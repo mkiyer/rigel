@@ -1,1363 +1,259 @@
-#!/usr/bin/env python3
-"""Profiling tool for rigel performance analysis.
+#!/usr/bin/env python
+"""Rigel pipeline profiler — per-stage wall-time + memory, with optional cProfile.
 
-Runs the rigel pipeline with detailed timing, memory tracking,
-and optional cProfile instrumentation.  Outputs machine-readable
-JSON alongside a human-readable text report.
+Profiles ``run_pipeline(bam, index)`` and reports where the time goes across the three pipeline
+stages:
 
-Modes
------
-**Simple** (default) — Times ``run_pipeline()`` as a whole with RSS
-memory sampling in a background thread.
+  1. **scan**      — ``scan_and_buffer`` (C++ htslib BAM scan, fragment resolution, model
+                      training, the fractional accumulator).
+  2. **calibrate** — the acyclic gDNA/RNA deconvolution + library hyperparameter fit.
+  3. **quant**     — ``quant_from_buffer`` (fragment scoring, routing, per-locus EM).
 
-**Stage decomposition** (``--stages``) — Separately times:
-    1. Index load
-    2. ``scan_and_buffer`` (C++ BAM scan)
-    3. Model finalization
-    4. ``quant_from_buffer`` (scoring, routing, locus-level EM)
+It works by **wrapping those three functions and running the real `run_pipeline`** — it does not
+re-implement the pipeline's internals, so it always profiles the production flow and cannot drift
+from the actual stage wiring. Use it to find bottlenecks before optimizing on real RNA-seq data.
 
-**cProfile** (``--cprofile``) — Enables Python function-level
-profiling for the pipeline run.  Writes a ``.prof`` file that can
-be visualized with ``snakeviz`` or ``py-spy``.
+Usage:
+    python scripts/profiling/profiler.py --bam sample.bam --index index/ \\
+        [--threads N] [--repeat 3] [--cprofile] [--out profile.json]
 
-**Comparison** — Supply multiple ``rigel_configs`` in the YAML to
-profile the same BAM with different parameter sets side by side.
-
-Usage
------
-::
-
-    python scripts/profiler.py --bam reads.bam --index rigel_index/
-    python scripts/profiler.py --config scripts/profile_example.yaml
-    python scripts/profiler.py --bam reads.bam --index rigel_index/ \\
-        --cprofile --stages --outdir profile_results/
-
-Output
-------
-::
-
-    <outdir>/
-        profile_summary.json   — machine-readable results
-        profile_report.txt     — human-readable text report
-        memory_timeline.csv    — RSS samples over time
-        profile_<name>.prof    — cProfile data (if --cprofile)
+Inside the activated `rigel` conda env. The BAM must be name-sorted with NH tags (as `rigel quant`
+requires). For a quick synthetic input, generate an oracle BAM + index with `rigel sim` /
+`simulate_suite.py` (see docs/SIMULATOR.md).
 """
 
 from __future__ import annotations
 
 import argparse
 import cProfile
-import csv
 import gc
-import io
 import json
 import logging
 import platform
 import pstats
 import resource
+import statistics
 import sys
-import threading
 import time
-from dataclasses import asdict, dataclass, field
+from contextlib import contextmanager
+from dataclasses import replace
+from io import StringIO
 from pathlib import Path
-from typing import Any
 
-
-try:
-    import yaml
-except ImportError:
-    yaml = None  # type: ignore[assignment]
-
-from rigel.calibration import assemble_em_inputs, calibrate
-from rigel.config import (
-    BamScanConfig,
-    EMConfig,
-    FragmentScoringConfig,
-    PipelineConfig,
-)
+import rigel.calibration as _cal_pkg
+import rigel.pipeline as _pipeline
+from rigel.config import PipelineConfig
 from rigel.index import TranscriptIndex
-from rigel.locus import build_multi_loci
-from rigel.locus_partition import partition_and_free
-from rigel.native import detect_sj_strand_tag
-from rigel.pipeline import (
-    _run_locus_em_partitioned,
-    _score_fragments,
-    _setup_geometry_and_estimator,
-    run_pipeline,
-    scan_and_buffer,
-)
-from rigel.scoring import (
-    GDNA_SPLICE_PENALTIES,
-    SPLICE_UNANNOT,
-    overhang_alpha_to_log_penalty,
+from rigel.pipeline import run_pipeline
+
+# ru_maxrss is bytes on macOS, kilobytes on Linux → MB.
+_RSS_TO_MB = (1.0 / 1024**2) if sys.platform == "darwin" else (1.0 / 1024)
+
+# The three pipeline stages, in execution order: (module, attribute, label).
+# scan_and_buffer / quant_from_buffer are module-level in rigel.pipeline; calibrate is imported
+# locally inside run_pipeline via `from .calibration import calibrate`, so patch it on the package.
+_STAGES = (
+    (_pipeline, "scan_and_buffer", "scan"),
+    (_cal_pkg, "calibrate", "calibrate"),
+    (_pipeline, "quant_from_buffer", "quant"),
 )
 
-logger = logging.getLogger(__name__)
+
+def _peak_rss_mb() -> float:
+    """Process peak resident set size (high-water mark) in MB."""
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * _RSS_TO_MB
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Memory tracking
-# ═══════════════════════════════════════════════════════════════════
+@contextmanager
+def _timed_stages(record: dict[str, dict]):
+    """Wrap each stage function with a timer + peak-RSS snapshot; restore on exit.
 
-
-def _get_rss_mb() -> float:
-    """Current peak RSS of this process in MB."""
-    usage = resource.getrusage(resource.RUSAGE_SELF)
-    if sys.platform == "darwin":
-        return usage.ru_maxrss / (1024 * 1024)  # bytes on macOS
-    return usage.ru_maxrss / 1024  # KB on Linux
-
-
-class MemoryTimeline:
-    """Background thread that samples RSS at regular intervals.
-
-    The timeline records (elapsed_sec, rss_mb) tuples which can be
-    written to CSV for visualization.
+    Records ``{label: {seconds, peak_rss_mb}}`` for each stage as the real ``run_pipeline`` calls
+    it. Wrappers forward ``*args, **kwargs`` so they are immune to stage-signature changes.
     """
+    originals = [(mod, attr, getattr(mod, attr)) for mod, attr, _ in _STAGES]
 
-    def __init__(self, interval_sec: float = 0.1):
-        self.interval_sec = interval_sec
-        self.samples: list[tuple[float, float]] = []
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._t0 = 0.0
+    def make_timed(orig, label):
+        def timed(*args, **kwargs):
+            start = time.perf_counter()
+            try:
+                return orig(*args, **kwargs)
+            finally:
+                record[label] = {
+                    "seconds": time.perf_counter() - start,
+                    "peak_rss_mb": _peak_rss_mb(),
+                }
 
-    def start(self) -> None:
-        self._t0 = time.monotonic()
-        self._stop.clear()
-        self.samples = [(_snap_rss_current(), 0.0)]
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
+        return timed
 
-    def stop(self) -> None:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=2.0)
-        self.samples.append((_snap_rss_current(), time.monotonic() - self._t0))
-
-    def _run(self) -> None:
-        while not self._stop.is_set():
-            elapsed = time.monotonic() - self._t0
-            rss = _snap_rss_current()
-            self.samples.append((rss, elapsed))
-            self._stop.wait(self.interval_sec)
-
-    @property
-    def peak_mb(self) -> float:
-        return max((s[0] for s in self.samples), default=0.0)
-
-    def write_csv(self, path: Path) -> None:
-        with open(path, "w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["elapsed_sec", "rss_mb"])
-            for rss, elapsed in self.samples:
-                w.writerow([f"{elapsed:.3f}", f"{rss:.1f}"])
-        logger.info("Wrote memory timeline: %s (%d samples)", path, len(self.samples))
-
-
-# Pre-initialize macOS mach task_info for fast RSS snapshots
-_MACH_TASK_INFO_READY = False
-_mach_libc = None
-_MachTaskBasicInfo = None
-_MACH_TASK_BASIC_INFO = 20
-
-if sys.platform == "darwin":
     try:
-        import ctypes
-        import ctypes.util
-
-        class _MachTaskBasicInfoStruct(ctypes.Structure):
-            _fields_ = [
-                ("suspend_count", ctypes.c_int32),
-                ("virtual_size", ctypes.c_uint64),
-                ("resident_size", ctypes.c_uint64),
-                ("user_time", ctypes.c_uint64),
-                ("system_time", ctypes.c_uint64),
-                ("policy", ctypes.c_int32),
-            ]
-
-        _mach_libc = ctypes.CDLL(ctypes.util.find_library("c"))
-        _mach_libc.mach_task_self.restype = ctypes.c_uint32
-        _MachTaskBasicInfo = _MachTaskBasicInfoStruct
-        _MACH_TASK_INFO_READY = True
-    except Exception:
-        pass
+        for (mod, attr, _), (_, _, orig) in zip(_STAGES, originals):
+            label = next(lbl for m, a, lbl in _STAGES if m is mod and a is attr)
+            setattr(mod, attr, make_timed(orig, label))
+        yield
+    finally:
+        for mod, attr, orig in originals:
+            setattr(mod, attr, orig)
 
 
-def _snap_rss_current() -> float:
-    """Snapshot current RSS in MB.
+def profile_once(bam_path: str, index: TranscriptIndex, config: PipelineConfig,
+                 *, cprofile: bool = False) -> dict:
+    """Run the pipeline once; return a result dict with per-stage timings + totals."""
+    gc.collect()
+    stages: dict[str, dict] = {}
+    profiler = cProfile.Profile() if cprofile else None
+    rss_before = _peak_rss_mb()
+    start = time.perf_counter()
+    if profiler:
+        profiler.enable()
+    with _timed_stages(stages):
+        result = run_pipeline(bam_path, index, config=config)
+    if profiler:
+        profiler.disable()
+    total = time.perf_counter() - start
 
-    Uses /proc/self/status on Linux (VmRSS) or task_info on macOS via
-    ctypes mach API.  Falls back to peak RSS if current is unavailable.
-    """
-    # Linux: read VmRSS from proc
-    if sys.platform == "linux":
-        try:
-            with open("/proc/self/status") as f:
-                for line in f:
-                    if line.startswith("VmRSS:"):
-                        return int(line.split()[1]) / 1024  # KB → MB
-        except FileNotFoundError:
-            pass
-
-    # macOS: use pre-initialized mach task_info
-    if _MACH_TASK_INFO_READY:
-        try:
-            info = _MachTaskBasicInfo()
-            count = ctypes.c_uint32(ctypes.sizeof(info) // 4)
-            task = _mach_libc.mach_task_self()
-            ret = _mach_libc.task_info(
-                task,
-                _MACH_TASK_BASIC_INFO,
-                ctypes.byref(info),
-                ctypes.byref(count),
-            )
-            if ret == 0:
-                return info.resident_size / (1024 * 1024)
-        except Exception:
-            pass
-
-    # Fallback: peak RSS
-    return _get_rss_mb()
+    staged = sum(s["seconds"] for s in stages.values())
+    n_frag = int(getattr(result.stats, "n_fragments", 0) or 0)
+    return {
+        "total_seconds": total,
+        "other_seconds": max(0.0, total - staged),  # setup/teardown outside the three stages
+        "stages": stages,
+        "n_fragments": n_frag,
+        "fragments_per_sec": (n_frag / total) if total > 0 else 0.0,
+        "peak_rss_mb": _peak_rss_mb(),
+        "rss_before_mb": rss_before,
+        "_cprofile": profiler,
+    }
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Configuration
-# ═══════════════════════════════════════════════════════════════════
+def _aggregate(runs: list[dict]) -> dict:
+    """Mean (± stdev) across repeated runs, per stage + totals."""
+    labels = [lbl for _, _, lbl in _STAGES]
+
+    def ms(vals):
+        return {"mean": statistics.fmean(vals),
+                "stdev": statistics.stdev(vals) if len(vals) > 1 else 0.0}
+
+    agg = {
+        "n_runs": len(runs),
+        "total_seconds": ms([r["total_seconds"] for r in runs]),
+        "other_seconds": ms([r["other_seconds"] for r in runs]),
+        "peak_rss_mb": ms([r["peak_rss_mb"] for r in runs]),
+        "fragments_per_sec": ms([r["fragments_per_sec"] for r in runs]),
+        "n_fragments": runs[-1]["n_fragments"],
+        "stages": {},
+    }
+    for lbl in labels:
+        secs = [r["stages"].get(lbl, {}).get("seconds", 0.0) for r in runs]
+        rss = [r["stages"].get(lbl, {}).get("peak_rss_mb", 0.0) for r in runs]
+        agg["stages"][lbl] = {"seconds": ms(secs), "peak_rss_mb_cumulative": ms(rss)}
+    return agg
 
 
-@dataclass
-class RigelParams:
-    """rigel parameter set (same keys as benchmark.py RigelConfig)."""
-
-    name: str = "default"
-    params: dict = field(default_factory=dict)
+def _bar(frac: float, width: int = 36) -> str:
+    fill = int(round(max(0.0, min(1.0, frac)) * width))
+    return "█" * fill + "·" * (width - fill)
 
 
-@dataclass
-class ProfileConfig:
-    """Profiling configuration."""
+def format_report(agg: dict, label: str) -> str:
+    total = agg["total_seconds"]["mean"]
+    lines = [
+        "",
+        "=" * 74,
+        f"  RIGEL PROFILE — {label}   ({agg['n_runs']} run(s))",
+        "=" * 74,
+        f"  fragments: {agg['n_fragments']:,}    "
+        f"throughput: {agg['fragments_per_sec']['mean']:,.0f} frag/s    "
+        f"peak RSS: {agg['peak_rss_mb']['mean']:,.0f} MB",
+        "",
+        f"  {'stage':<12} {'seconds':>10} {'± stdev':>9} {'% total':>8}  {'':<36}",
+        "  " + "-" * 70,
+    ]
+    for _, _, lbl in _STAGES:
+        st = agg["stages"][lbl]
+        sec, sd = st["seconds"]["mean"], st["seconds"]["stdev"]
+        pct = (sec / total) if total > 0 else 0.0
+        lines.append(f"  {lbl:<12} {sec:>10.3f} {sd:>9.3f} {100*pct:>7.1f}%  {_bar(pct)}")
+    other = agg["other_seconds"]["mean"]
+    opct = (other / total) if total > 0 else 0.0
+    lines.append(f"  {'other':<12} {other:>10.3f} {'':>9} {100*opct:>7.1f}%  {_bar(opct)}")
+    lines.append("  " + "-" * 70)
+    lines.append(f"  {'TOTAL':<12} {total:>10.3f} {agg['total_seconds']['stdev']:>9.3f} {100.0:>7.1f}%")
+    lines.append("=" * 74)
+    return "\n".join(lines)
 
-    bam: str = ""
-    index: str = ""
-    outdir: str = "profile_output"
 
-    rigel_configs: list[RigelParams] = field(default_factory=list)
-
-    stages: bool = False
-    enable_cprofile: bool = False
-    cprofile_top_n: int = 60
-    memory_sample_interval_ms: int = 100
-    verbose: bool = True
-    tmpdir: str | None = None
-
-
-def parse_yaml_config(path: str | Path) -> ProfileConfig:
-    """Parse a YAML config file into ProfileConfig."""
-    if yaml is None:
-        raise ImportError("PyYAML required: pip install pyyaml")
-    with open(path) as f:
-        raw = yaml.safe_load(f)
-
-    cfg = ProfileConfig()
-    cfg.bam = raw.get("bam", "")
-    cfg.index = raw.get("index", "")
-    cfg.outdir = raw.get("outdir", "profile_output")
-    cfg.stages = bool(raw.get("stages", False))
-    cfg.enable_cprofile = bool(raw.get("enable_cprofile", False))
-    cfg.cprofile_top_n = int(raw.get("cprofile_top_n", 60))
-    cfg.memory_sample_interval_ms = int(raw.get("memory_sample_interval_ms", 100))
-    cfg.verbose = bool(raw.get("verbose", True))
-
-    for name, params in raw.get("rigel_configs", {"default": {}}).items():
-        cfg.rigel_configs.append(RigelParams(name=name, params=params or {}))
-
-    if not cfg.rigel_configs:
-        cfg.rigel_configs.append(RigelParams())
-
+def _build_config(args: argparse.Namespace) -> PipelineConfig:
+    """Production-default PipelineConfig, with an optional thread override."""
+    cfg = PipelineConfig()
+    if args.threads is not None:
+        cfg = replace(
+            cfg,
+            scan=replace(cfg.scan, total_threads=args.threads),
+            em=replace(cfg.em, n_threads=args.threads),
+        )
     return cfg
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Pipeline config builder (shared with benchmark.py)
-# ═══════════════════════════════════════════════════════════════════
-
-
-def _build_pipeline_config(
-    rigel_params: RigelParams | None = None,
-    tmpdir: str | None = None,
-) -> PipelineConfig:
-    """Build PipelineConfig from profile config."""
-    raw: dict = {}
-    if rigel_params is not None:
-        raw.update(rigel_params.params)
-
-    removed_scan_keys = {
-        "buffer_size": "scan_buffer_size",
-        "chunk_size": "scan_fragments_per_chunk",
-        "max_memory_bytes": "scan_buffer_size",
-        "max_memory_gib": "scan_buffer_size",
-        "n_decomp_threads": "scan_bgzf_threads",
-        "decomp_threads": "scan_bgzf_threads",
-        "n_scan_threads": "threads",
-        "n_threads": "threads",
-        "qname_batch_size": "scan_read_name_batch_size",
-        "scan_decomp_threads": "scan_bgzf_threads",
-        "scan_max_memory_gib": "scan_buffer_size",
-        "scan_qname_batch_size": "scan_read_name_batch_size",
-        "scan_threads": "threads",
-    }
-    removed = sorted(set(raw) & set(removed_scan_keys))
-    if removed:
-        replacements = ", ".join(f"{key!r} -> {removed_scan_keys[key]!r}" for key in removed)
-        raise ValueError(
-            f"Removed profiler parameter(s); update to the new scan names: {replacements}"
-        )
-
-    em_kw: dict = {}
-    threads = raw.pop("threads", None)
-    if threads is not None:
-        em_kw["n_threads"] = threads
-    _EM_ALIASES = {
-        "em_convergence_delta": "convergence_delta",
-        "em_iterations": "iterations",
-        "em_prior_pseudocount": "prior_pseudocount",
-        "em_mode": "mode",
-    }
-    for raw_key, cfg_key in _EM_ALIASES.items():
-        if raw_key in raw:
-            em_kw[cfg_key] = raw.pop(raw_key)
-
-    scoring_kw: dict = {}
-    ov_alpha = raw.pop("overhang_alpha", None)
-    if ov_alpha is not None:
-        scoring_kw["overhang_log_penalty"] = overhang_alpha_to_log_penalty(ov_alpha)
-    mm_alpha = raw.pop("mismatch_alpha", None)
-    if mm_alpha is not None:
-        scoring_kw["mismatch_log_penalty"] = overhang_alpha_to_log_penalty(mm_alpha)
-    gdna_pen = raw.pop("gdna_splice_penalty_unannot", None)
-    if gdna_pen is not None:
-        penalties = dict(GDNA_SPLICE_PENALTIES)
-        penalties[SPLICE_UNANNOT] = gdna_pen
-        scoring_kw["gdna_splice_penalties"] = penalties
-
-    scan_kw: dict = {"sj_strand_tag": "auto", "include_multimap": True}
-    if tmpdir is not None:
-        from pathlib import Path as _Path
-
-        scan_kw["spill_dir"] = _Path(tmpdir)
-    if threads is not None:
-        scan_kw["total_threads"] = threads
-    _SCAN_ALIASES = {
-        "scan_bgzf_threads": "bgzf_threads",
-        "scan_fragments_per_chunk": "fragments_per_chunk",
-        "scan_read_name_batch_size": "read_name_batch_size",
-    }
-    for raw_key, cfg_key in _SCAN_ALIASES.items():
-        if raw_key in raw:
-            scan_kw[cfg_key] = raw.pop(raw_key)
-    scan_buffer_size = raw.pop("scan_buffer_size", None)
-    if scan_buffer_size is not None:
-        scan_kw["buffer_size_bytes"] = int(float(scan_buffer_size) * 1024**3)
-
-    return PipelineConfig(
-        em=EMConfig(**em_kw),
-        scan=BamScanConfig(**scan_kw),
-        scoring=FragmentScoringConfig(**scoring_kw),
-    )
-
-
-def _scan_config_summary(scan: BamScanConfig) -> dict:
-    """Return user-facing scan config values plus the resolved worker split."""
-    scan_workers, bgzf_threads = scan.resolved_scan_threads()
-    return {
-        "threads": scan.total_threads,
-        "resolved_total_threads": scan.resolved_total_threads(),
-        "scan_worker_threads": scan_workers,
-        "scan_bgzf_threads": bgzf_threads,
-        "requested_scan_bgzf_threads": scan.bgzf_threads,
-        "scan_fragments_per_chunk": scan.fragments_per_chunk,
-        "scan_read_name_batch_size": scan.read_name_batch_size,
-        "scan_buffer_size_bytes": scan.buffer_size_bytes,
-    }
-
-
-def _array_nbytes(arr: Any) -> int:
-    return int(getattr(arr, "nbytes", 0) or 0)
-
-
-def _bytes_for_attrs(obj: object, attrs: tuple[str, ...]) -> dict[str, int]:
-    return {attr: _array_nbytes(getattr(obj, attr, None)) for attr in attrs}
-
-
-def _scoring_csr_summary(em_data) -> dict:
-    """Return shape and byte metrics for the global scoring CSR."""
-    candidate_attrs = ("log_liks", "coverage_weights", "t_indices", "count_cols")
-    unit_attrs = (
-        "locus_t_indices",
-        "locus_count_cols",
-        "is_spliced",
-        "gdna_log_liks",
-        "frag_ids",
-        "frag_class",
-        "splice_type",
-    )
-    candidate_bytes = _bytes_for_attrs(em_data, candidate_attrs)
-    unit_bytes = _bytes_for_attrs(em_data, unit_attrs)
-    offsets_bytes = _array_nbytes(getattr(em_data, "offsets", None))
-    total_bytes = sum(candidate_bytes.values()) + sum(unit_bytes.values()) + offsets_bytes
-    n_units = int(getattr(em_data, "n_units", 0) or 0)
-    n_candidates = int(getattr(em_data, "n_candidates", 0) or 0)
-    return {
-        "n_units": n_units,
-        "n_candidates": n_candidates,
-        "mean_candidates_per_unit": (n_candidates / n_units) if n_units else 0.0,
-        "candidate_bytes": candidate_bytes,
-        "unit_bytes": unit_bytes,
-        "offsets_bytes": offsets_bytes,
-        "total_bytes": total_bytes,
-    }
-
-
-def _partition_bytes_summary(partitions: dict) -> dict:
-    """Return aggregate byte metrics for per-locus partition arrays."""
-    array_attrs = (
-        "offsets",
-        "t_indices",
-        "log_liks",
-        "count_cols",
-        "coverage_weights",
-        "is_spliced",
-        "gdna_log_liks",
-        "locus_t_indices",
-        "locus_count_cols",
-        "frag_ids",
-        "frag_class",
-        "splice_type",
-    )
-    by_array = {attr: 0 for attr in array_attrs}
-    n_units = 0
-    n_candidates = 0
-    for part in partitions.values():
-        n_units += int(getattr(part, "n_units", 0) or 0)
-        n_candidates += int(getattr(part, "n_candidates", 0) or 0)
-        for attr in array_attrs:
-            by_array[attr] += _array_nbytes(getattr(part, attr, None))
-    total_bytes = sum(by_array.values())
-    return {
-        "n_loci": len(partitions),
-        "n_units": n_units,
-        "n_candidates": n_candidates,
-        "array_bytes": by_array,
-        "total_bytes": total_bytes,
-    }
-
-
-def _buffer_summary(buffer) -> dict:
-    """Return FragmentBuffer summary with stable profiler-facing names."""
-    summary = dict(buffer.summary())
-    summary.setdefault("chunks_finalized", summary.get("n_chunks", 0))
-    summary.setdefault("chunks_spilled", getattr(buffer, "n_spilled", 0))
-    summary.setdefault("chunks_pending_spill_peak", summary.get("pending_spill_chunks", 0))
-    summary.setdefault("memory_bytes_peak", summary.get("memory_bytes", 0))
-    return summary
-
-
-# ═══════════════════════════════════════════════════════════════════
-# Timer helper
-# ═══════════════════════════════════════════════════════════════════
-
-
-class Timer:
-    """Context-manager wall-clock timer."""
-
-    def __init__(self, label: str):
-        self.label = label
-        self.elapsed = 0.0
-
-    def __enter__(self):
-        self._start = time.perf_counter()
-        return self
-
-    def __exit__(self, *args):
-        self.elapsed = time.perf_counter() - self._start
-
-
-# ═══════════════════════════════════════════════════════════════════
-# Profile run result
-# ═══════════════════════════════════════════════════════════════════
-
-
-@dataclass
-class StageTimings:
-    """Per-stage wall-clock timings (seconds)."""
-
-    index_load: float = 0.0
-    scan_and_buffer: float = 0.0
-    finalize_models: float = 0.0
-    calibration: float = 0.0
-    quant_from_buffer: float = 0.0
-
-    # Sub-stages of quant_from_buffer (if --stages)
-    compute_geometry: float = 0.0
-    create_estimator: float = 0.0
-    fragment_scorer: float = 0.0
-    fragment_router_scan: float = 0.0
-    build_loci: float = 0.0
-    compute_eb_gdna_priors: float = 0.0
-    partition: float = 0.0
-    locus_em: float = 0.0
-    locus_em_build: float = 0.0
-    locus_em_run: float = 0.0
-    locus_em_assign: float = 0.0
-
-    # Per-locus profiling stats from C++ instrumentation
-    locus_stats: list | None = field(default=None, repr=False)
-
-
-@dataclass
-class ProfileResult:
-    """Complete profile run result."""
-
-    config_name: str
-    bam_path: str
-    index_path: str
-
-    wall_time_sec: float
-    peak_rss_mb: float
-    rss_before_mb: float
-    rss_after_mb: float
-
-    n_fragments: int
-    n_buffered: int
-    n_unique: int
-    n_multimapping: int
-    n_intergenic: int
-    n_gdna_total: int
-    n_loci: int
-    throughput_frags_per_sec: float
-
-    stages: StageTimings
-    pipeline_stats: dict
-
-    # Index metadata
-    n_transcripts: int
-    n_genes: int
-
-    # Locus summary
-    max_locus_transcripts: int = 0
-    max_locus_units: int = 0
-
-    # Per-stage RSS memory snapshots (MB) taken at end of each stage
-    rss_snapshots: dict = field(default_factory=dict)
-    scan_config: dict = field(default_factory=dict)
-    buffer_summary: dict = field(default_factory=dict)
-    scoring_csr: dict = field(default_factory=dict)
-    partition_bytes_total: int = 0
-    partition_bytes: dict = field(default_factory=dict)
-
-
-# ═══════════════════════════════════════════════════════════════════
-# Simple profile: run_pipeline() as a whole
-# ═══════════════════════════════════════════════════════════════════
-
-
-def profile_simple(
-    bam_path: str,
-    index: TranscriptIndex,
-    config_name: str,
-    rigel_params: RigelParams | None = None,
-    enable_cprofile: bool = False,
-    tmpdir: str | None = None,
-) -> tuple[ProfileResult, cProfile.Profile | None]:
-    """Profile run_pipeline() as a single timed call."""
-
-    pcfg = _build_pipeline_config(rigel_params, tmpdir=tmpdir)
-    profiler = cProfile.Profile() if enable_cprofile else None
-
-    rss_before = _get_rss_mb()
-
-    t0 = time.perf_counter()
-    if profiler:
-        profiler.enable()
-    pipe = run_pipeline(bam_path, index, config=pcfg)
-    if profiler:
-        profiler.disable()
-    wall = time.perf_counter() - t0
-
-    rss_after = _get_rss_mb()
-
-    stats = pipe.stats
-    result = ProfileResult(
-        config_name=config_name,
-        bam_path=bam_path,
-        index_path="",
-        wall_time_sec=wall,
-        peak_rss_mb=rss_after,
-        rss_before_mb=rss_before,
-        rss_after_mb=rss_after,
-        n_fragments=stats.total,
-        n_buffered=stats.n_fragments,
-        n_unique=stats.unique,
-        n_multimapping=stats.multimapping,
-        n_intergenic=stats.n_intergenic,
-        n_gdna_total=stats.n_gdna_total,
-        n_loci=0,
-        throughput_frags_per_sec=stats.total / wall if wall > 0 else 0,
-        stages=StageTimings(),
-        pipeline_stats=stats.to_dict(),
-        n_transcripts=index.num_transcripts,
-        n_genes=index.num_genes,
-        scan_config=_scan_config_summary(pcfg.scan),
-    )
-    return result, profiler
-
-
-# ═══════════════════════════════════════════════════════════════════
-# Stage-decomposed profile
-# ═══════════════════════════════════════════════════════════════════
-
-
-def profile_stages(
-    bam_path: str,
-    index: TranscriptIndex,
-    config_name: str,
-    rigel_params: RigelParams | None = None,
-    enable_cprofile: bool = False,
-    tmpdir: str | None = None,
-) -> tuple[ProfileResult, cProfile.Profile | None]:
-    """Profile pipeline with per-stage timing decomposition."""
-
-    pcfg = _build_pipeline_config(rigel_params, tmpdir=tmpdir)
-    profiler = cProfile.Profile() if enable_cprofile else None
-    timings = StageTimings()
-    rss_snaps: dict[str, float] = {}
-
-    # Resolve sj_strand_tag "auto" before calling scan_and_buffer
-    scan_cfg = pcfg.scan
-    if scan_cfg.sj_strand_tag == "auto":
-        from dataclasses import replace as _replace
-
-        detected = detect_sj_strand_tag(bam_path)
-        scan_cfg = _replace(scan_cfg, sj_strand_tag=detected)
-
-    rss_before = _get_rss_mb()
-    rss_snaps["before"] = rss_before
-
-    # ── Stage 1: scan_and_buffer ────────────────────────────
-    if profiler:
-        profiler.enable()
-    with Timer("scan_and_buffer") as t_scan:
-        stats, strand_models, frag_length_models, buffer, cal_payload = scan_and_buffer(
-            bam_path, index, scan_cfg
-        )
-    timings.scan_and_buffer = t_scan.elapsed
-    rss_snaps["after_scan"] = _snap_rss_current()
-    buffer_profile_summary = _buffer_summary(buffer)
-
-    # ── Stage 2: Finalize models ────────────────────────────
-    cal_cfg = pcfg.calibration
-    with Timer("finalize_models") as t_fin:
-        strand_models.finalize()
-        # v6 calibration handles its own FL finalization; no
-        # build_scoring_models / finalize on the scanner accumulator.
-    timings.finalize_models = t_fin.elapsed
-    rss_snaps["after_finalize"] = _snap_rss_current()
-
-    # ── Stage 2b: gDNA calibration (v6) ─────────────────────
-    with Timer("calibration") as t_cal:
-        from rigel.calibration.strand_summary import StrandSummary as _StrandSummary
-
-        _strand_summary = _StrandSummary.from_model(strand_models.exonic_spliced)
-        calibration_obj = calibrate(
-            index=index,
-            payload=cal_payload,
-            scan_trained=frag_length_models,
-            fl_prior_ess=cal_cfg.prior_ess,
-            fl_scoring_prior_ess=cal_cfg.fl_scoring_prior_ess,
-            strand_summary=_strand_summary,
-        )
-    timings.calibration = t_cal.elapsed
-    rss_snaps["after_calibration"] = _snap_rss_current()
-
-    # ── Stage 3: quant_from_buffer (decomposed) ─────────────
-
-    em_config = pcfg.em
-    scoring = pcfg.scoring
-
-    # 3a: Geometry + estimator (single helper in current pipeline)
-    with Timer("compute_geometry") as t_geom:
-        geometry, estimator = _setup_geometry_and_estimator(
-            index,
-            calibration_obj.fl_models.rna_scoring,
-            em_config,
-        )
-    timings.compute_geometry = t_geom.elapsed
-    timings.create_estimator = 0.0  # folded into _setup_geometry_and_estimator
-
-    # 3b: Score fragments via the same helper the pipeline uses (builds
-    # FragmentScorer + FragmentRouter and consumes the buffer).
-    with Timer("fragment_router_scan") as t_route:
-        em_data = _score_fragments(
-            buffer,
-            index,
-            strand_models,
-            calibration_obj.fl_models.rna_scoring,
-            calibration_obj.fl_models.gdna_scoring,
-            stats,
-            estimator,
-            scoring,
-            log_every=1_000_000,
-            annotations=None,
-        )
-    timings.fragment_scorer = 0.0  # folded into _score_fragments
-    timings.fragment_router_scan = t_route.elapsed
-    scoring_csr_summary = _scoring_csr_summary(em_data)
-    rss_snaps["after_router_scan"] = _snap_rss_current()
-    rss_snaps["after_buffer_release"] = _snap_rss_current()
-
-    # 3c–3e: Locus-level EM
-    n_loci = 0
-    max_locus_t = 0
-    max_locus_u = 0
-    partition_bytes: dict = {}
-    partition_bytes_total = 0
-
-    if em_data.n_units > 0:
-        with Timer("build_loci") as t_loci:
-            loci = build_multi_loci(em_data, index)
-        timings.build_loci = t_loci.elapsed
-        n_loci = len(loci) if loci else 0
-
-        if loci:
-            max_locus_t = max(len(locus.transcript_indices) for locus in loci)
-            max_locus_u = max(len(locus.unit_indices) for locus in loci)
-
-            # Assign locus_id to every transcript before EM profiling.
-            for locus in loci:
-                for t_idx in locus.transcript_indices:
-                    estimator.locus_id_per_transcript[int(t_idx)] = locus.multi_locus_id
-
-            # Assemble v6 EM inputs BEFORE partition_and_free
-            # (the latter nulls em_data arrays as it scatters).
-            with Timer("compute_eb_gdna_priors") as t_gdna:
-                em_inputs = assemble_em_inputs(
-                    multi_loci=loci,
-                    em_data=em_data,
-                    index=index,
-                    calibration=calibration_obj,
-                    transcript_eff_len_unweighted=geometry.effective_lengths,
-                    em_config=em_config,
-                )
-                prior_table = em_inputs.prior
-                estimator.set_em_effective_lengths(
-                    em_inputs.exposure.transcript_eff_len_em,
-                    em_inputs.exposure.transcript_exposure_factor,
-                )
-                alpha_gdna_add = prior_table.alpha_gdna_add
-                alpha_rna_add = prior_table.alpha_rna_add
-                gdna_eff_len = prior_table.gdna_eff_len_em
-                enable_gdna = prior_table.enable_gdna
-            timings.compute_eb_gdna_priors = t_gdna.elapsed
-
-            with Timer("partition") as t_part:
-                partitions = partition_and_free(em_data, loci)
-                partition_bytes = _partition_bytes_summary(partitions)
-                del em_data
-            timings.partition = t_part.elapsed
-            partition_bytes_total = partition_bytes["total_bytes"]
-
-            with Timer("locus_em") as t_em:
-                _run_locus_em_partitioned(
-                    estimator,
-                    partitions,
-                    loci,
-                    index,
-                    alpha_gdna_add,
-                    alpha_rna_add,
-                    gdna_eff_len,
-                    em_config,
-                    enable_gdna=enable_gdna,
-                    emit_locus_stats=True,
-                )
-            timings.locus_em = t_em.elapsed
-            timings.locus_em_build = 0.0
-            timings.locus_em_run = timings.locus_em
-            timings.locus_em_assign = 0.0
-
-            # Capture per-locus profiling stats from C++ instrumentation
-            timings.locus_stats = getattr(estimator, "locus_stats", None)
-
-    if profiler:
-        profiler.disable()
-
-    rss_snaps["after_locus_em"] = _snap_rss_current()
-
-    gc.collect()
-
-    rss_snaps["after_cleanup"] = _snap_rss_current()
-
-    timings.quant_from_buffer = (
-        timings.compute_geometry
-        + timings.fragment_router_scan
-        + timings.build_loci
-        + timings.partition
-        + timings.compute_eb_gdna_priors
-        + timings.locus_em
-    )
-
-    rss_after = _get_rss_mb()
-    total_wall = (
-        timings.scan_and_buffer
-        + timings.finalize_models
-        + timings.calibration
-        + timings.quant_from_buffer
-    )
-
-    result = ProfileResult(
-        config_name=config_name,
-        bam_path=bam_path,
-        index_path="",
-        wall_time_sec=total_wall,
-        peak_rss_mb=rss_after,
-        rss_before_mb=rss_before,
-        rss_after_mb=rss_after,
-        n_fragments=stats.total,
-        n_buffered=stats.n_fragments,
-        n_unique=stats.unique,
-        n_multimapping=stats.multimapping,
-        n_intergenic=stats.n_intergenic,
-        n_gdna_total=stats.n_gdna_total,
-        n_loci=n_loci,
-        throughput_frags_per_sec=stats.total / total_wall if total_wall > 0 else 0,
-        stages=timings,
-        pipeline_stats=stats.to_dict(),
-        n_transcripts=index.num_transcripts,
-        n_genes=index.num_genes,
-        max_locus_transcripts=max_locus_t,
-        max_locus_units=max_locus_u,
-        rss_snapshots=rss_snaps,
-        scan_config=_scan_config_summary(scan_cfg),
-        buffer_summary=buffer_profile_summary,
-        scoring_csr=scoring_csr_summary,
-        partition_bytes_total=partition_bytes_total,
-        partition_bytes=partition_bytes,
-    )
-    return result, profiler
-
-
-# ═══════════════════════════════════════════════════════════════════
-# Report formatting
-# ═══════════════════════════════════════════════════════════════════
-
-
-def _format_bar(pct: float, width: int = 40) -> str:
-    filled = int(pct / 100 * width)
-    return "█" * filled + "░" * (width - filled)
-
-
-def format_report(results: list[ProfileResult], stage_mode: bool) -> str:
-    """Format profile results as a human-readable text report."""
-    lines: list[str] = []
-    lines.append("=" * 72)
-    lines.append("RIGEL PROFILE REPORT")
-    lines.append("=" * 72)
-    lines.append(f"Platform:   {platform.platform()}")
-    lines.append(f"Python:     {sys.version.split()[0]}")
-    lines.append(f"Date:       {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append("")
-
-    for r in results:
-        lines.append("-" * 72)
-        lines.append(f"Config: {r.config_name}")
-        lines.append("-" * 72)
-        lines.append(f"  BAM:             {r.bam_path}")
-        lines.append(f"  Index:           {r.index_path}")
-        lines.append(f"  Transcripts:     {r.n_transcripts:,}")
-        lines.append(f"  Genes:           {r.n_genes:,}")
-        lines.append("")
-        lines.append(f"  Wall time:       {r.wall_time_sec:.2f}s")
-        lines.append(f"  Peak RSS:        {r.peak_rss_mb:.0f} MB")
-        lines.append(f"  RSS before:      {r.rss_before_mb:.0f} MB")
-        lines.append(f"  RSS after:       {r.rss_after_mb:.0f} MB")
-        lines.append(f"  RSS delta:       {r.rss_after_mb - r.rss_before_mb:.0f} MB")
-        lines.append("")
-
-        if r.scan_config:
-            scan = r.scan_config
-            lines.append("  Scan Config:")
-            lines.append(
-                f"    threads:              {scan.get('threads')} "
-                f"(resolved {scan.get('resolved_total_threads')})"
-            )
-            lines.append(
-                f"    scan workers / BGZF:  {scan.get('scan_worker_threads')} / "
-                f"{scan.get('scan_bgzf_threads')}"
-            )
-            lines.append(
-                f"    buffer cap:           "
-                f"{scan.get('scan_buffer_size_bytes', 0) / 1024**3:.2f} GiB"
-            )
-            lines.append(f"    fragments/chunk:      {scan.get('scan_fragments_per_chunk'):,}")
-            lines.append(f"    read-name batch:      {scan.get('scan_read_name_batch_size'):,}")
-            lines.append("")
-
-        lines.append(f"  Fragments:       {r.n_fragments:,}")
-        lines.append(f"  Buffered:        {r.n_buffered:,}")
-        lines.append(f"  Unique align:    {r.n_unique:,}")
-        lines.append(f"  Multimapping:    {r.n_multimapping:,}")
-        lines.append(f"  Intergenic:      {r.n_intergenic:,}")
-        lines.append(f"  gDNA total:      {r.n_gdna_total:,}")
-        lines.append(f"  Throughput:      {r.throughput_frags_per_sec:,.0f} frags/s")
-        lines.append("")
-
-        if stage_mode:
-            s = r.stages
-            stages = [
-                ("scan_and_buffer", s.scan_and_buffer),
-                ("finalize_models", s.finalize_models),
-                ("calibration", s.calibration),
-                ("compute_geometry", s.compute_geometry),
-                ("fragment_router_scan", s.fragment_router_scan),
-                ("build_loci", s.build_loci),
-                ("partition", s.partition),
-                ("eb_gdna_priors", s.compute_eb_gdna_priors),
-                ("locus_em", s.locus_em),
-            ]
-            total = sum(t for _, t in stages)
-            lines.append("  Stage Breakdown:")
-            lines.append(f"  {'Stage':<24s} {'Time':>8s}  {'%':>6s}  Bar")
-            lines.append(f"  {'-' * 24} {'-' * 8}  {'-' * 6}  {'-' * 40}")
-            for name, dur in stages:
-                pct = dur / total * 100 if total > 0 else 0
-                bar = _format_bar(pct)
-                lines.append(f"  {name:<24s} {dur:7.3f}s  {pct:5.1f}%  {bar}")
-            lines.append(f"  {'TOTAL':<24s} {total:7.3f}s")
-            lines.append("")
-
-            if s.locus_em > 0:
-                lines.append("  Locus EM sub-stages:")
-                lines.append(f"    run_locus_em:        {s.locus_em_run:.3f}s")
-                lines.append(f"    assign_posteriors:   {s.locus_em_assign:.3f}s")
-                lines.append(f"    Loci:                {r.n_loci:,}")
-                lines.append(f"    Max transcripts:     {r.max_locus_transcripts:,}")
-                lines.append(f"    Max units:           {r.max_locus_units:,}")
-                lines.append("")
-
-            # Top-3 hotspots
-            ranked = sorted(stages, key=lambda x: -x[1])
-            lines.append("  Top-3 hotspots:")
-            for i, (name, dur) in enumerate(ranked[:3]):
-                pct = dur / total * 100 if total > 0 else 0
-                lines.append(f"    {i + 1}. {name}: {dur:.3f}s ({pct:.1f}%)")
-            lines.append("")
-
-            # Memory snapshots
-            if r.rss_snapshots:
-                lines.append("  RSS Memory Snapshots (MB):")
-                for snap_name, snap_mb in r.rss_snapshots.items():
-                    lines.append(f"    {snap_name:<24s} {snap_mb:>8.0f} MB")
-                lines.append("")
-
-            if r.buffer_summary:
-                buf = r.buffer_summary
-                lines.append("  Scan Buffer Summary:")
-                lines.append(
-                    f"    chunks finalized/spilled: "
-                    f"{buf.get('chunks_finalized', 0):,} / {buf.get('chunks_spilled', 0):,}"
-                )
-                lines.append(
-                    f"    memory current/peak:      "
-                    f"{buf.get('memory_bytes', 0) / 1024**2:.1f} / "
-                    f"{buf.get('memory_bytes_peak', 0) / 1024**2:.1f} MB"
-                )
-                lines.append(
-                    f"    pending spill peak:       "
-                    f"{buf.get('chunks_pending_spill_peak', 0):,} chunks"
-                )
-                lines.append("")
-
-            if r.scoring_csr:
-                csr = r.scoring_csr
-                lines.append("  Scoring CSR:")
-                lines.append(f"    units:                  {csr.get('n_units', 0):,}")
-                lines.append(f"    candidates:             {csr.get('n_candidates', 0):,}")
-                lines.append(
-                    f"    mean candidates/unit:    {csr.get('mean_candidates_per_unit', 0.0):.2f}"
-                )
-                lines.append(
-                    f"    total bytes:             {csr.get('total_bytes', 0) / 1024**3:.2f} GiB"
-                )
-                lines.append("")
-
-            if r.partition_bytes_total:
-                lines.append(
-                    f"  Partition arrays:          {r.partition_bytes_total / 1024**3:.2f} GiB"
-                )
-                lines.append("")
-
-    # Comparison table (if multiple configs)
-    if len(results) > 1:
-        lines.append("=" * 72)
-        lines.append("COMPARISON")
-        lines.append("=" * 72)
-        lines.append(
-            f"  {'Config':<20s} {'Wall (s)':>10s} {'RSS (MB)':>10s} "
-            f"{'Frags':>12s} {'Throughput':>15s}"
-        )
-        lines.append(f"  {'-' * 20} {'-' * 10} {'-' * 10} {'-' * 12} {'-' * 15}")
-        for r in results:
-            lines.append(
-                f"  {r.config_name:<20s} {r.wall_time_sec:10.2f} "
-                f"{r.peak_rss_mb:10.0f} {r.n_fragments:12,} "
-                f"{r.throughput_frags_per_sec:15,.0f}"
-            )
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-def format_cprofile(profiler: cProfile.Profile, top_n: int = 60) -> str:
-    """Format cProfile stats as text."""
-    lines: list[str] = []
-
-    s_cum = io.StringIO()
-    ps = pstats.Stats(profiler, stream=s_cum)
-    ps.sort_stats("cumulative")
-    ps.print_stats(top_n)
-    lines.append(f"{'=' * 72}")
-    lines.append(f"Top {top_n} by cumulative time")
-    lines.append(f"{'=' * 72}")
-    lines.append(s_cum.getvalue())
-
-    s_tot = io.StringIO()
-    ps2 = pstats.Stats(profiler, stream=s_tot)
-    ps2.sort_stats("tottime")
-    ps2.print_stats(top_n)
-    lines.append(f"{'=' * 72}")
-    lines.append(f"Top {top_n} by self time")
-    lines.append(f"{'=' * 72}")
-    lines.append(s_tot.getvalue())
-
-    total_calls = sum(v[0] for v in ps.stats.values())
-    lines.append(f"Total function calls: {total_calls:,}")
-
-    return "\n".join(lines)
-
-
-# ═══════════════════════════════════════════════════════════════════
-# Main orchestrator
-# ═══════════════════════════════════════════════════════════════════
-
-
-def run_profile(cfg: ProfileConfig) -> list[ProfileResult]:
-    """Run profiling for all configured parameter sets."""
-    outdir = Path(cfg.outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    bam_path = cfg.bam
-    index_dir = cfg.index
-
-    if not Path(bam_path).exists():
-        raise FileNotFoundError(f"BAM not found: {bam_path}")
-    if not Path(index_dir).is_dir():
-        raise FileNotFoundError(f"Index not found: {index_dir}")
-
-    # ── Load index (timed separately) ───────────────────────
-    print(f"Loading index from {index_dir} ...", flush=True)
-    t0 = time.perf_counter()
-    index = TranscriptIndex.load(str(index_dir))
-    index_load_time = time.perf_counter() - t0
-    print(
-        f"  {index.num_transcripts:,} transcripts, "
-        f"{index.num_genes:,} genes ({index_load_time:.1f}s)",
-        flush=True,
-    )
-
-    results: list[ProfileResult] = []
-    all_profilers: dict[str, cProfile.Profile] = {}
-
-    for hc in cfg.rigel_configs:
-        print(f"\n{'=' * 72}", flush=True)
-        print(f"Profiling: {hc.name}", flush=True)
-        print(f"  BAM: {Path(bam_path).name}", flush=True)
-        if hc.params:
-            print(f"  Params: {hc.params}", flush=True)
-        print(f"{'=' * 72}\n", flush=True)
-
-        # Start memory timeline
-        mem_interval = cfg.memory_sample_interval_ms / 1000.0
-        mem_timeline = MemoryTimeline(interval_sec=mem_interval)
-        mem_timeline.start()
-
-        try:
-            if cfg.stages:
-                result, profiler = profile_stages(
-                    bam_path,
-                    index,
-                    hc.name,
-                    hc,
-                    cfg.enable_cprofile,
-                    tmpdir=cfg.tmpdir,
-                )
-            else:
-                result, profiler = profile_simple(
-                    bam_path,
-                    index,
-                    hc.name,
-                    hc,
-                    cfg.enable_cprofile,
-                    tmpdir=cfg.tmpdir,
-                )
-        finally:
-            mem_timeline.stop()
-
-        result.index_path = str(index_dir)
-        result.stages.index_load = index_load_time
-        result.peak_rss_mb = max(result.peak_rss_mb, mem_timeline.peak_mb)
-
-        results.append(result)
-        if profiler:
-            all_profilers[hc.name] = profiler
-
-        # Write memory timeline per config
-        mem_csv = outdir / f"memory_timeline_{hc.name}.csv"
-        mem_timeline.write_csv(mem_csv)
-
-        # Print inline summary
-        print(f"\nWall time: {result.wall_time_sec:.2f}s", flush=True)
-        print(f"Fragments: {result.n_fragments:,}", flush=True)
-        print(f"Throughput: {result.throughput_frags_per_sec:,.0f} frags/s", flush=True)
-        print(f"Peak RSS: {result.peak_rss_mb:.0f} MB", flush=True)
-
-    # ── Write reports ────────────────────────────────────────
-    report_txt = format_report(results, stage_mode=cfg.stages)
-
-    # Append cProfile output
-    for name, profiler in all_profilers.items():
-        report_txt += f"\n\n{'=' * 72}\n"
-        report_txt += f"cProfile: {name}\n"
-        report_txt += f"{'=' * 72}\n"
-        report_txt += format_cprofile(profiler, cfg.cprofile_top_n)
-        # Save .prof file
-        prof_path = outdir / f"profile_{name}.prof"
-        profiler.dump_stats(str(prof_path))
-        print(f"Saved cProfile data: {prof_path}", flush=True)
-
-    # Write text report
-    report_path = outdir / "profile_report.txt"
-    with open(report_path, "w") as f:
-        f.write(report_txt)
-    print(f"\nReport: {report_path}", flush=True)
-
-    # Print report to stdout
-    print(f"\n{report_txt}", flush=True)
-
-    # Write JSON summary
-    json_data = {
-        "platform": platform.platform(),
-        "python": sys.version,
-        "date": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "index_load_sec": index_load_time,
-        "profiles": [
-            {
-                "config_name": r.config_name,
-                "bam_path": r.bam_path,
-                "index_path": r.index_path,
-                "wall_time_sec": r.wall_time_sec,
-                "peak_rss_mb": r.peak_rss_mb,
-                "rss_before_mb": r.rss_before_mb,
-                "rss_after_mb": r.rss_after_mb,
-                "n_fragments": r.n_fragments,
-                "n_buffered": r.n_buffered,
-                "n_unique": r.n_unique,
-                "n_multimapping": r.n_multimapping,
-                "n_intergenic": r.n_intergenic,
-                "n_gdna_total": r.n_gdna_total,
-                "n_loci": r.n_loci,
-                "throughput_frags_per_sec": r.throughput_frags_per_sec,
-                "n_transcripts": r.n_transcripts,
-                "n_genes": r.n_genes,
-                "stages": {k: v for k, v in asdict(r.stages).items() if k != "locus_stats"},
-                "pipeline_stats": r.pipeline_stats,
-                "rss_snapshots": r.rss_snapshots,
-                "scan_config": r.scan_config,
-                "buffer_summary": r.buffer_summary,
-                "scoring_csr": r.scoring_csr,
-                "partition_bytes_total": r.partition_bytes_total,
-                "partition_bytes": r.partition_bytes,
-            }
-            for r in results
-        ],
-    }
-    json_path = outdir / "profile_summary.json"
-    with open(json_path, "w") as f:
-        json.dump(json_data, f, indent=2, default=str)
-    print(f"JSON:   {json_path}", flush=True)
-
-    # Save per-locus profiling stats if available (separate file to avoid bloat)
-    for r in results:
-        locus_stats = r.stages.locus_stats
-        if locus_stats:
-            stats_path = outdir / f"locus_stats_{r.config_name}.json"
-            with open(stats_path, "w") as f:
-                json.dump(locus_stats, f, indent=1)
-            print(f"Locus stats ({len(locus_stats)} loci): {stats_path}", flush=True)
-
-    return results
-
-
-# ═══════════════════════════════════════════════════════════════════
-# CLI
-# ═══════════════════════════════════════════════════════════════════
-
-
-def build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
-        description="Profile rigel pipeline performance",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "Examples:\n"
-            "  python scripts/profiler.py --bam reads.bam --index rigel_index/\n"
-            "  python scripts/profiler.py --config scripts/profile_example.yaml --stages\n"
-            "  python scripts/profiler.py --bam reads.bam --index rigel_index/ "
-            "--cprofile --stages\n"
-        ),
-    )
-    p.add_argument("--config", help="YAML configuration file")
-    p.add_argument("--bam", help="Name-sorted BAM file (overrides YAML)")
-    p.add_argument("--index", help="rigel index directory (overrides YAML)")
-    p.add_argument("--outdir", help="Output directory (overrides YAML)")
-    p.add_argument(
-        "--stages", action="store_true", default=None, help="Enable per-stage timing decomposition"
-    )
-    p.add_argument(
-        "--cprofile",
-        action="store_true",
-        default=None,
-        help="Enable cProfile function-level profiling",
-    )
-    p.add_argument(
-        "--memory-interval",
-        type=int,
-        default=None,
-        help="RSS sampling interval in ms (default: 100)",
-    )
-    p.add_argument("--verbose", action="store_true", default=None, help="Verbose logging")
-    p.add_argument(
-        "--threads",
-        type=int,
-        default=None,
-        help="Total thread budget for Rigel. Scan splits this "
-        "budget between scan workers and --scan-bgzf-threads; "
-        "locus EM uses the same budget because stages run serially.",
-    )
-    p.add_argument(
-        "--scan-bgzf-threads",
-        type=int,
-        default=None,
-        help="BGZF decompression threads reserved from --threads during BAM scan",
-    )
-    p.add_argument(
-        "--scan-buffer-size",
-        type=float,
-        default=None,
-        help="Maximum scan buffer size in GiB before disk spill (default: 2)",
-    )
-    p.add_argument(
-        "--scan-fragments-per-chunk",
-        type=int,
-        default=None,
-        help="Buffered fragments per native scan chunk",
-    )
-    p.add_argument(
-        "--scan-read-name-batch-size",
-        type=int,
-        default=None,
-        help="Read-name groups per native scanner input queue item",
-    )
-    p.add_argument(
-        "--tmpdir",
-        default=None,
-        help="Directory for temporary buffer spill files (default: system temp directory)",
-    )
-    return p
+def _cprofile_text(prof: cProfile.Profile, top: int) -> str:
+    buf = StringIO()
+    pstats.Stats(prof, stream=buf).sort_stats("cumulative").print_stats(top)
+    return buf.getvalue()
 
 
 def main() -> int:
-    parser = build_arg_parser()
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser(description="Profile the Rigel quantification pipeline.")
+    ap.add_argument("--bam", required=True, help="Name-sorted BAM with NH tags.")
+    ap.add_argument("--index", required=True, help="Rigel index directory.")
+    ap.add_argument("--label", default=None, help="Run label for the report (default: BAM name).")
+    ap.add_argument("--threads", type=int, default=None, help="Thread budget (scan + EM).")
+    ap.add_argument("--repeat", type=int, default=1, help="Repeat N times and average.")
+    ap.add_argument("--cprofile", action="store_true",
+                    help="Also collect cProfile (Python hotspots) on the first run.")
+    ap.add_argument("--cprofile-top", type=int, default=30, help="Top-N cProfile rows to print.")
+    ap.add_argument("--out", default=None, help="Write the JSON report to this path.")
+    args = ap.parse_args()
 
-    # Build config from YAML or defaults
-    if args.config:
-        cfg = parse_yaml_config(args.config)
-    else:
-        cfg = ProfileConfig()
-        if not cfg.rigel_configs:
-            cfg.rigel_configs.append(RigelParams())
+    logging.basicConfig(level=logging.WARNING, format="%(message)s")
+    bam_path = str(Path(args.bam).resolve())
+    label = args.label or Path(args.bam).name
+    config = _build_config(args)
 
-    # CLI overrides
-    if args.bam:
-        cfg.bam = args.bam
-    if args.index:
-        cfg.index = args.index
-    if args.outdir:
-        cfg.outdir = args.outdir
-    if args.stages is not None:
-        cfg.stages = args.stages
-    if args.cprofile is not None:
-        cfg.enable_cprofile = args.cprofile
-    if args.memory_interval is not None:
-        cfg.memory_sample_interval_ms = args.memory_interval
-    if args.verbose is not None:
-        cfg.verbose = args.verbose
-    if args.threads is not None:
-        for hc in cfg.rigel_configs:
-            hc.params["threads"] = args.threads
-    if args.scan_bgzf_threads is not None:
-        for hc in cfg.rigel_configs:
-            hc.params["scan_bgzf_threads"] = args.scan_bgzf_threads
-    if args.scan_buffer_size is not None:
-        for hc in cfg.rigel_configs:
-            hc.params["scan_buffer_size"] = args.scan_buffer_size
-    if args.scan_fragments_per_chunk is not None:
-        for hc in cfg.rigel_configs:
-            hc.params["scan_fragments_per_chunk"] = args.scan_fragments_per_chunk
-    if args.scan_read_name_batch_size is not None:
-        for hc in cfg.rigel_configs:
-            hc.params["scan_read_name_batch_size"] = args.scan_read_name_batch_size
-    if args.tmpdir is not None:
-        cfg.tmpdir = args.tmpdir
+    index = TranscriptIndex.load(Path(args.index))
+    runs: list[dict] = []
+    cprofile_text = None
+    for i in range(max(1, args.repeat)):
+        res = profile_once(bam_path, index, config, cprofile=(args.cprofile and i == 0))
+        if res.get("_cprofile") is not None:
+            cprofile_text = _cprofile_text(res.pop("_cprofile"), args.cprofile_top)
+        else:
+            res.pop("_cprofile", None)
+        runs.append(res)
 
-    # Validate
-    if not cfg.bam:
-        print("Error: --bam is required (or specify bam in YAML)", file=sys.stderr)
-        return 1
-    if not cfg.index:
-        print("Error: --index is required (or specify index in YAML)", file=sys.stderr)
-        return 1
+    agg = _aggregate(runs)
+    print(format_report(agg, label))
+    if cprofile_text:
+        print(f"\n  cProfile — top {args.cprofile_top} by cumulative time:\n")
+        print(cprofile_text)
 
-    level = logging.DEBUG if cfg.verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)-8s %(message)s",
-        datefmt="%H:%M:%S",
-    )
-
-    print("rigel profiler", flush=True)
-    print(f"  BAM:             {cfg.bam}", flush=True)
-    print(f"  Index:           {cfg.index}", flush=True)
-    print(f"  Output:          {cfg.outdir}", flush=True)
-    print(f"  Stages:          {cfg.stages}", flush=True)
-    print(f"  cProfile:        {cfg.enable_cprofile}", flush=True)
-    print(f"  Memory interval: {cfg.memory_sample_interval_ms}ms", flush=True)
-    print(f"  Configs:         {[h.name for h in cfg.rigel_configs]}", flush=True)
-
-    results = run_profile(cfg)
-
-    print(f"\nProfiling complete. {len(results)} config(s) profiled.", flush=True)
+    if args.out:
+        report = {
+            "label": label,
+            "bam": bam_path,
+            "index": str(Path(args.index).resolve()),
+            "threads": args.threads,
+            "system": {
+                "platform": platform.platform(),
+                "python": platform.python_version(),
+                "cpu_count": __import__("os").cpu_count(),
+            },
+            "aggregate": agg,
+            "runs": runs,
+        }
+        Path(args.out).write_text(json.dumps(report, indent=2))
+        print(f"\n  JSON report → {args.out}")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
