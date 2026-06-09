@@ -187,12 +187,16 @@ takes spans), so its byte-for-byte reference is untouched.
    (empty `t_inds`) cannot be chimeric — so no chimera reaches the accumulator today. The span rule's
    "different ref closes the span" already makes future inclusion correct, but it stays **out of scope**
    for this work.
-4. **Performance → integrate, don't bolt on.** No new fragment-level loop: the span computation
-   replaces the existing `bs/be` loop in `deposit_to_accumulator`, the cut-intron set reuses
-   `build_fragment`'s introns and the resolver's already-running implicit-gap loop, and
-   `fragment_genomic_spans` is O(blocks+cuts) on ≤-few-element sorted lists with reused scratch (no
-   allocation in the hot path). Acceptance: profile vs current on `gdna_benchmark_5mb`, require no
-   measurable scan-phase regression.
+4. **Performance → integrate, don't bolt on; zero alloc churn.** No new fragment-level loop: the span
+   computation replaces the existing `bs/be` loop in `deposit_to_accumulator`, the cut-intron set
+   reuses `build_fragment`'s introns and the resolver's already-running implicit-gap loop, and
+   `fragment_genomic_spans` is O(blocks+cuts) on ≤-few-element sorted lists. **Memory:** the number of
+   output spans is **≤ the number of aligned blocks** (subtracting introns only splits, and the full
+   extent is one span), so the span buffer is bounded by the block count. Carry the span scratch on
+   `WorkerState` (alongside the existing per-worker scratch), `clear()`-and-reuse per fragment with
+   `reserve()` amortized to the high-water mark — **no per-fragment allocation/free**. Prefer writing
+   directly into reused `bs/be` vectors (already per-worker) to avoid a second buffer entirely.
+   Acceptance: profile vs current on `gdna_benchmark_5mb`, require no measurable scan-phase regression.
 
 ---
 
