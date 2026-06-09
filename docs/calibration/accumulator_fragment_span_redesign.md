@@ -229,9 +229,16 @@ explicit CIGAR-N only. Over-count flux/oracle-span **1.558→1.0003 (FL≈350), 
 oracle guard flipped to passing; parity green; byte-for-byte spec + mass conservation intact; golden
 regenerated (21 scenarios, ~0.3–0.4%); 1007 passed.
 
-**Phase C — Implicit splice → spliced channel + intron cut.**
-- `implicit_splice_gaps` records matched intervals; thread to deposit; `splice_type`-driven channel;
-  cut at implicit introns. Flip the channel-correctness test green. Golden regenerate, suite green.
+**Phase C — Implicit splice → spliced channel + intron cut.** ✅ **SHIPPED main@4b61120.**
+`collect_implicit_splice_introns` records the matched intron intervals (+ transcript strand) on
+`RawResolveResult.implicit_introns`; `deposit_to_accumulator` takes the resolve result, derives the
+channel from `splice_type` (implicit → spliced), cuts at the implicit introns, and orients by the
+implied introns' transcript strand (`cr.sj_strand` untouched → no scoring impact). Verified: 30,742
+implicit splices land on the spliced boundary channels with the intron region carrying ZERO unspliced
+mass (`test_implicit_splice_routes_to_spliced_channel`). Side effect: the now-correct classification
+unmasks the honest imperfect-SS false-gDNA floor at ss=0.65 (`test_nrna_double_counting[g0_n0_s65]`,
+~5.8%) — previously hidden by implicit splices being mis-counted as unspliced-RNA signal; weak-SS
+tolerance widened with rationale. Golden regenerated (22 scenarios); 1008 passed.
 
 **Phase D — Artifact hold-out.**
 - Guard `SPLICE_ARTIFACT` out of the deposit + FL pool. Golden regenerate, suite green.
