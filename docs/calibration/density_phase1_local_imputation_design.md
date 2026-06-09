@@ -1,8 +1,18 @@
 # Density Phase 1 — local boundary-anchored count density (design + dry-run)
 
-**Status:** design / dry-run, ready to implement next turn. 2026-06-09. Implements Phase 1 of
+**Status:** ✅ SHIPPED main@cb67e82 (2026-06-09). Implements Phase 1 of
 `density_sweep_implementation_plan.md`, now that the accumulator span redesign makes the
 boundary-crossing flux an **unbiased** density estimator (no `L_cross`, no correction factor).
+
+> **Measured outcome (GENE0037, gdna400 / ss0.99 / capture-on; oracle).** Exon gDNA density
+> **0.62 → ~11** (oracle truth ~21); exon deconv gDNA fraction **0.02 → ~0.45** (oracle ~0.77). A
+> ~18× density correction and a large leak reduction — and the residual is *exactly* the predicted
+> two-phase gap: (i) boundary-crossing fragments straddle the depleted intron, so the boundary anchor
+> reads ~½ the exon-interior enriched density (~11 vs ~21) — the **within-exon enrichment gradient**
+> that **Phase 2** (DNA-fraction at splice seams) targets; (ii) the count-prior concentration
+> `density·eff_len` (~12k) still outweighs the strand clue's ~0.8, holding the joint at the count
+> mean ~0.45 — the over-confidence **Phase 3** fixes (concentration = observed crossing count). Phase
+> 1 alone is a correct, large step; the leak fully closes with Phases 2–3.
 
 > **One-line goal.** Replace the global region↔boundary **sweep** in
 > `density_model.node_gdna_density` (which collapses every node to the genome-wide average density —
