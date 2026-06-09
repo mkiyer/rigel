@@ -256,3 +256,45 @@ Open question to resolve by experiment: with count overdispersion modeled (defec
 joint model self-weight correctly enough that the §8 strand-reliability heuristic becomes unnecessary
 (at least off-capture)? Measure φ_count on the benchmark + stress scenarios and re-run the deconv.
 
+### 9.1 RESULT — modeling the boundary count overdispersion is the principled fix (supersedes §8)
+
+Measured (DESeq2-style common-dispersion MoM, `CV²(ρ) − mean(1/N)`; gDNA counts from
+count-observable **regions** and **exon-adjacent observable boundaries** — the imputation source):
+
+| condition | region-seed α | **boundary-seed α** | boundary eff-N (1/α) |
+|---|---|---|---|
+| gdna400 / ss0.99 / **capture** | 0.038 | **1.21** | ~1 |
+| antisense stress / **no capture** | ~0 | **0.0002** | ~5000 |
+
+The **boundary** overdispersion is huge under capture (enrichment heterogeneity) and negligible
+without — a measurable, capture-sensitive reliability signal (the intron/intergenic *regions* miss
+it: uniformly depleted ⇒ α≈0.04 even under capture, which is why boundaries are essential, as
+predicted). Setting the count-prior concentration to the **overdispersion-limited effective count**
+`count_evidence = N/(1 + α·N)` (→ ~1/α for large N) then self-weights the joint deconv correctly,
+**with no strand-reliability weight, no zeroing, and no AMBIG special-case**:
+
+| condition | oracle gf | deconv gf with `N/(1+αN)` |
+|---|---|---|
+| capture / ss0.99 | 0.804 | **0.795** (α huge ⇒ count fades ⇒ strand governs ⇒ leak closed) |
+| no-capture / ss0.50 | 0.963 | **0.883** (α tiny ⇒ count carries ⇒ the weak-SS floor 0.60→0.88) |
+
+**This is the chosen solution — it supersedes §8 (the strand-reliability weight) and the categorical
+zeroing.** It is principled (the NB count overdispersion, the count-side twin of the strand
+Beta-Binomial), data-driven (α measured from the seeds), continuous (no cliff), and it feeds the
+joint model an *honest* count precision so its inverse-variance combination is automatic — dissolving
+both the over-weighting and the κ-circularity. Defect B (the systematic gradient *bias*) is still not
+removed — only bounded by the now-tiny effective count under capture — so the DNA-fraction (path 3)
+remains the eventual enhancement; but density-only is now coherent and self-weighting.
+
+**Implementation plan:**
+1. Fit the gDNA **count overdispersion** `α` (MoM → optionally the DESeq2 mean-trend + shrinkage if
+   the per-seed estimates prove noisy) from count-observable regions + **exon-adjacent observable
+   boundaries**. A new calibration step alongside the strand-overdispersion fits.
+2. `count_evidence = N / (1 + α·N)` for the supporting count `N` (= `density·eff_len`). Use
+   `α_boundary` for imputed (exon/AMBIG) regions, `α_region` for count-observable regions.
+3. **Remove** the categorical `defer_to_strand` zeroing (density_model.py) — the overdispersion-honest
+   concentration replaces it; AMBIG needs no special-case.
+4. (RNA twin, later) the same can model RNA count overdispersion from spliced-fragment counts at
+   boundaries, if an analogous reliability is wanted for the RNA side.
+5. Validate across the SS × capture matrix + the antisense stress; golden regen; end-to-end benchmark.
+
