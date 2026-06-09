@@ -1,20 +1,18 @@
-"""Behavioral guard: the accumulator deposits the molecule's span, not read blocks.
+"""Behavioral guards for the accumulator span redesign.
 
-Phase A (test-first) of the accumulator span redesign
-(``docs/calibration/accumulator_fragment_span_redesign.md``). On a uniform-density
-(no-capture) genome the boundary-crossing density estimator (one-side gDNA flux /
-fl_mean) must agree with the exact contained estimator (contained count /
-region_eff_len). Today it over-counts by ~1.2–1.56× (paired-end mate-gap slice
-crediting), so this is ``xfail(strict=True)`` until the span fix lands — at which
-point it flips to a hard failure to prompt removing the marker.
+(``docs/calibration/accumulator_fragment_span_redesign.md``.) The accumulator
+deposits the MOLECULE's contiguous genomic span(s), not the sequenced read blocks:
+  - unspliced  → one [min,max] span (mate gap filled) ⇒ the boundary-crossing
+    density estimator agrees with the exact contained estimator (no over-count);
+  - implicit splice → spliced channel, intron cut (not filled);
+  - artifact splice → held out entirely (unrecoverable true span).
 
-Kept small + deterministic (fixed seed, ~60k fragments) so it runs fast.
+Kept small + deterministic (fixed seeds) so they run fast.
 """
 
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from rigel.calibration.density_model import count_observable_masks
 from rigel.calibration.effective_length import boundary_eff_length, region_eff_length
@@ -129,8 +127,94 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
     assert intron_unspliced == 0.0, f"intron carries unspliced mass {intron_unspliced} (not cut)"
 
 
-@pytest.mark.skip(reason="Phase D: artifact-splice hold-out not yet implemented")
-def test_artifact_splice_held_out_and_mass_conserved():
-    """``SPLICE_ARTIFACT`` fragments are not deposited (no contained/boundary mass,
-    no FL pool), and total deposited mass == n_deposited (artifacts excluded)."""
-    raise NotImplementedError
+def _write_pair(out, qn, *, r1_pos, r1_cigar, r2_pos, r2_cigar, xs):
+    import re
+
+    import pysam
+
+    def seg(is_r1, pos, cigar, mpos):
+        a = pysam.AlignedSegment()
+        a.query_name = qn
+        a.reference_id = 0
+        a.reference_start = pos
+        a.mapping_quality = 60
+        a.cigarstring = cigar
+        a.next_reference_id = 0
+        a.next_reference_start = mpos
+        a.query_sequence = "A" * sum(int(x) for x in re.findall(r"(\d+)[MIS]", cigar))
+        a.flag = (0x1 | 0x2) | (0x40 if is_r1 else 0x80) | (0x20 if is_r1 else 0x10)
+        tags = [("NH", 1)] + ([("XS", "+", "A")] if (is_r1 and xs) else [])
+        a.set_tags(tags)
+        return a
+
+    out.write(seg(True, r1_pos, r1_cigar, r2_pos))
+    out.write(seg(False, r2_pos, r2_cigar, r1_pos))
+
+
+def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
+    """``SPLICE_ARTIFACT`` fragments (a blacklisted CIGAR-N junction) are held out
+    of the accumulator entirely — no contained/boundary mass — while non-artifact
+    fragments deposit normally, so total mass == n_deposited (artifacts excluded).
+
+    Construction: 20 plain unspliced pairs (positive control) + 50 pairs spanning
+    an ANNOTATED junction. Without a blacklist all 70 deposit (the 50 as spliced);
+    blacklisting that junction turns the 50 into artifacts (junction removed →
+    n_sj_blacklisted > 0 → SPLICE_ARTIFACT) which must then deposit nothing.
+    """
+    import numpy as np
+    import pandas as pd
+    import pysam
+
+    from rigel.index import SJ_BLACKLIST_FEATHER, TranscriptIndex
+
+    fasta = tmp_path / "g.fa"
+    fasta.write_text(">chr1\n" + "ACGT" * 1000 + "\n")
+    pysam.faidx(str(fasta))
+    gtf = tmp_path / "a.gtf"
+    # 2-exon transcript → annotated junction at 0-based [200, 300).
+    gtf.write_text(
+        'chr1\tsrc\texon\t1\t200\t.\t+\t.\tgene_id "G1"; transcript_id "T1";\n'
+        'chr1\tsrc\texon\t301\t500\t.\t+\t.\tgene_id "G1"; transcript_id "T1";\n'
+    )
+    idx_dir = tmp_path / "idx"
+    TranscriptIndex.build(fasta_file=str(fasta), gtf_file=str(gtf), output_dir=str(idx_dir))
+
+    bam = tmp_path / "art.bam"
+    header = {"HD": {"VN": "1.6", "SO": "queryname"}, "SQ": [{"SN": "chr1", "LN": 4000}]}
+    with pysam.AlignmentFile(str(bam), "wb", header=header) as out:
+        for i in range(20):  # unspliced positive control (exon 1)
+            _write_pair(out, f"u{i:03d}", r1_pos=20, r1_cigar="100M",
+                        r2_pos=120, r2_cigar="80M", xs=False)
+        for i in range(50):  # span the annotated junction [200, 300)
+            _write_pair(out, f"r{i:03d}", r1_pos=150, r1_cigar="50M100N50M",
+                        r2_pos=350, r2_cigar="80M", xs=True)
+
+    def total_mass(payload) -> float:
+        return float(
+            payload.region_contained.sum()
+            + payload.boundary_mass_left.sum()
+            + payload.boundary_mass_right.sum()
+        )
+
+    cfg = BamScanConfig(sj_strand_tag="XS")
+
+    # Control: no blacklist → all 70 deposit (the 50 as annotated splices).
+    idx = TranscriptIndex.load(str(idx_dir))
+    s0, _, _, _, pl0 = scan_and_buffer(str(bam), idx, cfg)
+    assert s0.n_sj_blacklisted == 0
+    assert s0.n_with_annotated_sj == 50
+    assert total_mass(pl0) > 65.0  # 20 contained + ~50 spliced crossing mass
+
+    # Blacklist the annotated junction → the 50 become SPLICE_ARTIFACT → held out.
+    pd.DataFrame({
+        "ref": ["chr1"],
+        "start": np.array([200], np.int32),
+        "end": np.array([300], np.int32),
+        "max_anchor_left": np.array([10000], np.int32),
+        "max_anchor_right": np.array([10000], np.int32),
+    }).to_feather(idx_dir / SJ_BLACKLIST_FEATHER)
+    idx2 = TranscriptIndex.load(str(idx_dir))
+    s1, _, _, _, pl1 = scan_and_buffer(str(bam), idx2, cfg)
+    assert s1.n_sj_blacklisted == 50, "blacklist did not flag the junction"
+    # Only the 20 non-artifact unspliced controls remain → mass == n_deposited.
+    assert total_mass(pl1) == 20.0, f"artifacts not held out (mass={total_mass(pl1)})"

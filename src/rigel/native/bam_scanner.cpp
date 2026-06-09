@@ -1434,6 +1434,14 @@ private:
             [&ws](const AssembledFragment& f, const RawResolveResult& cr) {
                 if (!ws.acc_set || f.exons.empty()) return;
                 const int32_t st = cr.splice_type;
+                // Phase D: hold artifact splices (blacklisted CIGAR-N) out of the
+                // accumulator entirely — no deposit, no FL pool. Their true span is
+                // unrecoverable (a blacklisted junction may be a real-but-rejected
+                // junction OR a wholly incorrect alignment, and we'd derive the span
+                // from that suspect alignment), so any reconstruction would inject a
+                // false assumption. Rare; zero extrapolation. Matches the resolver's
+                // SPLICE_ARTIFACT "held out of calibration" intent (resolve_context.h).
+                if (st == SPLICE_ARTIFACT) return;
                 const bool implicit = (st == SPLICE_IMPLICIT);
                 const bool spliced = (st == SPLICE_SPLICED_ANNOT ||
                                       st == SPLICE_SPLICED_UNANNOT || implicit);
