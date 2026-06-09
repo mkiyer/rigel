@@ -76,25 +76,32 @@ no-magic-numbers rule. Until validated, treat the 5pp as provisional.
 
 ---
 
-## Issue #3 — flagship gdna400 capture-on ss0.99 still leaks 6% gDNA→RNA
+## Issue #3 — flagship gdna400 capture-on ss0.99 leak (6.03% → 4.58%, gene-edge bug FIXED)
 
-**Problem.** Net 6.03% = 4.15% prior + 1.89% EM. The prior under-call splits: **silent loci −8.8pp**
-(pure-gDNA exons, explained by the #1 boundary bias) vs **expressed loci −5.6pp** (the bulk of the
-mass; *interior*-gf exonic nodes, NOT boundary-biased — the de-bias did not touch them). With the
-count correctly off under capture, the deconv there is strand-only; the strand clean of a mixed node
-is unbiased in the mean, so the expressed-locus deficit needs another explanation.
+**Root-caused at fragment resolution (2026-06-09)** via `scripts/debug/introspect_locus81.py` on the
+silent locus 81 (all gDNA): the dominant leak was **gene-edge boundary sides** (a stranded gene exon
+abutting intergenic) defaulting to the **Jeffreys ½ prior** — both clues gated off at once: the
+strand likelihood was *skipped* (`joint_deconv` required BOTH flanks to share a strand, so a
+NEG↔NONE edge was wrongly strand-blind) and the count clue was *nuked* (α_crossing=127.8 ⇒ N_eff≈0).
+194 such sides (~2/gene) carried ~164k gross rna_mass = ~68% of the in-locus leak.
 
-**Leading candidate (from [[gdna_leak_root_cause_efflen]]):** the per-region gDNA **effective
-length / IPR** (`gdna_eff_len`, `assemble_priors`) inflates ~2.2× under capture, so the EM gives the
-gDNA component too-low per-base density and it loses the exonic competition to RNA — a lever the
-de-bias left on physical mass. Also re-examine the **EM 1.89%** (per-fragment strand scoring /
-hard-vs-soft assignment; note the de-bias prototype showed the EM partly *self-corrects* a worse
-prior, so the per-fragment likelihood is doing real work).
+**FIXED (this session):** intergenic (TS_NONE) is a strand **wildcard** — `_compute_side` now orients
+a one-sided boundary by the stranded flank (`{POS,NONE}→POS`, `{NEG,NONE}→NEG`; only `{POS,NEG}` /
+`TS_AMBIG` stay undefined). Gene-edge sides recover sfrac=½ → gDNA: locus-81 deconv 0.979→0.995,
+dataset strand-blind edge leak 164k→1.5k, **flagship net leak 6.03%→4.58%**, no FP regression
+(gdna_none ss0.50 4.48%→4.51%, ss0.99 0.04%). Golden regenerated; full suite green.
 
-**To do:** quantify the eff_len/IPR inflation at this scenario (join `loci.feather`
-`gdna_eff_len_em` to truth); test exon-granular gDNA support; separately profile the EM leak.
+**Remaining 4.58%** is now the *within-gene* boundary sides' median bias (= **Issue #1**, the ~281k
+strand-observable residual the tally showed unchanged: each within-gene gDNA side reads ~0.4% RNA
+because the bounded posterior median truncates at gf=1) **plus the EM** (1.89%; uniform-density gDNA
+component under-competes for sense-exonic gDNA under capture — `em_solver` scalar `gdna_eff_len`).
+Note the small-N caveat: at low coverage the now-strand-observable edges can mis-clean by strand
+noise (toy golden shifted gDNA slightly *down*) — another face of Issue #1 (no uncertainty model).
 
-**Status:** open; depends partly on #1 (the silent-locus piece) and on the eff_len investigation.
+**To do (remaining):** Issue #1 (uncertainty-respecting strand clean — fixes the within-gene median
+bias AND the small-N edge noise); then the EM uniform-density gDNA competition / eff_len.
+
+**Status:** gene-edge bug FIXED (−1.45pp net, clean). Residual handed to #1 + the EM.
 
 ---
 

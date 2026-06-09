@@ -40,7 +40,7 @@ import numpy as np
 
 from .count_dispersion import effective_count
 from .density_model import strand_clean_gdna_frac
-from .signature import TS_NEG, TS_POS
+from .signature import TS_AMBIG, TS_NEG, TS_NONE, TS_POS
 from .strand_likelihood import strand_loglik
 
 _GRID_EPS = 1.0e-4
@@ -217,21 +217,42 @@ def _compute_side(
 ) -> _SideQuantities:
     """Per-side sense split, strand-cleaned gDNA weight, and count-prior density.
 
-    A side is **strand-observable** iff its boundary's two regions share a single transcript
-    strand (so 'sense' is defined). Its own crossing mass is gDNA + nascent read-through; the
-    closed-form strand-cleaned gDNA fraction ``(sense_frac − rna_sense_frac)/(½ − rna_sense_frac)``
-    (mean-based, **overdispersion-free**) serves as both the count-prior density cleaner and the
-    strand-fit seed weight. A side is **count-observable** iff its boundary has no shared exon
-    (exon–intron / exon–intergenic seam) — those borrow their own clean crossing density; others
-    borrow the swept region density.
+    A side is **strand-observable** iff its boundary's two regions define a single, consistent
+    transcript sense (so 'sense' is defined). An **intergenic (TS_NONE) region is a strand wildcard**
+    — it carries no transcript, so it is compatible with either strand: a gene-edge boundary
+    (stranded exon ↔ intergenic) is therefore oriented by the gene side, ``{POS,NONE}→POS``,
+    ``{NEG,NONE}→NEG`` (same as ``{POS,POS}`` / ``{NEG,NEG}``). Only a genuine conflict — opposite
+    strands ``{POS,NEG}`` or a ``TS_AMBIG`` flank (overlapping +/− transcripts) — leaves the sense
+    undefined. (Previously the rule required *both* flanks to share a strand, so a gene-edge side
+    facing intergenic was wrongly strand-blind and, with the count clue overdispersion-limited away,
+    collapsed to the Jeffreys ½ prior — leaking ~half its pure-gDNA crossing mass.) Its own crossing
+    mass is gDNA + nascent read-through; the closed-form strand-cleaned gDNA fraction
+    ``(sense_frac − rna_sense_frac)/(½ − rna_sense_frac)`` (mean-based, **overdispersion-free**)
+    serves as both the count-prior density cleaner and the strand-fit seed weight. A side is
+    **count-observable** iff its boundary has no shared exon (exon–intron / exon–intergenic seam) —
+    those borrow their own clean crossing density; others borrow the swept region density.
     """
     mass = view.mass_unspliced
     pos = view.n_unspliced_pos.astype(np.float64)
     neg = view.n_unspliced_neg.astype(np.float64)
-    both_pos = same & (ts_self == TS_POS) & (ts_other == TS_POS)
-    both_neg = same & (ts_self == TS_NEG) & (ts_other == TS_NEG)
-    strand_observable = both_pos | both_neg
-    sense = np.where(both_neg, neg, pos)
+    # Strand sense with TS_NONE (intergenic) as a wildcard: the side is POS-sense if each flank is
+    # POS-or-NONE and at least one is POS (mirror for NEG); a TS_AMBIG flank or an opposite-strand
+    # pairing leaves it undefined. Reduces to {POS,POS}/{NEG,NEG} when neither flank is intergenic.
+    either_ambig = (ts_self == TS_AMBIG) | (ts_other == TS_AMBIG)
+    self_pos_or_none = (ts_self == TS_POS) | (ts_self == TS_NONE)
+    other_pos_or_none = (ts_other == TS_POS) | (ts_other == TS_NONE)
+    self_neg_or_none = (ts_self == TS_NEG) | (ts_self == TS_NONE)
+    other_neg_or_none = (ts_other == TS_NEG) | (ts_other == TS_NONE)
+    cons_pos = (
+        same & ~either_ambig & self_pos_or_none & other_pos_or_none
+        & ((ts_self == TS_POS) | (ts_other == TS_POS))
+    )
+    cons_neg = (
+        same & ~either_ambig & self_neg_or_none & other_neg_or_none
+        & ((ts_self == TS_NEG) | (ts_other == TS_NEG))
+    )
+    strand_observable = cons_pos | cons_neg
+    sense = np.where(cons_neg, neg, pos)
     n_side = pos + neg
     antisense = n_side - sense
     with np.errstate(divide="ignore", invalid="ignore"):
