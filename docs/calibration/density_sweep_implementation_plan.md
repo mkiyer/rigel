@@ -230,6 +230,27 @@ Phase 3 (concentration + eff-len) → Phase 4 (fallbacks). Each phase: unit test
 - Per-region imputation validated against oracle across the full signature/condition matrix (Phase 2
   comparison harness), including runs and the unidentifiable floor (rational fallback).
 
+**DENSITY-ONLY RESULT (Phases 0/A–D + 1 + 3 shipped; `scripts/debug/density_only_accuracy_sweep.py`,
+GENE0037 captured exons, cal deconv vs oracle gDNA fraction):**
+
+| capture-on condition | cal_gf | oracle_gf | abs_err |
+|---|---|---|---|
+| ss0.99 / gdna_none  | 0.000 | 0.000 | **0.000** |
+| ss0.99 / gdna100    | 0.521 | 0.527 | **0.006** |
+| ss0.99 / gdna400    | 0.805 | 0.804 | **0.001** |
+| ss0.99 / gdna1000   | 0.920 | 0.908 | **0.012** |
+| ss0.50 / gdna_none  | 0.131 | 0.000 | 0.131 |
+| ss0.50 / gdna100    | 0.598 | 0.536 | 0.062 |
+| ss0.50 / gdna400    | 0.635 | 0.801 | 0.166 |
+| ss0.50 / gdna1000   | 0.616 | 0.908 | 0.292 |
+
+**Stranded (ss0.99): excellent — ≤1.2 % error across 0–1000 % gDNA, 0 false gDNA at gdna_none; the
+captured-exon leak is closed.** Fully-unstranded (ss0.50, worst case): the genuine floor — the
+calibration saturates ~0.6 (false + at gdna_none, under-count at high gDNA) because strand is blind
+and the density-derived mean is gradient-biased; this is the regime **Phase 2 (DNA-fraction,
+SS-independent)** addresses. **Recommendation: ship density-only for stranded libraries; keep the
+DNA-fraction estimator as the future enhancement for the unstranded + capture + high-gDNA corner.**
+
 **Risks:** (a) the residual estimator constant (manageable — bounded, validated empirically);
 (b) golden churn across phases (mitigated by phase isolation); (c) AMBIG/unstranded edge cases (accept
 reduced accuracy, ensure rational fallback); (d) Phase-0 runtime (expected negligible; profile).
