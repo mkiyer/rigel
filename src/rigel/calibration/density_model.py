@@ -47,10 +47,11 @@ class NodeDensity:
     """Per-region gDNA density (count clue) after local imputation."""
 
     density: np.ndarray  # float64[R] — local gDNA density (fragments per effective bp)
-    gdna_mass: np.ndarray  # float64[R] — density × region_eff_len (count-clue gDNA mass)
     count_evidence: (
         np.ndarray
-    )  # float64[R] — density·eff_len: expected gDNA count (count-prior precision)
+    )  # float64[R] — count-prior precision: gDNA events DIRECTLY observed in the
+    #   region (contained gDNA count for count-observable regions; 0 for imputed
+    #   regions, whose in-region fraction is not directly observed → defer to strand)
     region_count_observable: np.ndarray  # bool[R] — count-observable region (non-exonic)
     boundary_count_observable: np.ndarray  # bool[R] — count-observable boundary right of region r
     n_region_count_observable: int
@@ -180,14 +181,17 @@ def node_gdna_density(
     # prior collapse to Jeffreys Beta(½,½) so the strand clue governs (never the deflated global).
     density = np.where(np.isnan(density), 0.0, density)
 
-    gdna_mass = density * region_eff_len
-    # count-prior precision = the expected gDNA count (density·eff_len): the count clue is only as
-    # confident as the gDNA events it expects, so it defers to strand where RNA dominates (imputed-low
-    # density ⇒ small expected count ⇒ weak prior, Jeffreys-floored in joint_deconv).
-    count_evidence = gdna_mass
+    # count-prior precision = the gDNA events DIRECTLY observed in the region. For a count-observable
+    # region that is its contained gDNA count (= density·eff_len). For an imputed (exon/AMBIG) region
+    # the gDNA FRACTION is NOT directly observed — the crossing flux informs the density (the prior
+    # MEAN) but with model uncertainty (the within-exon enrichment gradient), so there is no direct
+    # in-region fraction evidence ⇒ concentration 0 ⇒ the joint defers to the strand clue rather than
+    # to a gradient-biased count prior. (Measured: this recovers the true captured-exon gDNA fraction
+    # at usable strand specificity and never regresses zero-gDNA regions; see
+    # docs/calibration/density_phase2_dna_fraction_design.md §2.)
+    count_evidence = np.where(region_count_observable, density * region_eff_len, 0.0)
     return NodeDensity(
         density=density,
-        gdna_mass=gdna_mass,
         count_evidence=count_evidence,
         region_count_observable=region_count_observable,
         boundary_count_observable=boundary_count_observable,
