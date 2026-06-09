@@ -90,6 +90,19 @@ The clear win is **weak-SS + low-capture** (a real regime — some unstranded pr
 count is accurate and should carry but the binary throws it away. Under capture the AMBIG case is a
 genuine floor either way (no clue is reliable); the de-bias refinement (§3) is what would lift it.
 
+**Measured confirmation (antisense stress scenario, no capture; `build_antisense_stress_scenario.py`):**
+
+| region | ss0.99 cal/oracle | ss0.50 cal/oracle | ss0.50 abs err |
+|---|---|---|---|
+| AMBIG overlap (count kept) | 0.91 / 0.93 | 0.81–0.90 / 0.93–0.94 | 0.04–0.12 |
+| **single-strand exon (count zeroed)** | 0.96 / 0.96 ✓ | **0.60 / 0.96** | **~0.36** |
+
+At weak SS the categorical fix is **backwards**: the AMBIG regions (count kept) recover well, while
+the single-strand exons **floor at ~0.6 (err 0.36)** because their *accurate* count was zeroed and
+strand is blind. And **no binary resolves it** — keeping the count would re-break high-SS + capture
+(the original leak), zeroing it breaks this. Only a reliability-weighted count (≈1 here since
+no-capture/unbiased, ≪1 under capture) handles both. This is the concrete motivation to implement §3.
+
 ## 5. Alternative considered — one-sided count prior
 
 The imputed crossing density is a **lower bound** on the interior gDNA density (capture only enriches
