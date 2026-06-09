@@ -19,13 +19,15 @@ from rigel.calibration.density_model import (
 )
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.signature import (
+    BIT_EXON_NEG,
     BIT_EXON_POS,
     BIT_INTRON_POS,
 )
 from rigel.calibration.substrate import CalibrationSubstrate, SubstrateView
 
 INTRON = BIT_INTRON_POS  # 0x8 — intron+, count-observable
-EXON = BIT_EXON_POS  # 0x2 — exon+, NOT count-observable
+EXON = BIT_EXON_POS  # 0x2 — exon+, NOT count-observable, strand POS
+AMBIG = BIT_EXON_POS | BIT_EXON_NEG  # 0x3 — exon+ over exon−, NOT observable, strand AMBIG
 INTERGENIC = 0  # no bits — count-observable
 
 
@@ -183,6 +185,38 @@ def test_no_observable_node_defers_to_strand_with_zero_density():
     )
     assert nd.density[0] == 0.0
     assert nd.count_evidence[0] == 0.0
+
+
+def test_single_strand_exon_defers_to_strand_zero_concentration():
+    # An ordinary single-strand exon between introns: the count clue defers to strand,
+    # so its count-prior concentration (count_evidence) is zeroed.
+    ra = _region_arrays([INTRON, EXON, INTRON])
+    contained = ([100, 0, 100], [100, 0, 100])
+    left = ([0, 50, 0], [0, 50, 0])
+    right = ([0, 50, 0], [0, 50, 0])
+    sub = _substrate(3, contained, left, right)
+    nd = node_gdna_density(
+        sub, ra, region_eff_len=np.full(3, 100.0), fl_mean=50.0, rna_sense_frac=0.99
+    )
+    assert nd.count_evidence[1] == 0.0  # exon → defer to strand
+    assert nd.count_evidence[0] > 0.0 and nd.count_evidence[2] > 0.0  # observable introns keep it
+
+
+def test_ambig_overlap_keeps_count_concentration():
+    # An AMBIG region (overlapping +/− exons) has NO defined sense, so the joint deconv skips the
+    # strand likelihood — the neighbour-imputed count is the only signal and MUST carry concentration
+    # (zeroing it would leave the region at Beta(½,½) ≈ 0.5). Contrast the single-strand exon, zeroed.
+    ra = _region_arrays([INTRON, AMBIG, INTRON])
+    contained = ([100, 0, 100], [100, 0, 100])
+    left = ([0, 50, 0], [0, 50, 0])
+    right = ([0, 50, 0], [0, 50, 0])
+    sub = _substrate(3, contained, left, right)
+    nd = node_gdna_density(
+        sub, ra, region_eff_len=np.full(3, 100.0), fl_mean=50.0, rna_sense_frac=0.99
+    )
+    assert nd.density[1] == pytest.approx(2.0)  # imputed from the observable boundaries
+    assert nd.count_evidence[1] > 0.0  # AMBIG keeps the imputed concentration (NOT zeroed)
+    assert nd.count_evidence[1] == pytest.approx(nd.density[1] * 100.0)
 
 
 def test_density_does_not_cross_references():

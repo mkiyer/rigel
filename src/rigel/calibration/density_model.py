@@ -36,7 +36,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .signature import BIT_EXON_NEG, BIT_EXON_POS, TS_AMBIG, TS_NEG, TS_NONE
+from .signature import BIT_EXON_NEG, BIT_EXON_POS, TS_AMBIG, TS_NEG, TS_NONE, TS_POS
 
 _EXON_BITS = BIT_EXON_POS | BIT_EXON_NEG
 _EPS = 1.0e-9
@@ -49,9 +49,9 @@ class NodeDensity:
     density: np.ndarray  # float64[R] — local gDNA density (fragments per effective bp)
     count_evidence: (
         np.ndarray
-    )  # float64[R] — count-prior precision: gDNA events DIRECTLY observed in the
-    #   region (contained gDNA count for count-observable regions; 0 for imputed
-    #   regions, whose in-region fraction is not directly observed → defer to strand)
+    )  # float64[R] — count-prior precision. density·eff_len, except 0 for single-strand
+    #   exons (defer to the strand clue). AMBIG overlaps KEEP it (strand is blind there, so
+    #   the neighbour-imputed count is the only signal).
     region_count_observable: np.ndarray  # bool[R] — count-observable region (non-exonic)
     boundary_count_observable: np.ndarray  # bool[R] — count-observable boundary right of region r
     n_region_count_observable: int
@@ -181,15 +181,20 @@ def node_gdna_density(
     # prior collapse to Jeffreys Beta(½,½) so the strand clue governs (never the deflated global).
     density = np.where(np.isnan(density), 0.0, density)
 
-    # count-prior precision = the gDNA events DIRECTLY observed in the region. For a count-observable
-    # region that is its contained gDNA count (= density·eff_len). For an imputed (exon/AMBIG) region
-    # the gDNA FRACTION is NOT directly observed — the crossing flux informs the density (the prior
-    # MEAN) but with model uncertainty (the within-exon enrichment gradient), so there is no direct
-    # in-region fraction evidence ⇒ concentration 0 ⇒ the joint defers to the strand clue rather than
-    # to a gradient-biased count prior. (Measured: this recovers the true captured-exon gDNA fraction
-    # at usable strand specificity and never regresses zero-gDNA regions; see
-    # docs/calibration/density_phase2_dna_fraction_design.md §2.)
-    count_evidence = np.where(region_count_observable, density * region_eff_len, 0.0)
+    # count-prior precision (concentration). The count clue DEFERS (concentration 0) only where the
+    # strand clue can take over: a non-count-observable region with a single defined transcript strand
+    # (an ordinary exon). There the crossing flux informs the density/MEAN but with model uncertainty
+    # (the within-exon enrichment gradient), so giving it concentration would over-confidence a
+    # gradient-biased mean and override the better strand likelihood. Everywhere else it keeps its
+    # concentration (= the directly-observed contained gDNA count, density·eff_len):
+    #   - count-observable regions (intron/intergenic): directly observed gDNA;
+    #   - strand-AMBIGUOUS overlaps (opposite-strand transcripts → no defined sense → the joint SKIPS
+    #     the strand likelihood): the neighbour-imputed count is the ONLY signal, so it must carry —
+    #     zeroing it would leave the genuinely-unidentifiable-by-strand region with Beta(½,½) ≈ 0.5.
+    # (Measured: defer recovers the true captured-exon fraction at usable SS without regressing
+    # zero-gDNA regions; keep recovers an antisense overlap 0.50→0.94 vs oracle 0.96.)
+    defer_to_strand = (~region_count_observable) & ((ts == TS_POS) | (ts == TS_NEG))
+    count_evidence = np.where(defer_to_strand, 0.0, density * region_eff_len)
     return NodeDensity(
         density=density,
         count_evidence=count_evidence,
