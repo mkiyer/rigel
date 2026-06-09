@@ -86,29 +86,37 @@ def main():
     # per-side cleaned gDNA (left side = right of left boundary; right side = left of right boundary)
     lgf = np.where(ts == TS_AMBIG, 1.0, _clean_frac(side_sense(sub.left), sub.left.n_unspliced.astype(float), kappa))
     rgf = np.where(ts == TS_AMBIG, 1.0, _clean_frac(side_sense(sub.right), sub.right.n_unspliced.astype(float), kappa))
-    left_g_mass = lgf * sub.left.mass_unspliced;  left_g_cnt = lgf * sub.left.n_unspliced.astype(float)
-    right_g_mass = rgf * sub.right.mass_unspliced; right_g_cnt = rgf * sub.right.n_unspliced.astype(float)
+    left_g_mass = lgf * sub.left.mass_unspliced
+    left_g_cnt = lgf * sub.left.n_unspliced.astype(float)
+    right_g_mass = rgf * sub.right.mass_unspliced
+    right_g_cnt = rgf * sub.right.n_unspliced.astype(float)
 
     # boundary-observability per region SIDE: left side usable if boundary (r-1,r) observable; right side if (r,r+1)
-    left_bnd_obs = np.zeros(n, bool); right_bnd_obs = np.zeros(n, bool)
+    left_bnd_obs = np.zeros(n, bool)
+    right_bnd_obs = np.zeros(n, bool)
     rid = np.asarray(ra.ref_id)
     left_bnd_obs[1:] = bnd_obs[:-1] & (rid[1:] == rid[:-1])
     right_bnd_obs[:-1] = bnd_obs[:-1] & (rid[:-1] == rid[1:])
 
     # impute density per region (A1 mass-based, A2 count-based)
-    dens_A1 = np.full(n, np.nan); dens_A2 = np.full(n, np.nan)
+    dens_A1 = np.full(n, np.nan)
+    dens_A2 = np.full(n, np.nan)
     for r in range(n):
         if reg_obs[r]:
             dens_A1[r] = cont_gdna_mass[r] / max(reg_eff[r], 1e-9)
             dens_A2[r] = cont_gdna_cnt[r] / max(reg_eff[r], 1e-9)
             continue
-        m=[]; cnt=[]
+        m = []
+        cnt = []
         if left_bnd_obs[r]:
-            m.append(left_g_mass[r] / max(bside[r], 1e-9)); cnt.append(left_g_cnt[r] / max(fl_mean, 1e-9))
+            m.append(left_g_mass[r] / max(bside[r], 1e-9))
+            cnt.append(left_g_cnt[r] / max(fl_mean, 1e-9))
         if right_bnd_obs[r]:
-            m.append(right_g_mass[r] / max(bside[r], 1e-9)); cnt.append(right_g_cnt[r] / max(fl_mean, 1e-9))
+            m.append(right_g_mass[r] / max(bside[r], 1e-9))
+            cnt.append(right_g_cnt[r] / max(fl_mean, 1e-9))
         if m:
-            dens_A1[r] = float(np.mean(m)); dens_A2[r] = float(np.mean(cnt))
+            dens_A1[r] = float(np.mean(m))
+            dens_A2[r] = float(np.mean(cnt))
     # run-fill: regions still NaN (no observable side) inherit nearest anchored neighbour (both dirs, avg)
     for arr in (dens_A1, dens_A2):
         # L->R carry then R->L carry, average the two where interior
