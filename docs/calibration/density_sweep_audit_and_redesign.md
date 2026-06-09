@@ -248,15 +248,20 @@ Targets on the worked examples: GENE0037 exon swept density 0.618 → ~20, `coun
 antisense-run interior region R8 imputed to ~true from both edges; intergenic flanks stay near baseline
 (no hallucination).
 
-## 8. Open questions
-- The exact unbiased count→density constant (per-side mass / `boundary_side_eff_len` ran ~0.3× of truth
-  on GENE0037; a crossing-count / `fl_mean` form over-samples) — derive from FL geometry and validate.
-- Density (6b-A) vs DNA-fraction (6b-B): which is more robust, and how to combine conflicting left/right
-  anchors over a run.
-- The **intergenic contained-mass = 0** behavior (§3.3): intended (genic-proximal-only calibration) or
-  a deposit gap? It deflates the global density and removes the baseline signal — fix or formally model.
-- AMBIG regions (opposite-strand overlap) at low strand-specificity: the genuinely-unidentifiable
-  floor — quantify the best achievable and ensure the fallback hits it.
+## 8. Open questions → resolved by the dry-run (see the implementation plan)
+
+These are now decided in `density_sweep_implementation_plan.md` (dry-run:
+`scripts/debug/impute_prototype.py`):
+- **Estimator:** the **count-based** form `crossing_gDNA_count / fl_mean` is ~unbiased on the capture
+  case (GENE0037 exons true ~21 → A2 17–23); the mass-based form is ~3× low. Ship A2. Residual ~1.5×
+  over in the no-capture case → a bounded FL-geometry constant to derive (acceptance item).
+- **Density vs DNA-fraction:** keep **both**; DNA-fraction is **gated to true splice seams** (same-strand
+  intron↔exon, where spliced reads flow — never TSS/TES intergenic↔exon nor antisense `ex+|ex-`).
+  Select per-condition from the empirical comparison.
+- **Intergenic contained-mass = 0:** confirmed a **bug** (`bam_scanner.cpp:1578/1643` — intergenic
+  fragments skip the deposit gate, telemetry-only). Fixed in **Phase 0**.
+- **AMBIG / unstranded floor:** genuine; aim for **rational fallback** (neighbor/intron baseline, never
+  global), accept reduced accuracy under unstranded+capture — **Phase 4**.
 
 ---
 
