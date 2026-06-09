@@ -1,8 +1,9 @@
 # Accumulator fragment-span redesign — deposit the molecule, not the reads
 
-**Status:** proposed plan (audit + design). 2026-06-09. Supersedes the calibration-side `L_cross`
-self-calibration idea in `density_sweep_implementation_plan.md`. **Lands after Phase 0, before
-Phase 1.**
+**Status:** design FINALIZED + phased implementation plan (§7). 2026-06-09. All four review questions
+resolved (§6). Supersedes the calibration-side `L_cross` self-calibration idea in
+`density_sweep_implementation_plan.md`. **Lands after Phase 0, before Phase 1.** Ready to start
+**Phase A (test scaffolding, no production change)** on go-ahead.
 
 > **TL;DR.** The fractional accumulator deposits a fragment's **aligned read blocks**, not the
 > **molecule's true genomic extent**. For a paired-end fragment the unsequenced insert gap between
@@ -77,17 +78,22 @@ Coalescing the unspliced molecule to a single span `[1100,1400]` gives slices `A
 A fragment occupies a set of **contiguous genomic intervals** = its true molecular footprint. Deposit
 *those*, and compute mass over their total length.
 
-| Fragment class | Contiguous spans to deposit | Channel |
-|---|---|---|
-| **gDNA / unspliced** (no explicit or implicit intron) | **one** span `[min block start, max block end]` — fill every gap (mate gap = unsequenced contiguous DNA) | unspliced |
-| **Explicitly spliced** (CIGAR `N`) | the exonic segments; cut at each CIGAR-`N` intron; fill within-exon mate gaps | spliced |
-| **Implicitly spliced** (annotated intron inside the mate gap, no CIGAR `N`) | cut at the implied intron; fill all other gaps | spliced |
-| **Artifact splice** (blacklisted junction, currently treated unspliced) | **open question — §6** | (today: unspliced) |
+There is **one unifying rule**: *walk the sorted blocks and fill every inter-block gap UNLESS the gap
+is (or contains) an intron.* Everything below is that rule specialized by fragment class — the only
+inputs are the blocks and the set of **cut introns** (gaps to keep open).
+
+| Fragment class | Cut introns (gaps kept open) | Resulting spans | Channel |
+|---|---|---|---|
+| **gDNA / unspliced** (no explicit or implicit intron) | none | **one** span `[min start, max end]` — fill every gap (mate gap = unsequenced contiguous DNA) | unspliced |
+| **Explicitly spliced** (CIGAR `N`) | the CIGAR-`N` introns (`frag.introns`) | exonic segments; within-exon mate gaps filled | spliced |
+| **Implicitly spliced** (annotated intron in the mate gap, no CIGAR `N`) | the PE gap(s) that matched an annotated intron | cut at the implied intron; other gaps filled | **spliced** (fix: today deposited as unspliced — a bug) |
+| **Artifact splice** (`SPLICE_ARTIFACT`, blacklisted junction) | — | **HOLD OUT — not deposited at all** (decision §6.1) | — |
+| **Chimeric** (multi-locus / interchromosomal) | — | already **held out** today (deposit is after the chimeric `continue`); deferred (§6.3) | — |
 
 Mass normalization: `L = Σ contiguous-span lengths` (the molecule's footprint minus introns), **not**
 the covered read length — directly the user's "accumulate relative to the full fragment length."
-Mass still conserves to 1 per fragment (sum over the regions its spans touch), so the
-`total mass == n_fragments` invariant ([[accumulator_mass_conservation]]) holds.
+Mass still conserves to 1 per *deposited* fragment (sum over the regions its spans touch); with
+artifacts held out the invariant is `total mass == n_deposited` ([[accumulator_mass_conservation]]).
 
 **Why this is principled, not a band-aid.** The accumulator's job is to measure where fragment
 *molecules* sit on the genome. A molecule is its full insert (for DNA/unspliced) or its exonic body
@@ -112,74 +118,132 @@ the intergenic/unspliced population, where the fix is unconditional gap-fill.
 
 ---
 
-## 5. Where to implement (proposed)
+## 5. Survey — where the pieces are, and where the new logic lives
 
-A new pure helper that maps `(blocks, explicit introns, candidate transcripts, splice_type)` → a
-sorted list of contiguous genomic spans, then feed those spans to the **unchanged** `deposit()`:
+The work is **code organization, not new computation**: every input the span rule needs is already
+produced once per fragment. The principle is *reuse the existing iterations; add no fragment-level
+loop; keep each function small and single-purpose.*
 
+**Current per-fragment flow (the hot path), and what each stage already yields:**
+
+| Stage | Location | Already produces |
+|---|---|---|
+| `build_fragment` | `bam_scanner.cpp:617` | sorted, within-read-merged `exons` (blocks) + explicit-`N` `introns`; one merge loop over blocks |
+| `_resolve_core` | `resolve_context.h:~1000` | `splice_type` (incl. `SPLICE_IMPLICIT` at `:1345`), `t_inds`, chimera type; **`has_implicit_splice_gap` (`:788`) already builds the PE gaps and matches them to annotated introns** |
+| `deposit_to_accumulator` | `bam_scanner.cpp:1355` | currently loops blocks into `bs/be` arrays → `deposit()` |
+
+**The single primitive (pure, unit-tested):**
+
+```cpp
+// Coalesce sorted blocks into contiguous genomic spans, keeping a gap OPEN
+// iff it is (or contains) a cut intron. O(blocks + cuts) on tiny sorted inputs.
+void fragment_genomic_spans(const std::vector<ExonBlock>& sorted_blocks,
+                            const std::vector<IntronBlock>& cut_introns,  // explicit ∪ implicit
+                            std::vector<Span>& out_spans);   // reused scratch, no alloc in hot path
 ```
-spans = coalesce_fragment_spans(frag.exons, frag.introns, splice_type, candidate_introns)
-acc.deposit(span_starts, span_ends, n_spans, spliced, primary)
-```
 
-- **Smallest-blast-radius option.** Put `coalesce_fragment_spans` in the scanner (next to
-  `deposit_to_accumulator`, `bam_scanner.cpp`), so `Accumulator::deposit` and its **byte-for-byte
-  reference** (`tests/native/_accumulator_reference.py`) are unchanged (they already take spans). The
-  scanner-integration tests + golden change (intended).
-- **Phasing the work within this fix:**
-  1. **Unspliced coalescing** (the entire density bias): if `splice_type ∈ {UNSPLICED}` and not
-     implicit → deposit `[min,max]`. Trivial, unconditional for the intergenic/gDNA path. **Highest
-     value, lowest risk — could land alone first.**
-  2. **Spliced spans:** cut at explicit + implicit introns, fill within-exon mate gaps. Needs the
-     intron intervals (explicit from `frag.introns`; implicit recovered from the matched transcript).
-  3. **Channel correctness:** an implicitly-spliced fragment is RNA — it should deposit on the
-     **spliced** channel (today `has_introns()` puts it on unspliced). Decide whether to pass
-     `splice_type`-derived `spliced` to the deposit so channel + span treatment agree.
+Rule: walk blocks; extend the current span across a gap unless a `cut_intron` lies within that gap
+(then close the span and start a new one). A different `ref_id` always closes the span (interchrom\
+osomal → separate spans, future-proofing chimeras for free). Unspliced ⇒ no cuts ⇒ one span.
 
-Alternative (rejected for now): fold coalescing into `deposit()` itself and pass introns through the
-ABI. More invasive (touches the spec + reference); revisit only if a non-scanner caller needs it.
+**Assembling the `cut_introns` with no new loop:**
+- *Explicit*: `frag.introns` (already built).
+- *Implicit*: extend `has_implicit_splice_gap` → `implicit_splice_gaps(...)` that **records the
+  matched gaps** (the loop already finds them at `:833-839`; today it discards them and returns
+  `bool`). Stash the matched intervals on `RawResolveResult`/`ResolvedFragment` so the deposit reads
+  them. The `bool` becomes "non-empty."
+
+**Where it runs:** inside `deposit_to_accumulator`, **replacing** the existing `bs/be`-building loop
+with `fragment_genomic_spans(...)` → `deposit()`. Same call site, same iteration count — *not a new
+pass*. `splice_type` (threaded via `result`/`ig_result`) drives the channel (`spliced` for explicit +
+implicit) and the `SPLICE_ARTIFACT` hold-out guard. `Accumulator::deposit` is **unchanged** (it still
+takes spans), so its byte-for-byte reference is untouched.
+
+**Files touched (small, focused):**
+- `bam_scanner.cpp`: new free `fragment_genomic_spans` + rewire `deposit_to_accumulator` (channel from
+  `splice_type`; artifact guard).
+- `resolve_context.h` / `constants.h`: `implicit_splice_gaps` records matched intervals; carry them +
+  ensure `splice_type` reaches the deposit (already on `ResolvedFragment`).
+- No change to `Accumulator::deposit` or `_accumulator_reference.py`.
 
 ---
 
-## 6. Open questions for review
+## 6. Resolved decisions
 
-1. **Artifact splices** (`SPLICE_ARTIFACT`, blacklisted CIGAR `N` treated as unspliced). If the `N` is
-   a true alignment artifact the molecule is contiguous → fill across it (consistent with "unspliced
-   ⇒ one span"). If it is a real-but-blacklisted junction, filling deposits intronic coverage. Which
-   default? (Leaning: treat as unspliced ⇒ fill, matching the rest of the pipeline's handling, and
-   accept that a blacklisted junction is rare and low-impact.)
-2. **Channel for implicit splices.** Move them to the spliced channel (correct biology, changes
-   strand/splice statistics slightly) or keep current behavior and only fix the span? Recommend
-   fixing both together for consistency.
-3. **Interchromosomal / chimeric paired fragments.** A mate on a different ref must **not** be filled
-   across (already separate refs; the span coalescing is per-ref). Confirm the per-ref grouping in
-   `build_fragment` covers this (it keys by `(ref_id, strand)`).
-4. **Performance.** `coalesce_fragment_spans` is O(blocks) on an already-sorted, tiny block list
-   (≤ a few per fragment) in the hot per-fragment path; expected negligible. Profile against the
-   current deposit on `gdna_benchmark_5mb`.
+1. **Artifact splices → HOLD OUT of the accumulator.** We cannot recover the true span: a blacklisted
+   `N` may be a real-but-blacklisted junction *or* a wholly incorrect alignment, and we derive the
+   span from the alignment — so any reconstruction risks a false-positive assumption about the true
+   molecule. The cleanest, most honest, lowest-bias rule is a single guard: `if splice_type ==
+   SPLICE_ARTIFACT → do not deposit` (and contribute no FL pool mass). They are rare, so the data loss
+   is negligible, and we introduce **zero** extrapolation. (Considered and rejected: deposit raw
+   blocks = today's behavior, which reintroduces the multi-block over-count; deposit `[min,max]`,
+   which assumes contiguity we can't justify; keep-largest-block, which is arbitrary and under-counts
+   mass. Hold-out wins on simplicity and correctness.)
+2. **Implicit splices → SPLICED channel + cut at the implied intron.** They are spliced reads; we
+   already detect and label them `SPLICE_IMPLICIT`. Depositing them as unspliced (today) is a bug —
+   it both fills across a real intron and mis-channels RNA as unspliced. Fix both together.
+3. **Chimeras → confirmed already held out, deferred.** The resolved-chimeric path appends to the
+   buffer and `continue`s *before* the deposit (`bam_scanner.cpp:~1505`), and intergenic fragments
+   (empty `t_inds`) cannot be chimeric — so no chimera reaches the accumulator today. The span rule's
+   "different ref closes the span" already makes future inclusion correct, but it stays **out of scope**
+   for this work.
+4. **Performance → integrate, don't bolt on.** No new fragment-level loop: the span computation
+   replaces the existing `bs/be` loop in `deposit_to_accumulator`, the cut-intron set reuses
+   `build_fragment`'s introns and the resolver's already-running implicit-gap loop, and
+   `fragment_genomic_spans` is O(blocks+cuts) on ≤-few-element sorted lists with reused scratch (no
+   allocation in the hot path). Acceptance: profile vs current on `gdna_benchmark_5mb`, require no
+   measurable scan-phase regression.
 
 ---
 
-## 7. Validation & acceptance
+## 7. Phased implementation plan
 
-- **Unit (new):** `coalesce_fragment_spans` — unspliced 2-block fragment → one `[min,max]` span;
-  explicitly-spliced → exonic spans with intron cut; implicit-intron-in-gap → cut; within-exon mate
-  gap → filled; interchromosomal → not merged.
-- **Oracle regression:** rerun `phase1_fl_geometry_derivation.py` — `flux / oracle-template-span → 1.0`
-  at BOTH FL≈350 and FL≈180 (the geometry dependence of the over-count disappears); contained-ρ and
-  crossing-ρ agree on uniform density.
-- **Conservation:** `total mass == n_fragments` still holds (the Phase-0 validation script extended).
-- **Byte-for-byte:** `Accumulator::deposit` unchanged ⇒ `_accumulator_reference.py` unaffected; add a
-  reference for `coalesce_fragment_spans`.
-- **Golden + suite:** regenerate gDNA/combo goldens (calibration inputs shift), full suite green,
-  `evaluate_suite.py` on `gdna_benchmark_5mb` shows the leak drop carry through with NO calibration
-  correction factor.
+> **Discipline (per the user):** an initial phase puts the *entire correctness harness* in place —
+> unit tests, regression guards, oracle assertions — **before any production code changes**, with the
+> new tests written to the target behavior so they **fail** against today's code. Only then do
+> implementation phases flip them green, one behavior at a time, each with golden regenerate + full
+> suite green.
 
-## 8. Sequencing (updated master order)
+**Phase A — Correctness scaffolding (tests first; NO production change).**
+- Unit tests for `fragment_genomic_spans` (table-driven): unspliced 2-block → one `[min,max]`;
+  explicit-spliced → exonic spans, intron cut; implicit-intron-in-gap → cut; within-exon mate gap →
+  filled; multi-ref → separate spans; artifact → caller skips.
+- A C++/Python reference for the primitive (mirrors the chosen semantics; analogous to
+  `_accumulator_reference.py`).
+- Oracle assertion test built from `phase1_fl_geometry_derivation.py`: `flux / oracle-template-span`
+  ≈ 1.0 at FL≈350 **and** FL≈180 (xfail/skip-marked until Phase B, documenting the target).
+- Channel-correctness test: an implicit-splice fragment lands in the **spliced** channels (ch2/3),
+  not unspliced (xfail until Phase C).
+- Mass-conservation test extended for hold-out: `total mass == n_deposited` (artifacts excluded).
+- Confirm the full existing suite is green first (regression baseline) and enumerate the golden files
+  expected to change (gDNA/combo) vs not (RNA/nRNA-only).
 
-Phase 0 (intergenic deposit, ✅ shipped) → **this accumulator span fix** (unspliced coalescing first,
-then spliced spans) → Phase 1 (density estimator, now unbiased) → Phases 2–4 as in
-`density_sweep_implementation_plan.md`.
+**Phase B — Span primitive + unspliced coalescing** (the entire gDNA density bias).
+- Implement `fragment_genomic_spans`; rewire `deposit_to_accumulator` to deposit coalesced spans;
+  unspliced/intergenic ⇒ one `[min,max]` span. Recompile, regenerate golden, suite green.
+- Flip the oracle over-count assertion green (1.56/1.19 → ~1.0).
+
+**Phase C — Implicit splice → spliced channel + intron cut.**
+- `implicit_splice_gaps` records matched intervals; thread to deposit; `splice_type`-driven channel;
+  cut at implicit introns. Flip the channel-correctness test green. Golden regenerate, suite green.
+
+**Phase D — Artifact hold-out.**
+- Guard `SPLICE_ARTIFACT` out of the deposit + FL pool. Golden regenerate, suite green.
+
+**Then:** Phase 1 of `density_sweep_implementation_plan.md` (density estimator) — now unbiased, no
+correction factor.
+
+## 8. Validation & acceptance (whole effort)
+
+- Oracle: `flux / oracle-template-span → 1.0` across FL geometries; contained-ρ ≈ crossing-ρ on
+  uniform density.
+- Conservation: `total mass == n_deposited` (artifacts excluded) — extends the Phase-0 validator.
+- Byte-for-byte: `Accumulator::deposit` + `_accumulator_reference.py` unchanged; new reference for
+  `fragment_genomic_spans`.
+- Golden + suite: gDNA/combo goldens regenerate, RNA/nRNA-only unchanged, full suite green;
+  `evaluate_suite.py` on `gdna_benchmark_5mb` shows the leak drop carried by the accumulator fix with
+  **no** calibration correction factor.
+- Performance: no measurable scan-phase regression (profile).
 
 ## Reproduce
 ```bash
