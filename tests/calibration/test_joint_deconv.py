@@ -25,9 +25,8 @@ def _gdna_frac(
         mass_spliced=np.array([0.0]),
         sense=np.array([float(sense)]),
         antisense=np.array([float(antisense)]),
-        density=np.array([0.0]),
-        count_evidence=np.array([0.0]),  # flat count prior → isolate the strand deconvolution
-        eff_len=np.array([1.0]),
+        count_gdna_frac_in=np.array([0.0]),
+        count_concentration_in=np.array([0.0]),  # flat count prior → isolate the strand deconvolution
         strand_observable=np.array([True]),
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=overdispersion,

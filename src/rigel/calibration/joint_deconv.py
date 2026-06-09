@@ -60,9 +60,8 @@ def _joint_per_node(
     mass_spliced,
     sense,
     antisense,
-    density,
-    count_evidence,
-    eff_len,
+    count_gdna_frac_in,
+    count_concentration_in,
     strand_observable,
     *,
     rna_sense_frac,
@@ -92,8 +91,8 @@ def _joint_per_node(
         # strand where they agree. Strand absent (flat) for AMBIG / zero-flux nodes ⇒ count-only;
         # unstranded (rna_sense_frac = 0.5) ⇒ count-only everywhere. count and strand are conditionally
         # independent given (gdna_density_global, rna_sense_frac); the node's ~1/N self-contribution to gdna_density_global is negligible.
-        count_gdna_frac = min(max(density[i] * eff_len[i] / m, 0.0), 1.0)
-        count_concentration = max(float(count_evidence[i]), 0.0)
+        count_gdna_frac = min(max(float(count_gdna_frac_in[i]), 0.0), 1.0)
+        count_concentration = max(float(count_concentration_in[i]), 0.0)
         a_c = count_concentration * count_gdna_frac + _JEFFREYS
         b_c = count_concentration * (1.0 - count_gdna_frac) + _JEFFREYS
         log_post = (a_c - 1.0) * log_grid + (b_c - 1.0) * log_1mgrid
@@ -134,7 +133,6 @@ def deconv_regions(
     substrate,
     region_arrays,
     node_density,
-    region_eff_len,
     *,
     rna_sense_frac,
     gdna_strand_overdispersion=0.0,
@@ -142,7 +140,12 @@ def deconv_regions(
     gdna_strand_llr_bias=0.0,
     n_grid=200,
 ) -> JointDeconv:
-    """Deconvolve each region's contained mass (a node) into gDNA / RNA."""
+    """Deconvolve each region's contained mass (a node) into gDNA / RNA.
+
+    The count-prior MEAN (``node_density.count_gdna_frac``) and concentration
+    (``node_density.count_evidence``) are precomputed by the count clue; this just orients the
+    strand split and combines.
+    """
     ts = np.asarray(region_arrays.strand_class)
     c = substrate.contained
     pos = c.n_unspliced_pos.astype(np.float64)
@@ -155,9 +158,8 @@ def deconv_regions(
         c.mass_spliced,
         sense,
         antisense,
-        node_density.density,
-        node_density.count_evidence,
-        np.asarray(region_eff_len, dtype=np.float64),
+        node_density.count_gdna_frac,  # prior MEAN (= clip(density·eff_len/mass), computed in node)
+        node_density.count_evidence,  # prior concentration
         strand_observable,
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
@@ -177,6 +179,7 @@ class _SideQuantities:
     mass: np.ndarray
     mass_spliced: np.ndarray
     density: np.ndarray  # count-prior density: clean own crossing density, else swept region
+    count_gdna_frac: np.ndarray  # count-prior MEAN = clip(density·eff/mass) — passed to the deconv
     gdna_weight: np.ndarray  # strand-cleaned own gDNA fraction (mean-based; overdispersion-free)
     strand_observable: np.ndarray
     count_observable: np.ndarray
@@ -235,7 +238,12 @@ def _compute_side(
         own = np.where(
             (mass > 0.0) & (eff > 0.0), clean_gdna_frac * mass / np.maximum(eff, 1e-12), 0.0
         )
-    density = np.where(side_count_observable, own, region_density)
+        density = np.where(side_count_observable, own, region_density)
+        # count-prior MEAN for this side: clip(density·eff / mass) — the deconv used to compute this
+        # inline; lift it here so _joint_per_node consumes the mean directly (= count_gdna_frac).
+        count_gdna_frac = np.clip(
+            np.where(mass > 0.0, density * eff / np.maximum(mass, 1e-12), 0.0), 0.0, 1.0
+        )
     return _SideQuantities(
         sense=sense,
         antisense=antisense,
@@ -243,6 +251,7 @@ def _compute_side(
         mass=mass,
         mass_spliced=view.mass_spliced,
         density=density,
+        count_gdna_frac=count_gdna_frac,
         gdna_weight=clean_gdna_frac,
         strand_observable=strand_observable,
         count_observable=np.asarray(side_count_observable, dtype=bool),
@@ -287,9 +296,8 @@ def deconv_sides(
             sq.mass_spliced,
             sq.sense,
             sq.antisense,
-            sq.density,
-            sq.n_side,
-            eff,
+            sq.count_gdna_frac,  # prior MEAN (= clip(density·eff/mass))
+            sq.n_side,  # prior concentration
             sq.strand_observable,
             rna_sense_frac=rna_sense_frac,
             gdna_strand_overdispersion=gdna_strand_overdispersion,

@@ -126,11 +126,17 @@ def _mock_substrate(pos, neg, ts, count_evidence, observable):
     pos = np.asarray(pos, dtype=np.float64)
     neg = np.asarray(neg, dtype=np.float64)
     n = pos.shape[0]
-    contained = SimpleNamespace(n_unspliced_pos=pos, n_unspliced_neg=neg, mass_unspliced=pos + neg)
+    mass = pos + neg
+    contained = SimpleNamespace(n_unspliced_pos=pos, n_unspliced_neg=neg, mass_unspliced=mass)
     substrate = SimpleNamespace(contained=contained, left=_zero_view(n), right=_zero_view(n))
     region_arrays = SimpleNamespace(strand_class=np.asarray(ts), ref_id=np.zeros(n, dtype=np.int64))
+    # New seed weight is count_gdna_frac directly (was count_evidence/mass) — preserve the intent.
+    ce = np.asarray(count_evidence, dtype=np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        count_gdna_frac = np.clip(np.where(mass > 0.0, ce / mass, 0.0), 0.0, 1.0)
     node_density = SimpleNamespace(
-        count_evidence=np.asarray(count_evidence, dtype=np.float64),
+        count_evidence=ce,
+        count_gdna_frac=count_gdna_frac,
         region_count_observable=np.asarray(observable, dtype=bool),
         boundary_count_observable=np.zeros(n, dtype=bool),  # no boundary seeds
         density=np.zeros(n, dtype=np.float64),

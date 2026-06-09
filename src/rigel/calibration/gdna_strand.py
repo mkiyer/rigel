@@ -240,9 +240,10 @@ def _region_seeds(substrate, region_arrays, node_density):
 
     Intergenic (``TS_NONE``) and intron-only (``TS_POS``/``TS_NEG``) regions — i.e.
     ``node_density.region_count_observable`` — excluding ``TS_AMBIG`` (both strands, no defined
-    sense). The weight is the count-clue gDNA fraction ``clip(count_evidence / mass, 0, 1)``,
-    overdispersion-free (``count_evidence`` = density·eff_len, density cleaned by the strand
-    *mean* ½, not the dispersion).
+    sense). The weight is the count-clue gDNA fraction ``node_density.count_gdna_frac`` (=
+    ``clip(density·eff_len / mass)``, density cleaned by the strand *mean* ½, not the dispersion).
+    It reads the explicit count-prior MEAN rather than re-deriving it from ``count_evidence`` — so
+    the concentration is free to carry the overdispersion-honest precision.
     """
     ts = np.asarray(region_arrays.strand_class)
     contained = substrate.contained
@@ -250,10 +251,7 @@ def _region_seeds(substrate, region_arrays, node_density):
     neg = np.asarray(contained.n_unspliced_neg, dtype=np.float64)
     total = pos + neg
     sense = np.where(ts == TS_NEG, neg, pos)  # orient to transcript sense (arbitrary for TS_NONE)
-    mass = np.asarray(contained.mass_unspliced, dtype=np.float64)
-    count_evidence = np.asarray(node_density.count_evidence, dtype=np.float64)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        weight = np.clip(np.where(mass > 0.0, count_evidence / mass, 0.0), 0.0, 1.0)
+    weight = np.clip(np.asarray(node_density.count_gdna_frac, dtype=np.float64), 0.0, 1.0)
     seed = np.asarray(node_density.region_count_observable) & (ts != TS_AMBIG)
     return sense[seed], total[seed], weight[seed]
 

@@ -136,7 +136,6 @@ def calibrate(
         substrate,
         region_arrays,
         node_density,
-        region_eff_len,
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,

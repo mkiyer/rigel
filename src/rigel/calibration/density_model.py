@@ -47,6 +47,12 @@ class NodeDensity:
     """Per-region gDNA density (count clue) after local imputation."""
 
     density: np.ndarray  # float64[R] — local gDNA density (fragments per effective bp)
+    count_gdna_frac: (
+        np.ndarray
+    )  # float64[R] — count-prior MEAN: clip(density·region_eff_len / contained_mass). The
+    #   strand-cleaned gDNA fraction of the contained mass; consumed by the joint deconv (the
+    #   prior mean) AND the gDNA strand-fit seed weight. Separated from the concentration so the
+    #   latter can carry the overdispersion-honest precision (see count_overdispersion plan).
     count_evidence: (
         np.ndarray
     )  # float64[R] — count-prior precision. density·eff_len, except 0 for single-strand
@@ -195,8 +201,19 @@ def node_gdna_density(
     # zero-gDNA regions; keep recovers an antisense overlap 0.50→0.94 vs oracle 0.96.)
     defer_to_strand = (~region_count_observable) & ((ts == TS_POS) | (ts == TS_NEG))
     count_evidence = np.where(defer_to_strand, 0.0, density * region_eff_len)
+
+    # Count-prior MEAN: the strand-cleaned gDNA fraction of the contained mass,
+    # clip(density·eff_len / contained_mass). Computed once here (was re-derived in the deconv and,
+    # as count_evidence/mass, in the gDNA strand-fit seed weight) so the concentration is free to
+    # carry a different (overdispersion-honest) precision downstream.
+    contained_mass = np.asarray(substrate.contained.mass_unspliced, dtype=np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        count_gdna_frac = np.clip(
+            np.where(contained_mass > 0.0, density * region_eff_len / contained_mass, 0.0), 0.0, 1.0
+        )
     return NodeDensity(
         density=density,
+        count_gdna_frac=count_gdna_frac,
         count_evidence=count_evidence,
         region_count_observable=region_count_observable,
         boundary_count_observable=boundary_count_observable,
