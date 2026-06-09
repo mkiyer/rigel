@@ -222,10 +222,12 @@ takes spans), so its byte-for-byte reference is untouched.
 - Confirm the full existing suite is green first (regression baseline) and enumerate the golden files
   expected to change (gDNA/combo) vs not (RNA/nRNA-only).
 
-**Phase B — Span primitive + unspliced coalescing** (the entire gDNA density bias).
-- Implement `fragment_genomic_spans`; rewire `deposit_to_accumulator` to deposit coalesced spans;
-  unspliced/intergenic ⇒ one `[min,max]` span. Recompile, regenerate golden, suite green.
-- Flip the oracle over-count assertion green (1.56/1.19 → ~1.0).
+**Phase B — Span primitive + unspliced coalescing** (the entire gDNA density bias). ✅ **SHIPPED
+main@b6c52c5.** `fragment_genomic_spans` implemented + bound; `deposit_to_accumulator` deposits
+coalesced spans via reusable per-`WorkerState` scratch (no per-fragment alloc); `cut_introns` =
+explicit CIGAR-N only. Over-count flux/oracle-span **1.558→1.0003 (FL≈350), 1.192→1.0005 (FL≈180)** —
+oracle guard flipped to passing; parity green; byte-for-byte spec + mass conservation intact; golden
+regenerated (21 scenarios, ~0.3–0.4%); 1007 passed.
 
 **Phase C — Implicit splice → spliced channel + intron cut.**
 - `implicit_splice_gaps` records matched intervals; thread to deposit; `splice_type`-driven channel;
