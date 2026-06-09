@@ -97,54 +97,24 @@ Observability per side: region `r`'s **left** side (`substrate.left[r]`) is usab
 Strand-clean each side's unspliced counts to gDNA via the closed form (same as the contained path);
 AMBIG sides fall back to gDNA-fraction 1 (or defer — see Phase 4).
 
-### The FL-geometry constant — DERIVED (2026-06-09)
+### Estimator normalization (depends on the accumulator span fix — see below)
 
-The dry-run's open "~1.5× over in no-capture" residual is now fully characterized
-(`scripts/debug/phase1_fl_geometry_derivation.py`, oracle-validated on a uniform-density genome):
+Use the **count-rate** form `boundary-side gDNA flux / fl_mean` (not the per-side *mass* form, the
+dry-run's A1, biased ~3× low). For uniform density both the contained (`count / region_eff_len`) and
+crossing (`flux / fl_mean`) estimators recover the true density — *provided* the accumulator deposits
+a fragment's true contiguous genomic span.
 
-1. **`fl_mean` is unbiased.** Estimated gDNA `fl_mean` / true = **1.000** (Phase 0's intergenic
-   contained deposits give the FL pipeline a clean, large-region sample). The residual is *not* an
-   FL-estimate error.
-2. **The crossing physics is exact.** Oracle gDNA *templates* spanning a seam = ρ·`fl_mean` to <1%
-   (1172 vs 1174). So `#templates covering a point = ρ·fl_mean` holds — the count→density model is
-   right.
-3. **The residual is a deposit over-count.** The accumulator's one-side boundary **flux** =
-   **c × (true template-span count)**, with **c ≈ 1.56** at gDNA FL≈350. Cause: paired-end reads are
-   deposited as *two blocks* (read1, read2) with the insert gap between them; the slice-adjacency
-   crossing rule (`accumulator.cpp` §4) credits a side-event whenever consecutive slices change
-   region, which over-counts relative to a single template spanning the seam point (a read straddling
-   a boundary plus a mate in the same region creates an extra crediting; a mate-gap that skips an
-   interior region credits flanking seams asymmetrically).
-4. **c is NOT universal — it tracks read/insert geometry.** Halving the gap (FL≈350→180) moves
-   **c 1.56→1.19** (→1 as the gap vanishes). So c must be **self-calibrated per library**, never
-   hardcoded. This also explains why the benchmark's GENE0037 (capture, short fragments) read ≈
-   unbiased while the FL≈350 synthetic read 1.56× over.
-5. **c is uniform within a library** (std ≈ 0.02–0.06 across all boundary types, exon-adjacent and
-   intron/intergenic-adjacent alike) and **capture-independent by mechanism** (capture changes which
-   fragments exist, not how a 2-block fragment is sliced).
-
-**Resolution — self-calibrate, no magic number.** Tie the crossing estimator to the *exact* contained
-estimator using count-observable nodes as the calibration anchor. Define one fitted per-library
-scalar — the **empirical boundary effective length** `L_cross` (equivalently `c = L_cross / fl_mean`):
-
-```
-ρ̂_region (observable)   = strand_cleaned_contained_count / region_eff_len          # exact reference
-L_cross = Σ_obs-boundary (one-side gDNA flux)  /  Σ_obs-boundary (ρ̂ · 1)            # fit, weighted by evidence
-        # i.e. the flux a unit local density produces at a seam, given THIS library's read geometry
-ρ̂_region (non-observable) = (boundary-side gDNA flux) / L_cross                      # apply to exons
-```
-
-`L_cross` is **fit, not assumed**: it is the slope that makes seam flux agree with the contained
-density on observable nodes, so the deposit over-count cancels exactly whatever the read geometry.
-Use the flux→`L_cross` path (not the per-side *mass*→`boundary_side_eff_length` path — the dry-run's
-A1, biased ~3× low because a straddling fragment puts only part of its length on each side). Pool the
-fit across all observable seams in the library (it is geometry-, not locus-, specific); guard against
-loci with no observable seam via the Phase-4 fallback.
-
-> **Alternative considered (not chosen): fix the over-count at the C++ source** so flux counts true
-> template-spanning. Rejected for Phase 1 — it changes accumulator semantics + the byte-for-byte
-> reference, the mass channel is already correct, and self-calibration is robust to *any* systematic
-> seam/geometry effect, not just the mate gap. Revisit only if a second consumer needs a clean flux.
+> **Prerequisite: the accumulator span fix (`accumulator_fragment_span_redesign.md`).** The Phase-1
+> derivation (`scripts/debug/phase1_fl_geometry_derivation.py`) found a ~1.2–1.56× over-count in the
+> boundary flux that is *not* an FL-estimate error (`fl_mean` est/true = 1.000) and *not* a flaw in
+> the count→density model (oracle template-span = ρ·fl_mean to <1%). It is an **accumulator deposit
+> bug**: paired-end reads are deposited as two blocks (read1, read2) with the unsequenced insert gap
+> between them, so the slice-crossing rule over-credits boundary flux (a read straddling a seam with
+> its mate in the same downstream region double-credits one side and phantom-credits the next seam).
+> The principled fix is to deposit the fragment's **true contiguous genomic span(s)** (fill the mate
+> gap for unspliced fragments; skip only true introns) — see the new redesign doc. That fix drives
+> the over-count to 1.0 *by construction*, so Phase 1's `flux / fl_mean` estimator is then unbiased
+> with **no calibration correction factor**. **The accumulator span fix lands before Phase 1.**
 
 **Outputs unchanged in shape:** `NodeDensity.density` + `count_evidence` (the latter revised in
 Phase 3). The joint deconvolution (`joint_deconv.py`) is untouched in Phase 1.
@@ -152,10 +122,10 @@ Phase 3). The joint deconvolution (`joint_deconv.py`) is untouched in Phase 1.
 **Tests / acceptance.**
 - Unit: a single exon between two introns recovers the (known) uniform density from either/both
   sides; a 3-region antisense run recovers the interior region from the carry.
-- Derivation regression: `L_cross`-calibrated crossing-ρ / contained-ρ ≈ 1.0 on the uniform-density
-  scenario at BOTH FL≈350 and FL≈180 (proves the self-calibration removes the geometry dependence).
+- Regression (post-accumulator-fix): on the uniform-density scenario, crossing-ρ / contained-ρ ≈ 1.0
+  at BOTH FL≈350 and FL≈180 (`phase1_fl_geometry_derivation.py`) — confirms the over-count is gone.
 - Worked: GENE0037 exon density 0.62 → ~20; antisense run interior → right magnitude.
-- The dry-run code (`impute_prototype.py`) + `phase1_fl_geometry_derivation.py` are the references.
+- The dry-run code (`impute_prototype.py`) is the reference for the imputation structure.
 
 ---
 
@@ -227,9 +197,10 @@ not accurate, behavior. Fallback order for a region with no usable anchor:
 ## Dry-run: issues encountered (implementation-readiness)
 
 1. **Estimator normalization:** mass-based (A1) is biased ~3× low; **count-based (A2) is the form to
-   ship.** Residual ~1.5× over in no-capture suggests cross-side contamination at the seam (the
-   exon-side count includes some neighbor-origin crossings) and/or the exact `fl_mean` constant — needs
-   a short FL-geometry derivation + empirical calibration; track as an acceptance item, not a blocker.
+   ship.** The ~1.2–1.56× over-count residual is now ROOT-CAUSED to an accumulator deposit bug (paired
+   reads deposited as separate blocks, mate gap mishandled) — fixed at the source by the **accumulator
+   span redesign** (`accumulator_fragment_span_redesign.md`), which lands before Phase 1. No
+   calibration correction factor.
 2. **Intergenic = 0 until Phase 0:** the prototype shows intergenic A1/A2 = 0 (no contained data) — the
    baseline/fallback is impossible until Phase 0 lands. Confirms phase ordering.
 3. **Degenerate zero-`eff_len` regions** (e.g. GENE0037 R374, an alt-splice boundary-shift artifact)
@@ -245,9 +216,11 @@ not accurate, behavior. Fallback order for a region with no usable anchor:
 
 ## Sequencing, validation, and acceptance
 
-**Order:** Phase 0 (C++, golden churn, land alone) → Phase 1 (count-based local imputation) →
-Phase 2 (DNA-fraction + comparison) → Phase 3 (concentration + eff-len) → Phase 4 (fallbacks). Each
-phase: unit tests + golden regenerate + `evaluate_suite.py` on `gdna_benchmark_5mb` + full suite green.
+**Order:** Phase 0 (intergenic deposit, ✅ shipped) → **Accumulator span fix** (C++, the contiguous-
+genomic-span deposit — `accumulator_fragment_span_redesign.md`; removes the flux over-count at the
+source) → Phase 1 (count-based local imputation, now unbiased) → Phase 2 (DNA-fraction + comparison) →
+Phase 3 (concentration + eff-len) → Phase 4 (fallbacks). Each phase: unit tests + golden regenerate +
+`evaluate_suite.py` on `gdna_benchmark_5mb` + full suite green.
 
 **Acceptance (end state):**
 - GENE0037 exon swept density ~20 (not 0.62), `count_gf` ~0.8, joint `gdna_frac` ~0.8.
@@ -263,9 +236,11 @@ reduced accuracy, ensure rational fallback); (d) Phase-0 runtime (expected negli
 
 ## Open items
 - ~~Exact FL-geometry constant for the count→density estimator (the ~1.5× no-capture residual).~~
-  **RESOLVED (2026-06-09):** it is a paired-end deposit over-count `c = flux/template-span`, geometry-
-  dependent (1.19–1.56), so **self-calibrated per library** as `L_cross` against the contained
-  reference — see Phase 1 "The FL-geometry constant" + `phase1_fl_geometry_derivation.py`.
+  **ROOT-CAUSED (2026-06-09) to an accumulator deposit bug, NOT a calibration constant.** It is a
+  paired-end deposit over-count (`flux/template-span` ≈ 1.19–1.56, geometry-dependent) caused by
+  depositing read blocks instead of the fragment's contiguous genomic span. Fixed at the source — see
+  `accumulator_fragment_span_redesign.md`. The earlier `L_cross` self-calibration idea is **dropped**
+  (a band-aid for an upstream bug). `phase1_fl_geometry_derivation.py` is the derivation harness.
 - Selection rule between A2-density and B-fraction (decide from the Phase-2 comparison).
 - AMBIG handling at the joint (weak prior + strand) — Phase 4.
 - Confirm the intergenic-deposit fix conserves total fragment mass (accumulator invariant).
