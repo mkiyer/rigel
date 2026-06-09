@@ -1,9 +1,23 @@
-# Principled clue integration — data-driven count reliability (design / for review)
+# Principled clue integration (design / for review)
 
-**Status:** design proposal, for review/critique. 2026-06-09. Addresses the critique that the
-count-vs-strand integration is crude (a binary "zero the count for single-strand exons, keep it for
-AMBIG") when reliability is a **spectrum**. Not implemented — proposes the principled replacement and
-asks for a decision (§7).
+**Status:** §1–§7 below proposed a *count-reliability* metric — **VETOED** (see banner). The chosen
+direction is **§8: weight the count by STRAND reliability** (the count yields to strand to the extent
+strand is trustworthy), validated at both SS endpoints. 2026-06-09.
+
+> **VETO (count reliability) — accepted.** Count reliability is **local**, not global: the probe
+> design + transcript geometry determine, per region, whether the boundary-crossing density over- or
+> under-estimates the interior (e.g. a 5 kb single exon with a *central* probe → the boundaries are
+> *depleted* relative to the enriched centre; another probe layout → enriched). We cannot know the
+> probe design, so the per-region count bias is **unestimable**. A global count-reliability factor
+> (§3) is therefore wrong. "Statistically precise" (thousands of fragments) ≠ "accurate."
+
+> **CHOSEN DIRECTION — weight the count by STRAND reliability (§8).** Unlike *count* reliability,
+> *strand* reliability is global and estimable (κ's distance from ½, identifiability, n_obs). Scale the
+> imputed-region count concentration by `(1 − strand_trust)`: where strand is reliable it governs and
+> the count fades; where strand is weak/inapplicable the count carries. Continuous in SS (no cliff),
+> and it **subsumes** the AMBIG special-case (strand not observable ⇒ strand_trust 0 ⇒ count carries)
+> AND fixes the weak-SS single-strand-exon floor. Validated: ss0.50 single-strand exons 0.60→~0.92
+> (count kept), ss0.99 strand governs (0.77, leak stays closed). See §8.
 
 ---
 
@@ -142,3 +156,52 @@ no/low capture; its weakness is weak-SS + low-capture and the AMBIG+capture floo
 
 **Decision requested:** (a) implement the reliability integration now, or validate-the-categorical-fix
 first then decide; (b) reliability down-weight only, or also the strand-calibrated de-bias (§3).
+
+---
+
+## 8. CHOSEN DIRECTION — weight the count by strand reliability
+
+**Principle.** Each clue is unbiased *or* biased. The strand clue is (approximately) unbiased but its
+precision fades with strand specificity. The count clue is statistically precise but **locally biased
+in an unknown way** under capture. So: trust the strand to the extent it is reliable, and let the
+count carry only the *remainder* of the belief. Concretely, scale the count-prior concentration of
+**imputed (non-count-observable) regions** by the strand model's unreliability:
+
+```
+strand_trust(region) = strand_observable(region) × strand_reliability(library)   # ∈ [0,1]
+count_evidence(region) = density·eff_len × (count_observable ? 1 : (1 − strand_trust))
+```
+
+- `strand_reliability(library)` — a continuous [0,1] measure of how identifiable the strand model is
+  (κ's distance from ½ and/or the existing identifiability margin). Start: `|2κ−1|`; refine from the
+  strand model's own confidence statistics (the pipeline already computes an identifiability margin).
+  **Not a tunable constant** — a deterministic function of the fitted strand posterior.
+- `strand_observable(region)` — already computed; 0 for AMBIG (no defined sense), so AMBIG → trust 0
+  → count carries, with **no special-case branch** (it subsumes the prior AMBIG fix).
+- count-observable regions (intron/intergenic) keep full concentration (direct gДНК observation).
+
+**Why this is the right shape, not a band-aid.** The strand likelihood's *effective* sample size is
+limited by its (real, fitted) overdispersion, so at high SS the count's raw statistical concentration
+overpowers it even though strand is the trustworthy clue — that mismatch is the entire bug, and the
+previous binary zeroing was a hard patch for it. Tying the count's *weight* to the strand's
+*reliability* is the continuous, estimable expression of "defer to the unbiased clue when it is
+trustworthy." It never consults the (unestimable) count reliability.
+
+**Validated (antisense stress scenario, no capture):**
+
+| | oracle | current (binary) | strand-reliability weighting |
+|---|---|---|---|
+| ss0.99 single-strand exon | 0.96 | 0.96 ✓ | 0.96 ✓ (strand governs) |
+| ss0.99 AMBIG | 0.93 | 0.91 ✓ | 0.91 ✓ |
+| **ss0.50 single-strand exon** | 0.96 | **0.60** ✗ | **~0.92** ✓ (count carries) |
+| ss0.50 AMBIG | 0.93 | 0.81–0.90 | 0.81–0.90 |
+
+**Remaining floor (honest):** low SS **+ capture** (strand blind AND count locally biased) and
+AMBIG + capture — neither clue is trustworthy. This is the genuinely-unidentifiable corner; the
+**Path-3 DNA-fraction** de-bias (a same-position ratio robust to the local probe gradient — exactly
+the "probe in centre" case) is the deferred enhancement that could lift the multi-exon part of it.
+
+**Open detail:** the exact `strand_reliability(library)` form — `|2κ−1|` vs an identifiability-margin
+based measure (accounting for n_spliced_obs). Decide from the stress scenario across the SS spectrum;
+must be monotone, ∈[0,1], and free of tunable constants.
+
