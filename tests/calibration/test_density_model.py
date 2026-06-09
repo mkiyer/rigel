@@ -175,21 +175,24 @@ def test_run_interior_filled_from_anchored_edges():
     assert nd.density[2] == pytest.approx(3.0)  # carry mean of the two flanks
 
 
-def test_no_observable_node_defers_to_strand_with_zero_density():
-    # A single exon-only reference: no observable region, no observable boundary → density 0
-    # ⇒ count prior collapses to Jeffreys ⇒ strand governs (never a deflated global average).
+def test_no_observable_node_carries_no_support():
+    # A single exon-only reference: no observable region, no observable boundary → no anchor.
+    # Density takes the global baseline (0 here — there is no observable region) and the region
+    # carries NO count support ⇒ the count prior collapses to Jeffreys ⇒ strand governs.
     ra = _region_arrays([EXON])
     sub = _substrate(1, _zeros(1), _zeros(1), _zeros(1))
     nd = node_gdna_density(
         sub, ra, region_eff_len=np.array([100.0]), fl_mean=50.0, rna_sense_frac=0.99
     )
-    assert nd.density[0] == 0.0
-    assert nd.count_evidence[0] == 0.0
+    assert nd.density[0] == 0.0  # global baseline = 0 (no observable region anywhere)
+    assert nd.count_support[0] == 0.0
 
 
-def test_single_strand_exon_defers_to_strand_zero_concentration():
-    # An ordinary single-strand exon between introns: the count clue defers to strand,
-    # so its count-prior concentration (count_evidence) is zeroed.
+def test_single_strand_exon_carries_crossing_support():
+    # An ordinary single-strand exon between introns: NO categorical zeroing anymore. The exon is
+    # imputed from its observable boundaries and carries the honest CROSSING support
+    # (density·fl_mean) — the count overdispersion fit later right-sizes its precision. The
+    # observable introns carry CONTAINED support (density·region_eff_len).
     ra = _region_arrays([INTRON, EXON, INTRON])
     contained = ([100, 0, 100], [100, 0, 100])
     left = ([0, 50, 0], [0, 50, 0])
@@ -198,14 +201,16 @@ def test_single_strand_exon_defers_to_strand_zero_concentration():
     nd = node_gdna_density(
         sub, ra, region_eff_len=np.full(3, 100.0), fl_mean=50.0, rna_sense_frac=0.99
     )
-    assert nd.count_evidence[1] == 0.0  # exon → defer to strand
-    assert nd.count_evidence[0] > 0.0 and nd.count_evidence[2] > 0.0  # observable introns keep it
+    assert nd.count_support[1] > 0.0  # exon NOT zeroed
+    assert nd.count_support[1] == pytest.approx(nd.density[1] * 50.0)  # crossing support (fl_mean)
+    assert nd.count_support[0] == pytest.approx(nd.density[0] * 100.0)  # intron: contained support
+    assert nd.count_support[2] == pytest.approx(nd.density[2] * 100.0)
 
 
-def test_ambig_overlap_keeps_count_concentration():
+def test_ambig_overlap_carries_crossing_support():
     # An AMBIG region (overlapping +/− exons) has NO defined sense, so the joint deconv skips the
-    # strand likelihood — the neighbour-imputed count is the only signal and MUST carry concentration
-    # (zeroing it would leave the region at Beta(½,½) ≈ 0.5). Contrast the single-strand exon, zeroed.
+    # strand likelihood — the neighbour-imputed crossing count is the only signal. It is imputed
+    # from the observable boundaries and carries the crossing support (density·fl_mean).
     ra = _region_arrays([INTRON, AMBIG, INTRON])
     contained = ([100, 0, 100], [100, 0, 100])
     left = ([0, 50, 0], [0, 50, 0])
@@ -215,18 +220,22 @@ def test_ambig_overlap_keeps_count_concentration():
         sub, ra, region_eff_len=np.full(3, 100.0), fl_mean=50.0, rna_sense_frac=0.99
     )
     assert nd.density[1] == pytest.approx(2.0)  # imputed from the observable boundaries
-    assert nd.count_evidence[1] > 0.0  # AMBIG keeps the imputed concentration (NOT zeroed)
-    assert nd.count_evidence[1] == pytest.approx(nd.density[1] * 100.0)
+    assert nd.count_support[1] > 0.0  # AMBIG carries the imputed crossing support (NOT zeroed)
+    assert nd.count_support[1] == pytest.approx(nd.density[1] * 50.0)
 
 
 def test_density_does_not_cross_references():
-    # Two single-region refs: an observable intron and a no-anchor exon — the exon must NOT
-    # inherit the intron's density (the carry is per-reference).
+    # chr1 carries a high-density observable intron (density 4.0); chr2 is a lone no-anchor exon.
+    # The chr2 exon must NOT inherit chr1's 4.0 via the run-fill carry (the carry is per-reference)
+    # — it takes the GLOBAL baseline (the count-weighted mean observable density, 4.0 here) for its
+    # MEAN but carries ZERO count support (no local evidence). The discriminating signal is the
+    # support: a within-ref carry would have given it nonzero support.
     ra = _region_arrays([INTRON, EXON], ref_names=["chr1", "chr2"])
-    contained = ([100, 0], [100, 0])
+    contained = ([200, 0], [200, 0])
     sub = _substrate(2, contained, _zeros(2), _zeros(2))
     nd = node_gdna_density(
         sub, ra, region_eff_len=np.array([100.0, 100.0]), fl_mean=50.0, rna_sense_frac=0.99
     )
-    assert nd.density[0] == pytest.approx(2.0)
-    assert nd.density[1] == 0.0  # no cross-ref carry
+    assert nd.density[0] == pytest.approx(4.0)  # chr1 observable intron: 400 / 100
+    assert nd.density[1] == pytest.approx(4.0)  # chr2 no-anchor: GLOBAL baseline, not a carry
+    assert nd.count_support[1] == 0.0  # no local evidence (a cross-ref carry would be nonzero)

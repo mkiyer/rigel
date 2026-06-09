@@ -133,6 +133,7 @@ def deconv_regions(
     substrate,
     region_arrays,
     node_density,
+    count_concentration,
     *,
     rna_sense_frac,
     gdna_strand_overdispersion=0.0,
@@ -142,9 +143,10 @@ def deconv_regions(
 ) -> JointDeconv:
     """Deconvolve each region's contained mass (a node) into gDNA / RNA.
 
-    The count-prior MEAN (``node_density.count_gdna_frac``) and concentration
-    (``node_density.count_evidence``) are precomputed by the count clue; this just orients the
-    strand split and combines.
+    The count-prior MEAN (``node_density.count_gdna_frac``) is precomputed by the count clue; the
+    concentration (``count_concentration`` = the overdispersion-limited effective gDNA count
+    ``N/(1+α·N)``) is finalized by ``calibrate`` after the count overdispersion fit. This just
+    orients the strand split and combines.
     """
     ts = np.asarray(region_arrays.strand_class)
     c = substrate.contained
@@ -159,7 +161,7 @@ def deconv_regions(
         sense,
         antisense,
         node_density.count_gdna_frac,  # prior MEAN (= clip(density·eff_len/mass), computed in node)
-        node_density.count_evidence,  # prior concentration
+        count_concentration,  # prior concentration (overdispersion-limited N/(1+αN))
         strand_observable,
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
@@ -265,6 +267,7 @@ def deconv_sides(
     boundary_side_eff_len,
     *,
     rna_sense_frac,
+    alpha_crossing=0.0,
     gdna_strand_overdispersion=0.0,
     rna_strand_overdispersion=0.0,
     gdna_strand_llr_bias=0.0,
@@ -280,6 +283,10 @@ def deconv_sides(
     it borrows the swept region density. It is **strand-observable** iff the boundary's two
     regions share a single transcript strand. Returns ``(left, right)`` per-region JointDecodes
     (zero where a side carries no mass — e.g. reference edges).
+
+    The side's count-prior concentration is the **crossing** count overdispersion-limited
+    ``n_side / (1 + α_crossing·n_side)`` (sides are crossing-type seeds), so a capture-heterogeneous
+    boundary fades to ~``1/α`` effective count and the strand clue governs.
     """
     ts = np.asarray(region_arrays.strand_class)
     ref_id = np.asarray(region_arrays.ref_id)
@@ -291,13 +298,15 @@ def deconv_sides(
 
     def _deconv(view, same, ts_other, side_obs):
         sq = _compute_side(view, same, ts, ts_other, side_obs, eff, region_density, rna_sense_frac)
+        a = max(float(alpha_crossing), 0.0)
+        count_concentration = sq.n_side / (1.0 + a * sq.n_side)  # overdispersion-limited N_eff
         return _joint_per_node(
             sq.mass,
             sq.mass_spliced,
             sq.sense,
             sq.antisense,
             sq.count_gdna_frac,  # prior MEAN (= clip(density·eff/mass))
-            sq.n_side,  # prior concentration
+            count_concentration,  # prior concentration (overdispersion-limited N/(1+αN))
             sq.strand_observable,
             rna_sense_frac=rna_sense_frac,
             gdna_strand_overdispersion=gdna_strand_overdispersion,

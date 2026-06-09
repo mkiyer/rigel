@@ -278,6 +278,23 @@ class CalibrationConfig:
     #: ``gdna_strand_prior_weight``; same default.
     rna_strand_prior_weight: float = 30.0
 
+    #: **Count-overdispersion fallback α₀** (advanced). The count-side twin of the strand
+    #: overdispersion. The count-prior concentration is the NB-overdispersion-limited effective gDNA
+    #: count ``N_eff = N/(1+α·N)`` (→ ``1/α`` for large ``N``); ``α`` is fit per count-type (contained
+    #: regions vs crossing boundary sides) by NB method-of-moments and shrunk toward the global
+    #: pooled-seed trend. This ``α₀`` is the fallback used only when even the pooled trend is
+    #: degenerate (too few seeds). ``1.0`` is the **geometric** NB (max-entropy at fixed mean):
+    #: ``N_eff → 1`` — absent any dispersion evidence a count is worth ~1 pseudo-observation, the
+    #: count analog of the Jeffreys ``Beta(½,½)`` floor (conservative: defers to the strand clue).
+    count_overdispersion_prior: float = 1.0
+
+    #: Strength of the count-overdispersion prior, in effective seed-node units (advanced). The
+    #: per-type MoM is shrunk toward the pooled trend by ``(n·α̂ + w·trend)/(n + w)``; with the
+    #: abundant seeds of a normal library it is negligible (the data dominates and the distinct
+    #: contained/crossing dispersions are preserved), and it only guards the degenerate few-seed
+    #: case. Same units + default as ``gdna_strand_prior_weight``.
+    count_overdispersion_prior_weight: float = 30.0
+
     def __post_init__(self) -> None:
         if not math.isfinite(float(self.gdna_strand_llr_bias)):
             raise ValueError(
@@ -307,6 +324,17 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.rna_strand_prior_weight must be >= 0; "
                 f"got {self.rna_strand_prior_weight}."
+            )
+        if self.count_overdispersion_prior < 0.0:
+            raise ValueError(
+                "CalibrationConfig.count_overdispersion_prior must be >= 0 "
+                "(an NB dispersion cannot be negative); "
+                f"got {self.count_overdispersion_prior}."
+            )
+        if self.count_overdispersion_prior_weight < 0.0:
+            raise ValueError(
+                "CalibrationConfig.count_overdispersion_prior_weight must be >= 0; "
+                f"got {self.count_overdispersion_prior_weight}."
             )
 
 

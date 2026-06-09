@@ -84,13 +84,14 @@ ruff format src/ tests/
 
 **Calibration package (`calibration/`):**
 
-- `calibrate.py` — the **acyclic single-pass** calibrator orchestrator (RNA strand balance → count-clue density → gDNA strand overdispersion → joint count×strand deconvolution → derive)
+- `calibrate.py` — the **acyclic single-pass** calibrator orchestrator (RNA strand balance → count-clue density → gDNA/RNA strand overdispersion → count overdispersion → joint count×strand deconvolution → derive)
 - `substrate.py` — `CalibrationSubstrate`: payload → per-region 3-view (contained / left / right) sufficient statistics
 - `region_arrays.py` / `regions.py` — region geometry (`RegionArrays`, build partition from `index.region_df`)
 - `signature.py` — region 4-bit strand/type signature + `strand_class` (POS/NEG/NONE/AMBIG)
 - `density_model.py` — count clue: per-region/boundary gDNA **density** via the region↔boundary sweep + count-observability masks (`region_count_observable` / `boundary_count_observable`); strand-cleaned by the strand *mean*
 - `strand_balance.py` / `strand_summary.py` — **RNA** strand *mean*: `rna_sense_frac` (used by the decode). `StrandBalance.rna_strand_overdispersion` here is a QC-only thin-count power diagnostic (`1/(n_obs+3)`), distinct from the decode's RNA overdispersion (see `gdna_strand.py`)
 - `gdna_strand.py` — **both** strand Beta-Binomial overdispersions (shared component-agnostic MoM core): `gdna_strand_overdispersion` (mean ½, fit from count-observable seed regions + boundary sides) and `rna_strand_overdispersion` (mean κ, fit from boundary-side spliced counts). Both applied symmetrically in `strand_likelihood` with the same default prior, so unstranded data is uninformative (see `docs/em_strand/05`)
+- `count_dispersion.py` — gDNA **count** overdispersion (count-side twin of `gdna_strand`): per-type NB method-of-moments `α` (contained regions vs crossing boundary sides) shrunk toward the global pooled-seed trend (α₀=1 geometric fallback). The count-prior concentration is the overdispersion-limited effective count `N_eff = N/(1+α·N)` — the honest precision that replaced the old categorical `defer_to_strand` zeroing (see `docs/calibration/count_overdispersion_integration_plan.md`)
 - `joint_deconv.py` — per-node joint count×strand deconvolution into gDNA/RNA (`strand_loglik` two-component variance); also exposes `boundary_side_seeds` for the gDNA strand fit
 - `derive.py` — `gdna_density_global` + per-node exposure (+ exposure-weighted gDNA length) from the deconvolved masses
 - `effective_length.py` — FL-marginal effective lengths (region / boundary)

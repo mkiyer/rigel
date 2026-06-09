@@ -1,8 +1,9 @@
 # Count-overdispersion integration — implementation plan (clean slate)
 
-**Status:** implementation plan + dry-run. 2026-06-09. The grounded foundation for the chosen
-clue-integration solution. Supersedes the exploration in `clue_integration_reliability_design.md`
-(which logs the vetoed count-reliability idea and the superseded strand-reliability weight).
+**Status:** Phase A + Phase B **IMPLEMENTED** (2026-06-09; Phase A bit-identical, Phase B golden
+regenerated, full suite green). Phase C (end-to-end net-flow benchmark) pending. Supersedes the
+exploration in `clue_integration_reliability_design.md` (which logs the vetoed count-reliability
+idea and the superseded strand-reliability weight).
 
 ---
 
@@ -151,7 +152,16 @@ count_evidence = N / (1.0 + alpha * N)          # overdispersion-limited effecti
    there). DESeq2 mean-trend `α(μ)=asymptDisp+extraPois/μ` is the documented fallback if α varies with
    μ; our leak-critical regime is the high-count asymptote, so start without it and add if a
    small-count scenario shows mean-dependence.
-4. **THE COLLABORATIVE ITEM — the overdispersion prior** *(open; resolve together)*.
+4. **THE COLLABORATIVE ITEM — the overdispersion prior** *(RESOLVED 2026-06-09, with the user)*.
+   **Decision:** fallback anchor **α₀ = 1** (the *geometric* NB — max-entropy at fixed mean;
+   `N_eff → 1`, so absent dispersion evidence a count is worth ~1 pseudo-observation — the count
+   analog of the Jeffreys `Beta(½,½)` floor; conservative/leak-averse). Shrink each per-type MoM
+   toward the **global pooled-seed trend** (NB-MoM over all seeds combined, DESeq2-style), with α₀
+   used **only** when that pool is degenerate (no usable seeds). Strength `count_overdispersion_prior_weight`
+   in seed-node units, default **30** (mirrors the strand fit); negligible with the abundant seeds
+   of a normal library (the distinct contained/crossing α's are preserved — that distinctness is
+   what closes the leak), a guard only in the degenerate few-seed case. *Original note below kept for
+   provenance.*
    **Key simplification (from the precedent survey):** edgeR (`prior.df`) and DESeq2 carry elaborate
    empirical-Bayes shrinkage *because they fit a dispersion per gene* (few replicates each, so each
    estimate is noisy and must borrow from a trend). **We fit a single *common* α per count-type,

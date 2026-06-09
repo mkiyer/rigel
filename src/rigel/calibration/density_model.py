@@ -23,8 +23,9 @@ The local imputation (no global sweep):
   one-side crossing flux is an unbiased density estimator), averaged over the available sides.
 * **run interiors** (consecutive non-observable regions, no observable side): the nearest anchored
   neighbour, carried inward from the run's observable edges (forward + reverse, averaged).
-* **no anchor in the whole reference**: density 0 ⇒ the count prior collapses to Jeffreys
-  Beta(½,½) and the strand clue governs (never the deflated global average).
+* **no anchor in the whole reference**: the global gDNA density (the count-weighted mean of the
+  observable regions' densities) for the MEAN, but with **no count support** ⇒ the count prior
+  collapses to Jeffreys Beta(½,½) and the strand clue governs.
 
 Counts → density via the gDNA FL effective lengths: contained ``count ÷ region_eff_len``, crossing
 ``count ÷ fl_mean``. For uniform gDNA at a given density both recover that density.
@@ -36,7 +37,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .signature import BIT_EXON_NEG, BIT_EXON_POS, TS_AMBIG, TS_NEG, TS_NONE, TS_POS
+from .signature import BIT_EXON_NEG, BIT_EXON_POS, TS_AMBIG, TS_NEG, TS_NONE
 
 _EXON_BITS = BIT_EXON_POS | BIT_EXON_NEG
 _EPS = 1.0e-9
@@ -53,11 +54,13 @@ class NodeDensity:
     #   strand-cleaned gDNA fraction of the contained mass; consumed by the joint deconv (the
     #   prior mean) AND the gDNA strand-fit seed weight. Separated from the concentration so the
     #   latter can carry the overdispersion-honest precision (see count_overdispersion plan).
-    count_evidence: (
+    count_support: (
         np.ndarray
-    )  # float64[R] — count-prior precision. density·eff_len, except 0 for single-strand
-    #   exons (defer to the strand clue). AMBIG overlaps KEEP it (strand is blind there, so
-    #   the neighbour-imputed count is the only signal).
+    )  # float64[R] — the HONEST gDNA count behind the density estimate: the contained gDNA count
+    #   ``density·region_eff_len`` for a count-observable region, else the anchoring crossing count
+    #   ``density·fl_mean`` for an imputed/carried region. ``0`` for a region with no anchor anywhere
+    #   (global-baseline density, no local evidence). ``calibrate`` turns it into the count-prior
+    #   concentration ``count_evidence = N/(1+α·N)`` once the count overdispersion α is fit.
     region_count_observable: np.ndarray  # bool[R] — count-observable region (non-exonic)
     boundary_count_observable: np.ndarray  # bool[R] — count-observable boundary right of region r
     n_region_count_observable: int
@@ -183,38 +186,40 @@ def node_gdna_density(
     n_valid = valid.sum(axis=0)
     carried = np.where(n_valid > 0, np.nansum(stack, axis=0) / np.maximum(n_valid, 1), np.nan)
     density = np.where(np.isnan(density), carried, density)
-    # No observable node anywhere in the reference ⇒ no count evidence: density 0 makes the count
-    # prior collapse to Jeffreys Beta(½,½) so the strand clue governs (never the deflated global).
-    density = np.where(np.isnan(density), 0.0, density)
 
-    # count-prior precision (concentration). The count clue DEFERS (concentration 0) only where the
-    # strand clue can take over: a non-count-observable region with a single defined transcript strand
-    # (an ordinary exon). There the crossing flux informs the density/MEAN but with model uncertainty
-    # (the within-exon enrichment gradient), so giving it concentration would over-confidence a
-    # gradient-biased mean and override the better strand likelihood. Everywhere else it keeps its
-    # concentration (= the directly-observed contained gDNA count, density·eff_len):
-    #   - count-observable regions (intron/intergenic): directly observed gDNA;
-    #   - strand-AMBIGUOUS overlaps (opposite-strand transcripts → no defined sense → the joint SKIPS
-    #     the strand likelihood): the neighbour-imputed count is the ONLY signal, so it must carry —
-    #     zeroing it would leave the genuinely-unidentifiable-by-strand region with Beta(½,½) ≈ 0.5.
-    # (Measured: defer recovers the true captured-exon fraction at usable SS without regressing
-    # zero-gDNA regions; keep recovers an antisense overlap 0.50→0.94 vs oracle 0.96.)
-    defer_to_strand = (~region_count_observable) & ((ts == TS_POS) | (ts == TS_NEG))
-    count_evidence = np.where(defer_to_strand, 0.0, density * region_eff_len)
+    # A region still unset has NO local anchor anywhere in its reference. It takes the GLOBAL gDNA
+    # density (the count-weighted mean of the count-observable regions' own densities — a sensible
+    # baseline, not 0) for its MEAN, but carries NO count evidence (count_support 0 below) so its
+    # count prior collapses to Jeffreys Beta(½,½) and the strand clue governs where present.
+    anchored = ~np.isnan(density)
+    own_count = contained_gdna[own]
+    own_len = region_eff_len[own]
+    global_density = float(np.sum(own_count) / np.sum(own_len)) if np.sum(own_len) > 0.0 else 0.0
+    density = np.where(anchored, density, global_density)
 
     # Count-prior MEAN: the strand-cleaned gDNA fraction of the contained mass,
-    # clip(density·eff_len / contained_mass). Computed once here (was re-derived in the deconv and,
-    # as count_evidence/mass, in the gDNA strand-fit seed weight) so the concentration is free to
-    # carry a different (overdispersion-honest) precision downstream.
+    # clip(density·eff_len / contained_mass). Computed here (was re-derived in the deconv and, as
+    # count_evidence/mass, in the gDNA strand-fit seed weight) so the concentration is free to carry
+    # the overdispersion-honest precision downstream.
     contained_mass = np.asarray(substrate.contained.mass_unspliced, dtype=np.float64)
     with np.errstate(divide="ignore", invalid="ignore"):
         count_gdna_frac = np.clip(
             np.where(contained_mass > 0.0, density * region_eff_len / contained_mass, 0.0), 0.0, 1.0
         )
+
+    # Count-prior SUPPORT: the honest gDNA count behind the estimate. A count-observable region uses
+    # its directly-observed contained gDNA count ``density·region_eff_len``; an imputed/carried
+    # region uses the anchoring crossing count ``density·fl_mean`` (its eff length is the gDNA-FL
+    # crossing mean). A no-anchor region carries 0 (global baseline, no local evidence). calibrate
+    # turns this into the overdispersion-limited concentration N/(1+α·N) — replacing the old
+    # categorical defer_to_strand zeroing with one principled precision.
+    eff_type = np.where(region_count_observable, region_eff_len, fl_mean)
+    count_support = np.where(anchored, density * eff_type, 0.0)
+
     return NodeDensity(
         density=density,
         count_gdna_frac=count_gdna_frac,
-        count_evidence=count_evidence,
+        count_support=count_support,
         region_count_observable=region_count_observable,
         boundary_count_observable=boundary_count_observable,
         n_region_count_observable=int(region_count_observable.sum()),

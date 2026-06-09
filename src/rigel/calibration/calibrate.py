@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .count_dispersion import fit_gdna_count_overdispersion
 from .density_model import node_gdna_density
 from .derive import derive
 from .errors import CalibrationStrandError
@@ -41,8 +42,9 @@ from .gdna_strand import (
     fit_rna_strand_from_substrate,
     overdispersion_for_beta,
 )
-from .joint_deconv import deconv_regions, deconv_sides
+from .joint_deconv import boundary_side_seeds, deconv_regions, deconv_sides
 from .result import CalibrationResult
+from .signature import TS_AMBIG
 from .strand_balance import fit_strand_balance
 from .substrate import CalibrationSubstrate
 
@@ -92,11 +94,11 @@ def calibrate(
     # Count clue: per-region gDNA density by LOCAL boundary-anchored imputation — an observable
     # region uses its own contained gDNA density; a non-observable (exon/AMBIG) region is anchored
     # from its observable boundary sides (crossing count / fl_mean). It is strand-cleaned by
-    # rna_sense_frac (κ), so the density is clean gDNA, not gDNA+nascent. The count-prior precision is
-    # the expected gDNA count count_evidence = density·eff_len (NodeDensity.count_evidence), so the
-    # count clue defers to strand where RNA dominates. The strand cleaning now lives inside
-    # node_gdna_density (the count clue's own concern), applied uniformly to the contained region and
-    # the boundary-side anchors.
+    # rna_sense_frac (κ), so the density is clean gDNA, not gDNA+nascent. node_gdna_density returns
+    # the count-prior MEAN (count_gdna_frac) and the honest gDNA SUPPORT (count_support); the
+    # concentration count_evidence = N/(1+α·N) is finalized below once the count overdispersion is
+    # fit (Coupling B). The strand cleaning lives inside node_gdna_density (the count clue's own
+    # concern), applied uniformly to the contained region and the boundary-side anchors.
     node_density = node_gdna_density(
         substrate, region_arrays, region_eff_len, fl_mean, rna_sense_frac=rna_sense_frac
     )
@@ -131,11 +133,57 @@ def calibrate(
     )
     rna_strand_overdispersion = rna_strand.rna_strand_overdispersion
 
+    # Count overdispersion: the count-side twin of the strand fit. The count-prior concentration is
+    # the *Poisson* precision (the raw gDNA count, thousands) — but counts are NB-overdispersed, so
+    # the honest precision is the overdispersion-limited effective count N/(1+α·N). α is fit per
+    # count-type (contained regions / crossing boundary sides) by NB MoM from the same gDNA seeds the
+    # density + gDNA strand fits use, shrunk toward the global pooled trend. This one principled
+    # precision replaces the old categorical defer_to_strand zeroing (single-strand exons now fade
+    # smoothly: large crossing α under capture ⇒ tiny effective count ⇒ strand governs).
+    ts = np.asarray(region_arrays.strand_class)
+    contained_seed = node_density.region_count_observable & (ts != TS_AMBIG)
+    contained_count = (node_density.density * region_eff_len)[contained_seed]
+    contained_len = region_eff_len[contained_seed]
+    _b_sense, b_total, b_weight = boundary_side_seeds(
+        substrate, region_arrays, node_density, boundary_eff_len, rna_sense_frac=rna_sense_frac
+    )
+    crossing_count = b_weight * b_total  # clean gDNA crossing count per observable boundary side
+    crossing_len = np.full(crossing_count.shape, fl_mean, dtype=np.float64)
+    count_disp = fit_gdna_count_overdispersion(
+        contained_count,
+        contained_len,
+        crossing_count,
+        crossing_len,
+        prior_alpha=config.count_overdispersion_prior,
+        prior_weight=config.count_overdispersion_prior_weight,
+    )
+    # Region concentration: observable regions carry a contained-type support (α_contained); imputed
+    # regions carry a crossing-type support (α_crossing). Boundary sides are crossing-type (handled
+    # inside deconv_sides with α_crossing).
+    region_alpha = np.where(
+        node_density.region_count_observable,
+        count_disp.alpha_contained,
+        count_disp.alpha_crossing,
+    )
+    support = np.asarray(node_density.count_support, dtype=np.float64)
+    count_evidence = support / (1.0 + region_alpha * support)
+    logger.debug(
+        "calibration: count overdispersion α_contained=%.4g (%d seeds) α_crossing=%.4g (%d seeds) "
+        "[pooled trend=%.4g%s]",
+        count_disp.alpha_contained,
+        count_disp.n_contained_seeds,
+        count_disp.alpha_crossing,
+        count_disp.n_crossing_seeds,
+        count_disp.alpha_pooled,
+        ", FALLBACK" if count_disp.fallback_used else "",
+    )
+
     # Joint per-node deconvolution: count prior × Beta-Binomial strand likelihood.
     regions = deconv_regions(
         substrate,
         region_arrays,
         node_density,
+        count_evidence,
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,
@@ -148,6 +196,7 @@ def calibrate(
         node_density,
         boundary_eff_len,
         rna_sense_frac=rna_sense_frac,
+        alpha_crossing=count_disp.alpha_crossing,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,
         gdna_strand_llr_bias=config.gdna_strand_llr_bias,
