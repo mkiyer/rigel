@@ -43,7 +43,6 @@ from .gdna_strand import (
 )
 from .joint_deconv import deconv_regions, deconv_sides
 from .result import CalibrationResult
-from .signature import TS_NEG, TS_NONE
 from .strand_balance import fit_strand_balance
 from .substrate import CalibrationSubstrate
 
@@ -90,32 +89,16 @@ def calibrate(
         )
     rna_sense_frac = float(balance.rna_sense_frac)
 
-    # Strand-deconvolved gDNA fraction of each region's contained mass, used to clean the
-    # nascent-RNA bias from the count density (gdna_density_global). Closed-form (unbiased) MLE from the oriented
-    # sense fraction: gdna_frac = (sense_frac − rna_sense_frac)/(½ − rna_sense_frac), clamped to [0, 1] — gDNA is
-    # symmetric (½), RNA skewed (rna_sense_frac), so a node at the RNA rate reads gdna_frac = 0 (no inflation),
-    # and any symmetric excess reads as gDNA. (The grid posterior MEAN would bias gdna_frac toward ½
-    # and under-clean.) Intergenic (NONE, no transcript) is pure gDNA; unstranded (rna_sense_frac = ½)
-    # cannot strand-clean, so gdna_density_global falls back to the raw count density. Exonic / AMBIG regions are
-    # not count-observable, so their fraction never enters gdna_density_global.
-    ts = np.asarray(region_arrays.strand_class)
-    c = substrate.contained
-    n_unspl = (c.n_unspliced_pos + c.n_unspliced_neg).astype(np.float64)
-    sense = np.where(ts == TS_NEG, c.n_unspliced_neg, c.n_unspliced_pos).astype(np.float64)
-    sense_frac = np.where(n_unspl > 0.0, sense / np.maximum(n_unspl, 1e-9), 0.5)
-    denom = 0.5 - rna_sense_frac
-    if abs(denom) < 1.0e-6:  # unstranded — strand cannot clean; keep the raw count density
-        gdna_frac = np.ones(region_arrays.n_regions, dtype=np.float64)
-    else:
-        gdna_frac = np.clip((sense_frac - rna_sense_frac) / denom, 0.0, 1.0)
-    gdna_frac = np.where(ts == TS_NONE, 1.0, gdna_frac)  # intergenic = pure gDNA
-
-    # Count clue: per-node gDNA density via the region↔boundary sweep, on the strand-cleaned
-    # density (gdna_density_global is now clean gDNA, not gDNA+nascent). The count-prior precision is the
-    # expected gDNA count count_evidence = density·eff_len (NodeDensity.count_evidence), so the count clue
-    # defers to strand where RNA dominates.
+    # Count clue: per-region gDNA density by LOCAL boundary-anchored imputation — an observable
+    # region uses its own contained gDNA density; a non-observable (exon/AMBIG) region is anchored
+    # from its observable boundary sides (crossing count / fl_mean). It is strand-cleaned by
+    # rna_sense_frac (κ), so the density is clean gDNA, not gDNA+nascent. The count-prior precision is
+    # the expected gDNA count count_evidence = density·eff_len (NodeDensity.count_evidence), so the
+    # count clue defers to strand where RNA dominates. The strand cleaning now lives inside
+    # node_gdna_density (the count clue's own concern), applied uniformly to the contained region and
+    # the boundary-side anchors.
     node_density = node_gdna_density(
-        substrate, region_arrays, region_eff_len, fl_mean, gdna_frac=gdna_frac
+        substrate, region_arrays, region_eff_len, fl_mean, rna_sense_frac=rna_sense_frac
     )
 
     # gDNA strand Beta-Binomial overdispersion: fitted from the count-observable seed regions

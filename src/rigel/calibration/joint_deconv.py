@@ -37,6 +37,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .density_model import strand_clean_gdna_frac
 from .signature import TS_NEG, TS_POS
 from .strand_likelihood import strand_loglik
 
@@ -227,13 +228,9 @@ def _compute_side(
     n_side = pos + neg
     antisense = n_side - sense
     with np.errstate(divide="ignore", invalid="ignore"):
-        sense_frac = np.where(n_side > 0.0, sense / np.maximum(n_side, 1e-9), 0.5)
-        if abs(0.5 - rna_sense_frac) > 1e-6:
-            clean_gdna_frac = np.clip(
-                (sense_frac - rna_sense_frac) / (0.5 - rna_sense_frac), 0.0, 1.0
-            )
-        else:
-            clean_gdna_frac = np.ones_like(mass)
+        # Same closed-form strand clean as the count clue (one shared implementation); a side with
+        # no defined sense (not strand-observable) keeps its full crossing mass (frac 1).
+        clean_gdna_frac = strand_clean_gdna_frac(sense, n_side, rna_sense_frac)
         clean_gdna_frac = np.where(strand_observable, clean_gdna_frac, 1.0)
         own = np.where(
             (mass > 0.0) & (eff > 0.0), clean_gdna_frac * mass / np.maximum(eff, 1e-12), 0.0

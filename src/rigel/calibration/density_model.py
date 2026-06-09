@@ -1,29 +1,33 @@
-"""Phase 1 — the density model ("count clue"): per-node gDNA density from OBSERVED counts.
+"""Phase 1 — the density model ("count clue"): per-region gDNA density from OBSERVED counts.
 
 Acyclic by construction: the gDNA density is read **directly** from count-observable nodes
-(where fragments are gDNA by construction) and **swept** to every other node. It never
-consults a global ``gdna_density_global * L`` product, so there is no
-density->deconv->density feedback loop.
+(where fragments are gDNA by construction) and **imputed locally** for the rest. It never consults
+a global ``gdna_density_global * L`` product, so there is no density->deconv->density feedback loop.
 
 Count-observability is a property of the region **signature** (4-bit exon/intron ± flags):
 
 * **region** is observable ⇔ it has **no exon bit** (intergenic or intron-only). Its
-  contained unspliced mass is gDNA (+ nascent RNA — an upper bias the Phase-3 strand clue
-  removes); an exonic region's contained mass is contaminated by mature RNA.
+  contained unspliced mass is gDNA (+ nascent RNA — an upper bias the strand clue removes);
+  an exonic region's contained mass is contaminated by mature RNA.
 * **boundary** is observable ⇔ **no exon bit is shared** across its two sides → no single
   exon-strand continues across it → no *unspliced mature RNA* crosses (a single-exon
   transcript spanning the seam would put unspliced mature RNA there). Its crossing
   unspliced mass is then gDNA(+nascent).
 
-Everything else — exonic regions, exon-spanning boundaries, AMBIG — carries no direct
-gDNA observation and is **imputed by the alternating region↔boundary sweep** (observable
-node → conduct across boundaries → impute → iterate). This sweep is mandatory: in an
-overlapping locus (a single-exon ``+`` transcript over a multi-exon ``−`` one) the only
-observable nodes can be the two locus-edge boundaries, and the whole interior is filled
-inward from them.
+The local imputation (no global sweep):
 
-Counts → density via the gDNA FL effective lengths: contained mass ÷ ``region_eff_len``,
-crossing mass ÷ ``fl_mean``. For uniform gDNA at a given density both recover that density.
+* **observable region** (intron/intergenic): its own contained gDNA ``count / region_eff_len``,
+  strand-cleaned.
+* **non-observable region** (exon/AMBIG): the gDNA density of each *observable boundary side*
+  (``crossing gDNA count / fl_mean`` — the accumulator deposits the molecule's true span, so the
+  one-side crossing flux is an unbiased density estimator), averaged over the available sides.
+* **run interiors** (consecutive non-observable regions, no observable side): the nearest anchored
+  neighbour, carried inward from the run's observable edges (forward + reverse, averaged).
+* **no anchor in the whole reference**: density 0 ⇒ the count prior collapses to Jeffreys
+  Beta(½,½) and the strand clue governs (never the deflated global average).
+
+Counts → density via the gDNA FL effective lengths: contained ``count ÷ region_eff_len``, crossing
+``count ÷ fl_mean``. For uniform gDNA at a given density both recover that density.
 """
 
 from __future__ import annotations
@@ -32,17 +36,15 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .signature import BIT_EXON_NEG, BIT_EXON_POS
+from .signature import BIT_EXON_NEG, BIT_EXON_POS, TS_AMBIG, TS_NEG, TS_NONE
 
 _EXON_BITS = BIT_EXON_POS | BIT_EXON_NEG
-# Unit pseudo-fragment for the boundary conduit weight (weakly-informative — a boundary with
-# little crossing traffic conducts density weakly).
-_TRAFFIC_PSEUDOCOUNT = 1.0
+_EPS = 1.0e-9
 
 
 @dataclass(frozen=True, slots=True)
 class NodeDensity:
-    """Per-region gDNA density (count clue) after the sweep."""
+    """Per-region gDNA density (count clue) after local imputation."""
 
     density: np.ndarray  # float64[R] — local gDNA density (fragments per effective bp)
     gdna_mass: np.ndarray  # float64[R] — density × region_eff_len (count-clue gDNA mass)
@@ -75,99 +77,113 @@ def count_observable_masks(
     return region_count_observable, boundary_count_observable
 
 
+def strand_clean_gdna_frac(
+    sense: np.ndarray, total: np.ndarray, rna_sense_frac: float
+) -> np.ndarray:
+    """Closed-form strand-cleaned gDNA fraction of unspliced mass (the count clue's cleaner).
+
+    A two-component linear unmix of the observed sense fraction ``s = sense/total`` between gDNA
+    (symmetric, ``s = ½``) and RNA (``s = κ``)::
+
+        gdna_frac = clip( (s − κ) / (½ − κ),  0, 1 )
+
+    Clamped to ``[0, 1]`` — a fraction cannot be negative or exceed 1, so a noise-skewed node reads
+    as 0 % gDNA (all RNA) or 100 % gDNA rather than an unphysical value. Unstranded (``κ ≈ ½``) is
+    degenerate (gDNA and RNA both symmetric) → returns ``1.0`` (cannot strand-clean; keep the raw
+    count). Empty nodes (``total = 0``) take ``s = ½``. The caller overrides ``TS_NONE`` (intergenic
+    ⇒ pure gDNA, frac 1) and ``TS_AMBIG`` (no defined sense ⇒ defer, frac 1).
+    """
+    sense = np.asarray(sense, dtype=np.float64)
+    total = np.asarray(total, dtype=np.float64)
+    sense_frac = np.where(total > 0.0, sense / np.maximum(total, _EPS), 0.5)
+    denom = 0.5 - rna_sense_frac
+    if abs(denom) < 1.0e-6:  # unstranded — strand cannot clean
+        return np.ones_like(sense_frac)
+    return np.clip((sense_frac - rna_sense_frac) / denom, 0.0, 1.0)
+
+
 def node_gdna_density(
     substrate,
     region_arrays,
     region_eff_len: np.ndarray,
     fl_mean: float,
-    gdna_frac: np.ndarray | None = None,
+    rna_sense_frac: float,
 ) -> NodeDensity:
-    """Per-region gDNA density from the count clue + the region↔boundary density sweep.
+    """Per-region gDNA density from the count clue via LOCAL boundary-anchored imputation.
 
-    ``gdna_frac`` is the per-region strand-deconvolved gDNA fraction of the contained mass
-    (Phase-2 strand clue). Supplying it cleans the nascent-RNA upper bias from the
-    count-observable nodes **before** gdna_density_global is read, so the swept density is clean gDNA, not
-    gDNA+nascent — the empirical-Bayes estimate of the global density hyperparameter. ``None``
-    ⇒ all 1.0 (the raw, pre-clean behaviour).
+    ``rna_sense_frac`` (κ) is the global RNA sense fraction; it strand-cleans the nascent-RNA upper
+    bias from every node's unspliced count before the density is read, so the density is clean gDNA.
+    See the module docstring for the estimator.
     """
     sig = np.asarray(region_arrays.signature)
     ref_id = np.asarray(region_arrays.ref_id)
-    ref_offsets = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
+    ts = np.asarray(region_arrays.strand_class)
     region_eff_len = np.asarray(region_eff_len, dtype=np.float64)
     r = sig.shape[0]
     region_count_observable, boundary_count_observable = count_observable_masks(sig, ref_id)
-    gdna_frac = np.ones(r) if gdna_frac is None else np.asarray(gdna_frac, dtype=np.float64)
 
-    # --- direct observations ---
-    # region node: strand-cleaned contained gDNA mass (observable regions only).
-    reg_mass = np.where(
-        region_count_observable, gdna_frac * substrate.contained.mass_unspliced, 0.0
-    )
-    reg_len = np.where(region_count_observable, region_eff_len, 0.0)
-    # boundary node (indexed by left region r): the unspliced crossing mass/flux at the
-    # r/r+1 seam = region r's RIGHT view + region r+1's LEFT view (the two sides).
-    same_right = np.zeros(r, dtype=bool)
+    # Strand-cleaned gDNA COUNT per node, oriented by region r's transcript strand. Intergenic
+    # (NONE, no transcript) is pure gDNA; AMBIG (both strands, no defined sense) defers — both
+    # keep the full unspliced count (frac 1), as does unstranded data (handled in the helper).
+    def clean_count(view) -> np.ndarray:
+        pos = np.asarray(view.n_unspliced_pos, dtype=np.float64)
+        neg = np.asarray(view.n_unspliced_neg, dtype=np.float64)
+        total = pos + neg
+        sense = np.where(ts == TS_NEG, neg, pos)
+        gf = strand_clean_gdna_frac(sense, total, rna_sense_frac)
+        gf = np.where((ts == TS_NONE) | (ts == TS_AMBIG), 1.0, gf)
+        return gf * total
+
+    contained_gdna = clean_count(substrate.contained)
+    left_gdna = clean_count(substrate.left)  # right side of region r's LEFT boundary
+    right_gdna = clean_count(substrate.right)  # left side of region r's RIGHT boundary
+
+    # Per-side boundary observability for region r: its LEFT side uses boundary (r−1, r); its RIGHT
+    # side uses boundary (r, r+1). boundary_count_observable[k] describes boundary (k, k+1).
+    left_anchor = np.zeros(r, dtype=bool)
+    right_anchor = np.zeros(r, dtype=bool)
     if r > 1:
-        same_right[:-1] = ref_id[:-1] == ref_id[1:]
-    cross_mass = np.zeros(r, dtype=np.float64)
-    cross_flux = np.zeros(r, dtype=np.float64)
-    if r > 1:
-        cross_mass[:-1] = substrate.right.mass_unspliced[:-1] + substrate.left.mass_unspliced[1:]
-        cross_flux[:-1] = substrate.right.n_unspliced[:-1].astype(
-            np.float64
-        ) + substrate.left.n_unspliced[1:].astype(np.float64)
-    cross_mass = np.where(same_right, cross_mass, 0.0)
-    cross_flux = np.where(same_right, cross_flux, 0.0)
-    bnd_mass = np.where(
-        boundary_count_observable, cross_mass, 0.0
-    )  # gDNA crossing mass (observable boundaries)
-    bnd_len = np.where(boundary_count_observable, fl_mean, 0.0)
-    # conduit reliability: a boundary with more crossing traffic propagates density better.
-    weight = np.where(same_right, cross_flux / (cross_flux + _TRAFFIC_PSEUDOCOUNT), 0.0)
+        left_anchor[1:] = boundary_count_observable[:-1] & (ref_id[1:] == ref_id[:-1])
+        right_anchor[:-1] = boundary_count_observable[:-1] & (ref_id[:-1] == ref_id[1:])
 
-    # --- alternating region↔boundary density sweep (per reference) ---
-    # Two parallel tracks per node: gDNA mass and effective length.
-    from_left_mass = np.zeros(r)
-    from_left_len = np.zeros(r)
-    from_right_mass = np.zeros(r)
-    from_right_len = np.zeros(r)
-    for f in range(ref_offsets.shape[0] - 1):
-        s, e = int(ref_offsets[f]), int(ref_offsets[f + 1])
-        if e <= s:
-            continue
-        run_mass = run_len = 0.0  # forward: left-side evidence, decayed per boundary
-        for i in range(s, e):
-            if i > s:
-                w = weight[i - 1]
-                run_mass = w * (run_mass + bnd_mass[i - 1])
-                run_len = w * (run_len + bnd_len[i - 1])
-            from_left_mass[i] = run_mass
-            from_left_len[i] = run_len
-            run_mass += reg_mass[i]
-            run_len += reg_len[i]
-        run_mass = run_len = 0.0  # reverse
-        for i in range(e - 1, s - 1, -1):
-            if i < e - 1:
-                w = weight[i]
-                run_mass = w * (run_mass + bnd_mass[i])
-                run_len = w * (run_len + bnd_len[i])
-            from_right_mass[i] = run_mass
-            from_right_len[i] = run_len
-            run_mass += reg_mass[i]
-            run_len += reg_len[i]
+    density = np.full(r, np.nan, dtype=np.float64)
+    # Observable region with a usable contained length → its own contained density.
+    own = region_count_observable & (region_eff_len > _EPS)
+    density[own] = contained_gdna[own] / region_eff_len[own]
+    # Everything else: anchor from the available observable boundary sides (crossing count / fl_mean).
+    inv_fl = 1.0 / fl_mean if fl_mean > 0.0 else 0.0
+    for i in np.where(~own)[0]:
+        est = []
+        if left_anchor[i]:
+            est.append(left_gdna[i] * inv_fl)
+        if right_anchor[i]:
+            est.append(right_gdna[i] * inv_fl)
+        if est:
+            density[i] = float(np.mean(est))
 
-    # density = own + swept-neighbour evidence: swept gDNA mass / swept effective length.
-    swept_mass = reg_mass + from_left_mass + from_right_mass
-    swept_len = reg_len + from_left_len + from_right_len
-    # global fallback for nodes the sweep never reached (no count-observable evidence in the ref).
-    total_len = float(reg_len.sum() + bnd_len.sum())
-    seed_density = float(reg_mass.sum() + bnd_mass.sum()) / total_len if total_len > 0.0 else 0.0
-    density = np.where(swept_len > 0.0, swept_mass / np.maximum(swept_len, 1e-12), seed_density)
+    # Run-fill: a region still unset (a run interior with no observable side) inherits the nearest
+    # anchored neighbour, carried inward from both directions within its reference and averaged.
+    fwd = density.copy()
+    for i in range(1, r):
+        if np.isnan(fwd[i]) and ref_id[i] == ref_id[i - 1]:
+            fwd[i] = fwd[i - 1]
+    rev = density.copy()
+    for i in range(r - 2, -1, -1):
+        if np.isnan(rev[i]) and ref_id[i] == ref_id[i + 1]:
+            rev[i] = rev[i + 1]
+    stack = np.vstack([fwd, rev])
+    valid = ~np.isnan(stack)
+    n_valid = valid.sum(axis=0)
+    carried = np.where(n_valid > 0, np.nansum(stack, axis=0) / np.maximum(n_valid, 1), np.nan)
+    density = np.where(np.isnan(density), carried, density)
+    # No observable node anywhere in the reference ⇒ no count evidence: density 0 makes the count
+    # prior collapse to Jeffreys Beta(½,½) so the strand clue governs (never the deflated global).
+    density = np.where(np.isnan(density), 0.0, density)
+
     gdna_mass = density * region_eff_len
-    # count-prior precision = the expected gDNA count (density·eff_len, which equals gdna_mass):
-    # the count clue is only as confident as the number of gDNA events it expects to see, so it
-    # defers to the strand clue where RNA dominates (imputed-low density => small expected count =>
-    # weak prior, Jeffreys floor in joint_deconv). At RNA-rich exons it is small and strand governs.
+    # count-prior precision = the expected gDNA count (density·eff_len): the count clue is only as
+    # confident as the gDNA events it expects, so it defers to strand where RNA dominates (imputed-low
+    # density ⇒ small expected count ⇒ weak prior, Jeffreys-floored in joint_deconv).
     count_evidence = gdna_mass
     return NodeDensity(
         density=density,
@@ -180,4 +196,9 @@ def node_gdna_density(
     )
 
 
-__all__ = ["NodeDensity", "count_observable_masks", "node_gdna_density"]
+__all__ = [
+    "NodeDensity",
+    "count_observable_masks",
+    "strand_clean_gdna_frac",
+    "node_gdna_density",
+]
