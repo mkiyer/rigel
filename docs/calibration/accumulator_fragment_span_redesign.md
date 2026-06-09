@@ -240,8 +240,15 @@ unmasks the honest imperfect-SS false-gDNA floor at ss=0.65 (`test_nrna_double_c
 ~5.8%) — previously hidden by implicit splices being mis-counted as unspliced-RNA signal; weak-SS
 tolerance widened with rationale. Golden regenerated (22 scenarios); 1008 passed.
 
-**Phase D — Artifact hold-out.**
-- Guard `SPLICE_ARTIFACT` out of the deposit + FL pool. Golden regenerate, suite green.
+**Phase D — Artifact hold-out.** ✅ **SHIPPED main@2c0b411.** One guard in `deposit_to_accumulator`:
+`SPLICE_ARTIFACT` → return (no deposit, no FL pool). Verified by a crafted-BAM test (blacklist an
+annotated junction → 50 reads become artifacts → total deposited mass drops to exactly the 20
+non-artifact controls; `test_artifact_splice_held_out_and_mass_conserved`). No golden churn (oracle
+scenarios carry no blacklist). Suite: 1009 passed, 0 skipped.
+
+**✅ ACCUMULATOR SPAN REDESIGN COMPLETE (Phases A–D).** The deposit now reflects the molecule's true
+contiguous genomic span(s) for every fragment class; the paired-end over-count is gone at the source
+(no calibration correction factor). Next: density Phase 1 in `density_sweep_implementation_plan.md`.
 
 **Then:** Phase 1 of `density_sweep_implementation_plan.md` (density estimator) — now unbiased, no
 correction factor.
