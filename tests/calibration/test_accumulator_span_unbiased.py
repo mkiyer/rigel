@@ -78,12 +78,55 @@ def test_crossing_density_unbiased(tmp_path):
     assert 0.9 <= ratio <= 1.1, f"crossing/contained density ratio = {ratio:.3f} (expected ≈1.0)"
 
 
-@pytest.mark.skip(reason="Phase C: implicit-splice channel routing not yet implemented")
-def test_implicit_splice_routes_to_spliced_channel():
-    """An implicitly-spliced fragment (intron in the mate gap, no CIGAR-N) must
-    deposit on the SPLICED channels (ch2/3), not unspliced (ch0/1). Today it is
-    mis-channeled as unspliced — a bug fixed in Phase C."""
-    raise NotImplementedError
+def test_implicit_splice_routes_to_spliced_channel(tmp_path):
+    """An implicitly-spliced fragment (annotated intron inside the mate gap, no
+    CIGAR-N) must deposit on the SPLICED channels (ch2/3) and CUT the intron —
+    not fill across it on the unspliced channels. Pre-Phase-C it was mis-channeled
+    as unspliced and filled [min,max], depositing unspliced mass through the intron.
+    """
+    import numpy as np
+
+    from rigel.calibration.region_arrays import RegionArrays
+    from rigel.calibration.signature import coarse_type_array
+    from rigel.sim import Scenario
+    from rigel.sim.reads import ReadSimConfig
+
+    sc = Scenario("implicit_chan", genome_length=6000, seed=7, work_dir=str(tmp_path / "sim"))
+    # Short intron (50 bp ≪ insert) → fragments spanning both exons place the
+    # junction in the unsequenced mate gap = implicit splice (no CIGAR-N).
+    sc.add_gene("g1", "+", [{"t_id": "t1", "exons": [(1000, 1150), (1200, 1500)], "abundance": 80}])
+    res = sc.build_oracle(
+        n_fragments=40000,
+        sim_config=ReadSimConfig(
+            frag_mean=250, frag_std=40, frag_min=180, frag_max=400,
+            read_length=100, strand_specificity=1.0, seed=7,
+        ),
+    )
+    _s, sm, _fl, _b, pl = scan_and_buffer(
+        str(res.bam_path), res.index, BamScanConfig(sj_strand_tag="auto")
+    )
+    sm.finalize()
+    ra = RegionArrays.from_region_df(res.index.region_df, res.index.ref_name_to_id)
+    sub = CalibrationSubstrate.from_payload(pl, ra)
+    ctype = coarse_type_array(np.asarray(ra.signature))
+    rid = np.asarray(ra.ref_id)
+    gene = rid == res.index.ref_name_to_id["implicit_chan"]
+
+    # (1) Implicit splices route to the SPLICED channel: the exon-flanking
+    #     boundaries carry spliced crossing flux.
+    spliced_flux = int((sub.left.n_spliced[gene] + sub.right.n_spliced[gene]).sum())
+    assert spliced_flux > 1000, f"expected substantial spliced crossing flux, got {spliced_flux}"
+
+    # (2) The intron is CUT, not filled: the intron region carries NO unspliced
+    #     mass (contained or crossing) — the implicit molecules skip it.
+    intron = gene & (ctype == 1)
+    assert intron.any()
+    intron_unspliced = float(
+        sub.contained.n_unspliced[intron].sum()
+        + sub.left.n_unspliced[intron].sum()
+        + sub.right.n_unspliced[intron].sum()
+    )
+    assert intron_unspliced == 0.0, f"intron carries unspliced mass {intron_unspliced} (not cut)"
 
 
 @pytest.mark.skip(reason="Phase D: artifact-splice hold-out not yet implemented")

@@ -204,6 +204,13 @@ struct RawResolveResult {
     // _resolve_core so the resolver can promote SPLICE_UNSPLICED
     // to SPLICE_ARTIFACT.
     int32_t n_sj_blacklisted = 0;
+
+    // Implicit-splice introns: annotated introns found wholly inside a
+    // paired-end mate gap (SPLICE_IMPLICIT). One per matched gap, carrying the
+    // matched transcript's strand. The accumulator cuts these out of the
+    // fragment span and orients the spliced channel by their strand (the splice
+    // motif itself was not sequenced). Empty unless splice_type == SPLICE_IMPLICIT.
+    std::vector<IntronBlock> implicit_introns;
 };
 
 // ================================================================

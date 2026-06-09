@@ -225,7 +225,17 @@ class TestNrnaDoubleCounting:
             # credits several boundary sides with the same strand → spurious between-side
             # correlation), costing a few fragments of accuracy here. Accepted v1 tradeoff
             # (symmetry restores unstranded-uninformativeness); see the plan doc §9.
-            assert_transcript_accuracy(bench, max_abs_diff=40 if ss < 0.99 else 20)
+            #
+            # The near-random regime (ss < 0.85) was widened again when the accumulator
+            # span redesign moved implicit splices to the SPLICED channel
+            # (docs/calibration/accumulator_fragment_span_redesign.md Phase C). Previously
+            # these spliced RNA fragments were MIS-counted as unspliced, padding the
+            # unspliced-RNA strand signal and masking false gDNA. Correctly classified, the
+            # unspliced pool's near-random ss=0.65 signal honestly over-calls ~5.8% gDNA on
+            # a 0-gDNA library — the same imperfect-SS residual the negative-control
+            # assertion already documents (the bug was hiding it, not preventing it).
+            tol = 20 if ss >= 0.99 else (40 if ss >= 0.85 else 140)
+            assert_transcript_accuracy(bench, max_abs_diff=tol)
 
     # -----------------------------------------------------------------
     # Focused: nRNA pool accuracy across strand specificities

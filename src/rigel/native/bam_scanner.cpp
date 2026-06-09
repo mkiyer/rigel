@@ -1415,44 +1415,58 @@ private:
 
         // Fractional-accumulator deposit for a unique-mapper, non-chimeric
         // fragment — resolved OR intergenic. The accumulator maps the
-        // fragment's blocks onto the genome-wide region partition, so an
-        // intergenic fragment lands in its intergenic region's contained mass
-        // (previously these were telemetry-only; see docs/calibration/
-        // density_sweep_implementation_plan.md Phase 0). Orientation: unspliced
-        // emits the genome strand ('+' = primary); spliced is oriented to
-        // motif-relative SENSE (align_strand == sj_strand), valid even inside
+        // fragment's contiguous genomic span(s) onto the genome-wide region
+        // partition, so an intergenic fragment lands in its intergenic region's
+        // contained mass (previously these were telemetry-only; see
+        // docs/calibration/density_sweep_implementation_plan.md Phase 0).
+        //
+        // Splice class drives BOTH the channel and the spans (see
+        // docs/calibration/accumulator_fragment_span_redesign.md):
+        //   - unspliced  → unspliced channel; one [min,max] span (mate gap filled);
+        //   - explicit   → spliced channel; cut at the CIGAR-N introns (frag.introns);
+        //   - implicit   → spliced channel; cut at the implied introns (in the
+        //                  mate gap) and orient by their transcript strand, since
+        //                  the splice motif itself was not sequenced.
+        // Orientation primary bit: unspliced → genome '+'; spliced → SENSE
+        // (read agrees with the motif/transcript strand), valid even inside
         // strand-ambiguous regions (docs/acc_caljointmodel §4 D2/D7).
         const auto deposit_to_accumulator =
-            [&ws](const AssembledFragment& f, int32_t align_strand,
-                  int32_t sj_strand) {
+            [&ws](const AssembledFragment& f, const RawResolveResult& cr) {
                 if (!ws.acc_set || f.exons.empty()) return;
-                const bool spliced = f.has_introns();
-                const bool align_ok = (align_strand == STRAND_POS ||
-                                       align_strand == STRAND_NEG);
-                const bool motif_ok = (sj_strand == STRAND_POS ||
-                                       sj_strand == STRAND_NEG);
+                const int32_t st = cr.splice_type;
+                const bool implicit = (st == SPLICE_IMPLICIT);
+                const bool spliced = (st == SPLICE_SPLICED_ANNOT ||
+                                      st == SPLICE_SPLICED_UNANNOT || implicit);
+                // The motif strand orients the spliced channel: the sequenced
+                // splice motif for explicit splices, the implied introns'
+                // transcript strand for implicit ones.
+                int32_t motif_strand = cr.sj_strand;
+                if (implicit) {
+                    motif_strand = STRAND_NONE;
+                    for (const auto& isj : cr.implicit_introns)
+                        motif_strand |= isj.strand;
+                }
+                const bool align_ok = (cr.align_strand == STRAND_POS ||
+                                       cr.align_strand == STRAND_NEG);
+                const bool motif_ok = (motif_strand == STRAND_POS ||
+                                       motif_strand == STRAND_NEG);
                 // Unspliced needs a defined genome strand; spliced also needs a
-                // defined splice-motif strand to orient sense.
+                // defined motif/transcript strand to orient sense.
                 if (!align_ok || (spliced && !motif_ok)) return;
                 const int32_t ref_id = f.exons.front().ref_id;
                 if (ref_id < 0 ||
                     static_cast<std::size_t>(ref_id) >= ws.acc_set->n_refs())
                     return;
-                // Deposit the MOLECULE's contiguous genomic span(s), not the
-                // sequenced read blocks: fill the unsequenced mate gap, cut only
-                // true introns. For an unspliced fragment (no CIGAR-N introns)
-                // this collapses to one [min,max] span, which removes the
-                // paired-end boundary-flux over-count at its source
-                // (docs/calibration/accumulator_fragment_span_redesign.md).
-                // NOTE: implicit-splice cuts + channel and the artifact hold-out
-                // arrive in Phases C/D; here cut_introns = explicit CIGAR-N only.
-                fragment_genomic_spans(f.exons, f.introns,
+                // Cut introns: explicit CIGAR-N for explicit splices, the implied
+                // introns for implicit ones; none otherwise (these are mutually
+                // exclusive — implicit is only detected when no CIGAR-N exists).
+                const std::vector<IntronBlock>& cut_introns =
+                    implicit ? cr.implicit_introns : f.introns;
+                fragment_genomic_spans(f.exons, cut_introns,
                                        ws.span_ref, ws.span_start, ws.span_end);
                 if (ws.span_start.empty()) return;
-                // primary channel bit: unspliced → genome '+';
-                // spliced → SENSE (read agrees with splice motif).
-                const bool primary = spliced ? (align_strand == sj_strand)
-                                             : (align_strand == STRAND_POS);
+                const bool primary = spliced ? (cr.align_strand == motif_strand)
+                                             : (cr.align_strand == STRAND_POS);
                 // Non-chimeric ⇒ all spans share `ref_id` (chimeras are held out
                 // before the deposit), so a single per-ref deposit is correct.
                 ws.acc_set->at(ref_id).deposit(ws.span_start.data(),
@@ -1613,8 +1627,9 @@ private:
                     // mass into the calibration accumulator. Without this, an
                     // intergenic region's contained mass is identically zero
                     // and the count-clue density loses its baseline signal.
-                    deposit_to_accumulator(frag, ig_result.align_strand,
-                                           ig_result.sj_strand);
+                    // (Intergenic ⇒ no candidate transcripts ⇒ no implicit
+                    // introns; cr drives the channel/spans uniformly.)
+                    deposit_to_accumulator(frag, cr);
                 }
 
                 continue;
@@ -1695,8 +1710,7 @@ private:
 
                 // Fractional accumulator deposit (resolved unique-mapper,
                 // non-chimeric). See deposit_to_accumulator above.
-                deposit_to_accumulator(frag, result.align_strand,
-                                       result.sj_strand);
+                deposit_to_accumulator(frag, cr);
             }
 
             // Region accumulation for resolved (non-chimeric) fragments.

@@ -746,9 +746,11 @@ public:
 
     /// Test whether transcript ``t`` has any annotated intron whose
     /// genomic interval is wholly contained in the PE gap
-    /// ``[gap_start, gap_end)`` modulo one-sided slack ``K`` bp.
+    /// ``[gap_start, gap_end)`` modulo one-sided slack ``K`` bp. On a match,
+    /// optionally emit the matched intron interval via ``out_start``/``out_end``.
     inline bool transcript_has_implicit_intron_in_gap(
-        int32_t t, int32_t gap_start, int32_t gap_end, int32_t K) const
+        int32_t t, int32_t gap_start, int32_t gap_end, int32_t K,
+        int32_t* out_start = nullptr, int32_t* out_end = nullptr) const
     {
         if (t < 0 || t + 1 >= static_cast<int32_t>(exon_offsets_.size())) return false;
 
@@ -777,19 +779,30 @@ public:
             if (is >= gap_end) break;        // no positive overlap with later introns
             const int32_t ie = intron_ends[i];
             if (static_cast<int64_t>(ie) > max_end) break;
-            if (ie > is) return true;        // all containment/overlap tests hold
+            if (ie > is) {                   // all containment/overlap tests hold
+                if (out_start) *out_start = is;
+                if (out_end) *out_end = ie;
+                return true;
+            }
         }
         return false;
     }
 
-    /// Decide whether a multi-block fragment exhibits an implicit splice gap:
-    /// any candidate transcript has an annotated intron wholly contained
-    /// in some PE gap (with one-sided K slack on each boundary).
-    bool has_implicit_splice_gap(
+    /// Collect the implicit-splice introns of a multi-block fragment: for each
+    /// PE gap, the annotated intron (wholly contained in the gap, K-slack) of
+    /// the first matching candidate transcript, tagged with that transcript's
+    /// strand. Empty ⇒ no implicit splice. Mirrors the former
+    /// ``has_implicit_splice_gap`` (non-empty ⇔ the old ``true``) but records
+    /// the matched introns so the accumulator can cut them out of the span and
+    /// orient the spliced channel (the splice motif itself was not sequenced).
+    /// Introns are emitted in genomic (gap) order, so the output is sorted.
+    bool collect_implicit_splice_introns(
         const std::vector<ExonBlock>& exons,
         const std::vector<int32_t>& candidate_t,
-        ResolverScratch& scratch) const
+        ResolverScratch& scratch,
+        std::vector<IntronBlock>& out_introns) const
     {
+        out_introns.clear();
         if (exons.size() < 2 || candidate_t.empty() || !has_exon_index()) {
             return false;
         }
@@ -830,14 +843,20 @@ public:
         if (gaps.empty()) return false;
 
         const int32_t K = splicing_anchor_tolerance_;
-        for (int32_t t : candidate_t) {
-            for (const GapBlock& gap : gaps) {
-                if (transcript_has_implicit_intron_in_gap(t, gap.start, gap.end, K)) {
-                    return true;
+        for (const GapBlock& gap : gaps) {
+            for (int32_t t : candidate_t) {
+                int32_t is = 0, ie = 0;
+                if (transcript_has_implicit_intron_in_gap(t, gap.start, gap.end, K, &is, &ie)) {
+                    const int32_t strand =
+                        (t >= 0 && t < static_cast<int32_t>(t_strand_arr_.size()))
+                            ? t_strand_arr_[t]
+                            : STRAND_NONE;
+                    out_introns.push_back({gap.ref_id, is, ie, strand});
+                    break;  // one intron per gap (the gap tightly bounds it)
                 }
             }
         }
-        return false;
+        return !out_introns.empty();
     }
 
     /// Map a genomic position to transcript-space offset for FL computation.
@@ -1344,7 +1363,8 @@ public:
         // overlaps the gap; that is true-gDNA, not implicit splicing.
         if (cr.splice_type == SPLICE_UNSPLICED &&
             cr.chimera_type == CHIMERA_NONE &&
-            has_implicit_splice_gap(exons, cr.t_inds, scratch)) {
+            collect_implicit_splice_introns(exons, cr.t_inds, scratch,
+                                            cr.implicit_introns)) {
             cr.splice_type = SPLICE_IMPLICIT;
         }
 
