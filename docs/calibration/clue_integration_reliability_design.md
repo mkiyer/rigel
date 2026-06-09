@@ -172,10 +172,13 @@ strand_trust(region) = strand_observable(region) × strand_reliability(library) 
 count_evidence(region) = density·eff_len × (count_observable ? 1 : (1 − strand_trust))
 ```
 
-- `strand_reliability(library)` — a continuous [0,1] measure of how identifiable the strand model is
-  (κ's distance from ½ and/or the existing identifiability margin). Start: `|2κ−1|`; refine from the
-  strand model's own confidence statistics (the pipeline already computes an identifiability margin).
-  **Not a tunable constant** — a deterministic function of the fitted strand posterior.
+- `strand_reliability(library)` — the strand estimate's **precision** (inverse variance). The strand
+  estimate is `ĝ = (s − κ)/(½ − κ)`, so `Var(ĝ) = Var(s)/(½−κ)²` and **precision ∝ n_eff · (2κ−1)²**
+  — the **squared** strand contrast (the per-fragment Fisher information of a strand label about g is
+  `(½−κ)²`). This is the inverse-variance / BLUE weight, **not a heuristic constant**, and it is what
+  the Beta-Binomial likelihood's curvature already encodes. **Use `(2κ−1)²` (squared), not linear
+  `|2κ−1|`** (an earlier error). The current workable form: `strand_trust = strand_observable ·
+  (2κ−1)²` (optionally × an n_eff / identifiability factor).
 - `strand_observable(region)` — already computed; 0 for AMBIG (no defined sense), so AMBIG → trust 0
   → count carries, with **no special-case branch** (it subsumes the prior AMBIG fix).
 - count-observable regions (intron/intergenic) keep full concentration (direct gДНК observation).
@@ -201,7 +204,55 @@ AMBIG + capture — neither clue is trustworthy. This is the genuinely-unidentif
 **Path-3 DNA-fraction** de-bias (a same-position ratio robust to the local probe gradient — exactly
 the "probe in centre" case) is the deferred enhancement that could lift the multi-exon part of it.
 
-**Open detail:** the exact `strand_reliability(library)` form — `|2κ−1|` vs an identifiability-margin
-based measure (accounting for n_spliced_obs). Decide from the stress scenario across the SS spectrum;
-must be monotone, ∈[0,1], and free of tunable constants.
+**Open detail:** whether to fold an `n_eff`/identifiability factor into `strand_trust` alongside
+`(2κ−1)²`. Decide from the stress scenario across the SS spectrum.
+
+---
+
+## 9. Going deeper — WHY the count is mis-specified (live thinking; NOT done)
+
+**Status:** the `(2κ−1)²` strand-reliability weight (§8) is the best *workable* solution now. But it
+patches a symptom. The deeper diagnosis: the count prior's **precision is wrong**, in two distinct
+ways.
+
+**Beta vs NB (orientation).** NB models a **count** (magnitude); Beta models a **proportion**. The
+deconv unknown is the gДНК *fraction* `g ∈ [0,1]` → Beta. They are one story: if gДНК ~ Gamma(α₁) and
+RNA ~ Gamma(α₂), the **total** is Gamma(α₁+α₂) (NB-like magnitude) and the **proportion** `g` is
+`Beta(α₁,α₂)`, independent of the total. The overdispersion analogy is exact: *Beta-Binomial :
+Binomial :: NB : Poisson*. So our **strand** likelihood (Beta-Binomial) already models strand
+overdispersion; the **count** prior (plain Beta with concentration = raw count) does not.
+
+**Defect A — statistical over-confidence (Poisson vs NB).** `count_concentration = density·eff_len`
+= the raw expected gДНК count. That is the *Poisson* precision (precision = count). RNA-seq counts are
+**NB-overdispersed**: e.g. 1234 counts carries a ~99% CI of ~823–2543, not ±105. So the count's
+precision is over-stated by ~an order of magnitude. Meanwhile the strand precision IS correctly
+overdispersion-limited (Beta-Binomial caps effective N at ~1/φ_strand). **This asymmetry — strand
+overdispersion modeled, count overdispersion not — is why the count over-powers the strand**, and is
+the real thing the §8 weight is compensating for.
+- **Principled fix:** model the gДНК **count overdispersion** `φ_count` (fit symmetrically with the
+  strand fit, from the count-observable regions), and set the Beta concentration to the
+  overdispersion-limited effective N `N/(1+φ_count·N)` (→ ~1/φ_count for large N), not the raw N.
+  This restores count↔strand symmetry → the joint model's precision-weighting becomes correct →
+  much less leak, and likely shrinks or removes the §8 heuristic. (This is the count-side twin of the
+  existing strand Beta-Binomial.)
+
+**Defect B — systematic local bias (the capture gradient).** Even with an honest precision, the count
+*mean* for an imputed exon is biased under capture (boundary crossing under-samples the enriched
+interior; probe-placement-dependent, §veto). Crucially, `φ_count` fit from observable regions
+(introns/intergenic, *uniformly* depleted under capture) does **not** see this — the gradient is the
+error of imputing depleted→enriched, invisible to the observable-region variance. So overdispersion
+modeling **bounds** B's harm (low precision ⇒ a biased mean pulls less) but does **not remove** it.
+- **Only fix for B:** the **DNA-fraction (path 3)** — a same-position ratio that cancels the local
+  probe coverage → an *unbiased* count mean. With B removed and A fixed, the joint model is fully
+  coherent (correct precisions, no patch, no κ-circularity).
+
+**Synthesis / roadmap (current thinking):**
+1. **Now (workable):** §8 strand-reliability weight with `(2κ−1)²`.
+2. **Principled, defect A:** model count overdispersion → honest count precision; re-measure whether
+   the §8 weight is still needed. *This is the next thing to investigate — it may be the real answer.*
+3. **Principled, defect B:** DNA-fraction (path 3) → unbiased count mean → joint model coherent.
+
+Open question to resolve by experiment: with count overdispersion modeled (defect A fixed), does the
+joint model self-weight correctly enough that the §8 strand-reliability heuristic becomes unnecessary
+(at least off-capture)? Measure φ_count on the benchmark + stress scenarios and re-run the deconv.
 
