@@ -16,6 +16,7 @@ _cgranges_impl: Interval overlap queries (vendored cgranges)
 from ._bam_impl import BamScanner
 from ._bam_impl import BamAnnotationWriter
 from ._bam_impl import detect_sj_strand_tag
+from ._bam_impl import fragment_genomic_spans
 
 # -- Fractional accumulator -------------------------------------------------
 from ._accumulator import Accumulator
@@ -54,6 +55,7 @@ __all__ = [
     "BamScanner",
     "BamAnnotationWriter",
     "detect_sj_strand_tag",
+    "fragment_genomic_spans",
     # Fractional accumulator
     "Accumulator",
     "ACCUMULATOR_N_CHANNELS",

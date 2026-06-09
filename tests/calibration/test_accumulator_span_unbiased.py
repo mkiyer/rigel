@@ -59,10 +59,6 @@ def _crossing_vs_contained_ratio(bam_path, index) -> float:
     return rho_crossing / rho_contained
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="accumulator span fix (Phase B): paired-end mate-gap over-counts boundary flux ~1.2-1.56x",
-)
 def test_crossing_density_unbiased(tmp_path):
     from rigel.sim import Scenario
     from rigel.sim.reads import GDNAConfig, ReadSimConfig

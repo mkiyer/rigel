@@ -99,13 +99,10 @@ def test_unspliced_is_single_extent():
     assert fragment_genomic_spans(blocks, []) == [(0, 100, 1000)]
 
 
-@pytest.mark.skip(reason="Phase B: native fragment_genomic_spans not yet bound")
 def test_native_parity():
-    """Native C++ must match the reference byte-for-byte on every spec case.
-
-    Un-skip when Phase B binds ``rigel.native.fragment_genomic_spans``.
-    """
-    from rigel.native import fragment_genomic_spans as native_spans  # type: ignore
+    """Native C++ must match the reference byte-for-byte on every spec case."""
+    from rigel.native import fragment_genomic_spans as native_spans
 
     for _id, blocks, cuts, _expected in CASES:
-        assert list(native_spans(blocks, cuts)) == fragment_genomic_spans(blocks, cuts)
+        native = [tuple(s) for s in native_spans(blocks, cuts)]
+        assert native == fragment_genomic_spans(blocks, cuts), _id

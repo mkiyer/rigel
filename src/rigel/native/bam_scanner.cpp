@@ -370,6 +370,14 @@ struct WorkerState {
     // region partition was provided.
     std::unique_ptr<rigel::accumulator::AccumulatorSet> acc_set;
 
+    // Reusable scratch for fragment_genomic_spans → deposit (the accumulator
+    // span redesign). Cleared and refilled per fragment; capacity amortizes to
+    // the high-water block count, so the deposit path allocates no per-fragment
+    // memory. Bounded by the fragment's block count (#spans <= #blocks).
+    std::vector<int32_t> span_ref;
+    std::vector<int64_t> span_start;
+    std::vector<int64_t> span_end;
+
     WorkerState(int32_t n_transcripts, int64_t /*n_regions*/)
         : scratch(n_transcripts) {}
 };
@@ -704,6 +712,67 @@ static AssembledFragment build_fragment(
     frag.introns = std::move(sorted_introns);
     frag.nm = nm_total;
     return frag;
+}
+
+// ================================================================
+// fragment_genomic_spans — the molecule's contiguous genomic extent
+// ================================================================
+//
+// Decompose a fragment's aligned blocks into the contiguous genomic span(s) the
+// MOLECULE occupies: per reference, the full extent [min block start, max block
+// end] MINUS the cut introns it splices out. This deposits the molecule (insert
+// gap filled) rather than the sequenced read blocks, removing the paired-end
+// over-count at its source. See docs/calibration/accumulator_fragment_span_redesign.md.
+//
+// Requires `blocks` sorted by (ref_id, start) — build_fragment guarantees this —
+// and `cut_introns` sorted by start within each reference (std::set order). The
+// number of spans is at most blocks.size(). Outputs are cleared then filled, so
+// the caller's vectors are reused across fragments with no per-fragment alloc.
+// A different ref_id always starts a new span, so no span bridges references.
+static void fragment_genomic_spans(
+    const std::vector<ExonBlock>& blocks,
+    const std::vector<IntronBlock>& cut_introns,
+    std::vector<int32_t>& out_ref,
+    std::vector<int64_t>& out_start,
+    std::vector<int64_t>& out_end)
+{
+    out_ref.clear();
+    out_start.clear();
+    out_end.clear();
+    const std::size_t n = blocks.size();
+    std::size_t bi = 0;
+    while (bi < n) {
+        const int32_t ref = blocks[bi].ref_id;
+        int64_t lo = blocks[bi].start;
+        int64_t hi = blocks[bi].end;
+        std::size_t bj = bi;
+        for (; bj < n && blocks[bj].ref_id == ref; ++bj) {
+            lo = std::min<int64_t>(lo, blocks[bj].start);
+            hi = std::max<int64_t>(hi, blocks[bj].end);
+        }
+        if (hi > lo) {
+            // Subtract the cut introns overlapping [lo, hi) on this reference.
+            int64_t pos = lo;
+            for (const auto& c : cut_introns) {
+                if (c.ref_id != ref) continue;
+                const int64_t c0 = std::max<int64_t>(c.start, lo);
+                const int64_t c1 = std::min<int64_t>(c.end, hi);
+                if (c1 <= c0) continue;  // no overlap with the extent
+                if (c0 > pos) {
+                    out_ref.push_back(ref);
+                    out_start.push_back(pos);
+                    out_end.push_back(c0);
+                }
+                pos = std::max(pos, c1);
+            }
+            if (pos < hi) {
+                out_ref.push_back(ref);
+                out_start.push_back(pos);
+                out_end.push_back(hi);
+            }
+        }
+        bi = bj;
+    }
 }
 
 // ================================================================
@@ -1369,18 +1438,26 @@ private:
                 if (ref_id < 0 ||
                     static_cast<std::size_t>(ref_id) >= ws.acc_set->n_refs())
                     return;
-                // Promote int32 exon coords → int64 for the deposit ABI.
-                const std::size_t n_blk = f.exons.size();
-                std::vector<int64_t> bs(n_blk), be(n_blk);
-                for (std::size_t k = 0; k < n_blk; ++k) {
-                    bs[k] = static_cast<int64_t>(f.exons[k].start);
-                    be[k] = static_cast<int64_t>(f.exons[k].end);
-                }
+                // Deposit the MOLECULE's contiguous genomic span(s), not the
+                // sequenced read blocks: fill the unsequenced mate gap, cut only
+                // true introns. For an unspliced fragment (no CIGAR-N introns)
+                // this collapses to one [min,max] span, which removes the
+                // paired-end boundary-flux over-count at its source
+                // (docs/calibration/accumulator_fragment_span_redesign.md).
+                // NOTE: implicit-splice cuts + channel and the artifact hold-out
+                // arrive in Phases C/D; here cut_introns = explicit CIGAR-N only.
+                fragment_genomic_spans(f.exons, f.introns,
+                                       ws.span_ref, ws.span_start, ws.span_end);
+                if (ws.span_start.empty()) return;
                 // primary channel bit: unspliced → genome '+';
                 // spliced → SENSE (read agrees with splice motif).
                 const bool primary = spliced ? (align_strand == sj_strand)
                                              : (align_strand == STRAND_POS);
-                ws.acc_set->at(ref_id).deposit(bs.data(), be.data(), n_blk,
+                // Non-chimeric ⇒ all spans share `ref_id` (chimeras are held out
+                // before the deposit), so a single per-ref deposit is correct.
+                ws.acc_set->at(ref_id).deposit(ws.span_start.data(),
+                                               ws.span_end.data(),
+                                               ws.span_start.size(),
                                                spliced, primary);
             };
 
@@ -2584,6 +2661,47 @@ NB_MODULE(_bam_impl, m) {
               },
               nb::arg("spliced"), nb::arg("strand_pos"));
     }
+
+    // Contiguous-genomic-span decomposition (accumulator span redesign). Test /
+    // spec surface mirroring tests/native/_fragment_spans_reference.py; the scan
+    // path calls the same core. Inputs/outputs are lists of (ref, start, end).
+    m.def("fragment_genomic_spans",
+          [](nb::list blocks, nb::list cut_introns) {
+              auto to_blocks = [](nb::list items, auto&& push) {
+                  for (auto h : items) {
+                      auto t = nb::cast<nb::tuple>(h);
+                      push(nb::cast<int32_t>(t[0]),
+                           nb::cast<int32_t>(t[1]),
+                           nb::cast<int32_t>(t[2]));
+                  }
+              };
+              std::vector<ExonBlock> b;
+              std::vector<IntronBlock> c;
+              to_blocks(blocks, [&](int32_t r, int32_t s, int32_t e) {
+                  b.push_back({r, s, e, 0}); });
+              to_blocks(cut_introns, [&](int32_t r, int32_t s, int32_t e) {
+                  c.push_back({r, s, e, 0}); });
+              // The core relies on sorted-by-(ref,start) inputs (build_fragment
+              // guarantees this in the scan path); sort here so arbitrary test
+              // input matches the reference.
+              auto less = [](const auto& x, const auto& y) {
+                  if (x.ref_id != y.ref_id) return x.ref_id < y.ref_id;
+                  if (x.start != y.start) return x.start < y.start;
+                  return x.end < y.end;
+              };
+              std::sort(b.begin(), b.end(), less);
+              std::sort(c.begin(), c.end(), less);
+              std::vector<int32_t> oref;
+              std::vector<int64_t> ostart, oend;
+              fragment_genomic_spans(b, c, oref, ostart, oend);
+              nb::list out;
+              for (std::size_t i = 0; i < oref.size(); ++i)
+                  out.append(nb::make_tuple(oref[i], ostart[i], oend[i]));
+              return out;
+          },
+          nb::arg("blocks"), nb::arg("cut_introns"),
+          "Decompose aligned blocks into contiguous genomic spans (full extent "
+          "per reference minus cut introns). Returns list of (ref, start, end).");
 
     nb::class_<BamScanner>(m, "BamScanner")
         .def(nb::init<FragmentResolver&, const std::string&, bool, bool>(),
