@@ -85,38 +85,48 @@ gdna_strand._region_seeds: weight = node_density.count_gdna_frac   # decoupled f
 
 **`density_model.node_gdna_density`** (return mean + support; drop count_evidence/zeroing):
 ```python
-# ... unchanged: compute `density` (local imputation), masks ...
+# ... compute `density` (local imputation) + masks; CHANGE: no-anchor regions shrink to the GLOBAL
+#     gDNA density (not 0) — a sensible baseline (decision §6.6) — flagged via `has_local_evidence`.
 mass = substrate.contained.mass_unspliced                      # contained unspliced mass per region
 with errstate:                                                 # the count-prior MEAN (was in the deconv)
     count_gdna_frac = clip(where(mass>0, density*region_eff_len/mass, 0.0), 0, 1)
-count_support = ??? # OPEN Q (§6.1): density*region_eff_len  vs  the anchoring crossing gDNA count
-return NodeDensity(density, count_gdna_frac, count_support, region_count_observable, boundary_count_observable, ...)
+# count_support = the HONEST gDNA evidence behind the estimate (decision §6.1):
+#   observable region : the contained gDNA count            (clean_gf · contained_total)
+#   imputed region    : the ANCHORING crossing gDNA count   (Σ exon-side clean crossing flux used)
+#   no local evidence : ~0 (global-density baseline ⇒ minimal concentration ⇒ defer)
+return NodeDensity(density, count_gdna_frac, count_support, region_count_observable,
+                   boundary_count_observable, ...)
 ```
 
 **`count_dispersion.fit_gdna_count_overdispersion`** (mirror `gdna_strand`):
 ```python
 def fit_gdna_count_overdispersion(substrate, ra, node_density, region_eff_len, fl_mean, *, κ,
-                                  prior_alpha, prior_weight):
-    # REGION seeds: count-observable, non-AMBIG. ρ = clean_gdna_contained / region_eff_len ; N = clean_gdna_contained
-    # BOUNDARY seeds: count-observable exon-adjacent sides. ρ = clean_gdna_cross / fl_mean ; N = clean_gdna_cross
-    #   (reuse the strand fit's seed collection: _region_seeds geometry + boundary_side_seeds)
-    def mom(rho, N):                       # common-dispersion NB MoM (CV² minus Poisson), guarded
-        cv2 = var(rho)/mean(rho)**2
-        return max(cv2 - mean(1.0/N), 0.0)
-    a_reg = shrink(mom(reg_rho, reg_N),  n_reg,  prior_alpha, prior_weight)   # EB shrinkage to prior
-    a_bnd = shrink(mom(bnd_rho, bnd_N),  n_bnd,  prior_alpha, prior_weight)   #   when few seeds
-    return a_reg, a_bnd
-# shrink(â, n, a0, w) = (n·â + w·a0) / (n + w)   # OPEN Q (§6.3): exact shrinkage / DESeq2 trend
+                                  gdna_density_global, prior_alpha, prior_weight):
+    # Two seed sets = two SUPPORTING-COUNT TYPES (decision §6.2 — NOT arbitrary):
+    #   CONTAINED: count-observable, non-AMBIG regions. N = clean_gdna_contained ; μ = ρ̄·region_eff_len
+    #   CROSSING : count-observable exon-adjacent boundary sides. N = clean_gdna_cross ; μ = ρ̄·fl_mean
+    #   (ρ̄ = gdna_density_global, the COMMON expectation, so residuals capture heterogeneity)
+    #   Reuse the strand fit's seed geometry (_region_seeds, boundary_side_seeds).
+    def nb_mom(N, mu):                     # proper NB method-of-moments (handles small counts, §6.3)
+        # Var = μ + α·μ²  ⇒  α̂ = Σ[(N-μ)² - μ] / Σ μ²   (Poisson term subtracted per seed)
+        return max(sum((N-mu)**2 - mu) / sum(mu**2), 0.0)
+    a_contained = shrink(nb_mom(reg_N, reg_mu), W(reg), prior_alpha, prior_weight)
+    a_crossing  = shrink(nb_mom(bnd_N, bnd_mu), W(bnd), prior_alpha, prior_weight)
+    return a_contained, a_crossing
+# shrink(â, W, a0, w) = (W·â + w·a0)/(W + w)   # EB; sparse ⇒ a0 (conservative-high) dominates (§6.4)
+# W(seeds) = seed evidence weight (n_seeds or Σμ); prior = "unreliable until proven" (§6.4, OPEN)
 ```
 
 **`calibrate`** (insert the fit; finalize `count_evidence`):
 ```python
 node_density = node_gdna_density(substrate, ra, region_eff_len, fl_mean, rna_sense_frac=κ)
-a_reg, a_bnd = fit_gdna_count_overdispersion(substrate, ra, node_density, region_eff_len, fl_mean,
-                                             κ=κ, prior_alpha=cfg.count_overdispersion_prior,
-                                             prior_weight=cfg.count_overdispersion_prior_weight)
-alpha = where(node_density.region_count_observable, a_reg, a_bnd)
-N = node_density.count_support
+a_contained, a_crossing = fit_gdna_count_overdispersion(
+    substrate, ra, node_density, region_eff_len, fl_mean, κ=κ,
+    gdna_density_global=node_density_global_density,           # the COMMON expectation ρ̄
+    prior_alpha=cfg.count_overdispersion_prior,
+    prior_weight=cfg.count_overdispersion_prior_weight)
+alpha = where(node_density.region_count_observable, a_contained, a_crossing)  # α of the support type
+N = node_density.count_support                  # honest gDNA evidence (contained or crossing)
 count_evidence = N / (1.0 + alpha * N)          # overdispersion-limited effective count
 # strand-overdispersion fit unchanged (now reads node_density.count_gdna_frac for its weight)
 # deconv_regions/deconv_sides: pass count_evidence as the concentration, count_gdna_frac as the mean
@@ -126,32 +136,44 @@ count_evidence = N / (1.0 + alpha * N)          # overdispersion-limited effecti
 `density·eff_len/mass`; `count_concentration = count_evidence` (now overdispersion-limited).
 `_region_seeds`: `weight = clip(node_density.count_gdna_frac, 0, 1)`.
 
-## 6. Open questions / decisions (resolve before/while implementing)
+## 6. Decisions (resolved) + the one collaborative item
 
-1. **Supporting count `count_support` for IMPUTED regions** — `density·eff_len` (the expected
-   *contained* gDNA count, used in the validation, worked) vs the **anchoring crossing gDNA count**
-   (the actual imputation *evidence*). They coincide under capture (α saturates `N_eff`→1/α regardless
-   of `N`) but differ at no-capture/low-SS (sub-saturated). Lean: the crossing count (the honest
-   evidence). **Decide empirically in Phase B** (re-check the no-cap/ss0.50 number both ways).
-2. **`α_region` vs `α_boundary` assignment** — observable regions → `α_region`; imputed (exon/AMBIG)
-   regions → `α_boundary`. (Confirm; it falls straight out of the masks.)
-3. **α estimator + shrinkage** — start with the guarded common-dispersion MoM `CV²−Poisson` + linear
-   EB shrinkage to a prior (mirroring `gdna_strand_prior_weight`). Optional later: the DESeq2 mean-trend
-   `α(μ)=asymptDisp+extraPois/μ` if small-count seeds bias the common estimate (our boundaries are
-   high-count, so the asymptotic α dominates — likely unnecessary).
-3a. Weighting of the MoM across seeds (equal vs by-`N`); robustness to outlier seeds (trim?).
-4. **Default `α` prior + prior_weight** (the few-seed fallback) — needs a principled default, not a
-   magic constant. A *weak* prior (low weight) lets data dominate where seeds are plentiful; but with
-   *few* seeds under capture, under-estimating α would over-trust a biased count → leak. So the default
-   should be **conservative (moderate α)** so a data-poor library does not over-trust the count. Pin
-   the value + weight from the SS×capture sweep. **Open.**
-5. **AMBIG + capture floor** — unchanged by this work (α_boundary huge ⇒ count fades ⇒ strand absent ⇒
-   ~0.5). Genuine; the DNA-fraction (path 3, defect B) remains the future de-bias. Confirm acceptable.
-6. **`count_support` = 0 / run-filled regions** — a region with no anchor (density 0) → support 0 →
-   count_evidence 0 (Jeffreys). A run-filled region inherits a carried density; its `count_support`
-   should reflect the (indirect) carried evidence — set to the carried support or a low value. Specify.
-7. **RNA twin (deferred)** — the same machinery could fit an RNA count overdispersion from
-   spliced-fragment counts at boundaries; out of scope here, noted.
+1. **Supporting count = the HONEST evidence** *(decided)*. Observable region → its contained gDNA
+   count; imputed region → the anchoring **crossing** gDNA count (not `density·eff_len`). For
+   zero-evidence regions, see §6.6.
+2. **Two α's — one model, two count TYPES** *(decided)*. `α_contained` (contained-count seeds) for
+   observable regions; `α_crossing` (crossing-count seeds) for imputed regions. They differ ~30× under
+   capture (crossing carries the enrichment heterogeneity — the leak-closing signal); a single pooled
+   α would mis-serve both. Each node uses the α of the count *type* that supports it.
+3. **α estimator** *(decided)* — the proper NB MoM `Σ[(N−μ)²−μ]/Σμ²` (μ = global-density expectation),
+   which subtracts the Poisson term per seed and so is well-behaved for the **many small-count seeds
+   of real data** (the toy data's high coverage hid this — the global `CV²` form would be biased
+   there). DESeq2 mean-trend `α(μ)=asymptDisp+extraPois/μ` is the documented fallback if α varies with
+   μ; our leak-critical regime is the high-count asymptote, so start without it and add if a
+   small-count scenario shows mean-dependence.
+4. **THE COLLABORATIVE ITEM — the overdispersion prior** *(open; resolve together)*.
+   **Key simplification (from the precedent survey):** edgeR (`prior.df`) and DESeq2 carry elaborate
+   empirical-Bayes shrinkage *because they fit a dispersion per gene* (few replicates each, so each
+   estimate is noisy and must borrow from a trend). **We fit a single *common* α per count-type,
+   pooled over all seeds** — so even with the many small-count seeds of real data, the pooled NB-MoM
+   `Σ[(N−μ)²−μ]/Σμ²` is well-determined by averaging, and per-feature shrinkage is *not* needed. The
+   prior is therefore only a **guard for the degenerate few-seed library** (too few seeds to estimate
+   α at all). Principle (rigel's strand precedent *sparse ⇒ high overdispersion*): that guard is
+   **conservative-high** — "unreliable until proven reliable" — so a data-poor library defers to
+   strand. EB shrinkage `α = (W·α̂ + w·a0)/(W + w)` with `W` = total seed evidence; when `W ≫ w` (the
+   normal case) the data dominates and the prior is irrelevant. **To pin together:** `a0` + `w` — but
+   the surface is small (it only bites at very low seed counts). Validate on a **low-coverage /
+   few-seed** scenario, not just the toy high-coverage benchmark. **Do NOT pick a magic number
+   unilaterally.** *Note: Phase A does not depend on this; only Phase B does.*
+5. **Unstranded + capture = worst case** *(accepted)* — strand blind AND count locally biased; push
+   forward, handle later if needed (the DNA-fraction / defect B is the eventual lever).
+6. **Zero-evidence regions → shrink to the GLOBAL gDNA density** *(decided, per your steer)*. A region
+   with no anchor (no own crossing, no run-fill reach) takes `density = gdna_density_global` (a
+   sensible baseline, not 0) with a **minimal `count_support`** (it is a global fallback, not local
+   evidence) ⇒ small concentration ⇒ it defers (to strand where present, else a weak global baseline).
+   Run-filled regions (carry reaches) keep the carried density with the carried (attenuated) support.
+7. **RNA twin — deferred** *(accepted)*. The same machinery could model RNA count overdispersion from
+   spliced-fragment counts later; out of scope.
 
 ## 7. Tests & acceptance
 
