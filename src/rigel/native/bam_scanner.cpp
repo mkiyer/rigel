@@ -1344,6 +1344,46 @@ private:
         FragLenObservations& fraglen_obs = ws.fraglen_obs;
         ResolverScratch& scratch = ws.scratch;
 
+        // Fractional-accumulator deposit for a unique-mapper, non-chimeric
+        // fragment — resolved OR intergenic. The accumulator maps the
+        // fragment's blocks onto the genome-wide region partition, so an
+        // intergenic fragment lands in its intergenic region's contained mass
+        // (previously these were telemetry-only; see docs/calibration/
+        // density_sweep_implementation_plan.md Phase 0). Orientation: unspliced
+        // emits the genome strand ('+' = primary); spliced is oriented to
+        // motif-relative SENSE (align_strand == sj_strand), valid even inside
+        // strand-ambiguous regions (docs/acc_caljointmodel §4 D2/D7).
+        const auto deposit_to_accumulator =
+            [&ws](const AssembledFragment& f, int32_t align_strand,
+                  int32_t sj_strand) {
+                if (!ws.acc_set || f.exons.empty()) return;
+                const bool spliced = f.has_introns();
+                const bool align_ok = (align_strand == STRAND_POS ||
+                                       align_strand == STRAND_NEG);
+                const bool motif_ok = (sj_strand == STRAND_POS ||
+                                       sj_strand == STRAND_NEG);
+                // Unspliced needs a defined genome strand; spliced also needs a
+                // defined splice-motif strand to orient sense.
+                if (!align_ok || (spliced && !motif_ok)) return;
+                const int32_t ref_id = f.exons.front().ref_id;
+                if (ref_id < 0 ||
+                    static_cast<std::size_t>(ref_id) >= ws.acc_set->n_refs())
+                    return;
+                // Promote int32 exon coords → int64 for the deposit ABI.
+                const std::size_t n_blk = f.exons.size();
+                std::vector<int64_t> bs(n_blk), be(n_blk);
+                for (std::size_t k = 0; k < n_blk; ++k) {
+                    bs[k] = static_cast<int64_t>(f.exons[k].start);
+                    be[k] = static_cast<int64_t>(f.exons[k].end);
+                }
+                // primary channel bit: unspliced → genome '+';
+                // spliced → SENSE (read agrees with splice motif).
+                const bool primary = spliced ? (align_strand == sj_strand)
+                                             : (align_strand == STRAND_POS);
+                ws.acc_set->at(ref_id).deposit(bs.data(), be.data(), n_blk,
+                                               spliced, primary);
+            };
+
         // Per-worker state refs
         stats.n_read_names++;
 
@@ -1491,6 +1531,13 @@ private:
                     ig_result.num_hits = num_hits;
                     ig_result.nm = frag.nm;
                     accumulator.append(ig_result, frag_id);
+
+                    // Phase 0: deposit the intergenic fragment's genomic-DNA
+                    // mass into the calibration accumulator. Without this, an
+                    // intergenic region's contained mass is identically zero
+                    // and the count-clue density loses its baseline signal.
+                    deposit_to_accumulator(frag, ig_result.align_strand,
+                                           ig_result.sj_strand);
                 }
 
                 continue;
@@ -1569,43 +1616,10 @@ private:
                     stats.n_frag_length_ambiguous++;
                 }
 
-                // Fractional accumulator deposit: unique-mapper non-chimeric
-                // resolved fragments. The accumulator emits genome strand for
-                // unspliced reads (orient downstream); spliced reads are
-                // oriented at deposit to motif-relative SENSE
-                // (align_strand == sj_strand), which is valid even inside
-                // strand-ambiguous regions (docs/acc_caljointmodel §4 D2/D7).
-                if (ws.acc_set && !frag.exons.empty()) {
-                    const bool spliced = frag.has_introns();
-                    const bool align_ok = (result.align_strand == STRAND_POS ||
-                                           result.align_strand == STRAND_NEG);
-                    const bool motif_ok = (result.sj_strand == STRAND_POS ||
-                                           result.sj_strand == STRAND_NEG);
-                    // Unspliced needs a defined genome strand; spliced also
-                    // needs a defined splice-motif strand to orient sense.
-                    if (align_ok && (!spliced || motif_ok)) {
-                        const int32_t ref_id = frag.exons.front().ref_id;
-                        if (ref_id >= 0 &&
-                            static_cast<std::size_t>(ref_id) < ws.acc_set->n_refs())
-                        {
-                            // Promote int32 exon coords → int64 for the
-                            // accumulator deposit ABI.
-                            const std::size_t n_blk = frag.exons.size();
-                            std::vector<int64_t> bs(n_blk), be(n_blk);
-                            for (std::size_t k = 0; k < n_blk; ++k) {
-                                bs[k] = static_cast<int64_t>(frag.exons[k].start);
-                                be[k] = static_cast<int64_t>(frag.exons[k].end);
-                            }
-                            // primary channel bit: unspliced → genome '+';
-                            // spliced → SENSE (read agrees with splice motif).
-                            const bool primary =
-                                spliced ? (result.align_strand == result.sj_strand)
-                                        : (result.align_strand == STRAND_POS);
-                            ws.acc_set->at(ref_id).deposit(
-                                bs.data(), be.data(), n_blk, spliced, primary);
-                        }
-                    }
-                }
+                // Fractional accumulator deposit (resolved unique-mapper,
+                // non-chimeric). See deposit_to_accumulator above.
+                deposit_to_accumulator(frag, result.align_strand,
+                                       result.sj_strand);
             }
 
             // Region accumulation for resolved (non-chimeric) fragments.

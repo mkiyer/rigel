@@ -32,7 +32,22 @@ against oracle truth, per region:
 
 ---
 
-## Phase 0 — Fix the intergenic accumulator deposit (C++) *(prerequisite)*
+## Phase 0 — Fix the intergenic accumulator deposit (C++) *(prerequisite)* — ✅ SHIPPED
+
+> **DONE (2026-06-09).** Implemented in `src/rigel/native/bam_scanner.cpp`: factored the resolved
+> deposit into a single shared `deposit_to_accumulator` lambda in `process_qname_group_threaded`
+> and call it from **both** the resolved unique-mapper path and the intergenic (`resolved &&
+> is_unique_mapper`) path. Confirmed `align_strand`/`sj_strand` are populated from the alignment
+> blocks regardless of transcript resolution (`resolve_context.h:1034`), so intergenic fragments
+> orient correctly. **Validation** (`scripts/debug/phase0_intergenic_deposit_validation.py`,
+> oracle scenario): intergenic regions went 0 → contained gDNA mass matching oracle **exactly**
+> (189,949 = 189,949, rel = 0.000); mass conservation exact (193,117 contained + 6,883 boundary =
+> 200,000 = n_fragments). Full suite green (994 passed); golden regenerated for the 4 gDNA
+> scenarios only (`gdna_light`, `gdna_heavy`, `combo_moderate`, `combo_extreme`; Δ 0.4–1.2% on
+> counts, toward more gDNA recognized). The byte-for-byte `deposit()` reference was unaffected (the
+> ABI is unchanged — only which fragments the scanner deposits changed). The "unit accumulator" and
+> "_accumulator_reference.py" acceptance items below were therefore N/A; the oracle validation
+> subsumes them.
 
 **Root cause (confirmed).** In `src/rigel/native/bam_scanner.cpp` the accumulator `deposit()` (line
 ~1578-1608, `if (ws.acc_set && !frag.exons.empty())`) runs **only inside the resolved-hit path**.
