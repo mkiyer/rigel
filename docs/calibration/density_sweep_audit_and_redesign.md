@@ -1,285 +1,262 @@
-# The count-clue density sweep: audit, failure analysis, and redesign
+# The count-clue density sweep: audit, failure analysis, and redesign (v2)
 
-**Status:** root-cause analysis + design proposal (no code changed). 2026-06-08.
-**Scope:** the Phase-1 "count clue" in `src/rigel/calibration/density_model.py` (`node_gdna_density`),
-its role in the acyclic calibrator, why it produces a near-uniform global gDNA density (and thereby
-the in-locus gDNA→RNA leak), and a proposed replacement.
+**Status:** root-cause analysis + design proposal (no calibration code changed). 2026-06-08.
+**Scope:** the Phase-1 "count clue" in `src/rigel/calibration/density_model.py` (`node_gdna_density`) —
+why it collapses to a global density (causing the in-locus gDNA→RNA leak), and a redesign that
+handles **runs of consecutive non-observable regions**, the **full region-signature case space**, and
+the **effective-length contraction**, which is the dominant error.
 
----
-
-## 1. The calibration algorithm (where the sweep sits)
-
-Rigel's calibrator (`calibration/calibrate.py`) is a **single acyclic feed-forward pass** — no EM
-loop. It deconvolves the library, per *node*, into gDNA vs RNA. A **node** is a region's *contained*
-mass plus its two *boundary sides* (the `CalibrationSubstrate` 3-view). The flow:
-
-```
-payload (fractional accumulator: per-region contained counts + per-boundary side counts)
-   │  CalibrationSubstrate.from_payload → contained / left-side / right-side views
-   │
-   ├─ effective lengths (FL geometry): region_eff_len, boundary_side_eff_len, fl_mean
-   ├─ fit_strand_balance ............................ rna_sense_frac (κ)         [strand MEAN]
-   ├─ strand-clean gdna_frac per region (closed form from κ)
-   │
-   ├─ node_gdna_density  ◀───────────────────────────  PHASE 1: THE COUNT CLUE / "SWEEP"
-   │      → per-region gDNA *density* (frag/eff-bp) + count_evidence (= density·eff_len)
-   │
-   ├─ fit gDNA / RNA strand Beta-Binomial overdispersions
-   │
-   ├─ deconv_regions / deconv_sides  ◀───────────────  PHASE 3: JOINT per-node posterior
-   │      posterior(gdna_frac) ∝ Beta(count prior FROM PHASE 1) × BB_strand(sense,anti | gdna_frac)
-   │      → per-node gDNA / RNA mass
-   │
-   └─ derive ........................................ gdna_density_global + gdna_geom_len
-```
-
-Downstream, `priors.assemble_priors` projects the deconvolved per-node mass to per-locus Dirichlet
-scalars and runs `_transport_boundary_flux` (re-attributes deconvolved boundary **mass** to its two
-regions ∝ local density ratio × boundary capacity).
-
-**Two clues feed the joint deconvolution (Phase 3):**
-- **count clue** — Phase 1's per-region density → a `Beta(a_c, b_c)` prior on `gdna_frac` with
-  mean `count_gdna_frac = density·eff_len / unspliced_mass` and **concentration `count_evidence = density·eff_len`** (the expected gDNA count). `joint_deconv.py:94-97`.
-- **strand clue** — the Beta-Binomial strand likelihood (gDNA symmetric ½, RNA skewed to κ).
-
-> **Correcting a common misconception.** The sweep is **Phase 1, *before* the joint deconvolution** —
-> it *builds the count prior*. It is **not** a post-deconvolution step that imputes nodes that "could
-> not be deconvolved." (The only thing that runs after deconvolution is `_transport_boundary_flux`,
-> which moves already-deconvolved *mass*; that mechanism works correctly.) Non-strand-observable
-> nodes (AMBIG) fall back to *count-only* inside the joint — i.e. they lean on this same Phase-1
-> density. So Phase 1 is load-bearing for exactly the hardest nodes.
+> **v2 changes (from v1):** added the consecutive-non-observable-run problem and the directional
+> inward sweep; the full 16-signature / region-pair observability case table; a second imputation
+> method (DNA *fraction* vs density); the empirical finding that **intergenic contained mass is zero**
+> (so a global average is a deflated, bad fallback); and a dedicated treatment of the **IPR
+> effective-length contraction** and its uncertainty.
 
 ---
 
-## 2. The sweep algorithm (`node_gdna_density`)
+## 1. The calibration flow (where the sweep sits)
 
-**Count-observability** (`density_model.count_observable_masks`) — where unspliced fragments are
-gDNA *by construction* (no mature RNA can be present):
-- a **region** is observable ⇔ it carries **no exon bit** (intron-only or intergenic); an exonic
-  region's contained unspliced mass is contaminated by mature RNA, so it is **not** observable.
-- a **boundary** is observable ⇔ its two regions **share no exon bit** (an exon–intron or
-  exon–intergenic *seam*); no single-exon transcript continues across it, so no unspliced *mature*
-  RNA crosses — the crossing unspliced mass is gDNA (+ nascent).
-
-**Direct observations** that seed the sweep:
-- observable region `r`: `reg_mass[r] = gdna_frac[r] · contained.mass_unspliced[r]`, length `reg_len[r] = region_eff_len[r]`.
-- observable boundary `r|r+1`: `bnd_mass[r] = right.mass_unspliced[r] + left.mass_unspliced[r+1]` (raw crossing unspliced mass, treated as gDNA), length `bnd_len[r] = fl_mean`.
-
-**The sweep itself** (`density_model.py:128-165`) — an *alternating region↔boundary propagation*,
-per reference, in two passes (forward `from_left`, reverse `from_right`):
+Single acyclic feed-forward pass (`calibration/calibrate.py`). A **node** = a region's *contained*
+mass + its two *boundary sides* (`CalibrationSubstrate` 3-view).
 
 ```
-run_mass = run_len = 0
-for region i, left → right:
-    if i not first:
-        w = weight[i-1]                              # conduit weight of the boundary to the left
-        run_mass = w · (run_mass + bnd_mass[i-1])    # carry accumulated evidence across the boundary
-        run_len  = w · (run_len  + bnd_len[i-1])
-    from_left_mass[i] = run_mass;  from_left_len[i] = run_len
-    run_mass += reg_mass[i];  run_len += reg_len[i]  # add this region's own observation
-# (reverse pass symmetric → from_right_*)
-
-density[i] = (reg_mass[i] + from_left_mass[i] + from_right_mass[i])
-           / (reg_len[i]  + from_left_len[i]  + from_right_len[i])      # global fallback if 0
-count_evidence[i] = density[i] · region_eff_len[i]
+payload (fractional accumulator) → substrate (contained / left-side / right-side)
+  ├─ effective lengths (FL geometry): region_eff_len, boundary_side_eff_len, fl_mean
+  ├─ fit_strand_balance → rna_sense_frac (κ)
+  ├─ strand-clean gdna_frac per region (closed form from κ)
+  ├─ node_gdna_density  ◀── PHASE 1: the count clue / SWEEP → per-region gDNA density + count_evidence
+  ├─ fit gDNA / RNA strand overdispersions
+  ├─ deconv_regions / deconv_sides ◀── PHASE 3: joint posterior(gdna_frac) ∝ Beta(count prior) × BB_strand
+  └─ derive → gdna_density_global + gdna_geom_len      (later: priors.assemble_priors → IPR eff-len + transport)
 ```
 
-The **conduit weight** `weight[b] = cross_flux[b] / (cross_flux[b] + 1)` (`density_model.py:126`)
-is meant to attenuate propagation across low-traffic boundaries: a boundary with no crossing
-fragments should not conduct density.
-
-**Intent:** impute the gDNA density at non-observable nodes (exons, AMBIG) by conducting the density
-of nearby observable nodes across boundaries, with attenuation, so each node's density reflects its
-*local* neighborhood.
+The sweep is **Phase 1, before deconvolution** — it builds the **count prior** (a `Beta` on
+`gdna_frac` with mean `density·eff_len / unspliced_mass` and concentration `count_evidence = density·eff_len`,
+`joint_deconv.py:94-97`). It is *not* post-deconvolution imputation. The per-region gDNA mass it
+implies also feeds the **IPR effective-length** in `assemble_priors` — so the sweep drives **two**
+downstream quantities: the prior *count* and the gDNA *effective length*.
 
 ---
 
-## 3. The bug
+## 2. Observability — the full case space
 
-Two structural flaws make the sweep collapse to a single global average instead of a local estimate.
+**Region** is count-observable ⇔ it has **no exon bit** (intergenic / intron-only): its unspliced
+mass is gDNA by construction. **Boundary** is count-observable ⇔ its two regions **share no exon bit**.
+The 4 signature bits are `{intron+ 0x8, intron- 0x4, exon+ 0x2, exon- 0x1}`.
 
-### 3a. The conduit weight does not attenuate at real coverage
-`weight = flux / (flux + 1)`. This was tuned for `flux ≈ 0…1`. At realistic depth the per-boundary
-crossing flux is **thousands** of fragments, so `weight ≈ 1.0000` at *every* boundary. With `w ≈ 1`
-the running accumulators never decay:
+Region observability (16 signatures, condensed to the realistic ones):
+
+| signature | class | region observable? |
+|---|---|---|
+| `intergenic` (0000) | intergenic | **Y** (direct) |
+| `in+` / `in-` / `in+\|in-` | intron | **Y** (direct) |
+| `ex+` / `ex-` | exon | n (impute) |
+| `ex+\|ex-` | exon, AMBIG | n (impute) |
+| `ex+\|in+`, `ex-\|in-` (alt-splice, same strand) | exon | n (impute) |
+| `ex+\|in-`, `ex-\|in+` (alt / antisense) | exon, AMBIG | n (impute) |
+
+Boundary observability (computed from the real code; `NON` = shared exon bit ⇒ not observable):
 
 ```
-from_left[i]  →  Σ_{j<i} (reg_mass[j] + bnd_mass[j])     (entire left side of the locus, undamped)
-from_right[i] →  Σ_{j>i} (reg_mass[j] + bnd_mass[j])     (entire right side, undamped)
-density[i]    →  (Σ_all observable gDNA mass) / (Σ_all observable length)  =  the GLOBAL average
+ L \ R        interg  in*   ex+   ex-   ex+|ex-   ex+|in-   ex-|in+   ex+|in+   ex-|in-
+ interg/in*    obs    obs   obs   obs    obs       obs       obs       obs       obs
+ ex+           obs    obs   NON   obs    NON       NON       obs       NON       obs
+ ex-           obs    obs   obs   NON    NON       obs       NON       obs       NON
+ ex+|ex-       obs    obs   NON   NON    NON       NON       NON       NON       NON
 ```
 
-So **every** node's density converges to one number. There is **no locality**: an exon's density is
-influenced no more by its two flanking boundaries than by a node 40 kb away.
-
-### 3b. Length normalization dilutes the boundary signal
-Even with attenuation, the numerator/denominator are mismatched. The boundary-crossing gDNA mass
-(the *enrichment* signal — large at exon edges under capture) goes in the **numerator**, but it is
-divided by accumulated lengths dominated by the **long, depleted intron** `region_eff_len`
-(5–8 kb each). The local enrichment present at the boundaries is length-normalized away to the
-global mean.
-
-### 3c. Consequence for the count prior
-A non-observable **exon** therefore gets `density ≈ global` (≈ 0.62 frag/bp in the worked example).
-Its count prior then has:
-- **mean** `count_gdna_frac = density·eff_len / contained_mass ≈ 0.02` (global density × short exon
-  eff-len ÷ the *huge* capture-enriched exon mass), and
-- **concentration** `count_evidence = density·eff_len ≈ 700–960` — a **fabricated** confidence (it is
-  not a count of locally observed gDNA; it is `global_density × eff_len`).
-
-This high-confidence, near-zero prior **fights the strand clue** — which is *correct*
-(`strand_gf ≈ true ≈ 0.8–0.94`). The joint posterior compromises at `gdna_frac ≈ 0.4`, so the exon's
-gDNA is under-deconvolved ~2×. That under-deconvolved gDNA mass becomes the per-locus prior the EM
-receives, so the EM then leaks the corresponding unspliced fragments gDNA→RNA. (The downstream
-boundary *transport* works — it depletes introns and fills exons — but it can only redistribute the
-already-too-low total.)
+**Consequences (the crux of v2):**
+- Intergenic & intron regions are **always** observable; every boundary touching them is observable.
+- The **only** non-observable boundaries are exon–exon seams **sharing a strand** (`ex+|…` next to `ex+|…`).
+- `ex+ | ex-` (a sense exon abutting an antisense exon) **is observable** — no single transcript's
+  mature RNA crosses it.
+- A **run** of non-observable regions forms wherever consecutive regions share a strand's exon bit
+  (alt-splice on one strand; or an antisense overlap `ex+ | ex+|ex- | ex-`). Inside a run, the interior
+  regions have **both** boundaries non-observable.
 
 ---
 
-## 4. Worked example — GENE0037 (locus 36), gdna400 / ss0.99 / capture-on
+## 3. The bug in the current sweep
 
-Tooling: `scripts/debug/gene37_sweep_walk.py` (node-by-node), `gene37_region_boundary_autopsy.py`
-(region/boundary vs oracle). All accumulator data validated against oracle truth (template spans):
-intron contained gDNA, boundary crossing gDNA, and exon contained mass all match truth exactly — the
-**accumulator is correct**; the failure is purely in the Phase-1 sweep.
+`node_gdna_density` (`density_model.py:128-165`) propagates observable density across boundaries with a
+running accumulator decayed by a **conduit weight** `w = cross_flux / (cross_flux + 1)`.
 
-Node-by-node (abridged; `unspl(+,-)` = contained unspliced counts):
+1. **`w` never attenuates.** At real depth the per-boundary crossing flux is thousands, so
+   `w ≈ 1.0000` everywhere. The running sums never decay → every node's density →
+   `Σ observable gDNA mass / Σ observable length` = a single **global** value. No locality.
+2. **Length mismatch.** The boundary-crossing gDNA (the enrichment signal) is divided by lengths
+   dominated by the long, depleted **intron** eff-lengths → diluted to the global mean.
+3. **Intergenic blindness (new, measured).** Genome-wide on the benchmark, **all 101 intergenic
+   regions have exactly 0 contained mass** (3.19 Mb / ~64% of the genome) — the accumulator does not
+   deposit deep-intergenic gDNA into region contained mass, yet truth has ~7.5k gDNA fragments per
+   intergenic region. So the global density is **deflated** (huge empty length in the denominator), and
+   the gDNA *baseline* is **not observable from intergenic contained mass** — only at gene-flanking
+   boundaries and (depleted) introns.
 
-```
-R368 intergenic obs=Y eff=19341  mass=0             DIRECT gdna=0       SWEPT dens=0.618 swept_gdna=11958
- └B368 interg→EXON obs=Y flux=10296  conduit_w=0.9999  DIRECT bnd=3246
-R369 ex+        obs=n eff= 1141  unspl(12077,19127) mass=31204  (impute) SWEPT dens=0.618 swept_gdna=  705
- └B369 EXON→intron obs=Y flux=12681  conduit_w=0.9999  DIRECT bnd=4206
-R370 in+        obs=Y eff= 1667  unspl(9,17) mass=26   DIRECT gdna=18    SWEPT dens=0.618 swept_gdna= 1031
- └B372 intron→EXON obs=Y flux=14412  conduit_w=0.9999  DIRECT bnd=4795
-R372 in+        obs=Y eff= 4959  mass=79              DIRECT gdna=60     SWEPT dens=0.618 swept_gdna= 3066
-   …every node: conduit_w = 0.9999, SWEPT density = 0.618 ± 0.0001…
-```
-
-Per-region density vs truth (exons):
-
-| region | true gDNA density (frag/eff-bp) | **swept density** | count_gf | strand_gf | joint cal_gf | **true gf** |
-|---|---|---|---|---|---|---|
-| 369 | 21.1 | **0.618** | 0.02 | 0.77 | 0.41 | 0.77 |
-| 371 | 20.7 | **0.618** | 0.03 | 0.93 | 0.44 | 0.94 |
-| 378 | 20.9 | **0.618** | 0.02 | 0.77 | 0.39 | 0.77 |
-
-What the data shows:
-- **conduit_w = 0.9999 at every boundary** (flux 8k–16k) → undamped → uniform 0.618 everywhere (§3a).
-- The **boundary crossing gDNA is large and correct** (DIRECT bnd 3k–5.5k per seam, matching oracle) —
-  the enrichment signal *is present at the boundaries* — but the sweep dilutes it (§3b).
-- The sweep **globalizes both ways**: the empty intergenic flank R368 (`mass=0`) is *hallucinated*
-  up to `swept_gdna=11958`; the enriched exon R369 (`mass=31204`, ~94% gDNA) is *crushed* down to
-  `swept_gdna=705`. **It cannot distinguish an enriched exon from an empty intergenic region.**
-- The error is **systematic and uniform across all exons** (not a subset); introns/intergenic
-  deconvolve correctly (`gf=1.0`). The leak lives entirely in the non-observable exon regions.
+Result: a non-observable exon gets `density ≈ global`, so its count prior is
+`mean ≈ 0.02` with a **fabricated concentration** `count_evidence ≈ 700–960` that overrules the
+*correct* strand clue → joint `gdna_frac ≈ 0.4` (truth ~0.8) → the under-deconvolved gDNA mass becomes
+a too-low per-locus prior → the EM leaks the matching unspliced fragments gDNA→RNA.
 
 ---
 
-## 5. What the ideal algorithm should do
+## 4. Worked examples
 
-The exon is **not directly count-observable** (its contained unspliced mass is gDNA + mature RNA),
-so its gDNA density must be *imputed*. The design question: **how should an exon obtain its gDNA
-density from its immediately-flanking exon–intron boundaries, normalized to its own length, rather
-than from an undamped global accumulation?**
+Tooling: `scripts/debug/gene37_sweep_walk.py`, `gene37_region_boundary_autopsy.py`,
+`build_stress_overlap_scenario.py`. Accumulator validated against oracle (template spans): intron
+contained, boundary crossing, and exon contained masses all match truth — the failure is purely the
+Phase-1 sweep.
 
-Requirements:
-1. **Locality.** A region's density must come from its *nearest* observable evidence — its two
-   bracketing boundaries (and adjacent observable regions) — with genuine distance attenuation, so
-   distant nodes do not dominate.
-2. **Correct, count-based normalization.** Boundary crossing gDNA is a *rate* observation: the count
-   of fragments crossing a seam = (local gDNA density) × (boundary count effective length). Convert
-   it to a density by dividing by the **boundary** effective length (≈ `fl_mean`), **never** by a
-   region's length. Then a region's density is the (length-weighted) blend of its bracketing seam
-   densities.
-3. **Per-side attribution.** The accumulator already splits each crossing fragment into the two
-   region sides (`substrate.left[r]`, `substrate.right[r]`). The **exon side** of each flanking seam
-   samples the *exon's* edge density directly; under capture the probe coverage is ~uniform across the
-   exon, so the edge density ≈ the interior density. Use the exon-side mass for the exon's estimate
-   (and the intron-side for the intron — though introns, being observable, use their own contained
-   density).
-4. **Honest concentration.** For a non-observable region the count prior is an *imputation*. Its
-   Dirichlet concentration must reflect the **uncertainty of that imputation** (e.g. the number of
-   crossing fragments actually observed at the bracketing seams), **not** `density × full eff_len`.
-   A fabricated high concentration is what lets the count prior overrule the (accurate) strand clue.
-5. **Graceful endpoints.** Zero gDNA → density 0 (no hallucination onto empty intergenic regions);
-   an isolated non-observable node with no observable neighbor → fall back to the global density, but
-   that should be the *rare* exception, not the universal outcome.
+### 4a. GENE0037 (capture-on, 4:1 gDNA) — uniform global, all exons
+Every node's swept density ≈ 0.618 (`conduit_w = 0.9999`); exons true ~21 frag/bp → count_gf ≈ 0.02;
+strand_gf ≈ true ≈ 0.8–0.94; joint cal_gf ≈ 0.4. Empty intergenic flanks hallucinated up
+(`swept_gdna ≈ 12k` from `mass = 0`); enriched exons crushed down. Systematic across all exons.
 
-**Empirical feasibility (already verified).** The flanking exon-side crossing mass alone recovers
-**6–8 frag/bp** for GENE0037's exons — vs the true ~21 and the broken 0.618. So the local boundaries
-carry the correct *order of magnitude* (~10–30× the global). The signal is recoverable; what is
-missing is (a) using it *locally* and (b) an unbiased count→density normalization.
+### 4b. Antisense-overlap stress — a run with a truly-interior region
+`ex+ (R7) | EXON→EXON NON-obs | ex+|ex- (R8) | EXON→EXON NON-obs | ex- (R9)`:
+
+```
+R7 ex+      obs=n   left boundary B6 (interg→EXON) OBSERVABLE  → reachable from LEFT
+R8 ex+|ex-  obs=n   BOTH boundaries (B7,B8) NON-observable     → reachable from NEITHER side
+R9 ex-      obs=n   right boundary B9 (EXON→interg) OBSERVABLE → reachable from RIGHT
+```
+
+R8 can only be imputed by sweeping **inward** from R7 (anchored on B6) and R9 (anchored on B9). The
+current sweep again returns the global (≈ 2.456) for all of R6–R10, hallucinating onto the empty
+intergenic flanks. The observable edge boundaries B6/B9 carry the real local density (~14 frag/bp,
+matching the true uniform density) — the signal the redesign must route inward.
 
 ---
 
-## 6. Proposed solution
+## 5. What the ideal algorithm must do
 
-Replace the undamped global sweep with a **local, boundary-anchored density imputation**, plus an
-**honest prior concentration**. Concretely, three changes:
+The exon's gDNA density must be **imputed** (its contained mass is gDNA + mature RNA). Requirements:
 
-### 6a. Observable regions: keep their own direct density (unchanged)
-`density[r] = gdna_frac[r] · contained.mass_unspliced[r] / region_eff_len[r]` for intron/intergenic
-regions. These are accurate (the depleted baseline under capture).
+1. **Locality with real attenuation.** A region's estimate comes from its *nearest* observable
+   evidence; influence decays with distance. (The current `flux/(flux+1)` does not attenuate.)
+2. **Count-based normalization.** Boundary crossing gDNA is a *rate*: convert to density by dividing by
+   the **boundary** effective length (≈ `fl_mean`), never by a region's length.
+3. **Directional inward sweep over runs.** Within a run of consecutive non-observable regions, impute
+   from the **leftmost** region (whose left boundary side is observable) rightward, and from the
+   **rightmost** region (right side observable) leftward; combine the two directions at each interior
+   region. Interior regions whose both *original* boundaries are non-observable inherit the estimate
+   carried in from the run's observable edges (this is the *legitimate* core of a "sweep" — local and
+   directional, not a global accumulation).
+4. **Per-side attribution.** Use the **region-facing side** of each anchoring boundary
+   (`substrate.left[r]` / `substrate.right[r]`), which samples that region's edge density.
+5. **Honest concentration.** A non-observable region's count prior is an imputation; its Dirichlet
+   concentration must reflect the **observed crossing-fragment count** that supports it, not
+   `density × full eff_len`. Thin evidence ⇒ weak prior ⇒ the strand clue rightly governs.
+6. **No global-average fallback.** Empirically the global is deflated by 3.19 Mb of empty intergenic
+   length and mixes depleted with enriched; it is a *bad* default. Fall back, in order, to: the nearest
+   observable boundary/region density → an intron baseline → and only as a last resort a conservative
+   prior length with near-zero concentration (add little to the prior rather than wrong mass).
 
-### 6b. Non-observable regions: impute from the *bracketing seams only*
-For an exon (or AMBIG) region `r`, anchor the density on the **two boundaries that bracket `r`**, using
-the **exon-side** crossing gDNA converted to a density via the boundary effective length:
+**Empirical feasibility.** The flanking observable boundaries already recover the right order of
+magnitude (GENE0037 exons: 6–8 frag/bp from boundary sides vs true ~21 and broken 0.618; antisense
+run edges: ~14 vs true ~14). The signal is local and present; what is missing is using it locally and
+normalizing it correctly.
 
-```
-seam_density(boundary b on r's side) = side_gdna_mass_on_r / boundary_side_eff_len[r]
-density[r] = mass-weighted mean of r's left-seam and right-seam densities
-```
+---
 
-No locus-wide accumulation; no decay chain. A region sees *only* its two neighbors. (For a region
-with one non-seam side — e.g. an internal exon–exon junction, which is not observable — use the one
-available seam, then the adjacent observable region, then the global fallback, in that order.)
+## 6. Proposed redesign
 
-> The exact count→density constant needs derivation so the estimate is **unbiased** (the naive
-> per-side-mass / `boundary_side_eff_len` form lands ~0.3× of truth because edge-crossing
-> under-samples the interior; a crossing-*count* / `fl_mean` form over-samples). The right form is a
-> short FL-geometry derivation — analogous to the existing `effective_length.py` count-effective-length
-> derivation — and must be validated on the benchmark so an unstranded/clean locus reproduces its
-> known density. This is the one open quantity; §4's tooling makes it directly checkable.
+### 6a. Observable regions — direct (unchanged)
+`density[r] = gdna_frac[r] · contained_unspliced[r] / region_eff_len[r]` for intron/intergenic.
+(Intergenic contributes 0 today — see §3.3; treat its density as the **intron-baseline**, not 0, and
+flag the intergenic-deposit gap for a separate fix.)
 
-### 6c. Make the imputed prior's concentration honest
-For a non-observable region, set the count-prior concentration to the **count of crossing fragments
-actually observed** at its bracketing seams (the real evidence), not `density × region_eff_len`. An
-exon with, say, ~15k crossing fragments still gets a real (large) concentration — but one *grounded in
-observations*, and the mean is now in the right place (§6b), so the count prior and the strand clue
-**agree** instead of fighting. Where evidence is genuinely thin, the concentration is small and the
-strand clue rightly governs (this is what the Phase-1 comment *claims* happens today but does not).
+### 6b. Non-observable regions — local, directional, two-anchor imputation
+For each **run** of consecutive non-observable regions bracketed by observable boundaries:
+- **Left-to-right pass:** seed at the run's left edge with the observable boundary's region-facing
+  side density `d = side_gdna_mass / boundary_side_eff_len`; carry it inward, updating each region from
+  the boundary on its left (using that boundary's region-facing gDNA, when observable, else the carried
+  estimate) with distance attenuation.
+- **Right-to-left pass:** symmetric from the run's right edge.
+- **Combine** the two directional estimates per region (e.g. evidence-weighted mean by the crossing
+  counts each direction carries). Interior regions with no observable boundary of their own are thus
+  filled from both edges of the run.
 
-### Why this fixes the leak
-With §6a–c, each exon's count prior has the correct order-of-magnitude mean (`count_gf` ≈ the true
-~0.8 rather than 0.02) and an honest concentration, so the joint posterior lands near the truth
-(`gdna_frac ≈ 0.8`) instead of 0.4. The per-locus gDNA prior handed to the EM is then ~correct, and
-the in-locus gDNA→RNA leak collapses. The downstream `_transport_boundary_flux` (already correct)
-then redistributes the *correct* total gDNA across exon vs intron.
+Two ways to express the per-anchor estimate (both worth trying):
+- **(A) Density:** `boundary region-side gDNA mass / boundary_side_eff_len` → a frag/eff-bp density,
+  applied as the region's gDNA density (then `count_gdna_frac = density·eff_len / mass`).
+- **(B) DNA fraction:** at an intron→exon (or intergenic→exon) seam the crossing fragments are
+  *unspliced* (gDNA, after strand-cleaning) **and** *spliced* (mature RNA). Their ratio
+  `gdna_unspliced / (unspliced + spliced)` is a **gDNA fraction** that can be applied directly to the
+  region's *own total* contained counts: `gdna_mass ≈ region_total · boundary_dna_fraction`. This
+  sidesteps the density/length normalization entirely and may be more robust where lengths are
+  uncertain. (Tradeoff: assumes the seam's DNA fraction transfers to the region interior; needs
+  testing, especially when the two flanking seams disagree.)
+
+### 6c. Honest concentration
+Set the non-observable region's count-prior concentration to the **crossing-fragment count** observed
+at its anchoring boundaries (real evidence), not `density · region_eff_len`. The mean is now ~correct
+(6b) and the concentration is grounded, so count and strand **agree** instead of fighting.
+
+### 6d. The effective-length contraction (the make-or-break)
+The IPR (`priors.assemble_priors`) contracts the gDNA component's effective length from the per-region
+gDNA *mass* concentration. This length is a **divisor** in the per-fragment EM weight `θ/L`; when gDNA
+(~350 bp, spread) competes with RNA (~spliced length), a wrong `L` is a first-order bias — worse than a
+wrong prior count, which the EM can outvote.
+
+Key points for the redesign:
+- **It is coupled to 6b.** The IPR is built from the same per-region gDNA mass the sweep imputes.
+  Getting the density imputation right *automatically* contracts the eff-len correctly (gDNA mass
+  concentrates on the captured exons → short eff-len). So 6b is the primary lever for the eff-len too.
+- **Model the uncertainty, don't hide it.** For imputed regions the gДНК mass is uncertain, so the IPR
+  length is uncertain. Rather than dividing by a single hard `L`, the imputation uncertainty should
+  enter as **prior strength** (6c) — a region we cannot resolve contributes *little* to both the prior
+  count and the eff-len, deferring to the EM + strand, instead of injecting a confident wrong `L`.
+- **Principled fallback length.** When a region is genuinely unidentifiable, do **not** contract toward
+  a global; regularize the eff-len toward a sensible local prior — the **geometric span** is the
+  uninformative null (no contraction; the existing Laplace `+1` already does this for `G→0`), and under
+  *suspected* capture the **exon/spliced footprint** is the informed prior. Choosing between them
+  should be driven by the local evidence strength, not a global constant.
+
+### 6e. Two error modes — design stance
+- **Prior count.** Adding *no* mass where we have no evidence is acceptable (a weaker prior; the EM
+  still solves it). Adding *wrong* mass is harmful. So bias toward honest (low) concentration over
+  confident imputation when evidence is thin.
+- **Effective length.** This is the dangerous one: an unmodeled, confident divisor. Treat its
+  uncertainty explicitly (6d). "We don't know" must translate to *less contraction confidence*, not a
+  fabricated short or global length.
 
 ### What is removed
-- The decay-chain accumulation in `node_gdna_density` (the `from_left`/`from_right` running sums and
-  the `weight = flux/(flux+1)` conduit). It is replaced by the local two-seam estimate.
-- The fabricated `count_evidence = density · region_eff_len` for non-observable regions, replaced by
-  the observed crossing-fragment count.
+The undamped `from_left`/`from_right` accumulation and `w = flux/(flux+1)`; the fabricated
+`count_evidence = density · region_eff_len` for non-observable regions.
 
-### Validation plan
-1. **Unit:** on a synthetic locus with known uniform gDNA density, the imputed exon density equals
-   the true density (within tolerance) for both stranded and unstranded inputs.
-2. **GENE0037 (this doc):** re-run `gene37_sweep_walk.py` — exon swept density should jump from 0.618
-   to ~20, `count_gf` from 0.02 to ~0.8; intergenic flanks stay near 0 (no hallucination).
-3. **Benchmark:** `evaluate_suite.py` on `gdna_benchmark_5mb` — net gDNA→RNA leak in the
-   capture-on / high-gDNA conditions should drop sharply, **without** inflating the gdna_none false
-   gDNA (no new RNA→gDNA siphon) and without disturbing the capture-off conditions. Golden tests
-   regenerated; full suite green.
+---
 
-### Open questions / for discussion
-- The exact unbiased count→density normalization constant (§6b note) — derive from FL geometry, or
-  calibrate empirically against the benchmark?
-- Should an exon also borrow from its adjacent *introns'* observed baseline (a two-component "baseline
-  + capture-excess" model), or is the bracketing-seam estimate sufficient on its own?
-- How to treat AMBIG regions (overlapping opposite-strand genes), which are non-observable for a
-  *different* reason — the same local-seam imputation should apply, but worth a dedicated test.
+## 7. Empirical validation plan
+
+Generate stress genomes covering **every** region-pair signature combination and exercise the
+imputation against oracle truth (`scripts/debug/build_stress_overlap_scenario.py` is the seed; extend
+to a generator):
+- **Single neighbor pairs:** for each (left-sig, right-sig) in §2, a 2-region locus — check the
+  imputed density/fraction and eff-len vs truth, observable and non-observable cases.
+- **Runs:** 3–5 consecutive non-observable regions (alt-splice on one strand; antisense overlap;
+  mixed), with an interior region reachable only inward — check both directional passes and their
+  combination, including conflicting left/right anchors.
+- **Capture vs no-capture × stranded vs unstranded:** confirm enriched exons get high density,
+  depleted introns/intergenic get baseline, and unstranded/AMBIG degrade gracefully (no hallucination).
+- **Truly-unidentifiable:** overlapping opposite-strand exons at low strand-specificity — confirm the
+  fallback adds little (honest weak prior) rather than a confident wrong value.
+- **Regression:** `evaluate_suite.py` on `gdna_benchmark_5mb` — net gDNA→RNA leak drops in capture-on /
+  high-gDNA without inflating gdna_none false gDNA; golden regenerated; full suite green.
+
+Targets on the worked examples: GENE0037 exon swept density 0.618 → ~20, `count_gf` 0.02 → ~0.8;
+antisense-run interior region R8 imputed to ~true from both edges; intergenic flanks stay near baseline
+(no hallucination).
+
+## 8. Open questions
+- The exact unbiased count→density constant (per-side mass / `boundary_side_eff_len` ran ~0.3× of truth
+  on GENE0037; a crossing-count / `fl_mean` form over-samples) — derive from FL geometry and validate.
+- Density (6b-A) vs DNA-fraction (6b-B): which is more robust, and how to combine conflicting left/right
+  anchors over a run.
+- The **intergenic contained-mass = 0** behavior (§3.3): intended (genic-proximal-only calibration) or
+  a deposit gap? It deflates the global density and removes the baseline signal — fix or formally model.
+- AMBIG regions (opposite-strand overlap) at low strand-specificity: the genuinely-unidentifiable
+  floor — quantify the best achievable and ensure the fallback hits it.
 
 ---
 
@@ -289,9 +266,10 @@ SUITE=/Users/mkiyer/Downloads/rigel_runs/gdna_benchmark_5mb
 COND=gdna_gdna400_ss_0.99_nrna_none_capture_on
 python scripts/debug/gene37_sweep_walk.py --index $SUITE/rigel_index \
   --bam $SUITE/$COND/sim_oracle.bam --ref chr_syn --start 1659774 --end 1701056
-python scripts/debug/gene37_region_boundary_autopsy.py --index $SUITE/rigel_index \
-  --bam $SUITE/$COND/sim_oracle.bam --ref chr_syn --start 1659774 --end 1701056 \
-  --gtf $SUITE/reference/genes.gtf
+python scripts/debug/build_stress_overlap_scenario.py
+python scripts/debug/gene37_sweep_walk.py --index /tmp/rigel_sim/antisense_run/index \
+  --bam /tmp/rigel_sim/antisense_run/antisense_run_oracle.bam --ref antisense_run --start 4500 --end 8500
 ```
-Key code: `calibration/density_model.py` (sweep), `calibration/joint_deconv.py` (count prior use),
-`calibration/effective_length.py` (FL geometry), `calibration/priors.py` (`_transport_boundary_flux`).
+Key code: `density_model.py` (sweep + observability masks), `joint_deconv.py` (count-prior use),
+`effective_length.py` (FL geometry), `priors.py` (IPR eff-len + `_transport_boundary_flux`),
+`signature.py` (4-bit signatures).
