@@ -1,5 +1,11 @@
 # Principled clue integration (design / for review)
 
+> **SUPERSEDED — exploration log only.** The implementation foundation is now
+> `count_overdispersion_integration_plan.md` (clean, phased). This file records the reasoning trail
+> (the vetoed count-reliability §1–§7, the superseded strand-reliability weight §8, and the §9
+> count-overdispersion result that became the chosen solution). Kept for provenance; do not implement
+> from it.
+
 **Status:** §1–§7 below proposed a *count-reliability* metric — **VETOED** (see banner). The chosen
 direction is **§8: weight the count by STRAND reliability** (the count yields to strand to the extent
 strand is trustworthy), validated at both SS endpoints. 2026-06-09.
