@@ -15,7 +15,6 @@ import pysam
 from rigel.calibration import calibrate
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.fl import build_fl_models, gdna_fl_mass
-from rigel.calibration.effective_length import region_eff_length
 from rigel.calibration.signature import coarse_type_array
 from rigel.config import BamScanConfig, CalibrationConfig
 from rigel.index import TranscriptIndex
