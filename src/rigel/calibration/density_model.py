@@ -41,6 +41,11 @@ from .signature import BIT_EXON_NEG, BIT_EXON_POS, TS_AMBIG, TS_NEG, TS_NONE
 
 _EXON_BITS = BIT_EXON_POS | BIT_EXON_NEG
 _EPS = 1.0e-9
+#: |½ − κ| below which the strand clean is degenerate (κ ≈ ½, unstranded) and cannot separate gDNA
+#: from RNA — the linear unmix denominator vanishes, so the count clue keeps the raw count (frac 1)
+#: and defers identifiability to whatever strand signal exists. Distinct from _EPS (a divide floor):
+#: this is a "κ is effectively ½" detector on the sense-rate scale.
+_UNSTRANDED_TOL = 1.0e-6
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +112,7 @@ def strand_clean_gdna_frac(
     total = np.asarray(total, dtype=np.float64)
     sense_frac = np.where(total > 0.0, sense / np.maximum(total, _EPS), 0.5)
     denom = 0.5 - rna_sense_frac
-    if abs(denom) < 1.0e-6:  # unstranded — strand cannot clean
+    if abs(denom) < _UNSTRANDED_TOL:  # unstranded — strand cannot clean
         return np.ones_like(sense_frac)
     return np.clip((sense_frac - rna_sense_frac) / denom, 0.0, 1.0)
 
@@ -198,9 +203,9 @@ def node_gdna_density(
     density = np.where(anchored, density, global_density)
 
     # Count-prior MEAN: the strand-cleaned gDNA fraction of the contained mass,
-    # clip(density·eff_len / contained_mass). Computed here (was re-derived in the deconv and, as
-    # count_evidence/mass, in the gDNA strand-fit seed weight) so the concentration is free to carry
-    # the overdispersion-honest precision downstream.
+    # clip(density·eff_len / contained_mass). Computed here (consumed by the joint deconv as the
+    # prior mean AND by the gDNA strand-fit seed weight) so the concentration is free to carry the
+    # overdispersion-honest precision (count_evidence = N/(1+α·N)) downstream.
     contained_mass = np.asarray(substrate.contained.mass_unspliced, dtype=np.float64)
     with np.errstate(divide="ignore", invalid="ignore"):
         count_gdna_frac = np.clip(

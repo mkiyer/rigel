@@ -7,9 +7,10 @@ gDNA fraction ``gdna_frac``::
     posterior(gdna_frac) ∝ Beta(gdna_frac ; gdna_frac^count, count_concentration)  ·  BB_strand(sense, antisense | gdna_frac)
 
 - **count prior** ``Beta(a_c, b_c)``: mean ``count_gdna_frac = clip(density*eff_len / M, 0, 1)`` from
-  the **strand-cleaned** global density (``density_model.gdna_frac``), concentration
-  ``count_concentration`` = the expected gDNA count ``count_evidence = density*eff_len``.
-  Jeffreys-floored, so a node expecting ~no gDNA gives Beta(1/2, 1/2) and defers to the strand clue.
+  the **strand-cleaned** density (``density_model.strand_clean_gdna_frac`` →
+  ``node_density.count_gdna_frac``), concentration ``count_concentration`` = the overdispersion-limited
+  effective gDNA count ``N/(1+α·N)`` (``count_dispersion``). Jeffreys-floored, so a node expecting
+  ~no gDNA gives Beta(1/2, 1/2) and defers to the strand clue.
 - **strand likelihood** (Phase 2, Beta-Binomial): :func:`strand_likelihood.strand_loglik`. Absent
   (flat) for AMBIG / zero-flux nodes ⇒ count-only; degenerate for unstranded (rna_sense_frac = 0.5).
 
@@ -37,6 +38,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .count_dispersion import effective_count
 from .density_model import strand_clean_gdna_frac
 from .signature import TS_NEG, TS_POS
 from .strand_likelihood import strand_loglik
@@ -84,8 +86,8 @@ def _joint_per_node(
             rna[i] = float(mass_spliced[i])  # only deterministic spliced RNA, if any
             continue
         # Joint deconvolution: count prior Beta(a_c, b_c) (mean from the strand-cleaned global
-        # density, precision = expected gDNA count count_evidence) x strand likelihood. The global
-        # density is already strand-cleaned (density_model.gdna_frac), so the count clue is correct
+        # density, precision = overdispersion-limited effective gDNA count) x strand likelihood. The global
+        # density is already strand-cleaned (density_model.strand_clean_gdna_frac), so the count clue is correct
         # on every node — nascent introns read as RNA (density >> clean global density), silent gDNA
         # genes as gDNA — and *reinforces* the
         # strand where they agree. Strand absent (flat) for AMBIG / zero-flux nodes ⇒ count-only;
@@ -281,8 +283,8 @@ def deconv_sides(
     ``boundary_side_eff_len[r] = E_FL[min(ℓ, L_r)]`` (R2/R3). A side is **count-observable** iff
     its boundary is (no shared exon) ⇒ ``count_gdna_frac → 1`` from its own crossing density; otherwise
     it borrows the swept region density. It is **strand-observable** iff the boundary's two
-    regions share a single transcript strand. Returns ``(left, right)`` per-region JointDecodes
-    (zero where a side carries no mass — e.g. reference edges).
+    regions share a single transcript strand. Returns ``(left, right)`` per-region ``JointDeconv``
+    results (zero where a side carries no mass — e.g. reference edges).
 
     The side's count-prior concentration is the **crossing** count overdispersion-limited
     ``n_side / (1 + α_crossing·n_side)`` (sides are crossing-type seeds), so a capture-heterogeneous
@@ -298,8 +300,9 @@ def deconv_sides(
 
     def _deconv(view, same, ts_other, side_obs):
         sq = _compute_side(view, same, ts, ts_other, side_obs, eff, region_density, rna_sense_frac)
-        a = max(float(alpha_crossing), 0.0)
-        count_concentration = sq.n_side / (1.0 + a * sq.n_side)  # overdispersion-limited N_eff
+        count_concentration = effective_count(
+            sq.n_side, alpha_crossing
+        )  # overdispersion-limited N_eff
         return _joint_per_node(
             sq.mass,
             sq.mass_spliced,

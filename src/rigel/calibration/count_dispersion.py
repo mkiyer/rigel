@@ -46,10 +46,15 @@ class CountDispersionModel:
     fallback_used: bool  # pooled trend undefined (no usable seeds) ⇒ shrank toward the prior α₀
 
 
-def effective_count(count: np.ndarray, alpha: float) -> np.ndarray:
-    """Overdispersion-limited effective count ``N / (1 + α·N)`` (→ ``1/α`` as ``N → ∞``)."""
+def effective_count(count, alpha):
+    """Overdispersion-limited effective count ``N / (1 + α·N)`` (→ ``1/α`` as ``N → ∞``).
+
+    ``alpha`` may be a scalar or a per-element array (floored at 0); ``count`` likewise. This is the
+    single home for the overdispersion-limit formula — both the region (per-type α) and boundary-side
+    (α_crossing) concentrations route through it.
+    """
     count = np.asarray(count, dtype=np.float64)
-    a = max(float(alpha), _ALPHA_FLOOR)
+    a = np.maximum(np.asarray(alpha, dtype=np.float64), _ALPHA_FLOOR)
     return count / (1.0 + a * count)
 
 

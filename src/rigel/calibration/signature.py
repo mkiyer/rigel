@@ -13,8 +13,9 @@ on nothing else in the package, so every other calibration module can import
 it freely.
 
 Recovered from the pre-burn ``signature.py`` (``fc96902``), scrubbed of the
-obsolete 12-channel / FL-pool layout (the accumulator emits a 4-channel
-``region_contained`` plus separate boundary arrays; there is no FL pool).
+obsolete 12-channel layout (the accumulator emits a 4-channel ``region_contained``
+plus separate boundary arrays; the gDNA FL pools are a separate payload keyed by
+the coarse region type — see :func:`coarse_type_array`).
 """
 
 from __future__ import annotations

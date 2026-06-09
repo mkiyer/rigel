@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .count_dispersion import fit_gdna_count_overdispersion
+from .count_dispersion import effective_count, fit_gdna_count_overdispersion
 from .density_model import node_gdna_density
 from .derive import derive
 from .errors import CalibrationStrandError
@@ -166,7 +166,7 @@ def calibrate(
         count_disp.alpha_crossing,
     )
     support = np.asarray(node_density.count_support, dtype=np.float64)
-    count_evidence = support / (1.0 + region_alpha * support)
+    count_evidence = effective_count(support, region_alpha)
     logger.debug(
         "calibration: count overdispersion α_contained=%.4g (%d seeds) α_crossing=%.4g (%d seeds) "
         "[pooled trend=%.4g%s]",

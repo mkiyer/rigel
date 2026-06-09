@@ -226,11 +226,11 @@ class CalibrationConfig:
     """Configuration for the acyclic calibrator (:func:`rigel.calibration.calibrate`).
 
     The calibrator is a single feed-forward pass (no EM loop, no convergence test).
-    The per-node decode is the **joint** count × strand posterior (see ``joint_deconv``):
-    the strand clue cleans the global gDNA density ρ_0, then each node's gDNA fraction is the
-    posterior median under a count prior × Beta-Binomial strand likelihood, optionally shifted
-    toward gDNA by the FP-aversion ``gdna_strand_llr_bias`` log-odds tilt. The old EM-loop knobs are
-    gone.
+    The per-node deconvolution is the **joint** count × strand posterior (see ``joint_deconv``):
+    the strand clue cleans the global gDNA density ``gdna_density_global``, then each node's gDNA
+    fraction is the posterior median under a count prior × Beta-Binomial strand likelihood, optionally
+    shifted toward gDNA by the FP-aversion ``gdna_strand_llr_bias`` log-odds tilt. The old EM-loop
+    knobs are gone.
     """
 
     #: **Strand-deconvolution gDNA LLR bias** — the false-positive-aversion dial for the per-node

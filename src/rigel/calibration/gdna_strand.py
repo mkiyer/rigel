@@ -242,8 +242,8 @@ def _region_seeds(substrate, region_arrays, node_density):
     ``node_density.region_count_observable`` — excluding ``TS_AMBIG`` (both strands, no defined
     sense). The weight is the count-clue gDNA fraction ``node_density.count_gdna_frac`` (=
     ``clip(density·eff_len / mass)``, density cleaned by the strand *mean* ½, not the dispersion).
-    It reads the explicit count-prior MEAN rather than re-deriving it from ``count_evidence`` — so
-    the concentration is free to carry the overdispersion-honest precision.
+    It reads the explicit count-prior MEAN (``count_gdna_frac``) directly — decoupled from the
+    count-prior concentration, which carries the overdispersion-honest precision.
     """
     ts = np.asarray(region_arrays.strand_class)
     contained = substrate.contained
@@ -393,6 +393,4 @@ __all__ = [
     "fit_rna_strand_overdispersion",
     "fit_rna_strand_from_substrate",
     "overdispersion_for_beta",
-    "_OVERDISPERSION_FLOOR",
-    "_MAX_OVERDISPERSION",
 ]
