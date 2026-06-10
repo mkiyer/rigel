@@ -19,6 +19,31 @@ if TYPE_CHECKING:
 # which the spliced strand model is considered unidentifiable.
 STRAND_CONTRAST_NUMERICAL_FLOOR: float = 1e-3
 
+_Z_BY_CONFIDENCE = {0.90: 1.644854, 0.95: 1.959964, 0.99: 2.575829}
+
+
+def strand_contrast_identifiable(
+    p_r1_sense: float, n_observations: int, *, confidence: float = 0.99
+) -> bool:
+    """True when the strand contrast ``|2·p_r1_sense − 1|`` is distinguishable from 0 at ``confidence``.
+
+    The strand channel can separate gDNA (sense ½) from RNA (sense κ) only when the observed sense
+    rate is detectably off ½ given its sample size: ``|2p−1|`` must exceed both a numerical floor and
+    its normal-approximation margin ``z·SE`` (``SE = 2·sqrt(p(1−p)/n)``). Works off the two universal
+    strand-model scalars (``p_r1_sense``, ``n_observations``) so it applies to the ``StrandModels``
+    container, a single ``StrandModel``, and :class:`StrandSummary` alike.
+    """
+    p = float(p_r1_sense)
+    n = int(n_observations)
+    if n <= 0:
+        return False
+    try:
+        z = _Z_BY_CONFIDENCE[float(confidence)]
+    except KeyError as exc:
+        raise ValueError("confidence must be one of 0.90, 0.95, or 0.99") from exc
+    se = 2.0 * math.sqrt(p * (1.0 - p) / n)
+    return abs(2.0 * p - 1.0) >= max(STRAND_CONTRAST_NUMERICAL_FLOOR, z * se)
+
 
 @dataclass(frozen=True, slots=True)
 class StrandSummary:
@@ -115,16 +140,18 @@ class StrandSummary:
 
     def signed_strand_contrast_margin(self, *, confidence: float = 0.99) -> float:
         """Normal-approximation margin for detecting nonzero strand contrast."""
-        z_by_confidence = {
-            0.90: 1.644854,
-            0.95: 1.959964,
-            0.99: 2.575829,
-        }
         try:
-            z = z_by_confidence[float(confidence)]
+            z = _Z_BY_CONFIDENCE[float(confidence)]
         except KeyError as exc:
             raise ValueError("confidence must be one of 0.90, 0.95, or 0.99") from exc
         return z * self.signed_strand_contrast_se
+
+    def is_identifiable(self, *, confidence: float = 0.99) -> bool:
+        """True when the strand contrast is distinguishable from 0 at ``confidence`` (see
+        :func:`strand_contrast_identifiable`)."""
+        return strand_contrast_identifiable(
+            self.p_r1_sense, self.n_observations, confidence=confidence
+        )
 
     @property
     def strand_specificity(self) -> float:
@@ -164,4 +191,4 @@ class StrandSummary:
         return cls(p_r1_sense=0.5, n_observations=0)
 
 
-__all__ = ["StrandSummary", "STRAND_CONTRAST_NUMERICAL_FLOOR"]
+__all__ = ["StrandSummary", "STRAND_CONTRAST_NUMERICAL_FLOOR", "strand_contrast_identifiable"]

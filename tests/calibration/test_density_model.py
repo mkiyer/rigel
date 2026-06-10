@@ -1,10 +1,10 @@
-"""Unit tests for the density model: strand-clean closed form + local imputation.
+"""Unit tests for the count module (density_model): raw-count local imputation.
 
-Phase 1 of the density rework (docs/calibration/density_phase1_local_imputation_design.md): the
-global sweep is replaced by a LOCAL estimator — observable regions use their own contained density,
-non-observable (exon) regions are anchored from their observable boundary sides (crossing count /
-fl_mean, unbiased post the accumulator span fix), run interiors are carried inward, and a region
-with no observable node anywhere takes density 0 (⇒ defer to strand).
+The count module (decoupled architecture) estimates gDNA density from RAW unspliced counts — no
+strand cleaning. Observable regions use their own contained density; non-observable (exon/AMBIG)
+regions are anchored from their observable boundary sides (crossing count / fl_mean); run interiors
+are carried inward; a region with no observable node anywhere takes the global count-weighted-mean
+observable density. The per-node gDNA fraction is ``count_gdna_frac = clip(density·eff / mass)``.
 """
 
 from __future__ import annotations
@@ -13,10 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rigel.calibration.density_model import (
-    node_gdna_density,
-    strand_clean_gdna_frac,
-)
+from rigel.calibration.density_model import node_gdna_density
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.signature import (
     BIT_EXON_NEG,
@@ -32,42 +29,7 @@ INTERGENIC = 0  # no bits — count-observable
 
 
 # --------------------------------------------------------------------------- #
-# strand_clean_gdna_frac
-# --------------------------------------------------------------------------- #
-
-
-def test_clean_rna_rate_reads_zero_gdna():
-    # A node exactly at the RNA sense rate κ is pure RNA → gdna_frac 0.
-    gf = strand_clean_gdna_frac(sense=[80.0], total=[100.0], rna_sense_frac=0.8)
-    assert gf[0] == pytest.approx(0.0)
-
-
-def test_clean_symmetric_reads_full_gdna():
-    # Symmetric (sense_frac ½) = gDNA's signature → gdna_frac 1.
-    gf = strand_clean_gdna_frac(sense=[50.0], total=[100.0], rna_sense_frac=0.8)
-    assert gf[0] == pytest.approx(1.0)
-
-
-def test_clean_clips_to_unit_interval():
-    # More-antisense-than-RNA and more-sense-than-gDNA both saturate (no negatives, no >1).
-    gf = strand_clean_gdna_frac(sense=[20.0, 95.0], total=[100.0, 100.0], rna_sense_frac=0.8)
-    assert gf[0] == pytest.approx(1.0)  # (0.2−0.8)/(0.5−0.8)=2 → clip 1
-    assert gf[1] == pytest.approx(0.0)  # (0.95−0.8)/(0.5−0.8)=−0.5 → clip 0
-
-
-def test_clean_unstranded_is_degenerate_one():
-    # κ ≈ ½ ⇒ gDNA and RNA both symmetric ⇒ cannot clean ⇒ 1.0 (keep raw), never a divide-by-zero.
-    gf = strand_clean_gdna_frac(sense=[10.0, 90.0], total=[100.0, 100.0], rna_sense_frac=0.5)
-    assert np.allclose(gf, 1.0)
-
-
-def test_clean_empty_node_is_finite():
-    gf = strand_clean_gdna_frac(sense=[0.0], total=[0.0], rna_sense_frac=0.9)
-    assert np.isfinite(gf[0])
-
-
-# --------------------------------------------------------------------------- #
-# node_gdna_density — helpers to build a minimal substrate + region geometry
+# helpers to build a minimal substrate + region geometry
 # --------------------------------------------------------------------------- #
 
 
@@ -124,6 +86,10 @@ def _zeros(n):
     return (np.zeros(n), np.zeros(n))
 
 
+def _density(sub, ra, eff, fl_mean=50.0):
+    return node_gdna_density(sub, ra, region_eff_len=np.asarray(eff, dtype=np.float64), fl_mean=fl_mean)
+
+
 # --------------------------------------------------------------------------- #
 # node_gdna_density — geometry cases
 # --------------------------------------------------------------------------- #
@@ -132,15 +98,11 @@ def _zeros(n):
 def test_exon_between_introns_recovers_uniform_density():
     # intron+ | exon+ | intron+ ; both exon boundaries are observable.
     ra = _region_arrays([INTRON, EXON, INTRON])
-    # observable introns: symmetric (pure-gDNA) contained, count 200 each.
-    contained = ([100, 0, 100], [100, 0, 100])
-    # exon's two boundary sides: symmetric crossing flux, total 100 each.
-    left = ([0, 50, 0], [0, 50, 0])
+    contained = ([100, 0, 100], [100, 0, 100])  # observable introns: contained count 200 each
+    left = ([0, 50, 0], [0, 50, 0])  # exon's boundary sides: crossing flux total 100 each
     right = ([0, 50, 0], [0, 50, 0])
     sub = _substrate(3, contained, left, right)
-    nd = node_gdna_density(
-        sub, ra, region_eff_len=np.array([100.0, 100.0, 100.0]), fl_mean=50.0, rna_sense_frac=0.99
-    )
+    nd = _density(sub, ra, [100.0, 100.0, 100.0])
     # ρ = 200/100 = 2 (introns) and 100/50 = 2 (exon from each side) → uniform 2.
     assert np.allclose(nd.density, [2.0, 2.0, 2.0])
 
@@ -152,9 +114,7 @@ def test_tiny_observable_region_anchors_from_boundaries():
     left = ([0, 30, 0], [0, 30, 0])  # r1 left side total 60 → 60/50 = 1.2
     right = ([0, 40, 0], [0, 40, 0])  # r1 right side total 80 → 80/50 = 1.6
     sub = _substrate(3, contained, left, right)
-    nd = node_gdna_density(
-        sub, ra, region_eff_len=np.array([100.0, 0.0, 100.0]), fl_mean=50.0, rna_sense_frac=0.99
-    )
+    nd = _density(sub, ra, [100.0, 0.0, 100.0])
     assert np.isfinite(nd.density[1])  # not inf from /eff_len=0
     assert nd.density[1] == pytest.approx(np.mean([1.2, 1.6]))
 
@@ -167,75 +127,44 @@ def test_run_interior_filled_from_anchored_edges():
     left = ([0, 50, 0, 0, 0], [0, 50, 0, 0, 0])  # r1 anchors from its (observable) left boundary
     right = ([0, 0, 0, 100, 0], [0, 0, 0, 100, 0])  # r3 anchors from its (observable) right boundary
     sub = _substrate(5, contained, left, right)
-    nd = node_gdna_density(
-        sub, ra, region_eff_len=np.full(5, 100.0), fl_mean=50.0, rna_sense_frac=0.99
-    )
+    nd = _density(sub, ra, np.full(5, 100.0))
     assert nd.density[1] == pytest.approx(2.0)  # 100/50
     assert nd.density[3] == pytest.approx(4.0)  # 200/50
     assert nd.density[2] == pytest.approx(3.0)  # carry mean of the two flanks
 
 
-def test_no_observable_node_carries_no_support():
-    # A single exon-only reference: no observable region, no observable boundary → no anchor.
-    # Density takes the global baseline (0 here — there is no observable region) and the region
-    # carries NO count support ⇒ the count prior collapses to Jeffreys ⇒ strand governs.
-    ra = _region_arrays([EXON])
-    sub = _substrate(1, _zeros(1), _zeros(1), _zeros(1))
-    nd = node_gdna_density(
-        sub, ra, region_eff_len=np.array([100.0]), fl_mean=50.0, rna_sense_frac=0.99
-    )
-    assert nd.density[0] == 0.0  # global baseline = 0 (no observable region anywhere)
-    assert nd.count_support[0] == 0.0
-
-
-def test_single_strand_exon_carries_crossing_support():
-    # An ordinary single-strand exon between introns: NO categorical zeroing anymore. The exon is
-    # imputed from its observable boundaries and carries the honest CROSSING support
-    # (density·fl_mean) — the count overdispersion fit later right-sizes its precision. The
-    # observable introns carry CONTAINED support (density·region_eff_len).
+def test_count_gdna_frac_is_density_ratio():
+    # count_gdna_frac = clip(density·eff / mass). For a pure-gDNA observable intron at uniform
+    # density the contained mass equals density·eff, so the fraction is 1 (all gDNA).
     ra = _region_arrays([INTRON, EXON, INTRON])
     contained = ([100, 0, 100], [100, 0, 100])
     left = ([0, 50, 0], [0, 50, 0])
     right = ([0, 50, 0], [0, 50, 0])
     sub = _substrate(3, contained, left, right)
-    nd = node_gdna_density(
-        sub, ra, region_eff_len=np.full(3, 100.0), fl_mean=50.0, rna_sense_frac=0.99
-    )
-    assert nd.count_support[1] > 0.0  # exon NOT zeroed
-    assert nd.count_support[1] == pytest.approx(nd.density[1] * 50.0)  # crossing support (fl_mean)
-    assert nd.count_support[0] == pytest.approx(nd.density[0] * 100.0)  # intron: contained support
-    assert nd.count_support[2] == pytest.approx(nd.density[2] * 100.0)
+    nd = _density(sub, ra, np.full(3, 100.0))
+    assert nd.count_gdna_frac[0] == pytest.approx(1.0)  # intron: density·eff = 2·100 = 200 = mass
+    assert nd.count_gdna_frac[2] == pytest.approx(1.0)
+    # exon has no contained mass here ⇒ fraction 0 (no gDNA to attribute from its own count)
+    assert nd.count_gdna_frac[1] == pytest.approx(0.0)
 
 
-def test_ambig_overlap_carries_crossing_support():
-    # An AMBIG region (overlapping +/− exons) has NO defined sense, so the joint deconv skips the
-    # strand likelihood — the neighbour-imputed crossing count is the only signal. It is imputed
-    # from the observable boundaries and carries the crossing support (density·fl_mean).
-    ra = _region_arrays([INTRON, AMBIG, INTRON])
-    contained = ([100, 0, 100], [100, 0, 100])
-    left = ([0, 50, 0], [0, 50, 0])
-    right = ([0, 50, 0], [0, 50, 0])
-    sub = _substrate(3, contained, left, right)
-    nd = node_gdna_density(
-        sub, ra, region_eff_len=np.full(3, 100.0), fl_mean=50.0, rna_sense_frac=0.99
-    )
-    assert nd.density[1] == pytest.approx(2.0)  # imputed from the observable boundaries
-    assert nd.count_support[1] > 0.0  # AMBIG carries the imputed crossing support (NOT zeroed)
-    assert nd.count_support[1] == pytest.approx(nd.density[1] * 50.0)
+def test_no_observable_node_takes_zero_baseline():
+    # A single exon-only reference: no observable region, no observable boundary → no anchor.
+    # Density takes the global baseline, which is 0 (there is no observable region anywhere).
+    ra = _region_arrays([EXON])
+    sub = _substrate(1, _zeros(1), _zeros(1), _zeros(1))
+    nd = _density(sub, ra, [100.0])
+    assert nd.density[0] == 0.0
+    assert nd.count_gdna_frac[0] == 0.0
 
 
 def test_density_does_not_cross_references():
     # chr1 carries a high-density observable intron (density 4.0); chr2 is a lone no-anchor exon.
     # The chr2 exon must NOT inherit chr1's 4.0 via the run-fill carry (the carry is per-reference)
-    # — it takes the GLOBAL baseline (the count-weighted mean observable density, 4.0 here) for its
-    # MEAN but carries ZERO count support (no local evidence). The discriminating signal is the
-    # support: a within-ref carry would have given it nonzero support.
+    # — it takes the GLOBAL baseline (the count-weighted-mean observable density, 4.0 here).
     ra = _region_arrays([INTRON, EXON], ref_names=["chr1", "chr2"])
     contained = ([200, 0], [200, 0])
     sub = _substrate(2, contained, _zeros(2), _zeros(2))
-    nd = node_gdna_density(
-        sub, ra, region_eff_len=np.array([100.0, 100.0]), fl_mean=50.0, rna_sense_frac=0.99
-    )
+    nd = _density(sub, ra, [100.0, 100.0])
     assert nd.density[0] == pytest.approx(4.0)  # chr1 observable intron: 400 / 100
     assert nd.density[1] == pytest.approx(4.0)  # chr2 no-anchor: GLOBAL baseline, not a carry
-    assert nd.count_support[1] == 0.0  # no local evidence (a cross-ref carry would be nonzero)

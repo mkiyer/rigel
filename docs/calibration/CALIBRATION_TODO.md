@@ -1,9 +1,30 @@
 # CALIBRATION_TODO — open issues toward a production-ready deconvolution
 
-**Status:** living tracker. Opened 2026-06-09 after the count-overdispersion work (Phase A/B,
-main@a23e236) + a calibration code review (main@978ad9e) + a deep dive into the residual
-gDNA→RNA leak on the flagship capture scenario. Several fronts are open at once; this document
-enumerates them so we stop conflating them and can attack each on its own terms.
+**Status:** living tracker. Opened 2026-06-09; major redirect 2026-06-10.
+
+> **2026-06-10 architecture change — DECOUPLED strand/count.** The Phase-0/1 benchmark (below) proved
+> the *joint* count×strand product mis-weights two unequal estimators: the count overdispersion crush
+> was a load-bearing crutch that made the deconvolution defer to strand under capture, and removing it
+> tripled the flagship leak. Resolution: **decouple** — route each node to the strand module
+> (Beta-Binomial posterior; unbiased) OR the count module (raw density ratio; biased under capture),
+> never a product, on disjoint node sets. The joint approach is archived in
+> `archive/joint_deconvolution.md`; the live design is `decoupled_calibration_design.md`. This
+> supersedes Phase 0/1 (`phase0_phase1_implementation_plan.md`) and the count-overdispersion line; the
+> count-module accuracy work (point-5 imputation) continues under `count_channel_capture_design.md`.
+> Strand-cleaning is replaced by the strand module's exact Beta-Binomial posterior (the clip-free
+> robust estimator the deferred doc described). Issues #1–#5 below predate this and are re-scoped by it.
+
+> **2026-06-10 redirect (superseded by the above).** Diagnostics (`scripts/debug/diag_*.py`) showed the dominant capture leak is
+> a **count-channel** failure, not strand-cleaning: a single global NB count overdispersion mistook
+> hybrid-capture's on/off-target *mean* heterogeneity for dispersion (α_crossing 0.0005→86 off→on),
+> crushing the count concentration to ~0 and annihilating the count clue exactly where it is the only
+> signal (unstranded+capture). **Phase 0** tore down that overdispersion model (count concentration =
+> the gDNA count behind the node, Poisson precision); **Phase 1** floored the count prior on the
+> node's own mean instead of Jeffreys ½ (kills the no-gDNA-exon false positive). The new direction +
+> staged plan live in `count_channel_capture_design.md`; the shipped change in
+> `phase0_phase1_implementation_plan.md`. Issue #2 is **reverted/closed**; Issue #1 (strand-cleaning)
+> is **deferred** — concept captured in `strand_clean_robust_deferred.md`. Issues #3–#5 below predate
+> the redirect (kept for context; re-evaluate against the post-Phase-0/1 benchmark).
 
 ## Where we are
 

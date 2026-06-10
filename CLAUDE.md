@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rigel is a Bayesian RNA-seq transcript quantification tool that jointly models mRNA, nascent RNA (nRNA), and genomic DNA contamination (gDNA). It uses a single-pass C++ BAM scanner, a per-region **calibration** stage that deconvolves the library into gDNA vs RNA, and a locus-level EM solver. Python package name is `rigel-rnaseq` on PyPI; the import and CLI are `rigel`.
 
-> **Calibration (acyclic, calibration-v6).** The calibration stage is an **acyclic single-pass** count×strand deconvolution (no iterative EM/M-step — the old `density.py`/`estep.py`/`exposure.py`/`sweep.py`/`mstep.py` modules were removed in the acyclic redesign). Theory: `docs/calibration/calibration_theory.md` (authoritative); fractional-accumulator spec in `docs/accumulator/00_design.md`; open work in `docs/calibration/CALIBRATION_TODO.md`; docs index in `docs/README.md`. The full pipeline (scan → calibrate → **quant**) runs end-to-end: `quant_from_buffer` + `calibration.priors.assemble_priors` are wired in `run_pipeline`.
+> **Calibration (acyclic, decoupled strand/count).** The calibration stage is an **acyclic single-pass** deconvolution that routes each node to a **strand module** (Beta-Binomial posterior, for strand-observable nodes in a strand-identifiable library) or a **count module** (raw density ratio, for everything else) — a handoff, not a joint product (the joint count×strand approach is archived in `docs/calibration/archive/joint_deconvolution.md`). No iterative EM/M-step. Theory: `docs/calibration/calibration_theory.md` (authoritative); fractional-accumulator spec in `docs/accumulator/00_design.md`; open work in `docs/calibration/CALIBRATION_TODO.md`; docs index in `docs/README.md`. The full pipeline (scan → calibrate → **quant**) runs end-to-end: `quant_from_buffer` + `calibration.priors.assemble_priors` are wired in `run_pipeline`.
 
 ## Build & Development
 
@@ -84,15 +84,14 @@ ruff format src/ tests/
 
 **Calibration package (`calibration/`):**
 
-- `calibrate.py` — the **acyclic single-pass** calibrator orchestrator (RNA strand balance → count-clue density → gDNA/RNA strand overdispersion → count overdispersion → joint count×strand deconvolution → derive)
+- `calibrate.py` — the **acyclic single-pass** calibrator orchestrator (RNA strand balance + identifiability → count-module density → gDNA/RNA strand overdispersion → per-node strand/count handoff → derive)
 - `substrate.py` — `CalibrationSubstrate`: payload → per-region 3-view (contained / left / right) sufficient statistics
 - `region_arrays.py` / `regions.py` — region geometry (`RegionArrays`, build partition from `index.region_df`)
 - `signature.py` — region 4-bit strand/type signature + `strand_class` (POS/NEG/NONE/AMBIG)
-- `density_model.py` — count clue: per-region/boundary gDNA **density** via the region↔boundary sweep + count-observability masks (`region_count_observable` / `boundary_count_observable`); strand-cleaned by the strand *mean*
+- `density_model.py` — **count module**: per-region/boundary gDNA **density** from RAW unspliced counts via local boundary-anchored imputation + count-observability masks (`region_count_observable` / `boundary_count_observable`); returns `count_gdna_frac` (no strand cleaning)
 - `strand_balance.py` / `strand_summary.py` — **RNA** strand *mean*: `rna_sense_frac` (used by the decode). `StrandBalance.rna_strand_overdispersion` here is a QC-only thin-count power diagnostic (`1/(n_obs+3)`), distinct from the decode's RNA overdispersion (see `gdna_strand.py`)
 - `gdna_strand.py` — **both** strand Beta-Binomial overdispersions (shared component-agnostic MoM core): `gdna_strand_overdispersion` (mean ½, fit from count-observable seed regions + boundary sides) and `rna_strand_overdispersion` (mean κ, fit from boundary-side spliced counts). Both applied symmetrically in `strand_likelihood` with the same default prior, so unstranded data is uninformative (see `docs/calibration/calibration_theory.md` §4.3)
-- `count_dispersion.py` — gDNA **count** overdispersion (count-side twin of `gdna_strand`): per-type NB method-of-moments `α` (contained regions vs crossing boundary sides) shrunk toward the global pooled-seed trend (α₀=1 geometric fallback). The count-prior concentration is the overdispersion-limited effective count `N_eff = N/(1+α·N)` — the honest precision that replaced the old categorical `defer_to_strand` zeroing (see `docs/calibration/count_overdispersion_integration_plan.md`)
-- `joint_deconv.py` — per-node joint count×strand deconvolution into gDNA/RNA (`strand_loglik` two-component variance); also exposes `boundary_side_seeds` for the gDNA strand fit
+- `strand_deconv.py` — **strand module** + per-node strand/count **handoff**: a strand-observable node in a strand-identifiable library takes the Beta-Binomial posterior (`strand_loglik`, weak Beta(½,½) prior, optional `gdna_strand_llr_bias`), every other node takes the count module's `count_gdna_frac`; disjoint, never a product. Also exposes `boundary_side_seeds` for the gDNA strand fit
 - `derive.py` — `gdna_density_global` + per-node exposure (+ exposure-weighted gDNA length) from the deconvolved masses
 - `effective_length.py` — FL-marginal effective lengths (region / boundary)
 - `fl.py` — gDNA / RNA / global fragment-length pmfs (empirical-Bayes smoothed)

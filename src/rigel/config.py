@@ -225,12 +225,11 @@ class BamScanConfig:
 class CalibrationConfig:
     """Configuration for the acyclic calibrator (:func:`rigel.calibration.calibrate`).
 
-    The calibrator is a single feed-forward pass (no EM loop, no convergence test).
-    The per-node deconvolution is the **joint** count × strand posterior (see ``joint_deconv``):
-    the strand clue cleans the global gDNA density ``gdna_density_global``, then each node's gDNA
-    fraction is the posterior median under a count prior × Beta-Binomial strand likelihood, optionally
-    shifted toward gDNA by the FP-aversion ``gdna_strand_llr_bias`` log-odds tilt. The old EM-loop
-    knobs are gone.
+    The calibrator is a single feed-forward pass (no EM loop, no convergence test). The per-node
+    deconvolution is a **strand-vs-count handoff** (see ``strand_deconv``): a strand-observable node
+    in a strand-identifiable library takes the strand module's Beta-Binomial posterior median
+    (optionally shifted toward gDNA by the FP-aversion ``gdna_strand_llr_bias`` log-odds tilt), every
+    other node takes the count module's gDNA fraction. The old EM-loop knobs are gone.
     """
 
     #: **Strand-deconvolution gDNA LLR bias** — the false-positive-aversion dial for the per-node
@@ -251,6 +250,18 @@ class CalibrationConfig:
     #: Grid resolution of the decode posterior over the gDNA fraction on ``[0, 1]``.
     #: Advanced/technical — 200 is ample for a smooth 1-D posterior.
     n_grid: int = 200
+
+    #: **Strand-identifiability confidence** (advanced) — the global gate that activates/deactivates
+    #: the strand deconvolution pathway for the whole library. The strand channel can separate gDNA
+    #: (sense ½) from RNA (sense κ) only when the spliced sense contrast ``|2·p_r1_sense − 1|`` is
+    #: distinguishable from 0 at this confidence given the spliced-read count (a one-sample
+    #: normal-approximation test: ``|2p−1| ≥ z·SE``, ``SE = 2·√(p(1−p)/n)``). Below the threshold the
+    #: library is treated as unstranded → every node routes to the count module (strand is a no-op).
+    #: This is a **statistical** threshold (it scales with the data's own standard error), not a fixed
+    #: cutoff on the strand rate. ``0.99`` is conservative (a weakly-stranded library must clear a 99%
+    #: bar before the strand pathway engages); ``0.95`` / ``0.90`` engage it more readily. Must be one
+    #: of ``{0.90, 0.95, 0.99}``.
+    strand_identifiability_confidence: float = 0.99
 
     #: **gDNA strand-overdispersion prior** (advanced). The gDNA per-region sense rate is
     #: ``Beta(a, a)``; this is that symmetric shape ``a`` (= α = β). The fitted overdispersion is
@@ -277,23 +288,6 @@ class CalibrationConfig:
     #: Strength of the RNA overdispersion prior, in effective seed-node units (advanced). Twin of
     #: ``gdna_strand_prior_weight``; same default.
     rna_strand_prior_weight: float = 30.0
-
-    #: **Count-overdispersion fallback α₀** (advanced). The count-side twin of the strand
-    #: overdispersion. The count-prior concentration is the NB-overdispersion-limited effective gDNA
-    #: count ``N_eff = N/(1+α·N)`` (→ ``1/α`` for large ``N``); ``α`` is fit per count-type (contained
-    #: regions vs crossing boundary sides) by NB method-of-moments and shrunk toward the global
-    #: pooled-seed trend. This ``α₀`` is the fallback used only when even the pooled trend is
-    #: degenerate (too few seeds). ``1.0`` is the **geometric** NB (max-entropy at fixed mean):
-    #: ``N_eff → 1`` — absent any dispersion evidence a count is worth ~1 pseudo-observation, the
-    #: count analog of the Jeffreys ``Beta(½,½)`` floor (conservative: defers to the strand clue).
-    count_overdispersion_prior: float = 1.0
-
-    #: Strength of the count-overdispersion prior, in effective seed-node units (advanced). The
-    #: per-type MoM is shrunk toward the pooled trend by ``(n·α̂ + w·trend)/(n + w)``; with the
-    #: abundant seeds of a normal library it is negligible (the data dominates and the distinct
-    #: contained/crossing dispersions are preserved), and it only guards the degenerate few-seed
-    #: case. Same units + default as ``gdna_strand_prior_weight``.
-    count_overdispersion_prior_weight: float = 30.0
 
     def __post_init__(self) -> None:
         if not math.isfinite(float(self.gdna_strand_llr_bias)):
@@ -325,16 +319,10 @@ class CalibrationConfig:
                 "CalibrationConfig.rna_strand_prior_weight must be >= 0; "
                 f"got {self.rna_strand_prior_weight}."
             )
-        if self.count_overdispersion_prior < 0.0:
+        if self.strand_identifiability_confidence not in (0.90, 0.95, 0.99):
             raise ValueError(
-                "CalibrationConfig.count_overdispersion_prior must be >= 0 "
-                "(an NB dispersion cannot be negative); "
-                f"got {self.count_overdispersion_prior}."
-            )
-        if self.count_overdispersion_prior_weight < 0.0:
-            raise ValueError(
-                "CalibrationConfig.count_overdispersion_prior_weight must be >= 0; "
-                f"got {self.count_overdispersion_prior_weight}."
+                "CalibrationConfig.strand_identifiability_confidence must be one of "
+                f"{{0.90, 0.95, 0.99}}; got {self.strand_identifiability_confidence}."
             )
 
 

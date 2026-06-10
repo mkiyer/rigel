@@ -26,9 +26,9 @@ BAM ──scan_and_buffer──▶ FragmentBuffer + AccumulatorPayload + trained
    fragment mass into the C++ **accumulator** (4 channels: unspliced ±, spliced sense/antisense)
    → an `AccumulatorPayload`.
 
-2. **Calibrate** (`calibration.calibrate`): an **acyclic single-pass** count×strand deconvolution of
-   the accumulator payload into gDNA vs RNA per node, fitting the library hyperparameters
-   (`gdna_density_global`, `rna_sense_frac`, the strand and count overdispersions). Output:
+2. **Calibrate** (`calibration.calibrate`): an **acyclic single-pass** deconvolution of the
+   accumulator payload into gDNA vs RNA per node by a **decoupled strand/count handoff**, fitting the library hyperparameters
+   (`gdna_density_global`, `rna_sense_frac`, the gDNA/RNA strand overdispersions). Output:
    `CalibrationResult`. See `calibration/calibration_theory.md`.
 
 3. **Quantify** (`quant_from_buffer`): bridges calibration → per-locus prior
@@ -67,10 +67,9 @@ BAM ──scan_and_buffer──▶ FragmentBuffer + AccumulatorPayload + trained
 | `region_arrays.py` / `regions.py` | region geometry (`RegionArrays`, partition from `index.region_df`) |
 | `signature.py` | 4-bit exon/intron×strand signature + `strand_class` (POS/NEG/NONE/AMBIG) |
 | `strand_balance.py` | RNA strand mean `rna_sense_frac` (κ) from the spliced channel |
-| `density_model.py` | count clue: per-region gDNA density via local imputation + strand cleaning |
+| `density_model.py` | count module: per-region gDNA density via local imputation on raw counts (`count_gdna_frac`) |
 | `gdna_strand.py` | gDNA & RNA strand Beta-Binomial overdispersions (shared pooled-MoM core) |
-| `count_dispersion.py` | gDNA count overdispersion (NB MoM); concentration `N_eff = N/(1+αN)` |
-| `joint_deconv.py` | per-node joint count×strand deconvolution into gDNA/RNA |
+| `strand_deconv.py` | per-node strand/count **handoff**: strand-observable nodes in a strand-identifiable library take the strand Beta-Binomial posterior, all others take the count fraction (disjoint, never a product) |
 | `derive.py` | `gdna_density_global` + geometric gDNA length from the deconvolved masses |
 | `effective_length.py` / `fl.py` | FL-marginal effective lengths; gDNA/RNA/global FL pmfs |
 | `priors.py` | `assemble_priors`: `CalibrationResult` → per-locus Dirichlet prior + gDNA eff-len |

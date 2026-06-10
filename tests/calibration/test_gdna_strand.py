@@ -188,9 +188,9 @@ def test_wrapper_excludes_ambig_and_non_observable():
 
 
 def test_boundary_side_seeds_extracts_observable_seam_sides():
-    """boundary_side_seeds picks the count- & strand-observable seam sides with cleaned weights."""
-    from rigel.calibration.joint_deconv import boundary_side_seeds
+    """boundary_side_seeds picks the count- & strand-observable seam sides with count weights."""
     from rigel.calibration.signature import TS_POS
+    from rigel.calibration.strand_deconv import boundary_side_seeds
 
     def view(pos, neg):
         pos = np.asarray(pos, dtype=np.float64)
@@ -213,12 +213,13 @@ def test_boundary_side_seeds_extracts_observable_seam_sides():
         boundary_count_observable=np.array([True, False]), density=np.zeros(2)
     )
     sense, total, weight = boundary_side_seeds(
-        substrate, region_arrays, node_density, np.array([100.0, 100.0]), rna_sense_frac=0.95
+        substrate, region_arrays, node_density, np.array([100.0, 100.0])
     )
     assert sorted(np.round(sense).tolist()) == [70.0, 80.0]
     assert sorted(total.tolist()) == [100.0, 100.0]
-    # weight = strand-cleaned gDNA fraction (sense_frac−0.95)/(0.5−0.95): 0.7→0.556, 0.8→0.333.
-    assert sorted(np.round(weight, 3).tolist()) == [0.333, 0.556]
+    # weight = count_gdna_frac: a count-observable seam side reads its own crossing density
+    # (mass/eff), so count_gdna_frac = clip((mass/eff)·eff/mass) = 1 (gDNA by signature).
+    assert np.allclose(weight, 1.0)
 
 
 # --- the decode application (strand_likelihood) ---------------------------------------------

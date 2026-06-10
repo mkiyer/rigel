@@ -40,8 +40,8 @@ def _beta_binom_nodes(rng, n_nodes, depth, overdispersion, mean):
 def _decoded_gdna_frac(sense, antisense, kappa, *, gdna_od, rna_od, n_grid=4000):
     """Posterior median gDNA fraction of one node under a FLAT count prior (strand-only decode).
 
-    Mirrors ``joint_deconv._joint_per_node`` with ``count_evidence = 0`` (flat prior), so this
-    isolates the strand likelihood's effect on the deconvolution.
+    Mirrors the strand module (``strand_deconv._deconv_per_node`` strand branch): a weak prior ×
+    the strand likelihood, isolating the strand likelihood's effect on the deconvolution.
     """
     grid = np.linspace(1e-6, 1.0 - 1e-6, n_grid)
     ll = strand_loglik(

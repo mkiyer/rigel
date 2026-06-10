@@ -18,10 +18,10 @@ overdispersion is fit from **boundary-side spliced counts** (spliced ⇒ pure RN
 
 **Breaking the circularity** (gDNA only). Fitting the overdispersion needs to know which fragments are gDNA,
 which is what the deconvolution determines — circular. We break it with the count⊥strand
-conditional independence the engine already relies on: the **count clue** supplies a per-node
-gDNA fraction ``gdna_weight`` that is *independent* of the strand overdispersion (the density is
-cleaned by the strand **mean** ½, never the dispersion). Given those weights and the RNA sense
-rate, the overdispersion is identified from the **excess variance of the sense split beyond
+conditional independence the engine already relies on: the **count module** supplies a per-node
+gDNA fraction ``gdna_weight`` (``count_gdna_frac``, a raw count/density ratio) that is *independent*
+of the strand overdispersion (it uses no strand information at all). Given those weights and the RNA
+sense rate, the overdispersion is identified from the **excess variance of the sense split beyond
 Binomial**, attributable to the gDNA fragments.
 
 **Estimator — pooled method of moments.** For each seed node ``s`` (a count-observable region or
@@ -53,7 +53,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .joint_deconv import boundary_side_seeds
+from .strand_deconv import boundary_side_seeds
 from .signature import TS_AMBIG, TS_NEG
 
 #: Hard floor on overdispersion — the Binomial limit (no negative overdispersion).
@@ -272,7 +272,7 @@ def fit_gdna_strand_from_substrate(
 
     * **contained regions** — intergenic + intron-only (:func:`_region_seeds`);
     * **boundary sides** — exon–intron / exon–intergenic seams
-      (:func:`joint_deconv.boundary_side_seeds`), needed under hybrid capture, which depletes
+      (:func:`strand_deconv.boundary_side_seeds`), needed under hybrid capture, which depletes
       off-target intergenic/intronic gDNA.
 
     Both contribute ``(sense, total, gdna_weight)`` on the same footing — the weight being the
@@ -281,7 +281,7 @@ def fit_gdna_strand_from_substrate(
     """
     r_sense, r_total, r_weight = _region_seeds(substrate, region_arrays, node_density)
     b_sense, b_total, b_weight = boundary_side_seeds(
-        substrate, region_arrays, node_density, boundary_side_eff_len, rna_sense_frac=rna_sense_frac
+        substrate, region_arrays, node_density, boundary_side_eff_len
     )
     sense = np.concatenate([r_sense, b_sense])
     total = np.concatenate([r_total, b_total])

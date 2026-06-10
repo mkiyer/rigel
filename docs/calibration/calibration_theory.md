@@ -28,15 +28,20 @@ gDNA vs RNA using two clues that are conditionally independent given the library
 - **Strand clue** — *which strand*. gDNA is 50/50 (sense rate ½); RNA is stranded (sense rate
   `κ = rna_sense_frac`). A node's observed sense fraction places it between the two.
 
-They are combined per node as a Bayesian posterior over the gDNA fraction `g`:
+The two clues are **decoupled** — each node is *routed* to exactly one estimator (a handoff, not a
+product), because the strand estimator is *unbiased* (gDNA symmetric at ½, RNA at κ) while the count
+estimator is *biased* under hybrid capture, and mixing the two re-introduces bias:
 
 ```
-posterior(g) ∝ Beta(g ; count prior)  ·  BetaBinomial(sense | g, κ, overdispersions)
+route_strand = strand_identifiable (global)  AND  strand_observable (per-node)
+   TRUE  → STRAND module:  Beta-Binomial posterior over g, weak Beta(½,½) prior
+   FALSE → COUNT  module:  g = clip(ρ·eff_len / mass)
 ```
 
-When one clue is uninformative the posterior gracefully falls back to the other: unstranded data
-(κ→½) ⇒ flat strand likelihood ⇒ count-only; a node with no count evidence ⇒ Jeffreys count prior ⇒
-strand-only.
+So strand decides wherever it has signal (strand-observable nodes in a strand-identifiable library),
+and count handles the rest (`AMBIG`/no-defined-sense nodes, and *every* node when the library is
+unstranded). They act on disjoint node sets and cannot conflict. The retired joint product is
+archived in `archive/joint_deconvolution.md`; see `decoupled_calibration_design.md` for the rationale.
 
 ## 3. Count-observability (signature-based, no circularity)
 
@@ -64,48 +69,46 @@ mass; see CALIBRATION_TODO Issue #3.)
 
 ```
 substrate (per-region 3-view sufficient statistics from the accumulator payload)
-  1. RNA strand balance        → κ = rna_sense_frac           (strand_balance.py)
-  2. node gDNA density          → per-node density + count-prior mean, strand-cleaned by κ
-                                                                (density_model.py)
+  1. RNA strand balance        → κ = rna_sense_frac + strand_identifiable   (strand_balance.py)
+  2. node gDNA density (count)  → per-node RAW density + count gDNA fraction  (density_model.py)
   3. gDNA & RNA strand overdispersion (Beta-Binomial, pooled MoM + prior shrinkage)
                                                                 (gdna_strand.py)
-  4. count overdispersion       → per-type NB α (contained / crossing)  (count_dispersion.py)
-  5. joint count×strand deconv  → per-node gDNA / RNA mass      (joint_deconv.py)
-  6. derive                     → gdna_density_global, geometric gDNA length  (derive.py)
+  4. per-node strand/count handoff → per-node gDNA / RNA mass   (strand_deconv.py)
+  5. derive                     → gdna_density_global, geometric gDNA length  (derive.py)
 ```
 
-### 4.1 Strand balance (κ)
+### 4.1 Strand balance (κ) + identifiability
 `rna_sense_frac` is the posterior-mean sense fraction of the **spliced** unique-mapper channel
-(spliced ⇒ pure RNA). Zero spliced reads ⇒ the orientation is unidentifiable ⇒ `CalibrationStrandError`
-(a real RNA-seq library always has spliced reads).
+(spliced ⇒ pure RNA). `strand_identifiable` — the global routing gate — is true when the spliced
+sense contrast `|2·p−1|` is distinguishable from 0 at 99% given its sample size
+(`strand_summary.strand_contrast_identifiable`). Zero spliced reads ⇒ not an RNA-seq library ⇒
+`CalibrationStrandError`; a balanced-but-nonzero (unstranded) channel ⇒ `strand_identifiable=False`
+⇒ everything routes to the count module.
 
-### 4.2 Count clue: per-node gDNA density (`density_model.py`)
-The gDNA density is read directly from count-observable nodes and **imputed locally** for the rest
-(an exon region anchors from its observable boundary sides; run interiors carry the nearest anchor;
-no global sweep). It is **strand-cleaned** by κ first, so the density is *clean gDNA*, not
-gDNA+nascent. The strand clean is the linear unmix `ĝ = (s−κ)/(½−κ)`, made robust by precision-
-weighted shrinkage (Issue #1). The node returns: the **mean** `count_gdna_frac` (the prior mean)
-and the **honest support** `count_support` (the gDNA count behind it).
+### 4.2 Count module: per-node gDNA density (`density_model.py`)
+The gDNA density is read directly from count-observable nodes (on **raw** unspliced counts — no
+strand cleaning) and **imputed locally** for the rest (an exon region anchors from its observable
+boundary sides; run interiors carry the nearest anchor; a no-anchor region takes the global
+count-weighted-mean observable density). The node returns the count module's gDNA fraction
+`count_gdna_frac = clip(density·eff_len / mass)`, used for count-routed nodes and as the gDNA
+strand-fit seed weight. Improving this estimate under capture (the point-5 unspliced-fraction
+projection) is tracked in `count_channel_capture_design.md`.
 
 ### 4.3 Strand overdispersion (`gdna_strand.py`)
 gDNA is unstranded (mean ½) but real libraries are **overdispersed** about ½; RNA likewise about κ.
 Both are fit as Beta-Binomial intra-class correlations by a shared pooled method-of-moments core
 (gDNA from count-observable seed regions + boundary sides; RNA from boundary-side spliced counts),
 shrunk toward the *same* default prior so that under sparse data both collapse to one distribution
-and unstranded data is uninformative.
+and unstranded data is uninformative. These parameterise the strand module.
 
-### 4.4 Count overdispersion (`count_dispersion.py`)
-RNA-seq/gDNA counts are NB-overdispersed, so the count-prior **concentration** is not the raw count
-(Poisson) but the **overdispersion-limited effective count** `N_eff = N/(1+α·N)` (→ 1/α for large
-N). `α` is fit per count-type (contained regions vs crossing boundary sides) by NB MoM against the
-global-density expectation, shrunk toward the pooled-seed trend (geometric `α₀=1` fallback). This
-replaced an earlier categorical "defer to strand" zeroing with one principled precision.
-
-### 4.5 Joint deconvolution (`joint_deconv.py`)
-Per node, the count prior `Beta(N_eff·gf, N_eff·(1−gf))` (Jeffreys-floored) is multiplied by the
-strand Beta-Binomial likelihood; the reported gDNA fraction is the posterior median, optionally
-shifted in log-odds by the FP-aversion knob `gdna_strand_llr_bias` (default 0). gDNA mass = `g·M`,
-RNA mass = `(1−g)·M` + the deterministic spliced mass. Mass is conserved per node.
+### 4.4 Per-node strand/count handoff (`strand_deconv.py`)
+Each node routes (§2): a strand-observable node in a strand-identifiable library takes the **strand
+module** — the Beta-Binomial posterior over `g` (weak Beta(½,½) prior × the strand likelihood),
+reported as the posterior median, optionally log-odds-shifted by the FP-aversion knob
+`gdna_strand_llr_bias` (default 0); every other node takes the **count module**'s
+`count_gdna_frac`. The strand posterior is the exact, clip-free robust strand deconvolution (its MLE
+is the linear unmix `(s−κ)/(½−κ)` but bounded and overdispersion-widened — no clip bias). gDNA mass
+= `g·M`, RNA mass = `(1−g)·M` + the deterministic spliced mass. Mass is conserved per node.
 
 ### 4.6 Derive (`derive.py`)
 `gdna_density_global` (a QC scalar) and the geometric gDNA length are derived from the aggregate
@@ -139,6 +142,7 @@ the compatible transcripts. The locus EM has **`n_t + 1` components** — one pe
 
 ## 7. Open work
 
-Tracked in `CALIBRATION_TODO.md`. Active design docs: `strand_cleaning_robustness_design.md` +
-`strand_clean_global_target_design.md` (Issue #1), `count_overdispersion_integration_plan.md`
-(Issue #2), `density_phase2_dna_fraction_design.md` (the deferred DNA-fraction lever).
+Tracked in `CALIBRATION_TODO.md`. Active design docs: `count_channel_capture_design.md` (the
+count-channel direction under capture) + `phase0_phase1_implementation_plan.md` (the shipped
+overdispersion teardown + own-mean floor); `strand_clean_robust_deferred.md` (deferred strand-clean
+concept); `density_phase2_dna_fraction_design.md` (the deferred DNA-fraction lever).

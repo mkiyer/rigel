@@ -1,2 +1,2 @@
 locus_id	locus_span_bp	n_transcripts	n_annotated_transcripts	n_nrna_entities	n_genes	n_em_fragments	count_unambig	mrna	nrna	gdna	total	gdna_rate	gdna_prior_count	rna_prior_count	enable_gdna	n_regions_touched	multi_locus_region_mass	partial_coverage_region_mass	gdna_eff_len_em	gdna_eff_len_per_bp
-0	1100	4	2	2	2	526	474.0	979.3543803583082	6.6373059132938835e-298	20.64561964169188	1000.0	0.02064561964169188	70.61568201572442	929.3842538049743	1	0	0.0	0.0	784.4516530831393	0.0
+0	1100	4	2	2	2	526	474.0	1000.0	6.8774676665893405e-298	1.8279865412035956e-298	1000.0	1.8279865412035955e-301	0.0	999.9999358206987	1	0	0.0	0.0	2071.6938349007314	0.0

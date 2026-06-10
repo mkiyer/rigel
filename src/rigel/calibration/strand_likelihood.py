@@ -1,6 +1,6 @@
 """Strand likelihood — the two-component gDNA/RNA strand log-likelihood of one node.
 
-Used by the joint deconvolution (:mod:`joint_deconv`). A region's unspliced fragments are a
+Used by the per-node strand module (:mod:`strand_deconv`). A region's unspliced fragments are a
 mix of **gDNA** and **RNA**, both **Beta-Binomial overdispersed**:
 
 * gDNA is unstranded (oriented-sense rate ½) with intra-class correlation
@@ -14,7 +14,7 @@ the same distribution under sparse data and an unstranded node (κ = ½, equal o
 term preferred the lower-variance component, pulling balanced nodes toward RNA).
 
 Given the observed (sense, antisense) split, this returns the strand log-likelihood over a grid
-of candidate gDNA fractions ``gdna_frac``, which the joint deconvolution multiplies into the
+of candidate gDNA fractions ``gdna_frac``, which the per-node strand module multiplies into the
 count prior. Only POS/NEG nodes carry a valid sense split; AMBIG (both strands) and intergenic
 (no transcript) nodes are strand-uninformative and left to the count clue.
 """

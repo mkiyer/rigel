@@ -175,26 +175,12 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
         setattr(stats, key, stats_dict.get(key, 0))
 
 
-def _strand_summary_identifiable(
-    strand_summary,
-    *,
-    confidence: float = 0.99,
-) -> bool:
-    from .calibration.strand_summary import STRAND_CONTRAST_NUMERICAL_FLOOR
-
-    effective_min = max(
-        STRAND_CONTRAST_NUMERICAL_FLOOR,
-        strand_summary.signed_strand_contrast_margin(confidence=confidence),
-    )
-    return abs(strand_summary.signed_strand_contrast) >= effective_min
-
-
 def _warn_if_calibration_strand_unidentifiable(strand_models: StrandModels) -> None:
     """Warn when calibration cannot identify strand from spliced RNA evidence."""
     from .calibration.strand_summary import StrandSummary
 
     primary = StrandSummary.from_model(strand_models.exonic_spliced)
-    if _strand_summary_identifiable(primary):
+    if primary.is_identifiable():
         return
 
     logger.warning(
@@ -210,7 +196,7 @@ def _warn_if_calibration_strand_unidentifiable(strand_models: StrandModels) -> N
     )
 
     diagnostic = StrandSummary.from_model(strand_models.exonic)
-    if _strand_summary_identifiable(diagnostic):
+    if diagnostic.is_identifiable():
         logger.warning(
             "[CAL] Exonic diagnostic strand signal is identifiable "
             "(n_exonic_obs=%d, p_r1_sense=%.6f), but it is not used for calibration. "
