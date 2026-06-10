@@ -1,27 +1,33 @@
-"""Per-node gDNA/RNA deconvolution by a strand-vs-count handoff (decoupled architecture).
+"""Per-node gDNA/RNA deconvolution by precision-weighted strand→count deference (decoupled).
 
 Each **node** (every region and every boundary side, kept separate) is deconvolved into gDNA / RNA
-mass by **routing** it to one of two independent estimators — never a product of the two:
+mass by a **precision-weighted blend** of two independent estimators — never their product:
 
-    route_strand = strand_identifiable (global)  AND  strand_observable (per-node)
-      ├─ TRUE  → STRAND module:  Beta-Binomial posterior over the gDNA fraction, weak Beta(½,½) prior
-      └─ FALSE → COUNT  module:  gDNA fraction = count_gdna_frac (density·eff_len / mass, raw)
+    g = w · g_strand  +  (1 − w) · g_count,     w = (2κ − 1)²   (κ = rna_sense_frac)
+      g_strand : Beta-Binomial posterior median over the gDNA fraction (weak Beta(½,½) prior)
+      g_count  : the count module's fraction (count_gdna_frac = density·eff_len / mass, raw)
 
-Why a handoff, not a joint product: the strand estimator is **unbiased** (gDNA is symmetric at ½,
-RNA is at κ) but noisy at low N/SS; the count estimator is **biased** under hybrid capture (exon
-density imputed from depleted off-target neighbours). Mixing a biased estimate into an unbiased one
-re-introduces bias, so we use strand wherever it has signal (strand-observable nodes in a
-strand-identifiable library) and count only where strand structurally has none (AMBIG /
-no-defined-sense nodes, and every node when the library is unstranded). The two act on disjoint node
-sets and cannot conflict. See ``docs/calibration/decoupled_calibration_design.md``; the retired joint
-product is archived in ``docs/calibration/archive/joint_deconvolution.md``.
+The weight ``w = (2κ−1)²`` is the strand channel's **discriminability** — the per-fragment strand
+Fisher information / the squared standardized separation between gDNA (sense ½) and RNA (sense κ). It
+``→ 1`` at high strand specificity (trust the strand estimate) and ``→ 0`` at unstranded (defer fully
+to count): a smooth deference with **no gate**. Because ``w`` is an *effect size* (a function of κ,
+not of the spliced-read count), a near-unstranded library gets ``w ≈ 0`` regardless of depth — which
+no significance threshold could deliver. A node with no defined sense (AMBIG / no shared strand) is
+count-only (``w`` applies only to strand-observable nodes).
+
+Why a blend, not their product: the strand estimator is **unbiased** (gDNA symmetric at ½, RNA at κ)
+but noisy at low N/SS; the count estimator is **biased** under hybrid capture. We weight the unbiased
+channel by its *signal strength* and lean on the biased channel only for what strand cannot resolve —
+*not* naive inverse-variance weighting (which assumes both unbiased and penalises strand for
+overdispersion variance that averages out at locus aggregation). See
+``docs/calibration/count_channel_capture_design.md`` (the redesign plan, Phase 1) and
+``decoupled_calibration_design.md``; the retired joint product is archived in
+``archive/joint_deconvolution.md``.
 
 The **strand module** is the Beta-Binomial posterior (the exact, clip-free robust strand
 deconvolution): ``log_post(g) = log Beta(g; ½, ½) + strand_loglik(sense, antisense | g, κ, od)`` on a
-grid, reported as the posterior median (then optionally log-odds-shifted by ``gdna_strand_llr_bias``,
-the FP-aversion knob; default 0). As κ→½ the likelihood flattens → posterior → prior (uninformative),
-but the global identifiability gate normally routes unstranded libraries to count, so the no-op is
-structural. Amounts use the conserved **fractional mass** ``M``: gDNA = ``g·M``,
+grid, the posterior median, optionally log-odds-shifted by ``gdna_strand_llr_bias`` (the FP-aversion
+knob; default 0). Amounts use the conserved **fractional mass** ``M``: gDNA = ``g·M``,
 RNA = ``(1−g)·M`` + the deterministic spliced mass. Regions and boundaries are combined into loci
 only **after** calibration (``assemble_priors``).
 """
@@ -57,26 +63,29 @@ def _deconv_per_node(
     strand_observable,
     count_gdna_frac,
     *,
-    strand_identifiable,
     rna_sense_frac,
     gdna_strand_overdispersion,
     rna_strand_overdispersion,
     gdna_strand_llr_bias,
     n_grid,
 ) -> NodeDeconv:
-    """Route each node to the strand posterior or the count fraction, then split its mass.
+    """Blend the strand posterior and the count fraction per node, then split its mass.
 
-    ``strand_identifiable`` is the global gate (is κ usable?); ``strand_observable[i]`` the per-node
-    gate (is the node's sense defined?). A node routes to STRAND iff both hold and it carries flux;
-    otherwise it takes the COUNT module's ``count_gdna_frac[i]`` (a raw density ratio in ``[0,1]``).
+    ``g = w·g_strand + (1−w)·g_count``, with the **strand-deference weight** ``w = (2κ−1)²`` — the
+    strand channel's discriminability (the per-fragment strand Fisher information / squared
+    standardized separation between gDNA at sense ½ and RNA at sense κ). ``w → 1`` at high strand
+    specificity (trust strand), ``w → 0`` at unstranded (defer to count) — a smooth deference with
+    **no gate**. Because ``w`` is an *effect size* (depends on κ, not on the spliced-read count), a
+    near-unstranded library gets ``w ≈ 0`` regardless of depth. ``g_strand`` is the Beta-Binomial
+    posterior median (weak Beta(½,½) prior, no count term); a node with no defined sense
+    (``strand_observable`` False) or κ = ½ takes the count fraction directly.
     """
     k = mass_unspl.shape[0]
     grid = np.linspace(_GRID_EPS, 1.0 - _GRID_EPS, n_grid)
     log_grid = np.log(grid)
     log_1mgrid = np.log1p(-grid)
-    # Weak Jeffreys prior over the gDNA fraction (strand module); the strand likelihood dominates it
-    # wherever we route to strand (κ identifiable ⇒ non-flat likelihood).
     log_prior = (_STRAND_PRIOR - 1.0) * log_grid + (_STRAND_PRIOR - 1.0) * log_1mgrid
+    w_strand = (2.0 * float(rna_sense_frac) - 1.0) ** 2  # strand discriminability, in [0, 1]
     gdna = np.zeros(k)
     rna = np.zeros(k)
     gdna_frac = np.zeros(k)
@@ -86,8 +95,9 @@ def _deconv_per_node(
         if m <= 0.0:
             rna[i] = float(mass_spliced[i])  # only deterministic spliced RNA, if any
             continue
-        if strand_identifiable and strand_observable[i] and (sense[i] + antisense[i]) > 0:
-            # STRAND module: Beta-Binomial posterior, weak prior, no count term.
+        g_count = min(max(float(count_gdna_frac[i]), 0.0), 1.0)
+        if w_strand > 0.0 and strand_observable[i] and (sense[i] + antisense[i]) > 0:
+            # STRAND module: Beta-Binomial posterior median (weak prior, no count term).
             log_post = log_prior + strand_loglik(
                 grid,
                 sense[i],
@@ -96,19 +106,21 @@ def _deconv_per_node(
                 gdna_strand_overdispersion=gdna_strand_overdispersion,
                 rna_strand_overdispersion=rna_strand_overdispersion,
             )
-            w = np.exp(log_post - log_post.max())
-            w /= w.sum()
-            mean = float(np.dot(grid, w))
-            gdna_frac_var[i] = float(np.dot((grid - mean) ** 2, w))
-            frac = float(np.clip(np.interp(0.5, np.cumsum(w), grid), 0.0, 1.0))  # posterior median
-            # gDNA FP-aversion LLR bias: shift the reported fraction's log-odds by λ nats (the
-            # calibration twin of the EM gdna_em_llr_bias; λ=0 ⇒ neutral, the default).
-            if gdna_strand_llr_bias != 0.0 and 0.0 < frac < 1.0:
-                logit_frac = np.log(frac) - np.log1p(-frac)
-                frac = float(1.0 / (1.0 + np.exp(-(gdna_strand_llr_bias + logit_frac))))
+            post = np.exp(log_post - log_post.max())
+            post /= post.sum()
+            mean = float(np.dot(grid, post))
+            gdna_frac_var[i] = float(np.dot((grid - mean) ** 2, post))
+            g_strand = float(np.clip(np.interp(0.5, np.cumsum(post), grid), 0.0, 1.0))
+            # Precision-weighted deference: trust strand by its discriminability w, count for the rest.
+            frac = w_strand * g_strand + (1.0 - w_strand) * g_count
         else:
-            # COUNT module: the count clue's gDNA fraction directly (point estimate, no posterior).
-            frac = min(max(float(count_gdna_frac[i]), 0.0), 1.0)
+            frac = g_count  # no usable strand signal (unstranded, or no defined sense) ⇒ count only
+        # gDNA FP-aversion LLR bias on the FINAL fraction (universal — both branches): shift its
+        # log-odds by λ nats; λ=0 ⇒ neutral (the default). Superseded by the deconvolution quantile
+        # in a later phase.
+        if gdna_strand_llr_bias != 0.0 and 0.0 < frac < 1.0:
+            logit = np.log(frac) - np.log1p(-frac)
+            frac = float(1.0 / (1.0 + np.exp(-(gdna_strand_llr_bias + logit))))
         gdna_frac[i] = frac
         gdna[i] = frac * m
         rna[i] = (1.0 - frac) * m + float(mass_spliced[i])
@@ -122,18 +134,18 @@ def deconv_regions(
     region_arrays,
     node_density,
     *,
-    strand_identifiable,
     rna_sense_frac,
     gdna_strand_overdispersion=0.0,
     rna_strand_overdispersion=0.0,
     gdna_strand_llr_bias=0.0,
     n_grid=200,
 ) -> NodeDeconv:
-    """Deconvolve each region's contained mass (a node) into gDNA / RNA by the strand/count handoff.
+    """Deconvolve each region's contained mass (a node) into gDNA / RNA by the strand/count blend.
 
     A region is strand-observable iff its transcript strand is defined (``TS_POS`` / ``TS_NEG``);
-    ``TS_NONE`` (intergenic) and ``TS_AMBIG`` route to count. The count fraction is the precomputed
-    ``node_density.count_gdna_frac``.
+    ``TS_NONE`` (intergenic) and ``TS_AMBIG`` are count-only. The count fraction is the precomputed
+    ``node_density.count_gdna_frac``; the strand-deference weight ``w=(2κ−1)²`` is set in
+    ``_deconv_per_node`` from ``rna_sense_frac``.
     """
     ts = np.asarray(region_arrays.strand_class)
     c = substrate.contained
@@ -149,7 +161,6 @@ def deconv_regions(
         antisense,
         strand_observable,
         node_density.count_gdna_frac,
-        strand_identifiable=strand_identifiable,
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,
@@ -260,14 +271,13 @@ def deconv_sides(
     node_density,
     boundary_side_eff_len,
     *,
-    strand_identifiable,
     rna_sense_frac,
     gdna_strand_overdispersion=0.0,
     rna_strand_overdispersion=0.0,
     gdna_strand_llr_bias=0.0,
     n_grid=200,
 ) -> tuple[NodeDeconv, NodeDeconv]:
-    """Deconvolve each boundary **side** as an independent node by the strand/count handoff.
+    """Deconvolve each boundary **side** as an independent node by the strand/count blend.
 
     Region ``r`` owns the **right** side of its left boundary (``substrate.left[r]``) and the
     **left** side of its right boundary (``substrate.right[r]``); both lie inside region ``r`` and so
@@ -291,7 +301,6 @@ def deconv_sides(
             sq.antisense,
             sq.strand_observable,
             sq.count_gdna_frac,
-            strand_identifiable=strand_identifiable,
             rna_sense_frac=rna_sense_frac,
             gdna_strand_overdispersion=gdna_strand_overdispersion,
             rna_strand_overdispersion=rna_strand_overdispersion,

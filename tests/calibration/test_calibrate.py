@@ -25,6 +25,7 @@ def _run(config=None):
         region_arrays=ra,
         strand_model=strand_model,
         gdna_fl_pmf=make_gdna_fl_pmf(),
+        rna_fl_pmf=make_gdna_fl_pmf(),  # a valid pmf; these tests pin mechanics, not the splice fraction
         config=config or CalibrationConfig(),
     )
 

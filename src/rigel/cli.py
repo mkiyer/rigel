@@ -607,7 +607,6 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
     # -- CalibrationConfig --
     _ParamSpec("gdna_strand_llr_bias", "calibration.gdna_strand_llr_bias"),
-    _ParamSpec("strand_identifiability_confidence", "calibration.strand_identifiability_confidence"),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -1179,17 +1178,6 @@ def build_parser() -> argparse.ArgumentParser:
         "gdna_frac <- sigmoid(lambda + logit(gdna_frac)) (default 0.0 = neutral). Positive favors "
         "gDNA (trades gDNA->RNA leak for RNA->gDNA siphon); lambda->inf siphons all unspliced mass "
         "into gDNA. Same concept/units as --gdna-em-llr-bias (the EM knob) but on calibration; decoupled.",
-    )
-    adv.add_argument(
-        "--strand-identifiability-confidence",
-        dest="strand_identifiability_confidence",
-        type=float,
-        default=None,
-        choices=(0.90, 0.95, 0.99),
-        help="Confidence for the global strand-identifiability gate (default 0.99). The strand "
-        "deconvolution pathway activates only when the spliced sense contrast |2p-1| is "
-        "distinguishable from 0 at this confidence given the spliced-read count; below it the "
-        "library is treated as unstranded (count module only). Lower = engage strand more readily.",
     )
     adv.add_argument(
         "--overhang-alpha",

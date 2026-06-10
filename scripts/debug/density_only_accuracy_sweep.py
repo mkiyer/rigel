@@ -48,12 +48,12 @@ def main() -> None:
             _s, sm, fla, _b, pl = scan_and_buffer(bam, idx, BamScanConfig(sj_strand_tag="auto"))
             sm.finalize()
             _check_region_payload_alignment(ra, pl)
-            gpmf = build_fl_models(
+            flm = build_fl_models(
                 global_counts=fla.global_model.counts,
                 rna_counts=fla.category_models[SpliceType.SPLICED_ANNOT].counts,
                 gdna_counts=gdna_fl_mass(pl), max_size=fla.max_size,
-            ).gdna_pmf
-            cal = calibrate(pl, ra, sm, gpmf, CalibrationConfig())
+            )
+            cal = calibrate(pl, ra, sm, flm.gdna_pmf, flm.rna_pmf, CalibrationConfig())
         except Exception as exc:  # noqa: BLE001
             print(f"{cond:>42}  calib error: {exc}")
             continue

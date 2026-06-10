@@ -251,18 +251,6 @@ class CalibrationConfig:
     #: Advanced/technical — 200 is ample for a smooth 1-D posterior.
     n_grid: int = 200
 
-    #: **Strand-identifiability confidence** (advanced) — the global gate that activates/deactivates
-    #: the strand deconvolution pathway for the whole library. The strand channel can separate gDNA
-    #: (sense ½) from RNA (sense κ) only when the spliced sense contrast ``|2·p_r1_sense − 1|`` is
-    #: distinguishable from 0 at this confidence given the spliced-read count (a one-sample
-    #: normal-approximation test: ``|2p−1| ≥ z·SE``, ``SE = 2·√(p(1−p)/n)``). Below the threshold the
-    #: library is treated as unstranded → every node routes to the count module (strand is a no-op).
-    #: This is a **statistical** threshold (it scales with the data's own standard error), not a fixed
-    #: cutoff on the strand rate. ``0.99`` is conservative (a weakly-stranded library must clear a 99%
-    #: bar before the strand pathway engages); ``0.95`` / ``0.90`` engage it more readily. Must be one
-    #: of ``{0.90, 0.95, 0.99}``.
-    strand_identifiability_confidence: float = 0.99
-
     #: **gDNA strand-overdispersion prior** (advanced). The gDNA per-region sense rate is
     #: ``Beta(a, a)``; this is that symmetric shape ``a`` (= α = β). The fitted overdispersion is
     #: shrunk toward ``od₀ = 1/(2·a + 1)`` for sparse/low-signal libraries (the conservative,
@@ -318,11 +306,6 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.rna_strand_prior_weight must be >= 0; "
                 f"got {self.rna_strand_prior_weight}."
-            )
-        if self.strand_identifiability_confidence not in (0.90, 0.95, 0.99):
-            raise ValueError(
-                "CalibrationConfig.strand_identifiability_confidence must be one of "
-                f"{{0.90, 0.95, 0.99}}; got {self.strand_identifiability_confidence}."
             )
 
 

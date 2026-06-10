@@ -72,6 +72,7 @@ def test_calibrate_recovers_overdispersion(od_true):
         region_arrays=ra,
         strand_model=_STRAND_MODEL,
         gdna_fl_pmf=make_gdna_fl_pmf(),
+        rna_fl_pmf=make_gdna_fl_pmf(),
         config=CalibrationConfig(),
     )
     assert result.gdna_strand_overdispersion == pytest.approx(od_true, rel=0.25, abs=0.02)
@@ -87,6 +88,7 @@ def test_calibrate_binomial_gdna_floors_to_zero():
         region_arrays=ra,
         strand_model=_STRAND_MODEL,
         gdna_fl_pmf=make_gdna_fl_pmf(),
+        rna_fl_pmf=make_gdna_fl_pmf(),
         config=CalibrationConfig(),
     )
     assert result.gdna_strand_overdispersion < 0.02

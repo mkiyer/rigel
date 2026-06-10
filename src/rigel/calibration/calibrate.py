@@ -1,18 +1,18 @@
 """calibrate() — the acyclic fractional-accumulator calibrator (decoupled strand/count).
 
 A single feed-forward pass: no EM loop, no density->deconv->density feedback. Each node (every region
-and the two boundary sides) is deconvolved into gDNA / RNA by a **strand-vs-count handoff**, not a
-joint product: a strand-observable node in a strand-identifiable library uses the **strand module**
-(Beta-Binomial posterior), every other node uses the **count module** (raw density ratio). The two
-estimators act on disjoint nodes and never multiply — the decoupling that fixed the joint model's
-bias-mixing (see ``docs/calibration/decoupled_calibration_design.md``; joint archived in
-``docs/calibration/archive/joint_deconvolution.md``)::
+and the two boundary sides) is deconvolved into gDNA / RNA by **precision-weighted strand→count
+deference**: ``g = w·g_strand + (1−w)·g_count`` with ``w=(2κ−1)²`` (the strand discriminability). At
+high strand specificity ``w→1`` (the unbiased strand posterior governs); at unstranded ``w→0`` (the
+count module governs) — a smooth blend with no gate, the decoupling that fixed the joint model's
+bias-mixing (see ``docs/calibration/decoupled_calibration_design.md`` +
+``count_channel_capture_design.md``; joint archived in ``archive/joint_deconvolution.md``)::
 
     substrate
-      -> strand balance: rna_sense_frac (κ) + strand_identifiable (the global routing gate)
-      -> node_gdna_density (count module; RAW density, intergenic-anchored global, no strand clean)
+      -> strand balance: rna_sense_frac (κ) -> strand weight w=(2κ−1)²
+      -> node_gdna_density (count module; RAW density, no strand clean)
       -> gdna/rna strand Beta-Binomial overdispersions (strand module parameters)
-      -> deconv_regions / deconv_sides (per-node handoff: strand posterior OR count fraction)
+      -> deconv_regions / deconv_sides (per-node blend: w·strand posterior + (1−w)·count fraction)
       -> derive (gdna_density_global, gdna_geom_len)
 
 The global density and geometric gDNA length are **derived** from the aggregate deconvolved mass --
@@ -23,6 +23,7 @@ contraction under capture is the IPR of the deconvolved gDNA mass, applied later
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from typing import TYPE_CHECKING
 
@@ -42,9 +43,9 @@ from .gdna_strand import (
     overdispersion_for_beta,
 )
 from .result import CalibrationResult
+from .splice_junction import region_splice_gdna_frac
 from .strand_balance import fit_strand_balance
 from .strand_deconv import deconv_regions, deconv_sides
-from .strand_summary import strand_contrast_identifiable
 from .substrate import CalibrationSubstrate
 
 if TYPE_CHECKING:
@@ -61,6 +62,7 @@ def calibrate(
     region_arrays: "RegionArrays",
     strand_model: "StrandModels",
     gdna_fl_pmf: "np.ndarray",
+    rna_fl_pmf: "np.ndarray",
     config: "CalibrationConfig",
 ) -> CalibrationResult:
     """Deconvolve the library into gDNA / RNA per node, then derive gdna_density_global.
@@ -76,11 +78,12 @@ def calibrate(
     region_eff_len = region_eff_length(region_arrays.region_size_bp, gdna_fl_pmf)
     boundary_eff_len = boundary_side_eff_length(gdna_fl_pmf, region_arrays.region_size_bp)
     fl_mean = boundary_eff_length(gdna_fl_pmf)
+    rna_fl_mean = boundary_eff_length(rna_fl_pmf)  # RNA boundary-crossing eff length (splice fraction)
 
-    # RNA strand balance: rna_sense_frac (κ) = posterior-mean spliced sense fraction, and whether the
-    # strand channel is IDENTIFIABLE (κ distinguishable from ½ at 99% given its sample size). The
-    # identifiability is the GLOBAL routing gate: a strand-identifiable library routes its
-    # strand-observable nodes to the strand module, an unstranded one routes everything to count.
+    # RNA strand balance: rna_sense_frac (κ) = posterior-mean spliced sense fraction. The strand
+    # channel's discriminability w=(2κ−1)² (set inside the deconv) is the smooth strand→count
+    # deference weight — there is no hard identifiability gate (an unstranded library has κ≈½ ⇒ w≈0 ⇒
+    # count governs, regardless of depth).
     balance = fit_strand_balance(strand_model)
     if balance.fallback_used:
         # No spliced reads at all — not a usable RNA-seq library. Fail loudly (a real RNA-seq library
@@ -90,11 +93,6 @@ def calibrate(
             "RNA-seq library. A real RNA-seq library always carries spliced reads."
         )
     rna_sense_frac = float(balance.rna_sense_frac)
-    strand_identifiable = strand_contrast_identifiable(
-        strand_model.p_r1_sense,
-        strand_model.n_observations,
-        confidence=config.strand_identifiability_confidence,
-    )
 
     # Count clue (the count module): per-region gDNA density by LOCAL boundary-anchored imputation on
     # RAW unspliced counts (no strand cleaning — the strand module owns the strand channel). An
@@ -103,6 +101,17 @@ def calibrate(
     # node_gdna_density returns the count module's gDNA fraction (count_gdna_frac) per node, consumed
     # for count-routed nodes and as the gDNA strand-fit seed weight.
     node_density = node_gdna_density(substrate, region_arrays, region_eff_len, fl_mean)
+
+    # Splice-junction gDNA-fraction (Phase 4-mean): for exon regions with an eligible splice-junction
+    # boundary, replace the absolute-density count fraction with the boundary gDNA-fraction — the
+    # crossing-spliced reads are a clean mature reference, so the fraction partitions the region's own
+    # (capture-enriched) total and avoids the absolute density's boundary-depletion under-count.
+    # Ineligible regions keep the absolute-density fallback. This upgrades only the REGION count
+    # fraction consumed by deconv_regions; the seed fit and side deconvolution keep node_density.
+    region_count_frac, n_splice_upgraded = region_splice_gdna_frac(
+        substrate, region_arrays, node_density.count_gdna_frac, eff_gdna=fl_mean, eff_rna=rna_fl_mean
+    )
+    region_node_density = dataclasses.replace(node_density, count_gdna_frac=region_count_frac)
 
     # gDNA strand Beta-Binomial overdispersion: fitted from the count-observable seed regions
     # (intergenic + intronic), using the count-clue gDNA weight (overdispersion-free, since the
@@ -134,14 +143,13 @@ def calibrate(
     )
     rna_strand_overdispersion = rna_strand.rna_strand_overdispersion
 
-    # Per-node deconvolution by the strand/count HANDOFF: each node routes to the strand module
-    # (Beta-Binomial posterior) when the library is strand-identifiable AND the node is
-    # strand-observable, else to the count module (count_gdna_frac). The two never multiply.
+    # Per-node deconvolution by precision-weighted strand→count deference: g = w·g_strand +
+    # (1−w)·g_count with w=(2κ−1)² (set inside the deconv). w→1 at high strand specificity, →0 at
+    # unstranded (count governs) — a smooth blend, no gate. Strand-unobservable nodes are count-only.
     regions = deconv_regions(
         substrate,
         region_arrays,
-        node_density,
-        strand_identifiable=strand_identifiable,
+        region_node_density,
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,
@@ -153,7 +161,6 @@ def calibrate(
         region_arrays,
         node_density,
         boundary_eff_len,
-        strand_identifiable=strand_identifiable,
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,
@@ -192,12 +199,14 @@ def calibrate(
     boundary_sense_frac = spl_sense / spl_total if spl_total > 0.0 else float("nan")
     logger.debug(
         "calibration: R=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
+        "splice_gdna_frac_upgraded=%d "
         "gdna_strand_overdispersion=%.4g (%d seed nodes, %d frags%s) "
         "rna_strand_overdispersion=%.4g (%d seed sides, %d frags%s) "
         "[boundary-spliced sense_frac=%.3f vs κ=%.3f]",
         result.n_regions,
         result.gdna_density_global,
         rna_sense_frac,
+        n_splice_upgraded,
         gdna_strand_overdispersion,
         gdna_strand.n_seed_nodes,
         gdna_strand.n_seed_fragments,

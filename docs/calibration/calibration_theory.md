@@ -28,20 +28,23 @@ gDNA vs RNA using two clues that are conditionally independent given the library
 - **Strand clue** — *which strand*. gDNA is 50/50 (sense rate ½); RNA is stranded (sense rate
   `κ = rna_sense_frac`). A node's observed sense fraction places it between the two.
 
-The two clues are **decoupled** — each node is *routed* to exactly one estimator (a handoff, not a
-product), because the strand estimator is *unbiased* (gDNA symmetric at ½, RNA at κ) while the count
-estimator is *biased* under hybrid capture, and mixing the two re-introduces bias:
+The two clues are **decoupled** and combined by a **precision-weighted deference**, not a product —
+because the strand estimator is *unbiased* (gDNA symmetric at ½, RNA at κ) while the count estimator
+is *biased* under hybrid capture, so mixing them by a product re-introduces bias:
 
 ```
-route_strand = strand_identifiable (global)  AND  strand_observable (per-node)
-   TRUE  → STRAND module:  Beta-Binomial posterior over g, weak Beta(½,½) prior
-   FALSE → COUNT  module:  g = clip(ρ·eff_len / mass)
+g = w·g_strand + (1−w)·g_count,   w = (2κ−1)²     (strand discriminability, in [0,1])
+   g_strand : Beta-Binomial posterior over g, weak Beta(½,½) prior
+   g_count  : clip(ρ·eff_len / mass)
 ```
 
-So strand decides wherever it has signal (strand-observable nodes in a strand-identifiable library),
-and count handles the rest (`AMBIG`/no-defined-sense nodes, and *every* node when the library is
-unstranded). They act on disjoint node sets and cannot conflict. The retired joint product is
-archived in `archive/joint_deconvolution.md`; see `decoupled_calibration_design.md` for the rationale.
+The weight `w = (2κ−1)²` is the strand channel's discriminability (the per-fragment strand Fisher
+information / squared standardized separation between the two components): `w → 1` at high strand
+specificity (trust the unbiased strand estimate), `w → 0` at unstranded (defer to count). Because `w`
+is an *effect size* (a function of κ, not of read depth), a near-unstranded library gets `w ≈ 0`
+regardless of depth — a smooth deference with **no gate**. A node with no defined sense
+(`AMBIG`/no-shared-strand) is count-only. The retired joint product is archived in
+`archive/joint_deconvolution.md`; see `decoupled_calibration_design.md` + `count_channel_capture_design.md`.
 
 ## 3. Count-observability (signature-based, no circularity)
 
@@ -69,21 +72,20 @@ mass; see CALIBRATION_TODO Issue #3.)
 
 ```
 substrate (per-region 3-view sufficient statistics from the accumulator payload)
-  1. RNA strand balance        → κ = rna_sense_frac + strand_identifiable   (strand_balance.py)
+  1. RNA strand balance        → κ = rna_sense_frac → strand weight w=(2κ−1)²  (strand_balance.py)
   2. node gDNA density (count)  → per-node RAW density + count gDNA fraction  (density_model.py)
   3. gDNA & RNA strand overdispersion (Beta-Binomial, pooled MoM + prior shrinkage)
                                                                 (gdna_strand.py)
-  4. per-node strand/count handoff → per-node gDNA / RNA mass   (strand_deconv.py)
+  4. per-node strand/count blend → per-node gDNA / RNA mass     (strand_deconv.py)
   5. derive                     → gdna_density_global, geometric gDNA length  (derive.py)
 ```
 
-### 4.1 Strand balance (κ) + identifiability
-`rna_sense_frac` is the posterior-mean sense fraction of the **spliced** unique-mapper channel
-(spliced ⇒ pure RNA). `strand_identifiable` — the global routing gate — is true when the spliced
-sense contrast `|2·p−1|` is distinguishable from 0 at 99% given its sample size
-(`strand_summary.strand_contrast_identifiable`). Zero spliced reads ⇒ not an RNA-seq library ⇒
-`CalibrationStrandError`; a balanced-but-nonzero (unstranded) channel ⇒ `strand_identifiable=False`
-⇒ everything routes to the count module.
+### 4.1 Strand balance (κ)
+`rna_sense_frac` (κ) is the posterior-mean sense fraction of the **spliced** unique-mapper channel
+(spliced ⇒ pure RNA). It sets the strand-deference weight `w=(2κ−1)²` (§2): there is **no** hard
+identifiability gate — an unstranded library has κ≈½ ⇒ w≈0 ⇒ count governs, smoothly and regardless
+of depth. Zero spliced reads ⇒ κ undefined ⇒ not an RNA-seq library ⇒ `CalibrationStrandError`.
+(`strand_summary.strand_contrast_identifiable` survives only as a pipeline QC *warning*, not a gate.)
 
 ### 4.2 Count module: per-node gDNA density (`density_model.py`)
 The gDNA density is read directly from count-observable nodes (on **raw** unspliced counts — no
@@ -101,14 +103,14 @@ Both are fit as Beta-Binomial intra-class correlations by a shared pooled method
 shrunk toward the *same* default prior so that under sparse data both collapse to one distribution
 and unstranded data is uninformative. These parameterise the strand module.
 
-### 4.4 Per-node strand/count handoff (`strand_deconv.py`)
-Each node routes (§2): a strand-observable node in a strand-identifiable library takes the **strand
-module** — the Beta-Binomial posterior over `g` (weak Beta(½,½) prior × the strand likelihood),
-reported as the posterior median, optionally log-odds-shifted by the FP-aversion knob
-`gdna_strand_llr_bias` (default 0); every other node takes the **count module**'s
-`count_gdna_frac`. The strand posterior is the exact, clip-free robust strand deconvolution (its MLE
-is the linear unmix `(s−κ)/(½−κ)` but bounded and overdispersion-widened — no clip bias). gDNA mass
-= `g·M`, RNA mass = `(1−g)·M` + the deterministic spliced mass. Mass is conserved per node.
+### 4.4 Per-node strand/count blend (`strand_deconv.py`)
+Each node (§2): `g = w·g_strand + (1−w)·g_count`, `w=(2κ−1)²`. `g_strand` is the **strand module** —
+the Beta-Binomial posterior over `g` (weak Beta(½,½) prior × the strand likelihood) median; the exact,
+clip-free robust strand deconvolution (its MLE is the linear unmix `(s−κ)/(½−κ)` but bounded and
+overdispersion-widened — no clip bias). `g_count` is the **count module**'s `count_gdna_frac`. A
+strand-unobservable node (no defined sense) is count-only. The final fraction is optionally
+log-odds-shifted by the FP-aversion knob `gdna_strand_llr_bias` (default 0). gDNA mass = `g·M`, RNA
+mass = `(1−g)·M` + the deterministic spliced mass. Mass is conserved per node.
 
 ### 4.6 Derive (`derive.py`)
 `gdna_density_global` (a QC scalar) and the geometric gDNA length are derived from the aggregate

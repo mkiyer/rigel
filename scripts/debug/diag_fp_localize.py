@@ -40,7 +40,7 @@ def analyze(cond):
         gdna_counts=gdna_fl_mass(payload), max_size=flm.max_size,
     )
     cal = calibrate(payload=payload, region_arrays=ra, strand_model=sm,
-                    gdna_fl_pmf=fl.gdna_pmf, config=cfg.calibration)
+                    gdna_fl_pmf=fl.gdna_pmf, rna_fl_pmf=fl.rna_pmf, config=cfg.calibration)
     nd = node_gdna_density(ra and None or None, ra, None, None, rna_sense_frac=0.5) if False else None
 
     # recompute node observability for attribution

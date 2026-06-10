@@ -861,6 +861,7 @@ def run_pipeline(
         region_arrays=region_arrays,
         strand_model=strand_models,
         gdna_fl_pmf=gdna_fl_pmf,
+        rna_fl_pmf=fl_models.rna_pmf,
         config=config.calibration,
     )
 

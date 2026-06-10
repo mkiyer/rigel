@@ -69,7 +69,7 @@ BAM ──scan_and_buffer──▶ FragmentBuffer + AccumulatorPayload + trained
 | `strand_balance.py` | RNA strand mean `rna_sense_frac` (κ) from the spliced channel |
 | `density_model.py` | count module: per-region gDNA density via local imputation on raw counts (`count_gdna_frac`) |
 | `gdna_strand.py` | gDNA & RNA strand Beta-Binomial overdispersions (shared pooled-MoM core) |
-| `strand_deconv.py` | per-node strand/count **handoff**: strand-observable nodes in a strand-identifiable library take the strand Beta-Binomial posterior, all others take the count fraction (disjoint, never a product) |
+| `strand_deconv.py` | per-node **precision-weighted blend** `g = w·g_strand + (1−w)·g_count`, `w=(2κ−1)²` (strand discriminability): strand BB posterior deferring smoothly to the count fraction as strand specificity fades (no gate) |
 | `derive.py` | `gdna_density_global` + geometric gDNA length from the deconvolved masses |
 | `effective_length.py` / `fl.py` | FL-marginal effective lengths; gDNA/RNA/global FL pmfs |
 | `priors.py` | `assemble_priors`: `CalibrationResult` → per-locus Dirichlet prior + gDNA eff-len |
