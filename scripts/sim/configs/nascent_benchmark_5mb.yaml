@@ -1,0 +1,93 @@
+# ════════════════════════════════════════════════════════════════════════
+# Nascent-RNA benchmark suite — 8 scenarios on the 5 Mb mini-genome.
+#
+# Purpose: test the count-channel redesign's clean→count imputation (Phase 3) and
+# the strand→count deference under nascent contamination — the regime the
+# gdna_benchmark_5mb suite (zero nascent) cannot see. Small + focused.
+#
+# Reference: SAME synthetic genome/transcriptome as gdna_benchmark_5mb (identical
+# suite/abundance params + seeds ⇒ deterministically identical reference).
+#
+# Condition grid = 1 gDNA level × 2 strand × 2 nascent × 2 capture = 8 runs:
+#   gDNA:    2:1 gDNA:mature-RNA (rate 2.0)
+#   strand:  unstranded (ss=0.50) and stranded (ss=0.99)
+#   nascent: none (off) and rnd (on)
+#   capture: hybrid-capture off and on
+#
+# Nascent model (nrna.mode = random_fraction): 50% of expressed multi-exon
+# transcripts (eligible_fraction=0.5) carry nascent RNA at a RANDOM per-transcript
+# ratio of their mature abundance (ratio ∈ [0.1, 1.0], drawn once per transcript
+# from the fixed nrna.seed ⇒ the SAME nascent layer in every nascent-on cell).
+# Nascent is ADDITIVE: mature fragment count (n_rna_fragments) is fixed; nascent
+# fragments layer on top (n_nrna = round(n_mrna · realized_ratio)). gDNA scales
+# from the mature count, so gDNA:mature stays 2:1 regardless of nascent.
+#
+# HEAD-TO-HEAD CAVEAT: the sim uses one shared RNG stream across pools (mature →
+# nascent → gDNA), so a nascent-on cell is NOT bit-identical to its nascent-off
+# twin (the nascent draws shift the gDNA stream). The nascent *abundances* are
+# fixed across cells; the aggregate net-flow leak metric is robust to this at 1M+
+# fragments. Strict bit-identical pairing would need a sim-engine change
+# (per-pool independent RNG, or draw nascent last) — tracked as an open item.
+#
+# Usage:
+#   python scripts/sim/simulate_suite.py --config scripts/sim/configs/nascent_benchmark_5mb.yaml
+# ════════════════════════════════════════════════════════════════════════
+
+suite:
+  outdir: /Users/mkiyer/Downloads/rigel_runs/nascent_benchmark_5mb
+  genome_length: 5000000      # ~5 Mb — identical to gdna_benchmark_5mb
+  n_genes: 100
+  min_isoforms: 1
+  max_isoforms: 5
+  target_transcripts: null
+  antisense_fraction: 0.0
+  seed: 20260608              # SAME as gdna_benchmark_5mb ⇒ identical reference
+  profile: smoke
+
+simulation:
+  n_rna_fragments: 1000000    # mature RNA fragments per condition (fixed; nascent adds on top)
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 80
+  frag_max: 800
+  read_length: 150
+  error_rate: 0.0
+  n_workers: 12
+
+abundance:
+  seed: 20260609              # SAME as gdna_benchmark_5mb ⇒ identical expressed set + mature abundances
+  min: 1.0
+  max: 10000.0
+  frac_expressed: 0.5
+
+# gDNA contamination: 2:1 gDNA:mature-RNA — the critical high-gDNA regime.
+gdna:
+  rates:       [2.0]
+  rate_labels: [gdna200]
+  frag_mean: 350
+  frag_std: 100
+  frag_min: 100
+  frag_max: 1000
+
+strand_specificities: [0.99, 0.50]   # stranded + unstranded
+
+# Nascent RNA: random per-transcript ratio on 50% of expressed multi-exon transcripts.
+nrna:
+  mode: random_fraction
+  ratio_ranges:  [[0.0, 0.0], [0.1, 1.0]]   # none ⇒ no nascent;  rnd ⇒ per-transcript ratio ∈ [0.1, 1.0]
+  ratio_labels:  [none, rnd]
+  eligible_fraction: 0.5                     # 50% of expressed multi-exon transcripts get nascent
+  seed: 20260610                             # fixed ⇒ the same nascent layer in every nascent-on cell
+
+capture:
+  probe_length: 120
+  probe_density: 0.5
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
+  configs:
+    - label: off
+      enabled: false
+    - label: on
+      fraction: 0.5

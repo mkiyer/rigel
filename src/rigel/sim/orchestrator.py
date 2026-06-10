@@ -48,8 +48,14 @@ def capture_paired_condition_seed(
     strand_specificity: float,
     nrna_label: str,
 ) -> int:
-    """Seed shared by the capture/overdispersion variants of one base ``(gdna, ss, nrna)`` condition."""
-    seed_name = condition_dir_name(gdna_label, strand_specificity, nrna_label)
+    """Seed shared by the capture **and nascent** variants of one ``(gdna, ss)`` base condition.
+
+    ``nrna_label`` is intentionally **excluded** from the seed so that a nascent-on cell and its
+    nascent-off twin share the same mature-RNA + gDNA streams (the nascent layer draws from a
+    dedicated RNG; see ``WholeGenomeSimulator._nrna_rng``) — making nascent on/off bit-identical
+    head-to-head, exactly as the capture variants already are.
+    """
+    seed_name = condition_dir_name(gdna_label, strand_specificity, "_paired")
     return stable_seed(base_seed, seed_name)
 
 

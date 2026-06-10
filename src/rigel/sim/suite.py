@@ -163,6 +163,10 @@ def _load_suite_config(path: Path) -> dict[str, object]:
     put(None, "strand_specificities")
     put("nrna", "ratios", "nrna_ratios")
     put("nrna", "ratio_labels", "nrna_labels")
+    put("nrna", "mode", "nrna_mode")
+    put("nrna", "ratio_ranges", "nrna_ratio_ranges")
+    put("nrna", "eligible_fraction", "nrna_eligible_fraction")
+    put("nrna", "seed", "nrna_seed")
 
     put("capture", "fraction", "capture_fraction")
     put("capture", "capture_fraction")
@@ -445,7 +449,26 @@ def main():
     )
     parser.add_argument(
         "--nrna-labels", type=str, default=None,
-        help="Comma-separated labels for --nrna-ratios (required when overriding ratios)"
+        help="Comma-separated labels for --nrna-ratios / --nrna-ratio-ranges"
+    )
+    parser.add_argument(
+        "--nrna-mode", type=str, default="additive_ratio",
+        choices=("additive_ratio", "random_fraction"),
+        help="Nascent sweep mode: additive_ratio (one global ratio for all expressed multi-exon "
+             "transcripts) or random_fraction (a random per-transcript ratio on a fraction of them)"
+    )
+    parser.add_argument(
+        "--nrna-ratio-ranges", type=str, default=None,
+        help="random_fraction: semicolon-separated lo,hi ranges, e.g. '0,0;0.1,1.0' "
+             "(per-transcript ratio drawn ~Uniform(lo,hi))"
+    )
+    parser.add_argument(
+        "--nrna-eligible-fraction", type=float, default=1.0,
+        help="random_fraction: fraction of expressed multi-exon transcripts that carry nascent RNA"
+    )
+    parser.add_argument(
+        "--nrna-seed", type=int, default=42,
+        help="random_fraction: RNG seed for the per-transcript nascent assignment"
     )
     parser.add_argument(
         "--conditions", nargs="*", default=None,
@@ -480,15 +503,31 @@ def main():
     ref_dir.mkdir(parents=True, exist_ok=True)
 
     t0 = time.monotonic()
-    if args.nrna_ratios is None:
-        nrna_ratios, nrna_labels = PROFILE_NRNA[args.profile]
-    else:
-        if args.nrna_labels is None:
-            raise ValueError("--nrna-labels is required when --nrna-ratios is set")
-        nrna_ratios = _as_float_list(args.nrna_ratios)
+    nrna_mode = getattr(args, "nrna_mode", None) or "additive_ratio"
+    if nrna_mode == "random_fraction":
+        if args.nrna_ratio_ranges is None or args.nrna_labels is None:
+            raise ValueError(
+                "nrna.ratio_ranges and nrna.ratio_labels are required for nrna.mode=random_fraction"
+            )
+        raw = args.nrna_ratio_ranges
+        if isinstance(raw, str):
+            raw = [pair.split(",") for pair in raw.split(";")]
+        nrna_ratio_ranges = [(float(lo), float(hi)) for lo, hi in raw]
         nrna_labels = _as_label_list(args.nrna_labels)
-    if len(nrna_labels) != len(nrna_ratios):
-        raise ValueError("--nrna-labels must have the same length as --nrna-ratios")
+        nrna_ratios = None
+        if len(nrna_labels) != len(nrna_ratio_ranges):
+            raise ValueError("nrna.ratio_labels must match nrna.ratio_ranges in length")
+    else:
+        nrna_ratio_ranges = None
+        if args.nrna_ratios is None:
+            nrna_ratios, nrna_labels = PROFILE_NRNA[args.profile]
+        else:
+            if args.nrna_labels is None:
+                raise ValueError("--nrna-labels is required when --nrna-ratios is set")
+            nrna_ratios = _as_float_list(args.nrna_ratios)
+            nrna_labels = _as_label_list(args.nrna_labels)
+        if len(nrna_labels) != len(nrna_ratios):
+            raise ValueError("--nrna-labels must have the same length as --nrna-ratios")
     if args.min_isoforms <= 0:
         raise ValueError("--min-isoforms must be > 0")
     if args.max_isoforms < args.min_isoforms:
@@ -749,9 +788,12 @@ def main():
             frag_max=args.gdna_frag_max,
         ),
         nrna=NRNAConfig(
-            mode="additive_ratio",
-            ratios=nrna_ratios,
+            mode=nrna_mode,
+            ratios=nrna_ratios if nrna_ratios is not None else [0.0],
+            ratio_ranges=nrna_ratio_ranges,
             ratio_labels=nrna_labels,
+            eligible_fraction=float(getattr(args, "nrna_eligible_fraction", 1.0) or 1.0),
+            seed=int(getattr(args, "nrna_seed", 42) or 42),
         ),
         capture=(
             capture_scenarios[0].config
@@ -815,10 +857,16 @@ def main():
         for scenario in capture_scenarios
     }
     base_abundances = [(t.abundance or 0.0, t.nrna_abundance) for t in transcripts]
-    nrna_pairs = [
-        (label, "additive_ratio", ratio, idx)
-        for idx, (ratio, label) in enumerate(zip(nrna_ratios, nrna_labels))
-    ]
+    if nrna_mode == "random_fraction":
+        nrna_pairs = [
+            (label, "random_fraction", ratio_range, idx)
+            for idx, (ratio_range, label) in enumerate(zip(nrna_ratio_ranges, nrna_labels))
+        ]
+    else:
+        nrna_pairs = [
+            (label, "additive_ratio", ratio, idx)
+            for idx, (ratio, label) in enumerate(zip(nrna_ratios, nrna_labels))
+        ]
     conditions = run_condition_grid(
         outdir=outdir,
         genome_path=fasta_path,
