@@ -53,7 +53,30 @@ contrast), combined across nodes by inverse-variance weighting; the global κ co
 the natural precision scale (it already appears as the strand Fisher information). This subsumes the
 ad-hoc `gdna_strand_llr_bias` knob and the vetoed global strand-reliability metric.
 
-**Status:** design open. Highest-value foundational fix; #3 and #5 partly depend on it.
+**Status:** design doc written → `docs/calibration/strand_cleaning_robustness_design.md` (options
+analysis + recommendation). Recommended: **O2 precision-weighted shrinkage** — treat the clean as a
+measurement with precision `τ=(2κ−1)²·N` (its Fisher info) and shrink toward a fallback g₀; the
+precision-weighting algebraically cancels the 1/(½−κ) blow-up (`g=[4N(½−κ)(s−κ)+τ₀g₀]/[4N(½−κ)²+τ₀]`),
+smooth and → g₀ at κ=½. Sub-decisions: target g₀ (node-type-aware: observable→1, exon→pre-deconv
+global) + prior strength τ₀. Highest-value foundational fix.
+
+**TRIAL implemented 2026-06-09 (uncommitted, may revert):** O2 with the *minimal* g₀=1 (fixed
+"keep raw count" fallback, not yet node-type-aware) + config `strand_clean_prior_weight` τ₀ (default
+1.0). `strand_clean_gdna_frac` does `g=[4N(½−κ)(s−κ)+τ₀]/[4N(½−κ)²+τ₀]`, threaded through the region
+clean (`node_gdna_density`) and boundary-side clean (`deconv_sides`); τ₀=0 reproduces legacy exactly.
+Smoke: gdna400 cap_on **ss0.99 net leak 4.58% UNCHANGED** (high SS: τ≫τ₀ ⇒ shrinkage inert ⇒ win
+preserved, no regression). O2's effect is at **low SS**.
+
+**FULL 20-SCENARIO RESULT (2026-06-09): g₀=1 is behaviorally INERT** — it smooths the cliff but
+reproduces its numbers (flagship 4.58→4.61%; gdna_none ss0.50 FP −4.48→−4.5%). Reason: at κ≈½ a node
+defaults to g₀, and g₀=1 = "all gDNA" = exactly the old cliff. The residual concentrates in the
+**unstranded (ss0.50)** conditions: gdna_none ss0.50 −4.5% (RNA→gDNA FP), unstranded+capture 13.6%
+(gdna100) → 17.4% (gdna400) → 18.7% (gdna1000). **To make O2 useful, g₀ must be the LIBRARY GLOBAL
+gDNA fraction at exon/non-observable nodes** (so an unstranded node defaults to the actual rate: ≈0
+for gdna_none → kills the FP; ≈0.9 for gdna1000 → correct) — the node-type-aware g₀ (observable→1,
+exon→pre-deconv global). Next: implement g₀=global, OR revert O2 (g₀=1 adds config+code for no
+behavioral change). Mechanism (smooth shrinkage, no high-SS regression) is validated; the TARGET is
+the lever.
 
 ---
 
