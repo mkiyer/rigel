@@ -237,8 +237,13 @@ class WholeGenomeSimulator:
         self.sim_params = sim_params
         self.gdna_config = gdna_config
         self.strand_specificity = strand_specificity
-        self._rng = np.random.default_rng(
-            seed if seed is not None else sim_params.sim_seed,
+        eff_seed = seed if seed is not None else sim_params.sim_seed
+        self._rng = np.random.default_rng(eff_seed)
+        # Nascent RNA draws on a DEDICATED, independent stream (entropy key "NRNA"=0x4E524E41) so
+        # toggling nascent on/off never perturbs the mature-RNA or gDNA streams: a nascent-off run is
+        # bit-identical to its nascent-on twin minus the nascent layer (head-to-head benchmarking).
+        self._nrna_rng = np.random.default_rng(
+            np.random.SeedSequence([int(eff_seed), 0x4E524E41])
         )
 
         N = len(transcripts)
@@ -488,9 +493,14 @@ class WholeGenomeSimulator:
             mrna_counts = self._accumulate_pool(
                 n_mrna, self._mrna_abund, self._t_lengths, space="mrna",
             )
+            # Nascent on the dedicated stream; restore self._rng so the gDNA pool (next) and the
+            # mature pool (above) are untouched by whether/how much nascent was drawn.
+            _main_rng = self._rng
+            self._rng = self._nrna_rng
             nrna_counts = self._accumulate_pool(
                 n_nrna, self._nrna_abund, self._premrna_lengths, space="nrna",
             )
+            self._rng = _main_rng
             return mrna_counts, nrna_counts
 
         # Combined-pool mode (original behaviour)
@@ -1071,11 +1081,15 @@ class WholeGenomeSimulator:
                         t_idx, mrna_counts[t_idx], r1_buf, r2_buf, bam_fh,
                         is_nrna=False,
                     )
+                # Nascent reads on the dedicated stream; restore so gDNA writing (next) is unaffected.
+                _main_rng = self._rng
+                self._rng = self._nrna_rng
                 for t_idx in sorted(nrna_counts):
                     self._write_rna_reads(
                         t_idx, nrna_counts[t_idx], r1_buf, r2_buf, bam_fh,
                         is_nrna=True,
                     )
+                self._rng = _main_rng
                 self._write_gdna_from_counts(gdna_counts, r1_buf, r2_buf, bam_fh)
                 r1_buf.close()
                 r2_buf.close()
@@ -1177,8 +1191,10 @@ class WholeGenomeSimulator:
         seed: int,
     ) -> tuple[str, str, str | None]:
         """Worker entry: write one shard's FASTQ + BAM files."""
-        # Independent RNG per shard
+        # Independent RNG per shard; nascent on its own dedicated stream (head-to-head: the mature +
+        # gDNA shard reads are unaffected by whether the nascent shard is written).
         self._rng = np.random.default_rng(seed)
+        self._nrna_rng = np.random.default_rng(np.random.SeedSequence([int(seed), 0x4E524E41]))
 
         shard_path = Path(shard_dir)
         r1_path = shard_path / f"{prefix}.shard{shard_id:03d}.R1.fq.gz"
@@ -1201,10 +1217,13 @@ class WholeGenomeSimulator:
                     self._write_rna_reads(
                         t_idx, len_counts, r1_buf, r2_buf, bam_fh, is_nrna=False,
                     )
+                _main_rng = self._rng
+                self._rng = self._nrna_rng  # nascent shard on the dedicated stream
                 for t_idx, len_counts in nrna_items:
                     self._write_rna_reads(
                         t_idx, len_counts, r1_buf, r2_buf, bam_fh, is_nrna=True,
                     )
+                self._rng = _main_rng
                 n_offset = 0
                 for (ref_idx, fl), count in gdna_items:
                     n_offset += self._write_gdna_chunk(
