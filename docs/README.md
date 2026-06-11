@@ -22,7 +22,8 @@ The gDNA-vs-RNA deconvolution stage — the most active area.
 | [`decoupled_calibration_design.md`](calibration/decoupled_calibration_design.md) | **current architecture**: the decoupled strand/count handoff (design + implementation guide) |
 | [`archive/joint_deconvolution.md`](calibration/archive/joint_deconvolution.md) | archived: the retired joint count×strand product (resurrection guide) |
 | [`CALIBRATION_TODO.md`](calibration/CALIBRATION_TODO.md) | live tracker of open issues |
-| [`count_channel_capture_design.md`](calibration/count_channel_capture_design.md) | **count-channel roadmap** (authoritative) — phasing reconciliation + Phase 1 / 2 / 4-mean / 4-var / 5 |
+| [`remaining_phases.md`](calibration/remaining_phases.md) | **AUTHORITATIVE forward plan** — the remaining work as clean Phase 1 (count posterior) / 2 (FP quantile) / 3 (nascent removal), implementation-grade |
+| [`count_channel_capture_design.md`](calibration/count_channel_capture_design.md) | background: the original count-channel roadmap (superseded by `remaining_phases.md` for sequencing) |
 | [`count_mean_bias_design.md`](calibration/count_mean_bias_design.md) | **Phase 4-mean**: the splice-junction gDNA-fraction (eligibility predicate, 2-/3-term, strand-resolved sweep) |
 | [`count_posterior_design.md`](calibration/count_posterior_design.md) | **Phase 4-var**: count posterior variance (`var∝mean²` from paired anchor disagreements) |
 | [`count_local_dispersion_design.md`](calibration/count_local_dispersion_design.md) | parked: local count-dispersion estimator (Phase 4-var extension) |

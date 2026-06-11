@@ -206,6 +206,82 @@ present.
 - Confirm the accumulator exposes crossing-unspliced vs crossing-spliced per boundary side (the substrate
   has `n_spliced_*`; add crossing-unspliced if missing — C++ + reference stay byte-identical).
 
+## 8a. Phase 4-mean.2 — the run-interior sweep (implementation plan)
+
+**Status:** plan for review; settle the open questions (§8a.5) before coding.
+
+### 8a.1 What it targets (and what it cannot)
+
+4-mean.1 gives a splice fraction to every non-observable exon region with a **direct** eligible
+splice-junction boundary — which already covers all internal *and* terminal exons of clean multi-exon
+genes (a terminal exon still has one intron neighbour). The regions that currently fall back to absolute
+density, and that the sweep can reach, are:
+- **AMBIG regions** (overlapping antisense) — matched-set-ineligible at a single-strand junction;
+- regions whose neighbours are intergenic or other exons (no intron neighbour) — complex multi-isoform
+  stacks, regions abutting single-exon transcripts;
+- regions where the local spliced reference is too sparse (`spl=0` ⇒ the direct anchor was skipped).
+
+The sweep carries the splice-derived gDNA fraction from a directly-anchored region into these neighbours
+along a run, so they use a splice estimate instead of the capture-biased absolute density.
+**It cannot help a region with no splice anchor anywhere in its run** (e.g. an isolated single-exon
+transcript) — those correctly stay on absolute density.
+
+### 8a.2 Mechanics (mirrors the existing density run-fill, in fraction space)
+
+- **Run** = a maximal stretch of consecutive same-reference regions between count-observable anchors
+  (the structure `density_model` already uses, lines ~138–150).
+- **Seeds** = regions with a direct 4-mean.1 splice fraction.
+- **Carry** = bidirectional forward+reverse fill: a non-anchored region inherits the nearest seeded
+  fraction from each direction, averaged where both reach (identical to the density run-fill).
+- **Priority per region:** direct splice anchor (4-mean.1) > carried splice fraction (4-mean.2) >
+  absolute-density fallback (§6).
+- **State:** a scalar gDNA fraction for 4-mean.2; the per-strand `{gDNA, RNA⁺, RNA⁻}` state (§5.1) is
+  4-mean.3 — **unless** §8a.5-Q2 decides to build per-strand from the start.
+
+### 8a.3 Files
+
+Extend `splice_junction.region_splice_gdna_frac` (or a sibling) to run the carry after the direct
+anchors; it already has the signatures, ref ids, and the fallback array. **No accumulator/C++ change, no
+new config** (no new constant — unless a distance decay is added, §8a.5-Q4).
+
+### 8a.4 Validation
+
+Existing 20-condition benchmark (AMBIG/complex regions should improve; FP stays 0; no regression) **and**
+the nascent+antisense suite (the main beneficiaries). Key A/B: carried-splice vs the absolute-density
+run-fill it replaces — does carrying the *fraction* beat carrying the *density*?
+
+### 8a.5 Open questions (settle together first)
+
+1. **Carry the fraction or the density?** The premise is the gDNA *fraction* is a more transport-stable
+   invariant than the absolute density under capture (enrichment scales numerator and denominator
+   together). Plausible but **unproven** — worth a quick diagnostic before committing to it.
+2. **Scalar now, or per-strand state from the start?** §5.1 argued for building `{gDNA, RNA⁺, RNA⁻}`
+   from the start (it's where AMBIG identifiability lives, and AMBIG regions are the sweep's main
+   beneficiaries). Carrying a scalar first is simpler but may need reworking for 4-mean.3.
+3. **Seeds: splice-only, or also count-observable regions?** A count-observable (intergenic/intron)
+   region has a reliable own-density fraction; seeding the sweep from those too would fill runs from
+   both ends. But that is close to the existing density run-fill — does it add anything beyond it?
+4. **Distance decay?** The current run-fill takes the nearest anchor with no decay. A decay would be a
+   new constant (no-magic-numbers concern) — avoid unless a diagnostic shows far-carried fractions are
+   unreliable.
+5. **Priority when carried-splice and absolute-density both exist** — trust carried-splice (premise:
+   less capture-biased) or blend? Leaning: carried-splice wins, since that is the whole point.
+6. **Is 4-mean.2 worth a separate step at all?** **RESOLVED — fold into 4-mean.3.** Sizing on
+   gdna1000 ss0.50 cap_on (`scripts/debug`, 2026-06-10): of 562 non-observable regions, 237 are directly
+   anchored (4-mean.1) and 325 fall back; of those, only **17 are sweep-reachable**, **0 are AMBIG**, and
+   **308 are unreachable** (no splice junction anywhere in their run — single-exon / isolated exons). A
+   standalone 2-term sweep would touch 17 regions ⇒ not worth its own step. Build the carry-over inside
+   4-mean.3 where it enables the 3-term.
+
+> **Sizing finding (2026-06-10) — the structural reach of the splice method.** The dominant fallback
+> bucket (308/325) is regions with **no spliced reference in their run** (single-exon transcripts,
+> isolated exons) — precisely where gDNA is sequence-identical to RNA and leaks worst under
+> unstranded+capture. **No splice-fraction method, direct or swept, can reach them.** So 4-mean (.1+.3)
+> closes the *junction-bearing* part of the unstranded+capture leak; the single-exon/no-junction part is
+> a separate problem for the count posterior (Phase 4-var) + the FP quantile (Phase 5), or an
+> absolute-density improvement. This re-weights the roadmap: after 4-mean.3, the single-exon residual is
+> the next target, via the count side — not more splice work.
+
 ## 9. Open questions / future work
 
 1. **FL-consistency of the partition — `f_b · M_region`.** `f_b` is a *molecular* (density) fraction;
