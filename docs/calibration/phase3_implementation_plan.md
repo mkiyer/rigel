@@ -1,5 +1,13 @@
 # Phase 3 — strand-resolved nascent removal (3-term splice fraction + per-strand carry-over): implementation plan
 
+> **SUPERSEDED (2026-06-11) by [`sequential_calibration_redesign.md`](sequential_calibration_redesign.md).**
+> The direct-3-term-on-eligible-regions approach here was measured net-negative (washed out on
+> strand-observable regions; never reaches the count-routed AMBIG node — see the A/B + the toy scenario
+> `scripts/debug/phase3_ambig_scenario.py`). The redesign instead restructures into a **sequential
+> strand→count pipeline** (strand cleans first + communicates precision; count imputes the cleaned
+> density field), which reaches the AMBIG node by construction. Kept for the design rationale (3-term
+> arithmetic, per-strand identifiability, sizing).
+
 **Status:** execution-ready plan, 2026-06-11. Resolves the open questions in
 `count_mean_bias_design.md` §5.1/§8a.5 and `remaining_phases.md` §3.8 with the decisions below.
 Supersedes those sketches for *implementation*; they remain the design rationale. **Do not start the

@@ -79,6 +79,44 @@ def _grid_posterior_median(post: np.ndarray, grid: np.ndarray) -> np.ndarray:
     return out
 
 
+def strand_posterior_gdna_frac(
+    sense: np.ndarray,
+    antisense: np.ndarray,
+    rna_sense_frac: float,
+    *,
+    gdna_strand_overdispersion: float,
+    rna_strand_overdispersion: float,
+    n_grid: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Beta-Binomial **strand posterior** over the gDNA fraction, per node — ``(median, variance)``.
+
+    The strand module's core: ``log_post(g) = log Beta(g; ½, ½) + strand_loglik(sense, antisense | g, κ,
+    od)`` on the ``n_grid`` grid, summarised by its **median** (the point estimate ``g_strand``) and
+    **variance** (the FP-quantile width). ``sense``/``antisense`` are 1-D arrays (length n, oriented to
+    transcript sense); returns two length-n arrays. Shared by the per-region deconvolution
+    (:func:`_deconv_per_node`) and the splice 3-term's crossing-unspliced strand-clean
+    (:mod:`splice_junction`) so both read the *same* posterior.
+    """
+    sense = np.asarray(sense, dtype=np.float64)
+    antisense = np.asarray(antisense, dtype=np.float64)
+    grid = np.linspace(_GRID_EPS, 1.0 - _GRID_EPS, n_grid)
+    log_prior = (_STRAND_PRIOR - 1.0) * (np.log(grid) + np.log1p(-grid))
+    log_post = log_prior[None, :] + strand_loglik(
+        grid[None, :],
+        sense[:, None],
+        antisense[:, None],
+        rna_sense_frac,
+        gdna_strand_overdispersion=gdna_strand_overdispersion,
+        rna_strand_overdispersion=rna_strand_overdispersion,
+    )  # (n, n_grid)
+    post = np.exp(log_post - log_post.max(axis=1, keepdims=True))
+    post /= post.sum(axis=1, keepdims=True)
+    mean = post @ grid  # (n,)
+    var = ((grid[None, :] - mean[:, None]) ** 2 * post).sum(axis=1)
+    median = np.clip(_grid_posterior_median(post, grid), 0.0, 1.0)
+    return median, var
+
+
 def _deconv_per_node(
     mass_unspl,
     mass_spliced,
@@ -128,21 +166,14 @@ def _deconv_per_node(
     use_strand = active & strand_observable & ((sense + antisense) > 0.0) & (w_strand > 0.0)
     if use_strand.any():
         idx = np.flatnonzero(use_strand)
-        grid = np.linspace(_GRID_EPS, 1.0 - _GRID_EPS, n_grid)
-        log_prior = (_STRAND_PRIOR - 1.0) * (np.log(grid) + np.log1p(-grid))
-        log_post = log_prior[None, :] + strand_loglik(
-            grid[None, :],
-            sense[idx, None],
-            antisense[idx, None],
+        g_strand, var_strand = strand_posterior_gdna_frac(
+            sense[idx],
+            antisense[idx],
             rna_sense_frac,
             gdna_strand_overdispersion=gdna_strand_overdispersion,
             rna_strand_overdispersion=rna_strand_overdispersion,
-        )  # (n_use, n_grid)
-        post = np.exp(log_post - log_post.max(axis=1, keepdims=True))
-        post /= post.sum(axis=1, keepdims=True)
-        mean = post @ grid  # (n_use,)
-        var_strand = ((grid[None, :] - mean[:, None]) ** 2 * post).sum(axis=1)
-        g_strand = np.clip(_grid_posterior_median(post, grid), 0.0, 1.0)
+            n_grid=n_grid,
+        )
         center[idx] = w_strand * g_strand + (1.0 - w_strand) * g_count[idx]
         var[idx] = w_strand**2 * var_strand + (1.0 - w_strand) ** 2 * var_count[idx]
 
@@ -382,4 +413,10 @@ def boundary_side_seeds(substrate, region_arrays, node_density, boundary_side_ef
     return np.concatenate(senses), np.concatenate(totals), np.concatenate(weights)
 
 
-__all__ = ["NodeDeconv", "deconv_regions", "deconv_sides", "boundary_side_seeds"]
+__all__ = [
+    "NodeDeconv",
+    "strand_posterior_gdna_frac",
+    "deconv_regions",
+    "deconv_sides",
+    "boundary_side_seeds",
+]
