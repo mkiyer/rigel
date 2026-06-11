@@ -19,6 +19,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .run_fill import same_ref_left_right
+
 
 @dataclass(frozen=True, slots=True)
 class DerivedDensity:
@@ -26,18 +28,6 @@ class DerivedDensity:
 
     gdna_density_global: float
     gdna_geom_len: np.ndarray  # float64[R]  Σ_node L_node (geometric, capture-independent)
-
-
-def _side_exists(ref_id: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Boolean masks: does region r have a left / right internal (same-ref) boundary?"""
-    r = ref_id.shape[0]
-    left = np.zeros(r, dtype=bool)
-    right = np.zeros(r, dtype=bool)
-    if r > 1:
-        same = ref_id[:-1] == ref_id[1:]
-        left[1:] = same
-        right[:-1] = same
-    return left, right
 
 
 def derive(
@@ -51,7 +41,7 @@ def derive(
     """Aggregate the Phase-3 deconvolution into the global density + geometric gDNA length."""
     region_eff_len = np.asarray(region_eff_len, dtype=np.float64)
     bside = np.asarray(boundary_side_eff_len, dtype=np.float64)
-    left_exists, right_exists = _side_exists(np.asarray(ref_id))
+    left_exists, right_exists = same_ref_left_right(np.asarray(ref_id))
     # A side that doesn't exist contributes no length.
     left_eff = np.where(left_exists, bside, 0.0)
     right_eff = np.where(right_exists, bside, 0.0)

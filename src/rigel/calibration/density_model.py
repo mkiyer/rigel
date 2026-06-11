@@ -37,6 +37,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .run_fill import runfill_bidirectional, same_ref_left_right
 from .signature import BIT_EXON_NEG, BIT_EXON_POS
 
 _EXON_BITS = BIT_EXON_POS | BIT_EXON_NEG
@@ -216,11 +217,12 @@ def node_gdna_density(
 
     # Per-side boundary observability for region r: its LEFT side uses boundary (r−1, r); its RIGHT
     # side uses boundary (r, r+1). boundary_count_observable[k] describes boundary (k, k+1).
+    left_same, right_same = same_ref_left_right(ref_id)
     left_anchor = np.zeros(r, dtype=bool)
     right_anchor = np.zeros(r, dtype=bool)
     if r > 1:
-        left_anchor[1:] = boundary_count_observable[:-1] & (ref_id[1:] == ref_id[:-1])
-        right_anchor[:-1] = boundary_count_observable[:-1] & (ref_id[:-1] == ref_id[1:])
+        left_anchor[1:] = boundary_count_observable[:-1] & left_same[1:]
+        right_anchor[:-1] = boundary_count_observable[:-1] & right_same[:-1]
 
     density = np.full(r, np.nan, dtype=np.float64)
     # Observable region with a usable contained length → its own contained density.
@@ -244,19 +246,7 @@ def node_gdna_density(
 
     # Run-fill: a region still unset (a run interior with no observable side) inherits the nearest
     # anchored neighbour, carried inward from both directions within its reference and averaged.
-    fwd = density.copy()
-    for i in range(1, r):
-        if np.isnan(fwd[i]) and ref_id[i] == ref_id[i - 1]:
-            fwd[i] = fwd[i - 1]
-    rev = density.copy()
-    for i in range(r - 2, -1, -1):
-        if np.isnan(rev[i]) and ref_id[i] == ref_id[i + 1]:
-            rev[i] = rev[i + 1]
-    stack = np.vstack([fwd, rev])
-    valid = ~np.isnan(stack)
-    n_valid = valid.sum(axis=0)
-    carried = np.where(n_valid > 0, np.nansum(stack, axis=0) / np.maximum(n_valid, 1), np.nan)
-    density = np.where(np.isnan(density), carried, density)
+    density = runfill_bidirectional(density, ref_id)
 
     # A region still unset has NO local anchor anywhere in its reference. It takes the GLOBAL gDNA
     # density (the count-weighted mean of the count-observable regions' own densities — a sensible

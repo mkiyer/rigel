@@ -40,6 +40,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.special import ndtri
 
+from .run_fill import same_ref_left_right
 from .signature import TS_AMBIG, TS_NEG, TS_NONE, TS_POS
 from .strand_likelihood import strand_loglik
 
@@ -199,16 +200,13 @@ def _left_right_neighbors(ts, ref_id, boundary_count_observable):
     ``(left_same, ts_prev, left_observable, right_same, ts_next, right_observable)``.
     """
     r = ts.shape[0]
-    left_same = np.zeros(r, dtype=bool)
+    left_same, right_same = same_ref_left_right(ref_id)
     ts_prev = np.zeros(r, dtype=ts.dtype)
     left_observable = np.zeros(r, dtype=bool)
-    right_same = np.zeros(r, dtype=bool)
     ts_next = np.zeros(r, dtype=ts.dtype)
     if r > 1:
-        left_same[1:] = ref_id[1:] == ref_id[:-1]
         ts_prev[1:] = ts[:-1]
         left_observable[1:] = boundary_count_observable[:-1]
-        right_same[:-1] = ref_id[:-1] == ref_id[1:]
         ts_next[:-1] = ts[1:]
     return left_same, ts_prev, left_observable, right_same, ts_next, boundary_count_observable
 
