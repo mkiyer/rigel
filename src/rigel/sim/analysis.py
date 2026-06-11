@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -636,6 +636,10 @@ class FlowData:
     comp_kind: dict[int, str]             # cid -> "rna" | "gdna" | "unassigned"
     comp_locus: dict[int, int]            # cid -> locus_id (gdna@L -> L; unknown -> -1)
     total_gdna_true: int = 0              # true gDNA fragments (oracle), all loci + intergenic
+    # 3-pool fragment flow (true_pool, assigned_pool) -> count, pools in {gdna, nrna, mrna}. The
+    # net reduction (net(a→b)=flow[a,b]-flow[b,a]) cancels sequence-identical unrecoverable
+    # misassignment; per-pool net surplus = assigned-true is the un-conflated leak/FP measure.
+    pool_flow: dict[tuple[str, str], int] = field(default_factory=dict)
 
 
 def collect_fragment_flows(
@@ -703,6 +707,7 @@ def collect_fragment_flows(
             return cid
 
         flow: Counter = Counter()
+        pool_flow: Counter = Counter()  # (true_pool, assigned_pool) -> count, pools gdna/nrna/mrna
 
         # Legacy gross-confusion counters (back-compat for downstream consumers).
         correct_tx = correct_gene = wrong_tx = 0
@@ -774,6 +779,10 @@ def collect_fragment_flows(
                             wrong_tx += 1
 
                 flow[(t_cid, a_cid)] += 1
+                assigned_pool = (
+                    "gdna" if is_assigned_gdna else ("nrna" if is_assigned_nrna else "mrna")
+                )
+                pool_flow[(origin.kind, assigned_pool)] += 1
                 # Vote the fragment's genomic locus (ZL) for any RNA endpoint.
                 if comp_kind[t_cid] == "rna":
                     comp_zl[t_cid][zl] += 1
@@ -792,6 +801,7 @@ def collect_fragment_flows(
             comp_kind=comp_kind,
             comp_locus=comp_locus,
             total_gdna_true=total_gdna,
+            pool_flow=dict(pool_flow),
         )
         overview_rows.append({
             "condition": cond,
@@ -899,6 +909,35 @@ def _net_flow_rows(fd: FlowData) -> tuple[list[dict], list[dict]]:
         })
 
     return tx_rows, locus_rows
+
+
+_POOLS_3 = ("gdna", "nrna", "mrna")
+
+
+def _pool_flow_3way_row(fd: FlowData) -> dict:
+    """One per-condition 3-pool (gDNA/nRNA/mRNA) net-flow row.
+
+    Reports each pool's true/assigned totals + **net surplus** (assigned − true; + = the pool is
+    net-inflated, − = net-deficit) and the three **net fluxes** between pool pairs. Net cancels the
+    sequence-identical, truly-unidentifiable misassignment, so the per-pool net surplus is the
+    un-conflated leak / false-positive measure (a gross sum over-counts unrecoverable exchange).
+    """
+    pf = fd.pool_flow
+
+    def cnt(a: str, b: str) -> int:
+        return pf.get((a, b), 0)
+
+    true = {p: sum(cnt(p, b) for b in _POOLS_3) for p in _POOLS_3}
+    asg = {p: sum(cnt(a, p) for a in _POOLS_3) for p in _POOLS_3}
+    row = {"condition": fd.condition}
+    for p in _POOLS_3:
+        row[f"{p}_true"] = true[p]
+        row[f"{p}_assigned"] = asg[p]
+        row[f"{p}_net_surplus"] = asg[p] - true[p]
+    row["net_gdna_to_nrna"] = cnt("gdna", "nrna") - cnt("nrna", "gdna")
+    row["net_gdna_to_mrna"] = cnt("gdna", "mrna") - cnt("mrna", "gdna")
+    row["net_nrna_to_mrna"] = cnt("nrna", "mrna") - cnt("mrna", "nrna")
+    return row
 
 
 def _spearman(x: "pd.Series", y: "pd.Series") -> float:
@@ -1031,6 +1070,43 @@ def analyze_net_flow(
         )
     cond_path = sim_base / "net_flow_per_condition.tsv"
     pd.DataFrame(pool_rows).to_csv(cond_path, sep="\t", index=False)
+
+    # ── 3-pool net flow: gDNA ↔ nRNA ↔ mRNA (the resurrected nRNA pool needs 3 pools) ──
+    lines.append(
+        "\n  3-POOL NET FLOW (gDNA/nRNA/mRNA): per-pool net surplus (assigned−true) + net pair fluxes."
+    )
+    lines.append(
+        "  + surplus ⇒ pool net-inflated (false gain); − ⇒ net-deficit. Watch mRNA surplus (mature FP)."
+    )
+    lines.append(
+        f"  {'gdna':9}{'cap':4}{'ss':5}{'nrna':5} | {'gDNA_surp':>10}{'nRNA_surp':>10}{'mRNA_surp':>10}"
+        f" | {'g→n':>8}{'g→m':>8}{'n→m':>8}"
+    )
+    lines.append("  " + "-" * 86)
+    pool3_rows = []
+    for cond in conditions:
+        fd = flows.get(cond)
+        if fd is None or not fd.pool_flow:
+            continue
+        meta = cmeta.get(cond, {})
+        row = _pool_flow_3way_row(fd)
+        row.update({
+            "gdna_label": meta.get("gdna_label", "?"),
+            "gdna_rate": float(meta.get("gdna_rate", 0.0)),
+            "capture": meta.get("capture_label", "off"),
+            "ss": meta.get("strand_specificity", float("nan")),
+            "nrna": meta.get("nrna_label", "rnd" if "nrna_rnd" in cond else "none"),
+        })
+        pool3_rows.append(row)
+    pool3_rows.sort(key=lambda r: (r["gdna_rate"], r["capture"], -r["ss"], r["nrna"]))
+    for r in pool3_rows:
+        lines.append(
+            f"  {r['gdna_label']:9}{r['capture']:4}{r['ss']:<5.2f}{r['nrna']:5} | "
+            f"{r['gdna_net_surplus']:>+10,}{r['nrna_net_surplus']:>+10,}{r['mrna_net_surplus']:>+10,}"
+            f" | {r['net_gdna_to_nrna']:>+8,}{r['net_gdna_to_mrna']:>+8,}{r['net_nrna_to_mrna']:>+8,}"
+        )
+    if pool3_rows:
+        pd.DataFrame(pool3_rows).to_csv(sim_base / "net_flow_3pool_per_condition.tsv", sep="\t", index=False)
 
     # ── Per-transcript Δ distribution + source decomposition ──
     lines.append("\n  PER-TRANSCRIPT Δ (observed − expected) and its decomposition:")
