@@ -58,24 +58,46 @@ class NodeDeconv:
     gdna_frac_var: np.ndarray  # float64[K] — posterior variance (0 for count-routed nodes)
 
 
-def _grid_posterior_median(post: np.ndarray, grid: np.ndarray) -> np.ndarray:
-    """Per-row posterior median — the batched ``np.interp(0.5, cumsum(post_row), grid)``.
+@dataclass(frozen=True, slots=True)
+class StrandSplit:
+    """Standalone strand deconvolution of a node's UNSPLICED mass into gDNA vs RNA, + likelihood info.
 
-    Vectorises the median over the ``(n_use, n_grid)`` posterior: the CDF crossing of ½ on each row,
-    linearly interpolated on ``grid`` with ``np.interp``'s exact arithmetic (``slope·(½−x_lo)+f_lo``)
-    and its end-clamps (½ ≤ cdf[0] → grid[0]; ½ ≥ cdf[-1] → grid[-1]).
+    The strand module's per-node output (sequential redesign). All float64[R]:
+
+    * ``gdna_frac`` — the gDNA fraction read at the FP-quantile where the node is strand-informative,
+      else ``NaN`` (the strand makes no guess; the count module imputes those nodes from the field).
+    * ``gdna_mass`` / ``rna_mass`` — ``mass_unspliced`` split by ``gdna_frac`` (``NaN`` where not split);
+      conserved (``gdna_mass + rna_mass = mass_unspliced``) where split. Spliced mass is NOT included —
+      it is deterministic RNA the count module folds in via the 3-term.
+    * ``info`` — ``I = N·(2κ−1)²`` (N = unspliced count, κ = ``rna_sense_frac``): the **likelihood**
+      precision the count module weights by; ``0`` where strand-uninformative (AMBIG / no sense) or
+      unstranded (κ=½). NOT the posterior variance (which is the finite prior variance at κ=½).
+    """
+
+    gdna_frac: np.ndarray
+    gdna_mass: np.ndarray
+    rna_mass: np.ndarray
+    info: np.ndarray
+
+
+def _grid_posterior_quantile(post: np.ndarray, grid: np.ndarray, q: float = 0.5) -> np.ndarray:
+    """Per-row posterior quantile — the batched ``np.interp(q, cumsum(post_row), grid)`` (median at q=½).
+
+    Vectorises the quantile over the ``(n, n_grid)`` posterior: the CDF crossing of ``q`` on each row,
+    linearly interpolated on ``grid`` with ``np.interp``'s exact arithmetic (``slope·(q−x_lo)+f_lo``)
+    and its end-clamps (``q ≤ cdf[0] → grid[0]``; ``q ≥ cdf[-1] → grid[-1]``). ``q=0.5`` is the median.
     """
     cdf = np.cumsum(post, axis=1)
     ng = grid.shape[0]
-    j = np.clip((cdf < 0.5).sum(axis=1), 1, ng - 1)  # first index with cdf ≥ ½ (interval upper bound)
+    j = np.clip((cdf < q).sum(axis=1), 1, ng - 1)  # first index with cdf ≥ q (interval upper bound)
     rows = np.arange(post.shape[0])
     c_lo = cdf[rows, j - 1]
     c_hi = cdf[rows, j]
     g_lo = grid[j - 1]
     slope = (grid[j] - g_lo) / np.where(c_hi > c_lo, c_hi - c_lo, 1.0)
-    out = slope * (0.5 - c_lo) + g_lo
-    out = np.where(cdf[:, 0] >= 0.5, grid[0], out)  # ½ ≤ cdf[0] ⇒ grid[0]
-    out = np.where(cdf[:, -1] <= 0.5, grid[-1], out)  # ½ ≥ cdf[-1] ⇒ grid[-1]
+    out = slope * (q - c_lo) + g_lo
+    out = np.where(cdf[:, 0] >= q, grid[0], out)  # q ≤ cdf[0] ⇒ grid[0]
+    out = np.where(cdf[:, -1] <= q, grid[-1], out)  # q ≥ cdf[-1] ⇒ grid[-1]
     return out
 
 
@@ -87,15 +109,17 @@ def strand_posterior_gdna_frac(
     gdna_strand_overdispersion: float,
     rna_strand_overdispersion: float,
     n_grid: int,
+    deconv_quantile: float = 0.5,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Beta-Binomial **strand posterior** over the gDNA fraction, per node — ``(median, variance)``.
+    """Beta-Binomial **strand posterior** over the gDNA fraction, per node — ``(point, variance)``.
 
     The strand module's core: ``log_post(g) = log Beta(g; ½, ½) + strand_loglik(sense, antisense | g, κ,
-    od)`` on the ``n_grid`` grid, summarised by its **median** (the point estimate ``g_strand``) and
-    **variance** (the FP-quantile width). ``sense``/``antisense`` are 1-D arrays (length n, oriented to
-    transcript sense); returns two length-n arrays. Shared by the per-region deconvolution
-    (:func:`_deconv_per_node`) and the splice 3-term's crossing-unspliced strand-clean
-    (:mod:`splice_junction`) so both read the *same* posterior.
+    od)`` on the ``n_grid`` grid, read at the **FP-quantile** ``deconv_quantile`` (the point estimate;
+    median at the ``0.5`` default), with the posterior **variance** alongside. ``sense``/``antisense`` are
+    1-D arrays (length n, oriented to transcript sense); returns two length-n arrays. Shared by the
+    per-region deconvolution (:func:`_deconv_per_node`, which uses the median + variance) and the
+    standalone strand module (:func:`strand_deconvolve`, which reads its own quantile) so both share the
+    *same* posterior machinery.
     """
     sense = np.asarray(sense, dtype=np.float64)
     antisense = np.asarray(antisense, dtype=np.float64)
@@ -113,8 +137,8 @@ def strand_posterior_gdna_frac(
     post /= post.sum(axis=1, keepdims=True)
     mean = post @ grid  # (n,)
     var = ((grid[None, :] - mean[:, None]) ** 2 * post).sum(axis=1)
-    median = np.clip(_grid_posterior_median(post, grid), 0.0, 1.0)
-    return median, var
+    g_q = np.clip(_grid_posterior_quantile(post, grid, deconv_quantile), 0.0, 1.0)
+    return g_q, var
 
 
 def _deconv_per_node(
@@ -263,6 +287,37 @@ def _left_right_neighbors(ts, ref_id, boundary_count_observable):
     return left_same, ts_prev, left_observable, right_same, ts_next, boundary_count_observable
 
 
+def _side_strand_orientation(view, same, ts_self, ts_other):
+    """Per-side sense/antisense split + strand-observability (the ``TS_NONE``-wildcard rule).
+
+    A side is **strand-observable** iff its two flanks define a single consistent transcript sense:
+    ``{POS,POS}``/``{NEG,NEG}``, or a gene-edge ``{POS,NONE}``/``{NEG,NONE}`` (intergenic ``TS_NONE`` is a
+    wildcard, oriented by the gene side); an opposite-strand ``{POS,NEG}`` or a ``TS_AMBIG`` flank leaves
+    the sense undefined. Returns ``(sense, antisense, n_side, strand_observable)`` (all length R). Shared
+    by the count-side quantities (:func:`_compute_side`) and the standalone strand module
+    (:func:`strand_deconvolve`).
+    """
+    pos = view.n_unspliced_pos.astype(np.float64)
+    neg = view.n_unspliced_neg.astype(np.float64)
+    either_ambig = (ts_self == TS_AMBIG) | (ts_other == TS_AMBIG)
+    self_pos_or_none = (ts_self == TS_POS) | (ts_self == TS_NONE)
+    other_pos_or_none = (ts_other == TS_POS) | (ts_other == TS_NONE)
+    self_neg_or_none = (ts_self == TS_NEG) | (ts_self == TS_NONE)
+    other_neg_or_none = (ts_other == TS_NEG) | (ts_other == TS_NONE)
+    cons_pos = (
+        same & ~either_ambig & self_pos_or_none & other_pos_or_none
+        & ((ts_self == TS_POS) | (ts_other == TS_POS))
+    )
+    cons_neg = (
+        same & ~either_ambig & self_neg_or_none & other_neg_or_none
+        & ((ts_self == TS_NEG) | (ts_other == TS_NEG))
+    )
+    strand_observable = cons_pos | cons_neg
+    sense = np.where(cons_neg, neg, pos)
+    n_side = pos + neg
+    return sense, n_side - sense, n_side, strand_observable
+
+
 def _compute_side(
     view, same, ts_self, ts_other, side_count_observable, eff, region_density
 ) -> _SideQuantities:
@@ -286,28 +341,9 @@ def _compute_side(
     (``density_model._count_fraction_variance``). It feeds the FP-rate quantile (Phase 2) only.
     """
     mass = view.mass_unspliced
-    pos = view.n_unspliced_pos.astype(np.float64)
-    neg = view.n_unspliced_neg.astype(np.float64)
-    # Strand sense with TS_NONE (intergenic) as a wildcard: POS-sense if each flank is POS-or-NONE
-    # and at least one is POS (mirror for NEG); a TS_AMBIG flank or an opposite-strand pairing leaves
-    # it undefined. Reduces to {POS,POS}/{NEG,NEG} when neither flank is intergenic.
-    either_ambig = (ts_self == TS_AMBIG) | (ts_other == TS_AMBIG)
-    self_pos_or_none = (ts_self == TS_POS) | (ts_self == TS_NONE)
-    other_pos_or_none = (ts_other == TS_POS) | (ts_other == TS_NONE)
-    self_neg_or_none = (ts_self == TS_NEG) | (ts_self == TS_NONE)
-    other_neg_or_none = (ts_other == TS_NEG) | (ts_other == TS_NONE)
-    cons_pos = (
-        same & ~either_ambig & self_pos_or_none & other_pos_or_none
-        & ((ts_self == TS_POS) | (ts_other == TS_POS))
+    sense, antisense, n_side, strand_observable = _side_strand_orientation(
+        view, same, ts_self, ts_other
     )
-    cons_neg = (
-        same & ~either_ambig & self_neg_or_none & other_neg_or_none
-        & ((ts_self == TS_NEG) | (ts_other == TS_NEG))
-    )
-    strand_observable = cons_pos | cons_neg
-    sense = np.where(cons_neg, neg, pos)
-    n_side = pos + neg
-    antisense = n_side - sense
     with np.errstate(divide="ignore", invalid="ignore"):
         # Raw crossing density (no strand cleaning); count-observable sides use their own crossing
         # density, others borrow the swept region density.
@@ -413,9 +449,84 @@ def boundary_side_seeds(substrate, region_arrays, node_density, boundary_side_ef
     return np.concatenate(senses), np.concatenate(totals), np.concatenate(weights)
 
 
+def strand_deconvolve(
+    substrate,
+    region_arrays,
+    *,
+    rna_sense_frac,
+    gdna_strand_overdispersion=0.0,
+    rna_strand_overdispersion=0.0,
+    deconv_quantile=0.5,
+    n_grid=200,
+) -> tuple[StrandSplit, StrandSplit, StrandSplit]:
+    """Standalone strand deconvolution of every node into gDNA / unspliced-RNA, with likelihood info.
+
+    The strand module of the sequential redesign (``docs/calibration/sequential_calibration_redesign.md``):
+    for each node — the region-contained view and each boundary side — the Beta-Binomial strand posterior
+    (:func:`strand_posterior_gdna_frac`) is read at the FP-quantile ``deconv_quantile`` to split the
+    UNSPLICED mass into gDNA vs RNA, and the **likelihood Fisher information** ``I = N·(2κ−1)²`` (N = the
+    unspliced count, κ = ``rna_sense_frac``) is emitted as the precision the count module weights by.
+    Strand-uninformative nodes (AMBIG / no defined sense, or κ=½) get ``I=0`` and ``gdna_frac=NaN`` — the
+    strand makes no guess; the count module imputes them from the density field. The deterministic spliced
+    mass is untouched (RNA the count module folds in via the 3-term). Returns ``(contained, left, right)``
+    :class:`StrandSplit`. Has **no count input** — Jeffreys-regularised and independent (the redesign's
+    "strand runs first, standalone"). Built alongside the live blend; not yet wired into ``calibrate``.
+    """
+    ts = np.asarray(region_arrays.strand_class)
+    ref_id = np.asarray(region_arrays.ref_id)
+    r = ts.shape[0]
+    w_strand = (2.0 * float(rna_sense_frac) - 1.0) ** 2  # per-fragment strand info (discriminability)
+
+    def _split(mass_unspliced, sense, antisense, n_side, observable) -> StrandSplit:
+        mass_unspliced = np.asarray(mass_unspliced, dtype=np.float64)
+        gdna_frac = np.full(r, np.nan)
+        info = np.zeros(r)
+        informative = np.asarray(observable, dtype=bool) & (n_side > 0.0) & (w_strand > 0.0)
+        if informative.any():
+            idx = np.flatnonzero(informative)
+            g_q, _ = strand_posterior_gdna_frac(
+                sense[idx],
+                antisense[idx],
+                rna_sense_frac,
+                gdna_strand_overdispersion=gdna_strand_overdispersion,
+                rna_strand_overdispersion=rna_strand_overdispersion,
+                n_grid=n_grid,
+                deconv_quantile=deconv_quantile,
+            )
+            gdna_frac[idx] = g_q
+            info[idx] = n_side[idx] * w_strand  # I = N·(2κ−1)²
+        gdna_mass = gdna_frac * mass_unspliced
+        return StrandSplit(
+            gdna_frac=gdna_frac, gdna_mass=gdna_mass, rna_mass=mass_unspliced - gdna_mass, info=info
+        )
+
+    # Contained view: a region is strand-observable iff its own transcript strand is defined (POS/NEG).
+    c = substrate.contained
+    c_pos = c.n_unspliced_pos.astype(np.float64)
+    c_neg = c.n_unspliced_neg.astype(np.float64)
+    c_sense = np.where(ts == TS_NEG, c_neg, c_pos)
+    c_n = c_pos + c_neg
+    contained = _split(c.mass_unspliced, c_sense, c_n - c_sense, c_n, (ts == TS_POS) | (ts == TS_NEG))
+
+    # Boundary sides: orient against the neighbour strand (the TS_NONE-wildcard rule, shared helper).
+    left_same, right_same = same_ref_left_right(ref_id)
+    ts_prev = np.zeros(r, dtype=ts.dtype)
+    ts_next = np.zeros(r, dtype=ts.dtype)
+    if r > 1:
+        ts_prev[1:] = ts[:-1]
+        ts_next[:-1] = ts[1:]
+    l_sense, l_anti, l_n, l_obs = _side_strand_orientation(substrate.left, left_same, ts, ts_prev)
+    r_sense, r_anti, r_n, r_obs = _side_strand_orientation(substrate.right, right_same, ts, ts_next)
+    left = _split(substrate.left.mass_unspliced, l_sense, l_anti, l_n, l_obs)
+    right = _split(substrate.right.mass_unspliced, r_sense, r_anti, r_n, r_obs)
+    return contained, left, right
+
+
 __all__ = [
     "NodeDeconv",
+    "StrandSplit",
     "strand_posterior_gdna_frac",
+    "strand_deconvolve",
     "deconv_regions",
     "deconv_sides",
     "boundary_side_seeds",
