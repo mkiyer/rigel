@@ -19,9 +19,15 @@ fall out and are asserted:
 
 from __future__ import annotations
 
+import pytest
+
 from rigel.calibration.regions import build_region_partition
 from rigel.calibration.signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_NEG, BIT_INTRON_POS
-from rigel.calibration.splice_junction import boundary_gdna_fraction, splice_junction_eligibility
+from rigel.calibration.splice_junction import (
+    boundary_gdna_fraction,
+    density_frac_to_count_frac,
+    splice_junction_eligibility,
+)
 from rigel.transcript import Interval, Transcript
 from rigel.types import Strand
 
@@ -195,3 +201,38 @@ def test_three_term_recovers_pure_gdna_when_nascent_present():
     )
     assert abs(three_term - gdna / (gdna + nascent + mature)) < 1e-12
     assert two_term > three_term  # 2-term over-attributes by the nascent share
+
+
+# ---------------------------------------------------------------------------
+# FL-consistency: density fraction → region count fraction (fl_consistency_diagnostic.md)
+# ---------------------------------------------------------------------------
+
+
+def test_density_to_count_frac_is_identity_when_fl_matches():
+    # E^g_region == E^r_region (matched gDNA/RNA FL) ⇒ the boundary density fraction IS the region
+    # count fraction. This is why the original matched-FL toy scenario recovered truth.
+    for f_b in (0.1, 0.5, 0.9):
+        assert density_frac_to_count_frac(f_b, 120.0, 120.0) == pytest.approx(f_b)
+
+
+def test_density_to_count_frac_recovers_the_true_count_fraction():
+    # Under uniform density the region's contained-count gDNA fraction is d_g·E^g/(d_g·E^g + d_r·E^r).
+    # Feeding the matching density fraction f_b = d_g/(d_g+d_r) must recover exactly that.
+    d_g, d_r, eg, er = 0.4, 0.6, 90.0, 12.0  # short exon, gDNA FL shorter ⇒ E^g ≫ E^r
+    f_b = d_g / (d_g + d_r)
+    g_true = d_g * eg / (d_g * eg + d_r * er)
+    assert density_frac_to_count_frac(f_b, eg, er) == pytest.approx(g_true)
+
+
+def test_density_to_count_frac_direction():
+    # gDNA fragments more containable than RNA (E^g > E^r) ⇒ count fraction ABOVE the density fraction
+    # (the bare f_b under-calls gDNA); the reverse when E^g < E^r (bare over-calls).
+    f_b = 0.5
+    assert density_frac_to_count_frac(f_b, 90.0, 12.0) > f_b  # gDNA shorter (more containable)
+    assert density_frac_to_count_frac(f_b, 12.0, 90.0) < f_b  # gDNA longer (less containable)
+
+
+def test_density_to_count_frac_degenerate_zero_mass():
+    # Both region eff-lengths 0 (exon shorter than every fragment ⇒ no contained mass): the value is
+    # moot (M_region≈0) and the conversion returns the input unchanged rather than dividing by zero.
+    assert density_frac_to_count_frac(0.7, 0.0, 0.0) == pytest.approx(0.7)

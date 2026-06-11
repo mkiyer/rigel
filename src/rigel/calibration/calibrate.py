@@ -79,6 +79,10 @@ def calibrate(
     boundary_eff_len = boundary_side_eff_length(gdna_fl_pmf, region_arrays.region_size_bp)
     fl_mean = boundary_eff_length(gdna_fl_pmf)
     rna_fl_mean = boundary_eff_length(rna_fl_pmf)  # RNA boundary-crossing eff length (splice fraction)
+    # RNA region (contained) eff length — pairs with region_eff_len (gDNA) to convert the splice
+    # boundary *density* fraction into the region *count* fraction (FL-consistency; see
+    # docs/calibration/fl_consistency_diagnostic.md).
+    region_eff_len_rna = region_eff_length(region_arrays.region_size_bp, rna_fl_pmf)
 
     # RNA strand balance: rna_sense_frac (κ) = posterior-mean spliced sense fraction. The strand
     # channel's discriminability w=(2κ−1)² (set inside the deconv) is the smooth strand→count
@@ -109,7 +113,13 @@ def calibrate(
     # Ineligible regions keep the absolute-density fallback. This upgrades only the REGION count
     # fraction consumed by deconv_regions; the seed fit and side deconvolution keep node_density.
     region_count_frac, n_splice_upgraded = region_splice_gdna_frac(
-        substrate, region_arrays, node_density.count_gdna_frac, eff_gdna=fl_mean, eff_rna=rna_fl_mean
+        substrate,
+        region_arrays,
+        node_density.count_gdna_frac,
+        eff_gdna=fl_mean,
+        eff_rna=rna_fl_mean,
+        eff_gdna_region=region_eff_len,
+        eff_rna_region=region_eff_len_rna,
     )
     region_node_density = dataclasses.replace(node_density, count_gdna_frac=region_count_frac)
 

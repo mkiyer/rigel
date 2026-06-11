@@ -40,6 +40,7 @@ __all__ = [
     "SpliceJunction",
     "splice_junction_eligibility",
     "boundary_gdna_fraction",
+    "density_frac_to_count_frac",
     "region_splice_gdna_frac",
 ]
 
@@ -161,6 +162,31 @@ def boundary_gdna_fraction(
     return rho_gdna / total
 
 
+def density_frac_to_count_frac(
+    density_frac: float, eff_gdna_region: float, eff_rna_region: float
+) -> float:
+    """Convert a molecular-**density** gDNA fraction to a region's contained-**count** fraction.
+
+    ``boundary_gdna_fraction`` returns ``f_b = ρ_gDNA/(ρ_gDNA+ρ_RNA)`` — a *density* fraction (the
+    crossing counts were divided by their **crossing** eff-lengths). Applying it to a region's contained
+    *count* ``M_region`` requires re-weighting by the region's own gDNA/RNA effective lengths, because a
+    contained count is ``ρ·E_region`` and the two species have different ``E_region`` when their FL
+    distributions differ::
+
+        g = (f_b·E^g_region) / ( f_b·E^g_region + (1−f_b)·E^r_region )
+
+    This is the exact count fraction under uniform density (``= d_g·E^g/(d_g·E^g + d_r·E^r)``); it is
+    the **identity** when ``E^g_region = E^r_region`` (matched FL), and corrects the otherwise-large
+    short-exon bias when they differ (the absolute-density count fraction already carries this factor —
+    ``density·E^g_region/M_region`` — so this aligns the splice fraction with it). See
+    ``docs/calibration/fl_consistency_diagnostic.md``. A degenerate region with no contained mass
+    (both eff-lengths ``0``) returns ``density_frac`` unchanged (the value is moot — ``M_region≈0``).
+    """
+    num = density_frac * eff_gdna_region
+    den = num + (1.0 - density_frac) * eff_rna_region
+    return float(num / den) if den > 0.0 else float(density_frac)
+
+
 def region_splice_gdna_frac(
     substrate,
     region_arrays,
@@ -168,6 +194,8 @@ def region_splice_gdna_frac(
     *,
     eff_gdna: float,
     eff_rna: float,
+    eff_gdna_region: np.ndarray,
+    eff_rna_region: np.ndarray,
 ) -> tuple[np.ndarray, int]:
     """Upgrade the count gDNA fraction for exon regions with an eligible splice-junction boundary.
 
@@ -176,10 +204,15 @@ def region_splice_gdna_frac(
     ``r`` as the exon side (``"R"`` for the left boundary, ``"L"`` for the right). At each anchoring
     boundary the **2-term** :func:`boundary_gdna_fraction` is computed from the crossing counts on
     ``r``'s side (``substrate.left[r]`` / ``substrate.right[r]`` — the per-side flux), using only sides
-    that carry a mature (spliced) reference. Eligible regions take the mean of their anchor fractions
-    (the same anchor combination the absolute-density imputation uses); regions with no usable splice
-    anchor keep ``fallback_frac`` (the absolute-density imputation, always available). Returns
-    ``(count_gdna_frac, n_upgraded)``.
+    that carry a mature (spliced) reference. Eligible regions take the mean of their anchor *density*
+    fractions (the same anchor combination the absolute-density imputation uses), then convert that to
+    the region's contained-**count** fraction via :func:`density_frac_to_count_frac` using the region's
+    own gDNA/RNA effective lengths (``eff_gdna_region`` / ``eff_rna_region`` = ``region_eff_length`` of
+    each FL pmf). The boundary fraction is a *density* fraction; without this conversion it carries a
+    large short-exon bias whenever the gDNA and RNA FL distributions differ (see
+    ``docs/calibration/fl_consistency_diagnostic.md``). Regions with no usable splice anchor keep
+    ``fallback_frac`` (the absolute-density imputation — itself already count-consistent — always
+    available). Returns ``(count_gdna_frac, n_upgraded)``.
 
     First cut — the **2-term** form (crossing-unspliced lumped as gDNA+nascent), correct for libraries
     without nascent RNA. The 3-term / strand-resolved sweep (design §5, §5.1) is a later layer; this
@@ -187,6 +220,8 @@ def region_splice_gdna_frac(
     """
     sig = np.asarray(region_arrays.signature)
     ref_id = np.asarray(region_arrays.ref_id)
+    eff_gdna_region = np.asarray(eff_gdna_region, dtype=np.float64)
+    eff_rna_region = np.asarray(eff_rna_region, dtype=np.float64)
     r = sig.shape[0]
     frac = np.array(fallback_frac, dtype=np.float64, copy=True)
 
@@ -222,6 +257,9 @@ def region_splice_gdna_frac(
                 if a is not None:
                     anchors.append(a)
         if anchors:
-            frac[i] = float(np.mean(anchors))
+            density_frac = float(np.mean(anchors))  # mean anchor DENSITY fraction for this region
+            frac[i] = density_frac_to_count_frac(
+                density_frac, eff_gdna_region[i], eff_rna_region[i]
+            )
             n_upgraded += 1
     return frac, n_upgraded
