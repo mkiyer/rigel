@@ -26,7 +26,8 @@ The gDNA-vs-RNA deconvolution stage — the most active area.
 | [`count_channel_capture_design.md`](calibration/count_channel_capture_design.md) | background: the original count-channel roadmap (superseded by `remaining_phases.md` for sequencing) |
 | [`count_mean_bias_design.md`](calibration/count_mean_bias_design.md) | **Phase 4-mean**: the splice-junction gDNA-fraction (eligibility predicate, 2-/3-term, strand-resolved sweep) |
 | [`count_posterior_design.md`](calibration/count_posterior_design.md) | **Phase 4-var**: count posterior variance (`var∝mean²` from paired anchor disagreements) |
-| [`phase2_design.md`](calibration/phase2_design.md) | **Phase 2** (research-backed): count posterior variance behavior, the blend decision (keep (2κ−1)²), the FP-rate quantile knob |
+| [`phase2_design.md`](calibration/phase2_design.md) | **Phase 2** (shipped + validated): count posterior variance behavior, the blend decision (keep (2κ−1)²), the FP-rate quantile knob |
+| [`phase3_implementation_plan.md`](calibration/phase3_implementation_plan.md) | **Phase 3** (execution-ready plan): strand-resolved nascent removal — 3-term splice fraction + per-strand `{gDNA,RNA⁺,RNA⁻}` carry-over sweep, density-as-floor combination, prerequisites |
 | [`capture_effective_length_design.md`](calibration/capture_effective_length_design.md) | **capture-aware effective lengths** for all EM components (the gDNA-only IPR contraction bug + fix) |
 | [`count_local_dispersion_design.md`](calibration/count_local_dispersion_design.md) | parked: local count-dispersion estimator (Phase 4-var extension) |
 | [`strand_clean_robust_deferred.md`](calibration/strand_clean_robust_deferred.md) | deferred: precision-weighted robust strand-clean concept (subsumed by the strand module) |
