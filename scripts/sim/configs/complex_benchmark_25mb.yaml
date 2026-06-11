@@ -1,0 +1,87 @@
+# ════════════════════════════════════════════════════════════════════════
+# Complex benchmark suite — 25 Mb / 500 genes, antisense + multi-isoform + nascent.
+#
+# Purpose: move calibration validation off the small/clean 5 Mb toy (where single-exon
+# noise dominates the residual) onto a larger, more realistic genome with all three
+# complexity dimensions the toy lacks:
+#   * antisense_fraction 0.15  → AMBIG (opposite-strand overlap) regions (Phase 3)
+#   * max_isoforms 8           → more junction-bearing regions, retained introns, complex loci
+#   * nascent RNA layer        → tests nascent removal under capture at scale
+#
+# BROAD periodic suite (run sparingly; the quick_3to1_5mb suite is the fast gate). Capped at 3:1 gDNA
+# to avoid the 10:1 read-count/storage monsters (3:1 with 3M RNA ⇒ 9M gDNA, vs 30M at 10:1).
+#
+# Condition grid = 2 gDNA × 2 strand × 2 nascent × 2 capture = 16 runs:
+#   gDNA:    none (FP test), gdna300 (3:1)  on 3,000,000 RNA fragments
+#   strand:  unstranded (0.50) + stranded (0.99)
+#   nascent: none (off) + rnd (random per-transcript ratio)
+#   capture: hybrid-capture off + on
+# Delete the per-condition sim_oracle.bam after evaluation to keep the footprint small.
+#
+# NEW genome (own seed) — NOT the 5 Mb reference. Used to evaluate Phase 1 (count
+# posterior variance) and beyond on data where single-exon transcripts are not the
+# dominant residual.
+#
+# Usage:
+#   python scripts/sim/simulate_suite.py --config scripts/sim/configs/complex_benchmark_25mb.yaml
+#   python scripts/sim/evaluate_suite.py --sim-base /Users/mkiyer/Downloads/rigel_runs/complex_benchmark_25mb
+# ════════════════════════════════════════════════════════════════════════
+
+suite:
+  outdir: /Users/mkiyer/Downloads/rigel_runs/complex_benchmark_25mb
+  genome_length: 25000000     # ~25 Mb (5× the toy)
+  n_genes: 500                # 5× the toy
+  min_isoforms: 1
+  max_isoforms: 8             # more isoforms/gene → richer splicing
+  target_transcripts: null
+  antisense_fraction: 0.15    # 15% antisense overlaps → AMBIG regions (Phase 3)
+  seed: 20260611              # NEW genome
+  profile: smoke
+
+simulation:
+  n_rna_fragments: 3000000    # mature RNA fragments per condition (fixed; nascent adds on top)
+  frag_mean: 250
+  frag_std: 50
+  frag_min: 80
+  frag_max: 800
+  read_length: 150
+  error_rate: 0.0
+  n_workers: 16
+
+abundance:
+  seed: 20260612
+  min: 1.0
+  max: 10000.0
+  frac_expressed: 0.5
+
+# gDNA contamination as a multiple of the 3,000,000 RNA fragments (3:1 balance point).
+gdna:
+  rates:       [0.0,  3.0]
+  rate_labels: [none, gdna300]
+  frag_mean: 350
+  frag_std: 100
+  frag_min: 100
+  frag_max: 1000
+
+strand_specificities: [0.99, 0.50]   # stranded + unstranded
+
+# Nascent RNA: random per-transcript ratio on 50% of expressed multi-exon transcripts.
+nrna:
+  mode: random_fraction
+  ratio_ranges:  [[0.0, 0.0], [0.1, 1.0]]   # none ⇒ no nascent;  rnd ⇒ ratio ∈ [0.1, 1.0]
+  ratio_labels:  [none, rnd]
+  eligible_fraction: 0.5
+  seed: 20260613
+
+capture:
+  probe_length: 120
+  probe_density: 0.5
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
+  configs:
+    - label: off
+      enabled: false
+    - label: on
+      fraction: 0.5
