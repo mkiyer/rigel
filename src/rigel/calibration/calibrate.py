@@ -104,7 +104,15 @@ def calibrate(
     # anchored from its observable boundary sides; the global fallback comes from intergenic regions.
     # node_gdna_density returns the count module's gDNA fraction (count_gdna_frac) per node, consumed
     # for count-routed nodes and as the gDNA strand-fit seed weight.
-    node_density = node_gdna_density(substrate, region_arrays, region_eff_len, fl_mean)
+    # The count posterior variance feeds only the FP-rate quantile (no-op at the default ½), so skip
+    # its O(R²) LOESS unless a non-½ quantile actually consumes it.
+    node_density = node_gdna_density(
+        substrate,
+        region_arrays,
+        region_eff_len,
+        fl_mean,
+        need_count_variance=(float(config.gdna_deconv_quantile) != 0.5),
+    )
 
     # Splice-junction gDNA-fraction (Phase 4-mean): for exon regions with an eligible splice-junction
     # boundary, replace the absolute-density count fraction with the boundary gDNA-fraction — the

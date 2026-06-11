@@ -190,6 +190,8 @@ def node_gdna_density(
     region_arrays,
     region_eff_len: np.ndarray,
     fl_mean: float,
+    *,
+    need_count_variance: bool = True,
 ) -> NodeDensity:
     """Per-region gDNA density from the count clue via LOCAL boundary-anchored imputation.
 
@@ -198,6 +200,11 @@ def node_gdna_density(
     fallback for strand-unobservable / unstranded nodes). The density is read directly from
     count-observable regions and imputed locally for the rest; a region with no local anchor anywhere
     takes the count-weighted-mean observable density as a global fallback. See the module docstring.
+
+    ``need_count_variance`` gates the Phase-1 count posterior variance: it feeds **only** the FP-rate
+    quantile (``strand_deconv``), which is a no-op at the default ``gdna_deconv_quantile=0.5`` (the
+    shift is ``Φ⁻¹(½)=0``). When the caller knows the quantile is ½ it passes ``False`` and the
+    (``O(R²)`` LOESS) variance is skipped, returning zeros — bit-identical, since the value is unused.
     """
     sig = np.asarray(region_arrays.signature)
     ref_id = np.asarray(region_arrays.ref_id)
@@ -267,10 +274,15 @@ def node_gdna_density(
         )
 
     # Phase 1: count posterior variance σ_g² of the gDNA fraction (see _count_fraction_variance).
-    count_gdna_frac_var = _count_fraction_variance(
-        count_gdna_frac, density, own=own, own_count=contained_gdna, d_left=d_left, d_right=d_right,
-        n_anchor=n_anchor,
-    )
+    # Skipped (zeros) when the FP-rate quantile is ½ — the variance is then multiplied by Φ⁻¹(½)=0,
+    # so this avoids the O(R²) LOESS on the default path with no observable effect.
+    if need_count_variance:
+        count_gdna_frac_var = _count_fraction_variance(
+            count_gdna_frac, density, own=own, own_count=contained_gdna, d_left=d_left,
+            d_right=d_right, n_anchor=n_anchor,
+        )
+    else:
+        count_gdna_frac_var = np.zeros(r, dtype=np.float64)
 
     return NodeDensity(
         density=density,

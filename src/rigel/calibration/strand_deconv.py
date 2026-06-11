@@ -58,6 +58,27 @@ class NodeDeconv:
     gdna_frac_var: np.ndarray  # float64[K] — posterior variance (0 for count-routed nodes)
 
 
+def _grid_posterior_median(post: np.ndarray, grid: np.ndarray) -> np.ndarray:
+    """Per-row posterior median — the batched ``np.interp(0.5, cumsum(post_row), grid)``.
+
+    Vectorises the median over the ``(n_use, n_grid)`` posterior: the CDF crossing of ½ on each row,
+    linearly interpolated on ``grid`` with ``np.interp``'s exact arithmetic (``slope·(½−x_lo)+f_lo``)
+    and its end-clamps (½ ≤ cdf[0] → grid[0]; ½ ≥ cdf[-1] → grid[-1]).
+    """
+    cdf = np.cumsum(post, axis=1)
+    ng = grid.shape[0]
+    j = np.clip((cdf < 0.5).sum(axis=1), 1, ng - 1)  # first index with cdf ≥ ½ (interval upper bound)
+    rows = np.arange(post.shape[0])
+    c_lo = cdf[rows, j - 1]
+    c_hi = cdf[rows, j]
+    g_lo = grid[j - 1]
+    slope = (grid[j] - g_lo) / np.where(c_hi > c_lo, c_hi - c_lo, 1.0)
+    out = slope * (0.5 - c_lo) + g_lo
+    out = np.where(cdf[:, 0] >= 0.5, grid[0], out)  # ½ ≤ cdf[0] ⇒ grid[0]
+    out = np.where(cdf[:, -1] <= 0.5, grid[-1], out)  # ½ ≥ cdf[-1] ⇒ grid[-1]
+    return out
+
+
 def _deconv_per_node(
     mass_unspl,
     mass_spliced,
@@ -87,52 +108,52 @@ def _deconv_per_node(
     is used only to *widen* the quantile (safe), never to *sharpen* the blend (kept bias-robust at
     ``(2κ−1)²`` — the count σ is anti-calibrated under capture; see ``docs/calibration/phase2_design.md``).
     """
-    k = mass_unspl.shape[0]
-    grid = np.linspace(_GRID_EPS, 1.0 - _GRID_EPS, n_grid)
-    log_grid = np.log(grid)
-    log_1mgrid = np.log1p(-grid)
-    log_prior = (_STRAND_PRIOR - 1.0) * log_grid + (_STRAND_PRIOR - 1.0) * log_1mgrid
+    mass_unspl = np.asarray(mass_unspl, dtype=np.float64)
+    mass_spliced = np.asarray(mass_spliced, dtype=np.float64)
+    sense = np.asarray(sense, dtype=np.float64)
+    antisense = np.asarray(antisense, dtype=np.float64)
+    strand_observable = np.asarray(strand_observable, dtype=bool)
     w_strand = (2.0 * float(rna_sense_frac) - 1.0) ** 2  # strand discriminability, in [0, 1]
     z = float(ndtri(min(max(float(deconv_quantile), 1e-6), 1.0 - 1e-6)))  # Φ⁻¹(q); 0 at q=0.5
-    gdna = np.zeros(k)
-    rna = np.zeros(k)
-    gdna_frac = np.zeros(k)
-    gdna_frac_var = np.zeros(k)
-    for i in range(k):
-        m = float(mass_unspl[i])
-        if m <= 0.0:
-            rna[i] = float(mass_spliced[i])  # only deterministic spliced RNA, if any
-            continue
-        g_count = min(max(float(count_gdna_frac[i]), 0.0), 1.0)
-        var_count = max(float(count_gdna_frac_var[i]), 0.0)
-        if w_strand > 0.0 and strand_observable[i] and (sense[i] + antisense[i]) > 0:
-            # STRAND module: Beta-Binomial posterior (weak prior, no count term).
-            log_post = log_prior + strand_loglik(
-                grid,
-                sense[i],
-                antisense[i],
-                rna_sense_frac,
-                gdna_strand_overdispersion=gdna_strand_overdispersion,
-                rna_strand_overdispersion=rna_strand_overdispersion,
-            )
-            post = np.exp(log_post - log_post.max())
-            post /= post.sum()
-            mean = float(np.dot(grid, post))
-            var_strand = float(np.dot((grid - mean) ** 2, post))
-            g_strand = float(np.clip(np.interp(0.5, np.cumsum(post), grid), 0.0, 1.0))
-            center = w_strand * g_strand + (1.0 - w_strand) * g_count
-            var = w_strand**2 * var_strand + (1.0 - w_strand) ** 2 * var_count
-        else:
-            center = g_count  # no usable strand signal (unstranded / no sense) ⇒ count only
-            var = var_count
-        gdna_frac_var[i] = var  # combined per-node posterior variance (Phase 1/2)
-        frac = center if z == 0.0 else min(max(center + z * var**0.5, 0.0), 1.0)
-        gdna_frac[i] = frac
-        gdna[i] = frac * m
-        rna[i] = (1.0 - frac) * m + float(mass_spliced[i])
-    return NodeDeconv(
-        gdna_mass=gdna, rna_mass=rna, gdna_frac=gdna_frac, gdna_frac_var=gdna_frac_var
-    )
+
+    g_count = np.clip(np.asarray(count_gdna_frac, dtype=np.float64), 0.0, 1.0)
+    var_count = np.maximum(np.asarray(count_gdna_frac_var, dtype=np.float64), 0.0)
+    center = g_count.copy()  # count-routed default (no usable strand signal ⇒ count only)
+    var = var_count.copy()
+
+    # STRAND module (Beta-Binomial posterior, weak prior) for every strand-routed node at once: a node
+    # uses strand iff the library is strand-identifiable (w>0), the node is strand-observable, it
+    # carries unspliced mass, and it has a sense split. The grid posterior is one (n_use, n_grid) batch.
+    active = mass_unspl > 0.0
+    use_strand = active & strand_observable & ((sense + antisense) > 0.0) & (w_strand > 0.0)
+    if use_strand.any():
+        idx = np.flatnonzero(use_strand)
+        grid = np.linspace(_GRID_EPS, 1.0 - _GRID_EPS, n_grid)
+        log_prior = (_STRAND_PRIOR - 1.0) * (np.log(grid) + np.log1p(-grid))
+        log_post = log_prior[None, :] + strand_loglik(
+            grid[None, :],
+            sense[idx, None],
+            antisense[idx, None],
+            rna_sense_frac,
+            gdna_strand_overdispersion=gdna_strand_overdispersion,
+            rna_strand_overdispersion=rna_strand_overdispersion,
+        )  # (n_use, n_grid)
+        post = np.exp(log_post - log_post.max(axis=1, keepdims=True))
+        post /= post.sum(axis=1, keepdims=True)
+        mean = post @ grid  # (n_use,)
+        var_strand = ((grid[None, :] - mean[:, None]) ** 2 * post).sum(axis=1)
+        g_strand = np.clip(_grid_posterior_median(post, grid), 0.0, 1.0)
+        center[idx] = w_strand * g_strand + (1.0 - w_strand) * g_count[idx]
+        var[idx] = w_strand**2 * var_strand + (1.0 - w_strand) ** 2 * var_count[idx]
+
+    # FP-rate quantile g(q)=clip(center+Φ⁻¹(q)·σ); q=½ ⇒ z=0 ⇒ frac=center (bit-identical no-op).
+    frac = center if z == 0.0 else np.clip(center + z * np.sqrt(var), 0.0, 1.0)
+    # Inactive nodes (no unspliced mass): no gDNA, only the deterministic spliced RNA; zero variance.
+    frac = np.where(active, frac, 0.0)
+    gdna_frac_var = np.where(active, var, 0.0)
+    gdna = frac * mass_unspl
+    rna = (1.0 - frac) * mass_unspl + mass_spliced
+    return NodeDeconv(gdna_mass=gdna, rna_mass=rna, gdna_frac=frac, gdna_frac_var=gdna_frac_var)
 
 
 def deconv_regions(

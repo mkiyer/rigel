@@ -60,7 +60,10 @@ def strand_loglik(
     :mod:`gdna_strand`; the normal-moment vs exact-mixture discrepancy is small and ~constant in
     ``N``.
     """
-    n = float(sense) + float(antisense)
+    # Fully elementwise in (sense, antisense, gdna_frac), so it broadcasts: scalar (sense, antisense)
+    # with a 1-D grid returns one node's curve; column (sense, antisense) of shape (K, 1) with a row
+    # grid of shape (1, n_grid) returns the whole (K, n_grid) batch at once (used by strand_deconv).
+    n = sense + antisense
     p = 0.5 * gdna_frac + rna_sense_frac * (1.0 - gdna_frac)
     mean = n * p
     rna_var_scale = rna_sense_frac * (1.0 - rna_sense_frac)  # κ(1−κ); the RNA component's μ(1−μ)
@@ -70,7 +73,7 @@ def strand_loglik(
         + (n * (1.0 - gdna_frac)) ** 2 * rna_var_scale * rna_strand_overdispersion
     )
     var = np.maximum(var, 1.0e-9)
-    return -0.5 * (float(sense) - mean) ** 2 / var - 0.5 * np.log(var)
+    return -0.5 * (sense - mean) ** 2 / var - 0.5 * np.log(var)
 
 
 __all__ = ["strand_loglik"]
