@@ -1,17 +1,19 @@
 # Calibration — remaining implementation phases (clean plan)
 
-**Status:** authoritative forward plan, for review. 2026-06-10. This document **replaces the confusing
-`4-mean.1 / 4-mean.2 / 4-mean.3 / 4-var / Phase-5` nomenclature** with three plainly-numbered phases in a
-discrete implementation order. The older `count_channel_capture_design.md` / `count_mean_bias_design.md`
-/ `count_posterior_design.md` remain as background design records; this doc is the one to implement from.
+**Status:** authoritative forward plan. 2026-06-10; **Phase 1 + Phase 2 SHIPPED `main@7ccc3b0`**
+(2026-06-11) — see `phase2_design.md` for the as-built design + validation. **Phase 3 is the remaining
+work.** This document **replaces the confusing `4-mean.1 / 4-mean.2 / 4-mean.3 / 4-var / Phase-5`
+nomenclature** with three plainly-numbered phases in a discrete implementation order. The older
+`count_channel_capture_design.md` / `count_mean_bias_design.md` / `count_posterior_design.md` remain as
+background design records; this doc is the one to implement from.
 
 > **Name mapping (so we don't lose the thread):**
-> | this doc | old name |
-> |---|---|
-> | Phase 0 (shipped) | decoupling + Phase 1 blend + `4-mean.1` splice 2-term |
-> | **Phase 1** | `4-var` — count-module posterior (variance) |
-> | **Phase 2** | `Phase 5` — false-positive-rate quantile knob |
-> | **Phase 3** | `4-mean.2` + `4-mean.3` — strand-resolved 3-term nascent removal + carry-over sweep |
+> | this doc | old name | status |
+> |---|---|---|
+> | Phase 0 | decoupling + Phase 1 blend + `4-mean.1` splice 2-term | shipped |
+> | **Phase 1** | `4-var` — count-module posterior (variance) | **shipped `7ccc3b0`** |
+> | **Phase 2** | `Phase 5` — false-positive-rate quantile knob | **shipped `7ccc3b0`** |
+> | **Phase 3** | `4-mean.2` + `4-mean.3` — strand-resolved 3-term nascent removal + carry-over sweep | TODO |
 
 ---
 

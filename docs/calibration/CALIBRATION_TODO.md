@@ -30,8 +30,8 @@ rescues). Phase 4-mean (splice-junction gDNA-fraction) attacks this directly.
 | **Phase 4-mean.1** eligible 2-term splice fraction | **implemented** (`splice_junction.py`, Tests A/B) | validating on the 20-cond benchmark (net-flow rerun in progress) |
 | **Phase 4-mean.2** run-interior sweep (carry-over) | designed (`count_mean_bias_design.md` §5) | implement after .1 validated |
 | **Phase 4-mean.3** 3-term + strand-resolved per-strand sweep | designed (§5, §5.1) | needs nascent suite; absorbs the retired Phase 3 (clean→count) |
-| **Phase 4-var** count posterior variance (`var∝mean²`) | designed (`count_posterior_design.md`) | implement; validate on nascent suite |
-| **Phase 5** FP-rate quantile knob | designed (redesign §5) | needs 4-var + Phase 1; retires `gdna_strand_llr_bias` |
+| **Phase 4-var** count posterior variance (`var∝mean²`) = remaining_phases **Phase 1** | **SHIPPED `7ccc3b0`** | Poisson floor everywhere (regions LOESS + boundary sides) + LOESS variance~mean; feeds the quantile |
+| **Phase 5** FP-rate quantile knob = remaining_phases **Phase 2** | **SHIPPED `7ccc3b0`** | `gdna_deconv_quantile` (default 0.5); retired `gdna_strand_llr_bias`; validated on the 3-pool suite (`phase2_design.md` §5) |
 
 ## Deferred / future
 

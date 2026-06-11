@@ -1,9 +1,10 @@
 # Phase 2 — count posterior variance + the FP-rate quantile knob (design, research-backed)
 
-**Status:** dedicated design doc, 2026-06-11. Built from diagnostics (not assumption) so the behavior of
-the count variance is understood before it is wired in. Supersedes the Phase-2 sketch in
-`remaining_phases.md`. Diagnostics: `scripts/debug/diag_count_variance_intuition.py`
-(`/tmp/count_variance_intuition.png`) and `diag_count_posterior_calibration.py`.
+**Status:** IMPLEMENTED + VALIDATED, 2026-06-11 (`main`). Built from diagnostics (not assumption) so the
+behavior of the count variance was understood before it was wired in; the sweep in §5 confirms the
+predicted leak↔siphon trade on the suite. Supersedes the Phase-2 sketch in `remaining_phases.md`.
+Diagnostics: `scripts/debug/diag_count_variance_intuition.py` (`/tmp/count_variance_intuition.png`),
+`diag_count_posterior_calibration.py`; the q-sweep validation is `scripts/debug/qsweep_3pool.py`.
 
 ## 0. The two decisions this doc settles
 
@@ -98,19 +99,35 @@ But §2 dictates *how* it can act:
 ⇒ **bit-identical default** (the variance is consumed only when `q≠0.5`). `config.gdna_deconv_quantile`
 (default 0.5); retire `gdna_strand_llr_bias` (subsumed). Record `q` in `CalibrationResult`.
 
-## 5. Validation plan
+## 5. Validation — plan + measured results
 
-- Unit: `q=0.5` reproduces the baseline exactly; `g(q)` monotone in `q`; count-routed nodes widen but
-  don't sharpen.
-- Sweep `q ∈ {0.5,0.7,0.9,0.95}` on the complex suite; confirm the **3-pool net flow** trades leak↔siphon
-  monotonically and that the trade concentrates on strand-observable / wide-posterior nodes (not the
-  confidently-biased count nodes, which it correctly can't move). Build the FP%→`q` curve.
+- Unit (`tests/calibration/test_strand_deconv.py`, `test_calibrate.py`): `q=0.5` reproduces the baseline
+  exactly (golden **bit-identical**, 1053 pass); `g(q)` monotone in `q`; the shift is uncertainty-aware
+  (a confident node barely moves); count-routed nodes widen but don't sharpen.
+- Sweep `q ∈ {0.5,0.7,0.9,0.95}` on the complex quick suite (3:1, capture-on, gDNA300 + random nascent),
+  **3-pool net flow** (`scripts/debug/qsweep_3pool.py`):
+
+  | q | stranded ss0.99: leak gDNA→RNA | mRNA FP | unstranded ss0.50: leak gDNA→RNA | mRNA FP |
+  |---|---|---|---|---|
+  | 0.50 | +237,095 | +3.6% | +515,922 | +10.2% |
+  | 0.70 | +193,192 | +2.8% | +494,912 | +9.9% |
+  | 0.90 | +163,236 | +2.0% | +470,903 | +9.8% |
+  | 0.95 | +154,704 | +1.8% | +459,878 | +9.8% |
+
+  **The prediction holds.** The leak (and the gDNA net-deficit) fall **monotonically** in `q` as mass is
+  pulled back into gDNA, and the trade **concentrates on the stranded condition** — ss0.99 nearly halves
+  its mature-RNA FP (3.6→1.8%, leak −35%), while ss0.50 barely moves (10.2→9.8%, leak −11%). That is §4
+  working as designed: the quantile bites on strand-observable / wide-posterior nodes and **cannot** move
+  the confidently-biased count-routed nodes — so the unstranded-capture residual (~9.8%) is left as the
+  documented identifiability floor (§6.1), not laundered away by a deceptive count σ.
 
 ## 6. Open questions
 
-1. **Count-side FP mechanism** — (a) widened-σ quantile vs (b) global log-odds shift vs (c) accept-floor.
-   Lean (b)+(c): a uniform count-side shift for the knob, and document the unstranded-capture floor.
-2. **Boundary-side variance** (§1) is needed first; it is a small addition (per-side Poisson floor).
-3. **Does the quantile help the 3-pool picture** (gDNA↔nRNA↔mRNA) — e.g. FP-averse `q` pulling
-   FL-ambiguous reads back toward gDNA — or is that better served by the FL/strand discriminator? Measure
-   on the suite before committing the knob's scope.
+1. **Count-side FP mechanism** — RESOLVED (this build): option (a)+(c). The count σ widens the quantile
+   uniformly (never sharpens), and the unstranded-capture floor is accepted/documented (the sweep above
+   confirms the knob correctly leaves it ~unchanged). A separate global count-side log-odds shift (b) was
+   not needed — the widened-σ quantile + accept-floor is sufficient and magic-number-free.
+2. **Boundary-side variance** (§1) — DONE (Phase-1 per-side Poisson floor, `strand_deconv._compute_side`).
+3. **Does the quantile help the 3-pool picture** (gDNA↔nRNA↔mRNA) — yes on the stranded condition (it
+   pulls both g→nRNA and g→mRNA net flow down monotonically); on the unstranded condition the FL/strand
+   discriminator, not the quantile, is the remaining lever (the floor).
