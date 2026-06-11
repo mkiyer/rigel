@@ -83,7 +83,7 @@ on a grid, with the count prior term **removed**:
 ```
 p(g)        = g·½ + (1−g)·κ                      # node sense rate as a function of gDNA fraction
 log_post(g) = log Beta(g; ½, ½)  +  strand_loglik(grid, sense, antisense, κ, od_gdna, od_rna)
-g_strand    = posterior median on the [ε, 1−ε] grid       # (+ optional gdna_strand_llr_bias, as today)
+g_strand    = posterior median on the [ε, 1−ε] grid       # (variance σ²_strand → the FP-rate quantile)
 gDNA = g_strand·M ;  RNA = (1−g_strand)·M + spliced
 ```
 
@@ -160,7 +160,8 @@ teardown starts from the committed-plus-Phase-0/1 tree and removes the coupling 
 - **`joint_deconv.py` → `strand_deconv.py`** (rename; role changed). Strip `_joint_per_node` to the
   strand-only posterior (§3): remove `count_gdna_frac_in`, `count_concentration_in`, the
   `a_c/b_c` count-prior construction, and `_MIN_CONCENTRATION`; the prior becomes `Beta(½,½)`. Keep
-  the grid, `strand_loglik`, the median, and the `gdna_strand_llr_bias` shift. `deconv_regions` /
+  the grid, `strand_loglik`, the median, and the FP-aversion shift (since replaced by the
+  `gdna_deconv_quantile` knob — see `phase2_design.md`). `deconv_regions` /
   `deconv_sides` keep their sense/observability machinery but now feed the strand posterior only.
   `_compute_side` loses its count-prior-density computation (the `own`/`density`/`count_gdna_frac`
   block) — it now only produces `sense/antisense/strand_observable` for the strand module.
@@ -175,8 +176,8 @@ teardown starts from the committed-plus-Phase-0/1 tree and removes the coupling 
   per-node `strand_observable`; route each node to the strand posterior or the count ratio; assemble
   the per-node gDNA/RNA mass arrays from the routed results. Remove the joint wiring.
 - **`config.py`** — confirm no coupled knobs remain (`count_overdispersion_*`,
-  `strand_clean_prior_weight` already gone). `gdna_strand_llr_bias`, `n_grid`, strand-overdispersion
-  priors stay.
+  `strand_clean_prior_weight` already gone). The FP-aversion knob (now `gdna_deconv_quantile`),
+  `n_grid`, strand-overdispersion priors stay.
 - **`strand_likelihood.py`, `gdna_strand.py`, `strand_balance.py`, `derive.py`, `priors.py`** —
   unchanged (the BB likelihood, the overdispersion fits, κ, derive, and the boundary-flux transport
   are all reused as-is).
@@ -233,9 +234,10 @@ simple to current:
 - **Count module:** `g = clip(ρ·eff/M)` — a pure ratio, no prior, no floor; the `_JEFFREYS` /
   `_MIN_CONCENTRATION` / `count_overdispersion_*` / `strand_clean_prior_weight` constants are all
   **deleted**.
-- Remaining knobs are pre-existing and principled: `n_grid` (grid resolution), `gdna_strand_llr_bias`
-  (FP-aversion, default 0), the strand-overdispersion priors. Net: the decoupling **removes**
-  magic numbers rather than adding them.
+- Remaining knobs are pre-existing and principled: `n_grid` (grid resolution), `gdna_deconv_quantile`
+  (the FP-rate quantile, default ½ — the uncertainty-aware successor to the old `gdna_strand_llr_bias`
+  tilt), the strand-overdispersion priors. Net: the decoupling **removes** magic numbers rather than
+  adding them.
 
 ---
 

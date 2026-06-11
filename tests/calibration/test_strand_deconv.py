@@ -1,9 +1,11 @@
 """Per-node strand/count handoff (`strand_deconv._deconv_per_node`).
 
 Two concerns: (1) the **routing** — a node takes the strand posterior iff the library is
-strand-identifiable AND the node is strand-observable, else the count fraction; (2) the strand
-module's **LLR bias** (``gdna_strand_llr_bias``) — the FP-aversion knob that siphons unspliced mass
-into gDNA monotonically, neutral at 0, full at the extremes.
+strand-identifiable AND the node is strand-observable, else the count fraction; (2) the **FP-rate
+quantile knob** (``deconv_quantile``) — reads ``g(q)=clip(center+Φ⁻¹(q)·σ)``: neutral at ½ (no shift),
+shifting toward gDNA as q rises. Crucially it is **uncertainty-aware** (the shift scales with the
+per-node σ), so it widens the estimate but cannot siphon a *confident* node — the deliberate contrast
+with the retired fixed log-odds tilt (see ``docs/calibration/phase2_design.md``).
 """
 
 from __future__ import annotations
@@ -15,8 +17,8 @@ from rigel.calibration.strand_deconv import _deconv_per_node
 
 
 def _frac(
-    *, strand_observable=True, sense, antisense, count_gdna_frac,
-    llr=0.0, overdispersion=0.0, rna_overdispersion=0.0, rna_sense_frac=0.99, mass=100.0,
+    *, strand_observable=True, sense, antisense, count_gdna_frac, count_gdna_frac_var=0.0,
+    quantile=0.5, overdispersion=0.0, rna_overdispersion=0.0, rna_sense_frac=0.99, mass=100.0,
 ):
     r = _deconv_per_node(
         np.array([mass]),
@@ -25,10 +27,11 @@ def _frac(
         np.array([float(antisense)]),
         np.array([bool(strand_observable)]),
         np.array([float(count_gdna_frac)]),
+        np.array([float(count_gdna_frac_var)]),
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=overdispersion,
         rna_strand_overdispersion=rna_overdispersion,
-        gdna_strand_llr_bias=llr,
+        deconv_quantile=quantile,
         n_grid=400,
     )
     return float(r.gdna_frac[0])
@@ -79,34 +82,55 @@ def test_weight_monotone_in_strand_specificity():
 
 
 # --------------------------------------------------------------------------- #
-# FP-aversion LLR bias (on the final blended fraction)
+# FP-rate quantile knob (uncertainty-aware shift on the final blended fraction)
 # --------------------------------------------------------------------------- #
 
 
-def _gdna_frac(llr, sense, antisense, *, overdispersion=0.0):
-    # count_gdna_frac=1.0 so the universal LLR bias can siphon the full node into gDNA at λ→+∞.
-    return _frac(sense=sense, antisense=antisense, count_gdna_frac=1.0, llr=llr,
-                 overdispersion=overdispersion, rna_sense_frac=0.99)
+def test_quantile_half_is_noop_center():
+    # q=½ ⇒ Φ⁻¹=0 ⇒ g = center (the blended point estimate), independent of σ: the variance is
+    # consumed only when q≠½. A count variance present must NOT change the q=½ answer.
+    no_var = _frac(sense=12, antisense=8, count_gdna_frac=0.5, rna_sense_frac=0.99, quantile=0.5)
+    with_var = _frac(sense=12, antisense=8, count_gdna_frac=0.5, count_gdna_frac_var=0.05,
+                     rna_sense_frac=0.99, quantile=0.5)
+    assert no_var == pytest.approx(with_var)
 
 
 @pytest.mark.parametrize("overdispersion", [0.0, 0.1, 0.5])
-def test_llr_bias_siphons_monotonically(overdispersion):
-    fracs = [_gdna_frac(llr, 8, 2, overdispersion=overdispersion)
-             for llr in (-2.0, 0.0, 1.0, 2.0, 4.0)]
-    assert all(b >= a - 1e-9 for a, b in zip(fracs, fracs[1:]))  # non-decreasing in λ
-    assert fracs[-1] > fracs[1] + 0.1  # materially more gDNA at high λ than at neutral
+def test_quantile_monotone_toward_gdna(overdispersion):
+    # g(q) is non-decreasing in q: q>½ is FP-averse (more gDNA), q<½ leans RNA. Use a wide-posterior
+    # node (mid, near-balanced counts) so the quantile has room to move.
+    fracs = [_frac(sense=6, antisense=4, count_gdna_frac=0.5, count_gdna_frac_var=0.02,
+                   rna_sense_frac=0.99, overdispersion=overdispersion, quantile=q)
+             for q in (0.05, 0.25, 0.5, 0.75, 0.95)]
+    assert all(b >= a - 1e-9 for a, b in zip(fracs, fracs[1:]))  # non-decreasing in q
+    assert fracs[-1] > fracs[2] + 0.01  # q=0.95 materially more gDNA than the q=0.5 center
 
 
-@pytest.mark.parametrize("overdispersion", [0.0, 0.1, 0.5])
-def test_llr_bias_neutral_then_full_siphon(overdispersion):
-    neutral = _gdna_frac(0.0, 95, 5, overdispersion=overdispersion)
-    extreme = _gdna_frac(40.0, 95, 5, overdispersion=overdispersion)
-    rna_lean = _gdna_frac(-40.0, 95, 5, overdispersion=overdispersion)
-    assert neutral < 0.2  # at λ=0 a strand-specific node reads RNA
-    assert extreme > 0.99  # λ→+∞ siphons it (and every unspliced node) into gDNA
-    assert rna_lean < 0.01  # λ→−∞ is the symmetric RNA limit
+def test_quantile_is_uncertainty_aware():
+    # The shift scales with σ. On a count-routed node σ=σ_count, so a higher count variance ⇒ a
+    # larger q=½→q=0.95 shift. This is the property the retired fixed log-odds tilt lacked.
+    def shift(var):
+        center = _frac(strand_observable=False, sense=0, antisense=0, count_gdna_frac=0.5,
+                       count_gdna_frac_var=var, quantile=0.5)
+        hi = _frac(strand_observable=False, sense=0, antisense=0, count_gdna_frac=0.5,
+                   count_gdna_frac_var=var, quantile=0.95)
+        return hi - center
+    assert shift(0.04) > shift(0.0025) + 0.05  # wider count posterior ⇒ larger FP-quantile shift
 
 
-def test_llr_bias_zero_is_unbiased_median():
-    frac = _gdna_frac(0.0, 8, 2)
-    assert 0.0 < frac < 1.0
+def test_quantile_cannot_siphon_a_confident_node():
+    # The decisive contrast with the retired log-odds tilt (which forced even a confident-RNA node to
+    # gDNA at λ→+∞): a strand-specific RNA node has σ→0, so an extreme q barely moves it — by design.
+    rna_center = _frac(sense=99, antisense=1, count_gdna_frac=0.0, rna_sense_frac=0.99, quantile=0.5)
+    rna_extreme = _frac(sense=99, antisense=1, count_gdna_frac=0.0, rna_sense_frac=0.99, quantile=0.99)
+    assert rna_center < 0.1  # confidently RNA at the center
+    assert rna_extreme < 0.3  # NOT siphoned into gDNA (σ is tiny) — a quantile cannot move it
+
+
+def test_quantile_clips_to_unit_interval():
+    # g(q)=clip(center+Φ⁻¹(q)·σ) stays in [0, 1] at extreme quantiles + large σ.
+    hi = _frac(strand_observable=False, sense=0, antisense=0, count_gdna_frac=0.9,
+               count_gdna_frac_var=0.09, quantile=0.999)
+    lo = _frac(strand_observable=False, sense=0, antisense=0, count_gdna_frac=0.1,
+               count_gdna_frac_var=0.09, quantile=0.001)
+    assert 0.0 <= lo <= hi <= 1.0

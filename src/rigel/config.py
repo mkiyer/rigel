@@ -68,10 +68,10 @@ class EMConfig:
     the odds factor ``exp(gdna_em_llr_bias)``: it trades the FP-deleterious gDNA→RNA
     *leak* for the FP-safe RNA→gDNA *siphon* (decreased RNA sensitivity). Use it to
     say "only call a fragment RNA when it is sufficiently more likely RNA than
-    gDNA." Where the calibration ``gdna_strand_llr_bias`` tilts the *strand
-    deconvolution* (same nats-of-log-odds concept), this reaches the *EM* assignment
-    directly (the two are decoupled). Units: nats of log-odds (e.g. ``log(9) ≈ 2.20``
-    requires ~9:1 RNA evidence)."""
+    gDNA." Where the calibration ``gdna_deconv_quantile`` tilts the *strand/count
+    deconvolution* (an uncertainty-aware FP-rate quantile), this reaches the *EM*
+    assignment directly (the two are decoupled). Units: nats of log-odds (e.g.
+    ``log(9) ≈ 2.20`` requires ~9:1 RNA evidence)."""
 
     def __post_init__(self):
         if self.mode not in ("map", "vbem"):
@@ -227,25 +227,27 @@ class CalibrationConfig:
 
     The calibrator is a single feed-forward pass (no EM loop, no convergence test). The per-node
     deconvolution is a **strand-vs-count handoff** (see ``strand_deconv``): a strand-observable node
-    in a strand-identifiable library takes the strand module's Beta-Binomial posterior median
-    (optionally shifted toward gDNA by the FP-aversion ``gdna_strand_llr_bias`` log-odds tilt), every
-    other node takes the count module's gDNA fraction. The old EM-loop knobs are gone.
+    in a strand-identifiable library takes the strand module's Beta-Binomial posterior median, every
+    other node takes the count module's gDNA fraction. The blended point estimate is then read at the
+    FP-rate quantile ``gdna_deconv_quantile`` (default ½ ⇒ no shift). The old EM-loop knobs are gone.
     """
 
-    #: **Strand-deconvolution gDNA LLR bias** — the false-positive-aversion dial for the per-node
-    #: gDNA/RNA *strand* call, the calibration-stage twin of the EM ``gdna_em_llr_bias``. A log-odds
-    #: (LLR) bias in **nats** that shifts each node's deconvolved gDNA fraction in log-odds:
-    #: ``gdna_frac ← σ(λ + logit(gdna_frac))``.
-    #:   ``0.0`` = neutral (no shift; the unbiased posterior median — the default);
-    #:   ``> 0`` = FP-averse — shift strand-balanced evidence toward gDNA rather than a gDNA+RNA
-    #:     mix, trading the gDNA→RNA leak for the RNA→gDNA siphon. ``λ → +∞`` siphons **all**
-    #:     unspliced mass into gDNA (even a confident-RNA node — a property a quantile cannot
-    #:     deliver). ``< 0`` leans toward RNA (higher sensitivity), symmetric.
-    #: Same concept + units (nats of log-odds) as ``gdna_em_llr_bias``, applied to the calibration
-    #: strand deconvolution rather than the EM assignment. The shift is on the point estimate, so
-    #: the nats are count-independent (portable). The two knobs are decoupled — a given λ is NOT
-    #: numerically identical between the stages (per-fragment EM component vs per-node fraction).
-    gdna_strand_llr_bias: float = 0.0
+    #: **gDNA-deconvolution FP-rate quantile** — the false-positive-aversion dial for the per-node
+    #: gDNA/RNA call (Phase 2). Each node's blended gDNA fraction is reported at this quantile of its
+    #: posterior: ``gdna_frac ← clip(center + Φ⁻¹(q)·σ)``, where ``center`` is the point estimate
+    #: (``w·g_strand + (1−w)·g_count``) and ``σ`` is the combined per-node std (strand BB ⊗ count).
+    #:   ``0.5`` = neutral (``Φ⁻¹=0`` ⇒ no shift; the unbiased point estimate — the default, a
+    #:     bit-identical no-op);
+    #:   ``> 0.5`` = FP-averse — shift toward gDNA, trading the gDNA→RNA leak for the RNA→gDNA siphon.
+    #:     The shift is **uncertainty-aware**: a wide-posterior (ambiguous) node moves a lot, a
+    #:     confident node barely moves — so it bites where the evidence is genuinely uncertain (unlike
+    #:     a uniform log-odds tilt, which moves even a confident-RNA node). ``< 0.5`` leans toward RNA
+    #:     (higher sensitivity), symmetric.
+    #: It only **widens** (never sharpens) — the count σ is anti-calibrated under capture, so it is
+    #: used to inflate the quantile, never to correct the blend (which stays bias-robust at
+    #: ``w=(2κ−1)²``). Decoupled from the EM ``gdna_em_llr_bias`` (per-fragment EM component vs
+    #: per-node fraction). See ``docs/calibration/phase2_design.md``.
+    gdna_deconv_quantile: float = 0.5
 
     #: Grid resolution of the decode posterior over the gDNA fraction on ``[0, 1]``.
     #: Advanced/technical — 200 is ample for a smooth 1-D posterior.
@@ -278,10 +280,10 @@ class CalibrationConfig:
     rna_strand_prior_weight: float = 30.0
 
     def __post_init__(self) -> None:
-        if not math.isfinite(float(self.gdna_strand_llr_bias)):
+        if not (0.0 < float(self.gdna_deconv_quantile) < 1.0):
             raise ValueError(
-                f"CalibrationConfig.gdna_strand_llr_bias must be finite; "
-                f"got {self.gdna_strand_llr_bias}."
+                f"CalibrationConfig.gdna_deconv_quantile must be in (0, 1); "
+                f"got {self.gdna_deconv_quantile}."
             )
         if self.n_grid < 2:
             raise ValueError(f"CalibrationConfig.n_grid must be >= 2; got {self.n_grid}.")

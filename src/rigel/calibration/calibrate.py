@@ -153,7 +153,7 @@ def calibrate(
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,
-        gdna_strand_llr_bias=config.gdna_strand_llr_bias,
+        deconv_quantile=config.gdna_deconv_quantile,
         n_grid=config.n_grid,
     )
     left, right = deconv_sides(
@@ -164,7 +164,7 @@ def calibrate(
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,
-        gdna_strand_llr_bias=config.gdna_strand_llr_bias,
+        deconv_quantile=config.gdna_deconv_quantile,
         n_grid=config.n_grid,
     )
 

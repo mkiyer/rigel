@@ -108,9 +108,21 @@ Each node (§2): `g = w·g_strand + (1−w)·g_count`, `w=(2κ−1)²`. `g_stran
 the Beta-Binomial posterior over `g` (weak Beta(½,½) prior × the strand likelihood) median; the exact,
 clip-free robust strand deconvolution (its MLE is the linear unmix `(s−κ)/(½−κ)` but bounded and
 overdispersion-widened — no clip bias). `g_count` is the **count module**'s `count_gdna_frac`. A
-strand-unobservable node (no defined sense) is count-only. The final fraction is optionally
-log-odds-shifted by the FP-aversion knob `gdna_strand_llr_bias` (default 0). gDNA mass = `g·M`, RNA
-mass = `(1−g)·M` + the deterministic spliced mass. Mass is conserved per node.
+strand-unobservable node (no defined sense) is count-only. The blended point estimate `center` is then
+read at the **FP-rate quantile** `g(q) = clip(center + Φ⁻¹(q)·σ)` (the FP-aversion knob
+`gdna_deconv_quantile`, default ½ ⇒ no shift), where `σ` is the combined per-node posterior std
+(`√(w²·σ²_strand + (1−w)²·σ²_count)`, or `σ_count` when count-routed). The shift is uncertainty-aware
+(wider posterior ⇒ larger shift) and widening-only — it never sharpens the bias-robust blend (§4.5).
+gDNA mass = `g·M`, RNA mass = `(1−g)·M` + the deterministic spliced mass. Mass is conserved per node.
+
+### 4.5 Count posterior variance (Phase 1) — the quantile width
+The count module also returns a per-node variance `σ²_count = μ²·v_rel` capped at the Bernoulli maximum
+`μ(1−μ)`. Every count is **Poisson** at baseline: an observable region/boundary side uses its own count
+floor `v_rel = 1/N`; an imputed region (exon/AMBIG) uses a non-parametric variance~mean LOESS over its
+two anchors, floored by the anchors' Poisson noise. It feeds **only** the quantile width above — never
+the blend weight `w`, which stays `(2κ−1)²`: under hybrid capture the count σ is *anti-calibrated*
+(confident = confidently-biased), so it is trustworthy for *widening* but not for *sharpening*
+(`docs/calibration/phase2_design.md`).
 
 ### 4.6 Derive (`derive.py`)
 `gdna_density_global` (a QC scalar) and the geometric gDNA length are derived from the aggregate

@@ -83,13 +83,13 @@ regions = deconv_regions(
     sub, ra, nd, count_evidence, rna_sense_frac=kappa,
     gdna_strand_overdispersion=gd.gdna_strand_overdispersion,
     rna_strand_overdispersion=rs.rna_strand_overdispersion,
-    gdna_strand_llr_bias=cc.gdna_strand_llr_bias, n_grid=cc.n_grid,
+    deconv_quantile=cc.gdna_deconv_quantile, n_grid=cc.n_grid,
 )
 left, right = deconv_sides(
     sub, ra, nd, boundary_eff_len, rna_sense_frac=kappa, alpha_crossing=cd.alpha_crossing,
     gdna_strand_overdispersion=gd.gdna_strand_overdispersion,
     rna_strand_overdispersion=rs.rna_strand_overdispersion,
-    gdna_strand_llr_bias=cc.gdna_strand_llr_bias, n_grid=cc.n_grid,
+    deconv_quantile=cc.gdna_deconv_quantile, n_grid=cc.n_grid,
 )
 
 print(f"kappa(rna_sense_frac)={kappa:.4f}  fl_mean={fl_mean:.1f}  "
