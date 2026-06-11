@@ -39,7 +39,7 @@ The point estimate is then **shrunk toward a prior overdispersion** ``od₀`` (a
 libraries lean on the prior, abundant ones on the fit — and clamped to ``[0, _MAX_OVERDISPERSION]``
 (the ``Beta(2, 2)`` ceiling, ``od = 0.2``, the most overdispersion allowed). This continuous
 shrinkage replaces the earlier hard min-seed-node / significance gates. The MoM is closed-form,
-``O(n_seed_nodes)``, and uses the **same variance decomposition the decode applies**
+``O(n_seed_nodes)``, and uses the **same variance decomposition the deconv applies**
 (:mod:`strand_likelihood`), so fit and application are consistent. The prior parameters live on
 ``CalibrationConfig`` (``gdna_strand_prior_alpha_beta``, ``gdna_strand_prior_weight``).
 

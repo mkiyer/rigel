@@ -53,8 +53,6 @@ class StrandSummary:
     n_observations: int = 0
     n_same: int = 0
     n_opposite: int = 0
-    minor_rate_alpha: float = 1.0
-    minor_rate_beta: float = 1.0
 
     def __post_init__(self) -> None:
         p_r1_sense = float(self.p_r1_sense)
@@ -85,40 +83,10 @@ class StrandSummary:
                     "StrandSummary.p_r1_sense must equal n_same / n_observations; "
                     f"got {p_r1_sense!r}, expected {observed_p!r}."
                 )
-        alpha = float(self.minor_rate_alpha)
-        beta = float(self.minor_rate_beta)
-        if n_observations > 0 and alpha == 1.0 and beta == 1.0:
-            alpha = float(min(n_same, n_opposite) + 1)
-            beta = float(max(n_same, n_opposite) + 1)
-        if not math.isfinite(alpha) or alpha <= 0.0:
-            raise ValueError(
-                "StrandSummary.minor_rate_alpha must be finite and positive; "
-                f"got {self.minor_rate_alpha!r}."
-            )
-        if not math.isfinite(beta) or beta <= 0.0:
-            raise ValueError(
-                "StrandSummary.minor_rate_beta must be finite and positive; "
-                f"got {self.minor_rate_beta!r}."
-            )
-        if n_observations > 0:
-            expected_alpha = float(min(n_same, n_opposite) + 1)
-            expected_beta = float(max(n_same, n_opposite) + 1)
-            if not math.isclose(alpha, expected_alpha, rel_tol=0.0, abs_tol=1e-12):
-                raise ValueError(
-                    "StrandSummary.minor_rate_alpha must equal min(n_same, n_opposite) + 1; "
-                    f"got {alpha!r}, expected {expected_alpha!r}."
-                )
-            if not math.isclose(beta, expected_beta, rel_tol=0.0, abs_tol=1e-12):
-                raise ValueError(
-                    "StrandSummary.minor_rate_beta must equal max(n_same, n_opposite) + 1; "
-                    f"got {beta!r}, expected {expected_beta!r}."
-                )
         object.__setattr__(self, "p_r1_sense", p_r1_sense)
         object.__setattr__(self, "n_observations", n_observations)
         object.__setattr__(self, "n_same", n_same)
         object.__setattr__(self, "n_opposite", n_opposite)
-        object.__setattr__(self, "minor_rate_alpha", alpha)
-        object.__setattr__(self, "minor_rate_beta", beta)
 
     @property
     def p_r1_antisense(self) -> float:
@@ -159,16 +127,6 @@ class StrandSummary:
         return max(self.p_r1_sense, self.p_r1_antisense)
 
     @property
-    def minor_rate_mean(self) -> float:
-        """Posterior mean of the RNA minor-orientation rate."""
-        return self.minor_rate_alpha / (self.minor_rate_alpha + self.minor_rate_beta)
-
-    @property
-    def minor_rate_concentration(self) -> float:
-        """Beta posterior concentration for the RNA minor-orientation rate."""
-        return self.minor_rate_alpha + self.minor_rate_beta
-
-    @property
     def read1_sense(self) -> bool:
         """True when the protocol is predominantly read-1 sense."""
         return self.p_r1_sense >= 0.5
@@ -181,8 +139,6 @@ class StrandSummary:
             n_observations=int(model.n_observations),
             n_same=int(model.n_same),
             n_opposite=int(model.n_opposite),
-            minor_rate_alpha=float(model.minor_rate_posterior_alpha),
-            minor_rate_beta=float(model.minor_rate_posterior_beta),
         )
 
     @classmethod

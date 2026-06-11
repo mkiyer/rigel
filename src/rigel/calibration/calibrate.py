@@ -188,7 +188,7 @@ def calibrate(
         config=config,
     )
     # Diagnostic: the boundary-spliced sense fraction should agree with the StrandModel κ (the
-    # decode mean). A large gap flags a strand-model / accumulator mismatch (we do NOT refit the
+    # deconv mean). A large gap flags a strand-model / accumulator mismatch (we do NOT refit the
     # mean from boundary spliced — κ stays the StrandModel posterior; this is QC only).
     spl_sense = float(
         np.sum(substrate.left.n_spliced_sense) + np.sum(substrate.right.n_spliced_sense)

@@ -1,4 +1,4 @@
-"""RNA strand-balance model: rna_sense_frac (used by the decode) + rna_strand_overdispersion (QC).
+"""RNA strand-balance model: rna_sense_frac (used by the deconv) + rna_strand_overdispersion (QC).
 
 Fit from the **posterior-predictive** of the library sense rate over annotated spliced unique
 mappers — an uncontaminated, per-fragment measure of strand specificity (the 2x2 contingency
@@ -11,19 +11,19 @@ carried by the live ``StrandModel``). The sense-rate posterior is ``Beta(n_same 
   a real RNA-seq library always carries spliced reads.
 * ``rna_strand_overdispersion`` = the posterior-predictive **overdispersion** ``1 / (n_obs + 3)``,
   a pure function of the spliced-read count, i.e. a **diagnostic of the strand model's
-  statistical power**. It is **QC-only and NOT fed into the decode** — it is a *thin-count
+  statistical power**. It is **QC-only and NOT fed into the deconv** — it is a *thin-count
   statistical-power* quantity, distinct from the biological between-region RNA strand
-  overdispersion the decode actually uses.
+  overdispersion the deconv actually uses.
 
-**Do not confuse this QC quantity with the decode's RNA strand overdispersion.** The decode's RNA
+**Do not confuse this QC quantity with the deconv's RNA strand overdispersion.** The deconv's RNA
 Beta-Binomial overdispersion is a separate, *biological*, between-boundary quantity fitted from
 boundary-side spliced counts in :mod:`gdna_strand` (``fit_rna_strand_from_substrate``) and applied
 symmetrically with the gDNA overdispersion in :mod:`strand_likelihood` (see docs/em_strand/05). The
-PR-9-era claim that "the decode uses the Binomial strand limit" is **superseded**: that earlier
+PR-9-era claim that "the deconv uses the Binomial strand limit" is **superseded**: that earlier
 measurement (negligible / slightly worse silent-gene FP) concerned wiring *this 1/(n_obs+3)
-posterior-predictive widening* into the decode while gDNA was also Binomial — a different quantity
+posterior-predictive widening* into the deconv while gDNA was also Binomial — a different quantity
 in a different regime. ``rna_sense_frac`` (the mean) is still the only field of this class the
-decode reads.
+deconv reads.
 
 (PR 9 replaced the old method-of-moments fit / overdispersion floor / minimum-observation
 fallback for *this* quantity, and by dropping the per-region substrate pool removed the boundary
@@ -43,8 +43,8 @@ if TYPE_CHECKING:
 class StrandBalance:
     """Fitted RNA strand model: posterior-mean rna_sense_frac (live) + rna_strand_overdispersion (QC)."""
 
-    rna_sense_frac: float  # RNA sense mean (posterior mean), in (0, 1) — used by the decode
-    rna_strand_overdispersion: float  # 1/(n_obs+3); QC strand-power diagnostic, not in the decode
+    rna_sense_frac: float  # RNA sense mean (posterior mean), in (0, 1) — used by the deconv
+    rna_strand_overdispersion: float  # 1/(n_obs+3); QC strand-power diagnostic, not in the deconv
     n_observations: int  # spliced strand observations (fragments) backing the posterior
     fallback_used: bool  # True when there are no spliced observations (rna_sense_frac → 0.5)
     fallback_reason: str
