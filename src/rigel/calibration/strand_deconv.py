@@ -522,11 +522,44 @@ def strand_deconvolve(
     return contained, left, right
 
 
+def cleaned_gdna_count(split: StrandSplit, raw_count: np.ndarray, info_scale: float) -> np.ndarray:
+    """Strand-cleaned gDNA count for the count module, degrading gracefully to the raw count.
+
+    The count module consumes this in place of the raw unspliced count (``pos+neg``) when building a
+    region's gDNA density. The cleaning fraction is
+
+        ``w·g_strand + (1−w)·1``       with   ``w = info / (info + info_scale)``
+
+    where ``info = N·(2κ−1)²`` is the strand deconvolution's information (Phase 1 ``StrandSplit.info``)
+    and ``g_strand`` is its gDNA fraction (``StrandSplit.gdna_frac``). The fraction slides **continuously**
+    from **1** (all-gDNA = no RNA removed = the raw count, a *no-op*) when ``info → 0`` (κ≈½ or thin) to
+    ``g_strand`` (full strand clean) when ``info → ∞``.
+
+    Robust by construction: ``w`` and the meaningfulness of ``g_strand`` share the same ``info``, so an
+    uninformative split — bounded to ``[0,1]`` by the Jeffreys grid, at worst the prior median, *never*
+    the wild unbounded MLE — is discarded (``w≈0``) rather than trusted. So the count module may trust
+    the result at every strand specificity, κ=½ ± fit-noise included. See
+    ``docs/calibration/redesign_phase2_plan.md`` and ``strand_first_plan.md``.
+    """
+    info = np.asarray(split.info, dtype=np.float64)
+    raw = np.asarray(raw_count, dtype=np.float64)
+    if info.shape != raw.shape:
+        raise ValueError(f"info {info.shape} and raw_count {raw.shape} must match")
+    if info_scale <= 0.0:
+        raise ValueError(f"info_scale must be > 0, got {info_scale}")
+    w = info / (info + float(info_scale))  # 0 at info=0, → 1 as info → ∞
+    # gdna_frac is NaN where info==0 (no strand sense); pin it to 0 there — w==0 discards it anyway.
+    g = np.where(info > 0.0, split.gdna_frac, 0.0)
+    clean_frac = w * g + (1.0 - w)
+    return clean_frac * raw
+
+
 __all__ = [
     "NodeDeconv",
     "StrandSplit",
     "strand_posterior_gdna_frac",
     "strand_deconvolve",
+    "cleaned_gdna_count",
     "deconv_regions",
     "deconv_sides",
     "boundary_side_seeds",

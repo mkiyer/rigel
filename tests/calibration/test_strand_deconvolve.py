@@ -16,6 +16,7 @@ from rigel.calibration.signature import TS_AMBIG, TS_NEG, TS_NONE, TS_POS
 from rigel.calibration.strand_deconv import (
     StrandSplit,
     _grid_posterior_quantile,
+    cleaned_gdna_count,
     strand_deconvolve,
     strand_posterior_gdna_frac,
 )
@@ -135,3 +136,59 @@ def test_boundary_side_oriented_and_informative():
     assert isinstance(lft, StrandSplit) and lft.info.shape == (2,)
     assert lft.info[0] == 0.0  # reference edge: no left neighbour
     assert lft.info[1] == pytest.approx(40 * (2 * 0.95 - 1) ** 2)
+
+
+# --------------------------------------------------------------------------- #
+# Phase-2: cleaned_gdna_count — the graceful, robust count cleaning
+# --------------------------------------------------------------------------- #
+
+
+def _split(gdna_frac, info):
+    g = np.asarray(gdna_frac, dtype=np.float64)
+    i = np.asarray(info, dtype=np.float64)
+    return StrandSplit(gdna_frac=g, gdna_mass=g, rna_mass=1.0 - g, info=i)
+
+
+def test_cleaned_count_noop_at_zero_info():
+    # info=0 (κ=½ / AMBIG / unobservable) → cleaning is a no-op: cleaned == raw, even where the
+    # strand fraction is NaN (the count module receives the raw count, never a garbage split).
+    split = _split([np.nan, 0.3], [0.0, 0.0])
+    raw = np.array([100.0, 100.0])
+    np.testing.assert_allclose(cleaned_gdna_count(split, raw, info_scale=1.0), raw)
+
+
+def test_cleaned_count_full_clean_at_large_info():
+    # info ≫ info_scale → cleaned → gdna_frac·raw (the strand wins).
+    cleaned = cleaned_gdna_count(_split([0.25], [1e6]), np.array([100.0]), info_scale=1.0)
+    assert cleaned[0] == pytest.approx(25.0, rel=1e-4)  # 0.25·100
+
+
+def test_cleaned_count_monotone_in_info():
+    # As info grows, the cleaned count slides monotonically from raw (no-op) toward gdna_frac·raw.
+    raw, g = 100.0, 0.2
+    vals = [
+        cleaned_gdna_count(_split([g], [info]), np.array([raw]), info_scale=1.0)[0]
+        for info in (0.0, 0.5, 2.0, 10.0, 1e6)
+    ]
+    assert vals[0] == pytest.approx(raw)  # no-op floor
+    assert vals[-1] == pytest.approx(g * raw, rel=1e-4)  # full-clean ceiling
+    assert all(a >= b for a, b in zip(vals, vals[1:]))  # monotone (g<1 ⇒ cleaning removes mass)
+
+
+def test_cleaned_count_robust_at_knife_edge_strand():
+    # THE robustness assurance: a fitted κ just above ½ (0.502) at ordinary depth (N=100) must NOT
+    # clean to garbage. info = 100·(2·0.502−1)² ≈ 0.0016 ≪ info_scale ⇒ cleaned ≈ raw (a no-op),
+    # whatever the (near-meaningless, prior-median) strand fraction there happens to be.
+    ts = [TS_POS]
+    c, _, _ = _deconv(_substrate(ts, [60], [40], [100.0]), _ra(ts), ss=0.502)
+    assert c.info[0] == pytest.approx(100 * (2 * 0.502 - 1) ** 2)  # ≈ 0.0016
+    cleaned = cleaned_gdna_count(c, np.array([100.0]), info_scale=1.0)
+    assert cleaned[0] == pytest.approx(100.0, rel=2e-3)  # within 0.2% of raw — a no-op
+
+
+def test_cleaned_count_validates_inputs():
+    split = _split([0.5], [1.0])
+    with pytest.raises(ValueError):
+        cleaned_gdna_count(split, np.array([1.0, 2.0]), info_scale=1.0)  # shape mismatch
+    with pytest.raises(ValueError):
+        cleaned_gdna_count(split, np.array([1.0]), info_scale=0.0)  # info_scale must be > 0

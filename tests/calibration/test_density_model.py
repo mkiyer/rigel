@@ -168,3 +168,55 @@ def test_density_does_not_cross_references():
     nd = _density(sub, ra, [100.0, 100.0])
     assert nd.density[0] == pytest.approx(4.0)  # chr1 observable intron: 400 / 100
     assert nd.density[1] == pytest.approx(4.0)  # chr2 no-anchor: GLOBAL baseline, not a carry
+
+
+# --------------------------------------------------------------------------- #
+# Phase-2: gdna_counts — the strand-cleaned count input (default None == raw)
+# --------------------------------------------------------------------------- #
+
+
+def _raw_counts(sub):
+    return tuple(
+        (v.n_unspliced_pos + v.n_unspliced_neg).astype(np.float64)
+        for v in (sub.contained, sub.left, sub.right)
+    )
+
+
+def test_gdna_counts_explicit_raw_matches_default():
+    # Passing the raw counts explicitly via gdna_counts must equal the default (None) path exactly.
+    ra = _region_arrays([INTRON, EXON, INTRON])
+    contained = ([100, 0, 100], [100, 0, 100])
+    left = ([0, 50, 0], [0, 50, 0])
+    right = ([0, 50, 0], [0, 50, 0])
+    sub = _substrate(3, contained, left, right)
+    eff = np.full(3, 100.0)
+    nd_default = node_gdna_density(sub, ra, region_eff_len=eff, fl_mean=50.0)
+    nd_explicit = node_gdna_density(
+        sub, ra, region_eff_len=eff, fl_mean=50.0, gdna_counts=_raw_counts(sub)
+    )
+    np.testing.assert_allclose(nd_explicit.density, nd_default.density, equal_nan=True)
+    np.testing.assert_allclose(nd_explicit.count_gdna_frac, nd_default.count_gdna_frac, equal_nan=True)
+
+
+def test_cleaned_counts_lower_imputed_exon_density():
+    # Cleaning the counts that feed an exon's imputation lowers its imputed gDNA density: halving
+    # every count (as if the strand attributed half the unspliced mass to RNA) halves the exon's
+    # boundary-anchored density — the cleaning flows through the imputation.
+    ra = _region_arrays([INTRON, EXON, INTRON])
+    contained = ([100, 0, 100], [100, 0, 100])
+    left = ([0, 50, 0], [0, 50, 0])  # the exon's boundary sides feed its imputation
+    right = ([0, 50, 0], [0, 50, 0])
+    sub = _substrate(3, contained, left, right)
+    eff = np.full(3, 100.0)
+    nd_raw = node_gdna_density(sub, ra, region_eff_len=eff, fl_mean=50.0)
+    half = tuple(0.5 * a for a in _raw_counts(sub))
+    nd_clean = node_gdna_density(sub, ra, region_eff_len=eff, fl_mean=50.0, gdna_counts=half)
+    assert nd_clean.density[1] == pytest.approx(0.5 * nd_raw.density[1])  # exon density halved
+
+
+def test_gdna_counts_wrong_shape_raises():
+    ra = _region_arrays([INTRON, EXON, INTRON])
+    sub = _substrate(3, ([100, 0, 100], [100, 0, 100]), _zeros(3), _zeros(3))
+    bad = (np.zeros(2), np.zeros(2), np.zeros(2))  # length 2 ≠ 3 regions
+    with pytest.raises(ValueError):
+        node_gdna_density(sub, ra, region_eff_len=np.full(3, 100.0), fl_mean=50.0, gdna_counts=bad)

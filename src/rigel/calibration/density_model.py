@@ -192,14 +192,21 @@ def node_gdna_density(
     fl_mean: float,
     *,
     need_count_variance: bool = True,
+    gdna_counts: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
 ) -> NodeDensity:
     """Per-region gDNA density from the count clue via LOCAL boundary-anchored imputation.
 
-    The count module estimates gDNA density from **raw** unspliced counts — no strand cleaning (in
-    the decoupled architecture the strand module owns the strand channel; the count module is the
-    fallback for strand-unobservable / unstranded nodes). The density is read directly from
+    The count module estimates gDNA density from the per-node unspliced counts of the three views
+    (contained / left side / right side) by local imputation: density is read directly from
     count-observable regions and imputed locally for the rest; a region with no local anchor anywhere
     takes the count-weighted-mean observable density as a global fallback. See the module docstring.
+
+    ``gdna_counts`` selects the count input. ``None`` (default) uses the **raw** unspliced count
+    (``pos+neg``) per view — the standalone count-module path, bit-identical to before. When provided
+    as ``(contained, left, right)`` float arrays, those are used in place of the raw counts: the
+    redesign passes **strand-cleaned** counts (``strand_deconv.cleaned_gdna_count``) so the imputed
+    density at exon / AMBIG nodes drops the RNA the count clue alone cannot see. The cleaning degrades
+    to the raw count where the strand is uninformative, so this path is safe at any strand specificity.
 
     ``need_count_variance`` gates the Phase-1 count posterior variance: it feeds **only** the FP-rate
     quantile (``strand_deconv``), which is a no-op at the default ``gdna_deconv_quantile=0.5`` (the
@@ -212,15 +219,23 @@ def node_gdna_density(
     r = sig.shape[0]
     region_count_observable, boundary_count_observable = count_observable_masks(sig, ref_id)
 
-    # Raw unspliced COUNT per node (no strand cleaning — the count module works on raw counts).
+    # Per-node unspliced COUNT per view. Default: the raw count (pos+neg). When the caller supplies
+    # strand-cleaned counts (gdna_counts), use those instead — everything downstream reads only these.
     def total_count(view) -> np.ndarray:
         pos = np.asarray(view.n_unspliced_pos, dtype=np.float64)
         neg = np.asarray(view.n_unspliced_neg, dtype=np.float64)
         return pos + neg
 
-    contained_gdna = total_count(substrate.contained)
-    left_gdna = total_count(substrate.left)  # right side of region r's LEFT boundary
-    right_gdna = total_count(substrate.right)  # left side of region r's RIGHT boundary
+    if gdna_counts is None:
+        contained_gdna = total_count(substrate.contained)
+        left_gdna = total_count(substrate.left)  # right side of region r's LEFT boundary
+        right_gdna = total_count(substrate.right)  # left side of region r's RIGHT boundary
+    else:
+        contained_gdna, left_gdna, right_gdna = (
+            np.asarray(a, dtype=np.float64) for a in gdna_counts
+        )
+        if not (contained_gdna.shape == left_gdna.shape == right_gdna.shape == (r,)):
+            raise ValueError(f"gdna_counts arrays must each have shape ({r},)")
 
     # Per-side boundary observability for region r: its LEFT side uses boundary (r−1, r); its RIGHT
     # side uses boundary (r, r+1). boundary_count_observable[k] describes boundary (k, k+1).
