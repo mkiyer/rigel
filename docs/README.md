@@ -25,7 +25,7 @@ The gDNA-vs-RNA deconvolution stage — the most active area.
 | [`deconvolution_implementation.md`](calibration/deconvolution_implementation.md) | theory→code: the capture-aware S0–S5 blueprint (boundaries as the atoms) |
 | [`phaseA_mature_imputation_plan.md`](calibration/phaseA_mature_imputation_plan.md) | **Phase A (shipped 83b3610)**: per-strand mature-density imputation (`mature_density.py`, RNA mirror of `density_model`); Issue D resolved |
 | [`phaseB_mature_subtraction_plan.md`](calibration/phaseB_mature_subtraction_plan.md) | **Phase B (Step 0 done; merged into C)**: mature-subtraction units verified; the finding that subtraction only helps AMBIG |
-| [`phaseC_ambig_resolution_plan.md`](calibration/phaseC_ambig_resolution_plan.md) | **Phase C (merged B+C) — ACTIVE plan**: AMBIG residual resolution (subtract mature, strand-on-residual + per-strand-mature prior, retire splice fraction) |
+| [`phaseC_ambig_resolution_plan.md`](calibration/phaseC_ambig_resolution_plan.md) | **Phase C (merged B+C) — ACTIVE plan, rev 2**: per-node likelihood deconvolution over the 3-simplex {RNA+,RNA−,gDNA} — strand likelihood pins the tilt, mature/gDNA crossings are soft lower-bound likelihoods, MAP partition; subsumes the strand module + retires the heuristic blend, the `ρ` weight, and the splice fraction |
 | [`archive/joint_deconvolution.md`](calibration/archive/joint_deconvolution.md) | archived: the retired joint count×strand product (resurrection guide) |
 | [`CALIBRATION_TODO.md`](calibration/CALIBRATION_TODO.md) | live tracker of open issues |
 | [`remaining_phases.md`](calibration/remaining_phases.md) | **AUTHORITATIVE forward plan** — the remaining work as clean Phase 1 (count posterior) / 2 (FP quantile) / 3 (nascent removal), implementation-grade |
