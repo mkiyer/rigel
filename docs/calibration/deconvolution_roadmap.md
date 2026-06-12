@@ -130,11 +130,17 @@ eligibility predicate.
   subtraction only benefits AMBIG nodes (a strand-observable node's strand already separates gDNA from all
   RNA — generative §4), so there is no separable subtraction-only phase. Step-0 record:
   [`phaseB_mature_subtraction_plan.md`](phaseB_mature_subtraction_plan.md).
-- **Phase C (merged B+C) — AMBIG residual resolution.** Subtract mature on AMBIG nodes, run the strand on
-  the AMBIG residual oriented by the per-strand mature, blend with the depleted count gDNA via a
-  strand-trust `w` that carries the weaker-strand RNA-free-ness (silent-strand override emergent;
-  both-expressed → count floor / neighbour), and retire the `splice_junction` fraction. The flagship leak
-  drops here. Plan: [`phaseC_ambig_resolution_plan.md`](phaseC_ambig_resolution_plan.md).
+- **Phase C (merged B+C) — the iterative propagation deconvolution** *(rev 3 — the unifying architecture).*
+  The per-node prototype proved a region cannot be solved in isolation, so deconvolution is a **graph of
+  region + boundary nodes**, each a 3-term `{RNA+, RNA−, gDNA}` partition, **solved by propagation from
+  seeds** (intergenic / single-strand / clean-junction nodes) **to convergence**. Boundaries deconvolve
+  their *unspliced* crossings into all three terms too (the key revelation), so information flows
+  region↔boundary↔region. The AMBIG gDNA is the **residual of the region's own enriched count minus the
+  propagated (non-depleted) RNA** → fixes the capture depletion. Consolidates `density_model` +
+  `mature_density` + the strand blend + `run_fill` into one solver; retires the splice fraction, the `w`
+  blend, and the rev-2 `ρ`. Plan: [`phaseC_ambig_resolution_plan.md`](phaseC_ambig_resolution_plan.md).
+  Scope note: this **lifts the one-pass lock** — bounded iteration (a few sweeps to convergence) is now
+  required, not optional.
 - **Phase D — validate at scale.** Golden refresh; full gDNA suite + the flagship; confirm the leak drop and
   no regression on simple/unstranded/no-gDNA conditions. Update the authoritative theory doc + CLAUDE.md.
 
