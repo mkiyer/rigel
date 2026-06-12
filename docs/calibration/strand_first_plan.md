@@ -1,5 +1,13 @@
 # Strand-first calibration — the converged implementation plan
 
+> **SUPERSEDED (2026-06-12):** this plan's "retire the combine — the cleaned count field *is* the blend"
+> conclusion was reversed. It holds only for count-observable regions; for **exons** it silently drops
+> the `w·g_strand` term (their `count_gdna_frac` is the boundary imputation, not their own count) →
+> a capture regression. The shipped design **keeps the combine** as a per-node gradient
+> `g = w·g_strand + (1−w)·g_count`, `w=I/(I+I₀)`, `I₀=10`. See `redesign_phase3_plan.md` (FINAL OUTCOME)
+> and `calibration_theory.md` §2. The carry-forward `I = N·(2κ−1)²` and the boundary cleaning below are
+> retained; only "retire the combine" is wrong.
+
 **Status:** the plan to implement, 2026-06-11. Converged after the full round-trip. This supersedes the
 rev-1/rev-2 Phase-2 sketches and the precision-weighted-field heuristic. It is a **targeted refinement of
 the existing decoupled blend**, not a rewrite — Phase 1 (`strand_deconvolve`) is already built and emits

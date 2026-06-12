@@ -28,23 +28,34 @@ gDNA vs RNA using two clues that are conditionally independent given the library
 - **Strand clue** — *which strand*. gDNA is 50/50 (sense rate ½); RNA is stranded (sense rate
   `κ = rna_sense_frac`). A node's observed sense fraction places it between the two.
 
-The two clues are **decoupled** and combined by a **precision-weighted deference**, not a product —
+The two clues are **decoupled** and combined by a **precision-weighted gradient**, not a product —
 because the strand estimator is *unbiased* (gDNA symmetric at ½, RNA at κ) while the count estimator
 is *biased* under hybrid capture, so mixing them by a product re-introduces bias:
 
 ```
-g = w·g_strand + (1−w)·g_count,   w = (2κ−1)²     (strand discriminability, in [0,1])
-   g_strand : Beta-Binomial posterior over g, weak Beta(½,½) prior
-   g_count  : clip(ρ·eff_len / mass)
+g = w·g_strand + (1−w)·g_count,   w = I/(I+I₀),  I = N·(2κ−1)²,  I₀ = 10
+   g_strand : Beta-Binomial posterior over g, weak Beta(½,½) prior — strand DIRECTION, capture-invariant
+   g_count  : clip(ρ·eff_len / mass) — count MAGNITUDE, on raw contained + strand-cleaned boundaries
 ```
 
-The weight `w = (2κ−1)²` is the strand channel's discriminability (the per-fragment strand Fisher
-information / squared standardized separation between the two components): `w → 1` at high strand
-specificity (trust the unbiased strand estimate), `w → 0` at unstranded (defer to count). Because `w`
-is an *effect size* (a function of κ, not of read depth), a near-unstranded library gets `w ≈ 0`
-regardless of depth — a smooth deference with **no gate**. A node with no defined sense
-(`AMBIG`/no-shared-strand) is count-only. The retired joint product is archived in
-`archive/joint_deconvolution.md`; see `decoupled_calibration_design.md` + `count_channel_capture_design.md`.
+The weight `w = I/(I+I₀)` is a **per-node strand-trust gradient**: `I = N·(2κ−1)²` is the carried strand
+**information** — the per-fragment discriminability `(2κ−1)²` (the strand Fisher information / squared
+standardized separation) times the node's unspliced count `N`, i.e. the total information the node's own
+reads carry about `g`. `I₀` is the half-trust scale. `w → 1` when the strand is genuinely informative
+(high κ **and** enough depth — trust the node's own, capture-invariant deconvolution); `w → 0` at `κ=½`,
+thin `N`, or `AMBIG`/no-shared-strand (defer to the count imputation). A gradient, **no gate**.
+
+**Why `I/(I+I₀)` and not the κ-only `(2κ−1)²`** — the strand estimate has `SE(g) = 1/√I`, so it is only
+meaningful at `I ≫ 1`. The κ-only effect size ignores `N`: it both *under*-trusts a confident strand
+(0.99 → w=0.96, dinging an excellent model) and, fatally, *over*-trusts a near-½ strand at high depth
+(under capture, `N` huge ⇒ even `κ=0.501` makes `I` non-trivial ⇒ a garbage `g_strand`, `SE≈1`, gets
+weight → manufactured gDNA). `I/(I+I₀)` with **`I₀=10`** sets half-trust at `SE≈0.3` (`I=11`): the strand
+is trusted only once its own information is real. `g_strand` (direction) and `g_count` (magnitude) use
+orthogonal aspects of the data and `g_count`'s *contained* counts are raw (the strand enters once, via
+`g_strand`; only the **boundary** crossings are strand-cleaned, for the exon/AMBIG imputation), so the
+combine does **not** double-count. The retired joint product is archived in
+`archive/joint_deconvolution.md`; the strand-first redesign that arrived at this per-node weight is in
+`redesign_phase3_plan.md`.
 
 ## 3. Count-observability (signature-based, no circularity)
 
@@ -72,27 +83,34 @@ mass; see CALIBRATION_TODO Issue #3.)
 
 ```
 substrate (per-region 3-view sufficient statistics from the accumulator payload)
-  1. RNA strand balance        → κ = rna_sense_frac → strand weight w=(2κ−1)²  (strand_balance.py)
-  2. node gDNA density (count)  → per-node RAW density + count gDNA fraction  (density_model.py)
-  3. gDNA & RNA strand overdispersion (Beta-Binomial, pooled MoM + prior shrinkage)
-                                                                (gdna_strand.py)
-  4. per-node strand/count blend → per-node gDNA / RNA mass     (strand_deconv.py)
-  5. derive                     → gdna_density_global, geometric gDNA length  (derive.py)
+  1. RNA strand balance         → κ = rna_sense_frac                          (strand_balance.py)
+  2. node gDNA density (RAW)     → seed for the strand overdispersion fit       (density_model.py)
+  3. gDNA & RNA strand overdispersion (Beta-Binomial, pooled MoM + prior)      (gdna_strand.py)
+  4. strand_deconvolve → cleaned_gdna_count: clean the BOUNDARY crossings      (strand_deconv.py)
+  5. node gDNA density (RAW contained + CLEANED boundaries) → g_count          (density_model.py)
+     + splice-junction 3-term gDNA-FRACTION upgrade                            (splice_junction.py)
+  6. per-node gradient combine g=w·g_strand+(1−w)·g_count, w=I/(I+I₀)          (strand_deconv.py)
+  7. derive                     → gdna_density_global, geometric gDNA length    (derive.py)
 ```
 
 ### 4.1 Strand balance (κ)
 `rna_sense_frac` (κ) is the posterior-mean sense fraction of the **spliced** unique-mapper channel
-(spliced ⇒ pure RNA). It sets the strand-deference weight `w=(2κ−1)²` (§2): there is **no** hard
-identifiability gate — an unstranded library has κ≈½ ⇒ w≈0 ⇒ count governs, smoothly and regardless
-of depth. Zero spliced reads ⇒ κ undefined ⇒ not an RNA-seq library ⇒ `CalibrationStrandError`.
+(spliced ⇒ pure RNA). It enters the per-node combine weight `w = I/(I+I₀)` via the per-fragment
+discriminability `(2κ−1)²` in `I = N·(2κ−1)²` (§2): there is **no** hard identifiability gate — an
+unstranded library has κ≈½ ⇒ I≈0 ⇒ w≈0 ⇒ count governs (and, unlike the κ-only effect size, depth `N`
+cannot rescue a near-½ strand — see §2 on the knife-edge). Zero spliced reads ⇒ κ undefined ⇒ not an
+RNA-seq library ⇒ `CalibrationStrandError`.
 (`strand_summary.strand_contrast_identifiable` survives only as a pipeline QC *warning*, not a gate.)
 
 ### 4.2 Count module: per-node gDNA density (`density_model.py`)
-The gDNA density is read directly from count-observable nodes (on **raw** unspliced counts — no
-strand cleaning) and **imputed locally** for the rest (an exon region anchors from its observable
-boundary sides; run interiors carry the nearest anchor; a no-anchor region takes the global
-count-weighted-mean observable density). The node returns the count module's gDNA fraction
-`count_gdna_frac = clip(density·eff_len / mass)`, used for count-routed nodes and as the gDNA
+The gDNA density is read directly from count-observable nodes and **imputed locally** for the rest (an
+exon region anchors from its observable boundary sides; run interiors carry the nearest anchor; a
+no-anchor region takes the global count-weighted-mean observable density). It operates on whatever
+per-view counts it is handed (`gdna_counts`): the live combine passes **RAW contained + STRAND-CLEANED
+boundaries** (step 5) — so an exon/AMBIG region imputed from its crossings inherits a nascent-free
+density, while the contained own-density of count-observable regions stays raw (the strand enters the
+*region* only via `g_strand`). The node returns the count module's gDNA fraction
+`count_gdna_frac = clip(density·eff_len / mass)`, used as `g_count` in the combine and as the gDNA
 strand-fit seed weight. Improving this estimate under capture (the point-5 unspliced-fraction
 projection) is tracked in `count_channel_capture_design.md`.
 
@@ -103,12 +121,17 @@ Both are fit as Beta-Binomial intra-class correlations by a shared pooled method
 shrunk toward the *same* default prior so that under sparse data both collapse to one distribution
 and unstranded data is uninformative. These parameterise the strand module.
 
-### 4.4 Per-node strand/count blend (`strand_deconv.py`)
-Each node (§2): `g = w·g_strand + (1−w)·g_count`, `w=(2κ−1)²`. `g_strand` is the **strand module** —
-the Beta-Binomial posterior over `g` (weak Beta(½,½) prior × the strand likelihood) median; the exact,
-clip-free robust strand deconvolution (its MLE is the linear unmix `(s−κ)/(½−κ)` but bounded and
-overdispersion-widened — no clip bias). `g_count` is the **count module**'s `count_gdna_frac`. A
-strand-unobservable node (no defined sense) is count-only. The blended point estimate `center` is then
+### 4.4 Per-node strand/count combine (`strand_deconv.py`)
+Each node (§2): `g = w·g_strand + (1−w)·g_count`, `w = I/(I+I₀)`, `I = N·(2κ−1)²`, `I₀=10` — the per-node
+strand-trust gradient (`deconv_regions`/`deconv_sides` → `_deconv_per_node`). `g_strand` is the **strand
+module** — the Beta-Binomial posterior over `g` (weak Beta(½,½) prior × the strand likelihood) median;
+the exact, clip-free robust strand deconvolution (its MLE is the linear unmix `(s−κ)/(½−κ)` but bounded
+and overdispersion-widened — no clip bias). `g_count` is the **count module**'s `count_gdna_frac`,
+computed on **raw contained + strand-cleaned boundary** counts (`cleaned_gdna_count` removes the
+strand-identified RNA from the crossings before the exon/AMBIG imputation — the nascent the count clue
+can't otherwise see; the contained stays raw so the strand enters once, via `g_strand`). A
+strand-unobservable node (κ=½ / no defined sense / `AMBIG`) is count-only (`w=0`). The blended point
+estimate `center` is then
 read at the **FP-rate quantile** `g(q) = clip(center + Φ⁻¹(q)·σ)` (the FP-aversion knob
 `gdna_deconv_quantile`, default ½ ⇒ no shift), where `σ` is the combined per-node posterior std
 (`√(w²·σ²_strand + (1−w)²·σ²_count)`, or `σ_count` when count-routed). The shift is uncertainty-aware
@@ -120,9 +143,9 @@ The count module also returns a per-node variance `σ²_count = μ²·v_rel` cap
 `μ(1−μ)`. Every count is **Poisson** at baseline: an observable region/boundary side uses its own count
 floor `v_rel = 1/N`; an imputed region (exon/AMBIG) uses a non-parametric variance~mean LOESS over its
 two anchors, floored by the anchors' Poisson noise. It feeds **only** the quantile width above — never
-the blend weight `w`, which stays `(2κ−1)²`: under hybrid capture the count σ is *anti-calibrated*
-(confident = confidently-biased), so it is trustworthy for *widening* but not for *sharpening*
-(`docs/calibration/phase2_design.md`).
+the combine weight `w = I/(I+I₀)` (which derives from the *strand* information `I`, not the count σ):
+under hybrid capture the count σ is *anti-calibrated* (confident = confidently-biased), so it is
+trustworthy for *widening* but not for *sharpening* (`docs/calibration/phase2_design.md`).
 
 ### 4.6 Derive (`derive.py`)
 `gdna_density_global` (a QC scalar) and the geometric gDNA length are derived from the aggregate

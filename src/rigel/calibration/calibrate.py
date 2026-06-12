@@ -147,7 +147,9 @@ def calibrate(
     # boundary crossings (left/right) makes the imputed density at exon / AMBIG regions drop the nascent
     # the count clue can't see (the Phase-2 AMBIG fix). The CONTAINED count stays RAW — a region's strand
     # enters the deconvolution once, as g_strand in the combine below, so g_count carries count MAGNITUDE
-    # only (orthogonal to strand direction ⇒ no double-count).
+    # only (orthogonal to strand direction ⇒ no double-count). Only the boundary splits are used here;
+    # the region split is discarded (deconv_regions recomputes the region g_strand internally — a small
+    # redundancy a future PR could fold away by passing the precomputed splits into the combine).
     _, left_split, right_split = strand_deconvolve(
         substrate,
         region_arrays,
