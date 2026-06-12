@@ -1,23 +1,32 @@
-"""calibrate() — the acyclic fractional-accumulator calibrator (decoupled strand/count).
+"""calibrate() — the acyclic fractional-accumulator calibrator (precision-weighted strand/count combine).
 
-A single feed-forward pass: no EM loop, no density->deconv->density feedback. Each node (every region
-and the two boundary sides) is deconvolved into gDNA / RNA by **precision-weighted strand→count
-deference**: ``g = w·g_strand + (1−w)·g_count`` with ``w=(2κ−1)²`` (the strand discriminability). At
-high strand specificity ``w→1`` (the unbiased strand posterior governs); at unstranded ``w→0`` (the
-count module governs) — a smooth blend with no gate, the decoupling that fixed the joint model's
-bias-mixing (see ``docs/calibration/decoupled_calibration_design.md`` +
-``count_channel_capture_design.md``; joint archived in ``archive/joint_deconvolution.md``)::
+A single feed-forward pass: no EM loop, no density->deconv->density feedback. Each node (every region and
+the two boundary sides) is deconvolved into gDNA / RNA by the **combine** of two independent estimates:
+
+    g = w·g_strand + (1−w)·g_count      w = I/(I+I₀),  I = N·(2κ−1)²
+
+``g_strand`` is the node's OWN strand deconvolution (a Beta-Binomial posterior — strand *direction*,
+capture-INVARIANT since probe enrichment cancels in the fraction); ``g_count`` is the count module's local
+gDNA-density imputation (count *magnitude*). They are independent signals, so the blend does not
+double-count. ``w`` is the **per-node strand-trust gradient** — the carried strand information ``I``
+(per-fragment discriminability ``(2κ−1)²`` × the node's unspliced count ``N``) over a half-trust scale
+``I₀``: ``w→1`` at high information (a confident strand governs — its own deconvolution, capture-invariant)
+and ``w→0`` at ``κ=½`` / thin / AMBIG (the count imputation governs). A gradient, not a cliff::
 
     substrate
-      -> strand balance: rna_sense_frac (κ) -> strand weight w=(2κ−1)²
-      -> node_gdna_density (count module; RAW density, no strand clean)
-      -> gdna/rna strand Beta-Binomial overdispersions (strand module parameters)
-      -> deconv_regions / deconv_sides (per-node blend: w·strand posterior + (1−w)·count fraction)
+      -> strand balance: rna_sense_frac (κ)
+      -> node_gdna_density (RAW) -> fit gdna/rna strand Beta-Binomial overdispersions (seed)
+      -> strand_deconvolve -> cleaned_gdna_count: clean the BOUNDARY crossings (nascent removal)
+      -> node_gdna_density (RAW contained + CLEANED boundaries) -> g_count
+         (+ splice-junction gDNA-FRACTION upgrade, 3-term, where eligible)
+      -> deconv_regions / deconv_sides: the combine g = w·g_strand + (1−w)·g_count, w = I/(I+I₀)
       -> derive (gdna_density_global, gdna_geom_len)
 
-The global density and geometric gDNA length are **derived** from the aggregate deconvolved mass --
-not looped -- which dissolved the old EM loop's sparse-data collapse. The per-region gDNA length
-contraction under capture is the IPR of the deconvolved gDNA mass, applied later in
+The contained count stays RAW (a region's strand enters once, as ``g_strand``); only the boundary
+crossings are cleaned, because they feed the spatial imputation of exon / AMBIG regions (the Phase-2
+AMBIG/nascent fix) and are independent reads from a region's own contained strand. The global density and
+geometric gDNA length are **derived** from the aggregate deconvolved mass — not looped. The per-region
+gDNA length contraction under capture is the IPR of the deconvolved gDNA mass, applied later in
 ``priors.assemble_priors``.
 """
 
@@ -45,7 +54,7 @@ from .gdna_strand import (
 from .result import CalibrationResult
 from .splice_junction import region_splice_gdna_frac
 from .strand_balance import fit_strand_balance
-from .strand_deconv import deconv_regions, deconv_sides
+from .strand_deconv import cleaned_gdna_count, deconv_regions, deconv_sides, strand_deconvolve
 from .substrate import CalibrationSubstrate
 
 if TYPE_CHECKING:
@@ -98,61 +107,32 @@ def calibrate(
         )
     rna_sense_frac = float(balance.rna_sense_frac)
 
-    # Count clue (the count module): per-region gDNA density by LOCAL boundary-anchored imputation on
-    # RAW unspliced counts (no strand cleaning — the strand module owns the strand channel). An
-    # observable region uses its own contained density; a non-observable (exon/AMBIG) region is
-    # anchored from its observable boundary sides; the global fallback comes from intergenic regions.
-    # node_gdna_density returns the count module's gDNA fraction (count_gdna_frac) per node, consumed
-    # for count-routed nodes and as the gDNA strand-fit seed weight.
-    # The count posterior variance feeds only the FP-rate quantile (no-op at the default ½), so skip
-    # its O(R²) LOESS unless a non-½ quantile actually consumes it.
-    node_density = node_gdna_density(
-        substrate,
-        region_arrays,
-        region_eff_len,
-        fl_mean,
-        need_count_variance=(float(config.gdna_deconv_quantile) != 0.5),
+    # Count clue on RAW counts (the count module, pre-cleaning): per-region gDNA density by LOCAL
+    # boundary-anchored imputation. Needed here only to fit the gDNA strand overdispersion (its seed
+    # identification is pre-cleaning) — the cleaning below depends on that overdispersion, so the raw
+    # pass must come first. This is NOT the region answer (the cleaned pass below is). The count
+    # posterior variance feeds only the FP-rate quantile (no-op at the default ½), so skip its O(R²)
+    # LOESS unless a non-½ quantile actually consumes it.
+    need_count_variance = float(config.gdna_deconv_quantile) != 0.5
+    node_density_raw = node_gdna_density(
+        substrate, region_arrays, region_eff_len, fl_mean, need_count_variance=need_count_variance
     )
 
-    # Splice-junction gDNA-fraction (Phase 4-mean): for exon regions with an eligible splice-junction
-    # boundary, replace the absolute-density count fraction with the boundary gDNA-fraction — the
-    # crossing-spliced reads are a clean mature reference, so the fraction partitions the region's own
-    # (capture-enriched) total and avoids the absolute density's boundary-depletion under-count.
-    # Ineligible regions keep the absolute-density fallback. This upgrades only the REGION count
-    # fraction consumed by deconv_regions; the seed fit and side deconvolution keep node_density.
-    region_count_frac, n_splice_upgraded = region_splice_gdna_frac(
-        substrate,
-        region_arrays,
-        node_density.count_gdna_frac,
-        eff_gdna=fl_mean,
-        eff_rna=rna_fl_mean,
-        eff_gdna_region=region_eff_len,
-        eff_rna_region=region_eff_len_rna,
-    )
-    region_node_density = dataclasses.replace(node_density, count_gdna_frac=region_count_frac)
-
-    # gDNA strand Beta-Binomial overdispersion: fitted from the count-observable seed regions
-    # (intergenic + intronic), using the count-clue gDNA weight (overdispersion-free, since the
-    # density is cleaned by the strand MEAN ½, not the dispersion) to break the circularity.
-    # gDNA is unstranded (mean ½) but overdispersed in real libraries; this is what keeps a
-    # noise-skewed pure-gDNA node reading as gDNA rather than mis-called RNA. The RNA strand is
-    # given a symmetric overdispersion just below (no longer Binomial). See docs/em_strand/03+05.
+    # Strand-module parameters — the two Beta-Binomial overdispersions. gDNA (mean ½) fitted from the
+    # count-observable seed regions/sides using the raw count-clue gDNA weight (breaks the circularity:
+    # the seed weight is the strand MEAN ½, not the dispersion). RNA (mean κ) fitted from boundary-side
+    # spliced counts. Both shrunk toward the SAME default prior, so under sparse data they collapse to
+    # one distribution and an unstranded node (κ=½) is uninformative. See docs/em_strand/03+05.
     gdna_strand = fit_gdna_strand_from_substrate(
         substrate,
         region_arrays,
-        node_density,
+        node_density_raw,
         boundary_eff_len,
         rna_sense_frac=rna_sense_frac,
         prior_overdispersion=overdispersion_for_beta(config.gdna_strand_prior_alpha_beta),
         prior_weight=config.gdna_strand_prior_weight,
     )
     gdna_strand_overdispersion = gdna_strand.gdna_strand_overdispersion
-
-    # RNA strand Beta-Binomial overdispersion: fitted from boundary-side SPLICED counts (spliced ⇒
-    # pure RNA, so node mean = κ and the whole node is RNA). Symmetric with the gDNA fit and shrunk
-    # toward the *same* default prior, so under sparse data both components collapse to one
-    # distribution and an unstranded node (κ = ½) is uninformative — the symmetry an earlier
-    # gDNA-only overdispersion broke. See docs/em_strand/05 + gdna_strand.py.
     rna_strand = fit_rna_strand_from_substrate(
         substrate,
         rna_sense_frac=rna_sense_frac,
@@ -161,9 +141,72 @@ def calibrate(
     )
     rna_strand_overdispersion = rna_strand.rna_strand_overdispersion
 
-    # Per-node deconvolution by precision-weighted strand→count deference: g = w·g_strand +
-    # (1−w)·g_count with w=(2κ−1)² (set inside the deconv). w→1 at high strand specificity, →0 at
-    # unstranded (count governs) — a smooth blend, no gate. Strand-unobservable nodes are count-only.
+    # Strand deconvolution → CLEAN the BOUNDARY counts for the count module's spatial imputation. The
+    # strand emits per node the gDNA fraction g_strand + its information I=N·(2κ−1)²; cleaned_gdna_count
+    # removes the strand-identified RNA from a count by w·g_strand+(1−w), w=I/(I+I₀). Cleaning the
+    # boundary crossings (left/right) makes the imputed density at exon / AMBIG regions drop the nascent
+    # the count clue can't see (the Phase-2 AMBIG fix). The CONTAINED count stays RAW — a region's strand
+    # enters the deconvolution once, as g_strand in the combine below, so g_count carries count MAGNITUDE
+    # only (orthogonal to strand direction ⇒ no double-count).
+    _, left_split, right_split = strand_deconvolve(
+        substrate,
+        region_arrays,
+        rna_sense_frac=rna_sense_frac,
+        gdna_strand_overdispersion=gdna_strand_overdispersion,
+        rna_strand_overdispersion=rna_strand_overdispersion,
+        deconv_quantile=config.gdna_deconv_quantile,
+        n_grid=config.n_grid,
+    )
+    i0 = config.gdna_strand_info_scale
+
+    def _raw_count(view):
+        return view.n_unspliced_pos.astype(np.float64) + view.n_unspliced_neg.astype(np.float64)
+
+    cleaned_left = cleaned_gdna_count(left_split, _raw_count(substrate.left), i0)
+    cleaned_right = cleaned_gdna_count(right_split, _raw_count(substrate.right), i0)
+
+    # Count module g_count: per-region gDNA density by LOCAL imputation — RAW contained own-density for
+    # signature count-observable regions (intergenic / intron); the CLEANED boundary crossings impute
+    # exon / AMBIG regions (nascent removed → the Phase-2 AMBIG fix). This is the count-only spatial
+    # estimate the combine blends with the strand (g_count = magnitude; g_strand = direction).
+    node_density = node_gdna_density(
+        substrate,
+        region_arrays,
+        region_eff_len,
+        fl_mean,
+        need_count_variance=need_count_variance,
+        gdna_counts=(_raw_count(substrate.contained), cleaned_left, cleaned_right),
+    )
+
+    # gDNA-FRACTION imputation (splice-junction method, 3-term): for exon regions with an eligible
+    # splice-junction boundary, replace the absolute gDNA-DENSITY count fraction with the boundary
+    # gDNA-FRACTION — the crossing-spliced reads are a clean mature reference, so the fraction partitions
+    # the region's own (capture-enriched) total and avoids the gDNA-density method's boundary-depletion
+    # under-count. The **3-term** form uses the strand-CLEANED gDNA crossings (cleaned_left/right) so
+    # nascent moves to the RNA side. This upgrades g_count for eligible regions; the combine below blends
+    # it with g_strand by w (it is not an override — at high w the own strand governs anyway).
+    region_count_frac, n_splice_upgraded = region_splice_gdna_frac(
+        substrate,
+        region_arrays,
+        node_density.count_gdna_frac,
+        eff_gdna=fl_mean,
+        eff_rna=rna_fl_mean,
+        eff_gdna_region=region_eff_len,
+        eff_rna_region=region_eff_len_rna,
+        left_gdna_unspl=cleaned_left,
+        right_gdna_unspl=cleaned_right,
+    )
+    region_node_density = dataclasses.replace(node_density, count_gdna_frac=region_count_frac)
+
+    # The COMBINE — blend the region's own strand deconvolution g_strand with the count imputation
+    # g_count by the per-node strand-trust gradient w = I/(I+I₀), I = N·(2κ−1)² (set inside the deconv).
+    # w→1 (confident strand, high N) ⇒ g_strand governs — the region's own contained strand, which is
+    # capture-INVARIANT (enrichment cancels in the fraction); w→0 (κ=½ / AMBIG / thin) ⇒ g_count governs
+    # — the boundary imputation. g_strand (direction) and g_count (magnitude) are independent signals, so
+    # the blend does not double-count. The gradient (not a cliff) is why a single-strand exon recovers
+    # its own gDNA at high SS while a κ≈½ exon falls back to the imputation, smoothly. The boundary SIDES
+    # are deconvolved the same way; their gDNA mass feeds the per-locus prior via the boundary-flux
+    # transport (priors._transport_boundary_flux), so they are not merely QC.
     regions = deconv_regions(
         substrate,
         region_arrays,
@@ -173,6 +216,7 @@ def calibrate(
         rna_strand_overdispersion=rna_strand_overdispersion,
         deconv_quantile=config.gdna_deconv_quantile,
         n_grid=config.n_grid,
+        info_scale=i0,
     )
     left, right = deconv_sides(
         substrate,
@@ -184,6 +228,7 @@ def calibrate(
         rna_strand_overdispersion=rna_strand_overdispersion,
         deconv_quantile=config.gdna_deconv_quantile,
         n_grid=config.n_grid,
+        info_scale=i0,
     )
 
     # Derive gdna_density_global (QC scalar) and the geometric gDNA length.

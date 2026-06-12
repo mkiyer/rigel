@@ -19,6 +19,7 @@ from rigel.calibration.strand_deconv import _deconv_per_node
 def _frac(
     *, strand_observable=True, sense, antisense, count_gdna_frac, count_gdna_frac_var=0.0,
     quantile=0.5, overdispersion=0.0, rna_overdispersion=0.0, rna_sense_frac=0.99, mass=100.0,
+    info_scale=1.0,
 ):
     r = _deconv_per_node(
         np.array([mass]),
@@ -33,17 +34,18 @@ def _frac(
         rna_strand_overdispersion=rna_overdispersion,
         deconv_quantile=quantile,
         n_grid=400,
+        info_scale=info_scale,
     )
     return float(r.gdna_frac[0])
 
 
 # --------------------------------------------------------------------------- #
-# precision-weighted strand→count deference: g = w·g_strand + (1−w)·g_count, w = (2κ−1)²
+# precision-weighted combine: g = w·g_strand + (1−w)·g_count, w = I/(I+I₀), I = N·(2κ−1)²
 # --------------------------------------------------------------------------- #
 
 
 def test_unstranded_defers_fully_to_count():
-    # κ=½ ⇒ w=(2κ−1)²=0 ⇒ the node is count-only regardless of its sense split.
+    # κ=½ ⇒ I=N·(2κ−1)²=0 ⇒ w=0 ⇒ the node is count-only regardless of its sense split or depth.
     frac = _frac(rna_sense_frac=0.5, sense=50, antisense=50, count_gdna_frac=0.3)
     assert frac == pytest.approx(0.3)
 
@@ -56,29 +58,34 @@ def test_strand_unobservable_is_count_only():
 
 
 def test_high_ss_is_mostly_strand():
-    # κ=0.99 ⇒ w≈0.96. A symmetric node (gDNA's signature) reads ~all gDNA, nearly ignoring the
-    # count fraction (0): frac ≈ 0.96·g_strand + 0.04·0.
+    # κ=0.99, N=100 ⇒ I≈96 ⇒ w≈0.99. A symmetric node (gDNA's signature) reads ~all gDNA, nearly
+    # ignoring the count fraction (0).
     frac = _frac(rna_sense_frac=0.99, sense=50, antisense=50, count_gdna_frac=0.0)
-    assert frac > 0.85  # strand dominates; the 4% count weight pulls it down only slightly
+    assert frac > 0.85  # strand dominates; the tiny count weight pulls it down only slightly
 
 
 def test_high_ss_rna_node_reads_rna():
     frac = _frac(rna_sense_frac=0.99, sense=99, antisense=1, count_gdna_frac=1.0)
-    assert frac < 0.1  # strand says RNA; the count fraction (1.0) gets only ~4% weight
+    assert frac < 0.1  # strand says RNA; the count fraction (1.0) gets ~no weight at high I
 
 
-def test_intermediate_ss_blends():
-    # κ=0.75 ⇒ w=0.25: a symmetric (gDNA-signature) node blends mostly toward the count fraction (0).
-    frac = _frac(rna_sense_frac=0.75, sense=50, antisense=50, count_gdna_frac=0.0)
-    assert 0.1 < frac < 0.4  # ≈ 0.25·g_strand + 0.75·0 — between count (0) and strand (~1)
+def test_weight_depends_on_count_information_not_kappa_alone():
+    # The per-node weight w=I/(I+I₀), I=N·(2κ−1)², depends on the COUNT N — not κ alone (the change
+    # from the κ-only scalar (2κ−1)²). At the SAME moderate κ, a deep node leans on its strand (w→1)
+    # while a thin node leans on the count fraction (w→0): the strand-trust gradient.
+    kappa = 0.75  # (2κ−1)² = 0.25
+    deep = _frac(rna_sense_frac=kappa, sense=200, antisense=200, count_gdna_frac=0.0)  # I=100 ⇒ w≈0.99
+    thin = _frac(rna_sense_frac=kappa, sense=1, antisense=1, count_gdna_frac=0.0)  # I=0.5 ⇒ w≈0.33
+    assert deep > 0.8  # ample evidence ⇒ the strand governs (gDNA signature ⇒ ~all gDNA)
+    assert thin < deep - 0.2  # thin ⇒ pulled toward the count fraction (0)
 
 
 def test_weight_monotone_in_strand_specificity():
-    # The same gDNA-signature node calls more gDNA as strand specificity rises (w grows).
+    # At a fixed depth the node calls more gDNA as strand specificity rises (I=N·(2κ−1)² grows ⇒ w↑).
     fracs = [_frac(rna_sense_frac=k, sense=50, antisense=50, count_gdna_frac=0.0)
              for k in (0.50, 0.60, 0.75, 0.90, 0.99)]
     assert all(b >= a - 1e-9 for a, b in zip(fracs, fracs[1:]))  # non-decreasing in κ
-    assert fracs[0] == pytest.approx(0.0)  # κ=½ → pure count (0)
+    assert fracs[0] == pytest.approx(0.0)  # κ=½ → I=0 → pure count (0)
 
 
 # --------------------------------------------------------------------------- #

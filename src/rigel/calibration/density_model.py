@@ -247,7 +247,10 @@ def node_gdna_density(
         right_anchor[:-1] = boundary_count_observable[:-1] & right_same[:-1]
 
     density = np.full(r, np.nan, dtype=np.float64)
-    # Observable region with a usable contained length → its own contained density.
+    # Observable region with a usable contained length → its own contained density. (Exons are NOT
+    # count-observable and are imputed from boundaries below; the strand for an exon enters the
+    # deconvolution as ``g_strand`` in the combine, not via the count density — so this stays the
+    # signature count-observable set, and ``g_count`` carries count magnitude only, no double-count.)
     own = region_count_observable & (region_eff_len > _EPS)
     density[own] = contained_gdna[own] / region_eff_len[own]
     # Everything else: anchor from the available observable boundary sides (crossing count / fl_mean).

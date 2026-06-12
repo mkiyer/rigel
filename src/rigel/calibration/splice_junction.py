@@ -196,27 +196,34 @@ def region_splice_gdna_frac(
     eff_rna: float,
     eff_gdna_region: np.ndarray,
     eff_rna_region: np.ndarray,
+    left_gdna_unspl: np.ndarray | None = None,
+    right_gdna_unspl: np.ndarray | None = None,
 ) -> tuple[np.ndarray, int]:
     """Upgrade the count gDNA fraction for exon regions with an eligible splice-junction boundary.
 
     For each region, its left boundary ``(r−1, r)`` and right boundary ``(r, r+1)`` are checked with
     :func:`splice_junction_eligibility`; a boundary anchors region ``r`` when it is eligible *and* names
     ``r`` as the exon side (``"R"`` for the left boundary, ``"L"`` for the right). At each anchoring
-    boundary the **2-term** :func:`boundary_gdna_fraction` is computed from the crossing counts on
-    ``r``'s side (``substrate.left[r]`` / ``substrate.right[r]`` — the per-side flux), using only sides
-    that carry a mature (spliced) reference. Eligible regions take the mean of their anchor *density*
-    fractions (the same anchor combination the absolute-density imputation uses), then convert that to
-    the region's contained-**count** fraction via :func:`density_frac_to_count_frac` using the region's
-    own gDNA/RNA effective lengths (``eff_gdna_region`` / ``eff_rna_region`` = ``region_eff_length`` of
-    each FL pmf). The boundary fraction is a *density* fraction; without this conversion it carries a
-    large short-exon bias whenever the gDNA and RNA FL distributions differ (see
+    boundary :func:`boundary_gdna_fraction` is computed from the crossing counts on ``r``'s side
+    (``substrate.left[r]`` / ``substrate.right[r]`` — the per-side flux), using only sides that carry a
+    mature (spliced) reference. Eligible regions take the mean of their anchor *density* fractions (the
+    same anchor combination the absolute-density imputation uses), then convert that to the region's
+    contained-**count** fraction via :func:`density_frac_to_count_frac` using the region's own gDNA/RNA
+    effective lengths (``eff_gdna_region`` / ``eff_rna_region`` = ``region_eff_length`` of each FL pmf).
+    The boundary fraction is a *density* fraction; without this conversion it carries a large short-exon
+    bias whenever the gDNA and RNA FL distributions differ (see
     ``docs/calibration/fl_consistency_diagnostic.md``). Regions with no usable splice anchor keep
     ``fallback_frac`` (the absolute-density imputation — itself already count-consistent — always
     available). Returns ``(count_gdna_frac, n_upgraded)``.
 
-    First cut — the **2-term** form (crossing-unspliced lumped as gDNA+nascent), correct for libraries
-    without nascent RNA. The 3-term / strand-resolved sweep (design §5, §5.1) is a later layer; this
-    function is the per-region direct anchor only (no run-interior carry-over yet).
+    ``left_gdna_unspl`` / ``right_gdna_unspl`` select the boundary form. **None** (default) → the
+    **2-term** form (the crossing-unspliced is the gDNA+nascent lump → ``f`` is the *not-mature*
+    fraction; correct for nascent-free libraries). When given (the **strand-cleaned** gDNA crossing count
+    per side, ``strand_deconv.cleaned_gdna_count``) → the **3-term** form: the nascent moves to the RNA
+    side (``unspliced_rna = crossing − gdna``) and ``f`` is the *pure gDNA* fraction. The 3-term is the
+    strand-resolved layer (design §5, §5.1): it is what stops a stranded exon with nascent RNA from
+    reading its crossing-unspliced as gDNA. Degrades to the 2-term where the strand is uninformative
+    (``cleaned → raw``), so it is safe at any strand specificity.
     """
     sig = np.asarray(region_arrays.signature)
     ref_id = np.asarray(region_arrays.ref_id)
@@ -230,14 +237,24 @@ def region_splice_gdna_frac(
     left_spl = (left.n_spliced_sense + left.n_spliced_antisense).astype(np.float64)
     right_unspl = (right.n_unspliced_pos + right.n_unspliced_neg).astype(np.float64)
     right_spl = (right.n_spliced_sense + right.n_spliced_antisense).astype(np.float64)
+    # gDNA share of the crossing-unspliced: the raw total (2-term) or the strand-cleaned count (3-term).
+    left_gdna = left_unspl if left_gdna_unspl is None else np.asarray(left_gdna_unspl, dtype=np.float64)
+    right_gdna = (
+        right_unspl if right_gdna_unspl is None else np.asarray(right_gdna_unspl, dtype=np.float64)
+    )
 
-    def _anchor(unspl: float, spl: float) -> float | None:
+    def _anchor(unspl: float, gdna: float, spl: float) -> float | None:
         # A splice anchor needs a mature (spliced) reference; without one there is nothing to debias
-        # against, so defer to the fallback.
+        # against, so defer to the fallback. The crossing-unspliced splits into gDNA (the cleaned share)
+        # and nascent RNA (the remainder) — 2-term has gdna == unspl ⇒ unspliced_rna = 0.
         if spl <= 0.0:
             return None
         f = boundary_gdna_fraction(
-            unspliced_gdna=unspl, unspliced_rna=0.0, spliced=spl, eff_gdna=eff_gdna, eff_rna=eff_rna
+            unspliced_gdna=gdna,
+            unspliced_rna=max(unspl - gdna, 0.0),
+            spliced=spl,
+            eff_gdna=eff_gdna,
+            eff_rna=eff_rna,
         )
         return None if math.isnan(f) else f
 
@@ -247,13 +264,13 @@ def region_splice_gdna_frac(
         if i > 0 and ref_id[i] == ref_id[i - 1]:
             elig = splice_junction_eligibility(int(sig[i - 1]), int(sig[i]))
             if elig is not None and elig.exon_side == "R":
-                a = _anchor(left_unspl[i], left_spl[i])
+                a = _anchor(left_unspl[i], left_gdna[i], left_spl[i])
                 if a is not None:
                     anchors.append(a)
         if i < r - 1 and ref_id[i] == ref_id[i + 1]:
             elig = splice_junction_eligibility(int(sig[i]), int(sig[i + 1]))
             if elig is not None and elig.exon_side == "L":
-                a = _anchor(right_unspl[i], right_spl[i])
+                a = _anchor(right_unspl[i], right_gdna[i], right_spl[i])
                 if a is not None:
                     anchors.append(a)
         if anchors:

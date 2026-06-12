@@ -279,6 +279,14 @@ class CalibrationConfig:
     #: ``gdna_strand_prior_weight``; same default.
     rna_strand_prior_weight: float = 30.0
 
+    #: **Strand-information half-trust scale** ``I₀`` for the strand→count blend (advanced). The single
+    #: blend weight is ``w = I/(I+I₀)`` with ``I = N·(2κ−1)²`` (the per-node strand information): the
+    #: strand cleans a node's count by ``w·g_strand + (1−w)·1`` (``strand_deconv.cleaned_gdna_count``).
+    #: ``I₀`` is "the strand information at which the strand is half-trusted" (~1 effective discriminating
+    #: fragment). ``w→1`` for a confident strand (high κ, decent depth) — it then stops fighting a clearly
+    #: good strand model; ``w→0`` at κ≈½ or thin — a no-op, the count floor. Validate on the suites.
+    gdna_strand_info_scale: float = 10.0
+
     def __post_init__(self) -> None:
         if not (0.0 < float(self.gdna_deconv_quantile) < 1.0):
             raise ValueError(
@@ -308,6 +316,11 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.rna_strand_prior_weight must be >= 0; "
                 f"got {self.rna_strand_prior_weight}."
+            )
+        if self.gdna_strand_info_scale <= 0.0:
+            raise ValueError(
+                "CalibrationConfig.gdna_strand_info_scale must be > 0; "
+                f"got {self.gdna_strand_info_scale}."
             )
 
 

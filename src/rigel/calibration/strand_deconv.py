@@ -155,27 +155,32 @@ def _deconv_per_node(
     rna_strand_overdispersion,
     deconv_quantile,
     n_grid,
+    info_scale,
 ) -> NodeDeconv:
     """Blend the strand posterior and the count fraction per node, then read a quantile, then split mass.
 
-    The **point estimate** (``center``) is the precision-weighted deference ``w·g_strand + (1−w)·g_count``
-    with ``w = (2κ−1)²`` — the strand channel's discriminability (→1 at high SS, →0 at unstranded; a
-    smooth, bias-robust deference with no gate). ``g_strand`` is the Beta-Binomial posterior median; a
-    node with no defined sense (or κ=½) takes the count fraction.
+    The **point estimate** (``center``) is the precision-weighted blend ``w·g_strand + (1−w)·g_count`` with
+    a **per-node** weight ``w = I/(I+I₀)`` — the carried strand information ``I = N·(2κ−1)²`` (the
+    per-fragment discriminability ``(2κ−1)²`` times the node's unspliced count ``N``), ``I₀ = info_scale``.
+    This is the *gradient* of strand-trustworthiness (not a cliff): ``w→1`` at high information (confident
+    strand → its own deconvolution governs, capture-invariant), ``w→0`` at ``κ=½`` or thin ``N`` (the count
+    imputation governs). ``g_strand`` (the region's own strand) and ``g_count`` (the count module's spatial
+    imputation, on raw contained + cleaned boundaries) are **independent** signals — strand *direction* vs
+    count *magnitude* — so the blend does not double-count. A node with no defined sense (κ=½ / AMBIG)
+    takes the count imputation (``w=0``).
 
-    The **FP-rate quantile knob** (Phase 2) then reads ``g(q) = clip(center + Φ⁻¹(q)·σ)`` where ``σ`` is
-    the combined per-node std: ``√(w²·σ²_strand + (1−w)²·σ²_count)`` (strand-observable) or ``σ_count``
-    (count-routed). ``q=0.5 ⇒ Φ⁻¹=0 ⇒ g=center`` — a bit-identical no-op default. ``q>0.5`` is FP-averse
-    (more gDNA); the shift is **uncertainty-aware** (wider posterior ⇒ larger shift). The count variance
-    is used only to *widen* the quantile (safe), never to *sharpen* the blend (kept bias-robust at
-    ``(2κ−1)²`` — the count σ is anti-calibrated under capture; see ``docs/calibration/phase2_design.md``).
+    The **FP-rate quantile knob** then reads ``g(q) = clip(center + Φ⁻¹(q)·σ)`` with the combined per-node
+    std ``√(w²·σ²_strand + (1−w)²·σ²_count)``. ``q=0.5 ⇒ Φ⁻¹=0 ⇒ g=center`` — the no-op default.
     """
     mass_unspl = np.asarray(mass_unspl, dtype=np.float64)
     mass_spliced = np.asarray(mass_spliced, dtype=np.float64)
     sense = np.asarray(sense, dtype=np.float64)
     antisense = np.asarray(antisense, dtype=np.float64)
     strand_observable = np.asarray(strand_observable, dtype=bool)
-    w_strand = (2.0 * float(rna_sense_frac) - 1.0) ** 2  # strand discriminability, in [0, 1]
+    discrim = (2.0 * float(rna_sense_frac) - 1.0) ** 2  # per-fragment strand discriminability, in [0, 1]
+    n_node = sense + antisense  # unspliced count evidence per node
+    info = n_node * discrim  # carried strand information I = N·(2κ−1)²
+    w = info / (info + float(info_scale))  # per-node strand-trust gradient: 0 at I=0, → 1 at high I
     z = float(ndtri(min(max(float(deconv_quantile), 1e-6), 1.0 - 1e-6)))  # Φ⁻¹(q); 0 at q=0.5
 
     g_count = np.clip(np.asarray(count_gdna_frac, dtype=np.float64), 0.0, 1.0)
@@ -184,10 +189,10 @@ def _deconv_per_node(
     var = var_count.copy()
 
     # STRAND module (Beta-Binomial posterior, weak prior) for every strand-routed node at once: a node
-    # uses strand iff the library is strand-identifiable (w>0), the node is strand-observable, it
+    # uses strand iff the library is strand-identifiable (discrim>0), the node is strand-observable, it
     # carries unspliced mass, and it has a sense split. The grid posterior is one (n_use, n_grid) batch.
     active = mass_unspl > 0.0
-    use_strand = active & strand_observable & ((sense + antisense) > 0.0) & (w_strand > 0.0)
+    use_strand = active & strand_observable & (n_node > 0.0) & (discrim > 0.0)
     if use_strand.any():
         idx = np.flatnonzero(use_strand)
         g_strand, var_strand = strand_posterior_gdna_frac(
@@ -198,8 +203,9 @@ def _deconv_per_node(
             rna_strand_overdispersion=rna_strand_overdispersion,
             n_grid=n_grid,
         )
-        center[idx] = w_strand * g_strand + (1.0 - w_strand) * g_count[idx]
-        var[idx] = w_strand**2 * var_strand + (1.0 - w_strand) ** 2 * var_count[idx]
+        wi = w[idx]  # per-node strand-trust gradient
+        center[idx] = wi * g_strand + (1.0 - wi) * g_count[idx]
+        var[idx] = wi**2 * var_strand + (1.0 - wi) ** 2 * var_count[idx]
 
     # FP-rate quantile g(q)=clip(center+Φ⁻¹(q)·σ); q=½ ⇒ z=0 ⇒ frac=center (bit-identical no-op).
     frac = center if z == 0.0 else np.clip(center + z * np.sqrt(var), 0.0, 1.0)
@@ -221,13 +227,14 @@ def deconv_regions(
     rna_strand_overdispersion=0.0,
     deconv_quantile=0.5,
     n_grid=200,
+    info_scale=1.0,
 ) -> NodeDeconv:
     """Deconvolve each region's contained mass (a node) into gDNA / RNA by the strand/count blend.
 
     A region is strand-observable iff its transcript strand is defined (``TS_POS`` / ``TS_NEG``);
     ``TS_NONE`` (intergenic) and ``TS_AMBIG`` are count-only. The count fraction + its variance are the
-    precomputed ``node_density.count_gdna_frac`` / ``count_gdna_frac_var``; the weight ``w=(2κ−1)²`` and
-    the FP-rate quantile ``deconv_quantile`` are applied in ``_deconv_per_node``.
+    precomputed ``node_density.count_gdna_frac`` / ``count_gdna_frac_var``; the per-node weight
+    ``w=I/(I+info_scale)``, ``I=N·(2κ−1)²``, and the FP-rate quantile are applied in ``_deconv_per_node``.
     """
     ts = np.asarray(region_arrays.strand_class)
     c = substrate.contained
@@ -249,6 +256,7 @@ def deconv_regions(
         rna_strand_overdispersion=rna_strand_overdispersion,
         deconv_quantile=deconv_quantile,
         n_grid=n_grid,
+        info_scale=info_scale,
     )
 
 
@@ -382,6 +390,7 @@ def deconv_sides(
     rna_strand_overdispersion=0.0,
     deconv_quantile=0.5,
     n_grid=200,
+    info_scale=1.0,
 ) -> tuple[NodeDeconv, NodeDeconv]:
     """Deconvolve each boundary **side** as an independent node by the strand/count blend.
 
@@ -413,6 +422,7 @@ def deconv_sides(
             rna_strand_overdispersion=rna_strand_overdispersion,
             deconv_quantile=deconv_quantile,
             n_grid=n_grid,
+            info_scale=info_scale,
         )
 
     left = _deconv(substrate.left, l_same, ts_prev, l_obs)

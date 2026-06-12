@@ -77,8 +77,12 @@ _SIM_SS65 = ReadSimConfig(
 
 
 def _pipeline_config(seed=PIPELINE_SEED):
+    # n_threads=1: the locus EM's OpenMP reduction order is non-deterministic, which the iterative
+    # solver amplifies to ~1e-8 relative on the largest scenarios — scientifically irrelevant, but it
+    # wanders past the bit-exact golden tolerance. Pin to 1 thread so the regression test is
+    # deterministic (it tests the algorithm's output, not the parallel reduction).
     return PipelineConfig(
-        em=EMConfig(seed=seed, assignment_mode="fractional"),
+        em=EMConfig(seed=seed, assignment_mode="fractional", n_threads=1),
         scan=BamScanConfig(sj_strand_tag="auto"),
     )
 
