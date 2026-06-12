@@ -71,7 +71,7 @@ Per region, after the library-global fits (κ, strand overdispersions, FL pmfs �
      annotation is overridden by the data.**
    - **both strands expressed:** residual under-determined by strand alone → the per-strand mature
      expression is the **directional prior** on nascent, blended (the existing `w=I/(I+I₀)` gradient) with
-     the gDNA crossing estimate / neighbour carry-over.
+     the gDNA crossing estimate / neighbour propagation.
 5. **gDNA mass** = residual − nascent; the spliced mass stays deterministic RNA.
 
 The intertwining the design needs: **signal #2 supplies the per-strand expression that drives signal #3.**
@@ -167,5 +167,5 @@ eligibility predicate.
 
 1. The `E_mu/E_ms` geometry edge cases (§3) — the primary risk; pure geometry, oracle-testable.
 2. Both-strands-expressed AMBIG — genuinely under-determined in one pass; relies on the directional prior +
-   carry-over. Where even that fails, **report low confidence** rather than manufacture a value.
+   propagation. Where even that fails, **report low confidence** rather than manufacture a value.
 3. Substrate crossing-count semantics vs. true crossings (§3) — must be reconciled in Phase A.
