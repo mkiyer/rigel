@@ -125,6 +125,28 @@ constant); a damping factor is available if a long balanced-AMBIG run oscillates
 5. **Flagship + full suite** — the 8.7% leak drops (the AMBIG + the eff-len-coupled part both improve as the
    per-region gDNA gets the right enriched level); confirm the eff-len contraction follows.
 
+## 8.5. Prototype outcome (2026-06-12) — architecture validated; two carry refinements found
+
+`scripts/debug/phaseC_propagation.py` (region-chain core: seeds → carry per-strand nascent density → AMBIG
+= residual) on locus 21:
+
+- **Validated.** It resolves the AMBIG regions the per-node model could not: region 226 `0.27 → 0.54`
+  (`nrna_none`, oracle 0.59) and `→ 0.42` (`nrna_rnd`, oracle 0.44); 231 `→ 0.45` (0.43); 236 `→ 0.43`
+  (0.45). The capture-depletion fix (gDNA = own enriched count − propagated RNA) works.
+- **Refinement 1 — precision-weighted carry.** Tiny-mass sliver seeds (U=10–80) can't estimate nascent
+  (`rho≈0`) and, being adjacent, poisoned the nearest-neighbour fill (every AMBIG region inherited 0.01 vs
+  the real ~8 from substantial U=14k–32k seeds). A count filter fixed it; production wants a precision
+  weight = the seed strand info `N·(2κ−1)²` (derived, no threshold).
+- **Refinement 2 — enrichment-aware carry (the important one).** Region 224 (a GENE0023 **intron**) broke
+  (0.34 vs oracle 0.98): it inherited the **exon** nascent density from exon seeds, but **nascent is
+  capture-enriched like gDNA** — high on exons, depleted in introns. The carry must stay within enrichment
+  class (exon→exon, intron→intron). *This re-justifies a capture/enrichment-aware carry* (earlier removed
+  from the roadmap as unnecessary — it IS necessary for the nascent density).
+- **Implication: the boundary nodes are essential, not optional.** Both refinements are symptoms of
+  carrying a *distant* seed's density. A boundary's deconvolved unspliced crossing gives the **local,
+  enrichment-matched** per-strand nascent at the region's own edge — the principled fix. The region-chain
+  prototype is the crude distant-carry stand-in; production must make boundaries first-class 3-term nodes.
+
 ## 9. Open questions / risks
 
 - **Nascent-carry geometry** — which neighbour, same-strand same-gene, how far to carry, the carry
