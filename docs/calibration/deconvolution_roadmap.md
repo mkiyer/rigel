@@ -126,12 +126,17 @@ eligibility predicate.
   `E_mu / (n_junctions·fl_mean)`. Validate the predicted contained-unspliced mature against the locus-21 +
   toy-AMBIG oracle, in isolation, before touching `calibrate`. *This is the only thing that can be wrong;
   prove it first.*
-- **Phase B — strand-aware subtraction + re-base.** Feed `U'_pos/U'_neg` into the region deconvolution;
-  retire the `splice_junction` fraction. Confirm the good regions hold and the failing regions recover.
-- **Phase C — signal #3 on AMBIG.** Strand-observability from per-strand mature expression (silent-strand
-  override); the directional nascent prior + neighbour carry-over for both-expressed.
-- **Phase D — wire + validate at scale.** Into `calibrate`; golden refresh; full gDNA suite + the flagship;
-  confirm the leak drop. Update the authoritative theory doc + CLAUDE.md.
+- **Phase B — mature subtraction.** *(plan written, then **merged into C** — see below.)* Step 0 found the
+  subtraction only benefits AMBIG nodes (a strand-observable node's strand already separates gDNA from all
+  RNA — generative §4), so there is no separable subtraction-only phase. Step-0 record:
+  [`phaseB_mature_subtraction_plan.md`](phaseB_mature_subtraction_plan.md).
+- **Phase C (merged B+C) — AMBIG residual resolution.** Subtract mature on AMBIG nodes, run the strand on
+  the AMBIG residual oriented by the per-strand mature, blend with the depleted count gDNA via a
+  strand-trust `w` that carries the weaker-strand RNA-free-ness (silent-strand override emergent;
+  both-expressed → count floor / neighbour), and retire the `splice_junction` fraction. The flagship leak
+  drops here. Plan: [`phaseC_ambig_resolution_plan.md`](phaseC_ambig_resolution_plan.md).
+- **Phase D — validate at scale.** Golden refresh; full gDNA suite + the flagship; confirm the leak drop and
+  no regression on simple/unstranded/no-gDNA conditions. Update the authoritative theory doc + CLAUDE.md.
 
 ## 6. Scope decisions (locked)
 
