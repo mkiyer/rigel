@@ -1,25 +1,29 @@
-"""The iterative propagation deconvolution — per-region {RNA+, RNA−, gDNA} by solving a node system.
+"""The iterative propagation deconvolution — per-node {RNA+, RNA−, gDNA} by solving a node system.
 
 Spec: ``docs/calibration/propagation_implementation_plan.md`` (validated by the prototypes
-``scripts/debug/phaseC_propagation*.py``). Each region's contained-unspliced mass is partitioned into
-``(f₊, f₋, f_g)``; the calibration reads ``f_g``. The partition is solved by **propagation from seeds**:
+``scripts/debug/phaseC_propagation*.py``). Each node's contained/crossing unspliced mass is partitioned
+into ``(f₊, f₋, f_g)``; the calibration reads ``f_g``. The partition is solved by **propagation from
+seeds**:
 
 * **seeds** (self-solvable from their own strand): intergenic (``f_g=1``); single-strand POS/NEG regions
   (the strand splits gDNA vs RNA_s). A seed emits its per-strand **nascent density** ``ρ_nasc_s`` (the RNA
   the strand sees, minus the mature the junctions see), tagged by **enrichment class** (exon vs intron —
   nascent is capture-enriched, so the two classes carry very different densities).
 * **propagation**: ``ρ_nasc_s`` is propagated along each strand-``s`` gene body, **precision-weighted**
-  (weight = the seed's strand information ``N·(2κ−1)²`` — a tiny/uninformative seed cannot poison the
-  field) and **enrichment-matched** (exon density to exon regions, intron density to intron regions).
-* **AMBIG solve** (the #1 resolution, validated): an AMBIG region has ≤2 strands and at least one is
-  seedable. Subtract the propagated **seeded-strand** nascent + **both** matures (κ-distributed) → the
-  residual is ``gDNA + the unseeded strand's nascent`` → the region's **own strand** resolves it (gDNA
-  symmetric, the remaining nascent tilted). Propagation supplies one strand; the node strand finishes the
-  other. Where **neither** strand is seedable (pathological), fall back to the count gDNA density.
+  (weight = the seed's strand information ``N·(2κ−1)²``) and **enrichment-matched** (exon density to exon
+  regions, intron density to intron regions).
+* **AMBIG solve** (the #1 resolution, validated): an AMBIG node has ≤2 strands and at least one is
+  seedable. Subtract the propagated **seeded-strand** nascent + matures (κ-distributed) → the residual is
+  ``gDNA + the unseeded strand's nascent`` → the node's **own strand** resolves it. Where **neither**
+  strand is seedable, fall back to the count gDNA density.
 
-This is **not** wired into ``calibrate`` yet — built + validated standalone first (Phase-A discipline). It
-consolidates ``density_model`` + ``mature_density`` + the ``strand_deconv`` per-node blend + ``run_fill``;
-those are retired once this replaces ``deconv_regions``.
+**Regions** carry mature (within-exon); **boundary sides** are **mature-free** (a contiguous unspliced
+crossing cannot span a junction — the user's physics: spliced crosses one-sided, unspliced both) so their
+solve is the same with ``mature=0`` and the per-bp nascent density scaled by the *crossing* eff-length.
+
+Not wired into ``calibrate`` by default (opt-in ``CalibrationConfig.use_propagation``); consolidates
+``density_model`` + ``mature_density`` + the ``strand_deconv`` per-node blend + ``run_fill`` once it
+replaces ``deconv_regions`` / ``deconv_sides``.
 """
 
 from __future__ import annotations
@@ -29,12 +33,13 @@ from dataclasses import dataclass
 import numpy as np
 
 from .mature_density import mature_density
-from .signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_NEG, BIT_INTRON_POS, TS_NEG, TS_POS
+from .signature import (
+    BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_NEG, BIT_INTRON_POS, TS_AMBIG, TS_NEG, TS_POS,
+)
 from .strand_deconv import NodeDeconv, strand_posterior_gdna_frac
 
-__all__ = ["propagate_regions"]
+__all__ = ["propagate_regions", "propagate"]
 
-# Per-strand (exon bit, intron bit) — a region's enrichment class for strand s.
 _STRAND_BITS = {TS_POS: (BIT_EXON_POS, BIT_INTRON_POS), TS_NEG: (BIT_EXON_NEG, BIT_INTRON_NEG)}
 _EPS = 1.0e-9
 
@@ -45,6 +50,18 @@ class _StrandField:
 
     nasc_density: np.ndarray  # float64[R] — propagated per-bp nascent density on this strand
     seedable: np.ndarray  # bool[R] — a seed for this strand is reachable in the region's gene-body run
+
+
+@dataclass(frozen=True, slots=True)
+class _Fields:
+    """The per-strand nascent fields + matures shared by the region and side solves."""
+
+    nasc_density_pos: np.ndarray
+    nasc_density_neg: np.ndarray
+    seedable_pos: np.ndarray
+    seedable_neg: np.ndarray
+    mature_pos: np.ndarray
+    mature_neg: np.ndarray
 
 
 def _body_run_segments(in_body: np.ndarray, ref_id: np.ndarray) -> np.ndarray:
@@ -60,27 +77,15 @@ def _body_run_segments(in_body: np.ndarray, ref_id: np.ndarray) -> np.ndarray:
 
 
 def _propagate_strand(
-    strand: int,
-    *,
-    sig: np.ndarray,
-    ref_id: np.ndarray,
-    strand_class: np.ndarray,
-    u_pos: np.ndarray,
-    u_neg: np.ndarray,
-    mature_s: np.ndarray,
-    e_rna: np.ndarray,
-    kappa: float,
-    od_g: float,
-    od_r: float,
-    n_grid: int,
+    strand, *, sig, ref_id, strand_class, u_pos, u_neg, mature_s, e_rna, kappa, od_g, od_r, n_grid,
 ) -> _StrandField:
     """Propagate strand-``s`` nascent density from single-strand-``s`` seeds, precision-weighted + per class.
 
     A single-strand-``s`` region is a seed: its own strand posterior gives ``f_g``, so ``RNA_s=(1−f_g)·U``,
     ``nascent_s = RNA_s − mature_s``, density ``ρ = nascent_s / E_rna``, precision ``= N·(2κ−1)²``. Within
-    each strand-``s`` gene-body run (contiguous ``E_s|I_s``) and **enrichment class** (exon / intron), the
-    field is the precision-weighted mean of that class's seeds; a region with no same-class seed in its run
-    is **not seedable** for ``s`` (its nascent is left to the AMBIG node-strand solve).
+    each strand-``s`` gene-body run and **enrichment class** (exon / intron) the field is the
+    precision-weighted mean of that class's seeds; a region with no same-class seed in its run is **not
+    seedable** for ``s`` (its nascent is left to the AMBIG node-strand solve).
     """
     exon_bit, intron_bit = _STRAND_BITS[strand]
     r = sig.shape[0]
@@ -89,7 +94,6 @@ def _propagate_strand(
     n = sense + antisense
     discrim = (2.0 * kappa - 1.0) ** 2
 
-    # seed nascent density + precision on single-strand-s regions (the strand resolves them directly).
     is_seed = (strand_class == strand) & (n > 0.0)
     nasc_density = np.zeros(r, dtype=np.float64)
     precision = np.zeros(r, dtype=np.float64)
@@ -102,9 +106,8 @@ def _propagate_strand(
         rna_s = (1.0 - g_q) * n[idx]
         nasc = np.maximum(rna_s - mature_s[idx], 0.0)
         nasc_density[idx] = np.where(e_rna[idx] > _EPS, nasc / np.maximum(e_rna[idx], _EPS), 0.0)
-        precision[idx] = n[idx] * discrim  # strand information of the seed
+        precision[idx] = n[idx] * discrim
 
-    # propagate within (gene-body run × enrichment class): precision-weighted mean of same-class seeds.
     in_body = (sig & (exon_bit | intron_bit)) != 0
     run = _body_run_segments(in_body, ref_id)
     is_exon = (sig & exon_bit) != 0
@@ -113,7 +116,6 @@ def _propagate_strand(
     field = np.zeros(r, dtype=np.float64)
     seedable = np.zeros(r, dtype=bool)
     for cls_mask in (is_exon, is_intron):
-        # group seeds of this class by run; assign each region of this class in the run the wtd mean.
         seed_here = is_seed & cls_mask & (precision > 0.0)
         for seg in np.unique(run[in_body & cls_mask]):
             in_seg = (run == seg) & cls_mask & in_body
@@ -126,94 +128,146 @@ def _propagate_strand(
     return _StrandField(nasc_density=field, seedable=seedable)
 
 
-def propagate_regions(
-    substrate,
-    region_arrays,
-    *,
-    rna_region_eff_len: np.ndarray,
-    rna_fl_mean: float,
-    rna_sense_frac: float,
-    gdna_strand_overdispersion: float,
-    rna_strand_overdispersion: float,
-    count_gdna_frac: np.ndarray,
-    n_grid: int = 200,
-) -> NodeDeconv:
-    """Per-region gDNA/RNA deconvolution by propagation (see the module docstring).
-
-    ``count_gdna_frac`` is the fallback gDNA fraction (the count density imputation) for regions where
-    neither strand is seedable. Returns a :class:`NodeDeconv` (``gdna_mass``, ``rna_mass``, ``gdna_frac``,
-    ``gdna_frac_var``) matching ``deconv_regions`` so it can replace it.
-    """
+def _compute_fields(substrate, region_arrays, e_rna, rna_fl_mean, kappa, od_g, od_r, n_grid) -> _Fields:
+    """Compute the per-strand nascent-density fields + matures (shared by the region and side solves)."""
     ts = np.asarray(region_arrays.strand_class)
     sig = np.asarray(region_arrays.signature).astype(np.int64)
     ref_id = np.asarray(region_arrays.ref_id)
-    kappa = float(rna_sense_frac)
-    e_rna = np.asarray(rna_region_eff_len, dtype=np.float64)
+    c = substrate.contained
+    u_pos = c.n_unspliced_pos.astype(np.float64)
+    u_neg = c.n_unspliced_neg.astype(np.float64)
+    md = mature_density(substrate, region_arrays, e_rna, rna_fl_mean)
+    common = dict(sig=sig, ref_id=ref_id, strand_class=ts, u_pos=u_pos, u_neg=u_neg, e_rna=e_rna,
+                  kappa=float(kappa), od_g=od_g, od_r=od_r, n_grid=n_grid)
+    fpos = _propagate_strand(TS_POS, mature_s=md.mature_pos, **common)
+    fneg = _propagate_strand(TS_NEG, mature_s=md.mature_neg, **common)
+    return _Fields(fpos.nasc_density, fneg.nasc_density, fpos.seedable, fneg.seedable,
+                   md.mature_pos, md.mature_neg)
+
+
+def _solve_regions(substrate, region_arrays, fields, e_rna, kappa, od_g, od_r, count_gdna_frac, n_grid):
+    """Per-region f_g: intergenic = 1; single-strand = strand posterior; AMBIG = the propagation solve."""
+    ts = np.asarray(region_arrays.strand_class)
     c = substrate.contained
     u_pos = c.n_unspliced_pos.astype(np.float64)
     u_neg = c.n_unspliced_neg.astype(np.float64)
     U = u_pos + u_neg
     mass_unspl = np.asarray(c.mass_unspliced, dtype=np.float64)
     mass_spliced = np.asarray(c.mass_spliced, dtype=np.float64)
+    nasc_pos = np.where(fields.seedable_pos, fields.nasc_density_pos * e_rna, 0.0)
+    nasc_neg = np.where(fields.seedable_neg, fields.nasc_density_neg * e_rna, 0.0)
 
-    md = mature_density(substrate, region_arrays, e_rna, rna_fl_mean)
-    m_pos, m_neg = md.mature_pos, md.mature_neg
-
-    # propagate each strand's nascent density (precision-weighted, enrichment-matched).
-    common = dict(sig=sig, ref_id=ref_id, strand_class=ts, u_pos=u_pos, u_neg=u_neg, e_rna=e_rna,
-                  kappa=kappa, od_g=gdna_strand_overdispersion, od_r=rna_strand_overdispersion,
-                  n_grid=n_grid)
-    fpos = _propagate_strand(TS_POS, mature_s=m_pos, **common)
-    fneg = _propagate_strand(TS_NEG, mature_s=m_neg, **common)
-
-    # nascent counts (density × eff-len) where seedable, else 0 (left to the node-strand residual solve).
-    nasc_pos = np.where(fpos.seedable, fpos.nasc_density * e_rna, 0.0)
-    nasc_neg = np.where(fneg.seedable, fneg.nasc_density * e_rna, 0.0)
-
-    # ---- the per-region solve ----
     f_g = np.full(U.shape, np.nan, dtype=np.float64)
     active = U > 0.0
-
-    # (a) intergenic / no transcript: all gDNA.
-    none_mask = active & (ts != TS_POS) & (ts != TS_NEG) & ~_is_ambig(ts)
-    f_g[none_mask] = 1.0
-
-    # (b) single-strand seeds: the strand posterior gives f_g directly.
+    f_g[active & (ts != TS_POS) & (ts != TS_NEG) & (ts != TS_AMBIG)] = 1.0  # intergenic / no transcript
     for strand, sense_arr in ((TS_POS, u_pos), (TS_NEG, u_neg)):
-        m = active & (ts == strand)
-        idx = np.flatnonzero(m)
+        idx = np.flatnonzero(active & (ts == strand))
         if idx.size:
             g_q, _ = strand_posterior_gdna_frac(
                 sense_arr[idx], (U - sense_arr)[idx], kappa,
-                gdna_strand_overdispersion=gdna_strand_overdispersion,
-                rna_strand_overdispersion=rna_strand_overdispersion, n_grid=n_grid,
+                gdna_strand_overdispersion=od_g, rna_strand_overdispersion=od_r, n_grid=n_grid,
             )
             f_g[idx] = g_q
-
-    # (c) AMBIG: subtract seeded-strand nascent + both matures -> residual -> node strand resolves.
-    amb = active & _is_ambig(ts)
+    amb = active & (ts == TS_AMBIG)
     if amb.any():
         f_g[amb] = _solve_ambig(
-            u_pos[amb], u_neg[amb], kappa,
-            nasc_pos[amb], nasc_neg[amb], fpos.seedable[amb], fneg.seedable[amb],
-            m_pos[amb], m_neg[amb], count_gdna_frac[amb],
+            u_pos[amb], u_neg[amb], kappa, nasc_pos[amb], nasc_neg[amb],
+            fields.seedable_pos[amb], fields.seedable_neg[amb],
+            fields.mature_pos[amb], fields.mature_neg[amb], count_gdna_frac[amb],
         )
-
     f_g = np.where(active, np.clip(np.nan_to_num(f_g, nan=0.0), 0.0, 1.0), 0.0)
-    gdna = f_g * mass_unspl
-    rna = (1.0 - f_g) * mass_unspl + mass_spliced
-    return NodeDeconv(gdna_mass=gdna, rna_mass=rna, gdna_frac=f_g,
-                      gdna_frac_var=np.zeros_like(f_g))
+    return NodeDeconv(gdna_mass=f_g * mass_unspl, rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
+                      gdna_frac=f_g, gdna_frac_var=np.zeros_like(f_g))
 
 
-def _is_ambig(ts: np.ndarray) -> np.ndarray:
-    from .signature import TS_AMBIG
-    return np.asarray(ts) == TS_AMBIG
+def _solve_sides(substrate, region_arrays, fields, rna_fl_mean, kappa, od_g, od_r, count_gdna_frac, n_grid):
+    """Boundary sides (left, right): mature-free crossing → {gDNA, nascent±}.
+
+    A side's unspliced crossing is gDNA + nascent (mature crosses spliced, one-sided). **Strand-observable**
+    sides (a single consistent sense across the boundary) use their **own strand** directly — exactly like a
+    single-strand region, and crucially *not* the propagated field (which carries the seed's small spurious
+    nascent and would siphon gDNA→RNA at every observable side). Only **AMBIG** (strand-unobservable) sides
+    use the propagation subtract-residual solve (mature=0, the per-bp nascent density × the **crossing**
+    eff-length ``rna_fl_mean``). Region ``r``'s field applies to both of ``r``'s side views.
+    """
+    from .density_model import count_observable_masks
+    from .strand_deconv import _left_right_neighbors, _side_strand_orientation
+
+    ts = np.asarray(region_arrays.strand_class)
+    ref_id = np.asarray(region_arrays.ref_id)
+    sig = np.asarray(region_arrays.signature).astype(np.int64)
+    _, bobs = count_observable_masks(sig, ref_id)
+    l_same, ts_prev, _l_obs, r_same, ts_next, _r_obs = _left_right_neighbors(ts, ref_id, bobs)
+    nasc_pos = np.where(fields.seedable_pos, fields.nasc_density_pos * rna_fl_mean, 0.0)
+    nasc_neg = np.where(fields.seedable_neg, fields.nasc_density_neg * rna_fl_mean, 0.0)
+    zeros = np.zeros_like(nasc_pos)
+
+    def _solve(view, same, ts_other) -> NodeDeconv:
+        u_pos = view.n_unspliced_pos.astype(np.float64)
+        u_neg = view.n_unspliced_neg.astype(np.float64)
+        U = u_pos + u_neg
+        mass_unspl = np.asarray(view.mass_unspliced, dtype=np.float64)
+        mass_spliced = np.asarray(view.mass_spliced, dtype=np.float64)
+        sense, antisense, _n, observable = _side_strand_orientation(view, same, ts, ts_other)
+        frac = np.zeros_like(U)
+        # observable sides: their OWN strand resolves gDNA vs RNA (no propagated field — avoids the siphon).
+        obs = np.flatnonzero(observable & (U > 0.0))
+        if obs.size:
+            g_q, _ = strand_posterior_gdna_frac(
+                sense[obs], antisense[obs], kappa,
+                gdna_strand_overdispersion=od_g, rna_strand_overdispersion=od_r, n_grid=n_grid,
+            )
+            frac[obs] = g_q
+        # AMBIG (unobservable) sides: the propagation subtract-residual solve (mature-free).
+        amb = (~observable) & (U > 0.0)
+        if amb.any():
+            frac[amb] = _solve_ambig(
+                u_pos[amb], u_neg[amb], kappa, nasc_pos[amb], nasc_neg[amb],
+                fields.seedable_pos[amb], fields.seedable_neg[amb], zeros[amb], zeros[amb],
+                count_gdna_frac[amb],
+            )
+        frac = np.where(U > 0.0, frac, 0.0)
+        return NodeDeconv(gdna_mass=frac * mass_unspl, rna_mass=(1.0 - frac) * mass_unspl + mass_spliced,
+                          gdna_frac=frac, gdna_frac_var=np.zeros_like(frac))
+
+    return _solve(substrate.left, l_same, ts_prev), _solve(substrate.right, r_same, ts_next)
+
+
+def propagate_regions(
+    substrate, region_arrays, *, rna_region_eff_len, rna_fl_mean, rna_sense_frac,
+    gdna_strand_overdispersion, rna_strand_overdispersion, count_gdna_frac, n_grid=200,
+) -> NodeDeconv:
+    """Per-region gDNA/RNA deconvolution by propagation (regions only; see :func:`propagate` for sides)."""
+    e_rna = np.asarray(rna_region_eff_len, dtype=np.float64)
+    fields = _compute_fields(substrate, region_arrays, e_rna, rna_fl_mean, rna_sense_frac,
+                             gdna_strand_overdispersion, rna_strand_overdispersion, n_grid)
+    return _solve_regions(substrate, region_arrays, fields, e_rna, rna_sense_frac,
+                          gdna_strand_overdispersion, rna_strand_overdispersion, count_gdna_frac, n_grid)
+
+
+def propagate(
+    substrate, region_arrays, *, rna_region_eff_len, rna_fl_mean, rna_sense_frac,
+    gdna_strand_overdispersion, rna_strand_overdispersion, count_gdna_frac, n_grid=200,
+):
+    """Propagation deconvolution for the region + both boundary sides → ``(regions, left, right)``.
+
+    Computes the per-strand nascent fields once and applies the region solve (with mature) and the
+    side solve (mature-free, crossing eff-length). Replaces ``deconv_regions`` + ``deconv_sides``.
+    """
+    e_rna = np.asarray(rna_region_eff_len, dtype=np.float64)
+    fields = _compute_fields(substrate, region_arrays, e_rna, rna_fl_mean, rna_sense_frac,
+                             gdna_strand_overdispersion, rna_strand_overdispersion, n_grid)
+    regions = _solve_regions(substrate, region_arrays, fields, e_rna, rna_sense_frac,
+                             gdna_strand_overdispersion, rna_strand_overdispersion, count_gdna_frac, n_grid)
+    left, right = _solve_sides(substrate, region_arrays, fields, rna_fl_mean, rna_sense_frac,
+                               gdna_strand_overdispersion, rna_strand_overdispersion, count_gdna_frac,
+                               n_grid)
+    return regions, left, right
 
 
 def _solve_ambig(u_pos, u_neg, kappa, nasc_pos, nasc_neg, seedable_pos, seedable_neg,
                  m_pos, m_neg, count_gdna_frac):
-    """AMBIG f_g: subtract seeded nascent + matures, then the node strand resolves the unseeded residual.
+    """f_g: subtract seeded nascent + matures, then the node strand resolves the unseeded residual.
 
     Seeded-strand RNA (nascent + mature) is distributed onto the observed counts by κ and subtracted; the
     residual = gDNA + the UNSEEDED strand's nascent. With one unseeded strand the residual tilt gives that
@@ -222,7 +276,6 @@ def _solve_ambig(u_pos, u_neg, kappa, nasc_pos, nasc_neg, seedable_pos, seedable
     """
     U = u_pos + u_neg
     k = float(kappa)
-    # seeded RNA per strand = nascent (if seedable) + mature; distribute by κ to observed pos/neg.
     rna_pos_s = np.where(seedable_pos, nasc_pos, 0.0) + m_pos
     rna_neg_s = np.where(seedable_neg, nasc_neg, 0.0) + m_neg
     seeded_pos = k * rna_pos_s + (1.0 - k) * rna_neg_s
@@ -234,10 +287,9 @@ def _solve_ambig(u_pos, u_neg, kappa, nasc_pos, nasc_neg, seedable_pos, seedable
     both = seedable_pos & seedable_neg
     neither = ~seedable_pos & ~seedable_neg
     denom = 2.0 * k - 1.0
-    # one unseeded strand: residual tilt is that strand's nascent; gDNA = residual − |nascent|.
     nasc_resid = np.where(np.abs(denom) > _EPS, np.abs(up2 - un2) / np.abs(denom), 0.0)
     gdna = np.clip(resid - nasc_resid, 0.0, None)
     f_g = np.where(U > 0.0, gdna / np.maximum(U, _EPS), 0.0)
-    f_g = np.where(both, np.clip(resid / np.maximum(U, _EPS), 0.0, 1.0), f_g)  # residual is all gDNA
-    f_g = np.where(neither, np.clip(count_gdna_frac, 0.0, 1.0), f_g)  # fallback: count density
+    f_g = np.where(both, np.clip(resid / np.maximum(U, _EPS), 0.0, 1.0), f_g)
+    f_g = np.where(neither, np.clip(count_gdna_frac, 0.0, 1.0), f_g)
     return np.clip(f_g, 0.0, 1.0)

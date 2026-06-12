@@ -211,11 +211,12 @@ def calibrate(
     # transport (priors._transport_boundary_flux), so they are not merely QC.
     if config.use_propagation:
         # Iterative propagation deconvolution (opt-in): resolve AMBIG loci by propagating per-strand
-        # nascent from seeds, the node strand finishing the residual. Replaces the contained-region
-        # combine; the boundary sides still use the combine for the flux transport (for now).
-        from .propagation import propagate_regions
+        # nascent from seeds, the node strand finishing the residual. Replaces BOTH the contained-region
+        # combine and the boundary-side combine (the sides are mature-free → the same solve with mature=0,
+        # so the flux transport reflects the AMBIG fix).
+        from .propagation import propagate
 
-        regions = propagate_regions(
+        regions, left, right = propagate(
             substrate,
             region_arrays,
             rna_region_eff_len=region_eff_len_rna,
@@ -238,18 +239,18 @@ def calibrate(
             n_grid=config.n_grid,
             info_scale=i0,
         )
-    left, right = deconv_sides(
-        substrate,
-        region_arrays,
-        node_density,
-        boundary_eff_len,
-        rna_sense_frac=rna_sense_frac,
-        gdna_strand_overdispersion=gdna_strand_overdispersion,
-        rna_strand_overdispersion=rna_strand_overdispersion,
-        deconv_quantile=config.gdna_deconv_quantile,
-        n_grid=config.n_grid,
-        info_scale=i0,
-    )
+        left, right = deconv_sides(
+            substrate,
+            region_arrays,
+            node_density,
+            boundary_eff_len,
+            rna_sense_frac=rna_sense_frac,
+            gdna_strand_overdispersion=gdna_strand_overdispersion,
+            rna_strand_overdispersion=rna_strand_overdispersion,
+            deconv_quantile=config.gdna_deconv_quantile,
+            n_grid=config.n_grid,
+            info_scale=i0,
+        )
 
     # Derive gdna_density_global (QC scalar) and the geometric gDNA length.
     derived = derive(regions, left, right, region_eff_len, boundary_eff_len, region_arrays.ref_id)
