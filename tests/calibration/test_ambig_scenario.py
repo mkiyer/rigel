@@ -1,0 +1,83 @@
+"""Regression lock for the AMBIG (overlapping opposite-strand) calibration fix.
+
+The strand-first redesign's headline fix: an **AMBIG** exon node (where a `+` and a `-` transcript
+overlap, so its own strand is undefined) must not read its nascent/mature RNA as gDNA. Before the fix
+it over-called gDNA (~0.12 of the contained mass at gDNA=0+nascent); the per-node gradient combine
+imputes the AMBIG region from its **strand-cleaned** flanking boundaries, dropping that to ~0.
+
+This is an end-to-end calibration test (sim → scan → calibrate) on a controlled toy genome: two
+overlapping opposite-strand transcripts form one AMBIG node (5000-6000), with single-strand flanks and
+separate multi-exon genes so the strand model trains. It locks two behaviours:
+
+  1. gDNA=0 + nascent: the AMBIG node's gDNA fraction is ~0 (no false gDNA from RNA the count clue
+     can't see) — the fix.
+  2. gDNA present, no nascent: the AMBIG node reads substantial gDNA — so (1) is not passing trivially.
+
+See `docs/calibration/redesign_phase3_plan.md` (FINAL OUTCOME) and `scripts/debug/phase3_ambig_scenario.py`.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+
+import numpy as np
+
+from rigel.calibration.calibrate import calibrate
+from rigel.calibration.fl import build_fl_models, gdna_fl_mass
+from rigel.calibration.region_arrays import RegionArrays
+from rigel.calibration.signature import TS_AMBIG
+from rigel.config import PipelineConfig
+from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer
+from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
+from rigel.splice import SpliceType
+
+
+def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float) -> float:
+    """Build the toy AMBIG scenario, calibrate, and return the AMBIG node's contained gDNA fraction."""
+    sc = Scenario("ambig_reg", genome_length=30000, seed=7, work_dir=work_dir)
+    # Overlapping opposite-strand pair → an AMBIG node at 5000-6000 with single-strand flanks.
+    sc.add_gene("gA", "+", [{"t_id": "TA", "exons": [(1000, 1500), (4000, 6000)], "abundance": 100}])
+    sc.add_gene("gB", "-", [{"t_id": "TB", "exons": [(5000, 7000), (10000, 10500)], "abundance": 100}])
+    # Standard multi-exon genes (both strands) so the strand model trains.
+    sc.add_gene("s1", "+", [{"t_id": "S1", "exons": [(12000, 12500), (13500, 14000), (15000, 15500)],
+                             "abundance": 120}])
+    sc.add_gene("s2", "-", [{"t_id": "S2", "exons": [(17000, 17500), (18500, 19000), (20000, 20500)],
+                             "abundance": 120}])
+    gd = (GDNAConfig(abundance=gdna_abundance, frag_mean=350, frag_std=100, frag_min=100, frag_max=1000)
+          if gdna_abundance > 0 else None)
+    res = sc.build_oracle(
+        n_fragments=8000,
+        sim_config=ReadSimConfig(frag_mean=250, frag_std=50, frag_min=80, frag_max=600,
+                                 read_length=100, strand_specificity=0.99, seed=7),
+        gdna_config=gd, nrna_abundance=float(nrna_abundance),
+    )
+    idx, bam = res.index, str(res.bam_path)
+    cfg = PipelineConfig()
+    scan = dataclasses.replace(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
+    _st, sm, flm, _buf, pl = scan_and_buffer(bam, idx, scan)
+    ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
+    fl = build_fl_models(global_counts=flm.global_model.counts,
+                         rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,
+                         gdna_counts=gdna_fl_mass(pl), max_size=flm.max_size)
+    result = calibrate(pl, ra, sm, fl.gdna_pmf, fl.rna_pmf, cfg.calibration)
+    sc.cleanup()
+
+    ambig = np.flatnonzero(np.asarray(ra.strand_class) == TS_AMBIG)
+    assert ambig.size >= 1, "the overlapping pair did not form an AMBIG node"
+    g = np.asarray(result.mass_gdna_contained)[ambig]
+    r = np.asarray(result.mass_rna_contained)[ambig]
+    return float(g.sum() / max(g.sum() + r.sum(), 1e-9))
+
+
+def test_ambig_no_false_gdna_from_nascent(tmp_path):
+    # gDNA=0 + nascent: the AMBIG node must NOT read the nascent/mature RNA as gDNA. The pre-fix
+    # over-call was ~0.12; the gradient combine + strand-cleaned boundary imputation drives it to ~0.
+    frac = _ambig_gdna_fraction(tmp_path / "none", gdna_abundance=0, nrna_abundance=30.0)
+    assert frac < 0.08, f"AMBIG gDNA fraction {frac:.3f} too high at gDNA=0+nascent (the fix should be ~0)"
+
+
+def test_ambig_reads_gdna_when_present(tmp_path):
+    # Sanity (so the test above is not trivially satisfied by always reading 0): with real gDNA and no
+    # nascent, the AMBIG node — imputed from its cleaned flanks — reads substantial gDNA.
+    frac = _ambig_gdna_fraction(tmp_path / "gdna", gdna_abundance=200, nrna_abundance=0.0)
+    assert frac > 0.2, f"AMBIG gDNA fraction {frac:.3f} too low with real gDNA present"
