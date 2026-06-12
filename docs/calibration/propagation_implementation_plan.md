@@ -141,17 +141,36 @@ Keep single-purpose: the graph (structure), the solve (one node's likelihood), t
 Reuse the BB posterior + the eff-length functions. Aim for the single-strand path to **byte-reduce** to the
 current strand result (the golden-stability guard).
 
+## 10.5. The AMBIG solve, refined by the #1 resolution (validated `nrna_rnd`)
+
+The user's #1 insight sharpens the AMBIG solve and is **validated** (`scripts/debug/phaseC_propagation_v2.py`,
+`nrna_rnd` locus 21: AMBIG mean error **0.056**, region 224 the v1 failure 0.34→0.96):
+
+> An AMBIG node has ≤2 strands; **one is always seedable** — a gene with single-strand stretches seeds
+> directly, and a *nested* gene's TSS/TES boundary exposes the OTHER gene's nascent as a 2-component
+> (strand-solvable) node. So **propagate the seedable strand's nascent, subtract it + both matures, and the
+> residual = `gDNA + the nested strand's nascent` → the node's OWN strand resolves it** (gDNA symmetric, the
+> remaining nascent tilted). Propagation supplies one strand; the node's strand finishes the other.
+
+This means the AMBIG solve **uses the node's own strand** (not `w=0`) after subtracting the propagated
+other-strand RNA — the strand does the final gDNA-vs-(one-strand-)nascent split it is good at. **Enrichment
+matters** (validated): the propagated nascent must be enrichment-class-matched — intron regions get the
+off-target (≈0, capture-depleted) nascent, exon regions the on-target nascent; carrying an exon seed's
+nascent to an intron region was the v1 failure.
+
 ## 11. REMAINING ISSUES — the focus for next
 
-1. **The gDNA-vs-balanced-nascent confound with no reachable seed.** A fully-nested gene (e.g. GENE0024 in
-   GENE0023) has *no* single-strand region → its nascent is unmeasurable by propagation, and the strand
-   can't separate it from gDNA in the AMBIG run. Characterize how often this occurs; define the fallback
-   (the gDNA crossing as a floor / report low confidence rather than invent). **Likely the dominant
-   residual.**
-2. **Precision / uncertainty model.** The exact precision a node emits (strand info `N·(2κ−1)²`, count
-   Poisson, the boundary-vs-region geometry) and how propagated densities combine + how precision **decays
-   with propagation distance**. Must be derived (no magic number). The prototype's count threshold is a
-   stand-in.
+1. **The gDNA-vs-balanced-nascent confound — RESOLVED (§10.5).** The user's insight (≤2 strands, one always
+   seedable, node-strand resolves the residual) dissolves it; validated on `nrna_rnd` (0.056). The genuine
+   residual is now narrower: a node where *neither* strand is seedable (a pathological all-AMBIG reference,
+   or both strands fully nested) → the global gDNA prior is the deferred ultimate fallback (issue #6).
+2. **Precision / uncertainty model — the now-primary issue.** The simple plan (issue #2 decision): the
+   strand weight `w = N·(2κ−1)²` governs; count/propagation gets `(1−w)`; a confident node strand is not
+   overridden by an uncertain propagated nascent. The prototype's nrna_none regression (0.042→0.117) is
+   exactly this: a no-nascent exon region's confident own-strand says "symmetric ⇒ gDNA," but a small
+   *spurious* seed-nascent (from the seed's strand-fit error) was over-subtracted. The fix is to weight the
+   propagated nascent by its precision (the seed's strand info, decayed with distance) so a confident node
+   strand wins. Derive it; no magic number. **This is the main thing to get right.**
 3. **Enrichment-matching via boundaries — confirm it's automatic.** Does drawing nascent from bounding
    boundaries fully replace explicit exon/intron class gating, or are there transitions (e.g. an AMBIG run
    spanning an exon→intron flip) where a region still pulls cross-enrichment nascent? Test on the toy sweep.
