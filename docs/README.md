@@ -20,6 +20,9 @@ The gDNA-vs-RNA deconvolution stage — the most active area.
 |---|---|
 | [`calibration_theory.md`](calibration/calibration_theory.md) | **authoritative** theory + acyclic inference + EM interface |
 | [`decoupled_calibration_design.md`](calibration/decoupled_calibration_design.md) | **current architecture**: the decoupled strand/count handoff (design + implementation guide) |
+| [`deconvolution_roadmap.md`](calibration/deconvolution_roadmap.md) | **ACTIVE ROADMAP** (three-signal complex-locus resolution): unspliced-crossing gDNA + spliced-crossing per-strand mature + strand-on-residual; mature subtraction; phased A–D plan. Operationalizes `deconvolution_generative_model.md` + `deconvolution_implementation.md` |
+| [`deconvolution_generative_model.md`](calibration/deconvolution_generative_model.md) | theory: the complete three-species (gDNA/nascent/mature) generative model + what is identifiable |
+| [`deconvolution_implementation.md`](calibration/deconvolution_implementation.md) | theory→code: the capture-aware S0–S5 blueprint (boundaries as the atoms) |
 | [`archive/joint_deconvolution.md`](calibration/archive/joint_deconvolution.md) | archived: the retired joint count×strand product (resurrection guide) |
 | [`CALIBRATION_TODO.md`](calibration/CALIBRATION_TODO.md) | live tracker of open issues |
 | [`remaining_phases.md`](calibration/remaining_phases.md) | **AUTHORITATIVE forward plan** — the remaining work as clean Phase 1 (count posterior) / 2 (FP quantile) / 3 (nascent removal), implementation-grade |

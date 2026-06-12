@@ -156,10 +156,19 @@ def main():
     print(f"TOTALS: oracle contained-unspl gDNA={og.sum():.0f} mRNA={om.sum():.0f}  "
           f"calib gDNA mass={calib_gdna.sum():.0f}  deficit={og.sum()-calib_gdna.sum():.0f}")
 
-    # worst regions by gDNA mass under-call (oracle gDNA - calib gDNA), among regions with real gDNA
     deficit = og - calib_gdna
-    order = np.argsort(-deficit)
-    print(f"\n--- {n_worst} regions with the largest gDNA UNDER-call (oracle_gdna - calib_gdna) ---")
+    print("  deficit by region class (oracle_gdna - calib_gdna):")
+    for cls_val, cls_name in [(TS_AMBIG, "AMBIG"), (TS_POS, "POS"), (TS_NEG, "NEG"), (TS_NONE, "NONE")]:
+        m = ts == cls_val
+        tot = deficit.sum()
+        print(f"    {cls_name:>5}: n={int(m.sum()):>5}  oracle_gdna={og[m].sum():>9.0f}  "
+              f"calib_gdna={calib_gdna[m].sum():>9.0f}  deficit={deficit[m].sum():>+9.0f}  "
+              f"({100*deficit[m].sum()/tot:>4.0f}% of total)")
+
+    # worst regions by gDNA mass under-call (oracle gDNA - calib gDNA); optional class filter (argv[3])
+    cls_filter = sys.argv[3] if len(sys.argv) > 3 else None
+    order = [i for i in np.argsort(-deficit) if cls_filter is None or SC[ts[i]] == cls_filter]
+    print(f"\n--- {n_worst} {cls_filter or 'all'} regions, largest gDNA UNDER-call (oracle_gdna - calib_gdna) ---")
     print("  (combine: reg_gf = w·gstr + (1−w)·gcount)")
     print(f"{'ref:start-end':>20}{'sig':>4}{'cls':>5}{'robs':>5}{'o_gdna':>7}{'o_mrna':>7}{'o_gfr':>6}"
           f"{'rawc':>7}{'gstr':>6}{'info':>8}{'w':>6}{'gcount':>7}{'reg_gf':>7}{'cgdna':>7}{'defic':>7}")
