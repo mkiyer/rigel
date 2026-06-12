@@ -287,6 +287,13 @@ class CalibrationConfig:
     #: good strand model; ``w→0`` at κ≈½ or thin — a no-op, the count floor. Validate on the suites.
     gdna_strand_info_scale: float = 10.0
 
+    #: Opt-in: use the iterative **propagation** deconvolution (``propagation.py``) for the contained-region
+    #: split instead of the per-node strand/count combine. Resolves AMBIG (overlapping opposite-strand) loci
+    #: by propagating per-strand nascent from seeds + the node strand (docs/calibration/
+    #: propagation_implementation_plan.md). Default ``False`` (production unchanged) while it is validated
+    #: end-to-end; flip after golden/suite confirm.
+    use_propagation: bool = False
+
     def __post_init__(self) -> None:
         if not (0.0 < float(self.gdna_deconv_quantile) < 1.0):
             raise ValueError(

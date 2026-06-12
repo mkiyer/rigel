@@ -209,17 +209,35 @@ def calibrate(
     # its own gDNA at high SS while a κ≈½ exon falls back to the imputation, smoothly. The boundary SIDES
     # are deconvolved the same way; their gDNA mass feeds the per-locus prior via the boundary-flux
     # transport (priors._transport_boundary_flux), so they are not merely QC.
-    regions = deconv_regions(
-        substrate,
-        region_arrays,
-        region_node_density,
-        rna_sense_frac=rna_sense_frac,
-        gdna_strand_overdispersion=gdna_strand_overdispersion,
-        rna_strand_overdispersion=rna_strand_overdispersion,
-        deconv_quantile=config.gdna_deconv_quantile,
-        n_grid=config.n_grid,
-        info_scale=i0,
-    )
+    if config.use_propagation:
+        # Iterative propagation deconvolution (opt-in): resolve AMBIG loci by propagating per-strand
+        # nascent from seeds, the node strand finishing the residual. Replaces the contained-region
+        # combine; the boundary sides still use the combine for the flux transport (for now).
+        from .propagation import propagate_regions
+
+        regions = propagate_regions(
+            substrate,
+            region_arrays,
+            rna_region_eff_len=region_eff_len_rna,
+            rna_fl_mean=rna_fl_mean,
+            rna_sense_frac=rna_sense_frac,
+            gdna_strand_overdispersion=gdna_strand_overdispersion,
+            rna_strand_overdispersion=rna_strand_overdispersion,
+            count_gdna_frac=node_density.count_gdna_frac,
+            n_grid=config.n_grid,
+        )
+    else:
+        regions = deconv_regions(
+            substrate,
+            region_arrays,
+            region_node_density,
+            rna_sense_frac=rna_sense_frac,
+            gdna_strand_overdispersion=gdna_strand_overdispersion,
+            rna_strand_overdispersion=rna_strand_overdispersion,
+            deconv_quantile=config.gdna_deconv_quantile,
+            n_grid=config.n_grid,
+            info_scale=i0,
+        )
     left, right = deconv_sides(
         substrate,
         region_arrays,
