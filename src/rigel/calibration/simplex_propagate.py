@@ -40,7 +40,7 @@ from .signature import RegionType, TS_AMBIG, TS_NEG, TS_NONE, TS_POS, coarse_typ
 from .simplex import init_from_signature, solve_node
 from .strand_deconv import NodeDeconv, strand_posterior_gdna_frac
 
-__all__ = ["propagate_simplex"]
+__all__ = ["deconv_regions_simplex", "propagate_simplex"]
 
 _EPS = 1.0e-9
 _DIFFUSE_VAR = 1.0e12  # diffuse prior variance for an unobserved chain start
@@ -144,19 +144,24 @@ def _smooth_density(rho_obs, rho_prec, ref_id, on_target, process_var):
     return rho_post, prec_post
 
 
-def _solve_view(view, allow_pos, allow_neg, rho_post, prec_post, eff_len, kappa, od_g, od_r,
+def _solve_view(view, allow_pos, allow_neg, rho_post, beta, eff_len, kappa, od_g, od_r,
                 gdna_prior_count, n_grid):
-    """Solve one view's pie (region-contained or a boundary side) given the smoothed ρ_g as count evidence."""
+    """Solve one view's pie: the node's own strand + the smoothed count density at trust ``β``.
+
+    PHASE-1 count trust: ``solve_node``'s count term gets the **fixed effective precision ``β``** (the
+    successor to the old hard-capped ``I₀``), not the count's own variance — so the strand
+    (curvature ``N·(2κ−1)²``, vanishing at κ=½) governs single-strand nodes where it is informative and
+    the count cleanly takes over where the strand is silent (κ=½ / AMBIG). See count_trust_design.md.
+    """
     u_pos = view.n_unspliced_pos.astype(np.float64)
     u_neg = view.n_unspliced_neg.astype(np.float64)
     U = u_pos + u_neg
     L = np.maximum(np.asarray(eff_len, dtype=np.float64), _EPS)
     mass_unspl = np.asarray(view.mass_unspliced, dtype=np.float64)
     mass_spliced = np.asarray(view.mass_spliced, dtype=np.float64)
-    # smoothed density → count evidence on f_g: f_g ≈ ρ_g·L/U, var(f_g) = (L/U)²/prec_post.
     with np.errstate(divide="ignore", invalid="ignore"):
         count_frac = np.where(U > 0.0, np.clip(rho_post * L / np.maximum(U, _EPS), 0.0, 1.0), 0.0)
-        count_prec = np.where(U > 0.0, prec_post * (U / L) ** 2, 0.0)
+    count_prec = np.where(U > 0.0, float(beta), 0.0)  # fixed count trust β (phase-1)
     sol = solve_node(
         u_pos, u_neg, kappa=kappa, count_gdna_frac=count_frac, count_precision=count_prec,
         allow_pos=allow_pos, allow_neg=allow_neg, strand_od_gdna=od_g, strand_od_rna=od_r,
@@ -166,6 +171,54 @@ def _solve_view(view, allow_pos, allow_neg, rho_post, prec_post, eff_len, kappa,
     return NodeDeconv(
         gdna_mass=f_g * mass_unspl, rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
         gdna_frac=f_g, gdna_frac_var=sol.f_g_var,
+    )
+
+
+def deconv_regions_simplex(
+    substrate, region_arrays, count_gdna_frac, *, rna_sense_frac, gdna_strand_overdispersion=0.0,
+    rna_strand_overdispersion=0.0, count_trust_beta=10.0, gdna_prior_count=0.0, n_grid=60,
+):
+    """PHASE-1 per-region simplex deconvolution — the per-node β combine, **no spatial propagation**.
+
+    Each region's pie is solved by :func:`simplex.solve_node` combining its **own strand** (``u_pos/u_neg``;
+    intrinsic precision ``N·(2κ−1)²``, vanishing at κ=½) with the **count signal** ``count_gdna_frac`` (the
+    splice-upgraded, count-mean-bias-corrected gDNA fraction) at the **fixed trust ``β=count_trust_beta``**.
+    The strand governs single-strand nodes where informative; the count governs at κ=½ / AMBIG. This is the
+    simplex/pie successor to the old ``w=I/(I+I₀)`` combine (count precision hard-capped at ``I₀``) — it does
+    **not** spatially smooth (the count-density RTS smeared unrelated exons; strand→AMBIG propagation is a
+    later phase). See docs/calibration/count_trust_design.md.
+    """
+    ts = np.asarray(region_arrays.strand_class)
+    c = substrate.contained
+    u_pos = c.n_unspliced_pos.astype(np.float64)
+    u_neg = c.n_unspliced_neg.astype(np.float64)
+    U = u_pos + u_neg
+    mass_unspl = np.asarray(c.mass_unspliced, dtype=np.float64)
+    mass_spliced = np.asarray(c.mass_spliced, dtype=np.float64)
+    cf = np.clip(np.asarray(count_gdna_frac, dtype=np.float64), 0.0, 1.0)
+
+    # Default = the count signal (the count governs where the strand is undefined: AMBIG, intergenic, κ=½).
+    # A region is STRAND-OBSERVABLE iff its transcript strand is defined (POS/NEG); for those the simplex
+    # solve combines the OWN strand (precision N·(2κ−1)², vanishing at κ=½) with the count at trust β —
+    # the strand governs where informative. AMBIG (overlapping opposite strands → no valid sense) and
+    # intergenic stay count-only, exactly as the production combine (w=0 there).
+    f_g = np.where(U > 0.0, cf, 0.0)
+    f_g_var = np.zeros_like(f_g)
+    obs = np.flatnonzero(((ts == TS_POS) | (ts == TS_NEG)) & (U > 0.0))
+    if obs.size:
+        allow_pos = ts[obs] == TS_POS
+        allow_neg = ts[obs] == TS_NEG
+        sol = solve_node(
+            u_pos[obs], u_neg[obs], kappa=float(rna_sense_frac), count_gdna_frac=cf[obs],
+            count_precision=float(count_trust_beta), allow_pos=allow_pos, allow_neg=allow_neg,
+            strand_od_gdna=gdna_strand_overdispersion, strand_od_rna=rna_strand_overdispersion,
+            gdna_prior_count=gdna_prior_count, n_grid=n_grid,
+        )
+        f_g[obs] = sol.f_g
+        f_g_var[obs] = sol.f_g_var
+    return NodeDeconv(
+        gdna_mass=f_g * mass_unspl, rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
+        gdna_frac=f_g, gdna_frac_var=f_g_var,
     )
 
 
@@ -227,38 +280,47 @@ def _side_allow(ts_self, ts_other):
 
 
 def propagate_simplex(
-    substrate, region_arrays, *, gdna_region_eff_len, gdna_boundary_side_eff_len, gdna_fl_mean,
-    rna_sense_frac, gdna_strand_overdispersion=0.0, rna_strand_overdispersion=0.0, gdna_prior_count=0.5,
-    process_var=None, n_grid=60,
+    substrate, region_arrays, *, count_gdna_frac, gdna_region_eff_len, gdna_boundary_side_eff_len,
+    gdna_fl_mean, rna_sense_frac, gdna_strand_overdispersion=0.0, rna_strand_overdispersion=0.0,
+    gdna_prior_count=0.5, count_trust_beta=10.0, process_var=None, n_grid=60,
 ):
-    """Forward–backward gDNA-density propagation → ``(regions, left, right)`` :class:`NodeDeconv`.
+    """Per-node simplex deconvolution with the count signal at trust ``β`` → ``(regions, left, right)``.
 
-    See the module docstring. The RTS per-hop coupling variance ``Q`` is derived per node from the triplet
-    ``var~mean`` curve (:func:`_coupling_process_var`); where the curve is undefined (too few anchors) it
-    falls back to the median local observation variance. An explicit ``process_var`` overrides the
-    derivation (a scalar or per-node array — used by tests / for ablation).
+    PHASE-1 (count_trust_design.md). The **count signal** is the splice-upgraded ``count_gdna_frac`` (the
+    count-mean-bias-corrected gDNA fraction), converted to a density and **smoothed along
+    (reference, enrichment-class) chains** by the RTS (the propagation of the count magnitude). Each node's
+    pie is then solved by :func:`simplex.solve_node`, combining the node's **own strand** (intrinsic
+    precision ``N·(2κ−1)²``) with that smoothed count at the **fixed trust ``β = count_trust_beta``** — so
+    the strand governs where informative and the count takes over where the strand is silent (κ=½ / AMBIG).
+
+    (Phase 2 will propagate single-strand neighbours' *strand-derived* densities into AMBIG nodes; phase
+    3–4 make ``β`` per-node / derived. The RTS ``Q`` is the triplet ``var~mean`` coupling variance;
+    ``process_var`` overrides it for tests/ablation.)
     """
-    ts = np.asarray(region_arrays.strand_class)
     ref_id = np.asarray(region_arrays.ref_id)
     sig = np.asarray(region_arrays.signature)
+    ts = np.asarray(region_arrays.strand_class)
     kappa = float(rna_sense_frac)
     od_g, od_r = gdna_strand_overdispersion, rna_strand_overdispersion
+    count_gdna_frac = np.asarray(count_gdna_frac, dtype=np.float64)
 
-    rho_obs, rho_prec, _U, _L = _local_gdna_density(
-        substrate, region_arrays, gdna_region_eff_len, kappa, od_g, od_r, n_grid
-    )
-    seen = rho_prec > 0.0
-    fallback_q = float(np.median(1.0 / rho_prec[seen])) if seen.any() else 1.0
-    if process_var is None:
-        # Q from the count var~mean curve; NaN (undefined fit) → the median-observation-variance fallback.
-        q = _coupling_process_var(substrate, region_arrays, gdna_region_eff_len, gdna_fl_mean)
-        process_var = np.where(np.isfinite(q) & (q > 0.0), q, fallback_q)
+    # The count signal as a density (the propagated magnitude), + the var~mean coupling/observation variance.
+    c = substrate.contained
+    mass = np.asarray(c.mass_unspliced, dtype=np.float64)
+    u = c.n_unspliced_pos.astype(np.float64) + c.n_unspliced_neg.astype(np.float64)
+    L = np.maximum(np.asarray(gdna_region_eff_len, dtype=np.float64), _EPS)
+    sigma_d2 = _coupling_process_var(substrate, region_arrays, gdna_region_eff_len, gdna_fl_mean)
+    fin = np.isfinite(sigma_d2) & (sigma_d2 > 0.0)
+    fallback_var = float(np.median(sigma_d2[fin])) if fin.any() else 1.0
+    rho_count = np.where(u > 0.0, np.clip(count_gdna_frac, 0.0, 1.0) * mass / L, np.nan)
+    prec_obs = np.where(u > 0.0, 1.0 / np.where(fin, sigma_d2, fallback_var), 0.0)
+    q = process_var if process_var is not None else np.where(fin, sigma_d2, fallback_var)
     on_target = coarse_type_array(sig) == int(RegionType.EXON)
-    rho_post, prec_post = _smooth_density(rho_obs, rho_prec, ref_id, on_target, process_var)
+    rho_post, _prec_post = _smooth_density(rho_count, prec_obs, ref_id, on_target, q)
 
     init = init_from_signature(ts)
     regions = _solve_view(
-        substrate.contained, init.allow_pos, init.allow_neg, rho_post, prec_post,
+        c, init.allow_pos, init.allow_neg, rho_post, count_trust_beta,
         gdna_region_eff_len, kappa, od_g, od_r, gdna_prior_count, n_grid,
     )
 
@@ -276,9 +338,9 @@ def propagate_simplex(
     side_eff = np.asarray(gdna_boundary_side_eff_len, dtype=np.float64)
 
     lp, ln = _side_allow(ts, ts_prev)
-    left = _solve_view(substrate.left, lp, ln, rho_post, prec_post, side_eff, kappa, od_g, od_r,
+    left = _solve_view(substrate.left, lp, ln, rho_post, count_trust_beta, side_eff, kappa, od_g, od_r,
                        gdna_prior_count, n_grid)
     rp, rn = _side_allow(ts, ts_next)
-    right = _solve_view(substrate.right, rp, rn, rho_post, prec_post, side_eff, kappa, od_g, od_r,
+    right = _solve_view(substrate.right, rp, rn, rho_post, count_trust_beta, side_eff, kappa, od_g, od_r,
                         gdna_prior_count, n_grid)
     return regions, left, right

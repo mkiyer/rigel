@@ -210,22 +210,35 @@ def calibrate(
     # are deconvolved the same way; their gDNA mass feeds the per-locus prior via the boundary-flux
     # transport (priors._transport_boundary_flux), so they are not merely QC.
     if config.use_propagation:
-        # Iterative propagation deconvolution (opt-in): resolve AMBIG loci by propagating per-strand
-        # nascent from seeds, the node strand finishing the residual. Replaces BOTH the contained-region
-        # combine and the boundary-side combine (the sides are mature-free → the same solve with mature=0,
-        # so the flux transport reflects the AMBIG fix).
-        from .propagation import propagate
+        # PHASE-1 simplex region deconvolution (opt-in, count_trust_design.md): solve_node combines each
+        # region's OWN strand (precision N·(2κ−1)², vanishing at κ=½) with the SPLICE-UPGRADED count clue
+        # (region_count_frac) at the fixed count trust β=config.count_trust_beta — the simplex/pie successor
+        # to the old w=I/(I+I₀) (count precision hard-capped at I₀), now with no-over-subtraction + the gDNA
+        # prior. No spatial propagation yet (it smeared unrelated exons; strand→AMBIG propagation is a later
+        # phase). The boundary sides keep the production combine (deconv_sides) → flux transport unchanged.
+        from .simplex_propagate import deconv_regions_simplex
 
-        regions, left, right = propagate(
+        regions = deconv_regions_simplex(
             substrate,
             region_arrays,
-            rna_region_eff_len=region_eff_len_rna,
-            rna_fl_mean=rna_fl_mean,
+            region_count_frac,
             rna_sense_frac=rna_sense_frac,
             gdna_strand_overdispersion=gdna_strand_overdispersion,
             rna_strand_overdispersion=rna_strand_overdispersion,
-            count_gdna_frac=node_density.count_gdna_frac,
+            count_trust_beta=config.count_trust_beta,
             n_grid=config.n_grid,
+        )
+        left, right = deconv_sides(
+            substrate,
+            region_arrays,
+            node_density,
+            boundary_eff_len,
+            rna_sense_frac=rna_sense_frac,
+            gdna_strand_overdispersion=gdna_strand_overdispersion,
+            rna_strand_overdispersion=rna_strand_overdispersion,
+            deconv_quantile=config.gdna_deconv_quantile,
+            n_grid=config.n_grid,
+            info_scale=i0,
         )
     else:
         regions = deconv_regions(

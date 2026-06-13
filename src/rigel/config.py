@@ -294,6 +294,16 @@ class CalibrationConfig:
     #: end-to-end; flip after golden/suite confirm.
     use_propagation: bool = False
 
+    #: **Count-trust ``β``** (the simplex propagation path, ``simplex_propagate``). The effective precision
+    #: of the count log-likelihood term in the per-node pie solve — how much to believe the (often biased
+    #: under capture) count signal relative to the strand. The strand's precision ``I=N·(2κ−1)²`` vanishes
+    #: at κ=½, so ``β`` sets the *absolute* count trust: small enough that an excellent strand (κ=0.99)
+    #: governs single-strand nodes, large enough that the count cleanly takes over where the strand is
+    #: silent (κ=½). PHASE-1 placeholder — a single hard-coded value (the successor to the hard-coded
+    #: ``I₀``=``gdna_strand_info_scale``); phases 2–4 make it per-node (by count-observability /
+    #: ``var~mean`` / capture-class) and derive it. See docs/calibration/count_trust_design.md.
+    count_trust_beta: float = 10.0
+
     def __post_init__(self) -> None:
         if not (0.0 < float(self.gdna_deconv_quantile) < 1.0):
             raise ValueError(
