@@ -176,17 +176,25 @@ def _solve_view(view, allow_pos, allow_neg, rho_post, beta, eff_len, kappa, od_g
 
 def deconv_regions_simplex(
     substrate, region_arrays, count_gdna_frac, *, rna_sense_frac, gdna_strand_overdispersion=0.0,
-    rna_strand_overdispersion=0.0, count_trust_beta=10.0, gdna_prior_count=0.0, n_grid=60,
+    rna_strand_overdispersion=0.0, count_trust_beta=10.0, n_grid=60,
 ):
-    """PHASE-1 per-region simplex deconvolution — the per-node β combine, **no spatial propagation**.
+    """Per-region deconvolution — the elegant **inverse-variance fusion** of strand + count.
 
-    Each region's pie is solved by :func:`simplex.solve_node` combining its **own strand** (``u_pos/u_neg``;
-    intrinsic precision ``N·(2κ−1)²``, vanishing at κ=½) with the **count signal** ``count_gdna_frac`` (the
-    splice-upgraded, count-mean-bias-corrected gDNA fraction) at the **fixed trust ``β=count_trust_beta``**.
-    The strand governs single-strand nodes where informative; the count governs at κ=½ / AMBIG. This is the
-    simplex/pie successor to the old ``w=I/(I+I₀)`` combine (count precision hard-capped at ``I₀``) — it does
-    **not** spatially smooth (the count-density RTS smeared unrelated exons; strand→AMBIG propagation is a
-    later phase). See docs/calibration/count_trust_design.md.
+    Each strand-observable (POS/NEG) region's gDNA fraction is the precision-weighted combine of the
+    **strand** estimate ``g_strand`` (Beta-Binomial posterior, precision ``I = N·(2κ−1)²`` — vanishing at
+    κ=½) and the **count** estimate ``g_count`` (the splice-upgraded ``count_gdna_frac``, precision the
+    count-trust ``β = count_trust_beta``)::
+
+        f_g = w·g_strand + (1−w)·g_count,   w = I/(I+β)
+
+    This is the log-likelihood fusion of two Gaussian signals; ``β`` is the explicit count penalty (the
+    successor to the hard-coded ``I₀``). The strand governs single-strand nodes where informative
+    (w→1 at κ=0.99, depth); the count is the **fallback** (w→0 at κ=½ ⇒ count governs). AMBIG (no valid
+    sense) / intergenic are **count-only**. Identical to the production ``deconv_regions`` combine at
+    ``β=I₀`` — **parity by construction** — but `β`-parameterized as the integration lever the propagation
+    sweep will reuse. (The earlier grid-MAP solver biased `f_g` low via the strand posterior's
+    overdispersion skew; the inverse-variance combine is exact and proven.) The pie's no-over-subtraction
+    safety is intrinsic (`f_g` clipped to [0,1]).
     """
     ts = np.asarray(region_arrays.strand_class)
     c = substrate.contained
@@ -195,30 +203,24 @@ def deconv_regions_simplex(
     U = u_pos + u_neg
     mass_unspl = np.asarray(c.mass_unspliced, dtype=np.float64)
     mass_spliced = np.asarray(c.mass_spliced, dtype=np.float64)
-    cf = np.clip(np.asarray(count_gdna_frac, dtype=np.float64), 0.0, 1.0)
+    kappa = float(rna_sense_frac)
+    g_count = np.clip(np.asarray(count_gdna_frac, dtype=np.float64), 0.0, 1.0)
 
-    # Default = the count signal (the count governs where the strand is undefined: AMBIG, intergenic, κ=½).
-    # A region is STRAND-OBSERVABLE iff its transcript strand is defined (POS/NEG); for those the simplex
-    # solve combines the OWN strand (precision N·(2κ−1)², vanishing at κ=½) with the count at trust β —
-    # the strand governs where informative. AMBIG (overlapping opposite strands → no valid sense) and
-    # intergenic stay count-only, exactly as the production combine (w=0 there).
-    f_g = np.where(U > 0.0, cf, 0.0)
-    f_g_var = np.zeros_like(f_g)
+    f_g = np.where(U > 0.0, g_count, 0.0)  # default: count governs (AMBIG / intergenic / no strand)
     obs = np.flatnonzero(((ts == TS_POS) | (ts == TS_NEG)) & (U > 0.0))
     if obs.size:
-        allow_pos = ts[obs] == TS_POS
-        allow_neg = ts[obs] == TS_NEG
-        sol = solve_node(
-            u_pos[obs], u_neg[obs], kappa=float(rna_sense_frac), count_gdna_frac=cf[obs],
-            count_precision=float(count_trust_beta), allow_pos=allow_pos, allow_neg=allow_neg,
-            strand_od_gdna=gdna_strand_overdispersion, strand_od_rna=rna_strand_overdispersion,
-            gdna_prior_count=gdna_prior_count, n_grid=n_grid,
+        sense = np.where(ts[obs] == TS_NEG, u_neg[obs], u_pos[obs])  # orient to transcript sense
+        anti = U[obs] - sense
+        g_strand, _ = strand_posterior_gdna_frac(
+            sense, anti, kappa, gdna_strand_overdispersion=gdna_strand_overdispersion,
+            rna_strand_overdispersion=rna_strand_overdispersion, n_grid=n_grid,
         )
-        f_g[obs] = sol.f_g
-        f_g_var[obs] = sol.f_g_var
+        info = U[obs] * (2.0 * kappa - 1.0) ** 2  # strand information I = N·(2κ−1)²
+        w = info / (info + float(count_trust_beta))  # strand-trust weight; count gets (1−w)
+        f_g[obs] = np.clip(w * g_strand + (1.0 - w) * g_count[obs], 0.0, 1.0)
     return NodeDeconv(
         gdna_mass=f_g * mass_unspl, rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
-        gdna_frac=f_g, gdna_frac_var=f_g_var,
+        gdna_frac=f_g, gdna_frac_var=np.zeros_like(f_g),
     )
 
 
