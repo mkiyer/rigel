@@ -193,11 +193,22 @@ coupling mean shift (the one genuine modelling risk, §6 issue A). The architect
 
 **Open issues / potential problems (flagged for review):**
 
-- **A — capture-aware coupling (the central risk).** gDNA density is *not* continuous at exon edges under
-  hybrid capture (capture enriches exon gDNA ~×). A naive `ρ_g,i≈ρ_g,j` coupling would smear exon gDNA into
-  introns (or vice versa). The coupling must carry the **enrichment ratio** as a mean shift, or couple only
-  *within* an enrichment class. This is exactly the capture logic in `density_model` today; phase-3 must
-  port it into `φ_{ij}`. **This is the make-or-break modelling step.**
+- **A — couple density, not fraction; state in fractions (RESOLVED in review).** The design review settled
+  the make-or-break question. **State = fraction** (the pie): a propagated value can only *redistribute* a
+  node's observed `U`, never inject phantom mass — the capping / no-injection safety. **Coupling = gDNA
+  density** `ρ_g = f_g·U/L`, NOT the fraction. Reason: `f_g = ρ_g/(ρ_g+ρ_RNA)` is contaminated by the local
+  RNA expression (the 10000×-variable, non-propagating quantity), so it is node-specific; the gDNA *density*
+  is the library-wide contamination property (piecewise-uniform by enrichment class), so it is the
+  transferable quantity. Decisive case: two adjacent on-target exons with the *same* `ρ_g` but very
+  different expression have very different `f_g` (e.g. 0.05 vs 0.60) — propagating the *fraction* would call
+  the low-expression AMBIG exon 5% gDNA (**exactly the gDNA→RNA leak we are fixing**, and capping does not
+  save a high-count node); propagating the *density* recovers ~0.60. So capping bounds blast-radius (thin
+  nodes), density-coupling removes the bias (high-count nodes) — complementary.
+  The capture discontinuity (exon enriched, intron/intergenic baseline) is handled by **enrichment-matching
+  the density**: exon-class and off-target-class form two interleaved chains (each still a tree → still
+  exact in two sweeps), OR a single genomic chain coupling density in **off-target-equivalent units** (a
+  per-node capture factor divided out — lean: single chain, reuses increment-2 adjacency). This is where the
+  `density_model` capture logic ports into `φ_{ij}`.
 - **B — boundary node = one or two?** The accumulator gives two side views (region `r`'s right, region
   `r+1`'s left) of the *same* crossing fragments. Model the boundary as **one** chain node (its observation
   = the shared crossing counts), coupled to each flank with that flank's eff-length? Or keep two nodes? One
@@ -208,17 +219,21 @@ coupling mean shift (the one genuine modelling risk, §6 issue A). The architect
 - **D — one-sided & simplex factors break Gaussianity.** The spliced lower bound (inequality) and the
   simplex constraint are non-Gaussian → the **grid message is the right first choice** (it represents them
   exactly); a Gaussian-message version would need EP-style moment matching. Defer Gaussian to phase 7.
-- **E — sequential sweep, parallel chains.** The forward/backward scan is inherently sequential *along* a
-  chain (each message depends on the previous), but **chains (loci/references) are independent** → the
-  parallelism the user envisions is across chains, not within. Cost is O(n · P) per sweep (P = lattice
-  points), linear in nodes — cheap.
-- **F — circularity of the count `var~mean` fit.** The coupling variance is fitted from the deconvolution,
-  which depends on the coupling. The user wants **one pass**: fit `σ²_couple` once from the seeds
-  (intergenic + single-strand) *before* the sweep, then propagate once. Note the one-pass approximation;
-  an outer EM loop is possible but out of scope.
-- **G — boundary transport subsumed?** Boundary nodes now carry gDNA mass directly; the post-hoc
-  `priors._transport_boundary_flux` may become "read the boundary node's gDNA" rather than a separate mass
-  shift. Keep transport as-is for phase 3 (no-regression); revisit in phase 6.
+- **E — parallel sweeps + parallel chains (confirmed).** The forward and backward sweeps are **mutually
+  independent** (neither consumes the other's messages; the belief combines them only at the end), so the
+  two directions run fully in parallel. Independent chains (loci/references) parallelize too. Only the scan
+  *within* one direction is sequential (message `i` needs message `i−1`). Cost O(n · P) per sweep
+  (P = lattice points), linear in nodes — cheap.
+- **F — circularity of the count `var~mean` fit (iteration is sound).** The coupling variance is fitted from
+  the deconvolution, which depends on the coupling. Start **one pass**: fit `σ²_couple` from the seeds
+  (intergenic + single-strand) *before* the sweep, propagate once. The outer loop (fit `var~mean` from the
+  deconvolution, re-propagate) is **theoretically sound** — iteratively-reweighted estimation / a poor-man's
+  EM, typically settling in 1–2 outer passes — so it is a principled extension, not a hack, if one pass
+  under-fits.
+- **G — boundary transport is a DISTINCT operation (not subsumed).** The simplex only *reproportions* a
+  node's mass in place (changes the pie's slice sizes); boundary transport physically *moves* mass from one
+  side of a boundary to the other. Different operations — keep `priors._transport_boundary_flux` as-is
+  (no-regression). Coupling the two so they run together is good future work (phase 6+).
 - **H — seed delta vs sharp factor.** Pin intergenic `f_g=1` as a near-delta local factor (numerically a
   very sharp grid spike), so the §3 "signal dies into a seed" behaviour emerges from the math rather than a
   special case in the loop.
