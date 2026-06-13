@@ -11,7 +11,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rigel.calibration.density_model import _count_fraction_variance, _loess
+from rigel.calibration.density_model import (
+    _count_fraction_variance, _loess, density_variance_curve,
+)
 
 
 def test_loess_recovers_a_line():
@@ -95,6 +97,39 @@ def test_variance_capped_at_bernoulli_max():
         d_left=np.array([np.nan]), d_right=np.array([np.nan]), n_anchor=np.array([0.0]),
     )
     assert var[0] == pytest.approx(0.9 * 0.1)  # capped, not 0.9² · 1.0
+
+
+def test_density_variance_curve_two_point_reduces_to_quarter_sqdiff():
+    # The shared curve with only the two boundaries must recover ¼(d_L−d_R)² at the fit nodes:
+    # plant a clean var∝mean² (raw_var = ¼(d_L−d_R)² = c·μ²) and check the curve returns ≈ c·density².
+    n = 40
+    mu = np.linspace(1.0, 50.0, n)
+    c = 0.02
+    half = np.sqrt(c) * mu  # so ¼(d_L−d_R)² = (half)² = c·μ²
+    dl, dr = mu + half, mu - half
+    ok = np.ones(n, bool)
+    s2 = density_variance_curve(mu, d_left=dl, d_right=dr, left_ok=ok, right_ok=ok)
+    np.testing.assert_allclose(s2, c * mu**2, rtol=0.2)
+
+
+def test_density_variance_curve_triplet_uses_three_points():
+    # Adding the count-observable contained observation makes each fit node a 3-point sample. A node
+    # whose contained sits between agreeing boundaries has LOWER disagreement than the pair alone would
+    # imply only if contained agrees; here contained disagrees, so the triplet variance is well-defined
+    # and finite (the curve fits on 3-point samples, not just pairs).
+    n = 40
+    mu = np.linspace(1.0, 50.0, n)
+    dl, dr = mu * 1.1, mu * 0.9
+    contained = mu * 1.0  # third observation at the mean
+    ok = np.ones(n, bool)
+    s2_pair = density_variance_curve(mu, d_left=dl, d_right=dr, left_ok=ok, right_ok=ok)
+    s2_trip = density_variance_curve(
+        mu, d_left=dl, d_right=dr, left_ok=ok, right_ok=ok, contained=contained, contained_ok=ok
+    )
+    assert np.all(np.isfinite(s2_trip))
+    # the triplet's variance-of-the-mean (k=3) is smaller than the pair's (k=2) when the extra point
+    # sits at the mean (more observations → tighter mean estimate).
+    assert np.nanmean(s2_trip) < np.nanmean(s2_pair)
 
 
 def test_too_few_two_anchor_falls_back_to_floor():

@@ -130,6 +130,66 @@ def _loess(x: np.ndarray, y: np.ndarray, xq: np.ndarray, frac: float, robust_ite
     return fit_at(xq)
 
 
+def _node_disagreement(obs: list[np.ndarray], ok: list[np.ndarray]):
+    """Per-node ``(μ̂, raw_var, k)`` over a node's available clean density observations.
+
+    ``obs`` are candidate density estimates (e.g. ``d_left``, ``d_right``, ``contained``), each gated by
+    its boolean mask in ``ok``. ``μ̂`` is the mean of the available (``ok``) observations; ``raw_var`` is
+    the **variance of that mean**, ``s²/k`` with the sample variance ``s² = Σ(x−μ̂)²/(k−1)``. For ``k=2``
+    this is exactly ``¼(x₁−x₂)²`` — identical to the original 2-boundary disagreement.
+    """
+    vals = np.stack(obs, axis=0)
+    msk = np.stack([np.asarray(m, dtype=bool) for m in ok], axis=0)
+    k = msk.sum(axis=0).astype(np.float64)
+    ksafe = np.maximum(k, 1.0)
+    mu = np.where(msk, vals, 0.0).sum(axis=0) / ksafe
+    dev2 = np.where(msk, (vals - mu) ** 2, 0.0).sum(axis=0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        s2 = np.where(k > 1.0, dev2 / np.maximum(k - 1.0, _EPS), np.nan)
+        raw_var = s2 / ksafe
+    return mu, raw_var, k
+
+
+def density_variance_curve(
+    density: np.ndarray,
+    *,
+    d_left: np.ndarray,
+    d_right: np.ndarray,
+    left_ok: np.ndarray,
+    right_ok: np.ndarray,
+    contained: np.ndarray | None = None,
+    contained_ok: np.ndarray | None = None,
+    frac: float = _LOESS_SPAN,
+) -> np.ndarray:
+    """Robust log-log LOESS ``σ²_density(μ)`` from per-node disagreement among clean gDNA observations.
+
+    With only the two boundaries (``contained=None``) each fit node is the 2-anchor ``¼(d_L−d_R)²`` at
+    ``½(d_L+d_R)`` — **identical to the original 2-boundary model**. Passing the count-observable
+    ``contained`` adds the ``{left, contained, right}`` **triplet** (the density gradient across the
+    region's span — a richer process-variance estimator), reducing to the pair where ``contained`` is
+    absent or RNA-contaminated. The fit (``log σ²_density ~ log μ̂`` via :func:`_loess`) is shared by the
+    count posterior variance (:func:`_count_fraction_variance`) and the propagation coupling variance
+    (``simplex_propagate``). Returns ``σ²_density`` per node (``NaN`` where ``density≤0`` or fewer than
+    ``_LOESS_MIN_FIT`` fit points).
+    """
+    r = density.shape[0]
+    obs = [np.asarray(d_left, dtype=np.float64), np.asarray(d_right, dtype=np.float64)]
+    ok = [np.asarray(left_ok, dtype=bool), np.asarray(right_ok, dtype=bool)]
+    if contained is not None:
+        obs.append(np.asarray(contained, dtype=np.float64))
+        ok.append(np.zeros(r, dtype=bool) if contained_ok is None else np.asarray(contained_ok, bool))
+    mu, raw_var, k = _node_disagreement(obs, ok)
+    fit_sel = (k >= 2.0) & np.isfinite(mu) & (mu > _EPS) & np.isfinite(raw_var) & (raw_var > _EPS)
+    sigma_d2 = np.full(r, np.nan, dtype=np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        if int(fit_sel.sum()) >= _LOESS_MIN_FIT:
+            valid = density > _EPS
+            sigma_d2[valid] = np.exp(
+                _loess(np.log(mu[fit_sel]), np.log(raw_var[fit_sel]), np.log(density[valid]), frac)
+            )
+    return sigma_d2
+
+
 def _count_fraction_variance(
     count_gdna_frac: np.ndarray,
     density: np.ndarray,
@@ -162,19 +222,16 @@ def _count_fraction_variance(
     ``frac`` is the LOESS span (the one smoothing knob; CV-selectable later — default ``_LOESS_SPAN``).
     """
     r = count_gdna_frac.shape[0]
-    two_anchor = np.isfinite(d_left) & np.isfinite(d_right) & ~own
-    mu_d = 0.5 * (d_left + d_right)
-    raw_var = 0.25 * (d_left - d_right) ** 2
-
-    fit_sel = two_anchor & (mu_d > _EPS) & (raw_var > _EPS)  # log-log fit drops exact-agreement zeros
+    # The 2-boundary disagreement (no contained term): each fit node is ¼(d_L−d_R)² at ½(d_L+d_R).
+    finite_l = np.isfinite(d_left) & ~own
+    finite_r = np.isfinite(d_right) & ~own
+    sigma_d2 = density_variance_curve(
+        density, d_left=d_left, d_right=d_right, left_ok=finite_l, right_ok=finite_r, frac=frac
+    )
     loess_v_rel = np.full(r, np.nan, dtype=np.float64)
     with np.errstate(divide="ignore", invalid="ignore"):
-        if int(fit_sel.sum()) >= _LOESS_MIN_FIT:
-            x_fit = np.log(mu_d[fit_sel])
-            y_fit = np.log(raw_var[fit_sel])
-            valid = density > _EPS
-            sigma_d2 = np.exp(_loess(x_fit, y_fit, np.log(density[valid]), frac))
-            loess_v_rel[valid] = sigma_d2 / density[valid] ** 2
+        valid = (density > _EPS) & np.isfinite(sigma_d2)
+        loess_v_rel[valid] = sigma_d2[valid] / density[valid] ** 2
 
         v_rel = np.full(r, 1.0, dtype=np.float64)  # default: no anchor → uninformative
         v_rel[own] = np.where(own_count[own] > 0.0, 1.0 / np.maximum(own_count[own], _EPS), 1.0)
@@ -316,5 +373,6 @@ def node_gdna_density(
 __all__ = [
     "NodeDensity",
     "count_observable_masks",
+    "density_variance_curve",
     "node_gdna_density",
 ]
