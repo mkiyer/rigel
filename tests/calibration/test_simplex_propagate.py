@@ -46,6 +46,37 @@ def test_rts_observation_dominates_at_low_process_noise():
     assert ps[0] < ps[1]
 
 
+def test_rts_per_node_q_matches_scalar_when_constant():
+    """A per-node Q array equal to a constant reproduces the scalar-Q result (the array path generalizes
+    the scalar path)."""
+    y = np.array([1.0, 0.0, 0.0, 4.0])
+    r = np.array([20.0, 0.0, 0.0, 20.0])
+    ms_s, ps_s = _rts_smooth(y, r, 0.05)
+    ms_a, ps_a = _rts_smooth(y, r, np.full(4, 0.05))
+    assert np.allclose(ms_s, ms_a) and np.allclose(ps_s, ps_a)
+
+
+def test_rts_high_q_grows_uncertainty_with_distance():
+    """A larger per-hop process variance makes a node far from the only seed MORE uncertain (the seed
+    carries less confidently) — the precision-decay-with-distance the coupling encodes."""
+    y = np.array([5.0, 0.0, 0.0])
+    r = np.array([1000.0, 0.0, 0.0])
+    _, low_ps = _rts_smooth(y, r, np.array([0.0, 0.01, 0.01]))
+    _, high_ps = _rts_smooth(y, r, np.array([0.0, 100.0, 100.0]))
+    assert high_ps[2] > low_ps[2]
+
+
+def test_rts_two_seeds_q_controls_interior_pull():
+    """With two seeds, a larger interior process variance lets each interior node follow its NEAR seed
+    more (less averaging toward the far seed)."""
+    y = np.array([10.0, 0.0, 0.0, 0.0])
+    r = np.array([1000.0, 0.0, 0.0, 1000.0])
+    lowq, _ = _rts_smooth(y, r, np.full(4, 0.001))
+    highq, _ = _rts_smooth(y, r, np.full(4, 50.0))
+    # node 1 is adjacent to the high seed (10); high Q → less pulled toward the far 0-seed → larger.
+    assert highq[1] > lowq[1]
+
+
 # --- integration on the toy AMBIG genome ---------------------------------------------------------
 
 
@@ -103,7 +134,7 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
         prior_overdispersion=overdispersion_for_beta(ccfg.rna_strand_prior_alpha_beta),
         prior_weight=ccfg.rna_strand_prior_weight).rna_strand_overdispersion
     regions, _left, _right = propagate_simplex(
-        sub, ra, gdna_region_eff_len=reg_el, gdna_boundary_side_eff_len=bnd_el,
+        sub, ra, gdna_region_eff_len=reg_el, gdna_boundary_side_eff_len=bnd_el, gdna_fl_mean=fl_mean,
         rna_sense_frac=kappa, gdna_strand_overdispersion=od_g, rna_strand_overdispersion=od_r,
         n_grid=ccfg.n_grid,
     )

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from .density_model import count_observable_masks, density_variance_curve, node_gdna_density
 from .run_fill import same_ref_left_right
 from .signature import RegionType, TS_AMBIG, TS_NEG, TS_NONE, TS_POS, coarse_type_array
 from .simplex import init_from_signature, solve_node
@@ -83,22 +84,25 @@ def _local_gdna_density(substrate, region_arrays, gdna_eff_len, kappa, od_g, od_
     return rho, prec, U, L
 
 
-def _rts_smooth(y: np.ndarray, r: np.ndarray, process_var: float) -> tuple[np.ndarray, np.ndarray]:
+def _rts_smooth(y: np.ndarray, r: np.ndarray, process_var) -> tuple[np.ndarray, np.ndarray]:
     """Scalar Kalman filter + RTS smoother over one ordered chain — the exact two-sweep BP.
 
-    State = ``ρ_g`` under a random-walk smoothness prior (process variance ``process_var`` per hop);
-    observations ``y`` with precision ``r`` (``r=0`` ⇒ no observation at that node). Returns the smoothed
-    mean + variance per node. The forward (filter) and backward (smoother) passes are the two sweeps; the
-    result is independent of which end starts (a tree has a unique fixed point).
+    State = ``ρ_g`` under a random-walk smoothness prior; observations ``y`` with precision ``r``
+    (``r=0`` ⇒ no observation at that node). ``process_var`` is the per-hop process variance ``Q`` —
+    a **scalar** (constant coupling, increment 3) or a **per-node array** (``Q[i]`` = noise on the hop
+    into node ``i``; the increment-4 ``var~mean`` coupling). Returns the smoothed mean + variance per
+    node. The forward (filter) and backward (smoother) passes are the two sweeps; the result is
+    independent of which end starts (a tree has a unique fixed point).
     """
     k = y.shape[0]
+    q = np.broadcast_to(np.asarray(process_var, dtype=np.float64), (k,))
     m_pred = np.empty(k)
     p_pred = np.empty(k)
     m_filt = np.empty(k)
     p_filt = np.empty(k)
     m, p = 0.0, _DIFFUSE_VAR
     for i in range(k):
-        mp, pp = m, p + process_var  # predict (random walk)
+        mp, pp = m, p + q[i]  # predict (random walk; per-hop process variance)
         m_pred[i], p_pred[i] = mp, pp
         if r[i] > 0.0:
             p = 1.0 / (1.0 / pp + r[i])
@@ -121,7 +125,8 @@ def _smooth_density(rho_obs, rho_prec, ref_id, on_target, process_var):
     Enrichment-class chains (on-target exon vs off-target intron/intergenic) keep ``ρ_g`` comparable
     within a chain without a capture factor (issue A): exon densities inform exon nodes, off-target
     densities inform off-target nodes. Region indices within a ``(ref, class)`` group are already in
-    genomic order, so the chain hop is the genomic neighbour.
+    genomic order, so the chain hop is the genomic neighbour. ``process_var`` may be a scalar or a
+    per-node array (sliced per chain).
     """
     r = rho_obs.shape[0]
     rho_post = np.zeros(r, dtype=np.float64)
@@ -129,10 +134,11 @@ def _smooth_density(rho_obs, rho_prec, ref_id, on_target, process_var):
     ref = np.asarray(ref_id)
     cls = on_target.astype(np.int64)
     keys = ref.astype(np.int64) * 2 + cls
+    q_arr = np.broadcast_to(np.asarray(process_var, dtype=np.float64), (r,))
     for key in np.unique(keys):
         idx = np.flatnonzero(keys == key)  # ascending ⇒ genomic order
         y = np.where(np.isnan(rho_obs[idx]), 0.0, rho_obs[idx])
-        ms, ps = _rts_smooth(y, rho_prec[idx], process_var)
+        ms, ps = _rts_smooth(y, rho_prec[idx], q_arr[idx])
         rho_post[idx] = np.clip(ms, 0.0, None)
         prec_post[idx] = 1.0 / np.maximum(ps, _EPS)
     return rho_post, prec_post
@@ -163,6 +169,47 @@ def _solve_view(view, allow_pos, allow_neg, rho_post, prec_post, eff_len, kappa,
     )
 
 
+def _coupling_process_var(substrate, region_arrays, gdna_region_eff_len, gdna_fl_mean):
+    """Per-node RTS process variance ``Q`` from the triplet ``var~mean`` curve (increment 4).
+
+    The chain coupling is gDNA-density continuity; its per-hop variance is how much ``ρ_g`` varies
+    node-to-node, which the **triplet disagreement** (``{left boundary, count-observable contained, right
+    boundary}``) estimates directly (the density gradient across a region's span). We fit
+    :func:`density_variance_curve` on the triplet observations and read ``σ²_density`` at each node's local
+    density ``μ`` (the count module's imputed density — available *before* propagation, so non-circular).
+    Returns ``(Q, fallback_scalar)``: ``Q`` is ``NaN`` where the curve is undefined (the caller fills those
+    with ``fallback_scalar``, the median local observation variance — the increment-3 default).
+    """
+    sig = np.asarray(region_arrays.signature)
+    ref_id = np.asarray(region_arrays.ref_id)
+    r = sig.shape[0]
+    L = np.maximum(np.asarray(gdna_region_eff_len, dtype=np.float64), _EPS)
+    inv_fl = 1.0 / gdna_fl_mean if gdna_fl_mean > 0.0 else 0.0
+
+    def total(view):
+        return view.n_unspliced_pos.astype(np.float64) + view.n_unspliced_neg.astype(np.float64)
+
+    region_obs, boundary_obs = count_observable_masks(sig, ref_id)
+    left_same, right_same = same_ref_left_right(ref_id)
+    left_anchor = np.zeros(r, dtype=bool)
+    right_anchor = np.zeros(r, dtype=bool)
+    if r > 1:
+        left_anchor[1:] = boundary_obs[:-1] & left_same[1:]
+        right_anchor[:-1] = boundary_obs[:-1] & right_same[:-1]
+    d_left = np.where(left_anchor, total(substrate.left) * inv_fl, np.nan)
+    d_right = np.where(right_anchor, total(substrate.right) * inv_fl, np.nan)
+    contained_density = np.where(region_obs & (L > _EPS), total(substrate.contained) / L, np.nan)
+
+    # μ for the curve lookup = the count module's local density estimate (pre-propagation, non-circular).
+    nd = node_gdna_density(substrate, region_arrays, L, gdna_fl_mean, need_count_variance=False)
+    sigma_d2 = density_variance_curve(
+        np.asarray(nd.density, dtype=np.float64), d_left=d_left, d_right=d_right,
+        left_ok=left_anchor, right_ok=right_anchor,
+        contained=contained_density, contained_ok=(region_obs & (L > _EPS)),
+    )
+    return sigma_d2
+
+
 def _side_allow(ts_self, ts_other):
     """A boundary side's active RNA strands = the union of its two flanks' signatures.
 
@@ -180,14 +227,16 @@ def _side_allow(ts_self, ts_other):
 
 
 def propagate_simplex(
-    substrate, region_arrays, *, gdna_region_eff_len, gdna_boundary_side_eff_len, rna_sense_frac,
-    gdna_strand_overdispersion=0.0, rna_strand_overdispersion=0.0, gdna_prior_count=0.5,
+    substrate, region_arrays, *, gdna_region_eff_len, gdna_boundary_side_eff_len, gdna_fl_mean,
+    rna_sense_frac, gdna_strand_overdispersion=0.0, rna_strand_overdispersion=0.0, gdna_prior_count=0.5,
     process_var=None, n_grid=60,
 ):
     """Forward–backward gDNA-density propagation → ``(regions, left, right)`` :class:`NodeDeconv`.
 
-    See the module docstring. ``process_var`` (the RTS per-hop coupling variance) defaults to the median
-    local observation variance — a flagged placeholder for the count ``var~mean`` model (increment 4).
+    See the module docstring. The RTS per-hop coupling variance ``Q`` is derived per node from the triplet
+    ``var~mean`` curve (:func:`_coupling_process_var`); where the curve is undefined (too few anchors) it
+    falls back to the median local observation variance. An explicit ``process_var`` overrides the
+    derivation (a scalar or per-node array — used by tests / for ablation).
     """
     ts = np.asarray(region_arrays.strand_class)
     ref_id = np.asarray(region_arrays.ref_id)
@@ -198,9 +247,12 @@ def propagate_simplex(
     rho_obs, rho_prec, _U, _L = _local_gdna_density(
         substrate, region_arrays, gdna_region_eff_len, kappa, od_g, od_r, n_grid
     )
+    seen = rho_prec > 0.0
+    fallback_q = float(np.median(1.0 / rho_prec[seen])) if seen.any() else 1.0
     if process_var is None:
-        seen = rho_prec > 0.0
-        process_var = float(np.median(1.0 / rho_prec[seen])) if seen.any() else 1.0
+        # Q from the count var~mean curve; NaN (undefined fit) → the median-observation-variance fallback.
+        q = _coupling_process_var(substrate, region_arrays, gdna_region_eff_len, gdna_fl_mean)
+        process_var = np.where(np.isfinite(q) & (q > 0.0), q, fallback_q)
     on_target = coarse_type_array(sig) == int(RegionType.EXON)
     rho_post, prec_post = _smooth_density(rho_obs, rho_prec, ref_id, on_target, process_var)
 
