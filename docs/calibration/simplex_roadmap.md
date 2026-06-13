@@ -39,48 +39,68 @@ parity** (pool gDNA within ~0.7% across ss×capture; the catastrophic flat-avera
 RNA-rich and gDNA-rich exons → regression). The lesson: the sweep must propagate the **strand-derived**
 density (unbiased) into the **AMBIG** nodes that lack strand — not the count. That is **phase 2b**.
 
-## 3. The phases (count-trust `β` track + the propagation track)
+## 2b. Phase-1 net-flow finding (2026-06-13): a small regression, NOT parity
 
-**Count-trust `β` (per-node misspecification penalty; the integration lever):**
-- **Phase 1 — single hard-coded `β`** ✅ (parity; `β` = I₀ successor, documented placeholder).
-- **Phase 2 — 2-level `β` by count-observability.** `β_high` on count-observable nodes (introns/intergenic,
-  measured MAE 0.005 — trust the count); `β_low` on imputed-across-capture exons (MAE 0.47 — distrust). The
-  first expected win over the old fixed `I₀`, targeting the capture-on exon leak.
-- **Phase 3 — continuous `β(observability, var~mean, capture-class-crossing)`.**
-- **Phase 4 — derived/calibrated `β`** on the benchmark (fused MAE < either signal alone); retires the
-  `I₀`/`β` magic number.
+The 16-condition net-flow A/B (the *primary* metric) shows phase-1 (per-node, no sweep) leaks **+0.5–2 pt
+more** gDNA→RNA than production across every gdna300 condition (ss0.99 cap-on 8.7→9.6 / 7.6→9.3; ss0.5
+cap-on 20.3→21.2 / 17.8→18.5; cap-off similar), 6/16 worse, 0 better, +8.7 pt total. `gdna_none` stays
+FP-free. The earlier "parity" call was from the *pool gDNA fraction* (within 0.7%) — but on net flow that
+0.7% is a uniform extra leak. **So phase-1 is not yet shippable; the productionization is gated on reaching
+≥ parity on net flow.** The per-node β combine is *meant* to be equivalent to the old `w=I/(I+I₀)` blend, so
+this gap is a discrepancy to **close** (diagnose `solve_node` MAP vs the linear blend; the 3-component
+strand mixture vs the 2-component posterior; `β`=10 vs `I₀`=10), not an inherent cost.
 
-**Propagation (carry strand quality to count-only nodes):**
-- **Phase 2b — strand→AMBIG propagation.** Turn on the RTS sweep to carry single-strand neighbours'
-  strand-derived density (bias −0.15) into AMBIG exons, where a low `β` lets it govern the biased count
-  (−0.38). Needs the **exclude-self** (BP message) rule so it does not smear or double-count a node's own
-  strand. This is the genuine payoff of the bidirectional sweep.
+## 3. The plan (revised priorities — the sweep is the foundation)
 
-The two tracks compose: `β` decides *how much* to trust the local count vs the (propagated) strand; the
-sweep *delivers* the strand quality to nodes that have none.
+**The integration principle (one method, not two signals).** Each node resolves locally by **one elegant
+log-likelihood integration** of strand + count on the pie — the likelihood-form analogue of the old
+`w=I/(I+I₀)` that worked well (κ=0.99 ⇒ w≈0.96, strand dominates; κ=½ ⇒ w→0, count is all that's left). The
+**count term carries a penalty `β`** (the `I₀` successor) so the strand governs where available and the
+count is a *fallback tier* that surfaces only when the strand is silent. We do **not** split propagation
+into separate strand- and count-signals; there is one integrated belief per node.
 
-## 4. Productionization plan for phase 1 (this effort)
+**Why the sweep should work now (the key correction).** The first sweep attempt smeared **because it
+predated the `β` penalty** (and the full commitment to fractions). The smear was biased count propagating
+onto good-strand nodes. With `β` penalizing the count, a propagated count signal arriving at a
+confident-strand node has **low likelihood → it cannot tarnish the strand**. The penalty is precisely what
+makes propagation safe. So the sweep is no longer expected to smear.
 
-Goal: ship the simplex+β path as the production deconvolution at parity, with a clean codebase, before
-resuming phases 2/2b.
+**Priority 1 — the propagation sweep (with `β`).** Turn the bidirectional RTS sweep back on, now that the
+count is penalized. Each node resolves locally (strand + count, count penalized), then propagates its
+resolved gDNA-density belief; neighbours integrate the received signal **with the count component
+penalized** (the penalty is for *propagation/imputation* — a signal-communication event — distinct from a
+node using its own count). A good-strand node barely moves; an AMBIG node (no strand) is governed by the
+propagated neighbour density over its own biased count. This is the foundational payoff and the reason
+parity-or-better is expected. Open: the **exclude-self** (BP message) rule; the imputation penalty
+magnitude (may exceed the local `β`).
 
-1. **Validate across all 20 scenarios** (`gdna_benchmark_5mb`): net `gdna→rna` flow, pool fraction,
-   `gdna_none` FP — ON vs the OFF baseline. Require **no glaring regression** (parity within tolerance).
-2. **All unit + golden tests green** with the simplex path.
-3. **Wire to production**: flip `use_propagation` default → `True` (or make the simplex path
-   unconditional). Temporary commit/push.
-4. **Teardown the prior framework** (after parity confirmed): retire `deconv_regions`/`deconv_sides`'s
-   region/side **combine** that the simplex replaces, the opt-in count-cascade `propagation.py`, and any
-   now-dead helpers (`run_fill` if unused, the `strand_deconv` per-node blend). Keep what the simplex still
-   uses (the strand posterior, the count clue, `region_splice_gdna_frac`, `deconv_sides` for boundary
-   sides — until the sides are also moved to the simplex).
-5. **Full code cleanup**: docstrings, dead-code removal, CLAUDE.md/docs index, the config (`I₀` vs `β`).
-6. **Resume phases 2 → 2b → 3 → 4** from the clean production base.
+**Priority 2 — configure `β`.** Tune the count penalty (and, if warranted, a separate, larger imputation
+penalty for propagated count) so strand cleanly dominates at κ=0.99 and count takes over at κ=½ — and so
+the per-node integration is ≥ the old `w=I/(I+I₀)` (closing §2b).
 
-**Caveat to decide before teardown:** phase-1 is *parity*, not an improvement, and the **sweep is off**. If
-the production foundation should already include the strand→AMBIG propagation (phase 2b), do that *before*
-the teardown; otherwise ship per-node phase-1 and add 2b next. The teardown is irreversible — confirm the
-scope first.
+**Later — `β` sophistication.** 2-level by count-observability (introns MAE 0.005 vs imputed exons 0.47) →
+continuous (`observability, var~mean, capture-class`) → derived/calibrated; retires the magic number.
+
+## 4. Productionization — gated on ≥ parity (net flow)
+
+The teardown ships only once the simplex path is **≥ production on net flow** (it is currently behind by
+§2b). Sequencing:
+
+1. **Close the per-node gap** (§2b): make `solve_node`(strand + count·`β`) reproduce the old
+   `w=I/(I+I₀)` result to ≥ parity on the 16-condition net flow. The two are meant to be equivalent.
+2. **Turn on the sweep** (priority 1): propagate the resolved gDNA-density belief; the `β`/imputation
+   penalty prevents biased-count smear. Validate it does **not** regress (and ideally improves AMBIG /
+   capture-on leak — the expected payoff).
+3. **Confirm ≥ parity across all scenarios** (regenerate `gdna_benchmark_5mb`'s 20 conditions — its BAMs
+   were cleaned up — + the `quick_3to1_5mb` 16). All unit + golden tests green.
+4. **Then** wire to production (flip the `use_propagation` default / make it unconditional), commit/push,
+   **teardown** the prior combine (`deconv_regions`; the count-cascade `propagation.py`; dead helpers —
+   keeping the strand posterior, the count clue, `region_splice_gdna_frac`, and `deconv_sides` until the
+   boundary sides also move to the simplex), and **full code cleanup** (docstrings, dead code, CLAUDE.md /
+   docs index, `I₀` vs `β` config).
+
+The teardown is irreversible (recoverable only via git); we do it once, from a validated ≥-parity base —
+not on the current small regression.
 
 ## 5. Risks / watch-items
 
