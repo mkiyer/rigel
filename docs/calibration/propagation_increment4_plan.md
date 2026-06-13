@@ -182,6 +182,36 @@ calibrate path unconditionally), then increment 6 retires `propagation.py` (coun
 
 ---
 
+## 7b. VALIDATION FINDING (2026-06-13) — issue A confirmed, blocks the wiring
+
+Steps 1–3 are implemented + tested (32 green). The illustration
+(`scripts/debug/plot_simplex_var_mean.py`) on the flagship
+(`gdna_gdna300_ss_0.99_nrna_none_capture_on`) surfaced a real problem **before** wiring into `calibrate`:
+
+| AMBIG class | n | oracle gDNA frac | count clue (`density_model`) | propagate_simplex |
+|---|---|---|---|---|
+| **EXON** | 87 | **0.946** | **0.246** | (carries the clue) |
+| INTRON | 54 | 1.000 | 0.852 | — |
+| all AMBIG | 141 | 0.967 | 0.478 | **0.381** |
+
+**Root cause = issue A (the make-or-break), confirmed.** AMBIG **exon** regions are *not* count-observable,
+so their gDNA density is imputed from boundary crossings — which cross the **capture enrichment
+discontinuity** into low-density off-target introns, dragging the imputed on-target density to ~¼ of
+truth. The simplex and the propagation are **not** at fault (they faithfully carry the density they are
+given; the machinery's own guarantees — order-independence, no over-subtraction, AMBIG-reads-RNA-when-no-
+gDNA — all hold). The defect is upstream, in the **count gDNA density under capture**: there is no reliable
+*enriched-exon* gDNA-density source. The strand-derived density at expressed single-strand exons is too
+low/noisy (the small gDNA fraction, strand-measured), and the count imputation smears in off-target
+introns.
+
+**This is the decision point flagged as issue A.2 / 8.4.** The fix needs a capture-aware enriched-exon gDNA
+density — options: (a) **capture-normalized density** (divide a per-node capture factor out, so the chain
+couples in off-target-equivalent units and the off-target seeds *predict* on-target density); (b) restrict
+the exon-class chain to true exon-class anchors with correct precision (the count-observable **exon-edge
+boundary** pure-gDNA crossings, §3.4 — not optional under capture); (c) port the count mean-bias
+debiasing (`count_mean_bias_design.md`, Phase 4-mean) that targets exactly this exon gDNA-count
+under-call. **Pause for direction before wiring** — this is a joint modelling decision, not a silent patch.
+
 ## 8. Open issues / risks
 
 1. **Circularity (issue F).** `Q` uses the count module's density `μ_i`, available *before* propagation —
