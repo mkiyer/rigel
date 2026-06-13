@@ -14,39 +14,22 @@ DNA (gDNA) contamination. This is the documentation map.
 
 ## Calibration (`calibration/`)
 
-The gDNA-vs-RNA deconvolution stage — the most active area.
+The gDNA-vs-RNA deconvolution stage — the most active area. **Consolidated 2026-06-13** to a single
+authoritative plan + the theory/diagnostic references; ~28 superseded planning docs moved to
+[`calibration/archive/`](calibration/archive/) (in git for history).
 
 | doc | what it is |
 |---|---|
-| [`calibration_theory.md`](calibration/calibration_theory.md) | **authoritative** theory + acyclic inference + EM interface |
-| [`decoupled_calibration_design.md`](calibration/decoupled_calibration_design.md) | **current architecture**: the decoupled strand/count handoff (design + implementation guide) |
-| [`deconvolution_roadmap.md`](calibration/deconvolution_roadmap.md) | **ACTIVE ROADMAP** (three-signal complex-locus resolution): unspliced-crossing gDNA + spliced-crossing per-strand mature + strand-on-residual; mature subtraction; phased A–D plan. Operationalizes `deconvolution_generative_model.md` + `deconvolution_implementation.md` |
-| [`deconvolution_generative_model.md`](calibration/deconvolution_generative_model.md) | theory: the complete three-species (gDNA/nascent/mature) generative model + what is identifiable |
-| [`deconvolution_implementation.md`](calibration/deconvolution_implementation.md) | theory→code: the capture-aware S0–S5 blueprint (boundaries as the atoms) |
-| [`phaseA_mature_imputation_plan.md`](calibration/phaseA_mature_imputation_plan.md) | **Phase A (shipped 83b3610)**: per-strand mature-density imputation (`mature_density.py`, RNA mirror of `density_model`); Issue D resolved |
-| [`phaseB_mature_subtraction_plan.md`](calibration/phaseB_mature_subtraction_plan.md) | **Phase B (Step 0 done; merged into C)**: mature-subtraction units verified; the finding that subtraction only helps AMBIG |
-| [`phaseC_ambig_resolution_plan.md`](calibration/phaseC_ambig_resolution_plan.md) | **Phase C — ACTIVE plan, rev 3**: the iterative **propagation** deconvolution — a graph of region+boundary nodes, each a 3-term {RNA+,RNA−,gDNA} partition, solved from seeds by propagation to convergence (boundaries deconvolve their unspliced crossings into all 3 terms too); consolidates density_model+mature_density+strand-blend+run_fill, retires the splice fraction / `w` blend / `ρ` |
-| [`propagation_implementation_plan.md`](calibration/propagation_implementation_plan.md) | `propagation.py` spec, **rev-1 (count-cascade)** — superseded for the solve by the simplex plan below; node graph / seeds / propagation framing still current |
-| [`propagation_increment4_plan.md`](calibration/propagation_increment4_plan.md) | **ACTIVE execution plan (increment 4)**: replace the RTS process-variance placeholder with the existing **non-parametric `var~mean` LOESS** (`density_model._loess` / `_count_fraction_variance`, fit on paired boundary disagreements) — the same curve gives the per-hop coupling variance `Q`; wire `propagate_simplex` into `calibrate`; **illustration script** (var~mean fit, Q field, ρ_g-vs-oracle, f_g calibration); flagship + full-suite validation; flip the default |
-| [`propagation_message_passing.md`](calibration/propagation_message_passing.md) | **ACTIVE theory + roadmap**: propagation = **belief propagation on a chain** (a locus is a tree → forward–backward is exact in two sweeps, order-independent — proves the user's L→R/R→L derivation). The graphical model (local strand/spliced factors + a **gDNA-density-only coupling**); reconciles loglik-residual ↔ inverse-variance (same thing; grid = exact, Gaussian = cheap shadow); the clean problem statement + search terms; the **phased roadmap** (0–7); the **increment-3 dry-run** (`propagate` forward–backward) + open issues (capture-aware coupling is the central risk) |
-| [`propagation_simplex_plan.md`](calibration/propagation_simplex_plan.md) | **ACTIVE execution spec, rev-2**: the **simplex (pie) solve** — calibration models **only RNA vs gDNA** (no mature/nascent slices; the EM separates those downstream); pie `(f_rna₊,f_rna₋,f_g)`, RNA prior 0 / gDNA weak prior, evidence (strand + sided-spliced-RNA-lower-bound + propagated count) as precision-weighted pushes (no over-subtraction; unknown slices stay wide); inverse-variance/order-independent propagation. §10 = remaining open items (the count `var~mean` uncertainty model) |
-| [`archive/joint_deconvolution.md`](calibration/archive/joint_deconvolution.md) | archived: the retired joint count×strand product (resurrection guide) |
-| [`CALIBRATION_TODO.md`](calibration/CALIBRATION_TODO.md) | live tracker of open issues |
-| [`remaining_phases.md`](calibration/remaining_phases.md) | **AUTHORITATIVE forward plan** — the remaining work as clean Phase 1 (count posterior) / 2 (FP quantile) / 3 (nascent removal), implementation-grade |
-| [`count_channel_capture_design.md`](calibration/count_channel_capture_design.md) | background: the original count-channel roadmap (superseded by `remaining_phases.md` for sequencing) |
-| [`count_mean_bias_design.md`](calibration/count_mean_bias_design.md) | **Phase 4-mean**: the splice-junction gDNA-fraction (eligibility predicate, 2-/3-term, strand-resolved sweep) |
-| [`count_posterior_design.md`](calibration/count_posterior_design.md) | **Phase 4-var**: count posterior variance (`var∝mean²` from paired anchor disagreements) |
-| [`phase2_design.md`](calibration/phase2_design.md) | **Phase 2** (shipped + validated): count posterior variance behavior, the blend decision (keep (2κ−1)²), the FP-rate quantile knob |
-| [`sequential_calibration_redesign.md`](calibration/sequential_calibration_redesign.md) | **AUTHORITATIVE redesign** (current): sequential strand→count pipeline — strand cleans + communicates likelihood precision (`N·(2ss−1)²`), count imputes the cleaned density field + 3-term; phased plan |
-| [`strand_deconvolution_explained.md`](calibration/strand_deconvolution_explained.md) | ground-up explainer: the strand deconvolution, the `Beta(½,½)` Jeffreys prior, why precision = `N·(2ss−1)²`, the `ss=½` bimodal subtlety |
-| [`phase3_implementation_plan.md`](calibration/phase3_implementation_plan.md) | **SUPERSEDED** by the redesign — the direct-3-term Phase 3 (kept for 3-term/AMBIG-identifiability rationale) |
-| [`fl_consistency_diagnostic.md`](calibration/fl_consistency_diagnostic.md) | **accuracy diagnostic** (Phase-3 prep): the splice `f_b·M_region` density-vs-count bias — exact eff-length-ratio fix, quantified (16–25pt at typical exons, present in the benchmark), density-path already consistent |
-| [`capture_effective_length_design.md`](calibration/capture_effective_length_design.md) | **capture-aware effective lengths** for all EM components (the gDNA-only IPR contraction bug + fix) |
-| [`count_local_dispersion_design.md`](calibration/count_local_dispersion_design.md) | parked: local count-dispersion estimator (Phase 4-var extension) |
-| [`strand_clean_robust_deferred.md`](calibration/strand_clean_robust_deferred.md) | deferred: precision-weighted robust strand-clean concept (subsumed by the strand module) |
-| [`density_phase1_local_imputation_design.md`](calibration/density_phase1_local_imputation_design.md) | count-clue density design (shipped) |
-| [`density_phase2_dna_fraction_design.md`](calibration/density_phase2_dna_fraction_design.md) | deferred DNA-fraction lever (future) |
+| [`CALIBRATION_PLAN.md`](calibration/CALIBRATION_PLAN.md) | **★ SINGLE SOURCE OF TRUTH** — current state → target architecture → phased path to production. The per-node inverse-variance fusion (`w=I/(I+β)`); the target = **belief propagation on a per-locus region chain with 2-simplex grid messages** (edge-factor boundaries, component-specific process noise `Q_c`); all resolved decisions (issues A–H, Q1–Q3); risks (`σ²_RNA` unsolved, `γ_ij` unbuildable→class-chains, perf chunking, the +8.7pt regression bar); code + docs consolidation actions |
+| [`calibration_theory.md`](calibration/calibration_theory.md) | **authoritative theory** — the acyclic single-pass pipeline, the per-node model, the EM interface |
+| [`deconvolution_generative_model.md`](calibration/deconvolution_generative_model.md) | theory: the three-species (gDNA/nascent/mature) generative model + what is identifiable |
+| [`deconvolution_implementation.md`](calibration/deconvolution_implementation.md) | theory→code: the capture-aware blueprint (boundaries as the atoms) — background for the sweep |
+| [`strand_deconvolution_explained.md`](calibration/strand_deconvolution_explained.md) | ground-up explainer: the strand deconvolution, `Beta(½,½)` prior, why precision = `N·(2κ−1)²` |
+| [`fl_consistency_diagnostic.md`](calibration/fl_consistency_diagnostic.md) | accuracy diagnostic: the splice density-vs-count eff-length-ratio fix (quantified) |
+| [`capture_effective_length_design.md`](calibration/capture_effective_length_design.md) | capture-aware effective lengths for the EM components (the gDNA IPR contraction) |
 | [`accumulator_fragment_span_redesign.md`](calibration/accumulator_fragment_span_redesign.md) | gDNA FL span fix (shipped design record) |
+| [`CALIBRATION_TODO.md`](calibration/CALIBRATION_TODO.md) | live tracker of open issues |
+| [`archive/`](calibration/archive/) | ~29 superseded planning/design docs (count-cascade, simplex/sweep/message-passing plans, count-trust, the phase A–C plans, the redesign series, …) — history, not current |
 
 ## Accumulator (`accumulator/`)
 

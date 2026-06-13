@@ -230,10 +230,9 @@ coupling mean shift (the one genuine modelling risk, §6 issue A). The architect
   deconvolution, re-propagate) is **theoretically sound** — iteratively-reweighted estimation / a poor-man's
   EM, typically settling in 1–2 outer passes — so it is a principled extension, not a hack, if one pass
   under-fits.
-- **G — boundary transport is a DISTINCT operation (not subsumed).** The simplex only *reproportions* a
-  node's mass in place (changes the pie's slice sizes); boundary transport physically *moves* mass from one
-  side of a boundary to the other. Different operations — keep `priors._transport_boundary_flux` as-is
-  (no-regression). Coupling the two so they run together is good future work (phase 6+).
+- **G — boundary transport subsumed?** Boundary nodes now carry gDNA mass directly; the post-hoc
+  `priors._transport_boundary_flux` may become "read the boundary node's gDNA" rather than a separate mass
+  shift. Keep transport as-is for phase 3 (no-regression); revisit in phase 6.
 - **H — seed delta vs sharp factor.** Pin intergenic `f_g=1` as a near-delta local factor (numerically a
   very sharp grid spike), so the §3 "signal dies into a seed" behaviour emerges from the math rather than a
   special case in the loop.
