@@ -182,35 +182,32 @@ calibrate path unconditionally), then increment 6 retires `propagation.py` (coun
 
 ---
 
-## 7b. VALIDATION FINDING (2026-06-13) — issue A confirmed, blocks the wiring
+## 7b. VALIDATION FINDING (2026-06-13) — CORRECTED: not a new problem; a wiring gap + a wrong yardstick
 
-Steps 1–3 are implemented + tested (32 green). The illustration
-(`scripts/debug/plot_simplex_var_mean.py`) on the flagship
-(`gdna_gdna300_ss_0.99_nrna_none_capture_on`) surfaced a real problem **before** wiring into `calibrate`:
+Steps 1–3 are implemented + tested (32 green). The illustration on the flagship initially looked like a
+fresh AMBIG-exon catastrophe (calibration `f_g` 0.246–0.381 vs oracle 0.946). **That framing was wrong**,
+for two reasons established by measuring the *old* path on the same data:
 
-| AMBIG class | n | oracle gDNA frac | count clue (`density_model`) | propagate_simplex |
-|---|---|---|---|---|
-| **EXON** | 87 | **0.946** | **0.246** | (carries the clue) |
-| INTRON | 54 | 1.000 | 0.852 | — |
-| all AMBIG | 141 | 0.967 | 0.478 | **0.381** |
+1. **Wrong yardstick.** Calibration contained `f_g` vs oracle is a proxy on which the **old `deconv_regions`
+   path also scores ~0.417** for AMBIG exons — i.e. the calibration-stage AMBIG-exon under-call is
+   long-standing, *not* introduced by propagation. The metric the system is actually judged by is **net
+   flow after the EM + boundary transport**, where the imperfect AMBIG prior is partly compensated. The old
+   system's net leak here is **8.7%** (capture-on ss 0.99) / **20.3%** (capture-on ss 0.50) / **~1%**
+   (capture-off) — the *known* capture-on residual this whole effort targets. The proxy made a known ~8%
+   leak look like a regression.
+2. **A real but trivial wiring gap.** The production path runs **`region_splice_gdna_frac`** (the
+   count-mean-bias / splice-junction gDNA-FRACTION method) which lifts AMBIG exons 0.246 → **0.417** (287
+   regions upgraded) — the capture-aware solution that already exists. `deconv_regions` consumes the
+   upgraded fraction; **`propagate_simplex` was fed the raw 0.246**, bypassing it. That is the only real
+   regression, and the fix is one line: feed propagation the splice-upgraded `region_count_frac`.
 
-**Root cause = issue A (the make-or-break), confirmed.** AMBIG **exon** regions are *not* count-observable,
-so their gDNA density is imputed from boundary crossings — which cross the **capture enrichment
-discontinuity** into low-density off-target introns, dragging the imputed on-target density to ~¼ of
-truth. The simplex and the propagation are **not** at fault (they faithfully carry the density they are
-given; the machinery's own guarantees — order-independence, no over-subtraction, AMBIG-reads-RNA-when-no-
-gDNA — all hold). The defect is upstream, in the **count gDNA density under capture**: there is no reliable
-*enriched-exon* gDNA-density source. The strand-derived density at expressed single-strand exons is too
-low/noisy (the small gDNA fraction, strand-measured), and the count imputation smears in off-target
-introns.
-
-**This is the decision point flagged as issue A.2 / 8.4.** The fix needs a capture-aware enriched-exon gDNA
-density — options: (a) **capture-normalized density** (divide a per-node capture factor out, so the chain
-couples in off-target-equivalent units and the off-target seeds *predict* on-target density); (b) restrict
-the exon-class chain to true exon-class anchors with correct precision (the count-observable **exon-edge
-boundary** pure-gDNA crossings, §3.4 — not optional under capture); (c) port the count mean-bias
-debiasing (`count_mean_bias_design.md`, Phase 4-mean) that targets exactly this exon gDNA-count
-under-call. **Pause for direction before wiring** — this is a joint modelling decision, not a silent patch.
+**Conclusion:** none of the three "issue A" fixes proposed earlier are needed. The capture-aware
+enriched-exon density solution (`region_splice_gdna_frac`) is already implemented and working; propagation
+just wasn't connected to it. Corrected path: (1) feed propagation the splice-upgraded fraction (parity);
+(2) wire into `calibrate`; (3) judge by the **net-flow benchmark** vs the old 8.7% / 20.3% capture-on leak —
+*not* the calibration-`f_g` proxy. The propagation's job is to *reduce* that known leak; the per-node-`Q`
+`var~mean` work (steps 1–3) and the spatial smoothing are how, with the splice-upgraded count as the
+observation.
 
 ## 8. Open issues / risks
 
