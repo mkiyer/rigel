@@ -292,4 +292,9 @@ def _solve_ambig(u_pos, u_neg, kappa, nasc_pos, nasc_neg, seedable_pos, seedable
     f_g = np.where(U > 0.0, gdna / np.maximum(U, _EPS), 0.0)
     f_g = np.where(both, np.clip(resid / np.maximum(U, _EPS), 0.0, 1.0), f_g)
     f_g = np.where(neither, np.clip(count_gdna_frac, 0.0, 1.0), f_g)
-    return np.clip(f_g, 0.0, 1.0)
+    # SAFETY FLOOR: the count gDNA density is a (capture-depleted) LOWER bound on the true gDNA, so the
+    # propagated-nascent subtraction must not push f_g below it. This stops the catastrophic over-subtraction
+    # when the seed nascent is spurious (mature_density misses the mature of single-exon/no-junction regions
+    # → the mature RNA is mislabelled nascent → over-subtracted). Until the nascent source is made
+    # mature-free (boundary-node nascent), this guarantees propagation never regresses below the count.
+    return np.clip(np.maximum(f_g, np.clip(count_gdna_frac, 0.0, 1.0)), 0.0, 1.0)
