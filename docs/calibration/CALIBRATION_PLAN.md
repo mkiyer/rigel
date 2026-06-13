@@ -157,6 +157,14 @@ improves) — and **must beat the prior grid-MAP's +8.7 pt regression**.
   (the AMBIG pie reconstructs from the two inherited odds via the simplex, §2). Resolves AMBIG and benefits
   `ss=0.5` (splice is motif-stranded). Validate **≥ parity and ideally an AMBIG/capture-on improvement** on
   the 16-condition net flow + flagship (must beat the prior grid-MAP's +8.7 pt regression).
+  - **Built + localized (2026-06-13, `simplex_sweep.py`):** mechanics validated (order-independence; toy
+    AMBIG resolves via odds-propagation). Flagship A/B = ~parity, *not yet* an improvement. **Localized
+    (not a theory failure):** the AMBIG exons get worse (0.369→0.304 vs oracle 0.946) because the
+    propagation *faithfully* carries the **single-strand exons' own under-call** (`f_g` 0.502 vs oracle
+    0.865) — and that under-call is **β=10 over-trusting the biased exon count** (the strand alone inverts
+    to 0.865). The fix is the **per-node β** (low on imputed exons, high on count-observable introns — the
+    count-trust track), which lifts the ss-exon `f_g`, corrects the odds, fixes AMBIG. Secondary: ss-intron
+    0.949→0.876, a lattice-coarseness / median-extraction numeric (K=20). **Next: per-node β, then re-run.**
 - **Phase 3 — refinements.** Full splice-graph RNA propagation (intron-skipping exon→exon); transcript-set
   dedup for the variance model; `β` sophistication (2-level → continuous → derived); a global off-target
   gDNA baseline prior for junction-less nodes.

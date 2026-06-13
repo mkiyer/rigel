@@ -210,23 +210,21 @@ def calibrate(
     # are deconvolved the same way; their gDNA mass feeds the per-locus prior via the boundary-flux
     # transport (priors._transport_boundary_flux), so they are not merely QC.
     if config.use_propagation:
-        # PHASE-1 simplex region deconvolution (opt-in, count_trust_design.md): solve_node combines each
-        # region's OWN strand (precision N·(2κ−1)², vanishing at κ=½) with the SPLICE-UPGRADED count clue
-        # (region_count_frac) at the fixed count trust β=config.count_trust_beta — the simplex/pie successor
-        # to the old w=I/(I+I₀) (count precision hard-capped at I₀), now with no-over-subtraction + the gDNA
-        # prior. No spatial propagation yet (it smeared unrelated exons; strand→AMBIG propagation is a later
-        # phase). The boundary sides keep the production combine (deconv_sides) → flux transport unchanged.
-        from .simplex_propagate import deconv_regions_simplex
+        # PHASE-2b odds-propagation grid sum-product (opt-in, CALIBRATION_PLAN §2/§4). Per-region pie on the
+        # 2-simplex; ψ_i = 3-component strand + sided spliced bound + β-trusted SPLICE-UPGRADED count
+        # (region_count_frac) + weak gDNA prior; the edge couples the per-strand RNA:gDNA LOG-ODDS within
+        # same-strand exon stretches (gDNA = residual). f_g read as the posterior median (skew-safe).
+        # Boundary sides keep the production combine (deconv_sides) → flux transport unchanged.
+        from .simplex_sweep import deconv_regions_sweep
 
-        regions = deconv_regions_simplex(
+        regions = deconv_regions_sweep(
             substrate,
             region_arrays,
-            region_count_frac,
             rna_sense_frac=rna_sense_frac,
             gdna_strand_overdispersion=gdna_strand_overdispersion,
             rna_strand_overdispersion=rna_strand_overdispersion,
+            count_gdna_frac=region_count_frac,
             count_trust_beta=config.count_trust_beta,
-            n_grid=config.n_grid,
         )
         left, right = deconv_sides(
             substrate,
