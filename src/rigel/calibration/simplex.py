@@ -39,7 +39,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-__all__ = ["SimplexSolution", "solve_node"]
+from .run_fill import same_ref_left_right
+from .signature import TS_AMBIG, TS_NEG, TS_NONE, TS_POS
+
+__all__ = ["SimplexSolution", "solve_node", "SignatureInit", "init_from_signature", "region_adjacency"]
 
 _EPS = 1.0e-9
 
@@ -52,6 +55,62 @@ class SimplexSolution:
     f_rna_neg: np.ndarray
     f_g: np.ndarray
     f_g_var: np.ndarray  # posterior variance of f_g (the node's gDNA-fraction uncertainty / precision⁻¹)
+
+
+@dataclass(frozen=True, slots=True)
+class SignatureInit:
+    """Per-node initialization from the signature (plan §2). All length-``R``.
+
+    The signature is a *fact* about which slices can be nonzero: an absent transcript strand means that
+    RNA slice is exactly 0 (certain), an active strand means that slice is unknown (to be earned by
+    evidence), and gDNA is always admissible. Intergenic (``TS_NONE``) nodes carry no transcript, so
+    they are fully specified seeds (``f_g = 1``).
+    """
+
+    allow_pos: np.ndarray  # bool — the +RNA slice may be nonzero (signature has a + transcript)
+    allow_neg: np.ndarray  # bool — the −RNA slice may be nonzero
+    f_g_fixed: np.ndarray  # float — pinned f_g (1.0 for intergenic seeds; NaN where not pinned)
+    intergenic_seed: np.ndarray  # bool — fully specified at init (TS_NONE: f_g=1, no work)
+    strand_seedable: np.ndarray  # bool — a single defined strand (POS/NEG): own strand can seed it
+
+
+def init_from_signature(strand_class: np.ndarray) -> SignatureInit:
+    """Map each node's transcript-strand class to its simplex init (plan §2).
+
+    ``TS_NONE`` → ``(0,0,1)`` fully specified (intergenic seed); ``TS_POS`` → ``(nan,0,prior)``;
+    ``TS_NEG`` → ``(0,nan,prior)``; ``TS_AMBIG`` → ``(nan,nan,prior)``. POS/NEG are *strand-seedable*
+    (their own strand deconvolution can resolve them ab initio if the data is informative); AMBIG and
+    NONE are not strand-seedable (NONE needs none; AMBIG is filled by propagation/count).
+    """
+    ts = np.asarray(strand_class)
+    allow_pos = (ts == TS_POS) | (ts == TS_AMBIG)
+    allow_neg = (ts == TS_NEG) | (ts == TS_AMBIG)
+    intergenic_seed = ts == TS_NONE
+    f_g_fixed = np.where(intergenic_seed, 1.0, np.nan)
+    strand_seedable = (ts == TS_POS) | (ts == TS_NEG)
+    return SignatureInit(
+        allow_pos=allow_pos, allow_neg=allow_neg, f_g_fixed=f_g_fixed,
+        intergenic_seed=intergenic_seed, strand_seedable=strand_seedable,
+    )
+
+
+def region_adjacency(ref_id: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Genomic-order ``(prev, next)`` region indices within each reference (−1 at a reference edge).
+
+    The calibration region partition is sorted in genomic order per reference, so region ``i``'s chain
+    neighbours are ``i−1`` / ``i+1`` when they share ``i``'s reference. This is the adjacency of the
+    **chain** the propagation runs over (a locus is a linear run of regions/boundaries → a tree → exact
+    two-sweep message passing; see ``docs/calibration/propagation_message_passing.md``).
+    """
+    ref = np.asarray(ref_id)
+    r = ref.shape[0]
+    left_same, right_same = same_ref_left_right(ref)
+    prev = np.full(r, -1, dtype=np.int64)
+    nxt = np.full(r, -1, dtype=np.int64)
+    idx = np.arange(r)
+    prev[left_same] = idx[left_same] - 1
+    nxt[right_same] = idx[right_same] + 1
+    return prev, nxt
 
 
 def _simplex_lattice(n_grid: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

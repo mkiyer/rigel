@@ -8,7 +8,8 @@ impossible (the 4030271-type catastrophe cannot recur), single-strand collapses 
 
 import numpy as np
 
-from rigel.calibration.simplex import solve_node
+from rigel.calibration.signature import TS_AMBIG, TS_NEG, TS_NONE, TS_POS
+from rigel.calibration.simplex import init_from_signature, region_adjacency, solve_node
 
 
 def _f(sol, i=0):
@@ -114,3 +115,26 @@ def test_count_evidence_pulls_fg():
                     allow_pos=True, allow_neg=True)
     assert float(lo.f_g[0]) < 0.4
     assert float(hi.f_g[0]) > 0.6
+
+
+# --- increment 2: init-from-signature + chain adjacency -----------------------------------------
+
+
+def test_init_from_signature_vectors():
+    """The plan §2 table: NONE→fully-specified seed (f_g=1); POS/NEG→one strand active, strand-seedable;
+    AMBIG→both active, not strand-seedable."""
+    ts = np.array([TS_NONE, TS_POS, TS_NEG, TS_AMBIG])
+    init = init_from_signature(ts)
+    assert list(init.allow_pos) == [False, True, False, True]
+    assert list(init.allow_neg) == [False, False, True, True]
+    assert list(init.intergenic_seed) == [True, False, False, False]
+    assert init.f_g_fixed[0] == 1.0 and np.all(np.isnan(init.f_g_fixed[1:]))
+    assert list(init.strand_seedable) == [False, True, True, False]
+
+
+def test_region_adjacency_chain_breaks_at_reference():
+    """prev/next follow genomic order within a reference and are −1 at reference edges."""
+    ref = np.array([0, 0, 0, 1, 1])  # two references: a 3-region chain and a 2-region chain
+    prev, nxt = region_adjacency(ref)
+    assert list(prev) == [-1, 0, 1, -1, 3]
+    assert list(nxt) == [1, 2, -1, 4, -1]
