@@ -10,6 +10,14 @@ per-region gDNA fraction `f_g`) that becomes the per-locus EM prior. This doc st
 is, the one target architecture we are building toward, every resolved design decision, the phased path,
 and the consolidation actions.
 
+> **§0 — rev-2 (2026-06-13, post-review refinement).** Two simplifications, now baked into §2–§5: **(a) the
+> coupling flips to per-strand RNA-density propagation; gDNA is the residual and does not propagate** — so
+> all capture-enrichment machinery (`γ_ij`, enrichment-class chains) is **dropped** (the gDNA *fraction* is
+> capture-invariant; gDNA *density* — the only discontinuous quantity — is never propagated). **(b)
+> `σ²_RNA_local` is SOLVED** by a splice-junction-pair `var~mean` LOESS (the RNA mirror of the gDNA curve),
+> retiring the last open modelling piece. Boundaries are confirmed **mass-bearing nodes** (the accumulator
+> gives them their own crossing mass), not edge factors.
+
 ---
 
 ## 1. WHERE WE ARE (audited 2026-06-13)
@@ -74,20 +82,30 @@ is exact in two sweeps (forward, backward), order-independent.
   fed from `substrate.contained.n_spliced_sense/antisense`) + a weak gDNA prior. The count is **not** local
   evidence — it arrives via the coupling (below). Seeds emerge from `ψ_i`: an intergenic seed is a sharp
   spike at the `f_g=1` vertex (no special-case code).
-- **Boundaries collapse into EDGE FACTORS `φ_ij`** (no boundary nodes). The chain is `R₁↔R₂↔…↔Rₙ`. **Caveat
-  (our correction):** the boundary's strand-cleaned crossing *count magnitude* is today's primary gDNA clue
-  for exon/AMBIG regions — it must still feed the **exon-side region's `ψ_i`** as a one-sided gDNA-density
-  observation; `φ_ij` carries the coupling *reliability/continuity*, not the mean information.
-- **Coupling = density continuity** on `ρ_c = f_c·U/L`, with **component-specific process noise `Q_c`**
-  (this unifies "gDNA-only" and "3-term": same sweep, different decay):
-  - **`Q_g`** small (from `density_variance_curve`) → gDNA carries **far** (uniform by enrichment class).
-  - **`Q_RNA`** finite within a contiguous same-strand active-signature run (`σ²_RNA_local·Δx_ij`) →
-    per-strand RNA passes **locally** into the adjacent AMBIG node; **`Q_RNA=∞`** (decouple, `log φ=0`) the
-    moment a strand goes silent. RNA rescues AMBIG, then dies.
-- **Capture:** handled by **per-enrichment-class chaining** (exon vs off-target), the implementable
-  stand-in. The reviewer's `γ_ij = enrichment_j/enrichment_i` mean-shift is **NOT buildable** — there is no
-  per-region enrichment scalar anywhere in the code (only a binary class + a per-*transcript* IPR in
-  `capture_eff_length.py`). Class-chains achieve "don't couple exon density to intron density" without it.
+- **Boundaries are first-class MASS-BEARING NODES (not edge factors).** In our accumulator a boundary
+  *owns* the fragment mass that overlaps it (it is not added to the regions), so the chain interleaves
+  region–boundary–region; every node deconvolves its own mass into a pie. (The reviewer's "collapse
+  boundaries into `φ_ij`" is **rejected** — it would silently drop the boundary mass + the flux transport
+  that consumes it.) A boundary's **spliced flux** is the RNA-propagation signal; its **unspliced crossing**
+  is gDNA+nascent.
+- **Coupling = per-strand RNA-density propagation (PRIMARY); gDNA is the residual and does NOT propagate.**
+  This is the rev-2 correction (see §0): the flip from "gDNA carries far + RNA local" to "RNA propagates,
+  gDNA = `1−f₊−f₋`".
+  - **`Q_RNA`** (per strand): finite where the RNA density is continuous — *within a contiguous same-strand
+    exon stretch* (e.g. the non-overlap part of an exon → its AMBIG-overlap part: same exon, same capture
+    enrichment, uniform RNA) — `∞` (decouple) at exon↔intron transitions (RNA density jumps mature→nascent)
+    and where a strand is silent. `σ²_RNA_local` from the **splice-junction-pair `var~mean`** (§3 Q2).
+    The AMBIG node inherits `f₊` from its `+`-neighbour and `f₋` from its `−`-neighbour → `f_g` = residual.
+  - **gDNA does not propagate.** It is resolved per node by the strand (capture-invariant) or as the
+    RNA-residual (AMBIG); junction-less nodes (single-exon / intergenic) fall back to the count + a **global
+    off-target gDNA-density baseline** prior (the clean deep-intron/intergenic anchors fit this baseline).
+- **Capture needs NO special handling — no enrichment classes, no `γ_ij`.** The gDNA *fraction* is
+  capture-invariant (probe enrichment scales gDNA and RNA on an exon by the same factor → it cancels in
+  `f_g`); the strand fraction is capture-invariant; the RNA propagation follows same-exon/same-transcript
+  edges (same enrichment by construction). gDNA **density** (the only capture-discontinuous quantity) is
+  never propagated, so the discontinuity never bites. `γ_ij` was unbuildable anyway (no per-region
+  enrichment exists); class-chains were a flawed stand-in (they sever exon↔intron edges that, on inspection,
+  carry no usable cross-enrichment gDNA signal). Both are dropped.
 - **Inference:** forward then backward grid sum-product — `m_{i→j} = logsumexp(ψ_i + m_{prev→i} + M_ij, axis
   over θ_i)`, `M_ij` the `(P,P)` transition `log φ_ij`; belief `b_i = ψ_i + m_fwd + m_bwd`; `softmax →
   E[f_g] → CalibrationResult`. Exact in 2 sweeps; **per-locus chunked + parallel** (mandatory at scale, §5).
@@ -100,15 +118,15 @@ is exact in two sweeps (forward, backward), order-independent.
 
 | # | decision |
 |---|---|
-| **A** state vs coupling | State = **fractions** (pie, mass-conserving). Coupling = **densities** `ρ=f·U/L` (transferable). The capture mean-shift `γ_ij` is **dropped** (unbuildable) → **per-enrichment-class chains**. |
-| **B** boundary 1 node or 2 | **Collapse to edge factors `φ_ij`** (no boundary nodes) — *with* the crossing count still feeding the exon-side `ψ_i`. |
-| **C** spliced flux ownership | **Local evidence of the exon-side region** (one-sided lower bound `f_c·U≥S`); never the boundary's, never double-counted. |
+| **A** state vs coupling | State = **fractions** (pie, mass-conserving). The **gDNA fraction is capture-invariant** (enrichment cancels in the ratio), so gDNA needs **no enrichment normalization and is not propagated**. `γ_ij` and per-enrichment-class chains are both **dropped** (rev-2, §0/§2). |
+| **B** boundary 1 node or 2 | **Boundaries are mass-bearing NODES** (the accumulator gives them their own crossing mass) — region–boundary–region chain. The reviewer's edge-factor collapse is **rejected** (it drops the boundary mass). |
+| **C** spliced flux ownership | The **spliced flux is the RNA-propagation signal** + a one-sided RNA lower bound on its node; sided (sense/antisense), never double-counted. |
 | **D / Q1** message rep | **2-simplex grid `(P,)` message + `(P,P)` transitions** (K≈20). Scalar/Gaussian rejected for the sweep; defer Gaussian/EP to the perf phase. |
 | **F** var~mean circularity | **1-pass** fit from anchor seeds (intergenic + deep single-strand) pre-sweep (non-circular); optional outer IRLS/EM refit. |
 | **G** boundary transport | **Decoupled, post-sweep** (`_transport_boundary_flux`). |
 | **H** seeds | **No special-case code** — intergenic seed = a sharp `ψ_i` delta at the `f_g=1` vertex; "signal dies into a seed" emerges from the math. |
-| **Q2** RNA decay model | `Q_RNA,ij = σ²_RNA_local·Δx_ij` within a same-strand active run, `∞` when silent. **`σ²_RNA_local` is UNSOLVED** (the one real open modelling piece — §5). |
-| **Q3** per-strand chains | Continuous gene-body proxy via the signature gate (`Q_RNA=∞` at silent-strand transitions); `Δx_ij` from `region_arrays`. |
+| **Q2** RNA variance model | **SOLVED (rev-2):** `σ²_RNA_local` from a **splice-junction-pair `var~mean` LOESS** — a region flanked by two same-strand splice boundaries with nonzero spliced counts is two measurements of the same RNA (`¼(d_L−d_R)²`), reusing `density_variance_curve`. Works at `ss=0.5` (splice is motif-stranded). Start with adjacent pairs; defer transcript-set dedup. |
+| **Q3** per-strand chains | RNA propagates along same-strand genomic edges, `Q_RNA=∞` at exon↔intron RNA-discontinuities + silent-strand transitions; the full splice-graph (intron-skipping exon→exon) is a deferred extension. |
 | count trust `β` | The integration lever; the explicit successor to `I₀`. Phased: single (now) → 2-level by count-observability → continuous → derived. |
 
 ---
@@ -120,16 +138,21 @@ Each phase is gated on the **net-flow benchmark** (the primary metric), referenc
 improves) — and **must beat the prior grid-MAP's +8.7 pt regression**.
 
 - **Phase 1 — per-node fusion (DONE).** `f_g = w·g_strand+(1−w)·g_count`, `w=I/(I+β)`. Byte-identical to
-  production; `β` explicit. This is the local resolve the sweep builds on.
-- **Phase 2 — the gDNA-only grid sum-product sweep (NEXT, the core build).** Replace the scalar `_rts_smooth`
-  with the `(P,P)` grid sum-product (§2): `ψ_i` (count-stripped) + edge `φ_ij` (gDNA density continuity,
-  class-chains) over per-locus chains. **RNA propagation OFF** (`Q_RNA=∞` everywhere ⇒ reduces to gDNA-only)
-  — this sidesteps the unsolved `σ²_RNA_local` and matches the shipped "only gDNA propagates" commitment.
-  Validate **≥ parity** on the 16-condition net flow + flagship (must beat the +8.7 pt regression). The win
-  here is filling thin/AMBIG nodes' gDNA from confident neighbours.
-- **Phase 3 — 3-term (RNA propagation ON).** Turn on `Q_RNA` (finite within same-strand runs) — **requires
-  first deriving + validating `σ²_RNA_local`** (the open piece). This is what resolves AMBIG exons via the
-  adjacent same-transcript `+`/`−` RNA. Validate AMBIG/capture-on leak drops.
+  production; `β` explicit. This is the local resolve the sweep builds on; the no-propagation baseline.
+- **Phase 2a — the splice-junction RNA `var~mean` model (NEXT, standalone).** Per the Q2 construction: find
+  regions flanked by two same-strand splice-junction boundaries with nonzero spliced counts, take
+  `¼(d_L−d_R)²` at `½(d_L+d_R)`, fit the LOESS via `density_variance_curve`. Validate the fit on the toy +
+  flagship (does it produce a sensible `σ²_RNA(μ)`?). No regression risk (standalone).
+- **Phase 2b — the RNA-propagation grid sum-product sweep (the core fix).** The `(P,P)` grid sum-product
+  over per-locus region–boundary chains: `ψ_i` = `solve_node` count-stripped (3-component strand + sided
+  spliced bound + weak gDNA prior); edge `φ_ij` = **per-strand RNA-density continuity** (`Q_RNA` from 2a,
+  finite within same-strand exon stretches, `∞` at RNA-discontinuities/silent strands); **gDNA = residual**.
+  Resolves AMBIG (`f₊` from the `+`-neighbour, `f₋` from the `−`-neighbour) and benefits `ss=0.5` (splice is
+  motif-stranded). Validate **≥ parity and ideally an AMBIG/capture-on improvement** on the 16-condition net
+  flow + flagship (must beat the prior grid-MAP's +8.7 pt regression).
+- **Phase 3 — refinements.** Full splice-graph RNA propagation (intron-skipping exon→exon); transcript-set
+  dedup for the variance model; `β` sophistication (2-level → continuous → derived); a global off-target
+  gDNA baseline prior for junction-less nodes.
 - **Phase 4 — productionize + teardown + perf.** Flip the default; **delete the old path + dead code**
   (collapse to one path); per-locus parallelism; Gaussian/EP messages only if perf demands.
 - **β sophistication (parallel track):** single → 2-level (count-observable introns MAE 0.005 vs imputed
@@ -139,23 +162,28 @@ improves) — and **must beat the prior grid-MAP's +8.7 pt regression**.
 
 ## 5. RISKS / OPEN MODELLING (read before building)
 
-1. **`σ²_RNA_local` is unsolved** — the basis for finite `Q_RNA` / 3-term RNA propagation. RNA coverage is
-   non-uniform within a transcript (3′ bias, isoforms) and a same-strand run can span two genes. **No model
-   exists** (unlike the gDNA `var~mean`). → **Phase 2 ships gDNA-only**; Phase 3 only after this is derived
-   and validated on the toy AMBIG sweep. This is the largest unfunded liability — do not hand-wave it.
-2. **Perf: the `(P,P)` sum-product cannot run whole-genome as one chain.** ~1e6 regions × P²(≈53k) is
+1. **`σ²_RNA_local`: SOLVED in principle** (Q2 splice-pair `var~mean`), but the *fit quality* is the
+   Phase-2a validation gate — sparse same-strand splice-pairs, and the multi-transcript "count each
+   boundary-set once" dedup (deferred). If the curve is unstable, fall back to a Poisson/constant `Q_RNA`.
+2. **RNA-propagation soundness (the main modelling risk now).** RNA density is uniform *within an exon* but
+   jumps at exon↔intron and across genes; the `Q_RNA=∞` gating (RNA-discontinuity + silent-strand) must be
+   correct or RNA smears. The validated win is the *within-exon* AMBIG case (overlap part ← non-overlap
+   part); intron-skipping exon→exon is the deferred splice-graph extension. Measure on the toy AMBIG sweep.
+3. **Perf: the `(P,P)` sum-product cannot run whole-genome as one chain.** ~1e6 regions × P²(≈53k) is
    ~5e10 flops/sweep and a single `(n,P,P)` tensor is unmaterializable. **Per-locus chunking is mandatory**
-   (`region_adjacency` + per-(ref,class) grouping give the skeleton; loci are <~100 regions, embarrassingly
-   parallel). Use **K≈20 (P=231)** for messages — *not* the production `n_grid=200` (P=20301).
-3. **`γ_ij` is unimplementable** (no per-region enrichment) → class-chains (decided). A continuous γ would be
-   circular (depends on the deconvolution) → only via the outer IRLS loop, deferred.
-4. **The +8.7 pt regression bar** — the prior grid-MAP-as-combine failed it (overdispersion skew). The grid
-   sum-product must verifiably beat production net flow, not just match pool fraction (the earlier "parity"
-   that was actually a uniform leak increase).
+   (`region_adjacency` + the per-reference run skeleton; loci are <~100 nodes, embarrassingly parallel). Use
+   **K≈20 (P=231)** for messages — *not* the production `n_grid=200` (P=20301).
+4. **The +8.7 pt regression bar** — the prior grid-MAP-as-combine failed it (strand-posterior overdispersion
+   skew). The grid sum-product must verifiably **beat production net flow**, not just match pool fraction
+   (the earlier "parity" that was a uniform leak increase).
 5. **FL-unit consistency** — `Q` (from `var~mean`) and the state `ρ=f·U/L` must use the **same per-node L**;
    boundary densities use `1/fl_mean`, contained uses `/region_eff_len` — correct today but fragile in a
    rewrite.
-6. **Boundary-as-edge refactor** must not lose the crossing-count gDNA evidence (§2 caveat).
+6. **Boundary nodes own mass** — the region–boundary–region chain must conserve mass (boundary crossing
+   mass deconvolved, not dropped); the flux transport still consumes the boundary gDNA post-sweep.
+7. **gDNA = residual** assumes `f₊+f₋` are well-estimated; a junction-less node (single-exon / no spliced)
+   has no RNA propagation → falls back to per-node strand + count + the global off-target gDNA baseline (the
+   honest "unknown" floored by the baseline). Confirm this degrades gracefully (no false gDNA injection).
 
 ---
 
