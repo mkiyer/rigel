@@ -167,9 +167,9 @@ def density_variance_curve(
     ``½(d_L+d_R)`` — **identical to the original 2-boundary model**. Passing the count-observable
     ``contained`` adds the ``{left, contained, right}`` **triplet** (the density gradient across the
     region's span — a richer process-variance estimator), reducing to the pair where ``contained`` is
-    absent or RNA-contaminated. The fit (``log σ²_density ~ log μ̂`` via :func:`_loess`) is shared by the
-    count posterior variance (:func:`_count_fraction_variance`) and the propagation coupling variance
-    (``simplex_propagate``). Returns ``σ²_density`` per node (``NaN`` where ``density≤0`` or fewer than
+    absent or RNA-contaminated. The fit (``log σ²_density ~ log μ̂`` via :func:`_loess`) feeds the count
+    posterior variance (:func:`_count_fraction_variance`) and is available to the ``simplex_sweep``
+    coupling variance. Returns ``σ²_density`` per node (``NaN`` where ``density≤0`` or fewer than
     ``_LOESS_MIN_FIT`` fit points).
     """
     r = density.shape[0]

@@ -287,14 +287,15 @@ class CalibrationConfig:
     #: good strand model; ``w→0`` at κ≈½ or thin — a no-op, the count floor. Validate on the suites.
     gdna_strand_info_scale: float = 10.0
 
-    #: Opt-in: use the iterative **propagation** deconvolution (``propagation.py``) for the contained-region
-    #: split instead of the per-node strand/count combine. Resolves AMBIG (overlapping opposite-strand) loci
-    #: by propagating per-strand nascent from seeds + the node strand (docs/calibration/
-    #: propagation_implementation_plan.md). Default ``False`` (production unchanged) while it is validated
-    #: end-to-end; flip after golden/suite confirm.
+    #: Opt-in: use the **odds-propagation grid sum-product** (``simplex_sweep.deconv_regions_sweep``) for
+    #: the contained-region split instead of the per-node strand/count fusion. Propagates the per-strand
+    #: RNA:gDNA log-odds along same-strand exon stretches to resolve AMBIG (overlapping opposite-strand)
+    #: loci (CALIBRATION_PLAN.md §2). Default ``False`` (production = the fusion) while the sweep is being
+    #: brought to ≥ parity (it currently underperforms the fusion — see CALIBRATION_PLAN §4); flip after the
+    #: net-flow benchmark confirms it beats production.
     use_propagation: bool = False
 
-    #: **Count-trust ``β``** (the simplex propagation path, ``simplex_propagate``). The effective precision
+    #: **Count-trust ``β``** (the ``simplex_sweep`` propagation path). The effective precision
     #: of the count log-likelihood term in the per-node pie solve — how much to believe the (often biased
     #: under capture) count signal relative to the strand. The strand's precision ``I=N·(2κ−1)²`` vanishes
     #: at κ=½, so ``β`` sets the *absolute* count trust: small enough that an excellent strand (κ=0.99)

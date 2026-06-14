@@ -6,8 +6,9 @@ cut into three slices ``(f_rna₊, f_rna₋, f_g)`` summing to 1 — **no nascen
 Evidence *pushes* the point on the 2-simplex; the answer is always a normalized partition, so
 over-subtraction is structurally impossible and an under-constrained slice stays wide ("unknown").
 
-This module is the **per-node solve only** (plan §3/§7), built standalone for isolated validation before
-the graph + worklist (`propagate`) are wired. It does not touch the opt-in count-cascade `propagation.py`.
+This module is the **per-node solve only** (plan §3/§7). Its ``_simplex_lattice`` and
+``_mixture_strand_loglik`` are the reusable primitives the ``simplex_sweep`` grid sum-product builds on;
+``solve_node`` (the grid-MAP combine) is retained as a primitive but is not the production combine.
 
 The strand term is the **three-component generalization** of :func:`strand_likelihood.strand_loglik`:
 of ``N`` unspliced fragments a fraction ``f_g`` are gDNA (genomic-plus rate ½, overdispersion ``od_g``),

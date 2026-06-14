@@ -13,7 +13,7 @@ spliced lower bound + a weak gDNA prior — i.e. `solve_node` minus the count te
 evidence; the cross-node signal is the odds). Seeds emerge from `ψ_i` (intergenic → only the `f_g=1`
 vertex survives the strand mixture + prior).
 
-This replaces the dead scalar-RTS `simplex_propagate.propagate_simplex`. Boundary sides keep
+This is the grid sum-product that superseded the (now-removed) scalar-RTS scaffold. Boundary sides keep
 `strand_deconv.deconv_sides` (the flux transport is unchanged, post-sweep). `Q_RNA` (the log-odds coupling
 variance = the RNA relative variance) is currently a scalar from the Phase-2a fit median — a flagged
 placeholder; the per-edge `var~mean` lookup is the refinement.

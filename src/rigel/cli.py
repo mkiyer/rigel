@@ -1185,9 +1185,9 @@ def build_parser() -> argparse.ArgumentParser:
         dest="use_propagation",
         action="store_true",
         default=None,
-        help="Use the iterative PROPAGATION deconvolution for calibration (resolves AMBIG overlapping "
-        "opposite-strand loci by propagating per-strand nascent from seeds; docs/calibration/"
-        "propagation_implementation_plan.md). Default off (the per-node strand/count combine). Experimental.",
+        help="Use the odds-propagation grid sum-product (simplex_sweep) for calibration's region split "
+        "(resolves AMBIG overlapping opposite-strand loci by propagating the per-strand RNA:gDNA log-odds; "
+        "docs/calibration/CALIBRATION_PLAN.md §2). Default off (the per-node strand/count fusion). Experimental.",
     )
     adv.add_argument(
         "--overhang-alpha",
