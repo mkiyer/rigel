@@ -44,11 +44,17 @@ def _exon_region_incidence(
     """``(inc_t, inc_r)`` — per-transcript region membership over its exon set.
 
     mRNA → the regions its **exon** intervals overlap; nRNA synthetics (absent from the exon-interval
-    table) → the regions its **full span** overlaps (from ``t_df``). Region boundaries align with exon
-    edges (the partition is built from the annotation), so each exon/span maps to a *contiguous* region
-    range via ``searchsorted`` on the per-reference region starts. Annotation-only (sample-independent).
+    table) → the regions its **full span** overlaps (from ``t_df``). Region boundaries do NOT always
+    coincide with exon edges (only ~90% do — the partition is annotation-WIDE), so an exon/span ``[a, b)``
+    is mapped to every region it **overlaps**: the first region whose ``end > a`` (the one containing ``a``)
+    through the last region whose ``start < b``. Reading the lower bound from region *starts* alone
+    (``searchsorted(starts, a, side='left')``) skips the region that contains ``a`` whenever ``a`` falls in
+    a region's interior — dropping fully-contained exons/spans entirely — so ``lo`` is read from the region
+    *ends* (matching the accumulator reference's ``searchsorted(side='right')`` containment idiom).
+    Annotation-only (sample-independent).
     """
     starts = np.asarray(region_arrays.start, dtype=np.int64)
+    ends = np.asarray(region_arrays.end, dtype=np.int64)
     ref_off = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
     name_to_id = index.ref_name_to_id
     inc_t_parts: list[np.ndarray] = []
@@ -60,9 +66,11 @@ def _exon_region_incidence(
         if rid is None:
             return
         lo0, hi0 = int(ref_off[rid]), int(ref_off[rid + 1])
-        rs = starts[lo0:hi0]
-        lo = lo0 + int(np.searchsorted(rs, a, side="left"))
-        hi = lo0 + int(np.searchsorted(rs, b, side="left"))
+        # overlap of region [start_r, end_r) with [a, b): first region with end_r > a (contains/after a)
+        # through the last with start_r < b. (searchsorted(starts, a) would skip the region containing a
+        # when a is interior to it, dropping fully-contained exons/spans.)
+        lo = lo0 + int(np.searchsorted(ends[lo0:hi0], a, side="right"))
+        hi = lo0 + int(np.searchsorted(starts[lo0:hi0], b, side="left"))
         if hi > lo:
             inc_r_parts.append(np.arange(lo, hi, dtype=np.int64))
             inc_t_parts.append(np.full(hi - lo, int(t), dtype=np.int64))

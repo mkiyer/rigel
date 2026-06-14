@@ -1,6 +1,110 @@
 
 
 
+Iterate over adjacent boundary pairs
+- check boundary and region signatures
+- RNA training?
+- gDNA training?
+
+Can sometimes use the contained region if no evidence
+Could use strand to deconvolve before building variance model
+
+
+
+
+Gemini: 
+This is an exceptional piece of consolidation. Your team has successfully transformed a scattered, multi-document architectural debate into a rigorous, actionable engineering spec. Cleaning out the dead scaffolds (`propagation.py`) and standardizing your mathematical terminology around the 2-simplex lattice ($K \approx 20, P = 231$) provides a clean, maintainable foundation.
+
+Most importantly, you have established a definitive validation bar: **any new spatial grid solver must verifiably beat the prior grid-MAP's +8.7 point net leak regression**.
+
+Below is the evaluation of your implementation phases, followed by structural solutions to the two open roadblocks regarding $\gamma_{ij}$ enrichment and $\sigma^2_{\text{RNA\_local}}$.
+
+---
+
+### 1. Critical Review of Your Implementation Phases
+
+Your 4-phase execution plan is highly pragmatic and structurally sound, specifically because it decouples algorithmic risk from modeling risk.
+
+* **Phase 1 (Done):** Establishing byte-parity with production while making $\beta$ an explicit parameter was the correct first step to anchor your testing suite.
+* **Phase 2 (Next - gDNA-Only Grid Sweep):** **I completely agree with prioritizing this.** Implementing the $(P,P)$ transition matrix and $(P,)$ grid message-passing framework using *only* gDNA continuity isolates the pure computer science and matrix-algebra challenges (vectorization, chunking, parallel execution across loci) from the biological uncertainty of RNA transcript behavior.
+* *Implementation Warning for Phase 2:* When constructing your $(P,P)$ transition matrix $M_{ij}$ for a gDNA-only sweep, ensure the transition log-likelihood *only* evaluates the gDNA density delta:
+
+$$\log \phi_{ij}(\theta_i, \theta_j) = -\frac{1}{2} \frac{(\rho_{j,g} - \gamma_{ij}\rho_{i,g})^2}{Q_{g,ij}}$$
+
+
+
+The RNA components must be assigned zero transition energy ($\log \phi_{\text{RNA}} = 0$). This ensures that on the 3-term grid, the RNA fractions are completely unconstrained by the edge factor, allowing them to freely adapt to local strand evidence ($\psi_i$) without causing the message precision to collapse.
+
+
+* **Phase 3 (3-Term Sweep):** Gated strictly on solving $\sigma^2_{\text{RNA\_local}}$. This prevents a half-baked RNA model from corrupting the validated gDNA wins achieved in Phase 2.
+* **Phase 4 (Teardown & Perf):** Correctly deferred. The per-locus chunking strategy (<100 nodes per locus) is mandatory to avoid $O(N)$ whole-genome memory blowup.
+
+---
+
+### 2. Resolving Roadblock 1: The $\gamma_{ij}$ Enrichment Circularity
+
+Your critique of the continuous $\gamma_{ij}$ calculation is entirely correct. Computing a highly granular, local enrichment ratio per region *during* the deconvolution creates a toxic circular dependency: you cannot compute local enrichment without knowing the true gDNA fraction, and you cannot compute the gDNA fraction without knowing the enrichment.
+
+However, your fallback workaround—**per-enrichment-class chains** (completely disconnecting exon chains from off-target chains)—introduces a major structural flaw. If you completely cut the edges between an exon node and an adjacent intron node, **the exon cannot inherit gDNA precision from the intron**. In hybrid-capture setups, deep introns are often your cleanest, most abundant sources of unbiasing gDNA anchor counts. Severing these edges defeats the primary purpose of spatial belief propagation.
+
+#### The Solution: Global Class-Based Edge Scaling ($\Gamma$)
+
+Instead of abandoning $\gamma_{ij}$ or fracturing your 1-D linear tree topology, exploit the fact that hybrid-capture enrichment is primarily a feature of the library's global probe design, not individual region quirks.
+
+You can compute a **single global enrichment scalar ($\Gamma$)** for the entire library during your pre-sweep 1-pass anchor phase:
+
+
+$$\Gamma = \frac{\text{Median}(\rho_{g,i}) \text{ for all high-confidence EXON seeds}}{\text{Median}(\rho_{g,j}) \text{ for all high-confidence OFF-TARGET seeds}}$$
+
+
+Because this is computed globally from unambiguous anchor seeds before the sweeps begin, the circularity is broken.
+
+You can then maintain your unified 1-D linear locus chain (preserving exact, two-sweep BP) and parameterize the edge factors $\phi_{ij}$ dynamically based on the binary class transition between node $i$ and node $j$:
+
+* If transitioning from **Off-Target $\to$ Exon**: Set $\gamma_{ij} = \Gamma$
+* If transitioning from **Exon $\to$ Off-Target**: Set $\gamma_{ij} = \frac{1}{\Gamma}$
+* If staying within the **Same Class** (Exon $\to$ Exon or Off-Target $\to$ Off-Target): Set $\gamma_{ij} = 1$
+
+This elegant compromise fully accounts for the enrichment jump across exon-intron boundaries without losing spatial continuity or breaking tree-structured exact inference.
+
+---
+
+### 3. Resolving Roadblock 2: The Unmodeled $\sigma^2_{\text{RNA\_local}}$
+
+Your plan states that Phase 2 will ship as gDNA-only because no RNA variance model exists. While this is a safe software engineering choice, you can easily bootstrap Phase 3 without a complex LOESS model.
+
+The reason your gDNA model requires a non-parametric `var~mean` LOESS curve is that gDNA counts represent a baseline background noise channel that spans across widely fluctuating low-to-high count regimes nationwide. RNA, by contrast, is governed by structural transcript physics: within a contiguous same-strand active-signature run, the transcript density is locally highly continuous, and its variance scales proportionally with its expression level.
+
+#### The Solution: Distance-Scaled Constant Coefficient of Variation (CV)
+
+Do not build an open-ended RNA variance model from scratch. For Phase 3, implement a **proportional variance proxy** that scales directly with local density and genomic distance:
+
+1. When evaluating the transition from region $i$ to region $j$, compute the average local RNA density: $\bar{\rho}_{\text{RNA}} = \frac{\rho_{i,\text{RNA}} + \rho_{j,\text{RNA}}}{2}$.
+2. Define the local process noise as a constant fraction of that density (e.g., a 20% coefficient of variation), scaled linearly by the genomic distance $\Delta x_{ij}$ from your `region_arrays`:
+
+$$Q_{\text{RNA}, ij} = \left( \nu \cdot \bar{\rho}_{\text{RNA}} \right)^2 \cdot \Delta x_{ij}$$
+
+
+
+*(Where $\nu \approx 0.2$ acts as a tunable dispersion scale).*
+3. Apply your signature gate exactly as planned:
+
+$$\text{If strand } c \text{ is active in both } i \text{ and } j \implies Q_{c,ij} = \left( \nu \cdot \bar{\rho}_{c} \right)^2 \cdot \Delta x_{ij}$$
+
+
+$$\text{Else } (c \text{ goes silent}) \implies Q_{c,ij} = \infty \implies \log \phi_{ij} = 0$$
+
+
+
+This simple, distance-scaled CV proxy provides exactly what Phase 3 needs: it allows high-expression RNA signals to smoothly carry across local AMBIG exons to resolve them, while preventing low-expression noise from inflating your variances, all without requiring an expensive LOESS modeling phase.
+
+### Summary of Recommended Adjustments to `CALIBRATION_PLAN.md`
+
+1. **Modify Phase 2 Edge Factors:** Keep the unified locus chain layout instead of fractured class-chains. Use the global, pre-computed anchor class-ratio $\Gamma$ to handle enrichment scaling on boundary crossings.
+2. **Unblock Phase 3:** Use the Distance-Scaled Constant CV model as your initial definition for $\sigma^2_{\text{RNA\_local}}$. This moves Phase 3 from an "unfunded liability" to an immediate, tuneable integration step.
+
+
+
 
 Regarding open issues:
 ## A) My mental model was that the fraction (pie chart) representation will help us handle capture. Probes typically enrich both RNA and DNA. Ideally, capture should not substantially alter the proportions of RNA and DNA. So yes, in an exon we may see raw counts {RNA+=1251, RNA-=3, gDNA=2350} but converted to fractions its just {f_rna+=0.34, f_rna-=0.0008, gdna=0.652}. When we propagate that into the intron, we could smear if the RNA to gDNA ratios are biased, but if the intron has 2 total counts, we propagate this fraction onto 2 total counts.. so the smear gets capped by the observed counts in the intron. That was my entire plan for controlling "smear" in the setting of hybrid capture and the main intuition between a "fractional" state model rather than a count model. What do you think? What did you have in mind for this "make or break modeling step"
