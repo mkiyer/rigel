@@ -19,6 +19,7 @@ def _valid_kwargs(n_regions: int = 2) -> dict:
         mass_rna_left=z.copy(),
         mass_gdna_right=z.copy(),
         mass_rna_right=z.copy(),
+        mass_rna_spliced=z.copy(),
         gdna_geom_len=o.copy(),
         gdna_boundary_len=o.copy(),
         gdna_density_global=1e-3,

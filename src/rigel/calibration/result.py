@@ -46,6 +46,14 @@ class CalibrationResult:
     mass_gdna_right: np.ndarray  # left side of the right boundary
     mass_rna_right: np.ndarray
 
+    # Spliced RNA mass per region (Σ over the 3 nodes). Carried so ``assemble_priors`` can
+    # WITHHOLD it from ``rna_prior_count``: a spliced fragment has no gDNA candidate in the EM
+    # (gDNA does not splice), so it is guaranteed-RNA and assigned directly — counting it in the
+    # prior would double-count it and unfairly inflate the RNA side of the gDNA-vs-RNA *unspliced*
+    # split. ``mass_rna_*`` themselves stay spliced-inclusive, so the per-node conservation
+    # ``mass_gdna + mass_rna = total node mass`` is preserved; only the prior subtracts this.
+    mass_rna_spliced: np.ndarray  # float64[R]
+
     # --- gDNA component geometric effective length: Σ_node L_node (capture-independent) ---
     # The per-region contraction under capture is the IPR of the deconvolved gDNA *mass*,
     # applied downstream in assemble_priors; this length stays geometric, so it is
@@ -79,6 +87,7 @@ class CalibrationResult:
             "mass_rna_left",
             "mass_gdna_right",
             "mass_rna_right",
+            "mass_rna_spliced",
             "gdna_geom_len",
             "gdna_boundary_len",
         ):

@@ -171,7 +171,8 @@ def assemble_priors(
     (``gdna_region``) and RNA (``rna_region``) project to loci by genomic-overlap ``share``::
 
         gdna_prior_count = Σ_r share * gdna_region    (deconvolved gDNA count)
-        rna_prior_count  = Σ_r share * rna_region     (deconvolved RNA count)
+        rna_prior_count  = Σ_r share * rna_region     (deconvolved UNSPLICED RNA count;
+                                                       spliced mass withheld — see below)
         gdna_eff_len     = (G+1)² / [ Σ share*(gdna²/geom) + (2G+1)/span ],  G = Σ share*gdna
                            (capped at span)
 
@@ -211,8 +212,18 @@ def assemble_priors(
         calibration.gdna_boundary_len,
         np.asarray(region_arrays.ref_id),
     )
-    rna_region = (
-        calibration.mass_rna_contained + calibration.mass_rna_left + calibration.mass_rna_right
+    # RNA prior = the UNSPLICED RNA mass only. Spliced fragments have no gDNA candidate in the EM
+    # (gDNA does not splice) → they are guaranteed-RNA and the EM assigns them directly; counting
+    # them in rna_prior_count would double-count them and unfairly inflate the RNA side of the
+    # gDNA-vs-RNA unspliced split (the prior arbitrates only the unspliced fragments, so a_g+a_r
+    # should equal the unspliced competing mass). mass_rna_* is spliced-inclusive (node
+    # conservation); subtracting mass_rna_spliced here yields (1−g)·M_unspliced per region.
+    rna_region = np.maximum(
+        calibration.mass_rna_contained
+        + calibration.mass_rna_left
+        + calibration.mass_rna_right
+        - calibration.mass_rna_spliced,
+        0.0,
     )
     with np.errstate(divide="ignore", invalid="ignore"):
         gdna_sq_over_len = np.where(

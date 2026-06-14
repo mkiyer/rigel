@@ -266,6 +266,18 @@ def calibrate(
     # Derive gdna_density_global (QC scalar) and the geometric gDNA length.
     derived = derive(regions, left, right, region_eff_len, boundary_eff_len, region_arrays.ref_id)
 
+    # Spliced RNA mass per region (Σ over the 3 nodes). The deconv adds the full per-node
+    # spliced mass to rna_mass (rna = (1−g)·M_unspliced + M_spliced), so this is exactly the
+    # spliced component of mass_rna_*. assemble_priors withholds it from rna_prior_count — a spliced
+    # fragment is guaranteed-RNA in the EM (no gDNA candidate), so it must not load the RNA side of
+    # the gDNA-vs-RNA *unspliced* split (the prior's a_g+a_r should equal the unspliced competing
+    # mass). mass_rna_* stays spliced-inclusive so node conservation gdna+rna = total holds.
+    mass_rna_spliced = (
+        np.asarray(substrate.contained.mass_spliced, dtype=np.float64)
+        + np.asarray(substrate.left.mass_spliced, dtype=np.float64)
+        + np.asarray(substrate.right.mass_spliced, dtype=np.float64)
+    )
+
     result = CalibrationResult(
         mass_gdna_contained=regions.gdna_mass,
         mass_rna_contained=regions.rna_mass,
@@ -273,6 +285,7 @@ def calibrate(
         mass_rna_left=left.rna_mass,
         mass_gdna_right=right.gdna_mass,
         mass_rna_right=right.rna_mass,
+        mass_rna_spliced=mass_rna_spliced,
         gdna_geom_len=derived.gdna_geom_len,
         gdna_boundary_len=boundary_eff_len,
         gdna_density_global=derived.gdna_density_global,

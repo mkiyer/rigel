@@ -12,19 +12,23 @@ from rigel.config import CalibrationConfig
 from rigel.locus import Locus, MultiLocus
 
 
-def _calibration(*, mass_g, mass_d, gdna_geom_len, gdna_density_global=0.01) -> CalibrationResult:
+def _calibration(
+    *, mass_g, mass_d, gdna_geom_len, gdna_density_global=0.01, mass_spliced=None
+) -> CalibrationResult:
     """Build a result with all mass in the contained node (left/right = 0).
 
     ``mass_g`` / ``mass_d`` are the per-region deconvolved gDNA / RNA mass;
     ``gdna_geom_len`` is the gDNA component's geometric length. ``gdna_density_global``
     is a required field but is **not** read by ``assemble_priors`` (it is already
-    baked into the deconvolved mass).
+    baked into the deconvolved mass). ``mass_spliced`` (default 0) is the spliced part of
+    ``mass_d`` that ``assemble_priors`` withholds from ``rna_prior_count``.
     """
     mg = np.asarray(mass_g, dtype=np.float64)
     md = np.asarray(mass_d, dtype=np.float64)
     el = np.asarray(gdna_geom_len, dtype=np.float64)
     n = mg.shape[0]
     z = np.zeros(n, dtype=np.float64)
+    ms = z.copy() if mass_spliced is None else np.asarray(mass_spliced, dtype=np.float64)
     return CalibrationResult(
         mass_gdna_contained=mg,
         mass_rna_contained=md,
@@ -32,6 +36,7 @@ def _calibration(*, mass_g, mass_d, gdna_geom_len, gdna_density_global=0.01) -> 
         mass_rna_left=z.copy(),
         mass_gdna_right=z.copy(),
         mass_rna_right=z.copy(),
+        mass_rna_spliced=ms,
         gdna_geom_len=el,
         gdna_boundary_len=el,
         gdna_density_global=gdna_density_global,
@@ -87,6 +92,23 @@ def test_single_locus_sums_region_nodes():
     # [100, 200, 150]; here the gDNA density g/geom = 0.01 is uniform, so the IPR equals the
     # geometric span Σ gdna_geom_len = 450 (uniform mass → full span; the smoothing is exact).
     np.testing.assert_allclose(priors.gdna_eff_len, [450.0])
+
+
+def test_spliced_mass_withheld_from_rna_prior():
+    # A spliced fragment has no gDNA candidate in the EM (gDNA does not splice) → it is
+    # guaranteed-RNA and the EM assigns it directly, so it must NOT load rna_prior_count. Only the
+    # UNSPLICED RNA competes with gDNA. RNA mass [3,4,5] (Σ=12) of which spliced [1,1,2] (Σ=4) →
+    # rna_prior = the unspliced remainder 8; the gDNA prior is unchanged (spliced never touches it).
+    cal = _calibration(
+        mass_g=[1.0, 2.0, 1.5],
+        mass_d=[3.0, 4.0, 5.0],
+        gdna_geom_len=[100.0, 200.0, 150.0],
+        mass_spliced=[1.0, 1.0, 2.0],
+    )
+    ra = _regions([0, 100, 200], [100, 200, 300])
+    priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
+    np.testing.assert_allclose(priors.rna_prior_count, [8.0])  # 12 total RNA − 4 spliced
+    np.testing.assert_allclose(priors.gdna_prior_count, [4.5])  # unchanged by the spliced withhold
 
 
 def test_region_split_between_two_loci():
