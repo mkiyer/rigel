@@ -56,6 +56,7 @@ from .splice_junction import region_splice_gdna_frac
 from .strand_balance import fit_strand_balance
 from .strand_deconv import cleaned_gdna_count, deconv_regions, deconv_sides, strand_deconvolve
 from .substrate import CalibrationSubstrate
+from .variance_model import fit_direct_varmean, fit_imputation_varmean, varmean_points
 
 if TYPE_CHECKING:
     from ..config import CalibrationConfig
@@ -111,9 +112,10 @@ def calibrate(
     # boundary-anchored imputation. Needed here only to fit the gDNA strand overdispersion (its seed
     # identification is pre-cleaning) — the cleaning below depends on that overdispersion, so the raw
     # pass must come first. This is NOT the region answer (the cleaned pass below is). The count
-    # posterior variance feeds only the FP-rate quantile (no-op at the default ½), so skip its O(R²)
-    # LOESS unless a non-½ quantile actually consumes it.
-    need_count_variance = float(config.gdna_deconv_quantile) != 0.5
+    # posterior variance feeds the FP-rate quantile (no-op at the default ½) AND — via its relative
+    # variance v_rel — the per-node count precision τ_count = 1/v_rel of the propagation sweep's count
+    # prior. So compute it for a non-½ quantile OR the propagation path; else skip its O(R²) LOESS.
+    need_count_variance = float(config.gdna_deconv_quantile) != 0.5 or config.use_propagation
     node_density_raw = node_gdna_density(
         substrate, region_arrays, region_eff_len, fl_mean, need_count_variance=need_count_variance
     )
@@ -210,22 +212,16 @@ def calibrate(
     # are deconvolved the same way; their gDNA mass feeds the per-locus prior via the boundary-flux
     # transport (priors._transport_boundary_flux), so they are not merely QC.
     if config.use_propagation:
-        # PHASE-2b odds-propagation grid sum-product (opt-in, CALIBRATION_PLAN §2/§4). Per-region pie on the
-        # 2-simplex; ψ_i = 3-component strand + sided spliced bound + β-trusted SPLICE-UPGRADED count
-        # (region_count_frac) + weak gDNA prior; the edge couples the per-strand RNA:gDNA LOG-ODDS within
-        # same-strand exon stretches (gDNA = residual). f_g read as the posterior median (skew-safe).
-        # Boundary sides keep the production combine (deconv_sides) → flux transport unchanged.
+        # ITERATIVE odds-propagation deconvolution (CALIBRATION_PLAN_v2 §2/§5). Each pass re-fits the gDNA
+        # var~mean + the global density ρ_global on the PREVIOUS pass's gDNA estimate, then re-solves. Pass 0
+        # is the **all-gDNA init** (every unspliced fragment is gDNA ⇒ ρ_global = the all-node total unspliced
+        # density, a deliberate over-estimate that iteration drives down as RNA is removed). The var~mean
+        # reports genuinely-high variance where the boundaries cannot predict the region (RNA-rich exons) ⇒
+        # the count yields there ⇒ the strand + propagation + global solve ⇒ the next pass's estimate is
+        # better. Boundary SIDES are deconvolved ONCE (the fusion combine) as the fixed boundary gDNA anchors
+        # for the var~mean's boundary→region imputation; the flux transport (priors) is post-loop, unchanged.
         from .simplex_sweep import deconv_regions_sweep
 
-        regions = deconv_regions_sweep(
-            substrate,
-            region_arrays,
-            rna_sense_frac=rna_sense_frac,
-            gdna_strand_overdispersion=gdna_strand_overdispersion,
-            rna_strand_overdispersion=rna_strand_overdispersion,
-            count_gdna_frac=region_count_frac,
-            count_trust_beta=config.count_trust_beta,
-        )
         left, right = deconv_sides(
             substrate,
             region_arrays,
@@ -238,6 +234,67 @@ def calibrate(
             n_grid=config.n_grid,
             info_scale=i0,
         )
+        c = substrate.contained
+        u_tot = c.n_unspliced_pos.astype(np.float64) + c.n_unspliced_neg.astype(np.float64)
+        eff_len = np.maximum(np.asarray(region_eff_len, dtype=np.float64), 1e-9)
+        mass_u = np.maximum(np.asarray(c.mass_unspliced, dtype=np.float64), 1e-9)
+        geom2 = (eff_len / mass_u) ** 2  # density-var → fraction-var
+        obs = np.asarray(node_density.region_count_observable, dtype=bool)
+        gdna_left = np.asarray(left.gdna_mass, dtype=np.float64)
+        gdna_right = np.asarray(right.gdna_mass, dtype=np.float64)
+        gdna_c = u_tot.copy()  # Pass-0 all-gDNA: every unspliced fragment is gDNA
+        regions = None
+        prev_fg = None
+        for _pass in range(int(config.sweep_max_passes)):
+            # ρ_global = the gDNA-baseline density, from the COUNT-OBSERVABLE nodes only (intergenic/intron —
+            # where gDNA is known), using their current gDNA estimate (iterating). NOT all nodes: an all-node
+            # average is irreducibly inflated by AMBIG/unstranded RNA the strand can't remove, so it never
+            # drops and the tightening global locks in a phantom (observed). The var~mean DOES use all nodes
+            # (it needs the enriched range); only the baseline density restricts to the observable gDNA.
+            rho_global = (
+                float(gdna_c[obs].sum() / max(float(eff_len[obs].sum()), 1e-9)) if obs.any() else 0.0
+            )
+            # var~mean on the CURRENT gDNA estimate (region contained + the fixed boundary anchors). DIRECT
+            # (count-observable own variance) and IMPUTATION (boundary→region prediction error); read each
+            # node in its own class at its current gDNA density μ. Density-var → fraction-var via (eff/mass)²;
+            # τ = 1/σ². Count τ ≤ own-count Poisson ceiling (mass); global τ ≥ 1-pseudo-obs foundation,
+            # ≤ own data. σ²_global = the between-node SPREAD (robust MAD) — wide/uncertain on Pass 0
+            # (all-gDNA spans depleted→enriched), tightening as iteration converges (the zero-DNA pin).
+            pts = varmean_points(
+                substrate, region_arrays, region_eff_len, fl_mean,
+                gdna_views=(gdna_c, gdna_left, gdna_right),
+            )
+            direct = fit_direct_varmean(pts)
+            imputation = fit_imputation_varmean(pts)
+            mu = gdna_c / eff_len
+            var_d = np.where(obs, direct.predict(mu), imputation.predict(mu))
+            sig2_frac = np.maximum(var_d * geom2, 1e-12)
+            active_mu = mu[u_tot > 0.0]
+            sigma_d_global = (
+                1.4826 * float(np.median(np.abs(active_mu - np.median(active_mu))))
+                if active_mu.size else rho_global
+            )
+            sig2_glob = np.maximum(sigma_d_global**2 * geom2, 1e-12)
+            tau_count = np.minimum(1.0 / sig2_frac, mass_u)
+            tau_global = np.clip(1.0 / sig2_glob, 1.0, mass_u)
+            regions = deconv_regions_sweep(
+                substrate,
+                region_arrays,
+                rna_sense_frac=rna_sense_frac,
+                gdna_strand_overdispersion=gdna_strand_overdispersion,
+                rna_strand_overdispersion=rna_strand_overdispersion,
+                count_gdna_frac=region_count_frac,
+                count_precision=tau_count,
+                n_grid=config.sweep_n_grid,
+                rho_global=rho_global,
+                region_eff_len=region_eff_len,
+                info_scale=i0,
+                global_tau=tau_global,
+            )
+            if prev_fg is not None and float(np.mean(np.abs(regions.gdna_frac - prev_fg))) < 1e-3:
+                break
+            prev_fg = regions.gdna_frac
+            gdna_c = np.asarray(regions.gdna_mass, dtype=np.float64)
     else:
         regions = deconv_regions(
             substrate,

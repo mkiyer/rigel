@@ -267,3 +267,79 @@ split — by attacking the seeding/competition:
 the "don't fully trust calibration" principle); the leak is an abundance-competition / EM-convergence
 problem seeded by the nascent prior and shaped by the relative eff-len. The next step is **empirical
 mechanism confirmation**, not implementation.
+
+---
+
+## 9. Empirical mechanism confirmation (2026-06-15) — §8.4-(ii) is the dominant lever; the relative eff-len is dishonest *by construction*
+
+The §8.4 experiments were run (diagnostics: `/tmp/em_basin_measure.py`, `/tmp/em_efflen_predict.py`,
+`/tmp/gdna_haircut_factor.py`) on the flagship `gdna300/ss0.99/nrna_none/cap_on` (so **every** nascent
+count is phantom leak). Result: **§8.4-(ii) [relative eff-len] is confirmed as the dominant basin-opener.**
+
+### 9.1 The relative eff-len rigs the competition (measurement)
+
+Per leaky locus, the nascent component's EM eff-len vs the gDNA component's IPR eff-len:
+
+- **mass-weighted `nascent_eff / gDNA_IPR = 0.644`, on 100.0% of the phantom-nascent mass** (75 loci,
+  182k phantom). The nascent component is systematically ~36% *shorter* than the gDNA component ⇒
+  `θ_nascent = count/eff` is inflated ⇒ nascent out-competes gDNA for the shared unspliced gene-body reads.
+- The user's *"nascent can never be shorter than mature"* invariant is **mostly satisfied** and is **not**
+  the driver: `nascent_eff / mature_eff = 2.13` mass-weighted; only **2.7%** of phantom mass sits where
+  nascent < mature. The leak is nascent-vs-**gDNA**, not nascent-vs-mature.
+
+### 9.2 The decisive prediction (§5) — scaling the gDNA eff-len recovers truth
+
+Re-running the per-locus EM with `gdna_eff_len × factor` (RNA eff-lens untouched):
+
+| `gdna_eff ×` | gdna_em | nrna phantom | mrna |
+|---|---|---|---|
+| 1.000 | 2,751,681 | 88,207 | 1,109,732 |
+| 0.800 | 2,818,497 | 57,053 | 1,074,070 |
+| 0.644 | 2,877,704 | 32,536 | 1,039,380 |
+| 0.500 | 2,939,488 | **15,037** | 995,095 |
+
+Flagship truth (gdna300 = 3:1) ⇒ gDNA ≈ 2.96M, RNA ≈ 0.99M. At `×0.5` the EM lands almost exactly there
+(gDNA 2.94M, mrna 0.995M, phantom 15k). **The leak is an eff-len competition** — the gDNA component
+eff-len is too *long* relative to the RNA components, and correcting the ratio monotonically collapses the
+leak and recovers truth. The historical `×0.5` "band-aid" was approximating this correction.
+
+### 9.3 Root cause: gDNA and RNA eff-lens are built by *different formulas* (different units)
+
+- **gDNA component** (`priors.assemble_priors`): `eff_g = IPR = (G+1)²/[Σ(g²/L)+…]`, capped at span — a
+  raw concentration measure in **bp**, **no FL haircut**, **no further span-contraction** (the IPR *is* the
+  contraction).
+- **RNA components** (`capture_eff_length.transcript_capture_eff_lengths`): `eff_r = fl · [w·(IPR_r/span)+(1−w)]`
+  — the **FL-marginal** length `fl ≈ span − E[frag]` (FL haircut) **times** the IPR/span contraction ratio.
+
+So for a shared footprint `eff_nascent/eff_gDNA ≈ (fl/span)·(IPR_nascent/IPR_gDNA)`. Two inconsistencies:
+
+1. **FL-haircut asymmetry** — RNA is FL-haircut, gDNA is not. *Quantified:* the principled fix (FL-haircut
+   the gDNA IPR with the gDNA FL pmf, `region_eff_length(IPR, gdna_fl)/IPR`) is only **0.922×**
+   mass-weighted — the IPR footprints are large (~6.6 kb), so subtracting the ~384 bp gDNA FL mean barely
+   moves it. **FL-haircut alone is a real but minor (~15%) correction — NOT the fix.**
+2. **IPR-construction asymmetry [DOMINANT]** — the nascent eff-len is contracted by the IPR over its
+   **full span (exons + capture-depleted introns)**, which over-concentrates it toward the probed exons,
+   while the gDNA component uses the locus-region IPR. This is most of the 0.644.
+
+### 9.4 Corrected fix direction (supersedes §5's lean toward seeding/Option-C)
+
+**The gDNA component must NOT be FL-haircut** (user correction, 2026-06-15). The FL-marginal haircut
+`L − E[frag]` accounts for the **end-effect**: near a bounded region's two ends there are fewer valid
+fragment start positions. A **transcript has real ends** (it terminates) → the RNA components correctly
+get the haircut. **gDNA has no ends within a locus — it bleeds across transcript and locus boundaries**
+(a gDNA fragment can start upstream of a region and extend in), so there is no end-effect and the raw IPR
+is the correct gDNA measure. So the §9.3-(1) FL-haircut asymmetry (`0.922×`) is **correct physics, not a
+bug** — RNA *should* be slightly shorter than gDNA by the end-effect. Do **not** pursue FL-haircutting the
+gDNA (the earlier candidate is retracted).
+
+That leaves the **dominant** §9.3-(2) term as the sole dishonest part: the RNA/nascent eff-len is
+over-contracted because it is built as `fl·(IPR/span)` with the IPR taken over the component's **full
+span including capture-depleted introns**, collapsing it toward the probed exons. The principled fix is a
+**unified enrichment-based effective length** in which every component (mRNA, nRNA, gDNA) derives its
+contraction from the **same per-region capture-enrichment ratio** (component density / global density),
+with the FL/end-effect convention applied only where it physically applies (RNA ends: yes; gDNA: no). The
+user is formulating this enrichment-based strategy; design + prototype to follow with their input. A
+uniform `×0.5` is explicitly **unsafe** (a global down-scale manufactures phantom gDNA on zero-DNA
+libraries). **This reopens the §5 decision** — the data shows the relative eff-len is the dominant,
+measurable, parameter-free lever. **Validation gate for any fix: flagship + 20-condition net-flow with the
+ss=0.5 / low-gDNA / nrna_rnd / zero-DNA guards.**

@@ -49,6 +49,10 @@ class NodeDensity:
     """Per-region gDNA density (count clue) after local imputation."""
 
     density: np.ndarray  # float64[R] — local gDNA density (fragments per effective bp)
+    global_density: float  # ρ_global — the single pooled gDNA density over count-observable regions
+    #   (Σ contained_gdna[obs] / Σ region_eff_len[obs]; 0.0 when none observable = the init-uniform /
+    #   zero-DNA limit). The PRE-sweep global baseline the simplex global prior shrinks toward — distinct
+    #   from derive.gdna_density_global (POST-sweep, all nodes). See per_node_deconv_hierarchy_design.md §4c.
     count_gdna_frac: (
         np.ndarray
     )  # float64[R] — count module's gDNA fraction g_count = clip(density·region_eff_len /
@@ -59,6 +63,11 @@ class NodeDensity:
     #   count_gdna_frac: μ_g²·v_rel, v_rel = relative variance (CV²) from the NON-PARAMETRIC kNN
     #   variance~density curve (imputed), 1/N_own (observable), 1.0 (no anchor); floored by Poisson
     #   1/N_anchor; capped at μ_g(1−μ_g). Feeds the FP-rate quantile (Phase 2); NOT yet the blend.
+    count_rel_var: np.ndarray  # float64[R] — the RELATIVE count variance v_rel (CV²) above, BEFORE the
+    #   μ_g² scale and the Bernoulli cap: 1/N_own (observable), LOESS-floored (imputed), 1.0 (no anchor).
+    #   The per-node count PRECISION for the simplex count prior is τ_count = 1/v_rel — bounded in [1, N]
+    #   (no 1/var blow-up), the degeneracy-free reliability the design's "crossing-count = probe-proximity"
+    #   proxy implies. 1.0 (= precision 1, defers to the global prior) when the variance is not computed.
     region_count_observable: np.ndarray  # bool[R] — count-observable region (non-exonic)
     boundary_count_observable: np.ndarray  # bool[R] — count-observable boundary right of region r
     n_region_count_observable: int
@@ -239,7 +248,8 @@ def _count_fraction_variance(
         floor = 1.0 / np.maximum(n_anchor, _EPS)  # Poisson count-noise floor (Q1)
         lv = np.where(np.isfinite(loess_v_rel), loess_v_rel, 0.0)
         v_rel[imputed] = np.maximum(lv[imputed], floor[imputed])
-    return np.minimum(count_gdna_frac**2 * v_rel, count_gdna_frac * (1.0 - count_gdna_frac))
+    var = np.minimum(count_gdna_frac**2 * v_rel, count_gdna_frac * (1.0 - count_gdna_frac))
+    return var, v_rel
 
 
 def node_gdna_density(
@@ -352,17 +362,20 @@ def node_gdna_density(
     # Skipped (zeros) when the FP-rate quantile is ½ — the variance is then multiplied by Φ⁻¹(½)=0,
     # so this avoids the O(R²) LOESS on the default path with no observable effect.
     if need_count_variance:
-        count_gdna_frac_var = _count_fraction_variance(
+        count_gdna_frac_var, count_rel_var = _count_fraction_variance(
             count_gdna_frac, density, own=own, own_count=contained_gdna, d_left=d_left,
             d_right=d_right, n_anchor=n_anchor,
         )
     else:
         count_gdna_frac_var = np.zeros(r, dtype=np.float64)
+        count_rel_var = np.ones(r, dtype=np.float64)  # v_rel=1 ⇒ count precision 1 ⇒ defers to global
 
     return NodeDensity(
         density=density,
+        global_density=global_density,
         count_gdna_frac=count_gdna_frac,
         count_gdna_frac_var=count_gdna_frac_var,
+        count_rel_var=count_rel_var,
         region_count_observable=region_count_observable,
         boundary_count_observable=boundary_count_observable,
         n_region_count_observable=int(region_count_observable.sum()),

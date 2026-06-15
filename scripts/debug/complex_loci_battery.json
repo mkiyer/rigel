@@ -1,0 +1,2053 @@
+[
+ {
+  "name": "cross",
+  "description": "simple +/- single-exon overlap",
+  "genes": [
+   {
+    "gene": "a+",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      3000
+     ]
+    ],
+    "abundance": 100
+   },
+   {
+    "gene": "a-",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      4000
+     ]
+    ],
+    "abundance": 100
+   }
+  ]
+ },
+ {
+  "name": "nested",
+  "description": "- multi-exon inside a long + exon",
+  "genes": [
+   {
+    "gene": "c+",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      8000
+     ]
+    ],
+    "abundance": 100
+   },
+   {
+    "gene": "d-",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      3000
+     ],
+     [
+      5000,
+      6000
+     ]
+    ],
+    "abundance": 100
+   }
+  ]
+ },
+ {
+  "name": "interleave",
+  "description": "two +/- exon overlaps interleaved",
+  "genes": [
+   {
+    "gene": "e+",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      3000
+     ],
+     [
+      5000,
+      7000
+     ]
+    ],
+    "abundance": 100
+   },
+   {
+    "gene": "f-",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      4000
+     ],
+     [
+      6000,
+      8000
+     ]
+    ],
+    "abundance": 100
+   }
+  ]
+ },
+ {
+  "name": "chain",
+  "description": "+ - + overlap chain",
+  "genes": [
+   {
+    "gene": "g+",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      3000
+     ]
+    ],
+    "abundance": 100
+   },
+   {
+    "gene": "h-",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      5000
+     ]
+    ],
+    "abundance": 100
+   },
+   {
+    "gene": "i+",
+    "strand": "+",
+    "exons": [
+     [
+      4000,
+      7000
+     ]
+    ],
+    "abundance": 100
+   }
+  ]
+ },
+ {
+  "name": "dense",
+  "description": "shifted-tiled 3+3 exons",
+  "genes": [
+   {
+    "gene": "j+",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      2000
+     ],
+     [
+      3000,
+      4000
+     ],
+     [
+      5000,
+      6000
+     ]
+    ],
+    "abundance": 100
+   },
+   {
+    "gene": "k-",
+    "strand": "-",
+    "exons": [
+     [
+      1500,
+      2500
+     ],
+     [
+      3500,
+      4500
+     ],
+     [
+      5500,
+      6500
+     ]
+    ],
+    "abundance": 100
+   }
+  ]
+ },
+ {
+  "name": "full_single",
+  "description": "fully overlapping single exons (no anchor, no SJ)",
+  "genes": [
+   {
+    "gene": "l+",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      8000
+     ]
+    ],
+    "abundance": 100
+   },
+   {
+    "gene": "m-",
+    "strand": "-",
+    "exons": [
+     [
+      1040,
+      8040
+     ]
+    ],
+    "abundance": 100
+   }
+  ]
+ },
+ {
+  "name": "deep_nest",
+  "description": "+ \u2283 - \u2283 + double-+ coverage",
+  "genes": [
+   {
+    "gene": "n+",
+    "strand": "+",
+    "exons": [
+     [
+      500,
+      9000
+     ]
+    ],
+    "abundance": 100
+   },
+   {
+    "gene": "o-",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      7000
+     ]
+    ],
+    "abundance": 100
+   },
+   {
+    "gene": "p+",
+    "strand": "+",
+    "exons": [
+     [
+      3500,
+      5500
+     ]
+    ],
+    "abundance": 100
+   }
+  ]
+ },
+ {
+  "name": "asym",
+  "description": "+ abundant / - rare",
+  "genes": [
+   {
+    "gene": "q+",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      5000
+     ]
+    ],
+    "abundance": 250
+   },
+   {
+    "gene": "r-",
+    "strand": "-",
+    "exons": [
+     [
+      3000,
+      7000
+     ]
+    ],
+    "abundance": 20
+   }
+  ]
+ },
+ {
+  "name": "converge",
+  "description": "convergent 3' ends overlap",
+  "genes": [
+   {
+    "gene": "s+",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      5000
+     ]
+    ],
+    "abundance": 100
+   },
+   {
+    "gene": "t-",
+    "strand": "-",
+    "exons": [
+     [
+      4000,
+      8000
+     ]
+    ],
+    "abundance": 100
+   }
+  ]
+ },
+ {
+  "name": "anchored",
+  "description": "multi-exon both strands, SJ anchors on both",
+  "genes": [
+   {
+    "gene": "u+",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      3000
+     ],
+     [
+      4000,
+      6000
+     ],
+     [
+      7000,
+      9000
+     ]
+    ],
+    "abundance": 100
+   },
+   {
+    "gene": "v-",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      3500
+     ],
+     [
+      4500,
+      6500
+     ],
+     [
+      7500,
+      8500
+     ]
+    ],
+    "abundance": 100
+   }
+  ]
+ },
+ {
+  "name": "multistrand_double_plus_skew",
+  "description": "Two + transcripts of very different abundance both spanning one - transcript; AMBIG core has DOUBLE-+ coverage, each + pokes out one single-strand anchor carrying a different odds.",
+  "genes": [
+   {
+    "gene": "ms1_p_hi",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      6000
+     ]
+    ],
+    "abundance": 140.0
+   },
+   {
+    "gene": "ms1_p_lo",
+    "strand": "+",
+    "exons": [
+     [
+      3000,
+      8000
+     ]
+    ],
+    "abundance": 40.0
+   },
+   {
+    "gene": "ms1_n",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      7000
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "Breaks the 2-D sweep: the central AMBIG node sees the SUM of two + transcripts whose RNA:gDNA odds differ (ab 140 vs 40 over the same gDNA density), so the two single-strand + anchors propagate conflicting per-strand odds and no single value is correct. The 1-D solver, blind to depth, over-calls gDNA at the double-covered core."
+ },
+ {
+  "name": "multistrand_triple_plus_stack",
+  "description": "Three + transcripts stacked over one - transcript with staggered ends; AMBIG core carries TRIPLE-+ RNA mass under an ordinary single-AMBIG signature.",
+  "genes": [
+   {
+    "gene": "ms2_p1",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      8500
+     ]
+    ],
+    "abundance": 120.0
+   },
+   {
+    "gene": "ms2_p2",
+    "strand": "+",
+    "exons": [
+     [
+      1300,
+      8200
+     ]
+    ],
+    "abundance": 90.0
+   },
+   {
+    "gene": "ms2_p3",
+    "strand": "+",
+    "exons": [
+     [
+      1600,
+      7900
+     ]
+    ],
+    "abundance": 60.0
+   },
+   {
+    "gene": "ms2_n",
+    "strand": "-",
+    "exons": [
+     [
+      2200,
+      7600
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "Probes per-strand-odds depth-blindness directly: the AMBIG core has 3x + RNA mass but the signature is identical to a single + transcript, so the count clue and the propagated + odds (calibrated from thin 1x/2x/3x staggered anchors) cannot match the triple-depth core; the 1-D solver mis-attributes the surplus + mass to gDNA."
+ },
+ {
+  "name": "multistrand_staircase",
+  "description": "+ coverage depth ramps 1->2->3 across the AMBIG span (left-staggered, common right end) while - is flat; the correct per-strand + odds VARIES across adjacent AMBIG sub-regions.",
+  "genes": [
+   {
+    "gene": "ms3_p1",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      9000
+     ]
+    ],
+    "abundance": 120.0
+   },
+   {
+    "gene": "ms3_p2",
+    "strand": "+",
+    "exons": [
+     [
+      3000,
+      9000
+     ]
+    ],
+    "abundance": 90.0
+   },
+   {
+    "gene": "ms3_p3",
+    "strand": "+",
+    "exons": [
+     [
+      5000,
+      9000
+     ]
+    ],
+    "abundance": 60.0
+   },
+   {
+    "gene": "ms3_n",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      8000
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "A single propagated + odds cannot represent a per-strand odds that changes within the AMBIG run (1x at [2000,3000], 2x at [3000,5000], 3x at [5000,8000]): only ms3_p1 has a +only anchor, so ms3_p2/ms3_p3 mass is unpropagatable and the sweep applies one stale odds across a ramping target."
+ },
+ {
+  "name": "multistrand_buried_sibling",
+  "description": "Two + transcripts over one -; one + has single-strand anchors, the sibling + is a single exon entirely inside the AMBIG core (no +only region, no SJ).",
+  "genes": [
+   {
+    "gene": "ms4_p_outer",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      9000
+     ]
+    ],
+    "abundance": 130.0
+   },
+   {
+    "gene": "ms4_p_buried",
+    "strand": "+",
+    "exons": [
+     [
+      3500,
+      6500
+     ]
+    ],
+    "abundance": 70.0
+   },
+   {
+    "gene": "ms4_n",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      8000
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "Generalizes full_single with a luring anchor: the buried + has no single-strand exon and no splice junction, so its 70 units are invisible to propagation, yet ms4_p_outer's anchor supplies a CONFIDENT but too-low + odds for the double-covered core, leading the sweep to leak the buried RNA to gDNA (worse than full_single, which is at least flagged unidentifiable)."
+ },
+ {
+  "name": "multistrand_double_both",
+  "description": "Two + AND two - transcripts overlapping; the central AMBIG node is double-coverage on BOTH strands, flanked by single-strand anchors at both far ends.",
+  "genes": [
+   {
+    "gene": "ms5_p1",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      5000
+     ]
+    ],
+    "abundance": 120.0
+   },
+   {
+    "gene": "ms5_p2",
+    "strand": "+",
+    "exons": [
+     [
+      3000,
+      7000
+     ]
+    ],
+    "abundance": 80.0
+   },
+   {
+    "gene": "ms5_n1",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      6000
+     ]
+    ],
+    "abundance": 110.0
+   },
+   {
+    "gene": "ms5_n2",
+    "strand": "-",
+    "exons": [
+     [
+      4000,
+      8000
+     ]
+    ],
+    "abundance": 70.0
+   }
+  ],
+  "why_stresses": "Symmetric double-coverage: the [4000,5000] core mixes two + and two - transcripts (each strand's odds is a 2-component mixture), so the sweep must reconcile mixture odds propagated from BOTH the +only and -only ends simultaneously - neither single-strand anchor's odds is valid at the core, compounding the M1 failure on both axes."
+ },
+ {
+  "name": "multistrand_rare_sibling_leak",
+  "description": "Two + transcripts of extreme abundance skew (dominant vs rare) co-covering one -; the rare +'s only single-strand anchor is thin and low-information.",
+  "genes": [
+   {
+    "gene": "ms6_p_dom",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      6000
+     ]
+    ],
+    "abundance": 200.0
+   },
+   {
+    "gene": "ms6_p_rare",
+    "strand": "+",
+    "exons": [
+     [
+      3000,
+      8000
+     ]
+    ],
+    "abundance": 15.0
+   },
+   {
+    "gene": "ms6_n",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      7000
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "Same-strand (not cross-strand like asym) abundance skew: the double-+ core's odds is dominated by ms6_p_dom (ab 200) while ms6_p_rare's only +only anchor [7000,8000] is too thin (ab 15) to carry information weight; the sweep propagates the strong dominant odds across the core and the rare sibling's genuine RNA is swamped/leaked to gDNA."
+ },
+ {
+  "name": "anchor_sj_neither",
+  "description": "Two nearly-coincident single-exon genes (+/-) overlapping with essentially no single-strand flank and zero splice junctions anywhere in the locus.",
+  "genes": [
+   {
+    "gene": "anchor_neither_P",
+    "strand": "+",
+    "exons": [
+     [
+      2000,
+      6000
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "anchor_neither_N",
+    "strand": "-",
+    "exons": [
+     [
+      2050,
+      5950
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "The AMBIG node [2050,5950] spans almost the entire locus and there is NO splice junction on either strand, so the only RNA:gDNA odds available come from the 50-bp single-strand exon stubs' unspliced strand-mixture - far too thin to seed. The 1-D solver over-calls gDNA->1.0 at the AMBIG node (strand uninformative, defers to count); the 2-D sweep has effectively nothing to propagate (the stubs carry negligible odds mass), so this is the genuinely unidentifiable case where BOTH solvers should gracefully degrade toward the prior rather than confidently mis-call."
+ },
+ {
+  "name": "anchor_sj_one_strand",
+  "description": "AMBIG overlap where only the + gene is multi-exon (carries SJ); the - gene is a single exon (no SJ), giving a splice anchor on exactly one strand.",
+  "genes": [
+   {
+    "gene": "anchor_one_P",
+    "strand": "+",
+    "exons": [
+     [
+      1200,
+      2200
+     ],
+     [
+      4000,
+      5000
+     ],
+     [
+      7000,
+      8200
+     ]
+    ],
+    "abundance": 110.0
+   },
+   {
+    "gene": "anchor_one_N",
+    "strand": "-",
+    "exons": [
+     [
+      4000,
+      5000
+     ]
+    ],
+    "abundance": 110.0
+   }
+  ],
+  "why_stresses": "The AMBIG node [4000,5000] is the + middle exon fully covered by the lone - exon. The + strand is splice-anchored (junctions at 2200->4000 and 5000->7000 sharpen the + odds at the flanking POS exon nodes, which propagate into AMBIG over finite-Q exon edges), but the - strand has no SJ and no - single-strand neighbour, so its odds are unanchored. Probes per-strand asymmetry in the sweep: it should recover the + share but cannot pin the - vs gDNA split, exposing whether one-sided anchoring biases the residual gDNA estimate."
+ },
+ {
+  "name": "anchor_sj_both_strands",
+  "description": "AMBIG node that is an interior exon overlap on BOTH genes, with splice junctions abutting it and same-strand single-strand exons contiguous on both sides of both strands (the case the sweep should solve cleanly).",
+  "genes": [
+   {
+    "gene": "anchor_both_P",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      2500
+     ],
+     [
+      2550,
+      4000
+     ],
+     [
+      6000,
+      7500
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "anchor_both_N",
+    "strand": "-",
+    "exons": [
+     [
+      2500,
+      4000
+     ],
+     [
+      4050,
+      5500
+     ],
+     [
+      8000,
+      9500
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "The AMBIG node [2500,4000] (the + 2nd exon coinciding with the - 1st exon) is exon-contiguous to a POS node [1000,2500] on its left and to a NEG node [4000,5500] on its right, so BOTH per-strand odds propagate in over finite-Q exon edges, each anchored upstream by an SJ-bearing exon. This is the graceful-success baseline for the anchoring mechanism: the sweep should resolve the AMBIG node well while the 1-D solver still over-calls gDNA, validating that propagation from two-sided splice anchors is the lever (a positive control distinct from the failure cases)."
+ },
+ {
+  "name": "anchor_intron_moat",
+  "description": "Fully-coincident overlapping middle exons (AMBIG node) walled off on BOTH sides by introns of both genes, while SJ-bearing single-strand exons exist but are intron-separated from the AMBIG node.",
+  "genes": [
+   {
+    "gene": "anchor_moat_P",
+    "strand": "+",
+    "exons": [
+     [
+      200,
+      1500
+     ],
+     [
+      4000,
+      5000
+     ],
+     [
+      8500,
+      9800
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "anchor_moat_N",
+    "strand": "-",
+    "exons": [
+     [
+      600,
+      1200
+     ],
+     [
+      4000,
+      5000
+     ],
+     [
+      8800,
+      9600
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "The AMBIG node [4000,5000] (identical middle exons of both genes) is flanked on both sides by regions that are intron on BOTH strands (intron_pos & intron_neg = INTRON nodes). The sweep gates finite Q only on same-strand EXON<->EXON edges, so both neighbour edges are Q=inf and propagation is SEVERED: the strand-informative SJ-bearing exons ([200,1500]/[8500,9800] on +, [600,1200]/[8800,9600] on -) exist in the locus but cannot reach the AMBIG node across the intron moat. Directly breaks the sweep's propagation path - the anchor is present yet unreachable - so the 2-D solver collapses to the same gDNA over-call as the 1-D solver."
+ },
+ {
+  "name": "anchor_exon_vs_intron_flank",
+  "description": "One locus with two AMBIG nodes differing ONLY in flank type: one exon-contiguous to a same-strand POS exon (finite-Q reachable), the other intron/silent-flanked (Q=inf, severed).",
+  "genes": [
+   {
+    "gene": "anchor_flank_P",
+    "strand": "+",
+    "exons": [
+     [
+      2000,
+      3000
+     ],
+     [
+      6000,
+      7000
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "anchor_flank_N",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      2500
+     ],
+     [
+      6000,
+      7000
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "AMBIG-A [2000,2500] (- exon covering the first half of + exon [2000,3000]) is exon-contiguous to the POS node [2500,3000], so exon_pos[a]&exon_pos[b] gives finite Qp and the + odds propagate in. AMBIG-B [6000,7000] (fully coincident + and - exons) is flanked by an INTRON node on the left and NONE on the right, so both edges are Q=inf and propagation is severed despite SJ junctions landing at 6000 on both strands (spliced evidence is zeroed at AMBIG nodes). Isolates the exon-edge-vs-intron-edge propagation gate as the single variable, so the sweep should fix A but not B - a paired contrast quantifying exactly how much anchoring buys."
+ },
+ {
+  "name": "anchor_base_single_exon",
+  "description": "Baseline: two well-separated single-exon genes (+ and -), no overlap, no splice junctions - the simplest single-strand calibration case.",
+  "genes": [
+   {
+    "gene": "anchor_base_se_P",
+    "strand": "+",
+    "exons": [
+     [
+      800,
+      3200
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "anchor_base_se_N",
+    "strand": "-",
+    "exons": [
+     [
+      6000,
+      9000
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "No AMBIG anywhere: clean POS and NEG single-strand exon nodes with only unspliced reads. Confirms the per-node strand mixture calibrates the easiest case (gDNA fraction from strand direction alone, no SJ help) with no regression; serves as the floor for unspliced single-strand accuracy against which the splice-anchored cases are compared."
+ },
+ {
+  "name": "anchor_base_multi_exon",
+  "description": "Baseline: two well-separated multi-exon genes (+ and -) with splice junctions, no overlap - confirms SJ local evidence works on the easy single-strand case.",
+  "genes": [
+   {
+    "gene": "anchor_base_me_P",
+    "strand": "+",
+    "exons": [
+     [
+      500,
+      1200
+     ],
+     [
+      2200,
+      2900
+     ],
+     [
+      3900,
+      4600
+     ]
+    ],
+    "abundance": 110.0
+   },
+   {
+    "gene": "anchor_base_me_N",
+    "strand": "-",
+    "exons": [
+     [
+      5400,
+      6100
+     ],
+     [
+      7100,
+      7800
+     ],
+     [
+      8800,
+      9500
+     ]
+    ],
+    "abundance": 110.0
+   }
+  ],
+  "why_stresses": "No AMBIG: clean POS/NEG exon nodes each carrying spliced reads. Confirms the sided spliced lower-bound (the splice anchor) sharpens the per-strand odds correctly at single-strand nodes and does not spuriously inflate gDNA on introns, validating the local-evidence path that the failure-mode loci rely on propagating from."
+ },
+ {
+  "name": "anchor_base_long_intron",
+  "description": "Baseline: a single multi-exon + gene with one very long intron, isolating a large intron node between two exon nodes.",
+  "genes": [
+   {
+    "gene": "anchor_base_li_P",
+    "strand": "+",
+    "exons": [
+     [
+      400,
+      1400
+     ],
+     [
+      8400,
+      9400
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "The locus is two POS exon nodes separated by a ~7kb intron_pos INTRON node. Confirms the long intron region does not spuriously acquire RNA mass and that the exon<->exon edge across an intron is correctly decoupled (Q=inf): the two exons must NOT exchange odds through the intron. A negative control for the intron-moat gating used by anchor_intron_moat."
+ },
+ {
+  "name": "anchor_base_tandem",
+  "description": "Baseline: two well-separated SAME-strand (+/+) genes in tandem, no overlap - checks the intergenic/intron gap correctly decouples independent same-strand genes.",
+  "genes": [
+   {
+    "gene": "anchor_base_tan_P1",
+    "strand": "+",
+    "exons": [
+     [
+      600,
+      1300
+     ],
+     [
+      2300,
+      3000
+     ]
+    ],
+    "abundance": 95.0
+   },
+   {
+    "gene": "anchor_base_tan_P2",
+    "strand": "+",
+    "exons": [
+     [
+      6000,
+      6700
+     ],
+     [
+      7700,
+      8400
+     ]
+    ],
+    "abundance": 130.0
+   }
+  ],
+  "why_stresses": "Two independent + genes with different abundances separated by a NONE/intergenic gap. The exon-pos chain spans both genes' exons but the intervening intergenic node has exon_pos=False, so the gate must set Q=inf there and prevent the abundant gene's odds from bleeding into the rarer one across the gap. Confirms the propagation gating does NOT over-couple distinct same-strand genes - a no-regression guard for the finite-Q exon-edge rule that the sweep depends on."
+ },
+ {
+  "name": "interleave_stairs",
+  "description": "Two opposite-strand 4-exon ladders offset by half a period, fusing into one 13-region consecutive-AMBIG run flanked by a single POS exon on the left and a single NEG exon on the right.",
+  "genes": [
+   {
+    "gene": "stairs_pos",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      2000
+     ],
+     [
+      3000,
+      4000
+     ],
+     [
+      5000,
+      6000
+     ],
+     [
+      7000,
+      8000
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "stairs_neg",
+    "strand": "-",
+    "exons": [
+     [
+      1500,
+      2500
+     ],
+     [
+      3500,
+      4500
+     ],
+     [
+      5500,
+      6500
+     ],
+     [
+      7500,
+      8500
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "Breaks the 2-D simplex sweep: the interior AMBIG run alternates sig=3(exon+/exon-) -> 9(intron+/exon-) -> 12(intron+/intron-) -> 6(exon+/intron-), so the +exon-bit chain and -exon-bit chain are each repeatedly severed by intronic patches; 11 of 13 AMBIG nodes are reachable from NEITHER single-strand anchor's per-strand odds, so the sweep degrades to the count clue (which over-calls gDNA->1.0) exactly like the 1-D solver."
+ },
+ {
+  "name": "interleave_picket",
+  "description": "A dense alternating picket fence of seven short +single-exons interdigitated with seven short -single-exons (200-bp exons offset by 200 bp), producing a 25-region consecutive-AMBIG run between one POS and one NEG anchor.",
+  "genes": [
+   {
+    "gene": "picket_pos",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      1400
+     ],
+     [
+      2000,
+      2400
+     ],
+     [
+      3000,
+      3400
+     ],
+     [
+      4000,
+      4400
+     ],
+     [
+      5000,
+      5400
+     ],
+     [
+      6000,
+      6400
+     ],
+     [
+      7000,
+      7400
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "picket_neg",
+    "strand": "-",
+    "exons": [
+     [
+      1200,
+      1600
+     ],
+     [
+      2200,
+      2600
+     ],
+     [
+      3200,
+      3600
+     ],
+     [
+      4200,
+      4600
+     ],
+     [
+      5200,
+      5600
+     ],
+     [
+      6200,
+      6600
+     ],
+     [
+      7200,
+      7600
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "Maximizes propagation DISTANCE: 25 AMBIG hops separate the two single-strand anchors, and each period contains a sig=12 (both-intronic) gap that decouples both strand chains, so per-strand odds cannot traverse the run at all. Pushes the sweep's accumulated edge-variance (sum of Q over the path) to the limit and probes whether grid resolution K is even fine enough to carry a message this far before it diffuses to the simplex centroid."
+ },
+ {
+  "name": "interleave_intronphase",
+  "description": "A 3-exon + transcript whose two long introns each contain one - exon, so the contested + strand is INTRONIC (not exonic) at every overlap region; the - exons sit entirely within + introns.",
+  "genes": [
+   {
+    "gene": "intronphase_pos",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      2000
+     ],
+     [
+      4000,
+      5000
+     ],
+     [
+      7000,
+      8000
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "intronphase_neg",
+    "strand": "-",
+    "exons": [
+     [
+      2500,
+      3500
+     ],
+     [
+      5500,
+      6500
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "Targets the sweep's exon-bit edge gate directly: the AMBIG nodes carry sig=9 (intron+/exon-) and sig=12, where the +EXON bit is absent, so the +odds chain is broken by the INTRON itself (not by an annotation gap) even though the + strand is continuously present. The + transcript's mature/spliced anchor exists on both sides but cannot reach the AMBIG interior; all 5 AMBIG nodes are unanchored, so the + content of the overlap is invisible and the count clue dominates."
+ },
+ {
+  "name": "interleave_longrun_noanchor",
+  "description": "Two opposite-strand multi-exon transcripts sharing BOTH outer endpoints (1000 and 5400) with phase-shifted interior exons, so every region in the locus is AMBIG and there is NO single-strand region anywhere to anchor propagation.",
+  "genes": [
+   {
+    "gene": "noanchor_pos",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      1800
+     ],
+     [
+      2200,
+      3000
+     ],
+     [
+      3400,
+      4200
+     ],
+     [
+      4600,
+      5400
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "noanchor_neg",
+    "strand": "-",
+    "exons": [
+     [
+      1000,
+      1400
+     ],
+     [
+      1600,
+      2400
+     ],
+     [
+      2800,
+      3600
+     ],
+     [
+      4000,
+      5400
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "The pure form of sweep failure mode (a): a 13-region AMBIG run with ZERO single-strand neighbours in the entire locus, so there is literally nothing for the odds-propagation to seed from. Both the 1-D solver and the 2-D sweep must fall back entirely on the count clue / global prior across the whole locus; isolates how badly the sweep collapses when no anchor exists at any distance."
+ },
+ {
+  "name": "interleave_diverge",
+  "description": "A shifted ladder where the -strand exons drift out of phase with a GROWING offset (100, 300, 600, 1000 bp), producing AMBIG patches of monotonically increasing width down the locus.",
+  "genes": [
+   {
+    "gene": "diverge_pos",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      2000
+     ],
+     [
+      3000,
+      4000
+     ],
+     [
+      5000,
+      6000
+     ],
+     [
+      7000,
+      8000
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "diverge_neg",
+    "strand": "-",
+    "exons": [
+     [
+      1100,
+      2100
+     ],
+     [
+      3300,
+      4300
+     ],
+     [
+      5600,
+      6600
+     ],
+     [
+      8000,
+      8800
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "Probes whether the scalar Q_RNA coupling variance (a flagged placeholder, constant per edge) mishandles edges of very different physical width: near the POS anchor the AMBIG patches are narrow (thin counts, high power for the strand mixture) while distally they are wide (more mass, but more hops away). The mismatch between message-confidence and edge-length means the sweep should propagate the wrong odds depth-wise, and the variable-width run also stresses the per-node strand power gate w=I/(I+I0)."
+ },
+ {
+  "name": "interleave_doublecoat",
+  "description": "One long continuous - exon carpet (1000-7200) tiled UNDER two phase-shifted same-strand + exon ladders, so every overlap region has DOUBLE + coverage over a single -, with NEG anchors at both ends and no + single-strand region anywhere.",
+  "genes": [
+   {
+    "gene": "doublecoat_pos1",
+    "strand": "+",
+    "exons": [
+     [
+      1200,
+      2400
+     ],
+     [
+      3200,
+      4400
+     ],
+     [
+      5200,
+      6400
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "doublecoat_pos2",
+    "strand": "+",
+    "exons": [
+     [
+      1800,
+      3000
+     ],
+     [
+      3800,
+      5000
+     ],
+     [
+      5800,
+      7000
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "doublecoat_neg",
+    "strand": "-",
+    "exons": [
+     [
+      1000,
+      7200
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "The canonical sweep failure mode (b): two same-strand transcripts overlapping one opposite-strand transcript (double + coverage). The -odds propagates cleanly end-to-end along the continuous carpet, but the contested + content is split across two overlapping + transcripts with NO +single-strand anchor; the sweep must apportion the AMBIG mass to the + strand from a strand it can never observe alone, and the strong -odds flooding every node risks being mistaken for resolving the + share. sig=11 (intron+/exon+/exon-) gaps between ladder exons further confound which + transcript owns the mass."
+ },
+ {
+  "name": "nest_telescope_4deep",
+  "description": "Four multi-exon transcripts telescoped inside each other with strictly alternating strand (+ contains - contains + contains -), each level's two exons flanking the next; the entire core (1600-8400) is one contiguous AMBIG block flanked by POS-only shoulders at both ends.",
+  "genes": [
+   {
+    "gene": "tel_p1",
+    "strand": "+",
+    "exons": [
+     [
+      600,
+      1200
+     ],
+     [
+      8800,
+      9400
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "tel_m2",
+    "strand": "-",
+    "exons": [
+     [
+      1600,
+      2200
+     ],
+     [
+      7800,
+      8400
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "tel_p3",
+    "strand": "+",
+    "exons": [
+     [
+      2600,
+      3200
+     ],
+     [
+      6800,
+      7400
+     ]
+    ],
+    "abundance": 110.0
+   },
+   {
+    "gene": "tel_m4",
+    "strand": "-",
+    "exons": [
+     [
+      3600,
+      4200
+     ],
+     [
+      5800,
+      6400
+     ]
+    ],
+    "abundance": 110.0
+   }
+  ],
+  "why_stresses": "Breaks the simplex sweep's propagation depth: the only single-strand anchors are the POS shoulders, so both - transcripts have NO single-strand neighbour and their per-strand odds must be carried many AMBIG hops inward from the + ends, while the innermost - core is the farthest of all from any seed. Tests whether internal sided-SJ flux can substitute when strand is uninformative across the whole core."
+ },
+ {
+  "name": "nest_exon_in_intron",
+  "description": "A two-exon + gene with a long (2500-7500) intron that fully contains a single-exon - gene; the - exon overlaps only the + intron, so the contained region is AMBIG (intron_pos | exon_neg) not strand-pure.",
+  "genes": [
+   {
+    "gene": "eii_p1",
+    "strand": "+",
+    "exons": [
+     [
+      500,
+      2500
+     ],
+     [
+      7500,
+      9500
+     ]
+    ],
+    "abundance": 120.0
+   },
+   {
+    "gene": "eii_m2",
+    "strand": "-",
+    "exons": [
+     [
+      4500,
+      5500
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "Demonstrates that intron-containment does NOT buy strand purity: the buried - exon (4500-5500) is AMBIG, and being single-exon it has no SJ anchor of its own. The nearest single-strand seeds are the + exons 2000 bp away across the intron, so the per-node solver over-calls gDNA->1.0 at the island and the sweep must propagate odds across a wide intron gap to reach a strand-blind AMBIG node with zero local splice evidence."
+ },
+ {
+  "name": "nest_matryoshka_ss",
+  "description": "Four SAME-strand (+) transcripts nested matryoshka-style with multi-exon outer layers and a single-exon innermost core, producing 1x-to-4x stacked coverage and NO AMBIG region anywhere.",
+  "genes": [
+   {
+    "gene": "mat_a",
+    "strand": "+",
+    "exons": [
+     [
+      500,
+      1500
+     ],
+     [
+      8500,
+      9500
+     ]
+    ],
+    "abundance": 80.0
+   },
+   {
+    "gene": "mat_b",
+    "strand": "+",
+    "exons": [
+     [
+      2000,
+      3000
+     ],
+     [
+      7000,
+      8000
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "mat_c",
+    "strand": "+",
+    "exons": [
+     [
+      3500,
+      4200
+     ],
+     [
+      5800,
+      6500
+     ]
+    ],
+    "abundance": 130.0
+   },
+   {
+    "gene": "mat_d",
+    "strand": "+",
+    "exons": [
+     [
+      4500,
+      5500
+     ]
+    ],
+    "abundance": 160.0
+   }
+  ],
+  "why_stresses": "A control that isolates the count-magnitude (r) channel from the strand-tilt (t) channel: there is no strand ambiguity at all, but coverage layers 4-deep, so the count clue must separate stacked same-strand RNA from gDNA purely on magnitude. Stresses the var~mean count-precision model under heavy same-strand double/triple/quad coverage where the strand term gives no help distinguishing the nested isoforms from contamination."
+ },
+ {
+  "name": "nest_double_cover_inside",
+  "description": "Two long + transcripts both spanning one short - transcript that sits fully inside their mutual overlap, so the central AMBIG node (4000-6000) carries 2x + coverage on top of the single -.",
+  "genes": [
+   {
+    "gene": "dci_p1",
+    "strand": "+",
+    "exons": [
+     [
+      600,
+      9400
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "dci_p2",
+    "strand": "+",
+    "exons": [
+     [
+      1500,
+      8500
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "dci_m3",
+    "strand": "-",
+    "exons": [
+     [
+      4000,
+      6000
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "Directly triggers the named simplex failure mode (multiple same-strand transcripts overlapping one opposite-strand = double-coverage), made nested. The AMBIG island sees double + count, so the propagated count odds from the two + flanks over-explain the node's magnitude and the - RNA is mislabeled gDNA; tests whether the per-strand odds correctly attribute the 2x to + while preserving a - RNA slice with no - SJ to anchor it."
+ },
+ {
+  "name": "nest_anchor_starved_core",
+  "description": "A 4-deep nest where only the outermost + gene is multi-exon (its exons are the sole single-strand anchors at the edges); the inner -, +, and innermost - are all single-exon, fusing the entire interior (2000-8000) into one anchorless AMBIG block.",
+  "genes": [
+   {
+    "gene": "asc_p1",
+    "strand": "+",
+    "exons": [
+     [
+      700,
+      1300
+     ],
+     [
+      8700,
+      9300
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "asc_m2",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      8000
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "asc_p3",
+    "strand": "+",
+    "exons": [
+     [
+      3000,
+      7000
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "asc_m4",
+    "strand": "-",
+    "exons": [
+     [
+      4500,
+      5500
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "The textbook starvation case: a wide AMBIG region with NO single-strand anchor inside AND no splice junctions anywhere in the interior (every inner transcript is single-exon). The innermost - core is maximally distant from the only seeds (the two + shoulders) with nothing to propagate from, so propagation has no path to carry odds in and the node honestly cannot be resolved -- probes whether the sweep rests at the gDNA prior gracefully or over-calls gDNA->1.0."
+ },
+ {
+  "name": "nest_offset_staircase",
+  "description": "Four alternating-strand multi-exon transcripts staggered so the chain has a POS-only anchor ONLY on the left (500-1100) and a NEG-only anchor ONLY on the right (8000-8500), with a single contiguous AMBIG core (1500-7500) between them.",
+  "genes": [
+   {
+    "gene": "ofs_p1",
+    "strand": "+",
+    "exons": [
+     [
+      500,
+      1100
+     ],
+     [
+      5000,
+      5500
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "ofs_m2",
+    "strand": "-",
+    "exons": [
+     [
+      1500,
+      2100
+     ],
+     [
+      6000,
+      6500
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "ofs_p3",
+    "strand": "+",
+    "exons": [
+     [
+      2500,
+      3100
+     ],
+     [
+      7000,
+      7500
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "ofs_m4",
+    "strand": "-",
+    "exons": [
+     [
+      3500,
+      4100
+     ],
+     [
+      8000,
+      8500
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "Probes DIRECTIONAL propagation depth: the + per-strand odds can only be seeded from the left shoulder and the - odds only from the right, so each strand's odds must traverse the entire 6000 bp AMBIG core in opposite directions. Tests whether the inverse-variance accumulation carries each per-strand RNA:gDNA odds the full distance from its single asymmetric anchor and whether the damping kills the signal before it reaches the far side."
+ },
+ {
+  "name": "prom_divergent_distal_anchor",
+  "description": "Divergent (5' back-to-back) promoter with a shared AMBIG island, but each gene's strand-informative anchor is a DISTAL spliced exon across an intron.",
+  "genes": [
+   {
+    "gene": "prom_divergent_distal_anchor_minus",
+    "strand": "-",
+    "exons": [
+     [
+      3500,
+      4200
+     ],
+     [
+      5500,
+      7000
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "prom_divergent_distal_anchor_plus",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      2500
+     ],
+     [
+      3900,
+      4600
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "The sweep propagates per-strand log-odds along same-strand exon stretches but decouples (Q=inf) at exon<->intron transitions, so the divergent AMBIG promoter island [3900,4200) is severed from both genes' distal anchor exons by the intervening introns; the sweep cannot carry the odds in and degenerates toward the count-only 1-D answer (over-calls gDNA)."
+ },
+ {
+  "name": "prom_convergent_terminator_collide",
+  "description": "Convergent 3' ends collide in a tiny unspliced AMBIG island (both 3' UTRs, no splice junction inside it) flanked by spliced single-strand bodies.",
+  "genes": [
+   {
+    "gene": "prom_convergent_terminator_collide_plus",
+    "strand": "+",
+    "exons": [
+     [
+      1500,
+      3000
+     ],
+     [
+      3500,
+      5000
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "prom_convergent_terminator_collide_minus",
+    "strand": "-",
+    "exons": [
+     [
+      4800,
+      6300
+     ],
+     [
+      6800,
+      8500
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "The 200-bp AMBIG collision at [4800,5000) has no internal splice anchor and strand is uninformative there, so the per-node 1-D solver defers to the count clue and over-calls gDNA->1.0; the sweep must propagate the RNA:gDNA odds across the exon-continuous boundary from each flanking single-strand 3' exon, testing whether a thin terminator island survives propagation."
+ },
+ {
+  "name": "prom_tandem_readthrough_dualisland",
+  "description": "Two tandem same-strand (+) genes with a single antisense readthrough exon overlapping BOTH terminators, creating two separate AMBIG islands fed by one shared antisense source.",
+  "genes": [
+   {
+    "gene": "prom_tandem_readthrough_u",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      2200
+     ],
+     [
+      2700,
+      4100
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "prom_tandem_readthrough_d",
+    "strand": "+",
+    "exons": [
+     [
+      5100,
+      6200
+     ],
+     [
+      6700,
+      8600
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "prom_tandem_readthrough_as",
+    "strand": "-",
+    "exons": [
+     [
+      3900,
+      5300
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "The single antisense exon produces two disjoint AMBIG islands [3900,4100) and [5100,5300) whose - log-odds must be jointly reconciled from one source split across a -only segment; the sweep's chain propagation must keep the - odds consistent across both islands while the + odds switches genes, stressing the multi-island same-source coupling that a per-node 1-D solver cannot see at all."
+ },
+ {
+  "name": "prom_head2head_asym",
+  "description": "Head-to-head 5' collision (genes facing each other) with the + gene abundant and the - gene rare, so the AMBIG node mass is dominated by one strand.",
+  "genes": [
+   {
+    "gene": "prom_head2head_asym_plus",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      2500
+     ],
+     [
+      3000,
+      4600
+     ]
+    ],
+    "abundance": 140.0
+   },
+   {
+    "gene": "prom_head2head_asym_minus",
+    "strand": "-",
+    "exons": [
+     [
+      4400,
+      5900
+     ],
+     [
+      6400,
+      7900
+     ]
+    ],
+    "abundance": 35.0
+   }
+  ],
+  "why_stresses": "At the head-to-head AMBIG island [4400,4600) the abundant + strand swamps the rare - strand, so the strand mixture cannot detect the small - RNA contribution and the node looks nearly pure-+; the sweep must propagate the rare strand's RNA:gDNA odds from the adjacent -only exon to avoid mis-attributing the - RNA to gDNA, stressing low-mass-strand recovery the per-node solver cannot do."
+ },
+ {
+  "name": "prom_tail2tail_orphan_island",
+  "description": "Tail-to-tail: a short - exon fully nested inside a long + exon, where the - gene has NO single-strand segment anywhere in the locus.",
+  "genes": [
+   {
+    "gene": "prom_tail2tail_orphan_plus",
+    "strand": "+",
+    "exons": [
+     [
+      1500,
+      6500
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "prom_tail2tail_orphan_minus",
+    "strand": "-",
+    "exons": [
+     [
+      3800,
+      4400
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "The - gene exists ONLY inside the AMBIG island [3800,4400) with no -only anchor and no splice junction, so there is nothing for the sweep to propagate the - RNA:gDNA odds from -- the canonical no-anchor failure; both the 1-D solver and the 2-D sweep must fall back to the count clue and tend to over-call the nested - RNA as gDNA."
+ },
+ {
+  "name": "prom_bidir_double_plus",
+  "description": "Bidirectional/divergent layout with TWO overlapping + transcripts spanning one - gene, giving double + coverage over the AMBIG node.",
+  "genes": [
+   {
+    "gene": "prom_bidir_double_plus_p1",
+    "strand": "+",
+    "exons": [
+     [
+      3000,
+      5000
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "prom_bidir_double_plus_p2",
+    "strand": "+",
+    "exons": [
+     [
+      3200,
+      5200
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "prom_bidir_double_plus_m",
+    "strand": "-",
+    "exons": [
+     [
+      4000,
+      4800
+     ]
+    ],
+    "abundance": 100.0
+   }
+  ],
+  "why_stresses": "The AMBIG island [4000,4800) is covered by two distinct + transcripts plus one - gene (double + coverage), the documented sweep failure mode where multiple same-strand transcripts overlap an opposite-strand one; the propagated + odds is the sum over two transcripts while the node mixture sees one aggregate + fraction, so the sweep can mis-split the doubled + mass and mis-attribute the - RNA."
+ },
+ {
+  "name": "asym_anchorless_rare",
+  "description": "Abundant two-exon + transcript over a rare single-exon - transcript that has NO splice junction of its own, in 50:1 +:- abundance ratio.",
+  "genes": [
+   {
+    "gene": "ar_plus",
+    "strand": "+",
+    "exons": [
+     [
+      500,
+      4500
+     ],
+     [
+      5500,
+      9500
+     ]
+    ],
+    "abundance": 300.0
+   },
+   {
+    "gene": "ar_minus",
+    "strand": "-",
+    "exons": [
+     [
+      3000,
+      6000
+     ]
+    ],
+    "abundance": 8.0
+   }
+  ],
+  "why_stresses": "Breaks the 2-D sweep: the AMBIG patches (3000-4500, 5500-6000) have a + single-strand anchor and SJ but the rare - strand has no single-strand region and no junction anywhere, so propagation has nothing to reconstruct the tiny - odds from and the count clue sees only the dominant + density, collapsing the AMBIG to look + (or pure gDNA at the 1-D node). Probes the 'no anchor for the rare strand + extreme odds' failure directly."
+ },
+ {
+  "name": "asym_odds_ladder",
+  "description": "Both strands multi-exon and SJ-anchored, but 10:1 +:- abundance, producing four AMBIG patches across which a large per-strand odds gap must be propagated.",
+  "genes": [
+   {
+    "gene": "ol_plus",
+    "strand": "+",
+    "exons": [
+     [
+      500,
+      3000
+     ],
+     [
+      3500,
+      6000
+     ],
+     [
+      6500,
+      9500
+     ]
+    ],
+    "abundance": 400.0
+   },
+   {
+    "gene": "ol_minus",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      4000
+     ],
+     [
+      5000,
+      7000
+     ]
+    ],
+    "abundance": 40.0
+   }
+  ],
+  "why_stresses": "Stresses the magnitude the propagation must carry: each AMBIG patch is flanked by + anchors that scream high + odds and - anchors/SJ that whisper low - odds, so the sweep must transport an asymmetric per-strand RNA:gDNA odds (10x apart) intact through four interleaved nodes without letting the dominant + odds bleed into and erase the - share. Tests odds-magnitude fidelity vs the I-gradient smoothing both strands together."
+ },
+ {
+  "name": "asym_balanced_uninformative",
+  "description": "Two near-equal single-exon transcripts (100 vs 95) on opposite strands with a single AMBIG overlap and no splice junctions on either side.",
+  "genes": [
+   {
+    "gene": "bu_plus",
+    "strand": "+",
+    "exons": [
+     [
+      1000,
+      5500
+     ]
+    ],
+    "abundance": 100.0
+   },
+   {
+    "gene": "bu_minus",
+    "strand": "-",
+    "exons": [
+     [
+      4500,
+      9000
+     ]
+    ],
+    "abundance": 95.0
+   }
+  ],
+  "why_stresses": "The odds the propagation carries is ~1:1, so the per-strand RNA:gDNA odds inflowing from the + and - single-strand anchors are nearly identical and provide no asymmetric signal to split the AMBIG node; combined with bare exons (no SJ), the only lever left is the count clue, which gives magnitude but not the 50/50 strand split. Probes whether the sweep degenerates gracefully (no spurious gDNA over-call) when odds asymmetry vanishes."
+ },
+ {
+  "name": "asym_dominant_double_cover",
+  "description": "Two identical abundant + transcripts (double + coverage) over one rare - transcript at ~25:1 effective +:- ratio, all single-exon and bare.",
+  "genes": [
+   {
+    "gene": "dd_plus_a",
+    "strand": "+",
+    "exons": [
+     [
+      500,
+      9500
+     ]
+    ],
+    "abundance": 150.0
+   },
+   {
+    "gene": "dd_plus_b",
+    "strand": "+",
+    "exons": [
+     [
+      540,
+      9540
+     ]
+    ],
+    "abundance": 150.0
+   },
+   {
+    "gene": "dd_minus",
+    "strand": "-",
+    "exons": [
+     [
+      3000,
+      6500
+     ]
+    ],
+    "abundance": 12.0
+   }
+  ],
+  "why_stresses": "Directly hits the known 'multiple same-strand transcripts overlapping an opposite-strand one' failure: the AMBIG node sees doubled + RNA mass plus a thin - sliver, and with no - anchor or SJ the sweep cannot recover the rare - odds, so it attributes the - mass to + or to gDNA. The double-+ coverage also inflates the count clue's apparent density, amplifying the bias against the rare strand."
+ },
+ {
+  "name": "asym_rare_anchored_dominant_bare",
+  "description": "Inverted anchoring: the abundant + strand is a single bare exon (no SJ) while the RARE - strand is the only multi-exon, SJ-anchored transcript, at ~17:1 +:- abundance.",
+  "genes": [
+   {
+    "gene": "rad_plus",
+    "strand": "+",
+    "exons": [
+     [
+      500,
+      9500
+     ]
+    ],
+    "abundance": 250.0
+   },
+   {
+    "gene": "rad_minus",
+    "strand": "-",
+    "exons": [
+     [
+      2000,
+      3000
+     ],
+     [
+      4000,
+      5000
+     ],
+     [
+      6000,
+      7000
+     ]
+    ],
+    "abundance": 15.0
+   }
+  ],
+  "why_stresses": "Tests whether the sweep trusts a strand anchor that is correct but low-depth: the only single-strand/SJ evidence belongs to the rare - strand (low N -> low information I = N(2k-1)^2), while the abundant + strand has no anchor of its own. The I-gradient w = I/(I+I0) may discount the rare strand's reliable SJ signal because of thin depth, letting the dominant unanchored + dominate the AMBIG against the actual strand evidence."
+ },
+ {
+  "name": "asym_gradient_skew",
+  "description": "One very abundant + long exon overlapping TWO - exons of the SAME strand at wildly different depths (120 vs 6), creating two AMBIG patches with high-N and low-N - evidence.",
+  "genes": [
+   {
+    "gene": "gs_plus",
+    "strand": "+",
+    "exons": [
+     [
+      500,
+      9500
+     ]
+    ],
+    "abundance": 380.0
+   },
+   {
+    "gene": "gs_minus_hi",
+    "strand": "-",
+    "exons": [
+     [
+      1500,
+      3000
+     ]
+    ],
+    "abundance": 120.0
+   },
+   {
+    "gene": "gs_minus_lo",
+    "strand": "-",
+    "exons": [
+     [
+      6000,
+      7500
+     ]
+    ],
+    "abundance": 6.0
+   }
+  ],
+  "why_stresses": "Probes the I = N(2k-1)^2 depth term of the trust gradient within a single strand and locus: the high-depth - patch (1500-3000) should retain strand trust and resolve, while the near-identical low-depth - patch (6000-7500) falls below the I0=10 information floor and gets absorbed into the dominant + odds or called gDNA. Reveals whether the solver's per-node trust cutoff produces inconsistent calls for the same strand at different depths under heavy +:- skew."
+ }
+]

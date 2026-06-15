@@ -48,7 +48,7 @@ def test_nonparametric_curve_captures_the_on_off_target_chasm():
     dl = np.concatenate([low * (1 + sl), high * (1 + sh)])
     dr = np.concatenate([low * (1 - sl), high * (1 - sh)])
     cg = np.full(2 * n, 0.1)
-    var = _count_fraction_variance(
+    var, _ = _count_fraction_variance(
         cg, density, own=np.zeros(2 * n, bool), own_count=np.zeros(2 * n),
         d_left=dl, d_right=dr, n_anchor=np.full(2 * n, 1e6),
     )
@@ -64,7 +64,7 @@ def test_poisson_floor_binds_for_sparse_anchors():
     mu = np.linspace(1.0, 5.0, n)
     dl, dr = mu * 1.0001, mu * 0.9999
     cg = np.full(n, 0.1)
-    var = _count_fraction_variance(
+    var, _ = _count_fraction_variance(
         cg, 0.5 * (dl + dr), own=np.zeros(n, bool), own_count=np.zeros(n),
         d_left=dl, d_right=dr, n_anchor=np.full(n, 4.0),  # floor 1/4 = 0.25
     )
@@ -73,7 +73,7 @@ def test_poisson_floor_binds_for_sparse_anchors():
 
 def test_no_anchor_node_is_uninformative():
     cg = np.array([0.1, 0.4])
-    var = _count_fraction_variance(
+    var, _ = _count_fraction_variance(
         cg, np.zeros(2), own=np.array([False, False]), own_count=np.array([0.0, 0.0]),
         d_left=np.array([np.nan, np.nan]), d_right=np.array([np.nan, np.nan]),
         n_anchor=np.array([0.0, 0.0]),
@@ -83,7 +83,7 @@ def test_no_anchor_node_is_uninformative():
 
 def test_observable_node_uses_own_count_poisson():
     cg = np.array([0.2])
-    var = _count_fraction_variance(
+    var, _ = _count_fraction_variance(
         cg, np.zeros(1), own=np.array([True]), own_count=np.array([50.0]),
         d_left=np.array([np.nan]), d_right=np.array([np.nan]), n_anchor=np.array([0.0]),
     )
@@ -92,7 +92,7 @@ def test_observable_node_uses_own_count_poisson():
 
 def test_variance_capped_at_bernoulli_max():
     cg = np.array([0.9])
-    var = _count_fraction_variance(
+    var, _ = _count_fraction_variance(
         cg, np.zeros(1), own=np.array([False]), own_count=np.array([0.0]),
         d_left=np.array([np.nan]), d_right=np.array([np.nan]), n_anchor=np.array([0.0]),
     )
@@ -135,7 +135,7 @@ def test_density_variance_curve_triplet_uses_three_points():
 def test_too_few_two_anchor_falls_back_to_floor():
     # Fewer than _LOESS_MIN_FIT 2-anchor points ⇒ LOESS skipped ⇒ imputed nodes use the Poisson floor.
     n = 3
-    var = _count_fraction_variance(
+    var, _ = _count_fraction_variance(
         np.full(n, 0.1), np.full(n, 2.0), own=np.zeros(n, bool), own_count=np.zeros(n),
         d_left=np.full(n, np.nan), d_right=np.full(n, 5.0), n_anchor=np.full(n, 10.0),
     )

@@ -1,5 +1,10 @@
 # Calibration deconvolution — the authoritative plan (current state → production)
 
+> **⚠️ SUPERSEDED (2026-06-15) by [`CALIBRATION_PLAN_v2.md`](CALIBRATION_PLAN_v2.md).** This 2026-06-13 plan
+> predates the per-node Bayesian-hierarchy redesign (strand-likelihood + count-prior + global-prior), the
+> monotone-P-spline variance model (`variance_model.py`), and the iterative bootstrap. Read v2 for the
+> current architecture; this is kept for history.
+
 **Status:** SINGLE SOURCE OF TRUTH, 2026-06-13. Consolidates and **supersedes** the scattered
 propagation/simplex planning docs (see §7). Where this doc and any older note disagree, this doc wins (and
 `calibration_theory.md` remains the authoritative *theory* reference). Written after a full code+docs audit

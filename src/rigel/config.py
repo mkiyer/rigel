@@ -305,6 +305,21 @@ class CalibrationConfig:
     #: ``var~mean`` / capture-class) and derive it. See docs/calibration/count_trust_design.md.
     count_trust_beta: float = 10.0
 
+    #: **Propagation lattice resolution** ``K`` for the 2-simplex grid sum-product
+    #: (``simplex_sweep.deconv_regions_sweep``). Separate from ``n_grid`` (the fine 1-D fusion grid):
+    #: the 2-simplex has ``(K+1)(K+2)/2`` points and the propagation edge is ``K²`` per transition, so the
+    #: cost grows ~quartically — ``n_grid=200`` is far too expensive here. ``K=60`` matches production
+    #: per-node accuracy at the tractable propagation cost (``K=20`` over-calls / under-resolves the
+    #: zero-DNA case; see CALIBRATION_PLAN §4).
+    sweep_n_grid: int = 60
+
+    #: **Iterative-bootstrap pass count** for the propagation path (``CALIBRATION_PLAN_v2`` §2/§5). Each
+    #: pass re-fits the gDNA ``var~mean`` + the global density ``ρ_global`` on the previous pass's gDNA
+    #: estimate (Pass 0 = the all-gDNA init: every unspliced fragment is gDNA), then re-solves; the loop
+    #: stops early once the per-node ``f_g`` stabilizes. A few passes suffice (strand/seed-anchored, not
+    #: open EM).
+    sweep_max_passes: int = 4
+
     def __post_init__(self) -> None:
         if not (0.0 < float(self.gdna_deconv_quantile) < 1.0):
             raise ValueError(
@@ -313,6 +328,14 @@ class CalibrationConfig:
             )
         if self.n_grid < 2:
             raise ValueError(f"CalibrationConfig.n_grid must be >= 2; got {self.n_grid}.")
+        if self.sweep_n_grid < 2:
+            raise ValueError(
+                f"CalibrationConfig.sweep_n_grid must be >= 2; got {self.sweep_n_grid}."
+            )
+        if self.sweep_max_passes < 1:
+            raise ValueError(
+                f"CalibrationConfig.sweep_max_passes must be >= 1; got {self.sweep_max_passes}."
+            )
         if self.gdna_strand_prior_alpha_beta < 2.0:
             raise ValueError(
                 "CalibrationConfig.gdna_strand_prior_alpha_beta must be >= 2.0 "
