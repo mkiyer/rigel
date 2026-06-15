@@ -61,7 +61,7 @@ ruff format src/ tests/
 
 1. **BAM Scan** (`scan_and_buffer`): C++ htslib single-pass BAM reader. Resolves fragments against the reference index, trains strand/fragment-length models from unique mappers, buffers resolved fragments into a columnar `FragmentBuffer`, **and** deposits per-region/per-boundary fractional fragment mass into the C++ **accumulator** (4 channels: unspliced ±, spliced sense/antisense) → an `AccumulatorPayload`.
 
-2. **Calibration** (`calibration.calibrate`): a per-region EM over the accumulator payload. It deconvolves each region's fragment mass into **gDNA vs RNA** and fits the library hyperparameters — `ρ_0` (gDNA density), `φ` (NB count dispersion), `ε_s` (gDNA splice-artifact rate), `ρ_d_bb`/`ρ_r_bb` (gDNA/RNA strand Beta-Binomial dispersions), `κ_rna` (RNA sense fraction) — plus a per-region exposure posterior `ω` and deconvolved gDNA/RNA mass. Output: `CalibrationResult`.
+2. **Calibration** (`calibration.calibrate`): an **acyclic single-pass deconvolution** over the accumulator payload (no iterative EM/M-step). It deconvolves each region's fragment mass into **gDNA vs RNA** and fits the library hyperparameters — `ρ_0` (gDNA density), `ρ_d_bb`/`ρ_r_bb` (gDNA/RNA strand Beta-Binomial dispersions), `κ_rna` (RNA sense fraction) — plus the deconvolved gDNA/RNA mass. Output: `CalibrationResult`.
 
 3. **Quantification** (`quant_from_buffer`): bridges calibration → per-locus prior (`calibration.priors.assemble_priors`), scores fragments (`scan.FragmentRouter` → CSR `ScoredFragments`), builds loci via connected components (`locus.build_multi_loci`), partitions the CSR per locus (`locus_partition.partition_and_free`), and runs per-locus EM. Each locus is an independent subproblem with **`n_t + 1` components** — one per transcript row (annotated mRNA and nRNA spans alike) plus one gDNA component. The calibration prior enters as **two per-locus Dirichlet scalars** (`alpha_rna_add`, `alpha_gdna_add`) that set the gDNA-vs-RNA split; the EM distributes RNA mass among the compatible transcripts.
 
@@ -92,11 +92,17 @@ ruff format src/ tests/
 - `strand_balance.py` / `strand_summary.py` — **RNA** strand *mean*: `rna_sense_frac` (used by the decode). `StrandBalance.rna_strand_overdispersion` here is a QC-only thin-count power diagnostic (`1/(n_obs+3)`), distinct from the decode's RNA overdispersion (see `gdna_strand.py`)
 - `gdna_strand.py` — **both** strand Beta-Binomial overdispersions (shared component-agnostic MoM core): `gdna_strand_overdispersion` (mean ½, fit from count-observable seed regions + boundary sides) and `rna_strand_overdispersion` (mean κ, fit from boundary-side spliced counts). Both applied symmetrically in `strand_likelihood` with the same default prior, so unstranded data is uninformative (see `docs/calibration/calibration_theory.md` §4.3)
 - `strand_deconv.py` — **strand module** (`strand_deconvolve`: per node the Beta-Binomial posterior gDNA fraction `g_strand` read at the FP-quantile + its information `I=N·(2κ−1)²`; weak Beta(½,½) prior) + the **count cleaning** `cleaned_gdna_count` (removes the strand-identified RNA from a count by `(w·g_strand+(1−w))`, `w=I/(I+I₀)`; applied to the boundary crossings, degrades to a no-op at low `I`) + the **per-node gradient combine** (`_deconv_per_node`/`deconv_regions`/`deconv_sides`): `g = w·g_strand + (1−w)·g_count`, `w=I/(I+I₀)`; `g_count` = count module's `count_gdna_frac`; strand-unobservable nodes (κ=½ / AMBIG) are count-only (`w=0`); FP-rate quantile `gdna_deconv_quantile` applied here (no-op at ½). Also exposes `boundary_side_seeds` for the gDNA strand fit
-- `derive.py` — `gdna_density_global` + per-node exposure (+ exposure-weighted gDNA length) from the deconvolved masses
+- `derive.py` — `gdna_density_global` (QC scalar) + the geometric gDNA length from the deconvolved masses
 - `effective_length.py` — FL-marginal effective lengths (region / boundary)
+- `capture_eff_length.py` — capture-aware **EM** effective lengths (`transcript_capture_eff_lengths`): contract each transcript's eff-len by the per-region gDNA-enrichment IPR over its region set, with an evidence-weighted shrinkage `w=G/(G+n_reg)` toward no-contraction on sparse gDNA
+- `splice_junction.py` — `region_splice_gdna_frac`: convert the boundary density fraction `f_b` to the region count fraction via the gDNA/RNA region eff-length ratio (FL-consistency of the splice partition)
+- `simplex.py` — per-node 2-simplex primitives (`_simplex_lattice`, `_mixture_strand_loglik`) shared by `simplex_sweep`
+- `simplex_sweep.py` — **opt-in** (`use_propagation=True`) region deconv: odds-propagation grid sum-product on the per-reference region chain (`deconv_regions_sweep`); alternative to the fusion `deconv_regions`
+- `mature_density.py` / `rna_variance.py` — RNA density + splice-junction-pair var~mean model (Phase 2a)
+- `run_fill.py` — run/neighbour helpers (`same_ref_left_right`) for the boundary-side and chain geometry
 - `fl.py` — gDNA / RNA / global fragment-length pmfs (empirical-Bayes smoothed)
 - `result.py` — `CalibrationResult` schema + intrinsic invariants
-- `priors.py` — `assemble_priors`: `CalibrationResult` → per-locus Dirichlet prior
+- `priors.py` — `assemble_priors`: `CalibrationResult` → per-locus Dirichlet prior (+ the gDNA-component IPR effective length)
 - `errors.py` — calibration exceptions
 
 ### C++ Extensions (`src/rigel/native/`)
@@ -109,7 +115,7 @@ Five nanobind modules compiled via CMakeLists.txt:
 | `_em_impl` | `em_solver.cpp` | Per-locus EM (`n_t + 1` components), connected components, partition scatter helpers, OpenMP |
 | `_scoring_impl` | `scoring.cpp` | Fragment likelihood scoring, bias correction, SIMD optimized |
 | `_resolve_impl` | `resolve.cpp` | Fragment-to-transcript resolution via cgranges interval tree |
-| `_cgranges_impl` | `cgranges_bind.cpp` | Vendored cgranges interval overlap library |
+| `_cgranges_impl` | `cgranges/cgranges_bind.cpp` | Vendored cgranges interval overlap library |
 
 Key C++ details:
 - C++17, compiled with `-O3`, LTO enabled
