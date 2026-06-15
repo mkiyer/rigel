@@ -5,8 +5,9 @@ Belief propagation on a per-reference chain of region nodes. Each node's latent 
 vectors; the edge transition is ``(P,P)``. The propagated quantity is the **per-strand RNA:gDNA log-odds**
 ``log(f_c/f_g)`` — the only enrichment-AND-content-invariant signal (CALIBRATION_PLAN §0b): the edge
 penalises the *difference* in log-odds, gated to same-strand exon stretches (continuous RNA) and decoupled
-(`Q=∞`) at exon↔intron / silent-strand transitions. gDNA is the residual (it falls out of the simplex,
-never propagated). Exact in two sweeps on a chain (forward + backward); per-reference chunked.
+(`Q=∞`) at exon↔intron / silent-strand transitions. gDNA is the residual of the simplex (never propagated
+*directly* — but it couples implicitly, since the propagated log-odds `log(f_c/f_g)` share `f_g` in the
+denominator). Exact in two sweeps on a chain (forward + backward); per-reference chunked.
 
 `ψ_i` (local evidence) = the 3-component strand mixture (`simplex._mixture_strand_loglik`) + the sided
 spliced lower bound + a weak gDNA prior — i.e. `solve_node` minus the count term (the count is not local
@@ -58,8 +59,9 @@ def _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, 
       vertex-push (the likelihood already favours that vertex at a single-strand node).
     * **AMBIG / intergenic (non-strand-observable) nodes** carry the **global gDNA prior** instead — a
       Gaussian pull of ``f_g`` toward the per-node baseline ``global_mu = clip(ρ_global·eff_len/mass, 0, 1)``
-      with **per-node precision ``global_tau``** (``1/σ²_global``, from the DIRECT var~mean at ρ_global;
-      a scalar/array, ≥ the 1-pseudo-observation foundation). Here the U-shaped Jeffreys *would* push a
+      with **per-node precision ``global_tau``** (``1/σ²_global``, where ``σ²_global`` is the robust MAD
+      spread of the per-node densities in ``calibrate``; a scalar/array, ≥ the 1-pseudo-observation
+      foundation). Here the U-shaped Jeffreys *would* push a
       flat-likelihood node to the ``f_g=1`` vertex (phantom gDNA); the informative global baseline replaces
       it, so in a pure-RNA library (``ρ_global ≈ 0`` ⇒ tight ``global_tau``) an unanchored AMBIG node
       settles at ``f_g ≈ 0``.
@@ -211,8 +213,8 @@ def deconv_regions_sweep(
             np.where(mass_unspl > 0.0, float(rho_global) * eff / np.maximum(mass_unspl, _EPS), 0.0),
             0.0, 1.0,
         )
-        # per-node global precision from calibrate (1/σ²_global, DIRECT var~mean at ρ_global); default to
-        # the 1-pseudo-observation foundation when not supplied (toy tests / first wiring).
+        # per-node global precision from calibrate (1/σ²_global, σ²_global = the robust MAD spread of the
+        # per-node densities); default to the 1-pseudo-observation foundation when not supplied (toy tests).
         gtau = 1.0 if global_tau is None else np.asarray(global_tau, dtype=np.float64)
     else:
         mu_global = None
