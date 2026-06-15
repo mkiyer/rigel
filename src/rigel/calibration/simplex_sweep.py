@@ -141,19 +141,50 @@ def _edge_logphi(lo_pos, lo_neg, q_pos, q_neg):
 
 
 def _sweep_chain(psi, q_pos_edges, q_neg_edges, lo_pos, lo_neg):
-    """Forward + backward grid sum-product over one chain. ``psi`` ``(m,P)``; returns belief ``(m,P)``."""
+    """Forward + backward grid sum-product over one chain. ``psi`` ``(m,P)``; returns belief ``(m,P)``.
+
+    The edge log-coupling depends only on the edge's ``(q_pos, q_neg)`` and there are at most a handful of
+    distinct values on a chain (each strand's ``Q`` is ``q_rna`` or ``∞``), so the ``(P,P)`` matrices are
+    **cached** by ``(q_pos, q_neg)`` rather than rebuilt per edge — a long chain otherwise materialises one
+    28.6 MB matrix per edge (~31 GB on a 1082-edge chain; an OOM wall at genome scale). A **fully decoupled**
+    edge (both ``Q=∞`` ⇒ the zero matrix) is short-circuited to an ``O(P)`` constant message — the incoming
+    vector's ``logsumexp`` broadcast across states — instead of an ``O(P²)`` reduction against a zero matrix
+    (the mathematically identical result: adding the zero coupling leaves only the marginal of the incoming
+    message). Most edges (exon↔intron / silent-strand transitions) are decoupled, so this is what makes the
+    sweep tractable at genome scale. Output matches the dense path to floating-point tolerance.
+    """
     m = psi.shape[0]
     if m == 1:
         return psi
-    mats = [_edge_logphi(lo_pos, lo_neg, q_pos_edges[k], q_neg_edges[k]) for k in range(m - 1)]
+
+    cache: dict = {}
+
+    def _mat(k):  # cached (P,P) edge log-coupling for edge k
+        key = (float(q_pos_edges[k]), float(q_neg_edges[k]))
+        mat = cache.get(key)
+        if mat is None:
+            mat = _edge_logphi(lo_pos, lo_neg, q_pos_edges[k], q_neg_edges[k])
+            cache[key] = mat
+        return mat
+
+    def _decoupled(k):  # both strands Q=∞ ⇒ zero coupling ⇒ the edge is a constant column
+        qp, qn = q_pos_edges[k], q_neg_edges[k]
+        return not (np.isfinite(qp) and qp > 0.0) and not (np.isfinite(qn) and qn > 0.0)
+
     alpha = np.zeros_like(psi)
     for i in range(1, m):
         prev = psi[i - 1] + alpha[i - 1]  # (P,)
-        alpha[i] = logsumexp(prev[:, None] + mats[i - 1], axis=0)  # over prev state → (P,)
+        if _decoupled(i - 1):
+            alpha[i] = logsumexp(prev)  # constant column → broadcast over states
+        else:
+            alpha[i] = logsumexp(prev[:, None] + _mat(i - 1), axis=0)  # over prev state → (P,)
     beta = np.zeros_like(psi)
     for i in range(m - 2, -1, -1):
         nxt = psi[i + 1] + beta[i + 1]
-        beta[i] = logsumexp(mats[i] + nxt[None, :], axis=1)  # over next state → (P,)
+        if _decoupled(i):
+            beta[i] = logsumexp(nxt)
+        else:
+            beta[i] = logsumexp(_mat(i) + nxt[None, :], axis=1)  # over next state → (P,)
     return psi + alpha + beta
 
 
