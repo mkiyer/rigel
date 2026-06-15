@@ -137,16 +137,28 @@ def transcript_capture_eff_lengths(
 
     inc_t, inc_r = _exon_region_incidence(index, region_arrays)
     n_t = fl.shape[0]
-    g_sum = np.zeros(n_t)  # G_t  = Σ m_r
+    g_sum = np.zeros(n_t)  # G_t  = Σ m_r        (component gDNA mass)
     supp = np.zeros(n_t)  # Σ m_r²/L_r
     span = np.zeros(n_t)  # span_t = Σ L_r
+    n_reg = np.zeros(n_t)  # number of regions in the footprint
     if inc_t.size:
         np.add.at(g_sum, inc_t, gdna_region[inc_r])
         np.add.at(supp, inc_t, m_sq_over_l[inc_r])
         np.add.at(span, inc_t, geom[inc_r])
+        np.add.at(n_reg, inc_t, 1.0)
 
     with np.errstate(divide="ignore", invalid="ignore"):
         safe_span = np.maximum(span, 1e-9)
         eff_ipr = np.minimum((g_sum + 1.0) ** 2 / (supp + (2.0 * g_sum + 1.0) / safe_span), span)
-        factor = np.where(span > 0.0, eff_ipr / safe_span, 1.0)  # ∈ (0,1]; 1 ⇒ no contraction
+        factor_raw = np.where(span > 0.0, eff_ipr / safe_span, 1.0)  # ∈ (0,1]; 1 ⇒ no contraction
+        # Evidence-weighted SHRINKAGE of the contraction toward 1 (no contraction). The IPR estimates an
+        # effective footprint from the per-region gDNA counts; that estimate is only trustworthy when there
+        # are enough fragments to resolve the distribution. Empirical-Bayes weight w = G/(G + n_reg) — one
+        # pseudo-fragment per footprint region (the canonical Dirichlet prior over the regions, NO tunable
+        # constant): w→1 when the gDNA is abundant relative to the footprint (real capture concentration ⇒
+        # full contraction) and w→0 when the gDNA is sparse — a few false-positive fragments in a zero-DNA
+        # library, or genuinely thin evidence — so the contraction smoothly SHRINKS back to no-contraction
+        # rather than over-contracting on noise. Degrades to ≈ the old factor wherever gDNA is real (G ≫ n_reg).
+        w = np.where(n_reg > 0.0, g_sum / (g_sum + n_reg), 0.0)
+        factor = w * factor_raw + (1.0 - w)
     return np.minimum(fl * factor, fl)
