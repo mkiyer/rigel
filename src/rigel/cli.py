@@ -607,7 +607,6 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
     # -- CalibrationConfig --
     _ParamSpec("gdna_deconv_quantile", "calibration.gdna_deconv_quantile"),
-    _ParamSpec("use_propagation", "calibration.use_propagation"),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -1179,15 +1178,6 @@ def build_parser() -> argparse.ArgumentParser:
         "(default 0.5 = neutral, no shift). >0.5 favors gDNA (trades gDNA->RNA leak for RNA->gDNA "
         "siphon), uncertainty-aware: ambiguous nodes move most, confident nodes barely move. <0.5 "
         "favors RNA. Widens only (never sharpens); decoupled from --gdna-em-llr-bias (the EM knob).",
-    )
-    adv.add_argument(
-        "--use-propagation",
-        dest="use_propagation",
-        action="store_true",
-        default=None,
-        help="Use the odds-propagation grid sum-product (simplex_sweep) for calibration's region split "
-        "(resolves AMBIG overlapping opposite-strand loci by propagating the per-strand RNA:gDNA log-odds; "
-        "docs/calibration/CALIBRATION_PLAN.md §2). Default off (the per-node strand/count fusion). Experimental.",
     )
     adv.add_argument(
         "--overhang-alpha",

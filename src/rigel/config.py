@@ -287,30 +287,12 @@ class CalibrationConfig:
     #: good strand model; ``w→0`` at κ≈½ or thin — a no-op, the count floor. Validate on the suites.
     gdna_strand_info_scale: float = 10.0
 
-    #: Opt-in: use the **odds-propagation grid sum-product** (``simplex_sweep.deconv_regions_sweep``) for
-    #: the contained-region split instead of the per-node strand/count fusion. Propagates the per-strand
-    #: RNA:gDNA log-odds along same-strand exon stretches to resolve AMBIG (overlapping opposite-strand)
-    #: loci (CALIBRATION_PLAN.md §2). Default ``False`` (production = the fusion) while the sweep is being
-    #: brought to ≥ parity (it currently underperforms the fusion — see CALIBRATION_PLAN §4); flip after the
-    #: net-flow benchmark confirms it beats production.
-    use_propagation: bool = False
-
-    #: **Count-trust ``β``** (the ``simplex_sweep`` propagation path). The effective precision
-    #: of the count log-likelihood term in the per-node pie solve — how much to believe the (often biased
-    #: under capture) count signal relative to the strand. The strand's precision ``I=N·(2κ−1)²`` vanishes
-    #: at κ=½, so ``β`` sets the *absolute* count trust: small enough that an excellent strand (κ=0.99)
-    #: governs single-strand nodes, large enough that the count cleanly takes over where the strand is
-    #: silent (κ=½). PHASE-1 placeholder — a single hard-coded value (the successor to the hard-coded
-    #: ``I₀``=``gdna_strand_info_scale``); phases 2–4 make it per-node (by count-observability /
-    #: ``var~mean`` / capture-class) and derive it. See docs/calibration/count_trust_design.md.
-    count_trust_beta: float = 10.0
-
     #: **Propagation lattice resolution** ``K`` for the 2-simplex grid sum-product
-    #: (``simplex_sweep.deconv_regions_sweep``). Separate from ``n_grid`` (the fine 1-D fusion grid):
-    #: the 2-simplex has ``(K+1)(K+2)/2`` points and the propagation edge is ``K²`` per transition, so the
-    #: cost grows ~quartically — ``n_grid=200`` is far too expensive here. ``K=60`` matches production
-    #: per-node accuracy at the tractable propagation cost (``K=20`` over-calls / under-resolves the
-    #: zero-DNA case; see CALIBRATION_PLAN §4).
+    #: (``simplex_sweep.deconv_regions_sweep``). Separate from ``n_grid`` (the fine 1-D strand-posterior
+    #: grid used for the boundary sides): the 2-simplex has ``(K+1)(K+2)/2`` points and the propagation
+    #: edge is ``K²`` per transition, so the cost grows ~quartically — ``n_grid=200`` is far too expensive
+    #: here. ``K=60`` matches per-node accuracy at the tractable propagation cost (``K=20`` over-calls /
+    #: under-resolves the zero-DNA case).
     sweep_n_grid: int = 60
 
     #: **Iterative-bootstrap pass count** for the propagation path (``CALIBRATION_PLAN_v2`` §2/§5). Each

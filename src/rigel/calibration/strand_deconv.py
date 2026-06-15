@@ -217,49 +217,6 @@ def _deconv_per_node(
     return NodeDeconv(gdna_mass=gdna, rna_mass=rna, gdna_frac=frac, gdna_frac_var=gdna_frac_var)
 
 
-def deconv_regions(
-    substrate,
-    region_arrays,
-    node_density,
-    *,
-    rna_sense_frac,
-    gdna_strand_overdispersion=0.0,
-    rna_strand_overdispersion=0.0,
-    deconv_quantile=0.5,
-    n_grid=200,
-    info_scale=1.0,
-) -> NodeDeconv:
-    """Deconvolve each region's contained mass (a node) into gDNA / RNA by the strand/count blend.
-
-    A region is strand-observable iff its transcript strand is defined (``TS_POS`` / ``TS_NEG``);
-    ``TS_NONE`` (intergenic) and ``TS_AMBIG`` are count-only. The count fraction + its variance are the
-    precomputed ``node_density.count_gdna_frac`` / ``count_gdna_frac_var``; the per-node weight
-    ``w=I/(I+info_scale)``, ``I=N·(2κ−1)²``, and the FP-rate quantile are applied in ``_deconv_per_node``.
-    """
-    ts = np.asarray(region_arrays.strand_class)
-    c = substrate.contained
-    pos = c.n_unspliced_pos.astype(np.float64)
-    neg = c.n_unspliced_neg.astype(np.float64)
-    sense = np.where(ts == TS_NEG, neg, pos)  # orient to transcript sense
-    antisense = (pos + neg) - sense
-    strand_observable = (ts == TS_POS) | (ts == TS_NEG)
-    return _deconv_per_node(
-        c.mass_unspliced,
-        c.mass_spliced,
-        sense,
-        antisense,
-        strand_observable,
-        node_density.count_gdna_frac,
-        node_density.count_gdna_frac_var,
-        rna_sense_frac=rna_sense_frac,
-        gdna_strand_overdispersion=gdna_strand_overdispersion,
-        rna_strand_overdispersion=rna_strand_overdispersion,
-        deconv_quantile=deconv_quantile,
-        n_grid=n_grid,
-        info_scale=info_scale,
-    )
-
-
 @dataclass(frozen=True, slots=True)
 class _SideQuantities:
     """Per-region boundary-side quantities shared by the deconvolution and the strand-fit seeds."""
@@ -570,7 +527,6 @@ __all__ = [
     "strand_posterior_gdna_frac",
     "strand_deconvolve",
     "cleaned_gdna_count",
-    "deconv_regions",
     "deconv_sides",
     "boundary_side_seeds",
 ]
