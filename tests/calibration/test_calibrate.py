@@ -72,8 +72,10 @@ def test_rna_strand_overdispersion_populated():
 def test_density_and_geom_len_sane():
     result = _run()
     assert np.isfinite(result.gdna_density_global) and result.gdna_density_global >= 0.0
-    assert np.all(np.isfinite(result.gdna_geom_len))
-    assert np.all(result.gdna_geom_len >= 0.0)
+    assert np.all(np.isfinite(result.gdna_region_eff_len))
+    assert np.all(result.gdna_region_eff_len >= 0.0)
+    assert np.all(np.isfinite(result.gdna_boundary_len))
+    assert np.all(result.gdna_boundary_len >= 0.0)
     assert 0.0 <= result.rna_sense_frac <= 1.0
 
 

@@ -1,8 +1,9 @@
 """CalibrationResult — the acyclic calibrator's output schema.
 
 Per-region deconvolved gDNA / RNA mass across the region's three nodes (contained
-plus the two boundary sides), the gDNA component's geometric effective length, and the
-two library scalars (``gdna_density_global``, ``rna_sense_frac``). The calibrator is a
+plus the two boundary sides), the per-region gDNA geometric supports (contained
+``gdna_region_eff_len`` + per-side ``gdna_boundary_len``), and the two library scalars
+(``gdna_density_global``, ``rna_sense_frac``). The calibrator is a
 single feed-forward pass, so there are **no** convergence diagnostics. ``__post_init__``
 enforces the intrinsic invariants (shapes, finiteness, sign); mass conservation against the
 raw fragment counts is checked by the calibrator / tests (it needs the substrate, which the
@@ -54,16 +55,23 @@ class CalibrationResult:
     # ``mass_gdna + mass_rna = total node mass`` is preserved; only the prior subtracts this.
     mass_rna_spliced: np.ndarray  # float64[R]
 
-    # --- gDNA component geometric effective length: Σ_node L_node (capture-independent) ---
-    # The per-region contraction under capture is the IPR of the deconvolved gDNA *mass*,
-    # applied downstream in assemble_priors; this length stays geometric, so it is
-    # well-defined even where calibration saw no reads and never collapses.
-    gdna_geom_len: np.ndarray  # float64[R]
-
-    # --- directional boundary effective length 𝓔(L)=E[min(ℓ,L)] per region (geometry) ---
-    # The per-region capacity to supply boundary-crossing fragments; consumed by the
-    # boundary-flux transport in assemble_priors.
+    # --- directional boundary per-side density length 𝓔(L)=E[min(ℓ,L)] per region (geometry) ---
+    # The mass a boundary-crossing fragment deposits on one flank of region r. Doubles as the
+    # POOLED-SEAM effective support: a seam between regions r and r+1 has support
+    # ½·(gdna_boundary_len[r] + gdna_boundary_len[r+1]) — the deposition-faithful divisor that makes
+    # the pooled seam mass ρ·support under uniform gDNA (see assemble_priors / capture_eff_length).
     gdna_boundary_len: np.ndarray  # float64[R]
+
+    # --- region-contained gDNA effective support E[max(0,L−ℓ)] per region (geometry) ---
+    # The count of contained-fragment start positions = the effective sampling support of the
+    # region's contained gDNA mass. Under uniform genomic gDNA deposition at density ρ, the
+    # expected contained mass is EXACTLY ρ·gdna_region_eff_len (a fragment must FIT to be
+    # contained), so dividing the contained mass by this recovers the true density ρ — the
+    # bedrock "factor = 1 under uniform gDNA" invariant. This, NOT region_size_bp, is the
+    # density-correct IPR divisor for the region node: region_size_bp understates the density of
+    # short regions (it ignores the fit-inside constraint), manufacturing a spurious contraction
+    # in an unenriched library. Consumed by assemble_priors / capture_eff_length.
+    gdna_region_eff_len: np.ndarray  # float64[R]
 
     # --- library scalars ---
     gdna_density_global: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
@@ -88,8 +96,8 @@ class CalibrationResult:
             "mass_gdna_right",
             "mass_rna_right",
             "mass_rna_spliced",
-            "gdna_geom_len",
             "gdna_boundary_len",
+            "gdna_region_eff_len",
         ):
             _check_region_array(getattr(self, name), name, n)
 

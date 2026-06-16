@@ -20,16 +20,17 @@ neighbours::
            rho_global + var~mean (direct / imputation) re-fit on the PREVIOUS pass's gDNA estimate
            -> deconv_regions_sweep: the per-node 3-term simplex solve + odds propagation
            -> converge on per-node f_g
-      -> derive (gdna_density_global, gdna_geom_len)
+      -> gdna_density_global (the library-average density QC scalar)
 
 Pass 0 is the all-gDNA init (every unspliced fragment is gDNA ⇒ ``ρ_global`` = the count-observable total
 density, a deliberate over-estimate the iteration drives down as RNA is removed). The ``var~mean`` reports
 genuinely-high variance where the boundaries cannot predict the region (RNA-rich exons) ⇒ the count yields
 there ⇒ the strand + propagation + global solve ⇒ the next pass's estimate is better. The contained count
 stays RAW (a region's strand enters once, via the strand likelihood); only the boundary crossings are
-cleaned, because they feed the spatial imputation of exon / AMBIG regions. The global density and geometric
-gDNA length are **derived** from the aggregate deconvolved mass. The per-region gDNA length contraction
-under capture is the IPR of the deconvolved gDNA mass, applied later in ``priors.assemble_priors``.
+cleaned, because they feed the spatial imputation of exon / AMBIG regions. The library-average gDNA density
+(a QC scalar) is **derived** from the aggregate deconvolved mass. The per-region gDNA length contraction
+under capture is the IPR of the deconvolved gDNA mass over the per-region effective supports
+(``gdna_region_eff_len`` + ``gdna_boundary_len``), applied later in ``priors.assemble_priors``.
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .density_model import node_gdna_density
-from .derive import derive
+from .derive import gdna_density_global
 from .errors import CalibrationStrandError
 from .effective_length import (
     boundary_eff_length,
@@ -90,7 +91,9 @@ def calibrate(
     region_eff_len = region_eff_length(region_arrays.region_size_bp, gdna_fl_pmf)
     boundary_eff_len = boundary_side_eff_length(gdna_fl_pmf, region_arrays.region_size_bp)
     fl_mean = boundary_eff_length(gdna_fl_pmf)
-    rna_fl_mean = boundary_eff_length(rna_fl_pmf)  # RNA boundary-crossing eff length (splice fraction)
+    rna_fl_mean = boundary_eff_length(
+        rna_fl_pmf
+    )  # RNA boundary-crossing eff length (splice fraction)
     # RNA region (contained) eff length — pairs with region_eff_len (gDNA) to convert the splice
     # boundary *density* fraction into the region *count* fraction (FL-consistency; see
     # docs/calibration/fl_consistency_diagnostic.md).
@@ -251,7 +254,10 @@ def calibrate(
         # ≤ own data. σ²_global = the between-node SPREAD (robust MAD) — wide/uncertain on Pass 0
         # (all-gDNA spans depleted→enriched), tightening as iteration converges (the zero-DNA pin).
         pts = varmean_points(
-            substrate, region_arrays, region_eff_len, fl_mean,
+            substrate,
+            region_arrays,
+            region_eff_len,
+            fl_mean,
             gdna_views=(gdna_c, gdna_left, gdna_right),
         )
         direct = fit_direct_varmean(pts)
@@ -262,7 +268,8 @@ def calibrate(
         active_mu = mu[u_tot > 0.0]
         sigma_d_global = (
             1.4826 * float(np.median(np.abs(active_mu - np.median(active_mu))))
-            if active_mu.size else rho_global
+            if active_mu.size
+            else rho_global
         )
         sig2_glob = np.maximum(sigma_d_global**2 * geom2, 1e-12)
         tau_count = np.minimum(1.0 / sig2_frac, mass_u)
@@ -286,8 +293,10 @@ def calibrate(
         prev_fg = regions.gdna_frac
         gdna_c = np.asarray(regions.gdna_mass, dtype=np.float64)
 
-    # Derive gdna_density_global (QC scalar) and the geometric gDNA length.
-    derived = derive(regions, left, right, region_eff_len, boundary_eff_len, region_arrays.ref_id)
+    # Derive gdna_density_global (the library-average density QC scalar).
+    density_global = gdna_density_global(
+        regions, left, right, region_eff_len, boundary_eff_len, region_arrays.ref_id
+    )
 
     # Spliced RNA mass per region (Σ over the 3 nodes). The deconv adds the full per-node
     # spliced mass to rna_mass (rna = (1−g)·M_unspliced + M_spliced), so this is exactly the
@@ -309,9 +318,9 @@ def calibrate(
         mass_gdna_right=right.gdna_mass,
         mass_rna_right=right.rna_mass,
         mass_rna_spliced=mass_rna_spliced,
-        gdna_geom_len=derived.gdna_geom_len,
         gdna_boundary_len=boundary_eff_len,
-        gdna_density_global=derived.gdna_density_global,
+        gdna_region_eff_len=np.asarray(region_eff_len, dtype=np.float64),
+        gdna_density_global=density_global,
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,

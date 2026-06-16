@@ -1,5 +1,12 @@
 # Capture-aware effective lengths for all EM components (design)
 
+> **STATUS (2026-06-16): motivation current; implementation SUPERSEDED by
+> `effective_length_redesign_plan.md` §8.** The core insight here — contract *every* component by the
+> per-region gDNA-enrichment IPR (gDNA is the probe pattern, not coverage) — is still the production design.
+> The specific divisors this doc assumes (per-region IPR over `region_size_bp`, transport) were replaced by
+> the density-correct effective-support node model (region `E[max(0,L−ℓ)]` + averaged-side-density pooled
+> seams, transport-free) in §8. Read this for the *why*, §8 for the *how*.
+
 **Status:** design for review. 2026-06-10 (rev 2). Fixes a confirmed **major bug**: the hybrid-capture
 IPR effective-length contraction is applied to the **gDNA component only**; mRNA and nRNA components use
 the capture-blind full FL-marginal length, so under capture the gDNA component is artificially

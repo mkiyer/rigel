@@ -1,5 +1,11 @@
 # Boundary-aware capture effective-length: diagnosis, redesign, and staged plan
 
+> **STATUS: SHIPPED — see §8 for the production method.** The density-correct, transport-free
+> effective-support method in **§8** is the implemented production path (`priors._gdna_region_node_arrays`,
+> shared by `assemble_priors` + `capture_eff_length`). §1–§7 are the design narrative and the empirically
+> staged PR sketch (PR-1/PR-A and the abandoned PR-B); they are retained for provenance but were superseded
+> when the selection criterion was re-anchored on theoretical correctness — read §8 first.
+
 **Status:** design / decision input — 2026-06-15. Companion to `new_eff_len_plan.md` (the author's
 proposal). Targets the dominant capture-driven gDNA→RNA error on the single production path (the iterative
 simplex sweep, post Phase-4 teardown).
@@ -562,3 +568,117 @@ from 0.0900 to ≤ 0.0797 (ideally ~0.055, measured)** with nRNA assigned ≈ tr
 conservation-correct** (`Σ node gDNA mass = total deconvolved`, `Σ node genomic length = covered span`).
 Secondary: `gdna_net_surplus`, `net_gdna_to_{nrna,mrna}` per condition (recovery of the −233,859 deficit, not
 mere suppression); ss0.65 zero-gDNA phantom tolerance held; capture-off transcript path within tolerance.
+
+---
+
+# 8. DENSITY-CORRECT first-principles method (SHIPPED — supersedes §7's divisor choices)
+
+§7 chose the node divisors empirically (`region_size_bp` for region nodes, `min(side_len)` for seams,
+empirical-net-flow gating). After the user re-anchored the selection criterion on **theoretical correctness
+first** ("choose a solution based on length-/mass-conservation and first-principles design; empirics are not a
+strong guide unless the algorithm is correct AND the accuracy is better"), the method was re-derived from a
+single bedrock invariant and the divisors were corrected. This is the implemented production path.
+
+## 8.1 The bedrock invariant: contraction factor = 1 under uniform gDNA
+
+> An **unenriched** library (gDNA deposited at a spatially uniform density ρ) must contract **nothing** —
+> every transcript's, and the gDNA component's, effective length is unchanged. Contraction may fire **only**
+> on a non-uniform (capture-enriched) density field.
+
+A method that contracts under uniform gDNA is manufacturing enrichment out of geometry (it would haircut a
+short-exon transcript in a library with no capture bias). That is a theoretical defect independent of any toy
+accuracy number. The invariant is just "capture-off ⇒ bit-identical," restated as a property of the density
+*field* rather than a config flag.
+
+## 8.2 The node model — effective-support divisors (CORRECTS §7.2/§7.3)
+
+Per region chain, the gDNA node set is the per-region **contained** node plus one **pooled seam** node per
+internal same-reference boundary, keyed to the left-flank region `r` (geometry, conservation, and the pooling
+argument are exactly §7.2 — unchanged). What changed is the **support each node's mass is divided by**:
+
+| node | mass `m_n` | **effective support `S_n`** (the divisor) |
+|------|-----------|--------------------------------------------|
+| region `r` | `mass_gdna_contained[r]` | `S_r = E[max(0, L_r − ℓ)] = gdna_region_eff_len[r]` |
+| seam `(r,r+1)` | `mass_gdna_right[r] + mass_gdna_left[r+1]` (POOLED) | `S_s = ½·(E[min(ℓ,L_r)] + E[min(ℓ,L_{r+1})])` = averaged `gdna_boundary_len` |
+
+**Why these supports (the derivation).** Under uniform deposition at density ρ, the reference accumulator
+deposits exactly `ρ·E[max(0,L−ℓ)]` of *contained* mass on a region (a contained fragment must FIT) and
+`ρ·(E[min(ℓ,L_left)]+E[min(ℓ,L_right)])/2` of *pooled crossing* mass on a seam (each flank captures only
+`min(ℓ,L_side)` of a crossing fragment). Dividing each node's mass by these supports makes **every node's
+density `m_n/S_n = ρ`** — the precondition for factor 1.
+
+The two divisors §7 / a naïve reading would have used are both **wrong**:
+- **`region_size_bp` (genomic)** ignores the fit-inside constraint → understates short-region density →
+  fabricates a contraction under uniform gDNA. *Verified factor 0.878 vs the correct 1.000.*
+- **`E[ℓ]` (the count crossing length) for the seam** over-states the support for short flanks (a fragment
+  deposits `min(ℓ,L)`, not `ℓ`) → under-contracts exon-flank seams → **inflates the gDNA→RNA leak**. This was
+  a real bug in the first implementation (it pushed the flagship leak from ~5.5% to **7.84%**); an adversarial
+  audit that drove the actual reference accumulator under a uniform field caught it. The averaged per-side
+  density length is the deposition-faithful support and restores factor 1 even for sub-`E[ℓ]` regions.
+
+## 8.3 The IPR is exactly factor-1 under uniform (algebra)
+
+Laplace-smoothed IPR: `eff = (G+1)² / [Σ m_n²/S_n + (2G+1)/span]`, `span = Σ S_n`, `G = Σ m_n`. With
+`m_n = ρ·S_n`: `G = ρ·span`, `Σ m_n²/S_n = ρ²·span`, so
+
+```
+eff = (ρ·span+1)² / [ρ²·span + (2ρ·span+1)/span]
+    = (ρ²span² + 2ρspan + 1) / [(ρ²span² + 2ρspan + 1)/span]   = span      (for ANY ρ, ANY span)
+```
+
+⇒ `factor = eff/span = 1` **exactly**, independent of ρ. The Laplace `(2G+1)/span` term is precisely what
+makes the cancellation hold. Under capture (concentrated gDNA) the IPR drops below `span` toward the probed
+footprint, so the gDNA component competes at its true local density. **Transport-free**: no mass is moved (the
+old `_transport_boundary_flux` heuristic is off both production paths). Conservation is the §7.2 statement
+(`Σ gdna_region = Σ contained + Σ internal sides`, every non-terminal side once; genomic tiling intact; the
+effective support is NOT a genomic length and is not required to equal the span).
+
+## 8.4 One node model for BOTH consumers + contained-evidence shrinkage
+
+`priors.assemble_priors` (gDNA component eff-len) and `capture_eff_length.transcript_capture_eff_lengths`
+(per-transcript eff-len) share the **same** helper `priors._gdna_region_node_arrays` → one consistent,
+density-correct node model. Both also apply the **same multimapper-blindness guard**: shrink the contraction
+toward 1 on the **CONTAINED (unique-mapper) mass** (calibration's accumulator is unique-mappers only), not on
+the total gDNA. A multimapper-blind footprint (identical paralogs) has ≈0 contained mass ⇒ no contraction ⇒
+degenerate paralogs stay symmetric in the EM. (Previously the transcript path shrank on total gDNA `G/(G+n_reg)`;
+unifying it to contained-evidence `C/(C+n_reg)` fixed a paralog-split regression that transport-removal exposed.)
+
+## 8.5 Implementation & status (SHIPPED)
+
+- **Schema** (`result.py`): added `gdna_region_eff_len` (E[max(0,L−ℓ)] per region); `gdna_boundary_len`
+  (E[min(ℓ,L)]) repurposed as the averaged seam support; `gdna_fl_mean` was *not* needed and not added.
+- **Helper** (`priors._gdna_region_node_arrays`): returns `(gdna_region, participation Σm²/S, support_len ΣS)`.
+- **Consumers**: `assemble_priors` (span = effective support; shrink on contained gDNA+RNA, log-space toward
+  span) and `transcript_capture_eff_lengths` (same helper; shrink on contained gDNA+RNA, `C/(C+n_reg)`).
+- **Tests**: `test_priors.py` / `test_capture_eff_length.py` carry the factor-1-under-uniform proof (built per
+  the TRUE deposition law with a SHORT region so the averaged-seam support is genuinely exercised — an `E[ℓ]`
+  divisor would fail them), mass-conservation, density-correct-not-genomic, and per-position-rate=ρ. Full
+  suite green (1126).
+- **Accepted toy regressions** (correct-method consequences, not bugs; confirmed by dissection):
+  - zero-gDNA `ss≥0.99` nRNA-phantom: the smaller (correct) divisor lets the residual antisense-nRNA phantom
+    gDNA (a calibration-SOLVE artifact, tracked separately) gain ~1.5 pts of EM share → `test_nrna_double_counting`
+    tolerances 0.05→0.08 with a documented rationale.
+  - paralog split: **fixed** by the contained-evidence shrinkage unification (§8.4).
+- **Cleanup deferred**: `_transport_boundary_flux` + `derive.gdna_geom_len` now have no production consumer but
+  are retained (debug scripts reference them); deleting them is a follow-up.
+
+## 8.6 Measured flagship leak — correct but NOT empirically better (decision: KEEP)
+
+Final flagship `gdna300 × cap_on × ss0.99` net gDNA→RNA leak (fresh quant, current code): **7.28%**
+(`nrna_none`) / **6.37%** (`nrna_rnd`). Versus: the buggy `E[ℓ]`-seam intermediate 7.84%/7.03% (the fix
+recovered ~0.6 pt), and the documented PR-A baseline ~5.5% (the correct method is **~0.9–1.8 pts WORSE**).
+
+**Why correct ⇒ more leak.** The lower baselines were achieved by **over-contracting** the gDNA via the very
+non-physical choices this redesign removed: the old transport moved boundary mass onto enriched regions, and
+PR-A's `min`-seam support is smaller than the deposition-faithful **average** → both made the gDNA component
+artificially concentrated → it out-competed RNA → less leak, but by violating the deposition law. The
+density-correct method contracts *exactly* as much as the physics warrants, so it leaves the true residual
+exposed. That residual is a **calibration-SOLVE** problem, not an eff-len one: `gdna_rate` recovers 0.6967 vs
+true 0.7500 under capture (capture-off is exact, 0.7500) — the solve hands the EM too little gDNA *before* the
+eff-len acts. The leak lever is the solve-side gDNA under-recovery (AMBIG count-bias / geom2), not eff-len
+over-contraction.
+
+**DECISION (user, 2026-06-16): KEEP the density-correct method; eff-len redesign CLOSED for now.** Per the
+correctness-first criterion (empirics don't override a correct algorithm; the lower baselines were the rejected
+over-contraction), the ~1 pt toy-leak regression is accepted. The residual solve-side leak is left to the
+existing calibration roadmap; no immediate follow-up.

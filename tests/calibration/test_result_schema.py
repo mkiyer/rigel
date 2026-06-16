@@ -20,8 +20,8 @@ def _valid_kwargs(n_regions: int = 2) -> dict:
         mass_gdna_right=z.copy(),
         mass_rna_right=z.copy(),
         mass_rna_spliced=z.copy(),
-        gdna_geom_len=o.copy(),
         gdna_boundary_len=o.copy(),
+        gdna_region_eff_len=o.copy(),
         gdna_density_global=1e-3,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
@@ -40,7 +40,6 @@ def test_zero_gdna_library_constructs():
     kw = _valid_kwargs()
     kw["gdna_density_global"] = 0.0
     for k in (
-        "gdna_geom_len",
         "mass_gdna_contained",
         "mass_gdna_left",
         "mass_gdna_right",
@@ -53,7 +52,7 @@ def test_zero_gdna_library_constructs():
     "field,value",
     [
         ("mass_gdna_contained", np.array([-1.0, 0.0])),  # negative mass
-        ("gdna_geom_len", np.array([1.0, -1.0])),  # negative length
+        ("gdna_region_eff_len", np.array([1.0, -1.0])),  # negative effective support
     ],
 )
 def test_rejects_negative_region_arrays(field, value):
@@ -65,7 +64,7 @@ def test_rejects_negative_region_arrays(field, value):
 
 def test_rejects_non_finite_array():
     kw = _valid_kwargs()
-    kw["gdna_geom_len"] = np.array([np.inf, 1.0])
+    kw["gdna_region_eff_len"] = np.array([np.inf, 1.0])
     with pytest.raises(ValueError):
         CalibrationResult(**kw)
 
