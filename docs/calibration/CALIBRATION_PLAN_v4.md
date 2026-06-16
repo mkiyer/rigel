@@ -1,6 +1,12 @@
 # Calibration — the inverted-model unified-solver redesign (PLAN v4, EXECUTION-READY)
 
-**Status:** authoritative **execution plan** (2026-06-16). Supersedes `CALIBRATION_PLAN_v3.md`. v3 formalized the
+> **⚠️ SUPERSEDED by `CALIBRATION_PLAN_v5.md` (2026-06-16, same day)** for the imputation architecture: v5 unifies
+> the per-component imputations (gDNA 2a + the RNA bolt-on) into **one full-pie message + a per-component
+> reliability layer** = the unified node solver (one step), retiring the §3 coherence guard as structural. v4's
+> **shipped** content (Phase 0 teardown, Phase 2a gDNA var~mean, the σ²_global=MAD reversal, the ledger) remains
+> the factual record; its *forward* plan (separate 2b, the §3 guard) is superseded by v5.
+
+**Status:** SUPERSEDED execution plan (2026-06-16). Supersedes `CALIBRATION_PLAN_v3.md`. v3 formalized the
 completion of the *region-only* iterative bootstrap; v4 incorporates two corrections from design review that
 change the spine of the algorithm — the **gDNA-chains / RNA-local inversion** and the **unified node solver** —
 and re-scopes the deferrals into an ordered, measurement-gated implementation plan. Every `file:line` below was
