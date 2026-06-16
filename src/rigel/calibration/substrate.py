@@ -4,7 +4,7 @@ The substrate is the only object that knows the 4-channel encoding and the
 payload topology. It reduces the raw payload into the per-region sufficient
 statistics the inference consumes (doc 01 §1, doc 03 §2), exposing **three
 parallel per-region views** — *contained*, *left*, *right* — so the joint
-deconvolution applies the identical code to all three views (single pass, no EM loop).
+deconvolution applies the identical code to all three views.
 
 Channel encoding (``ch = (spliced?2:0) + (primary?0:1)``)::
 

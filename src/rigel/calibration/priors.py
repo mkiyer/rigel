@@ -185,7 +185,7 @@ def assemble_priors(
     region_arrays: "RegionArrays",
     multi_loci: "list[MultiLocus]",
 ) -> LocusPriors:
-    """Build the per-locus EM prior from the acyclic calibration result.
+    """Build the per-locus EM prior from the calibration result.
 
     The gDNA node set is the **density-correct, transport-free** region + pooled-seam model
     (``effective_length_redesign_plan.md`` §8; see ``_gdna_region_node_arrays``):

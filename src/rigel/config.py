@@ -223,13 +223,13 @@ class BamScanConfig:
 
 @dataclass(frozen=True)
 class CalibrationConfig:
-    """Configuration for the acyclic calibrator (:func:`rigel.calibration.calibrate`).
+    """Configuration for the calibrator (:func:`rigel.calibration.calibrate`).
 
-    The calibrator is a single feed-forward pass (no EM loop, no convergence test). The per-node
-    deconvolution is a **strand-vs-count handoff** (see ``strand_deconv``): a strand-observable node
-    in a strand-identifiable library takes the strand module's Beta-Binomial posterior median, every
-    other node takes the count module's gDNA fraction. The blended point estimate is then read at the
-    FP-rate quantile ``gdna_deconv_quantile`` (default ½ ⇒ no shift). The old EM-loop knobs are gone.
+    The calibrator is an **iterative odds-propagation simplex sweep over an all-gDNA bootstrap**
+    (``sweep_max_passes`` passes, re-fitting ``ρ_global`` + the gDNA var~mean each pass and
+    converging on per-node ``f_g``). The boundary **sides** are deconvolved once (the strand-vs-count
+    handoff in ``strand_deconv.deconv_sides``) as the fixed boundary gDNA anchors, with that blended
+    point estimate read at the FP-rate quantile ``gdna_deconv_quantile`` (default ½ ⇒ no shift).
     """
 
     #: **gDNA-deconvolution FP-rate quantile** — the false-positive-aversion dial for the per-node

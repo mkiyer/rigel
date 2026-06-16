@@ -10,8 +10,9 @@ penalises the *difference* in log-odds, gated to same-strand exon stretches (con
 denominator). Exact in two sweeps on a chain (forward + backward); per-reference chunked.
 
 `ψ_i` (local evidence) = the 3-component strand mixture (`simplex._mixture_strand_loglik`) + the sided
-spliced lower bound + a weak gDNA prior — i.e. `solve_node` minus the count term (the count is not local
-evidence; the cross-node signal is the odds). Seeds emerge from `ψ_i` (intergenic → only the `f_g=1`
+spliced lower bound + the node-class prior (Jeffreys at single-strand nodes, global gDNA prior at AMBIG),
+without the count term (the count enters separately; the cross-node signal is the odds). Seeds emerge from
+`ψ_i` (intergenic → only the `f_g=1`
 vertex survives the strand mixture + prior).
 
 This is the grid sum-product that superseded the (now-removed) scalar-RTS scaffold. Boundary sides keep
@@ -45,7 +46,7 @@ def _log_odds(f_pos, f_neg, f_g):
 
 
 def _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, kappa, od_g, od_r,
-                  lattice, count_frac=None, count_trust_beta=0.0, count_precision=None, strand_obs=None,
+                  lattice, count_frac=None, count_precision=None, strand_obs=None,
                   global_mu=None, global_tau=0.0):
     """ψ_i over the lattice — strand mixture + sided spliced lower bound + count prior + node-class prior.
 
@@ -80,14 +81,11 @@ def _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, 
     short_p = np.maximum(spliced_pos[:, None] * inv_n - f_pos[None, :], 0.0)
     short_n = np.maximum(spliced_neg[:, None] * inv_n - f_neg[None, :], 0.0)
     psi = psi - 0.5 * spliced_pos[:, None] * short_p**2 - 0.5 * spliced_neg[:, None] * short_n**2
-    if count_frac is not None:
+    if count_frac is not None and count_precision is not None:
         # count prior: Gaussian pull of f_g toward count_frac. Per-node precision τ_count = count_precision
-        # (= 1/v_rel, the degeneracy-free count reliability) when supplied; else the scalar β (toy tests).
-        if count_precision is not None:
-            tau_c = np.asarray(count_precision, dtype=np.float64)[:, None]
-            psi = psi - 0.5 * tau_c * (f_g[None, :] - count_frac[:, None]) ** 2
-        elif count_trust_beta > 0.0:
-            psi = psi - 0.5 * count_trust_beta * (f_g[None, :] - count_frac[:, None]) ** 2
+        # (= 1/v_rel, the degeneracy-free count reliability).
+        tau_c = np.asarray(count_precision, dtype=np.float64)[:, None]
+        psi = psi - 0.5 * tau_c * (f_g[None, :] - count_frac[:, None]) ** 2
     # node-class prior: Jeffreys reference at strand-observable nodes, global gDNA prior elsewhere.
     if strand_obs is not None:
         jeff = (_STRAND_PRIOR - 1.0) * (
@@ -190,13 +188,13 @@ def _sweep_chain(psi, q_pos_edges, q_neg_edges, lo_pos, lo_neg):
 
 def deconv_regions_sweep(
     substrate, region_arrays, *, rna_sense_frac, gdna_strand_overdispersion=0.0,
-    rna_strand_overdispersion=0.0, count_gdna_frac=None, count_trust_beta=0.0, count_precision=None,
+    rna_strand_overdispersion=0.0, count_gdna_frac=None, count_precision=None,
     q_rna=0.25, n_grid=20, rho_global=0.0, region_eff_len=None, info_scale=10.0, global_tau=None,
 ):
     """Per-region gDNA fraction by the odds-propagation grid sum-product (see module docstring).
 
-    ``count_gdna_frac`` + ``count_precision`` (per-node ``τ_count``, from the var~mean; ``count_trust_beta``
-    is the scalar fallback for the toy tests): the count prior toward the count fraction in ``ψ_i``, gated by
+    ``count_gdna_frac`` + ``count_precision`` (per-node ``τ_count``, from the var~mean): the count prior
+    toward the count fraction in ``ψ_i``, gated by
     ``(1−w)`` so it yields to the strand. ``rho_global`` + ``region_eff_len`` + ``global_tau``: the
     **global gDNA prior** (foundation) — baseline fraction ``μ_global = clip(ρ_global·eff_len/mass, 0, 1)``
     with per-node precision ``global_tau`` (``1/σ²_global`` from ``calibrate``; default 1-pseudo-observation;
@@ -257,7 +255,7 @@ def deconv_regions_sweep(
     cf = None if count_gdna_frac is None else np.clip(np.asarray(count_gdna_frac, np.float64), 0.0, 1.0)
     psi = _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, kappa,
                         gdna_strand_overdispersion, rna_strand_overdispersion, lattice,
-                        count_frac=cf, count_trust_beta=count_trust_beta,
+                        count_frac=cf,
                         count_precision=eff_count_precision,
                         strand_obs=strand_obs, global_mu=mu_global, global_tau=gtau)
 

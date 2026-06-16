@@ -1,7 +1,8 @@
 """calibrate() — the fractional-accumulator calibrator (iterative odds-propagation simplex sweep).
 
 The contained-region split is solved by the **odds-propagation grid sum-product** on the per-node
-2-simplex (gDNA / mature-RNA / nascent-RNA), iterated over an **all-gDNA bootstrap**. Each node combines
+2-simplex (sense-RNA / antisense-RNA / gDNA — calibration models RNA-vs-gDNA only; the per-locus EM
+separates nascent from mature downstream), iterated over an **all-gDNA bootstrap**. Each node combines
 three Bayesian terms — a **strand likelihood** (the Beta-Binomial tilt of the per-strand counts, the
 capture-INVARIANT *direction* signal), a **count prior** (the local gDNA-density imputation weighted by its
 ``var~mean`` precision ``τ_count``, the *magnitude* signal), and a **global gDNA prior** (the foundation,
@@ -80,7 +81,9 @@ def calibrate(
 ) -> CalibrationResult:
     """Deconvolve the library into gDNA / RNA per node, then derive gdna_density_global.
 
-    Single feed-forward pass; see the module docstring for the data flow. ``gdna_density_global``
+    Iterative all-gDNA bootstrap (``config.sweep_max_passes`` passes, re-fitting ``ρ_global`` + the
+    gDNA var~mean each pass and converging on per-node ``f_g``); see the module docstring for the data
+    flow. ``gdna_density_global``
     may be ``0`` (a zero-gDNA library) and a node's deconvolved gDNA mass may be ``0`` (a pure-RNA
     node); both are valid, graceful outputs — not failures.
     """

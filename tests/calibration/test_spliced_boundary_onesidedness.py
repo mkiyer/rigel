@@ -12,8 +12,8 @@ The whole calibration relies on this one-sidedness being correct and on the chan
     is genuinely two-sided. Pooling the two sides of a seam is correct for gDNA; it would be WRONG for
     spliced/mature RNA, which is one-sided (a symmetric pool would mis-locate it / silently rely on a side
     that is structurally zero).
-  * ``splice_junction.region_splice_gdna_frac`` / ``rna_variance`` / ``mature_density`` read spliced flux
-    from the predicate-named EXON side only and *expect* the intron-facing side to be zero.
+  * ``splice_junction.region_splice_gdna_frac`` reads spliced flux from the predicate-named EXON side
+    only and *expects* the intron-facing side to be zero.
 
 This test pins that contract at the substrate level (where the calibration consumers read it), so that a
 future change — e.g. "fix" the accumulator to deposit spliced two-sided, or pool spliced across a seam the

@@ -1,6 +1,6 @@
 """Phase 4 — derive the global gDNA density (a QC scalar).
 
-A one-shot, feed-forward aggregate of the Phase-3 per-node deconvolution (no loop, no feedback):
+An aggregate of the converged per-node deconvolution into the library-average gDNA density scalar:
 
     gdna_density_global = Σ_nodes gdna_mass / Σ_nodes eff_len   (library-average density — a QC scalar)
 

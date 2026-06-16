@@ -1,10 +1,10 @@
-"""CalibrationResult — the acyclic calibrator's output schema.
+"""CalibrationResult — the calibrator's output schema.
 
 Per-region deconvolved gDNA / RNA mass across the region's three nodes (contained
 plus the two boundary sides), the per-region gDNA geometric supports (contained
 ``gdna_region_eff_len`` + per-side ``gdna_boundary_len``), and the two library scalars
-(``gdna_density_global``, ``rna_sense_frac``). The calibrator is a
-single feed-forward pass, so there are **no** convergence diagnostics. ``__post_init__``
+(``gdna_density_global``, ``rna_sense_frac``). The calibrator iterates the simplex sweep
+to convergence but carries no per-pass convergence diagnostics in this schema. ``__post_init__``
 enforces the intrinsic invariants (shapes, finiteness, sign); mass conservation against the
 raw fragment counts is checked by the calibrator / tests (it needs the substrate, which the
 result does not carry).
@@ -37,7 +37,7 @@ def _check_region_array(arr: np.ndarray, name: str, n_regions: int) -> None:
 
 @dataclass(frozen=True, slots=True)
 class CalibrationResult:
-    """Per-region deconvolved mass + geometric gDNA length + library scalars (acyclic)."""
+    """Per-region deconvolved mass + geometric gDNA length + library scalars."""
 
     # --- deconvolved mass across the region's 3 nodes (float64[R]) ---
     mass_gdna_contained: np.ndarray
