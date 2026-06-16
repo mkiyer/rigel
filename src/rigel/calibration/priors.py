@@ -297,20 +297,27 @@ def assemble_priors(
         smoothed_support = support_locus + (2.0 * gdna_locus + 1.0) / safe_span
         eff_len = np.minimum((gdna_locus + 1.0) ** 2 / smoothed_support, span)
 
-    # CONTAINED-EVIDENCE GATE (calibration multimapper-blindness). Calibration's accumulator is fed by
-    # UNIQUE mappers only (bam_scanner.cpp: deposit_to_accumulator is inside `if (is_unique_mapper)`; the
-    # EM buffer separately gets multimappers at 1/NH). A locus dominated by multimappers — e.g. identical
-    # paralogs — therefore has ~zero CONTAINED mass; the only gDNA signal it retains is the sparse,
-    # asymmetric unique-flank smear the pooled seam imports from adjacent introns at FL density, which
-    # over-contracts gdna_eff_len and lets the gDNA component over-claim the (degenerate) RNA budget. Where
-    # calibration is structurally blind (contained gDNA + contained RNA ≈ 0) the prior must be honestly
-    # uninformative: revert gdna_eff_len → span (no contraction). This fires ONLY at contained == 0 (NOT a
-    # multimap-fraction blend, which would erode the capture contraction on real gDNA-bearing duplicated
-    # loci); on every locus calibration can see it is the identity, so the capture leak win is preserved by
-    # construction. The real fix (multimapper-aware accumulator) is the mappability initiative; this is the
-    # principled interim. See docs/calibration/splice_junction_node_architecture.md siblings / project_mappability.
-    blind = (proj["gdna_contained"] + proj["rna_contained"]) < 1e-6
-    eff_len = np.where(blind, span, eff_len)
+    # CONTAINED-EVIDENCE SHRINKAGE (calibration multimapper-blindness). Calibration's accumulator is fed by
+    # UNIQUE mappers only (bam_scanner.cpp: deposit_to_accumulator is inside `if (is_unique_mapper)`; the EM
+    # buffer separately gets multimappers at 1/NH). A multimapper-dominated locus — e.g. identical paralogs —
+    # has little/no CONTAINED mass, so the pooled seam can import FL-scale gDNA from adjacent introns and
+    # over-contract gdna_eff_len, letting the gDNA component over-claim the (degenerate) RNA. The IPR's
+    # Laplace +1 cannot guard this: it shrinks on TOTAL G (contained + seam), so a seam that alone inflates G
+    # defeats it. Shrink instead on the RELIABLE evidence — the CONTAINED (unique-mapper) mass C — toward the
+    # span (no contraction), SMOOTHLY (not a cliff at C=0): weight w = C/(C+1) (one pseudo-observation,
+    # magic-free Laplace-style; the contained-evidence analog of capture_eff_length's w=G/(G+n_reg)) and
+    # interpolate in LOG space (the EM consumes log_eff_len, so geometric interpolation is the natural one):
+    #   eff_len ← exp( w·log(eff_len) + (1−w)·log(span) ) = eff_len^w · span^(1−w)
+    # C→0 ⇒ w→0 ⇒ eff_len→span (the multimap-blind null, reached smoothly as counts 3,2,1→0, no
+    # discontinuity); C≫1 (every real captured locus) ⇒ w→1 ⇒ the earned IPR contraction, so the capture
+    # leak win is preserved. The real fix (multimapper-aware accumulator) is the mappability initiative; this
+    # is the principled interim. See project_mappability.
+    contained_ev = np.maximum(proj["gdna_contained"] + proj["rna_contained"], 0.0)
+    w = contained_ev / (contained_ev + 1.0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        eff_len = np.exp(
+            w * np.log(np.maximum(eff_len, 1e-9)) + (1.0 - w) * np.log(np.maximum(span, 1e-9))
+        )
 
     return LocusPriors(
         gdna_prior_count=gdna_locus,
