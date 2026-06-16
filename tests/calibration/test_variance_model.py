@@ -8,6 +8,7 @@ partition the points by region-observability.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from rigel.calibration.variance_model import (
     MonotoneVarMean,
@@ -86,7 +87,8 @@ def test_builders_partition_by_region_observability():
     mean = np.exp(rng.uniform(np.log(0.01), np.log(10.0), n))
     var = 0.01 * mean**2 * np.exp(rng.normal(0.0, 0.3, n))
     obs = rng.random(n) < 0.5
-    pts = VarMeanPoints(mean=mean, raw_var=var, region_observable=obs)
+    kcount = np.where(obs, 3.0, 2.0)  # DIRECT triplets (k=3), IMPUTATION pairs (k=2)
+    pts = VarMeanPoints(mean=mean, raw_var=var, region_observable=obs, kcount=kcount)
     direct = fit_direct_varmean(pts)
     imp = fit_imputation_varmean(pts)
     # each builder fit only its own subset
@@ -96,3 +98,29 @@ def test_builders_partition_by_region_observability():
     g = np.logspace(-2, 1, 100)
     assert np.all(np.diff(direct.predict(g)) >= -1e-9)
     assert np.all(np.diff(imp.predict(g)) >= -1e-9)
+
+
+def test_jensen_offset_values():
+    # The Jensen df-offset Δ = log(dof/2) − ψ(dof/2): positive, decreasing in dof, → 0 as dof → ∞.
+    from rigel.calibration.variance_model import _jensen_offset
+
+    off = _jensen_offset(np.array([1.0, 2.0, 1e6]))
+    assert off[0] == pytest.approx(1.2703628454614782, rel=1e-9)  # dof=1 (k=2 disagreement)
+    assert off[1] == pytest.approx(0.5772156649015329, rel=1e-9)  # dof=2 (Euler–Mascheroni)
+    assert off[2] == pytest.approx(0.0, abs=1e-5)  # dof → ∞ (no correction)
+    assert off[0] > off[1] > off[2] >= 0.0
+
+
+def test_jensen_offset_inflates_recovered_variance():
+    # With dof passed, the fit target log(var) is shifted UP by Δ_k>0 ⇒ the recovered variance is
+    # uniformly larger than the un-corrected fit (removes the small-dof over-confidence).
+    mean, var = _powerlaw(n=400, seed=3)
+    dof = np.full(mean.shape[0], 1.0)  # every point a k=2 disagreement
+    corrected = MonotoneVarMean.fit(mean, var, dof=dof)
+    plain = MonotoneVarMean.fit(mean, var)  # dof=None ⇒ back-compat, no offset
+    g = np.logspace(-1.5, 0.5, 40)
+    pc, pp = corrected.predict(g), plain.predict(g)
+    assert np.all(pc > pp)  # inflated everywhere
+    # the inflation ≈ exp(Δ_1) = exp(1.2704) ≈ 3.56× (the verified k=2 factor)
+    ratio = np.median(pc / pp)
+    assert ratio == pytest.approx(np.exp(1.2703628454614782), rel=0.15)

@@ -295,12 +295,19 @@ class CalibrationConfig:
     #: under-resolves the zero-DNA case).
     sweep_n_grid: int = 60
 
-    #: **Iterative-bootstrap pass count** for the propagation path (``CALIBRATION_PLAN_v2`` §2/§5). Each
+    #: **Iterative-bootstrap pass count** for the propagation path (``CALIBRATION_PLAN_v4`` §2). Each
     #: pass re-fits the gDNA ``var~mean`` + the global density ``ρ_global`` on the previous pass's gDNA
     #: estimate (Pass 0 = the all-gDNA init: every unspliced fragment is gDNA), then re-solves; the loop
-    #: stops early once the per-node ``f_g`` stabilizes. A few passes suffice (strand/seed-anchored, not
-    #: open EM).
-    sweep_max_passes: int = 4
+    #: stops early once the per-node ``f_g`` stabilizes (within ``sweep_convergence_delta``). A few passes
+    #: suffice (strand/seed-anchored, not open EM); Phase-1 measured the capture case using the full
+    #: 4-pass budget, so the default carries margin.
+    sweep_max_passes: int = 6
+
+    #: **Iterative-bootstrap convergence threshold** — the loop stops once the mean absolute change in
+    #: the per-node gDNA fraction ``f_g`` between consecutive passes drops below this. Smaller ⇒ tighter
+    #: (more passes); ``1e-3`` is well below the lattice-cell resolution ``1/sweep_n_grid`` so further
+    #: passes do not move the discretized solution.
+    sweep_convergence_delta: float = 1e-3
 
     def __post_init__(self) -> None:
         if not (0.0 < float(self.gdna_deconv_quantile) < 1.0):
@@ -317,6 +324,11 @@ class CalibrationConfig:
         if self.sweep_max_passes < 1:
             raise ValueError(
                 f"CalibrationConfig.sweep_max_passes must be >= 1; got {self.sweep_max_passes}."
+            )
+        if not (float(self.sweep_convergence_delta) > 0.0):
+            raise ValueError(
+                "CalibrationConfig.sweep_convergence_delta must be > 0; "
+                f"got {self.sweep_convergence_delta}."
             )
         if self.gdna_strand_prior_alpha_beta < 2.0:
             raise ValueError(

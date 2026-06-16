@@ -14,6 +14,47 @@ a documented numerical-resolution knob), **ELEGANT** (behaviour emerges from hon
 
 ---
 
+## Amendment A1 — Phase-1-driven refinement (2026-06-16)
+
+Phase-1 measurement + design review refine the var~mean and the propagation model (updates §7, §2, the ledger,
+and Phase 2). The §0/§2 "gDNA chains / RNA local" framing below is **superseded** by points (1)-(2) here.
+
+**(1) The var~mean is the node-PAIR imputation-error model, fit on ALL adjacent node pairs — NOT
+boundary↔region↔boundary triplets restricted to count-observable nodes.** Phase-1 confirmed the current
+triplet/observable-only fit flat-extrapolates at **71% of captured-exon nodes**: count-observable ⇔ no-exon-bit
+⇔ intron/intergenic ⇔ the depleted low-μ regime, so the fit never sees the enriched exon μ. The fix: for every
+sequential adjacent pair `(source, dest)`, fit the imputation residual `dest_estimate − impute(source_estimate)`
+as a `var~mean` curve over **all** nodes, using the iteration's **current** gDNA/RNA estimate at every node
+(captured exons included) as the "actual." Every node contributes its current-μ residual ⇒ the fit spans the full
+μ range ⇒ it **interpolates** at exons ⇒ **no extrapolation, and the confidence(μ) guard is DISSOLVED** (it was a
+band-aid for the wrong model — retracted, not deferred). DIRECT (own-count Poisson) stays for observable nodes;
+the **IMPUTATION** model becomes this all-pairs version. Built for BOTH gDNA and RNA.
+
+**(2) RNA propagation STAYS, with a DERIVED coupling reliability — `q_rna=0.25` dies as a *derived* quantity, not
+by removing RNA chaining.** Phase-1 A/B showed RNA-odds propagation helps (+1.1–5.0% on the complex battery). RNA
+carries cross-node correlation and should propagate, but the coupling strength must be derived: the **RNA
+pair-model `var~mean`** supplies the per-μ coupling reliability on the (annotation-gated) same-strand-exon edges.
+The hard "gDNA chains / RNA local" rule is SUBSUMED by: **each component propagates on its structurally-gated edges
+with its own derived reliability** — gDNA's high where genomically smooth; RNA's reflecting expression coherence
+(low ≈ local where isoforms/capture break continuity). Behaviour emerges from the learned reliabilities, not a
+hard rule or a constant. *Caveat:* the battery is the favorable case (capture-off, single-abundance transcripts);
+a multi-isoform/capture-on stress locus is still needed to test where RNA coupling should decouple.
+
+**(3) Phase 2 is reframed** around building this pair-model `var~mean` (gDNA + RNA) as the foundational step — it
+delivers `τ_count` (no extrapolation), the derived `q_rna`, and `σ²_global`, with the Jensen df-offset + Bernoulli
+clamp applied to it. The all-pairs fit needs an estimate at every node, so it composes naturally with the unified
+node solver (Phase 5); it can be prototyped on the current region + boundary-side estimates.
+
+**A1.1 — Phase-2a result (2026-06-16, SHIPPED to working tree, suite-pending-goldens):** the IMPUTATION-axis fix
+(fit & query on the region's CURRENT density), the Jensen df-offset, and the Bernoulli clamp landed and
+**eliminated the extrapolation** (0% of captured-exon nodes extrapolate, was 71%) while **improving** the complex
+battery (4595 → 4502). `sweep_max_passes` 4→6; `1e-3` stop promoted to `CalibrationConfig.sweep_convergence_delta`.
+**`σ²_global = DIRECT.predict(ρ_global)` was tried and REVERTED** — A/B-measured ~5.5× too tight, +11.3% battery
+(see ledger). Kept the MAD between-node spread. Downstream: 4 golden scenarios shift ~4% (the intended
+prior change); golden regen gated on a net-flow accuracy confirmation (release-suite BAMs need a rebuild).
+
+---
+
 ## 0. TL;DR — the two corrections and the elegance
 
 Calibration deconvolves each node's unspliced mass into the 2-simplex pie `(f₊, f₋, f_g)` = sense-RNA /
@@ -274,9 +315,9 @@ readout is a per-node normalize the kernel can emit directly. Mirror a Python re
 
 | Constant | Current | Verdict | Derived replacement |
 |---|---|---|---|
-| **σ²_global** | `1.4826·MAD²·jac²` (`calibrate.py:269-274`) | **DERIVE-NOW** (P2) | `direct.predict(ρ_global)·jac²` — the zero-DNA pin |
+| **σ²_global** | `1.4826·MAD²·jac²` (`calibrate.py:269-274`) | **KEEP-MAD** (Phase-2a REVERTED the DERIVE) | `direct.predict(ρ_global)` was measured ~5.5× too tight (it's one node's *sampling* variance, not the between-node *spread* an unanchored node faces) ⇒ over-pinned anchorless AMBIG ⇒ **+11.3% complex battery** (A/B-isolated). The MAD IS the principled population spread (1.4826 = normal-consistency, not a tunable); → 0 at zero-DNA = the pin. |
 | **`I₀` `gdna_strand_info_scale=10.0`** | `config.py:288`; sweep down-weight `simplex_sweep.py:236`; side blend; side-clean | **DELETE** (sweep+side, P5) | **DIES** — count enters at raw `τ_count`; deference emerges from `I=N(2κ−1)²`. Survives only in `cleaned_gdna_count` until measured redundant |
-| **`q_rna` `0.25`** | `simplex_sweep.py:194,264-281` | **DELETE** (P2, gated P1) | **DIES** — RNA does not chain; premise rejected |
+| **`q_rna` `0.25`** | `simplex_sweep.py:194,264-281` | **DERIVE** (Amendment A1; P1 A/B: RNA-odds helps) | **DIES as a constant, not as a mechanism** — replaced by the per-μ RNA pair-model imputation-error reliability on same-strand-exon edges; RNA propagation STAYS |
 | **Jensen df-offset** | absent (`variance_model.py:282`) | **DERIVE-NOW** (P2) | `Δ_k = log((k−1)/2) − ψ((k−1)/2)`; +3.56×@k=2, +1.78×@k=3 |
 | **`sig2_frac` upper bound** | uncapped (`calibrate.py:267`) | **DERIVE-NOW** (P2) | Bernoulli `count_frac·(1−count_frac)` |
 | **convergence stop** | inline `1e-3` (`calibrate.py:291`) | **PROMOTE** (P2) | `sweep_convergence_delta` + prediction-error trace |
@@ -323,12 +364,16 @@ readout is a per-node normalize the kernel can emit directly. Mirror a Python re
 
 ## 6. Residual measurement-gated open questions
 
-1. **Does the count lever survive the density→fraction Jacobian²?** (`≈14` moderate exon, `~5625`@mass_u=20.) If
-   `τ_count·jac²` is near-inert, Phase 6 and even Jensen are invisible to net-flow. → instrument in Phase 1.
-2. **Do observable-destination pairs/triplets span the exon μ-range?** Phase 6/7 are honest only if high-μ points
-   exist; if only low-μ off-target points exist, the chain can only smooth depleted regions → defer at captured exons.
-3. **Does removing RNA-odds regress the complex battery?** The blocking Phase-1 A/B is the sole arbiter.
-4. **Per-pass refit + `_local_loglik` cost** → measure in Phase 1; decides the C++ perf PR.
+1. **RESOLVED (Phase 1): the count lever SURVIVES the Jacobian.** `geom2` spans ~6 orders under capture but `var_d`
+   shrinks in lockstep ⇒ `sig2_frac` stays O(1) ⇒ count-inert = 0% everywhere; count is a live lever on 84–87% of
+   nodes under capture. Jensen + the IMPUTATION re-cut ARE visible to net-flow.
+2. **RESOLVED (Phase 1 → Amendment A1): the OBSERVABLE-only fit does NOT span the exon μ-range (71% extrapolation).**
+   Hence the switch to the all-pairs node-pair var~mean (fit on every node's current estimate), which DOES span it.
+3. **RESOLVED (Phase 1 A/B): RNA-odds HELPS (+1.1–5.0%).** Keep it; derive `q_rna` (Amendment A1) rather than remove.
+   Open sub-question: build a multi-isoform/capture-on stress locus to test where RNA coupling should decouple.
+4. **PARTLY RESOLVED (Phase 1): the var~mean refit (90–246 ms) DOMINATES the sweep (25–33 ms) at R=157.** The perf
+   PR must profile BOTH the refit and `_local_loglik` at genome scale, not just `_local_loglik`. Also bump
+   `sweep_max_passes` (capon converged only on the last allowed pass).
 5. **Does the chain smooth a true capture/CNV edge?** Phase-7 toy: a sharp captured exon flanked by depleted introns;
    assert the chain is a no-op on the IPR under uniform gDNA (factor-1) and `s_edge` widens where neighbours disagree.
 6. **Robust-loss form (P7): Cauchy vs Huber** — Cauchy decouples harder (redescending), Huber is convex; choose by

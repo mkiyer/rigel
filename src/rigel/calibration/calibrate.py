@@ -60,7 +60,11 @@ from .splice_junction import region_splice_gdna_frac
 from .strand_balance import fit_strand_balance
 from .strand_deconv import cleaned_gdna_count, deconv_sides, strand_deconvolve
 from .substrate import CalibrationSubstrate
-from .variance_model import fit_direct_varmean, fit_imputation_varmean, varmean_points
+from .variance_model import (
+    fit_direct_varmean,
+    fit_imputation_varmean_current,
+    varmean_points,
+)
 
 if TYPE_CHECKING:
     from ..config import CalibrationConfig
@@ -251,11 +255,13 @@ def calibrate(
             float(gdna_c[obs].sum() / max(float(eff_len[obs].sum()), 1e-9)) if obs.any() else 0.0
         )
         # var~mean on the CURRENT gDNA estimate (region contained + the fixed boundary anchors). DIRECT
-        # (count-observable own variance) and IMPUTATION (boundary→region prediction error); read each
-        # node in its own class at its current gDNA density μ. Density-var → fraction-var via (eff/mass)²;
-        # τ = 1/σ². Count τ ≤ own-count Poisson ceiling (mass); global τ ≥ 1-pseudo-obs foundation,
-        # ≤ own data. σ²_global = the between-node SPREAD (robust MAD) — wide/uncertain on Pass 0
-        # (all-gDNA spans depleted→enriched), tightening as iteration converges (the zero-DNA pin).
+        # (count-observable own variance, Jensen-corrected via the per-point dof) and IMPUTATION
+        # (boundary→region prediction error, fit & queried on the SAME axis — the region's CURRENT gDNA
+        # density — so the captured-exon μ-range is INSIDE the fit range and no node extrapolates, the
+        # Phase-2a fix; CALIBRATION_PLAN_v4 A1). Read each node in its own class at its current gDNA
+        # density μ. Density-var → fraction-var via (eff/mass)²; τ = 1/σ². Count τ ≤ own-count Poisson
+        # ceiling (mass), Bernoulli-clamped (a fraction variance ≤ p(1−p)). σ²_global = the robust MAD
+        # between-node density spread (below) — the population spread an unanchored node faces.
         pts = varmean_points(
             substrate,
             region_arrays,
@@ -264,10 +270,24 @@ def calibrate(
             gdna_views=(gdna_c, gdna_left, gdna_right),
         )
         direct = fit_direct_varmean(pts)
-        imputation = fit_imputation_varmean(pts)
+        imputation = fit_imputation_varmean_current(
+            substrate,
+            region_arrays,
+            region_eff_len,
+            fl_mean,
+            gdna_views=(gdna_c, gdna_left, gdna_right),
+        )
         mu = gdna_c / eff_len
         var_d = np.where(obs, direct.predict(mu), imputation.predict(mu))
-        sig2_frac = np.maximum(var_d * geom2, 1e-12)
+        # Bernoulli clamp: a gDNA-FRACTION variance cannot exceed p(1−p) for the count-prior mean p.
+        cf = np.clip(region_count_frac, 0.0, 1.0)
+        sig2_frac = np.maximum(np.minimum(var_d * geom2, cf * (1.0 - cf)), 1e-12)
+        # σ²_global = the robust between-node SPREAD of the per-node densities (MAD), NOT a single node's
+        # sampling variance: an unanchored node could lie anywhere in the node-density distribution, so the
+        # global prior's width is the population spread, not the precision of one estimate. (Phase-2a A/B:
+        # DIRECT.predict(ρ_global) is ~5.5× too tight ⇒ over-pins anchorless AMBIG ⇒ +11.3% complex-battery
+        # leak — measured, reverted. 1.4826 = the normal-consistency MAD constant, not a tunable. The spread
+        # → 0 at zero-DNA where all observable nodes agree density ≈ 0, which is the zero-DNA pin.)
         active_mu = mu[u_tot > 0.0]
         sigma_d_global = (
             1.4826 * float(np.median(np.abs(active_mu - np.median(active_mu))))
@@ -291,7 +311,11 @@ def calibrate(
             info_scale=i0,
             global_tau=tau_global,
         )
-        if prev_fg is not None and float(np.mean(np.abs(regions.gdna_frac - prev_fg))) < 1e-3:
+        if (
+            prev_fg is not None
+            and float(np.mean(np.abs(regions.gdna_frac - prev_fg)))
+            < config.sweep_convergence_delta
+        ):
             break
         prev_fg = regions.gdna_frac
         gdna_c = np.asarray(regions.gdna_mass, dtype=np.float64)

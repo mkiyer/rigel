@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 from scipy.interpolate import BSpline
 from scipy.optimize import minimize
+from scipy.special import digamma
 
 __all__ = [
     "MonotoneVarMean",
@@ -34,7 +35,22 @@ __all__ = [
     "varmean_points",
     "fit_direct_varmean",
     "fit_imputation_varmean",
+    "fit_imputation_varmean_current",
 ]
+
+
+def _jensen_offset(dof: np.ndarray) -> np.ndarray:
+    """Per-point Jensen bias correction for ``log(raw_var)`` of a small-dof variance estimate.
+
+    A sample variance ``s²`` of ``dof`` degrees of freedom has ``E[log s²] = log σ² + ψ(dof/2) −
+    log(dof/2)`` (the log of a scaled χ²). So ``log s²`` is **downward**-biased by
+    ``Δ = log(dof/2) − ψ(dof/2) ≥ 0`` (e.g. dof=1 → +1.2704, dof=2 → +0.5772, →0 as dof→∞). Adding
+    ``Δ`` to the fit target ``log s²`` removes the over-confidence (inflates the recovered variance)
+    so a k=2 disagreement (dof=1) is not read as a tighter variance than it is.
+    """
+    d = np.asarray(dof, dtype=np.float64)
+    half = np.maximum(d, _EPS) / 2.0
+    return np.log(half) - digamma(half)
 
 _EPS = 1.0e-12
 _DEFAULT_K = 18  # B-spline basis size (upper bound on flexibility); λ controls the actual smoothness
@@ -83,6 +99,7 @@ class MonotoneVarMean:
         mean: np.ndarray,
         var: np.ndarray,
         *,
+        dof: np.ndarray | None = None,
         k: int = _DEFAULT_K,
         degree: int = _DEFAULT_DEGREE,
         robust_iters: int = 2,
@@ -92,19 +109,31 @@ class MonotoneVarMean:
 
         ``k`` is the basis upper bound (the GCV-selected λ controls smoothness); ``robust_iters`` adds
         bisquare IRLS passes (0 ⇒ plain least squares). Points with non-positive mean/var are dropped.
+
+        ``dof`` (optional, per-point degrees of freedom of each ``var`` estimate) applies the **Jensen
+        df-offset** to the fit target: ``log var`` of a small-dof variance is downward-biased, so we add
+        the positive correction ``Δ = log(dof/2) − ψ(dof/2)`` (see :func:`_jensen_offset`) before fitting,
+        inflating the recovered variance to remove the over-confidence. ``None`` ⇒ no offset (exact
+        back-compat).
         """
         mean = np.asarray(mean, dtype=np.float64)
         var = np.asarray(var, dtype=np.float64)
+        dof_arr = None if dof is None else np.asarray(dof, dtype=np.float64)
         ok = np.isfinite(mean) & np.isfinite(var) & (mean > _EPS) & (var > _EPS)
+        if dof_arr is not None:
+            ok &= np.isfinite(dof_arr)
         mean, var = mean[ok], var[ok]
+        off = None if dof_arr is None else _jensen_offset(dof_arr[ok])
         if mean.size < max(k, 8):
             # too few points for a stable spline — fall back to a monotone power-law (var = a·mean^b,
             # b≥0 enforced) so the curve is still usable (e.g. tiny toy scenarios).
-            return cls._powerlaw_fallback(mean, var, k, degree)
+            return cls._powerlaw_fallback(mean, var, k, degree, offset=off)
 
         order = np.argsort(mean)
         mean, var = mean[order], var[order]
         x, y = np.log(mean), np.log(var)
+        if off is not None:
+            y = y + off[order]  # Jensen-correct the fit target (does NOT alter stored fit_var)
         x_lo, x_hi = float(x[0]), float(x[-1])
         kn = _knots(x_lo, x_hi, k, degree)
         B = _bspline_design(x, kn, degree, k)
@@ -148,10 +177,16 @@ class MonotoneVarMean:
         )
 
     @classmethod
-    def _powerlaw_fallback(cls, mean, var, k, degree) -> "MonotoneVarMean":
-        """Monotone power-law ``var = a·mean^b`` (b clipped ≥ 0) for too-few-points cases."""
+    def _powerlaw_fallback(cls, mean, var, k, degree, *, offset=None) -> "MonotoneVarMean":
+        """Monotone power-law ``var = a·mean^b`` (b clipped ≥ 0) for too-few-points cases.
+
+        ``offset`` (optional, aligned to ``mean``/``var``) is the per-point Jensen df-offset added to
+        ``log var`` before the line fit — same correction as the spline path.
+        """
         if mean.size >= 2:
             x, y = np.log(mean), np.log(var)
+            if offset is not None:
+                y = y + np.asarray(offset, dtype=np.float64)
             b, a = np.polyfit(x, y, 1)
             b = max(b, 0.0)
             x_lo, x_hi = float(x.min()), float(x.max())
@@ -222,11 +257,14 @@ def _fit_monotone(B, y, w, P, lam, k) -> np.ndarray:
 class VarMeanPoints:
     """Per-region var~mean fit points: ``mean`` ½/⅓-measurement mean density, ``raw_var`` the
     inter-measurement disagreement, ``region_observable`` whether the contained region anchored the
-    triplet (DIRECT) or was imputed from its boundaries only (IMPUTATION)."""
+    triplet (DIRECT) or was imputed from its boundaries only (IMPUTATION), ``kcount`` the number of
+    density measurements behind each point (2 or 3) — the variance estimate has ``dof = kcount − 1``,
+    which feeds the Jensen df-offset (:func:`fit_direct_varmean`)."""
 
     mean: np.ndarray
     raw_var: np.ndarray
     region_observable: np.ndarray  # bool — True ⇒ DIRECT point, False ⇒ IMPUTATION point
+    kcount: np.ndarray  # float — number of measurements behind the point (dof = kcount − 1)
 
 
 def varmean_points(
@@ -281,19 +319,82 @@ def varmean_points(
     dev2 = np.where(msk, (np.nan_to_num(obs) - mu) ** 2, 0.0).sum(0)
     raw = np.where(kcount > 1.0, dev2 / np.maximum(kcount - 1.0, _EPS), np.nan) / np.maximum(kcount, 1.0)
     sel = (kcount >= 2.0) & np.isfinite(mu) & (mu > _EPS) & np.isfinite(raw) & (raw > _EPS)
-    return VarMeanPoints(mean=mu[sel], raw_var=raw[sel], region_observable=c_ok[sel])
+    return VarMeanPoints(
+        mean=mu[sel], raw_var=raw[sel], region_observable=c_ok[sel], kcount=kcount[sel]
+    )
 
 
 def fit_direct_varmean(points: VarMeanPoints, **kw) -> MonotoneVarMean:
     """DIRECT var~mean — fit over the region-observable points (the region anchored the estimate). Feeds
-    the count precision at count-observable nodes and the global-baseline variance."""
+    the count precision at count-observable nodes and the global-baseline variance. Jensen-corrected via
+    the per-point ``dof = kcount − 1`` (a 2-measurement point is dof=1, a triplet dof=2)."""
     m = points.region_observable
-    return MonotoneVarMean.fit(points.mean[m], points.raw_var[m], **kw)
+    return MonotoneVarMean.fit(
+        points.mean[m], points.raw_var[m], dof=points.kcount[m] - 1.0, **kw
+    )
 
 
 def fit_imputation_varmean(points: VarMeanPoints, **kw) -> MonotoneVarMean:
     """IMPUTATION var~mean — fit over the region-imputed points (boundaries only, no region truth). Feeds
     the count precision at imputed/AMBIG nodes (properly humble — it measures boundary→region disagreement,
-    not the anchor's own confidence — which is the §15 over-trust fix)."""
+    not the anchor's own confidence — which is the §15 over-trust fix).
+
+    **Superseded for production by :func:`fit_imputation_varmean_current`** (Phase-2a): this builder fits
+    on the boundary-crossing density axis (the low-μ depleted regime under capture), which the captured
+    exon nodes — queried at their CURRENT gDNA density — extrapolate far above. Kept for the legacy
+    boundary-disagreement view and back-compat tests.
+    """
     m = ~points.region_observable
     return MonotoneVarMean.fit(points.mean[m], points.raw_var[m], **kw)
+
+
+def fit_imputation_varmean_current(
+    substrate, region_arrays, region_eff_len, fl_mean, gdna_views, **kw
+) -> MonotoneVarMean:
+    """IMPUTATION var~mean fit **on the region's CURRENT gDNA density** (Phase-2a / CALIBRATION_PLAN_v4 A1).
+
+    The legacy :func:`fit_imputation_varmean` fits the boundary↔region disagreement against the boundary-
+    crossing density (μ depleted under capture), but the sweep QUERIES the model at each node's CURRENT
+    density ``gdna_c/eff_len`` (μ high for captured exons) — so 71% of exon nodes extrapolate (Phase-1).
+    The fix: fit and query on the SAME axis. For every NON-count-observable region (the imputed/exon/AMBIG
+    set) the fit point is
+
+    * ``mean  = gdna_contained[r] / region_eff_len[r]`` — the CURRENT (iterating) gDNA density;
+    * ``raw_var = ¼·(d_L − d_R)²`` — the boundary-crossing disagreement (``d_L = left/fl_mean``,
+      ``d_R = right/fl_mean`` from the observable adjacent sides, exactly as :func:`varmean_points`),
+      a 2-measurement (k=2, dof=1) imputation-error estimate.
+
+    Requiring BOTH adjacent sides finite makes the disagreement well-defined. The exon CURRENT densities
+    span the captured-exon μ-range ⇒ the model interpolates there ⇒ no extrapolation. Fit Jensen-corrected
+    with dof=1 (the k=2 estimate). ``gdna_views = (gdna_contained, gdna_left, gdna_right)`` is the current
+    iteration's gDNA estimate (same convention as :func:`varmean_points`).
+    """
+    from .density_model import count_observable_masks
+    from .run_fill import same_ref_left_right
+
+    sig = np.asarray(region_arrays.signature)
+    ref_id = np.asarray(region_arrays.ref_id)
+    r = sig.shape[0]
+    L = np.maximum(np.asarray(region_eff_len, dtype=np.float64), _EPS)
+    inv_fl = 1.0 / float(fl_mean) if float(fl_mean) > 0.0 else 0.0
+
+    c_cnt, l_cnt, r_cnt = (np.asarray(v, dtype=np.float64) for v in gdna_views)
+
+    rco, bco = count_observable_masks(sig, ref_id)
+    ls, rs = same_ref_left_right(ref_id)
+    la = np.zeros(r, bool)
+    rb = np.zeros(r, bool)
+    if r > 1:
+        la[1:] = bco[:-1] & ls[1:]  # left side observable (neighbour's boundary)
+        rb[:-1] = bco[:-1] & rs[:-1]  # right side observable
+    d_left = np.where(la, l_cnt * inv_fl, np.nan)
+    d_right = np.where(rb, r_cnt * inv_fl, np.nan)
+
+    # Non-count-observable regions (the imputed/exon/AMBIG set) with BOTH adjacent observable sides:
+    # mean = the region's CURRENT gDNA density; raw_var = ¼(d_L−d_R)² (k=2, dof=1).
+    imputed = (~rco) & la & rb
+    mean = c_cnt / L
+    raw_var = 0.25 * (d_left - d_right) ** 2
+    sel = imputed & np.isfinite(mean) & (mean > _EPS) & np.isfinite(raw_var) & (raw_var > _EPS)
+    m = mean[sel]
+    return MonotoneVarMean.fit(m, raw_var[sel], dof=np.ones(m.shape[0]), **kw)
