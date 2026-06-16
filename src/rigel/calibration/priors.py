@@ -166,21 +166,27 @@ def assemble_priors(
 ) -> LocusPriors:
     """Build the per-locus EM prior from the acyclic calibration result.
 
-    Boundary-crossing gDNA is first re-attributed to its origin region by the length-bias-free
-    boundary-flux transport (density_ratio * boundary_capacity); the transported per-region gDNA
-    (``gdna_region``) and RNA (``rna_region``) project to loci by genomic-overlap ``share``::
+    The per-region gDNA is the **conservation-correct node mass over genomic bp**: ``gdna_region`` =
+    ``contained + left + right`` (the gDNA overlapping the region's genomic interval) and the per-region
+    length is the bare genomic ``region_size_bp``. Both conserve exactly — ``Σ_r gdna_region`` = the total
+    deconvolved gDNA mass (CONSERVATION OF MASS) and ``Σ_r region_size_bp`` = the covered genomic span
+    (CONSERVATION OF GENOMIC LENGTH, since regions tile). ``gdna_region`` and ``rna_region`` project to
+    loci by genomic-overlap ``share``::
 
         gdna_prior_count = Σ_r share * gdna_region    (deconvolved gDNA count)
         rna_prior_count  = Σ_r share * rna_region     (deconvolved UNSPLICED RNA count;
                                                        spliced mass withheld — see below)
-        gdna_eff_len     = (G+1)² / [ Σ share*(gdna²/geom) + (2G+1)/span ],  G = Σ share*gdna
-                           (capped at span)
+        gdna_eff_len     = (G+1)² / [ Σ share*(gdna²/L) + (2G+1)/span ],  G = Σ share*gdna,
+                           L = region_size_bp,  span = Σ share*region_size_bp   (capped at span)
 
-    ``geom = gdna_geom_len`` is the FL-aware gDNA support of a region — the bases a gDNA fragment
-    can overlap (contained + both boundary crossings, ~ region_len + mean_FL), not the bare region
-    length. ``gdna_eff_len`` is the **inverse participation ratio** of the per-region gDNA mass
-    (its reciprocal makes the gDNA component's per-position rate equal the local gDNA density, so
-    under capture the support contracts to the exons and gDNA competes at its true density),
+    This REPLACES the earlier boundary-flux transport + the FL-aware ``gdna_geom_len`` (= contained
+    support + both boundary supports), which summed to ~8% more than the genomic span (≈2× on small
+    exons — it double-counts each seam and adds FL-mass on top of the contained support), violating
+    genomic-length conservation and biasing the IPR span. ``gdna_eff_len`` is the **inverse
+    participation ratio** of the per-region gDNA *density* ``gdna_region/region_size_bp`` (its reciprocal
+    makes the gDNA component's per-position rate equal the local gDNA density, so under capture the
+    support contracts to the probed exons and gDNA competes at its true density), correct by
+    construction — uniform gDNA (``g_r ∝ region_size_bp``) ⇒ ``eff_len = span`` (the genomic span).
     **Laplace-smoothed** by one fragment-equivalent of uniform per-base prior mass: adding
     ``c_r = L_r/span`` to each ``gdna_region`` and forming ``(G+1)²/Σ(g̃²/L)`` gives the closed
     form above, since ``Σ 2·g·c/L = 2G/span`` and ``Σ c²/L = 1/span``.
@@ -199,18 +205,24 @@ def assemble_priors(
             f"{region_arrays.n_regions}; they must address the same partition."
         )
 
-    # Transport uses the physical region length for its length-bias-free density ratio; the
-    # gdna_support_len uses the FL-aware gDNA support E_r = gdna_geom_len (contained + boundary crossings
-    # ≈ R + L̄) — the bases a gDNA fragment can actually overlap, not the bare region length.
+    # CONSERVATION-CORRECT per-region gDNA (PR-1). Per region: the gDNA mass overlapping its genomic
+    # interval — contained + the two boundary sides' portions — over the region's genomic bp. Both
+    # quantities conserve EXACTLY:
+    #   • mass:   Σ_r (contained + left + right) = the total deconvolved gDNA mass — each crossing
+    #             fragment's mass is split once across the two regions it spans (the two sides);
+    #   • length: Σ_r region_size_bp = the covered genomic span — regions tile the genome.
+    # This REPLACES the boundary-flux transport + the FL-aware gdna_geom_len, which summed to ~8% more
+    # than the genomic span (≈2× on small exons: gdna_geom_len = region_eff + both sides double-counts
+    # each seam and adds FL-mass on top of the contained support) — a genomic-length-conservation
+    # violation that biased the IPR span (the cap + the uniform reference). With genomic-bp lengths the
+    # IPR is correct by construction: uniform gDNA (g_r ∝ region_size_bp) ⇒ eff_len = span (the genomic
+    # span); only capture-concentrated gDNA contracts. No transport — the length-bias it compensated
+    # for is gone (the FL-aware length was the source of that bias).
     length = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
-    gdna_geom_len = np.asarray(calibration.gdna_geom_len, dtype=np.float64)
-    gdna_region = _transport_boundary_flux(
-        calibration.mass_gdna_contained,
-        calibration.mass_gdna_left,
-        calibration.mass_gdna_right,
-        length,
-        calibration.gdna_boundary_len,
-        np.asarray(region_arrays.ref_id),
+    gdna_region = (
+        np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
+        + np.asarray(calibration.mass_gdna_left, dtype=np.float64)
+        + np.asarray(calibration.mass_gdna_right, dtype=np.float64)
     )
     # RNA prior = the UNSPLICED RNA mass only. Spliced fragments have no gDNA candidate in the EM
     # (gDNA does not splice) → they are guaranteed-RNA and the EM assigns them directly; counting
@@ -227,7 +239,7 @@ def assemble_priors(
     )
     with np.errstate(divide="ignore", invalid="ignore"):
         gdna_sq_over_len = np.where(
-            gdna_geom_len > 0.0, gdna_region**2 / np.maximum(gdna_geom_len, 1e-9), 0.0
+            length > 0.0, gdna_region**2 / np.maximum(length, 1e-9), 0.0
         )
 
     proj = _project_regions_to_loci(
@@ -238,7 +250,7 @@ def assemble_priors(
             "gdna": gdna_region,
             "rna": rna_region,
             "support": gdna_sq_over_len,
-            "span": gdna_geom_len,
+            "span": length,
         },
     )
     gdna_locus, support_locus, span = proj["gdna"], proj["support"], proj["span"]

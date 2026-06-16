@@ -77,21 +77,67 @@ def _ml(locus_id, blocks) -> MultiLocus:
 
 
 def test_single_locus_sums_region_nodes():
-    # 3 regions fully inside one locus → φ = 1 each. alpha_gdna = Σ G_r,
-    # alpha_rna = Σ D_r, gdna_eff_len = the IPR (Σ G)² / Σ(G²/L) over region lengths.
+    # 3 regions fully inside one locus → φ = 1 each. gdna_prior_count = Σ G_r, rna_prior_count = Σ D_r,
+    # gdna_eff_len = the Laplace-smoothed IPR (Σ G)²/Σ(G²/L) over the GENOMIC region lengths
+    # region_size_bp (conservation-correct, PR-1). Region sizes [100, 200, 150] with gDNA mass ∝ size
+    # ⇒ uniform per-bp density ⇒ the IPR equals the genomic span Σ region_size_bp = 450 (uniform mass →
+    # full span; the smoothing is exact). gdna_geom_len is no longer read by assemble_priors.
     cal = _calibration(
         mass_g=[1.0, 2.0, 1.5],
         mass_d=[3.0, 4.0, 5.0],
-        gdna_geom_len=[100.0, 200.0, 150.0],
+        gdna_geom_len=[100.0, 200.0, 150.0],  # unused here now (capture_eff_length consumes it)
+    )
+    ra = _regions([0, 100, 300], [100, 300, 450])  # genomic sizes 100, 200, 150 (Σ = 450 bp)
+    priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 450)])])
+    np.testing.assert_allclose(priors.rna_prior_count, [12.0])
+    np.testing.assert_allclose(priors.gdna_prior_count, [4.5])
+    np.testing.assert_allclose(priors.gdna_eff_len, [450.0])
+
+
+def test_gdna_length_conservation_span_is_genomic():
+    # CONSERVATION OF GENOMIC LENGTH (the PR-1 regression guard). The gDNA component's IPR span must be
+    # the genomic span Σ region_size_bp, NOT the old FL-aware gdna_geom_len (which double-counts each
+    # boundary seam + adds mean-FL per region ⇒ ~8% inflation, ≈2× on small exons). Here gdna_geom_len
+    # is set 3× the genomic size to expose any leak of it into the length: with uniform per-bp gDNA the
+    # eff-len must equal the GENOMIC span (300), never the inflated 900.
+    cal = _calibration(
+        mass_g=[1.0, 1.0, 1.0],
+        mass_d=[0.0, 0.0, 0.0],
+        gdna_geom_len=[300.0, 300.0, 300.0],  # 3× the genomic size — must NOT be used as the length
+    )
+    ra = _regions([0, 100, 200], [100, 200, 300])  # genomic sizes 100, 100, 100 (Σ = 300 bp)
+    priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
+    # uniform per-bp gDNA over genomic bp ⇒ eff_len = genomic span = 300 (the conserved length),
+    # AND the cap is the genomic span: eff_len must never exceed Σ region_size_bp.
+    np.testing.assert_allclose(priors.gdna_eff_len, [300.0])
+    assert priors.gdna_eff_len[0] <= 300.0 + 1e-9
+
+
+def test_gdna_mass_conservation_contained_plus_sides():
+    # CONSERVATION OF MASS. The per-region gDNA is contained + left + right (the gDNA overlapping the
+    # region's genomic interval); gdna_prior_count must sum ALL of it. Boundary-side gDNA mass must be
+    # counted, not dropped. Total gDNA mass here = Σ(contained+left+right) = (2+1+1)+(3+0+2)+(1+1+0) = 11.
+    cal = CalibrationResult(
+        mass_gdna_contained=np.array([2.0, 3.0, 1.0]),
+        mass_rna_contained=np.array([0.0, 0.0, 0.0]),
+        mass_gdna_left=np.array([1.0, 0.0, 1.0]),
+        mass_rna_left=np.array([0.0, 0.0, 0.0]),
+        mass_gdna_right=np.array([1.0, 2.0, 0.0]),
+        mass_rna_right=np.array([0.0, 0.0, 0.0]),
+        mass_rna_spliced=np.array([0.0, 0.0, 0.0]),
+        gdna_geom_len=np.array([100.0, 100.0, 100.0]),
+        gdna_boundary_len=np.array([100.0, 100.0, 100.0]),
+        gdna_density_global=0.01,
+        rna_sense_frac=0.9,
+        gdna_strand_overdispersion=0.05,
+        rna_strand_overdispersion=0.05,
+        n_regions=3,
+        config=CalibrationConfig(),
     )
     ra = _regions([0, 100, 200], [100, 200, 300])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
-    np.testing.assert_allclose(priors.rna_prior_count, [12.0])
-    np.testing.assert_allclose(priors.gdna_prior_count, [4.5])
-    # gdna_eff_len is the Laplace-smoothed IPR over the FL-aware support gdna_geom_len =
-    # [100, 200, 150]; here the gDNA density g/geom = 0.01 is uniform, so the IPR equals the
-    # geometric span Σ gdna_geom_len = 450 (uniform mass → full span; the smoothing is exact).
-    np.testing.assert_allclose(priors.gdna_eff_len, [450.0])
+    # all 3 regions in one locus (φ=1) ⇒ gdna_prior_count = the total conserved gDNA mass.
+    np.testing.assert_allclose(priors.gdna_prior_count, [11.0])
 
 
 def test_spliced_mass_withheld_from_rna_prior():
