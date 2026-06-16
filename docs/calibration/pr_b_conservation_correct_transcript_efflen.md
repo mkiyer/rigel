@@ -1,6 +1,40 @@
 # PR-B: conservation-correct mature/nascent transcript effective length
 
-**Status:** plan (for the author to implement next).
+> **⚠ VERDICT (2026-06-16): DEFERRED — conservation-correctness and net-flow-neutrality are INCOMPATIBLE for
+> the transcript eff-len in isolation (measured, not assumed).** PR-B was implemented and measured end-to-end
+> on the flagship-with-nascent: it regresses the gDNA→RNA leak 5.62% → 8.55% (mature over-claims +119k;
+> nascent −31k and gDNA −88k lose). We then iterated **11+ conservation-correct variants** (V0–V9 + flank-seam
+> and nascent-seam α-sweeps), each measured through the full EM — **none** passes the gate (leak ≤ 5.7% AND
+> nrna ≈ 190,588 AND mrna no worse than OLD). They lie on a monotone frontier: pushing leak down forces nrna
+> down / mrna up; the best conservation-correct point (V1, mature exon-side flank seams) asymptotes at ~6.2%
+> and over-assigns nascent, never reaching OLD's 5.62%.
+>
+> **Mechanism (pinned).** The pooled-seam node acts in OPPOSITE directions across footprint types: it
+> over-contracts MATURE (the median mature transcript has 0 genomic seams — exon gaps; the minority with
+> partition-adjacent exon regions get a lone high-density FL-scale seam that detonates `factor_raw`, e.g.
+> 0.819→0.004) while RELAXING NASCENT (~10 high-mass intron-crossing seams, 1.08×). The conservation FIXES
+> themselves push the right way (genomic span + contained-only mass relax both classes); only the seam-node
+> loading regresses. The deep reason it is irreducible: OLD's neutrality is **functionally load-bearing on its
+> conservation violation** — `÷ gdna_geom_len` (region_eff + both FL-scale boundary sides, ~1.94× the genomic
+> length on small exon regions, `derive.py:55`) relaxes exactly the short-exon loci the FL-scale seam detonates,
+> and `_transport_boundary_flux` couples crossing-gDNA mass into the **gDNA-COMPONENT** IPR — a leak advantage
+> the transcript eff-len (which sets only RNA-side competitiveness) cannot reproduce. The nascent seams are
+> load-bearing, not removable (dropping them explodes nrna to 430k–680k).
+>
+> **DECISION:** keep the OLD (`_transport_boundary_flux` ÷ `gdna_geom_len`) transcript path as the shipped
+> production path — conservation-violating but net-flow-neutral by deliberate, measured choice. The eff-len
+> initiative is **resolved by PR-A** (the conservation-correct gDNA-COMPONENT pooled-seam, shipped). The
+> cleanup (deleting `_transport_boundary_flux` + `gdna_geom_len`) is consequently also deferred (the OLD
+> transcript path still uses them).
+>
+> **RE-OPEN only as a PAIRED change:** route the flanking/transport crossing-gDNA mass into the
+> `priors.assemble_priors` gDNA-component IPR (so the leak advantage no longer depends on the transcript
+> divisor's relaxation); then the transcript path could go conservation-correct (V1 flank-seam) without losing
+> leak. That is a separate, larger PR (touches the gDNA component), filed as a follow-up — NOT PR-B.
+> Closing evidence: `/tmp/mech_dissect.py`, `/tmp/mech_isolate.py`, the V0–V9 + α-sweep measurements.
+
+**Status:** DEFERRED (implemented + iterated; the conservation-correct rewrite below regresses — see the
+verdict above). The §1–§7 plan is retained as the design record + the re-open recipe.
 **Target:** `src/rigel/calibration/capture_eff_length.py` — `transcript_capture_eff_lengths` + `_exon_region_incidence`.
 **Reference to mirror (shipped):** `src/rigel/calibration/priors.py::assemble_priors` (PR-A, lines 215–326).
 **Predecessor:** PR-A migrated the **gDNA component** locus eff-len to the pooled-seam node model. PR-B migrates the **other consumer** — the per-transcript MATURE/NASCENT EM eff-len — to the same model.
