@@ -166,30 +166,37 @@ def assemble_priors(
 ) -> LocusPriors:
     """Build the per-locus EM prior from the acyclic calibration result.
 
-    The per-region gDNA is the **conservation-correct node mass over genomic bp**: ``gdna_region`` =
-    ``contained + left + right`` (the gDNA overlapping the region's genomic interval) and the per-region
-    length is the bare genomic ``region_size_bp``. Both conserve exactly — ``Σ_r gdna_region`` = the total
-    deconvolved gDNA mass (CONSERVATION OF MASS) and ``Σ_r region_size_bp`` = the covered genomic span
-    (CONSERVATION OF GENOMIC LENGTH, since regions tile). ``gdna_region`` and ``rna_region`` project to
-    loci by genomic-overlap ``share``::
+    The gDNA node set (PR-A; ``effective_length_redesign_plan.md`` §7) is the region-contained nodes PLUS
+    one **pooled seam node** per internal boundary — *not* the ``contained+left+right`` fold (PR-1):
 
-        gdna_prior_count = Σ_r share * gdna_region    (deconvolved gDNA count)
-        rna_prior_count  = Σ_r share * rna_region     (deconvolved UNSPLICED RNA count;
-                                                       spliced mass withheld — see below)
-        gdna_eff_len     = (G+1)² / [ Σ share*(gdna²/L) + (2G+1)/span ],  G = Σ share*gdna,
-                           L = region_size_bp,  span = Σ share*region_size_bp   (capped at span)
+        region node r:    mass = mass_gdna_contained[r],         length = region_size_bp[r]  (genomic)
+        seam node (r,r+1): mass = mass_gdna_right[r]+mass_gdna_left[r+1] (the boundary's two halves POOLED),
+                           length = min(gdna_boundary_len[r], gdna_boundary_len[r+1]) ≈ fl_mean  (FL-scale)
 
-    This REPLACES the earlier boundary-flux transport + the FL-aware ``gdna_geom_len`` (= contained
-    support + both boundary supports), which summed to ~8% more than the genomic span (≈2× on small
-    exons — it double-counts each seam and adds FL-mass on top of the contained support), violating
-    genomic-length conservation and biasing the IPR span. ``gdna_eff_len`` is the **inverse
-    participation ratio** of the per-region gDNA *density* ``gdna_region/region_size_bp`` (its reciprocal
-    makes the gDNA component's per-position rate equal the local gDNA density, so under capture the
-    support contracts to the probed exons and gDNA competes at its true density), correct by
-    construction — uniform gDNA (``g_r ∝ region_size_bp``) ⇒ ``eff_len = span`` (the genomic span).
-    **Laplace-smoothed** by one fragment-equivalent of uniform per-base prior mass: adding
-    ``c_r = L_r/span`` to each ``gdna_region`` and forming ``(G+1)²/Σ(g̃²/L)`` gives the closed
-    form above, since ``Σ 2·g·c/L = 2G/span`` and ``Σ c²/L = 1/span``.
+    keyed to the left-flank region r. Both conservation laws hold: **mass** — ``Σ contained + Σ seam`` =
+    the total deconvolved gDNA (each non-terminal boundary side counted once; terminals are zero);
+    **genomic length** — ``Σ region_size_bp`` = the covered genomic span (regions tile; seams add 0
+    genomic bp — their FL length is a density normalizer inside the dimensionless IPR only). The region +
+    seam masses/participations project to loci by genomic-overlap ``share``::
+
+        gdna_prior_count = Σ share * (contained + seam)                          (deconvolved gDNA count)
+        rna_prior_count  = Σ share * rna_region            (UNSPLICED RNA; spliced withheld — see below)
+        gdna_eff_len     = (G+1)² / [ Σ share*(contained²/L_g + seam²/L_e) + (2G+1)/span ],  capped at span
+                           G = Σ share*(contained+seam),  L_g = region_size_bp,  span = Σ share*region_size_bp
+
+    **Why pool, not split:** entering a seam's two halves ``s_L,s_R`` as separate IPR nodes contributes
+    support ``s_L²/L_e + s_R²/L_e ≈ s²/(2 L_e)``; pooling contributes ``(s_L+s_R)²/L_e = s²/L_e`` — by
+    Cauchy-Schwarz the split halves the IPR support (halves the contraction), nearly doubling the leak
+    (measured 13.5% vs pooled 5.5%). Pooling quarantines the captured intron↔exon crossing mass at FL
+    density (``s²/fl_mean``), recovering the gDNA concentration that PR-1's region-dilution (``s²/intron_bp``)
+    lost — **without** the old transport (which moved mass) or the FL-aware ``gdna_geom_len`` (which summed
+    to ~8% > the genomic span, ≈2× on small exons, violating length conservation). ``gdna_eff_len`` is the
+    **inverse participation ratio** of the per-node gDNA density (its reciprocal makes the gDNA component's
+    per-position rate the local density, so under capture the support contracts to the probed footprint and
+    gDNA competes at its true density), correct by construction — uniform gDNA ⇒ ``eff_len = span``.
+    **Laplace-smoothed** by one fragment-equivalent of uniform per-base prior mass (the ``(2G+1)/span``
+    term), the canonical add-one prior with no tunable constant. Measured flagship leak:
+    transport 7.97% → PR-1 8.98% → pooled-seam **5.52%** (below the old transport baseline).
 
     The add-one is the canonical Laplace prior — there is **no tunable shrinkage constant**. It
     shrinks the IPR toward the uniform geometric ``span`` exactly in proportion to the gDNA
@@ -205,25 +212,37 @@ def assemble_priors(
             f"{region_arrays.n_regions}; they must address the same partition."
         )
 
-    # CONSERVATION-CORRECT per-region gDNA (PR-1). Per region: the gDNA mass overlapping its genomic
-    # interval — contained + the two boundary sides' portions — over the region's genomic bp. Both
-    # quantities conserve EXACTLY:
-    #   • mass:   Σ_r (contained + left + right) = the total deconvolved gDNA mass — each crossing
-    #             fragment's mass is split once across the two regions it spans (the two sides);
-    #   • length: Σ_r region_size_bp = the covered genomic span — regions tile the genome.
-    # This REPLACES the boundary-flux transport + the FL-aware gdna_geom_len, which summed to ~8% more
-    # than the genomic span (≈2× on small exons: gdna_geom_len = region_eff + both sides double-counts
-    # each seam and adds FL-mass on top of the contained support) — a genomic-length-conservation
-    # violation that biased the IPR span (the cap + the uniform reference). With genomic-bp lengths the
-    # IPR is correct by construction: uniform gDNA (g_r ∝ region_size_bp) ⇒ eff_len = span (the genomic
-    # span); only capture-concentrated gDNA contracts. No transport — the length-bias it compensated
-    # for is gone (the FL-aware length was the source of that bias).
+    # CONSERVATION-CORRECT POOLED-SEAM node set (PR-A; effective_length_redesign_plan.md §7). The gDNA
+    # node set is the region-contained nodes PLUS one **pooled seam node** per internal boundary:
+    #   • region node r: mass = mass_gdna_contained[r],  length = region_size_bp[r] (genomic bp);
+    #   • seam node (r,r+1): mass = mass_gdna_right[r] + mass_gdna_left[r+1] (the boundary's BOTH halves
+    #     POOLED — gDNA is two-sided), length = min(gdna_boundary_len[r], gdna_boundary_len[r+1]) ≈ fl_mean
+    #     (the FL-scale density normalizer; NOT genomic — seams contribute 0 to the genomic span). The seam
+    #     is keyed to its left-flank region r.
+    # Conservation: mass — Σ contained + Σ seam = Σ contained + Σ both sides (each non-terminal side once;
+    # terminals are zero) = the total deconvolved gDNA; length — Σ region_size_bp = the covered genomic span
+    # (regions tile; seams add 0). The seam mass is POOLED, not split into two side nodes: splitting a
+    # seam's mass s into s_L,s_R as separate IPR nodes contributes support s_L²/Le + s_R²/Le ≈ s²/(2Le),
+    # whereas pooling contributes (s_L+s_R)²/Le = s²/Le — by Cauchy-Schwarz the split HALVES the IPR
+    # support (halves the contraction), nearly doubling the leak (measured 13.5% vs pooled 5.5%). Pooling
+    # quarantines the captured intron↔exon crossing mass at FL density (s²/fl_mean), recovering the
+    # concentration PR-1's region-dilution lost (s²/intron_bp) — WITHOUT the transport's mass-moving or the
+    # gdna_geom_len length-violation. Measured flagship leak: transport 7.97% → PR-1 8.98% → pooled 5.52%.
     length = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
-    gdna_region = (
-        np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
-        + np.asarray(calibration.mass_gdna_left, dtype=np.float64)
-        + np.asarray(calibration.mass_gdna_right, dtype=np.float64)
-    )
+    ref_id = np.asarray(region_arrays.ref_id)
+    contained = np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
+    side_left = np.asarray(calibration.mass_gdna_left, dtype=np.float64)
+    side_right = np.asarray(calibration.mass_gdna_right, dtype=np.float64)
+    side_len = np.maximum(np.asarray(calibration.gdna_boundary_len, dtype=np.float64), 1e-9)
+    pooled = np.zeros_like(contained)  # seam mass keyed to its left-flank region
+    pooled_supp = np.zeros_like(contained)  # seam participation s²/Le keyed to its left-flank region
+    if contained.shape[0] > 1:
+        same = ref_id[:-1] == ref_id[1:]  # internal seams (genomically adjacent, same reference)
+        seam_mass = side_right[:-1] + side_left[1:]  # POOL the boundary's two halves into one node
+        seam_len = np.minimum(side_len[:-1], side_len[1:])  # FL-scale; the tighter flank cap
+        pooled[:-1] = np.where(same, seam_mass, 0.0)
+        pooled_supp[:-1] = np.where(same, seam_mass**2 / seam_len, 0.0)
+    gdna_region = contained + pooled  # total gDNA per region = contained + its right-seam node
     # RNA prior = the UNSPLICED RNA mass only. Spliced fragments have no gDNA candidate in the EM
     # (gDNA does not splice) → they are guaranteed-RNA and the EM assigns them directly; counting
     # them in rna_prior_count would double-count them and unfairly inflate the RNA side of the
@@ -238,9 +257,10 @@ def assemble_priors(
         0.0,
     )
     with np.errstate(divide="ignore", invalid="ignore"):
-        gdna_sq_over_len = np.where(
-            length > 0.0, gdna_region**2 / np.maximum(length, 1e-9), 0.0
-        )
+        # IPR participation = region term (contained²/genomic_len) + seam term (pooled²/Le). The seam term
+        # is pre-computed above (pooled_supp); both ride region r's locus overlap share in the projection.
+        reg_supp = np.where(length > 0.0, contained**2 / np.maximum(length, 1e-9), 0.0)
+        gdna_sq_over_len = reg_supp + pooled_supp
 
     proj = _project_regions_to_loci(
         region_arrays,
@@ -251,6 +271,10 @@ def assemble_priors(
             "rna": rna_region,
             "support": gdna_sq_over_len,
             "span": length,
+            # the CONTAINED (unique-mapper) mass per locus — the calibration-blindness discriminator
+            # for the eff-len guard below (calibration's accumulator is fed by unique mappers only).
+            "gdna_contained": np.asarray(calibration.mass_gdna_contained, dtype=np.float64),
+            "rna_contained": np.asarray(calibration.mass_rna_contained, dtype=np.float64),
         },
     )
     gdna_locus, support_locus, span = proj["gdna"], proj["support"], proj["span"]
@@ -261,18 +285,32 @@ def assemble_priors(
     # projected quantities this is closed-form, since Σ(2·g·c/L) = 2G/span and
     # Σ(c²/L) = 1/span:
     #     eff_len = (G + 1)² / [ Σ(g²/L) + (2G + 1)/span ],   G = Σ g  (= gdna_locus)
-    # The add-one is the canonical Laplace prior — there is NO tunable shrinkage
-    # constant. It shrinks the support toward the uniform span exactly in
-    # proportion to the gDNA evidence: G = 0 → span (uniform; the multimap-blind
-    # null, no special case); a tiny sparse-but-concentrated mass → still ≈ span
-    # (the +1 uniform prior dominates), so the EM cannot amplify it past the
-    # calibration's call; abundant gDNA (capture, G ≫ 1) → the empirical
-    # concentration (the IPR). Capped at span: the gDNA cannot be more spread than
-    # the locus's uniform length.
+    # The add-one is the canonical Laplace prior — there is NO tunable shrinkage constant. It shrinks the
+    # support toward the uniform span in proportion to the gDNA evidence: G = 0 → span; abundant gDNA
+    # (capture, G ≫ 1) → the empirical concentration (the IPR); capped at span. NOTE the Laplace term
+    # (2G+1)/span is at GENOMIC scale while a pooled SEAM support term is at FL scale (≈ fl_mean ≪ span),
+    # so the add-one does NOT by itself protect a locus whose entire gDNA signal is FL-scale seam smear —
+    # there the seam term can dominate and over-contract. The contained-evidence gate below is what guards
+    # that multimap-blind case (NOT the +1 prior).
     with np.errstate(divide="ignore", invalid="ignore"):
         safe_span = np.maximum(span, 1e-9)
         smoothed_support = support_locus + (2.0 * gdna_locus + 1.0) / safe_span
         eff_len = np.minimum((gdna_locus + 1.0) ** 2 / smoothed_support, span)
+
+    # CONTAINED-EVIDENCE GATE (calibration multimapper-blindness). Calibration's accumulator is fed by
+    # UNIQUE mappers only (bam_scanner.cpp: deposit_to_accumulator is inside `if (is_unique_mapper)`; the
+    # EM buffer separately gets multimappers at 1/NH). A locus dominated by multimappers — e.g. identical
+    # paralogs — therefore has ~zero CONTAINED mass; the only gDNA signal it retains is the sparse,
+    # asymmetric unique-flank smear the pooled seam imports from adjacent introns at FL density, which
+    # over-contracts gdna_eff_len and lets the gDNA component over-claim the (degenerate) RNA budget. Where
+    # calibration is structurally blind (contained gDNA + contained RNA ≈ 0) the prior must be honestly
+    # uninformative: revert gdna_eff_len → span (no contraction). This fires ONLY at contained == 0 (NOT a
+    # multimap-fraction blend, which would erode the capture contraction on real gDNA-bearing duplicated
+    # loci); on every locus calibration can see it is the identity, so the capture leak win is preserved by
+    # construction. The real fix (multimapper-aware accumulator) is the mappability initiative; this is the
+    # principled interim. See docs/calibration/splice_junction_node_architecture.md siblings / project_mappability.
+    blind = (proj["gdna_contained"] + proj["rna_contained"]) < 1e-6
+    eff_len = np.where(blind, span, eff_len)
 
     return LocusPriors(
         gdna_prior_count=gdna_locus,

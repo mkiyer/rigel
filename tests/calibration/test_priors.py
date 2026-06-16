@@ -114,19 +114,22 @@ def test_gdna_length_conservation_span_is_genomic():
 
 
 def test_gdna_mass_conservation_contained_plus_sides():
-    # CONSERVATION OF MASS. The per-region gDNA is contained + left + right (the gDNA overlapping the
-    # region's genomic interval); gdna_prior_count must sum ALL of it. Boundary-side gDNA mass must be
-    # counted, not dropped. Total gDNA mass here = Σ(contained+left+right) = (2+1+1)+(3+0+2)+(1+1+0) = 11.
+    # CONSERVATION OF MASS (pooled-seam node set, PR-A). The total gDNA = Σ contained + Σ pooled seam,
+    # where each internal seam pools the boundary's two halves: seam(r,r+1) = mass_gdna_right[r] +
+    # mass_gdna_left[r+1]. Every NON-terminal boundary side is counted exactly once via its seam; terminal
+    # sides (region 0's left, region 2's right) carry zero mass on real data and are set zero here.
+    #   contained = [2,3,1] (Σ=6); internal seams: (r0,r1) = right[0]+left[1] = 1+1 = 2;
+    #   (r1,r2) = right[1]+left[2] = 2+1 = 3 ⇒ Σ seam = 5 ⇒ total gDNA = 11.
     cal = CalibrationResult(
         mass_gdna_contained=np.array([2.0, 3.0, 1.0]),
         mass_rna_contained=np.array([0.0, 0.0, 0.0]),
-        mass_gdna_left=np.array([1.0, 0.0, 1.0]),
+        mass_gdna_left=np.array([0.0, 1.0, 1.0]),  # left[0] = terminal (zero)
         mass_rna_left=np.array([0.0, 0.0, 0.0]),
-        mass_gdna_right=np.array([1.0, 2.0, 0.0]),
+        mass_gdna_right=np.array([1.0, 2.0, 0.0]),  # right[2] = terminal (zero)
         mass_rna_right=np.array([0.0, 0.0, 0.0]),
         mass_rna_spliced=np.array([0.0, 0.0, 0.0]),
         gdna_geom_len=np.array([100.0, 100.0, 100.0]),
-        gdna_boundary_len=np.array([100.0, 100.0, 100.0]),
+        gdna_boundary_len=np.array([50.0, 50.0, 50.0]),
         gdna_density_global=0.01,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
@@ -138,6 +141,65 @@ def test_gdna_mass_conservation_contained_plus_sides():
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
     # all 3 regions in one locus (φ=1) ⇒ gdna_prior_count = the total conserved gDNA mass.
     np.testing.assert_allclose(priors.gdna_prior_count, [11.0])
+
+
+def test_contained_evidence_gate_reverts_efflen_when_calibration_is_blind():
+    # CALIBRATION MULTIMAPPER-BLINDNESS guard. A locus dominated by multimappers (e.g. identical paralogs)
+    # has ~zero CONTAINED mass (calibration's accumulator is unique-mapper-only); the only gDNA signal is
+    # the sparse seam smear the pooled seam imports from adjacent introns, which would over-contract the
+    # gDNA eff-len and let gDNA over-claim the degenerate RNA. Where contained gDNA+RNA ≈ 0 the eff-len
+    # must revert to span (no contraction) — the prior is honestly uninformative where calibration is blind.
+    cal = CalibrationResult(
+        mass_gdna_contained=np.array([0.0, 0.0, 0.0]),  # blind: no unique-mapper contained gDNA
+        mass_rna_contained=np.array([0.0, 0.0, 0.0]),  # ... nor contained RNA
+        mass_gdna_left=np.array([0.0, 1.0, 1.0]),  # only sparse seam smear survives
+        mass_rna_left=np.array([0.0, 0.0, 0.0]),
+        mass_gdna_right=np.array([1.0, 2.0, 0.0]),
+        mass_rna_right=np.array([0.0, 0.0, 0.0]),
+        mass_rna_spliced=np.array([0.0, 0.0, 0.0]),
+        gdna_geom_len=np.array([100.0, 100.0, 100.0]),
+        gdna_boundary_len=np.array([50.0, 50.0, 50.0]),  # FL-scale ⇒ would contract eff-len absent the gate
+        gdna_density_global=0.01,
+        rna_sense_frac=0.9,
+        gdna_strand_overdispersion=0.05,
+        rna_strand_overdispersion=0.05,
+        n_regions=3,
+        config=CalibrationConfig(),
+    )
+    ra = _regions([0, 100, 200], [100, 200, 300])
+    priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
+    # gate fires (contained == 0) ⇒ eff_len reverts to the genomic span (no contraction).
+    np.testing.assert_allclose(priors.gdna_eff_len, [300.0])
+    # the seam mass is still counted in the prior pseudocount (only the eff-len is guarded).
+    np.testing.assert_allclose(priors.gdna_prior_count, [5.0])  # pooled seams 2 + 3
+
+
+def test_contained_evidence_gate_is_identity_when_calibration_sees_the_locus():
+    # The gate is the IDENTITY wherever calibration has contained evidence (contained gDNA+RNA > 0): it must
+    # NOT touch the capture contraction that wins the flagship leak. Concentrated contained gDNA ⇒ a
+    # contracted eff-len (< span) that the gate leaves intact.
+    cal = CalibrationResult(
+        mass_gdna_contained=np.array([10.0, 0.0, 0.0]),  # contained gDNA present ⇒ calibration sees it
+        mass_rna_contained=np.array([1.0, 0.0, 0.0]),
+        mass_gdna_left=np.array([0.0, 0.0, 0.0]),
+        mass_rna_left=np.array([0.0, 0.0, 0.0]),
+        mass_gdna_right=np.array([0.0, 0.0, 0.0]),
+        mass_rna_right=np.array([0.0, 0.0, 0.0]),
+        mass_rna_spliced=np.array([0.0, 0.0, 0.0]),
+        gdna_geom_len=np.array([100.0, 100.0, 100.0]),
+        gdna_boundary_len=np.array([50.0, 50.0, 50.0]),
+        gdna_density_global=0.01,
+        rna_sense_frac=0.9,
+        gdna_strand_overdispersion=0.05,
+        rna_strand_overdispersion=0.05,
+        n_regions=3,
+        config=CalibrationConfig(),
+    )
+    ra = _regions([0, 100, 200], [100, 200, 300])
+    priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
+    # G=10, supp = 10²/100 = 1.0, span = 300 ⇒ eff_len = 11²/(1.0 + 21/300) = 113.08 — contracted, NOT span.
+    np.testing.assert_allclose(priors.gdna_eff_len, [121.0 / 1.07])
+    assert priors.gdna_eff_len[0] < 300.0  # the gate did NOT revert it (calibration saw the locus)
 
 
 def test_spliced_mass_withheld_from_rna_prior():
