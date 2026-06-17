@@ -272,38 +272,3 @@ def test_rna_side_density_factor1_recovery():
     assert np.allclose(res_fixed, 0.0, atol=1e-18)
     assert ((d_region - d_side_bugged) ** 2)[short].max() > 1e-6
 
-
-def test_rna_recovery_real_scenario_factor1(tmp_path):
-    """A real single-strand RNA sim (no gDNA) → the RNA node-pair side density (with the per-side RNA
-    density length) recovers the region RNA density at factor-1 for the eligible exon→spliced-junction
-    adjacencies, and the residual reflects the true (near-uniform within a transcript) RNA field rather
-    than a normalization offset."""
-    # Reuse the multi-exon single-strand harness (it runs the real scanner + calibrator and returns the
-    # per-side RNA density length array used by the production RNA builder).
-    from rigel.calibration.rna_density_model import (
-        fit_rna_imputation_varmean,
-        rna_strand_densities,
-    )
-    from tests.calibration.test_variance_model import _multi_exon_single_strand_substrate
-
-    (sub, ra, rel_rna, rna_side_len, fg, lsplit, rsplit, cl, cr) = _multi_exon_single_strand_substrate(
-        tmp_path, gdna_abundance=0.0  # ZERO gDNA — a clean single-strand RNA field
-    )
-    fit = fit_rna_imputation_varmean(
-        rna_strand_densities(
-            sub, ra, rel_rna, rna_side_len,
-            gdna_frac=fg, left_gdna_frac=lsplit.gdna_frac, right_gdna_frac=rsplit.gdna_frac,
-            cleaned_left=cl, cleaned_right=cr,
-        )
-    )
-    # a real, monotone, finite fit on the RNA-density axis
-    assert fit.fit_mean.size > 0
-    grid = np.logspace(np.log10(np.exp(fit.x_lo)), np.log10(np.exp(fit.x_hi)), 60)
-    pred = fit.predict(grid)
-    assert np.all(np.isfinite(pred)) and np.all(pred > 0.0)
-    assert np.all(np.diff(pred) >= -1e-9)
-    # no extrapolation: the fit spans its own eligible RNA-density range (the 2a contract).
-    assert np.exp(fit.x_lo) <= float(fit.fit_mean.min()) * (1 + 1e-9)
-    assert np.exp(fit.x_hi) >= float(fit.fit_mean.max()) * (1 - 1e-9)
-    print("\n[RNA real-scenario proof] n_pts =", fit.fit_mean.size,
-          " RNA-density range = [%.4g, %.4g]" % (float(fit.fit_mean.min()), float(fit.fit_mean.max())))

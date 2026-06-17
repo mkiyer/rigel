@@ -1,37 +1,35 @@
-"""calibrate() — the fractional-accumulator calibrator (iterative odds-propagation simplex sweep).
+"""calibrate() — the fractional-accumulator calibrator (per-node simplex solve, iterated all-gDNA bootstrap).
 
-The contained-region split is solved by the **odds-propagation grid sum-product** on the per-node
-2-simplex (sense-RNA / antisense-RNA / gDNA — calibration models RNA-vs-gDNA only; the per-locus EM
-separates nascent from mature downstream), iterated over an **all-gDNA bootstrap**. Each node combines
-three Bayesian terms — a **strand likelihood** (the Beta-Binomial tilt of the per-strand counts, the
-capture-INVARIANT *direction* signal), a **count prior** (the local gDNA-density imputation weighted by its
-``var~mean`` precision ``τ_count``, the *magnitude* signal), and a **global gDNA prior** (the foundation,
-``ρ_global`` at precision ``τ_global``) — and propagates the per-strand RNA:gDNA log-odds along same-strand
-exon stretches so that AMBIG (overlapping opposite-strand) nodes are resolved from their stranded
-neighbours::
+The contained-region split is solved per node on the **2-simplex** ``(sense-RNA / antisense-RNA / gDNA)``
+(calibration models RNA-vs-gDNA only; the per-locus EM separates nascent from mature downstream), iterated
+over an **all-gDNA bootstrap**. Per the count-zero-information architecture (CALIBRATION_ARCHITECTURE.md §0),
+a node's gDNA/RNA composition is determined by exactly two terms here — a **strand likelihood** (the
+Beta-Binomial tilt of the per-strand counts, the only INTRINSIC per-node signal; the count enters ONLY as its
+overdispersed Fisher information) and a **global gDNA prior** (the foundation, ``ρ_global`` at the MAD-spread
+precision ``τ_global``, governing nodes the strand leaves undetermined)::
 
     substrate
       -> strand balance: rna_sense_frac (κ)
       -> node_gdna_density (RAW) -> fit gdna/rna strand Beta-Binomial overdispersions (seed)
       -> strand_deconvolve -> cleaned_gdna_count: clean the BOUNDARY crossings (nascent removal)
-      -> node_gdna_density (RAW contained + CLEANED boundaries) -> count prior g_count
-         (+ splice-junction gDNA-FRACTION upgrade, 3-term, where eligible)
-      -> deconv_sides ONCE: the fixed boundary gDNA anchors for the var~mean's boundary->region imputation
-      -> for each pass (all-gDNA init):
-           rho_global + var~mean (direct / imputation) re-fit on the PREVIOUS pass's gDNA estimate
-           -> deconv_regions_sweep: the per-node 3-term simplex solve + odds propagation
+      -> node_gdna_density (RAW contained + CLEANED boundaries): the boundary anchors' count input
+      -> deconv_sides ONCE: the fixed boundary gDNA anchors (the boundary-flux transport into priors)
+      -> for each pass (signature-binary all-gDNA init):
+           rho_global re-fit on the PREVIOUS pass's gDNA estimate (the iterating foundation)
+           -> deconv_regions_sweep: the per-node strand + global simplex solve
            -> converge on per-node f_g
       -> gdna_density_global (the library-average density QC scalar)
 
-Pass 0 is the all-gDNA init (every unspliced fragment is gDNA ⇒ ``ρ_global`` = the count-observable total
-density, a deliberate over-estimate the iteration drives down as RNA is removed). The ``var~mean`` reports
-genuinely-high variance where the boundaries cannot predict the region (RNA-rich exons) ⇒ the count yields
-there ⇒ the strand + propagation + global solve ⇒ the next pass's estimate is better. The contained count
-stays RAW (a region's strand enters once, via the strand likelihood); only the boundary crossings are
-cleaned, because they feed the spatial imputation of exon / AMBIG regions. The library-average gDNA density
-(a QC scalar) is **derived** from the aggregate deconvolved mass. The per-region gDNA length contraction
-under capture is the IPR of the deconvolved gDNA mass over the per-region effective supports
-(``gdna_region_eff_len`` + ``gdna_boundary_len``), applied later in ``priors.assemble_priors``.
+Pass 0 is the **signature-binary all-gDNA init**: every node starts at ``f_gdna=1`` carrying its full unspliced
+MASS (count-free; CALIBRATION_ARCHITECTURE §3) ⇒ ``ρ_global`` = the observable-node total mass density, a
+deliberate over-estimate the iteration drives down as the strand removes RNA. Cross-node imputation (the
+reliability-weighted neighbour propagation) is deferred to Step 2; until then a strand-weak node falls to the
+global foundation (``ρ_global ≈ 0`` in a pure-RNA library ⇒ no phantom gDNA). The boundary SIDES are
+deconvolved ONCE (``deconv_sides``) as the fixed gDNA anchors whose mass feeds the per-locus prior via the
+boundary-flux transport (``priors``), post-loop. The library-average gDNA density (a QC scalar) is **derived**
+from the aggregate deconvolved mass. The per-region gDNA length contraction under capture is the IPR of the
+deconvolved gDNA mass over the per-region effective supports (``gdna_region_eff_len`` + ``gdna_boundary_len``),
+applied later in ``priors.assemble_priors``.
 """
 
 from __future__ import annotations
@@ -55,22 +53,10 @@ from .gdna_strand import (
     overdispersion_for_beta,
 )
 from .result import CalibrationResult
-from .run_fill import same_ref_left_right
 from .simplex_sweep import deconv_regions_sweep
-from .splice_junction import region_splice_gdna_frac
 from .strand_balance import fit_strand_balance
 from .strand_deconv import cleaned_gdna_count, deconv_sides, strand_deconvolve
 from .substrate import CalibrationSubstrate
-from .rna_density_model import (
-    fit_rna_imputation_varmean,
-    node_rna_density,
-    rna_strand_densities,
-)
-from .variance_model import (
-    direct_points,
-    fit_direct_varmean,
-    fit_pair_imputation_varmean,
-)
 
 if TYPE_CHECKING:
     from ..config import CalibrationConfig
@@ -79,30 +65,6 @@ if TYPE_CHECKING:
     from .region_arrays import RegionArrays
 
 logger = logging.getLogger(__name__)
-
-
-def _rna_prior_fraction(rho, curve, eff_rna, mass_u, geom_rna):
-    """Convert an imputed RNA **density** ``ρ̂_s`` to the pie-fraction prior ``(μ_s, τ_rna_s)`` (PLAN v6 §8).
-
-    The RNA twin of the gDNA count prior (``count_gdna_frac``/``τ_count``): ``μ_s = clip(ρ̂_s·E_rna/M_u, 0, 1)``
-    (density → fraction of the region's unspliced mass); ``σ²_frac = curve(ρ̂_s)·geom_rna`` with
-    ``geom_rna = (E_rna/M_u)²`` (density-var → fraction-var); ``τ_rna_s = min(1/σ²_frac, M_u)`` (own-count
-    ceiling). Where no anchor exists (``ρ̂_s`` NaN) the prior is OFF (``τ_rna_s = 0``, ``μ_s = 0``) — the node
-    falls to the strand likelihood + the global foundation.
-
-    Unlike the gDNA count prior, **no Bernoulli clamp** (``min(·, μ(1−μ))``): the RNA prior is an *imputation*
-    from the flanks, not a direct observation, so its honest precision is the ``var~mean`` reliability — the
-    clamp would force ``τ→∞`` as ``μ_s→1`` (the common RNA-dominated case), a spurious over-confidence that
-    over-pulls the gDNA/RNA split (measured: a 7% abundance regression on a zero-gDNA scenario). For gDNA the
-    clamp is sound because ``cf→1`` only at count-*observable* introns where near-certainty is real.
-    """
-    rho = np.asarray(rho, dtype=np.float64)
-    anchored = np.isfinite(rho)
-    rho_safe = np.where(anchored, rho, 0.0)
-    mu = np.clip(rho_safe * eff_rna / mass_u, 0.0, 1.0)
-    sig2 = np.maximum(curve.predict(rho_safe) * geom_rna, 1e-12)
-    tau = np.where(anchored, np.minimum(1.0 / sig2, mass_u), 0.0)
-    return np.where(anchored, mu, 0.0), tau
 
 
 def calibrate(
@@ -128,16 +90,8 @@ def calibrate(
     region_eff_len = region_eff_length(region_arrays.region_size_bp, gdna_fl_pmf)
     boundary_eff_len = boundary_side_eff_length(gdna_fl_pmf, region_arrays.region_size_bp)
     fl_mean = boundary_eff_length(gdna_fl_pmf)
-    rna_fl_mean = boundary_eff_length(
-        rna_fl_pmf
-    )  # RNA boundary-crossing eff length (splice fraction)
-    # RNA region (contained) eff length — pairs with region_eff_len (gDNA) to convert the splice
-    # boundary *density* fraction into the region *count* fraction (FL-consistency; see
-    # docs/calibration/fl_consistency_diagnostic.md).
-    region_eff_len_rna = region_eff_length(region_arrays.region_size_bp, rna_fl_pmf)
-    # RNA per-side density length E_rna[min(ℓ,L_side)] — the divisor for a boundary side's RNA crossing
-    # MASS (PLAN v6 §4/§7; the RNA twin of boundary_eff_len). Feeds the RNA node-pair var~mean reliability.
-    rna_boundary_side_eff_len = boundary_side_eff_length(rna_fl_pmf, region_arrays.region_size_bp)
+    # ``rna_fl_pmf`` feeds the RNA-side effective lengths for the cross-node RNA imputation, which is
+    # deferred to Step 2 (CALIBRATION_ARCHITECTURE §8); it is unused by the Step-1 strand+global solve.
 
     # RNA strand balance: rna_sense_frac (κ) = posterior-mean spliced sense fraction. The strand
     # channel's discriminability w=(2κ−1)² (set inside the deconv) is the smooth strand→count
@@ -226,35 +180,12 @@ def calibrate(
         gdna_counts=(_raw_count(substrate.contained), cleaned_left, cleaned_right),
     )
 
-    # gDNA-FRACTION imputation (splice-junction method, 3-term): for exon regions with an eligible
-    # splice-junction boundary, replace the absolute gDNA-DENSITY count fraction with the boundary
-    # gDNA-FRACTION — the crossing-spliced reads are a clean mature reference, so the fraction partitions
-    # the region's own (capture-enriched) total and avoids the gDNA-density method's boundary-depletion
-    # under-count. The **3-term** form uses the strand-CLEANED gDNA crossings (cleaned_left/right) so
-    # nascent moves to the RNA side. This upgrades the count prior (g_count) for eligible regions; the
-    # sweep's count term weighs it by τ_count (it is not an override — where the strand is informative its
-    # likelihood governs anyway).
-    region_count_frac, n_splice_upgraded = region_splice_gdna_frac(
-        substrate,
-        region_arrays,
-        node_density.count_gdna_frac,
-        eff_gdna=fl_mean,
-        eff_rna=rna_fl_mean,
-        eff_gdna_region=region_eff_len,
-        eff_rna_region=region_eff_len_rna,
-        left_gdna_unspl=cleaned_left,
-        right_gdna_unspl=cleaned_right,
-    )
-
-    # THE SOLVE — the iterative odds-propagation simplex sweep (CALIBRATION_PLAN_v2 §2/§5). Each pass
-    # re-fits the gDNA var~mean + the global density ρ_global on the PREVIOUS pass's gDNA estimate, then
-    # re-solves. Pass 0 is the **all-gDNA init** (every unspliced fragment is gDNA ⇒ ρ_global = the
-    # count-observable total density, a deliberate over-estimate that iteration drives down as RNA is
-    # removed). The var~mean reports genuinely-high variance where the boundaries cannot predict the region
-    # (RNA-rich exons) ⇒ the count yields there ⇒ the strand + propagation + global solve ⇒ the next pass's
-    # estimate is better. The boundary SIDES are deconvolved ONCE (the per-node strand/count combine,
-    # deconv_sides) as the fixed boundary gDNA anchors for the var~mean's boundary→region imputation; their
-    # gDNA mass also feeds the per-locus prior via the boundary-flux transport (priors), post-loop.
+    # THE SOLVE — the iterative per-node simplex solve (CALIBRATION_ARCHITECTURE §4). Each pass re-fits the
+    # global density ρ_global on the PREVIOUS pass's gDNA estimate, then re-solves. Pass 0 is the
+    # signature-binary **all-gDNA init** (every node ``f_gdna=1`` carrying its full unspliced MASS, count-free
+    # ⇒ ρ_global = the observable-node mass density, a deliberate over-estimate iteration drives down as the
+    # strand removes RNA). The boundary SIDES are deconvolved ONCE (deconv_sides) as the fixed gDNA anchors
+    # whose mass feeds the per-locus prior via the boundary-flux transport (priors), post-loop.
     left, right = deconv_sides(
         substrate,
         region_arrays,
@@ -268,37 +199,22 @@ def calibrate(
         info_scale=i0,
     )
     c = substrate.contained
-    u_tot = c.n_unspliced_pos.astype(np.float64) + c.n_unspliced_neg.astype(np.float64)
     eff_len = np.maximum(np.asarray(region_eff_len, dtype=np.float64), 1e-9)
-    mass_u = np.maximum(np.asarray(c.mass_unspliced, dtype=np.float64), 1e-9)
-    geom2 = (eff_len / mass_u) ** 2  # density-var → fraction-var
-    eff_rna = np.maximum(np.asarray(region_eff_len_rna, dtype=np.float64), 1e-9)  # RNA region eff length
-    obs = np.asarray(node_density.region_count_observable, dtype=bool)
-    gdna_left = np.asarray(left.gdna_mass, dtype=np.float64)
-    gdna_right = np.asarray(right.gdna_mass, dtype=np.float64)
-    # Per-region adjacency for the gDNA node-pair imputation reliability (CALIBRATION_PLAN_v5 §3): the
-    # imputed (non-count-observable) regions are the dests; each flanking boundary side that exists
-    # (same-ref), is count-observable, and carries deconv'd gDNA mass > 0 is a predictor. The boundary side
-    # gDNA densities use the DECONV'D gDNA mass (RNA-removed) / the per-side density length — NOT raw counts.
-    bco = np.asarray(node_density.boundary_count_observable, dtype=bool)
-    ls_same, rs_same = same_ref_left_right(np.asarray(region_arrays.ref_id))
-    left_obs = np.zeros(region_arrays.n_regions, dtype=bool)
-    right_obs = np.zeros(region_arrays.n_regions, dtype=bool)
-    if region_arrays.n_regions > 1:
-        left_obs[1:] = bco[:-1] & ls_same[1:]  # region r's LEFT side = boundary (r−1, r)
-        right_obs[:-1] = bco[:-1] & rs_same[:-1]  # region r's RIGHT side = boundary (r, r+1)
-    region_eligible_g = ~obs  # imputed dests = non-count-observable regions
-    # Per-side gDNA DENSITY length: a boundary side's deconv'd MASS is divided by the per-side density
-    # length E[min(ℓ, L_side)] (= boundary_eff_len[r], the SAME convention deconv_sides / _compute_side
-    # use for that side, and priors._gdna_region_node_arrays uses for the seam), NOT by the count/power
-    # length fl_mean = E[ℓ]. Under uniform gDNA at density ρ the side mass = ρ·E[min(ℓ,L_side)], so
-    # mass/E[min] = ρ matches the region density contained/E[max(0,L−ℓ)] = ρ (factor-1 cross-type); the
-    # bugged mass/E[ℓ] = ρ·E[min(ℓ,L)]/E[ℓ] < ρ at short flanks fabricates a spurious node-pair residual.
-    inv_side_len_g = 1.0 / np.maximum(boundary_eff_len, 1e-9)
-    gdna_c = u_tot.copy()  # Pass-0 all-gDNA: every unspliced fragment is gDNA
+    mass_unspl = np.asarray(c.mass_unspliced, dtype=np.float64)
+    mass_u = np.maximum(mass_unspl, 1e-9)
+    # geom2 = the density→fraction jacobian (eff_len/mass_u)² — the SAME mass_u that DEFINES the fraction
+    # f_g = M_gdna/mass_u (the legitimate normalizer, NOT a count-confidence; CALIBRATION_ARCHITECTURE §2).
+    # It converts the global prior's MAD density-spread σ²_global to a fraction-variance.
+    geom2 = (eff_len / mass_u) ** 2
+    obs = np.asarray(node_density.region_count_observable, dtype=bool)  # signature partition (intergenic/intron)
+    has_data = mass_unspl > 0.0  # data-presence mask (which nodes carry unspliced fragments)
+    # Signature-binary all-gDNA init (CALIBRATION_ARCHITECTURE §3): every node f_gdna=1 ⇒ its gDNA MASS is the
+    # full unspliced MASS (count-FREE; not the raw count u_tot). The locked strand axes are realized by the
+    # sweep's allow_pos/allow_neg forbid mask; here the seed is only the gDNA mass the loop re-derives ρ_global
+    # from. Iteration drives it down as the strand separates RNA.
+    gdna_c = mass_u.copy()
     regions = None
     prev_fg = None
-    rna_curve = None  # the in-loop RNA var~mean reliability (PLAN v6 §8); kept for the post-loop diagnostic
     for _pass in range(int(config.sweep_max_passes)):
         # ρ_global = the gDNA-baseline density, from the COUNT-OBSERVABLE nodes only (intergenic/intron —
         # where gDNA is known), using their current gDNA estimate (iterating). NOT all nodes: an all-node
@@ -308,99 +224,31 @@ def calibrate(
         rho_global = (
             float(gdna_c[obs].sum() / max(float(eff_len[obs].sum()), 1e-9)) if obs.any() else 0.0
         )
-        # var~mean on the CURRENT gDNA estimate. DIRECT (count-observable own-count Poisson variance,
-        # Jensen-corrected via the per-point dof = count) and the node-PAIR IMPUTATION (per (observable
-        # boundary side → imputed region) adjacency, the FULL single-predictor residual (d_region−d_side)²
-        # at mean = d_region, fit & queried on the SAME axis — the region's CURRENT gDNA density — so the
-        # captured-exon μ-range is INSIDE the fit range and no node extrapolates, the Phase-2a contract;
-        # CALIBRATION_PLAN_v5 §3). Read each node in its own class at its current gDNA density μ.
-        # Density-var → fraction-var via (eff/mass)²; τ = 1/σ². Count τ ≤ own-count Poisson ceiling (mass),
-        # Bernoulli-clamped (a fraction variance ≤ p(1−p)). σ²_global = the robust MAD between-node density
-        # spread (below) — the population spread an unanchored node faces.
-        direct = fit_direct_varmean(
-            direct_points(
-                substrate, region_arrays, region_eff_len, boundary_eff_len,
-                gdna_views=(gdna_c, gdna_left, gdna_right),
-            )
-        )
-        # The gDNA node-PAIR imputation reliability (v5 §3): per (observable boundary side → imputed
-        # region) adjacency, raw_var = (d_region − d_side)² (FULL single-predictor residual), at
-        # mean = d_region (the queried axis). The side gDNA densities are the DECONV'D side gDNA mass
-        # (RNA-removed) / the per-side DENSITY length E[min(ℓ,L_side)] (NOT fl_mean = E[ℓ], which
-        # under-states short-flank density and manufactures a cross-type offset vs the region density —
-        # the root-cause node-pair eff-len bug). Single-flank regions contribute (the densification the
-        # triplet missed).
-        region_density_g = gdna_c / eff_len
-        imputation = fit_pair_imputation_varmean(
-            region_density_g,
-            gdna_left * inv_side_len_g,
-            gdna_right * inv_side_len_g,
-            region_eligible=region_eligible_g,
-            left_ok=left_obs & (gdna_left > 0.0),
-            right_ok=right_obs & (gdna_right > 0.0),
-            ref_id=region_arrays.ref_id,
-        )
-        # RNA prior (PLAN v6 §8, Phase B): the per-strand RNA-magnitude pull on the pie's f±. Built from ONE
-        # RNA-density assembly (rna_strand_densities): the reliability curve (the RNA var~mean — single-strand
-        # exon fit set, both strands pooled) and the per-node imputed RNA-density target ρ̂± (the boundary→
-        # region imputation, the flanking mature spliced as the anchor). The region gDNA fraction is the
-        # previous pass's f_g (all-gDNA at pass 0); the side anchors are the fixed deconv_sides estimates, so
-        # the RNA target is stable across passes (the full co-evolution is Phase C). AMBIG nodes take no RNA
-        # prior in Phase B (the motif-sense spliced maps to a strand only at single-strand nodes — Phase C's
-        # boundary nodes carry the explicit junction strand). μ±/τ_rna± via the density→fraction conversion.
-        region_fg = prev_fg if prev_fg is not None else np.ones(region_arrays.n_regions)
-        rna_dens = rna_strand_densities(
-            substrate,
-            region_arrays,
-            region_eff_len_rna,
-            rna_boundary_side_eff_len,
-            gdna_frac=region_fg,
-            left_gdna_frac=left.gdna_frac,
-            right_gdna_frac=right.gdna_frac,
-            cleaned_left=cleaned_left,
-            cleaned_right=cleaned_right,
-        )
-        rna_curve = fit_rna_imputation_varmean(rna_dens)
-        rho_pos, rho_neg = node_rna_density(rna_dens, region_arrays)
-        geom_rna = (eff_rna / mass_u) ** 2  # density-var → fraction-var (RNA twin of geom2)
-        mu_rna_pos, tau_rna_pos = _rna_prior_fraction(rho_pos, rna_curve, eff_rna, mass_u, geom_rna)
-        mu_rna_neg, tau_rna_neg = _rna_prior_fraction(rho_neg, rna_curve, eff_rna, mass_u, geom_rna)
+        # σ²_global = the robust between-node SPREAD of the per-node densities (MAD) — the population spread an
+        # unanchored node faces (NOT a single node's sampling variance). The global gDNA prior is the
+        # foundation (CALIBRATION_ARCHITECTURE §1.3): it governs the nodes the strand leaves undetermined
+        # (κ=½ / AMBIG / thin). 1.4826 = the normal-consistency MAD constant. The spread → 0 at zero-DNA where
+        # all observable nodes agree density ≈ 0 (the zero-DNA pin ⇒ no phantom gDNA). τ_global = 1/σ²_global
+        # via the density→fraction jacobian geom2, floored at the 1-pseudo-observation foundation; there is NO
+        # count cap (the mass_u ceiling was a §0 violation — CALIBRATION_ARCHITECTURE §6.2).
         mu = gdna_c / eff_len
-        var_d = np.where(obs, direct.predict(mu), imputation.predict(mu))
-        # Bernoulli clamp: a gDNA-FRACTION variance cannot exceed p(1−p) for the count-prior mean p.
-        cf = np.clip(region_count_frac, 0.0, 1.0)
-        sig2_frac = np.maximum(np.minimum(var_d * geom2, cf * (1.0 - cf)), 1e-12)
-        # σ²_global = the robust between-node SPREAD of the per-node densities (MAD), NOT a single node's
-        # sampling variance: an unanchored node could lie anywhere in the node-density distribution, so the
-        # global prior's width is the population spread, not the precision of one estimate. (Phase-2a A/B:
-        # DIRECT.predict(ρ_global) is ~5.5× too tight ⇒ over-pins anchorless AMBIG ⇒ +11.3% complex-battery
-        # leak — measured, reverted. 1.4826 = the normal-consistency MAD constant, not a tunable. The spread
-        # → 0 at zero-DNA where all observable nodes agree density ≈ 0, which is the zero-DNA pin.)
-        active_mu = mu[u_tot > 0.0]
+        active_mu = mu[has_data]
         sigma_d_global = (
             1.4826 * float(np.median(np.abs(active_mu - np.median(active_mu))))
             if active_mu.size
             else rho_global
         )
         sig2_glob = np.maximum(sigma_d_global**2 * geom2, 1e-12)
-        tau_count = np.minimum(1.0 / sig2_frac, mass_u)
-        tau_global = np.clip(1.0 / sig2_glob, 1.0, mass_u)
+        tau_global = np.maximum(1.0 / sig2_glob, 1.0)
         regions = deconv_regions_sweep(
             substrate,
             region_arrays,
             rna_sense_frac=rna_sense_frac,
             gdna_strand_overdispersion=gdna_strand_overdispersion,
             rna_strand_overdispersion=rna_strand_overdispersion,
-            count_gdna_frac=region_count_frac,
-            count_precision=tau_count,
-            rna_frac_pos=mu_rna_pos,
-            rna_frac_neg=mu_rna_neg,
-            rna_precision_pos=tau_rna_pos,
-            rna_precision_neg=tau_rna_neg,
             n_grid=config.sweep_n_grid,
             rho_global=rho_global,
             region_eff_len=region_eff_len,
-            info_scale=i0,
             global_tau=tau_global,
         )
         if (
@@ -411,19 +259,6 @@ def calibrate(
             break
         prev_fg = regions.gdna_frac
         gdna_c = np.asarray(regions.gdna_mass, dtype=np.float64)
-
-    # Phase A diagnostic (PLAN v6 §7): the converged RNA node-pair var~mean reliability — #fit points, the
-    # fit μ-range (RNA density), and the curve at the range ends. Validates the fit is real (≥18 pts ⇒ a true
-    # spline, else the power-law fallback) and spans its data before Phase B consumes it in the solve.
-    if rna_curve is not None and logger.isEnabledFor(logging.DEBUG):
-        npts = int(np.asarray(rna_curve.fit_mean).size)
-        lo, hi = float(np.exp(rna_curve.x_lo)), float(np.exp(rna_curve.x_hi))
-        logger.debug(
-            "calibration RNA var~mean (Phase B, consumed): %d fit points, μ-range [%.4g, %.4g], "
-            "var(lo)=%.4g var(hi)=%.4g edf=%.2f",
-            npts, lo, hi, float(rna_curve.predict(np.array([lo]))[0]),
-            float(rna_curve.predict(np.array([hi]))[0]), float(rna_curve.edf),
-        )
 
     # Derive gdna_density_global (the library-average density QC scalar).
     density_global = gdna_density_global(
@@ -471,14 +306,12 @@ def calibrate(
     boundary_sense_frac = spl_sense / spl_total if spl_total > 0.0 else float("nan")
     logger.debug(
         "calibration: R=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
-        "splice_gdna_frac_upgraded=%d "
         "gdna_strand_overdispersion=%.4g (%d seed nodes, %d frags%s) "
         "rna_strand_overdispersion=%.4g (%d seed sides, %d frags%s) "
         "[boundary-spliced sense_frac=%.3f vs κ=%.3f]",
         result.n_regions,
         result.gdna_density_global,
         rna_sense_frac,
-        n_splice_upgraded,
         gdna_strand_overdispersion,
         gdna_strand.n_seed_nodes,
         gdna_strand.n_seed_fragments,
