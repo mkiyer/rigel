@@ -37,7 +37,7 @@ import numpy as np
 
 from ..scan_payload import AccumulatorPayload
 from .errors import CalibrationSubstrateError
-from .region_arrays import RegionArrays, region_boundary_indices
+from .region_arrays import RegionArrays, boundary_region_indices, region_boundary_indices
 
 
 def _make_view(counts4: np.ndarray, mass4: np.ndarray) -> "SubstrateView":
@@ -140,4 +140,53 @@ class CalibrationSubstrate:
             )
 
 
-__all__ = ["SubstrateView", "CalibrationSubstrate"]
+@dataclass(frozen=True, slots=True)
+class BoundarySubstrate:
+    """Per-**boundary** sufficient statistics — the boundary nodes of the bipartite graph (PLAN v6 §2).
+
+    The calibration graph is a linear bipartite chain ``R ↔ B ↔ R`` of region and **boundary** nodes; this is
+    the boundary-indexed view of the payload (the twin of :class:`CalibrationSubstrate`, which is
+    region-indexed). A boundary node ``b`` is one genomic point with two sides:
+
+    * ``left``  — the side lying **inside** ``left_region[b]``  (the payload's ``boundary_*_left[b]``);
+    * ``right`` — the side lying **inside** ``right_region[b]`` (the payload's ``boundary_*_right[b]``).
+
+    A contiguous unspliced crossing credits **both** sides (it straddles the point); a spliced intron-skip
+    credits **one** side (the exon flank) — so the boundary node owns the one-sided, motif-stranded spliced
+    mass (the mature-RNA floor) and the two-sided unspliced crossing mass (its ``{f₊,f₋,f_g}`` pie). The two
+    sides are mass-accounting, not two beliefs: the solver pools them into one belief and applies the result to
+    each side's mass. ``left_region`` / ``right_region`` are ``-1`` on the off-edge side of a reference
+    terminal (a terminal boundary has only one flanking region).
+
+    This is the **same information** as ``CalibrationSubstrate.left`` / ``.right`` (which project the boundary
+    sides onto regions), re-keyed by boundary: for an internal boundary ``b`` with
+    ``(left_region=lr, right_region=rr)``, ``BoundarySubstrate.left[b] == CalibrationSubstrate.right[lr]`` and
+    ``BoundarySubstrate.right[b] == CalibrationSubstrate.left[rr]`` (the re-indexing identity, asserted in the
+    tests). No payload reshape, no C++ change — the boundary objects already exist.
+    """
+
+    n_boundaries: int
+    left_region: np.ndarray  # int64[B] — region to the boundary's left; -1 at a reference-start terminal
+    right_region: np.ndarray  # int64[B] — region to the boundary's right; -1 at a reference-end terminal
+    left: SubstrateView  # the boundary's LEFT side (inside left_region): boundary_*_left[b]
+    right: SubstrateView  # the boundary's RIGHT side (inside right_region): boundary_*_right[b]
+
+    @classmethod
+    def from_payload(cls, payload: AccumulatorPayload) -> "BoundarySubstrate":
+        # Boundary sides: counts = integer flux, mass = fractional crossing mass (the same _make_view
+        # contract as the region-contained view, where counts == mass).
+        left = _make_view(payload.boundary_flux_left, payload.boundary_mass_left)
+        right = _make_view(payload.boundary_flux_right, payload.boundary_mass_right)
+        left_region, right_region = boundary_region_indices(
+            payload.ref_region_offsets, payload.ref_boundary_offsets
+        )
+        return cls(
+            n_boundaries=payload.b_obj_total,
+            left_region=left_region,
+            right_region=right_region,
+            left=left,
+            right=right,
+        )
+
+
+__all__ = ["SubstrateView", "CalibrationSubstrate", "BoundarySubstrate"]

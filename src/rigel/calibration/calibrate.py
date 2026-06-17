@@ -64,6 +64,7 @@ from .substrate import CalibrationSubstrate
 from .variance_model import (
     direct_points,
     fit_direct_varmean,
+    fit_pair_imputation_rna_varmean,
     fit_pair_imputation_varmean,
 )
 
@@ -106,6 +107,9 @@ def calibrate(
     # boundary *density* fraction into the region *count* fraction (FL-consistency; see
     # docs/calibration/fl_consistency_diagnostic.md).
     region_eff_len_rna = region_eff_length(region_arrays.region_size_bp, rna_fl_pmf)
+    # RNA per-side density length E_rna[min(ℓ,L_side)] — the divisor for a boundary side's RNA crossing
+    # MASS (PLAN v6 §4/§7; the RNA twin of boundary_eff_len). Feeds the RNA node-pair var~mean reliability.
+    rna_boundary_side_eff_len = boundary_side_eff_length(rna_fl_pmf, region_arrays.region_size_bp)
 
     # RNA strand balance: rna_sense_frac (κ) = posterior-mean spliced sense fraction. The strand
     # channel's discriminability w=(2κ−1)² (set inside the deconv) is the smooth strand→count
@@ -265,6 +269,7 @@ def calibrate(
     gdna_c = u_tot.copy()  # Pass-0 all-gDNA: every unspliced fragment is gDNA
     regions = None
     prev_fg = None
+    rna_iter = None  # Phase A: the in-loop RNA var~mean (computed + logged; not yet consumed — PLAN v6 §7)
     for _pass in range(int(config.sweep_max_passes)):
         # ρ_global = the gDNA-baseline density, from the COUNT-OBSERVABLE nodes only (intergenic/intron —
         # where gDNA is known), using their current gDNA estimate (iterating). NOT all nodes: an all-node
@@ -305,6 +310,22 @@ def calibrate(
             left_ok=left_obs & (gdna_left > 0.0),
             right_ok=right_obs & (gdna_right > 0.0),
             ref_id=region_arrays.ref_id,
+        )
+        # Phase A (PLAN v6 §7): the RNA node-pair var~mean reliability — the symmetric RNA twin of the gDNA
+        # imputation above, fit on the CURRENT estimates each pass. COMPUTED + logged here; NOT yet consumed
+        # by the solve (Phase B wires the per-strand RNA prior μ±, τ_rna± into ψ). The region gDNA fraction is
+        # the previous pass's f_g (all-gDNA at pass 0 ⇒ RNA≈0 ⇒ the RNA fit is naturally inert until pass 1+).
+        region_fg = prev_fg if prev_fg is not None else np.ones(region_arrays.n_regions)
+        rna_iter = fit_pair_imputation_rna_varmean(
+            substrate,
+            region_arrays,
+            region_eff_len_rna,
+            rna_boundary_side_eff_len,
+            gdna_frac=region_fg,
+            left_gdna_frac=left.gdna_frac,
+            right_gdna_frac=right.gdna_frac,
+            cleaned_left=cleaned_left,
+            cleaned_right=cleaned_right,
         )
         mu = gdna_c / eff_len
         var_d = np.where(obs, direct.predict(mu), imputation.predict(mu))
@@ -348,6 +369,19 @@ def calibrate(
             break
         prev_fg = regions.gdna_frac
         gdna_c = np.asarray(regions.gdna_mass, dtype=np.float64)
+
+    # Phase A diagnostic (PLAN v6 §7): the converged RNA node-pair var~mean reliability — #fit points, the
+    # fit μ-range (RNA density), and the curve at the range ends. Validates the fit is real (≥18 pts ⇒ a true
+    # spline, else the power-law fallback) and spans its data before Phase B consumes it in the solve.
+    if rna_iter is not None and logger.isEnabledFor(logging.DEBUG):
+        npts = int(np.asarray(rna_iter.fit_mean).size)
+        lo, hi = float(np.exp(rna_iter.x_lo)), float(np.exp(rna_iter.x_hi))
+        logger.debug(
+            "calibration RNA var~mean (Phase A, unconsumed): %d fit points, μ-range [%.4g, %.4g], "
+            "var(lo)=%.4g var(hi)=%.4g edf=%.2f",
+            npts, lo, hi, float(rna_iter.predict(np.array([lo]))[0]),
+            float(rna_iter.predict(np.array([hi]))[0]), float(rna_iter.edf),
+        )
 
     # Derive gdna_density_global (the library-average density QC scalar).
     density_global = gdna_density_global(
