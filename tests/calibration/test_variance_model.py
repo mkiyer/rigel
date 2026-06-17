@@ -148,3 +148,76 @@ def test_jensen_offset_inflates_recovered_variance():
     ratio = np.median(pc / pp)
     assert ratio == pytest.approx(np.exp(1.2703628454614782), rel=0.15)
 
+
+# --- the Poisson-offset fit (imputation_variance_model.md): learn σ²_bio, not σ²_bio + sampling ---
+
+
+def _poisson_pair_points(lam_src, lam_dst, l_src, l_dst, rng):
+    """Vectorized node-pair samples → (μ=ρ_dst, R²=(ρ_dst−ρ_src)², V_p=ρ_src/L_src+ρ_dst/L_dst).
+
+    Each density ρ = C/L with C ~ Poisson(λ·L), so Var_samp(ρ) = C/L² = ρ/L (the computed offset)."""
+    c_src = rng.poisson(np.maximum(np.asarray(lam_src) * l_src, 0.0))
+    c_dst = rng.poisson(np.maximum(np.asarray(lam_dst) * l_dst, 0.0))
+    rho_src, rho_dst = c_src / l_src, c_dst / l_dst
+    r2 = (rho_dst - rho_src) ** 2
+    v_p = rho_src / l_src + rho_dst / l_dst
+    return rho_dst, r2, v_p
+
+
+def test_offset_fit_uniform_field_recovers_zero_dispersion():
+    # Uniform field (λ=5 everywhere ⇒ true σ²_bio=0). The squared residual is PURE Poisson sampling noise.
+    # The Poisson-offset fit must learn σ²_bio ≈ 0 — whereas the naive log-log TOTAL fit reads ~the sampling
+    # floor and over-states the biological dispersion. This is the contamination the decomposition removes.
+    rng = np.random.default_rng(0)
+    n, lam = 800, 5.0
+    l_src = rng.uniform(2.0, 200.0, n)  # varied lengths ⇒ varied certainty at the SAME density
+    l_dst = rng.uniform(2.0, 200.0, n)
+    mu, r2, v_p = _poisson_pair_points(lam, lam, l_src, l_dst, rng)
+    offset_fit = MonotoneVarMean.fit_offset(mu, r2, v_p)
+    naive_fit = MonotoneVarMean.fit(mu, r2, dof=np.ones(n))  # the contaminated density-only total
+    sigma_bio = float(offset_fit.predict(np.array([lam]))[0])
+    naive = float(naive_fit.predict(np.array([lam]))[0])
+    # σ²_bio ≈ 0, and far below both the sampling floor and the naive total (the de-confounding).
+    assert sigma_bio < 0.25 * float(np.mean(v_p))
+    assert sigma_bio < 0.25 * naive
+
+
+def test_offset_fit_recovers_planted_dispersion():
+    # Plant a real σ²_bio (adjacent true rates differ) on top of Poisson sampling; the offset fit recovers
+    # σ²_bio (≈ the planted variance), not σ²_bio + sampling.
+    rng = np.random.default_rng(1)
+    n, lam0, sd_bio = 1000, 20.0, 4.0  # σ²_bio = 16
+    l_src = rng.uniform(50.0, 200.0, n)
+    l_dst = rng.uniform(50.0, 200.0, n)
+    lam_dst = np.maximum(lam0 + rng.normal(0.0, sd_bio, n), 0.1)  # dst true rate differs by σ_bio
+    mu, r2, v_p = _poisson_pair_points(np.full(n, lam0), lam_dst, l_src, l_dst, rng)
+    fit = MonotoneVarMean.fit_offset(mu, r2, v_p)
+    sigma_bio = float(fit.predict(np.array([lam0]))[0])
+    assert 0.4 * sd_bio**2 < sigma_bio < 2.5 * sd_bio**2  # ≈ 16, within ~2×
+
+
+def test_offset_fit_is_nonneg_monotone_finite():
+    rng = np.random.default_rng(2)
+    n = 500
+    mu = np.exp(rng.uniform(np.log(0.1), np.log(50.0), n))
+    v_p = mu * rng.uniform(0.05, 0.3, n)
+    r2 = np.maximum(0.05 * mu**2 + v_p + rng.normal(0.0, 0.02, n), 0.0)  # σ²_bio = 0.05·μ² (rising)
+    fit = MonotoneVarMean.fit_offset(mu, r2, v_p)
+    grid = np.logspace(-1, np.log10(50.0), 120)
+    pred = fit.predict(grid)
+    assert np.all(np.isfinite(pred))
+    assert np.all(pred >= 0.0)  # σ²_bio is a variance, floored at 0
+    assert np.all(np.diff(pred) >= -1e-9)  # monotone non-decreasing
+
+
+def test_offset_fit_too_few_points_flat_fallback():
+    # < k points ⇒ a FLAT σ²_bio = the reliability-weighted mean excess max(mean(R²−V_p), 0).
+    mu = np.array([1.0, 2.0, 3.0])
+    r2 = np.array([0.5, 0.6, 0.55])
+    v_p = np.array([0.4, 0.4, 0.4])
+    fit = MonotoneVarMean.fit_offset(mu, r2, v_p)
+    pred = fit.predict(np.array([0.5, 1.5, 3.0, 10.0]))
+    assert np.all(np.isfinite(pred)) and np.all(pred >= 0.0)
+    assert np.allclose(pred, pred[0])  # flat
+    assert pred[0] == pytest.approx(0.15, abs=0.05)  # mean([0.1, 0.2, 0.15])
+

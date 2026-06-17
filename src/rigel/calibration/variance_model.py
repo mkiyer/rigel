@@ -89,6 +89,7 @@ class MonotoneVarMean:
     fit_var: np.ndarray
     edf: float  # effective degrees of freedom (GCV)
     lam: float  # selected smoothing parameter
+    linear: bool = False  # coeffs are the curve in LINEAR var space (≥0, the Poisson-offset fit) vs log-var
 
     @classmethod
     def fit(
@@ -212,6 +213,116 @@ class MonotoneVarMean:
             fit_mean=np.asarray(mean), fit_var=np.asarray(var), edf=2.0, lam=np.inf,
         )
 
+    @classmethod
+    def fit_offset(
+        cls,
+        mean: np.ndarray,
+        raw: np.ndarray,
+        offset: np.ndarray,
+        *,
+        k: int = _DEFAULT_K,
+        degree: int = _DEFAULT_DEGREE,
+        robust_iters: int = 2,
+        n_lambda: int = 40,
+    ) -> "MonotoneVarMean":
+        """Fit the **biological dispersion** ``σ²_bio(μ) ≥ 0`` from a Poisson-OFFSET decomposition
+        (``imputation_variance_model.md`` §3): the observed squared residual ``raw = (ρ_dst − ρ_src)²`` has
+        ``E[raw] = σ²_bio(μ) + V_p`` where ``V_p = offset`` is the COMPUTED Poisson sampling floor
+        (``ρ_src/L_src + ρ_dst/L_dst``). We learn only the EXCESS ``σ²_bio``.
+
+        Fit in **LINEAR** variance space (not log-log): the de-offset response ``z = raw − offset`` may be
+        negative per point (a sampling-dominated pair), which is an ordinary least-squares residual here —
+        no ``log`` of a negative. The monotone curve is ``σ²_bio(μ) = max(spline(log μ), 0)``; the
+        non-negativity floor (in :meth:`predict`) is the genuine zero-dispersion region. Heteroskedastic
+        IRLS weights ``w = 1/(σ²_bio + V_p)²`` (a squared-Gaussian-residual response has variance ∝ its
+        mean²) make the low-μ regime — where the offset dominates — count, plus bisquare robustness. The
+        count re-enters at APPLY as ``τ = 1/(σ²_bio(μ) + ρ_src/L_src)`` (the second §0 count→precision
+        channel), NOT here.
+        """
+        mean = np.asarray(mean, dtype=np.float64)
+        raw = np.asarray(raw, dtype=np.float64)
+        off = np.asarray(offset, dtype=np.float64)
+        ok = (
+            np.isfinite(mean) & (mean > _EPS)
+            & np.isfinite(raw) & (raw >= 0.0)
+            & np.isfinite(off) & (off >= 0.0)
+        )
+        mean, raw, off = mean[ok], raw[ok], off[ok]
+        if mean.size < max(k, 8):
+            return cls._constant_offset(mean, raw, off, degree)
+        order = np.argsort(mean)
+        mean, raw, off = mean[order], raw[order], off[order]
+        x = np.log(mean)
+        z = raw - off  # de-offset excess (LINEAR space; may be < 0 for sampling-dominated pairs)
+        x_lo, x_hi = float(x[0]), float(x[-1])
+        if x_hi - x_lo < _EPS:
+            return cls._constant_offset(mean, raw, off, degree)
+        kn = _knots(x_lo, x_hi, k, degree)
+        B = _bspline_design(x, kn, degree, k)
+        D2 = np.diff(np.eye(k), 2, axis=0)
+        P = D2.T @ D2
+
+        # λ by GCV on the (unweighted, linear) penalized fit of the de-offset response z.
+        lams = np.logspace(-4, 4, n_lambda)
+        BtB = B.T @ B
+        Btz = B.T @ z
+        best = (np.inf, lams[0], float(_DEFAULT_K))
+        for lam in lams:
+            A = BtB + lam * P
+            try:
+                beta = np.linalg.solve(A, Btz)
+                edf = float(np.trace(np.linalg.solve(A, BtB)))
+            except np.linalg.LinAlgError:
+                continue
+            rss = float(np.sum((z - B @ beta) ** 2))
+            denom = (mean.size - edf) ** 2
+            gcv = mean.size * rss / denom if denom > _EPS else np.inf
+            if gcv < best[0]:
+                best = (gcv, lam, edf)
+        lam, edf = best[1], best[2]
+
+        # heteroskedastic IRLS (w = 1/total², total = σ²_bio + V_p) + bisquare robustness. Init s=0 ⇒
+        # total = V_p (the Poisson floor weights the fit by the predictor reliability).
+        total = np.maximum(off, _EPS)
+        coeffs = None
+        for it in range(robust_iters + 1):
+            w = 1.0 / np.maximum(total, _EPS) ** 2
+            if it > 0:
+                r = (z - B @ coeffs) * np.sqrt(w)
+                s_mad = 1.4826 * float(np.median(np.abs(r - np.median(r)))) + _EPS
+                u = r / (4.685 * s_mad)
+                w = w * np.where(np.abs(u) < 1.0, (1.0 - u**2) ** 2, 0.0)
+            coeffs = _fit_monotone(B, z, w, P, lam, k)
+            if it == robust_iters:
+                break
+            total = np.maximum(B @ coeffs, 0.0) + off
+        return cls(
+            knots=kn, degree=degree, coeffs=coeffs, x_lo=x_lo, x_hi=x_hi,
+            fit_mean=mean, fit_var=np.maximum(z, 0.0), edf=float(edf), lam=float(lam), linear=True,
+        )
+
+    @classmethod
+    def _constant_offset(cls, mean, raw, off, degree) -> "MonotoneVarMean":
+        """Too-few-points / no-log-range fallback for the offset fit: a FLAT ``σ²_bio`` = the
+        reliability-weighted mean excess ``max(Σw·(raw−off)/Σw, 0)``, ``w = 1/V_p²``."""
+        mean = np.asarray(mean, dtype=np.float64)
+        raw = np.asarray(raw, dtype=np.float64)
+        off = np.asarray(off, dtype=np.float64)
+        if mean.size:
+            w = 1.0 / np.maximum(off, _EPS) ** 2
+            c = max(float(np.sum(w * (raw - off)) / max(float(np.sum(w)), _EPS)), 0.0)
+            lx = float(np.log(np.maximum(np.median(mean), _EPS)))
+        else:
+            c, lx = 0.0, 0.0
+        x_lo, x_hi = lx - 1.0, lx + 1.0
+        kn = _knots(x_lo, x_hi, max(degree + 1, 2), degree)
+        coeffs = np.full(kn.size - degree - 1, c)  # constant curve (≥0)
+        return cls(
+            knots=kn, degree=degree, coeffs=coeffs, x_lo=x_lo, x_hi=x_hi,
+            fit_mean=mean, fit_var=np.maximum(raw - off, 0.0) if mean.size else mean,
+            edf=1.0, lam=np.inf, linear=True,
+        )
+
     def predict(self, mean: np.ndarray) -> np.ndarray:
         """Variance at each ``mean`` (the monotone curve, clipped to the fit range = flat extrapolation).
 
@@ -222,7 +333,10 @@ class MonotoneVarMean:
         unreliable. See ``CALIBRATION_PLAN_v2.md`` §4-5."""
         m = np.asarray(mean, dtype=np.float64)
         xq = np.clip(np.log(np.maximum(m, _EPS)), self.x_lo, self.x_hi)
-        return np.exp(BSpline(self.knots, self.coeffs, self.degree, extrapolate=True)(xq))
+        raw = BSpline(self.knots, self.coeffs, self.degree, extrapolate=True)(xq)
+        # linear (Poisson-offset) fit: coeffs ARE σ²_bio in linear space, floored at 0 (the genuine
+        # zero-dispersion regions); log-log fit: coeffs are log-var, exponentiate.
+        return np.maximum(raw, 0.0) if self.linear else np.exp(raw)
 
     def to_dataframe(self, n_curve: int = 100) -> pd.DataFrame:
         """Diagnostics: the input fit points + the fitted curve sampled on a grid (for the companion
@@ -242,7 +356,10 @@ def _fit_monotone(B, y, w, P, lam, k) -> np.ndarray:
     sw = np.sqrt(np.maximum(w, 0.0))
 
     def beta_of(a):
-        return np.cumsum(np.concatenate([[a[0]], np.exp(a[1:])]))
+        # clamp the log-increment before exp: a pure overflow guard for the optimizer's transient large
+        # steps (exp(700) overflows float64); exp(50)≈5e21 dwarfs any real increment, so it never
+        # constrains a genuine fit — it only keeps the objective finite so L-BFGS doesn't stall on inf.
+        return np.cumsum(np.concatenate([[a[0]], np.exp(np.minimum(a[1:], 50.0))]))
 
     def obj(a):
         beta = beta_of(a)
@@ -278,22 +395,26 @@ def pair_imputation_points(
     region_eligible,
     left_ok,
     right_ok,
-) -> tuple[np.ndarray, np.ndarray]:
-    """``(means, raw_var)`` node-pair fit points — the generic, component-agnostic builder (v6 §7).
+    region_var_samp=None,
+    left_var_samp=None,
+    right_var_samp=None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """``(means, raw_var, offset)`` node-pair fit points — the generic, component-agnostic builder (v6 §7).
 
     A *pair* is two adjacent nodes — an imputed destination region and one observable boundary side (the
     single predictor). For each adjacency ``(observable side → eligible region)`` the point is, in **density
-    space** (eff-len-normalized, log-log): ``mean = region_density[r]`` (the *queried* axis — the sweep reads
-    the reliability at the region's CURRENT density), ``raw_var = (region_density − side_density)²`` (the
+    space** (eff-len-normalized): ``mean = region_density[r]`` (the *queried* axis — the sweep reads the
+    reliability at the region's CURRENT density), ``raw_var = (region_density − side_density)²`` (the
     **full** single-predictor residual, a dof=1 estimate). A region with both flanks eligible contributes
     **two** points; one flank → one point (the densification the deleted both-sides triplet missed). The
     reverse (region→boundary) direction is not emitted (its ``μ = d_side`` is queried only once boundaries
     become solved nodes — Phase C).
 
-    Consumed by the gDNA fit (:func:`fit_pair_imputation_varmean`) and, in Step 2, by the per-component
-    (per-strand RNA) imputation fits that will pool their points. All arrays are
-    per-region (length R); ``*_ok[r]`` means that flank exists, is observable, and carries component mass.
-    Standard filters (finite, ``> _EPS``) applied.
+    ``*_var_samp`` (the per-node Poisson sampling variance ``ρ/L = C/L²``; ``imputation_variance_model.md``
+    §2) is OPTIONAL: when given, the third return is the per-point **offset** ``V_p = ρ_region/L_region +
+    ρ_side/L_side`` for the Poisson-offset fit (:meth:`MonotoneVarMean.fit_offset`); else it is ``None``
+    (the legacy log-log fit). All arrays are per-region (length R); ``*_ok[r]`` means that flank exists, is
+    observable, and carries component mass. Standard filters (finite, ``> _EPS``) applied.
     """
     rd = np.asarray(region_density, dtype=np.float64)
     ld = np.asarray(left_density, dtype=np.float64)
@@ -304,8 +425,16 @@ def pair_imputation_points(
 
     means = np.concatenate([rd[lok], rd[rok]])
     raw = np.concatenate([(rd[lok] - ld[lok]) ** 2, (rd[rok] - rrd[rok]) ** 2])
-    sel = np.isfinite(means) & (means > _EPS) & np.isfinite(raw) & (raw > _EPS)
-    return means[sel], raw[sel]
+    base = np.isfinite(means) & (means > _EPS) & np.isfinite(raw)
+    if region_var_samp is None:
+        sel = base & (raw > _EPS)
+        return means[sel], raw[sel], None
+    rv = np.asarray(region_var_samp, dtype=np.float64)
+    lv = np.asarray(left_var_samp, dtype=np.float64)
+    rrv = np.asarray(right_var_samp, dtype=np.float64)
+    offset = np.concatenate([(rv + lv)[lok], (rv + rrv)[rok]])
+    sel = base & np.isfinite(offset) & (offset >= 0.0)  # raw≥0 ok here (de-offset excess may be ~0)
+    return means[sel], raw[sel], offset[sel]
 
 
 def fit_pair_imputation_varmean(
@@ -316,21 +445,30 @@ def fit_pair_imputation_varmean(
     region_eligible,
     left_ok,
     right_ok,
+    region_var_samp=None,
+    left_var_samp=None,
+    right_var_samp=None,
     ref_id=None,
     **kw,
 ) -> MonotoneVarMean:
-    """The **gDNA** node-pair imputation-reliability var~mean (v6 §7) — :func:`pair_imputation_points` fit.
+    """The node-pair imputation-reliability var~mean (v6 §7) — :func:`pair_imputation_points` fit.
 
-    Builds the node-pair points from the per-region gDNA densities and fits the monotone curve (Jensen
-    dof=1, the single-observation convention). ``ref_id`` is accepted for interface symmetry (the adjacency
-    masks already encode same-ref existence); it is unused.
+    With ``*_var_samp`` (the per-node Poisson sampling variance) it fits the biological dispersion
+    ``σ²_bio(μ)`` via the **Poisson-offset** model (:meth:`MonotoneVarMean.fit_offset`,
+    ``imputation_variance_model.md``); without it, the legacy log-log fit (Jensen dof=1). ``ref_id`` is
+    accepted for interface symmetry (the adjacency masks already encode same-ref existence); it is unused.
     """
-    means, raw = pair_imputation_points(
+    means, raw, offset = pair_imputation_points(
         region_density,
         left_density,
         right_density,
         region_eligible=region_eligible,
         left_ok=left_ok,
         right_ok=right_ok,
+        region_var_samp=region_var_samp,
+        left_var_samp=left_var_samp,
+        right_var_samp=right_var_samp,
     )
-    return MonotoneVarMean.fit(means, raw, dof=np.ones(means.shape[0]), **kw)
+    if offset is None:
+        return MonotoneVarMean.fit(means, raw, dof=np.ones(means.shape[0]), **kw)
+    return MonotoneVarMean.fit_offset(means, raw, offset, **kw)
