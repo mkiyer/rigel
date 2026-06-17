@@ -20,21 +20,29 @@ isolation, this tells you **nothing** about `{f_pos, f_neg, f_gdna}`. Example: 1
 50 genome-`−`. That 50/50 is *equally consistent* with pure gDNA (genomic strand is symmetric, sense ½) and pure
 RNA at an unstranded library (κ=½). **The count alone cannot say "this is gDNA" or "this is RNA."**
 
-The count's *only* intrinsic role is to set the **precision of the STRAND signal** — more fragments ⇒ a tighter
-strand posterior. There is no other legitimate way for the raw count to influence a node's solution or its
-precision.
+The count carries zero information about *composition*. It does carry information about the **precision of an
+estimate** — its statistical power. Those are different things, and conflating them is the root of every
+calibration bug: the count prior used the count to *vote* gDNA (a composition claim — forbidden), whereas the
+strand BB uses the count only to set how sharply a tilt is *measured* (statistical power — legitimate).
 
-**Molecular sampling.** Re-running the experiment yields a different total and split (103; 51/52) — and for
-RNA-seq this is **overdispersed**. The strand model **must** include this overdispersion (Beta-Binomial). The
-count's contribution to precision is therefore the *overdispersed* Fisher information, not a naïve Poisson.
+> **THE INVARIANT (violating it is a bug):** *No code path may let the raw fragment count VOTE on a node's
+> gDNA/RNA fraction. The count may enter ONLY as **statistical power** — the sampling/Fisher precision of an
+> estimate, never a composition claim.*
 
-> **THE INVARIANT (violating it is a bug):** *No code path may let the raw fragment count determine a node's
-> gDNA/RNA fraction, or the precision of that fraction, EXCEPT through the strand model's (overdispersed) Fisher
-> information.*
+**There are exactly TWO legitimate count→precision channels** (both are statistical power, neither is a vote):
 
-Every calibration bug we have chased traces to a violation of this invariant (the count prior voting gDNA at
-introns; `mass_u` Poisson caps on the fraction precisions; the DIRECT own-count `var~mean` used as a
-fraction-confidence; the `I₀` count→strand suppression).
+1. **The strand BB Fisher information** — the precision of a node's OWN strand signal (§1.1). More fragments ⇒ a
+   tighter strand posterior. Molecular sampling is **overdispersed** for RNA-seq, so this is the *overdispersed*
+   Beta-Binomial Fisher info `~ N·(2κ−1)²`, not a naïve Poisson.
+2. **The imputation Poisson sampling noise** — the precision of an OUTSIDE estimate propagated from a neighbour
+   (§1.2). A predictor's density `ρ = C/L` is itself a noisy estimate of the true rate; its sampling variance is
+   `C/L² = ρ/L` (Poisson). A high-count predictor is a tight prior, a low-count one diffuse. Derived from first
+   principles in `imputation_variance_model.md`.
+
+Every calibration bug we have chased traces to a violation (the count prior voting gDNA at introns; `mass_u`
+Poisson caps on the fraction precisions; the DIRECT own-count `var~mean` used as a fraction-confidence; the `I₀`
+count→strand suppression). The danger is always the count as a *vote* or a *ceiling* — never the count as
+*honest statistical power*.
 
 ---
 
@@ -51,14 +59,24 @@ the gDNA-vs-RNA split *and* the ± split, **with no help from the count except i
 - **Uninformative (near-infinite variance, zero precision) at κ=½ (unstranded) or low N.** Then the node has
   NO intrinsic signal and must be solved from outside (§1.2, §1.3).
 
-This is the **PRIORITY** signal and the **ONLY** legitimate count→precision path.
+This is the **PRIORITY** signal and the **FIRST** of the two count→precision channels (§0).
 
 ### 1.2 IMPUTATION across the node chain — OUTSIDE information
 A neighbour node with **higher precision** propagates its solution onto a lower-precision node. The
-**precision of the propagation is a MODELED RELIABILITY** — the `var~mean` of the prediction error — which
-depends on count **density**, *not* the raw count as a confidence. Empirically **imprecise**. It is
-transcript-structure-aware (§4): gDNA propagates genomically (smooth); nascent RNA propagates within a
-transcript across exon↔intron; mature RNA is anchored, not propagated; nothing propagates across a TSS/TES.
+**precision of the propagation has two parts** (`imputation_variance_model.md`):
+- the **biological/structural dispersion** `σ²_bio(μ)` — how much the true rate genuinely differs between adjacent
+  nodes — LEARNED as a `var~mean` curve keyed by density `μ`;
+- the **predictor's Poisson sampling noise** `ρ_src/L_src` — how noisy the neighbour's own density *estimate* is —
+  COMPUTED, not learned. This is the **SECOND** count→precision channel (§0): a high-count predictor is a tight
+  prior, a low-count one diffuse.
+
+So `τ_impute(dst│src) = 1 / (σ²_bio(μ_dst) + ρ_src/L_src)`. Working in density space alone (the pre-Step-2 model)
+*buried* the sampling term and *contaminated* the learned curve at low counts; the decomposition de-confounds
+them (subtract the computed Poisson floor → learn only the excess). The imputation mean is the **identity**
+(`μ_dst = ρ_src`) by the factor-1-under-uniform eff-len construction — a fitted slope ≠ 1 would be an eff-len bug,
+not biology. It is transcript-structure-aware (§4/§5): gDNA propagates genomically (smooth); nascent RNA
+propagates within a transcript across exon↔intron; mature RNA is anchored, not propagated; nothing across a
+TSS/TES.
 
 ### 1.3 The GLOBAL gDNA hyperprior — OUTSIDE information (the foundation)
 The population baseline gDNA density; it sways an *unanchored* node toward gDNA when there is global evidence of
@@ -78,9 +96,11 @@ ONLY by:
 | source | what it sets | count-dependence |
 |---|---|---|
 | **Initialization** (§3) | the signature-binary starting variance | **NONE** (signature only) |
-| **Strand deconvolution** | updates variance after the BB solve | **YES, and only here** — the overdispersed Fisher info `N·(2κ−1)²` |
-| **Imputation** | the propagated prior's precision | the `var~mean` **reliability** (a measured prediction error; density-based, NOT a raw-count confidence) |
+| **Strand deconvolution** | updates variance after the BB solve | **count→precision CHANNEL 1** — the overdispersed Fisher info `N·(2κ−1)²` (statistical power of the node's own strand signal) |
+| **Imputation** | the propagated prior's precision `σ²_bio(μ) + ρ_src/L_src` | **count→precision CHANNEL 2** — the predictor's Poisson sampling noise `ρ_src/L_src` (statistical power of the OUTSIDE estimate); the `σ²_bio(μ)` curve is the learned biological dispersion (`imputation_variance_model.md`) |
 | **Global hyperprior** | the foundation precision | the **MAD** population spread (NOT count) |
+
+The two count→precision entries are the two channels of §0 — both *statistical power*, neither a composition vote.
 
 **FORBIDDEN precision sources (the contamination to delete — §6):**
 - the raw count (`mass_u`) **capping** a fraction precision (`min(·, mass_u)` on `τ_count`/`τ_global`/`τ_rna`) —
@@ -248,10 +268,15 @@ by re-adding a suppression constant).
   remove the count prior + RNA prior + DIRECT var~mean + de-count the global precision (drop the `mass_u` caps,
   keep the jacobian) + delete `rna_density_model.py`; gate on the zero-gDNA diagnostic (introns→0 via
   strand+Jeffreys+global) + net-flow before/after. (3) dead density-variance cleanup.
-- **Step 2 — the imputation source = strand-deconvolved gDNA.** Ensure the gDNA imputation propagates the
-  **strand-deconvolved / signature-known** gDNA density (clean), not the raw count density; transcript-structure
-  RNA imputation already lands here (the RNA-prior gate fix). *Gate: weak-SS / unstranded introns rescued by
-  imputation + global without a count prior.*
+- **Step 2 — the imputation layer (the second count→precision channel).** Reintroduce cross-node imputation
+  (removed with `q_rna` in Step 1) on the **strand-deconvolved / signature-known** density (clean, not the raw
+  count). Precision per `imputation_variance_model.md`: the learned biological dispersion `σ²_bio(μ)` (the
+  Poisson-offset `var~mean`) + the predictor's computed sampling noise `ρ_src/L_src`; mean = identity. gDNA
+  propagates genomically; RNA imputation is transcript-structure-aware (nascent-only across exon↔intron, TSS/TES
+  black hole, mature anchored — rebuilt per `rna_imputation_transcript_structure.md`, reusing the kept
+  `variance_model.pair_imputation_points` / `MonotoneVarMean`). *Gate: weak-SS / unstranded / AMBIG nodes rescued
+  by imputation + global without a count vote; complex-loci AMBIG recovers the Step-1 propagation-removal
+  regression.*
 - **Step 3 — the bipartite boundary nodes (v6 Phase C).** Promote boundaries to first-class solved nodes with the
   one-sided spliced floor; retire `deconv_sides`/`cleaned_gdna_count`; the per-node pie + the signature-binary
   init + the strand/imputation/global apply uniformly to region and boundary nodes.
@@ -260,7 +285,15 @@ by re-adding a suppression constant).
 
 ## 9. THE LITMUS TEST (for any future change)
 
-Before adding or keeping any term, ask: **"Does this let the raw fragment count determine a fraction or its
-precision, other than through the strand's overdispersed Fisher information?"** If yes, it is a bug. The only
-count→precision is the strand. Everything else is signature (init), measured reliability (imputation), or the
-population spread (global).
+Before adding or keeping any term, ask two questions:
+
+1. **"Does this let the raw count VOTE on a fraction (a composition claim)?"** If yes, it is a bug (the count
+   prior, the RNA prior — removed). The count never says "this is gDNA/RNA."
+2. **"If it uses the count for precision, is that honest statistical power — one of the two §0 channels (the
+   strand BB Fisher info, or the imputation Poisson sampling noise)?"** If it is neither — a tuned ceiling
+   (`mass_u` cap), a hand-set suppression (`I₀`), or a count-derived variance masquerading as a fraction
+   confidence (the DIRECT `var~mean`) — it is a bug.
+
+Everything else is signature (init), the learned biological-dispersion reliability `σ²_bio(μ)` (imputation), or
+the MAD population spread (global). The definitional density→fraction jacobian `(eff/mass)²` is the legitimate
+fraction normalizer, not a count-precision (§2).
