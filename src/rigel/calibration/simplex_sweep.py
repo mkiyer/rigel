@@ -31,8 +31,9 @@ _STRAND_PRIOR = 0.5  # Beta(½,½) strand reference prior (matches strand_deconv
 
 
 def _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, kappa, od_g, od_r,
-                  lattice, strand_obs=None, global_mu=None, global_tau=0.0):
-    """ψ_i over the lattice — strand mixture + sided spliced lower bound + node-class prior.
+                  lattice, strand_obs=None, global_mu=None, global_tau=0.0,
+                  gdna_imp_frac=None, gdna_imp_precision=None):
+    """ψ_i over the lattice — strand mixture + sided spliced lower bound + node-class prior + imputation.
 
     The Bayesian hierarchy (CALIBRATION_ARCHITECTURE.md §1), with a **node-class-dependent** prior. The
     count enters ONLY through the strand mixture's overdispersed Fisher information (§0 invariant); there is
@@ -75,6 +76,13 @@ def _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, 
             gt = gt[:, None] if gt.ndim else gt  # per-node array → column; scalar → broadcast
             gpen = -0.5 * gt * (f_g[None, :] - global_mu[:, None]) ** 2
             psi = psi + (~strand_obs)[:, None].astype(np.float64) * gpen
+    # gDNA IMPUTATION prior: a Gaussian pull of f_g toward the neighbour-imputed fraction (the identity
+    # mean) at the precision 1/(σ²_bio + predictor Poisson noise) — CALIBRATION_ARCHITECTURE §1.2 +
+    # imputation_variance_model.md. τ_imp=0 (no observable flank) ⇒ a no-op; a sharp strand likelihood
+    # dominates this diffuse prior by their honest precisions (emergent deference, no tuned weight).
+    if gdna_imp_frac is not None and gdna_imp_precision is not None:
+        ti = np.asarray(gdna_imp_precision, dtype=np.float64)[:, None]
+        psi = psi - 0.5 * ti * (f_g[None, :] - np.asarray(gdna_imp_frac, dtype=np.float64)[:, None]) ** 2
     forbid = ((~allow_pos)[:, None] & (f_pos[None, :] > _EPS)) | (
         (~allow_neg)[:, None] & (f_neg[None, :] > _EPS)
     )
@@ -104,6 +112,7 @@ def _fg_var(belief, f_g_g):
 def deconv_regions_sweep(
     substrate, region_arrays, *, rna_sense_frac, gdna_strand_overdispersion=0.0,
     rna_strand_overdispersion=0.0, n_grid=20, rho_global=0.0, region_eff_len=None, global_tau=None,
+    gdna_imp_frac=None, gdna_imp_precision=None,
 ):
     """Per-region gDNA fraction by the per-node grid solve (see module docstring).
 
@@ -152,7 +161,8 @@ def deconv_regions_sweep(
     lattice = (f_pos_g, f_neg_g, f_g_g)
     psi = _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, kappa,
                         gdna_strand_overdispersion, rna_strand_overdispersion, lattice,
-                        strand_obs=strand_obs, global_mu=mu_global, global_tau=gtau)
+                        strand_obs=strand_obs, global_mu=mu_global, global_tau=gtau,
+                        gdna_imp_frac=gdna_imp_frac, gdna_imp_precision=gdna_imp_precision)
 
     # per-node solve: each node's belief IS its local evidence ψ_i (no cross-node coupling — Step-1 rebuild;
     # imputation returns in Step 2). f_g = posterior median over the lattice; f_g_var = posterior variance.

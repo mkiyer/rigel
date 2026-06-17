@@ -52,7 +52,9 @@ from .gdna_strand import (
     fit_rna_strand_from_substrate,
     overdispersion_for_beta,
 )
+from .imputation import gdna_imputation_prior
 from .result import CalibrationResult
+from .run_fill import same_ref_left_right
 from .simplex_sweep import deconv_regions_sweep
 from .strand_balance import fit_strand_balance
 from .strand_deconv import cleaned_gdna_count, deconv_sides, strand_deconvolve
@@ -206,6 +208,26 @@ def calibrate(
     # sweep's allow_pos/allow_neg forbid mask; here the seed is only the gDNA mass the loop re-derives ρ_global
     # from. Iteration drives it down as the strand separates RNA.
     gdna_c = mass_u.copy()
+    # gDNA imputation adjacency (CALIBRATION_ARCHITECTURE §1.2): the imputed dests are the non-count-
+    # observable (exon / AMBIG) regions; each flanking boundary side that exists (same-ref), is
+    # count-observable, and carries deconv'd gDNA mass is a predictor. The side gDNA densities use the FIXED
+    # deconv_sides gDNA mass / the per-side density length (boundary_eff_len) — boundaries remain fixed
+    # anchors until Step 3 promotes them to solved nodes, so these predictors are stable across passes.
+    bco = np.asarray(node_density.boundary_count_observable, dtype=bool)
+    ls_same, rs_same = same_ref_left_right(np.asarray(region_arrays.ref_id))
+    left_obs = np.zeros(region_arrays.n_regions, dtype=bool)
+    right_obs = np.zeros(region_arrays.n_regions, dtype=bool)
+    if region_arrays.n_regions > 1:
+        left_obs[1:] = bco[:-1] & ls_same[1:]  # region r's LEFT side = boundary (r−1, r)
+        right_obs[:-1] = bco[:-1] & rs_same[:-1]  # region r's RIGHT side = boundary (r, r+1)
+    region_eligible_g = ~obs
+    inv_side_len = 1.0 / np.maximum(boundary_eff_len, 1e-9)
+    gdna_left = np.asarray(left.gdna_mass, dtype=np.float64)
+    gdna_right = np.asarray(right.gdna_mass, dtype=np.float64)
+    d_left = gdna_left * inv_side_len  # fixed boundary-side gDNA crossing densities (the predictors)
+    d_right = gdna_right * inv_side_len
+    left_ok_g = left_obs & (gdna_left > 0.0)
+    right_ok_g = right_obs & (gdna_right > 0.0)
     regions = None
     prev_fg = None
     for _pass in range(int(config.sweep_max_passes)):
@@ -233,6 +255,16 @@ def calibrate(
         )
         sig2_glob = np.maximum(sigma_d_global**2 * geom2, 1e-12)
         tau_global = np.maximum(1.0 / sig2_glob, 1.0)
+        # gDNA imputation prior on f_g (CALIBRATION_ARCHITECTURE §1.2): the exon/AMBIG regions get a prior
+        # from their observable boundary-side gDNA crossings — mean = the side density (identity), precision
+        # = 1/(σ²_bio(ρ_g) + the predictor's Poisson sampling noise). This is the strand-weak rescue (the
+        # propagation removed in Step 1) and reinforces f_g=0 at zero-gDNA (the flanks carry ~0 gDNA there).
+        gdna_imp = gdna_imputation_prior(
+            mu, d_left, d_right,
+            region_eff_len=eff_len, side_eff_len=boundary_eff_len, mass_u=mass_u,
+            region_eligible=region_eligible_g, left_ok=left_ok_g, right_ok=right_ok_g,
+            ref_id=region_arrays.ref_id,
+        )
         regions = deconv_regions_sweep(
             substrate,
             region_arrays,
@@ -243,6 +275,8 @@ def calibrate(
             rho_global=rho_global,
             region_eff_len=region_eff_len,
             global_tau=tau_global,
+            gdna_imp_frac=gdna_imp.frac,
+            gdna_imp_precision=gdna_imp.precision,
         )
         if (
             prev_fg is not None
