@@ -109,6 +109,35 @@ def _fg_var(belief, f_g_g):
     return np.maximum(post @ (f_g_g**2) - mean**2, 0.0)
 
 
+def _solve_nodes(
+    u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, strand_obs,
+    mass_unspl, mass_spliced, *, kappa, od_g, od_r, n_grid,
+    mu_global=None, global_tau=0.0, gdna_imp_frac=None, gdna_imp_precision=None,
+) -> NodeDeconv:
+    """The node-agnostic per-node simplex solve — solves an array of nodes (regions OR boundaries) from their
+    per-node sufficient statistics, with no knowledge of node type. Each node's belief IS its local evidence
+    ``ψ_i`` (``_local_loglik``: strand mixture + sided spliced floor + node-class prior + imputation pull); the
+    cross-node imputation enters ψ_i as a prior, computed upstream. ``f_g`` = posterior median over the lattice,
+    ``f_g_var`` = posterior variance; a node with no fragments (``u_pos+u_neg == 0``) reports ``f_g = 0``.
+    The region/boundary wrappers build the arrays + the global baseline and call this core.
+    """
+    f_pos_g, f_neg_g, f_g_g = _simplex_lattice(int(n_grid))
+    lattice = (f_pos_g, f_neg_g, f_g_g)
+    psi = _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, kappa,
+                        od_g, od_r, lattice,
+                        strand_obs=strand_obs, global_mu=mu_global, global_tau=global_tau,
+                        gdna_imp_frac=gdna_imp_frac, gdna_imp_precision=gdna_imp_precision)
+    f_g = _fg_median(psi, f_g_g)
+    f_g_var = _fg_var(psi, f_g_g)
+    active = (u_pos + u_neg) > 0.0
+    f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
+    f_g_var = np.where(active, f_g_var, 0.0)
+    return NodeDeconv(
+        gdna_mass=f_g * mass_unspl, rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
+        gdna_frac=f_g, gdna_frac_var=f_g_var,
+    )
+
+
 def deconv_regions_sweep(
     substrate, region_arrays, *, rna_sense_frac, gdna_strand_overdispersion=0.0,
     rna_strand_overdispersion=0.0, n_grid=20, rho_global=0.0, region_eff_len=None, global_tau=None,
@@ -125,11 +154,9 @@ def deconv_regions_sweep(
     Step 2 (see module docstring). See CALIBRATION_ARCHITECTURE.md §1/§4.
     """
     ts = np.asarray(region_arrays.strand_class)
-    kappa = float(rna_sense_frac)
     c = substrate.contained
     u_pos = c.n_unspliced_pos.astype(np.float64)
     u_neg = c.n_unspliced_neg.astype(np.float64)
-    U = u_pos + u_neg
     mass_unspl = np.asarray(c.mass_unspliced, dtype=np.float64)
     mass_spliced = np.asarray(c.mass_spliced, dtype=np.float64)
     spl_sense = c.n_spliced_sense.astype(np.float64)
@@ -138,12 +165,12 @@ def deconv_regions_sweep(
     spliced_neg = np.where(ts == TS_NEG, spl_sense, 0.0)
     allow_pos = (ts == TS_POS) | (ts == TS_AMBIG)
     allow_neg = (ts == TS_NEG) | (ts == TS_AMBIG)
+    strand_obs = (ts == TS_POS) | (ts == TS_NEG)
 
     # GLOBAL gDNA prior (foundation): per-node baseline fraction μ_global = clip(ρ_global·eff_len/mass, 0, 1).
     # Weak (global_tau ≈ 1 pseudo-observation) so it only governs nodes the strand leaves undetermined
     # (κ=½ / AMBIG / thin); ρ_global ≈ 0 in a pure-RNA library ⇒ μ_global ≈ 0 ⇒ unanchored nodes settle at
     # f_g ≈ 0 (no phantom gDNA). Active only when region_eff_len is supplied (toy tests omit it ⇒ no prior).
-    strand_obs = (ts == TS_POS) | (ts == TS_NEG)
     if region_eff_len is not None:
         eff = np.asarray(region_eff_len, dtype=np.float64)
         mu_global = np.clip(
@@ -157,22 +184,10 @@ def deconv_regions_sweep(
         mu_global = None
         gtau = 0.0
 
-    f_pos_g, f_neg_g, f_g_g = _simplex_lattice(int(n_grid))
-    lattice = (f_pos_g, f_neg_g, f_g_g)
-    psi = _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, kappa,
-                        gdna_strand_overdispersion, rna_strand_overdispersion, lattice,
-                        strand_obs=strand_obs, global_mu=mu_global, global_tau=gtau,
-                        gdna_imp_frac=gdna_imp_frac, gdna_imp_precision=gdna_imp_precision)
-
-    # per-node solve: each node's belief IS its local evidence ψ_i (no cross-node coupling — Step-1 rebuild;
-    # imputation returns in Step 2). f_g = posterior median over the lattice; f_g_var = posterior variance.
-    f_g = _fg_median(psi, f_g_g)
-    f_g_var = _fg_var(psi, f_g_g)
-
-    active = U > 0.0
-    f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
-    f_g_var = np.where(active, f_g_var, 0.0)
-    return NodeDeconv(
-        gdna_mass=f_g * mass_unspl, rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
-        gdna_frac=f_g, gdna_frac_var=f_g_var,
+    return _solve_nodes(
+        u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, strand_obs,
+        mass_unspl, mass_spliced,
+        kappa=float(rna_sense_frac), od_g=gdna_strand_overdispersion, od_r=rna_strand_overdispersion,
+        n_grid=n_grid, mu_global=mu_global, global_tau=gtau,
+        gdna_imp_frac=gdna_imp_frac, gdna_imp_precision=gdna_imp_precision,
     )
