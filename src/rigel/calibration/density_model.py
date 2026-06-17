@@ -57,17 +57,8 @@ class NodeDensity:
         np.ndarray
     )  # float64[R] — count module's gDNA fraction g_count = clip(density·region_eff_len /
     #   contained_mass): the gDNA fraction of the contained unspliced mass from the (raw) local gDNA
-    #   density. Consumed by the count module (strand-unobservable / unstranded nodes) and the gDNA
-    #   strand-fit seed weight.
-    count_gdna_frac_var: np.ndarray  # float64[R] — Phase 1 count posterior variance σ_g² of
-    #   count_gdna_frac: μ_g²·v_rel, v_rel = relative variance (CV²) from the NON-PARAMETRIC kNN
-    #   variance~density curve (imputed), 1/N_own (observable), 1.0 (no anchor); floored by Poisson
-    #   1/N_anchor; capped at μ_g(1−μ_g). Feeds the FP-rate quantile (Phase 2); NOT yet the blend.
-    count_rel_var: np.ndarray  # float64[R] — the RELATIVE count variance v_rel (CV²) above, BEFORE the
-    #   μ_g² scale and the Bernoulli cap: 1/N_own (observable), LOESS-floored (imputed), 1.0 (no anchor).
-    #   The per-node count PRECISION for the simplex count prior is τ_count = 1/v_rel — bounded in [1, N]
-    #   (no 1/var blow-up), the degeneracy-free reliability the design's "crossing-count = probe-proximity"
-    #   proxy implies. 1.0 (= precision 1, defers to the global prior) when the variance is not computed.
+    #   density. KEPT as the gDNA strand-overdispersion fit SEED selector (gdna_strand.py) — NOT a
+    #   gDNA-fraction vote in the solve (the count prior was removed in the Step-1 precision rebuild).
     region_count_observable: np.ndarray  # bool[R] — count-observable region (non-exonic)
     boundary_count_observable: np.ndarray  # bool[R] — count-observable boundary right of region r
     n_region_count_observable: int
@@ -94,171 +85,12 @@ def count_observable_masks(
     return region_count_observable, boundary_count_observable
 
 
-_LOESS_SPAN = 0.4  # LOESS bandwidth (fraction of points per local fit); CV-selectable later
-_LOESS_MIN_FIT = 5  # need at least this many 2-anchor points to fit a local-linear curve
-_BISQUARE_C = 6.0  # Cleveland's robustness constant (6·MAD); the standard LOWESS value, not tuned
-
-
-def _loess(x: np.ndarray, y: np.ndarray, xq: np.ndarray, frac: float, robust_iters: int = 2):
-    """Robust LOESS — local **linear** regression (tricube kernel) of y on x, evaluated at ``xq``.
-
-    The standard Cleveland smoother: per query point, fit a weighted line over the ``frac·n`` nearest
-    points (tricube distance weights, adaptive bandwidth = the k-th nearest distance), and read the line
-    at the query. ``robust_iters`` passes reweight by the residual bisquare (``6·MAD``) to downweight
-    outliers — important here because variance estimates are heavy-tailed. Local *linear* (not a local
-    mean) corrects boundary bias; distance weighting (not k-by-rank) keeps a far cluster across a density
-    gap from contaminating the fit. ~O(n_query·n) per pass — sub-ms at our region counts.
-    """
-    n = x.shape[0]
-    k = int(np.clip(int(frac * n), 2, n))
-    rob = np.ones(n)
-
-    def fit_at(queries: np.ndarray) -> np.ndarray:
-        out = np.empty(queries.shape[0])
-        for i, xi in enumerate(queries):
-            d = np.abs(x - xi)
-            h = np.partition(d, k - 1)[k - 1]  # distance to the k-th nearest → local bandwidth
-            w = np.clip(1.0 - (d / max(h, 1e-12)) ** 3, 0.0, 1.0) ** 3 * rob  # tricube × robustness
-            sw = w.sum()
-            if sw <= 0.0:
-                out[i] = np.average(y, weights=rob) if rob.sum() > 0 else y.mean()
-                continue
-            mx = (w * x).sum() / sw
-            my = (w * y).sum() / sw
-            sxx = (w * (x - mx) ** 2).sum()
-            b = (w * (x - mx) * (y - my)).sum() / sxx if sxx > 1e-12 else 0.0  # else local mean
-            out[i] = my + b * (xi - mx)
-        return out
-
-    for _ in range(robust_iters):
-        resid = y - fit_at(x)
-        mad = np.median(np.abs(resid))
-        if mad <= 0.0:
-            break
-        rob = np.clip(1.0 - (resid / (_BISQUARE_C * mad)) ** 2, 0.0, 1.0) ** 2
-    return fit_at(xq)
-
-
-def _node_disagreement(obs: list[np.ndarray], ok: list[np.ndarray]):
-    """Per-node ``(μ̂, raw_var, k)`` over a node's available clean density observations.
-
-    ``obs`` are candidate density estimates (e.g. ``d_left``, ``d_right``, ``contained``), each gated by
-    its boolean mask in ``ok``. ``μ̂`` is the mean of the available (``ok``) observations; ``raw_var`` is
-    the **variance of that mean**, ``s²/k`` with the sample variance ``s² = Σ(x−μ̂)²/(k−1)``. For ``k=2``
-    this is exactly ``¼(x₁−x₂)²`` — identical to the original 2-boundary disagreement.
-    """
-    vals = np.stack(obs, axis=0)
-    msk = np.stack([np.asarray(m, dtype=bool) for m in ok], axis=0)
-    k = msk.sum(axis=0).astype(np.float64)
-    ksafe = np.maximum(k, 1.0)
-    mu = np.where(msk, vals, 0.0).sum(axis=0) / ksafe
-    dev2 = np.where(msk, (vals - mu) ** 2, 0.0).sum(axis=0)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        s2 = np.where(k > 1.0, dev2 / np.maximum(k - 1.0, _EPS), np.nan)
-        raw_var = s2 / ksafe
-    return mu, raw_var, k
-
-
-def density_variance_curve(
-    density: np.ndarray,
-    *,
-    d_left: np.ndarray,
-    d_right: np.ndarray,
-    left_ok: np.ndarray,
-    right_ok: np.ndarray,
-    contained: np.ndarray | None = None,
-    contained_ok: np.ndarray | None = None,
-    frac: float = _LOESS_SPAN,
-) -> np.ndarray:
-    """Robust log-log LOESS ``σ²_density(μ)`` from per-node disagreement among clean gDNA observations.
-
-    With only the two boundaries (``contained=None``) each fit node is the 2-anchor ``¼(d_L−d_R)²`` at
-    ``½(d_L+d_R)`` — **identical to the original 2-boundary model**. Passing the count-observable
-    ``contained`` adds the ``{left, contained, right}`` **triplet** (the density gradient across the
-    region's span — a richer process-variance estimator), reducing to the pair where ``contained`` is
-    absent or RNA-contaminated. The fit (``log σ²_density ~ log μ̂`` via :func:`_loess`) feeds the count
-    posterior variance (:func:`_count_fraction_variance`) and is available to the ``simplex_sweep``
-    coupling variance. Returns ``σ²_density`` per node (``NaN`` where ``density≤0`` or fewer than
-    ``_LOESS_MIN_FIT`` fit points).
-    """
-    r = density.shape[0]
-    obs = [np.asarray(d_left, dtype=np.float64), np.asarray(d_right, dtype=np.float64)]
-    ok = [np.asarray(left_ok, dtype=bool), np.asarray(right_ok, dtype=bool)]
-    if contained is not None:
-        obs.append(np.asarray(contained, dtype=np.float64))
-        ok.append(np.zeros(r, dtype=bool) if contained_ok is None else np.asarray(contained_ok, bool))
-    mu, raw_var, k = _node_disagreement(obs, ok)
-    fit_sel = (k >= 2.0) & np.isfinite(mu) & (mu > _EPS) & np.isfinite(raw_var) & (raw_var > _EPS)
-    sigma_d2 = np.full(r, np.nan, dtype=np.float64)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        if int(fit_sel.sum()) >= _LOESS_MIN_FIT:
-            valid = density > _EPS
-            sigma_d2[valid] = np.exp(
-                _loess(np.log(mu[fit_sel]), np.log(raw_var[fit_sel]), np.log(density[valid]), frac)
-            )
-    return sigma_d2
-
-
-def _count_fraction_variance(
-    count_gdna_frac: np.ndarray,
-    density: np.ndarray,
-    *,
-    own: np.ndarray,
-    own_count: np.ndarray,
-    d_left: np.ndarray,
-    d_right: np.ndarray,
-    n_anchor: np.ndarray,
-    frac: float = _LOESS_SPAN,
-) -> np.ndarray:
-    """Phase-1 count posterior variance ``σ_g² = μ_g²·v_rel`` via a **non-parametric LOESS** variance~mean
-    curve.
-
-    Hybrid capture is bimodal (on/off-target chasm in both mean and variance), so no single parametric
-    ``α·μ²`` law fits. Instead the imputation variance is a robust **LOESS curve in log-log space**:
-
-    1. each 2-anchor node (both ``d_left``/``d_right`` finite, not observable) gives a raw density variance
-       ``¼(d_L−d_R)²`` at mean density ``½(d_L+d_R)``;
-    2. fit ``log σ²_density ~ log μ_ρ`` by robust local-linear LOESS (:func:`_loess`) — log-log because
-       both span orders of magnitude (``var∝mean²`` is a line there) and it handles the chasm without a
-       global law; local-linear corrects boundary bias and distance weighting avoids gap contamination;
-    3. every region reads ``σ²_density`` off the curve at its own ``density`` → relative variance
-       ``v_rel = σ²_density/density²`` (invariant under the linear density→fraction map).
-
-    ``v_rel`` is then ``1/N_own`` for observable nodes (Poisson on own count), ``max(curve, 1/N_anchor)``
-    for imputed nodes (LOESS curve floored by the anchors' Poisson count noise — Q1), and ``1.0`` for a
-    node with no anchor anywhere (uninformative → defer). ``σ_g² = μ_g²·v_rel``, capped at ``μ_g(1−μ_g)``.
-
-    ``frac`` is the LOESS span (the one smoothing knob; CV-selectable later — default ``_LOESS_SPAN``).
-    """
-    r = count_gdna_frac.shape[0]
-    # The 2-boundary disagreement (no contained term): each fit node is ¼(d_L−d_R)² at ½(d_L+d_R).
-    finite_l = np.isfinite(d_left) & ~own
-    finite_r = np.isfinite(d_right) & ~own
-    sigma_d2 = density_variance_curve(
-        density, d_left=d_left, d_right=d_right, left_ok=finite_l, right_ok=finite_r, frac=frac
-    )
-    loess_v_rel = np.full(r, np.nan, dtype=np.float64)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        valid = (density > _EPS) & np.isfinite(sigma_d2)
-        loess_v_rel[valid] = sigma_d2[valid] / density[valid] ** 2
-
-        v_rel = np.full(r, 1.0, dtype=np.float64)  # default: no anchor → uninformative
-        v_rel[own] = np.where(own_count[own] > 0.0, 1.0 / np.maximum(own_count[own], _EPS), 1.0)
-        imputed = (~own) & (n_anchor > 0.0)
-        floor = 1.0 / np.maximum(n_anchor, _EPS)  # Poisson count-noise floor (Q1)
-        lv = np.where(np.isfinite(loess_v_rel), loess_v_rel, 0.0)
-        v_rel[imputed] = np.maximum(lv[imputed], floor[imputed])
-    var = np.minimum(count_gdna_frac**2 * v_rel, count_gdna_frac * (1.0 - count_gdna_frac))
-    return var, v_rel
-
-
 def node_gdna_density(
     substrate,
     region_arrays,
     region_eff_len: np.ndarray,
     fl_mean: float,
     *,
-    need_count_variance: bool = True,
     gdna_counts: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None,
 ) -> NodeDensity:
     """Per-region gDNA density from the count clue via LOCAL boundary-anchored imputation.
@@ -275,10 +107,9 @@ def node_gdna_density(
     density at exon / AMBIG nodes drops the RNA the count clue alone cannot see. The cleaning degrades
     to the raw count where the strand is uninformative, so this path is safe at any strand specificity.
 
-    ``need_count_variance`` gates the Phase-1 count posterior variance: it feeds **only** the FP-rate
-    quantile (``strand_deconv``), which is a no-op at the default ``gdna_deconv_quantile=0.5`` (the
-    shift is ``Φ⁻¹(½)=0``). When the caller knows the quantile is ½ it passes ``False`` and the
-    (``O(R²)`` LOESS) variance is skipped, returning zeros — bit-identical, since the value is unused.
+    Output ``count_gdna_frac`` (the density→fraction MEAN) is consumed only as the gDNA
+    strand-overdispersion fit SEED selector (``gdna_strand.py``) and the signature-partition masks; the
+    count posterior variance was removed with the count prior (the Step-1 precision rebuild).
     """
     sig = np.asarray(region_arrays.signature)
     ref_id = np.asarray(region_arrays.ref_id)
@@ -322,11 +153,6 @@ def node_gdna_density(
     density[own] = contained_gdna[own] / region_eff_len[own]
     # Everything else: anchor from the available observable boundary sides (crossing count / fl_mean).
     inv_fl = 1.0 / fl_mean if fl_mean > 0.0 else 0.0
-    # Per-node anchor bookkeeping for the Phase-1 count posterior variance (below): the two anchor
-    # densities (d_L, d_R) and the total anchor crossing count behind the imputation.
-    d_left = np.where(left_anchor, left_gdna * inv_fl, np.nan)
-    d_right = np.where(right_anchor, right_gdna * inv_fl, np.nan)
-    n_anchor = left_anchor * left_gdna + right_anchor * right_gdna  # crossing counts behind the impute
     for i in np.where(~own)[0]:
         est = []
         if left_anchor[i]:
@@ -350,32 +176,18 @@ def node_gdna_density(
     density = np.where(anchored, density, global_density)
 
     # Count-prior MEAN g_count = clip(density·eff_len / contained_mass): the gDNA fraction of the
-    # contained unspliced mass implied by the local gDNA density. Consumed by the count module
-    # (strand-unobservable / unstranded nodes) and by the gDNA strand-fit seed weight.
+    # contained unspliced mass implied by the local gDNA density. Consumed as the gDNA strand-fit seed
+    # selector (gdna_strand.py) — NOT a gDNA-fraction vote in the solve (the count prior was removed).
     contained_mass = np.asarray(substrate.contained.mass_unspliced, dtype=np.float64)
     with np.errstate(divide="ignore", invalid="ignore"):
         count_gdna_frac = np.clip(
             np.where(contained_mass > 0.0, density * region_eff_len / contained_mass, 0.0), 0.0, 1.0
         )
 
-    # Phase 1: count posterior variance σ_g² of the gDNA fraction (see _count_fraction_variance).
-    # Skipped (zeros) when the FP-rate quantile is ½ — the variance is then multiplied by Φ⁻¹(½)=0,
-    # so this avoids the O(R²) LOESS on the default path with no observable effect.
-    if need_count_variance:
-        count_gdna_frac_var, count_rel_var = _count_fraction_variance(
-            count_gdna_frac, density, own=own, own_count=contained_gdna, d_left=d_left,
-            d_right=d_right, n_anchor=n_anchor,
-        )
-    else:
-        count_gdna_frac_var = np.zeros(r, dtype=np.float64)
-        count_rel_var = np.ones(r, dtype=np.float64)  # v_rel=1 ⇒ count precision 1 ⇒ defers to global
-
     return NodeDensity(
         density=density,
         global_density=global_density,
         count_gdna_frac=count_gdna_frac,
-        count_gdna_frac_var=count_gdna_frac_var,
-        count_rel_var=count_rel_var,
         region_count_observable=region_count_observable,
         boundary_count_observable=boundary_count_observable,
         n_region_count_observable=int(region_count_observable.sum()),
@@ -386,6 +198,5 @@ def node_gdna_density(
 __all__ = [
     "NodeDensity",
     "count_observable_masks",
-    "density_variance_curve",
     "node_gdna_density",
 ]

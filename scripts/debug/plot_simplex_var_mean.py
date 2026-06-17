@@ -87,7 +87,7 @@ def main():
     bnd_el = boundary_side_eff_length(fl.gdna_pmf, ra.region_size_bp)
     fl_mean = boundary_eff_length(fl.gdna_pmf)
     kappa = float(fit_strand_balance(sm).rna_sense_frac)
-    nd = node_gdna_density(sub, ra, reg_el, fl_mean, need_count_variance=False)
+    nd = node_gdna_density(sub, ra, reg_el, fl_mean)
     od_g = fit_gdna_strand_from_substrate(sub, ra, nd, bnd_el, rna_sense_frac=kappa,
         prior_overdispersion=overdispersion_for_beta(ccfg.gdna_strand_prior_alpha_beta),
         prior_weight=ccfg.gdna_strand_prior_weight).gdna_strand_overdispersion

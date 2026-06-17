@@ -95,9 +95,9 @@ def run_condition(strand_specificity, work, nrna_abund=30):
         cleaned_gdna_count(right, r_raw, INFO_SCALE),
     )
 
-    nd_raw = node_gdna_density(substrate, ra, region_eff_len, fl_mean, need_count_variance=False)
+    nd_raw = node_gdna_density(substrate, ra, region_eff_len, fl_mean)
     nd_clean = node_gdna_density(
-        substrate, ra, region_eff_len, fl_mean, need_count_variance=False, gdna_counts=cleaned
+        substrate, ra, region_eff_len, fl_mean, gdna_counts=cleaned
     )
 
     sc_arr = np.asarray(ra.strand_class)

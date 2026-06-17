@@ -110,14 +110,8 @@ def calibrate(
     # Count clue on RAW counts (the count module, pre-cleaning): per-region gDNA density by LOCAL
     # boundary-anchored imputation. Needed here only to fit the gDNA strand overdispersion (its seed
     # identification is pre-cleaning) — the cleaning below depends on that overdispersion, so the raw
-    # pass must come first. This is NOT the region answer (the cleaned pass below is). The count
-    # posterior variance feeds only the FP-rate quantile of the boundary-side deconvolution (the sweep's
-    # per-node τ_count comes from the var~mean, not from here), so compute it only for a non-½ quantile;
-    # else skip its O(R²) LOESS.
-    need_count_variance = float(config.gdna_deconv_quantile) != 0.5
-    node_density_raw = node_gdna_density(
-        substrate, region_arrays, region_eff_len, fl_mean, need_count_variance=need_count_variance
-    )
+    # pass must come first. This is NOT the region answer (the cleaned pass below is).
+    node_density_raw = node_gdna_density(substrate, region_arrays, region_eff_len, fl_mean)
 
     # Strand-module parameters — the two Beta-Binomial overdispersions. gDNA (mean ½) fitted from the
     # count-observable seed regions/sides using the raw count-clue gDNA weight (breaks the circularity:
@@ -176,7 +170,6 @@ def calibrate(
         region_arrays,
         region_eff_len,
         fl_mean,
-        need_count_variance=need_count_variance,
         gdna_counts=(_raw_count(substrate.contained), cleaned_left, cleaned_right),
     )
 
