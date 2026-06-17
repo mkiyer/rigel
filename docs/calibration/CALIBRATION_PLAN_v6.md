@@ -287,6 +287,18 @@ Unchanged in spirit from v5 §3; extended to the bipartite graph:
 
 ## 8. The message is the PIE (the node's state) — no transport (the mechanism, user-clarified 2026-06-16)
 
+> **⚠️ RNA-IMPUTATION CORRECTION (2026-06-17): the RNA part of this section is SUPERSEDED by
+> [`rna_imputation_transcript_structure.md`](rna_imputation_transcript_structure.md).** The "carry the
+> neighbour's same-strand RNA density" framing below is wrong: RNA is **not** a single smooth field. It splits
+> into **mature** (contained in exons, crosses junctions only as one-sided spliced — a *fixed anchor*, never
+> imputed) and **nascent** (unspliced pre-mRNA, the only contiguous RNA — the only thing that imputes across an
+> exon↔intron edge). The imputation must respect **transcript structure**: (a) no RNA across TSS/TES
+> (intergenic↔exon = zero-RNA black hole); (b) exon↔intron carries the **unspliced/nascent only** (never the
+> one-sided spliced); (c) an exon's contained mature is anchored by the spliced floor + strand, not imputed
+> from the thin junction crossing. The v6 Phase-B implementation violated all three (measured: zero-gDNA
+> introns fabricate ~75% gDNA because the nascent imputation is gated off there). The gDNA part of this section
+> stands. See the correction doc for the corrected mechanism + the next-steps plan.
+
 > **A source node shares its current pie `(f₊,f₋,f_g)` with a destination node; the destination integrates
 > that pie into its own pie. No mass is transferred; no density is moved.** The communicated thing is the
 > node's *state*. (The user's explicit correction: we are *not* "communicating density and transferring mass"
