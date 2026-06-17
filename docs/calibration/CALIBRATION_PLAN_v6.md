@@ -151,11 +151,28 @@ summing to 1 per fragment ([`_accumulator_reference.py:254-263`](../../tests/nat
 **No re-attribution, no double-count, no C++ change** — v6 simply *reads* the spliced from the boundary node
 (where it already is) instead of from a (null) region channel.
 
-**The one-sided floor in ψ.** At a boundary node, the same-strand spliced crossing mass on strand `s` is a
-**hard lower bound** on that strand's RNA: it was directly observed as mature. The boundary's unspliced pie sets
-the gDNA/RNA± split of its *unspliced* crossings *subject to that floor* (v5 §2, now correctly homed on the
-boundary). The floor is **one-sided** — it exists only on the exon-facing side; the intron-facing side has
-spliced=0, which is correct (no mature RNA crosses into an intron).
+**Spliced fragments are inherently stranded by their genomic motif (user, 2026-06-17).** A splice junction's
+GT-AG motif is **non-palindromic**, so every spliced fragment has a definite **genomic (motif) strand** — the
+true strand of the mature RNA — independent of its **read strand** (whether the read mapped to genome +/−).
+The accumulator's spliced channels are *read*-strand-relative to the motif (`c2 = sense`, `align==motif`;
+`c3 = antisense`), but the fragment's strand IS the motif strand. So **a splice-junction boundary owns spliced
+mass on exactly ONE strand** (the motif strand) — never both. A boundary node therefore carries: **spliced
+RNA on its one motif strand** (the fixed mature anchor) **+ unspliced fragments split into all three** —
+RNA₊, RNA₋, gDNA (its pie). This strandedness is *known*, not ambiguous (correcting an earlier note): even at
+an AMBIG region the two flanking junctions have definite, possibly-opposite strands.
+
+**The spliced floor is LOAD-BEARING (not moot) — the boundary node's hard lower bound (v5 §2, vindicated by the
+user's `T1+/T2+` example).** At a node that owns spliced mass (a boundary), the spliced count is a **fixed
+lower bound** on that motif strand's RNA — it was *directly observed* as mature, so the projected pie can only
+set the *unspliced* split subject to it: if a projection implies less RNA than the spliced floor, the direct
+spliced observation dominates. Worked example (v5): a boundary with 200 crossings, 160 spliced (fixed) ⇒ the
+imputation may only partition the remaining 40 unspliced (e.g. 20 RNA₊ + 20 gDNA), never below the 160 mature
+floor. The floor is **one-sided** (exon-facing side only; the intron-facing side has spliced=0 — correct, no
+mature crosses into an intron) and in **density space with the FL conversion** (below), so spliced and
+unspliced add coherently. **This is a Phase-C constraint** (it acts on the boundary's *own* pie, and boundary
+nodes are solved in Phase C); in **Phase B** the boundary's mature signal still reaches its flanking *region*
+nodes — but *softly*, through the RNA prior `μ±` (the imputed RNA density includes the flank's spliced), not yet
+as the hard floor. The hard floor lands with the boundary-node solve (Phase C).
 
 **Spliced effective length (Q3 — "must reflect the 1-sided nature").** The spliced floor is a *density* on the
 exon flank: `ρ_spliced,s = spliced_s / E_rna[min(ℓ, L_exon_side)]` — divided by the **one** exon-side RNA

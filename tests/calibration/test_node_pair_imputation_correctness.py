@@ -280,16 +280,21 @@ def test_rna_recovery_real_scenario_factor1(tmp_path):
     than a normalization offset."""
     # Reuse the multi-exon single-strand harness (it runs the real scanner + calibrator and returns the
     # per-side RNA density length array used by the production RNA builder).
-    from rigel.calibration.variance_model import fit_pair_imputation_rna_varmean
+    from rigel.calibration.rna_density_model import (
+        fit_rna_imputation_varmean,
+        rna_strand_densities,
+    )
     from tests.calibration.test_variance_model import _multi_exon_single_strand_substrate
 
     (sub, ra, rel_rna, rna_side_len, fg, lsplit, rsplit, cl, cr) = _multi_exon_single_strand_substrate(
         tmp_path, gdna_abundance=0.0  # ZERO gDNA — a clean single-strand RNA field
     )
-    fit = fit_pair_imputation_rna_varmean(
-        sub, ra, rel_rna, rna_side_len,
-        gdna_frac=fg, left_gdna_frac=lsplit.gdna_frac, right_gdna_frac=rsplit.gdna_frac,
-        cleaned_left=cl, cleaned_right=cr,
+    fit = fit_rna_imputation_varmean(
+        rna_strand_densities(
+            sub, ra, rel_rna, rna_side_len,
+            gdna_frac=fg, left_gdna_frac=lsplit.gdna_frac, right_gdna_frac=rsplit.gdna_frac,
+            cleaned_left=cl, cleaned_right=cr,
+        )
     )
     # a real, monotone, finite fit on the RNA-density axis
     assert fit.fit_mean.size > 0

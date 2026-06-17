@@ -36,7 +36,7 @@ from rigel.splice import SpliceType
 
 # the SAME production internals calibrate() uses (verbatim replication; no prod edits)
 from rigel.calibration.substrate import CalibrationSubstrate
-from rigel.calibration.density_model import node_gdna_density, count_observable_masks
+from rigel.calibration.density_model import node_gdna_density
 from rigel.calibration.effective_length import (
     boundary_eff_length,
     boundary_side_eff_length,
@@ -54,8 +54,8 @@ from rigel.calibration.variance_model import (
     direct_points,
     fit_direct_varmean,
     fit_pair_imputation_varmean,
-    fit_pair_imputation_rna_varmean,
 )
+from rigel.calibration.rna_density_model import fit_rna_imputation_varmean, rna_strand_densities
 from rigel.calibration.simplex_sweep import deconv_regions_sweep
 from rigel.calibration.run_fill import same_ref_left_right
 
@@ -211,11 +211,12 @@ def run(pl, ra, sm, gdna_fl_pmf, rna_fl_pmf, cfg):
         fg_now = np.clip(fg_now, 0.0, 1.0)
         rna_boundary_side_eff_len = boundary_side_eff_length(rna_fl_pmf, ra.region_size_bp)
         try:
-            rna_fit = fit_pair_imputation_rna_varmean(
-                substrate, ra, region_eff_len_rna, rna_boundary_side_eff_len,
-                gdna_frac=fg_now, left_gdna_frac=left_split.gdna_frac,
-                right_gdna_frac=right_split.gdna_frac,
-                cleaned_left=cleaned_left, cleaned_right=cleaned_right)
+            rna_fit = fit_rna_imputation_varmean(
+                rna_strand_densities(
+                    substrate, ra, region_eff_len_rna, rna_boundary_side_eff_len,
+                    gdna_frac=fg_now, left_gdna_frac=left_split.gdna_frac,
+                    right_gdna_frac=right_split.gdna_frac,
+                    cleaned_left=cleaned_left, cleaned_right=cleaned_right))
         except Exception as e:  # noqa: BLE001
             print(f"  [pass {_pass}] RNA fit raised {type(e).__name__}: {e}")
             rna_fit = None

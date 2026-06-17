@@ -10,12 +10,19 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from rigel.calibration.rna_density_model import fit_rna_imputation_varmean, rna_strand_densities
 from rigel.calibration.variance_model import (
     MonotoneVarMean,
     direct_points,
-    fit_pair_imputation_rna_varmean,
     fit_pair_imputation_varmean,
 )
+
+
+def _fit_rna(sub, ra, rel_rna, rna_side_len, **kw):
+    """Test shim: the old single-call RNA fit, now assembly (rna_strand_densities) + fit."""
+    return fit_rna_imputation_varmean(
+        rna_strand_densities(sub, ra, rel_rna, rna_side_len, **kw)
+    )
 
 
 def _powerlaw(n=400, a=0.01, b=2.0, seed=0):
@@ -286,7 +293,7 @@ def test_rna_imputation_varmean_real_fit(tmp_path):
     (sub, ra, rel_rna, rna_side_len, fg, lsplit, rsplit, cl, cr) = _multi_exon_single_strand_substrate(
         tmp_path
     )
-    fit = fit_pair_imputation_rna_varmean(
+    fit = _fit_rna(
         sub, ra, rel_rna, rna_side_len,
         gdna_frac=fg, left_gdna_frac=lsplit.gdna_frac, right_gdna_frac=rsplit.gdna_frac,
         cleaned_left=cl, cleaned_right=cr,
@@ -320,7 +327,7 @@ def test_rna_imputation_varmean_nan_gdna_frac_fallback():
     nan = np.full(r, np.nan)
     raw_left = sub.left.n_unspliced_pos.astype(float) + sub.left.n_unspliced_neg.astype(float)
     raw_right = sub.right.n_unspliced_pos.astype(float) + sub.right.n_unspliced_neg.astype(float)
-    fit = fit_pair_imputation_rna_varmean(
+    fit = _fit_rna(
         sub, ra, np.full(r, 50.0), np.full(r, 50.0),  # per-side RNA density length array
         gdna_frac=np.zeros(r), left_gdna_frac=nan, right_gdna_frac=nan,
         cleaned_left=raw_left, cleaned_right=raw_right,  # cleaned == raw ⇒ RNA-removed = 0

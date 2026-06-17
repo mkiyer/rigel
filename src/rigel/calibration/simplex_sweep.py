@@ -47,7 +47,7 @@ def _log_odds(f_pos, f_neg, f_g):
 
 def _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, kappa, od_g, od_r,
                   lattice, count_frac=None, count_precision=None, strand_obs=None,
-                  global_mu=None, global_tau=0.0):
+                  global_mu=None, global_tau=0.0, rna_frac=None, rna_precision=None):
     """ψ_i over the lattice — strand mixture + sided spliced lower bound + count prior + node-class prior.
 
     The Bayesian hierarchy (per_node_deconv_hierarchy_design.md), with a **node-class-dependent** prior:
@@ -86,6 +86,17 @@ def _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, 
         # (= 1/v_rel, the degeneracy-free count reliability).
         tau_c = np.asarray(count_precision, dtype=np.float64)[:, None]
         psi = psi - 0.5 * tau_c * (f_g[None, :] - count_frac[:, None]) ** 2
+    # RNA prior (PLAN v6 §8): per-strand Gaussian pull of f± toward the imputed RNA fraction μ± with
+    # per-node precision τ_rna± (the RNA twin of the count prior). The pie message's RNA magnitude — the
+    # boundary→region mature imputation — pinning f± where the count prior pins f_g. τ_rna_s = 0 (no anchor)
+    # ⇒ a no-op on that strand. The lattice already enforces f₊+f₋+f_g=1, so pinning f± sharpens f_g too.
+    if rna_frac is not None and rna_precision is not None:
+        for f_axis, mu_s, tau_s in (
+            (f_pos, rna_frac[0], rna_precision[0]),
+            (f_neg, rna_frac[1], rna_precision[1]),
+        ):
+            tau_r = np.asarray(tau_s, dtype=np.float64)[:, None]
+            psi = psi - 0.5 * tau_r * (f_axis[None, :] - np.asarray(mu_s, dtype=np.float64)[:, None]) ** 2
     # node-class prior: Jeffreys reference at strand-observable nodes, global gDNA prior elsewhere.
     if strand_obs is not None:
         jeff = (_STRAND_PRIOR - 1.0) * (
@@ -189,6 +200,7 @@ def _sweep_chain(psi, q_pos_edges, q_neg_edges, lo_pos, lo_neg):
 def deconv_regions_sweep(
     substrate, region_arrays, *, rna_sense_frac, gdna_strand_overdispersion=0.0,
     rna_strand_overdispersion=0.0, count_gdna_frac=None, count_precision=None,
+    rna_frac_pos=None, rna_frac_neg=None, rna_precision_pos=None, rna_precision_neg=None,
     q_rna=0.25, n_grid=20, rho_global=0.0, region_eff_len=None, info_scale=10.0, global_tau=None,
 ):
     """Per-region gDNA fraction by the odds-propagation grid sum-product (see module docstring).
@@ -253,11 +265,14 @@ def deconv_regions_sweep(
     lattice = (f_pos_g, f_neg_g, f_g_g)
     lo_pos, lo_neg = _log_odds(f_pos_g, f_neg_g, f_g_g)
     cf = None if count_gdna_frac is None else np.clip(np.asarray(count_gdna_frac, np.float64), 0.0, 1.0)
+    rna_frac = None if rna_frac_pos is None else (rna_frac_pos, rna_frac_neg)
+    rna_precision = None if rna_precision_pos is None else (rna_precision_pos, rna_precision_neg)
     psi = _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, kappa,
                         gdna_strand_overdispersion, rna_strand_overdispersion, lattice,
                         count_frac=cf,
                         count_precision=eff_count_precision,
-                        strand_obs=strand_obs, global_mu=mu_global, global_tau=gtau)
+                        strand_obs=strand_obs, global_mu=mu_global, global_tau=gtau,
+                        rna_frac=rna_frac, rna_precision=rna_precision)
 
     exon_pos = (sig & BIT_EXON_POS) != 0
     exon_neg = (sig & BIT_EXON_NEG) != 0

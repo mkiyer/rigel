@@ -34,8 +34,8 @@ __all__ = [
     "DirectPoints",
     "direct_points",
     "fit_direct_varmean",
+    "pair_imputation_points",
     "fit_pair_imputation_varmean",
-    "fit_pair_imputation_rna_varmean",
 ]
 
 
@@ -354,8 +354,48 @@ def fit_direct_varmean(points: DirectPoints, **kw) -> MonotoneVarMean:
 
 
 # --------------------------------------------------------------------------------------
-# The unified node-PAIR imputation reliability (CALIBRATION_PLAN_v5 §3, user-locked)
+# The node-PAIR imputation reliability (CALIBRATION_PLAN v6 §7) — the GENERIC point builder.
+# The RNA-specific density assembly lives in ``rna_density_model`` (the domain layer); this module
+# stays the var~mean MACHINE: densities in, curve out.
 # --------------------------------------------------------------------------------------
+
+
+def pair_imputation_points(
+    region_density,
+    left_density,
+    right_density,
+    *,
+    region_eligible,
+    left_ok,
+    right_ok,
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(means, raw_var)`` node-pair fit points — the generic, component-agnostic builder (v6 §7).
+
+    A *pair* is two adjacent nodes — an imputed destination region and one observable boundary side (the
+    single predictor). For each adjacency ``(observable side → eligible region)`` the point is, in **density
+    space** (eff-len-normalized, log-log): ``mean = region_density[r]`` (the *queried* axis — the sweep reads
+    the reliability at the region's CURRENT density), ``raw_var = (region_density − side_density)²`` (the
+    **full** single-predictor residual, a dof=1 estimate). A region with both flanks eligible contributes
+    **two** points; one flank → one point (the densification the deleted both-sides triplet missed). The
+    reverse (region→boundary) direction is not emitted (its ``μ = d_side`` is queried only once boundaries
+    become solved nodes — Phase C).
+
+    Shared by the gDNA fit (:func:`fit_pair_imputation_varmean`) and the per-strand RNA fit
+    (``rna_density_model.fit_rna_imputation_varmean``, which pools both strands' points). All arrays are
+    per-region (length R); ``*_ok[r]`` means that flank exists, is observable, and carries component mass.
+    Standard filters (finite, ``> _EPS``) applied.
+    """
+    rd = np.asarray(region_density, dtype=np.float64)
+    ld = np.asarray(left_density, dtype=np.float64)
+    rrd = np.asarray(right_density, dtype=np.float64)
+    elig = np.asarray(region_eligible, dtype=bool)
+    lok = np.asarray(left_ok, dtype=bool) & elig
+    rok = np.asarray(right_ok, dtype=bool) & elig
+
+    means = np.concatenate([rd[lok], rd[rok]])
+    raw = np.concatenate([(rd[lok] - ld[lok]) ** 2, (rd[rok] - rrd[rok]) ** 2])
+    sel = np.isfinite(means) & (means > _EPS) & np.isfinite(raw) & (raw > _EPS)
+    return means[sel], raw[sel]
 
 
 def fit_pair_imputation_varmean(
@@ -366,177 +406,21 @@ def fit_pair_imputation_varmean(
     region_eligible,
     left_ok,
     right_ok,
-    ref_id,
+    ref_id=None,
     **kw,
 ) -> MonotoneVarMean:
-    """The unified **node-PAIR** imputation-reliability var~mean (CALIBRATION_PLAN_v5 §3).
+    """The **gDNA** node-pair imputation-reliability var~mean (v6 §7) — :func:`pair_imputation_points` fit.
 
-    A *pair* is exactly two adjacent nodes — one imputed-region (destination) and one observable boundary
-    side (the single predictor / source). For each adjacency ``(observable boundary side → eligible
-    region)`` the fit point is, in **density space** (eff-len-normalized, log-log):
-
-    * ``mean    = region_density[r]`` — the *queried* axis (the sweep reads ``τ_count`` at the region's
-      CURRENT density only — fit-and-query-on-the-same-axis, the 2a contract);
-    * ``raw_var = (region_density[r] − side_density[r])²`` — the **full** single-predictor imputation error
-      (NOT the ``¼(d_L−d_R)²`` variance-of-the-mean of the deleted triplet; the genuine residual of
-      predicting the region density from one boundary side), a single-observation (dof=1, Jensen) estimate.
-
-    A region with **both** flanks eligible contributes **TWO** points (one per flanking side); with one
-    eligible flank, **one** point — the densification the both-sides triplet missed (it required *both*
-    sides). The reverse (region→boundary) direction is **NOT emitted**: its ``μ = d_side`` is never queried
-    (until boundaries become solved nodes in Phase C) and emitting it would corrupt the GCV/IRLS via
-    duplicated residuals (v5 §3).
-
-    Parameters are per-region (length R) arrays:
-
-    * ``region_density[r]`` — the imputed-region (dest) CURRENT density (eff-len-normalized);
-    * ``left_density[r]`` / ``right_density[r]`` — the density at region ``r``'s LEFT / RIGHT observable
-      boundary side (the single predictor);
-    * ``region_eligible[r]`` — the region is an imputed dest (gDNA: ``~region_count_observable``; RNA:
-      single-strand-exon). Only eligible regions contribute fit points;
-    * ``left_ok[r]`` / ``right_ok[r]`` — that flanking side exists (same-ref), is observable, and carries
-      component mass > 0.
-
-    Standard filters (finite, ``mean > EPS``, ``raw_var > EPS``). ``MonotoneVarMean.fit(dof=ones)`` —
-    Jensen dof=1, exactly the convention the deleted imputation builders used. ``ref_id`` is accepted for
-    interface symmetry / future per-reference logic; the adjacency masks already encode same-ref existence.
-
-    **One builder, symmetric** for gDNA (this signature) and RNA (:func:`fit_pair_imputation_rna_varmean`,
-    which assembles the per-strand densities and concatenates the per-strand POINT arrays into one fit).
+    Builds the node-pair points from the per-region gDNA densities and fits the monotone curve (Jensen
+    dof=1, the single-observation convention). ``ref_id`` is accepted for interface symmetry (the adjacency
+    masks already encode same-ref existence); it is unused.
     """
-    rd = np.asarray(region_density, dtype=np.float64)
-    ld = np.asarray(left_density, dtype=np.float64)
-    rrd = np.asarray(right_density, dtype=np.float64)
-    elig = np.asarray(region_eligible, dtype=bool)
-    lok = np.asarray(left_ok, dtype=bool) & elig
-    rok = np.asarray(right_ok, dtype=bool) & elig
-
-    # One point per (observable side → eligible region) adjacency: mean = region density (the queried
-    # axis); raw_var = the FULL single-predictor residual (region density − that side's density)².
-    means = np.concatenate([rd[lok], rd[rok]])
-    raw = np.concatenate([(rd[lok] - ld[lok]) ** 2, (rd[rok] - rrd[rok]) ** 2])
-    sel = np.isfinite(means) & (means > _EPS) & np.isfinite(raw) & (raw > _EPS)
-    m = means[sel]
-    return MonotoneVarMean.fit(m, raw[sel], dof=np.ones(m.shape[0]), **kw)
-
-
-def fit_pair_imputation_rna_varmean(
-    substrate,
-    region_arrays,
-    region_eff_len_rna,
-    rna_boundary_side_eff_len,
-    *,
-    gdna_frac,
-    left_gdna_frac,
-    right_gdna_frac,
-    cleaned_left=None,
-    cleaned_right=None,
-    **kw,
-) -> MonotoneVarMean:
-    """The **RNA** node-pair imputation-reliability var~mean (CALIBRATION_PLAN_v5 §3) — the symmetric RNA
-    twin of :func:`fit_pair_imputation_varmean`, pooling the ``+`` and ``−`` strands into one fit.
-
-    STANDALONE / INERT: this is **not** wired into the live solve (Phase B/C); it is the RNA reliability the
-    unified node solver will consume, validated standalone for now.
-
-    Per strand ``s`` (``+`` then ``−``), in **RNA density space** (FL-consistent — ``region_eff_len_rna`` =
-    ``E_rna[max(0,L−ℓ)]`` for the region; ``rna_boundary_side_eff_len`` = ``E_rna[min(ℓ,L_side)]`` per side):
-
-    * ``region_density[r] = region_unspliced_s · (1 − f_g[r]) / region_eff_len_rna[r]`` — the region's
-      CURRENT RNA density on strand ``s``;
-    * ``side_density[r]   = (unspliced_RNA_s + spliced_s) / rna_boundary_side_eff_len[r]`` per side, with
-      ``unspliced_RNA_s = side_unspliced_s · (1 − side_gdna_frac)`` (``side_gdna_frac`` from the per-side
-      ``StrandSplit.gdna_frac`` with the strand-cleaned-count fallback where ``NaN``, identical to the
-      Phase-A RNA builder), and ``spliced_s`` the side's same-strand spliced crossing count. The side MASS is
-      divided by the per-side **density** length ``E_rna[min(ℓ,L_side)]`` — NOT the count/power length
-      ``rna_fl_mean = E_rna[ℓ]`` (the symmetric RNA twin of the gDNA node-pair eff-len fix): so under a
-      uniform single-strand RNA field a region and its flanking sides read the SAME RNA density (factor-1)
-      and the residual reflects only the true RNA structure, not a short-flank normalization offset;
-    * ``region_eligible[r]`` — single-strand exon on ``s`` (``TS_POS`` for ``+`` / ``TS_NEG`` for ``−``, has
-      the exon bit, ``~region_count_observable``);
-    * ``*_ok[r]`` — that flank is count-observable AND carries ``> 0`` same-strand spliced mass (so the side
-      is RNA-anchored).
-
-    The two strands are pooled by **concatenating the per-strand POINT arrays** (mean, raw_var) returned by
-    the core builder — NOT the per-strand node arrays — so no spurious ``+``↔``−`` seam adjacency is ever
-    formed (a region eligible on ``+`` is never paired against a ``−`` side). Each strand calls
-    :func:`fit_pair_imputation_varmean`'s *point assembly* and the pooled points are fit once.
-    """
-    from .density_model import count_observable_masks
-    from .run_fill import same_ref_left_right
-    from .signature import BIT_EXON_NEG, BIT_EXON_POS, TS_NEG, TS_POS
-
-    sig = np.asarray(region_arrays.signature).astype(np.int64)
-    ts = np.asarray(region_arrays.strand_class)
-    ref_id = np.asarray(region_arrays.ref_id)
-    r = sig.shape[0]
-    L = np.maximum(np.asarray(region_eff_len_rna, dtype=np.float64), _EPS)
-    # Per-side RNA DENSITY length E_rna[min(ℓ,L_side)] — the divisor for a side's RNA MASS (NOT rna_fl_mean).
-    inv_side = 1.0 / np.maximum(np.asarray(rna_boundary_side_eff_len, dtype=np.float64), _EPS)
-
-    fg = np.clip(np.asarray(gdna_frac, dtype=np.float64), 0.0, 1.0)
-    lgf = np.asarray(left_gdna_frac, dtype=np.float64)
-    rgf = np.asarray(right_gdna_frac, dtype=np.float64)
-
-    c = substrate.contained
-    c_pos = np.asarray(c.n_unspliced_pos, dtype=np.float64)
-    c_neg = np.asarray(c.n_unspliced_neg, dtype=np.float64)
-    left = substrate.left
-    right = substrate.right
-    l_pos = np.asarray(left.n_unspliced_pos, dtype=np.float64)
-    l_neg = np.asarray(left.n_unspliced_neg, dtype=np.float64)
-    rt_pos = np.asarray(right.n_unspliced_pos, dtype=np.float64)
-    rt_neg = np.asarray(right.n_unspliced_neg, dtype=np.float64)
-    left_spl_s = np.asarray(left.n_spliced_sense, dtype=np.float64)
-    right_spl_s = np.asarray(right.n_spliced_sense, dtype=np.float64)
-    left_total = l_pos + l_neg
-    right_total = rt_pos + rt_neg
-    cl = None if cleaned_left is None else np.asarray(cleaned_left, dtype=np.float64)
-    cr = None if cleaned_right is None else np.asarray(cleaned_right, dtype=np.float64)
-
-    def _rna_frac(side_gdna_frac, side_total, cleaned):
-        """Per-side RNA fraction (1 − side_gdna_frac), cleaned-count fallback where the gdna_frac is NaN."""
-        out = 1.0 - np.where(np.isfinite(side_gdna_frac), side_gdna_frac, 0.0)
-        if cleaned is not None:
-            with np.errstate(divide="ignore", invalid="ignore"):
-                fb = np.where(side_total > _EPS, (side_total - cleaned) / side_total, 0.0)
-            out = np.where(np.isfinite(side_gdna_frac), out, np.clip(fb, 0.0, 1.0))
-        return out
-
-    left_rna_frac = _rna_frac(lgf, left_total, cl)
-    right_rna_frac = _rna_frac(rgf, right_total, cr)
-
-    rco, bco = count_observable_masks(sig, ref_id)
-    ls, rs = same_ref_left_right(ref_id)
-    la = np.zeros(r, bool)  # left side count-observable
-    rb = np.zeros(r, bool)  # right side count-observable
-    if r > 1:
-        la[1:] = bco[:-1] & ls[1:]
-        rb[:-1] = bco[:-1] & rs[:-1]
-    has_exon = (sig & (BIT_EXON_POS | BIT_EXON_NEG)) != 0
-
-    rna_frac_region = 1.0 - fg
-    all_means, all_raw = [], []
-    for ts_s, region_unspl_s, l_unspl_s, r_unspl_s in (
-        (TS_POS, c_pos, l_pos, rt_pos),
-        (TS_NEG, c_neg, l_neg, rt_neg),
-    ):
-        region_density = region_unspl_s * rna_frac_region / L
-        d_left = (l_unspl_s * left_rna_frac + left_spl_s) * inv_side
-        d_right = (r_unspl_s * right_rna_frac + right_spl_s) * inv_side
-        eligible = (ts == ts_s) & has_exon & (~rco)
-        lok = la & (left_spl_s > 0.0) & eligible
-        rok = rb & (right_spl_s > 0.0) & eligible
-        # Assemble the per-strand POINTS (same form as the core builder); pool by concatenation below.
-        means = np.concatenate([region_density[lok], region_density[rok]])
-        raw = np.concatenate(
-            [(region_density[lok] - d_left[lok]) ** 2, (region_density[rok] - d_right[rok]) ** 2]
-        )
-        all_means.append(means)
-        all_raw.append(raw)
-
-    means = np.concatenate(all_means)
-    raw = np.concatenate(all_raw)
-    sel = np.isfinite(means) & (means > _EPS) & np.isfinite(raw) & (raw > _EPS)
-    m = means[sel]
-    return MonotoneVarMean.fit(m, raw[sel], dof=np.ones(m.shape[0]), **kw)
+    means, raw = pair_imputation_points(
+        region_density,
+        left_density,
+        right_density,
+        region_eligible=region_eligible,
+        left_ok=left_ok,
+        right_ok=right_ok,
+    )
+    return MonotoneVarMean.fit(means, raw, dof=np.ones(means.shape[0]), **kw)

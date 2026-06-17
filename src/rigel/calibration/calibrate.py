@@ -61,10 +61,14 @@ from .splice_junction import region_splice_gdna_frac
 from .strand_balance import fit_strand_balance
 from .strand_deconv import cleaned_gdna_count, deconv_sides, strand_deconvolve
 from .substrate import CalibrationSubstrate
+from .rna_density_model import (
+    fit_rna_imputation_varmean,
+    node_rna_density,
+    rna_strand_densities,
+)
 from .variance_model import (
     direct_points,
     fit_direct_varmean,
-    fit_pair_imputation_rna_varmean,
     fit_pair_imputation_varmean,
 )
 
@@ -75,6 +79,30 @@ if TYPE_CHECKING:
     from .region_arrays import RegionArrays
 
 logger = logging.getLogger(__name__)
+
+
+def _rna_prior_fraction(rho, curve, eff_rna, mass_u, geom_rna):
+    """Convert an imputed RNA **density** ``ρ̂_s`` to the pie-fraction prior ``(μ_s, τ_rna_s)`` (PLAN v6 §8).
+
+    The RNA twin of the gDNA count prior (``count_gdna_frac``/``τ_count``): ``μ_s = clip(ρ̂_s·E_rna/M_u, 0, 1)``
+    (density → fraction of the region's unspliced mass); ``σ²_frac = curve(ρ̂_s)·geom_rna`` with
+    ``geom_rna = (E_rna/M_u)²`` (density-var → fraction-var); ``τ_rna_s = min(1/σ²_frac, M_u)`` (own-count
+    ceiling). Where no anchor exists (``ρ̂_s`` NaN) the prior is OFF (``τ_rna_s = 0``, ``μ_s = 0``) — the node
+    falls to the strand likelihood + the global foundation.
+
+    Unlike the gDNA count prior, **no Bernoulli clamp** (``min(·, μ(1−μ))``): the RNA prior is an *imputation*
+    from the flanks, not a direct observation, so its honest precision is the ``var~mean`` reliability — the
+    clamp would force ``τ→∞`` as ``μ_s→1`` (the common RNA-dominated case), a spurious over-confidence that
+    over-pulls the gDNA/RNA split (measured: a 7% abundance regression on a zero-gDNA scenario). For gDNA the
+    clamp is sound because ``cf→1`` only at count-*observable* introns where near-certainty is real.
+    """
+    rho = np.asarray(rho, dtype=np.float64)
+    anchored = np.isfinite(rho)
+    rho_safe = np.where(anchored, rho, 0.0)
+    mu = np.clip(rho_safe * eff_rna / mass_u, 0.0, 1.0)
+    sig2 = np.maximum(curve.predict(rho_safe) * geom_rna, 1e-12)
+    tau = np.where(anchored, np.minimum(1.0 / sig2, mass_u), 0.0)
+    return np.where(anchored, mu, 0.0), tau
 
 
 def calibrate(
@@ -244,6 +272,7 @@ def calibrate(
     eff_len = np.maximum(np.asarray(region_eff_len, dtype=np.float64), 1e-9)
     mass_u = np.maximum(np.asarray(c.mass_unspliced, dtype=np.float64), 1e-9)
     geom2 = (eff_len / mass_u) ** 2  # density-var → fraction-var
+    eff_rna = np.maximum(np.asarray(region_eff_len_rna, dtype=np.float64), 1e-9)  # RNA region eff length
     obs = np.asarray(node_density.region_count_observable, dtype=bool)
     gdna_left = np.asarray(left.gdna_mass, dtype=np.float64)
     gdna_right = np.asarray(right.gdna_mass, dtype=np.float64)
@@ -269,7 +298,7 @@ def calibrate(
     gdna_c = u_tot.copy()  # Pass-0 all-gDNA: every unspliced fragment is gDNA
     regions = None
     prev_fg = None
-    rna_iter = None  # Phase A: the in-loop RNA var~mean (computed + logged; not yet consumed — PLAN v6 §7)
+    rna_curve = None  # the in-loop RNA var~mean reliability (PLAN v6 §8); kept for the post-loop diagnostic
     for _pass in range(int(config.sweep_max_passes)):
         # ρ_global = the gDNA-baseline density, from the COUNT-OBSERVABLE nodes only (intergenic/intron —
         # where gDNA is known), using their current gDNA estimate (iterating). NOT all nodes: an all-node
@@ -311,12 +340,16 @@ def calibrate(
             right_ok=right_obs & (gdna_right > 0.0),
             ref_id=region_arrays.ref_id,
         )
-        # Phase A (PLAN v6 §7): the RNA node-pair var~mean reliability — the symmetric RNA twin of the gDNA
-        # imputation above, fit on the CURRENT estimates each pass. COMPUTED + logged here; NOT yet consumed
-        # by the solve (Phase B wires the per-strand RNA prior μ±, τ_rna± into ψ). The region gDNA fraction is
-        # the previous pass's f_g (all-gDNA at pass 0 ⇒ RNA≈0 ⇒ the RNA fit is naturally inert until pass 1+).
+        # RNA prior (PLAN v6 §8, Phase B): the per-strand RNA-magnitude pull on the pie's f±. Built from ONE
+        # RNA-density assembly (rna_strand_densities): the reliability curve (the RNA var~mean — single-strand
+        # exon fit set, both strands pooled) and the per-node imputed RNA-density target ρ̂± (the boundary→
+        # region imputation, the flanking mature spliced as the anchor). The region gDNA fraction is the
+        # previous pass's f_g (all-gDNA at pass 0); the side anchors are the fixed deconv_sides estimates, so
+        # the RNA target is stable across passes (the full co-evolution is Phase C). AMBIG nodes take no RNA
+        # prior in Phase B (the motif-sense spliced maps to a strand only at single-strand nodes — Phase C's
+        # boundary nodes carry the explicit junction strand). μ±/τ_rna± via the density→fraction conversion.
         region_fg = prev_fg if prev_fg is not None else np.ones(region_arrays.n_regions)
-        rna_iter = fit_pair_imputation_rna_varmean(
+        rna_dens = rna_strand_densities(
             substrate,
             region_arrays,
             region_eff_len_rna,
@@ -327,6 +360,11 @@ def calibrate(
             cleaned_left=cleaned_left,
             cleaned_right=cleaned_right,
         )
+        rna_curve = fit_rna_imputation_varmean(rna_dens)
+        rho_pos, rho_neg = node_rna_density(rna_dens, region_arrays)
+        geom_rna = (eff_rna / mass_u) ** 2  # density-var → fraction-var (RNA twin of geom2)
+        mu_rna_pos, tau_rna_pos = _rna_prior_fraction(rho_pos, rna_curve, eff_rna, mass_u, geom_rna)
+        mu_rna_neg, tau_rna_neg = _rna_prior_fraction(rho_neg, rna_curve, eff_rna, mass_u, geom_rna)
         mu = gdna_c / eff_len
         var_d = np.where(obs, direct.predict(mu), imputation.predict(mu))
         # Bernoulli clamp: a gDNA-FRACTION variance cannot exceed p(1−p) for the count-prior mean p.
@@ -355,6 +393,10 @@ def calibrate(
             rna_strand_overdispersion=rna_strand_overdispersion,
             count_gdna_frac=region_count_frac,
             count_precision=tau_count,
+            rna_frac_pos=mu_rna_pos,
+            rna_frac_neg=mu_rna_neg,
+            rna_precision_pos=tau_rna_pos,
+            rna_precision_neg=tau_rna_neg,
             n_grid=config.sweep_n_grid,
             rho_global=rho_global,
             region_eff_len=region_eff_len,
@@ -373,14 +415,14 @@ def calibrate(
     # Phase A diagnostic (PLAN v6 §7): the converged RNA node-pair var~mean reliability — #fit points, the
     # fit μ-range (RNA density), and the curve at the range ends. Validates the fit is real (≥18 pts ⇒ a true
     # spline, else the power-law fallback) and spans its data before Phase B consumes it in the solve.
-    if rna_iter is not None and logger.isEnabledFor(logging.DEBUG):
-        npts = int(np.asarray(rna_iter.fit_mean).size)
-        lo, hi = float(np.exp(rna_iter.x_lo)), float(np.exp(rna_iter.x_hi))
+    if rna_curve is not None and logger.isEnabledFor(logging.DEBUG):
+        npts = int(np.asarray(rna_curve.fit_mean).size)
+        lo, hi = float(np.exp(rna_curve.x_lo)), float(np.exp(rna_curve.x_hi))
         logger.debug(
-            "calibration RNA var~mean (Phase A, unconsumed): %d fit points, μ-range [%.4g, %.4g], "
+            "calibration RNA var~mean (Phase B, consumed): %d fit points, μ-range [%.4g, %.4g], "
             "var(lo)=%.4g var(hi)=%.4g edf=%.2f",
-            npts, lo, hi, float(rna_iter.predict(np.array([lo]))[0]),
-            float(rna_iter.predict(np.array([hi]))[0]), float(rna_iter.edf),
+            npts, lo, hi, float(rna_curve.predict(np.array([lo]))[0]),
+            float(rna_curve.predict(np.array([hi]))[0]), float(rna_curve.edf),
         )
 
     # Derive gdna_density_global (the library-average density QC scalar).

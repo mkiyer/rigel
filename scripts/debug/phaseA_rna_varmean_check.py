@@ -33,7 +33,7 @@ from rigel.calibration.strand_deconv import cleaned_gdna_count, strand_deconvolv
 from rigel.calibration.substrate import CalibrationSubstrate
 from rigel.calibration.density_model import count_observable_masks
 from rigel.calibration.run_fill import same_ref_left_right
-from rigel.calibration.variance_model import fit_pair_imputation_rna_varmean
+from rigel.calibration.rna_density_model import fit_rna_imputation_varmean, rna_strand_densities
 
 
 def _load_phase1():
@@ -108,10 +108,12 @@ def run(kind, work, mod):
     cleaned_left = cleaned_gdna_count(left_split, _raw(substrate.left), i0)
     cleaned_right = cleaned_gdna_count(right_split, _raw(substrate.right), i0)
 
-    fit = fit_pair_imputation_rna_varmean(
-        substrate, ra, region_eff_len_rna, rna_boundary_side_eff_len,
-        gdna_frac=fg, left_gdna_frac=left_split.gdna_frac, right_gdna_frac=right_split.gdna_frac,
-        cleaned_left=cleaned_left, cleaned_right=cleaned_right,
+    fit = fit_rna_imputation_varmean(
+        rna_strand_densities(
+            substrate, ra, region_eff_len_rna, rna_boundary_side_eff_len,
+            gdna_frac=fg, left_gdna_frac=left_split.gdna_frac, right_gdna_frac=right_split.gdna_frac,
+            cleaned_left=cleaned_left, cleaned_right=cleaned_right,
+        )
     )
 
     n_pts = fit.fit_mean.size
