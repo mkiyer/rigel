@@ -55,15 +55,16 @@ from .gdna_strand import (
     overdispersion_for_beta,
 )
 from .result import CalibrationResult
+from .run_fill import same_ref_left_right
 from .simplex_sweep import deconv_regions_sweep
 from .splice_junction import region_splice_gdna_frac
 from .strand_balance import fit_strand_balance
 from .strand_deconv import cleaned_gdna_count, deconv_sides, strand_deconvolve
 from .substrate import CalibrationSubstrate
 from .variance_model import (
+    direct_points,
     fit_direct_varmean,
-    fit_imputation_varmean_current,
-    varmean_points,
+    fit_pair_imputation_varmean,
 )
 
 if TYPE_CHECKING:
@@ -242,6 +243,25 @@ def calibrate(
     obs = np.asarray(node_density.region_count_observable, dtype=bool)
     gdna_left = np.asarray(left.gdna_mass, dtype=np.float64)
     gdna_right = np.asarray(right.gdna_mass, dtype=np.float64)
+    # Per-region adjacency for the gDNA node-pair imputation reliability (CALIBRATION_PLAN_v5 §3): the
+    # imputed (non-count-observable) regions are the dests; each flanking boundary side that exists
+    # (same-ref), is count-observable, and carries deconv'd gDNA mass > 0 is a predictor. The boundary side
+    # gDNA densities use the DECONV'D gDNA mass (RNA-removed) / the per-side density length — NOT raw counts.
+    bco = np.asarray(node_density.boundary_count_observable, dtype=bool)
+    ls_same, rs_same = same_ref_left_right(np.asarray(region_arrays.ref_id))
+    left_obs = np.zeros(region_arrays.n_regions, dtype=bool)
+    right_obs = np.zeros(region_arrays.n_regions, dtype=bool)
+    if region_arrays.n_regions > 1:
+        left_obs[1:] = bco[:-1] & ls_same[1:]  # region r's LEFT side = boundary (r−1, r)
+        right_obs[:-1] = bco[:-1] & rs_same[:-1]  # region r's RIGHT side = boundary (r, r+1)
+    region_eligible_g = ~obs  # imputed dests = non-count-observable regions
+    # Per-side gDNA DENSITY length: a boundary side's deconv'd MASS is divided by the per-side density
+    # length E[min(ℓ, L_side)] (= boundary_eff_len[r], the SAME convention deconv_sides / _compute_side
+    # use for that side, and priors._gdna_region_node_arrays uses for the seam), NOT by the count/power
+    # length fl_mean = E[ℓ]. Under uniform gDNA at density ρ the side mass = ρ·E[min(ℓ,L_side)], so
+    # mass/E[min] = ρ matches the region density contained/E[max(0,L−ℓ)] = ρ (factor-1 cross-type); the
+    # bugged mass/E[ℓ] = ρ·E[min(ℓ,L)]/E[ℓ] < ρ at short flanks fabricates a spurious node-pair residual.
+    inv_side_len_g = 1.0 / np.maximum(boundary_eff_len, 1e-9)
     gdna_c = u_tot.copy()  # Pass-0 all-gDNA: every unspliced fragment is gDNA
     regions = None
     prev_fg = None
@@ -254,28 +274,37 @@ def calibrate(
         rho_global = (
             float(gdna_c[obs].sum() / max(float(eff_len[obs].sum()), 1e-9)) if obs.any() else 0.0
         )
-        # var~mean on the CURRENT gDNA estimate (region contained + the fixed boundary anchors). DIRECT
-        # (count-observable own variance, Jensen-corrected via the per-point dof) and IMPUTATION
-        # (boundary→region prediction error, fit & queried on the SAME axis — the region's CURRENT gDNA
-        # density — so the captured-exon μ-range is INSIDE the fit range and no node extrapolates, the
-        # Phase-2a fix; CALIBRATION_PLAN_v4 A1). Read each node in its own class at its current gDNA
-        # density μ. Density-var → fraction-var via (eff/mass)²; τ = 1/σ². Count τ ≤ own-count Poisson
-        # ceiling (mass), Bernoulli-clamped (a fraction variance ≤ p(1−p)). σ²_global = the robust MAD
-        # between-node density spread (below) — the population spread an unanchored node faces.
-        pts = varmean_points(
-            substrate,
-            region_arrays,
-            region_eff_len,
-            fl_mean,
-            gdna_views=(gdna_c, gdna_left, gdna_right),
+        # var~mean on the CURRENT gDNA estimate. DIRECT (count-observable own-count Poisson variance,
+        # Jensen-corrected via the per-point dof = count) and the node-PAIR IMPUTATION (per (observable
+        # boundary side → imputed region) adjacency, the FULL single-predictor residual (d_region−d_side)²
+        # at mean = d_region, fit & queried on the SAME axis — the region's CURRENT gDNA density — so the
+        # captured-exon μ-range is INSIDE the fit range and no node extrapolates, the Phase-2a contract;
+        # CALIBRATION_PLAN_v5 §3). Read each node in its own class at its current gDNA density μ.
+        # Density-var → fraction-var via (eff/mass)²; τ = 1/σ². Count τ ≤ own-count Poisson ceiling (mass),
+        # Bernoulli-clamped (a fraction variance ≤ p(1−p)). σ²_global = the robust MAD between-node density
+        # spread (below) — the population spread an unanchored node faces.
+        direct = fit_direct_varmean(
+            direct_points(
+                substrate, region_arrays, region_eff_len, boundary_eff_len,
+                gdna_views=(gdna_c, gdna_left, gdna_right),
+            )
         )
-        direct = fit_direct_varmean(pts)
-        imputation = fit_imputation_varmean_current(
-            substrate,
-            region_arrays,
-            region_eff_len,
-            fl_mean,
-            gdna_views=(gdna_c, gdna_left, gdna_right),
+        # The gDNA node-PAIR imputation reliability (v5 §3): per (observable boundary side → imputed
+        # region) adjacency, raw_var = (d_region − d_side)² (FULL single-predictor residual), at
+        # mean = d_region (the queried axis). The side gDNA densities are the DECONV'D side gDNA mass
+        # (RNA-removed) / the per-side DENSITY length E[min(ℓ,L_side)] (NOT fl_mean = E[ℓ], which
+        # under-states short-flank density and manufactures a cross-type offset vs the region density —
+        # the root-cause node-pair eff-len bug). Single-flank regions contribute (the densification the
+        # triplet missed).
+        region_density_g = gdna_c / eff_len
+        imputation = fit_pair_imputation_varmean(
+            region_density_g,
+            gdna_left * inv_side_len_g,
+            gdna_right * inv_side_len_g,
+            region_eligible=region_eligible_g,
+            left_ok=left_obs & (gdna_left > 0.0),
+            right_ok=right_obs & (gdna_right > 0.0),
+            ref_id=region_arrays.ref_id,
         )
         mu = gdna_c / eff_len
         var_d = np.where(obs, direct.predict(mu), imputation.predict(mu))

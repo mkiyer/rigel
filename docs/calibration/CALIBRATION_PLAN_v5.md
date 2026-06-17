@@ -80,10 +80,33 @@ contradictory boundary splits. No assertion needed.
 
 ## 3. The per-component reliability layer (the `var~mean` fits)
 
+> **CORRECTION (2026-06-16, user): the imputation reliability is a NODE-PAIR prediction error, not a triplet
+> disagreement.** A pair is **exactly two adjacent nodes — one region, one boundary**. For each adjacency
+> `(observable boundary → imputed region)`, `raw_var = (d_region − d_boundary)²` in **density space**
+> (eff-len-normalized, log-log; the boundary density *is* the single-predictor of the region), **one point per
+> adjacency at `mean = d_region`** — the *queried* axis (the sweep only reads `τ_count` at region density). It is
+> **NOT bidirectional for the fit** (the boundary-dest direction sits at an axis never queried until boundaries
+> become solved nodes in Phase C; emitting it would also corrupt GCV/IRLS via duplicated residuals). A region
+> with one observable flank still contributes a point (the densification the both-sides triplet missed). **One
+> builder, symmetric** for gDNA and RNA — they differ only in the data. **Two regression vectors to A/B-isolate
+> vs the shipped triplet** (re-opening 2a): (i) the full residual `(d_region−d_boundary)²` is ~4× the triplet's
+> variance-of-the-mean `¼(d_L−d_R)²` ⇒ `τ_count` ~4× smaller ⇒ the count defers more to strand+global (correct
+> for a single-predictor imputation error, but a real level change); (ii) the node-pair compares a
+> region-*contained* density against a boundary-*crossing* density, which the triplet's crossing-vs-crossing
+> form self-cancelled — sound under the factor-1-under-uniform eff-len bedrock but must be **measured** (the
+> net-flow gate; hybrid fallback = keep the crossing-vs-crossing numerator emitted at `μ=d_region` if it
+> regresses). The gDNA boundary density uses the **deconv'd** `gdna_mass/fl_mean` (RNA-removed), not raw
+> crossings. This **supersedes the shipped 2a `fit_imputation_varmean_current`**, which wrongly used the
+> boundary↔region↔boundary **triplet** disagreement `¼(d_L−d_R)²` (it required *both* flanking sides — the very
+> "both-sides" model we abandoned, and the cause of the RNA sparsity). `DIRECT` (own-count Poisson) stays for
+> observable nodes; the node-pair model is the **imputation** reliability for imputed nodes. Correcting 2a
+> re-opens its validation gate (battery ≤ 4502, net-flow, goldens) and lets the triplet machinery
+> (`varmean_points`'s both-sides logic, the observability-split) be **deleted** (the cleanup).
+
 The pie message says *what* to impute; the reliability layer says *how much to trust each component*. Both
-components use the **same machine** (`MonotoneVarMean`, current-density axis, Jensen `dof=1` on the 2-side
-disagreement, Bernoulli clamp, all-pairs, **bracketed** — fit on the previous pass's estimate, never the pass
-being solved), differing only in the data:
+components use the **same node-pair machine** (`MonotoneVarMean`, current-density axis, Jensen `dof=1` on the
+node-pair residual, Bernoulli clamp, all adjacent pairs both directions, **bracketed** — fit on the previous
+pass's estimate, never the pass being solved), differing only in the data:
 
 | component | predictor (source, density) | target (destination) | data scope |
 |---|---|---|---|
@@ -189,26 +212,54 @@ RNA estimate fed to the next fit if it oscillates.
 
 ---
 
-## 8. Load-bearing details & residual open issues
+## 8. Load-bearing details & residual open issues (user-reviewed 2026-06-16)
 
-1. **Spliced floor consistency (hard).** Projected RNA on a strand must be `≥` the node's fixed spliced density
-   on that strand; the direct spliced observation dominates any imputation that implies less. Keep the spliced
-   floor as a hard constraint in `ψ`.
-2. **FL/density conversion (hard).** Impute in density space with the correct spliced vs unspliced RNA eff-lengths
-   (`splice_junction` FL-consistency); never on raw counts. Most error-prone wiring step — unit-test that
-   `μ₊ + μ₋ + μ_g ≈ 1` on a clean single-strand node and that spliced+unspliced densities add coherently.
-2. **Multi-prior simplex convergence (MEDIUM).** The gDNA↔RNA cross-pass coupling (§7) — prove monotone
-   convergence empirically; damp if needed.
-3. **Boundary two-sidedness.** One node, edge-specific sided evidence; the simplex is over the pooled unspliced
-   crossing, spliced as the fixed floor. (The bipartite SJ-node split remains DEFERRED — EM-side, not calibration.)
-4. **AMBIG-source per-strand RNA.** At AMBIG sources the per-strand RNA is the *current estimate* (bracketed) —
-   the same acceptance 2a makes for imputed gDNA; the reliability absorbs the extra uncertainty as wider variance.
-5. **Cost.** Two `var~mean` fits per pass (~doubles the refit, already the wall-time bottleneck vs the sweep);
-   absorbed by the eventual C++ kernel / fit caching. Profile both the refit and `_local_loglik` at genome scale.
-6. **Nascent-smoothness break at TSS/TES.** The boundary-nascent ≈ region-nascent assumption breaks at
-   promoters/terminators/IR isoforms; the 2-side disagreement makes the RNA reliability *learn* the high variance
-   there (τ_rna small → yields to strand + spliced floor) — self-mitigating, but fit with the 2-side disagreement
-   so it is measured.
+1. **Spliced floor consistency (hard) — confirmed.** Projected RNA on a strand must be `≥` the node's fixed
+   spliced density on that strand; the direct spliced observation dominates any imputation that implies less.
+   Hard constraint in `ψ`.
+2. **FL/density conversion — RESOLVED + PROVEN (2026-06-16).** A real eff-len bug was found and fixed: the
+   node-pair side **density** divided the side **MASS** by `fl_mean = E[ℓ]` (the *count* effective length) instead
+   of `boundary_side_eff_length = E[min(ℓ, R_side)]` (the per-side *density* length — the divisor for fractional
+   crossing mass, the same `gdna_boundary_len` `priors._gdna_region_node_arrays` uses for the seam). Under uniform
+   gDNA this under-read short flanks by **up to ~52%** (`mass/E[ℓ] = ρ·E[min(ℓ,R)]/E[ℓ] < ρ`), a systematic
+   cross-type offset vs the correct region density `contained/E[max(0,L−ℓ)] = ρ` — inflating the residual and
+   over-humbling the count. Fixed: side mass ÷ `boundary_side_eff_length` (gDNA + RNA, symmetric). **Proven by
+   exact ground-truth tests** (`test_node_pair_imputation_correctness.py`): uniform gDNA ⇒ fixed `d_side = ρ` for
+   all flank lengths, residual exactly 0 (uniform = nothing to learn); capture step ⇒ residual exactly
+   `(ρ_hi−ρ_lo)²` (genuine structure, not a normalization artifact); RNA factor-1 recovery. The eff-len module's
+   own docstrings document this `count` (`fl_mean`) vs `density` (`E[min(ℓ,R)]`) distinction; the triplet dodged
+   it by differencing two same-type crossings (which also blinded it to real structure). NOTE: this fix had ~0
+   battery effect (4591 vs 4590) — confirming the +88-vs-triplet is the triplet's **unjustified overconfidence on
+   predictable sim data** (user-dismissed), NOT a node-pair defect; the node-pair's correctness stands
+   independent of the battery. The real ship gate is **net-flow** (capture-on, where the count is genuinely less
+   accurate and the node-pair's honest humility should help).
+3. **Multi-prior simplex convergence (MEDIUM) — expected to converge.** The gDNA↔RNA cross-pass coupling: RNA and
+   gDNA imputations may disagree locally, but with bracketing + frozen κ/overdispersions the method should
+   contract to a fixed point. Prove it via the monotone-convergence test before trusting; damp (under-relax the
+   estimate fed to the next fit) if it oscillates.
+4. **Boundaries are INDEPENDENT NODES — the two-sided model persists but is being proven unnecessary.** The key
+   development (shipped, the eff-len IPR redesign) is that each boundary is an **independent owner of mass AND
+   effective length** — a truly independent node, not an attribute of its flanking regions. The two-sided
+   internal representation **remains the current architecture and suffices for this implementation**; collapsing
+   it to a single-node boundary is **future work**, gradually justified as we prove the two sides are not
+   load-bearing for the node abstraction. (The bipartite SJ-node split remains separately DEFERRED — EM-side.)
+5. **Train on current estimates (confirmed).** The RNA (and gDNA) reliability fits train on the current node
+   estimates, refined over iterations (bracketed). At AMBIG sources the per-strand RNA is the current estimate —
+   the same acceptance gDNA makes for imputed nodes; the reliability absorbs the extra uncertainty as wider var.
+6. **Cost (eventual optimization, agreed).** Two `var~mean` fits per pass (~doubles the refit, already the
+   wall-time bottleneck vs the sweep); absorbed by the eventual C++ kernel / fit caching. Profile both the refit
+   and `_local_loglik` at genome scale.
+7. **TSS/TES boundaries are FLUX ANCHORS, not part of the transcript (architectural principle).** A transcript is
+   a linear set of nodes (regions + boundaries) bounded by a TSS and a TES; **the anchoring TSS/TES boundaries are
+   NOT part of the transcript — they measure flux into/out of it.** Fragments crossing a TSS/TES are NOT
+   compatible with that transcript (they belong to other transcripts' exons, nascent RNA from overlapping
+   introns, or gDNA). Consequences: **(a)** the transcript's mature-RNA continuity — and therefore the RNA
+   imputation edges and the deferred RNA propagation — lives *within* the transcript's node span and must **not
+   cross its own TSS/TES anchors**; **(b)** the nascent-smoothness "break" at a TSS/TES is *structural* (the
+   transcript ends), not merely high-variance to learn; **(c)** TSS/TES boundaries are intergenic↔exon
+   transitions and do **not** own splice-junction spliced mass, so they are already naturally excluded as
+   RNA-imputation sources (which require same-strand spliced) — Phase A's reliability fit is therefore largely
+   unaffected; the principle binds the imputation edges (Phase B) and the deferred propagation (Phase D).
 
 ---
 
