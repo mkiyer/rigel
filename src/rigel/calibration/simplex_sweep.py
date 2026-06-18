@@ -1,17 +1,15 @@
-"""The per-node grid solve over the 2-simplex pie ``(f₊, f₋, f_g)`` (CALIBRATION_PLAN §2/§4).
+"""The per-node ψ solve over the 2-simplex pie ``(f₊, f₋, f_g)`` — the shared core of the BP sweep.
 
-Each region node's latent is the pie ``(f₊, f₋, f_g)`` on the triangular lattice (P points). The per-node
-evidence ``ψ_i`` (`_local_loglik`) = the 3-component strand mixture (`simplex._mixture_strand_loglik`) + the
-sided spliced lower bound + the node-class prior (Jeffreys at single-strand nodes, the global gDNA prior at
-AMBIG / intergenic). The node's ``f_g`` is the posterior **median** of ``ψ_i`` over the lattice; its posterior
-**variance** is the per-node confidence. Intergenic → only the ``f_g=1`` vertex survives (the forbid mask).
+A node's latent is the pie ``(f₊, f₋, f_g)`` on the triangular lattice (P points). Its evidence ``ψ_i``
+(:func:`_local_loglik`) is the sum of: the 3-component strand mixture (`simplex._mixture_strand_loglik`, the
+only count→precision path); the sided spliced lower bound; the node-class prior (Jeffreys at single-strand
+nodes, the global gDNA prior at AMBIG / intergenic); and the optional gDNA / per-strand RNA imputation priors
+(the neighbour messages). ``f_g`` is the posterior **median** of ``ψ_i`` over the lattice, ``f_g_var`` its
+posterior **variance** (the per-node confidence), ``f±`` the posterior **means**; a forbidden strand axis is
+masked off, so an intergenic node keeps only the ``f_g=1`` vertex.
 
-Cross-node **imputation** — the odds-propagation that previously resolved AMBIG nodes from their same-strand
-exon neighbours (`log(f_c/f_g)` coupling on a per-reference chain) — was removed in the **Step-1 precision
-rebuild** (CALIBRATION_ARCHITECTURE §6.5: the `q_rna` magic edge-coupling). Its principled,
-reliability-weighted replacement lands in **Step 2**; until then every node is solved by its own local
-evidence + the global foundation. Boundary sides keep `strand_deconv.deconv_sides` (the flux transport,
-post-solve).
+This module is the **per-node primitives** (``_local_loglik`` + the marginal helpers + ``_solve_nodes``);
+:mod:`rigel.calibration.bp_solver` drives them over the region↔boundary chain (init + the directional sweep).
 """
 
 from __future__ import annotations
@@ -19,11 +17,10 @@ from __future__ import annotations
 import numpy as np
 from scipy.special import logsumexp
 
-from .signature import TS_AMBIG, TS_NEG, TS_POS
 from .simplex import _mixture_strand_loglik, _simplex_lattice
 from .strand_deconv import NodeDeconv
 
-__all__ = ["deconv_regions_sweep"]
+__all__ = ["_solve_nodes", "_local_loglik", "_fg_median", "_fg_var", "_axis_mean", "_simplex_lattice"]
 
 _EPS = 1.0e-9
 _PRIOR_EPS = 1.0e-3  # Jeffreys edge floor (the exact lattice vertex with 1e-9 over-rewards the prior)
@@ -162,67 +159,4 @@ def _solve_nodes(
     return NodeDeconv(
         gdna_mass=f_g * mass_unspl, rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
         gdna_frac=f_g, gdna_frac_var=f_g_var, rna_pos_frac=f_pos, rna_neg_frac=f_neg,
-    )
-
-
-def deconv_regions_sweep(
-    substrate, region_arrays, *, rna_sense_frac, gdna_strand_overdispersion=0.0,
-    rna_strand_overdispersion=0.0, n_grid=20, rho_global=0.0, region_eff_len=None, global_tau=None,
-    gdna_imp_frac=None, gdna_imp_precision=None,
-    rna_imp_frac_pos=None, rna_imp_frac_neg=None, rna_imp_precision_pos=None, rna_imp_precision_neg=None,
-):
-    """Per-region gDNA fraction by the per-node grid solve (see module docstring).
-
-    The node combines its **strand likelihood** (the only count→precision path — the overdispersed BB Fisher
-    info) with the **node-class prior**. ``rho_global`` + ``region_eff_len`` + ``global_tau``: the **global
-    gDNA prior** (foundation) — baseline fraction ``μ_global = clip(ρ_global·eff_len/mass, 0, 1)`` with
-    per-node precision ``global_tau`` (``1/σ²_global`` from ``calibrate``; default 1-pseudo-observation; toy
-    tests omit ``region_eff_len`` ⇒ no global prior). ``n_grid`` = lattice K. Returns the posterior-**median**
-    ``f_g`` and its posterior **variance** (the per-node confidence). Cross-node imputation is deferred to
-    Step 2 (see module docstring). See CALIBRATION_ARCHITECTURE.md §1/§4.
-    """
-    ts = np.asarray(region_arrays.strand_class)
-    c = substrate.contained
-    u_pos = c.n_unspliced_pos.astype(np.float64)
-    u_neg = c.n_unspliced_neg.astype(np.float64)
-    mass_unspl = np.asarray(c.mass_unspliced, dtype=np.float64)
-    mass_spliced = np.asarray(c.mass_spliced, dtype=np.float64)
-    spl_sense = c.n_spliced_sense.astype(np.float64)
-    # sided spliced (oriented): single-strand regions only (AMBIG relies on the propagated odds — deferred).
-    spliced_pos = np.where(ts == TS_POS, spl_sense, 0.0)
-    spliced_neg = np.where(ts == TS_NEG, spl_sense, 0.0)
-    allow_pos = (ts == TS_POS) | (ts == TS_AMBIG)
-    allow_neg = (ts == TS_NEG) | (ts == TS_AMBIG)
-    strand_obs = (ts == TS_POS) | (ts == TS_NEG)
-
-    # GLOBAL gDNA prior (foundation): per-node baseline fraction μ_global = clip(ρ_global·eff_len/mass, 0, 1).
-    # Weak (global_tau ≈ 1 pseudo-observation) so it only governs nodes the strand leaves undetermined
-    # (κ=½ / AMBIG / thin); ρ_global ≈ 0 in a pure-RNA library ⇒ μ_global ≈ 0 ⇒ unanchored nodes settle at
-    # f_g ≈ 0 (no phantom gDNA). Active only when region_eff_len is supplied (toy tests omit it ⇒ no prior).
-    if region_eff_len is not None:
-        eff = np.asarray(region_eff_len, dtype=np.float64)
-        mu_global = np.clip(
-            np.where(mass_unspl > 0.0, float(rho_global) * eff / np.maximum(mass_unspl, _EPS), 0.0),
-            0.0, 1.0,
-        )
-        # per-node global precision from calibrate (1/σ²_global, σ²_global = the robust MAD spread of the
-        # per-node densities); default to the 1-pseudo-observation foundation when not supplied (toy tests).
-        gtau = 1.0 if global_tau is None else np.asarray(global_tau, dtype=np.float64)
-    else:
-        mu_global = None
-        gtau = 0.0
-
-    # Per-strand RNA imputation pulls (CALIBRATION_ARCHITECTURE §1.2; the R↔B↔R chain): (μ_pos, μ_neg) +
-    # (τ_pos, τ_neg). None ⇒ no RNA prior (a no-op in _local_loglik).
-    rna_imp_frac = None if rna_imp_frac_pos is None else (rna_imp_frac_pos, rna_imp_frac_neg)
-    rna_imp_precision = (
-        None if rna_imp_precision_pos is None else (rna_imp_precision_pos, rna_imp_precision_neg)
-    )
-    return _solve_nodes(
-        u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, strand_obs,
-        mass_unspl, mass_spliced,
-        kappa=float(rna_sense_frac), od_g=gdna_strand_overdispersion, od_r=rna_strand_overdispersion,
-        n_grid=n_grid, mu_global=mu_global, global_tau=gtau,
-        gdna_imp_frac=gdna_imp_frac, gdna_imp_precision=gdna_imp_precision,
-        rna_imp_frac=rna_imp_frac, rna_imp_precision=rna_imp_precision,
     )
