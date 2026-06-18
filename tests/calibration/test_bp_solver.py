@@ -15,11 +15,19 @@ from rigel.calibration.bp_solver import (
     NodeBelief,
     NodeGeometry,
     build_node_geometry,
+    init_beliefs,
     node_densities,
 )
 from rigel.calibration.effective_length import boundary_side_eff_length, region_eff_length
 from rigel.calibration.node_chain import BOUNDARY, REGION, build_node_chain
-from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
+from rigel.calibration.signature import (
+    BIT_EXON_NEG,
+    BIT_EXON_POS,
+    BIT_INTRON_POS,
+    TS_AMBIG,
+    TS_NONE,
+    TS_POS,
+)
 
 
 def _view(mass_u, mass_spl):
@@ -29,6 +37,20 @@ def _view(mass_u, mass_spl):
         n_unspliced_pos=z.copy(), n_unspliced_neg=z.copy(),
         n_spliced_sense=z.copy(), n_spliced_antisense=z.copy(),
         mass_unspliced=np.asarray(mass_u, float), mass_spliced=np.asarray(mass_spl, float),
+    )
+
+
+def _cview(n_pos, n_neg, spl_sense=None, mass_u=None, mass_spl=None):
+    """A per-region/side view with per-strand unspliced counts (and optional sense-spliced)."""
+    n_pos = np.asarray(n_pos, float)
+    n_neg = np.asarray(n_neg, float)
+    n = n_pos.shape[0]
+    spl = np.zeros(n) if spl_sense is None else np.asarray(spl_sense, float)
+    return SimpleNamespace(
+        n_unspliced_pos=n_pos, n_unspliced_neg=n_neg,
+        n_spliced_sense=spl, n_spliced_antisense=np.zeros(n),
+        mass_unspliced=(n_pos + n_neg) if mass_u is None else np.asarray(mass_u, float),
+        mass_spliced=spl if mass_spl is None else np.asarray(mass_spl, float),
     )
 
 
@@ -144,3 +166,91 @@ def test_node_densities_factor1_under_uniform():
     )
     d = node_densities(b, g)
     assert np.isclose(d.rho_g_left[0], rho) and np.isclose(d.rho_g_right[0], rho)
+
+
+def _empty_boundary_substrate(n_b):
+    z = np.zeros(n_b)
+    side = _cview(z.copy(), z.copy())
+    return SimpleNamespace(left_region=np.full(n_b, -1), right_region=np.full(n_b, -1),
+                           left=side, right=side)
+
+
+def test_init_zero_gdna_introns_via_strand():
+    # The P1 gate: a zero-gDNA library. 3 regions: intergenic | intron+ | AMBIG (one ref).
+    rro = np.array([0, 3])
+    rbo = np.array([0, 4])
+    chain = build_node_chain(rro, rbo)
+    sig = np.array([0, BIT_INTRON_POS, BIT_EXON_POS | BIT_EXON_NEG], dtype=np.int64)
+    sc = np.array([TS_NONE, TS_POS, TS_AMBIG], dtype=np.int8)
+    region_arrays = SimpleNamespace(
+        strand_class=sc, signature=sig, region_size_bp=np.array([1000.0, 2000.0, 800.0]),
+    )
+    # intergenic gDNA = strand-symmetric; intron+ RNA = strongly sense-tilted (κ=0.95); AMBIG = symmetric.
+    contained = _cview([50.0, 95.0, 50.0], [50.0, 5.0, 50.0])
+    substrate = SimpleNamespace(contained=contained)
+    bsub = _empty_boundary_substrate(4)
+
+    b = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=60)
+
+    # region node ids on the chain: B0 R0 B1 R1 B2 R2 B3 → regions at 1, 3, 5.
+    rid = [1, 3, 5]
+    fg = b.f_g[rid]
+    # intergenic: locked gDNA sink {0,0,1}, zero variance.
+    assert fg[0] == 1.0
+    assert b.var_gdna[1] == 0.0 and b.var_pos[1] == 0.0 and b.var_neg[1] == 0.0
+    # intron+ (zero gDNA): the strand tilt alone drives f_g → 0; the − axis is locked, + axis carries the var.
+    assert fg[1] < 0.15
+    assert b.var_neg[3] == 0.0
+    assert np.isfinite(b.var_pos[3]) and np.isclose(b.var_pos[3], b.var_gdna[3])
+    # AMBIG: unresolved by strand → {0,0,1} at MAX (inf) variance for the sweep to resolve.
+    assert fg[2] == 1.0
+    assert np.isinf(b.var_gdna[5]) and np.isinf(b.var_pos[5]) and np.isinf(b.var_neg[5])
+
+
+def test_init_boundary_continuity_gate():
+    # 1 ref, 2 regions (exon+ | intron+) → boundaries B0(term) B1(ex+→in+ junction) B2(term).
+    rro = np.array([0, 2])
+    rbo = np.array([0, 3])
+    chain = build_node_chain(rro, rbo)
+    sig = np.array([BIT_EXON_POS, BIT_INTRON_POS], dtype=np.int64)
+    sc = np.array([TS_POS, TS_POS], dtype=np.int8)
+    region_arrays = SimpleNamespace(
+        strand_class=sc, signature=sig, region_size_bp=np.array([1000.0, 2000.0]),
+    )
+    substrate = SimpleNamespace(contained=_cview([80.0, 40.0], [4.0, 30.0]))
+    # B1 crossing: sense-tilted unspliced (κ=0.95 ⇒ +) + a sense-spliced floor on the exon (left) flank.
+    left = _cview([0.0, 90.0, 0.0], [0.0, 5.0, 0.0], spl_sense=[0.0, 50.0, 0.0])
+    right = _cview([0.0, 91.0, 0.0], [0.0, 6.0, 0.0], spl_sense=[0.0, 0.0, 0.0])
+    bsub = SimpleNamespace(left_region=np.array([-1, 0, 1]), right_region=np.array([0, 1, -1]),
+                           left=left, right=right)
+
+    b = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=60)
+    # boundary node ids: B0=0, B1=2, B2=4.
+    # terminals: off-edge flank ⇒ neither strand continuous ⇒ G1 gDNA sink.
+    assert b.f_g[0] == 1.0 and b.var_gdna[0] == 0.0
+    assert b.f_g[4] == 1.0 and b.var_gdna[4] == 0.0
+    # B1 (ex+→in+): +strand continuous (G2+) ⇒ the strand tilt resolves f_g → 0; − axis locked.
+    assert b.f_g[2] < 0.15
+    assert b.var_neg[2] == 0.0 and np.isfinite(b.var_pos[2])
+
+
+def test_init_tss_boundary_is_black_hole():
+    # intergenic | exon+ : the internal boundary is a TSS (intergenic↔exon) ⇒ continuity blocks RNA ⇒ sink.
+    rro = np.array([0, 2])
+    rbo = np.array([0, 3])
+    chain = build_node_chain(rro, rbo)
+    sig = np.array([0, BIT_EXON_POS], dtype=np.int64)
+    sc = np.array([TS_NONE, TS_POS], dtype=np.int8)
+    region_arrays = SimpleNamespace(
+        strand_class=sc, signature=sig, region_size_bp=np.array([1000.0, 2000.0]),
+    )
+    substrate = SimpleNamespace(contained=_cview([50.0, 80.0], [50.0, 4.0]))
+    # the TSS-crossing fragments are sense-tilted, but continuity must STILL block RNA (the black hole).
+    left = _cview([0.0, 90.0, 0.0], [0.0, 5.0, 0.0])
+    right = _cview([0.0, 91.0, 0.0], [0.0, 6.0, 0.0])
+    bsub = SimpleNamespace(left_region=np.array([-1, 0, 1]), right_region=np.array([0, 1, -1]),
+                           left=left, right=right)
+
+    b = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=60)
+    # B1 (node id 2) is the TSS: a locked gDNA sink despite the sense tilt.
+    assert b.f_g[2] == 1.0 and b.var_gdna[2] == 0.0 and b.var_pos[2] == 0.0 and b.var_neg[2] == 0.0
