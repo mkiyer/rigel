@@ -25,7 +25,7 @@ from .effective_length import boundary_side_eff_length, region_eff_length
 from .node_chain import BOUNDARY, REGION, NodeChain
 from .signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_NEG, BIT_INTRON_POS
 
-__all__ = ["NodeGeometry", "build_node_geometry"]
+__all__ = ["NodeGeometry", "build_node_geometry", "NodeBelief", "NodeDensities", "node_densities"]
 
 _EPS = 1.0e-9
 
@@ -131,4 +131,49 @@ def build_node_geometry(
         eff_rna_left=np.maximum(eff_rna_left, _EPS), eff_rna_right=np.maximum(eff_rna_right, _EPS),
         spliced_pos_left=spliced_pos_left, spliced_pos_right=spliced_pos_right,
         spliced_neg_left=spliced_neg_left, spliced_neg_right=spliced_neg_right,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class NodeBelief:
+    """Per-node solved state on the chain: the pie `(f_pos, f_neg, f_g)` over the node's UNSPLICED mass + the
+    per-component variances `(var_pos, var_neg, var_gdna)` (precision = 1/var). All length ``n_nodes``."""
+
+    f_pos: np.ndarray
+    f_neg: np.ndarray
+    f_g: np.ndarray
+    var_pos: np.ndarray
+    var_neg: np.ndarray
+    var_gdna: np.ndarray
+
+
+@dataclass(frozen=True, slots=True)
+class NodeDensities:
+    """Per-node, per-face component densities — what a node presents to its left/right neighbour. gDNA uses the
+    gDNA-FL eff-len; RNA (nascent unspliced + the boundary's one-sided spliced) uses the RNA-FL eff-len. These
+    are the identity-mean MESSAGE values (`ARCHITECTURE §1.2`): a source's facing density IS the destination's
+    prior mean. All length ``n_nodes``."""
+
+    rho_g_left: np.ndarray
+    rho_pos_left: np.ndarray
+    rho_neg_left: np.ndarray
+    rho_g_right: np.ndarray
+    rho_pos_right: np.ndarray
+    rho_neg_right: np.ndarray
+
+
+def node_densities(belief: NodeBelief, geometry: NodeGeometry) -> NodeDensities:
+    """Per-component, per-face densities from the belief pie + the static geometry. gDNA:
+    ``ρ_g(σ) = f_g·M_σ / E_gdna(σ)``. RNA: ``ρ_s(σ) = (f_s·M_σ + spliced_s(σ)) / E_rna(σ)`` — the spliced
+    (boundary-owned, one-sided) rides on its motif strand. The shipped factor-1-under-uniform construction makes
+    a region's contained density and a boundary side's crossing density both equal the true ρ under uniform."""
+    g = geometry
+    fp, fn, fg = belief.f_pos, belief.f_neg, belief.f_g
+    return NodeDensities(
+        rho_g_left=fg * g.mass_left / g.eff_gdna_left,
+        rho_pos_left=(fp * g.mass_left + g.spliced_pos_left) / g.eff_rna_left,
+        rho_neg_left=(fn * g.mass_left + g.spliced_neg_left) / g.eff_rna_left,
+        rho_g_right=fg * g.mass_right / g.eff_gdna_right,
+        rho_pos_right=(fp * g.mass_right + g.spliced_pos_right) / g.eff_rna_right,
+        rho_neg_right=(fn * g.mass_right + g.spliced_neg_right) / g.eff_rna_right,
     )

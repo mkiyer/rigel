@@ -11,7 +11,12 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from rigel.calibration.bp_solver import build_node_geometry
+from rigel.calibration.bp_solver import (
+    NodeBelief,
+    NodeGeometry,
+    build_node_geometry,
+    node_densities,
+)
 from rigel.calibration.effective_length import boundary_side_eff_length, region_eff_length
 from rigel.calibration.node_chain import BOUNDARY, REGION, build_node_chain
 from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
@@ -96,3 +101,46 @@ def test_terminal_boundary_zero_off_edge():
     assert np.isclose(g.eff_gdna_right[0], 300.0)
     # B3 (node 6): right_region=-1 → right face off edge.
     assert g.eff_gdna_right[6] <= 1e-6
+
+
+def test_node_densities_formula():
+    # one node, two faces with different mass/eff-len; + spliced only on the left face.
+    g = NodeGeometry(
+        n_nodes=1,
+        mass_left=np.array([100.0]), mass_right=np.array([200.0]),
+        eff_gdna_left=np.array([200.0]), eff_gdna_right=np.array([400.0]),
+        eff_rna_left=np.array([250.0]), eff_rna_right=np.array([500.0]),
+        spliced_pos_left=np.array([10.0]), spliced_pos_right=np.array([0.0]),
+        spliced_neg_left=np.array([0.0]), spliced_neg_right=np.array([0.0]),
+    )
+    b = NodeBelief(
+        f_pos=np.array([0.3]), f_neg=np.array([0.2]), f_g=np.array([0.5]),
+        var_pos=np.array([1.0]), var_neg=np.array([1.0]), var_gdna=np.array([1.0]),
+    )
+    d = node_densities(b, g)
+    assert np.isclose(d.rho_g_left[0], 0.5 * 100 / 200)            # 0.25
+    assert np.isclose(d.rho_pos_left[0], (0.3 * 100 + 10) / 250)   # spliced rides on +: 0.16
+    assert np.isclose(d.rho_neg_left[0], 0.2 * 100 / 250)          # 0.08
+    assert np.isclose(d.rho_g_right[0], 0.5 * 200 / 400)           # 0.25
+    assert np.isclose(d.rho_pos_right[0], 0.3 * 200 / 500)         # no spliced on the right face: 0.12
+
+
+def test_node_densities_factor1_under_uniform():
+    # construct mass = ρ·eff-len per face (the accumulator's uniform-density deposit) ⇒ a pure-gDNA node's
+    # ρ_g must read back ρ on BOTH faces despite different eff-lens (the factor-1 bedrock, formula level).
+    rho = 0.42
+    eff_g_l, eff_g_r = np.array([700.0]), np.array([300.0])
+    g = NodeGeometry(
+        n_nodes=1,
+        mass_left=rho * eff_g_l, mass_right=rho * eff_g_r,
+        eff_gdna_left=eff_g_l, eff_gdna_right=eff_g_r,
+        eff_rna_left=np.array([800.0]), eff_rna_right=np.array([200.0]),
+        spliced_pos_left=np.array([0.0]), spliced_pos_right=np.array([0.0]),
+        spliced_neg_left=np.array([0.0]), spliced_neg_right=np.array([0.0]),
+    )
+    b = NodeBelief(
+        f_pos=np.array([0.0]), f_neg=np.array([0.0]), f_g=np.array([1.0]),
+        var_pos=np.array([0.0]), var_neg=np.array([0.0]), var_gdna=np.array([0.0]),
+    )
+    d = node_densities(b, g)
+    assert np.isclose(d.rho_g_left[0], rho) and np.isclose(d.rho_g_right[0], rho)
