@@ -68,9 +68,8 @@ class EMConfig:
     the odds factor ``exp(gdna_em_llr_bias)``: it trades the FP-deleterious gDNA→RNA
     *leak* for the FP-safe RNA→gDNA *siphon* (decreased RNA sensitivity). Use it to
     say "only call a fragment RNA when it is sufficiently more likely RNA than
-    gDNA." Where the calibration ``gdna_deconv_quantile`` tilts the *strand/count
-    deconvolution* (an uncertainty-aware FP-rate quantile), this reaches the *EM*
-    assignment directly (the two are decoupled). Units: nats of log-odds (e.g.
+    gDNA." This reaches the *EM* assignment directly (distinct from the calibration
+    deconvolution). Units: nats of log-odds (e.g.
     ``log(9) ≈ 2.20`` requires ~9:1 RNA evidence)."""
 
     def __post_init__(self):
@@ -225,33 +224,10 @@ class BamScanConfig:
 class CalibrationConfig:
     """Configuration for the calibrator (:func:`rigel.calibration.calibrate`).
 
-    The calibrator is an **iterative odds-propagation simplex sweep over an all-gDNA bootstrap**
-    (``sweep_max_passes`` passes, re-fitting ``ρ_global`` + the gDNA var~mean each pass and
-    converging on per-node ``f_g``). The boundary **sides** are deconvolved once (the strand-vs-count
-    handoff in ``strand_deconv.deconv_sides``) as the fixed boundary gDNA anchors, with that blended
-    point estimate read at the FP-rate quantile ``gdna_deconv_quantile`` (default ½ ⇒ no shift).
+    The calibrator is the bipartite **belief-propagation sweep** over the region↔boundary chain
+    (``sweep_max_passes`` directional Gauss-Seidel passes; ``sweep_n_grid`` 2-simplex lattice;
+    ``sweep_convergence_delta`` stop) — see :func:`rigel.calibration.calibrate.calibrate`.
     """
-
-    #: **gDNA-deconvolution FP-rate quantile** — the false-positive-aversion dial for the per-node
-    #: gDNA/RNA call (Phase 2). Each node's blended gDNA fraction is reported at this quantile of its
-    #: posterior: ``gdna_frac ← clip(center + Φ⁻¹(q)·σ)``, where ``center`` is the point estimate
-    #: (``w·g_strand + (1−w)·g_count``) and ``σ`` is the combined per-node std (strand BB ⊗ count).
-    #:   ``0.5`` = neutral (``Φ⁻¹=0`` ⇒ no shift; the unbiased point estimate — the default, a
-    #:     bit-identical no-op);
-    #:   ``> 0.5`` = FP-averse — shift toward gDNA, trading the gDNA→RNA leak for the RNA→gDNA siphon.
-    #:     The shift is **uncertainty-aware**: a wide-posterior (ambiguous) node moves a lot, a
-    #:     confident node barely moves — so it bites where the evidence is genuinely uncertain (unlike
-    #:     a uniform log-odds tilt, which moves even a confident-RNA node). ``< 0.5`` leans toward RNA
-    #:     (higher sensitivity), symmetric.
-    #: It only **widens** (never sharpens) — the count σ is anti-calibrated under capture, so it is
-    #: used to inflate the quantile, never to correct the blend (which stays bias-robust at
-    #: ``w=(2κ−1)²``). Decoupled from the EM ``gdna_em_llr_bias`` (per-fragment EM component vs
-    #: per-node fraction). See ``docs/calibration/phase2_design.md``.
-    gdna_deconv_quantile: float = 0.5
-
-    #: Grid resolution of the decode posterior over the gDNA fraction on ``[0, 1]``.
-    #: Advanced/technical — 200 is ample for a smooth 1-D posterior.
-    n_grid: int = 200
 
     #: **gDNA strand-overdispersion prior** (advanced). The gDNA per-region sense rate is
     #: ``Beta(a, a)``; this is that symmetric shape ``a`` (= α = β). The fitted overdispersion is
@@ -279,20 +255,10 @@ class CalibrationConfig:
     #: ``gdna_strand_prior_weight``; same default.
     rna_strand_prior_weight: float = 30.0
 
-    #: **Strand-information half-trust scale** ``I₀`` for the strand→count blend (advanced). The single
-    #: blend weight is ``w = I/(I+I₀)`` with ``I = N·(2κ−1)²`` (the per-node strand information): the
-    #: strand cleans a node's count by ``w·g_strand + (1−w)·1`` (``strand_deconv.cleaned_gdna_count``).
-    #: ``I₀`` is "the strand information at which the strand is half-trusted" (~1 effective discriminating
-    #: fragment). ``w→1`` for a confident strand (high κ, decent depth) — it then stops fighting a clearly
-    #: good strand model; ``w→0`` at κ≈½ or thin — a no-op, the count floor. Validate on the suites.
-    gdna_strand_info_scale: float = 10.0
-
-    #: **Propagation lattice resolution** ``K`` for the 2-simplex grid sum-product
-    #: (``simplex_sweep.deconv_regions_sweep``). Separate from ``n_grid`` (the fine 1-D strand-posterior
-    #: grid used for the boundary sides): the 2-simplex has ``(K+1)(K+2)/2`` points and the propagation
-    #: edge is ``K²`` per transition, so the cost grows ~quartically — ``n_grid=200`` is far too expensive
-    #: here. ``K=60`` matches per-node accuracy at the tractable propagation cost (``K=20`` over-calls /
-    #: under-resolves the zero-DNA case).
+    #: **Sweep lattice resolution** ``K`` for the per-node 2-simplex ``(f₊, f₋, f_g)`` grid
+    #: (``simplex_sweep._solve_nodes``, driven by ``bp_solver.node_sweep``). The 2-simplex has
+    #: ``(K+1)(K+2)/2`` points; ``K=60`` matches per-node accuracy at a tractable cost (``K=20``
+    #: over-calls / under-resolves the zero-DNA case).
     sweep_n_grid: int = 60
 
     #: **Iterative-bootstrap pass count** for the propagation path (``CALIBRATION_PLAN_v4`` §2). Each
@@ -310,13 +276,6 @@ class CalibrationConfig:
     sweep_convergence_delta: float = 1e-3
 
     def __post_init__(self) -> None:
-        if not (0.0 < float(self.gdna_deconv_quantile) < 1.0):
-            raise ValueError(
-                f"CalibrationConfig.gdna_deconv_quantile must be in (0, 1); "
-                f"got {self.gdna_deconv_quantile}."
-            )
-        if self.n_grid < 2:
-            raise ValueError(f"CalibrationConfig.n_grid must be >= 2; got {self.n_grid}.")
         if self.sweep_n_grid < 2:
             raise ValueError(
                 f"CalibrationConfig.sweep_n_grid must be >= 2; got {self.sweep_n_grid}."
@@ -351,11 +310,6 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.rna_strand_prior_weight must be >= 0; "
                 f"got {self.rna_strand_prior_weight}."
-            )
-        if self.gdna_strand_info_scale <= 0.0:
-            raise ValueError(
-                "CalibrationConfig.gdna_strand_info_scale must be > 0; "
-                f"got {self.gdna_strand_info_scale}."
             )
 
 

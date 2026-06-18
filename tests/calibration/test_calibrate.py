@@ -85,28 +85,3 @@ def test_kappa_matches_strand_balance():
 
     sb = fit_strand_balance(SimpleNamespace(p_r1_sense=0.95, n_observations=40))
     assert _run().rna_sense_frac == sb.rna_sense_frac
-
-
-def _total_g(r):
-    return float(r.mass_gdna_contained.sum() + r.mass_gdna_left.sum() + r.mass_gdna_right.sum())
-
-
-def test_deconv_quantile_default_is_noop():
-    # q=0.5 ⇒ Φ⁻¹=0 ⇒ no shift: bit-identical to the implicit default (the variance is consumed
-    # only when q≠0.5). Pins the "default-preserving" property of the Phase-2 quantile knob.
-    base = _run()
-    half = _run(CalibrationConfig(gdna_deconv_quantile=0.5))
-    np.testing.assert_array_equal(half.mass_gdna_contained, base.mass_gdna_contained)
-    np.testing.assert_array_equal(half.mass_gdna_left, base.mass_gdna_left)
-    np.testing.assert_array_equal(half.mass_gdna_right, base.mass_gdna_right)
-
-
-def test_deconv_quantile_shifts_split_toward_gdna():
-    # The FP-rate quantile g(q)=clip(center+Φ⁻¹(q)·σ) reports a higher posterior quantile of each
-    # node's gDNA fraction as q rises: q>0.5 (FP-averse) cannot decrease the total deconvolved gDNA
-    # mass vs neutral (0.5), and q<0.5 cannot increase it — monotone in q (widening, never sharpening).
-    g_lo = _total_g(_run(CalibrationConfig(gdna_deconv_quantile=0.05)))
-    g_mid = _total_g(_run(CalibrationConfig(gdna_deconv_quantile=0.5)))
-    g_hi = _total_g(_run(CalibrationConfig(gdna_deconv_quantile=0.95)))
-    assert g_lo <= g_mid + 1e-9
-    assert g_mid <= g_hi + 1e-9

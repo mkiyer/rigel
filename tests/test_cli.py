@@ -321,15 +321,6 @@ class TestConfigRoundTrip:
         cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
         assert cfg.em.gdna_em_llr_bias == pytest.approx(2.2)
 
-    def test_gdna_deconv_quantile_flows_to_config(self):
-        """``--gdna-deconv-quantile`` reaches ``CalibrationConfig``."""
-        from rigel.cli import _build_pipeline_config
-
-        args = _parse_quant("--gdna-deconv-quantile", "0.9")
-        _resolve_quant_args(args, _build_quant_defaults())
-        cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")
-        assert cfg.calibration.gdna_deconv_quantile == pytest.approx(0.9)
-
     def test_scan_performance_flags_flow_to_config(self):
         """The renamed scan performance flags reach ``BamScanConfig``."""
         from rigel.cli import _build_pipeline_config
