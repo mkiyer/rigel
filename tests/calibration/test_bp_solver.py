@@ -15,6 +15,8 @@ from rigel.calibration.bp_solver import (
     NodeBelief,
     NodeGeometry,
     build_node_geometry,
+    build_node_statics,
+    gdna_sweep,
     global_gdna_prior,
     init_beliefs,
     node_densities,
@@ -24,8 +26,10 @@ from rigel.calibration.node_chain import BOUNDARY, REGION, build_node_chain
 from rigel.calibration.signature import (
     BIT_EXON_NEG,
     BIT_EXON_POS,
+    BIT_INTRON_NEG,
     BIT_INTRON_POS,
     TS_AMBIG,
+    TS_NEG,
     TS_NONE,
     TS_POS,
 )
@@ -288,3 +292,71 @@ def test_global_prior_excludes_exon_from_baseline():
     obs = np.array([True, False])  # region 1 (exon) excluded from the baseline
     rho, _ = global_gdna_prior(f_g, mass, eff, obs)
     assert np.isclose(rho, 0.1 * 100.0 / 900.0)  # only the observable region 0 contributes
+
+
+def test_gdna_sweep_factor1_uniform():
+    # The factor-1 bedrock: a UNIFORM-gDNA chain intergenic | AMBIG | intergenic. Every node's mass is laid
+    # down as ρ·eff-len (the accumulator's uniform deposit); after the sweep each node's ρ_g must read back ρ
+    # — including the AMBIG node the sweep actually solves (the locked intergenic nodes are trivially ρ).
+    rho = 0.5
+    gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
+    chain = build_node_chain(np.array([0, 3]), np.array([0, 4]))
+    L = np.array([1000.0, 1000.0, 1000.0])
+    sig = np.array([0, BIT_EXON_POS | BIT_EXON_NEG, 0], dtype=np.int64)
+    sc = np.array([TS_NONE, TS_AMBIG, TS_NONE], dtype=np.int8)
+    region_arrays = SimpleNamespace(strand_class=sc, signature=sig, region_size_bp=L)
+    reg_eff = region_eff_length(L, gdna_fl)  # [700,700,700]
+    cmass = rho * reg_eff
+    substrate = SimpleNamespace(contained=_cview(cmass / 2, cmass / 2, mass_u=cmass, mass_spl=np.zeros(3)))
+    side_eff = boundary_side_eff_length(gdna_fl, L)  # [300,300,300]
+    lr, rr = np.array([-1, 0, 1, 2]), np.array([0, 1, 2, -1])
+    lmass = np.where(lr >= 0, rho * side_eff[np.clip(lr, 0, 2)], 0.0)
+    rmass = np.where(rr >= 0, rho * side_eff[np.clip(rr, 0, 2)], 0.0)
+    left = _cview(lmass / 2, lmass / 2, mass_u=lmass, mass_spl=np.zeros(4))
+    right = _cview(rmass / 2, rmass / 2, mass_u=rmass, mass_spl=np.zeros(4))
+    bsub = SimpleNamespace(left_region=lr, right_region=rr, left=left, right=right)
+
+    geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
+    st = build_node_statics(chain, substrate, bsub, region_arrays)
+    belief = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.7, n_grid=40, statics=st)
+    final, _ = gdna_sweep(chain, st, geom, belief, region_arrays, rna_sense_frac=0.7,
+                          n_grid=40, max_passes=8, convergence_delta=1e-4)
+    dens = node_densities(final, geom)
+    rid = [1, 3, 5]  # the region nodes (R0 intergenic, R1 AMBIG, R2 intergenic)
+    assert np.allclose(dens.rho_g_left[rid], rho, atol=0.02)
+    assert np.allclose(dens.rho_g_right[rid], rho, atol=0.02)
+
+
+def test_gdna_sweep_zero_gdna_pin_and_monotone():
+    # A pure-RNA chain intron+ | AMBIG(in+|in−) | intron−. The AMBIG starts at the all-gDNA init f_g=1; the
+    # global (driven to ~0 by the RNA introns) + the RNA-neighbour messages must pull the phantom gDNA down,
+    # monotonically.
+    gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
+    chain = build_node_chain(np.array([0, 3]), np.array([0, 4]))
+    L = np.array([2000.0, 2000.0, 2000.0])
+    sig = np.array([BIT_INTRON_POS, BIT_INTRON_POS | BIT_INTRON_NEG, BIT_INTRON_NEG], dtype=np.int64)
+    sc = np.array([TS_POS, TS_AMBIG, TS_NEG], dtype=np.int8)
+    region_arrays = SimpleNamespace(strand_class=sc, signature=sig, region_size_bp=L)
+    cpos = np.array([95.0, 50.0, 5.0])  # sense-tilted RNA (κ=0.95): + intron genome+, − intron genome−
+    cneg = np.array([5.0, 50.0, 95.0])
+    substrate = SimpleNamespace(contained=_cview(cpos, cneg, mass_u=cpos + cneg, mass_spl=np.zeros(3)))
+    lr, rr = np.array([-1, 0, 1, 2]), np.array([0, 1, 2, -1])
+    # crossing counts cleanly sense-tilted like the regions: B0/B1 are +crossings (genome+), B2/B3 are −.
+    lpos = np.array([0.0, 40.0, 2.0, 2.0])
+    lneg = np.array([0.0, 2.0, 40.0, 40.0])
+    rpos = np.array([40.0, 40.0, 2.0, 0.0])
+    rneg = np.array([2.0, 2.0, 40.0, 0.0])
+    left = _cview(lpos, lneg, mass_u=lpos + lneg, mass_spl=np.zeros(4))
+    right = _cview(rpos, rneg, mass_u=rpos + rneg, mass_spl=np.zeros(4))
+    bsub = SimpleNamespace(left_region=lr, right_region=rr, left=left, right=right)
+
+    geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
+    st = build_node_statics(chain, substrate, bsub, region_arrays)
+    belief = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=40, statics=st)
+    assert belief.f_g[3] == 1.0  # AMBIG starts all-gDNA
+    final, deltas = gdna_sweep(chain, st, geom, belief, region_arrays, rna_sense_frac=0.95,
+                               n_grid=40, max_passes=10, convergence_delta=1e-4)
+    assert final.f_g[3] < 0.15  # the AMBIG phantom is pulled down (no phantom gDNA)
+    assert final.f_g[1] < 0.15 and final.f_g[5] < 0.15  # the introns stay RNA via the strand
+    # monotone convergence: the per-pass max-|Δf_g| is non-increasing
+    assert all(deltas[k + 1] <= deltas[k] + 1e-9 for k in range(len(deltas) - 1))
