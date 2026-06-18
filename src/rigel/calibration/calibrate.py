@@ -42,6 +42,7 @@ import numpy as np
 from .bp_solver import (
     build_node_geometry,
     build_node_statics,
+    chain_boundary_side_deconv,
     chain_region_deconv,
     init_beliefs,
     node_sweep,
@@ -62,7 +63,6 @@ from .gdna_strand import (
 from .node_chain import build_node_chain
 from .result import CalibrationResult
 from .strand_balance import fit_strand_balance
-from .strand_deconv import cleaned_gdna_count, deconv_sides, strand_deconvolve
 from .substrate import BoundarySubstrate, CalibrationSubstrate
 
 if TYPE_CHECKING:
@@ -143,61 +143,12 @@ def calibrate(
     )
     rna_strand_overdispersion = rna_strand.rna_strand_overdispersion
 
-    # Strand deconvolution → CLEAN the BOUNDARY counts for the count module's spatial imputation. The
-    # strand emits per node the gDNA fraction g_strand + its information I=N·(2κ−1)²; cleaned_gdna_count
-    # removes the strand-identified RNA from a count by w·g_strand+(1−w), w=I/(I+I₀). Cleaning the
-    # boundary crossings (left/right) makes the imputed density at exon / AMBIG regions drop the nascent
-    # the count clue can't see (the Phase-2 AMBIG fix). The CONTAINED count stays RAW — a region's strand
-    # enters the solve once, via the sweep's strand likelihood, so g_count carries count MAGNITUDE only
-    # (orthogonal to strand direction ⇒ no double-count). Only the boundary splits are used here; the
-    # contained split is discarded (the sweep recomputes the contained strand likelihood internally).
-    _, left_split, right_split = strand_deconvolve(
-        substrate,
-        region_arrays,
-        rna_sense_frac=rna_sense_frac,
-        gdna_strand_overdispersion=gdna_strand_overdispersion,
-        rna_strand_overdispersion=rna_strand_overdispersion,
-        deconv_quantile=config.gdna_deconv_quantile,
-        n_grid=config.n_grid,
-    )
-    i0 = config.gdna_strand_info_scale
-
-    def _raw_count(view):
-        return view.n_unspliced_pos.astype(np.float64) + view.n_unspliced_neg.astype(np.float64)
-
-    cleaned_left = cleaned_gdna_count(left_split, _raw_count(substrate.left), i0)
-    cleaned_right = cleaned_gdna_count(right_split, _raw_count(substrate.right), i0)
-
-    # Count module g_count: per-region gDNA density by LOCAL imputation — RAW contained own-density for
-    # signature count-observable regions (intergenic / intron); the CLEANED boundary crossings impute
-    # exon / AMBIG regions (nascent removed → the Phase-2 AMBIG fix). This is the count-only spatial
-    # estimate the combine blends with the strand (g_count = magnitude; g_strand = direction).
-    node_density = node_gdna_density(
-        substrate,
-        region_arrays,
-        region_eff_len,
-        fl_mean,
-        gdna_counts=(_raw_count(substrate.contained), cleaned_left, cleaned_right),
-    )
-
-    # THE SOLVE — the bipartite belief-propagation sweep (plan v3 / bp_solver). The boundary SIDES are still
-    # deconvolved ONCE (deconv_sides) as the fixed gDNA anchors whose mass feeds the per-locus prior via the
-    # boundary-flux transport (priors); their promotion into the unified chain's first-class boundary nodes
-    # (retiring deconv_sides / I₀ / the count module) is P4. The per-region gDNA fraction now comes from the
-    # directional region↔boundary Gauss-Seidel sweep (identity-density messages + per-pass frozen-snapshot
-    # var~mean reliability + the global prior), not the legacy region-only loop.
-    left, right = deconv_sides(
-        substrate,
-        region_arrays,
-        node_density,
-        boundary_eff_len,
-        rna_sense_frac=rna_sense_frac,
-        gdna_strand_overdispersion=gdna_strand_overdispersion,
-        rna_strand_overdispersion=rna_strand_overdispersion,
-        deconv_quantile=config.gdna_deconv_quantile,
-        n_grid=config.n_grid,
-        info_scale=i0,
-    )
+    # THE SOLVE — the bipartite belief-propagation sweep (plan v3 / bp_solver): build the unified
+    # region↔boundary chain + its per-node geometry / statics, the signature-binary init, then the directional
+    # Gauss-Seidel sweep (gDNA + per-strand RNA identity-density messages, per-pass frozen-snapshot var~mean
+    # reliability, the global gDNA prior). The region nodes give the per-region gDNA fraction; the boundary
+    # nodes give the per-side boundary flux feeding the per-locus prior (chain_boundary_side_deconv) — the
+    # first-class boundaries that retired the legacy deconv_sides / count-cleaning / I₀ path.
     boundary_substrate = BoundarySubstrate.from_payload(payload)
     chain = build_node_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     geometry = build_node_geometry(
@@ -220,6 +171,7 @@ def calibrate(
         convergence_delta=config.sweep_convergence_delta,
     )
     regions = chain_region_deconv(chain, belief, substrate)
+    left, right = chain_boundary_side_deconv(chain, belief, substrate)
     logger.debug("calibration sweep: %d passes, max-Δf_g per pass=%s", len(sweep_deltas), sweep_deltas)
 
     # Derive gdna_density_global (the library-average density QC scalar).

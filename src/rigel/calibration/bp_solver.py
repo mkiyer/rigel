@@ -57,6 +57,7 @@ __all__ = [
     "fit_rna_varmean",
     "node_sweep",
     "chain_region_deconv",
+    "chain_boundary_side_deconv",
 ]
 
 _EPS = 1.0e-9
@@ -702,3 +703,34 @@ def chain_region_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> Node
         gdna_mass=f_g * mass_u, rna_mass=(1.0 - f_g) * mass_u + mass_s,
         gdna_frac=f_g, gdna_frac_var=f_gv, rna_pos_frac=f_pos, rna_neg_frac=f_neg,
     )
+
+
+def chain_boundary_side_deconv(chain: NodeChain, belief: NodeBelief, substrate):
+    """Project the chain belief's BOUNDARY ``f_g`` onto each region's two SIDE views — the drop-in replacement
+    for ``deconv_sides`` (the boundary-flux that ``priors``' pooled-seam gDNA eff-len + ``derive`` consume).
+
+    Region ``r``'s left/right boundary IS its left/right chain neighbour; that boundary's solved ``f_g`` splits
+    ``r``'s side crossing mass (``substrate.left[r]`` / ``substrate.right[r]`` — the boundary flux already
+    projected onto the region by the D1 side-attribution) into gDNA / RNA (the RNA spliced-inclusive, matching
+    the contained projection). One boundary pie applied to its side mass. Returns ``(left, right)`` region-keyed
+    :class:`NodeDeconv`."""
+    kind = np.asarray(chain.kind)
+    reg_nodes = np.asarray(chain.order)[kind == REGION]
+    ridx = np.asarray(chain.ref_idx, dtype=np.int64)[reg_nodes]
+    R = int(ridx.max()) + 1 if ridx.size else 0
+    fg = np.asarray(belief.f_g, dtype=np.float64)
+    left_fg = np.zeros(R)
+    right_fg = np.zeros(R)
+    left_fg[ridx] = fg[np.asarray(chain.left)[reg_nodes]]  # f_g of r's left-flank boundary node
+    right_fg[ridx] = fg[np.asarray(chain.right)[reg_nodes]]
+
+    def _side(side_fg, view):
+        m_u = np.asarray(view.mass_unspliced, dtype=np.float64)
+        m_s = np.asarray(view.mass_spliced, dtype=np.float64)
+        return NodeDeconv(
+            gdna_mass=side_fg * m_u, rna_mass=(1.0 - side_fg) * m_u + m_s,
+            gdna_frac=side_fg, gdna_frac_var=np.zeros(R),
+            rna_pos_frac=np.zeros(R), rna_neg_frac=np.zeros(R),
+        )
+
+    return _side(left_fg, substrate.left), _side(right_fg, substrate.right)
