@@ -54,7 +54,7 @@ class EMConfig:
     assignment_mode: str = "sample"
     assignment_min_posterior: float = 0.01
     n_threads: int = 0
-    """Number of threads for parallel locus EM (Phase 2B).
+    """Number of threads for parallel locus EM.
 
     ``0`` (default) → use all available cores (``omp_get_max_threads()``).
     ``1`` → sequential (no OpenMP overhead).
@@ -261,12 +261,11 @@ class CalibrationConfig:
     #: over-calls / under-resolves the zero-DNA case).
     sweep_n_grid: int = 60
 
-    #: **Iterative-bootstrap pass count** for the propagation path (``CALIBRATION_PLAN_v4`` §2). Each
-    #: pass re-fits the gDNA ``var~mean`` + the global density ``ρ_global`` on the previous pass's gDNA
-    #: estimate (Pass 0 = the all-gDNA init: every unspliced fragment is gDNA), then re-solves; the loop
-    #: stops early once the per-node ``f_g`` stabilizes (within ``sweep_convergence_delta``). A few passes
-    #: suffice (strand/seed-anchored, not open EM); Phase-1 measured the capture case using the full
-    #: 4-pass budget, so the default carries margin.
+    #: **Sweep pass count** for the belief-propagation solver. Each pass re-fits the gDNA + RNA
+    #: ``var~mean`` + the global density ``ρ_global`` on the FROZEN previous-pass snapshot, then sweeps
+    #: (L→R then R→L); the loop stops early once the per-node pie stabilizes (max change within
+    #: ``sweep_convergence_delta``). A few passes suffice (strand/seed-anchored, not open EM); the default
+    #: carries margin for the capture case.
     sweep_max_passes: int = 6
 
     #: **Iterative-bootstrap convergence threshold** — the loop stops once the mean absolute change in

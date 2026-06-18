@@ -2,9 +2,8 @@
 
 Several calibration stages walk the region partition the same way — they look at each region's
 left/right neighbour *within the same reference*, and they fill unset regions by carrying the nearest
-anchored value inward from both ends of a run. That bookkeeping was re-derived in `density_model`,
-`derive`, `strand_deconv`, `priors`, and `splice_junction`; it lives here once so a new caller (the
-Phase-3 carry-over sweep) reuses it instead of adding another copy.
+anchored value inward from both ends of a run. That bookkeeping lives here once and is shared by
+`density_model`, `strand_deconv`, `priors`, and the `bp_solver` chain geometry.
 
 Both helpers treat the region array as a sequence of per-reference runs: a neighbour relation or a
 carry never crosses a reference boundary (``ref_id`` change).
@@ -47,7 +46,7 @@ def runfill_bidirectional(values: np.ndarray, ref_id: np.ndarray) -> np.ndarray:
     unchanged. A carry never crosses a reference boundary.
 
     This is the exact bidirectional run-fill `density_model.node_gdna_density` uses (extracted verbatim);
-    the Phase-3 carry-over sweep reuses it in fraction/state space. Cost is two ``O(R)`` passes.
+    the BP chain sweep reuses it in fraction/state space. Cost is two ``O(R)`` passes.
     """
     v = np.asarray(values, dtype=np.float64)
     ref = np.asarray(ref_id)

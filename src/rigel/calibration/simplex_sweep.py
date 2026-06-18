@@ -35,8 +35,9 @@ def _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, 
 
     The Bayesian hierarchy (CALIBRATION_ARCHITECTURE.md §1), with a **node-class-dependent** prior. The
     count enters ONLY through the strand mixture's overdispersed Fisher information (§0 invariant); there is
-    no count prior and no RNA-magnitude prior (both were count→fraction-precision violations, removed in the
-    Step-1 precision rebuild — §6.1). A node is solved by its strand likelihood + the node-class prior:
+    no count prior and no RNA-magnitude prior — a fragment count carries no intrinsic gDNA/RNA composition
+    information, only the strand mixture's precision. A node is solved by its strand likelihood + the
+    node-class prior + the neighbour imputation priors:
 
     * **single-strand (strand-observable) nodes** carry the **Beta(½,½) strand reference prior** (the
       Jeffreys term `(½−1)·(log f_g + log f_pos + log f_neg)`). It concentrates ``f_g`` at the

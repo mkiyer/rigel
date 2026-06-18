@@ -79,21 +79,19 @@ def calibrate(
 ) -> CalibrationResult:
     """Deconvolve the library into gDNA / RNA per node, then derive gdna_density_global.
 
-    Iterative all-gDNA bootstrap (``config.sweep_max_passes`` passes, re-fitting ``ρ_global`` + the
-    gDNA var~mean each pass and converging on per-node ``f_g``); see the module docstring for the data
-    flow. ``gdna_density_global``
-    may be ``0`` (a zero-gDNA library) and a node's deconvolved gDNA mass may be ``0`` (a pure-RNA
-    node); both are valid, graceful outputs — not failures.
+    Runs the belief-propagation sweep (``config.sweep_max_passes`` passes, converging on the per-node
+    pie); see the module docstring for the data flow. ``gdna_density_global`` may be ``0`` (a zero-gDNA
+    library) and a node's deconvolved gDNA mass may be ``0`` (a pure-RNA node); both are valid, graceful
+    outputs — not failures.
     """
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
 
-    # gDNA fragment-length effective lengths (PR 4c geometry): the region-contained
-    # length, the per-side boundary density length, and the region-free crossing mean.
+    # gDNA fragment-length effective lengths: the region-contained length, the per-side boundary
+    # density length, and the region-free crossing mean. ``rna_fl_pmf`` feeds the RNA-side effective
+    # lengths the sweep's per-strand RNA messages use (geometry built in bp_solver).
     region_eff_len = region_eff_length(region_arrays.region_size_bp, gdna_fl_pmf)
     boundary_eff_len = boundary_side_eff_length(gdna_fl_pmf, region_arrays.region_size_bp)
     fl_mean = boundary_eff_length(gdna_fl_pmf)
-    # ``rna_fl_pmf`` feeds the RNA-side effective lengths for the cross-node RNA imputation, which is
-    # deferred to Step 2 (CALIBRATION_ARCHITECTURE §8); it is unused by the Step-1 strand+global solve.
 
     # RNA strand balance: rna_sense_frac (κ) = posterior-mean spliced sense fraction. The strand
     # channel's discriminability w=(2κ−1)² (set inside the deconv) is the smooth strand→count
@@ -143,7 +141,7 @@ def calibrate(
     # Gauss-Seidel sweep (gDNA + per-strand RNA identity-density messages, per-pass frozen-snapshot var~mean
     # reliability, the global gDNA prior). The region nodes give the per-region gDNA fraction; the boundary
     # nodes give the per-side boundary flux feeding the per-locus prior (chain_boundary_side_deconv) — the
-    # first-class boundaries that retired the legacy deconv_sides / count-cleaning / I₀ path.
+    # first-class boundary nodes the sweep solves, projected to per-region sides for the prior.
     boundary_substrate = BoundarySubstrate.from_payload(payload)
     chain = build_node_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     geometry = build_node_geometry(

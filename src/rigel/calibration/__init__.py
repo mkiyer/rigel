@@ -1,4 +1,4 @@
-"""Rigel calibration — the iterative odds-propagation simplex-sweep deconvolution.
+"""Rigel calibration — the bipartite belief-propagation sweep deconvolution.
 
 This package recovers the library-wide gDNA contamination model and the
 per-region deconvolved mass from the accumulator payload. ``rigel quant``

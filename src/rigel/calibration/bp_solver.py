@@ -281,8 +281,7 @@ def _boundary_strand_stats(boundary_substrate, region_arrays):
     The allow mask is the **transcript-structure CONTINUITY gate** (`rna_imputation_transcript_structure.md`;
     plan v3 §3): a strand-s unspliced crossing is nascent RNA only where strand s is present on BOTH flanks, so
     ``free_s = has_s(left) & has_s(right)``. This BLOCKS RNA at a TSS/TES (intergenic↔exon → neither strand
-    continuous → a gDNA sink) and at a mixed exon↔AMBIG seam (the non-shared strand cannot cross) — distinct
-    from the legacy flank-OR ``boundary_nodes.boundary_node_class`` (retired in P4).
+    continuous → a gDNA sink) and at a mixed exon↔AMBIG seam (the non-shared strand cannot cross).
     """
     bs = boundary_substrate
     lr = np.asarray(bs.left_region, dtype=np.int64)
@@ -323,7 +322,7 @@ def _region_strand_stats(substrate, region_arrays):
     """Per-region strand-solve sufficient statistics + node class (the region twin of
     :func:`_boundary_strand_stats`). A region's admissible strand axes are its own ±transcript bits
     (``free_s`` from the strand class); its sided spliced floor is the contained sense spliced on a
-    single-strand region (0 on AMBIG, matching ``deconv_regions_sweep``)."""
+    single-strand region (0 on AMBIG — AMBIG spliced is not orientable)."""
     ts = np.asarray(region_arrays.strand_class)
     c = substrate.contained
     u_pos = c.n_unspliced_pos.astype(np.float64)
@@ -706,8 +705,8 @@ def chain_region_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> Node
 
 
 def chain_boundary_side_deconv(chain: NodeChain, belief: NodeBelief, substrate):
-    """Project the chain belief's BOUNDARY ``f_g`` onto each region's two SIDE views — the drop-in replacement
-    for ``deconv_sides`` (the boundary-flux that ``priors``' pooled-seam gDNA eff-len + ``derive`` consume).
+    """Project the chain belief's BOUNDARY ``f_g`` onto each region's two SIDE views — the boundary-flux that
+    ``priors``' pooled-seam gDNA eff-len + ``derive`` consume.
 
     Region ``r``'s left/right boundary IS its left/right chain neighbour; that boundary's solved ``f_g`` splits
     ``r``'s side crossing mass (``substrate.left[r]`` / ``substrate.right[r]`` — the boundary flux already

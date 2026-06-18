@@ -1,8 +1,11 @@
-"""Phase 1 — the density model ("count clue"): per-region gDNA density from OBSERVED counts.
+"""Per-region gDNA density from observed counts — the seed for the gDNA strand-overdispersion fit.
 
-Acyclic by construction: the gDNA density is read **directly** from count-observable nodes
-(where fragments are gDNA by construction) and **imputed locally** for the rest. It never consults
-a global ``gdna_density_global * L`` product, so there is no density->deconv->density feedback loop.
+The gDNA density is read **directly** from count-observable nodes (where fragments are gDNA by
+construction) and **imputed locally** for the rest. Its output (``count_gdna_frac`` + the
+count-observability masks) is consumed only by the gDNA strand-overdispersion fit (``gdna_strand``) as
+its seed selector and by the global prior as the signature partition — NOT by the per-node
+deconvolution itself (the belief-propagation sweep owns that). It never consults a global
+``gdna_density_global * L`` product, so there is no density->deconv->density feedback loop.
 
 Count-observability is a property of the region **signature** (4-bit exon/intron ± flags):
 
@@ -14,9 +17,9 @@ Count-observability is a property of the region **signature** (4-bit exon/intron
   transcript spanning the seam would put unspliced mature RNA there). Its crossing
   unspliced mass is then gDNA(+nascent).
 
-Raw counts (no strand cleaning): in the decoupled architecture the strand module owns the strand
-channel; this count module is the fallback for strand-unobservable / unstranded nodes and works on
-the raw unspliced count. The local imputation (no global sweep):
+Raw counts (no strand cleaning): the strand channel is owned by the belief-propagation sweep; this
+module works on the raw unspliced count purely to seed the strand-overdispersion fit. The local
+imputation (no global sweep):
 
 * **observable region** (intron/intergenic): its own contained ``count / region_eff_len``.
 * **non-observable region** (exon/AMBIG): the gDNA density of each *observable boundary side*
@@ -51,14 +54,14 @@ class NodeDensity:
     density: np.ndarray  # float64[R] — local gDNA density (fragments per effective bp)
     global_density: float  # ρ_global — the single pooled gDNA density over count-observable regions
     #   (Σ contained_gdna[obs] / Σ region_eff_len[obs]; 0.0 when none observable = the init-uniform /
-    #   zero-DNA limit). The PRE-sweep global baseline the simplex global prior shrinks toward — distinct
-    #   from derive.gdna_density_global (POST-sweep, all nodes). See per_node_deconv_hierarchy_design.md §4c.
+    #   zero-DNA limit). The PRE-sweep global baseline the sweep's global prior shrinks toward — distinct
+    #   from derive.gdna_density_global (POST-sweep, all nodes).
     count_gdna_frac: (
         np.ndarray
     )  # float64[R] — count module's gDNA fraction g_count = clip(density·region_eff_len /
     #   contained_mass): the gDNA fraction of the contained unspliced mass from the (raw) local gDNA
     #   density. KEPT as the gDNA strand-overdispersion fit SEED selector (gdna_strand.py) — NOT a
-    #   gDNA-fraction vote in the solve (the count prior was removed in the Step-1 precision rebuild).
+    #   gDNA-fraction vote in the solve (the BP sweep owns the gDNA/RNA call).
     region_count_observable: np.ndarray  # bool[R] — count-observable region (non-exonic)
     boundary_count_observable: np.ndarray  # bool[R] — count-observable boundary right of region r
     n_region_count_observable: int

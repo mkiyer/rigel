@@ -1,4 +1,4 @@
-"""Phase 4 — derive the global gDNA density (a QC scalar).
+"""Derive the global gDNA density — a library-average QC scalar.
 
 An aggregate of the converged per-node deconvolution into the library-average gDNA density scalar:
 

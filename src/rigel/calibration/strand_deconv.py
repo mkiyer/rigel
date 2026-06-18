@@ -10,9 +10,6 @@ deconvolution lives in the chain sweep. This module retains only the two pieces 
   weight)`` seeds for the gDNA strand-overdispersion fit (:mod:`rigel.calibration.gdna_strand`), complementing
   the contained-region seeds (needed under hybrid capture, which depletes off-target intergenic / intronic
   gDNA). The weight is the count-clue gDNA fraction (≈ 1 for a count-observable side — gDNA by signature).
-
-The legacy standalone strand/count blend (``deconv_sides`` / ``strand_deconvolve`` / ``cleaned_gdna_count``)
-was retired in the BP rebuild — the chain sweep's per-node ψ solve subsumes it; its history is in git.
 """
 
 from __future__ import annotations

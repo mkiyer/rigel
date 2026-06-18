@@ -69,7 +69,7 @@ def region_eff_length(region_len_bp: np.ndarray, fl_pmf: np.ndarray) -> np.ndarr
 
 
 def boundary_side_eff_length(fl_pmf: np.ndarray, region_side_len_bp: np.ndarray) -> np.ndarray:
-    """Per-side boundary **density** effective length ``E_f[min(ℓ, R_side)]`` (R2/R3, Phase 3.1).
+    """Per-side boundary **density** effective length ``E_f[min(ℓ, R_side)]``.
 
     A crossing fragment of length ``ℓ`` contributes at most ``min(ℓ, R_side)`` bases of mass
     to the side bounded by its region of length ``R_side`` — so the length the fractional
