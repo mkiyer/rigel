@@ -32,7 +32,8 @@ _STRAND_PRIOR = 0.5  # Beta(½,½) strand reference prior (matches strand_deconv
 
 def _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, kappa, od_g, od_r,
                   lattice, strand_obs=None, global_mu=None, global_tau=0.0,
-                  gdna_imp_frac=None, gdna_imp_precision=None):
+                  gdna_imp_frac=None, gdna_imp_precision=None,
+                  rna_imp_frac=None, rna_imp_precision=None):
     """ψ_i over the lattice — strand mixture + sided spliced lower bound + node-class prior + imputation.
 
     The Bayesian hierarchy (CALIBRATION_ARCHITECTURE.md §1), with a **node-class-dependent** prior. The
@@ -83,6 +84,17 @@ def _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, 
     if gdna_imp_frac is not None and gdna_imp_precision is not None:
         ti = np.asarray(gdna_imp_precision, dtype=np.float64)[:, None]
         psi = psi - 0.5 * ti * (f_g[None, :] - np.asarray(gdna_imp_frac, dtype=np.float64)[:, None]) ** 2
+    # RNA IMPUTATION prior: per-strand Gaussian pull of f± toward the neighbour-imputed strand-s fraction
+    # (each strand INDEPENDENT — the unspliced mass is partitioned by the fraction state, never shared). Since
+    # f₊+f₋+f_g=1, pulling f± toward their imputed RNA sharpens f_g. τ=0 (no strand-s RNA neighbour) ⇒ no-op.
+    # CALIBRATION_ARCHITECTURE §1.2 + the R↔B↔R chain (the nascent crosses exon↔intron via the boundary node).
+    if rna_imp_frac is not None and rna_imp_precision is not None:
+        for f_axis, mu_s, tau_s in (
+            (f_pos, rna_imp_frac[0], rna_imp_precision[0]),
+            (f_neg, rna_imp_frac[1], rna_imp_precision[1]),
+        ):
+            tr = np.asarray(tau_s, dtype=np.float64)[:, None]
+            psi = psi - 0.5 * tr * (f_axis[None, :] - np.asarray(mu_s, dtype=np.float64)[:, None]) ** 2
     forbid = ((~allow_pos)[:, None] & (f_pos[None, :] > _EPS)) | (
         (~allow_neg)[:, None] & (f_neg[None, :] > _EPS)
     )
@@ -109,32 +121,47 @@ def _fg_var(belief, f_g_g):
     return np.maximum(post @ (f_g_g**2) - mean**2, 0.0)
 
 
+def _axis_mean(belief, axis_g):
+    """Per-node posterior MEAN of a lattice axis (f_pos or f_neg) over the belief. Feeds the per-strand RNA
+    imputation (the current-state partition of the unspliced mass — the strands never share it)."""
+    post = np.exp(belief - logsumexp(belief, axis=1, keepdims=True))  # (m,P)
+    return post @ axis_g
+
+
 def _solve_nodes(
     u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, strand_obs,
     mass_unspl, mass_spliced, *, kappa, od_g, od_r, n_grid,
     mu_global=None, global_tau=0.0, gdna_imp_frac=None, gdna_imp_precision=None,
+    rna_imp_frac=None, rna_imp_precision=None,
 ) -> NodeDeconv:
     """The node-agnostic per-node simplex solve — solves an array of nodes (regions OR boundaries) from their
     per-node sufficient statistics, with no knowledge of node type. Each node's belief IS its local evidence
-    ``ψ_i`` (``_local_loglik``: strand mixture + sided spliced floor + node-class prior + imputation pull); the
-    cross-node imputation enters ψ_i as a prior, computed upstream. ``f_g`` = posterior median over the lattice,
-    ``f_g_var`` = posterior variance; a node with no fragments (``u_pos+u_neg == 0``) reports ``f_g = 0``.
-    The region/boundary wrappers build the arrays + the global baseline and call this core.
+    ``ψ_i`` (``_local_loglik``: strand mixture + sided spliced floor + node-class prior + imputation pulls);
+    the cross-node imputation enters ψ_i as a prior, computed upstream. ``f_g`` = posterior median over the
+    lattice, ``f_g_var`` = posterior variance, ``f_pos``/``f_neg`` = posterior MEANS (the current-state
+    partition for the per-strand RNA imputation); a node with no fragments (``u_pos+u_neg == 0``) reports
+    ``f_g = f_pos = f_neg = 0``. The region/boundary wrappers build the arrays + the global baseline and call
+    this core.
     """
     f_pos_g, f_neg_g, f_g_g = _simplex_lattice(int(n_grid))
     lattice = (f_pos_g, f_neg_g, f_g_g)
     psi = _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, kappa,
                         od_g, od_r, lattice,
                         strand_obs=strand_obs, global_mu=mu_global, global_tau=global_tau,
-                        gdna_imp_frac=gdna_imp_frac, gdna_imp_precision=gdna_imp_precision)
+                        gdna_imp_frac=gdna_imp_frac, gdna_imp_precision=gdna_imp_precision,
+                        rna_imp_frac=rna_imp_frac, rna_imp_precision=rna_imp_precision)
     f_g = _fg_median(psi, f_g_g)
     f_g_var = _fg_var(psi, f_g_g)
+    f_pos = _axis_mean(psi, f_pos_g)
+    f_neg = _axis_mean(psi, f_neg_g)
     active = (u_pos + u_neg) > 0.0
     f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
     f_g_var = np.where(active, f_g_var, 0.0)
+    f_pos = np.where(active, np.clip(f_pos, 0.0, 1.0), 0.0)
+    f_neg = np.where(active, np.clip(f_neg, 0.0, 1.0), 0.0)
     return NodeDeconv(
         gdna_mass=f_g * mass_unspl, rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
-        gdna_frac=f_g, gdna_frac_var=f_g_var,
+        gdna_frac=f_g, gdna_frac_var=f_g_var, rna_pos_frac=f_pos, rna_neg_frac=f_neg,
     )
 
 
@@ -142,6 +169,7 @@ def deconv_regions_sweep(
     substrate, region_arrays, *, rna_sense_frac, gdna_strand_overdispersion=0.0,
     rna_strand_overdispersion=0.0, n_grid=20, rho_global=0.0, region_eff_len=None, global_tau=None,
     gdna_imp_frac=None, gdna_imp_precision=None,
+    rna_imp_frac_pos=None, rna_imp_frac_neg=None, rna_imp_precision_pos=None, rna_imp_precision_neg=None,
 ):
     """Per-region gDNA fraction by the per-node grid solve (see module docstring).
 
@@ -184,10 +212,17 @@ def deconv_regions_sweep(
         mu_global = None
         gtau = 0.0
 
+    # Per-strand RNA imputation pulls (CALIBRATION_ARCHITECTURE §1.2; the R↔B↔R chain): (μ_pos, μ_neg) +
+    # (τ_pos, τ_neg). None ⇒ no RNA prior (a no-op in _local_loglik).
+    rna_imp_frac = None if rna_imp_frac_pos is None else (rna_imp_frac_pos, rna_imp_frac_neg)
+    rna_imp_precision = (
+        None if rna_imp_precision_pos is None else (rna_imp_precision_pos, rna_imp_precision_neg)
+    )
     return _solve_nodes(
         u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, strand_obs,
         mass_unspl, mass_spliced,
         kappa=float(rna_sense_frac), od_g=gdna_strand_overdispersion, od_r=rna_strand_overdispersion,
         n_grid=n_grid, mu_global=mu_global, global_tau=gtau,
         gdna_imp_frac=gdna_imp_frac, gdna_imp_precision=gdna_imp_precision,
+        rna_imp_frac=rna_imp_frac, rna_imp_precision=rna_imp_precision,
     )

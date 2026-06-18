@@ -56,6 +56,11 @@ class NodeDeconv:
     rna_mass: np.ndarray  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
     gdna_frac: np.ndarray  # float64[K] — reported gDNA fraction of the UNSPLICED mass
     gdna_frac_var: np.ndarray  # float64[K] — posterior variance (0 for count-routed nodes)
+    # per-strand RNA fractions of the UNSPLICED mass (posterior means; f_pos+f_neg+gdna_frac = 1). The
+    # simplex sweep populates these for the per-strand RNA imputation (the bipartite R↔B↔R chain); the
+    # legacy deconv_sides path leaves them None.
+    rna_pos_frac: "np.ndarray | None" = None  # float64[K] — f_pos
+    rna_neg_frac: "np.ndarray | None" = None  # float64[K] — f_neg
 
 
 @dataclass(frozen=True, slots=True)
