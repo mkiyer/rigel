@@ -40,6 +40,7 @@ from .simplex_sweep import (
     _simplex_lattice,
     _solve_nodes,
 )
+from .strand_deconv import NodeDeconv
 from .variance_model import MonotoneVarMean
 
 __all__ = [
@@ -54,6 +55,7 @@ __all__ = [
     "global_gdna_prior",
     "fit_gdna_varmean",
     "gdna_sweep",
+    "chain_region_deconv",
 ]
 
 _EPS = 1.0e-9
@@ -611,4 +613,30 @@ def gdna_sweep(
         NodeBelief(f_pos=f_pos, f_neg=f_neg, f_g=f_g,
                    var_pos=belief.var_pos, var_neg=belief.var_neg, var_gdna=var_g),
         deltas,
+    )
+
+
+def chain_region_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> NodeDeconv:
+    """Project the chain belief's REGION nodes back to a region-keyed :class:`NodeDeconv` — the transitional
+    region projection the existing ``CalibrationResult`` / ``priors`` / ``derive`` consume (the per-node
+    first-class schema rewire is P4). gDNA / RNA masses from each region's solved ``f_g`` over its contained
+    unspliced (+ the always-RNA contained spliced) mass."""
+    kind = np.asarray(chain.kind)
+    idx = np.asarray(chain.ref_idx, dtype=np.int64)
+    reg = kind == REGION
+    mass_u = np.asarray(substrate.contained.mass_unspliced, dtype=np.float64)
+    mass_s = np.asarray(substrate.contained.mass_spliced, dtype=np.float64)
+    R = mass_u.shape[0]
+    f_g = np.zeros(R)
+    f_pos = np.zeros(R)
+    f_neg = np.zeros(R)
+    f_gv = np.zeros(R)
+    ri = idx[reg]
+    f_g[ri] = belief.f_g[reg]
+    f_pos[ri] = belief.f_pos[reg]
+    f_neg[ri] = belief.f_neg[reg]
+    f_gv[ri] = belief.var_gdna[reg]
+    return NodeDeconv(
+        gdna_mass=f_g * mass_u, rna_mass=(1.0 - f_g) * mass_u + mass_s,
+        gdna_frac=f_g, gdna_frac_var=f_gv, rna_pos_frac=f_pos, rna_neg_frac=f_neg,
     )

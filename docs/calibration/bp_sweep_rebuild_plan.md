@@ -207,9 +207,20 @@ NO RNA imputation, NO boundary co-solve). Strip the TEMP trace. Build the unifie
 + `NodeBelief` densities; **consolidate `effective_length.py`** (no shipped-seam change). *Gate: suite green.*
 **P1** — init §6. *Gate: zero-gDNA introns init ~0 via strand; intergenic locked.*
 **P2** — gDNA-only directional sweep (§3 gDNA identity density, §4, §5). *Gate: monotone convergence; zero-gDNA
-clean; complex-loci ≤5024; net-flow non-regressing; factor-1 on uniform-gDNA toy.*
+clean; complex-loci ≤5024; net-flow non-regressing; factor-1 on uniform-gDNA toy.* **SHIPPED with a documented
+exception (user decision 2026-06-18):** P2a (the `bp_solver.gdna_sweep` driver) + P2b (wired into `calibrate`)
+are committed. zero-gDNA IMPROVED (exon false-gDNA 0.017→0.000) and the factor-1 / monotone toy gates pass, but
+**complex-loci regressed 5020→~5277 (+5%)** — small systematic gDNA UNDER-calls at large-mass AMBIG, the
+documented 2c message-over-confidence regime (`ARCHITECTURE` Step-2c): the chain's boundary nodes under-call
+their gDNA vs the old count-informed `deconv_sides`, because a boundary cannot yet model its RNA crossing (that
+is P3). The both-flank combine made it worse (5885) — confirming it is τ-too-high / source-too-low, not a
+combine-count, and the honest fix is NOT a magic τ-scale (`ARCHITECTURE §6` deleted I₀/q_rna). Per `ARCHITECTURE
+§8` ("a temporary recalibration regression during the rebuild is pre-accepted — recover via the reliability
+layer"), this regression is **accepted and recovered in P3** (the RNA message lets the boundary nodes solve
+accurately → better gDNA messages → AMBIG recovers). The ``complex-loci ≤5024`` gate is therefore moved to
+**P3** (where it must IMPROVE on the 5020 baseline).
 **P3** — RNA density message + spliced (§3 RNA). *Gate: intron phantom→0; r7=0; AMBIG via precision (τ-vs-Fisher
-printed); complex-loci improves; factor-1 on uniform-RNA toy.*
+printed); complex-loci RECOVERS ≤5020 (the P2 +5% is expected to close here); factor-1 on uniform-RNA toy.*
 **P4** — per-node schema + priors/derive rewire; retire `deconv_sides`/I0/`gdna_deconv_quantile` in dependency
 order (`ARCHITECTURE §6.4`). Golden update LAST.
 **P5 (deferred)** — explicit capture-enrichment correction across capture edges (the open problem); only if a
