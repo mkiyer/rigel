@@ -43,8 +43,8 @@ from .bp_solver import (
     build_node_geometry,
     build_node_statics,
     chain_region_deconv,
-    gdna_sweep,
     init_beliefs,
+    node_sweep,
 )
 from .density_model import node_gdna_density
 from .derive import gdna_density_global
@@ -211,7 +211,7 @@ def calibrate(
         rna_strand_overdispersion=rna_strand_overdispersion,
         n_grid=config.sweep_n_grid, statics=statics,
     )
-    belief, sweep_deltas = gdna_sweep(
+    belief, sweep_deltas = node_sweep(
         chain, statics, geometry, belief, region_arrays,
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,

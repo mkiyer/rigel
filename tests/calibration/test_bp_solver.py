@@ -16,7 +16,7 @@ from rigel.calibration.bp_solver import (
     NodeGeometry,
     build_node_geometry,
     build_node_statics,
-    gdna_sweep,
+    node_sweep,
     global_gdna_prior,
     init_beliefs,
     node_densities,
@@ -319,7 +319,7 @@ def test_gdna_sweep_factor1_uniform():
     geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
     st = build_node_statics(chain, substrate, bsub, region_arrays)
     belief = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.7, n_grid=40, statics=st)
-    final, _ = gdna_sweep(chain, st, geom, belief, region_arrays, rna_sense_frac=0.7,
+    final, _ = node_sweep(chain, st, geom, belief, region_arrays, rna_sense_frac=0.7,
                           n_grid=40, max_passes=8, convergence_delta=1e-4)
     dens = node_densities(final, geom)
     rid = [1, 3, 5]  # the region nodes (R0 intergenic, R1 AMBIG, R2 intergenic)
@@ -354,7 +354,7 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     st = build_node_statics(chain, substrate, bsub, region_arrays)
     belief = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=40, statics=st)
     assert belief.f_g[3] == 1.0  # AMBIG starts all-gDNA
-    final, deltas = gdna_sweep(chain, st, geom, belief, region_arrays, rna_sense_frac=0.95,
+    final, deltas = node_sweep(chain, st, geom, belief, region_arrays, rna_sense_frac=0.95,
                                n_grid=40, max_passes=10, convergence_delta=1e-4)
     assert final.f_g[3] < 0.15  # the AMBIG phantom is pulled down (no phantom gDNA)
     assert final.f_g[1] < 0.15 and final.f_g[5] < 0.15  # the introns stay RNA via the strand
