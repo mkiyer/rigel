@@ -1,35 +1,30 @@
-"""calibrate() — the fractional-accumulator calibrator (per-node simplex solve, iterated all-gDNA bootstrap).
+"""calibrate() — the calibrator: deconvolve each node's UNSPLICED mass into ``(RNA₊, RNA₋, gDNA)``.
 
-The contained-region split is solved per node on the **2-simplex** ``(sense-RNA / antisense-RNA / gDNA)``
-(calibration models RNA-vs-gDNA only; the per-locus EM separates nascent from mature downstream), iterated
-over an **all-gDNA bootstrap**. Per the count-zero-information architecture (CALIBRATION_ARCHITECTURE.md §0),
-a node's gDNA/RNA composition is determined by exactly two terms here — a **strand likelihood** (the
-Beta-Binomial tilt of the per-strand counts, the only INTRINSIC per-node signal; the count enters ONLY as its
-overdispersed Fisher information) and a **global gDNA prior** (the foundation, ``ρ_global`` at the MAD-spread
-precision ``τ_global``, governing nodes the strand leaves undetermined)::
+Calibration models **RNA vs gDNA only** (the per-locus EM separates nascent from mature downstream). Per the
+count-zero-information architecture (`CALIBRATION_ARCHITECTURE.md` §0) a node's composition is set by three
+sources — the **strand likelihood** (the Beta-Binomial tilt of the per-strand counts, the only INTRINSIC
+signal; the count enters ONLY as its overdispersed Fisher information), the **cross-node imputation** (the
+neighbour density messages, at the modeled var~mean reliability), and the **global gDNA prior** (the
+population baseline ``ρ_global`` at the MAD-spread precision). The solver is the bipartite belief-propagation
+SWEEP over the unified region↔boundary chain (:mod:`rigel.calibration.bp_solver`)::
 
-    substrate
+    substrate (+ boundary_substrate)
       -> strand balance: rna_sense_frac (κ)
-      -> node_gdna_density (RAW) -> fit gdna/rna strand Beta-Binomial overdispersions (seed)
-      -> strand_deconvolve -> cleaned_gdna_count: clean the BOUNDARY crossings (nascent removal)
-      -> node_gdna_density (RAW contained + CLEANED boundaries): the boundary anchors' count input
-      -> deconv_sides ONCE: the fixed boundary gDNA anchors (the boundary-flux transport into priors)
-      -> for each pass (signature-binary all-gDNA init):
-           rho_global re-fit on the PREVIOUS pass's gDNA estimate (the iterating foundation)
-           -> deconv_regions_sweep: the per-node strand + global simplex solve
-           -> converge on per-node f_g
+      -> node_gdna_density (RAW) -> fit gDNA / RNA strand Beta-Binomial overdispersions (seed)
+      -> build chain + geometry + statics -> signature-binary init (G1/G2/G3)
+      -> node_sweep: directional (L→R, R→L) Gauss-Seidel passes — each node integrates its strand
+           likelihood + the node-class prior + the gDNA & per-strand RNA identity-density messages from
+           its sweep-direction neighbour (precision = the per-pass frozen-snapshot var~mean reliability);
+           ρ_global re-fit each pass. Converge on the per-node pie.
+      -> chain_region_deconv  -> per-region gDNA / RNA contained mass
+      -> chain_boundary_side_deconv -> per-region boundary-side flux (gDNA / RNA), for the per-locus prior
       -> gdna_density_global (the library-average density QC scalar)
 
-Pass 0 is the **signature-binary all-gDNA init**: every node starts at ``f_gdna=1`` carrying its full unspliced
-MASS (count-free; CALIBRATION_ARCHITECTURE §3) ⇒ ``ρ_global`` = the observable-node total mass density, a
-deliberate over-estimate the iteration drives down as the strand removes RNA. Cross-node imputation (the
-reliability-weighted neighbour propagation) is deferred to Step 2; until then a strand-weak node falls to the
-global foundation (``ρ_global ≈ 0`` in a pure-RNA library ⇒ no phantom gDNA). The boundary SIDES are
-deconvolved ONCE (``deconv_sides``) as the fixed gDNA anchors whose mass feeds the per-locus prior via the
-boundary-flux transport (``priors``), post-loop. The library-average gDNA density (a QC scalar) is **derived**
-from the aggregate deconvolved mass. The per-region gDNA length contraction under capture is the IPR of the
-deconvolved gDNA mass over the per-region effective supports (``gdna_region_eff_len`` + ``gdna_boundary_len``),
-applied later in ``priors.assemble_priors``.
+The boundary nodes are first-class (they carry the one-sided, motif-stranded spliced RNA as a fixed floor +
+density term); their per-side gDNA/RNA mass feeds the per-locus prior via :mod:`rigel.calibration.priors`. The
+per-region gDNA length contraction under capture is the IPR of the deconvolved gDNA mass over the per-region
+effective supports (``gdna_region_eff_len`` + ``gdna_boundary_len``), applied later in ``priors``. A
+zero-gDNA library (``gdna_density_global == 0``, per-node gDNA mass ``0``) is a valid, graceful output.
 """
 
 from __future__ import annotations
