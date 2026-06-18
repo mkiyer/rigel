@@ -41,11 +41,13 @@ __all__ = [
     "NodeDensities",
     "node_densities",
     "init_beliefs",
+    "global_gdna_prior",
 ]
 
 _EPS = 1.0e-9
 _POS_BITS = BIT_EXON_POS | BIT_INTRON_POS
 _NEG_BITS = BIT_EXON_NEG | BIT_INTRON_NEG
+_MAD_TO_SIGMA = 1.4826  # normal-consistency constant: σ ≈ 1.4826·MAD (a mathematical constant, not a knob)
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,3 +366,31 @@ def init_beliefs(
         f_pos=pick(r_fp, b_fp), f_neg=pick(r_fn, b_fn), f_g=pick(r_fg, b_fg),
         var_pos=pick(r_vp, b_vp), var_neg=pick(r_vn, b_vn), var_gdna=pick(r_vg, b_vg),
     )
+
+
+def global_gdna_prior(region_f_g, region_mass_unspliced, region_eff_gdna, region_count_observable):
+    """The population gDNA baseline ``ρ_global`` + its robust density spread ``σ_global`` (plan v3 §6 / §4 step 3).
+
+    ``ρ_global`` is the gDNA density over the **count-observable** (signature-known non-exonic: intergenic /
+    intron) regions' current gDNA mass ``f_g·M_u`` — the cleanest gDNA evidence, restricted to avoid the
+    AMBIG/exon RNA the strand cannot remove inflating the baseline (`calibrate.py`'s carried-forward rule).
+    ``σ_global`` is the robust between-region MAD spread of the per-region gDNA density over ALL regions with
+    data (the population spread an unanchored node faces). Both are recomputed each sweep pass on the running
+    gDNA estimate. ``ρ_global → 0`` (and ``σ_global → 0``) in a pure-RNA library — the zero-gDNA pin, no
+    phantom gDNA. The per-node application (the density→fraction jacobian ``(E/M)²`` + the 1-pseudo-observation
+    precision floor) lives in the sweep, which holds each node's own geometry.
+    """
+    f_g = np.asarray(region_f_g, dtype=np.float64)
+    mass = np.asarray(region_mass_unspliced, dtype=np.float64)
+    eff = np.maximum(np.asarray(region_eff_gdna, dtype=np.float64), _EPS)
+    obs = np.asarray(region_count_observable, dtype=bool)
+    gdna_mass = f_g * mass
+    rho_global = (
+        float(gdna_mass[obs].sum() / max(float(eff[obs].sum()), _EPS)) if obs.any() else 0.0
+    )
+    mu = gdna_mass / eff  # per-region gDNA density
+    active = mu[mass > 0.0]
+    sigma_global = (
+        _MAD_TO_SIGMA * float(np.median(np.abs(active - np.median(active)))) if active.size else rho_global
+    )
+    return rho_global, sigma_global

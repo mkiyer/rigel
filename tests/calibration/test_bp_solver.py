@@ -15,6 +15,7 @@ from rigel.calibration.bp_solver import (
     NodeBelief,
     NodeGeometry,
     build_node_geometry,
+    global_gdna_prior,
     init_beliefs,
     node_densities,
 )
@@ -254,3 +255,36 @@ def test_init_tss_boundary_is_black_hole():
     b = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=60)
     # B1 (node id 2) is the TSS: a locked gDNA sink despite the sense tilt.
     assert b.f_g[2] == 1.0 and b.var_gdna[2] == 0.0 and b.var_pos[2] == 0.0 and b.var_neg[2] == 0.0
+
+
+def test_global_prior_zero_gdna_library():
+    # A pure-RNA library: the count-observable (intergenic/intron) regions carry no gDNA mass.
+    f_g = np.array([0.0, 0.0, 0.0])  # the strand pinned every node to RNA
+    mass = np.array([100.0, 200.0, 80.0])
+    eff = np.array([900.0, 1900.0, 700.0])
+    obs = np.array([True, True, False])  # region 2 is exonic (not count-observable)
+    rho, sigma = global_gdna_prior(f_g, mass, eff, obs)
+    assert rho == 0.0  # no phantom gDNA baseline
+    assert sigma == 0.0
+
+
+def test_global_prior_uniform_gdna_density():
+    # Uniform gDNA at density ρ over the count-observable regions: ρ_global recovers ρ, spread ~0.
+    rho_true = 0.5
+    eff = np.array([700.0, 1400.0])
+    mass = np.array([1000.0, 2000.0])
+    f_g = rho_true * eff / mass  # gDNA mass = ρ·eff ⇒ f_g·M = ρ·eff
+    obs = np.array([True, True])
+    rho, sigma = global_gdna_prior(f_g, mass, eff, obs)
+    assert np.isclose(rho, rho_true)
+    assert sigma < 1e-9
+
+
+def test_global_prior_excludes_exon_from_baseline():
+    # An exonic region with high apparent gDNA must NOT enter ρ_global (the baseline is observable-only).
+    f_g = np.array([0.1, 0.9])
+    mass = np.array([100.0, 100.0])
+    eff = np.array([900.0, 900.0])
+    obs = np.array([True, False])  # region 1 (exon) excluded from the baseline
+    rho, _ = global_gdna_prior(f_g, mass, eff, obs)
+    assert np.isclose(rho, 0.1 * 100.0 / 900.0)  # only the observable region 0 contributes
