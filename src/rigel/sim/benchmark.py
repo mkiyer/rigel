@@ -149,23 +149,11 @@ class BenchmarkResult:
         return max(t.rel_error for t in self.transcripts)
 
     @property
-    def n_quantified(self) -> float:
-        """Total counts assigned by the pipeline."""
-        return self.total_observed
-
-    @property
     def alignment_rate(self) -> float:
         """Fraction of simulated fragments that entered the pipeline."""
         if self.n_simulated == 0:
             return 0.0
         return self.n_fragments / self.n_simulated
-
-    @property
-    def quantification_rate(self) -> float:
-        """Fraction of pipeline fragments that received a quantification."""
-        if self.n_fragments == 0:
-            return 0.0
-        return self.total_observed / self.n_fragments
 
     @property
     def gdna_abs_diff(self) -> float:

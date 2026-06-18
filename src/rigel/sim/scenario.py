@@ -26,7 +26,6 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-import pysam
 
 from ..index import TranscriptIndex
 from ..transcript import Transcript
@@ -195,15 +194,6 @@ class ScenarioResult:
         return dict(count_mrna_by_transcript_from_fastq(self.fastq_r1))
 
     # -- BAM-based ground truth (oracle mode) ---------------------------------
-
-    def _parse_bam_qnames(self) -> list[str]:
-        """Return deduplicated query names from the BAM (one per fragment)."""
-        seen: set[str] = set()
-        with pysam.AlignmentFile(str(self.bam_path), "rb",
-                                 check_sq=False) as bam:
-            for read in bam:
-                seen.add(read.query_name)
-        return list(seen)
 
     def ground_truth_from_bam(self) -> dict[str, int]:
         """Parse BAM read names for ground-truth mRNA fragment counts.

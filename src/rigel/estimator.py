@@ -242,11 +242,6 @@ class AbundanceEstimator:
         self._t_eff_len_em = arr
 
     @property
-    def em_effective_lengths(self) -> np.ndarray:
-        """Per-transcript EM effective lengths (read-only)."""
-        return self._t_eff_len_em
-
-    @property
     def gdna_em_count(self) -> float:
         """Total EM-assigned gDNA count across all loci."""
         return self._gdna_em_total

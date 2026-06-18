@@ -114,12 +114,6 @@ class _FastqBuffer:
         self._size = buf_size
         self._count = 0
 
-    def write_record(self, qname: str, seq: str, quals: str) -> None:
-        self._parts.append(f"@{qname}\n{seq}\n+\n{quals}\n")
-        self._count += 1
-        if self._count >= self._size:
-            self.flush()
-
     def write_records_batch(
         self,
         qnames: list[str],

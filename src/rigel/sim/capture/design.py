@@ -201,23 +201,6 @@ def _bed12_row_from_blocks(
     ])
 
 
-def _bed12_row_for_probe(
-    transcript: Transcript,
-    start: int,
-    end: int,
-    probe_index: int,
-) -> str | None:
-    if transcript.ref is None or transcript.t_id is None:
-        return None
-    blocks = transcript_to_genomic_blocks(start, end, transcript)
-    return _bed12_row_from_blocks(
-        str(transcript.ref),
-        transcript.strand,
-        f"{transcript.t_id}:probe_{probe_index}",
-        blocks,
-    )
-
-
 def write_random_capture_probes(
     transcripts: list[Transcript],
     path: Path,

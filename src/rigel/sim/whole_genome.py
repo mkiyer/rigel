@@ -549,14 +549,6 @@ def apply_random_nrna_fraction(
     return realized_ratio
 
 
-def total_nrna_to_mrna_ratio(transcripts: list[Transcript]) -> float:
-    """Return total nRNA abundance divided by total mature RNA abundance."""
-    total_mrna = sum(t.abundance or 0.0 for t in transcripts)
-    if total_mrna <= 0:
-        return 0.0
-    return sum(t.nrna_abundance for t in transcripts) / total_mrna
-
-
 def assign_file_abundances(
     transcripts: list[Transcript],
     tsv_path: str | Path,
