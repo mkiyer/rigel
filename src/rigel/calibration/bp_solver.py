@@ -61,6 +61,8 @@ __all__ = [
 ]
 
 _EPS = 1.0e-9
+_MSG_PSEUDOCOUNT = 1.0  # one pseudo-observation: a density from a finite count can never have zero
+#                         sampling variance, so a message precision can never escape to ∞ (var stabilizer).
 _POS_BITS = BIT_EXON_POS | BIT_INTRON_POS
 _NEG_BITS = BIT_EXON_NEG | BIT_INTRON_NEG
 _MAD_TO_SIGMA = 1.4826  # normal-consistency constant: σ ≈ 1.4826·MAD (a mathematical constant, not a knob)
@@ -480,7 +482,11 @@ def _edge_varmean(chain, rho_left, rho_right, eff_left, eff_right, live):
         idx, s = idx[keep], s[keep]
         dr, sr, de, se = d_rho[idx], s_rho[s], d_e[idx], s_e[s]
         ok = (dr > 0.0) & (sr > 0.0)
-        means.append(dr[ok])
+        # Index σ²_bio by the MEAN of the two node densities — monotone-compatible (the cross-node
+        # dispersion scales with the average level) AND uses both endpoints, vs indexing by ρ_dst alone
+        # (query is then circular at the crushed dest) or ρ_src alone (breaks monotonicity: low-source /
+        # high-dest edges are high-residual at low μ).
+        means.append(0.5 * (dr[ok] + sr[ok]))
         raws.append((dr[ok] - sr[ok]) ** 2)
         offs.append(dr[ok] / de[ok] + sr[ok] / se[ok])
     return means, raws, offs
@@ -522,16 +528,30 @@ def fit_rna_varmean(
     return _fit_offset(mp + mn, rp + rn, op + on)
 
 
-def _message(rho_src, eff_src, eff_dst, mass_dst, rho_dst_cur, varmean, spliced_dst=0.0):
+def _message(rho_src, eff_src, eff_dst, mass_dst, mass_src, rho_dst_cur, varmean, spliced_dst=0.0):
     """One density message (source → dest) as the dest's fraction prior ``(μ_f, τ_f)`` (plan v3 §3/§5). Mean =
     the IDENTITY density ``ρ_src`` matched at the dest: its known spliced (free info, gDNA: 0) is subtracted so
     only the dest's UNSOLVED unspliced fraction is informed — ``μ_f = (ρ_src·E_dst − spliced_dst)/M_dst``.
-    Density precision ``τ_ρ = 1/(σ²_bio(ρ_dst) + ρ_src/E_src)`` (the learned biological dispersion + the
-    predictor's Poisson sampling noise); jacobian to fraction precision ``τ_f = τ_ρ·(M_dst/E_dst)²``."""
+    Density precision ``τ_ρ = 1/(σ²_bio(μ) + ρ_src/E_src)`` (the learned biological dispersion + the
+    predictor's Poisson sampling noise); jacobian to fraction precision ``τ_f = τ_ρ·(M_dst/E_dst)²``, then a
+    BINOMIAL count-currency floor (below)."""
     mu_f = float(np.clip((rho_src * eff_dst - spliced_dst) / max(mass_dst, _EPS), 0.0, 1.0))
-    sigma2_bio = float(varmean.predict(np.array([max(rho_dst_cur, _EPS)]))[0])
-    tau_rho = 1.0 / max(sigma2_bio + rho_src / max(eff_src, _EPS), _EPS)
+    # Query σ²_bio at the MEAN of the source + (snapshot) destination densities — consistent with the
+    # mean-indexed fit; uses both endpoints and is less circular than the crushed dest alone.
+    mu_q = max(0.5 * (rho_src + rho_dst_cur), _EPS)
+    sigma2_bio = float(varmean.predict(np.array([mu_q]))[0])
+    # A 1-pseudo-observation Poisson floor on the predictor — a density estimated from a finite count can
+    # never have zero sampling variance, so τ_ρ is bounded (≤ E_src²) and can never reach ∞.
+    pois = (rho_src + _MSG_PSEUDOCOUNT / max(eff_src, _EPS)) / max(eff_src, _EPS)
+    tau_rho = 1.0 / max(sigma2_bio + pois, _EPS)
     tau_f = tau_rho * (mass_dst / max(eff_dst, _EPS)) ** 2
+    # BINOMIAL count-currency variance floor (precision_overshoot_design.md §4A + reviewer critique): the
+    # imputed fraction cannot be known better than its binomial sampling variance ``f(1−f)/N`` from the
+    # OBSERVED fragment counts of the SOURCE (its information) AND the DESTINATION (its own capacity).
+    # f(1−f)→0 at the simplex walls ⇒ a clean 0/1 message still PINS (no flat-floor anti-pinning); the
+    # masses are observed counts (frozen ⇒ no live-sweep feedback loop). No magic constant.
+    var_floor = mu_f * (1.0 - mu_f) * (1.0 / max(mass_src, _EPS) + 1.0 / max(mass_dst, _EPS))
+    tau_f = 1.0 / (1.0 / max(tau_f, _EPS) + var_floor)
     return mu_f, tau_f
 
 
@@ -585,22 +605,15 @@ def node_sweep(
     mass_global = np.where(is_reg, MS[0], MS[0] + MS[1])
     geom2_global = (eff_global / np.maximum(mass_global, _EPS)) ** 2
 
-    # region-keyed arrays for the global prior (scatter the region chain nodes → region index).
-    reg_nodes = order[is_reg]
-    reg_index = np.asarray(chain.ref_idx, dtype=np.int64)[reg_nodes]
-    R = int(reg_index.max()) + 1 if reg_index.size else 0
-    region_eff_gdna = np.zeros(R)
-    region_eff_gdna[reg_index] = EG[0][reg_nodes]
-    region_mass = np.zeros(R)
-    region_mass[reg_index] = MS[0][reg_nodes]
-    sig = np.asarray(region_arrays.signature).astype(np.int64)
-    region_count_obs = (sig & _EXON_BITS) == 0
-
     lattice = _simplex_lattice(int(n_grid))
     fpg, fng, fgg = lattice
     kappa = float(rna_sense_frac)
     od_g, od_r = gdna_strand_overdispersion, rna_strand_overdispersion
     solvable = (fp | fn) & (statics.mass_unspliced > 0.0)
+    # "self-solvable" nodes — composition fixed by the node's OWN intrinsic signal, no imputation
+    # needed: single-strand (the strand likelihood) or intergenic (the signature). Everything except
+    # AMBIG (both strands ⇒ degenerate tilt). These anchor the global gDNA-density prior.
+    self_solvable = ~(fp & fn)
 
     def _solve(i, mu_g, tau_g, mu_p, tau_p, mu_n, tau_n, mu_glob, tau_glob):
         psi = _local_loglik(
@@ -628,13 +641,24 @@ def node_sweep(
         SNN = (snap.rho_neg_left, snap.rho_neg_right)
         gdna_vm = fit_gdna_varmean(chain, snap, geometry)
         rna_vm = fit_rna_varmean(chain, snap, geometry, statics)
-        region_f_g = np.zeros(R)
-        region_f_g[reg_index] = f_g[reg_nodes]
-        rho_global, sigma_global = global_gdna_prior(
-            region_f_g, region_mass, region_eff_gdna, region_count_obs
+        # GLOBAL gDNA-density prior over the SELF-SOLVABLE nodes, recomputed each pass:
+        #   mean  = mass-weighted gDNA density of the self-solvable nodes (includes strand-solved
+        #           enriched exons — capture is IN the mean, not blind to it);
+        #   width = Poisson-offset σ²(ρ_obs) — the genuine between-node density spread as a function of
+        #           the OBSERVED total density M/eff (a known, non-circular axis). Tight at low (un-
+        #           enriched) density, wide at high (capture-enriched) density ⇒ the prior is humble
+        #           exactly where enrichment lives, so propagation governs there instead of the global.
+        rho_obs_n = mass_global / np.maximum(eff_global, _EPS)        # observed total density (known)
+        rho_g_n = f_g * mass_global / np.maximum(eff_global, _EPS)    # current gDNA density per node
+        sel = self_solvable & (mass_global > _EPS)
+        w = mass_global[sel]
+        rho_mean = float(np.sum(w * rho_g_n[sel]) / max(float(np.sum(w)), _EPS))
+        gprior_vm = MonotoneVarMean.fit_offset(
+            rho_obs_n[sel], (rho_g_n[sel] - rho_mean) ** 2, rho_g_n[sel] / np.maximum(eff_global[sel], _EPS)
         )
-        mu_global = np.clip(rho_global * eff_global / np.maximum(mass_global, _EPS), 0.0, 1.0)
-        tau_global = np.maximum(1.0 / np.maximum(sigma_global**2 * geom2_global, _EPS), 1.0)
+        mu_global = np.clip(rho_mean * eff_global / np.maximum(mass_global, _EPS), 0.0, 1.0)
+        sigma2_n = np.maximum(gprior_vm.predict(rho_obs_n), _EPS)
+        tau_global = np.maximum(1.0 / np.maximum(sigma2_n * geom2_global, _EPS), 1.0)
 
         prev = (f_g.copy(), f_pos.copy(), f_neg.copy())
         # df = the dst's face toward its sweep-direction neighbour; sf = the src's face toward the dst.
@@ -648,19 +672,19 @@ def node_sweep(
                 s_mass = MS[sf][src]
                 # gDNA message (genomic; spliced_dst=0).
                 rho_g_src = f_g[src] * s_mass / max(EG[sf][src], _EPS)
-                mu_g, tau_g = _message(rho_g_src, EG[sf][src], EG[df][i], MS[df][i], SNG[df][i], gdna_vm)
+                mu_g, tau_g = _message(rho_g_src, EG[sf][src], EG[df][i], MS[df][i], s_mass, SNG[df][i], gdna_vm)
                 # per-strand RNA messages, gated by free_s on BOTH endpoints; spliced rides in ρ_s + the
                 # dest-spliced subtraction. τ=0 (no message) where the strand is not continuous.
                 mu_p = tau_p = mu_n = tau_n = 0.0
                 if fp[i] and fp[src]:
                     rho_p_src = (f_pos[src] * s_mass + SP[sf][src]) / max(ER[sf][src], _EPS)
                     mu_p, tau_p = _message(
-                        rho_p_src, ER[sf][src], ER[df][i], MS[df][i], SNP[df][i], rna_vm, SP[df][i]
+                        rho_p_src, ER[sf][src], ER[df][i], MS[df][i], s_mass, SNP[df][i], rna_vm, SP[df][i]
                     )
                 if fn[i] and fn[src]:
                     rho_n_src = (f_neg[src] * s_mass + SN[sf][src]) / max(ER[sf][src], _EPS)
                     mu_n, tau_n = _message(
-                        rho_n_src, ER[sf][src], ER[df][i], MS[df][i], SNN[df][i], rna_vm, SN[df][i]
+                        rho_n_src, ER[sf][src], ER[df][i], MS[df][i], s_mass, SNN[df][i], rna_vm, SN[df][i]
                     )
                 _solve(i, mu_g, tau_g, mu_p, tau_p, mu_n, tau_n, mu_global[i], tau_global[i])
         delta = max(
