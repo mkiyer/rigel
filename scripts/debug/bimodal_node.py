@@ -44,7 +44,10 @@ def _modality(vals, prob):
 def characterize(label, *, u_pos, u_neg, kappa, od_g, od_r, strand_obs, global_mu, global_tau):
     fp_g, fn_g, fg_g = _simplex_lattice(N_GRID)
     lattice = (fp_g, fn_g, fg_g)
-    arr = lambda x: np.array([float(x)])
+
+    def arr(x):
+        return np.array([float(x)])
+
     psi = _local_loglik(
         arr(u_pos), arr(u_neg), arr(0.0), arr(0.0), arr(True).astype(bool), arr(True).astype(bool),
         float(kappa), float(od_g), float(od_r), lattice,
@@ -65,7 +68,6 @@ def characterize(label, *, u_pos, u_neg, kappa, od_g, od_r, strand_obs, global_m
         peaks, edge = _modality(vals, prob)
         # report mass at the two ends + the interior trough (min in the middle third)
         mid = prob[(vals > 0.33) & (vals < 0.67)]
-        ends = prob[0] + prob[-1]
         shape = "BIMODAL/edge-piled" if (edge >= 1 or peaks >= 2) else "unimodal"
         print(f"      {nm:>5}: {shape:>18}  mass[0]={prob[0]:.3f} mass[1]={prob[-1]:.3f} "
               f"mid-mass={mid.sum():.3f}")
