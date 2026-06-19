@@ -80,6 +80,26 @@ pass metric. These are the **measurement targets**; the count-space-on-GS gates 
 Add a **τ_f finiteness assertion**: sweep `L ∈ {10, 50}` with the global ablated; max per-message `τ_f` must be
 finite and ≤ a small multiple of the largest observed node count (guards the §1 destination cap).
 
+### 2.1 Phase-0 characterization findings (the two adversarial criticals, measured on CURRENT code)
+Built `scripts/debug/bimodal_node.py` (P2) and `scripts/debug/tau_f_spike.py` (P4). Both criticals are **real
+architecturally but MILD in our actual parameterization** — they downgrade from "critical correctness fix" to
+"good hygiene" for the count-space-on-GS effort:
+
+- **P2 (trough-mean) does NOT bite.** At AMBIG nodes `strand_obs=False`, so the **Jeffreys U-shape is not
+  applied** (only the *unimodal* global Gaussian is) — the bimodality the reviewer assumed never co-occurs with
+  the flat strand likelihood in our code. Measured on a balanced AMBIG node: f_g median vs mean differ by only
+  ~0.04–0.05; the f± means sit on real posterior mass (mid-mass 0.4–0.73); no trough-mean fired in any case.
+  ⇒ the message-mean is fine; the **operator split (median readout / mean message) is hygiene, kept but not
+  urgent**; the +8.7pt regression is avoided simply by keeping `_fg_median` for the readout.
+- **P4 (τ_f spike) is real but bounded.** As `E_dst` shrinks 250→5 bp, τ_f rises 0.8→400 but stays *below* the
+  destination's one-fragment resolution (M²≈900); the binomial floor + μ_f clip bound it away from the wall, and
+  even at the wall (μ_f→1) τ_f only reaches 400. It exceeds the honest cap **only for sub-~3 bp flanks** with
+  high source density. ⇒ the **outgoing-τ_f cap (§1c) is cheap insurance**, not a critical fix; the tiny-exon
+  transparency gate (E_c-below-containment ⇒ ~0 self-prior) is the cleaner primary guard.
+
+Net: the count-space-on-GS effort's value is the **count-space precision wins** (length-aware `(n+a)/E²`,
+count-de-voting, bounded capture overshoot) — NOT rescuing P2/P4, which our parameterization already handles.
+
 ## 3. Phase 1 — count-space on the existing Gauss-Seidel sweep
 
 Sub-phased so each lands behind its own gate. The GS walk and the directional one-at-a-time solve (the no-blend
