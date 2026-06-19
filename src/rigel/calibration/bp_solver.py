@@ -609,7 +609,9 @@ def node_sweep(
     flank, ``free_s=False``) blocks it structurally, no extra gate (the bidirectional sweep + the per-strand
     lock state encode strandedness + transcript structure). gDNA and RNA use the SAME machinery; the boundary's
     spliced is free info that rides in its RNA density (``node_densities``) + the dest-spliced subtraction.
-    Only G2/G3 nodes with data are solved; G1 sinks + empty nodes are fixed. Returns ``(NodeBelief, deltas)``."""
+    Only G2/G3 nodes with data are solved; G1 sinks + empty nodes are fixed. A solvable node with no
+    message neighbour (both flanks empty) gets one intrinsic solve per pass — strand + global, no message —
+    so it can't get stranded at its gDNA-favouring init. Returns ``(NodeBelief, deltas)``."""
     left = np.asarray(chain.left)
     right = np.asarray(chain.right)
     order = np.asarray(chain.order)
@@ -632,6 +634,14 @@ def node_sweep(
     eff_global = np.where(is_reg, EG[0], 0.5 * (EG[0] + EG[1]))
     mass_global = np.where(is_reg, MS[0], MS[0] + MS[1])
     geom2_global = (eff_global / np.maximum(mass_global, _EPS)) ** 2
+
+    # Whether a node has ANY non-empty message neighbour (frozen — masses don't change across passes).
+    # The L→R message comes from the left neighbour's right face (MS[1]); R→L from the right neighbour's
+    # left face (MS[0]). A node with NO such neighbour receives no message in either sweep direction, so
+    # the directional loop below never reaches its _solve — it must be solved by its intrinsic evidence.
+    lv = (left >= 0) & (MS[1][np.where(left >= 0, left, 0)] > _EPS)
+    rv = (right >= 0) & (MS[0][np.where(right >= 0, right, 0)] > _EPS)
+    has_msg_nbr = lv | rv
 
     lattice = _simplex_lattice(int(n_grid))
     fpg, fng, fgg = lattice
@@ -745,6 +755,15 @@ def node_sweep(
                         SN[df][i],
                     )
                 _solve(i, mu_g, tau_g, mu_p, tau_p, mu_n, tau_n, mu_global[i], tau_global[i])
+        # Intrinsic solve for solvable nodes with NO message neighbour. The directional loop only reaches
+        # _solve after building a neighbour message, so a node whose both neighbours are empty is never
+        # solved and keeps its signature-binary init (AMBIG → f_g=1) — a phantom-gDNA sink in libraries
+        # where its flanks carry no crossing fragments. Solve it on its OWN intrinsic evidence (the strand
+        # likelihood + the global prior + Jeffreys; zero messages — nothing to blend). Nodes with ≥1
+        # neighbour are already solved above (has_msg_nbr is the exact complement), so this never double-solves.
+        for i in order:
+            if solvable[i] and not has_msg_nbr[i]:
+                _solve(i, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, mu_global[i], tau_global[i])
         delta = max(
             (float(np.max(np.abs(cur - p))) if cur.size else 0.0)
             for cur, p in ((f_g, prev[0]), (f_pos, prev[1]), (f_neg, prev[2]))
