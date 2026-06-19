@@ -17,7 +17,6 @@ from rigel.calibration.bp_solver import (
     build_node_geometry,
     build_node_statics,
     node_sweep,
-    global_gdna_prior,
     init_beliefs,
     node_densities,
 )
@@ -39,9 +38,12 @@ def _view(mass_u, mass_spl):
     n = len(mass_u)
     z = np.zeros(n)
     return SimpleNamespace(
-        n_unspliced_pos=z.copy(), n_unspliced_neg=z.copy(),
-        n_spliced_sense=z.copy(), n_spliced_antisense=z.copy(),
-        mass_unspliced=np.asarray(mass_u, float), mass_spliced=np.asarray(mass_spl, float),
+        n_unspliced_pos=z.copy(),
+        n_unspliced_neg=z.copy(),
+        n_spliced_sense=z.copy(),
+        n_spliced_antisense=z.copy(),
+        mass_unspliced=np.asarray(mass_u, float),
+        mass_spliced=np.asarray(mass_spl, float),
     )
 
 
@@ -52,8 +54,10 @@ def _cview(n_pos, n_neg, spl_sense=None, mass_u=None, mass_spl=None):
     n = n_pos.shape[0]
     spl = np.zeros(n) if spl_sense is None else np.asarray(spl_sense, float)
     return SimpleNamespace(
-        n_unspliced_pos=n_pos, n_unspliced_neg=n_neg,
-        n_spliced_sense=spl, n_spliced_antisense=np.zeros(n),
+        n_unspliced_pos=n_pos,
+        n_unspliced_neg=n_neg,
+        n_spliced_sense=spl,
+        n_spliced_antisense=np.zeros(n),
         mass_unspliced=(n_pos + n_neg) if mass_u is None else np.asarray(mass_u, float),
         mass_spliced=spl if mass_spl is None else np.asarray(mass_spl, float),
     )
@@ -83,8 +87,10 @@ def test_geometry_exon_intron_exon_plus_gene():
     left = _view([0.0, 30.0, 20.0, 40.0], [0.0, 88.0, 0.0, 0.0])
     right = _view([10.0, 31.0, 22.0, 0.0], [0.0, 0.0, 77.0, 0.0])
     bsub = SimpleNamespace(
-        left=left, right=right,
-        left_region=np.array([-1, 0, 1, 2]), right_region=np.array([0, 1, 2, -1]),
+        left=left,
+        right=right,
+        left_region=np.array([-1, 0, 1, 2]),
+        right_region=np.array([0, 1, 2, -1]),
     )
 
     gdna_fl = _delta_pmf(300)
@@ -93,13 +99,17 @@ def test_geometry_exon_intron_exon_plus_gene():
 
     # R0 (node 1): contained, same both faces; per-component FL.
     assert g.mass_left[1] == 100.0 and g.mass_right[1] == 100.0
-    assert np.isclose(g.eff_gdna_left[1], region_eff_length(np.array([1000.0]), gdna_fl)[0])  # 1000-300=700
+    assert np.isclose(
+        g.eff_gdna_left[1], region_eff_length(np.array([1000.0]), gdna_fl)[0]
+    )  # 1000-300=700
     assert np.isclose(g.eff_gdna_left[1], 700.0) and np.isclose(g.eff_rna_left[1], 800.0)
     assert g.spliced_pos_left[1] == 0.0 and g.spliced_pos_right[1] == 0.0
 
     # B1 (node 2): ex→in junction. left side in r0 (1000bp), right side in r1 (2000bp). spliced on LEFT (exon).
     assert g.mass_left[2] == 30.0 and g.mass_right[2] == 31.0
-    assert np.isclose(g.eff_gdna_left[2], boundary_side_eff_length(gdna_fl, np.array([1000.0]))[0])  # min(300,1000)=300
+    assert np.isclose(
+        g.eff_gdna_left[2], boundary_side_eff_length(gdna_fl, np.array([1000.0]))[0]
+    )  # min(300,1000)=300
     assert np.isclose(g.eff_gdna_left[2], 300.0) and np.isclose(g.eff_gdna_right[2], 300.0)
     assert np.isclose(g.eff_rna_left[2], 200.0)  # RNA-FL min(200, 1000)
     assert g.spliced_pos_left[2] == 88.0 and g.spliced_pos_right[2] == 0.0  # exon on the left flank
@@ -120,8 +130,12 @@ def test_terminal_boundary_zero_off_edge():
     substrate = SimpleNamespace(contained=_view([100.0, 50.0, 80.0], [0.0, 0.0, 0.0]))
     left = _view([0.0, 30.0, 20.0, 40.0], [0.0, 0.0, 0.0, 0.0])
     right = _view([10.0, 31.0, 22.0, 0.0], [0.0, 0.0, 0.0, 0.0])
-    bsub = SimpleNamespace(left=left, right=right,
-                           left_region=np.array([-1, 0, 1, 2]), right_region=np.array([0, 1, 2, -1]))
+    bsub = SimpleNamespace(
+        left=left,
+        right=right,
+        left_region=np.array([-1, 0, 1, 2]),
+        right_region=np.array([0, 1, 2, -1]),
+    )
     g = build_node_geometry(chain, substrate, bsub, region_arrays, _delta_pmf(300), _delta_pmf(200))
     # B0 (node 0): left_region=-1 → left face eff = _EPS-floored ~0 (off edge); right face = r0 crossing.
     assert g.eff_gdna_left[0] <= 1e-6
@@ -134,22 +148,31 @@ def test_node_densities_formula():
     # one node, two faces with different mass/eff-len; + spliced only on the left face.
     g = NodeGeometry(
         n_nodes=1,
-        mass_left=np.array([100.0]), mass_right=np.array([200.0]),
-        eff_gdna_left=np.array([200.0]), eff_gdna_right=np.array([400.0]),
-        eff_rna_left=np.array([250.0]), eff_rna_right=np.array([500.0]),
-        spliced_pos_left=np.array([10.0]), spliced_pos_right=np.array([0.0]),
-        spliced_neg_left=np.array([0.0]), spliced_neg_right=np.array([0.0]),
+        mass_left=np.array([100.0]),
+        mass_right=np.array([200.0]),
+        eff_gdna_left=np.array([200.0]),
+        eff_gdna_right=np.array([400.0]),
+        eff_rna_left=np.array([250.0]),
+        eff_rna_right=np.array([500.0]),
+        spliced_pos_left=np.array([10.0]),
+        spliced_pos_right=np.array([0.0]),
+        spliced_neg_left=np.array([0.0]),
+        spliced_neg_right=np.array([0.0]),
     )
     b = NodeBelief(
-        f_pos=np.array([0.3]), f_neg=np.array([0.2]), f_g=np.array([0.5]),
-        var_pos=np.array([1.0]), var_neg=np.array([1.0]), var_gdna=np.array([1.0]),
+        f_pos=np.array([0.3]),
+        f_neg=np.array([0.2]),
+        f_g=np.array([0.5]),
+        var_pos=np.array([1.0]),
+        var_neg=np.array([1.0]),
+        var_gdna=np.array([1.0]),
     )
     d = node_densities(b, g)
-    assert np.isclose(d.rho_g_left[0], 0.5 * 100 / 200)            # 0.25
-    assert np.isclose(d.rho_pos_left[0], (0.3 * 100 + 10) / 250)   # spliced rides on +: 0.16
-    assert np.isclose(d.rho_neg_left[0], 0.2 * 100 / 250)          # 0.08
-    assert np.isclose(d.rho_g_right[0], 0.5 * 200 / 400)           # 0.25
-    assert np.isclose(d.rho_pos_right[0], 0.3 * 200 / 500)         # no spliced on the right face: 0.12
+    assert np.isclose(d.rho_g_left[0], 0.5 * 100 / 200)  # 0.25
+    assert np.isclose(d.rho_pos_left[0], (0.3 * 100 + 10) / 250)  # spliced rides on +: 0.16
+    assert np.isclose(d.rho_neg_left[0], 0.2 * 100 / 250)  # 0.08
+    assert np.isclose(d.rho_g_right[0], 0.5 * 200 / 400)  # 0.25
+    assert np.isclose(d.rho_pos_right[0], 0.3 * 200 / 500)  # no spliced on the right face: 0.12
 
 
 def test_node_densities_factor1_under_uniform():
@@ -159,15 +182,24 @@ def test_node_densities_factor1_under_uniform():
     eff_g_l, eff_g_r = np.array([700.0]), np.array([300.0])
     g = NodeGeometry(
         n_nodes=1,
-        mass_left=rho * eff_g_l, mass_right=rho * eff_g_r,
-        eff_gdna_left=eff_g_l, eff_gdna_right=eff_g_r,
-        eff_rna_left=np.array([800.0]), eff_rna_right=np.array([200.0]),
-        spliced_pos_left=np.array([0.0]), spliced_pos_right=np.array([0.0]),
-        spliced_neg_left=np.array([0.0]), spliced_neg_right=np.array([0.0]),
+        mass_left=rho * eff_g_l,
+        mass_right=rho * eff_g_r,
+        eff_gdna_left=eff_g_l,
+        eff_gdna_right=eff_g_r,
+        eff_rna_left=np.array([800.0]),
+        eff_rna_right=np.array([200.0]),
+        spliced_pos_left=np.array([0.0]),
+        spliced_pos_right=np.array([0.0]),
+        spliced_neg_left=np.array([0.0]),
+        spliced_neg_right=np.array([0.0]),
     )
     b = NodeBelief(
-        f_pos=np.array([0.0]), f_neg=np.array([0.0]), f_g=np.array([1.0]),
-        var_pos=np.array([0.0]), var_neg=np.array([0.0]), var_gdna=np.array([0.0]),
+        f_pos=np.array([0.0]),
+        f_neg=np.array([0.0]),
+        f_g=np.array([1.0]),
+        var_pos=np.array([0.0]),
+        var_neg=np.array([0.0]),
+        var_gdna=np.array([0.0]),
     )
     d = node_densities(b, g)
     assert np.isclose(d.rho_g_left[0], rho) and np.isclose(d.rho_g_right[0], rho)
@@ -176,8 +208,9 @@ def test_node_densities_factor1_under_uniform():
 def _empty_boundary_substrate(n_b):
     z = np.zeros(n_b)
     side = _cview(z.copy(), z.copy())
-    return SimpleNamespace(left_region=np.full(n_b, -1), right_region=np.full(n_b, -1),
-                           left=side, right=side)
+    return SimpleNamespace(
+        left_region=np.full(n_b, -1), right_region=np.full(n_b, -1), left=side, right=side
+    )
 
 
 def test_init_zero_gdna_introns_via_strand():
@@ -188,7 +221,9 @@ def test_init_zero_gdna_introns_via_strand():
     sig = np.array([0, BIT_INTRON_POS, BIT_EXON_POS | BIT_EXON_NEG], dtype=np.int64)
     sc = np.array([TS_NONE, TS_POS, TS_AMBIG], dtype=np.int8)
     region_arrays = SimpleNamespace(
-        strand_class=sc, signature=sig, region_size_bp=np.array([1000.0, 2000.0, 800.0]),
+        strand_class=sc,
+        signature=sig,
+        region_size_bp=np.array([1000.0, 2000.0, 800.0]),
     )
     # intergenic gDNA = strand-symmetric; intron+ RNA = strongly sense-tilted (κ=0.95); AMBIG = symmetric.
     contained = _cview([50.0, 95.0, 50.0], [50.0, 5.0, 50.0])
@@ -220,14 +255,17 @@ def test_init_boundary_continuity_gate():
     sig = np.array([BIT_EXON_POS, BIT_INTRON_POS], dtype=np.int64)
     sc = np.array([TS_POS, TS_POS], dtype=np.int8)
     region_arrays = SimpleNamespace(
-        strand_class=sc, signature=sig, region_size_bp=np.array([1000.0, 2000.0]),
+        strand_class=sc,
+        signature=sig,
+        region_size_bp=np.array([1000.0, 2000.0]),
     )
     substrate = SimpleNamespace(contained=_cview([80.0, 40.0], [4.0, 30.0]))
     # B1 crossing: sense-tilted unspliced (κ=0.95 ⇒ +) + a sense-spliced floor on the exon (left) flank.
     left = _cview([0.0, 90.0, 0.0], [0.0, 5.0, 0.0], spl_sense=[0.0, 50.0, 0.0])
     right = _cview([0.0, 91.0, 0.0], [0.0, 6.0, 0.0], spl_sense=[0.0, 0.0, 0.0])
-    bsub = SimpleNamespace(left_region=np.array([-1, 0, 1]), right_region=np.array([0, 1, -1]),
-                           left=left, right=right)
+    bsub = SimpleNamespace(
+        left_region=np.array([-1, 0, 1]), right_region=np.array([0, 1, -1]), left=left, right=right
+    )
 
     b = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=60)
     # boundary node ids: B0=0, B1=2, B2=4.
@@ -247,51 +285,21 @@ def test_init_tss_boundary_is_black_hole():
     sig = np.array([0, BIT_EXON_POS], dtype=np.int64)
     sc = np.array([TS_NONE, TS_POS], dtype=np.int8)
     region_arrays = SimpleNamespace(
-        strand_class=sc, signature=sig, region_size_bp=np.array([1000.0, 2000.0]),
+        strand_class=sc,
+        signature=sig,
+        region_size_bp=np.array([1000.0, 2000.0]),
     )
     substrate = SimpleNamespace(contained=_cview([50.0, 80.0], [50.0, 4.0]))
     # the TSS-crossing fragments are sense-tilted, but continuity must STILL block RNA (the black hole).
     left = _cview([0.0, 90.0, 0.0], [0.0, 5.0, 0.0])
     right = _cview([0.0, 91.0, 0.0], [0.0, 6.0, 0.0])
-    bsub = SimpleNamespace(left_region=np.array([-1, 0, 1]), right_region=np.array([0, 1, -1]),
-                           left=left, right=right)
+    bsub = SimpleNamespace(
+        left_region=np.array([-1, 0, 1]), right_region=np.array([0, 1, -1]), left=left, right=right
+    )
 
     b = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=60)
     # B1 (node id 2) is the TSS: a locked gDNA sink despite the sense tilt.
     assert b.f_g[2] == 1.0 and b.var_gdna[2] == 0.0 and b.var_pos[2] == 0.0 and b.var_neg[2] == 0.0
-
-
-def test_global_prior_zero_gdna_library():
-    # A pure-RNA library: the count-observable (intergenic/intron) regions carry no gDNA mass.
-    f_g = np.array([0.0, 0.0, 0.0])  # the strand pinned every node to RNA
-    mass = np.array([100.0, 200.0, 80.0])
-    eff = np.array([900.0, 1900.0, 700.0])
-    obs = np.array([True, True, False])  # region 2 is exonic (not count-observable)
-    rho, sigma = global_gdna_prior(f_g, mass, eff, obs)
-    assert rho == 0.0  # no phantom gDNA baseline
-    assert sigma == 0.0
-
-
-def test_global_prior_uniform_gdna_density():
-    # Uniform gDNA at density ρ over the count-observable regions: ρ_global recovers ρ, spread ~0.
-    rho_true = 0.5
-    eff = np.array([700.0, 1400.0])
-    mass = np.array([1000.0, 2000.0])
-    f_g = rho_true * eff / mass  # gDNA mass = ρ·eff ⇒ f_g·M = ρ·eff
-    obs = np.array([True, True])
-    rho, sigma = global_gdna_prior(f_g, mass, eff, obs)
-    assert np.isclose(rho, rho_true)
-    assert sigma < 1e-9
-
-
-def test_global_prior_excludes_exon_from_baseline():
-    # An exonic region with high apparent gDNA must NOT enter ρ_global (the baseline is observable-only).
-    f_g = np.array([0.1, 0.9])
-    mass = np.array([100.0, 100.0])
-    eff = np.array([900.0, 900.0])
-    obs = np.array([True, False])  # region 1 (exon) excluded from the baseline
-    rho, _ = global_gdna_prior(f_g, mass, eff, obs)
-    assert np.isclose(rho, 0.1 * 100.0 / 900.0)  # only the observable region 0 contributes
 
 
 def test_gdna_sweep_factor1_uniform():
@@ -307,7 +315,9 @@ def test_gdna_sweep_factor1_uniform():
     region_arrays = SimpleNamespace(strand_class=sc, signature=sig, region_size_bp=L)
     reg_eff = region_eff_length(L, gdna_fl)  # [700,700,700]
     cmass = rho * reg_eff
-    substrate = SimpleNamespace(contained=_cview(cmass / 2, cmass / 2, mass_u=cmass, mass_spl=np.zeros(3)))
+    substrate = SimpleNamespace(
+        contained=_cview(cmass / 2, cmass / 2, mass_u=cmass, mass_spl=np.zeros(3))
+    )
     side_eff = boundary_side_eff_length(gdna_fl, L)  # [300,300,300]
     lr, rr = np.array([-1, 0, 1, 2]), np.array([0, 1, 2, -1])
     lmass = np.where(lr >= 0, rho * side_eff[np.clip(lr, 0, 2)], 0.0)
@@ -318,9 +328,20 @@ def test_gdna_sweep_factor1_uniform():
 
     geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
     st = build_node_statics(chain, substrate, bsub, region_arrays)
-    belief = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.7, n_grid=40, statics=st)
-    final, _ = node_sweep(chain, st, geom, belief, region_arrays, rna_sense_frac=0.7,
-                          n_grid=40, max_passes=8, convergence_delta=1e-4)
+    belief = init_beliefs(
+        chain, substrate, bsub, region_arrays, rna_sense_frac=0.7, n_grid=40, statics=st
+    )
+    final, _ = node_sweep(
+        chain,
+        st,
+        geom,
+        belief,
+        region_arrays,
+        rna_sense_frac=0.7,
+        n_grid=40,
+        max_passes=8,
+        convergence_delta=1e-4,
+    )
     dens = node_densities(final, geom)
     interg, ambig = [1, 5], 3  # region nodes: R0/R2 intergenic (strand-anchored), R1 AMBIG
     # Intergenic nodes recover ρ exactly (the strand/signature pins them).
@@ -343,12 +364,18 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
     chain = build_node_chain(np.array([0, 3]), np.array([0, 4]))
     L = np.array([2000.0, 2000.0, 2000.0])
-    sig = np.array([BIT_INTRON_POS, BIT_INTRON_POS | BIT_INTRON_NEG, BIT_INTRON_NEG], dtype=np.int64)
+    sig = np.array(
+        [BIT_INTRON_POS, BIT_INTRON_POS | BIT_INTRON_NEG, BIT_INTRON_NEG], dtype=np.int64
+    )
     sc = np.array([TS_POS, TS_AMBIG, TS_NEG], dtype=np.int8)
     region_arrays = SimpleNamespace(strand_class=sc, signature=sig, region_size_bp=L)
-    cpos = np.array([95.0, 50.0, 5.0])  # sense-tilted RNA (κ=0.95): + intron genome+, − intron genome−
+    cpos = np.array(
+        [95.0, 50.0, 5.0]
+    )  # sense-tilted RNA (κ=0.95): + intron genome+, − intron genome−
     cneg = np.array([5.0, 50.0, 95.0])
-    substrate = SimpleNamespace(contained=_cview(cpos, cneg, mass_u=cpos + cneg, mass_spl=np.zeros(3)))
+    substrate = SimpleNamespace(
+        contained=_cview(cpos, cneg, mass_u=cpos + cneg, mass_spl=np.zeros(3))
+    )
     lr, rr = np.array([-1, 0, 1, 2]), np.array([0, 1, 2, -1])
     # crossing counts cleanly sense-tilted like the regions: B0/B1 are +crossings (genome+), B2/B3 are −.
     lpos = np.array([0.0, 40.0, 2.0, 2.0])
@@ -361,10 +388,21 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
 
     geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
     st = build_node_statics(chain, substrate, bsub, region_arrays)
-    belief = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=40, statics=st)
+    belief = init_beliefs(
+        chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=40, statics=st
+    )
     assert belief.f_g[3] == 1.0  # AMBIG starts all-gDNA
-    final, deltas = node_sweep(chain, st, geom, belief, region_arrays, rna_sense_frac=0.95,
-                               n_grid=40, max_passes=10, convergence_delta=1e-4)
+    final, deltas = node_sweep(
+        chain,
+        st,
+        geom,
+        belief,
+        region_arrays,
+        rna_sense_frac=0.95,
+        n_grid=40,
+        max_passes=10,
+        convergence_delta=1e-4,
+    )
     assert final.f_g[3] < 0.15  # the AMBIG phantom is pulled down (no phantom gDNA)
     assert final.f_g[1] < 0.15 and final.f_g[5] < 0.15  # the introns stay RNA via the strand
     # monotone convergence: the per-pass max-|Δf_g| is non-increasing

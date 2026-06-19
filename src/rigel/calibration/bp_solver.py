@@ -1,18 +1,27 @@
-"""The belief-propagation calibration solver (density imputation, bidirectional sweep).
+"""The belief-propagation calibration solver: per-node gDNA-vs-RNA deconvolution by a bidirectional sweep.
 
-`docs/calibration/bp_sweep_rebuild_plan.md`. Rebuilds the per-node deconvolution as a pairwise, bidirectional
-belief-propagation sweep over the unified region↔boundary chain (`node_chain`). This module is built in phases:
+Deconvolves each node's unspliced fragment mass into a pie ``(f_pos, f_neg, f_g)`` — sense-RNA /
+antisense-RNA / gDNA — over the unified region↔boundary chain (`node_chain`), by a pairwise, directional
+(L→R then R→L) Gauss-Seidel sweep. Each per-node solve (`simplex_sweep`) reconciles three sources of
+information: the intrinsic strand likelihood (the Beta-Binomial tilt — the only signal a count carries), the
+cross-node imputation messages, and the population gDNA prior. Theory: the count-zero-information principle
+in `docs/calibration/CALIBRATION_ARCHITECTURE.md`; the message-precision model (count-currency variance
+floor) in `docs/calibration/precision_overshoot_design.md`.
 
-* **P1 (here):** the per-node static GEOMETRY on the chain (`build_node_geometry`) — each node's unspliced mass,
-  per-component (gDNA-FL / RNA-FL) effective lengths, and the boundary's one-sided motif-stranded spliced mass,
-  assembled **per face** (left/right) because a boundary's two sides lie in different-sized regions and the
-  message uses the side FACING the destination. Regions present the same (contained) geometry to both faces.
-  (init fractions + the directional sweep land next.)
-
-Per-component fragment length (the v2-critique fix): gDNA crossings/contained use the gDNA FL; RNA — nascent
-unspliced + the spliced — uses the RNA FL. The eff-len primitives are the single-owner `effective_length.py`
-functions (`region_eff_length` = `E[max(0,L−ℓ)]` contained support; `boundary_side_eff_length` =
-`E[min(ℓ,L_σ)]` per-side crossing support). The spliced is one-sided (its exon flank) and motif-stranded.
+Module layout:
+* `build_node_geometry` — the per-node, per-FACE static geometry (unspliced mass, per-component gDNA-/RNA-FL
+  effective lengths, the boundary's one-sided motif-stranded spliced mass). Per-face because a boundary's
+  two sides lie in different-sized regions and a message uses the side FACING the destination; a region
+  presents the same contained geometry both ways. Eff-len primitives are the single-owner
+  `effective_length.py` (`region_eff_length` = E[max(0,L−ℓ)] contained; `boundary_side_eff_length` =
+  E[min(ℓ,L)] per-side crossing). gDNA uses the gDNA FL; RNA (nascent unspliced + spliced) the RNA FL.
+* `init_beliefs` — the signature-binary G1/G2/G3 initial belief.
+* `node_densities` / `build_node_statics` — the per-pass density snapshot + the static per-node inputs.
+* `fit_gdna_varmean` / `fit_rna_varmean` — the message-reliability σ²_bio(μ), refit each pass on the FROZEN
+  snapshot.
+* `_message` / `node_sweep` — one imputation message (as a count-currency precision) + the sweep driver.
+* `chain_region_deconv` / `chain_boundary_side_deconv` — project the converged belief back to the per-region
+  / per-boundary-side masses the `CalibrationResult` consumes.
 """
 
 from __future__ import annotations
@@ -52,7 +61,6 @@ __all__ = [
     "NodeStatics",
     "build_node_statics",
     "init_beliefs",
-    "global_gdna_prior",
     "fit_gdna_varmean",
     "fit_rna_varmean",
     "node_sweep",
@@ -65,7 +73,6 @@ _MSG_PSEUDOCOUNT = 1.0  # one pseudo-observation: a density from a finite count 
 #                         sampling variance, so a message precision can never escape to ∞ (var stabilizer).
 _POS_BITS = BIT_EXON_POS | BIT_INTRON_POS
 _NEG_BITS = BIT_EXON_NEG | BIT_INTRON_NEG
-_MAD_TO_SIGMA = 1.4826  # normal-consistency constant: σ ≈ 1.4826·MAD (a mathematical constant, not a knob)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +85,7 @@ class NodeGeometry:
     n_nodes: int
     mass_left: np.ndarray  # float64 — unspliced mass facing the left neighbour
     mass_right: np.ndarray
-    eff_gdna_left: np.ndarray  # gDNA-FL eff-len facing left (region contained / boundary left-side crossing)
+    eff_gdna_left: np.ndarray  # gDNA-FL eff-len facing left (contained / boundary left side)
     eff_gdna_right: np.ndarray
     eff_rna_left: np.ndarray  # RNA-FL eff-len facing left
     eff_rna_right: np.ndarray
@@ -106,7 +113,9 @@ def build_node_geometry(
     L = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
     reg_eff_g = region_eff_length(L, gdna_fl_pmf)  # E_gdna[max(0,L−ℓ)] contained
     reg_eff_r = region_eff_length(L, rna_fl_pmf)
-    side_eff_g = boundary_side_eff_length(gdna_fl_pmf, L)  # per region: E_gdna[min(ℓ,L)] side crossing
+    side_eff_g = boundary_side_eff_length(
+        gdna_fl_pmf, L
+    )  # per region: E_gdna[min(ℓ,L)] side crossing
     side_eff_r = boundary_side_eff_length(rna_fl_pmf, L)
     reg_mass = np.asarray(substrate.contained.mass_unspliced, dtype=np.float64)
     sig = np.asarray(region_arrays.signature).astype(np.int64)
@@ -164,11 +173,16 @@ def build_node_geometry(
 
     return NodeGeometry(
         n_nodes=int(chain.n_nodes),
-        mass_left=mass_left, mass_right=mass_right,
-        eff_gdna_left=np.maximum(eff_gdna_left, _EPS), eff_gdna_right=np.maximum(eff_gdna_right, _EPS),
-        eff_rna_left=np.maximum(eff_rna_left, _EPS), eff_rna_right=np.maximum(eff_rna_right, _EPS),
-        spliced_pos_left=spliced_pos_left, spliced_pos_right=spliced_pos_right,
-        spliced_neg_left=spliced_neg_left, spliced_neg_right=spliced_neg_right,
+        mass_left=mass_left,
+        mass_right=mass_right,
+        eff_gdna_left=np.maximum(eff_gdna_left, _EPS),
+        eff_gdna_right=np.maximum(eff_gdna_right, _EPS),
+        eff_rna_left=np.maximum(eff_rna_left, _EPS),
+        eff_rna_right=np.maximum(eff_rna_right, _EPS),
+        spliced_pos_left=spliced_pos_left,
+        spliced_pos_right=spliced_pos_right,
+        spliced_neg_left=spliced_neg_left,
+        spliced_neg_right=spliced_neg_right,
     )
 
 
@@ -218,7 +232,7 @@ def node_densities(belief: NodeBelief, geometry: NodeGeometry) -> NodeDensities:
 
 
 # ---------------------------------------------------------------------------
-# Initialization (plan v3 §6) — the signature-binary G1/G2/G3 belief on the chain.
+# Initialization — the signature-binary G1/G2/G3 belief on the chain.
 # ---------------------------------------------------------------------------
 #
 # Variance convention: ``0`` = a LOCKED axis (the fraction is pinned, e.g. a forbidden strand or an
@@ -280,8 +294,8 @@ def _boundary_strand_stats(boundary_substrate, region_arrays):
     pie base) = both sides summed (conserved). The spliced floor is the one-sided motif-stranded sense spliced
     on that strand's exon flank (a clean exon↔intron transition), never summed across sides.
 
-    The allow mask is the **transcript-structure CONTINUITY gate** (`rna_imputation_transcript_structure.md`;
-    plan v3 §3): a strand-s unspliced crossing is nascent RNA only where strand s is present on BOTH flanks, so
+    The allow mask is the **transcript-structure CONTINUITY gate** (`rna_imputation_transcript_structure.md`):
+    a strand-s unspliced crossing is nascent RNA only where strand s is present on BOTH flanks, so
     ``free_s = has_s(left) & has_s(right)``. This BLOCKS RNA at a TSS/TES (intergenic↔exon → neither strand
     continuous → a gDNA sink) and at a mixed exon↔AMBIG seam (the non-shared strand cannot cross).
     """
@@ -359,7 +373,9 @@ class NodeStatics:
     mass_spliced: np.ndarray
 
 
-def build_node_statics(chain: NodeChain, substrate, boundary_substrate, region_arrays) -> NodeStatics:
+def build_node_statics(
+    chain: NodeChain, substrate, boundary_substrate, region_arrays
+) -> NodeStatics:
     """Gather the per-region (contained) and per-boundary (continuity-gated, max-of-sides + spliced floor)
     strand-solve statistics onto the unified chain."""
     r_fp, r_fn, r_up, r_un, r_sp, r_sn, r_mu, r_ms = _region_strand_stats(substrate, region_arrays)
@@ -382,10 +398,15 @@ def build_node_statics(chain: NodeChain, substrate, boundary_substrate, region_a
     free_neg = pick(r_fn, b_fn, False)
     return NodeStatics(
         n_nodes=int(chain.n_nodes),
-        u_pos=pick(r_up, b_up), u_neg=pick(r_un, b_un),
-        spliced_pos=pick(r_sp, b_sp), spliced_neg=pick(r_sn, b_sn),
-        free_pos=free_pos, free_neg=free_neg, strand_obs=free_pos ^ free_neg,
-        mass_unspliced=pick(r_mu, b_mu), mass_spliced=pick(r_ms, b_ms),
+        u_pos=pick(r_up, b_up),
+        u_neg=pick(r_un, b_un),
+        spliced_pos=pick(r_sp, b_sp),
+        spliced_neg=pick(r_sn, b_sn),
+        free_pos=free_pos,
+        free_neg=free_neg,
+        strand_obs=free_pos ^ free_neg,
+        mass_unspliced=pick(r_mu, b_mu),
+        mass_spliced=pick(r_ms, b_ms),
     )
 
 
@@ -401,7 +422,7 @@ def init_beliefs(
     n_grid: int,
     statics: "NodeStatics | None" = None,
 ) -> NodeBelief:
-    """The signature-binary G1/G2/G3 initial :class:`NodeBelief` on the unified chain (plan v3 §6).
+    """The signature-binary G1/G2/G3 initial :class:`NodeBelief` on the unified chain.
 
     All chain nodes are strand-solved by one shared per-node core (the bare strand likelihood + the Jeffreys
     reference at single-strand nodes; NO global prior, NO imputation — those enter the sweep, P2/P3). The
@@ -409,13 +430,24 @@ def init_beliefs(
     introns resolve to ``f_g≈0`` from the BB tilt alone (the zero-gDNA gate); intergenic / TSS sinks lock at
     ``{0,0,1}``; AMBIG nodes hold ``{0,0,1}`` at MAX variance for the sweep. Pass ``statics`` to reuse a
     prebuilt :class:`NodeStatics` (the sweep does)."""
-    st = statics if statics is not None else build_node_statics(
-        chain, substrate, boundary_substrate, region_arrays
+    st = (
+        statics
+        if statics is not None
+        else build_node_statics(chain, substrate, boundary_substrate, region_arrays)
     )
     deconv = _solve_nodes(
-        st.u_pos, st.u_neg, st.spliced_pos, st.spliced_neg, st.free_pos, st.free_neg, st.strand_obs,
-        st.mass_unspliced, st.mass_spliced,
-        kappa=float(rna_sense_frac), od_g=gdna_strand_overdispersion, od_r=rna_strand_overdispersion,
+        st.u_pos,
+        st.u_neg,
+        st.spliced_pos,
+        st.spliced_neg,
+        st.free_pos,
+        st.free_neg,
+        st.strand_obs,
+        st.mass_unspliced,
+        st.mass_spliced,
+        kappa=float(rna_sense_frac),
+        od_g=gdna_strand_overdispersion,
+        od_r=rna_strand_overdispersion,
         n_grid=n_grid,
     )
     f_pos, f_neg, f_g, var_p, var_n, var_g = _type_belief(
@@ -426,39 +458,9 @@ def init_beliefs(
     )
 
 
-def global_gdna_prior(region_f_g, region_mass_unspliced, region_eff_gdna, region_count_observable):
-    """The population gDNA baseline ``ρ_global`` + its robust density spread ``σ_global`` (plan v3 §6 / §4 step 3).
-
-    ``ρ_global`` is the gDNA density over the **count-observable** (signature-known non-exonic: intergenic /
-    intron) regions' current gDNA mass ``f_g·M_u`` — the cleanest gDNA evidence, restricted to avoid the
-    AMBIG/exon RNA the strand cannot remove inflating the baseline (`calibrate.py`'s carried-forward rule).
-    ``σ_global`` is the robust between-region MAD spread of the per-region gDNA density over ALL regions with
-    data (the population spread an unanchored node faces). Both are recomputed each sweep pass on the running
-    gDNA estimate. ``ρ_global → 0`` (and ``σ_global → 0``) in a pure-RNA library — the zero-gDNA pin, no
-    phantom gDNA. The per-node application (the density→fraction jacobian ``(E/M)²`` + the 1-pseudo-observation
-    precision floor) lives in the sweep, which holds each node's own geometry.
-    """
-    f_g = np.asarray(region_f_g, dtype=np.float64)
-    mass = np.asarray(region_mass_unspliced, dtype=np.float64)
-    eff = np.maximum(np.asarray(region_eff_gdna, dtype=np.float64), _EPS)
-    obs = np.asarray(region_count_observable, dtype=bool)
-    gdna_mass = f_g * mass
-    rho_global = (
-        float(gdna_mass[obs].sum() / max(float(eff[obs].sum()), _EPS)) if obs.any() else 0.0
-    )
-    mu = gdna_mass / eff  # per-region gDNA density
-    active = mu[mass > 0.0]
-    sigma_global = (
-        _MAD_TO_SIGMA * float(np.median(np.abs(active - np.median(active)))) if active.size else rho_global
-    )
-    return rho_global, sigma_global
-
-
 # ---------------------------------------------------------------------------
-# P2 — the gDNA-only directional belief-propagation sweep (plan v3 §3/§4/§5/§7).
+# The directional belief-propagation sweep (gDNA + per-strand RNA messages).
 # ---------------------------------------------------------------------------
-
-_EXON_BITS = BIT_EXON_POS | BIT_EXON_NEG
 
 
 def _edge_varmean(chain, rho_left, rho_right, eff_left, eff_right, live):
@@ -471,8 +473,20 @@ def _edge_varmean(chain, rho_left, rho_right, eff_left, eff_right, live):
     live = np.asarray(live, dtype=bool)
     means, raws, offs = [], [], []
     for nbr, d_rho, s_rho, d_e, s_e in (
-        (left, rho_left, rho_right, eff_left, eff_right),  # from-LEFT: dst left face, src=left[dst] right face
-        (right, rho_right, rho_left, eff_right, eff_left),  # from-RIGHT: dst right face, src=right[dst] left
+        (
+            left,
+            rho_left,
+            rho_right,
+            eff_left,
+            eff_right,
+        ),  # from-LEFT: dst left face, src=left[dst] right face
+        (
+            right,
+            rho_right,
+            rho_left,
+            eff_right,
+            eff_left,
+        ),  # from-RIGHT: dst right face, src=right[dst] left
     ):
         idx = np.where((nbr >= 0) & live)[0]
         if not idx.size:
@@ -497,14 +511,20 @@ def _fit_offset(means, raws, offs):
     return MonotoneVarMean.fit_offset(cat(means), cat(raws), cat(offs))
 
 
-def fit_gdna_varmean(chain: NodeChain, densities: NodeDensities, geometry: NodeGeometry) -> MonotoneVarMean:
-    """Fit the gDNA message reliability ``σ²_bio(μ)`` on the FROZEN snapshot densities (plan v3 §7). gDNA flows
+def fit_gdna_varmean(
+    chain: NodeChain, densities: NodeDensities, geometry: NodeGeometry
+) -> MonotoneVarMean:
+    """Fit the gDNA message reliability ``σ²_bio(μ)`` on the FROZEN snapshot densities. gDNA flows
     genomically (every edge is ``live``); the ``(dr>0)&(sr>0)`` filter drops pure-RNA pairs. Fitting on the
-    frozen previous-pass densities (not in-place) keeps σ²_bio from collapsing to 0 (plan v3 §4)."""
+    frozen previous-pass densities (not in-place) keeps σ²_bio from collapsing to 0."""
     live = np.ones(int(chain.n_nodes), dtype=bool)
     m, r, o = _edge_varmean(
-        chain, densities.rho_g_left, densities.rho_g_right,
-        geometry.eff_gdna_left, geometry.eff_gdna_right, live,
+        chain,
+        densities.rho_g_left,
+        densities.rho_g_right,
+        geometry.eff_gdna_left,
+        geometry.eff_gdna_right,
+        live,
     )
     return _fit_offset(m, r, o)
 
@@ -513,23 +533,31 @@ def fit_rna_varmean(
     chain: NodeChain, densities: NodeDensities, geometry: NodeGeometry, statics: NodeStatics
 ) -> MonotoneVarMean:
     """Fit the RNA message reliability ``σ²_bio(μ)`` on the FROZEN snapshot, POOLING both strands (the symmetric
-    RNA process; plan v3 §7). A strand-s edge is ``live`` only where strand s is continuous on BOTH endpoints
+    RNA process). A strand-s edge is ``live`` only where strand s is continuous on BOTH endpoints
     (``free_s`` — the transcript-structure gate), so the curve sees the genuine same-strand cross-node RNA
     dispersion (INCLUDING the AMBIG nodes' per-strand densities — the honest-AMBIG-dispersion the chain now
     provides, the 2c fix). The per-strand RNA density is spliced-inclusive (``node_densities``)."""
     mp, rp, op = _edge_varmean(
-        chain, densities.rho_pos_left, densities.rho_pos_right,
-        geometry.eff_rna_left, geometry.eff_rna_right, statics.free_pos,
+        chain,
+        densities.rho_pos_left,
+        densities.rho_pos_right,
+        geometry.eff_rna_left,
+        geometry.eff_rna_right,
+        statics.free_pos,
     )
     mn, rn, on = _edge_varmean(
-        chain, densities.rho_neg_left, densities.rho_neg_right,
-        geometry.eff_rna_left, geometry.eff_rna_right, statics.free_neg,
+        chain,
+        densities.rho_neg_left,
+        densities.rho_neg_right,
+        geometry.eff_rna_left,
+        geometry.eff_rna_right,
+        statics.free_neg,
     )
     return _fit_offset(mp + mn, rp + rn, op + on)
 
 
 def _message(rho_src, eff_src, eff_dst, mass_dst, mass_src, rho_dst_cur, varmean, spliced_dst=0.0):
-    """One density message (source → dest) as the dest's fraction prior ``(μ_f, τ_f)`` (plan v3 §3/§5). Mean =
+    """One density message (source → dest) as the dest's fraction prior ``(μ_f, τ_f)``. Mean =
     the IDENTITY density ``ρ_src`` matched at the dest: its known spliced (free info, gDNA: 0) is subtracted so
     only the dest's UNSOLVED unspliced fraction is informed — ``μ_f = (ρ_src·E_dst − spliced_dst)/M_dst``.
     Density precision ``τ_ρ = 1/(σ²_bio(μ) + ρ_src/E_src)`` (the learned biological dispersion + the
@@ -570,7 +598,7 @@ def node_sweep(
     convergence_delta: float,
 ):
     """The directional (Gauss-Seidel) belief-propagation sweep over the chain — gDNA AND per-strand RNA
-    messages (plan v3 §3/§4/§5/§7).
+    messages.
 
     Each outer pass: (1) freeze the snapshot densities + fit the gDNA and RNA ``σ²_bio`` var~means on them;
     (2) recompute the global gDNA prior on the running region beliefs; (3) sweep **L→R** then **R→L**, each node
@@ -600,7 +628,7 @@ def node_sweep(
     SP = (geometry.spliced_pos_left, geometry.spliced_pos_right)
     SN = (geometry.spliced_neg_left, geometry.spliced_neg_right)
     # per-node "global" gDNA support: region = its contained support; boundary = the shipped AVERAGED
-    # per-side density length ½(E_l+E_r) (plan v3 §2) over the total crossing mass.
+    # per-side density length ½(E_l+E_r) over the total crossing mass.
     eff_global = np.where(is_reg, EG[0], 0.5 * (EG[0] + EG[1]))
     mass_global = np.where(is_reg, MS[0], MS[0] + MS[1])
     geom2_global = (eff_global / np.maximum(mass_global, _EPS)) ** 2
@@ -617,12 +645,21 @@ def node_sweep(
 
     def _solve(i, mu_g, tau_g, mu_p, tau_p, mu_n, tau_n, mu_glob, tau_glob):
         psi = _local_loglik(
-            statics.u_pos[i:i + 1], statics.u_neg[i:i + 1],
-            statics.spliced_pos[i:i + 1], statics.spliced_neg[i:i + 1],
-            fp[i:i + 1], fn[i:i + 1], kappa, od_g, od_r, lattice,
-            strand_obs=statics.strand_obs[i:i + 1],
-            global_mu=np.array([mu_glob]), global_tau=np.array([tau_glob]),
-            gdna_imp_frac=np.array([mu_g]), gdna_imp_precision=np.array([tau_g]),
+            statics.u_pos[i : i + 1],
+            statics.u_neg[i : i + 1],
+            statics.spliced_pos[i : i + 1],
+            statics.spliced_neg[i : i + 1],
+            fp[i : i + 1],
+            fn[i : i + 1],
+            kappa,
+            od_g,
+            od_r,
+            lattice,
+            strand_obs=statics.strand_obs[i : i + 1],
+            global_mu=np.array([mu_glob]),
+            global_tau=np.array([tau_glob]),
+            gdna_imp_frac=np.array([mu_g]),
+            gdna_imp_precision=np.array([tau_g]),
             rna_imp_frac=(np.array([mu_p]), np.array([mu_n])),
             rna_imp_precision=(np.array([tau_p]), np.array([tau_n])),
         )
@@ -648,13 +685,15 @@ def node_sweep(
         #           the OBSERVED total density M/eff (a known, non-circular axis). Tight at low (un-
         #           enriched) density, wide at high (capture-enriched) density ⇒ the prior is humble
         #           exactly where enrichment lives, so propagation governs there instead of the global.
-        rho_obs_n = mass_global / np.maximum(eff_global, _EPS)        # observed total density (known)
-        rho_g_n = f_g * mass_global / np.maximum(eff_global, _EPS)    # current gDNA density per node
+        rho_obs_n = mass_global / np.maximum(eff_global, _EPS)  # observed total density (known)
+        rho_g_n = f_g * mass_global / np.maximum(eff_global, _EPS)  # current gDNA density per node
         sel = self_solvable & (mass_global > _EPS)
         w = mass_global[sel]
         rho_mean = float(np.sum(w * rho_g_n[sel]) / max(float(np.sum(w)), _EPS))
         gprior_vm = MonotoneVarMean.fit_offset(
-            rho_obs_n[sel], (rho_g_n[sel] - rho_mean) ** 2, rho_g_n[sel] / np.maximum(eff_global[sel], _EPS)
+            rho_obs_n[sel],
+            (rho_g_n[sel] - rho_mean) ** 2,
+            rho_g_n[sel] / np.maximum(eff_global[sel], _EPS),
         )
         mu_global = np.clip(rho_mean * eff_global / np.maximum(mass_global, _EPS), 0.0, 1.0)
         sigma2_n = np.maximum(gprior_vm.predict(rho_obs_n), _EPS)
@@ -662,8 +701,11 @@ def node_sweep(
 
         prev = (f_g.copy(), f_pos.copy(), f_neg.copy())
         # df = the dst's face toward its sweep-direction neighbour; sf = the src's face toward the dst.
-        for nbr_arr, df, sf in ((left, 0, 1), (right, 1, 0)):  # L→R (from left) then R→L (from right)
-            for i in (order if df == 0 else order[::-1]):
+        for nbr_arr, df, sf in (
+            (left, 0, 1),
+            (right, 1, 0),
+        ):  # L→R (from left) then R→L (from right)
+            for i in order if df == 0 else order[::-1]:
                 if not solvable[i]:
                     continue
                 src = nbr_arr[i]
@@ -672,19 +714,35 @@ def node_sweep(
                 s_mass = MS[sf][src]
                 # gDNA message (genomic; spliced_dst=0).
                 rho_g_src = f_g[src] * s_mass / max(EG[sf][src], _EPS)
-                mu_g, tau_g = _message(rho_g_src, EG[sf][src], EG[df][i], MS[df][i], s_mass, SNG[df][i], gdna_vm)
+                mu_g, tau_g = _message(
+                    rho_g_src, EG[sf][src], EG[df][i], MS[df][i], s_mass, SNG[df][i], gdna_vm
+                )
                 # per-strand RNA messages, gated by free_s on BOTH endpoints; spliced rides in ρ_s + the
                 # dest-spliced subtraction. τ=0 (no message) where the strand is not continuous.
                 mu_p = tau_p = mu_n = tau_n = 0.0
                 if fp[i] and fp[src]:
                     rho_p_src = (f_pos[src] * s_mass + SP[sf][src]) / max(ER[sf][src], _EPS)
                     mu_p, tau_p = _message(
-                        rho_p_src, ER[sf][src], ER[df][i], MS[df][i], s_mass, SNP[df][i], rna_vm, SP[df][i]
+                        rho_p_src,
+                        ER[sf][src],
+                        ER[df][i],
+                        MS[df][i],
+                        s_mass,
+                        SNP[df][i],
+                        rna_vm,
+                        SP[df][i],
                     )
                 if fn[i] and fn[src]:
                     rho_n_src = (f_neg[src] * s_mass + SN[sf][src]) / max(ER[sf][src], _EPS)
                     mu_n, tau_n = _message(
-                        rho_n_src, ER[sf][src], ER[df][i], MS[df][i], s_mass, SNN[df][i], rna_vm, SN[df][i]
+                        rho_n_src,
+                        ER[sf][src],
+                        ER[df][i],
+                        MS[df][i],
+                        s_mass,
+                        SNN[df][i],
+                        rna_vm,
+                        SN[df][i],
                     )
                 _solve(i, mu_g, tau_g, mu_p, tau_p, mu_n, tau_n, mu_global[i], tau_global[i])
         delta = max(
@@ -696,8 +754,14 @@ def node_sweep(
             break
 
     return (
-        NodeBelief(f_pos=f_pos, f_neg=f_neg, f_g=f_g,
-                   var_pos=belief.var_pos, var_neg=belief.var_neg, var_gdna=var_g),
+        NodeBelief(
+            f_pos=f_pos,
+            f_neg=f_neg,
+            f_g=f_g,
+            var_pos=belief.var_pos,
+            var_neg=belief.var_neg,
+            var_gdna=var_g,
+        ),
         deltas,
     )
 
@@ -723,8 +787,12 @@ def chain_region_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> Node
     f_neg[ri] = belief.f_neg[reg]
     f_gv[ri] = belief.var_gdna[reg]
     return NodeDeconv(
-        gdna_mass=f_g * mass_u, rna_mass=(1.0 - f_g) * mass_u + mass_s,
-        gdna_frac=f_g, gdna_frac_var=f_gv, rna_pos_frac=f_pos, rna_neg_frac=f_neg,
+        gdna_mass=f_g * mass_u,
+        rna_mass=(1.0 - f_g) * mass_u + mass_s,
+        gdna_frac=f_g,
+        gdna_frac_var=f_gv,
+        rna_pos_frac=f_pos,
+        rna_neg_frac=f_neg,
     )
 
 
@@ -751,9 +819,12 @@ def chain_boundary_side_deconv(chain: NodeChain, belief: NodeBelief, substrate):
         m_u = np.asarray(view.mass_unspliced, dtype=np.float64)
         m_s = np.asarray(view.mass_spliced, dtype=np.float64)
         return NodeDeconv(
-            gdna_mass=side_fg * m_u, rna_mass=(1.0 - side_fg) * m_u + m_s,
-            gdna_frac=side_fg, gdna_frac_var=np.zeros(R),
-            rna_pos_frac=np.zeros(R), rna_neg_frac=np.zeros(R),
+            gdna_mass=side_fg * m_u,
+            rna_mass=(1.0 - side_fg) * m_u + m_s,
+            gdna_frac=side_fg,
+            gdna_frac_var=np.zeros(R),
+            rna_pos_frac=np.zeros(R),
+            rna_neg_frac=np.zeros(R),
         )
 
     return _side(left_fg, substrate.left), _side(right_fg, substrate.right)
