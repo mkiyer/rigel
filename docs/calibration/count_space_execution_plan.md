@@ -100,6 +100,26 @@ architecturally but MILD in our actual parameterization** — they downgrade fro
 Net: the count-space-on-GS effort's value is the **count-space precision wins** (length-aware `(n+a)/E²`,
 count-de-voting, bounded capture overshoot) — NOT rescuing P2/P4, which our parameterization already handles.
 
+### 2.2 Phase-1c finding — the count-space message precision is ALREADY SHIPPED; the P4 cap is HARMFUL
+Verified on the code + measured the one candidate change:
+- **The `(density, precision)` message precision IS the count-space form, already shipped** (`dfc3360f`).
+  `_message`'s `pois = (ρ_src + a/E_src)/E_src = (n_src + a)/E_src²` with `a = _MSG_PSEUDOCOUNT = 1` — exactly
+  the §1 length-aware sampling precision; `tau_rho = 1/(σ²_bio + (n+a)/E²)` is biology+sampling capped (the
+  implicit `N_pseudo`); the binomial floor bounds the `(M/E)²` overshoot. **Because we rejected the Dirichlet
+  `Σα·log f` form (OQ1), the shipped `(density,precision)` message leaves no separate count-space precision to
+  build.**
+- **The wall-robust τ_f cap (the P4 guard) is a NET REGRESSION — reverted.** Flooring `μ(1−μ)` at `a/M` to cap
+  the wall spike dropped capture AMBIG gDNA 221,742 → 208,022 (−6%) while the truth there is *high* gDNA
+  (oracle f_g=0.84). Under capture the short-flank captured-exon boundaries emit high-precision messages that
+  **correctly** pull AMBIG toward the true high gDNA; the binomial floor's wall-vanishing is load-bearing for
+  capture recovery AND stranded-zero pinning. The P4 "over-confidence" is, in real data, correct signal; the
+  bounded spike (≤ M²/a, measured) is not worth a measured capture regression. **Keep the shipped floor.**
+
+**Consequence:** count-space-on-GS message precision (1c) is COMPLETE as shipped; the count-space priors (1b)
+are already `(density,precision)` Gaussians (count-space-equivalent), the only behavior-change candidate being
+the spliced **hard** anchor (uncertain value). The remaining *distinctive* count-space value is **relay** (FB,
+gated). So the next real decision is the **FB GO/NO-GO** (Phase-0 B-step), not more GS message work.
+
 ## 3. Phase 1 — count-space on the existing Gauss-Seidel sweep
 
 Sub-phased so each lands behind its own gate. The GS walk and the directional one-at-a-time solve (the no-blend
