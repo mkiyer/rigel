@@ -1,3 +1,171 @@
+
+# Proposed calibration workflow
+
+## Setup
+
+To run the solver, we need:
+1) FL distributions
+2) a strand model
+3) a count model (the prior)
+4) a global gDNA density model (the hyperprior)
+
+At setup time:
+- finalize our RNA FL and gDNA FL distributions
+- fit strand model (BB overdispersion)
+- init count model to a stability 'floor'
+- init hyperprior to stability 'floor'
+
+We do not have enough information to build a reliable count model at initialization time, so we must initialize it to an extremely weak prior:
+- Fraction: { f+ = 0, f- = 0, fg = 1 }
+- Uncertainty: numerically stable MAX uncertainty value
+
+Default hyperprior is *EXTREMELY* weak gDNA:
+- Fraction: { f+ = 0, f- = 0, fg = 1 }
+- Uncertainty: numerically stable MAX uncertainty value
+
+In the first pass, the count model (prior) and global model (hyperprior) are essentially OFF and provide only a weak initialization for ambiguous nodes.
+
+
+## Overview of node solver
+
+There are two types of nodes: Regions and Boundaries
+
+Global inputs:
+- gDNA FL dist
+- RNA FL dist
+- strand specificity
+- RNA var ~ mean model
+- gDNA var ~ mean model
+- gDNA global density model (hyperprior)
+
+Region Node inputs:
+- signature (ex+, ex-, in+, in-) 4-bit flag
+- contained counts (spliced+, spliced-, unspliced+, unspliced-)
+
+Boundary Node inputs:
+- L/R unspliced counts, L/R unspliced mass
+- L/R spliced counts, L/R spliced mass
+
+Imputation inputs:
+- signal propagation from left -> right (fractions, uncertainties)
+- signal propagation from right -> left (fractions, uncertainties)
+
+Outputs:
+- Each node must solve for its { f+, f-, fg } with uncertainties { unc+, unc-, unc_gdna }
+
+
+## Pass 0 - initialization pass
+
+The initialization pass iterates over every node. Any node that can be solved directly without outside information is solved.
+
+
+Node Initialization
+===================
+
+### Group 1 - Nodes that require no solver (seeds)
+
+1a) Intergenic regions
+1b) Intergenic-exon boundaries: { f+=0, f-= 0, fg=1 }
+
+- Fractions: { f+=0, f-=0, fg=1 }
+- Uncertainty: { unc+=0, unc-=0, unc_gdna=0 } (propagation sink)
+
+
+### Group 2 - Nodes that *could* be solved by strand deconvolution alone (1D solver nodes)
+
+2a) Intronic regions (single strand)
+2b) Exon <-> Intron boundaries (single strand)
+2c) Exon regions (single strand)
+
+Properties: 
+- f- = 0 if transcript is on positive strand
+- f+ = 0 if transcript is on negative strand
+
+Therefore, we only need to solve for single-stranded RNA and gDNA
+
+To initialize: Apply strand deconvolution ALONE (NO COUNT MODEL, NO IMPUTATION, NO COMBINE). During Pass 0, we have no imputation model.
+
+Strand deconvolution ALONE will yield fractions and uncertainties based on the strand model (BB overdispersion fit).
+
+For example, a '+' stranded node with U total counts deconvolves `U = Upos + Ugdna`. We compute fractions f+ and fg (f- = 0)
+
+The uncertainty of the deconvolution depends on the strand-specificity parameter and the BB overdispersion.
+
+When ss=0.5 (unstranded), there is no information and the solution must defer to the weak global hyperprior.
+
+When as `abs(2*(ss - 0.5))` approaches 1.0, we have increasingly reliable deconvolution information. The uncertainty depends on the total counts and the BB overdispersion fit.
+
+- Fractions: { f+, f-=0, fg } where f+ = 0 OR f- = 0
+- Uncertainty: { unc+, unc-, unc_gdna } where unc+ or unc- = 0
+
+
+### Group 3 - Nodes that cannot be solved by strand deconvolution alone (2D solver nodes)
+
+Definition: *any* node with both strands activated: `(ex+ or in+) AND (ex- OR in-)`
+
+These are (strand=AMBIG) and cannot be solved directly by strand deconvolution.
+
+*These nodes must be initialized to the weak prior*
+
+
+## Pass 0 - model initialization
+
+At this point, all nodes have been initialized.
+
+Steps:
+
+1) global gDNA density
+
+Use the initialized results (despite the high uncertainty) to compute the global gDNA density:
+- (sum of gdna mass at all nodes) / (sum of node lengths)
+
+2) enrichment ratios
+
+Compute the enrichment ratio for each node:
+`(local gdna density) / (global gdna density)`
+
+Now, fit models.
+
+3) global gdna density hyperprior
+
+- We compute a single scalar global gdna density from the current state of the nodes (from the current fraction gdna in each node)
+
+OPEN QUESTION:
+- How do we set the uncertainty of the global hyperprior? Can we model the variance of the global gdna density? How?
+
+4) gDNA imputation model (var ~ mean fit)
+
+The current implementation may be viable, but suspect that it can be improved. 
+
+OPEN ISSUE: we need to audit, understand, and further develop the existing gdna imputation model fit (together with the rna model)
+
+5) RNA imputation model (var ~ mean fit)
+
+OPEN ISSUE: we need to audit, understand, and further develop the existing RNA imputation model fit (together with the gdna model)
+
+
+
+
+## Pass 1 - full solver
+
+At this stage, we have a complete initialization. 
+- All nodes have initial fractions and uncertainties.
+- We have an initial var ~ mean gDNA model
+- We have an initial var ~ mean RNA model
+- Initial global gdna density calculation
+- Enrichment ratios
+
+Now we can run our belief propagation algorithm (bidirectional sweep).
+
+I'll need your help to understand the open variables and questions related to iteration after the initialization has been completed
+
+Pass 1 onwards applies the full solver with the iteration of the entire pipeline.
+
+
+
+
+
+
 Model A -- 
 
 At initialization we do not know what the gDNA landscape will look like (hybrid capture on/off? Cancer sample with lots of amplifications/deletions?). We must have an unsupervised approach.
@@ -220,7 +388,17 @@ Getting 'confidence' right is the CRUX of the entire problem.
 
 ## Node confidence measure
 
-Every node must store a current value: {f+, f-, fg}
+- Every node must store a current value: {f+, f-, fg}
+- Every node needs a measure of confidence in its current value.
+- We could call this confidence likelihood, uncertainty, etc
 
-Every node needs a measure confidence in its current value
+Node's *NEED* a measure of intrinsic confidence per node. 
+
+The node's current 'confidence' vector is its "prior belief that it is correct". The incoming signal propagation is the new information, which conveys a signal associated with another confidence.
+
+Unclear if this should be a 3-term vector { conf+, conf-, conf_gdna } or a single confidence measure for the entire node solution.
+
+When signal propagation happens, the node must weigh its own intrinsic confidence against the incoming confidence. This tells it how much of the signal to update with.
+
+After updating, the relative CHANGE in value from its prior value to the updated value becomes the new signal to propagate onward to the next node in the chain.
 
