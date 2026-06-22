@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rigel.calibration.variance_model import MonotoneVarMean
+from rigel.calibration.variance_model import MonotoneMean, MonotoneVarMean
 
 
 def _poisson_pair_points(lam_src, lam_dst, l_src, l_dst, rng):
@@ -104,3 +104,78 @@ def test_offset_fit_to_dataframe_has_points_and_curve():
     df = MonotoneVarMean.fit_offset(*_rising_offset_points(np.random.default_rng(6))).to_dataframe()
     assert set(df["kind"].unique()) == {"point", "curve"}
     assert (df["var"] >= 0.0).all()  # σ²_bio ≥ 0
+
+
+# --- MonotoneMean: the enrichment transfer ê(z)=E[ρ_g|z] (mean fit, count-recalibrated) -------------------
+
+def _power_law_points(rng, n=500, C=3.0, b=1.08, sigma=0.5):
+    """z ~ loguniform, ρ_g = C·z^b·lognormal(σ) (the validated near-log-linear enrichment law)."""
+    z = np.exp(rng.uniform(np.log(0.05), np.log(7.0), n))
+    rho = C * z**b * np.exp(rng.normal(0.0, sigma, n))
+    return z, rho
+
+
+def test_mean_fit_is_monotone_nonneg_finite():
+    z, rho = _power_law_points(np.random.default_rng(10))
+    fit = MonotoneMean.fit(z, rho)
+    grid = np.logspace(-2, 1, 200)
+    pred = fit.predict(grid)
+    assert np.all(np.isfinite(pred))
+    assert np.all(pred >= 0.0)
+    assert np.all(np.diff(pred) >= -1e-9)  # ê monotone non-decreasing in z
+
+
+def test_mean_fit_net_unbiased_on_recal_weight():
+    # The count-recal scale forces Σ ê(z)·rw = Σ ρ·rw on the fit set, EXACTLY (the §F net fix).
+    rng = np.random.default_rng(11)
+    z, rho = _power_law_points(rng)
+    rw = rng.uniform(50.0, 400.0, z.size)  # E_dst-like recal weight
+    fit = MonotoneMean.fit(z, rho, weight=rw, recal_weight=rw)
+    assert np.sum(rw * fit.predict(z)) == pytest.approx(np.sum(rw * rho), rel=1e-9)
+
+
+def test_mean_fit_recovers_power_law_conditional_mean():
+    # ê at a query z must ≈ the conditional MEAN C·z^b·exp(σ²/2) (the recal scale supplies the lognormal-mean
+    # correction that a raw log-space fit's exp would miss — the Duan role, as one global scale).
+    rng = np.random.default_rng(12)
+    C, b, sigma = 3.0, 1.08, 0.5
+    z, rho = _power_law_points(rng, n=4000, C=C, b=b, sigma=sigma)
+    fit = MonotoneMean.fit(z, rho)
+    for zq in (0.5, 2.0, 5.0):
+        truth = C * zq**b * np.exp(sigma**2 / 2)
+        assert fit.predict(np.array([zq]))[0] == pytest.approx(truth, rel=0.25)
+
+
+def test_mean_fit_flat_input_gives_constant():
+    # ρ_g independent of z ⇒ ê ≈ a constant (the recal-weighted mean), no spurious slope.
+    rng = np.random.default_rng(13)
+    z = np.exp(rng.uniform(np.log(0.05), np.log(7.0), 500))
+    rho = 4.0 * np.exp(rng.normal(0.0, 0.4, z.size))  # no z-dependence
+    fit = MonotoneMean.fit(z, rho)
+    pred = fit.predict(np.logspace(-2, 1, 50))
+    assert pred.max() / pred.min() < 1.6  # nearly flat
+    assert float(np.mean(pred)) == pytest.approx(np.mean(rho), rel=0.25)
+
+
+def test_mean_fit_predict_clips_to_fit_range():
+    z, rho = _power_law_points(np.random.default_rng(14))
+    fit = MonotoneMean.fit(z, rho)
+    lo_in = fit.predict(np.array([float(np.exp(fit.x_lo))]))[0]
+    hi_in = fit.predict(np.array([float(np.exp(fit.x_hi))]))[0]
+    assert np.isclose(fit.predict(np.array([1e-9]))[0], lo_in, rtol=1e-6)  # flat below
+    assert np.isclose(fit.predict(np.array([1e9]))[0], hi_in, rtol=1e-6)   # flat above
+
+
+def test_mean_fit_too_few_points_flat_fallback():
+    z = np.array([1.0, 2.0, 3.0])
+    rho = np.array([5.0, 6.0, 5.5])
+    fit = MonotoneMean.fit(z, rho)
+    pred = fit.predict(np.array([0.5, 2.0, 10.0]))
+    assert np.allclose(pred, pred[0])  # flat
+    assert pred[0] == pytest.approx(np.mean(rho), rel=0.05)
+
+
+def test_mean_constant_factory_is_flat_at_value():
+    fit = MonotoneMean.constant(0.46)  # the off-capture / z-unusable ρ_global fallback
+    pred = fit.predict(np.logspace(-3, 3, 40))
+    assert np.allclose(pred, 0.46)

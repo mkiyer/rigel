@@ -1,5 +1,10 @@
 # TODO list for entire package
 
+## node-pair density fit
+
+- monotonic spline (current) vs
+- log-linear fit (simpler, maybe not as robust)
+
 ## Tiny nodes (count or size)
 
 Nodes will zero (or low) counts kill propagation

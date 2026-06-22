@@ -111,12 +111,6 @@ def main():
     ap.add_argument("--kill-rna-prec", action="store_true",
                     help="EXPERIMENT: monkeypatch fit_rna_varmean to emit ~0 precision (honest-σ²_bio "
                          "direction) — tests whether over-confident RNA messages cause the AMBIG f_g→0.")
-    ap.add_argument("--soften-global", type=float, default=0.0,
-                    help="EXPERIMENT: scale σ_global UP by this factor (↓ global precision by factor²) — "
-                         "tests whether the over-precise global prior pins AMBIG f_g→0.")
-    ap.add_argument("--global-all-regions", action="store_true",
-                    help="EXPERIMENT: compute rho_global over ALL regions with data (not count-observable "
-                         "only) — the agreed capture-aware baseline.")
     args = ap.parse_args()
 
     from rigel.calibration import calibrate
@@ -136,27 +130,6 @@ def main():
 
         bp.fit_rna_varmean = lambda *a, **k: _LowPrec()
         print("  [EXPERIMENT] RNA-message precision killed (fit_rna_varmean σ²_bio→∞)")
-
-    if args.soften_global > 0:
-        import rigel.calibration.bp_solver as bp
-        _orig_g = bp.global_gdna_prior
-
-        def _soft(*a, **k):
-            rho, sig = _orig_g(*a, **k)
-            return rho, sig * args.soften_global  # ↓ precision by factor²
-
-        bp.global_gdna_prior = _soft
-        print(f"  [EXPERIMENT] global σ scaled ×{args.soften_global} (precision ÷{args.soften_global**2:.0f})")
-
-    if args.global_all_regions:
-        import rigel.calibration.bp_solver as bp
-        _orig_ga = bp.global_gdna_prior
-
-        def _allreg(region_f_g, mass, eff, obs):  # rho over ALL regions with data, not count-observable only
-            return _orig_ga(region_f_g, mass, eff, np.asarray(mass, float) > 0.0)
-
-        bp.global_gdna_prior = _allreg
-        print("  [EXPERIMENT] rho_global computed over ALL regions with data (capture-aware baseline)")
 
     cal = calibrate(
         payload=blob["payload_full"], region_arrays=region_arrays,

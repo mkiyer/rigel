@@ -337,6 +337,7 @@ def test_gdna_sweep_factor1_uniform():
         geom,
         belief,
         region_arrays,
+        bsub,
         rna_sense_frac=0.7,
         n_grid=40,
         max_passes=8,
@@ -398,12 +399,57 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
         geom,
         belief,
         region_arrays,
+        bsub,
         rna_sense_frac=0.95,
         n_grid=40,
         max_passes=10,
         convergence_delta=1e-4,
     )
-    assert final.f_g[3] < 0.15  # the AMBIG phantom is pulled down (no phantom gDNA)
-    assert final.f_g[1] < 0.15 and final.f_g[5] < 0.15  # the introns stay RNA via the strand
+    # the AMBIG phantom is pulled DOWN from its all-gDNA init (1.0) toward RNA. The honest global is now a
+    # GENTLE, M-independent tiebreaker (N_global≈1 pseudo-fragment at zero-gDNA, the Poisson-1 floor), so it
+    # NUDGES rather than hard-pins; the suppression here leans on the RNA imputation from the intron neighbours.
+    # This synthetic chain has NO intergenic structural seeds (intron+|AMBIG|intron−), so it is the hard case
+    # for a gentle global — on real libraries the intergenic zero-count seeds drive a firmer zero-baseline.
+    assert final.f_g[3] < 0.25  # substantially pulled down (init 1.0 → ~0.18)
+    assert final.f_g[1] < 0.15 and final.f_g[5] < 0.15  # the introns stay RNA via the (decisive) strand
     # monotone convergence: the per-pass max-|Δf_g| is non-increasing
     assert all(deltas[k + 1] <= deltas[k] + 1e-9 for k in range(len(deltas) - 1))
+
+
+# --- count-space message form: two-sided pull + emergent deference (honest-precision Step 2) -----------------
+
+
+def test_binom_message_two_sided_mode_not_vertex():
+    """A count-space gDNA message μ=0.2 with strong evidence must pull f_g TOWARD 0.2 (two-sided), not to the
+    f_g=1 vertex (the rejected one-sided ``α·log f`` form gave median ≈0.77, the opposite of its content)."""
+    from rigel.calibration.simplex_sweep import _fg_median, _local_loglik, _simplex_lattice
+
+    lat = _simplex_lattice(80)
+    _, _, fgg = lat
+    # AMBIG node, balanced counts ⇒ the strand is flat (κ=0.5); only the message shapes f_g.
+    psi = _local_loglik(
+        np.array([50.0]), np.array([50.0]), np.zeros(1), np.zeros(1),
+        np.array([True]), np.array([True]), 0.5, 0.0, 0.0, lat,
+        strand_obs=np.array([False]),
+        gdna_imp_frac=np.array([0.2]), gdna_imp_count=np.array([200.0]),
+    )
+    fg = float(_fg_median(psi, fgg)[0])
+    assert abs(fg - 0.2) < 0.05, fg
+
+
+def test_binom_message_defers_to_decisive_strand():
+    """Emergent deference: a weak gDNA message (N_src=3 pseudo-fragments) trying to pull f_g→0.9 must lose to a
+    decisive single-strand node's ~1000-fragment strand likelihood — f_g stays ≈0 (no destination-mass²
+    amplification can override the data)."""
+    from rigel.calibration.simplex_sweep import _fg_median, _local_loglik, _simplex_lattice
+
+    lat = _simplex_lattice(80)
+    _, _, fgg = lat
+    psi = _local_loglik(
+        np.array([1000.0]), np.array([5.0]), np.zeros(1), np.zeros(1),
+        np.array([True]), np.array([False]), 0.99, 0.0, 0.0, lat,
+        strand_obs=np.array([True]),
+        gdna_imp_frac=np.array([0.9]), gdna_imp_count=np.array([3.0]),
+    )
+    fg = float(_fg_median(psi, fgg)[0])
+    assert fg < 0.1, fg

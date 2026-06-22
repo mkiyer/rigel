@@ -156,7 +156,7 @@ def calibrate(
         n_grid=config.sweep_n_grid, statics=statics,
     )
     belief, sweep_deltas = node_sweep(
-        chain, statics, geometry, belief, region_arrays,
+        chain, statics, geometry, belief, region_arrays, boundary_substrate,
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,
