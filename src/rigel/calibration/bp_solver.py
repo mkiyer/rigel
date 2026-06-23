@@ -73,9 +73,6 @@ __all__ = [
 _EPS = 1.0e-9
 _MSG_PSEUDOCOUNT = 1.0  # one pseudo-observation: a density from a finite count can never have zero
 #                         sampling variance, so a message precision can never escape to ∞ (var stabilizer).
-_ENRICH_MIN_STRAND_CONTRAST = 0.25  # min strand discriminability (2κ−1)² to engage the enrichment transfer
-#   (|2κ−1|≥0.5, i.e. a ≥75/25 sense skew). Below it the single-strand teachers don't deconvolve and ê becomes
-#   phantom gDNA — the unstranded path is deferred (FL-ready). FLAGGED for discussion (no-magic-number rule).
 _POS_BITS = BIT_EXON_POS | BIT_INTRON_POS
 _NEG_BITS = BIT_EXON_NEG | BIT_INTRON_NEG
 
@@ -653,6 +650,11 @@ def fit_enrichment_transfer(
     ``ê`` is fit on the SINGLE-STRAND EXON regions (the only nodes whose enriched gDNA density is observed
     without a global); the exon edge→interior gradient is exon-specific, so seeds are NOT mixed in here.
 
+    The fit RESPONSE ρ_g is a reliability-weighted BLEND of a STRAND-derived estimate (``f_g_init·T``,
+    weight ``(2κ−1)²``) and a SPLICED-derived estimate (from the MOTIF-stranded spliced/pure-mature signal —
+    strand-immune, weight ``1−(2κ−1)²``; Part III). κ→1 ⇒ strand; κ→½ ⇒ spliced (the unstranded path); a node
+    uses the spliced term only where spliced is present at its flanking clean boundary.
+
     A **permutation significance gate** (real log-log R² vs the shuffled-``z`` null) collapses ``ê`` to the flat
     ``ρ_global`` when there is no ``z→ρ_g`` signal (off-capture / uniform gDNA) — capture is DETECTED, not
     flagged, and the layer reduces exactly to the genome-wide global. Returns
@@ -696,14 +698,6 @@ def fit_enrichment_transfer(
             z[i] = float(np.mean(vals))
 
     flat = MonotoneMean.constant(rho_global)  # the off-capture / no-signal fallback (= genome-wide global)
-    # STRANDED-ONLY GATE (design scope): the teachers are single-strand exons solved by the STRAND. As κ→½ the
-    # strand cannot deconvolve, so the strand-only f_g_init collapses to the ~0.5 prior midpoint, ρ_g=f_g_init·T
-    # → 0.5·T is NOT a gDNA density, and the significance test can't catch it (z trivially tracks 0.5·T) — it
-    # would manufacture μ_g≈0.5 phantom gDNA. The strand discriminability (2κ−1)² (the same weight the seed
-    # strand-deconv uses) must clear a floor; below it, the unstranded path is DEFERRED (FL-ready) and we keep
-    # the genome-wide ρ_global. [TODO discuss: _ENRICH_MIN_STRAND_CONTRAST — flagged per the no-magic rule.]
-    if float((2.0 * kappa - 1.0) ** 2) < _ENRICH_MIN_STRAND_CONTRAST:
-        return flat, z, None, False
     T = Ml / np.maximum(EGl, _EPS)
     strand_obs = np.asarray(statics.strand_obs, bool)
     ss_exon = is_reg & (node_rtype == 2) & strand_obs & (Ml > 0.0) & np.isfinite(z)
@@ -711,12 +705,44 @@ def fit_enrichment_transfer(
     if fi.size == 0:
         return flat, z, None, False
 
+    # ---- the ê-fit RESPONSE ρ_g: a reliability-weighted BLEND of two estimators (Part III) ----
+    # STRAND-derived (ρ_g=f_g_init·T) is gDNA-accurate when κ→1 but collapses to ~0.5·T as κ→½. SPLICED-derived
+    # uses the MOTIF-stranded spliced (pure-mature) signal at the flanking clean boundary — strand-immune, so it
+    # is the unstranded fallback: ρ_mature=M_spliced/E_rna_crossing(B); ρ_g=clip(M_unspliced−ρ_mature·E_rna_contained,0)/E_gdna.
+    # Blend w_str=(2κ−1)² (strand discriminability, →0 at κ=½), w_spl=1−w_str; a node uses the spliced term only
+    # where spliced is present at its flanking clean boundary (avail). κ→1 ⇒ strand; κ→½ ⇒ spliced; in between a
+    # smooth hand-off. Replaces the old hard strand-contrast gate.
     fg = np.asarray(f_g_init, dtype=np.float64)
-    rho_g = fg[fi] * T[fi]                      # strand-only gDNA density (the realizable response)
-    zf = z[fi]
+    fp = np.asarray(statics.free_pos, bool)  # single-strand: POS iff free_pos (else NEG) — the motif strand
+    SPl, SPr = geometry.spliced_pos_left, geometry.spliced_pos_right
+    SNl, SNr = geometry.spliced_neg_left, geometry.spliced_neg_right
+    ERl, ERr = geometry.eff_rna_left, geometry.eff_rna_right
+    rho_strand = fg[fi] * T[fi]
+    rho_spliced = np.zeros(fi.size)
+    avail = np.zeros(fi.size, dtype=bool)
+    for j, i in enumerate(fi):
+        sl, sr = (SPl, SPr) if fp[i] else (SNl, SNr)  # spliced on this region's motif strand
+        m_spl, e_spl = 0.0, _EPS
+        lb = int(left[i])
+        if lb >= 0 and clean_exon_bnd[lb] and sr[lb] > m_spl:  # R is lb's RIGHT region → faces lb's right side
+            m_spl, e_spl = float(sr[lb]), float(ERr[lb])
+        rb = int(right[i])
+        if rb >= 0 and clean_exon_bnd[rb] and sl[rb] > m_spl:  # R is rb's LEFT region → faces rb's left side
+            m_spl, e_spl = float(sl[rb]), float(ERl[rb])
+        if m_spl > 0.0:
+            rho_mature = m_spl / max(e_spl, _EPS)
+            rho_spliced[j] = max(Ml[i] - rho_mature * ERl[i], 0.0) / max(EGl[i], _EPS)
+            avail[j] = True
+    w_str = float((2.0 * kappa - 1.0) ** 2)
+    w_spl = 1.0 - w_str
+    denom = w_str + w_spl * avail.astype(np.float64)
+    keep = denom > _EPS  # drop unstranded-AND-no-spliced nodes (no reliable response → fall to the global)
+    rho_g = (w_str * rho_strand + w_spl * avail * rho_spliced) / np.maximum(denom, _EPS)
     eff = np.asarray(EGl, dtype=np.float64)[fi]
-    w_strand = float((2.0 * kappa - 1.0) ** 2)
-    w_fit = np.full(fi.size, w_strand) * eff    # (2κ−1)²·E reliability weight (M-13); E stabilizes the fit
+    w_fit = denom * eff  # per-node total reliability × E (E stabilizes + nets; 0 → excluded)
+    fi, zf, rho_g, eff, w_fit = fi[keep], z[fi][keep], rho_g[keep], eff[keep], w_fit[keep]
+    if fi.size == 0:
+        return flat, z, None, False
 
     ehat = MonotoneMean.fit(zf, rho_g, weight=w_fit, recal_weight=eff)
     # A DEGENERATE fit (too few points for the spline basis ⇒ MonotoneMean falls back to a flat constant,

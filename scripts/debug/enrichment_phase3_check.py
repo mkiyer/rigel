@@ -54,12 +54,12 @@ def run(cond):
 
 def main():
     print("PHASE 3 end-to-end gate — production calibrate WITH enrichment-aware ê")
-    on = run("gdna_gdna300_ss_0.99_nrna_none_capture_on")
-    amb = on.get((3, 2), float("nan"))
-    print("\n=== GATE ===")
-    print(f"  AMBIG.exon net err = {amb:+,.0f}  (pre-enrichment baseline was −107,509; target ≈ 0)")
-    ok = abs(amb) < 40_000  # recovered the bulk of the 107K under-call, not a runaway over-call
-    print(f"  {'PASS' if ok else 'CHECK'}: AMBIG-exon under-call {'substantially recovered' if ok else 'NOT recovered / over-shot'}")
+    conds = sys.argv[1:] or ["gdna_gdna300_ss_0.99_nrna_none_capture_on"]
+    print("\n=== GATE (AMBIG.exon prior net err; pre-enrichment baseline ss0.99 was −107,509) ===")
+    for c in conds:
+        amb = run(c).get((3, 2), float("nan"))
+        ok = abs(amb) < 40_000
+        print(f"  {c}: AMBIG.exon net {amb:+,.0f}  {'RECOVERED' if ok else 'CHECK'}")
 
 
 if __name__ == "__main__":

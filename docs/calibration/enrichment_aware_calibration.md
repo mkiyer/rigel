@@ -553,3 +553,94 @@ miss is the per-node corr (0.53) versus an arbitrary 0.60 bar — it is ~2× the
 honest clean-z ceiling (the unclipped corr is *lower*, 0.35, so the clip is not the limiter; the residual layer,
 ~1 on the uniform-genomic flagship, would add little). Decision point: accept corr 0.53 and proceed to Phase 1,
 or first invest in per-node resolution (residual layer / richer multi-boundary `z`).
+
+---
+
+# Part III — Unstranded extension: spliced-derived ρ_g (the strand-free response)
+
+> Status: concept developed + empirically validated 2026-06-22; first cut "raw" (no spliced→strand level
+> calibration), approved to build. This lights up the case the Phase-5 strand-contrast gate deferred:
+> capture under κ→½ (unstranded). Harness: `scripts/debug/spliced_derived_rho_check.py`.
+
+## A. The enabler — spliced fragments are *motif*-stranded
+
+The enrichment transfer ê(z) needs a per-region gDNA-density response ρ_g. Stranded data supplies it via
+strand-deconvolution (ρ_g = f_g·T). Unstranded data (κ→½) cannot — `f_g_init` collapses to the ~0.5 prior
+midpoint, and the Phase-5 gate therefore *defers* to the genome-wide ρ_global.
+
+But there is a signal that survives: **spliced fragments are stranded by the GT–AG splice MOTIF, not by the
+read chemistry.** A junction-crossing fragment's transcript strand is read off the motif, so the spliced channel
+carries strand even when the reads are fully unstranded. And "single-strand region/boundary" is an *annotation*
+property (the signature, from the GTF — always available). So unstranded data loses only the *response* ρ_g;
+the fit basis (single-strand exon nodes) and the RNA signal at their junctions are intact.
+
+## B. The arithmetic — reconstruct ρ_g from the spliced (pure-mature) signal
+
+Spliced fragments are pure mature mRNA. For a single-strand exon region R with a flanking clean (intron↔exon)
+boundary B on R's motif-strand (reusing the existing `_message` spliced-projection geometry):
+
+```
+ρ_mature   = M_spliced(B, R-facing, R's motif-strand) / E_rna_crossing(B)   # mature per-bp density at junction
+M_mature(R)= ρ_mature · E_rna_contained(R)                                  # project to R's intra-exon mature
+ρ_g(R)     = clip( M_unspliced(R) − M_mature(R), 0 ) / E_gdna_contained(R)  # residual unspliced → gDNA(+nascent)
+```
+
+The spliced mass at the boundary fixes the mature density (a *lower bound* on total RNA — nascent could add);
+projecting it onto R via the eff-lengths accounts for the mature share of R's unspliced mass; the residual is
+split between gDNA and nascent and — absent strand — attributed to gDNA (the nascent-sparse assumption the seeds
+already make).
+
+**Two honest caveats.** (1) It is an *upper bound* on gDNA: the residual is gDNA **+ nascent** (nascent is
+unspliced RNA with no splice signature). Strand-deconvolution separates gDNA from *all* RNA; the spliced method
+cannot — so in the nrna-present + unstranded corner it over-attributes to gDNA (an intrinsic unstranded limit).
+(2) **Single-exon transcripts** have no junction → no spliced → unrecoverable (the same gDNA-identical floor that
+limits the EM; FL is the only escape, deferred).
+
+## C. Validation (gdna 3:1, capture-on)
+
+| | ρ_g_spliced vs ORACLE | ρ_g_strand vs ORACLE | ê-fit → AMBIG recovery |
+|---|---|---|---|
+| **ss0.99** (stranded) | corr 0.874 | 0.982 (strand wins) | net +11.3%, corr 0.63 |
+| **ss0.5** (unstranded) | corr **0.895** | 0.768 (the 0.5·T artifact) | net **+11.0%**, corr **0.52** |
+
+At ss0.5 the spliced method *beats* the read-strand method and matches its own ss0.99 quality — strand-immune,
+as predicted. There is a level bias (enriched median 21.8 vs oracle 17.4 — the projection under-counts mature →
+over-attributes gDNA), surfacing as the +11% net over-call; the first cut accepts it (a spliced→strand level
+calibration is the obvious follow-up).
+
+## D. Integration — a reliability-weighted blend (replaces the hard gate)
+
+Only the ê-fit *response* changes; the ê machinery, significance gate, and conditional precision are unchanged.
+The response becomes a blend of the two estimators, weighted by their reliability (κ is global ⇒ scalar weights):
+
+```
+w_str = (2κ−1)²            w_spl = 1 − w_str            avail = (spliced present at R's flanking boundary)
+denom = w_str + w_spl·avail
+ρ_g(R) = ( w_str·ρ_strand(R) + w_spl·avail·ρ_spliced(R) ) / denom
+fit weight w_fit(R) = denom · E(R)      recal weight = E(R)
+```
+
+- **κ→1 (stranded):** ρ_g ≈ ρ_strand (≈4% spliced bleed — negligible; the shipped stranded result is preserved).
+- **κ→½ (unstranded):** ρ_g = ρ_spliced on avail nodes — the deferred case lights up.
+- **In between:** smooth hand-off — "lean harder on the spliced solution as the strand weakens."
+- A node enters the fit basis if w_str is meaningful **or** spliced is available; if **neither** (unstranded
+  *and* single-exon / no spliced) it is excluded → falls to the global.
+
+This **dissolves the Phase-5 `(2κ−1)²≥0.25` strand-contrast gate**: that gate was the "defer unstranded"
+placeholder; the spliced term is the unstranded path, so the gate (and its flagged constant) are removed.
+
+Crucially, the unstranded significance test now fires on a *genuine* enrichment signal (real spliced-derived
+ρ_g, corr 0.89), not the `0.5·T` artifact — so the Phase-5 phantom-gDNA regression does not return.
+
+## E. Validation gates (before commit)
+
+1. Production `fit_enrichment_transfer`: κ=0.99 → blend≈strand (net ≈ −1%); κ=0.5 → blend=spliced (net ≈ +11%).
+2. Calibration units 184 pass / 1 (`test_ambig`); goldens green (tiny scenarios degenerate → flat → byte-identical).
+3. Full 16-condition re-quant: **unstranded capture-on leak drops** (deferred case recovers), **no-gDNA
+   unstranded FP stays controlled** (no phantom return), **stranded + off-capture unchanged**.
+
+## F. Accepted limitations (first cut)
+
+- +11% level bias (no spliced→strand calibration this pass — the obvious refinement).
+- gDNA-vs-(gDNA+nascent) mismatch in nrna-present + unstranded — intrinsic unstranded limit.
+- Single-exon / no-spliced + unstranded — unrecoverable (FL-deferred).

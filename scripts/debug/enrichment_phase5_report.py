@@ -15,8 +15,9 @@ from pathlib import Path
 import pandas as pd
 
 SUITE = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.home() / "Downloads/rigel_runs/quick_3to1_5mb"
+BASE_SUFFIX = sys.argv[2] if len(sys.argv) > 2 else "pre_enrichment"  # or "gated" to isolate the unstranded win
 NEW = SUITE / "net_flow_3pool_per_condition.tsv"
-OLD = SUITE / "net_flow_3pool_per_condition.tsv.pre_enrichment"
+OLD = SUITE / f"net_flow_3pool_per_condition.tsv.{BASE_SUFFIX}"
 
 
 def main():
