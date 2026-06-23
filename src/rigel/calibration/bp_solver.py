@@ -45,7 +45,6 @@ from .simplex_sweep import (
     _axis_mean,
     _binom_pseudo,
     _fg_median,
-    _fg_var,
     _local_loglik,
     _simplex_lattice,
     _solve_nodes,
@@ -190,15 +189,20 @@ def build_node_geometry(
 
 @dataclass(frozen=True, slots=True)
 class NodeBelief:
-    """Per-node solved state on the chain: the pie `(f_pos, f_neg, f_g)` over the node's UNSPLICED mass + the
-    per-component variances `(var_pos, var_neg, var_gdna)` (precision = 1/var). All length ``n_nodes``."""
+    """Per-node solved state on the chain: the pie `(f_pos, f_neg, f_g)` over the node's UNSPLICED mass — the
+    node's gDNA/RNA **composition**. All length ``n_nodes``.
+
+    Representation layering (`docs/calibration/node_state_representation.md`): the composition is stored as a
+    FRACTION because it is the one quantity that is **face-invariant** — a boundary node has two faces (different
+    crossing mass + eff-len) but a single composition. The node↔node message currency is **density**
+    (`node_densities`: ρ = f·M_face/E_face, per face); the calibration output is **mass** (`NodeDeconv` /
+    `CalibrationResult`: m = f·M_face); statistical power / precision is carried in **count** units (the
+    `var~mean` curves + the effective counts `N_src`/`n_glob`), NOT in this struct. There is deliberately no
+    per-node posterior-variance field — it was vestigial (never read as precision, never reached any output)."""
 
     f_pos: np.ndarray
     f_neg: np.ndarray
     f_g: np.ndarray
-    var_pos: np.ndarray
-    var_neg: np.ndarray
-    var_gdna: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,55 +241,40 @@ def node_densities(belief: NodeBelief, geometry: NodeGeometry) -> NodeDensities:
 # Initialization — the signature-binary G1/G2/G3 belief on the chain.
 # ---------------------------------------------------------------------------
 #
-# Variance convention: ``0`` = a LOCKED axis (the fraction is pinned, e.g. a forbidden strand or an
-# intergenic sink — certain) and ``inf`` = NO self-information (an allowed-but-unresolved axis; the sweep's
-# precision ``1/var`` → 0 there, so the node is fully governed by neighbour messages + the global prior). The
-# hard locking itself is enforced by the per-node ``allow_pos``/``allow_neg`` forbid mask in the solve, not by
-# ``var=0``; the variance only records confidence. ``inf`` is the honest "no prior" value (magic-free) and is
-# only ever consumed as ``1/var`` (= 0), never in a sum or ratio.
+# A strand axis is hard-LOCKED (a forbidden strand, an intergenic sink) by the per-node ``allow_pos`` /
+# ``allow_neg`` forbid mask in the solve — never by a variance. The init sets only the composition fractions;
+# per-node confidence is not stored (precision lives in the sweep's ``var~mean`` curves + effective counts).
 
 
 def _type_belief(free_pos, free_neg, deconv, mass_unspl):
-    """Build the six per-node belief arrays for ONE node type (regions OR boundaries) from its
+    """Build the per-node composition ``(f_pos, f_neg, f_g)`` for ONE node type (regions OR boundaries) from its
     signature-binary classification + its strand-only solve.
 
     ``free_pos``/``free_neg`` are the per-node booleans for whether each strand's RNA axis is admissible (a
     region's own ±transcript bits; a boundary's ±strand CONTINUITY across the seam). ``deconv`` is the
     strand-only :class:`NodeDeconv` (no global, no imputation). The signature-binary default is all-gDNA
-    ``{0,0,1}`` with ``var_gdna=inf``, ``var_pos=inf`` iff ``free_pos`` else ``0`` (locked), symmetric for neg
-    (`ARCHITECTURE §3`). The class overrides:
+    ``{0,0,1}`` (`ARCHITECTURE §3`). The class overrides:
 
     * **G1** (neither strand free — intergenic region / no-RNA-crossing boundary): a LOCKED gDNA sink — keep
-      ``{0,0,1}`` and pin ``var_gdna=0``.
-    * **G2** (exactly one strand free, with data): the STRAND DECONVOLUTION alone resolves the pie; the active
-      strand axis shares ``f_g``'s posterior variance (a single-strand node is 1-D: ``f_active = 1 − f_g``).
-    * **G3** (both strands free — AMBIG): unresolvable by strand → keep the ``{0,0,1}`` default at MAX
-      (``inf``) variance; the sweep resolves it from neighbour messages + the global prior.
+      ``{0,0,1}``.
+    * **G2** (exactly one strand free, with data): the STRAND DECONVOLUTION alone resolves the pie (a
+      single-strand node is 1-D: ``f_active = 1 − f_g``).
+    * **G3** (both strands free — AMBIG): unresolvable by strand → keep the ``{0,0,1}`` default; the sweep
+      resolves it from neighbour messages + the global prior.
     """
     n = free_pos.shape[0]
     f_pos = np.zeros(n)
     f_neg = np.zeros(n)
     f_g = np.ones(n)  # all-gDNA default (count plays NO role; ARCHITECTURE §3)
-    var_g = np.full(n, np.inf)
-    var_p = np.where(free_pos, np.inf, 0.0)
-    var_n = np.where(free_neg, np.inf, 0.0)
 
-    g1 = ~free_pos & ~free_neg
     g2 = free_pos ^ free_neg
     g2_active = g2 & (np.asarray(mass_unspl, dtype=np.float64) > 0.0)
 
-    # G2-active: take the strand-only solve (median f_g, mean f±, f_g posterior variance).
-    fgv = np.asarray(deconv.gdna_frac_var, dtype=np.float64)
+    # G2-active: take the strand-only solve (median f_g, mean f±). G1 sinks + G3 AMBIG keep the {0,0,1} default.
     f_g[g2_active] = np.asarray(deconv.gdna_frac, dtype=np.float64)[g2_active]
     f_pos[g2_active] = np.asarray(deconv.rna_pos_frac, dtype=np.float64)[g2_active]
     f_neg[g2_active] = np.asarray(deconv.rna_neg_frac, dtype=np.float64)[g2_active]
-    var_g[g2_active] = fgv[g2_active]
-    var_p[g2_active & free_pos] = fgv[g2_active & free_pos]
-    var_n[g2_active & free_neg] = fgv[g2_active & free_neg]
-
-    # G1 sink: lock the gDNA axis (the fractions are already the {0,0,1} default).
-    var_g[g1] = 0.0
-    return f_pos, f_neg, f_g, var_p, var_n, var_g
+    return f_pos, f_neg, f_g
 
 
 def _boundary_strand_stats(boundary_substrate, region_arrays):
@@ -452,12 +441,10 @@ def init_beliefs(
         od_r=rna_strand_overdispersion,
         n_grid=n_grid,
     )
-    f_pos, f_neg, f_g, var_p, var_n, var_g = _type_belief(
+    f_pos, f_neg, f_g = _type_belief(
         st.free_pos, st.free_neg, deconv, st.mass_unspliced
     )
-    return NodeBelief(
-        f_pos=f_pos, f_neg=f_neg, f_g=f_g, var_pos=var_p, var_neg=var_n, var_gdna=var_g
-    )
+    return NodeBelief(f_pos=f_pos, f_neg=f_neg, f_g=f_g)
 
 
 # ---------------------------------------------------------------------------
@@ -912,7 +899,6 @@ def node_sweep(
     f_pos = np.asarray(belief.f_pos, dtype=np.float64).copy()
     f_neg = np.asarray(belief.f_neg, dtype=np.float64).copy()
     f_g = np.asarray(belief.f_g, dtype=np.float64).copy()
-    var_g = np.asarray(belief.var_gdna, dtype=np.float64).copy()
 
     # per-face geometry as (left, right) pairs, indexed by face (0=left, 1=right).
     EG = (geometry.eff_gdna_left, geometry.eff_gdna_right)
@@ -989,13 +975,10 @@ def node_sweep(
         f_g[i] = float(np.clip(_fg_median(psi, fgg)[0], 0.0, 1.0))
         f_pos[i] = float(np.clip(_axis_mean(psi, fpg)[0], 0.0, 1.0))
         f_neg[i] = float(np.clip(_axis_mean(psi, fng)[0], 0.0, 1.0))
-        var_g[i] = float(_fg_var(psi, fgg)[0])
 
     deltas = []
     for _pass in range(int(max_passes)):
-        snap = node_densities(
-            NodeBelief(f_pos, f_neg, f_g, belief.var_pos, belief.var_neg, var_g), geometry
-        )
+        snap = node_densities(NodeBelief(f_pos, f_neg, f_g), geometry)
         SNG = (snap.rho_g_left, snap.rho_g_right)
         SNP = (snap.rho_pos_left, snap.rho_pos_right)
         SNN = (snap.rho_neg_left, snap.rho_neg_right)
@@ -1052,17 +1035,7 @@ def node_sweep(
         if delta < convergence_delta:
             break
 
-    return (
-        NodeBelief(
-            f_pos=f_pos,
-            f_neg=f_neg,
-            f_g=f_g,
-            var_pos=belief.var_pos,
-            var_neg=belief.var_neg,
-            var_gdna=var_g,
-        ),
-        deltas,
-    )
+    return NodeBelief(f_pos=f_pos, f_neg=f_neg, f_g=f_g), deltas
 
 
 def chain_region_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> NodeDeconv:
@@ -1079,17 +1052,14 @@ def chain_region_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> Node
     f_g = np.zeros(R)
     f_pos = np.zeros(R)
     f_neg = np.zeros(R)
-    f_gv = np.zeros(R)
     ri = idx[reg]
     f_g[ri] = belief.f_g[reg]
     f_pos[ri] = belief.f_pos[reg]
     f_neg[ri] = belief.f_neg[reg]
-    f_gv[ri] = belief.var_gdna[reg]
     return NodeDeconv(
         gdna_mass=f_g * mass_u,
         rna_mass=(1.0 - f_g) * mass_u + mass_s,
         gdna_frac=f_g,
-        gdna_frac_var=f_gv,
         rna_pos_frac=f_pos,
         rna_neg_frac=f_neg,
     )
@@ -1121,7 +1091,6 @@ def chain_boundary_side_deconv(chain: NodeChain, belief: NodeBelief, substrate):
             gdna_mass=side_fg * m_u,
             rna_mass=(1.0 - side_fg) * m_u + m_s,
             gdna_frac=side_fg,
-            gdna_frac_var=np.zeros(R),
             rna_pos_frac=np.zeros(R),
             rna_neg_frac=np.zeros(R),
         )

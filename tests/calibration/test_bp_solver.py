@@ -163,9 +163,6 @@ def test_node_densities_formula():
         f_pos=np.array([0.3]),
         f_neg=np.array([0.2]),
         f_g=np.array([0.5]),
-        var_pos=np.array([1.0]),
-        var_neg=np.array([1.0]),
-        var_gdna=np.array([1.0]),
     )
     d = node_densities(b, g)
     assert np.isclose(d.rho_g_left[0], 0.5 * 100 / 200)  # 0.25
@@ -197,9 +194,6 @@ def test_node_densities_factor1_under_uniform():
         f_pos=np.array([0.0]),
         f_neg=np.array([0.0]),
         f_g=np.array([1.0]),
-        var_pos=np.array([0.0]),
-        var_neg=np.array([0.0]),
-        var_gdna=np.array([0.0]),
     )
     d = node_densities(b, g)
     assert np.isclose(d.rho_g_left[0], rho) and np.isclose(d.rho_g_right[0], rho)
@@ -235,16 +229,12 @@ def test_init_zero_gdna_introns_via_strand():
     # region node ids on the chain: B0 R0 B1 R1 B2 R2 B3 → regions at 1, 3, 5.
     rid = [1, 3, 5]
     fg = b.f_g[rid]
-    # intergenic: locked gDNA sink {0,0,1}, zero variance.
+    # intergenic: locked gDNA sink {0,0,1}.
     assert fg[0] == 1.0
-    assert b.var_gdna[1] == 0.0 and b.var_pos[1] == 0.0 and b.var_neg[1] == 0.0
-    # intron+ (zero gDNA): the strand tilt alone drives f_g → 0; the − axis is locked, + axis carries the var.
+    # intron+ (zero gDNA): the strand tilt alone drives f_g → 0 (the − axis is locked off).
     assert fg[1] < 0.15
-    assert b.var_neg[3] == 0.0
-    assert np.isfinite(b.var_pos[3]) and np.isclose(b.var_pos[3], b.var_gdna[3])
-    # AMBIG: unresolved by strand → {0,0,1} at MAX (inf) variance for the sweep to resolve.
+    # AMBIG: unresolved by strand → {0,0,1} default for the sweep to resolve.
     assert fg[2] == 1.0
-    assert np.isinf(b.var_gdna[5]) and np.isinf(b.var_pos[5]) and np.isinf(b.var_neg[5])
 
 
 def test_init_boundary_continuity_gate():
@@ -270,11 +260,10 @@ def test_init_boundary_continuity_gate():
     b = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=60)
     # boundary node ids: B0=0, B1=2, B2=4.
     # terminals: off-edge flank ⇒ neither strand continuous ⇒ G1 gDNA sink.
-    assert b.f_g[0] == 1.0 and b.var_gdna[0] == 0.0
-    assert b.f_g[4] == 1.0 and b.var_gdna[4] == 0.0
+    assert b.f_g[0] == 1.0
+    assert b.f_g[4] == 1.0
     # B1 (ex+→in+): +strand continuous (G2+) ⇒ the strand tilt resolves f_g → 0; − axis locked.
     assert b.f_g[2] < 0.15
-    assert b.var_neg[2] == 0.0 and np.isfinite(b.var_pos[2])
 
 
 def test_init_tss_boundary_is_black_hole():
@@ -299,7 +288,7 @@ def test_init_tss_boundary_is_black_hole():
 
     b = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=60)
     # B1 (node id 2) is the TSS: a locked gDNA sink despite the sense tilt.
-    assert b.f_g[2] == 1.0 and b.var_gdna[2] == 0.0 and b.var_pos[2] == 0.0 and b.var_neg[2] == 0.0
+    assert b.f_g[2] == 1.0
 
 
 def test_gdna_sweep_factor1_uniform():

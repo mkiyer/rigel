@@ -26,10 +26,9 @@ from .signature import TS_AMBIG, TS_NEG, TS_NONE, TS_POS
 class NodeDeconv:
     """Per-node deconvolution result (regions or boundary sides; kept separate)."""
 
-    gdna_mass: np.ndarray  # float64[K]
+    gdna_mass: np.ndarray  # float64[K] — the consumed output (calibrate/derive read ONLY the *_mass fields)
     rna_mass: np.ndarray  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
-    gdna_frac: np.ndarray  # float64[K] — reported gDNA fraction of the UNSPLICED mass
-    gdna_frac_var: np.ndarray  # float64[K] — posterior variance
+    gdna_frac: np.ndarray  # float64[K] — the node's gDNA composition (face-invariant; mass = frac·M_face)
     # per-strand RNA fractions of the UNSPLICED mass (posterior means; f_pos+f_neg+gdna_frac = 1), populated
     # by the simplex sweep for the per-strand RNA imputation (the bipartite R↔B↔R chain).
     rna_pos_frac: "np.ndarray | None" = None  # float64[K] — f_pos

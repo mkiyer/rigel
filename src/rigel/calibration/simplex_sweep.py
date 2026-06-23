@@ -133,7 +133,9 @@ def _fg_median(belief, f_g_g):
 
 def _fg_var(belief, f_g_g):
     """Per-node posterior VARIANCE of ``f_g`` over the lattice belief — the per-node confidence (the
-    combined strand+count+global precision; small ⇒ confident). Feeds ``NodeDeconv.gdna_frac_var``."""
+    combined strand+count+global precision; small ⇒ confident). A DIAGNOSTIC primitive only: the sweep's
+    message precision is carried by the ``var~mean`` curves + the effective counts ``N_src``/``n_glob``, NOT
+    by this posterior variance — it is not stored in ``NodeBelief``/``NodeDeconv``. Used by ``scripts/debug``."""
     post = np.exp(belief - logsumexp(belief, axis=1, keepdims=True))  # (m,P)
     mean = post @ f_g_g
     return np.maximum(post @ (f_g_g**2) - mean**2, 0.0)
@@ -156,7 +158,7 @@ def _solve_nodes(
     per-node sufficient statistics, with no knowledge of node type. Each node's belief IS its local evidence
     ``ψ_i`` (``_local_loglik``: strand mixture + sided spliced floor + node-class prior + imputation pulls);
     the cross-node imputation enters ψ_i as a prior, computed upstream. ``f_g`` = posterior median over the
-    lattice, ``f_g_var`` = posterior variance, ``f_pos``/``f_neg`` = posterior MEANS (the current-state
+    lattice, ``f_pos``/``f_neg`` = posterior MEANS (the current-state
     partition for the per-strand RNA imputation); a node with no fragments (``u_pos+u_neg == 0``) reports
     ``f_g = f_pos = f_neg = 0``. The region/boundary wrappers build the arrays + the global baseline and call
     this core.
@@ -169,15 +171,13 @@ def _solve_nodes(
                         gdna_imp_frac=gdna_imp_frac, gdna_imp_count=gdna_imp_count,
                         rna_imp_frac=rna_imp_frac, rna_imp_count=rna_imp_count)
     f_g = _fg_median(psi, f_g_g)
-    f_g_var = _fg_var(psi, f_g_g)
     f_pos = _axis_mean(psi, f_pos_g)
     f_neg = _axis_mean(psi, f_neg_g)
     active = (u_pos + u_neg) > 0.0
     f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
-    f_g_var = np.where(active, f_g_var, 0.0)
     f_pos = np.where(active, np.clip(f_pos, 0.0, 1.0), 0.0)
     f_neg = np.where(active, np.clip(f_neg, 0.0, 1.0), 0.0)
     return NodeDeconv(
         gdna_mass=f_g * mass_unspl, rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
-        gdna_frac=f_g, gdna_frac_var=f_g_var, rna_pos_frac=f_pos, rna_neg_frac=f_neg,
+        gdna_frac=f_g, rna_pos_frac=f_pos, rna_neg_frac=f_neg,
     )
