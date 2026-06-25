@@ -17,8 +17,8 @@ Module layout:
   E[min(ℓ,L)] per-side crossing). gDNA uses the gDNA FL; RNA (nascent unspliced + spliced) the RNA FL.
 * `init_beliefs` — the signature-binary G1/G2/G3 initial belief.
 * `node_densities` / `build_node_statics` — the per-pass density snapshot + the static per-node inputs.
-* `fit_gdna_varmean` / `fit_rna_varmean` — the message-reliability σ²_bio(μ), refit each pass on the FROZEN
-  snapshot.
+* `fit_rna_varmean` — the RNA message-reliability σ²_bio(μ), refit each pass on the FROZEN snapshot (RNA is
+  well-resolved → benign; the gDNA σ²_g is the seed-based non-circular firewall from `_gdna_seed_estimate`).
 * `_message` / `node_sweep` — one imputation message (as a count-currency precision) + the sweep driver.
 * `chain_region_deconv` / `chain_boundary_side_deconv` — project the converged belief back to the per-region
   / per-boundary-side masses the `CalibrationResult` consumes.
@@ -62,7 +62,6 @@ __all__ = [
     "NodeStatics",
     "build_node_statics",
     "init_beliefs",
-    "fit_gdna_varmean",
     "fit_rna_varmean",
     "fit_enrichment_transfer",
     "node_sweep",
@@ -817,32 +816,16 @@ def _global_logprior(
     return _binom_pseudo(fgg[None, :], mu[:, None], n_node[:, None])
 
 
-def fit_gdna_varmean(
-    chain: NodeChain, densities: NodeDensities, geometry: NodeGeometry
-) -> MonotoneVarMean:
-    """Fit the gDNA message reliability ``σ²_bio(μ)`` on the FROZEN snapshot densities. gDNA flows
-    genomically (every edge is ``live``); the ``(dr>0)&(sr>0)`` filter drops pure-RNA pairs. Fitting on the
-    frozen previous-pass densities (not in-place) keeps σ²_bio from collapsing to 0."""
-    live = np.ones(int(chain.n_nodes), dtype=bool)
-    m, r, o = _edge_varmean(
-        chain,
-        densities.rho_g_left,
-        densities.rho_g_right,
-        geometry.eff_gdna_left,
-        geometry.eff_gdna_right,
-        live,
-    )
-    return _fit_offset(m, r, o)
-
-
 def fit_rna_varmean(
     chain: NodeChain, densities: NodeDensities, geometry: NodeGeometry, statics: NodeStatics
 ) -> MonotoneVarMean:
-    """Fit the RNA message reliability ``σ²_bio(μ)`` on the FROZEN snapshot, POOLING both strands (the symmetric
-    RNA process). A strand-s edge is ``live`` only where strand s is continuous on BOTH endpoints
-    (``free_s`` — the transcript-structure gate), so the curve sees the genuine same-strand cross-node RNA
-    dispersion (INCLUDING the AMBIG nodes' per-strand densities — the honest-AMBIG-dispersion the chain now
-    provides, the 2c fix). The per-strand RNA density is spliced-inclusive (``node_densities``)."""
+    """Fit the RNA message reliability ``σ²_bio(μ)`` on the frozen snapshot, POOLING both strands (the symmetric
+    RNA process). A strand-s edge is ``live`` only where strand s is continuous on BOTH endpoints (``free_s`` —
+    the transcript-structure gate), so the curve sees the genuine same-strand cross-node RNA dispersion
+    (INCLUDING the AMBIG nodes' per-strand densities). Refit per pass: unlike gDNA (seed-based, phantom risk →
+    a non-circular firewall), RNA is well-resolved by strand+spliced so the swept densities are accurate and the
+    fit adapts; a non-circular init-based fit measured WORSE (the AMBIG RNA dispersion only exists after the
+    sweep — the gDNA/RNA observability asymmetry, Phase 3a). The per-strand density is spliced-inclusive."""
     mp, rp, op = _edge_varmean(
         chain,
         densities.rho_pos_left,
@@ -1021,8 +1004,10 @@ def node_sweep(
         SNG = (snap.rho_g_left, snap.rho_g_right)
         SNP = (snap.rho_pos_left, snap.rho_pos_right)
         SNN = (snap.rho_neg_left, snap.rho_neg_right)
-        # RNA message reliability — refit per pass on the frozen snapshot (the RNA channel stays the
-        # belief-fit for now; the gDNA σ²_g is the FIXED seed curve ``gdna_vm`` + the global is precomputed).
+        # RNA message reliability — refit per pass on the frozen snapshot. Unlike gDNA (seed-based firewall,
+        # phantom risk), RNA is well-resolved by strand+spliced, so the swept densities are accurate and the
+        # fit ADAPTS to them; the non-circular init-based fit was measured WORSE (the AMBIG RNA dispersion only
+        # exists after the sweep — the gDNA/RNA observability asymmetry; precision_state_design.md Phase 3a).
         rna_vm = fit_rna_varmean(chain, snap, geometry, statics)
 
         prev = (f_g.copy(), f_pos.copy(), f_neg.copy())
