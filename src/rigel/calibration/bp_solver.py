@@ -45,6 +45,7 @@ from .simplex_sweep import (
     _axis_mean,
     _binom_pseudo,
     _fg_median,
+    _fg_var,
     _local_loglik,
     _simplex_lattice,
     _solve_nodes,
@@ -189,20 +190,23 @@ def build_node_geometry(
 
 @dataclass(frozen=True, slots=True)
 class NodeBelief:
-    """Per-node solved state on the chain: the pie `(f_pos, f_neg, f_g)` over the node's UNSPLICED mass — the
-    node's gDNA/RNA **composition**. All length ``n_nodes``.
+    """Per-node solved state on the chain: the composition pie `(f_pos, f_neg, f_g)` over the node's UNSPLICED
+    mass + its per-component posterior VARIANCE `(var_pos, var_neg, var_gdna)` = `Var(f_c)`. All length
+    ``n_nodes``.
 
-    Representation layering (`docs/calibration/node_state_representation.md`): the composition is stored as a
-    FRACTION because it is the one quantity that is **face-invariant** — a boundary node has two faces (different
-    crossing mass + eff-len) but a single composition. The node↔node message currency is **density**
-    (`node_densities`: ρ = f·M_face/E_face, per face); the calibration output is **mass** (`NodeDeconv` /
-    `CalibrationResult`: m = f·M_face); statistical power / precision is carried in **count** units (the
-    `var~mean` curves + the effective counts `N_src`/`n_glob`), NOT in this struct. There is deliberately no
-    per-node posterior-variance field — it was vestigial (never read as precision, never reached any output)."""
+    The variance is the **precision state** (`docs/calibration/precision_state_design.md`): `Var(f_c)=0` ⇒
+    locked/certain (e.g. a forbidden strand), `=∞` ⇒ no information (unsolved). It feeds the honest message
+    send — a source's outgoing precision is degraded from its own `Var_own = (M/E)²·Var(f_c)` by the
+    communication noise, so an unsure node speaks quietly (Phase 2). The composition is stored as a FRACTION
+    (the face-invariant quantity — a boundary has two faces but one composition); density `ρ=f·M_face/E_face`
+    (`node_densities`) is the message currency, mass `m=f·M_face` (`NodeDeconv`) the output."""
 
     f_pos: np.ndarray
     f_neg: np.ndarray
     f_g: np.ndarray
+    var_pos: np.ndarray
+    var_neg: np.ndarray
+    var_gdna: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,8 +246,10 @@ def node_densities(belief: NodeBelief, geometry: NodeGeometry) -> NodeDensities:
 # ---------------------------------------------------------------------------
 #
 # A strand axis is hard-LOCKED (a forbidden strand, an intergenic sink) by the per-node ``allow_pos`` /
-# ``allow_neg`` forbid mask in the solve — never by a variance. The init sets only the composition fractions;
-# per-node confidence is not stored (precision lives in the sweep's ``var~mean`` curves + effective counts).
+# ``allow_neg`` forbid mask in the solve. The init ALSO sets the per-component precision state ``var(f_c)``
+# (`precision_state_design.md`): ``0`` = locked/certain (a forbidden strand, an intergenic gDNA sink), ``inf`` =
+# no information (an admissible-but-unsolved axis — it will listen to messages, and emits none until solved).
+# A solved single-strand (G2) node takes the strand-solve posterior variance.
 
 
 def _type_belief(free_pos, free_neg, deconv, mass_unspl):
@@ -259,22 +265,41 @@ def _type_belief(free_pos, free_neg, deconv, mass_unspl):
       ``{0,0,1}``.
     * **G2** (exactly one strand free, with data): the STRAND DECONVOLUTION alone resolves the pie (a
       single-strand node is 1-D: ``f_active = 1 − f_g``).
-    * **G3** (both strands free — AMBIG): unresolvable by strand → keep the ``{0,0,1}`` default; the sweep
-      resolves it from neighbour messages + the global prior.
+    * **G3** (both strands free — AMBIG): unresolvable by strand → keep the ``{0,0,1}`` default at MAX
+      (``inf``) variance; the sweep resolves it from neighbour messages + the global prior.
+
+    Returns the six per-node arrays ``(f_pos, f_neg, f_g, var_pos, var_neg, var_gdna)`` — the composition + the
+    precision state (`precision_state_design.md`): ``var=0`` locked, ``inf`` no-information, else the strand-solve
+    posterior variance.
     """
     n = free_pos.shape[0]
     f_pos = np.zeros(n)
     f_neg = np.zeros(n)
     f_g = np.ones(n)  # all-gDNA default (count plays NO role; ARCHITECTURE §3)
+    # precision state: gDNA unsolved (inf); a strand axis is locked (0) iff forbidden, else unsolved (inf).
+    var_g = np.full(n, np.inf)
+    var_p = np.where(free_pos, np.inf, 0.0)
+    var_n = np.where(free_neg, np.inf, 0.0)
 
+    g1 = ~free_pos & ~free_neg
     g2 = free_pos ^ free_neg
     g2_active = g2 & (np.asarray(mass_unspl, dtype=np.float64) > 0.0)
 
-    # G2-active: take the strand-only solve (median f_g, mean f±). G1 sinks + G3 AMBIG keep the {0,0,1} default.
+    # G2-active: take the strand-only solve (median f_g, mean f±, and the posterior variances). G1 sinks + G3
+    # AMBIG keep the {0,0,1} default at MAX variance.
+    fgv = np.asarray(deconv.gdna_frac_var, dtype=np.float64)
+    fpv = np.asarray(deconv.rna_pos_frac_var, dtype=np.float64)
+    fnv = np.asarray(deconv.rna_neg_frac_var, dtype=np.float64)
     f_g[g2_active] = np.asarray(deconv.gdna_frac, dtype=np.float64)[g2_active]
     f_pos[g2_active] = np.asarray(deconv.rna_pos_frac, dtype=np.float64)[g2_active]
     f_neg[g2_active] = np.asarray(deconv.rna_neg_frac, dtype=np.float64)[g2_active]
-    return f_pos, f_neg, f_g
+    var_g[g2_active] = fgv[g2_active]
+    var_p[g2_active & free_pos] = fpv[g2_active & free_pos]
+    var_n[g2_active & free_neg] = fnv[g2_active & free_neg]
+
+    # G1 sink: lock the gDNA axis (the fractions are already the {0,0,1} default).
+    var_g[g1] = 0.0
+    return f_pos, f_neg, f_g, var_p, var_n, var_g
 
 
 def _boundary_strand_stats(boundary_substrate, region_arrays):
@@ -441,10 +466,12 @@ def init_beliefs(
         od_r=rna_strand_overdispersion,
         n_grid=n_grid,
     )
-    f_pos, f_neg, f_g = _type_belief(
+    f_pos, f_neg, f_g, var_p, var_n, var_g = _type_belief(
         st.free_pos, st.free_neg, deconv, st.mass_unspliced
     )
-    return NodeBelief(f_pos=f_pos, f_neg=f_neg, f_g=f_g)
+    return NodeBelief(
+        f_pos=f_pos, f_neg=f_neg, f_g=f_g, var_pos=var_p, var_neg=var_n, var_gdna=var_g
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -835,29 +862,33 @@ def fit_rna_varmean(
     return _fit_offset(mp + mn, rp + rn, op + on)
 
 
-def _message(rho_src, eff_src, eff_dst, mass_dst, rho_dst_cur, varmean, spliced_dst=0.0):
-    """One density message (source → dest) as the dest's COUNT-SPACE belief ``(μ_c, N_src)``.
+def _message(rho_src, eff_src, eff_dst, mass_dst, rho_dst_cur, varmean, var_own_src=0.0, spliced_dst=0.0):
+    """One density message (source → dest) as a DENSITY-GAUSSIAN on the dest's fraction ``(mode, prec)``
+    (`precision_state_design.md` §3-5). Applied downstream as ``−½·prec·(f_c − mode)²``.
 
-    ``μ_c`` = the IDENTITY fraction: the source's facing density ``ρ_src`` matched at the dest, its known
-    spliced (free info, gDNA: 0) subtracted so only the dest's UNSOLVED unspliced fraction is informed —
-    ``μ_c = (ρ_src·E_dst − spliced_dst)/M_dst``. ``N_src = ρ_src²·τ_ρ`` is the source's **effective count**
-    (``= 1/CV²_total``), with ``τ_ρ = 1/(σ²_bio(μ) + (n_src+1)/E_src²)`` (the learned biological dispersion +
-    the predictor's Poisson sampling noise). When sampling-dominated ``N_src ≈ n_src`` (the source's gDNA
-    fragment count). This is the honest count-currency delivery: it is **independent of the destination mass**
-    — the ``(M_dst/E_dst)²`` Jacobian and the wall-vanishing binomial floor are DELETED. Applied downstream as
-    a binomial pseudo-count (:func:`simplex_sweep._binom_pseudo`): ``N_src`` pseudo-fragments at ``μ_c``,
-    competing one-for-one with the destination's own fragments (emergent deference, no tuned weight)."""
-    mu_c = float(np.clip((rho_src * eff_dst - spliced_dst) / max(mass_dst, _EPS), 0.0, 1.0))
+    ``mode`` = the imputed fraction: the source's facing density ``ρ_src`` matched at the dest, its known
+    spliced (free info; gDNA: 0) subtracted — ``mode = (ρ_src·E_dst − spliced_dst)/M_dst`` (UNclipped; the
+    lattice bounds it, and clipping would distort the off-simplex tail). ``prec`` = the precision on the dest
+    fraction:
+
+        prec = (M_dst/E_dst)² / v_msg,   v_msg = Var_own_src + σ²_bio(μ) + pois
+
+    the honest **variance blend** (no caps, no floor): ``Var_own_src = (M_src/E_src)²·Var(f_c^src)`` is the
+    SOURCE's own density uncertainty (an unsolved/uncertain source ⇒ large ⇒ low ``prec`` ⇒ weak message — the
+    Q2 fix); ``σ²_bio`` the communication drift (the fitted overdispersion); ``pois = (n_src+1)/E_src²`` the
+    Poisson-Gamma predictor sampling floor. The ``(M_dst/E_dst)²`` is the honest density→fraction Jacobian,
+    bounded by ``v_msg`` (the source humility), never a free amplifier — so no cap is needed (Phase-0 verified).
+    ``prec=0`` (no facing flank) ⇒ a no-op."""
+    mode = (rho_src * eff_dst - spliced_dst) / max(mass_dst, _EPS)
     # Query σ²_bio at the MEAN of the source + (snapshot) destination densities — consistent with the
     # mean-indexed fit; uses both endpoints and is less circular than the crushed dest alone.
     mu_q = max(0.5 * (rho_src + rho_dst_cur), _EPS)
     sigma2_bio = float(varmean.predict(np.array([mu_q]))[0])
-    # A 1-pseudo-observation Poisson floor on the predictor — a density from a finite count can never have
-    # zero sampling variance, so τ_ρ is bounded (≤ E_src²) and N_src can never escape to ∞.
+    # Poisson-Gamma predictor floor: a density from a finite count can never have zero sampling variance.
     pois = (rho_src + _MSG_PSEUDOCOUNT / max(eff_src, _EPS)) / max(eff_src, _EPS)  # (n_src+1)/E_src²
-    tau_rho = 1.0 / max(sigma2_bio + pois, _EPS)
-    n_src = rho_src * rho_src * tau_rho  # source effective count = ρ²·τ_ρ (count-space; M_dst-INDEPENDENT)
-    return mu_c, n_src
+    v_msg = max(var_own_src + sigma2_bio + pois, _EPS)  # the variance BLEND (own + communication + sampling)
+    k = mass_dst / max(eff_dst, _EPS)  # density→fraction Jacobian factor (M_dst/E_dst)
+    return mode, (k * k) / v_msg
 
 
 def node_sweep(
@@ -899,6 +930,10 @@ def node_sweep(
     f_pos = np.asarray(belief.f_pos, dtype=np.float64).copy()
     f_neg = np.asarray(belief.f_neg, dtype=np.float64).copy()
     f_g = np.asarray(belief.f_g, dtype=np.float64).copy()
+    # precision state (Phase 1: computed + carried; consumed by the honest message send in Phase 2).
+    var_pos = np.asarray(belief.var_pos, dtype=np.float64).copy()
+    var_neg = np.asarray(belief.var_neg, dtype=np.float64).copy()
+    var_g = np.asarray(belief.var_gdna, dtype=np.float64).copy()
 
     # per-face geometry as (left, right) pairs, indexed by face (0=left, 1=right).
     EG = (geometry.eff_gdna_left, geometry.eff_gdna_right)
@@ -953,7 +988,7 @@ def node_sweep(
         ehat=ehat, z=z_enrich, sigma2_level=sigma2_level, apply_mask=enrich_apply,
     )
 
-    def _solve(i, mu_g, n_g, mu_p, n_p, mu_n, n_n):
+    def _solve(i, mode_g, prec_g, mode_p, prec_p, mode_n, prec_n):
         psi = _local_loglik(
             statics.u_pos[i : i + 1],
             statics.u_neg[i : i + 1],
@@ -967,18 +1002,22 @@ def node_sweep(
             lattice,
             strand_obs=statics.strand_obs[i : i + 1],
             global_logprior=global_lp[i : i + 1],
-            gdna_imp_frac=np.array([mu_g]),
-            gdna_imp_count=np.array([n_g]),
-            rna_imp_frac=(np.array([mu_p]), np.array([mu_n])),
-            rna_imp_count=(np.array([n_p]), np.array([n_n])),
+            gdna_imp_mode=np.array([mode_g]),
+            gdna_imp_prec=np.array([prec_g]),
+            rna_imp_mode=(np.array([mode_p]), np.array([mode_n])),
+            rna_imp_prec=(np.array([prec_p]), np.array([prec_n])),
         )
         f_g[i] = float(np.clip(_fg_median(psi, fgg)[0], 0.0, 1.0))
         f_pos[i] = float(np.clip(_axis_mean(psi, fpg)[0], 0.0, 1.0))
         f_neg[i] = float(np.clip(_axis_mean(psi, fng)[0], 0.0, 1.0))
+        # precision state — moment-matched per-component variance (Phase 1: stored, not yet consumed).
+        var_g[i] = float(_fg_var(psi, fgg)[0])
+        var_pos[i] = float(_fg_var(psi, fpg)[0])
+        var_neg[i] = float(_fg_var(psi, fng)[0])
 
     deltas = []
     for _pass in range(int(max_passes)):
-        snap = node_densities(NodeBelief(f_pos, f_neg, f_g), geometry)
+        snap = node_densities(NodeBelief(f_pos, f_neg, f_g, var_pos, var_neg, var_g), geometry)
         SNG = (snap.rho_g_left, snap.rho_g_right)
         SNP = (snap.rho_pos_left, snap.rho_pos_right)
         SNN = (snap.rho_neg_left, snap.rho_neg_right)
@@ -999,25 +1038,32 @@ def node_sweep(
                 if src < 0 or MS[sf][src] <= _EPS or not solvable[src]:
                     continue  # reference terminal / empty / UNSOLVED-sink source → no message this direction
                 s_mass = MS[sf][src]
-                # gDNA message (genomic; spliced_dst=0) → (μ_c, N_src) count-space binomial pseudo-count.
-                rho_g_src = f_g[src] * s_mass / max(EG[sf][src], _EPS)
-                mu_g, n_g = _message(
-                    rho_g_src, EG[sf][src], EG[df][i], MS[df][i], SNG[df][i], gdna_vm
+                # gDNA message (genomic; spliced_dst=0) → (mode, prec) density-Gaussian. The source's own
+                # density uncertainty Var_own,g = (M_src/E_src)²·Var(f_g_src) is blended into prec, so an
+                # unsolved/uncertain source emits a weak message (precision_state_design.md §3-4).
+                eg_src = max(EG[sf][src], _EPS)
+                rho_g_src = f_g[src] * s_mass / eg_src
+                var_own_g = (s_mass / eg_src) ** 2 * var_g[src]
+                mode_g, prec_g = _message(
+                    rho_g_src, EG[sf][src], EG[df][i], MS[df][i], SNG[df][i], gdna_vm, var_own_g
                 )
                 # per-strand RNA messages, gated by free_s on BOTH endpoints; spliced rides in ρ_s + the
-                # dest-spliced subtraction. N=0 (no message) where the strand is not continuous.
-                mu_p = n_p = mu_n = n_n = 0.0
+                # dest-spliced subtraction. prec=0 (no message) where the strand is not continuous.
+                mode_p = prec_p = mode_n = prec_n = 0.0
+                er_src = max(ER[sf][src], _EPS)
                 if fp[i] and fp[src]:
-                    rho_p_src = (f_pos[src] * s_mass + SP[sf][src]) / max(ER[sf][src], _EPS)
-                    mu_p, n_p = _message(
-                        rho_p_src, ER[sf][src], ER[df][i], MS[df][i], SNP[df][i], rna_vm, SP[df][i]
+                    rho_p_src = (f_pos[src] * s_mass + SP[sf][src]) / er_src
+                    var_own_p = (s_mass / er_src) ** 2 * var_pos[src]
+                    mode_p, prec_p = _message(
+                        rho_p_src, ER[sf][src], ER[df][i], MS[df][i], SNP[df][i], rna_vm, var_own_p, SP[df][i]
                     )
                 if fn[i] and fn[src]:
-                    rho_n_src = (f_neg[src] * s_mass + SN[sf][src]) / max(ER[sf][src], _EPS)
-                    mu_n, n_n = _message(
-                        rho_n_src, ER[sf][src], ER[df][i], MS[df][i], SNN[df][i], rna_vm, SN[df][i]
+                    rho_n_src = (f_neg[src] * s_mass + SN[sf][src]) / er_src
+                    var_own_n = (s_mass / er_src) ** 2 * var_neg[src]
+                    mode_n, prec_n = _message(
+                        rho_n_src, ER[sf][src], ER[df][i], MS[df][i], SNN[df][i], rna_vm, var_own_n, SN[df][i]
                     )
-                _solve(i, mu_g, n_g, mu_p, n_p, mu_n, n_n)
+                _solve(i, mode_g, prec_g, mode_p, prec_p, mode_n, prec_n)
         # Intrinsic solve for solvable nodes with NO message neighbour. The directional loop only reaches
         # _solve after building a neighbour message, so a node whose both neighbours are empty is never
         # solved and keeps its signature-binary init (AMBIG → f_g=1) — a phantom-gDNA sink in libraries
@@ -1035,7 +1081,13 @@ def node_sweep(
         if delta < convergence_delta:
             break
 
-    return NodeBelief(f_pos=f_pos, f_neg=f_neg, f_g=f_g), deltas
+    return (
+        NodeBelief(
+            f_pos=f_pos, f_neg=f_neg, f_g=f_g,
+            var_pos=var_pos, var_neg=var_neg, var_gdna=var_g,
+        ),
+        deltas,
+    )
 
 
 def chain_region_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> NodeDeconv:

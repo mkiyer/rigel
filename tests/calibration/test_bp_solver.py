@@ -163,6 +163,9 @@ def test_node_densities_formula():
         f_pos=np.array([0.3]),
         f_neg=np.array([0.2]),
         f_g=np.array([0.5]),
+        var_pos=np.array([0.0]),
+        var_neg=np.array([0.0]),
+        var_gdna=np.array([0.0]),
     )
     d = node_densities(b, g)
     assert np.isclose(d.rho_g_left[0], 0.5 * 100 / 200)  # 0.25
@@ -194,6 +197,9 @@ def test_node_densities_factor1_under_uniform():
         f_pos=np.array([0.0]),
         f_neg=np.array([0.0]),
         f_g=np.array([1.0]),
+        var_pos=np.array([0.0]),
+        var_neg=np.array([0.0]),
+        var_gdna=np.array([0.0]),
     )
     d = node_densities(b, g)
     assert np.isclose(d.rho_g_left[0], rho) and np.isclose(d.rho_g_right[0], rho)
@@ -229,12 +235,15 @@ def test_init_zero_gdna_introns_via_strand():
     # region node ids on the chain: B0 R0 B1 R1 B2 R2 B3 → regions at 1, 3, 5.
     rid = [1, 3, 5]
     fg = b.f_g[rid]
-    # intergenic: locked gDNA sink {0,0,1}.
+    # intergenic: locked gDNA sink {0,0,1}, all precision locked (var 0).
     assert fg[0] == 1.0
-    # intron+ (zero gDNA): the strand tilt alone drives f_g → 0 (the − axis is locked off).
+    assert b.var_gdna[1] == 0.0 and b.var_pos[1] == 0.0 and b.var_neg[1] == 0.0
+    # intron+ (zero gDNA): the strand tilt alone drives f_g → 0; the − axis is locked (var 0), + & g finite.
     assert fg[1] < 0.15
-    # AMBIG: unresolved by strand → {0,0,1} default for the sweep to resolve.
+    assert b.var_neg[3] == 0.0 and np.isfinite(b.var_gdna[3]) and np.isfinite(b.var_pos[3])
+    # AMBIG: unresolved by strand → {0,0,1} default at MAX (inf) variance for the sweep to resolve.
     assert fg[2] == 1.0
+    assert np.isinf(b.var_gdna[5]) and np.isinf(b.var_pos[5]) and np.isinf(b.var_neg[5])
 
 
 def test_init_boundary_continuity_gate():
@@ -259,11 +268,12 @@ def test_init_boundary_continuity_gate():
 
     b = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=60)
     # boundary node ids: B0=0, B1=2, B2=4.
-    # terminals: off-edge flank ⇒ neither strand continuous ⇒ G1 gDNA sink.
-    assert b.f_g[0] == 1.0
-    assert b.f_g[4] == 1.0
-    # B1 (ex+→in+): +strand continuous (G2+) ⇒ the strand tilt resolves f_g → 0; − axis locked.
+    # terminals: off-edge flank ⇒ neither strand continuous ⇒ G1 gDNA sink (var locked at 0).
+    assert b.f_g[0] == 1.0 and b.var_gdna[0] == 0.0
+    assert b.f_g[4] == 1.0 and b.var_gdna[4] == 0.0
+    # B1 (ex+→in+): +strand continuous (G2+) ⇒ the strand tilt resolves f_g → 0; − axis locked (var 0).
     assert b.f_g[2] < 0.15
+    assert b.var_neg[2] == 0.0 and np.isfinite(b.var_gdna[2])
 
 
 def test_init_tss_boundary_is_black_hole():
@@ -287,8 +297,39 @@ def test_init_tss_boundary_is_black_hole():
     )
 
     b = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=60)
-    # B1 (node id 2) is the TSS: a locked gDNA sink despite the sense tilt.
-    assert b.f_g[2] == 1.0
+    # B1 (node id 2) is the TSS: a locked gDNA sink despite the sense tilt (all precision locked at 0).
+    assert b.f_g[2] == 1.0 and b.var_gdna[2] == 0.0 and b.var_pos[2] == 0.0 and b.var_neg[2] == 0.0
+
+
+def test_precision_state_strand_resolution():
+    """Phase-1 lock (precision_state_design.md §3): the moment-matched Var(f_g) reflects strand-resolving
+    power — a BALANCED node (gDNA-indistinguishable from balanced RNA) is uncertain (high Var(f_g)); a
+    confident single-strand node is sharp (low Var(f_g)). This is the precision the honest message send (Phase
+    2) will consume. A node with no fragments reports zero variance."""
+    from rigel.calibration.simplex_sweep import _solve_nodes
+
+    kappa = 0.01
+    # node 0 = balanced AMBIG (both strands free, u_pos≈u_neg); node 1 = confident single-strand + (− locked).
+    u_pos = np.array([100.0, 2.0])
+    u_neg = np.array([100.0, 200.0])
+    z = np.zeros(2)
+    allow_pos = np.array([True, True])
+    allow_neg = np.array([True, False])
+    strand_obs = allow_pos ^ allow_neg  # [False=AMBIG, True=single-strand]
+    mass = np.array([200.0, 202.0])
+    d = _solve_nodes(u_pos, u_neg, z, z, allow_pos, allow_neg, strand_obs, mass, z,
+                     kappa=kappa, od_g=0.2, od_r=0.1, n_grid=60)
+    assert d.gdna_frac_var is not None
+    # the balanced node cannot resolve gDNA-vs-RNA ⇒ higher posterior Var(f_g) than the confident node.
+    assert d.gdna_frac_var[0] > d.gdna_frac_var[1]
+    # all per-component variances are present, finite, non-negative for active nodes.
+    for v in (d.gdna_frac_var, d.rna_pos_frac_var, d.rna_neg_frac_var):
+        assert np.all(np.isfinite(v)) and np.all(v >= 0.0)
+    # a no-fragment node is inactive ⇒ zero variance on every component.
+    d0 = _solve_nodes(np.array([0.0]), np.array([0.0]), np.array([0.0]), np.array([0.0]),
+                      np.array([True]), np.array([True]), np.array([False]),
+                      np.array([0.0]), np.array([0.0]), kappa=kappa, od_g=0.2, od_r=0.1, n_grid=60)
+    assert d0.gdna_frac_var[0] == 0.0 and d0.rna_pos_frac_var[0] == 0.0
 
 
 def test_gdna_sweep_factor1_uniform():
@@ -405,12 +446,12 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     assert all(deltas[k + 1] <= deltas[k] + 1e-9 for k in range(len(deltas) - 1))
 
 
-# --- count-space message form: two-sided pull + emergent deference (honest-precision Step 2) -----------------
+# --- density-Gaussian message form: two-sided pull + emergent deference (precision_state_design.md §5) --------
 
 
-def test_binom_message_two_sided_mode_not_vertex():
-    """A count-space gDNA message μ=0.2 with strong evidence must pull f_g TOWARD 0.2 (two-sided), not to the
-    f_g=1 vertex (the rejected one-sided ``α·log f`` form gave median ≈0.77, the opposite of its content)."""
+def test_density_message_two_sided_mode_not_vertex():
+    """A density-Gaussian gDNA message (mode=0.2, strong prec) on a balanced AMBIG node (flat strand) pulls f_g
+    TOWARD 0.2 — two-sided by construction (a Gaussian, no edge log-wall), not to the f_g=1 vertex."""
     from rigel.calibration.simplex_sweep import _fg_median, _local_loglik, _simplex_lattice
 
     lat = _simplex_lattice(80)
@@ -420,16 +461,16 @@ def test_binom_message_two_sided_mode_not_vertex():
         np.array([50.0]), np.array([50.0]), np.zeros(1), np.zeros(1),
         np.array([True]), np.array([True]), 0.5, 0.0, 0.0, lat,
         strand_obs=np.array([False]),
-        gdna_imp_frac=np.array([0.2]), gdna_imp_count=np.array([200.0]),
+        gdna_imp_mode=np.array([0.2]), gdna_imp_prec=np.array([200.0]),
     )
     fg = float(_fg_median(psi, fgg)[0])
     assert abs(fg - 0.2) < 0.05, fg
 
 
-def test_binom_message_defers_to_decisive_strand():
-    """Emergent deference: a weak gDNA message (N_src=3 pseudo-fragments) trying to pull f_g→0.9 must lose to a
-    decisive single-strand node's ~1000-fragment strand likelihood — f_g stays ≈0 (no destination-mass²
-    amplification can override the data)."""
+def test_density_message_defers_to_decisive_strand():
+    """Emergent deference: a WEAK gDNA message (prec=3) trying to pull f_g→0.9 must lose to a decisive
+    single-strand node's ~1000-fragment strand likelihood — f_g stays ≈0 (the honest precision blend means a
+    weak message cannot override the data; no log-wall to force it off zero)."""
     from rigel.calibration.simplex_sweep import _fg_median, _local_loglik, _simplex_lattice
 
     lat = _simplex_lattice(80)
@@ -438,7 +479,7 @@ def test_binom_message_defers_to_decisive_strand():
         np.array([1000.0]), np.array([5.0]), np.zeros(1), np.zeros(1),
         np.array([True]), np.array([False]), 0.99, 0.0, 0.0, lat,
         strand_obs=np.array([True]),
-        gdna_imp_frac=np.array([0.9]), gdna_imp_count=np.array([3.0]),
+        gdna_imp_mode=np.array([0.9]), gdna_imp_prec=np.array([3.0]),
     )
     fg = float(_fg_median(psi, fgg)[0])
     assert fg < 0.1, fg

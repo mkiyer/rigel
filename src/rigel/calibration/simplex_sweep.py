@@ -46,8 +46,8 @@ def _binom_pseudo(f, mu, count):
 
 def _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, kappa, od_g, od_r,
                   lattice, strand_obs=None, global_logprior=None,
-                  gdna_imp_frac=None, gdna_imp_count=None,
-                  rna_imp_frac=None, rna_imp_count=None):
+                  gdna_imp_mode=None, gdna_imp_prec=None,
+                  rna_imp_mode=None, rna_imp_prec=None):
     """ψ_i over the lattice — strand mixture + sided spliced lower bound + node-class prior + imputation.
 
     The Bayesian hierarchy (CALIBRATION_ARCHITECTURE.md §1), with a **node-class-dependent** prior. The
@@ -67,9 +67,12 @@ def _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, 
       term with NO ``(M/E)²`` Jacobian: its pin/defer is governed by counts + length + the seed-fit gDNA
       between-node spread. In a zero-gDNA library the seed-based ``ρ_global → 0`` so it pins ``f_g → 0``;
       under capture the spread is large so it defers to the messages. Applying it to single-strand nodes too
-      counteracts the Jeffreys vertex-push at κ≈½ (the Bug-C fix). Messages enter as count-space binomial
-      pseudo-counts (:func:`_binom_pseudo`). The count still enters the LIKELIHOOD only through the strand
-      mixture's overdispersed Fisher information (§0 invariant). ``(n, P)``.
+      counteracts the Jeffreys vertex-push at κ≈½ (the Bug-C fix). ``(n, P)``.
+    * **imputation messages** enter as per-component **density-Gaussians** ``−½·prec·(f_c − mode)²``
+      (`precision_state_design.md`): ``mode`` = the neighbour's imputed fraction, ``prec`` = the honest
+      precision (the source's own `Var_own` blended with the communication `σ²_bio` + sampling). An unsure
+      source ⇒ low ``prec`` ⇒ weak pull; no edge log-wall. The count still enters the LIKELIHOOD only through
+      the strand mixture's overdispersed Fisher information (§0 invariant).
     """
     f_pos, f_neg, f_g = lattice
     n = u_pos + u_neg
@@ -92,27 +95,24 @@ def _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, 
     # precomputed per node (no (M/E)² Jacobian) and applied to ALL solvable nodes (fork dissolved — §3.3).
     if global_logprior is not None:
         psi = psi + np.asarray(global_logprior, dtype=np.float64)
-    # gDNA IMPUTATION message — a COUNT-SPACE binomial pseudo-count: N_src pseudo-fragments at the imputed
-    # fraction μ_c, competing one-for-one with the node's own fragments (emergent deference). count=0 (no
-    # observable flank) ⇒ a no-op. Replaces the old Gaussian + (M_dst/E_dst)² Jacobian + wall floor.
-    if gdna_imp_frac is not None and gdna_imp_count is not None:
-        psi = psi + _binom_pseudo(
-            f_g[None, :],
-            np.asarray(gdna_imp_frac, dtype=np.float64)[:, None],
-            np.asarray(gdna_imp_count, dtype=np.float64)[:, None],
-        )
-    # per-strand RNA IMPUTATION messages — same count-space binomial on each strand axis (each INDEPENDENT;
-    # since f₊+f₋+f_g=1, pulling f± toward their imputed RNA sharpens f_g). count=0 (no strand-s flank) ⇒ no-op.
-    if rna_imp_frac is not None and rna_imp_count is not None:
-        for f_axis, mu_s, n_s in (
-            (f_pos, rna_imp_frac[0], rna_imp_count[0]),
-            (f_neg, rna_imp_frac[1], rna_imp_count[1]),
+    # gDNA IMPUTATION message — a DENSITY-GAUSSIAN on f_g: ``−½·prec·(f_g − mode)²`` (precision_state_design.md
+    # §5/§7, Phase-0 decision). ``mode`` = the imputed fraction (ρ_src·E_dst−spliced)/M_dst; ``prec`` =
+    # (M_dst/E_dst)²/(Var_own,src + σ²_bio + pois) — the source's own uncertainty is blended into the variance,
+    # so an unsure source ⇒ low prec ⇒ weak pull (NO log-wall, NO cap). prec=0 (no flank) ⇒ a no-op.
+    if gdna_imp_mode is not None and gdna_imp_prec is not None:
+        m = np.asarray(gdna_imp_mode, dtype=np.float64)[:, None]
+        p = np.asarray(gdna_imp_prec, dtype=np.float64)[:, None]
+        psi = psi - 0.5 * p * (f_g[None, :] - m) ** 2
+    # per-strand RNA IMPUTATION messages — the same density-Gaussian on each strand axis (each INDEPENDENT;
+    # since f₊+f₋+f_g=1, pulling f± toward their imputed RNA sharpens f_g). prec=0 (no strand-s flank) ⇒ no-op.
+    if rna_imp_mode is not None and rna_imp_prec is not None:
+        for f_axis, m_s, p_s in (
+            (f_pos, rna_imp_mode[0], rna_imp_prec[0]),
+            (f_neg, rna_imp_mode[1], rna_imp_prec[1]),
         ):
-            psi = psi + _binom_pseudo(
-                f_axis[None, :],
-                np.asarray(mu_s, dtype=np.float64)[:, None],
-                np.asarray(n_s, dtype=np.float64)[:, None],
-            )
+            psi = psi - 0.5 * np.asarray(p_s, dtype=np.float64)[:, None] * (
+                f_axis[None, :] - np.asarray(m_s, dtype=np.float64)[:, None]
+            ) ** 2
     forbid = ((~allow_pos)[:, None] & (f_pos[None, :] > _EPS)) | (
         (~allow_neg)[:, None] & (f_neg[None, :] > _EPS)
     )
@@ -132,10 +132,11 @@ def _fg_median(belief, f_g_g):
 
 
 def _fg_var(belief, f_g_g):
-    """Per-node posterior VARIANCE of ``f_g`` over the lattice belief — the per-node confidence (the
-    combined strand+count+global precision; small ⇒ confident). A DIAGNOSTIC primitive only: the sweep's
-    message precision is carried by the ``var~mean`` curves + the effective counts ``N_src``/``n_glob``, NOT
-    by this posterior variance — it is not stored in ``NodeBelief``/``NodeDeconv``. Used by ``scripts/debug``."""
+    """Per-node posterior VARIANCE of a lattice axis (``f_g``, ``f_pos`` or ``f_neg`` — pass the matching grid)
+    over the belief: ``E[f²] − E[f]²``. This is the **precision state** (`precision_state_design.md`): small ⇒
+    confident, large ⇒ unresolved (e.g. a balanced AMBIG node's flat ``f_g``). Moment-matched (mean/variance),
+    distinct from the robust ``_fg_median`` readout (the two operators, plan P2). Feeds ``NodeBelief.var_*`` and
+    the honest message send ``Var_own = (M/E)²·Var(f_c)``."""
     post = np.exp(belief - logsumexp(belief, axis=1, keepdims=True))  # (m,P)
     mean = post @ f_g_g
     return np.maximum(post @ (f_g_g**2) - mean**2, 0.0)
@@ -151,33 +152,40 @@ def _axis_mean(belief, axis_g):
 def _solve_nodes(
     u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, strand_obs,
     mass_unspl, mass_spliced, *, kappa, od_g, od_r, n_grid,
-    global_logprior=None, gdna_imp_frac=None, gdna_imp_count=None,
-    rna_imp_frac=None, rna_imp_count=None,
+    global_logprior=None, gdna_imp_mode=None, gdna_imp_prec=None,
+    rna_imp_mode=None, rna_imp_prec=None,
 ) -> NodeDeconv:
     """The node-agnostic per-node simplex solve — solves an array of nodes (regions OR boundaries) from their
     per-node sufficient statistics, with no knowledge of node type. Each node's belief IS its local evidence
     ``ψ_i`` (``_local_loglik``: strand mixture + sided spliced floor + node-class prior + imputation pulls);
     the cross-node imputation enters ψ_i as a prior, computed upstream. ``f_g`` = posterior median over the
-    lattice, ``f_pos``/``f_neg`` = posterior MEANS (the current-state
-    partition for the per-strand RNA imputation); a node with no fragments (``u_pos+u_neg == 0``) reports
-    ``f_g = f_pos = f_neg = 0``. The region/boundary wrappers build the arrays + the global baseline and call
-    this core.
+    lattice, ``f_pos``/``f_neg`` = posterior MEANS (the current-state partition for the per-strand RNA
+    imputation), and ``*_frac_var`` = the per-component posterior VARIANCES (the precision state, moment-matched
+    — `precision_state_design.md`); a node with no fragments (``u_pos+u_neg == 0``) reports all of them 0. The
+    region/boundary wrappers build the arrays + the global baseline and call this core.
     """
     f_pos_g, f_neg_g, f_g_g = _simplex_lattice(int(n_grid))
     lattice = (f_pos_g, f_neg_g, f_g_g)
     psi = _local_loglik(u_pos, u_neg, spliced_pos, spliced_neg, allow_pos, allow_neg, kappa,
                         od_g, od_r, lattice,
                         strand_obs=strand_obs, global_logprior=global_logprior,
-                        gdna_imp_frac=gdna_imp_frac, gdna_imp_count=gdna_imp_count,
-                        rna_imp_frac=rna_imp_frac, rna_imp_count=rna_imp_count)
+                        gdna_imp_mode=gdna_imp_mode, gdna_imp_prec=gdna_imp_prec,
+                        rna_imp_mode=rna_imp_mode, rna_imp_prec=rna_imp_prec)
     f_g = _fg_median(psi, f_g_g)
     f_pos = _axis_mean(psi, f_pos_g)
     f_neg = _axis_mean(psi, f_neg_g)
+    var_g = _fg_var(psi, f_g_g)
+    var_pos = _fg_var(psi, f_pos_g)
+    var_neg = _fg_var(psi, f_neg_g)
     active = (u_pos + u_neg) > 0.0
     f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
     f_pos = np.where(active, np.clip(f_pos, 0.0, 1.0), 0.0)
     f_neg = np.where(active, np.clip(f_neg, 0.0, 1.0), 0.0)
+    var_g = np.where(active, var_g, 0.0)
+    var_pos = np.where(active, var_pos, 0.0)
+    var_neg = np.where(active, var_neg, 0.0)
     return NodeDeconv(
         gdna_mass=f_g * mass_unspl, rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
         gdna_frac=f_g, rna_pos_frac=f_pos, rna_neg_frac=f_neg,
+        gdna_frac_var=var_g, rna_pos_frac_var=var_pos, rna_neg_frac_var=var_neg,
     )

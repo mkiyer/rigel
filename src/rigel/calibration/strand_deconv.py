@@ -33,6 +33,13 @@ class NodeDeconv:
     # by the simplex sweep for the per-strand RNA imputation (the bipartite R↔B↔R chain).
     rna_pos_frac: "np.ndarray | None" = None  # float64[K] — f_pos
     rna_neg_frac: "np.ndarray | None" = None  # float64[K] — f_neg
+    # per-component posterior VARIANCES of the fractions (moment-matched from the lattice). The precision
+    # state for the honest message send (`precision_state_design.md` §1: Var_own = (M/E)²·Var(f_c)); set by
+    # the per-node solve, consumed when a node emits a message. None on the chain region/boundary projections
+    # (precision is a chain-node property, not needed by the downstream EM prior).
+    gdna_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_g)
+    rna_pos_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_pos)
+    rna_neg_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_neg)
 
 
 @dataclass(frozen=True, slots=True)
