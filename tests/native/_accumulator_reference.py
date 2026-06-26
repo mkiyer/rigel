@@ -77,6 +77,9 @@ class Boundary:
     mass_right: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=np.float32))
     flux_left: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=np.uint32))
     flux_right: np.ndarray = field(default_factory=lambda: np.zeros(4, dtype=np.uint32))
+    #: Splice-junction genomic strand (Strand: POS=1/NEG=2, 0=no junction). Set
+    #: from the motif strand on a spliced crossing — the mature-RNA anchor's strand.
+    junction_strand: int = 0
 
 
 @dataclass
@@ -144,6 +147,7 @@ class Accumulator:
         blocks: list[tuple[int, int]],
         spliced: bool,
         primary: bool,
+        strand: int = 0,
     ) -> None:
         """Deposit one fragment's evidence.
 
@@ -153,10 +157,14 @@ class Accumulator:
         spliced: single per-fragment splice classification.
         primary: channel-0 selector — genome '+' for unspliced, SENSE
                  (align_strand == sj_strand) for spliced.
+        strand: genomic strand (Strand: POS=1/NEG=2, 0=none). For a SPLICED
+                crossing it is the junction motif strand, recorded on every
+                boundary the spliced mass touches; ignored otherwise.
         """
         if not blocks:
             return
         ch = channel_idx(spliced, primary)
+        js = int(strand) if spliced else 0  # junction strand only for spliced
 
         # 1. Expand each block into per-region slices. A block may
         #    straddle one or more region boundaries (the "fully spans
@@ -237,10 +245,14 @@ class Accumulator:
                 b_out = self.right_boundary_of(r)
                 self.boundaries[b_out].mass_left[ch] += np.float32(share)
                 self.boundaries[b_out].flux_left[ch] += np.uint32(1)
+                if js != 0:  # spliced ⇒ this boundary is a junction of strand `js`
+                    self.boundaries[b_out].junction_strand = js
             if crosses_left:
                 b_in = self.left_boundary_of(r)
                 self.boundaries[b_in].mass_right[ch] += np.float32(share)
                 self.boundaries[b_in].flux_right[ch] += np.uint32(1)
+                if js != 0:
+                    self.boundaries[b_in].junction_strand = js
 
         # gDNA FL (crossing): each slice's fractional mass → the BOUNDARY pool of
         # its region-type, at FL bin = min(footprint, max_fl).

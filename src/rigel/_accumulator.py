@@ -33,9 +33,9 @@ class _RegionRow:
 
 
 class _BoundaryRow:
-    """View over one boundary's per-channel mass and per-side flux."""
+    """View over one boundary's per-channel mass, per-side flux, and junction strand."""
 
-    __slots__ = ("mass_left", "mass_right", "flux_left", "flux_right")
+    __slots__ = ("mass_left", "mass_right", "flux_left", "flux_right", "junction_strand")
 
     def __init__(
         self,
@@ -43,11 +43,13 @@ class _BoundaryRow:
         mass_right_row: np.ndarray,
         flux_left_row: np.ndarray,
         flux_right_row: np.ndarray,
+        junction_strand: int,
     ) -> None:
         self.mass_left = mass_left_row
         self.mass_right = mass_right_row
         self.flux_left = flux_left_row
         self.flux_right = flux_right_row
+        self.junction_strand = int(junction_strand)
 
 
 class _RegionList:
@@ -73,7 +75,7 @@ class _RegionList:
 class _BoundaryList:
     """Sequence-like view over Accumulator's boundaries."""
 
-    __slots__ = ("_owner", "_ml", "_mr", "_fl_l", "_fl_r")
+    __slots__ = ("_owner", "_ml", "_mr", "_fl_l", "_fl_r", "_js")
 
     def __init__(self, owner: "Accumulator") -> None:
         self._owner = owner
@@ -81,12 +83,13 @@ class _BoundaryList:
         self._mr = owner._native.boundaries_mass_right
         self._fl_l = owner._native.boundaries_flux_left
         self._fl_r = owner._native.boundaries_flux_right
+        self._js = owner._native.boundaries_junction_strand
 
     def __len__(self) -> int:
         return self._ml.shape[0]
 
     def __getitem__(self, i: int) -> _BoundaryRow:
-        return _BoundaryRow(self._ml[i], self._mr[i], self._fl_l[i], self._fl_r[i])
+        return _BoundaryRow(self._ml[i], self._mr[i], self._fl_l[i], self._fl_r[i], self._js[i])
 
     def __iter__(self):
         for i in range(len(self)):
@@ -158,6 +161,7 @@ class Accumulator:
         blocks: list[tuple[int, int]],
         spliced: bool,
         primary: bool,
+        strand: int = 0,
     ) -> None:
         if not blocks:
             return
@@ -166,7 +170,7 @@ class Accumulator:
         for i, (s, e) in enumerate(blocks):
             starts[i] = s
             ends[i] = e
-        self._native.deposit(starts, ends, bool(spliced), bool(primary))
+        self._native.deposit(starts, ends, bool(spliced), bool(primary), int(strand))
 
     def total_mass_deposited(self) -> float:
         total = 0.0

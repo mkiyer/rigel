@@ -84,6 +84,7 @@ def test_geometry_exon_intron_exon_plus_gene():
     substrate = SimpleNamespace(contained=_view([100.0, 50.0, 80.0], [0.0, 0.0, 0.0]))
 
     # boundary sides; b1 spliced on its LEFT (exon r0) side, b2 on its RIGHT (exon r2) side.
+    # b1 (idx 1) and b2 (idx 2) are POS splice junctions (motif strand from the accumulator).
     left = _view([0.0, 30.0, 20.0, 40.0], [0.0, 88.0, 0.0, 0.0])
     right = _view([10.0, 31.0, 22.0, 0.0], [0.0, 0.0, 77.0, 0.0])
     bsub = SimpleNamespace(
@@ -91,6 +92,7 @@ def test_geometry_exon_intron_exon_plus_gene():
         right=right,
         left_region=np.array([-1, 0, 1, 2]),
         right_region=np.array([0, 1, 2, -1]),
+        junction_strand=np.array([0, 1, 1, 0], dtype=np.int8),
     )
 
     gdna_fl = _delta_pmf(300)
@@ -135,6 +137,7 @@ def test_terminal_boundary_zero_off_edge():
         right=right,
         left_region=np.array([-1, 0, 1, 2]),
         right_region=np.array([0, 1, 2, -1]),
+        junction_strand=np.zeros(4, dtype=np.int8),
     )
     g = build_node_geometry(chain, substrate, bsub, region_arrays, _delta_pmf(300), _delta_pmf(200))
     # B0 (node 0): left_region=-1 → left face eff = _EPS-floored ~0 (off edge); right face = r0 crossing.
@@ -154,6 +157,8 @@ def test_node_densities_formula():
         eff_gdna_right=np.array([400.0]),
         eff_rna_left=np.array([250.0]),
         eff_rna_right=np.array([500.0]),
+        eff_spl_left=np.array([125.0]),  # one-sided spliced half-triangle eff-len (distinct from eff_rna)
+        eff_spl_right=np.array([250.0]),
         spliced_pos_left=np.array([10.0]),
         spliced_pos_right=np.array([0.0]),
         spliced_neg_left=np.array([0.0]),
@@ -169,8 +174,9 @@ def test_node_densities_formula():
     )
     d = node_densities(b, g)
     assert np.isclose(d.rho_g_left[0], 0.5 * 100 / 200)  # 0.25
-    assert np.isclose(d.rho_pos_left[0], (0.3 * 100 + 10) / 250)  # spliced rides on +: 0.16
-    assert np.isclose(d.rho_neg_left[0], 0.2 * 100 / 250)  # 0.08
+    # nascent rides eff_rna (250); the one-sided spliced rides its half-triangle eff_spl (125): 0.12+0.08=0.20
+    assert np.isclose(d.rho_pos_left[0], 0.3 * 100 / 250 + 10 / 125)  # 0.20
+    assert np.isclose(d.rho_neg_left[0], 0.2 * 100 / 250)  # 0.08 (no spliced on −)
     assert np.isclose(d.rho_g_right[0], 0.5 * 200 / 400)  # 0.25
     assert np.isclose(d.rho_pos_right[0], 0.3 * 200 / 500)  # no spliced on the right face: 0.12
 
@@ -188,6 +194,8 @@ def test_node_densities_factor1_under_uniform():
         eff_gdna_right=eff_g_r,
         eff_rna_left=np.array([800.0]),
         eff_rna_right=np.array([200.0]),
+        eff_spl_left=np.array([400.0]),  # inert here (no spliced mass); present for the dataclass
+        eff_spl_right=np.array([100.0]),
         spliced_pos_left=np.array([0.0]),
         spliced_pos_right=np.array([0.0]),
         spliced_neg_left=np.array([0.0]),
@@ -209,7 +217,8 @@ def _empty_boundary_substrate(n_b):
     z = np.zeros(n_b)
     side = _cview(z.copy(), z.copy())
     return SimpleNamespace(
-        left_region=np.full(n_b, -1), right_region=np.full(n_b, -1), left=side, right=side
+        left_region=np.full(n_b, -1), right_region=np.full(n_b, -1), left=side, right=side,
+        junction_strand=np.zeros(n_b, dtype=np.int8),
     )
 
 
@@ -354,7 +363,10 @@ def test_gdna_sweep_factor1_uniform():
     rmass = np.where(rr >= 0, rho * side_eff[np.clip(rr, 0, 2)], 0.0)
     left = _cview(lmass / 2, lmass / 2, mass_u=lmass, mass_spl=np.zeros(4))
     right = _cview(rmass / 2, rmass / 2, mass_u=rmass, mass_spl=np.zeros(4))
-    bsub = SimpleNamespace(left_region=lr, right_region=rr, left=left, right=right)
+    bsub = SimpleNamespace(
+        left_region=lr, right_region=rr, left=left, right=right,
+        junction_strand=np.zeros(len(lr), dtype=np.int8),
+    )
 
     geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
     st = build_node_statics(chain, substrate, bsub, region_arrays)
@@ -415,7 +427,10 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     rneg = np.array([2.0, 2.0, 40.0, 0.0])
     left = _cview(lpos, lneg, mass_u=lpos + lneg, mass_spl=np.zeros(4))
     right = _cview(rpos, rneg, mass_u=rpos + rneg, mass_spl=np.zeros(4))
-    bsub = SimpleNamespace(left_region=lr, right_region=rr, left=left, right=right)
+    bsub = SimpleNamespace(
+        left_region=lr, right_region=rr, left=left, right=right,
+        junction_strand=np.zeros(len(lr), dtype=np.int8),
+    )
 
     geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
     st = build_node_statics(chain, substrate, bsub, region_arrays)

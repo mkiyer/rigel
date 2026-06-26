@@ -507,3 +507,59 @@ def test_fl_footprint_is_span_native():
     _fl_gap_deposit(nat)
     np.testing.assert_allclose(np.asarray(nat.fl_pool_mass), ref.fl_pool_mass)
     _check_fl_gap(nat)
+
+
+# --- Junction strand: per-boundary genomic strand of the splice junction --------
+# A spliced crossing records its motif (genomic) strand on every boundary its
+# spliced mass touches; unspliced/contained fragments leave it 0. Partition:
+# exon1 (1000,2000) | intron (2000,5000) | exon2 (5000,6000) → boundaries at
+# indices 0..3 (positions 1000,2000,5000,6000). A spliced crossing exon1→exon2
+# deposits at the donor boundary (idx 1, pos 2000) and acceptor (idx 2, pos 5000).
+
+
+def _js(acc) -> list[int]:
+    return [int(acc.boundaries[i].junction_strand) for i in range(len(acc.boundaries))]
+
+
+def _check_junction_strand_pos(acc):
+    acc.deposit(blocks=[(1800, 1950), (5050, 5950)], spliced=True, primary=True, strand=1)
+    assert _js(acc) == [0, 1, 1, 0]  # POS on the two junction boundaries only
+
+
+def _check_junction_strand_neg(acc):
+    acc.deposit(blocks=[(1800, 1950), (5050, 5950)], spliced=True, primary=False, strand=2)
+    assert _js(acc) == [0, 2, 2, 0]  # NEG; the SENSE/ANTISENSE (primary) channel is independent
+
+
+def _check_junction_strand_unspliced_noop(acc):
+    # an unspliced contiguous crossing of boundary idx 1 records mass but NO junction strand
+    acc.deposit(blocks=[(1900, 2100)], spliced=False, primary=True, strand=1)
+    assert _js(acc) == [0, 0, 0, 0]
+    assert acc.boundaries[1].mass_left.sum() + acc.boundaries[1].mass_right.sum() > 0.0
+
+
+def test_junction_strand_pos_reference():
+    _check_junction_strand_pos(_both(Accumulator, partition_exon_intron_exon()))
+
+
+@XFAIL_NATIVE
+def test_junction_strand_pos_native():
+    _check_junction_strand_pos(_both(NativeAccumulator, partition_exon_intron_exon()))
+
+
+def test_junction_strand_neg_reference():
+    _check_junction_strand_neg(_both(Accumulator, partition_exon_intron_exon()))
+
+
+@XFAIL_NATIVE
+def test_junction_strand_neg_native():
+    _check_junction_strand_neg(_both(NativeAccumulator, partition_exon_intron_exon()))
+
+
+def test_junction_strand_unspliced_noop_reference():
+    _check_junction_strand_unspliced_noop(_both(Accumulator, partition_exon_intron_exon()))
+
+
+@XFAIL_NATIVE
+def test_junction_strand_unspliced_noop_native():
+    _check_junction_strand_unspliced_noop(_both(NativeAccumulator, partition_exon_intron_exon()))

@@ -162,10 +162,14 @@ def calibrate(
         rna_strand_overdispersion=rna_strand_overdispersion,
         n_grid=config.sweep_n_grid, max_passes=config.sweep_max_passes,
         convergence_delta=config.sweep_convergence_delta,
+        max_outer=config.sweep_max_outer,
+        outer_convergence_delta=config.sweep_outer_convergence_delta,
     )
     regions = chain_region_deconv(chain, belief, substrate)
     left, right = chain_boundary_side_deconv(chain, belief, substrate)
-    logger.debug("calibration sweep: %d passes, max-Δf_g per pass=%s", len(sweep_deltas), sweep_deltas)
+    logger.debug(
+        "calibration sweep: %d outer iterations, per-outer max-Δf_g=%s", len(sweep_deltas) + 1, sweep_deltas
+    )
 
     # Derive gdna_density_global (the library-average density QC scalar).
     density_global = gdna_density_global(

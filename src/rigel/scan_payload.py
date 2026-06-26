@@ -66,6 +66,11 @@ class AccumulatorPayload:
     boundary_flux_left: np.ndarray
     boundary_flux_right: np.ndarray
     n_refs: int
+    # Per-boundary splice-junction genomic strand :: int8[B_obj_total]
+    # (``Strand``: POS=1 / NEG=2, 0 = no junction). The mature-RNA anchor's
+    # strand, observed from the splice motif at deposit (one junction per
+    # boundary). Zeros for a stale payload that predates the field.
+    boundary_junction_strand: np.ndarray = None  # type: ignore[assignment]
     # gDNA FL pools (PR 4c): library-wide float64[N_FL_POOLS, fl_max_size + 1]
     # (region-type {intergenic,intronic,exonic} × compartment {contained,
     # boundary}), or None when FL pooling was disabled. ``fl_max_size`` is the
@@ -135,6 +140,16 @@ class AccumulatorPayload:
             cal["boundary_flux_right"], dtype=np.uint32
         ).reshape(b_total, N_CHANNELS)
 
+        # Per-boundary junction strand (int8[B]); zeros for a stale payload that
+        # predates the field (then routing falls back to the signature heuristic).
+        bjs_raw = cal.get("boundary_junction_strand")
+        if bjs_raw is None:
+            boundary_junction_strand = np.zeros(b_total, dtype=np.int8)
+        else:
+            boundary_junction_strand = np.ascontiguousarray(bjs_raw, dtype=np.int8).reshape(
+                b_total
+            )
+
         # Invariant: each ref with k regions contributes (k, k+1) or (0, 0).
         expected_b_total = r_total + int(np.sum(np.diff(ref_region_offsets) > 0))
         if expected_b_total != b_total:
@@ -166,6 +181,7 @@ class AccumulatorPayload:
             boundary_flux_left=boundary_flux_left,
             boundary_flux_right=boundary_flux_right,
             n_refs=n_refs,
+            boundary_junction_strand=boundary_junction_strand,
             fl_pool_mass=fl_pool_mass,
             fl_max_size=fl_max_size,
         )

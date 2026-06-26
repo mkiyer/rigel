@@ -79,3 +79,17 @@ def test_transcript_strand_class_array():
     ts = transcript_strand_class(sig)
     assert ts.dtype == np.int8
     np.testing.assert_array_equal(ts, [TS_NONE, TS_POS, TS_POS, TS_NEG, TS_AMBIG, TS_AMBIG])
+    # transcript_strand_class is the vectorised twin of coarse_strand_from_signature.
+    np.testing.assert_array_equal(ts, [coarse_strand_from_signature(int(s)) for s in sig])
+
+
+def test_strand_convention_unified():
+    """TS_* is ONE convention with RegionStrand (== rigel.types.Strand): NONE=0,
+    POS=1, NEG=2, AMBIG=3. (Regression: TS_NEG was historically -1, TS_AMBIG 2.)"""
+    from rigel.types import Strand
+
+    assert (TS_NONE, TS_POS, TS_NEG, TS_AMBIG) == (0, 1, 2, 3)
+    assert (int(RegionStrand.NONE), int(RegionStrand.POS), int(RegionStrand.NEG), int(RegionStrand.AMBIG)) == (
+        TS_NONE, TS_POS, TS_NEG, TS_AMBIG,
+    )
+    assert (int(Strand.POS), int(Strand.NEG)) == (TS_POS, TS_NEG)

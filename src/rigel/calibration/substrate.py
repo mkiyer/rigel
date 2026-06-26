@@ -170,6 +170,11 @@ class BoundarySubstrate:
     right_region: np.ndarray  # int64[B] — region to the boundary's right; -1 at a reference-end terminal
     left: SubstrateView  # the boundary's LEFT side (inside left_region): boundary_*_left[b]
     right: SubstrateView  # the boundary's RIGHT side (inside right_region): boundary_*_right[b]
+    #: int8[B] — the boundary's splice-junction genomic strand (``Strand``: POS=1 /
+    #: NEG=2, 0 = no junction). The mature-RNA anchor's strand, observed from the
+    #: motif at deposit (one junction per boundary). Routes the one-sided spliced
+    #: mass to its exon flank's strand — correct even at AMBIG / exon↔exon seams.
+    junction_strand: np.ndarray
 
     @classmethod
     def from_payload(cls, payload: AccumulatorPayload) -> "BoundarySubstrate":
@@ -180,12 +185,16 @@ class BoundarySubstrate:
         left_region, right_region = boundary_region_indices(
             payload.ref_region_offsets, payload.ref_boundary_offsets
         )
+        bjs = payload.boundary_junction_strand
+        if bjs is None:  # stale payload predating the field → no junction strand
+            bjs = np.zeros(payload.b_obj_total, dtype=np.int8)
         return cls(
             n_boundaries=payload.b_obj_total,
             left_region=left_region,
             right_region=right_region,
             left=left,
             right=right,
+            junction_strand=np.ascontiguousarray(bjs, dtype=np.int8),
         )
 
 

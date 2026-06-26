@@ -261,18 +261,29 @@ class CalibrationConfig:
     #: over-calls / under-resolves the zero-DNA case).
     sweep_n_grid: int = 60
 
-    #: **Sweep pass count** for the belief-propagation solver. Each pass re-fits the gDNA + RNA
-    #: ``var~mean`` + the global density ``ρ_global`` on the FROZEN previous-pass snapshot, then sweeps
-    #: (L→R then R→L); the loop stops early once the per-node pie stabilizes (max change within
-    #: ``sweep_convergence_delta``). A few passes suffice (strand/seed-anchored, not open EM); the default
-    #: carries margin for the capture case.
-    sweep_max_passes: int = 6
+    #: **Inner-loop max passes** (per outer iteration). The solver is a NESTED loop: the INNER loop
+    #: converges the per-node beliefs by directional (L→R then R→L) sweeps at FIXED var~mean, stopping
+    #: early once the per-node pie stabilizes (max change within ``sweep_convergence_delta``); the OUTER
+    #: loop refits the var~mean reliability curves on the converged belief. Entangling the refit INTO the
+    #: sweep (the old single-loop design) made a moving precision target ⇒ the sweep never converged
+    #: (a limit cycle); separating them lets the inner sweep actually settle. This caps the inner passes.
+    sweep_max_passes: int = 20
 
-    #: **Iterative-bootstrap convergence threshold** — the loop stops once the mean absolute change in
-    #: the per-node gDNA fraction ``f_g`` between consecutive passes drops below this. Smaller ⇒ tighter
-    #: (more passes); ``1e-3`` is well below the lattice-cell resolution ``1/sweep_n_grid`` so further
-    #: passes do not move the discretized solution.
+    #: **Inner-loop convergence threshold** — the inner sweep stops once the max absolute change in the
+    #: per-node gDNA fraction ``f_g`` between consecutive passes drops below this. ``1e-3`` is below the
+    #: lattice-cell resolution ``1/sweep_n_grid`` so further passes do not move the discretized solution.
     sweep_convergence_delta: float = 1e-3
+
+    #: **Outer-loop max iterations** (the var~mean fixed point). Each outer iteration: inner-converge the
+    #: belief at fixed var~mean, then refit BOTH the gDNA and RNA var~mean reliability curves on the
+    #: converged belief (symmetric — neither is privileged). The outer loop stops once the converged
+    #: belief stops moving between iterations (``sweep_outer_convergence_delta``). Count is set
+    #: empirically (the belief plateaus after a small number of refits).
+    sweep_max_outer: int = 4
+
+    #: **Outer-loop convergence threshold** — the outer loop stops once the max absolute change in ``f_g``
+    #: of the inner-converged belief between consecutive outer iterations drops below this.
+    sweep_outer_convergence_delta: float = 5e-3
 
     def __post_init__(self) -> None:
         if self.sweep_n_grid < 2:
@@ -287,6 +298,15 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.sweep_convergence_delta must be > 0; "
                 f"got {self.sweep_convergence_delta}."
+            )
+        if self.sweep_max_outer < 1:
+            raise ValueError(
+                f"CalibrationConfig.sweep_max_outer must be >= 1; got {self.sweep_max_outer}."
+            )
+        if not (float(self.sweep_outer_convergence_delta) > 0.0):
+            raise ValueError(
+                "CalibrationConfig.sweep_outer_convergence_delta must be > 0; "
+                f"got {self.sweep_outer_convergence_delta}."
             )
         if self.gdna_strand_prior_alpha_beta < 2.0:
             raise ValueError(

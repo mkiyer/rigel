@@ -40,6 +40,7 @@ Accumulator::Accumulator(std::vector<std::int64_t> boundaries,
     if (boundary_positions_.empty()) {
         regions_.clear();
         boundaries_.clear();
+        boundary_junction_strand_.clear();
         region_types_.clear();
         max_fl_ = 0;
         return;
@@ -54,6 +55,7 @@ Accumulator::Accumulator(std::vector<std::int64_t> boundaries,
     const std::size_t n = boundary_positions_.size() - 1;
     regions_.assign(n, Region{});
     boundaries_.assign(n + 1, Boundary{});
+    boundary_junction_strand_.assign(n + 1, 0);  // 0 = no junction (Strand convention)
     // POD zero-init via value-init in assign above; be explicit for clarity.
     if (n > 0) std::memset(regions_.data(), 0, n * sizeof(Region));
     std::memset(boundaries_.data(), 0, (n + 1) * sizeof(Boundary));
@@ -85,11 +87,15 @@ void Accumulator::deposit(const std::int64_t* block_starts,
                           const std::int64_t* block_ends,
                           std::size_t n_blocks,
                           bool spliced,
-                          bool primary)
+                          bool primary,
+                          std::int32_t strand)
 {
     if (n_blocks == 0 || regions_.empty()) return;
 
     const int ch = channel_idx(spliced, primary);
+    // The junction strand is recorded only for spliced crossings (a junction is
+    // single-strand by its motif). 0 elsewhere. Cast once; set per touched boundary.
+    const std::int8_t js = spliced ? static_cast<std::int8_t>(strand) : std::int8_t{0};
     const std::int64_t edge_lo = boundary_positions_.front();
     const std::int64_t edge_hi = boundary_positions_.back();
 
@@ -198,14 +204,18 @@ void Accumulator::deposit(const std::int64_t* block_starts,
         const double share = static_cast<double>(sl.end - sl.start) * inv_L
                              / static_cast<double>(n_cross);
         if (crosses_right) {
-            Boundary& bo = boundaries_[static_cast<std::size_t>(sl.region_idx + 1)];
+            const std::size_t b = static_cast<std::size_t>(sl.region_idx + 1);
+            Boundary& bo = boundaries_[b];
             bo.mass_left[ch] += static_cast<float>(share);
             bo.flux_left[ch] += 1u;
+            if (js != 0) boundary_junction_strand_[b] = js;  // spliced ⇒ this boundary is a junction
         }
         if (crosses_left) {
-            Boundary& bi = boundaries_[static_cast<std::size_t>(sl.region_idx)];
+            const std::size_t b = static_cast<std::size_t>(sl.region_idx);
+            Boundary& bi = boundaries_[b];
             bi.mass_right[ch] += static_cast<float>(share);
             bi.flux_right[ch] += 1u;
+            if (js != 0) boundary_junction_strand_[b] = js;
         }
     }
 
@@ -242,6 +252,12 @@ void Accumulator::merge_from(const Accumulator& other) {
             boundaries_[i].mass_right[c] += other.boundaries_[i].mass_right[c];
             boundaries_[i].flux_left[c]  += other.boundaries_[i].flux_left[c];
             boundaries_[i].flux_right[c] += other.boundaries_[i].flux_right[c];
+        }
+        // Junction strand: 0 is the identity (no junction); nonzero values agree
+        // across workers (≤1 motif-stranded junction per position), so take the
+        // other's value where this worker saw none.
+        if (boundary_junction_strand_[i] == 0) {
+            boundary_junction_strand_[i] = other.boundary_junction_strand_[i];
         }
     }
     // gDNA FL pools (PR 4c): element-wise sum (identical partition ⇒ same size).

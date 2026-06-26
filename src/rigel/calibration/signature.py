@@ -57,9 +57,14 @@ class RegionStrand(IntFlag):
     AMBIG = 3  # POS | NEG
 
 
-# Transcript-strand class for a region's signature (signed int8 encoding used
-# by :class:`rigel.calibration.region_arrays.RegionArrays`). TS_NEG is -1 so a
-# region's "sense" channel can be selected by the sign.
+# Transcript-strand class for a region's signature — the int8 encoding used by
+# :class:`rigel.calibration.region_arrays.RegionArrays`. These are ALIASES of
+# :class:`RegionStrand` (which mirrors :class:`rigel.types.Strand`): there is ONE
+# strand-value convention across the codebase — NONE=0, POS=1, NEG=2, AMBIG=3.
+# All consumers compare against these named constants (equality, no sign
+# arithmetic), so a value in the Strand convention — e.g. the accumulator's
+# per-boundary splice-junction strand (Strand POS=1 / NEG=2) — routes directly
+# against TS_POS / TS_NEG with no conversion.
 #
 # NONE and AMBIG both lack a single transcript strand but are NOT
 # interchangeable for the strand channel:
@@ -71,10 +76,10 @@ class RegionStrand(IntFlag):
 #                EXCLUDED from strand deconvolution and recovered by density +
 #                boundary-sweep imputation + global fallback
 #                (see docs/acc_caljointmodel/00_implementation_plan.md §4 D7).
-TS_NONE: int = 0
-TS_POS: int = 1
-TS_NEG: int = -1
-TS_AMBIG: int = 2
+TS_NONE: int = int(RegionStrand.NONE)  # 0
+TS_POS: int = int(RegionStrand.POS)  # 1
+TS_NEG: int = int(RegionStrand.NEG)  # 2
+TS_AMBIG: int = int(RegionStrand.AMBIG)  # 3
 
 
 # ---------------------------------------------------------------------------
@@ -163,9 +168,10 @@ def coarse_type_array(signature: np.ndarray) -> np.ndarray:
 def transcript_strand_class(signature: np.ndarray) -> np.ndarray:
     """Map a uint8 signature array to its int8 transcript-strand class.
 
-    Returns one of ``{TS_NONE=0, TS_POS=+1, TS_NEG=-1, TS_AMBIG=2}`` per
-    region. ``TS_NONE`` covers intergenic regions; ``TS_AMBIG`` covers
-    regions with transcripts on both strands.
+    Returns one of ``{TS_NONE=0, TS_POS=1, TS_NEG=2, TS_AMBIG=3}`` per region —
+    the vectorised form of :func:`coarse_strand_from_signature` (identical map).
+    ``TS_NONE`` covers intergenic regions; ``TS_AMBIG`` covers regions with
+    transcripts on both strands.
     """
     sig = np.asarray(signature)
     has_pos = (sig & (BIT_INTRON_POS | BIT_EXON_POS)) != 0

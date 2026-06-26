@@ -1475,12 +1475,18 @@ private:
                 if (ws.span_start.empty()) return;
                 const bool primary = spliced ? (cr.align_strand == motif_strand)
                                              : (cr.align_strand == STRAND_POS);
+                // Genomic strand carried to the accumulator: for a spliced fragment
+                // the junction MOTIF strand (recorded per boundary as the mature
+                // anchor's strand); for unspliced the genome strand (unused — the
+                // ch0/ch1 channels already encode it). motif_ok above guarantees a
+                // defined POS/NEG for spliced.
+                const std::int32_t deposit_strand = spliced ? motif_strand : cr.align_strand;
                 // Non-chimeric ⇒ all spans share `ref_id` (chimeras are held out
                 // before the deposit), so a single per-ref deposit is correct.
                 ws.acc_set->at(ref_id).deposit(ws.span_start.data(),
                                                ws.span_end.data(),
                                                ws.span_start.size(),
-                                               spliced, primary);
+                                               spliced, primary, deposit_strand);
             };
 
         // Per-worker state refs
@@ -1867,11 +1873,16 @@ private:
                 B_total * kNChannels, 0u);
             auto boundary_flux_right = std::make_unique<std::vector<uint32_t>>(
                 B_total * kNChannels, 0u);
+            // Per-boundary splice-junction strand (Strand 0/1/2): NOT channelled
+            // (one junction per boundary), so length B_total, not B_total*kNChannels.
+            auto boundary_junction_strand = std::make_unique<std::vector<int8_t>>(
+                B_total, 0);
 
             for (std::size_t f = 0; f < n_refs; ++f) {
                 const Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
                 const Region* rs = a.regions_data();
                 const Boundary* bs = a.boundaries_data();
+                const int8_t* js = a.boundary_junction_strand_data();
                 const std::size_t r_off =
                     static_cast<std::size_t>(ref_region_offsets[f]);
                 const std::size_t b_off =
@@ -1893,6 +1904,7 @@ private:
                         (*boundary_flux_right)[(b_off + i) * kNChannels + c] =
                             bs[i].flux_right[c];
                     }
+                    (*boundary_junction_strand)[b_off + i] = js[i];
                 }
             }
 
@@ -1924,6 +1936,8 @@ private:
                 vec_to_ndarray(std::move(*boundary_flux_left));
             cal["boundary_flux_right"] =
                 vec_to_ndarray(std::move(*boundary_flux_right));
+            cal["boundary_junction_strand"] =
+                vec_to_ndarray(std::move(*boundary_junction_strand));
 
             // gDNA FL pools (PR 4c): sum the per-ref pools into a single
             // library-wide [kNFlPools, fl_max_size + 1] float64 array (flat;
@@ -2652,6 +2666,16 @@ NB_MODULE(_bam_impl, m) {
                          {rigel::accumulator::kNFlPools, row},
                          self_h).cast();
                  })
+            // boundary junction strand: shape (N+1,), int8 (Strand 0/1/2)
+            .def_prop_ro("boundaries_junction_strand",
+                 [](nb::handle self_h) {
+                     auto& self = nb::cast<Accumulator&>(self_h);
+                     const size_t n = self.n_boundaries();
+                     return nb::ndarray<nb::numpy, const int8_t, nb::ndim<1>>(
+                         self.boundary_junction_strand_data(),
+                         {n},
+                         self_h).cast();
+                 })
             .def("region_of_pos",
                  [](const Accumulator& a, int64_t pos) {
                      return a.region_of_pos(pos);
@@ -2662,19 +2686,21 @@ NB_MODULE(_bam_impl, m) {
                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
                     bool spliced,
-                    bool primary) {
+                    bool primary,
+                    int32_t strand) {
                      if (starts.shape(0) != ends.shape(0)) {
                          throw std::invalid_argument(
                              "deposit: starts and ends must have same length");
                      }
                      a.deposit(starts.data(), ends.data(),
                                static_cast<size_t>(starts.shape(0)),
-                               spliced, primary);
+                               spliced, primary, strand);
                  },
                  nb::arg("block_starts"),
                  nb::arg("block_ends"),
                  nb::arg("spliced"),
-                 nb::arg("primary"));
+                 nb::arg("primary"),
+                 nb::arg("strand") = 0);
         m.attr("ACCUMULATOR_N_CHANNELS") =
             static_cast<int>(rigel::accumulator::kNChannels);
         m.def("accumulator_channel_idx",

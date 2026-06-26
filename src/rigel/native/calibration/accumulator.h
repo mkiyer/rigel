@@ -117,11 +117,27 @@ public:
     /// Deposit a single fragment's evidence per docs/accumulator/00_design.md.
     /// `block_starts`/`block_ends` have length `n_blocks`. Empty / fully
     /// out-of-range fragments are no-ops.
+    /// `strand` is the fragment's GENOMIC strand (Strand: POS=1 / NEG=2; 0 = none).
+    /// For a SPLICED crossing it is the splice-junction motif strand, recorded on
+    /// every boundary the fragment's spliced mass touches (the junction is
+    /// single-strand by its GT/AG motif, ≤1 per genomic position — see
+    /// docs/accumulator/01_junction_strand.md). It is ignored for unspliced
+    /// fragments (the ch0/ch1 channels already carry the genome strand) and for
+    /// contained fragments (no boundary). The SENSE/ANTISENSE channels are
+    /// unaffected — `primary` still selects them.
     void deposit(const std::int64_t* block_starts,
                  const std::int64_t* block_ends,
                  std::size_t n_blocks,
                  bool spliced,
-                 bool primary);
+                 bool primary,
+                 std::int32_t strand);
+
+    /// Per-boundary splice-junction genomic strand (Strand POS=1/NEG=2, 0=none),
+    /// length n_boundaries. The mature-RNA anchor's strand, observed from the
+    /// motif at deposit. Empty (size 0) iff there are no boundaries.
+    const std::int8_t* boundary_junction_strand_data() const noexcept {
+        return boundary_junction_strand_.data();
+    }
 
     /// Element-wise sum of `other` into this accumulator. Requires identical
     /// boundary positions (asserts at start). Used to merge per-worker
@@ -132,6 +148,9 @@ private:
     std::vector<std::int64_t> boundary_positions_;  // size = n_regions + 1
     std::vector<Region>       regions_;             // size = n_regions
     std::vector<Boundary>     boundaries_;          // size = n_regions + 1
+    // Per-boundary junction strand (Strand 0/1/2), size = n_regions + 1. A separate
+    // array so the 64-byte Boundary (mass/flux) layout stays byte-for-byte.
+    std::vector<std::int8_t>  boundary_junction_strand_;
     std::vector<std::uint8_t> region_types_;        // size = n_regions, or 0 (FL off)
     int                       max_fl_ = 0;          // FL pooling off iff <= 0
     std::vector<double>       fl_pool_mass_;         // kNFlPools*(max_fl+1), or 0

@@ -25,7 +25,13 @@ from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["fl_mean", "region_eff_length", "boundary_eff_length", "boundary_side_eff_length"]
+__all__ = [
+    "fl_mean",
+    "region_eff_length",
+    "boundary_eff_length",
+    "boundary_side_eff_length",
+    "spliced_side_eff_length",
+]
 
 
 def _as_pmf(fl_pmf: np.ndarray) -> np.ndarray:
@@ -91,4 +97,33 @@ def boundary_side_eff_length(fl_pmf: np.ndarray, region_side_len_bp: np.ndarray)
     R = np.asarray(region_side_len_bp, dtype=np.float64)
     idx = np.clip(np.floor(R).astype(np.int64), 0, n - 1)
     eff = cum_lf[idx] + R * (1.0 - cum_f[idx])
+    return np.maximum(eff, 0.0)
+
+
+def spliced_side_eff_length(fl_pmf: np.ndarray, region_side_len_bp: np.ndarray) -> np.ndarray:
+    """Per-side **one-sided crossing** density effective length ``E_f[min(ℓ, R)² / (2ℓ)]``.
+
+    A *spliced* fragment crosses a junction on **one side only** — its exon flank is credited; the intron
+    flank is never touched (an intron region carries no slice). Under a uniform mature density ``ρ`` the
+    one-sided deposited mass is ``Σ_{a=1}^{min(ℓ,R)} (a/ℓ) ≈ min(ℓ,R)²/(2ℓ)`` (a **half-triangle**: the exon
+    coverage ``a`` ranges ``0→min(ℓ,R)`` and its mass share ``a/ℓ`` is linear in ``a``), so the divisor that
+    recovers ``ρ`` is ``E_f[min(ℓ,R)²/(2ℓ)]``. For ``R ≫ support`` this → ``fl_mean/2`` — exactly HALF the
+    two-sided crossing measure ``boundary_side_eff_length`` (``E[min(ℓ,R)]``). Dividing a one-sided spliced
+    mass by the two-sided measure (as a contiguous gDNA/nascent crossing is) understates the mature density
+    ~2×; this is the correct one-sided divisor.
+
+    Split ``min(ℓ,R)²/(2ℓ) = ℓ/2`` for ``ℓ ≤ R`` and ``= R²/(2ℓ)`` for ``ℓ > R``; the ``ℓ=0`` term is 0.
+    """
+    p = _as_pmf(fl_pmf)
+    n = p.shape[0]
+    ell = np.arange(n, dtype=np.float64)
+    cum_lf = np.cumsum(ell * p)  # S(R) = Σ_{ℓ≤R} ℓ f(ℓ)
+    inv_ell = np.zeros(n, dtype=np.float64)
+    np.divide(p, ell, out=inv_ell, where=ell > 0)  # f(ℓ)/ℓ, 0 at ℓ=0
+    cum_g = np.cumsum(inv_ell)  # H(R) = Σ_{1≤ℓ≤R} f(ℓ)/ℓ
+    h_total = cum_g[-1]
+
+    R = np.asarray(region_side_len_bp, dtype=np.float64)
+    idx = np.clip(np.floor(R).astype(np.int64), 0, n - 1)
+    eff = 0.5 * cum_lf[idx] + 0.5 * R * R * (h_total - cum_g[idx])
     return np.maximum(eff, 0.0)
