@@ -927,6 +927,21 @@ def _message(rho_src, eff_src, eff_dst, mass_dst, rho_dst_cur, varmean, var_own_
     return mode, (k * k) / v_msg
 
 
+def _message_vec(rho_src, eff_src, eff_dst, mass_dst, rho_dst_cur, varmean, var_own_src, spliced_dst):
+    """Vectorized :func:`_message` — array inputs (one entry per chain node), array ``(mode, prec)`` outputs.
+    Identical math to the scalar version; the per-node Python sweep is replaced by ONE batched call (the Jacobi
+    update), so ``varmean.predict`` + the lattice solve run once over ALL nodes, not m times (the perf win)."""
+    eff_src = np.maximum(eff_src, _EPS)
+    eff_dst = np.maximum(eff_dst, _EPS)
+    mode = (rho_src * eff_dst - spliced_dst) / np.maximum(mass_dst, _EPS)
+    mu_q = np.maximum(0.5 * (rho_src + rho_dst_cur), _EPS)
+    sigma2_bio = np.asarray(varmean.predict(mu_q), dtype=np.float64)
+    pois = (rho_src + _MSG_PSEUDOCOUNT / eff_src) / eff_src
+    v_msg = np.maximum(var_own_src + sigma2_bio + pois, _EPS)
+    k = mass_dst / eff_dst
+    return mode, (k * k) / v_msg
+
+
 def node_sweep(
     chain: NodeChain,
     statics: NodeStatics,
@@ -973,7 +988,6 @@ def node_sweep(
     per-outer-iteration max-Δf_g of the converged belief — the convergence diagnostic)."""
     left = np.asarray(chain.left)
     right = np.asarray(chain.right)
-    order = np.asarray(chain.order)
     kind = np.asarray(chain.kind)
     is_reg = kind == REGION
     fp, fn = statics.free_pos, statics.free_neg
@@ -1003,7 +1017,8 @@ def node_sweep(
     od_g, od_r = gdna_strand_overdispersion, rna_strand_overdispersion
     solvable = (fp | fn) & (statics.mass_unspliced > 0.0)
 
-    # A valid MESSAGE SOURCE emits one of two kinds of evidence toward its facing side:
+    # A valid MESSAGE SOURCE emits one of two kinds of evidence toward its facing side (both per-component below
+    # in the Jacobi `_dir`):
     #   * gDNA / nascent — requires UNSPLICED facing mass AND SOLVABILITY: an unsolved node (a G1 gDNA-sink —
     #     intergenic / TES, fp=fn=False) keeps its signature-binary init {0,0,1} and carries no gDNA EVIDENCE,
     #     only a prior default; its (assumed) gDNA level is carried by the global, so it must not ALSO emit a
@@ -1013,14 +1028,8 @@ def node_sweep(
     #     impute mature RNA onto its adjacent exon even with ZERO unspliced crossing. Without this, in a
     #     low-nascent library ~all junction boundaries (unspliced≈0 ⇒ not solvable) are wrongly treated as
     #     empty, the mature signal is stranded there, and single-strand exons fall to the message-less intrinsic
-    #     solve ⇒ phantom gDNA (the spliced-imputation blockage).
-    # spl_face[f] = total spliced mass on face f (both strands); the per-strand SP/SN gate each RNA axis below.
-    spl_face = (SP[0] + SN[0], SP[1] + SN[1])
-    li = np.where(left >= 0, left, 0)
-    ri = np.where(right >= 0, right, 0)
-    lv = (left >= 0) & (((MS[1][li] > _EPS) & solvable[li]) | (spl_face[1][li] > _EPS))
-    rv = (right >= 0) & (((MS[0][ri] > _EPS) & solvable[ri]) | (spl_face[0][ri] > _EPS))
-    has_msg_nbr = lv | rv
+    #     solve ⇒ phantom gDNA (the spliced-imputation blockage). A node with NO neighbour message gets the
+    #     intrinsic solve for free — the batched solve runs with prec=0 there (strand + global only).
 
     # BOOTSTRAP (outer-iteration-0 var~mean). The population gDNA prior on gDNA-clean seeds (§4.3): the
     # exposure-pooled rate ρ_global (the ANCHORED global baseline — never refit) + var_mean (its variance) +
@@ -1055,111 +1064,85 @@ def node_sweep(
 
     global_lp = _global_lp(gdna_vm)
 
-    def _solve(i, mode_g, prec_g, mode_p, prec_p, mode_n, prec_n):
-        psi = _local_loglik(
-            statics.u_pos[i : i + 1],
-            statics.u_neg[i : i + 1],
-            statics.spliced_pos[i : i + 1],
-            statics.spliced_neg[i : i + 1],
-            fp[i : i + 1],
-            fn[i : i + 1],
-            kappa,
-            od_g,
-            od_r,
-            lattice,
-            strand_obs=statics.strand_obs[i : i + 1],
-            global_logprior=global_lp[i : i + 1],
-            gdna_imp_mode=np.array([mode_g]),
-            gdna_imp_prec=np.array([prec_g]),
-            rna_imp_mode=(np.array([mode_p]), np.array([mode_n])),
-            rna_imp_prec=(np.array([prec_p]), np.array([prec_n])),
-        )
-        f_g[i] = float(np.clip(_fg_median(psi, fgg)[0], 0.0, 1.0))
-        f_pos[i] = float(np.clip(_axis_mean(psi, fpg)[0], 0.0, 1.0))
-        f_neg[i] = float(np.clip(_axis_mean(psi, fng)[0], 0.0, 1.0))
-        # precision state — moment-matched per-component variance (Phase 1: stored, not yet consumed).
-        var_g[i] = float(_fg_var(psi, fgg)[0])
-        var_pos[i] = float(_fg_var(psi, fpg)[0])
-        var_neg[i] = float(_fg_var(psi, fng)[0])
-
     outer_deltas = []
     prev_outer = None
     for _outer in range(int(max_outer)):
-        # INNER LOOP — converge the beliefs at FIXED var~mean (rna_vm, gdna_vm, global_lp). No refit here:
-        # entangling it made a moving precision target (a measured limit cycle). At fixed var~mean the sweep
-        # settles (measured: ~8-12 passes).
+        # INNER LOOP — converge the beliefs at FIXED var~mean (rna_vm, gdna_vm, global_lp). JACOBI: every node is
+        # updated from the FROZEN pass-start state, so all per-node lattice solves BATCH into one `_local_loglik`
+        # call (the perf win — GS's in-place sequential update forbade batching), and each node integrates BOTH
+        # neighbours at once (no alternating-overwrite flip-flop — the FB substrate). No refit here: entangling it
+        # made a moving precision target (a measured limit cycle); at fixed var~mean the sweep settles.
         for _pass in range(int(max_passes)):
             snap = node_densities(NodeBelief(f_pos, f_neg, f_g, var_pos, var_neg, var_g), geometry)
             SNG = (snap.rho_g_left, snap.rho_g_right)
             SNP = (snap.rho_pos_left, snap.rho_pos_right)
             SNN = (snap.rho_neg_left, snap.rho_neg_right)
             prev = (f_g.copy(), f_pos.copy(), f_neg.copy())
-            # df = the dst's face toward its sweep-direction neighbour; sf = the src's face toward the dst.
-            for nbr_arr, df, sf in (
-                (left, 0, 1),
-                (right, 1, 0),
-            ):  # L→R (from left) then R→L (from right)
-                for i in order if df == 0 else order[::-1]:
-                    if not solvable[i]:
-                        continue
-                    src = nbr_arr[i]
-                    if src < 0:
-                        continue  # reference terminal — no neighbour this direction
-                    # A source emits a gDNA/nascent message only with UNSPLICED facing mass AND solvability
-                    # (an unsolved gDNA-sink must not propagate phantom gDNA). It emits a MATURE message wherever
-                    # it owns spliced facing mass — a fixed floor needing no solve (the previously-blocked
-                    # mature imputation). Skip only a source with NEITHER kind of evidence toward this node.
-                    unspl_src = solvable[src] and MS[sf][src] > _EPS
-                    spl_p, spl_n = SP[sf][src], SN[sf][src]
-                    if not unspl_src and spl_p <= _EPS and spl_n <= _EPS:
-                        continue
-                    s_mass = MS[sf][src] if unspl_src else 0.0
-                    # gDNA message (genomic; spliced_dst=0) → (mode, prec) density-Gaussian. Only from a solvable
-                    # source with unspliced mass; its own density uncertainty Var_own,g = (M_src/E_src)²·Var(f_g)
-                    # is blended into prec, so an uncertain source emits a weak message (precision_state_design §3-4).
-                    mode_g = prec_g = 0.0
-                    if unspl_src:
-                        eg_src = max(EG[sf][src], _EPS)
-                        rho_g_src = f_g[src] * s_mass / eg_src
-                        var_own_g = (s_mass / eg_src) ** 2 * var_g[src]
-                        mode_g, prec_g = _message(
-                            rho_g_src, EG[sf][src], EG[df][i], MS[df][i], SNG[df][i], gdna_vm, var_own_g
-                        )
-                    # per-strand RNA messages, gated by free_s on BOTH endpoints; the density is the nascent
-                    # (f_s·s_mass, present only when unspl_src) PLUS the one-sided spliced/mature floor spl_s
-                    # (present whenever the boundary owns spliced on strand s). prec=0 ⇒ no message.
-                    # The source RNA density combines NASCENT (f_s·s_mass over the two-sided eff_rna — a
-                    # contiguous crossing) and the one-sided spliced/MATURE floor (spl_s over the half-triangle
-                    # eff_spl). They use DIFFERENT crossing geometry; sharing eff_rna would understate the
-                    # mature ~2×. spliced_dst (the dest's own spliced) is subtracted in _message as free info.
-                    mode_p = prec_p = mode_n = prec_n = 0.0
-                    er_src = max(ER[sf][src], _EPS)
-                    esp_src = max(ESP[sf][src], _EPS)
-                    if fp[i] and fp[src] and (s_mass > _EPS or spl_p > _EPS):
-                        rho_p_src = f_pos[src] * s_mass / er_src + spl_p / esp_src
-                        # own-variance is the source's UNSPLICED-belief uncertainty; a pure-spliced source
-                        # (s_mass=0) contributes none here (its sampling floor enters via `pois` in _message) —
-                        # guard the 0·inf (an unsolved source carries var=inf) that would NaN the message.
-                        var_own_p = (s_mass / er_src) ** 2 * var_pos[src] if s_mass > _EPS else 0.0
-                        mode_p, prec_p = _message(
-                            rho_p_src, er_src, ER[df][i], MS[df][i], SNP[df][i], rna_vm, var_own_p, SP[df][i]
-                        )
-                    if fn[i] and fn[src] and (s_mass > _EPS or spl_n > _EPS):
-                        rho_n_src = f_neg[src] * s_mass / er_src + spl_n / esp_src
-                        var_own_n = (s_mass / er_src) ** 2 * var_neg[src] if s_mass > _EPS else 0.0
-                        mode_n, prec_n = _message(
-                            rho_n_src, er_src, ER[df][i], MS[df][i], SNN[df][i], rna_vm, var_own_n, SN[df][i]
-                        )
-                    _solve(i, mode_g, prec_g, mode_p, prec_p, mode_n, prec_n)
-            # Intrinsic solve for solvable nodes with NO message neighbour. The directional loop only reaches
-            # _solve after building a neighbour message, so a node whose both neighbours are empty is never
-            # solved and keeps its signature-binary init (AMBIG → f_g=1) — a phantom-gDNA sink in libraries
-            # where its flanks carry no crossing fragments. Solve it on its OWN intrinsic evidence (the strand
-            # likelihood + global prior + Jeffreys; zero messages). has_msg_nbr is the exact complement, so this
-            # never double-solves.
-            for i in order:
-                if solvable[i] and not has_msg_nbr[i]:
-                    _solve(i, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+            def _dir(nbr, sf, df):
+                """Vectorized per-component message from each node's ``nbr`` neighbour (src face ``sf`` → dst
+                face ``df``) — the per-node message build, batched; ``prec=0`` where a component has no message.
+                Same evidence rule as the scalar path: gDNA/nascent need a SOLVABLE unspliced source; the
+                one-sided spliced/MATURE floor (``spl_s`` over the half-triangle ``ESP``) rides any source that
+                owns it. Sources read the FROZEN pass-start belief (Jacobi)."""
+                valid = nbr >= 0
+                src = np.where(valid, nbr, 0)
+                unspl = valid & solvable[src] & (MS[sf][src] > _EPS)  # solvable unspliced source
+                s_mass = np.where(unspl, MS[sf][src], 0.0)
+                spl_p = np.where(valid, SP[sf][src], 0.0)
+                spl_n = np.where(valid, SN[sf][src], 0.0)
+                eg_s = np.maximum(EG[sf][src], _EPS)
+                er_s = np.maximum(ER[sf][src], _EPS)
+                esp_s = np.maximum(ESP[sf][src], _EPS)
+                # gDNA — solvable unspliced source only; var_own = (M/E)²·Var(f_g_src) (the source humility).
+                rho_g = np.where(unspl, f_g[src] * s_mass / eg_s, 0.0)
+                var_own_g = (s_mass / eg_s) ** 2 * np.where(unspl, var_g[src], 0.0)
+                mg, pg = _message_vec(rho_g, eg_s, EG[df], MS[df], SNG[df], gdna_vm, var_own_g, 0.0)
+                pg = np.where(unspl, pg, 0.0)
+                # per-strand RNA — nascent (f_s·s_mass/eff_rna, two-sided crossing) + one-sided spliced/MATURE
+                # floor (spl_s/eff_spl half-triangle); gated by free_s on both endpoints AND some evidence.
+                # var_own only from the nascent part (a pure-spliced source contributes none; its floor enters
+                # via `pois`). The 0·Var(s_mass=0) guard keeps an unsolved source's inf var out of the product.
+                em_p = valid & fp & fp[src] & ((s_mass > _EPS) | (spl_p > _EPS))
+                rho_p = f_pos[src] * s_mass / er_s + spl_p / esp_s
+                var_own_p = (s_mass / er_s) ** 2 * np.where(s_mass > _EPS, var_pos[src], 0.0)
+                mp, pp = _message_vec(rho_p, er_s, ER[df], MS[df], SNP[df], rna_vm, var_own_p, SP[df])
+                pp = np.where(em_p, pp, 0.0)
+                em_n = valid & fn & fn[src] & ((s_mass > _EPS) | (spl_n > _EPS))
+                rho_n = f_neg[src] * s_mass / er_s + spl_n / esp_s
+                var_own_n = (s_mass / er_s) ** 2 * np.where(s_mass > _EPS, var_neg[src], 0.0)
+                mn, pn = _message_vec(rho_n, er_s, ER[df], MS[df], SNN[df], rna_vm, var_own_n, SN[df])
+                pn = np.where(em_n, pn, 0.0)
+                return mg, pg, mp, pp, mn, pn
+
+            ml = _dir(left, 1, 0)   # from LEFT neighbour:  src right face → dst left face
+            mr = _dir(right, 0, 1)  # from RIGHT neighbour: src left  face → dst right face
+
+            def _comb(a, b):  # precision-weighted product of the two neighbour Gaussians per component
+                pc = a[1] + b[1]
+                mc = np.where(pc > _EPS, (a[1] * a[0] + b[1] * b[0]) / np.maximum(pc, _EPS), 0.0)
+                return mc, pc
+
+            mode_g, prec_g = _comb((ml[0], ml[1]), (mr[0], mr[1]))
+            mode_p, prec_p = _comb((ml[2], ml[3]), (mr[2], mr[3]))
+            mode_n, prec_n = _comb((ml[4], ml[5]), (mr[4], mr[5]))
+
+            # ONE batched lattice solve over ALL nodes (the perf win). A node with no neighbour message
+            # (both prec=0) is solved on its own strand+global evidence — the intrinsic solve folds in here.
+            psi = _local_loglik(
+                statics.u_pos, statics.u_neg, statics.spliced_pos, statics.spliced_neg,
+                fp, fn, kappa, od_g, od_r, lattice,
+                strand_obs=statics.strand_obs, global_logprior=global_lp,
+                gdna_imp_mode=mode_g, gdna_imp_prec=prec_g,
+                rna_imp_mode=(mode_p, mode_n), rna_imp_prec=(prec_p, prec_n),
+            )
+            # write back only SOLVABLE nodes (G1 sinks / empty keep their signature-binary init).
+            f_g = np.where(solvable, np.clip(_fg_median(psi, fgg), 0.0, 1.0), f_g)
+            f_pos = np.where(solvable, np.clip(_axis_mean(psi, fpg), 0.0, 1.0), f_pos)
+            f_neg = np.where(solvable, np.clip(_axis_mean(psi, fng), 0.0, 1.0), f_neg)
+            var_g = np.where(solvable, _fg_var(psi, fgg), var_g)
+            var_pos = np.where(solvable, _fg_var(psi, fpg), var_pos)
+            var_neg = np.where(solvable, _fg_var(psi, fng), var_neg)
             if max(
                 (float(np.max(np.abs(cur - p))) if cur.size else 0.0)
                 for cur, p in ((f_g, prev[0]), (f_pos, prev[1]), (f_neg, prev[2]))
