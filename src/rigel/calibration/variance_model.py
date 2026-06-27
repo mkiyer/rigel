@@ -28,7 +28,7 @@ import pandas as pd
 from scipy.interpolate import BSpline
 from scipy.optimize import minimize
 
-__all__ = ["MonotoneVarMean", "MonotoneMean"]
+__all__ = ["MonotoneVarMean", "MonotoneMean", "BlendedVarMean"]
 
 
 _EPS = 1.0e-12
@@ -90,6 +90,49 @@ def _select_lambda(B: np.ndarray, y: np.ndarray, P: np.ndarray, n: int, n_lambda
     return best[1], best[2]
 
 
+def _slope_evidence_weight(B: np.ndarray, y: np.ndarray, P: np.ndarray, lam: float, edf: float, n: int) -> float:
+    """The CONTINUOUS evidence weight ``w ∈ [0, 1]`` that the fitted spline explains ``y`` BEYOND chance —
+    the data-derived shrinkage of the learned mean toward the flat (intercept-only) model: ``ê_eff = w·ê +
+    (1−w)·flat``. ``w → 1`` under a real ``x→y`` relationship (apply the fit), ``w → 0`` under none (collapse
+    to flat). It replaces the binary permutation significance gate with a smooth function of the fit's OWN
+    evidence, so one uniform path handles enriched and non-enriched data alike — the fit self-collapsing where
+    ``x`` carries no signal.
+
+    **Empirical-Bayes posterior weight.** Treat the flat (intercept-only) model H0 and the GCV-fitted spline
+    H1 as two competing hypotheses with EQUAL prior odds; ``w`` is the posterior probability of the sloped
+    model — the textbook ``w = ev(H1) / (ev(H1) + ev(H0))``. With the Schwarz (unit-information) prior, the
+    log model-evidence is the BIC, so the log evidence-ratio is
+
+        ΔBIC = n·log(RSS_flat / RSS_spline) − (edf − 1)·log n,        w = σ(½·ΔBIC) = ev1 / (ev1 + ev0),
+
+    where ``RSS_spline`` is the residual SS of the penalized fit at the GCV-selected ``λ`` (the fit's own
+    out-of-sample prediction-error surrogate, the GCV score's numerator) and ``RSS_flat`` that of the
+    intercept-only model. The first term is the deviance the spline buys (the data evidence ``log RSS_flat /
+    RSS_spline``, ``→ 0`` exactly when **flat fits as well as sloped** ⇒ ``w → 0``); the second is the Occam
+    penalty for the ``edf − 1`` extra dof the spline spends — without it a microscopic chance slope at large
+    ``n`` would be promoted (the directive's large-``n`` failure mode). Every quantity comes from the GCV fit
+    (``RSS`` from the penalized β, ``edf`` the effective dof, ``n`` the fit-node count); no new constant —
+    the ``log n`` penalty is the Schwarz prior's, not a tuned threshold.
+
+    Behaviour: real enrichment drives ``RSS_flat ≫ RSS_spline`` ⇒ ``ΔBIC ≫ 0`` ⇒ ``w → 1`` regardless of
+    effect SIZE (a noisy-but-real enrichment, e.g. unstranded capture, is still applied fully — the posterior
+    SATURATES, unlike an effect-size weight); uniform gDNA gives ``RSS_flat ≈ RSS_spline`` and the Occam term
+    drives ``ΔBIC < 0`` ⇒ ``w → 0``, recovering the byte-flat global where the GCV spline can hallucinate a
+    faint slope."""
+    BtB = B.T @ B
+    A = BtB + lam * P
+    try:
+        beta = np.linalg.solve(A, B.T @ y)
+    except np.linalg.LinAlgError:
+        return 0.0
+    rss_spline = float(np.sum((y - B @ beta) ** 2))
+    rss_flat = float(np.sum((y - float(np.mean(y))) ** 2))
+    df1 = max(edf - 1.0, _EPS)  # the spline's extra dof over the flat (intercept-only) model
+    # log Bayes factor (Schwarz / unit-information prior): the deviance the spline buys minus its Occam penalty.
+    log_bf = 0.5 * n * np.log(max(rss_flat, _EPS) / max(rss_spline, _EPS)) - 0.5 * df1 * np.log(max(float(n), 2.0))
+    return float(1.0 / (1.0 + np.exp(-np.clip(log_bf, -700.0, 700.0))))
+
+
 @dataclass(frozen=True, slots=True)
 class MonotoneVarMean:
     """A fitted monotone-increasing ``σ²_bio(mean)`` curve (the Poisson-offset fit, :meth:`fit_offset`).
@@ -118,6 +161,7 @@ class MonotoneVarMean:
         degree: int = _DEFAULT_DEGREE,
         robust_iters: int = 2,
         n_lambda: int = 40,
+        population_spread: bool = False,
     ) -> "MonotoneVarMean":
         """Fit the **biological dispersion** ``σ²_bio(μ) ≥ 0`` from a Poisson-OFFSET decomposition
         (``imputation_variance_model.md`` §3): the observed squared residual ``raw = (ρ_dst − ρ_src)²`` has
@@ -132,11 +176,28 @@ class MonotoneVarMean:
         mean²) make the low-μ regime — where the offset dominates — count, plus bisquare robustness. The
         count re-enters at APPLY as ``τ = 1/(σ²_bio(μ) + ρ_src/L_src)`` (the second §0 count→precision
         channel), NOT here.
+
+        ``population_spread`` switches the estimand from the **reliability-weighted MEDIAN** squared
+        residual (the default, for the message σ²_g where the Poisson-offset reliability genuinely down-
+        weights thin-count edges) to the **unweighted conditional MEAN** ``E[z | log μ]`` — the unbiased
+        population CV⁻² that a per-node *hyperprior* needs (a node's predictive density spread is one
+        population draw, so every node counts equally). It drops (a) the heteroskedastic ``1/(σ²+V_p)²``
+        IRLS reweight — the response is *already* a variance, so down-weighting its heavy χ²₁ upper tail
+        discards the very signal being estimated; and (b) the bisquare ``robust_iters`` — same reason; and
+        (c) the supplied reliability ``weight`` (the eff-length weight systematically excludes the short /
+        variable nodes whose mis-prediction *is* the between-node spread). Used by the enrichment-aware
+        global σ²_bio fit and the symmetric RNA-message σ²_bio fit (which sets the cross-regime AMBIG
+        message precision); the gDNA message + seed fits keep the default. No new constant — it only
+        changes which statistic of the existing ``z = raw − offset`` is fitted.
         """
         mean = np.asarray(mean, dtype=np.float64)
         raw = np.asarray(raw, dtype=np.float64)
         off = np.asarray(offset, dtype=np.float64)
-        wt = np.ones_like(off) if weight is None else np.asarray(weight, dtype=np.float64)
+        if population_spread:
+            wt = np.ones_like(off)  # the conditional-MEAN estimand counts every node equally (no eff-len weight)
+            robust_iters = 0        # the χ²₁ upper tail IS the spread — never rejected as an outlier
+        else:
+            wt = np.ones_like(off) if weight is None else np.asarray(weight, dtype=np.float64)
         ok = (
             np.isfinite(mean) & (mean > _EPS)
             & np.isfinite(raw) & (raw >= 0.0)
@@ -161,7 +222,9 @@ class MonotoneVarMean:
         total = np.maximum(off, _EPS)
         coeffs = None
         for it in range(robust_iters + 1):
-            w = wt / np.maximum(total, _EPS) ** 2  # sample weight × heteroskedastic 1/total²
+            # population-spread: w = wt (uniform) — the response z is already a variance, so the
+            # heteroskedastic 1/total² (which pins the fit to the offset-dominated low-μ tail) is dropped.
+            w = wt if population_spread else wt / np.maximum(total, _EPS) ** 2
             if it > 0:
                 r = (z - B @ coeffs) * np.sqrt(w)
                 s_mad = 1.4826 * float(np.median(np.abs(r - np.median(r)))) + _EPS
@@ -225,6 +288,27 @@ class MonotoneVarMean:
 
 
 @dataclass(frozen=True, slots=True)
+class BlendedVarMean:
+    """A convex blend ``w·hi + (1−w)·lo`` of two fitted ``σ²_bio(mean)`` curves, evaluated at predict time.
+    Used for the RNA-message reliability: ``hi`` is the population-CONDITIONAL-MEAN fit (the unbiased
+    hyperprior estimand that capture needs), ``lo`` the reliability-weighted-MEDIAN fit (correct off-capture);
+    the SAME continuous evidence weight ``w`` that shrinks the enrichment transfer also selects between the two
+    estimands — ``w → 1`` under capture (the mean), ``w → 0`` off-capture (the median) — so there is no
+    population_spread flag and no capture detector, just the one uniform path."""
+
+    hi: "MonotoneVarMean"
+    lo: "MonotoneVarMean"
+    w: float
+
+    def predict(self, mean: np.ndarray) -> np.ndarray:
+        if self.w >= 1.0 - _EPS:
+            return self.hi.predict(mean)
+        if self.w <= _EPS:
+            return self.lo.predict(mean)
+        return self.w * self.hi.predict(mean) + (1.0 - self.w) * self.lo.predict(mean)
+
+
+@dataclass(frozen=True, slots=True)
 class MonotoneMean:
     """A fitted monotone-increasing **conditional MEAN** ``ê(x) = E[y | x]`` — the enrichment transfer
     ``ê(z) = E[ρ_g | z]`` of the enrichment-aware calibration design (``enrichment_aware_calibration.md`` §J).
@@ -249,6 +333,7 @@ class MonotoneMean:
     fit_y: np.ndarray
     edf: float
     lam: float
+    w_enrich: float  # the continuous slope-evidence weight (:func:`_slope_evidence_weight`); 0 for a flat fit
 
     @classmethod
     def fit(
@@ -284,6 +369,9 @@ class MonotoneMean:
             return cls._constant(x, y, w, rw, degree)
         kn, B, P, x_lo, x_hi = _setup_spline(lx, k, degree)
         lam, edf = _select_lambda(B, ly, P, x.size, n_lambda)
+        # the continuous slope-evidence weight on the SAME GCV fit (the EB sloped-vs-flat posterior) — the
+        # data-derived shrinkage that replaces the binary significance gate (the caller blends ê toward flat by this w).
+        w_enrich = _slope_evidence_weight(B, ly, P, lam, edf, x.size)
 
         coeffs = None
         for it in range(robust_iters + 1):
@@ -300,7 +388,7 @@ class MonotoneMean:
         scale = float(np.sum(rw * y) / max(float(np.sum(rw * yhat)), _EPS))
         return cls(
             knots=kn, degree=degree, coeffs=coeffs, x_lo=x_lo, x_hi=x_hi, scale=scale,
-            fit_x=x, fit_y=y, edf=float(edf), lam=float(lam),
+            fit_x=x, fit_y=y, edf=float(edf), lam=float(lam), w_enrich=float(w_enrich),
         )
 
     @classmethod
@@ -317,7 +405,7 @@ class MonotoneMean:
         coeffs = np.zeros(kn.size - degree - 1)  # exp(0)=1 ⇒ predict = scale (flat)
         return cls(
             knots=kn, degree=degree, coeffs=coeffs, x_lo=x_lo, x_hi=x_hi, scale=c,
-            fit_x=x, fit_y=y, edf=1.0, lam=np.inf,
+            fit_x=x, fit_y=y, edf=1.0, lam=np.inf, w_enrich=0.0,  # a flat fallback carries no slope evidence
         )
 
     @classmethod
@@ -331,6 +419,7 @@ class MonotoneMean:
         return cls(
             knots=kn, degree=_DEFAULT_DEGREE, coeffs=coeffs, x_lo=x_lo, x_hi=x_hi,
             scale=float(max(value, 0.0)), fit_x=np.zeros(0), fit_y=np.zeros(0), edf=1.0, lam=np.inf,
+            w_enrich=0.0,  # the explicit flat ρ_global transfer — no enrichment evidence
         )
 
     def predict(self, x: np.ndarray) -> np.ndarray:

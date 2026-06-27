@@ -53,7 +53,7 @@ from .simplex_sweep import (
     _solve_nodes,
 )
 from .strand_deconv import NodeDeconv
-from .variance_model import MonotoneMean, MonotoneVarMean
+from .variance_model import BlendedVarMean, MonotoneMean, MonotoneVarMean
 
 __all__ = [
     "NodeGeometry",
@@ -545,9 +545,11 @@ def _edge_varmean(chain, rho_left, rho_right, eff_left, eff_right, live):
     return means, raws, offs
 
 
-def _fit_offset(means, raws, offs):
+def _fit_offset(means, raws, offs, *, population_spread: bool = False):
     cat = lambda parts: np.concatenate(parts) if parts else np.zeros(0)  # noqa: E731
-    return MonotoneVarMean.fit_offset(cat(means), cat(raws), cat(offs))
+    return MonotoneVarMean.fit_offset(
+        cat(means), cat(raws), cat(offs), population_spread=population_spread
+    )
 
 
 _EXON_BITS = BIT_EXON_POS | BIT_EXON_NEG
@@ -658,23 +660,8 @@ def _fit_seed_varmean(chain, dens, eff, is_seed, seed_w):
     return MonotoneVarMean.fit_offset(cat(means), cat(raws), cat(offs), cat(wts))
 
 
-def _loglog_r2(z, y):
-    """log-log fit R² of ``y`` on ``z`` (both > 0) — the z→ρ_g signal statistic for the significance gate."""
-    z = np.asarray(z, float)
-    y = np.asarray(y, float)
-    ok = (z > 0.0) & (y > 0.0) & np.isfinite(z) & np.isfinite(y)
-    if int(ok.sum()) < 4:
-        return 0.0
-    lx, ly = np.log(z[ok]), np.log(y[ok])
-    X = np.vstack([np.ones_like(lx), lx]).T
-    cf, *_ = np.linalg.lstsq(X, ly, rcond=None)
-    sstot = float(np.sum((ly - ly.mean()) ** 2))
-    return 1.0 - float(np.sum((ly - X @ cf) ** 2)) / max(sstot, _EPS)
-
-
 def fit_enrichment_transfer(
     chain, statics, geometry, region_arrays, boundary_substrate, f_g_init, kappa, rho_global,
-    *, n_perm: int = 200, sig_quantile: float = 0.95,
 ):
     """The per-REGION enrichment transfer ``ê(z) = E[ρ_g | z]`` + its conditional reliability ``σ²_bio(level)``
     (``enrichment_aware_calibration.md`` §J, Phase 2). Fit ONCE pre-loop on the strand-ONLY init ``f_g`` (the
@@ -692,11 +679,13 @@ def fit_enrichment_transfer(
     strand-immune, weight ``1−(2κ−1)²``; Part III). κ→1 ⇒ strand; κ→½ ⇒ spliced (the unstranded path); a node
     uses the spliced term only where spliced is present at its flanking clean boundary.
 
-    A **permutation significance gate** (real log-log R² vs the shuffled-``z`` null) collapses ``ê`` to the flat
-    ``ρ_global`` when there is no ``z→ρ_g`` signal (off-capture / uniform gDNA) — capture is DETECTED, not
-    flagged, and the layer reduces exactly to the genome-wide global. Returns
-    ``(ehat: MonotoneMean, z: (n_nodes,) float [NaN where unusable], sigma2_level: MonotoneVarMean | None,
-    significant: bool)``."""
+    **One uniform path — no capture detector.** The fit returns a CONTINUOUS evidence weight ``w ∈ [0, 1]`` =
+    ``ehat.w_enrich`` (the empirical-Bayes sloped-vs-flat posterior weight, :func:`variance_model._slope_evidence_weight`); the
+    caller blends ``ê_eff(z) = w·ê(z) + (1−w)·ρ_global`` (and the matching σ²_prior). Under real enrichment
+    ``w → 1`` (apply the fit); off-capture / uniform gDNA the GCV spline carries no slope-evidence so ``w → 0``
+    and the layer reduces EXACTLY to the genome-wide global — the same code on every condition, the fit
+    self-collapsing, no permutation gate. Returns ``(ehat: MonotoneMean, z: (n_nodes,) float [NaN where
+    unusable], sigma2_level: MonotoneVarMean | None, w: float)``."""
     kind = np.asarray(chain.kind)
     is_reg = kind == REGION
     is_bnd = kind == BOUNDARY
@@ -740,7 +729,7 @@ def fit_enrichment_transfer(
     ss_exon = is_reg & (node_rtype == 2) & strand_obs & (Ml > 0.0) & np.isfinite(z)
     fi = np.where(ss_exon)[0]
     if fi.size == 0:
-        return flat, z, None, False
+        return flat, z, None, 0.0
 
     # ---- the ê-fit RESPONSE ρ_g: a reliability-weighted BLEND of two estimators (Part III) ----
     # STRAND-derived (ρ_g=f_g_init·T) is gDNA-accurate when κ→1 but collapses to ~0.5·T as κ→½. SPLICED-derived
@@ -783,44 +772,57 @@ def fit_enrichment_transfer(
     w_fit = denom * eff  # per-node total reliability × E (E stabilizes + nets; 0 → excluded)
     fi, zf, rho_g, eff, w_fit = fi[keep], z[fi][keep], rho_g[keep], eff[keep], w_fit[keep]
     if fi.size == 0:
-        return flat, z, None, False
+        return flat, z, None, 0.0
 
     ehat = MonotoneMean.fit(zf, rho_g, weight=w_fit, recal_weight=eff)
     # A DEGENERATE fit (too few points for the spline basis ⇒ MonotoneMean falls back to a flat constant,
-    # marked lam=inf) has no enrichment structure AND makes the permutation test unreliable (M-9). Treat it as
-    # not-significant ⇒ flat ρ_global. This ties the min-data guard to the spline's OWN basis floor (no new
-    # magic number) — small synthetic scenarios stay byte-identical to the genome-wide global.
+    # marked lam=inf) has no enrichment structure — its slope-evidence weight is already 0, but short out
+    # explicitly so small synthetic scenarios stay byte-identical to the genome-wide global (w=0 ⇒ flat).
     if not np.isfinite(ehat.lam):
-        return flat, z, None, False
-    # significance: real log-log R² vs the permutation null (shuffle z among the fit nodes; seeded → deterministic)
-    rng = np.random.default_rng(0)
-    real_r2 = _loglog_r2(zf, rho_g)
-    null = np.array([_loglog_r2(rng.permutation(zf), rho_g) for _ in range(int(n_perm))])
-    if real_r2 <= float(np.quantile(null, sig_quantile)):
-        return flat, z, None, False  # no enrichment signal → flat ρ_global (off-capture collapse)
+        return flat, z, None, 0.0
+    # the CONTINUOUS evidence weight (the EB sloped-vs-flat posterior, computed on the SAME GCV fit). w → 1
+    # under real enrichment, w → 0 in uniform gDNA — the smooth replacement for the binary permutation gate.
+    w = float(ehat.w_enrich)
 
     pred = ehat.predict(zf)
     raw = (rho_g - pred) ** 2                    # residual around the LEARNED mean (not the identity)
     offset = rho_g / np.maximum(eff, _EPS)       # the node's own density Poisson sampling floor
-    sigma2_level = MonotoneVarMean.fit_offset(pred, raw, offset, w_fit)  # σ²_bio as a function of ê(z) level
-    return ehat, z, sigma2_level, True
+    # σ²_bio as a function of the ê(z) level — the GLOBAL prior's between-node spread. Fit it as the
+    # unbiased conditional MEAN squared residual (population_spread): the pseudo-count N = ρ̂²/(σ²_bio+pois)
+    # is a population CV⁻² hyperprior, so it needs the predictive variance of ONE node's density around ê(z) —
+    # the conditional mean of the squared residual, not the eff-length-weighted Poisson-reliability median.
+    # The median collapses σ²_bio to ~1.3 (the offset-dominated low-μ edges dominate the heteroskedastic
+    # weight, and the high-residual short exons that ARE the spread are eff-weighted out), making N≈90-200 — a
+    # global so confident it overrules even a strand-confident single-strand exon. The mean recovers the honest
+    # σ²_bio (~the genuine population spread under capture) ⇒ N≈2, the gentle hyperprior the design intends.
+    # The conditional MEAN is the correct variance estimand regardless of capture (no flag); the w-blend in
+    # the caller collapses the WHOLE enrichment contribution (μ and N) toward the flat global off-capture.
+    sigma2_level = MonotoneVarMean.fit_offset(pred, raw, offset, w_fit, population_spread=True)
+    return ehat, z, sigma2_level, w
 
 
 def _global_logprior(
     fgg, mass_global, eff_global, rho_global, sigma2_g, var_mean,
-    *, ehat=None, z=None, sigma2_level=None, apply_mask=None,
+    *, ehat=None, z=None, sigma2_level=None, apply_mask=None, enrich_weight=0.0,
 ):
     """Precompute the count-space global as a per-node BINOMIAL pseudo-count on f_g, ``(n_nodes, P)`` (§4):
 
         glob(f_g) = α·log f_g + (N − α)·log(1 − f_g),   α = N·μ,   μ = clip(ρ·E/M, 0, 1),   N = ρ² / σ²_prior
 
-    The genome-wide baseline uses ``ρ = ρ_global`` and ``σ²_prior = var_mean + σ²_g(ρ_global)``. Where the
-    ENRICHMENT-AWARE transfer is significant (``apply_mask`` = exon REGION nodes with a usable ``z``;
-    :func:`fit_enrichment_transfer`), the per-node ``ρ`` is REPLACED (not added — §L/M-7) by the node's
-    enrichment-predicted gDNA density ``ρ̂ = ê(z)``, with the conditional reliability
-    ``σ²_prior = σ²_bio(ρ̂) + (ρ̂ + 1/E)/E`` (the level-conditional between-node spread + the node's own density
-    Poisson floor). Off-capture / not-significant ⇒ ``apply_mask`` is empty ⇒ BYTE-IDENTICAL to the genome-wide
-    baseline (the per-node ``N`` array is then a constant ``n_glob``).
+    The genome-wide baseline uses ``ρ = ρ_global`` and ``σ²_prior = var_mean + σ²_g(ρ_global)``. On the exon
+    REGION nodes with a usable ``z`` (``apply_mask``; :func:`fit_enrichment_transfer`), the per-node baseline is
+    CONTINUOUSLY SHRUNK toward the enrichment-aware transfer by the evidence weight ``w = enrich_weight ∈
+    [0, 1]``:
+
+        ρ̂ = w·ê(z) + (1−w)·ρ_global,
+        σ²_prior = w·[σ²_bio(ρ̂) + (ρ̂ + 1/E)/E] + (1−w)·[var_mean + σ²_g(ρ_global)],
+        μ = clip(ρ̂·E/M, 0, 1),   N = ρ̂² / σ²_prior.
+
+    ``w → 1`` under real enrichment (apply ê at its level-conditional reliability), ``w → 0`` off-capture /
+    uniform gDNA where the GCV transfer carries no slope-evidence — at ``w = 0`` the node reduces EXACTLY to the
+    genome-wide baseline (``ρ̂ = ρ_global``, ``σ²_prior = var_mean + σ²_g``, ``N = n_glob``), so the layer
+    self-collapses with no detector. ``apply_mask`` is built on every condition (no significance fork); the
+    weight ``w`` does the collapsing.
 
     ``N`` is the **M-INDEPENDENT** population confidence (``= 1/CV²`` of the rate) — a hyperprior is naturally
     imprecise, so it can NEVER overrule a node's own (strand) evidence; the MEAN ``μ`` keeps the honest
@@ -830,30 +832,56 @@ def _global_logprior(
     small under uniform present gDNA ⇒ ``N`` large, confident). Two-sided (mode μ); applied to ALL solvable
     nodes (the strand_obs fork is dissolved)."""
     s2_between = max(float(sigma2_g.predict(np.array([max(rho_global, _EPS)]))[0]), 0.0)
-    n_glob = rho_global * rho_global / max(var_mean + s2_between, _EPS)  # scalar, M-independent
+    s2_flat = var_mean + s2_between
+    n_glob = rho_global * rho_global / max(s2_flat, _EPS)  # scalar, M-independent
     mu = np.clip(rho_global * eff_global / np.maximum(mass_global, _EPS), 0.0, 1.0)
     n_node = np.full(mu.shape, n_glob, dtype=np.float64)  # per-node count (= n_glob everywhere by default)
-    if ehat is not None and apply_mask is not None and sigma2_level is not None and bool(np.any(apply_mask)):
+    w = float(enrich_weight)
+    if (
+        ehat is not None and apply_mask is not None and sigma2_level is not None
+        and w > _EPS and bool(np.any(apply_mask))
+    ):
         m = np.asarray(apply_mask, bool)
-        rho_hat = np.maximum(ehat.predict(np.asarray(z)[m]), 0.0)  # enrichment-predicted gDNA density
+        rho_e = np.maximum(ehat.predict(np.asarray(z)[m]), 0.0)    # enrichment-predicted gDNA density ê(z)
+        rho_hat = w * rho_e + (1.0 - w) * rho_global              # continuous shrinkage toward the flat global
         mu[m] = np.clip(rho_hat * eff_global[m] / np.maximum(mass_global[m], _EPS), 0.0, 1.0)
         s2_bio = np.maximum(sigma2_level.predict(rho_hat), 0.0)    # level-conditional between-node spread
         eff_m = np.maximum(eff_global[m], _EPS)
         pois = (rho_hat + _MSG_PSEUDOCOUNT / eff_m) / eff_m        # node density Poisson floor (matches _message)
-        n_node[m] = rho_hat * rho_hat / np.maximum(s2_bio + pois, _EPS)
+        s2_prior = w * (s2_bio + pois) + (1.0 - w) * s2_flat       # blend the reliability too ⇒ w=0 is byte-flat
+        n_node[m] = rho_hat * rho_hat / np.maximum(s2_prior, _EPS)
     return _binom_pseudo(fgg[None, :], mu[:, None], n_node[:, None])
 
 
 def fit_rna_varmean(
-    chain: NodeChain, densities: NodeDensities, geometry: NodeGeometry, statics: NodeStatics
-) -> MonotoneVarMean:
+    chain: NodeChain, densities: NodeDensities, geometry: NodeGeometry, statics: NodeStatics,
+    *, enrich_weight: float = 0.0,
+) -> MonotoneVarMean | BlendedVarMean:
     """Fit the RNA message reliability ``σ²_bio(μ)`` on the frozen snapshot, POOLING both strands (the symmetric
     RNA process). A strand-s edge is ``live`` only where strand s is continuous on BOTH endpoints (``free_s`` —
     the transcript-structure gate), so the curve sees the genuine same-strand cross-node RNA dispersion
     (INCLUDING the AMBIG nodes' per-strand densities). Refit per pass: unlike gDNA (seed-based, phantom risk →
     a non-circular firewall), RNA is well-resolved by strand+spliced so the swept densities are accurate and the
     fit adapts; a non-circular init-based fit measured WORSE (the AMBIG RNA dispersion only exists after the
-    sweep — the gDNA/RNA observability asymmetry, Phase 3a). The per-strand density is spliced-inclusive."""
+    sweep — the gDNA/RNA observability asymmetry, Phase 3a). The per-strand density is spliced-inclusive.
+
+    The σ²_bio is a CONTINUOUS BLEND of two estimands, selected by the SAME enrichment evidence weight ``w =
+    enrich_weight ∈ [0, 1]`` that shrinks the global enrichment transfer (no population_spread flag, no capture
+    detector):
+
+      * the **conditional MEAN** squared residual (``population_spread``), weight ``w`` — the unbiased
+        hyperprior estimand capture needs. Under capture the RNA message is the only cross-regime signal that
+        can re-pin an AMBIG exon (both strands free → the strand likelihood carries ~0 gDNA information): a
+        confident per-strand RNA message ("≈no RNA on either strand here") pushes ``f_g = 1 − f₊ − f₋`` UP to
+        the exon's true gDNA fraction, agreeing with a gentle global at AMBIG. The median statistic over-states
+        σ²_bio for the offset-dominated edges (it discards the heavy χ²₁ tail that IS the dispersion), leaving
+        the message too weak to do this.
+      * the **reliability-weighted MEDIAN**, weight ``1 − w`` — correct off-capture / uniform gDNA, where the
+        Poisson-offset reliability genuinely down-weights thin-count edges.
+
+    ``w → 1`` under capture (the mean), ``w → 0`` off-capture (the median, byte-identical to the prior default
+    so the synthetic goldens are unchanged). See ``CALIBRATION_ARCHITECTURE.md``: imputation at its var~mean
+    reliability + a gentle global."""
     mp, rp, op = _edge_varmean(
         chain,
         densities.rho_pos_left,
@@ -870,7 +898,12 @@ def fit_rna_varmean(
         geometry.eff_rna_right,
         statics.free_neg,
     )
-    return _fit_offset(mp + mn, rp + rn, op + on)
+    w = float(enrich_weight)
+    lo = _fit_offset(mp + mn, rp + rn, op + on, population_spread=False)
+    if w <= _EPS:
+        return lo  # off-capture: the reliability-weighted median ALONE (byte-identical to the prior default)
+    hi = _fit_offset(mp + mn, rp + rn, op + on, population_spread=True)
+    return BlendedVarMean(hi=hi, lo=lo, w=w)
 
 
 def fit_gdna_varmean(
@@ -995,19 +1028,24 @@ def node_sweep(
         chain, statics, geometry, region_arrays, boundary_substrate, f_g, kappa
     )
     # The ENRICHMENT-AWARE transfer ê(z), fit once on the strand-only init f_g (anchored, like ρ_global). Under
-    # capture it learns the edge→interior gDNA-density transfer; off-capture the significance gate fails and ê
-    # collapses to the flat ρ_global. It REPLACES the genome-wide global mean for the exon REGION nodes with a
-    # usable z (the AMBIG-exon targets); everything else keeps ρ_global (§J/P3).
-    ehat, z_enrich, sigma2_level, enrich_sig = fit_enrichment_transfer(
+    # capture it learns the edge→interior gDNA-density transfer; off-capture the fit carries no slope-evidence so
+    # its weight enrich_w → 0 and the layer self-collapses to the flat ρ_global — ONE uniform path, no capture
+    # detector. The transfer shrinks the genome-wide global mean toward ê on the exon REGION nodes with a usable
+    # z (the AMBIG-exon targets) by enrich_w; everything else keeps ρ_global (§J/P3).
+    ehat, z_enrich, sigma2_level, enrich_w = fit_enrichment_transfer(
         chain, statics, geometry, region_arrays, boundary_substrate, f_g, kappa, rho_global
     )
     node_rtype, _rtype = _node_region_type(chain, region_arrays)
-    enrich_apply = enrich_sig & is_reg & (node_rtype == 2) & np.isfinite(z_enrich)
+    # The apply set is built on EVERY condition (no significance fork); the continuous enrich_w does the
+    # collapsing (w → 0 ⇒ byte-identical to the flat global on these nodes).
+    enrich_apply = is_reg & (node_rtype == 2) & np.isfinite(z_enrich)
     # Bootstrap RNA reliability on the INIT belief (crude — the AMBIG RNA is still parked in gDNA, so this
     # curve is refined by the outer loop once the sweep resolves it). Symmetric bootstrap with the gDNA seed fit.
+    # Its σ²_bio estimand is blended (conditional mean ⊗ enrich_w, reliability median ⊗ 1−enrich_w) by the same
+    # evidence weight — population mean under capture, the median off-capture.
     rna_vm = fit_rna_varmean(
         chain, node_densities(NodeBelief(f_pos, f_neg, f_g, var_pos, var_neg, var_g), geometry),
-        geometry, statics,
+        geometry, statics, enrich_weight=enrich_w,
     )
     # The count-space global log-prior on f_g (M-INDEPENDENT strength so it can never overrule a node's own
     # strand evidence; ALL solvable nodes; enrichment-aware on the exon override set). Recomputed each outer
@@ -1016,6 +1054,7 @@ def node_sweep(
         return _global_logprior(
             fgg, mass_global, eff_global, rho_global, gvm, var_mean,
             ehat=ehat, z=z_enrich, sigma2_level=sigma2_level, apply_mask=enrich_apply,
+            enrich_weight=enrich_w,
         )
 
     global_lp = _global_lp(gdna_vm)
@@ -1184,7 +1223,7 @@ def node_sweep(
                 free_pos=np.asarray(fp, bool), free_neg=np.asarray(fn, bool),
                 # enrichment transfer ê(z): the fitted object + the predictor z + the apply (AMBIG-exon) mask +
                 # the global geometry (μ = clip(ρ·eff_global/mass_global, 0, 1) is the implied prior fraction).
-                ehat=ehat, z_enrich=z_enrich, enrich_apply=enrich_apply, enrich_sig=enrich_sig,
+                ehat=ehat, z_enrich=z_enrich, enrich_apply=enrich_apply, enrich_w=enrich_w,
                 eff_global=eff_global, mass_global=mass_global,
             )
 
@@ -1193,7 +1232,7 @@ def node_sweep(
         # anchored). This is the var~mean fixed point, separated from the inner sweep so the precision target
         # stops moving.
         snap = node_densities(NodeBelief(f_pos, f_neg, f_g, var_pos, var_neg, var_g), geometry)
-        rna_vm = fit_rna_varmean(chain, snap, geometry, statics)
+        rna_vm = fit_rna_varmean(chain, snap, geometry, statics, enrich_weight=enrich_w)
         gdna_vm = fit_gdna_varmean(chain, snap, geometry, statics)
         global_lp = _global_lp(gdna_vm)
 
