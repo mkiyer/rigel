@@ -21,7 +21,7 @@ from .simplex import _mixture_strand_loglik, _simplex_lattice
 from .strand_deconv import NodeDeconv
 
 __all__ = ["_solve_nodes", "_local_loglik", "_binom_pseudo", "_fg_median", "_fg_var", "_axis_mean",
-           "_simplex_lattice"]
+           "_node_marginals", "_simplex_lattice"]
 
 _EPS = 1.0e-9
 _PRIOR_EPS = 1.0e-3  # Jeffreys edge floor (the exact lattice vertex with 1e-9 over-rewards the prior)
@@ -147,6 +147,25 @@ def _axis_mean(belief, axis_g):
     imputation (the current-state partition of the unspliced mass — the strands never share it)."""
     post = np.exp(belief - logsumexp(belief, axis=1, keepdims=True))  # (m,P)
     return post @ axis_g
+
+
+def _node_marginals(belief, fpg, fng, fgg):
+    """All per-node belief marginals from ONE normalized posterior — the dedup of ``_fg_median`` +
+    2×``_axis_mean`` + 3×``_fg_var``, which each recomputed ``exp(belief − logsumexp(belief))`` (6× the work
+    over the ``(m,P)`` array; this is the sweep's hot readout). Returns, value-identically:
+    ``(f_g median, f_pos mean, f_neg mean, var_g, var_pos, var_neg)``."""
+    post = np.exp(belief - logsumexp(belief, axis=1, keepdims=True))  # (m,P), computed ONCE
+    mp = post @ fpg
+    mn = post @ fng
+    mg = post @ fgg
+    var_p = np.maximum(post @ (fpg * fpg) - mp * mp, 0.0)
+    var_n = np.maximum(post @ (fng * fng) - mn * mn, 0.0)
+    var_g = np.maximum(post @ (fgg * fgg) - mg * mg, 0.0)
+    order = np.argsort(fgg)  # f_g posterior MEDIAN (robust readout — distinct from the mean used for var)
+    fgs = fgg[order]
+    cw = np.cumsum(post[:, order], axis=1)
+    fg_med = fgs[np.clip((cw < 0.5).sum(axis=1), 0, fgs.size - 1)]
+    return fg_med, mp, mn, var_g, var_p, var_n
 
 
 def _solve_nodes(

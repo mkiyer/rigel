@@ -12,24 +12,27 @@ node-by-node + bridge dissections proved, the bugs found, and the prioritized ne
 
 ## 0. TL;DR
 
-- **Production = the committed Jacobi solver, `main`/branch @ 346f1531.** This session's exploration (FB rewrite +
-  the ê/mode fixes + dedup + all harnesses) is **preserved on branch `calib-fb-dissection-jun27`**, NOT merged.
-- **FB is correct tree-BP and fast** (~10× Jacobi) but **net worse on the benchmark** (+11% leak) — *only* because
-  Jacobi is accidentally regularized by under-convergence (FB == Jacobi@∞). FB is not the win.
-- **The node-by-node dissection overturned "FB over-smooths":** propagation is only 4–19% of the error and is
+- **Forward-backward IS the production solver, shipped on `calib-spliced-junction-strand`.** FB replaces the
+  per-node Jacobi inner sweep in `bp_solver.node_sweep` (forward α + backward β, true tree-BP, single inner pass;
+  the outer loop iterates the var~mean fixed point). ~10× faster than Jacobi. Goldens regenerated; suite green.
+  Shipped *with* the ê(z) eff-len fix + the mode clip + the `_node_marginals` dedup. The dead Jacobi message
+  helpers (`_message`/`_message_vec`) are removed (FB inlines the message in `_scan`).
+- **The node-by-node dissection (the core finding):** message propagation is only 4–19% of the error and is
   net-*correcting*. The error lives in the **LOCAL belief** — the strand likelihood (empty at κ≈½) + the **global
-  ê(z) prior** (biased/noisy, worst on AMBIG exons).
-- **Two genuine bugs found (both on the explore branch, validated-correct, NOT on main):** (1) the **ê(z) eff-len
-  bug** — `fit_enrichment_transfer` projected ρ_mature with the *full* RNA eff-len instead of the half-triangle
-  `eff_spl` (the same spliced-fix inconsistency, missed in this path); fixing it cut the zero-gDNA ê phantom ~85%
-  but **exposed the capture cliff** (flagship total flipped worse) → it needs the robust-message co-fix to be
-  net-positive, so it was NOT pushed standalone. (2) the **unbounded message mode** (clipped to [0,1]).
-- **§11 NEW — the calibration→EM bridge audit:** `assemble_priors` tabulates boundary/region **mass correctly**
-  (conserved), the **prior gDNA split is accurate** (vs oracle, mean|Δ|≈0.05), but the **gDNA component eff-len is
-  ~2× too large** → gDNA structurally under-competes → the **~200K stranded-flagship leak**. Halving it collapses
-  the leak 176K→1K. This is a **bridge fix, not calibration** (see Framing above).
-- **Decision:** keep Jacobi in production; the calibration-accuracy lever is the **local belief (ê(z) + the cliff
-  robust message)**; the bridge eff-len is a separate, confirmed, high-value EM fix.
+  ê(z) prior** (biased/noisy, worst on AMBIG exons). So the next lever is the local belief, not the solver.
+- **ê(z) eff-len bug FIXED (shipped):** `fit_enrichment_transfer` projected ρ_mature with the *full* RNA eff-len
+  instead of the half-triangle `eff_spl` (the spliced-fix da777bc7 corrected every other path and missed this one,
+  so 346f1531 shipped it live). Fixed → cuts the zero-gDNA ê phantom ~85%; it also **un-masks the capture cliff**
+  (a fragile cancellation where the buggy over-call hid the cliff under-call) → the cliff is now the visible next
+  lever (the robust message), not a hidden number.
+- **Benchmark honesty:** on `quick_3to1_5mb`, FB's Σ|leak| was ~+11% vs the committed Jacobi — but Jacobi's lower
+  number is *accidental under-convergence regularization* (FB == Jacobi@∞, proven in `fb_cliff_toy.py`); the gap is
+  the capture cliff, the real next target. (Re-benchmark FB+ê for the current number — §3 predates the ê fix.)
+- **§11 — the calibration→EM bridge audit (separate track):** `assemble_priors` mass is conserved + the prior
+  split is accurate, but the **gDNA component eff-len is ~2× too large** → ~200K stranded-flagship leak (×0.5 →
+  176K→1K). A confirmed high-value **bridge/EM** fix, off the calibration-accuracy critical path (see Framing).
+- **Next lever:** the **capture cliff / robust message** on the FB substrate (the local-belief fix for unstranded +
+  zero-gDNA), then the AMBIG-exon capture leak. The bridge eff-len is a separate confirmed EM win.
 
 ## 1. The journey
 
@@ -120,38 +123,34 @@ weight (else it relays the cliff) **and** solving the boundary's gDNA (currently
 | Message precision can hit ~1.2M (honest `(M/E)²` Jacobian) | deferred | harmless unless the mode is a cliff → robust weight's job |
 | gDNA-emission strand-gate (TSS/TES suppressed) | deferred | needs the robust weight + solving the boundary |
 
-## 8. Git topology (as of 2026-06-27 cleanup)
+## 8. Git topology (as of 2026-06-27)
 
-- **`calib-spliced-junction-strand` (main working branch), HEAD 346f1531 = the committed Jacobi solver.** This is
-  the validated production base. On top of 346f1531 this cleanup adds only: this doc, `fb_bridge_dissect.py`,
-  `fb_prior_tabulation_audit.py` (both base-agnostic — work on the Jacobi base). **No calibration code changed.**
-- **`calib-fb-dissection-jun27` (preserved snapshot, pushed).** Everything from the session: the FB inner solve
-  (replaces Jacobi in `bp_solver.node_sweep`), the mode clip, the `_capture` hook, `_node_marginals` (dedup), the
-  **ê(z) eff-len fix** (`fit_enrichment_transfer` → `eff_spl_left/right`), and the FB-internal harnesses
-  (`fb_node_dissect`, `fb_ehat_dissect`, `fb_message_audit`, `fb_cliff_toy`, the gs/outer convergence probes).
-  The FB goldens there are stale (regen if FB ever lands).
-
-**To resume FB / the ê fix:** `git checkout calib-fb-dissection-jun27` (or cherry-pick `fit_enrichment_transfer`).
-The ê fix is value-validated-correct but net-mixed standalone (see §0 / §11) — re-land it *with* the robust message.
+- **`calib-spliced-junction-strand` (production branch) = FB SHIPPED.** `bp_solver.node_sweep` is forward-backward;
+  the ê(z) eff-len fix, the mode clip, and `_node_marginals` (dedup) are in; dead Jacobi `_message`/`_message_vec`
+  removed; goldens regenerated; suite green. Harnesses on main: `fb_bridge_dissect`, `fb_prior_tabulation_audit`
+  (base-agnostic) + `fb_node_dissect`, `fb_ehat_dissect`, `fb_message_audit`, `fb_cliff_toy`, the gs/outer probes.
+- **`calib-fb-dissection-jun27`** — the session-snapshot branch (now redundant, FB is on main); safe to delete.
+- **Vestigial:** `node_sweep`'s `max_passes`/`convergence_delta` params are unused by FB (single inner pass; the
+  outer loop uses `max_outer`/`outer_convergence_delta`) — retained-for-API, candidate for a follow-up cleanup.
 
 ## 9. Resume plan — closing the CALIBRATION gap (priority order)
 
-The lever is the **local belief** (per the §5 dissection), not propagation. In rough ROI order:
+FB is the substrate; the lever is the **local belief** (per the §5 dissection), not the solver. In ROI order:
 
-1. **The capture cliff + the global ê(z) prior** — the dominant local error (32–46%). The ê eff-len bug is found
-   (explore branch); the remaining work is the **robust-message weight** (`fb_cliff_toy.py` has the derivation +
-   proof: `w=(ν+1)/(ν+r²)`) so ê can be de-biased *without* the cliff over-smoothing. This is the calibration-
-   accuracy lever for both unstranded (the cliff) and zero-gDNA (the ê phantom).
-2. **The AMBIG-exon capture leak** (the long-standing PROVEN #1 error — see memory
-   `calibration_ambig_exon_capture_leak.md`): balanced-strand AMBIG exons hold the bulk of the under-called gDNA
-   under capture; over-confident RNA imputation floods f_g→0. The robust message + the ê de-bias both bear on it.
-3. **The gDNA-emission strand-gate** (§6) — TSS/TES boundaries discard real gDNA crossing mass; safe to open only
-   with the robust weight + a solved boundary gDNA.
-4. **FB commit decision** — only after the local belief is fixed; FB's value is masked until then.
+1. **The capture cliff + the global ê(z) prior** (the dominant local error, 32–46%) — the ê eff-len bug is now
+   fixed; the remaining work is the **robust-message weight** (`fb_cliff_toy.py` has the derivation + proof:
+   `w=(ν+1)/(ν+r²)`) so the (now-visible) cliff is not over-smoothed. The lever for both unstranded (the cliff) and
+   zero-gDNA (the ê phantom).
+2. **The AMBIG-exon capture leak** (long-standing PROVEN #1 error, memory `calibration_ambig_exon_capture_leak`):
+   balanced-strand AMBIG exons hold the bulk of the under-called gDNA; over-confident RNA imputation floods f_g→0.
+3. **The gDNA-emission strand-gate** (§6) — TSS/TES boundaries discard real gDNA crossing mass; open it only with
+   the robust weight + a solved boundary gDNA.
+4. **Re-benchmark FB+ê** for the current Σ|leak| (the §3 table predates the ê fix); confirm the cliff is the gap.
+5. **Cleanup follow-up:** retire the vestigial `max_passes`/`convergence_delta` (§8); delete the redundant
+   `calib-fb-dissection-jun27` branch.
 
 **Separate track (bridge/EM, NOT calibration accuracy):** the §11 gDNA eff-len under-contraction — a confirmed
-~200K lever in `priors.assemble_priors`. High value, but it is a downstream fix; keep it off the calibration-
-accuracy critical path per the Framing note.
+~200K lever in `priors.assemble_priors`. High value, downstream; keep it off the calibration-accuracy critical path.
 
 ## 11. The calibration→EM bridge audit (NEW, 2026-06-27) — the ~200K stranded leak is the gDNA eff-len
 

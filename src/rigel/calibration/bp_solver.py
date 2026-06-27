@@ -46,11 +46,9 @@ from .signature import (
     TS_POS,
 )
 from .simplex_sweep import (
-    _axis_mean,
     _binom_pseudo,
-    _fg_median,
-    _fg_var,
     _local_loglik,
+    _node_marginals,
     _simplex_lattice,
     _solve_nodes,
 )
@@ -755,7 +753,8 @@ def fit_enrichment_transfer(
     fp = np.asarray(statics.free_pos, bool)  # single-strand: POS iff free_pos (else NEG) — the motif strand
     SPl, SPr = geometry.spliced_pos_left, geometry.spliced_pos_right
     SNl, SNr = geometry.spliced_neg_left, geometry.spliced_neg_right
-    ERl, ERr = geometry.eff_rna_left, geometry.eff_rna_right
+    ERl = geometry.eff_rna_left  # contained RNA eff (the mature-projection target)
+    ESPl, ESPr = geometry.eff_spl_left, geometry.eff_spl_right  # one-sided spliced HALF-TRIANGLE eff-len
     rho_strand = fg[fi] * T[fi]
     rho_spliced = np.zeros(fi.size)
     avail = np.zeros(fi.size, dtype=bool)
@@ -764,11 +763,14 @@ def fit_enrichment_transfer(
         m_spl, e_spl = 0.0, _EPS
         lb = int(left[i])
         if lb >= 0 and clean_exon_bnd[lb] and sr[lb] > m_spl:  # R is lb's RIGHT region → faces lb's right side
-            m_spl, e_spl = float(sr[lb]), float(ERr[lb])
+            m_spl, e_spl = float(sr[lb]), float(ESPr[lb])
         rb = int(right[i])
         if rb >= 0 and clean_exon_bnd[rb] and sl[rb] > m_spl:  # R is rb's LEFT region → faces rb's left side
-            m_spl, e_spl = float(sl[rb]), float(ERl[rb])
+            m_spl, e_spl = float(sl[rb]), float(ESPl[rb])
         if m_spl > 0.0:
+            # ρ_mature = spliced mass / its one-sided HALF-TRIANGLE eff-len (eff_spl), consistent with
+            # node_densities + the message — was the FULL crossing eff_rna here (a ~2× under-projection of mature
+            # ⇒ residual over-attributed to gDNA). Project that mature density onto the exon's contained RNA eff.
             rho_mature = m_spl / max(e_spl, _EPS)
             rho_spliced[j] = max(Ml[i] - rho_mature * ERl[i], 0.0) / max(EGl[i], _EPS)
             avail[j] = True
@@ -898,50 +900,6 @@ def fit_gdna_varmean(
     return _fit_offset(m, r, o)
 
 
-def _message(rho_src, eff_src, eff_dst, mass_dst, rho_dst_cur, varmean, var_own_src=0.0, spliced_dst=0.0):
-    """One density message (source → dest) as a DENSITY-GAUSSIAN on the dest's fraction ``(mode, prec)``
-    (`precision_state_design.md` §3-5). Applied downstream as ``−½·prec·(f_c − mode)²``.
-
-    ``mode`` = the imputed fraction: the source's facing density ``ρ_src`` matched at the dest, its known
-    spliced (free info; gDNA: 0) subtracted — ``mode = (ρ_src·E_dst − spliced_dst)/M_dst`` (UNclipped; the
-    lattice bounds it, and clipping would distort the off-simplex tail). ``prec`` = the precision on the dest
-    fraction:
-
-        prec = (M_dst/E_dst)² / v_msg,   v_msg = Var_own_src + σ²_bio(μ) + pois
-
-    the honest **variance blend** (no caps, no floor): ``Var_own_src = (M_src/E_src)²·Var(f_c^src)`` is the
-    SOURCE's own density uncertainty (an unsolved/uncertain source ⇒ large ⇒ low ``prec`` ⇒ weak message — the
-    Q2 fix); ``σ²_bio`` the communication drift (the fitted overdispersion); ``pois = (n_src+1)/E_src²`` the
-    Poisson-Gamma predictor sampling floor. The ``(M_dst/E_dst)²`` is the honest density→fraction Jacobian,
-    bounded by ``v_msg`` (the source humility), never a free amplifier — so no cap is needed (Phase-0 verified).
-    ``prec=0`` (no facing flank) ⇒ a no-op."""
-    mode = (rho_src * eff_dst - spliced_dst) / max(mass_dst, _EPS)
-    # Query σ²_bio at the MEAN of the source + (snapshot) destination densities — consistent with the
-    # mean-indexed fit; uses both endpoints and is less circular than the crushed dest alone.
-    mu_q = max(0.5 * (rho_src + rho_dst_cur), _EPS)
-    sigma2_bio = float(varmean.predict(np.array([mu_q]))[0])
-    # Poisson-Gamma predictor floor: a density from a finite count can never have zero sampling variance.
-    pois = (rho_src + _MSG_PSEUDOCOUNT / max(eff_src, _EPS)) / max(eff_src, _EPS)  # (n_src+1)/E_src²
-    v_msg = max(var_own_src + sigma2_bio + pois, _EPS)  # the variance BLEND (own + communication + sampling)
-    k = mass_dst / max(eff_dst, _EPS)  # density→fraction Jacobian factor (M_dst/E_dst)
-    return mode, (k * k) / v_msg
-
-
-def _message_vec(rho_src, eff_src, eff_dst, mass_dst, rho_dst_cur, varmean, var_own_src, spliced_dst):
-    """Vectorized :func:`_message` — array inputs (one entry per chain node), array ``(mode, prec)`` outputs.
-    Identical math to the scalar version; the per-node Python sweep is replaced by ONE batched call (the Jacobi
-    update), so ``varmean.predict`` + the lattice solve run once over ALL nodes, not m times (the perf win)."""
-    eff_src = np.maximum(eff_src, _EPS)
-    eff_dst = np.maximum(eff_dst, _EPS)
-    mode = (rho_src * eff_dst - spliced_dst) / np.maximum(mass_dst, _EPS)
-    mu_q = np.maximum(0.5 * (rho_src + rho_dst_cur), _EPS)
-    sigma2_bio = np.asarray(varmean.predict(mu_q), dtype=np.float64)
-    pois = (rho_src + _MSG_PSEUDOCOUNT / eff_src) / eff_src
-    v_msg = np.maximum(var_own_src + sigma2_bio + pois, _EPS)
-    k = mass_dst / eff_dst
-    return mode, (k * k) / v_msg
-
-
 def node_sweep(
     chain: NodeChain,
     statics: NodeStatics,
@@ -954,38 +912,41 @@ def node_sweep(
     gdna_strand_overdispersion: float = 0.0,
     rna_strand_overdispersion: float = 0.0,
     n_grid: int,
-    max_passes: int,
-    convergence_delta: float,
+    max_passes: int = 1,
+    convergence_delta: float = 1e-3,
     max_outer: int = 1,
     outer_convergence_delta: float = 1e-3,
+    _capture: dict | None = None,
 ):
-    """The directional belief-propagation sweep over the chain — gDNA AND per-strand RNA messages, in COUNT
-    space (no ``(M/E)²`` Jacobian) — as a **NESTED loop** (the var~mean fixed point outside the belief sweep).
+    """The belief-propagation sweep over the chain — gDNA AND per-strand RNA messages, in COUNT space (no
+    ``(M/E)²`` Jacobian) — as a **FORWARD-BACKWARD** inner solve inside a var~mean OUTER fixed point.
 
-    The single-loop design refit the var~mean reliability INSIDE every sweep pass, making a moving precision
-    target that the sweep chased forever (a measured limit cycle — it never converged). The nested loop
-    separates the two: the INNER loop converges the beliefs at FIXED var~mean (the sweep settles); the OUTER
-    loop refits BOTH reliability curves on the converged belief (symmetric — neither gDNA nor RNA privileged).
+    The chain is a forest of linear paths, so BP is exact in one forward + one backward pass (vs Gauss-Seidel /
+    Jacobi which propagate one hop per pass). Entangling the var~mean refit into the sweep made a moving precision
+    target (a measured limit cycle); the nested design separates them — the INNER FB solve runs at FIXED
+    var~mean, the OUTER loop refits BOTH reliability curves on the solved belief (symmetric — neither gDNA nor
+    RNA privileged).
 
-    BEFORE the loops (the outer-iteration-0 bootstrap): fit the non-circular population gDNA prior on
-    gDNA-clean seeds (:func:`_gdna_seed_estimate`) — the exposure-pooled rate ``ρ_global`` (the anchored global
-    baseline, NOT refit) + the seed gDNA spread ``σ²_g`` (the bootstrap gDNA message reliability) — the
-    enrichment transfer ``ê(z)`` (anchored), and the bootstrap RNA ``σ²_bio`` on the init belief.
+    BEFORE the loop (outer-iteration-0 bootstrap): the non-circular population gDNA prior on gDNA-clean seeds
+    (:func:`_gdna_seed_estimate`) — exposure-pooled ``ρ_global`` (anchored, NOT refit) + the seed gDNA spread
+    ``σ²_g`` — the enrichment transfer ``ê(z)`` (anchored), and the bootstrap RNA ``σ²_bio`` on the init belief.
 
-    Each OUTER iteration: (1) INNER-converge — sweep **L→R** then **R→L** at fixed var~mean, each node pulled by
-    ONE neighbour's CURRENT (Gauss-Seidel) density, until the per-node pie stabilizes (``convergence_delta``,
-    capped at ``max_passes``); (2) refit ``rna_vm`` (:func:`fit_rna_varmean`) AND ``gdna_vm``
-    (:func:`fit_gdna_varmean`) on the converged belief + recompute the global NB log-prior with the new
-    ``gdna_vm``. Stop once the converged belief stops moving between outer iterations (``outer_convergence_delta``,
-    capped at ``max_outer``).
+    Each OUTER iteration runs ONE FB pass: (A) a batched message-free LOCAL solve → per-component (fraction,
+    precision); (B) a FORWARD scan L→R accumulating the left-context message α and the forward belief (local ⊗
+    incoming message — NOT the reverse, true tree BP — so a thin node passes the upstream α on: the relay);
+    (C) a BACKWARD scan R→L → β; (D) combine α⊗β and one batched FINAL lattice solve. Then refit ``rna_vm`` +
+    ``gdna_vm`` on the solved belief and recompute the global NB log-prior. Stop once the belief stops moving
+    between outer iterations (``outer_convergence_delta``, capped at ``max_outer``).
 
     The per-node ψ solve integrates: the strand likelihood, the Jeffreys reference (single-strand nodes), the
-    count-space global NB prior (ALL solvable nodes — the fork is dissolved), and the count-space gDNA +
-    per-strand RNA imputation messages (binomial pseudo-counts ``(μ_c, N_src)``). The RNA message on strand s
-    flows only where strand s is continuous on both endpoints (``free_s``). Only G2/G3 nodes with data are
-    solved; G1 sinks + empty nodes are fixed. A solvable node with no message neighbour (both flanks empty) gets
-    one intrinsic solve per pass — strand + global, no message. Returns ``(NodeBelief, outer_deltas)`` (the
-    per-outer-iteration max-Δf_g of the converged belief — the convergence diagnostic)."""
+    count-space global NB prior (ALL solvable nodes — the fork is dissolved), and the gDNA + per-strand RNA
+    imputation messages (the spliced/MATURE floor rides the RNA message via the half-triangle ``ESP`` eff-len).
+    The RNA message on strand s flows only where strand s is continuous on both endpoints (``free_s``); gDNA /
+    nascent need a SOLVABLE unspliced source. Only G2/G3 nodes with data are written; G1 sinks + empty nodes keep
+    their init; a node with no neighbour message is solved on its own strand+global evidence (the intrinsic solve
+    folds into the final batched solve at prec=0). ``max_passes``/``convergence_delta`` are retained for API
+    compatibility but unused — FB is single-pass (exact on the chain given the local beliefs). Returns
+    ``(NodeBelief, outer_deltas)`` (the per-outer-iteration max-Δf_g — the convergence diagnostic)."""
     left = np.asarray(chain.left)
     right = np.asarray(chain.right)
     kind = np.asarray(chain.kind)
@@ -1064,90 +1025,168 @@ def node_sweep(
 
     global_lp = _global_lp(gdna_vm)
 
+    # Genomic node order for the forward/backward scans (within each ref path; left/right break at −1). The
+    # scans are sequential per node, so iterate as a Python list of ints (faster than numpy scalar indexing).
+    order_list = [int(x) for x in np.asarray(chain.order)]
+    n_nodes = f_g.shape[0]
+    PSEUDO = _MSG_PSEUDOCOUNT
+
     outer_deltas = []
     prev_outer = None
     for _outer in range(int(max_outer)):
-        # INNER LOOP — converge the beliefs at FIXED var~mean (rna_vm, gdna_vm, global_lp). JACOBI: every node is
-        # updated from the FROZEN pass-start state, so all per-node lattice solves BATCH into one `_local_loglik`
-        # call (the perf win — GS's in-place sequential update forbade batching), and each node integrates BOTH
-        # neighbours at once (no alternating-overwrite flip-flop — the FB substrate). No refit here: entangling it
-        # made a moving precision target (a measured limit cycle); at fixed var~mean the sweep settles.
-        for _pass in range(int(max_passes)):
-            snap = node_densities(NodeBelief(f_pos, f_neg, f_g, var_pos, var_neg, var_g), geometry)
-            SNG = (snap.rho_g_left, snap.rho_g_right)
-            SNP = (snap.rho_pos_left, snap.rho_pos_right)
-            SNN = (snap.rho_neg_left, snap.rho_neg_right)
-            prev = (f_g.copy(), f_pos.copy(), f_neg.copy())
+        # FORWARD-BACKWARD inner solve (one pass — on the chain it is exact given the local beliefs + var~mean,
+        # so no inner iteration: the outer loop iterates the var~mean fixed point). (A) message-free LOCAL
+        # beliefs (one batched lattice solve) → per-component (fraction, precision); (B) FORWARD scan L→R
+        # accumulating the left-context message α + the forward belief; (C) BACKWARD scan R→L → β; (D) combine
+        # α⊗β and one batched FINAL solve. Each node sees the WHOLE-chain context (relay) in one pass — vs
+        # Jacobi's one-hop — because the forward belief at a thin node is dominated by, and passes on, the
+        # upstream α. ``true`` tree BP: the forward belief excludes β (no double-counting), unlike Jacobi's
+        # full-marginal source.
 
-            def _dir(nbr, sf, df):
-                """Vectorized per-component message from each node's ``nbr`` neighbour (src face ``sf`` → dst
-                face ``df``) — the per-node message build, batched; ``prec=0`` where a component has no message.
-                Same evidence rule as the scalar path: gDNA/nascent need a SOLVABLE unspliced source; the
-                one-sided spliced/MATURE floor (``spl_s`` over the half-triangle ``ESP``) rides any source that
-                owns it. Sources read the FROZEN pass-start belief (Jacobi)."""
-                valid = nbr >= 0
-                src = np.where(valid, nbr, 0)
-                unspl = valid & solvable[src] & (MS[sf][src] > _EPS)  # solvable unspliced source
-                s_mass = np.where(unspl, MS[sf][src], 0.0)
-                spl_p = np.where(valid, SP[sf][src], 0.0)
-                spl_n = np.where(valid, SN[sf][src], 0.0)
-                eg_s = np.maximum(EG[sf][src], _EPS)
-                er_s = np.maximum(ER[sf][src], _EPS)
-                esp_s = np.maximum(ESP[sf][src], _EPS)
-                # gDNA — solvable unspliced source only; var_own = (M/E)²·Var(f_g_src) (the source humility).
-                rho_g = np.where(unspl, f_g[src] * s_mass / eg_s, 0.0)
-                var_own_g = (s_mass / eg_s) ** 2 * np.where(unspl, var_g[src], 0.0)
-                mg, pg = _message_vec(rho_g, eg_s, EG[df], MS[df], SNG[df], gdna_vm, var_own_g, 0.0)
-                pg = np.where(unspl, pg, 0.0)
-                # per-strand RNA — nascent (f_s·s_mass/eff_rna, two-sided crossing) + one-sided spliced/MATURE
-                # floor (spl_s/eff_spl half-triangle); gated by free_s on both endpoints AND some evidence.
-                # var_own only from the nascent part (a pure-spliced source contributes none; its floor enters
-                # via `pois`). The 0·Var(s_mass=0) guard keeps an unsolved source's inf var out of the product.
-                em_p = valid & fp & fp[src] & ((s_mass > _EPS) | (spl_p > _EPS))
-                rho_p = f_pos[src] * s_mass / er_s + spl_p / esp_s
-                var_own_p = (s_mass / er_s) ** 2 * np.where(s_mass > _EPS, var_pos[src], 0.0)
-                mp, pp = _message_vec(rho_p, er_s, ER[df], MS[df], SNP[df], rna_vm, var_own_p, SP[df])
-                pp = np.where(em_p, pp, 0.0)
-                em_n = valid & fn & fn[src] & ((s_mass > _EPS) | (spl_n > _EPS))
-                rho_n = f_neg[src] * s_mass / er_s + spl_n / esp_s
-                var_own_n = (s_mass / er_s) ** 2 * np.where(s_mass > _EPS, var_neg[src], 0.0)
-                mn, pn = _message_vec(rho_n, er_s, ER[df], MS[df], SNN[df], rna_vm, var_own_n, SN[df])
-                pn = np.where(em_n, pn, 0.0)
-                return mg, pg, mp, pp, mn, pn
+        # (A) LOCAL message-free beliefs.
+        psi_loc = _local_loglik(
+            statics.u_pos, statics.u_neg, statics.spliced_pos, statics.spliced_neg,
+            fp, fn, kappa, od_g, od_r, lattice,
+            strand_obs=statics.strand_obs, global_logprior=global_lp,
+        )
+        fg_loc, fp_loc, fn_loc, vg_loc, vp_loc, vn_loc = _node_marginals(psi_loc, fpg, fng, fgg)
+        pg_loc = 1.0 / np.maximum(vg_loc, _EPS)  # local precision (var floored: a sharp belief ⇒ large finite)
+        pp_loc = 1.0 / np.maximum(vp_loc, _EPS)
+        pn_loc = 1.0 / np.maximum(vn_loc, _EPS)
 
-            ml = _dir(left, 1, 0)   # from LEFT neighbour:  src right face → dst left face
-            mr = _dir(right, 0, 1)  # from RIGHT neighbour: src left  face → dst right face
+        # per-edge σ²_bio — the ONLY varmean.predict, batched on the LOCAL densities (the curve query point need
+        # not track the evolving forward belief). Density per node per face incl. the RNA one-sided spliced floor.
+        def _face_dens(fc, eff, mass, spl=None, esp=None):
+            d = fc * mass / np.maximum(eff, _EPS)
+            return d if spl is None else d + spl / np.maximum(esp, _EPS)
 
-            def _comb(a, b):  # precision-weighted product of the two neighbour Gaussians per component
-                pc = a[1] + b[1]
-                mc = np.where(pc > _EPS, (a[1] * a[0] + b[1] * b[0]) / np.maximum(pc, _EPS), 0.0)
-                return mc, pc
+        dG = (_face_dens(fg_loc, EG[0], MS[0]), _face_dens(fg_loc, EG[1], MS[1]))
+        dP = (_face_dens(fp_loc, ER[0], MS[0], SP[0], ESP[0]),
+              _face_dens(fp_loc, ER[1], MS[1], SP[1], ESP[1]))
+        dN = (_face_dens(fn_loc, ER[0], MS[0], SN[0], ESP[0]),
+              _face_dens(fn_loc, ER[1], MS[1], SN[1], ESP[1]))
 
-            mode_g, prec_g = _comb((ml[0], ml[1]), (mr[0], mr[1]))
-            mode_p, prec_p = _comb((ml[2], ml[3]), (mr[2], mr[3]))
-            mode_n, prec_n = _comb((ml[4], ml[5]), (mr[4], mr[5]))
+        def _edge_sigma2(nbr, sf, df, dens, vm):
+            valid = nbr >= 0
+            src = np.where(valid, nbr, 0)
+            return np.asarray(vm.predict(np.maximum(0.5 * (dens[sf][src] + dens[df]), _EPS)), float)
 
-            # ONE batched lattice solve over ALL nodes (the perf win). A node with no neighbour message
-            # (both prec=0) is solved on its own strand+global evidence — the intrinsic solve folds in here.
-            psi = _local_loglik(
-                statics.u_pos, statics.u_neg, statics.spliced_pos, statics.spliced_neg,
-                fp, fn, kappa, od_g, od_r, lattice,
-                strand_obs=statics.strand_obs, global_logprior=global_lp,
-                gdna_imp_mode=mode_g, gdna_imp_prec=prec_g,
-                rna_imp_mode=(mode_p, mode_n), rna_imp_prec=(prec_p, prec_n),
+        # forward edge: src=left, src face=1 (right) → dst face=0 (left). backward: src=right, face 0 → dst 1.
+        s2gf, s2gb = _edge_sigma2(left, 1, 0, dG, gdna_vm), _edge_sigma2(right, 0, 1, dG, gdna_vm)
+        s2pf, s2pb = _edge_sigma2(left, 1, 0, dP, rna_vm), _edge_sigma2(right, 0, 1, dP, rna_vm)
+        s2nf, s2nb = _edge_sigma2(left, 1, 0, dN, rna_vm), _edge_sigma2(right, 0, 1, dN, rna_vm)
+
+        def _scan(seq, nbr, sf, df, s2g, s2p, s2n):
+            """Sequential scan: project the running belief from each node's ``nbr`` (src face ``sf`` → dst face
+            ``df``) into the dst, then fold it into the dst's running belief (local ⊗ incoming message; NOT the
+            reverse message — true tree BP). Returns the per-node message (mode, prec) per component. O(m)."""
+            fbg, fbp, fbn = fg_loc.copy(), fp_loc.copy(), fn_loc.copy()  # running belief (starts at local)
+            vbg, vbp, vbn = vg_loc.copy(), vp_loc.copy(), vn_loc.copy()
+            amg, apg = np.zeros(n_nodes), np.zeros(n_nodes)  # gDNA message (mode, prec)
+            amp, app = np.zeros(n_nodes), np.zeros(n_nodes)  # RNA-pos
+            amn, apn = np.zeros(n_nodes), np.zeros(n_nodes)  # RNA-neg
+            EGs, EGd, ERs, ERd, ESPs = EG[sf], EG[df], ER[sf], ER[df], ESP[sf]
+            MSs, MSd, SPs, SPd, SNs, SNd = MS[sf], MS[df], SP[sf], SP[df], SN[sf], SN[df]
+            for i in seq:
+                lsrc = nbr[i]
+                if lsrc < 0:
+                    continue
+                md = MSd[i] if MSd[i] > _EPS else _EPS
+                egd = EGd[i] if EGd[i] > _EPS else _EPS
+                erd = ERd[i] if ERd[i] > _EPS else _EPS
+                unspl = solvable[lsrc] and MSs[lsrc] > _EPS  # solvable unspliced source (gDNA + nascent RNA)
+                sm = MSs[lsrc] if unspl else 0.0
+                # gDNA — solvable unspliced source only.
+                if unspl:
+                    eg = EGs[lsrc] if EGs[lsrc] > _EPS else _EPS
+                    rho = fbg[lsrc] * sm / eg
+                    vo = (sm / eg) ** 2 * vbg[lsrc]
+                    pois = (rho + PSEUDO / eg) / eg
+                    pr = (md / egd) ** 2 / max(vo + s2g[i] + pois, _EPS)
+                    # mode is a FRACTION ∈ [0,1]: the source density expressed as the dst fraction. Unclipped it
+                    # can run to 1e4+ when the source is denser than the dst can hold (cliff / low-count dst),
+                    # and `−½·prec·(f−mode)²` over the lattice then amplifies the pull by `mode`× (a vertex slam).
+                    mo = min(max(rho * egd / md, 0.0), 1.0)
+                    amg[i], apg[i] = mo, pr
+                    pt = pg_loc[i] + pr
+                    fbg[i], vbg[i] = (pg_loc[i] * fg_loc[i] + pr * mo) / pt, 1.0 / pt
+                # RNA-pos — nascent (from a solvable unspliced source) + one-sided spliced/MATURE floor.
+                if fp[i] and fp[lsrc] and (sm > _EPS or SPs[lsrc] > _EPS):
+                    er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
+                    esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
+                    rho = fbp[lsrc] * sm / er + SPs[lsrc] / esp
+                    vo = (sm / er) ** 2 * vbp[lsrc] if sm > _EPS else 0.0
+                    pois = (rho + PSEUDO / er) / er
+                    pr = (md / erd) ** 2 / max(vo + s2p[i] + pois, _EPS)
+                    mo = min(max((rho * erd - SPd[i]) / md, 0.0), 1.0)  # fraction ∈[0,1] (also kills spliced over-sub <0)
+                    amp[i], app[i] = mo, pr
+                    pt = pp_loc[i] + pr
+                    fbp[i], vbp[i] = (pp_loc[i] * fp_loc[i] + pr * mo) / pt, 1.0 / pt
+                # RNA-neg.
+                if fn[i] and fn[lsrc] and (sm > _EPS or SNs[lsrc] > _EPS):
+                    er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
+                    esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
+                    rho = fbn[lsrc] * sm / er + SNs[lsrc] / esp
+                    vo = (sm / er) ** 2 * vbn[lsrc] if sm > _EPS else 0.0
+                    pois = (rho + PSEUDO / er) / er
+                    pr = (md / erd) ** 2 / max(vo + s2n[i] + pois, _EPS)
+                    mo = min(max((rho * erd - SNd[i]) / md, 0.0), 1.0)  # fraction ∈[0,1]
+                    amn[i], apn[i] = mo, pr
+                    pt = pn_loc[i] + pr
+                    fbn[i], vbn[i] = (pn_loc[i] * fn_loc[i] + pr * mo) / pt, 1.0 / pt
+            return amg, apg, amp, app, amn, apn
+
+        a = _scan(order_list, left, 1, 0, s2gf, s2pf, s2nf)        # forward (α: left context)
+        b = _scan(order_list[::-1], right, 0, 1, s2gb, s2pb, s2nb)  # backward (β: right context)
+
+        # (D) combine α⊗β (precision-weighted product) per component → one batched FINAL solve.
+        def _comb(am_a, ap_a, am_b, ap_b):
+            pc = ap_a + ap_b
+            return np.where(pc > _EPS, (ap_a * am_a + ap_b * am_b) / np.maximum(pc, _EPS), 0.0), pc
+
+        mode_g, prec_g = _comb(a[0], a[1], b[0], b[1])
+        mode_p, prec_p = _comb(a[2], a[3], b[2], b[3])
+        mode_n, prec_n = _comb(a[4], a[5], b[4], b[5])
+        psi = _local_loglik(
+            statics.u_pos, statics.u_neg, statics.spliced_pos, statics.spliced_neg,
+            fp, fn, kappa, od_g, od_r, lattice,
+            strand_obs=statics.strand_obs, global_logprior=global_lp,
+            gdna_imp_mode=mode_g, gdna_imp_prec=prec_g,
+            rna_imp_mode=(mode_p, mode_n), rna_imp_prec=(prec_p, prec_n),
+        )
+        # write back only SOLVABLE nodes (G1 sinks / empty keep their signature-binary init).
+        mg_, mp_, mn_, vg_, vp_, vn_ = _node_marginals(psi, fpg, fng, fgg)
+        f_g = np.where(solvable, np.clip(mg_, 0.0, 1.0), f_g)
+        f_pos = np.where(solvable, np.clip(mp_, 0.0, 1.0), f_pos)
+        f_neg = np.where(solvable, np.clip(mn_, 0.0, 1.0), f_neg)
+        var_g = np.where(solvable, vg_, var_g)
+        var_pos = np.where(solvable, vp_, var_pos)
+        var_neg = np.where(solvable, vn_, var_neg)
+
+        if _capture is not None:  # inert diagnostic hook (overwritten each outer iter → ends on the last)
+            # strand-ONLY local belief (no global prior, no messages) — to split the LOCAL error into the
+            # strand likelihood vs the global gDNA prior contribution.
+            fg_strand = _node_marginals(
+                _local_loglik(
+                    statics.u_pos, statics.u_neg, statics.spliced_pos, statics.spliced_neg,
+                    fp, fn, kappa, od_g, od_r, lattice, strand_obs=statics.strand_obs, global_logprior=None,
+                ), fpg, fng, fgg,
+            )[0]
+            _capture.update(
+                fg_loc=fg_loc, fg_strand=fg_strand, fp_loc=fp_loc, fn_loc=fn_loc,
+                vg_loc=vg_loc, vp_loc=vp_loc, vn_loc=vn_loc,
+                a_fwd=a, b_bwd=b, mode_g=mode_g, prec_g=prec_g, mode_p=mode_p, prec_p=prec_p,
+                mode_n=mode_n, prec_n=prec_n, f_g=f_g.copy(), f_pos=f_pos.copy(), f_neg=f_neg.copy(),
+                var_g=var_g.copy(), solvable=solvable, rho_global=rho_global, gdna_vm=gdna_vm, rna_vm=rna_vm,
+                # boundary-emission geometry: a source emits gDNA iff solvable & facing unspliced mass>0;
+                # RNA iff free_s & (unspliced or spliced facing mass). Capture the faces to characterize it.
+                mass_l=MS[0], mass_r=MS[1], spl_l=SP[0] + SN[0], spl_r=SP[1] + SN[1],
+                free_pos=np.asarray(fp, bool), free_neg=np.asarray(fn, bool),
+                # enrichment transfer ê(z): the fitted object + the predictor z + the apply (AMBIG-exon) mask +
+                # the global geometry (μ = clip(ρ·eff_global/mass_global, 0, 1) is the implied prior fraction).
+                ehat=ehat, z_enrich=z_enrich, enrich_apply=enrich_apply, enrich_sig=enrich_sig,
+                eff_global=eff_global, mass_global=mass_global,
             )
-            # write back only SOLVABLE nodes (G1 sinks / empty keep their signature-binary init).
-            f_g = np.where(solvable, np.clip(_fg_median(psi, fgg), 0.0, 1.0), f_g)
-            f_pos = np.where(solvable, np.clip(_axis_mean(psi, fpg), 0.0, 1.0), f_pos)
-            f_neg = np.where(solvable, np.clip(_axis_mean(psi, fng), 0.0, 1.0), f_neg)
-            var_g = np.where(solvable, _fg_var(psi, fgg), var_g)
-            var_pos = np.where(solvable, _fg_var(psi, fpg), var_pos)
-            var_neg = np.where(solvable, _fg_var(psi, fng), var_neg)
-            if max(
-                (float(np.max(np.abs(cur - p))) if cur.size else 0.0)
-                for cur, p in ((f_g, prev[0]), (f_pos, prev[1]), (f_neg, prev[2]))
-            ) < convergence_delta:
-                break
 
         # OUTER LOOP — refit BOTH var~mean reliability curves on the inner-converged belief (SYMMETRIC: neither
         # gDNA nor RNA privileged) + recompute the gDNA global log-prior with the new gdna_vm (ρ_global / ê stay
