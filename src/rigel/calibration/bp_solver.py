@@ -941,10 +941,12 @@ def node_sweep(
     The per-node ψ solve integrates: the strand likelihood, the Jeffreys reference (single-strand nodes), the
     count-space global NB prior (ALL solvable nodes — the fork is dissolved), and the gDNA + per-strand RNA
     imputation messages (the spliced/MATURE floor rides the RNA message via the half-triangle ``ESP`` eff-len).
-    The RNA message on strand s flows only where strand s is continuous on both endpoints (``free_s``); gDNA /
-    nascent need a SOLVABLE unspliced source. Only G2/G3 nodes with data are written; G1 sinks + empty nodes keep
-    their init; a node with no neighbour message is solved on its own strand+global evidence (the intrinsic solve
-    folds into the final batched solve at prec=0). ``max_passes``/``convergence_delta`` are retained for API
+    The emission gate is a three-term Boolean over the components (gDNA / +RNA / −RNA): each RNA strand flows
+    only where that strand is continuous on both endpoints (``free_s``); gDNA is genomically continuous and
+    strand-agnostic, so it flows wherever there is unspliced facing mass — including across TSS/TES and other G1
+    seams (a locked all-gDNA node is a confident emitter). Only G2/G3 nodes with data are written; G1 sinks +
+    empty nodes keep their init; a node with no neighbour message is solved on its own strand+global evidence
+    (the intrinsic solve folds into the final batched solve at prec=0). ``max_passes``/``convergence_delta`` are retained for API
     compatibility but unused — FB is single-pass (exact on the chain given the local beliefs). Returns
     ``(NodeBelief, outer_deltas)`` (the per-outer-iteration max-Δf_g — the convergence diagnostic)."""
     left = np.asarray(chain.left)
@@ -976,21 +978,14 @@ def node_sweep(
     fpg, fng, fgg = lattice
     kappa = float(rna_sense_frac)
     od_g, od_r = gdna_strand_overdispersion, rna_strand_overdispersion
+    # Two distinct gates, both from the region SIGNATURE (never the counts — count-zero-info):
+    #   * SOLVE gate (`solvable`): a node deconvolves its own gDNA-vs-RNA split iff it admits ≥1 RNA strand and
+    #     has unspliced mass. A G1 node — no admissible RNA strand: an intergenic region, or a gene-boundary seam
+    #     (TSS/TES, opposite-strand exon↔exon) — is a LOCKED all-gDNA node ({0,0,1}); it is not solved, keeping
+    #     its init (RNA cannot cross a gene boundary, so its unspliced mass is purely gDNA).
+    #   * EMISSION gate (per component, in `_scan`): which MESSAGES a node sends. A three-term Boolean over the
+    #     components gDNA / +RNA / −RNA, structural and symmetric — defined at the top of the scan loop.
     solvable = (fp | fn) & (statics.mass_unspliced > 0.0)
-
-    # A valid MESSAGE SOURCE emits one of two kinds of evidence toward its facing side (both per-component below
-    # in the Jacobi `_dir`):
-    #   * gDNA / nascent — requires UNSPLICED facing mass AND SOLVABILITY: an unsolved node (a G1 gDNA-sink —
-    #     intergenic / TES, fp=fn=False) keeps its signature-binary init {0,0,1} and carries no gDNA EVIDENCE,
-    #     only a prior default; its (assumed) gDNA level is carried by the global, so it must not ALSO emit a
-    #     confident count-space message (which would propagate phantom gDNA once the (M/E)² attenuation is gone).
-    #   * MATURE (spliced) — requires only SPLICED facing mass: the one-sided motif-stranded spliced floor is a
-    #     FIXED, directly-observed quantity (independent of the source's solve), so a junction boundary can
-    #     impute mature RNA onto its adjacent exon even with ZERO unspliced crossing. Without this, in a
-    #     low-nascent library ~all junction boundaries (unspliced≈0 ⇒ not solvable) are wrongly treated as
-    #     empty, the mature signal is stranded there, and single-strand exons fall to the message-less intrinsic
-    #     solve ⇒ phantom gDNA (the spliced-imputation blockage). A node with NO neighbour message gets the
-    #     intrinsic solve for free — the batched solve runs with prec=0 there (strand + global only).
 
     # BOOTSTRAP (outer-iteration-0 var~mean). The population gDNA prior on gDNA-clean seeds (§4.3): the
     # exposure-pooled rate ρ_global (the ANCHORED global baseline — never refit) + var_mean (its variance) +
@@ -1094,10 +1089,15 @@ def node_sweep(
                 md = MSd[i] if MSd[i] > _EPS else _EPS
                 egd = EGd[i] if EGd[i] > _EPS else _EPS
                 erd = ERd[i] if ERd[i] > _EPS else _EPS
-                unspl = solvable[lsrc] and MSs[lsrc] > _EPS  # solvable unspliced source (gDNA + nascent RNA)
-                sm = MSs[lsrc] if unspl else 0.0
-                # gDNA — solvable unspliced source only.
-                if unspl:
+                sm = MSs[lsrc]  # source facing unspliced mass
+                # STRUCTURAL emission gate — one Boolean per component; src AND dst must admit it. gDNA is
+                # genomically universal (admitted everywhere) ⇒ it gates on facing mass alone; each RNA strand
+                # transmits only where THAT strand is continuous across the edge (free_pos / free_neg on both).
+                emit_g = sm > _EPS
+                emit_p = fp[lsrc] and fp[i] and (sm > _EPS or SPs[lsrc] > _EPS)
+                emit_n = fn[lsrc] and fn[i] and (sm > _EPS or SNs[lsrc] > _EPS)
+                # gDNA — a G1 seam (intergenic / TSS / TES) is a locked, confident all-gDNA emitter.
+                if emit_g:
                     eg = EGs[lsrc] if EGs[lsrc] > _EPS else _EPS
                     rho = fbg[lsrc] * sm / eg
                     vo = (sm / eg) ** 2 * vbg[lsrc]
@@ -1110,8 +1110,8 @@ def node_sweep(
                     amg[i], apg[i] = mo, pr
                     pt = pg_loc[i] + pr
                     fbg[i], vbg[i] = (pg_loc[i] * fg_loc[i] + pr * mo) / pt, 1.0 / pt
-                # RNA-pos — nascent (from a solvable unspliced source) + one-sided spliced/MATURE floor.
-                if fp[i] and fp[lsrc] and (sm > _EPS or SPs[lsrc] > _EPS):
+                # RNA-pos — nascent + one-sided spliced/MATURE floor (strand-continuous edge only).
+                if emit_p:
                     er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
                     esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
                     rho = fbp[lsrc] * sm / er + SPs[lsrc] / esp
@@ -1122,8 +1122,8 @@ def node_sweep(
                     amp[i], app[i] = mo, pr
                     pt = pp_loc[i] + pr
                     fbp[i], vbp[i] = (pp_loc[i] * fp_loc[i] + pr * mo) / pt, 1.0 / pt
-                # RNA-neg.
-                if fn[i] and fn[lsrc] and (sm > _EPS or SNs[lsrc] > _EPS):
+                # RNA-neg — symmetric.
+                if emit_n:
                     er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
                     esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
                     rho = fbn[lsrc] * sm / er + SNs[lsrc] / esp
@@ -1178,8 +1178,8 @@ def node_sweep(
                 a_fwd=a, b_bwd=b, mode_g=mode_g, prec_g=prec_g, mode_p=mode_p, prec_p=prec_p,
                 mode_n=mode_n, prec_n=prec_n, f_g=f_g.copy(), f_pos=f_pos.copy(), f_neg=f_neg.copy(),
                 var_g=var_g.copy(), solvable=solvable, rho_global=rho_global, gdna_vm=gdna_vm, rna_vm=rna_vm,
-                # boundary-emission geometry: a source emits gDNA iff solvable & facing unspliced mass>0;
-                # RNA iff free_s & (unspliced or spliced facing mass). Capture the faces to characterize it.
+                # boundary-emission geometry: gDNA emits iff facing unspliced mass>0 (strand-agnostic);
+                # RNA iff free_s on both endpoints & (unspliced or spliced facing mass). Capture the faces.
                 mass_l=MS[0], mass_r=MS[1], spl_l=SP[0] + SN[0], spl_r=SP[1] + SN[1],
                 free_pos=np.asarray(fp, bool), free_neg=np.asarray(fn, bool),
                 # enrichment transfer ê(z): the fitted object + the predictor z + the apply (AMBIG-exon) mask +

@@ -400,6 +400,57 @@ def test_gdna_sweep_factor1_uniform():
     assert np.allclose(dens.rho_g_right[ambig], rho, atol=0.05)
 
 
+def test_gdna_emits_across_tss_tes_seam():
+    """Structural-gate regression (`message_state_separation.md`): gDNA is genomically continuous, so the
+    gene-boundary seams (TSS/TES) flanking a SINGLE-EXON gene must RELAY a gDNA message into it from the
+    intergenic regions beyond — even though neither RNA strand is continuous across those seams. Before the
+    fix the gDNA message was gated by RNA strand-continuity (`solvable`), so such a gene (both flanks
+    intergenic) was a no-relay node, solving on its own local belief alone.
+
+    Conversely, the intergenic flank is structurally RNA-free and emits ZERO RNA authority: the exon receives
+    no +/− RNA message from it (a node's confidence about its OWN all-gDNA state grants no authority over a
+    neighbour's RNA). The assertions lock the two halves of the three-term emission gate.
+    """
+    rho = 0.5
+    gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
+    chain = build_node_chain(np.array([0, 3]), np.array([0, 4]))  # intergenic | exon+ | intergenic
+    L = np.array([1000.0, 1000.0, 1000.0])
+    sig = np.array([0, BIT_EXON_POS, 0], dtype=np.int64)
+    sc = np.array([TS_NONE, TS_POS, TS_NONE], dtype=np.int8)
+    region_arrays = SimpleNamespace(strand_class=sc, signature=sig, region_size_bp=L)
+    cmass = rho * region_eff_length(L, gdna_fl)
+    substrate = SimpleNamespace(
+        contained=_cview(cmass / 2, cmass / 2, mass_u=cmass, mass_spl=np.zeros(3))
+    )
+    side_eff = boundary_side_eff_length(gdna_fl, L)
+    lr, rr = np.array([-1, 0, 1, 2]), np.array([0, 1, 2, -1])
+    lmass = np.where(lr >= 0, rho * side_eff[np.clip(lr, 0, 2)], 0.0)
+    rmass = np.where(rr >= 0, rho * side_eff[np.clip(rr, 0, 2)], 0.0)
+    left = _cview(lmass / 2, lmass / 2, mass_u=lmass, mass_spl=np.zeros(4))
+    right = _cview(rmass / 2, rmass / 2, mass_u=rmass, mass_spl=np.zeros(4))
+    bsub = SimpleNamespace(
+        left_region=lr, right_region=rr, left=left, right=right,
+        junction_strand=np.zeros(len(lr), dtype=np.int8),
+    )
+
+    geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
+    st = build_node_statics(chain, substrate, bsub, region_arrays)
+    belief = init_beliefs(
+        chain, substrate, bsub, region_arrays, rna_sense_frac=0.7, n_grid=40, statics=st
+    )
+    cap = {}
+    final, _ = node_sweep(
+        chain, st, geom, belief, region_arrays, bsub, rna_sense_frac=0.7, n_grid=40, _capture=cap
+    )
+    exon = 3  # chain id of the single-exon gene (R1), flanked on both sides by TSS/TES seams
+    # THE FIX — the exon receives a gDNA relay across the seam (incoming precision > 0). Pre-fix: 0 (no relay).
+    assert cap["prec_g"][exon] > 0.0, "single-exon gene got NO gDNA relay across the TSS/TES seam"
+    # The intergenic flanks emit ZERO RNA authority: the exon receives no +/− RNA message from them.
+    assert cap["prec_p"][exon] == 0.0 and cap["prec_n"][exon] == 0.0
+    # State ⊥ messages: the intergenic nodes stay locked all-gDNA (confident own-state, ignore all inputs).
+    assert final.f_g[1] == 1.0 and final.f_g[5] == 1.0
+
+
 def test_gdna_sweep_zero_gdna_pin_and_monotone():
     # A pure-RNA chain intron+ | AMBIG(in+|in−) | intron−. The AMBIG starts at the all-gDNA init f_g=1; the
     # global (driven to ~0 by the RNA introns) + the RNA-neighbour messages must pull the phantom gDNA down,

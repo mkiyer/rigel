@@ -159,7 +159,7 @@ def main():
         rtt = rt_node[right[b]] if right[b] >= 0 else -1
         return int(lt), int(rtt)
 
-    emits_g = solv & ((ml > _EPS) | (mr > _EPS))                       # gDNA: solvable + unspliced crossing
+    emits_g = (ml > _EPS) | (mr > _EPS)  # gDNA: facing unspliced crossing mass (strand-agnostic structural gate)
     has_spl = (sl > _EPS) | (sr > _EPS)
     print("\nBOUNDARY EMISSION (a boundary emits a gDNA msg iff solvable & has UNSPLICED crossing mass):")
     cats = {}
