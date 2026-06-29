@@ -153,7 +153,7 @@ def calibrate(
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,
-        n_grid=config.sweep_n_grid, statics=statics,
+        n_grid=config.sweep_n_grid, logodds_window=config.sweep_logodds_window, statics=statics,
     )
     belief, sweep_deltas = node_sweep(
         chain, statics, geometry, belief, region_arrays, boundary_substrate,
@@ -164,6 +164,8 @@ def calibrate(
         convergence_delta=config.sweep_convergence_delta,
         max_outer=config.sweep_max_outer,
         outer_convergence_delta=config.sweep_outer_convergence_delta,
+        logodds_window=config.sweep_logodds_window,
+        n_tilt=config.sweep_n_tilt,
     )
     regions = chain_region_deconv(chain, belief, substrate)
     left, right = chain_boundary_side_deconv(chain, belief, substrate)

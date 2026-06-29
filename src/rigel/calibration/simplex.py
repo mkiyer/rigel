@@ -6,8 +6,8 @@ cut into three slices ``(f_rna₊, f_rna₋, f_g)`` summing to 1 — **no nascen
 Evidence *pushes* the point on the 2-simplex; the answer is always a normalized partition, so
 over-subtraction is structurally impossible and an under-constrained slice stays wide ("unknown").
 
-This module is the **per-node solve only** (plan §3/§7). Its ``_simplex_lattice`` and
-``_mixture_strand_loglik`` are the reusable primitives the ``simplex_sweep`` grid sum-product builds on.
+This module is the **per-node solve only** (plan §3/§7). Its ``_mixture_strand_loglik`` is the reusable
+three-component strand-likelihood primitive the ``simplex_logodds`` log-density solve builds on.
 
 The strand term is the **three-component generalization** of :func:`strand_likelihood.strand_loglik`:
 of ``N`` unspliced fragments a fraction ``f_g`` are gDNA (genomic-plus rate ½, overdispersion ``od_g``),
@@ -37,25 +37,9 @@ from __future__ import annotations
 
 import numpy as np
 
-__all__ = ["_simplex_lattice", "_mixture_strand_loglik"]
+__all__ = ["_mixture_strand_loglik"]
 
 _EPS = 1.0e-9
-
-
-def _simplex_lattice(n_grid: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """The ``(f₊, f₋, f_g)`` lattice on the 2-simplex: all ``(i, j)`` with ``i+j ≤ n_grid``, ``/n_grid``.
-
-    Returns three length-``P`` arrays (``P = (n_grid+1)(n_grid+2)/2``). The barycentric grid is uniform
-    over the triangle, so the softmax posterior mean over it is an unbiased simplex integral.
-    """
-    g = int(n_grid)
-    ii, jj = np.meshgrid(np.arange(g + 1), np.arange(g + 1), indexing="ij")
-    keep = (ii + jj) <= g
-    i = ii[keep].astype(np.float64)
-    j = jj[keep].astype(np.float64)
-    f_pos = i / g
-    f_neg = j / g
-    return f_pos, f_neg, 1.0 - f_pos - f_neg
 
 
 def _mixture_strand_loglik(u_pos, n, f_g, f_pos, f_neg, kappa, od_g, od_r):

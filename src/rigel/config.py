@@ -255,11 +255,19 @@ class CalibrationConfig:
     #: ``gdna_strand_prior_weight``; same default.
     rna_strand_prior_weight: float = 30.0
 
-    #: **Sweep lattice resolution** ``K`` for the per-node 2-simplex ``(f₊, f₋, f_g)`` grid
-    #: (``simplex_sweep._solve_nodes``, driven by ``bp_solver.node_sweep``). The 2-simplex has
-    #: ``(K+1)(K+2)/2`` points; ``K=60`` matches per-node accuracy at a tractable cost (``K=20``
-    #: over-calls / under-resolves the zero-DNA case).
+    #: **Sweep grid resolution** ``K`` for the per-node log-density log-odds solve over ``λ = logit(f_g)``
+    #: (``simplex_logodds``, driven by ``bp_solver.node_sweep``; single-strand nodes are exact 1-D, AMBIG
+    #: nodes marginalize the RNA tilt ``τ``). ``K=60`` matches per-node accuracy at a tractable cost
+    #: (``K=20`` over-calls / under-resolves the zero-DNA case).
     sweep_n_grid: int = 60
+
+    #: **Log-odds grid window** ``L``: ``λ ∈ [−L, L]`` ⇒ ``f_g ∈ [σ(−L), σ(L)]`` (``L=10`` ⇒
+    #: ``[4.5e-5, 1−4.5e-5]``, bracketing the vertex mass Phase 0 measured).
+    sweep_logodds_window: float = 10.0
+
+    #: **Inner tilt-grid resolution** ``K_t`` for AMBIG nodes' RNA tilt ``τ`` (the 2-D ``(λ,τ)`` solve).
+    #: ``None`` ⇒ reuse ``sweep_n_grid``.
+    sweep_n_tilt: int | None = None
 
     #: **Inner-loop max passes** (per outer iteration). The solver is a NESTED loop: the INNER loop
     #: converges the per-node beliefs by directional (L→R then R→L) sweeps at FIXED var~mean, stopping
@@ -289,6 +297,11 @@ class CalibrationConfig:
         if self.sweep_n_grid < 2:
             raise ValueError(
                 f"CalibrationConfig.sweep_n_grid must be >= 2; got {self.sweep_n_grid}."
+            )
+        if not (float(self.sweep_logodds_window) > 0.0):
+            raise ValueError(
+                "CalibrationConfig.sweep_logodds_window (L) must be > 0; "
+                f"got {self.sweep_logodds_window}."
             )
         if self.sweep_max_passes < 1:
             raise ValueError(

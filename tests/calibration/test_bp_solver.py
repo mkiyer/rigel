@@ -310,34 +310,38 @@ def test_init_tss_boundary_is_black_hole():
     assert b.f_g[2] == 1.0 and b.var_gdna[2] == 0.0 and b.var_pos[2] == 0.0 and b.var_neg[2] == 0.0
 
 
-def test_precision_state_strand_resolution():
-    """Phase-1 lock (precision_state_design.md §3): the moment-matched Var(f_g) reflects strand-resolving
-    power — a BALANCED node (gDNA-indistinguishable from balanced RNA) is uncertain (high Var(f_g)); a
-    confident single-strand node is sharp (low Var(f_g)). This is the precision the honest message send (Phase
-    2) will consume. A node with no fragments reports zero variance."""
-    from rigel.calibration.simplex_sweep import _solve_nodes
+def test_precision_state_count_resolution():
+    """The log-density solver's precision state is ``Var(log f_g)`` — the message currency (D2). It reflects
+    EVIDENCE: a node with more fragments (same composition) resolves its log-density sharper, so a lower
+    ``Var(log f_g)`` ⇒ a more confident message. (In LOG space a confident ``f_g→0`` node has WIDE variance —
+    a near-zero gDNA density carries little reliable gDNA-density information to impute, the
+    "zero-density-is-not-a-measurement" principle — so the lattice's linear ``Var(f_g)`` ordering does not
+    carry over.) A node with no fragments reports zero variance."""
+    from rigel.calibration.simplex_logodds import _solve_nodes_logodds_all
 
-    kappa = 0.01
-    # node 0 = balanced AMBIG (both strands free, u_pos≈u_neg); node 1 = confident single-strand + (− locked).
-    u_pos = np.array([100.0, 2.0])
-    u_neg = np.array([100.0, 200.0])
+    kappa = 0.99
     z = np.zeros(2)
+    # Same single-strand + composition at two evidence levels: node 1 has 20× the counts of node 0.
+    u_pos = np.array([20.0, 400.0])
+    u_neg = np.array([20.0, 400.0])
     allow_pos = np.array([True, True])
-    allow_neg = np.array([True, False])
-    strand_obs = allow_pos ^ allow_neg  # [False=AMBIG, True=single-strand]
-    mass = np.array([200.0, 202.0])
-    d = _solve_nodes(u_pos, u_neg, z, z, allow_pos, allow_neg, strand_obs, mass, z,
-                     kappa=kappa, od_g=0.2, od_r=0.1, n_grid=60)
+    allow_neg = np.array([False, False])
+    strand_obs = allow_pos ^ allow_neg  # both single-strand
+    mass = u_pos + u_neg
+    d = _solve_nodes_logodds_all(u_pos, u_neg, z, z, allow_pos, allow_neg, strand_obs, mass, z,
+                                 kappa=kappa, od_g=0.2, od_r=0.1, n_grid=60)
     assert d.gdna_frac_var is not None
-    # the balanced node cannot resolve gDNA-vs-RNA ⇒ higher posterior Var(f_g) than the confident node.
-    assert d.gdna_frac_var[0] > d.gdna_frac_var[1]
+    # same composition ⇒ same f_g; more fragments ⇒ sharper (lower Var(log f_g)).
+    assert np.isclose(d.gdna_frac[0], d.gdna_frac[1])
+    assert d.gdna_frac_var[1] < d.gdna_frac_var[0]
     # all per-component variances are present, finite, non-negative for active nodes.
     for v in (d.gdna_frac_var, d.rna_pos_frac_var, d.rna_neg_frac_var):
         assert np.all(np.isfinite(v)) and np.all(v >= 0.0)
     # a no-fragment node is inactive ⇒ zero variance on every component.
-    d0 = _solve_nodes(np.array([0.0]), np.array([0.0]), np.array([0.0]), np.array([0.0]),
-                      np.array([True]), np.array([True]), np.array([False]),
-                      np.array([0.0]), np.array([0.0]), kappa=kappa, od_g=0.2, od_r=0.1, n_grid=60)
+    d0 = _solve_nodes_logodds_all(np.array([0.0]), np.array([0.0]), np.array([0.0]), np.array([0.0]),
+                                  np.array([True]), np.array([True]), np.array([False]),
+                                  np.array([0.0]), np.array([0.0]), kappa=kappa, od_g=0.2, od_r=0.1,
+                                  n_grid=60)
     assert d0.gdna_frac_var[0] == 0.0 and d0.rna_pos_frac_var[0] == 0.0
 
 
@@ -516,20 +520,20 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
 
 
 def test_density_message_two_sided_mode_not_vertex():
-    """A density-Gaussian gDNA message (mode=0.2, strong prec) on a balanced AMBIG node (flat strand) pulls f_g
-    TOWARD 0.2 — two-sided by construction (a Gaussian, no edge log-wall), not to the f_g=1 vertex."""
-    from rigel.calibration.simplex_sweep import _fg_median, _local_loglik, _simplex_lattice
+    """A LOG-fraction gDNA message (mode=log 0.2, strong prec) on a balanced AMBIG node (flat strand) pulls
+    f_g TOWARD 0.2 — two-sided by construction (a Gaussian on log f_g, no edge wall), not to the f_g=1
+    vertex. The log-density log-odds solver's message form."""
+    from rigel.calibration.simplex_logodds import _solve_nodes_logodds_all
 
-    lat = _simplex_lattice(80)
-    _, _, fgg = lat
+    z = np.zeros(1)
     # AMBIG node, balanced counts ⇒ the strand is flat (κ=0.5); only the message shapes f_g.
-    psi = _local_loglik(
-        np.array([50.0]), np.array([50.0]), np.zeros(1), np.zeros(1),
-        np.array([True]), np.array([True]), 0.5, 0.0, 0.0, lat,
-        strand_obs=np.array([False]),
-        gdna_imp_mode=np.array([0.2]), gdna_imp_prec=np.array([200.0]),
+    d = _solve_nodes_logodds_all(
+        np.array([50.0]), np.array([50.0]), z, z,
+        np.array([True]), np.array([True]), np.array([False]),
+        np.array([100.0]), z, kappa=0.5, od_g=0.0, od_r=0.0, n_grid=80,
+        gdna_imp_mode=np.array([np.log(0.2)]), gdna_imp_prec=np.array([200.0]),
     )
-    fg = float(_fg_median(psi, fgg)[0])
+    fg = float(d.gdna_frac[0])
     assert abs(fg - 0.2) < 0.05, fg
 
 
@@ -537,15 +541,14 @@ def test_density_message_defers_to_decisive_strand():
     """Emergent deference: a WEAK gDNA message (prec=3) trying to pull f_g→0.9 must lose to a decisive
     single-strand node's ~1000-fragment strand likelihood — f_g stays ≈0 (the honest precision blend means a
     weak message cannot override the data; no log-wall to force it off zero)."""
-    from rigel.calibration.simplex_sweep import _fg_median, _local_loglik, _simplex_lattice
+    from rigel.calibration.simplex_logodds import _solve_nodes_logodds_all
 
-    lat = _simplex_lattice(80)
-    _, _, fgg = lat
-    psi = _local_loglik(
-        np.array([1000.0]), np.array([5.0]), np.zeros(1), np.zeros(1),
-        np.array([True]), np.array([False]), 0.99, 0.0, 0.0, lat,
-        strand_obs=np.array([True]),
-        gdna_imp_mode=np.array([0.9]), gdna_imp_prec=np.array([3.0]),
+    z = np.zeros(1)
+    d = _solve_nodes_logodds_all(
+        np.array([1000.0]), np.array([5.0]), z, z,
+        np.array([True]), np.array([False]), np.array([True]),
+        np.array([1005.0]), z, kappa=0.99, od_g=0.0, od_r=0.0, n_grid=80,
+        gdna_imp_mode=np.array([np.log(0.9)]), gdna_imp_prec=np.array([3.0]),
     )
-    fg = float(_fg_median(psi, fgg)[0])
+    fg = float(d.gdna_frac[0])
     assert fg < 0.1, fg

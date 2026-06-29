@@ -4,8 +4,8 @@ After the bipartite belief-propagation rebuild (:mod:`rigel.calibration.bp_solve
 deconvolution lives in the chain sweep. This module retains only the two pieces that still feed it:
 
 * :class:`NodeDeconv` — the per-node deconvolution result (a region or a boundary side), the schema
-  ``bp_solver``'s ``chain_region_deconv`` / ``chain_boundary_side_deconv`` and ``simplex_sweep._solve_nodes``
-  return, and that ``priors`` / ``derive`` consume.
+  ``bp_solver``'s ``chain_region_deconv`` / ``chain_boundary_side_deconv`` and
+  ``simplex_logodds._solve_nodes_logodds_all`` return, and that ``priors`` / ``derive`` consume.
 * :func:`boundary_side_seeds` — the exon–intron / exon–intergenic boundary-side ``(sense, total, gDNA
   weight)`` seeds for the gDNA strand-overdispersion fit (:mod:`rigel.calibration.gdna_strand`), complementing
   the contained-region seeds (needed under hybrid capture, which depletes off-target intergenic / intronic

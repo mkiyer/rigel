@@ -2,8 +2,9 @@
 
 Deconvolves each node's unspliced fragment mass into a pie ``(f_pos, f_neg, f_g)`` — sense-RNA /
 antisense-RNA / gDNA — over the unified region↔boundary chain (`node_chain`), by a pairwise, directional
-(L→R then R→L) Gauss-Seidel sweep. Each per-node solve (`simplex_sweep`) reconciles three sources of
-information: the intrinsic strand likelihood (the Beta-Binomial tilt — the only signal a count carries), the
+(L→R then R→L) Gauss-Seidel sweep. Each per-node solve (`simplex_logodds`, the log-density log-odds solver)
+reconciles three sources of information: the intrinsic strand likelihood (the Beta-Binomial tilt — the only
+signal a count carries), the
 cross-node imputation messages, and the population gDNA prior. Theory: the count-zero-information principle
 in `docs/calibration/CALIBRATION_ARCHITECTURE.md`; the message-precision model (count-currency variance
 floor) in `docs/calibration/precision_overshoot_design.md`.
@@ -26,6 +27,7 @@ Module layout:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -45,12 +47,9 @@ from .signature import (
     TS_NEG,
     TS_POS,
 )
-from .simplex_sweep import (
-    _binom_pseudo,
-    _local_loglik,
-    _node_marginals,
-    _simplex_lattice,
-    _solve_nodes,
+from .simplex_logodds import (
+    _logodds_grid,
+    _solve_nodes_logodds_all,
 )
 from .strand_deconv import NodeDeconv
 from .variance_model import BlendedVarMean, MonotoneMean, MonotoneVarMean
@@ -459,22 +458,23 @@ def init_beliefs(
     gdna_strand_overdispersion: float = 0.0,
     rna_strand_overdispersion: float = 0.0,
     n_grid: int,
+    logodds_window: float = 10.0,
     statics: "NodeStatics | None" = None,
 ) -> NodeBelief:
     """The signature-binary G1/G2/G3 initial :class:`NodeBelief` on the unified chain.
 
-    All chain nodes are strand-solved by one shared per-node core (the bare strand likelihood + the Jeffreys
-    reference at single-strand nodes; NO global prior, NO imputation — those enter the sweep, P2/P3). The
-    signature-binary class overrides (:func:`_type_belief`) then set the G1/G2/G3 belief. Single-strand
-    introns resolve to ``f_g≈0`` from the BB tilt alone (the zero-gDNA gate); intergenic / TSS sinks lock at
-    ``{0,0,1}``; AMBIG nodes hold ``{0,0,1}`` at MAX variance for the sweep. Pass ``statics`` to reuse a
-    prebuilt :class:`NodeStatics` (the sweep does)."""
+    All chain nodes are strand-solved by the log-density 1-D/2-D log-odds solver (:mod:`simplex_logodds`,
+    ``O(m·K)``; the bare strand likelihood + the Jeffreys reference at single-strand nodes; NO global prior,
+    NO imputation — those enter the sweep, P2/P3). The signature-binary class overrides (:func:`_type_belief`)
+    then set the G1/G2/G3 belief. Single-strand introns resolve to ``f_g≈0`` from the BB tilt alone (the
+    zero-gDNA gate); intergenic / TSS sinks lock at ``{0,0,1}``; AMBIG nodes hold ``{0,0,1}`` at MAX variance
+    for the sweep. Pass ``statics`` to reuse a prebuilt :class:`NodeStatics` (the sweep does)."""
     st = (
         statics
         if statics is not None
         else build_node_statics(chain, substrate, boundary_substrate, region_arrays)
     )
-    deconv = _solve_nodes(
+    deconv = _solve_nodes_logodds_all(
         st.u_pos,
         st.u_neg,
         st.spliced_pos,
@@ -488,6 +488,7 @@ def init_beliefs(
         od_g=gdna_strand_overdispersion,
         od_r=rna_strand_overdispersion,
         n_grid=n_grid,
+        L=logodds_window,
     )
     f_pos, f_neg, f_g, var_p, var_n, var_g = _type_belief(
         st.free_pos, st.free_neg, deconv, st.mass_unspliced
@@ -505,8 +506,12 @@ def init_beliefs(
 def _edge_varmean(chain, rho_left, rho_right, eff_left, eff_right, live):
     """Poisson-offset var~mean points over directed chain edges where BOTH endpoints are ``live`` (a bool mask
     — all nodes for gDNA; per-strand ``free_s`` continuity for RNA). For each directed edge the dst presents
-    its facing density/eff and the src the side facing the dst; point = ``(μ=ρ(dst), raw=(ρ(dst)−ρ(src))²,
-    offset=ρ(dst)/E(dst)+ρ(src)/E(src))``. Returns ``(means, raws, offs)`` lists (both sweep directions)."""
+    its facing density/eff and the src the side facing the dst. The predictor ``μ = 0.5(ρ_dst+ρ_src)`` (linear
+    density level — ``fit_offset`` takes ``log μ`` internally); the log-density RESPONSE is
+    ``raw=(log ρ_dst−log ρ_src)²``, ``offset=1/(ρ_dst·E_dst+1) + 1/(ρ_src·E_src+1)`` — the inverse-count
+    log-Poisson floor (``ρ·E=mass=count``; +1 pseudocount keeps it finite + O(1), matching ``raw``). So the
+    curve models ``Var(log ρ)`` vs the density level (the overhaul, D-plan §1.3). Returns ``(means, raws,
+    offs)`` lists (both sweep directions)."""
     left = np.asarray(chain.left)
     right = np.asarray(chain.right)
     live = np.asarray(live, dtype=bool)
@@ -535,13 +540,14 @@ def _edge_varmean(chain, rho_left, rho_right, eff_left, eff_right, live):
         idx, s = idx[keep], s[keep]
         dr, sr, de, se = d_rho[idx], s_rho[s], d_e[idx], s_e[s]
         ok = (dr > 0.0) & (sr > 0.0)
+        dr, sr, de, se = dr[ok], sr[ok], de[ok], se[ok]
         # Index σ²_bio by the MEAN of the two node densities — monotone-compatible (the cross-node
         # dispersion scales with the average level) AND uses both endpoints, vs indexing by ρ_dst alone
         # (query is then circular at the crushed dest) or ρ_src alone (breaks monotonicity: low-source /
         # high-dest edges are high-residual at low μ).
-        means.append(0.5 * (dr[ok] + sr[ok]))
-        raws.append((dr[ok] - sr[ok]) ** 2)
-        offs.append(dr[ok] / de[ok] + sr[ok] / se[ok])
+        means.append(0.5 * (dr + sr))
+        raws.append((np.log(dr) - np.log(sr)) ** 2)
+        offs.append(1.0 / (dr * de + 1.0) + 1.0 / (sr * se + 1.0))
     return means, raws, offs
 
 
@@ -632,13 +638,18 @@ def _gdna_seed_estimate(chain, statics, geometry, region_arrays, boundary_substr
     G = float(np.sum(sw * dens * eff))
     E_tot = max(float(np.sum(sw * eff)), _EPS)
     rho_global = (1.0 + G) / E_tot
-    var_mean = (1.0 + G) / (E_tot * E_tot)
+    # var_mean = the global rate-estimate variance, log-density form (D4, the delta method = this design's own
+    # 1/count principle): Var(log ρ̂) ≈ Var(ρ̂)/ρ̂² = [(1+G)/E_tot²]/[(1+G)/E_tot]² = 1/(1+G) — the inverse
+    # pooled effective count (NOT the opaque trigamma; transparent + consistent with pois_log=1/(count+1)).
+    # Gentle N→~0.5 at zero-gDNA (G=0).
+    var_mean = 1.0 / (1.0 + G)
     return rho_global, _fit_seed_varmean(chain, dens, eff, is_seed, seed_w), var_mean
 
 
 def _fit_seed_varmean(chain, dens, eff, is_seed, seed_w):
-    """σ²_g(μ) on adjacent SEED-SEED edges from the per-node seed gDNA density (the gDNA between-node spread).
-    Edge weight = ``min`` of the two endpoints' seed weights (the weaker endpoint limits reliability)."""
+    """σ²_g(μ) on adjacent SEED-SEED edges from the per-node seed gDNA density (the gDNA between-node spread),
+    in the log-density form (twin of :func:`_edge_varmean`). Edge weight = ``min`` of the two endpoints' seed
+    weights (the weaker endpoint limits reliability)."""
     left = np.asarray(chain.left)
     right = np.asarray(chain.right)
     is_seed = np.asarray(is_seed, bool)
@@ -652,9 +663,10 @@ def _fit_seed_varmean(chain, dens, eff, is_seed, seed_w):
         idx, s = idx[keep], s[keep]
         dr, sr, de, se = dens[idx], dens[s], eff[idx], eff[s]
         ok = (dr > 0.0) & (sr > 0.0)
-        means.append(0.5 * (dr[ok] + sr[ok]))
-        raws.append((dr[ok] - sr[ok]) ** 2)
-        offs.append(dr[ok] / de[ok] + sr[ok] / se[ok])
+        dr, sr, de, se = dr[ok], sr[ok], de[ok], se[ok]
+        means.append(0.5 * (dr + sr))
+        raws.append((np.log(dr) - np.log(sr)) ** 2)
+        offs.append(1.0 / (dr * de + 1.0) + 1.0 / (sr * se + 1.0))
         wts.append(np.minimum(seed_w[idx][ok], seed_w[s][ok]))
     cat = lambda p: np.concatenate(p) if p else np.zeros(0)  # noqa: E731
     return MonotoneVarMean.fit_offset(cat(means), cat(raws), cat(offs), cat(wts))
@@ -785,8 +797,10 @@ def fit_enrichment_transfer(
     w = float(ehat.w_enrich)
 
     pred = ehat.predict(zf)
-    raw = (rho_g - pred) ** 2                    # residual around the LEARNED mean (not the identity)
-    offset = rho_g / np.maximum(eff, _EPS)       # the node's own density Poisson sampling floor
+    # log-density σ²_level: response = squared LOG residual around ê(z); offset = inverse-count
+    # log-Poisson floor. Predictor stays the density ``pred`` (fit_offset takes log internally).
+    raw = (np.log(np.maximum(rho_g, _EPS)) - np.log(np.maximum(pred, _EPS))) ** 2
+    offset = 1.0 / (rho_g * np.maximum(eff, _EPS) + 1.0)
     # σ²_bio as a function of the ê(z) level — the GLOBAL prior's between-node spread. Fit it as the
     # unbiased conditional MEAN squared residual (population_spread): the pseudo-count N = ρ̂²/(σ²_bio+pois)
     # is a population CV⁻² hyperprior, so it needs the predictive variance of ONE node's density around ê(z) —
@@ -833,24 +847,32 @@ def _global_logprior(
     nodes (the strand_obs fork is dissolved)."""
     s2_between = max(float(sigma2_g.predict(np.array([max(rho_global, _EPS)]))[0]), 0.0)
     s2_flat = var_mean + s2_between
-    n_glob = rho_global * rho_global / max(s2_flat, _EPS)  # scalar, M-independent
-    mu = np.clip(rho_global * eff_global / np.maximum(mass_global, _EPS), 0.0, 1.0)
-    n_node = np.full(mu.shape, n_glob, dtype=np.float64)  # per-node count (= n_glob everywhere by default)
     w = float(enrich_weight)
-    if (
+    use_enrich = (
         ehat is not None and apply_mask is not None and sigma2_level is not None
         and w > _EPS and bool(np.any(apply_mask))
-    ):
+    )
+    # ── LOG-DENSITY global: a Gaussian on log f_g (D-plan §1.4). var_mean = 1/(1+G) (D4); the
+    #    M-independent precision is N_log = 1/Var(log ρ) directly — NO ρ² factor (s2_flat, s2_bio,
+    #    pois are ALREADY log-variances, not density variances). target = log(implied gDNA fraction).
+    #    The enrichment blend is in LOG space (D7), Jensen-clean. ──
+    eff = np.maximum(eff_global, _EPS)
+    mass = np.maximum(mass_global, _EPS)
+    n_glob = 1.0 / max(s2_flat, _EPS)
+    target = np.log(np.clip(rho_global * eff / mass, _EPS, 1.0))
+    n_node = np.full(target.shape, n_glob, dtype=np.float64)
+    if use_enrich:
         m = np.asarray(apply_mask, bool)
-        rho_e = np.maximum(ehat.predict(np.asarray(z)[m]), 0.0)    # enrichment-predicted gDNA density ê(z)
-        rho_hat = w * rho_e + (1.0 - w) * rho_global              # continuous shrinkage toward the flat global
-        mu[m] = np.clip(rho_hat * eff_global[m] / np.maximum(mass_global[m], _EPS), 0.0, 1.0)
-        s2_bio = np.maximum(sigma2_level.predict(rho_hat), 0.0)    # level-conditional between-node spread
-        eff_m = np.maximum(eff_global[m], _EPS)
-        pois = (rho_hat + _MSG_PSEUDOCOUNT / eff_m) / eff_m        # node density Poisson floor (matches _message)
-        s2_prior = w * (s2_bio + pois) + (1.0 - w) * s2_flat       # blend the reliability too ⇒ w=0 is byte-flat
-        n_node[m] = rho_hat * rho_hat / np.maximum(s2_prior, _EPS)
-    return _binom_pseudo(fgg[None, :], mu[:, None], n_node[:, None])
+        rho_e = np.maximum(ehat.predict(np.asarray(z)[m]), _EPS)
+        mu_log = w * np.log(rho_e) + (1.0 - w) * np.log(max(rho_global, _EPS))  # LOG blend (D7)
+        rho_hat = np.exp(mu_log)
+        target[m] = np.log(np.clip(rho_hat * eff[m] / mass[m], _EPS, 1.0))
+        s2_bio = np.maximum(sigma2_level.predict(rho_hat), 0.0)  # log-space level-conditional spread
+        pois = 1.0 / (rho_hat * eff[m] + 1.0)                    # inverse-count log-Poisson floor
+        s2_prior = w * (s2_bio + pois) + (1.0 - w) * s2_flat
+        n_node[m] = 1.0 / np.maximum(s2_prior, _EPS)
+    log_fg = np.log(np.maximum(np.asarray(fgg, np.float64), _EPS))  # (K,)
+    return -0.5 * n_node[:, None] * (log_fg[None, :] - target[:, None]) ** 2
 
 
 def fit_rna_varmean(
@@ -907,7 +929,7 @@ def fit_rna_varmean(
 
 
 def fit_gdna_varmean(
-    chain: NodeChain, densities: NodeDensities, geometry: NodeGeometry, statics: NodeStatics
+    chain: NodeChain, densities: NodeDensities, geometry: NodeGeometry, statics: NodeStatics,
 ) -> MonotoneVarMean:
     """Fit the gDNA message-reliability ``σ²_g(μ)`` on the frozen snapshot over **single-strand** edges
     (``statics.strand_obs = free_pos ^ free_neg`` on both endpoints). The twin of :func:`fit_rna_varmean`:
@@ -949,6 +971,8 @@ def node_sweep(
     convergence_delta: float = 1e-3,
     max_outer: int = 1,
     outer_convergence_delta: float = 1e-3,
+    logodds_window: float = 10.0,
+    n_tilt: int | None = None,
     _capture: dict | None = None,
 ):
     """The belief-propagation sweep over the chain — gDNA AND per-strand RNA messages, in COUNT space (no
@@ -1007,10 +1031,27 @@ def node_sweep(
     eff_global = np.where(is_reg, EG[0], 0.5 * (EG[0] + EG[1]))
     mass_global = np.where(is_reg, MS[0], MS[0] + MS[1])
 
-    lattice = _simplex_lattice(int(n_grid))
-    fpg, fng, fgg = lattice
+    # The per-node solve is the log-density 1-D/2-D log-odds solver (simplex_logodds, O(m·K),
+    # genome-scale-tractable). The "solve grid" is the f_g axis the global NB prior is evaluated on (the
+    # log-odds σ(λ) lattice).
+    _lam_lo, _fg_lo = _logodds_grid(int(n_grid), float(logodds_window))
+    solve_grid = _fg_lo
     kappa = float(rna_sense_frac)
     od_g, od_r = gdna_strand_overdispersion, rna_strand_overdispersion
+    _zero_spl = np.zeros_like(np.asarray(statics.mass_unspliced, dtype=np.float64))
+
+    def _local_solve(g_arr, gm=None, gp=None, rm=None, rp=None):
+        """The per-node local/final solve (log-density log-odds backend). Returns
+        ``(f_g median, f_pos mean, f_neg mean, var_g, var_pos, var_neg)``. Phase A calls it message-free;
+        phase D passes the FB messages (fraction-space)."""
+        dc = _solve_nodes_logodds_all(
+            statics.u_pos, statics.u_neg, statics.spliced_pos, statics.spliced_neg, fp, fn,
+            statics.strand_obs, statics.mass_unspliced, _zero_spl, kappa=kappa, od_g=od_g, od_r=od_r,
+            n_grid=int(n_grid), L=float(logodds_window), n_tilt=n_tilt, global_logprior=g_arr,
+            gdna_imp_mode=gm, gdna_imp_prec=gp, rna_imp_mode=rm, rna_imp_prec=rp,
+        )
+        return (dc.gdna_frac, dc.rna_pos_frac, dc.rna_neg_frac,
+                dc.gdna_frac_var, dc.rna_pos_frac_var, dc.rna_neg_frac_var)
     # Two distinct gates, both from the region SIGNATURE (never the counts — count-zero-info):
     #   * SOLVE gate (`solvable`): a node deconvolves its own gDNA-vs-RNA split iff it admits ≥1 RNA strand and
     #     has unspliced mass. A G1 node — no admissible RNA strand: an intergenic region, or a gene-boundary seam
@@ -1033,7 +1074,7 @@ def node_sweep(
     # detector. The transfer shrinks the genome-wide global mean toward ê on the exon REGION nodes with a usable
     # z (the AMBIG-exon targets) by enrich_w; everything else keeps ρ_global (§J/P3).
     ehat, z_enrich, sigma2_level, enrich_w = fit_enrichment_transfer(
-        chain, statics, geometry, region_arrays, boundary_substrate, f_g, kappa, rho_global
+        chain, statics, geometry, region_arrays, boundary_substrate, f_g, kappa, rho_global,
     )
     node_rtype, _rtype = _node_region_type(chain, region_arrays)
     # The apply set is built on EVERY condition (no significance fork); the continuous enrich_w does the
@@ -1052,7 +1093,7 @@ def node_sweep(
     # iteration with the refit gdna_vm (ρ_global / ê stay anchored), so define a helper.
     def _global_lp(gvm):
         return _global_logprior(
-            fgg, mass_global, eff_global, rho_global, gvm, var_mean,
+            solve_grid, mass_global, eff_global, rho_global, gvm, var_mean,
             ehat=ehat, z=z_enrich, sigma2_level=sigma2_level, apply_mask=enrich_apply,
             enrich_weight=enrich_w,
         )
@@ -1063,7 +1104,6 @@ def node_sweep(
     # scans are sequential per node, so iterate as a Python list of ints (faster than numpy scalar indexing).
     order_list = [int(x) for x in np.asarray(chain.order)]
     n_nodes = f_g.shape[0]
-    PSEUDO = _MSG_PSEUDOCOUNT
 
     outer_deltas = []
     prev_outer = None
@@ -1077,13 +1117,8 @@ def node_sweep(
         # upstream α. ``true`` tree BP: the forward belief excludes β (no double-counting), unlike Jacobi's
         # full-marginal source.
 
-        # (A) LOCAL message-free beliefs.
-        psi_loc = _local_loglik(
-            statics.u_pos, statics.u_neg, statics.spliced_pos, statics.spliced_neg,
-            fp, fn, kappa, od_g, od_r, lattice,
-            strand_obs=statics.strand_obs, global_logprior=global_lp,
-        )
-        fg_loc, fp_loc, fn_loc, vg_loc, vp_loc, vn_loc = _node_marginals(psi_loc, fpg, fng, fgg)
+        # (A) LOCAL message-free beliefs (backend-dispatched).
+        fg_loc, fp_loc, fn_loc, vg_loc, vp_loc, vn_loc = _local_solve(global_lp)
         pg_loc = 1.0 / np.maximum(vg_loc, _EPS)  # local precision (var floored: a sharp belief ⇒ large finite)
         pp_loc = 1.0 / np.maximum(vp_loc, _EPS)
         pn_loc = 1.0 / np.maximum(vn_loc, _EPS)
@@ -1119,8 +1154,13 @@ def node_sweep(
             amg, apg = np.zeros(n_nodes), np.zeros(n_nodes)  # gDNA message (mode, prec)
             amp, app = np.zeros(n_nodes), np.zeros(n_nodes)  # RNA-pos
             amn, apn = np.zeros(n_nodes), np.zeros(n_nodes)  # RNA-neg
-            EGs, EGd, ERs, ERd, ESPs = EG[sf], EG[df], ER[sf], ER[df], ESP[sf]
-            MSs, MSd, SPs, SPd, SNs, SNd = MS[sf], MS[df], SP[sf], SP[df], SN[sf], SN[df]
+            EGs, EGd, ERs, ERd = EG[sf], EG[df], ER[sf], ER[df]
+            MSs, MSd, SPs, SNs = MS[sf], MS[df], SP[sf], SN[sf]
+            # The running belief combines in LOG-fraction space (the message is a Gaussian on log f_c).
+            # Precompute the local log-fractions (constant across the scan) for the combine.
+            lfg_loc = np.log(np.maximum(fg_loc, _EPS))
+            lfp_loc = np.log(np.maximum(fp_loc, _EPS))
+            lfn_loc = np.log(np.maximum(fn_loc, _EPS))
             for i in seq:
                 lsrc = nbr[i]
                 if lsrc < 0:
@@ -1138,41 +1178,47 @@ def node_sweep(
                 # gDNA — a G1 seam (intergenic / TSS / TES) is a locked, confident all-gDNA emitter.
                 if emit_g:
                     eg = EGs[lsrc] if EGs[lsrc] > _EPS else _EPS
-                    rho = fbg[lsrc] * sm / eg
-                    vo = (sm / eg) ** 2 * vbg[lsrc]
-                    pois = (rho + PSEUDO / eg) / eg
-                    pr = (md / egd) ** 2 / max(vo + s2g[i] + pois, _EPS)
-                    # mode is a FRACTION ∈ [0,1]: the source density expressed as the dst fraction. Unclipped it
-                    # can run to 1e4+ when the source is denser than the dst can hold (cliff / low-count dst),
-                    # and `−½·prec·(f−mode)²` over the lattice then amplifies the pull by `mode`× (a vertex slam).
-                    mo = min(max(rho * egd / md, 0.0), 1.0)
+                    n_src = fbg[lsrc] * sm                   # source gDNA COUNT (deconvolved)
+                    rho = n_src / eg                         # source gDNA DENSITY ρ_g_src — the MESSAGE currency
+                    # DENSITY message (NO fractions in the wire): the content is the source gDNA density
+                    # ρ_g_src; the RECEIVER re-expresses it in its OWN log-f_g solve frame via its gDNA
+                    # density base M_dst/E_gdna_dst (= md/egd), flooring ρ at the dst min-observable density
+                    # 1/egd. (Fractions are not comparable across nodes — only densities are.)
+                    mo = math.log(max(rho, 1.0 / egd) / (md / egd))
+                    # precision = 1/(Var(log ρ_g)_src + σ²_bio + pois). pois = 1/(gDNA COUNT) = the source's
+                    # log-density sampling variance. NO +1 floor: a NON-DETECTION (count→0, a depleted seam)
+                    # has ~∞ log-density variance → ~0 precision → sends NO message. "Zero density is not a
+                    # measurement; its precision depends on the region length." (user's diagnosis)
+                    pois = 1.0 / max(n_src, _EPS)
+                    pr = 1.0 / max(vbg[lsrc] + s2g[i] + pois, _EPS)
                     amg[i], apg[i] = mo, pr
                     pt = pg_loc[i] + pr
-                    fbg[i], vbg[i] = (pg_loc[i] * fg_loc[i] + pr * mo) / pt, 1.0 / pt
-                # RNA-pos — nascent + one-sided spliced/MATURE floor (strand-continuous edge only).
+                    fbg[i] = math.exp((pg_loc[i] * lfg_loc[i] + pr * mo) / pt)
+                    vbg[i] = 1.0 / pt
+                # RNA-pos — NASCENT imputes across the edge (D8: spliced is the node-local floor, not imputed).
                 if emit_p:
                     er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
-                    esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
-                    rho = fbp[lsrc] * sm / er + SPs[lsrc] / esp
-                    vo = (sm / er) ** 2 * vbp[lsrc] if sm > _EPS else 0.0
-                    pois = (rho + PSEUDO / er) / er
-                    pr = (md / erd) ** 2 / max(vo + s2p[i] + pois, _EPS)
-                    mo = min(max((rho * erd - SPd[i]) / md, 0.0), 1.0)  # fraction ∈[0,1] (also kills spliced over-sub <0)
+                    n_src = fbp[lsrc] * sm               # source NASCENT-RNA COUNT (no spliced — D8)
+                    rho = n_src / er                     # source nascent RNA DENSITY — the message currency
+                    mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_pos frame
+                    pois = 1.0 / max(n_src, _EPS)        # 1/nascent-count (non-detection → no message)
+                    pr = 1.0 / max(vbp[lsrc] + s2p[i] + pois, _EPS)
                     amp[i], app[i] = mo, pr
                     pt = pp_loc[i] + pr
-                    fbp[i], vbp[i] = (pp_loc[i] * fp_loc[i] + pr * mo) / pt, 1.0 / pt
+                    fbp[i] = math.exp((pp_loc[i] * lfp_loc[i] + pr * mo) / pt)
+                    vbp[i] = 1.0 / pt
                 # RNA-neg — symmetric.
                 if emit_n:
                     er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
-                    esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
-                    rho = fbn[lsrc] * sm / er + SNs[lsrc] / esp
-                    vo = (sm / er) ** 2 * vbn[lsrc] if sm > _EPS else 0.0
-                    pois = (rho + PSEUDO / er) / er
-                    pr = (md / erd) ** 2 / max(vo + s2n[i] + pois, _EPS)
-                    mo = min(max((rho * erd - SNd[i]) / md, 0.0), 1.0)  # fraction ∈[0,1]
+                    n_src = fbn[lsrc] * sm               # source NASCENT-RNA COUNT (no spliced — D8)
+                    rho = n_src / er                     # source nascent RNA DENSITY — the message currency
+                    mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_neg frame
+                    pois = 1.0 / max(n_src, _EPS)        # 1/nascent-count (non-detection → no message)
+                    pr = 1.0 / max(vbn[lsrc] + s2n[i] + pois, _EPS)
                     amn[i], apn[i] = mo, pr
                     pt = pn_loc[i] + pr
-                    fbn[i], vbn[i] = (pn_loc[i] * fn_loc[i] + pr * mo) / pt, 1.0 / pt
+                    fbn[i] = math.exp((pn_loc[i] * lfn_loc[i] + pr * mo) / pt)
+                    vbn[i] = 1.0 / pt
             return amg, apg, amp, app, amn, apn
 
         a = _scan(order_list, left, 1, 0, s2gf, s2pf, s2nf)        # forward (α: left context)
@@ -1186,15 +1232,11 @@ def node_sweep(
         mode_g, prec_g = _comb(a[0], a[1], b[0], b[1])
         mode_p, prec_p = _comb(a[2], a[3], b[2], b[3])
         mode_n, prec_n = _comb(a[4], a[5], b[4], b[5])
-        psi = _local_loglik(
-            statics.u_pos, statics.u_neg, statics.spliced_pos, statics.spliced_neg,
-            fp, fn, kappa, od_g, od_r, lattice,
-            strand_obs=statics.strand_obs, global_logprior=global_lp,
-            gdna_imp_mode=mode_g, gdna_imp_prec=prec_g,
-            rna_imp_mode=(mode_p, mode_n), rna_imp_prec=(prec_p, prec_n),
+        # (D) FINAL solve with the FB messages (backend-dispatched).
+        mg_, mp_, mn_, vg_, vp_, vn_ = _local_solve(
+            global_lp, mode_g, prec_g, (mode_p, mode_n), (prec_p, prec_n)
         )
         # write back only SOLVABLE nodes (G1 sinks / empty keep their signature-binary init).
-        mg_, mp_, mn_, vg_, vp_, vn_ = _node_marginals(psi, fpg, fng, fgg)
         f_g = np.where(solvable, np.clip(mg_, 0.0, 1.0), f_g)
         f_pos = np.where(solvable, np.clip(mp_, 0.0, 1.0), f_pos)
         f_neg = np.where(solvable, np.clip(mn_, 0.0, 1.0), f_neg)
@@ -1204,13 +1246,12 @@ def node_sweep(
 
         if _capture is not None:  # inert diagnostic hook (overwritten each outer iter → ends on the last)
             # strand-ONLY local belief (no global prior, no messages) — to split the LOCAL error into the
-            # strand likelihood vs the global gDNA prior contribution.
-            fg_strand = _node_marginals(
-                _local_loglik(
-                    statics.u_pos, statics.u_neg, statics.spliced_pos, statics.spliced_neg,
-                    fp, fn, kappa, od_g, od_r, lattice, strand_obs=statics.strand_obs, global_logprior=None,
-                ), fpg, fng, fgg,
-            )[0]
+            # strand likelihood vs the global gDNA prior contribution. Same log-density solver, global=None.
+            fg_strand = _solve_nodes_logodds_all(
+                statics.u_pos, statics.u_neg, statics.spliced_pos, statics.spliced_neg, fp, fn,
+                statics.strand_obs, statics.mass_unspliced, _zero_spl, kappa=kappa, od_g=od_g, od_r=od_r,
+                n_grid=int(n_grid), L=float(logodds_window), n_tilt=n_tilt, global_logprior=None,
+            ).gdna_frac
             _capture.update(
                 fg_loc=fg_loc, fg_strand=fg_strand, fp_loc=fp_loc, fn_loc=fn_loc,
                 vg_loc=vg_loc, vp_loc=vp_loc, vn_loc=vn_loc,
@@ -1225,6 +1266,8 @@ def node_sweep(
                 # the global geometry (μ = clip(ρ·eff_global/mass_global, 0, 1) is the implied prior fraction).
                 ehat=ehat, z_enrich=z_enrich, enrich_apply=enrich_apply, enrich_w=enrich_w,
                 eff_global=eff_global, mass_global=mass_global,
+                # per-face geometry for message dissection (logodds diagnostics)
+                eff_gdna_l=EG[0], eff_gdna_r=EG[1], eff_rna_l=ER[0], eff_rna_r=ER[1],
             )
 
         # OUTER LOOP — refit BOTH var~mean reliability curves on the inner-converged belief (SYMMETRIC: neither
