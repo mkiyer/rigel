@@ -78,6 +78,12 @@ NB_MODULE(_resolve_impl, m) {
     // --- FragmentResolver ---
     nb::class_<FragmentResolver>(m, "FragmentResolver")
         .def(nb::init<>(), "Create an empty resolve context.")
+        .def("set_ref_names", &FragmentResolver::set_ref_names,
+             nb::arg("ref_names"),
+             "Seed the ref-name -> ID space in canonical index.ref_names order.\n\n"
+             "Must be called BEFORE build_overlap_index so the resolver's ref ids\n"
+             "match index.ref_name_to_id (the space used by t_df, region_df and the\n"
+             "calibration accumulator partition).")
         .def("build_overlap_index", &FragmentResolver::build_overlap_index,
              nb::arg("refs"), nb::arg("starts"), nb::arg("ends"),
              nb::arg("iv_types"), nb::arg("tset_data"),

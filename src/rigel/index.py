@@ -1266,6 +1266,15 @@ class TranscriptIndex:
 
         ctx = FragmentResolver()
 
+        # 0. Seed the ref-ID space in canonical ref_names order. Without this the
+        #    resolver assigns ref ids by first-seen interval order (gene order),
+        #    which scrambles them relative to index.ref_name_to_id and silently
+        #    mis-routes the calibration accumulator deposit on multi-reference
+        #    genomes (the accumulator partition is laid out in ref_names order;
+        #    the deposit indexes it with the resolver's ref id). A single-ref
+        #    synthetic index hides this — the two orderings coincide there.
+        ctx.set_ref_names([str(name) for name in self.ref_names])
+
         # 1. Overlap index from collapsed data
         len(_collapse_keys)
         cr_refs = [k[0] for k in _collapse_keys]

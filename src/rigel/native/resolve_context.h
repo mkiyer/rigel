@@ -593,6 +593,21 @@ public:
         return id;
     }
 
+    // Seed the reference-ID space in a CANONICAL order (index.ref_names) so the
+    // resolver's ref ids match index.ref_name_to_id — the same space used by
+    // t_df, region_df, RegionArrays and the calibration accumulator partition.
+    // Must be called BEFORE build_overlap_index: otherwise ref ids are assigned
+    // by first-seen interval order (gene/transcript order), which scrambles them
+    // relative to ref_names and silently mis-routes the accumulator deposit on
+    // multi-reference genomes (a single-ref synthetic index hides the bug).
+    void set_ref_names(const std::vector<std::string>& ref_names) {
+        ref_to_id_.clear();
+        id_to_ref_.clear();
+        ref_to_id_.reserve(ref_names.size());
+        id_to_ref_.reserve(ref_names.size());
+        for (const auto& name : ref_names) get_or_create_ref_id(name);
+    }
+
     // ----------------------------------------------------------------
     // Build methods — called once at index load time
     // ----------------------------------------------------------------
