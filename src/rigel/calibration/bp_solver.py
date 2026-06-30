@@ -619,6 +619,60 @@ def _fit_seed_varmean(chain, dens, eff, is_seed, seed_w):
     return MonotoneVarMean.fit_offset(cat(means), cat(raws), cat(offs), cat(wts))
 
 
+def _floor_estimate(chain, geometry, region_arrays, f_g_init, kappa):
+    """The DEPLETED gDNA FLOOR — the population background gDNA density from intergenic + intron REGIONS
+    (NOT boundaries, NOT exons; the user's directive). Globally these regions are pure gDNA and DEPLETED
+    (off-target under capture); introns may carry sparse nascent — handled below. The CONFIDENT floor (a
+    coherent depleted population ⇒ tight spread) is applied to the depleted REGION nodes by
+    :func:`_global_logprior`: it pins a floor-level intron to ``f_g≈1`` and gives an intron with density
+    EXCESS over the floor its nascent (``target = ρ_floor·E/M``) — the nascent-from-self-evidence
+    principle, no gate. Enriched exons are excluded (they need ``ê(z)``).
+
+    The per-region gDNA density is **strand-deconvolved where the strand is informative**: a region's gDNA
+    fraction is ``(1−w)·1 + w·f_g_init`` with ``w = (2κ−1)²`` (the strand discriminability) — so a
+    stranded RNA-rich intron is discounted out of the floor (``f_g_init→0``), while unstranded data falls
+    back to the raw ``M/E_g`` (``w→0``: the nascent-sparse assumption — introns ARE the gDNA floor).
+    Intergenic regions are locked ``f_g_init=1`` ⇒ their full ``M/E_g`` always counts.
+
+    Returns ``(rho_floor, s2_floor, var_mean_floor, floor_mask)``: the exposure-pooled floor rate, the
+    between-region log-density SPREAD (the floor tightness — biological/CNV excess over the per-region
+    Poisson floor), the rate-estimate variance ``1/(1+G)``, and the per-chain-node depleted-REGION mask.
+    """
+    kind = np.asarray(chain.kind)
+    is_reg = kind == REGION
+    node_rtype, _ = _node_region_type(chain, region_arrays)
+    floor_mask = is_reg & ((node_rtype == 0) | (node_rtype == 1))  # intergenic + intron REGIONS
+    EGl = np.maximum(np.asarray(geometry.eff_gdna_left, np.float64), _EPS)  # region: contained gDNA eff-len
+    Ml = np.asarray(geometry.mass_left, np.float64)                         # region: contained mass
+    # strand-deconvolved gDNA density: discount known-RNA introns where the strand is informative.
+    w_str = float((2.0 * kappa - 1.0) ** 2)
+    gdna_frac = (1.0 - w_str) + w_str * np.asarray(f_g_init, np.float64)  # ∈ (0,1]; =1 unstranded/intergenic
+    dens_g = (Ml / EGl) * gdna_frac
+    eff = EGl[floor_mask]
+    g_dens = dens_g[floor_mask]
+    # Exposure-pooled floor rate (Poisson–Gamma, 1 pseudocount on the TOTAL gDNA): zero-gDNA depleted
+    # regions are KEPT (0 gDNA over a large E is the strongest evidence gDNA is scarce → ρ_floor→0⁺).
+    G = float(np.sum(g_dens * eff))
+    E_tot = max(float(np.sum(eff)), _EPS)
+    rho_floor = (1.0 + G) / E_tot
+    var_mean_floor = 1.0 / (1.0 + G)
+    # Between-region SPREAD of log gDNA-density over the POPULATED floor regions (eff-weighted population
+    # variance minus the per-region log-Poisson floor → the excess/biological spread, ≥0). Tight for a
+    # coherent depleted population (a confident floor); naturally widens on real data (GC/mappability).
+    pop = g_dens > 0.0
+    if int(np.sum(pop)) >= 2:
+        lr = np.log(g_dens[pop])
+        w = eff[pop]
+        sw = float(np.sum(w))
+        mu = float(np.sum(w * lr) / sw)
+        s2_raw = float(np.sum(w * (lr - mu) ** 2) / sw)
+        pois = float(np.mean(1.0 / (g_dens[pop] * eff[pop] + 1.0)))
+        s2_floor = max(s2_raw - pois, 0.0)
+    else:
+        s2_floor = 0.0
+    return rho_floor, s2_floor, var_mean_floor, floor_mask
+
+
 def fit_enrichment_transfer(
     chain, statics, geometry, region_arrays, boundary_substrate, f_g_init, kappa, rho_global,
 ):
@@ -765,6 +819,7 @@ def fit_enrichment_transfer(
 def _global_logprior(
     fgg, mass_global, eff_global, rho_global, sigma2_g, var_mean,
     *, ehat=None, z=None, sigma2_level=None, apply_mask=None, enrich_weight=0.0,
+    floor_mask=None, rho_floor=None, s2_floor_total=None,
 ):
     """Precompute the count-space global as a per-node BINOMIAL pseudo-count on f_g, ``(n_nodes, P)`` (§4):
 
@@ -818,6 +873,19 @@ def _global_logprior(
         pois = 1.0 / (rho_hat * eff[m] + 1.0)                    # inverse-count log-Poisson floor
         s2_prior = w * (s2_bio + pois) + (1.0 - w) * s2_flat
         n_node[m] = 1.0 / np.maximum(s2_prior, _EPS)
+    # DEPLETED-REGION FLOOR (`_floor_estimate`): intergenic + intron REGION nodes are a coherent depleted
+    # population, so override them with the CONFIDENT floor (ρ_floor at the tight floor spread). target =
+    # ρ_floor·E/M ⇒ a floor-level intron pins to f_g≈1; an intron with density EXCESS over the floor gets
+    # nascent (low f_g) — the nascent-from-self-evidence principle, no gate. Exons/boundaries keep the
+    # genome-wide baseline (potentially enriched; ê(z) handles exons), and an ê(z) exon node is never
+    # overridden. On real data the floor and a node's own strand evidence agree (same physical density);
+    # they conflict only in the documented all-RNA-intron case the floor assumption excludes.
+    if floor_mask is not None and rho_floor is not None and s2_floor_total is not None:
+        fm = np.asarray(floor_mask, bool)
+        if use_enrich:
+            fm = fm & ~np.asarray(apply_mask, bool)
+        target[fm] = np.log(np.clip(float(rho_floor) * eff[fm] / mass[fm], _EPS, 1.0))
+        n_node[fm] = 1.0 / max(float(s2_floor_total), _EPS)
     log_fg = np.log(np.maximum(np.asarray(fgg, np.float64), _EPS))  # (K,)
     return -0.5 * n_node[:, None] * (log_fg[None, :] - target[:, None]) ** 2
 
@@ -884,6 +952,7 @@ def node_sweep(
     # per-face geometry as (left, right) pairs, indexed by face (0=left, 1=right).
     EG = (geometry.eff_gdna_left, geometry.eff_gdna_right)
     ER = (geometry.eff_rna_left, geometry.eff_rna_right)
+    ESP = (geometry.eff_spl_left, geometry.eff_spl_right)  # one-sided spliced half-triangle eff-len
     MS = (geometry.mass_left, geometry.mass_right)
     SP = (geometry.spliced_pos_left, geometry.spliced_pos_right)
     SN = (geometry.spliced_neg_left, geometry.spliced_neg_right)
@@ -941,6 +1010,12 @@ def node_sweep(
     # The apply set is built on EVERY condition (no significance fork); the continuous enrich_w does the
     # collapsing (w → 0 ⇒ byte-identical to the flat global on these nodes).
     enrich_apply = is_reg & (node_rtype == 2) & np.isfinite(z_enrich)
+    # The DEPLETED gDNA FLOOR from intergenic + intron REGIONS (the user's empirical-prior directive): a
+    # confident floor that pins depleted intron nodes (the nascent-hallucination fix), letting an intron
+    # with density excess over the floor carry nascent. Exons/boundaries keep the genome-wide global.
+    rho_floor, s2_floor, var_mean_floor, floor_mask = _floor_estimate(
+        chain, geometry, region_arrays, f_g, kappa
+    )
     # The count-space global log-prior on f_g (M-INDEPENDENT strength so it can never overrule a node's own strand
     # evidence; ALL solvable nodes; enrichment-aware on the exon override set). ANCHORED — every input (ρ_global /
     # ê / var_mean / the seed σ²_g) is fit once before the solve, so the global prior is CONSTANT.
@@ -948,6 +1023,7 @@ def node_sweep(
         solve_grid, mass_global, eff_global, rho_global, gdna_vm, var_mean,
         ehat=ehat, z=z_enrich, sigma2_level=sigma2_level, apply_mask=enrich_apply,
         enrich_weight=enrich_w,
+        floor_mask=floor_mask, rho_floor=rho_floor, s2_floor_total=var_mean_floor + s2_floor,
     )
 
     # Genomic node order for the forward/backward scans (within each ref path; left/right break at −1). The
@@ -988,6 +1064,9 @@ def node_sweep(
         amn, apn = np.zeros(n_nodes), np.zeros(n_nodes)  # RNA-neg
         EGs, EGd, ERs, ERd = EG[sf], EG[df], ER[sf], ER[df]
         MSs, MSd, SPs, SNs = MS[sf], MS[df], SP[sf], SN[sf]
+        ESPs = ESP[sf]  # source-face spliced eff-len (for the mature-RNA MEASUREMENT message)
+        SPd, SNd, ESPd = SP[df], SN[df], ESP[df]  # DEST-face spliced — the mature ABSORBED at a junction
+        # (subtracted from an exon→boundary message so only NASCENT crosses into the intron side).
         # The running belief combines in LOG-fraction space (the message is a Gaussian on log f_c).
         # Precompute the local log-fractions (constant across the scan) for the combine.
         lfg_loc = np.log(np.maximum(fg_loc, _EPS))
@@ -1028,30 +1107,57 @@ def node_sweep(
                 pt = pg_loc[i] + pr
                 fbg[i] = math.exp((pg_loc[i] * lfg_loc[i] + pr * mo) / pt)
                 vbg[i] = 1.0 / pt
-            # RNA-pos — NASCENT imputes across the edge (D8: spliced is the node-local floor, not imputed).
+            # RNA-pos — the imputed RNA density is the NASCENT (contiguous, unspliced) field, the only RNA
+            # that crosses an edge contiguously. MATURE does NOT flow as an imputation (it skips introns as
+            # SPLICED); it enters/leaves only at a junction boundary, via three density terms that sum to the
+            # message (the one-sided spliced geometry makes the gating automatic — `spliced_efflen_not_2x_…`):
+            #   ρ = (src nascent  ``fbp·sm/E_r``)
+            #     + (src-face mature  ``SPs/E_spl_src``)   — ADDED only when the SOURCE is a junction boundary
+            #         facing the dst exon (B→exon): a MEASUREMENT of the exon's within-exon mature.
+            #     − (dst-face mature  ``SPd/E_spl_dst``)   — ABSORBED only when the DEST is a junction boundary
+            #         facing the src exon (exon→B): the exon's mature crosses as spliced, so it must NOT be
+            #         imputed into the boundary's (gDNA+nascent) crossing — subtracting it leaves pure nascent.
+            # At most one of SPs/SPd is non-zero on an edge (src and dst are never both boundaries), and BOTH
+            # are zero on intron↔boundary edges (spliced lives on the exon flank), so introns carry pure
+            # nascent with NO gate. Precision: a MEASUREMENT (``n_mat>0``, B→exon) uses COUNT precision and is
+            # NOT disagreement-silenced (a gapped read IS mature RNA, fused with the strand likelihood so a
+            # confident strand wins and a strand-blind exon snaps to it); everything else is a nascent
+            # IMPUTATION at the disagreement-aware precision.
             if emit_p:
                 er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
-                n_src = fbp[lsrc] * sm               # source NASCENT-RNA COUNT (no spliced — D8)
-                rho = n_src / er                     # source nascent RNA DENSITY — the message currency
-                mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_pos frame
-                pois = 1.0 / max(n_src, _EPS)        # 1/nascent-count (non-detection → no message)
+                esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
+                n_nasc = fbp[lsrc] * sm              # source nascent RNA count (unspliced)
+                n_mat = SPs[lsrc]                     # source-face mature (one-sided; >0 only B→exon)
+                rho_mat_dst = SPd[i] / (ESPd[i] if ESPd[i] > _EPS else _EPS)  # dst-face mature absorbed (exon→B)
+                rho = n_nasc / er + n_mat / esp - rho_mat_dst  # NASCENT density (+ MEASUREMENT into an exon)
+                mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_pos frame (floored at min-observable)
+                pois = 1.0 / max(n_nasc + n_mat, _EPS)
                 base_var = vbp[lsrc] + pois
-                s2_edge = max((mo - lfp_loc[i]) ** 2 - (base_var + vp_loc[i]), 0.0)
-                pr = 1.0 / max(base_var + s2_edge, _EPS)
+                if n_mat > _EPS:
+                    pr = 1.0 / max(base_var, _EPS)               # MEASUREMENT (count precision)
+                else:
+                    s2_edge = max((mo - lfp_loc[i]) ** 2 - (base_var + vp_loc[i]), 0.0)
+                    pr = 1.0 / max(base_var + s2_edge, _EPS)     # IMPUTATION (disagreement-aware)
                 amp[i], app[i] = mo, pr
                 pt = pp_loc[i] + pr
                 fbp[i] = math.exp((pp_loc[i] * lfp_loc[i] + pr * mo) / pt)
                 vbp[i] = 1.0 / pt
-            # RNA-neg — symmetric.
+            # RNA-neg — symmetric (mature on the −strand junction motif; same 3-term nascent message).
             if emit_n:
                 er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
-                n_src = fbn[lsrc] * sm               # source NASCENT-RNA COUNT (no spliced — D8)
-                rho = n_src / er                     # source nascent RNA DENSITY — the message currency
+                esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
+                n_nasc = fbn[lsrc] * sm
+                n_mat = SNs[lsrc]
+                rho_mat_dst = SNd[i] / (ESPd[i] if ESPd[i] > _EPS else _EPS)  # dst-face mature absorbed (exon→B)
+                rho = n_nasc / er + n_mat / esp - rho_mat_dst
                 mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_neg frame
-                pois = 1.0 / max(n_src, _EPS)        # 1/nascent-count (non-detection → no message)
+                pois = 1.0 / max(n_nasc + n_mat, _EPS)
                 base_var = vbn[lsrc] + pois
-                s2_edge = max((mo - lfn_loc[i]) ** 2 - (base_var + vn_loc[i]), 0.0)
-                pr = 1.0 / max(base_var + s2_edge, _EPS)
+                if n_mat > _EPS:
+                    pr = 1.0 / max(base_var, _EPS)
+                else:
+                    s2_edge = max((mo - lfn_loc[i]) ** 2 - (base_var + vn_loc[i]), 0.0)
+                    pr = 1.0 / max(base_var + s2_edge, _EPS)
                 amn[i], apn[i] = mo, pr
                 pt = pn_loc[i] + pr
                 fbn[i] = math.exp((pn_loc[i] * lfn_loc[i] + pr * mo) / pt)

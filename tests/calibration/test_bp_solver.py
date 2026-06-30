@@ -20,7 +20,11 @@ from rigel.calibration.bp_solver import (
     init_beliefs,
     node_densities,
 )
-from rigel.calibration.effective_length import boundary_side_eff_length, region_eff_length
+from rigel.calibration.effective_length import (
+    boundary_side_eff_length,
+    region_eff_length,
+    spliced_side_eff_length,
+)
 from rigel.calibration.node_chain import BOUNDARY, REGION, build_node_chain
 from rigel.calibration.signature import (
     BIT_EXON_NEG,
@@ -510,8 +514,16 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     # NUDGES rather than hard-pins; the suppression here leans on the RNA imputation from the intron neighbours.
     # This synthetic chain has NO intergenic structural seeds (intron+|AMBIG|intron−), so it is the hard case
     # for a gentle global — on real libraries the intergenic zero-count seeds drive a firmer zero-baseline.
-    assert final.f_g[3] < 0.25  # substantially pulled down (init 1.0 → ~0.18)
-    assert final.f_g[1] < 0.15 and final.f_g[5] < 0.15  # the introns stay RNA via the (decisive) strand
+    # The AMBIG phantom is pulled DOWN from its all-gDNA init (1.0) toward RNA. With the depleted-region
+    # FLOOR (`_floor_estimate`) this ARTIFICIAL all-RNA chain — no intergenic gDNA to anchor the floor —
+    # is the documented excluded case: the strand discount (w=(2κ−1)²=0.81 at κ=0.95) still leaves ~19% of
+    # the RNA introns' mass in the gDNA floor, so the STRANDLESS AMBIG node is pinned a little higher
+    # (~0.32) than the single-strand introns. On real libraries the intergenic + true-gDNA introns anchor
+    # the floor low. Still firmly RNA-dominant and far below the all-gDNA init.
+    assert final.f_g[3] < 0.40
+    # single-strand introns: the decisive strand wins and the floor DEFERS (a hyperprior cannot overrule a
+    # node's own strand evidence) → they stay firmly RNA.
+    assert final.f_g[1] < 0.15 and final.f_g[5] < 0.15
 
 
 # --- density-Gaussian message form: two-sided pull + emergent deference (precision_state_design.md §5) --------
@@ -550,3 +562,102 @@ def test_density_message_defers_to_decisive_strand():
     )
     fg = float(d.gdna_frac[0])
     assert fg < 0.1, fg
+
+
+# --- mature absorption: the spliced mass "absorbs" the imputed RNA, leaving only NASCENT ---------------
+# (`spliced_mature_nascent_message.md`). The RNA message src→dst is
+#   ρ = src_nascent/E_r + SP[sf][src]/E_spl_src − SP[df][dst]/E_spl_dst.
+# The dst-face term subtracts the mature a junction boundary measures, so a pure-mature exon imputes
+# ≈0 nascent into the intron beyond it — no wholesale nascent hallucination.
+
+
+def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95):
+    """A `intron+ | exon+ | intron+` chain, physically consistent for a pure-MATURE expressed exon with
+    NO nascent: the exon's contained unspliced = balanced gDNA + sense (+) mature; the introns' contained
+    + boundary crossings = balanced gDNA only (mature skips the intron as SPLICED, never as an unspliced
+    crossing); the two intron↔exon junctions carry the one-sided sense spliced (mature) on the EXON flank
+    iff ``spliced``. Returns the node_sweep args (chain, statics, geometry, belief, region_arrays, bsub)."""
+    gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
+    chain = build_node_chain(np.array([0, 3]), np.array([0, 4]))  # B0 R0 B1 R1 B2 R2 B3
+    L = np.array([2000.0, 2000.0, 2000.0])
+    sig = np.array([BIT_INTRON_POS, BIT_EXON_POS, BIT_INTRON_POS], dtype=np.int64)
+    sc = np.array([TS_POS, TS_POS, TS_POS], dtype=np.int8)
+    region_arrays = SimpleNamespace(strand_class=sc, signature=sig, region_size_bp=L)
+    Eg = region_eff_length(L, gdna_fl)            # contained gDNA eff-len  (1700)
+    Er = region_eff_length(L, rna_fl)             # contained RNA  eff-len  (1800)
+    g_half = rho_g * Eg / 2.0                       # per-strand contained gDNA count (balanced)
+    mat = rho_m * Er                                # contained mature count (+ strand only)
+    # exon R1: gDNA (balanced) + mature (+); introns R0/R2: gDNA only.
+    u_pos = np.array([g_half[0], g_half[1] + mat[1], g_half[2]])
+    u_neg = np.array([g_half[0], g_half[1], g_half[2]])
+    contained = _cview(u_pos, u_neg, mass_u=u_pos + u_neg, mass_spl=np.zeros(3))
+    substrate = SimpleNamespace(contained=contained)
+    # boundary crossings: gDNA only (balanced); spliced(mature) on the EXON flank of the two junctions.
+    side_g = boundary_side_eff_length(gdna_fl, L)   # (300)
+    spl_eff = spliced_side_eff_length(rna_fl, L)     # one-sided half-triangle (100)
+    lr, rr = np.array([-1, 0, 1, 2]), np.array([0, 1, 2, -1])
+    gx = lambda r: np.where(r >= 0, rho_g * side_g[np.clip(r, 0, 2)], 0.0)
+    lcross, rcross = gx(lr), gx(rr)
+    spl_mat = rho_m * spl_eff[1]                      # mature spliced count on the exon flank
+    # B1 (idx1): exon R1 is its RIGHT region → spliced on the RIGHT side. B2 (idx2): exon is its LEFT
+    # region → spliced on the LEFT side. (One-sided, exon flank.)
+    spl_l = np.array([0.0, 0.0, spl_mat if spliced else 0.0, 0.0])
+    spl_r = np.array([0.0, spl_mat if spliced else 0.0, 0.0, 0.0])
+    left = _cview(lcross / 2, lcross / 2, spl_sense=spl_l, mass_u=lcross,
+                  mass_spl=spl_l.copy())
+    right = _cview(rcross / 2, rcross / 2, spl_sense=spl_r, mass_u=rcross,
+                   mass_spl=spl_r.copy())
+    bsub = SimpleNamespace(
+        left_region=lr, right_region=rr, left=left, right=right,
+        junction_strand=np.array([0, TS_POS, TS_POS, 0], dtype=np.int8),
+    )
+    geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
+    st = build_node_statics(chain, substrate, bsub, region_arrays)
+    belief = init_beliefs(chain, substrate, bsub, region_arrays,
+                          rna_sense_frac=kappa, n_grid=60, statics=st)
+    return chain, st, geom, belief, region_arrays, bsub
+
+
+def _sweep(args, kappa=0.95):
+    chain, st, geom, belief, ra, bsub = args
+    cap = {}
+    final = node_sweep(chain, st, geom, belief, ra, bsub, rna_sense_frac=kappa, n_grid=60, _capture=cap)
+    return final, cap
+
+
+def test_mature_no_nascent_hallucination_in_introns():
+    """Regression guard for the user's red line: a pure-mature expressed exon (nascent=0) must NOT
+    manufacture wholesale nascent in its flanking pure-gDNA introns. The introns stay gDNA (truth f_g=1).
+    (Here the strand is decisive, so the final f_g is also protected by the strand likelihood — the
+    message-level proof that the *absorption* is what removes the leak is the next test.)"""
+    fin_m, _ = _sweep(_mature_exon_chain(spliced=True))
+    fg_introns = fin_m.f_g[[1, 5]]  # chain ids of R0, R2
+    assert np.all(fg_introns > 0.85), fg_introns
+
+
+def test_mature_absorption_lowers_nascent_message_into_junction():
+    """The mechanism, asserted directly on the message (not the strand-masked final f_g). The exon→junction
+    message is the BACKWARD scan's +RNA message into B1 (B1's right neighbour is the exon R1). With the
+    junction spliced present, the message density subtracts the measured mature (``− SP[df]/E_spl_dst``),
+    so a pure-mature exon imputes ≈0 nascent; zeroing the spliced removes the subtraction and the exon's
+    RNA is imputed wholesale as nascent. The mode is a log-fraction target → lower (more negative) ⇒ less
+    nascent. This is "the boundary spliced mass absorbs the incoming RNA; the remainder is nascent.\""""
+    _, cap_m = _sweep(_mature_exon_chain(spliced=True))
+    _, cap_n = _sweep(_mature_exon_chain(spliced=False))
+    b1 = 2  # chain id of B1 (the intron→exon junction; its right neighbour R1 is the exon)
+    amp_idx = 2  # b_bwd tuple = (amg, apg, amp, app, amn, apn); amp = +RNA message mode
+    mode_mature = cap_m["b_bwd"][amp_idx][b1]
+    mode_nascent = cap_n["b_bwd"][amp_idx][b1]
+    # both must be real messages (emit_p fired across the +continuous junction)…
+    assert cap_m["b_bwd"][amp_idx + 1][b1] > 0.0 and cap_n["b_bwd"][amp_idx + 1][b1] > 0.0
+    # …and absorption makes the imputed nascent strictly lower (here ≈0 mature-only exon vs full RNA).
+    assert mode_mature < mode_nascent - 0.5, (mode_mature, mode_nascent)
+
+
+def test_mature_measurement_recovers_exon_rna():
+    """The companion direction (unchanged B→exon MEASUREMENT): the same chain's expressed exon is
+    correctly recovered as mostly RNA (its true f_g ≈ ρ_g·E_g/(ρ_g·E_g+ρ_m·E_r) ≈ 0.32), driven by the
+    + strand tilt + the mature measurement — so the absorption does not starve the exon of its own RNA."""
+    fin_m, _ = _sweep(_mature_exon_chain(spliced=True))
+    fg_exon = float(fin_m.f_g[3])  # chain id of R1 (the exon)
+    assert fg_exon < 0.45, fg_exon  # truth ≈0.32; comfortably RNA-dominated, not pinned to gDNA
