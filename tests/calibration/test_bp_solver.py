@@ -377,7 +377,7 @@ def test_gdna_sweep_factor1_uniform():
     belief = init_beliefs(
         chain, substrate, bsub, region_arrays, rna_sense_frac=0.7, n_grid=40, statics=st
     )
-    final, _ = node_sweep(
+    final = node_sweep(
         chain,
         st,
         geom,
@@ -443,7 +443,7 @@ def test_gdna_emits_across_tss_tes_seam():
         chain, substrate, bsub, region_arrays, rna_sense_frac=0.7, n_grid=40, statics=st
     )
     cap = {}
-    final, _ = node_sweep(
+    final = node_sweep(
         chain, st, geom, belief, region_arrays, bsub, rna_sense_frac=0.7, n_grid=40, _capture=cap
     )
     exon = 3  # chain id of the single-exon gene (R1), flanked on both sides by TSS/TES seams
@@ -493,7 +493,7 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
         chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=40, statics=st
     )
     assert belief.f_g[3] == 1.0  # AMBIG starts all-gDNA
-    final, deltas = node_sweep(
+    final = node_sweep(
         chain,
         st,
         geom,
@@ -512,8 +512,6 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     # for a gentle global — on real libraries the intergenic zero-count seeds drive a firmer zero-baseline.
     assert final.f_g[3] < 0.25  # substantially pulled down (init 1.0 → ~0.18)
     assert final.f_g[1] < 0.15 and final.f_g[5] < 0.15  # the introns stay RNA via the (decisive) strand
-    # monotone convergence: the per-pass max-|Δf_g| is non-increasing
-    assert all(deltas[k + 1] <= deltas[k] + 1e-9 for k in range(len(deltas) - 1))
 
 
 # --- density-Gaussian message form: two-sided pull + emergent deference (precision_state_design.md §5) --------

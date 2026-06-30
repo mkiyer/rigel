@@ -282,17 +282,6 @@ class CalibrationConfig:
     #: lattice-cell resolution ``1/sweep_n_grid`` so further passes do not move the discretized solution.
     sweep_convergence_delta: float = 1e-3
 
-    #: **Outer-loop max iterations** (the var~mean fixed point). Each outer iteration: inner-converge the
-    #: belief at fixed var~mean, then refit BOTH the gDNA and RNA var~mean reliability curves on the
-    #: converged belief (symmetric — neither is privileged). The outer loop stops once the converged
-    #: belief stops moving between iterations (``sweep_outer_convergence_delta``). Count is set
-    #: empirically (the belief plateaus after a small number of refits).
-    sweep_max_outer: int = 4
-
-    #: **Outer-loop convergence threshold** — the outer loop stops once the max absolute change in ``f_g``
-    #: of the inner-converged belief between consecutive outer iterations drops below this.
-    sweep_outer_convergence_delta: float = 5e-3
-
     def __post_init__(self) -> None:
         if self.sweep_n_grid < 2:
             raise ValueError(
@@ -311,15 +300,6 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.sweep_convergence_delta must be > 0; "
                 f"got {self.sweep_convergence_delta}."
-            )
-        if self.sweep_max_outer < 1:
-            raise ValueError(
-                f"CalibrationConfig.sweep_max_outer must be >= 1; got {self.sweep_max_outer}."
-            )
-        if not (float(self.sweep_outer_convergence_delta) > 0.0):
-            raise ValueError(
-                "CalibrationConfig.sweep_outer_convergence_delta must be > 0; "
-                f"got {self.sweep_outer_convergence_delta}."
             )
         if self.gdna_strand_prior_alpha_beta < 2.0:
             raise ValueError(

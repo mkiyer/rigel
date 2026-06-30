@@ -28,7 +28,7 @@ import pandas as pd
 from scipy.interpolate import BSpline
 from scipy.optimize import minimize
 
-__all__ = ["MonotoneVarMean", "MonotoneMean", "BlendedVarMean"]
+__all__ = ["MonotoneVarMean", "MonotoneMean"]
 
 
 _EPS = 1.0e-12
@@ -285,27 +285,6 @@ class MonotoneVarMean:
             crv = pd.DataFrame({"kind": "curve", "mean": grid, "var": self.predict(grid)})
             return pd.concat([pts, crv], ignore_index=True)
         return pts
-
-
-@dataclass(frozen=True, slots=True)
-class BlendedVarMean:
-    """A convex blend ``w·hi + (1−w)·lo`` of two fitted ``σ²_bio(mean)`` curves, evaluated at predict time.
-    Used for the RNA-message reliability: ``hi`` is the population-CONDITIONAL-MEAN fit (the unbiased
-    hyperprior estimand that capture needs), ``lo`` the reliability-weighted-MEDIAN fit (correct off-capture);
-    the SAME continuous evidence weight ``w`` that shrinks the enrichment transfer also selects between the two
-    estimands — ``w → 1`` under capture (the mean), ``w → 0`` off-capture (the median) — so there is no
-    population_spread flag and no capture detector, just the one uniform path."""
-
-    hi: "MonotoneVarMean"
-    lo: "MonotoneVarMean"
-    w: float
-
-    def predict(self, mean: np.ndarray) -> np.ndarray:
-        if self.w >= 1.0 - _EPS:
-            return self.hi.predict(mean)
-        if self.w <= _EPS:
-            return self.lo.predict(mean)
-        return self.w * self.hi.predict(mean) + (1.0 - self.w) * self.lo.predict(mean)
 
 
 @dataclass(frozen=True, slots=True)

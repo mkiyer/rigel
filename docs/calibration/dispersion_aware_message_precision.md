@@ -192,13 +192,23 @@ are untouched.
 - **Conflicting message into a CONFIDENT (single-strand) destination** (`vg_loc` small): `expected` small,
   `resid²` large ⇒ `σ²_edge ≈ resid²` ⇒ `τ` small ⇒ the depleted-seam message **cannot drag the enriched exon
   down**. ✔ (the capture under-call mechanism, silenced.)
-- **Conflicting message into an UNCERTAIN (AMBIG) destination** (`vg_loc` large — its local belief is just the
-  global): `expected` large ⇒ `σ²_edge = max(resid² − large, 0) ≈ 0` ⇒ `τ ≈ 1/base_var` ⇒ a correct enriched
-  neighbour **still lifts the AMBIG exon to its true level**. ✔ **This is the property a naive "down-weight by
-  raw disagreement" would break, and why the anchor's *precision* (`vg_loc`) must enter via `expected`.**
+- **Conflicting message into an UNCERTAIN (AMBIG) destination** — a correct enriched neighbour **still lifts the
+  AMBIG exon to its true level** — BUT NOT for the reason originally written here. **(Corrected by the 2026-06-29
+  counterfactual, §9.)** The original claim was "`vg_loc` is large ⇒ `expected` absorbs `resid²`." The data
+  refutes it: `vg_loc` is only **0.41** (stranded) to **0.80** (unstranded), nowhere near a seam's `resid²≈17`, so
+  `expected` is **near-cosmetic** and the precision reduces to **`τ ≈ 1/resid²`**. The lift survives for a
+  *different* reason — **the correct lift is a WITHIN-REGIME message** (an enriched exon node imputing onto another
+  enriched exon node: similar density ⇒ moderate `resid≈2` ⇒ modest `σ²_edge` ⇒ preserved). A *cross-seam* "lift"
+  (a depleted intron with a large `resid≈5` pushing UP) is correctly **silenced** — you do NOT impute an enriched
+  gDNA level across a regime boundary; that level comes from the global `ê(z)`. So the real discriminator is
+  **within-regime vs cross-seam disagreement magnitude**, not dst confidence. `vg_loc` provides only a *second-order*
+  nudge (AMBIG's slightly-larger `vg_loc` preserves its within-regime lift a bit better than a confident
+  single-strand dst's — observed: AMBIG within-regime lift kept at ×1.09 trust vs single-strand ×0.70).
 
-So it self-silences exactly the harmful seam messages while preserving both the smooth relay and the AMBIG lift —
-the three things that must all hold — with no regime label anywhere.
+So it self-silences exactly the harmful seam messages (the depleted-source DRAG = the leak) while preserving the
+smooth relay and the *within-regime* enriched lift — with no regime label anywhere. The §4.1 principle ("σ²_edge
+small within a regime, large across a boundary") is the correct and sufficient justification; the `vg_loc`
+absorption story is not needed (and is false at the observed magnitudes).
 
 ### 4.5 What this is, statistically
 
@@ -241,26 +251,28 @@ The one-sided spliced/mature floor is a node-local term (D8), not a message — 
 
 ---
 
-## 6. Open questions / risks (resolve during implementation)
+## 6. Open questions / risks — RESOLVED with the user (2026-06-29)
 
-1. **Single-residual noise.** `σ²_edge` from one residual is χ²₁-noisy. Acceptable for a one-sided protective
-   down-weight, but a message could be unlucky (large residual by chance) and be over-silenced, or lucky and
-   under-silenced. Options to consider: a mild shrinkage of `σ²_edge` toward 0; a light pooling that does NOT
-   reintroduce a μ axis; or accept the noise (it averages out over a node's several edges in the FB combine).
-   **Decide empirically with the kill-switch experiment (§7).**
-2. **Over-silencing the relay (the kill-switch).** Must confirm the new τ does NOT cut genuine long-range relay
-   edges (large μ-separation but small disagreement-from-anchor). §4.4 argues it doesn't (agreeing ⇒ full τ),
-   but verify on the converged belief before committing.
-3. **`expected`/combine double-use of `vg_loc`.** `vg_loc` enters both `expected` (the surprise threshold) and
-   the final Gaussian combine (`pg_loc`). Check the derivation is self-consistent (it is the dst's belief
-   variance in both roles, which is coherent, but confirm no double-counting of the dst evidence).
-4. **Offset cleanup (independent, cheap).** Swap the +1-pseudocount log-Poisson offset for the delta-exact
-   `1/max(count, count_floor)` (reuse the existing `_MSG_PSEUDOCOUNT/E` floor) — removes a spurious low-μ σ²_bio
-   floor and reconciles the fit-time vs apply-time floor conventions. Second-order; bundle or defer.
-5. **ê(z) compression (§2.4)** — separate follow-up; not in this change.
-6. **Goldens WILL change** — the synthetic regression goldens must be regenerated after this lands (an intended
-   solver change). Validate FIRST on the net-flow benchmark (§7).
-7. **VCaP can't validate this yet (§ below).**
+1. **Single-residual noise** — `σ²_edge` from one residual is χ²₁-noisy, and the counterfactual (§9) confirmed
+   `expected` is near-cosmetic so the precision is essentially `1/resid²` (the noise is real). **DECISION: no
+   shrinkage initially** — accept the noise (it averages over a node's ≤2 edges in the FB combine). **IF** the
+   benchmark shows instability, shrink `σ²_edge` toward a **non-zero floor = the global gDNA between-node spread
+   `σ²_g`** (NOT toward 0), i.e. `σ²_edge = max(resid² − expected, σ²_g_floor)` — a principled "edges are at least
+   as variable as the population" floor that reuses the existing seed `σ²_g`, no new constant. (user's call.)
+2. **Over-silencing the relay (the kill-switch)** — **RESOLVED, PASS (§9).** Relay edges (|resid|<0.5) keep/gain
+   trust (×3.0 stranded, ×1.0 unstranded, ×8.0 off-capture); 0% silenced. The relay survives.
+3. **`expected`/combine double-use of `vg_loc`** — **DECISION: keep.** It is the dst's belief variance in both
+   roles (the surprise threshold and the Gaussian combine), which is coherent. The counterfactual shows `vg_loc`
+   is near-cosmetic anyway (0.41–0.80 « seam resid²), so there is no material double-counting risk; keep the
+   delta-method-correct form and do not lean on it.
+4. **Offset cleanup** — **DECISION: defer.** Bundle separately so it doesn't confound the precision change in the
+   benchmark.
+5. **ê(z) compression (§2.4)** — separate follow-up; not in this change. NB the §9 finding makes ê(z) the
+   *coupled* lever: disagreement-aware precision protects the anchor `lfg_loc`, which IS the enrichment-aware
+   global, so the fix's effectiveness on the message-dominated (AMBIG/unstranded) leak rides on ê(z) working.
+6. **Goldens WILL change** — regenerate the synthetic goldens after this lands; validate FIRST on the net-flow
+   benchmark.
+7. **VCaP can't validate this yet** (below).
 
 ### Real-data (VCaP) caveats — deferred per the user (generating new real data)
 On the cached VCaP slice the redesign's premise can't be *tested*: `eff_gdna` spans ~8 orders of magnitude so
@@ -310,3 +322,77 @@ Related memory: `calib_sigma2_hump_monotone_misfit.md` (the diagnosis + the free
 `calib_logdensity_overhaul.md`, `hybrid_capture_derivation.md` (whose "bimodal seam" framing this sharpens to
 hump-vs-monotone, then to disagreement-vs-level), `flagship_em_bound_not_calibration.md` (why the flagship's
 own effect is small — it's EM-bound; the message fix matters most in the message-dominated regimes).
+
+---
+
+## 9. Validation results — the §7.1 counterfactual (2026-06-29, GREEN LIGHT)
+
+Ran `scripts/debug/dispersion_study/precision_counterfactual.py` on three cached `quick_3to1_5mb` conditions:
+proposed `τ` vs current `τ` per gDNA edge on the CONVERGED belief, bucketed by dst confidence × **sign** of
+disagreement (DRAG = message says less gDNA = the leak direction; LIFT = more) × **source region type**.
+
+Trust ratio = proposed ÷ current (>1 more trust, <1 silenced):
+
+| edge type | ss0.99 cap-ON (flagship) | ss0.50 cap-ON (unstranded) | ss0.99 cap-OFF (control) |
+|---|---|---|---|
+| **depleted-src → exon DRAG** (the leak) | **×0.11** (kept .01) | ×0.73 (kept .88) | n=0 (no depletion) |
+| **relay** (\|resid\|<0.5, agreeing) | ×3.0 (kept 1.0) | ×1.0 (kept 1.0) | ×8.0 (kept 1.0) |
+| **within-regime LIFT** (exon→exon, AMBIG dst) | ×1.09 (kept .88) | ×3.2 (kept .81) | ×0.79 (kept .83) |
+| relay ÷ drag discrimination | **7×** | 1× | 17× |
+
+Conclusions:
+- **The leak is correctly targeted.** On the flagship the depleted-intron→exon DRAG (the exact under-call
+  mechanism) is silenced ×0.11 while the relay is strengthened and the within-regime enriched lift preserved.
+  Criteria (i)/(ii)/(iii) all PASS once (iii) is split by source (large-resid cross-seam "lifts" are *meant* to
+  be silenced; the within-regime lift survives). **No free-spline fallback needed.**
+- **The `vg_loc` absorption rationale is false** (§4.4 corrected): `vg_loc` = 0.41–0.80 « seam `resid²≈17`, so
+  the precision is essentially `1/resid²`; the discriminator is within-regime vs cross-seam, not dst confidence.
+- **Two benchmark watch-items (not blockers):** (a) **unstranded** — new ≈ current on drags because the current
+  monotone σ²_bio already blows up to 36.9 there; the new value is *preserving the within-regime lift* the old
+  curve over-suppresses (×3.2). (b) **off-capture** — relay gains ×8 trust; expected benign-to-beneficial
+  (uniform gDNA ⇒ agreeing imputation is correct), but the off-capture goldens will shift — verify no regression.
+
+## 10. Implementation map (the precise, reviewable change set)
+
+**A. `bp_solver.py` — `_scan` (the core, 3 identical blocks).** In `emit_g` / `emit_p` / `emit_n`, replace the
+`1/(vbg + s2{g,p,n}[i] + pois)` precision with the disagreement form. The anchor is the dst's message-free local
+log-fraction (`lfg_loc`/`lfp_loc`/`lfn_loc`, already computed) and local variance (`vg_loc`/`vp_loc`/`vn_loc`,
+in the enclosing `node_sweep` scope). Per block (gDNA shown):
+```
+base_var = vbg[lsrc] + pois
+s2_edge  = max((mo - lfg_loc[i])**2 - (base_var + vg_loc[i]), 0.0)
+pr       = 1.0 / max(base_var + s2_edge, _EPS)
+```
+Inlined (not a helper) — the scan is the genome-scale hot loop; keep the 2 lines per block with one shared
+formula comment. Drop the `s2g/s2p/s2n` parameters from `_scan`'s signature.
+
+**B. `bp_solver.py` — `node_sweep` body, DELETE:** `_edge_sigma2` (local def), the `dG/dP/dN` + `_face_dens`
+block (only fed `_edge_sigma2`), the `s2gf,s2gb,s2pf,s2pb,s2nf,s2nb` computations, the **bootstrap**
+`rna_vm = fit_rna_varmean(...)` (pre-loop), and the per-pass refit `rna_vm = fit_rna_varmean(...)` /
+`gdna_vm = fit_gdna_varmean(...)`. (`rna_vm` disappears entirely; `gdna_vm` survives ONLY as the pre-loop seed
+fit for the global prior — see C.)
+
+**C. Global prior now uses the ANCHORED seed σ²_g.** Today `gdna_vm` is the seed fit before the loop (line 1068)
+but is REASSIGNED to the per-pass `fit_gdna_varmean` (line 1279) and fed to `_global_lp`. After deletion, the
+global prior uses the seed `gdna_vm` consistently ⇒ `global_lp` is **constant across outer iterations** ⇒ compute
+it ONCE (before the loop). This is a real (intended, non-circular) behaviour change for the global → goldens move.
+
+**D. The outer var~mean loop COLLAPSES.** With message precision per-edge and `global_lp` constant + the local
+solve deterministic, one forward+backward pass is exact (tree BP). DECISION (user): **remove the `for _outer in
+range(max_outer)` loop** + `prev_outer`/`outer_deltas` tracking + the `max_outer`/`outer_convergence_delta`
+params. Cascades: `config.py` drop `sweep_max_outer` + `sweep_outer_convergence_delta` (+ their validators);
+`calibrate.py` drop the two kwargs. (Return shape: `node_sweep` currently returns `(belief, outer_deltas)`; keep
+a 2-tuple `(belief, [])` or change to just `belief` + update the one caller — propose keeping the 2-tuple to
+minimise churn.)
+
+**E. Module-level DELETE:** `fit_gdna_varmean`, `fit_rna_varmean`, `_edge_varmean`, `_fit_offset` (only those two
+used it); drop them from `__all__`. Drop the `BlendedVarMean` import; remove the `BlendedVarMean` class +
+`__all__` entry from `variance_model.py` (no remaining users).
+
+**F. KEEP:** `node_densities` (tests + diagnostics), `_gdna_seed_estimate`/`_fit_seed_varmean`/`var_mean`,
+`fit_enrichment_transfer`/ê/σ²_level, `MonotoneVarMean`/`MonotoneMean`, the `fbg[src]` relay.
+
+**G. Tests/goldens:** no production/test code outside `bp_solver.py` imports the retired fns (only throwaway
+debug harnesses, incl. the dispersion_study ones — they were built to study the retired curve, expected to break).
+The sweep behaviour tests in `test_bp_solver.py` test outcomes not the fit internals; run them, then
+`pytest tests/ --update-golden`, then `pytest tests/`.
