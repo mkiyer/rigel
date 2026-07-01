@@ -76,6 +76,19 @@ __all__ = [
 _EPS = 1.0e-9
 _MSG_PSEUDOCOUNT = 1.0  # one pseudo-observation: a density from a finite count can never have zero
 #                         sampling variance, so a message precision can never escape to ∞ (var stabilizer).
+# ── Phase-1 single-strand solver (the prior-free training substrate). We do NOT yet have a trained gDNA
+#    prior — these single-strand solutions are what we will TRAIN it from. So the global gDNA prior must be
+#    STABILITY-ONLY: it gives low/zero-gDNA nodes a finite baseline so the solve stays sane, but it can NEVER
+#    drive a solution. A single-strand node resolves from its STRAND likelihood + the messages; with strong
+#    strand the tilt pins it, unstranded relies on the messages (won't be perfect — accepted). ê(z) (the
+#    enrichment prior) is OFF in Phase 1 (it is a prior, and Phase-2's mixture model replaces it).
+#
+#    This is the SHIPPED Phase-1 behaviour (a deliberate, documented phase state — main is "incomplete
+#    pending Phase 2"). The constant is the single switch Phase 2 flips back on once the mixture prior +
+#    enrichment transfer are trained: it then restores the self-scaling global precision and ê(z), and the
+#    AMBIG path regains a prior (see `test_gdna_sweep_factor1_uniform`). ──
+_PHASE1_PRIOR_FREE = True
+_GLOBAL_STAB_PREC = 1.0  # one pseudo-observation — the global can never override a node's own data.
 _POS_BITS = BIT_EXON_POS | BIT_INTRON_POS
 _NEG_BITS = BIT_EXON_NEG | BIT_INTRON_NEG
 
@@ -440,8 +453,14 @@ def build_node_statics(
         n_nodes=int(chain.n_nodes),
         u_pos=pick(r_up, b_up),
         u_neg=pick(r_un, b_un),
-        spliced_pos=pick(r_sp, b_sp),
-        spliced_neg=pick(r_sn, b_sn),
+        # No per-node spliced FLOOR. Spliced (mature) handling is OWNED by the message system (the B→exon
+        # MEASUREMENT message + the exon→B absorption); a second floor here would double-count it AND inflate a
+        # boundary's UNSPLICED f_pos with mature → phantom nascent into introns (matrix-confirmed: removing it
+        # is ≥ keeping it in every κ × capture × ±gDNA regime). Zeroed for ALL nodes (regions carry ~0 contained
+        # spliced anyway). The solver's spliced-lower-bound term thus operates on zeros (inert; dead-code
+        # cleanup is a follow-up).
+        spliced_pos=np.zeros_like(pick(r_sp, b_sp)),
+        spliced_neg=np.zeros_like(pick(r_sn, b_sn)),
         free_pos=free_pos,
         free_neg=free_neg,
         strand_obs=free_pos ^ free_neg,
@@ -886,6 +905,12 @@ def _global_logprior(
             fm = fm & ~np.asarray(apply_mask, bool)
         target[fm] = np.log(np.clip(float(rho_floor) * eff[fm] / mass[fm], _EPS, 1.0))
         n_node[fm] = 1.0 / max(float(s2_floor_total), _EPS)
+    if _PHASE1_PRIOR_FREE:
+        # STABILITY-ONLY: cap the WHOLE global (flat + floor) at one pseudo-observation so it cannot drive
+        # or drag any node — the single-strand solve is carried by strand + messages, the global only keeps
+        # low/zero-gDNA nodes finite. (The target VALUES — floor for depleted, ρ_global elsewhere — stay; only
+        # their weight is capped.)
+        n_node = np.minimum(n_node, _GLOBAL_STAB_PREC)
     log_fg = np.log(np.maximum(np.asarray(fgg, np.float64), _EPS))  # (K,)
     return -0.5 * n_node[:, None] * (log_fg[None, :] - target[:, None]) ** 2
 
@@ -1006,6 +1031,8 @@ def node_sweep(
     ehat, z_enrich, sigma2_level, enrich_w = fit_enrichment_transfer(
         chain, statics, geometry, region_arrays, boundary_substrate, f_g, kappa, rho_global,
     )
+    if _PHASE1_PRIOR_FREE:
+        enrich_w = 0.0  # Phase-1: ê(z) enrichment prior OFF (no trained prior yet; Phase-2 mixture replaces it)
     node_rtype, _rtype = _node_region_type(chain, region_arrays)
     # The apply set is built on EVERY condition (no significance fork); the continuous enrich_w does the
     # collapsing (w → 0 ⇒ byte-identical to the flat global on these nodes).
@@ -1119,10 +1146,17 @@ def node_sweep(
             #         imputed into the boundary's (gDNA+nascent) crossing — subtracting it leaves pure nascent.
             # At most one of SPs/SPd is non-zero on an edge (src and dst are never both boundaries), and BOTH
             # are zero on intron↔boundary edges (spliced lives on the exon flank), so introns carry pure
-            # nascent with NO gate. Precision: a MEASUREMENT (``n_mat>0``, B→exon) uses COUNT precision and is
-            # NOT disagreement-silenced (a gapped read IS mature RNA, fused with the strand likelihood so a
-            # confident strand wins and a strand-blind exon snaps to it); everything else is a nascent
-            # IMPUTATION at the disagreement-aware precision.
+            # nascent with NO gate. Precision: ALL RNA messages (the mature MEASUREMENT and the nascent
+            # IMPUTATION alike) use the disagreement-aware ``σ²_edge``. This is self-targeting and exactly
+            # realizes the "a confident strand wins, a strand-blind exon snaps" intent: when the message
+            # AGREES with the dst's message-free local belief, ``s2_edge = 0`` ⇒ full count precision
+            # (unchanged), so a strand-blind exon (uncertain ``f_pos``, large ``vp_loc`` absorbs the residual)
+            # still snaps to the mature it observes; when the message DISAGREES with a CONFIDENT local belief
+            # (a strong-strand exon whose own deep unspliced reads already pin ``f_pos``), ``s2_edge`` down-
+            # weights it. The old exemption (count precision, never silenced) let a capture-biased mature
+            # density (junction-spanning reads are only partially captured ⇒ ``n_mat/E_spl`` under-estimates
+            # the exon's RNA) OVERRIDE a correct strand-confident exon → phantom gDNA by simplex complement
+            # (−gDNA flagship +0.04→+0.018; toy no-gDNA +0.20→+0.005; expressed exons unchanged).
             if emit_p:
                 er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
                 esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
@@ -1133,11 +1167,8 @@ def node_sweep(
                 mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_pos frame (floored at min-observable)
                 pois = 1.0 / max(n_nasc + n_mat, _EPS)
                 base_var = vbp[lsrc] + pois
-                if n_mat > _EPS:
-                    pr = 1.0 / max(base_var, _EPS)               # MEASUREMENT (count precision)
-                else:
-                    s2_edge = max((mo - lfp_loc[i]) ** 2 - (base_var + vp_loc[i]), 0.0)
-                    pr = 1.0 / max(base_var + s2_edge, _EPS)     # IMPUTATION (disagreement-aware)
+                s2_edge = max((mo - lfp_loc[i]) ** 2 - (base_var + vp_loc[i]), 0.0)
+                pr = 1.0 / max(base_var + s2_edge, _EPS)          # disagreement-aware (MEASUREMENT or IMPUTATION)
                 amp[i], app[i] = mo, pr
                 pt = pp_loc[i] + pr
                 fbp[i] = math.exp((pp_loc[i] * lfp_loc[i] + pr * mo) / pt)
@@ -1153,11 +1184,8 @@ def node_sweep(
                 mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_neg frame
                 pois = 1.0 / max(n_nasc + n_mat, _EPS)
                 base_var = vbn[lsrc] + pois
-                if n_mat > _EPS:
-                    pr = 1.0 / max(base_var, _EPS)
-                else:
-                    s2_edge = max((mo - lfn_loc[i]) ** 2 - (base_var + vn_loc[i]), 0.0)
-                    pr = 1.0 / max(base_var + s2_edge, _EPS)
+                s2_edge = max((mo - lfn_loc[i]) ** 2 - (base_var + vn_loc[i]), 0.0)
+                pr = 1.0 / max(base_var + s2_edge, _EPS)          # disagreement-aware (MEASUREMENT or IMPUTATION)
                 amn[i], apn[i] = mo, pr
                 pt = pn_loc[i] + pr
                 fbn[i] = math.exp((pn_loc[i] * lfn_loc[i] + pr * mo) / pt)

@@ -231,11 +231,16 @@ class CalibrationConfig:
 
     #: **gDNA strand-overdispersion prior** (advanced). The gDNA per-region sense rate is
     #: ``Beta(a, a)``; this is that symmetric shape ``a`` (= α = β). The fitted overdispersion is
-    #: shrunk toward ``od₀ = 1/(2·a + 1)`` for sparse/low-signal libraries (the conservative,
-    #: FP-safe "floor"). ``a = 3`` ⇒ ``od₀ ≈ 0.143`` (very overdispersed — good for sparse data);
-    #: ``a = 2`` ⇒ ``od = 0.2`` is the **most overdispersion allowed** (the fit is capped there),
-    #: so values below 2 are rejected; larger ``a`` ⇒ less overdispersion.
-    gdna_strand_prior_alpha_beta: float = 3.0
+    #: shrunk toward ``od₀ = 1/(2·a + 1)`` for sparse/low-signal libraries. The prior should be the
+    #: **near-binomial null**: gDNA strand is intrinsically random (≈50/50 per region), so the expected
+    #: overdispersion is small (only secondary mappability/GC/PCR effects); the MoM measures any real
+    #: excess from the data. ``a = 14`` ⇒ ``od₀ ≈ 0.034``. (The old ``a = 3`` ⇒ ``od₀ ≈ 0.143`` was an
+    #: over-conservative "FP-safe floor" that pulled EVERY node toward 0.5 — under-calling clean-gDNA
+    #: nodes and over-calling clean-RNA nodes — because an inflated od widens the gDNA Beta-Binomial and
+    #: erases its specificity at its own mean ½. Confirmed at the unit level: a pure-gDNA 50/50 node
+    #: solves to f_g≈1 at od=0 but ≈0.7 at od=0.1.) ``a = 2`` ⇒ ``od = 0.2`` is the **most overdispersion
+    #: allowed** (the fit is capped there), so values below 2 are rejected; larger ``a`` ⇒ less.
+    gdna_strand_prior_alpha_beta: float = 14.0
 
     #: Strength of the overdispersion prior, in effective seed-node units (advanced). The prior is
     #: worth this many seed nodes; libraries with far more informative seed nodes follow the fit,
@@ -247,9 +252,10 @@ class CalibrationConfig:
     #: ``gdna_strand_prior_alpha_beta`` for the *RNA* strand Beta-Binomial (fitted from boundary-side
     #: spliced counts). Kept at the **same default as gDNA** so that under sparse data both
     #: components collapse to the same distribution — that symmetry is what keeps an unstranded node
-    #: uninformative (a gDNA-only overdispersion biases the deconvolution toward RNA). Same ``a ≥ 2``
-    #: rule (``Beta(2,2)``, od=0.2, is the most overdispersion allowed).
-    rna_strand_prior_alpha_beta: float = 3.0
+    #: uninformative (a gDNA-only overdispersion biases the deconvolution toward RNA). RNA-spliced
+    #: strand is motif-deterministic ⇒ also near-binomial, so the same near-binomial null applies. Same
+    #: ``a ≥ 2`` rule (``Beta(2,2)``, od=0.2, is the most overdispersion allowed).
+    rna_strand_prior_alpha_beta: float = 14.0
 
     #: Strength of the RNA overdispersion prior, in effective seed-node units (advanced). Twin of
     #: ``gdna_strand_prior_weight``; same default.
