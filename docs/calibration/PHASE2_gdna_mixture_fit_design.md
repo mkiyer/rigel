@@ -316,11 +316,21 @@ Built `calibration/gdna_density_prior.py` (substrate + KDE) + `scripts/debug/plo
   unimodal off-capture prior, and they are all "≈uniform gDNA" anyway), OR de-bias the small-exon/boundary
   teacher density, OR down-weight/exclude sub-`E` teachers. Prefer: bandwidth + weighting handle it; confirm
   on the plots.
-- **D2 — unstranded enriched teacher:** add the `ρ_resid` blend now (needed for the unstranded case) vs
-  defer (accept unstranded is boundary-only for the first wiring). Recommend adding it — it is the crux of
-  "optimize unstranded."
+- **D2 — unstranded enriched teacher: DONE (2026-06-30).** Added the strand ⊕ `ρ_resid` blend
+  (`_exon_spliced_residual`): the exon teacher density is `(2κ−1)²·strand + (1−(2κ−1)²)·ρ_resid` on exons
+  with flanking spliced. At κ=½ the enriched exon teachers now survive (exon Σw 0→6.3; a fitted enriched
+  mode reappears at ≈+0.5). **Two follow-ups surfaced (for the D1 dissection turn):** (i) the `ρ_resid`
+  teachers get LOW weight because `precision` uses the strand solve's `Var(log f_g)` (unreliable when
+  unstranded) — it should use the SPLICED count; so the unstranded enriched mode is still boundary-dominated
+  (biased low vs the oracle's ≈−0.5 spike). (ii) the `ρ_resid` level itself may be biased by the mature
+  eff-len (O2) — the +0.5 unstranded mode sits above the −0.6 stranded exon mode.
 - **D3 — bandwidth production rule:** Silverman + noise-floor is the robust default; keep LSCV + the plots
   for inspection; the final rule waits for real data (§7.1).
+
+**D1 (geometry-bias sub-modes) — DEFERRED to a dedicated dissection turn** (user, 2026-06-30): plot +
+understand the small-exon/boundary density bias, the `ρ_resid` weighting (D2-i), the `ρ_resid` level bias
+(D2-ii / O2), and the boundary-dominance, before deciding the fix. The current default (bandwidth +
+precision weighting) stands until then.
 
 ## 8. Why this is the right design (the invariants it respects)
 

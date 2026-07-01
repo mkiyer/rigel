@@ -87,6 +87,37 @@ def _clean_exon_boundary(chain, region_arrays, boundary_substrate):
     return clean_exon_bnd, exon_on_right
 
 
+def _exon_spliced_residual(chain, geometry, statics, clean_exon_bnd, node_rtype):
+    """``ρ_resid = clip(M_unspliced − ρ_mature·E_rna, 0) / E_gdna`` per EXON region node — the STRAND-FREE,
+    gDNA-specific density (the mature RNA subtracted via the flanking clean-exon boundary's motif-stranded
+    spliced mass). NaN on non-exon nodes and exons with no flanking spliced. Mirrors the ``rho_spliced``
+    computation in :func:`bp_solver.fit_enrichment_transfer` (the strand-immune estimator promoted here to
+    the unstranded exon TEACHER density, per design D2)."""
+    left = np.asarray(chain.left)
+    right = np.asarray(chain.right)
+    fp = np.asarray(statics.free_pos, bool)  # single-strand: motif strand is + iff free_pos (else −)
+    SPl, SPr = geometry.spliced_pos_left, geometry.spliced_pos_right
+    SNl, SNr = geometry.spliced_neg_left, geometry.spliced_neg_right
+    ESPl, ESPr = geometry.eff_spl_left, geometry.eff_spl_right
+    ERl = np.asarray(geometry.eff_rna_left, dtype=np.float64)
+    EGl = np.maximum(np.asarray(geometry.eff_gdna_left, dtype=np.float64), _EPS)
+    Ml = np.asarray(geometry.mass_left, dtype=np.float64)
+    out = np.full(int(chain.n_nodes), np.nan, dtype=np.float64)
+    for i in np.where(node_rtype == 2)[0]:
+        sl, sr = (SPl, SPr) if fp[i] else (SNl, SNr)  # spliced on this exon's motif strand
+        m_spl, e_spl = 0.0, _EPS
+        lb = int(left[i])
+        if lb >= 0 and clean_exon_bnd[lb] and sr[lb] > m_spl:  # exon is lb's RIGHT region → lb's right side
+            m_spl, e_spl = float(sr[lb]), float(ESPr[lb])
+        rb = int(right[i])
+        if rb >= 0 and clean_exon_bnd[rb] and sl[rb] > m_spl:  # exon is rb's LEFT region → rb's left side
+            m_spl, e_spl = float(sl[rb]), float(ESPl[rb])
+        if m_spl > 0.0:
+            rho_mature = m_spl / max(e_spl, _EPS)
+            out[i] = max(float(Ml[i]) - rho_mature * float(ERl[i]), 0.0) / float(EGl[i])
+    return out
+
+
 def build_training_substrate(
     chain,
     belief,
@@ -132,19 +163,30 @@ def build_training_substrate(
     def _std(gcount):  # per-node sampling std of log ρ_g (= 1/sqrt(precision))
         return np.sqrt(var_g + 1.0 / (np.maximum(gcount, 0.0) + 1.0))
 
+    clean_exon_bnd, exon_on_right = _clean_exon_boundary(chain, region_arrays, boundary_substrate)
+
     # ---- region teachers (contained face; left == right for regions) ----
-    reg_teacher = is_reg & (Ml > 0.0) & ~is_ambig
-    rho_reg = np.asarray(dens.rho_g_left, dtype=np.float64)
-    rho_reg = np.maximum(rho_reg, 1.0 / EGl)  # min-observable density floor
-    w_reg = np.where(is_ss, w_str, 1.0) * _precision(
-        fg * Ml
-    )  # SS fades unstranded; structural full
-    kind_reg = np.where(
-        node_rtype == 2, KIND_EXON, np.where(node_rtype == 1, KIND_INTRON, KIND_INTERGENIC)
-    )
+    # Density = a STRAND ⊕ ρ_resid blend (design D2): the strand-solved density (weight (2κ−1)²) blended with
+    # the strand-free spliced-residual (weight 1−(2κ−1)², EXONS with flanking spliced only), so the enriched
+    # exon teachers survive unstranded (κ→½) where the strand solve is worthless. Structural intergenic sinks
+    # (neither strand free) keep strand-factor 1 (their M/E IS the gDNA density). denom→0 (unstranded exon with
+    # NO spliced, or an unstranded intron) ⇒ dropped (no reliable teacher). weight = denom·precision.
+    is_exon = node_rtype == 2
+    rho_strand = np.maximum(np.asarray(dens.rho_g_left, dtype=np.float64), 1.0 / EGl)
+    rho_resid_raw = _exon_spliced_residual(chain, geometry, statics, clean_exon_bnd, node_rtype)
+    avail = is_exon & np.isfinite(rho_resid_raw) & (rho_resid_raw > 0.0)
+    rho_resid = np.where(avail, np.maximum(rho_resid_raw, 1.0 / EGl), 0.0)
+    w_strand_factor = np.where(is_ss, w_str, 1.0)          # 1 on structural intergenic; (2κ−1)² on SS
+    w_spl_factor = (1.0 - w_strand_factor) * avail.astype(np.float64)
+    denom = w_strand_factor + w_spl_factor
+    rho_reg = np.where(denom > _EPS,
+                       (w_strand_factor * rho_strand + w_spl_factor * rho_resid) / np.maximum(denom, _EPS),
+                       rho_strand)
+    reg_teacher = is_reg & (Ml > 0.0) & ~is_ambig & (denom > _EPS)
+    w_reg = denom * _precision(fg * Ml)
+    kind_reg = np.where(is_exon, KIND_EXON, np.where(node_rtype == 1, KIND_INTRON, KIND_INTERGENIC))
 
     # ---- boundary teachers (clean intron/intergenic↔exon crossing; exon-facing side) ----
-    clean_exon_bnd, exon_on_right = _clean_exon_boundary(chain, region_arrays, boundary_substrate)
     M_bnd = np.where(exon_on_right, Mr, Ml)
     E_bnd = np.where(exon_on_right, EGr, EGl)
     rho_bnd = np.where(exon_on_right, np.asarray(dens.rho_g_right), np.asarray(dens.rho_g_left))
