@@ -332,6 +332,48 @@ understand the small-exon/boundary density bias, the `ρ_resid` weighting (D2-i)
 (D2-ii / O2), and the boundary-dominance, before deciding the fix. The current default (bandwidth +
 precision weighting) stands until then.
 
+## 8c. D1 dissection findings (2026-07-01, `scripts/debug/dissect_gdna_teachers.py`)
+
+Ran the per-node density decomposition vs the oracle (`dissect_gdna_teachers.py`) across capture on/off. The
+dissection REORDERED the priorities:
+
+- **D1 (geometry-bias sub-modes) — CLOSED, a non-issue.** The oracle density is UNIFORM off-capture across
+  all sizes/types (the eff-length model is correct). The off-capture sub-modes are a strand-SOLVE f_g
+  under-call on RNA-rich / low-count nodes (od + few-fragment Jeffreys/grid, worst for small exons) — but
+  (a) off-capture it is benign (gDNA is uniform, a slightly-low unimodal prior is fine), and (b) under
+  capture the enriched mode is defined by the PURE-gDNA (unexpressed) exons, which solve ACCURATELY
+  (solved/oracle 0.95–0.98) and carry HIGH precision (var_g≈0.002 ⇒ prec 250–320), while the biased
+  expressed exons have LOW precision (var_g≈0.2 ⇒ prec 3–7). So the **precision weighting already
+  concentrates the enriched mode on the accurate teachers** — the fitted mode (−0.63) matches the pure-gDNA
+  oracle (log −0.63). No fix needed; the earlier unweighted Δ=−0.3 was misleading. (Finding B: the precision
+  weight works exactly as intended.)
+
+- **THE REAL PROBLEM — `ρ_resid` is fundamentally biased.** `ρ_resid = clip(M_unsp − ρ_mature·E_rna,0)/E_gdna`
+  over-calls gDNA **1.5× off-capture and 3.08× on-capture** (median vs oracle). Root cause: `ρ_mature`
+  (from the junction-spliced count / half-triangle `E_spl`) UNDER-estimates the within-exon mature density,
+  so the subtraction leaves RNA in the "gDNA" residual. Two components: (i) a ~1.5× base bias off-capture
+  (the mature eff-len O2), and (ii) the junction CAPTURE-CLIFF (junction-spanning reads are partially
+  captured — the SAME root as the Phase-1 mature-measurement bug we disagreement-silenced) roughly doubles
+  it to 3×. This breaks:
+  - **D2 (the `ρ_resid` blend):** for unstranded exons it injects the 3× over-call → the unstranded enriched
+    mode reads HIGH (the +0.5 vs −0.6 discrepancy). D2 is HARMFUL as built (it does not hurt the STRANDED
+    mode — there the blend weight on `ρ_resid` is (1−(2κ−1)²)≈0.04 and the mode-defining pure-gDNA exons have
+    no spliced ⇒ `ρ_resid` NaN ⇒ pure strand — but it does not help either).
+  - **The Phase-3 AMBIG strand-free observation (§3.2 / §6):** the design leaned on `ρ_resid` as the per-node
+    gDNA observation that localises an isolated AMBIG locus. A 1.5–3× biased observation cannot do that.
+
+### Decisions (proposed — supersede D1/D2 above)
+- **DR1 — close D1.** No geometry-bias fix; the precision weighting handles the enriched mode.
+- **DR2 — `ρ_resid`:** it is the linchpin for BOTH unstranded teachers (D2) and the Phase-3 AMBIG
+  observation, and it is broken. Options: (a) **REVERT D2** and drop `ρ_resid` from the substrate — accept
+  unstranded enriched teachers come only from pure-gDNA/structural nodes + boundaries (unstranded stays hard,
+  as the design acknowledged); (b) **FIX `ρ_mature`** — learn the junction→within-exon correction (incl. the
+  capture cliff) from STRANDED exons where the strand gives the true RNA, then apply it strand-free; (c) drop
+  `ρ_resid` entirely and lean the AMBIG solve on the **gDNA messages** (strand-free, from gDNA-clean
+  neighbours) + the mixture prior. Recommend (a)+(c): revert D2 now, and design Phase-3 AMBIG on
+  messages+prior rather than `ρ_resid` — revisit a cliff-corrected mature (b) only if AMBIG loci without
+  gDNA-clean neighbours prove unsolvable.
+
 ## 8. Why this is the right design (the invariants it respects)
 
 - **Count-zero-info** (`CALIBRATION_ARCHITECTURE.md`): the mixture is over gDNA *densities*, and enters as a

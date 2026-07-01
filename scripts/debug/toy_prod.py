@@ -84,6 +84,8 @@ def run(name, genes, *, kappa=1.0, n_rna=4000, gdna_fraction=0.5, capture=False,
         capture_config=cap_cfg, nrna_abundance=nascent,
     )
     idx = result.index
+    if _debug is not None:
+        _debug["bam_path"] = str(result.bam_path)  # oracle BAM, for downstream per-node oracle probes
     _st, sm, flm, _buf, pl = scan_and_buffer(str(result.bam_path), idx, BamScanConfig())
     fl = build_fl_models(global_counts=flm.global_model.counts,
                          rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,
