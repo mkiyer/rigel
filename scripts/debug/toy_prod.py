@@ -65,7 +65,7 @@ def _truth_fg(bam_path, ra, ref_names):
 
 def run(name, genes, *, kappa=1.0, n_rna=4000, gdna_fraction=0.5, capture=False,
         capture_strength=20.0, nascent=0.0, genome_length=12000, seed=7, instrument=False,
-        config=None):
+        config=None, _debug=None):
     wd = SCRATCH / f"prod_{name}"
     sc = Scenario(name, genome_length=genome_length, seed=seed, work_dir=wd, ref_name="chr1")
     for gid, strand, exons, *rest in genes:
@@ -98,11 +98,11 @@ def run(name, genes, *, kappa=1.0, n_rna=4000, gdna_fraction=0.5, capture=False,
         _orig = calmod.node_sweep
         calmod.node_sweep = lambda *a, **k: _orig(*a, _capture=cap, **k)
         try:
-            cal = calibrate(pl, ra, sm, fl.gdna_pmf, fl.rna_pmf, config or CalibrationConfig())
+            cal = calibrate(pl, ra, sm, fl.gdna_pmf, fl.rna_pmf, config or CalibrationConfig(), _debug=_debug)
         finally:
             calmod.node_sweep = _orig
     else:
-        cal = calibrate(pl, ra, sm, fl.gdna_pmf, fl.rna_pmf, config or CalibrationConfig())
+        cal = calibrate(pl, ra, sm, fl.gdna_pmf, fl.rna_pmf, config or CalibrationConfig(), _debug=_debug)
     gc = np.asarray(cal.mass_gdna_contained); rc = np.asarray(cal.mass_rna_contained)
     solved = np.where((gc + rc) > 0, gc / np.maximum(gc + rc, 1e-9), np.nan)
     truth, tg, tr = _truth_fg(result.bam_path, ra, idx.ref_names)

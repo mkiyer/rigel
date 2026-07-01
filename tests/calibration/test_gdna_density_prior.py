@@ -1,0 +1,179 @@
+"""Phase-2 gDNA-density mixture prior — the substrate extractor + the KDE fit
+(`calibration.gdna_density_prior`; design `docs/calibration/PHASE2_gdna_mixture_fit_design.md`)."""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
+from rigel.calibration.bp_solver import BOUNDARY, REGION, NodeBelief, NodeGeometry
+from rigel.calibration.gdna_density_prior import (
+    KIND_EXON,
+    GdnaDensityPrior,
+    TrainingSubstrate,
+    _weighted_kde_logpdf,
+    build_training_substrate,
+)
+from rigel.calibration.signature import BIT_EXON_NEG, BIT_EXON_POS, TS_AMBIG, TS_POS
+
+
+# --------------------------------------------------------------------------- KDE (P2.1)
+
+
+def _synthetic(x, *, w=None, std=None, kind=None):
+    x = np.asarray(x, dtype=np.float64)
+    w = np.ones_like(x) if w is None else np.asarray(w, dtype=np.float64)
+    std = np.full_like(x, 0.05) if std is None else np.asarray(std, dtype=np.float64)
+    kind = np.zeros(x.shape[0], dtype=np.int64) if kind is None else np.asarray(kind)
+    return TrainingSubstrate(
+        log_rho=x, weight=w, node_kind=kind, node_index=np.arange(x.shape[0]), log_rho_std=std
+    )
+
+
+def test_kde_recovers_bimodal_modes():
+    """Two well-separated clusters (depleted ⊕ enriched) → the fit is bimodal with modes at both levels."""
+    x = np.concatenate([np.linspace(-8.2, -7.8, 20), np.linspace(-1.2, -0.8, 20)])
+    pr = GdnaDensityPrior.fit(_synthetic(x, std=np.full(x.size, 0.05)), bandwidth="silverman")
+    top2 = sorted(m[0] for m in pr.modes[:2])
+    assert len(pr.modes) >= 2, pr.modes
+    assert -8.6 < top2[0] < -7.4, top2
+    assert -1.6 < top2[1] < -0.4, top2
+
+
+def test_kde_unimodal_when_single_cluster():
+    """One tight cluster (uniform gDNA) → a single dominant mode near the cluster centre."""
+    x = np.linspace(-2.3, -1.7, 40)
+    pr = GdnaDensityPrior.fit(_synthetic(x, std=np.full(x.size, 0.2)), bandwidth="silverman")
+    assert -2.2 < pr.modes[0][0] < -1.8, pr.modes
+
+
+def test_logpdf_matches_direct_kde():
+    """`logpdf` (grid interpolation) agrees with a direct weighted-KDE evaluation."""
+    x = np.array([-3.0, -2.0, -1.0, 0.0, 1.0])
+    w = np.array([1.0, 2.0, 3.0, 2.0, 1.0])
+    pr = GdnaDensityPrior.fit(_synthetic(x, w=w, std=np.full(5, 0.1)), bandwidth=0.5, n_grid=4096)
+    q = np.array([-2.5, -1.5, -0.5, 0.5])
+    direct = _weighted_kde_logpdf(q, pr.teacher_x, pr.teacher_w, pr.bandwidth)
+    assert np.allclose(pr.logpdf(q), direct, atol=0.02), (pr.logpdf(q), direct)
+
+
+def test_bandwidth_noise_floor():
+    """An ultra-tight cluster with LARGE per-node sampling std must NOT be resolved into spurious spikes —
+    the bandwidth is floored at the density-noise scale (the fix for the uniform-gDNA fracturing)."""
+    x = np.linspace(-2.01, -1.99, 60)  # spread 0.02 — far below the noise
+    pr = GdnaDensityPrior.fit(_synthetic(x, std=np.full(x.size, 0.3)), bandwidth="silverman")
+    assert pr.bandwidth >= 0.25, pr.bandwidth  # floored at ~median std 0.3
+    assert len(pr.modes) == 1, pr.modes  # one smooth mode, no noise spikes
+
+
+def test_fixed_bandwidth_and_lscv_run():
+    x = np.concatenate([np.linspace(-6, -5.5, 15), np.linspace(-1.5, -1.0, 15)])
+    sub = _synthetic(x, std=np.full(x.size, 0.05))
+    assert abs(GdnaDensityPrior.fit(sub, bandwidth=0.4).bandwidth - 0.4) < 1e-6
+    pr = GdnaDensityPrior.fit(
+        sub, bandwidth="lscv"
+    )  # LSCV must at least run + separate the two clusters
+    assert len(pr.modes) >= 2, pr.modes
+
+
+def test_floor_anchor_adds_depleted_mass():
+    """The optional ρ_floor virtual sample seeds the depleted mode when depleted teachers are absent."""
+    x = np.linspace(-1.2, -0.8, 30)  # only enriched teachers
+    sub = _synthetic(x, std=np.full(x.size, 0.05))
+    pr = GdnaDensityPrior.fit(
+        sub, bandwidth=0.2, floor_log_rho=-8.0, floor_weight=float(np.sum(sub.weight))
+    )
+    assert (
+        pr.logpdf(np.array([-8.0]))[0] > pr.logpdf(np.array([-5.0]))[0]
+    )  # mass appears at the floor
+
+
+def test_empty_substrate_raises():
+    with pytest.raises(ValueError):
+        GdnaDensityPrior.fit(_synthetic(np.zeros(0)))
+
+
+# --------------------------------------------------------------------------- substrate (P2.0)
+
+
+def _mock_chain_beliefs(kappa_marks_ambig: bool):
+    """A 5-node chain B0 R0(SS exon) B1 R1(AMBIG exon) B2 with known densities. include_boundaries=False in
+    the tests so only the two region nodes can teach — R0 (single-strand) does, R1 (AMBIG) must not."""
+    n = 5
+    kind = np.array([BOUNDARY, REGION, BOUNDARY, REGION, BOUNDARY])
+    ref_idx = np.array([0, 0, 1, 1, 2])
+    chain = SimpleNamespace(
+        kind=kind,
+        ref_idx=ref_idx,
+        n_nodes=n,
+        left=np.array([-1, 0, 1, 2, 3]),
+        right=np.array([1, 2, 3, 4, -1]),
+    )
+    # region signatures: R0 exon(+), R1 exon(+/−) = AMBIG
+    region_arrays = SimpleNamespace(
+        signature=np.array([BIT_EXON_POS, BIT_EXON_POS | BIT_EXON_NEG], dtype=np.int64),
+        strand_class=np.array([TS_POS, TS_AMBIG], dtype=np.int8),
+    )
+    # per NODE free masks: R0 single-strand (pos only), R1 AMBIG (both)
+    statics = SimpleNamespace(
+        free_pos=np.array([False, True, False, True, False]),
+        free_neg=np.array([False, False, False, True, False]),
+    )
+    z = np.zeros(n)
+    M = np.array([0.0, 500.0, 0.0, 800.0, 0.0])  # mass on R0, R1
+    Eg = np.array([1.0, 100.0, 1.0, 100.0, 1.0])  # gDNA eff-len
+    geometry = NodeGeometry(
+        n_nodes=n,
+        mass_left=M.copy(),
+        mass_right=M.copy(),
+        eff_gdna_left=Eg.copy(),
+        eff_gdna_right=Eg.copy(),
+        eff_rna_left=Eg.copy(),
+        eff_rna_right=Eg.copy(),
+        eff_spl_left=np.ones(n),
+        eff_spl_right=np.ones(n),
+        spliced_pos_left=z.copy(),
+        spliced_pos_right=z.copy(),
+        spliced_neg_left=z.copy(),
+        spliced_neg_right=z.copy(),
+    )
+    belief = NodeBelief(
+        f_pos=np.array([0.0, 0.8, 0.0, 0.5, 0.0]),
+        f_neg=z.copy(),
+        f_g=np.array([1.0, 0.2, 1.0, 0.5, 1.0]),  # R0 f_g=0.2, R1 f_g=0.5
+        var_pos=z.copy(),
+        var_neg=z.copy(),
+        var_gdna=np.array([0.0, 0.01, 0.0, 0.01, 0.0]),
+    )
+    bsub = SimpleNamespace(
+        left_region=np.array([-1, 0, 1, 2, 3]), right_region=np.array([0, 1, 2, 3, -1])
+    )
+    return chain, belief, geometry, statics, region_arrays, bsub
+
+
+def test_substrate_excludes_ambig_and_matches_density():
+    chain, belief, geom, st, ra, bsub = _mock_chain_beliefs(True)
+    sub = build_training_substrate(
+        chain, belief, geom, st, ra, bsub, kappa=0.99, include_boundaries=False
+    )
+    assert sub.n == 1  # only R0 (SS exon); R1 (AMBIG) excluded
+    assert sub.node_index[0] == 1  # chain id of R0
+    assert sub.node_kind[0] == KIND_EXON
+    # log ρ_g = log(f_g·M/E) = log(0.2·500/100) = log(1.0) = 0
+    assert abs(sub.log_rho[0] - np.log(0.2 * 500.0 / 100.0)) < 1e-9
+
+
+def test_substrate_strand_weight_fades_unstranded():
+    """A single-strand exon's teacher weight carries (2κ−1)² → it fades to ~0 as κ→½ (unstranded), so
+    unstranded data leans on structural teachers, not the unreliable strand solve."""
+    chain, belief, geom, st, ra, bsub = _mock_chain_beliefs(True)
+    w_stranded = build_training_substrate(
+        chain, belief, geom, st, ra, bsub, kappa=0.99, include_boundaries=False
+    ).weight[0]
+    sub_unstr = build_training_substrate(
+        chain, belief, geom, st, ra, bsub, kappa=0.5, include_boundaries=False
+    )
+    # at κ=0.5 the single-strand exon's weight → 0, so it drops out of the substrate entirely
+    assert sub_unstr.n == 0 or sub_unstr.weight[0] < 1e-6 * w_stranded

@@ -283,6 +283,45 @@ Stage-1 *final* SS beliefs (an AMBIG node between two SS genes gets both neighbo
 
 ---
 
+## 8b. P2.2 empirical findings (from the plotting framework, 2026-06-30)
+
+Built `calibration/gdna_density_prior.py` (substrate + KDE) + `scripts/debug/plot_gdna_prior.py`, run on
+`toy_prod` across the κ × capture ladder. What the plots show:
+
+- **The core hypothesis holds.** Capture-on is cleanly **bimodal** — a depleted mode (intergenic/intron)
+  and an enriched mode (captured exons, with a boundary-crossing shoulder between). Capture-off is
+  **unimodal** (uniform gDNA). Same code, no detector. The fitted modes track the oracle density clusters.
+- **Bandwidth is delicate (confirms §7.1).** LSCV under-smooths — it splits the depleted mode into spurious
+  peaks that are just the `1/E` floor of different-sized empty intergenic regions. Silverman is more robust
+  but its `min(std, IQR)` scale is fooled by a peaked-bulk-plus-geometry-tail shape. **Added a principled
+  noise floor** (bandwidth ≥ the weighted-median per-node Poisson log-density std, `log_rho_std`) — no magic
+  number; it stops the sampling-noise fracturing.
+- **Residual off-capture sub-modes are a SYSTEMATIC GEOMETRY BIAS, not sampling noise:** small exons
+  (tiny `E_gdna`) and boundary crossings read a *lower* apparent gDNA density than large regions even under
+  uniform gDNA (few-fragment + the depleted-neighbour drag). The noise floor doesn't remove these (they're
+  bias, not variance). → **Open decision D1** (below).
+- **Depleted mode sits at `1/E` under strong capture** — intergenic is nearly empty, so its "density" is the
+  min-observable (E-dependent). Directionally right ("~0 off-target gDNA") but the location is artificial.
+  → the `ρ_floor` virtual-sample anchor (§2.4) is the intended fix; validate it lifts the depleted mode to a
+  meaningful, E-independent level.
+- **Unstranded (κ→½) collapses the enriched teachers.** The strand-derived exon density carries `(2κ−1)²`,
+  so at κ=½ the exon-interior teachers get weight ≈0 and the enriched mode is left to the boundary crossings
+  alone (biased low). → **Open decision D2:** add the strand-free **`ρ_resid`-blended** exon teacher density
+  (`(2κ−1)²·strand + (1−(2κ−1)²)·ρ_resid`, the exact blend `fit_enrichment_transfer` already computes) so
+  the enriched mode survives unstranded. This is the O3/O4 mitigation and the "optimize unstranded too"
+  directive; it depends on the mature-eff-len quality (O2).
+
+**Decisions to make before P2.4 (wiring the solve):**
+- **D1 — geometry-bias sub-modes:** live with them (a broad-enough bandwidth washes them into the correct
+  unimodal off-capture prior, and they are all "≈uniform gDNA" anyway), OR de-bias the small-exon/boundary
+  teacher density, OR down-weight/exclude sub-`E` teachers. Prefer: bandwidth + weighting handle it; confirm
+  on the plots.
+- **D2 — unstranded enriched teacher:** add the `ρ_resid` blend now (needed for the unstranded case) vs
+  defer (accept unstranded is boundary-only for the first wiring). Recommend adding it — it is the crux of
+  "optimize unstranded."
+- **D3 — bandwidth production rule:** Silverman + noise-floor is the robust default; keep LSCV + the plots
+  for inspection; the final rule waits for real data (§7.1).
+
 ## 8. Why this is the right design (the invariants it respects)
 
 - **Count-zero-info** (`CALIBRATION_ARCHITECTURE.md`): the mixture is over gDNA *densities*, and enters as a

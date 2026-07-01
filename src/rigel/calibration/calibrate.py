@@ -76,6 +76,7 @@ def calibrate(
     gdna_fl_pmf: "np.ndarray",
     rna_fl_pmf: "np.ndarray",
     config: "CalibrationConfig",
+    _debug: dict | None = None,
 ) -> CalibrationResult:
     """Deconvolve the library into gDNA / RNA per node, then derive gdna_density_global.
 
@@ -168,6 +169,13 @@ def calibrate(
     regions = chain_region_deconv(chain, belief, substrate)
     left, right = chain_boundary_side_deconv(chain, belief, substrate)
     logger.debug("calibration sweep: single forward-backward pass")
+
+    if _debug is not None:  # inert diagnostic hook — the solved chain internals (Phase-2 substrate + plots)
+        _debug.update(
+            chain=chain, belief=belief, geometry=geometry, statics=statics, substrate=substrate,
+            boundary_substrate=boundary_substrate, region_arrays=region_arrays,
+            rna_sense_frac=rna_sense_frac, region_eff_len=region_eff_len, boundary_eff_len=boundary_eff_len,
+        )
 
     # Derive gdna_density_global (the library-average density QC scalar).
     density_global = gdna_density_global(
