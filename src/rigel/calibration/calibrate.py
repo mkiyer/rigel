@@ -180,14 +180,13 @@ def calibrate(
     # PASS 2 — re-solve ALL nodes with that mixture as the per-node prior (self-scaling; fills the tilt's
     # null space on AMBIG). Falls back to the pass-1 belief if the substrate is too small to fit.
     gdna_prior = None
-    if config.gdna_prior_enable:
-        train_sub = build_training_substrate(
-            chain, belief, geometry, statics, region_arrays, boundary_substrate,
-            min_eff_length=fl_mean,  # exclude regions too short to contain a gDNA fragment (§8e)
-        )
-        if train_sub.n >= _MIN_KDE_TEACHERS:
-            gdna_prior = GdnaDensityPrior.fit(train_sub, bandwidth=config.gdna_prior_bandwidth)
-            belief = _sweep(gdna_prior)
+    train_sub = build_training_substrate(
+        chain, belief, geometry, statics, region_arrays, boundary_substrate,
+        min_eff_length=fl_mean,  # exclude regions too short to contain a gDNA fragment (§8e)
+    )
+    if train_sub.n >= _MIN_KDE_TEACHERS:
+        gdna_prior = GdnaDensityPrior.fit(train_sub, bandwidth=config.gdna_prior_bandwidth)
+        belief = _sweep(gdna_prior)
     regions = chain_region_deconv(chain, belief, substrate)
     left, right = chain_boundary_side_deconv(chain, belief, substrate)
     logger.debug("calibration: %s", "two-pass (Phase-2 mixture prior)" if gdna_prior else "single pass")

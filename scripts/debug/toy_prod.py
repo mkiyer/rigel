@@ -142,7 +142,7 @@ def run(name, genes, *, kappa=1.0, n_rna=4000, gdna_fraction=0.5, capture=False,
         eff_gl = np.asarray(cap["eff_gdna_l"]); eff_gr = np.asarray(cap["eff_gdna_r"])
         ml = np.asarray(cap["mass_l"]); mr = np.asarray(cap["mass_r"])
         fgn = np.asarray(cap["f_g"])
-        print(f"  rho_global={cap['rho_global']:.4f}  enrich_w={cap['enrich_w']:.3f}  (anchor=fg_loc, msg modes are log-fraction targets)")
+        print(f"  rho_global={cap['rho_global']:.4f}  (anchor=fg_loc, msg modes are log-fraction targets)")
         print(f"  {'node':>10} {'kind':>4} | {'fg_str':>7} {'fg_loc':>7} {'fg_fin':>7} | {'gMSGmo':>7} {'gMSGpr':>7} {'pMSGmo':>7} {'pMSGpr':>7}")
         for n in range(ch.n_nodes):
             isreg = kind[n] == REGION
