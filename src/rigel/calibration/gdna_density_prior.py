@@ -40,9 +40,10 @@ class TrainingSubstrate:
     """The teacher set: one row per teaching node.
 
     ``log_rho`` — the node's gDNA density ``log ρ_g = log(f_g·M/E_gdna)``, floored at the min-observable
-    ``1/E_gdna`` (a finite count can never give an exactly-zero density). ``weight`` — the reliability
-    ``strand_discriminability·precision`` (§1 of the design; no new constant). ``node_kind`` — the
-    ``KIND_*`` code. ``node_index`` — the chain node id (cross-reference to the belief/geometry).
+    ``1/E_gdna`` (a finite count can never give an exactly-zero density). ``weight`` — the solve's OWN
+    confidence ``1/(Var(log f_g) + 1/(gcount+1))`` (the belief variance already integrates strand + messages
+    + structure; no separate strand-class factor). ``node_kind`` — the ``KIND_*`` code. ``node_index`` — the
+    chain node id (cross-reference to the belief/geometry).
     ``log_rho_std`` — the per-node sampling std of ``log ρ_g`` (= ``sqrt(Var(log f_g) + 1/(gcount+1))``, the
     density-noise scale); the KDE bandwidth is floored at its weighted median so a tight (uniform-gDNA)
     cluster is not resolved into spurious modes."""
@@ -87,37 +88,6 @@ def _clean_exon_boundary(chain, region_arrays, boundary_substrate):
     return clean_exon_bnd, exon_on_right
 
 
-def _exon_spliced_residual(chain, geometry, statics, clean_exon_bnd, node_rtype):
-    """``ρ_resid = clip(M_unspliced − ρ_mature·E_rna, 0) / E_gdna`` per EXON region node — the STRAND-FREE,
-    gDNA-specific density (the mature RNA subtracted via the flanking clean-exon boundary's motif-stranded
-    spliced mass). NaN on non-exon nodes and exons with no flanking spliced. Mirrors the ``rho_spliced``
-    computation in :func:`bp_solver.fit_enrichment_transfer` (the strand-immune estimator promoted here to
-    the unstranded exon TEACHER density, per design D2)."""
-    left = np.asarray(chain.left)
-    right = np.asarray(chain.right)
-    fp = np.asarray(statics.free_pos, bool)  # single-strand: motif strand is + iff free_pos (else −)
-    SPl, SPr = geometry.spliced_pos_left, geometry.spliced_pos_right
-    SNl, SNr = geometry.spliced_neg_left, geometry.spliced_neg_right
-    ESPl, ESPr = geometry.eff_spl_left, geometry.eff_spl_right
-    ERl = np.asarray(geometry.eff_rna_left, dtype=np.float64)
-    EGl = np.maximum(np.asarray(geometry.eff_gdna_left, dtype=np.float64), _EPS)
-    Ml = np.asarray(geometry.mass_left, dtype=np.float64)
-    out = np.full(int(chain.n_nodes), np.nan, dtype=np.float64)
-    for i in np.where(node_rtype == 2)[0]:
-        sl, sr = (SPl, SPr) if fp[i] else (SNl, SNr)  # spliced on this exon's motif strand
-        m_spl, e_spl = 0.0, _EPS
-        lb = int(left[i])
-        if lb >= 0 and clean_exon_bnd[lb] and sr[lb] > m_spl:  # exon is lb's RIGHT region → lb's right side
-            m_spl, e_spl = float(sr[lb]), float(ESPr[lb])
-        rb = int(right[i])
-        if rb >= 0 and clean_exon_bnd[rb] and sl[rb] > m_spl:  # exon is rb's LEFT region → rb's left side
-            m_spl, e_spl = float(sl[rb]), float(ESPl[rb])
-        if m_spl > 0.0:
-            rho_mature = m_spl / max(e_spl, _EPS)
-            out[i] = max(float(Ml[i]) - rho_mature * float(ERl[i]), 0.0) / float(EGl[i])
-    return out
-
-
 def build_training_substrate(
     chain,
     belief,
@@ -125,19 +95,22 @@ def build_training_substrate(
     statics,
     region_arrays,
     boundary_substrate,
-    kappa,
     *,
-    include_boundaries: bool = True,
+    include_boundaries: bool = False,
 ) -> TrainingSubstrate:
     """Extract the Phase-2 teacher set from a solved chain (P2.0).
 
-    Teachers = non-AMBIG region nodes with mass (intergenic / single-strand introns / single-strand exons)
-    plus, if ``include_boundaries``, the clean-exon boundary crossings (exon-facing side). AMBIG nodes (both
-    strands free) are excluded — they are the students. The density is ``ρ_g = f_g·M/E_gdna`` (from
-    :func:`node_densities`), floored at the min-observable ``1/E_gdna``. The weight is
-    ``strand_factor·precision`` where ``strand_factor = (2κ−1)²`` on single-strand nodes (fades to 0 at
-    κ→½, so unstranded data leans on the structural intergenic teachers) and ``1`` on structural nodes
-    (intergenic sinks, clean-exon boundaries), and ``precision = 1/(Var(log f_g) + 1/(gcount+1))``."""
+    The unified solver (structure + strand deconvolution + message/belief propagation + the extremely weak
+    gDNA floor) has ALREADY solved every node; this just READS its output. Teachers = every non-AMBIG node the
+    solver solved — intergenic sinks + single-strand introns + single-strand exons (and, if
+    ``include_boundaries``, the clean-exon boundary crossings). AMBIG nodes (both strands free) are excluded —
+    they are the students (their ``f_g`` is the unknown, solved in Phase 3 from the trained prior).
+
+    The teacher density is the solve's own ``ρ_g = f_g·M/E_gdna`` (:func:`node_densities`), floored at the
+    min-observable ``1/E_gdna``. The weight is the solve's OWN CONFIDENCE ``1/(Var(log f_g) + 1/(gcount+1))``
+    — the belief variance already integrates strand discriminability, the messages, and the structure, so a
+    strong-strand node counts heavily and an uncertain (weak-strand / weakly-messaged / low-count) node
+    counts lightly, with NO strand-class rule and NO ad-hoc estimator (that is the solver's job, done once)."""
     kind = np.asarray(chain.kind)
     is_reg = kind == REGION
     is_bnd = kind == BOUNDARY
@@ -145,8 +118,7 @@ def build_training_substrate(
 
     fp = np.asarray(statics.free_pos, bool)
     fn = np.asarray(statics.free_neg, bool)
-    is_ss = fp ^ fn  # exactly one strand free (G2 single-strand — strand-derived density)
-    is_ambig = fp & fn  # both free (G3) — EXCLUDED (students; non-circular teacher/target split)
+    is_ambig = fp & fn  # both strands free (G3) — EXCLUDED (students; non-circular teacher/target split)
 
     dens = node_densities(belief, geometry)
     fg = np.asarray(belief.f_g, dtype=np.float64)
@@ -155,7 +127,6 @@ def build_training_substrate(
     Mr = np.asarray(geometry.mass_right, dtype=np.float64)
     EGl = np.maximum(np.asarray(geometry.eff_gdna_left, dtype=np.float64), _EPS)
     EGr = np.maximum(np.asarray(geometry.eff_gdna_right, dtype=np.float64), _EPS)
-    w_str = float((2.0 * kappa - 1.0) ** 2)
 
     def _precision(gcount):
         return 1.0 / (var_g + 1.0 / (np.maximum(gcount, 0.0) + 1.0))
@@ -165,33 +136,20 @@ def build_training_substrate(
 
     clean_exon_bnd, exon_on_right = _clean_exon_boundary(chain, region_arrays, boundary_substrate)
 
-    # ---- region teachers (contained face; left == right for regions) ----
-    # Density = a STRAND ⊕ ρ_resid blend (design D2): the strand-solved density (weight (2κ−1)²) blended with
-    # the strand-free spliced-residual (weight 1−(2κ−1)², EXONS with flanking spliced only), so the enriched
-    # exon teachers survive unstranded (κ→½) where the strand solve is worthless. Structural intergenic sinks
-    # (neither strand free) keep strand-factor 1 (their M/E IS the gDNA density). denom→0 (unstranded exon with
-    # NO spliced, or an unstranded intron) ⇒ dropped (no reliable teacher). weight = denom·precision.
-    is_exon = node_rtype == 2
-    rho_strand = np.maximum(np.asarray(dens.rho_g_left, dtype=np.float64), 1.0 / EGl)
-    rho_resid_raw = _exon_spliced_residual(chain, geometry, statics, clean_exon_bnd, node_rtype)
-    avail = is_exon & np.isfinite(rho_resid_raw) & (rho_resid_raw > 0.0)
-    rho_resid = np.where(avail, np.maximum(rho_resid_raw, 1.0 / EGl), 0.0)
-    w_strand_factor = np.where(is_ss, w_str, 1.0)          # 1 on structural intergenic; (2κ−1)² on SS
-    w_spl_factor = (1.0 - w_strand_factor) * avail.astype(np.float64)
-    denom = w_strand_factor + w_spl_factor
-    rho_reg = np.where(denom > _EPS,
-                       (w_strand_factor * rho_strand + w_spl_factor * rho_resid) / np.maximum(denom, _EPS),
-                       rho_strand)
-    reg_teacher = is_reg & (Ml > 0.0) & ~is_ambig & (denom > _EPS)
-    w_reg = denom * _precision(fg * Ml)
-    kind_reg = np.where(is_exon, KIND_EXON, np.where(node_rtype == 1, KIND_INTRON, KIND_INTERGENIC))
+    # ---- region teachers: every non-AMBIG region with mass; the solve's own density + confidence ----
+    reg_teacher = is_reg & (Ml > 0.0) & ~is_ambig
+    rho_reg = np.maximum(np.asarray(dens.rho_g_left, dtype=np.float64), 1.0 / EGl)
+    w_reg = _precision(fg * Ml)
+    kind_reg = np.where(node_rtype == 2, KIND_EXON,
+                        np.where(node_rtype == 1, KIND_INTRON, KIND_INTERGENIC))
 
-    # ---- boundary teachers (clean intron/intergenic↔exon crossing; exon-facing side) ----
+    # ---- boundary teachers (clean intron/intergenic↔exon crossing; exon-facing side) — off by default;
+    #      the crossing-density normalization biases these low (dissection §8c). Toggle to experiment. ----
     M_bnd = np.where(exon_on_right, Mr, Ml)
     E_bnd = np.where(exon_on_right, EGr, EGl)
     rho_bnd = np.where(exon_on_right, np.asarray(dens.rho_g_right), np.asarray(dens.rho_g_left))
     rho_bnd = np.maximum(rho_bnd, 1.0 / np.maximum(E_bnd, _EPS))
-    w_bnd = _precision(fg * M_bnd)  # structural crossing → full trust
+    w_bnd = _precision(fg * M_bnd)
     bnd_teacher = is_bnd & clean_exon_bnd & (M_bnd > 0.0) & bool(include_boundaries)
 
     # ---- collect ----

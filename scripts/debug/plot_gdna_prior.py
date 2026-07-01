@@ -52,7 +52,7 @@ def main():
     ap.add_argument("--n-genes", type=int, default=10)
     ap.add_argument("--gdna", type=float, default=0.3)
     ap.add_argument("--no-capture", action="store_true")
-    ap.add_argument("--no-boundaries", action="store_true")
+    ap.add_argument("--boundaries", action="store_true", help="include clean-exon boundary crossings (off by default)")
     ap.add_argument("--seed", type=int, default=17)
     args = ap.parse_args()
 
@@ -66,8 +66,8 @@ def main():
 
     sub = build_training_substrate(
         dbg["chain"], dbg["belief"], dbg["geometry"], dbg["statics"],
-        dbg["region_arrays"], dbg["boundary_substrate"], kappa_fit,
-        include_boundaries=not args.no_boundaries,
+        dbg["region_arrays"], dbg["boundary_substrate"],
+        include_boundaries=args.boundaries,
     )
     print(f"scenario: kappa_fit={kappa_fit:.3f} capture={not args.no_capture} gdna={args.gdna} "
           f"n_genes={args.n_genes}")

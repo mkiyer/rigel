@@ -155,9 +155,7 @@ def _mock_chain_beliefs(kappa_marks_ambig: bool):
 
 def test_substrate_excludes_ambig_and_matches_density():
     chain, belief, geom, st, ra, bsub = _mock_chain_beliefs(True)
-    sub = build_training_substrate(
-        chain, belief, geom, st, ra, bsub, kappa=0.99, include_boundaries=False
-    )
+    sub = build_training_substrate(chain, belief, geom, st, ra, bsub, include_boundaries=False)
     assert sub.n == 1  # only R0 (SS exon); R1 (AMBIG) excluded
     assert sub.node_index[0] == 1  # chain id of R0
     assert sub.node_kind[0] == KIND_EXON
@@ -165,15 +163,21 @@ def test_substrate_excludes_ambig_and_matches_density():
     assert abs(sub.log_rho[0] - np.log(0.2 * 500.0 / 100.0)) < 1e-9
 
 
-def test_substrate_strand_weight_fades_unstranded():
-    """A single-strand exon's teacher weight carries (2κ−1)² → it fades to ~0 as κ→½ (unstranded), so
-    unstranded data leans on structural teachers, not the unreliable strand solve."""
+def test_substrate_weight_is_solve_confidence():
+    """The teacher weight is the solve's own confidence 1/(Var(log f_g)+1/(gcount+1)) — NO strand-class
+    factor (the belief variance already integrates strand + messages). A node solved with LOW variance
+    outweighs one solved with HIGH variance at the same gDNA count."""
     chain, belief, geom, st, ra, bsub = _mock_chain_beliefs(True)
-    w_stranded = build_training_substrate(
-        chain, belief, geom, st, ra, bsub, kappa=0.99, include_boundaries=False
-    ).weight[0]
-    sub_unstr = build_training_substrate(
-        chain, belief, geom, st, ra, bsub, kappa=0.5, include_boundaries=False
+    sub = build_training_substrate(chain, belief, geom, st, ra, bsub, include_boundaries=False)
+    # R0: f_g=0.2, M=500 ⇒ gcount=100; var_g=0.01 ⇒ weight = 1/(0.01 + 1/101)
+    gcount = 0.2 * 500.0
+    expect = 1.0 / (0.01 + 1.0 / (gcount + 1.0))
+    assert abs(float(sub.weight[0]) - expect) < 1e-6, (sub.weight[0], expect)
+    # raising the solve variance (less confident) must lower the weight, gDNA count unchanged
+    belief2 = belief.__class__(
+        f_pos=belief.f_pos, f_neg=belief.f_neg, f_g=belief.f_g,
+        var_pos=belief.var_pos, var_neg=belief.var_neg,
+        var_gdna=np.array([0.0, 0.5, 0.0, 0.01, 0.0]),  # R0 var 0.01 → 0.5
     )
-    # at κ=0.5 the single-strand exon's weight → 0, so it drops out of the substrate entirely
-    assert sub_unstr.n == 0 or sub_unstr.weight[0] < 1e-6 * w_stranded
+    sub2 = build_training_substrate(chain, belief2, geom, st, ra, bsub, include_boundaries=False)
+    assert float(sub2.weight[0]) < float(sub.weight[0])
