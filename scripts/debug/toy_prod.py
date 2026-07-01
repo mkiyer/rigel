@@ -90,6 +90,9 @@ def run(name, genes, *, kappa=1.0, n_rna=4000, gdna_fraction=0.5, capture=False,
     fl = build_fl_models(global_counts=flm.global_model.counts,
                          rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,
                          gdna_counts=gdna_fl_mass(pl), max_size=flm.max_size)
+    if _debug is not None:
+        from rigel.calibration.effective_length import boundary_eff_length as _bel
+        _debug["gdna_fl_mean"] = float(_bel(fl.gdna_pmf))  # gDNA mean fragment length (tiny-node threshold)
     ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
     from rigel.calibration.strand_balance import fit_strand_balance
     kfit = float(fit_strand_balance(sm).rna_sense_frac)

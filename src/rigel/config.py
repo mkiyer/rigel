@@ -288,6 +288,18 @@ class CalibrationConfig:
     #: lattice-cell resolution ``1/sweep_n_grid`` so further passes do not move the discretized solution.
     sweep_convergence_delta: float = 1e-3
 
+    #: **Phase-2 gDNA mixture prior** (``calibration.gdna_density_prior``). When on, calibration runs TWO
+    #: sweeps: pass 1 solves the single-strand nodes with the extremely-weak stability floor, a nonparametric
+    #: ``P(log ρ_g)`` KDE is trained on those solved densities, and pass 2 re-solves ALL nodes with that
+    #: mixture as the per-node prior (self-scaling — it fills the strand tilt's null space on AMBIG nodes and
+    #: recedes where the strand pins f_g). Off ⇒ the single pass-1 prior-free solve (the shipped Phase-1).
+    gdna_prior_enable: bool = True
+
+    #: The KDE **bandwidth** selector (the one knob): ``"silverman"`` (robust default), ``"lscv"``
+    #: (likelihood cross-validation), or a float (fixed ``h`` in log-density units). Decided empirically on
+    #: real data via ``scripts/debug/plot_gdna_prior.py`` (design §7.1); do NOT hard-code a magic value.
+    gdna_prior_bandwidth: str | float = "silverman"
+
     def __post_init__(self) -> None:
         if self.sweep_n_grid < 2:
             raise ValueError(

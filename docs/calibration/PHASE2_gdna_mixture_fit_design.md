@@ -374,6 +374,90 @@ dissection REORDERED the priorities:
   messages+prior rather than `ρ_resid` — revisit a cliff-corrected mature (b) only if AMBIG loci without
   gDNA-clean neighbours prove unsolvable.
 
+## 8d. Non-urgent backlog (2026-07-01, to explore/evaluate — not blocking the wiring)
+
+- **Exact Poisson–Gamma precision.** The per-node weight is currently the heuristic `1/(Var(log f_g) +
+  1/(gcount+1))`. The theoretically-exact discrete-data precision is `1/(ψ'(a+G) + Var(log f_g))` (trigamma;
+  `G=0,a=1` ⇒ 0.61, → G asymptotically), with center `ψ(a+G) − log E` (digamma — the E-dependent floor
+  placement that captures "zero counts over a large interval ⇒ confidently low"). The heuristic is close;
+  evaluate whether the exact form measurably changes the KDE before adopting it.
+- **Node imbalance in the KDE.** A weighted KDE with, e.g., 100k intergenic training nodes and 100 exon
+  nodes lets the huge class dominate the density (and the bandwidth). On a real genome this is usually
+  *helpful* (the depleted floor SHOULD dominate — the genome is mostly intergenic/intronic), but it means a
+  minority enriched mode can be under-represented, and on a tiny/unrepresentative scenario it flips (few
+  intergenic ⇒ the RNA nodes dominate — see the `test_ambig_no_false_gdna_from_nascent` toy). Decide whether
+  to cap/normalize per-class contribution or leave it to the weighting.
+- **The od-floor RNA-residual (a Phase-1 solver issue).** Pure-RNA nodes solve to `f_g ≈ 0.02` (the strand
+  overdispersion floor), not 0, so they sit at a density ~`0.006` — a spurious low mode ABOVE the true
+  depleted floor. In a gDNA-poor scenario this mode competes with (or, on a toy, outweighs) the intergenic
+  floor. Fixing it is a solver task (the od floor / the exon under-call), deferred per the "finish Phase-2,
+  then tackle lingering issues" plan.
+
+## 8e. Weighting / zero-inflation / imbalance investigation (2026-07-01, `zero_inflation_study.py`)
+
+Built a zero-inflated toy (80 genes, 10% expressed, capture) + compared weightings against the oracle.
+
+- **Precision weighting is WRONG — drop it; use UNIT weight.** Evidence (the plot): precision-weighting
+  ERASES the depleted floor (all mass on the enriched exons); unit weight recovers BOTH modes matching the
+  oracle. The rigorous reason: **precision correlates with the density** (depleted floor = low count = low
+  precision; enriched = high count = high precision), so precision-weighting is not a neutral noise-discount
+  — it systematically down-weights an entire MODE, biasing the distribution's SHAPE. (accuracy ≠ precision,
+  as flagged: an accurate-but-imprecise node is not down-weighted for being wrong, but a whole low-precision
+  CLASS is.) Bonus: unit weight also fixes the **bandwidth spike** — Silverman goes 0.03 → 0.75, because the
+  spike was driven by the precision-dominant tight enriched cluster controlling the bandwidth. **Noise is
+  handled by the bandwidth, not the weight.**
+- **The gDNA KDE is not RNA-zero-inflated — it is IMBALANCED.** gDNA is genome-wide (background) or on-panel
+  (enriched), so an *un*expressed exon still carries background/captured gDNA ⇒ nonzero gDNA count. The "500k
+  transcripts, few expressed" concern is about RNA; for the gDNA density those regions sit at the background
+  FLOOR (a huge majority), not at literal zero. Literal zero-gDNA-count arises only in gDNA≈0 libraries or
+  extreme off-target depletion. So the real problem is a big-floor / small-enriched (panel-dependent)
+  IMBALANCE, plus a zero corner.
+- **BUG: tiny-region 1/E artifact.** 39/281 nodes had `E_gdna < fragment length` (a region shorter than a
+  fragment can't contain one ⇒ `E_gdna→0` ⇒ `1/E` blows up ⇒ spurious HIGH density, up to +1.0, contaminating
+  the enriched mode). Fix: floor `E_gdna` at a fragment-length scale (or pool the zeros).
+- **Per-node zeros SMEAR** (log ρ −9 → +1 by E); the POOLED floor is clean (−10.76 from ΣE=453k). A
+  hurdle/pooled-floor is the robust option for the zero corner; per-node unit-weight is adequate once the
+  tiny-E artifact is fixed (the bulk clusters at the floor).
+- **Class imbalance / representativeness.** Unit weight tracks the TRUE node-count proportions. On a real
+  capture panel the floor (off-panel majority) dominates and the enriched mode is a minority bump — the
+  DESIGN INTENT (messages pick the mode, the prior supplies the LOCATIONS §3.5/§4) handles well-messaged
+  AMBIG nodes; the residual hard case is isolated / minority-enriched AMBIG nodes. Options: (E1) unit weight +
+  messages, accept the residual; (E2) class-balance — the plot shows it OVER-corrects; (E3) class-CONDITION
+  the prior (AMBIG nodes ARE exons ⇒ price them by the exon-density distribution). Recommend E1 default;
+  evaluate E3 on real data. The toys are also unrepresentative (all-exons-captured ⇒ enriched-majority; a
+  real panel is floor-majority) — build a capture-PANEL (subset) toy + prioritize real data.
+
+**Immediate:** drop precision weighting (unit weight) + fix the tiny-E floor. Defer: hurdle-floor,
+class-conditioning, genome-scale subsampling — evaluate after unit weight on a panel toy + real data.
+
+## 8f. The gDNA=0 AMBIG false-gDNA — deep dissection + fix (2026-07-01, `dissect_odfloor.py`)
+
+The `test_ambig_no_false_gdna_from_nascent` failure (AMBIG f_g=0.376 at gDNA=0+nascent) was traced end-to-end
+and, importantly, **re-diagnosed** — it is NOT about nascent (gDNA=0 + nascent=0 was WORSE, 0.542):
+
+- **The AMBIG balanced-strand degeneracy is the core.** An overlapping opposite-strand exon has RNA on both
+  strands → a balanced +frac that is STRAND-DEGENERATE with gDNA (both ~½). Its strand-only solve gives
+  f_g≈0.38–0.54 — it genuinely cannot tell two-strand RNA from gDNA. It NEEDS external info to resolve.
+- **What resolved it in PASS 1 was the weak floor's downward pull, not the messages.** `_global_logprior`
+  uses the EXPOSURE-POOLED ρ_global (≈0.001 at gDNA=0 — low, because pooling weights by ΣE and the large
+  low-density regions dominate). That low target pulls the AMBIG node down (fg_loc 0.376→0.053), then the
+  messages finish (→0.02). (Confirmed: with a FLAT pass-2 prior the AMBIG node reads 0.30 — the messages
+  alone do NOT resolve it.)
+- **Replacing the floor with the KDE lost that anchor.** The per-node unit-weight KDE's RNA-residual mode
+  sits ABOVE the pooled ρ_global (the many RNA nodes solve to f_g≈0.01 — an N-INDEPENDENT strand-solve floor,
+  ~5× amplified by od_r but present at od_r=0 too — so their density clusters at log ρ≈−5, well above the
+  pooled floor ≈−7). So the KDE did not pull the AMBIG node down. **Ruled out as fixes** (measured, no
+  effect): lowering od (RNA-node f_g barely moved — it is held by the full solve, not just od_r); tempering
+  the KDE (even α=0 gave 0.30); adding more floor/background nodes (0.38→0.46 — the KDE evaluates at the
+  node's OWN grid densities, not the dominant mode).
+- **FIX (shipped): the global prior is the pooled floor `_global_logprior` ALWAYS, and PASS 2 ADDS the KDE on
+  top** (`global_lp = _global_logprior(...) + _kde_logprior(...)`), rather than replacing it. This is the
+  design's "floor + mixture" (§3.4): the pooled floor is the always-present depleted baseline (its downward
+  pull resolves gDNA-poor AMBIG nodes), the KDE layers the enriched-mode structure. Result: gDNA=0 AMBIG →
+  0.005 (nascent) / 0.001 (no nascent); gDNA=200 AMBIG → 0.458 (reads gDNA); all 204 calibration tests pass.
+  (Open: is 0.458 the *right* gDNA fraction when gDNA is present? — the KDE-add raised it from 0.234; a
+  per-node-accuracy question for the AMBIG benchmark, validation B.)
+
 ## 8. Why this is the right design (the invariants it respects)
 
 - **Count-zero-info** (`CALIBRATION_ARCHITECTURE.md`): the mixture is over gDNA *densities*, and enters as a

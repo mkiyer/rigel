@@ -55,7 +55,7 @@ def test_logpdf_matches_direct_kde():
     w = np.array([1.0, 2.0, 3.0, 2.0, 1.0])
     pr = GdnaDensityPrior.fit(_synthetic(x, w=w, std=np.full(5, 0.1)), bandwidth=0.5, n_grid=4096)
     q = np.array([-2.5, -1.5, -0.5, 0.5])
-    direct = _weighted_kde_logpdf(q, pr.teacher_x, pr.teacher_w, pr.bandwidth)
+    direct = _weighted_kde_logpdf(q, pr.train_x, pr.train_w, pr.bandwidth)
     assert np.allclose(pr.logpdf(q), direct, atol=0.02), (pr.logpdf(q), direct)
 
 
@@ -79,8 +79,8 @@ def test_fixed_bandwidth_and_lscv_run():
 
 
 def test_floor_anchor_adds_depleted_mass():
-    """The optional ρ_floor virtual sample seeds the depleted mode when depleted teachers are absent."""
-    x = np.linspace(-1.2, -0.8, 30)  # only enriched teachers
+    """The optional ρ_floor virtual sample seeds the depleted mode when depleted training nodes are absent."""
+    x = np.linspace(-1.2, -0.8, 30)  # only enriched training nodes
     sub = _synthetic(x, std=np.full(x.size, 0.05))
     pr = GdnaDensityPrior.fit(
         sub, bandwidth=0.2, floor_log_rho=-8.0, floor_weight=float(np.sum(sub.weight))
@@ -163,21 +163,18 @@ def test_substrate_excludes_ambig_and_matches_density():
     assert abs(sub.log_rho[0] - np.log(0.2 * 500.0 / 100.0)) < 1e-9
 
 
-def test_substrate_weight_is_solve_confidence():
-    """The teacher weight is the solve's own confidence 1/(Var(log f_g)+1/(gcount+1)) — NO strand-class
-    factor (the belief variance already integrates strand + messages). A node solved with LOW variance
-    outweighs one solved with HIGH variance at the same gDNA count."""
+def test_substrate_weight_is_unit():
+    """Every training node carries UNIT weight — precision is NOT used as a weight (it correlates with the
+    density and would bias the KDE shape; design §8e)."""
     chain, belief, geom, st, ra, bsub = _mock_chain_beliefs(True)
     sub = build_training_substrate(chain, belief, geom, st, ra, bsub, include_boundaries=False)
-    # R0: f_g=0.2, M=500 ⇒ gcount=100; var_g=0.01 ⇒ weight = 1/(0.01 + 1/101)
-    gcount = 0.2 * 500.0
-    expect = 1.0 / (0.01 + 1.0 / (gcount + 1.0))
-    assert abs(float(sub.weight[0]) - expect) < 1e-6, (sub.weight[0], expect)
-    # raising the solve variance (less confident) must lower the weight, gDNA count unchanged
-    belief2 = belief.__class__(
-        f_pos=belief.f_pos, f_neg=belief.f_neg, f_g=belief.f_g,
-        var_pos=belief.var_pos, var_neg=belief.var_neg,
-        var_gdna=np.array([0.0, 0.5, 0.0, 0.01, 0.0]),  # R0 var 0.01 → 0.5
-    )
-    sub2 = build_training_substrate(chain, belief2, geom, st, ra, bsub, include_boundaries=False)
-    assert float(sub2.weight[0]) < float(sub.weight[0])
+    assert np.all(sub.weight == 1.0), sub.weight
+
+
+def test_substrate_excludes_tiny_regions():
+    """A region shorter than the fragment (E_gdna < min_eff_length) can't contain one → excluded (the
+    1/E-blowup fix). R0 has E_gdna=100; excluding below 200 drops it → empty substrate."""
+    chain, belief, geom, st, ra, bsub = _mock_chain_beliefs(True)
+    sub = build_training_substrate(chain, belief, geom, st, ra, bsub, min_eff_length=200.0,
+                                   include_boundaries=False)
+    assert sub.n == 0, sub.n

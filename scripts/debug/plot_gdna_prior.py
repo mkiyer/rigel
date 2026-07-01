@@ -8,7 +8,7 @@ how the estimators behave — BEFORE any bandwidth is chosen for production or w
 
 Usage:
     python -m scripts.debug.plot_gdna_prior                 # the default bimodal capture scenario
-    python -m scripts.debug.plot_gdna_prior --kappa 0.5     # unstranded (structural teachers only)
+    python -m scripts.debug.plot_gdna_prior --kappa 0.5     # unstranded (structural training nodes only)
     python -m scripts.debug.plot_gdna_prior --no-capture    # unimodal (uniform gDNA)
 Outputs a PNG under the scratchpad and prints the substrate + mode summary.
 """
@@ -33,8 +33,8 @@ _KIND_COLOR = {0: "tab:blue", 1: "tab:green", 2: "tab:red", 3: "tab:orange"}
 
 def _default_genes(n_genes: int):
     """n single-strand genes, alternating expressed / unexpressed, multi-exon (300/1200/5000 bp), well
-    spaced (intergenic deserts + introns → the depleted teachers). Expressed exons + their captured gDNA →
-    the enriched teachers; unexpressed exons → pure-gDNA enriched teachers."""
+    spaced (intergenic deserts + introns → the depleted training nodes). Expressed exons + their captured gDNA →
+    the enriched training nodes; unexpressed exons → pure-gDNA enriched training nodes."""
     genes, x, INTRON, GAP, SIZES = [], 5000, 3000, 6000, (300, 1200, 5000)
     for k in range(n_genes):
         s = x
@@ -71,7 +71,7 @@ def main():
     )
     print(f"scenario: kappa_fit={kappa_fit:.3f} capture={not args.no_capture} gdna={args.gdna} "
           f"n_genes={args.n_genes}")
-    print(f"substrate: n={sub.n} teachers  n_eff={sub.n_eff:.1f}")
+    print(f"substrate: n={sub.n} training nodes  n_eff={sub.n_eff:.1f}")
     for code, name in KIND_NAMES.items():
         m = sub.node_kind == code
         if m.any():
@@ -84,9 +84,9 @@ def main():
     oracle_log = np.log(oracle_rho[np.isfinite(oracle_rho) & (oracle_rho > 0)])
 
     priors = {}
-    for bw in ("silverman", "lscv"):
+    for bw in ("silverman", "lscv", 0.5):
         try:
-            priors[bw] = GdnaDensityPrior.fit(sub, bandwidth=bw)
+            priors[str(bw)] = GdnaDensityPrior.fit(sub, bandwidth=bw)
         except Exception as e:  # noqa: BLE001
             print(f"  [{bw}] fit failed: {e}")
     for bw, pr in priors.items():
@@ -99,7 +99,7 @@ def main():
         m = sub.node_kind == code
         if m.any():
             ax.plot(sub.log_rho[m], np.full(int(m.sum()), -0.02), "|", color=_KIND_COLOR[code],
-                    markersize=12, alpha=0.6, label=f"teacher: {name} (n={int(m.sum())})")
+                    markersize=12, alpha=0.6, label=f"training: {name} (n={int(m.sum())})")
     if oracle_log.size:
         ax.hist(oracle_log, bins=30, density=True, alpha=0.18, color="gray",
                 label="oracle region gDNA density")
@@ -112,7 +112,10 @@ def main():
     ax.set_title(f"Phase-2 gDNA density prior — κ_fit={kappa_fit:.2f}, "
                  f"capture={'on' if not args.no_capture else 'off'}, gdna={args.gdna}")
     ax.legend(fontsize=8, loc="upper right")
-    ax.set_ylim(bottom=-0.05)
+    # cap y at ~2× the smooth (fixed-h) curve so the tight auto-bandwidth spikes don't squash the structure
+    smooth = priors.get("0.5")
+    ytop = 2.0 * float(np.exp(smooth.logP_grid).max()) if smooth is not None else None
+    ax.set_ylim(bottom=-0.05, top=ytop)
     fig.tight_layout()
     out = SCRATCH / f"gdna_prior_k{args.kappa}_cap{0 if args.no_capture else 1}_g{args.gdna}.png"
     out.parent.mkdir(parents=True, exist_ok=True)

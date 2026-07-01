@@ -3,10 +3,11 @@ solutions (design: ``docs/calibration/PHASE2_gdna_mixture_fit_design.md``).
 
 Two objects:
 
-* :func:`build_training_substrate` (P2.0) — extract the teacher set from a solved chain: per-node
-  ``log ρ_g`` (gDNA density) + a reliability ``weight``. Teachers are the single-strand + structural region
-  nodes and the clean-exon boundary crossings; **AMBIG nodes are excluded** (they are the students — their
-  ``f_g`` is the unknown, so they cannot teach). This keeps the fit non-circular.
+* :func:`build_training_substrate` (P2.0) — extract the training-node set from a solved chain: per-node
+  ``log ρ_g`` (gDNA density) + a reliability ``weight``. Training nodes are the single-strand + structural
+  region nodes (incl. zero-count intergenic/intronic — the depleted-floor anchor) and the clean-exon
+  boundary crossings; **AMBIG nodes are excluded** (they are the target — their ``f_g`` is the unknown, solved
+  in Phase 3 from the trained prior). This keeps the fit non-circular.
 * :class:`GdnaDensityPrior` (P2.1) — a weighted Gaussian KDE in log space with a swappable bandwidth
   estimator (Silverman / likelihood-CV / fixed), pre-evaluated on a fine grid and consumed by the per-node
   solve via :meth:`GdnaDensityPrior.logpdf` (the drop-in for ``bp_solver._global_logprior``'s Gaussian).
@@ -37,16 +38,15 @@ KIND_NAMES = {0: "intergenic", 1: "intron", 2: "exon", 3: "boundary"}
 
 @dataclass(frozen=True, slots=True)
 class TrainingSubstrate:
-    """The teacher set: one row per teaching node.
+    """The training-node set: one row per training node.
 
     ``log_rho`` — the node's gDNA density ``log ρ_g = log(f_g·M/E_gdna)``, floored at the min-observable
-    ``1/E_gdna`` (a finite count can never give an exactly-zero density). ``weight`` — the solve's OWN
-    confidence ``1/(Var(log f_g) + 1/(gcount+1))`` (the belief variance already integrates strand + messages
-    + structure; no separate strand-class factor). ``node_kind`` — the ``KIND_*`` code. ``node_index`` — the
-    chain node id (cross-reference to the belief/geometry).
-    ``log_rho_std`` — the per-node sampling std of ``log ρ_g`` (= ``sqrt(Var(log f_g) + 1/(gcount+1))``, the
-    density-noise scale); the KDE bandwidth is floored at its weighted median so a tight (uniform-gDNA)
-    cluster is not resolved into spurious modes."""
+    ``1/E_gdna`` (a finite count can never give an exactly-zero density). ``weight`` — **UNIT** (all 1.0):
+    each solved node is one observation of a genomic location's density; precision is NOT used as a weight
+    (it correlates with the density and would bias the distribution's shape — design §8e). ``node_kind`` —
+    the ``KIND_*`` code. ``node_index`` — the chain node id (cross-reference to the belief/geometry).
+    ``log_rho_std`` — the per-node log-density noise scale (= ``sqrt(Var(log f_g) + 1/(gcount+1))``); the KDE
+    bandwidth is floored at its weighted median so a tight cluster is not resolved into spurious modes."""
 
     log_rho: np.ndarray
     weight: np.ndarray
@@ -96,21 +96,30 @@ def build_training_substrate(
     region_arrays,
     boundary_substrate,
     *,
+    min_eff_length: float = 0.0,
     include_boundaries: bool = False,
 ) -> TrainingSubstrate:
-    """Extract the Phase-2 teacher set from a solved chain (P2.0).
+    """Extract the Phase-2 training-node set from a solved chain (P2.0).
 
     The unified solver (structure + strand deconvolution + message/belief propagation + the extremely weak
-    gDNA floor) has ALREADY solved every node; this just READS its output. Teachers = every non-AMBIG node the
-    solver solved — intergenic sinks + single-strand introns + single-strand exons (and, if
-    ``include_boundaries``, the clean-exon boundary crossings). AMBIG nodes (both strands free) are excluded —
-    they are the students (their ``f_g`` is the unknown, solved in Phase 3 from the trained prior).
+    gDNA floor) has ALREADY solved every node; this just READS its output. Training nodes = every SOLVED
+    non-AMBIG node — intergenic sinks + single-strand introns + single-strand exons (and, if
+    ``include_boundaries``, the clean-exon boundary crossings), INCLUDING zero-count intergenic/intronic (the
+    depleted-floor anchor: a zero count over a large eff-length is a real, if imprecise, observation that the
+    density is low). AMBIG nodes (both strands free) are excluded — they are the target. Unsolved nodes
+    (``Var(log f_g)=∞`` — no strand and no mass) are excluded (no observation).
 
-    The teacher density is the solve's own ``ρ_g = f_g·M/E_gdna`` (:func:`node_densities`), floored at the
-    min-observable ``1/E_gdna``. The weight is the solve's OWN CONFIDENCE ``1/(Var(log f_g) + 1/(gcount+1))``
-    — the belief variance already integrates strand discriminability, the messages, and the structure, so a
-    strong-strand node counts heavily and an uncertain (weak-strand / weakly-messaged / low-count) node
-    counts lightly, with NO strand-class rule and NO ad-hoc estimator (that is the solver's job, done once)."""
+    The training-node density is the solve's own ``ρ_g = f_g·M/E_gdna`` (:func:`node_densities`), floored at
+    the min-observable ``1/E_gdna``. **Every training node carries UNIT weight** — NOT precision weight:
+    precision correlates with the density (the depleted floor is low-count/low-precision, the enriched mode
+    high-count/high-precision), so precision-weighting would systematically down-weight the whole floor MODE
+    and bias the distribution's SHAPE (measured — design §8e). The solve's log-density noise scale
+    (``log_rho_std``) is kept only to floor the KDE bandwidth, not to weight.
+
+    ``min_eff_length`` excludes region nodes whose gDNA eff-length ``E_gdna`` is below it — a region shorter
+    than a fragment cannot CONTAIN one, so ``E_gdna→0`` and its contained-density ``1/E`` blows up spuriously
+    (design §8e). The caller passes the gDNA mean fragment length; such tiny regions' gDNA is still observed
+    via boundary crossings, so nothing is lost from the (undefined) contained density."""
     kind = np.asarray(chain.kind)
     is_reg = kind == REGION
     is_bnd = kind == BOUNDARY
@@ -118,39 +127,40 @@ def build_training_substrate(
 
     fp = np.asarray(statics.free_pos, bool)
     fn = np.asarray(statics.free_neg, bool)
-    is_ambig = fp & fn  # both strands free (G3) — EXCLUDED (students; non-circular teacher/target split)
+    is_ambig = (
+        fp & fn
+    )  # both strands free (G3) — EXCLUDED (target, not training; non-circular split)
 
     dens = node_densities(belief, geometry)
     fg = np.asarray(belief.f_g, dtype=np.float64)
-    var_g = np.maximum(np.asarray(belief.var_gdna, dtype=np.float64), 0.0)  # Var(log f_g)
+    var_g = np.asarray(belief.var_gdna, dtype=np.float64)  # Var(log f_g); ∞ ⇒ unsolved (no observation)
+    solved = np.isfinite(var_g)
     Ml = np.asarray(geometry.mass_left, dtype=np.float64)
     Mr = np.asarray(geometry.mass_right, dtype=np.float64)
     EGl = np.maximum(np.asarray(geometry.eff_gdna_left, dtype=np.float64), _EPS)
     EGr = np.maximum(np.asarray(geometry.eff_gdna_right, dtype=np.float64), _EPS)
 
-    def _precision(gcount):
-        return 1.0 / (var_g + 1.0 / (np.maximum(gcount, 0.0) + 1.0))
-
-    def _std(gcount):  # per-node sampling std of log ρ_g (= 1/sqrt(precision))
-        return np.sqrt(var_g + 1.0 / (np.maximum(gcount, 0.0) + 1.0))
+    def _std(gcount):  # per-node log-density noise scale √(Var(log f_g)+1/(gcount+1)) — for the bandwidth floor
+        return np.sqrt(np.maximum(var_g, 0.0) + 1.0 / (np.maximum(gcount, 0.0) + 1.0))
 
     clean_exon_bnd, exon_on_right = _clean_exon_boundary(chain, region_arrays, boundary_substrate)
 
-    # ---- region teachers: every non-AMBIG region with mass; the solve's own density + confidence ----
-    reg_teacher = is_reg & (Ml > 0.0) & ~is_ambig
+    # ---- region training nodes: every SOLVED non-AMBIG region large enough to contain a fragment
+    #      (E_gdna ≥ min_eff_length), INCLUDING zero-count intergenic/intronic (the depleted-floor anchor). ----
+    reg_train = is_reg & ~is_ambig & solved & (EGl >= float(min_eff_length))
     rho_reg = np.maximum(np.asarray(dens.rho_g_left, dtype=np.float64), 1.0 / EGl)
-    w_reg = _precision(fg * Ml)
-    kind_reg = np.where(node_rtype == 2, KIND_EXON,
-                        np.where(node_rtype == 1, KIND_INTRON, KIND_INTERGENIC))
+    kind_reg = np.where(
+        node_rtype == 2, KIND_EXON, np.where(node_rtype == 1, KIND_INTRON, KIND_INTERGENIC)
+    )
 
-    # ---- boundary teachers (clean intron/intergenic↔exon crossing; exon-facing side) — off by default;
+    # ---- boundary training nodes (clean intron/intergenic↔exon crossing; exon-facing side) — off by default;
     #      the crossing-density normalization biases these low (dissection §8c). Toggle to experiment. ----
     M_bnd = np.where(exon_on_right, Mr, Ml)
     E_bnd = np.where(exon_on_right, EGr, EGl)
     rho_bnd = np.where(exon_on_right, np.asarray(dens.rho_g_right), np.asarray(dens.rho_g_left))
     rho_bnd = np.maximum(rho_bnd, 1.0 / np.maximum(E_bnd, _EPS))
-    w_bnd = _precision(fg * M_bnd)
-    bnd_teacher = is_bnd & clean_exon_bnd & (M_bnd > 0.0) & bool(include_boundaries)
+    bnd_train = (is_bnd & clean_exon_bnd & solved & (M_bnd > 0.0)
+                 & (E_bnd >= float(min_eff_length)) & bool(include_boundaries))
 
     # ---- collect ----
     node_idx = np.arange(int(chain.n_nodes))
@@ -160,19 +170,18 @@ def build_training_substrate(
     std = np.zeros(int(chain.n_nodes), dtype=np.float64)
     nkind = np.full(int(chain.n_nodes), -1, dtype=np.int64)
 
-    log_rho[reg_teacher] = np.log(rho_reg[reg_teacher])
-    weight[reg_teacher] = w_reg[reg_teacher]
-    std[reg_teacher] = _std(fg * Ml)[reg_teacher]
-    nkind[reg_teacher] = kind_reg[reg_teacher]
-    keep |= reg_teacher
+    log_rho[reg_train] = np.log(rho_reg[reg_train])
+    std[reg_train] = _std(fg * Ml)[reg_train]
+    nkind[reg_train] = kind_reg[reg_train]
+    keep |= reg_train
 
-    log_rho[bnd_teacher] = np.log(rho_bnd[bnd_teacher])
-    weight[bnd_teacher] = w_bnd[bnd_teacher]
-    std[bnd_teacher] = _std(fg * M_bnd)[bnd_teacher]
-    nkind[bnd_teacher] = KIND_BOUNDARY
-    keep |= bnd_teacher
+    log_rho[bnd_train] = np.log(rho_bnd[bnd_train])
+    std[bnd_train] = _std(fg * M_bnd)[bnd_train]
+    nkind[bnd_train] = KIND_BOUNDARY
+    keep |= bnd_train
 
-    keep &= np.isfinite(log_rho) & (weight > 0.0)
+    weight[keep] = 1.0  # UNIT weight (design §8e) — NOT precision; noise is handled by the bandwidth
+    keep &= np.isfinite(log_rho)
     return TrainingSubstrate(
         log_rho=log_rho[keep],
         weight=weight[keep],
@@ -288,9 +297,9 @@ class GdnaDensityPrior:
     logP_grid: np.ndarray
     bandwidth: float
     n_eff: float
-    teacher_x: np.ndarray
-    teacher_w: np.ndarray
-    teacher_kind: np.ndarray
+    train_x: np.ndarray
+    train_w: np.ndarray
+    train_kind: np.ndarray
     modes: tuple
 
     def logpdf(self, log_rho) -> np.ndarray:
@@ -333,7 +342,7 @@ class GdnaDensityPrior:
             kind = np.append(kind, KIND_INTERGENIC)
             std = np.append(std, float(np.median(std)) if std.size else 0.0)
         if x.shape[0] == 0:
-            raise ValueError("empty training substrate — no teacher nodes")
+            raise ValueError("empty training substrate — no training nodes")
 
         if isinstance(bandwidth, str):
             if bandwidth == "silverman":
@@ -364,8 +373,8 @@ class GdnaDensityPrior:
             logP_grid=logP,
             bandwidth=h,
             n_eff=n_eff,
-            teacher_x=x,
-            teacher_w=w,
-            teacher_kind=kind,
+            train_x=x,
+            train_w=w,
+            train_kind=kind,
             modes=tuple(_find_modes(x_grid, logP)),
         )

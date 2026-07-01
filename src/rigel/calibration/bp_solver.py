@@ -915,6 +915,20 @@ def _global_logprior(
     return -0.5 * n_node[:, None] * (log_fg[None, :] - target[:, None]) ** 2
 
 
+def _kde_logprior(fgg, mass_global, eff_global, gdna_prior):
+    """The PHASE-2 mixture-prior global term ``(n_nodes, K)`` — a drop-in for the Gaussian
+    :func:`_global_logprior`. The per-node gDNA density at grid point ``k`` is ``ρ_g = f_g·M/E`` ⇒
+    ``log ρ_g = log f_g + log(M/E)``; evaluate the fitted ``log P̂(log ρ_g)`` (`GdnaDensityPrior.logpdf`) there.
+    Applied to ALL nodes (self-scaling: the strand likelihood dominates where informative, the prior fills the
+    tilt's null space). ``gdna_prior`` is duck-typed on ``.logpdf`` (no import — avoids a cycle)."""
+    eff = np.maximum(np.asarray(eff_global, np.float64), _EPS)
+    mass = np.maximum(np.asarray(mass_global, np.float64), _EPS)
+    log_me = np.log(mass) - np.log(eff)                                # (m,) = log(M/E)
+    log_fg = np.log(np.maximum(np.asarray(fgg, np.float64), _EPS))     # (K,)
+    log_rho = log_fg[None, :] + log_me[:, None]                        # (m,K) = log ρ_g at each grid point
+    return gdna_prior.logpdf(log_rho.ravel()).reshape(log_rho.shape)
+
+
 def node_sweep(
     chain: NodeChain,
     statics: NodeStatics,
@@ -931,6 +945,7 @@ def node_sweep(
     convergence_delta: float = 1e-3,
     logodds_window: float = 10.0,
     n_tilt: int | None = None,
+    gdna_prior=None,
     _capture: dict | None = None,
 ):
     """The belief-propagation sweep over the chain — gDNA AND per-strand RNA messages, in COUNT space (no
@@ -1043,15 +1058,30 @@ def node_sweep(
     rho_floor, s2_floor, var_mean_floor, floor_mask = _floor_estimate(
         chain, geometry, region_arrays, f_g, kappa
     )
-    # The count-space global log-prior on f_g (M-INDEPENDENT strength so it can never overrule a node's own strand
-    # evidence; ALL solvable nodes; enrichment-aware on the exon override set). ANCHORED — every input (ρ_global /
-    # ê / var_mean / the seed σ²_g) is fit once before the solve, so the global prior is CONSTANT.
+    # The global gDNA prior on f_g, applied to ALL nodes as an (n_nodes, K) log-term on the solve grid.
+    #   * PASS 2 (``gdna_prior`` given) — the trained PHASE-2 mixture ``log P̂(log ρ_g)`` (`_kde_logprior`);
+    #     self-scaling (strand dominates where informative, the prior fills the tilt's null space on AMBIG).
+    #   * PASS 1 (``gdna_prior=None``) — the stability-only count-space Gaussian (`_global_logprior`):
+    #     M-INDEPENDENT strength (never overrules a node's own strand), the depleted floor override, capped at
+    #     one pseudo-observation under prior-free. ANCHORED — every input is fit once, so the prior is CONSTANT.
+    # The global gDNA prior on f_g, an (n_nodes, K) log-term on the solve grid, applied to ALL nodes. It is
+    # ALWAYS the weak, exposure-pooled stability floor (`_global_logprior`: M-INDEPENDENT, capped at one
+    # pseudo-observation, so it never overrules a node's own strand evidence; the depleted-floor override).
+    # PASS 2 ADDS the trained Phase-2 mixture ON TOP (`_kde_logprior`). This layering is the design's
+    # "floor + mixture" (§3.4): the pooled floor is the always-present "gDNA is scarce" baseline — its
+    # downward pull is what resolves a balanced AMBIG node (whose two-strand RNA is strand-degenerate with
+    # gDNA) toward ~0 in a gDNA-poor context — while the KDE supplies the enriched-mode structure the floor
+    # lacks. Replacing the floor with the KDE (an earlier attempt) lost the downward anchor, because the
+    # per-node KDE's RNA-residual mode sits ABOVE the exposure-pooled ρ_global (dissection: gDNA=0 AMBIG
+    # went 0.02→0.38). ANCHORED — every input is fit once, so the prior is CONSTANT within a pass.
     global_lp = _global_logprior(
         solve_grid, mass_global, eff_global, rho_global, gdna_vm, var_mean,
         ehat=ehat, z=z_enrich, sigma2_level=sigma2_level, apply_mask=enrich_apply,
         enrich_weight=enrich_w,
         floor_mask=floor_mask, rho_floor=rho_floor, s2_floor_total=var_mean_floor + s2_floor,
     )
+    if gdna_prior is not None:
+        global_lp = global_lp + _kde_logprior(solve_grid, mass_global, eff_global, gdna_prior)
 
     # Genomic node order for the forward/backward scans (within each ref path; left/right break at −1). The
     # scans are sequential per node, so iterate as a Python list of ints (faster than numpy scalar indexing).

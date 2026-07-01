@@ -45,6 +45,7 @@ from .bp_solver import (
 from .density_model import node_gdna_density
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
+from .gdna_density_prior import GdnaDensityPrior, build_training_substrate
 from .effective_length import (
     boundary_eff_length,
     boundary_side_eff_length,
@@ -67,6 +68,11 @@ if TYPE_CHECKING:
     from .region_arrays import RegionArrays
 
 logger = logging.getLogger(__name__)
+
+#: Below this many single-strand teacher nodes the KDE is degenerate (a density from a handful of points has
+#: no meaningful modes), so calibration falls back to the pass-1 prior-free belief rather than train + apply
+#: a garbage mixture. Real genomes have millions of teachers; only tiny single-locus scenarios trip this.
+_MIN_KDE_TEACHERS = 10
 
 
 def calibrate(
@@ -156,19 +162,35 @@ def calibrate(
         rna_strand_overdispersion=rna_strand_overdispersion,
         n_grid=config.sweep_n_grid, logodds_window=config.sweep_logodds_window, statics=statics,
     )
-    belief = node_sweep(
-        chain, statics, geometry, belief, region_arrays, boundary_substrate,
-        rna_sense_frac=rna_sense_frac,
-        gdna_strand_overdispersion=gdna_strand_overdispersion,
-        rna_strand_overdispersion=rna_strand_overdispersion,
-        n_grid=config.sweep_n_grid, max_passes=config.sweep_max_passes,
-        convergence_delta=config.sweep_convergence_delta,
-        logodds_window=config.sweep_logodds_window,
-        n_tilt=config.sweep_n_tilt,
-    )
+    def _sweep(prior):
+        return node_sweep(
+            chain, statics, geometry, belief, region_arrays, boundary_substrate,
+            rna_sense_frac=rna_sense_frac,
+            gdna_strand_overdispersion=gdna_strand_overdispersion,
+            rna_strand_overdispersion=rna_strand_overdispersion,
+            n_grid=config.sweep_n_grid, max_passes=config.sweep_max_passes,
+            convergence_delta=config.sweep_convergence_delta,
+            logodds_window=config.sweep_logodds_window,
+            n_tilt=config.sweep_n_tilt, gdna_prior=prior,
+        )
+
+    # PASS 1 — the single-strand solve with the extremely-weak stability floor (Phase 1).
+    belief = _sweep(None)
+    # PHASE 2 — train the nonparametric gDNA-density mixture prior on the solved single-strand nodes, then
+    # PASS 2 — re-solve ALL nodes with that mixture as the per-node prior (self-scaling; fills the tilt's
+    # null space on AMBIG). Falls back to the pass-1 belief if the substrate is too small to fit.
+    gdna_prior = None
+    if config.gdna_prior_enable:
+        train_sub = build_training_substrate(
+            chain, belief, geometry, statics, region_arrays, boundary_substrate,
+            min_eff_length=fl_mean,  # exclude regions too short to contain a gDNA fragment (§8e)
+        )
+        if train_sub.n >= _MIN_KDE_TEACHERS:
+            gdna_prior = GdnaDensityPrior.fit(train_sub, bandwidth=config.gdna_prior_bandwidth)
+            belief = _sweep(gdna_prior)
     regions = chain_region_deconv(chain, belief, substrate)
     left, right = chain_boundary_side_deconv(chain, belief, substrate)
-    logger.debug("calibration sweep: single forward-backward pass")
+    logger.debug("calibration: %s", "two-pass (Phase-2 mixture prior)" if gdna_prior else "single pass")
 
     if _debug is not None:  # inert diagnostic hook — the solved chain internals (Phase-2 substrate + plots)
         _debug.update(
