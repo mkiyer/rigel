@@ -265,9 +265,15 @@ def _solve_ambig_logodds(
             psi = psi - 0.5 * np.asarray(ps, np.float64)[:, None, None] * (
                 log_f - np.asarray(ms, np.float64)[:, None, None]
             ) ** 2
-    # ── 2-D Jacobian (τ-independent → add once on the λ axis): log f_g + 2 log(1−f_g), exact via
-    #    log_expit (D6). The ONE reference Jacobian (D3). ──
-    log_jac = _log_fg(lam) + 2.0 * _log1m_fg(lam)  # (K,)
+    # ── Reference measure (τ-independent → add once on the λ axis). NEUTRAL on the gDNA fraction:
+    #    uniform in (f_g, τ) ⇒ Jacobian log σ'(λ) = log f_g + log(1−f_g) — the SAME measure the
+    #    single-strand solver uses. The old uniform-(f_pos, f_neg) simplex measure (log f_g + 2 log(1−f_g))
+    #    put an implicit ANTI-gDNA prior on AMBIG nodes (it peaks at f_g = ⅓ and prefers balanced ±RNA), so
+    #    a gDNA-dominant AMBIG node — a near-50/50 count — was pulled to f_g ≈ 0.46 no matter what the strand
+    #    tilt or the gDNA prior said. Neutral lets the STRAND resolve it: a strong tilt ⇒ RNA (unchanged),
+    #    a balanced count ⇒ parsimoniously gDNA (the τ-marginal favours high f_g, where more τ fit the
+    #    balance) with the gDNA prior setting the level. (Derivation: log_density_1d_solver_design.md §5.2.) ──
+    log_jac = _log_fg(lam) + _log1m_fg(lam)  # (K,)
     psi_full = psi + log_jac[None, :, None]                 # (m,K,Kt) — the full 2-D log-posterior
     # τ-marginal λ-posterior (m,K)
     psi_lam = logsumexp(psi_full, axis=2)
