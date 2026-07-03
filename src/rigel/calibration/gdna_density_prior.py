@@ -304,7 +304,12 @@ class GdnaDensityPrior:
 
     def logpdf(self, log_rho) -> np.ndarray:
         """``log P̂(log ρ_g)`` by linear interpolation; the flat boundary value extrapolates outside the grid
-        (= "no prior information beyond the observed range" — the tilt / messages / residual then decide)."""
+        (= "no prior information beyond the observed range" — the tilt / messages / residual then decide).
+
+        NOTE: the clamped tails make this UNSUITABLE for the per-node SOLVE — a high-density node whose
+        implied ``log ρ_g`` falls in the (constant) upper tail sees no penalty and drifts to ``f_g≈0.5`` →
+        catastrophic false-positive gDNA. Use :meth:`logpdf_kernel` (real quadratic tails) in the solve;
+        keep this interpolation only for plotting / diagnostics."""
         x = np.asarray(log_rho, dtype=np.float64)
         return np.interp(
             x,
@@ -313,6 +318,16 @@ class GdnaDensityPrior:
             left=float(self.logP_grid[0]),
             right=float(self.logP_grid[-1]),
         )
+
+    def logpdf_kernel(self, log_rho) -> np.ndarray:
+        """``log P̂(log ρ_g)`` by the TRUE weighted-Gaussian kernel sum — real quadratic tails (unlike the
+        clamped :meth:`logpdf` interpolation). The solve MUST use this: a genuine ``−½((x−xᵢ)/h)²`` tail
+        penalises implausibly-high gDNA density instead of drifting to a constant, which is what removes the
+        density-prior false-positive gDNA (verified: clamped tails give ~585k FP on gDNA-free unstranded data
+        vs ~2k with real tails). Same kernel/bandwidth/weights the fit uses, so it agrees with the plotted
+        curve inside the observed range."""
+        x = np.asarray(log_rho, dtype=np.float64)
+        return _weighted_kde_logpdf(x.ravel(), self.train_x, self.train_w, self.bandwidth).reshape(x.shape)
 
     @classmethod
     def fit(

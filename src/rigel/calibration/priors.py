@@ -17,10 +17,17 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_NEG, BIT_INTRON_POS
+
 if TYPE_CHECKING:
     from ..locus import MultiLocus
     from .region_arrays import RegionArrays
     from .result import CalibrationResult
+
+# A region with none of these strand/type bits is intergenic — it overlaps no locus and is dropped by
+# the per-locus projection, so a seam whose left flank is such a region must be re-attributed to its
+# (locus) right flank or its gDNA is lost (see _gdna_region_node_arrays).
+_RNA_SIGNATURE_BITS = BIT_EXON_POS | BIT_EXON_NEG | BIT_INTRON_POS | BIT_INTRON_NEG
 
 # Numerical floor for the gDNA-component effective length: matches the EM's own
 # default (``run_batch_locus_em_partitioned`` floors at 1.0), avoiding a zero
@@ -153,20 +160,31 @@ def _gdna_region_node_arrays(
     ref_id = np.asarray(region_arrays.ref_id)
     n = contained.shape[0]
 
-    pooled = np.zeros(n, dtype=np.float64)  # pooled seam mass, keyed to its left-flank region r
-    seam_len = np.zeros(
-        n, dtype=np.float64
-    )  # seam effective support, keyed to its left-flank region r
+    pooled = np.zeros(n, dtype=np.float64)  # pooled seam mass, attributed to a flank region
+    seam_len = np.zeros(n, dtype=np.float64)  # seam effective support, attributed to a flank region
     if n > 1:
         same = ref_id[:-1] == ref_id[1:]  # internal seam: genomically adjacent, same reference
-        seam_mass = side_right[:-1] + side_left[1:]  # POOL the boundary's two halves into one node
+        seam_mass = np.where(same, side_right[:-1] + side_left[1:], 0.0)  # POOL the boundary's two halves
         # seam support = AVERAGE of the two flanking per-side density lengths E[min(ℓ,L)] — the
         # deposition-faithful divisor (each side captures min(ℓ,L_side) of a crossing fragment, so the
         # pooled mass is ρ·(E[min_left]+E[min_right])/2 under uniform gDNA). NOT E[ℓ], which over-states
         # the support for short flanks and under-contracts.
-        seam_support = 0.5 * (side_density_len[:-1] + side_density_len[1:])
-        pooled[:-1] = np.where(same, seam_mass, 0.0)
-        seam_len[:-1] = np.where(same, seam_support, 0.0)
+        seam_support = np.where(same, 0.5 * (side_density_len[:-1] + side_density_len[1:]), 0.0)
+        # ATTRIBUTE each seam to a flank REGION so the locus projection picks it up. Default: the LEFT
+        # flank r. BUT a locus's far-LEFT outer boundary is an intergenic→(exon/intron) seam whose left
+        # flank is INTERGENIC — a region that overlaps no locus and is dropped by _project_regions_to_loci.
+        # Keying to the left flank there SILENTLY LOSES that boundary's pure intergenic-crossing gDNA (both
+        # the intergenic side_right and the first-region side_left), under-counting the locus gDNA prior AND
+        # inflating the gDNA-component IPR eff-length (a high-density crossing node vanishes from Σm²/S, so
+        # eff_len lengthens). The far-RIGHT boundary is already kept (its left flank is the locus's last
+        # region), so this restores the symmetry: attribute the seam to the RIGHT flank whenever the left
+        # flank is intergenic (no RNA-signature bits) and the right flank is not — otherwise keep the left.
+        sig = np.asarray(region_arrays.signature).astype(np.int64)
+        ig = (sig & _RNA_SIGNATURE_BITS) == 0  # intergenic: no exon/intron bit ⇒ dropped by the projection
+        rekey_right = same & ig[:-1] & ~ig[1:]  # far-left outer boundary: intergenic → locus region
+        owner = np.where(rekey_right, np.arange(1, n), np.arange(0, n - 1))
+        np.add.at(pooled, owner, seam_mass)  # accumulate: a first-region node may own its right seam + this
+        np.add.at(seam_len, owner, seam_support)
 
     gdna_region = contained + pooled
     safe_seam = np.maximum(

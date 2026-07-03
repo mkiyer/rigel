@@ -733,17 +733,31 @@ def _global_logprior(
 
 
 def _kde_logprior(fgg, mass_global, eff_global, gdna_prior):
-    """The PHASE-2 mixture-prior global term ``(n_nodes, K)`` — a drop-in for the Gaussian
-    :func:`_global_logprior`. The per-node gDNA density at grid point ``k`` is ``ρ_g = f_g·M/E`` ⇒
-    ``log ρ_g = log f_g + log(M/E)``; evaluate the fitted ``log P̂(log ρ_g)`` (`GdnaDensityPrior.logpdf`) there.
-    Applied to ALL nodes (self-scaling: the strand likelihood dominates where informative, the prior fills the
-    tilt's null space). ``gdna_prior`` is duck-typed on ``.logpdf`` (no import — avoids a cycle)."""
+    """The GENERATIVE two-density prior term ``(n_nodes, K)`` on the f_g solve grid (design:
+    ``ambig_boundary_spliced_deconvolution.md``; derived by the density-prior-integration workflow).
+
+    The node's total density ``d = M/E`` splits into gDNA density ``ρ_g = f_g·d`` and RNA density
+    ``ρ_r = (1−f_g)·d``. Two independent density priors:
+
+      * gDNA: the empirical population KDE ``P(log ρ_g)`` — evaluated with **real Gaussian tails**
+        (:meth:`GdnaDensityPrior.logpdf_kernel`, NOT the clamped interpolation, whose constant tail lets a
+        high-density node drift to ``f_g≈0.5`` → false-positive gDNA).
+      * RNA: a scale-free **Jeffreys** prior ``p(ρ_r) ∝ 1/ρ_r`` (RNA spans >10⁴× — no informative scale).
+        Its Jacobian into the f_g coordinate is exactly ``1/(1−f_g)`` ⇒ the ``−log(1−f_g)`` term below.
+
+    The Jeffreys term is the crux: without it gDNA is priored but RNA is free, so the cheapest explanation of
+    any flat-strand node is "dump mass into free RNA, park gDNA at the tall depleted KDE mode" — the cliff and
+    the false-positives. With it, lowering f_g raises ρ_r (penalised), so gDNA is the residual after a
+    typical-magnitude RNA. Both terms are on the f_g grid only (the Jeffreys is node-independent, O(K)).
+    NO tuned constants (the Jeffreys exponent is 1, the KDE coordinate is native-log)."""
     eff = np.maximum(np.asarray(eff_global, np.float64), _EPS)
     mass = np.maximum(np.asarray(mass_global, np.float64), _EPS)
     log_me = np.log(mass) - np.log(eff)                                # (m,) = log(M/E)
-    log_fg = np.log(np.maximum(np.asarray(fgg, np.float64), _EPS))     # (K,)
-    log_rho = log_fg[None, :] + log_me[:, None]                        # (m,K) = log ρ_g at each grid point
-    return gdna_prior.logpdf(log_rho.ravel()).reshape(log_rho.shape)
+    fg = np.minimum(np.maximum(np.asarray(fgg, np.float64), _EPS), 1.0 - _EPS)  # (K,)
+    log_rho = np.log(fg)[None, :] + log_me[:, None]                    # (m,K) = log ρ_g at each grid point
+    kde_term = gdna_prior.logpdf_kernel(log_rho.ravel()).reshape(log_rho.shape)  # real quadratic tails
+    jeffreys = -np.log1p(-fg)                                          # (K,) RNA Jeffreys 1/(1−f_g)
+    return kde_term + jeffreys[None, :]
 
 
 def node_sweep(
@@ -871,10 +885,19 @@ def node_sweep(
     # lacks. Replacing the floor with the KDE (an earlier attempt) lost the downward anchor, because the
     # per-node KDE's RNA-residual mode sits ABOVE the exposure-pooled ρ_global (dissection: gDNA=0 AMBIG
     # went 0.02→0.38). ANCHORED — every input is fit once, so the prior is CONSTANT within a pass.
+    # PASS 1 (gdna_prior=None): the weak stability floor only (strand + messages carry the single-strand solve;
+    # the floor keeps low/zero-gDNA nodes finite and anchors the depleted population that trains the KDE).
     global_lp = _global_logprior(
         solve_grid, mass_global, eff_global, rho_global, gdna_vm, var_mean,
         floor_mask=floor_mask, rho_floor=rho_floor, s2_floor_total=var_mean_floor + s2_floor,
     )
+    # PASS 2 (gdna_prior set): ADD the generative two-density prior — the empirical gDNA-density KDE (real
+    # tails) × the Jeffreys RNA prior 1/(1−f_g) (`_kde_logprior`). This is the density-prior INTEGRATION: the
+    # strand landscape (ψ, added in the solve) × the population landscape. The Jeffreys term removes the
+    # gDNA-priored/RNA-free asymmetry that caused the boundary cliff + the false-positive gDNA; the real KDE
+    # tails stop a high-density node drifting to f_g≈0.5. Derivation + validation:
+    # ambig_boundary_spliced_deconvolution.md. Applied to ALL solvable nodes (self-scaling: a confident strand
+    # dominates ψ, an AMBIG/thin node leans on the population).
     if gdna_prior is not None:
         global_lp = global_lp + _kde_logprior(solve_grid, mass_global, eff_global, gdna_prior)
 
@@ -896,6 +919,7 @@ def node_sweep(
     pg_loc = 1.0 / np.maximum(vg_loc, _EPS)  # local precision (var floored: a sharp belief ⇒ large finite)
     pp_loc = 1.0 / np.maximum(vp_loc, _EPS)
     pn_loc = 1.0 / np.maximum(vn_loc, _EPS)
+
 
     def _scan(seq, nbr, sf, df):
         """Sequential scan: project the running belief from each node's ``nbr`` (src face ``sf`` → dst face
@@ -986,7 +1010,7 @@ def node_sweep(
                 er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
                 esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
                 n_nasc = fbp[lsrc] * sm              # source nascent RNA count (unspliced)
-                n_mat = SPs[lsrc]                     # source-face mature (one-sided; >0 only B→exon)
+                n_mat = SPs[lsrc]  # source-face mature (>0 only B→exon): MEASURES the exon's mature
                 rho_mat_dst = SPd[i] / (ESPd[i] if ESPd[i] > _EPS else _EPS)  # dst-face mature absorbed (exon→B)
                 rho = n_nasc / er + n_mat / esp - rho_mat_dst  # NASCENT density (+ MEASUREMENT into an exon)
                 mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_pos frame (floored at min-observable)
@@ -1062,6 +1086,7 @@ def node_sweep(
             eff_global=eff_global, mass_global=mass_global,
             # per-face geometry for message dissection (logodds diagnostics)
             eff_gdna_l=EG[0], eff_gdna_r=EG[1], eff_rna_l=ER[0], eff_rna_r=ER[1],
+            rho_floor=rho_floor, floor_mask=floor_mask,
         )
 
     return NodeBelief(

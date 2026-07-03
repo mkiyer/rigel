@@ -22,7 +22,7 @@ from rigel.calibration.capture_eff_length import (
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.result import CalibrationResult
 from rigel.config import CalibrationConfig
-from tests.conftest import build_test_index
+from conftest import build_test_index
 
 
 def _uniform_field_cal(region_arrays: RegionArrays, rho: float) -> CalibrationResult:
