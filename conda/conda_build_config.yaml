@@ -1,0 +1,19 @@
+# Recipe-local build variants.
+#
+# meta.yaml uses `{{ stdlib('c') }}`, which pins the C runtime/sysroot and needs
+# a `c_stdlib` variant. conda-build's built-in defaults define c_compiler /
+# cxx_compiler (gcc/gxx, clang/clangxx) but NOT c_stdlib — that normally comes
+# from conda-forge's global pinning. When conda-build does not pick up
+# conda-forge-pinning from the environment (common on a plain conda-build env),
+# `stdlib('c')` falls back to the literal `c` → the nonexistent `c_<platform>`
+# package and the solve fails ("c_linux-64 does not exist").
+#
+# conda-build ALWAYS reads <recipe-dir>/conda_build_config.yaml, so defining the
+# variant here makes the recipe self-contained: no dependency on conda-forge
+# pinning being installed or auto-discovered. Values mirror conda-forge's pinning.
+c_stdlib:
+  - sysroot                     # [linux]
+  - macosx_deployment_target    # [osx]
+c_stdlib_version:
+  - "2.17"                      # [linux]
+  - "11.0"                      # [osx]
