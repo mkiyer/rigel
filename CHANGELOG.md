@@ -5,206 +5,93 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — v6 calibration redesign
+## [0.6.0] - 2026-07-04
 
-### 2026-05-29 — Calibration v5 burn-down (Phase A)
+### Highlights
 
-Removed the v5 calibration module surface (~30 source files, ~32 test
-files) ahead of the joint fractional-accumulator + calibration-v6
-rewrite. `rigel.calibration` now exposes only `CalibrationConfig`,
-`CalibrationResult` (placeholder), and `calibrate` (stub that raises
-`NotImplementedError`). `rigel quant` therefore aborts at the calibration
-step until Phase D lands the new orchestrator.
+Rigel 0.6.0 is a **ground-up rewrite of the calibration stage** — the step that
+deconvolves each library into genomic-DNA contamination (gDNA) versus RNA before
+the per-locus EM runs. The earlier "Simple Regional Deconvolution" calibrators
+(the never-released SRD v1 / v2 iterations) are gone, replaced by a **bipartite
+belief-propagation sweep** over a region↔boundary node chain:
 
-Replacement plan and phase gates: see
-[`docs/acc_caljointmodel/00_implementation_plan.md`](docs/acc_caljointmodel/00_implementation_plan.md).
-Salvageable FL code preserved at
-`archive/calibration_legacy_2026_05/src/rigel/calibration/`.
+- Each node's unspliced fragment mass is deconvolved into a three-way pie —
+  **sense-RNA, antisense-RNA, gDNA** — from exactly three sources: a per-strand
+  Beta-Binomial strand likelihood, cross-node density imputation between
+  neighbouring nodes, and a population gDNA prior. (A fragment *count* carries no
+  intrinsic gDNA/RNA information; it enters only as strand-likelihood precision.)
+- **Boundaries are first-class nodes**: they own the one-sided, motif-stranded
+  spliced RNA and feed the per-locus prior their per-side gDNA/RNA flux.
+- gDNA flows genomically; per-strand RNA flows only where a transcript strand is
+  structurally continuous. The calibration result enters the per-locus EM as two
+  Dirichlet scalars that set the gDNA-vs-RNA split; the EM then distributes RNA
+  mass across the compatible transcripts.
 
-### 2026-05-29 — Calibration v5 burn-down completed (PR 0)
+The full pipeline (scan → calibrate → quant) runs end-to-end. Theory and design:
+`docs/calibration/CALIBRATION_ARCHITECTURE.md` (the count-zero-information
+principle) and the docs index in `docs/README.md`.
 
-Removed the residual v5 prior machinery the Phase-A burn left wired into
-live code (unreachable behind the `calibrate()` stub):
-`pipeline._run_locus_em_partitioned` (the v5 locus-prior EM driver) and
-its `prior_*` plumbing, the 11 `prior_*` columns in
-`estimator.get_loci_df`, the dead `_calibration_strand_summary` helper,
-and the 3 legacy `--cal-*` CLI tests. Fixed stale docstrings / doc
-references (`CalibrationResult.fl_models`, `assemble_priors`,
-`CalibrationScanPayload`, `04_outputs.md` → `04_interface_contract.md`).
-Stubbed the `sim/locus_sweep.py` calibration report (the full v6 rewrite
-of `sim/analysis.py` + `tests/test_sim_analysis.py` is deferred to PR 8).
-No behavior change — `rigel quant` still aborts at the `calibrate()`
-stub, but nothing dead hangs off it.
-
-### Headline
-
-Joint mRNA / nRNA / gDNA quantification with an in-place per-region
-accumulator that runs inside the existing C++ BAM scan.  Replaces the
-SRD-v1 calibrator outright (no deprecation cycle — rigel is pre-1.0).
-
-### Fixed
-
-- **`SPLICED_IMPLICIT` misclassification of unspliced multi-block
-  fragments**: the C++ `_resolve_core` discriminant previously fired
-  whenever any candidate transcript had *any* annotated intron content
-  inside the fragment outer span — including introns that the CIGAR
-  contradicts by aligning straight through them. True-gDNA fragments
-  whose contiguous PE alignment overlapped an annotated intron region
-  were being promoted to `SPLICED_IMPLICIT`, hard-gated out of the
-  gDNA likelihood and the boundary-flux numerator, and dumped into
-  nRNA. Replaced with a per-intron whole-containment test that fires
-  only when an annotated intron of at least one candidate transcript
-  is wholly contained in a paired-end gap (one-sided slack `K`
-  governed by `splicing_anchor_tolerance`). Required positive
-  intron-gap overlap before applying slack so a large `K` does not
-  classify a nearby-but-disjoint intron as implicit. Implementation
-  uses reusable `ResolverScratch` storage and binary search over the
-  existing per-transcript exon CSR (no new cgranges index). Native
-  ZS BAM tag now emits `spliced_implicit` and `splice_artifact`
-  instead of `unknown` for these splice classes; constants
-  `SPLICE_IMPLICIT` and `SPLICE_ARTIFACT` are exposed from
-  `_resolve_impl`. Goldens were regenerated; the small redistribution
-  shifts mass from nRNA back into mRNA on gDNA/nRNA-contaminated
-  scenarios. New acceptance matrix in `tests/test_implicit_splice.py`
-  covers 14 geometries including K-slack edges, microintrons,
-  long-intron slices, any-candidate semantics, and the chimera and
-  CIGAR-spliced gates.
-
-- **Fast-math-safe multimapper gDNA accumulation**: the native scorer's
-  multimapper gDNA log-sum-exp accumulator no longer uses an infinity
-  sentinel. `_scoring_impl` is compiled with fast-math, so the sentinel could
-  become order-sensitive after gDNA oracle simulation and emit `-inf` gDNA
-  likelihoods for otherwise valid unspliced multimapper units.
-
-### Changed (Breaking)
-
-- **Fine-grained calibration region index schema**: `regions.feather`
-  is bumped to `INDEX_FORMAT_VERSION = 4` and now persists a 4-bit
-  fine signature (`intron_pos`, `intron_neg`, `exon_pos`, `exon_neg`)
-  per region, plus adjacent-signature and boundary-kind metadata. Old
-  indexes fail to load with an explicit rebuild message. Rebuild with
-  `rigel index --fasta ... --gtf ...`.
-
-- **Float32 scored-fragment payloads**: the native scorer now stores
-  `log_liks`, `coverage_weights`, and `gdna_log_liks` as float32 payload
-  arrays, while native locus EM promotes them back to double for
-  reductions. Removed unused per-candidate `tx_start` / `tx_end` scorer
-  output arrays. On the VCAP RNA20M + gDNA20M profile with the 2 GiB
-  scan cap, peak RSS dropped from 15.60 GB to 12.09 GB; scoring CSR and
-  partition arrays each dropped from 5.99 GiB to 3.94 GiB.
-
-- **Scan buffer field diet**: removed dead scan-buffer/spill/scorer fields
-  (`intron_bp`, `exon_bp_pos`, `exon_bp_neg`, `tx_bp_pos`, `tx_bp_neg`) and
-  narrowed guarded `exon_bp` / `read_length` storage to uint16. Direct
-  `ResolvedFragment` introspection still exposes the diagnostic fields.
-  `frag_lengths` stays int32 after the VCAP profile hit a real 68,466 bp
-  transcript-space fragment length. Against the PR07 VCAP profile, peak RSS
-  dropped from 12.09 GB to 11.63 GB with scoring CSR and partition sizes
-  unchanged at 3.94 GiB each.
-
-- **Scan profiling visibility and memory-cap policy**: staged profiling now
-  records `scan_config`, `buffer_summary`, `scoring_csr`, and partition byte
-  metrics in `profile_summary.json`. The default scan buffer cap is now 2 GiB
-  (`--scan-buffer-size 2`) because async spill makes lower caps cheap while
-  reducing resident memory on large runs.
-
-- **Renamed `boundary_tolerance` → `splicing_anchor_tolerance`**: hard
-  rename across CLI flag (`--boundary-tolerance` removed; use
-  `--splicing-anchor-tolerance`), YAML config key,
-  `BamScanConfig` field, calibration payload/result fields,
-  `summary.json` keys, and native bindings. Pre-1.0 project — there
-  is no compatibility shim. The same K parameter now drives both the
-  calibration boundary-flux clearance (preserving the existing
-  `q(K) = max(K, 1)` integer-coordinate rule) and the resolver's
-  per-intron implicit-splice slack (raw K, so `K = 0` means strict
-  containment).
+> **Pre-release.** 0.6.0 is published to a personal channel for validation on
+> real datasets. Expect further calibration tuning before a public release.
 
 ### Added
 
-- **Boundary tolerance (`--splicing-anchor-tolerance K`, default 3 bp)**: the
-  per-fragment region-mask accumulator and the matched
-  ``B_cross(K)`` denominator in the global gDNA density estimator now
-  require a minimum bp clearance ``K`` on each side of every
-  exon-intron boundary before counting a fragment as a
-  boundary-crossing event or letting it contribute its EXON|INTRON
-  bit to ``obs_mask``. Internally enforced as ``q(K) = max(K, 1)`` so
-  that ``K = 0`` reproduces the pre-2026.05 strict-crossing semantics
-  bit-for-bit. Default 3 bp removes single-bp alignment artefacts
-  (soft-clip drift, indel slippage near GT-AG splice motifs) at the
-  cost of ~1% of true short-overhang exposure for typical 350 bp gDNA
-  fragments. Calibration goldens were regenerated; relative shifts in
-  per-locus counts are <0.2%. Exposed on `BamScanConfig`,
-  `CalibrationResult.splicing_anchor_tolerance`, and
-  `CalibrationResult.n_below_tolerance` (count of fragments rejected
-  for failing the K-clearance test, separated from
-  ``n_unannotated_ref``).
-
-- `rigel.calibration.calibrate(*, index, payload, scan_trained,
-  fl_prior_ess, pool_quality_good, pool_quality_weak)` — the new
-  top-level orchestrator.  Takes the in-place accumulator payload from
-  `scan_and_buffer`, builds the three pool fragment-length models,
-  computes the global gDNA densities, and returns a
-  `CalibrationResult` whose `PriorTable` is filled in by the pipeline
-  via `assemble_priors(...)` + `with_priors(...)`.
-- New region partition built at index time (`rigel index`) — 8-state
-  per-base mask (exon × intron × intergenic × strand) persisted in the
-  index under `region_df` and shared with the C++ scanner.
-- New CLI flags: `--cal-prior-ess`, `--cal-quality-good`,
-  `--cal-quality-weak`.
-  See [docs/parameters.md](docs/parameters.md) and
-  [docs/MANUAL.md §Calibration](docs/MANUAL.md#calibration).
-- New `summary.json.calibration` schema:
-  `global_densities`, `fl_models`, `diagnostics`, `n_multi_loci`,
-  `mean_pi_gdna`.
-- `docs/calibration/calibration_v6_plan.md` + companion docs
-  (m7/m8/m9 plans).  See [docs/METHODS.md §10](docs/METHODS.md) for
-  the mathematical exposition.
+- **Joint mRNA / nRNA / gDNA quantification** with an in-place per-region /
+  per-boundary fractional accumulator (four channels: unspliced ±, spliced
+  sense / antisense) that runs inside the single-pass C++ BAM scan.
+- **Fine-grained calibration region partition** built at `rigel index` time — a
+  4-bit exon/intron × strand signature per region, persisted in the index and
+  shared with the C++ scanner.
+- **`--splicing-anchor-tolerance K`** (default 3 bp): minimum bp clearance on
+  each side of an exon–intron boundary before a fragment counts as
+  boundary-crossing — removes single-bp soft-clip / indel-slippage artefacts
+  near GT-AG splice motifs.
+- **gDNA EM controls**: `--gdna-em-llr-bias`, `--gdna-splice-penalty-unannot`.
 
 ### Changed (Breaking)
 
-- `quant_from_buffer(...)` now takes `calibration_payload` and
-  returns `(estimator, calibration)` (was: `estimator` only).
-- `FragmentScorer.from_models(...)` now takes individual FL models
-  (`rna_fl`, `gdna_fl`) instead of a `FragmentLengthModels` container.
-- `_run_locus_em_partitioned(...)` consumes a single per-locus
-  `gdna_prior_count` array plus an explicit `enable_gdna` flag.
-- `summary.json.calibration` schema replaced (see Added).  Consumers
-  reading `pi_pool`, `gdna_fl.{mu,sigma,quality}`, or `srd.*` keys
-  must update.
+- **Index format bumped to `INDEX_FORMAT_VERSION = 5`.** Indexes built by older
+  Rigel fail to load with an explicit rebuild message — rebuild with
+  `rigel index --fasta … --gtf …`.
+- **Calibration API rewritten.** `rigel.calibration.calibrate()` now takes the
+  accumulator payload, region arrays, strand model, gDNA/RNA fragment-length
+  pmfs, and config, and returns a `CalibrationResult` carrying per-region and
+  per-boundary-side deconvolved gDNA/RNA mass. `quant_from_buffer()` and
+  `FragmentScorer.from_models()` signatures changed to match.
+- **`summary.json` calibration schema replaced.** Any consumer reading the old
+  SRD keys (`srd.*`, `pi_pool`, `gdna_fl.*`) must update.
+- **Native scored-fragment payloads are float32** (`log_liks`,
+  `coverage_weights`, `gdna_log_liks`), promoted back to double inside the locus
+  EM — lower peak RSS on large runs.
 
 ### Removed (Breaking)
 
-- SRD-v1 surface deleted in commit `5f4754f`:
-  `_simple.py`, `_categorize.py`, `_fl_mixture.py`,
-  `_fl_empirical_bayes.py`, the SRD-v1 `CalibrationResult`,
-  `calibrate_gdna(...)`, the v1 `CalibrationConfig` fields
-  (`exon_fit_tolerance_bp`, `fl_prior_ess`, `max_iter`, `tol`),
-  and the v1 CLI flags (`--cal-exon-fit-tolerance-bp`,
-  `--cal-fl-prior-ess`, `--cal-max-iter`, `--cal-tol`).
-- `tests/test_calibration_simple.py`, `tests/test_categorize.py`,
-  `tests/test_gdna.py`, `tests/test_gdna_harmonic_length.py`.
-- v1 deprecation-warning shims were **not** shipped (rigel is
-  pre-1.0; no users depended on a shim contract).
-- Legacy RNA-prior machinery removed: `_em_impl.run_locus_em_native`,
-  `prior_weight_rna`, `build_prior_weight_rna`, calibration
-  `nrna_weight`, `alpha_rna`, `rna_prior_count`, and the obsolete
-  `--cal-nrna-weight` / `--cal-c-base` knobs. The production EM API now
-  uses only `gdna_prior_count` and gDNA eligibility.
+- The entire SRD calibration surface and its `--cal-*` CLI flags, plus the legacy
+  per-transcript RNA-prior machinery (`prior_weight_rna`, `build_prior_weight_rna`,
+  `nrna_weight`, `rna_prior_count`). The production EM prior is now exactly two
+  per-locus Dirichlet scalars (gDNA / RNA).
+
+### Fixed
+
+- **`SPLICED_IMPLICIT` misclassification of unspliced fragments**: true-gDNA
+  fragments whose contiguous paired-end alignment merely overlapped an annotated
+  intron were promoted to `SPLICED_IMPLICIT`, hard-gated out of the gDNA
+  likelihood, and mis-attributed to nRNA. Replaced with a per-intron
+  whole-containment test (one-sided slack `K = splicing_anchor_tolerance`).
+- **Fast-math-safe multimapper gDNA accumulation**: removed an infinity sentinel
+  in the native scorer's gDNA log-sum-exp that could emit `-inf` gDNA likelihoods
+  for otherwise-valid unspliced multimappers under `-ffast-math`.
+- **Accumulator deposit mis-routing on multi-reference genomes**: per-region /
+  per-boundary mass was routed by first-seen reference order rather than the
+  index ref-id, silently dropping deposits on multi-contig genomes.
 
 ### Internals
 
-- Milestone progression: M1 (region partition) → M2 (index
-  persistence) → M3 (in-place C++ accumulator) → M4 (global gDNA
-  densities + κ) → M5 (production batch EM plumbing + Locus rename)
-  → M6 (per-MultiLocus priors) → M7 (pool FL models +
-  `CalibrationResult` schema) → M8a/b/c (orchestrator + pipeline +
-  legacy deletion) → M9.1 (knob ship + plan reconciliation) →
-  M9.3 (this CHANGELOG + MANUAL + METHODS + parameters refresh).
-- All `tests/golden/*` files regenerated against the v6 calibration
-  output (commit `dca1788`).
-- 1042 tests passing.
-- Plan vs implementation reconciliation logged in
-  [docs/calibration/m9_implementation_plan.md §1](docs/calibration/m9_implementation_plan.md).
+- Calibration rebuilt across the region↔boundary node chain (`node_chain`), the
+  belief-propagation solver (`bp_solver`), and the per-node 2-simplex solve
+  (`simplex_sweep` / `simplex`); see CLAUDE.md for the full module map.
+- Full test suite green (1084 tests). `tests/golden/*` regenerated against the
+  rewritten calibration output.
 
 ## [0.4.1] - 2026-04-27
 
@@ -763,3 +650,4 @@ Initial development release.
 [0.2.0]: https://github.com/mkiyer/rigel/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/mkiyer/rigel/releases/tag/v0.1.0
 [0.4.0]: https://github.com/mkiyer/rigel/compare/v0.3.3...v0.4.0
+[0.6.0]: https://github.com/mkiyer/rigel/compare/v0.4.0...v0.6.0
