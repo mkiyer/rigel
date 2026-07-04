@@ -301,21 +301,24 @@ def test_evidence_free_region_gives_zero_gdna_prior():
 
 
 def test_eff_len_shrinks_toward_span_for_sparse_gdna():
-    # gDNA concentrated on region 0 (region 1 empty): the IPR contracts toward region 0's support, and
-    # the Laplace one-fragment uniform-support prior pulls it back toward the span in proportion to the
-    # gDNA count — a sparse mass sits near the span, an abundant mass near the concentrated IPR. This is
-    # what stops the EM amplifying a tiny concentrated gДНК mass past the calibration's call.
+    # gDNA contained-only on region 0 (region 1 empty, NO crossing mass): the CONTAINED-density IPR E_c
+    # contracts toward region 0's support, and the contained-evidence shrinkage pulls it back toward the
+    # CONTAINED span in proportion to the gDNA count — a sparse mass sits near the contained span, an
+    # abundant mass near the concentrated region-0 support. This is what stops the EM amplifying a tiny
+    # concentrated gДНК mass past the calibration's call. With no crossing gДНК the count θ_g equals the
+    # contained mass G_c, so eff_len = θ_g/ρ* = (θ_g/G_c)·E_c = E_c ≤ span_c: the footprint is the CONTAINED
+    # span, NOT the seam-inflated total span (the empty internal seam carries no mass, so it is not counted).
     fl = 150.0
     ra = _regions([0, 100], [100, 200])
     ml = [_ml(0, [(0, 0, 200)])]
-    span_eff = (100.0 + 100.0) + fl  # 2 regions, 1 internal seam @ fl = 350
+    span_c = 100.0 + 100.0  # 2 contained regions, no crossing gDNA → contained footprint = 200
     sparse = _calibration(mass_g=[2.0, 0.0], mass_d=[0.0, 0.0], region_eff_len=[100.0, 100.0], fl_mean=fl)
     abundant = _calibration(mass_g=[100.0, 0.0], mass_d=[0.0, 0.0], region_eff_len=[100.0, 100.0], fl_mean=fl)
     eff_sparse = assemble_priors(sparse, ra, ml).gdna_eff_len[0]
     eff_abundant = assemble_priors(abundant, ra, ml).gdna_eff_len[0]
-    assert eff_abundant < eff_sparse < span_eff
-    assert eff_abundant < 0.5 * span_eff  # abundant ⇒ strongly contracted toward region-0 support
-    assert eff_sparse > 0.5 * span_eff  # sparse ⇒ near the uniform span
+    assert eff_abundant < eff_sparse <= span_c + 1e-6
+    assert eff_abundant < 0.75 * span_c  # abundant ⇒ contracted toward region-0 support (≈100)
+    assert eff_sparse > 0.5 * span_c  # sparse ⇒ near the contained span
 
 
 def _blind_seam_cal(contained_rna: float) -> CalibrationResult:
@@ -353,24 +356,50 @@ def test_contained_evidence_shrinkage_reverts_to_span_when_blind():
     np.testing.assert_allclose(priors.gdna_prior_count, [5.0])  # pooled seams 2 + 3
 
 
+def _contained_shrinkage_cal(contained_rna: float) -> CalibrationResult:
+    """A locus with a small CONTAINED gDNA mass concentrated on region 0 (no crossing seam), plus a
+    tunable amount of CONTAINED RNA — to isolate the contained-evidence shrinkage of the exon-density read
+    E_c. The concentrated gДНК fixes the raw IPR contraction (E_c_raw = 200 ≪ contained span 300); the
+    contained evidence C = gdna_contained + rna_contained drives the shrinkage weight w = C/(C+1), pulling
+    E_c from span_c (C→0) down toward the raw contraction (C≫1). region_eff_len = 100/region, no crossing
+    ⇒ θ_g = G_c ⇒ eff_len = E_c."""
+    return CalibrationResult(
+        mass_gdna_contained=np.array([1.0, 0.0, 0.0]),  # small concentrated contained gDNA (fixes E_c_raw)
+        mass_rna_contained=np.array([contained_rna, 0.0, 0.0]),  # the tunable contained evidence
+        mass_gdna_left=np.array([0.0, 0.0, 0.0]),  # no crossing seam — θ_g = contained mass
+        mass_rna_left=np.array([0.0, 0.0, 0.0]),
+        mass_gdna_right=np.array([0.0, 0.0, 0.0]),
+        mass_rna_right=np.array([0.0, 0.0, 0.0]),
+        mass_rna_spliced=np.array([0.0, 0.0, 0.0]),
+        gdna_boundary_len=np.array([50.0, 50.0, 50.0]),
+        gdna_region_eff_len=np.array([100.0, 100.0, 100.0]),
+        gdna_density_global=0.01,
+        rna_sense_frac=0.9,
+        gdna_strand_overdispersion=0.05,
+        rna_strand_overdispersion=0.05,
+        n_regions=3,
+        config=CalibrationConfig(),
+    )
+
+
 def test_contained_evidence_shrinkage_is_smooth_not_a_cliff():
-    # The shrinkage is SMOOTH in contained evidence (not a hard cliff at C=0). With the seam fixing the
-    # raw IPR contraction (≈125 ≪ span=400), increasing CONTAINED RNA monotonically increases trust w
-    # and pulls eff_len from span (C=0) down toward the contraction (C≫1). Counts 1,2,3,... interpolate.
+    # The shrinkage is SMOOTH in contained evidence (not a hard cliff). A single concentrated contained-gDNA
+    # node fixes the raw contraction: the contained-node Laplace IPR E_c_raw = (G_c+1)²/(P_c+(2G_c+1)/span_c)
+    # = (1+1)²/(1²/100 + 3/300) = 4/0.02 = 200 (≪ contained span_c = 300). eff = (θ_g/G_c)·E_c = E_c here
+    # (no crossing ⇒ θ_g = G_c). Increasing CONTAINED evidence monotonically raises trust w = C/(C+1) and
+    # pulls E_c from span_c (C→0) down toward E_c_raw (C≫1). Counts 1,2,3,... interpolate strictly between.
     ra = _regions([0, 100, 200], [100, 200, 300])
-    span = 400.0  # effective span = Σ region_eff_len (300) + 2 seams @ fl_mean=50
+    span_c = 300.0  # contained span = Σ region_eff_len (the shrinkage ceiling)
+    e_raw = 200.0  # raw contained-IPR contraction E_c_raw (the C≫1 floor)
 
     def eff(c):
-        return assemble_priors(_blind_seam_cal(c), ra, [_ml(0, [(0, 0, 300)])]).gdna_eff_len[0]
+        return assemble_priors(_contained_shrinkage_cal(c), ra, [_ml(0, [(0, 0, 300)])]).gdna_eff_len[0]
 
     e0, e1, e3, e_hi = eff(0.0), eff(1.0), eff(3.0), eff(1000.0)
-    assert e0 == pytest.approx(span)
     assert e_hi < e3 < e1 < e0  # smooth + monotone (no cliff)
-    assert e_hi < e1 < span  # C=1 lands strictly BETWEEN the contraction and span
-    # high contained evidence ⇒ ≈ the earned IPR contraction. raw IPR = (G+1)²/(supp + (2G+1)/span),
-    # G = 5 (pooled seams 2+3), supp = (2² + 3²)/fl_mean = 13/50 = 0.26, span = 400.
-    assert e_hi == pytest.approx(36.0 / (0.26 + 11.0 / 400.0), rel=0.02)
-    assert e_hi < 0.5 * span
+    assert e_raw <= e_hi  # C≫1 approaches — but never crosses below — the raw contraction
+    assert e0 < span_c  # even C=0 has the concentrated contained gDNA as evidence ⇒ below span_c
+    assert e_hi == pytest.approx(e_raw, abs=1.0)  # C≫1 ⇒ the earned contraction
 
 
 def test_empty_multiloci_returns_empty():

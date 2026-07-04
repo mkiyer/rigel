@@ -12,6 +12,7 @@ what the EM is for). See ``docs/acc_caljointmodel/prs/PR06_integrate.md`` §I an
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -33,6 +34,84 @@ _RNA_SIGNATURE_BITS = BIT_EXON_POS | BIT_EXON_NEG | BIT_INTRON_POS | BIT_INTRON_
 # default (``run_batch_locus_em_partitioned`` floors at 1.0), avoiding a zero
 # denominator when the EM normalises the gDNA component's abundance.
 _GDNA_EFF_LEN_FLOOR = 1.0
+
+
+# gDNA eff-len reference density ρ* (eff = θ_g/ρ*). Two production-supported modes, env-selectable:
+#   "contained" (DEFAULT, production): the mass-weighted CONTAINED (exon) density G_c/E_c — robust across
+#      capture on/off, stranded/unstranded, and gDNA level on today's (observed) calibration.
+#   "kmeans" (OPTIONAL, the TARGET): the magic-free per-locus ENRICHED-MODE reference (see below). Principled
+#      and preferred, but it needs a cleanly BIMODAL node-density landscape: on OBSERVED calibration it is
+#      currently worse than "contained" (it hallucinates a split from noise on unimodal/capture-off loci) and
+#      only wins once the calibration's per-node gDNA accuracy improves (perfect-calibration study). Keep it
+#      here so we can flip production to it after the calibration-accuracy work. See
+#      docs/calibration/effective_length_state_and_roadmap.md.
+_RHOSTAR_MODE = os.environ.get("RIGEL_RHOSTAR", "contained")
+
+
+def _per_locus_kmeans_rhostar(
+    region_arrays: "RegionArrays",
+    multi_loci: "list[MultiLocus]",
+    n_loci: int,
+    density: np.ndarray,
+    weight: np.ndarray,
+) -> np.ndarray:
+    """Per-locus ENRICHED-MODE reference density via a MAGIC-FREE log-space support-weighted 1-sided k-means.
+
+    Collects each locus's per-region gDNA densities ``ρ_n = density[r]`` (weight = support ``S_n``) for
+    regions with positive density, then fits two log-space centroids by iterating to a fixed point with the
+    split at their geometric midpoint. ``ρ_ref`` = the support-weighted geomean of the ENRICHED (above-split)
+    cluster. NO tunable constant (the split is self-determined; k=2 is the depleted-vs-captured physics),
+    degenerate-safe (uniform / single node → that density). Robust to the few-enriched/many-depleted panel
+    regime where a fixed quantile collapses into the depleted cluster. (enriched-mode-estimator workflow;
+    docs/calibration/effective_length_state_and_roadmap.md.)
+    """
+    per: list[list[tuple[float, float]]] = [[] for _ in range(n_loci)]
+    blocks_by_ref: dict[int, list[tuple[int, int, int]]] = {}
+    for ml in multi_loci:
+        for blk in ml.loci:
+            if blk.end > blk.start:
+                blocks_by_ref.setdefault(int(blk.ref_id), []).append(
+                    (int(blk.start), int(blk.end), int(ml.multi_locus_id))
+                )
+    for blocks in blocks_by_ref.values():
+        blocks.sort()
+    starts, ends, ref_off = region_arrays.start, region_arrays.end, region_arrays.ref_offsets
+    for ref_id in range(int(region_arrays.n_refs)):
+        blocks = blocks_by_ref.get(ref_id)
+        if not blocks:
+            continue
+        lo, hi = int(ref_off[ref_id]), int(ref_off[ref_id + 1])
+        bstarts = np.fromiter((b[0] for b in blocks), dtype=np.int64, count=len(blocks))
+        for r in range(lo, hi):
+            if density[r] <= 0.0 or weight[r] <= 0.0:
+                continue
+            rs, re = int(starts[r]), int(ends[r])
+            for b_start, b_end, lid in blocks[: int(np.searchsorted(bstarts, re, side="left"))]:
+                if b_end > rs and min(b_end, re) - max(b_start, rs) > 0:
+                    per[lid].append((float(density[r]), float(weight[r])))
+    out = np.zeros(n_loci, dtype=np.float64)
+    for lid, pairs in enumerate(per):
+        if not pairs:
+            continue
+        d = np.array([p[0] for p in pairs])
+        wts = np.array([p[1] for p in pairs])
+        x = np.log(d)
+        if np.ptp(x) < 1e-12:  # uniform / single node ⇒ that density (degenerate-safe)
+            out[lid] = float(d[0])
+            continue
+        c_hi, c_lo = float(x.max()), float(x.min())
+        for _ in range(100):  # iter cap is numerical convergence, not a modeling constant
+            tau = 0.5 * (c_hi + c_lo)  # self-determined inter-centroid geometric midpoint (no free knob)
+            up = x >= tau
+            whi, wlo = wts[up].sum(), wts[~up].sum()
+            n_hi = (wts[up] * x[up]).sum() / whi if whi > 0 else c_hi
+            n_lo = (wts[~up] * x[~up]).sum() / wlo if wlo > 0 else c_lo
+            if abs(n_hi - c_hi) < 1e-12 and abs(n_lo - c_lo) < 1e-12:
+                c_hi, c_lo = n_hi, n_lo
+                break
+            c_hi, c_lo = n_hi, n_lo
+        out[lid] = float(np.exp(c_hi))  # support-weighted geomean of the enriched (above-split) cluster
+    return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,59 +359,85 @@ def assemble_priors(
         {
             "gdna": gdna_region,
             "rna": rna_region,
-            "support": gdna_sq_over_len,  # Σ m²/S (region contained²/S_r + pooled seam²/S_s)
-            "span": support_len,  # Σ S — the EFFECTIVE support (region_eff_len + fl_mean seams), NOT genomic
-            # the CONTAINED (unique-mapper) mass per locus — the calibration-blindness discriminator
-            # for the eff-len guard below (calibration's accumulator is fed by unique mappers only).
+            "span": support_len,  # Σ S — the EFFECTIVE support (region_eff_len + averaged seams), NOT genomic
+            # the CONTAINED (unique-mapper) mass per locus — the calibration-blindness discriminator for the
+            # eff-len guard below (calibration's accumulator is fed by unique mappers only).
             "gdna_contained": np.asarray(calibration.mass_gdna_contained, dtype=np.float64),
             "rna_contained": np.asarray(calibration.mass_rna_contained, dtype=np.float64),
+            # CONTAINED-footprint IPR pieces (m_c²/S_c and S_c) — for the exon-competition density ρ* below.
+            "c_part": np.asarray(calibration.mass_gdna_contained, dtype=np.float64) ** 2
+            / np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9),
+            "c_span": np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9),
         },
     )
-    gdna_locus, support_locus, span = proj["gdna"], proj["support"], proj["span"]
-    # gDNA effective length = the inverse participation ratio of the per-NODE gDNA density,
-    # Laplace-smoothed by one fragment-equivalent of uniform support. Add c_n = S_n/span pseudo-mass
-    # (total 1, spread per unit effective support) to each node's mass m_n and form the IPR
-    # (G̃)²/Σ(m̃²/S) with G̃ = G + 1. In the projected quantities this is closed-form, since
-    # Σ(2·m·c/S) = 2G/span and Σ(c²/S) = 1/span:
-    #     eff_len = (G + 1)² / [ Σ(m²/S) + (2G + 1)/span ],   G = Σ m  (= gdna_locus)
-    # where span = Σ S is the EFFECTIVE support (region_eff_len + fl_mean seams). Under uniform gDNA
-    # (m_n = ρ·S_n) the closed form gives eff_len = span EXACTLY — contraction factor 1, no spurious
-    # haircut (the bedrock invariant; tested in test_priors). The add-one is the canonical Laplace prior
-    # (no tunable constant): G = 0 → span; abundant capture-concentrated gDNA → the empirical IPR; capped
-    # at span. NOTE the Laplace term is now consistently at EFFECTIVE-support scale (span = Σ S), so a
-    # contained-rich locus is well protected — but a locus whose entire signal is a pooled SEAM (E[ℓ] ≪
-    # span) can still over-contract; the contained-evidence gate below guards that multimap-blind case.
+    gdna_locus, span = proj["gdna"], proj["span"]
+    # gDNA EM effective length = the component's TOTAL node mass held at the exon-competition DENSITY ρ* —
+    # the per-node effective-length view (each node contributes ℓ_n = m_n/ρ*, and eff = Σ ℓ_n = θ/ρ*). gDNA
+    # is a contiguous genomic interval, so its node set is ALL the locus's nodes: every region PLUS every
+    # boundary over its span — including the two OUTER boundaries that bookend the locus (exclusively-gDNA
+    # crossing fragments, no RNA candidate) but NOT the intergenic regions outside it (dropped by the
+    # projection). ρ* is read on the CONTAINED (exon) footprint — where the ambiguous fragments mature RNA
+    # competes for actually sit (a boundary-crossing fragment is likelihood-resolved to gDNA/nascent, never
+    # spliced mature):
+    #
+    #   E_c = contained-footprint Laplace IPR over the locus's CONTAINED nodes only:
+    #           E_c = (G_c+1)² / [ Σ m_c²/S_c + (2G_c+1)/span_c ], capped at span_c   (G_c = Σ m_c)
+    #         ⇒ ρ* = G_c/E_c, the mass-weighted exon density where mature competes.
+    #   eff_len = θ_g/ρ* = (θ_g/G_c)·E_c, capped at the total span; G_c→0 (multimap-blind) ⇒ span.
+    #
+    # WHY read ρ* on the exon footprint (vs an all-node mean): the all-node density G/eff is a mean over the
+    # whole footprint; under capture the depleted introns/large-mass moderate seams drag it below the exon
+    # density, so gDNA is under-weighted where it competes → the gDNA→mature leak (measured: the all-node
+    # arithmetic mean and the Lehmer M3/M2 both leave a larger mature leak than this contained read). Under
+    # uniform gDNA E_c = span_c and θ_g/G_c = span/span_c ⇒ eff_len = span (factor 1 — capture-off
+    # bit-identical). This is the SAME per-node ℓ_n = m_n/ρ* the transcript components use, so gDNA and a
+    # full-span nRNA sharing a locus land at the same eff-len up to gDNA's two extra outer-boundary supports
+    # (negligible — verified ~2.5% on a single-transcript locus). Derivation: rhostar-derivation workflow.
+    Gc = proj["gdna_contained"]
+    Pc = proj["c_part"]
+    span_c = np.maximum(proj["c_span"], 1e-9)
     with np.errstate(divide="ignore", invalid="ignore"):
-        safe_span = np.maximum(span, 1e-9)
-        smoothed_support = support_locus + (2.0 * gdna_locus + 1.0) / safe_span
-        eff_len = np.minimum((gdna_locus + 1.0) ** 2 / smoothed_support, span)
+        E_c = np.minimum((Gc + 1.0) ** 2 / (Pc + (2.0 * Gc + 1.0) / span_c), span_c)
 
-    # CONTAINED-EVIDENCE SHRINKAGE (calibration multimapper-blindness). Calibration's accumulator is fed by
-    # UNIQUE mappers only (bam_scanner.cpp: deposit_to_accumulator is inside `if (is_unique_mapper)`; the EM
-    # buffer separately gets multimappers at 1/NH). A multimapper-dominated locus — e.g. identical paralogs —
-    # has little/no CONTAINED mass, so the pooled seam can import FL-scale gDNA from adjacent introns and
-    # over-contract gdna_eff_len, letting the gDNA component over-claim the (degenerate) RNA. The IPR's
-    # Laplace +1 cannot guard this: it shrinks on TOTAL G (contained + seam), so a seam that alone inflates G
-    # defeats it. Shrink instead on the RELIABLE evidence — the CONTAINED (unique-mapper) mass C — toward the
-    # span (no contraction), SMOOTHLY (not a cliff at C=0): weight w = C/(C+1) (one pseudo-observation,
-    # magic-free Laplace-style; the contained-evidence analog of capture_eff_length's w=G/(G+n_reg)) and
-    # interpolate in LOG space (the EM consumes log_eff_len, so geometric interpolation is the natural one):
-    #   eff_len ← exp( w·log(eff_len) + (1−w)·log(span) ) = eff_len^w · span^(1−w)
-    # C→0 ⇒ w→0 ⇒ eff_len→span (the multimap-blind null, reached smoothly as counts 3,2,1→0, no
-    # discontinuity); C≫1 (every real captured locus) ⇒ w→1 ⇒ the earned IPR contraction, so the capture
-    # leak win is preserved. The real fix (multimapper-aware accumulator) is the mappability initiative; this
-    # is the principled interim. See project_mappability.
+    # CONTAINED-EVIDENCE SHRINKAGE (calibration multimapper-blindness). The accumulator is fed by UNIQUE
+    # mappers only, so a multimapper-dominated locus (identical paralogs) has little CONTAINED mass and an
+    # unreliable E_c. Shrink E_c toward its uniform span_c on the reliable contained evidence C, smoothly
+    # (w = C/(C+1), one pseudo-observation, magic-free); the G_c→0 guard then sends eff_len→span. See
+    # project_mappability.
     contained_ev = np.maximum(proj["gdna_contained"] + proj["rna_contained"], 0.0)
     w = contained_ev / (contained_ev + 1.0)
     with np.errstate(divide="ignore", invalid="ignore"):
-        eff_len = np.exp(
-            w * np.log(np.maximum(eff_len, 1e-9)) + (1.0 - w) * np.log(np.maximum(span, 1e-9))
-        )
+        E_c = np.exp(w * np.log(np.maximum(E_c, 1e-9)) + (1.0 - w) * np.log(span_c))
+        ratio = np.where(Gc > 1e-9, gdna_locus / np.maximum(Gc, 1e-9), 1.0)
+        eff_len = np.where(Gc > 1e-9, np.minimum(ratio * E_c, span), span)
+
+    if _RHOSTAR_MODE == "kmeans":
+        # OPTIONAL (RIGEL_RHOSTAR=kmeans): override the reference density with the magic-free per-locus
+        # ENRICHED-MODE (log-space support-weighted 1-sided k-means). eff = θ_g/ρ*, capped at span, then the
+        # SAME contained-evidence shrinkage. The TARGET production reference — see the module note + the
+        # roadmap doc; on today's observed calibration "contained" (the default above) is more robust.
+        supp = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
+        dens = np.asarray(calibration.mass_gdna_contained, dtype=np.float64) / supp
+        rho_star = _per_locus_kmeans_rhostar(region_arrays, multi_loci, len(multi_loci), dens, supp)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            have = (gdna_locus > 1e-9) & (rho_star > 1e-9)
+            eff_raw = np.where(
+                have, np.minimum(gdna_locus / np.where(have, rho_star, 1.0), span), span
+            )
+            eff_len = np.exp(
+                w * np.log(np.maximum(eff_raw, 1e-9)) + (1.0 - w) * np.log(np.maximum(span, 1e-9))
+            )
 
     return LocusPriors(
         gdna_prior_count=gdna_locus,
         rna_prior_count=proj["rna"],
-        gdna_eff_len=np.maximum(eff_len, _GDNA_EFF_LEN_FLOOR),
+        # Clamp into [min(floor, span), span]: the 1 bp floor (matching the EM's own eff-len floor) applies
+        # to every real locus, but must never exceed the locus's own effective span — otherwise a degenerate
+        # sub-basepair span (e.g. a microexon-only locus, region shorter than a fragment ⇒ E[max(0,L−ℓ)]≈0)
+        # would return eff_len > span, breaking eff_len ∈ (0, span]. No effect on real loci (span ≫ 1).
+        gdna_eff_len=np.minimum(
+            np.maximum(eff_len, _GDNA_EFF_LEN_FLOOR), np.maximum(span, 1e-9)
+        ),
     )
 
 

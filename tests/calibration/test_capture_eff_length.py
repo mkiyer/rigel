@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration.capture_eff_length import (
-    _exon_region_incidence,
+    _transcript_node_incidence,
     transcript_capture_eff_lengths,
 )
 from rigel.calibration.region_arrays import RegionArrays
@@ -84,7 +84,7 @@ def test_incidence_maps_every_transcript(misaligned_index):
     """No transcript (mature or nRNA span) is dropped by the exon→region incidence."""
     idx = misaligned_index
     ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
-    inc_t, _ = _exon_region_incidence(idx, ra)
+    inc_t, _, _, _ = _transcript_node_incidence(idx, ra)
     n_t = len(idx.t_df)
     mapped = set(int(t) for t in inc_t)
     dropped = set(range(n_t)) - mapped
@@ -100,7 +100,7 @@ def test_incidence_len_t_ge_exonic(misaligned_index):
     """
     idx = misaligned_index
     ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
-    inc_t, inc_r = _exon_region_incidence(idx, ra)
+    inc_t, inc_r, _, _ = _transcript_node_incidence(idx, ra)
     n_t = len(idx.t_df)
     region_len = np.asarray(ra.region_size_bp, dtype=np.float64)
     len_t = np.zeros(n_t)
@@ -120,7 +120,7 @@ def test_merged_region_interior_exon_is_mapped(misaligned_index):
     incidence must include that region (the old code skipped to the next region, or dropped it)."""
     idx = misaligned_index
     ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
-    inc_t, inc_r = _exon_region_incidence(idx, ra)
+    inc_t, inc_r, _, _ = _transcript_node_incidence(idx, ra)
     starts = np.asarray(ra.start)
     ends = np.asarray(ra.end)
     # the region covering position 150 (interior to a merged exon region)
@@ -166,7 +166,7 @@ def test_transcript_contracts_under_concentrated_gdna(misaligned_index):
     idx = misaligned_index
     ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
     n = ra.n_regions
-    inc_t, inc_r = _exon_region_incidence(idx, ra)
+    inc_t, inc_r, _, _ = _transcript_node_incidence(idx, ra)
     assert inc_t.size, "the index must map at least one transcript to a region"
     enriched_r = int(inc_r[0])  # a region genuinely inside some transcript's footprint
     contained = np.zeros(n, dtype=np.float64)

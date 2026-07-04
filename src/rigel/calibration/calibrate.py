@@ -30,6 +30,8 @@ zero-gDNA library (``gdna_density_global == 0``, per-node gDNA mass ``0``) is a 
 from __future__ import annotations
 
 import logging
+import os
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -232,6 +234,22 @@ def calibrate(
         n_regions=region_arrays.n_regions,
         config=config,
     )
+    # EXPERIMENTAL (eff-len study, env-gated): replace the DECONVOLVED per-node masses with the TRUE
+    # per-node masses (oracle calibration) so any residual EM leak is purely the eff-len formula, not
+    # deconvolution error. Keeps the geometry (eff-lens) + hyperparameters. See scripts/debug/oracle_calibration.py.
+    _oracle = os.environ.get("RIGEL_ORACLE_CALIB")
+    if _oracle:
+        z = np.load(_oracle)
+        result = replace(
+            result,
+            mass_gdna_contained=z["mass_gdna_contained"],
+            mass_rna_contained=z["mass_rna_contained"],
+            mass_gdna_left=z["mass_gdna_left"],
+            mass_rna_left=z["mass_rna_left"],
+            mass_gdna_right=z["mass_gdna_right"],
+            mass_rna_right=z["mass_rna_right"],
+            mass_rna_spliced=z["mass_rna_spliced"],
+        )
     # Diagnostic: the boundary-spliced sense fraction should agree with the StrandModel κ (the
     # deconv mean). A large gap flags a strand-model / accumulator mismatch (we do NOT refit the
     # mean from boundary spliced — κ stays the StrandModel posterior; this is QC only).

@@ -30,7 +30,6 @@ import numpy as np
 import pandas as pd
 
 from ..types import IntervalType
-from .priors import _gdna_region_node_arrays
 
 if TYPE_CHECKING:
     from ..index import TranscriptIndex
@@ -40,27 +39,39 @@ if TYPE_CHECKING:
 __all__ = ["transcript_capture_eff_lengths"]
 
 
-def _exon_region_incidence(
+def _transcript_node_incidence(
     index: "TranscriptIndex", region_arrays: "RegionArrays"
-) -> tuple[np.ndarray, np.ndarray]:
-    """``(inc_t, inc_r)`` — per-transcript region membership over its exon set.
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Per-transcript **node** membership — the regions AND boundaries a component crosses CONTIGUOUSLY.
 
-    mRNA → the regions its **exon** intervals overlap; nRNA synthetics (absent from the exon-interval
-    table) → the regions its **full span** overlaps (from ``t_df``). Region boundaries do NOT always
-    coincide with exon edges (only ~90% do — the partition is annotation-WIDE), so an exon/span ``[a, b)``
-    is mapped to every region it **overlaps**: the first region whose ``end > a`` (the one containing ``a``)
-    through the last region whose ``start < b``. Reading the lower bound from region *starts* alone
-    (``searchsorted(starts, a, side='left')``) skips the region that contains ``a`` whenever ``a`` falls in
-    a region's interior — dropping fully-contained exons/spans entirely — so ``lo`` is read from the region
-    *ends* (matching the accumulator reference's ``searchsorted(side='right')`` containment idiom).
-    Annotation-only (sample-independent).
+    Returns ``(inc_t_reg, inc_reg, inc_t_bnd, inc_bnd)``: region incidence ``(t, r)`` and interior-boundary
+    incidence ``(t, r)`` where boundary ``r`` is the seam between regions ``r`` and ``r+1`` (left-region
+    keyed, matching ``priors._gdna_region_node_arrays``).
+
+    A component's effective length is the IPR over exactly the nodes it occupies contiguously (the
+    transcript-structure gate, from first principles):
+
+    * A **region** is in the set if an exon (mRNA) / the full span (nRNA) overlaps it.
+    * A **boundary** is in the set iff the component crosses it *without a splice* — i.e. it lies STRICTLY
+      INTERIOR to a single exon / span. For an exon ``[a, b)`` spanning region range ``[lo, hi)`` the interior
+      seams are ``r ∈ [lo, hi-1)``: their genomic positions ``end[r] = start[r+1]`` all satisfy ``a < · < b``
+      (``lo`` is the first region with ``end > a``; ``hi-1`` the last with ``start < b``). Seams at the exon
+      EDGES (splice donor/acceptor, or the transcript's outer ends) sit at ``a`` or ``b`` ⇒ index ``< lo`` or
+      ``≥ hi-1`` ⇒ excluded automatically. Introns lie in no exon's range ⇒ their regions and boundaries are
+      excluded. So a MULTI-exon mRNA drops its introns + splice-junction boundaries but KEEPS an
+      exon-interior boundary that merely marks a signature change (an antisense feature overlapping on the
+      other strand — crossed contiguously); a SINGLE-exon mRNA / nRNA keeps every interior node (introns
+      included, for nRNA); the outer boundaries are never interior ⇒ excluded (they belong to gDNA, which
+      spans the chromosome). Annotation-only (sample-independent) — could be precomputed at index build.
     """
     starts = np.asarray(region_arrays.start, dtype=np.int64)
     ends = np.asarray(region_arrays.end, dtype=np.int64)
     ref_off = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
     name_to_id = index.ref_name_to_id
-    inc_t_parts: list[np.ndarray] = []
-    inc_r_parts: list[np.ndarray] = []
+    r_t: list[np.ndarray] = []
+    r_r: list[np.ndarray] = []
+    b_t: list[np.ndarray] = []
+    b_r: list[np.ndarray] = []
     seen: set[int] = set()
 
     def _add(t: int, ref_name: object, a: int, b: int) -> None:
@@ -68,14 +79,15 @@ def _exon_region_incidence(
         if rid is None:
             return
         lo0, hi0 = int(ref_off[rid]), int(ref_off[rid + 1])
-        # overlap of region [start_r, end_r) with [a, b): first region with end_r > a (contains/after a)
-        # through the last with start_r < b. (searchsorted(starts, a) would skip the region containing a
-        # when a is interior to it, dropping fully-contained exons/spans.)
+        # regions overlapping [a, b): first with end_r > a (contains/after a) through last with start_r < b.
         lo = lo0 + int(np.searchsorted(ends[lo0:hi0], a, side="right"))
         hi = lo0 + int(np.searchsorted(starts[lo0:hi0], b, side="left"))
         if hi > lo:
-            inc_r_parts.append(np.arange(lo, hi, dtype=np.int64))
-            inc_t_parts.append(np.full(hi - lo, int(t), dtype=np.int64))
+            r_r.append(np.arange(lo, hi, dtype=np.int64))
+            r_t.append(np.full(hi - lo, int(t), dtype=np.int64))
+            if hi - 1 > lo:  # interior seams r ∈ [lo, hi-1): boundaries crossed contiguously (no splice)
+                b_r.append(np.arange(lo, hi - 1, dtype=np.int64))
+                b_t.append(np.full(hi - 1 - lo, int(t), dtype=np.int64))
 
     iv = pd.read_feather(os.path.join(index.index_dir, "intervals.feather"))
     ex = iv[(iv["interval_type"] == int(IntervalType.EXON)) & (iv["t_index"] >= 0)]
@@ -93,9 +105,13 @@ def _exon_region_incidence(
                 continue
             _add(int(t), ref_name, int(a), int(b))
 
-    if not inc_t_parts:
-        return np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64)
-    return np.concatenate(inc_t_parts), np.concatenate(inc_r_parts)
+    e = np.empty(0, dtype=np.int64)
+    return (
+        np.concatenate(r_t) if r_t else e,
+        np.concatenate(r_r) if r_r else e,
+        np.concatenate(b_t) if b_t else e,
+        np.concatenate(b_r) if b_r else e,
+    )
 
 
 def transcript_capture_eff_lengths(
@@ -104,74 +120,97 @@ def transcript_capture_eff_lengths(
     index: "TranscriptIndex",
     fl_eff_lengths: np.ndarray,
 ) -> np.ndarray:
-    """Capture-contract each transcript's EM effective length by the gDNA-enrichment IPR over its regions.
+    """Capture-contract each transcript's EM effective length by the per-node gDNA-enrichment density.
 
-    Uses the **same density-correct, transport-free node model as the gDNA component**
-    (``priors._gdna_region_node_arrays``): per-region CONTAINED node at effective support
-    ``S_r = E[max(0,L−ℓ)]`` plus a POOLED SEAM node per internal boundary at the averaged per-side
-    density support ``S_s = ½·(E[min(ℓ,L_r)] + E[min(ℓ,L_{r+1})])``. Over a transcript's region set the
-    Laplace-smoothed IPR gives an effective footprint, expressed as a factor on the FL-marginal length::
+    Every component's effective length is its TOTAL node mass held at the exon-competition density ρ* —
+    the per-node view ``ℓ_n = m_n/ρ*``, ``L = Σ ℓ_n = θ/ρ*`` — over exactly the nodes it occupies
+    CONTIGUOUSLY (``_transcript_node_incidence``), the SAME node model + reduction the gDNA component uses
+    (``assemble_priors``), differing ONLY in the node set:
 
-        eff_ipr_t = (G_t + 1)² / [ Σ(m_n²/S_n) + (2·G_t + 1)/span_t ],  capped at span_t   (G_t = Σ m_n)
-        factor_t  = eff_ipr_t / span_t  ∈ (0, 1]                         (span_t = Σ S_n, EFFECTIVE support)
-        eff_em_t  = fl_eff_lengths_t · factor_t                          (capped at fl)
+    * a per-region CONTAINED node at effective support ``S_r = E[max(0, L_r − ℓ)]`` (mass ``m_r``);
+    * a per-interior-boundary POOLED SEAM node at averaged per-side support ``S_s = ½·(E[min(ℓ,L_r)] +
+      E[min(ℓ,L_{r+1})])`` (mass ``m_s = right[r] + left[r+1]``) — **only for boundaries the transcript
+      crosses without a splice** (interior to an exon). gDNA (contiguous genomic interval) takes ALL nodes;
+      a spliced mRNA drops its introns + splice-junction boundaries; nRNA (single unspliced exon) keeps
+      every interior node (introns included).
+
+    ρ* is read on the transcript's CONTAINED (exon) nodes — the mass-weighted exon density where mature RNA
+    competes with gDNA for the ambiguous contained fragments — while the TOTAL mass θ_t spans the full node
+    set (contained + crossed seams)::
+
+        ρ*_t   = G_c/E_c   (E_c = contained-node Laplace IPR, G_c = Σ contained mass)
+        eff_t  = θ_t/ρ*_t = θ_t·E_c/G_c,  capped at span_t   (θ_t = Σ m_n, span_t = Σ S_n over the node set)
+        factor = eff_t/span_t ∈ (0, 1] ;  eff_em_t = fl_eff_lengths_t · factor   (capped at fl)
 
     A single O(incidence) pass (``np.add.at``) does every transcript at once. Properties:
 
-    * **uniform gDNA** (capture off) ⇒ ``m_n = ρ·S_n`` ⇒ the closed-form IPR gives ``eff_ipr_t = span_t``
-      ⇒ factor 1 ⇒ ``eff_em_t = fl`` — bit-identical to the FL-marginal length (the bedrock invariant);
-    * **sparse gDNA** ⇒ the Laplace ``+1`` and the evidence shrinkage keep factor ≈ 1 (no spurious
-      contraction on thin evidence);
-    * **concentrated gDNA** (capture) ⇒ contracts toward the probed regions, matching the gDNA component;
-    * **no gDNA over the transcript** ⇒ factor 1 ⇒ ``fl``.
+    * **uniform gDNA** (capture off) ⇒ ρ_n = ρ ⇒ E_c = span_c and θ_t/G_c = span_t/span_c ⇒ eff = span_t
+      ⇒ factor 1 ⇒ ``eff_em = fl`` — bit-identical to the FL-marginal length (the bedrock invariant);
+    * **no gDNA over the transcript** (G_c = 0) ⇒ factor 1;
+    * **concentrated gDNA** (capture) ⇒ ρ* pins to the enriched exon density, so depleted intron nodes
+      contribute ℓ_n = m_n/ρ* ≈ 0 and the eff-len contracts to the exon footprint. Reading ρ* on the
+      CONTAINED nodes (not an all-node mean) is what maximally weights gDNA where mature competes — measured
+      to beat the all-node arithmetic mean and the Lehmer M3/M2 on the binding sweep (mature leak).
 
-    Dividing each node's mass by its EFFECTIVE sampling support (NOT the genomic ``region_size_bp``) is
-    what makes factor = 1 hold exactly under an unenriched library — ``region_size_bp`` understates
-    short-exon density and would contract a transcript even with no capture bias. Sharing
-    ``_gdna_region_node_arrays`` with ``assemble_priors`` guarantees one consistent node model across the
-    gDNA component and the transcript contraction. ``fl_eff_lengths`` is the existing FL-marginal
-    ``effective_lengths`` (the contraction never exceeds it).
+    ``ρ*`` is the SAME exon-competition density the gDNA component uses (``assemble_priors``), so gDNA and a
+    full-span nRNA sharing a locus land at the same eff-len up to gDNA's two extra outer-boundary supports
+    (negligible; verified near-parity on a single-transcript locus). Dividing each node's mass by its
+    EFFECTIVE support (NOT genomic ``region_size_bp``) is what makes factor = 1 hold under an unenriched
+    library. Reduction chosen by the rhostar-derivation workflow + binding-sweep A/B (contained ρ*).
     """
     fl = np.asarray(fl_eff_lengths, dtype=np.float64)
-    gdna_region, participation, support_len = _gdna_region_node_arrays(calibration, region_arrays)
-    # CONTAINED (unique-mapper) mass per region — the reliable calibration-blindness discriminator, the
-    # SAME signal assemble_priors shrinks on. Calibration's accumulator is fed by UNIQUE mappers only, so a
-    # multimapper-dominated footprint (e.g. identical paralogs) has ~0 contained mass; its gDNA node mass is
-    # then pure boundary-seam smear imported from adjacent unique flanks, which is NOT reliable evidence to
-    # contract that transcript — and worse, it differs between otherwise-degenerate paralogs and breaks the
-    # EM's symmetric split. Shrinking the contraction on the CONTAINED mass (not the total gДНК) reverts
-    # multimap-blind transcripts to no-contraction, keeping degenerate paralogs symmetric.
-    contained_ev = np.asarray(calibration.mass_gdna_contained, dtype=np.float64) + np.asarray(
-        calibration.mass_rna_contained, dtype=np.float64
-    )
-
-    inc_t, inc_r = _exon_region_incidence(index, region_arrays)
     n_t = fl.shape[0]
-    g_sum = np.zeros(n_t)  # G_t  = Σ m_n        (component gDNA mass: contained + pooled seams)
-    supp = np.zeros(n_t)  # Σ m_n²/S_n
-    span = np.zeros(n_t)  # span_t = Σ S_n      (effective support)
-    c_sum = np.zeros(n_t)  # C_t = Σ contained unique-mapper mass (the shrinkage evidence)
-    n_reg = np.zeros(n_t)  # number of regions in the footprint
-    if inc_t.size:
-        np.add.at(g_sum, inc_t, gdna_region[inc_r])
-        np.add.at(supp, inc_t, participation[inc_r])
-        np.add.at(span, inc_t, support_len[inc_r])
-        np.add.at(c_sum, inc_t, contained_ev[inc_r])
-        np.add.at(n_reg, inc_t, 1.0)
 
+    # per-region CONTAINED node (mass, effective support) and per-interior-seam POOLED node. The seam
+    # between region r and r+1 (left-region keyed) pools both boundary halves at the averaged per-side
+    # density support — the SAME node the gDNA component uses (priors._gdna_region_node_arrays).
+    contained_m = np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
+    contained_S = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
+    contained_ev = contained_m + np.asarray(calibration.mass_rna_contained, dtype=np.float64)
+    side_left = np.asarray(calibration.mass_gdna_left, dtype=np.float64)
+    side_right = np.asarray(calibration.mass_gdna_right, dtype=np.float64)
+    side_len = np.asarray(calibration.gdna_boundary_len, dtype=np.float64)
+    ref_id = np.asarray(region_arrays.ref_id)
+    n = contained_m.shape[0]
+    seam_m = np.zeros(n, dtype=np.float64)  # seam r = boundary between region r and r+1 (left-keyed)
+    seam_S = np.zeros(n, dtype=np.float64)
+    if n > 1:
+        same = ref_id[:-1] == ref_id[1:]
+        seam_m[:-1] = np.where(same, side_right[:-1] + side_left[1:], 0.0)
+        seam_S[:-1] = np.where(same, 0.5 * (side_len[:-1] + side_len[1:]), 0.0)
+
+    rt, rr, bt, br = _transcript_node_incidence(index, region_arrays)
+    # CONTAINED (exon-region) accumulators → the exon-competition density ρ* = G_c/E_c (E_c = contained-node
+    # Laplace IPR). MAPPED-NODE totals θ_t (contained + crossed seams) and the uniform-case length span_full.
+    Gc = np.zeros(n_t)  # Σ contained mass
+    Pc = np.zeros(n_t)  # Σ contained²/S_c
+    span_c = np.zeros(n_t)  # Σ contained support
+    c_ev = np.zeros(n_t)  # Σ contained unique-mapper evidence (shrinkage weight)
+    theta = np.zeros(n_t)  # Σ m_n over the node set (regions + crossed boundaries)
+    span_full = np.zeros(n_t)  # Σ S_n over the node set (the factor-1 uniform length)
+    if rt.size:
+        np.add.at(Gc, rt, contained_m[rr])
+        np.add.at(Pc, rt, contained_m[rr] ** 2 / contained_S[rr])
+        np.add.at(span_c, rt, contained_S[rr])
+        np.add.at(c_ev, rt, contained_ev[rr])
+        np.add.at(theta, rt, contained_m[rr])
+        np.add.at(span_full, rt, contained_S[rr])
+    if bt.size:
+        np.add.at(theta, bt, seam_m[br])
+        np.add.at(span_full, bt, seam_S[br])
+
+    have = Gc > 1e-9  # no contained gDNA over the footprint ⇒ no contraction (factor 1)
+    safe_span_c = np.maximum(span_c, 1e-9)
     with np.errstate(divide="ignore", invalid="ignore"):
-        safe_span = np.maximum(span, 1e-9)
-        eff_ipr = np.minimum((g_sum + 1.0) ** 2 / (supp + (2.0 * g_sum + 1.0) / safe_span), span)
-        factor_raw = np.where(span > 0.0, eff_ipr / safe_span, 1.0)  # ∈ (0,1]; 1 ⇒ no contraction
-        # Evidence-weighted SHRINKAGE of the contraction toward 1 (no contraction), on the CONTAINED
-        # (unique-mapper) mass C — the reliable calibration-visible evidence — NOT the total gДНК (which
-        # includes seam smear a multimap-blind footprint can import). Empirical-Bayes weight
-        # w = C/(C + n_reg): one pseudo-observation per footprint region (the canonical Dirichlet prior, NO
-        # tunable constant). w→1 where calibration sees real contained gДНК/RNA (real capture concentration
-        # ⇒ full contraction); w→0 where the footprint is multimap-blind or thin (⇒ no contraction, so the
-        # gDNA component / degenerate paralogs are not contracted on unreliable seam smear). This mirrors
-        # assemble_priors' contained-evidence shrinkage so both eff-len consumers treat blindness alike. The
-        # real fix (multimapper-aware accumulator) is the mappability initiative; this is the interim guard.
-        w = np.where(n_reg > 0.0, c_sum / (c_sum + n_reg), 0.0)
-        factor = w * factor_raw + (1.0 - w)
+        # exon-competition density ρ* = G_c/E_c (contained-node Laplace IPR), shrunk toward span_c on the
+        # contained evidence (w = C/(C+1), multimap-blind guard). Per-node view ℓ_n = m_n/ρ*, eff = θ_t/ρ*.
+        # Under uniform gDNA ρ* = the uniform density and θ_t/ρ* = span_full ⇒ factor 1 (capture-off
+        # bit-identical); under capture ρ* = the enriched exon density ⇒ depleted intron nodes contribute
+        # ≈0 length ⇒ contracts to the exon footprint. Same ρ* as the gDNA component ⇒ near-parity.
+        E_c = np.minimum((Gc + 1.0) ** 2 / (Pc + (2.0 * Gc + 1.0) / safe_span_c), span_c)
+        w = np.where(have, c_ev / (c_ev + 1.0), 0.0)
+        E_c = np.exp(w * np.log(np.maximum(E_c, 1e-9)) + (1.0 - w) * np.log(safe_span_c))
+        # eff = θ_t/ρ* = θ_t·E_c/G_c ; factor vs the uniform-case span_full (→1 under uniform / no gDNA)
+        eff = theta * E_c / np.where(have, Gc, 1.0)
+        factor = np.where(have & (span_full > 0.0), eff / np.maximum(span_full, 1e-9), 1.0)
     return np.minimum(fl * factor, fl)
