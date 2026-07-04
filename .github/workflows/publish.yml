@@ -49,8 +49,12 @@ jobs:
           # Linux aarch64 (emulated)
           - os: ubuntu-latest
             cibw_archs: aarch64
-          # macOS arm64 — latest runner (macOS 15), brew targets 15.0
-          - os: macos-latest
+          # macOS arm64 — PINNED to macos-15, not macos-latest. macos-latest
+          # rolled to macOS 26, whose Homebrew bottles (htslib/libdeflate/xz)
+          # target 26.0 and fail delocate against a 15.0 wheel. macos-15 serves
+          # 15.0-targeted bottles matching macos_target below. Bump both together
+          # when intentionally raising the minimum macOS.
+          - os: macos-15
             cibw_archs: arm64
             macos_target: "15.0"
 
@@ -92,7 +96,7 @@ jobs:
           CIBW_ENVIRONMENT: >
             CMAKE_ARGS="-DRIGEL_PORTABLE=ON"
             PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-          # macOS arm64: macos-latest = macOS 15, brew targets 15.0
+          # macOS arm64: macos-15 runner; brew serves 15.0-targeted bottles
           CIBW_ENVIRONMENT_MACOS: >
             CMAKE_ARGS="-DRIGEL_PORTABLE=ON"
             PKG_CONFIG_PATH="/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
