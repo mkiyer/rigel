@@ -60,6 +60,7 @@ def index_command(args: argparse.Namespace) -> int:
         feather_compression=args.feather_compression,
         write_tsv=not args.no_tsv,
         gtf_parse_mode=args.gtf_parse_mode,
+        collapse_duplicate_transcripts=args.collapse_duplicate_transcripts,
         nrna_tolerance=args.nrna_tolerance,
         alignable_zarr_path=(Path(args.alignable_zarr) if args.alignable_zarr else None),
         mappability_read_length=args.mappability_read_length,
@@ -903,6 +904,21 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "GTF parse mode: 'strict' (default) fails on malformed lines; "
             "'warn-skip' logs warnings and skips malformed lines"
+        ),
+    )
+    idx.add_argument(
+        "--collapse-duplicate-transcripts",
+        dest="collapse_duplicate_transcripts",
+        action="store_true",
+        default=False,
+        help=(
+            "Collapse transcripts sharing identical exon coordinates (same ref, "
+            "strand, and every exon start/end) instead of failing. Keeps the "
+            "lexicographically-smallest transcript ID per group and drops the rest. "
+            "Such transcripts are mathematically unidentifiable in quantification, "
+            "so collapsing is loss-free. Default: fail with a report of the "
+            "offending groups. Useful for GENCODE, which contains a handful of "
+            "byte-identical transcript annotations."
         ),
     )
     idx.add_argument(

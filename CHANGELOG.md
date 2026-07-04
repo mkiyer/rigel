@@ -5,6 +5,21 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`rigel index --collapse-duplicate-transcripts`**: collapse transcripts that
+  share identical exon coordinates (same reference, strand, and every exon
+  start/end) instead of aborting the index build. Keeps the lexicographically-
+  smallest transcript ID in each duplicate group and drops the rest, logging a
+  summary of what was collapsed. Such transcripts are mathematically
+  unidentifiable in quantification, so collapsing to one representative is
+  loss-free. The default is unchanged — a hard `ValueError` reporting the
+  offending groups — but the error message now points at this flag. GENCODE
+  ships a handful of byte-identical transcript annotations that previously
+  required manual GTF pre-processing.
+
 ## [0.6.0] - 2026-07-04
 
 ### Highlights

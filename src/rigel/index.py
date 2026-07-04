@@ -121,49 +121,101 @@ def load_reference_lengths(fasta_file: str | Path) -> dict[str, int]:
     return ref_lengths
 
 
-def _check_no_duplicate_transcripts(transcripts: list[Transcript]) -> None:
-    """Raise ``ValueError`` if two transcripts share an identical exon structure.
+def _duplicate_transcript_groups(transcripts: list[Transcript]) -> dict[tuple, list[int]]:
+    """Group transcripts by identical exon structure.
 
-    Transcripts are considered duplicates when they have the same reference
-    sequence, strand, and bit-identical sorted ``(start, end)`` exon tuple.
-    Such transcripts are mathematically unidentifiable from any read data
-    and must be resolved upstream (collapsed in the GTF) before indexing.
+    Two transcripts are duplicates when they share the same reference sequence,
+    strand, and bit-identical sorted ``(start, end)`` exon tuple. Such transcripts
+    are mathematically unidentifiable from any read data. Transcripts that share an
+    intron chain but differ in 5'/3' UTR boundaries are *not* duplicates.
 
-    Transcripts that share an intron chain but differ in 5'/3' UTR
-    boundaries are *not* duplicates and pass this check.
+    Returns ``{(ref, strand, exon_tuple): [transcript list-index, ...]}`` containing
+    only groups with two or more members. Exon-less transcripts are ignored.
     """
     from collections import defaultdict
 
-    sig_to_tids: dict[tuple, list[str]] = defaultdict(list)
-    for t in transcripts:
+    sig_to_idx: dict[tuple, list[int]] = defaultdict(list)
+    for i, t in enumerate(transcripts):
         if not t.exons:
             continue
         exon_tuple = tuple(sorted((iv.start, iv.end) for iv in t.exons))
-        key = (t.ref, int(t.strand), exon_tuple)
-        sig_to_tids[key].append(t.t_id or f"<t_index={t.t_index}>")
+        sig_to_idx[(t.ref, int(t.strand), exon_tuple)].append(i)
 
-    duplicates = {k: v for k, v in sig_to_tids.items() if len(v) > 1}
+    return {k: v for k, v in sig_to_idx.items() if len(v) > 1}
+
+
+def _check_no_duplicate_transcripts(transcripts: list[Transcript]) -> None:
+    """Raise ``ValueError`` if two transcripts share an identical exon structure.
+
+    Duplicate transcripts (see :func:`_duplicate_transcript_groups`) are
+    mathematically unidentifiable from any read data and must be resolved before
+    indexing — either by collapsing them in the GTF upstream, or by passing
+    ``--collapse-duplicate-transcripts`` to let rigel drop them automatically.
+    """
+    duplicates = _duplicate_transcript_groups(transcripts)
     if not duplicates:
         return
 
     examples = []
-    for (ref, strand, _exons), tids in list(duplicates.items())[:5]:
+    for (ref, strand, _exons), idxs in list(duplicates.items())[:5]:
+        tids = [transcripts[i].t_id or f"<t_index={transcripts[i].t_index}>" for i in idxs]
         examples.append(f"  ({ref}, strand={strand}): {tids}")
     n_groups = len(duplicates)
     n_tx = sum(len(v) for v in duplicates.values())
     raise ValueError(
         f"GTF contains {n_groups} group(s) totalling {n_tx} transcript(s) "
         f"with identical exon coordinates. Such transcripts are "
-        f"mathematically unidentifiable and must be collapsed in the GTF "
-        f"before indexing.\n"
+        f"mathematically unidentifiable and must be collapsed before indexing.\n"
+        f"Pass --collapse-duplicate-transcripts to have rigel drop them "
+        f"automatically (keeping the lexicographically-smallest transcript ID per "
+        f"group), or collapse them in the GTF upstream.\n"
         f"First {min(5, n_groups)} duplicate group(s):\n" + "\n".join(examples)
     )
+
+
+def _collapse_duplicate_transcripts(transcripts: list[Transcript]) -> list[Transcript]:
+    """Drop duplicate transcripts, keeping the lexicographically-smallest ID per group.
+
+    Duplicate groups are identified exactly as in :func:`_check_no_duplicate_transcripts`
+    (same ref, strand, and sorted exon ``(start, end)`` tuple). Because identical-
+    coordinate transcripts are mathematically unidentifiable in quantification,
+    collapsing each group to a single representative is loss-free for abundance
+    estimation. Returns the filtered list (original order preserved); logs a summary of
+    what was dropped. When there are no duplicates the input list is returned unchanged.
+    """
+    duplicates = _duplicate_transcript_groups(transcripts)
+    if not duplicates:
+        return transcripts
+
+    drop_idx: set[int] = set()
+    examples: list[str] = []
+    for (ref, strand, _exons), idxs in duplicates.items():
+        keep = min(idxs, key=lambda i: transcripts[i].t_id or "")
+        dropped = [i for i in idxs if i != keep]
+        drop_idx.update(dropped)
+        if len(examples) < 5:
+            examples.append(
+                f"  ({ref}, strand={strand}): kept {transcripts[keep].t_id!r}, "
+                f"dropped {[transcripts[i].t_id for i in dropped]}"
+            )
+
+    logger.warning(
+        "Collapsed %d duplicate transcript(s) across %d group(s) with identical exon "
+        "coordinates (kept the lexicographically-smallest transcript ID per group).\n"
+        "First %d group(s):\n%s",
+        len(drop_idx),
+        len(duplicates),
+        min(5, len(duplicates)),
+        "\n".join(examples),
+    )
+    return [t for i, t in enumerate(transcripts) if i not in drop_idx]
 
 
 def read_transcripts(
     gtf_file: str | Path,
     *,
     gtf_parse_mode: Literal["strict", "warn-skip"] = "strict",
+    collapse_duplicate_transcripts: bool = False,
 ) -> list[Transcript]:
     """Parse a GTF file and return a sorted list of Transcript objects.
 
@@ -172,10 +224,21 @@ def read_transcripts(
     ``(ref, start, end, strand)`` so that downstream interval generation
     can process them in genomic order.
 
+    Parameters
+    ----------
+    collapse_duplicate_transcripts : bool
+        Controls handling of transcripts with identical exon structure
+        (same ``(ref, strand, sorted exon coordinates)``). When ``False``
+        (default) such duplicates raise ``ValueError``. When ``True`` they
+        are collapsed to a single representative — the lexicographically-
+        smallest transcript ID per group — via
+        :func:`_collapse_duplicate_transcripts`.
+
     Raises
     ------
     ValueError
-        If the GTF contains two or more transcripts with identical
+        If ``collapse_duplicate_transcripts`` is ``False`` and the GTF
+        contains two or more transcripts with identical
         ``(ref, strand, sorted exon coordinates)``. See
         :func:`_check_no_duplicate_transcripts`.
     """
@@ -184,7 +247,10 @@ def read_transcripts(
         parse_mode=gtf_parse_mode,
     )
 
-    _check_no_duplicate_transcripts(transcripts)
+    if collapse_duplicate_transcripts:
+        transcripts = _collapse_duplicate_transcripts(transcripts)
+    else:
+        _check_no_duplicate_transcripts(transcripts)
 
     # Assign integer indices
     g_id_to_index: dict[str, int] = {}
@@ -751,6 +817,7 @@ class TranscriptIndex:
         feather_compression: str = "lz4",
         write_tsv: bool = True,
         gtf_parse_mode: Literal["strict", "warn-skip"] = "strict",
+        collapse_duplicate_transcripts: bool = False,
         nrna_tolerance: int = NRNA_MERGE_TOLERANCE,
         alignable_zarr_path: str | Path | None = None,
         mappability_read_length: int = 100,
@@ -766,6 +833,11 @@ class TranscriptIndex:
             Gene annotation in GTF format (GENCODE recommended).
         output_dir : path
             Directory to write index files into (created if needed).
+        collapse_duplicate_transcripts : bool
+            When ``False`` (default), transcripts with identical exon
+            coordinates raise ``ValueError`` (they are unidentifiable in
+            quantification). When ``True``, collapse each such group to its
+            lexicographically-smallest transcript ID instead of failing.
         feather_compression : str
             Compression for Feather files (``'lz4'``, ``'zstd'``, or
             ``'uncompressed'``).
@@ -812,6 +884,7 @@ class TranscriptIndex:
         transcripts = read_transcripts(
             gtf_file,
             gtf_parse_mode=gtf_parse_mode,
+            collapse_duplicate_transcripts=collapse_duplicate_transcripts,
         )
         logger.info(f"[DONE] Read {len(transcripts)} transcripts")
 

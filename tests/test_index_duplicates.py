@@ -82,3 +82,70 @@ def test_duplicate_message_lists_offending_ids(tmp_path: Path):
     msg = str(excinfo.value)
     assert "ALPHA" in msg
     assert "BETA" in msg
+
+
+def test_duplicate_error_mentions_collapse_flag(tmp_path: Path):
+    """The error should point users at the --collapse-duplicate-transcripts escape hatch."""
+    gtf = tmp_path / "dup.gtf"
+    _write_gtf(gtf, [
+        _gtf_line("transcript", 100, 500, "+", "G1", "T1"),
+        _gtf_line("exon", 100, 500, "+", "G1", "T1"),
+        _gtf_line("transcript", 100, 500, "+", "G1", "T2"),
+        _gtf_line("exon", 100, 500, "+", "G1", "T2"),
+    ])
+    with pytest.raises(ValueError, match=r"--collapse-duplicate-transcripts"):
+        read_transcripts(gtf)
+
+
+def test_collapse_keeps_lexicographically_smallest_id(tmp_path: Path):
+    """With collapse enabled, a duplicate group keeps only the lexicographically
+    smallest transcript ID; distinct transcripts are untouched and t_index is
+    reassigned contiguously."""
+    gtf = tmp_path / "collapse.gtf"
+    _write_gtf(gtf, [
+        # duplicate pair (identical exons), IDs deliberately out of lexical order
+        _gtf_line("transcript", 100, 500, "+", "G1", "ENST00000002"),
+        _gtf_line("exon", 100, 200, "+", "G1", "ENST00000002"),
+        _gtf_line("exon", 400, 500, "+", "G1", "ENST00000002"),
+        _gtf_line("transcript", 100, 500, "+", "G1", "ENST00000001"),
+        _gtf_line("exon", 100, 200, "+", "G1", "ENST00000001"),
+        _gtf_line("exon", 400, 500, "+", "G1", "ENST00000001"),
+        # a distinct transcript (different exons) — must survive
+        _gtf_line("transcript", 1000, 1500, "+", "G2", "ENST00000009"),
+        _gtf_line("exon", 1000, 1500, "+", "G2", "ENST00000009"),
+    ])
+    txs = read_transcripts(gtf, collapse_duplicate_transcripts=True)
+    assert {t.t_id for t in txs} == {"ENST00000001", "ENST00000009"}
+    # dropped transcript is gone; kept indices are contiguous 0..N-1
+    assert sorted(t.t_index for t in txs) == [0, 1]
+
+
+def test_collapse_three_way_group_keeps_one(tmp_path: Path):
+    """A 3-way duplicate group collapses to the single lexicographically smallest ID."""
+    gtf = tmp_path / "collapse3.gtf"
+    lines: list[str] = []
+    for tid in ("ENST0000C", "ENST0000A", "ENST0000B"):
+        lines += [
+            _gtf_line("transcript", 100, 500, "+", "G1", tid),
+            _gtf_line("exon", 100, 200, "+", "G1", tid),
+            _gtf_line("exon", 400, 500, "+", "G1", tid),
+        ]
+    _write_gtf(gtf, lines)
+    txs = read_transcripts(gtf, collapse_duplicate_transcripts=True)
+    assert {t.t_id for t in txs} == {"ENST0000A"}
+
+
+def test_collapse_is_noop_without_duplicates(tmp_path: Path):
+    """collapse=True must not drop transcripts that are merely similar (shared intron,
+    different UTRs)."""
+    gtf = tmp_path / "nodup.gtf"
+    _write_gtf(gtf, [
+        _gtf_line("transcript", 100, 500, "+", "G1", "T1"),
+        _gtf_line("exon", 100, 200, "+", "G1", "T1"),
+        _gtf_line("exon", 400, 500, "+", "G1", "T1"),
+        _gtf_line("transcript", 120, 480, "+", "G1", "T2"),
+        _gtf_line("exon", 120, 200, "+", "G1", "T2"),
+        _gtf_line("exon", 400, 480, "+", "G1", "T2"),
+    ])
+    txs = read_transcripts(gtf, collapse_duplicate_transcripts=True)
+    assert {t.t_id for t in txs} == {"T1", "T2"}
