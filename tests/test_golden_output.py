@@ -52,13 +52,20 @@ PIPELINE_SEED = 42
 N_FRAGS = 1000  # enough to exercise EM meaningfully
 
 # Tolerance for golden comparison.
-# The C++ EM solver has inherent ULP-level (~1e-16) non-determinism in
-# floating-point accumulation order, and near-zero quantities (e.g. gdna
-# when there is no contamination, ~1e-296) can wander by several percent
-# in relative terms while remaining scientifically meaningless.
-# rtol=1e-12 catches real regressions on meaningful values; atol=1e-10
-# absorbs noise on effectively-zero quantities.
-RTOL = 1e-12
+# Rigel's native EM / effective-length path is compiled with -ffast-math and
+# -ffp-contract=fast and uses SIMD exp (fast_exp.h). Pinning n_threads=1 (below)
+# removes OpenMP reduction-order noise, so results are deterministic on a *single*
+# machine — but NOT bit-identical across machines: FMA contraction, SIMD lane
+# width, and libm/BLAS versions differ between the developer's Mac (where goldens
+# are generated) and the CI runners (Ubuntu/macOS × py3.12/3.13). The iterative
+# solver amplifies those ULP-level input differences to ~1e-8 relative on derived
+# quantities such as em_effective_length, so a bit-exact golden is unachievable.
+# Near-zero quantities (e.g. gdna with no contamination, ~1e-296) also wander by
+# several percent in relative terms while remaining scientifically meaningless.
+# rtol=1e-6 sits ~2 orders of magnitude below any real regression (algorithmic
+# changes move meaningful values by >=1e-3) yet absorbs cross-platform float
+# noise; atol=1e-10 absorbs noise on effectively-zero quantities.
+RTOL = 1e-6
 ATOL = 1e-10
 
 # Standard simulation configs
