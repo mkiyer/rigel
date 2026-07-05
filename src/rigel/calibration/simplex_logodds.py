@@ -252,7 +252,8 @@ def _solve_ambig_logodds(
     inv_n = np.where(n > 0.0, 1.0 / np.maximum(n, _EPS), 0.0)[:, None, None]
     short_p = np.maximum(spliced_pos[:, None, None] * inv_n - f_pos_kt[None, :, :], 0.0)
     short_n = np.maximum(spliced_neg[:, None, None] * inv_n - f_neg_kt[None, :, :], 0.0)
-    psi = psi - 0.5 * spliced_pos[:, None, None] * short_p**2 - 0.5 * spliced_neg[:, None, None] * short_n**2
+    psi -= 0.5 * spliced_pos[:, None, None] * short_p**2  # in-place: avoid reallocating the (m,K,Kt) cube
+    psi -= 0.5 * spliced_neg[:, None, None] * short_n**2
     # ── LOG-fraction grids (the overhaul): log f_g (τ-independent) + log f_pos/f_neg over the cube,
     #    floored at one pseudo-fragment 1/(n+1) (D5: the τ=±1 edges have f_s=0 → log(0); the count floor
     #    keeps it finite + consistent with pois_log). ──
@@ -262,19 +263,19 @@ def _solve_ambig_logodds(
     log_fneg = np.log(np.maximum(f_neg_kt[None, :, :], frac_floor))
     # ── log-density global on log f_g (τ-independent; pre-evaluated on the σ(λ) grid by the caller) ──
     if global_logprior is not None:
-        psi = psi + np.asarray(global_logprior, np.float64)[:, :, None]
+        psi += np.asarray(global_logprior, np.float64)[:, :, None]
     # ── gDNA LOG-fraction message on log f_g (τ-independent) ──
     if gdna_imp_mode is not None and gdna_imp_prec is not None:
         mo = np.asarray(gdna_imp_mode, np.float64)[:, None, None]
         pr = np.asarray(gdna_imp_prec, np.float64)[:, None, None]
-        psi = psi - 0.5 * pr * (log_fg_grid[None, :, None] - mo) ** 2
+        psi -= 0.5 * pr * (log_fg_grid[None, :, None] - mo) ** 2
     # ── per-strand RNA LOG-fraction messages on log f_pos/log f_neg (τ-dependent — inside the cube) ──
     if rna_imp_mode is not None and rna_imp_prec is not None:
         for log_f, ms, ps in (
             (log_fpos, rna_imp_mode[0], rna_imp_prec[0]),
             (log_fneg, rna_imp_mode[1], rna_imp_prec[1]),
         ):
-            psi = psi - 0.5 * np.asarray(ps, np.float64)[:, None, None] * (
+            psi -= 0.5 * np.asarray(ps, np.float64)[:, None, None] * (
                 log_f - np.asarray(ms, np.float64)[:, None, None]
             ) ** 2
     # ── Reference measure (τ-independent → add once on the λ axis). NEUTRAL on the gDNA fraction:
@@ -285,8 +286,9 @@ def _solve_ambig_logodds(
     #    tilt or the gDNA prior said. Neutral lets the STRAND resolve it: a strong tilt ⇒ RNA (unchanged),
     #    a balanced count ⇒ parsimoniously gDNA (the τ-marginal favours high f_g, where more τ fit the
     #    balance) with the gDNA prior setting the level. (Derivation: log_density_1d_solver_design.md §5.2.) ──
-    log_jac = _log_fg(lam) + _log1m_fg(lam)  # (K,)
-    psi_full = psi + log_jac[None, :, None]                 # (m,K,Kt) — the full 2-D log-posterior
+    log_jac = log_fg_grid + _log1m_fg(lam)  # (K,) — reuse log_fg_grid (= _log_fg(lam)) computed above
+    psi += log_jac[None, :, None]                           # in-place; psi is now the full 2-D log-posterior
+    psi_full = psi
     # τ-marginal λ-posterior (m,K)
     psi_lam = _lse(psi_full, axis=2)
     post_lam = np.exp(psi_lam - _lse(psi_lam, axis=1, keepdims=True))
