@@ -111,6 +111,48 @@ def test_empty_substrate_raises():
         GdnaDensityPrior.fit(_synthetic(np.zeros(0)))
 
 
+# --------------------------------------------------------------------------- genome-scale memory fix
+
+
+def test_weighted_kde_logpdf_query_tiling_is_exact():
+    """Query-axis tiling (``eval_chunk``) is a pure memory knob — it must be bit-identical to a single
+    untiled block. Regression for the genome-scale OOM: a ~90M-point query (nodes × grid) previously built
+    a single (n_eval, n_samp) matrix = 2.69 TiB and crashed; tiling bounds it without changing the result."""
+    rng = np.random.default_rng(3)
+    xe = rng.normal(size=40_000)
+    x = rng.normal(size=5_000)
+    w = rng.random(5_000) + 0.1
+    tiled = _weighted_kde_logpdf(xe, x, w, 0.4, eval_chunk=4096)
+    untiled = _weighted_kde_logpdf(xe, x, w, 0.4, eval_chunk=10**9)
+    assert np.array_equal(tiled, untiled)
+
+
+def test_kde_logprior_tabulation_matches_direct_at_scale():
+    """At genome scale ``_kde_logprior`` tabulates the exact kernel on a lattice spanning the query range
+    and interpolates (instead of evaluating the KDE at every one of m·K points). For a large query it must
+    agree with a direct per-point kernel evaluation to well within the kernel bandwidth — the real quadratic
+    tails are preserved because the lattice covers the full range (no clamping)."""
+    from rigel.calibration.bp_solver import _kde_logprior
+
+    xs = np.concatenate([np.linspace(-9.0, -8.5, 40), np.linspace(-1.5, -1.0, 40)])
+    pr = GdnaDensityPrior.fit(_synthetic(xs, std=np.full(xs.size, 0.1)), bandwidth="silverman")
+    rng = np.random.default_rng(4)
+    m = 50_000
+    mass = rng.uniform(1.0, 500.0, size=m)
+    eff = rng.uniform(50.0, 5_000.0, size=m)
+    fgg = np.linspace(1e-3, 1.0 - 1e-3, 60)  # m·K = 3M ≫ lattice ⇒ tabulation path
+    out = _kde_logprior(fgg, mass, eff, pr)
+    assert out.shape == (m, 60)
+    assert np.all(np.isfinite(out))
+    # direct reference on a subset (exact per-point kernel) — must match the interpolated result
+    sub = slice(0, 400)
+    log_me = np.log(mass[sub]) - np.log(eff[sub])
+    fg = np.clip(fgg, 1e-9, 1.0 - 1e-9)
+    log_rho = np.log(fg)[None, :] + log_me[:, None]
+    ref = pr.logpdf_kernel(log_rho.ravel()).reshape(log_rho.shape) - np.log1p(-fg)[None, :]
+    assert np.max(np.abs(out[sub] - ref)) < 5e-3  # interp error ≪ bandwidth; a broken lattice would be O(1)
+
+
 # --------------------------------------------------------------------------- substrate (P2.0)
 
 

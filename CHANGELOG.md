@@ -5,6 +5,29 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Genome-scale calibration out-of-memory (production blocker)**: on a whole-genome (human) index the
+  gDNA-density KDE prior evaluated `P(log ρ_g)` at every node × solve-grid point (~90M points for a human
+  index) and built a single `(n_eval, n_train)` matrix — a **2.69 TiB** allocation that crashed
+  `rigel quant` the first time it ran on real data. The KDE evaluation now (a) **tiles the query axis** so
+  the pairwise matrix is bounded at any scale, and (b) for genome-scale queries **tabulates the exact
+  kernel on a bandwidth-scaled lattice** spanning the query range and interpolates — the real quadratic
+  tails are preserved (the lattice covers the full range, so nothing is clamped). Peak RSS on a
+  971k-fragment human library went from an OOM crash to ~10 GB; small/golden inputs keep the exact
+  per-point path (bit-identical). Regression tests in `tests/calibration/test_gdna_density_prior.py`.
+
+### Changed
+
+- **Faster calibration solve**: the per-node log-odds solver (`simplex_logodds.py`) uses a lean numpy
+  log-sum-exp in place of `scipy.special.logsumexp` — same max-shift stabilisation, matches scipy to
+  ~1e-15, but without the scipy wrapper overhead. ~15 s (~14%) off the calibration stage on the human
+  library above (149 s → 134 s end-to-end).
+- **Deterministic calibration σ²_g (M2)**: replaced the bistable spline gDNA-density estimator with a
+  deterministic one, eliminating cross-process nondeterminism in the prior. *(committed since v0.6.1)*
+
 ## [0.6.1] - 2026-07-04
 
 ### Added

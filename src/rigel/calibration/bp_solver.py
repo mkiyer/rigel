@@ -773,6 +773,12 @@ def _global_logprior(
     return -0.5 * n_node[:, None] * (log_fg[None, :] - target[:, None]) ** 2
 
 
+# Lattice density for the tabulate-and-interpolate KDE evaluation in _kde_logprior: this many lattice
+# nodes per KDE bandwidth. Linear-interpolation error scales as ~(1/PTS_PER_BW)^2, so 16 keeps it far
+# below the kernel's own smoothing — a numerical-accuracy knob, not a model parameter.
+_KDE_LATTICE_PTS_PER_BW = 16
+
+
 def _kde_logprior(fgg, mass_global, eff_global, gdna_prior):
     """The GENERATIVE two-density prior term ``(n_nodes, K)`` on the f_g solve grid (design:
     ``ambig_boundary_spliced_deconvolution.md``; derived by the density-prior-integration workflow).
@@ -796,7 +802,27 @@ def _kde_logprior(fgg, mass_global, eff_global, gdna_prior):
     log_me = np.log(mass) - np.log(eff)                                # (m,) = log(M/E)
     fg = np.minimum(np.maximum(np.asarray(fgg, np.float64), _EPS), 1.0 - _EPS)  # (K,)
     log_rho = np.log(fg)[None, :] + log_me[:, None]                    # (m,K) = log ρ_g at each grid point
-    kde_term = gdna_prior.logpdf_kernel(log_rho.ravel()).reshape(log_rho.shape)  # real quadratic tails
+    # log ρ_g lies on a bounded 1-D interval and logpdf_kernel is a smooth 1-D function, so evaluate the
+    # EXACT kernel (real quadratic tails) on a dense lattice spanning the query range and linearly
+    # interpolate the m·K points off it — O(L·n_train + m·K) instead of O(m·K·n_train), which at genome
+    # scale (m·K ~ 10^8) is the difference between milliseconds and a multi-TiB OOM. The lattice spans the
+    # FULL query range, so no point is extrapolated: the real-tail behaviour that makes logpdf_kernel (not
+    # the clamped logpdf) the correct choice is preserved to interpolation accuracy (≪ bandwidth).
+    flat = log_rho.ravel()
+    lo = float(np.min(flat))
+    hi = float(np.max(flat))
+    h_bw = max(float(gdna_prior.bandwidth), _EPS)
+    # lattice step = bandwidth / PTS_PER_BW ⇒ interp error ~(1/PTS_PER_BW)^2, far below the kernel smoothing.
+    n_lat = int(np.clip(np.ceil((hi - lo) / h_bw * _KDE_LATTICE_PTS_PER_BW) + 1.0, 256, 65536))
+    if hi - lo <= _EPS or flat.size <= n_lat:
+        # Small query set (or degenerate range): the exact kernel is no costlier than building the lattice,
+        # so evaluate it directly — keeps small/golden cases BIT-EXACT. Tabulation only engages when the
+        # query set is large enough that interpolation genuinely saves work (the genome-scale m·K ~ 10^8).
+        kde_term = gdna_prior.logpdf_kernel(flat).reshape(log_rho.shape)
+    else:
+        lattice = np.linspace(lo, hi, n_lat)
+        tab = gdna_prior.logpdf_kernel(lattice)                        # (n_lat,) exact kernel — cheap
+        kde_term = np.interp(flat, lattice, tab).reshape(log_rho.shape)
     jeffreys = -np.log1p(-fg)                                          # (K,) RNA Jeffreys 1/(1−f_g)
     return kde_term + jeffreys[None, :]
 

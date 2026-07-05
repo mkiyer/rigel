@@ -196,26 +196,35 @@ def build_training_substrate(
 # ---------------------------------------------------------------------------
 
 
-def _weighted_kde_logpdf(x_eval, x, w, h, *, chunk: int = 4096):
-    """log of the weighted Gaussian KDE ``Σ w_j φ((x−x_j)/h)/(h·Σw)`` at ``x_eval`` (chunked over samples so
-    the ``(n_eval, n_samp)`` product never materialises whole). Returns ``(n_eval,)``."""
+def _weighted_kde_logpdf(x_eval, x, w, h, *, chunk: int = 4096, eval_chunk: int = 16384):
+    """log of the weighted Gaussian KDE ``Σ w_j φ((x−x_j)/h)/(h·Σw)`` at ``x_eval``. Returns ``(n_eval,)``.
+
+    Tiles BOTH axes: the query axis (n_eval) in ``eval_chunk`` blocks and the sample axis (n_samp) in
+    ``chunk`` blocks, so the ``(n_eval, n_samp)`` product never materialises. n_eval reaches ~10^8 at genome
+    scale (nodes × solve grid); without the query tiling this allocated TiB and OOM-crashed. Both are pure
+    memory knobs — the log-sum-exp is exact regardless of tiling, so the result is unchanged."""
     x = np.asarray(x, dtype=np.float64)
     w = np.asarray(w, dtype=np.float64)
     xe = np.asarray(x_eval, dtype=np.float64)
     W = max(float(np.sum(w)), _EPS)
     lw = np.log(np.maximum(w, _EPS)) - np.log(W) - np.log(max(h, _EPS)) - 0.5 * np.log(2.0 * np.pi)
-    # accumulate logsumexp over sample chunks (running max for stability)
-    m = np.full(xe.shape[0], -np.inf)
-    s = np.zeros(xe.shape[0])
-    for s0 in range(0, x.shape[0], chunk):
-        xj = x[s0 : s0 + chunk][None, :]
-        lwj = lw[s0 : s0 + chunk][None, :]
-        z = -0.5 * ((xe[:, None] - xj) / max(h, _EPS)) ** 2 + lwj  # (n_eval, chunk)
-        cmax = z.max(axis=1)
-        both = np.maximum(m, cmax)
-        s = s * np.exp(m - both) + np.sum(np.exp(z - both[:, None]), axis=1)
-        m = both
-    return m + np.log(np.maximum(s, _EPS))
+    hh = max(float(h), _EPS)
+    out = np.empty(xe.shape[0], dtype=np.float64)
+    for e0 in range(0, xe.shape[0], eval_chunk):
+        xeb = xe[e0 : e0 + eval_chunk][:, None]  # (b, 1)
+        # accumulate logsumexp over sample chunks (running max for stability)
+        m = np.full(xeb.shape[0], -np.inf)
+        s = np.zeros(xeb.shape[0])
+        for s0 in range(0, x.shape[0], chunk):
+            xj = x[s0 : s0 + chunk][None, :]
+            lwj = lw[s0 : s0 + chunk][None, :]
+            z = -0.5 * ((xeb - xj) / hh) ** 2 + lwj  # (b, chunk)
+            cmax = z.max(axis=1)
+            both = np.maximum(m, cmax)
+            s = s * np.exp(m - both) + np.sum(np.exp(z - both[:, None]), axis=1)
+            m = both
+        out[e0 : e0 + eval_chunk] = m + np.log(np.maximum(s, _EPS))
+    return out
 
 
 def _weighted_median(v, w):

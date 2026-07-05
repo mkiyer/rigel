@@ -19,7 +19,7 @@ over ``λ``; AMBIG nodes (both set) marginalize the RNA tilt ``τ`` on a 2-D ``(
 from __future__ import annotations
 
 import numpy as np
-from scipy.special import expit, log_expit, logsumexp
+from scipy.special import expit, log_expit
 
 from .simplex import _mixture_strand_loglik
 from .strand_deconv import NodeDeconv
@@ -39,6 +39,18 @@ _AMBIG_BATCH = 8192  # memory-tiling batch for the AMBIG 2-D (λ,τ) cube — bo
 #                      array at genome scale. NOT a model parameter: AMBIG nodes solve INDEPENDENTLY (no
 #                      cross-node coupling), so any batch size yields bit-identical results — it only caps
 #                      peak memory (the full subset at once is ~O(m·K²), same as the retired lattice).
+
+
+def _lse(a, axis, keepdims=False):
+    """Lean numpy log-sum-exp — a drop-in for ``scipy.special._lse(a, axis, keepdims)`` without the
+    scipy wrapper overhead (arg validation, ``b``/``return_sign`` handling), which the profiler flagged as
+    ~9 s of pure per-call cost across the AMBIG solve. Same max-shift stabilisation; the ``m→0`` guard makes
+    an all-``-inf`` slice give ``log(0) = -inf`` and avoids ``(-inf)-(-inf) = nan``."""
+    m = np.max(a, axis=axis, keepdims=True)
+    m = np.where(np.isfinite(m), m, 0.0)
+    with np.errstate(divide="ignore"):  # all-(-inf) slice ⇒ log(0) = -inf (correct); suppress the warning
+        r = m + np.log(np.sum(np.exp(a - m), axis=axis, keepdims=True))
+    return r if keepdims else np.squeeze(r, axis=axis)
 
 
 def _log_fg(lam):
@@ -170,7 +182,7 @@ def _solve_nodes_logodds(
         gdna_imp_mode=gdna_imp_mode, gdna_imp_prec=gdna_imp_prec,
         rna_imp_mode=rna_imp_mode, rna_imp_prec=rna_imp_prec,
     )
-    post = np.exp(psi - logsumexp(psi, axis=1, keepdims=True))  # (m,K)
+    post = np.exp(psi - _lse(psi, axis=1, keepdims=True))  # (m,K)
     # f_g posterior median (fg ascending ⇒ cumulative CDF directly)
     cw = np.cumsum(post, axis=1)
     idx = np.clip((cw < 0.5).sum(axis=1), 0, fg.size - 1)
@@ -276,8 +288,8 @@ def _solve_ambig_logodds(
     log_jac = _log_fg(lam) + _log1m_fg(lam)  # (K,)
     psi_full = psi + log_jac[None, :, None]                 # (m,K,Kt) — the full 2-D log-posterior
     # τ-marginal λ-posterior (m,K)
-    psi_lam = logsumexp(psi_full, axis=2)
-    post_lam = np.exp(psi_lam - logsumexp(psi_lam, axis=1, keepdims=True))
+    psi_lam = _lse(psi_full, axis=2)
+    post_lam = np.exp(psi_lam - _lse(psi_lam, axis=1, keepdims=True))
     cw = np.cumsum(post_lam, axis=1)
     idx = np.clip((cw < 0.5).sum(axis=1), 0, K - 1)
     f_g = fg[idx]
@@ -286,7 +298,7 @@ def _solve_ambig_logodds(
     var_g = np.maximum(post_lam @ (log_fg_grid * log_fg_grid) - mLg * mLg, 0.0)
     # f_pos/f_neg MEANS + Var(log f_pos/neg) over the FULL 2-D posterior.
     flat = psi_full.reshape(psi_full.shape[0], -1)
-    post2d = np.exp(flat - logsumexp(flat, axis=1, keepdims=True)).reshape(psi_full.shape)  # (m,K,Kt)
+    post2d = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(psi_full.shape)  # (m,K,Kt)
     fp_grid = f_pos_kt[None, :, :]
     fn_grid = f_neg_kt[None, :, :]
     f_pos = np.sum(post2d * fp_grid, axis=(1, 2))
