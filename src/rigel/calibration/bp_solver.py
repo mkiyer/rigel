@@ -56,7 +56,6 @@ from .simplex_logodds import (
     _solve_nodes_logodds_all,
 )
 from .strand_deconv import NodeDeconv
-from .variance_model import MonotoneVarMean
 
 __all__ = [
     "NodeGeometry",
@@ -535,8 +534,9 @@ def _node_region_type(chain, region_arrays):
 def _gdna_seed_estimate(chain, statics, geometry, region_arrays, boundary_substrate, f_g_init, kappa):
     """The honest, NON-CIRCULAR population gDNA prior, fit ONCE on gDNA-clean seed nodes (§4.3).
 
-    Returns ``(rho_global: float, sigma2_g: MonotoneVarMean)`` — the exposure-pooled gDNA rate + the gDNA
-    between-node spread var~mean. Inputs are belief-independent (structural ``M/E`` + the strand-ONLY init
+    Returns ``(rho_global: float, sigma2_g: _LogLinearVarMean, var_mean: float)`` — the exposure-pooled gDNA
+    rate + the deterministic gDNA between-node spread σ²_g(μ) + its rate-estimate variance. Inputs are
+    belief-independent (structural ``M/E`` + the strand-ONLY init
     ``f_g``), so this is computed once before the sweep and never refit (breaks the per-pass circularity).
 
     Seeds (per-node gDNA density + weight):
@@ -604,10 +604,51 @@ def _gdna_seed_estimate(chain, statics, geometry, region_arrays, boundary_substr
     return rho_global, _fit_seed_varmean(chain, dens, eff, is_seed, seed_w), var_mean
 
 
+@dataclass(frozen=True, slots=True)
+class _LogLinearVarMean:
+    """Deterministic ``σ²_g(μ) = max(a + b·log μ, 0)`` — the closed-form WLS replacement for the bistable
+    ``MonotoneVarMean`` P-spline (whose GCV-λ ``argmin`` was the calibration cross-process nondeterminism
+    root cause; `calibrate_cross_process_nondeterminism.md`). Fit on the seed-edge Poisson-corrected excess
+    ``(raw − offset)`` against the edge-midpoint log-density; every quantity is a continuous algebraic function
+    of the data (weighted sums, one ratio, a ``max``) so a machine-ε input change moves ``σ²_g`` by machine-ε —
+    NO discrete selection (no ``argmin`` / GCV / IRLS / active-set). It captures the load-bearing monotone μ
+    dependence (σ²_g≈0 at low ρ_global ⇒ strong prior suppresses no-gDNA exon FP; large at high ρ_global under
+    capture ⇒ weak prior spares enriched exons) that a single scalar cannot. Design:
+    `docs/calibration/M2_loglinear_sigma2g_design.md`."""
+
+    a: float
+    b: float
+
+    @classmethod
+    def fit(cls, means, raws, offs, wts) -> "_LogLinearVarMean":
+        m = np.asarray(means, dtype=np.float64)
+        y = np.asarray(raws, dtype=np.float64) - np.asarray(offs, dtype=np.float64)  # Poisson-corrected excess
+        w = np.asarray(wts, dtype=np.float64)
+        ok = (m > 0.0) & (w > 0.0) & np.isfinite(y)
+        m, y, w = m[ok], y[ok], w[ok]
+        if m.shape[0] < 2:
+            return cls(0.0, 0.0)  # <2 edges → σ²_g=0 (the strong-prior / no-gDNA regime)
+        x = np.log(m)
+        sw = float(np.sum(w))
+        xbar = float(np.sum(w * x) / sw)
+        ybar = float(np.sum(w * y) / sw)
+        sxx = float(np.sum(w * (x - xbar) ** 2))
+        if sxx <= _EPS:  # no density spread (all seeds ~one level) → flat law: b=0, a=weighted-mean excess
+            return cls(max(ybar, 0.0), 0.0)
+        b = float(np.sum(w * (x - xbar) * (y - ybar)) / sxx)
+        a = ybar - b * xbar
+        return cls(a, b)
+
+    def predict(self, x) -> np.ndarray:
+        x = np.asarray(x, dtype=np.float64)
+        return np.maximum(self.a + self.b * np.log(np.maximum(x, _EPS)), 0.0)
+
+
 def _fit_seed_varmean(chain, dens, eff, is_seed, seed_w):
     """σ²_g(μ) on adjacent SEED-SEED edges from the per-node seed gDNA density (the gDNA between-node spread),
     in the log-density form (twin of :func:`_edge_varmean`). Edge weight = ``min`` of the two endpoints' seed
-    weights (the weaker endpoint limits reliability)."""
+    weights (the weaker endpoint limits reliability). The fit is the deterministic closed-form log-linear law
+    (:class:`_LogLinearVarMean`) — NOT the retired bistable P-spline."""
     left = np.asarray(chain.left)
     right = np.asarray(chain.right)
     is_seed = np.asarray(is_seed, bool)
@@ -627,7 +668,7 @@ def _fit_seed_varmean(chain, dens, eff, is_seed, seed_w):
         offs.append(1.0 / (dr * de + 1.0) + 1.0 / (sr * se + 1.0))
         wts.append(np.minimum(seed_w[idx][ok], seed_w[s][ok]))
     cat = lambda p: np.concatenate(p) if p else np.zeros(0)  # noqa: E731
-    return MonotoneVarMean.fit_offset(cat(means), cat(raws), cat(offs), cat(wts))
+    return _LogLinearVarMean.fit(cat(means), cat(raws), cat(offs), cat(wts))
 
 
 def _floor_estimate(chain, geometry, region_arrays, f_g_init, kappa):

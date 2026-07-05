@@ -14,6 +14,7 @@ from rigel.calibration.gdna_density_prior import (
     GdnaDensityPrior,
     TrainingSubstrate,
     _weighted_kde_logpdf,
+    _weighted_median,
     build_training_substrate,
 )
 from rigel.calibration.signature import BIT_EXON_NEG, BIT_EXON_POS, TS_AMBIG, TS_POS
@@ -88,6 +89,21 @@ def test_floor_anchor_adds_depleted_mass():
     assert (
         pr.logpdf(np.array([-8.0]))[0] > pr.logpdf(np.array([-5.0]))[0]
     )  # mass appears at the floor
+
+
+def test_weighted_median_is_continuous():
+    """The bandwidth-floor weighted median must be CONTINUOUS in its inputs (interpolated, not the old
+    ``searchsorted`` step) — an ε change in a weight/value moves the result by ε, not discretely. This is the
+    calibration cross-process determinism fix (a 1e-15 nudge must not flip the KDE bandwidth)."""
+    rng = np.random.default_rng(0)
+    v = np.sort(rng.normal(size=201))
+    w = np.ones_like(v)
+    m0 = _weighted_median(v, w)
+    w2 = w.copy(); w2[100] += 1e-12
+    assert abs(_weighted_median(v, w2) - m0) < 1e-9   # continuous in weight
+    v2 = v.copy(); v2[100] += 1e-12
+    assert abs(_weighted_median(v2, w) - m0) < 1e-9   # continuous in value
+    assert abs(_weighted_median(np.array([0.0, 1.0]), np.array([1.0, 1.0])) - 0.5) < 1e-9  # even split → midpoint
 
 
 def test_empty_substrate_raises():

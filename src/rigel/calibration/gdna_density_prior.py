@@ -219,16 +219,24 @@ def _weighted_kde_logpdf(x_eval, x, w, h, *, chunk: int = 4096):
 
 
 def _weighted_median(v, w):
-    """Weighted median of ``v`` with weights ``w``."""
+    """Weighted median of ``v`` with weights ``w`` — CONTINUOUS (interpolated) so a machine-ε change in the
+    weights or values moves the result by machine-ε, not discretely.
+
+    The old ``vs[searchsorted(cw, 0.5·tot)]`` picked the sample AT the 0.5-mass crossing, a step function of
+    the inputs: a 1e-15 nudge could flip the crossing to the adjacent sample and jump the result — this fed the
+    KDE bandwidth floor and was a cross-process nondeterminism amplifier. Interpolate the value at cumulative
+    mass 0.5 on the mid-rank CDF (``(cumsum−½w)/tot``) instead; ``np.interp`` is continuous in the data."""
     v = np.asarray(v, dtype=np.float64)
     w = np.asarray(w, dtype=np.float64)
-    order = np.argsort(v)
+    if v.size == 0:
+        return 0.0
+    order = np.argsort(v, kind="stable")
     vs, ws = v[order], w[order]
-    cw = np.cumsum(ws)
-    tot = cw[-1] if cw.size else 0.0
+    tot = float(np.sum(ws))
     if tot <= _EPS:
-        return float(np.median(v)) if v.size else 0.0
-    return float(vs[np.searchsorted(cw, 0.5 * tot)])
+        return float(np.median(v))
+    cw_mid = (np.cumsum(ws) - 0.5 * ws) / tot  # cumulative weight at each sample's mass midpoint
+    return float(np.interp(0.5, cw_mid, vs))
 
 
 def _silverman_bandwidth(x, w):
