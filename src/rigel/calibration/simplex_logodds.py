@@ -49,7 +49,11 @@ def _lse(a, axis, keepdims=False):
     m = np.max(a, axis=axis, keepdims=True)
     m = np.where(np.isfinite(m), m, 0.0)
     with np.errstate(divide="ignore"):  # all-(-inf) slice ⇒ log(0) = -inf (correct); suppress the warning
-        r = m + np.log(np.sum(np.exp(a - m), axis=axis, keepdims=True))
+        # Accumulate the sum in float64 even for a float32 cube (a 60-/3600-wide reduction loses too much in
+        # f32), then return the input dtype — keeps the f64 path byte-identical, gives the f32 cube an
+        # accurate normalizer.
+        s = np.sum(np.exp(a - m), axis=axis, keepdims=True, dtype=np.float64)
+        r = (m + np.log(s)).astype(m.dtype, copy=False)
     return r if keepdims else np.squeeze(r, axis=axis)
 
 
@@ -240,43 +244,53 @@ def _solve_ambig_logodds(
     Kt = int(n_tilt) if n_tilt else int(n_grid)
     tau = _tilt_grid(Kt)                               # (Kt,)
     f_act = (1.0 - fg)[:, None]                         # (K,1)
-    f_pos_kt = f_act * (1.0 + tau[None, :]) / 2.0       # (K,Kt)
-    f_neg_kt = f_act * (1.0 - tau[None, :]) / 2.0       # (K,Kt)
+    f_pos_kt = f_act * (1.0 + tau[None, :]) / 2.0       # (K,Kt) f64 (reused f64 in the moment sums)
+    f_neg_kt = f_act * (1.0 - tau[None, :]) / 2.0       # (K,Kt) f64
     n = u_pos + u_neg
-    # ── strand mixture over the cube: (m,1,1)×(1,K,1)×(1,K,Kt) → (m,K,Kt) ──
+    # ── float32 cube (authorized small-tolerance perf): the (m,K,Kt) log-posterior and its per-cell inputs
+    #    are f32 — halves the cube's memory, ~2x the elementwise exp/log. Every REDUCTION below accumulates
+    #    in f64 and the (m,K) marginals are lifted to f64, so medians / means / variances keep precision. ──
+    F = np.float32
+    fg32 = fg.astype(F)
+    fpk = f_pos_kt.astype(F)                            # (K,Kt) f32 cube grid
+    fnk = f_neg_kt.astype(F)
+    # ── strand mixture over the cube: (m,1,1)×(1,K,1)×(1,K,Kt) → (m,K,Kt) f32 ──
     psi = _mixture_strand_loglik(
-        u_pos[:, None, None], n[:, None, None],
-        fg[None, :, None], f_pos_kt[None, :, :], f_neg_kt[None, :, :], kappa, od_g, od_r,
+        np.asarray(u_pos, F)[:, None, None], np.asarray(n, F)[:, None, None],
+        fg32[None, :, None], fpk[None, :, :], fnk[None, :, :], kappa, od_g, od_r,
     )
-    # ── sided spliced floor ──
-    inv_n = np.where(n > 0.0, 1.0 / np.maximum(n, _EPS), 0.0)[:, None, None]
-    short_p = np.maximum(spliced_pos[:, None, None] * inv_n - f_pos_kt[None, :, :], 0.0)
-    short_n = np.maximum(spliced_neg[:, None, None] * inv_n - f_neg_kt[None, :, :], 0.0)
-    psi -= 0.5 * spliced_pos[:, None, None] * short_p**2  # in-place: avoid reallocating the (m,K,Kt) cube
-    psi -= 0.5 * spliced_neg[:, None, None] * short_n**2
+    # ── sided spliced floor (f32) ──
+    inv_n = np.where(n > 0.0, 1.0 / np.maximum(n, _EPS), 0.0).astype(F)[:, None, None]
+    sp32 = np.asarray(spliced_pos, F)[:, None, None]
+    sn32 = np.asarray(spliced_neg, F)[:, None, None]
+    short_p = np.maximum(sp32 * inv_n - fpk[None, :, :], F(0.0))
+    short_n = np.maximum(sn32 * inv_n - fnk[None, :, :], F(0.0))
+    psi -= F(0.5) * sp32 * short_p**2  # in-place: avoid reallocating the (m,K,Kt) cube
+    psi -= F(0.5) * sn32 * short_n**2
     # ── LOG-fraction grids (the overhaul): log f_g (τ-independent) + log f_pos/f_neg over the cube,
     #    floored at one pseudo-fragment 1/(n+1) (D5: the τ=±1 edges have f_s=0 → log(0); the count floor
     #    keeps it finite + consistent with pois_log). ──
-    log_fg_grid = _log_fg(lam)                                   # (K,) = log f_g
-    frac_floor = (1.0 / (n + 1.0))[:, None, None]                # (m,1,1)
-    log_fpos = np.log(np.maximum(f_pos_kt[None, :, :], frac_floor))  # (m,K,Kt)
-    log_fneg = np.log(np.maximum(f_neg_kt[None, :, :], frac_floor))
+    log_fg_grid = _log_fg(lam)                                   # (K,) f64 = log f_g (moments use f64)
+    log_fg32 = log_fg_grid.astype(F)                             # (K,) f32 for the cube message
+    frac_floor = (1.0 / (n + 1.0)).astype(F)[:, None, None]      # (m,1,1) f32
+    log_fpos = np.log(np.maximum(fpk[None, :, :], frac_floor))   # (m,K,Kt) f32
+    log_fneg = np.log(np.maximum(fnk[None, :, :], frac_floor))
     # ── log-density global on log f_g (τ-independent; pre-evaluated on the σ(λ) grid by the caller) ──
     if global_logprior is not None:
-        psi += np.asarray(global_logprior, np.float64)[:, :, None]
+        psi += np.asarray(global_logprior, F)[:, :, None]
     # ── gDNA LOG-fraction message on log f_g (τ-independent) ──
     if gdna_imp_mode is not None and gdna_imp_prec is not None:
-        mo = np.asarray(gdna_imp_mode, np.float64)[:, None, None]
-        pr = np.asarray(gdna_imp_prec, np.float64)[:, None, None]
-        psi -= 0.5 * pr * (log_fg_grid[None, :, None] - mo) ** 2
+        mo = np.asarray(gdna_imp_mode, F)[:, None, None]
+        pr = np.asarray(gdna_imp_prec, F)[:, None, None]
+        psi -= F(0.5) * pr * (log_fg32[None, :, None] - mo) ** 2
     # ── per-strand RNA LOG-fraction messages on log f_pos/log f_neg (τ-dependent — inside the cube) ──
     if rna_imp_mode is not None and rna_imp_prec is not None:
         for log_f, ms, ps in (
             (log_fpos, rna_imp_mode[0], rna_imp_prec[0]),
             (log_fneg, rna_imp_mode[1], rna_imp_prec[1]),
         ):
-            psi -= 0.5 * np.asarray(ps, np.float64)[:, None, None] * (
-                log_f - np.asarray(ms, np.float64)[:, None, None]
+            psi -= F(0.5) * np.asarray(ps, F)[:, None, None] * (
+                log_f - np.asarray(ms, F)[:, None, None]
             ) ** 2
     # ── Reference measure (τ-independent → add once on the λ axis). NEUTRAL on the gDNA fraction:
     #    uniform in (f_g, τ) ⇒ Jacobian log σ'(λ) = log f_g + log(1−f_g) — the SAME measure the
@@ -286,11 +300,11 @@ def _solve_ambig_logodds(
     #    tilt or the gDNA prior said. Neutral lets the STRAND resolve it: a strong tilt ⇒ RNA (unchanged),
     #    a balanced count ⇒ parsimoniously gDNA (the τ-marginal favours high f_g, where more τ fit the
     #    balance) with the gDNA prior setting the level. (Derivation: log_density_1d_solver_design.md §5.2.) ──
-    log_jac = log_fg_grid + _log1m_fg(lam)  # (K,) — reuse log_fg_grid (= _log_fg(lam)) computed above
+    log_jac = (log_fg_grid + _log1m_fg(lam)).astype(F)  # (K,) f32 — reuse log_fg_grid (= _log_fg(lam)) above
     psi += log_jac[None, :, None]                           # in-place; psi is now the full 2-D log-posterior
-    psi_full = psi
-    # τ-marginal λ-posterior (m,K)
-    psi_lam = _lse(psi_full, axis=2)
+    psi_full = psi                                          # (m,K,Kt) f32
+    # τ-marginal λ-posterior (m,K) — lift to f64 so the posterior median + moments are full-precision.
+    psi_lam = _lse(psi_full, axis=2).astype(np.float64)
     post_lam = np.exp(psi_lam - _lse(psi_lam, axis=1, keepdims=True))
     cw = np.cumsum(post_lam, axis=1)
     idx = np.clip((cw < 0.5).sum(axis=1), 0, K - 1)
@@ -298,17 +312,17 @@ def _solve_ambig_logodds(
     # precision state = Var(log f_g) over the τ-marginal λ-posterior (D2).
     mLg = post_lam @ log_fg_grid
     var_g = np.maximum(post_lam @ (log_fg_grid * log_fg_grid) - mLg * mLg, 0.0)
-    # f_pos/f_neg MEANS + Var(log f_pos/neg) over the FULL 2-D posterior.
+    # f_pos/f_neg MEANS + Var(log f_pos/neg) over the FULL 2-D posterior (f32 cube; sums accumulate in f64).
     flat = psi_full.reshape(psi_full.shape[0], -1)
-    post2d = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(psi_full.shape)  # (m,K,Kt)
-    fp_grid = f_pos_kt[None, :, :]
-    fn_grid = f_neg_kt[None, :, :]
-    f_pos = np.sum(post2d * fp_grid, axis=(1, 2))
-    f_neg = np.sum(post2d * fn_grid, axis=(1, 2))
-    mLp = np.sum(post2d * log_fpos, axis=(1, 2))
-    mLn = np.sum(post2d * log_fneg, axis=(1, 2))
-    var_pos = np.maximum(np.sum(post2d * log_fpos * log_fpos, axis=(1, 2)) - mLp * mLp, 0.0)
-    var_neg = np.maximum(np.sum(post2d * log_fneg * log_fneg, axis=(1, 2)) - mLn * mLn, 0.0)
+    post2d = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(psi_full.shape)  # (m,K,Kt) f32
+    fp_grid = fpk[None, :, :]
+    fn_grid = fnk[None, :, :]
+    f_pos = np.sum(post2d * fp_grid, axis=(1, 2), dtype=np.float64)
+    f_neg = np.sum(post2d * fn_grid, axis=(1, 2), dtype=np.float64)
+    mLp = np.sum(post2d * log_fpos, axis=(1, 2), dtype=np.float64)
+    mLn = np.sum(post2d * log_fneg, axis=(1, 2), dtype=np.float64)
+    var_pos = np.maximum(np.sum(post2d * log_fpos * log_fpos, axis=(1, 2), dtype=np.float64) - mLp * mLp, 0.0)
+    var_neg = np.maximum(np.sum(post2d * log_fneg * log_fneg, axis=(1, 2), dtype=np.float64) - mLn * mLn, 0.0)
     active = n > 0.0
     f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
     f_pos = np.where(active, np.clip(f_pos, 0.0, 1.0), 0.0)
