@@ -32,6 +32,7 @@ Module layout:
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -823,6 +824,23 @@ def _kde_logprior(fgg, mass_global, eff_global, gdna_prior):
         lattice = np.linspace(lo, hi, n_lat)
         tab = gdna_prior.logpdf_kernel(lattice)                        # (n_lat,) exact kernel — cheap
         kde_term = np.interp(flat, lattice, tab).reshape(log_rho.shape)
+    # MIXTURE BRIDGE (Fix-1, env-gated by RIGEL_MIX_BRIDGE=ε∈(0,1); 0/unset ⇒ bit-exact baseline).
+    # The KDE is estimated from REGION nodes, which are cleanly depleted OR enriched, so it develops a deep
+    # VALLEY between the two modes — but a node's gDNA density is generically a spatial MIXTURE of enriched
+    # (in-probe) and depleted (off-target) positions (boundaries, sparse-probe regions), which lands in that
+    # valley BY CONSTRUCTION. The valley penalty (≈18 nats at ρ_g~5) makes such a node collapse to f_g≈0 (park
+    # ρ_g at the tall depleted mode, dump the rest into free RNA), emitting a pathologic RNA message. Mixing in
+    # a uniform "any-mixture" bridge over the observed gDNA-density support floors the valley (no collapse)
+    # while leaving the KDE's real Gaussian tails OUTSIDE the support intact (the high-ρ_g false-positive
+    # suppression is unchanged, since the bridge is bounded to [blo,bhi]≈[depleted,enriched]). See
+    # docs/calibration/boundary_kde_valley_collapse_and_simplex_precision.md.
+    eps = float(os.environ.get("RIGEL_MIX_BRIDGE", "0") or "0")
+    if eps > 0.0:
+        tx = np.asarray(gdna_prior.train_x, np.float64)
+        blo, bhi = (float(np.percentile(tx, 0.5)), float(np.percentile(tx, 99.5))) if tx.size else (0.0, 0.0)
+        if bhi > blo:
+            uni = np.where((log_rho >= blo) & (log_rho <= bhi), -math.log(bhi - blo), -np.inf)
+            kde_term = np.logaddexp(math.log1p(-eps) + kde_term, math.log(eps) + uni)
     jeffreys = -np.log1p(-fg)                                          # (K,) RNA Jeffreys 1/(1−f_g)
     return kde_term + jeffreys[None, :]
 
@@ -919,7 +937,8 @@ def node_sweep(
             gdna_imp_mode=gm, gdna_imp_prec=gp, rna_imp_mode=rm, rna_imp_prec=rp,
         )
         return (dc.gdna_frac, dc.rna_pos_frac, dc.rna_neg_frac,
-                dc.gdna_frac_var, dc.rna_pos_frac_var, dc.rna_neg_frac_var)
+                dc.gdna_frac_var, dc.rna_pos_frac_var, dc.rna_neg_frac_var,
+                dc.gdna_pos_cov, dc.gdna_neg_cov, dc.pos_neg_cov)
     # Two distinct gates, both from the region SIGNATURE (never the counts — count-zero-info):
     #   * SOLVE gate (`solvable`): a node deconvolves its own gDNA-vs-RNA split iff it admits ≥1 RNA strand and
     #     has unspliced mass. A G1 node — no admissible RNA strand: an intergenic region, or a gene-boundary seam
@@ -982,10 +1001,36 @@ def node_sweep(
     # per-edge (disagreement-aware, in `_scan`) so there is no var~mean fixed point ⇒ no outer loop.
 
     # (A) LOCAL message-free beliefs (backend-dispatched).
-    fg_loc, fp_loc, fn_loc, vg_loc, vp_loc, vn_loc = _local_solve(global_lp)
+    fg_loc, fp_loc, fn_loc, vg_loc, vp_loc, vn_loc, cgp_loc, cgn_loc, cpn_loc = _local_solve(global_lp)
     pg_loc = 1.0 / np.maximum(vg_loc, _EPS)  # local precision (var floored: a sharp belief ⇒ large finite)
     pp_loc = 1.0 / np.maximum(vp_loc, _EPS)
     pn_loc = 1.0 / np.maximum(vn_loc, _EPS)
+    # JOINT-DISAGREEMENT (Fix-2, env-gated RIGEL_JOINT_DISAGREE=1): the CONDITIONAL log-fraction variance of
+    # each component given its most-constraining coupled component — Var(c) − max_o Cov(c,o)²/Var(o). The
+    # composition is a 2-simplex pie, so a message that moves one slice moves the others; the MARGINAL var
+    # overstates a component's freedom (it includes the tail where a confident coupled slice also moves), so a
+    # message on an uncertain slice can drive a confident coupled slice (the trojan horse). The conditional
+    # var — the diagonal of the joint precision — is the honest "how free is this slice given what I'm sure
+    # of", and it is what the disagreement metric should anchor on. δ floors the denominators (a locked slice
+    # has var 0 ⇒ cov 0 ⇒ no contribution). Design: boundary_kde_valley_collapse_and_simplex_precision.md §3.
+    _joint_disagree = bool(int(os.environ.get("RIGEL_JOINT_DISAGREE", "0") or "0"))
+    if _joint_disagree:
+        _dlt = 1.0e-6
+        # ONLY AMBIG destinations (both RNA strands free). A single-strand node's live strand is intrinsically
+        # coupled to f_g (f_active = 1−f_g), so its conditional variance is ~0 TAUTOLOGICALLY (not from
+        # confidence) — applying the conditioning there would wrongly suppress the load-bearing nascent
+        # imputation. The trojan horse is exclusive to AMBIG nodes, where the KDE pins f_g (small var) while a
+        # strand-degenerate RNA component stays marginally free (large var) yet is conditionally constrained.
+        ambig_dst = np.asarray(fp, bool) & np.asarray(fn, bool)
+        def _cond(v_c, cov_a, v_a, cov_b, v_b):
+            red = np.maximum(cov_a * cov_a / np.maximum(v_a, _dlt),
+                             cov_b * cov_b / np.maximum(v_b, _dlt))  # reduction from the tighter coupling
+            return np.maximum(v_c - red, _dlt)
+        cvg_loc = np.where(ambig_dst, _cond(vg_loc, cgp_loc, vp_loc, cgn_loc, vn_loc), vg_loc)
+        cvp_loc = np.where(ambig_dst, _cond(vp_loc, cgp_loc, vg_loc, cpn_loc, vn_loc), vp_loc)
+        cvn_loc = np.where(ambig_dst, _cond(vn_loc, cgn_loc, vg_loc, cpn_loc, vp_loc), vn_loc)
+    else:
+        cvg_loc, cvp_loc, cvn_loc = vg_loc, vp_loc, vn_loc
 
 
     def _scan(seq, nbr, sf, df):
@@ -1044,7 +1089,7 @@ def node_sweep(
                 # ~0 precision → sends NO message. "Zero density is not a measurement." (user's diagnosis)
                 pois = 1.0 / max(n_src, _EPS)
                 base_var = vbg[lsrc] + pois              # sampling + source-belief log-var
-                s2_edge = max((mo - lfg_loc[i]) ** 2 - (base_var + vg_loc[i]), 0.0)  # per-edge surprise
+                s2_edge = max((mo - lfg_loc[i]) ** 2 - (base_var + cvg_loc[i]), 0.0)  # per-edge surprise (Fix-2: conditional anchor)
                 pr = 1.0 / max(base_var + s2_edge, _EPS)
                 amg[i], apg[i] = mo, pr
                 pt = pg_loc[i] + pr
@@ -1083,7 +1128,7 @@ def node_sweep(
                 mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_pos frame (floored at min-observable)
                 pois = 1.0 / max(n_nasc + n_mat, _EPS)
                 base_var = vbp[lsrc] + pois
-                s2_edge = max((mo - lfp_loc[i]) ** 2 - (base_var + vp_loc[i]), 0.0)
+                s2_edge = max((mo - lfp_loc[i]) ** 2 - (base_var + cvp_loc[i]), 0.0)
                 pr = 1.0 / max(base_var + s2_edge, _EPS)          # disagreement-aware (MEASUREMENT or IMPUTATION)
                 amp[i], app[i] = mo, pr
                 pt = pp_loc[i] + pr
@@ -1100,7 +1145,7 @@ def node_sweep(
                 mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_neg frame
                 pois = 1.0 / max(n_nasc + n_mat, _EPS)
                 base_var = vbn[lsrc] + pois
-                s2_edge = max((mo - lfn_loc[i]) ** 2 - (base_var + vn_loc[i]), 0.0)
+                s2_edge = max((mo - lfn_loc[i]) ** 2 - (base_var + cvn_loc[i]), 0.0)
                 pr = 1.0 / max(base_var + s2_edge, _EPS)          # disagreement-aware (MEASUREMENT or IMPUTATION)
                 amn[i], apn[i] = mo, pr
                 pt = pn_loc[i] + pr
@@ -1120,7 +1165,7 @@ def node_sweep(
     mode_p, prec_p = _comb(a[2], a[3], b[2], b[3])
     mode_n, prec_n = _comb(a[4], a[5], b[4], b[5])
     # (D) FINAL solve with the FB messages (backend-dispatched).
-    mg_, mp_, mn_, vg_, vp_, vn_ = _local_solve(
+    mg_, mp_, mn_, vg_, vp_, vn_, *_covs = _local_solve(
         global_lp, mode_g, prec_g, (mode_p, mode_n), (prec_p, prec_n)
     )
     # write back only SOLVABLE nodes (G1 sinks / empty keep their signature-binary init).

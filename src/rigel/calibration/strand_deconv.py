@@ -40,6 +40,16 @@ class NodeDeconv:
     gdna_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_g)
     rna_pos_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_pos)
     rna_neg_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_neg)
+    # LOG-fraction cross-COVARIANCES over the per-node posterior (Fix-2, the interdependent-simplex
+    # precision). The three variances above are the MARGINALs; these are the off-diagonals of the joint
+    # covariance in log-fraction space — needed so a message's disagreement can be measured against the
+    # CONDITIONAL variance (given the confident components), not the (freedom-overstating) marginal. The
+    # composition lives on the 2-simplex, so raising one component lowers the others; a marginal variance
+    # ignores that coupling and lets a message on an uncertain component (large marginal var) move a
+    # confident coupled one (the trojan horse). None on the chain projections (not needed downstream).
+    gdna_pos_cov: "np.ndarray | None" = None  # float64[K] — Cov(log f_g, log f_pos)
+    gdna_neg_cov: "np.ndarray | None" = None  # float64[K] — Cov(log f_g, log f_neg)
+    pos_neg_cov: "np.ndarray | None" = None   # float64[K] — Cov(log f_pos, log f_neg)
 
 
 @dataclass(frozen=True, slots=True)

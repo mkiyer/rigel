@@ -205,10 +205,17 @@ def _solve_nodes_logodds(
     La = _log1m_fg(lam)
     mLa = post @ La
     var_act = np.maximum(post @ (La * La) - mLa * mLa, 0.0)
+    # Cov(log f_g, log f_active) over the posterior (Fix-2): a single-strand node's live RNA strand carries
+    # f_active = 1−f_g, so log f_g and log f_active are perfectly (negatively) coupled along the 1-D λ ridge.
+    # Routed to the live strand's cross-cov; the dead strand (f=0, locked) has cov 0. cov_pn = 0 (never both live).
+    cov_ga = post @ (Lg * La) - mLg * mLa
     ap = np.asarray(allow_pos, bool)
     an = np.asarray(allow_neg, bool)
     var_pos = np.where(ap & ~an, var_act, 0.0)
     var_neg = np.where(an & ~ap, var_act, 0.0)
+    cov_gp = np.where(ap & ~an, cov_ga, 0.0)
+    cov_gn = np.where(an & ~ap, cov_ga, 0.0)
+    cov_pn = np.zeros_like(cov_ga)
     active = (u_pos + u_neg) > 0.0
     f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
     f_pos = np.where(active, np.clip(f_pos, 0.0, 1.0), 0.0)
@@ -216,10 +223,13 @@ def _solve_nodes_logodds(
     var_g = np.where(active, var_g, 0.0)
     var_pos = np.where(active, var_pos, 0.0)
     var_neg = np.where(active, var_neg, 0.0)
+    cov_gp = np.where(active, cov_gp, 0.0)
+    cov_gn = np.where(active, cov_gn, 0.0)
     return NodeDeconv(
         gdna_mass=f_g * mass_unspl, rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
         gdna_frac=f_g, rna_pos_frac=f_pos, rna_neg_frac=f_neg,
         gdna_frac_var=var_g, rna_pos_frac_var=var_pos, rna_neg_frac_var=var_neg,
+        gdna_pos_cov=cov_gp, gdna_neg_cov=cov_gn, pos_neg_cov=cov_pn,
     )
 
 
@@ -323,6 +333,13 @@ def _solve_ambig_logodds(
     mLn = np.sum(post2d * log_fneg, axis=(1, 2), dtype=np.float64)
     var_pos = np.maximum(np.sum(post2d * log_fpos * log_fpos, axis=(1, 2), dtype=np.float64) - mLp * mLp, 0.0)
     var_neg = np.maximum(np.sum(post2d * log_fneg * log_fneg, axis=(1, 2), dtype=np.float64) - mLn * mLn, 0.0)
+    # LOG-fraction cross-COVARIANCES over the full 2-D posterior (Fix-2). log f_g is τ-independent
+    # (broadcast over the τ axis); log f_pos/f_neg vary over the cube. These off-diagonals let a message's
+    # disagreement be scored against the CONDITIONAL variance given the confident coupled component.
+    lfg_cube = log_fg_grid[None, :, None]  # (1,K,1) f64 — upcasts the f32 cube in the products below
+    cov_gp = np.sum(post2d * lfg_cube * log_fpos, axis=(1, 2), dtype=np.float64) - mLg * mLp
+    cov_gn = np.sum(post2d * lfg_cube * log_fneg, axis=(1, 2), dtype=np.float64) - mLg * mLn
+    cov_pn = np.sum(post2d * log_fpos * log_fneg, axis=(1, 2), dtype=np.float64) - mLp * mLn
     active = n > 0.0
     f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
     f_pos = np.where(active, np.clip(f_pos, 0.0, 1.0), 0.0)
@@ -330,10 +347,14 @@ def _solve_ambig_logodds(
     var_g = np.where(active, var_g, 0.0)
     var_pos = np.where(active, var_pos, 0.0)
     var_neg = np.where(active, var_neg, 0.0)
+    cov_gp = np.where(active, cov_gp, 0.0)
+    cov_gn = np.where(active, cov_gn, 0.0)
+    cov_pn = np.where(active, cov_pn, 0.0)
     return NodeDeconv(
         gdna_mass=f_g * mass_unspl, rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
         gdna_frac=f_g, rna_pos_frac=f_pos, rna_neg_frac=f_neg,
         gdna_frac_var=var_g, rna_pos_frac_var=var_pos, rna_neg_frac_var=var_neg,
+        gdna_pos_cov=cov_gp, gdna_neg_cov=cov_gn, pos_neg_cov=cov_pn,
     )
 
 
@@ -354,7 +375,7 @@ def _solve_nodes_logodds_all(
     ``gdna_imp_*`` are ``(m,)``; ``rna_imp_*`` are 2-tuples of ``(m,)``. Each is sub-indexed per class."""
     m = int(np.asarray(u_pos).shape[0])
     out = {k: np.zeros(m, dtype=np.float64) for k in
-           ("fg", "fp", "fn", "vg", "vp", "vn", "gmass", "rmass")}
+           ("fg", "fp", "fn", "vg", "vp", "vn", "gmass", "rmass", "cgp", "cgn", "cpn")}
     # Skip EMPTY nodes — no per-strand counts AND no unspliced/spliced mass. Both per-class solvers zero
     # every output for an inactive node (gdna/rna_mass = f_g·M = (1−f_g)·M + S = 0 when all are 0), so an
     # empty node's solve is identical to the zero-initialized `out` — skipping is BIT-IDENTICAL. At genome
@@ -378,6 +399,10 @@ def _solve_nodes_logodds_all(
         out["vg"][msk] = dc.gdna_frac_var
         out["vp"][msk] = dc.rna_pos_frac_var
         out["vn"][msk] = dc.rna_neg_frac_var
+        if dc.gdna_pos_cov is not None:
+            out["cgp"][msk] = dc.gdna_pos_cov
+            out["cgn"][msk] = dc.gdna_neg_cov
+            out["cpn"][msk] = dc.pos_neg_cov
         out["gmass"][msk] = dc.gdna_mass
         out["rmass"][msk] = dc.rna_mass
 
@@ -405,4 +430,5 @@ def _solve_nodes_logodds_all(
         gdna_mass=out["gmass"], rna_mass=out["rmass"], gdna_frac=out["fg"],
         rna_pos_frac=out["fp"], rna_neg_frac=out["fn"], gdna_frac_var=out["vg"],
         rna_pos_frac_var=out["vp"], rna_neg_frac_var=out["vn"],
+        gdna_pos_cov=out["cgp"], gdna_neg_cov=out["cgn"], pos_neg_cov=out["cpn"],
     )
