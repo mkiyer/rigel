@@ -606,6 +606,8 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("mismatch_alpha", "scoring.mismatch_log_penalty", "log_penalty"),
     _ParamSpec("gdna_splice_penalty_unannot", "scoring.gdna_splice_penalties", "gdna_splice"),
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
+    # -- CalibrationConfig: advanced --
+    _ParamSpec("gdna_prior_mixture_bridge", "calibration.gdna_prior_mixture_bridge"),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -1171,6 +1173,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Convergence threshold for EM parameter updates (default: 1e-6).",
+    )
+    adv.add_argument(
+        "--gdna-prior-mixture-bridge",
+        dest="gdna_prior_mixture_bridge",
+        type=float,
+        default=None,
+        help="Calibration gDNA-density prior mixture-bridge weight epsilon in [0,1) (default 0.01). "
+        "Floors the KDE valley between the depleted and enriched modes so a mixture-density node "
+        "(a capture boundary, a sparse-probe region) is interpreted as an enriched/depleted mixture "
+        "instead of collapsing to ~0 gDNA. 0 disables it (legacy KDE). Advanced calibration knob.",
     )
     adv.add_argument(
         "--gdna-em-llr-bias",

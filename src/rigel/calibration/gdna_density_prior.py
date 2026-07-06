@@ -318,6 +318,16 @@ class GdnaDensityPrior:
     train_w: np.ndarray
     train_kind: np.ndarray
     modes: tuple
+    #: MIXTURE-BRIDGE weight ε∈[0,1) (Fix 1; `CalibrationConfig.gdna_prior_mixture_bridge`). The KDE is
+    #: estimated from clean (unimodal) region nodes, so it has a deep VALLEY between the depleted and enriched
+    #: modes; a node whose current-belief gDNA density is a spatial MIXTURE (a capture boundary, a
+    #: sparse-probe region) lands in that valley by construction and collapses to f_g≈0. `_kde_logprior`
+    #: mixes the KDE with a uniform "any-mixture" bridge over the observed density support at weight ε — this
+    #: floors the valley (no collapse) while leaving the KDE's real tails OUTSIDE the support intact (so the
+    #: high-density false-positive suppression is unchanged). ε=0 ⇒ no bridge (bit-exact legacy KDE). The
+    #: level is robust (the peak/valley gap is ~10² nats), so any small ε defeats the collapse cliff. Design:
+    #: `docs/calibration/boundary_kde_valley_collapse_and_simplex_precision.md`.
+    mixture_bridge: float = 0.0
 
     def logpdf(self, log_rho) -> np.ndarray:
         """``log P̂(log ρ_g)`` by linear interpolation; the flat boundary value extrapolates outside the grid
@@ -357,12 +367,15 @@ class GdnaDensityPrior:
         floor_log_rho: float | None = None,
         floor_weight: float = 0.0,
         n_lscv: int = 40,
+        mixture_bridge: float = 0.0,
     ) -> "GdnaDensityPrior":
         """Fit the KDE.
 
         ``bandwidth`` — ``'silverman'`` | ``'lscv'`` | a float (the fixed ``h``). ``floor_log_rho`` /
         ``floor_weight`` — optionally seed the depleted mode with a virtual sample at ``log ρ_floor``
         (design §2.4). ``pad`` — grid margin (in units of the final bandwidth) beyond the sample range.
+        ``mixture_bridge`` — the Fix-1 valley-fill weight ε (stored on the prior; consumed by
+        ``bp_solver._kde_logprior``).
         """
         x = np.asarray(substrate.log_rho, dtype=np.float64).copy()
         w = np.asarray(substrate.weight, dtype=np.float64).copy()
@@ -409,4 +422,5 @@ class GdnaDensityPrior:
             train_w=w,
             train_kind=kind,
             modes=tuple(_find_modes(x_grid, logP)),
+            mixture_bridge=float(mixture_bridge),
         )

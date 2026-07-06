@@ -823,6 +823,25 @@ def _kde_logprior(fgg, mass_global, eff_global, gdna_prior):
         lattice = np.linspace(lo, hi, n_lat)
         tab = gdna_prior.logpdf_kernel(lattice)                        # (n_lat,) exact kernel — cheap
         kde_term = np.interp(flat, lattice, tab).reshape(log_rho.shape)
+    # MIXTURE BRIDGE (Fix 1; ε = ``gdna_prior.mixture_bridge`` from CalibrationConfig; ε=0 ⇒ bit-exact
+    # legacy KDE). The KDE is estimated from clean (unimodal) REGION nodes, so it has a deep VALLEY between
+    # the depleted and enriched modes — but a node's current-belief gDNA density is generically a spatial
+    # MIXTURE of enriched (in-probe) and depleted (off-target) positions (a capture boundary, a sparse-probe
+    # region — a whole density BAND, not just boundaries), which lands in that valley by construction. The
+    # valley penalty (~10² nats) makes such a node collapse to f_g≈0 (park ρ_g at the tall depleted mode,
+    # dump the rest into free RNA), emitting a pathologic RNA message that then crushes its neighbours. Mixing
+    # in a uniform "any-mixture" bridge over the observed gDNA-density support floors the valley (no collapse)
+    # while leaving the KDE's real Gaussian tails OUTSIDE the support intact (the high-ρ_g false-positive
+    # suppression is unchanged, since the bridge is bounded to [blo,bhi]≈[depleted,enriched]). The KDE input
+    # is the current-belief gDNA density (refined by strand/spliced/messages), NEVER total density. See
+    # docs/calibration/boundary_kde_valley_collapse_and_simplex_precision.md.
+    eps = float(getattr(gdna_prior, "mixture_bridge", 0.0) or 0.0)
+    if eps > 0.0:
+        tx = np.asarray(gdna_prior.train_x, np.float64)
+        blo, bhi = (float(np.percentile(tx, 0.5)), float(np.percentile(tx, 99.5))) if tx.size else (0.0, 0.0)
+        if bhi > blo:
+            uni = np.where((log_rho >= blo) & (log_rho <= bhi), -math.log(bhi - blo), -np.inf)
+            kde_term = np.logaddexp(math.log1p(-eps) + kde_term, math.log(eps) + uni)
     jeffreys = -np.log1p(-fg)                                          # (K,) RNA Jeffreys 1/(1−f_g)
     return kde_term + jeffreys[None, :]
 

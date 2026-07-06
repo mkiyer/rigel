@@ -300,7 +300,24 @@ class CalibrationConfig:
     #: real data via ``scripts/debug/plot_gdna_prior.py`` (design §7.1); do NOT hard-code a magic value.
     gdna_prior_bandwidth: str | float = "silverman"
 
+    #: **Mixture-bridge weight ε∈[0,1)** for the Phase-2 gDNA-density prior (Fix 1;
+    #: ``bp_solver._kde_logprior``). The KDE is estimated from clean (unimodal) region nodes, so it develops a
+    #: deep VALLEY between the depleted and enriched modes; a node whose current-belief gDNA density is a
+    #: spatial MIXTURE (a capture boundary, a sparse-probe region) lands in that valley by construction and
+    #: collapses to ``f_g≈0``, emitting a pathologic RNA message that crushes its neighbours. Mixing the KDE
+    #: with a uniform "any-mixture" bridge over the observed density support at weight ε floors the valley (no
+    #: collapse) while leaving the KDE's real tails outside the support intact (false-positive suppression
+    #: unchanged). ``0`` disables it (bit-exact legacy KDE). The level is robust — the peak/valley gap is ~10²
+    #: nats, so any small ε defeats the collapse cliff; ``0.01`` is the validated default. Advanced knob;
+    #: design: ``docs/calibration/boundary_kde_valley_collapse_and_simplex_precision.md``.
+    gdna_prior_mixture_bridge: float = 0.01
+
     def __post_init__(self) -> None:
+        if not (0.0 <= float(self.gdna_prior_mixture_bridge) < 1.0):
+            raise ValueError(
+                "CalibrationConfig.gdna_prior_mixture_bridge must be in [0, 1); "
+                f"got {self.gdna_prior_mixture_bridge}."
+            )
         if self.sweep_n_grid < 2:
             raise ValueError(
                 f"CalibrationConfig.sweep_n_grid must be >= 2; got {self.sweep_n_grid}."

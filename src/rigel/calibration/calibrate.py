@@ -187,7 +187,10 @@ def calibrate(
         min_eff_length=fl_mean,  # exclude regions too short to contain a gDNA fragment (§8e)
     )
     if train_sub.n >= _MIN_KDE_TEACHERS:
-        gdna_prior = GdnaDensityPrior.fit(train_sub, bandwidth=config.gdna_prior_bandwidth)
+        gdna_prior = GdnaDensityPrior.fit(
+            train_sub, bandwidth=config.gdna_prior_bandwidth,
+            mixture_bridge=config.gdna_prior_mixture_bridge,
+        )
         belief = _sweep(gdna_prior)
     regions = chain_region_deconv(chain, belief, substrate)
     left, right = chain_boundary_side_deconv(chain, belief, substrate)

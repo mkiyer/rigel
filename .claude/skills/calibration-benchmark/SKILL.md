@@ -35,6 +35,26 @@ python scripts/sim/evaluate_suite.py --sim-base "$SUITE" --conditions <name> --s
   **`net_flow_per_condition.tsv`** (pool rollup), **`net_flow_per_locus.tsv`**,
   **`net_flow_per_transcript.tsv`**, and `abundance_per_condition.tsv`.
 
+## Before/after a calibration change — the FULL A/B report (use this to gate a ship)
+
+`scripts/debug/benchmark_ab_report.py` runs the tool END-TO-END for two arms (e.g. baseline vs a
+candidate) across all 16 conditions and collects the full metric set that matters for a ship decision,
+into one JSON:
+
+```bash
+python scripts/debug/benchmark_ab_report.py "$SUITE" --out ab_report.json \
+    --arms baseline:0 fix1:0.01 --threads 4      # arm = name:gdna_prior_mixture_bridge_epsilon
+```
+
+Per condition, per arm it reports: **3-pool net surplus** (assigned − true, fragments, for
+**gDNA / nascent / mature** — the soft EM pool counts, which unlike the hard-label net-flow ARE sensitive to
+a calibration-prior change), the **absolute** mature error `Σ_tx|measured − true|` (net cancels
+positive/negative per-transcript flow, so report both), and **transcript-level Spearman / MARD / n_FP /
+n_FN**. Arms differ only by the `--gdna-prior-mixture-bridge` value, so this is an in-tool A/B (no code
+swap). **Caveat learned:** the frag-level hard-label `net_to_rna` (below) is largely *insensitive* to a soft
+calibration-prior shift — a real change can move the soft 3-pool counts by tens of thousands of fragments
+while `net_to_rna` is byte-identical, so use the soft 3-pool surplus (this tool) as the primary pool metric.
+
 ## Primary metric — net fragment flow (why it's the right target)
 Hard per-fragment label recovery is the *wrong* target: an unspliced RNA fragment and a gDNA
 fragment from the same locus can be **sequence-identical and unrecoverable** — and that's fine.

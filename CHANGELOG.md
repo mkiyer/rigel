@@ -5,6 +5,25 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Calibration gDNA-prior mixture bridge (`--gdna-prior-mixture-bridge`, default 0.01)** — a new advanced
+  calibration parameter (`CalibrationConfig.gdna_prior_mixture_bridge`, exposed on the CLI and in the
+  `--config` YAML). The Phase-2 gDNA-density KDE is estimated from clean (unimodal) region nodes, so it
+  develops a deep **valley** between the depleted and enriched modes. A node whose current-belief gDNA
+  density is a spatial **mixture** of enriched (in-probe) and depleted (off-target) positions — a capture
+  boundary, or a sparsely-probed region — lands in that valley by construction and **collapses to `f_g≈0`**,
+  emitting a pathologic RNA message that then crushes the gDNA fraction of its AMBIG-exon neighbours. The
+  bridge mixes the KDE with a uniform "any-mixture" prior over the observed density support at weight ε,
+  which **floors the valley** (no collapse) while leaving the KDE's real Gaussian tails outside the support
+  intact (high-density false-positive suppression unchanged). On the capture-on failure conditions this fixes
+  the worst per-node deconvolution errors (the #1 error node's gDNA fraction 0.62→0.93 vs a true 0.92) and
+  **reduces the false-nascent hallucination ~22%** at the pool level (gDNA recovered from RNA); it is inert
+  on capture-off and gDNA-free libraries. `0` disables it (bit-exact legacy KDE). Design + validation:
+  `docs/calibration/boundary_kde_valley_collapse_and_simplex_precision.md`.
+
 ## [0.6.2] - 2026-07-05
 
 ### Fixed
