@@ -11,6 +11,7 @@ DNA (gDNA) contamination. This is the documentation map.
 | [`METHODS.md`](METHODS.md) | the scientific method (the mRNA/nRNA/gDNA model + the three stages) |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | the code map and data flow (scan → calibrate → quant; Python modules + C++ extensions) |
 | [`parameters.md`](parameters.md) | configuration parameters reference |
+| [`performance/`](performance/README.md) | memory & compute optimization — status (0.6.2), profiling infrastructure, and the ranked roadmap |
 
 ## Calibration (`calibration/`)
 
