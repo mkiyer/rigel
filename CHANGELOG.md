@@ -21,10 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Faster calibration solve**: the per-node log-odds solver (`simplex_logodds.py`) uses a lean numpy
-  log-sum-exp in place of `scipy.special.logsumexp` — same max-shift stabilisation, matches scipy to
-  ~1e-15, but without the scipy wrapper overhead. ~15 s (~14%) off the calibration stage on the human
-  library above (149 s → 134 s end-to-end).
+- **Faster, leaner calibration (real-data production prep)** — three optimizations to the per-node
+  belief-propagation solve, all verified within the golden tolerance (rtol=1e-6): the calibration stage
+  drops from ~110 s to **~66 s (−40%)** and peak RSS from ~10 GB to **~8.6 GB** on a 971k-fragment human
+  library, with the gDNA/RNA deconvolution unchanged (16-condition benchmark net flow within run-to-run
+  noise):
+  - lean numpy log-sum-exp in `simplex_logodds.py` (replacing `scipy.special.logsumexp`; matches it to
+    ~1e-15 without the scipy wrapper overhead) — byte-identical on the single-strand float64 path;
+  - in-place `psi` accumulation + common-subexpression reuse in the AMBIG (λ,τ) cube — byte-identical;
+  - **float32 AMBIG cube with float64 reductions** — the (m,K,Kt) log-posterior is stored/evaluated in
+    float32 (≈½ the cube memory, ~1.7× the elementwise exp/log) while every reduction accumulates in
+    float64 and the (m,K) marginals stay float64, so medians/means/variances keep precision. Deviation
+    vs float64: `f_g` identical, RNA fractions ≤7.7e-7.
 - **Deterministic calibration σ²_g (M2)**: replaced the bistable spline gDNA-density estimator with a
   deterministic one, eliminating cross-process nondeterminism in the prior. *(committed since v0.6.1)*
 
