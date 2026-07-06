@@ -1,0 +1,70 @@
+# AMBIG-DENSE 10 Mb benchmark — stresses the 2-D calibration solver.
+# Custom reference (genome.fa + genes.gtf) is PRE-GENERATED into <outdir>/reference/ by
+# scratchpad/gen_ambig_dense.py; run with --skip-existing so the suite REUSES it (does not regenerate)
+# and only designs probes + runs the read/oracle sweep.
+#   305 AMBIG regions: 61 exon-exon, 174 exon-over-intron, 63 intron-intron, + mixed.
+# Grid = 3 gDNA × 2 strand × 2 nascent × 2 capture = 24 conditions.
+#   gDNA:    none (phantom-gDNA guardrail) + gdna100 (1:1) + gdna300 (3:1)
+#   strand:  stranded 0.99 + unstranded 0.50
+#   nascent: none + present (additive 0.5× mature on all multi-exon)
+#   capture: off + on
+# Fragment lengths: gDNA=100 (short), RNA=200 (moderate).  Both strands of every AMBIG pair
+# expressed (frac_expressed=1.0), abundances LogUniform[1,10000] (dramatic per-strand variation).
+#
+# Usage:
+#   python scripts/sim/simulate_suite.py --config <this> --skip-existing
+
+suite:
+  outdir: /Users/mkiyer/Downloads/rigel_runs/ambig_dense_10mb
+  genome_length: 10570533     # (ignored under --skip-existing; matches the generated reference)
+  n_genes: 100                # (ignored under --skip-existing)
+  min_isoforms: 1
+  max_isoforms: 3
+  target_transcripts: null
+  antisense_fraction: 0.5
+  seed: 20260706
+  profile: smoke
+
+simulation:
+  n_rna_fragments: 2000000
+  frag_mean: 200              # RNA fragment length = 200 (moderate)
+  frag_std: 0                 # exact length
+  frag_min: 100
+  frag_max: 300
+  read_length: 100
+  error_rate: 0.0
+  n_workers: 16
+
+abundance:
+  seed: 20260707
+  min: 1.0
+  max: 10000.0
+  frac_expressed: 1.0         # ALL transcripts expressed → both AMBIG strands always present
+
+gdna:
+  rates:       [0.0,  1.0,     3.0]
+  rate_labels: [none, gdna100, gdna300]
+  frag_mean: 100              # gDNA fragment length = 100 (short)
+  frag_std: 0
+  frag_min: 50
+  frag_max: 150
+
+strand_specificities: [0.99, 0.50]
+
+nrna:
+  mode: additive_ratio
+  ratios:       [0.0,  0.5]   # none ⇒ no nascent;  present ⇒ nRNA = 0.5 × mRNA on multi-exon
+  ratio_labels: [none, present]
+
+capture:
+  probe_length: 120
+  probe_density: 0.5
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
+  configs:
+    - label: off
+      enabled: false
+    - label: on
+      fraction: 0.5

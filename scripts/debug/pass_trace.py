@@ -109,7 +109,8 @@ geometry = build_node_geometry(chain, sub, bsub, ra, gdna_fl_pmf, rna_fl_pmf)
 statics = build_node_statics(chain, sub, bsub, ra)
 belief0 = init_beliefs(chain, sub, bsub, ra, rna_sense_frac=kappa,
                        gdna_strand_overdispersion=od_g, rna_strand_overdispersion=od_r,
-                       n_grid=cfg.sweep_n_grid, logodds_window=cfg.sweep_logodds_window, statics=statics)
+                       n_grid=cfg.sweep_n_grid, n_grid_ss=cfg.sweep_n_grid_single_strand,
+                       logodds_window=cfg.sweep_logodds_window, statics=statics)
 
 def _sweep(prior, belief, cap):
     return node_sweep(chain, statics, geometry, belief, ra, bsub, rna_sense_frac=kappa,
@@ -117,6 +118,7 @@ def _sweep(prior, belief, cap):
                       n_grid=cfg.sweep_n_grid, max_passes=cfg.sweep_max_passes,
                       convergence_delta=cfg.sweep_convergence_delta,
                       logodds_window=cfg.sweep_logodds_window, n_tilt=cfg.sweep_n_tilt,
+                      n_grid_ss=cfg.sweep_n_grid_single_strand,
                       gdna_prior=prior, _capture=cap)
 
 cap1 = {}
