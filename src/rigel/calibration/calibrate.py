@@ -162,7 +162,8 @@ def calibrate(
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,
-        n_grid=config.sweep_n_grid, logodds_window=config.sweep_logodds_window, statics=statics,
+        n_grid=config.sweep_n_grid, n_grid_ss=config.sweep_n_grid_single_strand,
+        logodds_window=config.sweep_logodds_window, statics=statics,
     )
     def _sweep(prior):
         return node_sweep(
@@ -173,7 +174,7 @@ def calibrate(
             n_grid=config.sweep_n_grid, max_passes=config.sweep_max_passes,
             convergence_delta=config.sweep_convergence_delta,
             logodds_window=config.sweep_logodds_window,
-            n_tilt=config.sweep_n_tilt, gdna_prior=prior,
+            n_tilt=config.sweep_n_tilt, n_grid_ss=config.sweep_n_grid_single_strand, gdna_prior=prior,
         )
 
     # PASS 1 — the single-strand solve with the extremely-weak stability floor (Phase 1).

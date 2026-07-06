@@ -470,6 +470,7 @@ def init_beliefs(
     gdna_strand_overdispersion: float = 0.0,
     rna_strand_overdispersion: float = 0.0,
     n_grid: int,
+    n_grid_ss: int | None = None,
     logodds_window: float = 10.0,
     statics: "NodeStatics | None" = None,
 ) -> NodeBelief:
@@ -500,6 +501,7 @@ def init_beliefs(
         od_g=gdna_strand_overdispersion,
         od_r=rna_strand_overdispersion,
         n_grid=n_grid,
+        n_grid_ss=n_grid_ss,
         L=logodds_window,
     )
     f_pos, f_neg, f_g, var_p, var_n, var_g = _type_belief(
@@ -862,6 +864,7 @@ def node_sweep(
     convergence_delta: float = 1e-3,
     logodds_window: float = 10.0,
     n_tilt: int | None = None,
+    n_grid_ss: int | None = None,
     gdna_prior=None,
     _capture: dict | None = None,
 ):
@@ -934,7 +937,7 @@ def node_sweep(
         dc = _solve_nodes_logodds_all(
             statics.u_pos, statics.u_neg, statics.spliced_pos, statics.spliced_neg, fp, fn,
             statics.strand_obs, statics.mass_unspliced, _zero_spl, kappa=kappa, od_g=od_g, od_r=od_r,
-            n_grid=int(n_grid), L=float(logodds_window), n_tilt=n_tilt, global_logprior=g_arr,
+            n_grid=int(n_grid), L=float(logodds_window), n_tilt=n_tilt, n_grid_ss=n_grid_ss, global_logprior=g_arr,
             gdna_imp_mode=gm, gdna_imp_prec=gp, rna_imp_mode=rm, rna_imp_prec=rp,
         )
         return (dc.gdna_frac, dc.rna_pos_frac, dc.rna_neg_frac,
@@ -1156,7 +1159,7 @@ def node_sweep(
         fg_strand = _solve_nodes_logodds_all(
             statics.u_pos, statics.u_neg, statics.spliced_pos, statics.spliced_neg, fp, fn,
             statics.strand_obs, statics.mass_unspliced, _zero_spl, kappa=kappa, od_g=od_g, od_r=od_r,
-            n_grid=int(n_grid), L=float(logodds_window), n_tilt=n_tilt, global_logprior=None,
+            n_grid=int(n_grid), L=float(logodds_window), n_tilt=n_tilt, n_grid_ss=n_grid_ss, global_logprior=None,
         ).gdna_frac
         _capture.update(
             fg_loc=fg_loc, fg_strand=fg_strand, fp_loc=fp_loc, fn_loc=fn_loc,

@@ -69,7 +69,13 @@ with pysam.AlignmentFile(str(cond / "sim_oracle.bam"), "rb") as f:
 # production config default). The bridge is now a config param (not a solver env var), so it is threaded
 # into GdnaDensityPrior.fit below.
 _eps = os.environ.get("RIGEL_MIX_BRIDGE")
-cfg = CalibrationConfig() if _eps is None else CalibrationConfig(gdna_prior_mixture_bridge=float(_eps))
+_ng = os.environ.get("RIGEL_N_GRID")  # override sweep_n_grid for the grid-resolution study
+_ckw = {}
+if _eps is not None:
+    _ckw["gdna_prior_mixture_bridge"] = float(_eps)
+if _ng is not None:
+    _ckw["sweep_n_grid"] = int(_ng)
+cfg = CalibrationConfig(**_ckw)
 st, sm, flm, buf, pl = scan_and_buffer(str(cond / "sim_oracle.bam"), idx, BamScanConfig())
 sub = CalibrationSubstrate.from_payload(pl, ra)
 bsub = BoundarySubstrate.from_payload(pl)

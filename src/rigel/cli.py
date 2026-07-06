@@ -608,6 +608,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
     # -- CalibrationConfig: advanced --
     _ParamSpec("gdna_prior_mixture_bridge", "calibration.gdna_prior_mixture_bridge"),
+    _ParamSpec("sweep_n_grid_single_strand", "calibration.sweep_n_grid_single_strand"),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -1183,6 +1184,16 @@ def build_parser() -> argparse.ArgumentParser:
         "Floors the KDE valley between the depleted and enriched modes so a mixture-density node "
         "(a capture boundary, a sparse-probe region) is interpreted as an enriched/depleted mixture "
         "instead of collapsing to ~0 gDNA. 0 disables it (legacy KDE). Advanced calibration knob.",
+    )
+    adv.add_argument(
+        "--sweep-n-grid-single-strand",
+        dest="sweep_n_grid_single_strand",
+        type=int,
+        default=None,
+        help="Calibration single-strand log-odds grid resolution (default 256). Single-strand nodes solve a "
+        "cheap 1-D grid, so a fine grid de-quantizes the gDNA-fraction readout (the coarse shared grid "
+        "snapped it to ~0.085 steps, the dominant residual on high-mass exons). Decoupled from the AMBIG "
+        "2-D grid (--sweep... n_grid) which stays coarse for genome-scale memory. Advanced calibration knob.",
     )
     adv.add_argument(
         "--gdna-em-llr-bias",

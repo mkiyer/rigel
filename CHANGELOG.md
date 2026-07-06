@@ -5,6 +5,25 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Calibration single-strand grid resolution (`--sweep-n-grid-single-strand`, default 256)** — a new
+  advanced calibration parameter (`CalibrationConfig.sweep_n_grid_single_strand`, CLI + `--config` YAML).
+  After the mixture-bridge fix, the dominant remaining per-node deconvolution error was **grid quantization
+  of the single-strand gDNA fraction**: the solve reads `f_g` as the posterior median snapped to the
+  log-odds grid, and a deep-count exon's sharp posterior concentrates at the nearest of the (coarse, shared)
+  `sweep_n_grid=60` points, quantizing `f_g` to Δ≈0.085 steps — the true off-grid value differs by up to
+  ±0.04, and × high exon mass this was ~61% of the residual. Single-strand nodes solve a cheap 1-D grid, so
+  a fine grid (256) de-quantizes the readout there; it is **decoupled** from the AMBIG 2-D `(λ,τ)` cube
+  (kept at `sweep_n_grid=60`, since a fine grid there is a genome-scale memory risk), with the coarse global
+  prior regridded onto the fine grid. Keeps the **median** estimator (transform-invariant, vertex-safe — a
+  parabolic sub-grid *mode* was rejected because it under-calls confident pure-gDNA nodes at the f_g→1
+  vertex). Target calibration Σ|err| **−45.6%**; full-suite mature-transcript accuracy flat-to-better with no
+  regression (abundant-tx Spearman 0.959→0.962, n_FP 413→403). Design:
+  `docs/calibration/fix3_single_strand_grid_quantization.md`.
+
 ## [0.6.3] - 2026-07-06
 
 ### Added

@@ -267,6 +267,14 @@ class CalibrationConfig:
     #: (``K=20`` over-calls / under-resolves the zero-DNA case).
     sweep_n_grid: int = 60
 
+    #: **Single-strand λ-grid resolution** ``K_ss`` (Fix 3). Single-strand nodes solve a cheap 1-D λ grid
+    #: (``O(m·K)``), so a fine grid is affordable there and de-quantizes the ``f_g`` readout (the coarse
+    #: ``K=60`` snapped f_g to Δf_g≈0.085 steps — the dominant post-Fix-1 error on high-mass exons). Decoupled
+    #: from ``sweep_n_grid`` because the AMBIG 2-D ``(λ,τ)`` cube is ``O(m·K·K_t)`` and a fine grid there is a
+    #: genome-scale memory risk. Paired with the parabolic sub-grid-mode readout (``simplex_logodds``), which
+    #: recovers a 4×-finer-grid accuracy at any ``K``; ``256`` is where the pair saturates (512 adds <1%).
+    sweep_n_grid_single_strand: int = 256
+
     #: **Log-odds grid window** ``L``: ``λ ∈ [−L, L]`` ⇒ ``f_g ∈ [σ(−L), σ(L)]`` (``L=10`` ⇒
     #: ``[4.5e-5, 1−4.5e-5]``, bracketing the vertex mass Phase 0 measured).
     sweep_logodds_window: float = 10.0
@@ -321,6 +329,11 @@ class CalibrationConfig:
         if self.sweep_n_grid < 2:
             raise ValueError(
                 f"CalibrationConfig.sweep_n_grid must be >= 2; got {self.sweep_n_grid}."
+            )
+        if self.sweep_n_grid_single_strand < 2:
+            raise ValueError(
+                "CalibrationConfig.sweep_n_grid_single_strand must be >= 2; "
+                f"got {self.sweep_n_grid_single_strand}."
             )
         if not (float(self.sweep_logodds_window) > 0.0):
             raise ValueError(
