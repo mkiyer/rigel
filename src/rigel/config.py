@@ -283,6 +283,12 @@ class CalibrationConfig:
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
     sweep_n_tilt: int | None = None
 
+    #: **Message-precision mode.** ``False`` (default): the legacy disagreement-aware ``σ²_edge`` message
+    #: precision. ``True``: the Poisson disagreement-variance shrinkage (v1) — ``σ²_msg = σ²_imp + 1/n_src``,
+    #: ``σ²_imp`` the empirical adjacent-node imputation floor (``bp_solver.adjacent_disagreement_variance``).
+    #: Fixes the runaway-precision bug (``disagreement_shrinkage_prior_design_v2.md``). A/B toggle for now.
+    sweep_disagreement_shrinkage: bool = False
+
     #: **Inner-loop max passes** (per outer iteration). The solver is a NESTED loop: the INNER loop
     #: converges the per-node beliefs by directional (L→R then R→L) sweeps at FIXED var~mean, stopping
     #: early once the per-node pie stabilizes (max change within ``sweep_convergence_delta``); the OUTER

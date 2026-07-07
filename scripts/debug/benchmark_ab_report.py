@@ -23,17 +23,21 @@ from pathlib import Path
 import numpy as np, pandas as pd
 
 
-def run_quant(cond_dir: Path, index: Path, eps: float, threads: int, n_grid_ss: int | None = None) -> None:
+def run_quant(cond_dir: Path, index: Path, eps: float, threads: int, n_grid_ss: int | None = None,
+              shrinkage: bool = False) -> None:
     out = cond_dir / "rigel_out"
+    # No --annotated-bam: the pool + transcript metrics read only rigel_out/ + manifest + truth (the hard-label
+    # net-flow it drives is insensitive to soft prior shifts and the ambig suite doesn't emit annotated.bam).
     cmd = ["rigel", "quant", "--bam", str(cond_dir / "sim_oracle.bam"), "--index", str(index),
-           "-o", str(out), "--annotated-bam", str(cond_dir / "annotated.bam"),
-           "--sj-strand-tag", "auto", "--emit-locus-stats", "--tsv",
+           "-o", str(out), "--sj-strand-tag", "auto", "--emit-locus-stats", "--tsv",
            "--gdna-prior-mixture-bridge", str(eps), "--threads", str(threads)]
     if n_grid_ss is not None:
         cmd += ["--sweep-n-grid-single-strand", str(n_grid_ss)]
+    if shrinkage:
+        cmd += ["--sweep-disagreement-shrinkage"]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
-        raise RuntimeError(f"quant failed for {cond_dir.name} (eps={eps}):\n{r.stderr[-1500:]}")
+        raise RuntimeError(f"quant failed for {cond_dir.name} (eps={eps},shrink={shrinkage}):\n{r.stderr[-1500:]}")
 
 
 def _observed_truth(cond_dir: Path) -> dict:
@@ -106,24 +110,29 @@ def main():
     ap.add_argument("suite", type=Path)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--arms", nargs="+", default=["baseline:0", "fix1:0.01"],
-                    help="arm spec name:eps[:n_grid_ss] (n_grid_ss optional → config default)")
+                    help="arm spec name:eps[:n_grid_ss[:shrink]] (n_grid_ss optional; shrink=1 enables the "
+                    "disagreement-shrinkage precision)")
+    ap.add_argument("--filter", default=None, help="only conditions whose name contains this substring")
     ap.add_argument("--threads", type=int, default=4)
     args = ap.parse_args()
     index = args.suite / "rigel_index"
-    conds = sorted(p for p in args.suite.glob("gdna_*") if (p / "sim_oracle.bam").exists())
+    conds = sorted(p for p in args.suite.glob("gdna_*") if (p / "sim_oracle.bam").exists()
+                   and (args.filter is None or args.filter in p.name))
 
     def _parse(a):
         parts = a.split(":")
-        return (parts[0], float(parts[1]), int(parts[2]) if len(parts) > 2 else None)
+        ngss = int(parts[2]) if len(parts) > 2 and parts[2] else None
+        shrink = len(parts) > 3 and parts[3] in ("1", "true", "shrink")
+        return (parts[0], float(parts[1]), ngss, shrink)
     arms = [_parse(a) for a in args.arms]
-    report: dict = {"conditions": [c.name for c in conds], "arms": [a for a, _, _ in arms], "data": {}}
-    for arm, eps, ngss in arms:
+    report: dict = {"conditions": [c.name for c in conds], "arms": [a for a, _, _, _ in arms], "data": {}}
+    for arm, eps, ngss, shrink in arms:
         report["data"][arm] = {}
         for c in conds:
             t0 = time.time()
-            run_quant(c, index, eps, args.threads, n_grid_ss=ngss)
+            run_quant(c, index, eps, args.threads, n_grid_ss=ngss, shrinkage=shrink)
             report["data"][arm][c.name] = {"pools": pool_metrics(c), "tx": transcript_metrics(c)}
-            print(f"[{arm} eps={eps}] {c.name}  ({time.time()-t0:.0f}s)", flush=True)
+            print(f"[{arm} eps={eps} shrink={shrink}] {c.name}  ({time.time()-t0:.0f}s)", flush=True)
     json.dump(report, open(args.out, "w"), indent=2)
     print(f"\nwrote {args.out}")
 

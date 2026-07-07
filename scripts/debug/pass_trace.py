@@ -75,6 +75,8 @@ if _eps is not None:
     _ckw["gdna_prior_mixture_bridge"] = float(_eps)
 if _ng is not None:
     _ckw["sweep_n_grid"] = int(_ng)
+if os.environ.get("RIGEL_SHRINKAGE"):  # A/B: Poisson disagreement-variance message precision (v1)
+    _ckw["sweep_disagreement_shrinkage"] = True
 cfg = CalibrationConfig(**_ckw)
 st, sm, flm, buf, pl = scan_and_buffer(str(cond / "sim_oracle.bam"), idx, BamScanConfig())
 sub = CalibrationSubstrate.from_payload(pl, ra)
@@ -112,6 +114,11 @@ belief0 = init_beliefs(chain, sub, bsub, ra, rna_sense_frac=kappa,
                        n_grid=cfg.sweep_n_grid, n_grid_ss=cfg.sweep_n_grid_single_strand,
                        logodds_window=cfg.sweep_logodds_window, statics=statics)
 
+from rigel.calibration.bp_solver import adjacent_disagreement_variance
+_sig2 = adjacent_disagreement_variance(chain, geometry) if cfg.sweep_disagreement_shrinkage else None
+if _sig2 is not None:
+    print(f"disagreement-shrinkage ON: sigma2_imp={_sig2:.4f}")
+
 def _sweep(prior, belief, cap):
     return node_sweep(chain, statics, geometry, belief, ra, bsub, rna_sense_frac=kappa,
                       gdna_strand_overdispersion=od_g, rna_strand_overdispersion=od_r,
@@ -119,7 +126,7 @@ def _sweep(prior, belief, cap):
                       convergence_delta=cfg.sweep_convergence_delta,
                       logodds_window=cfg.sweep_logodds_window, n_tilt=cfg.sweep_n_tilt,
                       n_grid_ss=cfg.sweep_n_grid_single_strand,
-                      gdna_prior=prior, _capture=cap)
+                      gdna_prior=prior, disagreement_sigma2=_sig2, _capture=cap)
 
 cap1 = {}
 belief1 = _sweep(None, belief0, cap1)

@@ -848,6 +848,45 @@ def _kde_logprior(fgg, mass_global, eff_global, gdna_prior):
     return kde_term + jeffreys[None, :]
 
 
+def adjacent_disagreement_variance(chain: NodeChain, geometry: NodeGeometry) -> float:
+    """Poisson disagreement-variance estimator (v1, total density) — the imputation-noise floor σ²_imp
+    (``disagreement_shrinkage_prior_design_v2.md`` §2). Over adjacent boundary↔region edges, the observed
+    log-density disagreement decomposes ``Var(d) = σ²_imp + 1/n_i + 1/n_j``; we subtract each pair's known
+    Poisson sampling and average, inverse-variance weighted (``w = nᵢnⱼ/(nᵢ+nⱼ)`` — the harmonic form, 0 at
+    zero count, no threshold, all pairs used).
+
+    Densities are the naive-gDNA total density ``ρ = mass / eff_gdna`` (the frame the gDNA message uses under
+    ``fg=1``); each edge is oriented boundary→region so the systematic boundary-vs-region eff-length frame
+    offset is a single mode removed by the median (NOT split into ±δ, which would inflate the variance)."""
+    left = np.asarray(chain.left)  # noqa: F841 (kept for symmetry / future reverse-edge use)
+    right = np.asarray(chain.right)
+    kind = np.asarray(chain.kind)
+    ML = np.asarray(geometry.mass_left); MR = np.asarray(geometry.mass_right)
+    EGL = np.asarray(geometry.eff_gdna_left); EGR = np.asarray(geometry.eff_gdna_right)
+    src = np.arange(kind.shape[0])
+    dst = right
+    m = dst >= 0
+    src, dst = src[m], dst[m]                       # each undirected edge once (i → right[i])
+    n_i, e_i = MR[src], EGR[src]                     # src's right face
+    n_j, e_j = ML[dst], EGL[dst]                     # dst's left face
+    ok = (n_i > _EPS) & (n_j > _EPS) & (e_i > _EPS) & (e_j > _EPS)
+    src, dst, n_i, e_i, n_j, e_j = src[ok], dst[ok], n_i[ok], e_i[ok], n_j[ok], e_j[ok]
+    if src.size < 2:
+        return 1.0                                   # degenerate (no adjacent pairs) — should not occur
+    lr_i = np.log(n_i / e_i); lr_j = np.log(n_j / e_j)
+    src_is_bnd = kind[src] == BOUNDARY               # orient boundary→region (consistent sign, one mode)
+    resid = np.where(src_is_bnd, lr_i - lr_j, lr_j - lr_i)
+    ns = np.where(src_is_bnd, n_i, n_j)              # boundary (source) count
+    nd = np.where(src_is_bnd, n_j, n_i)              # region (dst) count
+    dc = resid - np.median(resid)                    # remove the systematic frame offset
+    w = (ns * nd) / (ns + nd)                        # harmonic inverse-variance weight
+    v = 1.0 / ns + 1.0 / nd                          # per-pair Poisson sampling variance
+    den = float(np.sum(w))
+    if den <= _EPS:
+        return 1.0
+    return float(max(np.sum(w * (dc * dc - v)) / den, 0.0))
+
+
 def node_sweep(
     chain: NodeChain,
     statics: NodeStatics,
@@ -866,6 +905,7 @@ def node_sweep(
     n_tilt: int | None = None,
     n_grid_ss: int | None = None,
     gdna_prior=None,
+    disagreement_sigma2: float | None = None,
     _capture: dict | None = None,
 ):
     """The belief-propagation sweep over the chain — gDNA AND per-strand RNA messages, in COUNT space (no
@@ -1061,13 +1101,19 @@ def node_sweep(
                 # density base M_dst/E_gdna_dst (= md/egd), flooring ρ at the dst min-observable density
                 # 1/egd. (Fractions are not comparable across nodes — only densities are.)
                 mo = math.log(max(rho, 1.0 / egd) / (md / egd))
-                # pois = 1/(gDNA COUNT): the source's log-density sampling variance. NO +1 floor — a
-                # NON-DETECTION (count→0, a depleted seam) has ~∞ log-density variance → base_var huge →
-                # ~0 precision → sends NO message. "Zero density is not a measurement." (user's diagnosis)
-                pois = 1.0 / max(n_src, _EPS)
-                base_var = vbg[lsrc] + pois              # sampling + source-belief log-var
-                s2_edge = max((mo - lfg_loc[i]) ** 2 - (base_var + vg_loc[i]), 0.0)  # per-edge surprise
-                pr = 1.0 / max(base_var + s2_edge, _EPS)
+                if disagreement_sigma2 is not None:
+                    # Poisson disagreement-variance (v2 design): σ²_msg = σ²_imp + 1/n_src, in the algebraic
+                    # form pr = n_src/(n_src·σ²_imp + 1) — denom ≥ 1, pr=0 exactly at n_src=0 (no message), no
+                    # if/clamp. σ²_imp is the empirical adjacent-node floor; no source certainty shrinks it to 0.
+                    pr = n_src / (n_src * disagreement_sigma2 + 1.0)
+                else:
+                    # pois = 1/(gDNA COUNT): the source's log-density sampling variance. NO +1 floor — a
+                    # NON-DETECTION (count→0, a depleted seam) has ~∞ log-density variance → base_var huge →
+                    # ~0 precision → sends NO message. "Zero density is not a measurement." (user's diagnosis)
+                    pois = 1.0 / max(n_src, _EPS)
+                    base_var = vbg[lsrc] + pois              # sampling + source-belief log-var
+                    s2_edge = max((mo - lfg_loc[i]) ** 2 - (base_var + vg_loc[i]), 0.0)  # per-edge surprise
+                    pr = 1.0 / max(base_var + s2_edge, _EPS)
                 amg[i], apg[i] = mo, pr
                 pt = pg_loc[i] + pr
                 fbg[i] = math.exp((pg_loc[i] * lfg_loc[i] + pr * mo) / pt)
@@ -1103,10 +1149,14 @@ def node_sweep(
                 rho_mat_dst = SPd[i] / (ESPd[i] if ESPd[i] > _EPS else _EPS)  # dst-face mature absorbed (exon→B)
                 rho = n_nasc / er + n_mat / esp - rho_mat_dst  # NASCENT density (+ MEASUREMENT into an exon)
                 mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_pos frame (floored at min-observable)
-                pois = 1.0 / max(n_nasc + n_mat, _EPS)
-                base_var = vbp[lsrc] + pois
-                s2_edge = max((mo - lfp_loc[i]) ** 2 - (base_var + vp_loc[i]), 0.0)
-                pr = 1.0 / max(base_var + s2_edge, _EPS)          # disagreement-aware (MEASUREMENT or IMPUTATION)
+                n_src = n_nasc + n_mat                            # source RNA⁺ count (Poisson sampling)
+                if disagreement_sigma2 is not None:
+                    pr = n_src / (n_src * disagreement_sigma2 + 1.0)
+                else:
+                    pois = 1.0 / max(n_src, _EPS)
+                    base_var = vbp[lsrc] + pois
+                    s2_edge = max((mo - lfp_loc[i]) ** 2 - (base_var + vp_loc[i]), 0.0)
+                    pr = 1.0 / max(base_var + s2_edge, _EPS)          # disagreement-aware (MEASUREMENT or IMPUTATION)
                 amp[i], app[i] = mo, pr
                 pt = pp_loc[i] + pr
                 fbp[i] = math.exp((pp_loc[i] * lfp_loc[i] + pr * mo) / pt)
@@ -1120,10 +1170,14 @@ def node_sweep(
                 rho_mat_dst = SNd[i] / (ESPd[i] if ESPd[i] > _EPS else _EPS)  # dst-face mature absorbed (exon→B)
                 rho = n_nasc / er + n_mat / esp - rho_mat_dst
                 mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_neg frame
-                pois = 1.0 / max(n_nasc + n_mat, _EPS)
-                base_var = vbn[lsrc] + pois
-                s2_edge = max((mo - lfn_loc[i]) ** 2 - (base_var + vn_loc[i]), 0.0)
-                pr = 1.0 / max(base_var + s2_edge, _EPS)          # disagreement-aware (MEASUREMENT or IMPUTATION)
+                n_src = n_nasc + n_mat                            # source RNA⁻ count (Poisson sampling)
+                if disagreement_sigma2 is not None:
+                    pr = n_src / (n_src * disagreement_sigma2 + 1.0)
+                else:
+                    pois = 1.0 / max(n_src, _EPS)
+                    base_var = vbn[lsrc] + pois
+                    s2_edge = max((mo - lfn_loc[i]) ** 2 - (base_var + vn_loc[i]), 0.0)
+                    pr = 1.0 / max(base_var + s2_edge, _EPS)          # disagreement-aware (MEASUREMENT or IMPUTATION)
                 amn[i], apn[i] = mo, pr
                 pt = pn_loc[i] + pr
                 fbn[i] = math.exp((pn_loc[i] * lfn_loc[i] + pr * mo) / pt)

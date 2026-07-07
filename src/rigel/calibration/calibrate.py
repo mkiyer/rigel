@@ -39,6 +39,7 @@ import numpy as np
 from .bp_solver import (
     build_node_geometry,
     build_node_statics,
+    adjacent_disagreement_variance,
     chain_boundary_side_deconv,
     chain_region_deconv,
     init_beliefs,
@@ -165,6 +166,15 @@ def calibrate(
         n_grid=config.sweep_n_grid, n_grid_ss=config.sweep_n_grid_single_strand,
         logodds_window=config.sweep_logodds_window, statics=statics,
     )
+    # Poisson disagreement-variance floor σ²_imp (v1): the empirical adjacent-node imputation variance,
+    # estimated ONCE on the observed (naive-gDNA) total density (data-fixed). None ⇒ legacy σ²_edge path.
+    disagreement_sigma2 = (
+        adjacent_disagreement_variance(chain, geometry)
+        if config.sweep_disagreement_shrinkage else None
+    )
+    if disagreement_sigma2 is not None:
+        logger.debug("calibration: disagreement-shrinkage σ²_imp=%.4f", disagreement_sigma2)
+
     def _sweep(prior):
         return node_sweep(
             chain, statics, geometry, belief, region_arrays, boundary_substrate,
@@ -175,6 +185,7 @@ def calibrate(
             convergence_delta=config.sweep_convergence_delta,
             logodds_window=config.sweep_logodds_window,
             n_tilt=config.sweep_n_tilt, n_grid_ss=config.sweep_n_grid_single_strand, gdna_prior=prior,
+            disagreement_sigma2=disagreement_sigma2,
         )
 
     # PASS 1 — the single-strand solve with the extremely-weak stability floor (Phase 1).
