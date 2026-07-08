@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from rigel.calibration.fl import build_fl_models, gdna_fl_mass
 from rigel.scan_payload import N_FL_POOLS
@@ -78,3 +79,66 @@ def test_build_fl_just_below_5000_is_not_a_cliff():
         global_counts=glob, rna_counts=glob, gdna_counts=_spike(300, 5001.0), max_size=1000
     )
     np.testing.assert_allclose(lo.gdna_pmf[300], hi.gdna_pmf[300], rtol=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# Raw empirical counts + FragmentLengthModel accessors (QC report views)
+# ---------------------------------------------------------------------------
+
+
+def test_build_fl_stores_raw_aligned_counts():
+    """Raw (unsmoothed) counts are stored aligned to max_size, totals = n_*."""
+    glob = _spike(100, 500.0)
+    rna = _spike(200, 300.0)
+    gdna = _spike(300, 40.0)
+    fl = build_fl_models(
+        global_counts=glob, rna_counts=rna, gdna_counts=gdna, max_size=1000, prior_ess=1000.0
+    )
+    assert fl.global_counts.shape == (1001,)
+    assert int(np.argmax(fl.rna_counts)) == 200
+    assert int(np.argmax(fl.gdna_counts)) == 300
+    # Raw counts are the empirical evidence — NOT the EB-smoothed pmf.
+    assert fl.rna_counts[200] == 300.0
+    assert fl.gdna_counts[300] == 40.0
+    assert fl.n_global == 500.0
+    assert fl.n_rna == 300.0
+    assert fl.n_gdna == 40.0
+
+
+def test_build_fl_counts_overflow_folds_into_last_bin():
+    """Counts beyond max_size fold into the overflow bin when aligned."""
+    over = np.zeros(1201, dtype=np.float64)
+    over[1150] = 7.0  # beyond max_size=1000
+    fl = build_fl_models(
+        global_counts=_spike(100, 10.0),
+        rna_counts=_spike(100, 10.0),
+        gdna_counts=over,
+        max_size=1000,
+    )
+    assert fl.gdna_counts.shape == (1001,)
+    assert fl.gdna_counts[1000] == 7.0
+    assert fl.n_gdna == 7.0
+
+
+def test_accessors_return_empirical_models():
+    """rna_model()/gdna_model()/global_model() expose the raw empirical FL."""
+    fl = build_fl_models(
+        global_counts=_spike(100, 500.0),
+        rna_counts=_spike(200, 300.0),
+        gdna_counts=_spike(325, 40.0),
+        max_size=1000,
+        prior_ess=1000.0,
+    )
+    rna_m = fl.rna_model()
+    gdna_m = fl.gdna_model()
+    glob_m = fl.global_model()
+    # Empirical modes/means track the raw counts (not smoothed toward global).
+    assert rna_m.mode == 200
+    assert gdna_m.mode == 325
+    assert glob_m.mode == 100
+    assert rna_m.mean == pytest.approx(200.0)
+    # n_observations = pool total.
+    assert rna_m.n_observations == 300
+    assert gdna_m.n_observations == 40
+    # to_dict() works (drives the summary QC report).
+    assert gdna_m.to_dict()["summary"]["mode"] == 325

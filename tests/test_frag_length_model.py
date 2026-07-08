@@ -90,6 +90,33 @@ class TestFragmentLengthModelStatistics:
         assert m.median == 0.0
         assert m.mode == 0
 
+    def test_overflow_bin_excluded_from_mean_mode_std(self):
+        """mean/std/mode ignore the >= max_size overflow bin; median does not."""
+        counts = np.zeros(101, dtype=np.float64)
+        counts[50] = 90.0  # in-range bulk
+        counts[100] = 10.0  # overflow bin (>= max_size=100), a censored long tail
+        m = FragmentLengthModel(max_size=100, counts=counts)  # raw QC view (unfinalized)
+
+        # mean/mode/std describe the in-range bulk (all at 50), NOT dragged to 100.
+        assert m.mode == 50
+        assert m.mean == pytest.approx(50.0)
+        assert m.std == pytest.approx(0.0)
+        # median is a rank statistic over the full sample: with only 10% censored,
+        # the 50th percentile still lands at the in-range bulk.
+        assert m.median == 50.0
+
+    def test_overflow_reported_in_to_dict(self):
+        """The censored overflow bin is surfaced as a QC diagnostic."""
+        counts = np.zeros(101, dtype=np.float64)
+        counts[50] = 90.0
+        counts[100] = 10.0
+        m = FragmentLengthModel(max_size=100, counts=counts)  # unfinalized (raw QC view)
+        summ = m.to_dict()["summary"]
+        assert summ["mode"] == 50
+        assert summ["mean"] == pytest.approx(50.0, abs=0.01)
+        assert summ["overflow"]["count"] == pytest.approx(10.0)
+        assert summ["overflow"]["fraction"] == pytest.approx(0.1)
+
 
 class TestFragmentLengthModelLikelihood:
     def test_log_likelihood_uniform_when_empty(self):
@@ -176,7 +203,10 @@ class TestFragmentLengthModelEffectiveLength:
         raw_probs = (m.counts + 1.0) / (m.total_weight + m.max_size + 1)
         raw_expected = self._oracle_eff_len(raw_probs, length=8)
         assert actual != pytest.approx(raw_expected)
-        assert m.mean == pytest.approx(float(np.dot(np.arange(11), probs)))
+        # mean uses the finalized EB distribution, over the in-range bins
+        # (the >= max_size overflow bin is excluded — see FragmentLengthModel.mean).
+        in_range = probs[: m.max_size]
+        assert m.mean == pytest.approx(float(np.dot(np.arange(m.max_size), in_range) / in_range.sum()))
 
     def test_terminal_bin_is_not_double_counted_for_long_transcripts(self):
         counts = np.zeros(11, dtype=np.float64)

@@ -850,10 +850,12 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                 row["n_intergenic"] = bench.n_intergenic
                 row["n_chimeric"] = bench.n_chimeric
 
-                # Fragment length distribution recovery metrics
-                fl = pr.frag_length_models
-                rna_m = fl.rna_model
-                gdna_m = fl.gdna_model
+                # Fragment length distribution recovery metrics. The empirical RNA
+                # (spliced-annotated) + gDNA (structural-pool) FL distributions are the
+                # views of the FL models actually built for scoring/calibration.
+                fl_models = pr.fl_models
+                rna_m = fl_models.rna_model()
+                gdna_m = fl_models.gdna_model()
 
                 rna_true_mean = rna_frag_params.get("frag_mean", 200)
                 rna_true_std = rna_frag_params.get("frag_std", 30)

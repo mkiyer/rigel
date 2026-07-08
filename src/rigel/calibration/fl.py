@@ -25,6 +25,7 @@ import numpy as np
 from ..scan_payload import N_FL_POOLS
 
 if TYPE_CHECKING:
+    from ..frag_length_model import FragmentLengthModel
     from ..scan_payload import AccumulatorPayload
 
 __all__ = [
@@ -61,15 +62,63 @@ POOL_EB_PRIOR_ESS: float = 1000.0
 
 @dataclass(frozen=True, slots=True)
 class FLModels:
-    """Library-wide FL pmfs (float64[max_size + 1]) + their pool totals."""
+    """Library-wide FL distributions (float64[max_size + 1]) + their pool totals.
+
+    Two views of each distribution are carried:
+
+    * ``*_pmf`` — the EB-smoothed pmf used for **scoring / calibration** (RNA and
+      gDNA are shrunk toward ``global_pmf``; see :func:`build_fl_models`).
+    * ``*_counts`` — the **raw, unsmoothed** histograms (aligned to
+      ``max_size + 1`` bins) the pmfs were built from. These are the honest
+      empirical distributions surfaced as QC (:meth:`rna_model` / :meth:`gdna_model`
+      / :meth:`global_model`); the EB smoothing is a <1% perturbation at real
+      library scale and stays internal to scoring.
+
+    ``gdna_counts`` is the **structural-pool proxy** (intergenic + intronic FL
+    mass; :func:`gdna_fl_mass`) — i.e. gDNA *plus* intronic/nascent RNA — not a
+    deconvolved pure-gDNA distribution. ``rna_counts`` is the spliced-annotated
+    (SPLICED-ANNOT) histogram.
+    """
 
     global_pmf: np.ndarray  # unconditional anchor (no prior)
     rna_pmf: np.ndarray  # spliced, EB-shrunk toward global
     gdna_pmf: np.ndarray  # gDNA pool, EB-shrunk toward global
+    global_counts: np.ndarray  # raw scanner histogram (all fragments)
+    rna_counts: np.ndarray  # raw spliced-annotated histogram
+    gdna_counts: np.ndarray  # raw structural pool (intergenic + intronic)
     n_global: float
     n_rna: float
     n_gdna: float
     max_size: int
+
+    def _empirical(self, counts: np.ndarray) -> "FragmentLengthModel":
+        """Wrap a raw count vector as an unfinalized ``FragmentLengthModel``.
+
+        Unfinalized on purpose: summary stats (mean/std/median/mode) and
+        ``to_dict()`` then read the *raw* histogram, matching how the scanner's
+        global + per-category models are reported (no scoring-side pseudo-count
+        smoothing enters the QC numbers).
+        """
+        from ..frag_length_model import FragmentLengthModel
+
+        return FragmentLengthModel(max_size=self.max_size, counts=counts.copy())
+
+    def global_model(self) -> "FragmentLengthModel":
+        """Empirical global FL distribution as a ``FragmentLengthModel`` (QC)."""
+        return self._empirical(self.global_counts)
+
+    def rna_model(self) -> "FragmentLengthModel":
+        """Empirical RNA (spliced-annotated) FL distribution (QC)."""
+        return self._empirical(self.rna_counts)
+
+    def gdna_model(self) -> "FragmentLengthModel":
+        """Empirical gDNA structural-pool FL distribution (QC).
+
+        The pool is intergenic + intronic FL mass (:func:`gdna_fl_mass`): a
+        gDNA-dominated proxy that also includes intronic/nascent RNA, not a
+        deconvolved pure-gDNA distribution.
+        """
+        return self._empirical(self.gdna_counts)
 
 
 def gdna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
@@ -100,13 +149,12 @@ def _normalized(v: np.ndarray) -> np.ndarray:
     return v / s if s > 0.0 else np.full(v.size, 1.0 / v.size, dtype=np.float64)
 
 
-def _smooth_eb(counts: np.ndarray, global_pmf: np.ndarray, max_size: int, prior_ess: float):
+def _smooth_eb(aligned: np.ndarray, global_pmf: np.ndarray, prior_ess: float):
     """Smooth EB pmf: ``(counts + prior_ess·global_pmf) / (total + prior_ess)``.
 
-    Continuous in the pool total — no quality threshold (PR04c decision 5).
-    Returns ``(pmf, pool_total)``.
+    ``aligned`` is an already ``max_size``-aligned count vector. Continuous in the
+    pool total — no quality threshold (PR04c decision 5). Returns ``(pmf, pool_total)``.
     """
-    aligned = _aligned(counts, max_size)
     total = float(aligned.sum())
     denom = total + prior_ess
     pmf = (aligned + prior_ess * global_pmf) / denom if denom > 0.0 else global_pmf.copy()
@@ -128,14 +176,20 @@ def build_fl_models(
     aggregated gDNA pool (:func:`gdna_fl_mass`). RNA and gDNA are EB-shrunk toward
     the global FL with a single Dirichlet ``prior_ess``.
     """
-    global_pmf = _normalized(_aligned(global_counts, max_size))
-    rna_pmf, n_rna = _smooth_eb(rna_counts, global_pmf, max_size, prior_ess)
-    gdna_pmf, n_gdna = _smooth_eb(gdna_counts, global_pmf, max_size, prior_ess)
+    global_aligned = _aligned(global_counts, max_size)
+    rna_aligned = _aligned(rna_counts, max_size)
+    gdna_aligned = _aligned(gdna_counts, max_size)
+    global_pmf = _normalized(global_aligned)
+    rna_pmf, n_rna = _smooth_eb(rna_aligned, global_pmf, prior_ess)
+    gdna_pmf, n_gdna = _smooth_eb(gdna_aligned, global_pmf, prior_ess)
     return FLModels(
         global_pmf=global_pmf,
         rna_pmf=rna_pmf,
         gdna_pmf=gdna_pmf,
-        n_global=float(np.asarray(global_counts, dtype=np.float64).sum()),
+        global_counts=global_aligned,
+        rna_counts=rna_aligned,
+        gdna_counts=gdna_aligned,
+        n_global=float(global_aligned.sum()),
         n_rna=n_rna,
         n_gdna=n_gdna,
         max_size=int(max_size),

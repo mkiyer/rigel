@@ -14,7 +14,7 @@ from rigel.buffer import (
 from rigel.splice import SpliceType
 from rigel.config import EMConfig
 from rigel.estimator import AbundanceEstimator
-from rigel.frag_length_model import FragmentLengthModels
+from rigel.frag_length_model import FragmentLengthModel, FragmentLengthModels
 from rigel.scoring import FragmentScorer
 from rigel.scan import FragmentRouter
 from rigel.stats import PipelineStats
@@ -169,10 +169,14 @@ def _scan_em_data(
     annotations=None,
 ):
     """Build EM data from a buffer using FragmentScorer + FragmentRouter."""
+    # Routing tests don't exercise FL scoring: pass unfinalized (empty) FL models
+    # so the scorer's FL LUT is inert (_log_prob is None), matching the prior use
+    # of the container's empty rna/gdna models.
+    empty_fl = FragmentLengthModel(max_size=frag_length_models.max_size)
     ctx = FragmentScorer.from_models(
         strand_models,
-        frag_length_models.rna_model,
-        frag_length_models.gdna_model,
+        empty_fl,
+        empty_fl,
         index,
         estimator,
         overhang_log_penalty=overhang_log_penalty,

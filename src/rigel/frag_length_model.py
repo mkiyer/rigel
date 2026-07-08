@@ -251,46 +251,47 @@ class FragmentLengthModel:
 
     @property
     def mean(self) -> float:
-        """Weighted mean fragment length.
+        """Weighted mean of the *in-range* fragment lengths.
 
-        The overflow bin is treated as having fragment length = max_size.
-        Returns 0.0 if no observations.
+        The ``>= max_size`` overflow bin is right-censored — its members' exact
+        lengths are unknown, only that they exceed ``max_size`` — so treating it
+        as a point mass at ``max_size`` would bias the mean toward the ceiling.
+        It is therefore EXCLUDED; this reports the mean of the resolved lengths.
+        The censored count is surfaced separately (``to_dict()`` → ``overflow``).
+        Returns 0.0 if there are no in-range observations.
         """
-        probs = self._stats_probs()
-        if probs is not None:
-            indices = np.arange(self.max_size + 1, dtype=np.float64)
-            return float(np.dot(indices, probs))
-        total = self.total_weight
-        if total == 0:
+        w = self._stats_weights()[: self.max_size]
+        total = float(w.sum())
+        if total <= 0.0:
             return 0.0
-        indices = np.arange(self.max_size + 1, dtype=np.float64)
-        return float(np.dot(indices, self.counts) / total)
+        idx = np.arange(self.max_size, dtype=np.float64)
+        return float(np.dot(idx, w) / total)
 
     @property
     def std(self) -> float:
-        """Weighted standard deviation.
+        """Weighted standard deviation of the in-range fragment lengths.
 
-        Returns 0.0 if no observations.
+        Excludes the ``>= max_size`` overflow bin, consistently with :meth:`mean`
+        (the spread is reported about the in-range mean). Returns 0.0 if there
+        are no in-range observations.
         """
-        probs = self._stats_probs()
-        if probs is not None:
-            indices = np.arange(self.max_size + 1, dtype=np.float64)
-            mu = np.dot(indices, probs)
-            var = np.dot((indices - mu) ** 2, probs)
-            return float(np.sqrt(var))
-        total = self.total_weight
-        if total == 0:
+        w = self._stats_weights()[: self.max_size]
+        total = float(w.sum())
+        if total <= 0.0:
             return 0.0
-        indices = np.arange(self.max_size + 1, dtype=np.float64)
-        mu = np.dot(indices, self.counts) / total
-        var = np.dot((indices - mu) ** 2, self.counts) / total
-        return float(np.sqrt(var))
+        idx = np.arange(self.max_size, dtype=np.float64)
+        mu = np.dot(idx, w) / total
+        var = np.dot((idx - mu) ** 2, w) / total
+        return float(np.sqrt(max(var, 0.0)))
 
     @property
     def median(self) -> float:
-        """Weighted median fragment length.
+        """Weighted median fragment length (over the full distribution).
 
-        Returns 0.0 if no observations.
+        Unlike :meth:`mean` / :meth:`mode`, the median is a rank statistic and
+        stays identifiable under right-censoring as long as the overflow fraction
+        is below 50%, so the ``>= max_size`` bin is retained here (it correctly
+        places the censored tail on the high side). Returns 0.0 if no observations.
         """
         probs = self._stats_probs()
         if probs is not None:
@@ -306,22 +307,33 @@ class FragmentLengthModel:
 
     @property
     def mode(self) -> int:
-        """Fragment length with the highest count.
+        """In-range fragment length with the highest weight.
 
-        Returns 0 if no observations.
+        Excludes the ``>= max_size`` overflow bin: that bin aggregates the whole
+        censored tail, so it can be the single largest bin without representing a
+        genuine peak (see :meth:`mean`). Returns 0 if no in-range observations.
         """
-        probs = self._stats_probs()
-        if probs is not None:
-            return int(np.argmax(probs))
-        if self.total_weight == 0:
+        w = self._stats_weights()[: self.max_size]
+        if float(w.sum()) <= 0.0:
             return 0
-        return int(np.argmax(self.counts))
+        return int(np.argmax(w))
 
     def _stats_probs(self) -> np.ndarray | None:
         """Finalized probability vector for summary statistics, when informative."""
         if self._finalized and self._prob is not None and self._stats_use_prob:
             return self._prob
         return None
+
+    def _stats_weights(self) -> np.ndarray:
+        """Weight vector for summary statistics: the finalized posterior-predictive
+        PMF when informative, else the raw counts."""
+        probs = self._stats_probs()
+        return probs if probs is not None else self.counts
+
+    @property
+    def overflow_count(self) -> float:
+        """Weight in the ``>= max_size`` overflow (right-censored) bin."""
+        return float(self.counts[self.max_size])
 
     # ------------------------------------------------------------------
     # Finalization (call after training, before scoring)
@@ -552,7 +564,9 @@ class FragmentLengthModel:
         """JSON/YAML-serializable summary of the fragment length model.
 
         Includes summary statistics and a trimmed histogram (bins with
-        zero counts at the tails are omitted).
+        zero counts at the tails are omitted). ``mean`` / ``std`` / ``mode``
+        describe the in-range lengths; the right-censored ``>= max_size`` tail is
+        reported separately under ``summary.overflow`` (count + fraction).
         """
         # Find the range of non-zero bins for compact output
         nonzero = np.nonzero(self.counts)[0]
@@ -564,15 +578,24 @@ class FragmentLengthModel:
             hist_range = [0, 0]
             hist_values = []
 
+        total = self.total_weight
+        overflow = self.overflow_count
+
         return {
             "summary": {
                 "n_observations": int(self.n_observations),
-                "total_weight": float(round(self.total_weight, 2)),
+                "total_weight": float(round(total, 2)),
                 "max_size": int(self.max_size),
                 "mean": float(round(self.mean, 2)),
                 "std": float(round(self.std, 2)),
                 "median": float(round(self.median, 2)),
                 "mode": int(self.mode),
+                # Right-censored fragments (length >= max_size), excluded from
+                # mean/std/mode above; reported here for QC.
+                "overflow": {
+                    "count": float(round(overflow, 2)),
+                    "fraction": float(round(overflow / total, 6)) if total > 0 else 0.0,
+                },
             },
             "histogram": {
                 "range": hist_range,
@@ -587,18 +610,16 @@ class FragmentLengthModel:
 
 
 class FragmentLengthModels:
-    """Container for per-category, global, and intergenic fragment length models.
+    """Container for the scanner's raw global + per-splice-category FL histograms.
 
     Wraps one ``FragmentLengthModel`` per ``SpliceType`` plus a global
-    model (all categories) and an intergenic model (fragments with no
-    gene overlap).
-
-    After observation, call :meth:`build_scoring_models` to set
-    ``rna_model`` (= annotated-spliced histogram).  The ``gdna_model``
-    is injected externally from the calibration module.
-
-    The :meth:`observe` method routes each observation to the global
+    model (all fragments). These are the raw, unsmoothed observation
+    histograms; :meth:`observe` routes each observation to the global
     model plus the appropriate category model.
+
+    The library-wide RNA / gDNA / global FL distributions used for
+    scoring and calibration are built separately from these raw counts by
+    ``rigel.calibration.fl.build_fl_models`` (see :class:`~rigel.calibration.fl.FLModels`).
     """
 
     def __init__(self, max_size: int = DEFAULT_MAX_FRAG_SIZE):
@@ -609,74 +630,6 @@ class FragmentLengthModels:
         self.category_models: dict = {
             cat: FragmentLengthModel(max_size=max_size) for cat in SpliceType
         }
-        # RNA fragment length model (set by build_scoring_models):
-        self.rna_model = FragmentLengthModel(max_size=max_size)
-        # gDNA fragment length model (injected from calibration):
-        self.gdna_model = FragmentLengthModel(max_size=max_size)
-
-    def finalize(self, prior_ess: float | None = None) -> None:
-        """Cache derived values on all sub-models for fast scoring.
-
-        The RNA and gDNA scoring models use the global fragment length
-        histogram as a Dirichlet prior, normalized to ``prior_ess``
-        pseudo-observations.  This ensures symmetric FL scoring when
-        category-specific data is sparse while still allowing FL to
-        discriminate when category data is abundant.
-
-        Diagnostic models (global, per-category) are finalized with the
-        same small unseen-bin reserve used by the scoring models.
-
-        Parameters
-        ----------
-        prior_ess : float or None
-            Effective sample size for the global prior.  The global
-            histogram is rescaled to this many pseudo-observations.
-            With ``N_cat`` category observations, the category has
-            ``N_cat / (N_cat + prior_ess)`` influence.  If None,
-            the raw global counts are used (backward compatibility).
-        """
-        self.global_model.finalize()
-        for m in self.category_models.values():
-            m.finalize()
-
-        # RNA and gDNA: Dirichlet prior from global observations,
-        # normalized to prior_ess pseudo-observations so that
-        # category-specific data can diverge from the prior at
-        # a controlled rate.
-        global_prior = self.global_model.counts
-        self.rna_model.finalize(prior_counts=global_prior, prior_ess=prior_ess)
-        self.gdna_model.finalize(prior_counts=global_prior, prior_ess=prior_ess)
-
-    def build_scoring_models(self) -> None:
-        """Set the RNA scoring model from annotated-spliced observations.
-
-        The RNA fragment length model uses the SPLICED_ANNOT
-        histogram as its category-specific evidence.  During
-        ``finalize()``, the global FL histogram is applied as a
-        Dirichlet prior, naturally handling the case where few or
-        no spliced observations exist — the model shrinks toward
-        the global distribution with no explicit fallback logic.
-
-        The gDNA model is NOT set here; it is injected from the
-        calibration module after calibration completes.
-
-        Must be called AFTER all observations and BEFORE ``finalize()``.
-        """
-        from .splice import SpliceType
-
-        spliced = self.category_models[SpliceType.SPLICED_ANNOT]
-        if spliced.total_weight > 0:
-            self.rna_model.counts = spliced.counts.copy()
-            self.rna_model._total_weight = float(spliced.counts.sum())
-            logger.info(
-                f"RNA FL model: {self.rna_model.total_weight:.0f} obs "
-                f"(annotated-spliced), mean={self.rna_model.mean:.1f}"
-            )
-        else:
-            logger.info(
-                "RNA FL model: no annotated-spliced observations; "
-                "global Dirichlet prior will provide the distribution"
-            )
 
     @property
     def n_observations(self) -> int:
@@ -733,12 +686,15 @@ class FragmentLengthModels:
                 self.category_models[cat].observe_batch(lengths[mask])
 
     def to_dict(self) -> dict:
-        """JSON/YAML-serializable summary of all fragment length models."""
+        """JSON/YAML-serializable summary of the raw global + per-category models.
+
+        The library-wide ``gdna`` / ``rna`` FL distributions are reported
+        separately by the caller from ``FLModels`` (they are built from these
+        raw counts, not stored here).
+        """
         from .splice import SpliceType
 
         d: dict = {"global": self.global_model.to_dict()}
-        d["gdna"] = self.gdna_model.to_dict()
-        d["rna"] = self.rna_model.to_dict()
         for cat in SpliceType:
             d[cat.name.lower()] = self.category_models[cat].to_dict()
         return d
@@ -776,13 +732,3 @@ class FragmentLengthModels:
                 logger.info(
                     f"  {cat.name}: {m.n_observations:,} obs, mean={m.mean:.1f}, mode={m.mode}"
                 )
-        if self.gdna_model.total_weight > 0:
-            logger.info(
-                f"  gDNA: {self.gdna_model.total_weight:.0f} weighted obs, "
-                f"mean={self.gdna_model.mean:.1f}, mode={self.gdna_model.mode}"
-            )
-        if self.rna_model.total_weight > 0:
-            logger.info(
-                f"  RNA (spliced): {self.rna_model.total_weight:.0f} weighted obs, "
-                f"mean={self.rna_model.mean:.1f}, mode={self.rna_model.mode}"
-            )

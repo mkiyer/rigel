@@ -85,6 +85,9 @@ class PipelineResult:
     pipeline_config: "PipelineConfig" = None
     calibration: "CalibrationResult" = None
     calibration_payload: "object" = None  # AccumulatorPayload | None
+    # Library-wide FL distributions actually built + used for scoring/calibration
+    # (global / RNA / gDNA); the empirical views feed the summary QC report.
+    fl_models: "FLModels" = None
 
 
 def _sj_tag_to_spec(sj_strand_tag) -> str:
@@ -825,11 +828,10 @@ def run_pipeline(
 
     # -- Finalize models: cache derived values for fast scoring --
     strand_models.finalize()
-    # NOTE: the FL models for calibration + scoring are built below via
-    # build_fl_models() (RNA + gDNA + global, EB-smoothed). We do NOT call
-    # ``frag_length_models.build_scoring_models()`` / ``.finalize(...)`` here —
-    # the scanner-trained accumulator is kept raw and only consulted for its
-    # per-category FL counts.
+    # NOTE: ``frag_length_models`` holds the scanner's raw global + per-splice-category
+    # histograms only. The RNA / gDNA / global FL distributions used for calibration +
+    # scoring (and surfaced as QC) are built below via build_fl_models() (EB-smoothed,
+    # returned on PipelineResult.fl_models).
 
     # -- Calibration (acyclic) --
     # Build the region geometry, verify it lines up 1:1 with the accumulator
@@ -957,4 +959,5 @@ def run_pipeline(
         pipeline_config=config,
         calibration=calibration,
         calibration_payload=calibration_payload,
+        fl_models=fl_models,
     )

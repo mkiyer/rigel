@@ -279,8 +279,21 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     sm_primary = sm.exonic_spliced
     ci_lo, ci_hi = sm_primary.posterior_95ci()
 
-    # Fragment length: full histograms + summary statistics per category
-    fl_dict = flm.to_dict()
+    # Fragment length: full histograms + summary statistics.
+    #   global + per-splice-category  ← scanner's raw histograms (frag_length_models)
+    #   gdna + rna                    ← empirical views of the FL models actually used
+    #                                    for scoring/calibration (result.fl_models):
+    #                                    rna = spliced-annotated fragments,
+    #                                    gdna = intergenic+intronic structural pool.
+    fl_dict = flm.to_dict()  # {"global": ..., <per-category>: ...}
+    fl_models = result.fl_models
+    if fl_models is not None:
+        fl_dict = {
+            "global": fl_dict["global"],
+            "gdna": fl_models.gdna_model().to_dict(),
+            "rna": fl_models.rna_model().to_dict(),
+            **{k: v for k, v in fl_dict.items() if k != "global"},
+        }
 
     # Calibration section — minimal library-scalar observability (the v5 per-region dict stays
     # burned down). Surfacing gdna_strand_overdispersion here is required so it is never again
