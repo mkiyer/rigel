@@ -623,6 +623,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("gdna_prior_mixture_bridge", "calibration.gdna_prior_mixture_bridge"),
     _ParamSpec("sweep_n_grid_single_strand", "calibration.sweep_n_grid_single_strand"),
     _ParamSpec("sweep_disagreement_shrinkage", "calibration.sweep_disagreement_shrinkage"),
+    _ParamSpec("sweep_disagreement_pass2", "calibration.sweep_disagreement_pass2"),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -1219,6 +1220,15 @@ def build_parser() -> argparse.ArgumentParser:
         "(sigma2_msg = sigma2_imp + 1/n_src) instead of the legacy disagreement-aware precision. Bounds "
         "message precision by the empirical adjacent-node imputation floor, fixing the runaway-precision "
         "bug where a confident source overrides the strand signal. Advanced calibration knob (default off).",
+    )
+    adv.add_argument(
+        "--sweep-disagreement-pass2",
+        dest="sweep_disagreement_pass2",
+        choices=("component", "total", "local"),
+        default=None,
+        help="Pass-2 disagreement-variance basis (with --sweep-disagreement-shrinkage): 'component' "
+        "(per-component gDNA/RNA, default), 'total' (single belief-free total-density for all channels), "
+        "or 'local' (per-edge total-density shrunk to global by a data-derived weight). Advanced knob.",
     )
     adv.add_argument(
         "--gdna-em-llr-bias",

@@ -53,6 +53,9 @@ INTERVALS_TSV = "intervals.tsv"
 REGIONS_FEATHER = "regions.feather"
 REGIONS_TSV = "regions.tsv"
 
+BOUNDARIES_FEATHER = "boundaries.feather"
+BOUNDARIES_TSV = "boundaries.tsv"
+
 SJ_FEATHER = "sj.feather"
 SJ_TSV = "sj.tsv"
 
@@ -75,7 +78,12 @@ MANIFEST_JSON = "manifest.json"
 #:   5 — calibration-v6: regions.feather is the minimal merged-signature
 #:        partition [region_id, ref_name, start, end, length, signature];
 #:        the derived coarse class is recomputed on load from `signature`.
-INDEX_FORMAT_VERSION = 5
+#:   6 — three-channel calibration: regions.feather gains per-strand
+#:        `mature_eligible_{pos,neg}` (multi-exon exon coverage) and a new
+#:        boundaries.feather carries the per-boundary annotation flags
+#:        (is_tss/is_tes/is_splice_junction/genomic_sj_strand). See
+#:        docs/calibration/three_component_mature_nascent_design.md §4.
+INDEX_FORMAT_VERSION = 6
 
 
 def _rigel_version() -> str:
@@ -702,14 +710,16 @@ def _group_transcripts_by_ref(
 def build_index_artifacts(
     transcripts: list[Transcript],
     ref_lengths: dict[str, int],
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Build both ``intervals.feather`` and ``regions.feather`` from a single sweep.
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Build ``intervals.feather``, ``regions.feather`` and ``boundaries.feather`` from a single sweep.
 
     Iterates each reference's layout (intergenic / genic spans) exactly
     once and feeds it into two emitters: the cgranges-style annotated
-    interval table and the calibration region partition.
+    interval table and the calibration region partition. The boundary
+    partition (one row per region interface, carrying the annotation
+    structural flags) is derived from the region partition + transcripts.
 
-    Returns ``(intervals_df, regions_df)``. Both DataFrames are typed
+    Returns ``(intervals_df, regions_df, boundaries_df)``. All DataFrames are typed
     per the on-disk schemas:
 
       - intervals_df: columns of :class:`AnnotatedInterval`, sorted by
@@ -721,7 +731,7 @@ def build_index_artifacts(
 
     Transcripts must be sorted by ``(ref, start, end)``.
     """
-    from .calibration.regions import build_region_partition
+    from .calibration.regions import build_boundary_partition, build_region_partition
 
     ref_transcripts = _group_transcripts_by_ref(transcripts, ref_lengths)
 
@@ -736,8 +746,9 @@ def build_index_artifacts(
     intervals.sort(key=lambda iv: (iv.ref, iv.start, iv.end, iv.strand))
     iv_df = pd.DataFrame(intervals, columns=AnnotatedInterval._fields)
     region_df = build_region_partition(transcripts, ref_lengths)
+    boundary_df = build_boundary_partition(region_df, transcripts, ref_lengths)
 
-    return iv_df, region_df
+    return iv_df, region_df, boundary_df
 
 
 # ---------------------------------------------------------------------------
@@ -944,10 +955,13 @@ class TranscriptIndex:
         if write_tsv:
             sj_df.to_csv(output_dir / SJ_TSV, sep="\t", index=False)
 
-        # -- Genomic intervals + region partition ----------------------------
-        logger.info("[START] Building genomic intervals + region partition")
-        iv_df, region_df = build_index_artifacts(transcripts, ref_lengths)
-        logger.info(f"[DONE] {len(iv_df)} genomic intervals, {len(region_df)} regions")
+        # -- Genomic intervals + region/boundary partition -------------------
+        logger.info("[START] Building genomic intervals + region/boundary partition")
+        iv_df, region_df, boundary_df = build_index_artifacts(transcripts, ref_lengths)
+        logger.info(
+            f"[DONE] {len(iv_df)} genomic intervals, {len(region_df)} regions, "
+            f"{len(boundary_df)} boundaries"
+        )
 
         iv_df.to_feather(output_dir / INTERVALS_FEATHER, **feather_kwargs)
         if write_tsv:
@@ -956,6 +970,10 @@ class TranscriptIndex:
         region_df.to_feather(output_dir / REGIONS_FEATHER, **feather_kwargs)
         if write_tsv:
             region_df.to_csv(output_dir / REGIONS_TSV, sep="\t", index=False)
+
+        boundary_df.to_feather(output_dir / BOUNDARIES_FEATHER, **feather_kwargs)
+        if write_tsv:
+            boundary_df.to_csv(output_dir / BOUNDARIES_TSV, sep="\t", index=False)
 
         # -- Splice-junction artifact blacklist (from alignable Zarr) -------
         if alignable_zarr_path is not None:
@@ -1059,9 +1077,11 @@ class TranscriptIndex:
 
         # -- reference lengths -------------------------------------------------
         from .calibration.regions import (
+            load_boundaries,
             load_ref_lengths,
             load_regions,
             validate_against_ref_lengths,
+            validate_boundaries_against_regions,
         )
 
         ref_lengths_path = os.path.join(index_dir, REF_LENGTHS_FEATHER)
@@ -1142,6 +1162,17 @@ class TranscriptIndex:
             )
         self.region_df = load_regions(regions_path)
         validate_against_ref_lengths(self.region_df, self.ref_lengths)
+
+        # -- boundary partition (calibration structural flags) ----------------
+        logger.debug("Reading boundaries")
+        boundaries_path = os.path.join(index_dir, BOUNDARIES_FEATHER)
+        if not os.path.exists(boundaries_path):
+            raise RuntimeError(
+                f"Index at {index_dir} is missing {BOUNDARIES_FEATHER}. "
+                f"Rebuild the index (rigel index --fasta ... --gtf ...)."
+            )
+        self.boundary_df = load_boundaries(boundaries_path)
+        validate_boundaries_against_regions(self.boundary_df, self.region_df)
 
         # -- interval index (unified cgranges) ---------------------------------
         logger.debug("Reading intervals")

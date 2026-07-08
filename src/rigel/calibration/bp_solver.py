@@ -688,9 +688,11 @@ def _floor_estimate(chain, geometry, region_arrays, f_g_init, kappa):
     back to the raw ``M/E_g`` (``w→0``: the nascent-sparse assumption — introns ARE the gDNA floor).
     Intergenic regions are locked ``f_g_init=1`` ⇒ their full ``M/E_g`` always counts.
 
-    Returns ``(rho_floor, s2_floor, var_mean_floor, floor_mask)``: the exposure-pooled floor rate, the
+    Returns ``(rho_floor, s2_floor, var_mean_floor, floor_mask, s2_bg)``: the exposure-pooled floor rate, the
     between-region log-density SPREAD (the floor tightness — biological/CNV excess over the per-region
-    Poisson floor), the rate-estimate variance ``1/(1+G)``, and the per-chain-node depleted-REGION mask.
+    Poisson floor), the rate-estimate variance ``1/(1+G)``, the per-chain-node depleted-REGION mask, and the
+    INTERGENIC-only background log-density spread ``s2_bg`` (the clean control for the Phase-2c intron density
+    likelihood).
     """
     kind = np.asarray(chain.kind)
     is_reg = kind == REGION
@@ -713,23 +715,31 @@ def _floor_estimate(chain, geometry, region_arrays, f_g_init, kappa):
     # Between-region SPREAD of log gDNA-density over the POPULATED floor regions (eff-weighted population
     # variance minus the per-region log-Poisson floor → the excess/biological spread, ≥0). Tight for a
     # coherent depleted population (a confident floor); naturally widens on real data (GC/mappability).
-    pop = g_dens > 0.0
-    if int(np.sum(pop)) >= 2:
-        lr = np.log(g_dens[pop])
-        w = eff[pop]
-        sw = float(np.sum(w))
-        mu = float(np.sum(w * lr) / sw)
-        s2_raw = float(np.sum(w * (lr - mu) ** 2) / sw)
-        pois = float(np.mean(1.0 / (g_dens[pop] * eff[pop] + 1.0)))
-        s2_floor = max(s2_raw - pois, 0.0)
-    else:
-        s2_floor = 0.0
-    return rho_floor, s2_floor, var_mean_floor, floor_mask
+    def _logdens_spread(dvals, evals):
+        """Eff-weighted between-node log-density spread minus the per-node log-Poisson floor (the excess/
+        biological spread, ≥0); 0.0 for <2 populated nodes."""
+        p = dvals > 0.0
+        if int(np.sum(p)) < 2:
+            return 0.0
+        lr_ = np.log(dvals[p]); w_ = evals[p]; sw_ = float(np.sum(w_))
+        mu_ = float(np.sum(w_ * lr_) / sw_)
+        s2_raw_ = float(np.sum(w_ * (lr_ - mu_) ** 2) / sw_)
+        pois_ = float(np.mean(1.0 / (dvals[p] * evals[p] + 1.0)))
+        return max(s2_raw_ - pois_, 0.0)
+
+    s2_floor = _logdens_spread(g_dens, eff)
+    # Background log-density spread for the Phase-2c intron density likelihood = the intergenic **+ intron**
+    # floor spread. It must capture the gDNA density variation RELEVANT TO INTRONS (GC / length / mappability /
+    # capture off-target) — intergenic-only is too tight, so ordinary intron gDNA variation would read as
+    # far-tail "excess" (phantom nascent, validated). Sparse nascent barely inflates it, and the strand-deconv
+    # (`gdna_frac`) discounts stranded-RNA introns out of it. So `s2_bg = s2_floor`.
+    s2_bg = s2_floor
+    return rho_floor, s2_floor, var_mean_floor, floor_mask, s2_bg
 
 
 def _global_logprior(
     fgg, mass_global, eff_global, rho_global, sigma2_g, var_mean,
-    *, floor_mask=None, rho_floor=None, s2_floor_total=None,
+    *, floor_mask=None, rho_floor=None, s2_floor_total=None, s2_bg=None,
 ):
     """Precompute the count-space global as a per-node BINOMIAL pseudo-count on f_g, ``(n_nodes, P)`` (§4):
 
@@ -771,8 +781,30 @@ def _global_logprior(
     # low/zero-gDNA nodes finite. (The target VALUES — floor for depleted, ρ_global elsewhere — stay; only
     # their weight is capped.)
     n_node = np.minimum(n_node, _GLOBAL_STAB_PREC)
+    # PHASE 2c — the intron DENSITY LIKELIHOOD (`three_component_mature_nascent_design.md` §10.3-10.4). For the
+    # depleted floor nodes (intergenic + pure introns — off-target, so the intergenic background is a clean
+    # control), the density-vs-background term is a LIKELIHOOD (the node's count vs the population), NOT the
+    # capped hyperprior, so its precision is DATA-DRIVEN `1/(σ²_bg + 1/N)` (N = the node's unspliced mass) and
+    # is applied AFTER the stability cap (it overrides the clamp for these nodes only). It is BOUNDED — `≤ N`
+    # (Poisson) and `≤ 1/σ²_bg` (finite empirical spread) — never infinite, and cannot collapse (σ²_bg, N are
+    # fixed); the outgoing MESSAGE precision stays separately ceilinged by σ²_imp in `_scan`, so no
+    # overconfident message can leave a node regardless of this local certainty. Engaged only on the shrinkage
+    # path (s2_bg is None ⇒ the legacy capped floor, byte-identical).
     log_fg = np.log(np.maximum(np.asarray(fgg, np.float64), _EPS))  # (K,)
-    return -0.5 * n_node[:, None] * (log_fg[None, :] - target[:, None]) ** 2
+    term = -0.5 * n_node[:, None] * (log_fg[None, :] - target[:, None]) ** 2
+    if floor_mask is not None and s2_bg is not None:
+        fm = np.asarray(floor_mask, bool)
+        n_node[fm] = 1.0 / (float(s2_bg) + 1.0 / mass[fm])
+        # The density term is a background Gaussian on log ρ_g whose MODE is f_g = ρ_bg/ρ. Alone, that pins any
+        # intron ABOVE the background mean below 1 — reading ordinary gDNA density variation as nascent. The
+        # scale-free RNA parsimony (Jeffreys ``−log(1−f_g)``, the same term `_kde_logprior` carries) corrects
+        # this: gDNA is the residual after a typical-magnitude RNA, so the BULK (within σ²_bg) pins to f_g≈1 and
+        # only a genuine far-tail density EXCESS becomes nascent (`three_component_mature_nascent_design.md`
+        # §10.3). On the shrinkage path the floor nodes use THIS density likelihood in place of the capped
+        # floor, so the term is rebuilt for them (mode + data-driven precision + parsimony).
+        jeff = -np.log1p(-np.minimum(np.asarray(fgg, np.float64), 1.0 - _EPS))  # (K,)
+        term[fm, :] = -0.5 * n_node[fm, None] * (log_fg[None, :] - target[fm, None]) ** 2 + jeff[None, :]
+    return term
 
 
 # Lattice density for the tabulate-and-interpolate KDE evaluation in _kde_logprior: this many lattice
@@ -848,43 +880,186 @@ def _kde_logprior(fgg, mass_global, eff_global, gdna_prior):
     return kde_term + jeffreys[None, :]
 
 
-def adjacent_disagreement_variance(chain: NodeChain, geometry: NodeGeometry) -> float:
-    """Poisson disagreement-variance estimator (v1, total density) — the imputation-noise floor σ²_imp
-    (``disagreement_shrinkage_prior_design_v2.md`` §2). Over adjacent boundary↔region edges, the observed
-    log-density disagreement decomposes ``Var(d) = σ²_imp + 1/n_i + 1/n_j``; we subtract each pair's known
-    Poisson sampling and average, inverse-variance weighted (``w = nᵢnⱼ/(nᵢ+nⱼ)`` — the harmonic form, 0 at
-    zero count, no threshold, all pairs used).
-
-    Densities are the naive-gDNA total density ``ρ = mass / eff_gdna`` (the frame the gDNA message uses under
-    ``fg=1``); each edge is oriented boundary→region so the systematic boundary-vs-region eff-length frame
-    offset is a single mode removed by the median (NOT split into ±δ, which would inflate the variance)."""
-    left = np.asarray(chain.left)  # noqa: F841 (kept for symmetry / future reverse-edge use)
-    right = np.asarray(chain.right)
-    kind = np.asarray(chain.kind)
-    ML = np.asarray(geometry.mass_left); MR = np.asarray(geometry.mass_right)
-    EGL = np.asarray(geometry.eff_gdna_left); EGR = np.asarray(geometry.eff_gdna_right)
-    src = np.arange(kind.shape[0])
-    dst = right
-    m = dst >= 0
-    src, dst = src[m], dst[m]                       # each undirected edge once (i → right[i])
-    n_i, e_i = MR[src], EGR[src]                     # src's right face
-    n_j, e_j = ML[dst], EGL[dst]                     # dst's left face
-    ok = (n_i > _EPS) & (n_j > _EPS) & (e_i > _EPS) & (e_j > _EPS)
-    src, dst, n_i, e_i, n_j, e_j = src[ok], dst[ok], n_i[ok], e_i[ok], n_j[ok], e_j[ok]
-    if src.size < 2:
-        return 1.0                                   # degenerate (no adjacent pairs) — should not occur
-    lr_i = np.log(n_i / e_i); lr_j = np.log(n_j / e_j)
-    src_is_bnd = kind[src] == BOUNDARY               # orient boundary→region (consistent sign, one mode)
-    resid = np.where(src_is_bnd, lr_i - lr_j, lr_j - lr_i)
-    ns = np.where(src_is_bnd, n_i, n_j)              # boundary (source) count
-    nd = np.where(src_is_bnd, n_j, n_i)              # region (dst) count
+def _poisson_moment_var(resid, ns, nd) -> float:
+    """The §2 Poisson disagreement-variance moment estimator, shared by the v1 total-density and v2
+    per-component estimators. ``Var(d) = σ²_imp + 1/n_i + 1/n_j`` ⇒ subtract each pair's known Poisson
+    sampling and inverse-variance-weight-average (``w = nᵢnⱼ/(nᵢ+nⱼ)``, harmonic — 0 at zero count, no
+    threshold). ``resid`` must already be oriented to a single sign convention (so the systematic frame
+    offset is one mode); it is median-centered here. ``ns``/``nd`` are symmetric in ``w`` and ``v`` so their
+    orientation is irrelevant. Returns ``max(·, 0)``; a degenerate (no pairs) input returns 1.0."""
+    resid = np.asarray(resid, float); ns = np.asarray(ns, float); nd = np.asarray(nd, float)
+    ok = np.isfinite(resid) & (ns > _EPS) & (nd > _EPS)
+    resid, ns, nd = resid[ok], ns[ok], nd[ok]
+    if resid.size < 2:
+        return 1.0
     dc = resid - np.median(resid)                    # remove the systematic frame offset
-    w = (ns * nd) / (ns + nd)                        # harmonic inverse-variance weight
-    v = 1.0 / ns + 1.0 / nd                          # per-pair Poisson sampling variance
+    w = (ns * nd) / (ns + nd)
     den = float(np.sum(w))
     if den <= _EPS:
         return 1.0
-    return float(max(np.sum(w * (dc * dc - v)) / den, 0.0))
+    return float(max(np.sum(w * (dc * dc - (1.0 / ns + 1.0 / nd))) / den, 0.0))
+
+
+def _chain_mature_eligible(chain: NodeChain, region_arrays, boundary_substrate):
+    """Per-chain-node mature-eligibility ``(pos, neg)`` — the structural gate for the mature RNA channel
+    (`docs/calibration/three_component_mature_nascent_design.md` §4/§5).
+
+    A REGION node reads its stored ``RegionArrays.mature_eligible_{pos,neg}`` (overlaps a multi-exon exon on
+    that strand). A BOUNDARY node is mature-eligible on ``s`` iff **both** flank regions are — an exon↔exon
+    seam, where mature transits. A splice junction (one intron flank) or a reference terminal (one off-edge
+    flank) is NOT mature-eligible: mature sinks there (its unspliced crossing is nascent), and the junction's
+    spliced mass enters the abutting exon via the separate source term in ``_scan``, not this gate."""
+    kind = np.asarray(chain.kind)
+    idx = np.asarray(chain.ref_idx, dtype=np.int64)
+    is_reg = kind == REGION
+    R = np.asarray(region_arrays.signature).shape[0]
+    # A region_arrays without the mature columns (only partial test namespaces) ⇒ nothing mature-eligible,
+    # the conservative all-nascent fallback (a real RegionArrays always carries them, calibration-v6+).
+    _me_p = getattr(region_arrays, "mature_eligible_pos", None)
+    _me_n = getattr(region_arrays, "mature_eligible_neg", None)
+    me_p = np.zeros(R, bool) if _me_p is None else np.asarray(_me_p, bool)
+    me_n = np.zeros(R, bool) if _me_n is None else np.asarray(_me_n, bool)
+    blr = np.asarray(boundary_substrate.left_region, dtype=np.int64)
+    brr = np.asarray(boundary_substrate.right_region, dtype=np.int64)
+    B = blr.shape[0]
+    ri_ = np.clip(idx, 0, R - 1)
+    bi_ = np.clip(idx, 0, B - 1)
+
+    def _bnd(me):
+        lr, rr = blr[bi_], brr[bi_]
+        both = (lr >= 0) & (rr >= 0)
+        return both & me[np.clip(lr, 0, R - 1)] & me[np.clip(rr, 0, R - 1)]
+
+    return (
+        np.where(is_reg, me_p[ri_], _bnd(me_p)),
+        np.where(is_reg, me_n[ri_], _bnd(me_n)),
+    )
+
+
+def _adjacent_edges(chain: NodeChain):
+    """Adjacent boundary↔region edges as (src, dst, src_is_boundary), each undirected edge once (i→right[i]).
+    src presents its RIGHT face to dst; dst its LEFT face."""
+    kind = np.asarray(chain.kind)
+    right = np.asarray(chain.right)
+    src = np.arange(kind.shape[0])
+    dst = right
+    m = dst >= 0
+    src, dst = src[m], dst[m]
+    return src, dst, kind[src] == BOUNDARY
+
+
+def adjacent_disagreement_variance(chain: NodeChain, geometry: NodeGeometry) -> float:
+    """v1 total-density σ²_imp (``disagreement_shrinkage_prior_design_v2.md`` §2): the naive-gDNA density
+    ``ρ = mass / eff_gdna`` (the frame the gDNA message uses under ``fg=1``), over adjacent boundary↔region
+    edges, oriented boundary→region so the frame offset is a single median-removable mode."""
+    ML = np.asarray(geometry.mass_left); MR = np.asarray(geometry.mass_right)
+    EGL = np.asarray(geometry.eff_gdna_left); EGR = np.asarray(geometry.eff_gdna_right)
+    src, dst, s_bnd = _adjacent_edges(chain)
+    n_i, e_i, n_j, e_j = MR[src], EGR[src], ML[dst], EGL[dst]
+    ok = (n_i > _EPS) & (n_j > _EPS) & (e_i > _EPS) & (e_j > _EPS)
+    n_i, e_i, n_j, e_j, s_bnd = n_i[ok], e_i[ok], n_j[ok], e_j[ok], s_bnd[ok]
+    lr_i = np.log(n_i / e_i); lr_j = np.log(n_j / e_j)
+    resid = np.where(s_bnd, lr_i - lr_j, lr_j - lr_i)   # orient boundary→region (one mode)
+    return _poisson_moment_var(resid, n_i, n_j)
+
+
+def adjacent_disagreement_local(chain: NodeChain, geometry: NodeGeometry) -> np.ndarray:
+    """PER-EDGE **local** total-density σ²_imp, shrunk toward the global by a DATA-DERIVED weight (no tuned
+    constant). Same total-density frame as :func:`adjacent_disagreement_variance` (ρ = mass/eff_gdna, the
+    fg=1 naive-gDNA density — belief-free, so echo-chamber-free), but instead of collapsing to one global
+    scalar it keeps each edge's disagreement d²_e and shrinks it toward the global with an empirical-Bayes /
+    DerSimonian-Laird moderated-variance weight ν = W̄/B:
+
+      * d²_e   = (median-centered oriented log-density difference)² − Poisson(1/n_i+1/n_j)   — the per-edge
+                 disagreement (the summand :func:`_poisson_moment_var` averages away), a 1-df variance estimate.
+      * σ²_g   = the shipped clamped inverse-variance-weighted mean of d²_e (the GLOBAL shrink target).
+      * W̄      = Σw·2(σ²_g+pois)²/Σw — the sampling variance of a 1-df per-edge d²_e (squared Gaussian).
+      * B      = max(Σw(d²_e−σ²_g)²/Σw − W̄, 0) — the between-edge heterogeneity beyond sampling.
+      * ν      = W̄/B ;  σ²_edge = max((ν·σ²_g + d²_e)/(ν+1), 0).
+
+    B→0 (HOMOGENEOUS — the observed spread is all sampling) ⇒ ν→∞ ⇒ σ²_edge ≡ σ²_g at every edge, recovering
+    the shipped full-shrink EXACTLY (strict generalization). B fit over the WHOLE edge population is stable
+    (no per-class small-sample noise). Returns a per-CHAIN-NODE array keyed by each edge's LEFT endpoint — the
+    message key in :func:`node_sweep._scan` (both scan directions of an undirected edge share that key, so a
+    message is weighted by its own edge's reliability regardless of direction); nodes that are no edge's left
+    endpoint hold σ²_g as an inert default."""
+    ML = np.asarray(geometry.mass_left); MR = np.asarray(geometry.mass_right)
+    EGL = np.asarray(geometry.eff_gdna_left); EGR = np.asarray(geometry.eff_gdna_right)
+    src, dst, s_bnd = _adjacent_edges(chain)
+    n_i, e_i, n_j, e_j = MR[src], EGR[src], ML[dst], EGL[dst]
+    ok = (n_i > _EPS) & (n_j > _EPS) & (e_i > _EPS) & (e_j > _EPS)
+    src_e, n_i, e_i, n_j, e_j, s_bnd = src[ok], n_i[ok], e_i[ok], n_j[ok], e_j[ok], s_bnd[ok]
+    n_nodes = np.asarray(chain.kind).shape[0]
+    if src_e.size < 2:
+        return np.full(n_nodes, 1.0)
+    resid = np.where(s_bnd, np.log(n_i / e_i) - np.log(n_j / e_j), np.log(n_j / e_j) - np.log(n_i / e_i))
+    dc = resid - np.median(resid)                          # GLOBAL median-centering (removes the frame offset)
+    pois = 1.0 / n_i + 1.0 / n_j
+    w = (n_i * n_j) / (n_i + n_j)                           # harmonic weight = 1/pois
+    d2 = dc * dc - pois                                     # per-edge disagreement (may be < 0)
+    sw = float(np.sum(w))
+    g = max(float(np.sum(w * d2) / sw), 0.0)               # global σ²_g (shipped clamped IVW mean)
+    W_e = 2.0 * (g + pois) ** 2                             # 1-df sampling variance of d²_e
+    Wbar = float(np.sum(w * W_e) / sw)
+    var_d2 = float(np.sum(w * (d2 - g) ** 2) / sw)
+    B = max(var_d2 - Wbar, 0.0)                             # between-edge heterogeneity (whole population)
+    out = np.full(n_nodes, g, float)                       # inert default = global
+    if B > _EPS:
+        nu = Wbar / B
+        out[src_e] = np.maximum((nu * g + d2) / (nu + 1.0), 0.0)
+    return out
+
+
+def adjacent_component_disagreement_variance(
+    chain: NodeChain, geometry: NodeGeometry, belief: NodeBelief, statics: NodeStatics,
+    include_ambig: bool = True,
+) -> tuple[float, float]:
+    """v2 per-component σ²_imp ``(gDNA, RNA)`` from the SOLVED belief over adjacent boundary↔region edges
+    (``disagreement_shrinkage_prior_design_v2.md`` §3.1). Component density / count match the ``_scan``
+    message: gDNA ``(f_g·mass/eff_gdna, f_g·mass)`` on ALL edges; RNA the per-strand
+    ``(f_s·mass/eff_rna + spliced_s/eff_spl, f_s·mass + spliced_s)`` on ``free_s`` edges, POOLED over ±.
+    AMBIG (both strands live) edges are excluded unless ``include_ambig`` (refit-1 excludes; refit-2 includes).
+    All resids are oriented boundary→region (§2) then median-centered in :func:`_poisson_moment_var`."""
+    ML = np.asarray(geometry.mass_left); MR = np.asarray(geometry.mass_right)
+    EGL = np.asarray(geometry.eff_gdna_left); EGR = np.asarray(geometry.eff_gdna_right)
+    ERL = np.maximum(np.asarray(geometry.eff_rna_left), _EPS)
+    ERR = np.maximum(np.asarray(geometry.eff_rna_right), _EPS)
+    ESPL = np.maximum(np.asarray(geometry.eff_spl_left), _EPS)
+    ESPR = np.maximum(np.asarray(geometry.eff_spl_right), _EPS)
+    SPL = np.asarray(geometry.spliced_pos_left); SPR = np.asarray(geometry.spliced_pos_right)
+    SNL = np.asarray(geometry.spliced_neg_left); SNR = np.asarray(geometry.spliced_neg_right)
+    fg = np.asarray(belief.f_g); fp = np.asarray(belief.f_pos); fn = np.asarray(belief.f_neg)
+    freep = np.asarray(statics.free_pos, bool); freen = np.asarray(statics.free_neg, bool)
+    ambig = freep & freen
+    src, dst, s_bnd = _adjacent_edges(chain)
+    if not include_ambig:
+        keep = ~(ambig[src] | ambig[dst])
+        src, dst, s_bnd = src[keep], dst[keep], s_bnd[keep]
+    if src.size < 2:
+        return 1.0, 1.0
+
+    def _orient(li, lj):
+        return np.where(s_bnd, li - lj, lj - li)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        # gDNA — all edges
+        ng_i = fg[src] * MR[src]; ng_j = fg[dst] * ML[dst]
+        rg = _orient(np.log(ng_i / np.maximum(EGR[src], _EPS)),
+                     np.log(ng_j / np.maximum(EGL[dst], _EPS)))
+        sig_g = _poisson_moment_var(rg, ng_i, ng_j)
+        # RNA — per strand on free_s edges, pooled over ±
+        r_all = []; ni_all = []; nj_all = []
+        for fs, spl_i, spl_j, free_s in ((fp, SPR, SPL, freep), (fn, SNR, SNL, freen)):
+            n_i = fs[src] * MR[src] + spl_i[src]
+            n_j = fs[dst] * ML[dst] + spl_j[dst]
+            rho_i = fs[src] * MR[src] / ERR[src] + spl_i[src] / ESPR[src]
+            rho_j = fs[dst] * ML[dst] / ERL[dst] + spl_j[dst] / ESPL[dst]
+            live = free_s[src] & free_s[dst] & (n_i > _EPS) & (n_j > _EPS)
+            r_all.append(_orient(np.log(rho_i), np.log(rho_j))[live])
+            ni_all.append(n_i[live]); nj_all.append(n_j[live])
+    resid_rna = np.concatenate(r_all); n_rna_i = np.concatenate(ni_all); n_rna_j = np.concatenate(nj_all)
+    sig_rna = _poisson_moment_var(resid_rna, n_rna_i, n_rna_j) if resid_rna.size >= 2 else 1.0
+    return float(sig_g), float(sig_rna)
 
 
 def node_sweep(
@@ -905,7 +1080,8 @@ def node_sweep(
     n_tilt: int | None = None,
     n_grid_ss: int | None = None,
     gdna_prior=None,
-    disagreement_sigma2: float | None = None,
+    disagreement_sigma2: float | tuple[float, float] | None = None,
+    mature_nascent_split: bool = True,
     _capture: dict | None = None,
 ):
     """The belief-propagation sweep over the chain — gDNA AND per-strand RNA messages, in COUNT space (no
@@ -1001,7 +1177,7 @@ def node_sweep(
     # The DEPLETED gDNA FLOOR from intergenic + intron REGIONS (the user's empirical-prior directive): a
     # confident floor that pins depleted intron nodes (the nascent-hallucination fix), letting an intron
     # with density excess over the floor carry nascent. Exons/boundaries keep the genome-wide global.
-    rho_floor, s2_floor, var_mean_floor, floor_mask = _floor_estimate(
+    rho_floor, s2_floor, var_mean_floor, floor_mask, s2_bg = _floor_estimate(
         chain, geometry, region_arrays, f_g, kappa
     )
     # The global gDNA prior on f_g, an (n_nodes, K) log-term on the solve grid, applied to ALL nodes. It is
@@ -1016,9 +1192,13 @@ def node_sweep(
     # went 0.02→0.38). ANCHORED — every input is fit once, so the prior is CONSTANT within a pass.
     # PASS 1 (gdna_prior=None): the weak stability floor only (strand + messages carry the single-strand solve;
     # the floor keeps low/zero-gDNA nodes finite and anchors the depleted population that trains the KDE).
+    # Phase 2c: on the shrinkage path, the floor nodes get the DATA-DRIVEN intron density likelihood
+    # (`s2_bg`, uncapped in `_global_logprior`); off the flag (`disagreement_sigma2 is None`) `s2_bg=None`
+    # keeps the legacy capped floor byte-identical.
+    _s2_bg = s2_bg if disagreement_sigma2 is not None else None
     global_lp = _global_logprior(
         solve_grid, mass_global, eff_global, rho_global, gdna_vm, var_mean,
-        floor_mask=floor_mask, rho_floor=rho_floor, s2_floor_total=var_mean_floor + s2_floor,
+        floor_mask=floor_mask, rho_floor=rho_floor, s2_floor_total=var_mean_floor + s2_floor, s2_bg=_s2_bg,
     )
     # PASS 2 (gdna_prior set): ADD the generative two-density prior — the empirical gDNA-density KDE (real
     # tails) × the Jeffreys RNA prior 1/(1−f_g) (`_kde_logprior`). This is the density-prior INTEGRATION: the
@@ -1028,7 +1208,17 @@ def node_sweep(
     # ambig_boundary_spliced_deconvolution.md. Applied to ALL solvable nodes (self-scaling: a confident strand
     # dominates ψ, an AMBIG/thin node leans on the population).
     if gdna_prior is not None:
-        global_lp = global_lp + _kde_logprior(solve_grid, mass_global, eff_global, gdna_prior)
+        kde_lp = _kde_logprior(solve_grid, mass_global, eff_global, gdna_prior)
+        if _s2_bg is not None:
+            # PHASE 2c — node-type-specific density prior (no double-count). The FLOOR nodes (intergenic +
+            # introns, off-target) use the intergenic-background density LIKELIHOOD (Gaussian + Jeffreys, built
+            # in `_global_logprior` above), so they are EXCLUDED from the capture-aware KDE here — the KDE is
+            # the density model for on-target ENRICHED exons/boundaries. This gives exactly ONE density prior
+            # and ONE Jeffreys RNA-parsimony per node; without the exclusion, floor nodes would carry the
+            # Jeffreys twice (once from each), doubling the parsimony and over-pinning introns to gDNA.
+            kde_lp = kde_lp.copy()
+            kde_lp[np.asarray(floor_mask, bool), :] = 0.0
+        global_lp = global_lp + kde_lp
 
     # Genomic node order for the forward/backward scans (within each ref path; left/right break at −1). The
     # scans are sequential per node, so iterate as a Python list of ints (faster than numpy scalar indexing).
@@ -1049,6 +1239,61 @@ def node_sweep(
     pp_loc = 1.0 / np.maximum(vp_loc, _EPS)
     pn_loc = 1.0 / np.maximum(vn_loc, _EPS)
 
+    # Disagreement-shrinkage precision floor (`disagreement_shrinkage_prior_design_v2.md`): None → legacy
+    # σ²_edge path; a scalar (v1, total density) applies to all components; a (gDNA, RNA) tuple (v2,
+    # per-component) applies σ²_imp,gDNA to the gDNA message and σ²_imp,RNA to both RNA messages.
+    if disagreement_sigma2 is None:
+        _sig_g = _sig_rna = _sig_edge = None
+        _shrink_on = _per_edge = False
+    elif isinstance(disagreement_sigma2, np.ndarray):
+        # PER-EDGE (local) total-density σ²_imp, keyed by each edge's LEFT endpoint (chain-node index) — one
+        # value per edge shared by ALL message channels (the total-density basis). See adjacent_disagreement_local.
+        _sig_edge = np.asarray(disagreement_sigma2, float)
+        _sig_g = _sig_rna = None
+        _shrink_on = _per_edge = True
+    elif isinstance(disagreement_sigma2, (tuple, list)):
+        _sig_g, _sig_rna = float(disagreement_sigma2[0]), float(disagreement_sigma2[1])
+        _sig_edge = None
+        _shrink_on = True
+        _per_edge = False
+    else:
+        _sig_g = _sig_rna = float(disagreement_sigma2)
+        _sig_edge = None
+        _shrink_on = True
+        _per_edge = False
+    # MATURE/NASCENT MESSAGE SPLIT (the 3-channel). ``_mat_split`` engages the three-channel RNA message (mature
+    # sub-message into mature-eligible exons + a separate nascent running belief); OFF ⇒ a single LUMPED RNA
+    # message (the 2-component {RNA,gDNA} model), with the intron-density penalty (``_global_logprior``, gated on
+    # ``_s2_bg``/shrinkage) as the SOLE bleed-stopper. Only meaningful on the shrinkage path (else the legacy
+    # lumped ``σ²_edge`` message runs regardless). Default ON ⇒ production byte-identical.
+    _mat_split = _shrink_on and mature_nascent_split
+
+    # THREE-CHANNEL structural state (mature/nascent split, `three_component_mature_nascent_design.md` §5/§6;
+    # engaged only on the shrinkage path). ``mat_elig_*`` is the per-chain-node DESTINATION gate for the mature
+    # channel: mature flows only into a mature-eligible node (an exon / exon↔exon seam), never an intron. The
+    # nascent channel's LOCAL prior is ``f_pos`` at mature-INELIGIBLE nodes (introns / single-exon exons — where
+    # nascent is conceived) and 0 with NO local precision at mature-eligible exons (pure message-driven, lifted
+    # only by nascent arriving from an intron) — realizing "nascent = 0 unless an intron lifts it".
+    mat_elig_p, mat_elig_n = _chain_mature_eligible(chain, region_arrays, boundary_substrate)
+    # Nascent is CONCEIVED at every mature-ineligible node, but its source PRECISION is by node type
+    # (`three_component_mature_nascent_design.md` §10.3-10.5):
+    #   * PURE-INTRON regions (coarse-type intron — off-target, so the intergenic control is valid): full
+    #     `p_loc`, DENSITY-CALIBRATED by the data-driven intron density likelihood above (a background-level
+    #     intron pins to f_g≈1 ⇒ ≈0 nascent; only a genuine density excess becomes nascent).
+    #   * all OTHER mature-ineligible sources — exon-bearing single-exon/retained regions AND exon-intron
+    #     BOUNDARIES (on-target / capture-enriched ⇒ intergenic control confounded): STRAND-GATED
+    #     `(2κ−1)²·p_loc` (density deferred, O2). Unstranded ⇒ precision 0 ⇒ self-source nothing (pure relay),
+    #     so an enriched node cannot inject phantom nascent.
+    #   * mature-eligible exons: 0 (relay) — "nascent = 0 unless an intron lifts it".
+    node_rtype, _ = _node_region_type(chain, region_arrays)
+    pure_intron = node_rtype == 1  # coarse-type intron REGION (off-target; intergenic-density control valid)
+    w_str = float((2.0 * kappa - 1.0) ** 2)  # strand discriminability (derived; not a tuned constant)
+    nasc_p_loc = np.where(mat_elig_p, 0.0, fp_loc)
+    nasc_n_loc = np.where(mat_elig_n, 0.0, fn_loc)
+    pnasc_p_loc = np.where(mat_elig_p, 0.0, np.where(pure_intron, pp_loc, w_str * pp_loc))
+    pnasc_n_loc = np.where(mat_elig_n, 0.0, np.where(pure_intron, pn_loc, w_str * pn_loc))
+    lnasc_p_loc = np.log(np.maximum(nasc_p_loc, _EPS))
+    lnasc_n_loc = np.log(np.maximum(nasc_n_loc, _EPS))
 
     def _scan(seq, nbr, sf, df):
         """Sequential scan: project the running belief from each node's ``nbr`` (src face ``sf`` → dst face
@@ -1064,6 +1309,9 @@ def node_sweep(
         retired ``σ²_bio(μ)`` var~mean curve. Same formula for all three components (gDNA / ±RNA)."""
         fbg, fbp, fbn = fg_loc.copy(), fp_loc.copy(), fn_loc.copy()  # running belief (starts at local)
         vbg, vbp, vbn = vg_loc.copy(), vp_loc.copy(), vn_loc.copy()
+        # running NASCENT sub-belief per strand (three-channel path only): the contiguous, intron-sourced
+        # fraction that alone may cross into an intron. mature = fbp − nasc_p (fbn − nasc_n) is the residual.
+        nasc_p, nasc_n = nasc_p_loc.copy(), nasc_n_loc.copy()
         amg, apg = np.zeros(n_nodes), np.zeros(n_nodes)  # gDNA message (mode, prec)
         amp, app = np.zeros(n_nodes), np.zeros(n_nodes)  # RNA-pos
         amn, apn = np.zeros(n_nodes), np.zeros(n_nodes)  # RNA-neg
@@ -1081,6 +1329,12 @@ def node_sweep(
             lsrc = nbr[i]
             if lsrc < 0:
                 continue
+            # message precision basis: per-edge σ²_imp keyed by the edge LEFT endpoint (sf==1 forward ⇒ the
+            # edge is (lsrc, i) keyed by lsrc; sf==0 backward ⇒ (i, right[i]) keyed by i), else the scalar.
+            if _per_edge:
+                sig_g_e = sig_rna_e = _sig_edge[lsrc if sf else i]
+            else:
+                sig_g_e, sig_rna_e = _sig_g, _sig_rna
             md = MSd[i] if MSd[i] > _EPS else _EPS
             egd = EGd[i] if EGd[i] > _EPS else _EPS
             erd = ERd[i] if ERd[i] > _EPS else _EPS
@@ -1101,11 +1355,11 @@ def node_sweep(
                 # density base M_dst/E_gdna_dst (= md/egd), flooring ρ at the dst min-observable density
                 # 1/egd. (Fractions are not comparable across nodes — only densities are.)
                 mo = math.log(max(rho, 1.0 / egd) / (md / egd))
-                if disagreement_sigma2 is not None:
-                    # Poisson disagreement-variance (v2 design): σ²_msg = σ²_imp + 1/n_src, in the algebraic
-                    # form pr = n_src/(n_src·σ²_imp + 1) — denom ≥ 1, pr=0 exactly at n_src=0 (no message), no
+                if _shrink_on:
+                    # Poisson disagreement-variance: σ²_msg = σ²_imp,gDNA + 1/n_src, algebraic form
+                    # pr = n_src/(n_src·σ²_imp + 1) — denom ≥ 1, pr=0 exactly at n_src=0 (no message), no
                     # if/clamp. σ²_imp is the empirical adjacent-node floor; no source certainty shrinks it to 0.
-                    pr = n_src / (n_src * disagreement_sigma2 + 1.0)
+                    pr = n_src / (n_src * sig_g_e + 1.0)
                 else:
                     # pois = 1/(gDNA COUNT): the source's log-density sampling variance. NO +1 floor — a
                     # NON-DETECTION (count→0, a depleted seam) has ~∞ log-density variance → base_var huge →
@@ -1141,28 +1395,88 @@ def node_sweep(
             # density (junction-spanning reads are only partially captured ⇒ ``n_mat/E_spl`` under-estimates
             # the exon's RNA) OVERRIDE a correct strand-confident exon → phantom gDNA by simplex complement
             # (−gDNA flagship +0.04→+0.018; toy no-gDNA +0.20→+0.005; expressed exons unchanged).
-            if emit_p:
+            if emit_p and _mat_split:
+                # THREE-CHANNEL RNA⁺ (`three_component_mature_nascent_design.md` §5). Two sub-messages on one
+                # strand: NASCENT (the source's contiguous nascent fraction, crosses everywhere free_s) and
+                # MATURE (the source's mature residual `fbp−nasc_p` PLUS the junction spliced source `SPs`),
+                # which crosses ONLY into a mature-eligible destination — never an intron (the bleed fix). The
+                # SOLVE sees their sum (total RNA⁺); the running NASCENT sub-belief relays independently.
                 er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
                 esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
-                n_nasc = fbp[lsrc] * sm              # source nascent RNA count (unspliced)
-                n_mat = SPs[lsrc]  # source-face mature (>0 only B→exon): MEASURES the exon's mature
+                n_nasc = nasc_p[lsrc] * sm
+                if mat_elig_p[i]:
+                    n_mat = (fbp[lsrc] - nasc_p[lsrc]) * sm       # source mature residual (unspliced)
+                    rho = n_nasc / er + n_mat / er + SPs[lsrc] / esp
+                    n_src = n_nasc + n_mat + SPs[lsrc]
+                else:
+                    rho = n_nasc / er                             # into an intron: nascent only — NO mature
+                    n_src = n_nasc
+                mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # total RNA⁺ → dst log-f_pos frame
+                pr = n_src / (n_src * sig_rna_e + 1.0)
+                amp[i], app[i] = mo, pr
+                pt = pp_loc[i] + pr
+                fbp[i] = math.exp((pp_loc[i] * lfp_loc[i] + pr * mo) / pt)
+                vbp[i] = 1.0 / pt
+                # relay the NASCENT sub-belief: combine the dst's nascent local prior with the nascent message
+                # (density n_nasc/er). At a mature-eligible exon the local prior has precision 0, so nasc_p is
+                # purely message-driven (0 with no upstream intron ⇒ no bleed).
+                rho_n = n_nasc / er
+                mo_n = math.log(max(rho_n, 1.0 / erd) / (md / erd))
+                pr_n = n_nasc / (n_nasc * sig_rna_e + 1.0)
+                ptn = pnasc_p_loc[i] + pr_n
+                if ptn > _EPS:
+                    nasc_p[i] = math.exp((pnasc_p_loc[i] * lnasc_p_loc[i] + pr_n * mo_n) / ptn)
+            elif emit_p:
+                # LUMPED single RNA⁺ message — serves BOTH the legacy path (shrinkage off) AND the 2-component
+                # mode (shrinkage on, mature/nascent split off): total unspliced RNA + the junction spliced
+                # MEASUREMENT/absorption, with NO mature-vs-nascent decomposition. RNA flows into introns
+                # (the intron-density penalty is the sole bleed-stopper).
+                er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
+                esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
+                n_nasc = fbp[lsrc] * sm              # source total unspliced RNA count (nascent + exon-body mature)
+                n_mat = SPs[lsrc]  # source-face spliced (>0 only B→exon): MEASURES the exon's mature
                 rho_mat_dst = SPd[i] / (ESPd[i] if ESPd[i] > _EPS else _EPS)  # dst-face mature absorbed (exon→B)
-                rho = n_nasc / er + n_mat / esp - rho_mat_dst  # NASCENT density (+ MEASUREMENT into an exon)
+                rho = n_nasc / er + n_mat / esp - rho_mat_dst  # total-RNA density (+ MEASUREMENT into an exon)
                 mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_pos frame (floored at min-observable)
                 n_src = n_nasc + n_mat                            # source RNA⁺ count (Poisson sampling)
-                if disagreement_sigma2 is not None:
-                    pr = n_src / (n_src * disagreement_sigma2 + 1.0)
-                else:
+                if _shrink_on:  # 2-component: lumped RNA at the PRODUCTION disagreement precision (isolates the split)
+                    pr = n_src / (n_src * sig_rna_e + 1.0)
+                else:           # legacy σ²_edge message-vs-belief precision
                     pois = 1.0 / max(n_src, _EPS)
                     base_var = vbp[lsrc] + pois
                     s2_edge = max((mo - lfp_loc[i]) ** 2 - (base_var + vp_loc[i]), 0.0)
-                    pr = 1.0 / max(base_var + s2_edge, _EPS)          # disagreement-aware (MEASUREMENT or IMPUTATION)
+                    pr = 1.0 / max(base_var + s2_edge, _EPS)
                 amp[i], app[i] = mo, pr
                 pt = pp_loc[i] + pr
                 fbp[i] = math.exp((pp_loc[i] * lfp_loc[i] + pr * mo) / pt)
                 vbp[i] = 1.0 / pt
             # RNA-neg — symmetric (mature on the −strand junction motif; same 3-term nascent message).
-            if emit_n:
+            if emit_n and _mat_split:
+                # THREE-CHANNEL RNA⁻ — mirror of RNA⁺ (mature on the −strand junction motif; spliced source SNs).
+                er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
+                esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
+                n_nasc = nasc_n[lsrc] * sm
+                if mat_elig_n[i]:
+                    n_mat = (fbn[lsrc] - nasc_n[lsrc]) * sm
+                    rho = n_nasc / er + n_mat / er + SNs[lsrc] / esp
+                    n_src = n_nasc + n_mat + SNs[lsrc]
+                else:
+                    rho = n_nasc / er
+                    n_src = n_nasc
+                mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # total RNA⁻ → dst log-f_neg frame
+                pr = n_src / (n_src * sig_rna_e + 1.0)
+                amn[i], apn[i] = mo, pr
+                pt = pn_loc[i] + pr
+                fbn[i] = math.exp((pn_loc[i] * lfn_loc[i] + pr * mo) / pt)
+                vbn[i] = 1.0 / pt
+                rho_n = n_nasc / er
+                mo_n = math.log(max(rho_n, 1.0 / erd) / (md / erd))
+                pr_n = n_nasc / (n_nasc * sig_rna_e + 1.0)
+                ptn = pnasc_n_loc[i] + pr_n
+                if ptn > _EPS:
+                    nasc_n[i] = math.exp((pnasc_n_loc[i] * lnasc_n_loc[i] + pr_n * mo_n) / ptn)
+            elif emit_n:
+                # LUMPED single RNA⁻ message — legacy path AND 2-component mode (mirror of RNA⁺).
                 er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
                 esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
                 n_nasc = fbn[lsrc] * sm
@@ -1171,13 +1485,13 @@ def node_sweep(
                 rho = n_nasc / er + n_mat / esp - rho_mat_dst
                 mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_neg frame
                 n_src = n_nasc + n_mat                            # source RNA⁻ count (Poisson sampling)
-                if disagreement_sigma2 is not None:
-                    pr = n_src / (n_src * disagreement_sigma2 + 1.0)
-                else:
+                if _shrink_on:  # 2-component: lumped RNA at the PRODUCTION disagreement precision
+                    pr = n_src / (n_src * sig_rna_e + 1.0)
+                else:           # legacy σ²_edge message-vs-belief precision
                     pois = 1.0 / max(n_src, _EPS)
                     base_var = vbn[lsrc] + pois
                     s2_edge = max((mo - lfn_loc[i]) ** 2 - (base_var + vn_loc[i]), 0.0)
-                    pr = 1.0 / max(base_var + s2_edge, _EPS)          # disagreement-aware (MEASUREMENT or IMPUTATION)
+                    pr = 1.0 / max(base_var + s2_edge, _EPS)
                 amn[i], apn[i] = mo, pr
                 pt = pn_loc[i] + pr
                 fbn[i] = math.exp((pn_loc[i] * lfn_loc[i] + pr * mo) / pt)

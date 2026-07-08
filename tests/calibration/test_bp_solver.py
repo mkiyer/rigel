@@ -683,6 +683,43 @@ def test_mature_measurement_disagreement_silenced():
     assert float(fin_lo.f_g[ex]) < 0.45, fin_lo.f_g[ex]
 
 
+def test_three_channel_mature_blocked_from_introns():
+    """Phase-2 three-channel routing (`three_component_mature_nascent_design.md` §5): on the shrinkage path a
+    MATURE-eligible exon must send only NASCENT (≈0 here, nrna_none) into its flanking intron — its mature
+    stays on the mature channel and cannot bleed in. Asserted on the forward +RNA message into the junction B2
+    (the exon R1's right junction, whose far flank is the intron R2): treating the exon as mature-eligible
+    yields a strictly LOWER message target (less RNA imputed intron-ward) than treating it as nascent-eligible,
+    where the exon's full RNA flows in as fake nascent (the v2 bleed)."""
+
+    def run(exon_mature_eligible: bool):
+        chain, st, geom, belief, ra, bsub = _mature_exon_chain(spliced=True)
+        ra.mature_eligible_pos = np.array([False, exon_mature_eligible, False])  # R0 intron, R1 exon, R2 intron
+        ra.mature_eligible_neg = np.array([False, False, False])
+        cap: dict = {}
+        node_sweep(
+            chain, st, geom, belief, ra, bsub, rna_sense_frac=0.95, n_grid=60,
+            disagreement_sigma2=3.0, _capture=cap,  # scalar σ²_imp engages the channel path
+        )
+        b2 = 4  # chain id of B2; its left neighbour (forward src) is the exon R1
+        return float(cap["a_fwd"][2][b2]), float(cap["a_fwd"][3][b2])  # (+RNA mode, prec) into B2
+
+    mode_elig, pr_elig = run(True)     # mature-eligible: mature blocked ⇒ nascent-only ≈ 0
+    mode_inelig, pr_inelig = run(False)  # nascent-eligible: full RNA flows into the intron side (the bleed)
+    assert pr_elig > 0.0 and pr_inelig > 0.0, (pr_elig, pr_inelig)  # both are real messages
+    assert mode_elig < mode_inelig - 0.5, (mode_elig, mode_inelig)
+
+
+def test_three_channel_legacy_path_unchanged_when_flag_off():
+    """The three-channel logic engages ONLY on the shrinkage path; with the flag off (disagreement_sigma2
+    None) the sweep is byte-identical to the legacy lumped-RNA path regardless of mature-eligibility."""
+    chain, st, geom, belief, ra, bsub = _mature_exon_chain(spliced=True)
+    fin_default, _ = _sweep((chain, st, geom, belief, ra, bsub))
+    chain2, st2, geom2, belief2, ra2, bsub2 = _mature_exon_chain(spliced=True)
+    ra2.mature_eligible_pos = np.array([True, True, True])  # would change the channel path, but flag is off
+    fin_elig, _ = _sweep((chain2, st2, geom2, belief2, ra2, bsub2))
+    assert np.allclose(fin_default.f_g, fin_elig.f_g)
+
+
 def test_strand_overdispersion_prior_default_is_near_binomial():
     """BUG #1 regression: the shipped default strand-overdispersion prior must be the NEAR-BINOMIAL null
     (α=β=14 ⇒ od₀≈0.034), NOT the old over-conservative 0.143 (α=β=3) that widened the gDNA Beta-Binomial

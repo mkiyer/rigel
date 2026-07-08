@@ -39,6 +39,8 @@ import numpy as np
 from .bp_solver import (
     build_node_geometry,
     build_node_statics,
+    adjacent_component_disagreement_variance,
+    adjacent_disagreement_local,
     adjacent_disagreement_variance,
     chain_boundary_side_deconv,
     chain_region_deconv,
@@ -166,16 +168,15 @@ def calibrate(
         n_grid=config.sweep_n_grid, n_grid_ss=config.sweep_n_grid_single_strand,
         logodds_window=config.sweep_logodds_window, statics=statics,
     )
-    # Poisson disagreement-variance floor σ²_imp (v1): the empirical adjacent-node imputation variance,
-    # estimated ONCE on the observed (naive-gDNA) total density (data-fixed). None ⇒ legacy σ²_edge path.
-    disagreement_sigma2 = (
-        adjacent_disagreement_variance(chain, geometry)
-        if config.sweep_disagreement_shrinkage else None
-    )
-    if disagreement_sigma2 is not None:
-        logger.debug("calibration: disagreement-shrinkage σ²_imp=%.4f", disagreement_sigma2)
+    # Poisson disagreement-variance floor (`disagreement_shrinkage_prior_design_v2.md`). None ⇒ legacy
+    # σ²_edge path. PASS-1 uses the scalar TOTAL-density σ²_imp (v1, pre-solve); PASS-2 uses the TWO-component
+    # (gDNA, RNA) σ²_imp refit on the pass-1 belief (v2, §3.1) — gDNA gets its deservedly-strong message back.
+    shrink = config.sweep_disagreement_shrinkage
+    sig_total = adjacent_disagreement_variance(chain, geometry) if shrink else None
+    if sig_total is not None:
+        logger.debug("calibration: pass-1 total-density σ²_imp=%.4f", sig_total)
 
-    def _sweep(prior):
+    def _sweep(prior, dis2):
         return node_sweep(
             chain, statics, geometry, belief, region_arrays, boundary_substrate,
             rna_sense_frac=rna_sense_frac,
@@ -185,11 +186,30 @@ def calibrate(
             convergence_delta=config.sweep_convergence_delta,
             logodds_window=config.sweep_logodds_window,
             n_tilt=config.sweep_n_tilt, n_grid_ss=config.sweep_n_grid_single_strand, gdna_prior=prior,
-            disagreement_sigma2=disagreement_sigma2,
+            disagreement_sigma2=dis2,
+            mature_nascent_split=config.sweep_mature_nascent_split,
         )
 
-    # PASS 1 — the single-strand solve with the extremely-weak stability floor (Phase 1).
-    belief = _sweep(None)
+    # PASS 1 — single-strand solve with the scalar total-density floor (or the legacy path).
+    belief = _sweep(None, sig_total)
+    # REFIT-1 (v2) — per-component (gDNA, RNA) σ²_imp on the pass-1 belief, AMBIG excluded (belief least
+    # trustworthy there this early). Used for PASS-2. Falls back to the scalar if shrinkage is off.
+    dis2_pass2 = sig_total
+    if shrink:
+        mode = config.sweep_disagreement_pass2
+        if mode == "component":
+            dis2_pass2 = adjacent_component_disagreement_variance(
+                chain, geometry, belief, statics, include_ambig=False
+            )
+            logger.debug("calibration: pass-2 σ²_imp (component) gDNA=%.4f RNA=%.4f",
+                         dis2_pass2[0], dis2_pass2[1])
+        elif mode == "local":
+            dis2_pass2 = adjacent_disagreement_local(chain, geometry)  # per-edge total-density, shrunk
+            logger.debug("calibration: pass-2 σ²_imp (local per-edge) median=%.4f",
+                         float(np.median(dis2_pass2)))
+        else:  # "total" — reuse the single total-density scalar for all channels
+            dis2_pass2 = sig_total
+            logger.debug("calibration: pass-2 σ²_imp (total) =%.4f", float(sig_total))
     # PHASE 2 — train the nonparametric gDNA-density mixture prior on the solved single-strand nodes, then
     # PASS 2 — re-solve ALL nodes with that mixture as the per-node prior (self-scaling; fills the tilt's
     # null space on AMBIG). Falls back to the pass-1 belief if the substrate is too small to fit.
@@ -203,7 +223,7 @@ def calibrate(
             train_sub, bandwidth=config.gdna_prior_bandwidth,
             mixture_bridge=config.gdna_prior_mixture_bridge,
         )
-        belief = _sweep(gdna_prior)
+        belief = _sweep(gdna_prior, dis2_pass2)
     regions = chain_region_deconv(chain, belief, substrate)
     left, right = chain_boundary_side_deconv(chain, belief, substrate)
     logger.debug("calibration: %s", "two-pass (Phase-2 mixture prior)" if gdna_prior else "single pass")

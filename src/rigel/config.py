@@ -289,6 +289,22 @@ class CalibrationConfig:
     #: Fixes the runaway-precision bug (``disagreement_shrinkage_prior_design_v2.md``). A/B toggle for now.
     sweep_disagreement_shrinkage: bool = False
 
+    #: **Pass-2 disagreement-variance basis** (only when ``sweep_disagreement_shrinkage``). ``"component"``
+    #: (default): the per-component ``(gDNA, RNA)`` σ²_imp refit on the pass-1 belief. ``"total"``: the single
+    #: total-density σ²_imp (belief-free) for all channels — the pass-1 basis reused. ``"local"``: the PER-EDGE
+    #: total-density σ²_imp shrunk toward the global by a data-derived weight (``adjacent_disagreement_local``).
+    #: A/B knob to settle the message-precision basis; the total-density basis carries the capture regime signal
+    #: that the belief-muddled per-component split destroys (per-edge B=0 on the component, B≫0 on total).
+    sweep_disagreement_pass2: str = "component"
+
+    #: **Mature/nascent MESSAGE split** (the 3-channel; only when ``sweep_disagreement_shrinkage``). ``True``
+    #: (default, production): RNA messages split into a mature sub-message (into mature-eligible exons only) + a
+    #: separate nascent running belief. ``False``: a single LUMPED RNA message (the 2-component {RNA, gDNA}
+    #: model), with the intron-density likelihood penalty (``bp_solver._global_logprior``) as the SOLE
+    #: bleed-stopper. A/B knob to test whether the intron penalty alone suffices (making the 3-channel message
+    #: machinery redundant). Output schema + EM are unchanged either way. Default True ⇒ goldens unchanged.
+    sweep_mature_nascent_split: bool = True
+
     #: **Inner-loop max passes** (per outer iteration). The solver is a NESTED loop: the INNER loop
     #: converges the per-node beliefs by directional (L→R then R→L) sweeps at FIXED var~mean, stopping
     #: early once the per-node pie stabilizes (max change within ``sweep_convergence_delta``); the OUTER
@@ -354,6 +370,11 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.sweep_convergence_delta must be > 0; "
                 f"got {self.sweep_convergence_delta}."
+            )
+        if self.sweep_disagreement_pass2 not in ("component", "total", "local"):
+            raise ValueError(
+                "CalibrationConfig.sweep_disagreement_pass2 must be 'component', 'total', or 'local'; "
+                f"got {self.sweep_disagreement_pass2!r}."
             )
         if self.gdna_strand_prior_alpha_beta < 2.0:
             raise ValueError(

@@ -9,6 +9,7 @@ import pytest
 from rigel.index import (
     TranscriptIndex,
     build_index_artifacts,
+    BOUNDARIES_FEATHER,
     INDEX_FORMAT_VERSION,
     INTERVALS_FEATHER,
     MANIFEST_JSON,
@@ -38,9 +39,10 @@ def _write_minimal_index(tmp_path: Path, t_df: pd.DataFrame) -> Path:
     # ref_lengths.feather: a single 1000-bp chr1.
     pd.DataFrame({"ref": ["chr1"], "length": [1000]}).to_feather(idx_dir / REF_LENGTHS_FEATHER)
 
-    # regions.feather: a single v4 INTERGENIC region tiling chr1.
-    _, rdf = build_index_artifacts([], {"chr1": 1000})
+    # regions.feather + boundaries.feather: a single INTERGENIC region tiling chr1.
+    _, rdf, bdf = build_index_artifacts([], {"chr1": 1000})
     rdf.to_feather(idx_dir / REGIONS_FEATHER)
+    bdf.to_feather(idx_dir / BOUNDARIES_FEATHER)
 
     iv_df = pd.DataFrame(
         {

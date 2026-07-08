@@ -24,7 +24,7 @@ import numpy as np, pandas as pd
 
 
 def run_quant(cond_dir: Path, index: Path, eps: float, threads: int, n_grid_ss: int | None = None,
-              shrinkage: bool = False) -> None:
+              shrinkage: bool = False, pass2: str | None = None) -> None:
     out = cond_dir / "rigel_out"
     # No --annotated-bam: the pool + transcript metrics read only rigel_out/ + manifest + truth (the hard-label
     # net-flow it drives is insensitive to soft prior shifts and the ambig suite doesn't emit annotated.bam).
@@ -35,9 +35,11 @@ def run_quant(cond_dir: Path, index: Path, eps: float, threads: int, n_grid_ss: 
         cmd += ["--sweep-n-grid-single-strand", str(n_grid_ss)]
     if shrinkage:
         cmd += ["--sweep-disagreement-shrinkage"]
+    if pass2 is not None:
+        cmd += ["--sweep-disagreement-pass2", pass2]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
-        raise RuntimeError(f"quant failed for {cond_dir.name} (eps={eps},shrink={shrinkage}):\n{r.stderr[-1500:]}")
+        raise RuntimeError(f"quant failed for {cond_dir.name} (eps={eps},shrink={shrinkage},pass2={pass2}):\n{r.stderr[-1500:]}")
 
 
 def _observed_truth(cond_dir: Path) -> dict:
@@ -110,8 +112,8 @@ def main():
     ap.add_argument("suite", type=Path)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--arms", nargs="+", default=["baseline:0", "fix1:0.01"],
-                    help="arm spec name:eps[:n_grid_ss[:shrink]] (n_grid_ss optional; shrink=1 enables the "
-                    "disagreement-shrinkage precision)")
+                    help="arm spec name:eps[:n_grid_ss[:shrink[:pass2]]] (n_grid_ss optional; shrink=1 enables "
+                    "the disagreement-shrinkage precision; pass2 in {component,total,local} sets the pass-2 basis)")
     ap.add_argument("--filter", default=None, help="only conditions whose name contains this substring")
     ap.add_argument("--threads", type=int, default=4)
     args = ap.parse_args()
@@ -123,16 +125,17 @@ def main():
         parts = a.split(":")
         ngss = int(parts[2]) if len(parts) > 2 and parts[2] else None
         shrink = len(parts) > 3 and parts[3] in ("1", "true", "shrink")
-        return (parts[0], float(parts[1]), ngss, shrink)
+        pass2 = parts[4] if len(parts) > 4 and parts[4] else None
+        return (parts[0], float(parts[1]), ngss, shrink, pass2)
     arms = [_parse(a) for a in args.arms]
-    report: dict = {"conditions": [c.name for c in conds], "arms": [a for a, _, _, _ in arms], "data": {}}
-    for arm, eps, ngss, shrink in arms:
+    report: dict = {"conditions": [c.name for c in conds], "arms": [a for a, *_ in arms], "data": {}}
+    for arm, eps, ngss, shrink, pass2 in arms:
         report["data"][arm] = {}
         for c in conds:
             t0 = time.time()
-            run_quant(c, index, eps, args.threads, n_grid_ss=ngss, shrinkage=shrink)
+            run_quant(c, index, eps, args.threads, n_grid_ss=ngss, shrinkage=shrink, pass2=pass2)
             report["data"][arm][c.name] = {"pools": pool_metrics(c), "tx": transcript_metrics(c)}
-            print(f"[{arm} eps={eps} shrink={shrink}] {c.name}  ({time.time()-t0:.0f}s)", flush=True)
+            print(f"[{arm} eps={eps} shrink={shrink} pass2={pass2}] {c.name}  ({time.time()-t0:.0f}s)", flush=True)
     json.dump(report, open(args.out, "w"), indent=2)
     print(f"\nwrote {args.out}")
 

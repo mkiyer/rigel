@@ -107,6 +107,8 @@ def _regions(starts, ends) -> RegionArrays:
         end=ends,
         signature=np.zeros(n, dtype=np.uint8),
         strand_class=np.zeros(n, dtype=np.int8),
+        mature_eligible_pos=np.zeros(n, dtype=bool),
+        mature_eligible_neg=np.zeros(n, dtype=bool),
         region_size_bp=(ends - starts).astype(np.float64),
         ref_offsets=np.array([0, n], dtype=np.int32),
         order=np.arange(n, dtype=np.int64),
