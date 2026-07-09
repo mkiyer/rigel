@@ -4,18 +4,20 @@ Calibration models **RNA vs gDNA only** (the per-locus EM separates nascent from
 count-zero-information architecture (`CALIBRATION_ARCHITECTURE.md` §0) a node's composition is set by three
 sources — the **strand likelihood** (the Beta-Binomial tilt of the per-strand counts, the only INTRINSIC
 signal; the count enters ONLY as its overdispersed Fisher information), the **cross-node imputation** (the
-neighbour density messages, at the modeled var~mean reliability), and the **global gDNA prior** (the
-population baseline ``ρ_global`` at the MAD-spread precision). The solver is the bipartite belief-propagation
-SWEEP over the unified region↔boundary chain (:mod:`rigel.calibration.bp_solver`)::
+neighbour density messages, at the belief-free Poisson disagreement-variance precision
+``pr = n_src/(n_src·σ²_imp + 1)``), and the **population gDNA prior** (the conservative intergenic+intron floor +
+the Phase-2 density KDE). The solver is the belief-propagation SWEEP over the unified region↔boundary chain
+(:mod:`rigel.calibration.bp_solver`)::
 
     substrate (+ boundary_substrate)
       -> strand balance: rna_sense_frac (κ)
       -> node_gdna_density (RAW) -> fit gDNA / RNA strand Beta-Binomial overdispersions (seed)
       -> build chain + geometry + statics -> signature-binary init (G1/G2/G3)
-      -> node_sweep: directional (L→R, R→L) Gauss-Seidel passes — each node integrates its strand
-           likelihood + the node-class prior + the gDNA & per-strand RNA identity-density messages from
-           its sweep-direction neighbour (precision = the per-pass frozen-snapshot var~mean reliability);
-           ρ_global re-fit each pass. Converge on the per-node pie.
+      -> compute the scalar total-density σ²_imp once (adjacent_disagreement_variance)
+      -> PASS 1 node_sweep (no KDE prior): ONE forward + ONE backward pass — each node integrates its strand
+           likelihood + the conservative gDNA floor + the belief-free gDNA & per-strand RNA density messages
+      -> train the Phase-2 gDNA-density KDE on the pass-1 belief
+      -> PASS 2 node_sweep (the KDE prior added per node) -> the converged per-node pie
       -> chain_region_deconv  -> per-region gDNA / RNA contained mass
       -> chain_boundary_side_deconv -> per-region boundary-side flux (gDNA / RNA), for the per-locus prior
       -> gdna_density_global (the library-average density QC scalar)
@@ -30,8 +32,6 @@ zero-gDNA library (``gdna_density_global == 0``, per-node gDNA mass ``0``) is a 
 from __future__ import annotations
 
 import logging
-import os
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -39,8 +39,6 @@ import numpy as np
 from .bp_solver import (
     build_node_geometry,
     build_node_statics,
-    adjacent_component_disagreement_variance,
-    adjacent_disagreement_local,
     adjacent_disagreement_variance,
     chain_boundary_side_deconv,
     chain_region_deconv,
@@ -73,11 +71,6 @@ if TYPE_CHECKING:
     from .region_arrays import RegionArrays
 
 logger = logging.getLogger(__name__)
-
-#: Below this many single-strand teacher nodes the KDE is degenerate (a density from a handful of points has
-#: no meaningful modes), so calibration falls back to the pass-1 prior-free belief rather than train + apply
-#: a garbage mixture. Real genomes have millions of teachers; only tiny single-locus scenarios trip this.
-_MIN_KDE_TEACHERS = 10
 
 
 def calibrate(
@@ -148,10 +141,10 @@ def calibrate(
     )
     rna_strand_overdispersion = rna_strand.rna_strand_overdispersion
 
-    # THE SOLVE — the bipartite belief-propagation sweep (plan v3 / bp_solver): build the unified
-    # region↔boundary chain + its per-node geometry / statics, the signature-binary init, then the directional
-    # Gauss-Seidel sweep (gDNA + per-strand RNA identity-density messages, per-pass frozen-snapshot var~mean
-    # reliability, the global gDNA prior). The region nodes give the per-region gDNA fraction; the boundary
+    # THE SOLVE — the bipartite belief-propagation sweep (bp_solver): build the unified region↔boundary chain
+    # + its per-node geometry / statics, the signature-binary init, then a single forward-backward pass
+    # (gDNA + per-strand RNA identity-density messages at the belief-free σ²_imp precision fit once, plus the
+    # anchored global gDNA prior). The region nodes give the per-region gDNA fraction; the boundary
     # nodes give the per-side boundary flux feeding the per-locus prior (chain_boundary_side_deconv) — the
     # first-class boundary nodes the sweep solves, projected to per-region sides for the prior.
     boundary_substrate = BoundarySubstrate.from_payload(payload)
@@ -168,15 +161,13 @@ def calibrate(
         n_grid=config.sweep_n_grid, n_grid_ss=config.sweep_n_grid_single_strand,
         logodds_window=config.sweep_logodds_window, statics=statics,
     )
-    # Poisson disagreement-variance floor (`disagreement_shrinkage_prior_design_v2.md`). None ⇒ legacy
-    # σ²_edge path. PASS-1 uses the scalar TOTAL-density σ²_imp (v1, pre-solve); PASS-2 uses the TWO-component
-    # (gDNA, RNA) σ²_imp refit on the pass-1 belief (v2, §3.1) — gDNA gets its deservedly-strong message back.
-    shrink = config.sweep_disagreement_shrinkage
-    sig_total = adjacent_disagreement_variance(chain, geometry) if shrink else None
-    if sig_total is not None:
-        logger.debug("calibration: pass-1 total-density σ²_imp=%.4f", sig_total)
+    # Belief-free Poisson message precision (`disagreement_shrinkage_prior_design_v2.md`): the scalar
+    # total-density σ²_imp — the empirical adjacent-node imputation floor. σ²_msg = σ²_imp + 1/n_src; the
+    # single production basis for every message channel, both passes.
+    sig_total = adjacent_disagreement_variance(chain, geometry)
+    logger.debug("calibration: total-density σ²_imp=%.4f", sig_total)
 
-    def _sweep(prior, dis2):
+    def _sweep(prior):
         return node_sweep(
             chain, statics, geometry, belief, region_arrays, boundary_substrate,
             rna_sense_frac=rna_sense_frac,
@@ -186,30 +177,11 @@ def calibrate(
             convergence_delta=config.sweep_convergence_delta,
             logodds_window=config.sweep_logodds_window,
             n_tilt=config.sweep_n_tilt, n_grid_ss=config.sweep_n_grid_single_strand, gdna_prior=prior,
-            disagreement_sigma2=dis2,
-            mature_nascent_split=config.sweep_mature_nascent_split,
+            disagreement_sigma2=sig_total,
         )
 
-    # PASS 1 — single-strand solve with the scalar total-density floor (or the legacy path).
-    belief = _sweep(None, sig_total)
-    # REFIT-1 (v2) — per-component (gDNA, RNA) σ²_imp on the pass-1 belief, AMBIG excluded (belief least
-    # trustworthy there this early). Used for PASS-2. Falls back to the scalar if shrinkage is off.
-    dis2_pass2 = sig_total
-    if shrink:
-        mode = config.sweep_disagreement_pass2
-        if mode == "component":
-            dis2_pass2 = adjacent_component_disagreement_variance(
-                chain, geometry, belief, statics, include_ambig=False
-            )
-            logger.debug("calibration: pass-2 σ²_imp (component) gDNA=%.4f RNA=%.4f",
-                         dis2_pass2[0], dis2_pass2[1])
-        elif mode == "local":
-            dis2_pass2 = adjacent_disagreement_local(chain, geometry)  # per-edge total-density, shrunk
-            logger.debug("calibration: pass-2 σ²_imp (local per-edge) median=%.4f",
-                         float(np.median(dis2_pass2)))
-        else:  # "total" — reuse the single total-density scalar for all channels
-            dis2_pass2 = sig_total
-            logger.debug("calibration: pass-2 σ²_imp (total) =%.4f", float(sig_total))
+    # PASS 1 — single-strand solve with the total-density floor.
+    belief = _sweep(None)
     # PHASE 2 — train the nonparametric gDNA-density mixture prior on the solved single-strand nodes, then
     # PASS 2 — re-solve ALL nodes with that mixture as the per-node prior (self-scaling; fills the tilt's
     # null space on AMBIG). Falls back to the pass-1 belief if the substrate is too small to fit.
@@ -218,12 +190,13 @@ def calibrate(
         chain, belief, geometry, statics, region_arrays, boundary_substrate,
         min_eff_length=fl_mean,  # exclude regions too short to contain a gDNA fragment (§8e)
     )
-    if train_sub.n >= _MIN_KDE_TEACHERS:
+    if train_sub.n >= config.calib_kde_min_training_nodes:
         gdna_prior = GdnaDensityPrior.fit(
             train_sub, bandwidth=config.gdna_prior_bandwidth,
             mixture_bridge=config.gdna_prior_mixture_bridge,
+            bridge_trim_pct=config.calib_kde_bridge_trim_pct,
         )
-        belief = _sweep(gdna_prior, dis2_pass2)
+        belief = _sweep(gdna_prior)
     regions = chain_region_deconv(chain, belief, substrate)
     left, right = chain_boundary_side_deconv(chain, belief, substrate)
     logger.debug("calibration: %s", "two-pass (Phase-2 mixture prior)" if gdna_prior else "single pass")
@@ -269,22 +242,6 @@ def calibrate(
         n_regions=region_arrays.n_regions,
         config=config,
     )
-    # EXPERIMENTAL (eff-len study, env-gated): replace the DECONVOLVED per-node masses with the TRUE
-    # per-node masses (oracle calibration) so any residual EM leak is purely the eff-len formula, not
-    # deconvolution error. Keeps the geometry (eff-lens) + hyperparameters. See scripts/debug/oracle_calibration.py.
-    _oracle = os.environ.get("RIGEL_ORACLE_CALIB")
-    if _oracle:
-        z = np.load(_oracle)
-        result = replace(
-            result,
-            mass_gdna_contained=z["mass_gdna_contained"],
-            mass_rna_contained=z["mass_rna_contained"],
-            mass_gdna_left=z["mass_gdna_left"],
-            mass_rna_left=z["mass_rna_left"],
-            mass_gdna_right=z["mass_gdna_right"],
-            mass_rna_right=z["mass_rna_right"],
-            mass_rna_spliced=z["mass_rna_spliced"],
-        )
     # Diagnostic: the boundary-spliced sense fraction should agree with the StrandModel κ (the
     # deconv mean). A large gap flags a strand-model / accumulator mismatch (we do NOT refit the
     # mean from boundary spliced — κ stays the StrandModel posterior; this is QC only).

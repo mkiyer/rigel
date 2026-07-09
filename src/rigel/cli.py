@@ -622,8 +622,6 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     # -- CalibrationConfig: advanced --
     _ParamSpec("gdna_prior_mixture_bridge", "calibration.gdna_prior_mixture_bridge"),
     _ParamSpec("sweep_n_grid_single_strand", "calibration.sweep_n_grid_single_strand"),
-    _ParamSpec("sweep_disagreement_shrinkage", "calibration.sweep_disagreement_shrinkage"),
-    _ParamSpec("sweep_disagreement_pass2", "calibration.sweep_disagreement_pass2"),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
     _ParamSpec("threads", "scan.total_threads"),
@@ -1209,26 +1207,6 @@ def build_parser() -> argparse.ArgumentParser:
         "cheap 1-D grid, so a fine grid de-quantizes the gDNA-fraction readout (the coarse shared grid "
         "snapped it to ~0.085 steps, the dominant residual on high-mass exons). Decoupled from the AMBIG "
         "2-D grid (--sweep... n_grid) which stays coarse for genome-scale memory. Advanced calibration knob.",
-    )
-    adv.add_argument(
-        "--sweep-disagreement-shrinkage",
-        dest="sweep_disagreement_shrinkage",
-        action="store_const",
-        const=True,
-        default=None,
-        help="Use the Poisson disagreement-variance message precision in the calibration sweep "
-        "(sigma2_msg = sigma2_imp + 1/n_src) instead of the legacy disagreement-aware precision. Bounds "
-        "message precision by the empirical adjacent-node imputation floor, fixing the runaway-precision "
-        "bug where a confident source overrides the strand signal. Advanced calibration knob (default off).",
-    )
-    adv.add_argument(
-        "--sweep-disagreement-pass2",
-        dest="sweep_disagreement_pass2",
-        choices=("component", "total", "local"),
-        default=None,
-        help="Pass-2 disagreement-variance basis (with --sweep-disagreement-shrinkage): 'component' "
-        "(per-component gDNA/RNA, default), 'total' (single belief-free total-density for all channels), "
-        "or 'local' (per-edge total-density shrunk to global by a data-derived weight). Advanced knob.",
     )
     adv.add_argument(
         "--gdna-em-llr-bias",

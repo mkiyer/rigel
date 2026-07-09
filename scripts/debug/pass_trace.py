@@ -75,8 +75,6 @@ if _eps is not None:
     _ckw["gdna_prior_mixture_bridge"] = float(_eps)
 if _ng is not None:
     _ckw["sweep_n_grid"] = int(_ng)
-if os.environ.get("RIGEL_SHRINKAGE"):  # A/B: Poisson disagreement-variance message precision (v1)
-    _ckw["sweep_disagreement_shrinkage"] = True
 cfg = CalibrationConfig(**_ckw)
 st, sm, flm, buf, pl = scan_and_buffer(str(cond / "sim_oracle.bam"), idx, BamScanConfig())
 sub = CalibrationSubstrate.from_payload(pl, ra)
@@ -114,16 +112,10 @@ belief0 = init_beliefs(chain, sub, bsub, ra, rna_sense_frac=kappa,
                        n_grid=cfg.sweep_n_grid, n_grid_ss=cfg.sweep_n_grid_single_strand,
                        logodds_window=cfg.sweep_logodds_window, statics=statics)
 
-from rigel.calibration.bp_solver import (
-    adjacent_disagreement_variance, adjacent_component_disagreement_variance,
-)
-# RIGEL_SHRINKAGE unset → None (legacy); "1"/"v1" → scalar total-density (v1); anything else / "v2" → v2
-# (pass-1 scalar, pass-2 per-component (gDNA,RNA) refit on the pass-1 belief).
-_shr = os.environ.get("RIGEL_SHRINKAGE", "")
-_sig_total = adjacent_disagreement_variance(chain, geometry) if _shr else None
-_v2 = bool(_shr) and _shr not in ("1", "v1")
-if _sig_total is not None:
-    print(f"disagreement-shrinkage ON ({'v2 per-component' if _v2 else 'v1 total'}): sigma2_total={_sig_total:.4f}")
+from rigel.calibration.bp_solver import adjacent_disagreement_variance
+# Single production path: the belief-free total-density σ²_imp message precision (σ²_msg = σ²_imp + 1/n_src).
+_sig_total = adjacent_disagreement_variance(chain, geometry)
+print(f"total-density sigma2_imp={_sig_total:.4f}")
 
 def _sweep(prior, belief, cap, dis2):
     return node_sweep(chain, statics, geometry, belief, ra, bsub, rna_sense_frac=kappa,
@@ -136,11 +128,7 @@ def _sweep(prior, belief, cap, dis2):
 
 cap1 = {}
 belief1 = _sweep(None, belief0, cap1, _sig_total)
-# refit-1: per-component (gDNA, RNA) on the pass-1 belief, AMBIG excluded (v2)
-_dis2 = _sig_total
-if _v2:
-    _dis2 = adjacent_component_disagreement_variance(chain, geometry, belief1, statics, include_ambig=False)
-    print(f"  pass-2 sigma2_imp gDNA={_dis2[0]:.4f} RNA={_dis2[1]:.4f}")
+_dis2 = _sig_total  # single total-density basis for both passes
 # KDE training on pass-1 belief
 train_sub = build_training_substrate(chain, belief1, geometry, statics, ra, bsub, min_eff_length=fl_mean)
 gdna_prior = GdnaDensityPrior.fit(train_sub, bandwidth=cfg.gdna_prior_bandwidth,

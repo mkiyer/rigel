@@ -74,7 +74,6 @@ def _region_arrays(signatures, ref_names=None) -> RegionArrays:
 def _substrate(n, contained, left, right) -> CalibrationSubstrate:
     return CalibrationSubstrate(
         n_regions=n,
-        region_len=np.full(n, 100.0),
         strand_class=np.zeros(n, dtype=np.int8),  # node uses region_arrays.strand_class
         contained=_view(*contained),
         left=_view(*left),

@@ -224,9 +224,10 @@ class BamScanConfig:
 class CalibrationConfig:
     """Configuration for the calibrator (:func:`rigel.calibration.calibrate`).
 
-    The calibrator is the bipartite **belief-propagation sweep** over the region↔boundary chain
-    (``sweep_max_passes`` directional Gauss-Seidel passes; ``sweep_n_grid`` 2-simplex lattice;
-    ``sweep_convergence_delta`` stop) — see :func:`rigel.calibration.calibrate.calibrate`.
+    The calibrator is the **belief-propagation sweep** over the region↔boundary chain — a single
+    forward-backward pass per node_sweep call, with the belief-free Poisson disagreement-variance message
+    precision (``σ²_msg = σ²_imp + 1/n_src``); ``sweep_n_grid`` sizes the per-node log-odds solve grid. See
+    :func:`rigel.calibration.calibrate.calibrate`.
     """
 
     #: **gDNA strand-overdispersion prior** (advanced). The gDNA per-region sense rate is
@@ -283,28 +284,6 @@ class CalibrationConfig:
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
     sweep_n_tilt: int | None = None
 
-    #: **Message-precision mode.** ``False`` (default): the legacy disagreement-aware ``σ²_edge`` message
-    #: precision. ``True``: the Poisson disagreement-variance shrinkage (v1) — ``σ²_msg = σ²_imp + 1/n_src``,
-    #: ``σ²_imp`` the empirical adjacent-node imputation floor (``bp_solver.adjacent_disagreement_variance``).
-    #: Fixes the runaway-precision bug (``disagreement_shrinkage_prior_design_v2.md``). A/B toggle for now.
-    sweep_disagreement_shrinkage: bool = False
-
-    #: **Pass-2 disagreement-variance basis** (only when ``sweep_disagreement_shrinkage``). ``"component"``
-    #: (default): the per-component ``(gDNA, RNA)`` σ²_imp refit on the pass-1 belief. ``"total"``: the single
-    #: total-density σ²_imp (belief-free) for all channels — the pass-1 basis reused. ``"local"``: the PER-EDGE
-    #: total-density σ²_imp shrunk toward the global by a data-derived weight (``adjacent_disagreement_local``).
-    #: A/B knob to settle the message-precision basis; the total-density basis carries the capture regime signal
-    #: that the belief-muddled per-component split destroys (per-edge B=0 on the component, B≫0 on total).
-    sweep_disagreement_pass2: str = "component"
-
-    #: **Mature/nascent MESSAGE split** (the 3-channel; only when ``sweep_disagreement_shrinkage``). ``True``
-    #: (default, production): RNA messages split into a mature sub-message (into mature-eligible exons only) + a
-    #: separate nascent running belief. ``False``: a single LUMPED RNA message (the 2-component {RNA, gDNA}
-    #: model), with the intron-density likelihood penalty (``bp_solver._global_logprior``) as the SOLE
-    #: bleed-stopper. A/B knob to test whether the intron penalty alone suffices (making the 3-channel message
-    #: machinery redundant). Output schema + EM are unchanged either way. Default True ⇒ goldens unchanged.
-    sweep_mature_nascent_split: bool = True
-
     #: **Inner-loop max passes** (per outer iteration). The solver is a NESTED loop: the INNER loop
     #: converges the per-node beliefs by directional (L→R then R→L) sweeps at FIXED var~mean, stopping
     #: early once the per-node pie stabilizes (max change within ``sweep_convergence_delta``); the OUTER
@@ -342,11 +321,34 @@ class CalibrationConfig:
     #: design: ``docs/calibration/boundary_kde_valley_collapse_and_simplex_precision.md``.
     gdna_prior_mixture_bridge: float = 0.01
 
+    #: **Min KDE training nodes** — the Phase-2 gDNA-density KDE prior is fit only when at least this many
+    #: gDNA-density "teacher" nodes exist; below it calibration falls back to the pass-1 prior-free belief
+    #: (never fit a garbage mixture on too little data). Real genomes have millions of teachers; only tiny
+    #: single-locus / toy scenarios trip this, so the exact value is not sensitive.
+    calib_kde_min_training_nodes: int = 10
+
+    #: **KDE mixture-bridge support trim (percent)** — the uniform "any-mixture" bridge (``gdna_prior_mixture_bridge``)
+    #: is bounded to the ``[trim, 100−trim]`` percentiles of the training gDNA-density support, so it floors the
+    #: valley between the depleted/enriched KDE modes without extending into the KDE's real tails (preserving
+    #: high-density false-positive suppression). A robustness trim of the density support (percentiles, not
+    #: min/max, so outliers don't set the range); low-sensitivity.
+    calib_kde_bridge_trim_pct: float = 0.5
+
     def __post_init__(self) -> None:
         if not (0.0 <= float(self.gdna_prior_mixture_bridge) < 1.0):
             raise ValueError(
                 "CalibrationConfig.gdna_prior_mixture_bridge must be in [0, 1); "
                 f"got {self.gdna_prior_mixture_bridge}."
+            )
+        if self.calib_kde_min_training_nodes < 1:
+            raise ValueError(
+                "CalibrationConfig.calib_kde_min_training_nodes must be >= 1; "
+                f"got {self.calib_kde_min_training_nodes}."
+            )
+        if not (0.0 <= float(self.calib_kde_bridge_trim_pct) < 50.0):
+            raise ValueError(
+                "CalibrationConfig.calib_kde_bridge_trim_pct must be in [0, 50); "
+                f"got {self.calib_kde_bridge_trim_pct}."
             )
         if self.sweep_n_grid < 2:
             raise ValueError(
@@ -370,11 +372,6 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.sweep_convergence_delta must be > 0; "
                 f"got {self.sweep_convergence_delta}."
-            )
-        if self.sweep_disagreement_pass2 not in ("component", "total", "local"):
-            raise ValueError(
-                "CalibrationConfig.sweep_disagreement_pass2 must be 'component', 'total', or 'local'; "
-                f"got {self.sweep_disagreement_pass2!r}."
             )
         if self.gdna_strand_prior_alpha_beta < 2.0:
             raise ValueError(

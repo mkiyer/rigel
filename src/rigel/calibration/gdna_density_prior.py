@@ -8,12 +8,13 @@ Two objects:
   region nodes (incl. zero-count intergenic/intronic — the depleted-floor anchor) and the clean-exon
   boundary crossings; **AMBIG nodes are excluded** (they are the target — their ``f_g`` is the unknown, solved
   in Phase 3 from the trained prior). This keeps the fit non-circular.
-* :class:`GdnaDensityPrior` (P2.1) — a weighted Gaussian KDE in log space with a swappable bandwidth
-  estimator (Silverman / likelihood-CV / fixed), pre-evaluated on a fine grid and consumed by the per-node
-  solve via :meth:`GdnaDensityPrior.logpdf` (the drop-in for ``bp_solver._global_logprior``'s Gaussian).
+* :class:`GdnaDensityPrior` — a weighted Gaussian KDE in log space with a swappable bandwidth estimator
+  (Silverman / likelihood-CV / fixed), pre-evaluated on a fine grid; the per-node solve uses its true-kernel
+  :meth:`GdnaDensityPrior.logpdf_kernel` (real quadratic tails), NOT the clamped :meth:`logpdf` interpolation.
 
-Nothing here is wired into the solve yet (that is P2.4); the immediate consumer is the P2.2 plotting
-framework, which visualises the fit against the oracle before any bandwidth is chosen for production.
+This is the PRODUCTION Phase-2 gDNA-density prior: it is trained on the pass-1 solved belief in
+:func:`calibrate.calibrate` and added to the per-node ψ in pass 2 via ``bp_solver._kde_logprior``.
+``scripts/debug/plot_gdna_prior.py`` visualises the fit against the oracle.
 """
 
 from __future__ import annotations
@@ -22,7 +23,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .bp_solver import BOUNDARY, REGION, _node_region_type, node_densities
+from .node_chain import BOUNDARY, REGION
+from .node_geometry import _node_region_type, node_densities
 
 __all__ = ["TrainingSubstrate", "GdnaDensityPrior", "build_training_substrate"]
 
@@ -68,8 +70,8 @@ class TrainingSubstrate:
 
 def _clean_exon_boundary(chain, region_arrays, boundary_substrate):
     """(clean_exon_bnd, exon_on_right) per chain node — the intron/intergenic↔exon crossings, exon-facing side.
-    Mirrors the cleanliness test in ``bp_solver._gdna_seed_estimate`` (kept local to avoid a shipped-file
-    refactor at this stage; consolidate when Phase 2 lands)."""
+    Mirrors the cleanliness test in ``bp_solver._gdna_seed_estimate``; the two live in different modules, so a
+    small shared-helper dedup remains as an optional follow-up (both compute the same clean-boundary mask)."""
     kind = np.asarray(chain.kind)
     is_bnd = kind == BOUNDARY
     idx = np.asarray(chain.ref_idx, dtype=np.int64)
@@ -328,6 +330,10 @@ class GdnaDensityPrior:
     #: level is robust (the peak/valley gap is ~10² nats), so any small ε defeats the collapse cliff. Design:
     #: `docs/calibration/boundary_kde_valley_collapse_and_simplex_precision.md`.
     mixture_bridge: float = 0.0
+    #: Bridge SUPPORT TRIM (percent; `CalibrationConfig.calib_kde_bridge_trim_pct`) — the mixture bridge is
+    #: bounded to the ``[trim, 100−trim]`` percentiles of the training gDNA-density support (a robustness trim so
+    #: outliers don't set the bridge range). Consumed by `bp_solver._kde_logprior`.
+    bridge_trim_pct: float = 0.5
 
     def logpdf(self, log_rho) -> np.ndarray:
         """``log P̂(log ρ_g)`` by linear interpolation; the flat boundary value extrapolates outside the grid
@@ -368,6 +374,7 @@ class GdnaDensityPrior:
         floor_weight: float = 0.0,
         n_lscv: int = 40,
         mixture_bridge: float = 0.0,
+        bridge_trim_pct: float = 0.5,
     ) -> "GdnaDensityPrior":
         """Fit the KDE.
 
@@ -423,4 +430,5 @@ class GdnaDensityPrior:
             train_kind=kind,
             modes=tuple(_find_modes(x_grid, logP)),
             mixture_bridge=float(mixture_bridge),
+            bridge_trim_pct=float(bridge_trim_pct),
         )

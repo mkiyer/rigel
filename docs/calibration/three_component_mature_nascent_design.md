@@ -1,5 +1,12 @@
 # Three-channel calibration: mature RNA, nascent RNA, and gDNA
 
+> ⚠️ **PARTIALLY SUPERSEDED (2026-07-09).** The mature/nascent *message overlay* (the 5-term factorization and
+> the per-strand mature-message split) was retired in the message-precision **collapse** — see
+> `two_component_implementation_plan_v2.md` (the single belief-free Poisson disagreement-variance path). What
+> SURVIVES and is still live in `bp_solver._global_logprior`: the intron **density likelihood** /
+> nascent-from-intron-self-evidence (§10.3–10.4). Read this doc for that mechanism; the mature-message-channel
+> sections are historical.
+
 **Status:** design v3, for review (2026-07-07). Full rewrite incorporating two rounds of maintainer review + a
 third-party critique. Supersedes `disagreement_shrinkage_prior_design_v2.md` (the two-component variance that
 regressed) and folds in `mature_rna_channel_design.md`. Grounded on `~/Downloads/rigel_runs/ambig_dense_10mb`.

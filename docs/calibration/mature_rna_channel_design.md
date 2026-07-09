@@ -1,5 +1,8 @@
 # Mature-RNA (spliced) message channel — dissection & design
 
+> ⚠️ **SUPERSEDED (2026-07-09).** The mature-RNA message channel was retired in the message-precision
+> **collapse** (`two_component_implementation_plan_v2.md`). Historical / design-record only.
+
 **Status:** design (2026-07-06). Empirically grounded on the AMBIG-dense 10 Mb benchmark
 (`~/Downloads/rigel_runs/ambig_dense_10mb`, condition `gdna300 / ss0.99 / capture-on`). Successor to the
 region-236 diagnosis (`region236_ambig_tau_nullspace_intron_ceiling` memory) and the conflation map. Companion

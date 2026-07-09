@@ -52,10 +52,6 @@ class NodeDensity:
     """Per-region gDNA density (count clue) after local imputation."""
 
     density: np.ndarray  # float64[R] — local gDNA density (fragments per effective bp)
-    global_density: float  # ρ_global — the single pooled gDNA density over count-observable regions
-    #   (Σ contained_gdna[obs] / Σ region_eff_len[obs]; 0.0 when none observable = the init-uniform /
-    #   zero-DNA limit). The PRE-sweep global baseline the sweep's global prior shrinks toward — distinct
-    #   from derive.gdna_density_global (POST-sweep, all nodes).
     count_gdna_frac: (
         np.ndarray
     )  # float64[R] — count module's gDNA fraction g_count = clip(density·region_eff_len /
@@ -136,16 +132,16 @@ def node_gdna_density(
     # signature count-observable set, and ``g_count`` carries count magnitude only, no double-count.)
     own = region_count_observable & (region_eff_len > _EPS)
     density[own] = contained_gdna[own] / region_eff_len[own]
-    # Everything else: anchor from the available observable boundary sides (crossing count / fl_mean).
+    # Everything else: anchor from the available observable boundary sides (crossing count / fl_mean) —
+    # the AVERAGE of whichever sides are anchored (both → mean, one → that side, none → stays NaN for the
+    # run-fill below). Vectorized over ~own (no Python loop; behavior-identical to the per-region mean).
     inv_fl = 1.0 / fl_mean if fl_mean > 0.0 else 0.0
-    for i in np.where(~own)[0]:
-        est = []
-        if left_anchor[i]:
-            est.append(left_gdna[i] * inv_fl)
-        if right_anchor[i]:
-            est.append(right_gdna[i] * inv_fl)
-        if est:
-            density[i] = float(np.mean(est))
+    todo = ~own
+    la, ra = todo & left_anchor, todo & right_anchor
+    n_sides = la.astype(np.float64) + ra.astype(np.float64)
+    side_sum = np.where(la, left_gdna * inv_fl, 0.0) + np.where(ra, right_gdna * inv_fl, 0.0)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        density = np.where(n_sides > 0.0, side_sum / np.maximum(n_sides, 1.0), density)
 
     # Run-fill: a region still unset (a run interior with no observable side) inherits the nearest
     # anchored neighbour, carried inward from both directions within its reference and averaged.
@@ -171,7 +167,6 @@ def node_gdna_density(
 
     return NodeDensity(
         density=density,
-        global_density=global_density,
         count_gdna_frac=count_gdna_frac,
         region_count_observable=region_count_observable,
         boundary_count_observable=boundary_count_observable,

@@ -1,36 +1,16 @@
-"""The simplex per-node solver — partition a node's unspliced mass into ``(f_rna₊, f_rna₋, f_g)``.
+"""The three-component strand-likelihood primitive shared by the log-density per-node solve.
 
-Spec: ``docs/calibration/propagation_simplex_plan.md`` (rev-2). Calibration models **only RNA vs gDNA**
-(the per-locus EM separates nascent from mature downstream), so every node's unspliced mass is one pie
-cut into three slices ``(f_rna₊, f_rna₋, f_g)`` summing to 1 — **no nascent slice, no mature slice**.
-Evidence *pushes* the point on the 2-simplex; the answer is always a normalized partition, so
-over-subtraction is structurally impossible and an under-constrained slice stays wide ("unknown").
+Calibration models **only RNA vs gDNA** (the per-locus EM separates nascent from mature downstream), so every
+node's unspliced mass is one pie ``(f_rna₊, f_rna₋, f_g)`` summing to 1 — no nascent/mature slice.
 
-This module is the **per-node solve only** (plan §3/§7). Its ``_mixture_strand_loglik`` is the reusable
-three-component strand-likelihood primitive the ``simplex_logodds`` log-density solve builds on.
-
-The strand term is the **three-component generalization** of :func:`strand_likelihood.strand_loglik`:
-of ``N`` unspliced fragments a fraction ``f_g`` are gDNA (genomic-plus rate ½, overdispersion ``od_g``),
-``f₊`` are ``+``-strand RNA (plus rate ``κ``, od ``od_r``) and ``f₋`` are ``−``-strand RNA (plus rate
-``1−κ``, od ``od_r``). The mixture plus-strand probability is ``p = ½·f_g + κ·f₊ + (1−κ)·f₋ = ½ +
-(κ−½)·(f₊−f₋)`` — it depends **only on the tilt** ``t = f₊−f₋`` (an identity, not an approximation), so
-the strand constrains ``t`` and the count/prior constrain the RNA-vs-gDNA magnitude orthogonally. For a
-single-strand node (``f₋≡0``) every term collapses back to ``strand_loglik`` exactly — the no-regression
-guard.
-
-Evidence terms (each a precision-weighted log term; plan §3):
-  * **strand** — the 3-component mixture loglik above (precision = BB curvature ``N·(2κ−1)²``, intrinsic).
-  * **count** — Gaussian pull of ``f_g`` toward ``count_gdna_frac`` with ``count_precision`` (the
-    propagated count evidence; Poisson floor to start, loess/NB ``var~mean`` to follow — plan §4).
-  * **spliced RNA lower bound (sided)** — a soft one-sided push ``f_s·U ≥ spliced_s`` (RNA can't be below
-    the mature its junctions directly observe); precision = the spliced flux (Poisson). Single-exon ⇒ no
-    junction ⇒ no push (correct: that RNA is honestly "unknown").
-  * **gDNA prior** — a weak Dirichlet pseudo-count on ``f_g`` (RNA prior flat / "earned"); keeps ``f_g``
-    off zero with no evidence and degrades gracefully at κ≈½. ``gdna_prior_count`` is the one sanctioned
-    starting constant (placeholder pending derivation; plan §5).
-
-The one-sided spliced shape (clipped-Gaussian) and the Dirichlet form are the toy-sweep-calibratable
-*shape* choices flagged in plan §10 — no magic widths (every precision is a derived flux count).
+This module holds only :func:`_mixture_strand_loglik` — the reusable three-component strand-likelihood the
+``simplex_logodds`` log-density solve builds on. It is the **three-component generalization** of
+:func:`strand_likelihood.strand_loglik`: of ``N`` unspliced fragments a fraction ``f_g`` are gDNA (plus rate ½,
+overdispersion ``od_g``), ``f₊`` are ``+``-strand RNA (plus rate ``κ``, od ``od_r``), ``f₋`` are ``−``-strand
+RNA (plus rate ``1−κ``, od ``od_r``). The mixture plus-strand probability ``p = ½·f_g + κ·f₊ + (1−κ)·f₋ = ½ +
+(κ−½)·(f₊−f₋)`` depends **only on the tilt** ``t = f₊−f₋`` (an identity), so the strand constrains ``t`` and the
+count/prior constrain the RNA-vs-gDNA magnitude orthogonally. A single-strand node (``f₋≡0``) collapses to
+``strand_loglik`` exactly (the no-regression guard).
 """
 
 from __future__ import annotations

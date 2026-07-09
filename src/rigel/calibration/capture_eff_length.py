@@ -14,8 +14,9 @@ mRNA** (introns are gaps), the **full span for nRNA** (its single full-span exon
 
 Contracted in **FL-marginal units** (scale the existing ``effective_lengths`` by the enrichment IPR over
 its regions), so a uniform enrichment reduces *exactly* to the input length ⇒ capture-off is bit-identical;
-only the captured case contracts. No new readout, no new constant — it reuses the calibration's per-region
-gDNA mass and the same IPR shape as the gDNA component. The density-correct node model (effective-support
+only the captured case contracts. No new readout — it reuses the calibration's per-region gDNA mass and the
+same IPR shape as the gDNA component (the standard 1-pseudocount convention + ``1e-9`` numerical floors used
+throughout calibration; not tuned constants). The density-correct node model (effective-support
 divisors, averaged-side-density pooled seams, transport-free) is documented in
 ``docs/calibration/effective_length_redesign_plan.md`` §8 (the *why* is in
 ``capture_effective_length_design.md``).

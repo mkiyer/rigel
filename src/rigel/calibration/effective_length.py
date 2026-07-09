@@ -1,11 +1,11 @@
 """gDNA fragment-length effective lengths (PR 4b §I.1).
 
-The gDNA count effective length of a region or boundary — the genomic measure of fragment
+The count effective length of a region or boundary — the genomic measure of fragment
 start-positions that produce the event — is a **pure geometric function of a
 fragment-length (FL) pmf**, identical for any species; only the FL distribution
-differs (the PR04b fairness note). Calibration applies these with the **gDNA** FL
-because gDNA is the density-modelled component (`gdna_density_global`); RNA is the observed
-residual mass (doc 01 §9), so it consumes no modelled length.
+differs. Calibration applies these PER COMPONENT: ``bp_solver.build_node_geometry`` computes
+each node's gDNA eff-lengths from the **gDNA** FL and its RNA (nascent unspliced + spliced)
+eff-lengths from the **RNA** FL.
 
 * **Region** of physical length ``L`` — a fragment is *contained* iff it fits, so
   the effective length is the FL-corrected ``E_f[max(0, L − ℓ)] = Σ_{ℓ≤L} (L − ℓ) f(ℓ)``.

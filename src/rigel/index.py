@@ -78,12 +78,17 @@ MANIFEST_JSON = "manifest.json"
 #:   5 — calibration-v6: regions.feather is the minimal merged-signature
 #:        partition [region_id, ref_name, start, end, length, signature];
 #:        the derived coarse class is recomputed on load from `signature`.
-#:   6 — three-channel calibration: regions.feather gains per-strand
-#:        `mature_eligible_{pos,neg}` (multi-exon exon coverage) and a new
-#:        boundaries.feather carries the per-boundary annotation flags
-#:        (is_tss/is_tes/is_splice_junction/genomic_sj_strand). See
-#:        docs/calibration/three_component_mature_nascent_design.md §4.
-INDEX_FORMAT_VERSION = 6
+#:   6 — three-channel calibration: regions.feather gained per-strand
+#:        `mature_eligible_{pos,neg}` and boundaries.feather carried
+#:        per-boundary annotation flags (is_tss/is_tes/is_splice_junction/
+#:        genomic_sj_strand).
+#:   7 — those v6 precompute columns removed (the message-precision collapse
+#:        retired the mature/nascent overlay that consumed them; the solver
+#:        reads junction strand from the accumulator motif instead).
+#:        regions.feather is again the minimal partition [region_id, ref_name,
+#:        start, end, length, signature]; boundaries.feather is [boundary_id,
+#:        ref_name, position].
+INDEX_FORMAT_VERSION = 7
 
 
 def _rigel_version() -> str:
@@ -746,7 +751,7 @@ def build_index_artifacts(
     intervals.sort(key=lambda iv: (iv.ref, iv.start, iv.end, iv.strand))
     iv_df = pd.DataFrame(intervals, columns=AnnotatedInterval._fields)
     region_df = build_region_partition(transcripts, ref_lengths)
-    boundary_df = build_boundary_partition(region_df, transcripts, ref_lengths)
+    boundary_df = build_boundary_partition(region_df, ref_lengths)
 
     return iv_df, region_df, boundary_df
 

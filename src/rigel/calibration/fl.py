@@ -6,9 +6,9 @@ gDNA-dominated regions/boundaries) and the **RNA FL** (spliced fragments), each
 **smoothly empirical-Bayes-shrunk** toward the global FL.
 
 This is **not** a per-fragment FL likelihood — that channel is deliberately
-excluded from calibration (``docs/caljointmodel/03_inference.md`` §2). Only gDNA
-consumes a modelled length today (RNA cannot be FL-corrected per transcript); the
-RNA FL is produced for PR 5's RNA effective length.
+excluded from calibration. BOTH FLs drive per-node effective lengths in the sweep
+(``bp_solver.build_node_geometry``): gDNA eff-lengths use the gDNA FL, RNA (nascent
+unspliced + spliced) eff-lengths use the RNA FL.
 
 The gDNA pool aggregates the accumulator's **intergenic + intronic** FL pools
 (both compartments); exonic pools (mature mRNA) are excluded. The FL pools and

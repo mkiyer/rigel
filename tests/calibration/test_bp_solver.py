@@ -14,6 +14,7 @@ import numpy as np
 from rigel.calibration.bp_solver import (
     NodeBelief,
     NodeGeometry,
+    adjacent_disagreement_variance,
     build_node_geometry,
     build_node_statics,
     node_sweep,
@@ -332,7 +333,7 @@ def test_precision_state_count_resolution():
     allow_neg = np.array([False, False])
     strand_obs = allow_pos ^ allow_neg  # both single-strand
     mass = u_pos + u_neg
-    d = _solve_nodes_logodds_all(u_pos, u_neg, z, z, allow_pos, allow_neg, strand_obs, mass, z,
+    d = _solve_nodes_logodds_all(u_pos, u_neg, allow_pos, allow_neg, strand_obs, mass, z,
                                  kappa=kappa, od_g=0.2, od_r=0.1, n_grid=60)
     assert d.gdna_frac_var is not None
     # same composition ⇒ same f_g; more fragments ⇒ sharper (lower Var(log f_g)).
@@ -342,7 +343,7 @@ def test_precision_state_count_resolution():
     for v in (d.gdna_frac_var, d.rna_pos_frac_var, d.rna_neg_frac_var):
         assert np.all(np.isfinite(v)) and np.all(v >= 0.0)
     # a no-fragment node is inactive ⇒ zero variance on every component.
-    d0 = _solve_nodes_logodds_all(np.array([0.0]), np.array([0.0]), np.array([0.0]), np.array([0.0]),
+    d0 = _solve_nodes_logodds_all(np.array([0.0]), np.array([0.0]),
                                   np.array([True]), np.array([True]), np.array([False]),
                                   np.array([0.0]), np.array([0.0]), kappa=kappa, od_g=0.2, od_r=0.1,
                                   n_grid=60)
@@ -392,6 +393,7 @@ def test_gdna_sweep_factor1_uniform():
         n_grid=40,
         max_passes=8,
         convergence_delta=1e-4,
+        disagreement_sigma2=adjacent_disagreement_variance(chain, geom),
     )
     dens = node_densities(final, geom)
     interg, ambig = [1, 5], 3  # region nodes: R0/R2 intergenic (strand-anchored), R1 AMBIG
@@ -448,7 +450,8 @@ def test_gdna_emits_across_tss_tes_seam():
     )
     cap = {}
     final = node_sweep(
-        chain, st, geom, belief, region_arrays, bsub, rna_sense_frac=0.7, n_grid=40, _capture=cap
+        chain, st, geom, belief, region_arrays, bsub, rna_sense_frac=0.7, n_grid=40, _capture=cap,
+        disagreement_sigma2=adjacent_disagreement_variance(chain, geom),
     )
     exon = 3  # chain id of the single-exon gene (R1), flanked on both sides by TSS/TES seams
     # THE FIX — the exon receives a gDNA relay across the seam (incoming precision > 0). Pre-fix: 0 (no relay).
@@ -508,6 +511,7 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
         n_grid=40,
         max_passes=10,
         convergence_delta=1e-4,
+        disagreement_sigma2=adjacent_disagreement_variance(chain, geom),
     )
     # The AMBIG phantom is pulled DOWN from its all-gDNA init (1.0) toward RNA. This chain is the WORST
     # case for a balanced AMBIG node: it is an ARTIFICIAL all-RNA chain (intron+|AMBIG|intron−) with NO
@@ -520,8 +524,10 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     # shows ~0 false gDNA). Still pulled well below the all-gDNA init and RNA-leaning.
     assert final.f_g[3] < 0.50
     # single-strand introns: the decisive strand wins and the floor DEFERS (a hyperprior cannot overrule a
-    # node's own strand evidence) → they stay firmly RNA.
-    assert final.f_g[1] < 0.15 and final.f_g[5] < 0.15
+    # node's own strand evidence) → they stay firmly RNA-leaning (~0.22 under the belief-free σ²_imp message
+    # precision on this ARTIFICIAL no-intergenic-seed worst case; real libraries with intergenic seeds pin
+    # them harder). The retired legacy σ²_edge basis reached ~0.13.
+    assert final.f_g[1] < 0.25 and final.f_g[5] < 0.25
 
 
 # --- density-Gaussian message form: two-sided pull + emergent deference (precision_state_design.md §5) --------
@@ -536,7 +542,7 @@ def test_density_message_two_sided_mode_not_vertex():
     z = np.zeros(1)
     # AMBIG node, balanced counts ⇒ the strand is flat (κ=0.5); only the message shapes f_g.
     d = _solve_nodes_logodds_all(
-        np.array([50.0]), np.array([50.0]), z, z,
+        np.array([50.0]), np.array([50.0]),
         np.array([True]), np.array([True]), np.array([False]),
         np.array([100.0]), z, kappa=0.5, od_g=0.0, od_r=0.0, n_grid=80,
         gdna_imp_mode=np.array([np.log(0.2)]), gdna_imp_prec=np.array([200.0]),
@@ -553,7 +559,7 @@ def test_density_message_defers_to_decisive_strand():
 
     z = np.zeros(1)
     d = _solve_nodes_logodds_all(
-        np.array([1000.0]), np.array([5.0]), z, z,
+        np.array([1000.0]), np.array([5.0]),
         np.array([True]), np.array([False]), np.array([True]),
         np.array([1005.0]), z, kappa=0.99, od_g=0.0, od_r=0.0, n_grid=80,
         gdna_imp_mode=np.array([np.log(0.9)]), gdna_imp_prec=np.array([3.0]),
@@ -594,7 +600,9 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
     side_g = boundary_side_eff_length(gdna_fl, L)   # (300)
     spl_eff = spliced_side_eff_length(rna_fl, L)     # one-sided half-triangle (100)
     lr, rr = np.array([-1, 0, 1, 2]), np.array([0, 1, 2, -1])
-    gx = lambda r: np.where(r >= 0, rho_g * side_g[np.clip(r, 0, 2)], 0.0)
+    def gx(r):
+        return np.where(r >= 0, rho_g * side_g[np.clip(r, 0, 2)], 0.0)
+
     lcross, rcross = gx(lr), gx(rr)
     # ``spl_scale`` < 1 models a CAPTURE-DEPLETED junction: junction-spanning (spliced) reads are only
     # partially captured, so the junction under-reports the exon's true mature density ⇒ the B→exon mature
@@ -622,7 +630,8 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
 def _sweep(args, kappa=0.95):
     chain, st, geom, belief, ra, bsub = args
     cap = {}
-    final = node_sweep(chain, st, geom, belief, ra, bsub, rna_sense_frac=kappa, n_grid=60, _capture=cap)
+    final = node_sweep(chain, st, geom, belief, ra, bsub, rna_sense_frac=kappa, n_grid=60, _capture=cap,
+                       disagreement_sigma2=adjacent_disagreement_variance(chain, geom))
     return final, cap
 
 
@@ -683,43 +692,6 @@ def test_mature_measurement_disagreement_silenced():
     assert float(fin_lo.f_g[ex]) < 0.45, fin_lo.f_g[ex]
 
 
-def test_three_channel_mature_blocked_from_introns():
-    """Phase-2 three-channel routing (`three_component_mature_nascent_design.md` §5): on the shrinkage path a
-    MATURE-eligible exon must send only NASCENT (≈0 here, nrna_none) into its flanking intron — its mature
-    stays on the mature channel and cannot bleed in. Asserted on the forward +RNA message into the junction B2
-    (the exon R1's right junction, whose far flank is the intron R2): treating the exon as mature-eligible
-    yields a strictly LOWER message target (less RNA imputed intron-ward) than treating it as nascent-eligible,
-    where the exon's full RNA flows in as fake nascent (the v2 bleed)."""
-
-    def run(exon_mature_eligible: bool):
-        chain, st, geom, belief, ra, bsub = _mature_exon_chain(spliced=True)
-        ra.mature_eligible_pos = np.array([False, exon_mature_eligible, False])  # R0 intron, R1 exon, R2 intron
-        ra.mature_eligible_neg = np.array([False, False, False])
-        cap: dict = {}
-        node_sweep(
-            chain, st, geom, belief, ra, bsub, rna_sense_frac=0.95, n_grid=60,
-            disagreement_sigma2=3.0, _capture=cap,  # scalar σ²_imp engages the channel path
-        )
-        b2 = 4  # chain id of B2; its left neighbour (forward src) is the exon R1
-        return float(cap["a_fwd"][2][b2]), float(cap["a_fwd"][3][b2])  # (+RNA mode, prec) into B2
-
-    mode_elig, pr_elig = run(True)     # mature-eligible: mature blocked ⇒ nascent-only ≈ 0
-    mode_inelig, pr_inelig = run(False)  # nascent-eligible: full RNA flows into the intron side (the bleed)
-    assert pr_elig > 0.0 and pr_inelig > 0.0, (pr_elig, pr_inelig)  # both are real messages
-    assert mode_elig < mode_inelig - 0.5, (mode_elig, mode_inelig)
-
-
-def test_three_channel_legacy_path_unchanged_when_flag_off():
-    """The three-channel logic engages ONLY on the shrinkage path; with the flag off (disagreement_sigma2
-    None) the sweep is byte-identical to the legacy lumped-RNA path regardless of mature-eligibility."""
-    chain, st, geom, belief, ra, bsub = _mature_exon_chain(spliced=True)
-    fin_default, _ = _sweep((chain, st, geom, belief, ra, bsub))
-    chain2, st2, geom2, belief2, ra2, bsub2 = _mature_exon_chain(spliced=True)
-    ra2.mature_eligible_pos = np.array([True, True, True])  # would change the channel path, but flag is off
-    fin_elig, _ = _sweep((chain2, st2, geom2, belief2, ra2, bsub2))
-    assert np.allclose(fin_default.f_g, fin_elig.f_g)
-
-
 def test_strand_overdispersion_prior_default_is_near_binomial():
     """BUG #1 regression: the shipped default strand-overdispersion prior must be the NEAR-BINOMIAL null
     (α=β=14 ⇒ od₀≈0.034), NOT the old over-conservative 0.143 (α=β=3) that widened the gDNA Beta-Binomial
@@ -752,7 +724,7 @@ def test_pure_gdna_node_confident_at_near_binomial_od():
         z = np.zeros(1)
         n = float(u_pos + u_neg)
         return float(_solve_nodes_logodds_all(
-            np.array([float(u_pos)]), np.array([float(u_neg)]), z, z,
+            np.array([float(u_pos)]), np.array([float(u_neg)]),
             np.array([True]), np.array([False]), np.array([True]),
             np.array([n]), z, kappa=0.7, od_g=od, od_r=od, n_grid=80).gdna_frac[0])
 

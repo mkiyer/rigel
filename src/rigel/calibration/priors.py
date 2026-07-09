@@ -12,7 +12,6 @@ what the EM is for). See ``docs/acc_caljointmodel/prs/PR06_integrate.md`` §I an
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -36,82 +35,8 @@ _RNA_SIGNATURE_BITS = BIT_EXON_POS | BIT_EXON_NEG | BIT_INTRON_POS | BIT_INTRON_
 _GDNA_EFF_LEN_FLOOR = 1.0
 
 
-# gDNA eff-len reference density ρ* (eff = θ_g/ρ*). Two production-supported modes, env-selectable:
-#   "contained" (DEFAULT, production): the mass-weighted CONTAINED (exon) density G_c/E_c — robust across
-#      capture on/off, stranded/unstranded, and gDNA level on today's (observed) calibration.
-#   "kmeans" (OPTIONAL, the TARGET): the magic-free per-locus ENRICHED-MODE reference (see below). Principled
-#      and preferred, but it needs a cleanly BIMODAL node-density landscape: on OBSERVED calibration it is
-#      currently worse than "contained" (it hallucinates a split from noise on unimodal/capture-off loci) and
-#      only wins once the calibration's per-node gDNA accuracy improves (perfect-calibration study). Keep it
-#      here so we can flip production to it after the calibration-accuracy work. See
-#      docs/calibration/effective_length_state_and_roadmap.md.
-_RHOSTAR_MODE = os.environ.get("RIGEL_RHOSTAR", "contained")
-
-
-def _per_locus_kmeans_rhostar(
-    region_arrays: "RegionArrays",
-    multi_loci: "list[MultiLocus]",
-    n_loci: int,
-    density: np.ndarray,
-    weight: np.ndarray,
-) -> np.ndarray:
-    """Per-locus ENRICHED-MODE reference density via a MAGIC-FREE log-space support-weighted 1-sided k-means.
-
-    Collects each locus's per-region gDNA densities ``ρ_n = density[r]`` (weight = support ``S_n``) for
-    regions with positive density, then fits two log-space centroids by iterating to a fixed point with the
-    split at their geometric midpoint. ``ρ_ref`` = the support-weighted geomean of the ENRICHED (above-split)
-    cluster. NO tunable constant (the split is self-determined; k=2 is the depleted-vs-captured physics),
-    degenerate-safe (uniform / single node → that density). Robust to the few-enriched/many-depleted panel
-    regime where a fixed quantile collapses into the depleted cluster. (enriched-mode-estimator workflow;
-    docs/calibration/effective_length_state_and_roadmap.md.)
-    """
-    per: list[list[tuple[float, float]]] = [[] for _ in range(n_loci)]
-    blocks_by_ref: dict[int, list[tuple[int, int, int]]] = {}
-    for ml in multi_loci:
-        for blk in ml.loci:
-            if blk.end > blk.start:
-                blocks_by_ref.setdefault(int(blk.ref_id), []).append(
-                    (int(blk.start), int(blk.end), int(ml.multi_locus_id))
-                )
-    for blocks in blocks_by_ref.values():
-        blocks.sort()
-    starts, ends, ref_off = region_arrays.start, region_arrays.end, region_arrays.ref_offsets
-    for ref_id in range(int(region_arrays.n_refs)):
-        blocks = blocks_by_ref.get(ref_id)
-        if not blocks:
-            continue
-        lo, hi = int(ref_off[ref_id]), int(ref_off[ref_id + 1])
-        bstarts = np.fromiter((b[0] for b in blocks), dtype=np.int64, count=len(blocks))
-        for r in range(lo, hi):
-            if density[r] <= 0.0 or weight[r] <= 0.0:
-                continue
-            rs, re = int(starts[r]), int(ends[r])
-            for b_start, b_end, lid in blocks[: int(np.searchsorted(bstarts, re, side="left"))]:
-                if b_end > rs and min(b_end, re) - max(b_start, rs) > 0:
-                    per[lid].append((float(density[r]), float(weight[r])))
-    out = np.zeros(n_loci, dtype=np.float64)
-    for lid, pairs in enumerate(per):
-        if not pairs:
-            continue
-        d = np.array([p[0] for p in pairs])
-        wts = np.array([p[1] for p in pairs])
-        x = np.log(d)
-        if np.ptp(x) < 1e-12:  # uniform / single node ⇒ that density (degenerate-safe)
-            out[lid] = float(d[0])
-            continue
-        c_hi, c_lo = float(x.max()), float(x.min())
-        for _ in range(100):  # iter cap is numerical convergence, not a modeling constant
-            tau = 0.5 * (c_hi + c_lo)  # self-determined inter-centroid geometric midpoint (no free knob)
-            up = x >= tau
-            whi, wlo = wts[up].sum(), wts[~up].sum()
-            n_hi = (wts[up] * x[up]).sum() / whi if whi > 0 else c_hi
-            n_lo = (wts[~up] * x[~up]).sum() / wlo if wlo > 0 else c_lo
-            if abs(n_hi - c_hi) < 1e-12 and abs(n_lo - c_lo) < 1e-12:
-                c_hi, c_lo = n_hi, n_lo
-                break
-            c_hi, c_lo = n_hi, n_lo
-        out[lid] = float(np.exp(c_hi))  # support-weighted geomean of the enriched (above-split) cluster
-    return out
+# gDNA eff-len reference density ρ* (eff = θ_g/ρ*): the mass-weighted CONTAINED (exon) density G_c/E_c —
+# robust across capture on/off, stranded/unstranded, and gDNA level.
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,10 +225,11 @@ def assemble_priors(
         gdna_eff_len     = (G+1)² / [ Σ share*(contained²/S_r + seam²/S_s) + (2G+1)/span ], capped at span
                            G = Σ share*(contained+seam),  span = Σ share*(S_r + S_s)  (EFFECTIVE support)
 
-    **The bedrock invariant — factor 1 under uniform gDNA.** Dividing each node's mass by its
-    EFFECTIVE sampling support (``S_r`` for contained, ``S_s = E[ℓ]`` for the pooled crossing) makes the
-    per-node density ``m_n/S_n`` exactly the true ρ under a uniform (unenriched) library — because the
-    accumulator deposits ``ρ·E[max(0,L−ℓ)]`` of contained mass and ``ρ·E[ℓ]`` of pooled crossing mass.
+    **The bedrock invariant — factor 1 under uniform gDNA.** Dividing each node's mass by its EFFECTIVE
+    sampling support (``S_r`` for contained, ``S_s = ½·(E[min(ℓ,L_r)]+E[min(ℓ,L_{r+1})])`` for the pooled
+    crossing — the AVERAGE per-side density length, NOT ``E[ℓ]`` which over-states it) makes the per-node
+    density ``m_n/S_n`` exactly the true ρ under a uniform (unenriched) library — because the accumulator
+    deposits ``ρ·E[max(0,L−ℓ)]`` of contained mass and ``ρ·S_s`` of pooled crossing mass.
     The Laplace-smoothed IPR then returns ``span`` EXACTLY (``eff_len = span`` ⇒ contraction factor 1):
     an unenriched library contracts NOTHING. Using the genomic ``region_size_bp`` instead would
     understate short-region density and fabricate a contraction even with no capture bias (verified
@@ -410,23 +336,6 @@ def assemble_priors(
         E_c = np.exp(w * np.log(np.maximum(E_c, 1e-9)) + (1.0 - w) * np.log(span_c))
         ratio = np.where(Gc > 1e-9, gdna_locus / np.maximum(Gc, 1e-9), 1.0)
         eff_len = np.where(Gc > 1e-9, np.minimum(ratio * E_c, span), span)
-
-    if _RHOSTAR_MODE == "kmeans":
-        # OPTIONAL (RIGEL_RHOSTAR=kmeans): override the reference density with the magic-free per-locus
-        # ENRICHED-MODE (log-space support-weighted 1-sided k-means). eff = θ_g/ρ*, capped at span, then the
-        # SAME contained-evidence shrinkage. The TARGET production reference — see the module note + the
-        # roadmap doc; on today's observed calibration "contained" (the default above) is more robust.
-        supp = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
-        dens = np.asarray(calibration.mass_gdna_contained, dtype=np.float64) / supp
-        rho_star = _per_locus_kmeans_rhostar(region_arrays, multi_loci, len(multi_loci), dens, supp)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            have = (gdna_locus > 1e-9) & (rho_star > 1e-9)
-            eff_raw = np.where(
-                have, np.minimum(gdna_locus / np.where(have, rho_star, 1.0), span), span
-            )
-            eff_len = np.exp(
-                w * np.log(np.maximum(eff_raw, 1e-9)) + (1.0 - w) * np.log(np.maximum(span, 1e-9))
-            )
 
     return LocusPriors(
         gdna_prior_count=gdna_locus,

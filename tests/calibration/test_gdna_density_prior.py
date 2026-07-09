@@ -99,9 +99,11 @@ def test_weighted_median_is_continuous():
     v = np.sort(rng.normal(size=201))
     w = np.ones_like(v)
     m0 = _weighted_median(v, w)
-    w2 = w.copy(); w2[100] += 1e-12
+    w2 = w.copy()
+    w2[100] += 1e-12
     assert abs(_weighted_median(v, w2) - m0) < 1e-9   # continuous in weight
-    v2 = v.copy(); v2[100] += 1e-12
+    v2 = v.copy()
+    v2[100] += 1e-12
     assert abs(_weighted_median(v2, w) - m0) < 1e-9   # continuous in value
     assert abs(_weighted_median(np.array([0.0, 1.0]), np.array([1.0, 1.0])) - 0.5) < 1e-9  # even split → midpoint
 

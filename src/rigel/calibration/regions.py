@@ -45,11 +45,7 @@ from .signature import (
 )
 
 
-REGION_CORE_COLUMNS = ["region_id", "ref_name", "start", "end", "length", "signature"]
-# Per-region mature-eligibility (spliced-exon coverage) on each strand — the structural input to the
-# calibration mature/nascent message split (docs/calibration/three_component_mature_nascent_design.md §4).
-REGION_MATURE_COLUMNS = ["mature_eligible_pos", "mature_eligible_neg"]
-REGION_COLUMNS = REGION_CORE_COLUMNS + REGION_MATURE_COLUMNS
+REGION_COLUMNS = ["region_id", "ref_name", "start", "end", "length", "signature"]
 
 REGION_COLUMN_DTYPES: dict[str, type | np.dtype] = {
     "region_id": np.int64,
@@ -57,8 +53,6 @@ REGION_COLUMN_DTYPES: dict[str, type | np.dtype] = {
     "end": np.int64,
     "length": np.int64,
     "signature": np.uint8,
-    "mature_eligible_pos": np.bool_,
-    "mature_eligible_neg": np.bool_,
 }
 
 # ---------------------------------------------------------------------------
@@ -67,17 +61,10 @@ REGION_COLUMN_DTYPES: dict[str, type | np.dtype] = {
 # A reference with k regions has k+1 boundaries B0 R0 B1 … R(k-1) Bk (node_chain.build_node_chain): B0 at the
 # reference start, Bk at the end, and internal Bi at region (i-1)'s end == region i's start. The row order
 # (ref-major, i = 0..k in genomic order) aligns by construction with the accumulator's boundary indexing.
-BOUNDARY_COLUMNS = [
-    "boundary_id", "ref_name", "position",
-    "is_tss", "is_tes", "is_splice_junction", "genomic_sj_strand",
-]
+BOUNDARY_COLUMNS = ["boundary_id", "ref_name", "position"]
 BOUNDARY_COLUMN_DTYPES: dict[str, type | np.dtype] = {
     "boundary_id": np.int64,
     "position": np.int64,
-    "is_tss": np.bool_,
-    "is_tes": np.bool_,
-    "is_splice_junction": np.bool_,
-    "genomic_sj_strand": np.int8,  # Strand: 0 none / 1 POS / 2 NEG / 3 both (coincident opposite junctions)
 }
 
 
@@ -235,116 +222,24 @@ def build_region_partition(
 
     for region_id, row in enumerate(rows):
         row["region_id"] = region_id
-    region_df = pd.DataFrame(rows, columns=REGION_CORE_COLUMNS)
-    pos, neg = _compute_mature_eligible(region_df, transcripts)
-    region_df["mature_eligible_pos"] = pos
-    region_df["mature_eligible_neg"] = neg
+    region_df = pd.DataFrame(rows, columns=REGION_COLUMNS)
     return _coerce_region_dtypes(region_df)
-
-
-def _compute_mature_eligible(
-    region_df: pd.DataFrame, transcripts: list[Transcript]
-) -> tuple[np.ndarray, np.ndarray]:
-    """Per-region mature-eligibility on each strand: does the region **overlap** an exon of a
-    **multi-exon** (spliced) transcript on that strand?
-
-    This is the structural statement of "spliced ⇒ mature"
-    (`docs/calibration/three_component_mature_nascent_design.md` §4): a single-exon transcript's exon and a
-    retained-intron region are correctly NOT mature-eligible (their RNA is nascent). **Overlap, not full
-    coverage** — a region has a constant signature but its multi-exon-vs-single-exon coverage can vary within
-    it (a multi-exon terminal exon merges with an adjacent single-exon exon when no intron separates them);
-    overlap over-approximates safely (it never *under*-calls mature-eligibility, so it can never re-introduce a
-    mature→intron bleed). Returns ``(pos, neg)`` bool arrays aligned to ``region_df`` rows.
-    """
-    n = len(region_df)
-    pos = np.zeros(n, dtype=bool)
-    neg = np.zeros(n, dtype=bool)
-    if n == 0:
-        return pos, neg
-
-    # Merged multi-exon exon intervals per (ref, strand).
-    exons_by: dict[tuple[str, int], list[tuple[int, int]]] = {}
-    for tx in transcripts:
-        if tx.is_synthetic or len(tx.exons) < 2:
-            continue
-        if tx.strand not in (Strand.POS, Strand.NEG):
-            continue
-        key = (str(tx.ref), int(tx.strand))
-        lst = exons_by.setdefault(key, [])
-        for exon in tx.exons:
-            lst.append((int(exon.start), int(exon.end)))
-    merged: dict[tuple[str, int], tuple[np.ndarray, np.ndarray]] = {}
-    for key, intervals in exons_by.items():
-        intervals.sort()
-        starts: list[int] = []
-        ends: list[int] = []
-        for s0, e0 in intervals:
-            if starts and s0 <= ends[-1]:
-                ends[-1] = max(ends[-1], e0)
-            else:
-                starts.append(s0)
-                ends.append(e0)
-        merged[key] = (np.asarray(starts, np.int64), np.asarray(ends, np.int64))
-
-    refs = region_df["ref_name"].to_numpy()
-    r_start = region_df["start"].to_numpy(np.int64)
-    r_end = region_df["end"].to_numpy(np.int64)
-    for (ref, strand_int), (m_start, m_end) in merged.items():
-        out = pos if strand_int == int(Strand.POS) else neg
-        sel = np.flatnonzero(refs == ref)
-        if sel.size == 0:
-            continue
-        rs, re = r_start[sel], r_end[sel]
-        # Merged intervals are sorted & disjoint. Region [rs,re) overlaps one iff the last interval starting
-        # STRICTLY before re ends after rs (earlier intervals end even earlier; later ones start at/after re).
-        # ``side="left"`` excludes an interval that merely touches at m_start == re (half-open, no overlap).
-        idx = np.searchsorted(m_start, re, side="left") - 1
-        ok = idx >= 0
-        hit = np.zeros(sel.size, dtype=bool)
-        hit[ok] = m_end[idx[ok]] > rs[ok]
-        out[sel] = hit
-    return pos, neg
 
 
 def build_boundary_partition(
     region_df: pd.DataFrame,
-    transcripts: list[Transcript],
     ref_lengths: Mapping[str, int],
 ) -> pd.DataFrame:
-    """Build the per-reference boundary partition — one row per region interface, carrying the annotation
-    structural flags the calibration mature/nascent split reads
-    (`docs/calibration/three_component_mature_nascent_design.md` §4).
+    """Build the per-reference boundary partition — one row per region interface (the calibration boundary
+    nodes).
 
     For a reference with ``k`` regions there are ``k+1`` boundaries (``node_chain``: B0 R0 … R(k-1) Bk); the
     boundary positions are ``[r0.start, r0.end, r1.end, …, r(k-1).end]``, ref-major in genomic order — aligning
-    by construction with the accumulator's boundary indexing. Per boundary position ``p``:
-
-    * ``is_splice_junction`` / ``genomic_sj_strand`` — ``p`` is a transcript **intron endpoint** (donor or
-      acceptor); the motif strand is the transcript's strand (``3`` = coincident opposite-strand junctions).
-    * ``is_tss`` / ``is_tes`` — ``p`` is a transcript's 5′ / 3′ terminus (orientation by strand; a ``+``
-      transcript's TSS is its first-exon start, its TES its last-exon end; ``−`` is mirrored).
+    by construction with the accumulator's boundary indexing. Boundary strand/junction orientation is NOT
+    precomputed here: the solver reads the observed splice-motif strand from the accumulator
+    (``BoundarySubstrate.junction_strand``), which is correct even at AMBIG / exon↔exon seams.
     """
     normalized_ref_lengths = {str(name): int(length) for name, length in ref_lengths.items()}
-    # Per-ref annotation event positions (sets), by role and strand.
-    sj_pos: dict[str, set[int]] = {}
-    sj_neg: dict[str, set[int]] = {}
-    tss: dict[str, set[int]] = {}
-    tes: dict[str, set[int]] = {}
-    for tx in transcripts:
-        if tx.is_synthetic or not tx.exons or tx.strand not in (Strand.POS, Strand.NEG):
-            continue
-        ref = str(tx.ref)
-        sj = sj_pos if tx.strand == Strand.POS else sj_neg
-        s = sj.setdefault(ref, set())
-        for intron_start, intron_end in tx.introns():
-            s.add(int(intron_start))
-            s.add(int(intron_end))
-        first, last = int(tx.exons[0].start), int(tx.exons[-1].end)
-        tss_p = first if tx.strand == Strand.POS else last
-        tes_p = last if tx.strand == Strand.POS else first
-        tss.setdefault(ref, set()).add(tss_p)
-        tes.setdefault(ref, set()).add(tes_p)
-
     by_ref: dict[str, pd.DataFrame] = {
         ref: grp for ref, grp in region_df.groupby("ref_name", sort=False)
     }
@@ -358,24 +253,8 @@ def build_boundary_partition(
         positions = np.empty(len(starts) + 1, dtype=np.int64)
         positions[:-1] = starts
         positions[-1] = ends[-1]
-        sp, sn = sj_pos.get(ref, set()), sj_neg.get(ref, set())
-        tss_r, tes_r = tss.get(ref, set()), tes.get(ref, set())
         for p in positions.tolist():
-            in_pos, in_neg = p in sp, p in sn
-            sj_strand = int(Strand.POS) * in_pos + int(Strand.NEG) * in_neg
-            if in_pos and in_neg:
-                sj_strand = int(Strand.AMBIGUOUS)
-            rows.append(
-                {
-                    "boundary_id": -1,
-                    "ref_name": ref,
-                    "position": int(p),
-                    "is_tss": p in tss_r,
-                    "is_tes": p in tes_r,
-                    "is_splice_junction": in_pos or in_neg,
-                    "genomic_sj_strand": sj_strand,
-                }
-            )
+            rows.append({"boundary_id": -1, "ref_name": ref, "position": int(p)})
     if not rows:
         return _coerce_boundary_dtypes(pd.DataFrame(columns=BOUNDARY_COLUMNS))
     for boundary_id, row in enumerate(rows):
@@ -657,8 +536,6 @@ def load_ref_lengths(path: str | Path) -> dict[str, int]:
 
 __all__ = [
     "REGION_COLUMNS",
-    "REGION_CORE_COLUMNS",
-    "REGION_MATURE_COLUMNS",
     "REGION_COLUMN_DTYPES",
     "BOUNDARY_COLUMNS",
     "BOUNDARY_COLUMN_DTYPES",

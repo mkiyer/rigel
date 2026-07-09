@@ -1,5 +1,9 @@
 # Spliced → mature → nascent: the RNA imputation message, from first principles
 
+> ⚠️ **SUPERSEDED (2026-07-09).** The mature/nascent RNA *message channel* described here was retired in the
+> message-precision **collapse** (`two_component_implementation_plan_v2.md`). Mature spliced RNA is now carried
+> only by the boundary spliced-floor terms, not a per-node mature/nascent message. Historical.
+
 **Status:** the **mature-absorption** term implemented + validated on the toy 2026-06-30
 (`calib-disagreement-precision`). Supersedes the NEXT_SESSION task-A premise (the `eff_spl` "~2×"
 bug — **disproven**, see §5). Companion: `dispersion_aware_message_precision.md` (the gDNA/nascent
