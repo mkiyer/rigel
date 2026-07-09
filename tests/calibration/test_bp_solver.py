@@ -740,3 +740,49 @@ def test_pure_gdna_node_confident_at_near_binomial_od():
     rna_infl = solve(700, 300, 0.143)
     assert rna_near < 0.25, rna_near
     assert rna_infl > rna_near, (rna_infl, rna_near)
+
+
+# --- empirical-Bayes disagreement-shrinkage message precision (Change 1, 2026-07-09) ---------------
+# The message precision is now σ²_edge = w·max(resid²,1/n) + (1−w)·(σ²_imp+1/n), pr = 1/σ²_edge, with w the
+# data-fit signal fraction. These lock: (1) the per-edge formula (w=0 == the legacy global scalar exactly;
+# agreement earns ABOVE-average precision; a seam self-silences); (2) the weight is ~0 on a uniform field
+# (all adjacent disagreement is sampling noise) and >0 on a capture-like density seam.
+
+
+def test_eb_edge_precision_properties():
+    from rigel.calibration.bp_solver import _eb_edge_precision
+
+    sig, n = 0.5, 100.0
+    legacy = n / (n * sig + 1.0)  # the shipped global scalar 1/(σ²_imp + 1/n)
+    # w=0 reproduces the global scalar BYTE-IDENTICALLY (goldens unchanged on the baseline arm)
+    assert _eb_edge_precision(0.7, n, sig, 0.0) == legacy
+    # a below-average-disagreement edge earns precision ABOVE the average; a seam self-silences below it
+    assert _eb_edge_precision(0.0, n, sig, 0.6) > legacy
+    assert _eb_edge_precision(5.0, n, sig, 0.6) < legacy
+    # bounded above (w<1 ⇒ σ²_edge ≥ (1−w)·σ²_imp ⇒ pr ≤ 1/((1−w)·σ²_imp)) — no runaway
+    assert _eb_edge_precision(0.0, 1e9, sig, 0.6) <= 1.0 / ((1.0 - 0.6) * sig) + 1e-6
+    # no source count ⇒ no message
+    assert _eb_edge_precision(1.0, 0.0, sig, 0.6) == 0.0
+    # monotone in disagreement (larger resid ⇒ lower precision) at fixed w>0
+    prs = [_eb_edge_precision(r, n, sig, 0.6) for r in (0.0, 0.5, 1.0, 3.0)]
+    assert all(a >= b for a, b in zip(prs, prs[1:]))
+
+
+def test_eb_shrinkage_weight_from_residuals():
+    from rigel.calibration.bp_solver import _shrinkage_weight_from_residuals
+
+    n = np.full(24, 100.0)  # equal counts ⇒ the same per-edge sampling noise (1/n) throughout
+    rng = np.random.default_rng(0)
+    # HOMOGENEOUS: every adjacent pair agrees (residuals at the sampling scale) ⇒ the spread is all noise ⇒
+    # w ≈ 0 (message precision collapses to the global scalar — the current behavior).
+    small = rng.normal(0.0, 0.05, 24)
+    w_small = _shrinkage_weight_from_residuals(small, n, n)
+    # HETEROGENEOUS: a subset of strong capture-like seams ⇒ genuine between-edge signal ⇒ w rises.
+    big = small.copy()
+    big[::4] = 5.0
+    w_big = _shrinkage_weight_from_residuals(big, n, n)
+    assert 0.0 <= w_small < 0.2, f"homogeneous residuals should give w≈0, got {w_small}"
+    assert w_big > w_small + 0.2, f"seam residuals should raise w ({w_big} vs {w_small})"
+    assert w_big < 1.0, "weight is bounded strictly below 1 (the ψ'(1/2) within-edge noise floor)"
+    # degenerate population ⇒ no shrinkage signal ⇒ w = 0 (falls back to the global scalar)
+    assert _shrinkage_weight_from_residuals(np.array([1.0]), np.array([10.0]), np.array([10.0])) == 0.0

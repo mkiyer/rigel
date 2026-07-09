@@ -39,7 +39,9 @@ import numpy as np
 from .bp_solver import (
     build_node_geometry,
     build_node_statics,
+    adjacent_disagreement_shrinkage_weight,
     adjacent_disagreement_variance,
+    adjacent_gdna_disagreement,
     chain_boundary_side_deconv,
     chain_region_deconv,
     init_beliefs,
@@ -161,13 +163,15 @@ def calibrate(
         n_grid=config.sweep_n_grid, n_grid_ss=config.sweep_n_grid_single_strand,
         logodds_window=config.sweep_logodds_window, statics=statics,
     )
-    # Belief-free Poisson message precision (`disagreement_shrinkage_prior_design_v2.md`): the scalar
-    # total-density σ²_imp — the empirical adjacent-node imputation floor. σ²_msg = σ²_imp + 1/n_src; the
-    # single production basis for every message channel, both passes.
+    # Empirical-Bayes disagreement-shrinkage message precision (`message_precision_regression_and_fix_plan.md`
+    # §6), both fit ONCE over the adjacent-node population: σ²_imp (the mean disagreement variance — the
+    # shrinkage target) and w_eb (the data-fit signal fraction — how much each edge is trusted over the
+    # population). σ²_edge = w·max(resid²,1/n) + (1−w)·(σ²_imp+1/n). w_eb=0 recovers the legacy global scalar.
     sig_total = adjacent_disagreement_variance(chain, geometry)
-    logger.debug("calibration: total-density σ²_imp=%.4f", sig_total)
+    w_eb = adjacent_disagreement_shrinkage_weight(chain, geometry)
+    logger.debug("calibration: pass-1 total-density σ²_imp=%.4f  EB weight=%.3f", sig_total, w_eb)
 
-    def _sweep(prior):
+    def _sweep(prior, sig, w):
         return node_sweep(
             chain, statics, geometry, belief, region_arrays, boundary_substrate,
             rna_sense_frac=rna_sense_frac,
@@ -177,14 +181,23 @@ def calibrate(
             convergence_delta=config.sweep_convergence_delta,
             logodds_window=config.sweep_logodds_window,
             n_tilt=config.sweep_n_tilt, n_grid_ss=config.sweep_n_grid_single_strand, gdna_prior=prior,
-            disagreement_sigma2=sig_total,
+            disagreement_sigma2=sig,
+            disagreement_weight=w,
         )
 
-    # PASS 1 — single-strand solve with the total-density floor.
-    belief = _sweep(None)
+    # PASS 1 — single-strand solve on the total-density basis (fg=1; RNA-contaminated, so the EB weight is
+    # typically ~0 and the precision is the global scalar — a conservative, self-solving start).
+    belief = _sweep(None, sig_total, w_eb)
     # PHASE 2 — train the nonparametric gDNA-density mixture prior on the solved single-strand nodes, then
     # PASS 2 — re-solve ALL nodes with that mixture as the per-node prior (self-scaling; fills the tilt's
     # null space on AMBIG). Falls back to the pass-1 belief if the substrate is too small to fit.
+    # Change 3 — refit the message precision on the PER-COMPONENT (gDNA-resolved) basis using pass-1's
+    # solved f_g: the deconvolved gDNA count f_g·mass strips the RNA-abundance variation that swamped the
+    # total-density frame, so capture's coherent enrichment seams register and the EB weight can rise
+    # above 0 (self-silencing where it belongs). Pass 2 uses this basis.
+    sig_g, w_g = adjacent_gdna_disagreement(chain, geometry, belief.f_g)
+    logger.debug("calibration: pass-2 gDNA-resolved σ²_imp=%.4f  EB weight=%.3f", sig_g, w_g)
+
     gdna_prior = None
     train_sub = build_training_substrate(
         chain, belief, geometry, statics, region_arrays, boundary_substrate,
@@ -196,7 +209,7 @@ def calibrate(
             mixture_bridge=config.gdna_prior_mixture_bridge,
             bridge_trim_pct=config.calib_kde_bridge_trim_pct,
         )
-        belief = _sweep(gdna_prior)
+        belief = _sweep(gdna_prior, sig_g, w_g)
     regions = chain_region_deconv(chain, belief, substrate)
     left, right = chain_boundary_side_deconv(chain, belief, substrate)
     logger.debug("calibration: %s", "two-pass (Phase-2 mixture prior)" if gdna_prior else "single pass")
