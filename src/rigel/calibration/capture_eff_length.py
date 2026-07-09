@@ -42,12 +42,21 @@ __all__ = ["transcript_capture_eff_lengths"]
 
 def _transcript_node_incidence(
     index: "TranscriptIndex", region_arrays: "RegionArrays"
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Per-transcript **node** membership — the regions AND boundaries a component crosses CONTIGUOUSLY.
+) -> tuple[
+    np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray
+]:
+    """Per-transcript **node** membership — the regions, boundaries, AND splice junctions a component crosses.
 
-    Returns ``(inc_t_reg, inc_reg, inc_t_bnd, inc_bnd)``: region incidence ``(t, r)`` and interior-boundary
-    incidence ``(t, r)`` where boundary ``r`` is the seam between regions ``r`` and ``r+1`` (left-region
-    keyed, matching ``priors._gdna_region_node_arrays``).
+    Returns ``(inc_t_reg, inc_reg, inc_t_bnd, inc_bnd, inc_t_junc, inc_junc_left, inc_junc_right)``: region
+    incidence ``(t, r)``; interior-boundary incidence ``(t, r)`` where boundary ``r`` is the seam between
+    regions ``r`` and ``r+1`` (left-region keyed, matching ``priors._gdna_region_node_arrays``); and
+    SPLICE-JUNCTION incidence ``(t, r_left, r_right)`` — one per adjacent exon pair of a multi-exon mRNA,
+    where ``r_left`` is the previous exon's last region and ``r_right`` this exon's first region. The intron
+    between them carries no gDNA (no genomic-adjacent seam), so the junction's crossing mass is IMPUTED by
+    ``transcript_capture_eff_lengths`` from the two flanking exon densities — stitching the spliced
+    transcript into one contiguous ruler so its ``span_full`` equals its FL-marginal length (else the
+    junction-dropped ``span_full`` under-states the mature footprint and the ``fl/span_full`` inflation
+    lifts a spliced mRNA's EM eff-length ABOVE its nascent parent's — the physically impossible inversion).
 
     A component's effective length is the IPR over exactly the nodes it occupies contiguously (the
     transcript-structure gate, from first principles):
@@ -73,12 +82,16 @@ def _transcript_node_incidence(
     r_r: list[np.ndarray] = []
     b_t: list[np.ndarray] = []
     b_r: list[np.ndarray] = []
+    j_t: list[int] = []  # splice-junction seam: transcript
+    j_l: list[int] = []  # left-flank region (the previous exon's LAST region)
+    j_r: list[int] = []  # right-flank region (this exon's FIRST region)
     seen: set[int] = set()
+    prev_last: dict[int, int] = {}  # t → last region of its previous (genomically earlier) exon
 
-    def _add(t: int, ref_name: object, a: int, b: int) -> None:
+    def _add(t: int, ref_name: object, a: int, b: int) -> "tuple[int, int] | None":
         rid = name_to_id.get(str(ref_name))
         if rid is None:
-            return
+            return None
         lo0, hi0 = int(ref_off[rid]), int(ref_off[rid + 1])
         # regions overlapping [a, b): first with end_r > a (contains/after a) through last with start_r < b.
         lo = lo0 + int(np.searchsorted(ends[lo0:hi0], a, side="right"))
@@ -89,12 +102,26 @@ def _transcript_node_incidence(
             if hi - 1 > lo:  # interior seams r ∈ [lo, hi-1): boundaries crossed contiguously (no splice)
                 b_r.append(np.arange(lo, hi - 1, dtype=np.int64))
                 b_t.append(np.full(hi - 1 - lo, int(t), dtype=np.int64))
+            return lo, hi
+        return None
 
     iv = pd.read_feather(os.path.join(index.index_dir, "intervals.feather"))
     ex = iv[(iv["interval_type"] == int(IntervalType.EXON)) & (iv["t_index"] >= 0)]
+    # genomic order per transcript so consecutive rows of one transcript are ADJACENT exons — the pairs
+    # whose SPLICE JUNCTION must be stitched (the intron between them carries no gDNA ⇒ it is not a
+    # genomic-adjacent seam; its crossing mass is imputed downstream from the flanking EXON densities).
+    ex = ex.sort_values(["t_index", "start"], kind="stable")
     for t, ref_name, a, b in zip(ex["t_index"], ex["ref"], ex["start"], ex["end"], strict=True):
-        _add(int(t), ref_name, int(a), int(b))
-        seen.add(int(t))
+        t = int(t)
+        res = _add(t, ref_name, int(a), int(b))
+        seen.add(t)
+        if res is not None:
+            lo, hi = res
+            if t in prev_last:  # exon→exon junction to this transcript's previous exon
+                j_t.append(t)
+                j_l.append(prev_last[t])
+                j_r.append(lo)
+            prev_last[t] = hi - 1
 
     tdf = index.t_df
     if tdf is not None and "is_synthetic" in tdf.columns:
@@ -104,7 +131,7 @@ def _transcript_node_incidence(
         ):
             if int(t) in seen:
                 continue
-            _add(int(t), ref_name, int(a), int(b))
+            _add(int(t), ref_name, int(a), int(b))  # single-exon spans (nRNA) → no splice junctions
 
     e = np.empty(0, dtype=np.int64)
     return (
@@ -112,6 +139,9 @@ def _transcript_node_incidence(
         np.concatenate(r_r) if r_r else e,
         np.concatenate(b_t) if b_t else e,
         np.concatenate(b_r) if b_r else e,
+        np.asarray(j_t, dtype=np.int64) if j_t else e,
+        np.asarray(j_l, dtype=np.int64) if j_l else e,
+        np.asarray(j_r, dtype=np.int64) if j_r else e,
     )
 
 
@@ -130,10 +160,19 @@ def transcript_capture_eff_lengths(
 
     * a per-region CONTAINED node at effective support ``S_r = E[max(0, L_r − ℓ)]`` (mass ``m_r``);
     * a per-interior-boundary POOLED SEAM node at averaged per-side support ``S_s = ½·(E[min(ℓ,L_r)] +
-      E[min(ℓ,L_{r+1})])`` (mass ``m_s = right[r] + left[r+1]``) — **only for boundaries the transcript
-      crosses without a splice** (interior to an exon). gDNA (contiguous genomic interval) takes ALL nodes;
-      a spliced mRNA drops its introns + splice-junction boundaries; nRNA (single unspliced exon) keeps
-      every interior node (introns included).
+      E[min(ℓ,L_{r+1})])`` (mass ``m_s = right[r] + left[r+1]``) — for boundaries the transcript
+      crosses without a splice (interior to an exon);
+    * a per-SPLICE-JUNCTION seam node (multi-exon mRNA), same crossing support ``S_j`` but with its mass
+      IMPUTED from the two flanking exon densities ``m_j = ½·(ρ_left + ρ_right)·S_j`` — the intron between
+      the exons holds no gDNA, so the junction's enrichment is that of the exonic sequence a spliced
+      fragment covers, not zero (dropping it) nor full length (the FL-marginal's implicit weight).
+
+    gDNA (contiguous genomic interval) takes ALL nodes; nRNA (single unspliced exon) keeps every interior
+    node (introns included); a spliced mRNA takes its exon regions + its interior + splice-junction seams
+    (dropping only the introns). Keeping the junction seams makes a spliced mRNA's ``span_full`` equal its
+    FL-marginal length — WITHOUT them the ``fl/span_full`` ratio exceeds 1 (growing with exon count) and
+    inflates a spliced mRNA's eff-length ABOVE its nascent parent's, the physically impossible inversion
+    (a nascent's genomic node set strictly contains its mature child's).
 
     ρ* is read on the transcript's CONTAINED (exon) nodes — the mass-weighted exon density where mature RNA
     competes with gDNA for the ambiguous contained fragments — while the TOTAL mass θ_t spans the full node
@@ -180,7 +219,7 @@ def transcript_capture_eff_lengths(
         seam_m[:-1] = np.where(same, side_right[:-1] + side_left[1:], 0.0)
         seam_S[:-1] = np.where(same, 0.5 * (side_len[:-1] + side_len[1:]), 0.0)
 
-    rt, rr, bt, br = _transcript_node_incidence(index, region_arrays)
+    rt, rr, bt, br, jt, jl, jr = _transcript_node_incidence(index, region_arrays)
     # CONTAINED (exon-region) accumulators → the exon-competition density ρ* = G_c/E_c (E_c = contained-node
     # Laplace IPR). MAPPED-NODE totals θ_t (contained + crossed seams) and the uniform-case length span_full.
     Gc = np.zeros(n_t)  # Σ contained mass
@@ -199,6 +238,22 @@ def transcript_capture_eff_lengths(
     if bt.size:
         np.add.at(theta, bt, seam_m[br])
         np.add.at(span_full, bt, seam_S[br])
+    if jt.size:
+        # SPLICE-JUNCTION seams (multi-exon mRNA). The intron between the two exons carries no gDNA, so
+        # the junction crossing is NOT a genomic-adjacent seam — its mass is IMPUTED from the two flanking
+        # EXON densities ρ = m/S (the exonic sequence a junction-spanning fragment actually covers), at the
+        # SAME pooled crossing support S_j = ½·(gdna_boundary_len[left] + gdna_boundary_len[right]) the
+        # genomic seams use. Stitching these in makes span_full == fl for a spliced mRNA, so the
+        # junction-dropped fl/span_full inflation (which lifted eff_em(mature) ABOVE eff_em(nascent) — the
+        # physically impossible inversion) vanishes. Under uniform gDNA m_j = ρ·S_j like every other node,
+        # so factor stays EXACTLY 1 (capture-off bit-identical); under capture the junction contributes at
+        # its flanking-exon enrichment, not the fabricated full-length weight.
+        rho_l = contained_m[jl] / contained_S[jl]
+        rho_r = contained_m[jr] / contained_S[jr]
+        s_j = 0.5 * (side_len[jl] + side_len[jr])
+        m_j = 0.5 * (rho_l + rho_r) * s_j
+        np.add.at(theta, jt, m_j)
+        np.add.at(span_full, jt, s_j)
 
     have = Gc > 1e-9  # no contained gDNA over the footprint ⇒ no contraction (factor 1)
     safe_span_c = np.maximum(span_c, 1e-9)

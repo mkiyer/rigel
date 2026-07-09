@@ -84,7 +84,7 @@ def test_incidence_maps_every_transcript(misaligned_index):
     """No transcript (mature or nRNA span) is dropped by the exon→region incidence."""
     idx = misaligned_index
     ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
-    inc_t, _, _, _ = _transcript_node_incidence(idx, ra)
+    inc_t, *_ = _transcript_node_incidence(idx, ra)
     n_t = len(idx.t_df)
     mapped = set(int(t) for t in inc_t)
     dropped = set(range(n_t)) - mapped
@@ -100,7 +100,7 @@ def test_incidence_len_t_ge_exonic(misaligned_index):
     """
     idx = misaligned_index
     ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
-    inc_t, inc_r, _, _ = _transcript_node_incidence(idx, ra)
+    inc_t, inc_r, *_ = _transcript_node_incidence(idx, ra)
     n_t = len(idx.t_df)
     region_len = np.asarray(ra.region_size_bp, dtype=np.float64)
     len_t = np.zeros(n_t)
@@ -120,7 +120,7 @@ def test_merged_region_interior_exon_is_mapped(misaligned_index):
     incidence must include that region (the old code skipped to the next region, or dropped it)."""
     idx = misaligned_index
     ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
-    inc_t, inc_r, _, _ = _transcript_node_incidence(idx, ra)
+    inc_t, inc_r, *_ = _transcript_node_incidence(idx, ra)
     starts = np.asarray(ra.start)
     ends = np.asarray(ra.end)
     # the region covering position 150 (interior to a merged exon region)
@@ -166,7 +166,7 @@ def test_transcript_contracts_under_concentrated_gdna(misaligned_index):
     idx = misaligned_index
     ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
     n = ra.n_regions
-    inc_t, inc_r, _, _ = _transcript_node_incidence(idx, ra)
+    inc_t, inc_r, *_ = _transcript_node_incidence(idx, ra)
     assert inc_t.size, "the index must map at least one transcript to a region"
     enriched_r = int(inc_r[0])  # a region genuinely inside some transcript's footprint
     contained = np.zeros(n, dtype=np.float64)
@@ -196,3 +196,115 @@ def test_transcript_contracts_under_concentrated_gdna(misaligned_index):
     overlaps = sorted({int(t) for t, r in zip(inc_t, inc_r, strict=True) if int(r) == enriched_r})
     assert overlaps, "expected at least one transcript overlapping the enriched region"
     assert np.any(eff[overlaps] < fl[overlaps] - 1e-6)  # at least one genuinely contracts
+
+
+# --- nascent<mature inversion guard (2026-07-09): splice-junction seams ---------------------------
+# A multi-exon mRNA and a single-exon nascent parent covering the SAME genomic span. A nascent's genomic
+# node set STRICTLY CONTAINS its mature child's, so its EM effective length can never be shorter. Before
+# the junction-seam fix, a multi-exon mRNA's span_full (with splice junctions DROPPED) fell below its
+# contiguous FL-marginal length, and the fl/span_full ratio (growing with exon count) inflated the mature's
+# eff_em ABOVE its nascent parent's under capture — the physically impossible inversion. These pin the fix.
+
+# six 500bp exons + a single-exon nascent covering the whole 1000..6500 span (genomic order per transcript
+# so the incidence pairs adjacent exons into splice junctions).
+_MULTIEXON_GTF = "".join(
+    f'chr1\ttest\texon\t{s + 1}\t{s + 500}\t.\t+\t.\tgene_id "gm"; transcript_id "mrna";\n'
+    for s in range(1000, 6500, 1000)
+) + 'chr1\ttest\texon\t1001\t6500\t.\t+\t.\tgene_id "gm"; transcript_id "nasc";\n'
+
+
+@pytest.fixture(scope="module")
+def multiexon_index(tmp_path_factory):
+    return build_test_index(tmp_path_factory, _MULTIEXON_GTF, genome_size=7000, name="multiexon")
+
+
+def _tidx(idx, tid: str) -> int:
+    tdf = idx.t_df
+    return int(tdf.loc[tdf["t_id"] == tid, "t_index"].iloc[0])
+
+
+def _field_cal(region_arrays: RegionArrays, density: np.ndarray, frag: float = 180.0) -> CalibrationResult:
+    """Deposition-faithful CalibrationResult for an arbitrary per-region gDNA DENSITY field, with an
+    FL-marginal region support (``region_eff_len = size − frag``) and crossing support (``boundary_len =
+    min(size, frag)``). This makes a multi-exon mRNA's junction-dropped ``span_full`` fall BELOW its
+    contiguous FL-marginal length — the exact gap the junction seams close. Uniform density ⇒ every node's
+    m/S = density ⇒ factor 1 (the bedrock invariant), independent of the field values."""
+    rel = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
+    region_eff = np.maximum(rel - frag, 1e-9)
+    bl = np.minimum(rel, frag)
+    ref_id = np.asarray(region_arrays.ref_id)
+    n = rel.shape[0]
+    d = np.asarray(density, dtype=np.float64)
+    contained = d * region_eff
+    side_left = np.zeros(n, dtype=np.float64)
+    side_right = np.zeros(n, dtype=np.float64)
+    if n > 1:
+        same = ref_id[:-1] == ref_id[1:]
+        side_right[:-1] = np.where(same, d[:-1] * bl[:-1] / 2.0, 0.0)
+        side_left[1:] = np.where(same, d[1:] * bl[1:] / 2.0, 0.0)
+    z = np.zeros(n, dtype=np.float64)
+    return CalibrationResult(
+        mass_gdna_contained=contained,
+        mass_rna_contained=z.copy(),
+        mass_gdna_left=side_left,
+        mass_rna_left=z.copy(),
+        mass_gdna_right=side_right,
+        mass_rna_right=z.copy(),
+        mass_rna_spliced=z.copy(),
+        gdna_boundary_len=bl,
+        gdna_region_eff_len=region_eff,
+        gdna_density_global=float(d.mean()),
+        rna_sense_frac=0.9,
+        gdna_strand_overdispersion=0.05,
+        rna_strand_overdispersion=0.05,
+        n_regions=n,
+        config=CalibrationConfig(),
+    )
+
+
+def test_junction_incidence_multiexon_only(multiexon_index):
+    """A multi-exon mRNA yields one splice-junction seam per adjacent exon pair; a single-exon nRNA yields
+    none, and each junction's flanking regions straddle the intron between the two exons."""
+    idx = multiexon_index
+    ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
+    _, _, _, _, jt, jl, jr = _transcript_node_incidence(idx, ra)
+    mrna, nasc = _tidx(idx, "mrna"), _tidx(idx, "nasc")
+    assert (jt == mrna).sum() == 5, "a 6-exon mRNA must have 5 splice-junction seams"
+    assert (jt == nasc).sum() == 0, "a single-exon nRNA must have NO splice junctions"
+    starts, ends = np.asarray(ra.start), np.asarray(ra.end)
+    for k in np.flatnonzero(jt == mrna):
+        assert ends[jl[k]] <= starts[jr[k]], "junction left flank must end at/before the right flank starts"
+
+
+def test_no_nascent_mature_inversion_under_capture(multiexon_index):
+    """THE regression guard: under capture on a single exon, eff_em(nascent) >= eff_em(mature).
+
+    Without the junction seams a 6-exon mRNA's fl/span_full ≈ 1.5 inflated its eff_em above its nascent
+    parent's (an inversion, since the nascent's node set strictly contains the mature's). The imputed
+    junction seams close the gap. Also asserts the mature genuinely CONTRACTS (the fix must not silently
+    disable capture contraction)."""
+    idx = multiexon_index
+    ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
+    n = ra.n_regions
+    starts, ends = np.asarray(ra.start), np.asarray(ra.end)
+    dens = np.full(n, 0.1)                       # depleted off-target
+    dens[(ends > 1000) & (starts < 1500)] = 100.0  # capture the first exon [1000,1500)
+    cal = _field_cal(ra, dens)
+    frag = 180.0
+    fl = np.maximum(idx.t_df["length"].to_numpy(dtype=np.float64) - frag, 1.0)  # contiguous FL-marginal
+    eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
+    mrna, nasc = _tidx(idx, "mrna"), _tidx(idx, "nasc")
+    assert eff[nasc] >= eff[mrna] - 1e-6, (
+        f"INVERSION: nascent eff_em {eff[nasc]:.2f} < mature eff_em {eff[mrna]:.2f}"
+    )
+    assert eff[mrna] < fl[mrna] - 1e-6, "the mature must genuinely contract under capture"
+
+
+def test_spliced_factor_one_under_uniform(multiexon_index):
+    """Capture-off bit-identity WITH junction seams: uniform gDNA ⇒ eff_em == fl for the multi-exon mRNA."""
+    idx = multiexon_index
+    ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
+    cal = _field_cal(ra, np.full(ra.n_regions, 0.02))
+    fl = np.linspace(900.0, 2000.0, len(idx.t_df))
+    eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
+    np.testing.assert_allclose(eff, fl, rtol=1e-9)
