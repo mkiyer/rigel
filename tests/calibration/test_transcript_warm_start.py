@@ -48,21 +48,22 @@ def test_capture_correction_lift_floor_and_shrinkage():
 # build_transcript_warm_start — fixtures
 # ---------------------------------------------------------------------------
 
-def _rna_warm_start() -> RnaWarmStart:
-    i8 = lambda v: np.asarray(v, dtype=np.int8)  # noqa: E731
-    return RnaWarmStart(
+def _rna_warm_start(**overrides) -> RnaWarmStart:
+    base = dict(
         rho_contained_pos=np.array([5.0, 2.0, 8.0, 0.01]),
         rho_contained_neg=np.array([1.0, 3.0, 1.0, 0.01]),
         rho_crossing_pos=np.array([3.0, 7.0, 0.0, 0.0]),
         rho_crossing_neg=np.array([9.0, 9.0, 0.0, 0.0]),
-        rho_spliced_right=np.array([0.0, 6.0, 0.0, 0.0]),  # donor at region 1's right
-        rho_spliced_left=np.array([0.0, 0.0, 4.0, 0.0]),   # acceptor at region 2's left
-        spliced_strand_right=i8([0, STRAND_POS, 0, 0]),
-        spliced_strand_left=i8([0, 0, STRAND_POS, 0]),
+        rho_spliced_pos_right=np.array([0.0, 6.0, 0.0, 0.0]),  # + donor at region 1's right
+        rho_spliced_neg_right=np.zeros(4),
+        rho_spliced_pos_left=np.array([0.0, 0.0, 4.0, 0.0]),   # + acceptor at region 2's left
+        rho_spliced_neg_left=np.zeros(4),
     )
+    base.update(overrides)
+    return RnaWarmStart(**base)
 
 
-def _calibration():
+def _calibration(ws=None):
     """4 regions, one reference. gDNA present on regions 0-2 only ⇒ < 5 valid nodes ⇒ rho_ref = None ⇒
     identity correction. Region 3 has NO observed mass (contained_ev = 0) → excluded. Seams 0,1 carry gDNA
     (observable); seam 2 does not."""
@@ -75,18 +76,18 @@ def _calibration():
         mass_rna_right=np.zeros(4),
         mass_rna_left=np.zeros(4),
         gdna_boundary_len=np.ones(4),
-        rna_warm_start=_rna_warm_start(),
+        rna_warm_start=ws if ws is not None else _rna_warm_start(),
     )
 
 
-def _run(monkeypatch, *, rt, rr, bt, br, jt, jl, jr, strand, eff, n_t):
+def _run(monkeypatch, *, rt, rr, bt, br, jt, jl, jr, strand, eff, n_t, ws=None):
     e = np.empty(0, dtype=np.int64)
     inc = tuple(np.asarray(a, dtype=np.int64) if len(a) else e for a in (rt, rr, bt, br, jt, jl, jr))
     monkeypatch.setattr(cel, "_transcript_node_incidence", lambda index, region_arrays: inc)
     index = SimpleNamespace(num_transcripts=n_t, t_to_strand_arr=np.asarray(strand))
     region_arrays = SimpleNamespace(ref_id=np.zeros(4, dtype=np.int64))
     return build_transcript_warm_start(
-        _calibration(), region_arrays, index, np.asarray(eff, dtype=np.float64)
+        _calibration(ws), region_arrays, index, np.asarray(eff, dtype=np.float64)
     )
 
 
@@ -120,9 +121,9 @@ def test_crossing_seam_bottleneck_and_observability(monkeypatch):
 
 
 def test_junction_strand_gated_discrimination(monkeypatch):
-    # Junction flanks (jl=1 donor, jr=2 acceptor). t0 (+): donor 6 & acceptor 4 both strand-match → min 4.
-    # t1 (−): both junction strands are +, mismatching − → 0 & 0 → min 0 → the isoform is CRUSHED (0, not
-    # NaN: its flanks are observed). This is the exon-sharing-isoform discrimination.
+    # Junction flanks (jl=1 donor, jr=2 acceptor). The + arrays carry the junction. t0 (+): donor 6 &
+    # acceptor 4 (its own strand) → min 4. t1 (−): reads its empty − arrays → 0 & 0 → min 0 → the isoform
+    # is CRUSHED (0, not NaN: its flanks are observed). This is the exon-sharing-isoform discrimination.
     warm = _run(
         monkeypatch,
         rt=[], rr=[], bt=[], br=[], jt=[0, 1], jl=[1, 1], jr=[2, 2],
@@ -130,6 +131,24 @@ def test_junction_strand_gated_discrimination(monkeypatch):
     )
     assert warm[0] == pytest.approx(4.0 * 10.0)
     assert warm[1] == pytest.approx(0.0)
+
+
+def test_junction_ambig_coincident_site_reads_own_strand(monkeypatch):
+    # A + and − gene share the EXACT junction coordinate: region 1's right side carries BOTH a + donor (6)
+    # and a − donor (3). Per-strand storage keeps them separate, so the − isoform reads its OWN 3 and is NOT
+    # crushed by the +. (The old single-value model summed them and tagged +, crushing the − isoform — the
+    # AMBIG gap the review caught.)
+    ws = _rna_warm_start(
+        rho_spliced_neg_right=np.array([0.0, 3.0, 0.0, 0.0]),  # coincident − donor at region 1's right
+        rho_spliced_neg_left=np.array([0.0, 0.0, 5.0, 0.0]),   # − acceptor at region 2's left
+    )
+    warm = _run(
+        monkeypatch,
+        rt=[], rr=[], bt=[], br=[], jt=[0, 1], jl=[1, 1], jr=[2, 2],
+        strand=[STRAND_POS, STRAND_NEG], eff=[10.0, 10.0], n_t=2, ws=ws,
+    )
+    assert warm[0] == pytest.approx(4.0 * 10.0)  # + isoform: donor 6, acceptor 4 → min 4
+    assert warm[1] == pytest.approx(3.0 * 10.0)  # − isoform: donor 3, acceptor 5 → min 3 (NOT crushed)
 
 
 def test_missing_warm_start_or_efflen_returns_all_nan(monkeypatch):

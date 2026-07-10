@@ -7,9 +7,9 @@ NONZERO contained / crossing / spliced signal on BOTH strands, checking the thre
   * CONTAINED — the region node's own belief × its contained mass / RNA eff-length, per strand.
   * CROSSING  — the seam boundary node's belief × the POOLED two-side mass / averaged support, left-keyed,
                 and ZERO on the reference's last region (no seam to its right).
-  * SPLICED   — the flanking boundary's one-sided motif-stranded mass / half-triangle support, kept in its
-                own arrays (never summed into crossing), SINGLE-STRAND: a donor on region r's RIGHT side, an
-                acceptor on region r+1's LEFT side, each tagged with its fixed motif strand.
+  * SPLICED   — the flanking boundary's one-sided motif-stranded mass / half-triangle support, PER STRAND
+                (each junction single-stranded ⇒ its opposite-strand array is 0), in its own arrays so it is
+                never summed into crossing. Donor on region r's RIGHT side, acceptor on region r+1's LEFT.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from rigel.calibration.calibrate import _build_rna_warm_start
 from rigel.calibration.node_chain import build_node_chain
 from rigel.calibration.node_geometry import NodeBelief, NodeGeometry
 from rigel.calibration.result import RnaWarmStart
-from rigel.calibration.signature import TS_NEG, TS_POS
 
 
 def _chain_3_regions():
@@ -101,29 +100,27 @@ def test_build_rna_warm_start_three_roles():
     np.testing.assert_allclose(ws.rho_crossing_pos, [0.50 * 4, 0.60 * 5, 0.0])
     np.testing.assert_allclose(ws.rho_crossing_neg, [0.10 * 4, 0.10 * 5, 0.0])
 
-    # --- SPLICED: single value + fixed motif strand; donor on r's RIGHT, acceptor on r+1's LEFT ---
-    # R0: donor 8/4=2 (+) on right; no acceptor on left.
-    # R1: acceptor 6/3=2 (+) on left; donor 4/2=2 (−) on right.
-    # R2: acceptor 10/5=2 (−) on left; nothing on right.
-    np.testing.assert_allclose(ws.rho_spliced_right, [2.0, 2.0, 0.0])
-    np.testing.assert_allclose(ws.rho_spliced_left, [0.0, 2.0, 2.0])
-    np.testing.assert_array_equal(ws.spliced_strand_right, np.array([TS_POS, TS_NEG, 0], dtype=np.int8))
-    np.testing.assert_array_equal(ws.spliced_strand_left, np.array([0, TS_POS, TS_NEG], dtype=np.int8))
+    # --- SPLICED (per strand): donor on r's RIGHT, acceptor on r+1's LEFT; opposite-strand array is 0 ---
+    # R0: + donor 8/4=2 on right.  R1: − donor 4/2=2 on right, + acceptor 6/3=2 on left.
+    # R2: − acceptor 10/5=2 on left.
+    np.testing.assert_allclose(ws.rho_spliced_pos_right, [2.0, 0.0, 0.0])
+    np.testing.assert_allclose(ws.rho_spliced_neg_right, [0.0, 2.0, 0.0])
+    np.testing.assert_allclose(ws.rho_spliced_pos_left, [0.0, 2.0, 0.0])
+    np.testing.assert_allclose(ws.rho_spliced_neg_left, [0.0, 0.0, 2.0])
 
     # crossing and spliced are DISTINCT arrays — a splice boundary never inflates the crossing density.
-    assert ws.rho_crossing_pos[0] == pytest.approx(2.0)  # R0 crossing (nascent) ...
-    assert ws.rho_spliced_right[0] == pytest.approx(2.0)  # ... independent of its donor spliced (mature)
+    assert ws.rho_crossing_pos[0] == pytest.approx(2.0)       # R0 crossing (nascent) ...
+    assert ws.rho_spliced_pos_right[0] == pytest.approx(2.0)  # ... independent of its + donor spliced (mature)
 
 
 def test_build_rna_warm_start_zero_signal_is_valid_and_zero():
-    """No RNA anywhere → all-zero densities and strand 0; the result still validates (the golden regime)."""
+    """No RNA anywhere → all-zero densities; the result still validates (the golden regime)."""
     chain = _chain_3_regions()
     belief = NodeBelief(f_pos=np.zeros(7), f_neg=np.zeros(7), f_g=np.ones(7),
                         var_pos=np.zeros(7), var_neg=np.zeros(7), var_gdna=np.zeros(7))
     ws = _build_rna_warm_start(chain, belief, _geometry_7(), SimpleNamespace(n_regions=3))
-    for arr in (ws.rho_contained_pos, ws.rho_crossing_pos, ws.rho_spliced_left, ws.rho_spliced_right):
+    for arr in (ws.rho_contained_pos, ws.rho_crossing_neg, ws.rho_spliced_pos_left, ws.rho_spliced_neg_right):
         np.testing.assert_array_equal(arr, np.zeros(3))
-    np.testing.assert_array_equal(ws.spliced_strand_left, np.zeros(3, dtype=np.int8))
 
 
 def _valid_kwargs(n=3):
@@ -131,28 +128,20 @@ def _valid_kwargs(n=3):
     return dict(
         rho_contained_pos=f.copy(), rho_contained_neg=f.copy(),
         rho_crossing_pos=f.copy(), rho_crossing_neg=f.copy(),
-        rho_spliced_left=f.copy(), rho_spliced_right=f.copy(),
-        spliced_strand_left=np.zeros(n, dtype=np.int8),
-        spliced_strand_right=np.zeros(n, dtype=np.int8),
+        rho_spliced_pos_left=f.copy(), rho_spliced_neg_left=f.copy(),
+        rho_spliced_pos_right=f.copy(), rho_spliced_neg_right=f.copy(),
     )
-
-
-def test_rna_warm_start_rejects_bad_strand_value():
-    kw = _valid_kwargs()
-    kw["spliced_strand_left"] = np.array([0, 3, TS_POS], dtype=np.int8)  # 3 ∉ {0, POS, NEG}
-    with pytest.raises(ValueError, match="0, TS_POS, or TS_NEG"):
-        RnaWarmStart(**kw)
-
-
-def test_rna_warm_start_rejects_non_int8_strand():
-    kw = _valid_kwargs()
-    kw["spliced_strand_right"] = np.zeros(3, dtype=np.int64)
-    with pytest.raises(ValueError, match="int8 array"):
-        RnaWarmStart(**kw)
 
 
 def test_rna_warm_start_rejects_negative_density():
     kw = _valid_kwargs()
     kw["rho_contained_pos"] = np.array([-1.0, 0.0, 0.0])
     with pytest.raises(ValueError, match="non-negative"):
+        RnaWarmStart(**kw)
+
+
+def test_rna_warm_start_rejects_wrong_shape():
+    kw = _valid_kwargs()
+    kw["rho_spliced_pos_right"] = np.zeros(4)  # n=3 elsewhere
+    with pytest.raises(ValueError, match="expected"):
         RnaWarmStart(**kw)

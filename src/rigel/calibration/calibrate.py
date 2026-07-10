@@ -62,7 +62,6 @@ from .gdna_strand import (
 )
 from .node_chain import REGION, build_node_chain
 from .result import CalibrationResult, RnaWarmStart
-from .signature import TS_NEG, TS_POS
 from .strand_balance import fit_strand_balance
 from .substrate import BoundarySubstrate, CalibrationSubstrate
 
@@ -309,8 +308,8 @@ def _build_rna_warm_start(chain, belief, geometry, substrate) -> RnaWarmStart:
 
     rho_c_pos, rho_c_neg = np.zeros(R), np.zeros(R)  # contained, per strand
     rho_x_pos, rho_x_neg = np.zeros(R), np.zeros(R)  # crossing (seam), per strand
-    rho_sp_left, rho_sp_right = np.zeros(R), np.zeros(R)  # spliced, per side (single-strand)
-    st_left, st_right = np.zeros(R, dtype=np.int8), np.zeros(R, dtype=np.int8)
+    rho_sp_pos_l, rho_sp_neg_l = np.zeros(R), np.zeros(R)  # spliced, region r's LEFT side, per strand
+    rho_sp_pos_r, rho_sp_neg_r = np.zeros(R), np.zeros(R)  # spliced, region r's RIGHT side, per strand
 
     # CONTAINED: region node's own face (mass_left == mass_right, eff_rna_left == eff_rna_right for regions).
     rho_c_pos[r] = fp[reg_nodes] * g.mass_left[reg_nodes] / g.eff_rna_left[reg_nodes]
@@ -322,25 +321,24 @@ def _build_rna_warm_start(chain, belief, geometry, substrate) -> RnaWarmStart:
     rho_x_pos[r[seam]] = fp[rb[seam]] * m_seam[seam] / s_seam[seam]
     rho_x_neg[r[seam]] = fn[rb[seam]] * m_seam[seam] / s_seam[seam]
 
-    # SPLICED (single-strand, motif): region r's RIGHT side rides the seam boundary rb's LEFT (exon) face;
-    # its LEFT side rides the left boundary lb's RIGHT (exon) face. Only one of pos/neg is nonzero per face.
-    def _spliced(sp_pos, sp_neg, eff):
-        return (sp_pos + sp_neg) / eff, np.where(sp_pos > 0.0, TS_POS, np.where(sp_neg > 0.0, TS_NEG, 0))
-
-    rho_sp_right[r], strand_r = _spliced(g.spliced_pos_left[rb], g.spliced_neg_left[rb], g.eff_spl_left[rb])
-    rho_sp_left[r], strand_l = _spliced(g.spliced_pos_right[lb], g.spliced_neg_right[lb], g.eff_spl_right[lb])
-    st_right[r] = strand_r.astype(np.int8)
-    st_left[r] = strand_l.astype(np.int8)
+    # SPLICED (mature, per strand): region r's RIGHT side (donor) rides the seam boundary rb's LEFT (exon)
+    # face; its LEFT side (acceptor) rides the left boundary lb's RIGHT (exon) face. Each junction is
+    # single-stranded (one of pos/neg nonzero per face); both are nonzero only where a +/− pair share the
+    # exact splice coordinate, kept SEPARATE so the antisense isoform reads on its own strand.
+    rho_sp_pos_r[r] = g.spliced_pos_left[rb] / g.eff_spl_left[rb]
+    rho_sp_neg_r[r] = g.spliced_neg_left[rb] / g.eff_spl_left[rb]
+    rho_sp_pos_l[r] = g.spliced_pos_right[lb] / g.eff_spl_right[lb]
+    rho_sp_neg_l[r] = g.spliced_neg_right[lb] / g.eff_spl_right[lb]
 
     return RnaWarmStart(
         rho_contained_pos=rho_c_pos,
         rho_contained_neg=rho_c_neg,
         rho_crossing_pos=rho_x_pos,
         rho_crossing_neg=rho_x_neg,
-        rho_spliced_left=rho_sp_left,
-        rho_spliced_right=rho_sp_right,
-        spliced_strand_left=st_left,
-        spliced_strand_right=st_right,
+        rho_spliced_pos_left=rho_sp_pos_l,
+        rho_spliced_neg_left=rho_sp_neg_l,
+        rho_spliced_pos_right=rho_sp_pos_r,
+        rho_spliced_neg_right=rho_sp_neg_r,
     )
 
 

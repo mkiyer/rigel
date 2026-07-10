@@ -17,7 +17,6 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..config import CalibrationConfig
-from .signature import TS_NEG, TS_POS
 
 
 def _check_region_array(arr: np.ndarray, name: str, n_regions: int) -> None:
@@ -52,26 +51,27 @@ class RnaWarmStart:
     * **CROSSING** (interior seam between region ``r`` and ``r+1``, LEFT-region keyed; nascent):
       ``rho_crossing_s[r] = f_s · M_seam / E_seam`` — per strand, from the seam BOUNDARY node's belief;
       ``0`` on each reference's last region (no seam to its right).
-    * **SPLICED** (mature) — per region SIDE, kept in its OWN arrays so it is NEVER summed into the crossing
+    * **SPLICED** (mature) — per region SIDE, in its OWN arrays so it is NEVER summed into the crossing
       density (a splice site is also an exon↔intron boundary; summing would let a neighbour's mature mass
-      inflate a nascent shadow's bottleneck → the gDNA→nascent siphon). It is SINGLE-STRAND (the splice
-      motif fixes the strand): ONE density ``rho_spliced_{left,right}[r] = spliced / E_spl`` plus its fixed
-      strand ``spliced_strand_{left,right}[r]`` (``TS_POS`` / ``TS_NEG``; ``0`` = no junction on that side).
-      A junction ``(r_left, r_right)`` reads the donor at ``rho_spliced_right[r_left]`` and the acceptor at
-      ``rho_spliced_left[r_right]``.
+      inflate a nascent shadow's bottleneck → the gDNA→nascent siphon). Each junction is single-stranded
+      (the splice motif fixes the strand), so at a normal site exactly one of the pos/neg arrays is nonzero;
+      both are nonzero only where an overlapping ``+`` and ``−`` gene share the exact splice coordinate (a
+      dense-AMBIG coincidence), which per-strand storage keeps separate — the antisense isoform is read on
+      its OWN strand, not crushed. ``rho_spliced_s_{left,right}[r] = spliced_s / E_spl``. A junction
+      ``(r_left, r_right)`` reads the donor at ``rho_spliced_s_right[r_left]`` and the acceptor at
+      ``rho_spliced_s_left[r_right]`` — the same per-strand ``_pick`` the contained/crossing roles use.
 
-    All arrays length ``R`` (region-keyed, mirroring the ``mass_*`` layout); the two strand arrays are
-    ``int8``, the six density arrays ``float64``.
+    All arrays are ``float64`` of length ``R`` (region-keyed, mirroring the ``mass_*`` layout).
     """
 
     rho_contained_pos: np.ndarray  # float64[R] — f_pos·M_u / E_rna (contained region node)
     rho_contained_neg: np.ndarray
     rho_crossing_pos: np.ndarray  # float64[R] — seam(r,r+1) f_pos·M_seam / E_seam (left-keyed; 0 at terminals)
     rho_crossing_neg: np.ndarray
-    rho_spliced_left: np.ndarray  # float64[R] — mature ρ on region r's LEFT side (acceptor); single-strand
-    rho_spliced_right: np.ndarray  # float64[R] — mature ρ on region r's RIGHT side (donor); single-strand
-    spliced_strand_left: np.ndarray  # int8[R] — the left-side junction motif strand (TS_POS/TS_NEG; 0 = none)
-    spliced_strand_right: np.ndarray
+    rho_spliced_pos_left: np.ndarray  # float64[R] — mature +ρ on region r's LEFT side (acceptor)
+    rho_spliced_neg_left: np.ndarray
+    rho_spliced_pos_right: np.ndarray  # float64[R] — mature +ρ on region r's RIGHT side (donor)
+    rho_spliced_neg_right: np.ndarray
 
     def __post_init__(self) -> None:
         n = self.rho_contained_pos.shape[0]
@@ -80,18 +80,12 @@ class RnaWarmStart:
             "rho_contained_neg",
             "rho_crossing_pos",
             "rho_crossing_neg",
-            "rho_spliced_left",
-            "rho_spliced_right",
+            "rho_spliced_pos_left",
+            "rho_spliced_neg_left",
+            "rho_spliced_pos_right",
+            "rho_spliced_neg_right",
         ):
             _check_region_array(getattr(self, name), f"RnaWarmStart.{name}", n)
-        for name in ("spliced_strand_left", "spliced_strand_right"):
-            arr = getattr(self, name)
-            if not isinstance(arr, np.ndarray) or arr.dtype != np.int8 or arr.shape != (n,):
-                raise ValueError(f"RnaWarmStart.{name} must be an int8 array of shape ({n},).")
-            # Strand value-domain: a junction rides exactly one motif strand (or none). Always holds on the
-            # projection's ``np.where`` output; guards a malformed hand-built array.
-            if not np.all((arr == 0) | (arr == TS_POS) | (arr == TS_NEG)):
-                raise ValueError(f"RnaWarmStart.{name} values must be 0, TS_POS, or TS_NEG.")
 
 
 @dataclass(frozen=True, slots=True)

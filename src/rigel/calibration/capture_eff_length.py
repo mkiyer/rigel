@@ -377,7 +377,11 @@ def _capture_correction(rho_ref: "float | None", rho_depleted: "float | None"):
     if rho_ref is None or rho_ref <= 0.0:
         return lambda rho_rna, rho_gdna, ev: rho_rna
     inv_ref = 1.0 / rho_ref
-    eps_floor = rho_depleted / rho_ref if (rho_depleted is not None and rho_depleted > 0.0) else 1.0
+    # ε_floor = depleted/enriched ∈ (0, 1]; min(·, 1) makes the ≤1 invariant explicit (the two modes are
+    # snapped independently) so np.clip always has valid bounds. No depleted mode ⇒ no floor (1 ⇒ identity).
+    eps_floor = (
+        min(rho_depleted / rho_ref, 1.0) if (rho_depleted is not None and rho_depleted > 0.0) else 1.0
+    )
 
     def correct(rho_rna, rho_gdna, ev):
         eps = np.clip(rho_gdna * inv_ref, eps_floor, 1.0)
@@ -464,11 +468,11 @@ def build_transcript_warm_start(
     if bt.size:  # exon↔intron BOUNDARY CROSSING (nascent), pooled seam
         _bottleneck(bt, _pick(ws.rho_crossing_pos, ws.rho_crossing_neg, bt, br),
                     seam_gdna[br], seam_ev[br])
-    if jt.size:  # SPLICE JUNCTION (mature): donor at r_left's right, acceptor at r_right's left; motif-gated
-        donor = np.where(ws.spliced_strand_right[jl] == strand[jt], ws.rho_spliced_right[jl], 0.0)
-        accept = np.where(ws.spliced_strand_left[jr] == strand[jt], ws.rho_spliced_left[jr], 0.0)
-        _bottleneck(jt, donor, contained_gdna[jl], contained_ev[jl])
-        _bottleneck(jt, accept, contained_gdna[jr], contained_ev[jr])
+    if jt.size:  # SPLICE JUNCTION (mature): donor at r_left's right, acceptor at r_right's left, per-strand
+        _bottleneck(jt, _pick(ws.rho_spliced_pos_right, ws.rho_spliced_neg_right, jt, jl),
+                    contained_gdna[jl], contained_ev[jl])
+        _bottleneck(jt, _pick(ws.rho_spliced_pos_left, ws.rho_spliced_neg_left, jt, jr),
+                    contained_gdna[jr], contained_ev[jr])
 
     warm = np.full(n_t, np.nan)  # NaN ⇒ no observable node ⇒ fall back to the coverage seed
     seen = np.isfinite(ceiling)
