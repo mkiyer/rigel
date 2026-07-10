@@ -6,8 +6,15 @@ locus-level EM.
 
 For unambiguously-mapping fragments, assignment is deterministic.
 For ambiguous fragments, transcript abundances are estimated via
-per-locus EM with a coverage-weighted One Virtual Read (OVR) prior,
-then counts are accumulated from the converged posterior.
+per-locus EM, then counts are accumulated from the converged posterior.
+The EM is initialized by a coverage-weighted warm start (each fragment's
+coverage split equally across its candidates) and uses ONLY a pool-level
+gDNA-vs-RNA prior (additive ``a_g`` on gDNA; ``a_r`` on the RNA pool,
+distributed among RNA components in proportion to their current EM count).
+There is NO per-transcript / One-Virtual-Read / Jeffreys prior: a component
+with zero current count receives zero prior mass (em_solver.cpp
+``apply_grouped_prior_update``). The transcript distribution within the RNA
+pool is defined by the data, not a prior.
 
 Data containers (``ScoredFragments``, ``Locus``, ``LocusPartition``)
 live in ``rigel.scored_fragments``.  Calibration and prior computation
