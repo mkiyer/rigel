@@ -86,6 +86,37 @@ vs nothing, per bucket, now that the siphon is gone? *Expectation (to be confirm
 carries it); unstranded worse under OFF (relay is load-bearing).* Driver:
 `scripts/debug/benchmark_ab_report.py --arms prod:0 off:0::RIGEL_MSG_MODE=off`.
 
+#### Phase 0 RESULTS (2026-07-09, quick_3to1_5mb, soft 3-pool, |off|−|prod| = message value)
+
+Message value on the **gDNA/RNA split** (mean |gdna surplus|, POSITIVE ⇒ messages help):
+
+| bucket | \|gdna\| prod | \|gdna\| off | message value |
+|---|--:|--:|--:|
+| ss99 capOFF (stranded, no capture) | 6,624 | 10,674 | **+4,050 (help)** |
+| ss99 capON  (stranded, capture) | 57,363 | 53,911 | −3,452 (~neutral) |
+| ss50 capOFF (unstranded, no capture) | 18,061 | 62,798 | **+44,736 (strong help)** |
+| ss50 capON  (unstranded, capture) | 164,374 | 56,941 | **−107,433 (catastrophic HURT)** |
+
+**Findings.** (1) STRANDED ≈ neutral — strand carries the solve (confirms the prediction). (2) UNSTRANDED
+capOFF: messages strongly HELP (+44k) and without them RNA→gDNA false positives explode (gNONE nrRND
+capOFF: off invents 161k false gDNA) — the relay is load-bearing (confirms the prediction). (3) UNSTRANDED
+capON is the OPPOSITE: production messages leak gDNA→RNA by up to **−347k** fragments (the capture
+**seam bleed** the paused doc predicted) — turning messages OFF fixes it. Strand normally vetoes this
+message; unstranded cannot. **The harm is seam-localized (capON); the help is seam-free (capOFF).**
+
+**Second, decoupled finding — the capON nascent siphon is NOT primarily message precision.** On gdna300
+capON the pure siphon (nrNONE) is ~90–120k under BOTH prod and off and BOTH strands (ss99: 104k/113k;
+ss50: 121k/92k) — a message-independent, strand-independent residual (exonic-gDNA under-call). Message
+precision is necessary-not-sufficient for the flagship: it can recover the −330k unstranded-capON split
+leak, but a separate ~90k capON calibration residual remains (parallel target — reference-density /
+exonic-gDNA under-call, not this doc).
+
+**Revised Phase-2 priority (data-driven):** the **asymmetric max-form** (self-silence across density seams)
+is now the PRIMARY lever — it directly targets the −107k capON seam harm while preserving the +44k capOFF
+relay (no seams there to silence). Strand-information gating is the secondary safety valve, most valuable on
+the AMBIG suite where the relay must stay alive. Phase-1 acceptance test: recover the unstranded-capON leak
+WITHOUT regressing the unstranded-capOFF relay.
+
 ### Phase 1 — re-baseline the two implemented candidates (cheap; code exists)
 
 Cherry-pick the WIP max-form + EB onto main behind `RIGEL_MSG_MODE` (`max`, `eb`); run them in the same
