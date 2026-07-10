@@ -258,11 +258,33 @@ def assemble_priors(
     # internal boundary (effective support = ½ the sum of the flanking E[min(ℓ,L)] = averaged gdna_boundary_len),
     # keyed to the left-flank region. The participation Σ m²/S and the span Σ S use these EFFECTIVE supports — NOT
     # region_size_bp, which understates short-region density and fabricates a contraction under uniform
-    # gDNA. _gdna_region_node_arrays carries the bedrock factor-1-under-uniform proof; capture_eff_length
-    # reuses the SAME helper, so the gDNA component and the transcript contraction share one node model.
+    # gDNA. _gdna_region_node_arrays carries the bedrock factor-1-under-uniform proof. NOTE: the same ρ_ref
+    # is shared with the transcript contraction (capture_eff_length), but the two apply it slightly
+    # differently — here the contraction min() runs over the FOLDED region+seam node mass/support, whereas
+    # capture_eff_length applies min() PER node (contained node and seam node separately). Since
+    # min(a+b, Sa+Sb) ≥ min(a,Sa)+min(b,Sb), the gDNA component is marginally LESS contracted than an
+    # equivalent transcript over the same nodes. Both are factor-1 under uniform gDNA (no divergence there);
+    # the difference appears only where a node is enriched and its seam depleted. TODO(cleanup): unify via a
+    # single shared per-node contraction helper so the two paths are byte-identical (docs/calibration/
+    # siphon_measurement.md notes this as a follow-up).
     gdna_region, gdna_sq_over_len, support_len = _gdna_region_node_arrays(
         calibration, region_arrays
     )
+
+    # SHARED global reference density — the SAME ρ_ref the transcript contraction uses. gDNA and EVERY
+    # transcript must contract against ONE reference, else the gDNA-vs-transcript density comparison sits on
+    # inconsistent per-locus scales. Per-region enrichment-weighted node length elen[r] = min(gdna_region[r]/
+    # ρ_ref, support_len[r]) (the node's support that survives at the fully-captured density); ρ_ref None (no
+    # gDNA) ⇒ elen = support (no contraction). See docs/calibration/enriched_mode_reference_density.md.
+    from .capture_eff_length import _global_reference_density
+
+    rho_ref = _global_reference_density(
+        calibration.mass_gdna_contained, calibration.gdna_region_eff_len
+    )
+    if rho_ref is None or rho_ref <= 0.0:
+        elen = support_len.copy()
+    else:
+        elen = np.minimum(gdna_region / rho_ref, support_len)
 
     # RNA prior = the UNSPLICED RNA mass only. Spliced fragments have no gDNA candidate in the EM
     # (gDNA does not splice) → they are guaranteed-RNA and the EM assigns them directly; counting
@@ -290,52 +312,25 @@ def assemble_priors(
             # eff-len guard below (calibration's accumulator is fed by unique mappers only).
             "gdna_contained": np.asarray(calibration.mass_gdna_contained, dtype=np.float64),
             "rna_contained": np.asarray(calibration.mass_rna_contained, dtype=np.float64),
-            # CONTAINED-footprint IPR pieces (m_c²/S_c and S_c) — for the exon-competition density ρ* below.
-            "c_part": np.asarray(calibration.mass_gdna_contained, dtype=np.float64) ** 2
-            / np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9),
-            "c_span": np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9),
+            # per-region enrichment-weighted node length (global ρ_ref) → the gDNA component's eff-length.
+            "elen": elen,
         },
     )
     gdna_locus, span = proj["gdna"], proj["span"]
-    # gDNA EM effective length = the component's TOTAL node mass held at the exon-competition DENSITY ρ* —
-    # the per-node effective-length view (each node contributes ℓ_n = m_n/ρ*, and eff = Σ ℓ_n = θ/ρ*). gDNA
-    # is a contiguous genomic interval, so its node set is ALL the locus's nodes: every region PLUS every
-    # boundary over its span — including the two OUTER boundaries that bookend the locus (exclusively-gDNA
-    # crossing fragments, no RNA candidate) but NOT the intergenic regions outside it (dropped by the
-    # projection). ρ* is read on the CONTAINED (exon) footprint — where the ambiguous fragments mature RNA
-    # competes for actually sit (a boundary-crossing fragment is likelihood-resolved to gDNA/nascent, never
-    # spliced mature):
+    # gDNA EM effective length = the enrichment-weighted length of the locus's gDNA against the SHARED global
+    # ρ_ref: eff = Σ_locus share·min(m_n/ρ_ref, S_n) = proj["elen"]. gDNA's node set is ALL the locus's nodes
+    # (every region + boundary over its span; the intergenic regions outside are dropped by the projection).
+    # Under uniform gDNA every node is at ρ_ref ⇒ elen = support ⇒ eff = span (no contraction). Using the SAME
+    # ρ_ref for gDNA AND every transcript puts the gDNA-vs-transcript density comparison on ONE consistent
+    # scale (and gives eff(nascent) ≥ eff(mature)). Replaces the former per-locus ρ* = G_c/E_c.
     #
-    #   E_c = contained-footprint Laplace IPR over the locus's CONTAINED nodes only:
-    #           E_c = (G_c+1)² / [ Σ m_c²/S_c + (2G_c+1)/span_c ], capped at span_c   (G_c = Σ m_c)
-    #         ⇒ ρ* = G_c/E_c, the mass-weighted exon density where mature competes.
-    #   eff_len = θ_g/ρ* = (θ_g/G_c)·E_c, capped at the total span; G_c→0 (multimap-blind) ⇒ span.
-    #
-    # WHY read ρ* on the exon footprint (vs an all-node mean): the all-node density G/eff is a mean over the
-    # whole footprint; under capture the depleted introns/large-mass moderate seams drag it below the exon
-    # density, so gDNA is under-weighted where it competes → the gDNA→mature leak (measured: the all-node
-    # arithmetic mean and the Lehmer M3/M2 both leave a larger mature leak than this contained read). Under
-    # uniform gDNA E_c = span_c and θ_g/G_c = span/span_c ⇒ eff_len = span (factor 1 — capture-off
-    # bit-identical). This is the SAME per-node ℓ_n = m_n/ρ* the transcript components use, so gDNA and a
-    # full-span nRNA sharing a locus land at the same eff-len up to gDNA's two extra outer-boundary supports
-    # (negligible — verified ~2.5% on a single-transcript locus). Derivation: rhostar-derivation workflow.
-    Gc = proj["gdna_contained"]
-    Pc = proj["c_part"]
-    span_c = np.maximum(proj["c_span"], 1e-9)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        E_c = np.minimum((Gc + 1.0) ** 2 / (Pc + (2.0 * Gc + 1.0) / span_c), span_c)
-
-    # CONTAINED-EVIDENCE SHRINKAGE (calibration multimapper-blindness). The accumulator is fed by UNIQUE
+    # CONTAINED-EVIDENCE SHRINKAGE (calibration multimapper-blindness): the accumulator is fed by UNIQUE
     # mappers only, so a multimapper-dominated locus (identical paralogs) has little CONTAINED mass and an
-    # unreliable E_c. Shrink E_c toward its uniform span_c on the reliable contained evidence C, smoothly
-    # (w = C/(C+1), one pseudo-observation, magic-free); the G_c→0 guard then sends eff_len→span. See
-    # project_mappability.
+    # unreliable reference read. Shrink the contracted length toward the uniform span on the reliable
+    # contained evidence C, smoothly (w = C/(C+1), one pseudo-observation, magic-free). See project_mappability.
     contained_ev = np.maximum(proj["gdna_contained"] + proj["rna_contained"], 0.0)
     w = contained_ev / (contained_ev + 1.0)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        E_c = np.exp(w * np.log(np.maximum(E_c, 1e-9)) + (1.0 - w) * np.log(span_c))
-        ratio = np.where(Gc > 1e-9, gdna_locus / np.maximum(Gc, 1e-9), 1.0)
-        eff_len = np.where(Gc > 1e-9, np.minimum(ratio * E_c, span), span)
+    eff_len = w * proj["elen"] + (1.0 - w) * span
 
     return LocusPriors(
         gdna_prior_count=gdna_locus,

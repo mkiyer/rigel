@@ -300,25 +300,41 @@ def test_evidence_free_region_gives_zero_gdna_prior():
     np.testing.assert_allclose(priors.gdna_eff_len, [100.0])  # effective-span fallback
 
 
+def _six_region_ra():
+    return _regions([0, 100, 200, 300, 400, 500], [100, 200, 300, 400, 500, 600])
+
+
+def _global_bimodal_cal(rna0: float, gdna0: float = 1.0) -> CalibrationResult:
+    """6-region calibration for the CONTAINED-EVIDENCE SHRINKAGE under the GLOBAL reference. Five ENRICHED
+    background regions (gDNA density 1.0) fix ρ_ref at the enriched mode; region 0 is DEPLETED (density
+    gdna0/100 ≪ ρ_ref) so it contracts (elen ≪ span). ``rna0`` tunes the contained evidence C = gdna0 + rna0
+    that drives the shrinkage weight w = C/(C+1). No crossing seam; region_eff_len = 100/region."""
+    ng = 6
+    mg = np.full(ng, 100.0)
+    mg[0] = gdna0
+    mr = np.zeros(ng)
+    mr[0] = rna0
+    z = np.zeros(ng)
+    return CalibrationResult(
+        mass_gdna_contained=mg, mass_rna_contained=mr,
+        mass_gdna_left=z.copy(), mass_rna_left=z.copy(),
+        mass_gdna_right=z.copy(), mass_rna_right=z.copy(), mass_rna_spliced=z.copy(),
+        gdna_boundary_len=np.full(ng, 50.0), gdna_region_eff_len=np.full(ng, 100.0),
+        gdna_density_global=0.5, rna_sense_frac=0.9,
+        gdna_strand_overdispersion=0.05, rna_strand_overdispersion=0.05,
+        n_regions=ng, config=CalibrationConfig(),
+    )
+
+
 def test_eff_len_shrinks_toward_span_for_sparse_gdna():
-    # gDNA contained-only on region 0 (region 1 empty, NO crossing mass): the CONTAINED-density IPR E_c
-    # contracts toward region 0's support, and the contained-evidence shrinkage pulls it back toward the
-    # CONTAINED span in proportion to the gDNA count — a sparse mass sits near the contained span, an
-    # abundant mass near the concentrated region-0 support. This is what stops the EM amplifying a tiny
-    # concentrated gДНК mass past the calibration's call. With no crossing gДНК the count θ_g equals the
-    # contained mass G_c, so eff_len = θ_g/ρ* = (θ_g/G_c)·E_c = E_c ≤ span_c: the footprint is the CONTAINED
-    # span, NOT the seam-inflated total span (the empty internal seam carries no mass, so it is not counted).
-    fl = 150.0
-    ra = _regions([0, 100], [100, 200])
-    ml = [_ml(0, [(0, 0, 200)])]
-    span_c = 100.0 + 100.0  # 2 contained regions, no crossing gDNA → contained footprint = 200
-    sparse = _calibration(mass_g=[2.0, 0.0], mass_d=[0.0, 0.0], region_eff_len=[100.0, 100.0], fl_mean=fl)
-    abundant = _calibration(mass_g=[100.0, 0.0], mass_d=[0.0, 0.0], region_eff_len=[100.0, 100.0], fl_mean=fl)
-    eff_sparse = assemble_priors(sparse, ra, ml).gdna_eff_len[0]
-    eff_abundant = assemble_priors(abundant, ra, ml).gdna_eff_len[0]
-    assert eff_abundant < eff_sparse <= span_c + 1e-6
-    assert eff_abundant < 0.75 * span_c  # abundant ⇒ contracted toward region-0 support (≈100)
-    assert eff_sparse > 0.5 * span_c  # sparse ⇒ near the contained span
+    # Under the GLOBAL reference a DEPLETED locus (density ≪ ρ_ref, set by the enriched background) contracts
+    # (elen ≪ span); the contained-evidence shrinkage pulls that contraction back toward span when the
+    # unique-mapper evidence is sparse (abundant ⇒ the earned contraction, sparse ⇒ near span).
+    ra = _six_region_ra()
+    ml = [_ml(0, [(0, 0, 100)])]  # locus = region 0 (the depleted one)
+    eff_sparse = assemble_priors(_global_bimodal_cal(rna0=0.3), ra, ml).gdna_eff_len[0]
+    eff_abundant = assemble_priors(_global_bimodal_cal(rna0=100.0), ra, ml).gdna_eff_len[0]
+    assert eff_abundant < eff_sparse  # more contained evidence ⇒ more of the earned contraction
 
 
 def _blind_seam_cal(contained_rna: float) -> CalibrationResult:
@@ -356,50 +372,20 @@ def test_contained_evidence_shrinkage_reverts_to_span_when_blind():
     np.testing.assert_allclose(priors.gdna_prior_count, [5.0])  # pooled seams 2 + 3
 
 
-def _contained_shrinkage_cal(contained_rna: float) -> CalibrationResult:
-    """A locus with a small CONTAINED gDNA mass concentrated on region 0 (no crossing seam), plus a
-    tunable amount of CONTAINED RNA — to isolate the contained-evidence shrinkage of the exon-density read
-    E_c. The concentrated gДНК fixes the raw IPR contraction (E_c_raw = 200 ≪ contained span 300); the
-    contained evidence C = gdna_contained + rna_contained drives the shrinkage weight w = C/(C+1), pulling
-    E_c from span_c (C→0) down toward the raw contraction (C≫1). region_eff_len = 100/region, no crossing
-    ⇒ θ_g = G_c ⇒ eff_len = E_c."""
-    return CalibrationResult(
-        mass_gdna_contained=np.array([1.0, 0.0, 0.0]),  # small concentrated contained gDNA (fixes E_c_raw)
-        mass_rna_contained=np.array([contained_rna, 0.0, 0.0]),  # the tunable contained evidence
-        mass_gdna_left=np.array([0.0, 0.0, 0.0]),  # no crossing seam — θ_g = contained mass
-        mass_rna_left=np.array([0.0, 0.0, 0.0]),
-        mass_gdna_right=np.array([0.0, 0.0, 0.0]),
-        mass_rna_right=np.array([0.0, 0.0, 0.0]),
-        mass_rna_spliced=np.array([0.0, 0.0, 0.0]),
-        gdna_boundary_len=np.array([50.0, 50.0, 50.0]),
-        gdna_region_eff_len=np.array([100.0, 100.0, 100.0]),
-        gdna_density_global=0.01,
-        rna_sense_frac=0.9,
-        gdna_strand_overdispersion=0.05,
-        rna_strand_overdispersion=0.05,
-        n_regions=3,
-        config=CalibrationConfig(),
-    )
-
-
 def test_contained_evidence_shrinkage_is_smooth_not_a_cliff():
-    # The shrinkage is SMOOTH in contained evidence (not a hard cliff). A single concentrated contained-gDNA
-    # node fixes the raw contraction: the contained-node Laplace IPR E_c_raw = (G_c+1)²/(P_c+(2G_c+1)/span_c)
-    # = (1+1)²/(1²/100 + 3/300) = 4/0.02 = 200 (≪ contained span_c = 300). eff = (θ_g/G_c)·E_c = E_c here
-    # (no crossing ⇒ θ_g = G_c). Increasing CONTAINED evidence monotonically raises trust w = C/(C+1) and
-    # pulls E_c from span_c (C→0) down toward E_c_raw (C≫1). Counts 1,2,3,... interpolate strictly between.
-    ra = _regions([0, 100, 200], [100, 200, 300])
-    span_c = 300.0  # contained span = Σ region_eff_len (the shrinkage ceiling)
-    e_raw = 200.0  # raw contained-IPR contraction E_c_raw (the C≫1 floor)
+    # The shrinkage is SMOOTH in contained evidence (not a hard cliff). Under the global reference a DEPLETED
+    # locus contracts (elen ≪ span); increasing the CONTAINED evidence C = gdna+rna monotonically raises the
+    # trust w = C/(C+1) and pulls the eff-length from span (C→0) down toward the earned contraction (C≫1).
+    # Counts 0,1,3,1000 interpolate strictly monotonically — no cliff.
+    ra = _six_region_ra()
+    ml = [_ml(0, [(0, 0, 100)])]  # locus = region 0 (depleted vs the enriched background ⇒ contracts)
 
     def eff(c):
-        return assemble_priors(_contained_shrinkage_cal(c), ra, [_ml(0, [(0, 0, 300)])]).gdna_eff_len[0]
+        return assemble_priors(_global_bimodal_cal(rna0=c), ra, ml).gdna_eff_len[0]
 
     e0, e1, e3, e_hi = eff(0.0), eff(1.0), eff(3.0), eff(1000.0)
     assert e_hi < e3 < e1 < e0  # smooth + monotone (no cliff)
-    assert e_raw <= e_hi  # C≫1 approaches — but never crosses below — the raw contraction
-    assert e0 < span_c  # even C=0 has the concentrated contained gDNA as evidence ⇒ below span_c
-    assert e_hi == pytest.approx(e_raw, abs=1.0)  # C≫1 ⇒ the earned contraction
+    assert e0 < 150.0  # even C=0 carries the depleted contained gDNA as evidence ⇒ below the full span
 
 
 def test_empty_multiloci_returns_empty():
@@ -416,3 +402,34 @@ def test_region_count_mismatch_raises():
     ra = _regions([0], [100])  # 1 region vs calibration's 2
     with pytest.raises(ValueError):
         assemble_priors(cal, ra, [_ml(0, [(0, 0, 100)])])
+
+
+def test_gdna_eff_len_factor_one_under_uniform_gdna_with_kde_firing():
+    # Priors-side factor-1: 6 regions at UNIFORM gDNA density (contained = ρ·region_eff, pooled seam =
+    # ρ·seam_support) ⇒ the KDE detector FIRES (≥6 gDNA nodes) but is unimodal ⇒ ρ_ref = ρ ⇒ every node
+    # min(m/ρ_ref, S) = S ⇒ gdna_eff_len == span EXACTLY (contraction factor 1). The existing gDNA-eff tests
+    # run in the <5-region regime that returns None, so this locks the KDE code path on the priors side.
+    from rigel.calibration.capture_eff_length import _global_reference_density
+
+    ra = _six_region_ra()
+    ml = [_ml(0, [(0, 0, 600)])]
+    rho = 2.0
+    cal = CalibrationResult(
+        mass_gdna_contained=np.full(6, rho * 100.0),  # ρ·region_eff_len ⇒ contained density = ρ
+        mass_rna_contained=np.zeros(6),
+        mass_gdna_left=np.full(6, 50.0),  # pooled seam m_s = right[r]+left[r+1] = 100 = ρ·seam_support(=50)
+        mass_rna_left=np.zeros(6),
+        mass_gdna_right=np.full(6, 50.0),
+        mass_rna_right=np.zeros(6),
+        mass_rna_spliced=np.zeros(6),
+        gdna_boundary_len=np.full(6, 50.0),
+        gdna_region_eff_len=np.full(6, 100.0),
+        gdna_density_global=0.5, rna_sense_frac=0.9,
+        gdna_strand_overdispersion=0.05, rna_strand_overdispersion=0.05,
+        n_regions=6, config=CalibrationConfig(),
+    )
+    # the KDE fires (unimodal ⇒ ρ_ref = ρ), NOT the <5-node None fallback
+    assert _global_reference_density(cal.mass_gdna_contained, cal.gdna_region_eff_len) == pytest.approx(rho)
+    # span = Σ support_len = 5·(100 + ½·(50+50)) + 1·100 (terminal region carries no right seam)
+    span = 5 * 150.0 + 100.0
+    np.testing.assert_allclose(assemble_priors(cal, ra, ml).gdna_eff_len[0], span, rtol=1e-9)

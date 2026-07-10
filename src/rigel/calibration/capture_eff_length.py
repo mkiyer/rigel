@@ -145,18 +145,63 @@ def _transcript_node_incidence(
     )
 
 
+# KDE smoothing params (log-density space): a fixed bandwidth + a peak-prominence floor. Standard KDE
+# smoothing, not tuned to a target; validated across the 16-scenario suite (kde_mode_scan.py). Could be made
+# data-driven (Silverman) later if needed.
+_KDE_BW = 0.4
+_KDE_PROM = 0.05
+
+
+def _global_reference_density(mass: np.ndarray, support: np.ndarray) -> "float | None":
+    """The global enriched-mode gDNA reference density for the eff-length contraction.
+
+    The rightmost significant peak of the **mass-weighted** log-density KDE over the per-region gDNA
+    densities ``ρ = mass/support`` — the fully-captured gDNA level, detected from the data with no assumption
+    about probe locations (``docs/calibration/enriched_mode_reference_density.md``). Mass-weighting is the
+    key: a small captured panel is a tiny COUNT bump but the dominant MASS peak (enriched nodes carry ~100×
+    the mass), so its enriched mode is detectable. Unimodal (capture-off / no enrichment) ⇒ the single mode
+    ⇒ every node lands at ``w = 1`` ⇒ no contraction. The result is SNAPPED to a real node density so a
+    uniform field returns its density EXACTLY (factor 1, capture-off bit-identical). Returns ``None`` if
+    there is too little gDNA to detect a reference (⇒ no contraction)."""
+    m = np.asarray(mass, dtype=np.float64)
+    s = np.maximum(np.asarray(support, dtype=np.float64), 1e-9)
+    rho = m / s
+    ok = np.isfinite(rho) & (rho > 1e-12) & (m > 0.0)
+    if int(ok.sum()) < 5:
+        return None
+    x = np.log(rho[ok])
+    wt = m[ok]
+    grid = np.linspace(float(x.min()) - 1.0, float(x.max()) + 1.0, 512)
+    wn = wt / wt.sum()
+    d = (grid[:, None] - x[None, :]) / _KDE_BW
+    km = (wn[None, :] * np.exp(-0.5 * d * d)).sum(1)  # mass-weighted log-density KDE
+    pk = np.where((km[1:-1] >= km[:-2]) & (km[1:-1] > km[2:]))[0] + 1
+    if pk.size == 0:
+        mode = grid[int(np.argmax(km))]
+    elif pk.size == 1:
+        mode = grid[int(pk[0])]
+    else:  # rightmost peak with height ≥ _KDE_PROM of the tallest (a real mode, not a tail wiggle)
+        h = km[pk]
+        sig = pk[h >= _KDE_PROM * float(h.max())]
+        mode = grid[int((sig if sig.size else pk)[-1])]
+    # snap to the nearest ACTUAL node density: exact ρ under a uniform field (⇒ factor 1), a real density
+    # under capture — no grid-quantization contraction is fabricated.
+    return float(rho[ok][int(np.argmin(np.abs(x - mode)))])
+
+
 def transcript_capture_eff_lengths(
     calibration: "CalibrationResult",
     region_arrays: "RegionArrays",
     index: "TranscriptIndex",
     fl_eff_lengths: np.ndarray,
 ) -> np.ndarray:
-    """Capture-contract each transcript's EM effective length by the per-node gDNA-enrichment density.
+    """Capture-contract each transcript's EM effective length by the per-node gDNA-enrichment density,
+    against a single GLOBAL reference density ``ρ_ref`` (the fully-captured level; ``_global_reference_density``).
 
-    Every component's effective length is its TOTAL node mass held at the exon-competition density ρ* —
-    the per-node view ``ℓ_n = m_n/ρ*``, ``L = Σ ℓ_n = θ/ρ*`` — over exactly the nodes it occupies
-    CONTIGUOUSLY (``_transcript_node_incidence``), the SAME node model + reduction the gDNA component uses
-    (``assemble_priors``), differing ONLY in the node set:
+    ``eff_em_t = fl_t · factor_t``, ``factor_t = [Σ_{n∈t} S_n·min(ρ_n/ρ_ref, 1)] / [Σ_{n∈t} S_n]`` — the
+    enrichment-weighted fraction of the transcript's footprint that survives at the reference density, over
+    exactly the nodes it occupies CONTIGUOUSLY (``_transcript_node_incidence``), differing ONLY in the node
+    set:
 
     * a per-region CONTAINED node at effective support ``S_r = E[max(0, L_r − ℓ)]`` (mass ``m_r``);
     * a per-interior-boundary POOLED SEAM node at averaged per-side support ``S_s = ½·(E[min(ℓ,L_r)] +
@@ -174,29 +219,25 @@ def transcript_capture_eff_lengths(
     inflates a spliced mRNA's eff-length ABOVE its nascent parent's, the physically impossible inversion
     (a nascent's genomic node set strictly contains its mature child's).
 
-    ρ* is read on the transcript's CONTAINED (exon) nodes — the mass-weighted exon density where mature RNA
-    competes with gDNA for the ambiguous contained fragments — while the TOTAL mass θ_t spans the full node
-    set (contained + crossed seams)::
-
-        ρ*_t   = G_c/E_c   (E_c = contained-node Laplace IPR, G_c = Σ contained mass)
-        eff_t  = θ_t/ρ*_t = θ_t·E_c/G_c,  capped at span_t   (θ_t = Σ m_n, span_t = Σ S_n over the node set)
-        factor = eff_t/span_t ∈ (0, 1] ;  eff_em_t = fl_eff_lengths_t · factor   (capped at fl)
-
     A single O(incidence) pass (``np.add.at``) does every transcript at once. Properties:
 
-    * **uniform gDNA** (capture off) ⇒ ρ_n = ρ ⇒ E_c = span_c and θ_t/G_c = span_t/span_c ⇒ eff = span_t
-      ⇒ factor 1 ⇒ ``eff_em = fl`` — bit-identical to the FL-marginal length (the bedrock invariant);
-    * **no gDNA over the transcript** (G_c = 0) ⇒ factor 1;
-    * **concentrated gDNA** (capture) ⇒ ρ* pins to the enriched exon density, so depleted intron nodes
-      contribute ℓ_n = m_n/ρ* ≈ 0 and the eff-len contracts to the exon footprint. Reading ρ* on the
-      CONTAINED nodes (not an all-node mean) is what maximally weights gDNA where mature competes — measured
-      to beat the all-node arithmetic mean and the Lehmer M3/M2 on the binding sweep (mature leak).
+    * **uniform gDNA** (capture off, unimodal density) ⇒ ρ_ref = ρ ⇒ every node ``min(ρ/ρ_ref, 1) = 1``
+      ⇒ factor 1 ⇒ ``eff_em = fl`` — bit-identical to the FL-marginal length. NOTE this holds for a
+      *noise-free* uniform field; on Poisson-noisy capture-off data the mass-weighted mode can sit slightly
+      above the median and manufacture a small spurious contraction. The deferred unimodal / gDNA-abundance
+      guard (require a genuine bimodal separation, or cap ρ_ref at a high mass-weighted-density quantile for
+      outlier resistance) would neutralise both this and a single high-mass region dominating ρ_ref
+      genome-wide; see docs/calibration/enriched_mode_reference_density.md;
+    * **no detectable gDNA** ⇒ ``ρ_ref = None`` ⇒ factor 1 (no contraction);
+    * **concentrated gDNA** (capture) ⇒ depleted nodes have ρ_n ≪ ρ_ref ⇒ ``min(m_n/ρ_ref, S_n) ≪ S_n``
+      ⇒ the eff-len contracts to the enriched footprint.
 
-    ``ρ*`` is the SAME exon-competition density the gDNA component uses (``assemble_priors``), so gDNA and a
-    full-span nRNA sharing a locus land at the same eff-len up to gDNA's two extra outer-boundary supports
-    (negligible; verified near-parity on a single-transcript locus). Dividing each node's mass by its
-    EFFECTIVE support (NOT genomic ``region_size_bp``) is what makes factor = 1 hold under an unenriched
-    library. Reduction chosen by the rhostar-derivation workflow + binding-sweep A/B (contained ρ*).
+    A single GLOBAL ``ρ_ref`` (shared by every transcript) makes ``eff(nascent) ≥ eff(mature)`` hold by
+    construction — no inversion — and is stable because gDNA barely varies across loci (a few-fold even in
+    cancer), unlike RNA. This REPLACES the former per-transcript ``ρ* = G_c/E_c``, which contracted on
+    within-transcript density variation including noise — it fired even with NO gDNA and drove the nascent
+    siphon. Full derivation + 16-scenario validation: ``docs/calibration/enriched_mode_reference_density.md``
+    and ``efflen_shared_reference_fix_plan.md``.
     """
     fl = np.asarray(fl_eff_lengths, dtype=np.float64)
     n_t = fl.shape[0]
@@ -220,23 +261,28 @@ def transcript_capture_eff_lengths(
         seam_S[:-1] = np.where(same, 0.5 * (side_len[:-1] + side_len[1:]), 0.0)
 
     rt, rr, bt, br, jt, jl, jr = _transcript_node_incidence(index, region_arrays)
-    # CONTAINED (exon-region) accumulators → the exon-competition density ρ* = G_c/E_c (E_c = contained-node
-    # Laplace IPR). MAPPED-NODE totals θ_t (contained + crossed seams) and the uniform-case length span_full.
-    Gc = np.zeros(n_t)  # Σ contained mass
-    Pc = np.zeros(n_t)  # Σ contained²/S_c
-    span_c = np.zeros(n_t)  # Σ contained support
-    c_ev = np.zeros(n_t)  # Σ contained unique-mapper evidence (shrinkage weight)
-    theta = np.zeros(n_t)  # Σ m_n over the node set (regions + crossed boundaries)
-    span_full = np.zeros(n_t)  # Σ S_n over the node set (the factor-1 uniform length)
+    # GLOBAL reference density ρ_ref = the enriched mode of the MASS-WEIGHTED node-density KDE — the
+    # fully-captured gDNA level detected from the data (no probe assumptions), SHARED across all transcripts
+    # so eff(nascent) ≥ eff(mature) by construction. Unimodal (capture-off / no enrichment) ⇒ single mode ⇒
+    # every node w=1 ⇒ no contraction. Replaces the per-transcript ρ*=G_c/E_c, which contracted on
+    # within-transcript density variation incl. noise — it fired even with NO gDNA, driving the nascent
+    # siphon. See docs/calibration/enriched_mode_reference_density.md.
+    rho_ref = _global_reference_density(contained_m, contained_S)
+    if rho_ref is None or rho_ref <= 0.0:
+        return fl.copy()  # no detectable gDNA reference ⇒ no contraction
+    inv = 1.0 / rho_ref
+    # Per-transcript enrichment-weighted length num = Σ_n min(m_n/ρ_ref, S_n) = Σ_n S_n·min(ρ_n/ρ_ref, 1),
+    # the uniform-case length span_full = Σ_n S_n, and the contained evidence (multimapper shrinkage), over
+    # the node set (regions + interior seams + splice-junction seams). factor = num/span_full ∈ (0, 1].
+    num = np.zeros(n_t)
+    span_full = np.zeros(n_t)
+    c_ev = np.zeros(n_t)
     if rt.size:
-        np.add.at(Gc, rt, contained_m[rr])
-        np.add.at(Pc, rt, contained_m[rr] ** 2 / contained_S[rr])
-        np.add.at(span_c, rt, contained_S[rr])
-        np.add.at(c_ev, rt, contained_ev[rr])
-        np.add.at(theta, rt, contained_m[rr])
+        np.add.at(num, rt, np.minimum(contained_m[rr] * inv, contained_S[rr]))
         np.add.at(span_full, rt, contained_S[rr])
+        np.add.at(c_ev, rt, contained_ev[rr])
     if bt.size:
-        np.add.at(theta, bt, seam_m[br])
+        np.add.at(num, bt, np.minimum(seam_m[br] * inv, seam_S[br]))
         np.add.at(span_full, bt, seam_S[br])
     if jt.size:
         # SPLICE-JUNCTION seams (multi-exon mRNA). The intron between the two exons carries no gDNA, so
@@ -252,21 +298,17 @@ def transcript_capture_eff_lengths(
         rho_r = contained_m[jr] / contained_S[jr]
         s_j = 0.5 * (side_len[jl] + side_len[jr])
         m_j = 0.5 * (rho_l + rho_r) * s_j
-        np.add.at(theta, jt, m_j)
+        np.add.at(num, jt, np.minimum(m_j * inv, s_j))
         np.add.at(span_full, jt, s_j)
 
-    have = Gc > 1e-9  # no contained gDNA over the footprint ⇒ no contraction (factor 1)
-    safe_span_c = np.maximum(span_c, 1e-9)
     with np.errstate(divide="ignore", invalid="ignore"):
-        # exon-competition density ρ* = G_c/E_c (contained-node Laplace IPR), shrunk toward span_c on the
-        # contained evidence (w = C/(C+1), multimap-blind guard). Per-node view ℓ_n = m_n/ρ*, eff = θ_t/ρ*.
-        # Under uniform gDNA ρ* = the uniform density and θ_t/ρ* = span_full ⇒ factor 1 (capture-off
-        # bit-identical); under capture ρ* = the enriched exon density ⇒ depleted intron nodes contribute
-        # ≈0 length ⇒ contracts to the exon footprint. Same ρ* as the gDNA component ⇒ near-parity.
-        E_c = np.minimum((Gc + 1.0) ** 2 / (Pc + (2.0 * Gc + 1.0) / safe_span_c), span_c)
-        w = np.where(have, c_ev / (c_ev + 1.0), 0.0)
-        E_c = np.exp(w * np.log(np.maximum(E_c, 1e-9)) + (1.0 - w) * np.log(safe_span_c))
-        # eff = θ_t/ρ* = θ_t·E_c/G_c ; factor vs the uniform-case span_full (→1 under uniform / no gDNA)
-        eff = theta * E_c / np.where(have, Gc, 1.0)
-        factor = np.where(have & (span_full > 0.0), eff / np.maximum(span_full, 1e-9), 1.0)
+        # factor = Σ min(m_n/ρ_ref, S_n) / Σ S_n ∈ (0, 1] (num ≤ span_full since min(·, S_n) ≤ S_n). Under
+        # uniform gDNA every node sits at ρ_ref ⇒ num = span_full ⇒ factor 1 (capture-off bit-identical);
+        # under capture depleted nodes contribute min(m_n/ρ_ref, S_n) ≪ S_n ⇒ contracts to the enriched
+        # footprint. ONE global ρ_ref for every transcript ⇒ eff(nascent) ≥ eff(mature) (no inversion).
+        factor = np.where(span_full > 1e-9, num / np.maximum(span_full, 1e-9), 1.0)
+        # multimapper-blindness shrinkage: shrink the contraction toward 1 (no contraction) on sparse
+        # CONTAINED evidence (the accumulator is unique-mapper-fed), smoothly (w = C/(C+1), magic-free).
+        w = c_ev / (c_ev + 1.0)
+        factor = w * factor + (1.0 - w)
     return np.minimum(fl * factor, fl)

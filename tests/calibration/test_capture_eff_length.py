@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration.capture_eff_length import (
+    _global_reference_density,
     _transcript_node_incidence,
     transcript_capture_eff_lengths,
 )
@@ -159,43 +160,22 @@ def test_transcript_factor_one_under_uniform_gdna(misaligned_index):
     np.testing.assert_allclose(eff, fl, rtol=1e-9)
 
 
-def test_transcript_contracts_under_concentrated_gdna(misaligned_index):
-    """Sanity: with gDNA concentrated on a SINGLE region (capture-like, non-uniform), the transcripts
-    overlapping it contract below their FL-marginal length (factor < 1), while the contraction never
-    exceeds fl. Confirms the method still does its job once the field is non-uniform."""
-    idx = misaligned_index
+def test_transcript_contracts_under_concentrated_gdna(multiexon_index):
+    """Under a realistic capture field (a subset of regions enriched, the rest depleted — a genuine bimodal
+    node-density distribution the global detector can resolve), transcripts overlapping the DEPLETED regions
+    contract below their FL-marginal length, and contraction never expands. (A single enriched region is NOT
+    a detectable capture pattern under the global reference — that regime is correctly left uncontracted.)"""
+    idx = multiexon_index
     ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
     n = ra.n_regions
-    inc_t, inc_r, *_ = _transcript_node_incidence(idx, ra)
-    assert inc_t.size, "the index must map at least one transcript to a region"
-    enriched_r = int(inc_r[0])  # a region genuinely inside some transcript's footprint
-    contained = np.zeros(n, dtype=np.float64)
-    contained[enriched_r] = 500.0  # all gDNA piled on one region — a sharply non-uniform (enriched) field
-    z = np.zeros(n, dtype=np.float64)
-    cal = CalibrationResult(
-        mass_gdna_contained=contained,
-        mass_rna_contained=z.copy(),
-        mass_gdna_left=z.copy(),
-        mass_rna_left=z.copy(),
-        mass_gdna_right=z.copy(),
-        mass_rna_right=z.copy(),
-        mass_rna_spliced=z.copy(),
-        gdna_boundary_len=np.full(n, 180.0, dtype=np.float64),
-        gdna_region_eff_len=np.asarray(ra.region_size_bp, dtype=np.float64),
-        gdna_density_global=0.01,
-        rna_sense_frac=0.9,
-        gdna_strand_overdispersion=0.05,
-        rna_strand_overdispersion=0.05,
-        n_regions=n,
-        config=CalibrationConfig(),
-    )
-    n_t = len(idx.t_df)
-    fl = np.full(n_t, 1500.0)
+    starts, ends = np.asarray(ra.start), np.asarray(ra.end)
+    dens = np.full(n, 0.1)                          # depleted (off-target) background
+    dens[(ends > 1000) & (starts < 1500)] = 100.0   # capture the first exon (enriched on-target)
+    cal = _field_cal(ra, dens)
+    fl = np.maximum(idx.t_df["length"].to_numpy(dtype=np.float64) - 180.0, 1.0)
     eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
-    assert np.all(eff <= fl + 1e-9)  # contraction never expands
-    overlaps = sorted({int(t) for t, r in zip(inc_t, inc_r, strict=True) if int(r) == enriched_r})
-    assert overlaps, "expected at least one transcript overlapping the enriched region"
-    assert np.any(eff[overlaps] < fl[overlaps] - 1e-6)  # at least one genuinely contracts
+    assert np.all(eff <= fl + 1e-9)                 # contraction never expands
+    assert np.any(eff < fl - 1e-6)                  # at least one transcript genuinely contracts
 
 
 # --- nascent<mature inversion guard (2026-07-09): splice-junction seams ---------------------------
@@ -308,3 +288,29 @@ def test_spliced_factor_one_under_uniform(multiexon_index):
     fl = np.linspace(900.0, 2000.0, len(idx.t_df))
     eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
     np.testing.assert_allclose(eff, fl, rtol=1e-9)
+
+
+# --- the enriched-mode reference detector's core contract (locks the <5-node fallback + the enriched mode) ---
+
+
+def test_global_reference_density_needs_five_gdna_nodes():
+    # Fewer than 5 gDNA-bearing nodes ⇒ None (no reference ⇒ no contraction), even with a clean bimodal split.
+    mass = np.array([100.0, 100.0, 1.0, 1.0])  # 4 gDNA-bearing nodes
+    support = np.full(4, 100.0)
+    assert _global_reference_density(mass, support) is None
+
+
+def test_global_reference_density_single_enriched_region_is_none():
+    # A single enriched region among empties ⇒ only 1 gDNA-bearing node ⇒ None (not a detectable pattern).
+    mass = np.array([100.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    support = np.full(6, 100.0)
+    assert _global_reference_density(mass, support) is None
+
+
+def test_global_reference_density_bimodal_returns_enriched_mode_snapped():
+    # >=5 gDNA nodes, bimodal (5 enriched at density 1.0 + 3 depleted at 0.01). The MASS-weighted KDE mode is
+    # the enriched level, SNAPPED to an actual node density (exactly 1.0 here), not a grid value.
+    mass = np.array([100.0, 100.0, 100.0, 100.0, 100.0, 1.0, 1.0, 1.0])
+    support = np.full(8, 100.0)
+    rho = _global_reference_density(mass, support)
+    assert rho == pytest.approx(1.0, rel=1e-9)
