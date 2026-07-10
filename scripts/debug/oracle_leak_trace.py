@@ -21,7 +21,7 @@ from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.fl import build_fl_models, gdna_fl_mass
 from rigel.splice import SpliceType
 
-S = "/Users/mkiyer/Downloads/rigel_runs/quick_3to1_5mb"
+S = os.environ.get("RIGEL_SUITE", "/Users/mkiyer/Downloads/rigel_runs/quick_3to1_5mb")
 COND = sys.argv[1] if len(sys.argv) > 1 else "gdna_gdna300_ss_0.99_nrna_none_capture_on"
 TOPN = int(sys.argv[2]) if len(sys.argv) > 2 else 15
 bam = f"{S}/{COND}/sim_oracle.bam"
@@ -30,7 +30,7 @@ cfg = PipelineConfig()
 ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
 wd = Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_oracle_split"
 
-orc = OracleTruth.from_bam(bam, index, cfg, wd, COND)
+orc = OracleTruth.from_bam(bam, index, cfg, wd, f"{os.path.basename(S)}_{COND}")
 override = orc.override_masses(ra)
 
 sc = dc(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
@@ -58,6 +58,8 @@ abund_arr = pd.to_numeric(tdf["abundance"], errors="coerce").fillna(0).to_numpy(
 ref_arr = tdf["ref"].to_numpy()
 start_arr = tdf["start"].to_numpy()
 end_arr = tdf["end"].to_numpy()
+strand_arr = np.array([str(s) for s in tdf["strand"].to_numpy()])
+gid_arr = tdf["g_id"].to_numpy()
 
 lr = pd.DataFrame(est.locus_results)
 print(f"=== {COND} — DOWNSTREAM leak trace (ORACLE calibration) ===")
@@ -74,6 +76,11 @@ for _, r in lr.iterrows():
     m = lid == L
     tx = np.where(m)[0]
     leak = float(r.get("gdna_prior_count", 0)) - float(r.get("gdna", 0))
+    mtx = tx[~is_syn[tx]]  # non-synthetic (real) transcripts in the locus
+    strands = set(strand_arr[mtx].tolist())
+    npos = int(np.sum(strand_arr[mtx] == "+")) + int(np.sum(strand_arr[mtx] == "1"))
+    nneg = int(np.sum(strand_arr[mtx] == "-")) + int(np.sum(strand_arr[mtx] == "-1"))
+    ambig = (npos > 0 and nneg > 0)
     rows.append(dict(
         locus=L, ref=str(ref_arr[tx][0]) if tx.size else "?",
         start=int(start_arr[tx].min()) if tx.size else -1,
@@ -83,9 +90,16 @@ for _, r in lr.iterrows():
         n_tx=int(r.get("n_transcripts", tx.size)), n_se=int(se[tx].sum()), n_me=int(me[tx].sum()),
         n_syn=int(is_syn[tx].sum()),
         eff_g=float(r.get("gdna_eff_len_em", 0)), enable_g=bool(r.get("enable_gdna", True)),
+        n_genes=int(r.get("n_genes", 0)), npos=npos, nneg=nneg, ambig=ambig,
+        n_gid=int(np.unique(gid_arr[mtx]).size) if mtx.size else 0,
         abund=float(abund_arr[tx][me[tx]].sum()) if tx.size else 0.0,
     ))
 D = pd.DataFrame(rows).sort_values("leak", ascending=False)
+# CENSUS: do AMBIG (opposite-strand overlap) loci EXIST here, and do they hold gDNA / leak?
+nA = int(D.ambig.sum())
+print(f"\nAMBIG census (ALL loci): {nA}/{len(D)} loci are opposite-strand-overlap (AMBIG); "
+      f"they hold prior_g={D.loc[D.ambig,'prior_g'].sum():,.0f} gDNA and leak {D.loc[D.ambig,'leak'].sum():+,.0f} "
+      f"(single-strand loci hold {D.loc[~D.ambig,'prior_g'].sum():,.0f}, leak {D.loc[~D.ambig,'leak'].sum():+,.0f})")
 pos = D[D.leak > 0]
 print(f"\ndirectional leak: Σ(+)={pos.leak.sum():,.0f} over {len(pos)} loci; "
       f"top {TOPN} = {pos.head(TOPN).leak.sum()/max(pos.leak.sum(),1)*100:.0f}% of it")
@@ -102,6 +116,22 @@ pos = pos.copy(); pos["cls"] = pos.apply(_cls, axis=1)
 print("\nleak by locus CLASS:")
 print(pos.groupby("cls").agg(n=("leak", "size"), leak=("leak", "sum"),
                              siphon=("siphon", "sum")).sort_values("leak", ascending=False).to_string())
+# *** THE KEY QUESTION: is the leak in AMBIG (opposite-strand overlap) loci? ***
+pos_all = D[D.leak > 0].copy()
+pos_all["strand_cls"] = np.where(pos_all.ambig, "AMBIG(both-strand)",
+                                 np.where(pos_all.npos > 0, "POS-only", "NEG-only"))
+print("\n*** leak by STRAND composition (AMBIG = transcripts on BOTH strands overlap) ***")
+print(pos_all.groupby("strand_cls").agg(
+    n=("leak", "size"), leak=("leak", "sum"), siphon=("siphon", "sum"),
+    prior_g=("prior_g", "sum")).sort_values("leak", ascending=False).to_string())
+tot = pos_all.leak.sum()
+print(f"AMBIG share of directional leak: {100*pos_all[pos_all.ambig].leak.sum()/max(tot,1):.0f}%  "
+      f"of siphon: {100*pos_all[pos_all.ambig].siphon.sum()/max(pos_all.siphon.sum(),1):.0f}%")
+# cross-tab AMBIG x #genes (multi-gene overlap)
+print("\nleak by (ambig, n_genes>1):")
+pos_all["multigene"] = pos_all.n_gid > 1
+print(pos_all.groupby(["ambig", "multigene"]).agg(n=("leak", "size"), leak=("leak", "sum"),
+      siphon=("siphon", "sum")).to_string())
 # is gDNA ever DISABLED on a leaking locus (forced leak)?
 n_dis = int((~D["enable_g"]).sum())
 dis_leak = float(D.loc[~D["enable_g"], "leak"].clip(lower=0).sum())
@@ -116,8 +146,8 @@ if len(D2) > 3:
     print(f"corr(leak_frac, n_me)={np.corrcoef(D2.n_me, D2.leak_frac)[0,1]:+.2f}  "
           f"corr(leak_frac, n_syn)={np.corrcoef(D2.n_syn, D2.leak_frac)[0,1]:+.2f}")
 print(f"\nTOP {TOPN} leaking loci:")
-cols = ["locus", "ref", "start", "end", "prior_g", "assigned_g", "leak", "siphon", "mature",
-        "n_tx", "n_se", "n_me", "cls", "eff_g", "enable_g", "abund"]
+cols = ["locus", "ref", "start", "end", "prior_g", "leak", "siphon", "mature",
+        "n_tx", "n_me", "npos", "nneg", "ambig", "n_gid", "cls"]
 with pd.option_context("display.width", 200, "display.max_columns", 20):
     print(pos.head(TOPN)[cols].to_string(index=False,
           formatters={c: "{:,.0f}".format for c in ["prior_g", "assigned_g", "leak", "siphon", "mature", "abund"]}))
