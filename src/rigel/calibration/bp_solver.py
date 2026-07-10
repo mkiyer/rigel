@@ -472,12 +472,23 @@ def _adjacent_edges(chain: NodeChain):
     return src, dst, kind[src] == BOUNDARY
 
 
-def adjacent_disagreement_variance(chain: NodeChain, geometry: NodeGeometry) -> float:
-    """v1 total-density σ²_imp (``disagreement_shrinkage_prior_design_v2.md`` §2): the naive-gDNA density
-    ``ρ = mass / eff_gdna`` (the frame the gDNA message uses under ``fg=1``), over adjacent boundary↔region
-    edges, oriented boundary→region so the frame offset is a single median-removable mode."""
+_LOGCHI2_1_VAR = math.pi**2 / 2.0  # ψ'(½): the irreducible log-variance of a ONE-residual variance estimate
+#   (a χ²₁ draw). A mathematical constant, NOT a tunable — it sets how far a single edge's log(resid²) must
+#   sit above the population mean before it counts as real between-edge signal rather than sampling noise.
+
+
+def _adjacent_log_density_residuals(chain: NodeChain, geometry: NodeGeometry, f_g=None):
+    """Oriented adjacent boundary↔region log gDNA-density residuals + the two source/dst gDNA counts, shared
+    by the σ²_imp moment estimator and the EB shrinkage weight. ``ρ = mass / eff_gdna`` oriented
+    boundary→region so the systematic frame offset is one median-removable mode. ``f_g=None`` ⇒ the naive
+    total-density frame (``fg=1``, RNA included) used pre-solve; a per-node ``f_g`` uses the deconvolved gDNA
+    count ``f_g·mass`` (the per-component frame on which capture's coherent gDNA enrichment registers)."""
     ML = np.asarray(geometry.mass_left)
     MR = np.asarray(geometry.mass_right)
+    if f_g is not None:
+        fg = np.asarray(f_g, dtype=np.float64)
+        ML = ML * fg
+        MR = MR * fg
     EGL = np.asarray(geometry.eff_gdna_left)
     EGR = np.asarray(geometry.eff_gdna_right)
     src, dst, s_bnd = _adjacent_edges(chain)
@@ -487,7 +498,94 @@ def adjacent_disagreement_variance(chain: NodeChain, geometry: NodeGeometry) -> 
     lr_i = np.log(n_i / e_i)
     lr_j = np.log(n_j / e_j)
     resid = np.where(s_bnd, lr_i - lr_j, lr_j - lr_i)   # orient boundary→region (one mode)
+    return resid, n_i, n_j
+
+
+def adjacent_disagreement_variance(chain: NodeChain, geometry: NodeGeometry) -> float:
+    """v1 total-density σ²_imp (``disagreement_shrinkage_prior_design_v2.md`` §2): the mean adjacent-node
+    naive-gDNA log-density disagreement variance (Poisson sampling removed) — the population-average message
+    process variance. The same residuals the EB shrinkage weight decomposes."""
+    resid, n_i, n_j = _adjacent_log_density_residuals(chain, geometry)
     return _poisson_moment_var(resid, n_i, n_j)
+
+
+def adjacent_disagreement_shrinkage_weight(chain: NodeChain, geometry: NodeGeometry) -> float:
+    """Empirical-Bayes local↔global shrinkage weight ``w = τ²_between / (τ²_between + ψ'(½))`` — the fraction
+    of the adjacent-edge log-variance spread that is real between-edge signal, NOT one-residual sampling
+    noise (`message_precision_roadmap_v2.md`). DATA-DETERMINED, no tunable: the within-edge noise is the
+    constant ``ψ'(½)=π²/2``; ``τ²_between`` is the population spread of ``log(resid²)`` minus it. ``w=0`` (all
+    spread is sampling noise) collapses the EB precision to the global scalar; ``w→1`` (edges genuinely
+    differ, e.g. under capture) lets a below-average edge earn above-average precision and a seam edge
+    self-silence."""
+    resid, n_i, n_j = _adjacent_log_density_residuals(chain, geometry)
+    return _shrinkage_weight_from_residuals(resid, n_i, n_j)
+
+
+def _shrinkage_weight_from_residuals(resid, n_i, n_j) -> float:
+    """The EB weight from a population of edge residuals + counts (pure; unit-testable). ``d =
+    log(max(resid², 1/nᵢ+1/nⱼ))`` is each edge's one-sample log-variance (floored at Poisson sampling); its
+    harmonically-weighted spread decomposes as ``τ²_between + ψ'(½)``; the weight is the signal fraction
+    ``τ²_between/(τ²_between+ψ'(½))`` — 0 when all spread is sampling noise, → 1 (strictly <1) when edges
+    genuinely differ."""
+    resid = np.asarray(resid, float)
+    n_i = np.asarray(n_i, float)
+    n_j = np.asarray(n_j, float)
+    ok = np.isfinite(resid) & (n_i > _EPS) & (n_j > _EPS)
+    resid, n_i, n_j = resid[ok], n_i[ok], n_j[ok]
+    if resid.size < 2:
+        return 0.0
+    samp = 1.0 / n_i + 1.0 / n_j
+    d = np.log(np.maximum(resid * resid, samp))          # 1-sample log-variance, floored at Poisson sampling
+    wt = (n_i * n_j) / (n_i + n_j)                        # harmonic weights (as _poisson_moment_var)
+    den = float(np.sum(wt))
+    if den <= _EPS:
+        return 0.0
+    mu = float(np.sum(wt * d) / den)
+    var_d = float(np.sum(wt * (d - mu) ** 2) / den)      # observed spread = τ²_between + within-edge noise
+    tau2 = max(var_d - _LOGCHI2_1_VAR, 0.0)
+    return tau2 / (tau2 + _LOGCHI2_1_VAR)
+
+
+def _eb_edge_precision(resid: float, n_src: float, sig_imp: float, weight: float) -> float:
+    """Empirical-Bayes shrunk message precision for ONE edge (`message_precision_roadmap_v2.md`)::
+
+        σ²_edge = w·max(resid², 1/n) + (1−w)·(σ²_imp + 1/n),   pr = 1/σ²_edge
+
+    ``resid`` = message − dst message-free local belief. ``w=0`` reproduces the global scalar
+    ``n/(n·σ²_imp+1)`` EXACTLY; ``w>0`` lets a below-average-disagreement edge exceed the average precision
+    and a seam edge self-silence. Bounded (``w<1`` ⇒ ``σ²_edge ≥ (1−w)·σ²_imp`` ⇒ no runaway); pr=0 at n=0."""
+    if n_src <= _EPS:
+        return 0.0
+    if weight <= 0.0:
+        return n_src / (n_src * sig_imp + 1.0)           # exact global scalar (byte-identical to prod)
+    samp = 1.0 / n_src
+    observed = resid * resid
+    if observed < samp:
+        observed = samp                                   # can't observe agreement finer than the count
+    s2 = weight * observed + (1.0 - weight) * (sig_imp + samp)
+    return 1.0 / s2 if s2 > _EPS else 0.0
+
+
+def _max_edge_precision(resid: float, var_loc: float, n_src: float, sig_imp: float) -> float:
+    """Per-edge SELF-SILENCING message precision (v0.6.4 form, belief-free base;
+    `message_precision_roadmap_v2.md`)::
+
+        σ²_edge = max(resid² − var_loc,  σ²_imp + 1/n_src),   pr = 1/σ²_edge
+
+    ``resid`` = message − dst message-free local belief; ``var_loc`` = the dst's own message-free local
+    variance (a surprise within the dst's own uncertainty is not a disagreement). The floor ``σ²_imp+1/n`` is
+    the CEILING on precision (== the prod global scalar) and is BELIEF-FREE — the fixed population σ²_imp, NOT
+    the source's collapsing belief variance that ran away in v0.6.4 — so precision can never exceed the
+    scalar and cannot run up. An agreeing edge sits at the ceiling; a seam (large resid²) self-silences to
+    ``1/resid²``. Precision only ever moves DOWN vs the ceiling — asymmetric by design (a large resid²
+    reliably marks a real seam; a small one is not reliable evidence of extra precision)."""
+    if n_src <= _EPS:
+        return 0.0
+    base = sig_imp + 1.0 / n_src                          # belief-free ceiling (no vbg ⇒ no runaway)
+    s2 = resid * resid - var_loc                          # surprise beyond the dst's own local uncertainty
+    if s2 < base:
+        s2 = base                                         # max(·, base): precision capped at 1/base
+    return 1.0 / s2
 
 
 def node_sweep(
@@ -509,6 +607,7 @@ def node_sweep(
     n_grid_ss: int | None = None,
     gdna_prior=None,
     disagreement_sigma2: float,
+    disagreement_weight: float = 0.0,
     _capture: dict | None = None,
 ):
     """The belief-propagation sweep over the chain — gDNA AND per-strand RNA messages, in COUNT space (no
@@ -672,11 +771,15 @@ def node_sweep(
     # 1/n_src ⇒ pr = n_src/(n_src·σ²_imp + 1). ONE total-density scalar for every channel (gDNA + both RNA
     # strands); σ²_imp is the empirical adjacent-node imputation floor (`adjacent_disagreement_variance`).
     sig_imp = float(disagreement_sigma2)
-    # Message-precision mode knob (message_precision_roadmap_v2.md, Phase 0). ``RIGEL_MSG_MODE=off``
-    # forces every cross-node message precision to 0 — the belief-free "no message propagation" floor
-    # (pr=0 is the code's own designed no-message state) — so the benchmark can measure the VALUE of
-    # message propagation against a no-messages baseline. Unset / "prod" ⇒ the production scalar below.
-    _msg_off = os.environ.get("RIGEL_MSG_MODE") == "off"
+    w_eb = float(disagreement_weight)
+    # Message-precision mode (message_precision_roadmap_v2.md). RIGEL_MSG_MODE selects the per-edge precision:
+    #   prod (default, 0) = global scalar pr = n_src/(n_src·σ²_imp+1) — the incumbent, byte-identical.
+    #   off  (1)          = pr=0 (no propagation; the Phase-0 baseline floor).
+    #   max  (2)          = per-edge SELF-SILENCING max form — precision capped at the scalar, mutes seams
+    #                       on high disagreement (the Phase-1 primary candidate; `_max_edge_precision`).
+    #   eb   (3)          = empirical-Bayes disagreement shrinkage at the DATA-FIT weight w_eb (NOT a tunable;
+    #                       fit once by adjacent_disagreement_shrinkage_weight). w_eb=0 ⇒ exactly prod.
+    _MSG_MODE = {"off": 1, "max": 2, "eb": 3}.get(os.environ.get("RIGEL_MSG_MODE", ""), 0)
 
     def _scan(seq, nbr, sf, df):
         """Sequential scan: project the running belief from each node's ``nbr`` (src face ``sf`` → dst face
@@ -729,7 +832,15 @@ def node_sweep(
                 mo = math.log(max(rho, 1.0 / egd) / (md / egd))
                 # Poisson disagreement-variance: σ²_msg = σ²_imp + 1/n_src ⇒ pr = n_src/(n_src·σ²_imp + 1) —
                 # denom ≥ 1, pr=0 exactly at n_src=0 (no message; "zero density is not a measurement"), no clamp.
-                pr = 0.0 if _msg_off else n_src / (n_src * sig_imp + 1.0)
+                # resid = message − dst message-free local belief (lfg_loc[i]); non-circular anchor.
+                if _MSG_MODE == 0:
+                    pr = n_src / (n_src * sig_imp + 1.0)
+                elif _MSG_MODE == 1:
+                    pr = 0.0
+                elif _MSG_MODE == 2:
+                    pr = _max_edge_precision(mo - lfg_loc[i], vg_loc[i], n_src, sig_imp)
+                else:
+                    pr = _eb_edge_precision(mo - lfg_loc[i], n_src, sig_imp, w_eb)
                 amg[i], apg[i] = mo, pr
                 pt = pg_loc[i] + pr
                 fbg[i] = math.exp((pg_loc[i] * lfg_loc[i] + pr * mo) / pt)
@@ -754,7 +865,14 @@ def node_sweep(
                 rho = n_nasc / er + n_mat / esp - rho_mat_dst  # total-RNA density (+ MEASUREMENT into an exon)
                 mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_pos frame (floored at min-observable)
                 n_src = n_nasc + n_mat                            # source RNA⁺ count (Poisson sampling)
-                pr = 0.0 if _msg_off else n_src / (n_src * sig_imp + 1.0)
+                if _MSG_MODE == 0:
+                    pr = n_src / (n_src * sig_imp + 1.0)
+                elif _MSG_MODE == 1:
+                    pr = 0.0
+                elif _MSG_MODE == 2:
+                    pr = _max_edge_precision(mo - lfp_loc[i], vp_loc[i], n_src, sig_imp)
+                else:
+                    pr = _eb_edge_precision(mo - lfp_loc[i], n_src, sig_imp, w_eb)
                 amp[i], app[i] = mo, pr
                 pt = pp_loc[i] + pr
                 fbp[i] = math.exp((pp_loc[i] * lfp_loc[i] + pr * mo) / pt)
@@ -770,7 +888,14 @@ def node_sweep(
                 rho = n_nasc / er + n_mat / esp - rho_mat_dst
                 mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_neg frame
                 n_src = n_nasc + n_mat                            # source RNA⁻ count (Poisson sampling)
-                pr = 0.0 if _msg_off else n_src / (n_src * sig_imp + 1.0)
+                if _MSG_MODE == 0:
+                    pr = n_src / (n_src * sig_imp + 1.0)
+                elif _MSG_MODE == 1:
+                    pr = 0.0
+                elif _MSG_MODE == 2:
+                    pr = _max_edge_precision(mo - lfn_loc[i], vn_loc[i], n_src, sig_imp)
+                else:
+                    pr = _eb_edge_precision(mo - lfn_loc[i], n_src, sig_imp, w_eb)
                 amn[i], apn[i] = mo, pr
                 pt = pn_loc[i] + pr
                 fbn[i] = math.exp((pn_loc[i] * lfn_loc[i] + pr * mo) / pt)

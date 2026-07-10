@@ -40,6 +40,7 @@ from .bp_solver import (
     build_node_geometry,
     build_node_statics,
     adjacent_disagreement_variance,
+    adjacent_disagreement_shrinkage_weight,
     chain_boundary_side_deconv,
     chain_region_deconv,
     init_beliefs,
@@ -165,7 +166,10 @@ def calibrate(
     # total-density σ²_imp — the empirical adjacent-node imputation floor. σ²_msg = σ²_imp + 1/n_src; the
     # single production basis for every message channel, both passes.
     sig_total = adjacent_disagreement_variance(chain, geometry)
-    logger.debug("calibration: total-density σ²_imp=%.4f", sig_total)
+    # EB shrinkage weight w (data-fit signal fraction; NO tunable — see adjacent_disagreement_shrinkage_weight).
+    # Used only by RIGEL_MSG_MODE=eb; the prod/off/max paths ignore it. Cheap (one pass over adjacent edges).
+    w_eb = adjacent_disagreement_shrinkage_weight(chain, geometry)
+    logger.debug("calibration: total-density σ²_imp=%.4f  EB shrinkage w=%.4f", sig_total, w_eb)
 
     def _sweep(prior):
         return node_sweep(
@@ -177,7 +181,7 @@ def calibrate(
             convergence_delta=config.sweep_convergence_delta,
             logodds_window=config.sweep_logodds_window,
             n_tilt=config.sweep_n_tilt, n_grid_ss=config.sweep_n_grid_single_strand, gdna_prior=prior,
-            disagreement_sigma2=sig_total,
+            disagreement_sigma2=sig_total, disagreement_weight=w_eb,
         )
 
     # PASS 1 — single-strand solve with the total-density floor.
