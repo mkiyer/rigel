@@ -888,9 +888,17 @@ static void compute_grouped_warm_start(
     //   uniform : 1.0 for every component — no data-driven seed at all
     static const int WS_MODE = []() {
         const char* e = std::getenv("RIGEL_EM_WARMSTART");
-        if (e) { std::string s(e); if (s == "uniform") return 1; if (s == "unambig") return 2; }
+        if (e) { std::string s(e);
+            if (s == "uniform") return 1; if (s == "unambig") return 2; if (s == "flat") return 3; }
         return 0;
     }();
+
+    if (WS_MODE == 3) {
+        // FLAT: every component equal (1/K after normalization), NO seed, NO prior projection in the init
+        // — the utterly-nullified warm start; the E-step converges from a neutral theta driven only by data.
+        std::fill(warm_counts_out, warm_counts_out + n_components, 1.0);
+        return;
+    }
 
     std::vector<double> warm_raw(static_cast<size_t>(n_components));
     if (WS_MODE == 1) {
