@@ -21,7 +21,7 @@ from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.fl import build_fl_models, gdna_fl_mass
 from rigel.splice import SpliceType
 
-S = "/Users/mkiyer/Downloads/rigel_runs/quick_3to1_5mb"
+S = os.environ.get("RIGEL_SUITE", "/Users/mkiyer/Downloads/rigel_runs/quick_3to1_5mb")
 COND = sys.argv[1] if len(sys.argv) > 1 else "gdna_gdna300_ss_0.99_nrna_none_capture_on"
 bam = f"{S}/{COND}/sim_oracle.bam"
 index = TranscriptIndex.load(f"{S}/rigel_index")
@@ -32,7 +32,7 @@ man = json.load(open(f"{S}/manifest.json"))
 truth = next(c for c in man["conditions"] if c["name"] == COND)
 T = {"gdna": truth["n_gdna_observed"], "nrna": truth["n_nrna_observed"], "mrna": truth["n_mrna_observed"]}
 
-orc = OracleTruth.from_bam(bam, index, cfg, wd, COND)
+orc = OracleTruth.from_bam(bam, index, cfg, wd, f"{os.path.basename(S)}_{COND}")
 print("oracle validated.")
 override = orc.override_masses(ra)
 
