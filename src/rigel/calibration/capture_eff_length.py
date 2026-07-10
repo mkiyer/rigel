@@ -189,6 +189,30 @@ def _global_reference_density(mass: np.ndarray, support: np.ndarray) -> "float |
     return float(rho[ok][int(np.argmin(np.abs(x - mode)))])
 
 
+def _pooled_seam_arrays(calibration, region_arrays):
+    """The left-keyed POOLED-SEAM node arrays ``(seam_mass, seam_support)`` — THE one seam node model both
+    the transcript contraction (``transcript_capture_eff_lengths``) and the gDNA component
+    (``priors._gdna_region_node_arrays``) share, so the two contract on an identical node basis.
+
+    Seam ``r`` is the boundary between region ``r`` and ``r+1`` (genomically adjacent, same reference):
+    ``mass = mass_gdna_right[r] + mass_gdna_left[r+1]`` (the two halves POOLED) and ``support =
+    ½·(gdna_boundary_len[r] + gdna_boundary_len[r+1])`` (the AVERAGED per-side density lengths, the
+    deposition-faithful divisor). Zero at terminal / cross-reference boundaries. The gDNA path re-keys some
+    seams to their right flank (intergenic outer boundaries); the transcript path takes them as-is."""
+    right = np.asarray(calibration.mass_gdna_right, dtype=np.float64)
+    left = np.asarray(calibration.mass_gdna_left, dtype=np.float64)
+    side_len = np.asarray(calibration.gdna_boundary_len, dtype=np.float64)
+    ref_id = np.asarray(region_arrays.ref_id)
+    n = right.shape[0]
+    seam_m = np.zeros(n, dtype=np.float64)  # seam r = boundary between region r and r+1 (left-keyed)
+    seam_S = np.zeros(n, dtype=np.float64)
+    if n > 1:
+        same = ref_id[:-1] == ref_id[1:]  # internal seam: genomically adjacent, same reference
+        seam_m[:-1] = np.where(same, right[:-1] + left[1:], 0.0)
+        seam_S[:-1] = np.where(same, 0.5 * (side_len[:-1] + side_len[1:]), 0.0)
+    return seam_m, seam_S
+
+
 def transcript_capture_eff_lengths(
     calibration: "CalibrationResult",
     region_arrays: "RegionArrays",
@@ -248,17 +272,8 @@ def transcript_capture_eff_lengths(
     contained_m = np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
     contained_S = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
     contained_ev = contained_m + np.asarray(calibration.mass_rna_contained, dtype=np.float64)
-    side_left = np.asarray(calibration.mass_gdna_left, dtype=np.float64)
-    side_right = np.asarray(calibration.mass_gdna_right, dtype=np.float64)
-    side_len = np.asarray(calibration.gdna_boundary_len, dtype=np.float64)
-    ref_id = np.asarray(region_arrays.ref_id)
-    n = contained_m.shape[0]
-    seam_m = np.zeros(n, dtype=np.float64)  # seam r = boundary between region r and r+1 (left-keyed)
-    seam_S = np.zeros(n, dtype=np.float64)
-    if n > 1:
-        same = ref_id[:-1] == ref_id[1:]
-        seam_m[:-1] = np.where(same, side_right[:-1] + side_left[1:], 0.0)
-        seam_S[:-1] = np.where(same, 0.5 * (side_len[:-1] + side_len[1:]), 0.0)
+    side_len = np.asarray(calibration.gdna_boundary_len, dtype=np.float64)  # for the junction-seam support
+    seam_m, seam_S = _pooled_seam_arrays(calibration, region_arrays)  # the SHARED seam node model
 
     rt, rr, bt, br, jt, jl, jr = _transcript_node_incidence(index, region_arrays)
     # GLOBAL reference density ρ_ref = the enriched mode of the MASS-WEIGHTED node-density KDE — the

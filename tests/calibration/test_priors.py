@@ -181,18 +181,18 @@ def test_eff_len_uses_effective_support_not_genomic_size():
 
 def test_node_arrays_uniform_density_is_constant():
     # The shared node-model helper itself: under a uniform field every node's density m_n/S_n = ρ
-    # (regions AND pooled seams), which is the precondition for the IPR factor-1 identity. The varied/
+    # (regions AND pooled seams), the precondition for the per-node min() factor-1 identity. The varied/
     # short boundary_len exercises the averaged seam support (an E[ℓ] divisor would break the constancy).
     rel = np.array([120.0, 200.0, 80.0])
     bl = [180.0, 60.0, 180.0]
     rho = 0.02
     cal = _uniform_field_cal(rel, bl, rho)
     ra = _regions([0, 120, 320], [120, 320, 400])
-    gdna_region, participation, support_len = _gdna_region_node_arrays(cal, ra)
-    # density m/S = ρ on every region (the seam keyed to r adds ρ·S_s mass and S_s support):
+    gdna_region, support_len, pooled, seam_len = _gdna_region_node_arrays(cal, ra)
+    # every node sits at density ρ — the folded region and the pooled-seam node alike:
     np.testing.assert_allclose(gdna_region / support_len, rho, rtol=1e-9)
-    # participation m²/S = ρ²·S, so Σ participation = ρ²·Σ S:
-    np.testing.assert_allclose(participation.sum(), rho**2 * support_len.sum(), rtol=1e-9)
+    seam = seam_len > 0
+    np.testing.assert_allclose(pooled[seam] / seam_len[seam], rho, rtol=1e-9)
 
 
 # --- mass / projection (independent of the support choice) ----------------------------------------
@@ -240,7 +240,7 @@ def test_gdna_mass_conservation_contained_plus_sides():
     # all 3 regions in one locus (φ=1) ⇒ gdna_prior_count = the total conserved gДНК mass.
     np.testing.assert_allclose(priors.gdna_prior_count, [11.0])
     # cross-check the helper's mass conservation directly: Σ gdna_region = Σ contained + Σ internal sides.
-    gdna_region, _, _ = _gdna_region_node_arrays(cal, ra)
+    gdna_region, _, _, _ = _gdna_region_node_arrays(cal, ra)
     internal_sides = (
         cal.mass_gdna_right[:-1].sum() + cal.mass_gdna_left[1:].sum()
     )  # every non-terminal side once

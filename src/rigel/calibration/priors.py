@@ -114,8 +114,9 @@ def _project_regions_to_loci(
 def _gdna_region_node_arrays(
     calibration: "CalibrationResult",
     region_arrays: "RegionArrays",
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Per-region (mass, IPR participation, effective support) for the gDNA region + pooled-seam nodes.
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Per-region node arrays ``(gdna_region, support_len, pooled, seam_len)`` for the gDNA region +
+    pooled-seam nodes — the SHARED node model with ``transcript_capture_eff_lengths`` (via _pooled_seam_arrays).
 
     The density-correct, transport-free gDNA node model (``effective_length_redesign_plan.md`` §8 —
     the first-principles rev). The node set over a region chain is the per-region CONTAINED node plus
@@ -132,74 +133,64 @@ def _gdna_region_node_arrays(
     genomic gDNA at density ρ, the expected masses are ``m_r = ρ·E[max(0,L_r−ℓ)]`` (a contained fragment
     must FIT) and ``m_s = ρ·(E[min(ℓ,L_r)] + E[min(ℓ,L_{r+1})])/2`` (each side captures only ``min(ℓ,L_side)``
     of a crossing fragment, so the pooled mass is ρ times the AVERAGE of the two side density lengths).
-    Dividing each node's mass by these supports makes EVERY node density ``m_n/S_n = ρ``, and the
-    Laplace-smoothed IPR ``(G+1)²/[Σ m_n²/S_n + (2G+1)/ΣS_n]`` then returns ``ΣS_n`` EXACTLY (contraction
-    factor 1) for any ρ — an unenriched library contracts nothing, EVEN for regions shorter than ``E[ℓ]``.
+    Dividing each node's mass by these supports makes EVERY node density ``m_n/S_n = ρ``, so the
+    enrichment contraction ``min(m_n/ρ_ref, S_n)`` (applied per node in ``assemble_priors`` against the
+    shared ρ_ref) returns ``S_n`` EXACTLY (contraction factor 1) under uniform gDNA — an unenriched library
+    contracts nothing, EVEN for regions shorter than ``E[ℓ]``.
     Two divisors are WRONG: the genomic ``region_size_bp`` understates short-region density (verified
     factor 0.878 under uniform); and the count crossing length ``E[ℓ]`` over-states the seam support for
     short flanks (a fragment can only deposit ``min(ℓ,L_side)``, not ``ℓ``), under-contracting exon-flank
     seams and inflating the gДНК→RNA leak — the averaged side density length is the deposition-faithful
     support.
 
-    **Why POOL the seam, not split it.** Entering the two halves ``s_L,s_R`` as separate nodes contributes
-    ``s_L²/S_s + s_R²/S_s ≤ (s_L+s_R)²/S_s`` (Cauchy–Schwarz) — splitting at most halves the IPR support
-    (over-contracting). The halves are also one physical crossing event, so the pooled node is faithful.
+    **Why POOL the seam, not split it.** The two halves ``s_L,s_R`` are one physical crossing event, so the
+    pooled node (one node at the averaged support) is the faithful representation; splitting them into two
+    separate nodes would double-count the crossing and over-contract.
 
-    Returns ``(gdna_region, participation, support_len)``, each float64[R] keyed to region ``r``::
+    Returns ``(gdna_region, support_len, pooled, seam_len)``, each float64[R] keyed to region ``r``::
 
-        gdna_region[r]   = m_r + m_s(r,r+1)        total node mass on region r
-        participation[r] = m_r²/S_r + m_s²/S_s      the Σ m²/S terms
-        support_len[r]   = S_r + S_s(r,r+1)         the Σ S effective-support terms
+        gdna_region[r]   = m_r + m_s(r,r+1)   total node mass on region r (contained + pooled seam)
+        support_len[r]   = S_r + S_s(r,r+1)   total effective support (Σ S), for the span + mass projection
+        pooled[r]        = m_s(r,r+1)         the pooled-seam mass ALONE  (per-node contraction in priors)
+        seam_len[r]      = S_s(r,r+1)         the pooled-seam support ALONE
+
+    ``assemble_priors`` contracts PER NODE — ``min(contained/ρ_ref, S_r) + min(pooled/ρ_ref, S_s)`` —
+    matching ``transcript_capture_eff_lengths``, NOT over the folded ``gdna_region`` (which would
+    under-contract a captured exon whose seam runs into a depleted intron).
 
     Mass conservation (no mass moved — transport-free): ``Σ gdna_region = Σ contained +
     Σ_{internal} (right[r] + left[r+1])`` — every non-terminal boundary side counted exactly once
     (terminal / cross-reference sides carry zero on real data and are excluded).
     """
+    from .capture_eff_length import _pooled_seam_arrays  # THE shared seam node model (transcript + gDNA)
+
     contained = np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
-    side_left = np.asarray(calibration.mass_gdna_left, dtype=np.float64)
-    side_right = np.asarray(calibration.mass_gdna_right, dtype=np.float64)
     region_eff_len = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
-    # per-region per-side density length E[min(ℓ,L_r)] (the mass a crossing fragment deposits on region r)
-    side_density_len = np.asarray(calibration.gdna_boundary_len, dtype=np.float64)
     ref_id = np.asarray(region_arrays.ref_id)
     n = contained.shape[0]
 
     pooled = np.zeros(n, dtype=np.float64)  # pooled seam mass, attributed to a flank region
     seam_len = np.zeros(n, dtype=np.float64)  # seam effective support, attributed to a flank region
     if n > 1:
+        seam_mass, seam_support = _pooled_seam_arrays(calibration, region_arrays)  # left-keyed, length n
         same = ref_id[:-1] == ref_id[1:]  # internal seam: genomically adjacent, same reference
-        seam_mass = np.where(same, side_right[:-1] + side_left[1:], 0.0)  # POOL the boundary's two halves
-        # seam support = AVERAGE of the two flanking per-side density lengths E[min(ℓ,L)] — the
-        # deposition-faithful divisor (each side captures min(ℓ,L_side) of a crossing fragment, so the
-        # pooled mass is ρ·(E[min_left]+E[min_right])/2 under uniform gDNA). NOT E[ℓ], which over-states
-        # the support for short flanks and under-contracts.
-        seam_support = np.where(same, 0.5 * (side_density_len[:-1] + side_density_len[1:]), 0.0)
         # ATTRIBUTE each seam to a flank REGION so the locus projection picks it up. Default: the LEFT
         # flank r. BUT a locus's far-LEFT outer boundary is an intergenic→(exon/intron) seam whose left
         # flank is INTERGENIC — a region that overlaps no locus and is dropped by _project_regions_to_loci.
-        # Keying to the left flank there SILENTLY LOSES that boundary's pure intergenic-crossing gDNA (both
-        # the intergenic side_right and the first-region side_left), under-counting the locus gDNA prior AND
-        # inflating the gDNA-component IPR eff-length (a high-density crossing node vanishes from Σm²/S, so
-        # eff_len lengthens). The far-RIGHT boundary is already kept (its left flank is the locus's last
-        # region), so this restores the symmetry: attribute the seam to the RIGHT flank whenever the left
-        # flank is intergenic (no RNA-signature bits) and the right flank is not — otherwise keep the left.
+        # Keying to the left flank there SILENTLY LOSES that boundary's crossing gDNA, under-counting the
+        # locus gDNA prior AND inflating the eff-length. The far-RIGHT boundary is already kept (its left
+        # flank is the locus's last region), so this restores symmetry: attribute the seam to the RIGHT
+        # flank whenever the left flank is intergenic (no RNA-signature bits) and the right flank is not.
         sig = np.asarray(region_arrays.signature).astype(np.int64)
         ig = (sig & _RNA_SIGNATURE_BITS) == 0  # intergenic: no exon/intron bit ⇒ dropped by the projection
         rekey_right = same & ig[:-1] & ~ig[1:]  # far-left outer boundary: intergenic → locus region
         owner = np.where(rekey_right, np.arange(1, n), np.arange(0, n - 1))
-        np.add.at(pooled, owner, seam_mass)  # accumulate: a first-region node may own its right seam + this
-        np.add.at(seam_len, owner, seam_support)
+        np.add.at(pooled, owner, seam_mass[:-1])  # a first-region node may own its right seam + a rekeyed one
+        np.add.at(seam_len, owner, seam_support[:-1])
 
     gdna_region = contained + pooled
-    safe_seam = np.maximum(
-        seam_len, 1e-9
-    )  # floor the divisor consistently with the seam_len>0 gate
-    with np.errstate(divide="ignore", invalid="ignore"):
-        participation = contained**2 / region_eff_len + np.where(
-            seam_len > 0.0, pooled**2 / safe_seam, 0.0
-        )
     support_len = region_eff_len + seam_len
-    return gdna_region, participation, support_len
+    return gdna_region, support_len, pooled, seam_len
 
 
 def assemble_priors(
@@ -255,36 +246,28 @@ def assemble_priors(
 
     # Density-correct, transport-free gDNA node model (effective_length_redesign_plan.md §8): per-region
     # CONTAINED node (effective support gdna_region_eff_len = E[max(0,L−ℓ)]) + one POOLED SEAM node per
-    # internal boundary (effective support = ½ the sum of the flanking E[min(ℓ,L)] = averaged gdna_boundary_len),
-    # keyed to the left-flank region. The participation Σ m²/S and the span Σ S use these EFFECTIVE supports — NOT
-    # region_size_bp, which understates short-region density and fabricates a contraction under uniform
-    # gDNA. _gdna_region_node_arrays carries the bedrock factor-1-under-uniform proof. NOTE: the same ρ_ref
-    # is shared with the transcript contraction (capture_eff_length), but the two apply it slightly
-    # differently — here the contraction min() runs over the FOLDED region+seam node mass/support, whereas
-    # capture_eff_length applies min() PER node (contained node and seam node separately). Since
-    # min(a+b, Sa+Sb) ≥ min(a,Sa)+min(b,Sb), the gDNA component is marginally LESS contracted than an
-    # equivalent transcript over the same nodes. Both are factor-1 under uniform gDNA (no divergence there);
-    # the difference appears only where a node is enriched and its seam depleted. TODO(cleanup): unify via a
-    # single shared per-node contraction helper so the two paths are byte-identical (docs/calibration/
-    # siphon_measurement.md notes this as a follow-up).
-    gdna_region, gdna_sq_over_len, support_len = _gdna_region_node_arrays(
-        calibration, region_arrays
-    )
+    # internal boundary (support = ½ the sum of the flanking E[min(ℓ,L)] = averaged gdna_boundary_len),
+    # keyed to the left-flank region — the SAME node model _pooled_seam_arrays gives the transcript
+    # contraction (EFFECTIVE, not genomic, supports; the factor-1-under-uniform bedrock).
+    gdna_region, support_len, pooled, seam_len = _gdna_region_node_arrays(calibration, region_arrays)
 
-    # SHARED global reference density — the SAME ρ_ref the transcript contraction uses. gDNA and EVERY
-    # transcript must contract against ONE reference, else the gDNA-vs-transcript density comparison sits on
-    # inconsistent per-locus scales. Per-region enrichment-weighted node length elen[r] = min(gdna_region[r]/
-    # ρ_ref, support_len[r]) (the node's support that survives at the fully-captured density); ρ_ref None (no
-    # gDNA) ⇒ elen = support (no contraction). See docs/calibration/enriched_mode_reference_density.md.
+    # SHARED global reference density — the SAME ρ_ref every transcript contracts against, so the
+    # gDNA-vs-transcript density comparison sits on ONE scale. The enrichment contraction is applied PER
+    # NODE (contained region node + pooled-seam node separately), identical to transcript_capture_eff_lengths:
+    #   elen = min(contained/ρ_ref, S_region) + min(pooled/ρ_ref, S_seam).
+    # Folding the two into one min() would UNDER-contract a captured exon whose seam runs into a depleted
+    # intron (up to ~13% per region under capture, verified). ρ_ref None (no detectable gDNA) ⇒ elen =
+    # support (no contraction). See docs/calibration/enriched_mode_reference_density.md.
     from .capture_eff_length import _global_reference_density
 
-    rho_ref = _global_reference_density(
-        calibration.mass_gdna_contained, calibration.gdna_region_eff_len
-    )
+    contained = np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
+    region_eff = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
+    rho_ref = _global_reference_density(contained, calibration.gdna_region_eff_len)
     if rho_ref is None or rho_ref <= 0.0:
         elen = support_len.copy()
     else:
-        elen = np.minimum(gdna_region / rho_ref, support_len)
+        inv = 1.0 / rho_ref
+        elen = np.minimum(contained * inv, region_eff) + np.minimum(pooled * inv, seam_len)
 
     # RNA prior = the UNSPLICED RNA mass only. Spliced fragments have no gDNA candidate in the EM
     # (gDNA does not splice) → they are guaranteed-RNA and the EM assigns them directly; counting
