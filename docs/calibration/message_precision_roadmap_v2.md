@@ -123,6 +123,37 @@ Cherry-pick the WIP max-form + EB onto main behind `RIGEL_MSG_MODE` (`max`, `eb`
 matrix vs `{off, prod}`. **Question:** does the max-form's stranded-win / unstranded-loss survive the siphon
 fix, or was part of it the siphon? Fold the WIP env gate (`RIGEL_MSG_MAXFORM`) into `RIGEL_MSG_MODE`.
 
+#### Phase 1 RESULTS (2026-07-09, quick_3to1_5mb, mean |gdna split err| per bucket)
+
+| bucket | prod | off | max | eb |
+|---|--:|--:|--:|--:|
+| ss99 capOFF (stranded, no cap) | **6,299** | 10,473 | 8,002 | 6,394 |
+| ss99 capON  (stranded, cap) | 57,599 | **53,950** | 61,544 | 57,827 |
+| ss50 capOFF (unstranded, no cap) | **18,154** | 62,734 | 38,765 | 18,116 |
+| ss50 capON  (unstranded, cap) | 164,468 | **57,196** | 196,849 | 164,568 |
+
+**`max` is WORSE than both prod and off in every bucket → rejected.** Self-silencing anchored on the dst's
+*local* belief entrenches the corrupted capON local belief (the exonic-gDNA under-call): it mutes the
+*corrective* gDNA-neighbour messages (high disagreement with the wrong local) while keeping the
+*leak-causing* RNA messages (low disagreement). The old "stranded win" was a **siphon-confound artifact** —
+it vanished once the siphon was fixed. **`eb` ≡ prod** (`w=0` measured on all conditions — the total-density
+frame has no between-edge signal). Inert.
+
+**The deeper lesson.** No single message rule threads the suite: **prod wins where the relay is load-bearing
+(capOFF-unstranded, 18k vs off's 63k), off wins where the seam bleeds (capON)**. The capON failure is NOT
+fixable by a message rule — both `max` and `eb` anchor on the local belief, which at capON exons is *itself*
+wrong (message-independent). So on the easy suite there is **little message-precision headroom: prod is
+already the best message rule where messages are the right tool**, and the capON leak is a LOCAL-SOLVE
+(reference-density / exonic-gDNA under-call) problem — the separate parallel target.
+
+**Revised next step.** The one untested, principled candidate is the **`f_g`-resolved EB (Change 3)**:
+measure the shrinkage weight from the *deconvolved* gDNA count `f_g·mass` after pass 1 (where capture's
+coherent gDNA enrichment creates real between-edge signal ⇒ `w>0`), not per-edge disagreement with a
+corrupted local belief. This is "self-silence on high disagreement" done right — disagreement of the
+reliable gDNA *field*, population-shrinkage-bounded. **Test it on the AMBIG suite** (`ambig_dense_10mb`),
+where the relay is load-bearing and a better rule can actually earn its keep — the easy suite cannot
+distinguish it.
+
 ### Phase 2 — the improvement: **asymmetric self-silencing + strand-information gating**
 
 Headline recommendation, motivated directly by the data:
