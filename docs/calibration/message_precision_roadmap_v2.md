@@ -3,7 +3,15 @@
 **Scope:** `src/rigel/calibration/bp_solver.py` (the BP-sweep message precision).
 **Supersedes:** `message_precision_regression_and_fix_plan.md` (the paused bookmark).
 **WIP code:** `calib-msgprec-eb-maxform-wip` (EB shrinkage + env-gated max-form, both implemented).
-**Status:** ▶️ **RESUMED 2026-07-09.** The confounds that masked this work are fixed.
+**Status:** ⏸️ **PAUSED 2026-07-10 — valuable, not abandoned.** Resumed 2026-07-09 (confounds fixed);
+Phases 0 & 1 ran (results below). The easy suite has little message-precision headroom (prod is already the
+best message rule where messages help), so the message-precision thread is paused with a clear open
+candidate (the `f_g`-resolved EB, to be tested on the AMBIG suite — its real arena). Work pivoted to the
+**capON local-solve residual** (the message-independent exonic-gDNA under-call) that Phases 0 & 1 isolate
+as the dominant error. **What survives as valuable:** (a) the `RIGEL_MSG_MODE` harness + the soft-3-pool
+bucketed measurement; (b) `off` as a diagnostic floor; (c) the `f_g`-resolved EB candidate (Change 3, plumbing
+ported, untested); (d) the confirmed map of where messages help/hurt (below). What is dead is only the
+*specific forms* the tests refuted (max, total-density EB) — not the idea of disagreement-aware precision.
 
 ## Why now (the precondition is finally met)
 
