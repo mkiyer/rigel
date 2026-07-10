@@ -192,13 +192,16 @@ def analyze_library(label: str, library_dir: Path, rigel_subdir: str = "rigel_v0
                     "n_pool", "iter_count", "converged"):
             if key in cal:
                 pool[f"cal.{key}"] = cal[key]
-        # Emergent totals
-        if "is_nrna" in rigel.columns:
-            mrna_total = float(rigel.loc[~rigel["is_nrna"].astype(bool), "rigel_count"].sum())
-            nrna_total = float(rigel.loc[rigel["is_nrna"].astype(bool), "rigel_count"].sum())
-        else:
-            mrna_total = float(rigel["rigel_count"].sum())
-            nrna_total = 0.0
+        # Emergent totals. The nascent total is the SYNTHETIC nascent-shadow EM mass — the estimator's own
+        # ``nrna_em_count`` scalar. Do NOT sum "rigel_count" over is_nrna: that count is 0 for synthetics
+        # (Trap 1) and is_nrna also flags real annotated single-exon transcripts (Trap 2). See
+        # docs/calibration/siphon_measurement.md. Annotated single-exon transcripts stay in mrna_total (their
+        # count is real); mrna_total is all annotated RNA (synthetic count is 0, so it doesn't leak in).
+        mrna_total = float(rigel["rigel_count"].sum())
+        nrna_total = rigel_summary.get("nrna_em_count")
+        if nrna_total is None:
+            nrna_total = rigel_summary.get("locus_em", {}).get("nrna_em_count", 0.0)
+        nrna_total = float(nrna_total or 0.0)
         gdna_em = rigel_summary.get("gdna_em_total")
         if gdna_em is None:
             gdna_em = rigel_summary.get("locus_em", {}).get("gdna_em_total")
