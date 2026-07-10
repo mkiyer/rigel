@@ -92,6 +92,9 @@ struct LocusProfile {
     double gdna_eff_len = 1.0;
     double gdna_log_eff_len = 0.0;
 
+    // Final marginal data log-likelihood at the converged theta (diagnostic; only when emit_locus_stats).
+    double final_data_loglik = 0.0;
+
     // Sub-phase wall times in microseconds
     double extract_us = 0.0;
     double bias_us = 0.0;
@@ -869,6 +872,38 @@ static void vbem_step(
     }
     apply_grouped_prior_update(
         raw_counts.data(), alpha, aggregate_prior, alpha_new, n_components);
+}
+
+// ================================================================
+// Marginal data log-likelihood at a given theta (diagnostic)
+// ================================================================
+// Σ_units log( Σ_c (theta_c / eff_c) · exp(log_lik_{u,c}) ), i.e. Σ_units
+// logsumexp_c(log_weights[c] + log_lik_{u,c}) where log_weights[c] =
+// log(theta_c + eps) − log_eff_len[c]. This is the data term of the EM
+// objective; comparing it across two converged solutions says which is the
+// higher-likelihood (MLE) fixed point.
+static double marginal_data_loglik(
+    const std::vector<EmEquivClass>& ec_data, const double* log_weights)
+{
+    double total = 0.0;
+    for (const auto& ec : ec_data) {
+        const int k = ec.k;
+        const double* ll = ec.ll_flat.data();
+        const int32_t* cidx = ec.comp_idx.data();
+        for (int i = 0; i < ec.n; ++i) {
+            double mx = ll[i * k] + log_weights[cidx[0]];
+            for (int j = 1; j < k; ++j) {
+                double v = ll[i * k + j] + log_weights[cidx[j]];
+                if (v > mx) mx = v;
+            }
+            double s = 0.0;
+            for (int j = 0; j < k; ++j) {
+                s += std::exp((ll[i * k + j] + log_weights[cidx[j]]) - mx);
+            }
+            total += mx + std::log(s);
+        }
+    }
+    return total;
 }
 
 // ================================================================
@@ -2188,6 +2223,14 @@ batch_locus_em_partitioned(
                     result.squarem_grouped_stabilization_fail_count;
                 prof.gdna_eff_len = gel_ptr[li] >= 1.0 ? gel_ptr[li] : 1.0;
                 prof.gdna_log_eff_len = std::log(prof.gdna_eff_len);
+                {
+                    // Marginal data log-lik at the converged theta (which fixed point is the MLE).
+                    std::vector<double> lw(static_cast<size_t>(nc));
+                    for (int c = 0; c < nc; ++c) {
+                        lw[c] = std::log(result.theta[c] + EM_LOG_EPSILON) - log_eff_len_ptr[c];
+                    }
+                    prof.final_data_loglik = marginal_data_loglik(ec_data, lw.data());
+                }
 
                 int64_t total_elems = 0;
                 int max_k = 0, max_n = 0;
@@ -2321,6 +2364,7 @@ batch_locus_em_partitioned(
                 p.squarem_grouped_stabilization_fail_count;
             d["gdna_eff_len"] = p.gdna_eff_len;
             d["gdna_log_eff_len"] = p.gdna_log_eff_len;
+            d["final_data_loglik"] = p.final_data_loglik;
             d["digamma_calls_per_estep"] = p.digamma_calls_per_estep;
             d["extract_us"] = p.extract_us;
             d["bias_us"] = p.bias_us;
