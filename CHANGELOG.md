@@ -777,3 +777,4 @@ Initial development release.
 [0.6.2]: https://github.com/mkiyer/rigel/compare/v0.6.1...v0.6.2
 [0.6.3]: https://github.com/mkiyer/rigel/compare/v0.6.2...v0.6.3
 [0.6.4]: https://github.com/mkiyer/rigel/compare/v0.6.3...v0.6.4
+[0.7.0]: https://github.com/mkiyer/rigel/compare/v0.6.4...v0.7.0
