@@ -12,7 +12,7 @@ benchmark should report before shipping a change:
     Single-exon `is_nrna` transcripts are non-synthetic (both mature+nascent, indistinguishable) and
     are counted in the MATURE pool (`mrna_total`), so the siphon is never conflated with legitimate
     single-exon annotated mass (Trap 2) nor zeroed by the display column (Trap 1). Canonical metric +
-    the three traps: scripts/debug/_metrics.py.
+    the three traps: docs/calibration/oracle_and_benchmarking.md.
   * ABSOLUTE mature error Σ_tx |measured − true| (positive/negative per-transcript flow cancels in
     the net, so the absolute sum is reported alongside).
   * TRANSCRIPT-level Spearman (truth vs measured), MARD, n_FP, n_FN — the vetted abundance-accuracy
