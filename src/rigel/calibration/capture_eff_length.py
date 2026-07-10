@@ -30,14 +30,14 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from ..types import IntervalType
+from ..types import STRAND_POS, IntervalType
 
 if TYPE_CHECKING:
     from ..index import TranscriptIndex
     from .region_arrays import RegionArrays
     from .result import CalibrationResult
 
-__all__ = ["transcript_capture_eff_lengths"]
+__all__ = ["transcript_capture_eff_lengths", "build_transcript_warm_start"]
 
 
 def _transcript_node_incidence(
@@ -212,6 +212,19 @@ def _global_depleted_density(mass: np.ndarray, support: np.ndarray) -> "float | 
     return _kde_significant_mode(mass, support, rightmost=False)
 
 
+def _pooled_seam_mass(right: np.ndarray, left: np.ndarray, ref_id: np.ndarray) -> np.ndarray:
+    """Left-keyed POOLED seam mass: seam ``r`` (the boundary between genomically adjacent same-reference
+    regions ``r`` and ``r+1``) pools both halves ``right[r] + left[r+1]``; ``0`` at terminal / cross-reference
+    boundaries. The mass half of :func:`_pooled_seam_arrays`, shared with the RNA warm-start seam so the
+    gDNA and RNA crossing densities sit on ONE node basis."""
+    n = right.shape[0]
+    out = np.zeros(n, dtype=np.float64)
+    if n > 1:
+        same = ref_id[:-1] == ref_id[1:]  # internal seam: genomically adjacent, same reference
+        out[:-1] = np.where(same, right[:-1] + left[1:], 0.0)
+    return out
+
+
 def _pooled_seam_arrays(calibration, region_arrays):
     """The left-keyed POOLED-SEAM node arrays ``(seam_mass, seam_support)`` — THE one seam node model both
     the transcript contraction (``transcript_capture_eff_lengths``) and the gDNA component
@@ -227,11 +240,10 @@ def _pooled_seam_arrays(calibration, region_arrays):
     side_len = np.asarray(calibration.gdna_boundary_len, dtype=np.float64)
     ref_id = np.asarray(region_arrays.ref_id)
     n = right.shape[0]
-    seam_m = np.zeros(n, dtype=np.float64)  # seam r = boundary between region r and r+1 (left-keyed)
+    seam_m = _pooled_seam_mass(right, left, ref_id)  # left-keyed pooled seam mass (the shared node model)
     seam_S = np.zeros(n, dtype=np.float64)
     if n > 1:
         same = ref_id[:-1] == ref_id[1:]  # internal seam: genomically adjacent, same reference
-        seam_m[:-1] = np.where(same, right[:-1] + left[1:], 0.0)
         seam_S[:-1] = np.where(same, 0.5 * (side_len[:-1] + side_len[1:]), 0.0)
     return seam_m, seam_S
 
@@ -350,3 +362,115 @@ def transcript_capture_eff_lengths(
         w = c_ev / (c_ev + 1.0)
         factor = w * factor + (1.0 - w)
     return np.minimum(fl * factor, fl)
+
+
+def _capture_correction(rho_ref: "float | None", rho_depleted: "float | None"):
+    """Return ``correct(rho_rna, rho_gdna, ev) → capture-corrected density`` (all array-valued).
+
+    Under capture, off-probe RNA is depleted; the local gDNA enrichment ``ε = rho_gdna / rho_ref`` (vs the
+    enriched mode) is an endogenous readout of that node's capture efficiency, so ``rho_rna / ε`` lifts the
+    reading back to its true level. Two guards against over-correction (dividing by a tiny ε), both
+    magic-free: ``ε`` is floored at the DEPLETED mode ``rho_depleted / rho_ref`` (the off-target background —
+    unimodal ⇒ floor ``= 1`` ⇒ no correction), and the lift is shrunk toward none by the per-node evidence
+    ``w = ev/(ev+1)`` (the same 1-pseudocount form used across calibration). With no detectable reference the
+    correction is the identity — the warm start degrades to the raw stranded-density bottleneck."""
+    if rho_ref is None or rho_ref <= 0.0:
+        return lambda rho_rna, rho_gdna, ev: rho_rna
+    inv_ref = 1.0 / rho_ref
+    eps_floor = rho_depleted / rho_ref if (rho_depleted is not None and rho_depleted > 0.0) else 1.0
+
+    def correct(rho_rna, rho_gdna, ev):
+        eps = np.clip(rho_gdna * inv_ref, eps_floor, 1.0)
+        w = ev / (ev + 1.0)
+        return rho_rna * (1.0 + w * (1.0 / eps - 1.0))
+
+    return correct
+
+
+def build_transcript_warm_start(
+    calibration: "CalibrationResult",
+    region_arrays: "RegionArrays",
+    index: "TranscriptIndex",
+    effective_lengths_em: "np.ndarray | None",
+) -> np.ndarray:
+    """A calibration-informed per-transcript EM warm-start seed (float64[n_transcripts], counts).
+
+    A transcript's density can be no higher than its scarcest node, so its abundance CEILING is the
+    ``min`` over its nodes of the capture-corrected stranded RNA density (``rho ≈ true abundance θ``); the
+    seed is that ceiling × the transcript's capture-contracted EM effective length (``θ·E`` = the expected
+    OBSERVED count the EM accumulates). The ``min`` is the nascent gate: a nascent shadow bottlenecks on its
+    intron / exon↔intron-crossing nodes (≈0 without real nascent), while its shared exons — high, but really
+    the mature parent's — never bind. Three node ROLES (``_transcript_node_incidence``), each reading the
+    per-strand density :class:`~rigel.calibration.result.RnaWarmStart` exposes on the transcript's OWN strand:
+
+    * **contained** region (exon or intron) — ``rho_contained_s``;
+    * **exon↔intron boundary crossing** (nascent) — ``rho_crossing_s`` over the pooled seam;
+    * **splice junction** (mature) — ``rho_spliced`` on the junction's fixed motif strand, at the donor
+      (region ``r_left``'s right side) and acceptor (region ``r_right``'s left side). This is the mature
+      signal that discriminates exon-sharing isoforms; a junction with no spliced reads on the transcript's
+      strand contributes ``0`` and correctly bottlenecks that isoform down.
+
+    Observability (``_transcript_node_incidence`` gives structure; the data decides): a node enters the
+    ``min`` only if its evidence mass (gDNA+RNA) ``> 0`` — so a genuinely unobserved node (a micro-region, a
+    mappability hole) is EXCLUDED, never punished, while an observed-but-RNA-empty node (a covered intron
+    with no nascent) is a real, binding zero. A transcript with NO observable node returns ``NaN`` — the
+    signal ``"fall back to the coverage seed"`` (never a spurious zero).
+
+    Requires the Phase-A :attr:`CalibrationResult.rna_warm_start` and the capture-contracted
+    ``effective_lengths_em``; returns all-``NaN`` (full fallback) if either is absent.
+    """
+    ws = calibration.rna_warm_start
+    if effective_lengths_em is None or ws is None:
+        return np.full(int(index.num_transcripts), np.nan)
+    eff = np.asarray(effective_lengths_em, dtype=np.float64)
+    n_t = eff.shape[0]
+    strand = np.asarray(index.t_to_strand_arr)
+
+    # gDNA density (the capture-correction ε) + observed evidence (the observability gate + shrinkage), per
+    # node role, on the SAME node model the gDNA component uses (contained region + pooled seam).
+    gdna_S = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
+    gdna_m = np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
+    contained_gdna = gdna_m / gdna_S
+    contained_ev = gdna_m + np.asarray(calibration.mass_rna_contained, dtype=np.float64)
+    ref_id = np.asarray(region_arrays.ref_id)
+    seam_gdna_m, seam_S = _pooled_seam_arrays(calibration, region_arrays)
+    seam_rna_m = _pooled_seam_mass(
+        np.asarray(calibration.mass_rna_right, dtype=np.float64),
+        np.asarray(calibration.mass_rna_left, dtype=np.float64),
+        ref_id,
+    )
+    seam_gdna = seam_gdna_m / np.maximum(seam_S, 1e-9)
+    seam_ev = seam_gdna_m + seam_rna_m
+
+    correct = _capture_correction(
+        _global_reference_density(gdna_m, gdna_S), _global_depleted_density(gdna_m, gdna_S)
+    )
+    ceiling = np.full(n_t, np.inf)
+
+    def _pick(rho_pos, rho_neg, t_idx, r_idx):
+        """The RNA density on each transcript's OWN strand at its node."""
+        return np.where(strand[t_idx] == STRAND_POS, rho_pos[r_idx], rho_neg[r_idx])
+
+    def _bottleneck(t_idx, rho_rna, rho_gdna, ev):
+        """Fold observable nodes' corrected densities into the running per-transcript ``min``."""
+        obs = ev > 0.0
+        if np.any(obs):
+            np.minimum.at(ceiling, t_idx[obs], correct(rho_rna[obs], rho_gdna[obs], ev[obs]))
+
+    rt, rr, bt, br, jt, jl, jr = _transcript_node_incidence(index, region_arrays)
+    if rt.size:  # CONTAINED region nodes
+        _bottleneck(rt, _pick(ws.rho_contained_pos, ws.rho_contained_neg, rt, rr),
+                    contained_gdna[rr], contained_ev[rr])
+    if bt.size:  # exon↔intron BOUNDARY CROSSING (nascent), pooled seam
+        _bottleneck(bt, _pick(ws.rho_crossing_pos, ws.rho_crossing_neg, bt, br),
+                    seam_gdna[br], seam_ev[br])
+    if jt.size:  # SPLICE JUNCTION (mature): donor at r_left's right, acceptor at r_right's left; motif-gated
+        donor = np.where(ws.spliced_strand_right[jl] == strand[jt], ws.rho_spliced_right[jl], 0.0)
+        accept = np.where(ws.spliced_strand_left[jr] == strand[jt], ws.rho_spliced_left[jr], 0.0)
+        _bottleneck(jt, donor, contained_gdna[jl], contained_ev[jl])
+        _bottleneck(jt, accept, contained_gdna[jr], contained_ev[jr])
+
+    warm = np.full(n_t, np.nan)  # NaN ⇒ no observable node ⇒ fall back to the coverage seed
+    seen = np.isfinite(ceiling)
+    warm[seen] = ceiling[seen] * eff[seen]
+    return warm

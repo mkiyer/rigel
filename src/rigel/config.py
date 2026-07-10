@@ -458,3 +458,7 @@ class TranscriptGeometry:
     t_to_g: np.ndarray
     transcript_spans: np.ndarray
     effective_lengths_em: np.ndarray | None = None
+    # float64[n_transcripts] — calibration-informed per-transcript EM warm-start counts (a
+    # capture-corrected density bottleneck; NaN ⇒ fall back to the coverage seed). None when calibration is
+    # absent. Consumed only by the ``RIGEL_EM_WARMSTART=calib`` path; inert otherwise.
+    warm_start_counts: np.ndarray | None = None

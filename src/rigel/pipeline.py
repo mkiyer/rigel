@@ -447,11 +447,18 @@ def _setup_geometry_and_estimator(
         effective_lengths = np.maximum(exonic_lengths - _DEFAULT_MEAN_FRAG + 1.0, 1.0)
 
     effective_lengths_em = None
+    warm_start_counts = None
     if calibration is not None and region_arrays is not None:
-        from .calibration.capture_eff_length import transcript_capture_eff_lengths
+        from .calibration.capture_eff_length import (
+            build_transcript_warm_start,
+            transcript_capture_eff_lengths,
+        )
 
         effective_lengths_em = transcript_capture_eff_lengths(
             calibration, region_arrays, index, effective_lengths
+        )
+        warm_start_counts = build_transcript_warm_start(
+            calibration, region_arrays, index, effective_lengths_em
         )
 
     transcript_spans = (index.t_df["end"].values - index.t_df["start"].values).astype(np.float64)
@@ -462,6 +469,7 @@ def _setup_geometry_and_estimator(
         t_to_g=index.t_to_g_arr,
         transcript_spans=transcript_spans,
         effective_lengths_em=effective_lengths_em,
+        warm_start_counts=warm_start_counts,
     )
 
     estimator = AbundanceEstimator(
