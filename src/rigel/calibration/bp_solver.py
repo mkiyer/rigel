@@ -27,6 +27,7 @@ the global gDNA prior + the sweep:
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -671,6 +672,11 @@ def node_sweep(
     # 1/n_src ⇒ pr = n_src/(n_src·σ²_imp + 1). ONE total-density scalar for every channel (gDNA + both RNA
     # strands); σ²_imp is the empirical adjacent-node imputation floor (`adjacent_disagreement_variance`).
     sig_imp = float(disagreement_sigma2)
+    # Message-precision mode knob (message_precision_roadmap_v2.md, Phase 0). ``RIGEL_MSG_MODE=off``
+    # forces every cross-node message precision to 0 — the belief-free "no message propagation" floor
+    # (pr=0 is the code's own designed no-message state) — so the benchmark can measure the VALUE of
+    # message propagation against a no-messages baseline. Unset / "prod" ⇒ the production scalar below.
+    _msg_off = os.environ.get("RIGEL_MSG_MODE") == "off"
 
     def _scan(seq, nbr, sf, df):
         """Sequential scan: project the running belief from each node's ``nbr`` (src face ``sf`` → dst face
@@ -723,7 +729,7 @@ def node_sweep(
                 mo = math.log(max(rho, 1.0 / egd) / (md / egd))
                 # Poisson disagreement-variance: σ²_msg = σ²_imp + 1/n_src ⇒ pr = n_src/(n_src·σ²_imp + 1) —
                 # denom ≥ 1, pr=0 exactly at n_src=0 (no message; "zero density is not a measurement"), no clamp.
-                pr = n_src / (n_src * sig_imp + 1.0)
+                pr = 0.0 if _msg_off else n_src / (n_src * sig_imp + 1.0)
                 amg[i], apg[i] = mo, pr
                 pt = pg_loc[i] + pr
                 fbg[i] = math.exp((pg_loc[i] * lfg_loc[i] + pr * mo) / pt)
@@ -748,7 +754,7 @@ def node_sweep(
                 rho = n_nasc / er + n_mat / esp - rho_mat_dst  # total-RNA density (+ MEASUREMENT into an exon)
                 mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_pos frame (floored at min-observable)
                 n_src = n_nasc + n_mat                            # source RNA⁺ count (Poisson sampling)
-                pr = n_src / (n_src * sig_imp + 1.0)
+                pr = 0.0 if _msg_off else n_src / (n_src * sig_imp + 1.0)
                 amp[i], app[i] = mo, pr
                 pt = pp_loc[i] + pr
                 fbp[i] = math.exp((pp_loc[i] * lfp_loc[i] + pr * mo) / pt)
@@ -764,7 +770,7 @@ def node_sweep(
                 rho = n_nasc / er + n_mat / esp - rho_mat_dst
                 mo = math.log(max(rho, 1.0 / erd) / (md / erd))   # → dst log-f_neg frame
                 n_src = n_nasc + n_mat                            # source RNA⁻ count (Poisson sampling)
-                pr = n_src / (n_src * sig_imp + 1.0)
+                pr = 0.0 if _msg_off else n_src / (n_src * sig_imp + 1.0)
                 amn[i], apn[i] = mo, pr
                 pt = pn_loc[i] + pr
                 fbn[i] = math.exp((pn_loc[i] * lfn_loc[i] + pr * mo) / pt)

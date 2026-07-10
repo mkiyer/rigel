@@ -6,8 +6,13 @@ benchmark should report before shipping a change:
 
   * 3-POOL NET SURPLUS (assigned − true), fragments, for gDNA / nascent / mature — the pool-level
     deconvolution result (soft EM counts; sensitive to a calibration-prior change, unlike the
-    hard-label net-flow). Assigned from summary.json `quantification`; true from truth_summary.json
-    `origin_counts`.
+    hard-label net-flow). Assigned from summary.json `quantification`; true from manifest `n_*_observed`.
+    SIPHON MEASUREMENT (audited): the NASCENT pool assigned count is `quantification.nrna_total` =
+    `estimator.nrna_em_count` = EM mass on the SYNTHETIC nascent-shadow spans ONLY (the true siphon).
+    Single-exon `is_nrna` transcripts are non-synthetic (both mature+nascent, indistinguishable) and
+    are counted in the MATURE pool (`mrna_total`), so the siphon is never conflated with legitimate
+    single-exon annotated mass (Trap 2) nor zeroed by the display column (Trap 1). Canonical metric +
+    the three traps: scripts/debug/_metrics.py.
   * ABSOLUTE mature error Σ_tx |measured − true| (positive/negative per-transcript flow cancels in
     the net, so the absolute sum is reported alongside).
   * TRANSCRIPT-level Spearman (truth vs measured), MARD, n_FP, n_FN — the vetted abundance-accuracy
@@ -15,15 +20,21 @@ benchmark should report before shipping a change:
 
 Writes a structured JSON (both arms, all conditions) consumed by the HTML report renderer.
 
+ARMS. An arm is `name:eps[:ngss[:ENV]]`: `eps` = --gdna-prior-mixture-bridge, `ngss` =
+--sweep-n-grid-single-strand (optional), `ENV` = one `KEY=VAL` env override passed to the quant
+subprocess (e.g. `RIGEL_MSG_MODE=off` for the no-message-propagation baseline). Empty middle fields
+are allowed, e.g. `off:0::RIGEL_MSG_MODE=off`.
+
     python scripts/debug/benchmark_ab_report.py <suite> --out ab_report.json \
-        --arms baseline:0 fix1:0.01 [--threads 4]
+        --arms prod:0 off:0::RIGEL_MSG_MODE=off [--threads 4]
 """
-import argparse, json, subprocess, sys, time
+import argparse, json, os, subprocess, sys, time
 from pathlib import Path
 import numpy as np, pandas as pd
 
 
-def run_quant(cond_dir: Path, index: Path, eps: float, threads: int, n_grid_ss: int | None = None) -> None:
+def run_quant(cond_dir: Path, index: Path, eps: float, threads: int, n_grid_ss: int | None = None,
+              env: dict | None = None) -> None:
     out = cond_dir / "rigel_out"
     # No --annotated-bam: the pool + transcript metrics read only rigel_out/ + manifest + truth (the hard-label
     # net-flow it drives is insensitive to soft prior shifts and the ambig suite doesn't emit annotated.bam).
@@ -32,9 +43,12 @@ def run_quant(cond_dir: Path, index: Path, eps: float, threads: int, n_grid_ss: 
            "--gdna-prior-mixture-bridge", str(eps), "--threads", str(threads)]
     if n_grid_ss is not None:
         cmd += ["--sweep-n-grid-single-strand", str(n_grid_ss)]
-    r = subprocess.run(cmd, capture_output=True, text=True)
+    # Arm-specific env override (e.g. RIGEL_MSG_MODE=off) reaches calibration via the subprocess env — a
+    # config file flip does NOT reach the subprocess, so env is the A/B channel for behavioral knobs.
+    run_env = {**os.environ, **(env or {})}
+    r = subprocess.run(cmd, capture_output=True, text=True, env=run_env)
     if r.returncode != 0:
-        raise RuntimeError(f"quant failed for {cond_dir.name} (eps={eps}):\n{r.stderr[-1500:]}")
+        raise RuntimeError(f"quant failed for {cond_dir.name} (eps={eps}, env={env}):\n{r.stderr[-1500:]}")
 
 
 def _observed_truth(cond_dir: Path) -> dict:
@@ -107,7 +121,8 @@ def main():
     ap.add_argument("suite", type=Path)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--arms", nargs="+", default=["baseline:0", "fix1:0.01"],
-                    help="arm spec name:eps[:n_grid_ss] (n_grid_ss optional)")
+                    help="arm spec name:eps[:n_grid_ss[:ENV]] — ENV is one KEY=VAL env override "
+                         "(e.g. RIGEL_MSG_MODE=off); empty middle fields ok (off:0::RIGEL_MSG_MODE=off)")
     ap.add_argument("--filter", default=None, help="only conditions whose name contains this substring")
     ap.add_argument("--threads", type=int, default=4)
     args = ap.parse_args()
@@ -118,16 +133,20 @@ def main():
     def _parse(a):
         parts = a.split(":")
         ngss = int(parts[2]) if len(parts) > 2 and parts[2] else None
-        return (parts[0], float(parts[1]), ngss)
+        env = None
+        if len(parts) > 3 and parts[3]:
+            k, _, v = parts[3].partition("=")
+            env = {k: v}
+        return (parts[0], float(parts[1]), ngss, env)
     arms = [_parse(a) for a in args.arms]
     report: dict = {"conditions": [c.name for c in conds], "arms": [a for a, *_ in arms], "data": {}}
-    for arm, eps, ngss in arms:
+    for arm, eps, ngss, env in arms:
         report["data"][arm] = {}
         for c in conds:
             t0 = time.time()
-            run_quant(c, index, eps, args.threads, n_grid_ss=ngss)
+            run_quant(c, index, eps, args.threads, n_grid_ss=ngss, env=env)
             report["data"][arm][c.name] = {"pools": pool_metrics(c), "tx": transcript_metrics(c)}
-            print(f"[{arm} eps={eps}] {c.name}  ({time.time()-t0:.0f}s)", flush=True)
+            print(f"[{arm} eps={eps} env={env}] {c.name}  ({time.time()-t0:.0f}s)", flush=True)
     json.dump(report, open(args.out, "w"), indent=2)
     print(f"\nwrote {args.out}")
 
