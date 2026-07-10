@@ -5,6 +5,44 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-07-10
+
+### Changed (breaking)
+
+- **Index format version 5 → 7.** Reference indices built with Rigel ≤ 0.6.4 are no longer
+  loadable and must be rebuilt with `rigel index`. The calibration solver now reads splice-junction
+  geometry directly from a slimmer index schema (vestigial fragment-length model columns were dropped
+  at the same time), so `rigel quant` against an old index raises a clear format-version error rather
+  than mis-reading it.
+
+### Added
+
+- **Global KDE-mode reference density for capture effective lengths.** The per-region capture
+  eff-length contraction now derives its enrichment reference from a single mass-weighted
+  kernel-density mode over the library, replacing the old per-transcript `ρ* = G_c / E_c` reference
+  that could fire even with no gDNA present (a nascent-RNA over-siphon in capture-enriched loci).
+- **Fragment-length reporting.** The pipeline now reports the separate gDNA and RNA empirical
+  fragment-length distributions it fits, and drops the vestigial per-category FL models.
+- **Validated accumulator-consistent calibration oracle** (`scripts/debug/oracle.py`, CI-checked via
+  `tests/calibration/test_oracle.py`) plus a set of diagnostic tools (siphon localization, layer/leak
+  tracing, controlled EM experiments) and canonical docs
+  (`docs/calibration/oracle_and_benchmarking.md`, `message_precision_roadmap_v2.md`). Developer-facing.
+
+### Changed
+
+- **Unified gDNA / transcript effective-length node model.** gDNA and transcript effective lengths
+  now share one per-node contraction path instead of two divergent code paths.
+- **Message precision is a single production path** (belief-free Poisson disagreement variance
+  `σ²_imp`, fit once before the belief-propagation pass — no per-pass `var~mean` refit and no outer
+  fixed-point loop). Exploratory message-precision variants remain available behind the
+  default-off `RIGEL_MSG_MODE` env switch for diagnostics.
+
+### Fixed
+
+- **Capture eff-length splice-junction seams** — junction seams are now imputed from their flanking
+  exons in the capture eff-length node model, fixing a nascent < mature effective-length inversion in
+  capture-enriched loci. Capture-off output is bit-identical to before.
+
 ## [0.6.4] - 2026-07-06
 
 ### Added
