@@ -55,6 +55,47 @@ def rna_component_breakdown(estimator, index):
     return float(em[syn].sum()), float(em[single_exon_nrna].sum()), float(em[mature].sum())
 
 
+def ontarget_gdna_fl_pmf(bam_path, region_arrays, index, max_size):
+    """The TRUE on-target (captured, exonic-region) gDNA fragment-length pmf from a sim oracle BAM — the
+    length distribution of the gDNA that actually competes with RNA in loci. The production gDNA FL model
+    trains on the OFF-target (intergenic+intronic) accumulator pools (see calibration.fl.gdna_fl_mass),
+    which capture leaves LONGER than the size-selected on-target gDNA; feeding this on-target pmf to
+    calibrate()+scorer tests the capture-aware fix. Returns a normalized pmf aligned to max_size+1."""
+    import pysam
+    from rigel.sim.read_name import parse_origin
+    from rigel.calibration.signature import BIT_EXON_POS, BIT_EXON_NEG
+
+    starts = np.asarray(region_arrays.start, np.int64)
+    ends = np.asarray(region_arrays.end, np.int64)
+    ref_off = np.asarray(region_arrays.ref_offsets, np.int64)
+    sig = np.asarray(region_arrays.signature).astype(np.int64)
+    name2id = index.ref_name_to_id
+    exon_bit = BIT_EXON_POS | BIT_EXON_NEG
+    counts = np.zeros(int(max_size) + 1, dtype=np.float64)
+    with pysam.AlignmentFile(str(bam_path), "rb") as f:
+        default = f.references[0] if f.references else None
+        seen = set()
+        for r in f:
+            q = r.query_name
+            if q in seen:
+                continue
+            seen.add(q)
+            o = parse_origin(q)
+            if o.kind != "gdna" or o.start is None:
+                continue
+            rid = name2id.get(str(o.ref if o.ref is not None else default))
+            if rid is None:
+                continue
+            lo0, hi0 = int(ref_off[rid]), int(ref_off[rid + 1])
+            mid = (int(o.start) + int(o.end)) // 2
+            j = lo0 + int(np.searchsorted(ends[lo0:hi0], mid, side="right"))
+            if not (lo0 <= j < hi0) or not (sig[j] & exon_bit):
+                continue
+            counts[min(int(o.end) - int(o.start), int(max_size))] += 1.0
+    total = counts.sum()
+    return counts / total if total > 0 else counts
+
+
 def oracle_node_masses(bam_path, region_arrays, index):
     """Build the TRUE per-node gDNA/RNA masses from a sim oracle BAM's read-name origins — the "oracle
     calibration" used to separate calibration error from structural EM effects (feed to

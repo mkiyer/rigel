@@ -50,6 +50,15 @@ GENES_BY_MODE = {"single": GENES_SINGLE, "multi": GENES_MULTI}
 GENOME_LEN = {"single": 11000, "multi": 33000}
 N_RNA = int(os.environ.get("N_RNA", "8000"))  # depth (snowball test): raise to flagship per-locus scale
 GDNA_FRACTION = 0.5
+RNA_FRAG_MEAN = 250
+# FL interrogation: the gDNA sim fragment length. Default 250 == RNA (EQUAL FL, no FL signal — the
+# bias-ruling-out baseline). Set e.g. 380 to mimic the real flagship's gDNA>RNA length separation.
+GDNA_FRAG_MEAN = int(os.environ.get("GDNA_FRAG_MEAN", "250"))
+
+
+def _pmf_mean(pmf):
+    p = np.asarray(pmf, dtype=np.float64)
+    return float(np.dot(np.arange(p.size), p) / max(p.sum(), 1e-12))
 
 
 # oracle_node_masses + rna_component_breakdown live in _metrics.py (single source of truth for the siphon
@@ -68,10 +77,10 @@ def truth_counts(bam_path):
     return c
 
 
-def run_one(name, capture, mode):
-    genes = GENES_BY_MODE[mode]
+def run_one(name, capture, genes_mode):
+    genes = GENES_BY_MODE[genes_mode]
     wd = WD / f"ambigem_{name}"
-    sc = Scenario(name, genome_length=GENOME_LEN[mode], seed=7, work_dir=wd, ref_name="chr1")
+    sc = Scenario(name, genome_length=GENOME_LEN[genes_mode], seed=7, work_dir=wd, ref_name="chr1")
     for gid, strand, isoforms in genes:
         sc.add_gene(gid, strand, [{"t_id": tid, "exons": exons, "abundance": 100.0}
                                   for tid, exons in isoforms])
@@ -87,42 +96,43 @@ def run_one(name, capture, mode):
         cap_cfg = CaptureConfig(probes=str(probes), binding_per_base=20.0)
     result = sc.build_oracle(
         n_rna_fragments=N_RNA, gdna_fraction=GDNA_FRACTION,
-        sim_config=ReadSimConfig(frag_mean=250, frag_std=50, frag_min=80, frag_max=600,
+        sim_config=ReadSimConfig(frag_mean=RNA_FRAG_MEAN, frag_std=50, frag_min=80, frag_max=600,
                                  read_length=120, strand_specificity=0.99, seed=7),
-        gdna_config=GDNAConfig(abundance=0.0, frag_mean=250, frag_std=50),
+        gdna_config=GDNAConfig(abundance=0.0, frag_mean=GDNA_FRAG_MEAN, frag_std=50),
         capture_config=cap_cfg, nrna_abundance=0.0)  # NASCENT = 0
     idx = result.index
     tc = truth_counts(result.bam_path)
-    is_n = idx.t_df["is_nrna"].to_numpy(bool)
-    n_nrna_rows = int(is_n.sum())
+    n_nrna_rows = int(idx.t_df["is_nrna"].to_numpy(bool).sum())
 
-    def quant(mode):
+    def quant(lever):
         _st, sm, flm, buf, pl = scan_and_buffer(str(result.bam_path), idx, BamScanConfig())
         sm.finalize()
         fl = build_fl_models(global_counts=flm.global_model.counts,
                              rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,
                              gdna_counts=gdna_fl_mass(pl), max_size=flm.max_size)
+        gdna_fl_mean, rna_fl_mean = _pmf_mean(fl.gdna_pmf), _pmf_mean(fl.rna_pmf)
         ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
         cal = calibrate(pl, ra, sm, fl.gdna_pmf, fl.rna_pmf, CalibrationConfig())
-        if mode == "oracle":
+        if lever == "oracle":  # perfect per-node masses (isolates the EM/scoring from calibration error)
             cal = dataclasses.replace(cal, **oracle_node_masses(result.bam_path, ra, idx))
+        if lever == "fl_neutral":  # force the scorer's gDNA FL == RNA FL ⇒ ZERO FL gDNA-vs-RNA discrimination
+            fl = dataclasses.replace(fl, gdna_pmf=fl.rna_pmf.copy())
         est, _ = quant_from_buffer(buf, idx, sm, fl, ra, _st, cal, pl,
                                    em_config=EMConfig(), scoring=FragmentScoringConfig())
         # SIPHON = EM mass on the SYNTHETIC shadows (see _metrics / docs/calibration/siphon_measurement.md).
         siphon, _single_exon, mature_em = rna_component_breakdown(est, idx)
-        nn = idx.t_df["is_nrna"].to_numpy(bool)
-        syn = idx.t_df["is_synthetic"].to_numpy(bool)
-        return siphon, mature_em, int((nn & syn).sum()), int((nn & ~syn).sum())
+        return siphon, mature_em, gdna_fl_mean, rna_fl_mean
 
-    print(f"\n===== {name}  (mode={mode}  capture={'ON' if capture else 'OFF'}) =====")
-    print(f"  TRUTH: gdna={tc['gdna']}  mrna={tc['mrna']}  nrna={tc['nrna']} (=0)  |  {n_nrna_rows} nascent EM rows exist")
-    print(f"  {'calibration':>12} {'nascent_EM(siphon)':>18} {'mature_EM':>10}   (nascent rows: syn/nonsyn)")
-    for mode in ("fitted", "oracle"):
-        nascent, mature, n_syn, n_non = quant(mode)
-        print(f"  {mode:>12} {nascent:>18,.1f} {mature:>10,.1f}   ({n_syn} syn / {n_non} nonsyn)")
+    print(f"\n===== {name}  (genes={genes_mode}  capture={'ON' if capture else 'OFF'}  "
+          f"sim FL: gDNA={GDNA_FRAG_MEAN} RNA={RNA_FRAG_MEAN}) =====")
+    print(f"  TRUTH: gdna={tc['gdna']}  mrna={tc['mrna']}  nrna={tc['nrna']} (=0)  |  {n_nrna_rows} nascent EM rows")
+    print(f"  {'lever':12} {'nascent_EM(siphon)':>18} {'mature_EM':>10} {'est.FL gDNA/RNA':>18}")
+    for lever in ("fitted", "fl_neutral", "oracle"):
+        siphon, mature, gfm, rfm = quant(lever)
+        print(f"  {lever:12} {siphon:>18,.1f} {mature:>10,.1f} {f'{gfm:.1f}/{rfm:.1f}':>18}")
 
 
 if __name__ == "__main__":
-    mode = os.environ.get("MODE", "multi")
+    gm = os.environ.get("MODE", "multi")
     for cap in (False, True):
-        run_one(f"{mode}_{'cap' if cap else 'nocap'}", cap, mode)
+        run_one(f"{gm}_{'cap' if cap else 'nocap'}", cap, gm)

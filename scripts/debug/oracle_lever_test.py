@@ -31,7 +31,7 @@ from rigel.calibration.fl import build_fl_models, gdna_fl_mass
 from rigel.splice import SpliceType
 
 import rigel.calibration.capture_eff_length as cel_mod
-from _metrics import oracle_node_masses, rna_component_breakdown
+from _metrics import oracle_node_masses, ontarget_gdna_fl_pmf, rna_component_breakdown
 
 S = os.environ.get("AUDIT_SUITE", "/Users/mkiyer/Downloads/rigel_runs/quick_3to1_5mb")
 COND = sys.argv[1] if len(sys.argv) > 1 else "gdna_gdna300_ss_0.99_nrna_none_capture_on"
@@ -56,6 +56,8 @@ def run(index, bam, cfg, lever):
     fl = build_fl_models(global_counts=flm.global_model.counts,
                          rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,
                          gdna_counts=gdna_fl_mass(payload), max_size=flm.max_size)
+    if lever == "fl_ontarget":  # feed calibrate()+scorer the TRUE on-target gDNA FL (capture-aware fix test)
+        fl = dc(fl, gdna_pmf=ontarget_gdna_fl_pmf(bam, ra, index, flm.max_size))
     cal = calibrate(payload=payload, region_arrays=ra, strand_model=sm,
                     gdna_fl_pmf=fl.gdna_pmf, rna_fl_pmf=fl.rna_pmf, config=cfg.calibration)
     if lever == "oracle_calib":  # replace fitted per-node masses with the TRUE masses (perfect calibration)
@@ -64,7 +66,7 @@ def run(index, bam, cfg, lever):
     if "strand" in lever:  # neutralize the RNA strand tilt (RNA strand term := gDNA's LOG_HALF)
         sm.exonic_spliced._cached_p_sense = 0.5
         sm.exonic_spliced._cached_p_antisense = 0.5
-    if "fl" in lever:  # neutralize FL discrimination (gDNA FL := RNA FL)
+    if lever in ("fl", "strand+fl"):  # neutralize FL discrimination (gDNA FL := RNA FL)
         fl = dc(fl, gdna_pmf=fl.rna_pmf.copy())
     # eff-length levers: patch the (lazily-imported) module functions so quant + priors pick them up
     cel_mod._global_reference_density = _REAL_GREF
