@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <numeric>
@@ -881,29 +882,44 @@ static void compute_grouped_warm_start(
     double*       warm_counts_out,
     int           n_components)
 {
-    // Initialize theta_init from unambig_totals
+    // Warm-start mode (RIGEL_EM_WARMSTART — snowball-hypothesis probe; default = production):
+    //   default : unambig_totals + coverage-weighted shares of AMBIGUOUS (competing) fragments
+    //   unambig : unambig_totals ONLY — seed from INDEPENDENT data, never the competing pool
+    //   uniform : 1.0 for every component — no data-driven seed at all
+    static const int WS_MODE = []() {
+        const char* e = std::getenv("RIGEL_EM_WARMSTART");
+        if (e) { std::string s(e); if (s == "uniform") return 1; if (s == "unambig") return 2; }
+        return 0;
+    }();
+
     std::vector<double> warm_raw(static_cast<size_t>(n_components));
-    std::copy(unambig_totals, unambig_totals + n_components, warm_raw.begin());
+    if (WS_MODE == 1) {
+        std::fill(warm_raw.begin(), warm_raw.end(), 1.0);
+    } else {
+        std::copy(unambig_totals, unambig_totals + n_components, warm_raw.begin());
+    }
 
-    for (const auto& ec : ec_data) {
-        const int n = ec.n;
-        const int k = ec.k;
-        const int32_t* cidx = ec.comp_idx.data();
-        const double* wt = ec.wt_flat.data();
+    if (WS_MODE == 0) {
+        for (const auto& ec : ec_data) {
+            const int n = ec.n;
+            const int k = ec.k;
+            const int32_t* cidx = ec.comp_idx.data();
+            const double* wt = ec.wt_flat.data();
 
-        for (int i = 0; i < n; ++i) {
-            // Normalize coverage weights within the actual candidate set.
-            double row_sum = 0.0;
-            for (int j = 0; j < k; ++j) {
-                double w = wt[i * k + j];
-                row_sum += w;
-            }
-            if (row_sum == 0.0) row_sum = 1.0;
-            double inv_row_sum = 1.0 / row_sum;
+            for (int i = 0; i < n; ++i) {
+                // Normalize coverage weights within the actual candidate set.
+                double row_sum = 0.0;
+                for (int j = 0; j < k; ++j) {
+                    double w = wt[i * k + j];
+                    row_sum += w;
+                }
+                if (row_sum == 0.0) row_sum = 1.0;
+                double inv_row_sum = 1.0 / row_sum;
 
-            for (int j = 0; j < k; ++j) {
-                double share = wt[i * k + j] * inv_row_sum;
-                warm_raw[cidx[j]] += share;
+                for (int j = 0; j < k; ++j) {
+                    double share = wt[i * k + j] * inv_row_sum;
+                    warm_raw[cidx[j]] += share;
+                }
             }
         }
     }
