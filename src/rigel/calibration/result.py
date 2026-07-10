@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..config import CalibrationConfig
+from .signature import TS_NEG, TS_POS
 
 
 def _check_region_array(arr: np.ndarray, name: str, n_regions: int) -> None:
@@ -33,6 +34,64 @@ def _check_region_array(arr: np.ndarray, name: str, n_regions: int) -> None:
         raise ValueError(f"CalibrationResult.{name} contains non-finite values.")
     if np.any(arr < 0.0):
         raise ValueError(f"CalibrationResult.{name} must be non-negative.")
+
+
+@dataclass(frozen=True, slots=True)
+class RnaWarmStart:
+    """Per-region SOLVED per-strand RNA densities (ρ ≈ true abundance θ) — the EM warm-start signal.
+
+    Consumed by the pipeline-layer warm-start builder (which owns the transcript index; calibration does
+    not) to compute a capture-corrected density BOTTLENECK per transcript: it maps a transcript to its
+    nodes and takes the min over three node ROLES, ready-to-use (the only arithmetic left to the builder is
+    that min plus the capture correction ε it reconstructs from the gDNA mass fields). gDNA is NOT
+    re-exposed — a node's gDNA density is reconstructible from ``mass_gdna_contained / gdna_region_eff_len``
+    and the pooled seam ``(mass_gdna_right[r] + mass_gdna_left[r+1]) / mean(gdna_boundary_len[r, r+1])``.
+
+    * **CONTAINED** (region node, nascent+mature): ``rho_contained_s[r] = f_s · M_u / E_rna_contained`` —
+      per strand, from the region node's solved belief.
+    * **CROSSING** (interior seam between region ``r`` and ``r+1``, LEFT-region keyed; nascent):
+      ``rho_crossing_s[r] = f_s · M_seam / E_seam`` — per strand, from the seam BOUNDARY node's belief;
+      ``0`` on each reference's last region (no seam to its right).
+    * **SPLICED** (mature) — per region SIDE, kept in its OWN arrays so it is NEVER summed into the crossing
+      density (a splice site is also an exon↔intron boundary; summing would let a neighbour's mature mass
+      inflate a nascent shadow's bottleneck → the gDNA→nascent siphon). It is SINGLE-STRAND (the splice
+      motif fixes the strand): ONE density ``rho_spliced_{left,right}[r] = spliced / E_spl`` plus its fixed
+      strand ``spliced_strand_{left,right}[r]`` (``TS_POS`` / ``TS_NEG``; ``0`` = no junction on that side).
+      A junction ``(r_left, r_right)`` reads the donor at ``rho_spliced_right[r_left]`` and the acceptor at
+      ``rho_spliced_left[r_right]``.
+
+    All arrays length ``R`` (region-keyed, mirroring the ``mass_*`` layout); the two strand arrays are
+    ``int8``, the six density arrays ``float64``.
+    """
+
+    rho_contained_pos: np.ndarray  # float64[R] — f_pos·M_u / E_rna (contained region node)
+    rho_contained_neg: np.ndarray
+    rho_crossing_pos: np.ndarray  # float64[R] — seam(r,r+1) f_pos·M_seam / E_seam (left-keyed; 0 at terminals)
+    rho_crossing_neg: np.ndarray
+    rho_spliced_left: np.ndarray  # float64[R] — mature ρ on region r's LEFT side (acceptor); single-strand
+    rho_spliced_right: np.ndarray  # float64[R] — mature ρ on region r's RIGHT side (donor); single-strand
+    spliced_strand_left: np.ndarray  # int8[R] — the left-side junction motif strand (TS_POS/TS_NEG; 0 = none)
+    spliced_strand_right: np.ndarray
+
+    def __post_init__(self) -> None:
+        n = self.rho_contained_pos.shape[0]
+        for name in (
+            "rho_contained_pos",
+            "rho_contained_neg",
+            "rho_crossing_pos",
+            "rho_crossing_neg",
+            "rho_spliced_left",
+            "rho_spliced_right",
+        ):
+            _check_region_array(getattr(self, name), f"RnaWarmStart.{name}", n)
+        for name in ("spliced_strand_left", "spliced_strand_right"):
+            arr = getattr(self, name)
+            if not isinstance(arr, np.ndarray) or arr.dtype != np.int8 or arr.shape != (n,):
+                raise ValueError(f"RnaWarmStart.{name} must be an int8 array of shape ({n},).")
+            # Strand value-domain: a junction rides exactly one motif strand (or none). Always holds on the
+            # projection's ``np.where`` output; guards a malformed hand-built array.
+            if not np.all((arr == 0) | (arr == TS_POS) | (arr == TS_NEG)):
+                raise ValueError(f"RnaWarmStart.{name} values must be 0, TS_POS, or TS_NEG.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,10 +142,24 @@ class CalibrationResult:
     n_regions: int
     config: CalibrationConfig
 
+    # --- EM warm-start signal (Phase A; additive, default None) ---
+    # Per-region SOLVED per-strand RNA densities for the pipeline-layer warm-start builder (see
+    # ``RnaWarmStart``). Not read by ``assemble_priors`` or any serialized output, so populating it leaves
+    # the default calibration output byte-identical. ``None`` on results that predate / skip the warm start.
+    rna_warm_start: "RnaWarmStart | None" = None
+
     def __post_init__(self) -> None:
         n = self.n_regions
         if n < 0:
             raise ValueError(f"CalibrationResult.n_regions must be >= 0; got {n}.")
+        if self.rna_warm_start is not None:
+            if not isinstance(self.rna_warm_start, RnaWarmStart):
+                raise ValueError("CalibrationResult.rna_warm_start must be an RnaWarmStart or None.")
+            if self.rna_warm_start.rho_contained_pos.shape != (n,):
+                raise ValueError(
+                    "CalibrationResult.rna_warm_start arrays must have length n_regions "
+                    f"({n}); got {self.rna_warm_start.rho_contained_pos.shape}."
+                )
 
         for name in (
             "mass_gdna_contained",
@@ -124,4 +197,4 @@ class CalibrationResult:
             )
 
 
-__all__ = ["CalibrationResult"]
+__all__ = ["CalibrationResult", "RnaWarmStart"]

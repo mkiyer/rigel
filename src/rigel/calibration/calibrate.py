@@ -60,8 +60,9 @@ from .gdna_strand import (
     fit_rna_strand_from_substrate,
     overdispersion_for_beta,
 )
-from .node_chain import build_node_chain
-from .result import CalibrationResult
+from .node_chain import REGION, build_node_chain
+from .result import CalibrationResult, RnaWarmStart
+from .signature import TS_NEG, TS_POS
 from .strand_balance import fit_strand_balance
 from .substrate import BoundarySubstrate, CalibrationSubstrate
 
@@ -203,6 +204,7 @@ def calibrate(
         belief = _sweep(gdna_prior)
     regions = chain_region_deconv(chain, belief, substrate)
     left, right = chain_boundary_side_deconv(chain, belief, substrate)
+    rna_warm_start = _build_rna_warm_start(chain, belief, geometry, substrate)
     logger.debug("calibration: %s", "two-pass (Phase-2 mixture prior)" if gdna_prior else "single pass")
 
     if _debug is not None:  # inert diagnostic hook — the solved chain internals (Phase-2 substrate + plots)
@@ -245,6 +247,7 @@ def calibrate(
         rna_strand_overdispersion=rna_strand_overdispersion,
         n_regions=region_arrays.n_regions,
         config=config,
+        rna_warm_start=rna_warm_start,
     )
     # Diagnostic: the boundary-spliced sense fraction should agree with the StrandModel κ (the
     # deconv mean). A large gap flags a strand-model / accumulator mismatch (we do NOT refit the
@@ -276,6 +279,69 @@ def calibrate(
         rna_sense_frac,
     )
     return result
+
+
+def _build_rna_warm_start(chain, belief, geometry, substrate) -> RnaWarmStart:
+    """Project the solved chain into the per-region per-strand RNA densities the EM warm-start builder needs.
+
+    A pure additive read of the final ``belief`` (``f_pos`` / ``f_neg`` read directly — raw, non-zeroed for
+    ALL nodes) over the static per-face ``geometry`` (masses + RNA / spliced effective lengths, already
+    floored). The three ROLES map onto the chain by adjacency (verified: a region node's ``chain.right`` is
+    the seam boundary to region ``r+1`` when that boundary itself has a right neighbour; its ``chain.left`` /
+    ``chain.right`` are always valid boundary nodes):
+
+    * CONTAINED: the region node's own face — ``f_s · mass / eff_rna``.
+    * CROSSING (seam ``r``↔``r+1``, left-keyed): the seam boundary node's belief over its POOLED two-side
+      crossing mass and averaged RNA support — mirroring the gDNA pooled seam so the builder's RNA and
+      reconstructed-gDNA densities share one node basis.
+    * SPLICED (per region SIDE): the flanking boundary's one-sided motif-stranded spliced mass over the
+      half-triangle spliced support — kept SEPARATE from crossing, single value + its fixed strand.
+    """
+    kind = np.asarray(chain.kind)
+    order = np.asarray(chain.order)
+    reg_nodes = order[kind == REGION]
+    r = np.asarray(chain.ref_idx, dtype=np.int64)[reg_nodes]  # region index per region node
+    lb = np.asarray(chain.left, dtype=np.int64)[reg_nodes]  # region r's left-flank boundary node
+    rb = np.asarray(chain.right, dtype=np.int64)[reg_nodes]  # region r's right-flank (seam) boundary node
+    seam = np.asarray(chain.right, dtype=np.int64)[rb] != -1  # rb is an internal seam (has region r+1)
+    R = int(substrate.n_regions)
+    fp, fn, g = belief.f_pos, belief.f_neg, geometry
+
+    rho_c_pos, rho_c_neg = np.zeros(R), np.zeros(R)  # contained, per strand
+    rho_x_pos, rho_x_neg = np.zeros(R), np.zeros(R)  # crossing (seam), per strand
+    rho_sp_left, rho_sp_right = np.zeros(R), np.zeros(R)  # spliced, per side (single-strand)
+    st_left, st_right = np.zeros(R, dtype=np.int8), np.zeros(R, dtype=np.int8)
+
+    # CONTAINED: region node's own face (mass_left == mass_right, eff_rna_left == eff_rna_right for regions).
+    rho_c_pos[r] = fp[reg_nodes] * g.mass_left[reg_nodes] / g.eff_rna_left[reg_nodes]
+    rho_c_neg[r] = fn[reg_nodes] * g.mass_left[reg_nodes] / g.eff_rna_left[reg_nodes]
+
+    # CROSSING: pooled seam mass (both boundary faces) / averaged RNA support, tilted by the seam belief.
+    m_seam = g.mass_left[rb] + g.mass_right[rb]
+    s_seam = 0.5 * (g.eff_rna_left[rb] + g.eff_rna_right[rb])
+    rho_x_pos[r[seam]] = fp[rb[seam]] * m_seam[seam] / s_seam[seam]
+    rho_x_neg[r[seam]] = fn[rb[seam]] * m_seam[seam] / s_seam[seam]
+
+    # SPLICED (single-strand, motif): region r's RIGHT side rides the seam boundary rb's LEFT (exon) face;
+    # its LEFT side rides the left boundary lb's RIGHT (exon) face. Only one of pos/neg is nonzero per face.
+    def _spliced(sp_pos, sp_neg, eff):
+        return (sp_pos + sp_neg) / eff, np.where(sp_pos > 0.0, TS_POS, np.where(sp_neg > 0.0, TS_NEG, 0))
+
+    rho_sp_right[r], strand_r = _spliced(g.spliced_pos_left[rb], g.spliced_neg_left[rb], g.eff_spl_left[rb])
+    rho_sp_left[r], strand_l = _spliced(g.spliced_pos_right[lb], g.spliced_neg_right[lb], g.eff_spl_right[lb])
+    st_right[r] = strand_r.astype(np.int8)
+    st_left[r] = strand_l.astype(np.int8)
+
+    return RnaWarmStart(
+        rho_contained_pos=rho_c_pos,
+        rho_contained_neg=rho_c_neg,
+        rho_crossing_pos=rho_x_pos,
+        rho_crossing_neg=rho_x_neg,
+        rho_spliced_left=rho_sp_left,
+        rho_spliced_right=rho_sp_right,
+        spliced_strand_left=st_left,
+        spliced_strand_right=st_right,
+    )
 
 
 __all__ = ["calibrate"]

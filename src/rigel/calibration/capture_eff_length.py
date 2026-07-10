@@ -152,17 +152,19 @@ _KDE_BW = 0.4
 _KDE_PROM = 0.05
 
 
-def _global_reference_density(mass: np.ndarray, support: np.ndarray) -> "float | None":
-    """The global enriched-mode gDNA reference density for the eff-length contraction.
+def _kde_significant_mode(
+    mass: np.ndarray, support: np.ndarray, *, rightmost: bool
+) -> "float | None":
+    """The rightmost (``rightmost=True``) or leftmost significant peak of the **mass-weighted** log-density
+    KDE over the per-region gDNA densities ``ρ = mass/support``, snapped to a real node density.
 
-    The rightmost significant peak of the **mass-weighted** log-density KDE over the per-region gDNA
-    densities ``ρ = mass/support`` — the fully-captured gDNA level, detected from the data with no assumption
-    about probe locations (``docs/calibration/enriched_mode_reference_density.md``). Mass-weighting is the
-    key: a small captured panel is a tiny COUNT bump but the dominant MASS peak (enriched nodes carry ~100×
-    the mass), so its enriched mode is detectable. Unimodal (capture-off / no enrichment) ⇒ the single mode
-    ⇒ every node lands at ``w = 1`` ⇒ no contraction. The result is SNAPPED to a real node density so a
-    uniform field returns its density EXACTLY (factor 1, capture-off bit-identical). Returns ``None`` if
-    there is too little gDNA to detect a reference (⇒ no contraction)."""
+    Mass-weighting is the key: a small captured panel is a tiny COUNT bump but the dominant MASS peak
+    (enriched nodes carry ~100× the mass), so its enriched mode is detectable
+    (``docs/calibration/enriched_mode_reference_density.md``). The snap makes a uniform field return its
+    density EXACTLY (factor 1, capture-off bit-identical). Returns ``None`` if there is too little gDNA to
+    detect a mode (``< 5`` valid nodes). The sole selection axis is which END of the significant-peak set to
+    pick — shared verbatim by the enriched reference (rightmost) and the depleted floor (leftmost) so an
+    honestly unimodal field yields the SAME snapped density from both."""
     m = np.asarray(mass, dtype=np.float64)
     s = np.maximum(np.asarray(support, dtype=np.float64), 1e-9)
     rho = m / s
@@ -180,13 +182,34 @@ def _global_reference_density(mass: np.ndarray, support: np.ndarray) -> "float |
         mode = grid[int(np.argmax(km))]
     elif pk.size == 1:
         mode = grid[int(pk[0])]
-    else:  # rightmost peak with height ≥ _KDE_PROM of the tallest (a real mode, not a tail wiggle)
+    else:  # significant peaks: height ≥ _KDE_PROM of the tallest (a real mode, not a tail wiggle)
         h = km[pk]
         sig = pk[h >= _KDE_PROM * float(h.max())]
-        mode = grid[int((sig if sig.size else pk)[-1])]
+        cand = sig if sig.size else pk
+        mode = grid[int(cand[-1] if rightmost else cand[0])]
     # snap to the nearest ACTUAL node density: exact ρ under a uniform field (⇒ factor 1), a real density
     # under capture — no grid-quantization contraction is fabricated.
     return float(rho[ok][int(np.argmin(np.abs(x - mode)))])
+
+
+def _global_reference_density(mass: np.ndarray, support: np.ndarray) -> "float | None":
+    """The global enriched-mode gDNA reference density for the eff-length contraction — the RIGHTMOST
+    significant peak of the mass-weighted log-density KDE (:func:`_kde_significant_mode`), i.e. the
+    fully-captured gDNA level detected from the data with no assumption about probe locations. Unimodal
+    (capture-off / no enrichment) ⇒ the single mode ⇒ every node lands at ``w = 1`` ⇒ no contraction. ``None``
+    when there is too little gDNA to detect a reference (⇒ no contraction)."""
+    return _kde_significant_mode(mass, support, rightmost=True)
+
+
+def _global_depleted_density(mass: np.ndarray, support: np.ndarray) -> "float | None":
+    """The global depleted (off-target) gDNA density — the LEFTMOST significant peak of the SAME
+    mass-weighted log-density KDE as :func:`_global_reference_density`.
+
+    Feeds the warm-start capture floor ``ε_floor = rho_depleted / rho_ref``: the residual fraction of the
+    fully-captured level that off-target (unenriched) sequence still carries. When the field is unimodal the
+    leftmost and rightmost significant peaks coincide ⇒ ``rho_depleted == rho_ref`` ⇒ ``ε_floor → 1`` (no
+    floor). Returns ``None`` under the same ``< 5`` valid-node guard (⇒ no floor)."""
+    return _kde_significant_mode(mass, support, rightmost=False)
 
 
 def _pooled_seam_arrays(calibration, region_arrays):
