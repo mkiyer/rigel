@@ -913,6 +913,7 @@ static double marginal_data_loglik(
 static void compute_grouped_warm_start(
     const std::vector<EmEquivClass>& ec_data,
     const double* unambig_totals,
+    const double* warm_seed,
     const AggregatePrior& aggregate_prior,
     double*       warm_counts_out,
     int           n_components)
@@ -921,10 +922,13 @@ static void compute_grouped_warm_start(
     //   default : unambig_totals + coverage-weighted shares of AMBIGUOUS (competing) fragments
     //   unambig : unambig_totals ONLY — seed from INDEPENDENT data, never the competing pool
     //   uniform : 1.0 for every component — no data-driven seed at all
+    //   calib   : the default coverage seed, but each RNA component's warm mass REPLACED by the
+    //             calibration density-bottleneck count (``warm_seed``) where finite (NaN ⇒ keep coverage)
     static const int WS_MODE = []() {
         const char* e = std::getenv("RIGEL_EM_WARMSTART");
         if (e) { std::string s(e);
-            if (s == "uniform") return 1; if (s == "unambig") return 2; if (s == "flat") return 3; }
+            if (s == "uniform") return 1; if (s == "unambig") return 2;
+            if (s == "flat") return 3; if (s == "calib") return 4; }
         return 0;
     }();
 
@@ -942,7 +946,7 @@ static void compute_grouped_warm_start(
         std::copy(unambig_totals, unambig_totals + n_components, warm_raw.begin());
     }
 
-    if (WS_MODE == 0) {
+    if (WS_MODE == 0 || WS_MODE == 4) {
         for (const auto& ec : ec_data) {
             const int n = ec.n;
             const int k = ec.k;
@@ -964,6 +968,16 @@ static void compute_grouped_warm_start(
                     warm_raw[cidx[j]] += share;
                 }
             }
+        }
+    }
+
+    if (WS_MODE == 4 && warm_seed != nullptr) {
+        // CALIB: replace each RNA component's coverage warm mass with the calibration density-bottleneck
+        // count where finite; NaN ⇒ no calibration signal ⇒ keep the coverage seed. gDNA keeps coverage.
+        for (int c = 0; c < n_components; ++c) {
+            if (c == aggregate_prior.gdna_idx) continue;
+            double s = warm_seed[c];
+            if (std::isfinite(s) && s >= 0.0) warm_raw[c] = s;
         }
     }
     apply_grouped_prior_update(
@@ -1296,6 +1310,7 @@ struct LocusSubProblem {
     // Per-component
     std::vector<double>   unambig_totals;   // [n_components]
     std::vector<double>   log_eff_len;      // [n_components] log L̃ per component
+    std::vector<double>   warm_seed;        // [n_components] calibration warm-start counts (NaN = fallback)
 
     // Local→global transcript mapping
     std::vector<int32_t>  local_to_global_t; // [n_t]
@@ -1764,6 +1779,7 @@ static void extract_locus_sub_problem_from_partition(
     double gdna_em_llr_bias,
     const double*  all_unambig_row_sums,
     const double*  all_t_eff_lens,
+    const double*  all_t_warm_start,
     int32_t* local_map, int local_map_size)
 {
     int n_t = pv.n_transcripts;
@@ -1893,6 +1909,13 @@ static void extract_locus_sub_problem_from_partition(
         sub.unambig_totals[i] = all_unambig_row_sums[t_arr[i]];
     }
 
+    // Per-component calibration warm-start counts, gathered by global transcript id (like the eff-lengths).
+    // NaN ⇒ fall back to the coverage seed; the gDNA component (index n_t) has no transcript ⇒ stays NaN.
+    sub.warm_seed.assign(nc, std::nan(""));
+    if (all_t_warm_start != nullptr) {
+        for (int i = 0; i < n_t; ++i) sub.warm_seed[i] = all_t_warm_start[t_arr[i]];
+    }
+
     sub.log_eff_len.assign(nc, 0.0);
     for (int i = 0; i < n_t; ++i) {
         double Le = all_t_eff_lens[t_arr[i]];
@@ -1948,6 +1971,8 @@ batch_locus_em_partitioned(
     // Per-transcript globals
     f64_2d   unambig_counts,
     f64_1d   t_eff_lens_arr,
+    // Per-transcript calibration warm-start counts (empty ⇒ none); used only by RIGEL_EM_WARMSTART=calib
+    f64_1d   t_warm_start_arr,
     // Mutable output accumulators
     f64_2d_mut em_counts_out,
     f64_2d_mut gdna_locus_counts_out,
@@ -2016,6 +2041,7 @@ batch_locus_em_partitioned(
     const double*   gel_ptr = locus_gdna_eff_lens.data();
     const double*   uac    = unambig_counts.data();
     const double*   tel_ptr = t_eff_lens_arr.data();
+    const double*   tws_ptr = t_warm_start_arr.size() ? t_warm_start_arr.data() : nullptr;
 
     double* em_out    = em_counts_out.data();
     double* gdna_out  = gdna_locus_counts_out.data();
@@ -2126,7 +2152,7 @@ batch_locus_em_partitioned(
                 sub, pv,
                 gel_ptr[li],
                 gdna_em_llr_bias,
-                unambig_row_sums.data(), tel_ptr,
+                unambig_row_sums.data(), tel_ptr, tws_ptr,
                 local_map_vec.data(), local_map_size);
             auto t2 = hrclock::now();
 
@@ -2168,6 +2194,7 @@ batch_locus_em_partitioned(
             compute_grouped_warm_start(
                 ec_data,
                 sub.unambig_totals.data(),
+                sub.warm_seed.data(),
                 aggregate_prior,
                 init_counts.data(), nc);
             auto t5 = hrclock::now();
@@ -2684,6 +2711,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("locus_gdna_eff_lens"),
           nb::arg("unambig_counts"),
           nb::arg("t_eff_lens"),
+          nb::arg("t_warm_start"),
           nb::arg("em_counts_out"),
           nb::arg("gdna_locus_counts_out"),
           nb::arg("posterior_sum_out"),

@@ -199,12 +199,19 @@ class AbundanceEstimator:
                     np.asarray(geometry.effective_lengths_em, dtype=np.float64),
                     1.0,
                 )
+            wsc = getattr(geometry, "warm_start_counts", None)
+            self._t_warm_start = (
+                np.ascontiguousarray(wsc, dtype=np.float64)
+                if wsc is not None
+                else np.empty(0, dtype=np.float64)
+            )
         else:
             self._t_to_g = None
             self._transcript_spans = None
             self._exonic_lengths = None
             self._t_eff_len_output = np.ones(num_transcripts, dtype=np.float64)
             self._t_eff_len_em = self._t_eff_len_output
+            self._t_warm_start = np.empty(0, dtype=np.float64)
 
         self.unambig_counts = np.zeros((num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64)
         self.em_counts = np.zeros((num_transcripts, NUM_SPLICE_STRAND_COLS), dtype=np.float64)
@@ -339,6 +346,7 @@ class AbundanceEstimator:
         # (and inside assign_posteriors) instead of any per-fragment
         # length correction.
         t_eff_lens = np.ascontiguousarray(self._t_eff_len_em, dtype=np.float64)
+        t_warm_start = np.ascontiguousarray(self._t_warm_start, dtype=np.float64)
         n_loci = len(partition_tuples)
 
         if gdna_eff_len is None:
@@ -400,6 +408,7 @@ class AbundanceEstimator:
             gdna_eff_len,
             self.unambig_counts,
             t_eff_lens,
+            t_warm_start,
             self.em_counts,
             self.gdna_locus_counts,
             self._em_posterior_sum,
