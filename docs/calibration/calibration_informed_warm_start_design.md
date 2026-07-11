@@ -1,7 +1,83 @@
 # Calibration-Informed Per-Transcript Warm Start — Design & Implementation
 
+> ## ⏸️ STATUS: DEFERRED (2026-07-10) — not in production
+>
+> Built end-to-end and validated against ground truth on branch **`calib-warmstart-v1`** (off v0.7.0),
+> behind the **default-off** `RIGEL_EM_WARMSTART=calib` flag. **Deferred, not merged.** It added
+> substantial calibration→EM plumbing and, on the ground-truth A/B, **helped the flagship but net-
+> regressed across the matrix** — not worth the added complexity vs. current priorities (the flagship is
+> already ~3% error; higher-priority streamlining: code review, perf, output, docs, real-data
+> benchmarking). **Production is v0.7.0 (`origin/main`), which contains none of this.** The branch and
+> this doc preserve everything for a clean future resume — see *§0 Outcome & Resumption*.
+
+---
+
+## 0. Outcome, diagnosis & how to resume  *(read this first)*
+
+### What was built (branch `calib-warmstart-v1`, off v0.7.0 `ba6f1f10`)
+| commit | phase |
+|---|---|
+| `8131a558` | design doc |
+| `a3e76c7e` | **A** — per-strand node densities (`RnaWarmStart`) on `CalibrationResult` |
+| `1f3f2328` + `8d2b5a4d` | **B** — `build_transcript_warm_start` (capture-corrected density bottleneck) + per-strand-spliced AMBIG fix |
+| `47d67cd7` + `4d02411d` | **C** — `WS_MODE==4` (`RIGEL_EM_WARMSTART=calib`) in `em_solver.cpp` + length-guard |
+
+Files: `result.py` (`RnaWarmStart`), `calibrate.py` (`_build_rna_warm_start`), `capture_eff_length.py`
+(`build_transcript_warm_start`, `_capture_correction`, `_global_depleted_density`, `_pooled_seam_mass`),
+`config.py` (`TranscriptGeometry.warm_start_counts`), `pipeline.py` (wiring), `em_solver.cpp`
+(`t_warm_start` arg + `WS_MODE==4`), `estimator.py` (`_t_warm_start`). Tests:
+`tests/calibration/test_rna_warm_start.py`, `test_transcript_warm_start.py`. **Default path byte-identical
+(goldens pass); the flag is default-off.** Two adversarial code reviews (Phase B, Phase C) found no
+confirmed bugs.
+
+### Results — ground-truth 3-pool A/B (`quick_3to1_5mb`, `baseline` vs `calib`)
+Scored against simulation truth via `scripts/debug/benchmark_ab_report.py` (per-pool surplus =
+assigned − observed-true, for gDNA / mRNA / **synthetic** nRNA; + mature-transcript accuracy).
+
+- **Flagship** (`gdna300 ss0.99 nnone capON`): nRNA siphon **103k → 83k (−19%)**, mature `abs_err` better. **Win.**
+- **gDNA-free `nrna_none`**: siphon driven to **~0**. **Win.**
+- **Net across all 16 conditions: Σ|surplus| +4.1% WORSE.** `calib` is a **nascent-suppressor** — it helps
+  where nascent is *over*-called (the siphon) but *deepens* the under-call where real nascent exists
+  (`nrna_rnd`), and the freed mass inflates the already-over-called **mRNA** pool. Capture-OFF mRNA is
+  slightly worse (the seed perturbs it). The unstranded `ss0.50 capON` 120k siphon stays **flat**.
+
+### Root-cause diagnosis (the key insights to resume with)
+1. **Hard `min` is a ceiling estimator** → it *under-seeds* any transcript with one scarce node (a
+   heterogeneous real-nascent span; a weak-exon mature under capture-off).
+2. **Nascent is pure-ambiguous by construction** — every nascent fragment is co-compatible with gDNA
+   (unspliced genomic sequence), so `unambig_totals[nascent] ≡ 0`. Nascent is the **only floor-less pool**
+   (mRNA is floored by unambiguous splice-junction reads, gDNA by intergenic reads). Therefore the
+   **seed/prior is the sole control** of the gDNA↔nascent split, and **zeroing nascent = permanent death**
+   (no data revives it). `calib` *replaces* the coverage seed with the bottleneck, so a `0` bottleneck
+   **kills** a real nascent the production default would have kept alive — the `nrna_rnd` regression.
+
+### How to resume — the fix direction
+1. **Soft (quantile) bottleneck** in place of `min` (`q` swept, `q=0 ≡` today's hard min): a real
+   multi-node nascent gets a nonzero *survival* seed while a fake nascent still → ~0. This is *both* the
+   heterogeneity fix *and* the survival floor. **Do NOT "max with the coverage seed"** — that would forbid
+   lowering the fake siphon (the coverage seed *is* the over-seed).
+2. **Never zero a live component** — keep a small survival seed so the strand/FL likelihood adjudicates
+   real-vs-fake nascent rather than the seed pre-deciding death.
+3. **Regime-gate** to capture-ON / gDNA-present, so the seed is truly inert on capture-OFF.
+4. **Calibration-confidence gating** (`var_pos/var_neg` on `NodeBelief`) for the unstranded-AMBIG regime.
+5. **Ceiling:** the seed is only as accurate as calibration's intronic gDNA-vs-nascent deconvolution —
+   the unstranded-AMBIG siphon is a *calibration-accuracy* problem, not a warm-start one.
+
+### Resume mechanics
+```bash
+git checkout calib-warmstart-v1 && pip install --no-build-isolation -e .   # recompile — Phase C touched C++
+# ground-truth 3-pool A/B:
+python scripts/debug/benchmark_ab_report.py <suite> --out ab.json \
+    --arms baseline:0 calib:0::RIGEL_EM_WARMSTART=calib          # render: benchmark_ab_render.py
+```
+`RIGEL_EM_WARMSTART=calib` enables it; unset = production behavior (byte-identical to v0.7.0).
+
+---
+
+*The full design and phase plan below is unchanged — it documents the approach as built.*
+
 **Status:** design agreed; external critique incorporated; simplified to a minimal "does-it-help"
-v1 (2026-07-10); implementation not started.
+v1 (2026-07-10); **implemented behind the flag, then DEFERRED (see §0).**
 
 **v1 scope (minimal, but the full node taxonomy — all four node types are load-bearing):**
 - Nodes: **region (exon + intron) contained + exon↔intron boundary (nascent crossing) + splice
