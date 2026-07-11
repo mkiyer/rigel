@@ -678,6 +678,20 @@ def export_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def report_command(args: argparse.Namespace) -> int:
+    """Run the ``rigel report`` subcommand — build an HTML QC report from a run."""
+    from .report import build_report
+    from .report.substrate import SubstrateError
+
+    try:
+        out = build_report(args.output_dir, out_path=args.output, title=args.title)
+    except SubstrateError as exc:
+        logging.error(f"{exc}")
+        return 1
+    logging.info(f"[DONE] Report written to {out}")
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Declarative CLI ↔ config registry
 # ---------------------------------------------------------------------------
@@ -1412,6 +1426,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format (default: tsv)",
     )
     export.set_defaults(func=export_command)
+
+    # ------------------------------------------------------------------ report
+    report = subparsers.add_parser(
+        "report",
+        help="Build a self-contained HTML QC report from a rigel quant output directory",
+    )
+    report.add_argument(
+        "output_dir",
+        help="A rigel quant --output-dir (must contain summary.json)",
+    )
+    report.add_argument(
+        "-o",
+        "--output",
+        dest="output",
+        default=None,
+        help="Output HTML path (default: <output_dir>/report.html)",
+    )
+    report.add_argument(
+        "--title",
+        dest="title",
+        default=None,
+        help="Report title (default: 'Rigel QC · <sample>')",
+    )
+    report.set_defaults(func=report_command)
 
     return parser
 

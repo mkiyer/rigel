@@ -38,6 +38,12 @@ pileup = [
     "zarr>=2.16",
     "numcodecs>=0.12",
 ]
+# QC report builder (`rigel report`). vl-convert-python ships the Vega / Vega-Lite
+# / Vega-Embed JavaScript runtime inside its wheel, so reports are fully
+# self-contained and render offline with no CDN or Node dependency.
+report = [
+    "vl-convert-python>=1.7",
+]
 
 [project.scripts]
 rigel = "rigel.cli:main"
