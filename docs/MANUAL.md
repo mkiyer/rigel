@@ -331,7 +331,8 @@ Pass `--tsv` to also write `.tsv` mirrors, or convert afterward with
 | `gene_quant.feather` | Gene-level aggregation |
 | `nrna_quant.feather` | nRNA entity estimates |
 | `loci.feather` | Per-locus EM summary |
-| `summary.json` | Run-level QC + calibration scalars |
+| `summary.json` | Run-level QC manifest + calibration scalars (`schema_version` 2) |
+| `fragment_lengths.feather` | Raw fragment-length histograms, tidy `(category, length, count)` |
 | `config.yaml` | Resolved run configuration (reproducibility) |
 | `locus_stats.feather` | Per-locus EM convergence profiling — **only** with `--emit-locus-stats` |
 
@@ -441,23 +442,51 @@ components (one per transcript row + one gDNA).
 | `gdna_eff_len_em` | Exposure-adjusted EM effective length of the locus gDNA component |
 | `gdna_eff_len_per_bp` | `gdna_eff_len_em / locus_span_bp` diagnostic ratio |
 
+### fragment_lengths.feather / fragment_lengths.tsv
+
+Raw fragment-length histograms in tidy long form — one row per non-empty 1-bp
+bin. This is the plotting substrate for the fragment-length distributions
+(kept out of `summary.json`, where it previously added thousands of lines).
+
+| Column | Description |
+|--------|-------------|
+| `category` | FL model: `global`, `gdna`, `rna`, or a splice category (`unspliced`, `spliced_annot`, `spliced_unannot`, `spliced_implicit`, `splice_artifact`) |
+| `length` | Fragment length (bp) |
+| `count` | Fragment weight in this bin (fractional for the `gdna` structural pool) |
+
+Per category, `count` sums to the matching `summary.json` →
+`fragment_length.<category>.n_observations`. The `gdna` / `rna` categories are
+the deconvolved structural pools used for scoring/calibration; the splice
+categories are the scanner's raw per-fragment histograms.
+
 ### summary.json
 
-Run-level summary. Top-level keys:
+Run-level QC manifest. It is a small, human-readable index — the bulky raw
+fragment-length histograms live in the `fragment_lengths.feather` companion
+(see below), not in the JSON. `schema_version` (integer) identifies the layout;
+the current version is **2**. Top-level keys:
 
 | Key | Contents |
 |-----|----------|
+| `schema_version` | Manifest schema version (currently `2`) |
 | `rigel_version`, `timestamp` | Version and run time |
 | `command` | Subcommand, resolved arguments, config-file path |
 | `configuration` | All resolved pipeline parameters |
 | `input` | Absolute BAM and index paths |
 | `alignment_stats` | Total, mapped, unique, multimapping, proper-pair, duplicate, QC-fail read counts |
-| `fragment_stats` | Total, genic, intergenic, and chimeric breakdowns; annotated/unannotated SJ counts |
-| `strand_model` | Protocol (`R1-sense` / `R1-antisense`), strand specificity, `p_r1_sense`, training count, posterior variance, 95% CI |
+| `fragment_stats` | Total, genic, intergenic, and chimeric breakdowns; annotated/unannotated SJ counts; a `splice` sub-block with the per-fragment splice-type breakdown (`unspliced`, `spliced_annotated`, `spliced_unannotated`, `spliced_implicit`, `splice_artifact`) plus `sj_blacklisted` |
+| `strand_model` | Protocol (`R1-sense` / `R1-antisense`), strand specificity, `p_r1_sense`, training count, posterior variance, 95% CI, and a `diagnostics` sub-block comparing the all-exonic model to the spliced-only model (`contamination_gap` — a positive value flags unstranded gDNA contamination) |
 | `calibration` | Library-scalar calibration outputs (see below) |
 | `gdna_eff_len` | Summary of the per-locus gDNA effective-length series (`em`, `per_bp`) |
-| `fragment_length` | `global`, `gdna`, `rna`, and per-splice-category FL summaries + histograms |
+| `fragment_length` | Per-category FL **summary statistics only** (`n_observations`, `mean`, `std`, `median`, `mode`, `max_size`, `overflow_count`, `overflow_fraction`) for `global`, `gdna`, `rna`, and each splice category. The raw per-bin histograms are in `fragment_lengths.feather` |
 | `quantification` | `n_transcripts`, `n_genes`, `n_loci`, assignment counts, and mRNA/nRNA/gDNA totals + fractions |
+
+> **Schema v2 (breaking change from v1).** The full per-bin FL histograms were
+> removed from `summary.json` — they inflated the file by thousands of lines —
+> and moved to `fragment_lengths.feather`. `fragment_length` now carries only
+> summary statistics. The `overflow` object is flattened to `overflow_count` /
+> `overflow_fraction`. New: `schema_version`, `fragment_stats.splice`, and
+> `strand_model.diagnostics`.
 
 The **`calibration`** block holds exactly the library-wide calibration
 scalars (it is `null` if calibration did not run):

@@ -200,6 +200,76 @@ def _build_pipeline_config(
     return cfg
 
 
+#: summary.json schema version. Bumped to 2 when the fragment-length histograms
+#: were externalized to ``fragment_lengths.feather`` (they previously bloated the
+#: JSON by thousands of lines) and the splice / strand-contamination diagnostics
+#: were added. Consumers should read this before parsing.
+SUMMARY_SCHEMA_VERSION = 2
+
+
+def _fragment_length_report(flm, fl_models):
+    """Split the fragment-length models into a lean summary + a tidy histogram table.
+
+    Returns ``(summary_by_category, histogram_df)`` where
+
+    * ``summary_by_category`` is ``{category: {n_observations, mean, std, median,
+      mode, max_size, overflow_count, overflow_fraction}}`` — small, human-readable,
+      destined for ``summary.json`` (no raw per-bin arrays).
+    * ``histogram_df`` is a long ``(category, length, count)`` DataFrame — the raw
+      1-bp histograms, destined for ``fragment_lengths.feather``. This is the bulk
+      that used to inflate ``summary.json``.
+
+    Categories: ``global`` + the library ``gdna`` / ``rna`` pools (when
+    ``fl_models`` is present) + the per-splice-category scanner histograms
+    (``unspliced``, ``spliced_annot``, ``spliced_unannot``, ``spliced_implicit``,
+    ``splice_artifact``).
+    """
+    import pandas as pd
+
+    raw = flm.to_dict()  # {"global": {summary, histogram}, <per-splice-category>: ...}
+
+    # Ordered category set: global, then the deconvolved gDNA/RNA pools, then the
+    # raw per-splice-category models. Matches the pre-v2 fragment_length ordering.
+    entries: dict = {"global": raw["global"]}
+    if fl_models is not None:
+        entries["gdna"] = fl_models.gdna_model().to_dict()
+        entries["rna"] = fl_models.rna_model().to_dict()
+    for key, val in raw.items():
+        if key != "global":
+            entries[key] = val
+
+    summary_by_category: dict = {}
+    cats: list = []
+    lengths: list = []
+    counts: list = []
+    for cat, d in entries.items():
+        s = d["summary"]
+        summary_by_category[cat] = {
+            "n_observations": s["n_observations"],
+            "mean": s["mean"],
+            "std": s["std"],
+            "median": s["median"],
+            "mode": s["mode"],
+            "max_size": s["max_size"],
+            "overflow_count": s["overflow"]["count"],
+            "overflow_fraction": s["overflow"]["fraction"],
+        }
+        lo, _hi = d["histogram"]["range"]
+        for i, c in enumerate(d["histogram"]["values"]):
+            cats.append(cat)
+            lengths.append(lo + i)
+            counts.append(c)
+
+    histogram_df = pd.DataFrame(
+        {
+            "category": pd.Series(cats, dtype="category"),
+            "length": pd.Series(lengths, dtype="int32"),
+            "count": pd.Series(counts, dtype="float64"),
+        }
+    )
+    return summary_by_category, histogram_df
+
+
 def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     """Write quantification tables and summary.json."""
     import json
@@ -209,6 +279,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     nrna_quant_path = output_dir / "nrna_quant.feather"
     loci_path = output_dir / "loci.feather"
     summary_path = output_dir / "summary.json"
+    fragment_lengths_path = output_dir / "fragment_lengths.feather"
     config_yaml_path = output_dir / "config.yaml"
 
     # Log stats
@@ -279,21 +350,35 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     sm_primary = sm.exonic_spliced
     ci_lo, ci_hi = sm_primary.posterior_95ci()
 
-    # Fragment length: full histograms + summary statistics.
+    # Fragment length: lean per-category summary statistics go into summary.json;
+    # the raw 1-bp histograms are written separately to fragment_lengths.feather
+    # (they used to inflate summary.json by thousands of lines). Categories:
     #   global + per-splice-category  ← scanner's raw histograms (frag_length_models)
     #   gdna + rna                    ← empirical views of the FL models actually used
     #                                    for scoring/calibration (result.fl_models):
     #                                    rna = spliced-annotated fragments,
     #                                    gdna = intergenic+intronic structural pool.
-    fl_dict = flm.to_dict()  # {"global": ..., <per-category>: ...}
     fl_models = result.fl_models
-    if fl_models is not None:
-        fl_dict = {
-            "global": fl_dict["global"],
-            "gdna": fl_models.gdna_model().to_dict(),
-            "rna": fl_models.rna_model().to_dict(),
-            **{k: v for k, v in fl_dict.items() if k != "global"},
-        }
+    fl_summary, fl_histogram_df = _fragment_length_report(flm, fl_models)
+
+    # Splice-type breakdown — per-fragment classification from the FL category
+    # models, plus the blacklist tally. Surfaces the ``spliced_implicit`` and
+    # ``splice_artifact`` classes that the scan-level ``with_*_sj`` counters omit.
+    from .splice import SpliceType
+
+    _cat_models = flm.category_models
+
+    def _splice_n(stype) -> int:
+        return int(_cat_models[stype].n_observations)
+
+    splice_counts = {
+        "unspliced": _splice_n(SpliceType.UNSPLICED),
+        "spliced_annotated": _splice_n(SpliceType.SPLICED_ANNOT),
+        "spliced_unannotated": _splice_n(SpliceType.SPLICED_UNANNOT),
+        "spliced_implicit": _splice_n(SpliceType.SPLICED_IMPLICIT),
+        "splice_artifact": _splice_n(SpliceType.SPLICE_ARTIFACT),
+        "sj_blacklisted": int(stats.n_sj_blacklisted),
+    }
 
     # Calibration section — minimal library-scalar observability (the v5 per-region dict stays
     # burned down). Surfacing gdna_strand_overdispersion here is required so it is never again
@@ -329,6 +414,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         cmd_params[dest] = val
 
     summary = {
+        "schema_version": SUMMARY_SCHEMA_VERSION,
         "rigel_version": __version__,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "command": {
@@ -362,6 +448,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "chimeric_cis_diff": stats.n_chimeric_cis_strand_diff,
             "with_annotated_sj": stats.n_with_annotated_sj,
             "with_unannotated_sj": stats.n_with_unannotated_sj,
+            "splice": splice_counts,
         },
         "strand_model": {
             "protocol": "R1-sense" if sm.read1_sense else "R1-antisense",
@@ -371,13 +458,25 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "n_training_fragments": sm.n_observations,
             "posterior_variance": round(sm_primary.posterior_variance(), 8),
             "ci_95": [round(ci_lo, 6), round(ci_hi, 6)],
+            # All-exonic (RNA+gDNA) diagnostic model, never used for scoring.
+            # A positive ``contamination_gap`` means unstranded gDNA is dragging
+            # the mixed all-exonic estimate toward 0.5 relative to the clean
+            # spliced-only model — a gDNA-contamination fingerprint.
+            "diagnostics": {
+                "exonic_all_specificity": round(sm.exonic.strand_specificity, 6),
+                "exonic_all_p_r1_sense": round(sm.exonic.p_r1_sense, 6),
+                "exonic_all_n_fragments": sm.exonic.n_observations,
+                "contamination_gap": round(
+                    sm.exonic_spliced.strand_specificity - sm.exonic.strand_specificity, 6
+                ),
+            },
         },
         "calibration": cal_dict,
         "gdna_eff_len": {
             "em": _locus_series_summary("gdna_eff_len_em"),
             "per_bp": _locus_series_summary("gdna_eff_len_per_bp"),
         },
-        "fragment_length": fl_dict,
+        "fragment_length": fl_summary,
         "quantification": {
             "n_transcripts": index.num_transcripts,
             "n_genes": index.num_annotated_genes,
@@ -413,6 +512,15 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
     logging.info(f"[DONE] Summary written to {summary_path}")
+
+    # Write the raw fragment-length histograms (the bulk kept out of summary.json).
+    # Tidy long form: (category, length, count) — one row per non-empty 1-bp bin.
+    fl_histogram_df.to_feather(str(fragment_lengths_path), **feather_kw)
+    if getattr(args, "tsv", False):
+        fl_histogram_df.to_csv(
+            str(fragment_lengths_path.with_suffix(".tsv")), sep="\t", index=False
+        )
+    logging.info(f"[DONE] Wrote {fragment_lengths_path} ({len(fl_histogram_df)} rows)")
 
     # Write config.yaml — reproducible run configuration
     _write_config_yaml(config_yaml_path, args)
