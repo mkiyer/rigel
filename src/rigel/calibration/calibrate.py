@@ -81,6 +81,7 @@ def calibrate(
     rna_fl_pmf: "np.ndarray",
     config: "CalibrationConfig",
     _debug: dict | None = None,
+    diagnostics_out: dict | None = None,
 ) -> CalibrationResult:
     """Deconvolve the library into gDNA / RNA per node, then derive gdna_density_global.
 
@@ -206,6 +207,14 @@ def calibrate(
             boundary_substrate=boundary_substrate, region_arrays=region_arrays,
             rna_sense_frac=rna_sense_frac, region_eff_len=region_eff_len, boundary_eff_len=boundary_eff_len,
         )
+
+    # Report-facing diagnostics: the fitted gDNA-density KDE (bimodal ⇒ capture
+    # enrichment). Only when the Phase-2 prior was actually fit; consumed by the
+    # QC report, never by the EM (which uses CalibrationResult).
+    if diagnostics_out is not None and gdna_prior is not None:
+        from .diagnostics import CalibrationDiagnostics
+
+        diagnostics_out["calibration"] = CalibrationDiagnostics.from_prior(gdna_prior)
 
     # Derive gdna_density_global (the library-average density QC scalar).
     density_global = gdna_density_global(

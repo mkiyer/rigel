@@ -295,6 +295,27 @@
     });
   }
 
+  /* ---------- capture note (no verdict — descriptive numbers) ---------- */
+  function captureNote() {
+    const n = $("capture-note"); if (!n) return;
+    const c = M.calibration && M.calibration.capture;
+    if (!c) {
+      n.innerHTML = "The gDNA-density KDE was not fit for this run (too few training nodes).";
+      return;
+    }
+    if (c.is_bimodal) {
+      n.innerHTML = `<b>Bimodal gDNA density.</b> A low (depleted / off-target) mode and a high ` +
+        `(enriched / on-target) mode, separated by <span class="num">${(c.separation_nats ?? 0).toFixed(2)} nats</span> ` +
+        `— an enrichment of <span class="num">${(c.enrichment_factor ?? 0).toFixed(0)}×</span>. ` +
+        `This is the signature of hybrid-capture enrichment; a flat / unimodal curve indicates none. ` +
+        `<span style="color:var(--muted)">n_eff ${(c.kde_n_eff ?? 0).toFixed(0)}, bandwidth ${(c.kde_bandwidth ?? 0).toFixed(3)}.</span>`;
+    } else {
+      n.innerHTML = `<b>Unimodal gDNA density</b> (${c.n_modes} mode${c.n_modes === 1 ? "" : "s"}). ` +
+        `No clear enriched/depleted separation — consistent with a non-capture (whole-transcriptome) library ` +
+        `or unsuccessful enrichment. <span style="color:var(--muted)">n_eff ${(c.kde_n_eff ?? 0).toFixed(0)}.</span>`;
+    }
+  }
+
   /* ---------- scroll spy ---------- */
   function spy() {
     const links = [...document.querySelectorAll(".rail a")];
@@ -322,7 +343,7 @@
     flTable();
     stackBar($("pool-bar"), M.quant.pools); legend($("pool-legend"), M.quant.pools, true); poolTable();
     kpis($("pool-kpis"), M.quant.kpis); donut($("pool-donut"), M.quant.pools, M.quant.rna_share);
-    if (M.calibration) kpis($("calib-kpis"), M.calibration.kpis);
+    if (M.calibration) { kpis($("calib-kpis"), M.calibration.kpis); captureNote(); }
     geneTable("");
     const gs = $("gsearch"); if (gs) gs.addEventListener("input", (e) => geneTable(e.target.value));
     config();

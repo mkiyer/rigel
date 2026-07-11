@@ -11,13 +11,17 @@ import importlib.util
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
+import numpy as np
+
+from rigel.calibration.diagnostics import CalibrationDiagnostics
 from rigel.report.build import build_report
 from rigel.report.model import build_view_model
-from rigel.report.specs import build_charts, build_fl_specs, genome_track_spec
+from rigel.report.specs import build_charts, build_fl_specs, capture_kde_spec, genome_track_spec
 from rigel.report.substrate import SubstrateError, load_substrate
 
 _HAS_VEGA = importlib.util.find_spec("vl_convert") is not None
@@ -197,9 +201,62 @@ def test_genome_track_spec_bins_per_ref():
     refs = {row["ref"] for row in spec["data"]["values"]}
     assert refs == {"chr1", "chr2"}
     # build_charts merges genome in when a track is present
-    charts = build_charts(None, track)
-    assert set(charts) == {"genome"}
-    assert build_charts(None, None) == {}
+    stub = SimpleNamespace(
+        fragment_lengths=None,
+        calibration_track=track,
+        gdna_density_kde=None,
+        gdna_density_nodes=None,
+        summary={},
+    )
+    assert set(build_charts(stub)) == {"genome"}
+    empty = SimpleNamespace(
+        fragment_lengths=None,
+        calibration_track=None,
+        gdna_density_kde=None,
+        gdna_density_nodes=None,
+        summary={},
+    )
+    assert build_charts(empty) == {}
+
+
+def test_capture_diagnostics_from_prior_labels_modes():
+    # A bimodal density: depleted mode at x=-8, enriched at x=-2.
+    x = np.linspace(-10, 0, 256)
+    logp = np.log(
+        np.exp(-0.5 * ((x + 8) / 0.4) ** 2) + 0.6 * np.exp(-0.5 * ((x + 2) / 0.5) ** 2) + 1e-9
+    )
+    prior = SimpleNamespace(
+        x_grid=x,
+        logP_grid=logp,
+        bandwidth=0.4,
+        n_eff=1234.0,
+        train_x=np.array([-8.1, -7.9, -2.1, -1.9]),
+        train_w=np.ones(4),
+        train_kind=np.array([0, 1, 2, 3]),
+        modes=((-8.0, 0.0), (-2.0, -0.5)),  # (x, logP) sorted by height desc
+    )
+    diag = CalibrationDiagnostics.from_prior(prior)
+    assert diag.depleted_mode < diag.enriched_mode
+    assert diag.separation_nats == pytest.approx(6.0, abs=1e-6)
+    assert diag.enrichment_factor == pytest.approx(np.exp(6.0), rel=1e-6)
+    assert diag.n_modes == 2
+
+
+def test_capture_kde_spec_layers():
+    kde = pd.DataFrame({"log_rho": np.linspace(-10, 0, 50), "density": np.linspace(0.01, 0.5, 50)})
+    nodes = pd.DataFrame({"log_rho": [-8.0, -2.0, -5.0], "kind": [0, 2, 1]})
+    capture = {
+        "is_bimodal": True,
+        "depleted_mode_log_rho": -8.0,
+        "enriched_mode_log_rho": -2.0,
+        "separation_nats": 6.0,
+        "enrichment_factor": 403.0,
+    }
+    spec = capture_kde_spec(kde, nodes, capture)
+    assert spec is not None and "layer" in spec
+    # curve + rug + mode-rule + mode-text = 4 layers
+    assert len(spec["layer"]) == 4
+    assert capture_kde_spec(None, None, None) is None
 
 
 def test_build_report_self_contained(tmp_path):

@@ -332,7 +332,12 @@ def _calibration(sub: ReportSubstrate) -> dict:
         gf = track["gdna_frac"].to_numpy(dtype="float64")
         kpis.append({"l": "Mean gDNA frac", "v": f"{float(gf.mean()) * 100:.1f}", "u": "%"})
         kpis.append({"l": "Regions >50% gDNA", "v": _si(int((gf > 0.5).sum()))})
-    return {"kpis": kpis, "has_track": has_track}
+    capture = cal.get("capture")
+    if capture and capture.get("is_bimodal"):
+        kpis.append(
+            {"l": "Enrichment", "v": f"{capture.get('enrichment_factor', 0):.0f}", "u": "×"}
+        )
+    return {"kpis": kpis, "has_track": has_track, "capture": capture}
 
 
 def _config(summary: dict) -> dict:

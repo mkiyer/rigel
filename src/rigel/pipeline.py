@@ -90,6 +90,9 @@ class PipelineResult:
     # Per-region genome-wide gDNA track (ref/start/end + gDNA mass/density/frac),
     # built from the calibration result; feeds the report's genome track + bedGraph.
     calibration_track: "object" = None
+    # Report-facing calibration diagnostics (the fitted gDNA-density KDE); None
+    # when the Phase-2 KDE was not fit (e.g. tiny / toy scenarios).
+    calibration_diagnostics: "object" = None
 
 
 def _sj_tag_to_spec(sj_strand_tag) -> str:
@@ -878,6 +881,7 @@ def run_pipeline(
     )
 
     # NOTE: the buffer is NOT freed here — quant_from_buffer scans it below.
+    _calib_diag: dict = {}
     calibration = calibrate(
         payload=calibration_payload,
         region_arrays=region_arrays,
@@ -885,7 +889,9 @@ def run_pipeline(
         gdna_fl_pmf=gdna_fl_pmf,
         rna_fl_pmf=fl_models.rna_pmf,
         config=config.calibration,
+        diagnostics_out=_calib_diag,
     )
+    calibration_diagnostics = _calib_diag.get("calibration")
 
     logger.info(
         "calibration: R=%d gdna_density_global=%.4g rna_sense_frac=%.3f gDNA_mass=%.0f RNA_mass=%.0f",
@@ -968,4 +974,5 @@ def run_pipeline(
         calibration=calibration,
         fl_models=fl_models,
         calibration_track=calibration_track,
+        calibration_diagnostics=calibration_diagnostics,
     )

@@ -333,7 +333,15 @@ Pass `--tsv` to also write `.tsv` mirrors, or convert afterward with
 | `loci.feather` | Per-locus EM summary |
 | `summary.json` | Run-level QC manifest + calibration scalars (`schema_version` 2) |
 | `fragment_lengths.feather` | Raw fragment-length histograms, tidy `(category, length, count)` |
+| `calibration_track.feather` | Per-region gDNA solution: `(ref, start, end, gdna_mass, rna_mass, gdna_density, gdna_frac)` |
+| `calibration_track.bedgraph` | Per-region gDNA density as a genome-browser track (IGV / UCSC) |
+| `gdna_density_kde.feather` | The fitted gDNA-density KDE curve `(log_rho, log_density, density)` — capture diagnostic |
+| `gdna_density_nodes.feather` | Training-node rug for the KDE `(log_rho, kind)` (downsampled) |
 | `config.yaml` | Resolved run configuration (reproducibility) |
+
+The `calibration_*` and `gdna_density_*` files are written only when calibration
+runs and, for the KDE, only when the Phase-2 gDNA-density prior is fit (enough
+training nodes). Build the HTML report from all of the above with `rigel report`.
 | `locus_stats.feather` | Per-locus EM convergence profiling — **only** with `--emit-locus-stats` |
 
 A `config.yaml` is always written, recording all resolved parameters and I/O
@@ -498,10 +506,26 @@ scalars (it is `null` if calibration did not run):
     "rna_sense_frac":             <float>,  // kappa: sense-strand RNA fraction
     "gdna_strand_overdispersion": <float>,  // gDNA strand Beta-Binomial overdispersion
     "rna_strand_overdispersion":  <float>,  // RNA strand Beta-Binomial overdispersion
-    "n_regions":                  <int>     // number of calibration regions
+    "n_regions":                  <int>,    // number of calibration regions
+    "capture": {                            // present only when the Phase-2 KDE is fit
+      "n_modes":               <int>,       // local maxima of the gDNA-density KDE
+      "is_bimodal":            <bool>,      // >=2 modes: capture-enrichment signature
+      "depleted_mode_log_rho": <float>,     // low (off-target) mode, log gDNA density
+      "enriched_mode_log_rho": <float>,     // high (on-target) mode, log gDNA density
+      "separation_nats":       <float>,     // enriched - depleted (log enrichment)
+      "enrichment_factor":     <float>,     // exp(separation_nats)
+      "kde_bandwidth":         <float>,
+      "kde_n_eff":             <float>,     // effective training-node count
+      "n_training_nodes":      <int>
+    }
   }
 }
 ```
+
+The `capture` block is **descriptive only** — Rigel reports the enrichment
+separation but assigns no categorical "capture worked" verdict; the full KDE
+curve + training-node rug are in `gdna_density_kde.feather` /
+`gdna_density_nodes.feather` for plotting.
 
 The RNA and gDNA fragment-length models used by scoring/calibration are
 reported separately under the top-level **`fragment_length`** key (as

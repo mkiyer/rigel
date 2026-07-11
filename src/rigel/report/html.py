@@ -149,14 +149,21 @@ _SECTIONS = """
     </section>
 
     <section class="panel" id="s-calib">
-      <div class="ph"><span class="eyebrow">06</span><h2>Calibration</h2><span class="desc">Genome-wide gDNA level</span></div>
+      <div class="ph"><span class="eyebrow">06</span><h2>Calibration</h2><span class="desc">gDNA deconvolution &amp; capture enrichment</span></div>
       <div class="pb">
         <div class="kpis" id="calib-kpis"></div>
-        <p class="cap">gDNA density across the genome — binned per reference</p>
+        <div class="grid2 wide-left">
+          <div>
+            <p class="cap">gDNA-density prior — P(log ρg)</p>
+            <div class="vega-chart" id="vega-capture_kde"></div>
+          </div>
+          <div><div class="note" id="capture-note"></div></div>
+        </div>
+        <p class="cap" style="margin-top:24px">gDNA density across the genome — binned per reference</p>
         <div class="tw"><div class="vega-chart" id="vega-genome"></div></div>
         <div class="note">Per-region gDNA solved by calibration. Also written as
           <span class="num">calibration_track.bedgraph</span> — load it in IGV or the UCSC browser
-          for base-pair inspection. <span class="pill warn" style="font-size:11px">capture-mode KDE · next</span></div>
+          for base-pair inspection.</div>
       </div>
     </section>
 

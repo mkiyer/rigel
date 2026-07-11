@@ -227,10 +227,134 @@ def genome_track_spec(track: pd.DataFrame | None) -> dict | None:
     }
 
 
-def build_charts(fl_df: pd.DataFrame | None, track: pd.DataFrame | None) -> dict:
+_KIND_NAMES = {0: "intergenic", 1: "intron", 2: "exon", 3: "boundary"}
+
+
+def capture_kde_spec(
+    kde: pd.DataFrame | None, nodes: pd.DataFrame | None, capture: dict | None
+) -> dict | None:
+    """gDNA-density KDE: the ``P(log ρ_g)`` curve + labeled depleted/enriched modes + a node rug.
+
+    Bimodality is the capture signal (a low off-target mode + a high on-target
+    mode). No categorical verdict — the separation / enrichment numbers are shown
+    and left to the analyst.
+    """
+    if kde is None or kde.empty:
+        return None
+    curve = [
+        {"log_rho": float(x), "density": float(d)} for x, d in zip(kde["log_rho"], kde["density"])
+    ]
+
+    layers = [
+        {
+            "data": {"values": curve},
+            "mark": {
+                "type": "area",
+                "line": {"strokeWidth": 2},
+                "opacity": 0.18,
+                "interpolate": "monotone",
+            },
+            "encoding": {
+                "x": {
+                    "field": "log_rho",
+                    "type": "quantitative",
+                    "title": "log gDNA density  ρg  (nats)",
+                },
+                "y": {"field": "density", "type": "quantitative", "title": "P(log ρg)"},
+                "tooltip": [
+                    {"field": "log_rho", "title": "log ρg", "format": ".2f"},
+                    {"field": "density", "title": "density", "format": ".3~e"},
+                ],
+            },
+        }
+    ]
+
+    # Node rug, coloured by node kind, along the bottom.
+    if nodes is not None and not nodes.empty:
+        rug = [
+            {"log_rho": float(x), "kind": _KIND_NAMES.get(int(k), "?")}
+            for x, k in zip(nodes["log_rho"], nodes["kind"])
+        ]
+        layers.append(
+            {
+                "data": {"values": rug},
+                "mark": {
+                    "type": "tick",
+                    "opacity": 0.5,
+                    "thickness": 1.5,
+                    "size": 10,
+                    "yOffset": 120,
+                },
+                "encoding": {
+                    "x": {"field": "log_rho", "type": "quantitative"},
+                    "color": {
+                        "field": "kind",
+                        "type": "nominal",
+                        "title": "node",
+                        "sort": ["intergenic", "intron", "exon", "boundary"],
+                        "legend": {"orient": "top-right"},
+                    },
+                    "tooltip": [
+                        {"field": "kind", "title": "node kind"},
+                        {"field": "log_rho", "title": "log ρg", "format": ".2f"},
+                    ],
+                },
+            }
+        )
+
+    # Depleted / enriched mode rules + labels.
+    modes = []
+    if capture:
+        if capture.get("depleted_mode_log_rho") is not None:
+            modes.append({"log_rho": capture["depleted_mode_log_rho"], "label": "depleted"})
+        enr = capture.get("enriched_mode_log_rho")
+        if enr is not None and capture.get("is_bimodal"):
+            modes.append({"log_rho": enr, "label": "enriched"})
+    if modes:
+        layers.append(
+            {
+                "data": {"values": modes},
+                "mark": {"type": "rule", "strokeDash": [3, 3], "opacity": 0.7},
+                "encoding": {"x": {"field": "log_rho", "type": "quantitative"}},
+            }
+        )
+        layers.append(
+            {
+                "data": {"values": modes},
+                "mark": {"type": "text", "dy": -6, "fontWeight": "bold", "baseline": "bottom"},
+                "encoding": {
+                    "x": {"field": "log_rho", "type": "quantitative"},
+                    "y": {"value": 0},
+                    "text": {"field": "label"},
+                },
+            }
+        )
+
+    return {
+        "$schema": _SCHEMA,
+        "width": "container",
+        "height": 250,
+        "layer": layers,
+        "autosize": {"type": "fit", "contains": "padding"},
+    }
+
+
+def _capture_meta(sub) -> dict | None:
+    cal = getattr(sub, "summary", {}).get("calibration") or {}
+    return cal.get("capture")
+
+
+def build_charts(sub) -> dict:
     """All Vega-Lite charts for the report, keyed by container id (``vega-<key>``)."""
-    charts = build_fl_specs(fl_df)
-    genome = genome_track_spec(track)
+    charts = build_fl_specs(getattr(sub, "fragment_lengths", None))
+    genome = genome_track_spec(getattr(sub, "calibration_track", None))
     if genome is not None:
         charts["genome"] = genome
+    capture = capture_kde_spec(
+        getattr(sub, "gdna_density_kde", None),
+        getattr(sub, "gdna_density_nodes", None),
+        _capture_meta(sub),
+    )
+    if capture is not None:
+        charts["capture_kde"] = capture
     return charts

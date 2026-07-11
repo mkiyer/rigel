@@ -172,12 +172,32 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     assert pr.calibration_track is not None
     track = pd.read_feather(out / "calibration_track.feather")
     assert list(track.columns) == [
-        "ref", "start", "end", "gdna_mass", "rna_mass", "gdna_density", "gdna_frac"
+        "ref",
+        "start",
+        "end",
+        "gdna_mass",
+        "rna_mass",
+        "gdna_density",
+        "gdna_frac",
     ]
     assert len(track) == pr.calibration.n_regions
     assert (track["gdna_frac"] >= 0).all() and (track["gdna_frac"] <= 1).all()
     bg = (out / "calibration_track.bedgraph").read_text().splitlines()
     assert bg[0].startswith("track type=bedGraph")
     assert len(bg) == len(track) + 1  # header + one line per region
+
+    # capture-mode KDE diagnostics — only when the Phase-2 KDE was fit
+    if pr.calibration_diagnostics is not None:
+        cap = summary["calibration"]["capture"]
+        assert {
+            "n_modes",
+            "is_bimodal",
+            "separation_nats",
+            "enrichment_factor",
+            "kde_n_eff",
+        } <= set(cap)
+        kde = pd.read_feather(out / "gdna_density_kde.feather")
+        assert {"log_rho", "log_density", "density"} <= set(kde.columns)
+        assert (out / "gdna_density_nodes.feather").exists()
 
     sc.cleanup()

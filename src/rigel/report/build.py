@@ -39,7 +39,7 @@ def build_report(
         logger.warning("[report] %s", w)
 
     model = build_view_model(sub)
-    charts = build_charts(sub.fragment_lengths, sub.calibration_track)
+    charts = build_charts(sub)
 
     if title is None:
         title = f"Rigel QC · {model['meta']['sample']}"
