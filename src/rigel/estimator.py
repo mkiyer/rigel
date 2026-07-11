@@ -200,11 +200,17 @@ class AbundanceEstimator:
                     1.0,
                 )
             wsc = getattr(geometry, "warm_start_counts", None)
-            self._t_warm_start = (
-                np.ascontiguousarray(wsc, dtype=np.float64)
-                if wsc is not None
-                else np.empty(0, dtype=np.float64)
-            )
+            if wsc is None:
+                self._t_warm_start = np.empty(0, dtype=np.float64)
+            else:
+                self._t_warm_start = np.ascontiguousarray(wsc, dtype=np.float64)
+                # Length must equal n_transcripts (indexed by global transcript id in the C++ gather);
+                # otherwise a short array would silently OOB-read there. Empty ⇒ no warm start (fallback).
+                if self._t_warm_start.shape[0] != num_transcripts:
+                    raise ValueError(
+                        f"warm_start_counts length {self._t_warm_start.shape[0]} "
+                        f"!= num_transcripts {num_transcripts}."
+                    )
         else:
             self._t_to_g = None
             self._transcript_spans = None
