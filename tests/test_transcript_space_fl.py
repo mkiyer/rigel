@@ -20,7 +20,7 @@ import textwrap
 import pytest
 
 from rigel.types import Strand, GenomicInterval
-from rigel.resolution import make_fragment, resolve_fragment
+from _resolution_reference import make_fragment, resolve_fragment
 from conftest import build_test_index
 
 

@@ -42,6 +42,12 @@ def _float_unit_scatter(arr: np.ndarray):
     raise TypeError(f"Expected float32 or float64 unit payload, got {arr.dtype}")
 
 
+# Dtype-driven selectors: a table entry whose scatter_fn is one of these is
+# resolved to its concrete scatter by calling it with the global array (no
+# by-name special-casing — a new float array routes correctly automatically).
+_FLOAT_SELECTORS = (_float_candidate_scatter, _float_unit_scatter)
+
+
 def partition_and_free(
     em_data: ScoredFragments,
     multi_loci: list,
@@ -80,7 +86,7 @@ def partition_and_free(
     cand_results = {}
     for attr, scatter_fn in CAND_ARRAYS:
         global_arr = getattr(em_data, attr)
-        if attr in {"log_liks", "coverage_weights"}:
+        if scatter_fn in _FLOAT_SELECTORS:
             scatter_fn = scatter_fn(global_arr)
         cand_results[attr] = scatter_fn(
             global_arr, em_data.offsets, locus_units, offsets_list, n_loci
@@ -108,7 +114,7 @@ def partition_and_free(
             global_arr = global_arr.view(np.uint8)
         elif global_arr.dtype == np.int8:
             global_arr = global_arr.view(np.uint8)
-        elif attr == "gdna_log_liks":
+        elif scatter_fn in _FLOAT_SELECTORS:
             scatter_fn = scatter_fn(global_arr)
         unit_results[attr] = scatter_fn(global_arr, locus_units, n_loci)
         setattr(em_data, attr, None)

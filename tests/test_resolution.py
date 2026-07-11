@@ -7,7 +7,7 @@ from conftest import build_test_index
 
 from rigel.types import ChimeraType, MergeOutcome, Strand, GenomicInterval
 from rigel.splice import SpliceType
-from rigel.resolution import (
+from _resolution_reference import (
     _detect_intrachromosomal_chimera,
     make_fragment,
     resolve_fragment,

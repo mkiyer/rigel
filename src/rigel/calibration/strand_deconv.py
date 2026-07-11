@@ -44,15 +44,11 @@ class NodeDeconv:
 
 @dataclass(frozen=True, slots=True)
 class _SideQuantities:
-    """Per-region boundary-side quantities shared by the seed builder (and the retired deconvolution)."""
+    """Per-region boundary-side quantities consumed by the seed builder."""
 
     sense: np.ndarray
-    antisense: np.ndarray
     n_side: np.ndarray  # pos + neg (count evidence)
-    mass: np.ndarray
-    mass_spliced: np.ndarray
     count_gdna_frac: np.ndarray  # count module's gDNA fraction for this side (raw density ratio)
-    count_gdna_frac_var: np.ndarray  # Poisson floor σ_g² = g²/n_side (cap g(1−g))
     strand_observable: np.ndarray
     count_observable: np.ndarray
 
@@ -120,13 +116,9 @@ def _compute_side(
     undefined. The **count** fraction is the raw crossing density ratio: a count-observable side (no
     shared exon) reads ``count_gdna_frac → 1`` from its own crossing mass; otherwise it borrows the swept
     region density. (No strand cleaning — the count module is raw.)
-
-    The **count variance** is the Poisson floor (a boundary side is a *direct* measurement, not an imputed
-    region): the crossing count ``n_side`` is Poisson, so the fraction's relative variance is ``1/n_side``,
-    giving ``σ_g² = g_count²·(1/n_side)`` capped at the Bernoulli maximum ``g_count(1−g_count)``.
     """
     mass = view.mass_unspliced
-    sense, antisense, n_side, strand_observable = _side_strand_orientation(
+    sense, _antisense, n_side, strand_observable = _side_strand_orientation(
         view, same, ts_self, ts_other
     )
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -137,20 +129,10 @@ def _compute_side(
         count_gdna_frac = np.clip(
             np.where(mass > 0.0, density * eff / np.maximum(mass, 1e-12), 0.0), 0.0, 1.0
         )
-        # Poisson floor: crossing count n_side ~ Poisson ⇒ relative variance 1/n_side;
-        # σ_g² = g²·(1/n_side), capped at the Bernoulli maximum g(1−g) (sides with no crossings → 0).
-        v_rel = np.where(n_side > 0.0, 1.0 / np.maximum(n_side, 1e-12), 0.0)
-        count_gdna_frac_var = np.minimum(
-            count_gdna_frac**2 * v_rel, count_gdna_frac * (1.0 - count_gdna_frac)
-        )
     return _SideQuantities(
         sense=sense,
-        antisense=antisense,
         n_side=n_side,
-        mass=mass,
-        mass_spliced=view.mass_spliced,
         count_gdna_frac=count_gdna_frac,
-        count_gdna_frac_var=count_gdna_frac_var,
         strand_observable=strand_observable,
         count_observable=np.asarray(side_count_observable, dtype=bool),
     )

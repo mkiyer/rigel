@@ -130,8 +130,6 @@ def test_write_post_capture_truth_uses_observed_read_origins(tmp_path):
     assert tx1["post_capture_mrna_fragments"] == 1
     assert tx1["post_capture_nrna_fragments"] == 1
     assert tx1["post_capture_total_rna_fragments"] == 2
-    assert tx1["molecular_mrna_abundance"] == 10.0
-    assert tx1["molecular_nrna_abundance"] == 2.0
     assert tx2["mrna_abundance"] == 1.0
 
     fl = pd.read_csv(tmp_path / "truth_fragment_lengths.tsv", sep="\t")

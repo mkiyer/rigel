@@ -156,7 +156,7 @@ class ScenarioResult:
             Mapping of ``t_id → count`` for each transcript that
             contributed at least one simulated fragment.
         """
-        return dict(count_mrna_by_transcript_from_bam(self.bam_path))
+        return self.ground_truth_from_bam()
 
     def ground_truth_gdna_count(self) -> int:
         """Count gDNA fragments from FASTQ read names.

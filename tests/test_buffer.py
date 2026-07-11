@@ -12,7 +12,7 @@ import pytest
 import rigel.buffer as buffer_mod
 from rigel.types import Strand, MergeOutcome, GenomicInterval
 from rigel.splice import SpliceType
-from rigel.resolution import make_fragment, resolve_fragment
+from _resolution_reference import make_fragment, resolve_fragment
 from rigel.buffer import (
     FragmentBuffer,
     BufferedFragment,

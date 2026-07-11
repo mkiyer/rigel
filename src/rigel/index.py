@@ -1078,10 +1078,13 @@ class TranscriptIndex:
             )
         on_disk_version = int(manifest.get("format_version", -1))
         if on_disk_version != INDEX_FORMAT_VERSION:
+            built_by = manifest.get("rigel_version")
+            built_str = f" (built by rigel {built_by})" if built_by else ""
             raise RuntimeError(
-                f"Index at {index_dir} has format_version={on_disk_version}, "
-                f"but this rigel build requires {INDEX_FORMAT_VERSION}. "
-                f"Rebuild the index (rigel index --fasta ... --gtf ...)."
+                f"Index at {index_dir} has format_version={on_disk_version}"
+                f"{built_str}, but this rigel build (v{_rigel_version()}) "
+                f"requires {INDEX_FORMAT_VERSION}. "
+                f"Rebuild: rigel index --fasta ... --gtf ... -o {index_dir}"
             )
 
         # -- reference lengths -------------------------------------------------
@@ -1450,34 +1453,29 @@ class TranscriptIndex:
             )
             logger.info(f"Splice artifact blacklist: {len(bl_df):,} junctions active")
 
-        # 3. Per-transcript exon CSR for transcript-space FL computation
-        n_t = len(self.t_to_g_arr)
-        exon_offsets = [0] * (n_t + 1)
-        for t_idx, ivs in (self._t_exon_intervals or {}).items():
-            exon_offsets[t_idx + 1] = len(ivs)
-        for i in range(n_t):
-            exon_offsets[i + 1] += exon_offsets[i]
-        total_exons = exon_offsets[n_t]
-        exon_starts_flat = [0] * total_exons
-        exon_ends_flat = [0] * total_exons
-        exon_cumsum_flat = [0] * total_exons
-        t_lengths = [0] * n_t
-        for t_idx, ivs in (self._t_exon_intervals or {}).items():
-            off = exon_offsets[t_idx]
-            cum = 0
-            for j in range(len(ivs)):
-                s, e = int(ivs[j, 0]), int(ivs[j, 1])
-                exon_starts_flat[off + j] = s
-                exon_ends_flat[off + j] = e
-                exon_cumsum_flat[off + j] = cum
-                cum += e - s
-            t_lengths[t_idx] = cum
+        # 3. Per-transcript exon CSR for transcript-space FL computation.
+        #    build_exon_csr() is the single owner of this CSR (it is also
+        #    consumed by scoring), so reuse it here rather than duplicating
+        #    the flattening loop — the two paths cannot drift.  NOTE: this
+        #    also triggers build_exon_csr()'s free-after-build of
+        #    ``_t_exon_intervals`` (unless retain_test_structures); the dict
+        #    is no longer needed after this point (get_exon_intervals()
+        #    falls back to the cached CSR arrays).
+        exon_offsets, exon_starts_flat, exon_ends_flat, exon_cumsum_flat = (
+            self.build_exon_csr()
+        )
+        # Per-transcript spliced length = sum of exon lengths, derived from
+        # the same CSR: cumulative segment lengths differenced at the CSR
+        # offsets (int64 accumulation, empty groups → 0).
+        seg_len = (exon_ends_flat - exon_starts_flat).astype(np.int64)
+        seg_cumsum = np.concatenate(([0], np.cumsum(seg_len)))
+        t_lengths = seg_cumsum[exon_offsets[1:]] - seg_cumsum[exon_offsets[:-1]]
         ctx.build_exon_index(
-            exon_offsets,
-            exon_starts_flat,
-            exon_ends_flat,
-            exon_cumsum_flat,
-            t_lengths,
+            exon_offsets.tolist(),
+            exon_starts_flat.tolist(),
+            exon_ends_flat.tolist(),
+            exon_cumsum_flat.tolist(),
+            t_lengths.tolist(),
         )
 
         # 5. Metadata  (t_to_g_arr is already int32 from downcast above)
@@ -1551,6 +1549,13 @@ class TranscriptIndex:
     def get_exon_intervals(self, t_idx: int) -> np.ndarray | None:
         """Return sorted exon ``[start, end)`` intervals for a transcript.
 
+        Order-independent: once :meth:`build_exon_csr` has been called it
+        frees the source ``_t_exon_intervals`` dict (memory optimization,
+        unless ``retain_test_structures``), after which this accessor
+        transparently reconstructs the interval from the cached CSR arrays.
+        It therefore never returns a misleading ``None`` merely because
+        scoring/loading ran first.
+
         Parameters
         ----------
         t_idx : int
@@ -1562,9 +1567,20 @@ class TranscriptIndex:
             ``(n_exons, 2)`` int32 array sorted by genomic start, or
             ``None`` if the transcript has no cached exon intervals.
         """
-        if self._t_exon_intervals is None:
+        if self._t_exon_intervals is not None:
+            return self._t_exon_intervals.get(t_idx)
+        # Dict was freed after build_exon_csr(); rebuild from the cached CSR.
+        cache = getattr(self, "_exon_csr_cache", None)
+        if cache is None:
             return None
-        return self._t_exon_intervals.get(t_idx)
+        offsets, starts, ends, _ = cache
+        if t_idx < 0 or t_idx + 1 >= len(offsets):
+            return None
+        lo = int(offsets[t_idx])
+        hi = int(offsets[t_idx + 1])
+        if lo == hi:
+            return None
+        return np.column_stack((starts[lo:hi], ends[lo:hi])).astype(np.int32)
 
     def build_exon_csr(
         self,
@@ -1577,7 +1593,10 @@ class TranscriptIndex:
 
         The result is cached: subsequent calls return the same arrays
         and the source ``_t_exon_intervals`` dict is freed after the
-        first call to reclaim memory.
+        first call to reclaim memory (unless ``retain_test_structures``).
+        This free-after-build is why :meth:`get_exon_intervals` falls back
+        to reconstructing intervals from the cached CSR — callers must not
+        rely on ``_t_exon_intervals`` still being populated afterwards.
 
         Returns
         -------

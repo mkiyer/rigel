@@ -9,6 +9,7 @@ lives in :mod:`wgs_config`; the suite frontend (config parsing, abundance, run_s
 
 from __future__ import annotations
 
+import contextlib
 import gzip
 import logging
 import multiprocessing
@@ -55,6 +56,20 @@ _FASTQ_BUFFER_SIZE = 100_000
 def _seq_to_bytes(seq: str) -> np.ndarray:
     """Convert a DNA string to a numpy uint8 array (writable copy)."""
     return np.frombuffer(seq.encode("ascii"), dtype=np.uint8).copy()
+
+
+def _mate_flags(r1_is_rev: bool, r2_is_rev: bool) -> tuple[int, int]:
+    """Build the (r1_flag, r2_flag) BAM mate-orientation flags from the mate strands."""
+    r1_flag = BASE_R1_FLAG
+    r2_flag = BASE_R2_FLAG
+    if r1_is_rev:
+        r1_flag |= FLAG_REVERSE
+    if r2_is_rev:
+        r1_flag |= FLAG_MATE_REVERSE
+        r2_flag |= FLAG_REVERSE
+    if r1_is_rev:
+        r2_flag |= FLAG_MATE_REVERSE
+    return r1_flag, r2_flag
 
 
 def _batch_extract_reads(
@@ -459,6 +474,20 @@ class WholeGenomeSimulator:
 
         return dict(counts)
 
+    @contextlib.contextmanager
+    def _use_nrna_rng(self):
+        """Bind the dedicated nascent-RNA RNG stream for the duration of the block.
+
+        Always restores the prior ``self._rng`` on exit (even on exception) so the
+        surrounding pools/streams are untouched by whether/how much nascent was drawn.
+        """
+        _main_rng = self._rng
+        self._rng = self._nrna_rng
+        try:
+            yield
+        finally:
+            self._rng = _main_rng
+
     def _accumulate_rna_counts(
         self,
         n_rna: int,
@@ -483,12 +512,10 @@ class WholeGenomeSimulator:
             )
             # Nascent on the dedicated stream; restore self._rng so the gDNA pool (next) and the
             # mature pool (above) are untouched by whether/how much nascent was drawn.
-            _main_rng = self._rng
-            self._rng = self._nrna_rng
-            nrna_counts = self._accumulate_pool(
-                n_nrna, self._nrna_abund, self._premrna_lengths, space="nrna",
-            )
-            self._rng = _main_rng
+            with self._use_nrna_rng():
+                nrna_counts = self._accumulate_pool(
+                    n_nrna, self._nrna_abund, self._premrna_lengths, space="nrna",
+                )
             return mrna_counts, nrna_counts
 
         # Combined-pool mode (original behaviour)
@@ -673,15 +700,7 @@ class WholeGenomeSimulator:
                 xs_strand = "-" if t.strand == Strand.NEG else "+"
                 tags = [("NH", 1), ("XS", xs_strand, "A")]  # type 'A' (char), per SAM convention
 
-            r1_flag = BASE_R1_FLAG
-            r2_flag = BASE_R2_FLAG
-            if r1_is_rev:
-                r1_flag |= FLAG_REVERSE
-            if r2_is_rev:
-                r1_flag |= FLAG_MATE_REVERSE
-                r2_flag |= FLAG_REVERSE
-            if r1_is_rev:
-                r2_flag |= FLAG_MATE_REVERSE
+            r1_flag, r2_flag = _mate_flags(r1_is_rev, r2_is_rev)
 
             r1_tlen = tlen if r1_start <= r2_start else -tlen
             r2_tlen = -r1_tlen
@@ -736,15 +755,7 @@ class WholeGenomeSimulator:
 
             tlen = g_end - g_start
 
-            r1_flag = BASE_R1_FLAG
-            r2_flag = BASE_R2_FLAG
-            if r1_is_rev:
-                r1_flag |= FLAG_REVERSE
-            if r2_is_rev:
-                r1_flag |= FLAG_MATE_REVERSE
-                r2_flag |= FLAG_REVERSE
-            if r1_is_rev:
-                r2_flag |= FLAG_MATE_REVERSE
+            r1_flag, r2_flag = _mate_flags(r1_is_rev, r2_is_rev)
 
             r1_tlen = tlen if r1_g_start <= r2_g_start else -tlen
             r2_tlen = -r1_tlen
@@ -881,15 +892,7 @@ class WholeGenomeSimulator:
                     r1_start_pos = end - read_len
                     r2_start_pos = start
 
-                r1_flag = BASE_R1_FLAG
-                r2_flag = BASE_R2_FLAG
-                if r1_is_rev:
-                    r1_flag |= FLAG_REVERSE
-                if r2_is_rev:
-                    r1_flag |= FLAG_MATE_REVERSE
-                    r2_flag |= FLAG_REVERSE
-                if r1_is_rev:
-                    r2_flag |= FLAG_MATE_REVERSE
+                r1_flag, r2_flag = _mate_flags(r1_is_rev, r2_is_rev)
 
                 tlen = end - start
                 r1_tlen = tlen if r1_start_pos <= r2_start_pos else -tlen
@@ -1070,14 +1073,12 @@ class WholeGenomeSimulator:
                         is_nrna=False,
                     )
                 # Nascent reads on the dedicated stream; restore so gDNA writing (next) is unaffected.
-                _main_rng = self._rng
-                self._rng = self._nrna_rng
-                for t_idx in sorted(nrna_counts):
-                    self._write_rna_reads(
-                        t_idx, nrna_counts[t_idx], r1_buf, r2_buf, bam_fh,
-                        is_nrna=True,
-                    )
-                self._rng = _main_rng
+                with self._use_nrna_rng():
+                    for t_idx in sorted(nrna_counts):
+                        self._write_rna_reads(
+                            t_idx, nrna_counts[t_idx], r1_buf, r2_buf, bam_fh,
+                            is_nrna=True,
+                        )
                 self._write_gdna_from_counts(gdna_counts, r1_buf, r2_buf, bam_fh)
                 r1_buf.close()
                 r2_buf.close()
@@ -1205,13 +1206,12 @@ class WholeGenomeSimulator:
                     self._write_rna_reads(
                         t_idx, len_counts, r1_buf, r2_buf, bam_fh, is_nrna=False,
                     )
-                _main_rng = self._rng
-                self._rng = self._nrna_rng  # nascent shard on the dedicated stream
-                for t_idx, len_counts in nrna_items:
-                    self._write_rna_reads(
-                        t_idx, len_counts, r1_buf, r2_buf, bam_fh, is_nrna=True,
-                    )
-                self._rng = _main_rng
+                # nascent shard on the dedicated stream
+                with self._use_nrna_rng():
+                    for t_idx, len_counts in nrna_items:
+                        self._write_rna_reads(
+                            t_idx, len_counts, r1_buf, r2_buf, bam_fh, is_nrna=True,
+                        )
                 n_offset = 0
                 for (ref_idx, fl), count in gdna_items:
                     n_offset += self._write_gdna_chunk(

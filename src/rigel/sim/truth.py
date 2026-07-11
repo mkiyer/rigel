@@ -153,8 +153,6 @@ def _transcript_metadata(transcript) -> dict[str, object]:
         "pre_capture_mrna_abundance": pre_capture_mrna,
         "pre_capture_nrna_abundance": pre_capture_nrna,
         "pre_capture_total_rna": pre_capture_mrna + pre_capture_nrna,
-        "molecular_mrna_abundance": pre_capture_mrna,
-        "molecular_nrna_abundance": pre_capture_nrna,
     }
 
 
@@ -249,8 +247,6 @@ def _write_post_capture_abundances(summary: dict[str, object], path: Path) -> No
         "observed_mrna_fragments",
         "observed_nrna_fragments",
         "observed_total_rna_fragments",
-        "molecular_mrna_abundance",
-        "molecular_nrna_abundance",
         "n_exons",
         "spliced_length",
         "genomic_span",
@@ -309,15 +305,12 @@ def write_post_capture_truth(
         "pre_capture_abundances": molecular_truth,
         "post_capture_abundances": str(abundance_path),
         "post_capture_fragment_lengths": str(fl_path),
-        "molecular_truth_abundances": molecular_truth,
         "origin_counts": summary["origin_counts"],
         "fragment_lengths": summary["fragment_lengths"],
         "files": {
             "pre_capture_abundances": molecular_truth,
             "post_capture_abundances": str(abundance_path),
             "post_capture_fragment_lengths": str(fl_path),
-            "truth_abundances": str(abundance_path),
-            "truth_fragment_lengths": str(fl_path),
         },
     }
     summary_path.parent.mkdir(parents=True, exist_ok=True)

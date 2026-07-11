@@ -1,15 +1,17 @@
-"""
-rigel.resolution — Fragment resolution and chimera detection.
+"""Python reference fragment resolution — TEST-ONLY.
 
-Resolves aligned fragments to their compatible transcript/gene sets
-by querying the reference index and applying progressive set merging.
-
-Uses the C++ native kernel (``rigel._resolve_impl``) exclusively.
+Production fragment resolution runs entirely in C++
+(``rigel._resolve_impl`` via ``FragmentResolver``).  These Python
+functions are the pre-C++ reference implementation, retained solely as
+test fixtures / oracles.  They are imported only by the ``tests/``
+suite and are intentionally NOT part of the shipped ``rigel`` package.
 
 This module contains:
 - ``make_fragment()`` — lightweight fragment constructor for ``resolve_fragment``
 - ``resolve_fragment()`` — core fragment-to-transcript resolution with
   chimera detection (interchromosomal and intrachromosomal)
+- ``_detect_intrachromosomal_chimera()`` — transcript-set disjointness
+  chimera detector
 """
 
 # ---------------------------------------------------------------------------
@@ -18,11 +20,10 @@ This module contains:
 
 from types import SimpleNamespace
 
-from .types import (
+from rigel.types import (
     ChimeraType,
     Strand,
 )
-
 
 
 # ---------------------------------------------------------------------------
@@ -175,4 +176,3 @@ def resolve_fragment(frag, index):
     if not frag.exons:
         return None
     return index.resolver.resolve_fragment(frag)
-

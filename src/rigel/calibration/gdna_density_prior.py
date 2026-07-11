@@ -145,8 +145,6 @@ def build_training_substrate(
     def _std(gcount):  # per-node log-density noise scale √(Var(log f_g)+1/(gcount+1)) — for the bandwidth floor
         return np.sqrt(np.maximum(var_g, 0.0) + 1.0 / (np.maximum(gcount, 0.0) + 1.0))
 
-    clean_exon_bnd, exon_on_right = _clean_exon_boundary(chain, region_arrays, boundary_substrate)
-
     # ---- region training nodes: every SOLVED non-AMBIG region large enough to contain a fragment
     #      (E_gdna ≥ min_eff_length), INCLUDING zero-count intergenic/intronic (the depleted-floor anchor). ----
     reg_train = is_reg & ~is_ambig & solved & (EGl >= float(min_eff_length))
@@ -156,13 +154,21 @@ def build_training_substrate(
     )
 
     # ---- boundary training nodes (clean intron/intergenic↔exon crossing; exon-facing side) — off by default;
-    #      the crossing-density normalization biases these low (dissection §8c). Toggle to experiment. ----
-    M_bnd = np.where(exon_on_right, Mr, Ml)
-    E_bnd = np.where(exon_on_right, EGr, EGl)
-    rho_bnd = np.where(exon_on_right, np.asarray(dens.rho_g_right), np.asarray(dens.rho_g_left))
-    rho_bnd = np.maximum(rho_bnd, 1.0 / np.maximum(E_bnd, _EPS))
-    bnd_train = (is_bnd & clean_exon_bnd & solved & (M_bnd > 0.0)
-                 & (E_bnd >= float(min_eff_length)) & bool(include_boundaries))
+    #      the crossing-density normalization biases these low (dissection §8c). The compute is skipped
+    #      entirely when off (bnd_train is then an all-False mask and the collect section is a no-op on it);
+    #      toggle ``include_boundaries`` to experiment. ----
+    if include_boundaries:
+        clean_exon_bnd, exon_on_right = _clean_exon_boundary(chain, region_arrays, boundary_substrate)
+        M_bnd = np.where(exon_on_right, Mr, Ml)
+        E_bnd = np.where(exon_on_right, EGr, EGl)
+        rho_bnd = np.where(exon_on_right, np.asarray(dens.rho_g_right), np.asarray(dens.rho_g_left))
+        rho_bnd = np.maximum(rho_bnd, 1.0 / np.maximum(E_bnd, _EPS))
+        bnd_train = (is_bnd & clean_exon_bnd & solved & (M_bnd > 0.0)
+                     & (E_bnd >= float(min_eff_length)))
+    else:
+        M_bnd = np.zeros(int(chain.n_nodes), dtype=np.float64)
+        rho_bnd = np.ones(int(chain.n_nodes), dtype=np.float64)
+        bnd_train = np.zeros(int(chain.n_nodes), dtype=bool)
 
     # ---- collect ----
     node_idx = np.arange(int(chain.n_nodes))

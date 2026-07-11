@@ -24,10 +24,9 @@ from scipy.special import expit, log_expit
 from .simplex import _mixture_strand_loglik
 from .strand_deconv import NodeDeconv
 
-__all__ = ["_logodds_grid", "_tilt_grid", "_single_strand_mask", "_ambig_mask",
-           "_log_fg", "_log1m_fg",
-           "_local_loglik_logodds", "_solve_nodes_logodds", "_solve_ambig_logodds",
-           "_solve_nodes_logodds_all"]
+# Public surface consumed by bp_solver / node_geometry. The remaining private helpers stay importable
+# for tests but are not part of the module's external API.
+__all__ = ["_logodds_grid", "_solve_nodes_logodds_all"]
 
 _EPS = 1.0e-9
 _PRIOR_EPS = 1.0e-3  # the Jeffreys edge floor

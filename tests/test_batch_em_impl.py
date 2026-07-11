@@ -198,3 +198,88 @@ def test_assignment_outputs_follow_partition_units():
     np.testing.assert_array_equal(winner_tid, np.zeros(n_units, dtype=np.int32))
     assert np.all(winner_post > 0.98)
     np.testing.assert_array_equal(n_candidates, np.full(n_units, 2, dtype=np.int16))
+
+
+# ---------------------------------------------------------------------------
+# Structural gDNA eligibility: ``gdna_prior_count`` no longer gates the gDNA
+# component, and the compatibility ``enable_gdna`` array is not a modeling gate
+# — native derives candidate availability from the partition itself.
+# ---------------------------------------------------------------------------
+
+
+def test_compat_enable_false_does_not_disable_structural_candidate():
+    """A compatibility ``enable_gdna=False`` input is ignored by native v3."""
+    n_units = 50
+    est = _estimator(2, mode="map")
+    total_gdna, _rna, _g = est.run_batch_locus_em_partitioned(
+        partition_tuples=[_partition(n_units=n_units, log_liks=(-1.0, -1.0), gdna_log_lik=-0.5)],
+        locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
+        gdna_prior_count=np.array([100.0], dtype=np.float64),
+        index=None,
+        enable_gdna=np.array([0], dtype=np.uint8),
+    )
+
+    assert total_gdna > 0.5 * n_units, (
+        "native should derive gDNA availability from finite unspliced candidates, "
+        f"not the compatibility enable_gdna array; got total_gdna={total_gdna}"
+    )
+
+
+def test_default_enable_gdna_inferred_from_partition():
+    """When ``enable_gdna`` is None, the wrapper computes it from the partition
+    (any unspliced unit with a finite gDNA log-lik ⇒ enabled).
+    """
+    n_units = 20
+    locus_t_lists = [np.array([0, 1], dtype=np.int32)]
+
+    # All-spliced partition ⇒ no per-unit gDNA candidate ⇒ enable=0.
+    spliced_part = _partition(
+        n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-0.5, is_spliced=True
+    )
+    # Unspliced partition with finite gDNA log-liks ⇒ enable=1.
+    unspliced_part = _partition(
+        n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-0.5, is_spliced=False
+    )
+    # Unspliced but non-finite gDNA log-lik ⇒ enable=0.
+    nogdna_part = _partition(
+        n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-np.inf, is_spliced=False
+    )
+
+    # All three with gdna_prior_count=0 and enable_gdna omitted (inferred).
+    # Only the unspliced+finite case produces gDNA assignments.
+    g_spl, _, _ = _estimator(2, mode="map").run_batch_locus_em_partitioned(
+        [spliced_part], locus_t_lists, np.zeros(1), index=None,
+    )
+    g_uns, _, _ = _estimator(2, mode="map").run_batch_locus_em_partitioned(
+        [unspliced_part], locus_t_lists, np.zeros(1), index=None,
+    )
+    g_no, _, _ = _estimator(2, mode="map").run_batch_locus_em_partitioned(
+        [nogdna_part], locus_t_lists, np.zeros(1), index=None,
+    )
+
+    assert g_spl == 0.0, "spliced partition has no gDNA candidates"
+    assert g_no == 0.0, "non-finite gDNA log-liks ⇒ no gDNA candidates"
+    assert g_uns > 0.0, (
+        "unspliced+finite gDNA log-lik must enable component "
+        "even when gdna_prior_count == 0"
+    )
+
+
+def test_positive_gdna_prior_produces_finite_outputs():
+    """A positive gDNA prior count produces finite, conserved outputs."""
+    n_units = 30
+    est = _estimator(2, mode="map")
+    total_gdna, locus_rna, locus_gdna = est.run_batch_locus_em_partitioned(
+        partition_tuples=[_partition(n_units=n_units, log_liks=(-1.0, -2.0), gdna_log_lik=-1.0)],
+        locus_transcript_indices=[np.array([0, 1], dtype=np.int32)],
+        gdna_prior_count=np.array([5.0], dtype=np.float64),
+        index=None,
+    )
+
+    # Outputs must be finite and sum to total fragments.
+    assert np.isfinite(total_gdna)
+    assert np.isfinite(locus_rna).all() and np.isfinite(locus_gdna).all()
+    assert total_gdna >= 0.0
+    # Conservation up to assignment fractional remainder.
+    assigned = float(locus_rna[0]) + float(locus_gdna[0])
+    assert assigned == pytest.approx(30.0, rel=1e-9)

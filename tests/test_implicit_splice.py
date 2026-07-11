@@ -37,7 +37,7 @@ from conftest import build_test_index
 
 from rigel.types import GenomicInterval, Strand
 from rigel.splice import SpliceType
-from rigel.resolution import make_fragment, resolve_fragment
+from _resolution_reference import make_fragment, resolve_fragment
 
 
 # ---------------------------------------------------------------------------
