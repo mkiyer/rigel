@@ -2,7 +2,9 @@
 
     python scripts/debug/benchmark_ab_render.py ab_report.json --out ab_report.html
 """
-import argparse, json, html
+import argparse
+import json
+import html
 from pathlib import Path
 
 
@@ -48,7 +50,6 @@ def main():
     gabs_b = roll(B, lambda d: abs(d["pools"]["gdna"]["surplus"]))
     gabs_f = roll(F, lambda d: abs(d["pools"]["gdna"]["surplus"]))
     fp_b = roll(B, lambda d: d["tx"]["n_fp"]); fp_f = roll(F, lambda d: d["tx"]["n_fp"])
-    import math
     def mean_sp(A, key):
         v = [A[c]["tx"][key] for c in conds if A[c]["tx"][key] == A[c]["tx"][key]]  # drop nan
         return sum(v) / len(v) if v else float("nan")

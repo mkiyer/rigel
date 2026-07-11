@@ -132,7 +132,7 @@ def run(name, genes, *, kappa=1.0, n_rna=4000, gdna_fraction=0.5, capture=False,
         err = '' if np.isnan(tt) else f"{solved[i] - tt:+.3f}"
         print(f"  {i:>3} {f'{st}-{en}':>13} {rtype(sig[i]):>10} {sig[i]:>3} | {ts:>6} {solved[i]:>6.3f} {err:>7}")
     if instrument and cap:
-        from rigel.calibration.node_chain import build_node_chain, REGION, BOUNDARY
+        from rigel.calibration.node_chain import build_node_chain, REGION
         ch = build_node_chain(pl.ref_region_offsets, pl.ref_boundary_offsets)
         kind = np.asarray(ch.kind); ridx = np.asarray(ch.ref_idx)
         fgl = np.asarray(cap["fg_loc"]); fgs = np.asarray(cap["fg_strand"])

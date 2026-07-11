@@ -7,12 +7,12 @@ Design per N: one +strand gene with N 2-exon isoforms sharing exon1 but with DIS
 unspliced spans ⇒ N nascent shadows). Equal RNA abundance split across isoforms (total fixed). gDNA 3:1 with
 capture ON (concentrates gDNA onto the exons, into the locus). Calibration replaced by the validated oracle.
 """
-import os, sys, json
+import os
+import sys
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 from dataclasses import replace as dc
 import dataclasses
 from pathlib import Path
-import numpy as np
 sys.path.insert(0, "/Users/mkiyer/proj/rigel/scripts/debug")
 from oracle import OracleTruth
 from rigel.config import PipelineConfig

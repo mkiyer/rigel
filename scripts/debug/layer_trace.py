@@ -5,12 +5,12 @@
   D oracle_masses + nascent_out  — also price nascent shadows out (x100 eff-len) (isolates nascent-shadow sink)
 True nascent = 0 ⇒ siphon = nrna_em_count. gDNA leak = true_g − assigned_g.
 """
-import os, sys
+import os
+import sys
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 from dataclasses import replace as dc
 import dataclasses
 from pathlib import Path
-import numpy as np
 import pysam
 sys.path.insert(0, "/Users/mkiyer/proj/rigel/scripts/debug")
 from oracle import OracleTruth

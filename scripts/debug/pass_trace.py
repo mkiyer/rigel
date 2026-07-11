@@ -10,10 +10,13 @@ decomposes each top culprit's error across stages:
 
     OMP_NUM_THREADS=1 python pass_trace.py <condition_dir> [topN] [deep_region_ids_csv]
 """
-import os, sys
+import os
+import sys
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 from pathlib import Path
-import numpy as np, pandas as pd, pysam
+import numpy as np
+import pandas as pd
+import pysam
 
 from rigel.index import TranscriptIndex
 from rigel.config import BamScanConfig, CalibrationConfig
@@ -183,7 +186,7 @@ df["gf_err"]   = (df.p2_fin - df.true_gf)
 pd.set_option("display.width", 260); pd.set_option("display.max_columns", 40)
 print(f"=== {cond.name} ===")
 print(f"totals: obs_g={obs_final.sum():,.0f} true_g={true_g.sum():,.0f}  Σ|err|={np.abs(err).sum():,.0f}")
-print(f"net err by class:  " + "  ".join(f"{c}:{df[df.cls==c].err.sum():+,.0f}" for c in ["exon","intron","ig"]))
+print("net err by class:  " + "  ".join(f"{c}:{df[df.cls==c].err.sum():+,.0f}" for c in ["exon","intron","ig"]))
 print(f"strand overdisp od_g={od_g:.4g} od_r={od_r:.4g}  kappa={kappa:.4f}  rho_global(p2)={cap2['rho_global']:.4g} rho_floor(p2)={cap2['rho_floor']:.4g}")
 print(f"KDE: bandwidth={gdna_prior.bandwidth:.4f}  n_train={train_sub.n}  n_eff={gdna_prior.n_eff:.0f}  modes(logrho,logP)={[(round(m,3),round(p,2)) for m,p in gdna_prior.modes[:5]]}")
 

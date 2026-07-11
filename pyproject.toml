@@ -69,3 +69,15 @@ addopts = "-v --tb=short"
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+
+[tool.ruff.lint.per-file-ignores]
+# scripts/debug/ is a working toolkit of one-off diagnostics (see scripts/README.md).
+# Its scratch idioms are tolerated so the dir stays lint-clean without imposing
+# production style on throwaway analysis; real errors (undefined names, redefinition,
+# syntax) are still enforced.
+"scripts/debug/**" = [
+    "E701",  # multiple statements on one line (colon) — quick `if x: y` diagnostics
+    "E702",  # multiple statements on one line (semicolon) — `a = ...; b = ...` one-liners
+    "E402",  # module import not at top (after sys.path / env setup)
+    "F841",  # local assigned but never used (compute-and-inspect vars)
+]

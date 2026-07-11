@@ -15,7 +15,6 @@ Usage: python scripts/debug/dissect_loci.py [condition] [top_n]
 """
 import sys
 
-import numpy as np
 import pandas as pd
 
 S = "/Users/mkiyer/Downloads/rigel_runs/quick_3to1_5mb"

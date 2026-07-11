@@ -48,10 +48,11 @@ Golden output regression tests live in `tests/golden/` (feather, TSV, JSON). Use
 
 ## Linting
 
-Ruff is configured in `pyproject.toml`: Python 3.12 target, 100-char line length.
+Ruff is configured in `pyproject.toml`: Python 3.12 target, 100-char line length. `scripts/` is also
+linted (with relaxed diagnostic-script idioms for `scripts/debug/**` — see `scripts/README.md`).
 
 ```bash
-ruff check src/ tests/
+ruff check src/ tests/ scripts/
 ruff format src/ tests/
 ```
 

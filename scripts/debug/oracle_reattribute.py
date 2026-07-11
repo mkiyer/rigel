@@ -5,12 +5,13 @@ If oracle-override => leak ~0: the leak IS calibration (small errors snowball). 
 is downstream (EM/eff-length), given an accurate calibration. Uses scripts/debug/oracle.py (validated),
 NOT the retired oracle_node_masses.
 """
-import os, sys, json
+import os
+import sys
+import json
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 from dataclasses import replace as dc
 import dataclasses
 from pathlib import Path
-import numpy as np
 sys.path.insert(0, "/Users/mkiyer/proj/rigel/scripts/debug")
 from oracle import OracleTruth
 from rigel.index import TranscriptIndex

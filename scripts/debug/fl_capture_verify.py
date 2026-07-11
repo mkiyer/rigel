@@ -14,7 +14,6 @@ is refuted.
 
   OMP_NUM_THREADS=1 python scripts/debug/fl_capture_verify.py
 """
-import os
 from pathlib import Path
 
 import numpy as np

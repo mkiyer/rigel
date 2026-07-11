@@ -4,7 +4,6 @@ signature: exon/intron x strand-composition (POS / NEG / AMBIG=both-strand overl
 distribution to the BACKGROUND (all gDNA) to test: is the siphon enriched in AMBIG introns (opposite-strand
 overlap), as hypothesized?
 """
-import sys
 from collections import Counter
 import numpy as np
 import pysam

@@ -10,7 +10,8 @@ Contrast AMBIG (both RNA strands present) vs SINGLE-STRAND (only +RNA). Hypothes
 EVERY gDNA fragment (either strand) is beaten 2:1 by the matching-strand RNA ⇒ gDNA under-assigned; and it
 worsens with strand-specificity. Single-strand only beats the matching half of the (50/50) gDNA.
 """
-import sys, math
+import sys
+import math
 sys.path.insert(0, "/Users/mkiyer/proj/rigel/tests")
 import numpy as np
 from rigel.estimator import AbundanceEstimator

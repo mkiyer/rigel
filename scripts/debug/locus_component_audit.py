@@ -30,7 +30,6 @@ from rigel.pipeline import scan_and_buffer, _native_detect_sj_tag
 from rigel.calibration import calibrate
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.fl import build_fl_models, gdna_fl_mass
-from rigel.calibration.priors import assemble_priors
 from rigel.calibration.capture_eff_length import (
     transcript_capture_eff_lengths,
     _transcript_node_incidence,

@@ -33,10 +33,13 @@ INTERGENIC_HI = 28000
 # ── exon-length mixture: microexon / short(<FL) / medium / long ──────────────
 def sample_exon_len(rng) -> int:
     r = rng.random()
-    if r < 0.12:  return int(rng.integers(20, 60))      # microexon: pure relay (< FL, tiny)
-    if r < 0.38:  return int(rng.integers(60, FL_RNA))   # short: no contained fragment at FL=200
-    if r < 0.78:  return int(rng.integers(FL_RNA, 700))  # medium
-    return int(rng.integers(700, 2500))                  # long
+    if r < 0.12:
+        return int(rng.integers(20, 60))       # microexon: pure relay (< FL, tiny)
+    if r < 0.38:
+        return int(rng.integers(60, FL_RNA))   # short: no contained fragment at FL=200
+    if r < 0.78:
+        return int(rng.integers(FL_RNA, 700))  # medium
+    return int(rng.integers(700, 2500))        # long
 
 
 def build_exons(rng, start: int, n_exons: int) -> tuple[list[ExonDef], int]:
@@ -106,7 +109,8 @@ class Builder:
             v = [ExonDef(e.start, e.end) for e in base]
             mode = rng.integers(0, 3)
             if mode == 0 and len(v) > 2:          # exon skip (interior)
-                j = int(rng.integers(1, len(v) - 1)); del v[j]
+                j = int(rng.integers(1, len(v) - 1))
+                del v[j]
             elif mode == 1 and len(v) >= 2:        # alt first exon (truncate 5')
                 v = v[1:]
             elif len(v) >= 2:                      # alt last exon (truncate 3')
@@ -262,7 +266,8 @@ class Builder:
             if s == "anchor":
                 pos = self.anchor(pos)
             else:
-                pos = self.ambig_locus(pos, ai); ai += 1
+                pos = self.ambig_locus(pos, ai)
+                ai += 1
             pos += int(rng.integers(INTERGENIC_LO, INTERGENIC_HI))
         return pos + int(rng.integers(INTERGENIC_LO, INTERGENIC_HI))
 
@@ -274,8 +279,7 @@ def main(outdir: str):
     genome_end = b.layout()
 
     # exonic fraction -> scale genome length so exonic < 5%
-    exon_bp = sum(e.end - e.start for g in b.genes for tx in g.transcripts for e in tx.exons)
-    # (double-counts shared exons across isoforms; use unique intervals for a fair fraction)
+    # (use UNIQUE exon intervals so shared exons across isoforms aren't double-counted)
     uniq = set()
     for g in b.genes:
         for tx in g.transcripts:
@@ -285,7 +289,6 @@ def main(outdir: str):
     genome_length = max(genome_end, int(uniq_exon_bp / 0.045))  # pad so exonic <= 4.5%
 
     all_tx = [tx for g in b.genes for tx in g.transcripts]
-    n_ambig_genes = sum(1 for g in b.genes if any(t[1] == g.gene_id and t[2] != "anchor" for t in b.tags))
     n_anchor = sum(1 for g in b.genes if g.transcripts and b._tag_of(g) == "anchor") if hasattr(b, "_tag_of") else \
                sum(1 for g in b.genes if any(t[1] == g.gene_id and t[2] == "anchor" for t in b.tags))
 
@@ -305,8 +308,10 @@ def main(outdir: str):
 
     # exon-length histogram for the report
     elens = np.array([e.end - e.start for _, e in [((), ExonDef(s, e)) for s, e in uniq]])
-    micro = int((elens < 60).sum()); short = int(((elens >= 60) & (elens < FL_RNA)).sum())
-    med = int(((elens >= FL_RNA) & (elens < 700)).sum()); lng = int((elens >= 700).sum())
+    micro = int((elens < 60).sum())
+    short = int(((elens >= 60) & (elens < FL_RNA)).sum())
+    med = int(((elens >= FL_RNA) & (elens < 700)).sum())
+    lng = int((elens >= 700).sum())
 
     from collections import Counter
     topo = Counter(t[2] for t in b.tags)
