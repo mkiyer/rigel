@@ -16,7 +16,7 @@ from ..transcript import Transcript
 from ..types import Interval, Strand
 
 from .genome import MutableGenome
-from .splice_motif import splice_donor_acceptor
+from .splice_motif import place_intron_motif
 
 logger = logging.getLogger(__name__)
 
@@ -175,16 +175,13 @@ class GeneBuilder:
         For a negative-strand intron (CT-AC on genomic + strand):
             genome[intron_start:intron_start+2] = 'CT'
             genome[intron_end-2:intron_end]     = 'AC'
+
+        Delegates the placement to the shared :func:`place_intron_motif`; raises on an
+        intron < 4 bp (the builder contract — a construction error).
         """
-        intron_len = intron_end - intron_start
-        if intron_len < 4:
-            raise ValueError(
-                f"Intron ({intron_start},{intron_end}) too short for "
-                f"splice motifs (length {intron_len} < 4)"
-            )
-        donor, acceptor = splice_donor_acceptor(strand)
-        self.genome.edit(intron_start, donor)
-        self.genome.edit(intron_end - 2, acceptor)
+        place_intron_motif(
+            self.genome.edit, intron_start, intron_end, strand, on_short="raise"
+        )
 
     # -- Output ---------------------------------------------------------------
 

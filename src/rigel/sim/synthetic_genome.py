@@ -17,6 +17,15 @@ Output structure:
 
 Reference generation is normally driven by ``scripts/sim/simulate_suite.py``.
 Use ``simulate_suite.py --reference-only`` for a reference-only debugging run.
+
+This is the **function path** used by the whole-genome suite + the reference-gen scripts. It shares
+its low-level mechanics — DNA generation (``genome.random_dna_array``), FASTA writing
+(``genome.write_fasta_file``), and splice-motif placement (``splice_motif.place_intron_motif``) —
+with the **class path** (``MutableGenome`` + ``GeneBuilder``, used by ``Scenario``). The two paths
+keep DISTINCT output contracts on purpose: this path writes ``genome.fa`` + a transcript+exon
+``genes.gtf`` (the interface ``suite.py`` / ``analysis.py`` / ``build_toy_2exon_reference.py`` and the
+pre-generated benchmarks depend on), whereas ``GeneBuilder`` writes ``{name}.fa`` + an exon-only
+``annotations.gtf``. Only the GTF writers below (:func:`write_gtf`) differ by design.
 """
 from __future__ import annotations
 
@@ -25,9 +34,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-import pysam
 
-from .splice_motif import splice_donor_acceptor
+from .genome import random_dna_array, write_fasta_file
+from .splice_motif import place_intron_motif
 
 logger = logging.getLogger(__name__)
 
@@ -94,33 +103,27 @@ class GeneDef:
 # ── Genome generation ─────────────────────────────────────────────────────
 
 def generate_random_genome(length: int, seed: int) -> str:
-    """Generate a random DNA sequence."""
-    rng = np.random.default_rng(seed)
-    bases = np.array(list("ACGT"))
-    seq = bases[rng.integers(0, 4, size=length)]
-    return "".join(seq)
+    """Generate a random DNA sequence (shared generator — see ``genome.random_dna_array``)."""
+    return "".join(random_dna_array(length, np.random.default_rng(seed)))
 
 
 def inject_splice_sites(seq_array: np.ndarray, transcripts: list[TranscriptDef]):
     """Inject GT-AG splice sites at intron boundaries.
 
-    Modifies seq_array in-place. For + strand: GT at intron start, AG at intron end.
-    For - strand: CT at intron start, AC at intron end (reverse complement of GT-AG).
+    Modifies ``seq_array`` (a uint8 byte array) in-place. For + strand: GT at intron start, AG at
+    intron end. For - strand: CT / AC (reverse complement of GT-AG). Introns shorter than 4 bp are
+    skipped (the function-path policy). Placement is the shared :func:`place_intron_motif`.
     """
+    def _edit(pos: int, bases: str) -> None:
+        for i, b in enumerate(bases):
+            seq_array[pos + i] = ord(b)
+
     for tx in transcripts:
         exons = tx.exons
         for i in range(len(exons) - 1):
-            intron_start = exons[i].end
-            intron_end = exons[i + 1].start
-
-            if intron_end - intron_start < 4:
-                continue
-
-            donor, acceptor = splice_donor_acceptor(tx.strand)
-            seq_array[intron_start] = ord(donor[0])
-            seq_array[intron_start + 1] = ord(donor[1])
-            seq_array[intron_end - 2] = ord(acceptor[0])
-            seq_array[intron_end - 1] = ord(acceptor[1])
+            place_intron_motif(
+                _edit, exons[i].end, exons[i + 1].start, tx.strand, on_short="skip"
+            )
 
 
 # ── Gene/transcript structure generation ──────────────────────────────────
@@ -494,21 +497,23 @@ def generate_genes(
 # ── File writers ──────────────────────────────────────────────────────────
 
 def write_fasta(genome_seq: str, ref_name: str, outdir: Path) -> Path:
-    """Write genome FASTA with samtools index."""
-    fasta_path = outdir / "genome.fa"
-    with open(fasta_path, "w") as f:
-        f.write(f">{ref_name}\n")
-        # Write in 80-char lines
-        for i in range(0, len(genome_seq), 80):
-            f.write(genome_seq[i:i+80] + "\n")
+    """Write the genome FASTA (as ``genome.fa``) with a samtools index.
 
-    # Index with pysam
-    pysam.faidx(str(fasta_path))
-    return fasta_path
+    Uses the shared :func:`genome.write_fasta_file`; the only difference from
+    ``MutableGenome.write_fasta`` is the chosen filename (``genome.fa`` — the suite interface).
+    """
+    return write_fasta_file(genome_seq, ref_name, Path(outdir) / "genome.fa")
 
 
 def write_gtf(genes: list[GeneDef], ref_name: str, outdir: Path) -> Path:
-    """Write GTF annotation file."""
+    """Write a transcript+exon GTF annotation as ``genes.gtf``.
+
+    Intentionally distinct from ``GeneBuilder.write_gtf`` (which writes an exon-only
+    ``annotations.gtf`` via ``GTFRecord``): this format + filename are the interface the suite,
+    ``analysis.py``'s ``rigel index`` call, ``build_toy_2exon_reference.py``, and the pre-generated
+    benchmarks depend on, so the two GTF writers are kept separate by design (see the module
+    docstring). The dinucleotide convention + splice-motif placement ARE shared (``splice_motif``).
+    """
     gtf_path = outdir / "genes.gtf"
     with open(gtf_path, "w") as f:
         for gene in genes:
