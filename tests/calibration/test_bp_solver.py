@@ -1,4 +1,4 @@
-"""The BP-solver per-node geometry (`calibration.bp_solver.build_node_geometry`).
+"""The BP-solver per-node geometry (`calibration.node_geometry.build_node_geometry`).
 
 Verifies the per-face assembly onto the chain against the substrate: a region presents its contained geometry
 both ways; a boundary presents its per-side crossing geometry (left-side / right-side, in the flank regions'
@@ -12,12 +12,14 @@ from types import SimpleNamespace
 import numpy as np
 
 from rigel.calibration.bp_solver import (
+    adjacent_disagreement_variance,
+    node_sweep,
+)
+from rigel.calibration.node_geometry import (
     NodeBelief,
     NodeGeometry,
-    adjacent_disagreement_variance,
     build_node_geometry,
     build_node_statics,
-    node_sweep,
     init_beliefs,
     node_densities,
 )
@@ -391,8 +393,6 @@ def test_gdna_sweep_factor1_uniform():
         bsub,
         rna_sense_frac=0.7,
         n_grid=40,
-        max_passes=8,
-        convergence_delta=1e-4,
         disagreement_sigma2=adjacent_disagreement_variance(chain, geom),
     )
     dens = node_densities(final, geom)
@@ -509,8 +509,6 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
         bsub,
         rna_sense_frac=0.95,
         n_grid=40,
-        max_passes=10,
-        convergence_delta=1e-4,
         disagreement_sigma2=adjacent_disagreement_variance(chain, geom),
     )
     # The AMBIG phantom is pulled DOWN from its all-gDNA init (1.0) toward RNA. This chain is the WORST

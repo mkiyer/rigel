@@ -38,7 +38,7 @@ class TranscriptAccuracy:
     expected : int
         Ground-truth fragment count (from simulation read names).
     observed : float
-        Pipeline-assigned count (summed across all 12 count types).
+        Pipeline-assigned count (summed across all 8 count types).
     exact_match : bool
         True if ``observed == expected``.
     abs_diff : float
@@ -235,7 +235,7 @@ def run_benchmark(
     n_nrna_expected = scenario_result.ground_truth_nrna_auto()
 
     # Observed: per-transcript total counts from the pipeline
-    t_counts = pipeline_result.estimator.t_counts  # (N_t, 12) array
+    t_counts = pipeline_result.estimator.t_counts  # (N_t, 8) array
     observed_per_t = t_counts.sum(axis=1)  # total per transcript
 
     # Stats

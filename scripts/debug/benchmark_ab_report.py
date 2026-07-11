@@ -22,11 +22,11 @@ Writes a structured JSON (both arms, all conditions) consumed by the HTML report
 
 ARMS. An arm is `name:eps[:ngss[:ENV]]`: `eps` = --gdna-prior-mixture-bridge, `ngss` =
 --sweep-n-grid-single-strand (optional), `ENV` = one `KEY=VAL` env override passed to the quant
-subprocess (e.g. `RIGEL_MSG_MODE=off` for the no-message-propagation baseline). Empty middle fields
-are allowed, e.g. `off:0::RIGEL_MSG_MODE=off`.
+subprocess (the A/B channel for any behavioral knob a config-file flip cannot reach). Empty middle
+fields are allowed, e.g. `alt:0::SOME_ENV=1`.
 
     python scripts/debug/benchmark_ab_report.py <suite> --out ab_report.json \
-        --arms prod:0 off:0::RIGEL_MSG_MODE=off [--threads 4]
+        --arms prod:0 fine:0:256 [--threads 4]
 """
 import argparse, json, os, subprocess, sys, time
 from pathlib import Path
@@ -43,8 +43,8 @@ def run_quant(cond_dir: Path, index: Path, eps: float, threads: int, n_grid_ss: 
            "--gdna-prior-mixture-bridge", str(eps), "--threads", str(threads)]
     if n_grid_ss is not None:
         cmd += ["--sweep-n-grid-single-strand", str(n_grid_ss)]
-    # Arm-specific env override (e.g. RIGEL_MSG_MODE=off) reaches calibration via the subprocess env — a
-    # config file flip does NOT reach the subprocess, so env is the A/B channel for behavioral knobs.
+    # Arm-specific env override reaches the run via the subprocess env — a config-file flip does NOT reach
+    # the subprocess, so env is the A/B channel for any behavioral knob exposed only through the environment.
     run_env = {**os.environ, **(env or {})}
     r = subprocess.run(cmd, capture_output=True, text=True, env=run_env)
     if r.returncode != 0:
@@ -122,7 +122,7 @@ def main():
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--arms", nargs="+", default=["baseline:0", "fix1:0.01"],
                     help="arm spec name:eps[:n_grid_ss[:ENV]] — ENV is one KEY=VAL env override "
-                         "(e.g. RIGEL_MSG_MODE=off); empty middle fields ok (off:0::RIGEL_MSG_MODE=off)")
+                         "passed to the quant subprocess; empty middle fields ok (alt:0::SOME_ENV=1)")
     ap.add_argument("--filter", default=None, help="only conditions whose name contains this substring")
     ap.add_argument("--threads", type=int, default=4)
     args = ap.parse_args()

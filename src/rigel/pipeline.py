@@ -84,7 +84,6 @@ class PipelineResult:
     estimator: AbundanceEstimator
     pipeline_config: "PipelineConfig" = None
     calibration: "CalibrationResult" = None
-    calibration_payload: "object" = None  # AccumulatorPayload | None
     # Library-wide FL distributions actually built + used for scoring/calibration
     # (global / RNA / gDNA); the empirical views feed the summary QC report.
     fl_models: "FLModels" = None
@@ -492,7 +491,6 @@ def _score_fragments(
         rna_fl,
         gdna_fl,
         index,
-        estimator,
         overhang_log_penalty=scoring.overhang_log_penalty,
         mismatch_log_penalty=scoring.mismatch_log_penalty,
         gdna_splice_penalties=scoring.gdna_splice_penalties,
@@ -503,7 +501,6 @@ def _score_fragments(
         estimator,
         stats,
         index,
-        strand_models,
         annotations=annotations,
     )
     em_data = builder.scan(buffer, log_every)
@@ -958,6 +955,5 @@ def run_pipeline(
         estimator=estimator,
         pipeline_config=config,
         calibration=calibration,
-        calibration_payload=calibration_payload,
         fl_models=fl_models,
     )

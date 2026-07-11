@@ -5,7 +5,7 @@ Two properties:
 * **Estimator** — RNA overdispersion drawn at a known level (from boundary-side spliced counts) is
   recovered by :func:`fit_rna_strand_overdispersion` (its component mean is κ, not ½, so the
   excess-variance scale must be κ(1−κ), not ¼).
-* **Decode symmetry** — with the RNA strand modelled as Beta-Binomial too (same default prior as
+* **Deconv symmetry** — with the RNA strand modelled as Beta-Binomial too (same default prior as
   gDNA), an *unstranded* node (κ = ½) is **uninformative**, and a balanced node grows more
   gDNA-like as the library becomes more stranded. The earlier gDNA-only overdispersion broke this
   (it pulled balanced unstranded nodes toward RNA).
@@ -38,7 +38,7 @@ def _beta_binom_nodes(rng, n_nodes, depth, overdispersion, mean):
 
 
 def _decoded_gdna_frac(sense, antisense, kappa, *, gdna_od, rna_od, n_grid=4000):
-    """Posterior median gDNA fraction of one node under a FLAT count prior (strand-only decode).
+    """Posterior median gDNA fraction of one node under a FLAT count prior (strand-only deconv).
 
     Mirrors the strand module (``strand_deconv._deconv_per_node`` strand branch): a weak prior ×
     the strand likelihood, isolating the strand likelihood's effect on the deconvolution.
@@ -165,11 +165,11 @@ def test_fit_from_substrate_empty_is_fallback():
     assert model.fallback_used
 
 
-# --------------------------------------------------------------------------- decode symmetry
+# --------------------------------------------------------------------------- deconv symmetry
 
 
 def test_unstranded_is_uninformative_with_symmetric_overdispersion():
-    """κ = ½, equal gDNA/RNA overdispersion ⇒ a balanced node decodes to gdna_frac ≈ ½ (flat)."""
+    """κ = ½, equal gDNA/RNA overdispersion ⇒ a balanced node deconvolves to gdna_frac ≈ ½ (flat)."""
     od = overdispersion_for_beta(3.0)
     frac = _decoded_gdna_frac(50, 50, 0.5, gdna_od=od, rna_od=od)
     assert frac == pytest.approx(0.5, abs=0.02)

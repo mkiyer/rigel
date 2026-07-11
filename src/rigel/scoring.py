@@ -1,14 +1,11 @@
-"""rigel.scoring — Pure scoring functions and pre-computed scoring context.
+"""rigel.scoring — scoring parameter assembly for the native scorer.
 
-Every function in this module takes explicit arguments (no closures,
-no captured state).  The ``FragmentScorer`` dataclass holds all
-pre-computed parameters that were previously captured as locals inside
-``_scan_and_build_em_data``'s nested closures.
-
-Design contract:
-    - All functions are stateless pure functions.
-    - ``FragmentScorer`` maps directly to a C struct.
-    - Every function is a candidate for Cython / C acceleration.
+The fragment-scoring math itself lives in the C++ extension
+(``src/rigel/native/scoring.cpp``).  This module only holds
+``overhang_alpha_to_log_penalty()`` and the ``FragmentScorer`` builder,
+which gathers the trained strand / fragment-length models and index
+geometry into a single parameter bundle and hands them to a
+``NativeFragmentScorer``.
 """
 
 import math
@@ -16,7 +13,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .splice import SPLICE_UNSPLICED, SPLICE_UNANNOT, SPLICE_ANNOT
+from .splice import SPLICE_UNSPLICED
 
 # ---------------------------------------------------------------------------
 # Constants (single source of truth for all scoring/penalty values)
@@ -28,9 +25,6 @@ LOG_SAFE_FLOOR = 1e-10
 #: Pre-computed log(0.5) — used for uninformative strand log-probabilities.
 LOG_HALF = math.log(0.5)
 
-#: Default gDNA splice penalty for SPLICED_UNANNOT fragments.
-DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT = 0.01
-
 #: Default overhang alpha: each base of overhang reduces probability by 10×.
 DEFAULT_OVERHANG_ALPHA = 0.1
 
@@ -39,11 +33,11 @@ DEFAULT_OVERHANG_ALPHA = 0.1
 DEFAULT_MISMATCH_ALPHA = 0.1
 
 
-#: Default gDNA splice penalties per SpliceType (int keys for fast lookup).
+#: Default gDNA splice penalties per SpliceType (int keys for fast lookup). Only the unspliced entry is
+#: consumed — spliced fragments are structurally incompatible with the (genomic) gDNA component, so they
+#: never reach a gDNA splice penalty.
 GDNA_SPLICE_PENALTIES = {
     SPLICE_UNSPLICED: 1.0,
-    SPLICE_UNANNOT: DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
-    SPLICE_ANNOT: 0.0,  # never used — spliced fragments don't see gDNA
 }
 
 
@@ -77,7 +71,7 @@ DEFAULT_MISMATCH_LOG_PENALTY = overhang_alpha_to_log_penalty(DEFAULT_MISMATCH_AL
 
 
 # ---------------------------------------------------------------------------
-# FragmentScorer — replaces 15+ closure-captured locals
+# FragmentScorer — parameter bundle for the native scorer
 # ---------------------------------------------------------------------------
 
 
@@ -85,9 +79,10 @@ DEFAULT_MISMATCH_LOG_PENALTY = overhang_alpha_to_log_penalty(DEFAULT_MISMATCH_AL
 class FragmentScorer:
     """Pre-computed scoring parameters, built once per pipeline run.
 
-    Replaces the 15+ captured locals in the old closure-based design.
-    Every scoring function receives this as its first argument.
-    Maps directly to a C struct for future acceleration.
+    Bundles the trained strand / fragment-length models, penalty
+    parameters, and index geometry.  ``from_models`` assembles these into
+    a ``NativeFragmentScorer`` (the C++ scorer in ``scoring.cpp``) that
+    does the actual per-fragment scoring.
     """
 
     # Strand model: RNA
@@ -123,7 +118,6 @@ class FragmentScorer:
         rna_fl,
         gdna_fl,
         index,
-        estimator,
         *,
         overhang_log_penalty: float | None = None,
         mismatch_log_penalty: float | None = None,
@@ -140,7 +134,6 @@ class FragmentScorer:
         gdna_fl : FragmentLengthModel
             Finalised gDNA fragment-length scoring model.
         index : TranscriptIndex
-        estimator : AbundanceEstimator
         overhang_log_penalty : float or None
         mismatch_log_penalty : float or None
         gdna_splice_penalties : dict or None

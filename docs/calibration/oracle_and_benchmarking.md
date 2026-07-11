@@ -83,7 +83,7 @@ by sum-to-full against the production accumulator (as `oracle.py` is) before it 
 | `scripts/debug/oracle.py` | THE oracle: validated per-origin truth + `override_masses()` (perfect-calibration lever) + per-region true `f_g`. |
 | `scripts/debug/oracle_reattribute.py` | baseline vs oracle-override → EM → 3-pool: is a leak calibration error or downstream (EM/eff-length)? |
 | `scripts/debug/pass_trace.py` | per-node calibration stage trace (init → strand → +prior → +messages → +KDE) vs oracle, on the **accumulator basis** — correct for localizing *where in calibration* an error enters. |
-| `scripts/debug/benchmark_ab_report.py` | end-to-end A/B across the 16-condition suite → soft 3-pool + transcript accuracy JSON (`benchmark_ab_render.py` renders it). Arms may vary env (e.g. `RIGEL_MSG_MODE`). |
+| `scripts/debug/benchmark_ab_report.py` | end-to-end A/B across the 16-condition suite → soft 3-pool + transcript accuracy JSON (`benchmark_ab_render.py` renders it). Arms vary a knob (e.g. `--gdna-prior-mixture-bridge`, `--sweep-n-grid-single-strand`) or a per-arm env override. |
 
 Suites: `quick_3to1_5mb` (16 conditions, easy), `ambig_dense_10mb` (AMBIG, hard). Run inside the `rigel`
 conda env; `OMP_NUM_THREADS=1` for determinism.

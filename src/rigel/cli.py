@@ -310,7 +310,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "n_regions": int(cal.n_regions),
         }
     )
-    prior_policy = None
 
     # Command section — record CLI arguments
     cmd_params: dict = {
@@ -374,7 +373,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "ci_95": [round(ci_lo, 6), round(ci_hi, 6)],
         },
         "calibration": cal_dict,
-        "prior_policy": prior_policy,
         "gdna_eff_len": {
             "em": _locus_series_summary("gdna_eff_len_em"),
             "per_bp": _locus_series_summary("gdna_eff_len_per_bp"),
@@ -582,7 +580,7 @@ def export_command(args: argparse.Namespace) -> int:
 #   2. Add the argparse argument below in build_parser()
 #   3. Add a _ParamSpec entry here
 # Everything else (_build_quant_defaults, _build_pipeline_config,
-# _write_run_config, _resolve_quant_args) is driven by this registry.
+# _write_config_yaml, and the summary loop in _write_quant_outputs) is driven by this registry.
 
 
 @_dataclass(frozen=True)
@@ -592,7 +590,7 @@ class _ParamSpec:
     cli_dest: str  # argparse dest, e.g. "em_iterations"
     config_path: str  # dotted config path, e.g. "em.iterations"
     transform: str = "direct"  # "direct" | "invert_bool" | "log_penalty"
-    #                             | "gdna_splice" | "path_or_none" | "sj_tag"
+    #                             | "path_or_none" | "sj_tag" | "gb_to_bytes"
 
 
 _PARAM_SPECS: tuple[_ParamSpec, ...] = (
@@ -617,7 +615,6 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     # -- FragmentScoringConfig: transformed --
     _ParamSpec("overhang_alpha", "scoring.overhang_log_penalty", "log_penalty"),
     _ParamSpec("mismatch_alpha", "scoring.mismatch_log_penalty", "log_penalty"),
-    _ParamSpec("gdna_splice_penalty_unannot", "scoring.gdna_splice_penalties", "gdna_splice"),
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
     # -- CalibrationConfig: advanced --
     _ParamSpec("gdna_prior_mixture_bridge", "calibration.gdna_prior_mixture_bridge"),
@@ -679,14 +676,6 @@ def _config_to_cli(val: object, transform: str) -> object:
         return [val] if isinstance(val, str) else list(val)
     if transform == "log_penalty":
         return _math.exp(val) if val > float("-inf") else 0.0
-    if transform == "gdna_splice":
-        from .scoring import DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
-
-        if val is None:
-            return DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT
-        from .splice import SPLICE_UNANNOT
-
-        return val.get(SPLICE_UNANNOT, DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT)
     if transform == "path_or_none":
         return str(val) if val else None
     if transform == "gb_to_bytes":
@@ -710,13 +699,6 @@ def _cli_to_config(val: object, transform: str) -> object:
         from .scoring import overhang_alpha_to_log_penalty
 
         return overhang_alpha_to_log_penalty(val)
-    if transform == "gdna_splice":
-        from .scoring import GDNA_SPLICE_PENALTIES
-        from .splice import SPLICE_UNANNOT
-
-        penalties = dict(GDNA_SPLICE_PENALTIES)
-        penalties[SPLICE_UNANNOT] = val
-        return penalties
     if transform == "path_or_none":
         return Path(val) if val else None
     if transform == "gb_to_bytes":
@@ -735,26 +717,24 @@ def _build_quant_defaults() -> dict:
     Single source of truth: all default values derived from the frozen
     dataclasses in ``config.py`` via the ``_PARAM_SPECS`` registry.
 
-    Scoring fields (overhang_alpha, mismatch_alpha, gdna_splice_penalty)
-    use exact CLI-space constants from ``scoring.py`` to avoid float
-    noise from log/exp round-tripping.
+    Scoring fields (overhang_alpha, mismatch_alpha) use exact CLI-space
+    constants from ``scoring.py`` to avoid float noise from log/exp
+    round-tripping.
     """
     from .config import PipelineConfig
     from .scoring import (
         DEFAULT_OVERHANG_ALPHA,
         DEFAULT_MISMATCH_ALPHA,
-        DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
     )
 
     cfg = PipelineConfig()
 
     # Scoring fields have different representations in CLI (alpha) vs
-    # config (log-penalty / dict).  Use exact constants to avoid float
+    # config (log-penalty).  Use exact constants to avoid float
     # noise from math.exp(math.log(alpha)).
     _scoring_defaults = {
         "overhang_alpha": DEFAULT_OVERHANG_ALPHA,
         "mismatch_alpha": DEFAULT_MISMATCH_ALPHA,
-        "gdna_splice_penalty_unannot": DEFAULT_GDNA_SPLICE_PENALTY_UNANNOT,
     }
 
     defaults: dict = {}
@@ -1233,13 +1213,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Per-mismatch (NM tag) penalty alpha in [0,1] (default: 0.1). "
         "0 = hard gate, 1 = no penalty.",
-    )
-    adv.add_argument(
-        "--gdna-splice-penalty-unannot",
-        dest="gdna_splice_penalty_unannot",
-        type=float,
-        default=None,
-        help="gDNA splice penalty for SPLICED_UNANNOT fragments (default: 0.01).",
     )
     adv.add_argument(
         "--pruning-min-posterior",

@@ -716,13 +716,16 @@ def build_index_artifacts(
     transcripts: list[Transcript],
     ref_lengths: dict[str, int],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Build ``intervals.feather``, ``regions.feather`` and ``boundaries.feather`` from a single sweep.
+    """Build ``intervals.feather``, ``regions.feather`` and ``boundaries.feather``.
 
-    Iterates each reference's layout (intergenic / genic spans) exactly
-    once and feeds it into two emitters: the cgranges-style annotated
-    interval table and the calibration region partition. The boundary
-    partition (one row per region interface, carrying the annotation
-    structural flags) is derived from the region partition + transcripts.
+    The per-reference layout (intergenic / genic spans) feeds ONLY the
+    cgranges-style annotated interval table (:func:`_emit_genomic_intervals`).
+    The calibration region partition (``regions_df``) and boundary partition
+    (``boundaries_df``) are built INDEPENDENTLY via
+    :func:`rigel.calibration.regions.build_region_partition` and
+    :func:`~rigel.calibration.regions.build_boundary_partition`. The boundary
+    partition carries one row per region interface with the annotation
+    structural flags.
 
     Returns ``(intervals_df, regions_df, boundaries_df)``. All DataFrames are typed
     per the on-disk schemas:
@@ -993,9 +996,10 @@ class TranscriptIndex:
                 bl_df.to_csv(output_dir / SJ_BLACKLIST_TSV, sep="\t", index=False)
 
         # -- Manifest --------------------------------------------------------
-        # Per-region calibration tables (regions.feather, MappabilityProvenance)
-        # were removed in v0.5.0 with the SRD v1 calibrator overhaul. The
-        # "mappability" key is preserved (always null) for manifest
+        # regions.feather and boundaries.feather are CORE calibration
+        # artifacts (written above, validated on load, required by the
+        # calibration path). Only the "mappability" manifest key is
+        # vestigial: it is preserved (always null) for manifest
         # compatibility with external consumers.
         manifest = {
             "format_version": INDEX_FORMAT_VERSION,
@@ -1385,7 +1389,6 @@ class TranscriptIndex:
         ctx.set_ref_names([str(name) for name in self.ref_names])
 
         # 1. Overlap index from collapsed data
-        len(_collapse_keys)
         cr_refs = [k[0] for k in _collapse_keys]
         cr_starts = [k[1] for k in _collapse_keys]
         cr_ends = [k[2] for k in _collapse_keys]

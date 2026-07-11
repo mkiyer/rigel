@@ -107,19 +107,10 @@ NB_MODULE(_resolve_impl, m) {
              "Set transcript-to-gene mapping and allocate scratch buffers.")
         .def("get_ref_to_id", &FragmentResolver::get_ref_to_id,
              "Return the ref-name → integer-ID mapping as a Python dict.")
-        .def("resolve", &FragmentResolver::resolve,
-             nb::arg("exon_ref_ids"), nb::arg("exon_starts"),
-             nb::arg("exon_ends"), nb::arg("align_strands"),
-             nb::arg("intron_ref_ids"), nb::arg("intron_starts"),
-             nb::arg("intron_ends"), nb::arg("intron_strands"),
-             nb::arg("genomic_footprint"),
-             "Resolve a fragment to its compatible transcript set.\n\n"
-             "Returns a 13-element tuple or None for intergenic fragments.")
         .def("resolve_fragment", &FragmentResolver::resolve_fragment,
              nb::arg("frag"),
-             "Resolve a Fragment object directly.\n\n"
-             "Returns a ResolvedFragment or None for intergenic fragments.\n"
-             "Eliminates Python marshaling overhead of the resolve() path.")
+             "Resolve a Fragment object to its compatible transcript set.\n\n"
+             "Returns a ResolvedFragment or None for intergenic fragments.")
         .def("set_gene_strands", &FragmentResolver::set_gene_strands,
              nb::arg("g_to_strand"),
              "Set gene strand mapping for BAM scanner model training.")

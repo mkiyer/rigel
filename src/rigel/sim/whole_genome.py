@@ -621,7 +621,7 @@ def write_truth_abundances(
 
 
 # ═══════════════════════════════════════════════════════════════════
-# Genome cache — pre-load chromosome sequences as numpy byte arrays
+# nRNA sweep-pair construction
 # ═══════════════════════════════════════════════════════════════════
 
 

@@ -1,8 +1,8 @@
-"""Shared fragment-length sampling for the simulator's read engines.
+"""Shared fragment-length sampling for the simulator's read engine.
 
-Both :class:`reads.ReadSimulator` (in-memory) and :class:`whole_genome.WholeGenomeSimulator`
-(vectorized) drew fragment lengths from the same truncated normal via the same rejection loop.
-This is the single implementation both now call.
+The single shared fragment-length sampler: :func:`truncated_normal_frag_lengths` draws
+fragment lengths from a truncated normal via a rejection loop. Its one caller is the
+whole-genome read engine (:class:`wgs_engine.WholeGenomeSimulator`).
 """
 
 from __future__ import annotations

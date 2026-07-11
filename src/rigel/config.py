@@ -284,19 +284,6 @@ class CalibrationConfig:
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
     sweep_n_tilt: int | None = None
 
-    #: **Inner-loop max passes** (per outer iteration). The solver is a NESTED loop: the INNER loop
-    #: converges the per-node beliefs by directional (L→R then R→L) sweeps at FIXED var~mean, stopping
-    #: early once the per-node pie stabilizes (max change within ``sweep_convergence_delta``); the OUTER
-    #: loop refits the var~mean reliability curves on the converged belief. Entangling the refit INTO the
-    #: sweep (the old single-loop design) made a moving precision target ⇒ the sweep never converged
-    #: (a limit cycle); separating them lets the inner sweep actually settle. This caps the inner passes.
-    sweep_max_passes: int = 20
-
-    #: **Inner-loop convergence threshold** — the inner sweep stops once the max absolute change in the
-    #: per-node gDNA fraction ``f_g`` between consecutive passes drops below this. ``1e-3`` is below the
-    #: lattice-cell resolution ``1/sweep_n_grid`` so further passes do not move the discretized solution.
-    sweep_convergence_delta: float = 1e-3
-
     #: **Phase-2 gDNA mixture prior** (``calibration.gdna_density_prior``). Calibration runs TWO sweeps:
     #: pass 1 solves the single-strand nodes with the extremely-weak stability floor, a nonparametric
     #: ``P(log ρ_g)`` KDE is trained on those solved densities, and pass 2 re-solves ALL nodes with that
@@ -363,15 +350,6 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.sweep_logodds_window (L) must be > 0; "
                 f"got {self.sweep_logodds_window}."
-            )
-        if self.sweep_max_passes < 1:
-            raise ValueError(
-                f"CalibrationConfig.sweep_max_passes must be >= 1; got {self.sweep_max_passes}."
-            )
-        if not (float(self.sweep_convergence_delta) > 0.0):
-            raise ValueError(
-                "CalibrationConfig.sweep_convergence_delta must be > 0; "
-                f"got {self.sweep_convergence_delta}."
             )
         if self.gdna_strand_prior_alpha_beta < 2.0:
             raise ValueError(

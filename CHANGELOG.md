@@ -230,8 +230,8 @@ principle) and the docs index in `docs/README.md`.
   blacklisted SJ). Zero-candidate (intergenic) fragments now flow
   through the buffer and are categorized as INTERGENIC by the same
   geometric rule rather than via a side-channel accumulator.
-  See [docs/calibration/srd_v2_results.md](docs/calibration/srd_v2_results.md)
-  and [docs/calibration/srd_v2_phase2plus_handoff.md](docs/calibration/srd_v2_phase2plus_handoff.md).
+  (The SRD v2 design/results notes referenced here have since been
+  superseded; see the calibration history under `docs/calibration/archive/`.)
 
 - **Headline gDNA-FL recovery**: the v1 saturation failure mode
   (gDNA-FL mode pinned at bin-0, bin-0 fraction up to 55%) is

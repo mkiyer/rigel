@@ -471,10 +471,9 @@ Phase 6 acceptance gate green.
 
 ### 7.2 First task
 
-Read [`../caljointmodel/05_implementation_plan.md`](../caljointmodel/05_implementation_plan.md)
-Phase 3 ("substrate adapter") and re-scope: the substrate is now
-the live `AccumulatorPayload`, not an extension. Update that doc to
-mark it as completed-by-accumulator-rewrite.
+The substrate is now the live `AccumulatorPayload` (a native payload,
+not a Python extension) — the "substrate adapter" phase is completed
+by the accumulator rewrite.
 
 ---
 

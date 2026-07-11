@@ -288,8 +288,9 @@ class TestConfigRoundTrip:
         # Scoring: log penalties match exactly
         assert result.scoring.overhang_log_penalty == ref.scoring.overhang_log_penalty
         assert result.scoring.mismatch_log_penalty == ref.scoring.mismatch_log_penalty
-        # gdna_splice_penalties: result has explicit dict, ref has None
-        assert result.scoring.gdna_splice_penalties is not None
+        # gdna_splice_penalties: no CLI knob, so it stays at the config default (None → the scorer
+        # applies GDNA_SPLICE_PENALTIES at construction).
+        assert result.scoring.gdna_splice_penalties == ref.scoring.gdna_splice_penalties
 
     def test_param_specs_cover_all_defaults(self):
         """Every key in _build_quant_defaults matches a _ParamSpec or is CLI-only."""

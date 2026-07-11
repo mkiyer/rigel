@@ -15,8 +15,7 @@ inherits the new substrate.
    left and right fractional masses + a single integer flux count.
    No more "is `regions[r].boundary_right` redundant with
    `regions[r+1].boundary_left`?" — they were never duplicates, but
-   the question keeps coming up because the storage is region-keyed
-   (see [`../edgecentric/edge_centric_model.md`](../edgecentric/edge_centric_model.md)).
+   the question keeps coming up because the storage is region-keyed.
 3. **Per-fragment accounting.** A fragment contributes exactly 1.0
    total mass to the substrate, distributed across at most one region
    (contained) or a set of boundaries (crossing). Multi-block
@@ -448,10 +447,8 @@ No intermediate `BoundaryTable` derivation.
 4. **Consumer migration.** Rewrite `boundaries.py` consumers to read
    from `AccumulatorPayload` directly. Delete `boundaries.py` and
    its tests.
-5. **Calibration v6 substrate.** Calibrator's substrate becomes a
-   thin view over `AccumulatorPayload`. Update
-   [`../caljointmodel/04_interface_contract.md`](../caljointmodel/04_interface_contract.md)
-   §2 to drop the "extension" framing — it's now native.
+5. **Calibration substrate.** The calibrator's substrate becomes a
+   thin view over `AccumulatorPayload` (native, not a Python extension).
 6. **Cleanup.** Delete `RegionCountLedger`-only fields. Update
    `CLAUDE.md` and `.github/copilot-instructions.md`.
 

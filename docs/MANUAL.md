@@ -5,6 +5,12 @@ nascent RNA (nRNA), and genomic DNA contamination (gDNA). It takes aligned
 BAM files as input and produces per-transcript, per-gene, and per-locus
 abundance estimates.
 
+This manual covers installation, the four CLI subcommands (`index`, `quant`,
+`sim`, `export`), the output files, and the calibration stage. For the
+statistical model see [METHODS.md](METHODS.md); for the calibration theory
+see [docs/calibration/CALIBRATION_ARCHITECTURE.md](calibration/CALIBRATION_ARCHITECTURE.md);
+for a flag-by-flag reference see [parameters.md](parameters.md).
+
 ---
 
 ## Installation
@@ -48,11 +54,15 @@ rigel --version
 
 - Genome FASTA with `.fai` index (`samtools faidx genome.fa`)
 - Gene annotation GTF (GENCODE format recommended; `exon` records required)
+- Optional: a per-base mappability **Zarr store** built by the companion
+  `alignable` tool for the same genome + aligner (see
+  [Mappability](#mappability-and-the-splice-artifact-blacklist))
 
 ### BAM
 
 - **Name-sorted or collated** — not coordinate-sorted
-- **`NH` tag present** for multimapper handling
+- **`NH` tag** used for multimapper handling when present; otherwise
+  multimappers are detected from secondary BAM flags
 - Splice-junction strand tag recommended for strand-model accuracy
   (`XS` from STAR/HISAT2, `ts` from minimap2, or `auto` for detection)
 
@@ -67,10 +77,13 @@ samtools sort -n -@ 8 -o sample.namesorted.bam sample.bam
 ## Quick start
 
 ```bash
-# Step 1: Build index (once per genome + annotation)
+# Step 1: Build index (once per genome + annotation).
+#   --no-mappability opts out of the alignable Zarr store; drop it and pass
+#   --alignable-zarr for real genomes (see Mappability below).
 rigel index \
     --fasta genome.fa \
     --gtf annotation.gtf \
+    --no-mappability \
     -o index/
 
 # Step 2: Quantify
@@ -82,6 +95,7 @@ rigel quant \
     --seed 42
 
 # Step 3: Inspect outputs
+rigel export results/sample/ --format tsv    # optional: feather -> TSV
 head results/sample/quant.tsv
 cat results/sample/summary.json
 ```
@@ -90,32 +104,41 @@ cat results/sample/summary.json
 
 ## Commands
 
+Rigel has four subcommands: `index`, `quant`, `sim`, and `export`.
+
 ### rigel index
 
 Builds the reference index from a genome FASTA and GTF. Run once per
 genome/annotation combination; the index is shared across all samples.
 
 ```bash
-rigel index --fasta genome.fa --gtf annotation.gtf -o index/
+rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o index/
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--fasta` | required | Genome FASTA (must have `.fai` index) |
-| `--gtf` | required | Annotation GTF |
-| `-o`, `--output-dir` | required | Output directory |
-| `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides the splice-junction artifact blacklist applied at BAM-scan time. (Per-base mappability is no longer consumed by calibration as of v0.5.0; the SRD calibrator does not use the per-region mappability table.) Required unless `--no-mappability` is set. |
-| `--no-mappability` | off | Opt out of the splice-artifact blacklist. Mutually exclusive with `--alignable-zarr`. |
-| `--splice-blacklist-min-count` | `2` | Minimum unique-fragment support per `(chrom, intron, read_length)` for a junction to enter the blacklist. Lower admits more singletons; higher keeps only the most reproducible artifacts. Ignored under `--no-mappability`. |
-| `--mappability-read-length` | `100` | Read-length bin used when querying the alignable store. |
-| `--nrna-tolerance` | `20` | Max distance (bp) for clustering transcript start/end sites into shared nRNA spans |
-| `--gtf-parse-mode` | `strict` | `strict` fails on malformed GTF records; `warn-skip` logs warnings and skips them |
-| `--feather-compression` | `lz4` | Feather compression: `lz4`, `zstd`, or `uncompressed` |
+| `--fasta` | required | Genome FASTA (must have a `.fai` index) |
+| `--gtf` | required | Annotation GTF (GENCODE recommended; `exon` records required) |
+| `-o`, `--output-dir` | required | Output directory for index files |
+| `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides per-base fractional mappability (for gDNA-aware effective length) **and** the splice-junction artifact blacklist (applied at BAM-scan time). Required unless `--no-mappability` is set. |
+| `--no-mappability` | off | Explicitly opt out of mappability + splice-blacklist ingestion (synthetic genomes, stranded-only benchmarks). Mutually exclusive with `--alignable-zarr`. |
+| `--splice-blacklist-min-count N` | `2` | (Advanced) Minimum unique-fragment support per `(chrom, intron, read_length)` for a junction to enter the blacklist. Lower admits more singletons; higher keeps only the most reproducible artifacts. Ignored under `--no-mappability`. |
+| `--mappability-read-length N` | `100` | (Advanced) Read-length bin to query in the alignable store (must match a bin the store was built with; commonly 50/75/100/125). Ignored under `--no-mappability`. |
+| `--nrna-tolerance N` | `20` | Max distance (bp) for clustering transcript start/end sites into shared synthetic nRNA spans |
+| `--collapse-duplicate-transcripts` | off | Collapse transcripts sharing identical exon coordinates (keeps the lexicographically-smallest ID). Default: fail with a report. Useful for GENCODE, which has a few byte-identical annotations. |
+| `--gtf-parse-mode {strict,warn-skip}` | `strict` | `strict` fails on malformed GTF records; `warn-skip` logs warnings and skips them |
+| `--feather-compression {lz4,zstd,uncompressed}` | `lz4` | Feather compression for index files |
 | `--no-tsv` | off | Skip writing TSV mirrors of index files |
+
+**Index artifacts** (Feather, plus `.tsv` mirrors unless `--no-tsv`):
+`transcripts`, `intervals`, `regions` (the calibration region partition),
+`boundaries`, `ref_lengths`, `sj`, `splice_blacklist`, and `manifest.json`.
+`regions.feather` and `boundaries.feather` are **core** calibration
+artifacts — they are consumed directly by the calibration BP sweep.
 
 ### rigel quant
 
-Runs the full scan-and-EM quantification pipeline.
+Runs the full single-pass pipeline: BAM scan → calibration → per-locus EM.
 
 ```bash
 rigel quant \
@@ -126,55 +149,130 @@ rigel quant \
     --seed 42
 ```
 
-All flags are described in [Parameters Reference](parameters.md).
+Every flag is also documented in [parameters.md](parameters.md).
 
-**Common options for pipeline use:**
+**Input / output**
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--threads N` | 0 (all cores) | Total thread budget; scan splits this between workers and BGZF decompression, while EM uses the same budget later |
-| `--scan-bgzf-threads N` | 4 | BGZF/BAM decompression threads reserved from `--threads` during scan |
-| `--scan-buffer-size GB` | 2 | Scan buffer size in GiB before disk spill |
-| `--seed N` | timestamp | Set for reproducibility |
-| `--sj-strand-tag TAG` | `auto` | Use `XS` for STAR/HISAT2, `ts` for minimap2 |
-| `--tmpdir DIR` | system temp | Spill directory for buffer overflow; use local SSD |
-| `--tsv` | off | Write TSV mirrors alongside Feather outputs |
-| `--config FILE` | — | YAML config file (see [YAML configuration](#yaml-configuration)) |
-| `--annotated-bam PATH` | — | Write annotated BAM with per-fragment assignment tags |
+| `--bam PATH` | — | Name-sorted BAM. Minimap2 and STAR are supported. `NH` used when present; otherwise multimappers come from secondary flags. |
+| `--index DIR` | — | Directory of `rigel index` files |
+| `-o`, `--output-dir DIR` | — | Output directory for results |
+| `--config FILE` | — | YAML config (same keys as CLI options, underscored). CLI flags override it. See [YAML configuration](#yaml-configuration). |
+| `--annotated-bam PATH` | — | Write an annotated BAM with per-fragment assignment tags (requires a second BAM pass) |
+| `--tsv` | off | Also write `.tsv` mirrors of the quant tables |
 
-### rigel export
+**Alignment options**
 
-Converts all `.feather` output files in a results directory to TSV or Parquet.
-Useful as a post-processing step or when Parquet is preferred for downstream tools.
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--include-multimap` / `--no-include-multimap` | on | Include multimapping reads |
+| `--keep-duplicates` / `--no-keep-duplicates` | off | Keep reads marked PCR/optical duplicates |
+| `--sj-strand-tag TAG [...]` | `auto` | Splice-junction strand tag. `auto` detects from the first 10,000 reads; use `XS` (STAR/HISAT2), `ts` (minimap2), or list several to try in order (e.g. `XS ts`). |
 
-```bash
-# Convert to TSV
-rigel export results/sample/ --format tsv
+**Model parameters**
 
-# Convert to Parquet
-rigel export results/sample/ --format parquet
-```
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--seed N` | timestamp | Random seed for reproducibility |
+| `--em-iterations N` | `1000` | Maximum EM iterations. Set `0` for unambiguous-only quantification (skip EM). |
+| `--em-mode {vbem,map}` | `vbem` | EM variant. `vbem` = Variational Bayes EM (digamma soft updates); `map` = MAP-EM with hard `max(0, n+a-1)` updates. |
+| `--assignment-mode {sample,fractional,map}` | `sample` | Post-EM fragment assignment. `sample` draws from the posterior; `fractional` preserves posterior weights; `map` takes the argmax component. |
 
-| Argument | Default | Description |
-|----------|---------|-------------|
-| `output_dir` | required | Directory containing `.feather` files |
-| `-f`, `--format` | `tsv` | Output format: `tsv` or `parquet` |
+**Performance**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--threads N` | 0 (all cores) | Total thread budget. During scan it splits between scan workers and `--scan-bgzf-threads`; locus EM reuses the same budget (stages run serially). |
+| `--scan-bgzf-threads N` | `4` | BGZF decompression threads reserved from `--threads` during scan. `0` disables htslib threaded decompression. |
+| `--scan-buffer-size GiB` | `2` | Max scan buffer before chunks spill to disk |
+| `--tmpdir DIR` | system temp | Directory for buffer spill files |
+| `--scan-fragments-per-chunk N` | `1000000` | Buffered fragments per scan chunk before the native scanner hands off to the Python buffer |
+| `--scan-read-name-batch-size N` | `512` | (Advanced) Read-name groups per native scanner input-queue item |
+
+**Advanced options**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--assignment-min-posterior P` | `0.01` | Minimum posterior for a component to be eligible for discrete assignment (map/sample modes) |
+| `--em-convergence-delta D` | `1e-6` | Convergence threshold for EM parameter updates |
+| `--gdna-prior-mixture-bridge EPS` | `0.01` | Calibration gDNA-density prior mixture-bridge weight in `[0,1)`. Floors the KDE valley between the depleted and enriched modes so a mixture-density node (a capture boundary, a sparse-probe region) reads as an enriched/depleted mixture instead of collapsing to ~0 gDNA. `0` = legacy KDE. Advanced calibration knob. |
+| `--sweep-n-grid-single-strand N` | `256` | Calibration single-strand log-odds grid resolution. Single-strand nodes solve a cheap 1-D grid, so a fine grid de-quantizes the gDNA-fraction readout. Decoupled from the AMBIG 2-D grid (`sweep_n_grid`, which stays coarse for genome-scale memory). Advanced calibration knob. |
+| `--gdna-em-llr-bias B` | `0.0` | gDNA false-positive-aversion: a log-odds (LLR) bias in nats added to the gDNA component in the locus EM. Positive favors gDNA (trades the gDNA→RNA leak for an RNA→gDNA siphon), e.g. `2.2` ≈ require 9:1 RNA evidence before calling a fragment RNA. |
+| `--overhang-alpha A` | `0.1` | Per-base overhang penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
+| `--mismatch-alpha A` | `0.1` | Per-mismatch (`NM` tag) penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
+| `--pruning-min-posterior P` | `1e-4` | Minimum posterior for candidate pruning. Lower keeps more candidates; `0` disables pruning. |
+| `--splicing-anchor-tolerance K` | `3` | Resolver-side splicing-anchor tolerance (bp) around annotated introns. The fractional calibration accumulator does not interpret this value. |
+| `--emit-locus-stats` | off | Write per-locus EM convergence profiling (iteration counts, timing, equivalence-class stats) to `locus_stats.feather` |
 
 ### rigel sim
 
-Generates synthetic test scenarios for benchmarking and development.
+Generates synthetic test scenarios for benchmarking and development. The
+scenario is defined by a YAML file; the three CLI numeric options provide
+defaults that the YAML overrides.
 
 ```bash
 rigel sim --config scenario.yaml -o sim_out/
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config FILE` | required | YAML scenario definition |
+| `-o`, `--output-dir DIR` | required | Output directory for scenario artifacts |
+| `--genome-length N` | `5000` | Genome length in bases (overridden by YAML) |
+| `--seed N` | `42` | Random seed (overridden by YAML) |
+| `--num-reads N` | `1000` | Number of fragments to simulate (overridden by YAML) |
+
+See [SIMULATOR.md](SIMULATOR.md) for the scenario YAML schema.
+
+### rigel export
+
+Converts every `.feather` output file in a results directory to TSV or
+Parquet. Useful as a post-processing step or when Parquet is preferred
+downstream.
+
+```bash
+rigel export results/sample/ --format tsv
+rigel export results/sample/ --format parquet
+```
+
+| Argument / flag | Default | Description |
+|-----------------|---------|-------------|
+| `output_dir` (positional) | required | Directory containing `.feather` files from `rigel quant` |
+| `-f`, `--format {tsv,parquet}` | `tsv` | Output format |
+
+---
+
+## Mappability and the splice-artifact blacklist
+
+Real genomes have regions where reads cannot map uniquely. Rigel can ingest
+a per-base **mappability** track — a Zarr store built by the companion
+`alignable` tool for the *same* genome and aligner — at index time via
+`--alignable-zarr`. It is used for two things:
+
+1. **gDNA-aware effective length** — the mappable fraction shortens the
+   effective length used in quantification, so unmappable stretches do not
+   inflate or deflate abundance.
+2. **Splice-junction artifact blacklist** — spurious junctions (recurrent
+   alignment artifacts) are recorded at index time and treated as unspliced
+   during scoring, which the annotated BAM reports per record via the `ZB`
+   tag.
+
+For synthetic genomes, stranded-only benchmarks, or any setting where
+running `alignable` is unnecessary, pass `--no-mappability` (mutually
+exclusive with `--alignable-zarr`). The two advanced knobs
+`--splice-blacklist-min-count` and `--mappability-read-length` tune the
+blacklist threshold and the read-length bin queried; both are ignored under
+`--no-mappability`.
 
 ---
 
 ## YAML configuration
 
 Any `rigel quant` flag can be set in a YAML file via `--config`. Keys use
-underscores (hyphens also accepted). Explicit CLI flags always override the
-YAML. Unknown keys are ignored with a warning.
+underscores (hyphens are also accepted). Explicit CLI flags always override
+the YAML. A resolved `config.yaml` is written to the output directory after
+each run for reproducibility.
 
 ```yaml
 # rigel_params.yaml
@@ -185,10 +283,9 @@ keep_duplicates: false
 sj_strand_tag: [auto]       # [XS] for STAR, [ts] for minimap2, [XS, ts] to try both
 
 # EM algorithm (defaults are suitable for most libraries)
-prior_pseudocount: 1.0
 em_iterations: 1000
-assignment_mode: sample     # sample | fractional | map
 em_mode: vbem               # vbem | map
+assignment_mode: sample     # sample | fractional | map
 
 # Performance
 threads: 16
@@ -211,20 +308,35 @@ rigel quant --bam sample.bam --index index/ -o results/ \
     --threads 4
 ```
 
----
-
-## Output files
-
-All outputs are written to `--output-dir`. Feather files (`.feather`) use
-ZSTD compression and are readable with `pandas.read_feather()` or
-`pyarrow.feather.read_feather()`.
-
-A `config.yaml` is also written to the output directory, recording all
-resolved parameters and I/O paths. Rerun the exact same analysis with:
+You can also rerun a completed analysis from the emitted `config.yaml`:
 
 ```bash
 rigel quant --config results/config.yaml
 ```
+
+---
+
+## Output files
+
+All outputs are written to `--output-dir`. Feather files (`.feather`) are
+readable with `pandas.read_feather()` or `pyarrow.feather.read_feather()`.
+Pass `--tsv` to also write `.tsv` mirrors, or convert afterward with
+`rigel export`.
+
+`rigel quant` writes:
+
+| File | Contents |
+|------|----------|
+| `quant.feather` | Per-transcript abundance (mRNA + nRNA rows) |
+| `gene_quant.feather` | Gene-level aggregation |
+| `nrna_quant.feather` | nRNA entity estimates |
+| `loci.feather` | Per-locus EM summary |
+| `summary.json` | Run-level QC + calibration scalars |
+| `config.yaml` | Resolved run configuration (reproducibility) |
+| `locus_stats.feather` | Per-locus EM convergence profiling — **only** with `--emit-locus-stats` |
+
+A `config.yaml` is always written, recording all resolved parameters and I/O
+paths. Rerun the exact analysis with `rigel quant --config results/config.yaml`.
 
 ### quant.feather / quant.tsv
 
@@ -243,23 +355,23 @@ transcripts are included; synthetic nRNA spans appear in `nrna_quant`.
 | `length` | Spliced exonic length (bp) |
 | `effective_length` | Length after fragment-length correction |
 | `locus_id` | Locus ID; `-1` if not placed in an EM locus |
-| `nrna_id` | ID of the parent nRNA entity for this transcript (`"."` if none or if the transcript is itself an nRNA entity) |
-| `is_basic` | `1` if transcript has the GENCODE `basic` tag |
-| `is_mane` | `1` if transcript is MANE Select or MANE Plus Clinical |
-| `is_nrna` | `1` if transcript is single-exon (indistinguishable from nascent RNA) |
+| `nrna_id` | ID of the parent nRNA entity (`"."` if none or if the row is itself an nRNA entity) |
+| `is_basic` | `1` if the transcript has the GENCODE `basic` tag |
+| `is_mane` | `1` if MANE Select or MANE Plus Clinical |
+| `is_nrna` | `1` if single-exon (indistinguishable from nascent RNA) |
 | `count` | Fragment count assigned to this transcript |
 | `count_unambig` | Deterministically assigned fragment count |
 | `count_em` | EM-assigned fragment count |
 | `count_spliced` | Fragment count from annotated-spliced fragments |
-| `nrna_parent_count` | Parent nRNA entity's count. Zero if `is_nrna=1` (progenitors have no parent) or if no parent nRNA exists |
+| `nrna_parent_count` | Parent nRNA entity's count (0 if `is_nrna=1` or no parent) |
 | `tpm` | Transcripts per million (annotated transcripts only) |
-| `tpm_total_rna` | TPM normalized over all RNA (annotated + synthetic nRNA). Comparable to `tpm` in `nrna_quant` |
+| `tpm_total_rna` | TPM over all RNA (annotated + synthetic nRNA); comparable to `tpm` in `nrna_quant` |
 | `posterior_mean` | Mean EM posterior over units assigned to this transcript |
 
 ### gene_quant.feather / gene_quant.tsv
 
-Gene-level abundance aggregated from annotated (non-synthetic) transcript
-estimates. No nRNA attribution is performed at the gene level.
+Gene-level abundance aggregated from annotated (non-synthetic) transcripts.
+No nRNA attribution is performed at the gene level.
 
 | Column | Description |
 |--------|-------------|
@@ -279,10 +391,9 @@ estimates. No nRNA attribution is performed at the gene level.
 ### nrna_quant.feather / nrna_quant.tsv
 
 nRNA entity estimates. Each row is one nRNA entity (a single-exon
-transcript, either annotated or synthetic) that has at least one
-multi-exon mRNA child transcript. Standalone single-exon genes with
-no multi-exon overlap are excluded; they appear in `quant.feather`
-with `is_nrna=True`.
+transcript, annotated or synthetic) that has at least one multi-exon mRNA
+child. Standalone single-exon genes with no multi-exon overlap appear in
+`quant.feather` with `is_nrna=1` instead.
 
 | Column | Description |
 |--------|-------------|
@@ -293,50 +404,85 @@ with `is_nrna=True`.
 | `length` | Entity length (bp) |
 | `effective_length` | Effective length after fragment-length correction |
 | `locus_id` | Locus containing this entity |
-| `is_synthetic` | `1` if this entity was synthesized by rigel |
+| `is_synthetic` | `1` if synthesized by rigel |
 | `n_contributing_transcripts` | Number of multi-exon transcripts merged into this span |
-| `n_mrna` | Number of multi-exon mRNA transcripts associated with this nRNA entity |
+| `n_mrna` | Number of multi-exon mRNA transcripts associated with the entity |
 | `mrna_count` | Sum of mRNA children's fragment counts |
-| `count` | nRNA entity's own fragment count |
-| `tpm` | Total RNA TPM (denominator includes all annotated + synthetic transcripts). Directly comparable to `tpm_total_rna` in `quant.feather` |
+| `count` | Entity's own fragment count |
+| `tpm` | Total-RNA TPM; comparable to `tpm_total_rna` in `quant.feather` |
 
 ### loci.feather / loci.tsv
 
 Per-locus EM summary. One row per connected component of overlapping
-transcripts.
+transcripts. Each locus is an independent EM subproblem with `n_t + 1`
+components (one per transcript row + one gDNA).
 
 | Column | Description |
 |--------|-------------|
 | `locus_id` | Locus ID |
-| `ref` | Primary chromosome |
-| `n_transcripts` | Total transcript count (mRNA + nRNA spans) |
+| `locus_span_bp` | Genomic span of the locus (bp) |
+| `n_transcripts` | Total transcript rows (mRNA + nRNA spans) |
 | `n_annotated_transcripts` | Annotated (non-synthetic) transcript count |
 | `n_nrna_entities` | Number of nRNA entities (all single-exon transcripts) |
 | `n_genes` | Number of genes |
 | `n_em_fragments` | Ambiguous fragments entering EM |
-| `mrna` | Total mRNA count |
+| `count_unambig` | Deterministic (splice-confirmed) mRNA count that bypassed EM |
+| `mrna` | Total mRNA count (EM-assigned annotated + unambiguous) |
 | `nrna` | Total nRNA count |
 | `gdna` | Total gDNA count |
 | `total` | `mrna + nrna + gdna` |
 | `gdna_rate` | `gdna / total` |
-| `gdna_init` | Calibrated per-locus gDNA prior (γ) used for EM initialization |
+| `gdna_prior_count` | Calibrated per-locus gDNA Dirichlet prior scalar |
+| `rna_prior_count` | Calibrated per-locus RNA Dirichlet prior scalar |
+| `enable_gdna` | `1` if the gDNA component is enabled for this locus |
+| `n_regions_touched` | Number of calibration regions overlapping the locus |
+| `multi_locus_region_mass` | Fragment mass in regions shared with other loci |
+| `partial_coverage_region_mass` | Fragment mass in partially covered regions |
+| `gdna_eff_len_em` | Exposure-adjusted EM effective length of the locus gDNA component |
+| `gdna_eff_len_per_bp` | `gdna_eff_len_em / locus_span_bp` diagnostic ratio |
 
 ### summary.json
 
-Run-level summary. Key sections:
+Run-level summary. Top-level keys:
 
-| Section | Contents |
-|---------|----------|
+| Key | Contents |
+|-----|----------|
 | `rigel_version`, `timestamp` | Version and run time |
-| `command` | Subcommand, arguments, config file path |
-| `configuration` | All resolved parameters after CLI + YAML merge |
+| `command` | Subcommand, resolved arguments, config-file path |
+| `configuration` | All resolved pipeline parameters |
 | `input` | Absolute BAM and index paths |
-| `alignment_stats` | Total, mapped, unique, multimapping, duplicate, QC-fail read counts |
-| `fragment_stats` | Genic, intergenic, chimeric counts |
-| `strand_model` | Protocol (`R1-sense` / `R1-antisense`), strand specificity, 95% CI |
-| `calibration` | gDNA / RNA pool fragment-length models, global gDNA densities, per-MultiLocus prior diagnostics, library-wide `mean_pi_gdna`, `n_multi_loci`, `c_base`. See [Calibration](#calibration) below. |
-| `fragment_length` | Per-category summary statistics (mean/std/median/mode/n_obs) and full histograms with trimmed zero bins for QC plotting |
-| `quantification` | n_transcripts, n_genes, n_loci, mRNA/nRNA/gDNA totals and fractions |
+| `alignment_stats` | Total, mapped, unique, multimapping, proper-pair, duplicate, QC-fail read counts |
+| `fragment_stats` | Total, genic, intergenic, and chimeric breakdowns; annotated/unannotated SJ counts |
+| `strand_model` | Protocol (`R1-sense` / `R1-antisense`), strand specificity, `p_r1_sense`, training count, posterior variance, 95% CI |
+| `calibration` | Library-scalar calibration outputs (see below) |
+| `gdna_eff_len` | Summary of the per-locus gDNA effective-length series (`em`, `per_bp`) |
+| `fragment_length` | `global`, `gdna`, `rna`, and per-splice-category FL summaries + histograms |
+| `quantification` | `n_transcripts`, `n_genes`, `n_loci`, assignment counts, and mRNA/nRNA/gDNA totals + fractions |
+
+The **`calibration`** block holds exactly the library-wide calibration
+scalars (it is `null` if calibration did not run):
+
+```jsonc
+{
+  "calibration": {
+    "gdna_density_global":        <float>,  // library-average gDNA density (QC scalar)
+    "rna_sense_frac":             <float>,  // kappa: sense-strand RNA fraction
+    "gdna_strand_overdispersion": <float>,  // gDNA strand Beta-Binomial overdispersion
+    "rna_strand_overdispersion":  <float>,  // RNA strand Beta-Binomial overdispersion
+    "n_regions":                  <int>     // number of calibration regions
+  }
+}
+```
+
+The RNA and gDNA fragment-length models used by scoring/calibration are
+reported separately under the top-level **`fragment_length`** key (as
+`fragment_length.rna` and `fragment_length.gdna`), alongside the global and
+per-splice-category FL summaries.
+
+> **Note.** The older `region_calibration` / `background_model` /
+> `boundary_sweep` / `prior_table` keys and the `fl_models.rna_quality`
+> style quality flags are **retired** — they came from a superseded density
+> calibrator and are not written by v0.7.0.
 
 ### Annotated BAM
 
@@ -346,9 +492,8 @@ Produced by `--annotated-bam PATH`. Requires a second pass over the BAM.
 out with **exactly the same records**:
 
 - Record-count parity: the output contains the same multiset of records as
-  the input (no drops, no duplications). This is enforced by regression tests.
-- Collation is preserved: every qname appears in a single contiguous run in
-  the output.
+  the input (no drops, no duplications), enforced by regression tests.
+- Collation is preserved: every qname appears in a single contiguous run.
 - Filtered records (QCFAIL / unmapped / unpaired / duplicates when skipped)
   are written through unchanged without annotation tags.
 
@@ -361,17 +506,17 @@ out with **exactly the same records**:
 | `ZJ` | int | Gene index into rigel reference (`-1` if unassigned) |
 | `ZF` | int | Assignment flags bitfield (see below) |
 | `ZW` | float | Posterior probability of the assignment |
-| `ZC` | string | Input-ambiguity class for scored fragments: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`. `.` for records that were not scored by the EM (chimeric, intergenic, or dropped multimappers) |
-| `ZH` | int | Primary-hit flag: `1` for the winning alignment, `0` otherwise. Note: this reflects rigel's EM assignment, which may differ from the aligner's primary/secondary FLAG. |
+| `ZC` | string | Input-ambiguity class: `unambig`, `ambig_same_strand`, `ambig_opp_strand`, `multimapper`; `.` for records not scored by the EM |
+| `ZH` | int | Primary-hit flag: `1` for the winning alignment, `0` otherwise (reflects rigel's EM assignment, which may differ from the aligner's primary FLAG) |
 | `ZN` | int | Number of competing candidate components |
 | `ZS` | string | Splice type: `spliced_annot`, `spliced_unannot`, `unspliced`, or `unknown` |
 | `ZL` | int | Locus ID (`-1` if no locus) |
-| `ZB` | int | Number of splice junctions in **this record's CIGAR** that matched the splice-artifact blacklist and were treated as unspliced during scoring. Record-local (a mate with clean junctions reports `0` even if its mate reports `>0`). Always `0` when no blacklist is loaded. Sum of `ZB` across the annotated BAM equals the Pass-1 stat `n_sj_blacklisted`. |
+| `ZB` | int | Number of SJs in **this record's CIGAR** matched to the splice-artifact blacklist and treated as unspliced during scoring. Record-local. Always `0` when no blacklist is loaded. Summed over the BAM it equals the Pass-1 stat `n_sj_blacklisted`. |
 
 #### ZF assignment flags
 
-The `ZF` tag is an 8-bit integer bitfield describing the fate of the fragment
-(or read when unpaired) in the EM pipeline:
+`ZF` is an 8-bit bitfield describing the fate of the fragment (or read when
+unpaired) in the EM pipeline:
 
 | Bit | Mask | Flag | Meaning |
 |-----|------|------|---------|
@@ -384,11 +529,10 @@ The `ZF` tag is an 8-bit integer bitfield describing the fate of the fragment
 | 6 | 0x40 | `is_chimeric` | Chimeric fragment, skipped before scoring |
 | 7 | 0x80 | `is_multimapper_dropped` | Multimapper dropped when `--include-multimap` is off |
 
-Canonical ZF values (the only values produced):
+Canonical `ZF` values (the only ones produced):
 
 | ZF (hex) | Dec | Meaning |
 |----------|-----|---------|
-| `0x00` |   0 | Unresolved (placeholder; never written by rigel) |
 | `0x03` |   3 | mRNA assigned (multi-exon transcript) |
 | `0x09` |   9 | nRNA assigned (annotated single-exon transcript) |
 | `0x19` |  25 | nRNA assigned (rigel-synthesized span) |
@@ -400,11 +544,9 @@ Canonical ZF values (the only values produced):
 Invariants (enforced by tests):
 
 - Exactly one of `{is_mrna, is_gdna, is_nrna}` is set on any resolved record.
-- `is_resolved` ⇒ the record participated in the EM (mRNA/nRNA/gDNA); the
-  complement (`is_chimeric` or `is_multimapper_dropped` or unresolved) never
-  has `is_resolved` set.
-- `is_synthetic` ⇒ `is_nrna`.
-- `is_intergenic` ⇒ `is_gdna`.
+- `is_resolved` ⇒ the record participated in the EM; chimeric / dropped /
+  unresolved records never set `is_resolved`.
+- `is_synthetic` ⇒ `is_nrna`; `is_intergenic` ⇒ `is_gdna`.
 - `is_chimeric` and `is_multimapper_dropped` are mutually exclusive and never
   combine with any assignment bit.
 
@@ -426,107 +568,95 @@ is_mm_dropped = (zf & 0x80) != 0
 
 ## Calibration
 
-Calibration is the step that turns the raw BAM scan into the priors
-that the per-locus EM consumes.  It runs once per quant invocation,
-in-process, and writes its results both into the EM (as a per-MultiLocus
-`gdna_prior_count` plus gDNA eligibility flag) and into
-`summary.json` (under the `calibration` key) for inspection.
+Calibration is the middle stage of the pipeline. It runs once per `quant`
+invocation, in-process, on the fractional per-region/per-boundary fragment
+mass the C++ scanner deposits during the single BAM pass (no extra read of
+the BAM). It turns that mass into the per-locus priors the EM consumes and
+into the library-scalar block in `summary.json`.
 
-### What calibration does
+### What calibration solves
 
-Rigel's likelihood model has three competing fragment origins:
+Rigel's model has three competing fragment origins:
 
-- **mRNA** — spliced, transcribed.
-- **nRNA** — nascent / unspliced (single-exon transcripts and
-  rigel-synthesised intronic spans).
-- **gDNA** — genomic DNA contamination (intergenic + intragenic
-  unspliced reads that originate from gDNA, not pre-mRNA).
+- **mRNA** — spliced, mature, transcribed.
+- **nRNA** — nascent / unspliced pre-mRNA, strand-matched to its gene.
+- **gDNA** — genomic DNA contamination: unspliced, unstranded (50/50),
+  genome-wide, and (under hybrid capture) enriched on probed exons.
 
-The three are not always identifiable from the read alone — a
-fragment that maps inside an intron could be nRNA or gDNA, and a
-short single-exon read could be mRNA, nRNA, or gDNA.  Calibration
-estimates *prior probabilities* for each component on a per-locus
-basis using global summaries that the BAM scan accumulates in a
-single pass (no extra read of the BAM).
+Calibration models **only RNA-vs-gDNA** — it deconvolves each genomic
+node's *unspliced* mass into the 2-simplex `(f_rna+, f_rna-, f_g)`
+(sense-RNA / antisense-RNA / gDNA). The nascent-vs-mature split is left to
+the per-locus EM downstream.
 
-The pipeline:
+### The bipartite belief-propagation sweep
 
-1. **Region partition**: at index time, `rigel index` partitions the
-   genome into 8 disjoint mask states based on annotation
-   (intergenic / intron / exon × strand).  Persisted into the index
-   under `region_df`.
-2. **In-place accumulator** (BAM scan): the C++ scanner attributes
-   every observed fragment to one of the 8 states and records a
-   per-state fragment-length histogram and per-region count totals.
-   No extra pass over the BAM.
-3. **Pool FL models**: build one fragment-length distribution per
-   pool (RNA, gDNA, global) and shrink low-count pools toward the
-   global FL using empirical-Bayes Dirichlet smoothing.  Each pool
-   gets a `Quality` flag (`good` / `weak` / `fallback`) based on its
-   observed count.
-4. **Global gDNA densities**: from the per-region counts, compute
-   library-wide gDNA fragment-density estimates per region category
-   (intergenic / intron / exon-near-intron) and a kappa correction
-   for the gDNA fragment-length effect.
-5. **Per-MultiLocus priors**: for every MultiLocus (a connected
-  component of mappable transcripts), turn the global densities
-  into a single expected gDNA pseudocount, `gdna_prior_count`.
-  RNA components do not receive a calibration-derived prior budget.
+Calibration builds a **bipartite region↔boundary node chain** from the
+index's `regions` and `boundaries` partitions and runs a **single
+forward-backward belief-propagation pass** over it (exact on the chain,
+which is a forest of linear paths). There is no outer fixed-point loop.
 
-### Knobs
+The design principle is **count-zero-information**: a fragment count carries
+no intrinsic gDNA/RNA information. A node's composition is set by exactly
+three sources:
 
-All calibration knobs are advanced settings; defaults are tuned for
-standard total-RNA libraries.
+1. **Strand likelihood** — the Beta-Binomial tilt of the per-strand counts.
+   This is the *only* intrinsic gDNA/RNA signal; the count enters only as
+   overdispersed Fisher information (how sharp the strand tilt is).
+2. **Cross-node imputation** — neighbour *density* messages passed at the
+   belief-free Poisson disagreement variance `sigma2_imp` (fit once, before
+   the pass). gDNA flows genomically; per-strand RNA flows only across an
+   edge where that strand is continuous (the transcript-structure gate).
+3. **The global gDNA prior** — the population baseline `rho_global` plus a
+   trained Phase-2 gDNA-density KDE, at MAD-spread precision.
 
-| Flag                  | Default | What it controls                                                                                              |
-|-----------------------|---------|---------------------------------------------------------------------------------------------------------------|
-| `--cal-prior-ess`     | `1000`  | Empirical-Bayes evidence strength for the FL-Dirichlet shrinkage. Larger ⇒ pool FLs pulled harder toward the global FL. |
-| `--cal-quality-good`  | `5000`  | Pool counts at or above this threshold are flagged `"good"` and used without shrinkage. |
-| `--cal-quality-weak`  | `200`   | Pool counts below this threshold are flagged `"unusable"` and the pool falls back on the global FL.  Counts in `[weak, good)` are flagged `"weak"` and shrunk toward the global FL with strength `--cal-prior-ess`. |
-| `--rna-lower-confidence` | `0.95` | Posterior confidence level used for the per-region RNA lower bound and for the exon self-training screen that refits the gDNA strand-balance concentration `kappa_d`. Must lie in `[0.5, 1.0)`. |
-| `--gdna-density-confidence` | `0.95` | Posterior confidence level for the gDNA density-prior upper bound emitted by the v4 fine-region density model (`upper_unbounded = B_tot + nbinom.ppf(confidence, alpha_post, p_nb)`). Must lie in `[0.5, 1.0)`. |
-| `--density-max-exposure` | unset | Optional upper clip on the per-region relative-exposure `A_r` produced by `RegionExposure.from_density`. `A_r` is density-derived in v4 and may exceed 1 on regions with above-reference gDNA density; this is intentional. Set a positive value to cap `A_r` via `np.minimum` for downstream consumers that prefer a bounded surface. |
+The pass resolves each node's `(f+, f-, f_g)` pie, then projects the result
+onto per-region and per-boundary-side deconvolved gDNA/RNA mass.
 
-### `summary.json` calibration schema
+### What calibration produces
 
-```jsonc
-{
-  "calibration": {
-    "global_densities": { /* per-region-category lambda + kappa */ },
-    "fl_models": {
-      "rna_quality":    "good" | "weak" | "fallback",
-      "gdna_quality":   "good" | "weak" | "fallback",
-      "rna":            { "mean": ..., "std": ..., "n_obs": ... },
-      "gdna":           { "mean": ..., "std": ..., "n_obs": ... },
-      "global":         { "mean": ..., "std": ..., "n_obs": ... }
-    },
-    "diagnostics": { /* per-region observation counts, boundary flux */ },
-    "n_multi_loci":  <int>,
-    "mean_pi_gdna":  <float>     // library-wide pi_gdna averaged across MultiLoci
-  }
-}
-```
+- **Library hyperparameters** (surfaced in `summary.json.calibration`):
+  `gdna_density_global`, `rna_sense_frac` (κ), and the gDNA and RNA strand
+  Beta-Binomial overdispersions.
+- **Per-locus Dirichlet prior** — two scalars, `gdna_prior_count` and
+  `rna_prior_count`, that set the gDNA-vs-RNA split for each locus's EM (plus
+  the gDNA component's effective length). These appear per locus in
+  `loci.feather`. RNA mass is distributed among the compatible transcripts by
+  the EM itself, not by calibration.
+
+### Advanced calibration knobs
+
+All are advanced; defaults suit standard libraries. Exposed on `rigel quant`:
+
+- `--gdna-prior-mixture-bridge` (default `0.01`) — floors the KDE valley
+  between the depleted and enriched gDNA-density modes.
+- `--sweep-n-grid-single-strand` (default `256`) — single-strand node
+  log-odds grid resolution (de-quantizes the gDNA-fraction readout).
+- `--gdna-em-llr-bias` (default `0.0`) — a downstream EM knob, not part of
+  the calibration sweep: biases the gDNA component in the locus EM to trade
+  the gDNA→RNA leak against an RNA→gDNA siphon.
+
+The remaining calibration parameters (`sweep_n_grid`,
+`gdna_strand_prior_*`, `rna_strand_prior_*`, `gdna_prior_bandwidth`,
+`calib_kde_*`) live in `CalibrationConfig` and can be set via the YAML
+`--config` file; see [parameters.md](parameters.md).
 
 ### When to suspect calibration is misfiring
 
-- `mean_pi_gdna` ≈ 1.0 on a presumed-clean library — calibration
-  has assigned everything to gDNA.  Almost always means the gDNA
-  pool FL is `"fallback"` because `n_obs` was below
-  `--cal-quality-weak`.  Inspect `fl_models.gdna_quality`.
-- `mean_pi_gdna` ≈ 0.0 on a presumed-contaminated library —
-  conversely, the RNA pool FL is too dominant.  Inspect
-  `fl_models.rna_quality` and the per-region counts in `diagnostics`.
-- Heavy mass on nRNA components in `nrna_quant.feather` for a
-  short-fragment library generally indicates an mRNA/nRNA/gDNA
-  identifiability limit in that locus. Inspect the locus-level
-  likelihood evidence and gDNA calibration diagnostics.
-- The calibration knobs above are *priors*; the EM will override them when
-  the per-locus likelihood is decisive.  If a locus disagrees with
-  calibration, the locus generally wins.
+- A very high genome-wide `gdna_fraction` in `summary.json.quantification`
+  on a presumed-clean library, or an implausible `gdna_density_global`,
+  suggests the strand signal is weak (near-unstranded data) and the sweep is
+  leaning on the global prior. Inspect `strand_model.strand_specificity`.
+- Heavy mass on nRNA components in `nrna_quant.feather` for a short-fragment
+  library usually indicates an mRNA/nRNA/gDNA identifiability limit in that
+  locus rather than a calibration error.
+- The per-locus priors are *priors*: a decisive per-locus likelihood
+  overrides them. If a locus disagrees with calibration, the locus generally
+  wins.
 
-For a more thorough discussion of the calibration model and its
-identifiability limits, see [METHODS.md](METHODS.md) §10 and
-[docs/calibration/calibration_v6_plan.md](calibration/calibration_v6_plan.md).
+For the full theory, see
+[docs/calibration/CALIBRATION_ARCHITECTURE.md](calibration/CALIBRATION_ARCHITECTURE.md)
+(the count-zero-information principle) and the model overview in
+[METHODS.md](METHODS.md).
 
 ---
 
@@ -562,11 +692,14 @@ rule rigel_index:
     log:
         "logs/rigel_index.log",
     threads: 1
+    params:
+        zarr = config.get("alignable_zarr", ""),
     shell:
         """
         rigel index \
             --fasta {input.fasta} \
             --gtf   {input.gtf}   \
+            $([ -n "{params.zarr}" ] && echo "--alignable-zarr {params.zarr}" || echo "--no-mappability") \
             -o      {output}      \
             > {log} 2>&1
         """
@@ -628,7 +761,10 @@ genome_fasta: /path/to/GRCh38.primary_assembly.fa
 genome_gtf:   /path/to/gencode.v46.primary_assembly.annotation.gtf
 rigel_index:  /path/to/rigel_index/
 
-# Optional: path to a rigel quant YAML config shared across all samples
+# Optional: alignable Zarr store (omit to build the index with --no-mappability)
+alignable_zarr: /path/to/GRCh38.alignable.zarr
+
+# Optional: a shared rigel quant YAML config
 rigel_config: config/rigel_params.yaml
 ```
 
@@ -639,7 +775,6 @@ rigel_config: config/rigel_params.yaml
 include_multimap: true
 keep_duplicates: false
 sj_strand_tag: [auto]
-prior_pseudocount: 1.0
 assignment_mode: sample
 em_mode: vbem
 ```
@@ -651,15 +786,15 @@ import pandas as pd
 
 samples = ["sample1", "sample2", "sample3"]
 
-# Gene-level mRNA matrix
+# Gene-level matrices
 gene_dfs = [
     pd.read_feather(f"results/{s}/gene_quant.feather").assign(sample=s)
     for s in samples
 ]
 gene_quant = pd.concat(gene_dfs, ignore_index=True)
 
-mrna_matrix = gene_quant.pivot(index="gene_id", columns="sample", values="mrna")
-tpm_matrix  = gene_quant.pivot(index="gene_id", columns="sample", values="tpm")
+count_matrix = gene_quant.pivot(index="gene_id", columns="sample", values="count")
+tpm_matrix   = gene_quant.pivot(index="gene_id", columns="sample", values="tpm")
 ```
 
 ---
@@ -668,11 +803,12 @@ tpm_matrix  = gene_quant.pivot(index="gene_id", columns="sample", values="tpm")
 
 | Aligner | SJ strand tag | Notes |
 |---------|--------------|-------|
-| STAR | `XS` | Recommended; name-grouped output by default |
+| STAR | `XS` | Name-grouped output by default |
 | HISAT2 | `XS` | Standard RNA-seq workflow |
 | minimap2 | `ts` | Long-read and splice-aware mode |
 
-Use `--sj-strand-tag auto` (default) to detect the tag automatically.
+Use `--sj-strand-tag auto` (default) to detect the tag automatically, or list
+several tags to try in order (e.g. `--sj-strand-tag XS ts`).
 
 ---
 
@@ -700,7 +836,8 @@ rigel quant \
     --seed 42 --threads 1
 ```
 
-A `config.yaml` is written to the output directory, so you can rerun later:
+Set `--seed` for deterministic post-EM assignment sampling; add `--threads 1`
+for bit-reproducible output. Rerun later from the emitted config:
 
 ```bash
 rigel quant --config results/config.yaml
@@ -723,9 +860,9 @@ rigel quant \
     --bam sample.bam --index index/ -o results/ \
     --annotated-bam results/annotated.bam
 
-# Count gDNA-assigned fragments (ZF=3)
+# Count fragments assigned to gDNA by the EM (ZF=5)
 samtools view -F 256 results/annotated.bam \
-    | awk '{ for(i=12;i<=NF;i++) if($i=="ZF:i:3") count++ } END { print count }'
+    | awk '{ for(i=12;i<=NF;i++) if($i=="ZF:i:5") count++ } END { print count }'
 ```
 
 ### Exclude multimappers
@@ -742,6 +879,15 @@ rigel quant \
 rigel quant \
     --bam sample.bam --index index/ -o results/ \
     --em-iterations 0
+```
+
+### Profile EM convergence
+
+```bash
+rigel quant \
+    --bam sample.bam --index index/ -o results/ \
+    --emit-locus-stats
+# -> results/locus_stats.feather (iteration counts, timing, EC stats per locus)
 ```
 
 ---
@@ -768,20 +914,29 @@ transcripts that map to the same span. Isoforms with identical start and end
 coordinates share one nRNA component.
 
 **Why is `strand_specificity` near 0.5?**
-Rigel trains the strand model from annotated spliced fragments only. Unstranded
-libraries, or libraries with few informative splice reads, will stay near 0.5.
+Rigel trains the strand model from annotated spliced fragments only.
+Unstranded libraries, or libraries with few informative splice reads, stay
+near 0.5.
 
-**How does calibration decide whether to use strand information?**
-Calibration uses strand correction only when the signed strand contrast is
-statistically identifiable at the 99% level and not numerically tiny. Otherwise
-it runs the unstranded count/exposure estimator. The exact rule, including why
-exonic diagnostic strand signal is not used for calibration, is documented in
-[`docs/calibration/strand_mode_decision_2026-05-12.md`](calibration/strand_mode_decision_2026-05-12.md).
+**How does calibration use strand information?**
+The per-strand counts are the *only* intrinsic gDNA/RNA signal in the model
+(the count itself carries no gDNA/RNA information — the count-zero-information
+principle). Each node's strand likelihood is a Beta-Binomial tilt; the count
+enters only as its overdispersed Fisher information, so an unstranded or
+low-count node contributes a weak, uninformative tilt and the node's
+composition is then set by cross-node imputation and the global gDNA prior.
+There is no on/off "strand-mode switch." See
+[docs/calibration/CALIBRATION_ARCHITECTURE.md](calibration/CALIBRATION_ARCHITECTURE.md).
+
+**Do I need the alignable Zarr store?**
+For real genomes it is recommended — it provides gDNA-aware effective length
+and the splice-artifact blacklist. For synthetic genomes or stranded-only
+benchmarks, pass `--no-mappability` at index time.
 
 **How much memory does Rigel use?**
-The fragment buffer defaults to 2 GiB. Overflow spills to disk under
-`--tmpdir`. Typical paired-end libraries (50–100M read pairs) fit within
-the default.
+The scan buffer defaults to 2 GiB (`--scan-buffer-size`); overflow spills to
+disk under `--tmpdir`. Typical paired-end libraries (50–100M read pairs) fit
+within the default.
 
 **Can I run Rigel on a cluster?**
 Yes. Each `rigel quant` is independent. Parallelise at the sample level via
@@ -792,21 +947,18 @@ Set `--seed` for deterministic post-EM assignment sampling. For fully
 bit-reproducible output, also set `--threads 1`.
 
 **When should I use `--annotated-bam`?**
-For read-level inspection, debugging, or assignment validation. It requires
-a second BAM pass and adds some runtime overhead.
+For read-level inspection, debugging, or assignment validation. It requires a
+second BAM pass and adds runtime overhead.
 
 **Does Rigel support single-end reads?**
 Single-end reads are handled but less thoroughly tested than paired-end.
-Fragment length estimation uses alignment length rather than insert size.
+Fragment-length estimation uses alignment length rather than insert size.
 
-**What is `VBEM_CLAMP_FLOOR` and why does it matter?**
-In VBEM mode, Rigel uses SQUAREM acceleration to speed up EM convergence.
-SQUAREM can overshoot, pushing a component's Dirichlet alpha to very small
-values. Because VBEM E-step weights depend on `digamma(α)`, which diverges
-as `−1/α` near zero, components pushed below α ≈ 0.01 enter an absorbing
-regime where they can never recover — even if they have genuine read
-support. `VBEM_CLAMP_FLOOR` (default 0.1) sets a minimum alpha after each
-SQUAREM iteration, keeping components in the recoverable regime. This
-constant is defined in `src/rigel/native/em_solver.cpp` and has no effect
-on MAP-EM mode. See [parameters.md](parameters.md) for all compile-time
-constants.
+**What is `VBEM_CLAMP_FLOOR`?**
+In VBEM mode Rigel uses SQUAREM acceleration. SQUAREM can overshoot, pushing a
+component's Dirichlet alpha toward zero; because VBEM E-step weights depend on
+`digamma(alpha)` (which diverges as `-1/alpha`), components below alpha ≈ 0.01
+enter an absorbing regime and never recover. `VBEM_CLAMP_FLOOR` (default 0.1)
+sets a minimum alpha after each SQUAREM iteration. It is a compile-time
+constant in `src/rigel/native/em_solver.cpp` and has no effect in MAP-EM mode.
+See [parameters.md](parameters.md) for all compile-time constants.

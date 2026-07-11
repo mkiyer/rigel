@@ -57,7 +57,11 @@ def _gene_locus_ids(
     locus_id_per_transcript: np.ndarray,
     t_mrna: np.ndarray,
 ) -> np.ndarray:
-    """For each gene, assign the locus_id of its highest-mRNA transcript."""
+    """For each gene, assign the locus_id of its highest-count transcript.
+
+    The caller passes total (mRNA + nRNA) counts as ``t_mrna``, so the
+    winning transcript is the one with the highest total count.
+    """
     g_locus_id = np.full(n_genes, -1, dtype=np.int32)
     g_best_mrna = np.full(n_genes, -1.0, dtype=np.float64)
     valid = locus_id_per_transcript >= 0
@@ -334,8 +338,7 @@ class AbundanceEstimator:
         """
         n_transcripts = self.num_transcripts
         # Pass per-transcript FL-marginal effective length L̃_t to the
-        # C++ EM.  See effective_length_consistency_2026_05.md for the
-        # derivation; the EM uses log L̃_t per component inside the E-step
+        # C++ EM.  The EM uses log L̃_t per component inside the E-step
         # (and inside assign_posteriors) instead of any per-fragment
         # length correction.
         t_eff_lens = np.ascontiguousarray(self._t_eff_len_em, dtype=np.float64)
@@ -457,10 +460,6 @@ class AbundanceEstimator:
         return result
 
     # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
     # Output - primary counts
     # ------------------------------------------------------------------
 
@@ -471,6 +470,7 @@ class AbundanceEstimator:
         -------
         transcript_id, gene_id, gene_name : identifiers
         effective_length : bias-corrected effective length
+        em_effective_length : FL-marginal effective length used by the EM
         locus_id : int32, EM locus (-1 if no locus)
         nrna_id : str, parent nRNA entity transcript ID ("." if none or is_nrna)
         is_basic, is_mane, is_nrna : flags
@@ -666,12 +666,13 @@ class AbundanceEstimator:
         -------
         nrna_id : str, transcript ID for the nRNA entity
         effective_length : bias-corrected effective length
+        em_effective_length : FL-marginal effective length used by the EM
         locus_id : int32, EM locus
         is_synthetic : bool, True for RIGEL-generated synthetics
         n_contributing_transcripts : int, annotated transcripts merged
         count : float, nRNA entity's own fragment count
-        n_mrna_children : int, number of multi-exon mRNA transcripts
-        mrna_children_count : float, sum of mRNA children's transcript counts
+        n_mrna : int, number of multi-exon mRNA transcripts
+        mrna_count : float, sum of mRNA children's transcript counts
         tpm : float, total RNA TPM (comparable to quant.feather tpm_total_rna)
         """
         t_df = index.t_df
@@ -778,6 +779,12 @@ class AbundanceEstimator:
         gdna : float, gDNA count from locus EM
         total : float, mrna + nrna + gdna
         gdna_rate : float, gdna / total
+        gdna_prior_count : float, per-locus gDNA Dirichlet prior scalar
+        rna_prior_count : float, per-locus RNA Dirichlet prior scalar
+        enable_gdna : bool, whether the locus admits a gDNA component
+        n_regions_touched : int, calibration regions overlapping the locus
+        multi_locus_region_mass : float, region mass shared across loci
+        partial_coverage_region_mass : float, region mass partially covered by the locus
         gdna_eff_len_em : float
             Exposure-adjusted EM effective length for the locus gDNA component.
         gdna_eff_len_per_bp : float

@@ -120,8 +120,7 @@ print(f"total-density sigma2_imp={_sig_total:.4f}")
 def _sweep(prior, belief, cap, dis2):
     return node_sweep(chain, statics, geometry, belief, ra, bsub, rna_sense_frac=kappa,
                       gdna_strand_overdispersion=od_g, rna_strand_overdispersion=od_r,
-                      n_grid=cfg.sweep_n_grid, max_passes=cfg.sweep_max_passes,
-                      convergence_delta=cfg.sweep_convergence_delta,
+                      n_grid=cfg.sweep_n_grid,
                       logodds_window=cfg.sweep_logodds_window, n_tilt=cfg.sweep_n_tilt,
                       n_grid_ss=cfg.sweep_n_grid_single_strand,
                       gdna_prior=prior, disagreement_sigma2=dis2, _capture=cap)

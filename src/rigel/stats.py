@@ -75,10 +75,6 @@ class PipelineStats:
     n_sj_observed: int = 0
     n_sj_blacklisted: int = 0
 
-    # --- gDNA contamination ---
-    n_gdna_em: int = 0
-    n_gdna_global: int = 0
-
     @property
     def n_intergenic(self) -> int:
         """Total intergenic fragments (unspliced + spliced)."""
@@ -89,20 +85,14 @@ class PipelineStats:
         """Intergenic fragments assigned deterministically to gDNA."""
         return self.n_intergenic
 
-    @property
-    def n_gdna_total(self) -> int:
-        """Total gDNA estimate: calibration-projected global estimate."""
-        return self.n_gdna_global if self.n_gdna_global > 0 else (self.n_gdna_unambig + self.n_gdna_em)
-
     def to_dict(self) -> dict:
         """Convert to a JSON-serializable dictionary.
 
-        Includes computed properties (``n_intergenic``, ``n_gdna_*``)
+        Includes computed properties (``n_intergenic``, ``n_gdna_unambig``)
         for convenience alongside the raw dataclass fields.
         """
         d = asdict(self)
         # Add computed properties
         d["n_intergenic"] = self.n_intergenic
         d["n_gdna_unambig"] = self.n_gdna_unambig
-        d["n_gdna_total"] = self.n_gdna_total
         return d

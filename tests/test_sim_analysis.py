@@ -34,10 +34,9 @@ def _write_manifest(sim_base, condition: str, *, n_rna: int = 1_000_000, n_gdna:
     (sim_base / "manifest.json").write_text(json.dumps(manifest))
 
 
-def _write_summary(sim_base, condition: str, *, rho_ex: float = 0.0985):
+def _write_summary(sim_base, condition: str):
     out_dir = sim_base / condition / "rigel_out"
     out_dir.mkdir(parents=True)
-    _ = rho_ex  # v4: EXON-INTRON family removed; kept as kwarg for callers.
     summary = {
         # Acyclic-calibrator schema: one global gDNA density + strand-model scalars.
         "calibration": {
@@ -94,7 +93,7 @@ def test_calibration_report_uses_condition_fl_truth_when_available(tmp_path):
 def test_postfix_acceptance_checks_pass_for_post_fix_profile(tmp_path):
     condition = "gdna_high_ss_0.99_nrna_none"
     _write_manifest(tmp_path, condition, n_gdna=2_000_000)
-    _write_summary(tmp_path, condition, rho_ex=0.0985)
+    _write_summary(tmp_path, condition)
     loci_path = tmp_path / condition / "rigel_out" / "loci.tsv"
     loci_path.write_text("nrna\n0\n")
 

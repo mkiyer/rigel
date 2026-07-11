@@ -109,11 +109,6 @@ _PARAM_SECTIONS = {
     "scoring": _SCORING_FIELDS,
 }
 
-# Simulation-level sweep keys (not pipeline config fields)
-_SIM_SWEEP_KEYS = frozenset({
-    "gdna_frag_mean", "gdna_frag_std", "gdna_strand_kappa",
-})
-
 logger = logging.getLogger(__name__)
 
 
@@ -892,10 +887,9 @@ def run_sweep(config, output_dir, *, gtf_path=None,
                     float(gdna_sk) if gdna_sk is not None else "")
                 row["cal_kappa_true"] = cal_kappa_true
 
-                # Calibration report deferred to PR 8: the v6 calibrator
-                # (rigel.calibration.calibrate) is not yet wired end-to-end
-                # (see docs/acc_caljointmodel/), so pr.calibration carries no
-                # summary. Only the FL truth columns are populated here.
+                # Only the gDNA FL truth columns are populated here; the
+                # per-condition calibration-estimate columns (cal_kappa_est,
+                # cal_density_est, …) are left blank in this report.
                 row["cal_gdna_fl_true_mean"] = gdna_true_mean
                 row["cal_gdna_fl_true_std"] = gdna_true_std
                 for col in ("cal_kappa_est", "cal_kappa_err",

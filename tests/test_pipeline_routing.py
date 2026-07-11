@@ -178,7 +178,6 @@ def _scan_em_data(
         empty_fl,
         empty_fl,
         index,
-        estimator,
         overhang_log_penalty=overhang_log_penalty,
         mismatch_log_penalty=mismatch_log_penalty,
         gdna_splice_penalties=gdna_splice_penalties,
@@ -188,7 +187,6 @@ def _scan_em_data(
         estimator,
         stats,
         index,
-        strand_models,
         annotations=annotations,
     )
     return builder.scan(buffer, log_every)

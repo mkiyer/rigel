@@ -3,11 +3,11 @@
 import pysam
 
 from rigel.sim.bam import (
-    blocks_to_cigar as _blocks_to_cigar,
-    premrna_to_genomic_interval as _premrna_to_genomic_interval,
-    take_from_left as _take_from_left,
-    take_from_right as _take_from_right,
-    transcript_to_genomic_blocks as _transcript_to_genomic_blocks,
+    blocks_to_cigar,
+    premrna_to_genomic_interval,
+    take_from_left,
+    take_from_right,
+    transcript_to_genomic_blocks,
 )
 from rigel.sim.genome import MutableGenome
 from rigel.sim.whole_genome import GDNASimConfig, SimulationParams, WholeGenomeSimulator
@@ -74,12 +74,12 @@ def _reference_sequence_for_record(read: pysam.AlignedSegment, fasta: pysam.Fast
 
 
 class TestTranscriptToGenomicBlocks:
-    """Test _transcript_to_genomic_blocks for POS and NEG strand."""
+    """Test transcript_to_genomic_blocks for POS and NEG strand."""
 
     def test_single_exon_pos(self):
         """Fragment within a single exon on + strand."""
         t = _make_pos_transcript([(100, 300)])  # 200bp exon
-        blocks = _transcript_to_genomic_blocks(10, 50, t)
+        blocks = transcript_to_genomic_blocks(10, 50, t)
         assert blocks == [(110, 150)]
 
     def test_single_exon_neg(self):
@@ -90,7 +90,7 @@ class TestTranscriptToGenomicBlocks:
         Mirrored: tx [150, 190) → genomic [250, 290)
         """
         t = _make_neg_transcript([(100, 300)])
-        blocks = _transcript_to_genomic_blocks(10, 50, t)
+        blocks = transcript_to_genomic_blocks(10, 50, t)
         # t_len=200, mirrored: start=200-50=150, end=200-10=190
         # exon is [100,300), offset 150→190 → genomic [250, 290)
         assert blocks == [(250, 290)]
@@ -100,7 +100,7 @@ class TestTranscriptToGenomicBlocks:
         t = _make_pos_transcript([(100, 200), (300, 400)])
         # Transcript: 100bp exon1 + 100bp exon2 = 200bp total
         # Fragment at tx [80, 120) spans exon boundary at pos 100
-        blocks = _transcript_to_genomic_blocks(80, 120, t)
+        blocks = transcript_to_genomic_blocks(80, 120, t)
         # First 20bp in exon1: genomic [180, 200)
         # Next 20bp in exon2: genomic [300, 320)
         assert blocks == [(180, 200), (300, 320)]
@@ -113,20 +113,20 @@ class TestTranscriptToGenomicBlocks:
         # (mirrored: start=200-120=80, end=200-80=120)
         # tx pos 80-99 → exon1 offset 80 → genomic [180, 200)
         # tx pos 100-119 → exon2 offset 0 → genomic [300, 320)
-        blocks = _transcript_to_genomic_blocks(80, 120, t)
+        blocks = transcript_to_genomic_blocks(80, 120, t)
         assert blocks == [(180, 200), (300, 320)]
 
     def test_within_first_exon_pos(self):
         """Fragment entirely within the first exon."""
         t = _make_pos_transcript([(100, 200), (300, 400)])
-        blocks = _transcript_to_genomic_blocks(0, 50, t)
+        blocks = transcript_to_genomic_blocks(0, 50, t)
         assert blocks == [(100, 150)]
 
     def test_within_second_exon_pos(self):
         """Fragment entirely within the second exon."""
         t = _make_pos_transcript([(100, 200), (300, 400)])
         # tx position 100 = start of exon2
-        blocks = _transcript_to_genomic_blocks(100, 150, t)
+        blocks = transcript_to_genomic_blocks(100, 150, t)
         assert blocks == [(300, 350)]
 
     def test_three_exon_spanning_two_introns(self):
@@ -136,17 +136,17 @@ class TestTranscriptToGenomicBlocks:
         # exon1 [0,50): tx 40-49 → genomic [40, 50)
         # exon2 [100,150): tx 50-99 → genomic [100, 150)
         # exon3 [200,250): tx 100-119 → genomic [200, 220)
-        blocks = _transcript_to_genomic_blocks(40, 120, t)
+        blocks = transcript_to_genomic_blocks(40, 120, t)
         assert blocks == [(40, 50), (100, 150), (200, 220)]
 
 
 class TestPremrnaToGenomicInterval:
-    """Test _premrna_to_genomic_interval."""
+    """Test premrna_to_genomic_interval."""
 
     def test_pos_strand(self):
         t = _make_pos_transcript([(100, 200), (300, 400)])
         # Pre-mRNA spans genomic [100, 400), len=300
-        gstart, gend = _premrna_to_genomic_interval(10, 50, t)
+        gstart, gend = premrna_to_genomic_interval(10, 50, t)
         assert gstart == 110
         assert gend == 150
 
@@ -155,54 +155,54 @@ class TestPremrnaToGenomicInterval:
         # Pre-mRNA spans [100, 400), len=300
         # Mirrored: start=300-50=250, end=300-10=290
         # Genomic: 100+250=350, 100+290=390
-        gstart, gend = _premrna_to_genomic_interval(10, 50, t)
+        gstart, gend = premrna_to_genomic_interval(10, 50, t)
         assert gstart == 350
         assert gend == 390
 
 
 class TestBlocksToCigar:
-    """Test _blocks_to_cigar."""
+    """Test blocks_to_cigar."""
 
     def test_single_block(self):
-        cigar = _blocks_to_cigar([(100, 250)])
+        cigar = blocks_to_cigar([(100, 250)])
         assert cigar == [(0, 150)]  # 150M
 
     def test_two_blocks_with_intron(self):
-        cigar = _blocks_to_cigar([(100, 200), (300, 400)])
+        cigar = blocks_to_cigar([(100, 200), (300, 400)])
         # 100M, 100N, 100M
         assert cigar == [(0, 100), (3, 100), (0, 100)]
 
     def test_three_blocks(self):
-        cigar = _blocks_to_cigar([(10, 50), (100, 150), (200, 220)])
+        cigar = blocks_to_cigar([(10, 50), (100, 150), (200, 220)])
         assert cigar == [(0, 40), (3, 50), (0, 50), (3, 50), (0, 20)]
 
 
 class TestTakeFromLeftRight:
-    """Test _take_from_left and _take_from_right."""
+    """Test take_from_left and take_from_right."""
 
     def test_take_left_single_block(self):
-        result = _take_from_left([(100, 300)], 50)
+        result = take_from_left([(100, 300)], 50)
         assert result == [(100, 150)]
 
     def test_take_left_spanning(self):
-        result = _take_from_left([(100, 120), (200, 300)], 50)
+        result = take_from_left([(100, 120), (200, 300)], 50)
         assert result == [(100, 120), (200, 230)]
 
     def test_take_right_single_block(self):
-        result = _take_from_right([(100, 300)], 50)
+        result = take_from_right([(100, 300)], 50)
         assert result == [(250, 300)]
 
     def test_take_right_spanning(self):
-        result = _take_from_right([(100, 200), (300, 320)], 50)
+        result = take_from_right([(100, 200), (300, 320)], 50)
         assert result == [(170, 200), (300, 320)]
 
     def test_take_left_exact(self):
         """Take exactly the whole block."""
-        result = _take_from_left([(100, 200)], 100)
+        result = take_from_left([(100, 200)], 100)
         assert result == [(100, 200)]
 
     def test_take_right_exact(self):
-        result = _take_from_right([(100, 200)], 100)
+        result = take_from_right([(100, 200)], 100)
         assert result == [(100, 200)]
 
 

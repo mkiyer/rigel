@@ -1,4 +1,4 @@
-"""Regression tests for code-review findings (May 2026).
+"""Regression test: ``Locus.ref_id`` is the canonical FASTA/BAM ref id.
 
 1. ``Locus.ref_id`` must hold the canonical resolver/BAM ref id
    (defined by ``index.ref_lengths`` insertion order via

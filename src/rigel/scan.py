@@ -30,9 +30,11 @@ _DEFAULT_SPLICE_PENALTY = 1.0
 class FragmentRouter:
     """Builds the global CSR (ScoredFragments) from a FragmentBuffer.
 
-    State that was previously captured via closures is now explicit
-    instance attributes.  Every method is a candidate for Cython / C
-    acceleration.
+    Drives the native StreamingScorer over buffer chunks: it scores each
+    fragment against its compatible transcripts in C++, routes
+    deterministic-unique fragments to direct assignment, and packs the
+    remaining ambiguous fragments into the global CSR ``ScoredFragments``
+    for the locus-level EM.
 
     Parameters
     ----------
@@ -55,14 +57,12 @@ class FragmentRouter:
         estimator: AbundanceEstimator,
         stats: PipelineStats,
         index: TranscriptIndex,
-        strand_models,
         annotations=None,
     ):
         self.ctx = ctx
         self.estimator = estimator
         self.stats = stats
         self.index = index
-        self.strand_models = strand_models
         self.annotations = annotations
 
         # Native scoring context (set by FragmentScorer.from_models)

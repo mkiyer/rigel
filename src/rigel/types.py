@@ -69,11 +69,6 @@ class Strand(IntEnum):
         return Strand(((self & 1) << 1) | (self >> 1))
 
 
-#: Pre-computed int constants for hot-path comparisons (avoid enum overhead).
-STRAND_POS: int = int(Strand.POS)  # 1
-STRAND_NEG: int = int(Strand.NEG)  # 2
-
-
 # ---------------------------------------------------------------------------
 # Interval
 # ---------------------------------------------------------------------------

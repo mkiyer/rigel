@@ -462,7 +462,7 @@ def init_beliefs(
 
 
 # ---------------------------------------------------------------------------
-# The directional belief-propagation sweep (gDNA + per-strand RNA messages).
+# Region-type helper (the sweep itself lives in bp_solver.node_sweep).
 # ---------------------------------------------------------------------------
 
 

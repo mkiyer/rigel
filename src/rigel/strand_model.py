@@ -397,14 +397,12 @@ class StrandModels:
     making this an uncontaminated measure of library strand specificity.
     Probabilities are pure MLE from observed counts.
 
-    Two additional sub-models are retained **for diagnostics only** and
-    are never used for scoring:
+    One additional sub-model is retained **for diagnostics only** and
+    is never used for scoring:
 
     * **exonic** — trained from ALL exonic fragments (RNA + gDNA
       mixture).  Comparing its specificity to ``exonic_spliced``
       reveals gDNA contamination in exonic regions.
-    * **intergenic** — trained from intergenic fragments (~100% gDNA).
-      Expected ~50/50 since gDNA has no strand bias.
 
     gDNA is scored with a fixed strand probability of **0.5**
     (no strand bias), not learned from intergenic data.

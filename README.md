@@ -43,7 +43,7 @@ that start and end at the same coordinates.
 - Shared-span nRNA architecture with one component per unique genomic span `(ref, strand, start, end)`
 - Single-pass C++ BAM scanner using htslib, with memory-bounded buffering and spill-to-disk support
 - Automatic strand-model training from annotated spliced fragments; protocol auto-detection (`R1-sense` / `R1-antisense`)
-- gDNA calibration via Simple Regional Deconvolution (SRD): per-fragment geometric categorization plus a 1-D fragment-length mixture, library-agnostic
+- gDNA/RNA calibration via a bipartite region↔boundary belief-propagation sweep that deconvolves each genomic node's unspliced mass into the `(RNA₊, RNA₋, gDNA)` simplex, library-agnostic
 - Empirical Bayes priors for nRNA fractions and gDNA rates; calibrated per-locus gDNA initialization
 - MAP-EM and Variational Bayes EM (VBEM, default) solver modes with SQUAREM acceleration
 - Discrete fragment assignment: `fractional`, `map`, or `sample` (default) post-EM assignment modes
@@ -143,13 +143,18 @@ cat results/summary.json
 
 | File | Description |
 |------|-------------|
-| `quant.feather` / `quant.tsv` | Transcript-level abundance table with `mrna`, `nrna`, `rna_total`, `tpm`, and QC columns |
+| `quant.feather` / `quant.tsv` | Transcript-level abundance table (annotated mRNA + nRNA rows) with `count`, `count_unambig`, `count_em`, `count_spliced`, `tpm`, `tpm_total_rna`, effective lengths, and per-transcript QC columns |
 | `gene_quant.feather` / `gene_quant.tsv` | Gene-level aggregates derived from transcript estimates |
 | `nrna_quant.feather` / `nrna_quant.tsv` | nRNA-span-level abundance estimates (one row per unique genomic nRNA span) |
-| `loci.feather` / `loci.tsv` | Per-locus EM summary with `mrna`, `nrna`, `gdna`, and `gdna_init` |
-| `summary.json` | Library protocol, strand specificity, fragment-length histograms, calibration results, alignment counts, and global quantification totals |
+| `loci.feather` / `loci.tsv` | Per-locus EM summary |
+| `summary.json` | Library protocol, strand specificity, fragment-length histograms, the calibration scalars (`gdna_density_global`, `rna_sense_frac`, the gDNA/RNA strand overdispersions, `n_regions`), alignment counts, and global quantification totals |
 | `config.yaml` | Resolved run configuration (parameters, I/O paths). Rerun with `rigel quant --config config.yaml` |
-| `annotated.bam` | Optional annotated BAM with `ZT`, `ZG`, `ZR`, `ZI`, `ZJ`, `ZF`, `ZW`, `ZC`, `ZH`, `ZN`, `ZS`, `ZL`, `ZB` tags. Rigel guarantees a collated-in → collated-out contract: the output contains exactly the same records as the input (no drops, no duplications). |
+| `locus_stats.feather` | Optional per-locus statistics, emitted only with `--emit-locus-stats` |
+| `annotated.bam` | Optional annotated BAM with per-fragment assignment tags, written with `--annotated-bam` (a second BAM pass). Rigel guarantees a collated-in → collated-out contract: the output contains exactly the same records as the input (no drops, no duplications). |
+
+`tpm` is normalized over annotated transcripts only; `tpm_total_rna` uses the
+same numerator but normalizes over all RNA (annotated + synthetic nRNA spans),
+so it is directly comparable to the `nrna_quant` TPM column.
 
 The `nrna` values in transcript- and gene-level tables are derived from shared
 nRNA-span counts that are pro-rated across transcripts sharing the same span.
@@ -158,7 +163,8 @@ nRNA-span counts that are pro-rated across transcripts sharing the same span.
 
 ## How it works
 
-Rigel runs in two logical stages.
+Rigel runs one native BAM pass feeding three stages: **scan**, **calibrate**,
+and **quantify**.
 
 ### Architecture
 
@@ -171,32 +177,32 @@ Rigel runs in two logical stages.
                               │  Stage 1: BAM Scan & Training    │
                               │  C++: BamScanner → Resolver      │
                               │  Py:  buffer.py, strand_model.py │
+                              │  → FragmentBuffer + models +     │
+                              │    accumulator (AccumulatorPayload)│
                               └──────────────┬───────────────────┘
-                                             │ FragmentBuffer + models
+                                             │ per-region/boundary mass
                                              ▼
                               ┌──────────────────────────────────┐
-                              │  Stage 2: Score & Route          │
-                              │  C++: fused_score_buffer         │
-                              │  Py:  scan.py → ScoredFragments  │
+                              │  Stage 2: gDNA/RNA Calibration   │
+                              │  Bipartite region↔boundary       │
+                              │  belief-propagation sweep        │
+                              │  Py:  node_chain → bp_solver     │
                               └──────────────┬───────────────────┘
-                                             │ CSR arrays
+                                             │ per-locus Dirichlet prior
                                              ▼
                               ┌──────────────────────────────────┐
-                              │  Stage 3: SRD gDNA Calibration   │
-                              │  Py:  calibration/_simple.py     │
-                              └──────────────┬───────────────────┘
-                                             │ per-locus γ (gDNA fraction)
-                                             ▼
-                              ┌──────────────────────────────────┐
-                              │  Stage 4: Locus-Level EM         │
-                              │  C++: batch_locus_em (SQUAREM)   │
-                              │  Py:  estimator.py dispatch      │
+                              │  Stage 3: Quantification         │
+                              │  score → route → build loci →    │
+                              │  per-locus EM                    │
+                              │  C++: scoring, batch_locus_em    │
+                              │  Py:  scan.py, locus.py,         │
+                              │       estimator.py               │
                               └──────────────┬───────────────────┘
                                              │ posterior counts
                                              ▼
                               ┌──────────────────────────────────┐
-                              │  Stage 5: Output                 │
-                              │  Py:  cli.py → Feather/TSV/JSON  │
+                              │  Output: Feather / TSV / JSON    │
+                              │  Py:  cli.py                     │
                               └──────────────────────────────────┘
 ```
 
@@ -204,47 +210,61 @@ Rigel runs in two logical stages.
 
 A native scanner reads the BAM once, resolves fragments against the indexed
 annotation, classifies splice structure, trains strand and fragment-length
-models, and writes resolved fragment data into a columnar buffer.
+models, and writes resolved fragment data into a columnar buffer. In the same
+pass it deposits fractional per-region and per-boundary fragment mass into a
+C++ accumulator (four channels: unspliced ±, spliced sense/antisense),
+producing the `AccumulatorPayload` that calibration consumes.
 
 The main strand model is trained from annotated spliced fragments with
 unambiguous gene assignment. Diagnostic exonic and intergenic strand models are
 also retained for reporting, but gDNA itself is always scored with strand
 probability `0.5`.
 
-### gDNA calibration
+### gDNA/RNA calibration
 
-Before per-locus EM, Rigel runs Simple Regional Deconvolution (SRD).
-Every uniquely-aligned fragment is classified into one of seven geometric
-categories using only per-candidate exon-overlap counts computed by the
-C++ scanner. Fragments that geometrically *cannot* originate from mature
-mRNA — those overhanging transcript edges, falling entirely in introns,
-or mapping outside any annotated transcript — form a "gDNA pool". A
-1-D fragment-length mixture
+Before per-locus EM, Rigel deconvolves each genomic **node**'s unspliced
+fragment mass into the 2-simplex `(f_rna₊, f_rna₋, f_g)` — sense-RNA /
+antisense-RNA / gDNA. Calibration models *only* RNA-vs-gDNA; nascent-vs-mature
+is separated downstream by the per-locus EM.
 
-```
-pool_FL(L) ≈ π·gDNA_FL(L) + (1−π)·RNA_FL(L)
-```
+The deconvolution is a **belief-propagation sweep** over a bipartite
+region↔boundary node chain. `node_chain` builds the chain from the accumulator
+payload; `bp_solver.node_sweep` runs a single forward-backward pass (exact on
+the chain, which is a forest of linear paths). Following the
+**count-zero-information** principle, a fragment count carries no intrinsic
+gDNA/RNA signal — a node's composition is set by exactly three sources:
 
-recovers `gDNA_FL(L)` and the library-wide gDNA fraction `π`. Per-locus
-Dirichlet priors are derived from per-fragment posteriors and feed the
-EM. No regional density model, no per-region exposure, no SS-threshold
-magic numbers. See `docs/calibration/srd_v1_implementation.md` for the
-full derivation.
+1. a **strand likelihood** — the Beta-Binomial tilt of the per-strand counts
+   (the only intrinsic gDNA/RNA signal; the count enters only as overdispersed
+   Fisher information);
+2. **cross-node imputation** — neighbour density messages at a belief-free
+   Poisson disagreement variance, fit once; gDNA flows genomically, while
+   per-strand RNA flows only where that strand is continuous across an edge
+   (the transcript-structure gate);
+3. the **global gDNA prior** — the population baseline plus a trained Phase-2
+   gDNA-density KDE.
+
+Calibration fits the library hyperparameters (`gdna_density_global`,
+`rna_sense_frac`, and the gDNA/RNA strand Beta-Binomial overdispersions) plus
+the per-region and per-boundary deconvolved gDNA/RNA mass. These are bridged
+into **two per-locus Dirichlet scalars** (`gdna_prior_count`,
+`rna_prior_count`) that set the gDNA-vs-RNA split feeding the EM. See
+[docs/calibration/CALIBRATION_ARCHITECTURE.md](docs/calibration/CALIBRATION_ARCHITECTURE.md)
+for the full theory.
 
 ### Locus-level EM
 
-Ambiguous fragments are routed into CSR form and grouped into connected
-components of overlapping transcripts. For a locus with `T` transcripts and `N`
-unique nRNA spans, Rigel solves a `T + N + 1` component problem:
+Ambiguous fragments are scored, routed into CSR form, and grouped into
+connected components of overlapping transcripts. Each locus is an independent
+subproblem with `n_t + 1` components — one per transcript **row** (annotated
+mRNA and synthetic nRNA spans alike, since unique nRNA spans are materialized
+as ordinary transcript rows) plus one merged gDNA component.
 
-- `T` mRNA components
-- `N` shared nRNA components
-- `1` merged gDNA component for the locus
-
-The solver runs VBEM (default) or MAP-EM with SQUAREM acceleration. A
-tripartite prior (coverage-weighted OVR for mRNA, sparsifying Dirichlet for
-nRNA, calibrated γ for gDNA) is applied. Post-EM fragments are assigned using
-the configured assignment mode (`sample` by default).
+The solver runs VBEM (default; digamma soft updates) or MAP-EM with SQUAREM
+acceleration, parallelized across loci with OpenMP. The calibration prior
+enters as the two per-locus Dirichlet scalars; the EM distributes RNA mass
+among the compatible transcripts. Post-EM fragments are assigned using the
+configured assignment mode (`sample` by default).
 
 ---
 

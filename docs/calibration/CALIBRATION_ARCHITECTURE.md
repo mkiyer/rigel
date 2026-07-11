@@ -240,8 +240,8 @@ resolution** (lattice `K`, GCV grid, `_EPS`, the MAX/0 init variances are numeri
 
 ## 8. IMPLEMENTATION ORDER (recommended)
 
-Each step independently testable; the zero-gDNA diagnostic (`scripts/debug/rna_imputation_diagnostic.py`, true
-`f_g=0` everywhere) + the net-flow before/after are the gates. A temporary recalibration regression during the
+Each step independently testable; a zero-gDNA diagnostic (true `f_g=0` everywhere) + the net-flow
+before/after (see `oracle_and_benchmarking.md`) are the gates. A temporary recalibration regression during the
 count-prior/`I₀` removal is **expected and pre-accepted** (recover it by improving the reliability layer, never
 by re-adding a suppression constant).
 

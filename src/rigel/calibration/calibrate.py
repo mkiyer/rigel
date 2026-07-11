@@ -40,7 +40,6 @@ from .bp_solver import (
     build_node_geometry,
     build_node_statics,
     adjacent_disagreement_variance,
-    adjacent_disagreement_shrinkage_weight,
     chain_boundary_side_deconv,
     chain_region_deconv,
     init_beliefs,
@@ -85,7 +84,7 @@ def calibrate(
 ) -> CalibrationResult:
     """Deconvolve the library into gDNA / RNA per node, then derive gdna_density_global.
 
-    Runs the belief-propagation sweep (``config.sweep_max_passes`` passes, converging on the per-node
+    Runs the belief-propagation sweep (a single forward-backward pass per phase, resolving the per-node
     pie); see the module docstring for the data flow. ``gdna_density_global`` may be ``0`` (a zero-gDNA
     library) and a node's deconvolved gDNA mass may be ``0`` (a pure-RNA node); both are valid, graceful
     outputs — not failures.
@@ -166,10 +165,7 @@ def calibrate(
     # total-density σ²_imp — the empirical adjacent-node imputation floor. σ²_msg = σ²_imp + 1/n_src; the
     # single production basis for every message channel, both passes.
     sig_total = adjacent_disagreement_variance(chain, geometry)
-    # EB shrinkage weight w (data-fit signal fraction; NO tunable — see adjacent_disagreement_shrinkage_weight).
-    # Used only by RIGEL_MSG_MODE=eb; the prod/off/max paths ignore it. Cheap (one pass over adjacent edges).
-    w_eb = adjacent_disagreement_shrinkage_weight(chain, geometry)
-    logger.debug("calibration: total-density σ²_imp=%.4f  EB shrinkage w=%.4f", sig_total, w_eb)
+    logger.debug("calibration: total-density σ²_imp=%.4f", sig_total)
 
     def _sweep(prior):
         return node_sweep(
@@ -177,11 +173,10 @@ def calibrate(
             rna_sense_frac=rna_sense_frac,
             gdna_strand_overdispersion=gdna_strand_overdispersion,
             rna_strand_overdispersion=rna_strand_overdispersion,
-            n_grid=config.sweep_n_grid, max_passes=config.sweep_max_passes,
-            convergence_delta=config.sweep_convergence_delta,
+            n_grid=config.sweep_n_grid,
             logodds_window=config.sweep_logodds_window,
             n_tilt=config.sweep_n_tilt, n_grid_ss=config.sweep_n_grid_single_strand, gdna_prior=prior,
-            disagreement_sigma2=sig_total, disagreement_weight=w_eb,
+            disagreement_sigma2=sig_total,
         )
 
     # PASS 1 — single-strand solve with the total-density floor.

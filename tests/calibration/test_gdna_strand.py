@@ -222,7 +222,7 @@ def test_boundary_side_seeds_extracts_observable_seam_sides():
     assert np.allclose(weight, 1.0)
 
 
-# --- the decode application (strand_likelihood) ---------------------------------------------
+# --- the deconv application (strand_likelihood) ---------------------------------------------
 
 
 def test_strand_loglik_od_zero_is_binomial_variance():

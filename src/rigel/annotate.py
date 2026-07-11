@@ -343,7 +343,10 @@ class AnnotationTable:
         self._grow_to(max(self.capacity * 2, 1024))
 
     def get(self, frag_id: int):
-        """Return annotation dict for a frag_id, or None if absent."""
+        """Return annotation dict for a frag_id, or None if absent.
+
+        Debug/test accessor — used only by tests, not on the production path.
+        """
         row = self.frag_id_to_row.get(frag_id)
         if row is None:
             return None
@@ -363,7 +366,11 @@ class AnnotationTable:
 
 
 def _splice_type_label(code: int) -> str:
-    """Convert SpliceType int to lowercase label for the ZS tag."""
+    """Convert SpliceType int to lowercase label for the ZS tag.
+
+    TEST-ONLY reference oracle: production stamps the ZS tag in C++
+    (``BamAnnotationWriter``); this helper is referenced only by tests.
+    """
     from .splice import SpliceType
     try:
         return SpliceType(code).name.lower()

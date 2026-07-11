@@ -1,7 +1,7 @@
 # Rigel architecture
 
 The current code map and data flow. For the scientific method see `METHODS.md`; for calibration
-theory see `calibration/calibration_theory.md`; for usage see `MANUAL.md`.
+theory see `calibration/CALIBRATION_ARCHITECTURE.md`; for usage see `MANUAL.md`.
 
 Rigel is a Bayesian RNA-seq quantifier that jointly models **mRNA**, **nascent RNA (nRNA)**, and
 **genomic DNA (gDNA) contamination**. A single-pass C++ BAM scanner feeds a per-region
@@ -26,10 +26,18 @@ BAM ──scan_and_buffer──▶ FragmentBuffer + AccumulatorPayload + trained
    fragment mass into the C++ **accumulator** (4 channels: unspliced ±, spliced sense/antisense)
    → an `AccumulatorPayload`.
 
-2. **Calibrate** (`calibration.calibrate`): an **acyclic single-pass** deconvolution of the
-   accumulator payload into gDNA vs RNA per node by a **decoupled strand/count handoff**, fitting the library hyperparameters
-   (`gdna_density_global`, `rna_sense_frac`, the gDNA/RNA strand overdispersions). Output:
-   `CalibrationResult`. See `calibration/calibration_theory.md`.
+2. **Calibrate** (`calibration.calibrate`): a **bipartite region↔boundary belief-propagation sweep**
+   over the accumulator payload that deconvolves each node's unspliced mass into the simplex
+   `(f_rna₊, f_rna₋, f_g)`. Per the **count-zero-information** principle, a fragment count carries no
+   intrinsic gDNA/RNA information; a node's composition comes from exactly three sources — the strand
+   likelihood (the Beta-Binomial tilt of the per-strand counts, the only intrinsic signal; the count
+   enters only as overdispersed Fisher information), cross-node imputation (neighbour density messages
+   at the belief-free Poisson disagreement variance σ²_imp, fit once), and the global gDNA prior
+   (population baseline + a trained Phase-2 KDE). `node_chain` builds the chain; `bp_solver.node_sweep`
+   runs a **single forward-backward pass** (exact on the chain, a forest of linear paths — no
+   fixed-point loop). Fits the library hyperparameters (`gdna_density_global`, `rna_sense_frac`, the
+   gDNA/RNA strand overdispersions) plus the per-region / per-boundary-side gDNA/RNA mass. Output:
+   `CalibrationResult`. See `calibration/CALIBRATION_ARCHITECTURE.md`.
 
 3. **Quantify** (`quant_from_buffer`): bridges calibration → per-locus prior
    (`calibration.priors.assemble_priors`), scores fragments (`scan.FragmentRouter` → CSR
@@ -62,28 +70,35 @@ BAM ──scan_and_buffer──▶ FragmentBuffer + AccumulatorPayload + trained
 
 | module | role |
 |---|---|
-| `calibrate.py` | the acyclic calibrator orchestrator |
-| `substrate.py` | `CalibrationSubstrate`: payload → per-region 3-view (contained/left/right) sufficient stats |
+| `calibrate.py` | the calibrator orchestrator: κ → strand overdispersions → build chain + geometry + statics → signature-binary `init_beliefs` → `bp_solver.node_sweep` (the single forward-backward pass) → region / boundary-side projections → `gdna_density_global` |
+| `node_chain.py` | builds the bipartite **region↔boundary** node chain (genomic interleave + left/right adjacency) from the payload offsets; pure index arithmetic |
+| `bp_solver.py` | the BP solver: the anchored population gDNA prior + the belief-free message precision `adjacent_disagreement_variance` (fit once) + the single forward-backward `node_sweep` (gDNA + per-strand RNA messages) + the region / boundary-side projections (`chain_region_deconv` / `chain_boundary_side_deconv`) |
+| `node_geometry.py` | per-node chain primitives beneath the solver: per-face geometry, the belief / density types + `node_densities` (the message currency ρ = f·M/E), the static solver inputs, the signature-binary `init_beliefs` |
+| `simplex_logodds.py` / `simplex.py` | the per-node ψ solve over the 2-simplex `(f₊, f₋, f_g)` in log-fraction space (`_solve_nodes_logodds_all`): strand mixture + sided spliced floor + node-class prior + gDNA & per-strand RNA imputation messages, plus the lattice primitives |
+| `strand_likelihood.py` | `strand_loglik`: the two-component gDNA/RNA strand Beta-Binomial log-likelihood of a node over a `gdna_frac` grid (the only intrinsic gDNA/RNA signal; both overdispersions applied symmetrically) |
+| `gdna_density_prior.py` | the trained **Phase-2** gDNA-density KDE prior (`GdnaDensityPrior.fit` over gDNA-clean training nodes); consumed by `bp_solver._kde_logprior` |
+| `strand_deconv.py` | the per-node `NodeDeconv` result type + `boundary_side_seeds` (the exon↔intron / exon↔intergenic boundary-side seeds for the gDNA strand-overdispersion fit) |
+| `substrate.py` | `CalibrationSubstrate` (payload → per-region contained/left/right views) + `BoundarySubstrate` (the boundary-node view) |
 | `region_arrays.py` / `regions.py` | region geometry (`RegionArrays`, partition from `index.region_df`) |
 | `signature.py` | 4-bit exon/intron×strand signature + `strand_class` (POS/NEG/NONE/AMBIG) |
-| `strand_balance.py` | RNA strand mean `rna_sense_frac` (κ) from the spliced channel |
-| `density_model.py` | count module: per-region gDNA density via local imputation on raw counts (`count_gdna_frac`) |
-| `gdna_strand.py` | gDNA & RNA strand Beta-Binomial overdispersions (shared pooled-MoM core) |
-| `strand_deconv.py` | per-node **precision-weighted blend** `g = w·g_strand + (1−w)·g_count`, `w=(2κ−1)²` (strand discriminability): strand BB posterior deferring smoothly to the count fraction as strand specificity fades (no gate) |
-| `derive.py` | `gdna_density_global` + geometric gDNA length from the deconvolved masses |
-| `effective_length.py` / `fl.py` | FL-marginal effective lengths; gDNA/RNA/global FL pmfs |
+| `strand_balance.py` / `strand_summary.py` | RNA strand *mean* `rna_sense_frac` (κ); `rna_strand_overdispersion` here is a QC-only thin-count diagnostic |
+| `density_model.py` | per-region gDNA density via local boundary-anchored imputation on the raw unspliced counts (`count_gdna_frac`): the gDNA strand-overdispersion fit's seed selector + the signature-partition masks the global prior uses |
+| `gdna_strand.py` | both strand Beta-Binomial overdispersions (shared component-agnostic MoM core), applied symmetrically so unstranded data is uninformative |
+| `effective_length.py` / `capture_eff_length.py` / `fl.py` | FL-marginal effective lengths; capture-aware EM effective lengths (gDNA-enrichment IPR contraction); gDNA/RNA/global FL pmfs |
+| `run_fill.py` | run/neighbour helpers (`same_ref_left_right`) for the boundary-side and chain geometry |
+| `derive.py` | `gdna_density_global` (a QC scalar) from the deconvolved masses |
 | `priors.py` | `assemble_priors`: `CalibrationResult` → per-locus Dirichlet prior + gDNA eff-len |
 | `result.py` / `errors.py` | `CalibrationResult` schema + invariants; exceptions |
 
 ## C++ extensions (`src/rigel/native/`)
 
-Five nanobind modules (C++17, `-O3`, LTO; SIMD `fast_exp.h`; OpenMP):
+Five nanobind modules (C++17, `-O3`, LTO; OpenMP):
 
 | module | source | purpose |
 |---|---|---|
 | `_bam_impl` | `bam_scanner.cpp`, `calibration/accumulator.cpp` | single-pass htslib parser, fragment grouping, model training, **fractional accumulator** |
-| `_em_impl` | `em_solver.cpp` | per-locus EM (`n_t+1` components), connected components, OpenMP, Kahan/digamma |
-| `_scoring_impl` | `scoring.cpp` | fragment likelihood scoring, bias correction, SIMD (`-ffast-math`) |
+| `_em_impl` | `em_solver.cpp` | per-locus EM (`n_t+1` components), connected components, OpenMP, Kahan/digamma; uses the `fast_exp.h` SIMD exp (AVX2/AVX-512/NEON) |
+| `_scoring_impl` | `scoring.cpp` | fragment likelihood scoring, bias correction (`-ffast-math`; no SIMD/`fast_exp`) |
 | `_resolve_impl` | `resolve.cpp` | fragment→transcript resolution via cgranges interval tree |
 | `_cgranges_impl` | `cgranges_bind.cpp` | vendored cgranges interval overlap |
 
@@ -105,6 +120,7 @@ hence `n_t + 1` components per locus, not a separate mRNA/nRNA pair per transcri
 rigel index --fasta genome.fa --gtf annotation.gtf -o index/
 rigel quant --bam sample.bam --index index/ -o results/
 rigel sim [options]
+rigel export results/ --format tsv    # feather → TSV / Parquet
 ```
 
 Input BAM must be name-sorted with the `NH` tag.

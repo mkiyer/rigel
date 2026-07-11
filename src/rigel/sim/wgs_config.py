@@ -63,10 +63,14 @@ class GDNASimConfig:
 class NRNAConfig:
     """Nascent RNA spike-in sweep configuration.
 
-    The only generated sweep mode is ``additive_ratio``. Each entry in
-    ``ratios`` adds nascent RNA independently of mature RNA:
+    Two sweep modes are supported:
 
-        nrna_abundance = mrna_abundance * ratio
+    - ``additive_ratio`` (via ``ratios``): each entry adds nascent RNA at a
+      fixed ratio of mature RNA, ``nrna_abundance = mrna_abundance * ratio``.
+    - ``random_fraction`` (via ``ratio_ranges`` + ``eligible_fraction``): each
+      entry draws per-transcript ratios uniformly from a ``(lo, hi)`` range,
+      applied to a random ``eligible_fraction`` of transcripts (the rest get
+      zero nascent).
 
     When abundances come from a file that already contains explicit nRNA
     data, the configured sweep is ignored and the file's nRNA values are

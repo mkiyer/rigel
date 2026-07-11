@@ -8,8 +8,7 @@
 * :func:`build_multi_loci` — connected-component partitioning of
   transcripts producing per-component :class:`MultiLocus` records.
 
-Per-locus EM Dirichlet priors are assembled by ``rigel.calibration.priors``
-(lands in PR 6 of the calibration-v6 rebuild; see ``docs/acc_caljointmodel/``).
+Per-locus EM Dirichlet priors are assembled by ``rigel.calibration.priors``.
 """
 
 from __future__ import annotations
@@ -135,7 +134,8 @@ def build_multi_loci(
     # order via ``index.ref_name_to_id``).  We store both: ``_ref_codes``
     # is used only for fast intra-loop sorting/comparison; ``Locus.ref_id``
     # must carry the canonical id so downstream consumers
-    # (``_locus_n_obs.build_t_to_local_locus``) bin against the correct contig.
+    # (``calibration.priors._project_regions_to_loci``, which bins locus
+    # blocks by ref_id against RegionArrays) match the correct contig.
     ref_cat = index.t_df["ref"].cat
     _ref_names = ref_cat.categories.values
     _ref_codes = ref_cat.codes.values

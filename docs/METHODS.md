@@ -6,7 +6,7 @@
 
 The scientific method behind Rigel's joint mRNA / nascent-RNA / gDNA quantification. This document
 follows the code; for the code map see `ARCHITECTURE.md`, and for the calibration internals see
-`calibration/calibration_theory.md`.
+`calibration/CALIBRATION_ARCHITECTURE.md`.
 
 ## 1. Model
 
@@ -48,15 +48,38 @@ likelihood combining:
 
 ## 5. Calibration: gDNA-vs-RNA deconvolution
 
-Before quantification, an **acyclic single-pass** calibrator deconvolves the library into gDNA vs
-RNA using two conditionally-independent clues per genomic node:
+Before quantification, the calibrator deconvolves each genomic node's **unspliced** fragment mass
+into the 2-simplex **(f_rna₊, f_rna₋, f_g)** — sense-RNA / antisense-RNA / gDNA. Calibration models
+only the **RNA-vs-gDNA** split; the nascent-vs-mature separation is left to the per-locus EM
+downstream.
 
-- a **count** clue (mass vs the expected gDNA density, with an NB-overdispersion-honest precision),
-- a **strand** clue (the Beta-Binomial sense split between gDNA at ½ and RNA at κ).
+**The count-zero-information principle.** A fragment count carries *no intrinsic information* about a
+node's gDNA/RNA composition: 50 sense / 50 antisense unspliced fragments are equally consistent with
+pure gDNA (genomic strand is symmetric) and pure RNA in an unstranded library. The count enters only
+as **statistical power** — the precision of an estimate — never as a vote on composition. A node's
+composition is therefore set by exactly three sources:
 
-gDNA-pure nodes (intergenic / intron-only, by signature) anchor the gDNA density without strand or
-feedback, which is what makes the pass acyclic. The result is the library hyperparameters and a
-**per-locus gDNA-vs-RNA prior**. Full theory and inference: `calibration/calibration_theory.md`.
+- the **strand likelihood** — the Beta-Binomial tilt of the per-strand counts (RNA tilts the sense
+  rate toward the library sense fraction κ; gDNA stays at ½). This is the only *intrinsic* gDNA/RNA
+  signal, and the count enters it only as overdispersed Fisher information (statistical power),
+  vanishing to zero at κ=½ (unstranded) or low count;
+- **cross-node imputation** — density messages from neighbouring nodes at the belief-free Poisson
+  disagreement variance σ²_imp (fit once). gDNA flows genomically; per-strand RNA flows only across
+  edges where that strand is transcriptionally continuous (the transcript-structure gate);
+- the **global gDNA prior** — the population baseline gDNA density (plus a trained Phase-2 gDNA-density
+  KDE) at a robust MAD-spread precision, which sways nodes the strand and imputation leave undetermined.
+
+The genome is modelled as a **bipartite region↔boundary node chain** — regions and boundaries are both
+first-class nodes owning fragment mass, an effective length, and a composition pie; boundaries
+additionally own the one-sided, motif-stranded **spliced** RNA (a fixed mature-RNA floor). Inference is
+a **single forward-backward belief-propagation sweep** over the chain (L→R then R→L), which is exact
+because the chain is a forest of linear paths — there is no iterative fixed-point loop. σ²_imp and every
+global-prior input are fit once *before* the sweep.
+
+The result is the library hyperparameters (`gdna_density_global`, `rna_sense_frac` = κ, the gDNA and
+RNA strand Beta-Binomial overdispersions) plus the per-region / per-boundary-side deconvolved gDNA/RNA
+mass, assembled downstream into a **per-locus gDNA-vs-RNA prior**. Full theory: the
+count-zero-information architecture in `calibration/CALIBRATION_ARCHITECTURE.md`.
 
 ## 6. Per-locus EM
 

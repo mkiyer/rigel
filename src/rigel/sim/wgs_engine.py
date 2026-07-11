@@ -193,26 +193,20 @@ class WholeGenomeSimulator:
 
     Generates gzipped FASTQ and collated oracle BAM in a single pass.
 
-    Performance strategy
-    --------------------
-    1. Pre-cache all chromosome sequences as numpy byte arrays at init.
-    2. Pre-extract all mRNA and pre-mRNA sequences as byte arrays.
-    3. Sample fragment lengths in bulk, then sample transcript
-       assignments per unique fragment length.
-    4. Vectorized read extraction via numpy fancy indexing.
-    5. Multi-threaded gzip compression via pgzip (if available).
-    6. Unified RNA read writer handles both mRNA and nRNA.
-
-    Architecture
-    ------------
-    1. Pre-compute abundance weight vectors (numpy arrays).
-    2. Sample from fragment-length distribution, count fragments per
-       unique length.
-    3. For each fragment length, sample mRNA/nRNA transcripts
-       proportional to abundance × effective_length.  Accumulate
+    Pipeline
+    --------
+    1. Pre-cache all chromosome sequences as numpy byte arrays at init,
+       and pre-extract all mRNA and pre-mRNA sequences as byte arrays.
+    2. Pre-compute abundance weight vectors (numpy arrays).
+    3. Sample from the fragment-length distribution in bulk, counting
+       fragments per unique length.
+    4. For each fragment length, sample mRNA/nRNA transcripts
+       proportional to abundance × effective_length. Accumulate
        per-transcript fragment counts.
-    4. Iterate transcripts: pull sequence ONCE, generate all
-       fragments, write FASTQ.gz + BAM simultaneously.
+    5. Iterate transcripts: pull sequence ONCE, extract all fragments
+       via numpy fancy indexing, and write FASTQ.gz + BAM simultaneously
+       (a unified RNA writer handles both mRNA and nRNA). gzip
+       compression is multi-threaded via pgzip when available.
     """
 
     def __init__(
@@ -961,8 +955,8 @@ class WholeGenomeSimulator:
     def pool_split(self, n_total: int, gdna_abundance: float) -> tuple[int, int, int]:
         """Split ``n_total`` fragments 3-way into ``(n_mrna, n_nrna, n_gdna)`` by abundance ×
         effective length, with gDNA weighted by ``gdna_abundance × genome effective length``
-        (summed over the annotated references). The abundance-weighted equivalent of the old
-        ``ReadSimulator._compute_pool_split``."""
+        (summed over the annotated references). The abundance-weighted 3-way generalization of
+        the 2-way RNA-only ``rna_split``."""
         mrna_w, nrna_w = self._rna_eff_weights()
         gdna_mean_frag = int(self.gdna_config.frag_mean)
         genome_eff = sum(

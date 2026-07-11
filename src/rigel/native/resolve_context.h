@@ -1032,7 +1032,7 @@ public:
     }
 
     // ================================================================
-    // _resolve_core — shared logic for resolve() and resolve_fragment()
+    // _resolve_core — shared resolution logic behind resolve_fragment()
     // ================================================================
 
     /// Thread-safe overload: uses caller-supplied scratch buffers.
@@ -1400,73 +1400,6 @@ public:
         RawResolveResult& cr)
     {
         return _resolve_core(exons, introns, genomic_footprint, cr, scratch_);
-    }
-
-    // ================================================================
-    // resolve — legacy entry point (returns 13-element tuple)
-    // ================================================================
-
-    nb::object resolve(
-        const std::vector<int32_t>& exon_ref_ids,
-        const std::vector<int32_t>& exon_starts,
-        const std::vector<int32_t>& exon_ends,
-        const std::vector<int32_t>& align_strands,
-        const std::vector<int32_t>& intron_ref_ids,
-        const std::vector<int32_t>& intron_starts,
-        const std::vector<int32_t>& intron_ends,
-        const std::vector<int32_t>& intron_strands,
-        int32_t genomic_footprint)
-    {
-        int n_exons = static_cast<int>(exon_ref_ids.size());
-        if (n_exons == 0) return nb::none();
-
-        std::vector<ExonBlock> exons(n_exons);
-        for (int i = 0; i < n_exons; i++) {
-            exons[i] = {exon_ref_ids[i], exon_starts[i],
-                        exon_ends[i], align_strands[i]};
-        }
-        int n_introns = static_cast<int>(intron_ref_ids.size());
-        std::vector<IntronBlock> introns(n_introns);
-        for (int i = 0; i < n_introns; i++) {
-            introns[i] = {intron_ref_ids[i], intron_starts[i],
-                          intron_ends[i], intron_strands[i]};
-        }
-
-        RawResolveResult cr;
-        if (!_resolve_core(exons, introns, genomic_footprint, cr))
-            return nb::none();
-
-        // Convert to legacy tuple format
-        nb::list t_inds_list;
-        for (int32_t t : cr.t_inds) t_inds_list.append(t);
-
-        nb::dict frag_lengths_dict;
-        for (size_t i = 0; i < cr.t_inds.size() && i < cr.frag_lengths.size(); i++) {
-            if (cr.frag_lengths[i] > 0)
-                frag_lengths_dict[nb::cast(cr.t_inds[i])] = nb::cast(cr.frag_lengths[i]);
-        }
-
-        nb::dict overlap_bp_dict;
-        for (size_t i = 0; i < cr.t_inds.size(); i++) {
-            overlap_bp_dict[nb::cast(cr.t_inds[i])] = nb::make_tuple(
-                cr.t_exon_bp[i], cr.t_intron_bp[i]);
-        }
-
-        return nb::make_tuple(
-            t_inds_list,
-            cr.ambig_strand,
-            cr.splice_type,
-            cr.align_strand,
-            cr.sj_strand,
-            frag_lengths_dict,
-            cr.genomic_footprint,
-            cr.genomic_start,
-            cr.merge_criteria,
-            overlap_bp_dict,
-            cr.read_length,
-            cr.chimera_type,
-            cr.chimera_gap
-        );
     }
 
     // ================================================================

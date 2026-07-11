@@ -26,7 +26,6 @@ from __future__ import annotations
 import numpy as np
 
 __all__ = [
-    "fl_mean",
     "region_eff_length",
     "boundary_eff_length",
     "boundary_side_eff_length",

@@ -29,9 +29,8 @@ def strand_contrast_identifiable(
 
     The strand channel can separate gDNA (sense ½) from RNA (sense κ) only when the observed sense
     rate is detectably off ½ given its sample size: ``|2p−1|`` must exceed both a numerical floor and
-    its normal-approximation margin ``z·SE`` (``SE = 2·sqrt(p(1−p)/n)``). Works off the two universal
-    strand-model scalars (``p_r1_sense``, ``n_observations``) so it applies to the ``StrandModels``
-    container, a single ``StrandModel``, and :class:`StrandSummary` alike.
+    its normal-approximation margin ``z·SE`` (``SE = 2·sqrt(p(1−p)/n)``). Reached via
+    :meth:`StrandSummary.is_identifiable`.
     """
     p = float(p_r1_sense)
     n = int(n_observations)
@@ -47,7 +46,7 @@ def strand_contrast_identifiable(
 
 @dataclass(frozen=True, slots=True)
 class StrandSummary:
-    """Minimal strand-model summary used by calibration density correction."""
+    """Minimal strand-model summary used by pipeline QC strand logging."""
 
     p_r1_sense: float = 0.5
     n_observations: int = 0
