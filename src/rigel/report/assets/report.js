@@ -5,7 +5,7 @@
 (function () {
   const R = window.__RIGEL__ || {};
   const M = R.model || {};
-  const FL_SPECS = R.fl_specs || {};
+  const CHARTS = R.charts || {};
 
   /* ---------- helpers ---------- */
   const grp = (n) => Math.round(n).toLocaleString("en-US");
@@ -260,25 +260,23 @@
     };
   }
   function embedAll() {
-    if (typeof window.vegaEmbed !== "function") return;
+    const hasVega = typeof window.vegaEmbed === "function";
     const t = curTheme();
     const opts = { config: themeConfig(t), renderer: "svg", actions: { export: true, source: true, compiled: false, editor: false } };
-    for (const [id, spec] of Object.entries(FL_SPECS)) {
-      const node = $("vega-" + id);
-      if (!node) continue;
+    // Every .vega-chart container is named vega-<key>; embed CHARTS[key] or show why not.
+    document.querySelectorAll(".vega-chart").forEach((node) => {
+      const key = node.id.replace(/^vega-/, "");
       node.innerHTML = "";
+      if (!hasVega) {
+        node.innerHTML = `<div class="chart-note">Vega runtime not embedded — install <span class="num">rigel[report]</span> to render this chart.</div>`;
+        return;
+      }
+      const spec = CHARTS[key];
+      if (!spec) { node.innerHTML = `<div class="chart-note">No data for this chart in the run.</div>`; return; }
       window.vegaEmbed(node, spec, opts).catch((e) => { node.innerHTML = `<div class="chart-note">chart error: ${e}</div>`; });
-    }
+    });
   }
-  function initFL() {
-    const hasVega = typeof window.vegaEmbed === "function";
-    const hasSpecs = Object.keys(FL_SPECS).length > 0;
-    if (!hasSpecs || !hasVega) {
-      ["vega-overlay", "vega-small_multiples"].forEach((id) => {
-        const n = $(id); if (n) n.innerHTML = `<div class="chart-note">Fragment-length histograms unavailable${hasVega ? " (no fragment_lengths.feather)" : " (Vega runtime not embedded)"}.</div>`;
-      });
-      return;
-    }
+  function initCharts() {
     embedAll();
     // Re-embed on theme change (host toggle stamps data-theme; OS pref may change)
     new MutationObserver(embedAll).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
@@ -324,10 +322,11 @@
     flTable();
     stackBar($("pool-bar"), M.quant.pools); legend($("pool-legend"), M.quant.pools, true); poolTable();
     kpis($("pool-kpis"), M.quant.kpis); donut($("pool-donut"), M.quant.pools, M.quant.rna_share);
+    if (M.calibration) kpis($("calib-kpis"), M.calibration.kpis);
     geneTable("");
     const gs = $("gsearch"); if (gs) gs.addEventListener("input", (e) => geneTable(e.target.value));
     config();
-    initFL(); initThemeToggle(); spy();
+    initCharts(); initThemeToggle(); spy();
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
 })();

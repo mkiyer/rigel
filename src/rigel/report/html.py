@@ -53,7 +53,8 @@ _SECTIONS = """
     <a href="#s-strand"><span class="rn">03</span>Strand model</a>
     <a href="#s-fl"><span class="rn">04</span>Fragment length</a>
     <a href="#s-quant"><span class="rn">05</span>Quantification</a>
-    <a href="#s-genes"><span class="rn">06</span>Gene expression</a>
+    <a href="#s-calib"><span class="rn">06</span>Calibration</a>
+    <a href="#s-genes"><span class="rn">07</span>Gene expression</a>
     <a href="#s-config"><span class="rn">✦</span>Run configuration</a>
   </nav>
   <main class="main">
@@ -147,8 +148,20 @@ _SECTIONS = """
       </div>
     </section>
 
+    <section class="panel" id="s-calib">
+      <div class="ph"><span class="eyebrow">06</span><h2>Calibration</h2><span class="desc">Genome-wide gDNA level</span></div>
+      <div class="pb">
+        <div class="kpis" id="calib-kpis"></div>
+        <p class="cap">gDNA density across the genome — binned per reference</p>
+        <div class="tw"><div class="vega-chart" id="vega-genome"></div></div>
+        <div class="note">Per-region gDNA solved by calibration. Also written as
+          <span class="num">calibration_track.bedgraph</span> — load it in IGV or the UCSC browser
+          for base-pair inspection. <span class="pill warn" style="font-size:11px">capture-mode KDE · next</span></div>
+      </div>
+    </section>
+
     <section class="panel" id="s-genes">
-      <div class="ph"><span class="eyebrow">06</span><h2>Gene expression</h2><span class="desc">Look up any gene</span></div>
+      <div class="ph"><span class="eyebrow">07</span><h2>Gene expression</h2><span class="desc">Look up any gene</span></div>
       <div class="pb">
         <div class="search">
           <input id="gsearch" type="text" placeholder="gene name, ID…" aria-label="Search genes"/>
@@ -169,14 +182,14 @@ _SECTIONS = """
 """
 
 
-def render_html(model: dict, fl_specs: dict, title: str) -> str:
+def render_html(model: dict, charts: dict, title: str) -> str:
     """Render the full self-contained HTML document string."""
     css = _asset("report.css")
     js = _asset("report.js")
     bundle = _vega_bundle()
     meta = model.get("meta", {})
 
-    payload = _json_for_script({"model": model, "fl_specs": fl_specs})
+    payload = _json_for_script({"model": model, "charts": charts})
     sections = _SECTIONS.format(
         version=meta.get("version") or "?",
         schema=f"report/{meta.get('schema_version')}" if meta.get("schema_version") else "report",

@@ -17,7 +17,7 @@ import pytest
 
 from rigel.report.build import build_report
 from rigel.report.model import build_view_model
-from rigel.report.specs import build_fl_specs
+from rigel.report.specs import build_charts, build_fl_specs, genome_track_spec
 from rigel.report.substrate import SubstrateError, load_substrate
 
 _HAS_VEGA = importlib.util.find_spec("vl_convert") is not None
@@ -180,6 +180,28 @@ def test_fl_specs_present(tmp_path):
     assert "overlay" in specs and "small_multiples" in specs
 
 
+def test_genome_track_spec_bins_per_ref():
+    track = pd.DataFrame(
+        {
+            "ref": pd.Categorical(["chr1"] * 4 + ["chr2"] * 2),
+            "start": [0, 1000, 2000, 3000, 0, 5000],
+            "end": [1000, 2000, 3000, 4000, 5000, 10000],
+            "gdna_mass": [1.0, 8.0, 2.0, 1.0, 3.0, 9.0],
+            "rna_mass": [9.0, 2.0, 8.0, 9.0, 7.0, 1.0],
+            "gdna_density": [0.01, 0.09, 0.02, 0.01, 0.03, 0.10],
+            "gdna_frac": [0.1, 0.8, 0.2, 0.1, 0.3, 0.9],
+        }
+    )
+    spec = genome_track_spec(track)
+    assert spec is not None
+    refs = {row["ref"] for row in spec["data"]["values"]}
+    assert refs == {"chr1", "chr2"}
+    # build_charts merges genome in when a track is present
+    charts = build_charts(None, track)
+    assert set(charts) == {"genome"}
+    assert build_charts(None, None) == {}
+
+
 def test_build_report_self_contained(tmp_path):
     d = _write_substrate(tmp_path / "run")
     out = build_report(d)
@@ -196,7 +218,7 @@ def test_build_report_self_contained(tmp_path):
     m = re.search(r'<script id="rigel-data" type="application/json">(.*?)</script>', html, re.S)
     payload = json.loads(m.group(1).replace("<\\/", "</"))
     assert payload["model"]["meta"]["sample"] == "SampleX"
-    assert set(payload["fl_specs"]) == {"overlay", "small_multiples"}
+    assert set(payload["charts"]) == {"overlay", "small_multiples"}  # no track in this substrate
 
 
 @pytest.mark.skipif(not _HAS_VEGA, reason="vl-convert-python not installed")

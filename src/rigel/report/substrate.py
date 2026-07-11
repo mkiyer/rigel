@@ -49,6 +49,7 @@ class ReportSubstrate:
     gene_quant: pd.DataFrame | None = None
     nrna_quant: pd.DataFrame | None = None
     loci: pd.DataFrame | None = None
+    calibration_track: pd.DataFrame | None = None
     #: Non-fatal issues to surface in the report (schema drift, missing tables).
     warnings: list[str] = field(default_factory=list)
 
@@ -122,5 +123,6 @@ def load_substrate(output_dir: str | Path) -> ReportSubstrate:
         gene_quant=_read_feather(output_dir / "gene_quant.feather"),
         nrna_quant=_read_feather(output_dir / "nrna_quant.feather"),
         loci=_read_feather(output_dir / "loci.feather"),
+        calibration_track=_read_feather(output_dir / "calibration_track.feather"),
         warnings=warnings,
     )

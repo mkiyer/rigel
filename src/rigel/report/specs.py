@@ -12,6 +12,7 @@ strand components are native HTML/SVG. The genome-track and capture-KDE charts
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 _SCHEMA = "https://vega.github.io/schema/vega-lite/v5.json"
@@ -150,3 +151,86 @@ def build_fl_specs(fl_df: pd.DataFrame | None) -> dict:
     if small is not None:
         specs["small_multiples"] = small
     return specs
+
+
+def _bin_track(track: pd.DataFrame, bins_per_ref: int = 160) -> list[dict]:
+    """Length-weighted per-bin gDNA density, binned within each reference.
+
+    Binning happens here (Python) so a genome with millions of region rows still
+    emits only ~bins_per_ref points per chromosome to the chart.
+    """
+    rows: list[dict] = []
+    length = (track["end"] - track["start"]).clip(lower=1).to_numpy(dtype="float64")
+    dens = track["gdna_density"].to_numpy(dtype="float64")
+    starts = track["start"].to_numpy(dtype="float64")
+    refs = track["ref"].astype(str).to_numpy()
+    for ref in pd.unique(refs):
+        m = refs == ref
+        span = float(starts[m].max() + length[m][starts[m].argmax()])
+        if span <= 0:
+            continue
+        width = span / bins_per_ref
+        bin_idx = np.minimum((starts[m] / width).astype(int), bins_per_ref - 1)
+        wl, wd = length[m], dens[m] * length[m]
+        num = np.bincount(bin_idx, weights=wd, minlength=bins_per_ref)
+        den = np.bincount(bin_idx, weights=wl, minlength=bins_per_ref)
+        for b in range(bins_per_ref):
+            if den[b] > 0:
+                rows.append(
+                    {
+                        "ref": str(ref),
+                        "pos_mb": round((b + 0.5) * width / 1e6, 4),
+                        "density": float(num[b] / den[b]),
+                    }
+                )
+    return rows
+
+
+def genome_track_spec(track: pd.DataFrame | None) -> dict | None:
+    """Whole-genome gDNA density overview — a binned area, faceted per reference."""
+    if track is None or track.empty:
+        return None
+    rows = _bin_track(track)
+    if not rows:
+        return None
+    n_refs = len({r["ref"] for r in rows})
+    return {
+        "$schema": _SCHEMA,
+        "data": {"values": rows},
+        "columns": 1 if n_refs <= 3 else 2,
+        "facet": {
+            "field": "ref",
+            "type": "nominal",
+            "title": None,
+            "header": {"labelAnchor": "start", "labelFontWeight": "bold"},
+        },
+        "spec": {
+            "width": "container",
+            "height": 60,
+            "mark": {
+                "type": "area",
+                "line": {"strokeWidth": 1},
+                "opacity": 0.5,
+                "interpolate": "monotone",
+            },
+            "encoding": {
+                "x": {"field": "pos_mb", "type": "quantitative", "title": "position (Mb)"},
+                "y": {"field": "density", "type": "quantitative", "title": "gDNA density"},
+                "tooltip": [
+                    {"field": "ref", "title": "ref"},
+                    {"field": "pos_mb", "title": "position (Mb)"},
+                    {"field": "density", "title": "gDNA density", "format": ".3~g"},
+                ],
+            },
+        },
+        "resolve": {"scale": {"x": "independent"}},
+    }
+
+
+def build_charts(fl_df: pd.DataFrame | None, track: pd.DataFrame | None) -> dict:
+    """All Vega-Lite charts for the report, keyed by container id (``vega-<key>``)."""
+    charts = build_fl_specs(fl_df)
+    genome = genome_track_spec(track)
+    if genome is not None:
+        charts["genome"] = genome
+    return charts

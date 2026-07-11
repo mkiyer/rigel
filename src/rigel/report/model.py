@@ -319,6 +319,22 @@ def _genes(sub: ReportSubstrate, max_rows: int = 20000) -> dict:
     return {"rows": rows, "total": total, "shown": len(rows), "truncated": truncated}
 
 
+def _calibration(sub: ReportSubstrate) -> dict:
+    cal = sub.summary.get("calibration") or {}
+    track = sub.calibration_track
+    kpis = [
+        {"l": "Regions", "v": _si(cal.get("n_regions", 0))},
+        {"l": "ρg global", "v": f"{cal.get('gdna_density_global', 0):.4g}"},
+        {"l": "RNA sense", "v": f"{cal.get('rna_sense_frac', 0):.3f}"},
+    ]
+    has_track = track is not None and len(track) > 0
+    if has_track:
+        gf = track["gdna_frac"].to_numpy(dtype="float64")
+        kpis.append({"l": "Mean gDNA frac", "v": f"{float(gf.mean()) * 100:.1f}", "u": "%"})
+        kpis.append({"l": "Regions >50% gDNA", "v": _si(int((gf > 0.5).sum()))})
+    return {"kpis": kpis, "has_track": has_track}
+
+
 def _config(summary: dict) -> dict:
     cfg = summary.get("configuration", {})
     groups: dict[str, dict] = {}
@@ -361,6 +377,7 @@ def build_view_model(sub: ReportSubstrate) -> dict:
         "strand": _strand(s),
         "fl": _fragment_length(sub),
         "quant": _quant(s),
+        "calibration": _calibration(sub),
         "genes": _genes(sub),
         "config": _config(s),
     }

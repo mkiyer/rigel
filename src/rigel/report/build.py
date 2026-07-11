@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .html import render_html
 from .model import build_view_model
-from .specs import build_fl_specs
+from .specs import build_charts
 from .substrate import load_substrate
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ def build_report(
         logger.warning("[report] %s", w)
 
     model = build_view_model(sub)
-    fl_specs = build_fl_specs(sub.fragment_lengths)
+    charts = build_charts(sub.fragment_lengths, sub.calibration_track)
 
     if title is None:
         title = f"Rigel QC · {model['meta']['sample']}"
@@ -53,7 +53,7 @@ def build_report(
             "charts will be omitted. Install with: pip install 'rigel-rnaseq[report]'"
         )
 
-    html = render_html(model, fl_specs, title)
+    html = render_html(model, charts, title)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding="utf-8")
     logger.info("[report] wrote %s (%.0f KB)", out_path, out_path.stat().st_size / 1024)

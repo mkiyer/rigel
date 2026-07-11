@@ -280,6 +280,8 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     loci_path = output_dir / "loci.feather"
     summary_path = output_dir / "summary.json"
     fragment_lengths_path = output_dir / "fragment_lengths.feather"
+    calibration_track_path = output_dir / "calibration_track.feather"
+    calibration_bedgraph_path = output_dir / "calibration_track.bedgraph"
     config_yaml_path = output_dir / "config.yaml"
 
     # Log stats
@@ -521,6 +523,19 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             str(fragment_lengths_path.with_suffix(".tsv")), sep="\t", index=False
         )
     logging.info(f"[DONE] Wrote {fragment_lengths_path} ({len(fl_histogram_df)} rows)")
+
+    # Genome-wide gDNA track: a feather (report substrate) + a bedGraph (genome
+    # browser). Per-region gDNA level solved by calibration.
+    track = getattr(result, "calibration_track", None)
+    if track is not None and len(track) > 0:
+        from .calibration.track import write_bedgraph
+
+        track.to_feather(str(calibration_track_path), **feather_kw)
+        write_bedgraph(track, calibration_bedgraph_path)
+        logging.info(
+            f"[DONE] Wrote {calibration_track_path} + {calibration_bedgraph_path.name} "
+            f"({len(track)} regions)"
+        )
 
     # Write config.yaml — reproducible run configuration
     _write_config_yaml(config_yaml_path, args)

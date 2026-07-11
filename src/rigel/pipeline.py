@@ -87,6 +87,9 @@ class PipelineResult:
     # Library-wide FL distributions actually built + used for scoring/calibration
     # (global / RNA / gDNA); the empirical views feed the summary QC report.
     fl_models: "FLModels" = None
+    # Per-region genome-wide gDNA track (ref/start/end + gDNA mass/density/frac),
+    # built from the calibration result; feeds the report's genome track + bedGraph.
+    calibration_track: "object" = None
 
 
 def _sj_tag_to_spec(sj_strand_tag) -> str:
@@ -948,6 +951,14 @@ def run_pipeline(
             locus_id_per_transcript=estimator.locus_id_per_transcript,
         )
 
+    # Genome-wide gDNA track for the QC report (+ bedGraph). Pure persistence of
+    # the per-region calibration solution; skipped if calibration did not run.
+    calibration_track = None
+    if calibration is not None:
+        from .calibration.track import build_gdna_track
+
+        calibration_track = build_gdna_track(calibration, region_arrays, index.ref_names)
+
     return PipelineResult(
         stats=stats,
         strand_models=strand_models,
@@ -956,4 +967,5 @@ def run_pipeline(
         pipeline_config=config,
         calibration=calibration,
         fl_models=fl_models,
+        calibration_track=calibration_track,
     )
