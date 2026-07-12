@@ -60,8 +60,9 @@ _SECTIONS = """
     <a href="#s-strand"><span class="rn">03</span>Strand model</a>
     <a href="#s-fl"><span class="rn">04</span>Fragment length</a>
     <a href="#s-quant"><span class="rn">05</span>Quantification</a>
-    <a href="#s-calib"><span class="rn">06</span>Calibration</a>
-    <a href="#s-genes"><span class="rn">07</span>Gene expression</a>
+    <a href="#s-enrich"><span class="rn">06</span>Enrichment</a>
+    <a href="#s-density"><span class="rn">07</span>gDNA density</a>
+    <a href="#s-genes"><span class="rn">08</span>Gene expression</a>
     <a href="#s-config"><span class="rn">✦</span>Run configuration</a>
   </nav>
   <main class="main">
@@ -155,10 +156,10 @@ _SECTIONS = """
       </div>
     </section>
 
-    <section class="panel" id="s-calib">
-      <div class="ph"><span class="eyebrow">06</span><h2>Calibration</h2><span class="desc">gDNA deconvolution &amp; capture enrichment</span></div>
+    <section class="panel" id="s-enrich">
+      <div class="ph"><span class="eyebrow">06</span><h2>Calibration · Enrichment</h2><span class="desc">Capture on-target enrichment</span></div>
       <div class="pb">
-        <div class="kpis" id="calib-kpis"></div>
+        <div class="kpis" id="enrich-kpis"></div>
         <div class="grid2 wide-left">
           <div>
             <p class="cap">gDNA density — by region count vs by gDNA mass</p>
@@ -166,7 +167,14 @@ _SECTIONS = """
           </div>
           <div><div class="note" id="capture-note"></div></div>
         </div>
-        <p class="cap" style="margin-top:24px" id="genome-cap">gDNA density across the genome</p>
+      </div>
+    </section>
+
+    <section class="panel" id="s-density">
+      <div class="ph"><span class="eyebrow">07</span><h2>Calibration · gDNA density across the genome</h2><span class="desc">Per-reference gDNA levels</span></div>
+      <div class="pb">
+        <div class="kpis" id="density-kpis"></div>
+        <p class="cap" id="genome-cap">gDNA density across the genome</p>
         <div class="tw"><div class="vega-chart" id="vega-genome"></div></div>
         <div class="note">Log density, independent y per reference (so a high-density reference such as
           chrM can't flatten the others). Full per-base signal is in
@@ -182,7 +190,7 @@ _SECTIONS = """
     </section>
 
     <section class="panel" id="s-genes">
-      <div class="ph"><span class="eyebrow">07</span><h2>Gene expression</h2><span class="desc">Look up any gene</span></div>
+      <div class="ph"><span class="eyebrow">08</span><h2>Gene expression</h2><span class="desc">Look up any gene</span></div>
       <div class="pb">
         <div class="search">
           <input id="gsearch" type="text" placeholder="gene name, ID, biotype…" aria-label="Search genes"/>

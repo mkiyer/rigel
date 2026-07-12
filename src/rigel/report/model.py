@@ -381,29 +381,35 @@ def _genes(sub: ReportSubstrate, max_rows: int = 20000) -> dict:
 
 
 def _calibration(sub: ReportSubstrate, capture: dict | None = None) -> dict:
+    """Two panels' worth of data: 'enrichment' (the capture KDE + its KPIs) and
+    'density' (the genome track + per-reference table + its KPIs)."""
     cal = sub.summary.get("calibration") or {}
     track = sub.calibration_track
-    kpis = [
+    has_track = track is not None and len(track) > 0
+
+    # Enrichment panel KPIs (capture).
+    enrichment_kpis = [{"l": "RNA sense", "v": cal.get("rna_sense_frac", 0), "fmt": "float3"}]
+    if capture and capture.get("enriched"):
+        enrichment_kpis = [
+            {"l": "Enr. vs median", "v": capture.get("fold_vs_median", 1.0), "fmt": "fold"},
+            {"l": "Peak-to-peak", "v": capture.get("fold_peak_to_peak", 1.0), "fmt": "fold"},
+            {"l": "On-target mass", "v": capture.get("mass_frac_ontarget", 0), "fmt": "pct"},
+        ]
+
+    # gDNA-density panel KPIs.
+    density_kpis = [
         {"l": "Regions", "v": cal.get("n_regions", 0), "fmt": "count"},
         {"l": "ρg global", "v": cal.get("gdna_density_global", 0), "fmt": "g4"},
-        {"l": "RNA sense", "v": cal.get("rna_sense_frac", 0), "fmt": "float3"},
     ]
-    has_track = track is not None and len(track) > 0
     if has_track:
         gf = track["gdna_frac"].to_numpy(dtype="float64")
-        kpis.append({"l": "Mean gDNA frac", "v": float(gf.mean()), "fmt": "pct"})
-        kpis.append({"l": "Regions >50% gDNA", "v": int((gf > 0.5).sum()), "fmt": "count"})
-    if capture and capture.get("enriched"):
-        kpis.append({"l": "Enr. vs median", "v": capture.get("fold_vs_median", 1.0), "fmt": "fold"})
-        kpis.append(
-            {"l": "Peak-to-peak", "v": capture.get("fold_peak_to_peak", 1.0), "fmt": "fold"}
-        )
-        kpis.append(
-            {"l": "On-target mass", "v": capture.get("mass_frac_ontarget", 0), "fmt": "pct"}
-        )
+        density_kpis.append({"l": "Mean gDNA frac", "v": float(gf.mean()), "fmt": "pct"})
+        density_kpis.append({"l": "Regions >50% gDNA", "v": int((gf > 0.5).sum()), "fmt": "count"})
+
     ref_table = _reference_table(track) if has_track else []
     return {
-        "kpis": kpis,
+        "enrichment_kpis": enrichment_kpis,
+        "density_kpis": density_kpis,
         "has_track": has_track,
         "capture": capture,
         "ref_table": ref_table,
@@ -424,11 +430,15 @@ def _reference_table(track) -> list:
     average discriminates references and is what "density" means at this scale.
     """
     length = (track["end"] - track["start"]).clip(lower=1)
-    agg = track.assign(_len=length).groupby("ref", observed=True).agg(
-        n_regions=("start", "size"),
-        gdna_mass=("gdna_mass", "sum"),
-        rna_mass=("rna_mass", "sum"),
-        len_bp=("_len", "sum"),
+    agg = (
+        track.assign(_len=length)
+        .groupby("ref", observed=True)
+        .agg(
+            n_regions=("start", "size"),
+            gdna_mass=("gdna_mass", "sum"),
+            rna_mass=("rna_mass", "sum"),
+            len_bp=("_len", "sum"),
+        )
     )
     agg["mean_density"] = (agg["gdna_mass"] / agg["len_bp"]).fillna(0.0)
     agg["gdna_frac"] = (agg["gdna_mass"] / (agg["gdna_mass"] + agg["rna_mass"])).fillna(0.0)

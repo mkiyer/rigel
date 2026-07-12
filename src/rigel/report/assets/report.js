@@ -396,7 +396,9 @@
     stackBar($("pool-bar"), M.quant.pools); legend($("pool-legend"), M.quant.pools, true); poolTable();
     kpis($("pool-kpis"), M.quant.kpis); donut($("pool-donut"), M.quant.pools, M.quant.rna_share);
     if (M.calibration) {
-      kpis($("calib-kpis"), M.calibration.kpis); captureNote(); refTable("");
+      kpis($("enrich-kpis"), M.calibration.enrichment_kpis);
+      kpis($("density-kpis"), M.calibration.density_kpis);
+      captureNote(); refTable("");
       const rs = $("rsearch"); if (rs) rs.addEventListener("input", (e) => refTable(e.target.value));
     }
     geneTable("");
