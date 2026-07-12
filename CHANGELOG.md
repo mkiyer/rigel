@@ -5,6 +5,37 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`rigel report` — self-contained HTML QC report.** A new subcommand turns a
+  `rigel quant` output directory into a single offline `.html` (no CDN, server, or
+  Node dependency): alignment fates, fragment composition, strand model, per-category
+  fragment-length distributions, the mRNA/nRNA/gDNA quantification split, capture
+  on-target enrichment, a genome-wide gDNA-density track, and a searchable
+  gene-expression table. Install the optional charting runtime with
+  `pip install 'rigel-rnaseq[report]'` (bundles the Vega/Vega-Lite runtime via
+  `vl-convert-python`); without it the report still builds with the fragment-length
+  charts omitted.
+- **Report substrate written by `rigel quant`.** Quant now persists a small set of
+  self-describing companion tables so reports can be built later, decoupled from the
+  (expensive) quant pass: `fragment_lengths.feather`, `calibration_track.feather`
+  + `calibration_track.bedgraph` (per-region gDNA track for IGV/UCSC), and the
+  capture diagnostics `gdna_density_kde.feather` / `gdna_density_nodes.feather`.
+- **Splice-artifact blacklist provenance.** `summary.json` now records
+  `sj_blacklist_size` and `sj_blacklist_loaded` under `fragment_stats.splice`, so a
+  `splice_artifact` count of `0` is unambiguous — "detection ran, found none" versus
+  "no blacklist in the index (built with `--no-mappability`), so detection was off."
+  The report surfaces this as an on/off status note.
+
+### Changed
+
+- **`summary.json` schema 1 → 2 (leaner).** The bulky per-bin fragment-length
+  histograms were moved out of `summary.json` into `fragment_lengths.feather`;
+  `summary.json` keeps only per-category FL **summary statistics**. This keeps the
+  per-sample JSON small enough to aggregate across thousands of samples.
+
 ## [0.7.0] - 2026-07-10
 
 ### Changed (breaking)

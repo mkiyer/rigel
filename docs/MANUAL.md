@@ -104,7 +104,7 @@ cat results/sample/summary.json
 
 ## Commands
 
-Rigel has four subcommands: `index`, `quant`, `sim`, and `export`.
+Rigel has five subcommands: `index`, `quant`, `sim`, `export`, and `report`.
 
 ### rigel index
 
@@ -241,14 +241,44 @@ rigel export results/sample/ --format parquet
 | `output_dir` (positional) | required | Directory containing `.feather` files from `rigel quant` |
 | `-f`, `--format {tsv,parquet}` | `tsv` | Output format |
 
+### rigel report
+
+Builds a single self-contained HTML QC report from a `rigel quant` output
+directory. It reads only the files `quant` already wrote (`summary.json` plus the
+companion tables — see [Output files](#output-files)), so reports are decoupled
+from quantification: quantify thousands of samples cheaply now, build (or rebuild)
+reports later, in bulk, on a laptop.
+
+```bash
+rigel report results/sample/                         # → results/sample/report.html
+rigel report results/sample/ -o qc.html --title "Sample 42"
+```
+
+| Argument / flag | Default | Description |
+|-----------------|---------|-------------|
+| `output_dir` (positional) | required | A `rigel quant` output directory (must contain `summary.json`) |
+| `-o`, `--output` | `<output_dir>/report.html` | Destination HTML path |
+| `--title` | `Rigel QC · <sample>` | Document title |
+
+The report covers alignment fates, fragment composition (including the
+splice-artifact blacklist status), the strand model, per-category fragment-length
+distributions, the mature-mRNA / nascent-RNA / gDNA split, capture on-target
+enrichment, a genome-wide gDNA-density track, and a searchable gene-expression
+table. The output is a single offline file — no CDN, server, or Node dependency.
+
+`rigel report` needs the `[report]` extra
+(`pip install 'rigel-rnaseq[report]'`, or `conda install -c conda-forge
+vl-convert-python`), which bundles the Vega/Vega-Lite runtime. Without it the
+report still builds, with the fragment-length charts omitted.
+
 ---
 
 ## Mappability and the splice-artifact blacklist
 
 Real genomes have regions where reads cannot map uniquely. Rigel can ingest
 a per-base **mappability** track — a Zarr store built by the companion
-`alignable` tool for the *same* genome and aligner — at index time via
-`--alignable-zarr`. It is used for two things:
+`alignable` tool (`pip install alignable`) for the *same* genome and aligner —
+at index time via `--alignable-zarr`. It is used for two things:
 
 1. **gDNA-aware effective length** — the mappable fraction shortens the
    effective length used in quantification, so unmappable stretches do not
@@ -487,7 +517,7 @@ the current version is **2**. Top-level keys:
 | `configuration` | All resolved pipeline parameters |
 | `input` | Absolute BAM and index paths |
 | `alignment_stats` | Two unit families: record-level counts (`total_reads`, `mapped_reads`, `secondary_reads`, `supplementary_reads`, `proper_pairs`, `duplicate_reads`, `qc_fail_reads`) and read-name-group counts (`read_groups`, `unique_reads`, `multimapping_reads`). The report's read-fate bar uses the read-group family so its segments share one denominator |
-| `fragment_stats` | Total, genic, intergenic, and chimeric breakdowns; annotated/unannotated SJ counts; a `splice` sub-block with the per-fragment splice-type breakdown (`unspliced`, `spliced_annotated`, `spliced_unannotated`, `spliced_implicit`, `splice_artifact`) plus `sj_blacklisted` |
+| `fragment_stats` | Total, genic, intergenic, and chimeric breakdowns; annotated/unannotated SJ counts; a `splice` sub-block with the per-fragment splice-type breakdown (`unspliced`, `spliced_annotated`, `spliced_unannotated`, `spliced_implicit`, `splice_artifact`) plus `sj_blacklisted`, and blacklist provenance `sj_blacklist_size` / `sj_blacklist_loaded` (so `splice_artifact: 0` reads as "detection off — no blacklist in the index" vs "detection on, none found") |
 | `strand_model` | Protocol (`R1-sense` / `R1-antisense`), strand specificity, `p_r1_sense`, training count, posterior variance, 95% CI, and a `diagnostics` sub-block comparing the all-exonic model to the spliced-only model (`contamination_gap` — a positive value flags unstranded gDNA contamination) |
 | `calibration` | Library-scalar calibration outputs (see below) |
 | `gdna_eff_len` | Summary of the per-locus gDNA effective-length series (`em`, `per_bp`) |

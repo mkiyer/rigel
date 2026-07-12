@@ -64,10 +64,19 @@ conda install -c conda-forge -c bioconda rigel
 
 ```bash
 pip install rigel-rnaseq
+
+# with the optional HTML QC report ('rigel report'):
+pip install 'rigel-rnaseq[report]'
 ```
 
 The PyPI package name is `rigel-rnaseq` because `rigel` is already taken on
 PyPI. The import name and CLI stay `rigel`.
+
+The `[report]` extra pulls in `vl-convert-python`, which bundles the
+Vega/Vega-Lite JavaScript runtime so reports are fully self-contained and render
+offline. On conda, install it alongside with
+`conda install -c conda-forge vl-convert-python`. Without it, `rigel report`
+still builds a report — only the fragment-length charts are omitted.
 
 ### From source
 
@@ -137,6 +146,19 @@ head results/loci.tsv
 cat results/summary.json
 ```
 
+### 4. Build a QC report (optional)
+
+```bash
+rigel report results/ -o results/report.html
+```
+
+Produces a single self-contained HTML file (alignment fates, fragment
+composition, strand model, fragment-length distributions, the mRNA/nRNA/gDNA
+split, capture enrichment, a genome-wide gDNA-density track, and a searchable
+gene table). It reads only the files `rigel quant` already wrote, so reports can
+be built long after — and in bulk — without re-running quantification. Requires
+the `[report]` extra (see [Installation](#pypi)).
+
 ---
 
 ## Output files
@@ -147,8 +169,12 @@ cat results/summary.json
 | `gene_quant.feather` / `gene_quant.tsv` | Gene-level aggregates derived from transcript estimates |
 | `nrna_quant.feather` / `nrna_quant.tsv` | nRNA-span-level abundance estimates (one row per unique genomic nRNA span) |
 | `loci.feather` / `loci.tsv` | Per-locus EM summary |
-| `summary.json` | Library protocol, strand specificity, fragment-length histograms, the calibration scalars (`gdna_density_global`, `rna_sense_frac`, the gDNA/RNA strand overdispersions, `n_regions`), alignment counts, and global quantification totals |
+| `summary.json` | Library protocol, strand specificity, per-category fragment-length **summary statistics**, the calibration scalars (`gdna_density_global`, `rna_sense_frac`, the gDNA/RNA strand overdispersions, `n_regions`), alignment counts, and global quantification totals (schema v2) |
+| `fragment_lengths.feather` | Raw per-bin fragment-length histograms, tidy `(category, length, count)` |
+| `calibration_track.feather` / `.bedgraph` | Per-region gDNA solution; the bedGraph is a genome-browser track (IGV / UCSC) |
+| `gdna_density_kde.feather` / `gdna_density_nodes.feather` | Capture gDNA-density KDE diagnostic (written when the Phase-2 prior is fit) |
 | `config.yaml` | Resolved run configuration (parameters, I/O paths). Rerun with `rigel quant --config config.yaml` |
+| `report.html` | Optional self-contained QC report, built by `rigel report` (see step 4) |
 | `locus_stats.feather` | Optional per-locus statistics, emitted only with `--emit-locus-stats` |
 | `annotated.bam` | Optional annotated BAM with per-fragment assignment tags, written with `--annotated-bam` (a second BAM pass). Rigel guarantees a collated-in → collated-out contract: the output contains exactly the same records as the input (no drops, no duplications). |
 
