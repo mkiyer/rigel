@@ -72,11 +72,15 @@ class TestCrossChunkRegression:
         self.index = self.result.index
         # Baseline: all fragments in one chunk
         self.pr_big = _run_with_fragments_per_chunk(
-            self.result, self.index, fragments_per_chunk=N_FRAGS + 100,
+            self.result,
+            self.index,
+            fragments_per_chunk=N_FRAGS + 100,
         )
         # Test: many tiny chunks (forces chunk-boundary splits)
         self.pr_tiny = _run_with_fragments_per_chunk(
-            self.result, self.index, fragments_per_chunk=10,
+            self.result,
+            self.index,
+            fragments_per_chunk=10,
         )
         yield
         self.sc.cleanup()

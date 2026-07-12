@@ -48,7 +48,9 @@ def test_runfill_does_not_cross_reference():
     v = np.array([5.0, np.nan, np.nan, np.nan])
     out = runfill_bidirectional(v, ref)
     assert out[1] == 5.0  # filled within ref 0
-    assert np.isnan(out[2]) and np.isnan(out[3])  # ref 1 has no anchor — not carried across the seam
+    assert np.isnan(out[2]) and np.isnan(
+        out[3]
+    )  # ref 1 has no anchor — not carried across the seam
 
 
 def test_runfill_unreachable_run_stays_nan():

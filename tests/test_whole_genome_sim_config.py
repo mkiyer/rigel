@@ -71,10 +71,7 @@ def test_parse_random_fraction_nrna_config(tmp_path):
 def test_random_fraction_requires_ratio_ranges(tmp_path):
     config_path = tmp_path / "sim.yaml"
     config_path.write_text(
-        "genome: /tmp/genome.fa\n"
-        "gtf: /tmp/genes.gtf\n"
-        "nrna:\n"
-        "  mode: random_fraction\n"
+        "genome: /tmp/genome.fa\ngtf: /tmp/genes.gtf\nnrna:\n  mode: random_fraction\n"
     )
 
     with pytest.raises(ValueError, match="ratio_ranges"):

@@ -84,9 +84,7 @@ class ScoredFragments:
     frag_ids: np.ndarray
     frag_class: np.ndarray
     splice_type: np.ndarray
-    genomic_midpoint: np.ndarray = field(
-        default_factory=lambda: np.empty(0, dtype=np.int64)
-    )
+    genomic_midpoint: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int64))
     n_units: int = 0
     n_candidates: int = 0
 

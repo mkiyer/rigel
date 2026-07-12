@@ -44,8 +44,13 @@ PIPELINE_SEED = 42
 def sim_config(*, strand_specificity: float = 1.0, seed: int = SIM_SEED):
     """Standard ReadSimConfig used across all scenarios."""
     return ReadSimConfig(
-        frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-        read_length=100, strand_specificity=strand_specificity, seed=seed,
+        frag_mean=200,
+        frag_std=30,
+        frag_min=80,
+        frag_max=450,
+        read_length=100,
+        strand_specificity=strand_specificity,
+        seed=seed,
     )
 
 
@@ -54,14 +59,23 @@ def gdna_config(abundance: float) -> GDNAConfig | None:
     if abundance == 0:
         return None
     return GDNAConfig(
-        abundance=abundance, frag_mean=350, frag_std=100,
-        frag_min=100, frag_max=1000,
+        abundance=abundance,
+        frag_mean=350,
+        frag_std=100,
+        frag_min=100,
+        frag_max=1000,
     )
 
 
-def build_and_run(scenario, *, n_fragments=N_FRAGMENTS,
-                  gdna_abundance=0, strand_specificity=1.0,
-                  nrna_abundance=0, scenario_name=""):
+def build_and_run(
+    scenario,
+    *,
+    n_fragments=N_FRAGMENTS,
+    gdna_abundance=0,
+    strand_specificity=1.0,
+    nrna_abundance=0,
+    scenario_name="",
+):
     """Build an oracle scenario and run the pipeline.
 
     Returns a BenchmarkResult comparing pipeline output to ground truth.
@@ -69,8 +83,10 @@ def build_and_run(scenario, *, n_fragments=N_FRAGMENTS,
     sc = sim_config(strand_specificity=strand_specificity)
     gdna = gdna_config(gdna_abundance)
     result = scenario.build_oracle(
-        n_fragments=n_fragments, sim_config=sc,
-        gdna_config=gdna, nrna_abundance=nrna_abundance,
+        n_fragments=n_fragments,
+        sim_config=sc,
+        gdna_config=gdna,
+        nrna_abundance=nrna_abundance,
     )
     config = PipelineConfig(
         em=EMConfig(seed=PIPELINE_SEED),
@@ -90,9 +106,7 @@ def build_and_run(scenario, *, n_fragments=N_FRAGMENTS,
 def assert_alignment(bench, min_rate=0.95):
     """Oracle BAM should produce near-perfect alignment rate."""
     assert bench.n_fragments > 0, "No fragments entered the pipeline"
-    assert bench.alignment_rate > min_rate, (
-        f"Low alignment rate: {bench.alignment_rate:.1%}"
-    )
+    assert bench.alignment_rate > min_rate, f"Low alignment rate: {bench.alignment_rate:.1%}"
 
 
 def assert_accountability(bench, tolerance=5):
@@ -102,32 +116,29 @@ def assert_accountability(bench, tolerance=5):
     # n_synthetic_observed already includes nRNA counts (synthetic transcripts),
     # so we don't add n_nrna_pipeline separately.
     total = (
-        bench.total_observed + bench.n_synthetic_observed
-        + bench.n_gdna_pipeline + bench.n_chimeric
+        bench.total_observed
+        + bench.n_synthetic_observed
+        + bench.n_gdna_pipeline
+        + bench.n_chimeric
         + n_gated_out
     )
     gap = abs(total - bench.n_fragments)
     assert gap <= tolerance, (
-        f"Accountability gap: {gap:.0f} "
-        f"(total={total:.0f}, n_fragments={bench.n_fragments})"
+        f"Accountability gap: {gap:.0f} (total={total:.0f}, n_fragments={bench.n_fragments})"
     )
 
 
-def assert_transcript_accuracy(bench, max_abs_diff=3,
-                                exclude_ids=("t_ctrl", "t_helper")):
+def assert_transcript_accuracy(bench, max_abs_diff=3, exclude_ids=("t_ctrl", "t_helper")):
     """Per-transcript mRNA accuracy (skips controls/helpers)."""
     for ta in bench.transcripts:
         if ta.t_id in exclude_ids:
             continue
         assert ta.abs_diff <= max_abs_diff, (
-            f"{ta.t_id}: expected={ta.expected}, "
-            f"observed={ta.observed:.0f}, diff={ta.abs_diff:.0f}"
+            f"{ta.t_id}: expected={ta.expected}, observed={ta.observed:.0f}, diff={ta.abs_diff:.0f}"
         )
 
 
-def assert_negative_control(bench, ctrl_id="t_ctrl", *,
-                             gdna_abundance=0,
-                             strand_specificity=1.0):
+def assert_negative_control(bench, ctrl_id="t_ctrl", *, gdna_abundance=0, strand_specificity=1.0):
     """Assert negative-control transcript has near-zero mRNA counts.
 
     Tolerance scales with gDNA contamination and the strand-specificity gap.
@@ -181,6 +192,4 @@ def assert_nrna_detected(bench, nrna_abundance):
         return
     if bench.n_gdna_expected > 3 * bench.n_nrna_expected:
         return
-    assert bench.n_nrna_pipeline > 0, (
-        f"No nRNA detected but expected {bench.n_nrna_expected:.0f}"
-    )
+    assert bench.n_nrna_pipeline > 0, f"No nRNA detected but expected {bench.n_nrna_expected:.0f}"

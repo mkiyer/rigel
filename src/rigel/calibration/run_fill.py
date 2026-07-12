@@ -32,7 +32,9 @@ def same_ref_left_right(ref_id: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     if r > 1:
         eq = ref[:-1] == ref[1:]  # eq[k] = (ref[k] == ref[k+1])
         left_same[1:] = eq  # region i (>0) has a same-ref left neighbour iff ref[i] == ref[i-1]
-        right_same[:-1] = eq  # region i (<R-1) has a same-ref right neighbour iff ref[i] == ref[i+1]
+        right_same[:-1] = (
+            eq  # region i (<R-1) has a same-ref right neighbour iff ref[i] == ref[i+1]
+        )
     return left_same, right_same
 
 

@@ -143,9 +143,7 @@ def test_write_post_capture_truth_uses_observed_read_origins(tmp_path):
     assert written_summary["truth_kind"] == "post_capture_empirical"
     assert written_summary["pre_capture_abundances"] == "molecular.tsv"
     assert written_summary["files"]["pre_capture_abundances"] == "molecular.tsv"
-    assert written_summary["files"]["post_capture_abundances"].endswith(
-        "truth_abundances.tsv"
-    )
+    assert written_summary["files"]["post_capture_abundances"].endswith("truth_abundances.tsv")
     assert written_summary["files"]["post_capture_fragment_lengths"].endswith(
         "truth_fragment_lengths.tsv"
     )
@@ -154,10 +152,7 @@ def test_write_post_capture_truth_uses_observed_read_origins(tmp_path):
 
 def test_condition_dir_name_and_gdna_labels():
     assert condition_dir_name("low", 0.9, "rand") == "gdna_low_ss_0.90_nrna_rand"
-    assert (
-        condition_dir_name("low", 0.9, "rand", "on")
-        == "gdna_low_ss_0.90_nrna_rand_capture_on"
-    )
+    assert condition_dir_name("low", 0.9, "rand", "on") == "gdna_low_ss_0.90_nrna_rand_capture_on"
     assert gdna_label_for_rate(0, None, 0) == "r0"
     assert gdna_label_for_rate(0.3, None, 1) == "r0.3"
     assert gdna_label_for_rate(0.3, ["none", "low"], 1) == "low"

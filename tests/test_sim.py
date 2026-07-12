@@ -73,6 +73,7 @@ class TestMutableGenome:
 
     def test_write_fasta_readable_by_pysam(self, tmp_path):
         import pysam
+
         g = MutableGenome(500, seed=1, name="testchr")
         fasta = g.write_fasta(tmp_path)
         with pysam.FastaFile(str(fasta)) as fh:
@@ -125,9 +126,13 @@ class TestGeneBuilder:
     def test_single_gene_single_transcript(self, tmp_path):
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)
-        builder.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(100, 300), (500, 700)], "abundance": 100},
-        ])
+        builder.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(100, 300), (500, 700)], "abundance": 100},
+            ],
+        )
         transcripts = builder.get_transcripts()
         assert len(transcripts) == 1
         assert transcripts[0].t_id == "t1"
@@ -138,9 +143,13 @@ class TestGeneBuilder:
     def test_splice_motif_positive_strand(self):
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)
-        builder.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(100, 300), (500, 700)]},
-        ])
+        builder.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(100, 300), (500, 700)]},
+            ],
+        )
         # Intron is (300, 500): donor at 300, acceptor at 498
         assert g[300:302] == "GT"
         assert g[498:500] == "AG"
@@ -148,9 +157,13 @@ class TestGeneBuilder:
     def test_splice_motif_negative_strand(self):
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)
-        builder.add_gene("g1", "-", [
-            {"t_id": "t1", "exons": [(100, 300), (500, 700)]},
-        ])
+        builder.add_gene(
+            "g1",
+            "-",
+            [
+                {"t_id": "t1", "exons": [(100, 300), (500, 700)]},
+            ],
+        )
         # Negative strand: CT at donor, AC at acceptor
         assert g[300:302] == "CT"
         assert g[498:500] == "AC"
@@ -158,9 +171,13 @@ class TestGeneBuilder:
     def test_multi_exon_splice_motifs(self):
         g = MutableGenome(3000, seed=1, name="chr1")
         builder = GeneBuilder(g)
-        builder.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(100, 200), (400, 500), (700, 800)]},
-        ])
+        builder.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(100, 200), (400, 500), (700, 800)]},
+            ],
+        )
         # Intron 1: (200, 400)
         assert g[200:202] == "GT"
         assert g[398:400] == "AG"
@@ -171,10 +188,14 @@ class TestGeneBuilder:
     def test_multi_isoform_gene(self):
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)
-        builder.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(100, 200), (400, 500), (700, 800)]},
-            {"t_id": "t2", "exons": [(100, 200), (700, 800)]},
-        ])
+        builder.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(100, 200), (400, 500), (700, 800)]},
+                {"t_id": "t2", "exons": [(100, 200), (700, 800)]},
+            ],
+        )
         transcripts = builder.get_transcripts()
         assert len(transcripts) == 2
         # Both belong to same gene
@@ -187,27 +208,43 @@ class TestGeneBuilder:
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)
         with pytest.raises(ValueError, match="overlap"):
-            builder.add_gene("g1", "+", [
-                {"t_id": "t1", "exons": [(100, 300), (250, 500)]},
-            ])
+            builder.add_gene(
+                "g1",
+                "+",
+                [
+                    {"t_id": "t1", "exons": [(100, 300), (250, 500)]},
+                ],
+            )
 
     def test_exon_out_of_bounds_raises(self):
         g = MutableGenome(500, seed=1, name="chr1")
         builder = GeneBuilder(g)
         with pytest.raises(ValueError, match="outside genome"):
-            builder.add_gene("g1", "+", [
-                {"t_id": "t1", "exons": [(100, 600)]},
-            ])
+            builder.add_gene(
+                "g1",
+                "+",
+                [
+                    {"t_id": "t1", "exons": [(100, 600)]},
+                ],
+            )
 
     def test_t_index_assignment(self):
         g = MutableGenome(3000, seed=1, name="chr1")
         builder = GeneBuilder(g)
-        builder.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(100, 200)]},
-        ])
-        builder.add_gene("g2", "-", [
-            {"t_id": "t2", "exons": [(1000, 1200)]},
-        ])
+        builder.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(100, 200)]},
+            ],
+        )
+        builder.add_gene(
+            "g2",
+            "-",
+            [
+                {"t_id": "t2", "exons": [(1000, 1200)]},
+            ],
+        )
         transcripts = builder.get_transcripts()
         assert transcripts[0].t_index == 0
         assert transcripts[1].t_index == 1
@@ -216,14 +253,19 @@ class TestGeneBuilder:
     def test_write_gtf(self, tmp_path):
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)
-        builder.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(100, 300), (500, 700)]},
-        ])
+        builder.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(100, 300), (500, 700)]},
+            ],
+        )
         gtf_path = builder.write_gtf(tmp_path)
         assert gtf_path.exists()
 
         # Read it back with the GTF parser
         from rigel.gtf import GTFRecord
+
         features = list(GTFRecord.parse_file(gtf_path))
         assert len(features) == 2  # 2 exon lines
         assert all(f.feature == "exon" for f in features)
@@ -234,10 +276,14 @@ class TestGeneBuilder:
         """GTF → Transcript.read_gtf should reconstruct the transcripts."""
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)
-        builder.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(100, 300), (500, 700)], "abundance": 50.0},
-            {"t_id": "t2", "exons": [(100, 300)], "abundance": 25.0},
-        ])
+        builder.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(100, 300), (500, 700)], "abundance": 50.0},
+                {"t_id": "t2", "exons": [(100, 300)], "abundance": 25.0},
+            ],
+        )
         gtf_path = builder.write_gtf(tmp_path)
 
         # Read back
@@ -255,12 +301,17 @@ class TestGeneBuilder:
         """Abundance is written as GTF score field."""
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)
-        builder.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(100, 300)], "abundance": 42.5},
-        ])
+        builder.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(100, 300)], "abundance": 42.5},
+            ],
+        )
         gtf_path = builder.write_gtf(tmp_path)
 
         from rigel.gtf import GTFRecord
+
         features = list(GTFRecord.parse_file(gtf_path))
         assert features[0].score == 42.5
 
@@ -268,9 +319,13 @@ class TestGeneBuilder:
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)
         with pytest.raises(ValueError, match="too short"):
-            builder.add_gene("g1", "+", [
-                {"t_id": "t1", "exons": [(100, 200), (202, 300)]},
-            ])
+            builder.add_gene(
+                "g1",
+                "+",
+                [
+                    {"t_id": "t1", "exons": [(100, 200), (202, 300)]},
+                ],
+            )
 
     def test_gtf_to_bed12(self, tmp_path):
         """GTF → BED12 conversion produces valid 12-column BED."""
@@ -278,12 +333,20 @@ class TestGeneBuilder:
 
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)
-        builder.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(100, 300), (500, 700)]},
-        ])
-        builder.add_gene("g2", "-", [
-            {"t_id": "t2", "exons": [(1000, 1200), (1400, 1500), (1700, 1800)]},
-        ])
+        builder.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(100, 300), (500, 700)]},
+            ],
+        )
+        builder.add_gene(
+            "g2",
+            "-",
+            [
+                {"t_id": "t2", "exons": [(1000, 1200), (1400, 1500), (1700, 1800)]},
+            ],
+        )
         gtf_path = builder.write_gtf(tmp_path)
         bed_path = tmp_path / "annotation.bed"
         result_path = gtf_to_bed12(gtf_path, bed_path)
@@ -295,14 +358,14 @@ class TestGeneBuilder:
         # Parse first transcript (2-exon, + strand)
         fields = lines[0].split("\t")
         assert len(fields) == 12
-        assert fields[0] == "chr1"     # ref
-        assert fields[1] == "100"      # refStart
-        assert fields[2] == "700"      # refEnd
-        assert fields[3] == "t1"       # name
-        assert fields[5] == "+"        # strand
-        assert fields[9] == "2"        # blockCount
-        assert fields[10] == "200,200" # blockSizes (300-100, 700-500)
-        assert fields[11] == "0,400"   # blockStarts (100-100, 500-100)
+        assert fields[0] == "chr1"  # ref
+        assert fields[1] == "100"  # refStart
+        assert fields[2] == "700"  # refEnd
+        assert fields[3] == "t1"  # name
+        assert fields[5] == "+"  # strand
+        assert fields[9] == "2"  # blockCount
+        assert fields[10] == "200,200"  # blockSizes (300-100, 700-500)
+        assert fields[11] == "0,400"  # blockStarts (100-100, 500-100)
 
         # Parse second transcript (3-exon, - strand)
         fields = lines[1].split("\t")
@@ -313,7 +376,7 @@ class TestGeneBuilder:
         assert fields[5] == "-"
         assert fields[9] == "3"
         assert fields[10] == "200,100,100"  # sizes
-        assert fields[11] == "0,400,700"    # starts relative to 1000
+        assert fields[11] == "0,400,700"  # starts relative to 1000
 
 
 # =====================================================================
@@ -328,12 +391,20 @@ class TestGeneBuilderIndexIntegration:
 
         g = MutableGenome(2000, seed=1, name="chr1")
         builder = GeneBuilder(g)
-        builder.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(100, 300), (500, 700)]},
-        ])
-        builder.add_gene("g2", "-", [
-            {"t_id": "t2", "exons": [(1200, 1400), (1600, 1800)]},
-        ])
+        builder.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(100, 300), (500, 700)]},
+            ],
+        )
+        builder.add_gene(
+            "g2",
+            "-",
+            [
+                {"t_id": "t2", "exons": [(1200, 1400), (1600, 1800)]},
+            ],
+        )
 
         fasta = g.write_fasta(tmp_path)
         gtf = builder.write_gtf(tmp_path)

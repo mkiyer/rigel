@@ -237,9 +237,7 @@ class TestExonIntervals:
         """Exon intervals for every transcript must be sorted by start coord."""
         for t_idx, exons in mini_index._t_exon_intervals.items():
             starts = exons[:, 0]
-            assert np.all(starts[1:] >= starts[:-1]), (
-                f"Exons not sorted for t_idx={t_idx}: {exons}"
-            )
+            assert np.all(starts[1:] >= starts[:-1]), f"Exons not sorted for t_idx={t_idx}: {exons}"
 
     def test_get_exon_intervals_method(self, mini_index):
         """The get_exon_intervals(t_idx) method should return same data."""
@@ -423,10 +421,8 @@ class TestBuildLoadRoundTrip:
                 tsets = [h[3] for h in exon_hits]
                 merged = frozenset().union(*tsets) if tsets else frozenset()
                 assert t_idx in merged, (
-                    f"t_idx={t_idx} not in exon query result for "
-                    f"({start},{end}): {merged}"
+                    f"t_idx={t_idx} not in exon query result for ({start},{end}): {merged}"
                 )
-
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -449,19 +445,19 @@ class TestLargerIndex:
         # Gene A (+ strand): 3 transcripts with varying exon structures
         for exon in [(100, 300), (500, 700), (900, 1100)]:
             lines.append(
-                f'chr1\ttest\texon\t{exon[0]}\t{exon[1]}\t.\t+\t.\t'
+                f"chr1\ttest\texon\t{exon[0]}\t{exon[1]}\t.\t+\t.\t"
                 f'gene_id "gA"; transcript_id "tA1"; gene_name "GeneA"; '
                 f'gene_type "protein_coding"; tag "basic";'
             )
         for exon in [(100, 300), (900, 1100)]:
             lines.append(
-                f'chr1\ttest\texon\t{exon[0]}\t{exon[1]}\t.\t+\t.\t'
+                f"chr1\ttest\texon\t{exon[0]}\t{exon[1]}\t.\t+\t.\t"
                 f'gene_id "gA"; transcript_id "tA2"; gene_name "GeneA"; '
                 f'gene_type "protein_coding";'
             )
         for exon in [(100, 300), (500, 700), (900, 1100), (1300, 1500)]:
             lines.append(
-                f'chr1\ttest\texon\t{exon[0]}\t{exon[1]}\t.\t+\t.\t'
+                f"chr1\ttest\texon\t{exon[0]}\t{exon[1]}\t.\t+\t.\t"
                 f'gene_id "gA"; transcript_id "tA3"; gene_name "GeneA"; '
                 f'gene_type "protein_coding";'
             )
@@ -469,13 +465,13 @@ class TestLargerIndex:
         # Gene B (- strand): 2 transcripts
         for exon in [(2000, 2200), (2500, 2700)]:
             lines.append(
-                f'chr1\ttest\texon\t{exon[0]}\t{exon[1]}\t.\t-\t.\t'
+                f"chr1\ttest\texon\t{exon[0]}\t{exon[1]}\t.\t-\t.\t"
                 f'gene_id "gB"; transcript_id "tB1"; gene_name "GeneB"; '
                 f'gene_type "lncRNA";'
             )
         for exon in [(2000, 2200), (2500, 2700), (3000, 3200)]:
             lines.append(
-                f'chr1\ttest\texon\t{exon[0]}\t{exon[1]}\t.\t-\t.\t'
+                f"chr1\ttest\texon\t{exon[0]}\t{exon[1]}\t.\t-\t.\t"
                 f'gene_id "gB"; transcript_id "tB2"; gene_name "GeneB"; '
                 f'gene_type "lncRNA";'
             )
@@ -483,22 +479,20 @@ class TestLargerIndex:
         # Gene C (+ strand): overlapping with Gene A on same strand
         for exon in [(800, 1100), (1300, 1600)]:
             lines.append(
-                f'chr1\ttest\texon\t{exon[0]}\t{exon[1]}\t.\t+\t.\t'
+                f"chr1\ttest\texon\t{exon[0]}\t{exon[1]}\t.\t+\t.\t"
                 f'gene_id "gC"; transcript_id "tC1"; gene_name "GeneC"; '
                 f'gene_type "protein_coding";'
             )
 
         # Gene D (+ strand): single-exon gene (unspliced)
         lines.append(
-            'chr1\ttest\texon\t4000\t5000\t.\t+\t.\t'
+            "chr1\ttest\texon\t4000\t5000\t.\t+\t.\t"
             'gene_id "gD"; transcript_id "tD1"; gene_name "GeneD"; '
             'gene_type "protein_coding"; tag "basic";'
         )
 
         gtf_text = "\n".join(lines) + "\n"
-        return build_test_index(
-            tmp_path_factory, gtf_text, genome_size=6000, name="complex_idx"
-        )
+        return build_test_index(tmp_path_factory, gtf_text, genome_size=6000, name="complex_idx")
 
     def test_transcript_count(self, complex_index):
         # 7 annotated + 5 synthetic nRNA (gA:2, gB:2, gC:1)
@@ -516,9 +510,13 @@ class TestLargerIndex:
     def test_exon_intervals_shape_per_transcript(self, complex_index):
         t_df = complex_index.t_df
         expected_exon_counts = {
-            "tA1": 3, "tA2": 2, "tA3": 4,
-            "tB1": 2, "tB2": 3,
-            "tC1": 2, "tD1": 1,
+            "tA1": 3,
+            "tA2": 2,
+            "tA3": 4,
+            "tB1": 2,
+            "tB2": 3,
+            "tC1": 2,
+            "tD1": 1,
         }
         for _, row in t_df.iterrows():
             t_idx = row["t_index"]
@@ -559,9 +557,7 @@ class TestLargerIndex:
             t_id = row["t_id"]
             t_idx = int(row["t_index"])
             if t_id in ("tA1", "tA2", "tA3", "tC1"):
-                assert t_idx in merged, (
-                    f"{t_id} (t_idx={t_idx}) should overlap query 899-1100"
-                )
+                assert t_idx in merged, f"{t_id} (t_idx={t_idx}) should overlap query 899-1100"
 
     def test_intergenic_between_gene_clusters(self, complex_index):
         """Region 3500-3900 should be intergenic."""
@@ -572,9 +568,7 @@ class TestLargerIndex:
 
     def test_exon_interval_values_are_int32(self, complex_index):
         for t_idx, exons in complex_index._t_exon_intervals.items():
-            assert exons.dtype == np.int32, (
-                f"t_idx={t_idx}: expected int32, got {exons.dtype}"
-            )
+            assert exons.dtype == np.int32, f"t_idx={t_idx}: expected int32, got {exons.dtype}"
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -591,16 +585,14 @@ class TestEdgeCases:
         from conftest import build_test_index
 
         gtf = (
-            'chr1\ttest\texon\t100\t500\t.\t+\t.\t'
+            "chr1\ttest\texon\t100\t500\t.\t+\t.\t"
             'gene_id "g1"; transcript_id "t1"; gene_name "G1"; '
             'gene_type "protein_coding"; tag "basic";\n'
-            'chr1\ttest\texon\t1000\t1500\t.\t-\t.\t'
+            "chr1\ttest\texon\t1000\t1500\t.\t-\t.\t"
             'gene_id "g2"; transcript_id "t2"; gene_name "G2"; '
             'gene_type "lncRNA";\n'
         )
-        return build_test_index(
-            tmp_path_factory, gtf, genome_size=2000, name="single_exon_idx"
-        )
+        return build_test_index(tmp_path_factory, gtf, genome_size=2000, name="single_exon_idx")
 
     def test_single_exon_loads_ok(self, single_exon_index):
         assert single_exon_index.num_transcripts == 2

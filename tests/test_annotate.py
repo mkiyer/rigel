@@ -50,14 +50,14 @@ VALID_ZF_VALUES = {
 
 def _assert_zf_invariants(zf: int) -> None:
     """Assert the 6 ZF invariants from docs/annotated_bam_fix/ZF_TAG_REDESIGN.md."""
-    is_resolved  = bool(zf & AF_RESOLVED)
-    is_mrna      = bool(zf & AF_MRNA_BIT)
-    is_gdna      = bool(zf & AF_GDNA_BIT)
-    is_nrna      = bool(zf & AF_NRNA_BIT)
-    is_synth     = bool(zf & AF_SYNTHETIC_BIT)
-    is_interg    = bool(zf & AF_INTERGENIC_BIT)
-    is_chim      = bool(zf & AF_CHIMERIC_BIT)
-    is_mm_drop   = bool(zf & AF_MULTIMAPPER_DROP_BIT)
+    is_resolved = bool(zf & AF_RESOLVED)
+    is_mrna = bool(zf & AF_MRNA_BIT)
+    is_gdna = bool(zf & AF_GDNA_BIT)
+    is_nrna = bool(zf & AF_NRNA_BIT)
+    is_synth = bool(zf & AF_SYNTHETIC_BIT)
+    is_interg = bool(zf & AF_INTERGENIC_BIT)
+    is_chim = bool(zf & AF_CHIMERIC_BIT)
+    is_mm_drop = bool(zf & AF_MULTIMAPPER_DROP_BIT)
 
     # 1: resolved XOR (chimeric OR mm_dropped) — every stamped record is
     #    exactly one or the other (unresolved sentinel ZF=0 also
@@ -68,26 +68,18 @@ def _assert_zf_invariants(zf: int) -> None:
     # 2: resolved -> exactly one pool bit
     if is_resolved:
         pool_count = int(is_mrna) + int(is_gdna) + int(is_nrna)
-        assert pool_count == 1, (
-            f"ZF={zf:#x}: resolved but {pool_count} pool bits set"
-        )
+        assert pool_count == 1, f"ZF={zf:#x}: resolved but {pool_count} pool bits set"
     else:
         # Pool bits are only meaningful when resolved
-        assert not (is_mrna or is_gdna or is_nrna), (
-            f"ZF={zf:#x}: pool bit set without is_resolved"
-        )
+        assert not (is_mrna or is_gdna or is_nrna), f"ZF={zf:#x}: pool bit set without is_resolved"
     # 3: synthetic -> nrna
     if is_synth:
         assert is_nrna, f"ZF={zf:#x}: is_synthetic set without is_nrna"
     # 4: intergenic -> resolved & gdna
     if is_interg:
-        assert is_resolved and is_gdna, (
-            f"ZF={zf:#x}: is_intergenic without resolved&gdna"
-        )
+        assert is_resolved and is_gdna, f"ZF={zf:#x}: is_intergenic without resolved&gdna"
     # 5: chimeric and mm_dropped mutually exclusive
-    assert not (is_chim and is_mm_drop), (
-        f"ZF={zf:#x}: chimeric AND mm_dropped both set"
-    )
+    assert not (is_chim and is_mm_drop), f"ZF={zf:#x}: chimeric AND mm_dropped both set"
     # 6: subtype bits only with their pool
     if is_synth:
         assert is_nrna, f"ZF={zf:#x}: synthetic subtype without nrna"
@@ -138,8 +130,15 @@ class TestAnnotationTable:
     def test_grow(self):
         tbl = AnnotationTable.create(2)
         for i in range(10):
-            tbl.add(frag_id=i, best_tid=i, best_gid=0, tx_flags=AF_MRNA,
-                    posterior=1.0, frag_class=0, n_candidates=1)
+            tbl.add(
+                frag_id=i,
+                best_tid=i,
+                best_gid=0,
+                tx_flags=AF_MRNA,
+                posterior=1.0,
+                frag_class=0,
+                n_candidates=1,
+            )
         assert tbl.size == 10
         assert tbl.capacity >= 10
         for i in range(10):
@@ -186,6 +185,7 @@ class TestAnnotationTable:
     def test_splice_type_label(self):
         """SpliceType codes convert to lowercase labels."""
         from rigel.splice import SpliceType
+
         for st in SpliceType:
             label = _splice_type_label(int(st))
             assert label == st.name.lower()
@@ -208,25 +208,34 @@ class TestAnnotatedBamIntegration:
     @pytest.fixture
     def scenario(self, tmp_path):
         from rigel.sim import Scenario
+
         sc = Scenario(
-            "annot_bam_test", genome_length=8000, seed=42,
+            "annot_bam_test",
+            genome_length=8000,
+            seed=42,
             work_dir=tmp_path / "annot_bam",
         )
         # Spliced gene for strand training + deterministic unambig
-        sc.add_gene("g1", "+", [
-            {"t_id": "t1",
-             "exons": [(500, 1000), (1500, 2000)],
-             "abundance": 80},
-        ])
+        sc.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(500, 1000), (1500, 2000)], "abundance": 80},
+            ],
+        )
         # Second gene for EM-routed isoform ambiguity
-        sc.add_gene("g2", "+", [
-            {"t_id": "t2",
-             "exons": [(3000, 3500), (4000, 4500)],
-             "abundance": 40},
-            {"t_id": "t3",
-             "exons": [(3000, 3500), (4000, 4500), (5000, 5500)],
-             "abundance": 40},
-        ])
+        sc.add_gene(
+            "g2",
+            "+",
+            [
+                {"t_id": "t2", "exons": [(3000, 3500), (4000, 4500)], "abundance": 40},
+                {
+                    "t_id": "t3",
+                    "exons": [(3000, 3500), (4000, 4500), (5000, 5500)],
+                    "abundance": 40,
+                },
+            ],
+        )
         yield sc
         sc.cleanup()
 
@@ -238,11 +247,17 @@ class TestAnnotatedBamIntegration:
         from rigel.pipeline import run_pipeline
 
         sim_config = ReadSimConfig(
-            frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-            read_length=100, strand_specificity=1.0, seed=42,
+            frag_mean=200,
+            frag_std=30,
+            frag_min=80,
+            frag_max=450,
+            read_length=100,
+            strand_specificity=1.0,
+            seed=42,
         )
         result = scenario.build(
-            n_fragments=200, sim_config=sim_config,
+            n_fragments=200,
+            sim_config=sim_config,
         )
 
         annotated_bam = tmp_path / "annotated.bam"
@@ -268,9 +283,7 @@ class TestAnnotatedBamIntegration:
         for rec in records:
             tags_present = {t[0] for t in rec.get_tags()}
             missing = expected_tags - tags_present
-            assert not missing, (
-                f"Record {rec.query_name} missing tags: {missing}"
-            )
+            assert not missing, f"Record {rec.query_name} missing tags: {missing}"
 
         # Check tag value types
         rec = records[0]
@@ -292,8 +305,7 @@ class TestAnnotatedBamIntegration:
             _assert_zf_invariants(zf)
 
         # ZC values: pre-EM ambiguity enum + "." for non-EM records.
-        valid_zc = {"unambig", "ambig_same_strand", "ambig_opp_strand",
-                    "multimapper", "."}
+        valid_zc = {"unambig", "ambig_same_strand", "ambig_opp_strand", "multimapper", "."}
         for rec in records:
             zc = rec.get_tag("ZC")
             assert zc in valid_zc, f"Unexpected ZC value: {zc!r}"
@@ -308,9 +320,7 @@ class TestAnnotatedBamIntegration:
             assert 0.0 <= w <= 1.0 + 1e-6, f"ZW out of range: {w}"
 
         # At least some records should have transcript assignment (ZF & 1 set)
-        transcript_records = [
-            r for r in records if (r.get_tag("ZF") & AF_RESOLVED)
-        ]
+        transcript_records = [r for r in records if (r.get_tag("ZF") & AF_RESOLVED)]
         assert len(transcript_records) > 0, "No resolved assignments found"
 
     def test_annotated_bam_counts_match(self, scenario, tmp_path):
@@ -320,11 +330,17 @@ class TestAnnotatedBamIntegration:
         from rigel.pipeline import run_pipeline
 
         sim_config = ReadSimConfig(
-            frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-            read_length=100, strand_specificity=1.0, seed=42,
+            frag_mean=200,
+            frag_std=30,
+            frag_min=80,
+            frag_max=450,
+            read_length=100,
+            strand_specificity=1.0,
+            seed=42,
         )
         result = scenario.build(
-            n_fragments=200, sim_config=sim_config,
+            n_fragments=200,
+            sim_config=sim_config,
         )
 
         base_config = PipelineConfig(
@@ -339,9 +355,12 @@ class TestAnnotatedBamIntegration:
         # Run with annotation
         annotated_bam = tmp_path / "annotated.bam"
         from dataclasses import replace as _replace
+
         annot_config = _replace(base_config, annotated_bam_path=annotated_bam)
         pr2 = run_pipeline(
-            result.bam_path, result.index, config=annot_config,
+            result.bam_path,
+            result.index,
+            config=annot_config,
         )
         counts2 = pr2.estimator.get_counts_df(result.index)
 
@@ -353,9 +372,7 @@ class TestAnnotatedBamIntegration:
             err_msg="Annotation mode changed count totals",
         )
 
-    def test_annotated_bam_preserves_records_and_collation(
-        self, scenario, tmp_path
-    ):
+    def test_annotated_bam_preserves_records_and_collation(self, scenario, tmp_path):
         """Annotated BAM MUST contain exactly the same records as input
         and MUST remain collated (qnames grouped contiguously).
 
@@ -370,8 +387,13 @@ class TestAnnotatedBamIntegration:
         from rigel.pipeline import run_pipeline
 
         sim_config = ReadSimConfig(
-            frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-            read_length=100, strand_specificity=1.0, seed=42,
+            frag_mean=200,
+            frag_std=30,
+            frag_min=80,
+            frag_max=450,
+            read_length=100,
+            strand_specificity=1.0,
+            seed=42,
         )
         result = scenario.build(n_fragments=500, sim_config=sim_config)
 
@@ -428,13 +450,10 @@ class TestAnnotatedBamIntegration:
         n_unique_qnames = len({r[0] for r in out_records})
         n_runs = _qname_runs(out_records)
         assert n_runs == n_unique_qnames, (
-            f"Annotated BAM is not collated: "
-            f"{n_runs} qname runs vs {n_unique_qnames} unique qnames"
+            f"Annotated BAM is not collated: {n_runs} qname runs vs {n_unique_qnames} unique qnames"
         )
 
-    def test_annotated_bam_preserves_records_with_multimappers(
-        self, scenario, tmp_path
-    ):
+    def test_annotated_bam_preserves_records_with_multimappers(self, scenario, tmp_path):
         """Record-identity preservation under NH>1 multimappers.
 
         Simulates a standard scenario, then fabricates NH=2 cross-mapped
@@ -450,8 +469,13 @@ class TestAnnotatedBamIntegration:
         from rigel.pipeline import run_pipeline
 
         sim_config = ReadSimConfig(
-            frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-            read_length=100, strand_specificity=1.0, seed=42,
+            frag_mean=200,
+            frag_std=30,
+            frag_min=80,
+            frag_max=450,
+            read_length=100,
+            strand_specificity=1.0,
+            seed=42,
         )
         result = scenario.build(n_fragments=200, sim_config=sim_config)
 
@@ -467,6 +491,7 @@ class TestAnnotatedBamIntegration:
         # Group by qname (input is collated) and set NH=2 on every
         # record of a subset, then append a secondary copy per record.
         from collections import defaultdict
+
         by_qname = defaultdict(list)
         for r in records:
             by_qname[r.query_name].append(r)
@@ -486,18 +511,14 @@ class TestAnnotatedBamIntegration:
                 for r in recs:
                     sec = r.__copy__()
                     sec.flag = r.flag | 0x100  # mark secondary
-                    sec.reference_start = max(
-                        0, r.reference_start + 500
-                    )
+                    sec.reference_start = max(0, r.reference_start + 500)
                     sec.set_tag("NH", 2)
                     new_group.append(sec)
                 augmented_records.extend(new_group)
             else:
                 augmented_records.extend(recs)
 
-        with pysam.AlignmentFile(
-            str(augmented), "wb", header=header
-        ) as fout:
+        with pysam.AlignmentFile(str(augmented), "wb", header=header) as fout:
             for r in augmented_records:
                 fout.write(r)
 
@@ -508,7 +529,8 @@ class TestAnnotatedBamIntegration:
             config=PipelineConfig(
                 em=EMConfig(seed=42),
                 scan=BamScanConfig(
-                    sj_strand_tag="ts", include_multimap=True,
+                    sj_strand_tag="ts",
+                    include_multimap=True,
                 ),
                 annotated_bam_path=annotated_bam,
             ),
@@ -528,8 +550,7 @@ class TestAnnotatedBamIntegration:
             out_keys = [_record_key(r) for r in fout.fetch(until_eof=True)]
 
         assert len(out_keys) == len(in_keys), (
-            f"Multimapper record count changed: "
-            f"in={len(in_keys)} out={len(out_keys)}"
+            f"Multimapper record count changed: in={len(in_keys)} out={len(out_keys)}"
         )
         assert Counter(in_keys) == Counter(out_keys), (
             "Multimapper annotated BAM does not preserve input records "
@@ -564,8 +585,13 @@ class TestAnnotatedBamIntegration:
         from rigel.pipeline import run_pipeline
 
         sim_config = ReadSimConfig(
-            frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-            read_length=100, strand_specificity=1.0, seed=42,
+            frag_mean=200,
+            frag_std=30,
+            frag_min=80,
+            frag_max=450,
+            read_length=100,
+            strand_specificity=1.0,
+            seed=42,
         )
         result = scenario.build(n_fragments=200, sim_config=sim_config)
 
@@ -589,16 +615,12 @@ class TestAnnotatedBamIntegration:
         for rec in records:
             tags = {t[0] for t in rec.get_tags()}
             if "ZT" in tags:  # record was annotated by rigel
-                assert "ZB" in tags, (
-                    f"Record {rec.query_name} missing ZB tag"
-                )
+                assert "ZB" in tags, f"Record {rec.query_name} missing ZB tag"
                 zb = rec.get_tag("ZB")
                 assert isinstance(zb, int)
                 assert zb >= 0
                 # No blacklist loaded in this scenario → ZB must be 0
-                assert zb == 0, (
-                    f"ZB={zb} with no blacklist loaded (expected 0)"
-                )
+                assert zb == 0, f"ZB={zb} with no blacklist loaded (expected 0)"
 
     def test_zb_tag_marks_blacklisted_junctions(self, scenario, tmp_path):
         """Injecting a targeted blacklist entry produces ZB>=1 on the
@@ -614,8 +636,13 @@ class TestAnnotatedBamIntegration:
         from rigel.pipeline import run_pipeline
 
         sim_config = ReadSimConfig(
-            frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-            read_length=100, strand_specificity=1.0, seed=42,
+            frag_mean=200,
+            frag_std=30,
+            frag_min=80,
+            frag_max=450,
+            read_length=100,
+            strand_specificity=1.0,
+            seed=42,
         )
         result = scenario.build(n_fragments=500, sim_config=sim_config)
 
@@ -623,13 +650,15 @@ class TestAnnotatedBamIntegration:
         # with huge anchor envelopes so every spliced read over it is
         # dropped.  The scenario's ref name equals scenario.name by default.
         ref = scenario.ref_name
-        bl_df = pd.DataFrame({
-            "ref": [ref],
-            "start": pd.array([1000], dtype="int32"),
-            "end": pd.array([1500], dtype="int32"),
-            "max_anchor_left": pd.array([1000], dtype="int32"),
-            "max_anchor_right": pd.array([1000], dtype="int32"),
-        })
+        bl_df = pd.DataFrame(
+            {
+                "ref": [ref],
+                "start": pd.array([1000], dtype="int32"),
+                "end": pd.array([1500], dtype="int32"),
+                "max_anchor_left": pd.array([1000], dtype="int32"),
+                "max_anchor_right": pd.array([1000], dtype="int32"),
+            }
+        )
         bl_df.to_feather(result.index_dir / SJ_BLACKLIST_FEATHER)
 
         # Reload so the C++ resolver picks up the new blacklist
@@ -649,25 +678,19 @@ class TestAnnotatedBamIntegration:
         with pysam.AlignmentFile(str(annotated_bam), "rb") as fout:
             records = list(fout.fetch(until_eof=True))
 
-        zb_values = [
-            rec.get_tag("ZB") for rec in records if rec.has_tag("ZB")
-        ]
+        zb_values = [rec.get_tag("ZB") for rec in records if rec.has_tag("ZB")]
         n_marked = sum(1 for v in zb_values if v > 0)
         zb_sum = sum(zb_values)
 
         assert n_marked > 0, (
-            "Expected at least one record with ZB>0 after injecting a "
-            "blacklist, got none."
+            "Expected at least one record with ZB>0 after injecting a blacklist, got none."
         )
 
         # Pass-1 / Pass-2 parity: the sum of ZB over the annotated BAM
         # equals the scanner's n_sj_blacklisted stat.
-        assert pr.stats.n_sj_blacklisted > 0, (
-            "Pass-1 stat n_sj_blacklisted should be > 0"
-        )
+        assert pr.stats.n_sj_blacklisted > 0, "Pass-1 stat n_sj_blacklisted should be > 0"
         assert zb_sum == pr.stats.n_sj_blacklisted, (
-            f"ZB sum ({zb_sum}) != Pass-1 n_sj_blacklisted "
-            f"({pr.stats.n_sj_blacklisted})"
+            f"ZB sum ({zb_sum}) != Pass-1 n_sj_blacklisted ({pr.stats.n_sj_blacklisted})"
         )
 
     def test_zb_tag_absent_on_filtered_passthrough(self, scenario, tmp_path):
@@ -681,8 +704,13 @@ class TestAnnotatedBamIntegration:
         from rigel.pipeline import run_pipeline
 
         sim_config = ReadSimConfig(
-            frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-            read_length=100, strand_specificity=1.0, seed=42,
+            frag_mean=200,
+            frag_std=30,
+            frag_min=80,
+            frag_max=450,
+            read_length=100,
+            strand_specificity=1.0,
+            seed=42,
         )
         result = scenario.build(n_fragments=100, sim_config=sim_config)
 
@@ -697,9 +725,7 @@ class TestAnnotatedBamIntegration:
         qc.flag = qc.flag | 0x200  # BAM_FQCFAIL
         # Prepend so it is clearly outside any existing qname group
         records.insert(0, qc)
-        with pysam.AlignmentFile(
-            str(augmented), "wb", header=header
-        ) as fout:
+        with pysam.AlignmentFile(str(augmented), "wb", header=header) as fout:
             for r in records:
                 fout.write(r)
 
@@ -715,27 +741,18 @@ class TestAnnotatedBamIntegration:
         )
 
         with pysam.AlignmentFile(str(annotated_bam), "rb") as fout:
-            qc_out = [
-                r for r in fout.fetch(until_eof=True)
-                if r.query_name == "QCFAIL_SENTINEL"
-            ]
-        assert len(qc_out) == 1, (
-            f"QCFAIL sentinel not preserved: found {len(qc_out)} copies"
-        )
+            qc_out = [r for r in fout.fetch(until_eof=True) if r.query_name == "QCFAIL_SENTINEL"]
+        assert len(qc_out) == 1, f"QCFAIL sentinel not preserved: found {len(qc_out)} copies"
         tags = {t[0] for t in qc_out[0].get_tags()}
         # Filtered pass-through records get no rigel annotations
         for tag in ("ZT", "ZG", "ZF", "ZB"):
-            assert tag not in tags, (
-                f"Filtered pass-through record carries {tag}; should not"
-            )
+            assert tag not in tags, f"Filtered pass-through record carries {tag}; should not"
 
     # =================================================================
     # ZF redesign — outcome-specific stamping tests
     # =================================================================
 
-    def test_zf_invariants_and_zc_domain_hold_over_fixture(
-        self, scenario, tmp_path
-    ):
+    def test_zf_invariants_and_zc_domain_hold_over_fixture(self, scenario, tmp_path):
         """Every annotated record satisfies the ZF invariants, and ZC is
         restricted to the new input-ambiguity enum (no ``intergenic`` /
         ``chimeric`` strings in ZC).
@@ -746,8 +763,13 @@ class TestAnnotatedBamIntegration:
         from rigel.pipeline import run_pipeline
 
         sim_config = ReadSimConfig(
-            frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-            read_length=100, strand_specificity=1.0, seed=42,
+            frag_mean=200,
+            frag_std=30,
+            frag_min=80,
+            frag_max=450,
+            read_length=100,
+            strand_specificity=1.0,
+            seed=42,
         )
         result = scenario.build(n_fragments=300, sim_config=sim_config)
 
@@ -762,22 +784,17 @@ class TestAnnotatedBamIntegration:
             ),
         )
 
-        allowed_zc = {"unambig", "ambig_same_strand", "ambig_opp_strand",
-                      "multimapper", "."}
+        allowed_zc = {"unambig", "ambig_same_strand", "ambig_opp_strand", "multimapper", "."}
 
         with pysam.AlignmentFile(str(annotated_bam), "rb") as fout:
             for rec in fout.fetch(until_eof=True):
                 if not rec.has_tag("ZF"):
                     continue  # filtered pass-through
                 zf = rec.get_tag("ZF")
-                assert zf in VALID_ZF_VALUES, (
-                    f"Unexpected ZF={zf:#x} on {rec.query_name}"
-                )
+                assert zf in VALID_ZF_VALUES, f"Unexpected ZF={zf:#x} on {rec.query_name}"
                 _assert_zf_invariants(zf)
                 zc = rec.get_tag("ZC")
-                assert zc in allowed_zc, (
-                    f"ZC={zc!r} not in redesign enum on {rec.query_name}"
-                )
+                assert zc in allowed_zc, f"ZC={zc!r} not in redesign enum on {rec.query_name}"
                 # ZC retains no legacy terminal-outcome strings
                 assert zc not in ("intergenic", "chimeric")
 
@@ -792,8 +809,13 @@ class TestAnnotatedBamIntegration:
         from rigel.pipeline import run_pipeline
 
         sim_config = ReadSimConfig(
-            frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-            read_length=100, strand_specificity=1.0, seed=42,
+            frag_mean=200,
+            frag_std=30,
+            frag_min=80,
+            frag_max=450,
+            read_length=100,
+            strand_specificity=1.0,
+            seed=42,
         )
         result = scenario.build(n_fragments=200, sim_config=sim_config)
 
@@ -808,11 +830,13 @@ class TestAnnotatedBamIntegration:
 
         # Find an R1/R2 pair we can relocate.
         from collections import defaultdict
+
         by_qname = defaultdict(list)
         for r in records:
             by_qname[r.query_name].append(r)
         donor_qname = next(
-            qn for qn, rs in by_qname.items()
+            qn
+            for qn, rs in by_qname.items()
             if len(rs) >= 2 and not any(r.is_secondary for r in rs)
         )
         donor = by_qname[donor_qname]
@@ -831,9 +855,7 @@ class TestAnnotatedBamIntegration:
         # Place the sentinel at the front so it's clearly separated.
         records = new_pair + records
 
-        with pysam.AlignmentFile(
-            str(augmented), "wb", header=header
-        ) as fout:
+        with pysam.AlignmentFile(str(augmented), "wb", header=header) as fout:
             for r in records:
                 fout.write(r)
 
@@ -850,8 +872,7 @@ class TestAnnotatedBamIntegration:
 
         with pysam.AlignmentFile(str(annotated_bam), "rb") as fout:
             sentinel_out = [
-                r for r in fout.fetch(until_eof=True)
-                if r.query_name == "INTERGENIC_SENTINEL"
+                r for r in fout.fetch(until_eof=True) if r.query_name == "INTERGENIC_SENTINEL"
             ]
 
         assert len(sentinel_out) >= 1, "Intergenic sentinel lost in output"
@@ -863,14 +884,10 @@ class TestAnnotatedBamIntegration:
             )
             _assert_zf_invariants(zf)
             assert zf & AF_GDNA_BIT, "Intergenic should set is_gdna bit"
-            assert zf & AF_INTERGENIC_BIT, (
-                "Intergenic should set is_intergenic bit"
-            )
+            assert zf & AF_INTERGENIC_BIT, "Intergenic should set is_intergenic bit"
             assert rec.get_tag("ZC") == "."
 
-    def test_zf_multimapper_dropped_without_include_multimap(
-        self, scenario, tmp_path
-    ):
+    def test_zf_multimapper_dropped_without_include_multimap(self, scenario, tmp_path):
         """When --no-multimap drops a multimapper, ZF is
         AF_MULTIMAPPER_DROP and ZC is '.'.
         """
@@ -881,8 +898,13 @@ class TestAnnotatedBamIntegration:
         from rigel.pipeline import run_pipeline
 
         sim_config = ReadSimConfig(
-            frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-            read_length=100, strand_specificity=1.0, seed=42,
+            frag_mean=200,
+            frag_std=30,
+            frag_min=80,
+            frag_max=450,
+            read_length=100,
+            strand_specificity=1.0,
+            seed=42,
         )
         result = scenario.build(n_fragments=100, sim_config=sim_config)
 
@@ -895,9 +917,7 @@ class TestAnnotatedBamIntegration:
         by_qname = defaultdict(list)
         for r in records:
             by_qname[r.query_name].append(r)
-        victim_qname = next(
-            qn for qn, rs in by_qname.items() if len(rs) >= 2
-        )
+        victim_qname = next(qn for qn, rs in by_qname.items() if len(rs) >= 2)
         out_records = []
         for qn, recs in by_qname.items():
             if qn == victim_qname:
@@ -915,9 +935,7 @@ class TestAnnotatedBamIntegration:
             else:
                 out_records.extend(recs)
 
-        with pysam.AlignmentFile(
-            str(augmented), "wb", header=header
-        ) as fout:
+        with pysam.AlignmentFile(str(augmented), "wb", header=header) as fout:
             for r in out_records:
                 fout.write(r)
 
@@ -928,21 +946,17 @@ class TestAnnotatedBamIntegration:
             config=PipelineConfig(
                 em=EMConfig(seed=42),
                 scan=BamScanConfig(
-                    sj_strand_tag="ts", include_multimap=False,
+                    sj_strand_tag="ts",
+                    include_multimap=False,
                 ),
                 annotated_bam_path=annotated_bam,
             ),
         )
 
         with pysam.AlignmentFile(str(annotated_bam), "rb") as fout:
-            victim_out = [
-                r for r in fout.fetch(until_eof=True)
-                if r.query_name == victim_qname
-            ]
+            victim_out = [r for r in fout.fetch(until_eof=True) if r.query_name == victim_qname]
 
-        assert len(victim_out) >= 1, (
-            "Dropped-multimapper qname lost from output"
-        )
+        assert len(victim_out) >= 1, "Dropped-multimapper qname lost from output"
         for rec in victim_out:
             zf = rec.get_tag("ZF")
             assert zf == AF_MULTIMAPPER_DROP, (
@@ -952,4 +966,3 @@ class TestAnnotatedBamIntegration:
             _assert_zf_invariants(zf)
             assert not (zf & AF_RESOLVED)
             assert rec.get_tag("ZC") == "."
-

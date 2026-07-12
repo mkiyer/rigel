@@ -113,6 +113,7 @@ def _run_diagnostic(
     bench = run_benchmark(result, pr, scenario_name=label or "gdna_diag")
     return bench, pr, result
 
+
 class TestGDNADiagnosis:
     """Regression: a pure-mRNA library must not siphon mRNA into gDNA."""
 

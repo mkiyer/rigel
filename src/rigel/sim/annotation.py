@@ -150,22 +150,19 @@ class GeneBuilder:
                 )
             if e.start >= e.end:
                 raise ValueError(
-                    f"Transcript {t_id} exon {i} has start >= end: "
-                    f"({e.start},{e.end})"
+                    f"Transcript {t_id} exon {i} has start >= end: ({e.start},{e.end})"
                 )
         for i in range(1, len(exons)):
             if exons[i].start < exons[i - 1].end:
                 raise ValueError(
-                    f"Transcript {t_id} exons {i-1} and {i} overlap: "
-                    f"({exons[i-1].start},{exons[i-1].end}) vs "
+                    f"Transcript {t_id} exons {i - 1} and {i} overlap: "
+                    f"({exons[i - 1].start},{exons[i - 1].end}) vs "
                     f"({exons[i].start},{exons[i].end})"
                 )
 
     # -- Splice motif injection -----------------------------------------------
 
-    def _inject_splice_motif(
-        self, intron_start: int, intron_end: int, strand: Strand
-    ) -> None:
+    def _inject_splice_motif(self, intron_start: int, intron_end: int, strand: Strand) -> None:
         """Edit the genome to place canonical splice-site dinucleotides.
 
         For a positive-strand intron (GT-AG):
@@ -179,9 +176,7 @@ class GeneBuilder:
         Delegates the placement to the shared :func:`place_intron_motif`; raises on an
         intron < 4 bp (the builder contract — a construction error).
         """
-        place_intron_motif(
-            self.genome.edit, intron_start, intron_end, strand, on_short="raise"
-        )
+        place_intron_motif(self.genome.edit, intron_start, intron_end, strand, on_short="raise")
 
     # -- Output ---------------------------------------------------------------
 

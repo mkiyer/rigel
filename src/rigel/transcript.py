@@ -72,22 +72,22 @@ class Transcript:
     """
 
     @classmethod
-    def from_gtf(cls, feature) -> 'Transcript':
-        '''Create a Transcript object from a GTF feature'''
+    def from_gtf(cls, feature) -> "Transcript":
+        """Create a Transcript object from a GTF feature"""
         t = cls()
-        if not hasattr(feature, 'seqname'):
+        if not hasattr(feature, "seqname"):
             raise AttributeError("GTF feature missing seqname")
         t.ref = feature.seqname
-        t.strand = Strand.from_str(getattr(feature, 'strand', '.'))
-        t.abundance = getattr(feature, 'score', None)
+        t.strand = Strand.from_str(getattr(feature, "strand", "."))
+        t.abundance = getattr(feature, "score", None)
 
-        attrs = getattr(feature, 'attrs', None) or {}
-        t.t_id = _first_attr(attrs.get('transcript_id'))
-        t.g_id = _first_attr(attrs.get('gene_id'))
-        t.g_name = _first_attr(attrs.get('gene_name'))
-        t.g_type = _first_attr(attrs.get('gene_type'))
+        attrs = getattr(feature, "attrs", None) or {}
+        t.t_id = _first_attr(attrs.get("transcript_id"))
+        t.g_id = _first_attr(attrs.get("gene_id"))
+        t.g_name = _first_attr(attrs.get("gene_name"))
+        t.g_type = _first_attr(attrs.get("gene_type"))
         # gencode specific tags
-        tags = getattr(feature, 'tags', set()) or set()
+        tags = getattr(feature, "tags", set()) or set()
         t.is_basic = "basic" in tags
         t.is_mane = ("MANE_Select" in tags) or ("MANE_Plus_Clinical" in tags)
         t.is_ccds = "CCDS" in tags
@@ -103,7 +103,6 @@ class Transcript:
         """End coordinate of the last exon (0 if empty)."""
         return self.exons[-1].end if self.exons else 0
 
-
     def compute_length(self):
         if self.length is not None:
             return self.length
@@ -112,47 +111,47 @@ class Transcript:
 
     def introns(self):
         for i in range(1, len(self.exons)):
-            yield self.exons[i-1].end, self.exons[i].start
+            yield self.exons[i - 1].end, self.exons[i].start
 
     def to_dict(self):
         return {
-            'ref': self.ref,
-            'start': self.start,
-            'end': self.end,
-            'strand': self.strand,
-            'length': self.length,
-            't_id': self.t_id,
-            'g_id': self.g_id,
-            't_index': self.t_index,
-            'g_index': self.g_index,
-            'g_name': self.g_name,
-            'g_type': self.g_type,
-            'is_basic': self.is_basic,
-            'is_mane': self.is_mane,
-            'is_ccds': self.is_ccds,
-            'n_exons': len(self.exons),
-            'is_nrna': self.is_nrna,
-            'is_synthetic': self.is_synthetic,
-            'nrna_t_index': self.nrna_t_index,
-            'nrna_n_contributors': self.nrna_n_contributors,
-            'abundance': self.abundance,
-            'nrna_abundance': self.nrna_abundance,
+            "ref": self.ref,
+            "start": self.start,
+            "end": self.end,
+            "strand": self.strand,
+            "length": self.length,
+            "t_id": self.t_id,
+            "g_id": self.g_id,
+            "t_index": self.t_index,
+            "g_index": self.g_index,
+            "g_name": self.g_name,
+            "g_type": self.g_type,
+            "is_basic": self.is_basic,
+            "is_mane": self.is_mane,
+            "is_ccds": self.is_ccds,
+            "n_exons": len(self.exons),
+            "is_nrna": self.is_nrna,
+            "is_synthetic": self.is_synthetic,
+            "nrna_t_index": self.nrna_t_index,
+            "nrna_n_contributors": self.nrna_n_contributors,
+            "abundance": self.abundance,
+            "nrna_abundance": self.nrna_abundance,
         }
-    
+
     @staticmethod
     def read_gtf(
         gtf_file: str,
         *,
         parse_mode: Literal["strict", "warn-skip"] = "strict",
-    ) -> list['Transcript']:
+    ) -> list["Transcript"]:
         """Read GTF and construct list of Transcript objects."""
         transcripts: dict[str, Transcript] = {}
-        logging.debug('[Transcript] Reading GTF file: %s', gtf_file)
+        logging.debug("[Transcript] Reading GTF file: %s", gtf_file)
         num_lines = 0
         for f in GTFRecord.parse_file(gtf_file, parse_mode=parse_mode):
-            if f.feature != 'exon':
+            if f.feature != "exon":
                 continue
-            t_id = f.attrs['transcript_id']
+            t_id = f.attrs["transcript_id"]
             if t_id not in transcripts:
                 t = Transcript.from_gtf(f)
                 transcripts[t_id] = t
@@ -161,10 +160,10 @@ class Transcript:
             t.exons.append(Interval(f.start, f.end))
             num_lines += 1
             if num_lines % _GTF_LOG_INTERVAL == 0:
-                logging.debug('[Transcript] Read %d GTF features', num_lines)
-        logging.debug('[Transcript] Done reading GTF: %d features', num_lines)
+                logging.debug("[Transcript] Read %d GTF features", num_lines)
+        logging.debug("[Transcript] Done reading GTF: %d features", num_lines)
 
-        logging.debug('[Transcript] Processing transcripts')
+        logging.debug("[Transcript] Processing transcripts")
         for t in transcripts.values():
             t.exons.sort()
             t.compute_length()
@@ -174,5 +173,5 @@ class Transcript:
             transcripts.values(),
             key=lambda t: (t.ref, t.start, t.end, t.strand),
         )
-        logging.debug('[Transcript] Read %d transcripts', len(sorted_transcripts))
+        logging.debug("[Transcript] Read %d transcripts", len(sorted_transcripts))
         return sorted_transcripts

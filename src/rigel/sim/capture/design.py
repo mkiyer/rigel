@@ -185,20 +185,22 @@ def _bed12_row_from_blocks(
     chrom_end = max(block_end for _, block_end in blocks)
     block_sizes = [block_end - block_start for block_start, block_end in blocks]
     block_starts = [block_start - chrom_start for block_start, _ in blocks]
-    return "\t".join([
-        str(ref),
-        str(chrom_start),
-        str(chrom_end),
-        name,
-        "0",
-        strand.to_str(),
-        str(chrom_start),
-        str(chrom_end),
-        "0",
-        str(len(blocks)),
-        ",".join(str(size) for size in block_sizes),
-        ",".join(str(offset) for offset in block_starts),
-    ])
+    return "\t".join(
+        [
+            str(ref),
+            str(chrom_start),
+            str(chrom_end),
+            name,
+            "0",
+            strand.to_str(),
+            str(chrom_start),
+            str(chrom_end),
+            "0",
+            str(len(blocks)),
+            ",".join(str(size) for size in block_sizes),
+            ",".join(str(offset) for offset in block_starts),
+        ]
+    )
 
 
 def write_random_capture_probes(
@@ -297,11 +299,13 @@ def write_random_capture_probes(
                     continue
                 handle.write(f"{transcript.t_id}\t{start}\t{end}\n")
                 bed_handle.write(f"{bed_row}\n")
-                existing_probes.append(DesignedGenomicProbe(
-                    str(transcript.ref),
-                    transcript.strand,
-                    tuple(blocks),
-                ))
+                existing_probes.append(
+                    DesignedGenomicProbe(
+                        str(transcript.ref),
+                        transcript.strand,
+                        tuple(blocks),
+                    )
+                )
 
     return CaptureProbeDesignResult(
         path,

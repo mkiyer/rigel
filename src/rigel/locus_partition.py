@@ -71,9 +71,7 @@ def partition_and_free(
     locus_units = [locus.unit_indices for locus in multi_loci]
 
     # ---- Build per-locus CSR offsets ----
-    offsets_list = build_partition_offsets(
-        em_data.offsets, locus_units, n_loci
-    )
+    offsets_list = build_partition_offsets(em_data.offsets, locus_units, n_loci)
 
     # ---- Scatter per-candidate arrays (largest first) ----
     # g_offsets must stay alive during this phase.

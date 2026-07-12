@@ -130,7 +130,7 @@ def _length_stats(length_counts: Counter[int]) -> dict[str, float | int | None]:
     return {
         "n": n,
         "mean": mean,
-        "std": var ** 0.5,
+        "std": var**0.5,
         "min": int(lengths[0]),
         "max": int(lengths[-1]),
     }
@@ -201,18 +201,20 @@ def summarize_post_capture_truth(
         mrna_count = int(mrna_by_tx.get(transcript_id, 0))
         nrna_count = int(nrna_by_tx.get(transcript_id, 0))
         total_count = mrna_count + nrna_count
-        transcript_rows.append({
-            **meta,
-            "post_capture_mrna_fragments": mrna_count,
-            "post_capture_nrna_fragments": nrna_count,
-            "post_capture_total_rna_fragments": total_count,
-            "mrna_abundance": float(mrna_count),
-            "nrna_abundance": float(nrna_count),
-            "total_rna": float(total_count),
-            "observed_mrna_fragments": mrna_count,
-            "observed_nrna_fragments": nrna_count,
-            "observed_total_rna_fragments": total_count,
-        })
+        transcript_rows.append(
+            {
+                **meta,
+                "post_capture_mrna_fragments": mrna_count,
+                "post_capture_nrna_fragments": nrna_count,
+                "post_capture_total_rna_fragments": total_count,
+                "mrna_abundance": float(mrna_count),
+                "nrna_abundance": float(nrna_count),
+                "total_rna": float(total_count),
+                "observed_mrna_fragments": mrna_count,
+                "observed_nrna_fragments": nrna_count,
+                "observed_total_rna_fragments": total_count,
+            }
+        )
 
     return {
         "transcript_rows": transcript_rows,
@@ -220,9 +222,7 @@ def summarize_post_capture_truth(
             kind: int(origin_counts.get(kind, 0)) for kind in ("mrna", "nrna", "gdna")
         },
         "fragment_length_counts": length_counts,
-        "fragment_lengths": {
-            kind: _length_stats(counts) for kind, counts in length_counts.items()
-        },
+        "fragment_lengths": {kind: _length_stats(counts) for kind, counts in length_counts.items()},
     }
 
 

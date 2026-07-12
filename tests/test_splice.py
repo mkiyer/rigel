@@ -112,7 +112,8 @@ class TestColumnSubsets:
 
     def test_spliced_cols_match_enum(self):
         expected = tuple(
-            c.value for c in SpliceStrandCol
+            c.value
+            for c in SpliceStrandCol
             if c.category in (SpliceType.SPLICED_ANNOT, SpliceType.SPLICED_UNANNOT)
         )
         assert SPLICED_COLS == expected

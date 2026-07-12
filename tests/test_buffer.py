@@ -348,9 +348,7 @@ class TestFragmentBufferBasic:
 
     def test_many_fragments_chunking(self, mini_index):
         """Buffer should create multiple chunks when chunk_size is exceeded."""
-        buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr, chunk_size=10
-        )
+        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=10)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         for i in range(25):
             buf.append(r, frag_id=i)
@@ -530,13 +528,9 @@ class TestFragmentClasses:
 
     def test_mixed_classes(self, mini_index):
         """Multiple fragment classes in one chunk."""
-        r_unambig = _resolve(
-            mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)]
-        )
+        r_unambig = _resolve(mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)])
         r_iso = _resolve(mini_index, [_exon("chr1", 120, 180)])
-        r_mm = _resolve(
-            mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)]
-        )
+        r_mm = _resolve(mini_index, [_exon("chr1", 1020, 1080, Strand.NEG)])
         r_mm.num_hits = 2
 
         buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
@@ -803,9 +797,7 @@ class TestDiskSpill:
 
 class TestBufferSummary:
     def test_summary_structure(self, mini_index):
-        buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100
-        )
+        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         for i in range(150):
             buf.append(r, frag_id=i)
@@ -852,9 +844,7 @@ class TestBufferSummary:
 
 class TestIterChunks:
     def test_iter_chunks_yields_correct_count(self, mini_index):
-        buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr, chunk_size=10
-        )
+        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=10)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         for i in range(25):
             buf.append(r, frag_id=i)
@@ -866,9 +856,7 @@ class TestIterChunks:
         assert total == 25
 
     def test_iter_chunks_getitem(self, mini_index):
-        buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100
-        )
+        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         for i in range(5):
             buf.append(r, frag_id=i)
@@ -882,9 +870,7 @@ class TestIterChunks:
             assert bf.frag_id == i
 
     def test_memory_bytes_positive(self, mini_index):
-        buf = FragmentBuffer(
-            t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100
-        )
+        buf = FragmentBuffer(t_strand_arr=mini_index.t_to_strand_arr, chunk_size=100)
         r = _resolve(mini_index, [_exon("chr1", 120, 180)])
         for i in range(50):
             buf.append(r, frag_id=i)

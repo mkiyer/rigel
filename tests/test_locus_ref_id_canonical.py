@@ -70,9 +70,7 @@ def test_two_ref_index_has_id_space_mismatch(two_ref_index):
     assert idx.ref_name_to_id["chrA"] == 1
     # Pandas categorical codes: alphabetic.
     cats = list(idx.t_df["ref"].cat.categories)
-    assert cats == ["chrA", "chrZ"], (
-        f"Expected pandas to alphabetize categories; got {cats}."
-    )
+    assert cats == ["chrA", "chrZ"], f"Expected pandas to alphabetize categories; got {cats}."
 
 
 def test_locus_ref_id_is_canonical_not_categorical(two_ref_index):

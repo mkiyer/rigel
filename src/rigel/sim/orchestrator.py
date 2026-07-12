@@ -92,8 +92,11 @@ def run_condition_grid(
     conditions: list[dict] = []
     cond_num = 0
     total = (
-        len(nrna_pairs) * len(gdna_pairs) * len(gdna_od_pairs)
-        * len(strand_specificities) * len(capture_scenarios)
+        len(nrna_pairs)
+        * len(gdna_pairs)
+        * len(gdna_od_pairs)
+        * len(strand_specificities)
+        * len(capture_scenarios)
     )
 
     for nrna_label, nrna_mode, nrna_value, nrna_index in nrna_pairs:
@@ -110,8 +113,10 @@ def run_condition_grid(
         elif nrna_mode == "random_fraction":
             nrna_ratio_range = tuple(nrna_value)  # type: ignore[arg-type]
             nrna_ratio = apply_random_nrna_fraction(
-                cond_transcripts, nrna_ratio_range,
-                eligible_fraction=nrna.eligible_fraction, seed=nrna.seed + nrna_index,
+                cond_transcripts,
+                nrna_ratio_range,
+                eligible_fraction=nrna.eligible_fraction,
+                seed=nrna.seed + nrna_index,
             )
 
         molecular_truth_name = f"truth_abundances_nrna_{nrna_label}.tsv"
@@ -122,11 +127,12 @@ def run_condition_grid(
                 gdna_od_pairs, strand_specificities
             ):
                 for capture_scenario in capture_scenarios:
-                    capture_label = (
-                        capture_scenario.label if include_capture_in_names else None
-                    )
+                    capture_label = capture_scenario.label if include_capture_in_names else None
                     cond_name = condition_dir_name(
-                        gdna_label, strand_spec, nrna_label, capture_label,
+                        gdna_label,
+                        strand_spec,
+                        nrna_label,
+                        capture_label,
                         gdna_strand_overdispersion=gdna_od,
                     )
                     if selected_conditions and cond_name not in selected_conditions:
@@ -207,15 +213,22 @@ def run_condition_grid(
                         t0 = time.monotonic()
                         cond_sim = replace(sim, sim_seed=condition_seed)
                         simulator = WholeGenomeSimulator(
-                            genome_path, cond_transcripts, cond_sim,
+                            genome_path,
+                            cond_transcripts,
+                            cond_sim,
                             replace(gdna, strand_overdispersion=gdna_od),
                             strand_specificity=strand_spec,
                             capture_config=capture_scenario.config,
                         )
                         _, _, bam_path = simulator.simulate_and_write(
-                            cond_dir, n_rna, n_gdna,
-                            oracle_bam=oracle_bam, prefix="sim",
-                            n_mrna=n_mrna, n_nrna=n_nrna, n_workers=sim.n_workers,
+                            cond_dir,
+                            n_rna,
+                            n_gdna,
+                            oracle_bam=oracle_bam,
+                            prefix="sim",
+                            n_mrna=n_mrna,
+                            n_nrna=n_nrna,
+                            n_workers=sim.n_workers,
                         )
                         simulator.close()
                         cond_entry["oracle_bam"] = (

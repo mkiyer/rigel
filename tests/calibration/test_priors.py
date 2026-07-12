@@ -47,7 +47,9 @@ def _calibration(
         mass_gdna_right=z.copy(),
         mass_rna_right=z.copy(),
         mass_rna_spliced=ms,
-        gdna_boundary_len=np.full(n, fl_mean, dtype=np.float64),  # per-side density length (seam support)
+        gdna_boundary_len=np.full(
+            n, fl_mean, dtype=np.float64
+        ),  # per-side density length (seam support)
         gdna_region_eff_len=rel.copy(),
         gdna_density_global=gdna_density_global,
         rna_sense_frac=0.9,
@@ -145,9 +147,7 @@ def test_factor_one_under_uniform_gdna():
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 400)])])
     np.testing.assert_allclose(priors.gdna_eff_len, [span_eff], rtol=1e-9)
     # per-position gDNA rate = the true density ρ (the deconvolved gДНК mass spread over the eff-len)
-    np.testing.assert_allclose(
-        priors.gdna_prior_count[0] / priors.gdna_eff_len[0], rho, rtol=1e-9
-    )
+    np.testing.assert_allclose(priors.gdna_prior_count[0] / priors.gdna_eff_len[0], rho, rtol=1e-9)
 
 
 def test_factor_one_holds_for_any_density():
@@ -176,7 +176,9 @@ def test_eff_len_uses_effective_support_not_genomic_size():
     ra = _regions([0, 100, 200], [100, 200, 300])  # genomic sizes 100,100,100 (Σ=300) ≠ rel
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
     np.testing.assert_allclose(priors.gdna_eff_len, [span_eff], rtol=1e-9)
-    assert not np.isclose(priors.gdna_eff_len[0], 300.0 + 0.5 * (bl[0] + bl[1]) + 0.5 * (bl[1] + bl[2]))
+    assert not np.isclose(
+        priors.gdna_eff_len[0], 300.0 + 0.5 * (bl[0] + bl[1]) + 0.5 * (bl[1] + bl[2])
+    )
 
 
 def test_node_arrays_uniform_density_is_constant():
@@ -201,7 +203,9 @@ def test_node_arrays_uniform_density_is_constant():
 def test_single_locus_sums_region_nodes():
     # gdna_prior_count = Σ contained gDNA, rna_prior_count = Σ RNA. These are MASS sums, unaffected by
     # the (effective-support) eff-len divisor. The eff-len magnitude is pinned by the factor-1 tests.
-    cal = _calibration(mass_g=[1.0, 2.0, 1.5], mass_d=[3.0, 4.0, 5.0], region_eff_len=[100.0, 200.0, 150.0])
+    cal = _calibration(
+        mass_g=[1.0, 2.0, 1.5], mass_d=[3.0, 4.0, 5.0], region_eff_len=[100.0, 200.0, 150.0]
+    )
     ra = _regions([0, 100, 300], [100, 300, 450])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 450)])])
     np.testing.assert_allclose(priors.rna_prior_count, [12.0])
@@ -316,13 +320,21 @@ def _global_bimodal_cal(rna0: float, gdna0: float = 1.0) -> CalibrationResult:
     mr[0] = rna0
     z = np.zeros(ng)
     return CalibrationResult(
-        mass_gdna_contained=mg, mass_rna_contained=mr,
-        mass_gdna_left=z.copy(), mass_rna_left=z.copy(),
-        mass_gdna_right=z.copy(), mass_rna_right=z.copy(), mass_rna_spliced=z.copy(),
-        gdna_boundary_len=np.full(ng, 50.0), gdna_region_eff_len=np.full(ng, 100.0),
-        gdna_density_global=0.5, rna_sense_frac=0.9,
-        gdna_strand_overdispersion=0.05, rna_strand_overdispersion=0.05,
-        n_regions=ng, config=CalibrationConfig(),
+        mass_gdna_contained=mg,
+        mass_rna_contained=mr,
+        mass_gdna_left=z.copy(),
+        mass_rna_left=z.copy(),
+        mass_gdna_right=z.copy(),
+        mass_rna_right=z.copy(),
+        mass_rna_spliced=z.copy(),
+        gdna_boundary_len=np.full(ng, 50.0),
+        gdna_region_eff_len=np.full(ng, 100.0),
+        gdna_density_global=0.5,
+        rna_sense_frac=0.9,
+        gdna_strand_overdispersion=0.05,
+        rna_strand_overdispersion=0.05,
+        n_regions=ng,
+        config=CalibrationConfig(),
     )
 
 
@@ -344,8 +356,12 @@ def _blind_seam_cal(contained_rna: float) -> CalibrationResult:
     boundary_len=50/region ⇒ seam support = ½(50+50) = 50 each ⇒ effective span = Σ region_eff_len +
     2 seams = 300 + 2·50 = 400."""
     return CalibrationResult(
-        mass_gdna_contained=np.array([0.0, 0.0, 0.0]),  # no contained gDNA — all signal is seam smear
-        mass_rna_contained=np.array([contained_rna, 0.0, 0.0]),  # the only contained (unique-mapper) evidence
+        mass_gdna_contained=np.array(
+            [0.0, 0.0, 0.0]
+        ),  # no contained gDNA — all signal is seam smear
+        mass_rna_contained=np.array(
+            [contained_rna, 0.0, 0.0]
+        ),  # the only contained (unique-mapper) evidence
         mass_gdna_left=np.array([0.0, 1.0, 1.0]),  # pooled seam = right[r]+left[r+1] = [2, 3, 0]
         mass_rna_left=np.array([0.0, 0.0, 0.0]),
         mass_gdna_right=np.array([1.0, 2.0, 0.0]),
@@ -378,14 +394,18 @@ def test_contained_evidence_shrinkage_is_smooth_not_a_cliff():
     # trust w = C/(C+1) and pulls the eff-length from span (C→0) down toward the earned contraction (C≫1).
     # Counts 0,1,3,1000 interpolate strictly monotonically — no cliff.
     ra = _six_region_ra()
-    ml = [_ml(0, [(0, 0, 100)])]  # locus = region 0 (depleted vs the enriched background ⇒ contracts)
+    ml = [
+        _ml(0, [(0, 0, 100)])
+    ]  # locus = region 0 (depleted vs the enriched background ⇒ contracts)
 
     def eff(c):
         return assemble_priors(_global_bimodal_cal(rna0=c), ra, ml).gdna_eff_len[0]
 
     e0, e1, e3, e_hi = eff(0.0), eff(1.0), eff(3.0), eff(1000.0)
     assert e_hi < e3 < e1 < e0  # smooth + monotone (no cliff)
-    assert e0 < 150.0  # even C=0 carries the depleted contained gDNA as evidence ⇒ below the full span
+    assert (
+        e0 < 150.0
+    )  # even C=0 carries the depleted contained gDNA as evidence ⇒ below the full span
 
 
 def test_empty_multiloci_returns_empty():
@@ -417,19 +437,26 @@ def test_gdna_eff_len_factor_one_under_uniform_gdna_with_kde_firing():
     cal = CalibrationResult(
         mass_gdna_contained=np.full(6, rho * 100.0),  # ρ·region_eff_len ⇒ contained density = ρ
         mass_rna_contained=np.zeros(6),
-        mass_gdna_left=np.full(6, 50.0),  # pooled seam m_s = right[r]+left[r+1] = 100 = ρ·seam_support(=50)
+        mass_gdna_left=np.full(
+            6, 50.0
+        ),  # pooled seam m_s = right[r]+left[r+1] = 100 = ρ·seam_support(=50)
         mass_rna_left=np.zeros(6),
         mass_gdna_right=np.full(6, 50.0),
         mass_rna_right=np.zeros(6),
         mass_rna_spliced=np.zeros(6),
         gdna_boundary_len=np.full(6, 50.0),
         gdna_region_eff_len=np.full(6, 100.0),
-        gdna_density_global=0.5, rna_sense_frac=0.9,
-        gdna_strand_overdispersion=0.05, rna_strand_overdispersion=0.05,
-        n_regions=6, config=CalibrationConfig(),
+        gdna_density_global=0.5,
+        rna_sense_frac=0.9,
+        gdna_strand_overdispersion=0.05,
+        rna_strand_overdispersion=0.05,
+        n_regions=6,
+        config=CalibrationConfig(),
     )
     # the KDE fires (unimodal ⇒ ρ_ref = ρ), NOT the <5-node None fallback
-    assert _global_reference_density(cal.mass_gdna_contained, cal.gdna_region_eff_len) == pytest.approx(rho)
+    assert _global_reference_density(
+        cal.mass_gdna_contained, cal.gdna_region_eff_len
+    ) == pytest.approx(rho)
     # span = Σ support_len = 5·(100 + ½·(50+50)) + 1·100 (terminal region carries no right seam)
     span = 5 * 150.0 + 100.0
     np.testing.assert_allclose(assemble_priors(cal, ra, ml).gdna_eff_len[0], span, rtol=1e-9)

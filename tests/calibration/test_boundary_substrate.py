@@ -65,10 +65,14 @@ def test_reindexing_identity_vs_region_substrate():
     for b in range(bsub.n_boundaries):
         lr, rr = int(bsub.left_region[b]), int(bsub.right_region[b])
         if lr >= 0:
-            assert _views_equal(bsub.left, b, rsub.right, lr), f"boundary {b} left ≠ region {lr} right"
+            assert _views_equal(bsub.left, b, rsub.right, lr), (
+                f"boundary {b} left ≠ region {lr} right"
+            )
             checked += 1
         if rr >= 0:
-            assert _views_equal(bsub.right, b, rsub.left, rr), f"boundary {b} right ≠ region {rr} left"
+            assert _views_equal(bsub.right, b, rsub.left, rr), (
+                f"boundary {b} right ≠ region {rr} left"
+            )
             checked += 1
     # 2 internal boundaries × 2 sides + 2 terminals × 1 inner side = 6 checked adjacencies.
     assert checked == 6

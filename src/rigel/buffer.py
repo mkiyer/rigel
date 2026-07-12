@@ -260,7 +260,7 @@ class _FinalizedChunk:
         classes[self.num_hits > 1] = FRAG_MULTIMAPPER
         # Chimeric → highest priority (overrides all others)
         classes[self.chimera_type > 0] = FRAG_CHIMERIC
-        object.__setattr__(self, '_fragment_classes', classes)
+        object.__setattr__(self, "_fragment_classes", classes)
         return classes
 
     def to_scoring_arrays(self) -> tuple:

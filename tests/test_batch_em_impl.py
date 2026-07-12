@@ -31,7 +31,9 @@ def _partition(
     )
 
 
-def _estimator(n_t: int, *, mode: str = "vbem", gdna_em_llr_bias: float = 0.0) -> AbundanceEstimator:
+def _estimator(
+    n_t: int, *, mode: str = "vbem", gdna_em_llr_bias: float = 0.0
+) -> AbundanceEstimator:
     est = AbundanceEstimator(
         num_transcripts=n_t,
         em_config=EMConfig(
@@ -248,20 +250,28 @@ def test_default_enable_gdna_inferred_from_partition():
     # All three with gdna_prior_count=0 and enable_gdna omitted (inferred).
     # Only the unspliced+finite case produces gDNA assignments.
     g_spl, _, _ = _estimator(2, mode="map").run_batch_locus_em_partitioned(
-        [spliced_part], locus_t_lists, np.zeros(1), index=None,
+        [spliced_part],
+        locus_t_lists,
+        np.zeros(1),
+        index=None,
     )
     g_uns, _, _ = _estimator(2, mode="map").run_batch_locus_em_partitioned(
-        [unspliced_part], locus_t_lists, np.zeros(1), index=None,
+        [unspliced_part],
+        locus_t_lists,
+        np.zeros(1),
+        index=None,
     )
     g_no, _, _ = _estimator(2, mode="map").run_batch_locus_em_partitioned(
-        [nogdna_part], locus_t_lists, np.zeros(1), index=None,
+        [nogdna_part],
+        locus_t_lists,
+        np.zeros(1),
+        index=None,
     )
 
     assert g_spl == 0.0, "spliced partition has no gDNA candidates"
     assert g_no == 0.0, "non-finite gDNA log-liks ⇒ no gDNA candidates"
     assert g_uns > 0.0, (
-        "unspliced+finite gDNA log-lik must enable component "
-        "even when gdna_prior_count == 0"
+        "unspliced+finite gDNA log-lik must enable component even when gdna_prior_count == 0"
     )
 
 

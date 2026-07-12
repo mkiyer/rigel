@@ -17,10 +17,16 @@ import pytest
 from rigel.sim import Scenario
 
 from .conftest import (
-    GDNA_LEVELS, STRAND_LEVELS, STRESS_COMBOS, STRESS_IDS,
-    SIM_SEED, build_and_run,
-    assert_alignment, assert_accountability,
-    assert_negative_control, assert_gdna_accuracy,
+    GDNA_LEVELS,
+    STRAND_LEVELS,
+    STRESS_COMBOS,
+    STRESS_IDS,
+    SIM_SEED,
+    build_and_run,
+    assert_alignment,
+    assert_accountability,
+    assert_negative_control,
+    assert_gdna_accuracy,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -41,51 +47,69 @@ class TestParalogMultimapping:
     counts evenly when abundances are equal.
     """
 
-    def _make_scenario(self, tmp_path, g1_abund, g2_abund, *,
-                       spliced=False, name_suffix=""):
-        sc = Scenario("paralogs" + name_suffix, genome_length=12000,
-                       seed=SIM_SEED,
-                       work_dir=tmp_path / ("paralogs" + name_suffix))
+    def _make_scenario(self, tmp_path, g1_abund, g2_abund, *, spliced=False, name_suffix=""):
+        sc = Scenario(
+            "paralogs" + name_suffix,
+            genome_length=12000,
+            seed=SIM_SEED,
+            work_dir=tmp_path / ("paralogs" + name_suffix),
+        )
         if spliced:
-            sc.add_gene("g1", "+", [
-                {"t_id": "t1", "exons": [(500, 800), (1200, 1500)],
-                 "abundance": g1_abund},
-            ])
-            sc.add_gene("g2", "+", [
-                {"t_id": "t2", "exons": [(5000, 5300), (5700, 6000)],
-                 "abundance": g2_abund},
-            ])
+            sc.add_gene(
+                "g1",
+                "+",
+                [
+                    {"t_id": "t1", "exons": [(500, 800), (1200, 1500)], "abundance": g1_abund},
+                ],
+            )
+            sc.add_gene(
+                "g2",
+                "+",
+                [
+                    {"t_id": "t2", "exons": [(5000, 5300), (5700, 6000)], "abundance": g2_abund},
+                ],
+            )
             sc.genome.edit(5000, sc.genome[500:1500])
         else:
-            sc.add_gene("g1", "+", [
-                {"t_id": "t1", "exons": [(500, 1000)],
-                 "abundance": g1_abund},
-            ])
-            sc.add_gene("g2", "+", [
-                {"t_id": "t2", "exons": [(5000, 5500)],
-                 "abundance": g2_abund},
-            ])
+            sc.add_gene(
+                "g1",
+                "+",
+                [
+                    {"t_id": "t1", "exons": [(500, 1000)], "abundance": g1_abund},
+                ],
+            )
+            sc.add_gene(
+                "g2",
+                "+",
+                [
+                    {"t_id": "t2", "exons": [(5000, 5500)], "abundance": g2_abund},
+                ],
+            )
             sc.genome.edit(5000, sc.genome[500:1000])
-        sc.add_gene("g_helper", "+", [
-            {"t_id": "t_helper",
-             "exons": [(8000, 8300), (8700, 9000)],
-             "abundance": 50},
-        ])
-        sc.add_gene("g_ctrl", "-", [
-            {"t_id": "t_ctrl", "exons": [(9500, 9800)], "abundance": 0},
-        ])
+        sc.add_gene(
+            "g_helper",
+            "+",
+            [
+                {"t_id": "t_helper", "exons": [(8000, 8300), (8700, 9000)], "abundance": 50},
+            ],
+        )
+        sc.add_gene(
+            "g_ctrl",
+            "-",
+            [
+                {"t_id": "t_ctrl", "exons": [(9500, 9800)], "abundance": 0},
+            ],
+        )
         return sc
 
     def test_equal_unspliced(self, tmp_path):
         """Equal-abundance unspliced paralogs -> ~50/50 split."""
         sc = self._make_scenario(tmp_path, 100, 100)
         try:
-            bench = build_and_run(sc, include_multimap=True,
-                                  scenario_name="paralogs_eq_unspliced")
+            bench = build_and_run(sc, include_multimap=True, scenario_name="paralogs_eq_unspliced")
             assert_alignment(bench)
             assert_negative_control(bench)
-            assert bench.total_rna_observed == pytest.approx(
-                bench.total_expected, abs=25)
+            assert bench.total_rna_observed == pytest.approx(bench.total_expected, abs=25)
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
             t2 = next(t for t in bench.transcripts if t.t_id == "t2")
             total = t1.observed + t2.observed
@@ -97,12 +121,10 @@ class TestParalogMultimapping:
         """Equal-abundance spliced paralogs -> ~50/50 split."""
         sc = self._make_scenario(tmp_path, 100, 100, spliced=True)
         try:
-            bench = build_and_run(sc, include_multimap=True,
-                                  scenario_name="paralogs_eq_spliced")
+            bench = build_and_run(sc, include_multimap=True, scenario_name="paralogs_eq_spliced")
             assert_alignment(bench)
             assert_negative_control(bench)
-            assert bench.total_rna_observed == pytest.approx(
-                bench.total_expected, abs=10)
+            assert bench.total_rna_observed == pytest.approx(bench.total_expected, abs=10)
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
             t2 = next(t for t in bench.transcripts if t.t_id == "t2")
             total = t1.observed + t2.observed
@@ -110,11 +132,9 @@ class TestParalogMultimapping:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("gdna", GDNA_LEVELS,
-                             ids=[f"gdna_{g}" for g in GDNA_LEVELS])
+    @pytest.mark.parametrize("gdna", GDNA_LEVELS, ids=[f"gdna_{g}" for g in GDNA_LEVELS])
     def test_gdna_sweep(self, tmp_path, gdna):
-        sc = self._make_scenario(tmp_path, 100, 100,
-                                  name_suffix=f"_gdna_{gdna}")
+        sc = self._make_scenario(tmp_path, 100, 100, name_suffix=f"_gdna_{gdna}")
         try:
             # Use n_fragments=3000 (6× default) so the EM has enough
             # symmetric shared-multimapper signal to overcome asymmetric
@@ -122,10 +142,13 @@ class TestParalogMultimapping:
             # gDNA fragments that extend into unique flanking sequence
             # map to only one paralog, creating stochastic warm-start
             # asymmetry that SQUAREM amplifies at small N.
-            bench = build_and_run(sc, n_fragments=3000,
-                                  gdna_abundance=gdna,
-                                  include_multimap=True,
-                                  scenario_name=f"paralogs_gdna_{gdna}")
+            bench = build_and_run(
+                sc,
+                n_fragments=3000,
+                gdna_abundance=gdna,
+                include_multimap=True,
+                scenario_name=f"paralogs_gdna_{gdna}",
+            )
             assert_alignment(bench)
             assert_negative_control(bench, gdna_abundance=gdna)
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
@@ -137,20 +160,17 @@ class TestParalogMultimapping:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("ss", STRAND_LEVELS,
-                             ids=[f"ss_{s}" for s in STRAND_LEVELS])
+    @pytest.mark.parametrize("ss", STRAND_LEVELS, ids=[f"ss_{s}" for s in STRAND_LEVELS])
     def test_strand_sweep(self, tmp_path, ss):
-        sc = self._make_scenario(tmp_path, 100, 100,
-                                  name_suffix=f"_ss_{ss}")
+        sc = self._make_scenario(tmp_path, 100, 100, name_suffix=f"_ss_{ss}")
         try:
-            bench = build_and_run(sc, strand_specificity=ss,
-                                  include_multimap=True,
-                                  scenario_name=f"paralogs_ss_{ss}")
+            bench = build_and_run(
+                sc, strand_specificity=ss, include_multimap=True, scenario_name=f"paralogs_ss_{ss}"
+            )
             assert_alignment(bench)
             assert_negative_control(bench, strand_specificity=ss)
             if ss >= 0.95:
-                assert bench.total_rna_observed == pytest.approx(
-                    bench.total_expected, abs=55)
+                assert bench.total_rna_observed == pytest.approx(bench.total_expected, abs=55)
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
             t2 = next(t for t in bench.transcripts if t.t_id == "t2")
             total = t1.observed + t2.observed
@@ -161,21 +181,26 @@ class TestParalogMultimapping:
 
     @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
     def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(tmp_path, 100, 100,
-                                  name_suffix=f"_g{gdna}_n{nrna}_s{int(ss*100)}")
+        sc = self._make_scenario(
+            tmp_path, 100, 100, name_suffix=f"_g{gdna}_n{nrna}_s{int(ss * 100)}"
+        )
         try:
             # n_fragments=3000 (6× default), matching test_gdna_sweep above: at heavy gDNA
             # (abundance 100) on identical paralogs the mRNA pool is tiny and mostly multimapped,
             # so the default 500 leaves too few *unique spliced* reads for the strand model to be
             # identifiable — a knife-edge the engine consolidation (one WGS engine) exposed.
-            bench = build_and_run(sc, n_fragments=3000, gdna_abundance=gdna,
-                                  nrna_abundance=nrna, strand_specificity=ss,
-                                  include_multimap=True,
-                                  scenario_name=f"paralogs_stress_{gdna}_{nrna}_{int(ss*100)}")
+            bench = build_and_run(
+                sc,
+                n_fragments=3000,
+                gdna_abundance=gdna,
+                nrna_abundance=nrna,
+                strand_specificity=ss,
+                include_multimap=True,
+                scenario_name=f"paralogs_stress_{gdna}_{nrna}_{int(ss * 100)}",
+            )
             assert_alignment(bench)
             assert_accountability(bench)
-            assert_negative_control(bench, gdna_abundance=gdna,
-                                     strand_specificity=ss)
+            assert_negative_control(bench, gdna_abundance=gdna, strand_specificity=ss)
         finally:
             sc.cleanup()
 
@@ -192,46 +217,57 @@ class TestDistinguishableParalogs:
     exons anchor the EM to correctly resolve shared-exon reads.
     """
 
-    def _make_scenario(self, tmp_path, g1_abund, g2_abund,
-                       name_suffix=""):
-        sc = Scenario("dist_paralogs" + name_suffix, genome_length=12000,
-                       seed=SIM_SEED,
-                       work_dir=tmp_path / ("dist_paralogs" + name_suffix))
-        sc.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(500, 800), (1200, 1500)],
-             "abundance": g1_abund},
-        ])
-        sc.add_gene("g2", "+", [
-            {"t_id": "t2", "exons": [(5000, 5300), (5700, 5900)],
-             "abundance": g2_abund},
-        ])
+    def _make_scenario(self, tmp_path, g1_abund, g2_abund, name_suffix=""):
+        sc = Scenario(
+            "dist_paralogs" + name_suffix,
+            genome_length=12000,
+            seed=SIM_SEED,
+            work_dir=tmp_path / ("dist_paralogs" + name_suffix),
+        )
+        sc.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(500, 800), (1200, 1500)], "abundance": g1_abund},
+            ],
+        )
+        sc.add_gene(
+            "g2",
+            "+",
+            [
+                {"t_id": "t2", "exons": [(5000, 5300), (5700, 5900)], "abundance": g2_abund},
+            ],
+        )
         sc.genome.edit(5000, sc.genome[500:800])
         # Spliced helper gene anchors calibration (provides splice signal
         # so the algebraic fallback doesn't misclassify RNA as gDNA).
-        sc.add_gene("g_helper", "+", [
-            {"t_id": "t_helper",
-             "exons": [(8000, 8300), (8700, 9000)],
-             "abundance": 50},
-        ])
-        sc.add_gene("g_ctrl", "-", [
-            {"t_id": "t_ctrl", "exons": [(9500, 9800)], "abundance": 0},
-        ])
+        sc.add_gene(
+            "g_helper",
+            "+",
+            [
+                {"t_id": "t_helper", "exons": [(8000, 8300), (8700, 9000)], "abundance": 50},
+            ],
+        )
+        sc.add_gene(
+            "g_ctrl",
+            "-",
+            [
+                {"t_id": "t_ctrl", "exons": [(9500, 9800)], "abundance": 0},
+            ],
+        )
         return sc
 
-    @pytest.mark.parametrize("fold_change", [1, 4, 16],
-                             ids=["fc_1", "fc_4", "fc_16"])
+    @pytest.mark.parametrize("fold_change", [1, 4, 16], ids=["fc_1", "fc_4", "fc_16"])
     def test_abundance_sweep(self, tmp_path, fold_change):
         g1_abund, g2_abund = 100, 100 / fold_change
-        sc = self._make_scenario(tmp_path, g1_abund, g2_abund,
-                                  f"_fc_{fold_change}")
+        sc = self._make_scenario(tmp_path, g1_abund, g2_abund, f"_fc_{fold_change}")
         try:
-            bench = build_and_run(sc, n_fragments=1000,
-                                  include_multimap=True,
-                                  scenario_name=f"dist_fc_{fold_change}")
+            bench = build_and_run(
+                sc, n_fragments=1000, include_multimap=True, scenario_name=f"dist_fc_{fold_change}"
+            )
             assert_alignment(bench)
             assert_negative_control(bench)
-            assert bench.total_rna_observed == pytest.approx(
-                bench.total_expected, abs=15)
+            assert bench.total_rna_observed == pytest.approx(bench.total_expected, abs=15)
             if fold_change > 1:
                 t1 = next(t for t in bench.transcripts if t.t_id == "t1")
                 t2 = next(t for t in bench.transcripts if t.t_id == "t2")
@@ -239,20 +275,21 @@ class TestDistinguishableParalogs:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize("gdna", GDNA_LEVELS,
-                             ids=[f"gdna_{g}" for g in GDNA_LEVELS])
+    @pytest.mark.parametrize("gdna", GDNA_LEVELS, ids=[f"gdna_{g}" for g in GDNA_LEVELS])
     def test_gdna_sweep(self, tmp_path, gdna):
-        sc = self._make_scenario(tmp_path, 100, 100,
-                                  f"_gdna_{gdna}")
+        sc = self._make_scenario(tmp_path, 100, 100, f"_gdna_{gdna}")
         try:
-            bench = build_and_run(sc, gdna_abundance=gdna, n_fragments=1000,
-                                  include_multimap=True,
-                                  scenario_name=f"dist_gdna_{gdna}")
+            bench = build_and_run(
+                sc,
+                gdna_abundance=gdna,
+                n_fragments=1000,
+                include_multimap=True,
+                scenario_name=f"dist_gdna_{gdna}",
+            )
             assert_alignment(bench)
             assert_negative_control(bench, gdna_abundance=gdna)
             if gdna == 0:
-                assert bench.total_rna_observed == pytest.approx(
-                    bench.total_expected, abs=10)
+                assert bench.total_rna_observed == pytest.approx(bench.total_expected, abs=10)
             else:
                 assert_gdna_accuracy(bench, gdna)
         finally:
@@ -260,16 +297,19 @@ class TestDistinguishableParalogs:
 
     @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
     def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(tmp_path, 100, 100,
-                                  f"_g{gdna}_n{nrna}_s{int(ss*100)}")
+        sc = self._make_scenario(tmp_path, 100, 100, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
         try:
-            bench = build_and_run(sc, gdna_abundance=gdna,
-                                  nrna_abundance=nrna, strand_specificity=ss,
-                                  n_fragments=1000, include_multimap=True,
-                                  scenario_name=f"dist_stress_{gdna}_{nrna}_{int(ss*100)}")
+            bench = build_and_run(
+                sc,
+                gdna_abundance=gdna,
+                nrna_abundance=nrna,
+                strand_specificity=ss,
+                n_fragments=1000,
+                include_multimap=True,
+                scenario_name=f"dist_stress_{gdna}_{nrna}_{int(ss * 100)}",
+            )
             assert_alignment(bench)
             assert_accountability(bench)
-            assert_negative_control(bench, gdna_abundance=gdna,
-                                     strand_specificity=ss)
+            assert_negative_control(bench, gdna_abundance=gdna, strand_specificity=ss)
         finally:
             sc.cleanup()

@@ -63,8 +63,15 @@ def test_crossing_density_unbiased(tmp_path):
 
     sc = Scenario("span_unbiased", genome_length=40000, seed=29, work_dir=str(tmp_path / "sim"))
     sc.add_gene(
-        "G", "+",
-        [{"t_id": "G.1", "exons": [(12000, 13000), (16000, 17000), (20000, 21000)], "abundance": 40}],
+        "G",
+        "+",
+        [
+            {
+                "t_id": "G.1",
+                "exons": [(12000, 13000), (16000, 17000), (20000, 21000)],
+                "abundance": 40,
+            }
+        ],
     )
     res = sc.build_oracle(
         n_fragments=60000,
@@ -96,8 +103,13 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
     res = sc.build_oracle(
         n_fragments=40000,
         sim_config=ReadSimConfig(
-            frag_mean=250, frag_std=40, frag_min=180, frag_max=400,
-            read_length=100, strand_specificity=1.0, seed=7,
+            frag_mean=250,
+            frag_std=40,
+            frag_min=180,
+            frag_max=400,
+            read_length=100,
+            strand_specificity=1.0,
+            seed=7,
         ),
     )
     _s, sm, _fl, _b, pl = scan_and_buffer(
@@ -183,11 +195,19 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
     header = {"HD": {"VN": "1.6", "SO": "queryname"}, "SQ": [{"SN": "chr1", "LN": 4000}]}
     with pysam.AlignmentFile(str(bam), "wb", header=header) as out:
         for i in range(20):  # unspliced positive control (exon 1)
-            _write_pair(out, f"u{i:03d}", r1_pos=20, r1_cigar="100M",
-                        r2_pos=120, r2_cigar="80M", xs=False)
+            _write_pair(
+                out, f"u{i:03d}", r1_pos=20, r1_cigar="100M", r2_pos=120, r2_cigar="80M", xs=False
+            )
         for i in range(50):  # span the annotated junction [200, 300)
-            _write_pair(out, f"r{i:03d}", r1_pos=150, r1_cigar="50M100N50M",
-                        r2_pos=350, r2_cigar="80M", xs=True)
+            _write_pair(
+                out,
+                f"r{i:03d}",
+                r1_pos=150,
+                r1_cigar="50M100N50M",
+                r2_pos=350,
+                r2_cigar="80M",
+                xs=True,
+            )
 
     def total_mass(payload) -> float:
         return float(
@@ -206,13 +226,15 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
     assert total_mass(pl0) > 65.0  # 20 contained + ~50 spliced crossing mass
 
     # Blacklist the annotated junction → the 50 become SPLICE_ARTIFACT → held out.
-    pd.DataFrame({
-        "ref": ["chr1"],
-        "start": np.array([200], np.int32),
-        "end": np.array([300], np.int32),
-        "max_anchor_left": np.array([10000], np.int32),
-        "max_anchor_right": np.array([10000], np.int32),
-    }).to_feather(idx_dir / SJ_BLACKLIST_FEATHER)
+    pd.DataFrame(
+        {
+            "ref": ["chr1"],
+            "start": np.array([200], np.int32),
+            "end": np.array([300], np.int32),
+            "max_anchor_left": np.array([10000], np.int32),
+            "max_anchor_right": np.array([10000], np.int32),
+        }
+    ).to_feather(idx_dir / SJ_BLACKLIST_FEATHER)
     idx2 = TranscriptIndex.load(str(idx_dir))
     s1, _, _, _, pl1 = scan_and_buffer(str(bam), idx2, cfg)
     assert s1.n_sj_blacklisted == 50, "blacklist did not flag the junction"

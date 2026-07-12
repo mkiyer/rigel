@@ -35,7 +35,9 @@ def _uniform_field_cal(region_arrays: RegionArrays, rho: float) -> CalibrationRe
     ``rho·S_s``. The factor-1-under-uniform invariant ⇒ every transcript's contraction factor is 1 ⇒
     eff_em == fl, EVEN for short exon flanks (the deposition-faithful averaged seam support)."""
     rel = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
-    bl = np.minimum(rel, 180.0)  # per-side density length E[min(ℓ,L)] — varies, clips on short regions
+    bl = np.minimum(
+        rel, 180.0
+    )  # per-side density length E[min(ℓ,L)] — varies, clips on short regions
     ref_id = np.asarray(region_arrays.ref_id)
     n = rel.shape[0]
     contained = rho * rel
@@ -63,6 +65,7 @@ def _uniform_field_cal(region_arrays: RegionArrays, rho: float) -> CalibrationRe
         n_regions=n,
         config=CalibrationConfig(),
     )
+
 
 # Two same-strand transcripts sharing gene g1. t1's first exon [150, 300) is a sub-interval of t0's
 # [100, 300); both halves carry the identical EXON_POS signature, so the partition MERGES them into a
@@ -155,7 +158,9 @@ def test_transcript_factor_one_under_uniform_gdna(misaligned_index):
     ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
     cal = _uniform_field_cal(ra, rho=0.02)
     n_t = len(idx.t_df)
-    fl = np.linspace(800.0, 2000.0, n_t)  # arbitrary FL-marginal lengths; the factor must be exactly 1
+    fl = np.linspace(
+        800.0, 2000.0, n_t
+    )  # arbitrary FL-marginal lengths; the factor must be exactly 1
     eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
     np.testing.assert_allclose(eff, fl, rtol=1e-9)
 
@@ -169,13 +174,13 @@ def test_transcript_contracts_under_concentrated_gdna(multiexon_index):
     ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
     n = ra.n_regions
     starts, ends = np.asarray(ra.start), np.asarray(ra.end)
-    dens = np.full(n, 0.1)                          # depleted (off-target) background
-    dens[(ends > 1000) & (starts < 1500)] = 100.0   # capture the first exon (enriched on-target)
+    dens = np.full(n, 0.1)  # depleted (off-target) background
+    dens[(ends > 1000) & (starts < 1500)] = 100.0  # capture the first exon (enriched on-target)
     cal = _field_cal(ra, dens)
     fl = np.maximum(idx.t_df["length"].to_numpy(dtype=np.float64) - 180.0, 1.0)
     eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
-    assert np.all(eff <= fl + 1e-9)                 # contraction never expands
-    assert np.any(eff < fl - 1e-6)                  # at least one transcript genuinely contracts
+    assert np.all(eff <= fl + 1e-9)  # contraction never expands
+    assert np.any(eff < fl - 1e-6)  # at least one transcript genuinely contracts
 
 
 # --- nascent<mature inversion guard (2026-07-09): splice-junction seams ---------------------------
@@ -187,10 +192,13 @@ def test_transcript_contracts_under_concentrated_gdna(multiexon_index):
 
 # six 500bp exons + a single-exon nascent covering the whole 1000..6500 span (genomic order per transcript
 # so the incidence pairs adjacent exons into splice junctions).
-_MULTIEXON_GTF = "".join(
-    f'chr1\ttest\texon\t{s + 1}\t{s + 500}\t.\t+\t.\tgene_id "gm"; transcript_id "mrna";\n'
-    for s in range(1000, 6500, 1000)
-) + 'chr1\ttest\texon\t1001\t6500\t.\t+\t.\tgene_id "gm"; transcript_id "nasc";\n'
+_MULTIEXON_GTF = (
+    "".join(
+        f'chr1\ttest\texon\t{s + 1}\t{s + 500}\t.\t+\t.\tgene_id "gm"; transcript_id "mrna";\n'
+        for s in range(1000, 6500, 1000)
+    )
+    + 'chr1\ttest\texon\t1001\t6500\t.\t+\t.\tgene_id "gm"; transcript_id "nasc";\n'
+)
 
 
 @pytest.fixture(scope="module")
@@ -203,7 +211,9 @@ def _tidx(idx, tid: str) -> int:
     return int(tdf.loc[tdf["t_id"] == tid, "t_index"].iloc[0])
 
 
-def _field_cal(region_arrays: RegionArrays, density: np.ndarray, frag: float = 180.0) -> CalibrationResult:
+def _field_cal(
+    region_arrays: RegionArrays, density: np.ndarray, frag: float = 180.0
+) -> CalibrationResult:
     """Deposition-faithful CalibrationResult for an arbitrary per-region gDNA DENSITY field, with an
     FL-marginal region support (``region_eff_len = size − frag``) and crossing support (``boundary_len =
     min(size, frag)``). This makes a multi-exon mRNA's junction-dropped ``span_full`` fall BELOW its
@@ -253,7 +263,9 @@ def test_junction_incidence_multiexon_only(multiexon_index):
     assert (jt == nasc).sum() == 0, "a single-exon nRNA must have NO splice junctions"
     starts, ends = np.asarray(ra.start), np.asarray(ra.end)
     for k in np.flatnonzero(jt == mrna):
-        assert ends[jl[k]] <= starts[jr[k]], "junction left flank must end at/before the right flank starts"
+        assert ends[jl[k]] <= starts[jr[k]], (
+            "junction left flank must end at/before the right flank starts"
+        )
 
 
 def test_no_nascent_mature_inversion_under_capture(multiexon_index):
@@ -267,11 +279,13 @@ def test_no_nascent_mature_inversion_under_capture(multiexon_index):
     ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
     n = ra.n_regions
     starts, ends = np.asarray(ra.start), np.asarray(ra.end)
-    dens = np.full(n, 0.1)                       # depleted off-target
+    dens = np.full(n, 0.1)  # depleted off-target
     dens[(ends > 1000) & (starts < 1500)] = 100.0  # capture the first exon [1000,1500)
     cal = _field_cal(ra, dens)
     frag = 180.0
-    fl = np.maximum(idx.t_df["length"].to_numpy(dtype=np.float64) - frag, 1.0)  # contiguous FL-marginal
+    fl = np.maximum(
+        idx.t_df["length"].to_numpy(dtype=np.float64) - frag, 1.0
+    )  # contiguous FL-marginal
     eff = transcript_capture_eff_lengths(cal, ra, idx, fl)
     mrna, nasc = _tidx(idx, "mrna"), _tidx(idx, "nasc")
     assert eff[nasc] >= eff[mrna] - 1e-6, (

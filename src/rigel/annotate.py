@@ -130,14 +130,14 @@ AF_CHIMERIC_BIT: int = 0x40
 AF_MULTIMAPPER_DROP_BIT: int = 0x80
 
 # Canonical composed values (the only legitimate ZF outputs).
-AF_UNRESOLVED: int = 0x00                                            # 0x00
-AF_MRNA: int = AF_RESOLVED | AF_MRNA_BIT                             # 0x03
-AF_NRNA: int = AF_RESOLVED | AF_NRNA_BIT                             # 0x09
-AF_NRNA_SYNTH: int = AF_NRNA | AF_SYNTHETIC_BIT                      # 0x19
-AF_GDNA_EM: int = AF_RESOLVED | AF_GDNA_BIT                          # 0x05
-AF_GDNA_INTERGENIC: int = AF_GDNA_EM | AF_INTERGENIC_BIT             # 0x25
-AF_CHIMERIC: int = AF_CHIMERIC_BIT                                   # 0x40
-AF_MULTIMAPPER_DROP: int = AF_MULTIMAPPER_DROP_BIT                   # 0x80
+AF_UNRESOLVED: int = 0x00  # 0x00
+AF_MRNA: int = AF_RESOLVED | AF_MRNA_BIT  # 0x03
+AF_NRNA: int = AF_RESOLVED | AF_NRNA_BIT  # 0x09
+AF_NRNA_SYNTH: int = AF_NRNA | AF_SYNTHETIC_BIT  # 0x19
+AF_GDNA_EM: int = AF_RESOLVED | AF_GDNA_BIT  # 0x05
+AF_GDNA_INTERGENIC: int = AF_GDNA_EM | AF_INTERGENIC_BIT  # 0x25
+AF_CHIMERIC: int = AF_CHIMERIC_BIT  # 0x40
+AF_MULTIMAPPER_DROP: int = AF_MULTIMAPPER_DROP_BIT  # 0x80
 
 
 def winner_flag(is_nrna: bool, is_synthetic: bool) -> int:
@@ -313,9 +313,7 @@ class AnnotationTable:
         if locus_ids is not None:
             self.locus_id[start:end] = locus_ids
 
-        self.frag_id_to_row.update(
-            zip(frag_ids.tolist(), range(start, end))
-        )
+        self.frag_id_to_row.update(zip(frag_ids.tolist(), range(start, end)))
 
         self._size = end
 
@@ -324,17 +322,23 @@ class AnnotationTable:
         if new_cap <= self.capacity:
             return
         for attr in (
-            "frag_ids", "best_tid", "best_gid", "tx_flags",
-            "posterior", "frag_class", "n_candidates", "splice_type",
+            "frag_ids",
+            "best_tid",
+            "best_gid",
+            "tx_flags",
+            "posterior",
+            "frag_class",
+            "n_candidates",
+            "splice_type",
             "locus_id",
         ):
             old = getattr(self, attr)
             new = np.empty(new_cap, dtype=old.dtype)
-            new[:self.capacity] = old
+            new[: self.capacity] = old
             if attr in ("frag_ids", "best_tid", "best_gid", "frag_class", "locus_id"):
-                new[self.capacity:] = -1
+                new[self.capacity :] = -1
             else:
-                new[self.capacity:] = 0
+                new[self.capacity :] = 0
             setattr(self, attr, new)
         self.capacity = new_cap
 
@@ -372,6 +376,7 @@ def _splice_type_label(code: int) -> str:
     (``BamAnnotationWriter``); this helper is referenced only by tests.
     """
     from .splice import SpliceType
+
     try:
         return SpliceType(code).name.lower()
     except (ValueError, KeyError):

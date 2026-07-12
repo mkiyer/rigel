@@ -31,7 +31,9 @@ def _mixture_strand_loglik(u_pos, n, f_g, f_pos, f_neg, kappa, od_g, od_r):
     (gDNA ¼, RNA κ(1−κ) for both strands), exactly as in the two-component model.
     """
     p = 0.5 * f_g + kappa * f_pos + (1.0 - kappa) * f_neg
-    mean = n * p  # reused below as n·p in the binomial variance term — byte-identical, one fewer big multiply
+    mean = (
+        n * p
+    )  # reused below as n·p in the binomial variance term — byte-identical, one fewer big multiply
     rscale = kappa * (1.0 - kappa)  # κ(1−κ): each RNA strand's μ(1−μ)
     var = (
         mean * (1.0 - p)

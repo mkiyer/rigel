@@ -172,11 +172,9 @@ class BenchmarkResult:
         lines = [
             f"Benchmark: {self.scenario_name}",
             f"  Simulated: {self.n_simulated} fragments",
-            f"  Pipeline fragments: {self.n_fragments} "
-            f"(alignment rate: {self.alignment_rate:.1%})",
+            f"  Pipeline fragments: {self.n_fragments} (alignment rate: {self.alignment_rate:.1%})",
             f"  Intergenic: {self.n_intergenic}, Chimeric: {self.n_chimeric}",
-            f"  Total expected: {self.total_expected}, "
-            f"Total observed: {self.total_observed:.0f}",
+            f"  Total expected: {self.total_expected}, Total observed: {self.total_observed:.0f}",
         ]
         if self.n_gdna_expected > 0 or self.n_gdna_pipeline > 0:
             lines.append(
@@ -190,12 +188,14 @@ class BenchmarkResult:
                 f"pipeline={self.n_nrna_pipeline:.0f}, "
                 f"diff={self.nrna_abs_diff:.0f}"
             )
-        lines.extend([
-            f"  All exact: {self.all_exact}, "
-            f"Total abs error: {self.total_abs_error:.0f}, "
-            f"Max rel error: {self.max_rel_error:.1%}",
-            "  Per-transcript:",
-        ])
+        lines.extend(
+            [
+                f"  All exact: {self.all_exact}, "
+                f"Total abs error: {self.total_abs_error:.0f}, "
+                f"Max rel error: {self.max_rel_error:.1%}",
+                "  Per-transcript:",
+            ]
+        )
         for t in self.transcripts:
             lines.append(f"    {t}")
         return "\n".join(lines)
@@ -245,9 +245,7 @@ def run_benchmark(
     # We use gdna_em_count (actual fragment assignments) rather than
     # gdna_total (which also includes shadow_init prior, a Bayesian
     # regularization term that is not a real fragment count).
-    n_gdna_pipeline = float(
-        stats.n_intergenic + pipeline_result.estimator.gdna_em_count
-    )
+    n_gdna_pipeline = float(stats.n_intergenic + pipeline_result.estimator.gdna_em_count)
 
     # Pipeline nRNA count: EM-assigned nascent RNA fragments.
     n_nrna_pipeline = float(pipeline_result.estimator.nrna_em_count)
@@ -263,23 +261,23 @@ def run_benchmark(
         exact = observed == expected
         annotated_t_indices.add(t.t_index)
 
-        transcript_results.append(TranscriptAccuracy(
-            t_id=t.t_id,
-            t_index=t.t_index,
-            expected=expected,
-            observed=observed,
-            exact_match=exact,
-            abs_diff=abs_diff,
-            rel_error=rel_error,
-        ))
+        transcript_results.append(
+            TranscriptAccuracy(
+                t_id=t.t_id,
+                t_index=t.t_index,
+                expected=expected,
+                observed=observed,
+                exact_match=exact,
+                abs_diff=abs_diff,
+                rel_error=rel_error,
+            )
+        )
 
     # EM-assigned mRNA counts for synthetic nRNA transcripts (in the index
     # but not in simulation ground truth).  These must be included in the
     # accountability equation so that all fragment mass is accounted for.
     n_synthetic_observed = sum(
-        float(observed_per_t[i])
-        for i in range(len(observed_per_t))
-        if i not in annotated_t_indices
+        float(observed_per_t[i]) for i in range(len(observed_per_t)) if i not in annotated_t_indices
     )
 
     return BenchmarkResult(

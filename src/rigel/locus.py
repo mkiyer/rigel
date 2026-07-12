@@ -196,5 +196,3 @@ def build_multi_loci(
         )
 
     return multi_loci
-
-

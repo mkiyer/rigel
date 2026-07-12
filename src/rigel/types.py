@@ -30,6 +30,7 @@ class Strand(IntEnum):
         combined |= Strand.POS   # → POS
         combined |= Strand.NEG   # → AMBIGUOUS
     """
+
     NONE = 0
     POS = 1
     NEG = 2
@@ -73,12 +74,14 @@ class Strand(IntEnum):
 # Interval
 # ---------------------------------------------------------------------------
 
+
 class Interval(NamedTuple):
     """A simple 0-based half-open interval (start, end).
 
     Used by ``Transcript`` to store exon coordinates. For intervals
     positioned on a specific reference/strand, use ``GenomicInterval``.
     """
+
     start: int
     end: int
 
@@ -87,12 +90,14 @@ class Interval(NamedTuple):
 # GenomicInterval
 # ---------------------------------------------------------------------------
 
+
 class GenomicInterval(NamedTuple):
     """An interval located on a specific reference and strand.
 
     Used by ``Fragment`` for aligned exons and splice junctions (introns),
     and anywhere a positioned interval is needed without annotation metadata.
     """
+
     ref: str
     start: int
     end: int
@@ -102,6 +107,7 @@ class GenomicInterval(NamedTuple):
 # ---------------------------------------------------------------------------
 # IntervalType
 # ---------------------------------------------------------------------------
+
 
 class IntervalType(IntEnum):
     """Classification of a genomic interval relative to gene annotations.
@@ -115,6 +121,7 @@ class IntervalType(IntEnum):
     junction observed in the CIGAR (N-operation) but not matching any
     annotated intron — these are recorded with ``t_index = -1``.
     """
+
     EXON = 0
     TRANSCRIPT = 1
     INTERGENIC = 2
@@ -126,6 +133,7 @@ class IntervalType(IntEnum):
 # AnnotatedInterval
 # ---------------------------------------------------------------------------
 
+
 class AnnotatedInterval(NamedTuple):
     """A reference-annotated genomic interval with index metadata.
 
@@ -134,6 +142,7 @@ class AnnotatedInterval(NamedTuple):
     lookup).  Gene index is derived from the transcript table at load
     time — not stored per-interval.
     """
+
     ref: str
     start: int
     end: int
@@ -145,6 +154,7 @@ class AnnotatedInterval(NamedTuple):
 # ---------------------------------------------------------------------------
 # Merge criteria and result types
 # ---------------------------------------------------------------------------
+
 
 class MergeOutcome(IntEnum):
     """Which relaxation level succeeded in progressive set merging.
@@ -158,17 +168,17 @@ class MergeOutcome(IntEnum):
     2. UNION — union of all sets (most sensitive)
     3. EMPTY — no sets to merge (no hits of this type)
     """
+
     INTERSECTION = 0
     INTERSECTION_NONEMPTY = 1
     UNION = 2
     EMPTY = 3
 
 
-
-
 # ---------------------------------------------------------------------------
 # Chimera classification
 # ---------------------------------------------------------------------------
+
 
 class ChimeraType(IntEnum):
     """Classification of chimeric fragments.
@@ -192,6 +202,7 @@ class ChimeraType(IntEnum):
         clusters align to different strands.  Suggestive of genomic
         rearrangement or trans-splicing.
     """
+
     NONE = 0
     TRANS = 1
     CIS_STRAND_SAME = 2

@@ -6,6 +6,7 @@ fragment independently, so the per-origin parts must sum to the whole). This tes
 + nascent scenario and asserts that identity holds — if the accumulator ever changes in a way that breaks
 per-fragment linearity, this fails loudly rather than letting a silently-wrong oracle percolate.
 """
+
 import sys
 from pathlib import Path
 
@@ -26,9 +27,18 @@ def oracle_scenario(tmp_path_factory):
     sc.add_gene("g1", "+", [{"t_id": "t1", "exons": [(400, 700), (1200, 1500)], "abundance": 60}])
     sc.add_gene("g2", "-", [{"t_id": "t2", "exons": [(3000, 3300), (3800, 4100)], "abundance": 40}])
     result = sc.build_oracle(
-        n_rna_fragments=1500, gdna_fraction=1.0, nrna_abundance=20.0,
-        sim_config=ReadSimConfig(frag_mean=180, frag_std=30, frag_min=80, frag_max=400,
-                                 read_length=90, strand_specificity=0.99, seed=11),
+        n_rna_fragments=1500,
+        gdna_fraction=1.0,
+        nrna_abundance=20.0,
+        sim_config=ReadSimConfig(
+            frag_mean=180,
+            frag_std=30,
+            frag_min=80,
+            frag_max=400,
+            read_length=90,
+            strand_specificity=0.99,
+            seed=11,
+        ),
         gdna_config=GDNAConfig(abundance=0.0, frag_mean=200, frag_std=40),
     )
     return result
@@ -37,7 +47,8 @@ def oracle_scenario(tmp_path_factory):
 def test_oracle_validates_and_partitions_sum_to_full(oracle_scenario, tmp_path):
     # from_bam runs the sum-to-full + channel-sanity + fragment-accounting gates internally (raises on any).
     orc = OracleTruth.from_bam(
-        str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc")
+        str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc"
+    )
 
     # region_contained partitions sum to full EXACTLY (integer channels).
     rc_full = np.asarray(orc.full.region_contained, np.int64)
@@ -62,15 +73,27 @@ def test_oracle_override_conserves_node_mass(oracle_scenario, tmp_path):
     from rigel.calibration.substrate import CalibrationSubstrate
 
     orc = OracleTruth.from_bam(
-        str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc2")
-    ra = RegionArrays.from_region_df(oracle_scenario.index.region_df,
-                                     oracle_scenario.index.ref_name_to_id)
+        str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc2"
+    )
+    ra = RegionArrays.from_region_df(
+        oracle_scenario.index.region_df, oracle_scenario.index.ref_name_to_id
+    )
     ov = orc.override_masses(ra)
     full_sub = CalibrationSubstrate.from_payload(orc.full, ra)
-    total = (np.asarray(full_sub.contained.mass_unspliced) + np.asarray(full_sub.contained.mass_spliced)
-             + np.asarray(full_sub.left.mass_unspliced) + np.asarray(full_sub.left.mass_spliced)
-             + np.asarray(full_sub.right.mass_unspliced) + np.asarray(full_sub.right.mass_spliced))
-    got = (ov["mass_gdna_contained"] + ov["mass_rna_contained"]
-           + ov["mass_gdna_left"] + ov["mass_rna_left"]
-           + ov["mass_gdna_right"] + ov["mass_rna_right"])
+    total = (
+        np.asarray(full_sub.contained.mass_unspliced)
+        + np.asarray(full_sub.contained.mass_spliced)
+        + np.asarray(full_sub.left.mass_unspliced)
+        + np.asarray(full_sub.left.mass_spliced)
+        + np.asarray(full_sub.right.mass_unspliced)
+        + np.asarray(full_sub.right.mass_spliced)
+    )
+    got = (
+        ov["mass_gdna_contained"]
+        + ov["mass_rna_contained"]
+        + ov["mass_gdna_left"]
+        + ov["mass_rna_left"]
+        + ov["mass_gdna_right"]
+        + ov["mass_rna_right"]
+    )
     assert np.allclose(got, total, atol=1e-3)

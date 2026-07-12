@@ -30,6 +30,7 @@ from rigel.types import (
 # Intrachromosomal chimera detection
 # ---------------------------------------------------------------------------
 
+
 def _detect_intrachromosomal_chimera(
     exon_blocks: tuple,
     exon_t_sets: list[frozenset[int]],
@@ -55,11 +56,7 @@ def _detect_intrachromosomal_chimera(
         exon blocks in different connected components.
     """
     # Filter to blocks with non-empty transcript sets
-    items = [
-        (block, tset)
-        for block, tset in zip(exon_blocks, exon_t_sets)
-        if tset
-    ]
+    items = [(block, tset) for block, tset in zip(exon_blocks, exon_t_sets) if tset]
     if len(items) <= 1:
         return None  # Cannot be chimeric with 0 or 1 annotated block
 
@@ -132,6 +129,7 @@ def _detect_intrachromosomal_chimera(
 # Fragment construction helper
 # ---------------------------------------------------------------------------
 
+
 def make_fragment(exons=(), introns=()):
     """Create a minimal fragment-like object for :func:`resolve_fragment`.
 
@@ -157,13 +155,16 @@ def make_fragment(exons=(), introns=()):
     introns = tuple(introns)
     footprint = exons[-1].end - exons[0].start if exons else -1
     return SimpleNamespace(
-        exons=exons, introns=introns, genomic_footprint=footprint,
+        exons=exons,
+        introns=introns,
+        genomic_footprint=footprint,
     )
 
 
 # ---------------------------------------------------------------------------
 # Fragment resolution — C++ native kernel (required)
 # ---------------------------------------------------------------------------
+
 
 def resolve_fragment(frag, index):
     """Resolve a fragment to its compatible transcript set.

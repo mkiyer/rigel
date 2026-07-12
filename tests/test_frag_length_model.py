@@ -206,7 +206,9 @@ class TestFragmentLengthModelEffectiveLength:
         # mean uses the finalized EB distribution, over the in-range bins
         # (the >= max_size overflow bin is excluded — see FragmentLengthModel.mean).
         in_range = probs[: m.max_size]
-        assert m.mean == pytest.approx(float(np.dot(np.arange(m.max_size), in_range) / in_range.sum()))
+        assert m.mean == pytest.approx(
+            float(np.dot(np.arange(m.max_size), in_range) / in_range.sum())
+        )
 
     def test_terminal_bin_is_not_double_counted_for_long_transcripts(self):
         counts = np.zeros(11, dtype=np.float64)

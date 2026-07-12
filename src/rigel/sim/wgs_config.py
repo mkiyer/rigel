@@ -100,9 +100,7 @@ class WholeGenomeSimConfig:
     nrna: NRNAConfig = field(default_factory=NRNAConfig)
     capture: CaptureConfig = field(default_factory=CaptureConfig)
     capture_configs: list[CaptureScenario] = field(default_factory=list)
-    strand_specificities: list[float] = field(
-        default_factory=lambda: [1.0]
-    )
+    strand_specificities: list[float] = field(default_factory=lambda: [1.0])
 
     oracle_bam: bool = True
     verbose: bool = True

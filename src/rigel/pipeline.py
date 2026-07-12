@@ -759,9 +759,7 @@ def quant_from_buffer(
     if getattr(em_data, "n_units", 0) == 0 or not multi_loci:
         return estimator, calibration
 
-    priors = assemble_priors(
-        calibration, region_arrays, multi_loci
-    )
+    priors = assemble_priors(calibration, region_arrays, multi_loci)
     partitions = partition_and_free(em_data, multi_loci)
     _run_locus_em_partitioned(
         estimator,

@@ -162,7 +162,9 @@ def _gdna_region_node_arrays(
     Σ_{internal} (right[r] + left[r+1])`` — every non-terminal boundary side counted exactly once
     (terminal / cross-reference sides carry zero on real data and are excluded).
     """
-    from .capture_eff_length import _pooled_seam_arrays  # THE shared seam node model (transcript + gDNA)
+    from .capture_eff_length import (
+        _pooled_seam_arrays,
+    )  # THE shared seam node model (transcript + gDNA)
 
     contained = np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
     region_eff_len = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
@@ -172,7 +174,9 @@ def _gdna_region_node_arrays(
     pooled = np.zeros(n, dtype=np.float64)  # pooled seam mass, attributed to a flank region
     seam_len = np.zeros(n, dtype=np.float64)  # seam effective support, attributed to a flank region
     if n > 1:
-        seam_mass, seam_support = _pooled_seam_arrays(calibration, region_arrays)  # left-keyed, length n
+        seam_mass, seam_support = _pooled_seam_arrays(
+            calibration, region_arrays
+        )  # left-keyed, length n
         same = ref_id[:-1] == ref_id[1:]  # internal seam: genomically adjacent, same reference
         # ATTRIBUTE each seam to a flank REGION so the locus projection picks it up. Default: the LEFT
         # flank r. BUT a locus's far-LEFT outer boundary is an intergenic→(exon/intron) seam whose left
@@ -182,10 +186,14 @@ def _gdna_region_node_arrays(
         # flank is the locus's last region), so this restores symmetry: attribute the seam to the RIGHT
         # flank whenever the left flank is intergenic (no RNA-signature bits) and the right flank is not.
         sig = np.asarray(region_arrays.signature).astype(np.int64)
-        ig = (sig & _RNA_SIGNATURE_BITS) == 0  # intergenic: no exon/intron bit ⇒ dropped by the projection
+        ig = (
+            sig & _RNA_SIGNATURE_BITS
+        ) == 0  # intergenic: no exon/intron bit ⇒ dropped by the projection
         rekey_right = same & ig[:-1] & ~ig[1:]  # far-left outer boundary: intergenic → locus region
         owner = np.where(rekey_right, np.arange(1, n), np.arange(0, n - 1))
-        np.add.at(pooled, owner, seam_mass[:-1])  # a first-region node may own its right seam + a rekeyed one
+        np.add.at(
+            pooled, owner, seam_mass[:-1]
+        )  # a first-region node may own its right seam + a rekeyed one
         np.add.at(seam_len, owner, seam_support[:-1])
 
     gdna_region = contained + pooled
@@ -249,7 +257,9 @@ def assemble_priors(
     # internal boundary (support = ½ the sum of the flanking E[min(ℓ,L)] = averaged gdna_boundary_len),
     # keyed to the left-flank region — the SAME node model _pooled_seam_arrays gives the transcript
     # contraction (EFFECTIVE, not genomic, supports; the factor-1-under-uniform bedrock).
-    gdna_region, support_len, pooled, seam_len = _gdna_region_node_arrays(calibration, region_arrays)
+    gdna_region, support_len, pooled, seam_len = _gdna_region_node_arrays(
+        calibration, region_arrays
+    )
 
     # SHARED global reference density — the SAME ρ_ref every transcript contracts against, so the
     # gDNA-vs-transcript density comparison sits on ONE scale. The enrichment contraction is applied PER
@@ -322,9 +332,7 @@ def assemble_priors(
         # to every real locus, but must never exceed the locus's own effective span — otherwise a degenerate
         # sub-basepair span (e.g. a microexon-only locus, region shorter than a fragment ⇒ E[max(0,L−ℓ)]≈0)
         # would return eff_len > span, breaking eff_len ∈ (0, span]. No effect on real loci (span ≫ 1).
-        gdna_eff_len=np.minimum(
-            np.maximum(eff_len, _GDNA_EFF_LEN_FLOOR), np.maximum(span, 1e-9)
-        ),
+        gdna_eff_len=np.minimum(np.maximum(eff_len, _GDNA_EFF_LEN_FLOOR), np.maximum(span, 1e-9)),
     )
 
 

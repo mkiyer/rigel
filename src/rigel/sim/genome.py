@@ -123,9 +123,7 @@ class MutableGenome:
         """
         end = pos + len(bases)
         if end > len(self._seq) or pos < 0:
-            raise IndexError(
-                f"Edit at {pos}:{end} exceeds genome length {len(self._seq)}"
-            )
+            raise IndexError(f"Edit at {pos}:{end} exceeds genome length {len(self._seq)}")
         for i, b in enumerate(bases):
             self._seq[pos + i] = b
 

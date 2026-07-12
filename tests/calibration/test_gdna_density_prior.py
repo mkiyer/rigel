@@ -101,11 +101,13 @@ def test_weighted_median_is_continuous():
     m0 = _weighted_median(v, w)
     w2 = w.copy()
     w2[100] += 1e-12
-    assert abs(_weighted_median(v, w2) - m0) < 1e-9   # continuous in weight
+    assert abs(_weighted_median(v, w2) - m0) < 1e-9  # continuous in weight
     v2 = v.copy()
     v2[100] += 1e-12
-    assert abs(_weighted_median(v2, w) - m0) < 1e-9   # continuous in value
-    assert abs(_weighted_median(np.array([0.0, 1.0]), np.array([1.0, 1.0])) - 0.5) < 1e-9  # even split → midpoint
+    assert abs(_weighted_median(v2, w) - m0) < 1e-9  # continuous in value
+    assert (
+        abs(_weighted_median(np.array([0.0, 1.0]), np.array([1.0, 1.0])) - 0.5) < 1e-9
+    )  # even split → midpoint
 
 
 def test_empty_substrate_raises():
@@ -152,7 +154,9 @@ def test_kde_logprior_tabulation_matches_direct_at_scale():
     fg = np.clip(fgg, 1e-9, 1.0 - 1e-9)
     log_rho = np.log(fg)[None, :] + log_me[:, None]
     ref = pr.logpdf_kernel(log_rho.ravel()).reshape(log_rho.shape) - np.log1p(-fg)[None, :]
-    assert np.max(np.abs(out[sub] - ref)) < 5e-3  # interp error ≪ bandwidth; a broken lattice would be O(1)
+    assert (
+        np.max(np.abs(out[sub] - ref)) < 5e-3
+    )  # interp error ≪ bandwidth; a broken lattice would be O(1)
 
 
 # --------------------------------------------------------------------------- substrate (P2.0)
@@ -235,6 +239,7 @@ def test_substrate_excludes_tiny_regions():
     """A region shorter than the fragment (E_gdna < min_eff_length) can't contain one → excluded (the
     1/E-blowup fix). R0 has E_gdna=100; excluding below 200 drops it → empty substrate."""
     chain, belief, geom, st, ra, bsub = _mock_chain_beliefs(True)
-    sub = build_training_substrate(chain, belief, geom, st, ra, bsub, min_eff_length=200.0,
-                                   include_boundaries=False)
+    sub = build_training_substrate(
+        chain, belief, geom, st, ra, bsub, min_eff_length=200.0, include_boundaries=False
+    )
     assert sub.n == 0, sub.n

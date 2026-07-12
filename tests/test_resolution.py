@@ -201,7 +201,7 @@ def _ambiguous_multiexon_gtf(n_transcripts=8):
         ]
         for start, end in exon_coords:
             lines.append(
-                f'chr1\ttest\texon\t{start}\t{end}\t.\t+\t.\t'
+                f"chr1\ttest\texon\t{start}\t{end}\t.\t+\t.\t"
                 f'gene_id "g1"; transcript_id "t{t_idx}"; '
                 f'gene_name "G1"; gene_type "protein_coding"; tag "basic";'
             )

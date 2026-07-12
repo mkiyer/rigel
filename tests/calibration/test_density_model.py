@@ -86,7 +86,9 @@ def _zeros(n):
 
 
 def _density(sub, ra, eff, fl_mean=50.0):
-    return node_gdna_density(sub, ra, region_eff_len=np.asarray(eff, dtype=np.float64), fl_mean=fl_mean)
+    return node_gdna_density(
+        sub, ra, region_eff_len=np.asarray(eff, dtype=np.float64), fl_mean=fl_mean
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -124,7 +126,10 @@ def test_run_interior_filled_from_anchored_edges():
     ra = _region_arrays([INTRON, EXON, EXON, EXON, INTRON])
     contained = ([100, 0, 0, 0, 100], [100, 0, 0, 0, 100])
     left = ([0, 50, 0, 0, 0], [0, 50, 0, 0, 0])  # r1 anchors from its (observable) left boundary
-    right = ([0, 0, 0, 100, 0], [0, 0, 0, 100, 0])  # r3 anchors from its (observable) right boundary
+    right = (
+        [0, 0, 0, 100, 0],
+        [0, 0, 0, 100, 0],
+    )  # r3 anchors from its (observable) right boundary
     sub = _substrate(5, contained, left, right)
     nd = _density(sub, ra, np.full(5, 100.0))
     assert nd.density[1] == pytest.approx(2.0)  # 100/50
@@ -167,5 +172,3 @@ def test_density_does_not_cross_references():
     nd = _density(sub, ra, [100.0, 100.0])
     assert nd.density[0] == pytest.approx(4.0)  # chr1 observable intron: 400 / 100
     assert nd.density[1] == pytest.approx(4.0)  # chr2 no-anchor: GLOBAL baseline, not a carry
-
-

@@ -245,9 +245,7 @@ class WholeGenomeSimulator:
         # Nascent RNA draws on a DEDICATED, independent stream (entropy key "NRNA"=0x4E524E41) so
         # toggling nascent on/off never perturbs the mature-RNA or gDNA streams: a nascent-off run is
         # bit-identical to its nascent-on twin minus the nascent layer (head-to-head benchmarking).
-        self._nrna_rng = np.random.default_rng(
-            np.random.SeedSequence([int(eff_seed), 0x4E524E41])
-        )
+        self._nrna_rng = np.random.default_rng(np.random.SeedSequence([int(eff_seed), 0x4E524E41]))
 
         N = len(transcripts)
         self._genome = GenomeCache(self.fasta)
@@ -263,7 +261,8 @@ class WholeGenomeSimulator:
 
         # Pre-mRNA lengths and sequences
         self._premrna_lengths = np.array(
-            [t.end - t.start for t in transcripts], dtype=np.int64,
+            [t.end - t.start for t in transcripts],
+            dtype=np.int64,
         )
 
         # Pre-extract pre-mRNA sequences for nRNA-eligible transcripts
@@ -315,34 +314,38 @@ class WholeGenomeSimulator:
         # BAM header and reference mapping (built once, reused)
         self._ref_names = list(self.fasta.references)
         self._ref_lengths = [self.fasta.get_reference_length(r) for r in self._ref_names]
-        self._ref_name_to_id: dict[str, int] = {
-            name: i for i, name in enumerate(self._ref_names)
-        }
+        self._ref_name_to_id: dict[str, int] = {name: i for i, name in enumerate(self._ref_names)}
         self.capture = CaptureSampler.from_config(
             capture_config,
             transcripts,
             dict(zip(self._ref_names, self._ref_lengths)),
         )
-        self._bam_header = pysam.AlignmentHeader.from_dict({
-            "HD": {"VN": "1.6", "SO": "unsorted", "GO": "query"},
-            "SQ": [
-                {"SN": name, "LN": length}
-                for name, length in zip(self._ref_names, self._ref_lengths)
-            ],
-            "PG": [{
-                "ID": "rigel_sim",
-                "PN": "rigel_sim",
-                "VN": "1.0",
-                "CL": "simulated",
-            }],
-        })
+        self._bam_header = pysam.AlignmentHeader.from_dict(
+            {
+                "HD": {"VN": "1.6", "SO": "unsorted", "GO": "query"},
+                "SQ": [
+                    {"SN": name, "LN": length}
+                    for name, length in zip(self._ref_names, self._ref_lengths)
+                ],
+                "PG": [
+                    {
+                        "ID": "rigel_sim",
+                        "PN": "rigel_sim",
+                        "VN": "1.0",
+                        "CL": "simulated",
+                    }
+                ],
+            }
+        )
 
         # Pre-built shared tag lists for BAM records
         self._nh1_tags = [("NH", 1)]
 
         logger.info(
             "Simulator ready: %d transcripts, %d gDNA refs, max mRNA len=%d",
-            N, len(self._gdna_refs), max_mrna,
+            N,
+            len(self._gdna_refs),
+            max_mrna,
         )
 
     # -- Sequence extraction ------------------------------------------------
@@ -508,13 +511,19 @@ class WholeGenomeSimulator:
         # Separate-pool mode: precise fragment-level control
         if n_mrna is not None and n_nrna is not None:
             mrna_counts = self._accumulate_pool(
-                n_mrna, self._mrna_abund, self._t_lengths, space="mrna",
+                n_mrna,
+                self._mrna_abund,
+                self._t_lengths,
+                space="mrna",
             )
             # Nascent on the dedicated stream; restore self._rng so the gDNA pool (next) and the
             # mature pool (above) are untouched by whether/how much nascent was drawn.
             with self._use_nrna_rng():
                 nrna_counts = self._accumulate_pool(
-                    n_nrna, self._nrna_abund, self._premrna_lengths, space="nrna",
+                    n_nrna,
+                    self._nrna_abund,
+                    self._premrna_lengths,
+                    space="nrna",
                 )
             return mrna_counts, nrna_counts
 
@@ -536,10 +545,12 @@ class WholeGenomeSimulator:
 
             mrna_eff = self.capture.partition_array("mrna", range(N), self._t_lengths, fl)
             nrna_eff = self.capture.partition_array("nrna", range(N), self._premrna_lengths, fl)
-            weights = np.concatenate([
-                self._mrna_abund * mrna_eff,
-                self._nrna_abund * nrna_eff,
-            ])
+            weights = np.concatenate(
+                [
+                    self._mrna_abund * mrna_eff,
+                    self._nrna_abund * nrna_eff,
+                ]
+            )
             total_w = weights.sum()
             if total_w <= 0:
                 continue
@@ -601,7 +612,12 @@ class WholeGenomeSimulator:
 
             capture_space = "nrna" if is_nrna else "mrna"
             frag_starts = self.capture.sample_starts(
-                capture_space, t_idx, seq_len, frag_len, count, rng,
+                capture_space,
+                t_idx,
+                seq_len,
+                frag_len,
+                count,
+                rng,
             )
             flip_mask = rng.random(count) >= ss if ss < 1.0 else None
             quals = self._get_quals(read_len)
@@ -638,13 +654,29 @@ class WholeGenomeSimulator:
             if bam_fh is not None and ref_id is not None:
                 if is_nrna:
                     self._write_nrna_bam_batch(
-                        bam_fh, qnames, r1_seqs, r2_seqs, t,
-                        frag_starts, frag_len, read_len, flip_mask, ref_id,
+                        bam_fh,
+                        qnames,
+                        r1_seqs,
+                        r2_seqs,
+                        t,
+                        frag_starts,
+                        frag_len,
+                        read_len,
+                        flip_mask,
+                        ref_id,
                     )
                 else:
                     self._write_mrna_bam_batch(
-                        bam_fh, qnames, r1_seqs, r2_seqs, t,
-                        frag_starts, frag_len, read_len, flip_mask, ref_id,
+                        bam_fh,
+                        qnames,
+                        r1_seqs,
+                        r2_seqs,
+                        t,
+                        frag_starts,
+                        frag_len,
+                        read_len,
+                        flip_mask,
+                        ref_id,
                     )
 
             n_written += count
@@ -708,14 +740,36 @@ class WholeGenomeSimulator:
             r1_seq_str = _bam_seq_from_fastq_bytes(r1_seqs[i], r1_is_rev)
             r2_seq_str = _bam_seq_from_fastq_bytes(r2_seqs[i], r2_is_rev)
 
-            bam_fh.write(make_aligned_segment(
-                self._bam_header, qnames[i], r1_seq_str, r1_flag, ref_id,
-                r1_start, r1_cigar, ref_id, r2_start, r1_tlen, tags=tags,
-            ))
-            bam_fh.write(make_aligned_segment(
-                self._bam_header, qnames[i], r2_seq_str, r2_flag, ref_id,
-                r2_start, r2_cigar, ref_id, r1_start, r2_tlen, tags=tags,
-            ))
+            bam_fh.write(
+                make_aligned_segment(
+                    self._bam_header,
+                    qnames[i],
+                    r1_seq_str,
+                    r1_flag,
+                    ref_id,
+                    r1_start,
+                    r1_cigar,
+                    ref_id,
+                    r2_start,
+                    r1_tlen,
+                    tags=tags,
+                )
+            )
+            bam_fh.write(
+                make_aligned_segment(
+                    self._bam_header,
+                    qnames[i],
+                    r2_seq_str,
+                    r2_flag,
+                    ref_id,
+                    r2_start,
+                    r2_cigar,
+                    ref_id,
+                    r1_start,
+                    r2_tlen,
+                    tags=tags,
+                )
+            )
 
     def _write_nrna_bam_batch(
         self,
@@ -766,16 +820,36 @@ class WholeGenomeSimulator:
             r1_seq_str = _bam_seq_from_fastq_bytes(r1_seqs[i], r1_is_rev)
             r2_seq_str = _bam_seq_from_fastq_bytes(r2_seqs[i], r2_is_rev)
 
-            bam_fh.write(make_aligned_segment(
-                self._bam_header, qnames[i], r1_seq_str, r1_flag, ref_id,
-                r1_g_start, [(pysam.CMATCH, r1_read_len)],
-                ref_id, r2_g_start, r1_tlen, tags=self._nh1_tags,
-            ))
-            bam_fh.write(make_aligned_segment(
-                self._bam_header, qnames[i], r2_seq_str, r2_flag, ref_id,
-                r2_g_start, [(pysam.CMATCH, r2_read_len)],
-                ref_id, r1_g_start, r2_tlen, tags=self._nh1_tags,
-            ))
+            bam_fh.write(
+                make_aligned_segment(
+                    self._bam_header,
+                    qnames[i],
+                    r1_seq_str,
+                    r1_flag,
+                    ref_id,
+                    r1_g_start,
+                    [(pysam.CMATCH, r1_read_len)],
+                    ref_id,
+                    r2_g_start,
+                    r1_tlen,
+                    tags=self._nh1_tags,
+                )
+            )
+            bam_fh.write(
+                make_aligned_segment(
+                    self._bam_header,
+                    qnames[i],
+                    r2_seq_str,
+                    r2_flag,
+                    ref_id,
+                    r2_g_start,
+                    [(pysam.CMATCH, r2_read_len)],
+                    ref_id,
+                    r1_g_start,
+                    r2_tlen,
+                    tags=self._nh1_tags,
+                )
+            )
 
     # -- gDNA reads (vectorized per chromosome) -----------------------------
 
@@ -901,20 +975,36 @@ class WholeGenomeSimulator:
                 r1_seq_str = _bam_seq_from_fastq_bytes(r1_seqs[j], r1_is_rev)
                 r2_seq_str = _bam_seq_from_fastq_bytes(r2_seqs[j], r2_is_rev)
 
-                bam_fh.write(make_aligned_segment(
-                    self._bam_header, qnames[j], r1_seq_str,
-                    r1_flag, ref_id, r1_start_pos,
-                    [(pysam.CMATCH, read_len)],
-                    ref_id, r2_start_pos, r1_tlen,
-                    tags=self._nh1_tags,
-                ))
-                bam_fh.write(make_aligned_segment(
-                    self._bam_header, qnames[j], r2_seq_str,
-                    r2_flag, ref_id, r2_start_pos,
-                    [(pysam.CMATCH, read_len)],
-                    ref_id, r1_start_pos, r2_tlen,
-                    tags=self._nh1_tags,
-                ))
+                bam_fh.write(
+                    make_aligned_segment(
+                        self._bam_header,
+                        qnames[j],
+                        r1_seq_str,
+                        r1_flag,
+                        ref_id,
+                        r1_start_pos,
+                        [(pysam.CMATCH, read_len)],
+                        ref_id,
+                        r2_start_pos,
+                        r1_tlen,
+                        tags=self._nh1_tags,
+                    )
+                )
+                bam_fh.write(
+                    make_aligned_segment(
+                        self._bam_header,
+                        qnames[j],
+                        r2_seq_str,
+                        r2_flag,
+                        ref_id,
+                        r2_start_pos,
+                        [(pysam.CMATCH, read_len)],
+                        ref_id,
+                        r1_start_pos,
+                        r2_tlen,
+                        tags=self._nh1_tags,
+                    )
+                )
         return count
 
     def _write_gdna_from_counts(
@@ -928,7 +1018,13 @@ class WholeGenomeSimulator:
         n_written = 0
         for (ref_idx, fl), count in gdna_counts.items():
             n_written += self._write_gdna_chunk(
-                ref_idx, fl, count, r1_buf, r2_buf, bam_fh, n_offset=n_written,
+                ref_idx,
+                fl,
+                count,
+                r1_buf,
+                r2_buf,
+                bam_fh,
+                n_offset=n_written,
             )
         return n_written
 
@@ -1012,7 +1108,9 @@ class WholeGenomeSimulator:
         # Uses self._rng so determinism follows the configured seed.
         logger.info("Accumulating RNA fragment counts...")
         mrna_counts, nrna_counts = self._accumulate_rna_counts(
-            n_rna, n_mrna=n_mrna, n_nrna=n_nrna,
+            n_rna,
+            n_mrna=n_mrna,
+            n_nrna=n_nrna,
         )
         gdna_counts = self._accumulate_gdna_counts(n_gdna)
 
@@ -1021,25 +1119,46 @@ class WholeGenomeSimulator:
         total_gdna = sum(gdna_counts.values())
         logger.info(
             "Fragment counts: %d mRNA (%d txs), %d nRNA (%d txs), %d gDNA chunks",
-            total_mrna, len(mrna_counts), total_nrna, len(nrna_counts), len(gdna_counts),
+            total_mrna,
+            len(mrna_counts),
+            total_nrna,
+            len(nrna_counts),
+            len(gdna_counts),
         )
 
         if n_workers <= 1:
             self._write_all_serial(
-                r1_path, r2_path, bam_path, mrna_counts, nrna_counts, gdna_counts,
+                r1_path,
+                r2_path,
+                bam_path,
+                mrna_counts,
+                nrna_counts,
+                gdna_counts,
                 oracle_bam,
             )
         else:
             self._write_all_parallel(
-                output_dir, prefix, r1_path, r2_path, bam_path,
-                mrna_counts, nrna_counts, gdna_counts,
-                oracle_bam, n_workers,
+                output_dir,
+                prefix,
+                r1_path,
+                r2_path,
+                bam_path,
+                mrna_counts,
+                nrna_counts,
+                gdna_counts,
+                oracle_bam,
+                n_workers,
             )
 
         n_written = total_mrna + total_nrna + total_gdna
         logger.info(
             "Wrote %d read pairs -> %s (RNA=%d, gDNA=%d, oracle=%s, workers=%d)",
-            n_written, output_dir, n_rna, n_gdna, oracle_bam, n_workers,
+            n_written,
+            output_dir,
+            n_rna,
+            n_gdna,
+            oracle_bam,
+            n_workers,
         )
         return r1_path, r2_path, bam_path
 
@@ -1064,19 +1183,29 @@ class WholeGenomeSimulator:
             r2_buf = _FastqBuffer(r2_fh)
             if oracle_bam:
                 bam_fh = pysam.AlignmentFile(
-                    str(bam_path), "wb", header=self._bam_header,
+                    str(bam_path),
+                    "wb",
+                    header=self._bam_header,
                 )
             try:
                 for t_idx in sorted(mrna_counts):
                     self._write_rna_reads(
-                        t_idx, mrna_counts[t_idx], r1_buf, r2_buf, bam_fh,
+                        t_idx,
+                        mrna_counts[t_idx],
+                        r1_buf,
+                        r2_buf,
+                        bam_fh,
                         is_nrna=False,
                     )
                 # Nascent reads on the dedicated stream; restore so gDNA writing (next) is unaffected.
                 with self._use_nrna_rng():
                     for t_idx in sorted(nrna_counts):
                         self._write_rna_reads(
-                            t_idx, nrna_counts[t_idx], r1_buf, r2_buf, bam_fh,
+                            t_idx,
+                            nrna_counts[t_idx],
+                            r1_buf,
+                            r2_buf,
+                            bam_fh,
                             is_nrna=True,
                         )
                 self._write_gdna_from_counts(gdna_counts, r1_buf, r2_buf, bam_fh)
@@ -1105,13 +1234,19 @@ class WholeGenomeSimulator:
         gdna_items = list(gdna_counts.items())  # [((ref_idx, fl), count), ...]
 
         mrna_shards = _shard_by_count(
-            mrna_items, n_workers, weight=lambda x: sum(x[1].values()),
+            mrna_items,
+            n_workers,
+            weight=lambda x: sum(x[1].values()),
         )
         nrna_shards = _shard_by_count(
-            nrna_items, n_workers, weight=lambda x: sum(x[1].values()),
+            nrna_items,
+            n_workers,
+            weight=lambda x: sum(x[1].values()),
         )
         gdna_shards = _shard_by_count(
-            gdna_items, n_workers, weight=lambda x: x[1],
+            gdna_items,
+            n_workers,
+            weight=lambda x: x[1],
         )
 
         shard_dir = output_dir / f".{prefix}_shards"
@@ -1121,16 +1256,18 @@ class WholeGenomeSimulator:
 
         tasks = []
         for k in range(n_workers):
-            tasks.append((
-                k,
-                mrna_shards[k],
-                nrna_shards[k],
-                gdna_shards[k],
-                str(shard_dir),
-                prefix,
-                oracle_bam,
-                base_seed + k,
-            ))
+            tasks.append(
+                (
+                    k,
+                    mrna_shards[k],
+                    nrna_shards[k],
+                    gdna_shards[k],
+                    str(shard_dir),
+                    prefix,
+                    oracle_bam,
+                    base_seed + k,
+                )
+            )
 
         # Bind self into a module global so fork'd children inherit it without
         # pickling.  Passing self via Pool.map would fail (pysam handles).
@@ -1199,23 +1336,41 @@ class WholeGenomeSimulator:
             r2_buf = _FastqBuffer(r2_fh)
             if oracle_bam:
                 bam_fh = pysam.AlignmentFile(
-                    str(bam_path), "wb", header=self._bam_header,
+                    str(bam_path),
+                    "wb",
+                    header=self._bam_header,
                 )
             try:
                 for t_idx, len_counts in mrna_items:
                     self._write_rna_reads(
-                        t_idx, len_counts, r1_buf, r2_buf, bam_fh, is_nrna=False,
+                        t_idx,
+                        len_counts,
+                        r1_buf,
+                        r2_buf,
+                        bam_fh,
+                        is_nrna=False,
                     )
                 # nascent shard on the dedicated stream
                 with self._use_nrna_rng():
                     for t_idx, len_counts in nrna_items:
                         self._write_rna_reads(
-                            t_idx, len_counts, r1_buf, r2_buf, bam_fh, is_nrna=True,
+                            t_idx,
+                            len_counts,
+                            r1_buf,
+                            r2_buf,
+                            bam_fh,
+                            is_nrna=True,
                         )
                 n_offset = 0
                 for (ref_idx, fl), count in gdna_items:
                     n_offset += self._write_gdna_chunk(
-                        ref_idx, fl, count, r1_buf, r2_buf, bam_fh, n_offset=n_offset,
+                        ref_idx,
+                        fl,
+                        count,
+                        r1_buf,
+                        r2_buf,
+                        bam_fh,
+                        n_offset=n_offset,
                     )
                 r1_buf.close()
                 r2_buf.close()

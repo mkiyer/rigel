@@ -35,7 +35,9 @@ def test_scenario_gdna_config_both_knobs_reach_the_engine():
     after the single-engine consolidation."""
     from rigel.sim.scenario import _to_gdna_sim
 
-    assert _to_gdna_sim(GDNAConfig(gdna_strand_overdispersion=0.2)).strand_overdispersion == pytest.approx(0.2)
+    assert _to_gdna_sim(
+        GDNAConfig(gdna_strand_overdispersion=0.2)
+    ).strand_overdispersion == pytest.approx(0.2)
     assert _to_gdna_sim(GDNAConfig(strand_kappa=9.0)).strand_overdispersion == pytest.approx(0.1)
     assert _to_gdna_sim(GDNAConfig()).strand_overdispersion == 0.0
     assert _to_gdna_sim(None).strand_overdispersion == 0.0

@@ -27,6 +27,7 @@ keep DISTINCT output contracts on purpose: this path writes ``genome.fa`` + a tr
 pre-generated benchmarks depend on), whereas ``GeneBuilder`` writes ``{name}.fa`` + an exon-only
 ``annotations.gtf``. Only the GTF writers below (:func:`write_gtf`) differ by design.
 """
+
 from __future__ import annotations
 
 import logging
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────
 
-GENOME_LENGTH = 10_000_000   # 10 Mb
+GENOME_LENGTH = 10_000_000  # 10 Mb
 REF_NAME = "chr_syn"
 SEED = 42
 N_GENES = 50
@@ -102,6 +103,7 @@ class GeneDef:
 
 # ── Genome generation ─────────────────────────────────────────────────────
 
+
 def generate_random_genome(length: int, seed: int) -> str:
     """Generate a random DNA sequence (shared generator — see ``genome.random_dna_array``)."""
     return "".join(random_dna_array(length, np.random.default_rng(seed)))
@@ -114,6 +116,7 @@ def inject_splice_sites(seq_array: np.ndarray, transcripts: list[TranscriptDef])
     intron end. For - strand: CT / AC (reverse complement of GT-AG). Introns shorter than 4 bp are
     skipped (the function-path policy). Placement is the shared :func:`place_intron_motif`.
     """
+
     def _edit(pos: int, bases: str) -> None:
         for i, b in enumerate(bases):
             seq_array[pos + i] = ord(b)
@@ -121,12 +124,11 @@ def inject_splice_sites(seq_array: np.ndarray, transcripts: list[TranscriptDef])
     for tx in transcripts:
         exons = tx.exons
         for i in range(len(exons) - 1):
-            place_intron_motif(
-                _edit, exons[i].end, exons[i + 1].start, tx.strand, on_short="skip"
-            )
+            place_intron_motif(_edit, exons[i].end, exons[i + 1].start, tx.strand, on_short="skip")
 
 
 # ── Gene/transcript structure generation ──────────────────────────────────
+
 
 def _generate_exon_structure(
     rng: np.random.Generator,
@@ -162,7 +164,7 @@ def _generate_exon_structure(
     if total_needed > available_span:
         n_exons = max(1, n_exons // 2)
         exon_lens = exon_lens[:n_exons]
-        intron_lens = intron_lens[:max(0, n_exons - 1)]
+        intron_lens = intron_lens[: max(0, n_exons - 1)]
         total_needed = int(exon_lens.sum() + intron_lens.sum())
 
     # Place within gene region
@@ -276,8 +278,12 @@ def _dedup_isoforms(
             # Deterministic last-resort: shift exon-0 start by idx+1 bp
             shift = idx + 1
             first = cur[0]
-            new_start = max(0, first.start + shift if first.start + shift < first.end - MIN_EXON_LEN
-                            else first.start - shift)
+            new_start = max(
+                0,
+                first.start + shift
+                if first.start + shift < first.end - MIN_EXON_LEN
+                else first.start - shift,
+            )
             cur[0] = ExonDef(new_start, first.end)
             new_sig = _exon_signature(cur)
             # If still colliding (extremely unlikely), nudge the last exon too.
@@ -356,9 +362,15 @@ def generate_genes(
 
     # Decide isoform counts per gene.
     if target_transcripts is None:
-        isoform_counts = rng.integers(
-            min_isoforms, max_isoforms + 1, size=n_genes,
-        ).astype(int).tolist()
+        isoform_counts = (
+            rng.integers(
+                min_isoforms,
+                max_isoforms + 1,
+                size=n_genes,
+            )
+            .astype(int)
+            .tolist()
+        )
     else:
         # Draw from the original shifted exponential-like distribution, but
         # scale it to the requested target and always emit n_genes primary genes.
@@ -495,6 +507,7 @@ def generate_genes(
 
 
 # ── File writers ──────────────────────────────────────────────────────────
+
 
 def write_fasta(genome_seq: str, ref_name: str, outdir: Path) -> Path:
     """Write the genome FASTA (as ``genome.fa``) with a samtools index.

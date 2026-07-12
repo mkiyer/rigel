@@ -236,12 +236,7 @@ def test_suite_capture_config_accepts_top_level_external_bed_panel(tmp_path):
     probes = tmp_path / "panel.bed"
     probes.write_text("chr1\t10\t130\tprobe1\t0\t+\t10\t130\t0\t1\t120\t0\n")
     config = tmp_path / "suite.yaml"
-    config.write_text(
-        f"capture:\n"
-        f"  probes: {probes}\n"
-        f"  format: bed12\n"
-        f"  binding_per_base: 7\n"
-    )
+    config.write_text(f"capture:\n  probes: {probes}\n  format: bed12\n  binding_per_base: 7\n")
 
     values = _load_suite_config(config)
     specs, include_capture_in_names = _suite_capture_specs(_suite_capture_args(**values))
@@ -289,7 +284,10 @@ def test_capture_sweep_uses_paired_condition_seed():
     assert seed == capture_paired_condition_seed(42, "none", 0.99, "none")
     assert seed != capture_paired_condition_seed(42, "high", 0.99, "none")
     assert condition_dir_name("none", 0.99, "none", "off") != condition_dir_name(
-        "none", 0.99, "none", "on",
+        "none",
+        0.99,
+        "none",
+        "on",
     )
 
 

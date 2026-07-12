@@ -40,7 +40,9 @@ class NodeChain:
 
     n_nodes: int
     kind: np.ndarray  # int8[n_nodes] — REGION or BOUNDARY
-    ref_idx: np.ndarray  # int64[n_nodes] — index into the region (kind=REGION) or boundary (kind=BOUNDARY) arrays
+    ref_idx: (
+        np.ndarray
+    )  # int64[n_nodes] — index into the region (kind=REGION) or boundary (kind=BOUNDARY) arrays
     order: np.ndarray  # int64[n_nodes] — node ids in genomic visiting order
     left: np.ndarray  # int64[n_nodes] — left neighbour node id (-1 = reference start terminal)
     right: np.ndarray  # int64[n_nodes] — right neighbour node id (-1 = reference end terminal)
@@ -65,7 +67,9 @@ def build_node_chain(ref_region_offsets: np.ndarray, ref_boundary_offsets: np.nd
     rro = np.asarray(ref_region_offsets, dtype=np.int64)
     rbo = np.asarray(ref_boundary_offsets, dtype=np.int64)
     if rro.shape != rbo.shape:
-        raise ValueError("ref_region_offsets and ref_boundary_offsets must share length (n_refs + 1).")
+        raise ValueError(
+            "ref_region_offsets and ref_boundary_offsets must share length (n_refs + 1)."
+        )
     n_refs = rro.shape[0] - 1
     r_total = int(rro[-1])
     b_total = int(rbo[-1])
@@ -103,4 +107,6 @@ def build_node_chain(ref_region_offsets: np.ndarray, ref_boundary_offsets: np.nd
         right[ref_nodes[:-1]] = ref_nodes[1:]
 
     order = np.arange(n_nodes, dtype=np.int64)  # node ids already assigned in genomic order
-    return NodeChain(n_nodes=n_nodes, kind=kind, ref_idx=ref_idx, order=order, left=left, right=right)
+    return NodeChain(
+        n_nodes=n_nodes, kind=kind, ref_idx=ref_idx, order=order, left=left, right=right
+    )

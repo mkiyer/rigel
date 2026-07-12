@@ -299,8 +299,12 @@ def test_fallback_returns_prior():
     """No seed signal (empty) ⇒ fall back to the prior overdispersion, not 0."""
     prior = overdispersion_for_beta(3.0)
     m = fit_gdna_strand_overdispersion(
-        np.array([]), np.array([]), np.array([]), rna_sense_frac=0.95,
-        prior_overdispersion=prior, prior_weight=30.0,
+        np.array([]),
+        np.array([]),
+        np.array([]),
+        rna_sense_frac=0.95,
+        prior_overdispersion=prior,
+        prior_weight=30.0,
     )
     assert m.fallback_used
     assert m.gdna_strand_overdispersion == pytest.approx(prior)

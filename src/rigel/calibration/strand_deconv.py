@@ -26,9 +26,13 @@ from .signature import TS_AMBIG, TS_NEG, TS_NONE, TS_POS
 class NodeDeconv:
     """Per-node deconvolution result (regions or boundary sides; kept separate)."""
 
-    gdna_mass: np.ndarray  # float64[K] — the consumed output (calibrate/derive read ONLY the *_mass fields)
+    gdna_mass: (
+        np.ndarray
+    )  # float64[K] — the consumed output (calibrate/derive read ONLY the *_mass fields)
     rna_mass: np.ndarray  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
-    gdna_frac: np.ndarray  # float64[K] — the node's gDNA composition (face-invariant; mass = frac·M_face)
+    gdna_frac: (
+        np.ndarray
+    )  # float64[K] — the node's gDNA composition (face-invariant; mass = frac·M_face)
     # per-strand RNA fractions of the UNSPLICED mass (posterior means; f_pos+f_neg+gdna_frac = 1), populated
     # by the simplex sweep for the per-strand RNA imputation (the bipartite R↔B↔R chain).
     rna_pos_frac: "np.ndarray | None" = None  # float64[K] — f_pos
@@ -89,11 +93,17 @@ def _side_strand_orientation(view, same, ts_self, ts_other):
     self_neg_or_none = (ts_self == TS_NEG) | (ts_self == TS_NONE)
     other_neg_or_none = (ts_other == TS_NEG) | (ts_other == TS_NONE)
     cons_pos = (
-        same & ~either_ambig & self_pos_or_none & other_pos_or_none
+        same
+        & ~either_ambig
+        & self_pos_or_none
+        & other_pos_or_none
         & ((ts_self == TS_POS) | (ts_other == TS_POS))
     )
     cons_neg = (
-        same & ~either_ambig & self_neg_or_none & other_neg_or_none
+        same
+        & ~either_ambig
+        & self_neg_or_none
+        & other_neg_or_none
         & ((ts_self == TS_NEG) | (ts_other == TS_NEG))
     )
     strand_observable = cons_pos | cons_neg

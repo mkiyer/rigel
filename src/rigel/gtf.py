@@ -24,6 +24,7 @@ class GTFRecord:
     """
     Represents a single line in a GTF file
     """
+
     seqname: str
     source: str
     feature: str
@@ -41,26 +42,26 @@ class GTFRecord:
     ATTR_TOKEN_PATTERN = re.compile(r'\s*([^";\s]+)\s+(?:"([^"]*)"|([^;]+))\s*;')
 
     @classmethod
-    def from_str(cls, s: str) -> 'GTFRecord':
+    def from_str(cls, s: str) -> "GTFRecord":
         """
         Parses a raw GTF string line into a GTF object.
         """
-        fields = s.rstrip('\n').split('\t')
+        fields = s.rstrip("\n").split("\t")
         if len(fields) < 9:
             raise ValueError(f"Malformed GTF line, expected 9 columns: {s}")
 
         # Parse coordinates (Convert 1-based to 0-based)
         try:
-            # GTF is 1-based inclusive. 
+            # GTF is 1-based inclusive.
             # We convert to 0-based exclusive (Python/BED standard)
-            start_pos = int(fields[3]) - 1 
+            start_pos = int(fields[3]) - 1
             end_pos = int(fields[4])
         except ValueError:
             raise ValueError(f"Non-integer coordinates in line: {fields}")
 
         # Parse Score: '.' -> None
         score_val = None
-        if fields[5] != '.':
+        if fields[5] != ".":
             try:
                 score_val = float(fields[5])
             except ValueError as exc:
@@ -68,7 +69,7 @@ class GTFRecord:
 
         # Validate phase field (CDS: 0/1/2 or '.')
         phase_val = fields[7]
-        if phase_val != '.' and phase_val not in {'0', '1', '2'}:
+        if phase_val != "." and phase_val not in {"0", "1", "2"}:
             raise ValueError(f"Invalid phase value: {phase_val}")
 
         # Parse Attributes
@@ -84,15 +85,15 @@ class GTFRecord:
             strand=fields[6],
             phase=phase_val,
             attrs=parsed_attrs,
-            tags=parsed_tags
+            tags=parsed_tags,
         )
-    
+
     def __str__(self) -> str:
         """
         Convert GTF object back to string representation.
         """
         # Convert score and phase back to string
-        score_str = '.' if self.score is None else str(self.score)
+        score_str = "." if self.score is None else str(self.score)
 
         # Reconstruct attributes field
         attr_parts = []
@@ -104,7 +105,7 @@ class GTFRecord:
                 attr_parts.append(f'{k} "{v}";')
         for k in self.tags:
             attr_parts.append(f'tag "{k}";')
-        attr_field = ' '.join(attr_parts)
+        attr_field = " ".join(attr_parts)
 
         fields = [
             self.seqname,
@@ -115,16 +116,16 @@ class GTFRecord:
             score_str,
             self.strand,
             self.phase,
-            attr_field
+            attr_field,
         ]
-        return '\t'.join(fields)
+        return "\t".join(fields)
 
     @staticmethod
     def parse(
         line_iter: Iterable[str],
         *,
         parse_mode: Literal["strict", "warn-skip"] = "strict",
-    ) -> Generator['GTFRecord', None, None]:
+    ) -> Generator["GTFRecord", None, None]:
         """
         Generator to parse lines from an iterator (file object or list).
 
@@ -137,25 +138,19 @@ class GTFRecord:
             - ``"warn-skip"``: log warning and skip malformed lines.
         """
         if parse_mode not in {"strict", "warn-skip"}:
-            raise ValueError(
-                f"Invalid parse_mode {parse_mode!r}; expected "
-                f"'strict' or 'warn-skip'"
-            )
+            raise ValueError(f"Invalid parse_mode {parse_mode!r}; expected 'strict' or 'warn-skip'")
 
         for line_num, line in enumerate(line_iter, 1):
             line = line.strip()
-            if not line or line.startswith('#'):
+            if not line or line.startswith("#"):
                 continue
             try:
                 yield GTFRecord.from_str(line)
             except ValueError as e:
                 if parse_mode == "strict":
-                    raise ValueError(
-                        f"Malformed GTF at line {line_num}: {e}"
-                    ) from e
+                    raise ValueError(f"Malformed GTF at line {line_num}: {e}") from e
                 logger.warning("Skipping malformed GTF line %d: %s", line_num, e)
                 continue
-
 
     @classmethod
     def _parse_attrs(cls, raw_attr_field: str) -> tuple[dict[str, AttrValue], set[str]]:
@@ -170,7 +165,7 @@ class GTFRecord:
             key = match.group(1)
             value = match.group(2) if match.group(2) is not None else match.group(3).strip()
 
-            if key == 'tag':
+            if key == "tag":
                 tags.add(value)
                 continue
 
@@ -185,13 +180,12 @@ class GTFRecord:
 
         return attrs, tags
 
-
     @staticmethod
     def parse_file(
         filepath: str | Path,
         *,
         parse_mode: Literal["strict", "warn-skip"] = "strict",
-    ) -> Generator['GTFRecord', None, None]:
+    ) -> Generator["GTFRecord", None, None]:
         """
         Parse a GTF file and yield GTF objects.
         Handles both plain text and gzip files (.gz).
@@ -199,7 +193,7 @@ class GTFRecord:
         filepath = Path(filepath)
         if not filepath.exists():
             raise FileNotFoundError(f"GTF file not found: {filepath}")
-        
-        open_func = gzip.open if filepath.suffix == '.gz' else open    
-        with open_func(filepath, 'rt') as f:
+
+        open_func = gzip.open if filepath.suffix == ".gz" else open
+        with open_func(filepath, "rt") as f:
             yield from GTFRecord.parse(f, parse_mode=parse_mode)

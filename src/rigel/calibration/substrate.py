@@ -164,8 +164,12 @@ class BoundarySubstrate:
     """
 
     n_boundaries: int
-    left_region: np.ndarray  # int64[B] — region to the boundary's left; -1 at a reference-start terminal
-    right_region: np.ndarray  # int64[B] — region to the boundary's right; -1 at a reference-end terminal
+    left_region: (
+        np.ndarray
+    )  # int64[B] — region to the boundary's left; -1 at a reference-start terminal
+    right_region: (
+        np.ndarray
+    )  # int64[B] — region to the boundary's right; -1 at a reference-end terminal
     left: SubstrateView  # the boundary's LEFT side (inside left_region): boundary_*_left[b]
     right: SubstrateView  # the boundary's RIGHT side (inside right_region): boundary_*_right[b]
     #: int8[B] — the boundary's splice-junction genomic strand (``Strand``: POS=1 /

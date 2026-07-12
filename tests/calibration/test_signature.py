@@ -89,7 +89,15 @@ def test_strand_convention_unified():
     from rigel.types import Strand
 
     assert (TS_NONE, TS_POS, TS_NEG, TS_AMBIG) == (0, 1, 2, 3)
-    assert (int(RegionStrand.NONE), int(RegionStrand.POS), int(RegionStrand.NEG), int(RegionStrand.AMBIG)) == (
-        TS_NONE, TS_POS, TS_NEG, TS_AMBIG,
+    assert (
+        int(RegionStrand.NONE),
+        int(RegionStrand.POS),
+        int(RegionStrand.NEG),
+        int(RegionStrand.AMBIG),
+    ) == (
+        TS_NONE,
+        TS_POS,
+        TS_NEG,
+        TS_AMBIG,
     )
     assert (int(Strand.POS), int(Strand.NEG)) == (TS_POS, TS_NEG)

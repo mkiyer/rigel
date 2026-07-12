@@ -65,9 +65,7 @@ def _make_spliced_read(
         cigar = [(0, 50), (3, 200), (0, 50)]
     a.cigar = cigar
     a.query_sequence = "A" * sum(n for op, n in cigar if op in (0, 1, 4))
-    a.query_qualities = pysam.qualitystring_to_array(
-        "I" * len(a.query_sequence)
-    )
+    a.query_qualities = pysam.qualitystring_to_array("I" * len(a.query_sequence))
     a.next_reference_id = 0
     a.next_reference_start = pos + 300
     a.template_length = 500
@@ -184,7 +182,8 @@ class TestDetectSJStrandTag:
     def test_detect_xs_type_a(self, tmp_path):
         """XS tag stored as type 'A' → detected as 'XS'."""
         reads = _make_read_pair(
-            "r1", 1000,
+            "r1",
+            1000,
             r1_tags=[("NH", 1), ("XS", "+", "A")],
             r2_tags=[("NH", 1)],
         )
@@ -194,7 +193,8 @@ class TestDetectSJStrandTag:
     def test_detect_xs_type_z(self, tmp_path):
         """XS tag stored as type 'Z' → still detected (tag is present)."""
         reads = _make_read_pair(
-            "r1", 1000,
+            "r1",
+            1000,
             r1_tags=[("NH", 1), ("XS", "+", "Z")],
             r2_tags=[("NH", 1)],
         )
@@ -204,7 +204,8 @@ class TestDetectSJStrandTag:
     def test_detect_ts(self, tmp_path):
         """ts tag detected."""
         reads = _make_read_pair(
-            "r1", 1000,
+            "r1",
+            1000,
             r1_tags=[("NH", 1), ("ts", "+", "A")],
             r2_tags=[("NH", 1)],
         )
@@ -214,7 +215,8 @@ class TestDetectSJStrandTag:
     def test_detect_both_xs_ts(self, tmp_path):
         """Both XS and ts present → 'XS,ts'."""
         reads = _make_read_pair(
-            "r1", 1000,
+            "r1",
+            1000,
             r1_tags=[("NH", 1), ("XS", "+", "A"), ("ts", "+", "A")],
             r2_tags=[("NH", 1)],
         )
@@ -244,7 +246,8 @@ class TestDetectSJStrandTag:
     def test_detect_none_no_tags(self, tmp_path):
         """Spliced reads without strand tags → 'none'."""
         reads = _make_read_pair(
-            "r1", 1000,
+            "r1",
+            1000,
             r1_tags=[("NH", 1)],  # no XS/ts
             r2_tags=[("NH", 1)],
         )
@@ -292,8 +295,13 @@ class TestXSTagTypeVariants:
             ],
         )
         sc = ReadSimConfig(
-            frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
-            read_length=100, strand_specificity=0.95, seed=42,
+            frag_mean=250,
+            frag_std=40,
+            frag_min=100,
+            frag_max=500,
+            read_length=100,
+            strand_specificity=0.95,
+            seed=42,
         )
         result = scenario.build_oracle(
             n_fragments=200,
@@ -332,9 +340,7 @@ class TestXSTagTypeVariants:
         pr = run_pipeline(bam_path, index, config=config)
 
         sm = pr.strand_models.exonic_spliced
-        assert sm.n_observations > 0, (
-            "Type 'A' XS tag should produce exonic_spliced observations"
-        )
+        assert sm.n_observations > 0, "Type 'A' XS tag should produce exonic_spliced observations"
         # With SS=0.95, strand_specificity should be high
         assert sm.strand_specificity > 0.8
 
@@ -352,9 +358,7 @@ class TestXSTagTypeVariants:
         pr = run_pipeline(bam_path, index, config=config)
 
         sm = pr.strand_models.exonic_spliced
-        assert sm.n_observations > 0, (
-            "Type 'Z' XS tag should be handled by Z-type fallback"
-        )
+        assert sm.n_observations > 0, "Type 'Z' XS tag should be handled by Z-type fallback"
         assert sm.strand_specificity > 0.8
 
     def test_type_a_and_z_produce_same_strand_model(self, tmp_path):
@@ -367,7 +371,8 @@ class TestXSTagTypeVariants:
         dir_a.mkdir()
         bam_a, idx_a = self._build_simple_scenario(dir_a, "A")
         cfg = PipelineConfig(
-            em=EMConfig(seed=42), scan=BamScanConfig(sj_strand_tag="auto"),
+            em=EMConfig(seed=42),
+            scan=BamScanConfig(sj_strand_tag="auto"),
         )
         pr_a = run_pipeline(bam_a, idx_a, config=cfg)
 
@@ -419,8 +424,13 @@ class TestTsTagFlipping:
             ],
         )
         sc = ReadSimConfig(
-            frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
-            read_length=100, strand_specificity=0.95, seed=42,
+            frag_mean=250,
+            frag_std=40,
+            frag_min=100,
+            frag_max=500,
+            read_length=100,
+            strand_specificity=0.95,
+            seed=42,
         )
         result = scenario.build_oracle(n_fragments=200, sim_config=sc)
 
@@ -483,9 +493,7 @@ class TestTsTagFlipping:
         pr = run_pipeline(bam_path, index, config=config)
 
         sm = pr.strand_models.exonic_spliced
-        assert sm.n_observations > 0, (
-            "ts type 'Z' should be handled by Z-type fallback"
-        )
+        assert sm.n_observations > 0, "ts type 'Z' should be handled by Z-type fallback"
         assert sm.strand_specificity > 0.8
 
 
@@ -520,8 +528,13 @@ class TestMissingAndInvalidTags:
             ],
         )
         sc = ReadSimConfig(
-            frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
-            read_length=100, strand_specificity=0.95, seed=42,
+            frag_mean=250,
+            frag_std=40,
+            frag_min=100,
+            frag_max=500,
+            read_length=100,
+            strand_specificity=0.95,
+            seed=42,
         )
         result = scenario.build_oracle(n_fragments=200, sim_config=sc)
 
@@ -603,8 +616,13 @@ class TestMissingAndInvalidTags:
             ],
         )
         sc = ReadSimConfig(
-            frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
-            read_length=100, strand_specificity=0.95, seed=42,
+            frag_mean=250,
+            frag_std=40,
+            frag_min=100,
+            frag_max=500,
+            read_length=100,
+            strand_specificity=0.95,
+            seed=42,
         )
         result = scenario.build_oracle(n_fragments=200, sim_config=sc)
         _, strand_models, _, _, _ = scan_and_buffer(
@@ -641,8 +659,13 @@ class TestMissingAndInvalidTags:
             ],
         )
         sc = ReadSimConfig(
-            frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
-            read_length=100, strand_specificity=0.95, seed=42,
+            frag_mean=250,
+            frag_std=40,
+            frag_min=100,
+            frag_max=500,
+            read_length=100,
+            strand_specificity=0.95,
+            seed=42,
         )
         result = scenario.build_oracle(n_fragments=200, sim_config=sc)
 
@@ -699,8 +722,13 @@ class TestOracleBamXSType:
             ],
         )
         sc = ReadSimConfig(
-            frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
-            read_length=100, strand_specificity=0.95, seed=42,
+            frag_mean=250,
+            frag_std=40,
+            frag_min=100,
+            frag_max=500,
+            read_length=100,
+            strand_specificity=0.95,
+            seed=42,
         )
         result = scenario.build_oracle(n_fragments=50, sim_config=sc)
 
@@ -708,18 +736,12 @@ class TestOracleBamXSType:
             for read in bam:
                 if read.has_tag("XS"):
                     # get_tags with_value_type returns (tag, value, type)
-                    tag_dict = {
-                        t: (v, c)
-                        for t, v, c in read.get_tags(with_value_type=True)
-                    }
+                    tag_dict = {t: (v, c) for t, v, c in read.get_tags(with_value_type=True)}
                     xs_val, xs_type = tag_dict["XS"]
                     assert xs_type == "A", (
-                        f"XS tag should be type 'A' (char), "
-                        f"got type '{xs_type}' value '{xs_val}'"
+                        f"XS tag should be type 'A' (char), got type '{xs_type}' value '{xs_val}'"
                     )
-                    assert xs_val in ("+", "-"), (
-                        f"XS value should be '+' or '-', got '{xs_val}'"
-                    )
+                    assert xs_val in ("+", "-"), f"XS value should be '+' or '-', got '{xs_val}'"
 
 
 # =====================================================================
@@ -760,8 +782,13 @@ class TestIntegerTags:
             ],
         )
         sc = ReadSimConfig(
-            frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
-            read_length=100, strand_specificity=0.95, seed=42,
+            frag_mean=250,
+            frag_std=40,
+            frag_min=100,
+            frag_max=500,
+            read_length=100,
+            strand_specificity=0.95,
+            seed=42,
         )
         result = scenario.build_oracle(n_fragments=50, sim_config=sc)
 
@@ -830,8 +857,13 @@ class TestSJTagPriority:
             ],
         )
         sc = ReadSimConfig(
-            frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
-            read_length=100, strand_specificity=1.0, seed=42,
+            frag_mean=250,
+            frag_std=40,
+            frag_min=100,
+            frag_max=500,
+            read_length=100,
+            strand_specificity=1.0,
+            seed=42,
         )
         result = scenario.build_oracle(n_fragments=200, sim_config=sc)
 
@@ -905,8 +937,13 @@ class TestSJTagPriority:
             ],
         )
         sc = ReadSimConfig(
-            frag_mean=250, frag_std=40, frag_min=100, frag_max=500,
-            read_length=100, strand_specificity=0.95, seed=42,
+            frag_mean=250,
+            frag_std=40,
+            frag_min=100,
+            frag_max=500,
+            read_length=100,
+            strand_specificity=0.95,
+            seed=42,
         )
         result = scenario.build_oracle(n_fragments=200, sim_config=sc)
 
@@ -938,7 +975,5 @@ class TestSJTagPriority:
         pr = run_pipeline(sorted_bam, result.index, config=config)
 
         sm = pr.strand_models.exonic_spliced
-        assert sm.n_observations > 0, (
-            "Fallback to ts should produce exonic_spliced observations"
-        )
+        assert sm.n_observations > 0, "Fallback to ts should produce exonic_spliced observations"
         assert sm.strand_specificity > 0.8

@@ -42,9 +42,7 @@ __all__ = ["transcript_capture_eff_lengths"]
 
 def _transcript_node_incidence(
     index: "TranscriptIndex", region_arrays: "RegionArrays"
-) -> tuple[
-    np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray
-]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Per-transcript **node** membership — the regions, boundaries, AND splice junctions a component crosses.
 
     Returns ``(inc_t_reg, inc_reg, inc_t_bnd, inc_bnd, inc_t_junc, inc_junc_left, inc_junc_right)``: region
@@ -99,7 +97,9 @@ def _transcript_node_incidence(
         if hi > lo:
             r_r.append(np.arange(lo, hi, dtype=np.int64))
             r_t.append(np.full(hi - lo, int(t), dtype=np.int64))
-            if hi - 1 > lo:  # interior seams r ∈ [lo, hi-1): boundaries crossed contiguously (no splice)
+            if (
+                hi - 1 > lo
+            ):  # interior seams r ∈ [lo, hi-1): boundaries crossed contiguously (no splice)
                 b_r.append(np.arange(lo, hi - 1, dtype=np.int64))
                 b_t.append(np.full(hi - 1 - lo, int(t), dtype=np.int64))
             return lo, hi
@@ -204,7 +204,9 @@ def _pooled_seam_arrays(calibration, region_arrays):
     side_len = np.asarray(calibration.gdna_boundary_len, dtype=np.float64)
     ref_id = np.asarray(region_arrays.ref_id)
     n = right.shape[0]
-    seam_m = np.zeros(n, dtype=np.float64)  # seam r = boundary between region r and r+1 (left-keyed)
+    seam_m = np.zeros(
+        n, dtype=np.float64
+    )  # seam r = boundary between region r and r+1 (left-keyed)
     seam_S = np.zeros(n, dtype=np.float64)
     if n > 1:
         same = ref_id[:-1] == ref_id[1:]  # internal seam: genomically adjacent, same reference
@@ -272,7 +274,9 @@ def transcript_capture_eff_lengths(
     contained_m = np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
     contained_S = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
     contained_ev = contained_m + np.asarray(calibration.mass_rna_contained, dtype=np.float64)
-    side_len = np.asarray(calibration.gdna_boundary_len, dtype=np.float64)  # for the junction-seam support
+    side_len = np.asarray(
+        calibration.gdna_boundary_len, dtype=np.float64
+    )  # for the junction-seam support
     seam_m, seam_S = _pooled_seam_arrays(calibration, region_arrays)  # the SHARED seam node model
 
     rt, rr, bt, br, jt, jl, jr = _transcript_node_incidence(index, region_arrays)

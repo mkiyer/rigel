@@ -48,8 +48,13 @@ PIPELINE_SEED = 42
 
 def sim_config(*, strand_specificity: float = 1.0, seed: int = SIM_SEED):
     return ReadSimConfig(
-        frag_mean=200, frag_std=30, frag_min=80, frag_max=450,
-        read_length=100, strand_specificity=strand_specificity, seed=seed,
+        frag_mean=200,
+        frag_std=30,
+        frag_min=80,
+        frag_max=450,
+        read_length=100,
+        strand_specificity=strand_specificity,
+        seed=seed,
     )
 
 
@@ -57,21 +62,32 @@ def gdna_config(abundance: float) -> GDNAConfig | None:
     if abundance == 0:
         return None
     return GDNAConfig(
-        abundance=abundance, frag_mean=350, frag_std=100,
-        frag_min=100, frag_max=1000,
+        abundance=abundance,
+        frag_mean=350,
+        frag_std=100,
+        frag_min=100,
+        frag_max=1000,
     )
 
 
-def build_and_run(scenario, *, n_fragments=N_FRAGMENTS,
-                  gdna_abundance=0, strand_specificity=1.0,
-                  nrna_abundance=0, include_multimap=False,
-                  scenario_name=""):
+def build_and_run(
+    scenario,
+    *,
+    n_fragments=N_FRAGMENTS,
+    gdna_abundance=0,
+    strand_specificity=1.0,
+    nrna_abundance=0,
+    include_multimap=False,
+    scenario_name="",
+):
     """Build via FASTQ+alignment and run the pipeline."""
     sc = sim_config(strand_specificity=strand_specificity)
     gdna = gdna_config(gdna_abundance)
     result = scenario.build(
-        n_fragments=n_fragments, sim_config=sc,
-        gdna_config=gdna, nrna_abundance=nrna_abundance,
+        n_fragments=n_fragments,
+        sim_config=sc,
+        gdna_config=gdna,
+        nrna_abundance=nrna_abundance,
     )
     config = PipelineConfig(
         em=EMConfig(seed=PIPELINE_SEED),
@@ -91,9 +107,7 @@ def build_and_run(scenario, *, n_fragments=N_FRAGMENTS,
 def assert_alignment(bench, min_rate=0.70):
     """Aligner may lose some reads — lower threshold than oracle."""
     assert bench.n_fragments > 0, "No fragments entered the pipeline"
-    assert bench.alignment_rate > min_rate, (
-        f"Low alignment rate: {bench.alignment_rate:.1%}"
-    )
+    assert bench.alignment_rate > min_rate, f"Low alignment rate: {bench.alignment_rate:.1%}"
 
 
 def assert_accountability(bench, tolerance=5):
@@ -102,19 +116,19 @@ def assert_accountability(bench, tolerance=5):
     # n_synthetic_observed already includes nRNA counts (synthetic transcripts),
     # so we don't add n_nrna_pipeline separately.
     total = (
-        bench.total_observed + bench.n_synthetic_observed
-        + bench.n_gdna_pipeline + bench.n_chimeric
+        bench.total_observed
+        + bench.n_synthetic_observed
+        + bench.n_gdna_pipeline
+        + bench.n_chimeric
         + n_gated_out
     )
     gap = abs(total - bench.n_fragments)
     assert gap <= tolerance, (
-        f"Accountability gap: {gap:.0f} "
-        f"(total={total:.0f}, n_fragments={bench.n_fragments})"
+        f"Accountability gap: {gap:.0f} (total={total:.0f}, n_fragments={bench.n_fragments})"
     )
 
 
-def assert_negative_control(bench, ctrl_id="t_ctrl", *,
-                             gdna_abundance=0, strand_specificity=1.0):
+def assert_negative_control(bench, ctrl_id="t_ctrl", *, gdna_abundance=0, strand_specificity=1.0):
     ctrl = next(t for t in bench.transcripts if t.t_id == ctrl_id)
     max_fp = 5
     if gdna_abundance > 0:

@@ -166,7 +166,9 @@ class TestAnnotatedInterval:
 
     def test_with_all_fields(self):
         ri = AnnotatedInterval(
-            "chr1", 100, 200,
+            "chr1",
+            100,
+            200,
             strand=Strand.POS,
             interval_type=IntervalType.EXON,
             t_index=3,
@@ -198,11 +200,11 @@ class TestCppConstantParity:
     def test_log_half(self):
         import math
         from rigel._scoring_impl import LOG_HALF
+
         assert LOG_HALF == math.log(0.5)
 
     def test_tail_decay_lp(self):
         import math
         from rigel._scoring_impl import TAIL_DECAY_LP
+
         assert TAIL_DECAY_LP == math.log(0.99)
-
-

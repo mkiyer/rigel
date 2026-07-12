@@ -58,13 +58,8 @@ NRNA_LEVELS = [0, 30, 70]
 SS_LEVELS = [0.65, 0.9, 1.0]
 
 # All (gdna, nrna, ss) combos for the exhaustive sweep
-_FULL_GRID = [
-    (g, n, s)
-    for g in GDNA_LEVELS
-    for n in NRNA_LEVELS
-    for s in SS_LEVELS
-]
-_FULL_IDS = [f"g{g}_n{n}_s{int(s*100)}" for g, n, s in _FULL_GRID]
+_FULL_GRID = [(g, n, s) for g in GDNA_LEVELS for n in NRNA_LEVELS for s in SS_LEVELS]
+_FULL_IDS = [f"g{g}_n{n}_s{int(s * 100)}" for g, n, s in _FULL_GRID]
 
 N_FRAGMENTS = 2000
 
@@ -84,40 +79,48 @@ class TestNrnaDoubleCounting:
         # Total exon length is 4 kb, matching the original toy, but multiple
         # junctions keep annotated spliced observations well represented.
         # The broad 8 kb span keeps the nRNA/gDNA separation problem active.
-        sc.add_gene("g1", "+", [
-            {
-                "t_id": "t1",
-                "exons": [
-                    (2000, 2500),
-                    (3000, 3500),
-                    (4000, 4500),
-                    (5000, 5500),
-                    (6000, 6500),
-                    (7000, 7500),
-                    (8000, 8500),
-                    (9500, 10000),
-                ],
-                "abundance": 100,
-            },
-        ])
+        sc.add_gene(
+            "g1",
+            "+",
+            [
+                {
+                    "t_id": "t1",
+                    "exons": [
+                        (2000, 2500),
+                        (3000, 3500),
+                        (4000, 4500),
+                        (5000, 5500),
+                        (6000, 6500),
+                        (7000, 7500),
+                        (8000, 8500),
+                        (9500, 10000),
+                    ],
+                    "abundance": 100,
+                },
+            ],
+        )
         # Negative control: multi-exon gene on − strand, no expression.
         # Physically separated from g1.
-        sc.add_gene("g_ctrl", "-", [
-            {
-                "t_id": "t_ctrl",
-                "exons": [
-                    (12000, 12500),
-                    (13000, 13500),
-                    (14000, 14500),
-                    (15000, 15500),
-                    (16000, 16500),
-                    (17000, 17500),
-                    (18000, 18500),
-                    (19000, 19500),
-                ],
-                "abundance": 0,
-            },
-        ])
+        sc.add_gene(
+            "g_ctrl",
+            "-",
+            [
+                {
+                    "t_id": "t_ctrl",
+                    "exons": [
+                        (12000, 12500),
+                        (13000, 13500),
+                        (14000, 14500),
+                        (15000, 15500),
+                        (16000, 16500),
+                        (17000, 17500),
+                        (18000, 18500),
+                        (19000, 19500),
+                    ],
+                    "abundance": 0,
+                },
+            ],
+        )
         yield sc
         sc.cleanup()
 
@@ -145,12 +148,14 @@ class TestNrnaDoubleCounting:
             gdna_abundance=gdna,
             nrna_abundance=nrna,
             strand_specificity=ss,
-            scenario_name=f"nrna_dc_g{gdna}_n{nrna}_s{int(ss*100)}",
+            scenario_name=f"nrna_dc_g{gdna}_n{nrna}_s{int(ss * 100)}",
         )
         assert_alignment(bench)
         assert_accountability(bench, tolerance=10)
         assert_negative_control(
-            bench, gdna_abundance=gdna, strand_specificity=ss,
+            bench,
+            gdna_abundance=gdna,
+            strand_specificity=ss,
         )
 
         # ----- Core nRNA double-counting assertion -----
@@ -179,9 +184,7 @@ class TestNrnaDoubleCounting:
         total_rna_expected = bench.total_expected + bench.n_nrna_expected
         total_rna_observed = bench.total_rna_observed
         if total_rna_expected > 0:
-            rna_rel_err = abs(
-                total_rna_observed - total_rna_expected
-            ) / total_rna_expected
+            rna_rel_err = abs(total_rna_observed - total_rna_expected) / total_rna_expected
 
             if gdna == 0 and ss >= 0.99:
                 # Perfect SS, no gDNA: total RNA near-exact. Tolerance 0.08 (was 0.05): the density-correct
@@ -266,10 +269,8 @@ class TestNrnaDoubleCounting:
     # Focused: nRNA pool accuracy across strand specificities
     # -----------------------------------------------------------------
 
-    @pytest.mark.parametrize("ss", SS_LEVELS,
-                             ids=[f"ss_{int(s*100)}" for s in SS_LEVELS])
-    @pytest.mark.parametrize("nrna", [30, 70],
-                             ids=[f"nrna_{n}" for n in [30, 70]])
+    @pytest.mark.parametrize("ss", SS_LEVELS, ids=[f"ss_{int(s * 100)}" for s in SS_LEVELS])
+    @pytest.mark.parametrize("nrna", [30, 70], ids=[f"nrna_{n}" for n in [30, 70]])
     def test_nrna_strand_inversion(self, scenario, nrna, ss):
         """Higher strand specificity must NOT degrade nRNA accuracy.
 
@@ -284,7 +285,7 @@ class TestNrnaDoubleCounting:
             n_fragments=N_FRAGMENTS,
             nrna_abundance=nrna,
             strand_specificity=ss,
-            scenario_name=f"nrna_inversion_n{nrna}_s{int(ss*100)}",
+            scenario_name=f"nrna_inversion_n{nrna}_s{int(ss * 100)}",
         )
         if bench.n_nrna_expected > 10:
             nrna_ratio = bench.n_nrna_pipeline / bench.n_nrna_expected
@@ -305,8 +306,7 @@ class TestNrnaDoubleCounting:
     # Focused: mRNA should be unaffected by nRNA presence
     # -----------------------------------------------------------------
 
-    @pytest.mark.parametrize("nrna", [0, 30, 70],
-                             ids=[f"nrna_{n}" for n in [0, 30, 70]])
+    @pytest.mark.parametrize("nrna", [0, 30, 70], ids=[f"nrna_{n}" for n in [0, 30, 70]])
     def test_mrna_stable_across_nrna(self, scenario, nrna):
         """Total RNA (mRNA+nRNA) should be conserved regardless of nRNA level.
 

@@ -362,9 +362,7 @@ def load_boundaries(path: str | Path) -> pd.DataFrame:
     return _coerce_boundary_dtypes(df).reset_index(drop=True)
 
 
-def validate_boundaries_against_regions(
-    boundary_df: pd.DataFrame, region_df: pd.DataFrame
-) -> None:
+def validate_boundaries_against_regions(boundary_df: pd.DataFrame, region_df: pd.DataFrame) -> None:
     """Enforce the boundary-partition invariant: each reference has ``regions + 1`` boundaries, and each
     boundary position equals the corresponding region interface (the ``[start…, last end]`` sequence). Raises
     :class:`ValueError` (rebuild the index) on the first violation."""

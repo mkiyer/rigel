@@ -206,8 +206,6 @@ class TestTakeFromLeftRight:
         assert result == [(100, 200)]
 
 
-
-
 class TestWholeGenomeOracleBamOrientation:
     """Regression tests for the vectorized whole-genome oracle BAM writer."""
 
@@ -252,7 +250,10 @@ class TestWholeGenomeOracleBamOrientation:
 
         assert bam_path is not None
         seen_categories = set()
-        with pysam.FastaFile(str(fasta_path)) as fasta, pysam.AlignmentFile(str(bam_path), "rb") as bam:
+        with (
+            pysam.FastaFile(str(fasta_path)) as fasta,
+            pysam.AlignmentFile(str(bam_path), "rb") as bam,
+        ):
             for read in bam.fetch(until_eof=True):
                 if read.query_name.startswith("gdna:"):
                     seen_categories.add("gdna")

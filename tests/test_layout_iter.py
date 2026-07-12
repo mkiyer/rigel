@@ -15,8 +15,9 @@ from rigel.transcript import Transcript
 from rigel.types import Interval, Strand
 
 
-def _mk_tx(t_idx: int, ref: str, strand: Strand, exons: list[tuple[int, int]],
-           is_synthetic: bool = False) -> Transcript:
+def _mk_tx(
+    t_idx: int, ref: str, strand: Strand, exons: list[tuple[int, int]], is_synthetic: bool = False
+) -> Transcript:
     """Construct a minimal Transcript for layout tests."""
     return Transcript(
         ref=ref,
@@ -109,9 +110,7 @@ def test_synthetic_excluded_from_layout():
     """Synthetic nRNAs must not coalesce or extend genic spans."""
     real = _mk_tx(0, "chr1", Strand.POS, [(100, 200)])
     syn = _mk_tx(1, "chr1", Strand.POS, [(150, 800)], is_synthetic=True)
-    spans = list(_iter_reference_layout(
-        1000, sorted([real, syn], key=lambda x: (x.start, x.end))
-    ))
+    spans = list(_iter_reference_layout(1000, sorted([real, syn], key=lambda x: (x.start, x.end))))
     _assert_tiles(spans, 1000)
     # The synthetic [150,800) must NOT extend the real [100,200) genic span.
     genic = [s for s in spans if isinstance(s, _GenicSpan)]

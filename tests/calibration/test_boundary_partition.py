@@ -16,7 +16,9 @@ from rigel.types import Interval, Strand
 
 
 def _tx(t_id: str, strand: Strand, exons: list[tuple[int, int]]) -> Transcript:
-    return Transcript(ref="chr1", strand=strand, exons=[Interval(s, e) for s, e in exons], t_id=t_id)
+    return Transcript(
+        ref="chr1", strand=strand, exons=[Interval(s, e) for s, e in exons], t_id=t_id
+    )
 
 
 def test_boundary_count_matches_regions_plus_one():

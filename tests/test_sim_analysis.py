@@ -76,12 +76,16 @@ def test_calibration_report_uses_condition_fl_truth_when_available(tmp_path):
     manifest["conditions"][0]["truth_summary"] = f"{condition}/truth_summary.json"
     (tmp_path / "manifest.json").write_text(json.dumps(manifest))
     (tmp_path / condition).mkdir()
-    (tmp_path / condition / "truth_summary.json").write_text(json.dumps({
-        "fragment_lengths": {
-            "mrna": {"n": 10, "mean": 260.0},
-            "gdna": {"n": 10, "mean": 300.0},
-        }
-    }))
+    (tmp_path / condition / "truth_summary.json").write_text(
+        json.dumps(
+            {
+                "fragment_lengths": {
+                    "mrna": {"n": 10, "mean": 260.0},
+                    "gdna": {"n": 10, "mean": 300.0},
+                }
+            }
+        )
+    )
     _write_summary(tmp_path, condition)
 
     report = analyze_calibration(tmp_path, [condition], pd.DataFrame())
@@ -97,9 +101,7 @@ def test_postfix_acceptance_checks_pass_for_post_fix_profile(tmp_path):
     loci_path = tmp_path / condition / "rigel_out" / "loci.tsv"
     loci_path.write_text("nrna\n0\n")
 
-    assignment_rows = [
-        {"condition": condition, "total_gdna": 2_000_000, "gdna_as_rna": 9_430}
-    ]
+    assignment_rows = [{"condition": condition, "total_gdna": 2_000_000, "gdna_as_rna": 9_430}]
 
     report = analyze_postfix_acceptance(tmp_path, [condition], assignment_rows)
 
@@ -112,15 +114,17 @@ def test_postfix_acceptance_checks_pass_for_post_fix_profile(tmp_path):
 def test_analysis_discovers_conditions_from_manifest(tmp_path):
     _write_manifest(tmp_path, "gdna_none_ss_1.00_nrna_none")
     manifest = json.loads((tmp_path / "manifest.json").read_text())
-    manifest["conditions"].append({
-        "name": "gdna_none_ss_1.00_nrna_high",
-        "gdna_label": "none",
-        "gdna_rate": 0.0,
-        "strand_specificity": 1.0,
-        "nrna_label": "high",
-        "n_rna": 150,
-        "n_gdna": 0,
-    })
+    manifest["conditions"].append(
+        {
+            "name": "gdna_none_ss_1.00_nrna_high",
+            "gdna_label": "none",
+            "gdna_rate": 0.0,
+            "strand_specificity": 1.0,
+            "nrna_label": "high",
+            "n_rna": 150,
+            "n_gdna": 0,
+        }
+    )
     (tmp_path / "manifest.json").write_text(json.dumps(manifest))
 
     assert discover_conditions(tmp_path) == [

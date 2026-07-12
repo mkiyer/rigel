@@ -33,12 +33,16 @@ from rigel.splice_blacklist import (
 )
 
 
-def _row(chrom: str, s: int, e: int, rl: int, count: int,
-         al: int, ar: int) -> dict:
+def _row(chrom: str, s: int, e: int, rl: int, count: int, al: int, ar: int) -> dict:
     return {
-        "chrom": chrom, "intron_start": s, "intron_end": e,
-        "strand": ".", "read_length": rl, "count": count,
-        "max_anchor_left": al, "max_anchor_right": ar,
+        "chrom": chrom,
+        "intron_start": s,
+        "intron_end": e,
+        "strand": ".",
+        "read_length": rl,
+        "count": count,
+        "max_anchor_left": al,
+        "max_anchor_right": ar,
     }
 
 
@@ -76,32 +80,41 @@ class TestLoaderFromRecords:
         assert len(df) == 1
 
     def test_aggregation_takes_max_across_read_lengths(self) -> None:
-        df = load_splice_blacklist_from_records([
-            _row("chr1", 100, 500,  50, 5,  8, 12),
-            _row("chr1", 100, 500,  75, 3, 12,  9),
-            _row("chr1", 100, 500, 100, 7, 15,  6),
-            _row("chr1", 100, 500, 125, 4, 10, 18),
-        ], min_count=2)
+        df = load_splice_blacklist_from_records(
+            [
+                _row("chr1", 100, 500, 50, 5, 8, 12),
+                _row("chr1", 100, 500, 75, 3, 12, 9),
+                _row("chr1", 100, 500, 100, 7, 15, 6),
+                _row("chr1", 100, 500, 125, 4, 10, 18),
+            ],
+            min_count=2,
+        )
         assert len(df) == 1
         assert df.iloc[0]["max_anchor_left"] == 15
         assert df.iloc[0]["max_anchor_right"] == 18
 
     def test_aggregation_after_count_filter(self) -> None:
         """Read-length rows below min_count must NOT contribute to max."""
-        df = load_splice_blacklist_from_records([
-            _row("chr1", 100, 500,  50, 1, 99, 99),  # dropped
-            _row("chr1", 100, 500, 100, 5, 10, 12),
-        ], min_count=2)
+        df = load_splice_blacklist_from_records(
+            [
+                _row("chr1", 100, 500, 50, 1, 99, 99),  # dropped
+                _row("chr1", 100, 500, 100, 5, 10, 12),
+            ],
+            min_count=2,
+        )
         assert len(df) == 1
         assert df.iloc[0]["max_anchor_left"] == 10
         assert df.iloc[0]["max_anchor_right"] == 12
 
     def test_multiple_junctions_sorted(self) -> None:
-        df = load_splice_blacklist_from_records([
-            _row("chr2", 200, 300, 100, 3,  5,  5),
-            _row("chr1", 100, 500, 100, 3, 10, 10),
-            _row("chr1",  50,  80, 100, 3,  3,  3),
-        ], min_count=2)
+        df = load_splice_blacklist_from_records(
+            [
+                _row("chr2", 200, 300, 100, 3, 5, 5),
+                _row("chr1", 100, 500, 100, 3, 10, 10),
+                _row("chr1", 50, 80, 100, 3, 3, 3),
+            ],
+            min_count=2,
+        )
         assert len(df) == 3
         assert list(df["ref"]) == ["chr1", "chr1", "chr2"]
         assert list(df["start"]) == [50, 100, 200]
@@ -161,13 +174,15 @@ class TestIndexRoundTrip:
         )
 
         # Hand-write a blacklist feather with the canonical schema.
-        bl = pd.DataFrame({
-            "ref": ["chr1"],
-            "start": np.asarray([100], dtype=np.int32),
-            "end": np.asarray([200], dtype=np.int32),
-            "max_anchor_left": np.asarray([10], dtype=np.int32),
-            "max_anchor_right": np.asarray([15], dtype=np.int32),
-        })
+        bl = pd.DataFrame(
+            {
+                "ref": ["chr1"],
+                "start": np.asarray([100], dtype=np.int32),
+                "end": np.asarray([200], dtype=np.int32),
+                "max_anchor_left": np.asarray([10], dtype=np.int32),
+                "max_anchor_right": np.asarray([15], dtype=np.int32),
+            }
+        )
         bl.to_feather(out_dir / SJ_BLACKLIST_FEATHER)
 
         on_disk = pd.read_feather(out_dir / SJ_BLACKLIST_FEATHER)

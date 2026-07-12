@@ -135,9 +135,7 @@ class FragmentRouter:
             scorer.score_chunk(arrays)
             n_processed += chunk.size
             if n_processed % log_every < chunk.size:
-                logger.debug(
-                    f"  Scan: {n_processed:,} / {n_total:,}"
-                )
+                logger.debug(f"  Scan: {n_processed:,} / {n_total:,}")
             del arrays, chunk  # free immediately
 
         result = scorer.finish()

@@ -22,8 +22,16 @@ def test_interleave_and_adjacency_two_refs():
     assert ch.n_nodes == 3 + 5  # R + B
     assert ch.n_regions == 3 and ch.n_boundaries == 5
     # genomic order ref0: B0 R0 B1 R1 B2  | ref1: B3 R2 B4
-    assert list(ch.kind) == [BOUNDARY, REGION, BOUNDARY, REGION, BOUNDARY,
-                             BOUNDARY, REGION, BOUNDARY]
+    assert list(ch.kind) == [
+        BOUNDARY,
+        REGION,
+        BOUNDARY,
+        REGION,
+        BOUNDARY,
+        BOUNDARY,
+        REGION,
+        BOUNDARY,
+    ]
     assert list(ch.ref_idx) == [0, 0, 1, 1, 2, 3, 2, 4]
     # adjacency (node ids); reference terminals are -1
     assert list(ch.left) == [-1, 0, 1, 2, 3, -1, 5, 6]
@@ -49,7 +57,9 @@ def test_consistent_with_index_maps():
     rbo = np.array([0, 4, 6, 9])
     ch = build_node_chain(rro, rbo)
     lb, rb = region_boundary_indices(rro, rbo)  # per region → flanking boundary array-indices
-    blr, brr = boundary_region_indices(rro, rbo)  # per boundary → flanking region array-indices (-1 terminal)
+    blr, brr = boundary_region_indices(
+        rro, rbo
+    )  # per boundary → flanking region array-indices (-1 terminal)
 
     for node in range(ch.n_nodes):
         L, R = int(ch.left[node]), int(ch.right[node])

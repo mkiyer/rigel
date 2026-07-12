@@ -14,10 +14,15 @@ def _example() -> FlowData:
     # rows=true, cols=assigned; row sums (expected) = 10 each (truth),
     # col sums (observed) = T1:12, T2:2, T3:8, gDNA:18.
     flow = {
-        (0, 0): 8, (0, 3): 2,                 # T1 true: 8 stay, 2 -> gDNA
-        (1, 0): 4, (1, 1): 2, (1, 2): 2, (1, 3): 2,  # T2 true: leaks out widely
-        (2, 2): 6, (2, 3): 4,                 # T3 true: 6 stay, 4 -> gDNA
-        (3, 3): 10,                           # gDNA true: all correct
+        (0, 0): 8,
+        (0, 3): 2,  # T1 true: 8 stay, 2 -> gDNA
+        (1, 0): 4,
+        (1, 1): 2,
+        (1, 2): 2,
+        (1, 3): 2,  # T2 true: leaks out widely
+        (2, 2): 6,
+        (2, 3): 4,  # T3 true: 6 stay, 4 -> gDNA
+        (3, 3): 10,  # gDNA true: all correct
     }
     return FlowData(
         condition="unit",
@@ -59,12 +64,21 @@ def test_per_transcript_decomposition():
         assert r["delta"] == r["net_from_gdna"] + r["net_from_rna_isoforms"] + r["cross_locus"]
         assert r["cross_locus"] == 0
 
-    assert (by_tx["T1"]["delta"], by_tx["T1"]["net_from_gdna"],
-            by_tx["T1"]["net_from_rna_isoforms"]) == (2, -2, 4)
-    assert (by_tx["T2"]["delta"], by_tx["T2"]["net_from_gdna"],
-            by_tx["T2"]["net_from_rna_isoforms"]) == (-8, -2, -6)
-    assert (by_tx["T3"]["delta"], by_tx["T3"]["net_from_gdna"],
-            by_tx["T3"]["net_from_rna_isoforms"]) == (-2, -4, 2)
+    assert (
+        by_tx["T1"]["delta"],
+        by_tx["T1"]["net_from_gdna"],
+        by_tx["T1"]["net_from_rna_isoforms"],
+    ) == (2, -2, 4)
+    assert (
+        by_tx["T2"]["delta"],
+        by_tx["T2"]["net_from_gdna"],
+        by_tx["T2"]["net_from_rna_isoforms"],
+    ) == (-8, -2, -6)
+    assert (
+        by_tx["T3"]["delta"],
+        by_tx["T3"]["net_from_gdna"],
+        by_tx["T3"]["net_from_rna_isoforms"],
+    ) == (-2, -4, 2)
 
     # Conservation: Σ transcript Δ + gDNA Δ == 0 over the closed locus.
     locus = locus_rows[0]

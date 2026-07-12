@@ -17,6 +17,7 @@ from rigel._em_impl import _fast_exp_test_array
 # Accuracy: fast_exp vs math.exp over the entire input domain
 # ---------------------------------------------------------------------------
 
+
 class TestFastExpAccuracy:
     """Validate fast_exp matches std::exp to within a few ULP."""
 
@@ -54,6 +55,7 @@ class TestFastExpAccuracy:
 # ---------------------------------------------------------------------------
 # Edge cases and cutoff behavior
 # ---------------------------------------------------------------------------
+
 
 class TestFastExpEdgeCases:
     """Verify correct behavior at boundaries and special values."""
@@ -105,6 +107,7 @@ class TestFastExpEdgeCases:
 # NEON vs scalar consistency
 # ---------------------------------------------------------------------------
 
+
 class TestFastExpNeonScalarConsistency:
     """Ensure NEON-processed lanes match scalar-processed lanes."""
 
@@ -126,13 +129,15 @@ class TestFastExpNeonScalarConsistency:
             x = rng.uniform(-708.0, 0.0, size=size)
             result = _fast_exp_test_array(x)
             expected = np.array([math.exp(v) for v in x])
-            npt.assert_allclose(result, expected, rtol=1e-14, atol=0,
-                                err_msg=f"Mismatch for size={size}")
+            npt.assert_allclose(
+                result, expected, rtol=1e-14, atol=0, err_msg=f"Mismatch for size={size}"
+            )
 
 
 # ---------------------------------------------------------------------------
 # ULP error measurement (informational)
 # ---------------------------------------------------------------------------
+
 
 class TestFastExpULP:
     """Measure the maximum ULP error (informational, not gating)."""
@@ -149,8 +154,7 @@ class TestFastExpULP:
             if expected == 0.0:
                 continue
             # ULP distance
-            ulp = abs(result[i] - expected) / max(
-                abs(expected) * 2**-52, 5e-324)
+            ulp = abs(result[i] - expected) / max(abs(expected) * 2**-52, 5e-324)
             if ulp > max_ulp:
                 max_ulp = ulp
 

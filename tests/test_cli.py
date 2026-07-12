@@ -327,10 +327,14 @@ class TestConfigRoundTrip:
         from rigel.cli import _build_pipeline_config
 
         args = _parse_quant(
-            "--threads", "8",
-            "--scan-bgzf-threads", "2",
-            "--scan-buffer-size", "1.5",
-            "--scan-fragments-per-chunk", "1234",
+            "--threads",
+            "8",
+            "--scan-bgzf-threads",
+            "2",
+            "--scan-buffer-size",
+            "1.5",
+            "--scan-fragments-per-chunk",
+            "1234",
         )
         _resolve_quant_args(args, _build_quant_defaults())
         cfg = _build_pipeline_config(args, seed=42, sj_strand_tag="auto")

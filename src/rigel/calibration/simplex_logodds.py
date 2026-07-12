@@ -31,10 +31,12 @@ __all__ = ["_logodds_grid", "_solve_nodes_logodds_all"]
 _EPS = 1.0e-9
 _PRIOR_EPS = 1.0e-3  # the Jeffreys edge floor
 _STRAND_PRIOR = 0.5  # Beta(½,½) Jeffreys strand prior
-_DEFAULT_L = 10.0    # f_g ∈ [σ(−10), σ(10)] = [4.5e-5, 1−4.5e-5] — brackets Phase-0's vertex mass; a
+_DEFAULT_L = 10.0  # f_g ∈ [σ(−10), σ(10)] = [4.5e-5, 1−4.5e-5] — brackets Phase-0's vertex mass; a
 #                      data-driven tuning knob (the (K,L) sweep), NOT a numerical ceiling: log_expit +
 #                      the 1/E density floor keep the grid exact at any L (no underflow cap needed).
-_AMBIG_BATCH = 8192  # memory-tiling batch for the AMBIG 2-D (λ,τ) cube — bounds the (B,K,K_t) materialized
+_AMBIG_BATCH = (
+    8192  # memory-tiling batch for the AMBIG 2-D (λ,τ) cube — bounds the (B,K,K_t) materialized
+)
 #                      array at genome scale. NOT a model parameter: AMBIG nodes solve INDEPENDENTLY (no
 #                      cross-node coupling), so any batch size yields bit-identical results — it only caps
 #                      peak memory (the full subset at once is ~O(m·K²), same as the retired lattice).
@@ -47,7 +49,9 @@ def _lse(a, axis, keepdims=False):
     an all-``-inf`` slice give ``log(0) = -inf`` and avoids ``(-inf)-(-inf) = nan``."""
     m = np.max(a, axis=axis, keepdims=True)
     m = np.where(np.isfinite(m), m, 0.0)
-    with np.errstate(divide="ignore"):  # all-(-inf) slice ⇒ log(0) = -inf (correct); suppress the warning
+    with np.errstate(
+        divide="ignore"
+    ):  # all-(-inf) slice ⇒ log(0) = -inf (correct); suppress the warning
         # Accumulate the sum in float64 even for a float32 cube (a 60-/3600-wide reduction loses too much in
         # f32), then return the input dtype — keeps the f64 path byte-identical, gives the f32 cube an
         # accurate normalizer.
@@ -121,9 +125,21 @@ def _ambig_mask(allow_pos, allow_neg) -> np.ndarray:
 
 
 def _local_loglik_logodds(
-    u_pos, u_neg, allow_pos, allow_neg, kappa, od_g, od_r, lam, fg,
-    strand_obs=None, global_logprior=None,
-    gdna_imp_mode=None, gdna_imp_prec=None, rna_imp_mode=None, rna_imp_prec=None,
+    u_pos,
+    u_neg,
+    allow_pos,
+    allow_neg,
+    kappa,
+    od_g,
+    od_r,
+    lam,
+    fg,
+    strand_obs=None,
+    global_logprior=None,
+    gdna_imp_mode=None,
+    gdna_imp_prec=None,
+    rna_imp_mode=None,
+    rna_imp_prec=None,
 ):
     """ψ over the log-odds grid for single-strand nodes (strand mixture, Jeffreys, global, imputation),
     evaluated at ``f_g = σ(λ)`` with the live strand carrying ``f_active = 1 − f_g``,
@@ -135,7 +151,7 @@ def _local_loglik_logodds(
     an = np.asarray(allow_neg, bool)
     pos_live = (ap & ~an)[:, None]  # (m,1)
     neg_live = (an & ~ap)[:, None]
-    fg2 = fg[None, :]               # (1,K)
+    fg2 = fg[None, :]  # (1,K)
     f_act = 1.0 - fg2
     f_pos = np.where(pos_live, f_act, 0.0)  # (m,K)
     f_neg = np.where(neg_live, f_act, 0.0)
@@ -157,7 +173,7 @@ def _local_loglik_logodds(
     #    (``log`` of the imputed fraction, built in ``_scan``); evaluated against ``log f_c(λ)``. No clip —
     #    an off-grid target (source denser than the dst can hold) is a bounded monotone pull toward the
     #    edge, governed by precision (D-plan P6, verify-don't-clip). ──
-    log_fg = _log_fg(lam)[None, :]      # log f_g = log σ(λ)
+    log_fg = _log_fg(lam)[None, :]  # log f_g = log σ(λ)
     log_fact = _log1m_fg(lam)[None, :]  # log(1−f_g) = log f_active (the single live strand)
     if gdna_imp_mode is not None and gdna_imp_prec is not None:
         m_ = np.asarray(gdna_imp_mode, np.float64)[:, None]
@@ -167,9 +183,12 @@ def _local_loglik_logodds(
         # single-strand: the live strand carries f_active = 1−f_g; the per-strand precision gates which
         # message applies (the dead strand's prec is 0 → no-op). Both evaluate against log f_active.
         for ms, ps in ((rna_imp_mode[0], rna_imp_prec[0]), (rna_imp_mode[1], rna_imp_prec[1])):
-            psi = psi - 0.5 * np.asarray(ps, np.float64)[:, None] * (
-                log_fact - np.asarray(ms, np.float64)[:, None]
-            ) ** 2
+            psi = (
+                psi
+                - 0.5
+                * np.asarray(ps, np.float64)[:, None]
+                * (log_fact - np.asarray(ms, np.float64)[:, None]) ** 2
+            )
     # ── change of variable: uniform-λ Riemann sum → uniform-f integral (so the median matches the
     #    linear lattice's uniform-f measure). log σ'(λ) = log σ(λ) + log(1−σ(λ)) = log f_g + log(1−f_g),
     #    exact via log_expit (D6). This is the ONE reference Jacobian (D3); the log-density empirical
@@ -179,10 +198,24 @@ def _local_loglik_logodds(
 
 
 def _solve_nodes_logodds(
-    u_pos, u_neg, allow_pos, allow_neg, strand_obs,
-    mass_unspl, mass_spliced, *, kappa, od_g, od_r, n_grid, L: float = _DEFAULT_L,
-    global_logprior=None, gdna_imp_mode=None, gdna_imp_prec=None,
-    rna_imp_mode=None, rna_imp_prec=None,
+    u_pos,
+    u_neg,
+    allow_pos,
+    allow_neg,
+    strand_obs,
+    mass_unspl,
+    mass_spliced,
+    *,
+    kappa,
+    od_g,
+    od_r,
+    n_grid,
+    L: float = _DEFAULT_L,
+    global_logprior=None,
+    gdna_imp_mode=None,
+    gdna_imp_prec=None,
+    rna_imp_mode=None,
+    rna_imp_prec=None,
 ) -> NodeDeconv:
     """The log-odds 1-D per-node solve for SINGLE-STRAND nodes.
 
@@ -193,10 +226,21 @@ def _solve_nodes_logodds(
     (both strands live) are out of contract — mask them out."""
     lam, fg = _logodds_grid(int(n_grid), L)
     psi, f_pos_g, f_neg_g = _local_loglik_logodds(
-        u_pos, u_neg, allow_pos, allow_neg, kappa, od_g, od_r, lam, fg,
-        strand_obs=strand_obs, global_logprior=global_logprior,
-        gdna_imp_mode=gdna_imp_mode, gdna_imp_prec=gdna_imp_prec,
-        rna_imp_mode=rna_imp_mode, rna_imp_prec=rna_imp_prec,
+        u_pos,
+        u_neg,
+        allow_pos,
+        allow_neg,
+        kappa,
+        od_g,
+        od_r,
+        lam,
+        fg,
+        strand_obs=strand_obs,
+        global_logprior=global_logprior,
+        gdna_imp_mode=gdna_imp_mode,
+        gdna_imp_prec=gdna_imp_prec,
+        rna_imp_mode=rna_imp_mode,
+        rna_imp_prec=rna_imp_prec,
     )
     post = np.exp(psi - _lse(psi, axis=1, keepdims=True))  # (m,K)
     # f_g posterior median (fg ascending ⇒ cumulative CDF directly)
@@ -227,17 +271,34 @@ def _solve_nodes_logodds(
     var_pos = np.where(active, var_pos, 0.0)
     var_neg = np.where(active, var_neg, 0.0)
     return NodeDeconv(
-        gdna_mass=f_g * mass_unspl, rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
-        gdna_frac=f_g, rna_pos_frac=f_pos, rna_neg_frac=f_neg,
-        gdna_frac_var=var_g, rna_pos_frac_var=var_pos, rna_neg_frac_var=var_neg,
+        gdna_mass=f_g * mass_unspl,
+        rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
+        gdna_frac=f_g,
+        rna_pos_frac=f_pos,
+        rna_neg_frac=f_neg,
+        gdna_frac_var=var_g,
+        rna_pos_frac_var=var_pos,
+        rna_neg_frac_var=var_neg,
     )
 
 
 def _solve_ambig_logodds(
-    u_pos, u_neg, mass_unspl, mass_spliced, *,
-    kappa, od_g, od_r, n_grid, L: float = _DEFAULT_L, n_tilt: int | None = None,
-    global_logprior=None, gdna_imp_mode=None, gdna_imp_prec=None,
-    rna_imp_mode=None, rna_imp_prec=None,
+    u_pos,
+    u_neg,
+    mass_unspl,
+    mass_spliced,
+    *,
+    kappa,
+    od_g,
+    od_r,
+    n_grid,
+    L: float = _DEFAULT_L,
+    n_tilt: int | None = None,
+    global_logprior=None,
+    gdna_imp_mode=None,
+    gdna_imp_prec=None,
+    rna_imp_mode=None,
+    rna_imp_prec=None,
 ) -> NodeDeconv:
     """Phase 2 — the 2-D ``(λ, τ)`` solve for AMBIG nodes (both strands live; NO Jeffreys, matching the
     lattice). Grids the gDNA-vs-RNA log-odds ``λ`` (outer, ``K = n_grid``) and the RNA-internal tilt
@@ -249,32 +310,38 @@ def _solve_ambig_logodds(
 
     ``global_logprior`` is ``(m, K)`` evaluated on the σ(λ) grid (broadcast over τ). The cube is only
     materialized for the AMBIG subset (the caller masks); ``K·K_t`` is the per-node cost."""
-    lam, fg = _logodds_grid(int(n_grid), L)            # (K,)
+    lam, fg = _logodds_grid(int(n_grid), L)  # (K,)
     Kt = int(n_tilt) if n_tilt else int(n_grid)
-    tau = _tilt_grid(Kt)                               # (Kt,)
-    f_act = (1.0 - fg)[:, None]                         # (K,1)
-    f_pos_kt = f_act * (1.0 + tau[None, :]) / 2.0       # (K,Kt) f64 (reused f64 in the moment sums)
-    f_neg_kt = f_act * (1.0 - tau[None, :]) / 2.0       # (K,Kt) f64
+    tau = _tilt_grid(Kt)  # (Kt,)
+    f_act = (1.0 - fg)[:, None]  # (K,1)
+    f_pos_kt = f_act * (1.0 + tau[None, :]) / 2.0  # (K,Kt) f64 (reused f64 in the moment sums)
+    f_neg_kt = f_act * (1.0 - tau[None, :]) / 2.0  # (K,Kt) f64
     n = u_pos + u_neg
     # ── float32 cube (authorized small-tolerance perf): the (m,K,Kt) log-posterior and its per-cell inputs
     #    are f32 — halves the cube's memory, ~2x the elementwise exp/log. Every REDUCTION below accumulates
     #    in f64 and the (m,K) marginals are lifted to f64, so medians / means / variances keep precision. ──
     F = np.float32
     fg32 = fg.astype(F)
-    fpk = f_pos_kt.astype(F)                            # (K,Kt) f32 cube grid
+    fpk = f_pos_kt.astype(F)  # (K,Kt) f32 cube grid
     fnk = f_neg_kt.astype(F)
     # ── strand mixture over the cube: (m,1,1)×(1,K,1)×(1,K,Kt) → (m,K,Kt) f32 ──
     psi = _mixture_strand_loglik(
-        np.asarray(u_pos, F)[:, None, None], np.asarray(n, F)[:, None, None],
-        fg32[None, :, None], fpk[None, :, :], fnk[None, :, :], kappa, od_g, od_r,
+        np.asarray(u_pos, F)[:, None, None],
+        np.asarray(n, F)[:, None, None],
+        fg32[None, :, None],
+        fpk[None, :, :],
+        fnk[None, :, :],
+        kappa,
+        od_g,
+        od_r,
     )
     # ── LOG-fraction grids (the overhaul): log f_g (τ-independent) + log f_pos/f_neg over the cube,
     #    floored at one pseudo-fragment 1/(n+1) (D5: the τ=±1 edges have f_s=0 → log(0); the count floor
     #    keeps it finite + consistent with pois_log). ──
-    log_fg_grid = _log_fg(lam)                                   # (K,) f64 = log f_g (moments use f64)
-    log_fg32 = log_fg_grid.astype(F)                             # (K,) f32 for the cube message
-    frac_floor = (1.0 / (n + 1.0)).astype(F)[:, None, None]      # (m,1,1) f32
-    log_fpos = np.log(np.maximum(fpk[None, :, :], frac_floor))   # (m,K,Kt) f32
+    log_fg_grid = _log_fg(lam)  # (K,) f64 = log f_g (moments use f64)
+    log_fg32 = log_fg_grid.astype(F)  # (K,) f32 for the cube message
+    frac_floor = (1.0 / (n + 1.0)).astype(F)[:, None, None]  # (m,1,1) f32
+    log_fpos = np.log(np.maximum(fpk[None, :, :], frac_floor))  # (m,K,Kt) f32
     log_fneg = np.log(np.maximum(fnk[None, :, :], frac_floor))
     # ── log-density global on log f_g (τ-independent; pre-evaluated on the σ(λ) grid by the caller) ──
     if global_logprior is not None:
@@ -290,9 +357,11 @@ def _solve_ambig_logodds(
             (log_fpos, rna_imp_mode[0], rna_imp_prec[0]),
             (log_fneg, rna_imp_mode[1], rna_imp_prec[1]),
         ):
-            psi -= F(0.5) * np.asarray(ps, F)[:, None, None] * (
-                log_f - np.asarray(ms, F)[:, None, None]
-            ) ** 2
+            psi -= (
+                F(0.5)
+                * np.asarray(ps, F)[:, None, None]
+                * (log_f - np.asarray(ms, F)[:, None, None]) ** 2
+            )
     # ── Reference measure (τ-independent → add once on the λ axis). NEUTRAL on the gDNA fraction:
     #    uniform in (f_g, τ) ⇒ Jacobian log σ'(λ) = log f_g + log(1−f_g) — the SAME measure the
     #    single-strand solver uses. The old uniform-(f_pos, f_neg) simplex measure (log f_g + 2 log(1−f_g))
@@ -301,9 +370,11 @@ def _solve_ambig_logodds(
     #    tilt or the gDNA prior said. Neutral lets the STRAND resolve it: a strong tilt ⇒ RNA (unchanged),
     #    a balanced count ⇒ parsimoniously gDNA (the τ-marginal favours high f_g, where more τ fit the
     #    balance) with the gDNA prior setting the level. (Derivation: log_density_1d_solver_design.md §5.2.) ──
-    log_jac = (log_fg_grid + _log1m_fg(lam)).astype(F)  # (K,) f32 — reuse log_fg_grid (= _log_fg(lam)) above
-    psi += log_jac[None, :, None]                           # in-place; psi is now the full 2-D log-posterior
-    psi_full = psi                                          # (m,K,Kt) f32
+    log_jac = (log_fg_grid + _log1m_fg(lam)).astype(
+        F
+    )  # (K,) f32 — reuse log_fg_grid (= _log_fg(lam)) above
+    psi += log_jac[None, :, None]  # in-place; psi is now the full 2-D log-posterior
+    psi_full = psi  # (m,K,Kt) f32
     # τ-marginal λ-posterior (m,K) — lift to f64 so the posterior median + moments are full-precision.
     psi_lam = _lse(psi_full, axis=2).astype(np.float64)
     post_lam = np.exp(psi_lam - _lse(psi_lam, axis=1, keepdims=True))
@@ -313,15 +384,21 @@ def _solve_ambig_logodds(
     var_g = np.maximum(post_lam @ (log_fg_grid * log_fg_grid) - mLg * mLg, 0.0)
     # f_pos/f_neg MEANS + Var(log f_pos/neg) over the FULL 2-D posterior (f32 cube; sums accumulate in f64).
     flat = psi_full.reshape(psi_full.shape[0], -1)
-    post2d = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(psi_full.shape)  # (m,K,Kt) f32
+    post2d = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(
+        psi_full.shape
+    )  # (m,K,Kt) f32
     fp_grid = fpk[None, :, :]
     fn_grid = fnk[None, :, :]
     f_pos = np.sum(post2d * fp_grid, axis=(1, 2), dtype=np.float64)
     f_neg = np.sum(post2d * fn_grid, axis=(1, 2), dtype=np.float64)
     mLp = np.sum(post2d * log_fpos, axis=(1, 2), dtype=np.float64)
     mLn = np.sum(post2d * log_fneg, axis=(1, 2), dtype=np.float64)
-    var_pos = np.maximum(np.sum(post2d * log_fpos * log_fpos, axis=(1, 2), dtype=np.float64) - mLp * mLp, 0.0)
-    var_neg = np.maximum(np.sum(post2d * log_fneg * log_fneg, axis=(1, 2), dtype=np.float64) - mLn * mLn, 0.0)
+    var_pos = np.maximum(
+        np.sum(post2d * log_fpos * log_fpos, axis=(1, 2), dtype=np.float64) - mLp * mLp, 0.0
+    )
+    var_neg = np.maximum(
+        np.sum(post2d * log_fneg * log_fneg, axis=(1, 2), dtype=np.float64) - mLn * mLn, 0.0
+    )
     active = n > 0.0
     f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
     f_pos = np.where(active, np.clip(f_pos, 0.0, 1.0), 0.0)
@@ -330,17 +407,38 @@ def _solve_ambig_logodds(
     var_pos = np.where(active, var_pos, 0.0)
     var_neg = np.where(active, var_neg, 0.0)
     return NodeDeconv(
-        gdna_mass=f_g * mass_unspl, rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
-        gdna_frac=f_g, rna_pos_frac=f_pos, rna_neg_frac=f_neg,
-        gdna_frac_var=var_g, rna_pos_frac_var=var_pos, rna_neg_frac_var=var_neg,
+        gdna_mass=f_g * mass_unspl,
+        rna_mass=(1.0 - f_g) * mass_unspl + mass_spliced,
+        gdna_frac=f_g,
+        rna_pos_frac=f_pos,
+        rna_neg_frac=f_neg,
+        gdna_frac_var=var_g,
+        rna_pos_frac_var=var_pos,
+        rna_neg_frac_var=var_neg,
     )
 
 
 def _solve_nodes_logodds_all(
-    u_pos, u_neg, allow_pos, allow_neg, strand_obs,
-    mass_unspl, mass_spliced, *, kappa, od_g, od_r, n_grid, L: float = _DEFAULT_L,
-    n_tilt: int | None = None, n_grid_ss: int | None = None, global_logprior=None,
-    gdna_imp_mode=None, gdna_imp_prec=None, rna_imp_mode=None, rna_imp_prec=None,
+    u_pos,
+    u_neg,
+    allow_pos,
+    allow_neg,
+    strand_obs,
+    mass_unspl,
+    mass_spliced,
+    *,
+    kappa,
+    od_g,
+    od_r,
+    n_grid,
+    L: float = _DEFAULT_L,
+    n_tilt: int | None = None,
+    n_grid_ss: int | None = None,
+    global_logprior=None,
+    gdna_imp_mode=None,
+    gdna_imp_prec=None,
+    rna_imp_mode=None,
+    rna_imp_prec=None,
 ) -> NodeDeconv:
     """The full per-node log-odds dispatcher (Phase 3 #1): routes single-strand nodes to the 1-D
     ``λ`` solve (:func:`_solve_nodes_logodds`) and AMBIG nodes to the 2-D ``(λ, τ)`` solve
@@ -352,15 +450,21 @@ def _solve_nodes_logodds_all(
     All array inputs are full length ``m``; ``global_logprior`` is ``(m, K)`` on the σ(λ) grid;
     ``gdna_imp_*`` are ``(m,)``; ``rna_imp_*`` are 2-tuples of ``(m,)``. Each is sub-indexed per class."""
     m = int(np.asarray(u_pos).shape[0])
-    out = {k: np.zeros(m, dtype=np.float64) for k in
-           ("fg", "fp", "fn", "vg", "vp", "vn", "gmass", "rmass")}
+    out = {
+        k: np.zeros(m, dtype=np.float64)
+        for k in ("fg", "fp", "fn", "vg", "vp", "vn", "gmass", "rmass")
+    }
     # Skip EMPTY nodes — no per-strand counts AND no unspliced/spliced mass. Both per-class solvers zero
     # every output for an inactive node (gdna/rna_mass = f_g·M = (1−f_g)·M + S = 0 when all are 0), so an
     # empty node's solve is identical to the zero-initialized `out` — skipping is BIT-IDENTICAL. At genome
     # scale most region/boundary nodes carry no fragments (unexpressed genes, intergenic deserts), so this
     # is the dominant cost saver, not a slice artifact. (A spliced-only node has signal ⇒ still solved.)
-    signal = (np.asarray(u_pos, np.float64) + np.asarray(u_neg, np.float64)
-              + np.asarray(mass_unspl, np.float64) + np.asarray(mass_spliced, np.float64)) > 0.0
+    signal = (
+        np.asarray(u_pos, np.float64)
+        + np.asarray(u_neg, np.float64)
+        + np.asarray(mass_unspl, np.float64)
+        + np.asarray(mass_spliced, np.float64)
+    ) > 0.0
     ss = _single_strand_mask(allow_pos, allow_neg) & signal
     amb = _ambig_mask(allow_pos, allow_neg) & signal
 
@@ -384,27 +488,62 @@ def _solve_nodes_logodds_all(
         # Single-strand nodes solve on the FINE 1-D grid (Fix 3, n_grid_ss); the coarse-grid global prior is
         # regridded onto it. AMBIG keeps the coarse n_grid (the expensive 2-D cube). n_grid_ss=None ⇒ n_grid.
         k_ss = int(n_grid_ss) if n_grid_ss else int(n_grid)
-        _scatter(ss, _solve_nodes_logodds(
-            u_pos[ss], u_neg[ss], allow_pos[ss], allow_neg[ss],
-            _s(strand_obs, ss), mass_unspl[ss], mass_spliced[ss], kappa=kappa, od_g=od_g, od_r=od_r,
-            n_grid=k_ss, L=L, global_logprior=_regrid_global(_s(global_logprior, ss), n_grid, k_ss, L),
-            gdna_imp_mode=_s(gdna_imp_mode, ss), gdna_imp_prec=_s(gdna_imp_prec, ss),
-            rna_imp_mode=_sp(rna_imp_mode, ss), rna_imp_prec=_sp(rna_imp_prec, ss)))
+        _scatter(
+            ss,
+            _solve_nodes_logodds(
+                u_pos[ss],
+                u_neg[ss],
+                allow_pos[ss],
+                allow_neg[ss],
+                _s(strand_obs, ss),
+                mass_unspl[ss],
+                mass_spliced[ss],
+                kappa=kappa,
+                od_g=od_g,
+                od_r=od_r,
+                n_grid=k_ss,
+                L=L,
+                global_logprior=_regrid_global(_s(global_logprior, ss), n_grid, k_ss, L),
+                gdna_imp_mode=_s(gdna_imp_mode, ss),
+                gdna_imp_prec=_s(gdna_imp_prec, ss),
+                rna_imp_mode=_sp(rna_imp_mode, ss),
+                rna_imp_prec=_sp(rna_imp_prec, ss),
+            ),
+        )
     if bool(amb.any()):
         # The 2-D (λ,τ) cube is (B,K,K_t); materialized for ALL ambig nodes at once it is ~O(m·K²) (the
         # memory the lattice OOM'd on). AMBIG nodes solve independently, so tile the subset into row-batches
         # — bit-identical results, peak memory bounded to one (≤_AMBIG_BATCH, K, K_t) cube.
         amb_idx = np.where(amb)[0]
         for s0 in range(0, amb_idx.size, _AMBIG_BATCH):
-            bidx = amb_idx[s0:s0 + _AMBIG_BATCH]
-            _scatter(bidx, _solve_ambig_logodds(
-                u_pos[bidx], u_neg[bidx], mass_unspl[bidx],
-                mass_spliced[bidx], kappa=kappa, od_g=od_g, od_r=od_r, n_grid=n_grid, L=L, n_tilt=n_tilt,
-                global_logprior=_s(global_logprior, bidx),
-                gdna_imp_mode=_s(gdna_imp_mode, bidx), gdna_imp_prec=_s(gdna_imp_prec, bidx),
-                rna_imp_mode=_sp(rna_imp_mode, bidx), rna_imp_prec=_sp(rna_imp_prec, bidx)))
+            bidx = amb_idx[s0 : s0 + _AMBIG_BATCH]
+            _scatter(
+                bidx,
+                _solve_ambig_logodds(
+                    u_pos[bidx],
+                    u_neg[bidx],
+                    mass_unspl[bidx],
+                    mass_spliced[bidx],
+                    kappa=kappa,
+                    od_g=od_g,
+                    od_r=od_r,
+                    n_grid=n_grid,
+                    L=L,
+                    n_tilt=n_tilt,
+                    global_logprior=_s(global_logprior, bidx),
+                    gdna_imp_mode=_s(gdna_imp_mode, bidx),
+                    gdna_imp_prec=_s(gdna_imp_prec, bidx),
+                    rna_imp_mode=_sp(rna_imp_mode, bidx),
+                    rna_imp_prec=_sp(rna_imp_prec, bidx),
+                ),
+            )
     return NodeDeconv(
-        gdna_mass=out["gmass"], rna_mass=out["rmass"], gdna_frac=out["fg"],
-        rna_pos_frac=out["fp"], rna_neg_frac=out["fn"], gdna_frac_var=out["vg"],
-        rna_pos_frac_var=out["vp"], rna_neg_frac_var=out["vn"],
+        gdna_mass=out["gmass"],
+        rna_mass=out["rmass"],
+        gdna_frac=out["fg"],
+        rna_pos_frac=out["fp"],
+        rna_neg_frac=out["fn"],
+        gdna_frac_var=out["vg"],
+        rna_pos_frac_var=out["vp"],
+        rna_neg_frac_var=out["vn"],
     )

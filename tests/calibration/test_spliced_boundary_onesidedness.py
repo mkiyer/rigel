@@ -46,7 +46,8 @@ def _exon_intron_exon_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     deposits it (T4). ``mass_left`` is the side LEFT of the boundary; ``mass_right`` the side RIGHT.
     """
     region_contained = np.array(
-        [[4, 0, 2, 0], [1, 0, 0, 0], [4, 0, 2, 0]], dtype=np.uint32  # r1 intron: sparse gDNA, no spliced
+        [[4, 0, 2, 0], [1, 0, 0, 0], [4, 0, 2, 0]],
+        dtype=np.uint32,  # r1 intron: sparse gDNA, no spliced
     )
     flux_left = np.zeros((4, 4), dtype=np.uint32)
     flux_right = np.zeros((4, 4), dtype=np.uint32)
@@ -55,14 +56,14 @@ def _exon_intron_exon_payload() -> tuple[AccumulatorPayload, RegionArrays]:
 
     # b1 = donor seam (exon r0 on the LEFT, intron r1 on the RIGHT):
     #   gDNA two-sided; spliced on the EXON (left) side only, intron (right) side ZERO.
-    mass_left[1] = [2.0, 0.0, 3.0, 0.0]   # exon r0 side: gDNA 2 + spliced 3
+    mass_left[1] = [2.0, 0.0, 3.0, 0.0]  # exon r0 side: gDNA 2 + spliced 3
     mass_right[1] = [2.0, 0.0, 0.0, 0.0]  # intron r1 side: gDNA 2, spliced 0  ← the invariant
     flux_left[1] = [2, 0, 1, 0]
     flux_right[1] = [2, 0, 0, 0]
 
     # b2 = acceptor seam (intron r1 on the LEFT, exon r2 on the RIGHT):
     #   gDNA two-sided; spliced on the EXON (right) side only, intron (left) side ZERO.
-    mass_left[2] = [2.0, 0.0, 0.0, 0.0]   # intron r1 side: gDNA 2, spliced 0  ← the invariant
+    mass_left[2] = [2.0, 0.0, 0.0, 0.0]  # intron r1 side: gDNA 2, spliced 0  ← the invariant
     mass_right[2] = [2.0, 0.0, 3.0, 0.0]  # exon r2 side: gDNA 2 + spliced 3
     flux_left[2] = [2, 0, 0, 0]
     flux_right[2] = [2, 0, 1, 0]
@@ -107,8 +108,8 @@ def test_spliced_boundary_mass_is_one_sided_at_the_intron():
 
     # The EXON regions carry the spliced mass on their intron-facing views (donor: r0's right view;
     # acceptor: r2's left view) — one-sided, as deposited.
-    assert sub.right.mass_spliced[R0] == 3.0       # donor seam, exon side
-    assert sub.left.mass_spliced[R2] == 3.0        # acceptor seam, exon side
+    assert sub.right.mass_spliced[R0] == 3.0  # donor seam, exon side
+    assert sub.left.mass_spliced[R2] == 3.0  # acceptor seam, exon side
 
 
 def test_seam_pooling_is_valid_for_gdna_but_spliced_stays_one_sided():
@@ -129,8 +130,8 @@ def test_seam_pooling_is_valid_for_gdna_but_spliced_stays_one_sided():
     # (it does not double a junction's mass; it just rides on the lone exon side). Consumers must read the
     # exon side explicitly, not pool both sides.
     donor_pool_spliced = sub.right.mass_spliced[R0] + sub.left.mass_spliced[R1_INTRON]
-    assert donor_pool_spliced == 3.0                       # = exon side only; intron side contributed 0
-    assert sub.left.mass_spliced[R1_INTRON] == 0.0         # the zero half is structural, not incidental
+    assert donor_pool_spliced == 3.0  # = exon side only; intron side contributed 0
+    assert sub.left.mass_spliced[R1_INTRON] == 0.0  # the zero half is structural, not incidental
 
 
 def test_gdna_channel_excludes_spliced_so_pooled_seam_efflen_is_immune():
@@ -142,7 +143,9 @@ def test_gdna_channel_excludes_spliced_so_pooled_seam_efflen_is_immune():
     # SEPARATE reductions. The pooled-seam gDNA eff-len pools mass_unspliced; a regression that folded the
     # spliced channel into the unspliced one would change these whole-locus sums. Pin both, independently:
     total_spliced = (
-        sub.contained.mass_spliced.sum() + sub.left.mass_spliced.sum() + sub.right.mass_spliced.sum()
+        sub.contained.mass_spliced.sum()
+        + sub.left.mass_spliced.sum()
+        + sub.right.mass_spliced.sum()
     )
     total_unspliced = (
         sub.contained.mass_unspliced.sum()

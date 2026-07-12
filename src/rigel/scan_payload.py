@@ -146,9 +146,7 @@ class AccumulatorPayload:
         if bjs_raw is None:
             boundary_junction_strand = np.zeros(b_total, dtype=np.int8)
         else:
-            boundary_junction_strand = np.ascontiguousarray(bjs_raw, dtype=np.int8).reshape(
-                b_total
-            )
+            boundary_junction_strand = np.ascontiguousarray(bjs_raw, dtype=np.int8).reshape(b_total)
 
         # Invariant: each ref with k regions contributes (k, k+1) or (0, 0).
         expected_b_total = r_total + int(np.sum(np.diff(ref_region_offsets) > 0))

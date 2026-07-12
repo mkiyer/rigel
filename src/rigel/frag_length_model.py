@@ -156,7 +156,9 @@ class FragmentLengthModel:
         if max_size is None:
             max_size = len(prob_in) - 1
         if max_size < 0:
-            raise ValueError(f"FragmentLengthModel.from_pmf: max_size must be >= 0; got {max_size}.")
+            raise ValueError(
+                f"FragmentLengthModel.from_pmf: max_size must be >= 0; got {max_size}."
+            )
         if np.any(~np.isfinite(prob_in)) or np.any(prob_in < 0.0):
             raise ValueError("FragmentLengthModel.from_pmf: pmf must be finite and non-negative.")
 

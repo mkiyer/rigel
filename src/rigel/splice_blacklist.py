@@ -49,7 +49,11 @@ logger = logging.getLogger(__name__)
 
 #: Canonical columns in the Rigel blacklist representation.
 BLACKLIST_COLUMNS = (
-    "ref", "start", "end", "max_anchor_left", "max_anchor_right",
+    "ref",
+    "start",
+    "end",
+    "max_anchor_left",
+    "max_anchor_right",
 )
 
 
@@ -111,21 +115,23 @@ def load_splice_blacklist_from_records(
         )
         return _empty_blacklist_df()
 
-    df = pd.DataFrame({
-        "ref": refs,
-        "start": np.asarray(starts, dtype=np.int32),
-        "end": np.asarray(ends, dtype=np.int32),
-        "max_anchor_left": np.asarray(a_left, dtype=np.int32),
-        "max_anchor_right": np.asarray(a_right, dtype=np.int32),
-    })
+    df = pd.DataFrame(
+        {
+            "ref": refs,
+            "start": np.asarray(starts, dtype=np.int32),
+            "end": np.asarray(ends, dtype=np.int32),
+            "max_anchor_left": np.asarray(a_left, dtype=np.int32),
+            "max_anchor_right": np.asarray(a_right, dtype=np.int32),
+        }
+    )
 
     agg = (
         df.groupby(["ref", "start", "end"], sort=False, observed=True)
-          .agg(
-              max_anchor_left=("max_anchor_left", "max"),
-              max_anchor_right=("max_anchor_right", "max"),
-          )
-          .reset_index()
+        .agg(
+            max_anchor_left=("max_anchor_left", "max"),
+            max_anchor_right=("max_anchor_right", "max"),
+        )
+        .reset_index()
     )
     agg = agg.sort_values(["ref", "start", "end"], kind="stable").reset_index(drop=True)
     agg["start"] = agg["start"].astype(np.int32)
@@ -199,14 +205,13 @@ def load_splice_blacklist_from_zarr(
         )
         return _empty_blacklist_df()
 
-    df = df.rename(columns={"chrom": "ref",
-                            "intron_start": "start",
-                            "intron_end": "end"})
+    df = df.rename(columns={"chrom": "ref", "intron_start": "start", "intron_end": "end"})
     agg = (
         df.groupby(["ref", "start", "end"], sort=False, observed=True)
-          .agg(max_anchor_left=("max_anchor_left", "max"),
-               max_anchor_right=("max_anchor_right", "max"))
-          .reset_index()
+        .agg(
+            max_anchor_left=("max_anchor_left", "max"), max_anchor_right=("max_anchor_right", "max")
+        )
+        .reset_index()
     )
     agg = agg.sort_values(["ref", "start", "end"], kind="stable").reset_index(drop=True)
     agg["ref"] = agg["ref"].astype(object)
@@ -224,10 +229,12 @@ def load_splice_blacklist_from_zarr(
 
 
 def _empty_blacklist_df() -> pd.DataFrame:
-    return pd.DataFrame({
-        "ref": pd.Series([], dtype="object"),
-        "start": pd.Series([], dtype=np.int32),
-        "end": pd.Series([], dtype=np.int32),
-        "max_anchor_left": pd.Series([], dtype=np.int32),
-        "max_anchor_right": pd.Series([], dtype=np.int32),
-    })
+    return pd.DataFrame(
+        {
+            "ref": pd.Series([], dtype="object"),
+            "start": pd.Series([], dtype=np.int32),
+            "end": pd.Series([], dtype=np.int32),
+            "max_anchor_left": pd.Series([], dtype=np.int32),
+            "max_anchor_right": pd.Series([], dtype=np.int32),
+        }
+    )

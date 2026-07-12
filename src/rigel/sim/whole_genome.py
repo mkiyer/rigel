@@ -62,6 +62,7 @@ Output
             sim_R1.fq.gz, sim_R2.fq.gz
             sim_oracle.bam         (if oracle_bam enabled)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -83,6 +84,7 @@ except ImportError:
     pgzip = None  # type: ignore[assignment]
 
 from rigel.transcript import Transcript
+
 # Config dataclasses live in wgs_config (data layer); re-exported so existing
 # `from rigel.sim.whole_genome import SimulationParams` call sites keep working.
 from .wgs_config import (  # noqa: F401
@@ -100,6 +102,7 @@ from rigel.sim.manifest import (
 )
 
 logger = logging.getLogger(__name__)
+
 
 def _capture_config_from_mapping(
     raw: dict,
@@ -145,11 +148,7 @@ def _capture_scenarios_from_mapping(raw: dict) -> list[CaptureScenario]:
     if not isinstance(raw_configs, list) or not raw_configs:
         raise ValueError("capture.configs must be a non-empty list")
 
-    defaults = {
-        key: value
-        for key, value in raw.items()
-        if key not in {"configs", "scenarios"}
-    }
+    defaults = {key: value for key, value in raw.items() if key not in {"configs", "scenarios"}}
     scenarios: list[CaptureScenario] = []
     seen_labels: set[str] = set()
     for index, item in enumerate(raw_configs, start=1):
@@ -161,15 +160,17 @@ def _capture_scenarios_from_mapping(raw: dict) -> list[CaptureScenario]:
         if label in seen_labels:
             raise ValueError(f"duplicate capture config label: {label}")
         seen_labels.add(label)
-        scenarios.append(CaptureScenario(
-            label=label,
-            config=_capture_config_from_mapping(
-                item,
-                defaults,
+        scenarios.append(
+            CaptureScenario(
                 label=label,
-                require_probes_when_enabled=True,
-            ),
-        ))
+                config=_capture_config_from_mapping(
+                    item,
+                    defaults,
+                    label=label,
+                    require_probes_when_enabled=True,
+                ),
+            )
+        )
     return scenarios
 
 
@@ -231,9 +232,7 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
         nrna.ratios = [float(r) for r in raw_ratios]
     raw_ratio_ranges = nrna_raw.get("ratio_ranges", None)
     if raw_ratio_ranges is not None:
-        nrna.ratio_ranges = [
-            (float(pair[0]), float(pair[1])) for pair in raw_ratio_ranges
-        ]
+        nrna.ratio_ranges = [(float(pair[0]), float(pair[1])) for pair in raw_ratio_ranges]
     nrna.ratio_labels = nrna_raw.get("ratio_labels", None)
     nrna.eligible_fraction = float(nrna_raw.get("eligible_fraction", 1.0))
     nrna.seed = int(nrna_raw.get("seed", 42))
@@ -276,9 +275,7 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
         cfg.capture = _capture_config_from_mapping(cap_raw)
 
     # Strand specificities
-    cfg.strand_specificities = [
-        float(s) for s in raw.get("strand_specificities", [1.0])
-    ]
+    cfg.strand_specificities = [float(s) for s in raw.get("strand_specificities", [1.0])]
 
     # Misc
     cfg.oracle_bam = bool(raw.get("oracle_bam", True))
@@ -373,7 +370,9 @@ def assign_random_abundances(
     total_mrna = sum(t.abundance for t in transcripts)
     logger.info(
         "Log-uniform abundances: %d/%d expressed, total mRNA=%.1f",
-        n_expr, n, total_mrna,
+        n_expr,
+        n,
+        total_mrna,
     )
 
 
@@ -494,7 +493,11 @@ def apply_nrna_ratio(
     logger.info(
         "Set additive nRNA ratio: %.3g (%d transcripts, mRNA=%.1f, nRNA=%.1f, "
         "%d single-exon zeroed)",
-        ratio, n_spiked, total_mrna, total_nrna, n_single,
+        ratio,
+        n_spiked,
+        total_mrna,
+        total_nrna,
+        n_single,
     )
 
 
@@ -543,8 +546,15 @@ def apply_random_nrna_fraction(
         "Set random nRNA fractions: range=[%.3g, %.3g], eligible_fraction=%.3g, "
         "spiked=%d/%d expressed multi-exon, mRNA=%.1f, nRNA=%.1f, "
         "realized_ratio=%.4g, %d single-exon zeroed",
-        lo, hi, eligible_fraction, n_spiked, n_eligible,
-        total_mrna, total_nrna, realized_ratio, n_single,
+        lo,
+        hi,
+        eligible_fraction,
+        n_spiked,
+        n_eligible,
+        total_mrna,
+        total_nrna,
+        realized_ratio,
+        n_single,
     )
     return realized_ratio
 
@@ -591,7 +601,10 @@ def assign_file_abundances(
 
     logger.info(
         "File abundances (%s): matched=%d/%d, has_nrna=%s",
-        fmt, matched, len(transcripts), has_nrna_data,
+        fmt,
+        matched,
+        len(transcripts),
+        has_nrna_data,
     )
 
     return has_nrna_data
@@ -603,9 +616,11 @@ def write_truth_abundances(
 ) -> None:
     """Write ground-truth abundances to a TSV file."""
     with open(path, "w") as f:
-        f.write("transcript_id\tgene_id\tgene_name\tref\tstrand\t"
-                "mrna_abundance\tnrna_abundance\ttotal_rna\tn_exons\t"
-                "spliced_length\tgenomic_span\n")
+        f.write(
+            "transcript_id\tgene_id\tgene_name\tref\tstrand\t"
+            "mrna_abundance\tnrna_abundance\ttotal_rna\tn_exons\t"
+            "spliced_length\tgenomic_span\n"
+        )
         for t in transcripts:
             total = (t.abundance or 0.0) + t.nrna_abundance
             genomic_span = t.end - t.start if t.end and t.start else 0
@@ -732,14 +747,10 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         raise ValueError(f"Unknown abundance mode: {ab.mode}")
 
     if has_file_nrna:
-        logger.info(
-            "Abundance file provided nRNA data — skipping nRNA spike-in sweep"
-        )
+        logger.info("Abundance file provided nRNA data — skipping nRNA spike-in sweep")
 
     # Save base abundances
-    base_abundances = [
-        (t.abundance or 0.0, t.nrna_abundance) for t in transcripts
-    ]
+    base_abundances = [(t.abundance or 0.0, t.nrna_abundance) for t in transcripts]
 
     # 3. Build condition grid: nrna × gdna × strand_specificities × capture
     sim = cfg.simulation
@@ -813,8 +824,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--gtf", help="Gene annotation GTF (overrides YAML)")
     p.add_argument("--outdir", help="Output directory (overrides YAML)")
     p.add_argument("--n-rna", type=int, help="Number of RNA fragments (overrides YAML)")
-    p.add_argument("-j", "--n-workers", type=int, default=None,
-                   help="Worker processes for parallel read generation (overrides YAML)")
+    p.add_argument(
+        "-j",
+        "--n-workers",
+        type=int,
+        default=None,
+        help="Worker processes for parallel read generation (overrides YAML)",
+    )
     p.add_argument("--no-oracle", action="store_true", help="Skip oracle BAM generation")
     p.add_argument("--verbose", action="store_true", default=None, help="Verbose logging")
     return p

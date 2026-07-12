@@ -155,12 +155,17 @@ def calibrate(
     )
     statics = build_node_statics(chain, substrate, boundary_substrate, region_arrays)
     belief = init_beliefs(
-        chain, substrate, boundary_substrate, region_arrays,
+        chain,
+        substrate,
+        boundary_substrate,
+        region_arrays,
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,
-        n_grid=config.sweep_n_grid, n_grid_ss=config.sweep_n_grid_single_strand,
-        logodds_window=config.sweep_logodds_window, statics=statics,
+        n_grid=config.sweep_n_grid,
+        n_grid_ss=config.sweep_n_grid_single_strand,
+        logodds_window=config.sweep_logodds_window,
+        statics=statics,
     )
     # Belief-free Poisson message precision (`disagreement_shrinkage_prior_design_v2.md`): the scalar
     # total-density σ²_imp — the empirical adjacent-node imputation floor. σ²_msg = σ²_imp + 1/n_src; the
@@ -170,13 +175,20 @@ def calibrate(
 
     def _sweep(prior):
         return node_sweep(
-            chain, statics, geometry, belief, region_arrays, boundary_substrate,
+            chain,
+            statics,
+            geometry,
+            belief,
+            region_arrays,
+            boundary_substrate,
             rna_sense_frac=rna_sense_frac,
             gdna_strand_overdispersion=gdna_strand_overdispersion,
             rna_strand_overdispersion=rna_strand_overdispersion,
             n_grid=config.sweep_n_grid,
             logodds_window=config.sweep_logodds_window,
-            n_tilt=config.sweep_n_tilt, n_grid_ss=config.sweep_n_grid_single_strand, gdna_prior=prior,
+            n_tilt=config.sweep_n_tilt,
+            n_grid_ss=config.sweep_n_grid_single_strand,
+            gdna_prior=prior,
             disagreement_sigma2=sig_total,
         )
 
@@ -187,25 +199,42 @@ def calibrate(
     # null space on AMBIG). Falls back to the pass-1 belief if the substrate is too small to fit.
     gdna_prior = None
     train_sub = build_training_substrate(
-        chain, belief, geometry, statics, region_arrays, boundary_substrate,
+        chain,
+        belief,
+        geometry,
+        statics,
+        region_arrays,
+        boundary_substrate,
         min_eff_length=fl_mean,  # exclude regions too short to contain a gDNA fragment (§8e)
     )
     if train_sub.n >= config.calib_kde_min_training_nodes:
         gdna_prior = GdnaDensityPrior.fit(
-            train_sub, bandwidth=config.gdna_prior_bandwidth,
+            train_sub,
+            bandwidth=config.gdna_prior_bandwidth,
             mixture_bridge=config.gdna_prior_mixture_bridge,
             bridge_trim_pct=config.calib_kde_bridge_trim_pct,
         )
         belief = _sweep(gdna_prior)
     regions = chain_region_deconv(chain, belief, substrate)
     left, right = chain_boundary_side_deconv(chain, belief, substrate)
-    logger.debug("calibration: %s", "two-pass (Phase-2 mixture prior)" if gdna_prior else "single pass")
+    logger.debug(
+        "calibration: %s", "two-pass (Phase-2 mixture prior)" if gdna_prior else "single pass"
+    )
 
-    if _debug is not None:  # inert diagnostic hook — the solved chain internals (Phase-2 substrate + plots)
+    if (
+        _debug is not None
+    ):  # inert diagnostic hook — the solved chain internals (Phase-2 substrate + plots)
         _debug.update(
-            chain=chain, belief=belief, geometry=geometry, statics=statics, substrate=substrate,
-            boundary_substrate=boundary_substrate, region_arrays=region_arrays,
-            rna_sense_frac=rna_sense_frac, region_eff_len=region_eff_len, boundary_eff_len=boundary_eff_len,
+            chain=chain,
+            belief=belief,
+            geometry=geometry,
+            statics=statics,
+            substrate=substrate,
+            boundary_substrate=boundary_substrate,
+            region_arrays=region_arrays,
+            rna_sense_frac=rna_sense_frac,
+            region_eff_len=region_eff_len,
+            boundary_eff_len=boundary_eff_len,
         )
 
     # Report-facing diagnostics: the fitted gDNA-density KDE (bimodal ⇒ capture

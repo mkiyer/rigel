@@ -280,9 +280,7 @@ class Scenario:
             self.work_dir.mkdir(parents=True, exist_ok=True)
 
         self.ref_name = ref_name or name
-        self.genome = MutableGenome(
-            genome_length, seed=seed, name=self.ref_name
-        )
+        self.genome = MutableGenome(genome_length, seed=seed, name=self.ref_name)
         self.annotation = GeneBuilder(self.genome, ref_name=self.ref_name)
 
     # -- Gene addition (delegates to GeneBuilder) ----------------------------
@@ -349,9 +347,7 @@ class Scenario:
 
         # Resolve gDNA config: build() param overrides constructor
         effective_gdna = gdna_config if gdna_config is not None else self.gdna_config
-        effective_capture = (
-            capture_config if capture_config is not None else self.capture_config
-        )
+        effective_capture = capture_config if capture_config is not None else self.capture_config
 
         # 1. Genome FASTA
         logger.info(f"[{self.name}] Writing genome FASTA...")
@@ -376,7 +372,8 @@ class Scenario:
         if sim_config is None:
             sim_config = ReadSimConfig(seed=self.seed)
         sim = WholeGenomeSimulator(
-            fasta_path, transcripts,
+            fasta_path,
+            transcripts,
             _to_sim_params(sim_config, n_fragments),
             _to_gdna_sim(effective_gdna),
             strand_specificity=sim_config.strand_specificity,
@@ -386,8 +383,13 @@ class Scenario:
         n_mrna, n_nrna, n_gdna = sim.pool_split(n_fragments, gdna_abundance)
         logger.info(f"[{self.name}] Simulating {n_fragments} fragments...")
         r1_path, r2_path, _ = sim.simulate_and_write(
-            wdir, n_mrna + n_nrna, n_gdna,
-            n_mrna=n_mrna, n_nrna=n_nrna, oracle_bam=False, prefix=self.name,
+            wdir,
+            n_mrna + n_nrna,
+            n_gdna,
+            n_mrna=n_mrna,
+            n_nrna=n_nrna,
+            oracle_bam=False,
+            prefix=self.name,
         )
         sim.close()
 
@@ -466,9 +468,7 @@ class Scenario:
         """
         wdir = self.work_dir
         effective_gdna = gdna_config if gdna_config is not None else self.gdna_config
-        effective_capture = (
-            capture_config if capture_config is not None else self.capture_config
-        )
+        effective_capture = capture_config if capture_config is not None else self.capture_config
 
         # 1. Genome FASTA
         fasta_path = self.genome.write_fasta(wdir)
@@ -490,10 +490,11 @@ class Scenario:
         if n_rna_fragments is not None:
             # Fixed-RNA mode (b): explicit RNA total, gDNA added on top.
             n_rna = n_rna_fragments
-            n_gdna = (int(round(n_rna * gdna_fraction))
-                      if gdna_fraction and effective_gdna else 0)
+            n_gdna = int(round(n_rna * gdna_fraction)) if gdna_fraction and effective_gdna else 0
             sim = WholeGenomeSimulator(
-                fasta_path, transcripts, _to_sim_params(sim_config, n_rna),
+                fasta_path,
+                transcripts,
+                _to_sim_params(sim_config, n_rna),
                 _to_gdna_sim(effective_gdna),
                 strand_specificity=sim_config.strand_specificity,
                 capture_config=effective_capture,
@@ -502,15 +503,22 @@ class Scenario:
         else:
             # Fixed-total mode (a): abundance-weighted 3-way split.
             sim = WholeGenomeSimulator(
-                fasta_path, transcripts, _to_sim_params(sim_config, n_fragments),
+                fasta_path,
+                transcripts,
+                _to_sim_params(sim_config, n_fragments),
                 _to_gdna_sim(effective_gdna),
                 strand_specificity=sim_config.strand_specificity,
                 capture_config=effective_capture,
             )
             n_mrna, n_nrna, n_gdna = sim.pool_split(n_fragments, gdna_abundance)
         _, _, bam_path = sim.simulate_and_write(
-            wdir, n_mrna + n_nrna, n_gdna,
-            n_mrna=n_mrna, n_nrna=n_nrna, oracle_bam=True, prefix=self.name,
+            wdir,
+            n_mrna + n_nrna,
+            n_gdna,
+            n_mrna=n_mrna,
+            n_nrna=n_nrna,
+            oracle_bam=True,
+            prefix=self.name,
         )
         sim.close()
         n_simulated_total = n_mrna + n_nrna + n_gdna
@@ -535,8 +543,9 @@ class Scenario:
             is_oracle=True,
         )
 
-    def _align(self, fasta_path: Path, r1_path: Path, r2_path: Path,
-               gtf_path: Path | None = None) -> Path:
+    def _align(
+        self, fasta_path: Path, r1_path: Path, r2_path: Path, gtf_path: Path | None = None
+    ) -> Path:
         """Align reads with minimap2 and produce a name-sorted BAM.
 
         Pipeline::
@@ -560,7 +569,8 @@ class Scenario:
         # minimap2 → samtools sort -n (name-sorted)
         minimap2_cmd = [
             "minimap2",
-            "-ax", "splice:sr",
+            "-ax",
+            "splice:sr",
             "--secondary=yes",
         ]
 
@@ -572,17 +582,21 @@ class Scenario:
             minimap2_cmd.extend(["-j", str(bed_path)])
             logger.info(f"Using BED12 annotation for minimap2: {bed_path}")
 
-        minimap2_cmd.extend([
-            str(fasta_path),
-            str(r1_path),
-            str(r2_path),
-        ])
+        minimap2_cmd.extend(
+            [
+                str(fasta_path),
+                str(r1_path),
+                str(r2_path),
+            ]
+        )
 
         sort_cmd = [
-            "samtools", "sort",
+            "samtools",
+            "sort",
             "-n",  # name-sort for the BAM parser
-            "-o", str(bam_path),
-            "-",   # read from stdin
+            "-o",
+            str(bam_path),
+            "-",  # read from stdin
         ]
 
         logger.debug(f"Running: {' '.join(minimap2_cmd)} | {' '.join(sort_cmd)}")
@@ -609,14 +623,12 @@ class Scenario:
         p1.wait()
 
         if p2.returncode != 0:
-            raise RuntimeError(
-                f"samtools sort failed (rc={p2.returncode}): "
-                f"{p2_stderr.decode()}"
-            )
+            raise RuntimeError(f"samtools sort failed (rc={p2.returncode}): {p2_stderr.decode()}")
         if p1.returncode != 0:
             logger.warning(
                 "minimap2 exited with rc=%d: %s",
-                p1.returncode, p1_stderr.decode(errors='replace'),
+                p1.returncode,
+                p1_stderr.decode(errors="replace"),
             )
 
         logger.info(f"Wrote name-sorted BAM → {bam_path}")

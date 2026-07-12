@@ -135,14 +135,18 @@ def build_training_substrate(
 
     dens = node_densities(belief, geometry)
     fg = np.asarray(belief.f_g, dtype=np.float64)
-    var_g = np.asarray(belief.var_gdna, dtype=np.float64)  # Var(log f_g); ∞ ⇒ unsolved (no observation)
+    var_g = np.asarray(
+        belief.var_gdna, dtype=np.float64
+    )  # Var(log f_g); ∞ ⇒ unsolved (no observation)
     solved = np.isfinite(var_g)
     Ml = np.asarray(geometry.mass_left, dtype=np.float64)
     Mr = np.asarray(geometry.mass_right, dtype=np.float64)
     EGl = np.maximum(np.asarray(geometry.eff_gdna_left, dtype=np.float64), _EPS)
     EGr = np.maximum(np.asarray(geometry.eff_gdna_right, dtype=np.float64), _EPS)
 
-    def _std(gcount):  # per-node log-density noise scale √(Var(log f_g)+1/(gcount+1)) — for the bandwidth floor
+    def _std(
+        gcount,
+    ):  # per-node log-density noise scale √(Var(log f_g)+1/(gcount+1)) — for the bandwidth floor
         return np.sqrt(np.maximum(var_g, 0.0) + 1.0 / (np.maximum(gcount, 0.0) + 1.0))
 
     # ---- region training nodes: every SOLVED non-AMBIG region large enough to contain a fragment
@@ -158,13 +162,16 @@ def build_training_substrate(
     #      entirely when off (bnd_train is then an all-False mask and the collect section is a no-op on it);
     #      toggle ``include_boundaries`` to experiment. ----
     if include_boundaries:
-        clean_exon_bnd, exon_on_right = _clean_exon_boundary(chain, region_arrays, boundary_substrate)
+        clean_exon_bnd, exon_on_right = _clean_exon_boundary(
+            chain, region_arrays, boundary_substrate
+        )
         M_bnd = np.where(exon_on_right, Mr, Ml)
         E_bnd = np.where(exon_on_right, EGr, EGl)
         rho_bnd = np.where(exon_on_right, np.asarray(dens.rho_g_right), np.asarray(dens.rho_g_left))
         rho_bnd = np.maximum(rho_bnd, 1.0 / np.maximum(E_bnd, _EPS))
-        bnd_train = (is_bnd & clean_exon_bnd & solved & (M_bnd > 0.0)
-                     & (E_bnd >= float(min_eff_length)))
+        bnd_train = (
+            is_bnd & clean_exon_bnd & solved & (M_bnd > 0.0) & (E_bnd >= float(min_eff_length))
+        )
     else:
         M_bnd = np.zeros(int(chain.n_nodes), dtype=np.float64)
         rho_bnd = np.ones(int(chain.n_nodes), dtype=np.float64)
@@ -188,7 +195,9 @@ def build_training_substrate(
     nkind[bnd_train] = KIND_BOUNDARY
     keep |= bnd_train
 
-    weight[keep] = 1.0  # UNIT weight (design §8e) — NOT precision; noise is handled by the bandwidth
+    weight[keep] = (
+        1.0  # UNIT weight (design §8e) — NOT precision; noise is handled by the bandwidth
+    )
     keep &= np.isfinite(log_rho)
     return TrainingSubstrate(
         log_rho=log_rho[keep],
@@ -366,7 +375,9 @@ class GdnaDensityPrior:
         vs ~2k with real tails). Same kernel/bandwidth/weights the fit uses, so it agrees with the plotted
         curve inside the observed range."""
         x = np.asarray(log_rho, dtype=np.float64)
-        return _weighted_kde_logpdf(x.ravel(), self.train_x, self.train_w, self.bandwidth).reshape(x.shape)
+        return _weighted_kde_logpdf(x.ravel(), self.train_x, self.train_w, self.bandwidth).reshape(
+            x.shape
+        )
 
     @classmethod
     def fit(

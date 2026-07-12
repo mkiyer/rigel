@@ -87,19 +87,29 @@ class TestIntergenicMultimappers:
             work_dir=tmp_path / ("ig_mm" + name_suffix),
         )
         # Real gene far from the duplicated regions
-        sc.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(6000, 6200)], "abundance": 100},
-        ])
+        sc.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(6000, 6200)], "abundance": 100},
+            ],
+        )
         # Helper gene for strand training
-        sc.add_gene("g_helper", "+", [
-            {"t_id": "t_helper",
-             "exons": [(14000, 14300), (14700, 15000)],
-             "abundance": 80},
-        ])
+        sc.add_gene(
+            "g_helper",
+            "+",
+            [
+                {"t_id": "t_helper", "exons": [(14000, 14300), (14700, 15000)], "abundance": 80},
+            ],
+        )
         # Negative control
-        sc.add_gene("g_ctrl", "-", [
-            {"t_id": "t_ctrl", "exons": [(17000, 17300)], "abundance": 0},
-        ])
+        sc.add_gene(
+            "g_ctrl",
+            "-",
+            [
+                {"t_id": "t_ctrl", "exons": [(17000, 17300)], "abundance": 0},
+            ],
+        )
         # Duplicate a 500bp intergenic region → multimapping gDNA
         sc.genome.edit(10000, sc.genome[2000:2500])
         return sc
@@ -110,7 +120,8 @@ class TestIntergenicMultimappers:
         sc = self._make_scenario(tmp_path, "_baseline")
         try:
             bench = build_and_run(
-                sc, include_multimap=True,
+                sc,
+                include_multimap=True,
                 scenario_name="ig_mm_baseline",
             )
             assert_alignment(bench)
@@ -125,7 +136,9 @@ class TestIntergenicMultimappers:
         sc = self._make_scenario(tmp_path, "_gdna_budget")
         try:
             bench = build_and_run(
-                sc, gdna_abundance=50, n_fragments=1000,
+                sc,
+                gdna_abundance=50,
+                n_fragments=1000,
                 include_multimap=True,
                 scenario_name="ig_mm_gdna_budget",
             )
@@ -140,7 +153,9 @@ class TestIntergenicMultimappers:
         sc = self._make_scenario(tmp_path, "_high_gdna")
         try:
             bench = build_and_run(
-                sc, gdna_abundance=200, n_fragments=2000,
+                sc,
+                gdna_abundance=200,
+                n_fragments=2000,
                 include_multimap=True,
                 scenario_name="ig_mm_high_gdna",
             )
@@ -151,12 +166,14 @@ class TestIntergenicMultimappers:
 
     @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
     def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(
-            tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
-                sc, gdna_abundance=gdna, nrna_abundance=nrna,
-                strand_specificity=ss, include_multimap=True,
+                sc,
+                gdna_abundance=gdna,
+                nrna_abundance=nrna,
+                strand_specificity=ss,
+                include_multimap=True,
                 scenario_name=f"ig_mm_stress_{gdna}_{nrna}_{int(ss * 100)}",
             )
             assert_alignment(bench)
@@ -196,21 +213,29 @@ class TestIntronicIntergenicMultimappers:
             work_dir=tmp_path / ("intr_ig" + name_suffix),
         )
         # Gene with large intron → nRNA reads come from intron
-        sc.add_gene("g1", "+", [
-            {"t_id": "t1",
-             "exons": [(1000, 1300), (3000, 3300)],
-             "abundance": 100},
-        ])
+        sc.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(1000, 1300), (3000, 3300)], "abundance": 100},
+            ],
+        )
         # Helper for strand training
-        sc.add_gene("g_helper", "+", [
-            {"t_id": "t_helper",
-             "exons": [(14000, 14300), (14700, 15000)],
-             "abundance": 80},
-        ])
+        sc.add_gene(
+            "g_helper",
+            "+",
+            [
+                {"t_id": "t_helper", "exons": [(14000, 14300), (14700, 15000)], "abundance": 80},
+            ],
+        )
         # Negative control
-        sc.add_gene("g_ctrl", "-", [
-            {"t_id": "t_ctrl", "exons": [(17000, 17300)], "abundance": 0},
-        ])
+        sc.add_gene(
+            "g_ctrl",
+            "-",
+            [
+                {"t_id": "t_ctrl", "exons": [(17000, 17300)], "abundance": 0},
+            ],
+        )
         # Duplicate g1's intron to an intergenic region
         intronic_seq = sc.genome[1300:3000]
         sc.genome.edit(8000, intronic_seq)
@@ -222,7 +247,9 @@ class TestIntronicIntergenicMultimappers:
         sc = self._make_scenario(tmp_path, "_nrna")
         try:
             bench = build_and_run(
-                sc, nrna_abundance=50, n_fragments=1000,
+                sc,
+                nrna_abundance=50,
+                n_fragments=1000,
                 include_multimap=True,
                 scenario_name="intr_ig_nrna",
             )
@@ -237,8 +264,11 @@ class TestIntronicIntergenicMultimappers:
         sc = self._make_scenario(tmp_path, "_nrna_gdna")
         try:
             bench = build_and_run(
-                sc, nrna_abundance=50, gdna_abundance=30,
-                n_fragments=1500, include_multimap=True,
+                sc,
+                nrna_abundance=50,
+                gdna_abundance=30,
+                n_fragments=1500,
+                include_multimap=True,
                 scenario_name="intr_ig_nrna_gdna",
             )
             assert_alignment(bench)
@@ -248,12 +278,14 @@ class TestIntronicIntergenicMultimappers:
 
     @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
     def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(
-            tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
-                sc, gdna_abundance=gdna, nrna_abundance=nrna,
-                strand_specificity=ss, n_fragments=1000,
+                sc,
+                gdna_abundance=gdna,
+                nrna_abundance=nrna,
+                strand_specificity=ss,
+                n_fragments=1000,
                 include_multimap=True,
                 scenario_name=f"intr_ig_stress_{gdna}_{nrna}_{int(ss * 100)}",
             )
@@ -281,30 +313,43 @@ class TestExonicParalogBudget:
         [12000-12300] gene g_ctrl (- strand, abundance=0)
     """
 
-    def _make_scenario(self, tmp_path, g1_abund=100, g2_abund=100,
-                       name_suffix=""):
+    def _make_scenario(self, tmp_path, g1_abund=100, g2_abund=100, name_suffix=""):
         sc = Scenario(
             "para_budget" + name_suffix,
             genome_length=16000,
             seed=SIM_SEED,
             work_dir=tmp_path / ("para_budget" + name_suffix),
         )
-        sc.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(500, 1000)], "abundance": g1_abund},
-        ])
-        sc.add_gene("g2", "+", [
-            {"t_id": "t2", "exons": [(5000, 5500)], "abundance": g2_abund},
-        ])
+        sc.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(500, 1000)], "abundance": g1_abund},
+            ],
+        )
+        sc.add_gene(
+            "g2",
+            "+",
+            [
+                {"t_id": "t2", "exons": [(5000, 5500)], "abundance": g2_abund},
+            ],
+        )
         # Copy g1 sequence to g2 → identical paralogs
         sc.genome.edit(5000, sc.genome[500:1000])
-        sc.add_gene("g_helper", "+", [
-            {"t_id": "t_helper",
-             "exons": [(8000, 8300), (8700, 9000)],
-             "abundance": 80},
-        ])
-        sc.add_gene("g_ctrl", "-", [
-            {"t_id": "t_ctrl", "exons": [(12000, 12300)], "abundance": 0},
-        ])
+        sc.add_gene(
+            "g_helper",
+            "+",
+            [
+                {"t_id": "t_helper", "exons": [(8000, 8300), (8700, 9000)], "abundance": 80},
+            ],
+        )
+        sc.add_gene(
+            "g_ctrl",
+            "-",
+            [
+                {"t_id": "t_ctrl", "exons": [(12000, 12300)], "abundance": 0},
+            ],
+        )
         return sc
 
     def test_budget_no_gdna(self, tmp_path):
@@ -312,7 +357,9 @@ class TestExonicParalogBudget:
         sc = self._make_scenario(tmp_path, name_suffix="_budget_no_gdna")
         try:
             bench = build_and_run(
-                sc, n_fragments=1000, include_multimap=True,
+                sc,
+                n_fragments=1000,
+                include_multimap=True,
                 scenario_name="para_budget_no_gdna",
             )
             assert_alignment(bench)
@@ -331,7 +378,9 @@ class TestExonicParalogBudget:
         sc = self._make_scenario(tmp_path, name_suffix="_budget_gdna")
         try:
             bench = build_and_run(
-                sc, gdna_abundance=50, n_fragments=1500,
+                sc,
+                gdna_abundance=50,
+                n_fragments=1500,
                 include_multimap=True,
                 scenario_name="para_budget_gdna",
             )
@@ -342,11 +391,12 @@ class TestExonicParalogBudget:
 
     def test_budget_asymmetric(self, tmp_path):
         """Asymmetric paralog abundances (4:1) — budget conserved."""
-        sc = self._make_scenario(tmp_path, g1_abund=100, g2_abund=25,
-                                 name_suffix="_budget_asym")
+        sc = self._make_scenario(tmp_path, g1_abund=100, g2_abund=25, name_suffix="_budget_asym")
         try:
             bench = build_and_run(
-                sc, n_fragments=1000, include_multimap=True,
+                sc,
+                n_fragments=1000,
+                include_multimap=True,
                 scenario_name="para_budget_asym",
             )
             assert_alignment(bench)
@@ -356,12 +406,14 @@ class TestExonicParalogBudget:
 
     @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
     def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(
-            tmp_path, name_suffix=f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+        sc = self._make_scenario(tmp_path, name_suffix=f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
-                sc, gdna_abundance=gdna, nrna_abundance=nrna,
-                strand_specificity=ss, n_fragments=1000,
+                sc,
+                gdna_abundance=gdna,
+                nrna_abundance=nrna,
+                strand_specificity=ss,
+                n_fragments=1000,
                 include_multimap=True,
                 scenario_name=f"para_budget_stress_{gdna}_{nrna}_{int(ss * 100)}",
             )
@@ -397,8 +449,7 @@ class TestPseudogene:
     the parent gene.
     """
 
-    def _make_scenario(self, tmp_path, parent_abund=100, pseudo_abund=0,
-                       name_suffix=""):
+    def _make_scenario(self, tmp_path, parent_abund=100, pseudo_abund=0, name_suffix=""):
         sc = Scenario(
             "pseudogene" + name_suffix,
             genome_length=20000,
@@ -406,32 +457,46 @@ class TestPseudogene:
             work_dir=tmp_path / ("pseudogene" + name_suffix),
         )
         # Parent gene: two exons with a 700bp intron
-        sc.add_gene("g_parent", "+", [
-            {"t_id": "t_parent",
-             "exons": [(1000, 1300), (2000, 2300)],
-             "abundance": parent_abund},
-        ])
+        sc.add_gene(
+            "g_parent",
+            "+",
+            [
+                {
+                    "t_id": "t_parent",
+                    "exons": [(1000, 1300), (2000, 2300)],
+                    "abundance": parent_abund,
+                },
+            ],
+        )
         # Pseudogene: single exon = concatenated parent exons
-        sc.add_gene("g_pseudo", "+", [
-            {"t_id": "t_pseudo",
-             "exons": [(8000, 8600)],
-             "abundance": pseudo_abund},
-        ])
+        sc.add_gene(
+            "g_pseudo",
+            "+",
+            [
+                {"t_id": "t_pseudo", "exons": [(8000, 8600)], "abundance": pseudo_abund},
+            ],
+        )
         # Copy concatenated exon sequences to pseudogene location
         exon1 = sc.genome[1000:1300]
         exon2 = sc.genome[2000:2300]
         sc.genome.edit(8000, exon1 + exon2)
 
         # Helper gene
-        sc.add_gene("g_helper", "+", [
-            {"t_id": "t_helper",
-             "exons": [(14000, 14300), (14700, 15000)],
-             "abundance": 80},
-        ])
+        sc.add_gene(
+            "g_helper",
+            "+",
+            [
+                {"t_id": "t_helper", "exons": [(14000, 14300), (14700, 15000)], "abundance": 80},
+            ],
+        )
         # Negative control
-        sc.add_gene("g_ctrl", "-", [
-            {"t_id": "t_ctrl", "exons": [(17000, 17300)], "abundance": 0},
-        ])
+        sc.add_gene(
+            "g_ctrl",
+            "-",
+            [
+                {"t_id": "t_ctrl", "exons": [(17000, 17300)], "abundance": 0},
+            ],
+        )
         return sc
 
     def test_parent_only(self, tmp_path):
@@ -439,37 +504,37 @@ class TestPseudogene:
         Budget must be conserved.  The EM may split counts between
         parent and pseudo since most reads don't span the splice
         junction, but the total should match expected."""
-        sc = self._make_scenario(tmp_path, parent_abund=100, pseudo_abund=0,
-                                 name_suffix="_parent_only")
+        sc = self._make_scenario(
+            tmp_path, parent_abund=100, pseudo_abund=0, name_suffix="_parent_only"
+        )
         try:
             bench = build_and_run(
-                sc, n_fragments=1000, include_multimap=True,
+                sc,
+                n_fragments=1000,
+                include_multimap=True,
                 scenario_name="pseudo_parent_only",
             )
             assert_alignment(bench)
             assert_accountability(bench)
             assert_negative_control(bench)
             # Total across parent+pseudo should match expected
-            t_parent = next(
-                t for t in bench.transcripts if t.t_id == "t_parent")
-            t_pseudo = next(
-                t for t in bench.transcripts if t.t_id == "t_pseudo")
+            t_parent = next(t for t in bench.transcripts if t.t_id == "t_parent")
+            t_pseudo = next(t for t in bench.transcripts if t.t_id == "t_pseudo")
             combined = t_parent.observed + t_pseudo.observed
-            assert combined == pytest.approx(
-                t_parent.expected, abs=20), (
-                f"Combined parent+pseudo={combined:.0f} vs "
-                f"expected={t_parent.expected}"
+            assert combined == pytest.approx(t_parent.expected, abs=20), (
+                f"Combined parent+pseudo={combined:.0f} vs expected={t_parent.expected}"
             )
         finally:
             sc.cleanup()
 
     def test_both_expressed(self, tmp_path):
         """Both parent and pseudogene expressed — budget conserved."""
-        sc = self._make_scenario(tmp_path, parent_abund=100, pseudo_abund=50,
-                                 name_suffix="_both")
+        sc = self._make_scenario(tmp_path, parent_abund=100, pseudo_abund=50, name_suffix="_both")
         try:
             bench = build_and_run(
-                sc, n_fragments=1500, include_multimap=True,
+                sc,
+                n_fragments=1500,
+                include_multimap=True,
                 scenario_name="pseudo_both",
             )
             assert_alignment(bench)
@@ -479,11 +544,12 @@ class TestPseudogene:
 
     def test_parent_with_gdna(self, tmp_path):
         """Parent gene + gDNA contamination — budget conserved."""
-        sc = self._make_scenario(tmp_path, parent_abund=100, pseudo_abund=0,
-                                 name_suffix="_gdna")
+        sc = self._make_scenario(tmp_path, parent_abund=100, pseudo_abund=0, name_suffix="_gdna")
         try:
             bench = build_and_run(
-                sc, gdna_abundance=50, n_fragments=1500,
+                sc,
+                gdna_abundance=50,
+                n_fragments=1500,
                 include_multimap=True,
                 scenario_name="pseudo_parent_gdna",
             )
@@ -495,12 +561,18 @@ class TestPseudogene:
     @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
     def test_stress(self, tmp_path, gdna, nrna, ss):
         sc = self._make_scenario(
-            tmp_path, parent_abund=100, pseudo_abund=0,
-            name_suffix=f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+            tmp_path,
+            parent_abund=100,
+            pseudo_abund=0,
+            name_suffix=f"_g{gdna}_n{nrna}_s{int(ss * 100)}",
+        )
         try:
             bench = build_and_run(
-                sc, gdna_abundance=gdna, nrna_abundance=nrna,
-                strand_specificity=ss, n_fragments=1000,
+                sc,
+                gdna_abundance=gdna,
+                nrna_abundance=nrna,
+                strand_specificity=ss,
+                n_fragments=1000,
                 include_multimap=True,
                 scenario_name=f"pseudo_stress_{gdna}_{nrna}_{int(ss * 100)}",
             )
@@ -539,19 +611,27 @@ class TestExonicIntergenicMultimappers:
             seed=SIM_SEED,
             work_dir=tmp_path / ("exon_ig" + name_suffix),
         )
-        sc.add_gene("g1", "+", [
-            {"t_id": "t1",
-             "exons": [(1000, 1300), (2000, 2300)],
-             "abundance": 100},
-        ])
-        sc.add_gene("g_helper", "+", [
-            {"t_id": "t_helper",
-             "exons": [(12000, 12300), (12700, 13000)],
-             "abundance": 80},
-        ])
-        sc.add_gene("g_ctrl", "-", [
-            {"t_id": "t_ctrl", "exons": [(17000, 17300)], "abundance": 0},
-        ])
+        sc.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(1000, 1300), (2000, 2300)], "abundance": 100},
+            ],
+        )
+        sc.add_gene(
+            "g_helper",
+            "+",
+            [
+                {"t_id": "t_helper", "exons": [(12000, 12300), (12700, 13000)], "abundance": 80},
+            ],
+        )
+        sc.add_gene(
+            "g_ctrl",
+            "-",
+            [
+                {"t_id": "t_ctrl", "exons": [(17000, 17300)], "abundance": 0},
+            ],
+        )
         # Duplicate exon 1 to intergenic space
         sc.genome.edit(7000, sc.genome[1000:1300])
         return sc
@@ -561,7 +641,9 @@ class TestExonicIntergenicMultimappers:
         sc = self._make_scenario(tmp_path, "_budget")
         try:
             bench = build_and_run(
-                sc, n_fragments=1000, include_multimap=True,
+                sc,
+                n_fragments=1000,
+                include_multimap=True,
                 scenario_name="exon_ig_budget",
             )
             assert_alignment(bench)
@@ -570,8 +652,7 @@ class TestExonicIntergenicMultimappers:
             # g1 should get most of its expected counts despite multimap
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
             assert t1.observed >= t1.expected * 0.50, (
-                f"g1 under-quantified: {t1.observed:.0f} vs "
-                f"expected {t1.expected}"
+                f"g1 under-quantified: {t1.observed:.0f} vs expected {t1.expected}"
             )
         finally:
             sc.cleanup()
@@ -581,7 +662,9 @@ class TestExonicIntergenicMultimappers:
         sc = self._make_scenario(tmp_path, "_gdna")
         try:
             bench = build_and_run(
-                sc, gdna_abundance=50, n_fragments=1500,
+                sc,
+                gdna_abundance=50,
+                n_fragments=1500,
                 include_multimap=True,
                 scenario_name="exon_ig_gdna",
             )
@@ -592,12 +675,14 @@ class TestExonicIntergenicMultimappers:
 
     @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
     def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(
-            tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
-                sc, gdna_abundance=gdna, nrna_abundance=nrna,
-                strand_specificity=ss, n_fragments=1000,
+                sc,
+                gdna_abundance=gdna,
+                nrna_abundance=nrna,
+                strand_specificity=ss,
+                n_fragments=1000,
                 include_multimap=True,
                 scenario_name=f"exon_ig_stress_{gdna}_{nrna}_{int(ss * 100)}",
             )
@@ -634,28 +719,46 @@ class TestTripleMultimapper:
             seed=SIM_SEED,
             work_dir=tmp_path / ("triple_mm" + name_suffix),
         )
-        sc.add_gene("g1", "+", [
-            {"t_id": "t1", "exons": [(1000, 1500)], "abundance": 100},
-        ])
-        sc.add_gene("g2", "+", [
-            {"t_id": "t2", "exons": [(6000, 6500)], "abundance": 100},
-        ])
-        sc.add_gene("g3", "+", [
-            {"t_id": "t3", "exons": [(11000, 11500)], "abundance": 100},
-        ])
+        sc.add_gene(
+            "g1",
+            "+",
+            [
+                {"t_id": "t1", "exons": [(1000, 1500)], "abundance": 100},
+            ],
+        )
+        sc.add_gene(
+            "g2",
+            "+",
+            [
+                {"t_id": "t2", "exons": [(6000, 6500)], "abundance": 100},
+            ],
+        )
+        sc.add_gene(
+            "g3",
+            "+",
+            [
+                {"t_id": "t3", "exons": [(11000, 11500)], "abundance": 100},
+            ],
+        )
         # Make all three loci identical
         seq = sc.genome[1000:1500]
         sc.genome.edit(6000, seq)
         sc.genome.edit(11000, seq)
 
-        sc.add_gene("g_helper", "+", [
-            {"t_id": "t_helper",
-             "exons": [(16000, 16300), (16700, 17000)],
-             "abundance": 80},
-        ])
-        sc.add_gene("g_ctrl", "-", [
-            {"t_id": "t_ctrl", "exons": [(20000, 20300)], "abundance": 0},
-        ])
+        sc.add_gene(
+            "g_helper",
+            "+",
+            [
+                {"t_id": "t_helper", "exons": [(16000, 16300), (16700, 17000)], "abundance": 80},
+            ],
+        )
+        sc.add_gene(
+            "g_ctrl",
+            "-",
+            [
+                {"t_id": "t_ctrl", "exons": [(20000, 20300)], "abundance": 0},
+            ],
+        )
         return sc
 
     def test_budget_three_way(self, tmp_path):
@@ -663,7 +766,9 @@ class TestTripleMultimapper:
         sc = self._make_scenario(tmp_path, "_3way")
         try:
             bench = build_and_run(
-                sc, n_fragments=1500, include_multimap=True,
+                sc,
+                n_fragments=1500,
+                include_multimap=True,
                 scenario_name="triple_mm_3way",
             )
             assert_alignment(bench)
@@ -678,8 +783,7 @@ class TestTripleMultimapper:
                 avg = total / 3
                 for t in [t1, t2, t3]:
                     assert abs(t.observed - avg) < avg * 0.30 + 5, (
-                        f"{t.t_id}={t.observed:.0f} too far from "
-                        f"mean={avg:.0f}"
+                        f"{t.t_id}={t.observed:.0f} too far from mean={avg:.0f}"
                     )
         finally:
             sc.cleanup()
@@ -689,7 +793,9 @@ class TestTripleMultimapper:
         sc = self._make_scenario(tmp_path, "_3way_gdna")
         try:
             bench = build_and_run(
-                sc, gdna_abundance=50, n_fragments=2000,
+                sc,
+                gdna_abundance=50,
+                n_fragments=2000,
                 include_multimap=True,
                 scenario_name="triple_mm_3way_gdna",
             )
@@ -700,12 +806,14 @@ class TestTripleMultimapper:
 
     @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
     def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(
-            tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
-                sc, gdna_abundance=gdna, nrna_abundance=nrna,
-                strand_specificity=ss, n_fragments=1500,
+                sc,
+                gdna_abundance=gdna,
+                nrna_abundance=nrna,
+                strand_specificity=ss,
+                n_fragments=1500,
                 include_multimap=True,
                 scenario_name=f"triple_mm_stress_{gdna}_{nrna}_{int(ss * 100)}",
             )
@@ -747,35 +855,52 @@ class TestMixedMultimapperKitchenSink:
             work_dir=tmp_path / ("kitchen_sink" + name_suffix),
         )
         # Spliced gene
-        sc.add_gene("g_spliced", "+", [
-            {"t_id": "t_spliced",
-             "exons": [(1000, 1300), (2000, 2300)],
-             "abundance": 100},
-        ])
+        sc.add_gene(
+            "g_spliced",
+            "+",
+            [
+                {"t_id": "t_spliced", "exons": [(1000, 1300), (2000, 2300)], "abundance": 100},
+            ],
+        )
         # Identical single-exon paralogs
-        sc.add_gene("g_single_a", "+", [
-            {"t_id": "t_single_a", "exons": [(8000, 8500)],
-             "abundance": 80},
-        ])
-        sc.add_gene("g_single_b", "+", [
-            {"t_id": "t_single_b", "exons": [(12000, 12500)],
-             "abundance": 80},
-        ])
+        sc.add_gene(
+            "g_single_a",
+            "+",
+            [
+                {"t_id": "t_single_a", "exons": [(8000, 8500)], "abundance": 80},
+            ],
+        )
+        sc.add_gene(
+            "g_single_b",
+            "+",
+            [
+                {"t_id": "t_single_b", "exons": [(12000, 12500)], "abundance": 80},
+            ],
+        )
         # Pseudogene (retrocopy of g_spliced)
-        sc.add_gene("g_retro", "+", [
-            {"t_id": "t_retro", "exons": [(16000, 16600)],
-             "abundance": 0},
-        ])
+        sc.add_gene(
+            "g_retro",
+            "+",
+            [
+                {"t_id": "t_retro", "exons": [(16000, 16600)], "abundance": 0},
+            ],
+        )
         # Helper
-        sc.add_gene("g_helper", "+", [
-            {"t_id": "t_helper",
-             "exons": [(20000, 20300), (20700, 21000)],
-             "abundance": 80},
-        ])
+        sc.add_gene(
+            "g_helper",
+            "+",
+            [
+                {"t_id": "t_helper", "exons": [(20000, 20300), (20700, 21000)], "abundance": 80},
+            ],
+        )
         # Negative control
-        sc.add_gene("g_ctrl", "-", [
-            {"t_id": "t_ctrl", "exons": [(25000, 25300)], "abundance": 0},
-        ])
+        sc.add_gene(
+            "g_ctrl",
+            "-",
+            [
+                {"t_id": "t_ctrl", "exons": [(25000, 25300)], "abundance": 0},
+            ],
+        )
 
         # Dup 1: copy exon 1 of g_spliced to intergenic
         sc.genome.edit(5000, sc.genome[1000:1300])
@@ -793,7 +918,9 @@ class TestMixedMultimapperKitchenSink:
         sc = self._make_scenario(tmp_path, "_baseline")
         try:
             bench = build_and_run(
-                sc, n_fragments=2000, include_multimap=True,
+                sc,
+                n_fragments=2000,
+                include_multimap=True,
                 scenario_name="kitchen_sink_baseline",
             )
             assert_alignment(bench)
@@ -807,7 +934,9 @@ class TestMixedMultimapperKitchenSink:
         sc = self._make_scenario(tmp_path, "_gdna")
         try:
             bench = build_and_run(
-                sc, gdna_abundance=50, n_fragments=2500,
+                sc,
+                gdna_abundance=50,
+                n_fragments=2500,
                 include_multimap=True,
                 scenario_name="kitchen_sink_gdna",
             )
@@ -818,12 +947,14 @@ class TestMixedMultimapperKitchenSink:
 
     @pytest.mark.parametrize("gdna,nrna,ss", STRESS_COMBOS, ids=STRESS_IDS)
     def test_stress(self, tmp_path, gdna, nrna, ss):
-        sc = self._make_scenario(
-            tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
+        sc = self._make_scenario(tmp_path, f"_g{gdna}_n{nrna}_s{int(ss * 100)}")
         try:
             bench = build_and_run(
-                sc, gdna_abundance=gdna, nrna_abundance=nrna,
-                strand_specificity=ss, n_fragments=2000,
+                sc,
+                gdna_abundance=gdna,
+                nrna_abundance=nrna,
+                strand_specificity=ss,
+                n_fragments=2000,
                 include_multimap=True,
                 scenario_name=f"kitchen_sink_stress_{gdna}_{nrna}_{int(ss * 100)}",
             )

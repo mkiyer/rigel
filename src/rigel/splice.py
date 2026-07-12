@@ -19,22 +19,23 @@ from enum import IntEnum
 
 class SpliceType(IntEnum):
     """Category of a fragment based on splice junction status."""
+
     UNSPLICED = 0
     SPLICED_UNANNOT = 1
     SPLICED_ANNOT = 2
     # SRD v2 additions:
-    SPLICED_IMPLICIT = 3   # PE gap spans an annotated intron of any candidate
-    SPLICE_ARTIFACT = 4    # CIGAR junction was rejected by the SJ blacklist
+    SPLICED_IMPLICIT = 3  # PE gap spans an annotated intron of any candidate
+    SPLICE_ARTIFACT = 4  # CIGAR junction was rejected by the SJ blacklist
 
 
 NUM_SPLICE_TYPES = len(SpliceType)
 
 #: Pre-computed int constants for hot-path comparisons (avoid enum overhead).
-SPLICE_UNSPLICED: int = int(SpliceType.UNSPLICED)         # 0
-SPLICE_UNANNOT: int = int(SpliceType.SPLICED_UNANNOT)     # 1
-SPLICE_ANNOT: int = int(SpliceType.SPLICED_ANNOT)         # 2
-SPLICE_IMPLICIT: int = int(SpliceType.SPLICED_IMPLICIT)   # 3
-SPLICE_ARTIFACT: int = int(SpliceType.SPLICE_ARTIFACT)    # 4
+SPLICE_UNSPLICED: int = int(SpliceType.UNSPLICED)  # 0
+SPLICE_UNANNOT: int = int(SpliceType.SPLICED_UNANNOT)  # 1
+SPLICE_ANNOT: int = int(SpliceType.SPLICED_ANNOT)  # 2
+SPLICE_IMPLICIT: int = int(SpliceType.SPLICED_IMPLICIT)  # 3
+SPLICE_ARTIFACT: int = int(SpliceType.SPLICE_ARTIFACT)  # 4
 
 
 class SpliceStrandCol(IntEnum):
@@ -51,6 +52,7 @@ class SpliceStrandCol(IntEnum):
     Even indices (0, 2, 4, 6, 8) are sense; odd indices (1, 3, 5, 7, 9)
     are antisense.
     """
+
     UNSPLICED_SENSE = 0
     UNSPLICED_ANTISENSE = 1
     SPLICED_UNANNOT_SENSE = 2
@@ -81,6 +83,7 @@ NUM_SPLICE_STRAND_COLS = len(SpliceStrandCol)
 # Pre-computed column subsets (tuples for immutability and indexing).
 ANTISENSE_COLS = tuple(c.value for c in SpliceStrandCol if c.is_antisense)
 SPLICED_COLS = tuple(
-    c.value for c in SpliceStrandCol
+    c.value
+    for c in SpliceStrandCol
     if c.category in (SpliceType.SPLICED_ANNOT, SpliceType.SPLICED_UNANNOT)
 )

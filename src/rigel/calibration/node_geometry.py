@@ -59,6 +59,7 @@ _EPS = 1.0e-9
 _POS_BITS = BIT_EXON_POS | BIT_INTRON_POS
 _NEG_BITS = BIT_EXON_NEG | BIT_INTRON_NEG
 
+
 @dataclass(frozen=True, slots=True)
 class NodeGeometry:
     """Per-node, per-face static geometry on the chain (length ``n_nodes``). The ``_left``/``_right`` arrays
@@ -73,7 +74,9 @@ class NodeGeometry:
     eff_gdna_right: np.ndarray
     eff_rna_left: np.ndarray  # RNA-FL eff-len facing left (nascent two-sided crossing / contained)
     eff_rna_right: np.ndarray
-    eff_spl_left: np.ndarray  # one-sided spliced-crossing RNA eff-len (half-triangle E[min²/2ℓ]) facing left
+    eff_spl_left: (
+        np.ndarray
+    )  # one-sided spliced-crossing RNA eff-len (half-triangle E[min²/2ℓ]) facing left
     eff_spl_right: np.ndarray
     spliced_pos_left: np.ndarray  # + motif spliced mass on the left face (boundary, exon-on-left)
     spliced_pos_right: np.ndarray
@@ -108,7 +111,9 @@ def build_node_geometry(
         gdna_fl_pmf, L
     )  # per region: E_gdna[min(ℓ,L)] side crossing
     side_eff_r = boundary_side_eff_length(rna_fl_pmf, L)
-    side_eff_spl = spliced_side_eff_length(rna_fl_pmf, L)  # one-sided spliced-crossing half-triangle
+    side_eff_spl = spliced_side_eff_length(
+        rna_fl_pmf, L
+    )  # one-sided spliced-crossing half-triangle
     reg_mass = np.asarray(substrate.contained.mass_unspliced, dtype=np.float64)
     sig = np.asarray(region_arrays.signature).astype(np.int64)
     R = L.shape[0]
@@ -135,12 +140,16 @@ def build_node_geometry(
     # One-sided per exon: mass_left → left-exon donor, mass_right → right-exon acceptor.
     sig_l = np.where(blr >= 0, sig[np.clip(blr, 0, R - 1)], 0)
     sig_r = np.where(brr >= 0, sig[np.clip(brr, 0, R - 1)], 0)
-    js = np.asarray(boundary_substrate.junction_strand).reshape(-1)  # TS_POS / TS_NEG / 0 (== Strand)
+    js = np.asarray(boundary_substrate.junction_strand).reshape(
+        -1
+    )  # TS_POS / TS_NEG / 0 (== Strand)
     any_exon_l = (sig_l & (BIT_EXON_POS | BIT_EXON_NEG)) != 0
     any_exon_r = (sig_r & (BIT_EXON_POS | BIT_EXON_NEG)) != 0
 
     def _spliced_faces(strand_val):
-        on = js == strand_val  # the junction is on this strand → its exon flank carries the mature floor
+        on = (
+            js == strand_val
+        )  # the junction is on this strand → its exon flank carries the mature floor
         return np.where(on & any_exon_l, bspl_l, 0.0), np.where(on & any_exon_r, bspl_r, 0.0)
 
     b_spl_pos_l, b_spl_pos_r = _spliced_faces(TS_POS)
@@ -378,9 +387,7 @@ def build_node_statics(
     """Gather the per-region (contained) and per-boundary (continuity-gated, max-of-sides) strand-solve
     statistics onto the unified chain."""
     r_fp, r_fn, r_up, r_un, r_mu, r_ms = _region_strand_stats(substrate, region_arrays)
-    b_fp, b_fn, b_up, b_un, b_mu, b_ms = _boundary_strand_stats(
-        boundary_substrate, region_arrays
-    )
+    b_fp, b_fn, b_up, b_un, b_mu, b_ms = _boundary_strand_stats(boundary_substrate, region_arrays)
     kind = np.asarray(chain.kind)
     idx = np.asarray(chain.ref_idx, dtype=np.int64)
     is_reg = kind == REGION

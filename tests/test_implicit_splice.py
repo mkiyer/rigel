@@ -64,9 +64,7 @@ IMPLICIT_GTF = textwrap.dedent("""\
 @pytest.fixture(scope="session")
 def implicit_index(tmp_path_factory):
     """Build the comprehensive implicit-splice fixture index."""
-    return build_test_index(
-        tmp_path_factory, IMPLICIT_GTF, genome_size=70000, name="implicit_idx"
-    )
+    return build_test_index(tmp_path_factory, IMPLICIT_GTF, genome_size=70000, name="implicit_idx")
 
 
 @pytest.fixture
@@ -94,6 +92,7 @@ def _resolve(index, exons, introns=()):
 # ---------------------------------------------------------------------------
 # Acceptance matrix
 # ---------------------------------------------------------------------------
+
 
 class TestImplicitSpliceDiscriminant:
     """14-case acceptance matrix for the per-intron implicit-splice predicate."""
@@ -224,9 +223,7 @@ class TestImplicitSpliceDiscriminant:
         # g5 locus: t_one_exon (single span 60000..60500) and t_split with intron
         # (60100, 60399). blocks (60050,60100),(60399,60450); gap = (60100,60399).
         # Only t_split has an intron in the gap.
-        result = _resolve(
-            index, exons=(_exon(60050, 60100), _exon(60399, 60450))
-        )
+        result = _resolve(index, exons=(_exon(60050, 60100), _exon(60399, 60450)))
         assert result is not None
         assert result.splice_type == int(SpliceType.SPLICED_IMPLICIT)
 

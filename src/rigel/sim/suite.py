@@ -10,6 +10,7 @@ Usage:
     python scripts/sim/simulate_suite.py \\
     --outdir /Users/mkiyer/Downloads/rigel_runs/sim_synthetic
 """
+
 from __future__ import annotations
 
 import argparse
@@ -283,9 +284,7 @@ def _suite_capture_specs(args: argparse.Namespace) -> tuple[list[SuiteCaptureSpe
         enabled = bool(raw.get("enabled", True))
         fraction = float(raw.get("fraction", raw.get("capture_fraction", args.capture_fraction)))
         probes = raw.get("probes", args.capture_probes)
-        probe_format = str(
-            raw.get("probe_format", raw.get("format", args.capture_probe_format))
-        )
+        probe_format = str(raw.get("probe_format", raw.get("format", args.capture_probe_format)))
         if not enabled:
             fraction = 0.0
             probes = None
@@ -294,12 +293,8 @@ def _suite_capture_specs(args: argparse.Namespace) -> tuple[list[SuiteCaptureSpe
             fraction=fraction,
             probe_length=int(raw.get("probe_length", args.probe_length)),
             probe_density=float(raw.get("probe_density", args.probe_density)),
-            off_target_weight=float(
-                raw.get("off_target_weight", args.capture_off_target_weight)
-            ),
-            binding_per_base=float(
-                raw.get("binding_per_base", args.capture_binding_per_base)
-            ),
+            off_target_weight=float(raw.get("off_target_weight", args.capture_off_target_weight)),
+            binding_per_base=float(raw.get("binding_per_base", args.capture_binding_per_base)),
             gdna_split_penalty=float(
                 raw.get("gdna_split_penalty", args.capture_gdna_split_penalty)
             ),
@@ -317,7 +312,8 @@ def _suite_capture_specs(args: argparse.Namespace) -> tuple[list[SuiteCaptureSpe
 
     if raw_configs is None:
         label = (
-            "on" if args.capture_probes or (args.capture_fraction > 0.0 and args.probe_density > 0.0)
+            "on"
+            if args.capture_probes or (args.capture_fraction > 0.0 and args.probe_density > 0.0)
             else "off"
         )
         return [from_mapping({"label": label}, 1)], False
@@ -332,59 +328,70 @@ def _suite_capture_specs(args: argparse.Namespace) -> tuple[list[SuiteCaptureSpe
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Full synthetic mini-genome simulation pipeline"
+    parser = argparse.ArgumentParser(description="Full synthetic mini-genome simulation pipeline")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="YAML suite config; explicit CLI flags override matching config values",
     )
     parser.add_argument(
-        "--config", type=Path, default=None,
-        help="YAML suite config; explicit CLI flags override matching config values"
-    )
-    parser.add_argument(
-        "--outdir", type=Path,
+        "--outdir",
+        type=Path,
         default=Path("/Users/mkiyer/Downloads/rigel_runs/sim_synthetic"),
-        help="Base output directory"
+        help="Base output directory",
     )
     parser.add_argument(
-        "--genome-length", type=int, default=GENOME_LENGTH,
-        help=f"Genome length in bp (default: {GENOME_LENGTH:,})"
+        "--genome-length",
+        type=int,
+        default=GENOME_LENGTH,
+        help=f"Genome length in bp (default: {GENOME_LENGTH:,})",
     )
     parser.add_argument(
-        "--n-genes", type=int, default=N_GENES,
-        help=f"Number of genes (default: {N_GENES})"
+        "--n-genes", type=int, default=N_GENES, help=f"Number of genes (default: {N_GENES})"
     )
     parser.add_argument(
-        "--min-isoforms", type=int, default=MIN_ISOFORMS,
-        help=f"Minimum transcript isoforms per primary gene (default: {MIN_ISOFORMS})"
+        "--min-isoforms",
+        type=int,
+        default=MIN_ISOFORMS,
+        help=f"Minimum transcript isoforms per primary gene (default: {MIN_ISOFORMS})",
     )
     parser.add_argument(
-        "--max-isoforms", type=int, default=MAX_ISOFORMS,
-        help=f"Maximum transcript isoforms per primary gene (default: {MAX_ISOFORMS})"
+        "--max-isoforms",
+        type=int,
+        default=MAX_ISOFORMS,
+        help=f"Maximum transcript isoforms per primary gene (default: {MAX_ISOFORMS})",
     )
     parser.add_argument(
-        "--target-transcripts", type=int, default=TARGET_TRANSCRIPTS,
+        "--target-transcripts",
+        type=int,
+        default=TARGET_TRANSCRIPTS,
         help=(
             f"Approximate target transcript count for isoform sampling "
             f"(default: {TARGET_TRANSCRIPTS}; use 0 for uniform min/max sampling)"
-        )
+        ),
     )
     parser.add_argument(
-        "--antisense-fraction", type=float, default=ANTISENSE_OVERLAP_FRAC,
+        "--antisense-fraction",
+        type=float,
+        default=ANTISENSE_OVERLAP_FRAC,
         help=(
             "Fraction of primary genes with an antisense overlapping partner "
             f"(default: {ANTISENSE_OVERLAP_FRAC})"
-        )
+        ),
+    )
+    parser.add_argument("--seed", type=int, default=SEED, help=f"Random seed (default: {SEED})")
+    parser.add_argument(
+        "--profile",
+        choices=("smoke", "full"),
+        default="smoke",
+        help="Condition profile: smoke = 10 no-nRNA baseline conditions, full = 40 conditions",
     )
     parser.add_argument(
-        "--seed", type=int, default=SEED,
-        help=f"Random seed (default: {SEED})"
-    )
-    parser.add_argument(
-        "--profile", choices=("smoke", "full"), default="smoke",
-        help="Condition profile: smoke = 10 no-nRNA baseline conditions, full = 40 conditions"
-    )
-    parser.add_argument(
-        "--n-rna", type=int, default=1_000_000,
-        help="Number of mature RNA fragments per condition (default: 1,000,000)"
+        "--n-rna",
+        type=int,
+        default=1_000_000,
+        help="Number of mature RNA fragments per condition (default: 1,000,000)",
     )
     parser.add_argument("--frag-mean", type=float, default=250.0)
     parser.add_argument("--frag-std", type=float, default=50.0)
@@ -402,89 +409,134 @@ def main():
     parser.add_argument("--gdna-frag-std", type=float, default=100.0)
     parser.add_argument("--gdna-frag-min", type=int, default=100)
     parser.add_argument("--gdna-frag-max", type=int, default=1000)
-    parser.add_argument("--gdna-strand-overdispersions", type=str, default=None,
-                        help="Comma-separated gDNA strand overdispersion sweep values in [0, 1).")
-    parser.add_argument("--gdna-strand-overdispersion-labels", type=str, default=None,
-                        help="Comma-separated labels for --gdna-strand-overdispersions.")
+    parser.add_argument(
+        "--gdna-strand-overdispersions",
+        type=str,
+        default=None,
+        help="Comma-separated gDNA strand overdispersion sweep values in [0, 1).",
+    )
+    parser.add_argument(
+        "--gdna-strand-overdispersion-labels",
+        type=str,
+        default=None,
+        help="Comma-separated labels for --gdna-strand-overdispersions.",
+    )
     parser.add_argument("--strand-specificities", type=str, default=None)
     parser.add_argument(
-        "--capture-fraction", type=float, default=0.0,
-        help="Fraction of eligible genes to target with generated probes (default: 0.0)"
+        "--capture-fraction",
+        type=float,
+        default=0.0,
+        help="Fraction of eligible genes to target with generated probes (default: 0.0)",
     )
     parser.add_argument(
-        "--capture-probes", type=str, default=None,
-        help="Provided capture probe panel path; skips generated probe design when set"
+        "--capture-probes",
+        type=str,
+        default=None,
+        help="Provided capture probe panel path; skips generated probe design when set",
     )
     parser.add_argument(
-        "--capture-probe-format", type=str, default="auto",
-        help="Provided capture probe format: auto, transcript, or bed12 (default: auto)"
+        "--capture-probe-format",
+        type=str,
+        default="auto",
+        help="Provided capture probe format: auto, transcript, or bed12 (default: auto)",
     )
     parser.add_argument(
-        "--probe-length", type=int, default=120,
-        help="Generated capture probe length in transcript coordinates (default: 120)"
+        "--probe-length",
+        type=int,
+        default=120,
+        help="Generated capture probe length in transcript coordinates (default: 120)",
     )
     parser.add_argument(
-        "--probe-density", type=float, default=1.0,
-        help="Fraction of each captured transcript's non-overlapping probe tiling to emit (default: 1.0)"
+        "--probe-density",
+        type=float,
+        default=1.0,
+        help="Fraction of each captured transcript's non-overlapping probe tiling to emit (default: 1.0)",
     )
     parser.add_argument(
-        "--capture-off-target-weight", type=float, default=1.0,
-        help="Hybrid-capture baseline weight for every legal fragment start"
+        "--capture-off-target-weight",
+        type=float,
+        default=1.0,
+        help="Hybrid-capture baseline weight for every legal fragment start",
     )
     parser.add_argument(
-        "--capture-binding-per-base", type=float, default=10.0,
-        help="Hybrid-capture extra weight per overlapping probe base"
+        "--capture-binding-per-base",
+        type=float,
+        default=10.0,
+        help="Hybrid-capture extra weight per overlapping probe base",
     )
     parser.add_argument(
-        "--capture-gdna-split-penalty", type=float, default=0.2,
-        help="Hybrid-capture multiplier for probes split by introns in gDNA/pre-mRNA"
+        "--capture-gdna-split-penalty",
+        type=float,
+        default=0.2,
+        help="Hybrid-capture multiplier for probes split by introns in gDNA/pre-mRNA",
     )
     parser.add_argument(
-        "--capture-min-overlap", type=int, default=1,
-        help="Minimum fragment/probe overlap required to add capture weight"
+        "--capture-min-overlap",
+        type=int,
+        default=1,
+        help="Minimum fragment/probe overlap required to add capture weight",
     )
     parser.add_argument(
-        "--nrna-ratios", type=str, default=None,
-        help="Comma-separated additive nRNA:mRNA fragment ratios (overrides --profile)"
+        "--nrna-ratios",
+        type=str,
+        default=None,
+        help="Comma-separated additive nRNA:mRNA fragment ratios (overrides --profile)",
     )
     parser.add_argument(
-        "--nrna-labels", type=str, default=None,
-        help="Comma-separated labels for --nrna-ratios / --nrna-ratio-ranges"
+        "--nrna-labels",
+        type=str,
+        default=None,
+        help="Comma-separated labels for --nrna-ratios / --nrna-ratio-ranges",
     )
     parser.add_argument(
-        "--nrna-mode", type=str, default="additive_ratio",
+        "--nrna-mode",
+        type=str,
+        default="additive_ratio",
         choices=("additive_ratio", "random_fraction"),
         help="Nascent sweep mode: additive_ratio (one global ratio for all expressed multi-exon "
-             "transcripts) or random_fraction (a random per-transcript ratio on a fraction of them)"
+        "transcripts) or random_fraction (a random per-transcript ratio on a fraction of them)",
     )
     parser.add_argument(
-        "--nrna-ratio-ranges", type=str, default=None,
+        "--nrna-ratio-ranges",
+        type=str,
+        default=None,
         help="random_fraction: semicolon-separated lo,hi ranges, e.g. '0,0;0.1,1.0' "
-             "(per-transcript ratio drawn ~Uniform(lo,hi))"
+        "(per-transcript ratio drawn ~Uniform(lo,hi))",
     )
     parser.add_argument(
-        "--nrna-eligible-fraction", type=float, default=1.0,
-        help="random_fraction: fraction of expressed multi-exon transcripts that carry nascent RNA"
+        "--nrna-eligible-fraction",
+        type=float,
+        default=1.0,
+        help="random_fraction: fraction of expressed multi-exon transcripts that carry nascent RNA",
     )
     parser.add_argument(
-        "--nrna-seed", type=int, default=42,
-        help="random_fraction: RNG seed for the per-transcript nascent assignment"
+        "--nrna-seed",
+        type=int,
+        default=42,
+        help="random_fraction: RNG seed for the per-transcript nascent assignment",
     )
     parser.add_argument(
-        "--conditions", nargs="*", default=None,
-        help="Optional condition names to generate from the selected profile/grid"
+        "--conditions",
+        nargs="*",
+        default=None,
+        help="Optional condition names to generate from the selected profile/grid",
     )
     parser.add_argument(
-        "-j", "--n-workers", type=int, default=1,
-        help="Worker processes for parallel read generation"
+        "-j",
+        "--n-workers",
+        type=int,
+        default=1,
+        help="Worker processes for parallel read generation",
     )
     parser.add_argument(
-        "--reference-only", action="store_true",
-        help="Generate only the synthetic reference FASTA/GTF and exit"
+        "--reference-only",
+        action="store_true",
+        help="Generate only the synthetic reference FASTA/GTF and exit",
     )
     parser.add_argument(
-        "--skip-existing", action="store_true",
-        help="Skip conditions that already have output files"
+        "--skip-existing",
+        action="store_true",
+        help="Skip conditions that already have output files",
     )
     args = parser.parse_args()
 
@@ -549,7 +601,8 @@ def main():
     gdna_labels = _as_label_list(args.gdna_labels) if args.gdna_labels is not None else GDNA_LABELS
     strand_specs = (
         _as_float_list(args.strand_specificities)
-        if args.strand_specificities is not None else STRAND_SPECIFICITIES
+        if args.strand_specificities is not None
+        else STRAND_SPECIFICITIES
     )
     if len(gdna_labels) != len(gdna_rates):
         raise ValueError("gDNA labels must have the same length as gDNA rates")
@@ -582,7 +635,8 @@ def main():
     abundance_config = AbundanceConfig(
         mode="random",
         seed=(
-            args.abundance_seed if args.abundance_seed is not None
+            args.abundance_seed
+            if args.abundance_seed is not None
             else stable_seed(args.seed, "abundance")
         ),
         min=args.abundance_min,
@@ -732,9 +786,7 @@ def main():
                     gdna_split_penalty=spec.gdna_split_penalty,
                     min_overlap=spec.min_overlap,
                 )
-                print(
-                    f"  Capture {spec.label}: using {capture_result.bed_path}"
-                )
+                print(f"  Capture {spec.label}: using {capture_result.bed_path}")
             else:
                 print(
                     f"  Capture {spec.label} requested but no eligible probes were "
@@ -743,7 +795,8 @@ def main():
         else:
             print(
                 f"  Capture {spec.label}: disabled"
-                if include_capture_in_names else "  Capture: disabled"
+                if include_capture_in_names
+                else "  Capture: disabled"
             )
         capture_scenarios.append(CaptureScenario(label=spec.label, config=capture_config))
 
@@ -795,13 +848,8 @@ def main():
             eligible_fraction=float(getattr(args, "nrna_eligible_fraction", 1.0) or 1.0),
             seed=int(getattr(args, "nrna_seed", 42) or 42),
         ),
-        capture=(
-            capture_scenarios[0].config
-            if capture_scenarios else CaptureConfig()
-        ),
-        capture_configs=(
-            capture_scenarios if include_capture_in_names else []
-        ),
+        capture=(capture_scenarios[0].config if capture_scenarios else CaptureConfig()),
+        capture_configs=(capture_scenarios if include_capture_in_names else []),
         strand_specificities=strand_specs,
         oracle_bam=True,
     )
@@ -844,9 +892,7 @@ def main():
     if unknown_conditions:
         unknown = ", ".join(sorted(unknown_conditions))
         raise ValueError(f"Unknown condition(s) for selected profile/grid: {unknown}")
-    total_conditions = (
-        len(selected_conditions) if selected_conditions else len(all_condition_names)
-    )
+    total_conditions = len(selected_conditions) if selected_conditions else len(all_condition_names)
     capture_meta_by_label = {
         scenario.label: {
             "source": capture_probe_source_by_label.get(scenario.label),

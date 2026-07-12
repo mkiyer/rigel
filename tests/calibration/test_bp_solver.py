@@ -164,7 +164,9 @@ def test_node_densities_formula():
         eff_gdna_right=np.array([400.0]),
         eff_rna_left=np.array([250.0]),
         eff_rna_right=np.array([500.0]),
-        eff_spl_left=np.array([125.0]),  # one-sided spliced half-triangle eff-len (distinct from eff_rna)
+        eff_spl_left=np.array(
+            [125.0]
+        ),  # one-sided spliced half-triangle eff-len (distinct from eff_rna)
         eff_spl_right=np.array([250.0]),
         spliced_pos_left=np.array([10.0]),
         spliced_pos_right=np.array([0.0]),
@@ -224,7 +226,10 @@ def _empty_boundary_substrate(n_b):
     z = np.zeros(n_b)
     side = _cview(z.copy(), z.copy())
     return SimpleNamespace(
-        left_region=np.full(n_b, -1), right_region=np.full(n_b, -1), left=side, right=side,
+        left_region=np.full(n_b, -1),
+        right_region=np.full(n_b, -1),
+        left=side,
+        right=side,
         junction_strand=np.zeros(n_b, dtype=np.int8),
     )
 
@@ -335,8 +340,19 @@ def test_precision_state_count_resolution():
     allow_neg = np.array([False, False])
     strand_obs = allow_pos ^ allow_neg  # both single-strand
     mass = u_pos + u_neg
-    d = _solve_nodes_logodds_all(u_pos, u_neg, allow_pos, allow_neg, strand_obs, mass, z,
-                                 kappa=kappa, od_g=0.2, od_r=0.1, n_grid=60)
+    d = _solve_nodes_logodds_all(
+        u_pos,
+        u_neg,
+        allow_pos,
+        allow_neg,
+        strand_obs,
+        mass,
+        z,
+        kappa=kappa,
+        od_g=0.2,
+        od_r=0.1,
+        n_grid=60,
+    )
     assert d.gdna_frac_var is not None
     # same composition ⇒ same f_g; more fragments ⇒ sharper (lower Var(log f_g)).
     assert np.isclose(d.gdna_frac[0], d.gdna_frac[1])
@@ -345,10 +361,19 @@ def test_precision_state_count_resolution():
     for v in (d.gdna_frac_var, d.rna_pos_frac_var, d.rna_neg_frac_var):
         assert np.all(np.isfinite(v)) and np.all(v >= 0.0)
     # a no-fragment node is inactive ⇒ zero variance on every component.
-    d0 = _solve_nodes_logodds_all(np.array([0.0]), np.array([0.0]),
-                                  np.array([True]), np.array([True]), np.array([False]),
-                                  np.array([0.0]), np.array([0.0]), kappa=kappa, od_g=0.2, od_r=0.1,
-                                  n_grid=60)
+    d0 = _solve_nodes_logodds_all(
+        np.array([0.0]),
+        np.array([0.0]),
+        np.array([True]),
+        np.array([True]),
+        np.array([False]),
+        np.array([0.0]),
+        np.array([0.0]),
+        kappa=kappa,
+        od_g=0.2,
+        od_r=0.1,
+        n_grid=60,
+    )
     assert d0.gdna_frac_var[0] == 0.0 and d0.rna_pos_frac_var[0] == 0.0
 
 
@@ -375,7 +400,10 @@ def test_gdna_sweep_factor1_uniform():
     left = _cview(lmass / 2, lmass / 2, mass_u=lmass, mass_spl=np.zeros(4))
     right = _cview(rmass / 2, rmass / 2, mass_u=rmass, mass_spl=np.zeros(4))
     bsub = SimpleNamespace(
-        left_region=lr, right_region=rr, left=left, right=right,
+        left_region=lr,
+        right_region=rr,
+        left=left,
+        right=right,
         junction_strand=np.zeros(len(lr), dtype=np.int8),
     )
 
@@ -439,7 +467,10 @@ def test_gdna_emits_across_tss_tes_seam():
     left = _cview(lmass / 2, lmass / 2, mass_u=lmass, mass_spl=np.zeros(4))
     right = _cview(rmass / 2, rmass / 2, mass_u=rmass, mass_spl=np.zeros(4))
     bsub = SimpleNamespace(
-        left_region=lr, right_region=rr, left=left, right=right,
+        left_region=lr,
+        right_region=rr,
+        left=left,
+        right=right,
         junction_strand=np.zeros(len(lr), dtype=np.int8),
     )
 
@@ -450,7 +481,15 @@ def test_gdna_emits_across_tss_tes_seam():
     )
     cap = {}
     final = node_sweep(
-        chain, st, geom, belief, region_arrays, bsub, rna_sense_frac=0.7, n_grid=40, _capture=cap,
+        chain,
+        st,
+        geom,
+        belief,
+        region_arrays,
+        bsub,
+        rna_sense_frac=0.7,
+        n_grid=40,
+        _capture=cap,
         disagreement_sigma2=adjacent_disagreement_variance(chain, geom),
     )
     exon = 3  # chain id of the single-exon gene (R1), flanked on both sides by TSS/TES seams
@@ -490,7 +529,10 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     left = _cview(lpos, lneg, mass_u=lpos + lneg, mass_spl=np.zeros(4))
     right = _cview(rpos, rneg, mass_u=rpos + rneg, mass_spl=np.zeros(4))
     bsub = SimpleNamespace(
-        left_region=lr, right_region=rr, left=left, right=right,
+        left_region=lr,
+        right_region=rr,
+        left=left,
+        right=right,
         junction_strand=np.zeros(len(lr), dtype=np.int8),
     )
 
@@ -540,10 +582,19 @@ def test_density_message_two_sided_mode_not_vertex():
     z = np.zeros(1)
     # AMBIG node, balanced counts ⇒ the strand is flat (κ=0.5); only the message shapes f_g.
     d = _solve_nodes_logodds_all(
-        np.array([50.0]), np.array([50.0]),
-        np.array([True]), np.array([True]), np.array([False]),
-        np.array([100.0]), z, kappa=0.5, od_g=0.0, od_r=0.0, n_grid=80,
-        gdna_imp_mode=np.array([np.log(0.2)]), gdna_imp_prec=np.array([200.0]),
+        np.array([50.0]),
+        np.array([50.0]),
+        np.array([True]),
+        np.array([True]),
+        np.array([False]),
+        np.array([100.0]),
+        z,
+        kappa=0.5,
+        od_g=0.0,
+        od_r=0.0,
+        n_grid=80,
+        gdna_imp_mode=np.array([np.log(0.2)]),
+        gdna_imp_prec=np.array([200.0]),
     )
     fg = float(d.gdna_frac[0])
     assert abs(fg - 0.2) < 0.05, fg
@@ -557,10 +608,19 @@ def test_density_message_defers_to_decisive_strand():
 
     z = np.zeros(1)
     d = _solve_nodes_logodds_all(
-        np.array([1000.0]), np.array([5.0]),
-        np.array([True]), np.array([False]), np.array([True]),
-        np.array([1005.0]), z, kappa=0.99, od_g=0.0, od_r=0.0, n_grid=80,
-        gdna_imp_mode=np.array([np.log(0.9)]), gdna_imp_prec=np.array([3.0]),
+        np.array([1000.0]),
+        np.array([5.0]),
+        np.array([True]),
+        np.array([False]),
+        np.array([True]),
+        np.array([1005.0]),
+        z,
+        kappa=0.99,
+        od_g=0.0,
+        od_r=0.0,
+        n_grid=80,
+        gdna_imp_mode=np.array([np.log(0.9)]),
+        gdna_imp_prec=np.array([3.0]),
     )
     fg = float(d.gdna_frac[0])
     assert fg < 0.1, fg
@@ -585,19 +645,20 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
     sig = np.array([BIT_INTRON_POS, BIT_EXON_POS, BIT_INTRON_POS], dtype=np.int64)
     sc = np.array([TS_POS, TS_POS, TS_POS], dtype=np.int8)
     region_arrays = SimpleNamespace(strand_class=sc, signature=sig, region_size_bp=L)
-    Eg = region_eff_length(L, gdna_fl)            # contained gDNA eff-len  (1700)
-    Er = region_eff_length(L, rna_fl)             # contained RNA  eff-len  (1800)
-    g_half = rho_g * Eg / 2.0                       # per-strand contained gDNA count (balanced)
-    mat = rho_m * Er                                # contained mature count (+ strand only)
+    Eg = region_eff_length(L, gdna_fl)  # contained gDNA eff-len  (1700)
+    Er = region_eff_length(L, rna_fl)  # contained RNA  eff-len  (1800)
+    g_half = rho_g * Eg / 2.0  # per-strand contained gDNA count (balanced)
+    mat = rho_m * Er  # contained mature count (+ strand only)
     # exon R1: gDNA (balanced) + mature (+); introns R0/R2: gDNA only.
     u_pos = np.array([g_half[0], g_half[1] + mat[1], g_half[2]])
     u_neg = np.array([g_half[0], g_half[1], g_half[2]])
     contained = _cview(u_pos, u_neg, mass_u=u_pos + u_neg, mass_spl=np.zeros(3))
     substrate = SimpleNamespace(contained=contained)
     # boundary crossings: gDNA only (balanced); spliced(mature) on the EXON flank of the two junctions.
-    side_g = boundary_side_eff_length(gdna_fl, L)   # (300)
-    spl_eff = spliced_side_eff_length(rna_fl, L)     # one-sided half-triangle (100)
+    side_g = boundary_side_eff_length(gdna_fl, L)  # (300)
+    spl_eff = spliced_side_eff_length(rna_fl, L)  # one-sided half-triangle (100)
     lr, rr = np.array([-1, 0, 1, 2]), np.array([0, 1, 2, -1])
+
     def gx(r):
         return np.where(r >= 0, rho_g * side_g[np.clip(r, 0, 2)], 0.0)
 
@@ -605,31 +666,43 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
     # ``spl_scale`` < 1 models a CAPTURE-DEPLETED junction: junction-spanning (spliced) reads are only
     # partially captured, so the junction under-reports the exon's true mature density ⇒ the B→exon mature
     # MEASUREMENT DISAGREES with the exon's own (confident) unspliced belief. Used by the silencing test.
-    spl_mat = rho_m * spl_eff[1] * spl_scale         # mature spliced count on the exon flank
+    spl_mat = rho_m * spl_eff[1] * spl_scale  # mature spliced count on the exon flank
     # B1 (idx1): exon R1 is its RIGHT region → spliced on the RIGHT side. B2 (idx2): exon is its LEFT
     # region → spliced on the LEFT side. (One-sided, exon flank.)
     spl_l = np.array([0.0, 0.0, spl_mat if spliced else 0.0, 0.0])
     spl_r = np.array([0.0, spl_mat if spliced else 0.0, 0.0, 0.0])
-    left = _cview(lcross / 2, lcross / 2, spl_sense=spl_l, mass_u=lcross,
-                  mass_spl=spl_l.copy())
-    right = _cview(rcross / 2, rcross / 2, spl_sense=spl_r, mass_u=rcross,
-                   mass_spl=spl_r.copy())
+    left = _cview(lcross / 2, lcross / 2, spl_sense=spl_l, mass_u=lcross, mass_spl=spl_l.copy())
+    right = _cview(rcross / 2, rcross / 2, spl_sense=spl_r, mass_u=rcross, mass_spl=spl_r.copy())
     bsub = SimpleNamespace(
-        left_region=lr, right_region=rr, left=left, right=right,
+        left_region=lr,
+        right_region=rr,
+        left=left,
+        right=right,
         junction_strand=np.array([0, TS_POS, TS_POS, 0], dtype=np.int8),
     )
     geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
     st = build_node_statics(chain, substrate, bsub, region_arrays)
-    belief = init_beliefs(chain, substrate, bsub, region_arrays,
-                          rna_sense_frac=kappa, n_grid=60, statics=st)
+    belief = init_beliefs(
+        chain, substrate, bsub, region_arrays, rna_sense_frac=kappa, n_grid=60, statics=st
+    )
     return chain, st, geom, belief, region_arrays, bsub
 
 
 def _sweep(args, kappa=0.95):
     chain, st, geom, belief, ra, bsub = args
     cap = {}
-    final = node_sweep(chain, st, geom, belief, ra, bsub, rna_sense_frac=kappa, n_grid=60, _capture=cap,
-                       disagreement_sigma2=adjacent_disagreement_variance(chain, geom))
+    final = node_sweep(
+        chain,
+        st,
+        geom,
+        belief,
+        ra,
+        bsub,
+        rna_sense_frac=kappa,
+        n_grid=60,
+        _capture=cap,
+        disagreement_sigma2=adjacent_disagreement_variance(chain, geom),
+    )
     return final, cap
 
 
@@ -683,9 +756,15 @@ def test_mature_measurement_disagreement_silenced():
     fin_ok, cap_ok = _sweep(_mature_exon_chain(spliced=True, rho_m=4.0, spl_scale=1.0))
     fin_lo, cap_lo = _sweep(_mature_exon_chain(spliced=True, rho_m=4.0, spl_scale=0.25))
     # (1) the depleted junction really did lower the +RNA message target into the exon (a genuine disagreement)…
-    assert cap_lo["mode_p"][ex] < cap_ok["mode_p"][ex] - 0.3, (cap_lo["mode_p"][ex], cap_ok["mode_p"][ex])
+    assert cap_lo["mode_p"][ex] < cap_ok["mode_p"][ex] - 0.3, (
+        cap_lo["mode_p"][ex],
+        cap_ok["mode_p"][ex],
+    )
     # (2) …yet the exon's gDNA fraction barely moves (silenced — pre-fix the low measurement inflated f_g).
-    assert abs(float(fin_lo.f_g[ex]) - float(fin_ok.f_g[ex])) < 0.05, (fin_lo.f_g[ex], fin_ok.f_g[ex])
+    assert abs(float(fin_lo.f_g[ex]) - float(fin_ok.f_g[ex])) < 0.05, (
+        fin_lo.f_g[ex],
+        fin_ok.f_g[ex],
+    )
     # (3) and the exon stays RNA-dominated, not pulled toward phantom gDNA.
     assert float(fin_lo.f_g[ex]) < 0.45, fin_lo.f_g[ex]
 
@@ -721,16 +800,30 @@ def test_pure_gdna_node_confident_at_near_binomial_od():
     def solve(u_pos, u_neg, od):
         z = np.zeros(1)
         n = float(u_pos + u_neg)
-        return float(_solve_nodes_logodds_all(
-            np.array([float(u_pos)]), np.array([float(u_neg)]),
-            np.array([True]), np.array([False]), np.array([True]),
-            np.array([n]), z, kappa=0.7, od_g=od, od_r=od, n_grid=80).gdna_frac[0])
+        return float(
+            _solve_nodes_logodds_all(
+                np.array([float(u_pos)]),
+                np.array([float(u_neg)]),
+                np.array([True]),
+                np.array([False]),
+                np.array([True]),
+                np.array([n]),
+                z,
+                kappa=0.7,
+                od_g=od,
+                od_r=od,
+                n_grid=80,
+            ).gdna_frac[0]
+        )
 
     # pure gDNA (exact 50/50): near-binomial od → confidently gDNA; inflated od → materially under-called.
     fg_near = solve(500, 500, 0.034)
     fg_infl = solve(500, 500, 0.143)
     assert fg_near > 0.8, fg_near
-    assert fg_infl < fg_near - 0.15, (fg_infl, fg_near)  # the inflated prior demonstrably degrades the call
+    assert fg_infl < fg_near - 0.15, (
+        fg_infl,
+        fg_near,
+    )  # the inflated prior demonstrably degrades the call
     # pure RNA (+frac = κ = 0.7): near-binomial stays RNA-dominated; the inflated prior's symmetric harm is
     # MORE false gDNA on RNA too (it pulls every node toward ½). (At this intermediate κ the gDNA/RNA means
     # are close, so a small residual f_g is inherent — the point is near-binomial is cleaner.)
