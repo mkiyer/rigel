@@ -184,34 +184,100 @@
     });
     fillTable($("pool-table"), `<th>Pool</th><th class="n">Fragments</th><th class="n">Share</th><th>Origin</th>`, rows);
   }
-  function geneTable(filter) {
-    // rows: [name, id, type, ref, strand, tpm, mature, nascent, n_tx]
-    const q = (filter || "").toLowerCase();
-    const all = M.genes.rows || [];
-    const rows = [];
-    let shown = 0;
-    for (const g of all) {
-      if (q && !(String(g[0]).toLowerCase().includes(q) || String(g[1]).toLowerCase().includes(q) ||
-                 String(g[2]).toLowerCase().includes(q))) continue;
-      shown++;
-      const tr = H("tr");
-      tr.appendChild(H("td", null, `<b>${g[0]}</b>`));
-      tr.appendChild(H("td", null, `<span class="num" style="color:var(--muted);font-size:11.5px">${g[1]}</span>`));
-      tr.appendChild(H("td", null, `<span style="font-size:11px;color:var(--ink-2)">${g[2]}</span>`));
-      tr.appendChild(H("td", null, `<span class="num" style="font-size:11.5px">${g[3]} ${g[4]}</span>`));
-      tr.appendChild(H("td", "n num", g[5].toLocaleString("en-US")));
-      tr.appendChild(H("td", "n num", grp(g[6])));
-      tr.appendChild(H("td", "n num", grp(g[7])));
-      tr.appendChild(H("td", "n num", g[8]));
-      rows.push(tr);
+  // Reusable paginated + sortable + searchable table. Renders only the current
+  // page, so a 20k-row table never floods the DOM. Zero dependency, CSP-safe.
+  // cfg: {table, search, count, pager, noun, rows, columns, sort, dir, pageSize, hint}
+  // Each column: {idx (row-array index), label, num?, search?, render(value,row)}.
+  function dataTable(cfg) {
+    const table = $(cfg.table); if (!table) return;
+    const cols = cfg.columns;
+    const searchIdx = cols.filter((c) => c.search).map((c) => c.idx);
+    const st = { q: "", sort: cfg.sort ?? null, dir: cfg.dir ?? -1, page: 0, size: cfg.pageSize || 25 };
+
+    function view() {
+      let rows = cfg.rows;
+      const q = st.q.toLowerCase();
+      if (q) rows = rows.filter((r) => searchIdx.some((i) => String(r[i]).toLowerCase().includes(q)));
+      if (st.sort != null) {
+        const c = cols[st.sort], d = st.dir;
+        rows = rows.slice().sort((a, b) =>
+          c.num ? (Number(a[c.idx]) - Number(b[c.idx])) * d
+                : String(a[c.idx]).localeCompare(String(b[c.idx])) * d);
+      }
+      return rows;
     }
-    fillTable($("gene-table"), `<th>Gene</th><th>ID</th><th>type</th><th>locus</th><th class="n">TPM</th><th class="n">mature</th><th class="n">nascent</th><th class="n">n_tx</th>`, rows);
-    const c = $("gcount");
-    if (c) {
-      const g = M.genes;
-      const tail = g.truncated ? ` · top ${grp(g.shown)} by TPM (full set in gene_quant.feather)` : "";
-      c.textContent = `${grp(shown)} shown · ${grp(g.total)} expressed genes${tail}`;
+
+    function pager(total, pages) {
+      const node = $(cfg.pager); if (!node) return;
+      node.innerHTML = "";
+      const sel = H("select");
+      [10, 25, 50, 100].forEach((n) => {
+        const o = document.createElement("option");
+        o.value = n; o.textContent = n + " / page"; if (n === st.size) o.selected = true;
+        sel.appendChild(o);
+      });
+      sel.onchange = () => { st.size = +sel.value; st.page = 0; render(); };
+      const prev = H("button", "pg-btn", "‹ prev"); prev.disabled = st.page <= 0;
+      prev.onclick = () => { st.page--; render(); };
+      const next = H("button", "pg-btn", "next ›"); next.disabled = st.page >= pages - 1;
+      next.onclick = () => { st.page++; render(); };
+      node.appendChild(sel); node.appendChild(prev); node.appendChild(next);
+      node.appendChild(H("span", "pg-info", `page ${grp(st.page + 1)} of ${grp(pages)}`));
     }
+
+    function render() {
+      const rows = view();
+      const total = rows.length;
+      const pages = Math.max(1, Math.ceil(total / st.size));
+      st.page = Math.min(Math.max(st.page, 0), pages - 1);
+      const page = rows.slice(st.page * st.size, st.page * st.size + st.size);
+      const head = cols.map((c, i) => {
+        const arrow = st.sort === i ? (st.dir < 0 ? " ▾" : " ▴") : "";
+        return `<th class="sortable${c.num ? " n" : ""}" data-c="${i}">${c.label}${arrow}</th>`;
+      }).join("");
+      table.innerHTML = `<thead><tr>${head}</tr></thead>`;
+      const tb = H("tbody");
+      for (const r of page) {
+        const tr = H("tr");
+        cols.forEach((c) => tr.appendChild(H("td", c.num ? "n num" : null, c.render(r[c.idx], r))));
+        tb.appendChild(tr);
+      }
+      table.appendChild(tb);
+      table.querySelectorAll("th.sortable").forEach((h) => {
+        h.onclick = () => {
+          const i = +h.dataset.c;
+          if (st.sort === i) st.dir = -st.dir; else { st.sort = i; st.dir = cols[i].num ? -1 : 1; }
+          st.page = 0; render();
+        };
+      });
+      const c = $(cfg.count);
+      if (c) c.textContent = `${grp(total)} ${cfg.noun || "rows"}${st.q ? " (filtered)" : ""}` +
+        (cfg.hint ? cfg.hint() : "");
+      pager(total, pages);
+    }
+
+    const s = $(cfg.search);
+    if (s) s.addEventListener("input", (e) => { st.q = e.target.value; st.page = 0; render(); });
+    render();
+  }
+
+  function geneTable() {
+    const g = M.genes || { rows: [] };  // rows: [name, id, type, ref, strand, tpm, mature, nascent, n_tx]
+    dataTable({
+      table: "gene-table", search: "gsearch", count: "gcount", pager: "gene-pager",
+      noun: "expressed genes", rows: g.rows || [], sort: 4, dir: -1,
+      hint: () => (g.truncated ? ` · showing top ${grp(g.shown)} of ${grp(g.total)} by TPM (full set in gene_quant.feather)` : ""),
+      columns: [
+        { idx: 0, label: "Gene", search: true, render: (v) => `<b>${v}</b>` },
+        { idx: 1, label: "ID", search: true, render: (v) => `<span class="num" style="color:var(--muted);font-size:11.5px">${v}</span>` },
+        { idx: 2, label: "type", search: true, render: (v) => `<span style="font-size:11px;color:var(--ink-2)">${v}</span>` },
+        { idx: 3, label: "locus", render: (v, r) => `<span class="num" style="font-size:11.5px">${r[3]} ${r[4]}</span>` },
+        { idx: 5, label: "TPM", num: true, render: (v) => Number(v).toLocaleString("en-US") },
+        { idx: 6, label: "mature", num: true, render: (v) => grp(v) },
+        { idx: 7, label: "nascent", num: true, render: (v) => grp(v) },
+        { idx: 8, label: "n_tx", num: true, render: (v) => String(v) },
+      ],
+    });
   }
   function config() {
     const b = $("cfg-body"); if (!b) return; b.innerHTML = "";
@@ -344,28 +410,21 @@
   }
 
   /* ---------- reference table (all references, by gDNA mass) ---------- */
-  function refTable(filter) {
-    const c = M.calibration || {};
-    const all = c.ref_table || [];  // [ref, n_regions, gdna_mass, median_density, gdna_frac]
-    const q = (filter || "").toLowerCase();
-    const rows = []; let shown = 0;
-    for (const r of all) {
-      if (q && !String(r[0]).toLowerCase().includes(q)) continue;
-      shown++;
-      const tr = H("tr");
-      tr.appendChild(H("td", null, `<span class="num">${r[0]}</span>`));
-      tr.appendChild(H("td", "n num", grp(r[1])));
-      tr.appendChild(H("td", "n num", si(r[2])));
-      tr.appendChild(H("td", "n num", Number(r[3]).toExponential(2)));
-      tr.appendChild(H("td", "n num", pc(r[4])));
-      rows.push(tr);
-    }
-    fillTable($("ref-table"),
-      `<th>Reference</th><th class="n">regions</th><th class="n">gDNA mass</th><th class="n">gDNA/bp</th><th class="n">gDNA frac</th>`,
-      rows);
-    const rc = $("rcount"); if (rc) rc.textContent = `${grp(shown)} shown · ${grp(all.length)} references`;
+  function refTable() {
+    const rt = (M.calibration || {}).ref_table || [];  // [ref, n_regions, gdna_mass, gdna/bp, gdna_frac]
     const cap = $("genome-cap");
-    if (cap) cap.textContent = `gDNA density across the genome — top ${Math.min(24, all.length)} of ${grp(all.length)} references by gDNA mass`;
+    if (cap) cap.textContent = `gDNA density across the genome — top ${Math.min(24, rt.length)} of ${grp(rt.length)} references by gDNA mass`;
+    dataTable({
+      table: "ref-table", search: "rsearch", count: "rcount", pager: "ref-pager",
+      noun: "references", rows: rt, sort: 2, dir: -1,
+      columns: [
+        { idx: 0, label: "Reference", search: true, render: (v) => `<span class="num">${v}</span>` },
+        { idx: 1, label: "regions", num: true, render: (v) => grp(v) },
+        { idx: 2, label: "gDNA mass", num: true, render: (v) => si(v) },
+        { idx: 3, label: "gDNA/bp", num: true, render: (v) => Number(v).toExponential(2) },
+        { idx: 4, label: "gDNA frac", num: true, render: (v) => pc(v) },
+      ],
+    });
   }
 
   /* ---------- scroll spy ---------- */
@@ -398,11 +457,9 @@
     if (M.calibration) {
       kpis($("enrich-kpis"), M.calibration.enrichment_kpis);
       kpis($("density-kpis"), M.calibration.density_kpis);
-      captureNote(); refTable("");
-      const rs = $("rsearch"); if (rs) rs.addEventListener("input", (e) => refTable(e.target.value));
+      captureNote(); refTable();
     }
-    geneTable("");
-    const gs = $("gsearch"); if (gs) gs.addEventListener("input", (e) => geneTable(e.target.value));
+    geneTable();
     config();
     initCharts(); initThemeToggle(); spy();
   }

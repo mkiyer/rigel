@@ -185,7 +185,8 @@ _SECTIONS = """
           <input id="rsearch" type="text" placeholder="reference…" aria-label="Search references"/>
           <span class="hint" id="rcount"></span>
         </div>
-        <div class="tw" style="max-height:340px;overflow-y:auto"><table class="data" id="ref-table"></table></div>
+        <div class="tw"><table class="data" id="ref-table"></table></div>
+        <div class="pager" id="ref-pager"></div>
       </div>
     </section>
 
@@ -197,6 +198,7 @@ _SECTIONS = """
           <span class="hint" id="gcount"></span>
         </div>
         <div class="tw"><table class="data" id="gene-table"></table></div>
+        <div class="pager" id="gene-pager"></div>
       </div>
     </section>
 
