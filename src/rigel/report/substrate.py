@@ -1,12 +1,13 @@
 """Load the ``rigel quant`` report substrate into a structured bundle.
 
-The substrate is everything ``rigel quant`` writes to its output directory that
-the report needs:
+The substrate is everything ``rigel quant`` writes to its output directory:
 
-* ``summary.json`` — the lean run manifest (schema v2).
-* ``fragment_lengths.feather`` — tidy ``(category, length, count)`` histograms.
-* ``gene_quant.feather`` / ``quant.feather`` / ``nrna_quant.feather`` /
-  ``loci.feather`` — the expression + pool tables.
+* ``summary.json`` — the lean run manifest (schema v2), read eagerly.
+* companion feather tables (``fragment_lengths``, ``gene_quant``,
+  ``calibration_track``, …) — read **lazily** on first access, so a report only
+  pays I/O + memory for the tables it actually uses. The big per-transcript /
+  nascent tables (``quant``, ``nrna_quant``) are exposed for future features but
+  never read unless something asks for them.
 
 Only ``summary.json`` is required; every companion table is optional so the
 report degrades gracefully on partial or older outputs.
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from functools import cached_property
 from pathlib import Path
 
 import pandas as pd
@@ -29,31 +31,54 @@ class SubstrateError(Exception):
     """Raised when the report substrate is missing or unreadable."""
 
 
-def _read_feather(path: Path) -> pd.DataFrame | None:
-    if not path.exists():
-        return None
-    try:
-        return pd.read_feather(path)
-    except Exception as exc:  # pragma: no cover - corrupt file is unusual
-        raise SubstrateError(f"Could not read {path.name}: {exc}") from exc
-
-
 @dataclass
 class ReportSubstrate:
-    """Everything the report builder needs, loaded from a quant output directory."""
+    """Everything the report builder needs from a quant output directory.
+
+    ``summary`` is loaded up front; the feather tables are lazy ``cached_property``
+    accessors that read from ``output_dir`` on first use and return ``None`` when
+    the file is absent.
+    """
 
     output_dir: Path
     summary: dict
-    fragment_lengths: pd.DataFrame | None = None
-    quant: pd.DataFrame | None = None
-    gene_quant: pd.DataFrame | None = None
-    nrna_quant: pd.DataFrame | None = None
-    loci: pd.DataFrame | None = None
-    calibration_track: pd.DataFrame | None = None
-    gdna_density_kde: pd.DataFrame | None = None
-    gdna_density_nodes: pd.DataFrame | None = None
     #: Non-fatal issues to surface in the report (schema drift, missing tables).
     warnings: list[str] = field(default_factory=list)
+
+    def _feather(self, name: str) -> pd.DataFrame | None:
+        path = self.output_dir / name
+        if not path.exists():
+            return None
+        try:
+            return pd.read_feather(path)
+        except Exception as exc:  # pragma: no cover - corrupt file is unusual
+            raise SubstrateError(f"Could not read {path.name}: {exc}") from exc
+
+    # -- tables the report currently consumes --
+    @cached_property
+    def fragment_lengths(self) -> pd.DataFrame | None:
+        return self._feather("fragment_lengths.feather")
+
+    @cached_property
+    def gene_quant(self) -> pd.DataFrame | None:
+        return self._feather("gene_quant.feather")
+
+    @cached_property
+    def calibration_track(self) -> pd.DataFrame | None:
+        return self._feather("calibration_track.feather")
+
+    # -- available for future panels; not read unless accessed --
+    @cached_property
+    def quant(self) -> pd.DataFrame | None:
+        return self._feather("quant.feather")
+
+    @cached_property
+    def nrna_quant(self) -> pd.DataFrame | None:
+        return self._feather("nrna_quant.feather")
+
+    @cached_property
+    def loci(self) -> pd.DataFrame | None:
+        return self._feather("loci.feather")
 
     @property
     def schema_version(self) -> int | None:
@@ -63,19 +88,14 @@ class ReportSubstrate:
     def sample_name(self) -> str:
         """A human label for the sample, derived from the input BAM stem."""
         bam = self.summary.get("input", {}).get("bam_file")
-        if bam:
-            return Path(bam).stem
-        return self.output_dir.name
+        return Path(bam).stem if bam else self.output_dir.name
 
 
 def load_substrate(output_dir: str | Path) -> ReportSubstrate:
     """Load the report substrate from a ``rigel quant`` output directory.
 
-    Parameters
-    ----------
-    output_dir
-        Directory containing ``summary.json`` and its companion feather tables
-        (i.e. the ``--output-dir`` of a ``rigel quant`` run).
+    Reads ``summary.json`` and checks which companion tables are present (for
+    warnings); the tables themselves load lazily on first access.
 
     Raises
     ------
@@ -109,24 +129,10 @@ def load_substrate(output_dir: str | Path) -> ReportSubstrate:
             f"summary.json schema_version is {sv}; this builder targets "
             f"v{EXPECTED_SCHEMA_VERSION}. Some panels may be incomplete."
         )
-
-    fl = _read_feather(output_dir / "fragment_lengths.feather")
-    if fl is None:
+    if not (output_dir / "fragment_lengths.feather").exists():
         warnings.append(
             "fragment_lengths.feather not found; the fragment-length "
             "distribution charts will be omitted."
         )
 
-    return ReportSubstrate(
-        output_dir=output_dir,
-        summary=summary,
-        fragment_lengths=fl,
-        quant=_read_feather(output_dir / "quant.feather"),
-        gene_quant=_read_feather(output_dir / "gene_quant.feather"),
-        nrna_quant=_read_feather(output_dir / "nrna_quant.feather"),
-        loci=_read_feather(output_dir / "loci.feather"),
-        calibration_track=_read_feather(output_dir / "calibration_track.feather"),
-        gdna_density_kde=_read_feather(output_dir / "gdna_density_kde.feather"),
-        gdna_density_nodes=_read_feather(output_dir / "gdna_density_nodes.feather"),
-        warnings=warnings,
-    )
+    return ReportSubstrate(output_dir=output_dir, summary=summary, warnings=warnings)

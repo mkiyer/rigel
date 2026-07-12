@@ -9,6 +9,7 @@ CDN, server, or Node dependency.
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from importlib.resources import files
 
 _ASSETS = files("rigel.report") / "assets"
@@ -22,8 +23,14 @@ def _asset(name: str) -> str:
     return (_ASSETS / name).read_text(encoding="utf-8")
 
 
+@lru_cache(maxsize=1)
 def _vega_bundle() -> str | None:
-    """Return the inlinable Vega runtime, or ``None`` if vl-convert is absent."""
+    """Return the inlinable Vega runtime, or ``None`` if vl-convert is absent.
+
+    The bundle is identical for every report, so it is built once per process and
+    cached — this dominates a single build (~0.8 s) and would otherwise repeat for
+    every sample in a batch.
+    """
     try:
         import vl_convert as vlc
     except ImportError:

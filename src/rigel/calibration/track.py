@@ -96,7 +96,8 @@ def capture_summary(track: pd.DataFrame | None, *, with_curve: bool = False) -> 
 
     grid = np.linspace(float(log_rho.min()), float(log_rho.max()), _KDE_N_GRID)
     try:
-        y_count = gaussian_kde(log_rho)(grid)
+        kde_count = gaussian_kde(log_rho)
+        y_count = kde_count(grid)
         y_mass = gaussian_kde(log_rho, weights=w)(grid)
     except Exception:  # pragma: no cover
         return None
@@ -140,7 +141,7 @@ def capture_summary(track: pd.DataFrame | None, *, with_curve: bool = False) -> 
         "separation_peak_nats": round(sep_peak, 4),
         "separation_median_nats": round(sep_median, 4),
         "mass_frac_ontarget": round(mass_frac_ontarget, 4),
-        "kde_bandwidth_factor": round(float(gaussian_kde(log_rho).factor), 4),
+        "kde_bandwidth_factor": round(float(kde_count.factor), 4),
     }
     if with_curve:
         cmax = float(y_count.max()) or 1.0

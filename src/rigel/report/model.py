@@ -349,7 +349,7 @@ def _genes(sub: ReportSubstrate, max_rows: int = 20000) -> dict:
         "nascent_count",
         "n_transcripts",
     ]
-    df = gq[[c for c in want if c in gq.columns]].copy()
+    df = gq[[c for c in want if c in gq.columns]]
     # Embed only expressed genes for lookup; the long tail of zero-count genes
     # stays in gene_quant.feather. Cap the embed to keep the HTML a sane size.
     if "count" in df.columns:
@@ -359,21 +359,25 @@ def _genes(sub: ReportSubstrate, max_rows: int = 20000) -> dict:
     total = len(df)
     truncated = total > max_rows
     df = df.head(max_rows)
-    rows = []
-    for _, r in df.iterrows():
-        rows.append(
-            [
-                str(r.get("gene_name", "")),
-                str(r.get("gene_id", "")),
-                str(r.get("gene_type", "")),
-                str(r.get("ref", "")),
-                str(r.get("strand", "")),
-                round(float(r.get("tpm", 0)), 2),
-                round(float(r.get("mature_count", 0)), 1),
-                round(float(r.get("nascent_count", 0)), 1),
-                int(r.get("n_transcripts", 0)),
-            ]
-        )
+
+    # Build the row arrays column-wise (vectorized) — far faster than iterrows.
+    def col(name, cast, default):
+        if name not in df.columns:
+            return [default] * len(df)
+        return [cast(v) for v in df[name].to_numpy()]
+
+    cols = [
+        col("gene_name", str, ""),
+        col("gene_id", str, ""),
+        col("gene_type", str, ""),
+        col("ref", str, ""),
+        col("strand", str, ""),
+        col("tpm", lambda v: round(float(v), 2), 0.0),
+        col("mature_count", lambda v: round(float(v), 1), 0.0),
+        col("nascent_count", lambda v: round(float(v), 1), 0.0),
+        col("n_transcripts", int, 0),
+    ]
+    rows = [list(r) for r in zip(*cols)]
     return {"rows": rows, "total": total, "shown": len(rows), "truncated": truncated}
 
 

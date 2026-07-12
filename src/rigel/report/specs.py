@@ -157,32 +157,30 @@ def _bin_track(track: pd.DataFrame, bins_per_ref: int = 160) -> list[dict]:
     """Length-weighted per-bin gDNA density, binned within each reference.
 
     Binning happens here (Python) so a genome with millions of region rows still
-    emits only ~bins_per_ref points per chromosome to the chart.
+    emits only ~bins_per_ref points per chromosome to the chart. One ``groupby``
+    over the ref column keeps this O(regions) rather than O(refs × regions).
     """
     rows: list[dict] = []
     length = (track["end"] - track["start"]).clip(lower=1).to_numpy(dtype="float64")
     dens = track["gdna_density"].to_numpy(dtype="float64")
     starts = track["start"].to_numpy(dtype="float64")
-    refs = track["ref"].astype(str).to_numpy()
-    for ref in pd.unique(refs):
-        m = refs == ref
-        span = float(starts[m].max() + length[m][starts[m].argmax()])
+    for ref, idx in track.groupby("ref", observed=True, sort=False).indices.items():
+        s, ln, d = starts[idx], length[idx], dens[idx]
+        span = float(s.max() + ln[s.argmax()])
         if span <= 0:
             continue
         width = span / bins_per_ref
-        bin_idx = np.minimum((starts[m] / width).astype(int), bins_per_ref - 1)
-        wl, wd = length[m], dens[m] * length[m]
-        num = np.bincount(bin_idx, weights=wd, minlength=bins_per_ref)
-        den = np.bincount(bin_idx, weights=wl, minlength=bins_per_ref)
-        for b in range(bins_per_ref):
-            if den[b] > 0:
-                rows.append(
-                    {
-                        "ref": str(ref),
-                        "pos_mb": round((b + 0.5) * width / 1e6, 4),
-                        "density": float(num[b] / den[b]),
-                    }
-                )
+        bin_idx = np.minimum((s / width).astype(int), bins_per_ref - 1)
+        num = np.bincount(bin_idx, weights=d * ln, minlength=bins_per_ref)
+        den = np.bincount(bin_idx, weights=ln, minlength=bins_per_ref)
+        for b in np.nonzero(den > 0)[0]:
+            rows.append(
+                {
+                    "ref": str(ref),
+                    "pos_mb": round((b + 0.5) * width / 1e6, 4),
+                    "density": float(num[b] / den[b]),
+                }
+            )
     return rows
 
 
