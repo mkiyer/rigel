@@ -1,11 +1,14 @@
 name: Build & Publish
 
 on:
+  # The release flow (scripts/publishing/release.sh) publishes by pushing a
+  # vX.Y.Z tag — that tag push is the SOLE automatic trigger. (There is
+  # deliberately no `release: [published]` trigger: it would double-fire the
+  # workflow for the same version, and the second run would fail the PyPI
+  # upload as "file already exists".) `workflow_dispatch` allows a manual run.
   push:
     tags:
       - "v*"
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       publish:
@@ -124,7 +127,6 @@ jobs:
     needs: [sdist, wheels]
     runs-on: ubuntu-latest
     if: >-
-      github.event_name == 'release' ||
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.publish == 'yes')
     environment: pypi
@@ -139,3 +141,11 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Make re-triggers idempotent: if a version's files are already on
+          # PyPI (a re-run, a force-repushed tag, a partial earlier upload),
+          # skip them instead of failing the job with "file already exists".
+          # PyPI still forbids OVERWRITING an existing file — this only skips
+          # byte-identical re-uploads of an already-published version.
+          skip-existing: true
+          verbose: true
