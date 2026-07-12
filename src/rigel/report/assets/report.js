@@ -11,6 +11,22 @@
   const grp = (n) => Math.round(n).toLocaleString("en-US");
   const si = (n) => n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(Math.round(n));
   const pc = (x) => (x * 100).toFixed(1) + "%";
+  const fold = (x) => x >= 1000 ? Number(x).toExponential(1).replace("e+", "e") + "×" : Math.round(x) + "×";
+  const g4 = (x) => String(parseFloat(Number(x).toPrecision(4)));
+  // Single place that formats a data value by its tag — Python emits raw numbers,
+  // all presentation happens here (see model.py). Non-numbers pass through as-is.
+  function fmtValue(v, fmt) {
+    if (typeof v !== "number" || !isFinite(v)) return v == null ? "" : String(v);
+    switch (fmt) {
+      case "pct": return pc(v);       // fraction 0..1 -> "58.8%"
+      case "count": return si(v);     // 1.2M / 1.2k
+      case "int": return grp(v);
+      case "fold": return fold(v);
+      case "float3": return v.toFixed(3);
+      case "g4": return g4(v);         // 4 significant figures
+      default: return String(v);
+    }
+  }
   const SVGNS = "http://www.w3.org/2000/svg";
   const $ = (id) => document.getElementById(id);
   function H(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
@@ -34,7 +50,7 @@
     (items || []).forEach((d) => {
       const k = H("div", "kpi");
       k.appendChild(H("div", "l", d.l));
-      k.appendChild(H("div", "v", `${d.v}${d.u ? `<small> ${d.u}</small>` : ""}`));
+      k.appendChild(H("div", "v", fmtValue(d.v, d.fmt)));
       node.appendChild(k);
     });
   }
@@ -228,7 +244,7 @@
       v.innerHTML = "";
       (M.verdicts || []).forEach((d) => {
         const t = H("div", `vt s-${d.s}`);
-        t.innerHTML = `<div class="k">${icon(d.icon)}${d.k}</div><div class="v">${d.v}</div><div class="n">${d.n}</div>`;
+        t.innerHTML = `<div class="k">${icon(d.icon)}${d.k}</div><div class="v">${fmtValue(d.v, d.fmt)}</div><div class="n">${d.n}</div>`;
         v.appendChild(t);
       });
     }
@@ -239,34 +255,38 @@
     }
   }
 
-  /* ---------- Vega-Lite (fragment length) ---------- */
-  const PAL = {
-    light: { cat: ["#2a78d6", "#1baf7a", "#eda100", "#008300", "#4a3aa7", "#e34948", "#e87ba4", "#eb6834"], ink: "#0d1117", ink2: "#48505e", muted: "#8b93a1", grid: "#e6eaf0", baseline: "#c7cdd8" },
-    dark: { cat: ["#3987e5", "#199e70", "#c98500", "#008300", "#9085e9", "#e66767", "#d55181", "#d95926"], ink: "#eef1f6", ink2: "#aab2c0", muted: "#6c7482", grid: "#222834", baseline: "#333b48" },
-  };
+  /* ---------- Vega-Lite theming ---------- */
   function curTheme() {
     const a = document.documentElement.getAttribute("data-theme");
     if (a === "dark" || a === "light") return a;
     return window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   }
-  function themeConfig(t) {
-    const p = PAL[t] || PAL.light;
+  // Single source of palette truth: read the live CSS custom properties so Vega
+  // charts always match report.css (and the active theme) — no duplicated hexes.
+  function cssVar(name, fallback) {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  }
+  function themeConfig() {
+    const cat = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => cssVar("--s" + i, "#888888"));
+    const ink = cssVar("--ink", "#000"), ink2 = cssVar("--ink-2", "#444");
+    const muted = cssVar("--muted", "#888"), grid = cssVar("--grid", "#ddd");
+    const baseline = cssVar("--baseline", "#ccc");
     const font = "system-ui,-apple-system,'Segoe UI',Roboto,sans-serif";
     return {
       background: "transparent", font,
       view: { stroke: null },
-      range: { category: p.cat },
-      mark: { color: p.cat[0] },
-      axis: { labelColor: p.muted, titleColor: p.ink2, gridColor: p.grid, domainColor: p.baseline, tickColor: p.baseline, labelFont: font, titleFont: font, gridOpacity: 0.7, labelFontSize: 10, titleFontSize: 11 },
-      legend: { labelColor: p.ink2, titleColor: p.ink2, labelFont: font, titleFont: font },
-      header: { labelColor: p.ink2, titleColor: p.ink2, labelFont: font, titleFont: font },
-      title: { color: p.ink, font },
+      range: { category: cat },
+      mark: { color: cat[0] },
+      axis: { labelColor: muted, titleColor: ink2, gridColor: grid, domainColor: baseline, tickColor: baseline, labelFont: font, titleFont: font, gridOpacity: 0.7, labelFontSize: 10, titleFontSize: 11 },
+      legend: { labelColor: ink2, titleColor: ink2, labelFont: font, titleFont: font },
+      header: { labelColor: ink2, titleColor: ink2, labelFont: font, titleFont: font },
+      title: { color: ink, font },
     };
   }
   function embedAll() {
     const hasVega = typeof window.vegaEmbed === "function";
-    const t = curTheme();
-    const opts = { config: themeConfig(t), renderer: "svg", actions: { export: true, source: true, compiled: false, editor: false } };
+    const opts = { config: themeConfig(), renderer: "svg", actions: { export: true, source: true, compiled: false, editor: false } };
     // Every .vega-chart container is named vega-<key>; embed CHARTS[key] or show why not.
     document.querySelectorAll(".vega-chart").forEach((node) => {
       const key = node.id.replace(/^vega-/, "");
@@ -300,7 +320,6 @@
   }
 
   /* ---------- capture note (descriptive; mass-weighted) ---------- */
-  function fold(x) { return x >= 1000 ? x.toExponential(1).replace("e+", "e") + "×" : x.toFixed(0) + "×"; }
   function captureNote() {
     const n = $("capture-note"); if (!n) return;
     const c = M.calibration && M.calibration.capture;

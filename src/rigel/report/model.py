@@ -39,7 +39,8 @@ def _verdicts(summary: dict, capture: dict | None = None) -> list[dict]:
         {
             "k": "Mapping rate",
             "icon": "check",
-            "v": f"{mrate * 100:.1f}%",
+            "v": mrate,
+            "fmt": "pct",
             "s": "good" if mrate >= 0.75 else "warning" if mrate >= 0.5 else "critical",
             "n": f"{mapped:,} of {total:,} reads mapped",
         }
@@ -59,6 +60,7 @@ def _verdicts(summary: dict, capture: dict | None = None) -> list[dict]:
             "k": "Strandedness",
             "icon": "arrow",
             "v": label,
+            "fmt": "text",
             "s": s,
             "n": f"{spec * 100:.1f}% strand-specific · {protocol}",
         }
@@ -70,7 +72,8 @@ def _verdicts(summary: dict, capture: dict | None = None) -> list[dict]:
         {
             "k": "gDNA contamination",
             "icon": "warn",
-            "v": f"{gfrac * 100:.1f}%",
+            "v": gfrac,
+            "fmt": "pct",
             "s": "good" if gfrac < 0.1 else "warning" if gfrac < 0.3 else "critical",
             "n": "EM-corrected; incl. intergenic",
         }
@@ -84,7 +87,8 @@ def _verdicts(summary: dict, capture: dict | None = None) -> list[dict]:
         {
             "k": "Usable fragments",
             "icon": "check",
-            "v": _si(genic),
+            "v": genic,
+            "fmt": "count",
             "s": "good" if grate >= 0.6 else "warning",
             "n": f"{grate * 100:.1f}% genic of {_si(ftot)}",
         }
@@ -100,7 +104,8 @@ def _verdicts(summary: dict, capture: dict | None = None) -> list[dict]:
                 {
                     "k": "Capture enrichment",
                     "icon": "target",
-                    "v": _fold(capture.get("fold_vs_median", 1.0)),
+                    "v": capture.get("fold_vs_median", 1.0),
+                    "fmt": "fold",
                     "s": "info",
                     "n": f"on-target mode vs median; {capture.get('mass_frac_ontarget', 0) * 100:.0f}% of gDNA mass on-target",
                 }
@@ -111,19 +116,12 @@ def _verdicts(summary: dict, capture: dict | None = None) -> list[dict]:
                     "k": "Capture enrichment",
                     "icon": "target",
                     "v": "None",
+                    "fmt": "text",
                     "s": "info",
                     "n": "no on-target gDNA density mode above the median",
                 }
             )
     return out
-
-
-def _fold(x: float) -> str:
-    """Compact fold-change label (e.g. 45× / 4.4e4×)."""
-    x = float(x)
-    if x >= 1000:
-        return f"{x:.0e}×".replace("e+0", "e").replace("e+", "e")
-    return f"{x:.0f}×"
 
 
 def _si(n: float) -> str:
@@ -158,11 +156,11 @@ def _alignment(summary: dict) -> dict:
         fate.append({"label": "Unmapped", "value": unmapped_grp, "cls": "fmuted"})
 
     kpis = [
-        {"l": "Read groups", "v": _si(groups)},
-        {"l": "Uniquely mapped", "v": f"{_pct(unique, groups) * 100:.1f}", "u": "%"},
-        {"l": "Multi-mapping", "v": f"{_pct(multi, groups) * 100:.1f}", "u": "%"},
-        {"l": "Alignment records", "v": _si(total)},
-        {"l": "Duplicates", "v": f"{_pct(a.get('duplicate_reads', 0), total) * 100:.1f}", "u": "%"},
+        {"l": "Read groups", "v": groups, "fmt": "count"},
+        {"l": "Uniquely mapped", "v": _pct(unique, groups), "fmt": "pct"},
+        {"l": "Multi-mapping", "v": _pct(multi, groups), "fmt": "pct"},
+        {"l": "Alignment records", "v": total, "fmt": "count"},
+        {"l": "Duplicates", "v": _pct(a.get("duplicate_reads", 0), total), "fmt": "pct"},
     ]
     # Table keeps both unit families, each labeled so they are not conflated.
     rows = [
@@ -215,11 +213,11 @@ def _fragments(summary: dict) -> dict:
         {"label": "Artifact", "value": sp.get("splice_artifact", 0), "cls": _C[6]},
     ]
     kpis = [
-        {"l": "Fragments", "v": _si(total)},
-        {"l": "Genic", "v": f"{_pct(genic, total) * 100:.1f}", "u": "%"},
-        {"l": "Intergenic", "v": f"{_pct(inter, total) * 100:.1f}", "u": "%"},
-        {"l": "Chimeric", "v": f"{_pct(chim, total) * 100:.1f}", "u": "%"},
-        {"l": "Spliced", "v": _si(spliced)},
+        {"l": "Fragments", "v": total, "fmt": "count"},
+        {"l": "Genic", "v": _pct(genic, total), "fmt": "pct"},
+        {"l": "Intergenic", "v": _pct(inter, total), "fmt": "pct"},
+        {"l": "Chimeric", "v": _pct(chim, total), "fmt": "pct"},
+        {"l": "Spliced", "v": spliced, "fmt": "count"},
     ]
     return {
         "kpis": kpis,
@@ -245,14 +243,15 @@ def _strand(summary: dict) -> dict:
         "exonic_all_spec": d.get("exonic_all_specificity"),
         "contamination_gap": d.get("contamination_gap"),
         "kpis": [
-            {"l": "P(R1 sense)", "v": f"{s.get('p_r1_sense', 0.5):.3f}"},
-            {"l": "Specificity", "v": f"{s.get('strand_specificity', 0.5):.3f}"},
-            {"l": "95% CI", "v": f"±{eps:.4f}"},
+            {"l": "P(R1 sense)", "v": s.get("p_r1_sense", 0.5), "fmt": "float3"},
+            {"l": "Specificity", "v": s.get("strand_specificity", 0.5), "fmt": "float3"},
+            {"l": "95% CI", "v": f"±{eps:.4f}", "fmt": "text"},
             {
                 "l": "Exonic (all)",
-                "v": f"{d.get('exonic_all_specificity', float('nan')):.3f}"
+                "v": d.get("exonic_all_specificity", "—")
                 if d.get("exonic_all_specificity") is not None
                 else "—",
+                "fmt": "float3",
             },
         ],
     }
@@ -324,11 +323,11 @@ def _quant(summary: dict) -> dict:
     ]
     rna_share = q.get("mrna_fraction", 0.0) + q.get("nrna_fraction", 0.0)
     kpis = [
-        {"l": "Transcripts", "v": _si(q.get("n_transcripts", 0))},
-        {"l": "Genes", "v": _si(q.get("n_genes", 0))},
-        {"l": "Loci", "v": _si(q.get("n_loci", 0))},
-        {"l": "mRNA", "v": _si(mrna)},
-        {"l": "nRNA", "v": _si(nrna)},
+        {"l": "Transcripts", "v": q.get("n_transcripts", 0), "fmt": "count"},
+        {"l": "Genes", "v": q.get("n_genes", 0), "fmt": "count"},
+        {"l": "Loci", "v": q.get("n_loci", 0), "fmt": "count"},
+        {"l": "mRNA", "v": mrna, "fmt": "count"},
+        {"l": "nRNA", "v": nrna, "fmt": "count"},
     ]
     return {"pools": pools, "table": table, "rna_share": rna_share, "kpis": kpis}
 
@@ -385,24 +384,22 @@ def _calibration(sub: ReportSubstrate, capture: dict | None = None) -> dict:
     cal = sub.summary.get("calibration") or {}
     track = sub.calibration_track
     kpis = [
-        {"l": "Regions", "v": _si(cal.get("n_regions", 0))},
-        {"l": "ρg global", "v": f"{cal.get('gdna_density_global', 0):.4g}"},
-        {"l": "RNA sense", "v": f"{cal.get('rna_sense_frac', 0):.3f}"},
+        {"l": "Regions", "v": cal.get("n_regions", 0), "fmt": "count"},
+        {"l": "ρg global", "v": cal.get("gdna_density_global", 0), "fmt": "g4"},
+        {"l": "RNA sense", "v": cal.get("rna_sense_frac", 0), "fmt": "float3"},
     ]
     has_track = track is not None and len(track) > 0
     if has_track:
         gf = track["gdna_frac"].to_numpy(dtype="float64")
-        kpis.append({"l": "Mean gDNA frac", "v": f"{float(gf.mean()) * 100:.1f}", "u": "%"})
-        kpis.append({"l": "Regions >50% gDNA", "v": _si(int((gf > 0.5).sum()))})
+        kpis.append({"l": "Mean gDNA frac", "v": float(gf.mean()), "fmt": "pct"})
+        kpis.append({"l": "Regions >50% gDNA", "v": int((gf > 0.5).sum()), "fmt": "count"})
     if capture and capture.get("enriched"):
-        kpis.append({"l": "Enr. vs median", "v": _fold(capture.get("fold_vs_median", 1.0))})
-        kpis.append({"l": "Peak-to-peak", "v": _fold(capture.get("fold_peak_to_peak", 1.0))})
+        kpis.append({"l": "Enr. vs median", "v": capture.get("fold_vs_median", 1.0), "fmt": "fold"})
         kpis.append(
-            {
-                "l": "On-target mass",
-                "v": f"{capture.get('mass_frac_ontarget', 0) * 100:.1f}",
-                "u": "%",
-            }
+            {"l": "Peak-to-peak", "v": capture.get("fold_peak_to_peak", 1.0), "fmt": "fold"}
+        )
+        kpis.append(
+            {"l": "On-target mass", "v": capture.get("mass_frac_ontarget", 0), "fmt": "pct"}
         )
     return {"kpis": kpis, "has_track": has_track, "capture": capture}
 

@@ -47,8 +47,8 @@ _SECTIONS = """
 <div class="topbar"><div class="topbar-in">
   <div class="wm"><span class="dot"></span><span class="star">RIGEL</span><span class="sub">Quality&nbsp;Control</span></div>
   <div class="spacer"></div>
-  <span class="chip">v{version}</span>
-  <span class="chip">schema&nbsp;{schema}</span>
+  <span class="chip">v__VERSION__</span>
+  <span class="chip">schema&nbsp;__SCHEMA__</span>
   <button class="tbtn" id="theme-toggle" type="button" title="Toggle light / dark">◐ theme</button>
 </div></div>
 
@@ -204,9 +204,10 @@ def render_html(model: dict, charts: dict, title: str) -> str:
     meta = model.get("meta", {})
 
     payload = _json_for_script({"model": model, "charts": charts})
-    sections = _SECTIONS.format(
-        version=meta.get("version") or "?",
-        schema=f"report/{meta.get('schema_version')}" if meta.get("schema_version") else "report",
+    # Token replace (not str.format) so literal { } in the section HTML/CSS/JS are safe.
+    schema = f"report/{meta.get('schema_version')}" if meta.get("schema_version") else "report"
+    sections = _SECTIONS.replace("__VERSION__", str(meta.get("version") or "?")).replace(
+        "__SCHEMA__", schema
     )
 
     vega_tag = f"<script>{bundle}</script>" if bundle else ""

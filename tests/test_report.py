@@ -166,6 +166,12 @@ def test_view_model_shape(tmp_path):
     vm = build_view_model(sub)
 
     assert len(vm["verdicts"]) == 4
+    # formatting boundary: KPIs / verdicts carry raw values + a fmt tag (JS formats)
+    for kpi in vm["alignment"]["kpis"]:
+        assert "fmt" in kpi and "u" not in kpi
+    numeric = next(k for k in vm["alignment"]["kpis"] if k["fmt"] in ("pct", "count"))
+    assert isinstance(numeric["v"], (int, float))
+    assert all("fmt" in v for v in vm["verdicts"])
     # alignment fate never double-counts past the total
     assert sum(seg["value"] for seg in vm["alignment"]["fate"]) <= 1000
     # splice bar carries implicit + artifact
