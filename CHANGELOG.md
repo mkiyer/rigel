@@ -5,7 +5,7 @@ All notable changes to Rigel will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.1] - 2026-07-12
 
 ### Added
 
@@ -809,3 +809,4 @@ Initial development release.
 [0.6.3]: https://github.com/mkiyer/rigel/compare/v0.6.2...v0.6.3
 [0.6.4]: https://github.com/mkiyer/rigel/compare/v0.6.3...v0.6.4
 [0.7.0]: https://github.com/mkiyer/rigel/compare/v0.6.4...v0.7.0
+[0.7.1]: https://github.com/mkiyer/rigel/compare/v0.7.0...v0.7.1
