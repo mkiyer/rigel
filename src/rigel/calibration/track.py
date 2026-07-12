@@ -37,25 +37,126 @@ def build_gdna_track(calibration, region_arrays, ref_names) -> pd.DataFrame:
     categories = [str(x) for x in ref_names]
     ref = pd.Categorical.from_codes(np.asarray(region_arrays.ref_id, dtype=np.int64), categories)
 
-    return pd.DataFrame({
-        "ref": ref,
-        "start": np.asarray(region_arrays.start, dtype=np.int64),
-        "end": np.asarray(region_arrays.end, dtype=np.int64),
-        "gdna_mass": gdna,
-        "rna_mass": rna,
-        "gdna_density": density.astype(np.float64),
-        "gdna_frac": frac.astype(np.float64),
-    })
+    return pd.DataFrame(
+        {
+            "ref": ref,
+            "start": np.asarray(region_arrays.start, dtype=np.int64),
+            "end": np.asarray(region_arrays.end, dtype=np.int64),
+            "gdna_mass": gdna,
+            "rna_mass": rna,
+            "gdna_density": density.astype(np.float64),
+            "gdna_frac": frac.astype(np.float64),
+        }
+    )
 
 
-def write_bedgraph(track: pd.DataFrame, path, column: str = "gdna_density", *, track_name: str = "rigel_gdna_density") -> None:
+#: separation (nats) above which capture is flagged "enriched" — a soft display
+#: descriptor; the numbers are always reported (no hard verdict).
+_CAPTURE_ENRICHED_NATS = 1.0
+_KDE_N_GRID = 320
+
+
+def capture_summary(track: pd.DataFrame | None, *, with_curve: bool = False) -> dict | None:
+    """Mass-weighted capture-enrichment summary from the per-region gDNA track.
+
+    On hybrid-capture RNA-seq the on-target regions are a small minority of nodes
+    but carry the captured gDNA *mass* at high density; the many off-target
+    (expressed) genes dominate by count. So an equal-weight density KDE is
+    unimodal, while a gDNA-mass-weighted KDE develops a high-density on-target
+    shoulder. We report:
+
+    * ``background_mode`` — the dominant density peak by region **count** (the
+      typical region);
+    * ``enriched_mode`` — the highest-density peak of the mass-weighted KDE (the
+      on-target shoulder); their gap is the **peak-to-peak** fold-change;
+    * ``mass_frac_ontarget`` — the fraction of gDNA **mass** sitting between the
+      two peaks' midpoint and above (how much material is actually on-target).
+
+    The peak-to-peak fold and the on-target mass fraction answer different
+    questions (how enriched vs how much) — both are surfaced; no pass/fail
+    verdict. Returns ``None`` if the track is empty / uninformative / SciPy is
+    unavailable. Set ``with_curve`` to also return the plottable KDE curves.
+    """
+    if track is None or len(track) == 0:
+        return None
+    try:
+        from scipy.stats import gaussian_kde
+    except ImportError:  # pragma: no cover
+        return None
+
+    dens = np.asarray(track["gdna_density"], dtype=np.float64)
+    gmass = np.asarray(track["gdna_mass"], dtype=np.float64)
+    keep = (dens > 0) & (gmass > 0)
+    if int(keep.sum()) < 20:
+        return None
+    log_rho = np.log(dens[keep])
+    w = gmass[keep]
+    if np.ptp(log_rho) < 1e-6:
+        return None
+
+    grid = np.linspace(float(log_rho.min()), float(log_rho.max()), _KDE_N_GRID)
+    try:
+        y_count = gaussian_kde(log_rho)(grid)
+        y_mass = gaussian_kde(log_rho, weights=w)(grid)
+    except Exception:  # pragma: no cover
+        return None
+
+    background_mode = float(grid[int(np.argmax(y_count))])
+    # Enriched mode = highest-x local maximum of the mass-weighted KDE that sits
+    # clearly above background; falls back to background (no enrichment).
+    peak = float(y_mass.max())
+    hi_modes = [
+        float(grid[i])
+        for i in range(1, _KDE_N_GRID - 1)
+        if y_mass[i] > y_mass[i - 1]
+        and y_mass[i] >= y_mass[i + 1]
+        and y_mass[i] > 0.02 * peak
+        and grid[i] > background_mode + _CAPTURE_ENRICHED_NATS
+    ]
+    enriched_mode = max(hi_modes) if hi_modes else background_mode
+    separation = enriched_mode - background_mode
+    midpoint = (background_mode + enriched_mode) / 2.0
+    mass_frac_ontarget = float(w[log_rho >= midpoint].sum() / w.sum()) if hi_modes else 0.0
+
+    out = {
+        "n_nodes": int(keep.sum()),
+        "background_mode_log_rho": round(background_mode, 4),
+        "enriched_mode_log_rho": round(enriched_mode, 4),
+        "separation_nats": round(separation, 4),
+        "enrichment_factor": round(float(np.exp(separation)), 2),
+        "mass_frac_ontarget": round(mass_frac_ontarget, 4),
+        "enriched": bool(hi_modes and separation > _CAPTURE_ENRICHED_NATS),
+    }
+    if with_curve:
+        cmax = float(y_count.max()) or 1.0
+        mmax = peak or 1.0
+        out["curve"] = [
+            {
+                "log_rho": round(float(grid[i]), 4),
+                "by_count": round(float(y_count[i] / cmax), 5),
+                "by_mass": round(float(y_mass[i] / mmax), 5),
+            }
+            for i in range(_KDE_N_GRID)
+        ]
+    return out
+
+
+def write_bedgraph(
+    track: pd.DataFrame,
+    path,
+    column: str = "gdna_density",
+    *,
+    track_name: str = "rigel_gdna_density",
+) -> None:
     """Write a bedGraph of one track column (default gDNA density) for genome browsers.
 
     bedGraph is ``chrom  start  end  value`` (tab-separated). A ``track`` header
     line names it for IGV/UCSC. Rows follow the track's genomic order.
     """
     with open(path, "w") as fh:
-        fh.write(f'track type=bedGraph name="{track_name}" description="Rigel per-region gDNA {column}"\n')
+        fh.write(
+            f'track type=bedGraph name="{track_name}" description="Rigel per-region gDNA {column}"\n'
+        )
         refs = track["ref"].astype(str).to_numpy()
         starts = track["start"].to_numpy()
         ends = track["end"].to_numpy()

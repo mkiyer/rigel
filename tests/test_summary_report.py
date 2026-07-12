@@ -186,16 +186,22 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     assert bg[0].startswith("track type=bedGraph")
     assert len(bg) == len(track) + 1  # header + one line per region
 
-    # capture-mode KDE diagnostics — only when the Phase-2 KDE was fit
-    if pr.calibration_diagnostics is not None:
+    # Mass-weighted capture-enrichment summary — present when the track has
+    # enough informative nodes (capture_summary returns non-None).
+    if "capture" in summary["calibration"]:
         cap = summary["calibration"]["capture"]
         assert {
-            "n_modes",
-            "is_bimodal",
+            "n_nodes",
+            "background_mode_log_rho",
+            "enriched_mode_log_rho",
             "separation_nats",
             "enrichment_factor",
-            "kde_n_eff",
+            "enriched",
+            "mass_frac_ontarget",
         } <= set(cap)
+
+    # The prior's own equal-weight KDE is still persisted for provenance.
+    if pr.calibration_diagnostics is not None:
         kde = pd.read_feather(out / "gdna_density_kde.feather")
         assert {"log_rho", "log_density", "density"} <= set(kde.columns)
         assert (out / "gdna_density_nodes.feather").exists()

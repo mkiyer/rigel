@@ -486,7 +486,7 @@ the current version is **2**. Top-level keys:
 | `command` | Subcommand, resolved arguments, config-file path |
 | `configuration` | All resolved pipeline parameters |
 | `input` | Absolute BAM and index paths |
-| `alignment_stats` | Total, mapped, unique, multimapping, proper-pair, duplicate, QC-fail read counts |
+| `alignment_stats` | Two unit families: record-level counts (`total_reads`, `mapped_reads`, `secondary_reads`, `supplementary_reads`, `proper_pairs`, `duplicate_reads`, `qc_fail_reads`) and read-name-group counts (`read_groups`, `unique_reads`, `multimapping_reads`). The report's read-fate bar uses the read-group family so its segments share one denominator |
 | `fragment_stats` | Total, genic, intergenic, and chimeric breakdowns; annotated/unannotated SJ counts; a `splice` sub-block with the per-fragment splice-type breakdown (`unspliced`, `spliced_annotated`, `spliced_unannotated`, `spliced_implicit`, `splice_artifact`) plus `sj_blacklisted` |
 | `strand_model` | Protocol (`R1-sense` / `R1-antisense`), strand specificity, `p_r1_sense`, training count, posterior variance, 95% CI, and a `diagnostics` sub-block comparing the all-exonic model to the spliced-only model (`contamination_gap` — a positive value flags unstranded gDNA contamination) |
 | `calibration` | Library-scalar calibration outputs (see below) |
@@ -512,25 +512,27 @@ scalars (it is `null` if calibration did not run):
     "gdna_strand_overdispersion": <float>,  // gDNA strand Beta-Binomial overdispersion
     "rna_strand_overdispersion":  <float>,  // RNA strand Beta-Binomial overdispersion
     "n_regions":                  <int>,    // number of calibration regions
-    "capture": {                            // present only when the Phase-2 KDE is fit
-      "n_modes":               <int>,       // local maxima of the gDNA-density KDE
-      "is_bimodal":            <bool>,      // >=2 modes: capture-enrichment signature
-      "depleted_mode_log_rho": <float>,     // low (off-target) mode, log gDNA density
-      "enriched_mode_log_rho": <float>,     // high (on-target) mode, log gDNA density
-      "separation_nats":       <float>,     // enriched - depleted (log enrichment)
-      "enrichment_factor":     <float>,     // exp(separation_nats)
-      "kde_bandwidth":         <float>,
-      "kde_n_eff":             <float>,     // effective training-node count
-      "n_training_nodes":      <int>
+    "capture": {                            // present when the gDNA track is informative
+      "n_nodes":                 <int>,     // regions with gDNA signal used
+      "background_mode_log_rho": <float>,   // dominant density peak by region COUNT (typical region)
+      "enriched_mode_log_rho":   <float>,   // high-density peak by gDNA MASS (on-target shoulder)
+      "separation_nats":         <float>,   // enriched - background (log peak-to-peak fold)
+      "enrichment_factor":       <float>,   // exp(separation_nats) — peak-to-peak fold
+      "mass_frac_ontarget":      <float>,   // fraction of gDNA mass in the on-target mode
+      "enriched":                <bool>     // a distinct on-target mode was found
     }
   }
 }
 ```
 
-The `capture` block is **descriptive only** — Rigel reports the enrichment
-separation but assigns no categorical "capture worked" verdict; the full KDE
-curve + training-node rug are in `gdna_density_kde.feather` /
-`gdna_density_nodes.feather` for plotting.
+The `capture` block is **descriptive only** (no pass/fail verdict). It is
+**mass-weighted**: on hybrid-capture RNA-seq the on-target regions are a small
+minority of nodes but carry the captured gDNA *mass*, so weighting the per-region
+density by gDNA mass surfaces the on-target mode that an equal-weight view
+misses. `enrichment_factor` is the peak-to-peak fold (how enriched); the smaller
+`mass_frac_ontarget` (how much of the gDNA is actually on-target) is the
+companion. The prior's own equal-weight KDE curve is still written to
+`gdna_density_kde.feather` for provenance.
 
 The RNA and gDNA fragment-length models used by scoring/calibration are
 reported separately under the top-level **`fragment_length`** key (as

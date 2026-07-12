@@ -299,24 +299,25 @@
     });
   }
 
-  /* ---------- capture note (no verdict — descriptive numbers) ---------- */
+  /* ---------- capture note (descriptive; mass-weighted) ---------- */
+  function fold(x) { return x >= 1000 ? x.toExponential(1).replace("e+", "e") + "×" : x.toFixed(0) + "×"; }
   function captureNote() {
     const n = $("capture-note"); if (!n) return;
     const c = M.calibration && M.calibration.capture;
-    if (!c) {
-      n.innerHTML = "The gDNA-density KDE was not fit for this run (too few training nodes).";
-      return;
-    }
-    if (c.is_bimodal) {
-      n.innerHTML = `<b>Bimodal gDNA density.</b> A low (depleted / off-target) mode and a high ` +
-        `(enriched / on-target) mode, separated by <span class="num">${(c.separation_nats ?? 0).toFixed(2)} nats</span> ` +
-        `— an enrichment of <span class="num">${(c.enrichment_factor ?? 0).toFixed(0)}×</span>. ` +
-        `This is the signature of hybrid-capture enrichment; a flat / unimodal curve indicates none. ` +
-        `<span style="color:var(--muted)">n_eff ${(c.kde_n_eff ?? 0).toFixed(0)}, bandwidth ${(c.kde_bandwidth ?? 0).toFixed(3)}.</span>`;
+    if (!c) { n.innerHTML = "No gDNA track for this run — capture diagnostic unavailable."; return; }
+    const nodes = `<span style="color:var(--muted)">${grp(c.n_nodes)} nodes with gDNA signal.</span>`;
+    if (c.enriched) {
+      const mf = c.mass_frac_ontarget != null
+        ? ` <span class="num">${(c.mass_frac_ontarget * 100).toFixed(1)}%</span> of the gDNA mass sits in that on-target mode` : "";
+      n.innerHTML = `<b>Capture enrichment detected.</b> Weighting each region by its gDNA <i>mass</i> ` +
+        `(not by region count) reveals a high-density on-target mode ` +
+        `<span class="num">${(c.separation_nats ?? 0).toFixed(1)} nats</span> (~<span class="num">${fold(c.enrichment_factor ?? 1)}</span> fold) ` +
+        `above background${mf} — a small minority of regions carrying the captured material, which the ` +
+        `by-count curve cannot see. ${nodes}`;
     } else {
-      n.innerHTML = `<b>Unimodal gDNA density</b> (${c.n_modes} mode${c.n_modes === 1 ? "" : "s"}). ` +
-        `No clear enriched/depleted separation — consistent with a non-capture (whole-transcriptome) library ` +
-        `or unsuccessful enrichment. <span style="color:var(--muted)">n_eff ${(c.kde_n_eff ?? 0).toFixed(0)}.</span>`;
+      n.innerHTML = `<b>No distinct on-target mode.</b> Even mass-weighted, the gDNA density has no high-density ` +
+        `shoulder above background — consistent with a non-capture (whole-transcriptome) library or ` +
+        `unsuccessful enrichment. ${nodes}`;
     }
   }
 

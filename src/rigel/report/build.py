@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from .capture import capture_kde_from_track
 from .html import render_html
 from .model import build_view_model
 from .specs import build_charts
@@ -38,8 +39,9 @@ def build_report(
     for w in sub.warnings:
         logger.warning("[report] %s", w)
 
-    model = build_view_model(sub)
-    charts = build_charts(sub)
+    capture = capture_kde_from_track(sub.calibration_track)
+    model = build_view_model(sub, capture=capture)
+    charts = build_charts(sub, capture=capture)
 
     if title is None:
         title = f"Rigel QC · {model['meta']['sample']}"

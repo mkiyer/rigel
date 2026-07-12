@@ -20,6 +20,7 @@ import numpy as np
 
 from rigel.calibration.diagnostics import CalibrationDiagnostics
 from rigel.report.build import build_report
+from rigel.report.capture import capture_kde_from_track
 from rigel.report.model import build_view_model
 from rigel.report.specs import build_charts, build_fl_specs, capture_kde_spec, genome_track_spec
 from rigel.report.substrate import SubstrateError, load_substrate
@@ -242,21 +243,54 @@ def test_capture_diagnostics_from_prior_labels_modes():
     assert diag.n_modes == 2
 
 
-def test_capture_kde_spec_layers():
-    kde = pd.DataFrame({"log_rho": np.linspace(-10, 0, 50), "density": np.linspace(0.01, 0.5, 50)})
-    nodes = pd.DataFrame({"log_rho": [-8.0, -2.0, -5.0], "kind": [0, 2, 1]})
-    capture = {
-        "is_bimodal": True,
-        "depleted_mode_log_rho": -8.0,
-        "enriched_mode_log_rho": -2.0,
-        "separation_nats": 6.0,
-        "enrichment_factor": 403.0,
-    }
-    spec = capture_kde_spec(kde, nodes, capture)
-    assert spec is not None and "layer" in spec
-    # curve + rug + mode-rule + mode-text = 4 layers
-    assert len(spec["layer"]) == 4
-    assert capture_kde_spec(None, None, None) is None
+def test_capture_kde_from_track_mass_weighting_recovers_enrichment():
+    # Many low-density (off-target) regions with tiny gDNA mass + a few
+    # high-density (on-target) regions carrying large gDNA mass. Equal weight is
+    # dominated by the low mode; mass weighting must surface the high mode.
+    rng = np.random.default_rng(0)
+    low_d = np.exp(rng.normal(-9.0, 0.4, 4000))
+    high_d = np.exp(rng.normal(0.0, 0.4, 120))
+    dens = np.concatenate([low_d, high_d])
+    gmass = np.concatenate([np.full(4000, 0.01), np.full(120, 50.0)])
+    track = pd.DataFrame(
+        {
+            "ref": pd.Categorical(["chr1"] * len(dens)),
+            "start": np.arange(len(dens)) * 100,
+            "end": np.arange(len(dens)) * 100 + 50,
+            "gdna_mass": gmass,
+            "rna_mass": np.ones(len(dens)),
+            "gdna_density": dens,
+            "gdna_frac": np.clip(dens, 0, 1),
+        }
+    )
+    cap = capture_kde_from_track(track)
+    assert cap is not None
+    assert cap["enriched"] is True
+    assert cap["enriched_mode_log_rho"] > cap["background_mode_log_rho"]
+    assert cap["separation_nats"] > 3.0
+    assert 0.0 < cap["mass_frac_ontarget"] <= 1.0
+    # spec renders as an overlay (curve + mode rule + mode text)
+    spec = capture_kde_spec(cap)
+    assert spec is not None and len(spec["layer"]) == 3
+    assert capture_kde_spec(None) is None
+
+
+def test_capture_kde_from_track_unimodal_when_no_enrichment():
+    rng = np.random.default_rng(1)
+    dens = np.exp(rng.normal(-9.0, 0.5, 3000))
+    track = pd.DataFrame(
+        {
+            "ref": pd.Categorical(["chr1"] * len(dens)),
+            "start": np.arange(len(dens)),
+            "end": np.arange(len(dens)) + 50,
+            "gdna_mass": np.full(len(dens), 0.02),
+            "rna_mass": np.ones(len(dens)),
+            "gdna_density": dens,
+            "gdna_frac": np.clip(dens, 0, 1),
+        }
+    )
+    cap = capture_kde_from_track(track)
+    assert cap is not None and cap["enriched"] is False
 
 
 def test_build_report_self_contained(tmp_path):

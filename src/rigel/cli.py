@@ -207,11 +207,6 @@ def _build_pipeline_config(
 SUMMARY_SCHEMA_VERSION = 2
 
 
-def _none_or_round(value, ndigits: int):
-    """Round a float for JSON, passing ``None`` through unchanged."""
-    return None if value is None else round(float(value), ndigits)
-
-
 def _fragment_length_report(flm, fl_models):
     """Split the fragment-length models into a lean summary + a tidy histogram table.
 
@@ -402,22 +397,19 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "n_regions": int(cal.n_regions),
         }
     )
-    # Capture-mode diagnostics from the fitted gDNA-density KDE (bimodal ⇒ capture
-    # enrichment). Descriptive numbers only — no categorical "capture worked"
-    # verdict (that threshold is the analyst's call). Full curve → companion feather.
+    # Capture-enrichment diagnostics — mass-weighted (count-median vs gDNA-mass-
+    # median density → fold-change). On capture RNA-seq the on-target regions are
+    # a small minority of nodes but carry the gDNA mass, so an equal-weight view is
+    # blind to them; the mass shift is the signal. Descriptive only — no verdict.
+    # (The prior's own equal-weight KDE is kept for provenance in the companion
+    # gdna_density_kde.feather below.)
+    if cal_dict is not None:
+        from .calibration.track import capture_summary
+
+        cap = capture_summary(getattr(result, "calibration_track", None))
+        if cap is not None:
+            cal_dict["capture"] = cap
     diag = getattr(result, "calibration_diagnostics", None)
-    if cal_dict is not None and diag is not None:
-        cal_dict["capture"] = {
-            "n_modes": int(diag.n_modes),
-            "is_bimodal": bool(diag.n_modes >= 2),
-            "depleted_mode_log_rho": _none_or_round(diag.depleted_mode, 4),
-            "enriched_mode_log_rho": _none_or_round(diag.enriched_mode, 4),
-            "separation_nats": _none_or_round(diag.separation_nats, 4),
-            "enrichment_factor": _none_or_round(diag.enrichment_factor, 3),
-            "kde_bandwidth": round(float(diag.bandwidth), 4),
-            "kde_n_eff": round(float(diag.n_eff), 1),
-            "n_training_nodes": int(diag.rug_log_rho.size),
-        }
 
     # Command section — record CLI arguments
     cmd_params: dict = {
@@ -453,13 +445,21 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "index_dir": str(Path(args.index_dir).resolve()),
         },
         "alignment_stats": {
+            # Record-level counts (individual alignment records in the BAM).
             "total_reads": stats.total,
             "mapped_reads": stats.total - stats.unmapped,
-            "unique_reads": stats.unique,
-            "multimapping_reads": stats.multimapping,
+            "unmapped_reads": stats.unmapped,
+            "secondary_reads": stats.secondary,
+            "supplementary_reads": stats.supplementary,
             "proper_pairs": stats.proper_pair,
             "duplicate_reads": stats.duplicate,
             "qc_fail_reads": stats.qc_fail,
+            # Read-NAME-group counts (one per read name, i.e. per read/pair) —
+            # a different unit than the record counts above. The "read fate"
+            # visual is built from these so its segments share one denominator.
+            "read_groups": stats.n_read_names,
+            "unique_reads": stats.unique,
+            "multimapping_reads": stats.multimapping,
         },
         "fragment_stats": {
             "total": stats.n_fragments,
@@ -563,15 +563,19 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         import numpy as _np
         import pandas as _pd
 
-        _pd.DataFrame({
-            "log_rho": _np.asarray(diag.kde_x, dtype="float64"),
-            "log_density": _np.asarray(diag.kde_logp, dtype="float64"),
-            "density": _np.exp(_np.asarray(diag.kde_logp, dtype="float64")),
-        }).to_feather(str(output_dir / "gdna_density_kde.feather"), **feather_kw)
-        _pd.DataFrame({
-            "log_rho": _np.asarray(diag.rug_log_rho, dtype="float64"),
-            "kind": _np.asarray(diag.rug_kind, dtype="int32"),
-        }).to_feather(str(output_dir / "gdna_density_nodes.feather"), **feather_kw)
+        _pd.DataFrame(
+            {
+                "log_rho": _np.asarray(diag.kde_x, dtype="float64"),
+                "log_density": _np.asarray(diag.kde_logp, dtype="float64"),
+                "density": _np.exp(_np.asarray(diag.kde_logp, dtype="float64")),
+            }
+        ).to_feather(str(output_dir / "gdna_density_kde.feather"), **feather_kw)
+        _pd.DataFrame(
+            {
+                "log_rho": _np.asarray(diag.rug_log_rho, dtype="float64"),
+                "kind": _np.asarray(diag.rug_kind, dtype="int32"),
+            }
+        ).to_feather(str(output_dir / "gdna_density_nodes.feather"), **feather_kw)
         logging.info(
             f"[DONE] Wrote gdna_density_kde.feather ({len(diag.kde_x)} pts) + "
             f"gdna_density_nodes.feather ({diag.rug_log_rho.size} nodes)"

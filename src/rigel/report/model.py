@@ -22,9 +22,9 @@ def _pct(numer: float, denom: float) -> float:
     return (numer / denom) if denom else 0.0
 
 
-def _verdicts(summary: dict) -> list[dict]:
+def _verdicts(summary: dict, capture: dict | None = None) -> list[dict]:
     """Headline QC tiles: mapping, strandedness, gDNA, usable fragments, + capture
-    enrichment (descriptive ratio) when the gDNA-density KDE was fit."""
+    enrichment (descriptive, mass-weighted) when a gDNA track is present."""
     out: list[dict] = []
     aln = summary.get("alignment_stats", {})
     frag = summary.get("fragment_stats", {})
@@ -90,18 +90,18 @@ def _verdicts(summary: dict) -> list[dict]:
         }
     )
 
-    # Capture enrichment — descriptive (the enrichment ratio between the gDNA
-    # density modes), no pass/fail verdict. Only when the KDE was fit.
-    cap = (summary.get("calibration") or {}).get("capture")
-    if cap:
-        if cap.get("is_bimodal"):
+    # Capture enrichment — descriptive, from the gDNA-MASS-weighted density KDE
+    # (equal-weight is blind to the few on-target regions). No pass/fail verdict.
+    if capture:
+        if capture.get("enriched"):
+            n = f"peak-to-peak; {capture.get('mass_frac_ontarget', 0) * 100:.0f}% of gDNA mass on-target"
             out.append(
                 {
                     "k": "Capture enrichment",
                     "icon": "target",
-                    "v": f"{cap.get('enrichment_factor', 0):.0f}×",
+                    "v": _fold(capture.get("enrichment_factor", 1.0)),
                     "s": "good",
-                    "n": f"on- vs off-target gDNA ({cap.get('separation_nats', 0):.1f} nats)",
+                    "n": n,
                 }
             )
         else:
@@ -111,10 +111,18 @@ def _verdicts(summary: dict) -> list[dict]:
                     "icon": "target",
                     "v": "None",
                     "s": "info",
-                    "n": "unimodal gDNA density — no enrichment detected",
+                    "n": "no distinct on-target gDNA density mode",
                 }
             )
     return out
+
+
+def _fold(x: float) -> str:
+    """Compact fold-change label (e.g. 45× / 4.4e4×)."""
+    x = float(x)
+    if x >= 1000:
+        return f"{x:.0e}×".replace("e+0", "e").replace("e+", "e")
+    return f"{x:.0f}×"
 
 
 def _si(n: float) -> str:
@@ -128,37 +136,50 @@ def _si(n: float) -> str:
 
 def _alignment(summary: dict) -> dict:
     a = summary.get("alignment_stats", {})
+    # Record-level (individual BAM alignment records).
     total = a.get("total_reads", 0)
     mapped = a.get("mapped_reads", 0)
+    # Read-NAME-group level (one per read/pair) — the "read fate" denominator.
     unique = a.get("unique_reads", 0)
     multi = a.get("multimapping_reads", 0)
-    unmapped = max(0, total - mapped)
-    other_mapped = max(0, mapped - unique - multi)
+    # read_groups may be absent on pre-fix summaries; fall back to unique+multi
+    # (mapped groups only) rather than mixing in record-level unmapped counts.
+    groups = a.get("read_groups", unique + multi)
+    unmapped_grp = max(0, groups - unique - multi)
 
+    # Fate over read groups — every segment shares the read-group denominator,
+    # so it composes correctly (the earlier bug mixed records with groups).
     fate = [
         {"label": "Uniquely mapped", "value": unique, "cls": _C[1]},
-        {"label": "Multimapping", "value": multi, "cls": _C[3]},
+        {"label": "Multi-mapping", "value": multi, "cls": _C[3]},
     ]
-    if other_mapped > 0:
-        fate.append({"label": "Other mapped", "value": other_mapped, "cls": _C[7]})
-    fate.append({"label": "Unmapped", "value": unmapped, "cls": "fmuted"})
+    if unmapped_grp > 0:
+        fate.append({"label": "Unmapped", "value": unmapped_grp, "cls": "fmuted"})
 
     kpis = [
-        {"l": "Total reads", "v": _si(total)},
-        {"l": "Mapped", "v": f"{_pct(mapped, total) * 100:.1f}", "u": "%"},
-        {"l": "Unique", "v": _si(unique)},
-        {"l": "Multimapping", "v": f"{_pct(multi, total) * 100:.1f}", "u": "%"},
+        {"l": "Read groups", "v": _si(groups)},
+        {"l": "Uniquely mapped", "v": f"{_pct(unique, groups) * 100:.1f}", "u": "%"},
+        {"l": "Multi-mapping", "v": f"{_pct(multi, groups) * 100:.1f}", "u": "%"},
+        {"l": "Alignment records", "v": _si(total)},
         {"l": "Duplicates", "v": f"{_pct(a.get('duplicate_reads', 0), total) * 100:.1f}", "u": "%"},
     ]
+    # Table keeps both unit families, each labeled so they are not conflated.
     rows = [
-        ["Total reads", total, 1.0],
-        ["Mapped", mapped, _pct(mapped, total)],
-        ["Uniquely mapped", unique, _pct(unique, total)],
-        ["Multimapping", multi, _pct(multi, total)],
-        ["Proper pairs", a.get("proper_pairs", 0), _pct(a.get("proper_pairs", 0), total)],
-        ["Duplicates", a.get("duplicate_reads", 0), _pct(a.get("duplicate_reads", 0), total)],
-        ["QC-fail", a.get("qc_fail_reads", 0), _pct(a.get("qc_fail_reads", 0), total)],
-        ["Unmapped", unmapped, _pct(unmapped, total)],
+        ["Read groups (reads/pairs)", groups, 1.0],
+        ["  uniquely mapped", unique, _pct(unique, groups)],
+        ["  multi-mapping", multi, _pct(multi, groups)],
+        ["  unmapped", unmapped_grp, _pct(unmapped_grp, groups)],
+        ["Alignment records", total, 1.0],
+        ["  mapped", mapped, _pct(mapped, total)],
+        ["  secondary", a.get("secondary_reads", 0), _pct(a.get("secondary_reads", 0), total)],
+        [
+            "  supplementary",
+            a.get("supplementary_reads", 0),
+            _pct(a.get("supplementary_reads", 0), total),
+        ],
+        ["  proper pairs", a.get("proper_pairs", 0), _pct(a.get("proper_pairs", 0), total)],
+        ["  duplicates", a.get("duplicate_reads", 0), _pct(a.get("duplicate_reads", 0), total)],
+        ["  QC-fail", a.get("qc_fail_reads", 0), _pct(a.get("qc_fail_reads", 0), total)],
     ]
     return {"kpis": kpis, "fate": fate, "table": rows}
 
@@ -355,7 +376,7 @@ def _genes(sub: ReportSubstrate, max_rows: int = 20000) -> dict:
     return {"rows": rows, "total": total, "shown": len(rows), "truncated": truncated}
 
 
-def _calibration(sub: ReportSubstrate) -> dict:
+def _calibration(sub: ReportSubstrate, capture: dict | None = None) -> dict:
     cal = sub.summary.get("calibration") or {}
     track = sub.calibration_track
     kpis = [
@@ -368,10 +389,14 @@ def _calibration(sub: ReportSubstrate) -> dict:
         gf = track["gdna_frac"].to_numpy(dtype="float64")
         kpis.append({"l": "Mean gDNA frac", "v": f"{float(gf.mean()) * 100:.1f}", "u": "%"})
         kpis.append({"l": "Regions >50% gDNA", "v": _si(int((gf > 0.5).sum()))})
-    capture = cal.get("capture")
-    if capture and capture.get("is_bimodal"):
+    if capture and capture.get("enriched"):
+        kpis.append({"l": "Enrichment", "v": _fold(capture.get("enrichment_factor", 1.0))})
         kpis.append(
-            {"l": "Enrichment", "v": f"{capture.get('enrichment_factor', 0):.0f}", "u": "×"}
+            {
+                "l": "On-target mass",
+                "v": f"{capture.get('mass_frac_ontarget', 0) * 100:.1f}",
+                "u": "%",
+            }
         )
     return {"kpis": kpis, "has_track": has_track, "capture": capture}
 
@@ -399,7 +424,7 @@ def _fmt_val(v) -> str:
     return str(v)
 
 
-def build_view_model(sub: ReportSubstrate) -> dict:
+def build_view_model(sub: ReportSubstrate, capture: dict | None = None) -> dict:
     """Assemble the complete JSON-serializable view model for the report."""
     s = sub.summary
     return {
@@ -412,13 +437,13 @@ def build_view_model(sub: ReportSubstrate) -> dict:
             "schema_version": s.get("schema_version"),
             "warnings": sub.warnings,
         },
-        "verdicts": _verdicts(s),
+        "verdicts": _verdicts(s, capture),
         "alignment": _alignment(s),
         "fragments": _fragments(s),
         "strand": _strand(s),
         "fl": _fragment_length(sub),
         "quant": _quant(s),
-        "calibration": _calibration(sub),
+        "calibration": _calibration(sub, capture),
         "genes": _genes(sub),
         "config": _config(s),
     }

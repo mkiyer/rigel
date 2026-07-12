@@ -227,31 +227,33 @@ def genome_track_spec(track: pd.DataFrame | None) -> dict | None:
     }
 
 
-_KIND_NAMES = {0: "intergenic", 1: "intron", 2: "exon", 3: "boundary"}
+def capture_kde_spec(capture: dict | None) -> dict | None:
+    """Capture-enrichment KDE: log gDNA density weighted by region **count** vs by
+    gDNA **mass**, overlaid, with the mass-weighted depleted/enriched modes marked.
 
-
-def capture_kde_spec(
-    kde: pd.DataFrame | None, nodes: pd.DataFrame | None, capture: dict | None
-) -> dict | None:
-    """gDNA-density KDE: the ``P(log ρ_g)`` curve + labeled depleted/enriched modes + a node rug.
-
-    Bimodality is the capture signal (a low off-target mode + a high on-target
-    mode). No categorical verdict — the separation / enrichment numbers are shown
-    and left to the analyst.
+    The gap between the two curves is the signal: on-target regions are few (so
+    the count curve is flat/unimodal) but carry the gDNA mass (so the mass curve
+    develops the enriched mode). Descriptive only — no pass/fail verdict.
     """
-    if kde is None or kde.empty:
+    if not capture or not capture.get("curve"):
         return None
-    curve = [
-        {"log_rho": float(x), "density": float(d)} for x, d in zip(kde["log_rho"], kde["density"])
-    ]
+    # Long-form for a color-by-series overlay.
+    values = []
+    for row in capture["curve"]:
+        values.append(
+            {"log_rho": row["log_rho"], "series": "by region count", "value": row["by_count"]}
+        )
+        values.append(
+            {"log_rho": row["log_rho"], "series": "by gDNA mass", "value": row["by_mass"]}
+        )
 
     layers = [
         {
-            "data": {"values": curve},
+            "data": {"values": values},
             "mark": {
                 "type": "area",
                 "line": {"strokeWidth": 2},
-                "opacity": 0.18,
+                "opacity": 0.16,
                 "interpolate": "monotone",
             },
             "encoding": {
@@ -260,67 +262,44 @@ def capture_kde_spec(
                     "type": "quantitative",
                     "title": "log gDNA density  ρg  (nats)",
                 },
-                "y": {"field": "density", "type": "quantitative", "title": "P(log ρg)"},
+                "y": {
+                    "field": "value",
+                    "type": "quantitative",
+                    "title": "density (scaled)",
+                    "stack": None,
+                },
+                "color": {
+                    "field": "series",
+                    "type": "nominal",
+                    "title": None,
+                    "sort": ["by region count", "by gDNA mass"],
+                    "legend": {"orient": "top-right"},
+                },
                 "tooltip": [
+                    {"field": "series"},
                     {"field": "log_rho", "title": "log ρg", "format": ".2f"},
-                    {"field": "density", "title": "density", "format": ".3~e"},
+                    {"field": "value", "title": "density", "format": ".3f"},
                 ],
             },
         }
     ]
 
-    # Node rug, coloured by node kind, along the bottom.
-    if nodes is not None and not nodes.empty:
-        rug = [
-            {"log_rho": float(x), "kind": _KIND_NAMES.get(int(k), "?")}
-            for x, k in zip(nodes["log_rho"], nodes["kind"])
-        ]
+    marks = []
+    if capture.get("background_mode_log_rho") is not None:
+        marks.append({"log_rho": capture["background_mode_log_rho"], "label": "background"})
+    if capture.get("enriched") and capture.get("enriched_mode_log_rho") is not None:
+        marks.append({"log_rho": capture["enriched_mode_log_rho"], "label": "on-target"})
+    if marks:
         layers.append(
             {
-                "data": {"values": rug},
-                "mark": {
-                    "type": "tick",
-                    "opacity": 0.5,
-                    "thickness": 1.5,
-                    "size": 10,
-                    "yOffset": 120,
-                },
-                "encoding": {
-                    "x": {"field": "log_rho", "type": "quantitative"},
-                    "color": {
-                        "field": "kind",
-                        "type": "nominal",
-                        "title": "node",
-                        "sort": ["intergenic", "intron", "exon", "boundary"],
-                        "legend": {"orient": "top-right"},
-                    },
-                    "tooltip": [
-                        {"field": "kind", "title": "node kind"},
-                        {"field": "log_rho", "title": "log ρg", "format": ".2f"},
-                    ],
-                },
-            }
-        )
-
-    # Depleted / enriched mode rules + labels.
-    modes = []
-    if capture:
-        if capture.get("depleted_mode_log_rho") is not None:
-            modes.append({"log_rho": capture["depleted_mode_log_rho"], "label": "depleted"})
-        enr = capture.get("enriched_mode_log_rho")
-        if enr is not None and capture.get("is_bimodal"):
-            modes.append({"log_rho": enr, "label": "enriched"})
-    if modes:
-        layers.append(
-            {
-                "data": {"values": modes},
+                "data": {"values": marks},
                 "mark": {"type": "rule", "strokeDash": [3, 3], "opacity": 0.7},
                 "encoding": {"x": {"field": "log_rho", "type": "quantitative"}},
             }
         )
         layers.append(
             {
-                "data": {"values": modes},
+                "data": {"values": marks},
                 "mark": {"type": "text", "dy": -6, "fontWeight": "bold", "baseline": "bottom"},
                 "encoding": {
                     "x": {"field": "log_rho", "type": "quantitative"},
@@ -339,22 +318,13 @@ def capture_kde_spec(
     }
 
 
-def _capture_meta(sub) -> dict | None:
-    cal = getattr(sub, "summary", {}).get("calibration") or {}
-    return cal.get("capture")
-
-
-def build_charts(sub) -> dict:
+def build_charts(sub, capture: dict | None = None) -> dict:
     """All Vega-Lite charts for the report, keyed by container id (``vega-<key>``)."""
     charts = build_fl_specs(getattr(sub, "fragment_lengths", None))
     genome = genome_track_spec(getattr(sub, "calibration_track", None))
     if genome is not None:
         charts["genome"] = genome
-    capture = capture_kde_spec(
-        getattr(sub, "gdna_density_kde", None),
-        getattr(sub, "gdna_density_nodes", None),
-        _capture_meta(sub),
-    )
-    if capture is not None:
-        charts["capture_kde"] = capture
+    cap_spec = capture_kde_spec(capture)
+    if cap_spec is not None:
+        charts["capture_kde"] = cap_spec
     return charts

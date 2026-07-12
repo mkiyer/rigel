@@ -73,11 +73,11 @@ _SECTIONS = """
         <div class="kpis" id="align-kpis"></div>
         <div class="grid2 wide-left">
           <div>
-            <p class="cap">Read fate — accounts for all reads</p>
+            <p class="cap">Read fate — read groups by NH tag</p>
             <div class="stackbar" id="align-bar"></div>
             <div class="legend" id="align-legend"></div>
           </div>
-          <div class="tw"><p class="cap">Read counts</p><table class="data" id="align-table"></table></div>
+          <div class="tw"><p class="cap">Counts (records vs read groups)</p><table class="data" id="align-table"></table></div>
         </div>
       </div>
     </section>
@@ -154,7 +154,7 @@ _SECTIONS = """
         <div class="kpis" id="calib-kpis"></div>
         <div class="grid2 wide-left">
           <div>
-            <p class="cap">gDNA-density prior — P(log ρg)</p>
+            <p class="cap">gDNA density — by region count vs by gDNA mass</p>
             <div class="vega-chart" id="vega-capture_kde"></div>
           </div>
           <div><div class="note" id="capture-note"></div></div>
