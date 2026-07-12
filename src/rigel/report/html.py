@@ -166,11 +166,18 @@ _SECTIONS = """
           </div>
           <div><div class="note" id="capture-note"></div></div>
         </div>
-        <p class="cap" style="margin-top:24px">gDNA density across the genome — binned per reference</p>
+        <p class="cap" style="margin-top:24px" id="genome-cap">gDNA density across the genome</p>
         <div class="tw"><div class="vega-chart" id="vega-genome"></div></div>
-        <div class="note">Per-region gDNA solved by calibration. Also written as
-          <span class="num">calibration_track.bedgraph</span> — load it in IGV or the UCSC browser
-          for base-pair inspection.</div>
+        <div class="note">Log density, independent y per reference (so a high-density reference such as
+          chrM can't flatten the others). Full per-base signal is in
+          <span class="num">calibration_track.bedgraph</span> (IGV / UCSC).</div>
+
+        <p class="cap" style="margin-top:22px">All references · by gDNA mass</p>
+        <div class="search">
+          <input id="rsearch" type="text" placeholder="reference…" aria-label="Search references"/>
+          <span class="hint" id="rcount"></span>
+        </div>
+        <div class="tw" style="max-height:340px;overflow-y:auto"><table class="data" id="ref-table"></table></div>
       </div>
     </section>
 

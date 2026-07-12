@@ -184,36 +184,53 @@ def _bin_track(track: pd.DataFrame, bins_per_ref: int = 160) -> list[dict]:
     return rows
 
 
-def genome_track_spec(track: pd.DataFrame | None) -> dict | None:
-    """Whole-genome gDNA density overview — a binned area, faceted per reference."""
+def genome_track_spec(track: pd.DataFrame | None, top_n: int = 24) -> dict | None:
+    """Per-reference gDNA-density track for the top references by gDNA mass.
+
+    References are ranked by total gDNA mass (data-driven, organism-agnostic — no
+    name-based filtering) and only the top ``top_n`` are faceted, so hundreds of
+    small alt/haplotype contigs don't flood the panel (the full list is in the
+    reference table). The y-axis is **log** and **independent per facet**, so a
+    high-density outlier like chrM cannot flatten the other references' scales.
+    """
     if track is None or track.empty:
         return None
-    rows = _bin_track(track)
+    mass = track.groupby("ref", observed=True)["gdna_mass"].sum().sort_values(ascending=False)
+    top = [str(r) for r in mass.index[:top_n]]
+    sub = track[track["ref"].astype(str).isin(top)]
+    # log axis needs strictly positive density
+    rows = [r for r in _bin_track(sub) if r["density"] > 0]
     if not rows:
         return None
-    n_refs = len({r["ref"] for r in rows})
+    n_shown = len({r["ref"] for r in rows})
     return {
         "$schema": _SCHEMA,
         "data": {"values": rows},
-        "columns": 1 if n_refs <= 3 else 2,
+        "columns": 1 if n_shown <= 3 else 2,
         "facet": {
             "field": "ref",
             "type": "nominal",
             "title": None,
+            "sort": top,  # biggest-mass references first
             "header": {"labelAnchor": "start", "labelFontWeight": "bold"},
         },
         "spec": {
             "width": "container",
-            "height": 60,
+            "height": 58,
             "mark": {
-                "type": "area",
-                "line": {"strokeWidth": 1},
-                "opacity": 0.5,
+                "type": "line",
+                "strokeWidth": 1.5,
                 "interpolate": "monotone",
+                "point": {"size": 6, "filled": True},
             },
             "encoding": {
                 "x": {"field": "pos_mb", "type": "quantitative", "title": "position (Mb)"},
-                "y": {"field": "density", "type": "quantitative", "title": "gDNA density"},
+                "y": {
+                    "field": "density",
+                    "type": "quantitative",
+                    "title": "gDNA density (log)",
+                    "scale": {"type": "log"},
+                },
                 "tooltip": [
                     {"field": "ref", "title": "ref"},
                     {"field": "pos_mb", "title": "position (Mb)"},
@@ -221,7 +238,8 @@ def genome_track_spec(track: pd.DataFrame | None) -> dict | None:
                 ],
             },
         },
-        "resolve": {"scale": {"x": "independent"}},
+        # Independent scales per facet — no reference (e.g. chrM) blows out another.
+        "resolve": {"scale": {"x": "independent", "y": "independent"}},
     }
 
 

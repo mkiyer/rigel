@@ -401,7 +401,48 @@ def _calibration(sub: ReportSubstrate, capture: dict | None = None) -> dict:
         kpis.append(
             {"l": "On-target mass", "v": capture.get("mass_frac_ontarget", 0), "fmt": "pct"}
         )
-    return {"kpis": kpis, "has_track": has_track, "capture": capture}
+    ref_table = _reference_table(track) if has_track else []
+    return {
+        "kpis": kpis,
+        "has_track": has_track,
+        "capture": capture,
+        "ref_table": ref_table,
+        "n_refs": len(ref_table),
+    }
+
+
+def _reference_table(track) -> list:
+    """Per-reference gDNA summary (all references), sorted by gDNA mass desc.
+
+    Rows: ``[ref, n_regions, gdna_mass, mean_density, gdna_frac]``. This is the
+    complete, compact view of every reference — the track chart only facets the
+    top few by mass, so users never sift through hundreds of panels.
+
+    ``mean_density`` is the reference-wide gDNA mass per bp (Σ gDNA mass / Σ region
+    length) — NOT a median. On most references the median per-region density is 0
+    (most regions carry no gDNA), which is a useless column; the mass-per-bp
+    average discriminates references and is what "density" means at this scale.
+    """
+    length = (track["end"] - track["start"]).clip(lower=1)
+    agg = track.assign(_len=length).groupby("ref", observed=True).agg(
+        n_regions=("start", "size"),
+        gdna_mass=("gdna_mass", "sum"),
+        rna_mass=("rna_mass", "sum"),
+        len_bp=("_len", "sum"),
+    )
+    agg["mean_density"] = (agg["gdna_mass"] / agg["len_bp"]).fillna(0.0)
+    agg["gdna_frac"] = (agg["gdna_mass"] / (agg["gdna_mass"] + agg["rna_mass"])).fillna(0.0)
+    agg = agg.sort_values("gdna_mass", ascending=False)
+    return [
+        [
+            str(ref),
+            int(v["n_regions"]),
+            round(float(v["gdna_mass"]), 1),
+            float(v["mean_density"]),
+            round(float(v["gdna_frac"]), 4),
+        ]
+        for ref, v in agg.iterrows()
+    ]
 
 
 def _config(summary: dict) -> dict:

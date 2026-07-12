@@ -343,6 +343,31 @@
     }
   }
 
+  /* ---------- reference table (all references, by gDNA mass) ---------- */
+  function refTable(filter) {
+    const c = M.calibration || {};
+    const all = c.ref_table || [];  // [ref, n_regions, gdna_mass, median_density, gdna_frac]
+    const q = (filter || "").toLowerCase();
+    const rows = []; let shown = 0;
+    for (const r of all) {
+      if (q && !String(r[0]).toLowerCase().includes(q)) continue;
+      shown++;
+      const tr = H("tr");
+      tr.appendChild(H("td", null, `<span class="num">${r[0]}</span>`));
+      tr.appendChild(H("td", "n num", grp(r[1])));
+      tr.appendChild(H("td", "n num", si(r[2])));
+      tr.appendChild(H("td", "n num", Number(r[3]).toExponential(2)));
+      tr.appendChild(H("td", "n num", pc(r[4])));
+      rows.push(tr);
+    }
+    fillTable($("ref-table"),
+      `<th>Reference</th><th class="n">regions</th><th class="n">gDNA mass</th><th class="n">gDNA/bp</th><th class="n">gDNA frac</th>`,
+      rows);
+    const rc = $("rcount"); if (rc) rc.textContent = `${grp(shown)} shown · ${grp(all.length)} references`;
+    const cap = $("genome-cap");
+    if (cap) cap.textContent = `gDNA density across the genome — top ${Math.min(24, all.length)} of ${grp(all.length)} references by gDNA mass`;
+  }
+
   /* ---------- scroll spy ---------- */
   function spy() {
     const links = [...document.querySelectorAll(".rail a")];
@@ -370,7 +395,10 @@
     flTable();
     stackBar($("pool-bar"), M.quant.pools); legend($("pool-legend"), M.quant.pools, true); poolTable();
     kpis($("pool-kpis"), M.quant.kpis); donut($("pool-donut"), M.quant.pools, M.quant.rna_share);
-    if (M.calibration) { kpis($("calib-kpis"), M.calibration.kpis); captureNote(); }
+    if (M.calibration) {
+      kpis($("calib-kpis"), M.calibration.kpis); captureNote(); refTable("");
+      const rs = $("rsearch"); if (rs) rs.addEventListener("input", (e) => refTable(e.target.value));
+    }
     geneTable("");
     const gs = $("gsearch"); if (gs) gs.addEventListener("input", (e) => geneTable(e.target.value));
     config();

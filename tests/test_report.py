@@ -21,7 +21,7 @@ import numpy as np
 from rigel.calibration.diagnostics import CalibrationDiagnostics
 from rigel.report.build import build_report
 from rigel.report.capture import capture_kde_from_track
-from rigel.report.model import build_view_model
+from rigel.report.model import _reference_table, build_view_model
 from rigel.report.specs import build_charts, build_fl_specs, capture_kde_spec, genome_track_spec
 from rigel.report.substrate import SubstrateError, load_substrate
 
@@ -197,7 +197,7 @@ def test_genome_track_spec_bins_per_ref():
             "ref": pd.Categorical(["chr1"] * 4 + ["chr2"] * 2),
             "start": [0, 1000, 2000, 3000, 0, 5000],
             "end": [1000, 2000, 3000, 4000, 5000, 10000],
-            "gdna_mass": [1.0, 8.0, 2.0, 1.0, 3.0, 9.0],
+            "gdna_mass": [1.0, 8.0, 2.0, 1.0, 30.0, 90.0],  # chr1 sum 12, chr2 sum 120
             "rna_mass": [9.0, 2.0, 8.0, 9.0, 7.0, 1.0],
             "gdna_density": [0.01, 0.09, 0.02, 0.01, 0.03, 0.10],
             "gdna_frac": [0.1, 0.8, 0.2, 0.1, 0.3, 0.9],
@@ -207,6 +207,16 @@ def test_genome_track_spec_bins_per_ref():
     assert spec is not None
     refs = {row["ref"] for row in spec["data"]["values"]}
     assert refs == {"chr1", "chr2"}
+    # log + independent y per facet (so a high-density ref can't flatten others)
+    assert spec["spec"]["encoding"]["y"]["scale"]["type"] == "log"
+    assert spec["resolve"]["scale"]["y"] == "independent"
+    # top-N ranks by gDNA mass; chr2 (120) outranks chr1 (12)
+    top1 = genome_track_spec(track, top_n=1)
+    assert {row["ref"] for row in top1["data"]["values"]} == {"chr2"}
+    # reference table: every reference, sorted by gDNA mass desc
+    rt = _reference_table(track)
+    assert [r[0] for r in rt] == ["chr2", "chr1"]
+    assert rt[0][1] == 2  # chr2 n_regions
     # build_charts merges genome in when a track is present
     stub = SimpleNamespace(
         fragment_lengths=None,
