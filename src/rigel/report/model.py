@@ -219,12 +219,19 @@ def _fragments(summary: dict) -> dict:
         {"l": "Chimeric", "v": _pct(chim, total), "fmt": "pct"},
         {"l": "Spliced", "v": spliced, "fmt": "count"},
     ]
+    # Blacklist provenance so a 0-artifact bar can be read correctly:
+    #   size is None    → index predates the field (unknown)
+    #   loaded is False  → no blacklist in the index; detection is OFF
+    #   loaded is True   → detection ON; `size` junctions active
+    bl_size = sp.get("sj_blacklist_size")
+    bl_loaded = sp.get("sj_blacklist_loaded")
     return {
         "kpis": kpis,
         "ctx": ctx,
         "chim": chim_bar,
         "splice": splice_bar,
         "blacklisted": sp.get("sj_blacklisted", 0),
+        "blacklist": {"size": bl_size, "loaded": bl_loaded},
     }
 
 

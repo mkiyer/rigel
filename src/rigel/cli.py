@@ -373,6 +373,9 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     def _splice_n(stype) -> int:
         return int(_cat_models[stype].n_observations)
 
+    # Blacklist provenance: distinguishes "detection off (no blacklist in the
+    # index)" from "detection on, 0 artifacts found". None on pre-field indexes.
+    _bl_size = getattr(index, "sj_blacklist_size", None)
     splice_counts = {
         "unspliced": _splice_n(SpliceType.UNSPLICED),
         "spliced_annotated": _splice_n(SpliceType.SPLICED_ANNOT),
@@ -380,6 +383,8 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
         "spliced_implicit": _splice_n(SpliceType.SPLICED_IMPLICIT),
         "splice_artifact": _splice_n(SpliceType.SPLICE_ARTIFACT),
         "sj_blacklisted": int(stats.n_sj_blacklisted),
+        "sj_blacklist_size": None if _bl_size is None else int(_bl_size),
+        "sj_blacklist_loaded": bool(_bl_size) if _bl_size is not None else None,
     }
 
     # Calibration section — minimal library-scalar observability (the v5 per-region dict stays

@@ -793,6 +793,12 @@ class TranscriptIndex:
         # Splice-junction exact-match map  (ref, start, end, strand) → frozenset[int]
         self.sj_map: dict | None = None
 
+        # Splice-artifact blacklist size, set at load():
+        #   None → index predates the field / never loaded
+        #   0    → no blacklist present (artifact detection is OFF)
+        #   >0   → number of blacklisted junctions active (detection is ON)
+        self.sj_blacklist_size: int | None = None
+
         # Per-transcript exon intervals for coverage-weight model.
         # Maps t_index → (n_exons, 2) int32 array of [start, end) intervals
         # sorted by genomic start position.
@@ -1451,7 +1457,11 @@ class TranscriptIndex:
                 bl_df["max_anchor_left"].astype(np.int32).tolist(),
                 bl_df["max_anchor_right"].astype(np.int32).tolist(),
             )
+            self.sj_blacklist_size = int(len(bl_df))
             logger.info(f"Splice artifact blacklist: {len(bl_df):,} junctions active")
+        else:
+            # No blacklist file → artifact detection is off for this index.
+            self.sj_blacklist_size = 0
 
         # 3. Per-transcript exon CSR for transcript-space FL computation.
         #    build_exon_csr() is the single owner of this CSR (it is also
@@ -1461,9 +1471,7 @@ class TranscriptIndex:
         #    ``_t_exon_intervals`` (unless retain_test_structures); the dict
         #    is no longer needed after this point (get_exon_intervals()
         #    falls back to the cached CSR arrays).
-        exon_offsets, exon_starts_flat, exon_ends_flat, exon_cumsum_flat = (
-            self.build_exon_csr()
-        )
+        exon_offsets, exon_starts_flat, exon_ends_flat, exon_cumsum_flat = self.build_exon_csr()
         # Per-transcript spliced length = sum of exon lengths, derived from
         # the same CSR: cumulative segment lengths differenced at the CSR
         # offsets (int64 accumulation, empty groups → 0).
@@ -1652,4 +1660,3 @@ class TranscriptIndex:
         self._exon_csr_cache = result
 
         return result
-

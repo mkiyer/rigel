@@ -104,6 +104,7 @@ _SECTIONS = """
           <div>
             <p class="cap">Splice junctions · by class</p>
             <div class="stackbar" id="sj-bar"></div><div class="legend" id="sj-legend"></div>
+            <div class="note" id="sj-note" style="margin-top:14px"></div>
           </div>
         </div>
       </div>

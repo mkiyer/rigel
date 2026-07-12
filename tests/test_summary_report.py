@@ -141,7 +141,7 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     for d in fl.values():
         assert "histogram" not in d
 
-    # splice breakdown surfaces implicit / artifact / blacklist
+    # splice breakdown surfaces implicit / artifact / blacklist + provenance
     splice = summary["fragment_stats"]["splice"]
     assert set(splice) == {
         "unspliced",
@@ -150,7 +150,12 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
         "spliced_implicit",
         "splice_artifact",
         "sj_blacklisted",
+        "sj_blacklist_size",
+        "sj_blacklist_loaded",
     }
+    # This fixture builds its index without a blacklist → detection off.
+    assert splice["sj_blacklist_loaded"] is False
+    assert splice["sj_blacklist_size"] == 0
 
     # strand contamination diagnostic present
     diag = summary["strand_model"]["diagnostics"]

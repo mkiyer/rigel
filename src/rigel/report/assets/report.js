@@ -445,6 +445,19 @@
     stackBar($("ctx-bar"), M.fragments.ctx); legend($("ctx-legend"), M.fragments.ctx, true);
     stackBar($("chim-bar"), M.fragments.chim); legend($("chim-legend"), M.fragments.chim, true);
     stackBar($("sj-bar"), M.fragments.splice); legend($("sj-legend"), M.fragments.splice, true);
+    if ($("sj-note")) {
+      const bl = M.fragments.blacklist || {}, art = (M.fragments.splice.find(s => s.label === "Artifact") || {}).value || 0;
+      let msg;
+      if (bl.loaded === true)
+        msg = `<b>Splice-artifact detection: on</b> — <span class="num">${fmtValue(bl.size, "count")}</span> blacklisted junctions active. ` +
+              `<span class="num">${fmtValue(art, "count")}</span> fragments flagged as artifacts and held out of quantification.`;
+      else if (bl.loaded === false)
+        msg = `<b>Splice-artifact detection: off</b> — no artifact blacklist in this index, so the <span class="num">Artifact</span> class reads 0 by construction, not by measurement. ` +
+              `Rebuild the index with <span class="num">--alignable-zarr</span> to enable detection.`;
+      else
+        msg = `<b>Splice-artifact detection: unknown</b> — this run predates blacklist provenance tracking.`;
+      $("sj-note").innerHTML = msg;
+    }
     gauge($("gauge"), M.strand.spec); kpis($("strand-kpis"), M.strand.kpis); orient($("orient"), M.strand.read1_sense);
     if ($("strand-note")) {
       const g = M.strand.contamination_gap, ex = M.strand.exonic_all_spec;
