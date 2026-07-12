@@ -287,6 +287,10 @@
   function embedAll() {
     const hasVega = typeof window.vegaEmbed === "function";
     const opts = { config: themeConfig(), renderer: "svg", actions: { export: true, source: true, compiled: false, editor: false } };
+    // Use Vega's CSP-safe expression interpreter (no eval / new Function) when
+    // available, so charts render under strict Content-Security-Policy sandboxes
+    // (shared Artifacts, VS Code webviews, notebooks) as well as a local file.
+    if (window.vega && window.vega.expressionInterpreter) opts.expr = window.vega.expressionInterpreter;
     // Every .vega-chart container is named vega-<key>; embed CHARTS[key] or show why not.
     document.querySelectorAll(".vega-chart").forEach((node) => {
       const key = node.id.replace(/^vega-/, "");
