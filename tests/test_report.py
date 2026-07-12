@@ -266,8 +266,9 @@ def test_capture_kde_from_track_mass_weighting_recovers_enrichment():
     cap = capture_kde_from_track(track)
     assert cap is not None
     assert cap["enriched"] is True
-    assert cap["enriched_mode_log_rho"] > cap["background_mode_log_rho"]
-    assert cap["separation_nats"] > 3.0
+    assert cap["enriched_mode_log_rho"] > cap["count_median_log_rho"]
+    assert cap["separation_median_nats"] > 3.0
+    assert cap["fold_vs_median"] > 3.0
     assert 0.0 < cap["mass_frac_ontarget"] <= 1.0
     # spec renders as an overlay (curve + mode rule + mode text)
     spec = capture_kde_spec(cap)

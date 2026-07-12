@@ -305,19 +305,18 @@
     const n = $("capture-note"); if (!n) return;
     const c = M.calibration && M.calibration.capture;
     if (!c) { n.innerHTML = "No gDNA track for this run — capture diagnostic unavailable."; return; }
-    const nodes = `<span style="color:var(--muted)">${grp(c.n_nodes)} nodes with gDNA signal.</span>`;
+    const nodes = `<span style="color:var(--muted)">${grp(c.n_nodes)} nodes with gDNA signal · KDE bandwidth factor ${(c.kde_bandwidth_factor ?? 0).toFixed(2)}.</span>`;
     if (c.enriched) {
-      const mf = c.mass_frac_ontarget != null
-        ? ` <span class="num">${(c.mass_frac_ontarget * 100).toFixed(1)}%</span> of the gDNA mass sits in that on-target mode` : "";
-      n.innerHTML = `<b>Capture enrichment detected.</b> Weighting each region by its gDNA <i>mass</i> ` +
-        `(not by region count) reveals a high-density on-target mode ` +
-        `<span class="num">${(c.separation_nats ?? 0).toFixed(1)} nats</span> (~<span class="num">${fold(c.enrichment_factor ?? 1)}</span> fold) ` +
-        `above background${mf} — a small minority of regions carrying the captured material, which the ` +
-        `by-count curve cannot see. ${nodes}`;
+      n.innerHTML = `Weighting each region by its gDNA <i>mass</i> (not by region count) surfaces a high-density ` +
+        `<b>on-target mode</b> the by-count curve cannot see. Enrichment of the on-target mode vs the ` +
+        `median region: <span class="num">${fold(c.fold_vs_median ?? 1)}</span>; peak-to-peak (vs the ` +
+        `depleted mode, which GC/mappability can depress): <span class="num">${fold(c.fold_peak_to_peak ?? 1)}</span>. ` +
+        `<span class="num">${((c.mass_frac_ontarget ?? 0) * 100).toFixed(1)}%</span> of the gDNA mass lies on-target ` +
+        `(mass above the median→mode midpoint). Descriptive only — enrichment magnitude is not yet interpreted as ` +
+        `pass/fail, and small panels + bandwidth can raise small modes. ${nodes}`;
     } else {
-      n.innerHTML = `<b>No distinct on-target mode.</b> Even mass-weighted, the gDNA density has no high-density ` +
-        `shoulder above background — consistent with a non-capture (whole-transcriptome) library or ` +
-        `unsuccessful enrichment. ${nodes}`;
+      n.innerHTML = `<b>No on-target mode above the median.</b> Even mass-weighted, the gDNA density shows no ` +
+        `high-density mode — consistent with a non-capture library or weak/failed enrichment. ${nodes}`;
     }
   }
 

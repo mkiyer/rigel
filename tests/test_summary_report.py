@@ -192,12 +192,14 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
         cap = summary["calibration"]["capture"]
         assert {
             "n_nodes",
+            "enriched",
+            "count_median_log_rho",
             "background_mode_log_rho",
             "enriched_mode_log_rho",
-            "separation_nats",
-            "enrichment_factor",
-            "enriched",
+            "fold_peak_to_peak",
+            "fold_vs_median",
             "mass_frac_ontarget",
+            "kde_bandwidth_factor",
         } <= set(cap)
 
     # The prior's own equal-weight KDE is still persisted for provenance.

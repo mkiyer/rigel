@@ -286,7 +286,9 @@ def capture_kde_spec(capture: dict | None) -> dict | None:
 
     marks = []
     if capture.get("background_mode_log_rho") is not None:
-        marks.append({"log_rho": capture["background_mode_log_rho"], "label": "background"})
+        marks.append({"log_rho": capture["background_mode_log_rho"], "label": "background mode"})
+    if capture.get("count_median_log_rho") is not None:
+        marks.append({"log_rho": capture["count_median_log_rho"], "label": "median"})
     if capture.get("enriched") and capture.get("enriched_mode_log_rho") is not None:
         marks.append({"log_rho": capture["enriched_mode_log_rho"], "label": "on-target"})
     if marks:

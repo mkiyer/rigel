@@ -102,8 +102,13 @@ def capture_summary(track: pd.DataFrame | None, *, with_curve: bool = False) -> 
         return None
 
     background_mode = float(grid[int(np.argmax(y_count))])
+    count_median = float(np.median(log_rho))
     # Enriched mode = highest-x local maximum of the mass-weighted KDE that sits
-    # clearly above background; falls back to background (no enrichment).
+    # clearly above the median density; falls back to no enrichment. NOTE the
+    # enriched mode (not the depleted mode) is the robust target — GC / mappability
+    # depress the depleted mode artificially, and small panels + KDE bandwidth can
+    # manufacture small modes, so we also report the bandwidth + on-target mass so
+    # the modes can be judged rather than trusted blindly.
     peak = float(y_mass.max())
     hi_modes = [
         float(grid[i])
@@ -111,21 +116,31 @@ def capture_summary(track: pd.DataFrame | None, *, with_curve: bool = False) -> 
         if y_mass[i] > y_mass[i - 1]
         and y_mass[i] >= y_mass[i + 1]
         and y_mass[i] > 0.02 * peak
-        and grid[i] > background_mode + _CAPTURE_ENRICHED_NATS
+        and grid[i] > count_median + _CAPTURE_ENRICHED_NATS
     ]
-    enriched_mode = max(hi_modes) if hi_modes else background_mode
-    separation = enriched_mode - background_mode
-    midpoint = (background_mode + enriched_mode) / 2.0
-    mass_frac_ontarget = float(w[log_rho >= midpoint].sum() / w.sum()) if hi_modes else 0.0
+    enriched = bool(hi_modes)
+    enriched_mode = max(hi_modes) if enriched else count_median
+
+    # Two fold references (peak-to-peak uses the fragile depleted mode; vs-median
+    # uses the robust median). On-target mass fraction uses the median→enriched
+    # midpoint as the valley threshold (median is the robust low reference).
+    sep_peak = enriched_mode - background_mode
+    sep_median = enriched_mode - count_median
+    midpoint = (count_median + enriched_mode) / 2.0
+    mass_frac_ontarget = float(w[log_rho >= midpoint].sum() / w.sum()) if enriched else 0.0
 
     out = {
         "n_nodes": int(keep.sum()),
+        "enriched": enriched,
+        "count_median_log_rho": round(count_median, 4),
         "background_mode_log_rho": round(background_mode, 4),
         "enriched_mode_log_rho": round(enriched_mode, 4),
-        "separation_nats": round(separation, 4),
-        "enrichment_factor": round(float(np.exp(separation)), 2),
+        "fold_peak_to_peak": round(float(np.exp(sep_peak)), 2),
+        "fold_vs_median": round(float(np.exp(sep_median)), 2),
+        "separation_peak_nats": round(sep_peak, 4),
+        "separation_median_nats": round(sep_median, 4),
         "mass_frac_ontarget": round(mass_frac_ontarget, 4),
-        "enriched": bool(hi_modes and separation > _CAPTURE_ENRICHED_NATS),
+        "kde_bandwidth_factor": round(float(gaussian_kde(log_rho).factor), 4),
     }
     if with_curve:
         cmax = float(y_count.max()) or 1.0

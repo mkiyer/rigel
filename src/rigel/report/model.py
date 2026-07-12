@@ -90,18 +90,19 @@ def _verdicts(summary: dict, capture: dict | None = None) -> list[dict]:
         }
     )
 
-    # Capture enrichment — descriptive, from the gDNA-MASS-weighted density KDE
-    # (equal-weight is blind to the few on-target regions). No pass/fail verdict.
+    # Capture enrichment — descriptive only. Variable capture performance is
+    # expected and we do not interpret an enriched mode as good/bad; the tile
+    # leads with the robust enriched-vs-median fold, the Calibration panel has the
+    # full metric set. Styled neutral ("info").
     if capture:
         if capture.get("enriched"):
-            n = f"peak-to-peak; {capture.get('mass_frac_ontarget', 0) * 100:.0f}% of gDNA mass on-target"
             out.append(
                 {
                     "k": "Capture enrichment",
                     "icon": "target",
-                    "v": _fold(capture.get("enrichment_factor", 1.0)),
-                    "s": "good",
-                    "n": n,
+                    "v": _fold(capture.get("fold_vs_median", 1.0)),
+                    "s": "info",
+                    "n": f"on-target mode vs median; {capture.get('mass_frac_ontarget', 0) * 100:.0f}% of gDNA mass on-target",
                 }
             )
         else:
@@ -111,7 +112,7 @@ def _verdicts(summary: dict, capture: dict | None = None) -> list[dict]:
                     "icon": "target",
                     "v": "None",
                     "s": "info",
-                    "n": "no distinct on-target gDNA density mode",
+                    "n": "no on-target gDNA density mode above the median",
                 }
             )
     return out
@@ -390,7 +391,8 @@ def _calibration(sub: ReportSubstrate, capture: dict | None = None) -> dict:
         kpis.append({"l": "Mean gDNA frac", "v": f"{float(gf.mean()) * 100:.1f}", "u": "%"})
         kpis.append({"l": "Regions >50% gDNA", "v": _si(int((gf > 0.5).sum()))})
     if capture and capture.get("enriched"):
-        kpis.append({"l": "Enrichment", "v": _fold(capture.get("enrichment_factor", 1.0))})
+        kpis.append({"l": "Enr. vs median", "v": _fold(capture.get("fold_vs_median", 1.0))})
+        kpis.append({"l": "Peak-to-peak", "v": _fold(capture.get("fold_peak_to_peak", 1.0))})
         kpis.append(
             {
                 "l": "On-target mass",
