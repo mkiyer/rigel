@@ -1,3 +1,3 @@
-gene_id	gene_name	n_transcripts	locus_id	effective_length	count	count_unambig	count_em	count_spliced	tpm
-g1	g1	1	0	501.684354986276	800.7082673220485	0.0	800.7082673220485	0.0	763160.1582948603
-g_h	g_h	1	1	401.68435498627605	198.96090353219807	93.0	105.96090353219809	93.0	236839.84170513967
+gene_id	gene_name	gene_type	ref	strand	start	end	n_transcripts	locus_id	effective_length	count	mature_count	nascent_count	count_unambig	count_em	count_spliced	tpm
+g1	g1	protein_coding	golden_1e	+	500	1200	1	0	501.684354986276	800.7082673220485	0.0	800.7082673220485	0.0	800.7082673220485	0.0	763160.1582948603
+g_h	g_h	protein_coding	golden_1e	-	3000	4000	1	1	401.68435498627605	198.96090353219807	198.96090353219807	0.0	93.0	105.96090353219809	93.0	236839.84170513967

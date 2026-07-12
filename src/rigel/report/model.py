@@ -23,7 +23,8 @@ def _pct(numer: float, denom: float) -> float:
 
 
 def _verdicts(summary: dict) -> list[dict]:
-    """Headline QC calls derivable from v1 substrate (capture verdict is Phase 2)."""
+    """Headline QC tiles: mapping, strandedness, gDNA, usable fragments, + capture
+    enrichment (descriptive ratio) when the gDNA-density KDE was fit."""
     out: list[dict] = []
     aln = summary.get("alignment_stats", {})
     frag = summary.get("fragment_stats", {})
@@ -82,12 +83,37 @@ def _verdicts(summary: dict) -> list[dict]:
     out.append(
         {
             "k": "Usable fragments",
-            "icon": "target",
+            "icon": "check",
             "v": _si(genic),
             "s": "good" if grate >= 0.6 else "warning",
             "n": f"{grate * 100:.1f}% genic of {_si(ftot)}",
         }
     )
+
+    # Capture enrichment — descriptive (the enrichment ratio between the gDNA
+    # density modes), no pass/fail verdict. Only when the KDE was fit.
+    cap = (summary.get("calibration") or {}).get("capture")
+    if cap:
+        if cap.get("is_bimodal"):
+            out.append(
+                {
+                    "k": "Capture enrichment",
+                    "icon": "target",
+                    "v": f"{cap.get('enrichment_factor', 0):.0f}×",
+                    "s": "good",
+                    "n": f"on- vs off-target gDNA ({cap.get('separation_nats', 0):.1f} nats)",
+                }
+            )
+        else:
+            out.append(
+                {
+                    "k": "Capture enrichment",
+                    "icon": "target",
+                    "v": "None",
+                    "s": "info",
+                    "n": "unimodal gDNA density — no enrichment detected",
+                }
+            )
     return out
 
 
@@ -289,12 +315,19 @@ def _genes(sub: ReportSubstrate, max_rows: int = 20000) -> dict:
     gq = sub.gene_quant
     if gq is None or gq.empty:
         return {"rows": [], "total": 0, "shown": 0, "truncated": False}
-    cols = [
-        c
-        for c in ["gene_name", "gene_id", "count", "count_spliced", "tpm", "n_transcripts"]
-        if c in gq.columns
+    want = [
+        "gene_name",
+        "gene_id",
+        "gene_type",
+        "ref",
+        "strand",
+        "tpm",
+        "count",
+        "mature_count",
+        "nascent_count",
+        "n_transcripts",
     ]
-    df = gq[cols].copy()
+    df = gq[[c for c in want if c in gq.columns]].copy()
     # Embed only expressed genes for lookup; the long tail of zero-count genes
     # stays in gene_quant.feather. Cap the embed to keep the HTML a sane size.
     if "count" in df.columns:
@@ -310,9 +343,12 @@ def _genes(sub: ReportSubstrate, max_rows: int = 20000) -> dict:
             [
                 str(r.get("gene_name", "")),
                 str(r.get("gene_id", "")),
-                round(float(r.get("count", 0)), 1),
-                round(float(r.get("count_spliced", 0)), 1),
+                str(r.get("gene_type", "")),
+                str(r.get("ref", "")),
+                str(r.get("strand", "")),
                 round(float(r.get("tpm", 0)), 2),
+                round(float(r.get("mature_count", 0)), 1),
+                round(float(r.get("nascent_count", 0)), 1),
                 int(r.get("n_transcripts", 0)),
             ]
         )

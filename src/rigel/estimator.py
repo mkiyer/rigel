@@ -80,6 +80,15 @@ def _gene_locus_ids(
     return g_locus_id
 
 
+#: Strand code (rigel.types.Strand: NONE=0, POS=1, NEG=2, AMBIGUOUS=3) → display glyph.
+_STRAND_STR = np.array([".", "+", "-", "."])
+
+
+def _strand_glyph(strand_codes: np.ndarray) -> np.ndarray:
+    """Map an int strand-code array to ``+`` / ``-`` / ``.`` glyphs."""
+    return _STRAND_STR[np.clip(np.asarray(strand_codes), 0, 3)]
+
+
 def _tpm(
     counts: np.ndarray, eff_len: np.ndarray, denom_counts: np.ndarray | None = None
 ) -> np.ndarray:
@@ -468,7 +477,8 @@ class AbundanceEstimator:
 
         Columns
         -------
-        transcript_id, gene_id, gene_name : identifiers
+        transcript_id, gene_id, gene_name, gene_type : identifiers + biotype
+        ref, strand, start, end, length : genomic locus + spliced length
         effective_length : bias-corrected effective length
         em_effective_length : FL-marginal effective length used by the EM
         locus_id : int32, EM locus (-1 if no locus)
@@ -531,6 +541,12 @@ class AbundanceEstimator:
                 "transcript_id": t_ids,
                 "gene_id": index.t_df["g_id"].values,
                 "gene_name": index.t_df["g_name"].values,
+                "gene_type": index.t_df["g_type"].values,
+                "ref": index.t_df["ref"].values,
+                "strand": _strand_glyph(index.t_df["strand"].to_numpy()),
+                "start": index.t_df["start"].values,
+                "end": index.t_df["end"].values,
+                "length": index.t_df["length"].values,
                 "effective_length": eff,
                 "em_effective_length": em_eff,
                 "locus_id": self.locus_id_per_transcript,
@@ -558,16 +574,21 @@ class AbundanceEstimator:
         """Primary gene-level abundance estimates.
 
         Gene counts sum annotated (non-synthetic) transcript counts only.
-        No nRNA computation — the gene-to-nRNA relationship is many-to-many
-        and is not resolved here.
+        ``mature_count`` / ``nascent_count`` split those over the gene's
+        multi-exon vs single-exon (``is_nrna``) annotated transcripts
+        (``count == mature_count + nascent_count``). Synthetic nRNA spans are
+        gene-neutral (many-to-many) and are reported per-entity in ``nrna_quant``,
+        not attributed to genes here.
 
         Columns
         -------
-        gene_id, gene_name : identifiers
+        gene_id, gene_name, gene_type : identifiers + biotype
+        ref, strand, start, end : genomic locus
         n_transcripts : int, number of annotated transcripts
         locus_id : int32, primary EM locus for this gene (-1 if none)
         effective_length : abundance-weighted mean effective length
         count : sum of annotated transcript counts
+        mature_count, nascent_count : annotated mature / nascent split
         count_unambig : uniquely-assigned count
         count_em : EM-assigned count
         count_spliced : spliced fragment count
@@ -584,6 +605,19 @@ class AbundanceEstimator:
 
         t_counts_all = total.sum(axis=1)
         count = _aggregate_to_gene(t_to_g, n_genes, t_counts_all * annotated_mask)
+
+        # Mature vs nascent split over the gene's ANNOTATED transcripts:
+        # single-exon annotated transcripts (is_nrna) are the nascent side, the
+        # rest mature. count == mature_count + nascent_count. Synthetic nRNA spans
+        # are gene-neutral (many-to-many) and are NOT attributed here — that mass
+        # lives in nrna_quant.
+        is_nrna_f = index.t_df["is_nrna"].to_numpy().astype(np.float64)
+        mature_count = _aggregate_to_gene(
+            t_to_g, n_genes, t_counts_all * annotated_mask * (1.0 - is_nrna_f)
+        )
+        nascent_count = _aggregate_to_gene(
+            t_to_g, n_genes, t_counts_all * annotated_mask * is_nrna_f
+        )
 
         g_unambig = _aggregate_to_gene(t_to_g, n_genes, unique)
         count_unambig = g_unambig.sum(axis=1)
@@ -626,20 +660,39 @@ class AbundanceEstimator:
         count_unambig = count_unambig[annotated_gene_mask]
         count_em = count_em[annotated_gene_mask]
         count_spliced = count_spliced[annotated_gene_mask]
+        mature_count = mature_count[annotated_gene_mask]
+        nascent_count = nascent_count[annotated_gene_mask]
         g_eff_len = g_eff_len[annotated_gene_mask]
         g_locus_id = g_locus_id[annotated_gene_mask]
         n_annotated = n_annotated[annotated_gene_mask]
 
         tpm = _tpm(count, g_eff_len)
 
+        # Per-gene biotype (g_df carries no g_type): first g_type per gene, keyed
+        # by the transcript→gene map (t_to_g), which the real + mock indexes share.
+        g_type = (
+            pd.Series(index.t_df["g_type"].to_numpy())
+            .groupby(np.asarray(t_to_g))
+            .first()
+            .reindex(range(n_genes))
+            .to_numpy()
+        )[annotated_gene_mask]
+
         df = pd.DataFrame(
             {
                 "gene_id": index.g_df["g_id"].values[annotated_gene_mask],
                 "gene_name": index.g_df["g_name"].values[annotated_gene_mask],
+                "gene_type": g_type,
+                "ref": index.g_df["ref"].values[annotated_gene_mask],
+                "strand": _strand_glyph(index.g_df["strand"].to_numpy()[annotated_gene_mask]),
+                "start": index.g_df["start"].values[annotated_gene_mask],
+                "end": index.g_df["end"].values[annotated_gene_mask],
                 "n_transcripts": n_annotated,
                 "locus_id": g_locus_id,
                 "effective_length": g_eff_len,
                 "count": count,
+                "mature_count": mature_count,
+                "nascent_count": nascent_count,
                 "count_unambig": count_unambig,
                 "count_em": count_em,
                 "count_spliced": count_spliced,

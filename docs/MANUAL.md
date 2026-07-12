@@ -380,7 +380,10 @@ transcripts are included; synthetic nRNA spans appear in `nrna_quant`.
 ### gene_quant.feather / gene_quant.tsv
 
 Gene-level abundance aggregated from annotated (non-synthetic) transcripts.
-No nRNA attribution is performed at the gene level.
+`mature_count` / `nascent_count` split that over the gene's multi-exon vs
+single-exon (`is_nrna`) annotated transcripts (`count = mature_count +
+nascent_count`). Synthetic nRNA spans are gene-neutral (many-to-many) and are
+reported per-entity in `nrna_quant`, not attributed to genes here.
 
 | Column | Description |
 |--------|-------------|
@@ -392,6 +395,8 @@ No nRNA attribution is performed at the gene level.
 | `locus_id` | Primary locus assigned to the gene |
 | `effective_length` | Abundance-weighted mean effective transcript length |
 | `count` | Total fragment count (sum of annotated transcript counts) |
+| `mature_count` | Count over multi-exon annotated transcripts |
+| `nascent_count` | Count over single-exon (`is_nrna`) annotated transcripts |
 | `count_unambig` | Deterministic fragment count |
 | `count_em` | EM-assigned fragment count |
 | `count_spliced` | Spliced fragment count |

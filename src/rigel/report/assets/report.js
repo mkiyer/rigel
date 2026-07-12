@@ -169,23 +169,27 @@
     fillTable($("pool-table"), `<th>Pool</th><th class="n">Fragments</th><th class="n">Share</th><th>Origin</th>`, rows);
   }
   function geneTable(filter) {
+    // rows: [name, id, type, ref, strand, tpm, mature, nascent, n_tx]
     const q = (filter || "").toLowerCase();
     const all = M.genes.rows || [];
     const rows = [];
     let shown = 0;
     for (const g of all) {
-      if (q && !(String(g[0]).toLowerCase().includes(q) || String(g[1]).toLowerCase().includes(q))) continue;
+      if (q && !(String(g[0]).toLowerCase().includes(q) || String(g[1]).toLowerCase().includes(q) ||
+                 String(g[2]).toLowerCase().includes(q))) continue;
       shown++;
       const tr = H("tr");
       tr.appendChild(H("td", null, `<b>${g[0]}</b>`));
       tr.appendChild(H("td", null, `<span class="num" style="color:var(--muted);font-size:11.5px">${g[1]}</span>`));
-      tr.appendChild(H("td", "n num", grp(g[2])));
-      tr.appendChild(H("td", "n num", grp(g[3])));
-      tr.appendChild(H("td", "n num", g[4].toLocaleString("en-US")));
-      tr.appendChild(H("td", "n num", g[5]));
+      tr.appendChild(H("td", null, `<span style="font-size:11px;color:var(--ink-2)">${g[2]}</span>`));
+      tr.appendChild(H("td", null, `<span class="num" style="font-size:11.5px">${g[3]} ${g[4]}</span>`));
+      tr.appendChild(H("td", "n num", g[5].toLocaleString("en-US")));
+      tr.appendChild(H("td", "n num", grp(g[6])));
+      tr.appendChild(H("td", "n num", grp(g[7])));
+      tr.appendChild(H("td", "n num", g[8]));
       rows.push(tr);
     }
-    fillTable($("gene-table"), `<th>Gene</th><th>ID</th><th class="n">count</th><th class="n">spliced</th><th class="n">TPM</th><th class="n">n_tx</th>`, rows);
+    fillTable($("gene-table"), `<th>Gene</th><th>ID</th><th>type</th><th>locus</th><th class="n">TPM</th><th class="n">mature</th><th class="n">nascent</th><th class="n">n_tx</th>`, rows);
     const c = $("gcount");
     if (c) {
       const g = M.genes;
