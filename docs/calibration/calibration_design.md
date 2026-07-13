@@ -277,11 +277,27 @@ gDNA hyperprior), so init establishes honest precisions the first message pass t
 
 ---
 
-## 6. The general node solver (#1 + #2)
+## 6. The node solver — boundary self-solve is the innovation (#2), regions differ (#1)
 
-Initialization and the sweep are the **same solver** invoked with different factors switched on. There is **no
-region/boundary branch** — the difference is *data*: whether spliced counts are present, and which effective-length
-geometry (contained vs crossing) is passed. Prototype + all results below: `scripts/debug/node_solver.py`.
+> **Region vs boundary — do not conflate them (the lesson of the mis-scoped region A/B).** Splicing happens
+> *at boundaries*, by definition. So:
+> - A **boundary** owns **spliced** fragments (mature RNA, motif strand) and its **unspliced-crossing** spans the
+>   intron ⟹ **nascent + gDNA only** (a mature fragment crossing the junction is *spliced*). So a boundary's
+>   `f_g = gDNA/(gDNA+nascent)`, and nascent≈0 ⟹ `f_g→1` — **correct for a boundary**, and self-solvable from the
+>   spliced/unspliced structure. **This is the innovation.**
+> - A **region** (exon/intron interior) has **no spliced** fragments. Its **unspliced-contained** mass is nascent +
+>   gDNA **+ contained-mature** in an exon (3-way, no spliced anchor), or nascent + gDNA in an intron. A region
+>   therefore **cannot** self-solve from spliced/unspliced; it relies on **strand balance + the gDNA prior**, and —
+>   when unstranded — on **message propagation** from its flanking boundaries. `nascent≈0` does **not** mean
+>   "region unspliced = gDNA" (the contained-mature remains); that mature is only removable by the boundary spliced
+>   message (the sweep) or by strand (stranded).
+>
+> The solver code can be shared (a region simply carries zero spliced, so the composition term is inert and it
+> falls through to strand+prior+messages), but the **self-solve capability is boundary-only**. Validating boundary
+> self-solve by a region-projected metric is a category error.
+
+The same solver serves init (message-free) and the sweep (prior + messages ON). Prototype + results:
+`scripts/debug/boundary_ab.py` (boundary A/B vs oracle) and `scripts/debug/node_solver.py` (mechanism).
 
 ### 6.1 The I/O contract
 
@@ -326,20 +342,40 @@ precision 50 for a hedged value — a wrong value at high confidence).
   the strand is flat → the value stays at the gDNA default. (Sandbox S2: stranded (220,80) → gDNA 136 + nascent+
   164; S1: unstranded → gDNA.)
 
-**Precision — the honest "solved" state:** the **composition precision** of the two *independent* count pools,
+**Precision — the honest "solved" state = the per-component COUNT precision (derivation).** The message currency
+is per-component *density*, so each component carries its own count precision — **not** a composition of the two.
+For the gDNA component, `ρ̂_g = N_u/E_g` with `N_u ~ Poisson(ρ_g·E_g)`, so `Var(log ρ̂_g) = 1/N_u`; adding the
+count overdispersion `φ`:
 
 ```
-π_gdna  =  min( strand_marginal(κ)  +  1 / ( 1/N_unspliced + 1/N_spliced + 2φ ) ,  1/φ )
+precision(log ρ_g)  =  N_u / (1 + N_u·φ)          →  saturates at 1/φ      (gDNA, from the unspliced-crossing)
+precision(log ρ_mat) =  N_s / (1 + N_s·φ)                                    (mature, from the spliced)
 ```
 
-- The composition term needs **both** a gDNA-candidate count (unspliced) **and** an independent RNA count
-  (spliced). A spliced boundary is therefore *solved* even unstranded; a spliced-free unstranded region is **not**
-  (π → 0, it must wait for the prior/messages). This is why boundaries carry the deconvolution.
-- Worked example (`N_u=300`, `N_s=100`, `φ=0.02`): `π = 1/(1/300 + 1/100 + 0.04) = 18.75` — **honest, not the cap
-  50**. (Sandbox S1.)
-- `strand_marginal(κ)` is the strand's *own* information above the reference-measure floor; it → 0 at κ = ½ and
-  rises with κ (sandbox S6: 0.28 → 27.9). **This is the "precision = 0 at κ = ½" fix (#F):** the node's precision
-  at κ = ½ comes *entirely* from the spliced composition, not from a reference-floor artifact.
+- **This is what makes a boundary self-solve and a region not.** At a *boundary* the unspliced-crossing has **no
+  mature** (mature crossing is spliced), so under nascent≈0 `N_u` *is* the gDNA count → full count precision, and
+  the boundary is a **confident emitter** (`precision ≈ N_u`, hundreds at a real junction). At a *region interior*
+  the unspliced is gDNA + nascent + **contained-mature**, so `N_u` is *not* the gDNA count → no count-precision
+  claim; the region defers to strand / the boundary's mature message (sweep).
+- The **spliced is a separate channel**, not part of the gDNA precision: it carries the boundary's **mature-RNA
+  density message** (`ρ_mat = N_s/E_spl`, motif strand, its own count precision) to the exon — which is how the
+  exon later peels its contained-mature. (My earlier "composition harmonic `1/(1/N_u+1/N_s)`" was wrong: it
+  conflated the gDNA-vs-mature *split* precision with the gDNA-density *message* precision.)
+- **`φ` is derived, not magic — and it is NOT `σ²_imp`.** `φ` is the density estimate's own **overdispersion**
+  (the NB floor in `Var(log ρ)=1/n+φ`), a *self* property. It is distinct from the message transfer variance
+  `σ²_imp` (`adjacent_disagreement_variance`, a *sweep* quantity that scales cross-node messages, **no role at
+  init**). `φ` is derivable from the adjacent-pair log-density disagreement, Poisson-subtracted, taken as a robust
+  **within-regime** typical (`Var_within ≈ 2φ`; the pooled mean is dominated by across-regime enrichment jumps —
+  that's the #3 transfer variance, §7.2). Init can ship `φ` from this estimate, or `φ=0` (pure count) — the
+  *structure* (finite-for-boundaries, count-driven) is φ-independent.
+- **`nascent≈0` is the initialization commitment (your directive):** all unspliced-crossing → gDNA, so the
+  precision above is honest *given that commitment*; the commitment is revised in the sweep (strand where
+  available). This is why unstranded + real-nascent overshoots at init — an accepted, revisable initial estimate.
+- **AMBIG magnitude is strand-invisible** (`p` depends only on the tilt), so the strand cannot peel an AMBIG
+  node's `f_g`; it holds `f_g=1` (nascent≈0) and needs the sweep. *(With strand-specific data an AMBIG node may
+  still admit a defined precision — a separate, open sub-problem to be designed later.)* The "precision = 0 at
+  κ = ½" fix (#F) is automatic here: the value default doesn't peel at κ=½ (strand confidence → 0), and the
+  precision is the count (φ-capped), never a reference-floor artifact.
 
 ### 6.3 The objective
 
@@ -354,8 +390,8 @@ additive sum — init uses the first two terms only:
    + reference measure
 ```
 
-and the emitted **precision** is the composition formula of §6.2 (computed from the counts, not read off the
-possibly-flat ψ curvature).
+and the emitted **precision** is the per-component **count** precision of §6.2 (`N_c/(1+N_c·φ)`, computed from
+the counts — not read off the possibly-flat ψ curvature).
 
 ### 6.4 Revision — "nascent ≈ 0 until proven otherwise"
 
