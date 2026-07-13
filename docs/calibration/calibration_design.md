@@ -259,60 +259,109 @@ gDNA hyperprior), so init establishes honest precisions the first message pass t
 
 ---
 
-## 6. Boundary self-solve from spliced vs unspliced (#2 — primary, load-bearing)
+## 6. The general node solver (#1 + #2)
 
-A boundary is the only node that directly observes two physically distinct fragment classes at one genomic
-point, giving a **strand-free** gDNA/RNA readout.
+Initialization and the sweep are the **same solver** invoked with different factors switched on. There is **no
+region/boundary branch** — the difference is *data*: whether spliced counts are present, and which effective-length
+geometry (contained vs crossing) is passed. Prototype + all results below: `scripts/debug/node_solver.py`.
 
-### 6.1 The two classes
-
-- **Spliced = mature RNA, with known strand.** A splice junction carries a single-stranded genomic motif
-  (canonical GT/AG), so a spliced fragment's strand is **fixed by the motif**, not inferred. Placed directly into
-  the correct RNA-strand density:
-  ```
-  ρ_p = n_{s+} / E_spl ,   ρ_n = n_{s−} / E_spl        (E_spl = crossing eff-length under the RNA FL)
-  ```
-- **Unspliced = gDNA (+ sparse nascent).** Nascent RNA crossing an unspliced junction is rare, so at init the
-  unspliced crossing count is assigned to gDNA:
-  ```
-  ρ_g = n_u / E_uns                                     (E_uns = crossing eff-length under the gDNA FL)
-  ```
-  With stranded data the unspliced count can be strand-deconvolved into nascent vs gDNA (Beta-Binomial, its own
-  precision); unstranded, it is all gDNA. *(The nascent split under `nrna_present` is a placeholder — §9.)*
-
-Note `E_spl` (RNA FL) `≠ E_uns` (gDNA FL): the count→density map differs by class, so count conservation (§1.2)
-applies at the boundary too.
-
-### 6.2 The self-solved composition + honest precision
-
-The boundary self-solves a full `{ρ_p, ρ_n, ρ_g}` with the honest density precision of §3, **with no prior and
-no strand**. Worked example (`+` junction, `μ_RNA = 200`, `μ_gDNA = 100`, `φ = 0.02`):
+### 6.1 The I/O contract
 
 ```
-n_{s+} = 100 spliced(+)  → ρ_p = 100/200 = 0.5
-n_u    = 300 unspliced   → ρ_g = 300/100 = 3.0
-λ = log(ρ_g / ρ_p) = log 6 = 1.79        ⇒   f_g = σ(1.79) = 0.857
-Var(λ) = (1/300 + φ) + (1/100 + φ) = 0.053   ⇒   π(λ) ≈ 18.8    (NONZERO, no strand used)
+solve_node(
+    # counts — the native currency (all nodes)
+    n_unspliced_pos, n_unspliced_neg,          # per-strand unspliced (the Beta-Binomial power N)
+    n_spliced_pos,  n_spliced_neg,             # boundaries: motif-stranded mature RNA (0 for regions)
+    # structure
+    free_pos, free_neg, motif_strand,          # admissible RNA strands; the splice-motif strand
+    # effective lengths — per component (encode contained vs crossing geometry)
+    E_gdna, E_rna, E_spl,                       # ρ_c = N_c / E_c  (E_gdna ≠ E_rna, §1.2)
+    # library models
+    kappa, od_gdna, od_rna,
+    # OPTIONAL factors — OFF at init, ON in the sweep
+    gdna_prior=None, msg=None,
+) -> NodeSolution(
+    unspliced = {n_gdna, n_rna_pos, n_rna_neg},   # sum = N_unspliced (count conservation, §1.2)
+    spliced   = {n_pos, n_neg},                    # STATIC — pure mature RNA, never modified
+    precision = {gdna, rna_pos, rna_neg},          # 1/Var(log f_c)
+)
 ```
 
-The spliced:unspliced **ratio sets the direction** of the split; the counts set the honest precision. Boundaries
-are the only nodes that localize the gDNA/RNA composition without a prior in unstranded data.
+**Message-free self-solve = `gdna_prior=None, msg=None`.** Densities are derived helpers (`ρ = N/E`); spliced
+counts are pure mature RNA, held **out of the solve variable** (nothing to solve — strand is motif-fixed) but
+folded **into** the belief and precision. `E_spl` (RNA FL) `≠ E_gdna` (gDNA FL), so count conservation (§1.2)
+applies here too.
 
-### 6.3 Per-side structure and the flux into regions
+### 6.2 Value vs precision — the two are distinct (the crux)
 
-A boundary owns its spliced RNA **one-sided** (a junction faces one exon). Its per-side gDNA/RNA flux feeds the
-adjacent region's deconvolution as the neighbour density message (§7). *(The exact per-side geometry and the
-region-projection are grounded in §8.)*
+The solver's output separates cleanly into a **value** (the split) and a **precision** (confidence). They come
+from different places, and conflating them was the bug the sandbox caught (an early anchor claimed the capped
+precision 50 for a hedged value — a wrong value at high confidence).
 
-### 6.4 Pass-0 enriched mode from self-solved boundaries
+**Value — the split `f_g`:**
+- **Init default: unspliced → gDNA (nascent ≈ 0).** This is the structural `{0,0,1}` default (§5.1); nascent RNA
+  is biologically sparse, so with no strand and no messages the *safe, prior-free* attribution of unspliced mass
+  is gDNA. It is an **initialization** assumption, **revisable** by later passes (§6.4).
+- **Strand refines it in-solve.** When stranded (κ ≫ ½), the unspliced strand imbalance peels nascent RNA off the
+  gDNA — on the strand set by the splice **motif** (`nascent shares the mature transcript strand`). This is the
+  synergy: spliced fixes *which* strand nascent lives on; the strand imbalance *measures* it. Unstranded (κ = ½),
+  the strand is flat → the value stays at the gDNA default. (Sandbox S2: stranded (220,80) → gDNA 136 + nascent+
+  164; S1: unstranded → gDNA.)
 
-Because boundaries self-solve an honest, prior-free composition, the gDNA-density prior's **enriched mode** can
-be built directly from them **before** the first message pass. Select the structurally clean gDNA-enrichment
-readouts — **intron↔exon, single-strand, enriched (high unspliced density), RNA-free (low spliced density)** —
-and take their adjacent exon densities as the enriched training sample. (Validated on the flagship: such
-boundaries' adjacent exons are 99.7 % gDNA at density ≈ 26 vs the true plateau ≈ 30; `gdna_none`/capture-off
-select **zero**, so it self-gates. This replaces the depleted-only KDE trained on already-crushed pass-1
-densities.) This is a *consequence* of the self-solves, not a hand-set floor.
+**Precision — the honest "solved" state:** the **composition precision** of the two *independent* count pools,
+
+```
+π_gdna  =  min( strand_marginal(κ)  +  1 / ( 1/N_unspliced + 1/N_spliced + 2φ ) ,  1/φ )
+```
+
+- The composition term needs **both** a gDNA-candidate count (unspliced) **and** an independent RNA count
+  (spliced). A spliced boundary is therefore *solved* even unstranded; a spliced-free unstranded region is **not**
+  (π → 0, it must wait for the prior/messages). This is why boundaries carry the deconvolution.
+- Worked example (`N_u=300`, `N_s=100`, `φ=0.02`): `π = 1/(1/300 + 1/100 + 0.04) = 18.75` — **honest, not the cap
+  50**. (Sandbox S1.)
+- `strand_marginal(κ)` is the strand's *own* information above the reference-measure floor; it → 0 at κ = ½ and
+  rises with κ (sandbox S6: 0.28 → 27.9). **This is the "precision = 0 at κ = ½" fix (#F):** the node's precision
+  at κ = ½ comes *entirely* from the spliced composition, not from a reference-floor artifact.
+
+### 6.3 The objective
+
+Over the unspliced simplex `(f_g, f_np, f_nn)` (parametrized as production's λ, τ), the log-posterior is the
+additive sum — init uses the first two terms only:
+
+```
+ψ =  strand_BB_loglik(n_u±  | f ; κ, od)          [the intrinsic gDNA/RNA signal; count = Fisher info]
+   + nascent≈0 init default                        [attributes unspliced → gDNA absent strand evidence]
+   + gdna_prior                                     [OFF at init]
+   + Σ messages (per-component log-density)         [OFF at init]
+   + reference measure
+```
+
+and the emitted **precision** is the composition formula of §6.2 (computed from the counts, not read off the
+possibly-flat ψ curvature).
+
+### 6.4 Revision — "nascent ≈ 0 until proven otherwise"
+
+Because the init precision is honest (18.75, not 50), the nascent ≈ 0 default is **revisable**: a later-pass
+message combines with the init belief by the precision-weighted product, and moves `f_g` **iff it out-precises
+the node**. Sandbox S8 (init `f_g = 0.98`): a weak RNA message (π 8 < 18.75) barely moves it (→ 0.939); a strong
+one (π 40 > 18.75) yields (→ 0.776). Overconfidence at init would have frozen it — which is exactly why the init
+precision must be the honest composition value, not the cap.
+
+### 6.5 Self-gating and the region case
+
+- **`gdna_none` boundary** (little unspliced, much spliced): emits a *low* gDNA density (`N_u/E_g` small) — it does
+  not hallucinate gDNA even though its unspliced is attributed to gDNA. (Sandbox S5.)
+- **Unstranded region, no spliced:** π → 0 — correctly *not* self-solved; it is resolved by the prior/messages
+  (sandbox S3 → S4, where the enriched-mode prior lifts it). Boundaries feed regions via the sweep.
+
+### 6.6 Pass-0 enriched mode from self-solved boundaries
+
+Because boundaries self-solve an honest, prior-free composition, the gDNA-density prior's **enriched mode** can be
+built directly from them **before** the first message pass. Select the structurally clean gDNA-enrichment
+readouts — **intron↔exon, single-strand, enriched (high unspliced density), RNA-free (low spliced density)** — and
+take their adjacent exon densities as the enriched training sample. (Validated on the flagship: such boundaries'
+adjacent exons are 99.7 % gDNA at density ≈ 26 vs the true plateau ≈ 30; `gdna_none`/capture-off select **zero**,
+so it self-gates.) This is a *consequence* of the self-solves, not a hand-set floor.
 
 ---
 
@@ -531,9 +580,11 @@ The user's priority is #1 (init) and #2 (boundary), which are the same first mov
 strand-free spliced/unspliced self-solve (§6)**, since that self-solve *is* the load-bearing init for the
 unstranded case. Concretely, in order:
 
-1. **Boundary self-solve (change A) + honest precision.** Implement §6 in the init/statics path: a boundary's
-   spliced (motif-stranded, `E_spl`) and unspliced (gDNA, `E_uns`) counts produce `{ρ_p, ρ_n, ρ_g}` with the
-   density precision of §3 — no prior, no strand. Prove in the sandbox first (extend `bp_sandbox.py`), then wire.
+1. **General node solver (changes A + F).** Implement the §6 contract: fold the spliced counts into the belief +
+   the honest **composition precision** (`1/(1/N_u + 1/N_s + 2φ)` + strand-marginal), keep nascent ≈ 0 as the
+   revisable init default, and make the strand-marginal → 0 at κ = ½ cleanly (the #F fix). This unifies the
+   region/boundary solve and gives boundaries their non-zero init precision. Design proven in
+   `scripts/debug/node_solver.py`; wire into `node_geometry` (statics/init) + `simplex_logodds` (the ψ).
 2. **Count-conservation in the message integration (change B).** Recast the node's message reconciliation as the
    §4 joint solve over the count simplex with per-component `E` (the FL-shifted targets `m̃_c = m_c + log E_c`).
    Re-verify uniqueness under count conservation (§10 open item 1) before implementing.
@@ -546,16 +597,22 @@ Changes to #3 (transfer variance) and the full #4 message model follow, once §7
 
 ## 10. Sandbox validation status
 
-- **Self-defense, recovery, self-gating, relay/decay, Trojan-horse, AMBIG 2-DoF, uniqueness** — proven under the
+- **General node solver (§6)** — proven in `scripts/debug/node_solver.py`: the composition precision is honest and
+  non-zero unstranded (S1: 18.75, not the cap 50); the ss=½ fix (S6: strand_marginal 0.28→27.9, composition
+  carries); stranded synergy (S2: strand peels nascent); self-defense preserved (S7); self-gating (S5); a
+  spliced-free unstranded region is correctly unsolved (S3→S4); nascent≈0 is a revisable init default (S8: yields
+  only to a message that out-precises the node).
+- **Self-defense, recovery, self-gating, relay/decay, Trojan-horse, AMBIG 2-DoF** — proven earlier under the
   *density-conserved* solve (`bp_theory.py`, `bp_reconcile.py`, `bp_dependency.py`).
 - **Count conservation (#5)** — self-defense KKT preserved (identical `μ`), reduces to the old solve at equal FL,
-  and exposes the count-vs-density FL bias (`count_conservation.py` TESTs 1–3, this doc §1.2, §4.2).
+  exposes the count-vs-density FL bias (`count_conservation.py` TESTs 1–3, §1.2, §4.2).
 - **Transfer-variance regime stratification (#3)** — evidence gathered (`transfer_var_estimator.py`); model not
   yet designed.
 
 **Open before any code:**
-1. Re-verify node-solve **uniqueness** under count conservation (§4.4) — was proven only for density conservation.
+1. Re-verify node-solve **uniqueness** under count conservation (§4.4) — proven only for density conservation.
 2. Design the **transfer-variance / enriched-vs-depleted** model (§7.2) and prove it in the sandbox.
-3. The **nascent-vs-gDNA** unspliced split under `nrna_present` (§6.1).
+3. The **nascent-vs-gDNA** unspliced split under `nrna_present` **when unstranded** (§6.2) — inherently
+   unidentifiable from a node; deferred to the prior/sweep (the nascent≈0 init default, §6.4, is the placeholder).
 4. Prove the **prior-free first pass** does not reintroduce RNA bleed across all 24 conditions before removing
    the floor.
