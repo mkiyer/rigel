@@ -31,6 +31,10 @@ __all__ = ["_logodds_grid", "_solve_nodes_logodds_all"]
 _EPS = 1.0e-9
 _PRIOR_EPS = 1.0e-3  # the Jeffreys edge floor
 _STRAND_PRIOR = 0.5  # Beta(½,½) Jeffreys strand prior
+_NASCENT_TIEBREAK = 1.0e-6  # nascent≈0 vertex TIE-BREAK strength (see `nascent0` below). NOT a tuned
+#   constant: it only breaks the flat-direction degeneracy toward the f_g=1 vertex, so the result is
+#   INSENSITIVE to it across many orders of magnitude (`scripts/debug/density_frame.py`). Contrast a
+#   `+c·log f_g` TILT, whose strength IS a magic number.
 _DEFAULT_L = 10.0  # f_g ∈ [σ(−10), σ(10)] = [4.5e-5, 1−4.5e-5] — brackets Phase-0's vertex mass; a
 #                      data-driven tuning knob (the (K,L) sweep), NOT a numerical ceiling: log_expit +
 #                      the 1/E density floor keep the grid exact at any L (no underflow cap needed).
@@ -140,13 +144,20 @@ def _local_loglik_logodds(
     gdna_imp_prec=None,
     rna_imp_mode=None,
     rna_imp_prec=None,
+    nascent0=False,
 ):
     """ψ over the log-odds grid for single-strand nodes (strand mixture, Jeffreys, global, imputation),
     evaluated at ``f_g = σ(λ)`` with the live strand carrying ``f_active = 1 − f_g``,
     PLUS the ``log σ'(λ)`` Jacobian. Returns ``(m, K)``.
 
     ``global_logprior`` must already be evaluated on THIS ``fg`` grid → ``(m, K)`` (the caller builds
-    it with ``bp_solver._global_logprior`` passing ``fg`` as the ``fgg`` arg)."""
+    it with ``bp_solver._global_logprior`` passing ``fg`` as the ``fgg`` arg).
+
+    ``nascent0`` (the density-frame default; `calibration_selfsolve_status.md` §2): drop the uniform
+    reference (Jeffreys + the log σ'(λ) Jacobian, which peak at f_g=½) and add the nascent≈0 vertex
+    TIE-BREAK ``−ε·(1−f_g)``. With the MAP read-out (:func:`_solve_nodes_logodds`) this makes the
+    prior-/message-free default the gDNA vertex f_g=1 (nascent≈0 = 100 % gDNA), while the strand
+    likelihood peels RNA when there is a real imbalance — magic-number-free (ε-insensitive)."""
     ap = np.asarray(allow_pos, bool)
     an = np.asarray(allow_neg, bool)
     pos_live = (ap & ~an)[:, None]  # (m,1)
@@ -159,7 +170,8 @@ def _local_loglik_logodds(
     # ── strand mixture (identical to the lattice term; broadcasts (m,1)×(m,K)→(m,K)) ──
     psi = _mixture_strand_loglik(u_pos[:, None], n, fg2, f_pos, f_neg, kappa, od_g, od_r)
     # ── Jeffreys Beta(½,½) reference at strand-observable nodes (identical) ──
-    if strand_obs is not None:
+    #    Dropped under nascent0 (it is part of the uniform-f reference that peaks at f_g=½).
+    if strand_obs is not None and not nascent0:
         jeff = (_STRAND_PRIOR - 1.0) * (
             np.log(np.clip(fg2, _PRIOR_EPS, 1.0))
             + np.log(np.clip(f_pos, _PRIOR_EPS, 1.0))
@@ -189,11 +201,16 @@ def _local_loglik_logodds(
                 * np.asarray(ps, np.float64)[:, None]
                 * (log_fact - np.asarray(ms, np.float64)[:, None]) ** 2
             )
-    # ── change of variable: uniform-λ Riemann sum → uniform-f integral (so the median matches the
-    #    linear lattice's uniform-f measure). log σ'(λ) = log σ(λ) + log(1−σ(λ)) = log f_g + log(1−f_g),
-    #    exact via log_expit (D6). This is the ONE reference Jacobian (D3); the log-density empirical
-    #    priors are added bare (no per-term Jacobian). ──
-    psi = psi + (_log_fg(lam) + _log1m_fg(lam))[None, :]
+    if nascent0:
+        # nascent≈0 vertex tie-break −ε·(1−f_g): no reference Jacobian (the MAP read-out reads the
+        # gDNA vertex as the prior-free default; the strand mixture peels RNA on a real imbalance).
+        psi = psi - _NASCENT_TIEBREAK * f_act
+    else:
+        # ── change of variable: uniform-λ Riemann sum → uniform-f integral (so the median matches the
+        #    linear lattice's uniform-f measure). log σ'(λ) = log σ(λ) + log(1−σ(λ)) = log f_g + log(1−f_g),
+        #    exact via log_expit (D6). This is the ONE reference Jacobian (D3); the log-density empirical
+        #    priors are added bare (no per-term Jacobian). ──
+        psi = psi + (_log_fg(lam) + _log1m_fg(lam))[None, :]
     return psi, f_pos, f_neg
 
 
@@ -216,14 +233,18 @@ def _solve_nodes_logodds(
     gdna_imp_prec=None,
     rna_imp_mode=None,
     rna_imp_prec=None,
+    nascent0=False,
 ) -> NodeDeconv:
     """The log-odds 1-D per-node solve for SINGLE-STRAND nodes.
 
-    ``f_g`` = posterior median over the ``λ`` grid (= median of ``f_g = σ(λ)``, monotone so the median
-    is preserved); ``f_pos``/``f_neg`` = posterior MEANS (the current-state fractions). ``*_frac_var`` =
-    the precision state ``Var(log f_c)`` (the LOG-fraction variance, the message currency — D2), NOT the
-    fraction variance. Zero-mass nodes report 0; the dead strand is locked-certain (var 0). AMBIG nodes
-    (both strands live) are out of contract — mask them out."""
+    Default read-out: ``f_g`` = posterior median over the ``λ`` grid; ``f_pos``/``f_neg`` = posterior
+    MEANS; ``*_frac_var`` = the grid-moment ``Var(log f_c)``.
+
+    ``nascent0`` (density-frame default): ``f_g`` = the **MAP** (argmax of ψ; with the tie-break in
+    ``_local_loglik_logodds`` the prior-/message-free default is the gDNA vertex f_g=1, and the strand
+    peels RNA on a real imbalance), the live strand carries ``1−f_g``, and ``*_frac_var`` is the honest
+    per-component **count** precision ``Var(log ρ_c) = 1/N_c`` (``N_c = f_c·M``, φ=0). Zero-mass nodes
+    report 0; the dead strand is locked-certain (var 0). AMBIG nodes are out of contract — masked out."""
     lam, fg = _logodds_grid(int(n_grid), L)
     psi, f_pos_g, f_neg_g = _local_loglik_logodds(
         u_pos,
@@ -241,28 +262,38 @@ def _solve_nodes_logodds(
         gdna_imp_prec=gdna_imp_prec,
         rna_imp_mode=rna_imp_mode,
         rna_imp_prec=rna_imp_prec,
+        nascent0=nascent0,
     )
-    post = np.exp(psi - _lse(psi, axis=1, keepdims=True))  # (m,K)
-    # f_g posterior median (fg ascending ⇒ cumulative CDF directly)
-    f_g = _posterior_median_fg(post, fg)
-    # composition: f_g median + f_pos/f_neg posterior MEANS (the current-state fractions → node_densities).
-    f_pos = np.sum(post * f_pos_g, axis=1)
-    f_neg = np.sum(post * f_neg_g, axis=1)
-    # precision state = Var(log f_c) (the message currency, D2), moment-matched on the grid. log f_g = log σ(λ);
-    # the single live RNA strand carries f_active = 1−f_g → log f_active = log σ(−λ). The dead strand is
-    # locked-certain (f=0) → var 0 (and emits nothing — the _scan gate). Capping is AUTOMATIC: the send
-    # prec_log = 1/(var+σ²_bio+pois) ≤ 1/(σ²_bio+pois) since var ≥ 0 (D2a), so a window-truncated var only
-    # approaches, never exceeds, the noise-model ceiling.
-    Lg = _log_fg(lam)
-    mLg = post @ Lg
-    var_g = np.maximum(post @ (Lg * Lg) - mLg * mLg, 0.0)
-    La = _log1m_fg(lam)
-    mLa = post @ La
-    var_act = np.maximum(post @ (La * La) - mLa * mLa, 0.0)
     ap = np.asarray(allow_pos, bool)
     an = np.asarray(allow_neg, bool)
-    var_pos = np.where(ap & ~an, var_act, 0.0)
-    var_neg = np.where(an & ~ap, var_act, 0.0)
+    if nascent0:
+        # MAP value (the tie-break makes the prior-free default the gDNA vertex); the live strand carries
+        # 1−f_g. Precision = the honest per-component COUNT precision Var(log ρ_c)=1/N_c (N_c = f_c·M).
+        f_g = fg[np.argmax(psi, axis=1)]
+        f_act = 1.0 - f_g
+        f_pos = np.where(ap & ~an, f_act, 0.0)
+        f_neg = np.where(an & ~ap, f_act, 0.0)
+        Mu = np.asarray(mass_unspl, np.float64)
+        var_g = 1.0 / np.maximum(f_g * Mu, _EPS)
+        var_pos = np.where(ap & ~an, 1.0 / np.maximum(f_pos * Mu, _EPS), 0.0)
+        var_neg = np.where(an & ~ap, 1.0 / np.maximum(f_neg * Mu, _EPS), 0.0)
+    else:
+        post = np.exp(psi - _lse(psi, axis=1, keepdims=True))  # (m,K)
+        # f_g posterior median (fg ascending ⇒ cumulative CDF directly)
+        f_g = _posterior_median_fg(post, fg)
+        # composition: f_g median + f_pos/f_neg posterior MEANS (the current-state fractions).
+        f_pos = np.sum(post * f_pos_g, axis=1)
+        f_neg = np.sum(post * f_neg_g, axis=1)
+        # precision state = Var(log f_c), moment-matched on the grid. The dead strand is locked-certain
+        # (f=0) → var 0. Capping is AUTOMATIC: the send prec_log = 1/(var+σ²+pois) ≤ 1/(σ²+pois).
+        Lg = _log_fg(lam)
+        mLg = post @ Lg
+        var_g = np.maximum(post @ (Lg * Lg) - mLg * mLg, 0.0)
+        La = _log1m_fg(lam)
+        mLa = post @ La
+        var_act = np.maximum(post @ (La * La) - mLa * mLa, 0.0)
+        var_pos = np.where(ap & ~an, var_act, 0.0)
+        var_neg = np.where(an & ~ap, var_act, 0.0)
     active = (u_pos + u_neg) > 0.0
     f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
     f_pos = np.where(active, np.clip(f_pos, 0.0, 1.0), 0.0)
@@ -299,6 +330,7 @@ def _solve_ambig_logodds(
     gdna_imp_prec=None,
     rna_imp_mode=None,
     rna_imp_prec=None,
+    nascent0=False,
 ) -> NodeDeconv:
     """Phase 2 — the 2-D ``(λ, τ)`` solve for AMBIG nodes (both strands live; NO Jeffreys, matching the
     lattice). Grids the gDNA-vs-RNA log-odds ``λ`` (outer, ``K = n_grid``) and the RNA-internal tilt
@@ -370,18 +402,29 @@ def _solve_ambig_logodds(
     #    tilt or the gDNA prior said. Neutral lets the STRAND resolve it: a strong tilt ⇒ RNA (unchanged),
     #    a balanced count ⇒ parsimoniously gDNA (the τ-marginal favours high f_g, where more τ fit the
     #    balance) with the gDNA prior setting the level. (Derivation: log_density_1d_solver_design.md §5.2.) ──
-    log_jac = (log_fg_grid + _log1m_fg(lam)).astype(
-        F
-    )  # (K,) f32 — reuse log_fg_grid (= _log_fg(lam)) above
-    psi += log_jac[None, :, None]  # in-place; psi is now the full 2-D log-posterior
+    if nascent0:
+        # nascent≈0 vertex tie-break (τ-independent, on the λ axis): the AMBIG magnitude f_g is
+        # strand-INVISIBLE (p depends only on the tilt), so absent prior/messages it goes to the gDNA
+        # vertex f_g=1; the RNA (both strands) → 0. (Needs the sweep/prior for a real magnitude.)
+        psi += (-_NASCENT_TIEBREAK * (1.0 - fg32)).astype(F)[None, :, None]
+    else:
+        # ── Reference measure (τ-independent → add once on the λ axis). NEUTRAL on the gDNA fraction:
+        #    uniform in (f_g, τ) ⇒ Jacobian log σ'(λ) = log f_g + log(1−f_g) — the SAME measure the
+        #    single-strand solver uses. (Derivation: log_density_1d_solver_design.md §5.2.) ──
+        log_jac = (log_fg_grid + _log1m_fg(lam)).astype(F)  # (K,) f32
+        psi += log_jac[None, :, None]  # in-place
     psi_full = psi  # (m,K,Kt) f32
     # τ-marginal λ-posterior (m,K) — lift to f64 so the posterior median + moments are full-precision.
     psi_lam = _lse(psi_full, axis=2).astype(np.float64)
-    post_lam = np.exp(psi_lam - _lse(psi_lam, axis=1, keepdims=True))
-    f_g = _posterior_median_fg(post_lam, fg)
-    # precision state = Var(log f_g) over the τ-marginal λ-posterior (D2).
-    mLg = post_lam @ log_fg_grid
-    var_g = np.maximum(post_lam @ (log_fg_grid * log_fg_grid) - mLg * mLg, 0.0)
+    if nascent0:
+        # MAP magnitude + honest count precision; the RNA splits the residual 1−f_g by the tilt mean.
+        f_g = fg[np.argmax(psi_lam, axis=1)]
+    else:
+        post_lam = np.exp(psi_lam - _lse(psi_lam, axis=1, keepdims=True))
+        f_g = _posterior_median_fg(post_lam, fg)
+        # precision state = Var(log f_g) over the τ-marginal λ-posterior (D2).
+        mLg = post_lam @ log_fg_grid
+        var_g = np.maximum(post_lam @ (log_fg_grid * log_fg_grid) - mLg * mLg, 0.0)
     # f_pos/f_neg MEANS + Var(log f_pos/neg) over the FULL 2-D posterior (f32 cube; sums accumulate in f64).
     flat = psi_full.reshape(psi_full.shape[0], -1)
     post2d = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(
@@ -391,14 +434,25 @@ def _solve_ambig_logodds(
     fn_grid = fnk[None, :, :]
     f_pos = np.sum(post2d * fp_grid, axis=(1, 2), dtype=np.float64)
     f_neg = np.sum(post2d * fn_grid, axis=(1, 2), dtype=np.float64)
-    mLp = np.sum(post2d * log_fpos, axis=(1, 2), dtype=np.float64)
-    mLn = np.sum(post2d * log_fneg, axis=(1, 2), dtype=np.float64)
-    var_pos = np.maximum(
-        np.sum(post2d * log_fpos * log_fpos, axis=(1, 2), dtype=np.float64) - mLp * mLp, 0.0
-    )
-    var_neg = np.maximum(
-        np.sum(post2d * log_fneg * log_fneg, axis=(1, 2), dtype=np.float64) - mLn * mLn, 0.0
-    )
+    if nascent0:
+        # Split 1−f_g by the posterior tilt (f_pos/f_neg means from the 2-D posterior, renormalized so
+        # f_pos+f_neg = 1−f_g exactly), and use the honest per-component COUNT precision Var(log ρ_c)=1/N_c.
+        tot = np.maximum(f_pos + f_neg, _EPS)
+        f_pos = (1.0 - f_g) * f_pos / tot
+        f_neg = (1.0 - f_g) * f_neg / tot
+        Mu = np.asarray(mass_unspl, np.float64)
+        var_g = 1.0 / np.maximum(f_g * Mu, _EPS)
+        var_pos = 1.0 / np.maximum(f_pos * Mu, _EPS)
+        var_neg = 1.0 / np.maximum(f_neg * Mu, _EPS)
+    else:
+        mLp = np.sum(post2d * log_fpos, axis=(1, 2), dtype=np.float64)
+        mLn = np.sum(post2d * log_fneg, axis=(1, 2), dtype=np.float64)
+        var_pos = np.maximum(
+            np.sum(post2d * log_fpos * log_fpos, axis=(1, 2), dtype=np.float64) - mLp * mLp, 0.0
+        )
+        var_neg = np.maximum(
+            np.sum(post2d * log_fneg * log_fneg, axis=(1, 2), dtype=np.float64) - mLn * mLn, 0.0
+        )
     active = n > 0.0
     f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
     f_pos = np.where(active, np.clip(f_pos, 0.0, 1.0), 0.0)
@@ -439,6 +493,7 @@ def _solve_nodes_logodds_all(
     gdna_imp_prec=None,
     rna_imp_mode=None,
     rna_imp_prec=None,
+    nascent0=False,
 ) -> NodeDeconv:
     """The full per-node log-odds dispatcher (Phase 3 #1): routes single-strand nodes to the 1-D
     ``λ`` solve (:func:`_solve_nodes_logodds`) and AMBIG nodes to the 2-D ``(λ, τ)`` solve
@@ -508,6 +563,7 @@ def _solve_nodes_logodds_all(
                 gdna_imp_prec=_s(gdna_imp_prec, ss),
                 rna_imp_mode=_sp(rna_imp_mode, ss),
                 rna_imp_prec=_sp(rna_imp_prec, ss),
+                nascent0=nascent0,
             ),
         )
     if bool(amb.any()):
@@ -535,6 +591,7 @@ def _solve_nodes_logodds_all(
                     gdna_imp_prec=_s(gdna_imp_prec, bidx),
                     rna_imp_mode=_sp(rna_imp_mode, bidx),
                     rna_imp_prec=_sp(rna_imp_prec, bidx),
+                    nascent0=nascent0,
                 ),
             )
     return NodeDeconv(
