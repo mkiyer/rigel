@@ -210,11 +210,38 @@ wrong or absent.
   (no false gDNA, no prior). Intergenic/TSS/TES stay f_g = 1 (unmovable) and are barriers — they do not inject
   their gDNA composition into an adjacent expressed exon.
 
-Prototype: `scripts/debug/bp_reconcile.py` derives and demonstrates all of the above (the three precision
-regimes, the active-set-change seam, and the flagship recovery). `scripts/debug/bp_sandbox.py` covers the init +
-self-solve. The **message-precision / edge-gating model** — the per-edge enrichment-transfer variance for gDNA
+### 5.1 The components are interdependent — solve the degrees of freedom, not the components
+
+The sum constraint makes the components a **pie chart**: you cannot move one without the others moving. The
+inference is over the **degrees of freedom** — single-strand has **1 DoF**, AMBIG **2 DoF**; the total `D` is
+observed and is *not* a DoF. This must be solved **jointly**.
+
+Updating a component *independently* and then re-imposing the sum is the **Trojan-horse failure**: a message
+aimed at a **weak** component moves it (it "listens", being low-precision), and the sum then **forces a
+confident component to change** even though nothing informed it. Demonstrated (`bp_dependency.py`): a confident
+gDNA = 30 (prec 50) is dragged to **25.6** by an RNA+ message, purely through the residual.
+
+The **joint DoF solve** — entering every component's precision (local belief *and* message) simultaneously into
+the single constrained minimization — fixes it: the confident component now moves only in proportion to
+`(other precisions)/(its precision)` (gDNA 30 → **27.3**, barely), and in the AMBIG case the change from an
+RNA+ message is absorbed by the **other weak component** (RNA− 4.0 → 2.5), sparing the confident gDNA
+(25 → 23). So *which* component absorbs a change is decided by the precisions: **the least-confident active
+components absorb it; the confident one is protected proportionally.**
+
+Two caveats worth stating: (a) a finite-precision confident component is **not frozen** — via the constraint,
+evidence about RNA *is* legitimate evidence about gDNA (more RNA ⇒ less gDNA at fixed `D`), so a proportional
+update is correct, not a leak; **full** protection requires a structural lock (infinite precision, §3.2).
+(b) The production *per-node* solve is already joint (`_solve_nodes_logodds_all` on the log-odds simplex), but
+the sweep's *per-component running-belief relay* (`fbg/fbp/fbn` in `_scan`) is updated per component and is not
+sum-reconciled before being relayed — a Trojan-horse risk in the message path, flagged for the message-precision
+phase.
+
+Prototype: `scripts/debug/bp_reconcile.py` (total-density reconciliation + flagship recovery),
+`scripts/debug/bp_dependency.py` (the interdependency / Trojan-horse), `scripts/debug/bp_sandbox.py` (init +
+self-solve). The **message-precision / edge-gating model** — the per-edge enrichment-transfer variance for gDNA
 and the along-transcript continuity for RNA that set each `prec_c` — is the next phase; this document fixes
-initialization and establishes that the currency is per-component density reconciled to the observed total.
+initialization and establishes that the currency is per-component density reconciled to the observed total,
+solved on the degrees of freedom.
 
 ---
 
