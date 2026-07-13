@@ -204,13 +204,31 @@ hard constraint; the KKT routes the residual count to the lowest-π components. 
 fragments does not overwrite a region's 100 contained fragments — it informs the *split*; the region allocates
 its own `N`. Composition is emergent, never transmitted.
 
-### 4.4 Uniqueness
+### 4.4 Uniqueness (re-verified under count conservation)
 
-The 1-D (single-strand) and 2-D (AMBIG) solves are empirically unimodal across the regimes tested (excess,
-deficit, two-confident conflict, extreme precision gap). The clean monotonicity proof requires
-`2π_c + μ e^{x_c} > 0`, which can fail in the excess (`μ<0`) regime; unimodality still holds empirically there,
-so the production solver should use **bisection on `μ` or a grid**, not a bare Newton, in that regime. *(This
-was verified under density conservation; it must be re-verified under count conservation — §10 open item.)*
+Re-checked by enumerating the constrained objective on a fine count simplex and counting strict local minima
+(`scripts/debug/uniqueness_count.py`, 1-DoF single-strand + 2-DoF AMBIG). Findings:
+
+- **Unimodal in every realistic regime:** push-down (targets want more count than `N`), two-confident conflict,
+  extreme precision gap, strong `E_g≠E_r` asymmetry, stranded, and the self-defense case — all exactly one
+  minimum.
+- **The one multimodal regime is "push-up":** when *every* component's density target is tiny while the node is
+  full (`Σ n*_c ≪ N`), the log-penalty is concave far above target (`g''(N)=2(1−(log N−m̃))/N² < 0`), so dumping
+  all the excess count into one component beats spreading it, giving one local minimum per component. It is
+  **structural** (persists even at message precision π=0.3), **not** a message-strength artifact.
+- **But it is guarded three ways.** (i) It **cannot arise at initialization** — init has no density-target terms
+  (prior + messages off), so the init solve (strand + nascent≈0 default + reference) is unimodal. (ii) In the
+  sweep it vanishes the moment *any* component's target is consistent with the count — e.g. the gDNA
+  enriched-mode prior on a full enriched node makes it unimodal at the correct `f_g≈0.93` (`R2'''`, `A2''`). It
+  requires *all* messages **and** the gDNA prior to simultaneously contradict the node's own fragment count — the
+  un-trained-depleted-prior pathology the rest of the design eliminates. (iii) Even when local minima exist, the
+  **global minimum is unique** with a large margin (F-gap 11–49), so a **grid** solve returns it deterministically
+  and the forward-backward stays **order-independent**.
+
+**Prescription (unchanged from the density case):** the production solver must be a **grid / global** search over
+the simplex (which it already is — the log-odds lattice), never a bare local Newton. The extreme-precision-gap
+"flat ridge" (a component at π≈0) is a genuinely *unidentified* split, unique in the identified direction — correct
+behaviour, not a failure.
 
 ---
 
@@ -610,7 +628,10 @@ Changes to #3 (transfer variance) and the full #4 message model follow, once §7
   yet designed.
 
 **Open before any code:**
-1. Re-verify node-solve **uniqueness** under count conservation (§4.4) — proven only for density conservation.
+1. ~~Re-verify node-solve **uniqueness** under count conservation~~ — **CLOSED** (§4.4,
+   `uniqueness_count.py`): unimodal in all realistic regimes; the lone push-up multimodality cannot occur at
+   init, is eliminated by an honest prior in the sweep, and has a unique global min a grid resolves
+   deterministically.
 2. Design the **transfer-variance / enriched-vs-depleted** model (§7.2) and prove it in the sandbox.
 3. The **nascent-vs-gDNA** unspliced split under `nrna_present` **when unstranded** (§6.2) — inherently
    unidentifiable from a node; deferred to the prior/sweep (the nascent≈0 init default, §6.4, is the placeholder).
