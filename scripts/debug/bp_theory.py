@@ -205,3 +205,39 @@ show_chain(relay, bp_chain(relay, reliab_g=8.0))
 print("  ⇒ the gDNA message relays rightward but its precision DECAYS each hop (variances add: π ≈ 6.3→3.5→2.4"
       "\n    →1.9), so against the constant weak RNA prior the gDNA fraction FALLS with distance — messages change"
       "\n    and confidence attenuates as they propagate. A far node is rightly less sure than a near one.")
+
+
+# ------------------------------------------------------------------------------------------------------
+# TEST 5 — CONVERGENCE / UNIQUENESS (verify the reviewer's claim: unique minimum, order-independent)
+# ------------------------------------------------------------------------------------------------------
+def count_minima_1d(D, m, prec, n=200000):
+    """Scan the single-strand node-solve cost over f_g and count LOCAL minima (interior)."""
+    f = np.linspace(1e-5, 1 - 1e-5, n)
+    cost = prec[0] * (np.log(f * D) - m[0]) ** 2 + prec[1] * (np.log((1 - f) * D) - m[1]) ** 2
+    interior = (cost[1:-1] < cost[:-2]) & (cost[1:-1] <= cost[2:])
+    idx = np.where(interior)[0] + 1
+    return len(idx), (f[idx] if len(idx) else np.array([])), float(cost.min())
+
+
+def mu_of_split(D, m, prec, fg):
+    """The KKT multiplier implied at split fg (single-strand), from component g: μ = −2π_g δ_g/ρ_g."""
+    rg = fg * D; dg = math.log(rg) - m[0]
+    return -2 * prec[0] * dg / rg
+
+
+hdr("TEST 5 — CONVERGENCE / UNIQUENESS of the node solve (reviewer's Open-Items 2 & 4 claim)")
+cases = [
+    ("excess  (Σtargets≪D, μ<0)", 33.0, (LOG(3.0), LOG(0.5)), (10.0, 10.0)),
+    ("deficit (Σtargets≫D, μ>0)", 33.0, (LOG(30.0), LOG(30.0)), (10.0, 10.0)),
+    ("conflict (two CONFIDENT, Σ≫D)", 33.0, (LOG(30.0), LOG(30.0)), (50.0, 50.0)),
+    ("self-defense (conf g, weak p)", 33.0, (LOG(30.0), LOG(15.0)), (50.0, 2.0)),
+    ("extreme ratio (g»p, huge π gap)", 33.0, (LOG(32.0), LOG(0.05)), (500.0, 0.5)),
+]
+allok = True
+for name, D, m, p in cases:
+    k, locs, cmin = count_minima_1d(D, m, p)
+    ok = (k == 1)
+    allok &= ok
+    print(f"  {name:34}: local minima={k}  f_g*={locs[0] if len(locs) else float('nan'):.4f}  "
+          f"{'OK — unique' if ok else '*** MULTIPLE MINIMA ***'}")
+print(f"\n  ⇒ node solve is {'UNIMODAL (unique global min) in every 1-D case tested ⇒ order-independent, root-find-safe' if allok else 'NOT always unimodal — grid solve is safe, but Newton on μ is NOT guaranteed'}")
