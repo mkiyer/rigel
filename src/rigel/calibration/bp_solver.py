@@ -548,6 +548,7 @@ def node_sweep(
     n_grid_ss: int | None = None,
     gdna_prior=None,
     disagreement_sigma2: float,
+    emit_locked: bool = False,
     _capture: dict | None = None,
 ):
     """The belief-propagation sweep over the chain — gDNA AND per-strand RNA messages, in COUNT space (no
@@ -737,6 +738,22 @@ def node_sweep(
     )  # local precision (var floored: a sharp belief ⇒ large finite)
     pp_loc = 1.0 / np.maximum(vp_loc, _EPS)
     pn_loc = 1.0 / np.maximum(vn_loc, _EPS)
+
+    # G1-EMISSION FIX (`emit_locked`): a G1-locked seam (intergenic / TSS / TES / opposite-strand exon↔exon)
+    # is neither single-strand nor AMBIG, so `_local_solve` SKIPS it and returns f_g=0. The sweep seeds each
+    # node's running EMISSION belief (`fbg` in `_scan`) from that local solve, so a locked all-gDNA seam emits
+    # n_src = f_g·mass = 0 — it is SILENT, contradicting this module's "a locked all-gDNA node is a confident
+    # emitter" (a high-count gene-boundary gDNA crossing sends nothing to the adjacent exon). Reseed the locked
+    # nodes' running belief from their LOCKED init belief so they emit their structural gDNA. Their local
+    # precision is already 1/ε (vg_loc=0 for skipped nodes) so they stay locked and are not swayed by incoming
+    # messages. Their own FINAL value is unchanged — the solvable write-back keeps the init for non-solvable
+    # nodes — this only restores their OUTGOING messages. Empty nodes (mass 0) are also reseeded but never emit
+    # (the sm>0 gate). Default off (bit-identical) pending all-24 validation, incl. gdna_none false-positive.
+    if emit_locked:
+        locked = ~np.asarray(solvable, bool)
+        fg_loc = np.where(locked, f_g, fg_loc)
+        fp_loc = np.where(locked, f_pos, fp_loc)
+        fn_loc = np.where(locked, f_neg, fn_loc)
 
     # Belief-free Poisson message precision (`disagreement_shrinkage_prior_design_v2.md`): σ²_msg = σ²_imp +
     # 1/n_src ⇒ pr = n_src/(n_src·σ²_imp + 1). ONE total-density scalar for every channel (gDNA + both RNA
@@ -946,6 +963,10 @@ def node_sweep(
             eff_rna_r=ER[1],
             rho_floor=rho_floor,
             floor_mask=floor_mask,
+            # the full per-node global prior term on the solve grid (strand-free), so a diagnostic can
+            # replay _solve_nodes_logodds_all with message channels ablated (message help/hurt attribution).
+            global_lp=global_lp,
+            solve_grid=solve_grid,
         )
 
     return NodeBelief(

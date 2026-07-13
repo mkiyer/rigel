@@ -81,9 +81,15 @@ class OracleTruth:
 
     @classmethod
     def from_bam(cls, bam: str, index, cfg, work_dir: Path, tag: str,
-                 boundary_mass_tol: float = 1e-2) -> "OracleTruth":
+                 boundary_mass_tol: float = 1e-2, full_payload=None) -> "OracleTruth":
+        """Split the BAM by origin, scan each partition, and validate sum-to-full.
+
+        ``full_payload`` lets a caller that has ALREADY scanned the full BAM (e.g. to run
+        ``calibrate`` on it) hand that payload in, skipping a redundant full re-scan. It must be
+        the production scan of ``bam`` with the same ``cfg`` — sum-to-full then also PROVES the
+        oracle partitions reconstruct the exact payload the calibration consumed."""
         paths, read_counts = _split_bam(bam, work_dir, tag)
-        full = _scan_payload(bam, index, cfg)
+        full = full_payload if full_payload is not None else _scan_payload(bam, index, cfg)
         parts = {k: _scan_payload(paths[k], index, cfg) for k in ORIGINS}
         self = cls(full=full, parts=parts, read_counts=read_counts, boundary_mass_tol=boundary_mass_tol)
         self._validate()
@@ -126,6 +132,30 @@ class OracleTruth:
         G, R = self.region_unspliced()
         tot = G + R
         return np.where(tot > 0, G / np.maximum(tot, 1e-12), np.nan), tot
+
+    def region_pools(self) -> dict:
+        """Per-region TRUE contained mass on the accumulator basis, split by ORIGIN × genome STRAND.
+
+        The gDNA-vs-RNA calibration deconvolves the **unspliced** channels into the 2-simplex
+        ``(RNA₊, RNA₋, gDNA)`` (genome strand: ch0=+, ch1=−). Spliced (ch2 sense, ch3 antisense) is
+        guaranteed-mature RNA that never competes with gDNA. Calibration cannot split mature from
+        nascent — that is the downstream EM's job — so ``mature`` / ``nascent`` here are the TRUE
+        composition of the RNA the calibration lumps together. Every array is float64[R]; all eight
+        components sum (over origins × channels) to the full per-region contained mass (the validated
+        sum-to-full identity). Keys:
+          gdna_pos/gdna_neg          — unspliced gDNA by genome strand (should be ~50/50)
+          mat_uns_pos/mat_uns_neg    — unspliced mature (exon-body) RNA by genome strand
+          nas_uns_pos/nas_uns_neg    — unspliced nascent RNA by genome strand
+          mat_spl/nas_spl            — spliced RNA (mature / nascent), guaranteed-RNA, no gDNA rival
+        """
+        rc = lambda k: np.asarray(self.parts[k].region_contained, np.float64)  # noqa: E731
+        g, m, n = rc("gdna"), rc("mrna"), rc("nrna")
+        return dict(
+            gdna_pos=g[:, 0], gdna_neg=g[:, 1],
+            mat_uns_pos=m[:, 0], mat_uns_neg=m[:, 1],
+            nas_uns_pos=n[:, 0], nas_uns_neg=n[:, 1],
+            mat_spl=m[:, 2] + m[:, 3], nas_spl=n[:, 2] + n[:, 3],
+        )
 
     def override_masses(self, region_arrays) -> dict:
         """The TRUE per-region CalibrationResult mass arrays, built DIRECTLY from the per-origin substrates
