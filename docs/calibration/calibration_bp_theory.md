@@ -163,6 +163,37 @@ variance for `c` (enrichment-transfer for gDNA; along-transcript continuity for 
 **never be more precise than the source knows, nor than the edge reliably carries.** This honesty is not
 optional: §8 shows self-defense fails against an *overconfident* message.
 
+### 6.1 The transfer variance — why the current global `σ²_imp` is inflated (and how to send stronger, honest messages)
+
+The production model estimates a single global transfer variance from the **total-density** disagreement of
+(boundary, region) node pairs, measured **before** deconvolution. Under capture that variance is large, so all
+messages are heavily weakened — the impotence we observe. But the total-density disagreement **conflates three
+distinct sources**:
+
+1. **gDNA enrichment transfer** — the boundary's and region's gDNA densities differ because a capture probe may
+   sit on the region, straddle the boundary, or span the splice junction (boundary can even exceed the region).
+   *This is the variance we actually want.* We cannot observe probe placement, so it has an irreducible floor.
+2. **Composition / structure** — a boundary measures *crossing* fragments (spliced + unspliced) while a region
+   measures *contained* fragments; the two node **types** carry different RNA compositions at the same locus, so
+   their totals differ **even with identical gDNA**. This is *structural and predictable*, not transfer noise.
+3. **Poisson sampling** — count-based, known.
+
+Measuring on the **total** density folds (2) into the estimate, inflating it. Sandbox (`bp_theory.py` TEST 7):
+with a shared gDNA field (true enrichment σ²≈0.09) but different boundary/region RNA compositions,
+`Var(Δlog total) = 0.56` while `Var(Δlog gDNA) = 0.09` — **the total-density variance is 6.2× the true gDNA
+transfer variance.** So the current model over-weakens gDNA messages ~6×.
+
+**The fix follows from the boundary self-solve (§4):** transfer **per-component densities**, not totals. The
+gDNA message carries the gDNA transfer variance (source 1, floored by the unobservable probe placement); the RNA
+message carries the continuity variance (source 2 becomes a *within-component* quantity, much smaller). This
+recovers the tighter honest variance and lets us **send materially higher-precision messages without any
+dishonesty** — directly answering "can the recipient interpret stronger messages accurately?" *Yes, because the
+message is now honestly more precise.* The residual gDNA enrichment floor can be further reduced (not eliminated)
+by **stratifying** the estimate on observable proxies for the probe geometry (spliced mass present at the
+boundary ⇒ a probe near/across the junction; the density regime; the boundary type) and by estimating it from
+**gDNA-identifiable** edges — the RNA-free enriched exons (where the exon's gDNA density is observable) for the
+gDNA leg, and deep constitutive exon segments for the RNA leg.
+
 ---
 
 ## 7. Message propagation — forward-backward; messages change and decay
@@ -205,6 +236,17 @@ Self-defense is delivered by **three** mechanisms, all necessary:
    absolute, unconditional defense. Demo: a locked gDNA is unmoved (30.00) even by an overconfident wrong
    message.
 
+**Self-defense protects the CONFIDENT, not the BLANK — this bounds what "send stronger messages" can mean.** A
+blank node (π=0, e.g. an unstranded enriched exon before any evidence) has *no* defense: it adopts whatever
+message dominates, correct or not. So message precision must be **honest**, never dishonestly inflated — a
+stronger message is only safe if it is stronger *because it is genuinely more reliable* (§6.1: de-conflating the
+transfer variance earns real precision; simply raising `π` does not). The flagship collapse was in fact a blank
+exon dominated by a **confident-but-wrong local prior** (the depleted KDE), not by messages — which is why the
+first pass must be **prior-free** (§10): remove the confident-wrong prior so the blank node is governed by the
+honest messages (right direction) plus its own total-density constraint, which the joint solve amplifies. In
+AMBIG (2 DoF) the same law holds — `bp_theory.py` TEST 6: a confident gDNA survives an honest weak RNA+ message
+(the trade routes to RNA−) and is dominated only by an overconfident one; the node solve is unimodal (unique).
+
 **Practical corollary — the current tool's exposure.** The production *per-node* solve is joint
 (`_solve_nodes_logodds_all` on the log-odds simplex — good), **but** the sweep's *per-component running belief*
 (`fbg/fbp/fbn` in `bp_solver._scan`) is updated one component at a time and **relayed without being
@@ -244,12 +286,20 @@ When we do touch code, the theory prescribes:
 
 ## 11. Open theory items (before code)
 
-- **The per-edge transfer variances** `σ²_transfer(g)` (enrichment) and `σ²_transfer(s)` (RNA continuity) — how
-  are they estimated from the data (not hand-set)? This is the remaining quantitative piece; it decides, at
-  every edge, which component is the confidently-imputed one.
-- **AMBIG (2 DoF)** stress cases: opposite-strand overlapping transcripts where both RNA strands *and* gDNA are
-  active — confirm the joint solve + self-defense behave under two simultaneous weak/strong messages.
+- **CLOSED — convergence / uniqueness (was open items 2 & 4).** The node solve is **unimodal (unique global
+  minimum)** in every 1-D case tested (excess/μ<0, deficit/μ>0, two-confident-conflict, self-defense, extreme
+  precision gap) and in the AMBIG **2-D** case — so the forward-backward is exact and **order-independent**
+  (`bp_theory.py` TEST 5, TEST 6). Caveat: the clean monotonicity proof needs `2π_c+μe^{x_c}>0`, which fails in
+  the μ<0 (excess) regime; unimodality holds empirically there, but the production solver should use **bisection
+  on μ or a grid**, not a bare Newton, in that regime.
+- **The per-edge transfer variances** `σ²_transfer(g)` / `σ²_transfer(s)` — the remaining quantitative piece.
+  Plan (from §6.1): (i) **de-conflate** — estimate per-component, not on total density, which alone recovers
+  ~6× precision; (ii) estimate the **gDNA** enrichment leg from **gDNA-identifiable edges** (RNA-free enriched
+  exons) and the **RNA** continuity leg from deep constitutive exon segments; (iii) **stratify** on observable
+  probe-geometry proxies (spliced mass at the boundary, density regime, boundary type) to shrink the residual
+  toward its irreducible (unobservable-probe) floor. Build the estimator + validate in the sandbox next.
 - **Nascent in `nrna_present`** breaks "unspliced = gDNA"; the unspliced leg needs a nascent-vs-gDNA split
   (strand-deconvolved when stranded; open when unstranded).
-- **Convergence / order-independence** of the forward-backward on realistic multi-junction exons (the flagship
-  503 had disagreeing junctions) — verify the joint solve is stable to message order.
+- **The relay fix** (code-side, §8): the sweep's per-component running belief must be **sum-reconciled** (joint)
+  and exclude the recipient's own message before it is relayed — otherwise the Trojan horse re-enters the
+  message path.

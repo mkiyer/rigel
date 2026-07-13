@@ -241,3 +241,64 @@ for name, D, m, p in cases:
     print(f"  {name:34}: local minima={k}  f_g*={locs[0] if len(locs) else float('nan'):.4f}  "
           f"{'OK — unique' if ok else '*** MULTIPLE MINIMA ***'}")
 print(f"\n  ⇒ node solve is {'UNIMODAL (unique global min) in every 1-D case tested ⇒ order-independent, root-find-safe' if allok else 'NOT always unimodal — grid solve is safe, but Newton on μ is NOT guaranteed'}")
+
+
+# ------------------------------------------------------------------------------------------------------
+# TEST 6 — AMBIG (2 DoF): uniqueness + self-defense with THREE active components
+# ------------------------------------------------------------------------------------------------------
+def count_minima_2d(D, m, prec, n=300):
+    """Scan the AMBIG cost over the 2-simplex (f_g,f_p); count strict 2-D local minima."""
+    g = np.linspace(1e-3, 1 - 1e-3, n)
+    Fg, Fp = np.meshgrid(g, g); Fn = 1 - Fg - Fp
+    ok = Fn > 1e-3
+    r = [Fg * D, Fp * D, Fn * D]
+    C = np.where(ok, sum(prec[k] * (np.log(np.where(ok, r[k], 1)) - m[k]) ** 2 for k in range(3)), np.inf)
+    mins = 0
+    for i in range(1, n - 1):
+        for j in range(1, n - 1):
+            if not np.isfinite(C[i, j]):
+                continue
+            w = C[i - 1:i + 2, j - 1:j + 2]
+            if C[i, j] <= np.nanmin(w) and np.isfinite(w).sum() >= 6 and C[i, j] < np.partition(w.ravel(), 1)[1]:
+                mins += 1
+    return mins
+
+hdr("TEST 6 — AMBIG (2 DoF, all three components active). D=33.")
+# uniqueness
+k = count_minima_2d(33.0, (LOG(25.0), LOG(4.0), LOG(4.0)), (50.0, 1.0, 1.0))
+print(f"  uniqueness: 2-D local minima = {k}  ({'unique global min' if k == 1 else 'MULTIPLE'})")
+# self-defense: confident gDNA (25, π50), weak RNA± (4, π1). Wrong RNA+ message.
+base = {"g": (LOG(25.0), 50.0), "p": (LOG(4.0), 1.0), "n": (LOG(4.0), 1.0)}
+print("  self-defense (confident gDNA=25 π50; weak RNA± π1); a WRONG RNA+ message says ρ_p≈14:")
+for lab, mp in [("HONEST weak (π3)", 3.0), ("OVERCONFIDENT (π90)", 90.0)]:
+    b = dict(base); b["p"] = combine(base["p"], (LOG(14.0), mp))
+    rho = node_solve(33.0, b)
+    print(f"    {lab:22}: g={rho['g']:6.2f} p={rho['p']:6.2f} n={rho['n']:6.2f}  (f_g={rho['g']/33:.3f})")
+print("  ⇒ honest: gDNA protected, RNA- absorbs the RNA+ rise. Overconfident: gDNA dominated. 2-DoF obeys"
+      "\n    the same self-defense law (δ_c ∝ ρ_c/π_c) as 1-DoF; the trade routes to the weakest component.")
+
+
+# ------------------------------------------------------------------------------------------------------
+# TEST 7 — WHY total-density σ²_imp is INFLATED (the current production model) vs per-component transfer
+# ------------------------------------------------------------------------------------------------------
+hdr("TEST 7 — the current σ²_imp (TOTAL-density boundary↔region disagreement) CONFLATES 3 sources.")
+rng = np.random.default_rng(7)
+N = 40000
+# a boundary↔region pair sharing the SAME local gDNA field (enrichment transfers with modest noise σ=0.3),
+# but DIFFERENT compositions: boundary carries spliced RNA (crossing), region carries contained RNA — the
+# RNA densities are unrelated between the two node TYPES even at the same locus.
+rho_g = np.exp(rng.normal(np.log(5.0), 0.6, N))            # shared gDNA density (per pair)
+enrich = rng.normal(0.0, 0.30, N)                          # gDNA enrichment-transfer noise (the TRUE σ_g)
+g_b = rho_g; g_r = rho_g * np.exp(enrich)
+rna_b = np.exp(rng.normal(np.log(2.0), 1.0, N))            # boundary RNA (spliced, crossing)
+rna_r = np.exp(rng.normal(np.log(8.0), 1.0, N))            # region RNA (contained) — different magnitude
+tot_b, tot_r = g_b + rna_b, g_r + rna_r
+var_total = float(np.var(np.log(tot_b) - np.log(tot_r)))   # what the production model measures
+var_gdna = float(np.var(np.log(g_b) - np.log(g_r)))        # the TRUE gDNA transfer variance (=σ²_enrich)
+print(f"  Var(Δ log TOTAL density)  [current σ²_imp]      = {var_total:.3f}   ⇒ msg precision ≈ {1/var_total:.2f}")
+print(f"  Var(Δ log gDNA density)   [true enrichment σ²]  = {var_gdna:.3f}   ⇒ msg precision ≈ {1/var_gdna:.2f}")
+print(f"  ⇒ the total-density variance is {var_total/var_gdna:.1f}× the true gDNA transfer variance — the extra"
+      "\n    is COMPOSITION/structure (boundary=crossing vs region=contained), NOT enrichment noise. Measuring on"
+      "\n    TOTAL density before deconvolution CONFLATES them, so honest messages are over-weakened. Per-component"
+      "\n    transfer (enabled by the boundary self-solve) recovers the tighter true variance ⇒ stronger, still-honest"
+      "\n    messages — WITHOUT dishonestly inflating precision.")
