@@ -77,26 +77,33 @@ sweep (prior + messages), passing the **real spliced** (not `_zero_spl`), dissol
 
 ---
 
-## 2. The central open problem — the solve *frame* (the crux)
+## 2. The value default — RESOLVED (it was tilt-vs-tie-break, not the frame)
 
-The most recent finding, and the gate on implementation:
+Prototyped in `scripts/debug/density_frame.py`. The finding:
 
-**"Initial unspliced composition = 100 % gDNA" is a hard assignment (`f_g=1`), and needs no tuning constant. A
-tunable "nascent≈0 strength" is a *symptom* of the wrong solve frame — not a real modelling parameter.**
+"Initial unspliced composition = 100 % gDNA" is a hard default (`f_g=1`) and needs **no tuning constant**. The
+magic number I briefly introduced was the wrong *device*, not the wrong frame:
 
-- The current per-node solver works in **log-odds `f_g`** and, absent evidence, defaults to the **uniform
-  `f_g = 0.5`**. Making it default to the `f_g=1` **vertex** (nascent≈0) requires a tilt whose strength is a magic
-  number — an **artifact of the frame**, not of the assumption.
-- The vertex-free frame is the one `calibration_design.md` already names as the **message currency: per-component
-  density**. There, nascent≈0 is *structural* (`ρ_nascent = 0` by default, `ρ_gDNA = N_u/E_g` from the count);
-  evidence (strand imbalance, the spliced-mature message, neighbour messages) **peels RNA density up from zero**,
-  each by its own principled strength. `f_g` is emergent (`ρ_g/Σρ`); "no RNA evidence → `f_g=1`" falls out for
-  free; **no magic constant appears.**
+- A **tilt** `+c·log(f_g)` drives `f_g→1` with a strength that scales with `c` (`f_g` slides 0.83 → 0.95 → 1 as
+  c = 1 → 5 → 10) — a magic number.
+- A **tie-break** `−ε·(1−f_g)` merely breaks the flat-direction degeneracy toward the `f_g=1` vertex, and the
+  result is **INSENSITIVE to ε across 7 orders of magnitude** (`1e-2 … 1e-9`): absent strand → `f_g=1`
+  (nascent≈0), strand imbalance → peeled, all ε-invariant. A tie-break, not a strength.
 
-**Open architectural decision:** move the solve's *default* into per-component density space (clean, magic-free,
-aligned with the currency doc — a larger change to the per-node solve), vs. staying in log-odds `f_g` (which forces
-the tuning constant). Current lean: **density frame** — it is the correct answer the magic-number question exposed.
-This reshapes the unified-solver implementation and must be settled before code.
+**It works in the EXISTING log-odds solver** — the tie-break gives the identical ε-invariant result there as in a
+per-component count/density frame. So **"log-odds vs density frame" was a red herring**: the real issue was the
+DEFAULT (uniform-`f_g` reference → 0.5 vs. a **nascent≈0 vertex tie-break** → 1) and the *device* (tilt vs
+tie-break). **No re-architecture to a density solver is needed.**
+
+**Second finding — a real count-zero-info violation to fix alongside.** The strand **overdispersion** term
+(`od_g`/`od_r`) prefers `f_g=0.5` at κ=½ via its `−½·log(var)` normalization: a 50/50 split has lower
+Beta-Binomial variance (od ∝ component-count²), so the *count magnitude* tilts the gDNA-vs-RNA VALUE — forbidden
+by count-zero-info. It scales with `od` (→ 0.5 at od=0.05; harmless at the flagship's fitted `od_g≈0`), and it is
+present in production (`simplex.py`). **`od` must set the precision, not the value.**
+
+**So the value default is settled** — two targeted, magic-free changes in the existing per-node solver:
+(1) replace the uniform reference with the **nascent≈0 vertex tie-break**; (2) fix the **od count-zero-info
+violation** (od → precision only). No frame re-architecture; §3/#A closes.
 
 ---
 
@@ -104,26 +111,26 @@ This reshapes the unified-solver implementation and must be settled before code.
 
 | # | issue | status | approach |
 |---|---|---|---|
-| **A** | **Solve frame** (log-odds `f_g` vs per-component density) | **OPEN — the gate** | §2. Decide before implementing; density frame is the lean. |
+| **A** | **Value default** (nascent≈0 without a magic number) | **CLOSED (§2)** | It was tilt-vs-tie-break, not the frame. Use a `−ε·(1−f_g)` **tie-break** (ε-invariant) in the existing log-odds solver + fix the **od count-zero-info violation** (od → precision, not value). No re-architecture. |
 | **B** | **`φ` (density overdispersion)** — the honest precision cap | proxy only | A *clean* `φ` needs the *deconvolved* gDNA densities (a solve) — the same circularity as #3. The no-solve `estimate_phi` uses **total** density → conflated (0.004 `nrna_none` vs 0.023 `nrna_present`, RNA leaking in). **Ship `φ=0` at init** (honest structure, uncapped); derive the real `φ` post-solve alongside #3. |
 | **C** | **`σ²_imp` (message transfer variance)** — over-inflated | deferred (#3) | Total-density, **pooled over regimes** → dominated by enrichment jumps → messages over-weakened. Needs the **enriched-vs-depleted regime-stratified** model (within-regime → the reliable message variance; across-regime → the jump). **This is the end-to-end flagship bottleneck** — the boundary self-solve makes junctions emit correctly, but the message only *lands* once `σ²_imp` is de-conflated. |
 | **D** | **Unstranded + nascent (`nrna_present`)** | fundamental limit | gDNA and nascent are unspliced-identical without strand → nascent≈0 overshoots and *nothing* at init (or unstranded sweep) can peel it. Accepted, revisable; the honest edge of the design. |
 | **E** | **AMBIG magnitude self-solve** | open sub-problem | `p` depends only on the tilt, so strand can't peel an AMBIG node's `f_g` (holds `f_g=1`, needs the sweep). **With strand-specific data an AMBIG node may still admit a defined precision** — flagged by the user as a distinct, interesting problem to design separately. |
 | **F** | **Region contained-mature** | sweep-resolved | An exon's unspliced includes mature; only removable by the **boundary spliced-mature message** (sweep) or strand. Region init `f_g=1` is a placeholder (`var=∞`), not a claim. |
-| **G** | **Sweep architecture** — re-solve-from-scratch vs anchored-at-init | tied to #A | The sweep currently re-solves each node from the uniform reference (re-hedging to 0.5, discarding the init). It must instead be **anchored at nascent≈0** (density default) so boundaries keep emitting their gDNA. |
+| **G** | **Sweep architecture** — re-solve-from-scratch vs anchored-at-init | resolved by #A | The sweep re-solves each node from the uniform reference (re-hedging to 0.5, discarding the init). With #A's **tie-break default** it re-solves *toward nascent≈0* instead, so boundaries keep emitting their gDNA — no separate anchoring machinery needed. |
 
 ---
 
 ## 4. How we proceed (next steps)
 
-1. **Settle the frame (#A).** Decide log-odds vs per-component-density for the per-node solve's default. Prototype
-   the density-frame default in the sandbox (nascent≈0 structural, evidence peels up) and confirm it reproduces the
-   boundary A/B **without a tuning constant**. *(This is the immediate next step — it unblocks everything.)*
-2. **Implement the unified solver** on the chosen frame:
-   - init = hard `f_g=1` + count precision (§1.3), a direct assignment — dissolve the init grid solve + `_type_belief`;
-   - sweep = the one solver anchored at nascent≈0, passing real spliced + the mature channel — dissolve `_zero_spl`
-     + the `solvable`-gate;
-   - `φ=0` (honest structure).
+1. ~~**Settle the frame (#A).**~~ **DONE (§2):** tie-break, not tilt; existing solver; no re-architecture.
+2. **Implement the unified solver** (the immediate next step):
+   - **value default** = the `−ε·(1−f_g)` nascent≈0 **tie-break** replacing the uniform reference (Jeffreys +
+     symmetric Jacobian);
+   - **fix the od count-zero-info violation** (od → precision, not the value's `−½·log(var)` preference);
+   - **precision** = the count floor `1/(Var(log f_g) + 1/N_u + φ)`, `φ=0`;
+   - init = the solve with no prior/messages (dissolve `_type_belief`); sweep = the same solve + prior + messages +
+     real spliced + the mature channel (dissolve `_zero_spl` + the `solvable`-gate);
    - **Validate**: boundary A/B (from production), goldens, and no catastrophic end-to-end regression.
 3. **De-conflate `σ²_imp` (#C / #3).** The regime-stratified transfer variance — the step that makes the confident
    boundary emissions actually *land* in the enriched exons (the end-to-end flagship fix). Derive the clean `φ`
