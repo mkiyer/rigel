@@ -21,7 +21,10 @@ the enriched exons currently get pinned to f_g ≈ 0 by an overconfident deplete
 messages that carry the real gDNA signal can act — and those messages are themselves impotent or silent. The
 cure starts at initialization: give every node an honest self-solved precision, let boundaries self-solve
 their composition from the spliced-vs-unspliced structure (a strand-free gDNA/RNA readout), and run the first
-message pass **prior-free**, propagating **composition** (scale-free) rather than absolute density.
+message pass **prior-free**, messaging **per-component density fields** (gDNA everywhere; each RNA strand only
+where active) reconciled against each node's **observed total density** — not a single transferable
+"composition" (it jumps as strands switch on/off) and not absolute totals (the receiver reallocates to its own
+`D`). §5 derives how differing total densities reconcile.
 
 ---
 
@@ -158,39 +161,60 @@ nodes, which is a bug for the emitter story).
 
 ---
 
-## 5. The first message pass — propagate composition, not density (no prior)
+## 5. The message currency — per-component density fields reconciled to the observed total
 
-Consider a `+` splice-junction boundary **B** adjacent to its exon region **R**:
+**Composition is NOT the message currency, and neither is absolute total density.** Composition is not a single
+transferable object: the **active component set changes** across the chain — intergenic has one active component
+(gDNA), a single-strand node two (gDNA + one RNA strand), an AMBIG node three — so composition jumps
+discontinuously wherever a strand switches on or off (an intron at gDNA 100 % abuts an intron→exon boundary at,
+say, {RNA+ 80 %, gDNA 20 %}). Copying composition across that seam is meaningless. Copying *absolute* density is
+also wrong: a boundary with total density 10 cannot tell a region with total density 100 how to allocate its 100.
 
-```
-B: ρ_+ = 0.5, ρ_g = 3.0  → composition f_g = 0.857, precision(λ) ≈ 18.8   (self-solved, §3.4)
-R: 10 000 unspliced over L_eff ≈ 500 − μ_FL  → total density D_R ≈ 33, composition UNKNOWN (precision 0)
-```
+The correct currency is **per-component DENSITY**, where each component is a **field with its own continuity**,
+and the receiver's **observed total density is a hard SUM CONSTRAINT**:
 
-R's total density (33) is a precise direct count; its **composition** is a blank. B carries the composition at
-real precision. The message must impute R's **composition**, and R keeps its **own** total density:
+- **gDNA** is active everywhere — a smooth density field in log-space **modulo a multiplicative capture
+  enrichment factor**. Its message is a density `ρ_g`, imputable between any adjacent nodes (with an
+  enrichment-transfer variance on the edge).
+- **RNA+ / RNA−** are coverage fields active **only along their transcript**, and exactly `0` where the strand is
+  off. Their messages are densities that flow only between strand-active neighbours; a deactivation is a sink.
+- **The receiver observes its total density `D` at high precision, and its components must sum to `D`.** The
+  node solve is
+  ```
+  find ρ_g, ρ_+, ρ_- ≥ 0  with  Σ ρ_c = D   minimizing   Σ_c prec_c · (log ρ_c − m_c)²
+  ```
+  where `m_c` are the per-component message log-density targets (`prec_c = 0` for an active-but-uninformed
+  component). **Composition is an OUTPUT of this solve, never a message.**
 
-- **Composition transfer (correct).** Send B's `λ` (scale-free fraction). R adopts `f_g = 0.857` and computes
-  its gDNA density as `0.857 · 33 ≈ 28` — the right answer. Prior-free.
-- **Density transfer (the current tool — wrong).** Send B's *absolute* gDNA density `ρ_g = 3.0` and impute it
-  as R's gDNA density ⇒ `f_g = 3/33 = 0.09`, gDNA density ≈ 3 — the **undersampling collapse**. B's crossing
-  density (3.0) is far below R's interior density (33) because enrichment and crossing geometry differ, so B's
-  *absolute density* does not transfer; only its *composition* does.
+**How total-density differences reconcile (the key question).** The messages set the per-component *targets*; the
+sum constraint allocates the receiver's *own* `D`; the **excess** `D − Σ targets` flows, in log-space, to the
+**largest-target / lowest-precision active component**. So the split interpolates: pin a confidently-imputed
+component and make the rest the residual. Crucially this is only correct if **at least one component is imputed
+confidently *and correctly*** — total-density reconciliation cannot save a node where every component target is
+wrong or absent.
 
-The sandbox reproduces both exactly (`f_g` → 0.857 vs 0.091). It also shows the two safety properties that make
-this work prior-free:
+- **This recovers the flagship, robustly.** A gDNA-dominant junction (unspliced ≫ spliced) gives `ρ_g` target
+  3.0 vs `ρ_+` target 0.5; gDNA is the larger target, so the region's excess (33 − 3.5) flows to gDNA ⇒
+  `f_g ≈ 0.98`, `ρ_gDNA ≈ 32` — **not** the collapsed 0.002. It is *robust to the boundary undersampling*: the
+  spliced:unspliced **ratio sets the direction** (gDNA-dominant) and the region's own `D` sets the magnitude, so
+  the fact that the junction's crossing gDNA density (3.0) undersamples the exon interior (~30) does not matter.
+- **This *is* the collapse, named precisely.** The current tool imputes gDNA from a **depleted off-target
+  neighbour** (a tiny target) while RNA is the large free residual ⇒ the real excess gDNA is dumped into RNA
+  (`f_g → 0.09`). The fix is not a new "currency" — it is imputing gDNA from the **right source** (the junction's
+  own unspliced field, or the pass-0 enriched mode) so gDNA is the confidently-and-correctly-imputed component.
+- **Active-set changes are handled per-component.** At an intron→exon seam, gDNA transfers as a *density* from the
+  intron field (not as the intron's 100 % composition), and RNA+ is a newly-active component informed by the
+  boundary's *own* spliced coverage — the emergent composition (≈ {gDNA 45 %, RNA+ 55 %}) falls out of the
+  per-component fields plus the sum-to-`D` solve.
+- **Self-gating and barriers hold.** No unspliced gDNA at a boundary ⇒ `ρ_g` target → 0 ⇒ region imputed as RNA
+  (no false gDNA, no prior). Intergenic/TSS/TES stay f_g = 1 (unmovable) and are barriers — they do not inject
+  their gDNA composition into an adjacent expressed exon.
 
-- **Self-gating on gDNA-free libraries.** With `ρ_g = 0` at the boundary (no unspliced gDNA), `f_g → 0`, so R is
-  imputed as RNA — no false gDNA, no prior needed.
-- **Structural barriers hold.** An intergenic/TSS/TES lock stays f_g = 1 (unmovable) and does not inject its
-  gDNA into an adjacent expressed exon (it is a barrier, not an emitter into genes).
-
-> **Caveat — composition transfer is valid between physically related nodes.** B → its own adjacent exon shares
-> the same transcript coverage and the same local capture enrichment, so the composition transfers. It does
-> **not** transfer across a gene boundary (an intergenic lock and an expressed exon have different compositions
-> — hence the barrier), nor is a *single* junction's composition automatically the whole exon's when the exon
-> has multiple, disagreeing junctions. The message-precision / edge-gating model that governs *when* a
-> composition transfers is the next phase; this document fixes initialization and the composition currency.
+Prototype: `scripts/debug/bp_reconcile.py` derives and demonstrates all of the above (the three precision
+regimes, the active-set-change seam, and the flagship recovery). `scripts/debug/bp_sandbox.py` covers the init +
+self-solve. The **message-precision / edge-gating model** — the per-edge enrichment-transfer variance for gDNA
+and the along-transcript continuity for RNA that set each `prec_c` — is the next phase; this document fixes
+initialization and establishes that the currency is per-component density reconciled to the observed total.
 
 ---
 
