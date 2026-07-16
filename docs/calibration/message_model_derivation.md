@@ -129,11 +129,14 @@ Two things, both at the precision / edge-potential layer, **neither** a represen
 
 ---
 
-## 5. The mature gate — recommendation: DISMANTLE (work in a pristine architecture)
+## 5. The mature gate — DISMANTLED (landed 2026-07-16, commit `5e54fdc5`)
 
 **Decision (owner, 2026-07-16): dismantle the mature gate temporarily and pursue an honest, gate-free solution;
-re-introduce a gate only if we *cannot* solve accurately without it.** The reasoning, with the evidence and its
-limits stated honestly:
+re-introduce a gate only if we *cannot* solve accurately without it.** **LANDED** — the asymmetric
+`send_s = mrna_active[dst] or not mrna_active[src]` gate is removed from `bp_solver._scan`; only the structural
+per-strand `free_s` continuity gate remains. Revert `5e54fdc5` to restore the gate (the checkpoint `9b0f7419`
+is the gate-intact state). The `mrna_active_*` mask stays computed in the statics for the nascent factory (§6.2).
+The reasoning, with the evidence and its limits stated honestly:
 
 * **The gate is a band-aid for problems the DOF pie fix now owns.** Item 1 was created because the incoherent
   three-fraction relay let an exon over-send its (mostly-mature) RNA into introns with no way to bound it. The
@@ -204,10 +207,12 @@ destructive, in high nascent. Accuracy A/B (DOF-fix vs shipped, `ablate_replay`)
 
 ## 8. The path forward
 
-1. **Dismantle the mature gate** (§5) — return to a pristine, gate-free relay; accept the temporary suite
-   regression, documented, and recover it with (2), not with the gate.
+1. **Dismantle the mature gate** (§5) — ✅ **DONE** (commit `5e54fdc5`). Gate-free relay; the temporary suite
+   regression is documented and measured (gate helped 7/7: ALL mwae 0.1690 → 0.1925, concentrated in introns —
+   the mature leak; verified equivalent to the all-True mask). Recover it with (2), not with the gate.
 2. **Build the `σ²_transfer` model** (§6.1) — the load-bearing fix; per-component, count-independent, fit on raw
    observables, giving honest per-hop decay. This is where the "precision is fundamentally broken" is repaired.
+   **NEXT.**
 3. **The nascent factor** (§6.2) — replace the gate's job honestly (`RNA − mature`, intron-baseline).
 4. Re-measure the flagship + the whole suite; only if the pristine solution is *unacceptable* does a gate return
    as a documented last resort.

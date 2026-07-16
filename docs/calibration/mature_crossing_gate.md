@@ -1,6 +1,12 @@
 # The mature-crossing gate — the RNA message's missing structure gate
 
-**Status:** design + phased plan, **ready to implement once §5's decisions are closed**. Written 2026-07-16,
+**Status:** ⚠️ **DISMANTLED 2026-07-16 (commit `5e54fdc5`)** — the gate landed, then was removed in favour of a
+pristine, gate-free relay ([`message_model_derivation.md`](message_model_derivation.md) §5). This document is
+retained as the diagnosis + provenance of *why* the leak exists (§1 is still the authoritative statement of the
+defect the nascent factory must counter); its **prescription (the gate itself) is retired**. The gate helped
+7/7 cached conditions (ALL mwae 0.169 → 0.193, concentrated in introns), so the dismantle regresses the
+mature-heavy suite until the honest `σ²_transfer` + nascent factory (`RNA − mature`) land. The `mrna_active_*`
+mask it introduced stays computed in the statics (the nascent factory consumes it). Written 2026-07-16,
 branch `calib-ambig-init-wip`.
 **Supersedes:** [`splice_junction_absorption_fix.md`](archive/splice_junction_absorption_fix.md) (item 1) — that
 document's **diagnosis is retained and credited**; its **§3.2 prescription and §5 step 1 are retired** (§1.2).
