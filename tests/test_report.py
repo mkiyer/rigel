@@ -242,20 +242,12 @@ def test_capture_diagnostics_from_prior_labels_modes():
     logp = np.log(
         np.exp(-0.5 * ((x + 8) / 0.4) ** 2) + 0.6 * np.exp(-0.5 * ((x + 2) / 0.5) ** 2) + 1e-9
     )
-    prior = SimpleNamespace(
-        x_grid=x,
-        logP_grid=logp,
-        bandwidth=0.4,
-        n_eff=1234.0,
-        train_x=np.array([-8.1, -7.9, -2.1, -1.9]),
-        train_w=np.ones(4),
-        train_kind=np.array([0, 1, 2, 3]),
-        modes=((-8.0, 0.0), (-2.0, -0.5)),  # (x, logP) sorted by height desc
-    )
+    # the new GdnaRatePrior exposes the fitted curve as (log_rho, logP); from_prior finds the modes from it.
+    prior = SimpleNamespace(log_rho=x, logP=logp, bandwidth=0.4, n_cells=1234)
     diag = CalibrationDiagnostics.from_prior(prior)
     assert diag.depleted_mode < diag.enriched_mode
-    assert diag.separation_nats == pytest.approx(6.0, abs=1e-6)
-    assert diag.enrichment_factor == pytest.approx(np.exp(6.0), rel=1e-6)
+    assert diag.separation_nats == pytest.approx(6.0, abs=0.1)  # grid resolution ~0.04
+    assert diag.enrichment_factor == pytest.approx(np.exp(diag.separation_nats), rel=1e-6)
     assert diag.n_modes == 2
 
 

@@ -803,7 +803,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("mismatch_alpha", "scoring.mismatch_log_penalty", "log_penalty"),
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
     # -- CalibrationConfig: advanced --
-    _ParamSpec("gdna_prior_mixture_bridge", "calibration.gdna_prior_mixture_bridge"),
+    _ParamSpec("gdna_rate_prior_bandwidth", "calibration.gdna_rate_prior_bandwidth"),
     _ParamSpec("sweep_n_grid_single_strand", "calibration.sweep_n_grid_single_strand"),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
@@ -1355,14 +1355,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Convergence threshold for EM parameter updates (default: 1e-6).",
     )
     adv.add_argument(
-        "--gdna-prior-mixture-bridge",
-        dest="gdna_prior_mixture_bridge",
+        "--gdna-rate-prior-bandwidth",
+        dest="gdna_rate_prior_bandwidth",
         type=float,
         default=None,
-        help="Calibration gDNA-density prior mixture-bridge weight epsilon in [0,1) (default 0.01). "
-        "Floors the KDE valley between the depleted and enriched modes so a mixture-density node "
-        "(a capture boundary, a sparse-probe region) is interpreted as an enriched/depleted mixture "
-        "instead of collapsing to ~0 gDNA. 0 disables it (legacy KDE). Advanced calibration knob.",
+        help="Pass-0 gDNA-rate prior bandwidth h in decades (default 0.15). The kernel width of the "
+        "Fixed-Kernel Poisson-lognormal Mixture NPMLE P(log rho): larger h ⇒ smoother, weaker prior. "
+        "Advanced calibration knob.",
     )
     adv.add_argument(
         "--sweep-n-grid-single-strand",

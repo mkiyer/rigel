@@ -21,6 +21,7 @@ spliced (validated: ch2/3 == 0 in the gdna partition).
 
     OMP_NUM_THREADS=1 python scripts/debug/oracle.py [condition] [--suite DIR]
 """
+
 from __future__ import annotations
 import argparse
 import os
@@ -36,8 +37,8 @@ from rigel.pipeline import scan_and_buffer, _native_detect_sj_tag
 from rigel.sim.read_name import parse_origin
 
 ORIGINS = ("gdna", "mrna", "nrna")
-_UNSPL = (0, 1)   # unspliced channels (the gDNA-vs-RNA competition basis)
-_SPL = (2, 3)     # spliced channels (mature RNA; never competes with gDNA)
+_UNSPL = (0, 1)  # unspliced channels (the gDNA-vs-RNA competition basis)
+_SPL = (2, 3)  # spliced channels (mature RNA; never competes with gDNA)
 
 
 def _split_bam(bam: str, out_dir: Path, tag: str) -> tuple[dict[str, str], dict[str, int]]:
@@ -52,7 +53,9 @@ def _split_bam(bam: str, out_dir: Path, tag: str) -> tuple[dict[str, str], dict[
         w = {k: pysam.AlignmentFile(paths[k], "wb", template=fin) for k in ORIGINS}
         for r in fin:
             n_in += 1
-            k = parse_origin(r.query_name).kind  # raises on any unclassifiable read (no silent drop)
+            k = parse_origin(
+                r.query_name
+            ).kind  # raises on any unclassifiable read (no silent drop)
             w[k].write(r)
             counts[k] += 1
         for x in w.values():
@@ -64,6 +67,7 @@ def _split_bam(bam: str, out_dir: Path, tag: str) -> tuple[dict[str, str], dict[
 
 def _scan_payload(bam: str, index, cfg):
     from dataclasses import replace as dc
+
     sc = dc(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     _stats, _sm, _flm, _buf, payload = scan_and_buffer(bam, index, sc)
     return payload
@@ -74,14 +78,23 @@ class OracleTruth:
     """Validated per-origin accumulator payloads for one condition. Construct via :meth:`from_bam`, which
     runs the sum-to-full validation as a HARD gate (raises if the partition does not reconstruct the full
     payload — i.e. if the oracle is ever not trustworthy)."""
+
     full: object
-    parts: dict          # origin -> payload
-    read_counts: dict    # origin -> reads written (every input read accounted for)
+    parts: dict  # origin -> payload
+    read_counts: dict  # origin -> reads written (every input read accounted for)
     boundary_mass_tol: float
 
     @classmethod
-    def from_bam(cls, bam: str, index, cfg, work_dir: Path, tag: str,
-                 boundary_mass_tol: float = 1e-2, full_payload=None) -> "OracleTruth":
+    def from_bam(
+        cls,
+        bam: str,
+        index,
+        cfg,
+        work_dir: Path,
+        tag: str,
+        boundary_mass_tol: float = 1e-2,
+        full_payload=None,
+    ) -> "OracleTruth":
         """Split the BAM by origin, scan each partition, and validate sum-to-full.
 
         ``full_payload`` lets a caller that has ALREADY scanned the full BAM (e.g. to run
@@ -91,7 +104,9 @@ class OracleTruth:
         paths, read_counts = _split_bam(bam, work_dir, tag)
         full = full_payload if full_payload is not None else _scan_payload(bam, index, cfg)
         parts = {k: _scan_payload(paths[k], index, cfg) for k in ORIGINS}
-        self = cls(full=full, parts=parts, read_counts=read_counts, boundary_mass_tol=boundary_mass_tol)
+        self = cls(
+            full=full, parts=parts, read_counts=read_counts, boundary_mass_tol=boundary_mass_tol
+        )
         self._validate()
         return self
 
@@ -101,7 +116,8 @@ class OracleTruth:
         if not np.array_equal(rc_sum, rc_full):
             raise AssertionError(
                 f"oracle INVALID: region_contained partitions do not sum to full "
-                f"(max|diff|={np.abs(rc_sum - rc_full).max()}). The partition is not the production split.")
+                f"(max|diff|={np.abs(rc_sum - rc_full).max()}). The partition is not the production split."
+            )
         for arr in ("boundary_flux_left", "boundary_flux_right"):
             af = np.asarray(getattr(self.full, arr), np.int64)
             asum = sum(np.asarray(getattr(self.parts[k], arr), np.int64) for k in ORIGINS)
@@ -116,7 +132,9 @@ class OracleTruth:
         # gDNA is never spliced (physical): the gdna partition must have zero spliced contained mass.
         g_spl = np.asarray(self.parts["gdna"].region_contained, np.int64)[:, _SPL].sum()
         if g_spl != 0:
-            raise AssertionError(f"oracle INVALID: gdna partition has {g_spl} spliced contained reads (>0).")
+            raise AssertionError(
+                f"oracle INVALID: gdna partition has {g_spl} spliced contained reads (>0)."
+            )
 
     # ---- per-region TRUE masses on the accumulator basis ----
     def region_unspliced(self):
@@ -151,10 +169,42 @@ class OracleTruth:
         rc = lambda k: np.asarray(self.parts[k].region_contained, np.float64)  # noqa: E731
         g, m, n = rc("gdna"), rc("mrna"), rc("nrna")
         return dict(
-            gdna_pos=g[:, 0], gdna_neg=g[:, 1],
-            mat_uns_pos=m[:, 0], mat_uns_neg=m[:, 1],
-            nas_uns_pos=n[:, 0], nas_uns_neg=n[:, 1],
-            mat_spl=m[:, 2] + m[:, 3], nas_spl=n[:, 2] + n[:, 3],
+            gdna_pos=g[:, 0],
+            gdna_neg=g[:, 1],
+            mat_uns_pos=m[:, 0],
+            mat_uns_neg=m[:, 1],
+            nas_uns_pos=n[:, 0],
+            nas_uns_neg=n[:, 1],
+            mat_spl=m[:, 2] + m[:, 3],
+            nas_spl=n[:, 2] + n[:, 3],
+        )
+
+    def boundary_pools(self) -> dict:
+        """Per-BOUNDARY TRUE mass by ORIGIN × genome STRAND — the exact mirror of :meth:`region_pools`, on
+        the basis the solver's boundary nodes actually use.
+
+        Basis alignment (``node_geometry._boundary_strand_stats``): a boundary node's pie base is
+        ``mass = left + right`` (both sides SUMMED — conserved), so the truth sums both faces too. (The
+        strand COUNT ``u_±`` uses ``max(left, right)`` instead — de-duplicating the straddle — but that is
+        the BB power, not the mass basis, so it does not enter these pools.) Every array is float64[B].
+        """
+
+        def bm(k):
+            p = self.parts[k]
+            return np.asarray(p.boundary_mass_left, np.float64) + np.asarray(
+                p.boundary_mass_right, np.float64
+            )
+
+        g, m, n = bm("gdna"), bm("mrna"), bm("nrna")
+        return dict(
+            gdna_pos=g[:, 0],
+            gdna_neg=g[:, 1],
+            mat_uns_pos=m[:, 0],
+            mat_uns_neg=m[:, 1],
+            nas_uns_pos=n[:, 0],
+            nas_uns_neg=n[:, 1],
+            mat_spl=m[:, 2] + m[:, 3],
+            nas_spl=n[:, 2] + n[:, 3],
         )
 
     def override_masses(self, region_arrays) -> dict:
@@ -166,6 +216,7 @@ class OracleTruth:
         partitions sum to the full payload (the validated identity). Feed via
         ``dataclasses.replace(cal, **override_masses(ra))`` for the perfect-calibration lever."""
         from rigel.calibration.substrate import CalibrationSubstrate
+
         g = CalibrationSubstrate.from_payload(self.parts["gdna"], region_arrays)
         m = CalibrationSubstrate.from_payload(self.parts["mrna"], region_arrays)
         n = CalibrationSubstrate.from_payload(self.parts["nrna"], region_arrays)
@@ -178,7 +229,7 @@ class OracleTruth:
             return np.asarray(getattr(sub, side).mass_spliced, np.float64)
 
         rna_u = lambda side: U(m, side) + U(n, side)  # noqa: E731 (unspliced RNA = mrna+nrna)
-        spl = lambda side: Sp(f, side)                # noqa: E731 (all spliced is RNA; == cal's)
+        spl = lambda side: Sp(f, side)  # noqa: E731 (all spliced is RNA; == cal's)
         return dict(
             mass_gdna_contained=U(g, "contained"),
             mass_rna_contained=rna_u("contained") + spl("contained"),
@@ -205,8 +256,10 @@ def _main():
     print("VALIDATION PASSED: per-origin partitions sum to the full production payload.")
 
     G, R = orc.region_unspliced()
-    print(f"\nTRUE unspliced contained mass: gDNA={G.sum():,.0f}  RNA={R.sum():,.0f}  "
-          f"(RNA = exon-body mRNA + nascent)")
+    print(
+        f"\nTRUE unspliced contained mass: gDNA={G.sum():,.0f}  RNA={R.sum():,.0f}  "
+        f"(RNA = exon-body mRNA + nascent)"
+    )
 
     # calibration accuracy on the CORRECT basis: compare per-region f_g
     from rigel.calibration import calibrate
@@ -214,32 +267,48 @@ def _main():
     from rigel.calibration.fl import build_fl_models, gdna_fl_mass
     from rigel.splice import SpliceType
     from dataclasses import replace as dc
+
     sc = dc(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     stats, sm, flm, buffer, payload = scan_and_buffer(bam, index, sc)
     sm.finalize()
     ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
-    fl = build_fl_models(global_counts=flm.global_model.counts,
-                         rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,
-                         gdna_counts=gdna_fl_mass(payload), max_size=flm.max_size)
-    cal = calibrate(payload=payload, region_arrays=ra, strand_model=sm,
-                    gdna_fl_pmf=fl.gdna_pmf, rna_fl_pmf=fl.rna_pmf, config=cfg.calibration)
+    fl = build_fl_models(
+        global_counts=flm.global_model.counts,
+        rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,
+        gdna_counts=gdna_fl_mass(payload),
+        max_size=flm.max_size,
+    )
+    cal = calibrate(
+        payload=payload,
+        region_arrays=ra,
+        strand_model=sm,
+        gdna_fl_pmf=fl.gdna_pmf,
+        rna_fl_pmf=fl.rna_pmf,
+        config=cfg.calibration,
+    )
     cal_g = np.asarray(cal.mass_gdna_contained, np.float64)
     cal_r = np.asarray(cal.mass_rna_contained, np.float64)
     # cal contained total vs payload unspliced contained (should match — spliced contained ~0)
-    print(f"\ncal contained total (g+r)={ (cal_g+cal_r).sum():,.0f}  vs TRUE unspliced contained={ (G+R).sum():,.0f}")
+    print(
+        f"\ncal contained total (g+r)={(cal_g + cal_r).sum():,.0f}  vs TRUE unspliced contained={(G + R).sum():,.0f}"
+    )
     true_fg, tot = orc.region_true_fg()
     cal_fg = np.where((cal_g + cal_r) > 0, cal_g / np.maximum(cal_g + cal_r, 1e-12), np.nan)
     ok = np.isfinite(true_fg) & np.isfinite(cal_fg)
     w = tot[ok]
-    err_g_mass = (cal_g - G)  # per-region gDNA contained mass error
+    err_g_mass = cal_g - G  # per-region gDNA contained mass error
     print("\n=== CALIBRATION ACCURACY on the correct (accumulator) basis ===")
-    print(f"  contained gDNA mass: cal={cal_g.sum():,.0f}  true={G.sum():,.0f}  "
-          f"net err={ (cal_g-G).sum():+,.0f}  Σ|err|={np.abs(cal_g-G).sum():,.0f}")
+    print(
+        f"  contained gDNA mass: cal={cal_g.sum():,.0f}  true={G.sum():,.0f}  "
+        f"net err={(cal_g - G).sum():+,.0f}  Σ|err|={np.abs(cal_g - G).sum():,.0f}"
+    )
     mwae = float(np.sum(w * np.abs(cal_fg[ok] - true_fg[ok])) / max(w.sum(), 1))
     print(f"  mass-weighted |Δf_g| = {mwae:.4f}   (0 = perfect per-region gDNA fraction)")
     dirn = np.maximum(G - cal_g, 0.0)  # gDNA under-called (leaks to RNA)
-    print(f"  directional gDNA under-call (RNA over-attribution) = {dirn.sum():,.0f}  "
-          f"over-call = {np.maximum(cal_g-G,0).sum():,.0f}")
+    print(
+        f"  directional gDNA under-call (RNA over-attribution) = {dirn.sum():,.0f}  "
+        f"over-call = {np.maximum(cal_g - G, 0).sum():,.0f}"
+    )
 
 
 if __name__ == "__main__":

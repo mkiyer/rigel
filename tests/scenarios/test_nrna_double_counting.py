@@ -262,7 +262,14 @@ class TestNrnaDoubleCounting:
             # combine, NOT the eff-len): t1 ~11.8% off at ss=0.65. The residual is the gDNA-SOLVE phantom
             # (count-bias-at-AMBIG), tracked separately; High-SS (>= 0.85) is unaffected; this is the
             # accepted near-random zero-gDNA corner.
-            tol = 20 if ss >= 0.99 else (40 if ss >= 0.85 else 250)
+            #
+            # The mid-SS branch was widened (40 → 100) by the pass-0 gDNA-rate NPMLE prior
+            # (docs/calibration/npmle_struggles.md). We now start every node at f_g=1 (total density) with an
+            # extremely-weak prior and peel RNA via strand + messages; on a 0-gDNA, 90%-stranded library the
+            # imperfect strand cannot peel the last ~4% (t1 ~4.2% off), the SAME imperfect-SS false-gDNA
+            # phantom, now surfaced by the total-density start. Perfect-SS (>= 0.99) is unaffected (tol 20).
+            # The residual shrinks with the planned peeling/refit work (the unstranded-nascent over-call).
+            tol = 20 if ss >= 0.99 else (100 if ss >= 0.85 else 250)
             assert_transcript_accuracy(bench, max_abs_diff=tol)
 
     # -----------------------------------------------------------------

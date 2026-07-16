@@ -284,58 +284,44 @@ class CalibrationConfig:
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
     sweep_n_tilt: int | None = None
 
-    #: **Phase-2 gDNA mixture prior** (``calibration.gdna_density_prior``). Calibration runs TWO sweeps:
-    #: pass 1 solves the single-strand nodes with the extremely-weak stability floor, a nonparametric
-    #: ``P(log ρ_g)`` KDE is trained on those solved densities, and pass 2 re-solves ALL nodes with that
-    #: mixture as the per-node prior (self-scaling — it fills the strand tilt's null space on AMBIG nodes and
-    #: recedes where the strand pins f_g). Pass 2 falls back to the pass-1 belief only when the training
-    #: substrate is too small to fit a KDE.
-    #:
-    #: The KDE **bandwidth** selector (the one knob): ``"silverman"`` (robust default), ``"lscv"``
-    #: (likelihood cross-validation), or a float (fixed ``h`` in log-density units). Decided empirically on
-    #: real data via ``scripts/debug/plot_gdna_prior.py`` (design §7.1); do NOT hard-code a magic value.
-    gdna_prior_bandwidth: str | float = "silverman"
+    #: **Relay fold quadrature** (the coherent ``(λ,θ)`` EP relay — ``bp_solver._fold_lambda``,
+    #: ``docs/calibration/dof_pie_relay_implementation_plan.md`` §6.1). The relay folds each incoming message
+    #: onto the running ``λ`` belief by a two-stage self-correcting grid moment-match: a COARSE grid locates the
+    #: posterior peak + curvature, a FINE grid re-centered on it (``refine`` iterations) resolves the moments.
+    #: These are **numerical-resolution knobs, NOT model dials** — the same class as ``sweep_n_grid``. The
+    #: prototype (``scripts/debug/dof_pie_relay_check.py`` C8) tracks a 4001-point reference to 2.5e-3 at these
+    #: defaults; they are conservative, trade only against compute, and are to be hardened on genome-scale data.
+    fold_coarse_k: int = 33
+    fold_fine_k: int = 33
+    fold_sigma_coverage: float = 6.0
+    fold_refine_iters: int = 3
 
-    #: **Mixture-bridge weight ε∈[0,1)** for the Phase-2 gDNA-density prior (Fix 1;
-    #: ``bp_solver._kde_logprior``). The KDE is estimated from clean (unimodal) region nodes, so it develops a
-    #: deep VALLEY between the depleted and enriched modes; a node whose current-belief gDNA density is a
-    #: spatial MIXTURE (a capture boundary, a sparse-probe region) lands in that valley by construction and
-    #: collapses to ``f_g≈0``, emitting a pathologic RNA message that crushes its neighbours. Mixing the KDE
-    #: with a uniform "any-mixture" bridge over the observed density support at weight ε floors the valley (no
-    #: collapse) while leaving the KDE's real tails outside the support intact (false-positive suppression
-    #: unchanged). ``0`` disables it (bit-exact legacy KDE). The level is robust — the peak/valley gap is ~10²
-    #: nats, so any small ε defeats the collapse cliff; ``0.01`` is the validated default. Advanced knob;
-    #: design: ``docs/calibration/boundary_kde_valley_collapse_and_simplex_precision.md``.
-    gdna_prior_mixture_bridge: float = 0.01
+    #: **Pass-0 gDNA-rate prior bandwidth** ``h`` (decades) for the Fixed-Kernel Poisson-lognormal Mixture
+    #: NPMLE (``calibration.gdna_rate_prior.GdnaRatePrior``). The prior ``P(log ρ)`` is a mixture of fixed-width
+    #: Gaussian kernels on a log-rate grid, fit ONCE (belief-free, on all nodes' total unspliced density) by
+    #: plain EM — deterministic, no spline. The fixed ``h`` is the KDE-style bandwidth: it forbids any peak
+    #: sharper than ``h`` (smooth, never a bed-of-nails) and the resulting prior is extremely weak
+    #: (``n_eff≈0.15`` pseudo-obs), so strand + messages dominate. Grid size / EM iters are perf-only knobs
+    #: left at the fitter's defaults. Design: ``docs/calibration/npmle_struggles.md``.
+    gdna_rate_prior_bandwidth: float = 0.15
 
-    #: **Min KDE training nodes** — the Phase-2 gDNA-density KDE prior is fit only when at least this many
-    #: gDNA-density "teacher" nodes exist; below it calibration falls back to the pass-1 prior-free belief
-    #: (never fit a garbage mixture on too little data). Real genomes have millions of teachers; only tiny
-    #: single-locus / toy scenarios trip this, so the exact value is not sensitive.
-    calib_kde_min_training_nodes: int = 10
-
-    #: **KDE mixture-bridge support trim (percent)** — the uniform "any-mixture" bridge (``gdna_prior_mixture_bridge``)
-    #: is bounded to the ``[trim, 100−trim]`` percentiles of the training gDNA-density support, so it floors the
-    #: valley between the depleted/enriched KDE modes without extending into the KDE's real tails (preserving
-    #: high-density false-positive suppression). A robustness trim of the density support (percentiles, not
-    #: min/max, so outliers don't set the range); low-sensitivity.
-    calib_kde_bridge_trim_pct: float = 0.5
+    #: **Calibration refit iterations.** Pass-0 bootstraps from TOTAL density: an extremely weak gDNA-rate
+    #: prior + an RNA-inflated scalar message precision ⇒ deliberately GENTLE messages that nudge rather than
+    #: ruin the solve. Each refit then re-estimates BOTH population models on the *solved* gDNA rates — P(ρ)
+    #: (`GdnaRatePrior`, on the believed gDNA counts + belief width) and the honest, non-constant per-node
+    #: σ²_imp(ρ) (`message_precision.adjacent_imputation_variance`) — so messages strengthen exactly where the
+    #: data has earned it and the solve converges. ``0`` ⇒ the pass-0 bootstrap alone (no refit).
+    calib_refit_iters: int = 1
 
     def __post_init__(self) -> None:
-        if not (0.0 <= float(self.gdna_prior_mixture_bridge) < 1.0):
+        if self.calib_refit_iters < 0:
             raise ValueError(
-                "CalibrationConfig.gdna_prior_mixture_bridge must be in [0, 1); "
-                f"got {self.gdna_prior_mixture_bridge}."
+                f"CalibrationConfig.calib_refit_iters must be >= 0; got {self.calib_refit_iters}."
             )
-        if self.calib_kde_min_training_nodes < 1:
+        if not (0.0 < float(self.gdna_rate_prior_bandwidth) < 5.0):
             raise ValueError(
-                "CalibrationConfig.calib_kde_min_training_nodes must be >= 1; "
-                f"got {self.calib_kde_min_training_nodes}."
-            )
-        if not (0.0 <= float(self.calib_kde_bridge_trim_pct) < 50.0):
-            raise ValueError(
-                "CalibrationConfig.calib_kde_bridge_trim_pct must be in [0, 50); "
-                f"got {self.calib_kde_bridge_trim_pct}."
+                "CalibrationConfig.gdna_rate_prior_bandwidth must be in (0, 5) decades; "
+                f"got {self.gdna_rate_prior_bandwidth}."
             )
         if self.sweep_n_grid < 2:
             raise ValueError(

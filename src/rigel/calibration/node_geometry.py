@@ -8,8 +8,8 @@ the FL pmfs — no sweep state, no global prior.
   per-component gDNA-/RNA-FL effective lengths, the boundary's one-sided motif-stranded spliced mass). Per-face
   because a boundary's two sides lie in different-sized regions and a message uses the side FACING the
   destination; a region presents the same contained geometry both ways.
-* `NodeBelief` / `NodeDensities` / `node_densities` — the per-node pie ``(f_pos, f_neg, f_g)`` + the
-  per-component densities ``rho = f·M/E`` that are the sweep's message currency.
+* `NodeBelief` — the per-node pie ``(f_pos, f_neg, f_g)``; the per-component message densities
+  ``rho = f·M/E`` are computed inline in ``bp_solver.node_sweep``.
 * `NodeStatics` / `build_node_statics` — the static per-node solver inputs (per-strand counts, masks, masses).
 * `init_beliefs` — the signature-binary G1/G2/G3 initial belief.
 * `_node_region_type` — per-chain-node coarse region type (intergenic/intron/exon), shared with the prior
@@ -35,12 +35,12 @@ from .node_chain import BOUNDARY, REGION, NodeChain
 from .signature import (
     BIT_EXON_NEG,
     BIT_EXON_POS,
-    BIT_INTRON_NEG,
-    BIT_INTRON_POS,
     TS_AMBIG,
     TS_NEG,
     TS_POS,
     coarse_type_array,
+    mrna_active_strands,
+    nrna_active_strands,
 )
 from .simplex_logodds import _solve_nodes_logodds_all
 
@@ -48,16 +48,12 @@ __all__ = [
     "NodeGeometry",
     "build_node_geometry",
     "NodeBelief",
-    "NodeDensities",
-    "node_densities",
     "NodeStatics",
     "build_node_statics",
     "init_beliefs",
 ]
 
 _EPS = 1.0e-9
-_POS_BITS = BIT_EXON_POS | BIT_INTRON_POS
-_NEG_BITS = BIT_EXON_NEG | BIT_INTRON_NEG
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,10 +74,21 @@ class NodeGeometry:
         np.ndarray
     )  # one-sided spliced-crossing RNA eff-len (half-triangle E[min²/2ℓ]) facing left
     eff_spl_right: np.ndarray
-    spliced_pos_left: np.ndarray  # + motif spliced mass on the left face (boundary, exon-on-left)
+    spliced_pos_left: np.ndarray  # + motif spliced MASS on the left face (boundary, exon-on-left)
     spliced_pos_right: np.ndarray
     spliced_neg_left: np.ndarray
     spliced_neg_right: np.ndarray
+    # The matching integer spliced COUNT (flux), same faces, same motif/exon routing as the mass above.
+    # MASS is the correct numerator for a DENSITY (`spliced/eff_spl`); the COUNT is what a Poisson VARIANCE
+    # needs (`Var(log rho_m) = 1/n`, not `1/mass` — mass sums fractional per-fragment shares, so `1/mass`
+    # over-states the variance; the Kish n_eff = (sum w)^2/sum w^2 >= mass). Precedent for carrying both:
+    # `_boundary_strand_stats` already takes the integer flux for the BB strand power and the float mass for
+    # the pie base. Currently UNUSED by the solver — plumbed for the priority-#3 mature-measurement channel
+    # (docs/calibration/boundary_spliced_channel_design.md §4.1); inert until that lands.
+    spliced_n_pos_left: np.ndarray
+    spliced_n_pos_right: np.ndarray
+    spliced_n_neg_left: np.ndarray
+    spliced_n_neg_right: np.ndarray
 
 
 def build_node_geometry(
@@ -126,6 +133,13 @@ def build_node_geometry(
     bmass_r = np.asarray(bsub.right.mass_unspliced, dtype=np.float64)
     bspl_l = np.asarray(bsub.left.mass_spliced, dtype=np.float64)  # sense+antisense summed
     bspl_r = np.asarray(bsub.right.mass_spliced, dtype=np.float64)
+    # the matching integer flux (same channels, summed the same way) — the Poisson count for the variance
+    bspn_l = np.asarray(bsub.left.n_spliced_sense, np.float64) + np.asarray(
+        bsub.left.n_spliced_antisense, np.float64
+    )
+    bspn_r = np.asarray(bsub.right.n_spliced_sense, np.float64) + np.asarray(
+        bsub.right.n_spliced_antisense, np.float64
+    )
     B = blr.shape[0]
     # a boundary's per-side crossing eff-len = its flank region's E[min(ℓ,L)] (0 at a −1 terminal flank)
     b_eff_g_l = np.where(blr >= 0, side_eff_g[np.clip(blr, 0, R - 1)], 0.0)
@@ -143,17 +157,25 @@ def build_node_geometry(
     js = np.asarray(boundary_substrate.junction_strand).reshape(
         -1
     )  # TS_POS / TS_NEG / 0 (== Strand)
-    any_exon_l = (sig_l & (BIT_EXON_POS | BIT_EXON_NEG)) != 0
-    any_exon_r = (sig_r & (BIT_EXON_POS | BIT_EXON_NEG)) != 0
+    # STRAND-AWARE routing: mature RNA is single-stranded, and a splice junction is single-stranded with a
+    # KNOWN, data-type-invariant strand (the genomic splice motif). A junction absorbs mature ONLY on its own
+    # strand, so its spliced mass routes to a flank carrying THAT STRAND's exon bit — never merely "any exon".
+    # At an AMBIG seam (overlapping opposite-strand transcripts) a + junction beside a −-only exon must NOT
+    # deposit + mature there, and vice versa. Per strand: TS_POS → BIT_EXON_POS flanks, TS_NEG → BIT_EXON_NEG.
+    exon_pos_l = (sig_l & BIT_EXON_POS) != 0
+    exon_pos_r = (sig_r & BIT_EXON_POS) != 0
+    exon_neg_l = (sig_l & BIT_EXON_NEG) != 0
+    exon_neg_r = (sig_r & BIT_EXON_NEG) != 0
 
-    def _spliced_faces(strand_val):
-        on = (
-            js == strand_val
-        )  # the junction is on this strand → its exon flank carries the mature floor
-        return np.where(on & any_exon_l, bspl_l, 0.0), np.where(on & any_exon_r, bspl_r, 0.0)
+    def _spliced_faces(strand_val, exon_l, exon_r, vl, vr):
+        on = js == strand_val  # the junction is on this strand → its SAME-STRAND exon flank carries the mature
+        return np.where(on & exon_l, vl, 0.0), np.where(on & exon_r, vr, 0.0)
 
-    b_spl_pos_l, b_spl_pos_r = _spliced_faces(TS_POS)
-    b_spl_neg_l, b_spl_neg_r = _spliced_faces(TS_NEG)
+    b_spl_pos_l, b_spl_pos_r = _spliced_faces(TS_POS, exon_pos_l, exon_pos_r, bspl_l, bspl_r)
+    b_spl_neg_l, b_spl_neg_r = _spliced_faces(TS_NEG, exon_neg_l, exon_neg_r, bspl_l, bspl_r)
+    # counts: the SAME gate, so `spliced_n_*` is nonzero exactly where `spliced_*` is
+    b_spn_pos_l, b_spn_pos_r = _spliced_faces(TS_POS, exon_pos_l, exon_pos_r, bspn_l, bspn_r)
+    b_spn_neg_l, b_spn_neg_r = _spliced_faces(TS_NEG, exon_neg_l, exon_neg_r, bspn_l, bspn_r)
 
     # --- gather onto the chain (region nodes ← region arrays; boundary nodes ← boundary arrays) ---
     ri_ = np.clip(idx, 0, R - 1)  # region index where is_reg
@@ -178,6 +200,10 @@ def build_node_geometry(
     spliced_pos_right = pick(zeros_R, b_spl_pos_r)
     spliced_neg_left = pick(zeros_R, b_spl_neg_l)
     spliced_neg_right = pick(zeros_R, b_spl_neg_r)
+    spliced_n_pos_left = pick(zeros_R, b_spn_pos_l)
+    spliced_n_pos_right = pick(zeros_R, b_spn_pos_r)
+    spliced_n_neg_left = pick(zeros_R, b_spn_neg_l)
+    spliced_n_neg_right = pick(zeros_R, b_spn_neg_r)
 
     return NodeGeometry(
         n_nodes=int(chain.n_nodes),
@@ -193,6 +219,10 @@ def build_node_geometry(
         spliced_pos_right=spliced_pos_right,
         spliced_neg_left=spliced_neg_left,
         spliced_neg_right=spliced_neg_right,
+        spliced_n_pos_left=spliced_n_pos_left,
+        spliced_n_pos_right=spliced_n_pos_right,
+        spliced_n_neg_left=spliced_n_neg_left,
+        spliced_n_neg_right=spliced_n_neg_right,
     )
 
 
@@ -207,7 +237,8 @@ class NodeBelief:
     send — a source's outgoing precision is degraded from its own `Var_own = (M/E)²·Var(f_c)` by the
     communication noise, so an unsure node speaks quietly (Phase 2). The composition is stored as a FRACTION
     (the face-invariant quantity — a boundary has two faces but one composition); density `ρ=f·M_face/E_face`
-    (`node_densities`) is the message currency, mass `m=f·M_face` (`NodeDeconv`) the output."""
+    is the message currency (computed inline in `bp_solver.node_sweep`), mass `m=f·M_face` (`NodeDeconv`) the
+    output."""
 
     f_pos: np.ndarray
     f_neg: np.ndarray
@@ -215,42 +246,6 @@ class NodeBelief:
     var_pos: np.ndarray
     var_neg: np.ndarray
     var_gdna: np.ndarray
-
-
-@dataclass(frozen=True, slots=True)
-class NodeDensities:
-    """Per-node, per-face component densities — what a node presents to its left/right neighbour. gDNA uses the
-    gDNA-FL eff-len; RNA (nascent unspliced + the boundary's one-sided spliced) uses the RNA-FL eff-len. These
-    are the identity-mean MESSAGE values (`ARCHITECTURE §1.2`): a source's facing density IS the destination's
-    prior mean. All length ``n_nodes``."""
-
-    rho_g_left: np.ndarray
-    rho_pos_left: np.ndarray
-    rho_neg_left: np.ndarray
-    rho_g_right: np.ndarray
-    rho_pos_right: np.ndarray
-    rho_neg_right: np.ndarray
-
-
-def node_densities(belief: NodeBelief, geometry: NodeGeometry) -> NodeDensities:
-    """Per-component, per-face densities from the belief pie + the static geometry. gDNA:
-    ``ρ_g(σ) = f_g·M_σ / E_gdna(σ)``. RNA: ``ρ_s(σ) = (f_s·M_σ + spliced_s(σ)) / E_rna(σ)`` — the spliced
-    (boundary-owned, one-sided) rides on its motif strand. The shipped factor-1-under-uniform construction makes
-    a region's contained density and a boundary side's crossing density both equal the true ρ under uniform."""
-    g = geometry
-    fp, fn, fg = belief.f_pos, belief.f_neg, belief.f_g
-    # The RNA density sums two pieces with DIFFERENT crossing geometry: the nascent unspliced (``f·M/eff_rna``,
-    # the two-sided ``E[min(ℓ,R)]`` — contiguous crossing) plus the one-sided spliced/mature floor
-    # (``spliced/eff_spl``, the half-triangle ``E[min²/2ℓ]``). Sharing one divisor understates the one-sided
-    # spliced ~2× (the mature density bug).
-    return NodeDensities(
-        rho_g_left=fg * g.mass_left / g.eff_gdna_left,
-        rho_pos_left=fp * g.mass_left / g.eff_rna_left + g.spliced_pos_left / g.eff_spl_left,
-        rho_neg_left=fn * g.mass_left / g.eff_rna_left + g.spliced_neg_left / g.eff_spl_left,
-        rho_g_right=fg * g.mass_right / g.eff_gdna_right,
-        rho_pos_right=fp * g.mass_right / g.eff_rna_right + g.spliced_pos_right / g.eff_spl_right,
-        rho_neg_right=fn * g.mass_right / g.eff_rna_right + g.spliced_neg_right / g.eff_spl_right,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -324,8 +319,10 @@ def _boundary_strand_stats(boundary_substrate, region_arrays):
 
     The allow mask is the **transcript-structure CONTINUITY gate** (`rna_imputation_transcript_structure.md`):
     a strand-s unspliced crossing is nascent RNA only where strand s is present on BOTH flanks, so
-    ``free_s = has_s(left) & has_s(right)``. This BLOCKS RNA at a TSS/TES (intergenic↔exon → neither strand
-    continuous → a gDNA sink) and at a mixed exon↔AMBIG seam (the non-shared strand cannot cross).
+    ``free_s = nrna_active_s(left) & nrna_active_s(right)``. This BLOCKS RNA at a TSS/TES (intergenic↔exon →
+    neither strand continuous → a gDNA sink) and at a mixed exon↔AMBIG seam (the non-shared strand cannot
+    cross). ``mrna_active_s = exon_s(left) & exon_s(right)`` is the tighter **mature**-crossing gate
+    (contiguous exon on both flanks) that selects the per-node prior (`node_prior_design.md` §3).
     """
     bs = boundary_substrate
     lr = np.asarray(bs.left_region, dtype=np.int64)
@@ -333,50 +330,58 @@ def _boundary_strand_stats(boundary_substrate, region_arrays):
     sig = np.asarray(region_arrays.signature).astype(np.int64)
     sig_l = np.where(lr >= 0, sig[np.clip(lr, 0, None)], 0)  # off-edge terminal flank → no bits
     sig_r = np.where(rr >= 0, sig[np.clip(rr, 0, None)], 0)
-    has_pos_l = (sig_l & _POS_BITS) != 0
-    has_pos_r = (sig_r & _POS_BITS) != 0
-    has_neg_l = (sig_l & _NEG_BITS) != 0
-    has_neg_r = (sig_r & _NEG_BITS) != 0
-    free_pos = has_pos_l & has_pos_r  # +strand continuous across the seam
-    free_neg = has_neg_l & has_neg_r
+    nrp_l, nrn_l = nrna_active_strands(sig_l)
+    nrp_r, nrn_r = nrna_active_strands(sig_r)
+    free_pos = nrp_l & nrp_r  # +strand nascent continuous across the seam
+    free_neg = nrn_l & nrn_r
+    mrp_l, mrn_l = mrna_active_strands(sig_l)
+    mrp_r, mrn_r = mrna_active_strands(sig_r)
+    mrna_pos = mrp_l & mrp_r  # +strand mature (contiguous exon) crosses the seam
+    mrna_neg = mrn_l & mrn_r
 
     left, right = bs.left, bs.right
     u_pos = np.maximum(left.n_unspliced_pos, right.n_unspliced_pos).astype(np.float64)
     u_neg = np.maximum(left.n_unspliced_neg, right.n_unspliced_neg).astype(np.float64)
     mass_unspl = np.asarray(left.mass_unspliced, float) + np.asarray(right.mass_unspliced, float)
     mass_spliced = np.asarray(left.mass_spliced, float) + np.asarray(right.mass_spliced, float)
-    return free_pos, free_neg, u_pos, u_neg, mass_unspl, mass_spliced
+    return free_pos, free_neg, mrna_pos, mrna_neg, u_pos, u_neg, mass_unspl, mass_spliced
 
 
 def _region_strand_stats(substrate, region_arrays):
     """Per-region strand-solve sufficient statistics + node class (the region twin of
-    :func:`_boundary_strand_stats`). A region's admissible strand axes are its own ±transcript bits
-    (``free_s`` from the strand class)."""
+    :func:`_boundary_strand_stats`). A region's nascent-active axes are its own ±transcript bits (``free_s``
+    from the strand class); its ``mrna_active_s`` axes are its own ±exon bits (the prior selector)."""
     ts = np.asarray(region_arrays.strand_class)
     c = substrate.contained
     u_pos = c.n_unspliced_pos.astype(np.float64)
     u_neg = c.n_unspliced_neg.astype(np.float64)
     free_pos = (ts == TS_POS) | (ts == TS_AMBIG)
     free_neg = (ts == TS_NEG) | (ts == TS_AMBIG)
+    mrna_pos, mrna_neg = mrna_active_strands(np.asarray(region_arrays.signature))  # own ±exon bits
     mass_u = np.asarray(c.mass_unspliced, dtype=np.float64)
     mass_s = np.asarray(c.mass_spliced, dtype=np.float64)
-    return free_pos, free_neg, u_pos, u_neg, mass_u, mass_s
+    return free_pos, free_neg, mrna_pos, mrna_neg, u_pos, u_neg, mass_u, mass_s
 
 
 @dataclass(frozen=True, slots=True)
 class NodeStatics:
     """Per-chain-node STATIC strand-solve sufficient statistics + node class (length ``n_nodes``) — the
     region- and boundary-keyed stats gathered onto the chain once. The sweep mutates only the dynamic
-    :class:`NodeBelief`; these never change. ``free_pos``/``free_neg`` are the admissible strand axes (a
-    region's ±bits / a boundary's ±continuity); ``strand_obs = free_pos ^ free_neg`` (a single consistent
-    strand). All ``float64`` except the three bool masks."""
+    :class:`NodeBelief`; these never change. ``free_pos``/``free_neg`` are the nascent-RNA-active axes (a
+    region's ±transcript bits / a boundary's ±continuity — the RNA-crossing gate); ``mrna_active_pos``/
+    ``mrna_active_neg`` are the mature-RNA-active axes (a region's ±exon bits / a boundary's ±contiguous
+    exon) that select the per-node solver prior (`node_prior_design.md` §3). All ``float64`` except the four
+    bool masks."""
 
     n_nodes: int
     u_pos: np.ndarray
     u_neg: np.ndarray
-    free_pos: np.ndarray  # bool
+    free_pos: np.ndarray  # bool — nascent-RNA-active (transcript continuity); the RNA-crossing gate
     free_neg: np.ndarray  # bool
-    strand_obs: np.ndarray  # bool
+    mrna_active_pos: (
+        np.ndarray
+    )  # bool — mature-RNA-active (contiguous exon); selects the node prior
+    mrna_active_neg: np.ndarray  # bool
     mass_unspliced: np.ndarray
     mass_spliced: np.ndarray
 
@@ -386,8 +391,12 @@ def build_node_statics(
 ) -> NodeStatics:
     """Gather the per-region (contained) and per-boundary (continuity-gated, max-of-sides) strand-solve
     statistics onto the unified chain."""
-    r_fp, r_fn, r_up, r_un, r_mu, r_ms = _region_strand_stats(substrate, region_arrays)
-    b_fp, b_fn, b_up, b_un, b_mu, b_ms = _boundary_strand_stats(boundary_substrate, region_arrays)
+    r_fp, r_fn, r_mrp, r_mrn, r_up, r_un, r_mu, r_ms = _region_strand_stats(
+        substrate, region_arrays
+    )
+    b_fp, b_fn, b_mrp, b_mrn, b_up, b_un, b_mu, b_ms = _boundary_strand_stats(
+        boundary_substrate, region_arrays
+    )
     kind = np.asarray(chain.kind)
     idx = np.asarray(chain.ref_idx, dtype=np.int64)
     is_reg = kind == REGION
@@ -412,7 +421,8 @@ def build_node_statics(
         # removing it is ≥ keeping it in every κ × capture × ±gDNA regime).
         free_pos=free_pos,
         free_neg=free_neg,
-        strand_obs=free_pos ^ free_neg,
+        mrna_active_pos=pick(r_mrp, b_mrp, False),
+        mrna_active_neg=pick(r_mrn, b_mrn, False),
         mass_unspliced=pick(r_mu, b_mu),
         mass_spliced=pick(r_ms, b_ms),
     )
@@ -450,7 +460,6 @@ def init_beliefs(
         st.u_neg,
         st.free_pos,
         st.free_neg,
-        st.strand_obs,
         st.mass_unspliced,
         st.mass_spliced,
         kappa=float(rna_sense_frac),

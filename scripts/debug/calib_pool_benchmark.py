@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import pickle
 from dataclasses import replace as dc
 from pathlib import Path
 
@@ -69,11 +70,20 @@ def _parse_condition(name: str) -> dict:
     return dict(gdna=gdna, ss=get("ss"), nrna=get("nrna"), capture=get("capture"))
 
 
-def evaluate_condition(suite: Path, cond: str, index, cfg, work_dir: Path) -> dict:
-    """Run production calibration + the validated oracle on one condition → a pool-error row."""
-    bam = str(suite / cond / "sim_oracle.bam")
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+def _scan_and_truth(suite: Path, cond: str, index, cfg, work_dir: Path, cache_dir: Path | None) -> dict:
+    """The EXPENSIVE, calibration-INDEPENDENT half: the production scan + the validated oracle truth.
+    Cached to ``cache_dir`` (one pickle per condition) so iterating on the calibration code re-runs only
+    ``calibrate`` + the metrics (seconds) instead of re-scanning + re-oracling every BAM (minutes).
 
+    The cache holds exactly the calibrate inputs (payload / strand model / FL pmfs) and the oracle's
+    per-region truth pools — none of which depend on the calibration being benchmarked. Delete the dir to
+    invalidate (e.g. after a scanner/accumulator/oracle change)."""
+    cache = (cache_dir / f"{cond}.pkl") if cache_dir is not None else None
+    if cache is not None and cache.exists():
+        with open(cache, "rb") as fh:
+            return pickle.load(fh)
+
+    bam = str(suite / cond / "sim_oracle.bam")
     # ---- ONE production scan; feed the same payload to calibrate AND the oracle ----
     sc = dc(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     _stats, sm, flm, _buf, payload = scan_and_buffer(bam, index, sc)
@@ -84,16 +94,6 @@ def evaluate_condition(suite: Path, cond: str, index, cfg, work_dir: Path) -> di
         gdna_counts=gdna_fl_mass(payload),
         max_size=flm.max_size,
     )
-    dbg: dict = {}
-    calibrate(payload=payload, region_arrays=ra, strand_model=sm,
-              gdna_fl_pmf=fl.gdna_pmf, rna_fl_pmf=fl.rna_pmf, config=cfg.calibration, _debug=dbg)
-    # per-region solved pie (f_g, f₊, f₋) over the contained UNSPLICED mass
-    reg = chain_region_deconv(dbg["chain"], dbg["belief"], dbg["substrate"])
-    M = np.asarray(dbg["substrate"].contained.mass_unspliced, np.float64)  # contained unspliced total
-    cal_g = reg.gdna_frac * M
-    cal_p = reg.rna_pos_frac * M
-    cal_n = reg.rna_neg_frac * M
-
     # ---- validated per-origin truth on the SAME payload ----
     # boundary_mass is float32; over ~8M fragments its sum-to-full rounding (~1e-2) can exceed the
     # 1e-2 default (tuned for the 5Mb suite). The INTEGER region_contained check — the real proof the
@@ -101,7 +101,37 @@ def evaluate_condition(suite: Path, cond: str, index, cfg, work_dir: Path) -> di
     # a generous float tolerance (~1e-7 relative here) is safe.
     orc = OracleTruth.from_bam(bam, index, cfg, work_dir, cond, full_payload=payload,
                                boundary_mass_tol=0.5)
-    p = orc.region_pools()
+    out = dict(
+        payload=payload, strand_model=sm,
+        gdna_fl_pmf=np.asarray(fl.gdna_pmf), rna_fl_pmf=np.asarray(fl.rna_pmf),
+        pools={k: np.asarray(v) for k, v in orc.region_pools().items()},
+    )
+    if cache is not None:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        with open(cache, "wb") as fh:
+            pickle.dump(out, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    return out
+
+
+def evaluate_condition(suite: Path, cond: str, index, cfg, work_dir: Path,
+                       cache_dir: Path | None = None) -> dict:
+    """Run production calibration + the validated oracle on one condition → a pool-error row."""
+    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    inp = _scan_and_truth(suite, cond, index, cfg, work_dir, cache_dir)
+    payload = inp["payload"]
+
+    dbg: dict = {}
+    calibrate(payload=payload, region_arrays=ra, strand_model=inp["strand_model"],
+              gdna_fl_pmf=inp["gdna_fl_pmf"], rna_fl_pmf=inp["rna_fl_pmf"],
+              config=cfg.calibration, _debug=dbg)
+    # per-region solved pie (f_g, f₊, f₋) over the contained UNSPLICED mass
+    reg = chain_region_deconv(dbg["chain"], dbg["belief"], dbg["substrate"])
+    M = np.asarray(dbg["substrate"].contained.mass_unspliced, np.float64)  # contained unspliced total
+    cal_g = reg.gdna_frac * M
+    cal_p = reg.rna_pos_frac * M
+    cal_n = reg.rna_neg_frac * M
+
+    p = inp["pools"]
     true_g = p["gdna_pos"] + p["gdna_neg"]
     true_p = p["mat_uns_pos"] + p["nas_uns_pos"]
     true_n = p["mat_uns_neg"] + p["nas_uns_neg"]
@@ -172,12 +202,19 @@ def main() -> None:
     ap.add_argument("--conditions", default=None,
                     help="comma-separated subset (default: all sim_oracle.bam dirs)")
     ap.add_argument("--out", default=None, help="output TSV (default: <suite>/calib_pool_benchmark.tsv)")
+    ap.add_argument(
+        "--cache-dir", default=None,
+        help="cache the per-condition scan + oracle truth here (calibration-independent), so re-running "
+        "after a calibration change costs only calibrate + metrics (seconds, not minutes). Delete the dir "
+        "to invalidate after a scanner/accumulator/oracle change.",
+    )
     args = ap.parse_args()
 
     suite = Path(args.suite)
     index = TranscriptIndex.load(str(suite / "rigel_index"))
     cfg = PipelineConfig()
     work_dir = Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_calib_pool_split"
+    cache_dir = Path(args.cache_dir) if args.cache_dir else None
 
     if args.conditions:
         conds = args.conditions.split(",")
@@ -188,7 +225,7 @@ def main() -> None:
     rows = []
     for i, cond in enumerate(conds, 1):
         print(f"[{i}/{len(conds)}] {cond} ...", flush=True)
-        rows.append(evaluate_condition(suite, cond, index, cfg, work_dir))
+        rows.append(evaluate_condition(suite, cond, index, cfg, work_dir, cache_dir))
 
     df = pd.DataFrame(rows)
     out = Path(args.out) if args.out else suite / "calib_pool_benchmark.tsv"

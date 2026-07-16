@@ -12,10 +12,9 @@ def solve(u_pos, u_neg, kappa, c, allow=(True, False)):
     m = 1
     up = np.array([float(u_pos)]); un = np.array([float(u_neg)])
     ap = np.array([allow[0]]); an = np.array([allow[1]])
-    so = np.array([allow[0] ^ allow[1]])
     mu = np.array([float(u_pos + u_neg)]); ms = np.zeros(1)
     glp = (c * log_fg)[None, :] if c else None    # gDNA-vertex prior: +c·log f_g (favors f_g→1)
-    dc = _solve_nodes_logodds_all(up, un, ap, an, so, mu, ms, kappa=kappa, od_g=0.0, od_r=0.0,
+    dc = _solve_nodes_logodds_all(up, un, ap, an, mu, ms, kappa=kappa, od_g=0.0, od_r=0.0,
                                   n_grid=K, L=L, n_grid_ss=K, global_logprior=glp)
     return float(dc.gdna_frac[0])
 

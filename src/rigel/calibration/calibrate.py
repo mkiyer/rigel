@@ -4,8 +4,8 @@ Calibration models **RNA vs gDNA only** (the per-locus EM separates nascent from
 count-zero-information architecture (`CALIBRATION_ARCHITECTURE.md` §0) a node's composition is set by three
 sources — the **strand likelihood** (the Beta-Binomial tilt of the per-strand counts, the only INTRINSIC
 signal; the count enters ONLY as its overdispersed Fisher information), the **cross-node imputation** (the
-neighbour density messages, at the belief-free Poisson disagreement-variance precision
-``pr = n_src/(n_src·σ²_imp + 1)``), and the **population gDNA prior** (the conservative intergenic+intron floor +
+neighbour density messages, at the source's own honest belief precision (strand + count)
+``pr = n_src/(n_src·vb_src + 1)``), and the **population gDNA prior** (the conservative intergenic+intron floor +
 the Phase-2 density KDE). The solver is the belief-propagation SWEEP over the unified region↔boundary chain
 (:mod:`rigel.calibration.bp_solver`)::
 
@@ -13,7 +13,6 @@ the Phase-2 density KDE). The solver is the belief-propagation SWEEP over the un
       -> strand balance: rna_sense_frac (κ)
       -> node_gdna_density (RAW) -> fit gDNA / RNA strand Beta-Binomial overdispersions (seed)
       -> build chain + geometry + statics -> signature-binary init (G1/G2/G3)
-      -> compute the scalar total-density σ²_imp once (adjacent_disagreement_variance)
       -> PASS 1 node_sweep (no KDE prior): ONE forward + ONE backward pass — each node integrates its strand
            likelihood + the conservative gDNA floor + the belief-free gDNA & per-strand RNA density messages
       -> train the Phase-2 gDNA-density KDE on the pass-1 belief
@@ -39,16 +38,16 @@ import numpy as np
 from .bp_solver import (
     build_node_geometry,
     build_node_statics,
-    adjacent_disagreement_variance,
     chain_boundary_side_deconv,
     chain_region_deconv,
     init_beliefs,
+    node_global_geometry,
     node_sweep,
 )
 from .density_model import node_gdna_density
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
-from .gdna_density_prior import GdnaDensityPrior, build_training_substrate
+from .gdna_rate_prior import GdnaRatePrior
 from .effective_length import (
     boundary_eff_length,
     boundary_side_eff_length,
@@ -144,7 +143,7 @@ def calibrate(
 
     # THE SOLVE — the bipartite belief-propagation sweep (bp_solver): build the unified region↔boundary chain
     # + its per-node geometry / statics, the signature-binary init, then a single forward-backward pass
-    # (gDNA + per-strand RNA identity-density messages at the belief-free σ²_imp precision fit once, plus the
+    # (gDNA + per-strand RNA identity-density messages at each source's own honest belief precision, plus the
     # anchored global gDNA prior). The region nodes give the per-region gDNA fraction; the boundary
     # nodes give the per-side boundary flux feeding the per-locus prior (chain_boundary_side_deconv) — the
     # first-class boundary nodes the sweep solves, projected to per-region sides for the prior.
@@ -167,14 +166,17 @@ def calibrate(
         logodds_window=config.sweep_logodds_window,
         statics=statics,
     )
-    # Belief-free Poisson message precision (`disagreement_shrinkage_prior_design_v2.md`): the scalar
-    # total-density σ²_imp — the empirical adjacent-node imputation floor. σ²_msg = σ²_imp + 1/n_src; the
-    # single production basis for every message channel, both passes.
-    sig_total = adjacent_disagreement_variance(chain, geometry)
-    logger.debug("calibration: total-density σ²_imp=%.4f", sig_total)
+    # Message precision is now the source's OWN honest belief precision (strand + count), computed inside
+    # the sweep — there is nothing to fit here. The adjacent-pair overdispersion σ²_transfer that used to be
+    # estimated at this point is a PRIOR (and, fit on total density, one that weakened every message
+    # dramatically); it is ZERO while the prior-free solve is developed. See `bp_solver._scan`.
 
+    # When ``_debug`` is on, the LAST sweep also fills ``_debug["capture"]`` with the per-node message
+    # internals (local vs final belief, each channel's message mode/precision) — the substrate for the
+    # message-corruption trace (`scripts/debug/msg_trace.py`). Inert in production.
     def _sweep(prior):
-        return node_sweep(
+        capture = {} if _debug is not None else None
+        out = node_sweep(
             chain,
             statics,
             geometry,
@@ -189,36 +191,57 @@ def calibrate(
             n_tilt=config.sweep_n_tilt,
             n_grid_ss=config.sweep_n_grid_single_strand,
             gdna_prior=prior,
-            disagreement_sigma2=sig_total,
+            fold_coarse_k=config.fold_coarse_k,
+            fold_fine_k=config.fold_fine_k,
+            fold_sigma_coverage=config.fold_sigma_coverage,
+            fold_refine_iters=config.fold_refine_iters,
+            _capture=capture,
         )
+        if capture is not None:
+            _debug["capture"] = capture
+        return out
 
-    # PASS 1 — single-strand solve with the total-density floor.
-    belief = _sweep(None)
-    # PHASE 2 — train the nonparametric gDNA-density mixture prior on the solved single-strand nodes, then
-    # PASS 2 — re-solve ALL nodes with that mixture as the per-node prior (self-scaling; fills the tilt's
-    # null space on AMBIG). Falls back to the pass-1 belief if the substrate is too small to fit.
-    gdna_prior = None
-    train_sub = build_training_substrate(
-        chain,
-        belief,
-        geometry,
-        statics,
-        region_arrays,
-        boundary_substrate,
-        min_eff_length=fl_mean,  # exclude regions too short to contain a gDNA fragment (§8e)
+    # THE PASS-0 gDNA-RATE PRIOR — fit ONCE on ALL nodes' total unspliced density (f_g=1, belief-free) via the
+    # Fixed-Kernel Poisson-lognormal Mixture NPMLE (`GdnaRatePrior`). It is EXTREMELY WEAK (n_eff≈0.15
+    # pseudo-obs, never >1), so the strand likelihood and the boundary messages dominate the sweep and peel
+    # RNA out of the f_g=1 start. Replaces the retired seed/floor/global + the Phase-2 density KDE with one
+    # count-space model (docs/calibration/npmle_struggles.md). Belief-free ⇒ ONE sweep suffices (no train-then-
+    # re-solve); a refit on the solved belief is a future enhancement.
+    mass_global, eff_global = node_global_geometry(chain, geometry)
+    gdna_prior = GdnaRatePrior.fit(
+        mass_global, eff_global, bandwidth=config.gdna_rate_prior_bandwidth
     )
-    if train_sub.n >= config.calib_kde_min_training_nodes:
-        gdna_prior = GdnaDensityPrior.fit(
-            train_sub,
-            bandwidth=config.gdna_prior_bandwidth,
-            mixture_bridge=config.gdna_prior_mixture_bridge,
-            bridge_trim_pct=config.calib_kde_bridge_trim_pct,
+    # PASS 0 — the gentle bootstrap. The prior comes from TOTAL density, so it is deliberately conservative
+    # (extremely weak, n_eff≈0.15). Messages are gentle for a DERIVED reason rather than a fitted one: a
+    # source can send no more precision than its own belief supports (`pr` saturates at `1/vb_src`), so a
+    # node the strand cannot peel stays quiet on its own. The strand peels what it can here.
+    belief = _sweep(gdna_prior)
+    # REFIT ITERATIONS — now that the belief is (partly) peeled, re-estimate the population model on the
+    # SOLVED gDNA rates: P(ρ) on the believed gDNA counts, with the belief width τ² as the observation WIDTH.
+    # Message precision needs no refit: it tracks the belief automatically (`vb_src` IS the belief variance),
+    # so messages strengthen exactly where the data has earned it. Deterministic (fixed kernels; no spline).
+    for _ in range(int(config.calib_refit_iters)):
+        g_hat = np.asarray(belief.f_g, dtype=np.float64) * mass_global
+        gdna_prior = GdnaRatePrior.fit(
+            g_hat,
+            eff_global,
+            var_g=np.asarray(belief.var_gdna, dtype=np.float64),
+            bandwidth=config.gdna_rate_prior_bandwidth,
         )
+        # ⚠ HISTORICAL, and it still bites: an adjacent-pair σ²_transfer(ρ) refit on the SOLVED rates was
+        # built and A/B'd (`message_precision.adjacent_imputation_variance`) and it BACKFIRES — measured on a
+        # not-yet-peeled belief, adjacent nodes agree on their *wrong* gDNA rates ⇒ σ² small ⇒ messages become
+        # confident and propagate the error (mean mwae 0.151→0.189; the zero-gDNA/unstranded/nascent/capture
+        # corner 0.52→0.95). Honesty measured against a wrong belief is not honesty. σ²_transfer is now ZERO
+        # (it is a prior); when it returns it must be an NPMLE projection gated on belief QUALITY. Keeping
+        # messages weak lets the PRIOR refit alone do the work (mean mwae 0.151→0.118). See npmle_roadmap.md.
         belief = _sweep(gdna_prior)
     regions = chain_region_deconv(chain, belief, substrate)
     left, right = chain_boundary_side_deconv(chain, belief, substrate)
     logger.debug(
-        "calibration: %s", "two-pass (Phase-2 mixture prior)" if gdna_prior else "single pass"
+        "calibration: pass-0 gDNA-rate NPMLE prior (%d cells) + %d refit iteration(s)",
+        gdna_prior.n_cells,
+        int(config.calib_refit_iters),
     )
 
     if (
@@ -232,15 +255,15 @@ def calibrate(
             substrate=substrate,
             boundary_substrate=boundary_substrate,
             region_arrays=region_arrays,
+            gdna_prior=gdna_prior,
             rna_sense_frac=rna_sense_frac,
             region_eff_len=region_eff_len,
             boundary_eff_len=boundary_eff_len,
         )
 
-    # Report-facing diagnostics: the fitted gDNA-density KDE (bimodal ⇒ capture
-    # enrichment). Only when the Phase-2 prior was actually fit; consumed by the
-    # QC report, never by the EM (which uses CalibrationResult).
-    if diagnostics_out is not None and gdna_prior is not None:
+    # Report-facing diagnostics: the fitted gDNA-rate prior P(ρ) (bimodal ⇒ capture enrichment). Consumed by
+    # the QC report, never by the EM.
+    if diagnostics_out is not None:
         from .diagnostics import CalibrationDiagnostics
 
         diagnostics_out["calibration"] = CalibrationDiagnostics.from_prior(gdna_prior)

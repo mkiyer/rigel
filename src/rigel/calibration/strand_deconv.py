@@ -24,12 +24,15 @@ from .signature import TS_AMBIG, TS_NEG, TS_NONE, TS_POS
 
 @dataclass(frozen=True, slots=True)
 class NodeDeconv:
-    """Per-node deconvolution result (regions or boundary sides; kept separate)."""
+    """Per-node deconvolution result. TWO disjoint uses, hence the optional halves:
 
-    gdna_mass: (
-        np.ndarray
-    )  # float64[K] — the consumed output (calibrate/derive read ONLY the *_mass fields)
-    rna_mass: np.ndarray  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
+    * the per-node SOLVE (`simplex_logodds._solve_nodes_logodds_all`) returns the **composition** —
+      ``*_frac`` + ``*_frac_var`` — and no mass (a node's mass is a per-FACE quantity; the solve is
+      face-invariant, so a single ``*_mass`` here would be meaningless);
+    * the chain PROJECTION (`bp_solver.chain_region_deconv` / `chain_boundary_side_deconv`) returns the
+      **mass** the downstream `CalibrationResult` consumes, and no precision.
+    """
+
     gdna_frac: (
         np.ndarray
     )  # float64[K] — the node's gDNA composition (face-invariant; mass = frac·M_face)
@@ -41,9 +44,21 @@ class NodeDeconv:
     # state for the honest message send (`precision_state_design.md` §1: Var_own = (M/E)²·Var(f_c)); set by
     # the per-node solve, consumed when a node emits a message. None on the chain region/boundary projections
     # (precision is a chain-node property, not needed by the downstream EM prior).
+    # the PROJECTION's consumed output (calibrate/derive read ONLY these); None on the per-node solve.
+    gdna_mass: "np.ndarray | None" = None  # float64[K]
+    rna_mass: "np.ndarray | None" = None  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
     gdna_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_g)
     rna_pos_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_pos)
     rna_neg_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_neg)
+    # The grid-posterior moments in the FREE COORDINATES of the composition manifold — the seed for the
+    # coherent (λ,θ) relay (docs/calibration/dof_pie_relay_implementation_plan.md §2/§4 S3). λ = logit(f_g)
+    # (gDNA-vs-RNA-total log-odds); θ = arcsin(tilt) (the strand tilt, AMBIG only — single-strand nodes lock
+    # it at ±π/2). Populated by the per-node solve; None on the chain projections. Additive — the existing
+    # `*_frac` / `*_frac_var` fields (the current readout) are unchanged.
+    lam_mean: "np.ndarray | None" = None  # float64[K] — E[λ] over the grid posterior
+    lam_var: "np.ndarray | None" = None  # float64[K] — Var[λ]
+    theta_mean: "np.ndarray | None" = None  # float64[K] — E[θ] (±π/2 locked for single-strand)
+    theta_var: "np.ndarray | None" = None  # float64[K] — Var[θ] (0 for single-strand)
 
 
 @dataclass(frozen=True, slots=True)

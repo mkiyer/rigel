@@ -22,24 +22,34 @@ __all__ = ["_mixture_strand_loglik"]
 _EPS = 1.0e-9
 
 
-def _mixture_strand_loglik(u_pos, n, f_g, f_pos, f_neg, kappa, od_g, od_r):
+def _mixture_strand_loglik(
+    u_pos, n, f_g, f_pos, f_neg, kappa, od_g, od_r, f_g_ref, f_pos_ref, f_neg_ref
+):
     """Three-component gDNA/RNA₊/RNA₋ strand loglik — :func:`strand_loglik` generalized to two RNA strands.
 
     Broadcasts ``(u_pos, n)`` of shape ``(nodes, 1)`` against the lattice ``(f_*)`` of shape
-    ``(1, P)`` → ``(nodes, P)``. Mean ``N·p`` with ``p = ½·f_g + κ·f₊ + (1−κ)·f₋``; variance is the
-    Binomial-mixture term plus each component's overdispersion excess scaled by its own ``μ(1−μ)``
-    (gDNA ¼, RNA κ(1−κ) for both strands), exactly as in the two-component model.
+    ``(1, P)`` → ``(nodes, P)``. Mean ``N·p`` with ``p = ½·f_g + κ·f₊ + (1−κ)·f₋``.
+
+    **Count-zero-information freeze** (`docs/calibration/node_prior_design.md` §2): the mean stays LIVE in
+    the solved composition ``(f_g, f_pos, f_neg)`` — the legitimate strand channel — but the variance is
+    evaluated at the fixed REFERENCE composition ``(f_g_ref, f_pos_ref, f_neg_ref)`` (per-node scalars,
+    broadcast). This keeps the heteroscedastic precision (the count still sets a composition-aware variance
+    via the reference) while removing the ``f_g``-tilt of the normalizer, so the raw count can no longer
+    manufacture a composition preference toward the variance-minimum when the mean degenerates (κ→½). The
+    reference is a NEUTRAL structural default at init and the incoming belief in the sweep.
     """
-    p = 0.5 * f_g + kappa * f_pos + (1.0 - kappa) * f_neg
-    mean = (
-        n * p
-    )  # reused below as n·p in the binomial variance term — byte-identical, one fewer big multiply
+    p = (
+        0.5 * f_g + kappa * f_pos + (1.0 - kappa) * f_neg
+    )  # LIVE mean channel (the composition solved)
+    mean = n * p
     rscale = kappa * (1.0 - kappa)  # κ(1−κ): each RNA strand's μ(1−μ)
+    # Variance at the REFERENCE composition (NOT the solved f_g) — the freeze.
+    p_ref = 0.5 * f_g_ref + kappa * f_pos_ref + (1.0 - kappa) * f_neg_ref
     var = (
-        mean * (1.0 - p)
-        + (n * f_g) ** 2 * 0.25 * od_g
-        + (n * f_pos) ** 2 * rscale * od_r
-        + (n * f_neg) ** 2 * rscale * od_r
+        n * p_ref * (1.0 - p_ref)
+        + (n * f_g_ref) ** 2 * 0.25 * od_g
+        + (n * f_pos_ref) ** 2 * rscale * od_r
+        + (n * f_neg_ref) ** 2 * rscale * od_r
     )
     var = np.maximum(var, _EPS)
     return -0.5 * (u_pos - mean) ** 2 / var - 0.5 * np.log(var)

@@ -42,11 +42,15 @@ class CalibrationDiagnostics:
 
     @classmethod
     def from_prior(cls, prior) -> "CalibrationDiagnostics":
-        """Build from a fitted :class:`GdnaDensityPrior`."""
-        # prior.modes is all local maxima sorted by height (desc). Use the two
-        # tallest as the dominant depleted/enriched pair, then order them by x.
-        modes = list(prior.modes)
-        top_x = sorted(float(m[0]) for m in modes[:2])
+        """Build from a fitted :class:`~rigel.calibration.gdna_rate_prior.GdnaRatePrior` — the pass-0
+        count-space gDNA-rate prior. Modes are the local maxima of the fitted log-density curve (the NPMLE
+        carries no per-node training points, so the rug is empty)."""
+        x = np.asarray(prior.log_rho, dtype=np.float64)
+        logp = np.asarray(prior.logP, dtype=np.float64)
+        # local maxima of the log-density curve, tallest first → the dominant depleted/enriched pair.
+        interior = np.where((logp[1:-1] > logp[:-2]) & (logp[1:-1] >= logp[2:]))[0] + 1
+        order = interior[np.argsort(logp[interior])[::-1]]
+        top_x = sorted(float(x[i]) for i in order[:2])
         if len(top_x) >= 2:
             depleted, enriched = top_x[0], top_x[1]
             separation = enriched - depleted
@@ -56,25 +60,19 @@ class CalibrationDiagnostics:
         else:
             depleted = enriched = separation = None
         enrichment = float(np.exp(separation)) if separation is not None else None
-
-        tx = np.asarray(prior.train_x, dtype=np.float64)
-        tk = np.asarray(prior.train_kind)
-        if tx.size > _RUG_CAP:
-            idx = np.linspace(0, tx.size - 1, _RUG_CAP).astype(int)
-            tx, tk = tx[idx], tk[idx]
-
+        empty = np.zeros(0)
         return cls(
-            kde_x=np.asarray(prior.x_grid, dtype=np.float64),
-            kde_logp=np.asarray(prior.logP_grid, dtype=np.float64),
+            kde_x=x,
+            kde_logp=logp,
             bandwidth=float(prior.bandwidth),
-            n_eff=float(prior.n_eff),
-            n_modes=len(modes),
+            n_eff=float(prior.n_cells),  # collapsed-cell count (the NPMLE has no Kish n_eff)
+            n_modes=int(interior.size),
             depleted_mode=depleted,
             enriched_mode=enriched,
             separation_nats=separation,
             enrichment_factor=enrichment,
-            rug_log_rho=tx,
-            rug_kind=tk.astype(np.int64),
+            rug_log_rho=empty,
+            rug_kind=empty.astype(np.int64),
         )
 
 
