@@ -258,7 +258,6 @@ def node_sweep(
     left = np.asarray(chain.left)
     right = np.asarray(chain.right)
     fp, fn = statics.free_pos, statics.free_neg
-    mrp, mrn = statics.mrna_active_pos, statics.mrna_active_neg  # mature-crossing gate (see `_scan`)
     f_pos = np.asarray(belief.f_pos, dtype=np.float64).copy()
     f_neg = np.asarray(belief.f_neg, dtype=np.float64).copy()
     f_g = np.asarray(belief.f_g, dtype=np.float64).copy()
@@ -411,8 +410,12 @@ def node_sweep(
         **The fold.** ``_fold_lambda`` — a two-stage EP moment-match of the running Gaussian against the gDNA
         (on ``log f_g``) and RNA-total (on ``log f_r``) factors: the two ``λ``-messages in tension on one axis.
 
-        **The mature-crossing gate is now EXPLICIT** (``send_s = mrna_active[dst] or not mrna_active[src]``):
-        the count-term no longer silences a gated edge via a zero sub-count, so the gate is spelled out."""
+        **The mature-crossing gate is DISMANTLED** (2026-07-16, docs/calibration/message_model_derivation.md
+        §5). Only the STRUCTURAL per-strand ``free_s`` continuity gate remains: an exon again emits its unspliced
+        RNA density into a flanking intron/boundary. This REGRESSES the mature-heavy suite (an exon's ~95%-mature
+        unspliced payload leaks in as nascent, since we do not yet subtract mature from the RNA-total factor)
+        until the honest ``σ²_transfer`` precision + the nascent factory (``ρ_nascent = ρ_RNA − ρ_mature``,
+        intron-baselined) land. The spliced MEASUREMENT + junction absorption content is unchanged."""
         mu_lam, var_lam = lam_loc.copy(), lvar_loc.copy()  # running λ belief (starts at the local seed)
         mu_th, var_th = thm_loc.copy(), thv_loc.copy()  # tilt θ: seeded, NOT relayed (v1 — a nuisance)
         amg, apg = np.zeros(n_nodes), np.zeros(n_nodes)  # gDNA message (mode, prec)
@@ -443,12 +446,13 @@ def node_sweep(
             vts = var_th[lsrc]
             v_logfp = v_logfr + (cos_t / max(1.0 + sin_t, _EPS)) ** 2 * vts  # +θ term (0 for single-strand)
             v_logfn = v_logfr + (cos_t / max(1.0 - sin_t, _EPS)) ** 2 * vts
-            # STRUCTURAL emission gates + the EXPLICIT mature-crossing gate.
+            # STRUCTURAL emission gates only (per-strand `free_s` continuity + facing mass). The
+            # mature-crossing gate (`send_s = mrna_active[dst] or not mrna_active[src]`) was DISMANTLED —
+            # see the `_scan` docstring; each RNA strand flows wherever that strand is continuous on both
+            # endpoints, INCLUDING exon→intron (the leak the nascent factory will counter).
             emit_g = sm > _EPS
-            send_p = mrp[i] or not mrp[lsrc]
-            send_n = mrn[i] or not mrn[lsrc]
-            emit_p = fp[lsrc] and fp[i] and (sm > _EPS or SPs[lsrc] > _EPS) and send_p
-            emit_n = fn[lsrc] and fn[i] and (sm > _EPS or SNs[lsrc] > _EPS) and send_n
+            emit_p = fp[lsrc] and fp[i] and (sm > _EPS or SPs[lsrc] > _EPS)
+            emit_n = fn[lsrc] and fn[i] and (sm > _EPS or SNs[lsrc] > _EPS)
             lam_factors = []
             # ---- gDNA density message (a factor on log f_g) ----
             if emit_g:
