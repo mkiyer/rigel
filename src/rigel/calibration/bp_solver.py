@@ -34,6 +34,7 @@ import math
 import numpy as np
 
 from .node_chain import REGION, NodeChain
+from .signature import coarse_type_array
 from .node_geometry import (
     NodeBelief,
     NodeGeometry,
@@ -97,27 +98,25 @@ _TAU_PRECISION = True
 _ISTRUCT = True
 _ISTRUCT_SEAMS = False
 
-# Phase B — composition-imputation + geometric mature removal across the density cliff
-# (docs/calibration/density_cliff_and_mature_absorption.md; 2026-07-20). The message MODE imputes the
-# source's COMPOSITION: the per-component imputed dst MASS ``M_c = ρ_c^src·E_c^dst`` normalized by the
-# IMPUTED total ``ΣM`` (capture ``e(x)`` cancels ⇒ cliff-invariant), instead of the retired absolute-density
-# ``log(ρ_c^src/ρ_total^dst)`` (which divided an enriched-frame numerator by the dst's depleted OBSERVED
-# total ``md`` and so saturated across the ~10²–10³× cliff). The mature removal (source exon) + addition
-# (dst exon) are carried by ``rho_pos``/``rho_neg`` (the ``±absorb`` / ``±SPs`` terms, §5 both directions).
-# PRECISION is UNCHANGED (§6.4 — the densities feed ``n_eff``/``rho_r`` exactly as before).
+# The cliff-crossing message: the effective-length-frame LOG-ODDS SHIFT (docs/calibration/
+# cliff_message_derivation.md; 2026-07-20). A message imputes the dst's ``f_c`` as the source COMPOSITION —
+# per-component imputed MASS ``M_c = ρ_c^src·E_c^dst`` normalized by the IMPUTED total ``ΣM`` — equivalently
+# ``λ_dst = λ_src + log(E_g^dst/E_g^src) − log(E_r^dst/E_r^src)``. The capture enrichment ``e(x)`` cancels
+# identically (CLIFF-INVARIANT); the shift is nonzero because gDNA and RNA have different FL distributions ⇒
+# different per-component eff-lengths in the region-contained vs boundary-crossing frames. Replaces the retired
+# ``log(ρ_c^src/ρ_total^dst)`` density mode, which divided by the dst's single-component OBSERVED total ``md/E``
+# and FAILED across the ~10²–10³× cliff (isolated intron→boundary |Δf_g| 0.65 → 0.17; MC-validated across
+# gaussian/gamma/bimodal/uniform FL pairs — `scripts/debug/cliff_message_mc.py`). PRECISION is UNCHANGED.
 #
-# ⚠ DEFAULT OFF (2026-07-20). Verified CORRECT against the doc's worked example WITH oracle source beliefs
-# (exon→boundary f_g = 0.0126 vs the density mode's 0.081 — the doc's 0.0128, §4.4). BUT it REGRESSES the
-# real pass-0-vs-oracle A/B on cached ambig_dense_10mb with ``_TAU_PRECISION`` ON (mean exon |Δf_g| 0.287→
-# 0.302; boundary 0.299→0.316; CW% 0.9→2.3). Root cause: composition faithfully COPIES the source belief,
-# but τ (the §7 hard dependency) correctly gates messages OFF on the vacuous unstranded low-gDNA chains this
-# fix TARGETS — there the exon honestly believes ~0.5 (no strand, no gDNA evidence), NOT the 0.0041 the doc's
-# arithmetic assumed (that was the ORACLE). So the fix is INERT where targeted, and where messages DO flow
-# (gDNA-high / stranded) it discards the robust observed-total anchor ``md`` ⇒ regresses. "Honest" (calibrated
-# ignorance) ≠ "accurate": what makes an unstranded exon's belief ACCURATE is the spliced-derived node-local
-# gDNA (the "nascent factory", CALIBRATION_STATUS.md), a NODE-LOCAL mechanism that must precede this MESSAGE
-# model. Kept behind the toggle for the owner's A/B; OFF = the shipped density mode, byte-identical.
-_COMPOSITION_MODE = False
+# SCOPE (landed): the shift applies per edge ONLY on CLEAN transitions — neither endpoint an EXON region
+# (intron/intergenic ↔ boundary, no mature; the ``use_shift`` gate + ``is_exon_node`` in ``node_sweep``). On a
+# clean edge the geometry zeroes the mature terms, so the shift is pure. EXON ↔ boundary messages carry
+# contained mature that does NOT cross as unspliced (it splices), so they KEEP the density mode until the
+# mature reconciliation (`cliff_message_derivation.md` §8) lands — the deferred extension. LANDED (default
+# True, 2026-07-20): the correct clean-transition arithmetic, MC-validated + zero-regression on the 32-scenario
+# sim A/B (aggregate boundary effect is small — the intron-exon boundaries are still dominated by the
+# density-mode exon→boundary message until the §8 extension lands; helps the cliff boundaries where visible).
+_COMPOSITION_MODE = True
 
 
 
@@ -359,6 +358,14 @@ def node_sweep(
     # scans are sequential per node, so iterate as a Python list of ints (faster than numpy scalar indexing).
     order_list = [int(x) for x in np.asarray(chain.order)]
     n_nodes = f_g.shape[0]
+    # Per-node EXON-region flag (coarse_type == 2). The cliff-crossing log-odds shift
+    # (`cliff_message_derivation.md`) is landed for the CLEAN transitions only — a message whose region
+    # endpoint is an intron/intergenic (no mature). An EXON endpoint carries contained mature that does NOT
+    # cross as unspliced (it splices); that reconciliation is the deferred extension (§8), so exon↔boundary
+    # messages keep the retired density mode for now. ``is_exon_node`` gates the shift per edge.
+    _rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
+    _ri = np.clip(np.asarray(chain.ref_idx, dtype=np.int64), 0, _rtype.shape[0] - 1)
+    is_exon_node = ((np.asarray(chain.kind) == REGION) & (_rtype[_ri] == 2)).tolist()
 
     # FORWARD-BACKWARD solve — ONE exact pass on the chain (a forest of linear paths) given the message-free
     # local beliefs + the ANCHORED global prior. (A) message-free LOCAL beliefs (one batched solve) →
@@ -557,6 +564,11 @@ def node_sweep(
             emit_g = (sm > _EPS) and lam_ev
             emit_p = fp[lsrc] and fp[i] and (sm > _EPS or SPs[lsrc] > _EPS) and (lam_ev or th_ev)
             emit_n = fn[lsrc] and fn[i] and (sm > _EPS or SNs[lsrc] > _EPS) and (lam_ev or th_ev)
+            # The cliff-crossing log-odds SHIFT applies on CLEAN edges only — neither endpoint an exon region
+            # (`cliff_message_derivation.md` §7: intron/intergenic ↔ boundary, no mature). An exon endpoint
+            # keeps the retired density mode until the mature reconciliation (§8) lands. On a clean edge the
+            # geometry already zeroes the mature terms (``SPs``/``absorb`` = 0), so the shift is pure.
+            use_shift = _COMPOSITION_MODE and not is_exon_node[lsrc] and not is_exon_node[i]
             # ---- source per-component DENSITIES (shared by the mode AND the precision path) ----
             # ``rho_g`` = source gDNA density; ``rho_pos``/``rho_neg`` = the per-strand RNA density the source
             # imputes, carrying the FULL mature accounting (§5, BOTH directions): ``− absorb`` removes the
@@ -574,15 +586,17 @@ def node_sweep(
             absorb_n = (SNd[i] / _espd) if _RNA_ABSORB else 0.0
             rho_pos = fp_s * sm / _er + SPs[lsrc] / _esp - absorb_p  # +SPs/esp = the DST exon's mature (added)
             rho_neg = fn_s * sm / _er + SNs[lsrc] / _esp - absorb_n
-            # ---- COMPOSITION imputation across the density cliff (density_cliff_and_mature_absorption.md) ----
+            # ---- the cliff-crossing LOG-ODDS SHIFT (cliff_message_derivation.md §3) ----
             # Impute the dst's f_c as the source COMPOSITION: the per-component imputed MASS ``M_c = ρ_c^src ·
-            # E_c^dst``, normalized by the IMPUTED total ``ΣM`` (the capture enrichment ``e(x)`` cancels in the
-            # ratio ⇒ CLIFF-INVARIANT), NOT the dst's OBSERVED total ``md`` (which sits on the dst's enrichment
-            # scale — dividing an enriched-frame numerator by a depleted-frame denominator is what made the
-            # retired ``log(ρ_c^src/ρ_total^dst)`` mode saturate across the ~10²–10³× cliff, §3). The mature
-            # removal/addition is already folded into ``rho_pos``/``rho_neg``. Worked example (exon→boundary):
-            # M_g=45.4, M_r=3530 ⇒ f_g=0.0127 (truth 0.0073) vs the density mode's 0.081, an 11× fix (§4.4).
-            if _COMPOSITION_MODE:
+            # E_c^dst``, normalized by the IMPUTED total ``ΣM``. Equivalent to the log-odds shift
+            # ``λ_dst = λ_src + log(E_g^dst/E_g^src) − log(E_r^dst/E_r^src)``: the capture enrichment ``e(x)``
+            # cancels identically (CLIFF-INVARIANT), and the shift is nonzero because gDNA and RNA have different
+            # FL distributions ⇒ different per-component eff-lengths in the contained (region) vs crossing
+            # (boundary) frames. This REPLACES the retired ``log(ρ_c^src/ρ_total^dst)`` density mode, which
+            # divided an enriched-frame numerator by the dst's single-component OBSERVED total ``md/E`` and so
+            # failed across the ~10²–10³× cliff (isolated intron→boundary |Δf_g| 0.65 → 0.17). MC-validated
+            # across gaussian/gamma/bimodal/uniform FL pairs (scripts/debug/cliff_message_mc.py).
+            if use_shift:
                 # ΣM must count only what PHYSICALLY crosses to the dst: gDNA always (genomic); RNA strand s
                 # only where s is structurally continuous on BOTH endpoints (``fp/fn`` — the transcript-
                 # structure gate). Without this, a gene-end / TES / opposite-strand seam (where the RNA does
@@ -601,8 +615,8 @@ def node_sweep(
             lam_factors = []
             # ---- gDNA message (a factor on log f_g) ----
             if emit_g:
-                if _COMPOSITION_MODE:
-                    mo = math.log(max(Mg / _den, comp_fl))  # → dst log-f_g (composition, cliff-invariant)
+                if use_shift:
+                    mo = math.log(max(Mg / _den, comp_fl))  # → dst log-f_g (the cliff-invariant shift)
                 else:
                     mo = math.log(max(rho_g, 1.0 / egd) / (md / egd))  # → dst log-f_g frame (retired density)
                 pr = sm / (sm * (v_logfg + s2t) + 1.0)  # 1/(Var(log f_g) + 1/M_src + σ²_transfer)
@@ -620,8 +634,8 @@ def node_sweep(
             # the floor's ONE count, not the source's full ``sm`` — never laundered into a confident "no RNA".
             rho_r = 0.0
             if emit_p:
-                if _COMPOSITION_MODE:
-                    mo = math.log(max(Mp / _den, comp_fl))  # → dst log-f_pos (composition)
+                if use_shift:
+                    mo = math.log(max(Mp / _den, comp_fl))  # → dst log-f_pos (the cliff-invariant shift)
                 else:
                     mo = math.log(max(rho_pos, 1.0 / erd) / (md / erd))  # → dst log-f_pos frame (density)
                 n_eff = (max(rho_pos, 0.0) * erd) if (rho_pos <= 1.0 / erd) else sm  # honest clamp
@@ -632,8 +646,8 @@ def node_sweep(
                 if rho_pos > 0.0:
                     rho_r += rho_pos
             if emit_n:
-                if _COMPOSITION_MODE:
-                    mo = math.log(max(Mn / _den, comp_fl))  # → dst log-f_neg (composition)
+                if use_shift:
+                    mo = math.log(max(Mn / _den, comp_fl))  # → dst log-f_neg (the cliff-invariant shift)
                 else:
                     mo = math.log(max(rho_neg, 1.0 / erd) / (md / erd))  # → dst log-f_neg frame (density)
                 n_eff = (max(rho_neg, 0.0) * erd) if (rho_neg <= 1.0 / erd) else sm  # honest clamp
@@ -651,8 +665,8 @@ def node_sweep(
                 if s_spl > _EPS:
                     pr_r += s_spl / (1.0 + s_spl * s2t)  # + spliced-fragment MEASUREMENT precision
                 if pr_r > 0.0:
-                    if _COMPOSITION_MODE:
-                        mo_r = math.log(max((Mp + Mn) / _den, comp_fl))  # → dst log-f_r (composition)
+                    if use_shift:
+                        mo_r = math.log(max((Mp + Mn) / _den, comp_fl))  # → dst log-f_r (the cliff-invariant shift)
                     else:
                         mo_r = math.log(max(rho_r, 1.0 / erd) / (md / erd))  # density
                     lam_factors.append((False, mo_r, pr_r))
