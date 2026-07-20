@@ -64,59 +64,46 @@ __all__ = [
 
 _EPS = 1.0e-9
 
-# A/B TOGGLE (the spliced ABSORPTION — owner-confirmed CORRECT, 2026-07-18): the boundary subtracts ITS OWN
-# spliced-RNA density (``SPd[i]/ESPd[i]``, the dst-face spliced) from the incoming message's RNA density. A
-# splice junction directly measures a pure-RNA spliced population; that mass is accounted for BEFORE the
-# residual unspliced RNA is imputed onto the boundary's crossing. The two densities are disjoint independent
-# measurements, so the residual can go negative — which just means the boundary's spliced already absorbed all
-# the incoming RNA (and more) ⇒ ~zero unspliced RNA left (handled by the honest clamp below). Default True =
-# production. Kept as a toggle only for the A/B; the subtraction is physically required, not a bug.
-_RNA_ABSORB = True
-
-# THE HONEST CLAMP (production, message_absorption_fix.md Step 0 — landed): a residual unspliced-RNA density
-# that the spliced absorption drives at/below the count floor ``1/erd`` is a genuine but IMPRECISE zero — a
-# short boundary cannot measure a confident zero — so it is sent with the ONE-COUNT precision of that floor
-# (``n_eff = rho_floor·erd = 1``), NOT the source's full count ``sm`` (see the ``n_eff`` sites in ``_scan``).
-# This stops the saturated subtraction from being laundered into a CONFIDENT "no RNA" (the confident-FP seed).
-# It does not manufacture RNA either; the honest weak zero lets the Phase-2 DNA hyperprior pin the node later.
-
-# Phase A — the τ-precision core (docs/calibration/message_precision_derivation.md §3; validated 2026-07-20).
-# A message's COMPOSITION precision is sourced from a REFERENCE-FREE evidence quantity ``τ`` (the Compositional
-# Evidence Compiler: I_strand + I_struct + relayed pr) instead of the running BELIEF variance ``σ²_λ`` — which
-# pools the shared Beta(½,½) reference and manufactures confidence on composition-vacuous unstranded chains (the
-# 35× phantom cascade, §2). A vacuous source (unstranded, no structural lock) has ``τ = 0 ⇒ pr = 0``; a strand
-# anchor / structural lock propagates honestly. The strand seed I_strand carries the DERIVED overdispersion
-# noise floor (below) so a κ≈½ sampling whisper cannot seed phantom precision. Confidently-wrong mass (the
-# NPMLE-corrupting quantity) → ~0 on vacuous chains, stranded controls preserved (validate_tau, 2026-07-20).
-_TAU_PRECISION = True
-
-# A/B sub-toggles for the I_struct composition-certain gate (the structural gDNA locks):
-#   _ISTRUCT       — master: when False, NO structural locks emit in pass 1 (all gDNA grounding deferred to the
-#                    Phase-2 hyperprior). Tests whether the lock compounding is what keeps the zero-DNA fit wrong.
-#   _ISTRUCT_SEAMS — when True, the gate applies to ALL locked (G1) nodes incl. boundary SEAMS; when False,
-#                    only true intergenic REGION locks (seams carry RNA-contaminated mass → phantom).
-_ISTRUCT = True
-_ISTRUCT_SEAMS = False
-
-# The cliff-crossing message: the effective-length-frame LOG-ODDS SHIFT (docs/calibration/
-# cliff_message_derivation.md; 2026-07-20). A message imputes the dst's ``f_c`` as the source COMPOSITION —
-# per-component imputed MASS ``M_c = ρ_c^src·E_c^dst`` normalized by the IMPUTED total ``ΣM`` — equivalently
-# ``λ_dst = λ_src + log(E_g^dst/E_g^src) − log(E_r^dst/E_r^src)``. The capture enrichment ``e(x)`` cancels
-# identically (CLIFF-INVARIANT); the shift is nonzero because gDNA and RNA have different FL distributions ⇒
-# different per-component eff-lengths in the region-contained vs boundary-crossing frames. Replaces the retired
-# ``log(ρ_c^src/ρ_total^dst)`` density mode, which divided by the dst's single-component OBSERVED total ``md/E``
-# and FAILED across the ~10²–10³× cliff (isolated intron→boundary |Δf_g| 0.65 → 0.17; MC-validated across
-# gaussian/gamma/bimodal/uniform FL pairs — `scripts/debug/cliff_message_mc.py`). PRECISION is UNCHANGED.
+# THE SPLICED ABSORPTION (production): the boundary subtracts ITS OWN spliced-RNA density (``SPd[i]/ESPd[i]``,
+# the dst-face spliced) from the incoming message's RNA density and adds the DST exon's spliced (``SPs/ESPs``). A
+# splice junction directly measures a pure-RNA spliced population; that mass is accounted for BEFORE the residual
+# unspliced RNA is imputed onto the boundary's crossing. The two densities are disjoint independent measurements,
+# so the residual can go negative — which just means the boundary's spliced already absorbed all the incoming RNA
+# (and more) ⇒ ~zero unspliced RNA left (handled by the honest clamp below).
 #
-# SCOPE (landed): the shift applies per edge ONLY on CLEAN transitions — neither endpoint an EXON region
-# (intron/intergenic ↔ boundary, no mature; the ``use_shift`` gate + ``is_exon_node`` in ``node_sweep``). On a
-# clean edge the geometry zeroes the mature terms, so the shift is pure. EXON ↔ boundary messages carry
-# contained mature that does NOT cross as unspliced (it splices), so they KEEP the density mode until the
-# mature reconciliation (`cliff_message_derivation.md` §8) lands — the deferred extension. LANDED (default
-# True, 2026-07-20): the correct clean-transition arithmetic, MC-validated + zero-regression on the 32-scenario
-# sim A/B (aggregate boundary effect is small — the intron-exon boundaries are still dominated by the
-# density-mode exon→boundary message until the §8 extension lands; helps the cliff boundaries where visible).
-_COMPOSITION_MODE = True
+# THE HONEST CLAMP (message_absorption_fix.md Step 0): a residual unspliced-RNA density that the spliced
+# absorption drives at/below the count floor ``1/erd`` is a genuine but IMPRECISE zero — a short boundary cannot
+# measure a confident zero — so it is sent with the ONE-COUNT precision of that floor (``n_eff = rho_floor·erd =
+# 1``), NOT the source's full count ``sm`` (see the ``n_eff`` sites in ``_scan``). This stops the saturated
+# subtraction from being laundered into a CONFIDENT "no RNA" (the confident-FP seed); the honest weak zero lets
+# the Phase-2 DNA hyperprior pin the node later.
+#
+# THE τ-PRECISION CORE (docs/calibration/message_precision_derivation.md §3). A message's COMPOSITION precision
+# is sourced from a REFERENCE-FREE evidence quantity ``τ`` (I_strand + I_struct + relayed pr) instead of the
+# running BELIEF variance ``σ²_λ`` — which pools the shared Beta(½,½) reference and manufactures confidence on
+# composition-vacuous unstranded chains (the 35× phantom cascade). A vacuous source (unstranded, no structural
+# lock) has ``τ = 0 ⇒ pr = 0``; a strand anchor / structural lock propagates honestly. The strand seed I_strand
+# carries the DERIVED overdispersion noise floor (see ``_scan``) so a κ≈½ sampling whisper cannot seed phantom
+# precision. Measured: confidently-wrong mass (the NPMLE-corrupting quantity) 10.4% → 1.4% vs the pooled-belief
+# precision. I_struct is composition-certain ONLY for true intergenic REGION locks, NOT G1 boundary SEAMS
+# (TSS/TES, opposite-strand exon↔exon) — a seam is locked to gDNA by structure but sits between RNA-carrying
+# exons, so its crossing mass is RNA-contaminated and making it certain turns it into a phantom-gDNA emitter that
+# compounds along the chain (measured: τ→12 in gdna_none); a true intergenic region carries ~0 mass in a
+# zero-gDNA library, so it is safe.
+#
+# THE CLIFF-CROSSING MESSAGE MODE (docs/calibration/cliff_message_derivation.md). Two regimes, gated per edge by
+# whether either endpoint is an EXON region (``is_exon_node`` / ``use_shift`` in ``node_sweep``):
+#   * CLEAN edges (intron/intergenic ↔ boundary, no mature): the eff-length-frame LOG-ODDS SHIFT — impute the
+#     dst ``f_c`` as the source COMPOSITION (per-component imputed mass ``M_c = ρ_c^src·E_c^dst`` normalized by
+#     ``ΣM``, ≡ ``λ_dst = λ_src + log(E_g^dst/E_g^src) − log(E_r^dst/E_r^src)``). The capture enrichment cancels
+#     identically (CLIFF-INVARIANT); the shift is nonzero because gDNA and RNA have different FL distributions.
+#     The intron factory makes the source accurate here, so the confident shift is safe.
+#   * EXON ↔ boundary edges: the DENSITY mode ``log(ρ_c^src·E_c^dst / md)`` (÷ the dst's OBSERVED total), which
+#     keeps the gDNA f_g DECOUPLED from the error-prone mature removal + anchored to real data — robust where
+#     the (often unstranded) exon source is NOT reliable. The ``±`` spliced absorption rides in ``rho_pos/neg``.
+# §9 records the REJECTED unifiers (the composition shift on all edges, and the gDNA-only / all-component +logR
+# "hybrid enrichment-corrected density"): all regress on unstranded exons — that is an identifiability floor, not
+# a mode defect. PRECISION is the lever, not the mode. Do not re-attempt a composition-conserving mode on exons.
 
 
 
@@ -346,7 +333,7 @@ def node_sweep(
     # crossing (mode gap²) and floors at h². This is Role A — message PRECISION, not a composition claim — so it
     # runs on the ENRICHMENT NPMLE (``enrichment_prior``), INDEPENDENTLY of the composition arm above. Fit once,
     # belief-free, ANCHORED. Falls back to ``gdna_prior`` for callers that pass one prior (backward compat).
-    # σ²_transfer = 0 with no prior or when disabled (clean A/B via ``transfer_variance=False``).
+    # σ²_transfer = 0 with no prior or when disabled (``transfer_variance=False``, for ablation).
     proj_prior = enrichment_prior if enrichment_prior is not None else gdna_prior
     if transfer_variance and proj_prior is not None:
         mu_proj, var_proj = proj_prior.project(mass_global, eff_global)
@@ -359,10 +346,11 @@ def node_sweep(
     order_list = [int(x) for x in np.asarray(chain.order)]
     n_nodes = f_g.shape[0]
     # Per-node EXON-region flag (coarse_type == 2). The cliff-crossing log-odds shift
-    # (`cliff_message_derivation.md`) is landed for the CLEAN transitions only — a message whose region
-    # endpoint is an intron/intergenic (no mature). An EXON endpoint carries contained mature that does NOT
-    # cross as unspliced (it splices); that reconciliation is the deferred extension (§8), so exon↔boundary
-    # messages keep the retired density mode for now. ``is_exon_node`` gates the shift per edge.
+    # (`cliff_message_derivation.md`) applies on CLEAN transitions only — a message whose region endpoint is an
+    # intron/intergenic (no mature), where the intron factory makes the source accurate. An EXON endpoint keeps
+    # the DENSITY mode (observed-md anchor), which is the correct permanent design: a composition-conserving
+    # mode on exon edges over-trusts the (often unstranded) exon source and regresses (§9 — the exon floor is
+    # identifiability, not the mode). ``is_exon_node`` gates the shift per edge.
     _rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
     _ri = np.clip(np.asarray(chain.ref_idx, dtype=np.int64), 0, _rtype.shape[0] - 1)
     is_exon_node = ((np.asarray(chain.kind) == REGION) & (_rtype[_ri] == 2)).tolist()
@@ -382,7 +370,7 @@ def node_sweep(
     fg_loc, fp_loc, fn_loc = dc_loc.gdna_frac, dc_loc.rna_pos_frac, dc_loc.rna_neg_frac
     vg_loc, vp_loc, vn_loc = dc_loc.gdna_frac_var, dc_loc.rna_pos_frac_var, dc_loc.rna_neg_frac_var
     lam_loc, lvar_loc = dc_loc.lam_mean.copy(), dc_loc.lam_var.copy()
-    thm_loc, thv_loc = dc_loc.theta_mean.copy(), dc_loc.theta_var.copy()
+    thm_loc = dc_loc.theta_mean.copy()  # tilt θ mode (seeded, not relayed); its variance is not used in v1
 
     # G1-EMISSION FIX. A G1-locked seam (intergenic / TSS / TES / opposite-strand exon↔exon) is neither
     # single-strand nor AMBIG, so `_local_solve` SKIPS it and returns f_g=0. The sweep seeds each node's
@@ -413,54 +401,45 @@ def node_sweep(
     lam_loc = np.where(locked, lam_locked, lam_loc)
     lvar_loc = np.where(locked, 0.0, lvar_loc)
 
-    # ---- Phase A: the reference-free evidence precision τ (message_precision_derivation.md §3) ----
-    # Seed τ from the two composition-evidence channels present in this pass (spliced precision is Phase B):
+    # ---- the reference-free evidence precision τ (message_precision_derivation.md §3) ----
+    # Seed τ from the two composition-evidence channels present in this pass:
     #   * I_strand(λ) = N·(2κ−1)²·[f_g(1−f_g)]²/(4 p(1−p)),  p = κ + f_g(½−κ)  — the strand Fisher info,
     #     IDENTICALLY 0 at κ=½ (unstranded); evaluated at the message-free local f_g.
     #   * I_struct — the boolean composition-certain gate: a signature-locked (G1) node is certain (v_evid=0),
     #     its message precision governed only by the honest count/transfer terms (1/M_src + s2t).
     # The running τ then accumulates relayed message precision (the cavity), so τ is 0 exactly on a vacuous
     # unstranded chain (⇒ pr=0, the phantom collapse) and >0 only where real evidence exists or propagates.
-    if _TAU_PRECISION:
-        _n_raw = np.asarray(statics.u_pos, dtype=np.float64) + np.asarray(statics.u_neg, dtype=np.float64)
-        # OVERDISPERSED effective count N_eff = N/(1+(N−1)ω) → 1/ω: molecular sampling is Beta-Binomial
-        # overdispersed, so the strand Fisher POWER saturates at ~1/ω regardless of raw depth. Using the raw
-        # N compounds the tiny residual tilt at κ≈½ (fitting noise) across high-expression chains into phantom
-        # confidence — the τ must carry the HONEST (deflated) power, not the raw count.
-        _n_str = _n_raw / (1.0 + np.maximum(_n_raw - 1.0, 0.0) * od_r)
-        _fgl = np.clip(np.asarray(fg_loc, dtype=np.float64), _EPS, 1.0 - _EPS)
-        _pmix = np.clip(kappa + _fgl * (0.5 - kappa), _EPS, 1.0 - _EPS)
-        # STRAND discriminability with a DERIVED noise floor (message_precision_derivation.md). The strand
-        # channel distinguishes gDNA (sense rate ½ — dsDNA is strand-symmetric, biological truth, NOT fitted)
-        # from RNA (sense rate κ_RNA); its Fisher scale is 4·(κ_RNA − ½)². But that separation must clear the
-        # VARIANCE of the two sense splits about their means — the Beta-Binomial OVERDISPERSION (ω, fitted) plus
-        # Binomial sampling: σ²_κ = ¼·(1/N + ω). The 1/N term gates a gDNA-free library (N_gdna=0 ⇒ σ²→∞ ⇒
-        # disc=0) and thins a sparse one; the ω term is the irreducible overdispersion floor that sets the
-        # deadband on real (overdispersed) data — self-scaling, no tuned constant. A κ_RNA within √σ²_d of ½ is
-        # not composition signal, so the κ≈½ sampling whisper a huge N would square-and-multiply into phantom
-        # precision is gated. (Replaces the shipped bare (2κ_RNA−1)², which had no floor.)
-        _sig2_d = 0.25 * (1.0 / max(float(n_rna_obs), _EPS) + od_r) + 0.25 * (
-            1.0 / max(float(n_gdna_obs), _EPS) + od_g
-        )
-        _disc = 4.0 * max(0.0, (kappa - 0.5) ** 2 - _sig2_d)
-        _i_strand = (
-            _n_str * _disc * (_fgl * (1.0 - _fgl)) ** 2 / (4.0 * _pmix * (1.0 - _pmix))
-        )
-        tau0_lam = _i_strand.copy()
-        tau0_th = _i_strand.copy()  # θ-axis tilt Fisher info (same differential-disc gating); seed-only (θ not relayed)
-        # I_struct — composition-certain ONLY for true intergenic REGION nodes (gonly), NOT G1 boundary SEAMS
-        # (TSS/TES, opposite-strand exon↔exon): a seam is locked to gDNA by structure but sits between
-        # RNA-carrying exons, so its crossing mass is RNA-contaminated — making it composition-CERTAIN turns it
-        # into a high-precision phantom-gDNA emitter that compounds along the chain (measured: 2310 lock-sourced
-        # edges, τ→12 in gdna_none). A true intergenic region carries ~0 mass in a zero-gDNA library, so it is
-        # safe. (`_ISTRUCT_SEAMS` restores the all-locks form for the A/B.)
-        _is_reg = np.asarray(chain.kind) == REGION
-        if _ISTRUCT:
-            struct_lock = np.asarray(locked, dtype=bool) & (_is_reg | _ISTRUCT_SEAMS)
-        else:
-            struct_lock = np.zeros(n_nodes, dtype=bool)
-    else:
-        tau0_lam = tau0_th = struct_lock = None
+    _n_raw = np.asarray(statics.u_pos, dtype=np.float64) + np.asarray(statics.u_neg, dtype=np.float64)
+    # OVERDISPERSED effective count N_eff = N/(1+(N−1)ω) → 1/ω: molecular sampling is Beta-Binomial
+    # overdispersed, so the strand Fisher POWER saturates at ~1/ω regardless of raw depth. Using the raw
+    # N compounds the tiny residual tilt at κ≈½ (fitting noise) across high-expression chains into phantom
+    # confidence — the τ must carry the HONEST (deflated) power, not the raw count.
+    _n_str = _n_raw / (1.0 + np.maximum(_n_raw - 1.0, 0.0) * od_r)
+    _fgl = np.clip(np.asarray(fg_loc, dtype=np.float64), _EPS, 1.0 - _EPS)
+    _pmix = np.clip(kappa + _fgl * (0.5 - kappa), _EPS, 1.0 - _EPS)
+    # STRAND discriminability with a DERIVED noise floor (message_precision_derivation.md). The strand
+    # channel distinguishes gDNA (sense rate ½ — dsDNA is strand-symmetric, biological truth, NOT fitted)
+    # from RNA (sense rate κ_RNA); its Fisher scale is 4·(κ_RNA − ½)². But that separation must clear the
+    # VARIANCE of the two sense splits about their means — the Beta-Binomial OVERDISPERSION (ω, fitted) plus
+    # Binomial sampling: σ²_κ = ¼·(1/N + ω). The 1/N term gates a gDNA-free library (N_gdna=0 ⇒ σ²→∞ ⇒
+    # disc=0) and thins a sparse one; the ω term is the irreducible overdispersion floor that sets the
+    # deadband on real (overdispersed) data — self-scaling, no tuned constant. A κ_RNA within √σ²_d of ½ is
+    # not composition signal, so the κ≈½ sampling whisper a huge N would square-and-multiply into phantom
+    # precision is gated.
+    _sig2_d = 0.25 * (1.0 / max(float(n_rna_obs), _EPS) + od_r) + 0.25 * (
+        1.0 / max(float(n_gdna_obs), _EPS) + od_g
+    )
+    _disc = 4.0 * max(0.0, (kappa - 0.5) ** 2 - _sig2_d)
+    _i_strand = _n_str * _disc * (_fgl * (1.0 - _fgl)) ** 2 / (4.0 * _pmix * (1.0 - _pmix))
+    tau0_lam = _i_strand.copy()
+    tau0_th = _i_strand.copy()  # θ-axis tilt Fisher info (same differential-disc gating); seed-only (θ not relayed)
+    # I_struct — composition-certain ONLY for true intergenic REGION nodes, NOT G1 boundary SEAMS (TSS/TES,
+    # opposite-strand exon↔exon): a seam is locked to gDNA by structure but sits between RNA-carrying exons, so
+    # its crossing mass is RNA-contaminated — making it composition-CERTAIN turns it into a high-precision
+    # phantom-gDNA emitter that compounds along the chain. A true intergenic region carries ~0 mass in a
+    # zero-gDNA library, so it is safe.
+    _is_reg = np.asarray(chain.kind) == REGION
+    struct_lock = np.asarray(locked, dtype=bool) & _is_reg
 
     def _scan(seq, nbr, sf, df):
         """Sequential scan — the coherent ``(λ,θ)`` relay (docs/calibration/dof_pie_relay_derivation.md;
@@ -487,18 +466,18 @@ def node_sweep(
         **The fold.** ``_fold_lambda`` — a two-stage EP moment-match of the running Gaussian against the gDNA
         (on ``log f_g``) and RNA-total (on ``log f_r``) factors: the two ``λ``-messages in tension on one axis.
 
-        **The mature-crossing gate is DISMANTLED** (2026-07-16, docs/calibration/message_model_derivation.md
-        §5). Only the STRUCTURAL per-strand ``free_s`` continuity gate remains: an exon again emits its unspliced
-        RNA density into a flanking intron/boundary. This REGRESSES the mature-heavy suite (an exon's ~95%-mature
-        unspliced payload leaks in as nascent, since we do not yet subtract mature from the RNA-total factor)
-        until the honest ``σ²_transfer`` precision + the nascent factory (``ρ_nascent = ρ_RNA − ρ_mature``,
-        intron-baselined) land. The spliced MEASUREMENT + junction absorption content is unchanged."""
+        **Emission is gated by the STRUCTURAL per-strand ``free_s`` continuity only** (the mature-crossing gate
+        was dismantled, 2026-07-16): each RNA strand flows wherever it is continuous on both endpoints. Mature RNA
+        at a junction is reconciled in DENSITY space by the spliced source/sink absorption (``±SPs``/``−absorb``
+        in ``rho_pos``/``rho_neg``), not by a separate gate. A full node-local nascent/mature split
+        (``ρ_nascent = ρ_RNA − ρ_mature``) is not modelled here — the per-locus EM separates nascent from mature
+        downstream."""
         mu_lam, var_lam = lam_loc.copy(), lvar_loc.copy()  # running λ belief (starts at the local seed)
-        mu_th, var_th = thm_loc.copy(), thv_loc.copy()  # tilt θ: seeded, NOT relayed (v1 — a nuisance)
-        # running reference-free evidence precision τ (Phase A); accumulates relayed pr (the cavity along
-        # this sweep's direction). None when the τ-precision core is off (belief-variance behaviour).
-        tau_lam = tau0_lam.copy() if _TAU_PRECISION else None
-        tau_th = tau0_th if _TAU_PRECISION else None  # seed-only (θ not relayed) — read, not mutated
+        mu_th = thm_loc.copy()  # tilt θ: seeded, NOT relayed (v1 — a nuisance)
+        # running reference-free evidence precision τ; accumulates the relayed pr (the cavity along this
+        # sweep's direction).
+        tau_lam = tau0_lam.copy()
+        tau_th = tau0_th  # seed-only (θ not relayed) — read, not mutated
         amg, apg = np.zeros(n_nodes), np.zeros(n_nodes)  # gDNA message (mode, prec)
         amp, app = np.zeros(n_nodes), np.zeros(n_nodes)  # RNA-pos
         amn, apn = np.zeros(n_nodes), np.zeros(n_nodes)  # RNA-neg
@@ -531,44 +510,39 @@ def node_sweep(
             fr_s = 1.0 - fg_s
             fp_s = fr_s * (1.0 + sin_t) / 2.0
             fn_s = fr_s * (1.0 - sin_t) / 2.0
-            # PRECISION SOURCE (the log-fraction variances). Phase A (τ core): the REFERENCE-FREE evidence
-            # variance ``1/τ`` — a structural lock is composition-CERTAIN (``ev=0`` ⇒ high pr, governed by the
-            # honest 1/M_src+s2t); a source with no composition evidence (``τ=0``, not locked) is gated OUT
-            # (``lam_ev``/``th_ev`` False ⇒ pr=0), the phantom collapse. Pre-Phase-A: the running BELIEF
-            # variance (which pools the reference — the defect).
-            if _TAU_PRECISION:
-                lock_s = bool(struct_lock[lsrc])
-                lam_ev = lock_s or (tau_lam[lsrc] > _EPS)
-                ev_lam = 0.0 if lock_s else (1.0 / tau_lam[lsrc] if tau_lam[lsrc] > _EPS else 0.0)
-                th_ev = tau_th[lsrc] > _EPS
-                ev_th = (1.0 / tau_th[lsrc]) if th_ev else 0.0
-            else:
-                lam_ev = th_ev = True
-                ev_lam, ev_th = vls, var_th[lsrc]
-            v_logfg = fr_s * fr_s * ev_lam  # Var(log f_g) = (1−f_g)²·(1/τ_λ) [Phase A] / ·σ²_λ [pre]
+            # PRECISION SOURCE (the log-fraction variances): the REFERENCE-FREE evidence variance ``1/τ`` — a
+            # structural lock is composition-CERTAIN (``ev=0`` ⇒ high pr, governed only by the honest
+            # 1/M_src+s2t); a source with no composition evidence (``τ=0``, not locked) is gated OUT
+            # (``lam_ev``/``th_ev`` False ⇒ pr=0), the phantom collapse.
+            lock_s = bool(struct_lock[lsrc])
+            lam_ev = lock_s or (tau_lam[lsrc] > _EPS)
+            ev_lam = 0.0 if lock_s else (1.0 / tau_lam[lsrc] if tau_lam[lsrc] > _EPS else 0.0)
+            th_ev = tau_th[lsrc] > _EPS
+            ev_th = (1.0 / tau_th[lsrc]) if th_ev else 0.0
+            v_logfg = fr_s * fr_s * ev_lam  # Var(log f_g) = (1−f_g)²·(1/τ_λ)
             v_logfr = fg_s * fg_s * ev_lam  # Var(log f_r) =  f_g²·(1/τ_λ)     (RNA-total)
             v_logfp = v_logfr + (cos_t / max(1.0 + sin_t, _EPS)) ** 2 * ev_th  # +θ term (0 for single-strand)
             v_logfn = v_logfr + (cos_t / max(1.0 - sin_t, _EPS)) ** 2 * ev_th
             if _capture is not None:
                 _pt["sm"][i], _pt["vlfg"][i], _pt["vlfp"][i] = sm, v_logfg, v_logfp
                 _pt["s2t"][i], _pt["fgs"][i], _pt["vls"][i] = s2t, fg_s, vls
-                if _TAU_PRECISION:
-                    _pt.setdefault("tau_src", np.zeros(n_nodes))[i] = tau_lam[lsrc]
-                    _pt.setdefault("lock_src", np.zeros(n_nodes))[i] = 1.0 if struct_lock[lsrc] else 0.0
-            # STRUCTURAL emission gates only (per-strand `free_s` continuity + facing mass). The
-            # mature-crossing gate (`send_s = mrna_active[dst] or not mrna_active[src]`) was DISMANTLED —
-            # see the `_scan` docstring; each RNA strand flows wherever that strand is continuous on both
-            # endpoints, INCLUDING exon→intron (the leak the nascent factory will counter).
-            # Phase A adds the τ-evidence gate: a source with no composition evidence emits NOTHING (pr=0),
-            # never a reference-pooled confident message. ``lam_ev``/``th_ev`` are True pre-Phase-A (no gate).
+                _pt.setdefault("tau_src", np.zeros(n_nodes))[i] = tau_lam[lsrc]
+                _pt.setdefault("lock_src", np.zeros(n_nodes))[i] = 1.0 if struct_lock[lsrc] else 0.0
+            # STRUCTURAL emission gates only (per-strand `free_s` continuity + facing mass): each RNA strand
+            # flows wherever that strand is continuous on both endpoints (the mature-crossing gate was
+            # dismantled — see the `_scan` docstring; mature is reconciled by the spliced absorption instead).
+            # The τ-evidence gate: a source with no composition evidence emits NOTHING (pr=0), never a
+            # reference-pooled confident message (``lam_ev``/``th_ev`` False ⇒ the emission is suppressed).
             emit_g = (sm > _EPS) and lam_ev
             emit_p = fp[lsrc] and fp[i] and (sm > _EPS or SPs[lsrc] > _EPS) and (lam_ev or th_ev)
             emit_n = fn[lsrc] and fn[i] and (sm > _EPS or SNs[lsrc] > _EPS) and (lam_ev or th_ev)
-            # The cliff-crossing log-odds SHIFT applies on CLEAN edges only — neither endpoint an exon region
-            # (`cliff_message_derivation.md` §7: intron/intergenic ↔ boundary, no mature). An exon endpoint
-            # keeps the retired density mode until the mature reconciliation (§8) lands. On a clean edge the
-            # geometry already zeroes the mature terms (``SPs``/``absorb`` = 0), so the shift is pure.
-            use_shift = _COMPOSITION_MODE and not is_exon_node[lsrc] and not is_exon_node[i]
+            # The cliff-crossing log-odds SHIFT applies on CLEAN edges only (neither endpoint an exon region —
+            # `cliff_message_derivation.md` §7: intron/intergenic ↔ boundary, no mature), where the intron
+            # factory makes the source accurate. EXON ↔ boundary edges keep the DENSITY mode (the observed-md
+            # anchor; the ``±SPs/−absorb`` mature reconciliation rides in ``rho_pos``/``rho_neg``). §9: a
+            # composition-conserving mode on exon edges regresses — the exon floor is identifiability, not the
+            # mode; do not re-attempt it.
+            use_shift = not is_exon_node[lsrc] and not is_exon_node[i]
             # ---- source per-component DENSITIES (shared by the mode AND the precision path) ----
             # ``rho_g`` = source gDNA density; ``rho_pos``/``rho_neg`` = the per-strand RNA density the source
             # imputes, carrying the FULL mature accounting (§5, BOTH directions): ``− absorb`` removes the
@@ -582,8 +556,8 @@ def node_sweep(
             _esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
             _espd = ESPd[i] if ESPd[i] > _EPS else _EPS
             rho_g = fg_s * sm / _eg
-            absorb_p = (SPd[i] / _espd) if _RNA_ABSORB else 0.0  # source exon +mature density (removed)
-            absorb_n = (SNd[i] / _espd) if _RNA_ABSORB else 0.0
+            absorb_p = SPd[i] / _espd  # source exon mature density (removed from the imputed RNA)
+            absorb_n = SNd[i] / _espd
             rho_pos = fp_s * sm / _er + SPs[lsrc] / _esp - absorb_p  # +SPs/esp = the DST exon's mature (added)
             rho_neg = fn_s * sm / _er + SNs[lsrc] / _esp - absorb_n
             # ---- the cliff-crossing LOG-ODDS SHIFT (cliff_message_derivation.md §3) ----
@@ -618,7 +592,7 @@ def node_sweep(
                 if use_shift:
                     mo = math.log(max(Mg / _den, comp_fl))  # → dst log-f_g (the cliff-invariant shift)
                 else:
-                    mo = math.log(max(rho_g, 1.0 / egd) / (md / egd))  # → dst log-f_g frame (retired density)
+                    mo = math.log(max(rho_g, 1.0 / egd) / (md / egd))  # → dst log-f_g frame (density)
                 pr = sm / (sm * (v_logfg + s2t) + 1.0)  # 1/(Var(log f_g) + 1/M_src + σ²_transfer)
                 amg[i], apg[i] = mo, pr
                 if pr > 0.0:
@@ -637,6 +611,8 @@ def node_sweep(
                 if use_shift:
                     mo = math.log(max(Mp / _den, comp_fl))  # → dst log-f_pos (the cliff-invariant shift)
                 else:
+                    # HYBRID keeps RNA on the PURE density mode (decoupled from the gDNA cliff correction —
+                    # density's robustness: the gDNA f_g must NOT be hostage to the error-prone mature removal).
                     mo = math.log(max(rho_pos, 1.0 / erd) / (md / erd))  # → dst log-f_pos frame (density)
                 n_eff = (max(rho_pos, 0.0) * erd) if (rho_pos <= 1.0 / erd) else sm  # honest clamp
                 pr = n_eff / (n_eff * (v_logfp + s2t) + 1.0)  # +σ²_transfer (unspliced; n_mat excluded)
@@ -668,7 +644,7 @@ def node_sweep(
                     if use_shift:
                         mo_r = math.log(max((Mp + Mn) / _den, comp_fl))  # → dst log-f_r (the cliff-invariant shift)
                     else:
-                        mo_r = math.log(max(rho_r, 1.0 / erd) / (md / erd))  # density
+                        mo_r = math.log(max(rho_r, 1.0 / erd) / (md / erd))  # density (decoupled — see f_pos note)
                     lam_factors.append((False, mo_r, pr_r))
             # ---- FOLD the λ-messages onto the dst's running belief (two-stage EP moment-match) ----
             if lam_factors:
@@ -682,7 +658,7 @@ def node_sweep(
                     sigma_cov=fold_sigma_coverage,
                     refine=fold_refine_iters,
                 )
-                # Phase A cavity: the dst's evidence precision grows by the message it absorbed, so it relays
+                # The τ cavity: the dst's evidence precision grows by the message it absorbed, so it relays
                 # that (real) evidence onward — but NEVER the reference (τ starts at I_strand/I_struct, never at
                 # the reference precision a=0.1153). CRITICAL FRAME CONVERSION: the message precision ``f[2]``
                 # is in the dst's LOG-FRACTION frame (log f_g for a gDNA factor, log f_r for an RNA-total
@@ -691,10 +667,9 @@ def node_sweep(
                 # this, τ over-counts by 1/jac² and self-bootstraps: a tiny seed amplifies 1/(1−f_g)²≈4× per hop
                 # and saturates at 1/s2t (toy: `scratchpad/tau_toy.py`; real: τ→12 in gdna_none). This
                 # conversion makes the relayed λ-evidence ≈ the source's own (s2t-damped), never amplified.
-                if _TAU_PRECISION:
-                    _fgd = 1.0 / (1.0 + math.exp(-mu_lam[i]))  # dst f_g after the fold
-                    _jd_g, _jd_r = (1.0 - _fgd) ** 2, _fgd * _fgd
-                    tau_lam[i] += math.fsum(f[2] * (_jd_g if f[0] else _jd_r) for f in lam_factors)
+                _fgd = 1.0 / (1.0 + math.exp(-mu_lam[i]))  # dst f_g after the fold
+                _jd_g, _jd_r = (1.0 - _fgd) ** 2, _fgd * _fgd
+                tau_lam[i] += math.fsum(f[2] * (_jd_g if f[0] else _jd_r) for f in lam_factors)
         if _capture is not None:
             # DIAGNOSTIC — the coherent relay pie: f_g=σ(μ_λ), f_pos/f_neg from (f_r, θ). Sums to 1, each ≤1
             # BY CONSTRUCTION (the S2 invariant). Forward scan appends [0], backward [1].

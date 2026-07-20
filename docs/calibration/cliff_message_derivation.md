@@ -192,27 +192,116 @@ source belief). The message is the pure shift (3.2), in both directions:
 The precision is unchanged in spirit (§9): the source's own belief precision + the count term + the belief-free
 `σ²_transfer` enrichment-crossing damping. The mode is the shift; nothing divides by a depleted quantity.
 
-**This is exactly the composition message mode** (`bp_solver._COMPOSITION_MODE`, currently dormant): its
-`Mg = ρ_g^src·E_g^dst`, `Mp = ρ_r^src·E_r^dst`, `f_g = Mg/(Mg+Mp+Mn)` is (3.2) rearranged. Landing the shift =
-enabling that mode for the clean transitions, with the density mode's single-eff-len denominator retired.
+**This is exactly the composition message mode** (`bp_solver._COMPOSITION_MODE`, **LANDED 2026-07-20**,
+commit `d8fef478`, per-edge `use_shift` gate on clean non-exon transitions): its `Mg = ρ_g^src·E_g^dst`,
+`Mp = ρ_r^src·E_r^dst`, `f_g = Mg/(Mg+Mp+Mn)` is (3.2) rearranged. Zero-regression on the 32-scenario sim; the
+aggregate boundary effect is small because the intron-exon boundaries are still dominated by the
+higher-precision (density-mode) exon→boundary message — which §8 fixes.
 
 ---
 
-## 8. The extension framework — mature-bearing (exon) transitions
+## 8. Exon region ↔ intron-exon boundary — the mature reconciliation (DERIVED + MC-VALIDATED)
 
-Layer the mature reconciliation onto the shift (do **not** re-mix it into a density denominator — that was the
-saturating bug). For a source exon → boundary, in count space:
+**Status:** derived + Monte-Carlo validated across FL distributions (`scripts/debug/cliff_exon_boundary_mc.py`);
+implementation next. Grounded in §3's density-composition invariance + shift.
+
+### 8.1 The component structure
+
+An **exon region** observes ONLY *unspliced contained* fragments, per strand `s`:
 
 ```
-    nascent_c^src  =  max( f_c^src · M_src  −  mat_c ,  0 ) ,    mat_c  =  S_c · (E_r^src / E_spl^bnd)          (8.1)
+    RNA_s^exon (contained)  =  nascent_s  +  mature_s          (both unspliced, in the exon body)
+    gDNA^exon (contained)
 ```
 
-(the contained mature `mat_c`, from the junction spliced `S_c` scaled to the exon body by the spliced
-eff-length; `density_cliff_and_mature_absorption.md` §4.2), then apply the shift (3.2) to `{f_g^src, nascent}`.
-For boundary → exon, **add** the destination exon's mature (`+S_c·E_r^dst/E_spl^bnd`) after the shift. The known
-open item is the estimator for `mat_c` at exons whose mature splices at the *other* junction
-([[composition_mode_regresses_post_tau]]); the shift itself is exact and FL-general (§4). **Sequencing:** land the
-clean shift (§7), validate no-regression, then the mature reconciliation.
+An **intron-exon boundary** observes:
+
+```
+    unspliced crossing:  gDNA,  nascent_+ ,  nascent_−     (nascent crosses unspliced)
+    SPLICED:             mature on the junction's ONE motif strand   (mature crosses ONLY as spliced)
+```
+
+The physical crux: **mature RNA has the SAME density `ρ_m` measured in two frames** — *contained-unspliced* in
+the exon body (eff-len `E_r^cont = region_eff_length(RNA_FL, L)`) and *spliced-crossing* at the junction (eff-len
+`E_spl`, the one-sided half-triangle `spliced_side_eff_length`). MC-verified: `ρ_m` recovered as
+`mature_contained/E_r^cont` and as `spliced/E_spl` agree to ~0.3% across FL shapes. This is the **link** that
+lets a boundary's spliced measurement reconcile an exon's contained mature.
+
+The boundary's *unspliced* crossing carries **no mature** (it splices), so the exon's `f_g` (which counts mature
+as RNA) and the boundary's unspliced `f_g` differ by the mature — reconciled below. A single junction carries
+spliced on **one strand** only (the splice motif is stranded), so the reconciliation is applied to that strand.
+
+### 8.2 Density arithmetic (the invariant), both directions
+
+Work in the invariant **densities** (`ρ_g`, `ρ_n±` nascent, `ρ_m±` mature), then convert with the destination's
+per-component eff-lengths (the shift, §3). Enrichment cancels throughout (MC: `e = 1` vs `100` → `f_g` identical).
+
+**Boundary → Exon (ADD mature).** The boundary supplies `ρ_g`, `ρ_n±` (from its unspliced crossing:
+`ρ_n = n_cross/E_r^cross`) and `ρ_m` on the junction strand (from its spliced: `ρ_m = S/E_spl`). The exon's RNA
+density on that strand is `ρ_RNA_s = ρ_n_s + ρ_m_s`. Apply the exon's contained eff-lengths:
+
+```
+    f_g^exon  =  ρ_g·E_g^cont  /  ( ρ_g·E_g^cont  +  Σ_s (ρ_n_s + ρ_m_s)·E_r^cont ) .                  (8.2)
+```
+
+**Exon → Boundary (SUBTRACT mature).** The exon supplies `ρ_g`, `ρ_RNA_s = ρ_n_s + ρ_m_s` (it cannot split
+nascent from mature). The boundary removes the mature *it directly measures* on its strand, `ρ_m_s = S/E_spl`, to
+recover the nascent that actually crosses unspliced, then applies its crossing eff-lengths:
+
+```
+    ρ_n_s  =  max( ρ_RNA_s^exon  −  ρ_m_s^bnd ,  0 ) ,
+    f_g^bnd(unspliced)  =  ρ_g·E_g^cross  /  ( ρ_g·E_g^cross  +  Σ_s ρ_n_s·E_r^cross ) .                (8.3)
+```
+
+MC (`cliff_exon_boundary_mc.py`, `ρ_g=0.4, ρ_n=0.3, ρ_m=0.6`): the reconciliation `ρ_RNA^exon − ρ_m = ρ_n`
+holds to ~1%, and both (8.2)/(8.3) reproduce the ground-truth `f_g` to MC noise for gaussian / gamma / uniform
+FL pairs, at every gDNA/RNA FL ratio.
+
+### 8.3 The spliced-absorption GATE — WITH vs WITHOUT (owner's insight)
+
+The `± ρ_m` reconciliation fires **only when the boundary carries spliced mass on the exon's strand and side** —
+i.e. the boundary is a genuine splice site of the exon's transcript. This is a signature/geometry flag, already
+computed: the boundary's `junction_strand` + the exon-flank routing (`node_geometry._spliced_faces` routes
+spliced mass to the same-strand exon flank). Two message types result:
+
+- **WITH spliced absorption** (`S_s > 0` on the exon's strand/side): apply `± ρ_m_s` (8.2 add / 8.3 subtract) —
+  the boundary is a **source** of that strand's mature (into the exon) / a **sink** for it (out of the exon).
+- **WITHOUT spliced absorption** (`S_s = 0`): the exon's mature does not splice at THIS boundary (it is a TSS/TES
+  or the exon's other end); the message is the **pure shift (§7)** — no mature term.
+
+This is exactly the `±SPs / −absorb` structure already in `_scan`, but **gated** by the same-strand-spliced flag
+(the missing piece), so the `ρ_m` used is the mature that actually reconciles at THIS junction — never a
+mismatched subtraction. On a clean (intron/intergenic) edge `S = 0` identically ⇒ WITHOUT ⇒ §7 (self-consistent).
+
+### 8.4 Both-sides-exon boundaries
+
+Some boundaries flank an exon on BOTH sides (adjacent exons / an opposite-strand exon↔exon seam). These decompose
+by the **same gate applied per side/strand**: each side is an exon↔boundary transition that is WITH spliced
+absorption iff that side's exon strand carries junction spliced, else WITHOUT. No new arithmetic — the
+per-side/per-strand spliced flag fully determines the reconciliation. (An exon↔exon seam with no splicing is
+WITHOUT on both sides = pure shift; a mutually-spliced pair is WITH on the spliced strand.)
+
+### 8.5 Precision (unchanged) and the earlier regression, resolved
+
+Precision is the §9 machinery (source belief + `1/M` + `σ²_transfer`), plus the spliced count credits its own
+measurement precision. The earlier composition-mode regression ([[composition_mode_regresses_post_tau]], the
+"300× under-removal") is now understood: it applied `−absorb` to exon edges **ungated** and normalized by the
+imputed total without the density-frame link — subtracting a mismatched mature. §8.3's `ρ_m = S/E_spl` is the
+mature that reconciles *at this junction*, gated by §8.3's flag; where the exon's mature splices at its *other*
+junction, THIS boundary's `S ≈ 0` ⇒ WITHOUT ⇒ no (wrong) subtraction. The MC confirms the gated arithmetic is
+exact.
+
+### 8.6 Implementation plan
+
+1. **Gate** the `±SPs/−absorb` terms in `_scan` by the same-strand-spliced flag (§8.3) → extend `use_shift`'s
+   scope from clean-only to *all* region↔boundary edges, with the reconciliation applied WITH/WITHOUT per the
+   flag. On a clean edge this is identical to §7 (S=0).
+2. **Densities from the correct eff-lengths** — `ρ_m = S/E_spl` (half-triangle) added/subtracted in *density*
+   space before the mass conversion (8.2/8.3), not the current count-space `S·E_r/E_spl` mixed into `rho_pos`.
+3. **Validate** — the exon↔boundary MC as the unit ground truth (already passing), then pass-0 vs oracle on all
+   32 scenarios (boundary + exon `|Δf_g|` must improve — this removes the exon→boundary domination that masks
+   §7), no regressions, stranded controls flat.
+4. **Then** the gDNA hyperprior study on the now-healthy pass-0.
 
 ---
 
@@ -237,6 +326,118 @@ intron's contained count, so its message is honestly less precise — the count 
 3. **Extend** to exon ↔ boundary (§8) — the mature reconciliation layered on the shift.
 4. **Then** the gDNA hyperprior study, on the now-healthy pass-0 (owner sequencing: the hyperprior learns garbage
    from a broken pass-0).
+
+---
+
+## 9. The hybrid enrichment-corrected density mode — DERIVED, TESTED, and REJECTED as a unifier
+
+**Status:** derived + MC + 32-scenario sim A/B (2026-07-20). The owner's directive was to unify the two landed
+message modes (the composition **shift** on clean/intron edges, the **density + mature** mode on exon edges) into
+one "hybrid enrichment-corrected density" mode that keeps the observed-total anchor `md` while conserving the
+density composition across the cliff. This section records the derivation, the implementation (`bp._HYBRID_MODE`,
+default OFF), and the **decisive finding that it regresses** — so it is not re-attempted.
+
+### 9.1 The two candidate hybrid modes
+
+A message provides two soft targets to the dst's λ-fold: a gDNA factor on `log f_g`, an RNA-total factor on
+`log f_r`, at explicitly-set precisions (identical across all modes — only the targets change). With
+`M_c^pred = ρ_c^src·E_c^dst`, `_den = ΣM_c^pred`, `md` the observed dst total, and
+`dmu = logR = mu_proj[dst] − mu_proj[src]` (the belief-free denoised enrichment jump the `σ²_transfer` projection
+already computes), the density and composition modes plus the **two** ways to build a hybrid enrichment-corrected
+density:
+
+```
+    density         t_c = log(M_c^pred / md)               observed anchor; Σexp(t)=_den/md ≠ 1 at a cliff
+    composition     t_c = log(M_c^pred / _den)             Σexp(t)=1; the cliff-invariant shift (§7)
+    hybrid-ALL      t_c = log(M_c^pred / md) + dmu   (all c)      "keep md + correct the cliff"
+    hybrid-gDNA     t_g = log(M_g^pred / md) + dmu ; t_{r±} = log(M_{r±}^pred / md)   (gDNA ONLY — owner option B)
+```
+
+`hybrid-gDNA` is the owner's `composition_mode_regresses_post_tau` option B: keep density's *decoupled*, error-prone-
+mature-robust RNA on the pure density mode, correct **only** the gDNA numerator's cliff bias (`ρ_g^src·e_dst/e_src`
+then ÷md). Both were implemented behind `bp._HYBRID_MODE` (the gDNA-only form is the one that shipped in the
+toggle) and A/B'd. **Both regress.**
+
+### 9.2 hybrid-ALL is not distinct from composition (the algebra; adversarially confirmed)
+
+`t_c^{hyb-ALL} − t_c^comp = log(_den/md) + dmu ≡ C` — **the same constant for every component** `c` (an
+independent adversarial derivation confirmed `C_g − C_r < 1e-12`). So hybrid-ALL = composition + a *uniform*
+offset. Consequences: (1) the implied log-odds `t_g − t_r = log(M_g/M_r)` is **identical** to the composition
+shift (the `+C` cancels), so it conserves the same composition; (2) `C = log(R·_den/md)`, and `_den = md/R`
+**exactly when the source composition is accurate** ⇒ `C = 0` ⇒ hybrid-ALL = composition. The `+dmu` is precisely
+what turns the density mode *into* the composition mode when R is right.
+
+The observed `md` survives only in the residual `C ≠ 0` under source error — and it is **not** a "weak offset
+always" (the adversary showed |C| ≳ 1 shifts folded f_g by 0.08–0.31, asymmetrically); it is that the *operative*
+`C` on these edges is **small** (|C| ≤ ~0.3 at true R) because `_den` barely tracks the composition split. MC
+(`scripts/debug/cliff_hybrid_mc.py`): with true R, hybrid-ALL is byte-identical to composition for an accurate
+source (|Δf_g| 0.0045) and within 0.002 under injected error; with the *estimated* R (the total-density ratio,
+which the frame shift + composition change contaminate) it is **worse**. No regime beats composition.
+
+### 9.3 hybrid-gDNA IS distinct — and regresses hardest (the `mu_proj` contamination)
+
+Adding `dmu` to the gDNA factor **only** does *not* cancel in `t_g − t_r`, so hybrid-gDNA is a genuinely different
+mode: it keeps density's decoupled RNA + observed-`md` anchor and shifts only the gDNA log-fraction by the measured
+enrichment jump. In principle it fixes density's `−logR` gDNA cliff bias while staying robust to the error-prone
+mature. **In practice it is the worst arm on unstranded exons**, because `dmu = mu_proj[dst] − mu_proj[src]` is the
+*total-density* jump, which at a composition-changing exon↔boundary edge **conflates enrichment with the mature/RNA
+composition change** (RNA present in the exon, absent from the boundary's unspliced crossing; a pure-gDNA seam).
+The gDNA correction then mis-fires exactly where density's decoupling was winning (the pure-gDNA seams), driving
+confident-wrong mass up to **9.4 %** (gdna300_none_off CW 1.66 → 9.38). A clean gDNA-only enrichment ratio would
+need the *gDNA* density jump, which is circular (it is what we are solving for).
+
+### 9.4 The sim verdict — every hybrid regresses; baseline is best
+
+4-way pass-0-vs-oracle A/B over all 32 cached `ambig_dense_10mb` scenarios (a session A/B harness that toggled the
+message mode per arm — those mode toggles have since been collapsed to the single production path; the reusable
+single-arm error diagnostic is `scripts/debug/pass0_error_diagnostic.py`), factory + τ ON in every arm,
+mass-weighted |Δf_g| vs oracle:
+
+| arm | exon (all 32) | exon (unstranded ss0.50) | boundary | CW% |
+|---|---|---|---|---|
+| **baseline** (shift on clean, density+mature on exon) | **0.249** | **0.392** | **0.274** | **0.6** |
+| hybrid-gDNA (owner option B) | 0.272 | 0.428 | 0.281 | 1.3 |
+| hybrid-ALL (density+dmu on all c) | 0.264 | 0.414 | 0.276 | 0.9 |
+| composition (`_SHIFT_ALL_EDGES`) | 0.265 | 0.416 | 0.286 | 1.0 |
+
+All hybrids regress (19–24 flagged conditions), all in unstranded `ss_0.50` (e.g. hybrid-gDNA gdna300_none_off
+exon 0.270→0.460, CW 1.66→9.38). Stranded (`ss_0.99`) exons are **flat at 0.011 under every mode**. No hybrid
+gives any aggregate benefit.
+
+### 9.5 Why — unstranded IDENTIFIABILITY + `mu_proj` contamination, not mode arithmetic
+
+1. **Identifiability.** Stranded exons solve to 0.005–0.025 under *every* mode; unstranded sit at 0.39. The entire
+   gap is the **loss of strand information** — the only intrinsic gDNA/RNA signal (count-zero-info). No message
+   *mode* can recover information the unstranded data does not contain.
+2. **Composition-conservation transports source noise.** On an unstranded exon the source composition is noise;
+   the shift/hybrid-ALL propagate it as **confident-wrong mass**. The density mode's target-inconsistency
+   (`Σexp(t) ≠ 1`) keeps messages **fuzzy** → self-limits error propagation → defers to the observed anchor /
+   population prior, which *is* the better estimate when the source is noise. So the baseline is right to use
+   composition only where the source is trustworthy (**factory-anchored introns**) and density where it is not
+   (**exons**) — **the current architecture already IS the enrichment-corrected hybrid**, gated by source
+   reliability, keeping the observed `md` anchor exactly on the unreliable-source edges.
+3. **The enrichment estimate is unusable at exon edges.** `mu_proj` is a total-density landscape; its difference
+   is a clean enrichment ratio only on **composition-preserving** (clean intron) edges — which is why the shift
+   works there — and is contaminated on composition-changing exon edges, breaking hybrid-gDNA.
+4. **The trust knob is PRECISION, not the mode (adversary Claim 3, confirmed).** With the cliff-invariant log-odds
+   fixed, a mode's only remaining freedom is one scalar (the common level `C`), which encodes total-mass/enrichment
+   consistency — *orthogonal* to composition accuracy (silent on real source error, harmful under R bias). No
+   fixed-precision mode can be a cliff-invariant, non-collapsing, genuine composition-*trust* regularizer; that
+   role belongs to the message precision (`pr = 1/(Var(log f_c^src) + 1/M_src + σ²_transfer)`).
+
+### 9.6 Where the real headroom is (NOT the mode)
+
+To push unstranded exons below the 0.39 floor the lever is **not** the message mode. It is either (a) the message
+**precision** — down-weight untrustworthy (composition-vacuous) sources so a composition-conserving mode becomes
+safe (this is what the τ core reaches for; the residual regression means it is not yet fully gating the compounded
+confidence along the chain), or (b) inject the one signal unstranded data *does* carry — the **motif-stranded
+spliced mature** measurement (the `_RNA_ABSORB` clean win, already in the exon density path) and the
+**population / intron-factory gDNA prior**. Both are precision/prior levers, out of scope for a mode change.
+
+**Decision:** keep the baseline. `bp._HYBRID_MODE` and `_SHIFT_ALL_EDGES` stay default OFF (byte-identical;
+retained as the A/B artifacts alongside this write-up, to be removed on owner sign-off). Related:
+[`background_reference_derivation.md`], the `composition_mode_regresses_post_tau` and
+`pass0_mature_subtraction_gap` memories.
 
 ---
 
