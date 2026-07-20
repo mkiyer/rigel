@@ -803,7 +803,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("mismatch_alpha", "scoring.mismatch_log_penalty", "log_penalty"),
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
     # -- CalibrationConfig: advanced --
-    _ParamSpec("gdna_rate_prior_bandwidth", "calibration.gdna_rate_prior_bandwidth"),
+    _ParamSpec("npmle_bandwidth", "calibration.npmle_bandwidth"),
     _ParamSpec("sweep_n_grid_single_strand", "calibration.sweep_n_grid_single_strand"),
     # -- Fan-out: total threads → both EM and scan budgets --
     _ParamSpec("threads", "em.n_threads"),
@@ -1356,10 +1356,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     adv.add_argument(
         "--gdna-rate-prior-bandwidth",
-        dest="gdna_rate_prior_bandwidth",
+        dest="npmle_bandwidth",
         type=float,
         default=None,
-        help="Pass-0 gDNA-rate prior bandwidth h in decades (default 0.15). The kernel width of the "
+        help="Pass-0 gDNA hyperprior bandwidth h in decades (default 0.15). The kernel width of the "
         "Fixed-Kernel Poisson-lognormal Mixture NPMLE P(log rho): larger h ⇒ smoother, weaker prior. "
         "Advanced calibration knob.",
     )

@@ -242,7 +242,7 @@ def test_capture_diagnostics_from_prior_labels_modes():
     logp = np.log(
         np.exp(-0.5 * ((x + 8) / 0.4) ** 2) + 0.6 * np.exp(-0.5 * ((x + 2) / 0.5) ** 2) + 1e-9
     )
-    # the new GdnaRatePrior exposes the fitted curve as (log_rho, logP); from_prior finds the modes from it.
+    # the new DensityNPMLE exposes the fitted curve as (log_rho, logP); from_prior finds the modes from it.
     prior = SimpleNamespace(log_rho=x, logP=logp, bandwidth=0.4, n_cells=1234)
     diag = CalibrationDiagnostics.from_prior(prior)
     assert diag.depleted_mode < diag.enriched_mode

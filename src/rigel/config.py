@@ -296,32 +296,60 @@ class CalibrationConfig:
     fold_sigma_coverage: float = 6.0
     fold_refine_iters: int = 3
 
-    #: **Pass-0 gDNA-rate prior bandwidth** ``h`` (decades) for the Fixed-Kernel Poisson-lognormal Mixture
-    #: NPMLE (``calibration.gdna_rate_prior.GdnaRatePrior``). The prior ``P(log ρ)`` is a mixture of fixed-width
-    #: Gaussian kernels on a log-rate grid, fit ONCE (belief-free, on all nodes' total unspliced density) by
-    #: plain EM — deterministic, no spline. The fixed ``h`` is the KDE-style bandwidth: it forbids any peak
-    #: sharper than ``h`` (smooth, never a bed-of-nails) and the resulting prior is extremely weak
+    #: **NPMLE bandwidth** ``h`` (decades) for the Fixed-Kernel Poisson-lognormal Mixture NPMLE
+    #: (``calibration.npmle.DensityNPMLE``) — shared by both its uses (the enrichment fit for σ²_transfer and
+    #: the gDNA-hyperprior refit). ``P(log ρ)`` is a mixture of fixed-width Gaussian kernels on a log-rate grid,
+    #: fit by plain EM — deterministic, no spline. The fixed ``h`` is the KDE-style bandwidth: it forbids any
+    #: peak sharper than ``h`` (smooth, never a bed-of-nails) and the projected prior is extremely weak
     #: (``n_eff≈0.15`` pseudo-obs), so strand + messages dominate. Grid size / EM iters are perf-only knobs
     #: left at the fitter's defaults. Design: ``docs/calibration/npmle_struggles.md``.
-    gdna_rate_prior_bandwidth: float = 0.15
+    npmle_bandwidth: float = 0.15
+
+    #: **Aggregate DNA-background floor** (`calibration.background_reference`,
+    #: ``docs/calibration/background_reference_derivation.md``). Measure the genome-wide DNA background as a
+    #: pooled scalar ``(log ρ_bg, σ_bg)`` and apply it as a ONE-SIDED log-floor in the gDNA prior — data-driven
+    #: crush protection that is DORMANT for a DNA-free / fully-depleted library (never manufactures gDNA) and
+    #: never a scale/denominator. ``False`` ⇒ no floor (the pre-background behaviour).
+    background_floor: bool = True
+
+    #: Background region set: intergenic-only (``False``, sim-safe — the sim's unrealistically abundant nascent
+    #: contaminates introns) vs intergenic + intron (``True``, the real-data path — reclaims the introns' huge
+    #: aggregate span for resolution; real nascent is sparse). Explore ``True`` on real data.
+    background_include_introns: bool = False
+
+    #: Optional upper MAD fence (in log-density) that drops nascent-contaminated intron outliers from the
+    #: background pool before aggregation; ``None`` ⇒ no trim. Only meaningful with ``background_include_introns``.
+    background_robust_trim_mad: float | None = None
 
     #: **Calibration refit iterations.** Pass-0 bootstraps from TOTAL density: an extremely weak gDNA-rate
-    #: prior + an RNA-inflated scalar message precision ⇒ deliberately GENTLE messages that nudge rather than
-    #: ruin the solve. Each refit then re-estimates BOTH population models on the *solved* gDNA rates — P(ρ)
-    #: (`GdnaRatePrior`, on the believed gDNA counts + belief width) and the honest, non-constant per-node
-    #: σ²_imp(ρ) (`message_precision.adjacent_imputation_variance`) — so messages strengthen exactly where the
-    #: data has earned it and the solve converges. ``0`` ⇒ the pass-0 bootstrap alone (no refit).
+    #: prior + the belief-free projection ``σ²_transfer`` ⇒ deliberately GENTLE messages that nudge rather than
+    #: ruin the solve. Each refit re-estimates the population model P(ρ) (`DensityNPMLE`) on the *solved* gDNA
+    #: counts + belief width, so the prior sharpens where the data has earned it; message precision needs no
+    #: refit (it tracks the running belief). ``0`` ⇒ the pass-0 bootstrap alone (no refit).
     calib_refit_iters: int = 1
+
+    #: **gDNA composition prior representation (Role B).** ``False`` (default) = the EM Poisson-mixture NPMLE.
+    #: ``True`` = the **additive, occupancy-weighted, fixed-bandwidth KDE** on the deconvolved gDNA + a weak
+    #: 1-pseudo-observation floor (``gdna_kde_restore_plan.md``): every node deposits its own kernel so a
+    #: capture-enriched minority is never competed away, and the intergenic flood is a single weak floor rather
+    #: than an ``n_regions`` tower. Affects ONLY the gDNA hyperprior fit (Role B) — NOT the enrichment NPMLE
+    #: (Role A / σ²_transfer) and NOT the solve's gDNA messages. Experimental; being A/B-gated before default-on.
+    gdna_prior_additive: bool = False
 
     def __post_init__(self) -> None:
         if self.calib_refit_iters < 0:
             raise ValueError(
                 f"CalibrationConfig.calib_refit_iters must be >= 0; got {self.calib_refit_iters}."
             )
-        if not (0.0 < float(self.gdna_rate_prior_bandwidth) < 5.0):
+        if not (0.0 < float(self.npmle_bandwidth) < 5.0):
             raise ValueError(
-                "CalibrationConfig.gdna_rate_prior_bandwidth must be in (0, 5) decades; "
-                f"got {self.gdna_rate_prior_bandwidth}."
+                "CalibrationConfig.npmle_bandwidth must be in (0, 5) decades; "
+                f"got {self.npmle_bandwidth}."
+            )
+        if self.background_robust_trim_mad is not None and float(self.background_robust_trim_mad) <= 0.0:
+            raise ValueError(
+                "CalibrationConfig.background_robust_trim_mad must be > 0 (or None); "
+                f"got {self.background_robust_trim_mad}."
             )
         if self.sweep_n_grid < 2:
             raise ValueError(

@@ -1,0 +1,4 @@
+
+There's another source of unstranded precision that we can develop next. we have called it the "RNA factory" -- first we model the distribution of intergenic counts (pure DNA) and intergenic-exon counts (also pure DNA). We can then model the total counts of non-intergenic nodes as a separate distribution. We can then compare the likelihood of a node being sampled from the intergenic DNA distribution vs the non-intergenic distribution. Nodes are then assigned a likelihood of being sampled from pure DNA. This can translate to a deconvolution solution with precision based on density alone.
+
+this is essentially what the gDNA hyperprior does. the problem is that it does not work well under hybrid capture circumstances, because intergenic regions are not captured. so applying it to captured nodes will fail (they could be 100% gDNA but much higher than the intergenic gDNA density due to capture). But it could be applied to introns, which are typically not captured.

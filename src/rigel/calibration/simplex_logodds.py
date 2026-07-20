@@ -286,7 +286,7 @@ def _local_loglik_logodds(
                 * (log_fact - np.asarray(ms, np.float64)[:, None]) ** 2
             )
     # ── NO change-of-variable Jacobian, and NO reference prior. Both are deliberate, and they are the SAME
-    #    fact: `GdnaRatePrior.logP` is a density in LOG-rate, so its conversion to a linear-rate density
+    #    fact: `DensityNPMLE.logP` is a density in LOG-rate, so its conversion to a linear-rate density
     #    (−log f_g, up to a constant) cancels log σ'(λ) = log f_g + log(1−f_g) exactly, once per component.
     #    Writing either alone is what produced the improper +0.5·λ ramp (prior_ramp_and_bp_roadmap.md §2).
     #    ⇒ ψ_λ = strand + logP_g + logP_r, bare. ──

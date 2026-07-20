@@ -70,10 +70,12 @@ import numpy as np
 import pandas as pd
 from selfsolve_diag import _scan_and_truth
 
-from rigel.calibration.bp_solver import (
+from _disagreement_variance import (
     _adjacent_edges,
     _poisson_moment_var,
     adjacent_disagreement_variance,
+)
+from rigel.calibration.bp_solver import (
     node_global_geometry,
 )
 from rigel.calibration.node_chain import REGION, build_node_chain

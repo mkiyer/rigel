@@ -151,8 +151,8 @@ def boundary_side_eff_length(fl_pmf: np.ndarray, region_side_len_bp: np.ndarray)
 
     **This ½ was previously missing**, so every boundary↔region message carried a systematic 2× frame
     error (a boundary told its neighbour "you are half gDNA"; a region told a boundary "you are 2×",
-    clipped to 1). ``bp_solver._poisson_moment_var`` measured the resulting −0.69-nat offset and removed
-    it from the *variance* while leaving it in the message *mode*.
+    clipped to 1). The retired total-density σ²_imp moment estimator measured the resulting −0.69-nat offset
+    and removed it from the *variance* while leaving it in the message *mode*.
 
     Distinct from :func:`boundary_side_crossing_count_eff_length` (the un-halved **count** length —
     statistical power, where the whole fragment does cross) and from

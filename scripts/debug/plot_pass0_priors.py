@@ -1,6 +1,6 @@
 """Plot the pass-0 gDNA-rate NPMLE prior P(ρ) for every condition of a sim suite (a grid, for comparison).
 
-Scans + calibrates each condition (capturing the fitted `GdnaRatePrior` via the calibrate `_debug` hook) and
+Scans + calibrates each condition (capturing the fitted `DensityNPMLE` via the calibrate `_debug` hook) and
 plots its P(log ρ) — so we can see the pass-0 prior's shape (depleted / middle / enriched modes) across gDNA
 level, strand specificity, capture, and nascent. Curves are coloured by the condition's true gDNA level.
 

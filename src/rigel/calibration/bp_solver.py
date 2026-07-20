@@ -10,8 +10,8 @@ messages, and the population gDNA prior. Theory: the count-zero-information prin
 `docs/calibration/reference_prior_derivation.md`; the message-precision model — the source's own honest
 belief precision ``Var(log ρ_c^src) = Var(log f_c^src) + 1/n_c^src`` — in the `_scan` docstring below.
 
-The gDNA population prior is the pass-0 count-space **`GdnaRatePrior`** (`gdna_rate_prior`), fit ONCE before
-the sweep on all nodes' total unspliced density and projected onto each node's ψ (`GdnaRatePrior.logprior`) —
+The gDNA population prior is the pass-0 count-space **`DensityNPMLE`** (`npmle`), fit ONCE before
+the sweep on all nodes' total unspliced density and projected onto each node's ψ (`DensityNPMLE.logprior`) —
 extremely weak, so strand + messages dominate. It replaces the retired seed/floor/global + the density KDE.
 
 Module layout. The per-node geometry / belief / statics / init primitives (`build_node_geometry`,
@@ -20,11 +20,9 @@ lower `node_geometry` module and are re-exported here for the calibrator's conve
 * `node_global_geometry` — the per-node ``(mass, eff)`` support the rate prior is fit on and projected onto.
 * `node_sweep` — the single forward-backward sweep. Message precision is the source's own HONEST belief
   precision ``pr = n_src/(n_src·vb_src + 1)`` = ``1/(Var(log f_c^src) + 1/n_src)`` — strand (composition) and
-  count (sampling), per component, from the RUNNING belief. It saturates at ``1/vb_src``, so a source can
-  never send more confidence than its own belief supports; there is no var~mean fixed point / no outer loop.
-  The adjacent-pair overdispersion ``σ²_transfer`` is a PRIOR and is currently ZERO — it returns later as an
-  NPMLE projection, not a total-density fit (`adjacent_disagreement_variance`, retained but no longer in the
-  solve, is that retired total-density estimator).
+  count (sampling), per component, from the RUNNING belief — plus the belief-free ``σ²_transfer`` (the NPMLE
+  enrichment-crossing projection ``F1``, `DensityNPMLE.project`), added to the message variance. The retired
+  total-density disagreement estimator is gone from production (relocated to `scripts/debug/`).
 * `chain_region_deconv` / `chain_boundary_side_deconv` — project the converged belief back to the per-region
   / per-boundary-side masses the `CalibrationResult` consumes.
 """
@@ -35,7 +33,7 @@ import math
 
 import numpy as np
 
-from .node_chain import BOUNDARY, REGION, NodeChain
+from .node_chain import REGION, NodeChain
 from .node_geometry import (
     NodeBelief,
     NodeGeometry,
@@ -64,6 +62,41 @@ __all__ = [
 ]
 
 _EPS = 1.0e-9
+
+# A/B TOGGLE (the spliced ABSORPTION — owner-confirmed CORRECT, 2026-07-18): the boundary subtracts ITS OWN
+# spliced-RNA density (``SPd[i]/ESPd[i]``, the dst-face spliced) from the incoming message's RNA density. A
+# splice junction directly measures a pure-RNA spliced population; that mass is accounted for BEFORE the
+# residual unspliced RNA is imputed onto the boundary's crossing. The two densities are disjoint independent
+# measurements, so the residual can go negative — which just means the boundary's spliced already absorbed all
+# the incoming RNA (and more) ⇒ ~zero unspliced RNA left (handled by the honest clamp below). Default True =
+# production. Kept as a toggle only for the A/B; the subtraction is physically required, not a bug.
+_RNA_ABSORB = True
+
+# THE HONEST CLAMP (production, message_absorption_fix.md Step 0 — landed): a residual unspliced-RNA density
+# that the spliced absorption drives at/below the count floor ``1/erd`` is a genuine but IMPRECISE zero — a
+# short boundary cannot measure a confident zero — so it is sent with the ONE-COUNT precision of that floor
+# (``n_eff = rho_floor·erd = 1``), NOT the source's full count ``sm`` (see the ``n_eff`` sites in ``_scan``).
+# This stops the saturated subtraction from being laundered into a CONFIDENT "no RNA" (the confident-FP seed).
+# It does not manufacture RNA either; the honest weak zero lets the Phase-2 DNA hyperprior pin the node later.
+
+# Phase A — the τ-precision core (docs/calibration/message_precision_derivation.md §3; validated 2026-07-20).
+# A message's COMPOSITION precision is sourced from a REFERENCE-FREE evidence quantity ``τ`` (the Compositional
+# Evidence Compiler: I_strand + I_struct + relayed pr) instead of the running BELIEF variance ``σ²_λ`` — which
+# pools the shared Beta(½,½) reference and manufactures confidence on composition-vacuous unstranded chains (the
+# 35× phantom cascade, §2). A vacuous source (unstranded, no structural lock) has ``τ = 0 ⇒ pr = 0``; a strand
+# anchor / structural lock propagates honestly. The strand seed I_strand carries the DERIVED overdispersion
+# noise floor (below) so a κ≈½ sampling whisper cannot seed phantom precision. Confidently-wrong mass (the
+# NPMLE-corrupting quantity) → ~0 on vacuous chains, stranded controls preserved (validate_tau, 2026-07-20).
+_TAU_PRECISION = True
+
+# A/B sub-toggles for the I_struct composition-certain gate (the structural gDNA locks):
+#   _ISTRUCT       — master: when False, NO structural locks emit in pass 1 (all gDNA grounding deferred to the
+#                    Phase-2 hyperprior). Tests whether the lock compounding is what keeps the zero-DNA fit wrong.
+#   _ISTRUCT_SEAMS — when True, the gate applies to ALL locked (G1) nodes incl. boundary SEAMS; when False,
+#                    only true intergenic REGION locks (seams carry RNA-contaminated mass → phantom).
+_ISTRUCT = True
+_ISTRUCT_SEAMS = False
+
 
 
 def _log_sigmoid(x):
@@ -122,70 +155,10 @@ def _fold_lambda(mu, var, factors, *, L, coarse_k, fine_k, sigma_cov, refine):
     return m1, v1
 
 
-def _poisson_moment_var(resid, ns, nd) -> float:
-    """The §2 Poisson disagreement-variance moment estimator (the total-density σ²_imp).
-    ``Var(d) = σ²_imp + 1/n_i + 1/n_j`` ⇒ subtract each pair's known Poisson
-    sampling and inverse-variance-weight-average (``w = nᵢnⱼ/(nᵢ+nⱼ)``, harmonic — 0 at zero count, no
-    threshold). ``resid`` must already be oriented to a single sign convention (so the systematic frame
-    offset is one mode); it is median-centered here. ``ns``/``nd`` are symmetric in ``w`` and ``v`` so their
-    orientation is irrelevant. Returns ``max(·, 0)``; a degenerate (no pairs) input returns 1.0."""
-    resid = np.asarray(resid, float)
-    ns = np.asarray(ns, float)
-    nd = np.asarray(nd, float)
-    ok = np.isfinite(resid) & (ns > _EPS) & (nd > _EPS)
-    resid, ns, nd = resid[ok], ns[ok], nd[ok]
-    if resid.size < 2:
-        return 1.0
-    dc = resid - np.median(resid)  # remove the systematic frame offset
-    w = (ns * nd) / (ns + nd)
-    den = float(np.sum(w))
-    if den <= _EPS:
-        return 1.0
-    return float(max(np.sum(w * (dc * dc - (1.0 / ns + 1.0 / nd))) / den, 0.0))
-
-
-def _adjacent_edges(chain: NodeChain):
-    """Adjacent boundary↔region edges as (src, dst, src_is_boundary), each undirected edge once (i→right[i]).
-    src presents its RIGHT face to dst; dst its LEFT face."""
-    kind = np.asarray(chain.kind)
-    right = np.asarray(chain.right)
-    src = np.arange(kind.shape[0])
-    dst = right
-    m = dst >= 0
-    src, dst = src[m], dst[m]
-    return src, dst, kind[src] == BOUNDARY
-
-
-def _adjacent_log_density_residuals(chain: NodeChain, geometry: NodeGeometry):
-    """Oriented adjacent boundary↔region log gDNA-density residuals + the two source/dst gDNA counts, feeding
-    the σ²_imp moment estimator. ``ρ = mass / eff_gdna`` oriented boundary→region so the systematic frame
-    offset is one median-removable mode (the naive total-density frame, RNA included, evaluated pre-solve)."""
-    ML = np.asarray(geometry.mass_left)
-    MR = np.asarray(geometry.mass_right)
-    EGL = np.asarray(geometry.eff_gdna_left)
-    EGR = np.asarray(geometry.eff_gdna_right)
-    src, dst, s_bnd = _adjacent_edges(chain)
-    n_i, e_i, n_j, e_j = MR[src], EGR[src], ML[dst], EGL[dst]
-    ok = (n_i > _EPS) & (n_j > _EPS) & (e_i > _EPS) & (e_j > _EPS)
-    n_i, e_i, n_j, e_j, s_bnd = n_i[ok], e_i[ok], n_j[ok], e_j[ok], s_bnd[ok]
-    lr_i = np.log(n_i / e_i)
-    lr_j = np.log(n_j / e_j)
-    resid = np.where(s_bnd, lr_i - lr_j, lr_j - lr_i)  # orient boundary→region (one mode)
-    return resid, n_i, n_j
-
-
-def adjacent_disagreement_variance(chain: NodeChain, geometry: NodeGeometry) -> float:
-    """v1 total-density σ²_imp (``disagreement_shrinkage_prior_design_v2.md`` §2): the mean adjacent-node
-    naive-gDNA log-density disagreement variance (Poisson sampling removed) — the population-average message
-    process variance."""
-    resid, n_i, n_j = _adjacent_log_density_residuals(chain, geometry)
-    return _poisson_moment_var(resid, n_i, n_j)
-
-
 def node_global_geometry(chain: NodeChain, geometry: NodeGeometry):
     """Per-node 'global' gDNA support ``(mass, eff)``: a REGION uses its contained mass over its contained
     gDNA eff-length; a BOUNDARY uses its both-side crossing mass over the SUMMED per-side density length
-    ``E_l + E_r``. This is the basis the pass-0 gDNA-rate prior (`GdnaRatePrior`) is fit on and projected
+    ``E_l + E_r``. This is the basis the enrichment NPMLE (`DensityNPMLE`) is fit on and projected
     onto — shared by :func:`node_sweep` and ``calibrate`` so the fit and the projection use one definition.
 
     The boundary sum is ``E_l + E_r`` (not the old ``½(E_l+E_r)``) because ``eff_gdna_*`` is now the true
@@ -213,15 +186,19 @@ def node_sweep(
     rna_sense_frac: float,
     gdna_strand_overdispersion: float = 0.0,
     rna_strand_overdispersion: float = 0.0,
+    n_gdna_obs: float = 0.0,
+    n_rna_obs: float = 0.0,
     n_grid: int,
     logodds_window: float = 10.0,
     n_tilt: int | None = None,
     n_grid_ss: int | None = None,
     gdna_prior=None,
+    enrichment_prior=None,
     fold_coarse_k: int = 33,
     fold_fine_k: int = 33,
     fold_sigma_coverage: float = 6.0,
     fold_refine_iters: int = 3,
+    transfer_variance: bool = True,
     _capture: dict | None = None,
 ):
     """The belief-propagation sweep over the chain — gDNA AND per-strand RNA messages, in COUNT space (no
@@ -229,13 +206,14 @@ def node_sweep(
 
     The chain is a forest of linear paths, so BP is exact in one forward + one backward pass (vs Gauss-Seidel /
     Jacobi which propagate one hop per pass). The message precision is the source's own HONEST belief precision
-    ``pr = n_src/(n_src·vb_src + 1)`` = ``1/(Var(log f_c^src) + 1/n_src)`` — strand (composition) and count
-    (sampling), and nothing else. The adjacent-pair overdispersion ``σ²_transfer`` is a PRIOR and is currently
-    **zero**; see the ``_scan`` docstring for the derivation. There is no precision to refit and no outer
+    plus the belief-free transfer variance: ``pr = 1/(Var(log f_c^src) + 1/n_src + σ²_transfer)`` — strand
+    (composition), count (sampling), and the enrichment-crossing damping ``σ²_transfer`` from the NPMLE
+    projection (fit once, belief-free — ``docs/calibration/npmle_projection_variance_design.md``; off when
+    ``transfer_variance=False`` or there is no prior). There is no precision to refit and no outer
     fixed-point loop. The global prior is ANCHORED (every input fit once before the solve), so the single FB
     pass is exact.
 
-    BEFORE the pass: the pass-0 NPMLE gDNA-rate prior (:class:`~.gdna_rate_prior.GdnaRatePrior`), fit once,
+    BEFORE the pass: the pass-0 NPMLE gDNA hyperprior (:class:`~.npmle.DensityNPMLE`), fit once,
     belief-free, and passed as ``gdna_prior``. ``gdna_prior=None`` is a first-class PRIOR-FREE solve: ψ then
     carries the derived reference alone on both arms (``simplex_logodds._gdna_arm`` / ``_rna_arm``) — prior-free
     is not reference-free.
@@ -324,17 +302,30 @@ def node_sweep(
     #     components gDNA / +RNA / −RNA, structural and symmetric — defined at the top of the scan loop.
     solvable = (fp | fn) & (statics.mass_unspliced > 0.0)
 
-    # The pass-0 gDNA-rate prior (`GdnaRatePrior`, fit ONCE before the sweep on ALL nodes' total unspliced
-    # density) projected onto the f_g solve grid → the (n_nodes, K) additive term = log P(f_g·M/E) + the RNA
-    # Jeffreys. ANCHORED (constant within the pass). It is EXTREMELY WEAK (n_eff≈0.15 pseudo-obs, never >1),
-    # so it can never override a node's strand likelihood or the boundary messages — it supplies the
-    # gDNA-vs-RNA population shape + the zero anchor, then lets strand/messages peel RNA out of the f_g=1
-    # start. Replaces the retired seed/floor/global (`_gdna_seed_estimate`/`_floor_estimate`/`_global_logprior`)
-    # and the density KDE (`_kde_logprior`) with this single count-space model (docs/calibration/
-    # npmle_struggles.md §8-9). ``gdna_prior=None`` ⇒ no prior (strand + messages alone; a graceful degenerate).
+    # THE gDNA ARM of ψ — the COMPOSITION prior. The NPMLE's two roles are kept SEPARATE
+    # (docs/calibration/CALIBRATION_MASTER.md §5): this ``gdna_prior`` is the COMPOSITION arm ONLY.
+    #   * ``gdna_prior=None`` — the INITIAL prior-free solve: the arm is the derived inert reference (½·log f_c
+    #     on both arms, added by simplex_logodds). A total-density NPMLE is an ENRICHMENT model, NOT a DNA
+    #     composition prior — letting it vote a node's f_g is the count-votes-composition regression (§0).
+    #   * ``gdna_prior`` set — a REFIT with the FITTED gDNA hyperprior (fit on the DECONVOLVED gDNA density,
+    #     with ρ_bg pinned as a smooth low-density component — NO clamp/floor). ANCHORED, EXTREMELY WEAK.
     global_lp = (
         gdna_prior.logprior(solve_grid, mass_global, eff_global) if gdna_prior is not None else None
     )
+
+    # The belief-free PROJECTION message transfer variance (transfer_variance_formal_derivation.md): each node's
+    # total density projected onto the NPMLE ENRICHMENT landscape → (mu_proj, var_proj). The per-edge
+    # σ²_transfer = var_proj[dst] + (mu_proj[dst] − mu_proj[src])² damps a message across a capture-enrichment
+    # crossing (mode gap²) and floors at h². This is Role A — message PRECISION, not a composition claim — so it
+    # runs on the ENRICHMENT NPMLE (``enrichment_prior``), INDEPENDENTLY of the composition arm above. Fit once,
+    # belief-free, ANCHORED. Falls back to ``gdna_prior`` for callers that pass one prior (backward compat).
+    # σ²_transfer = 0 with no prior or when disabled (clean A/B via ``transfer_variance=False``).
+    proj_prior = enrichment_prior if enrichment_prior is not None else gdna_prior
+    if transfer_variance and proj_prior is not None:
+        mu_proj, var_proj = proj_prior.project(mass_global, eff_global)
+    else:
+        mu_proj = np.zeros_like(mass_global)
+        var_proj = np.zeros_like(mass_global)
 
     # Genomic node order for the forward/backward scans (within each ref path; left/right break at −1). The
     # scans are sequential per node, so iterate as a Python list of ints (faster than numpy scalar indexing).
@@ -387,6 +378,55 @@ def node_sweep(
     lam_loc = np.where(locked, lam_locked, lam_loc)
     lvar_loc = np.where(locked, 0.0, lvar_loc)
 
+    # ---- Phase A: the reference-free evidence precision τ (message_precision_derivation.md §3) ----
+    # Seed τ from the two composition-evidence channels present in this pass (spliced precision is Phase B):
+    #   * I_strand(λ) = N·(2κ−1)²·[f_g(1−f_g)]²/(4 p(1−p)),  p = κ + f_g(½−κ)  — the strand Fisher info,
+    #     IDENTICALLY 0 at κ=½ (unstranded); evaluated at the message-free local f_g.
+    #   * I_struct — the boolean composition-certain gate: a signature-locked (G1) node is certain (v_evid=0),
+    #     its message precision governed only by the honest count/transfer terms (1/M_src + s2t).
+    # The running τ then accumulates relayed message precision (the cavity), so τ is 0 exactly on a vacuous
+    # unstranded chain (⇒ pr=0, the phantom collapse) and >0 only where real evidence exists or propagates.
+    if _TAU_PRECISION:
+        _n_raw = np.asarray(statics.u_pos, dtype=np.float64) + np.asarray(statics.u_neg, dtype=np.float64)
+        # OVERDISPERSED effective count N_eff = N/(1+(N−1)ω) → 1/ω: molecular sampling is Beta-Binomial
+        # overdispersed, so the strand Fisher POWER saturates at ~1/ω regardless of raw depth. Using the raw
+        # N compounds the tiny residual tilt at κ≈½ (fitting noise) across high-expression chains into phantom
+        # confidence — the τ must carry the HONEST (deflated) power, not the raw count.
+        _n_str = _n_raw / (1.0 + np.maximum(_n_raw - 1.0, 0.0) * od_r)
+        _fgl = np.clip(np.asarray(fg_loc, dtype=np.float64), _EPS, 1.0 - _EPS)
+        _pmix = np.clip(kappa + _fgl * (0.5 - kappa), _EPS, 1.0 - _EPS)
+        # STRAND discriminability with a DERIVED noise floor (message_precision_derivation.md). The strand
+        # channel distinguishes gDNA (sense rate ½ — dsDNA is strand-symmetric, biological truth, NOT fitted)
+        # from RNA (sense rate κ_RNA); its Fisher scale is 4·(κ_RNA − ½)². But that separation must clear the
+        # VARIANCE of the two sense splits about their means — the Beta-Binomial OVERDISPERSION (ω, fitted) plus
+        # Binomial sampling: σ²_κ = ¼·(1/N + ω). The 1/N term gates a gDNA-free library (N_gdna=0 ⇒ σ²→∞ ⇒
+        # disc=0) and thins a sparse one; the ω term is the irreducible overdispersion floor that sets the
+        # deadband on real (overdispersed) data — self-scaling, no tuned constant. A κ_RNA within √σ²_d of ½ is
+        # not composition signal, so the κ≈½ sampling whisper a huge N would square-and-multiply into phantom
+        # precision is gated. (Replaces the shipped bare (2κ_RNA−1)², which had no floor.)
+        _sig2_d = 0.25 * (1.0 / max(float(n_rna_obs), _EPS) + od_r) + 0.25 * (
+            1.0 / max(float(n_gdna_obs), _EPS) + od_g
+        )
+        _disc = 4.0 * max(0.0, (kappa - 0.5) ** 2 - _sig2_d)
+        _i_strand = (
+            _n_str * _disc * (_fgl * (1.0 - _fgl)) ** 2 / (4.0 * _pmix * (1.0 - _pmix))
+        )
+        tau0_lam = _i_strand.copy()
+        tau0_th = _i_strand.copy()  # θ-axis tilt Fisher info (same differential-disc gating); seed-only (θ not relayed)
+        # I_struct — composition-certain ONLY for true intergenic REGION nodes (gonly), NOT G1 boundary SEAMS
+        # (TSS/TES, opposite-strand exon↔exon): a seam is locked to gDNA by structure but sits between
+        # RNA-carrying exons, so its crossing mass is RNA-contaminated — making it composition-CERTAIN turns it
+        # into a high-precision phantom-gDNA emitter that compounds along the chain (measured: 2310 lock-sourced
+        # edges, τ→12 in gdna_none). A true intergenic region carries ~0 mass in a zero-gDNA library, so it is
+        # safe. (`_ISTRUCT_SEAMS` restores the all-locks form for the A/B.)
+        _is_reg = np.asarray(chain.kind) == REGION
+        if _ISTRUCT:
+            struct_lock = np.asarray(locked, dtype=bool) & (_is_reg | _ISTRUCT_SEAMS)
+        else:
+            struct_lock = np.zeros(n_nodes, dtype=bool)
+    else:
+        tau0_lam = tau0_th = struct_lock = None
+
     def _scan(seq, nbr, sf, df):
         """Sequential scan — the coherent ``(λ,θ)`` relay (docs/calibration/dof_pie_relay_derivation.md;
         implementation plan §3-§6). Each node folds its ONE incoming message onto its running FREE-COORDINATE
@@ -405,7 +445,9 @@ def node_sweep(
         **Message precision — the count-term (docs §5.2).** ``pr = 1/(Var(log f_c^src) + 1/M_src)`` written
         ``M_src/(M_src·Var + 1)`` so ``M_src=0 ⇒ pr=0``. ``M_src = sm`` is the source facing UNSPLICED mass; the
         spliced MEASUREMENT ``n_mat`` rides in the CONTENT but NOT the precision (item 2 owns the imputation
-        precision; the mature-measurement channel is priority #3). ``σ²_transfer = 0`` (returns with the NPMLE).
+        precision; the mature-measurement channel is priority #3). ``σ²_transfer`` (``s2t``) is the belief-free
+        NPMLE-projection enrichment-crossing damping ``var_proj[dst] + (mu_proj[dst] − mu_proj[src])²``, shared
+        by every component at pass-0 (capture is nucleic-acid-agnostic).
 
         **The fold.** ``_fold_lambda`` — a two-stage EP moment-match of the running Gaussian against the gDNA
         (on ``log f_g``) and RNA-total (on ``log f_r``) factors: the two ``λ``-messages in tension on one axis.
@@ -418,9 +460,17 @@ def node_sweep(
         intron-baselined) land. The spliced MEASUREMENT + junction absorption content is unchanged."""
         mu_lam, var_lam = lam_loc.copy(), lvar_loc.copy()  # running λ belief (starts at the local seed)
         mu_th, var_th = thm_loc.copy(), thv_loc.copy()  # tilt θ: seeded, NOT relayed (v1 — a nuisance)
+        # running reference-free evidence precision τ (Phase A); accumulates relayed pr (the cavity along
+        # this sweep's direction). None when the τ-precision core is off (belief-variance behaviour).
+        tau_lam = tau0_lam.copy() if _TAU_PRECISION else None
+        tau_th = tau0_th if _TAU_PRECISION else None  # seed-only (θ not relayed) — read, not mutated
         amg, apg = np.zeros(n_nodes), np.zeros(n_nodes)  # gDNA message (mode, prec)
         amp, app = np.zeros(n_nodes), np.zeros(n_nodes)  # RNA-pos
         amn, apn = np.zeros(n_nodes), np.zeros(n_nodes)  # RNA-neg
+        # DIAGNOSTIC (inert unless _capture): per-edge precision-term decomposition for the honest-precision
+        # audit — the source count `sm`, the source composition variances `v_logf*`/`vls`, the transfer var
+        # `s2t`, the source `fg_s`. Reveals WHICH term lets a message run to high precision.
+        _pt = {k: np.zeros(n_nodes) for k in ("sm", "vlfg", "vlfp", "s2t", "fgs", "vls")}
         EGs, EGd, ERs, ERd = EG[sf], EG[df], ER[sf], ER[df]
         MSs, MSd, SPs, SNs = MS[sf], MS[df], SP[sf], SN[sf]
         ESPs = ESP[sf]  # source-face spliced eff-len (for the mature-RNA MEASUREMENT message)
@@ -433,7 +483,12 @@ def node_sweep(
             egd = EGd[i] if EGd[i] > _EPS else _EPS
             erd = ERd[i] if ERd[i] > _EPS else _EPS
             sm = MSs[lsrc]  # source facing UNSPLICED mass = the count-term M_src
-            # source COHERENT fractions + log-fraction variances from its (λ,θ) belief (delta-method).
+            # belief-free message transfer variance for THIS edge (src=lsrc → dst=i): the enrichment-crossing
+            # damping (F1). Shared by every component (capture is nucleic-acid-agnostic ⇒ the crossing is a
+            # discontinuity in gDNA AND RNA at pass-0). 0 when the projection is off.
+            s2t = var_proj[i] + (mu_proj[i] - mu_proj[lsrc]) ** 2
+            # source COHERENT fractions from its (λ,θ) belief (the MODE; the belief is still the point
+            # estimate). ``vls`` kept for the diagnostic capture.
             ls, vls = mu_lam[lsrc], var_lam[lsrc]
             sin_t = math.sin(mu_th[lsrc])
             cos_t = math.cos(mu_th[lsrc])
@@ -441,62 +496,103 @@ def node_sweep(
             fr_s = 1.0 - fg_s
             fp_s = fr_s * (1.0 + sin_t) / 2.0
             fn_s = fr_s * (1.0 - sin_t) / 2.0
-            v_logfg = fr_s * fr_s * vls  # Var(log f_g)  = (1−f_g)²·σ²_λ
-            v_logfr = fg_s * fg_s * vls  # Var(log f_r)  =  f_g²·σ²_λ   (RNA-total)
-            vts = var_th[lsrc]
-            v_logfp = v_logfr + (cos_t / max(1.0 + sin_t, _EPS)) ** 2 * vts  # +θ term (0 for single-strand)
-            v_logfn = v_logfr + (cos_t / max(1.0 - sin_t, _EPS)) ** 2 * vts
+            # PRECISION SOURCE (the log-fraction variances). Phase A (τ core): the REFERENCE-FREE evidence
+            # variance ``1/τ`` — a structural lock is composition-CERTAIN (``ev=0`` ⇒ high pr, governed by the
+            # honest 1/M_src+s2t); a source with no composition evidence (``τ=0``, not locked) is gated OUT
+            # (``lam_ev``/``th_ev`` False ⇒ pr=0), the phantom collapse. Pre-Phase-A: the running BELIEF
+            # variance (which pools the reference — the defect).
+            if _TAU_PRECISION:
+                lock_s = bool(struct_lock[lsrc])
+                lam_ev = lock_s or (tau_lam[lsrc] > _EPS)
+                ev_lam = 0.0 if lock_s else (1.0 / tau_lam[lsrc] if tau_lam[lsrc] > _EPS else 0.0)
+                th_ev = tau_th[lsrc] > _EPS
+                ev_th = (1.0 / tau_th[lsrc]) if th_ev else 0.0
+            else:
+                lam_ev = th_ev = True
+                ev_lam, ev_th = vls, var_th[lsrc]
+            v_logfg = fr_s * fr_s * ev_lam  # Var(log f_g) = (1−f_g)²·(1/τ_λ) [Phase A] / ·σ²_λ [pre]
+            v_logfr = fg_s * fg_s * ev_lam  # Var(log f_r) =  f_g²·(1/τ_λ)     (RNA-total)
+            v_logfp = v_logfr + (cos_t / max(1.0 + sin_t, _EPS)) ** 2 * ev_th  # +θ term (0 for single-strand)
+            v_logfn = v_logfr + (cos_t / max(1.0 - sin_t, _EPS)) ** 2 * ev_th
+            if _capture is not None:
+                _pt["sm"][i], _pt["vlfg"][i], _pt["vlfp"][i] = sm, v_logfg, v_logfp
+                _pt["s2t"][i], _pt["fgs"][i], _pt["vls"][i] = s2t, fg_s, vls
+                if _TAU_PRECISION:
+                    _pt.setdefault("tau_src", np.zeros(n_nodes))[i] = tau_lam[lsrc]
+                    _pt.setdefault("lock_src", np.zeros(n_nodes))[i] = 1.0 if struct_lock[lsrc] else 0.0
             # STRUCTURAL emission gates only (per-strand `free_s` continuity + facing mass). The
             # mature-crossing gate (`send_s = mrna_active[dst] or not mrna_active[src]`) was DISMANTLED —
             # see the `_scan` docstring; each RNA strand flows wherever that strand is continuous on both
             # endpoints, INCLUDING exon→intron (the leak the nascent factory will counter).
-            emit_g = sm > _EPS
-            emit_p = fp[lsrc] and fp[i] and (sm > _EPS or SPs[lsrc] > _EPS)
-            emit_n = fn[lsrc] and fn[i] and (sm > _EPS or SNs[lsrc] > _EPS)
+            # Phase A adds the τ-evidence gate: a source with no composition evidence emits NOTHING (pr=0),
+            # never a reference-pooled confident message. ``lam_ev``/``th_ev`` are True pre-Phase-A (no gate).
+            emit_g = (sm > _EPS) and lam_ev
+            emit_p = fp[lsrc] and fp[i] and (sm > _EPS or SPs[lsrc] > _EPS) and (lam_ev or th_ev)
+            emit_n = fn[lsrc] and fn[i] and (sm > _EPS or SNs[lsrc] > _EPS) and (lam_ev or th_ev)
             lam_factors = []
             # ---- gDNA density message (a factor on log f_g) ----
             if emit_g:
                 eg = EGs[lsrc] if EGs[lsrc] > _EPS else _EPS
                 rho = fg_s * sm / eg  # source gDNA DENSITY (f_g^src ≤ 1 ⇒ n_src ≤ sm by construction)
                 mo = math.log(max(rho, 1.0 / egd) / (md / egd))  # → dst log-f_g frame
-                pr = sm / (sm * v_logfg + 1.0)  # COUNT-TERM: 1/(Var(log f_g) + 1/M_src)
+                pr = sm / (sm * (v_logfg + s2t) + 1.0)  # 1/(Var(log f_g) + 1/M_src + σ²_transfer)
                 amg[i], apg[i] = mo, pr
                 if pr > 0.0:
                     lam_factors.append((True, mo, pr))
             # ---- RNA per-strand densities: emission (per strand) + the RNA-TOTAL λ-factor ----
-            # The imputed density is the NASCENT unspliced RNA (`f_s·sm/E_r`, gated) + the junction spliced
-            # MEASUREMENT (`n_mat/E_spl`, B→exon; rides in CONTENT, NOT precision — #3) − the dst absorption.
+            # The RNA density a splice-junction boundary sends has TWO sources folded into one message: the
+            # deconvolved UNSPLICED RNA (a PREDICTION at count-zero-info-degraded precision `pr`) and the SPLICED
+            # fragments (a direct MEASUREMENT of mature RNA). Both are in the MODE (`rho_pos` adds `SPs/esp`); the
+            # spliced additionally credit the PRECISION — `pr += S_eff/(1+S_eff·σ²_transfer)`, a pure count
+            # precision (no deconvolution variance, transfer-attenuated only), so more spliced ⇒ a more confident
+            # RNA message (`S=0 ⇒ no change`; spliced_precision_status.md §3 — validated: gDNA-hyperprior L1
+            # improved 15/23 conditions, 0 worse). Mode as before:
+            # The residual unspliced RNA the boundary imputes = the incoming source RNA density (`f_s·sm/E_r`)
+            # + a boundary source's own facing spliced (`SPs/esp`) − the DST boundary's OWN spliced density
+            # (`absorb`, the pure-RNA it directly measured and must account for BEFORE the unspliced residual).
+            # When the absorption saturates the residual to the count floor, that is a genuine ~zero — but a
+            # WEAK, imprecise one (honest clamp): backed by the floor's ONE count (`rho_c·erd = 1`), not the
+            # source's full count `sm`, so it never becomes a confident "no RNA".
             rho_r = 0.0
             if emit_p:
                 er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
                 esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
-                rho_pos = (
-                    fp_s * sm / er
-                    + SPs[lsrc] / esp
-                    - SPd[i] / (ESPd[i] if ESPd[i] > _EPS else _EPS)
-                )
-                mo = math.log(max(rho_pos, 1.0 / erd) / (md / erd))  # → dst log-f_pos frame
-                pr = sm / (sm * v_logfp + 1.0)  # IMPUTATION precision (unspliced M_src; n_mat excluded)
+                absorb_p = (SPd[i] / (ESPd[i] if ESPd[i] > _EPS else _EPS)) if _RNA_ABSORB else 0.0
+                rho_pos = fp_s * sm / er + SPs[lsrc] / esp - absorb_p
+                rho_pos_c = max(rho_pos, 1.0 / erd)  # floor at ~zero (one count over the dst RNA eff-len)
+                mo = math.log(rho_pos_c / (md / erd))  # → dst log-f_pos frame
+                # honest clamp: a genuine positive residual is a real imputation → the source's count `sm`
+                # backs it as before; but when the boundary's spliced ABSORBS the incoming RNA (residual at
+                # the floor) the count backing the residual is the residual's own — ZERO fragments ⇒ pr → 0,
+                # a WEAK zero, never a confident "no RNA" (Phase-2's DNA hyperprior pins the node down later).
+                n_eff = (max(rho_pos, 0.0) * erd) if (rho_pos <= 1.0 / erd) else sm  # honest clamp
+                pr = n_eff / (n_eff * (v_logfp + s2t) + 1.0)  # +σ²_transfer (unspliced; n_mat excluded)
+                if SPs[lsrc] > _EPS:
+                    pr += SPs[lsrc] / (1.0 + SPs[lsrc] * s2t)  # + spliced-fragment MEASUREMENT precision
                 amp[i], app[i] = mo, pr
                 if rho_pos > 0.0:
                     rho_r += rho_pos
             if emit_n:
                 er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
                 esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
-                rho_neg = (
-                    fn_s * sm / er
-                    + SNs[lsrc] / esp
-                    - SNd[i] / (ESPd[i] if ESPd[i] > _EPS else _EPS)
-                )
-                mo = math.log(max(rho_neg, 1.0 / erd) / (md / erd))  # → dst log-f_neg frame
-                pr = sm / (sm * v_logfn + 1.0)
+                absorb_n = (SNd[i] / (ESPd[i] if ESPd[i] > _EPS else _EPS)) if _RNA_ABSORB else 0.0
+                rho_neg = fn_s * sm / er + SNs[lsrc] / esp - absorb_n
+                rho_neg_c = max(rho_neg, 1.0 / erd)
+                mo = math.log(rho_neg_c / (md / erd))  # → dst log-f_neg frame
+                n_eff = (max(rho_neg, 0.0) * erd) if (rho_neg <= 1.0 / erd) else sm  # honest clamp
+                pr = n_eff / (n_eff * (v_logfn + s2t) + 1.0)  # +σ²_transfer
+                if SNs[lsrc] > _EPS:
+                    pr += SNs[lsrc] / (1.0 + SNs[lsrc] * s2t)  # + spliced-fragment MEASUREMENT precision
                 amn[i], apn[i] = mo, pr
                 if rho_neg > 0.0:
                     rho_r += rho_neg
             # RNA-TOTAL density message (a factor on log f_r) — the second λ-factor; gDNA + RNA-total in
             # tension on the SAME axis λ (this is what makes the pie coherent — docs §2.2).
             if rho_r > _EPS:
-                pr_r = sm / (sm * v_logfr + 1.0)
+                pr_r = sm / (sm * (v_logfr + s2t) + 1.0)  # +σ²_transfer (RNA-total λ-factor)
+                s_spl = SPs[lsrc] + SNs[lsrc]  # total spliced (motif-stranded ⇒ one term nonzero)
+                if s_spl > _EPS:
+                    pr_r += s_spl / (1.0 + s_spl * s2t)  # + spliced-fragment MEASUREMENT precision
                 if pr_r > 0.0:
                     lam_factors.append((False, math.log(max(rho_r, 1.0 / erd) / (md / erd)), pr_r))
             # ---- FOLD the λ-messages onto the dst's running belief (two-stage EP moment-match) ----
@@ -511,6 +607,19 @@ def node_sweep(
                     sigma_cov=fold_sigma_coverage,
                     refine=fold_refine_iters,
                 )
+                # Phase A cavity: the dst's evidence precision grows by the message it absorbed, so it relays
+                # that (real) evidence onward — but NEVER the reference (τ starts at I_strand/I_struct, never at
+                # the reference precision a=0.1153). CRITICAL FRAME CONVERSION: the message precision ``f[2]``
+                # is in the dst's LOG-FRACTION frame (log f_g for a gDNA factor, log f_r for an RNA-total
+                # factor); τ lives in the λ=logit(f_g) frame. Convert by the Jacobian² — ``(d log f_g/dλ)² =
+                # (1−f_g)²`` for gDNA, ``(d log f_r/dλ)² = f_g²`` for RNA-total — BEFORE accumulating. Without
+                # this, τ over-counts by 1/jac² and self-bootstraps: a tiny seed amplifies 1/(1−f_g)²≈4× per hop
+                # and saturates at 1/s2t (toy: `scratchpad/tau_toy.py`; real: τ→12 in gdna_none). This
+                # conversion makes the relayed λ-evidence ≈ the source's own (s2t-damped), never amplified.
+                if _TAU_PRECISION:
+                    _fgd = 1.0 / (1.0 + math.exp(-mu_lam[i]))  # dst f_g after the fold
+                    _jd_g, _jd_r = (1.0 - _fgd) ** 2, _fgd * _fgd
+                    tau_lam[i] += math.fsum(f[2] * (_jd_g if f[0] else _jd_r) for f in lam_factors)
         if _capture is not None:
             # DIAGNOSTIC — the coherent relay pie: f_g=σ(μ_λ), f_pos/f_neg from (f_r, θ). Sums to 1, each ≤1
             # BY CONSTRUCTION (the S2 invariant). Forward scan appends [0], backward [1].
@@ -520,6 +629,11 @@ def node_sweep(
             _capture.setdefault("_relay_pie", []).append(
                 (_fg, _fr * (1.0 + _st) / 2.0, _fr * (1.0 - _st) / 2.0)
             )
+            _capture.setdefault("_prec_terms", []).append(
+                {**{k: v.copy() for k, v in _pt.items()}, "pr_g": apg.copy(), "pr_p": app.copy()}
+            )
+            # running-belief (λ) trajectory at the END of this scan — shows how the relay sharpens σ²_λ.
+            _capture.setdefault("_relay_lam", []).append((mu_lam.copy(), var_lam.copy()))
         return amg, apg, amp, app, amn, apn
 
     a = _scan(order_list, left, 1, 0)  # forward (α: left context)

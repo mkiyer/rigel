@@ -168,6 +168,14 @@ The reasoning, with the evidence and its limits stated honestly:
 
 ### 6.1 The transfer-variance (`σ²_transfer`) model — the load-bearing one
 
+> **DERIVED + PROVEN belief-free (2026-07-16): [`sigma2_transfer_derivation.md`](sigma2_transfer_derivation.md).**
+> `σ²_transfer,g` is a **pair** quantity, **stratified on the belief-free total-density regime** of both
+> endpoints (`[0, 1.6, 25]` on-capture: dep–dep / enr–enr / crossing; flat ≈0 off-capture), fit **belief-free
+> on RNA-free anchor pairs**. Source-only is refuted (it blends the reliable same-mode edge with the crossing).
+> The shipped total-density scalar is 12–28× too large off-capture (pure RNA noise). The NPMLE-on-total-density
+> already shipped IS the regime classifier; the variances come from adjacent RNA-free pairs, not the NPMLE
+> marginal width. Circularity cut: regime label + `σ²_transfer` are belief-free and fixed across passes.
+
 Per-component, count-independent, honest, and **fit on raw observables, not relay-smoothed posteriors**
 (`archive/count_space_relay_implementation_plan.md` §9): the gDNA leg from **gDNA-identifiable** edges
 (RNA-free enriched exons — where the exon's gDNA density is directly observable) with an irreducible unobservable-

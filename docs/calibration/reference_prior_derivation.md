@@ -3,14 +3,23 @@
 **Status:** **REVIEWED 2026-07-15 — the reference is RESOLVED. See §10 for the outcome and the adopted form.**
 Written 2026-07-15, branch `calib-ambig-init-wip`.
 **Audience:** a reviewer who does not know the codebase. Everything needed is stated here.
-**Companion:** [`calibration_roadmap.md`](calibration_roadmap.md) §1 states an earlier version of this
-derivation; this document supersedes its §3 "OPEN — the 2-DOF reference is NOT settled" item.
+**Companion:** [`CALIBRATION_MASTER.md`](CALIBRATION_MASTER.md) is the current big-picture reference;
+[`archive/calibration_roadmap.md`](archive/calibration_roadmap.md) §1 states an earlier version of this
+derivation (archived), whose §3 "OPEN — the 2-DOF reference is NOT settled" item this document supersedes.
 
 > **§1–§9 are the document as submitted for review** (the questions, and our reasoning up to that point).
 > **§10 records the review's answers, our verification of them, and the resolved design.** Where §10
 > contradicts §1–§9, §10 wins — most importantly, §5.3's `Dir(½,¼,¼)` proposal is **superseded** by the
 > exact Berger–Bernardo prior, and §3's framing of the measure residual `R` as separately-shippable is
 > **corrected** (it is non-integrable alone).
+
+> **⚠ Note (2026-07-19) on the `logP_r` mentions below.** Several passages describe the RNA arm's
+> `½·log(1−f_g)` reference as a *placeholder until a fitted `logP_r` is written*. That roadmap thread is
+> **closed**: fitting a learned RNA-rate prior (`logP_r`/`π_r`) was tested and **rejected** (full-solve A/B,
+> 2026-07-19 — it fails to recover under message anchoring and manufactures false positives; see
+> `kde_vs_npmle_enriched_mode` and `CALIBRATION_MASTER.md`). **The `½·log(1−f_g)` Beta(½,½) reference IS the
+> RNA arm** — permanently, not provisionally. The reference derivation itself is unaffected; only read the
+> "eventually fit `logP_r`" asides as historical.
 
 ---
 

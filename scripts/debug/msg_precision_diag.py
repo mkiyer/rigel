@@ -28,10 +28,12 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import numpy as np
 
-from rigel.calibration.bp_solver import (
+from _disagreement_variance import (
     _adjacent_edges,
     _poisson_moment_var,
     adjacent_disagreement_variance,
+)
+from rigel.calibration.bp_solver import (
     build_node_geometry,
 )
 from rigel.calibration.node_chain import REGION, build_node_chain

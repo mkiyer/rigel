@@ -42,8 +42,8 @@ class CalibrationDiagnostics:
 
     @classmethod
     def from_prior(cls, prior) -> "CalibrationDiagnostics":
-        """Build from a fitted :class:`~rigel.calibration.gdna_rate_prior.GdnaRatePrior` — the pass-0
-        count-space gDNA-rate prior. Modes are the local maxima of the fitted log-density curve (the NPMLE
+        """Build from a fitted :class:`~rigel.calibration.npmle.DensityNPMLE` — the pass-0
+        count-space gDNA hyperprior. Modes are the local maxima of the fitted log-density curve (the NPMLE
         carries no per-node training points, so the rug is empty)."""
         x = np.asarray(prior.log_rho, dtype=np.float64)
         logp = np.asarray(prior.logP, dtype=np.float64)

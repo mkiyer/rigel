@@ -39,7 +39,7 @@ def estimate_phi(chain, geometry):
     (robust → the WITHIN-regime typical disagreement, not the across-regime enrichment jumps that the
     pooled mean is dominated by). Var_within ≈ 2φ (two adjacent nodes' overdispersions) ⇒ φ = median/2.
     (An upper bound: within-regime pairs still carry some real local density variation.)"""
-    from rigel.calibration.bp_solver import _adjacent_log_density_residuals
+    from _disagreement_variance import _adjacent_log_density_residuals
     resid, n_i, n_j = _adjacent_log_density_residuals(chain, geometry)
     dc = resid - np.median(resid)
     pois = 1.0 / n_i + 1.0 / n_j
