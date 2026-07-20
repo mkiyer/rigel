@@ -85,3 +85,25 @@ def test_kappa_matches_strand_balance():
 
     sb = fit_strand_balance(SimpleNamespace(p_r1_sense=0.95, n_observations=40))
     assert _run().rna_sense_frac == sb.rna_sense_frac
+
+
+def test_intron_factory_flag_runs_and_conserves_mass():
+    # The gDNA intron factory flag is safe end-to-end: a valid result, mass still conserved per node.
+    import dataclasses
+
+    result = _run(dataclasses.replace(CalibrationConfig(), intron_factory=True))
+    assert isinstance(result, CalibrationResult)
+    np.testing.assert_allclose(
+        result.mass_gdna_contained + result.mass_rna_contained, [15.0, 26.0, 15.0]
+    )
+
+
+def test_intron_factory_noop_without_introns():
+    # Correct scoping: with no INTRON regions (the synthetic is +exon/−exon/intergenic) the factory is a
+    # graceful no-op — byte-identical to the flag-off calibration.
+    import dataclasses
+
+    off = _run(CalibrationConfig())
+    on = _run(dataclasses.replace(CalibrationConfig(), intron_factory=True))
+    np.testing.assert_array_equal(off.mass_gdna_contained, on.mass_gdna_contained)
+    np.testing.assert_array_equal(off.mass_rna_contained, on.mass_rna_contained)

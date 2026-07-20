@@ -222,6 +222,7 @@ def _local_loglik_logodds(
     gdna_imp_prec=None,
     rna_imp_mode=None,
     rna_imp_prec=None,
+    lam_logprior=None,
 ):
     """ψ over the log-odds grid for single-strand nodes (strand mixture, the two arms, imputation), evaluated
     at ``f_g = σ(λ)`` with the live strand carrying ``f_active = 1 − f_g``. Returns ``(m, K)``.
@@ -265,6 +266,12 @@ def _local_loglik_logodds(
     #    (Beta(½,½) when neither is fitted); the gDNA arm alone would leave f_g→1 unbounded, and the RNA arm
     #    alone would leave f_g→0 unbounded. ──
     psi = psi + _gdna_arm(lam, global_logprior) + _rna_arm(lam)
+    # ── the gDNA INTRON FACTORY λ-factor (gdna_intron_factory_design.md): a per-node (m,K) log-likelihood on
+    #    the λ axis, ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)``, ADDED (not folded into the gDNA arm — that arm
+    #    REPLACES the Jeffreys reference; folding would drop the f_g→1 bound). It peels confident gDNA from
+    #    introns against the intergenic background; zero on non-intron nodes ⇒ a no-op there. ──
+    if lam_logprior is not None:
+        psi = psi + np.asarray(lam_logprior, np.float64)
     # ── imputation messages: LOG-FRACTION Gaussians (the overhaul). The mode is a log-FRACTION target
     #    (``log`` of the imputed fraction, built in ``_scan``); evaluated against ``log f_c(λ)``. No clip —
     #    an off-grid target (source denser than the dst can hold) is a bounded monotone pull toward the
@@ -314,6 +321,7 @@ def _solve_nodes_logodds(
     gdna_imp_prec=None,
     rna_imp_mode=None,
     rna_imp_prec=None,
+    lam_logprior=None,
 ) -> NodeDeconv:
     """The log-odds 1-D per-node solve for SINGLE-STRAND nodes.
 
@@ -340,6 +348,7 @@ def _solve_nodes_logodds(
         gdna_imp_prec=gdna_imp_prec,
         rna_imp_mode=rna_imp_mode,
         rna_imp_prec=rna_imp_prec,
+        lam_logprior=lam_logprior,
     )
     ap = np.asarray(allow_pos, bool)
     an = np.asarray(allow_neg, bool)
@@ -408,6 +417,7 @@ def _solve_ambig_logodds(
     gdna_imp_prec=None,
     rna_imp_mode=None,
     rna_imp_prec=None,
+    lam_logprior=None,
 ) -> NodeDeconv:
     """The 2-D ``(λ, θ)`` solve for AMBIG nodes (both strands live). Grids the gDNA-vs-RNA-total log-odds
     ``λ`` (outer, ``K = n_grid``) and the tilt ANGLE ``θ = arcsin(τ)`` (inner, ``K_t = n_tilt`` or
@@ -463,6 +473,10 @@ def _solve_ambig_logodds(
     # ── the two composition arms (θ-independent — they live on the λ axis, which is exactly what makes the
     #    tilt a nuisance). Identical call to the 1-D path; see `_gdna_arm` / `_rna_arm`. ──
     psi += np.asarray(_gdna_arm(lam, global_logprior) + _rna_arm(lam), F)[:, :, None]
+    # ── the gDNA INTRON FACTORY λ-factor (θ-independent — it lives on the λ axis), ADDED like the arms; the
+    #    [:, :, None] broadcast makes it constant across the tilt, so θ is integrated out cleanly. ──
+    if lam_logprior is not None:
+        psi += np.asarray(lam_logprior, F)[:, :, None]
     # ── gDNA LOG-fraction message on log f_g (τ-independent) ──
     if gdna_imp_mode is not None and gdna_imp_prec is not None:
         mo = np.asarray(gdna_imp_mode, F)[:, None, None]
@@ -556,6 +570,7 @@ def _solve_nodes_logodds_all(
     gdna_imp_prec=None,
     rna_imp_mode=None,
     rna_imp_prec=None,
+    lam_logprior=None,
     fg_ref=None,
     fpos_ref=None,
     fneg_ref=None,
@@ -648,6 +663,7 @@ def _solve_nodes_logodds_all(
                 gdna_imp_prec=_s(gdna_imp_prec, ss),
                 rna_imp_mode=_sp(rna_imp_mode, ss),
                 rna_imp_prec=_sp(rna_imp_prec, ss),
+                lam_logprior=_regrid_global(_s(lam_logprior, ss), n_grid, k_ss, L),
             ),
         )
     if bool(amb.any()):
@@ -678,6 +694,7 @@ def _solve_nodes_logodds_all(
                     gdna_imp_prec=_s(gdna_imp_prec, bidx),
                     rna_imp_mode=_sp(rna_imp_mode, bidx),
                     rna_imp_prec=_sp(rna_imp_prec, bidx),
+                    lam_logprior=_s(lam_logprior, bidx),
                 ),
             )
     return NodeDeconv(

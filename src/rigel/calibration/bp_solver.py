@@ -97,6 +97,28 @@ _TAU_PRECISION = True
 _ISTRUCT = True
 _ISTRUCT_SEAMS = False
 
+# Phase B — composition-imputation + geometric mature removal across the density cliff
+# (docs/calibration/density_cliff_and_mature_absorption.md; 2026-07-20). The message MODE imputes the
+# source's COMPOSITION: the per-component imputed dst MASS ``M_c = ρ_c^src·E_c^dst`` normalized by the
+# IMPUTED total ``ΣM`` (capture ``e(x)`` cancels ⇒ cliff-invariant), instead of the retired absolute-density
+# ``log(ρ_c^src/ρ_total^dst)`` (which divided an enriched-frame numerator by the dst's depleted OBSERVED
+# total ``md`` and so saturated across the ~10²–10³× cliff). The mature removal (source exon) + addition
+# (dst exon) are carried by ``rho_pos``/``rho_neg`` (the ``±absorb`` / ``±SPs`` terms, §5 both directions).
+# PRECISION is UNCHANGED (§6.4 — the densities feed ``n_eff``/``rho_r`` exactly as before).
+#
+# ⚠ DEFAULT OFF (2026-07-20). Verified CORRECT against the doc's worked example WITH oracle source beliefs
+# (exon→boundary f_g = 0.0126 vs the density mode's 0.081 — the doc's 0.0128, §4.4). BUT it REGRESSES the
+# real pass-0-vs-oracle A/B on cached ambig_dense_10mb with ``_TAU_PRECISION`` ON (mean exon |Δf_g| 0.287→
+# 0.302; boundary 0.299→0.316; CW% 0.9→2.3). Root cause: composition faithfully COPIES the source belief,
+# but τ (the §7 hard dependency) correctly gates messages OFF on the vacuous unstranded low-gDNA chains this
+# fix TARGETS — there the exon honestly believes ~0.5 (no strand, no gDNA evidence), NOT the 0.0041 the doc's
+# arithmetic assumed (that was the ORACLE). So the fix is INERT where targeted, and where messages DO flow
+# (gDNA-high / stranded) it discards the robust observed-total anchor ``md`` ⇒ regresses. "Honest" (calibrated
+# ignorance) ≠ "accurate": what makes an unstranded exon's belief ACCURATE is the spliced-derived node-local
+# gDNA (the "nascent factory", CALIBRATION_STATUS.md), a NODE-LOCAL mechanism that must precede this MESSAGE
+# model. Kept behind the toggle for the owner's A/B; OFF = the shipped density mode, byte-identical.
+_COMPOSITION_MODE = False
+
 
 
 def _log_sigmoid(x):
@@ -194,6 +216,7 @@ def node_sweep(
     n_grid_ss: int | None = None,
     gdna_prior=None,
     enrichment_prior=None,
+    intron_prior=None,
     fold_coarse_k: int = 33,
     fold_fine_k: int = 33,
     fold_sigma_coverage: float = 6.0,
@@ -286,6 +309,11 @@ def node_sweep(
             gdna_imp_prec=gp,
             rna_imp_mode=rm,
             rna_imp_prec=rp,
+            # the gDNA intron factory λ-factor (anchored, per-intron, 0 elsewhere): peels confident gDNA from
+            # introns against the intergenic background BEFORE the sweep resolves the pie (design §9.3). Added
+            # to ψ, distinct from the gDNA arm; participates in the local solve AND the relay (a confident
+            # intron gDNA belief propagates genomically to the flanking exons/boundaries).
+            lam_logprior=intron_prior,
             # count-zero-info variance freeze (§2, B1): reference = the incoming belief, so the variance —
             # hence the message precision — is evaluated near the truth, not at a flat ½.
             fg_ref=f_g,
@@ -529,42 +557,73 @@ def node_sweep(
             emit_g = (sm > _EPS) and lam_ev
             emit_p = fp[lsrc] and fp[i] and (sm > _EPS or SPs[lsrc] > _EPS) and (lam_ev or th_ev)
             emit_n = fn[lsrc] and fn[i] and (sm > _EPS or SNs[lsrc] > _EPS) and (lam_ev or th_ev)
+            # ---- source per-component DENSITIES (shared by the mode AND the precision path) ----
+            # ``rho_g`` = source gDNA density; ``rho_pos``/``rho_neg`` = the per-strand RNA density the source
+            # imputes, carrying the FULL mature accounting (§5, BOTH directions): ``− absorb`` removes the
+            # SOURCE exon's contained mature (``SPd/ESPd``, nonzero only when the source-facing flank is an
+            # exon) and ``+ SPs/esp`` adds the DST exon's mature (``SPs/ESPs``, nonzero only when the
+            # dst-facing flank is an exon). SPd/SPs route to the exon flank only ⇒ at most one fires per hop,
+            # so a boundary/intron end contributes no mature. These densities are what the PRECISION path
+            # (``n_eff``, ``rho_r``) consumes, unchanged.
+            _eg = EGs[lsrc] if EGs[lsrc] > _EPS else _EPS
+            _er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
+            _esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
+            _espd = ESPd[i] if ESPd[i] > _EPS else _EPS
+            rho_g = fg_s * sm / _eg
+            absorb_p = (SPd[i] / _espd) if _RNA_ABSORB else 0.0  # source exon +mature density (removed)
+            absorb_n = (SNd[i] / _espd) if _RNA_ABSORB else 0.0
+            rho_pos = fp_s * sm / _er + SPs[lsrc] / _esp - absorb_p  # +SPs/esp = the DST exon's mature (added)
+            rho_neg = fn_s * sm / _er + SNs[lsrc] / _esp - absorb_n
+            # ---- COMPOSITION imputation across the density cliff (density_cliff_and_mature_absorption.md) ----
+            # Impute the dst's f_c as the source COMPOSITION: the per-component imputed MASS ``M_c = ρ_c^src ·
+            # E_c^dst``, normalized by the IMPUTED total ``ΣM`` (the capture enrichment ``e(x)`` cancels in the
+            # ratio ⇒ CLIFF-INVARIANT), NOT the dst's OBSERVED total ``md`` (which sits on the dst's enrichment
+            # scale — dividing an enriched-frame numerator by a depleted-frame denominator is what made the
+            # retired ``log(ρ_c^src/ρ_total^dst)`` mode saturate across the ~10²–10³× cliff, §3). The mature
+            # removal/addition is already folded into ``rho_pos``/``rho_neg``. Worked example (exon→boundary):
+            # M_g=45.4, M_r=3530 ⇒ f_g=0.0127 (truth 0.0073) vs the density mode's 0.081, an 11× fix (§4.4).
+            if _COMPOSITION_MODE:
+                # ΣM must count only what PHYSICALLY crosses to the dst: gDNA always (genomic); RNA strand s
+                # only where s is structurally continuous on BOTH endpoints (``fp/fn`` — the transcript-
+                # structure gate). Without this, a gene-end / TES / opposite-strand seam (where the RNA does
+                # NOT cross, so the boundary's unspliced crossing is PURE gDNA — oracle f_g=1) has its gDNA
+                # composition wrongly DILUTED by the non-crossing exon RNA, crushing f_g toward 0 (verified:
+                # density imputes ≈1 there, ungated composition ≈0.03; 646:14 edges worse). The density mode
+                # is immune because it divides by the dst's OBSERVED total (genuinely ≈pure gDNA at a seam).
+                cont_p = bool(fp[lsrc]) and bool(fp[i])
+                cont_n = bool(fn[lsrc]) and bool(fn[i])
+                Mg = rho_g * egd  # → dst gDNA mass (always crosses)
+                Mp = (max(rho_pos, 0.0) * erd) if cont_p else 0.0  # → dst +RNA mass (0 if it can't cross)
+                Mn = (max(rho_neg, 0.0) * erd) if cont_n else 0.0
+                _den = Mg + Mp + Mn
+                _den = _den if _den > _EPS else _EPS  # gDNA + crossing-RNA imputed mass
+                comp_fl = 1.0 / md  # one-fragment floor ≡ the retired density floor log(1/M_dst) = −log M_dst
             lam_factors = []
-            # ---- gDNA density message (a factor on log f_g) ----
+            # ---- gDNA message (a factor on log f_g) ----
             if emit_g:
-                eg = EGs[lsrc] if EGs[lsrc] > _EPS else _EPS
-                rho = fg_s * sm / eg  # source gDNA DENSITY (f_g^src ≤ 1 ⇒ n_src ≤ sm by construction)
-                mo = math.log(max(rho, 1.0 / egd) / (md / egd))  # → dst log-f_g frame
+                if _COMPOSITION_MODE:
+                    mo = math.log(max(Mg / _den, comp_fl))  # → dst log-f_g (composition, cliff-invariant)
+                else:
+                    mo = math.log(max(rho_g, 1.0 / egd) / (md / egd))  # → dst log-f_g frame (retired density)
                 pr = sm / (sm * (v_logfg + s2t) + 1.0)  # 1/(Var(log f_g) + 1/M_src + σ²_transfer)
                 amg[i], apg[i] = mo, pr
                 if pr > 0.0:
                     lam_factors.append((True, mo, pr))
-            # ---- RNA per-strand densities: emission (per strand) + the RNA-TOTAL λ-factor ----
-            # The RNA density a splice-junction boundary sends has TWO sources folded into one message: the
-            # deconvolved UNSPLICED RNA (a PREDICTION at count-zero-info-degraded precision `pr`) and the SPLICED
-            # fragments (a direct MEASUREMENT of mature RNA). Both are in the MODE (`rho_pos` adds `SPs/esp`); the
-            # spliced additionally credit the PRECISION — `pr += S_eff/(1+S_eff·σ²_transfer)`, a pure count
+            # ---- RNA per-strand messages (emission per strand) + the RNA-TOTAL λ-factor ----
+            # The RNA a splice-junction boundary imputes folds TWO sources into one message: the deconvolved
+            # UNSPLICED RNA (a PREDICTION at count-zero-info-degraded precision ``pr``) and the SPLICED fragments
+            # (a direct MEASUREMENT of mature RNA — already in the ``rho_*`` density via ``±`` above). The
+            # spliced additionally credit the PRECISION: ``pr += S_eff/(1+S_eff·σ²_transfer)``, a pure count
             # precision (no deconvolution variance, transfer-attenuated only), so more spliced ⇒ a more confident
-            # RNA message (`S=0 ⇒ no change`; spliced_precision_status.md §3 — validated: gDNA-hyperprior L1
-            # improved 15/23 conditions, 0 worse). Mode as before:
-            # The residual unspliced RNA the boundary imputes = the incoming source RNA density (`f_s·sm/E_r`)
-            # + a boundary source's own facing spliced (`SPs/esp`) − the DST boundary's OWN spliced density
-            # (`absorb`, the pure-RNA it directly measured and must account for BEFORE the unspliced residual).
-            # When the absorption saturates the residual to the count floor, that is a genuine ~zero — but a
-            # WEAK, imprecise one (honest clamp): backed by the floor's ONE count (`rho_c·erd = 1`), not the
-            # source's full count `sm`, so it never becomes a confident "no RNA".
+            # RNA message (``S=0 ⇒ no change``; spliced_precision_status.md §3). The honest clamp: when the
+            # absorption saturates the residual to the count floor, that is a genuine but WEAK ~zero — backed by
+            # the floor's ONE count, not the source's full ``sm`` — never laundered into a confident "no RNA".
             rho_r = 0.0
             if emit_p:
-                er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
-                esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
-                absorb_p = (SPd[i] / (ESPd[i] if ESPd[i] > _EPS else _EPS)) if _RNA_ABSORB else 0.0
-                rho_pos = fp_s * sm / er + SPs[lsrc] / esp - absorb_p
-                rho_pos_c = max(rho_pos, 1.0 / erd)  # floor at ~zero (one count over the dst RNA eff-len)
-                mo = math.log(rho_pos_c / (md / erd))  # → dst log-f_pos frame
-                # honest clamp: a genuine positive residual is a real imputation → the source's count `sm`
-                # backs it as before; but when the boundary's spliced ABSORBS the incoming RNA (residual at
-                # the floor) the count backing the residual is the residual's own — ZERO fragments ⇒ pr → 0,
-                # a WEAK zero, never a confident "no RNA" (Phase-2's DNA hyperprior pins the node down later).
+                if _COMPOSITION_MODE:
+                    mo = math.log(max(Mp / _den, comp_fl))  # → dst log-f_pos (composition)
+                else:
+                    mo = math.log(max(rho_pos, 1.0 / erd) / (md / erd))  # → dst log-f_pos frame (density)
                 n_eff = (max(rho_pos, 0.0) * erd) if (rho_pos <= 1.0 / erd) else sm  # honest clamp
                 pr = n_eff / (n_eff * (v_logfp + s2t) + 1.0)  # +σ²_transfer (unspliced; n_mat excluded)
                 if SPs[lsrc] > _EPS:
@@ -573,12 +632,10 @@ def node_sweep(
                 if rho_pos > 0.0:
                     rho_r += rho_pos
             if emit_n:
-                er = ERs[lsrc] if ERs[lsrc] > _EPS else _EPS
-                esp = ESPs[lsrc] if ESPs[lsrc] > _EPS else _EPS
-                absorb_n = (SNd[i] / (ESPd[i] if ESPd[i] > _EPS else _EPS)) if _RNA_ABSORB else 0.0
-                rho_neg = fn_s * sm / er + SNs[lsrc] / esp - absorb_n
-                rho_neg_c = max(rho_neg, 1.0 / erd)
-                mo = math.log(rho_neg_c / (md / erd))  # → dst log-f_neg frame
+                if _COMPOSITION_MODE:
+                    mo = math.log(max(Mn / _den, comp_fl))  # → dst log-f_neg (composition)
+                else:
+                    mo = math.log(max(rho_neg, 1.0 / erd) / (md / erd))  # → dst log-f_neg frame (density)
                 n_eff = (max(rho_neg, 0.0) * erd) if (rho_neg <= 1.0 / erd) else sm  # honest clamp
                 pr = n_eff / (n_eff * (v_logfn + s2t) + 1.0)  # +σ²_transfer
                 if SNs[lsrc] > _EPS:
@@ -586,15 +643,19 @@ def node_sweep(
                 amn[i], apn[i] = mo, pr
                 if rho_neg > 0.0:
                     rho_r += rho_neg
-            # RNA-TOTAL density message (a factor on log f_r) — the second λ-factor; gDNA + RNA-total in
-            # tension on the SAME axis λ (this is what makes the pie coherent — docs §2.2).
+            # RNA-TOTAL message (a factor on log f_r) — the second λ-factor; gDNA + RNA-total in tension on the
+            # SAME axis λ (this is what makes the pie coherent — docs §2.2).
             if rho_r > _EPS:
                 pr_r = sm / (sm * (v_logfr + s2t) + 1.0)  # +σ²_transfer (RNA-total λ-factor)
                 s_spl = SPs[lsrc] + SNs[lsrc]  # total spliced (motif-stranded ⇒ one term nonzero)
                 if s_spl > _EPS:
                     pr_r += s_spl / (1.0 + s_spl * s2t)  # + spliced-fragment MEASUREMENT precision
                 if pr_r > 0.0:
-                    lam_factors.append((False, math.log(max(rho_r, 1.0 / erd) / (md / erd)), pr_r))
+                    if _COMPOSITION_MODE:
+                        mo_r = math.log(max((Mp + Mn) / _den, comp_fl))  # → dst log-f_r (composition)
+                    else:
+                        mo_r = math.log(max(rho_r, 1.0 / erd) / (md / erd))  # density
+                    lam_factors.append((False, mo_r, pr_r))
             # ---- FOLD the λ-messages onto the dst's running belief (two-stage EP moment-match) ----
             if lam_factors:
                 mu_lam[i], var_lam[i] = _fold_lambda(

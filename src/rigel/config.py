@@ -321,6 +321,15 @@ class CalibrationConfig:
     #: background pool before aggregation; ``None`` ⇒ no trim. Only meaningful with ``background_include_introns``.
     background_robust_trim_mad: float | None = None
 
+    #: **gDNA intron factory** (`docs/calibration/gdna_intron_factory_design.md`). ``True`` ⇒ peel confident gDNA
+    #: from INTRON nodes against the intergenic background BEFORE the pass-0 solve: a per-intron
+    #: ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` λ-factor (introns are off-target ⇒ ρ_bg is their TRUE gDNA
+    #: density, a two-sided estimate; peels gDNA, not RNA — strand-free). Resolves the unstranded-intron gDNA the
+    #: prior-free pass-0 currently leaves at ~½ (fixes both the zero-gDNA false-positive and the gDNA under-call),
+    #: and seeds the Phase-2 hyperprior fit with clean intron gDNA. ``False`` (default) ⇒ byte-identical to the
+    #: pre-factory pass-0.
+    intron_factory: bool = False
+
     #: **Calibration refit iterations.** Pass-0 bootstraps from TOTAL density: an extremely weak gDNA-rate
     #: prior + the belief-free projection ``σ²_transfer`` ⇒ deliberately GENTLE messages that nudge rather than
     #: ruin the solve. Each refit re-estimates the population model P(ρ) (`DensityNPMLE`) on the *solved* gDNA

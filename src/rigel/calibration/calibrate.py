@@ -55,6 +55,7 @@ from .effective_length import (
     boundary_side_eff_length,
     region_eff_length,
 )
+from .gdna_intron_factory import fit_intron_background, intron_lambda_factor
 from .gdna_strand import (
     fit_gdna_strand_from_substrate,
     fit_rna_strand_from_substrate,
@@ -63,6 +64,7 @@ from .gdna_strand import (
 from .node_chain import build_node_chain
 from .result import CalibrationResult
 from .signature import coarse_type_array
+from .simplex_logodds import _logodds_grid
 from .strand_balance import fit_strand_balance
 from .substrate import BoundarySubstrate, CalibrationSubstrate
 
@@ -73,6 +75,34 @@ if TYPE_CHECKING:
     from .region_arrays import RegionArrays
 
 logger = logging.getLogger(__name__)
+
+
+def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config):
+    """The gDNA intron factory λ-factor per chain node (`docs/calibration/gdna_intron_factory_design.md`).
+
+    Fits the intergenic-background NegBinom (`fit_intron_background`) and tabulates, for each INTRON REGION node,
+    ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` over the σ(λ) solve grid → a ``(n_nodes, K)`` array, ZERO on every
+    non-intron node (a no-op there). Returns ``None`` when the factory is disabled, the background pool is
+    uninformative, or there are no intron nodes — in which case the sweep is byte-identical to the pre-factory
+    path. gDNA is strand-symmetric, so this factor lives purely on ``λ`` (peels gDNA; the residual RNA's tilt is
+    left to the solver), and is consumed identically by the single-strand and AMBIG per-node solves."""
+    bg = fit_intron_background(substrate, region_arrays, region_eff_len, include_introns=False)
+    if not bg.informative:
+        return None
+    kind = np.asarray(chain.kind)
+    idx = np.asarray(chain.ref_idx, dtype=np.int64)
+    rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)  # 0/1/2 per REGION
+    R = rtype.shape[0]
+    is_intron = (kind == REGION) & (rtype[np.clip(idx, 0, R - 1)] == 1)  # INTRON == 1
+    if not bool(is_intron.any()):
+        return None
+    _, fg = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
+    prior = np.zeros((kind.shape[0], fg.shape[0]), dtype=np.float64)
+    ridx = idx[is_intron]
+    count = np.asarray(substrate.contained.n_unspliced, dtype=np.float64)[ridx]
+    eff_g = np.asarray(region_eff_len, dtype=np.float64)[ridx]
+    prior[is_intron] = intron_lambda_factor(bg, count, eff_g, fg)
+    return prior
 
 
 def _fit_gdna_hyperprior(
@@ -228,6 +258,15 @@ def calibrate(
         )
 
     belief = _init_belief()
+    # The gDNA INTRON FACTORY λ-factor (`docs/calibration/gdna_intron_factory_design.md`): peel confident gDNA
+    # from intron nodes against the intergenic background, BEFORE the pass-0 solve. Built ONCE (belief-free —
+    # only the intron count vs the background), applied in every sweep below. ``None`` (disabled / no
+    # informative background / no introns) ⇒ byte-identical to the pre-factory pass-0.
+    intron_prior = (
+        _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config)
+        if config.intron_factory
+        else None
+    )
     # Message precision is now the source's OWN honest belief precision (strand + count), computed inside
     # the sweep — there is nothing to fit here. The adjacent-pair overdispersion σ²_transfer that used to be
     # estimated at this point is a PRIOR (and, fit on total density, one that weakened every message
@@ -256,6 +295,7 @@ def calibrate(
             n_grid_ss=config.sweep_n_grid_single_strand,
             gdna_prior=prior,
             enrichment_prior=enrichment_prior,
+            intron_prior=intron_prior,
             fold_coarse_k=config.fold_coarse_k,
             fold_fine_k=config.fold_fine_k,
             fold_sigma_coverage=config.fold_sigma_coverage,
