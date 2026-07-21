@@ -30,6 +30,7 @@ lower `node_geometry` module and are re-exported here for the calibrator's conve
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -181,6 +182,64 @@ def node_global_geometry(chain: NodeChain, geometry: NodeGeometry):
     mass = np.where(is_reg, msl, msl + msr)
     eff = np.where(is_reg, egl, egl + egr)
     return mass, eff
+
+
+@dataclass(frozen=True)
+class StrandEvidence:
+    """The per-node reference-free **composition evidence** — the identifiability model in one place
+    (`docs/calibration/message_system_derivation.md` §6B). It seeds the message precision (the τ cavity) AND is
+    the natural home for the pass-0 solvability gate (§6B: a node skips its solve iff a free axis has zero total
+    precision — Phase C). Two evidence channels seed it here; the running τ accumulates relayed message precision
+    on top during the sweep:
+
+    * ``tau0_lam`` / ``tau0_th`` — **I_strand**: the differential-κ strand Fisher info on the λ (gDNA-vs-RNA) and
+      θ (tilt) axes. Zero on unstranded data (κ=½) by the DERIVED noise-floor deadband
+      ``disc = 4·max(0, (κ−½)² − σ²_d)`` — this, not any gate, is what kills the phantom.
+    * ``struct_lock`` — **I_struct**: signature composition-certainty (intergenic REGION nodes today; a lock ⇒
+      ``ev=0`` ⇒ high message precision governed only by the honest count/transfer terms).
+    """
+
+    tau0_lam: np.ndarray  # I_strand on the λ axis (float64[m])
+    tau0_th: np.ndarray  # I_strand on the θ axis (float64[m])
+    struct_lock: np.ndarray  # I_struct — composition-certain nodes (bool[m])
+
+
+def _compile_strand_evidence(
+    u_pos,
+    u_neg,
+    fg_loc,
+    *,
+    kappa: float,
+    od_g: float,
+    od_r: float,
+    n_gdna_obs: float,
+    n_rna_obs: float,
+    is_region,
+    locked,
+) -> StrandEvidence:
+    """Compile the reference-free strand/structure evidence seeds (`StrandEvidence`), evaluated at the
+    message-free local ``fg_loc``. Pure: no cross-node coupling, unit-testable.
+
+    ``I_strand(λ) = N·(2κ−1)²·[f_g(1−f_g)]² / (4 p(1−p))``, ``p = κ + f_g(½−κ)`` — the strand Fisher info,
+    IDENTICALLY 0 at κ=½ (unstranded). The count enters as the OVERDISPERSED effective count
+    ``N_eff = N/(1+(N−1)ω)`` (the honest power saturates at ~1/ω, not the raw depth), and the discriminability
+    ``disc`` carries the DERIVED noise floor ``σ²_d = ¼·(1/N_rna+ω_r) + ¼·(1/N_gdna+ω_g)`` — a κ within √σ²_d of
+    ½ is not composition signal (the deadband that kills the phantom; `message_precision_derivation.md`). The
+    ``1/N_gdna`` term gates a gDNA-free library (N_gdna=0 ⇒ σ²_d→∞ ⇒ disc=0). ``I_struct`` is composition-certain
+    ONLY for true intergenic REGION nodes, never G1 boundary SEAMS (whose crossing mass is RNA-contaminated)."""
+    _n_raw = np.asarray(u_pos, dtype=np.float64) + np.asarray(u_neg, dtype=np.float64)
+    _n_str = _n_raw / (1.0 + np.maximum(_n_raw - 1.0, 0.0) * od_r)
+    _fgl = np.clip(np.asarray(fg_loc, dtype=np.float64), _EPS, 1.0 - _EPS)
+    _pmix = np.clip(kappa + _fgl * (0.5 - kappa), _EPS, 1.0 - _EPS)
+    _sig2_d = 0.25 * (1.0 / max(float(n_rna_obs), _EPS) + od_r) + 0.25 * (
+        1.0 / max(float(n_gdna_obs), _EPS) + od_g
+    )
+    _disc = 4.0 * max(0.0, (kappa - 0.5) ** 2 - _sig2_d)
+    _i_strand = _n_str * _disc * (_fgl * (1.0 - _fgl)) ** 2 / (4.0 * _pmix * (1.0 - _pmix))
+    struct_lock = np.asarray(locked, dtype=bool) & np.asarray(is_region, dtype=bool)
+    return StrandEvidence(
+        tau0_lam=_i_strand.copy(), tau0_th=_i_strand.copy(), struct_lock=struct_lock
+    )
 
 
 def node_sweep(
@@ -401,45 +460,24 @@ def node_sweep(
     lam_loc = np.where(locked, lam_locked, lam_loc)
     lvar_loc = np.where(locked, 0.0, lvar_loc)
 
-    # ---- the reference-free evidence precision τ (message_precision_derivation.md §3) ----
-    # Seed τ from the two composition-evidence channels present in this pass:
-    #   * I_strand(λ) = N·(2κ−1)²·[f_g(1−f_g)]²/(4 p(1−p)),  p = κ + f_g(½−κ)  — the strand Fisher info,
-    #     IDENTICALLY 0 at κ=½ (unstranded); evaluated at the message-free local f_g.
-    #   * I_struct — the boolean composition-certain gate: a signature-locked (G1) node is certain (v_evid=0),
-    #     its message precision governed only by the honest count/transfer terms (1/M_src + s2t).
-    # The running τ then accumulates relayed message precision (the cavity), so τ is 0 exactly on a vacuous
-    # unstranded chain (⇒ pr=0, the phantom collapse) and >0 only where real evidence exists or propagates.
-    _n_raw = np.asarray(statics.u_pos, dtype=np.float64) + np.asarray(statics.u_neg, dtype=np.float64)
-    # OVERDISPERSED effective count N_eff = N/(1+(N−1)ω) → 1/ω: molecular sampling is Beta-Binomial
-    # overdispersed, so the strand Fisher POWER saturates at ~1/ω regardless of raw depth. Using the raw
-    # N compounds the tiny residual tilt at κ≈½ (fitting noise) across high-expression chains into phantom
-    # confidence — the τ must carry the HONEST (deflated) power, not the raw count.
-    _n_str = _n_raw / (1.0 + np.maximum(_n_raw - 1.0, 0.0) * od_r)
-    _fgl = np.clip(np.asarray(fg_loc, dtype=np.float64), _EPS, 1.0 - _EPS)
-    _pmix = np.clip(kappa + _fgl * (0.5 - kappa), _EPS, 1.0 - _EPS)
-    # STRAND discriminability with a DERIVED noise floor (message_precision_derivation.md). The strand
-    # channel distinguishes gDNA (sense rate ½ — dsDNA is strand-symmetric, biological truth, NOT fitted)
-    # from RNA (sense rate κ_RNA); its Fisher scale is 4·(κ_RNA − ½)². But that separation must clear the
-    # VARIANCE of the two sense splits about their means — the Beta-Binomial OVERDISPERSION (ω, fitted) plus
-    # Binomial sampling: σ²_κ = ¼·(1/N + ω). The 1/N term gates a gDNA-free library (N_gdna=0 ⇒ σ²→∞ ⇒
-    # disc=0) and thins a sparse one; the ω term is the irreducible overdispersion floor that sets the
-    # deadband on real (overdispersed) data — self-scaling, no tuned constant. A κ_RNA within √σ²_d of ½ is
-    # not composition signal, so the κ≈½ sampling whisper a huge N would square-and-multiply into phantom
-    # precision is gated.
-    _sig2_d = 0.25 * (1.0 / max(float(n_rna_obs), _EPS) + od_r) + 0.25 * (
-        1.0 / max(float(n_gdna_obs), _EPS) + od_g
+    # ---- the reference-free composition evidence (StrandEvidence) ----
+    # I_strand (the differential-κ deadband Fisher info — 0 on unstranded, the real phantom fix) + I_struct
+    # (signature composition-certainty), evaluated at the message-free local f_g. The running τ (below)
+    # accumulates relayed message precision on top during the sweep. Derivation + the solvability model this
+    # object is the home for: `docs/calibration/message_system_derivation.md` §6B.
+    _ev = _compile_strand_evidence(
+        statics.u_pos,
+        statics.u_neg,
+        fg_loc,
+        kappa=kappa,
+        od_g=od_g,
+        od_r=od_r,
+        n_gdna_obs=n_gdna_obs,
+        n_rna_obs=n_rna_obs,
+        is_region=(np.asarray(chain.kind) == REGION),
+        locked=locked,
     )
-    _disc = 4.0 * max(0.0, (kappa - 0.5) ** 2 - _sig2_d)
-    _i_strand = _n_str * _disc * (_fgl * (1.0 - _fgl)) ** 2 / (4.0 * _pmix * (1.0 - _pmix))
-    tau0_lam = _i_strand.copy()
-    tau0_th = _i_strand.copy()  # θ-axis tilt Fisher info (same differential-disc gating); seed-only (θ not relayed)
-    # I_struct — composition-certain ONLY for true intergenic REGION nodes, NOT G1 boundary SEAMS (TSS/TES,
-    # opposite-strand exon↔exon): a seam is locked to gDNA by structure but sits between RNA-carrying exons, so
-    # its crossing mass is RNA-contaminated — making it composition-CERTAIN turns it into a high-precision
-    # phantom-gDNA emitter that compounds along the chain. A true intergenic region carries ~0 mass in a
-    # zero-gDNA library, so it is safe.
-    _is_reg = np.asarray(chain.kind) == REGION
-    struct_lock = np.asarray(locked, dtype=bool) & _is_reg
+    tau0_lam, tau0_th, struct_lock = _ev.tau0_lam, _ev.tau0_th, _ev.struct_lock
 
     def _scan(seq, nbr, sf, df):
         """Sequential scan — the coherent ``(λ,θ)`` relay (docs/calibration/dof_pie_relay_derivation.md;

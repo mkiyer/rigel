@@ -209,6 +209,85 @@ node later.
 
 ---
 
+## 6A. The two modes are ONE — the shift + honest precision (retire the density mode)
+
+Today `_scan` carries **two** message modes (§2.1): the **composition SHIFT** on clean edges and the **density
+mode** on exon edges. They differ in exactly one thing — the **normalizer**. Both impute the dst's per-component
+masses `M_c = ρ_c^src · E_c^dst`; then:
+- **SHIFT** normalizes by the *imputed* total `ΣM_c` ⇒ `f_c^dst = M_c/ΣM_c`. Trusts the source composition; the
+  enrichment scale `k` cancels ⇒ **cliff-invariant** (`λ_dst = λ_src + log(E_g^dst/E_g^src) − log(E_r^dst/E_r^src)`).
+- **DENSITY** normalizes by the dst's *observed* total `md` ⇒ `f_c^dst = ρ_c^src·E_c^dst / md`. Trusts the dst's
+  own total; the enrichment is baked in ⇒ **fails across a cliff** (source depleted ÷ dst enriched → `f_g→0`, the
+  TSS/TES crush, `enrichment_sensitivity_worklog.md` §8c).
+
+**Why the split exists (and why it is ad-hoc).** The shift is cliff-invariant but *trusts the source's
+composition*; on an **unstranded exon** source that composition is degenerate (~0.5, unresolved), so the shift
+propagated garbage confidently — the regression `cliff_message_derivation.md` §9 records. The density mode was
+kept on exon edges as a **robustness crutch** ("distrust the exon source; anchor to observed data"), gated by the
+`use_shift = not exon@either-end` proxy — a *reliability* heuristic, not a principled rule.
+
+**The reconciliation — that crutch is now the PRECISION's job.** After the τ-fix the message precision is
+`1/(Var(log f_c^src) + 1/M_src + σ²_transfer)`, where `Var(log f_c^src)` is sourced from the source's own
+reference-free evidence `τ`. An unstranded exon source has `τ→0 ⇒ Var→∞ ⇒ precision→0` — its shift message is
+**already ignored**. So we no longer need to *switch modes* to distrust an unreliable source; we use the
+**composition shift everywhere and let honest precision decide trust.** The density mode is **retired** — it was
+the shift's crutch from before the precision was honest. The only branch that remains is **structural**, not
+ad-hoc (§5 vs §6):
+
+- **gates match** ⇒ normalize over the transferred components = the shift (cliff-invariant).
+- **gates differ** ⇒ the un-transferable components are unconstrained; the transferable gDNA imputes a one-sided
+  **lower anchor** on its density (§6), never a two-sided point estimate.
+
+So the *single* mode function is: **impute per-component masses via the eff-length frame; branch only on
+gate-equality; trust via honest precision.** ⚠ **BEHAVIORAL, needs an A/B:** the memory's shift-on-exon regression
+was measured at *full* precision — the honest-precision version must be benchmarked (`pass0_bench.py` +
+`gdna_none` guard) before landing. Unifying the mode is therefore a *behavioral* phase, NOT part of the
+byte-identical Phase-A refactor (which only *extracts* the two modes as-is).
+
+---
+
+## 6B. Solvability — "can I solve?" (the degrees-of-freedom criterion)
+
+**The gate sets the DOF.** The composition `(f_g, f_+, f_−)` lives on the simplex, but the structural gate fixes
+some components. With `|A| = 1 + [gate_+] + [gate_−]` active components, the composition has **`|A|−1` free DOF**,
+in the two natural coordinates `λ` (the gDNA-vs-RNA level) and `θ` (the +/− tilt):
+
+| gate `(g,+,−)` | class | DOF | free axes |
+|---|---|---|---|
+| (1,0,0) | intergenic / seam | **0** | none — `f_g=1` forced by structure |
+| (1,1,0) / (1,0,1) | single-strand | **1** | `λ` (θ locked to the live strand) |
+| (1,1,1) | AMBIG | **2** | `λ` and `θ` |
+
+**A node is solvable ⟺ the Fisher information over its free axes is full-rank** — equivalently, **every free axis
+has ≥1 nonzero-precision source.** The three information sources (the count-zero-info sources) each carry rank on
+specific axes:
+
+| source | axis it informs | rank |
+|---|---|---|
+| **strand tilt** (the Beta-Binomial) | the plus-fraction `p = ½f_g + κf_+ + (1−κ)f_−` | **1 if κ≠½, 0 if unstranded** |
+| **a gDNA-bearing message** | `λ` | 1 |
+| **a per-strand RNA message** (spliced / nascent) | `θ` | 1 |
+| **the global gDNA prior** (Phase-2) | `λ` | 1 |
+
+**Every case falls out** (deriving the owner's premise — "nonzero precision for each active component"):
+- **Intergenic (0-DOF):** no free axis ⇒ self-solved with NO information (`f_g=1` by structure).
+- **Single-strand STRANDED (1-DOF):** strand alone pins `λ` ⇒ solvable. (*"tilt solves 1-DOF."*)
+- **Single-strand UNSTRANDED (strand rank 0):** `λ` has no pass-0 source (a TSS/TES neighbour gives only a weak
+  gDNA *lower bound*, §6) ⇒ **unsolvable in pass-0 ⇒ skip; defer to the Phase-2 prior.** (the single-exon case, §8)
+- **AMBIG (2-DOF):** strand gives *one* constraint (`p`) — and for a **balanced** node `p=½` regardless of `f_g`,
+  so `λ` is unconstrained ⇒ **needs a second source** (a gDNA message or the prior). (*"strand needs additional
+  info for 2-DOF"* — precisely the AMBIG two-root ambiguity, `CALIBRATION_MASTER.md` §4.)
+
+**⟹ THE SKIP RULE (Phase C).** *A node skips its pass-0 solve iff any free axis (`λ`; and `θ` for AMBIG) has zero
+total precision from {strand, messages, prior}.* Skipping keeps the signature-binary init (`f_g=1`, max variance,
+`CALIBRATION_ARCHITECTURE.md` §3) — the honest "gDNA-present, level-unknown" default — so the prior moves it in
+Phase 2 without a pass-0 phantom to fight (§9). This is the elegant, DOF-derived form of the owner's
+"don't perturb an unidentifiable node." It shares the identifiability compiler with the message precision (one
+`Evidence` object, two consumers — the solve gate and the send precision), which is the Phase-A `StrandEvidence`
+extraction.
+
+---
+
 ## 7. Emission — do NOT gate; use honest precision (the τ-gag fix)
 
 **Principle (owner): the source always emits; it never gates.** A message that carries no information carries

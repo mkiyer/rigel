@@ -760,6 +760,42 @@ def test_tau_gag_fix_deconvolution_prediction_stays_gated():
     assert 0.2 < float(fin_no.f_g[ex]) < 0.8, fin_no.f_g[ex]
 
 
+def test_compile_strand_evidence_deadband_kills_unstranded():
+    """A1 unit (`StrandEvidence`, `message_system_derivation.md` §6B): the DERIVED deadband
+    ``disc = 4·max(0, (κ−½)² − σ²_d)`` makes I_strand IDENTICALLY 0 on unstranded data (κ=½) — the real phantom
+    fix — and >0 on stranded data; a gDNA-free library (N_gdna=0 ⇒ σ²_d→∞) also gates it to 0."""
+    from rigel.calibration.bp_solver import _compile_strand_evidence
+
+    u = np.array([100.0, 100.0])
+    fg = np.array([0.5, 0.5])
+    reg = np.array([True, True])
+    unl = np.array([False, False])
+    base = dict(od_g=0.03, od_r=0.03, n_gdna_obs=1e4, n_rna_obs=1e4, is_region=reg, locked=unl)
+    ev_unstr = _compile_strand_evidence(u, u, fg, kappa=0.5, **base)
+    ev_str = _compile_strand_evidence(u, u, fg, kappa=0.99, **base)
+    assert np.all(ev_unstr.tau0_lam == 0.0)  # unstranded: the deadband kills I_strand (the phantom fix)
+    assert np.all(ev_str.tau0_lam > 0.0)  # stranded: I_strand fires
+    assert np.all(ev_unstr.tau0_th == 0.0) and np.all(ev_str.tau0_th > 0.0)
+    ev_nog = _compile_strand_evidence(  # gDNA-free ⇒ σ²_d→∞ ⇒ disc=0 even when stranded
+        u, u, fg, kappa=0.99, od_g=0.03, od_r=0.03, n_gdna_obs=0.0, n_rna_obs=1e4, is_region=reg, locked=unl
+    )
+    assert np.all(ev_nog.tau0_lam == 0.0)
+
+
+def test_compile_strand_evidence_struct_lock_regions_only():
+    """A1 unit: I_struct (``struct_lock``) is composition-certainty for LOCKED REGION nodes only — never a
+    boundary seam (locked by structure but sitting between RNA-carrying exons)."""
+    from rigel.calibration.bp_solver import _compile_strand_evidence
+
+    z = np.zeros(4)
+    ev = _compile_strand_evidence(
+        z, z, np.full(4, 0.5), kappa=0.5, od_g=0.03, od_r=0.03, n_gdna_obs=1e4, n_rna_obs=1e4,
+        is_region=np.array([True, True, False, False]), locked=np.array([True, False, True, False]),
+    )
+    # locked region → True; unlocked region → False; locked BOUNDARY (seam) → False; unlocked boundary → False
+    assert list(ev.struct_lock) == [True, False, False, False]
+
+
 def test_strand_overdispersion_prior_default_is_near_binomial():
     """BUG #1 regression: the shipped default strand-overdispersion prior must be the NEAR-BINOMIAL null
     (α=β=14 ⇒ od₀≈0.034), NOT the old over-conservative 0.143 (α=β=3) that widened the gDNA Beta-Binomial
