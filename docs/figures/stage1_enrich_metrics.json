@@ -1,0 +1,37 @@
+{
+  "stage": "stage1_enrich",
+  "table": {
+    "0.50/capOFF/exon": 0.3958,
+    "0.50/capOFF/intergenic": 0.0,
+    "0.50/capOFF/intron": 0.335,
+    "0.50/capON/exon": 0.3385,
+    "0.50/capON/intergenic": 0.0,
+    "0.50/capON/intron": 0.3772,
+    "0.99/capOFF/exon": 0.0155,
+    "0.99/capOFF/intergenic": 0.0,
+    "0.99/capOFF/intron": 0.0496,
+    "0.99/capON/exon": 0.0278,
+    "0.99/capON/intergenic": 0.0,
+    "0.99/capON/intron": 0.0812
+  },
+  "poles": {
+    "pole1_node1055": {
+      "cond": "gdna_gdna100_ss_0.50_nrna_present_capture_on",
+      "node": 1055,
+      "true": 0.850087497569512,
+      "pass0": 0.3752394920178638,
+      "refit": 0.3752394920178638,
+      "var": 3.609713102185649
+    },
+    "invariant_node1055_ss099": {
+      "true": 0.8471026297416803,
+      "refit": 0.7848433281836538
+    },
+    "pole2_none": {
+      "gdna_none_ss_0.50_nrna_none_capture_on": 0.5033736445623257,
+      "gdna_none_ss_0.50_nrna_present_capture_on": 0.5026345592424594,
+      "gdna_none_ss_0.99_nrna_none_capture_on": 0.06914743573442454,
+      "gdna_none_ss_0.99_nrna_present_capture_on": 0.07189903702099094
+    }
+  }
+}

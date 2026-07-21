@@ -31,7 +31,6 @@ zero-gDNA library (``gdna_density_global == 0``, per-node gDNA mass ``0``) is a 
 from __future__ import annotations
 
 import logging
-import os
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -108,7 +107,6 @@ def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config)
 
 def _fit_gdna_hyperprior(
     chain, belief, statics, region_arrays, mass_global, eff_global, *, background, bandwidth, additive=False,
-    enrichment_prior=None, enrichment_condition=False,
 ):
     """Fit the DECONVOLVED-gDNA hyperprior (:class:`DensityNPMLE`) on the initial solve's peeled gDNA — the
     composition (gDNA) arm of ψ for the Phase-2 refit. Training set (non-circular): REGION nodes only, AMBIG
@@ -132,9 +130,9 @@ def _fit_gdna_hyperprior(
     gonly = ~fp & ~fn  # structural gDNA (intergenic / seam)
     live = (eff_global > 1.0e-9) & (mass_global > 1.0e-12)
     if additive:
-        # v0.7.1 substrate: single-strand + structural gDNA (incl. intergenic gonly — the nodes that reveal the
-        # library's gDNA level, and the depleted-floor anchor). Env-gated for the staged A/B.
-        sel = live & isr & (single | gonly) if os.environ.get("RIGEL_ADD_GONLY") == "1" else live & isr & single
+        # the Role-B KDE substrate: single-strand expressed regions only (`single`) — intergenic / structural
+        # gDNA (`gonly`) is dropped and represented by the weak floor instead of flooding the depleted mode.
+        sel = live & isr & single
     else:
         sel = live & isr & (single | gonly)  # SELECTED: no AMBIG, no boundary ⇒ non-circular
         if background is not None:  # HYBRID: intergenic → the aggregate cell, drop from the individuals
@@ -146,17 +144,8 @@ def _fit_gdna_hyperprior(
         return None
     g_hat = np.asarray(belief.f_g, dtype=np.float64) * mass_global
     var_g = None if additive else np.asarray(belief.var_gdna, dtype=np.float64)[sel]
-    # STAGE 1 — enrichment-conditioning (Jacobian-free log-shift ã = log ρ_g − μ_proj): scale eff by exp(μ_proj)
-    # so g_hat/eff' = the INTRINSIC rate d_g = ρ_g/e(x). The eval (bp_solver) scales its eff the same way, so the
-    # fit + lookup share the ã axis. The density-space background floor does not map to ã ⇒ drop it here.
-    eff_fit = np.asarray(eff_global, dtype=np.float64)
-    bg = background
-    if enrichment_condition and enrichment_prior is not None:
-        mu = enrichment_prior.project(mass_global, eff_global)[0]
-        eff_fit = eff_fit * np.exp(np.asarray(mu, dtype=np.float64))
-        bg = None
     return DensityNPMLE.fit(
-        g_hat[sel], eff_fit[sel], var_g=var_g, background=bg,
+        g_hat[sel], np.asarray(eff_global, dtype=np.float64)[sel], var_g=var_g, background=background,
         bandwidth=bandwidth, additive=additive,
     )
 
@@ -287,7 +276,7 @@ def calibrate(
     # When ``_debug`` is on, the LAST sweep also fills ``_debug["capture"]`` with the per-node message
     # internals (local vs final belief, each channel's message mode/precision) — the substrate for the
     # message-corruption trace (`scripts/debug/msg_trace.py`). Inert in production.
-    def _sweep(prior, enrichment_prior=None, enrichment_condition=False):
+    def _sweep(prior, enrichment_prior=None):
         capture = {} if _debug is not None else None
         out = node_sweep(
             chain,
@@ -307,7 +296,6 @@ def calibrate(
             n_grid_ss=config.sweep_n_grid_single_strand,
             gdna_prior=prior,
             enrichment_prior=enrichment_prior,
-            enrichment_condition=enrichment_condition,
             intron_prior=intron_prior,
             fold_coarse_k=config.fold_coarse_k,
             fold_fine_k=config.fold_fine_k,
@@ -360,14 +348,11 @@ def calibrate(
             chain, belief, statics, region_arrays, mass_global, eff_global,
             background=background, bandwidth=config.npmle_bandwidth,
             additive=config.gdna_prior_additive,
-            enrichment_prior=enrichment_prior,
-            enrichment_condition=config.gdna_prior_enrichment_condition,
         )
         if gdna_hyperprior is None:
             break
         belief = _init_belief()
-        belief = _sweep(gdna_hyperprior, enrichment_prior=enrichment_prior,
-                        enrichment_condition=config.gdna_prior_enrichment_condition)
+        belief = _sweep(gdna_hyperprior, enrichment_prior=enrichment_prior)
         logger.debug(
             "calibration: PHASE 2 gDNA-hyperprior refit %d/%d (%d cells)",
             it + 1,

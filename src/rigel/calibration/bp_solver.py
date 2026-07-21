@@ -202,7 +202,6 @@ def node_sweep(
     n_grid_ss: int | None = None,
     gdna_prior=None,
     enrichment_prior=None,
-    enrichment_condition=False,
     intron_prior=None,
     fold_coarse_k: int = 33,
     fold_fine_k: int = 33,
@@ -324,17 +323,8 @@ def node_sweep(
     #     composition prior — letting it vote a node's f_g is the count-votes-composition regression (§0).
     #   * ``gdna_prior`` set — a REFIT with the FITTED gDNA hyperprior (fit on the DECONVOLVED gDNA density,
     #     with ρ_bg pinned as a smooth low-density component — NO clamp/floor). ANCHORED, EXTREMELY WEAK.
-    # STAGE 1 — enrichment-conditioning (`gdna_hyperprior_plan.md`): evaluate the composition prior on the
-    # intrinsic axis ``ã = log ρ_g − μ_proj`` via the Jacobian-free log-shift, implemented by scaling eff by
-    # ``exp(μ_proj)`` (μ_proj = the Role-A enrichment projection, same object as σ²_transfer below). The fit is
-    # scaled identically (calibrate._fit_gdna_hyperprior), so the fitted prior and this lookup share the ã axis
-    # ⇒ the density prior becomes a per-library composition-FRACTION prior. Off ⇒ the plain density δ-pin.
-    eff_lp = eff_global
-    if enrichment_condition and enrichment_prior is not None and gdna_prior is not None:
-        mu_c = enrichment_prior.project(mass_global, eff_global)[0]
-        eff_lp = np.asarray(eff_global, np.float64) * np.exp(np.asarray(mu_c, np.float64))
     global_lp = (
-        gdna_prior.logprior(solve_grid, mass_global, eff_lp) if gdna_prior is not None else None
+        gdna_prior.logprior(solve_grid, mass_global, eff_global) if gdna_prior is not None else None
     )
 
     # The belief-free PROJECTION message transfer variance (transfer_variance_formal_derivation.md): each node's
