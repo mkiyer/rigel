@@ -44,6 +44,8 @@ them out via ``solvable``, so no reference is applied to a node whose compositio
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from scipy.special import expit, log_expit
 
@@ -72,6 +74,11 @@ _EPS = 1.0e-9
 # IS this reference. Licensed as the "structural Jeffreys" prior (reference_prior_derivation.md §10.6); §10.5
 # records the known cost — it forbids the simplex vertices, where some truth genuinely lives.
 _JEFFREYS_REF = 0.5
+
+# STAGE-0 symmetric floor (gdna_hyperprior_plan.md): the fitted prior sits on top of the ½·log f_g reference
+# via logaddexp instead of replacing it. Env-gated ONLY for the staged A/B (default on); to be resolved into a
+# proper config flag / removed once the Stage 0/1 form is settled.
+_STAGE0_FLOOR = os.environ.get("RIGEL_STAGE0_FLOOR", "0") == "1"
 
 # f_g ∈ [σ(−10), σ(10)] = [4.5e-5, 1−4.5e-5]. A pure STATE-SPACE bracket: the widest f_g the grid can
 # represent, NOT an accuracy knob — but that is a PROPERTY OF A PROPER ψ, not of this constant. It holds
@@ -155,12 +162,21 @@ def _regrid_global(glp, n_from, n_to, L):
 def _gdna_arm(lam, global_logprior):
     """The gDNA arm of ψ over the λ grid → broadcastable to ``(m, K)``.
 
-    ``logP_g(log ρ_g)`` when fitted (the caller pre-evaluates it on THIS ``f_g`` grid → ``(m, K)``), else the
-    ``_JEFFREYS_REF`` reference ``+½·log f_g`` → ``(1, K)``. ``None`` means "not fitted", **not** "no term":
-    writing nothing would silently select Haldane at this arm and leave ψ improper at ``f_g → 0``."""
-    if global_logprior is not None:
-        return np.asarray(global_logprior, np.float64)
-    return _JEFFREYS_REF * _log_fg(lam)[None, :]
+    ``_JEFFREYS_REF`` reference ``+½·log f_g`` → ``(1, K)`` when no fitted prior. When a prior IS fitted, the
+    fitted ``logP_g(log ρ_g)`` (pre-evaluated on THIS ``f_g`` grid → ``(m, K)``) sits **on top of** that
+    reference via ``logaddexp`` — the Stage-0 symmetric floor (`gdna_hyperprior_plan.md` §4): the reference is a
+    smooth ``f_g → 0`` barrier and an ``up-tilt`` toward ``f_g → 1``, so the fitted prior can ADD enriched mass
+    but can never penalize BELOW the uninformative reference. This is what the fitted prior used to *replace*
+    (deleting the barrier ⇒ the unstranded-enriched crush, `gdna_crush_dissection_node1055.md`).
+
+    ``None`` means "not fitted", **not** "no term": writing nothing would silently select Haldane at this arm
+    and leave ψ improper at ``f_g → 0``."""
+    ref = _JEFFREYS_REF * _log_fg(lam)[None, :]
+    if global_logprior is None:
+        return ref
+    if _STAGE0_FLOOR:
+        return np.logaddexp(np.asarray(global_logprior, np.float64), ref)
+    return np.asarray(global_logprior, np.float64)
 
 
 def _rna_arm(lam, rna_logprior=None):

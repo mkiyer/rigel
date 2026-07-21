@@ -90,9 +90,38 @@ In a single-stranded intron, "this intron is 95% gDNA" implies "the rest is RNA 
 - this should manifest as a gDNA DENSITY with a gDNA PRECISION -- in our new precision model we have 1-DOF (for single-stranded nodes) and 2-DOF (for both-stranded ambiguous nodes). the belief must reflect the mode and precision of intronic gDNA
 
 
+# Extending to all nodes
 
+## idea
 
+Using the intergenic gdna background level can apply to all nodes, and not merely introns.
 
+Your review highlighted that the approach can be extended to exons (we can peel gDNA out of exons in the same fashion). 
+
+**The trouble is hybrid capture**
+
+Hybrid capture enriches all nucleic acid (both RNA and gDNA) above background levels. The intergenic distribution only measures background gDNA levels. So while it is not wrong to peel confident gDNA within exons using the exact same approach, much of the total density within exons will be unaccounted for, because all we can confidently peel is the depleted floor density. 
+
+In otherwords the intergenic gdna factory implementation can be applied globally to all non-intergenic nodes, but will underestimate gdna under hybrid capture conditions.
+
+If we apply our gdna factory to exons, we must be sure to derive the correct precision term.
+
+For example:
+- suppose intergenic background gdna has mean, variance
+- exons and intron-exon boundaries are enriched by a factor of 1000X over the background level (background is depleted)
+
+If we apply our gdna factory to enriched exons and intron-exon boundaries, we can successfully peel gDNA.
+
+But what happens to precision?
+
+- A exon or exon-intron boundary node might have total density=30
+- Our intergenic background may be mean=0.01 (with variance)
+
+- We can peel off the intergenic background (approx 0.01), leaving majority of density (30 - 0.01) unaccounted for. The method can say, "i'm confident that 0.01 is gDNA", but it cannot say anything about the residual 29.99 density. The residual may still be gDNA or RNA.
+
+So when there is a HUGE discrepancy between total densities, the gdna factory must remain HONEST about its capabilities. It can still work, but cannot result in a confident call about the total density composition of the enriched nodes.
+
+How does the method work now? Can it be extended to ALL nodes safely, without making the enriched nodes overconfident about their final solution?
 
 
 

@@ -345,6 +345,13 @@ class CalibrationConfig:
     #: (Role A / σ²_transfer) and NOT the solve's gDNA messages. Experimental; being A/B-gated before default-on.
     gdna_prior_additive: bool = False
 
+    #: ENRICHMENT-CONDITION the Role-B gDNA hyperprior (Stage 1, `gdna_hyperprior_plan.md`): fit/evaluate it on
+    #: the intrinsic axis ``ã = log ρ_g − μ_proj`` (μ_proj = the Role-A denoised total log-density) via a
+    #: Jacobian-free log-shift — implemented as scaling each node's eff by ``exp(μ_proj)`` in both the fit and
+    #: the lookup. Turns the (enrichment-blind) density prior into a per-library composition-fraction prior, so
+    #: an enriched node is scored against the population of FRACTIONS. Affects ONLY Role B. Experimental; gated.
+    gdna_prior_enrichment_condition: bool = False
+
     def __post_init__(self) -> None:
         if self.calib_refit_iters < 0:
             raise ValueError(

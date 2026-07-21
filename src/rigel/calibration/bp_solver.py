@@ -202,6 +202,7 @@ def node_sweep(
     n_grid_ss: int | None = None,
     gdna_prior=None,
     enrichment_prior=None,
+    enrichment_condition=False,
     intron_prior=None,
     fold_coarse_k: int = 33,
     fold_fine_k: int = 33,
@@ -323,8 +324,17 @@ def node_sweep(
     #     composition prior — letting it vote a node's f_g is the count-votes-composition regression (§0).
     #   * ``gdna_prior`` set — a REFIT with the FITTED gDNA hyperprior (fit on the DECONVOLVED gDNA density,
     #     with ρ_bg pinned as a smooth low-density component — NO clamp/floor). ANCHORED, EXTREMELY WEAK.
+    # STAGE 1 — enrichment-conditioning (`gdna_hyperprior_plan.md`): evaluate the composition prior on the
+    # intrinsic axis ``ã = log ρ_g − μ_proj`` via the Jacobian-free log-shift, implemented by scaling eff by
+    # ``exp(μ_proj)`` (μ_proj = the Role-A enrichment projection, same object as σ²_transfer below). The fit is
+    # scaled identically (calibrate._fit_gdna_hyperprior), so the fitted prior and this lookup share the ã axis
+    # ⇒ the density prior becomes a per-library composition-FRACTION prior. Off ⇒ the plain density δ-pin.
+    eff_lp = eff_global
+    if enrichment_condition and enrichment_prior is not None and gdna_prior is not None:
+        mu_c = enrichment_prior.project(mass_global, eff_global)[0]
+        eff_lp = np.asarray(eff_global, np.float64) * np.exp(np.asarray(mu_c, np.float64))
     global_lp = (
-        gdna_prior.logprior(solve_grid, mass_global, eff_global) if gdna_prior is not None else None
+        gdna_prior.logprior(solve_grid, mass_global, eff_lp) if gdna_prior is not None else None
     )
 
     # The belief-free PROJECTION message transfer variance (transfer_variance_formal_derivation.md): each node's
@@ -531,11 +541,21 @@ def node_sweep(
             # STRUCTURAL emission gates only (per-strand `free_s` continuity + facing mass): each RNA strand
             # flows wherever that strand is continuous on both endpoints (the mature-crossing gate was
             # dismantled — see the `_scan` docstring; mature is reconciled by the spliced absorption instead).
-            # The τ-evidence gate: a source with no composition evidence emits NOTHING (pr=0), never a
-            # reference-pooled confident message (``lam_ev``/``th_ev`` False ⇒ the emission is suppressed).
+            #
+            # THE τ-GAG FIX (2026-07-21, message_system_implementation_plan.md §2/§4-B). A message has TWO
+            # independent precision channels: the DECONVOLUTION prediction (the deconvolved unspliced RNA — a
+            # count-zero-info-degraded PREDICTION whose confidence is the reference-free evidence τ) and the
+            # SPLICED MEASUREMENT (a splice-junction's motif-stranded spliced fragments — a DIRECT pure-RNA
+            # measurement whose confidence is its own count `S_eff`, `spliced_precision_status.md` §3). The
+            # τ-evidence gate correctly suppresses the PREDICTION on a composition-vacuous source (`lam_ev`/
+            # `th_ev` False ⇒ pr=0, the phantom fix) — but it MUST NOT suppress the MEASUREMENT: the spliced
+            # count is evidence in its own right, and gating it silenced 52% of splice-junction messages on
+            # unstranded data (our best RNA signal). So RNA emission also opens on spliced presence (`SPs/SNs`);
+            # the deconvolution precision below stays τ-gated, the spliced credit is added unconditionally.
             emit_g = (sm > _EPS) and lam_ev
-            emit_p = fp[lsrc] and fp[i] and (sm > _EPS or SPs[lsrc] > _EPS) and (lam_ev or th_ev)
-            emit_n = fn[lsrc] and fn[i] and (sm > _EPS or SNs[lsrc] > _EPS) and (lam_ev or th_ev)
+            emit_p = fp[lsrc] and fp[i] and (sm > _EPS or SPs[lsrc] > _EPS) and (lam_ev or th_ev or SPs[lsrc] > _EPS)
+            emit_n = fn[lsrc] and fn[i] and (sm > _EPS or SNs[lsrc] > _EPS) and (lam_ev or th_ev or SNs[lsrc] > _EPS)
+            has_comp_ev = lam_ev or th_ev  # composition (λ/θ) evidence present ⇒ the PREDICTION channel is trusted
             # The cliff-crossing log-odds SHIFT applies on CLEAN edges only (neither endpoint an exon region —
             # `cliff_message_derivation.md` §7: intron/intergenic ↔ boundary, no mature), where the intron
             # factory makes the source accurate. EXON ↔ boundary edges keep the DENSITY mode (the observed-md
@@ -615,8 +635,9 @@ def node_sweep(
                     # density's robustness: the gDNA f_g must NOT be hostage to the error-prone mature removal).
                     mo = math.log(max(rho_pos, 1.0 / erd) / (md / erd))  # → dst log-f_pos frame (density)
                 n_eff = (max(rho_pos, 0.0) * erd) if (rho_pos <= 1.0 / erd) else sm  # honest clamp
-                pr = n_eff / (n_eff * (v_logfp + s2t) + 1.0)  # +σ²_transfer (unspliced; n_mat excluded)
-                if SPs[lsrc] > _EPS:
+                # PREDICTION channel (τ-gated: 0 on a composition-vacuous source — the phantom fix)
+                pr = n_eff / (n_eff * (v_logfp + s2t) + 1.0) if has_comp_ev else 0.0
+                if SPs[lsrc] > _EPS:  # MEASUREMENT channel (independent evidence — always credited)
                     pr += SPs[lsrc] / (1.0 + SPs[lsrc] * s2t)  # + spliced-fragment MEASUREMENT precision
                 amp[i], app[i] = mo, pr
                 if rho_pos > 0.0:
@@ -627,8 +648,8 @@ def node_sweep(
                 else:
                     mo = math.log(max(rho_neg, 1.0 / erd) / (md / erd))  # → dst log-f_neg frame (density)
                 n_eff = (max(rho_neg, 0.0) * erd) if (rho_neg <= 1.0 / erd) else sm  # honest clamp
-                pr = n_eff / (n_eff * (v_logfn + s2t) + 1.0)  # +σ²_transfer
-                if SNs[lsrc] > _EPS:
+                pr = n_eff / (n_eff * (v_logfn + s2t) + 1.0) if has_comp_ev else 0.0  # PREDICTION (τ-gated)
+                if SNs[lsrc] > _EPS:  # MEASUREMENT channel (independent evidence — always credited)
                     pr += SNs[lsrc] / (1.0 + SNs[lsrc] * s2t)  # + spliced-fragment MEASUREMENT precision
                 amn[i], apn[i] = mo, pr
                 if rho_neg > 0.0:
@@ -636,7 +657,8 @@ def node_sweep(
             # RNA-TOTAL message (a factor on log f_r) — the second λ-factor; gDNA + RNA-total in tension on the
             # SAME axis λ (this is what makes the pie coherent — docs §2.2).
             if rho_r > _EPS:
-                pr_r = sm / (sm * (v_logfr + s2t) + 1.0)  # +σ²_transfer (RNA-total λ-factor)
+                # PREDICTION channel (τ-gated) + spliced MEASUREMENT channel (independent — always)
+                pr_r = sm / (sm * (v_logfr + s2t) + 1.0) if has_comp_ev else 0.0
                 s_spl = SPs[lsrc] + SNs[lsrc]  # total spliced (motif-stranded ⇒ one term nonzero)
                 if s_spl > _EPS:
                     pr_r += s_spl / (1.0 + s_spl * s2t)  # + spliced-fragment MEASUREMENT precision

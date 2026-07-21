@@ -723,6 +723,43 @@ def test_mature_measurement_disagreement_silenced():
     assert float(fin_lo.f_g[ex]) < 0.45, fin_lo.f_g[ex]
 
 
+def test_tau_gag_fix_spliced_junction_emits_when_unstranded():
+    """τ-GAG REGRESSION (`message_system_implementation_plan.md` §Phase B, 2026-07-21). On UNSTRANDED data
+    (κ=½ ⇒ the strand Fisher info ``I_strand`` is identically 0), a splice-junction boundary still carries
+    motif-stranded spliced (mature-RNA) fragments — a DIRECT measurement, independent of strand. That
+    measurement MUST reach the exon. The bug: the τ-evidence emission gate (keyed on ``I_strand``+``I_struct``
+    only, NOT the spliced count) silenced it, and the spliced-precision credit — which lives *inside* the gated
+    block — never fired (52% of junctions). The fix opens RNA emission on spliced presence while keeping the
+    deconvolution PREDICTION τ-gated.
+
+    Pins both halves: (1) a spliced junction DELIVERS a +RNA message to its exon even unstranded; (2) the same
+    chain with the spliced REMOVED delivers zero +RNA authority (a vacuous unstranded node manufactures no
+    phantom RNA — the deconvolution stays gated). This exact pair fails on the pre-fix gated code."""
+    ex = 3  # chain id of the expressed exon R1
+    fin_spl, cap_spl = _sweep(_mature_exon_chain(spliced=True, kappa=0.5), kappa=0.5)
+    fin_no, cap_no = _sweep(_mature_exon_chain(spliced=False, kappa=0.5), kappa=0.5)
+    # (1) THE FIX: the spliced (mature) MEASUREMENT reaches the exon with the strand silent (κ=½).
+    assert cap_spl["prec_p"][ex] > 0.0, cap_spl["prec_p"][ex]
+    # (2) the vacuous control (no spliced, no strand): ZERO +RNA authority — no phantom manufactured.
+    assert cap_no["prec_p"][ex] == 0.0, cap_no["prec_p"][ex]
+    # (3) the real mature measurement moves the exon TOWARD RNA — never toward phantom gDNA.
+    assert float(fin_spl.f_g[ex]) < float(fin_no.f_g[ex]), (fin_spl.f_g[ex], fin_no.f_g[ex])
+
+
+def test_tau_gag_fix_deconvolution_prediction_stays_gated():
+    """The safety half of the τ-gag fix: unblocking the spliced MEASUREMENT must NOT unblock the deconvolution
+    PREDICTION on a vacuous source (that is the phantom the τ-precision exists to kill). On the unstranded
+    no-spliced chain, the boundary→exon +RNA precision is exactly 0 (asserted above); here we pin that even the
+    gDNA message a vacuous boundary sends carries no manufactured composition confidence beyond the honest
+    structural/count evidence — the exon's solved f_g stays near the uninformative reference, not driven to a
+    confident vertex by a phantom."""
+    ex = 3
+    fin_no, cap_no = _sweep(_mature_exon_chain(spliced=False, kappa=0.5), kappa=0.5)
+    # No spliced + no strand ⇒ the exon has no composition evidence of its own; it must not be pinned to a
+    # confident vertex by the messages (the phantom would drive it to ~1). It stays mid-range (reference-led).
+    assert 0.2 < float(fin_no.f_g[ex]) < 0.8, fin_no.f_g[ex]
+
+
 def test_strand_overdispersion_prior_default_is_near_binomial():
     """BUG #1 regression: the shipped default strand-overdispersion prior must be the NEAR-BINOMIAL null
     (α=β=14 ⇒ od₀≈0.034), NOT the old over-conservative 0.143 (α=β=3) that widened the gDNA Beta-Binomial
