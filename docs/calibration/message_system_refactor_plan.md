@@ -112,13 +112,14 @@ diagnostic `_capture` are already reasonable units — untouched except for cons
 Every step gates on: `pytest tests/calibration` (249) + the **golden** suite (byte-identical) + lint. Behavioral
 steps additionally gate on the `gdna_none` FP guard + the `pass0_bench.py` mwae table.
 
-- **A0 — remove the δ-pin gates (byte-identical, high-value cleanup).** Delete
+- **A0 — remove the δ-pin gates (byte-identical, high-value cleanup). ✅ DONE (`7a51351c`).** Deleted
   `gdna_prior_enrichment_condition` (config), `_STAGE0_FLOOR` (simplex_logodds), `RIGEL_ADD_GONLY` (calibrate),
-  and the `enrichment_condition` plumbing (node_sweep/calibrate). All default-off ⇒ golden unchanged. *This also
-  removes `import os` from the touched modules.* Smallest, safest, and clears the noise before restructuring.
-- **A1 — extract `_compile_strand_evidence` → `StrandEvidence`.** Move the τ-seed block verbatim into a pure
-  function + dataclass. Add unit tests: unstranded ⇒ `tau0_lam==0` (the deadband); stranded ⇒ `>0`; intergenic
-  region ⇒ `struct_lock`. *Golden byte-identical* (same values, relocated).
+  and the `enrichment_condition` plumbing (node_sweep/calibrate) + the now-unused `import os`. 0 golden files
+  changed; 1132 tests; lint clean.
+- **A1 — extract `_compile_strand_evidence` → `StrandEvidence`. ✅ DONE (`7db05195`).** The τ-seed block moved
+  verbatim into a frozen dataclass + pure function; `node_sweep` calls it. Unit tests: the deadband kills
+  I_strand unstranded + gates a gDNA-free library; `struct_lock` = locked REGIONS only. 0 golden files changed;
+  1132→1134 tests. This is the home for the §6B solvability model (Phase C) + I_spliced (B) + I_struct@TSS/TES (D).
 - **A2 — extract the mode functions `_shift_mode` / `_density_mode`.** Replace the two inline blocks; unit-test
   each against a hand-worked cliff example. *Golden byte-identical.* Measure sweep runtime (expect flat).
 - **A3 — section + name the precision block (prediction vs measurement).** Introduce `pred_pr_*` / `meas_pr_*`
