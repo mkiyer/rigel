@@ -88,15 +88,17 @@ solve-gate deferring unidentifiable nodes + single-exon transcripts **withheld f
 
 Before investing in §5, make the solver *trustworthy*. These are ordered by confidence-risk.
 
-- **F. Numerical robustness sweep.** The emission refactor exposed **two latent nans** (`0·∞` at the λ-window
-  edge, `n_eff=0×v=∞`) the old gates had masked. *Systematically hunt the rest*: assert `isfinite` on every
-  emitted mode/precision across the full suite; add a fuzz/property test over extreme node states (empty, pure,
-  window-edge, huge-mass). **No silent nan/inf may reach the fold.**
-- **G. Invariant test coverage.** The emission coupling bug was caught only by a *golden*, not a unit test —
-  goldens tell us *that* something changed, never *what principle broke*. Add invariant tests that pin each
-  principled behavior directly: density ⊥ evidence (a vacuous strand's density still reaches the RNA-total);
-  `pr→0` as `τ→0`; the spliced MEASUREMENT survives any gate; the deadband kills I_strand unstranded. **A future
-  refactor should fail a named principle, not just "the golden moved."**
+- **F. Numerical robustness sweep. ✅ DONE** (`test_bp_solver.py::test_message_primitives_never_nan`,
+  `::test_sweep_finite_over_extreme_configs`). Fuzzed `_pred_precision`/`_mode_shift`/`_mode_density` over extreme
+  inputs (incl. `v=∞` AND `v=nan` — `_pred_precision` self-guards) + the real sweep over 20 configs
+  (pure-gDNA / pure-RNA / empty / tiny / huge). **No further latent nan found** beyond the two the refactor
+  already fixed; every emitted mode/precision + final belief is finite (∞-variance = honest "unsolved" allowed).
+- **G. Invariant test coverage. ✅ DONE** (`::test_pred_precision_honest_semantics`,
+  `::test_vacuous_unstranded_source_zero_precision_but_density_flows`; plus the existing `test_tau_gag_fix_*`,
+  `test_compile_strand_evidence_deadband_*`). The principles are now pinned directly: no-evidence⇒pr=0 (ev_λ=∞);
+  monotone-in-count; and the **density ⊥ evidence decoupling** — a vacuous source emits 0 composition precision
+  yet a well-defined density mode (the exact principle the coupling bug violated). A future refactor now fails a
+  *named principle*, not just "the golden moved."
 - **H. Determinism / reproducibility.** Confirm the pass-0 solve is bit-reproducible at `total_threads=1`
   (cross-process nondeterminism was ~2.6 % from C++ FP reduction; `calibrate_cross_process_nondeterminism`).
   A confidence claim needs a deterministic solver.
