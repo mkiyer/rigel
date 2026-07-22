@@ -146,18 +146,31 @@ Before investing in §5, make the solver *trustworthy*. These are ordered by con
 
 ---
 
-## 7. Sequencing
+## 7. Sequencing — the remaining path to SHIP pass-0, then the hyperprior
 
-1. **Harden first — ✅ DONE.** F (nan sweep) + G (invariant tests) + H (determinism) landed; the solver is now
-   robust, principled, and bit-reproducible.
-2. **Finish the solve-gate — A (§4-A), the current solver task.** The DOF criterion is validated for regions
-   (correlation test); to ship it needs (a) a correlation/precision-aware metric, (b) the fitted prior as an
-   identification source (so the refit *resolves* deferred nodes), and (c) a re-derived **boundary rule** (a real
-   bug — currently inverted). This is a genuine solver task, not a hyperprior task.
-3. **The correctness items** — I (discretization; the AMBIG two-root; the wall).
-4. **The feature levers** — B (mature correction) → C (mode flip) → D (seam anchor) → E (precision merge).
-5. **Then the hyperprior** (§5) — the real under-call lever, but only *after* the solver tasks: it is fed a
-   pass-0 that solves what it can and honestly withholds what it cannot.
+**Ship criterion for pass-0 (the contract to pass-2, §3):** the solve is *HONEST* — **never confident-wrong**,
+*weak* where unidentifiable, and the **`gdna_none` phantom guard held**. Pass-0 does NOT need a big benchmark
+number (the hyperprior owns the 80.5 % identifiability floor); it needs to hand the prior a belief that is
+trustworthy where it is confident and honestly weak where it is not.
+
+1. **Harden — ✅ DONE.** F (nan sweep) + G (invariant tests) + H (determinism).
+2. **Boundary transfer mode — ✅ LANDED (2026-07-22, commit `4f2f5511`).** Fix #1 (spliced-density σ²_transfer) +
+   Fix #2 (geo-mean crossing mode). This subsumed the boundary parts of the old items A/B/C: the "boundary rule
+   inversion" was a **Simpson metric artifact** (no inversion — the DOF criterion is fine for regions), the mature
+   reconciliation at boundaries is handled by the geo-mean's nascent-as-residual, and `RIGEL_GATE_SHIFT` is retired.
+3. **⟵ SHIP-BLOCKER — item L, the `nascent ≫ mature` over-call (§4-L). THE NEXT TASK.** This is a
+   **confident-wrong** pattern (over-calling gDNA where the mass is nascent RNA), exactly what the ship criterion
+   forbids — so it must be fixed OR made honestly weak before pass-0 ships. It is the unstranded
+   nascent-vs-gDNA identifiability floor; the lever is the **intron→exon nascent relay** (the quintuple) or the
+   global gDNA prior. Harness: `scripts/debug/quintuple_grid.py`. Two acceptable outcomes: (a) the relay resolves
+   it (a real fix), or (b) the over-call is driven to LOW precision (honest-weak, deferred to the hyperprior).
+4. **The solve-gate — A (§4-A), the honesty refinement.** Decide withhold-vs-solve for the coin-flip nodes; needs
+   the correlation/precision metric + the fitted prior as an identification source. Reframed: no boundary
+   inversion (that was the artifact); the open part is the region withhold decision + the prior-as-source.
+5. **The correctness items — I (§6).** Discretization-frame consistency; the AMBIG two-root stance; the
+   identifiability-wall path (test it fires). Smaller hardening.
+6. **SHIP pass-0**, then **the hyperprior (§5)** — the real under-call lever, fed the honest pass-0.
+   (Lower-priority polish D seam-anchor / E precision-merge can follow the hyperprior.)
 
 **The one rule throughout:** golden byte-identity for refactors; `gdna_none` + node-level-honesty for behavioural
 steps; the error-budget map (§3) as the scoreboard. Never land on the aggregate benchmark alone.
