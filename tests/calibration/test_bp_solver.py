@@ -1104,3 +1104,85 @@ def test_mode_helpers_finite_under_zero_and_negative_density():
         assert math.isfinite(m)
         assert np.isclose(m, math.log((1.0 / erd) * erd / md))  # == floor·E/md = 1/md
     assert math.isfinite(_mode_density(-9.9, egd, md))
+
+
+# ── HARDENING: F (numerical robustness) + G (invariant coverage) ──────────────────────────────────────────
+# These lock down the two things this session's emission refactor taught us: (F) the old evidence gates were
+# masking latent 0·∞ nans, and (G) the emission↔density coupling bug that only a GOLDEN caught. Goldens tell
+# us THAT output moved; these pin WHAT principle must hold.
+
+
+def test_message_primitives_never_nan():
+    """F: the pure message primitives must be FINITE over extreme/degenerate inputs — the emission refactor
+    exposed two latent 0·∞ nans the gates had masked (fr²·∞ at the λ-window edge; n_eff·∞). No nan/inf may ever
+    reach the fold; and _pred_precision must self-guard even a nan variance."""
+    import math
+
+    from rigel.calibration.bp_solver import _EPS, _mode_density, _mode_shift, _pred_precision
+
+    EXT = [0.0, _EPS, 1e-6, 1.0, 1e6, 1e12]
+    for count in [0.0, _EPS, 1.0, 1e9]:
+        for v in EXT + [math.inf, math.nan]:  # incl. ∞ (unseen) and nan (must be guarded, not propagated)
+            for s2t in [0.0, _EPS, 1.0, 1e6]:
+                pr = _pred_precision(count, v, s2t)
+                assert math.isfinite(pr) and pr >= 0.0, (count, v, s2t, pr)
+    for mass in [0.0, _EPS, 1.0, 1e9]:
+        for den in [_EPS, 1.0, 1e9]:
+            for cfl in [1e-12, 1e-3, 1.0]:
+                assert math.isfinite(_mode_shift(mass, den, cfl)), (mass, den, cfl)
+    for rho in [-5.0, -1e-6, 0.0, _EPS, 1.0, 1e9]:  # negative ρ = over-absorbed mature (§4b)
+        for eff in [_EPS, 1.0, 1e6]:
+            for md in [_EPS, 1.0, 1e9]:
+                assert math.isfinite(_mode_density(rho, eff, md)), (rho, eff, md)
+
+
+def test_sweep_finite_over_extreme_configs():
+    """F: no nan/inf reaches the fold. The real node_sweep over spliced/±, stranded/unstranded, and extreme
+    gDNA/mature densities (pure-gDNA, pure-RNA, empty, tiny, huge) — every final fraction is finite & in range,
+    every variance is ≥0 (∞ = the honest 'unsolved' state is allowed; nan is not), every emitted message
+    mode/precision is finite."""
+    for spliced in (True, False):
+        for kappa in (0.5, 0.95):
+            for rho_g, rho_m in [(0.5, 1.0), (0.0, 1.0), (2.0, 0.0), (1e-6, 1e-6), (1e4, 1e4)]:
+                cfg = dict(spliced=spliced, kappa=kappa, rho_g=rho_g, rho_m=rho_m)
+                final, cap = _sweep(_mature_exon_chain(**cfg), kappa=kappa)
+                for nm in ("f_g", "f_pos", "f_neg"):
+                    v = np.asarray(getattr(final, nm))
+                    assert np.all(np.isfinite(v)), (cfg, nm, v)
+                    assert np.all(v >= -1e-9) and np.all(v <= 1.0 + 1e-9), (cfg, nm, v)
+                for nm in ("var_gdna", "var_pos", "var_neg"):
+                    v = np.asarray(getattr(final, nm))
+                    assert not np.any(np.isnan(v)) and np.all(v >= -1e-12), (cfg, nm, v)  # ∞ ok, nan not
+                for scan in ("a_fwd", "b_bwd"):
+                    for arr in cap[scan]:  # (amg, apg, amp, app, amn, apn)
+                        assert np.all(np.isfinite(np.asarray(arr))), (cfg, scan)
+
+
+def test_pred_precision_honest_semantics():
+    """G: the honest-precision principle at the source (emission_and_precision_derivation.md §2). A message's
+    composition precision is 0 when the composition is UNSEEN (v_log=∞ — a no-evidence source, the ev_λ=∞ fix)
+    or when there is no count; positive & finite with real evidence; monotone-increasing in the count."""
+    import math
+
+    from rigel.calibration.bp_solver import _pred_precision
+
+    assert _pred_precision(100.0, math.inf, 0.1) == 0.0  # UNSEEN (τ=0 ⇒ v=∞) ⇒ zero precision (the ev_λ=∞ fix)
+    assert _pred_precision(0.0, 1.0, 0.1) == 0.0  # no count ⇒ zero precision
+    p = _pred_precision(50.0, 1.0, 0.1)
+    assert 0.0 < p and math.isfinite(p)  # real evidence ⇒ finite positive
+    assert _pred_precision(10.0, 1.0, 0.1) < _pred_precision(100.0, 1.0, 0.1)  # more count ⇒ more power
+
+
+def test_vacuous_unstranded_source_zero_precision_but_density_flows():
+    """G: the phantom guard + the density⊥evidence DECOUPLING (the coupling bug's principle). On a fully
+    composition-vacuous UNSTRANDED chain (κ=½ ⇒ I_strand deadband ⇒ τ=0, no spliced), a source manufactures NO
+    composition confidence — its gDNA/RNA PREDICTION precision is exactly 0 (ev_λ=∞ ⇒ pr→0) — YET its message
+    MODE stays a well-defined finite density (STRUCTURE, not evidence, sets the mode). Precision reflects
+    evidence; density does not. This is exactly what the old emission gate violated: it dropped the density when
+    the evidence gate closed (`rho_r += rho_neg` inside `if emit_n`)."""
+    _, cap = _sweep(_mature_exon_chain(spliced=False, kappa=0.5), kappa=0.5)
+    for scan in ("a_fwd", "b_bwd"):
+        apg, amp, app = np.asarray(cap[scan][1]), np.asarray(cap[scan][2]), np.asarray(cap[scan][3])
+        assert np.all(apg <= 1e-12), (scan, "gDNA PREDICTION precision must be 0 on a vacuous source", apg)
+        assert np.all(app <= 1e-12), (scan, "RNA PREDICTION precision must be 0 (no spliced, τ=0)", app)
+        assert np.all(np.isfinite(amp)), (scan, "RNA density MODE must stay well-defined (density ⊥ evidence)")
