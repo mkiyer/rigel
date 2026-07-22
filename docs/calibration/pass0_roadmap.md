@@ -207,8 +207,12 @@ the unstranded+capture-ON failure §7 was trying to route around. This section i
   kept the `f_g=1` init (an all-gDNA lock). The intended paradigm is an **honest precision-0 state** for
   unidentified nodes, which the gDNA hyperprior later resolves. Materially different from what was refuted;
   needs derivation + implementation + the hyperprior handoff contract.
-* **E. Precision prediction⊕measurement merge** (§4-E). **PROMOTED — now a PREREQUISITE for R2** (the
-  measurement needs its own mode before its precision can be undamped; measured +49 % phantom otherwise).
+* **E. Precision prediction⊕measurement merge** (§4-E). **PROMOTED — the NEXT task and a PREREQUISITE for R2.**
+  **DERIVED** in `prediction_measurement_merge_derivation.md`: the bug is precision-ADDITION (replicate-measurement
+  algebra) applied to an ADDITIVE decomposition `ρ_r = ρ_m + ρ_n`; the fix is a share-weighted delta-method
+  log-variance whose mode is the SUM with ρ_n floored at 0 — which makes the measured mature a lower bound on
+  RNA that the prediction cannot erase (structurally killing the confident-"no RNA" ⇒ phantom pathology).
+  σ²_xfer (point-flux → region-containment) applies to BOTH components: nothing here measures the exon directly.
 * **L. nascent≫mature over-call** — may be substantially addressed by the mode fixes; **re-measure** on the
   grounded toy before treating it as open.
 * **Depletion bias** (probe-attenuated junctions): bounded (~0.053 f_g at 4× depletion), one-sided, contained by
