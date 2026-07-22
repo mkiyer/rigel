@@ -278,14 +278,15 @@ specific axes:
   so `λ` is unconstrained ⇒ **needs a second source** (a gDNA message or the prior). (*"strand needs additional
   info for 2-DOF"* — precisely the AMBIG two-root ambiguity, `CALIBRATION_MASTER.md` §4.)
 
-**⟹ THE SKIP RULE (Phase C) — ⛔ REFUTED (2026-07-21), see [`solve_gate_design.md`](solve_gate_design.md).**
-*(Original proposal:)* a node skips its pass-0 solve iff any free axis (`λ`; and `θ` for AMBIG) has zero total
-precision from {strand, messages, prior}; skipping keeps the signature-binary init (`f_g=1`, max variance) so the
-prior moves it in Phase 2 without a pass-0 phantom. **This was implemented and measured, and the premise is
-empirically false:** deferring to `f_g=1` regresses `gdna_none` both standalone and *with* the hyperprior — the
-prior resolves an imperfectly-**solved** node (which carries the observed density) far better than a deferred
-all-gDNA init. The DOF criterion is a correct *description* of identifiability, but the **skip** action is wrong:
-pass-0 should solve every strand+mass node and hand the prior a solved belief. "Destination decides" is retired.
+**⟹ THE SKIP RULE (Phase C) — VALID for regions; boundary rule + metric pending. See [`solve_gate_design.md`](solve_gate_design.md).**
+A node skips its pass-0 solve iff a free axis (`λ`; and `θ` for AMBIG) has zero total precision from {strand,
+messages, prior}. **Node-type correlation test (2026-07-21) confirms the criterion for REGIONS** (77 % of mass):
+the withheld single-strand + AMBIG regions are genuine *coin-flips* — their forced solve is uncorrelated with the
+oracle (corr −0.04 / −0.07) — while the solved ones correlate 0.63 / 0.69. So withholding them is right; their
+arbitrary default `f_g` must simply not be counted as error (an earlier mass-weighted-error "refutation" was a
+metric artifact — `solve_gate_design.md` §2). **Open before it ships:** the criterion is *inverted for boundaries*
+(a real bug — re-derive), and the DOF gate must count the fitted prior as a source so the Phase-2 refit *resolves*
+the deferred nodes rather than re-skipping them.
 
 ---
 

@@ -52,13 +52,14 @@ regressing the `gdna_none` phantom guard**, the hard gate.
 
 ## 4. Remaining feature work (each derive → plan → stage, A/B-gated)
 
-**A. The solve-gate (§6B). ⛔ REFUTED — do not re-attempt** ([`solve_gate_design.md`](solve_gate_design.md)).
-Derived, implemented (flag-gated), and measured: the DOF skip (unidentified → keep `f_g=1` init, defer to the
-prior) regresses **both** standalone (refit=0 +0.010, `gdna_none` rises) **and with the hyperprior** (refit=1
-+0.025, 15/32 worse, 0 better). The premise is empirically false — the prior resolves an imperfectly-**solved**
-node (which carries the observed density) far better than a deferred all-gDNA init. Reverted; `solvable` stays
-structural. **"Destination decides" is retired as a pass-0 mechanism** — honest emission (pr→0 when vacuous)
-already prevents over-commitment.
+**A. The solve-gate (§6B). ACTIVE — validated for regions; boundary rule + metric to fix**
+([`solve_gate_design.md`](solve_gate_design.md)). A node-type CORRELATION test (not the mass-weighted-error
+metric, which wrongly counts withheld nodes' arbitrary default) confirms: the DOF criterion is **correct for
+regions (77 % of mass)** — the single-strand + AMBIG regions it withholds are genuine coin-flips (corr ≈ 0),
+those it solves correlate 0.63–0.69. A first "refutation" was a **flawed measurement** (mwae counted arbitrary
+defaults; the gate omitted the prior as a source so the refit re-skipped instead of resolving). **To ship:** (1) a
+correlation/precision-aware metric; (2) count the fitted prior as an identification source (so the refit resolves
+deferred nodes); (3) **re-derive the boundary rule** (currently inverted — a real bug). Then re-run ON/OFF.
 
 **B. The mature capture-scale correction (§6a #3) — the mode-flip UNBLOCKER.** Under proportional capture, the
 mature (spliced, one-sided) channel is captured at a different rate than the unspliced channel, so the mature
@@ -82,12 +83,12 @@ gates.
 ## 5. The handoff — the Phase-2 hyperprior is THE lever (measured)
 
 **The Phase-2 gDNA hyperprior** is the real under-call lever, and it is **already wired** (`calib_refit_iters`):
-on `ambig_dense_10mb`, refit=1 alone takes the pass-0 mwae **0.2030 → 0.0998 — it halves the error**
-([`solve_gate_design.md`](solve_gate_design.md) §4). Crucially it works **best with pass-0 solving every node**
-(the solve-gate deferral made it *worse*, §4-A). So pass-0's contract is simpler than §6B assumed: **solve
-honestly (imperfect-but-informative), keep it weak where the evidence is weak, and hand the prior a solved belief
-— not a deferral.** The remaining lever is improving the **hyperprior itself** (the live DNA-prior track,
-`dna_prior_session_resume.md`), plus withholding single-exon transcripts from its training (§6-J).
+on `ambig_dense_10mb`, refit=1 (with today's solve-everything pass-0) takes the mwae **0.2030 → 0.0998 — it
+halves the error**. *(Whether a properly-fixed solve-gate then does better is OPEN — the earlier "solving beats
+deferring" claim came from a broken measurement, `solve_gate_design.md` §2; it must be re-tested with the
+prior-as-source fix.)* Pass-0's contract to the prior: solve what it can, honestly **withhold** what it cannot
+(the coin-flip nodes, §4-A), and hand the prior a **fit trained on solved nodes only** (already the case —
+`_fit_gdna_hyperprior` excludes AMBIG/boundary). Plus withholding single-exon transcripts from its training (§6-J).
 
 ---
 
@@ -131,14 +132,14 @@ Before investing in §5, make the solver *trustworthy*. These are ordered by con
 
 1. **Harden first — ✅ DONE.** F (nan sweep) + G (invariant tests) + H (determinism) landed; the solver is now
    robust, principled, and bit-reproducible.
-2. ~~Finish the clean architecture — A (the solve-gate)~~ **⛔ REFUTED** (§4-A): the DOF skip regresses even with
-   the prior. "Destination decides" is retired; honest emission already prevents over-commitment.
-3. **The lever is the hyperprior** (§5) — measured to halve the pass-0 error, and it wants pass-0 to *solve*, not
-   defer. The substantive next step is improving the **hyperprior itself** (the DNA-prior track).
-4. **The pass-0 correctness/feature items** remain useful but are second-order to the hyperprior: I (discretization;
-   the AMBIG two-root — now WITHOUT a solve-gate crutch, so it needs its own stance; the wall), then B (mature
-   correction) → C (mode flip) → D (seam anchor) → E (precision merge).
-5. **Hand off** — J (single-exon holdout) + the Phase-2 hyperprior (§5), fed an honestly-*solved* pass-0.
+2. **Finish the solve-gate — A (§4-A), the current solver task.** The DOF criterion is validated for regions
+   (correlation test); to ship it needs (a) a correlation/precision-aware metric, (b) the fitted prior as an
+   identification source (so the refit *resolves* deferred nodes), and (c) a re-derived **boundary rule** (a real
+   bug — currently inverted). This is a genuine solver task, not a hyperprior task.
+3. **The correctness items** — I (discretization; the AMBIG two-root; the wall).
+4. **The feature levers** — B (mature correction) → C (mode flip) → D (seam anchor) → E (precision merge).
+5. **Then the hyperprior** (§5) — the real under-call lever, but only *after* the solver tasks: it is fed a
+   pass-0 that solves what it can and honestly withholds what it cannot.
 
 **The one rule throughout:** golden byte-identity for refactors; `gdna_none` + node-level-honesty for behavioural
 steps; the error-budget map (§3) as the scoreboard. Never land on the aggregate benchmark alone.
