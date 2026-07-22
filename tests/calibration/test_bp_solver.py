@@ -1060,3 +1060,47 @@ def test_solve_returns_coherent_coordinate_seed():
         assert np.all(f >= -1e-12) and np.all(f <= 1.0 + 1e-12)
     # the single-strand dead strand is exactly 0 (θ lock): +node has f_neg=0, −node has f_pos=0
     assert f_neg[0] == 0.0 and f_pos[1] == 0.0
+
+
+# ── Stage 2: the two extracted message-MODE helpers (message_mode_implementation_plan.md) ──────────────────
+def test_mode_shift_equals_mc_composition_fraction():
+    """``exp(_mode_shift(Mg, Mg+Mr, comp_fl))`` == the MC-validated composition fraction Mg/(Mg+Mr)
+    (chain_mode_mc._fg_from_densities) when the one-fragment floor is inactive — the shift IS §4a."""
+    from rigel.calibration.bp_solver import _mode_shift
+
+    rho_g, rho_r, egd, erd, md = 0.4, 0.6, 200.0, 150.0, 5000.0
+    Mg, Mr = rho_g * egd, rho_r * erd
+    comp_fl = 1.0 / md
+    fg_shift = np.exp(_mode_shift(Mg, Mg + Mr, comp_fl))
+    fg_mc = Mg / (Mg + Mr)  # == chain_mode_mc._fg_from_densities(rho_g, rho_r, egd, erd)
+    assert np.isclose(fg_shift, fg_mc, atol=1e-12)
+    assert comp_fl < fg_mc  # floor genuinely inactive here
+
+
+def test_mode_density_closed_form():
+    """``_mode_density(ρ, E, md)`` == log(ρ·E/md) when the one-fragment floor is inactive."""
+    from rigel.calibration.bp_solver import _mode_density
+
+    rho_c, eff_c, md = 0.4, 200.0, 5000.0
+    assert rho_c > 1.0 / eff_c  # floor inactive
+    assert np.isclose(_mode_density(rho_c, eff_c, md), np.log(rho_c * eff_c / md), atol=1e-12)
+
+
+def test_mode_helpers_finite_under_zero_and_negative_density():
+    """Domain guard (review #2): the derived one-fragment floors keep both modes FINITE even when the mature
+    subtraction drives ρ_c ≤ 0 — no NaN/−inf, and NO added epsilon."""
+    import math
+
+    from rigel.calibration.bp_solver import _mode_density, _mode_shift
+
+    egd, erd, md = 200.0, 150.0, 5000.0
+    comp_fl = 1.0 / md
+    # shift: a component whose imputed mass is 0 floors at comp_fl (log finite, = −log md)
+    assert math.isfinite(_mode_shift(0.0, 1e-9, comp_fl))
+    assert np.isclose(_mode_shift(0.0, 1e-9, comp_fl), math.log(comp_fl))
+    # density: a NEGATIVE residual density (over-absorbed mature) floors at 1/E (log finite)
+    for rho_neg_density in (-5.0, 0.0, -1e-3):
+        m = _mode_density(rho_neg_density, erd, md)
+        assert math.isfinite(m)
+        assert np.isclose(m, math.log((1.0 / erd) * erd / md))  # == floor·E/md = 1/md
+    assert math.isfinite(_mode_density(-9.9, egd, md))

@@ -30,6 +30,7 @@ lower `node_geometry` module and are re-exported here for the calibrator's conve
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -64,6 +65,12 @@ __all__ = [
 ]
 
 _EPS = 1.0e-9
+
+# TEMPORARY A/B gate for the mode flip (message_mode_implementation_plan.md Stages 4–6). Levels rolled out
+# additively so each stage isolates one edge class; `off` is byte-identical to today's exon-membership proxy.
+# TO BE DELETED in Stage 6 once the default is decided (owner directive: no lingering knobs).
+#   off → today   |   dst → + B-safe (boundary→exon)   |   src → + B-src (exon→boundary)   |   all → pure gates_equal
+_GATE_SHIFT_LEVELS = {"off": 0, "dst": 1, "src": 2, "all": 3}
 
 # THE SPLICED ABSORPTION (production): the boundary subtracts ITS OWN spliced-RNA density (``SPd[i]/ESPd[i]``,
 # the dst-face spliced) from the incoming message's RNA density and adds the DST exon's spliced (``SPs/ESPs``). A
@@ -242,6 +249,39 @@ def _compile_strand_evidence(
     )
 
 
+# ── The two message MODES (docs/calibration/message_propagation_arithmetic.md) ─────────────────────────────
+# A message conveys, per component, a target **log-fraction** ``log f_c`` in the dst frame. There are exactly two
+# ways to set it, and (Stage-1 verified, ``mode_verify.py``) the solver computes each bit-for-bit:
+#   • the composition SHIFT (§3/§4a): normalize the imputed per-component masses by their IMPUTED total ⇒ the
+#     capture scale cancels (cliff-invariant). Correct on every gate-EQUAL edge.
+#   • the DENSITY mode (§8): ÷ the dst's OBSERVED total ``md`` ⇒ the enrichment is baked in (fails across a cliff).
+#     Retained on exon / unequal-gate edges pending the gate-equality flip (message_mode_implementation_plan.md).
+# Both carry the SAME one-fragment resolution floor — a node can never be more certain than its one-fragment
+# opportunity (``comp_fl = 1/M_dst`` for the shift; ``max(ρ_c, 1/E_c)`` for the density). NOT an arbitrary epsilon;
+# it is also the domain guard that keeps ``log`` finite when the mature subtraction drives ``ρ_c ≤ 0``.
+
+
+def _mode_shift(mass_c: float, den: float, comp_fl: float) -> float:
+    """Composition-SHIFT mode ``log(max(M_c/ΣM, comp_fl))`` — cliff-invariant (§4a)."""
+    return math.log(max(mass_c / den, comp_fl))
+
+
+def _mode_density(rho_c: float, eff_c: float, md: float) -> float:
+    """DENSITY mode ``log(max(ρ_c, 1/E_c)·E_c / md)`` — observed-total anchor (§8)."""
+    return math.log(max(rho_c, 1.0 / eff_c) / (md / eff_c))
+
+
+def _pred_precision(count: float, v_log: float, s2t: float) -> float:
+    """The deconvolution-PREDICTION precision ``1 / (Var(log f) + 1/count + σ²_transfer)``
+    (emission_and_precision_derivation.md §1). It is **zero** when the composition is *unseen*
+    (``v_log = ∞`` — a no-evidence source) or there is no count — so a composition-vacuous source emits
+    ``pr→0`` and is ignored, with no emission gate and no nan (``count·∞`` is never formed). The spliced
+    MEASUREMENT precision is a separate, independent channel and does NOT pass through here (§4)."""
+    if count > 0.0 and math.isfinite(v_log):
+        return count / (count * (v_log + s2t) + 1.0)
+    return 0.0
+
+
 def node_sweep(
     chain: NodeChain,
     statics: NodeStatics,
@@ -413,6 +453,7 @@ def node_sweep(
     _rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
     _ri = np.clip(np.asarray(chain.ref_idx, dtype=np.int64), 0, _rtype.shape[0] - 1)
     is_exon_node = ((np.asarray(chain.kind) == REGION) & (_rtype[_ri] == 2)).tolist()
+    _gate_level = _GATE_SHIFT_LEVELS.get(os.environ.get("RIGEL_GATE_SHIFT", "off"), 0)  # TEMP A/B (Stage 4–6)
 
     # FORWARD-BACKWARD solve — ONE exact pass on the chain (a forest of linear paths) given the message-free
     # local beliefs + the ANCHORED global prior. (A) message-free LOCAL beliefs (one batched solve) →
@@ -552,13 +593,23 @@ def node_sweep(
             # structural lock is composition-CERTAIN (``ev=0`` ⇒ high pr, governed only by the honest
             # 1/M_src+s2t); a source with no composition evidence (``τ=0``, not locked) is gated OUT
             # (``lam_ev``/``th_ev`` False ⇒ pr=0), the phantom collapse.
+            # The composition evidence VARIANCE on λ=logit(f_g) (reference-free — never the belief variance,
+            # which pools the shared reference into a phantom; message_precision_derivation.md §2). Three states,
+            # nothing in between (emission_and_precision_derivation.md §2):
+            #   structural lock  → composition CERTAIN → variance 0
+            #   real evidence τ  → Var(log f_c) = jac²·(1/τ_λ) → finite
+            #   NO evidence τ=0  → composition UNSEEN → variance ∞ → the message carries zero composition precision
+            # Set ∞ DIRECTLY (not fr_s²·∞, which would be 0·∞=nan at the λ-window edge) — coordinate-clean and safe.
             lock_s = bool(struct_lock[lsrc])
-            lam_ev = lock_s or (tau_lam[lsrc] > _EPS)
-            ev_lam = 0.0 if lock_s else (1.0 / tau_lam[lsrc] if tau_lam[lsrc] > _EPS else 0.0)
-            th_ev = tau_th[lsrc] > _EPS
-            ev_th = (1.0 / tau_th[lsrc]) if th_ev else 0.0
-            v_logfg = fr_s * fr_s * ev_lam  # Var(log f_g) = (1−f_g)²·(1/τ_λ)
-            v_logfr = fg_s * fg_s * ev_lam  # Var(log f_r) =  f_g²·(1/τ_λ)     (RNA-total)
+            if lock_s:
+                v_logfg = v_logfr = 0.0
+            elif tau_lam[lsrc] > _EPS:
+                _ev_lam = 1.0 / tau_lam[lsrc]
+                v_logfg = fr_s * fr_s * _ev_lam  # Var(log f_g) = (1−f_g)²·(1/τ_λ)
+                v_logfr = fg_s * fg_s * _ev_lam  # Var(log f_r) =  f_g²·(1/τ_λ)     (RNA-total)
+            else:
+                v_logfg = v_logfr = math.inf
+            ev_th = (1.0 / tau_th[lsrc]) if tau_th[lsrc] > _EPS else 0.0  # θ tilt evidence (single-strand lock ⇒ 0)
             v_logfp = v_logfr + (cos_t / max(1.0 + sin_t, _EPS)) ** 2 * ev_th  # +θ term (0 for single-strand)
             v_logfn = v_logfr + (cos_t / max(1.0 - sin_t, _EPS)) ** 2 * ev_th
             if _capture is not None:
@@ -566,31 +617,35 @@ def node_sweep(
                 _pt["s2t"][i], _pt["fgs"][i], _pt["vls"][i] = s2t, fg_s, vls
                 _pt.setdefault("tau_src", np.zeros(n_nodes))[i] = tau_lam[lsrc]
                 _pt.setdefault("lock_src", np.zeros(n_nodes))[i] = 1.0 if struct_lock[lsrc] else 0.0
-            # STRUCTURAL emission gates only (per-strand `free_s` continuity + facing mass): each RNA strand
-            # flows wherever that strand is continuous on both endpoints (the mature-crossing gate was
-            # dismantled — see the `_scan` docstring; mature is reconciled by the spliced absorption instead).
-            #
-            # THE τ-GAG FIX (2026-07-21, message_system_implementation_plan.md §2/§4-B). A message has TWO
-            # independent precision channels: the DECONVOLUTION prediction (the deconvolved unspliced RNA — a
-            # count-zero-info-degraded PREDICTION whose confidence is the reference-free evidence τ) and the
-            # SPLICED MEASUREMENT (a splice-junction's motif-stranded spliced fragments — a DIRECT pure-RNA
-            # measurement whose confidence is its own count `S_eff`, `spliced_precision_status.md` §3). The
-            # τ-evidence gate correctly suppresses the PREDICTION on a composition-vacuous source (`lam_ev`/
-            # `th_ev` False ⇒ pr=0, the phantom fix) — but it MUST NOT suppress the MEASUREMENT: the spliced
-            # count is evidence in its own right, and gating it silenced 52% of splice-junction messages on
-            # unstranded data (our best RNA signal). So RNA emission also opens on spliced presence (`SPs/SNs`);
-            # the deconvolution precision below stays τ-gated, the spliced credit is added unconditionally.
-            emit_g = (sm > _EPS) and lam_ev
-            emit_p = fp[lsrc] and fp[i] and (sm > _EPS or SPs[lsrc] > _EPS) and (lam_ev or th_ev or SPs[lsrc] > _EPS)
-            emit_n = fn[lsrc] and fn[i] and (sm > _EPS or SNs[lsrc] > _EPS) and (lam_ev or th_ev or SNs[lsrc] > _EPS)
-            has_comp_ev = lam_ev or th_ev  # composition (λ/θ) evidence present ⇒ the PREDICTION channel is trusted
-            # The cliff-crossing log-odds SHIFT applies on CLEAN edges only (neither endpoint an exon region —
-            # `cliff_message_derivation.md` §7: intron/intergenic ↔ boundary, no mature), where the intron
-            # factory makes the source accurate. EXON ↔ boundary edges keep the DENSITY mode (the observed-md
-            # anchor; the ``±SPs/−absorb`` mature reconciliation rides in ``rho_pos``/``rho_neg``). §9: a
-            # composition-conserving mode on exon edges regresses — the exon floor is identifiability, not the
-            # mode; do not re-attempt it.
-            use_shift = not is_exon_node[lsrc] and not is_exon_node[i]
+            # STRUCTURAL emission only — the source ALWAYS emits (emission_and_precision_derivation.md §3). The
+            # only gates are structural: gDNA flows genomically; each RNA strand flows where that strand is
+            # CONTINUOUS (`free_s`) on both endpoints (facing mass — unspliced `sm` or spliced `SPs/SNs`). There
+            # is NO evidence gate: a composition-vacuous source (τ=0) carries ``v_log*=∞`` above ⇒ its PREDICTION
+            # precision is 0 (``_pred_precision``) ⇒ the recipient ignores it. This RETIRES the τ-gag bug class —
+            # a gate keyed on τ once silenced BOTH channels, hiding the spliced MEASUREMENT (52% of junctions on
+            # unstranded data); now the measurement is a separate channel that no gate can suppress (§4).
+            emit_g = sm > _EPS
+            emit_p = fp[lsrc] and fp[i] and (sm > _EPS or SPs[lsrc] > _EPS)
+            emit_n = fn[lsrc] and fn[i] and (sm > _EPS or SNs[lsrc] > _EPS)
+            # THE MODE PREDICATE (message_mode_implementation_plan.md). Today's default (level `off`) is the
+            # exon-membership proxy: the SHIFT on CLEAN edges (neither endpoint an exon region), the DENSITY mode
+            # (observed-md anchor; the ``±SPs/−absorb`` mature reconciliation rides in ``rho_pos``/``rho_neg``) on
+            # exon edges. The derivation's target is GATE-EQUALITY (`message_propagation_arithmetic.md` §7): the
+            # shift on every gate-equal edge, density/lower-anchor on unequal gates. The `RIGEL_GATE_SHIFT` A/B
+            # rolls that in additively per edge class (B-safe boundary→exon, then B-src exon→boundary, then all).
+            _ex_s, _ex_d = is_exon_node[lsrc], is_exon_node[i]
+            if _gate_level == 0:
+                use_shift = (not _ex_s) and (not _ex_d)  # byte-identical to today
+            else:
+                gates_equal = (fp[lsrc] == fp[i]) and (fn[lsrc] == fn[i])
+                if _gate_level >= 3:
+                    use_shift = bool(gates_equal)  # `all` → pure gate-equality (class A is empirically empty)
+                else:
+                    use_shift = (not _ex_s) and (not _ex_d)  # start from today, then turn ON gate-equal exon edges
+                    if gates_equal and _gate_level >= 1 and _ex_d and not _ex_s:  # B-safe: boundary→exon
+                        use_shift = True
+                    if gates_equal and _gate_level >= 2 and _ex_s:  # B-src: exon→boundary
+                        use_shift = True
             # ---- source per-component DENSITIES (shared by the mode AND the precision path) ----
             # ``rho_g`` = source gDNA density; ``rho_pos``/``rho_neg`` = the per-strand RNA density the source
             # imputes, carrying the FULL mature accounting (§5, BOTH directions): ``− absorb`` removes the
@@ -637,11 +692,8 @@ def node_sweep(
             lam_factors = []
             # ---- gDNA message (a factor on log f_g) ----
             if emit_g:
-                if use_shift:
-                    mo = math.log(max(Mg / _den, comp_fl))  # → dst log-f_g (the cliff-invariant shift)
-                else:
-                    mo = math.log(max(rho_g, 1.0 / egd) / (md / egd))  # → dst log-f_g frame (density)
-                pr = sm / (sm * (v_logfg + s2t) + 1.0)  # 1/(Var(log f_g) + 1/M_src + σ²_transfer)
+                mo = _mode_shift(Mg, _den, comp_fl) if use_shift else _mode_density(rho_g, egd, md)
+                pr = _pred_precision(sm, v_logfg, s2t)  # 1/(Var(log f_g) + 1/M_src + σ²_transfer); 0 if unseen
                 amg[i], apg[i] = mo, pr
                 if pr > 0.0:
                     lam_factors.append((True, mo, pr))
@@ -656,27 +708,20 @@ def node_sweep(
             # the floor's ONE count, not the source's full ``sm`` — never laundered into a confident "no RNA".
             rho_r = 0.0
             if emit_p:
-                if use_shift:
-                    mo = math.log(max(Mp / _den, comp_fl))  # → dst log-f_pos (the cliff-invariant shift)
-                else:
-                    # HYBRID keeps RNA on the PURE density mode (decoupled from the gDNA cliff correction —
-                    # density's robustness: the gDNA f_g must NOT be hostage to the error-prone mature removal).
-                    mo = math.log(max(rho_pos, 1.0 / erd) / (md / erd))  # → dst log-f_pos frame (density)
+                # HYBRID keeps RNA on the PURE density mode (decoupled from the gDNA cliff correction —
+                # density's robustness: the gDNA f_g must NOT be hostage to the error-prone mature removal).
+                mo = _mode_shift(Mp, _den, comp_fl) if use_shift else _mode_density(rho_pos, erd, md)
                 n_eff = (max(rho_pos, 0.0) * erd) if (rho_pos <= 1.0 / erd) else sm  # honest clamp
-                # PREDICTION channel (τ-gated: 0 on a composition-vacuous source — the phantom fix)
-                pr = n_eff / (n_eff * (v_logfp + s2t) + 1.0) if has_comp_ev else 0.0
+                pr = _pred_precision(n_eff, v_logfp, s2t)  # PREDICTION channel (0 on a composition-vacuous source)
                 if SPs[lsrc] > _EPS:  # MEASUREMENT channel (independent evidence — always credited)
                     pr += SPs[lsrc] / (1.0 + SPs[lsrc] * s2t)  # + spliced-fragment MEASUREMENT precision
                 amp[i], app[i] = mo, pr
                 if rho_pos > 0.0:
                     rho_r += rho_pos
             if emit_n:
-                if use_shift:
-                    mo = math.log(max(Mn / _den, comp_fl))  # → dst log-f_neg (the cliff-invariant shift)
-                else:
-                    mo = math.log(max(rho_neg, 1.0 / erd) / (md / erd))  # → dst log-f_neg frame (density)
+                mo = _mode_shift(Mn, _den, comp_fl) if use_shift else _mode_density(rho_neg, erd, md)
                 n_eff = (max(rho_neg, 0.0) * erd) if (rho_neg <= 1.0 / erd) else sm  # honest clamp
-                pr = n_eff / (n_eff * (v_logfn + s2t) + 1.0) if has_comp_ev else 0.0  # PREDICTION (τ-gated)
+                pr = _pred_precision(n_eff, v_logfn, s2t)  # PREDICTION channel (0 on a composition-vacuous source)
                 if SNs[lsrc] > _EPS:  # MEASUREMENT channel (independent evidence — always credited)
                     pr += SNs[lsrc] / (1.0 + SNs[lsrc] * s2t)  # + spliced-fragment MEASUREMENT precision
                 amn[i], apn[i] = mo, pr
@@ -686,15 +731,12 @@ def node_sweep(
             # SAME axis λ (this is what makes the pie coherent — docs §2.2).
             if rho_r > _EPS:
                 # PREDICTION channel (τ-gated) + spliced MEASUREMENT channel (independent — always)
-                pr_r = sm / (sm * (v_logfr + s2t) + 1.0) if has_comp_ev else 0.0
+                pr_r = _pred_precision(sm, v_logfr, s2t)  # PREDICTION channel (0 on a composition-vacuous source)
                 s_spl = SPs[lsrc] + SNs[lsrc]  # total spliced (motif-stranded ⇒ one term nonzero)
                 if s_spl > _EPS:
                     pr_r += s_spl / (1.0 + s_spl * s2t)  # + spliced-fragment MEASUREMENT precision
                 if pr_r > 0.0:
-                    if use_shift:
-                        mo_r = math.log(max((Mp + Mn) / _den, comp_fl))  # → dst log-f_r (the cliff-invariant shift)
-                    else:
-                        mo_r = math.log(max(rho_r, 1.0 / erd) / (md / erd))  # density (decoupled — see f_pos note)
+                    mo_r = _mode_shift(Mp + Mn, _den, comp_fl) if use_shift else _mode_density(rho_r, erd, md)
                     lam_factors.append((False, mo_r, pr_r))
             # ---- FOLD the λ-messages onto the dst's running belief (two-stage EP moment-match) ----
             if lam_factors:
@@ -720,6 +762,22 @@ def node_sweep(
                 _fgd = 1.0 / (1.0 + math.exp(-mu_lam[i]))  # dst f_g after the fold
                 _jd_g, _jd_r = (1.0 - _fgd) ** 2, _fgd * _fgd
                 tau_lam[i] += math.fsum(f[2] * (_jd_g if f[0] else _jd_r) for f in lam_factors)
+            if _capture is not None:  # inert (production _capture is None) — Stage-1 mode-verify per-edge record
+                _capture.setdefault("_edge_modes", []).append(
+                    {
+                        "src": int(lsrc), "dst": int(i), "use_shift": bool(use_shift),
+                        "ref_s": int(chain.ref_idx[lsrc]), "ref_d": int(chain.ref_idx[i]),
+                        "fp_s": bool(fp[lsrc]), "fp_d": bool(fp[i]),
+                        "fn_s": bool(fn[lsrc]), "fn_d": bool(fn[i]),
+                        "exon_s": bool(is_exon_node[lsrc]), "exon_d": bool(is_exon_node[i]),
+                        "kind_s": int(chain.kind[lsrc]), "kind_d": int(chain.kind[i]),
+                        "rho_g": float(rho_g), "rho_pos": float(rho_pos), "rho_neg": float(rho_neg),
+                        "egs": float(_eg), "ers": float(_er), "egd": float(egd), "erd": float(erd),
+                        "md": float(md), "sm": float(sm),
+                        "mode_g": float(amg[i]), "mode_p": float(amp[i]), "mode_n": float(amn[i]),
+                        "prec_g": float(apg[i]), "prec_p": float(app[i]), "prec_n": float(apn[i]),
+                    }
+                )
         if _capture is not None:
             # DIAGNOSTIC — the coherent relay pie: f_g=σ(μ_λ), f_pos/f_neg from (f_r, θ). Sums to 1, each ≤1
             # BY CONSTRUCTION (the S2 invariant). Forward scan appends [0], backward [1].
