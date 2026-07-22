@@ -11,8 +11,10 @@ full and lays out the framework for extending to every message type (the mature-
 Companions: [`gdna_intron_factory_design.md`](gdna_intron_factory_design.md) (the intron factory that supplies
 accurate source beliefs), [`background_reference_derivation.md`](background_reference_derivation.md) §3 (SCALE ×
 SHAPE: enrichment cancels in composition), [`effective_length.py`](../../src/rigel/calibration/effective_length.py)
-(the per-component eff-lengths), [`density_cliff_and_mature_absorption.md`](density_cliff_and_mature_absorption.md)
-(the mature removal, the harder extension). Prototype + validation: `scripts/debug/cliff_message_mc.py`.
+(the per-component eff-lengths), [`message_propagation_arithmetic.md`](message_propagation_arithmetic.md)
+(the consolidated, MC-validated chain derivation: this shift + the mature add/subtract, superseding the archived
+`density_cliff_and_mature_absorption.md`). Prototype + validation: `scripts/debug/cliff_message_mc.py`,
+`scripts/debug/chain_mode_mc.py`.
 
 ---
 
@@ -172,9 +174,9 @@ crossing is always gDNA + nascent, never mature. Therefore:
   to the destination RNA after the shift. *(§8.)*
 
 The mature quantity is measured by the junction's **spliced** count `S`, projected to the contained/crossing
-frame by the spliced eff-length `spliced_side_eff_length` — the geometry of
-[`density_cliff_and_mature_absorption.md`](density_cliff_and_mature_absorption.md), now layered *on top of* the
-validated shift rather than mixed into a saturating density mode.
+frame by the spliced eff-length `spliced_side_eff_length` — the mature add/subtract now **derived and
+MC-validated** in [`message_propagation_arithmetic.md`](message_propagation_arithmetic.md) §4b (C3/C4), layered
+*on top of* the validated shift rather than mixed into a saturating density mode.
 
 ---
 

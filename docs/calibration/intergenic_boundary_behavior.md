@@ -253,9 +253,190 @@ No change to current method
 Same paradigm applies bidirectionally Intron <-> Intron-Exon
 
 
-## Exon -> Intergenic-Exon
+## Intron-Exon boundary -> exon region
 
-- message dies (intergenic-exon is a pure SINK)
+## 1) do we have splice junction (yes/no)
+
+- is boundary a splice junction? if yes, is the splice direction in the same direction as the source -> destination of the message? if yes, then the boundary emits spliced density (it is a splice junction source)
+
+### 2) message content
+
+- unspliced gDNA + nascent RNA (derived from intron)
+- spliced RNA (what is the precision?)
+
+### 3) emit message
+
+compute densities:
+- spliced_density = spliced mass / splice_junction_eff_len
+- unspliced_rnapos_density = f_rna_pos * tot_unspliced_counts / rna_eff_len
+- gdna_density = f_gdna * tot_unspliced_counts / gdna_eff_len
+
+modes:
+- RNA+ = spliced_density + unspliced_rnapos_density
+- RNA- = 0 (for pos strand transcript)
+- gDNA = gdna_density
+
+#### precisions:
+
+RNA+: *this is the challenge*
+
+RNA is directly measured at the boundary. It should have "count precision", quite high.
+
+Nascent RNA is deconvolved/imputed. It has lower precision because it's levels are based on likelihood of DNA vs RNA in the intron.
+
+So we have two values with two precisions!
+
+- spliced_rna_density has count precision (directly measured)
+- nascent_rna has separate precision (based on strand balance and deconvolution precision)
+
+How do these precisions combine?
+
+If there is 0 spliced mass, then we have unspliced RNA alone
+If we have 0 unspliced RNA, then we have spliced alone
+But if we have both? Do we average the precisions? 
+
+If we have high spliced density and low nascent RNA, then the precision will approach the precision of the spliced density. If we have low spliced density and high nascent RNA, then the precision approaches the precision of the nascent RNA. 
+
+So somehow the precisions merge. How should this be done?
+
+**this is an open question**
+
+otherwise, this should address the message emission
+
+
+### 4) receive message
+
+- exon region receives message with RNA (one strand) and gDNA densities and precisions
+
+- theoretically, we should have equal gating between intron-exon boundary and exon region. same active components.
+
+- composition transfer should hold here. the exon should be able to perform composition shift using the densities it receives in the message.
+
+
+## Exon region -> Intron-exon boundary
+
+### compose message:
+
+- Exon harbors unspliced fragments only
+- Message composition is straightforward! Just unspliced densities and precisions.
+
+### receive message:
+
+Boundary receives message
+
+1) is this a splice junction boundary? if yes, is the splice junction on the correct side of the message direction? if yes, this is a splice junction sink (absorb).
+
+2) boundary <-> region gates should be compatible, same components are active
+
+3) boundary must absorb the splice junction
+
+- message rna density must be split across splice junction and unspliced fragments, this is the complexity.
+
+- if this is an enrichment cliff, does the boundary composition change? do we preserve composition? this is an open question.
+
+- the simplest solution, is to have boundary split the RNA message into spliced and unspliced in its own frame.
+
+Two equations:
+- exon message RNA density = spliced rna + unspliced rna. 
+- boundary total density = spliced rna + unspliced rna + gdna
+
+but boundary total density != exon message density!
+
+So how does the boundary node solve? we cannot simply subtract the spliced rna from the incoming message because of the enrichment cliff. 
+
+The intron-exon boundary integrates two messages:
+- message from intron (depleted)
+- message from exon (may be enriched)
+
+This is one of the most difficult nodes to solve.
+
+This requires a careful derivation. What do we already have?
+
+- We CAN solve for gDNA and nascent RNA (unspliced) using composition shift directly from the neighboring intron, that respects the enrichment cliff.
+
+- We can't use composition shift from the exon message until we have a gDNA estimate for the node. The gDNA estimate is critical. The best source of the gDNA estimate could be from the exon itself, once the gDNA hyperprior is known. The messages from the intron may be sparse, suggesting that gDNA is scared (depleted mode). It will be an imprecise gDNA estimate at best.
+
+- A gDNA estimate from the exon message will be more accurate. Composition shift can be used for gDNA assuming gates are compatible. 
+
+** IS THAT A NEW THEOREM? THAT COMPOSITION SHIFT CAN ALWAYS BE USED FOR GDNA ** If so, that is a major finding. 
+
+exon message:
+- dst_gdna_counts = src_gdna_density * dst_gdna_eff_len
+
+
+
+- Absorbing splice density using composition shift requires a gDNA estimate. 
+
+
+- handle gdna messages (both sides). how does simplex solver 
+integrate two messages (forward/backward) currently? average the densities? average the precisions?
+
+
+
+
+- spliced composition is RNA only
+- unspliced composition is (RNA + DNA)
+
+rho_spliced = rho_src_rna
+
+
+
+
+
+
+
+
+
+
+
+
+## Intergenic: nothing, intergenic is solved by definition
+## intergenic-exon boundary: defined, solved
+- include pass-0
+
+## single-stranded intron
+- ALWAYS solvable, "self solve" using strand AND/OR *NEW* density deconvolute (vs intergenic)
+- include pass-0
+
+## ambiguous (both strand) intron
+- if strand-specific data is available, can "self-solve" using BOTH density deconvolution (provides gDNA estimate) and strand tilt, making the node independently solvable.
+- if unstranded, NOT directly self-solvable (no tilt information), but can be solved by message propagation (provides RNA "tilt") without a gDNA prior, because gDNA is by definition depleted and estimated from the density alone.
+- exclude pass-0
+
+## single-stranded intron-exon boundary
+- may be enriched by hybrid capture
+- if strand-specific data, can "self solve"
+- if unstranded data, can solve by message propagation
+- include pass-0
+
+## ambiguous intron-exon boundary
+- this is a boundary that contains introns in both directions and an exon
+- if strand-specific, needs message propagation (gdna estimate) + strand -> solvable pass-0
+- unstranded: message propagation + strand (solvable)
+- gdna hyperprior can stabilize
+
+
+## single-stranded exon
+- may be enriched by hybrid capture
+- solvable pass-0
+- if strand-specific, can "self solve"
+- if unstranded, needs message propagation
+
+
+## ambiguous exon
+- may be enriched by hybrid capture
+- not solvable pass-0
+- if strand-specific, needs strand-balance + messages +/- gdna hyperprior
+- if unstranded, needs strand-balance + messages + gdna hyperprior
+
+## exon-exon boundary
+- depends on single-stranded vs ambig
+
+## single-exon transcript (TSS and TES)
+- strand-specific: self solve
+- unstranded: requires messages + gdna hyperprior
+
+
 
 
 
