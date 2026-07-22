@@ -14,6 +14,8 @@ import pytest
 
 from rigel.calibration.bp_solver import (
     node_sweep,
+    node_global_geometry,
+    _boundary_spliced_mass_increment,
 )
 from rigel.calibration.node_geometry import (
     build_node_geometry,
@@ -131,6 +133,51 @@ def test_geometry_exon_intron_exon_plus_gene():
     assert g.spliced_pos_left[4] == 0.0 and g.spliced_pos_right[4] == 77.0
     # right side is r2 (500bp): gDNA min(300,500)/2=150, RNA min(200,500)/2=100
     assert np.isclose(g.eff_gdna_right[4], 150.0) and np.isclose(g.eff_rna_right[4], 100.0)
+
+
+def test_spliced_mass_enters_the_transfer_variance_density():
+    """REGRESSION (message-passing precision): a splice-junction boundary's SPLICED (mature) mass MUST contribute
+    to the enrichment density that σ²_transfer is built on. Excluding it (the pre-2026-07-22 bug —
+    ``node_global_geometry`` counted only the unspliced crossing) put the exon flank (whose contained density
+    already carries within-exon mature) and the boundary (mature-free crossing) on ASYMMETRIC mass bases, which
+    inflated the exon-vs-boundary mode gap and made σ²_transfer GAG the reliable dense exon edge. The
+    directional fix folds the boundary's spliced DENSITY back in via ``_boundary_spliced_mass_increment``.
+
+    This guard pins the PRINCIPLE (no message-density computation may silently drop a mass channel): the
+    mature-inclusive increment is >0 exactly at a junction boundary, 0 on regions and spliceless/terminal
+    boundaries, and MONOTONE in the spliced mass. A future refactor that re-excludes the spliced channel fails
+    here — the class of bug we missed before.
+    """
+    # chain: ex+ | in+ | ex+ ; b1 (node 2) = ex→in junction spliced on the LEFT (exon) face,
+    #                           b2 (node 4) = in→ex junction spliced on the RIGHT (exon) face.
+    chain = build_node_chain(np.array([0, 3]), np.array([0, 4]))
+    L = np.array([1000.0, 2000.0, 500.0])
+    sig = np.array([BIT_EXON_POS, BIT_INTRON_POS, BIT_EXON_POS], dtype=np.int64)
+    region_arrays = SimpleNamespace(region_size_bp=L, signature=sig)
+    substrate = SimpleNamespace(contained=_view([100.0, 50.0, 80.0], [0.0, 0.0, 0.0]))
+
+    def _geom(spl_scale):
+        left = _view([0.0, 30.0, 20.0, 40.0], [0.0, 88.0 * spl_scale, 0.0, 0.0])
+        right = _view([10.0, 31.0, 22.0, 0.0], [0.0, 0.0, 77.0 * spl_scale, 0.0])
+        bsub = SimpleNamespace(
+            left=left, right=right,
+            left_region=np.array([-1, 0, 1, 2]), right_region=np.array([0, 1, 2, -1]),
+            junction_strand=np.array([0, 1, 1, 0], dtype=np.int8),
+        )
+        return build_node_geometry(chain, substrate, bsub, region_arrays, _delta_pmf(300), _delta_pmf(200))
+
+    g = _geom(1.0)
+    _, eff = node_global_geometry(chain, g)
+    incr = _boundary_spliced_mass_increment(chain, g, eff)
+
+    is_reg = np.asarray(chain.kind) == REGION
+    assert np.all(incr[is_reg] == 0.0), "regions carry no spliced mass → zero increment"
+    assert incr[2] > 0.0 and incr[4] > 0.0, "junction boundaries MUST fold their spliced mass into the density"
+    assert incr[0] == 0.0 and incr[6] == 0.0, "terminal/spliceless boundaries → zero increment"
+
+    # MONOTONE: doubling the spliced mass must RAISE the increment (the density genuinely responds to the channel)
+    incr2 = _boundary_spliced_mass_increment(chain, _geom(2.0), eff)
+    assert incr2[2] > incr[2] and incr2[4] > incr[4], "the mature-inclusive density must scale with spliced mass"
 
 
 def test_terminal_boundary_zero_off_edge():
@@ -882,18 +929,23 @@ _B1 = 2  # intron→exon junction; its right neighbour (backward src) is R1
 _B2 = 4  # exon→intron junction; its left neighbour (forward src) is R1
 
 
-def test_gate_dismantled_exon_emits_rna_into_intron():
-    """The dismantle's observable effect, asserted on the message itself (the inversion of the retired
-    `test_exon_does_not_manufacture_nascent_into_intron`). With the mature-crossing gate GONE, the two edges
-    it used to silence — backward exon R1→B1 and forward exon R1→B2 — now carry a non-zero +RNA message (the
-    exon's own unspliced RNA density is structurally continuous into its flanking introns). This FAILS on the
-    gated code (both were pinned to 0.0), so it is a real falsifier that the gate is truly dismantled, and it
-    STAYS true after the nascent factory lands (nascent still flows exon→intron, only with mature subtracted).
-    The magnitude of this leak is the known, accepted regression tracked by
-    `test_mature_no_nascent_hallucination_in_introns`."""
+def test_geomode_suppresses_exon_unspliced_rna_into_boundary():
+    """The GEO-MODE supersedes the mature-gate dismantle at splice-junction boundaries (docs §14). The dismantle
+    let the exon emit its own unspliced RNA directly into the flanking introns — but the exon's unspliced RNA is
+    dominated by within-exon MATURE (never crosses the junction unspliced), so importing it as the boundary's
+    nascent crushes f_g (the §9 mature-contamination under-call). The geo-mode instead SUPPRESSES the exon→boundary
+    unspliced-RNA import (change 1) and makes the boundary's nascent the RESIDUAL of its own mature-free crossing.
+    So the two edges the dismantle re-opened — backward exon R1→B1, forward exon R1→B2 — are now pinned to 0.0
+    again (the exon region carries no spliced, so nothing survives the suppression). Nascent still reaches the
+    intron: from the MATURE-FREE INTRON flank (guarded by `test_intron_relays_nascent_into_exon_both_directions`),
+    which the geo-mode leaves untouched. This is the design-tension resolution recorded in
+    `docs/calibration/boundary_rule_rederivation.md` §14 (change 1 is load-bearing; interrogation 1)."""
     _, cap = _sweep(_mature_exon_chain(spliced=True))
-    assert cap["b_bwd"][_APP][_B1] > 0.0, cap["b_bwd"][_APP][_B1]  # backward exon R1 → B1 now fires
-    assert cap["a_fwd"][_APP][_B2] > 0.0, cap["a_fwd"][_APP][_B2]  # forward  exon R1 → B2 now fires
+    assert cap["b_bwd"][_APP][_B1] == 0.0, cap["b_bwd"][_APP][_B1]  # exon R1 → B1 unspliced-RNA import SUPPRESSED
+    assert cap["a_fwd"][_APP][_B2] == 0.0, cap["a_fwd"][_APP][_B2]  # exon R1 → B2 unspliced-RNA import SUPPRESSED
+    # the mature-free INTRON flank still relays nascent into the boundary (nascent = residual is fed from there)
+    assert cap["a_fwd"][_APP][_B1] > 0.0, cap["a_fwd"][_APP][_B1]  # intron R0 → B1 still fires
+    assert cap["b_bwd"][_APP][_B2] > 0.0, cap["b_bwd"][_APP][_B2]  # intron R2 → B2 still fires
 
 
 def test_intron_relays_nascent_into_exon_both_directions():

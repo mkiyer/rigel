@@ -52,6 +52,15 @@ regressing the `gdna_none` phantom guard**, the hard gate.
 
 ## 4. Remaining feature work (each derive → plan → stage, A/B-gated)
 
+> **BOUNDARY MODE — LANDED (2026-07-22, `boundary_rule_rederivation.md`).** The whole boundary/σ²_transfer/mode
+> thread below (items A boundary-rule, B, C) is **superseded** by two shipped fixes: **Fix #1** the directional
+> spliced-density σ²_transfer (§12–13 there — the precision bug: spliced excluded from the transfer variance) and
+> **Fix #2** the geo-mean cliff-interpolated mature-free crossing mode (§14 — count-legal, zero constants). The
+> antisense-intronic leak is fixed; boundary corr 0.105→0.233. The mature-gate-dismantle's exon→intron *direct*
+> nascent emission is superseded by the residual relay (change 1). **RETIRED:** `RIGEL_GATE_SHIFT` (the mode-flip
+> A/B — the geo-mode owns boundary edges now). **NEW open item (item L below):** the **nascent≫mature** over-call
+> (the unstranded identifiability floor, not the boundary mode) — the quintuple grid is its regression harness.
+
 **A. The solve-gate (§6B). ACTIVE — validated for regions; boundary rule + metric to fix**
 ([`solve_gate_design.md`](solve_gate_design.md)). A node-type CORRELATION test (not the mass-weighted-error
 metric, which wrongly counts withheld nodes' arbitrary default) confirms: the DOF criterion is **correct for
@@ -77,6 +86,15 @@ never the crushing density point-estimate. Needs the ψ form (half-quadratic / h
 *mode* (both-strand density) and its *precision* (a +spliced measurement) have different provenances — decoupling
 was right, but the principled merge is open. Plus C4 conditioning (mature≫nascent) and `σ²_transfer` at unequal
 gates.
+
+**L. The nascent≫mature over-call (NEW — the next investigation).** On unstranded data, when nascent RNA far
+outweighs mature, the solver **over-calls gDNA** (middle-exon f_g 0.81 vs oracle 0.31; 0.69 vs 0.05 near zero
+gDNA — `boundary_rule_rederivation.md` §14 interrogation 2). Nascent is unspliced ⇒ locally indistinguishable
+from gDNA; the only RNA proof is the scarce spliced/mature. This is the **unstranded identifiability floor**, NOT
+the boundary mode (the geo-mode gives identical results). The lever: the **intron→exon nascent relay** (the
+quintuple `intron ↔ IE ↔ exon ↔ EI ↔ intron` — the introns are transcribed and well-defined; the exon is a relay
+whose gDNA is imputed) or the global gDNA prior. Regression harness: `scripts/debug/quintuple_grid.py` (sweep
+gDNA × nascent × mature; the solver must "just work" across the grid).
 
 ---
 

@@ -30,7 +30,6 @@ lower `node_geometry` module and are re-exported here for the calibrator's conve
 from __future__ import annotations
 
 import math
-import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -65,12 +64,6 @@ __all__ = [
 ]
 
 _EPS = 1.0e-9
-
-# TEMPORARY A/B gate for the mode flip (message_mode_implementation_plan.md Stages 4–6). Levels rolled out
-# additively so each stage isolates one edge class; `off` is byte-identical to today's exon-membership proxy.
-# TO BE DELETED in Stage 6 once the default is decided (owner directive: no lingering knobs).
-#   off → today   |   dst → + B-safe (boundary→exon)   |   src → + B-src (exon→boundary)   |   all → pure gates_equal
-_GATE_SHIFT_LEVELS = {"off": 0, "dst": 1, "src": 2, "all": 3}
 
 # THE SPLICED ABSORPTION (production): the boundary subtracts ITS OWN spliced-RNA density (``SPd[i]/ESPd[i]``,
 # the dst-face spliced) from the incoming message's RNA density and adds the DST exon's spliced (``SPs/ESPs``). A
@@ -189,6 +182,18 @@ def node_global_geometry(chain: NodeChain, geometry: NodeGeometry):
     mass = np.where(is_reg, msl, msl + msr)
     eff = np.where(is_reg, egl, egl + egr)
     return mass, eff
+
+
+def _boundary_spliced_mass_increment(chain, geometry, eff):
+    """The mature-INCLUSIVE mass increment for boundaries (0 on regions): fold the boundary's spliced (mature)
+    density ``ρ_spl = Σ_side spl_side/E_spl_side`` (per-frame, NOT raw mass — the composition-conditional trap)
+    into an equivalent unspliced-frame mass ``ρ_spl·eff``. Used ONLY on the exon↔boundary σ²_transfer edge, where
+    the exon flank's contained density already carries within-exon mature (`bp_solver` directional σ²_T)."""
+    is_bnd = np.asarray(chain.kind) != REGION
+    spl_l = np.asarray(geometry.spliced_pos_left, np.float64) + np.asarray(geometry.spliced_neg_left, np.float64)
+    spl_r = np.asarray(geometry.spliced_pos_right, np.float64) + np.asarray(geometry.spliced_neg_right, np.float64)
+    rho_spl = spl_l / np.maximum(geometry.eff_spl_left, _EPS) + spl_r / np.maximum(geometry.eff_spl_right, _EPS)
+    return np.where(is_bnd, rho_spl * eff, 0.0)
 
 
 @dataclass(frozen=True)
@@ -439,6 +444,18 @@ def node_sweep(
     else:
         mu_proj = np.zeros_like(mass_global)
         var_proj = np.zeros_like(mass_global)
+    # DIRECTIONAL spliced-density σ²_transfer: a mature-INCLUSIVE boundary projection, selected per-edge (in
+    # ``_scan``) ONLY on the exon↔boundary edge — where the exon endpoint's contained density already carries
+    # within-exon mature (unspliced, no junction). Without it the exon-vs-boundary mode gap is inflated by the
+    # mature-inclusion asymmetry (the boundary crossing is mature-free) and σ²_transfer GAGS the reliable dense
+    # exon edge. The intron↔boundary edge stays mature-FREE (the intron has no mature) — hence per-EDGE, not
+    # per-node. Fit-basis note: the enrichment NPMLE is fit on the bare density; this mature-inclusive projection
+    # only re-reads the exon-facing boundary onto that landscape (a higher density → a mode nearer the exon's).
+    if transfer_variance and proj_prior is not None:
+        _mass_mat = mass_global + _boundary_spliced_mass_increment(chain, geometry, eff_global)
+        mu_proj_mat, var_proj_mat = proj_prior.project(_mass_mat, eff_global)
+    else:
+        mu_proj_mat, var_proj_mat = mu_proj, var_proj
 
     # Genomic node order for the forward/backward scans (within each ref path; left/right break at −1). The
     # scans are sequential per node, so iterate as a Python list of ints (faster than numpy scalar indexing).
@@ -453,7 +470,7 @@ def node_sweep(
     _rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
     _ri = np.clip(np.asarray(chain.ref_idx, dtype=np.int64), 0, _rtype.shape[0] - 1)
     is_exon_node = ((np.asarray(chain.kind) == REGION) & (_rtype[_ri] == 2)).tolist()
-    _gate_level = _GATE_SHIFT_LEVELS.get(os.environ.get("RIGEL_GATE_SHIFT", "off"), 0)  # TEMP A/B (Stage 4–6)
+    _is_bnd = (np.asarray(chain.kind) != REGION).tolist()  # boundary-dst edges: geo-mean crossing + density frame
 
     # FORWARD-BACKWARD solve — ONE exact pass on the chain (a forest of linear paths) given the message-free
     # local beliefs + the ANCHORED global prior. (A) message-free LOCAL beliefs (one batched solve) →
@@ -500,6 +517,26 @@ def node_sweep(
     )
     lam_loc = np.where(locked, lam_locked, lam_loc)
     lvar_loc = np.where(locked, 0.0, lvar_loc)
+
+    # --- GEO-MEAN crossing gDNA density (derive-boundary-mode workflow, docs §14) ---
+    # A splice-junction exon-intron boundary's UNSPLICED crossing is gDNA + nascent, MATURE-FREE. Its gDNA
+    # density is NOT the enriched exon flank's (mature-contaminated + anti-correlated with truth under the
+    # unstranded hedge) nor the depleted intron's, but the log-MIDPOINT of the two — capture enrichment is
+    # multiplicative, so the partial-capture crossing sits at the GEOMETRIC MEAN of its flank gDNA densities.
+    # Precomputed per boundary from the flank LOCAL beliefs (regions resolve well locally); the boundary then
+    # decodes f_g in its own mature-free crossing frame (nascent = residual), never importing a flank scale
+    # across the cliff (which over-imputes non-monotonically — probe placement makes the scale unfixable). ZERO
+    # free constants. The boundary uses ``rho_g_cross`` as its gDNA density in the density-mode decode (`_scan`).
+    _is_reg_arr = np.asarray(chain.kind) == REGION
+    _rho_g_reg = np.where(_is_reg_arr, fg_loc * MS[0] / np.maximum(EG[0], _EPS), 0.0)  # flank contained gDNA density
+    _lft, _rgt = np.asarray(chain.left), np.asarray(chain.right)
+    _gl = np.where(_lft >= 0, _rho_g_reg[np.clip(_lft, 0, None)], 0.0)  # left-flank gDNA density (0 at a terminal)
+    _gr = np.where(_rgt >= 0, _rho_g_reg[np.clip(_rgt, 0, None)], 0.0)
+    rho_g_cross = np.where(  # geo-mean of both flanks; single-flank fallback where one carries no gDNA
+        ~_is_reg_arr,
+        np.where((_gl > 0.0) & (_gr > 0.0), np.sqrt(_gl * _gr), np.maximum(_gl, _gr)),
+        0.0,
+    )
 
     # ---- the reference-free composition evidence (StrandEvidence) ----
     # I_strand (the differential-κ deadband Fisher info — 0 on unstranded, the real phantom fix) + I_struct
@@ -579,7 +616,15 @@ def node_sweep(
             # belief-free message transfer variance for THIS edge (src=lsrc → dst=i): the enrichment-crossing
             # damping (F1). Shared by every component (capture is nucleic-acid-agnostic ⇒ the crossing is a
             # discontinuity in gDNA AND RNA at pass-0). 0 when the projection is off.
-            s2t = var_proj[i] + (mu_proj[i] - mu_proj[lsrc]) ** 2
+            # DIRECTIONAL spliced-density σ²_transfer: use the mature-INCLUSIVE boundary projection on an
+            # exon↔boundary edge only (a boundary endpoint whose OTHER endpoint is an exon region);
+            # intron↔boundary stays mature-free. mu_proj_mat == mu_proj when there is no projection ⇒ no-op there.
+            _dst_mat = _is_bnd[i] and is_exon_node[lsrc]
+            _src_mat = _is_bnd[lsrc] and is_exon_node[i]
+            _mu_d = mu_proj_mat[i] if _dst_mat else mu_proj[i]
+            _mu_s = mu_proj_mat[lsrc] if _src_mat else mu_proj[lsrc]
+            _var_d = var_proj_mat[i] if _dst_mat else var_proj[i]
+            s2t = _var_d + (_mu_d - _mu_s) ** 2
             # source COHERENT fractions from its (λ,θ) belief (the MODE; the belief is still the point
             # estimate). ``vls`` kept for the diagnostic capture.
             ls, vls = mu_lam[lsrc], var_lam[lsrc]
@@ -627,25 +672,14 @@ def node_sweep(
             emit_g = sm > _EPS
             emit_p = fp[lsrc] and fp[i] and (sm > _EPS or SPs[lsrc] > _EPS)
             emit_n = fn[lsrc] and fn[i] and (sm > _EPS or SNs[lsrc] > _EPS)
-            # THE MODE PREDICATE (message_mode_implementation_plan.md). Today's default (level `off`) is the
-            # exon-membership proxy: the SHIFT on CLEAN edges (neither endpoint an exon region), the DENSITY mode
+            # THE MODE PREDICATE (message_propagation_arithmetic.md §4/§7). The eff-length-frame log-odds SHIFT on
+            # CLEAN edges (neither endpoint an exon region — the cliff is invariant there); the DENSITY mode
             # (observed-md anchor; the ``±SPs/−absorb`` mature reconciliation rides in ``rho_pos``/``rho_neg``) on
-            # exon edges. The derivation's target is GATE-EQUALITY (`message_propagation_arithmetic.md` §7): the
-            # shift on every gate-equal edge, density/lower-anchor on unequal gates. The `RIGEL_GATE_SHIFT` A/B
-            # rolls that in additively per edge class (B-safe boundary→exon, then B-src exon→boundary, then all).
+            # exon edges, where a composition-conserving shift over-trusts the unstranded exon (§9). Every
+            # boundary-dst edge uses the density frame — its gDNA is the geo-mean crossing decode (docs §14),
+            # decoded in the boundary's OWN mature-free crossing frame (nascent = residual).
             _ex_s, _ex_d = is_exon_node[lsrc], is_exon_node[i]
-            if _gate_level == 0:
-                use_shift = (not _ex_s) and (not _ex_d)  # byte-identical to today
-            else:
-                gates_equal = (fp[lsrc] == fp[i]) and (fn[lsrc] == fn[i])
-                if _gate_level >= 3:
-                    use_shift = bool(gates_equal)  # `all` → pure gate-equality (class A is empirically empty)
-                else:
-                    use_shift = (not _ex_s) and (not _ex_d)  # start from today, then turn ON gate-equal exon edges
-                    if gates_equal and _gate_level >= 1 and _ex_d and not _ex_s:  # B-safe: boundary→exon
-                        use_shift = True
-                    if gates_equal and _gate_level >= 2 and _ex_s:  # B-src: exon→boundary
-                        use_shift = True
+            use_shift = (not _ex_s) and (not _ex_d) and not _is_bnd[i]
             # ---- source per-component DENSITIES (shared by the mode AND the precision path) ----
             # ``rho_g`` = source gDNA density; ``rho_pos``/``rho_neg`` = the per-strand RNA density the source
             # imputes, carrying the FULL mature accounting (§5, BOTH directions): ``− absorb`` removes the
@@ -663,6 +697,20 @@ def node_sweep(
             absorb_n = SNd[i] / _espd
             rho_pos = fp_s * sm / _er + SPs[lsrc] / _esp - absorb_p  # +SPs/esp = the DST exon's mature (added)
             rho_neg = fn_s * sm / _er + SNs[lsrc] / _esp - absorb_n
+            if _is_bnd[i]:
+                # (2) the crossing gDNA is the GEO-MEAN of both flanks (not this one source flank's scale).
+                if rho_g_cross[i] > 0.0:
+                    rho_g = rho_g_cross[i]
+                # (1) SUPPRESS the mature-contaminated exon UNSPLICED-RNA import (§9): the exon flank's
+                # ``fp_s·sm/_er`` is dominated by within-exon MATURE (never crosses the junction unspliced), so
+                # importing it as the boundary's nascent crushes f_g. Drop it ⇒ nascent = RESIDUAL of the
+                # boundary's own mature-free crossing. KEEP the spliced MEASUREMENT (``SPs/_esp``, a real mature-
+                # RNA count) and the mature absorption. The intron flank (mature-free) keeps its clean nascent —
+                # nascent still reaches the intron via the boundary's residual relay (docs §14; supersedes the
+                # exon's DIRECT emission the mature-gate dismantle assumed). Load-bearing: (2) alone regresses.
+                if _ex_s:
+                    rho_pos = SPs[lsrc] / _esp - absorb_p
+                    rho_neg = SNs[lsrc] / _esp - absorb_n
             # ---- the cliff-crossing LOG-ODDS SHIFT (cliff_message_derivation.md §3) ----
             # Impute the dst's f_c as the source COMPOSITION: the per-component imputed MASS ``M_c = ρ_c^src ·
             # E_c^dst``, normalized by the IMPUTED total ``ΣM``. Equivalent to the log-odds shift
@@ -774,6 +822,11 @@ def node_sweep(
                         "rho_g": float(rho_g), "rho_pos": float(rho_pos), "rho_neg": float(rho_neg),
                         "egs": float(_eg), "ers": float(_er), "egd": float(egd), "erd": float(erd),
                         "md": float(md), "sm": float(sm),
+                        # DIAGNOSTIC (inert): the decomposed RNA density terms for the boundary RNA-imputation trace
+                        "rna_src": float((fp_s + fn_s) * sm / _er),   # source RNA density (nascent + within-exon mature)
+                        "mat_abs": float((SPd[i] + SNd[i]) / _espd),  # boundary junction-mature density (absorbed)
+                        "mat_add": float((SPs[lsrc] + SNs[lsrc]) / _esp),  # source-face mature added
+                        "esp_s": float(_esp), "esp_d": float(_espd), "fr_s": float(fr_s),
                         "mode_g": float(amg[i]), "mode_p": float(amp[i]), "mode_n": float(amn[i]),
                         "prec_g": float(apg[i]), "prec_p": float(app[i]), "prec_n": float(apn[i]),
                     }
@@ -881,6 +934,12 @@ def node_sweep(
             # replay _solve_nodes_logodds_all with message channels ablated (message help/hurt attribution).
             global_lp=global_lp,
             solve_grid=solve_grid,
+            # DIAGNOSTIC (inert in production): the composition-evidence seed + the bare enrichment projection
+            # (mu_proj, var_proj) that σ²_transfer = var_proj[dst]+(mu_proj[dst]−mu_proj[src])² is built from, so a
+            # diagnostic can recompute per-flank σ²_transfer + the DOF verdict offline (boundary-rule tooling).
+            _tau0_lam=tau0_lam,
+            _mu_proj=mu_proj,
+            _var_proj=var_proj,
         )
 
     return NodeBelief(
