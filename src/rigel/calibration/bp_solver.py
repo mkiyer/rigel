@@ -810,7 +810,10 @@ def node_sweep(
     dc_fin = _local_solve(global_lp, mode_g, prec_g, (mode_p, mode_n), (prec_p, prec_n))
     mg_, mp_, mn_ = dc_fin.gdna_frac, dc_fin.rna_pos_frac, dc_fin.rna_neg_frac
     vg_, vp_, vn_ = dc_fin.gdna_frac_var, dc_fin.rna_pos_frac_var, dc_fin.rna_neg_frac_var
-    # write back only SOLVABLE nodes (G1 sinks / empty keep their signature-binary init).
+    # write back only SOLVABLE nodes (G1 sinks / empty keep their signature-binary init). The §6B DOF SOLVE-GATE
+    # (skip unidentified nodes → keep the f_g=1 init, defer to the prior) was DERIVED, IMPLEMENTED, and
+    # EMPIRICALLY REFUTED (solve_gate_design.md): it regresses both standalone (refit=0 +0.010) and with the
+    # hyperprior (refit=1 +0.025) — the prior resolves an imperfectly-SOLVED node better than a deferred f_g=1.
     f_g = np.where(solvable, np.clip(mg_, 0.0, 1.0), f_g)
     f_pos = np.where(solvable, np.clip(mp_, 0.0, 1.0), f_pos)
     f_neg = np.where(solvable, np.clip(mn_, 0.0, 1.0), f_neg)

@@ -278,13 +278,14 @@ specific axes:
   so `λ` is unconstrained ⇒ **needs a second source** (a gDNA message or the prior). (*"strand needs additional
   info for 2-DOF"* — precisely the AMBIG two-root ambiguity, `CALIBRATION_MASTER.md` §4.)
 
-**⟹ THE SKIP RULE (Phase C).** *A node skips its pass-0 solve iff any free axis (`λ`; and `θ` for AMBIG) has zero
-total precision from {strand, messages, prior}.* Skipping keeps the signature-binary init (`f_g=1`, max variance,
-`CALIBRATION_ARCHITECTURE.md` §3) — the honest "gDNA-present, level-unknown" default — so the prior moves it in
-Phase 2 without a pass-0 phantom to fight (§9). This is the elegant, DOF-derived form of the owner's
-"don't perturb an unidentifiable node." It shares the identifiability compiler with the message precision (one
-`Evidence` object, two consumers — the solve gate and the send precision), which is the Phase-A `StrandEvidence`
-extraction.
+**⟹ THE SKIP RULE (Phase C) — ⛔ REFUTED (2026-07-21), see [`solve_gate_design.md`](solve_gate_design.md).**
+*(Original proposal:)* a node skips its pass-0 solve iff any free axis (`λ`; and `θ` for AMBIG) has zero total
+precision from {strand, messages, prior}; skipping keeps the signature-binary init (`f_g=1`, max variance) so the
+prior moves it in Phase 2 without a pass-0 phantom. **This was implemented and measured, and the premise is
+empirically false:** deferring to `f_g=1` regresses `gdna_none` both standalone and *with* the hyperprior — the
+prior resolves an imperfectly-**solved** node (which carries the observed density) far better than a deferred
+all-gDNA init. The DOF criterion is a correct *description* of identifiability, but the **skip** action is wrong:
+pass-0 should solve every strand+mass node and hand the prior a solved belief. "Destination decides" is retired.
 
 ---
 
