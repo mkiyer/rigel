@@ -174,3 +174,51 @@ trustworthy where it is confident and honestly weak where it is not.
 
 **The one rule throughout:** golden byte-identity for refactors; `gdna_none` + node-level-honesty for behavioural
 steps; the error-budget map (§3) as the scoreboard. Never land on the aggregate benchmark alone.
+
+---
+
+## 8. CONSOLIDATED ROADMAP (2026-07-22) — supersedes §7 sequencing
+
+§7's ship path was written before the message-arithmetic thread. That thread was not a digression: it found
+that pass-0's **mode** arithmetic was structurally wrong across the capture cliff, which is the root cause of
+the unstranded+capture-ON failure §7 was trying to route around. This section is the complete open set.
+
+### 8.1 Landed this session
+* **Toolkit** — `injected_priors` hook in `calibrate` (population priors: κ, strand overdispersions, noise-floor
+  sample sizes, enrichment NPMLE, intron background, ρ_bg) + `scripts/debug/toy_inject.py` + the FULL-TRANSCRIPT
+  toy (intergenic-TSS-exon-intron-exon-intron-exon-TES-intergenic). Injection verified byte-identical.
+  *A tiny toy cannot fit these priors — this is what makes toy results trustworthy at all.*
+* **intron ↔ IE-boundary** → composition invariance (shift). Identical active components (gDNA+nascent).
+* **exon ↔ IE-boundary** → shift ± `c_b`, `c_b = log(1+S_B/D_B)` (`exon_boundary_mature_dilution_plan.md`).
+  Enrichment-invariant, zero constants, validated on 22 toy cells (premise `mature-cross=0.000` universal).
+
+### 8.2 Message-arithmetic reconciliation (`message_arithmetic_reconciliation.md`) — ACTIVE
+| # | item | status |
+|---|---|---|
+| R1 | **MASS→COUNT**: `n_unspl_left/right` plumbed into `NodeGeometry`; `_pred_precision` uses integer counts. | ✅ **LANDED** (phantom-neutral) |
+| R2 | **Decouple the spliced MEASUREMENT channel from σ²_transfer**. ⛔ **BLOCKED on E** — measured +49 % `gdna_none` phantom: `pr += S` attaches MEASUREMENT confidence to the PREDICTION's mode, which mature-absorption clamps to ~0 ⇒ confident "no RNA". Needs the measurement to carry its OWN mode first. | blocked |
+| R3 | **Retire `rho_g_cross`** (unweighted pre-scan geo-mean). | ✅ **LANDED** — measured INERT (byte-identical on the phantom guard, the toy, and all suites): once both exon↔boundary directions carry real messages its only remaining destinations were structurally-pinned seams. |
+| R4 | **Neutralize the σ²_transfer cliff term** `(μ_dst−μ_src)²` — a proxy for a mode that is now correct; measured to throttle the corrected messages to prec≈0.03. **Behind a switch; per-condition A/B on STRANDED and UNSTRANDED arms** (it currently protects stranded data). | the big lever |
+| R5 | **Measure residual disagreement** after R1–R4; decide whether ANY replacement damping is warranted. | after R4 |
+| R6 | **Seam mode derivations**: TSS/TES (intergenic↔exon) and exon–exon AMBIG. Components differ by RNA *presence*, not mature. **Completing R6 is what allows the DENSITY MODE to be retired entirely.** | last mode item |
+
+### 8.3 Remaining pass-0 items (carried forward)
+* **A′. Solve-gate, reframed.** "Always emit" is implemented. The node-side gate is NOT: the refuted DOF gate
+  kept the `f_g=1` init (an all-gDNA lock). The intended paradigm is an **honest precision-0 state** for
+  unidentified nodes, which the gDNA hyperprior later resolves. Materially different from what was refuted;
+  needs derivation + implementation + the hyperprior handoff contract.
+* **E. Precision prediction⊕measurement merge** (§4-E). **PROMOTED — now a PREREQUISITE for R2** (the
+  measurement needs its own mode before its precision can be undamped; measured +49 % phantom otherwise).
+* **L. nascent≫mature over-call** — may be substantially addressed by the mode fixes; **re-measure** on the
+  grounded toy before treating it as open.
+* **Depletion bias** (probe-attenuated junctions): bounded (~0.053 f_g at 4× depletion), one-sided, contained by
+  the intron-side anchor. NOT fixable by any precision term (it is a mode bias). Real fix = cross-junction
+  consistency detector (a transcript's junctions share one mature abundance) — non-local; follow-up.
+
+### 8.4 Standing gates (every behavioural stage)
+`msg_audit` direction · mature-dilution identity test · **`gdna_none` phantom guard (hard)** · calibration
+suite · **benchmark A/B per-condition (stranded AND unstranded)** · goldens regenerated LAST, only after A/B review.
+
+### 8.5 Ship criterion (unchanged)
+Pass-0 is HONEST: never confident-wrong, weak where unidentifiable, `gdna_none` guard held. The gDNA hyperprior
+owns the residual identifiability floor.

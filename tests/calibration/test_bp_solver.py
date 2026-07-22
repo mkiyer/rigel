@@ -53,6 +53,9 @@ def _view(mass_u, mass_spl):
         n_spliced_antisense=z.copy(),
         mass_unspliced=np.asarray(mass_u, float),
         mass_spliced=np.asarray(mass_spl, float),
+        # the integer unspliced flux the real view exposes as a property; these doubles use the
+        # one-fragment-per-unit-mass convention so the Poisson message precision is exercised.
+        n_unspliced=np.asarray(mass_u, float),
     )
 
 
@@ -69,6 +72,7 @@ def _cview(n_pos, n_neg, spl_sense=None, mass_u=None, mass_spl=None):
         n_spliced_antisense=np.zeros(n),
         mass_unspliced=(n_pos + n_neg) if mass_u is None else np.asarray(mass_u, float),
         mass_spliced=spl if mass_spl is None else np.asarray(mass_spl, float),
+        n_unspliced=n_pos + n_neg,  # the real view's property: integer unspliced flux
     )
 
 

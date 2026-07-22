@@ -108,6 +108,9 @@ def run(name, genes, *, kappa=1.0, n_rna=4000, gdna_fraction=0.5, capture=False,
             calmod.node_sweep = _orig
     else:
         cal = calibrate(pl, ra, sm, fl.gdna_pmf, fl.rna_pmf, config or CalibrationConfig(), _debug=_debug)
+    if _debug is not None:  # expose the node chain to callers (calibrate already stashes _debug["capture"])
+        from rigel.calibration.node_chain import build_node_chain
+        _debug["chain"] = build_node_chain(pl.ref_region_offsets, pl.ref_boundary_offsets)
     gc = np.asarray(cal.mass_gdna_contained); rc = np.asarray(cal.mass_rna_contained)
     solved = np.where((gc + rc) > 0, gc / np.maximum(gc + rc, 1e-9), np.nan)
     truth, tg, tr = _truth_fg(result.bam_path, ra, idx.ref_names)

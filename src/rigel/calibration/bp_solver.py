@@ -362,8 +362,15 @@ def node_sweep(
     ER = (geometry.eff_rna_left, geometry.eff_rna_right)
     ESP = (geometry.eff_spl_left, geometry.eff_spl_right)  # one-sided spliced half-triangle eff-len
     MS = (geometry.mass_left, geometry.mass_right)
+    # integer unspliced flux per face — the Poisson n for message PRECISION (mass is the density numerator
+    # only; it is fractional AND split across nodes by the accumulator, so 1/mass is not a counting variance).
+    MSN = (geometry.n_unspl_left, geometry.n_unspl_right)
     SP = (geometry.spliced_pos_left, geometry.spliced_pos_right)
     SN = (geometry.spliced_neg_left, geometry.spliced_neg_right)
+    # integer spliced COUNT (flux) — MASS is the density numerator, COUNT is what a Poisson VARIANCE needs
+    # (`Var(log ρ_m)=1/n`, not `1/mass`; node_geometry §spliced_n_*). Consumed by the mature-dilution variance.
+    SPN = (geometry.spliced_n_pos_left, geometry.spliced_n_pos_right)
+    SNN = (geometry.spliced_n_neg_left, geometry.spliced_n_neg_right)
     # per-node "global" gDNA support (region = contained; boundary = both-side crossing over the averaged
     # per-side density length) — the basis the pass-0 rate prior is fit + projected on.
     mass_global, eff_global = node_global_geometry(chain, geometry)
@@ -470,6 +477,7 @@ def node_sweep(
     _rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
     _ri = np.clip(np.asarray(chain.ref_idx, dtype=np.int64), 0, _rtype.shape[0] - 1)
     is_exon_node = ((np.asarray(chain.kind) == REGION) & (_rtype[_ri] == 2)).tolist()
+    is_intron_node = ((np.asarray(chain.kind) == REGION) & (_rtype[_ri] == 1)).tolist()  # INTRON == 1
     _is_bnd = (np.asarray(chain.kind) != REGION).tolist()  # boundary-dst edges: geo-mean crossing + density frame
 
     # FORWARD-BACKWARD solve — ONE exact pass on the chain (a forest of linear paths) given the message-free
@@ -518,23 +526,43 @@ def node_sweep(
     lam_loc = np.where(locked, lam_locked, lam_loc)
     lvar_loc = np.where(locked, 0.0, lvar_loc)
 
-    # --- GEO-MEAN crossing gDNA density (derive-boundary-mode workflow, docs §14) ---
-    # A splice-junction exon-intron boundary's UNSPLICED crossing is gDNA + nascent, MATURE-FREE. Its gDNA
-    # density is NOT the enriched exon flank's (mature-contaminated + anti-correlated with truth under the
-    # unstranded hedge) nor the depleted intron's, but the log-MIDPOINT of the two — capture enrichment is
-    # multiplicative, so the partial-capture crossing sits at the GEOMETRIC MEAN of its flank gDNA densities.
-    # Precomputed per boundary from the flank LOCAL beliefs (regions resolve well locally); the boundary then
-    # decodes f_g in its own mature-free crossing frame (nascent = residual), never importing a flank scale
-    # across the cliff (which over-imputes non-monotonically — probe placement makes the scale unfixable). ZERO
-    # free constants. The boundary uses ``rho_g_cross`` as its gDNA density in the density-mode decode (`_scan`).
+    # The §14 GEO-MEAN crossing decode (`rho_g_cross = sqrt(rho_g^exon * rho_g^intron)`) was RETIRED here
+    # (roadmap R3). It was an unweighted, pre-scan stand-in for the MISSING exon->boundary imputation and it
+    # bypassed the precision machinery entirely. Both exon<->boundary directions now carry real,
+    # precision-bearing messages (shift +/- c_b), and the alpha-beta integrator -- already a
+    # precision-weighted GEOMETRIC mean -- reconciles a boundary's two flanks properly. Removal measured
+    # INERT: byte-identical on the gdna_none phantom guard (9 scenarios), the grounded full-transcript toy,
+    # and the calibration/native/golden suites, because its only remaining destinations were structurally
+    # pinned seams.
     _is_reg_arr = np.asarray(chain.kind) == REGION
-    _rho_g_reg = np.where(_is_reg_arr, fg_loc * MS[0] / np.maximum(EG[0], _EPS), 0.0)  # flank contained gDNA density
-    _lft, _rgt = np.asarray(chain.left), np.asarray(chain.right)
-    _gl = np.where(_lft >= 0, _rho_g_reg[np.clip(_lft, 0, None)], 0.0)  # left-flank gDNA density (0 at a terminal)
-    _gr = np.where(_rgt >= 0, _rho_g_reg[np.clip(_rgt, 0, None)], 0.0)
-    rho_g_cross = np.where(  # geo-mean of both flanks; single-flank fallback where one carries no gDNA
+
+    # --- MATURE-DILUTION per boundary (docs/calibration/exon_boundary_mature_dilution_plan.md) ---
+    # A mature fragment is SPLICED, so it cannot cross an intron-exon junction contiguously: the boundary's
+    # unspliced crossing is mature-FREE (ρ_bg+ν) while the exon carries mature too (ρ_bg+ν+μ). The boundary's
+    # TOTAL (unspliced + spliced) therefore has the SAME component set as the exon, so the capture enrichment
+    # e(x) CANCELS and the composition transfer across the cliff is exactly
+    #     f_g^boundary = f_g^exon · (D_B + S_B)/D_B     ⇒  an ADDITIVE  c_b = log1p(S_B/D_B)  on the log-f mode
+    #     (+c_b exon→boundary: remove mature;  −c_b boundary→exon: restore it).
+    # ZERO free constants; the correction uses only the boundary's OWN measured spliced/unspliced split, so it
+    # never extrapolates within-exon mature via eff-length ratios (the step that failed before, §9).
+    # SUMMED-EFF frame — validated on the toy (~2% @20k frags); the per-side density sum over-corrects ~2×
+    # because spliced mass lands on ONE face only.
+    _D_B = (MS[0] + MS[1]) / np.maximum(EG[0] + EG[1], _EPS)  # unspliced crossing density
+    _spl_mass = SP[0] + SN[0] + SP[1] + SN[1]  # spliced (mature) MASS
+    _S_B = _spl_mass / np.maximum(ESP[0] + ESP[1], _EPS)  # spliced (mature) density
+    _r_mat = np.where(_D_B > _EPS, _S_B / np.maximum(_D_B, _EPS), 0.0)
+    mature_dilution = np.where(~_is_reg_arr, np.log1p(_r_mat), 0.0)
+    # Counting-noise variance of c_b, propagated through c=log(1+r):  Var(c) = [r/(1+r)]²·Var(log r), and
+    # Var(log r) = 1/n_s + 1/n_d for two independent Poisson channels. The variance MUST use the INTEGER
+    # COUNTS, not the fractional mass — mass sums per-fragment shares, so 1/mass mis-states the Poisson
+    # variance (node_geometry §spliced_n_*: `Var(log ρ_m)=1/n`, Kish n_eff ≥ mass). Gamma posterior (n+1)
+    # keeps it finite at n=0. NOTE: this models SAMPLING noise only — a probe-ATTENUATED junction is a
+    # systematic BIAS in the mode, which no variance term can represent (see the plan doc §5 risk 1).
+    _spl_n = SPN[0] + SNN[0] + SPN[1] + SNN[1]  # integer spliced flux
+    _unspl_n = np.asarray(statics.u_pos, np.float64) + np.asarray(statics.u_neg, np.float64)
+    _var_mat = np.where(
         ~_is_reg_arr,
-        np.where((_gl > 0.0) & (_gr > 0.0), np.sqrt(_gl * _gr), np.maximum(_gl, _gr)),
+        (_r_mat / (1.0 + _r_mat)) ** 2 * (1.0 / (_spl_n + 1.0) + 1.0 / (_unspl_n + 1.0)),
         0.0,
     )
 
@@ -603,6 +631,7 @@ def node_sweep(
         _pt = {k: np.zeros(n_nodes) for k in ("sm", "vlfg", "vlfp", "s2t", "fgs", "vls")}
         EGs, EGd, ERs, ERd = EG[sf], EG[df], ER[sf], ER[df]
         MSs, MSd, SPs, SNs = MS[sf], MS[df], SP[sf], SN[sf]
+        MSNs = MSN[sf]  # source-face integer unspliced flux — the Poisson n for the message precision
         ESPs = ESP[sf]  # source-face spliced eff-len (for the mature-RNA MEASUREMENT message)
         SPd, SNd, ESPd = SP[df], SN[df], ESP[df]  # dest-face spliced — the mature ABSORBED at a junction
         for i in seq:
@@ -612,7 +641,8 @@ def node_sweep(
             md = MSd[i] if MSd[i] > _EPS else _EPS
             egd = EGd[i] if EGd[i] > _EPS else _EPS
             erd = ERd[i] if ERd[i] > _EPS else _EPS
-            sm = MSs[lsrc]  # source facing UNSPLICED mass = the count-term M_src
+            sm = MSs[lsrc]  # source facing UNSPLICED MASS — the DENSITY numerator (ρ = mass/eff)
+            smn = MSNs[lsrc]  # source facing integer unspliced COUNT — the Poisson n for the PRECISION
             # belief-free message transfer variance for THIS edge (src=lsrc → dst=i): the enrichment-crossing
             # damping (F1). Shared by every component (capture is nucleic-acid-agnostic ⇒ the crossing is a
             # discontinuity in gDNA AND RNA at pass-0). 0 when the projection is off.
@@ -675,11 +705,24 @@ def node_sweep(
             # THE MODE PREDICATE (message_propagation_arithmetic.md §4/§7). The eff-length-frame log-odds SHIFT on
             # CLEAN edges (neither endpoint an exon region — the cliff is invariant there); the DENSITY mode
             # (observed-md anchor; the ``±SPs/−absorb`` mature reconciliation rides in ``rho_pos``/``rho_neg``) on
-            # exon edges, where a composition-conserving shift over-trusts the unstranded exon (§9). Every
-            # boundary-dst edge uses the density frame — its gDNA is the geo-mean crossing decode (docs §14),
-            # decoded in the boundary's OWN mature-free crossing frame (nascent = residual).
+            # exon edges, where a composition-conserving shift over-trusts the unstranded exon (§9).
+            # INTRON REGION → BOUNDARY also uses the shift (owner 2026-07-22): an intron and its IE/EI boundary
+            # have IDENTICAL active components (gDNA + nascent RNA, mature-free), so composition is invariant
+            # across the enrichment cliff and the fraction scales safely — the initial design, restored after the
+            # geo-mean §14 refactor scoped every boundary-dst edge onto the density frame. The EXON source →
+            # boundary direction (mature-contaminated) still needs its own derivation, so it keeps the geo-mean.
             _ex_s, _ex_d = is_exon_node[lsrc], is_exon_node[i]
-            use_shift = (not _ex_s) and (not _ex_d) and not _is_bnd[i]
+            use_shift = (not _ex_s) and (not _ex_d) and (not _is_bnd[i] or is_intron_node[lsrc])
+            # EXON↔BOUNDARY: the mature-dilution edges. The gDNA factor rides the composition SHIFT plus the
+            # additive ±c_b; the RNA factors keep their existing treatment (the exon's unspliced RNA is
+            # mature-contaminated and stays suppressed, §14 change-1), so `use_shift` (which governs the RNA
+            # modes) is left untouched and only the gDNA mode switches via ``use_shift_g``.
+            _c_mat = _v_mat = 0.0
+            if _is_bnd[i] and _ex_s:  # exon → boundary: REMOVE the exon's mature
+                _c_mat, _v_mat = mature_dilution[i], _var_mat[i]
+            elif _ex_d and _is_bnd[lsrc]:  # boundary → exon: RESTORE the mature
+                _c_mat, _v_mat = -mature_dilution[lsrc], _var_mat[lsrc]
+            use_shift_g = use_shift or (_c_mat != 0.0) or (_is_bnd[i] and _ex_s) or (_ex_d and _is_bnd[lsrc])
             # ---- source per-component DENSITIES (shared by the mode AND the precision path) ----
             # ``rho_g`` = source gDNA density; ``rho_pos``/``rho_neg`` = the per-strand RNA density the source
             # imputes, carrying the FULL mature accounting (§5, BOTH directions): ``− absorb`` removes the
@@ -698,19 +741,25 @@ def node_sweep(
             rho_pos = fp_s * sm / _er + SPs[lsrc] / _esp - absorb_p  # +SPs/esp = the DST exon's mature (added)
             rho_neg = fn_s * sm / _er + SNs[lsrc] / _esp - absorb_n
             if _is_bnd[i]:
-                # (2) the crossing gDNA is the GEO-MEAN of both flanks (not this one source flank's scale).
-                if rho_g_cross[i] > 0.0:
-                    rho_g = rho_g_cross[i]
-                # (1) SUPPRESS the mature-contaminated exon UNSPLICED-RNA import (§9): the exon flank's
-                # ``fp_s·sm/_er`` is dominated by within-exon MATURE (never crosses the junction unspliced), so
-                # importing it as the boundary's nascent crushes f_g. Drop it ⇒ nascent = RESIDUAL of the
-                # boundary's own mature-free crossing. KEEP the spliced MEASUREMENT (``SPs/_esp``, a real mature-
-                # RNA count) and the mature absorption. The intron flank (mature-free) keeps its clean nascent —
-                # nascent still reaches the intron via the boundary's residual relay (docs §14; supersedes the
-                # exon's DIRECT emission the mature-gate dismantle assumed). Load-bearing: (2) alone regresses.
-                if _ex_s:
+                if use_shift:
+                    # INTRON → BOUNDARY: composition invariance. Transfer the intron's OWN gDNA + nascent
+                    # (identical active components, mature-free) across the enrichment cliff via the shift below —
+                    # NO geo-mean crossing (that decodes the boundary from BOTH flanks) and NO mature
+                    # reconciliation (the intron carries no mature; the boundary's spliced is not the intron's to
+                    # absorb). ``rho_g`` stays the intron's own gDNA density; drop the ``±SPs/−absorb`` terms.
+                    rho_pos = fp_s * sm / _er
+                    rho_neg = fn_s * sm / _er
+                elif _ex_s:
+                    # EXON → boundary: the MATURE-DILUTION path. ``rho_g`` stays the exon's OWN gDNA density
+                    # (NO geo-mean override — that unweighted hack stood in for this missing imputation); the
+                    # +c_b term converts the exon's mature-contaminated composition into the boundary's
+                    # mature-free crossing composition. RNA stays suppressed to the spliced MEASUREMENT.
                     rho_pos = SPs[lsrc] / _esp - absorb_p
                     rho_neg = SNs[lsrc] / _esp - absorb_n
+                # else: INTERGENIC → boundary (a TSS/TES seam) keeps the source's own densities on the
+                # density mode. A seam is a distinct case — the intergenic flank carries gDNA only (no
+                # nascent) — so neither composition invariance nor the mature-dilution rule applies
+                # unmodified. OUT OF SCOPE pending its own derivation (roadmap R6).
             # ---- the cliff-crossing LOG-ODDS SHIFT (cliff_message_derivation.md §3) ----
             # Impute the dst's f_c as the source COMPOSITION: the per-component imputed MASS ``M_c = ρ_c^src ·
             # E_c^dst``, normalized by the IMPUTED total ``ΣM``. Equivalent to the log-odds shift
@@ -721,7 +770,7 @@ def node_sweep(
             # divided an enriched-frame numerator by the dst's single-component OBSERVED total ``md/E`` and so
             # failed across the ~10²–10³× cliff (isolated intron→boundary |Δf_g| 0.65 → 0.17). MC-validated
             # across gaussian/gamma/bimodal/uniform FL pairs (scripts/debug/cliff_message_mc.py).
-            if use_shift:
+            if use_shift_g:
                 # ΣM must count only what PHYSICALLY crosses to the dst: gDNA always (genomic); RNA strand s
                 # only where s is structurally continuous on BOTH endpoints (``fp/fn`` — the transcript-
                 # structure gate). Without this, a gene-end / TES / opposite-strand seam (where the RNA does
@@ -740,38 +789,48 @@ def node_sweep(
             lam_factors = []
             # ---- gDNA message (a factor on log f_g) ----
             if emit_g:
-                mo = _mode_shift(Mg, _den, comp_fl) if use_shift else _mode_density(rho_g, egd, md)
-                pr = _pred_precision(sm, v_logfg, s2t)  # 1/(Var(log f_g) + 1/M_src + σ²_transfer); 0 if unseen
+                # gDNA rides the composition SHIFT on every clean edge AND on the exon↔boundary edges, where the
+                # additive ±c_b converts between the exon's mature-INCLUSIVE and the boundary's mature-FREE
+                # composition (enrichment cancels). ``_v_mat`` carries c_b's counting noise into the precision,
+                # so a count-starved junction self-limits instead of asserting an uncorrected mode.
+                mo = _mode_shift(Mg, _den, comp_fl) if use_shift_g else _mode_density(rho_g, egd, md)
+                mo += _c_mat
+                pr = _pred_precision(smn, v_logfg + _v_mat, s2t)  # 1/(Var(log f_g)+Var(c_b)+1/n_src+σ²_T)
                 amg[i], apg[i] = mo, pr
                 if pr > 0.0:
                     lam_factors.append((True, mo, pr))
             # ---- RNA per-strand messages (emission per strand) + the RNA-TOTAL λ-factor ----
             # The RNA a splice-junction boundary imputes folds TWO sources into one message: the deconvolved
             # UNSPLICED RNA (a PREDICTION at count-zero-info-degraded precision ``pr``) and the SPLICED fragments
-            # (a direct MEASUREMENT of mature RNA — already in the ``rho_*`` density via ``±`` above). The
-            # spliced additionally credit the PRECISION: ``pr += S_eff/(1+S_eff·σ²_transfer)``, a pure count
-            # precision (no deconvolution variance, transfer-attenuated only), so more spliced ⇒ a more confident
-            # RNA message (``S=0 ⇒ no change``; spliced_precision_status.md §3). The honest clamp: when the
+            # (a direct MEASUREMENT of mature RNA — already in the ``rho_*`` density via ``±`` above).
+            # R2-BLOCKED (measured 2026-07-22): undamping this MEASUREMENT precision is correct in principle
+            # (a junction COUNT is not an imputation, so an enrichment cliff should not attenuate it) but it
+            # REGRESSED the gdna_none phantom guard +49%. Cause: ``pr += S`` attaches the MEASUREMENT's
+            # confidence to the PREDICTION's mode ``mo``, which the mature absorption can drive to a clamped
+            # ~zero — undamped, that laundered a weak "no RNA" into a CONFIDENT one (exactly what the clamp
+            # note below forbids). σ²_transfer was silently holding this unsound merge together. R2 is
+            # therefore blocked on item E (prediction⊕measurement MERGE — the measurement needs its OWN mode).
+            # The honest clamp on the PREDICTION side stays: when the
             # absorption saturates the residual to the count floor, that is a genuine but WEAK ~zero — backed by
-            # the floor's ONE count, not the source's full ``sm`` — never laundered into a confident "no RNA".
+            # the floor's ONE count, not the source's full count — never laundered into a confident "no RNA".
             rho_r = 0.0
             if emit_p:
                 # HYBRID keeps RNA on the PURE density mode (decoupled from the gDNA cliff correction —
                 # density's robustness: the gDNA f_g must NOT be hostage to the error-prone mature removal).
                 mo = _mode_shift(Mp, _den, comp_fl) if use_shift else _mode_density(rho_pos, erd, md)
-                n_eff = (max(rho_pos, 0.0) * erd) if (rho_pos <= 1.0 / erd) else sm  # honest clamp
+                n_eff = (max(rho_pos, 0.0) * erd) if (rho_pos <= 1.0 / erd) else smn  # honest clamp
                 pr = _pred_precision(n_eff, v_logfp, s2t)  # PREDICTION channel (0 on a composition-vacuous source)
                 if SPs[lsrc] > _EPS:  # MEASUREMENT channel (independent evidence — always credited)
-                    pr += SPs[lsrc] / (1.0 + SPs[lsrc] * s2t)  # + spliced-fragment MEASUREMENT precision
+                    pr += SPs[lsrc] / (1.0 + SPs[lsrc] * s2t)  # damped: see R2-BLOCKED note above
                 amp[i], app[i] = mo, pr
                 if rho_pos > 0.0:
                     rho_r += rho_pos
             if emit_n:
                 mo = _mode_shift(Mn, _den, comp_fl) if use_shift else _mode_density(rho_neg, erd, md)
-                n_eff = (max(rho_neg, 0.0) * erd) if (rho_neg <= 1.0 / erd) else sm  # honest clamp
+                n_eff = (max(rho_neg, 0.0) * erd) if (rho_neg <= 1.0 / erd) else smn  # honest clamp
                 pr = _pred_precision(n_eff, v_logfn, s2t)  # PREDICTION channel (0 on a composition-vacuous source)
                 if SNs[lsrc] > _EPS:  # MEASUREMENT channel (independent evidence — always credited)
-                    pr += SNs[lsrc] / (1.0 + SNs[lsrc] * s2t)  # + spliced-fragment MEASUREMENT precision
+                    pr += SNs[lsrc] / (1.0 + SNs[lsrc] * s2t)  # damped: see R2-BLOCKED note above
                 amn[i], apn[i] = mo, pr
                 if rho_neg > 0.0:
                     rho_r += rho_neg
@@ -779,10 +838,10 @@ def node_sweep(
             # SAME axis λ (this is what makes the pie coherent — docs §2.2).
             if rho_r > _EPS:
                 # PREDICTION channel (τ-gated) + spliced MEASUREMENT channel (independent — always)
-                pr_r = _pred_precision(sm, v_logfr, s2t)  # PREDICTION channel (0 on a composition-vacuous source)
+                pr_r = _pred_precision(smn, v_logfr, s2t)  # PREDICTION channel (0 on a composition-vacuous source)
                 s_spl = SPs[lsrc] + SNs[lsrc]  # total spliced (motif-stranded ⇒ one term nonzero)
                 if s_spl > _EPS:
-                    pr_r += s_spl / (1.0 + s_spl * s2t)  # + spliced-fragment MEASUREMENT precision
+                    pr_r += s_spl / (1.0 + s_spl * s2t)  # damped: see R2-BLOCKED note above
                 if pr_r > 0.0:
                     mo_r = _mode_shift(Mp + Mn, _den, comp_fl) if use_shift else _mode_density(rho_r, erd, md)
                     lam_factors.append((False, mo_r, pr_r))

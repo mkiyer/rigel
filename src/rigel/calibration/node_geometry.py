@@ -66,6 +66,13 @@ class NodeGeometry:
     n_nodes: int
     mass_left: np.ndarray  # float64 — unspliced mass facing the left neighbour
     mass_right: np.ndarray
+    # The matching integer UNSPLICED COUNT (flux), same faces as the mass above. MASS is the density
+    # numerator; COUNT is what a Poisson VARIANCE needs (`Var(log ρ)=1/n`, not `1/mass`) — see the
+    # `spliced_n_*` note below, which states the same rule for the spliced channel. The unspliced mass is
+    # additionally NOT conserved per node (the accumulator splits one fragment across several nodes), so
+    # `1/mass` is wrong in two independent ways; the integer flux is the honest ``n``.
+    n_unspl_left: np.ndarray
+    n_unspl_right: np.ndarray
     eff_gdna_left: np.ndarray  # gDNA-FL eff-len facing left (contained / boundary left side)
     eff_gdna_right: np.ndarray
     eff_rna_left: np.ndarray  # RNA-FL eff-len facing left (nascent two-sided crossing / contained)
@@ -131,6 +138,9 @@ def build_node_geometry(
     brr = np.asarray(bsub.right_region, dtype=np.int64)
     bmass_l = np.asarray(bsub.left.mass_unspliced, dtype=np.float64)
     bmass_r = np.asarray(bsub.right.mass_unspliced, dtype=np.float64)
+    # matching integer unspliced flux per side (the Poisson n for the message precision)
+    bn_unspl_l = np.asarray(bsub.left.n_unspliced, dtype=np.float64)
+    bn_unspl_r = np.asarray(bsub.right.n_unspliced, dtype=np.float64)
     bspl_l = np.asarray(bsub.left.mass_spliced, dtype=np.float64)  # sense+antisense summed
     bspl_r = np.asarray(bsub.right.mass_spliced, dtype=np.float64)
     # the matching integer flux (same channels, summed the same way) — the Poisson count for the variance
@@ -187,6 +197,9 @@ def build_node_geometry(
     # region presents the same (contained) geometry both ways; boundary presents its per-side geometry.
     mass_left = pick(reg_mass, bmass_l)
     mass_right = pick(reg_mass, bmass_r)
+    reg_n_unspl = np.asarray(substrate.contained.n_unspliced, dtype=np.float64)
+    n_unspl_left = pick(reg_n_unspl, bn_unspl_l)
+    n_unspl_right = pick(reg_n_unspl, bn_unspl_r)
     eff_gdna_left = pick(reg_eff_g, b_eff_g_l)
     eff_gdna_right = pick(reg_eff_g, b_eff_g_r)
     eff_rna_left = pick(reg_eff_r, b_eff_r_l)
@@ -209,6 +222,8 @@ def build_node_geometry(
         n_nodes=int(chain.n_nodes),
         mass_left=mass_left,
         mass_right=mass_right,
+        n_unspl_left=n_unspl_left,
+        n_unspl_right=n_unspl_right,
         eff_gdna_left=np.maximum(eff_gdna_left, _EPS),
         eff_gdna_right=np.maximum(eff_gdna_right, _EPS),
         eff_rna_left=np.maximum(eff_rna_left, _EPS),

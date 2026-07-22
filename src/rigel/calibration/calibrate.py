@@ -31,11 +31,12 @@ zero-gDNA library (``gdna_density_global == 0``, per-node gDNA mass ``0``) is a 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
 
-from .background_reference import measure_background
+from .background_reference import BackgroundReference, measure_background
 from .bp_solver import (
     REGION,
     build_node_geometry,
@@ -55,7 +56,7 @@ from .effective_length import (
     boundary_side_eff_length,
     region_eff_length,
 )
-from .gdna_intron_factory import fit_intron_background, intron_lambda_factor
+from .gdna_intron_factory import IntronBackground, fit_intron_background, intron_lambda_factor
 from .gdna_strand import (
     fit_gdna_strand_from_substrate,
     fit_rna_strand_from_substrate,
@@ -77,7 +78,30 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config):
+@dataclass(frozen=True, slots=True)
+class InjectedCalibrationPriors:
+    """Population-scale calibration priors — the objects that require genome-scale (or many-gene) data to fit and
+    are physically **directly observable** (no deconvolution / no solving): the RNA strand balance, the strand
+    Beta-Binomial overdispersions, the strand-Fisher noise-floor sample sizes, the enrichment-density NPMLE (the
+    σ²_transfer landscape), the intergenic intron-factory background, and the aggregate ρ_bg background.
+
+    A tiny (single-transcript) toy CANNOT fit these — so :func:`calibrate` accepts them pre-fit from a
+    population scenario and injects them, letting the toy provide only the controlled per-node GEOMETRY. Every
+    field is optional; ``None`` ⇒ fit that prior internally (the default, byte-identical). ``calibrate`` also
+    stashes the fitted-or-injected bundle in ``_debug["calibration_priors"]`` so a population scenario's fitted
+    priors can be extracted and re-injected into a toy (`scripts/debug/toy_inject.py`)."""
+
+    rna_sense_frac: float | None = None
+    n_rna_obs: float | None = None
+    n_gdna_obs: float | None = None
+    gdna_strand_overdispersion: float | None = None
+    rna_strand_overdispersion: float | None = None
+    enrichment_prior: DensityNPMLE | None = None
+    intron_background: IntronBackground | None = None
+    background: BackgroundReference | None = None
+
+
+def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config, bg=None):
     """The gDNA intron factory λ-factor per chain node (`docs/calibration/gdna_intron_factory_design.md`).
 
     Fits the intergenic-background NegBinom (`fit_intron_background`) and tabulates, for each INTRON REGION node,
@@ -85,8 +109,12 @@ def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config)
     non-intron node (a no-op there). Returns ``None`` when the factory is disabled, the background pool is
     uninformative, or there are no intron nodes — in which case the sweep is byte-identical to the pre-factory
     path. gDNA is strand-symmetric, so this factor lives purely on ``λ`` (peels gDNA; the residual RNA's tilt is
-    left to the solver), and is consumed identically by the single-strand and AMBIG per-node solves."""
-    bg = fit_intron_background(substrate, region_arrays, region_eff_len, include_introns=False)
+    left to the solver), and is consumed identically by the single-strand and AMBIG per-node solves.
+
+    ``bg`` (an injected population :class:`IntronBackground`) overrides the internal fit — a tiny toy's own
+    intergenic pool is too sparse to fit the background the introns are peeled against."""
+    if bg is None:
+        bg = fit_intron_background(substrate, region_arrays, region_eff_len, include_introns=False)
     if not bg.informative:
         return None
     kind = np.asarray(chain.kind)
@@ -159,6 +187,7 @@ def calibrate(
     config: "CalibrationConfig",
     _debug: dict | None = None,
     diagnostics_out: dict | None = None,
+    injected_priors: "InjectedCalibrationPriors | None" = None,
 ) -> CalibrationResult:
     """Deconvolve the library into gDNA / RNA per node, then derive gdna_density_global.
 
@@ -168,6 +197,7 @@ def calibrate(
     outputs — not failures.
     """
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
+    inj = injected_priors  # population-scale priors to inject in place of the internal (toy-untrustworthy) fits
 
     # gDNA fragment-length effective lengths: the region-contained length, the per-side boundary
     # density length, and the region-free crossing mean. ``rna_fl_pmf`` feeds the RNA-side effective
@@ -180,15 +210,21 @@ def calibrate(
     # channel's discriminability w=(2κ−1)² (set inside the deconv) is the smooth strand→count
     # deference weight — there is no hard identifiability gate (an unstranded library has κ≈½ ⇒ w≈0 ⇒
     # count governs, regardless of depth).
-    balance = fit_strand_balance(strand_model)
-    if balance.fallback_used:
-        # No spliced reads at all — not a usable RNA-seq library. Fail loudly (a real RNA-seq library
-        # always carries spliced reads); see CalibrationStrandError.
-        raise CalibrationStrandError(
-            "the library has zero spliced unique-mapper observations; this does not look like an "
-            "RNA-seq library. A real RNA-seq library always carries spliced reads."
-        )
-    rna_sense_frac = float(balance.rna_sense_frac)
+    if inj is not None and inj.rna_sense_frac is not None:
+        # INJECTED population κ + spliced sample size — a tiny toy cannot fit either (scarce spliced).
+        rna_sense_frac = float(inj.rna_sense_frac)
+        n_rna_obs = float(inj.n_rna_obs) if inj.n_rna_obs is not None else 0.0
+    else:
+        balance = fit_strand_balance(strand_model)
+        if balance.fallback_used:
+            # No spliced reads at all — not a usable RNA-seq library. Fail loudly (a real RNA-seq library
+            # always carries spliced reads); see CalibrationStrandError.
+            raise CalibrationStrandError(
+                "the library has zero spliced unique-mapper observations; this does not look like an "
+                "RNA-seq library. A real RNA-seq library always carries spliced reads."
+            )
+        rna_sense_frac = float(balance.rna_sense_frac)
+        n_rna_obs = float(balance.n_observations)
 
     # Count clue on RAW counts (the count module, pre-cleaning): per-region gDNA density by LOCAL
     # boundary-anchored imputation. Needed here only to fit the gDNA strand overdispersion (its seed
@@ -201,23 +237,32 @@ def calibrate(
     # the seed weight is the strand MEAN ½, not the dispersion). RNA (mean κ) fitted from boundary-side
     # spliced counts. Both shrunk toward the SAME default prior, so under sparse data they collapse to
     # one distribution and an unstranded node (κ=½) is uninformative. See docs/em_strand/03+05.
-    gdna_strand = fit_gdna_strand_from_substrate(
-        substrate,
-        region_arrays,
-        node_density_raw,
-        boundary_eff_len,
-        rna_sense_frac=rna_sense_frac,
-        prior_overdispersion=overdispersion_for_beta(config.gdna_strand_prior_alpha_beta),
-        prior_weight=config.gdna_strand_prior_weight,
-    )
-    gdna_strand_overdispersion = gdna_strand.gdna_strand_overdispersion
-    rna_strand = fit_rna_strand_from_substrate(
-        substrate,
-        rna_sense_frac=rna_sense_frac,
-        prior_overdispersion=overdispersion_for_beta(config.rna_strand_prior_alpha_beta),
-        prior_weight=config.rna_strand_prior_weight,
-    )
-    rna_strand_overdispersion = rna_strand.rna_strand_overdispersion
+    _gd_seed = _rna_seed = (-1, -1, False)  # (n_seed_nodes, n_seed_frags, fallback) — QC log only; -1 = injected
+    if inj is not None and inj.gdna_strand_overdispersion is not None:
+        gdna_strand_overdispersion = float(inj.gdna_strand_overdispersion)
+    else:
+        gdna_strand = fit_gdna_strand_from_substrate(
+            substrate,
+            region_arrays,
+            node_density_raw,
+            boundary_eff_len,
+            rna_sense_frac=rna_sense_frac,
+            prior_overdispersion=overdispersion_for_beta(config.gdna_strand_prior_alpha_beta),
+            prior_weight=config.gdna_strand_prior_weight,
+        )
+        gdna_strand_overdispersion = gdna_strand.gdna_strand_overdispersion
+        _gd_seed = (gdna_strand.n_seed_nodes, gdna_strand.n_seed_fragments, gdna_strand.fallback_used)
+    if inj is not None and inj.rna_strand_overdispersion is not None:
+        rna_strand_overdispersion = float(inj.rna_strand_overdispersion)
+    else:
+        rna_strand = fit_rna_strand_from_substrate(
+            substrate,
+            rna_sense_frac=rna_sense_frac,
+            prior_overdispersion=overdispersion_for_beta(config.rna_strand_prior_alpha_beta),
+            prior_weight=config.rna_strand_prior_weight,
+        )
+        rna_strand_overdispersion = rna_strand.rna_strand_overdispersion
+        _rna_seed = (rna_strand.n_seed_nodes, rna_strand.n_seed_fragments, rna_strand.fallback_used)
 
     # THE SOLVE — the bipartite belief-propagation sweep (bp_solver): build the unified region↔boundary chain
     # + its per-node geometry / statics, the signature-binary init, then a single forward-backward pass
@@ -237,11 +282,14 @@ def calibrate(
     # fit from). gDNA's sense mean is ½ by biology (dsDNA symmetry — not fitted); the seed only needs the sample
     # sizes to size the sampling part of the floor ¼·(1/N + ω). N_gdna=0 (a gDNA-free library) ⇒ 1/N_gdna → ∞ ⇒
     # the strand seed is gated off (nothing to distinguish RNA from).
-    _inter = coarse_type_array(np.asarray(region_arrays.signature)) == 0
-    _gpos = float(np.sum(np.asarray(substrate.contained.n_unspliced_pos, dtype=np.float64)[_inter]))
-    _gneg = float(np.sum(np.asarray(substrate.contained.n_unspliced_neg, dtype=np.float64)[_inter]))
-    n_gdna_obs = _gpos + _gneg
-    n_rna_obs = float(balance.n_observations)
+    if inj is not None and inj.n_gdna_obs is not None:
+        n_gdna_obs = float(inj.n_gdna_obs)  # INJECTED intergenic gDNA sample size (toy intergenic is sparse)
+    else:
+        _inter = coarse_type_array(np.asarray(region_arrays.signature)) == 0
+        _gpos = float(np.sum(np.asarray(substrate.contained.n_unspliced_pos, dtype=np.float64)[_inter]))
+        _gneg = float(np.sum(np.asarray(substrate.contained.n_unspliced_neg, dtype=np.float64)[_inter]))
+        n_gdna_obs = _gpos + _gneg
+    # n_rna_obs is set above (injected or from the strand-balance fit).
 
     def _init_belief():
         return init_beliefs(
@@ -263,9 +311,19 @@ def calibrate(
     # from intron nodes against the intergenic background, BEFORE the pass-0 solve. Built ONCE (belief-free —
     # only the intron count vs the background), applied in every sweep below. ``None`` (disabled / no
     # informative background / no introns) ⇒ byte-identical to the pre-factory pass-0.
+    # INJECTED intergenic intron-factory background overrides the internal (toy-sparse) fit.
+    intron_background = (
+        inj.intron_background
+        if (inj is not None and inj.intron_background is not None)
+        else (
+            fit_intron_background(substrate, region_arrays, region_eff_len, include_introns=False)
+            if config.intron_factory
+            else None
+        )
+    )
     intron_prior = (
-        _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config)
-        if config.intron_factory
+        _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config, bg=intron_background)
+        if (config.intron_factory and intron_background is not None)
         else None
     )
     # Message precision is now the source's OWN honest belief precision (strand + count), computed inside
@@ -313,9 +371,15 @@ def calibrate(
     # PRECISION — σ²_transfer projects each node's density onto it ("enriched or depleted?") inside
     # ``node_sweep``. It is NEVER fed to the composition (gDNA) arm.
     mass_global, eff_global = node_global_geometry(chain, geometry)
-    enrichment_prior = DensityNPMLE.fit(
-        mass_global, eff_global, bandwidth=config.npmle_bandwidth
-    )
+    if inj is not None and inj.enrichment_prior is not None:
+        # INJECTED population enrichment landscape — a toy has too few nodes to resolve enriched vs depleted
+        # modes. (Scale note: the toy's densities must be generated at the reference library's depth so its
+        # nodes project onto the right cells of this absolute log-density landscape.)
+        enrichment_prior = inj.enrichment_prior
+    else:
+        enrichment_prior = DensityNPMLE.fit(
+            mass_global, eff_global, bandwidth=config.npmle_bandwidth
+        )
     # PHASE 1 — the INITIAL solve is PRIOR-FREE of the DNA composition prior: the inert Beta(½,½) reference
     # alone (``gdna_prior=None``) + the strand likelihood + the belief-free forward-backward messages, with
     # σ²_transfer supplied by the enrichment NPMLE above. Single-strand nodes self-solve from strand; unstranded
@@ -333,15 +397,16 @@ def calibrate(
     # ambiguity the prior-free pass leaves at unstranded AMBIG nodes. Repeated ``calib_refit_iters`` times.
     # ANCHORED, EXTREMELY WEAK. The aggregate DNA-background reference (`ρ_bg`, pooled pure intergenic/intron —
     # belief-free) is the refit floor; ``None`` when disabled.
-    background = (
-        measure_background(
+    if inj is not None and inj.background is not None:
+        background = inj.background  # INJECTED aggregate ρ_bg (pooled pure intergenic/intron — population-scale)
+    elif config.background_floor:
+        background = measure_background(
             substrate, region_arrays, region_eff_len,
             include_introns=config.background_include_introns,
             robust_trim_mad=config.background_robust_trim_mad,
         )
-        if config.background_floor
-        else None
-    )
+    else:
+        background = None
     gdna_hyperprior = None
     for it in range(int(config.calib_refit_iters)):
         gdna_hyperprior = _fit_gdna_hyperprior(
@@ -380,6 +445,17 @@ def calibrate(
             rna_sense_frac=rna_sense_frac,
             region_eff_len=region_eff_len,
             boundary_eff_len=boundary_eff_len,
+            # the fitted-or-injected population priors — extract from a population scenario, inject into a toy
+            calibration_priors=InjectedCalibrationPriors(
+                rna_sense_frac=rna_sense_frac,
+                n_rna_obs=n_rna_obs,
+                n_gdna_obs=n_gdna_obs,
+                gdna_strand_overdispersion=gdna_strand_overdispersion,
+                rna_strand_overdispersion=rna_strand_overdispersion,
+                enrichment_prior=enrichment_prior,
+                intron_background=intron_background,
+                background=background,
+            ),
         )
 
     # Report-facing diagnostics: the fitted gDNA hyperprior P(ρ) (bimodal ⇒ capture enrichment). Consumed by
@@ -442,13 +518,13 @@ def calibrate(
         result.gdna_density_global,
         rna_sense_frac,
         gdna_strand_overdispersion,
-        gdna_strand.n_seed_nodes,
-        gdna_strand.n_seed_fragments,
-        ", FALLBACK" if gdna_strand.fallback_used else "",
+        _gd_seed[0],
+        _gd_seed[1],
+        ", FALLBACK" if _gd_seed[2] else ("" if _gd_seed[0] >= 0 else ", INJECTED"),
         rna_strand_overdispersion,
-        rna_strand.n_seed_nodes,
-        rna_strand.n_seed_fragments,
-        ", FALLBACK" if rna_strand.fallback_used else "",
+        _rna_seed[0],
+        _rna_seed[1],
+        ", FALLBACK" if _rna_seed[2] else ("" if _rna_seed[0] >= 0 else ", INJECTED"),
         boundary_sense_frac,
         rna_sense_frac,
     )
