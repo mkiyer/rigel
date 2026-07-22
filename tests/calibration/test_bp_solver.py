@@ -1186,3 +1186,19 @@ def test_vacuous_unstranded_source_zero_precision_but_density_flows():
         assert np.all(apg <= 1e-12), (scan, "gDNA PREDICTION precision must be 0 on a vacuous source", apg)
         assert np.all(app <= 1e-12), (scan, "RNA PREDICTION precision must be 0 (no spliced, τ=0)", app)
         assert np.all(np.isfinite(amp)), (scan, "RNA density MODE must stay well-defined (density ⊥ evidence)")
+
+
+def test_node_sweep_deterministic():
+    """H: pass-0 must be bit-reproducible. The forward-backward BP sweep is sequential Python (no parallel
+    reduction), so the same input must give a bit-identical belief AND identical emitted messages run-to-run —
+    a prerequisite for any confidence claim about the solver. Uses the unstranded (κ=½), fully message-driven
+    case, the one most sensitive to any ordering nondeterminism."""
+    a, capa = _sweep(_mature_exon_chain(spliced=True, kappa=0.5), kappa=0.5)
+    b, capb = _sweep(_mature_exon_chain(spliced=True, kappa=0.5), kappa=0.5)
+    for nm in ("f_g", "f_pos", "f_neg", "var_gdna", "var_pos", "var_neg"):
+        x, y = np.asarray(getattr(a, nm)), np.asarray(getattr(b, nm))
+        assert np.array_equal(x, y, equal_nan=True), (nm, x, y)  # BIT-identical (not just close)
+    for scan in ("a_fwd", "b_bwd"):  # every emitted message (amg,apg,amp,app,amn,apn) bit-identical
+        for i in range(6):
+            x, y = np.asarray(capa[scan][i]), np.asarray(capb[scan][i])
+            assert np.array_equal(x, y, equal_nan=True), (scan, i, x, y)

@@ -99,9 +99,12 @@ Before investing in §5, make the solver *trustworthy*. These are ordered by con
   monotone-in-count; and the **density ⊥ evidence decoupling** — a vacuous source emits 0 composition precision
   yet a well-defined density mode (the exact principle the coupling bug violated). A future refactor now fails a
   *named principle*, not just "the golden moved."
-- **H. Determinism / reproducibility.** Confirm the pass-0 solve is bit-reproducible at `total_threads=1`
-  (cross-process nondeterminism was ~2.6 % from C++ FP reduction; `calibrate_cross_process_nondeterminism`).
-  A confidence claim needs a deterministic solver.
+- **H. Determinism / reproducibility. ✅ DONE.** Pass-0 is bit-reproducible at `OMP_NUM_THREADS=1`, both
+  within-process (`test_bp_solver.py::test_node_sweep_deterministic` — belief + every emitted message
+  bit-identical run-to-run) and **cross-process** (two independent `calibrate` runs → byte-identical across all
+  32 `ambig_dense_10mb` scenarios). The sweep is sequential Python with no parallel reduction; the historical
+  ~2.6 % wander was C++ scan/EM FP-reduction order, absent at single-thread — and the property survived the whole
+  mode+emission refactor.
 - **I. Known correctness items.**
   - **Discretization-frame consistency** (§6a #2): `region_eff_length` (+1 discrete) vs `spliced/boundary`
     (continuous) — a several-% frame error on short flanks (`L≲fl_mean`). Align the conventions; gate on golden.
