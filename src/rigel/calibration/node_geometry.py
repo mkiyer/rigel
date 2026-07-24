@@ -156,8 +156,6 @@ def build_node_geometry(
     b_eff_g_r = np.where(brr >= 0, side_eff_g[np.clip(brr, 0, R - 1)], 0.0)
     b_eff_r_l = np.where(blr >= 0, side_eff_r[np.clip(blr, 0, R - 1)], 0.0)
     b_eff_r_r = np.where(brr >= 0, side_eff_r[np.clip(brr, 0, R - 1)], 0.0)
-    b_eff_spl_l = np.where(blr >= 0, side_eff_spl[np.clip(blr, 0, R - 1)], 0.0)
-    b_eff_spl_r = np.where(brr >= 0, side_eff_spl[np.clip(brr, 0, R - 1)], 0.0)
     # spliced face: route a boundary side's spliced (mature) mass to that side's EXON flank on the junction's
     # KNOWN genomic strand (``boundary_substrate.junction_strand``, observed from the motif at deposit — one
     # motif-stranded junction per boundary). Correct at AMBIG / exon↔exon seams the signatures cannot orient.
@@ -183,6 +181,74 @@ def build_node_geometry(
 
     b_spl_pos_l, b_spl_pos_r = _spliced_faces(TS_POS, exon_pos_l, exon_pos_r, bspl_l, bspl_r)
     b_spl_neg_l, b_spl_neg_r = _spliced_faces(TS_NEG, exon_neg_l, exon_neg_r, bspl_l, bspl_r)
+
+    # ── the ONE-SIDED SPLICED eff-length: which divisor, per face (A1/A2, message_layer_derivation.md) ──
+    # A spliced fragment credits only its exon flank. Enumerating the accumulator's deposit rule
+    # ((slice_len/ℓ)/n_cross) over the fragment's ``a`` bases on this side, with flank length ``R``:
+    #     a ≤ R  → the near slice lies inside the flank      → END slice,      n_cross=1 → a/ℓ
+    #     a > R  → it overruns into the NEXT genomic region  → INTERIOR slice, n_cross=2 → R/(2ℓ)
+    # so the per-unit-density deposit is
+    #     Σ_a = R²/(2ℓ) + (ℓ−R)·R/(2ℓ) = min(ℓ,R)/2     when the exon CONTINUES past the flank's far edge
+    #     Σ_a = R²/(2ℓ)                                  when the exon TERMINATES there (no fragment can overrun)
+    # Brute-force verified to 4 d.p. against both closed forms. The half-triangle
+    # (:func:`spliced_side_eff_length`) is therefore correct ONLY for a terminal exon; for every INTERNAL one it
+    # is low by exactly ``ℓ/R`` (measured 2.0× at R=100/ℓ=200, 8.0× at R=25, 12.0× at R=25/ℓ=300), and the
+    # correct divisor is ``E[min(ℓ,R)]/2`` — which is :func:`boundary_side_eff_length`, i.e. ``side_eff_r``,
+    # already computed above on the RNA FL.
+    #
+    # The selector is STRUCTURAL and carries no constant: can the fragment's coverage extend more than ``R``
+    # bases past the junction — i.e. does the MATURE TRANSCRIPT continue past the flank region's far edge?
+    #
+    # ⚠ Verified against the accumulator reference (`tests/native/_accumulator_reference.py`, the crossing
+    # path): a slice is INTERIOR (``n_cross=2``) iff another slice follows it — ``crosses_right = i < n-1`` —
+    # which is a property of the FRAGMENT's slice list, not of region geometry. For a spliced fragment the
+    # next block lands in a different region whether the far boundary is an exon↔exon seam OR an exon↔intron
+    # splice junction. So an INTERNAL exon continues in BOTH cases; only a genuine transcript END terminates.
+    # (A first draft of this used ``mrna_active_s`` alone — exon on both sides — which wrongly called every
+    # exon↔intron junction "terminating" and so left almost every internal exon face on the half-triangle.)
+    #
+    #     continues_s(far boundary)  =  mrna_active_s(far)          exon runs contiguously past it
+    #                                OR  far is a splice junction on strand s   the transcript splices onward
+    #
+    # taken on the JUNCTION's own strand, since that is the strand whose mature is deposited on this face.
+    lb_of_reg = np.full(R, -1, dtype=np.int64)  # region → the boundary on its LEFT
+    rb_of_reg = np.full(R, -1, dtype=np.int64)  # region → the boundary on its RIGHT
+    _m = brr >= 0
+    lb_of_reg[brr[_m]] = np.nonzero(_m)[0]  # boundary b is the LEFT boundary of region brr[b]
+    _m = blr >= 0
+    rb_of_reg[blr[_m]] = np.nonzero(_m)[0]  # ... and the RIGHT boundary of region blr[b]
+
+    def _mrna_active(bit_pos, bit_neg):
+        """Per-BOUNDARY 'mature crosses contiguously', per strand: exon bit on BOTH flank regions."""
+        lp = np.where(blr >= 0, bit_pos[np.clip(blr, 0, R - 1)], False)
+        rp = np.where(brr >= 0, bit_pos[np.clip(brr, 0, R - 1)], False)
+        ln = np.where(blr >= 0, bit_neg[np.clip(blr, 0, R - 1)], False)
+        rn = np.where(brr >= 0, bit_neg[np.clip(brr, 0, R - 1)], False)
+        return lp & rp, ln & rn
+
+    _ex_p_reg = (sig & BIT_EXON_POS) != 0
+    _ex_n_reg = (sig & BIT_EXON_NEG) != 0
+    _mact_p, _mact_n = _mrna_active(_ex_p_reg, _ex_n_reg)
+
+    def _continues(flank_reg, far_bnd_of_reg):
+        """Does the MATURE TRANSCRIPT continue past the flank's far edge, on this junction's strand?"""
+        ok = flank_reg >= 0
+        fr = np.clip(flank_reg, 0, R - 1)
+        fb = np.where(ok, far_bnd_of_reg[fr], -1)
+        okb = ok & (fb >= 0)
+        fbc = np.clip(fb, 0, B - 1)
+        contig = np.where(js == TS_POS, _mact_p[fbc], np.where(js == TS_NEG, _mact_n[fbc], False))
+        splices_on = (js != 0) & (js[fbc] == js)  # the far boundary is a junction on the SAME strand
+        return okb & (contig | splices_on)
+
+    def _eff_spl_face(flank_reg, far_bnd_of_reg):
+        ok = flank_reg >= 0
+        fr = np.clip(flank_reg, 0, R - 1)
+        cont = _continues(flank_reg, far_bnd_of_reg)
+        return np.where(ok, np.where(cont, side_eff_r[fr], side_eff_spl[fr]), 0.0)
+
+    b_eff_spl_l = _eff_spl_face(blr, lb_of_reg)  # left face: its flank's FAR boundary is that region's left
+    b_eff_spl_r = _eff_spl_face(brr, rb_of_reg)
     # counts: the SAME gate, so `spliced_n_*` is nonzero exactly where `spliced_*` is
     b_spn_pos_l, b_spn_pos_r = _spliced_faces(TS_POS, exon_pos_l, exon_pos_r, bspn_l, bspn_r)
     b_spn_neg_l, b_spn_neg_r = _spliced_faces(TS_NEG, exon_neg_l, exon_neg_r, bspn_l, bspn_r)

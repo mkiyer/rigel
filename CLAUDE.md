@@ -6,7 +6,32 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rigel is a Bayesian RNA-seq transcript quantification tool that jointly models mRNA, nascent RNA (nRNA), and genomic DNA contamination (gDNA). It uses a single-pass C++ BAM scanner, a per-region **calibration** stage that deconvolves the library into gDNA vs RNA, and a locus-level EM solver. Python package name is `rigel-rnaseq` on PyPI; the import and CLI are `rigel`.
 
-> **Calibration (bipartite belief-propagation sweep — single production path).** The calibration stage deconvolves each node's **unspliced** fragment mass into the 2-simplex **(f_rna₊, f_rna₋, f_g)** — sense-RNA / antisense-RNA / gDNA (calibration models **only RNA-vs-gDNA**; the per-locus EM separates nascent from mature downstream) — by a **belief-propagation sweep** over a **bipartite region↔boundary node chain** (`node_chain` builds the chain; `bp_solver` is the solver). Per the **count-zero-information** principle (`docs/calibration/CALIBRATION_ARCHITECTURE.md`): a fragment count carries no intrinsic gDNA/RNA information, so a node's composition is set by exactly three sources — a **strand likelihood** (the Beta-Binomial tilt of the per-strand counts — the only INTRINSIC signal; the count enters ONLY as its overdispersed Fisher information), the **cross-node imputation** (neighbour **density** messages at the belief-free Poisson disagreement-variance reliability `σ²_imp` — `bp_solver.adjacent_disagreement_variance`, fit ONCE, no `var~mean` curve), and the **global gDNA prior** (the population baseline `ρ_global` at MAD-spread precision). Each node carries a pie `(f₊,f₋,f_g)` + per-component densities; nodes inform each other by a **single forward-backward (L→R then R→L) belief-propagation pass** (`bp_solver.node_sweep`, exact on the chain — a forest of linear paths): a source's facing density is the destination's **identity-mean** prior (`μ_dst = ρ_src`), precision-weighted into the destination's per-node ψ solve (`simplex_logodds._solve_nodes_logodds_all`). **gDNA flows genomically; per-strand RNA flows only where that strand is continuous** (`free_s` on both endpoints — the transcript-structure gate; a TES / non-strand flank is a per-strand variance sink). **Boundaries are first-class:** they own the one-sided, motif-stranded **spliced** RNA (a fixed floor + density term) and their per-side gDNA/RNA flux feeds the per-locus prior (`chain_region_deconv` + `chain_boundary_side_deconv`). **Init** is signature-binary G1/G2/G3 (`init_beliefs`: intergenic / TSS sinks → `{0,0,1}`; single-strand → the strand solve; AMBIG → `{0,0,1}` at MAX variance). The message precision `σ²_imp` and every global-prior input are fit ONCE before the pass (no per-pass `var~mean` refit, no outer fixed-point loop); the single forward-backward pass then resolves the per-node pie (`config.sweep_n_grid`=60 lattice). Theory + production reference: `docs/calibration/CALIBRATION_ARCHITECTURE.md` (the count-zero-info principle — authoritative) and `docs/calibration/calibration_prior_production_reference.md` (what ships on `main`: the 2-pass M2-background + KDE prior); fractional-accumulator spec in `docs/accumulator/00_design.md`; docs index in `docs/README.md`. The full pipeline (scan → calibrate → **quant**) runs end-to-end: `quant_from_buffer` + `calibration.priors.assemble_priors` are wired in `run_pipeline`.
+> **Calibration (WIP — mid-migration between two solvers; NOT ready to ship).** ⚠ **Read
+> `docs/calibration/ROADMAP.md` before doing any calibration work — it is the single entry point.** Most docs
+> in `docs/calibration/` were archived to `archive/` on 2026-07-24; only the handful named in the ROADMAP are
+> live. Do NOT reference anything in `archive/`.
+>
+> The calibration stage deconvolves each node's **unspliced** fragment mass into the 2-simplex **(f_rna₊,
+> f_rna₋, f_g)** — sense-RNA / antisense-RNA / gDNA (calibration models **only RNA-vs-gDNA**; the per-locus EM
+> separates nascent from mature downstream) — by a **belief-propagation sweep** over a **bipartite
+> region↔boundary node chain** (`node_chain` builds the chain; `bp_solver` is the solver). This is the
+> **prior-free first pass, "pass-0"** — an approximation whose result trains a **gDNA hyperprior** that is then
+> required to **re-solve** (esp. AMBIG nodes). Per the **count-zero-information** principle
+> (`docs/calibration/CALIBRATION_ARCHITECTURE.md`, authoritative): a fragment count carries no intrinsic
+> gDNA/RNA information, so a node's composition is set by exactly three sources — the **strand likelihood**
+> (Beta-Binomial tilt; constrains only the tilt, so AMBIG nodes get NO f_g from it), **cross-node imputation**
+> (neighbour messages), and the **population gDNA prior** (the hyperprior, WIP).
+>
+> **`bp_solver.py` currently holds TWO solve paths:** the legacy density-transfer `_scan` (default,
+> `RIGEL_UNIFIED=0`) and the new composition/enrichment-ratio `_unified_solve` (`RIGEL_UNIFIED=1`, default off,
+> the target). The goal is to productionize `_unified_solve` and delete `_scan`; the blocker is that the
+> unified solver's **variance model is wrong** for a composition transport (the old model assumed genome-wide
+> density uniformity, which hybrid capture breaks — see `docs/calibration/variance_model_handoff.md`). The
+> **gDNA intron factory** is shipped (`intron_factory=True` default): it deconvolves introns against the
+> intergenic background and carries its derived precision (`bp_solver._lambda_factor_precision`).
+> Fractional-accumulator spec in `docs/accumulator/00_design.md`. The full pipeline (scan → calibrate →
+> **quant**) runs end-to-end: `quant_from_buffer` + `calibration.priors.assemble_priors` are wired in
+> `run_pipeline`.
 
 ## Build & Development
 

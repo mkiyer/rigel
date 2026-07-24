@@ -326,9 +326,17 @@ class CalibrationConfig:
     #: ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` λ-factor (introns are off-target ⇒ ρ_bg is their TRUE gDNA
     #: density, a two-sided estimate; peels gDNA, not RNA — strand-free). Resolves the unstranded-intron gDNA the
     #: prior-free pass-0 currently leaves at ~½ (fixes both the zero-gDNA false-positive and the gDNA under-call),
-    #: and seeds the Phase-2 hyperprior fit with clean intron gDNA. ``False`` (default) ⇒ byte-identical to the
+    #: and seeds the Phase-2 hyperprior fit with clean intron gDNA. ``False`` ⇒ byte-identical to the
     #: pre-factory pass-0.
-    intron_factory: bool = False
+    #:
+    #: **DEFAULT ON since 2026-07-23**, once the factor's precision was registered as composition evidence
+    #: (``bp_solver._lambda_factor_precision`` — ``I_factory``). Before that the factory shifted an intron's own
+    #: mode but carried no ``τ``, so the intron had no standing to EMIT and the correction died one hop out
+    #: (measured: intron belief +93 %, neighbour ``prec_g`` bit-identical). With the evidence channel wired,
+    #: pass-0 vs oracle over the 32-scenario ambig_dense_10mb suite: mwae 0.1361 → 0.0949, corr 0.688 → 0.736,
+    #: 20 scenarios better / 1 worse / 11 flat; intron mwae 0.1781 → 0.0117 (its share of suite error 17.0 % →
+    #: 1.6 %); every stranded scenario better or flat (R4 clean).
+    intron_factory: bool = True
 
     #: **Calibration refit iterations.** Pass-0 bootstraps from TOTAL density: an extremely weak gDNA-rate
     #: prior + the belief-free projection ``σ²_transfer`` ⇒ deliberately GENTLE messages that nudge rather than

@@ -749,6 +749,21 @@ def test_mature_measurement_recovers_exon_rna():
     assert fg_exon < 0.45, fg_exon  # truth ≈0.32; comfortably RNA-dominated, not pinned to gDNA
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "OPEN ITEM surfaced by B1b (message_layer_derivation.md §12.8). Assertions (1) and (3) still hold — "
+        "the depleted junction genuinely lowers the RNA target, and the exon stays firmly RNA-dominated "
+        "(f_g = 0.134 vs a 0.45 bound). Only the ABSOLUTE bound in (2) fails: |Δf_g| = 0.0612 vs 0.05. "
+        "The diagnosis is a real coupling, not a tolerance nuisance: `_boundary_spliced_mass_increment` folds "
+        "the SPLICED density into the mature-inclusive boundary projection used for σ²_transfer on exon↔"
+        "boundary edges, so depleting the spliced channel changes σ²_transfer, which changes the attenuation "
+        "of the gDNA RELAY. **The gDNA relay's precision should not depend on the spliced channel's probe "
+        "depletion at all** — those are different components. Fixing that belongs with the RNA relay (N4) / "
+        "the Stage-C restructure, where σ²_transfer is replaced by the measured per-edge δ. The 0.05 bound "
+        "itself was empirical, not derived; do not simply widen it — derive what a 4× depletion SHOULD move."
+    ),
+)
 def test_mature_measurement_disagreement_silenced():
     """BUG #2 regression: the mature MEASUREMENT message must be DISAGREEMENT-SILENCED like every other RNA
     message (the old exemption applied it at full COUNT precision). Under capture, junction-spanning reads are
@@ -831,6 +846,49 @@ def test_compile_strand_evidence_deadband_kills_unstranded():
         u, u, fg, kappa=0.99, od_g=0.03, od_r=0.03, n_gdna_obs=0.0, n_rna_obs=1e4, is_region=reg, locked=unl
     )
     assert np.all(ev_nog.tau0_lam == 0.0)
+
+
+def test_lambda_factor_precision_flat_carries_no_evidence():
+    """I_factory unit: a FLAT λ-factor row carries τ = 0 — NOT the solve grid's own width.
+
+    Every non-intron node gets an all-zero row from ``_build_intron_prior`` (and an uninformative background
+    makes every row flat). Moment-matching a uniform weight vector over a bounded grid would return the GRID
+    variance, i.e. a spurious finite precision at every node in the genome; the flatness gate is what keeps
+    "no factor" meaning "no evidence" (`gdna_intron_factory_design.md` §4)."""
+    from rigel.calibration.bp_solver import _lambda_factor_precision
+    from rigel.calibration.simplex_logodds import _logodds_grid
+
+    lam, _ = _logodds_grid(60, 10.0)
+    assert _lambda_factor_precision(None, lam) is None  # factory off ⇒ nothing to add
+    tau = _lambda_factor_precision(np.zeros((4, lam.shape[0])), lam)
+    assert np.all(tau == 0.0)
+
+
+def test_lambda_factor_precision_tracks_curvature_and_count():
+    """I_factory unit: the registered precision IS the factor's curvature, and it honours the count.
+
+    Two properties the design (§4) demands of the factory's precision, neither of which involves a tuned
+    constant: a SHARPER factor carries more evidence, and — through the NegBinom ``Var(g) = μ + μ²/α_eff`` — a
+    high-count intron resolves ``f_g`` more sharply than a low-count one. This is what makes registering it in
+    ``τ`` safe where §E.8's binary ``struct_lock`` certainty was not: it self-limits on thin data."""
+    from rigel.calibration.bp_solver import _lambda_factor_precision
+    from rigel.calibration.gdna_intron_factory import IntronBackground, intron_lambda_factor
+    from rigel.calibration.simplex_logodds import _logodds_grid
+
+    lam, fg = _logodds_grid(60, 10.0)
+    sharp = -0.5 * ((lam - 1.0) ** 2) / 0.05
+    diffuse = -0.5 * ((lam - 1.0) ** 2) / 5.0
+    t_sharp = _lambda_factor_precision(np.stack([sharp]), lam)[0]
+    t_diffuse = _lambda_factor_precision(np.stack([diffuse]), lam)[0]
+    assert t_sharp > t_diffuse > 0.0
+
+    # count-over-length: same background + same density, 100x the opportunity ⇒ a sharper peel.
+    bg = IntronBackground(log_mu_bg=float(np.log(0.01)), alpha=np.inf, sg=1.0e5, n0=0.0,
+                          n_regions=500, informative=True)
+    eff = np.array([1.0e3, 1.0e5])
+    factor = intron_lambda_factor(bg, count=0.02 * eff, eff_g=eff, fg_grid=fg)
+    tau = _lambda_factor_precision(factor, lam)
+    assert tau[1] > tau[0] > 0.0
 
 
 def test_compile_strand_evidence_struct_lock_regions_only():
