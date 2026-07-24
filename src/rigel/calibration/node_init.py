@@ -12,9 +12,12 @@ sources of ``docs/calibration/variance_model_concepts.md``:
    (`density_deconv`); the curvature of that per-node ``λ``-factor is honest, count-derived composition
    evidence, registered here as ``τ_λ`` (`density_factor_precision`). The **intron factory** is its special
    case (the gDNA prior = the intergenic node distribution).
-3. **STRAND DECONVOLUTION** — a 1-DOF (single-strand) node solves its ``f_g`` directly from the Beta-Binomial
-   tilt; a 2-DOF (AMBIG) node gets only a partial (tilt) solve. The strand Fisher information seeds ``τ_λ``
-   (`strand_evidence`), and is IDENTICALLY zero on unstranded data (κ=½) by a derived noise-floor deadband.
+3. **STRAND DECONVOLUTION** — the strand Beta-Binomial is RANK-1 (it informs only ``p``), so its
+   gDNA-level (``λ``) precision is the Schur-marginal (`variance_foundation_proposal.md`, approach E): a 1-DOF
+   (single-strand) node has its tilt structurally locked, so the strand PINS ``f_g`` (``τ_λ`` gets the strand
+   λ-term ``c·a²``); a 2-DOF (AMBIG) node's tilt is free, so the strand CANCELS out of ``f_g`` and contributes
+   ZERO (it constrains only the tilt). `strand_evidence` returns the single-strand λ-term; `build_node_init`
+   gates it to single-strand nodes. Identically zero on unstranded data (κ=½) by a derived noise-floor deadband.
 4. **UNSOLVED** nodes default to **100 % gDNA at ZERO precision** — the honest "no information" state
    (``τ_λ = 0 ⇒ Var(log f) = ∞ ⇒ p = 0``), left for the sweep + population prior to resolve.
 
@@ -217,8 +220,9 @@ def build_node_init(
     fp_loc = np.where(locked, np.asarray(belief.f_pos, np.float64), fp_loc)
     fn_loc = np.where(locked, np.asarray(belief.f_neg, np.float64), fn_loc)
 
-    # ── sources 1 & 3: the composition evidence τ_λ = I_strand + I_factory, and the structural lock ──
-    tau_lam, struct_lock = strand_evidence(
+    # ── sources 1 & 3: the composition evidence τ_λ (the Schur-marginal gDNA-level precision) + struct lock ──
+    # `strand_evidence` returns the SINGLE-STRAND strand λ-Fisher I_strand = c·a² (the value at the locked tilt).
+    i_strand, struct_lock = strand_evidence(
         statics.u_pos,
         statics.u_neg,
         fg_loc,
@@ -230,8 +234,17 @@ def build_node_init(
         is_region=is_reg,
         locked=locked,
     )
+    # APPROACH E (docs/calibration/variance_foundation_proposal.md, verified). The strand Beta-Binomial is
+    # RANK-1: it depends on (λ,θ) only through p = ½+(κ−½)(1−f_g)sinθ. So the honest MARGINAL gDNA-level
+    # precision (the Schur complement of the 2×2 composition Fisher) is:
+    #   * SINGLE-STRAND (1-DOF): θ is STRUCTURALLY locked ⇒ τ_λ gets the full strand λ-term c·a² (strand pins f_g);
+    #   * AMBIG (2-DOF): θ is a FREE nuisance ⇒ the strand CANCELS out of f_g (Schur ⇒ 0) — it constrains only
+    #     the tilt, never the gDNA level. Crediting c·a² to an AMBIG node is a (bounded) phantom precision on
+    #     exactly the nodes calibration exists to resolve. Gate the strand λ-term to single-strand nodes.
+    single_strand = np.asarray(fp, bool) ^ np.asarray(fn, bool)
+    tau_lam = np.where(single_strand, i_strand, 0.0)
     lam_grid, _ = _logodds_grid(int(n_grid), float(logodds_window))
-    tau_fac = density_factor_precision(intron_prior, lam_grid)
+    tau_fac = density_factor_precision(intron_prior, lam_grid)  # I_density (NB curvature) on the λ axis
     if tau_fac is not None:
         tau_lam = tau_lam + tau_fac
 

@@ -73,7 +73,7 @@ if args.arm:
         inp = _scan_and_truth(SUITE, cond, index, cfg, Path("/tmp/rigel_selfsolve"), SUITE / "_selfsolve_cache")
         dbg: dict = {}
         _fac = os.environ.get('P0_FACTORY')
-        cc = dataclasses.replace(cfg.calibration, calib_refit_iters=0,  # PASS-0 ONLY
+        cc = dataclasses.replace(cfg.calibration, calib_refit_iters=int(os.environ.get('P0_REFIT', '0')),  # 0=PASS-0
                                  **({} if _fac is None else {'intron_factory': _fac != '0'}))
         calmod.calibrate(
             inp["payload"], ra, inp["strand_model"],

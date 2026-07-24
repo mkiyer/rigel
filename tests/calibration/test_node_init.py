@@ -208,14 +208,39 @@ def test_strand_evidence_struct_lock_regions_only():
 
 def test_strand_deconv_single_strand_solves_and_is_precise():
     """A single-strand (G2) exon self-solves f_g from the tilt: it carries a live gDNA + sense-RNA own belief
-    at finite precision, and NO antisense (the − axis is structurally dead)."""
+    at finite precision, and NO antisense (the − axis is structurally dead). The strand λ-term (c·a²) applies
+    to a single-strand node — the tilt is locked, so the strand PINS f_g (approach E)."""
     ni, _ = _init(kappa=0.95)
     ex = 3  # exon+ region node
     assert not ni.struct_lock[ex]
-    assert ni.tau_lam[ex] > 0.0  # stranded evidence fires
+    assert ni.tau_lam[ex] > 0.0  # stranded evidence fires (single-strand ⇒ strand pins f_g)
     assert ni.rho_g[ex] > 0.0 and ni.prec_g[ex] > 0.0
     assert ni.rho_pos[ex] > 0.0 and ni.prec_pos[ex] > 0.0
     assert ni.rho_neg[ex] == 0.0 and ni.prec_neg[ex] == 0.0  # − strand dead
+
+
+def test_ambig_stranded_strand_gives_zero_fg_precision():
+    """APPROACH E (the rank-1 fix): the strand Beta-Binomial is rank-1 (informs only p), so for an AMBIG (2-DOF)
+    node — where the tilt is a free nuisance — the strand CANCELS out of f_g (the Schur-marginal λ-precision)
+    and contributes ZERO. The un-gated `strand_evidence` still computes a POSITIVE single-strand λ-term for the
+    AMBIG node (the phantom source), but `build_node_init` GATES it to single-strand nodes, so the AMBIG node's
+    τ_λ from the strand is 0. Only a density (gDNA) prior can pin an AMBIG node's f_g."""
+    chain, statics, geometry, belief, ra = _scenario(kappa=0.9)
+    am = 5  # AMBIG region node (both strands live), no intron prior in _init ⇒ no density evidence
+    is_reg = np.asarray(chain.kind) == REGION
+    locked = ~(
+        (np.asarray(statics.free_pos, bool) | np.asarray(statics.free_neg, bool))
+        & (np.asarray(statics.mass_unspliced, float) > 0.0)
+    )
+    i_strand, _ = strand_evidence(
+        statics.u_pos, statics.u_neg, np.full(chain.n_nodes, 0.5),
+        kappa=0.9, od_g=0.2, od_r=0.1, n_gdna_obs=230.0, n_rna_obs=85.0, is_region=is_reg, locked=locked,
+    )
+    assert i_strand[am] > 0.0  # the un-gated single-strand strand term is positive (the phantom the fix removes)
+    ni, _ = _init(kappa=0.9)
+    assert not ni.struct_lock[am]
+    assert ni.tau_lam[am] == 0.0  # ...but the assembled τ_λ gates the strand term to 0 for the AMBIG node
+    assert ni.prec_g[am] == 0.0
 
 
 # ── source 1: MEASURED (structural pure gDNA) → Poisson precision ────────────────────────────────────────────

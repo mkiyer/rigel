@@ -22,7 +22,11 @@ The only other docs that are live (everything else is in `archive/`, kept for hi
 * `gdna_intron_factory_design.md` — a shipped feature (the intron gDNA factory). Live.
 * `variance_model_concepts.md` — the owner's spec for the **initialization** phase (the four sources) that
   `node_init.py` implements. Read for the init model.
-* `variance_model_handoff.md` — the variance-model derivation work, to be **redone** next (handoff). Live.
+* `variance_foundation_plan.md` — **the current implementation plan**: isolate the composition precision
+  `(τ_λ,τ_θ)` (foundation) from the sampling `1/n` (messages). Hardened against `variance_foundation_critique.md`
+  (a 6-lens adversarial critique). **The next task's spec.** `SESSION_2026_07_24_HANDOFF_2.md` is the handoff.
+* `variance_model_handoff.md` — the MESSAGE variance-model derivation, to be redone **after** the foundation
+  (`variance_foundation_plan.md`) lands. Live.
 * `SESSION_2026_07_24_HANDOFF.md` — the prior session's record. Its "two-solver / uncommitted" specifics are
   now superseded (the convergence landed); the variance-model derivation §§ still stand.
 
@@ -106,10 +110,13 @@ capture-ON pass-0 badly; see the session handoff §“open problems”.)
 0. ✅ **DONE (2026-07-24):** converge to one solver — deleted `_scan` + flags + the `_UNIFIED_*` gates;
    extracted + hardened + unit-tested the **initialization** phase (`node_init.py`, the four sources);
    regenerated goldens. `bp_solver.py` 1871 → ~730 lines. Behavior-preserving (byte-identical A/B).
-1. **Derive the correct variance model** for the composition solver — per-component density variance +
-   a composition-appropriate transfer variance. Validate by MC. *(This is the NEXT task.)*
-2. **Implement it** as pure, tested arithmetic (extend `enrichment_frame.py` / mirror `node_init.py`) so the
-   `_unified_solve` closure shrinks further. Re-run the loop (worst scenario → dissect → fix).
+1. **Solidify the variance FOUNDATION** (`variance_foundation_plan.md`, hardened by
+   `variance_foundation_critique.md`) — isolate the node's composition precision `(τ_λ, τ_θ)` from the sampling
+   `1/n`, so message-propagation precision builds on a clean foundation. **This is the NEXT task** (verify the
+   plan → critique → implement Phases B–E; 2 blockers are open decisions in plan §0). τ_θ is deferred (its
+   diagonal premise was refuted — the strand Fisher is rank-1).
+2. **Then derive the MESSAGE variance model** (`variance_model_handoff.md`) — per-component density variance +
+   a composition-appropriate transfer variance, on the clean foundation. Validate by MC.
 3. **Make the unified solver win the A/B** (≥ the legacy-with-factory baseline, no stranded regression).
 4. **Return to the gDNA hyperprior refit** (§4) on the clean solver, then the re-solve, then a ship candidate.
 
