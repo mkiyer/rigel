@@ -110,13 +110,16 @@ capture-ON pass-0 badly; see the session handoff §“open problems”.)
 0. ✅ **DONE (2026-07-24):** converge to one solver — deleted `_scan` + flags + the `_UNIFIED_*` gates;
    extracted + hardened + unit-tested the **initialization** phase (`node_init.py`, the four sources);
    regenerated goldens. `bp_solver.py` 1871 → ~730 lines. Behavior-preserving (byte-identical A/B).
-1. **Solidify the variance FOUNDATION** (`variance_foundation_plan.md`, hardened by
-   `variance_foundation_critique.md`) — isolate the node's composition precision `(τ_λ, τ_θ)` from the sampling
-   `1/n`, so message-propagation precision builds on a clean foundation. **This is the NEXT task** (verify the
-   plan → critique → implement Phases B–E; 2 blockers are open decisions in plan §0). τ_θ is deferred (its
-   diagonal premise was refuted — the strand Fisher is rank-1).
-2. **Then derive the MESSAGE variance model** (`variance_model_handoff.md`) — per-component density variance +
-   a composition-appropriate transfer variance, on the clean foundation. Validate by MC.
+1. ✅ **DONE — the variance FOUNDATION** (`variance_foundation_plan.md` v4, `variance_foundation_proposal.md`).
+   The honest local composition precision is a **single Schur-marginal scalar `τ_λ`** (approach E) — a diagonal
+   `(τ_λ, τ_θ)` is prohibited (the strand Fisher is rank-1). Derived by a 5-approach workflow, numerically
+   validated + independently re-verified, and independently critiqued (both converge on approach E + Option B).
+   Phase 1 (the strand-gate bug fix — AMBIG gets zero strand f_g credit) is landed + A/B-validated (stranded arm
+   improves, no regression), committed `c6df8c50`.
+2. **The MESSAGE variance model** (`variance_model_handoff.md`) — **the NEXT task**. Builds the message precision
+   on the `τ_λ` foundation; absorbs the deferred **composition/sampling separation** (move `1/n` out of the
+   fusion weight into the transport transfer function + the `struct_lock` hard-override; plan v4 §4). Per-node
+   density variance + a composition-appropriate transfer variance. Validate by MC + the per-condition A/B.
 3. **Make the unified solver win the A/B** (≥ the legacy-with-factory baseline, no stranded regression).
 4. **Return to the gDNA hyperprior refit** (§4) on the clean solver, then the re-solve, then a ship candidate.
 
