@@ -120,6 +120,34 @@ Differencing `mo_g − mo_R` demands both components be known, so it drops the R
    stranded must return to ≤ ~0.03. If a regression appears, **DISSECT** (worst scenario → worst nodes → trace
    the message propagation to root cause; do NOT assume a theory flaw — the theory is sound). Then regenerate goldens.
 
+### ✅ DONE — the three-stream relay + single-λ combine (Steps B/C)
+Implemented (`bp_solver._unified_solve`): the density relay now carries, alongside the mode densities, a
+**composition-τ** accumulator (seed `_ni.tau_lam`) → ONE **λ-message** (`lam_imp`, mode `mo_g − mo_R`, precision
+the fused τ), and **measurement** accumulators `mg/mp/mn` (seed `struct_lock·prec_g` for the anchor gDNA; the
+spliced adds at the graft) → the independent **gdna_imp/rna_imp**; the θ tilt (AMBIG) from `(c_p−c_n)/(c_p+c_n)`.
+Tests green (383); the double-count is fixed (single-λ). A diagnostic env hook `RIGEL_S2T_OFF` zeros
+`σ²_transfer`.
+
+### ⛔ STILL FAILING — the stranded regression is NOT the double-count; it is a REFRAME/PROPAGATION defect
+A/B: three-stream ≈ m5 (aggregate refit=1 0.0945→0.0998, stranded 0.0777→0.0778) — **the single-λ fix did not
+move the stranded regression**, so it was never the double-count. **DISSECTED** (`gdna_gdna300_ss_0.99_capON`,
+node 1909, an exon oracle f_g=0.985, mostly gDNA): its OWN message-free solve `fg_loc=0.953` is CORRECT but at
+WEAK precision (`τ=1.6` — a mostly-gDNA region has little RNA, so the strand tilt barely constrains it); it then
+receives a **strong, WRONG RNA+ measurement** (`cm_p=26.45`, mode `f_pos=0.718`, i.e. "72 % RNA+" for a ~1.5 %-RNA
+node) that overrides the weak-but-correct own belief → f_g collapses to 0.51. **Root cause:** the **reframe `r`
+AMPLIFIES a tiny high-RNA-fraction neighbour into a dominant RNA message at a high-mass gDNA node** (1909 mass
+66,544 next to boundary 1910 mass 14, 64 % RNA ⇒ `r = ρ_tot(1909)/ρ_tot(1910)` enormous — the "r up to 10³ into
+exons" pathology the code comments already lament). σ²_transfer damps the *precision* but the *mode* is already
+wrong and the precision stays high enough to win. This defect is **orthogonal to the single-λ work** — it lives
+in the density relay's reframe + the measurement propagation, and is present in m5 too (which is why it improves
+the unstranded/capture arm — where messages SHOULD propagate — but corrupts high-gDNA stranded nodes where a
+tiny mis-composed neighbour must NOT dominate).
+
+**▶ NEXT lead:** cap/gate the reframe so a tiny neighbour's RNA fraction cannot become a high-precision message
+at a high-mass, composition-mismatched node (mass-ratio or composition-mismatch gate on the reframe or on the
+measurement propagation) — this is what unblocks the stranded gate. Dissect first (`RIGEL_S2T_OFF` + a per-node
+dump; `scratchpad`/`/tmp/dump_node.py` is the template) before changing the reframe.
+
 ## 7. INVARIANTS — preserve (handoff §7 unchanged) + the corrected census (HANDOFF_3 §8)
 
 `N` enters only as power (`τ_λ` or `1/n`), never a composition vote; variances in log-odds `Var(λ)`/`Var(log f_c)`,

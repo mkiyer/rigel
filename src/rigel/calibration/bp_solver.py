@@ -31,6 +31,7 @@ INITIALIZATION self-solve (the four sources → each node's own ``(density, prec
 
 from __future__ import annotations
 
+import os
 
 import numpy as np
 
@@ -290,6 +291,7 @@ def node_sweep(
             is_exon_node, dtype=bool
         )  # source-is-exon selector for the mature routing
         fp_a, fn_a = np.asarray(fp, bool), np.asarray(fn, bool)
+        is_amb = fp_a & fn_a  # AMBIG: both strands live → the tilt θ is a free DOF (its own message)
         M = np.asarray(mass_global, np.float64)
         E_g = np.asarray(eff_global, np.float64)
         E_r = np.where(is_reg_a, ER[0], ER[0] + ER[1]).astype(
@@ -317,6 +319,8 @@ def node_sweep(
             np.where(_tau > _EPS, np.minimum(_fgfr * _fgfr / np.maximum(_tau, _EPS), _fgfr), _fgfr),
         )
         logvar_tot = np.asarray(composition_logvar(_fg0, E_g, E_r, _var_fg, _n_node), np.float64)
+        if os.environ.get("RIGEL_S2T_OFF"):  # DIAGNOSTIC ONLY: disable σ²_transfer (isolate its effect)
+            logvar_tot = np.zeros_like(logvar_tot)
 
         # per-strand spliced (mature) DENSITY — one-sided per-face density (0 on regions); the acceptor face.
         def _face_spl(sp):
@@ -348,6 +352,21 @@ def node_sweep(
         # SAME τ as gDNA (never the local posterior variance, which pools the shared reference into a phantom).
         og, op, on = _ni.rho_g, _ni.rho_pos, _ni.rho_neg
         pg_own, pp_own, pn_own = _ni.prec_g, _ni.prec_pos, _ni.prec_neg
+
+        # ── THREE-STREAM precision seeds (the single-λ combine, message_variance_derivation.md §4 / HANDOFF_4
+        # §6). The density precision (pg/pp/pn, unchanged) drives the MODE fusion. TWO extra accumulators
+        # SEPARATE the RANK-1 composition (→ ONE λ-message) from the INDEPENDENT measurements (→ their own
+        # gdna/rna messages), so ψ counts each ONCE — the fix for the two-message double-count:
+        #   * τ (COMPOSITION): the Schur λ-precision; 0 at anchors + unstranded non-factory nodes. On unstranded
+        #     data τ≈0 ⇒ the λ-message is ~off and the solve rides the measurement channels (preserving the M5
+        #     win); on stranded data the composition rides ONE λ-message (no double-count).
+        #   * mg/mp/mn (MEASUREMENT): the anchor gDNA count (own, struct_lock only) + the spliced RNA count
+        #     (added at the graft). A density-level bound, NOT a composition vote.
+        _struct = np.asarray(_ni.struct_lock, bool)
+        tau_own = np.asarray(_ni.tau_lam, np.float64)
+        mg_own = np.where(_struct, np.asarray(pg_own, np.float64), 0.0)
+        mp_own = np.zeros_like(np.asarray(pp_own, np.float64))
+        mn_own = np.zeros_like(np.asarray(pn_own, np.float64))
 
         def _fuse(a, pa, b, pb):  # scalar precision-weighted density fuse
             p = pa + pb
@@ -402,7 +421,9 @@ def node_sweep(
 
         def _relay(seq, nbr, dst_face, src_face, df, sf):
             rg, rp, rn = og.copy(), op.copy(), on.copy()
-            pg, pp, pn = pg_own.copy(), pp_own.copy(), pn_own.copy()
+            pg, pp, pn = pg_own.copy(), pp_own.copy(), pn_own.copy()  # full → MODE fusion
+            mg, mp, mn = mg_own.copy(), mp_own.copy(), mn_own.copy()  # MEASUREMENT (anchor gDNA + spliced RNA)
+            tau = tau_own.copy()  # COMPOSITION (τ_λ) → the λ-message
             for i in seq:
                 s = nbr[i]
                 if s < 0:
@@ -423,31 +444,41 @@ def node_sweep(
                 # node-pooled sum. Only an EXON receives the graft — an intron carries no mature (`ex_a[i]`,
                 # not `is_reg_a[i]`, which grafted the junction's whole mature flux into every flanking intron).
                 _gr = ex_a[i] and is_bnd_a[s]
-                # M5 σ²_transfer: 0 on the matched-set GRAFT (r is common-mode across {g,R} ⇒ cancels in the
-                # composition — applying it here would double-count), Var(log r)=logvar_tot[i]+logvar_tot[s]
-                # otherwise (peel DIFFERENCE / plain reframe / partial-anchor — r is load-bearing).
+                # σ²_transfer: 0 on the matched-set GRAFT (r common-mode across {g,R}), Var(log r) elsewhere
+                # (peel / plain reframe / partial-anchor — r load-bearing).
                 s2t = 0.0 if _gr else (logvar_tot[i] + logvar_tot[s])
                 gp = spl_p_f[sf][s] if _gr else 0.0
                 gn = spl_n_f[sf][s] if _gr else 0.0
                 tg, tp, tn = rg[s] * r, (rp[s] + gp) * r, (rn[s] + gn) * r
-                tpg, tpp, tpn = _damp(pg[s], s2t), _damp(pp[s], s2t), _damp(pn[s], s2t)
+                tpg, tpp, tpn = _damp(pg[s], s2t), _damp(pp[s], s2t), _damp(pn[s], s2t)  # full (mode)
+                tmg, tmp, tmn = _damp(mg[s], s2t), _damp(mp[s], s2t), _damp(mn[s], s2t)  # measurement
+                ttau = _damp(tau[s], s2t)  # composition
                 # The grafted mature is a MEASUREMENT (a junction COUNT), not an imputation, so it carries its
                 # own precision and is NOT τ-gated — the source's PREDICTION precision is 0 on unstranded data
-                # and would otherwise drop the graft on the floor. Gating both channels on τ is the τ-gag bug
-                # `_scan` retired (it silenced 52 % of spliced junctions unstranded); keep them separate.
+                # and would otherwise drop the graft on the floor. It enters BOTH the mode-fusion (full) and the
+                # MEASUREMENT stream (never the composition τ — a count is not a composition vote).
                 if _gr:
-                    tpp += SP[sf][s] / (1.0 + SP[sf][s] * s2t) if SP[sf][s] > _EPS else 0.0
-                    tpn += SN[sf][s] / (1.0 + SN[sf][s] * s2t) if SN[sf][s] > _EPS else 0.0
+                    _spc = SP[sf][s] / (1.0 + SP[sf][s] * s2t) if SP[sf][s] > _EPS else 0.0
+                    _snc = SN[sf][s] / (1.0 + SN[sf][s] * s2t) if SN[sf][s] > _EPS else 0.0
+                    tpp += _spc
+                    tpn += _snc
+                    tmp += _spc
+                    tmn += _snc
                 if is_bnd_a[i] and ex_a[s]:  # EXON → boundary: PEEL the departing mature
                     tp, tn = max(tp - spl_p_f[df][i], 0.0), max(tn - spl_n_f[df][i], 0.0)
                 if not fp_a[i]:
-                    tp, tpp = 0.0, 0.0
+                    tp, tpp, tmp = 0.0, 0.0, 0.0
                 if not fn_a[i]:
-                    tn, tpn = 0.0, 0.0
+                    tn, tpn, tmn = 0.0, 0.0, 0.0
                 rg[i], pg[i] = _fuse(og[i], pg_own[i], tg, tpg)
                 rp[i], pp[i] = _fuse(op[i], pp_own[i], tp, tpp)
                 rn[i], pn[i] = _fuse(on[i], pn_own[i], tn, tpn)
-            return rg, rp, rn, pg, pp, pn
+                # measurement + composition precisions are INDEPENDENT evidence → additive (inverse-variance) fuse
+                mg[i] = mg_own[i] + tmg
+                mp[i] = mp_own[i] + tmp
+                mn[i] = mn_own[i] + tmn
+                tau[i] = tau_own[i] + ttau
+            return rg, rp, rn, pg, pp, pn, mg, mp, mn, tau
 
         # dst faces its source on its LEFT (face 0); the source faces the dst on its RIGHT (face 1) — and mirrored
         # for the backward pass. The face pair selects BOTH the per-side ρ_tot and the per-face mature flux.
@@ -461,7 +492,7 @@ def node_sweep(
         sl, sr = np.clip(li, 0, n - 1), np.clip(ri, 0, n - 1)
 
         def _transport(src, valid, df, sf, fwd_arrs, dst_face_v, src_face_v):
-            rg, rp, rn, pg, pp, pn = fwd_arrs
+            rg, rp, rn, pg, pp, pn, mg, mp, mn, tau = fwd_arrs
             # A node with no frame (no mass ⇒ no ρ_tot, §5) cannot reframe: the message passes through at r=1.
             # Falling back to ``rho_src = 1.0`` instead made r the destination's ABSOLUTE density (10³ on a
             # short node) — a raw scale masquerading as a ratio. The relay already guards this way.
@@ -479,29 +510,40 @@ def node_sweep(
             # cancels — a double-count otherwise), Var(log r)=logvar_tot+logvar_tot[src] elsewhere (peel /
             # plain reframe / partial-anchor — r load-bearing). See the relay's twin. Retires the proxy.
             s2t = transfer_logvar(logvar_tot, logvar_tot[src], graft)
+            # the COMPOSITION τ-stream: λ enrichment-invariant ⇒ σ²_transfer 0 on EVERY matched reframe (source
+            # carries RNA and not a peel), load-bearing only on peel/partial (see the relay's twin).
+            _matched = (fp_a[src] | fn_a[src]) & ~(is_bnd_a & ex_a[src] & valid)
+            s2t_comp = np.where(_matched, 0.0, s2t)
 
-            def _dv(p):
+            def _dv(p, s2=s2t):
                 return np.where(
-                    valid & (p[src] > 0.0), 1.0 / (1.0 / np.maximum(p[src], _EPS) + s2t), 0.0
+                    valid & (p[src] > 0.0), 1.0 / (1.0 / np.maximum(p[src], _EPS) + s2), 0.0
                 )
 
-            tpg, tpp, tpn = _dv(pg), _dv(pp), _dv(pn)
+            tpg, tpp, tpn = _dv(pg), _dv(pp), _dv(pn)  # full → mode fusion
+            tmg, tmp, tmn = _dv(mg), _dv(mp), _dv(mn)  # measurement (anchor gDNA + spliced RNA)
+            ttau = _dv(tau, s2t_comp)  # composition (τ) → the λ-message; 0 σ²t on matched (λ-invariant)
             # the graft's MEASUREMENT precision — never τ-gated (see the relay's twin). ``_sp``>0 only on a GRAFT
             # edge, where s2t≡0, so the inf→0 substitution below touches only already-masked entries (a
             # zero-count node has logvar_tot=+inf ⇒ s2t=inf; ``0·inf`` would nan the masked branch np.where evals).
             _sp, _sn = np.where(graft, SP[sf][src], 0.0), np.where(graft, SN[sf][src], 0.0)
             _s2t_spl = np.where(np.isfinite(s2t), s2t, 0.0)
-            tpp = tpp + np.where(_sp > _EPS, _sp / (1.0 + _sp * _s2t_spl), 0.0)
-            tpn = tpn + np.where(_sn > _EPS, _sn / (1.0 + _sn * _s2t_spl), 0.0)
+            _spc = np.where(_sp > _EPS, _sp / (1.0 + _sp * _s2t_spl), 0.0)
+            _snc = np.where(_sn > _EPS, _sn / (1.0 + _sn * _s2t_spl), 0.0)
+            tpp, tpn = tpp + _spc, tpn + _snc  # into the mode-fusion precision …
+            tmp, tmn = tmp + _spc, tmn + _snc  # … and the measurement stream (a count, never composition τ)
             peel = is_bnd_a & ex_a[src] & valid  # EXON → boundary: PEEL the departing mature
             tp = np.where(peel, np.maximum(tp - spl_p_f[df], 0.0), tp)
             tn = np.where(peel, np.maximum(tn - spl_n_f[df], 0.0), tn)
-            tp, tpp = np.where(fp_a, tp, 0.0), np.where(fp_a, tpp, 0.0)
-            tn, tpn = np.where(fn_a, tn, 0.0), np.where(fn_a, tpn, 0.0)
+            tp, tpp, tmp = np.where(fp_a, tp, 0.0), np.where(fp_a, tpp, 0.0), np.where(fp_a, tmp, 0.0)
+            tn, tpn, tmn = np.where(fn_a, tn, 0.0), np.where(fn_a, tpn, 0.0), np.where(fn_a, tmn, 0.0)
             tg, tp, tn = _pin_v(
                 tg, tp, tn, tpg, tpp, tpn
             )  # the message is a claim about THIS node's mass
-            return tg, tp, tn, tpg, tpp, tpn
+            return tg, tp, tn, tpg, tpp, tpn, tmg, tmp, tmn, ttau
+
+        def _fuse_add(a, b):  # additive (inverse-variance) fuse of two independent precision streams
+            return np.asarray(a, np.float64) + np.asarray(b, np.float64)
 
         def _fuse_v(a, pa, b, pb):
             p = pa + pb
@@ -511,25 +553,38 @@ def node_sweep(
         f_cur = np.asarray(f_g, np.float64).copy()
         for _ in range(_RHO_ITERS):
             _, rho_lf, rho_rf = _rho_faces(f_cur)
-            ag, ap, an, apg, app, apn = _transport(
+            ag, ap, an, apg, app, apn, amg, amp, amn, atau = _transport(
                 sl, vl, 0, 1, fwd, rho_lf, rho_rf
             )  # left msg: dst face 0, src face 1
-            bg, bp, bn, bpg, bpp, bpn = _transport(
+            bg, bp, bn, bpg, bpp, bpn, bmg, bmp, bmn, btau = _transport(
                 sr, vr, 1, 0, bwd, rho_rf, rho_lf
             )  # right msg: dst face 1, src face 0
-            cg, cpg = _fuse_v(ag, apg, bg, bpg)
+            cg, cpg = _fuse_v(ag, apg, bg, bpg)  # density MODE (full precision-weighted)
             cp, cpp = _fuse_v(ap, app, bp, bpp)
             cn, cpn = _fuse_v(an, apn, bn, bpn)
+            # measurement + composition precisions: additive (independent left + right evidence)
+            cm_g, cm_p, cm_n = _fuse_add(amg, bmg), _fuse_add(amp, bmp), _fuse_add(amn, bmn)
+            c_tau = _fuse_add(atau, btau)
             mo_g = np.log(np.maximum(cg * E_g / np.maximum(M, _EPS), _EPS))
             mo_p = np.log(np.maximum(cp * E_r / np.maximum(M, _EPS), _EPS))
             mo_n = np.log(np.maximum(cn * E_r / np.maximum(M, _EPS), _EPS))
-            # NOTE: the SINGLE-λ combine (the M6 rank-1 fix) needs a THREE-STREAM relay — composition-τ (→ one
-            # λ-message) SEPARATED from the independent measurement channels (anchor gDNA, spliced RNA → their
-            # own messages). Collapsing the entangled density relay's ``mo_g − mo_R`` at the combine loses the
-            # RNA-only spliced constraint when there is no gDNA info (Var(λ)=v_g+v_R=∞). The ψ λ/θ interface
-            # (`_local_solve`'s ``lam_imp``/``theta_imp``) is ready; the relay refactor is the next step
-            # (`SESSION_2026_07_24_HANDOFF_4.md`). Until then, the two-message combine (M5 state) stands.
-            dc_fin = _local_solve(global_lp, mo_g, cpg, (mo_p, mo_n), (cpp, cpn))
+            # ── THE THREE-STREAM SINGLE-λ COMBINE (the M6 rank-1 fix, message_variance_derivation.md §4) ──
+            # (1) COMPOSITION → ONE λ-message on λ = log(f_g/f_R): mode ``mo_g − mo_R`` (from the density relay),
+            #     precision ``c_tau`` (the fused Schur τ) — ψ counts the composition DOF ONCE, not twice.
+            cR = cp + cn
+            mo_R = np.log(np.maximum(cR * E_r / np.maximum(M, _EPS), _EPS))
+            lam_msg = mo_g - mo_R
+            # (2) ANCHOR gDNA MEASUREMENT → gdna_imp (mode mo_g, precision ``cm_g``). (3) SPLICED RNA MEASUREMENT
+            #     → rna_imp (mode mo_p/mo_n, precision ``cm_p``/``cm_n``). INDEPENDENT of the composition, so
+            #     fused separately (an RNA-only spliced measurement constrains f_g via f_R with NO gDNA info).
+            # θ TILT (AMBIG): τ_tilt = (c_p − c_n)/(c_p + c_n) → arcsin; precision the summed measured RNA.
+            tau_tilt = np.clip(np.where(cR > _EPS, (cp - cn) / np.maximum(cR, _EPS), 0.0), -1.0, 1.0)
+            th_msg = np.arcsin(tau_tilt)
+            th_prec = np.where(is_amb, cm_p + cm_n, 0.0)
+            dc_fin = _local_solve(
+                global_lp, mo_g, cm_g, (mo_p, mo_n), (cm_p, cm_n),
+                lam_imp=(lam_msg, c_tau), theta_imp=(th_msg, th_prec),
+            )
             f_cur = np.clip(np.asarray(dc_fin.gdna_frac, np.float64), 0.0, 1.0)
             nonlocal _uni_msg
             _uni_msg = (mo_g, cpg, mo_p, cpp, mo_n, cpn)  # publish for the shared diagnostics
@@ -559,6 +614,12 @@ def node_sweep(
                         "mo_g": mo_g.copy(),
                         "mo_p": mo_p.copy(),
                         "mo_n": mo_n.copy(),
+                        "lam_msg": lam_msg.copy(),
+                        "c_tau": c_tau.copy(),
+                        "cm_g": cm_g.copy(),
+                        "cm_p": cm_p.copy(),
+                        "cm_n": cm_n.copy(),
+                        "cpg": cpg.copy(),
                         "fg_out": f_cur.copy(),
                     }
                 )
