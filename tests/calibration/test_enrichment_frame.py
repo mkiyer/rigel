@@ -23,9 +23,14 @@ from rigel.calibration.enrichment_frame import (
     enrichment_ratio,
     f_g_from_k,
     gdna_fallback_admissible,
+    graft_rna_logvar,
     k_from_belief,
+    message_precision,
+    peel_rna_logvar,
     reframe_density,
     total_density,
+    transfer_logvar,
+    transport_seed_logvar,
 )
 
 # Real-ish effective lengths from the FL models (gDNA ~N(300,60), RNA ~N(200,50)):
@@ -263,3 +268,138 @@ def test_enrichment_frame_functions_are_vectorized():
     assert rho.shape == (3,)
     for i in range(3):
         assert rho[i] == pytest.approx(float(total_density(m[i], fg[i], eg[i], er[i])), rel=1e-14)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+# The pass-0 message-VARIANCE laws (message_variance_derivation.md M1-M5) — closed-form + MC cross-check.
+# The MC ground-truth harness is scratchpad/message_variance_mc.py (independently re-derived + adversarially
+# verified, workflow wf_c952640d, <1% in-regime); these pin the arithmetic and one MC per non-trivial law.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+_MC = np.random.default_rng(20260724)
+
+
+def _lognormal_mc(mean, var_log, size):
+    s = np.sqrt(max(float(var_log), 0.0))
+    return float(mean) * np.exp(_MC.normal(-0.5 * s * s, s, size=size))
+
+
+def _beta_mc(mean, var, size):
+    m = float(mean)
+    v = min(float(var), m * (1.0 - m) * 0.98)
+    c = m * (1.0 - m) / v - 1.0
+    return _MC.beta(m * c, (1.0 - m) * c, size=size)
+
+
+# ── M1 transport seed ──
+
+
+def test_transport_seed_is_composition_plus_count():
+    """M1: Var(log ρ_c) = Var(log f_c) + 1/n. Measured spliced (var_log_f=0) ⇒ pure 1/n; n=0 ⇒ ∞ (no message)."""
+    assert float(transport_seed_logvar(0.02, 500.0)) == pytest.approx(0.02 + 1.0 / 500.0, rel=1e-14)
+    assert float(transport_seed_logvar(0.0, 800.0)) == pytest.approx(1.0 / 800.0, rel=1e-14)  # spliced
+    assert np.isinf(float(transport_seed_logvar(0.02, 0.0)))  # no count ⇒ no message
+    assert np.isinf(float(transport_seed_logvar(np.inf, 500.0)))  # τ_λ=0 ⇒ no composition ⇒ ∞
+
+
+def test_transport_seed_matches_mc():
+    """The seed equals the empirical Var(log(f_g·M/E_g)) — composition (Beta) ⊕ Poisson count (lognormal)."""
+    f_g, var_fg, n, E_g = 0.35, 0.003, 900.0, 120.0
+    fg = _beta_mc(f_g, var_fg, 400_000)
+    M = _lognormal_mc(700.0, 1.0 / n, 400_000)
+    emp = float(np.var(np.log(fg * M / E_g)))
+    pred = float(transport_seed_logvar(var_fg / f_g**2, n))  # Var(log f_g) = var_fg/f_g² (LOG Jacobian)
+    assert pred == pytest.approx(emp, rel=0.06)
+
+
+# ── M2 graft (SUM, share-weighted) ──
+
+
+def test_graft_rna_is_share_weighted_sum():
+    """M2: Var(log ρ_R) = w_ν²·v_ν + w_μ²·v_μ (convex weights). Degenerate w_μ=0 ⇒ v_ν; w_μ=1 ⇒ v_μ."""
+    assert float(graft_rna_logvar(0.01, 0.002, 0.7, 0.3)) == pytest.approx(
+        0.49 * 0.01 + 0.09 * 0.002, rel=1e-14
+    )
+    assert float(graft_rna_logvar(0.01, 0.002, 1.0, 0.0)) == pytest.approx(0.01, rel=1e-14)
+    assert float(graft_rna_logvar(0.01, 0.002, 0.0, 1.0)) == pytest.approx(0.002, rel=1e-14)
+
+
+def test_graft_rna_matches_mc():
+    """The share-weighted SUM equals the empirical Var(log(ρ_ν+ρ_μ)) — the item-E rule falls out of the delta
+    method, and beats the naive (unweighted) v_ν+v_μ at intermediate w_μ."""
+    f_g, var_fg, n, n_s = 0.40, 0.004, 800.0, 600.0
+    E_r, E_spl, M_b, S_b = 200.0, 100.0, 900.0, 1500.0
+    fg = _beta_mc(f_g, var_fg, 400_000)
+    Mb = _lognormal_mc(M_b, 1.0 / n, 400_000)
+    Sb = _lognormal_mc(S_b, 1.0 / n_s, 400_000)
+    rho_nu = (1.0 - fg) * Mb / E_r
+    rho_mu = Sb / E_spl
+    emp = float(np.var(np.log(rho_nu + rho_mu)))
+    rn0, rm0 = (1.0 - f_g) * M_b / E_r, S_b / E_spl
+    rR = rn0 + rm0
+    v_nu = transport_seed_logvar(var_fg / (1.0 - f_g) ** 2, n)  # Var(log f_R)=var_fg/(1−f_g)²
+    v_mu = transport_seed_logvar(0.0, n_s)
+    pred = float(graft_rna_logvar(v_nu, v_mu, rn0 / rR, rm0 / rR))
+    assert pred == pytest.approx(emp, rel=0.08)
+
+
+# ── M3 peel (DIFFERENCE, u-weighted) ──
+
+
+def test_peel_rna_is_u_weighted_difference():
+    """M3: Var(log ρ_ν) = u²·(Var(log ρ_R)+σ²_t) + (u−1)²·v_μ. u=1 (all continues) ⇒ just Var(log T)."""
+    assert float(peel_rna_logvar(0.005, 0.01, 0.002, 1.0)) == pytest.approx(0.015, rel=1e-14)
+    # u=3: 9·(0.005+0.01) + 4·0.002
+    assert float(peel_rna_logvar(0.005, 0.01, 0.002, 3.0)) == pytest.approx(
+        9.0 * 0.015 + 4.0 * 0.002, rel=1e-14
+    )
+
+
+def test_peel_rna_matches_mc_in_regime():
+    """The u-weighted DIFFERENCE equals the empirical Var(log ρ_ν) at low u (ε≲0.15, the valid regime);
+    σ²_transfer is load-bearing."""
+    rho_R_x, var_log_rhoR, r, var_log_r, rho_mu, n_s = 40.0, 1.0 / 5000, 200.0, 0.004, 0.10, 1500.0
+    Rx = _lognormal_mc(rho_R_x, var_log_rhoR, 400_000)
+    rr = _lognormal_mc(r, var_log_r, 400_000)
+    rm = _lognormal_mc(rho_mu, 1.0 / n_s, 400_000)
+    nu = Rx / rr - rm
+    keep = nu > 0
+    emp = float(np.var(np.log(nu[keep])))
+    T0 = rho_R_x / r
+    u = T0 / (T0 - rho_mu)
+    pred = float(peel_rna_logvar(var_log_rhoR, var_log_r, 1.0 / n_s, u))
+    assert pred == pytest.approx(emp, rel=0.12)
+
+
+# ── M5 transfer variance (direction-dependent) ──
+
+
+def test_transfer_logvar_cancels_on_graft_and_adds_on_peel():
+    """M5: σ²_transfer = 0 on the GRAFT (r common-mode, cancels), = Var(log ρ_tot^dst)+Var(log ρ_tot^src) on
+    the PEEL. Vectorized over a mixed direction mask."""
+    dst = np.array([0.1, 0.1, 0.1])
+    src = np.array([0.3, 0.3, 0.3])
+    graft = np.array([True, False, True])
+    out = transfer_logvar(dst, src, graft)
+    assert list(out) == [0.0, 0.4, 0.0]
+
+
+def test_transfer_logvar_feeds_off_composition_logvar():
+    """The two inputs are exactly composition_logvar at the two endpoints — one law, reusing the existing
+    total-density variance (no new derivation)."""
+    vd = float(composition_logvar(0.6, EG_BND, ER_BND, var_fg=0.01, n=100.0))
+    vs = float(composition_logvar(0.9, EG_REG, ER_REG, var_fg=0.005, n=50.0))
+    assert float(transfer_logvar(vd, vs, graft=False)) == pytest.approx(vd + vs, rel=1e-14)
+
+
+# ── M4 ÷M_dst precision conversion ──
+
+
+def test_message_precision_is_reciprocal_no_jacobian():
+    """M4: p_c = 1/Var(log ρ_c) — NO destination Jacobian, NO 1/n_dst. ∞/0/negative variance ⇒ 0 (no message)."""
+    v = np.array([0.02, np.inf, 0.0, -1.0, 0.25])
+    p = message_precision(v)
+    assert p[0] == pytest.approx(1.0 / 0.02, rel=1e-14)
+    assert p[1] == 0.0 and p[2] == 0.0 and p[3] == 0.0  # no message, never a nan/∞
+    assert p[4] == pytest.approx(4.0, rel=1e-14)
+    assert not np.any(np.isnan(p)) and np.all(np.isfinite(p))

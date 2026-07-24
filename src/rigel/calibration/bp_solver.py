@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from .enrichment_frame import composition_logvar, transfer_logvar
 from .node_chain import REGION, NodeChain
 from .signature import coarse_type_array
 from .node_geometry import (
@@ -287,6 +288,28 @@ def node_sweep(
             np.float64
         )  # node-level RNA-FL eff-length
 
+        # ── M5 σ²_transfer = Var(log r): the per-node total-density log-variance (`message_variance_derivation.md`
+        # §3; `enrichment_frame.composition_logvar`). Var(log ρ_tot) = 1/n + [(1/E_g−1/E_r)/B]²·Var(f_g), with
+        # Var(f_g) = (f_g(1−f_g))²/τ_λ CAPPED at f_g(1−f_g) (a fraction's max variance) and 0 for a
+        # composition-certain (struct_lock) node. Evaluated at the INPUT belief f_g (consistent with the reframe
+        # densities rho_l0/rho_r0). This is the HONEST, prior-free transfer variance that RETIRES the
+        # density-uniformity NPMLE proxy (which was identically 0 in pass-0, so pass-0 had NO transfer damping).
+        _n_node = np.where(
+            is_reg_a,
+            np.asarray(geometry.n_unspl_left, np.float64),
+            np.asarray(geometry.n_unspl_left, np.float64)
+            + np.asarray(geometry.n_unspl_right, np.float64),
+        )
+        _fg0 = np.clip(np.asarray(f_g, np.float64), 0.0, 1.0)
+        _fgfr = _fg0 * (1.0 - _fg0)
+        _tau = np.asarray(_ni.tau_lam, np.float64)
+        _var_fg = np.where(
+            np.asarray(_ni.struct_lock, bool),
+            0.0,
+            np.where(_tau > _EPS, np.minimum(_fgfr * _fgfr / np.maximum(_tau, _EPS), _fgfr), _fgfr),
+        )
+        logvar_tot = np.asarray(composition_logvar(_fg0, E_g, E_r, _var_fg, _n_node), np.float64)
+
         # per-strand spliced (mature) DENSITY — one-sided per-face density (0 on regions); the acceptor face.
         def _face_spl(sp):
             return np.where(sp[0] > _EPS, sp[0] / np.maximum(ESP[0], _EPS), 0.0) + np.where(
@@ -362,14 +385,11 @@ def node_sweep(
         # INPUT-belief ρ_tot. Returns each node's context belief IN ITS OWN FRAME; the combine re-reframes.
         rho_node0, rho_l0, rho_r0 = _rho_faces(np.asarray(f_g, np.float64))
 
-        # σ²_transfer inputs — the belief-free NPMLE enrichment projection. NOTE: this whole per-hop damping is
-        # the CURRENT (density-uniformity) transfer variance; it is deliberately left as-is here — deriving the
-        # composition-transport variance is the NEXT task (`variance_model_handoff.md` §3-4).
-        _mup, _vp = np.asarray(mu_proj, np.float64), np.asarray(var_proj, np.float64)
-
-        def _damp(
-            p, s2t
-        ):  # σ²_transfer per-hop damping (PRECISION unchanged this task — the variance model is next)
+        # σ²_transfer per-hop damping: add the edge's transfer log-variance to the message's log-variance
+        # (1/p → 1/p + σ²_transfer). This is now the DERIVED, direction-dependent M5 variance (0 on the matched
+        # graft, Var(log r) on the peel/plain/anchor — computed per edge from ``logvar_tot`` below), retiring the
+        # density-uniformity NPMLE proxy (`_mup`/`_vp`, no longer read).
+        def _damp(p, s2t):
             return 1.0 / (1.0 / p + s2t) if p > 0.0 else 0.0
 
         def _relay(seq, nbr, dst_face, src_face, df, sf):
@@ -389,15 +409,16 @@ def node_sweep(
                 r = (
                     (dst_face[i] / rho_src) if (rho_src > _EPS and dst_face[i] > _EPS) else 1.0
                 )  # no frame ⇒ pass-through
-                s2t = (
-                    _vp[i] + (_mup[i] - _mup[s]) ** 2
-                )  # enrichment-crossing damping (bounds relay confidence)
                 # GRAFT (boundary → EXON, §6): the boundary's measured mature is a density AT THE SOURCE, so it
                 # joins the source's RNA BEFORE the reframe; the peel is measured at the destination and so is
                 # applied after. Both use the face that FACES the other endpoint (``sf``/``df``), never the
                 # node-pooled sum. Only an EXON receives the graft — an intron carries no mature (`ex_a[i]`,
                 # not `is_reg_a[i]`, which grafted the junction's whole mature flux into every flanking intron).
                 _gr = ex_a[i] and is_bnd_a[s]
+                # M5 σ²_transfer: 0 on the matched-set GRAFT (r is common-mode across {g,R} ⇒ cancels in the
+                # composition — applying it here would double-count), Var(log r)=logvar_tot[i]+logvar_tot[s]
+                # otherwise (peel DIFFERENCE / plain reframe / partial-anchor — r is load-bearing).
+                s2t = 0.0 if _gr else (logvar_tot[i] + logvar_tot[s])
                 gp = spl_p_f[sf][s] if _gr else 0.0
                 gn = spl_n_f[sf][s] if _gr else 0.0
                 tg, tp, tn = rg[s] * r, (rp[s] + gp) * r, (rn[s] + gn) * r
@@ -446,8 +467,10 @@ def node_sweep(
             gp = np.where(graft, spl_p_f[sf][src], 0.0)
             gn = np.where(graft, spl_n_f[sf][src], 0.0)
             tg, tp, tn = rg[src] * r, (rp[src] + gp) * r, (rn[src] + gn) * r
-            # σ²_transfer per-hop damping (vectorized) — same as the relay; PRECISION unchanged this task.
-            s2t = _vp + (_mup - _mup[src]) ** 2
+            # M5 σ²_transfer (vectorized, the tested pure law): 0 on the matched-set graft (r common-mode ⇒
+            # cancels — a double-count otherwise), Var(log r)=logvar_tot+logvar_tot[src] elsewhere (peel /
+            # plain reframe / partial-anchor — r load-bearing). See the relay's twin. Retires the proxy.
+            s2t = transfer_logvar(logvar_tot, logvar_tot[src], graft)
 
             def _dv(p):
                 return np.where(
@@ -455,10 +478,13 @@ def node_sweep(
                 )
 
             tpg, tpp, tpn = _dv(pg), _dv(pp), _dv(pn)
-            # the graft's MEASUREMENT precision — never τ-gated (see the relay's twin)
+            # the graft's MEASUREMENT precision — never τ-gated (see the relay's twin). ``_sp``>0 only on a GRAFT
+            # edge, where s2t≡0, so the inf→0 substitution below touches only already-masked entries (a
+            # zero-count node has logvar_tot=+inf ⇒ s2t=inf; ``0·inf`` would nan the masked branch np.where evals).
             _sp, _sn = np.where(graft, SP[sf][src], 0.0), np.where(graft, SN[sf][src], 0.0)
-            tpp = tpp + np.where(_sp > _EPS, _sp / (1.0 + _sp * s2t), 0.0)
-            tpn = tpn + np.where(_sn > _EPS, _sn / (1.0 + _sn * s2t), 0.0)
+            _s2t_spl = np.where(np.isfinite(s2t), s2t, 0.0)
+            tpp = tpp + np.where(_sp > _EPS, _sp / (1.0 + _sp * _s2t_spl), 0.0)
+            tpn = tpn + np.where(_sn > _EPS, _sn / (1.0 + _sn * _s2t_spl), 0.0)
             peel = is_bnd_a & ex_a[src] & valid  # EXON → boundary: PEEL the departing mature
             tp = np.where(peel, np.maximum(tp - spl_p_f[df], 0.0), tp)
             tn = np.where(peel, np.maximum(tn - spl_n_f[df], 0.0), tn)

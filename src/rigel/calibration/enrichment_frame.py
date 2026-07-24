@@ -39,6 +39,12 @@ __all__ = [
     "gdna_fallback_admissible",
     "reframe_density",
     "density_mode_logfrac",
+    # ── the pass-0 message-VARIANCE laws (message_variance_derivation.md) ──
+    "transport_seed_logvar",
+    "graft_rna_logvar",
+    "peel_rna_logvar",
+    "transfer_logvar",
+    "message_precision",
 ]
 
 _EPS = 1.0e-12
@@ -219,3 +225,96 @@ def gdna_fallback_admissible(is_ambig, mature_crosses, has_junction, retained_in
     junction = np.asarray(has_junction, dtype=bool)
     retained = np.asarray(retained_intron, dtype=bool)
     return junction & ~ambig & ~mature & ~retained
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# The pass-0 message-VARIANCE laws (``docs/calibration/message_variance_derivation.md``).
+#
+# Built on the ``τ_λ`` FOUNDATION (``variance_foundation_proposal.md``): a source component's message log-variance
+# is its composition variance ``Var(log f_c)`` (the Schur-marginal Jacobian) ⊕ its Poisson sampling ``1/n``,
+# transported across an edge by a SUM (the GRAFT, share-weighted, convex ≤1) or a DIFFERENCE (the PEEL,
+# u-weighted, ≥1), damped by the enrichment-transfer variance ``σ²_transfer = Var(log r)`` — DIRECTION-dependent
+# (~0 on the graft where the reframe cancels, load-bearing on the peel/anchor). The ÷M_dst normalizer is
+# common-mode and cancels, so the ψ message precision is simply ``1/Var(log ρ_c)`` — NO destination Jacobian,
+# NO ``1/n_dst``. Every law MC-validated (``scratchpad/message_variance_mc.py``; independently re-derived +
+# adversarially verified, workflow ``wf_c952640d``) to <1% in-regime. Variances live in log space (additive);
+# convert to a ψ precision only at the handoff (:func:`message_precision`).
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+def transport_seed_logvar(var_log_f, n):
+    """M1 — the per-component SOURCE log-variance a belief carries when it becomes a message: composition ⊕
+    sampling, ``Var(log ρ_c) = Var(log f_c) + 1/n``.
+
+    Count-zero-information, made precise: the count sets ONLY the total precision ``1/n``; the gDNA-vs-RNA split
+    precision is ``Var(log f_c)`` (from ``τ_λ``), NEVER the count. The MEASURED spliced is the
+    ``var_log_f = 0`` (composition-CERTAIN) case ⇒ pure ``1/n_spl``. ``n = 0`` (no count) ⇒ ``+inf`` (no
+    message). This is the *transport* seed — distinct from the *fusion* weight ``1/Var(log f_c)`` (composition
+    only, no ``1/n``); the ``1/n`` enters HERE, not in the fusion (handoff §7, the composition⟂sampling split).
+
+    ⚠ ``Var(log f_c)`` is the FOUNDATION Jacobian; near the ``f_c→0`` wall a small, high-CV minority component's
+    log-variance is UNDER-stated (over-confident 36–92% — ``message_variance_derivation.md`` §4 guard). Not
+    corrected here (a foundation caveat); watch the minority-arm message in the A/B."""
+    v = np.asarray(var_log_f, np.float64)
+    nn = np.asarray(n, np.float64)
+    count = np.where(nn > 0.0, 1.0 / np.maximum(nn, _EPS), np.inf)
+    return v + count
+
+
+def graft_rna_logvar(v_nu, v_mu, w_nu, w_mu):
+    """M2 — the GRAFT (boundary→exon) RNA message log-variance. The exon receives the boundary's WHOLE RNA
+    flux, so the RNA density is a **sum** ``ρ_R = ρ_ν + ρ_μ`` (imputed-continue + measured-splice). The delta
+    method on a sum gives the **share-weighted** (convex, ≤1) combination — the item-E rule, a minority
+    component contributes quadratically LITTLE::
+
+        Var(log ρ_R) = w_ν²·v_ν + w_μ²·v_μ ,     w_ν = ρ_ν/ρ_R,  w_μ = ρ_μ/ρ_R,  w_ν+w_μ = 1
+
+    ``v_ν`` is the continue seed (``Var(log f_R)+1/n``), ``v_μ = 1/n_spl`` (measured). Enrichment CANCELS on the
+    matched-set graft, so ``σ²_transfer`` is added as 0 there (:func:`transfer_logvar`). The gDNA grafts alone
+    (its message log-variance is just its transport seed). MC <1%."""
+    wn, wm = np.asarray(w_nu, np.float64), np.asarray(w_mu, np.float64)
+    return wn * wn * np.asarray(v_nu, np.float64) + wm * wm * np.asarray(v_mu, np.float64)
+
+
+def peel_rna_logvar(v_log_rho_R, s2_transfer, v_mu, u):
+    """M3 — the PEEL (exon→boundary) RNA-continue message log-variance. The boundary receives only what
+    CONTINUES: ``ρ_ν = ρ_R(x)/r − ρ_μ`` — a **difference** (an absolute measured density is subtracted, so
+    enrichment does NOT cancel). The delta method gives u-weighted (≥1) terms::
+
+        Var(log ρ_ν) = u²·Var(log T) + (u−1)²·v_μ ,   Var(log T) = Var(log ρ_R(x)) + σ²_transfer ,
+        u = T/ρ_ν = 1/(fraction that continues) ≥ 1
+
+    A difference DESTROYS precision (subtracting near-equal numbers) — the mirror of the graft's convex weights;
+    ``σ²_transfer`` is LOAD-BEARING here (~85–92% of the variance).
+
+    ⚠ The linearization is valid only for ``ε = √(fraction continuing) ≲ 0.15`` (``u ≲ 3``); beyond it (>p75 of
+    real junctions) it UNDER-states the variance (over-confident 27–40%). ``u`` MUST therefore gate the peel's
+    precision as a per-junction weight, and ``ρ_ν < 0`` is a PRIOR truncation, not an emission gate (handoff §6).
+    MC 1–3% in-regime."""
+    uu = np.asarray(u, np.float64)
+    vT = np.asarray(v_log_rho_R, np.float64) + np.asarray(s2_transfer, np.float64)
+    return uu * uu * vT + (uu - 1.0) ** 2 * np.asarray(v_mu, np.float64)
+
+
+def transfer_logvar(logvar_tot_dst, logvar_tot_src, graft):
+    """M5 — ``σ²_transfer = Var(log r)``, the enrichment-ratio uncertainty that damps a message across a capture
+    cliff: ``Var(log r) = Var(log ρ_tot^dst) + Var(log ρ_tot^src)`` (each from :func:`composition_logvar`).
+
+    DIRECTION-dependent: on the **graft** the reframe ``r`` is common-mode across the matched component set and
+    CANCELS in the composition (return 0 — applying it there is the double-count the density-uniformity proxy
+    committed); on the **peel** / partial-anchor message it is LOAD-BEARING. This one law replaces the retired
+    ``var_proj[dst] + (μ_proj[dst]−μ_proj[src])²`` proxy and covers BOTH the relay and the combine. MC 0.02–0.27%."""
+    g = np.asarray(graft, bool)
+    s = np.asarray(logvar_tot_dst, np.float64) + np.asarray(logvar_tot_src, np.float64)
+    return np.where(g, 0.0, s)
+
+
+def message_precision(var_log_rho_msg):
+    """M4 — the ÷M_dst conversion: the ψ message precision from a component's message log-variance. Because
+    ``ρ_tot^dst = M_dst·B_dst`` cancels ``M_dst`` in the reframe ``r``, the destination mass is common-mode and
+    drops from the delivered composition mode AND its variance ⇒ the precision is simply ``1/Var(log ρ_c^msg)`` —
+    **NO destination Jacobian, NO ``1/n_dst``** (verified to machine precision, invariant under a 100× M_dst
+    spread). Returns 0 for a ``+inf`` / non-positive variance (no message), never a nan or ``∞``."""
+    v = np.asarray(var_log_rho_msg, np.float64)
+    ok = np.isfinite(v) & (v > _EPS)
+    return np.where(ok, 1.0 / np.maximum(v, _EPS), 0.0)

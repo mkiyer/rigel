@@ -2,12 +2,17 @@
 
 **This is the single entry point for calibration work. Read it first.** Last updated: 2026-07-24.
 
-> **Status in one line:** the migration to the composition (enrichment-ratio) solver for the **prior-free
-> first pass (“pass-0”)** has **CONVERGED to one solver** — the legacy density-transfer `_scan` path is
-> deleted and the unified solver is the sole path. The **initialization phase is now a hardened, unit-tested
-> module (`node_init.py`)**. The current blocker is unchanged: **the message variance model is wrong** (the old
-> one assumed genome-wide density uniformity, which hybrid capture breaks) — that is the immediate next task.
+> **Status in one line:** the message-variance model is **derived, MC-validated, and independently verified**
+> (M1–M5); the pure layer is landed; **M5 `σ²_transfer` is wired and is a large win on the error-mass arm**
+> (aggregate refit=1 0.1234→**0.0945**, unstr-capON 0.387→**0.163**) **but regresses the stranded arm** — traced
+> (dissection) to the two-message per-component combine's rank-1 double-count, NOT the variance laws. **The next
+> task is the committed fix: the single-λ combine on a λ-space relay** (`SESSION_2026_07_24_HANDOFF_4.md` §6).
 > **NOT ready to ship.**
+>
+> **Update 2026-07-24 (message-variance session).** Retired the density-uniformity `σ²_transfer` proxy (it was
+> identically 0 in pass-0) for the honest, prior-free, direction-dependent `Var(log r)`; the derivation +
+> independent-verification workflow settled the laws and proved the two-message combine is 2–7× over-confident
+> (rank-1). START at `SESSION_2026_07_24_HANDOFF_4.md`.
 >
 > **Update 2026-07-24 (post-handoff session).** Retired `_scan` + all its flags/helpers (`bp_solver.py` 1871 →
 > ~730 lines); extracted the per-node self-solve into `node_init.build_node_init` (the four init sources of
@@ -20,9 +25,11 @@ The only other docs that are live (everything else is in `archive/`, kept for hi
 * `unified_solver_design.md` — the target solver's architecture (the reframe + ÷M_dst mode). Its **precision /
   variance sections (§8 R1–R4) are SUPERSEDED** by `variance_model_handoff.md`; the mode design stands.
 * `gdna_intron_factory_design.md` — a shipped feature (the intron gDNA factory). Live.
-* **`SESSION_2026_07_24_HANDOFF_3.md` — the LIVE handoff. START HERE for the next session** (the message
-  variance model); it has the full arc, the ordered implementation steps, the invariants, and a kickoff prompt.
-  (Handoffs 1 and 2 are historical.)
+* **`SESSION_2026_07_24_HANDOFF_4.md` — the LIVE handoff. START HERE for the next session** (the single-λ
+  combine); it has the full arc, the A/B numbers, the diagnosis, the ordered steps, and a kickoff prompt.
+  (Handoffs 1–3 are historical.)
+* `message_variance_derivation.md` — the derived + MC-validated + independently-verified message-variance laws
+  (M1–M5), the M6 combine finding, and the empirical results (§6). Live.
 * `variance_model_concepts.md` — the owner's spec for the **initialization** phase (the four sources).
 * `variance_foundation_proposal.md` — the SETTLED foundation model (approach E, the single Schur scalar `τ_λ`),
   derived + numerically verified. `variance_foundation_plan.md` v4 — the invariants + the deferred-work spec;
