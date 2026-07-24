@@ -164,10 +164,14 @@ def node_sweep(
     kappa = float(rna_sense_frac)
     od_g, od_r = gdna_strand_overdispersion, rna_strand_overdispersion
 
-    def _local_solve(g_arr, gm=None, gp=None, rm=None, rp=None):
+    def _local_solve(
+        g_arr, gm=None, gp=None, rm=None, rp=None, lam_imp=None, theta_imp=None
+    ):
         """The per-node local/final solve (log-density log-odds backend). Returns the :class:`NodeDeconv`
         (the readout ``*_frac``/``*_frac_var`` + the free-coordinate seed ``lam_mean``/``lam_var``/
-        ``theta_mean``/``theta_var``). Phase A calls it message-free; phase D passes the FB messages."""
+        ``theta_mean``/``theta_var``). Phase A calls it message-free; phase D passes the FB messages.
+        ``lam_imp``/``theta_imp`` are the SINGLE-λ composition message + the θ tilt message (2-tuples of
+        ``(mode, prec)``), the rank-1 fix that replaces the two per-component ``gm``/``rm`` messages."""
         return _solve_nodes_logodds_all(
             statics.u_pos,
             statics.u_neg,
@@ -187,6 +191,10 @@ def node_sweep(
             gdna_imp_prec=gp,
             rna_imp_mode=rm,
             rna_imp_prec=rp,
+            lam_imp_mode=None if lam_imp is None else lam_imp[0],
+            lam_imp_prec=None if lam_imp is None else lam_imp[1],
+            theta_imp_mode=None if theta_imp is None else theta_imp[0],
+            theta_imp_prec=None if theta_imp is None else theta_imp[1],
             # the gDNA intron factory λ-factor (anchored, per-intron, 0 elsewhere): peels confident gDNA from
             # introns against the intergenic background BEFORE the sweep resolves the pie (design §9.3). Added
             # to ψ, distinct from the gDNA arm; participates in the local solve AND the relay (a confident
@@ -515,6 +523,12 @@ def node_sweep(
             mo_g = np.log(np.maximum(cg * E_g / np.maximum(M, _EPS), _EPS))
             mo_p = np.log(np.maximum(cp * E_r / np.maximum(M, _EPS), _EPS))
             mo_n = np.log(np.maximum(cn * E_r / np.maximum(M, _EPS), _EPS))
+            # NOTE: the SINGLE-λ combine (the M6 rank-1 fix) needs a THREE-STREAM relay — composition-τ (→ one
+            # λ-message) SEPARATED from the independent measurement channels (anchor gDNA, spliced RNA → their
+            # own messages). Collapsing the entangled density relay's ``mo_g − mo_R`` at the combine loses the
+            # RNA-only spliced constraint when there is no gDNA info (Var(λ)=v_g+v_R=∞). The ψ λ/θ interface
+            # (`_local_solve`'s ``lam_imp``/``theta_imp``) is ready; the relay refactor is the next step
+            # (`SESSION_2026_07_24_HANDOFF_4.md`). Until then, the two-message combine (M5 state) stands.
             dc_fin = _local_solve(global_lp, mo_g, cpg, (mo_p, mo_n), (cpp, cpn))
             f_cur = np.clip(np.asarray(dc_fin.gdna_frac, np.float64), 0.0, 1.0)
             nonlocal _uni_msg

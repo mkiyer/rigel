@@ -76,23 +76,49 @@ eff-length ratio `log(E_g^dst E_r^src/E_r^dst E_g^src)`. So **carry a λ-belief 
 through the relay** (+ a separate θ tilt belief for AMBIG), NOT three per-component densities. This is *simpler*
 (no enrichment residual — the current relay laments `Σ_c f_c=75.6` at introns) AND removes the double-count.
 
-**Steps.**
-1. **λ-relay:** replace the per-component (density, precision) relay with a `(λ, Var(λ), θ, Var(θ))` relay. Each
-   hop shifts λ by the eff-length ratio (enrichment-free), grafts/peels the mature (the peel is a λ-domain
-   DIFFERENCE — reuse `peel_rna_logvar`'s u-weighting; the graft folds the spliced into R-total via `w_μ`), and
-   adds `σ²_transfer` (M5, `transfer_logvar`) only where load-bearing (peel/partial), 0 on the matched reframe.
-2. **Joint λ-precision:** each neighbour's λ-constraint uses `Var(log k)` = the T2 form
-   `w_μ²(1/n+1/n_s) + (1−w_μ f_g)²·Var(λ_src)` (MC-validated in `scripts/debug/message_precision_mc.py`) — the
-   λ-relay makes `Var(λ_src)` and `w_μ` available, so the joint precision is computable with NO cross-component
-   covariance to track.
-3. **ψ interface:** feed ψ ONE Gaussian on `λ` (`−½·λ_prec·(λ−λ_msg)²`, a direct grid-variable constraint —
-   simpler than the current `log f_c` messages) + the θ message for AMBIG. Two regimes: single-λ where both
-   components live; the ÷M gDNA density mode (`message_precision`) at structural anchors (`ρ_R≡0`, k singular).
-4. **`struct_lock` HARD OVERRIDE + the 1/n fusion/transport split** (handoff §7, still owed): the fusion weight
-   is `1/Var(λ)` (composition only), the transport seed `1/(Var(λ)+1/n)`; a `struct_lock` node ADOPTS its own
-   belief (never an ∞ weight → nan). Add an interior-anchor no-nan test.
+### ✅ DONE this session — the ψ λ/θ interface (Step A)
+`simplex_logodds` now accepts a SINGLE Gaussian on the grid variable `λ` directly (`lam_imp_mode/prec`, both
+the 1-D and 2-D paths) + a SEPARATE Gaussian on the tilt `θ` (`theta_imp_mode/prec`, AMBIG only). Unit-tested +
+pinned (`tests/calibration/test_lambda_message.py`), backward-compatible (defaults None). `_local_solve` in
+`bp_solver` threads them (`lam_imp`/`theta_imp`). This is the substrate the relay feeds.
+
+### ⚠ FINDING — a combine-only single-λ CANNOT work; it must be a THREE-STREAM relay
+A v1 that collapsed the existing density relay's fused densities into one `λ_msg = mo_g − mo_R` at the combine
+FAILED (`test_tau_gag_fix_spliced_junction_emits_when_unstranded`): on an unstranded spliced junction the
+spliced measurement stopped moving f_g, because `Var(λ) = v_g + v_R = ∞` when there is no gDNA info
+(`v_g = 1/cpg = ∞`) — even though the RNA (spliced) side is strongly measured. ROOT CAUSE (traced, not
+theorised): the density relay ENTANGLES two kinds of evidence that must be handled OPPOSITELY —
+* **composition** (from strand/factory-solved neighbours) is RANK-1 → must be ONE λ-message (the M6 fix);
+* **independent measurements** (the spliced RNA count, the anchor gDNA count) are NOT rank-1 → must be FUSED as
+  separate constraints (an RNA-only spliced measurement constrains f_g via f_R with NO gDNA info needed).
+
+Differencing `mo_g − mo_R` demands both components be known, so it drops the RNA-only channel. The fix separates
+**three streams**, all fused independently at ψ:
+
+**Steps (the three-stream relay).**
+1. **Composition-τ stream:** seed `τ_own = _ni.tau_lam` (the Schur composition precision; 0 for anchors +
+   unstranded non-factory nodes). Transport enrichment-free (λ shifts by the eff-length ratio; τ damped by
+   `σ²_transfer` on peel/partial, unchanged on matched — reuse `peel_rna_logvar` u-weighting + `transfer_logvar`).
+   Fuse additively (τ adds). → ONE **λ-message**: mode `mo_g − mo_R` (from the density relay, which stays for the
+   MODE), precision `τ_fused`.
+2. **Anchor-gDNA-measurement stream:** seed `mg_own = where(struct_lock, prec_g, 0)` (the ÷M anchor gDNA count).
+   Transport (density reframe + `σ²_transfer`), fuse additively. → **gdna_imp** (mode `mo_g`, precision the
+   measurement stream). NOT the composition — a density lower-bound.
+3. **Spliced-RNA-measurement stream:** the graft's spliced precision (`SP/SN`, already isolated in the relay),
+   fused additively. → **rna_imp** (mode `mo_p/mo_n`, precision the spliced measurement). The θ tilt for AMBIG
+   comes from `(c_p − c_n)/(c_p + c_n)`.
+
+   On UNSTRANDED data `τ≈0` ⇒ the λ-message is ~off and this reduces to the measurement channels — **preserving
+   the M5 unstranded win**. On STRANDED data the composition rides the ONE λ-message (no double-count) while the
+   measurements stay independent — **removing the stranded regression**. Keep the density relay's full-precision
+   (`pg/pp/pn`) for the MODE fusion (`_fuse`); track `mg/mp/mn` (measurement) + `τ` (composition) as ADDITIONAL
+   accumulators in the SAME relay loop (no extra passes).
+4. **`struct_lock` HARD OVERRIDE + the fusion/transport split** (handoff §7, still owed): the composition fusion
+   weight is `τ_λ` (no `1/n` — the count cancels in the ratio; a REFINEMENT of the handoff's blanket `⊕1/n`);
+   a `struct_lock` node ADOPTS its own belief (never an ∞ weight → nan). Add an interior-anchor no-nan test.
 5. **A/B every step** (refit=0 AND refit=1, unstranded-capON called out); PASS iff no per-condition regression —
-   specifically stranded must return to ≤ ~0.03. Then regenerate goldens.
+   stranded must return to ≤ ~0.03. If a regression appears, **DISSECT** (worst scenario → worst nodes → trace
+   the message propagation to root cause; do NOT assume a theory flaw — the theory is sound). Then regenerate goldens.
 
 ## 7. INVARIANTS — preserve (handoff §7 unchanged) + the corrected census (HANDOFF_3 §8)
 

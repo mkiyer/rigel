@@ -227,6 +227,8 @@ def _local_loglik_logodds(
     rna_imp_mode=None,
     rna_imp_prec=None,
     lam_logprior=None,
+    lam_imp_mode=None,
+    lam_imp_prec=None,
 ):
     """ψ over the log-odds grid for single-strand nodes (strand mixture, the two arms, imputation), evaluated
     at ``f_g = σ(λ)`` with the live strand carrying ``f_active = 1 − f_g``. Returns ``(m, K)``.
@@ -296,6 +298,13 @@ def _local_loglik_logodds(
                 * np.asarray(ps, np.float64)[:, None]
                 * (log_fact - np.asarray(ms, np.float64)[:, None]) ** 2
             )
+    # ── the SINGLE-λ composition message (the M6 rank-1 fix): ONE Gaussian on the log-odds grid variable λ
+    #    DIRECTLY (not on log f_c) — the one gDNA-vs-RNA-total DOF, so ψ counts it ONCE, not twice
+    #    (`message_variance_derivation.md` §4). Enrichment-invariant: λ carries no reframe. ──
+    if lam_imp_mode is not None and lam_imp_prec is not None:
+        lm_ = np.asarray(lam_imp_mode, np.float64)[:, None]
+        lp_ = np.asarray(lam_imp_prec, np.float64)[:, None]
+        psi = psi - 0.5 * lp_ * (lam[None, :] - lm_) ** 2
     # ── NO change-of-variable Jacobian, and NO reference prior. Both are deliberate, and they are the SAME
     #    fact: `DensityNPMLE.logP` is a density in LOG-rate, so its conversion to a linear-rate density
     #    (−log f_g, up to a constant) cancels log σ'(λ) = log f_g + log(1−f_g) exactly, once per component.
@@ -326,6 +335,8 @@ def _solve_nodes_logodds(
     rna_imp_mode=None,
     rna_imp_prec=None,
     lam_logprior=None,
+    lam_imp_mode=None,
+    lam_imp_prec=None,
 ) -> NodeDeconv:
     """The log-odds 1-D per-node solve for SINGLE-STRAND nodes.
 
@@ -353,6 +364,8 @@ def _solve_nodes_logodds(
         rna_imp_mode=rna_imp_mode,
         rna_imp_prec=rna_imp_prec,
         lam_logprior=lam_logprior,
+        lam_imp_mode=lam_imp_mode,
+        lam_imp_prec=lam_imp_prec,
     )
     ap = np.asarray(allow_pos, bool)
     an = np.asarray(allow_neg, bool)
@@ -422,6 +435,10 @@ def _solve_ambig_logodds(
     rna_imp_mode=None,
     rna_imp_prec=None,
     lam_logprior=None,
+    lam_imp_mode=None,
+    lam_imp_prec=None,
+    theta_imp_mode=None,
+    theta_imp_prec=None,
 ) -> NodeDeconv:
     """The 2-D ``(λ, θ)`` solve for AMBIG nodes (both strands live). Grids the gDNA-vs-RNA-total log-odds
     ``λ`` (outer, ``K = n_grid``) and the tilt ANGLE ``θ = arcsin(τ)`` (inner, ``K_t = n_tilt`` or
@@ -497,6 +514,18 @@ def _solve_ambig_logodds(
                 * np.asarray(ps, F)[:, None, None]
                 * (log_f - np.asarray(ms, F)[:, None, None]) ** 2
             )
+    # ── the SINGLE-λ composition message on λ DIRECTLY (θ-INDEPENDENT — it lives on the λ axis, which is
+    #    exactly what makes the tilt a nuisance): one Gaussian, ψ counts the g-vs-R DOF ONCE. ──
+    if lam_imp_mode is not None and lam_imp_prec is not None:
+        lm_ = np.asarray(lam_imp_mode, F)[:, None, None]
+        lp_ = np.asarray(lam_imp_prec, F)[:, None, None]
+        psi -= F(0.5) * lp_ * (lam.astype(F)[None, :, None] - lm_) ** 2
+    # ── the TILT message on θ (λ-INDEPENDENT — the separate strand-tilt DOF an AMBIG node needs; not part of
+    #    the g-vs-R double-count): a Gaussian on the θ = arcsin(τ) grid. ──
+    if theta_imp_mode is not None and theta_imp_prec is not None:
+        tm_ = np.asarray(theta_imp_mode, F)[:, None, None]
+        tp_ = np.asarray(theta_imp_prec, F)[:, None, None]
+        psi -= F(0.5) * tp_ * (theta.astype(F)[None, None, :] - tm_) ** 2
     psi_full = psi  # (m,K,Kt) f32
     # θ-marginal λ-posterior (m,K) — lift to f64 so the posterior median + moments are full-precision.
     psi_lam = _lse(psi_full, axis=2).astype(np.float64)
@@ -575,6 +604,10 @@ def _solve_nodes_logodds_all(
     rna_imp_mode=None,
     rna_imp_prec=None,
     lam_logprior=None,
+    lam_imp_mode=None,
+    lam_imp_prec=None,
+    theta_imp_mode=None,
+    theta_imp_prec=None,
     fg_ref=None,
     fpos_ref=None,
     fneg_ref=None,
@@ -668,6 +701,8 @@ def _solve_nodes_logodds_all(
                 rna_imp_mode=_sp(rna_imp_mode, ss),
                 rna_imp_prec=_sp(rna_imp_prec, ss),
                 lam_logprior=_regrid_global(_s(lam_logprior, ss), n_grid, k_ss, L),
+                lam_imp_mode=_s(lam_imp_mode, ss),
+                lam_imp_prec=_s(lam_imp_prec, ss),
             ),
         )
     if bool(amb.any()):
@@ -699,6 +734,10 @@ def _solve_nodes_logodds_all(
                     rna_imp_mode=_sp(rna_imp_mode, bidx),
                     rna_imp_prec=_sp(rna_imp_prec, bidx),
                     lam_logprior=_s(lam_logprior, bidx),
+                    lam_imp_mode=_s(lam_imp_mode, bidx),
+                    lam_imp_prec=_s(lam_imp_prec, bidx),
+                    theta_imp_mode=_s(theta_imp_mode, bidx),
+                    theta_imp_prec=_s(theta_imp_prec, bidx),
                 ),
             )
     return NodeDeconv(
