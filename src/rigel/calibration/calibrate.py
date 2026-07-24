@@ -326,10 +326,10 @@ def calibrate(
         if (config.intron_factory and intron_background is not None)
         else None
     )
-    # Message precision is now the source's OWN honest belief precision (strand + count), computed inside
-    # the sweep — there is nothing to fit here. The adjacent-pair overdispersion σ²_transfer that used to be
-    # estimated at this point is a PRIOR (and, fit on total density, one that weakened every message
-    # dramatically); it is ZERO while the prior-free solve is developed. See `bp_solver._scan`.
+    # Message precision is the source's OWN honest belief precision (strand + count), computed inside the
+    # unified sweep from the per-node self-solve (`node_init.build_node_init`) — there is nothing to fit here.
+    # The message-transport variance (σ²_transfer) rides on the enrichment NPMLE (`node_sweep`) and is the
+    # density-uniformity proxy being redone (`docs/calibration/variance_model_handoff.md`).
 
     # When ``_debug`` is on, the LAST sweep also fills ``_debug["capture"]`` with the per-node message
     # internals (local vs final belief, each channel's message mode/precision) — the substrate for the

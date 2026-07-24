@@ -2,10 +2,17 @@
 
 **This is the single entry point for calibration work. Read it first.** Last updated: 2026-07-24.
 
-> **Status in one line:** we are mid-migration from a density-transfer solver to a composition
-> (enrichment-ratio) solver for the **prior-free first pass (“pass-0”)**. The new solver is not yet correct,
-> and — the current blocker — **its variance model is wrong** (the old one assumed genome-wide density
-> uniformity, which hybrid capture breaks). **NOT ready to ship.**
+> **Status in one line:** the migration to the composition (enrichment-ratio) solver for the **prior-free
+> first pass (“pass-0”)** has **CONVERGED to one solver** — the legacy density-transfer `_scan` path is
+> deleted and the unified solver is the sole path. The **initialization phase is now a hardened, unit-tested
+> module (`node_init.py`)**. The current blocker is unchanged: **the message variance model is wrong** (the old
+> one assumed genome-wide density uniformity, which hybrid capture breaks) — that is the immediate next task.
+> **NOT ready to ship.**
+>
+> **Update 2026-07-24 (post-handoff session).** Retired `_scan` + all its flags/helpers (`bp_solver.py` 1871 →
+> ~730 lines); extracted the per-node self-solve into `node_init.build_node_init` (the four init sources of
+> `variance_model_concepts.md`, one unit test each), behavior-preserving (byte-identical to the pre-refactor
+> unified path across all 32 scenarios). Goldens regenerated to the unified default. §2 below is now historical.
 
 The only other docs that are live (everything else is in `archive/`, kept for history, NOT to be referenced):
 * `CALIBRATION_ARCHITECTURE.md` — the authoritative theory (count-zero-information; the three information
@@ -13,8 +20,11 @@ The only other docs that are live (everything else is in `archive/`, kept for hi
 * `unified_solver_design.md` — the target solver's architecture (the reframe + ÷M_dst mode). Its **precision /
   variance sections (§8 R1–R4) are SUPERSEDED** by `variance_model_handoff.md`; the mode design stands.
 * `gdna_intron_factory_design.md` — a shipped feature (the intron gDNA factory). Live.
-* `variance_model_handoff.md` — the variance-model derivation work, to be **redone** next session (handoff).
-* `SESSION_2026_07_24_HANDOFF.md` — what this session did, what remains, the next-session prompt.
+* `variance_model_concepts.md` — the owner's spec for the **initialization** phase (the four sources) that
+  `node_init.py` implements. Read for the init model.
+* `variance_model_handoff.md` — the variance-model derivation work, to be **redone** next (handoff). Live.
+* `SESSION_2026_07_24_HANDOFF.md` — the prior session's record. Its "two-solver / uncommitted" specifics are
+  now superseded (the convergence landed); the variance-model derivation §§ still stand.
 
 ---
 
@@ -40,19 +50,16 @@ Calibration deconvolves each genomic node’s **unspliced** fragment mass into a
 
 Everything below is **pass-0** unless stated. The hyperprior fit is a separate, also-WIP workstream (§4).
 
-## 2. The two-solver problem (the core mess)
+## 2. The two-solver problem — RESOLVED (historical)
 
-`bp_solver.py` (~1870 lines) currently contains **two** solve paths:
-
-| path | flag | status | what it is |
-|---|---|---|---|
-| **`_scan`** (legacy) | default (`RIGEL_UNIFIED=0`) | **production path today** | density-transfer relay; ~470 lines + many experiment flags (`_B1B`, `_N4A`, `_N4B`, `_E2`, …) |
-| **`_unified_solve`** | `RIGEL_UNIFIED=1` | **the target, default OFF** | composition (enrichment-ratio) relay; ~300-line nested closure |
-
-**Goal: productionize `_unified_solve`, put it on the default path, and delete `_scan` and all its flags.**
-This has not happened because (a) the unified solver still has bugs / is not fully correct, and (b) there is
-no correct variance model for its message propagation (§3). Until both are fixed, the unified solver *loses*
-the A/B (measured pass-0-vs-oracle mwae: unified **0.1280** vs legacy **0.0949**), so it cannot be flipped on.
+`bp_solver.py` used to contain **two** solve paths — the legacy density-transfer `_scan` (default) and the
+composition `_unified_solve` (flag-gated). **As of 2026-07-24 this is resolved: `_scan` and all its flags
+(`RIGEL_B1B/N4A/N4B/E2`, the `_UNIFIED` gate) and helpers were deleted; the unified solver is the sole path.**
+`bp_solver.py` roughly a third of its former size (1871 → ~730 lines); the per-node INITIALIZATION self-solve
+now lives in `node_init.py` (`build_node_init` — the four sources, unit-tested). The unified solver still
+**loses the A/B** (measured pass-0-vs-oracle mwae: unified ~**0.15** vs the legacy-with-factory baseline) — this
+is **expected and accepted on this WIP branch**; the variance model (§3) is what recovers it. Nothing ships
+until it does.
 
 ## 3. ⛔ THE BLOCKER — the variance model
 
@@ -96,14 +103,15 @@ capture-ON pass-0 badly; see the session handoff §“open problems”.)
 
 ## 6. The path to production (ordered)
 
+0. ✅ **DONE (2026-07-24):** converge to one solver — deleted `_scan` + flags + the `_UNIFIED_*` gates;
+   extracted + hardened + unit-tested the **initialization** phase (`node_init.py`, the four sources);
+   regenerated goldens. `bp_solver.py` 1871 → ~730 lines. Behavior-preserving (byte-identical A/B).
 1. **Derive the correct variance model** for the composition solver — per-component density variance +
-   a composition-appropriate transfer variance. Validate by MC. *(This is the next session’s first task.)*
-2. **Implement it in `_unified_solve`**, as pure, tested arithmetic functions (mirroring `enrichment_frame.py`
-   / `gdna_intron_factory.py`) so the closure shrinks. Re-run the loop (worst scenario → dissect → fix).
-3. **Make the unified solver win the A/B** (≥ legacy 0.0949, no stranded regression).
-4. **Converge:** flip `RIGEL_UNIFIED` on, delete `_scan` + its flags, collapse the `_UNIFIED_*` diagnostic
-   gates, regenerate goldens. `bp_solver.py` roughly halves.
-5. **Return to the gDNA hyperprior refit** (§4) on the clean solver, then the re-solve, then a ship candidate.
+   a composition-appropriate transfer variance. Validate by MC. *(This is the NEXT task.)*
+2. **Implement it** as pure, tested arithmetic (extend `enrichment_frame.py` / mirror `node_init.py`) so the
+   `_unified_solve` closure shrinks further. Re-run the loop (worst scenario → dissect → fix).
+3. **Make the unified solver win the A/B** (≥ the legacy-with-factory baseline, no stranded regression).
+4. **Return to the gDNA hyperprior refit** (§4) on the clean solver, then the re-solve, then a ship candidate.
 
 ## 7. How we work (methodology — see memory `pass0_debug_iteration_loop`)
 

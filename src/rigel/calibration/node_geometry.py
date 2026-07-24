@@ -47,6 +47,8 @@ from .simplex_logodds import _solve_nodes_logodds_all
 __all__ = [
     "NodeGeometry",
     "build_node_geometry",
+    "node_global_geometry",
+    "node_total_density",
     "NodeBelief",
     "NodeStatics",
     "build_node_statics",
@@ -305,6 +307,58 @@ def build_node_geometry(
         spliced_n_neg_left=spliced_n_neg_left,
         spliced_n_neg_right=spliced_n_neg_right,
     )
+
+
+def node_global_geometry(chain: NodeChain, geometry: NodeGeometry):
+    """Per-node 'global' gDNA support ``(mass, eff)``: a REGION uses its contained mass over its contained
+    gDNA eff-length; a BOUNDARY uses its both-side crossing mass over the SUMMED per-side density length
+    ``E_l + E_r``. This is the basis the enrichment NPMLE (`DensityNPMLE`) is fit on and projected
+    onto — shared by :func:`bp_solver.node_sweep` and ``calibrate`` so the fit and the projection use one
+    definition.
+
+    The boundary sum is ``E_l + E_r`` (not the old ``½(E_l+E_r)``) because ``eff_gdna_*`` is now the true
+    per-face DENSITY length ``E[min(ℓ,R)]/2`` (`effective_length.boundary_side_eff_length`). The old ½ here
+    was silently cancelling the ½ that was *missing* from the face length — which is why this frame read the
+    correct ρ while every per-face MESSAGE read ρ/2. Both frames are now the same one."""
+    is_reg = np.asarray(chain.kind) == REGION
+    egl = np.asarray(geometry.eff_gdna_left, dtype=np.float64)
+    egr = np.asarray(geometry.eff_gdna_right, dtype=np.float64)
+    msl = np.asarray(geometry.mass_left, dtype=np.float64)
+    msr = np.asarray(geometry.mass_right, dtype=np.float64)
+    mass = np.where(is_reg, msl, msl + msr)
+    eff = np.where(is_reg, egl, egl + egr)
+    return mass, eff
+
+
+def node_total_density(chain: NodeChain, geometry: NodeGeometry, f_g):
+    """The LAZY, composition-aware node total density (`unified_solver_design.md` §2, owner 2026-07-23):
+    the SUM of component densities, each in its OWN FL frame, from the current belief ``f_g``::
+
+        ρ_unspliced = f_g · (M/E_g^gDNA)  +  (1−f_g) · (M/E_r^RNA)      gDNA-FL for gDNA, RNA-FL for RNA
+        ρ_spliced   = spliced_mass / E_spl^RNA                          one-sided, boundary only
+
+    Returns ``(rho_unspliced, rho_with_spliced)`` per node. ``rho_with_spliced`` adds ρ_spliced and is the
+    total density used to form the enrichment ratio toward the exon/acceptor side (mature-bearing); the
+    mature-free ``rho_unspliced`` is used toward the intron side (§6). This is NEVER a pure-gDNA precompute —
+    ``f_g`` is the best current composition (self-solve + messages + measured spliced); gDNA-FL alone
+    (``f_g = 1``) is only the fallback where composition is genuinely unknown, and the bounding lemma (§2)
+    bounds *that* fallback, not this. Mass/eff are the node-level (both-face-pooled) quantities of
+    :func:`node_global_geometry`; the RNA eff-length is the RNA-FL twin, summed the same way."""
+    is_reg = np.asarray(chain.kind) == REGION
+    mass, eff_g = node_global_geometry(chain, geometry)
+    erl = np.asarray(geometry.eff_rna_left, dtype=np.float64)
+    err_ = np.asarray(geometry.eff_rna_right, dtype=np.float64)
+    eff_r = np.where(is_reg, erl, erl + err_)
+    fg = np.clip(np.asarray(f_g, dtype=np.float64), 0.0, 1.0)
+    rho_unspl = mass * (fg / np.maximum(eff_g, _EPS) + (1.0 - fg) / np.maximum(eff_r, _EPS))
+    # one-sided spliced (mature) DENSITY: spliced mass lands on ONE face, so divide by THAT face's E_spl (a
+    # summed-eff divisor would under-state it ~2×). Sum the per-face densities (only the acceptor face is nonzero).
+    spl_l = np.asarray(geometry.spliced_pos_left, np.float64) + np.asarray(geometry.spliced_neg_left, np.float64)
+    spl_r = np.asarray(geometry.spliced_pos_right, np.float64) + np.asarray(geometry.spliced_neg_right, np.float64)
+    espl_l = np.maximum(np.asarray(geometry.eff_spl_left, np.float64), _EPS)
+    espl_r = np.maximum(np.asarray(geometry.eff_spl_right, np.float64), _EPS)
+    rho_spliced = np.where(spl_l > _EPS, spl_l / espl_l, 0.0) + np.where(spl_r > _EPS, spl_r / espl_r, 0.0)
+    return rho_unspl, rho_unspl + rho_spliced
 
 
 @dataclass(frozen=True, slots=True)
