@@ -20,15 +20,15 @@ The only other docs that are live (everything else is in `archive/`, kept for hi
 * `unified_solver_design.md` — the target solver's architecture (the reframe + ÷M_dst mode). Its **precision /
   variance sections (§8 R1–R4) are SUPERSEDED** by `variance_model_handoff.md`; the mode design stands.
 * `gdna_intron_factory_design.md` — a shipped feature (the intron gDNA factory). Live.
-* `variance_model_concepts.md` — the owner's spec for the **initialization** phase (the four sources) that
-  `node_init.py` implements. Read for the init model.
-* `variance_foundation_plan.md` — **the current implementation plan**: isolate the composition precision
-  `(τ_λ,τ_θ)` (foundation) from the sampling `1/n` (messages). Hardened against `variance_foundation_critique.md`
-  (a 6-lens adversarial critique). **The next task's spec.** `SESSION_2026_07_24_HANDOFF_2.md` is the handoff.
-* `variance_model_handoff.md` — the MESSAGE variance-model derivation, to be redone **after** the foundation
-  (`variance_foundation_plan.md`) lands. Live.
-* `SESSION_2026_07_24_HANDOFF.md` — the prior session's record. Its "two-solver / uncommitted" specifics are
-  now superseded (the convergence landed); the variance-model derivation §§ still stand.
+* **`SESSION_2026_07_24_HANDOFF_3.md` — the LIVE handoff. START HERE for the next session** (the message
+  variance model); it has the full arc, the ordered implementation steps, the invariants, and a kickoff prompt.
+  (Handoffs 1 and 2 are historical.)
+* `variance_model_concepts.md` — the owner's spec for the **initialization** phase (the four sources).
+* `variance_foundation_proposal.md` — the SETTLED foundation model (approach E, the single Schur scalar `τ_λ`),
+  derived + numerically verified. `variance_foundation_plan.md` v4 — the invariants + the deferred-work spec;
+  `variance_foundation_critique.md` — the adversarial critique ledger.
+* `variance_model_handoff.md` — the MESSAGE variance-model derivation substrate (§3-4), the NEXT task's math,
+  built on the `τ_λ` foundation.
 
 ---
 
