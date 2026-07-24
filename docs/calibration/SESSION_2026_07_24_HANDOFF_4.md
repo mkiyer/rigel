@@ -146,7 +146,57 @@ tiny mis-composed neighbour must NOT dominate).
 **▶ NEXT lead:** cap/gate the reframe so a tiny neighbour's RNA fraction cannot become a high-precision message
 at a high-mass, composition-mismatched node (mass-ratio or composition-mismatch gate on the reframe or on the
 measurement propagation) — this is what unblocks the stranded gate. Dissect first (`RIGEL_S2T_OFF` + a per-node
-dump; `scratchpad`/`/tmp/dump_node.py` is the template) before changing the reframe.
+dump; `scratchpad/dump_node.py` is the template) before changing the reframe.
+
+### ✅ ROOT-CAUSED by the precision-audit workflow (`wf_fe3119fb`, 4 agents, machine-precision reproduction)
+**The `σ²_transfer = 0` exemption on matched/graft reframes — correct for the MODE (enrichment cancels) — is
+wrongly applied to the PRECISION.** A message crossing a large enrichment cliff arrives at FULL precision because
+(a) the graft is σ²_transfer-exempt and (b) `Var(log r) ≈ 1/n` is negligible on well-counted nodes. At node 1909
+the reframe is `r ≈ 407` (ρ_tot(exon)=34 vs ρ_tot(boundary)=0.08, dominated by the exon's gDNA), so the flanking
+boundary's real 47-count spliced measurement crosses the 407× cliff undamped (precision ~17–26) at a
+stretched-wrong mode (f_pos=0.718) → f_g→0.51. **Channel ablation: BOTH the RNA-measurement stream (`cm_p`) AND
+the composition λ-stream (`c_tau`) are corrupted identically — only dropping BOTH recovers node 1909 to 0.91.**
+Secondary: the measurement stream `mp` additively accumulates FOREIGN junctions' counts (`bp_solver.py:478`,
+combine `:566`). Seeds are count-honest (`SP` mass ≤ integer count); the violation is entirely in the cross-cliff
+TRANSPORT. **This IS the owner's insight** — a big enrichment cliff must COST precision; today it costs nothing.
+
+**Constraint on the fix (verifier caution):** must be composition/mass-mismatch-aware, NOT a blanket own-count
+cap — on unstranded AMBIG nodes `τ_own=0` and messages are the only information (the M5 win).
+
+### ✅ DERIVED + IMPLEMENTED — the cross-cliff precision law `σ²_cliff = (log r)²` (`wf_c565d23a`)
+The design workflow (3 derivations + 2 critiques + adjudicator, MC-validated) derived: the message's EXACT error
+is `log(a_c^src/a_c^dst)` (the composition-SHARE mismatch, `a_c = ρ_c/ρ_tot`; all scale/enrichment/`M_dst`
+cancel to machine precision). The imputation premise IS "shares match"; the honest precision prices how suspect
+that is across the cliff. The law: **`τ_msg = 1/(1/p_src + (log r)²)`** — the maximally-honest scale-free
+quadratic (→0 at `r=1`, grows with the cliff), grounded in the mass-ratio (counts) + eff-lengths, coefficient
+exactly 1, NO magic number. It **replaces** the wrong `Var(log r)≈1/n` and **removes the graft/matched exemption
+for the precision** (kept for the mode). Applied to EVERY stream. IMPLEMENTED (`bp_solver.py` `_relay`/
+`_transport`); tests green (383, +1 xpass on the AMBIG-recovery test). Anchor node 1909: **0.510 → 0.910**
+(oracle 0.985).
+
+**A/B (`pass0_oracle_bench.py`):** the stranded regression is LARGELY RECOVERED and refit=0 is a NET WIN, but
+`(log r)²` OVER-damps the biggest ENRICHMENT cliffs (verystrong) at refit=1:
+
+| condition | refit=0 base→cliff | refit=1 base→cliff |
+|---|---|---|
+| aggregate | 0.1267 → **0.1092** ✅ | 0.1234 → 0.1283 ⬆ |
+| stranded ss_0.99 | 0.0262 → 0.0391 (was 0.079) ✅mostly | 0.0293 → 0.0374 ✅mostly |
+| unstr capON | 0.2543 → 0.2186 ✅ | 0.3874 → 0.3420 ✅ |
+| **verystrong** | 0.2985 → 0.2779 ✅ | 0.1514 → **0.2356** ⬆ over-damped |
+
+**The characterized limitation (the design workflow predicted it):** prior-free, `(log r)²` cannot distinguish
+a pure-ENRICHMENT cliff (composition preserved — should cost NO precision, the M5 capture win) from a
+COMPOSITION-mismatch cliff (should cost). `log r` is dominated by the mass ratio (enrichment), so `(log r)²`
+over-attributes enrichment to composition drift on the extreme-capture (verystrong) arm. The **clean successor
+is the composition-MISMATCH term** (workflow's "D3": damp by the actual `gap²` between the transported mode and a
+reference), which is un-shippable prior-free (zero protection on AMBIG `τ_own=0`) but becomes the right object
+**once the gDNA hyperprior (Phase 2) supplies the reference** `v_own` on AMBIG nodes. So: `(log r)²` is the
+honest prior-free fix (recovers stranded, net win refit=0); the enrichment-vs-mismatch split is Phase 2.
+
+**▶ NEXT decision:** (a) accept `(log r)²` + move to the gDNA-hyperprior (Phase 2), where the `gap²` mismatch
+term replaces the `(log r)²` proxy and removes the verystrong over-damping; or (b) a prior-free `gap²` using the
+self-solve `fg_loc`/`τ_λ` as the reference (damp only where the message disagrees with a confident own belief) —
+untested, may recover verystrong without the hyperprior. RIGEL_S2T_OFF zeros the cliff term for A/B isolation.
 
 ## 7. INVARIANTS — preserve (handoff §7 unchanged) + the corrected census (HANDOFF_3 §8)
 

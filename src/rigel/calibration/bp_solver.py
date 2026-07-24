@@ -35,7 +35,7 @@ import os
 
 import numpy as np
 
-from .enrichment_frame import composition_logvar, transfer_logvar
+from .enrichment_frame import composition_logvar
 from .node_chain import REGION, NodeChain
 from .signature import coarse_type_array
 from .node_geometry import (
@@ -318,9 +318,24 @@ def node_sweep(
             0.0,
             np.where(_tau > _EPS, np.minimum(_fgfr * _fgfr / np.maximum(_tau, _EPS), _fgfr), _fgfr),
         )
-        logvar_tot = np.asarray(composition_logvar(_fg0, E_g, E_r, _var_fg, _n_node), np.float64)
-        if os.environ.get("RIGEL_S2T_OFF"):  # DIAGNOSTIC ONLY: disable σ²_transfer (isolate its effect)
-            logvar_tot = np.zeros_like(logvar_tot)
+        logvar_tot = np.asarray(
+            composition_logvar(_fg0, E_g, E_r, _var_fg, _n_node), np.float64
+        )  # (retained for the diagnostic capture only; no longer the transport-damping source)
+        # ── CROSS-CLIFF PRECISION (the cliff-precision design workflow, derived + MC-validated) ──────────────
+        # A message reframed across an enrichment cliff pays σ²_cliff = (log r)² — the honest composition-MISMATCH
+        # cost. The exact per-component message error is log(a_c^src/a_c^dst), a composition-SHARE mismatch (all
+        # scale / enrichment / M_dst cancel); the imputation premise IS "the shares match", and the precision must
+        # price how suspect that is across the cliff. (log r)² is the maximally-honest scale-free quadratic that
+        # → 0 at a matched edge (r=1: a same-density neighbour is the same KIND of region ⇒ trustworthy at FULL
+        # precision) and grows with the cliff (a node and its 1000×-denser neighbour are almost certainly
+        # different kinds ⇒ "we share a composition" is far more suspect). log r = log(M_dst·B_dst)−log(M_src·B_src)
+        # is dominated by the integer fragment-mass ratio, so it is grounded in COUNTS + effective LENGTHS —
+        # coefficient exactly 1 ("all of the unexplained cliff could be composition drift"), NO magic number.
+        # It REPLACES the wrong Var(log r)≈1/n object (the SAMPLING error of r — negligible on well-counted nodes,
+        # so a 407× cliff arrived ~200× over-confident even at n_src=14) and REMOVES the graft/matched exemption
+        # for the PRECISION (that exemption is correct for the MODE only). Applied to EVERY stream (mode-fusion,
+        # measurement, composition τ) — the anchor recovers only when BOTH cm_p AND c_tau are damped.
+        _s2t_off = bool(os.environ.get("RIGEL_S2T_OFF"))  # DIAGNOSTIC ONLY: disable the cross-cliff term
 
         # per-strand spliced (mature) DENSITY — one-sided per-face density (0 on regions); the acceptor face.
         def _face_spl(sp):
@@ -444,9 +459,10 @@ def node_sweep(
                 # node-pooled sum. Only an EXON receives the graft — an intron carries no mature (`ex_a[i]`,
                 # not `is_reg_a[i]`, which grafted the junction's whole mature flux into every flanking intron).
                 _gr = ex_a[i] and is_bnd_a[s]
-                # σ²_transfer: 0 on the matched-set GRAFT (r common-mode across {g,R}), Var(log r) elsewhere
-                # (peel / plain reframe / partial-anchor — r load-bearing).
-                s2t = 0.0 if _gr else (logvar_tot[i] + logvar_tot[s])
+                # σ²_cliff = (log r)² — the honest cross-cliff precision cost (0 at a matched r=1 edge, huge on a
+                # big cliff). NO graft exemption for the precision (the graft spliced now pays the cliff too — the
+                # direct anchor fix). Applied to every stream below.
+                s2t = 0.0 if _s2t_off else float(np.log(max(r, _EPS))) ** 2
                 gp = spl_p_f[sf][s] if _gr else 0.0
                 gn = spl_n_f[sf][s] if _gr else 0.0
                 tg, tp, tn = rg[s] * r, (rp[s] + gp) * r, (rn[s] + gn) * r
@@ -506,14 +522,15 @@ def node_sweep(
             gp = np.where(graft, spl_p_f[sf][src], 0.0)
             gn = np.where(graft, spl_n_f[sf][src], 0.0)
             tg, tp, tn = rg[src] * r, (rp[src] + gp) * r, (rn[src] + gn) * r
-            # M5 σ²_transfer (vectorized, the tested pure law): 0 on the matched-set graft (r common-mode ⇒
-            # cancels — a double-count otherwise), Var(log r)=logvar_tot+logvar_tot[src] elsewhere (peel /
-            # plain reframe / partial-anchor — r load-bearing). See the relay's twin. Retires the proxy.
-            s2t = transfer_logvar(logvar_tot, logvar_tot[src], graft)
-            # the COMPOSITION τ-stream: λ enrichment-invariant ⇒ σ²_transfer 0 on EVERY matched reframe (source
-            # carries RNA and not a peel), load-bearing only on peel/partial (see the relay's twin).
-            _matched = (fp_a[src] | fn_a[src]) & ~(is_bnd_a & ex_a[src] & valid)
-            s2t_comp = np.where(_matched, 0.0, s2t)
+            # σ²_cliff = (log r)² (vectorized) — the honest cross-cliff precision cost; 0 at a matched r=1 edge,
+            # huge on a big cliff. NO graft/matched exemption for the precision (the exemption is correct for the
+            # MODE only; the composition τ pays the cliff too — the anchor recovers only when BOTH cm_p and c_tau
+            # are damped). r=0 (invalid/unframed edge) ⇒ 0 (also masked by _dv's valid gate).
+            s2t = (
+                np.zeros_like(r)
+                if _s2t_off
+                else np.where(r > _EPS, np.log(np.maximum(r, _EPS)) ** 2, 0.0)
+            )
 
             def _dv(p, s2=s2t):
                 return np.where(
@@ -522,14 +539,12 @@ def node_sweep(
 
             tpg, tpp, tpn = _dv(pg), _dv(pp), _dv(pn)  # full → mode fusion
             tmg, tmp, tmn = _dv(mg), _dv(mp), _dv(mn)  # measurement (anchor gDNA + spliced RNA)
-            ttau = _dv(tau, s2t_comp)  # composition (τ) → the λ-message; 0 σ²t on matched (λ-invariant)
-            # the graft's MEASUREMENT precision — never τ-gated (see the relay's twin). ``_sp``>0 only on a GRAFT
-            # edge, where s2t≡0, so the inf→0 substitution below touches only already-masked entries (a
-            # zero-count node has logvar_tot=+inf ⇒ s2t=inf; ``0·inf`` would nan the masked branch np.where evals).
+            ttau = _dv(tau, s2t)  # composition (τ) → the λ-message; pays the cliff like every other stream
+            # the graft's MEASUREMENT precision — never τ-gated (see the relay's twin). Now damped by σ²_cliff
+            # (finite everywhere), so the flanking spliced crossing a big reframe is finally attenuated.
             _sp, _sn = np.where(graft, SP[sf][src], 0.0), np.where(graft, SN[sf][src], 0.0)
-            _s2t_spl = np.where(np.isfinite(s2t), s2t, 0.0)
-            _spc = np.where(_sp > _EPS, _sp / (1.0 + _sp * _s2t_spl), 0.0)
-            _snc = np.where(_sn > _EPS, _sn / (1.0 + _sn * _s2t_spl), 0.0)
+            _spc = np.where(_sp > _EPS, _sp / (1.0 + _sp * s2t), 0.0)
+            _snc = np.where(_sn > _EPS, _sn / (1.0 + _sn * s2t), 0.0)
             tpp, tpn = tpp + _spc, tpn + _snc  # into the mode-fusion precision …
             tmp, tmn = tmp + _spc, tmn + _snc  # … and the measurement stream (a count, never composition τ)
             peel = is_bnd_a & ex_a[src] & valid  # EXON → boundary: PEEL the departing mature
@@ -619,6 +634,10 @@ def node_sweep(
                         "cm_g": cm_g.copy(),
                         "cm_p": cm_p.copy(),
                         "cm_n": cm_n.copy(),
+                        "amp": amp.copy(),
+                        "bmp": bmp.copy(),
+                        "amn": amn.copy(),
+                        "bmn": bmn.copy(),
                         "cpg": cpg.copy(),
                         "fg_out": f_cur.copy(),
                     }
@@ -652,6 +671,23 @@ def node_sweep(
                     "rho_node0": rho_node0,
                     "rho_l0": rho_l0,
                     "rho_r0": rho_r0,
+                    # ── AUDIT_2 instrumentation (invariant scan) ──
+                    "order": np.asarray(order_list, np.int64),
+                    "logvar_tot": logvar_tot.copy(),
+                    "SP_l": SP[0].copy(), "SP_r": SP[1].copy(),
+                    "SN_l": SN[0].copy(), "SN_r": SN[1].copy(),
+                    "n_unspl_l": np.asarray(geometry.n_unspl_left, np.float64),
+                    "n_unspl_r": np.asarray(geometry.n_unspl_right, np.float64),
+                    "spl_n_pos_l": np.asarray(geometry.spliced_n_pos_left, np.float64),
+                    "spl_n_pos_r": np.asarray(geometry.spliced_n_pos_right, np.float64),
+                    "spl_n_neg_l": np.asarray(geometry.spliced_n_neg_left, np.float64),
+                    "spl_n_neg_r": np.asarray(geometry.spliced_n_neg_right, np.float64),
+                    "tau_own": tau_own.copy(), "mg_own": mg_own.copy(),
+                    "struct_lock": _struct.copy(),
+                    "fwd_mp": fwd[7], "bwd_mp": bwd[7],
+                    "fwd_mn": fwd[8], "bwd_mn": bwd[8],
+                    "fwd_mg": fwd[6], "bwd_mg": bwd[6],
+                    "fwd_tau": fwd[9], "bwd_tau": bwd[9],
                     "is_bnd": is_bnd_a,
                     "is_exon": ex_a,
                     "left": li,
