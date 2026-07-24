@@ -16,12 +16,15 @@ from rigel.calibration.node_chain import REGION, build_node_chain
 from rigel.calibration.node_geometry import build_node_geometry, build_node_statics, init_beliefs
 from rigel.calibration.node_init import (
     build_node_init,
-    factory_precision,
     own_composition_logvar,
     own_precision,
     strand_evidence,
 )
-from rigel.calibration.gdna_intron_factory import IntronBackground, intron_lambda_factor
+from rigel.calibration.density_deconv import (
+    GdnaBackground,
+    density_factor_precision,
+    density_lambda_factor,
+)
 from rigel.calibration.simplex_logodds import _logodds_grid
 from rigel.calibration.signature import (
     BIT_EXON_POS,
@@ -256,29 +259,29 @@ def test_build_node_init_all_finite_precisions():
             assert np.all(np.isfinite(arr)) and np.all(arr >= 0.0)
 
 
-# ── source 2: intron factory precision (I_factory) ──────────────────────────────────────────────────────────
+# ── source 2: density-deconvolution factor precision (I_density) ──────────────────────────────────────────────────────────
 
 
-def test_factory_precision_flat_carries_no_evidence():
+def test_density_factor_precision_flat_carries_no_evidence():
     """A FLAT λ-factor row carries τ = 0 — NOT the solve grid's own width; None ⇒ None (factory off)."""
     lam, _ = _logodds_grid(60, 10.0)
-    assert factory_precision(None, lam) is None
-    assert np.all(factory_precision(np.zeros((4, lam.shape[0])), lam) == 0.0)
+    assert density_factor_precision(None, lam) is None
+    assert np.all(density_factor_precision(np.zeros((4, lam.shape[0])), lam) == 0.0)
 
 
-def test_factory_precision_tracks_curvature_and_count():
+def test_density_factor_precision_tracks_curvature_and_count():
     """A sharper factor carries more evidence, and (via NegBinom Var(g)=μ+μ²/α_eff) a high-count intron peels
     more sharply than a low-count one — the self-limiting precision (migrated from `_lambda_factor_precision`)."""
     lam, fg = _logodds_grid(60, 10.0)
     sharp = -0.5 * ((lam - 1.0) ** 2) / 0.05
     diffuse = -0.5 * ((lam - 1.0) ** 2) / 5.0
     assert (
-        factory_precision(np.stack([sharp]), lam)[0]
-        > factory_precision(np.stack([diffuse]), lam)[0]
+        density_factor_precision(np.stack([sharp]), lam)[0]
+        > density_factor_precision(np.stack([diffuse]), lam)[0]
         > 0.0
     )
 
-    bg = IntronBackground(
+    bg = GdnaBackground(
         log_mu_bg=float(np.log(0.01)),
         alpha=np.inf,
         sg=1.0e5,
@@ -287,12 +290,12 @@ def test_factory_precision_tracks_curvature_and_count():
         informative=True,
     )
     eff = np.array([1.0e3, 1.0e5])
-    factor = intron_lambda_factor(bg, count=0.02 * eff, eff_g=eff, fg_grid=fg)
-    tau = factory_precision(factor, lam)
+    factor = density_lambda_factor(bg, count=0.02 * eff, eff_g=eff, fg_grid=fg)
+    tau = density_factor_precision(factor, lam)
     assert tau[1] > tau[0] > 0.0
 
 
-def test_factory_precision_flows_into_node_init_gdna():
+def test_density_factor_precision_flows_into_node_init():
     """End-to-end: passing an intron λ-factor lifts the intron's own gDNA precision above its strand-only value
     (the factory learning, registered as τ so the intron can propagate)."""
     chain, statics, geometry, belief, region_arrays = _scenario(

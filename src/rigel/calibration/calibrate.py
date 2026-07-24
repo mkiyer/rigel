@@ -56,7 +56,7 @@ from .effective_length import (
     boundary_side_eff_length,
     region_eff_length,
 )
-from .gdna_intron_factory import IntronBackground, fit_intron_background, intron_lambda_factor
+from .density_deconv import GdnaBackground, density_lambda_factor, fit_intron_background
 from .gdna_strand import (
     fit_gdna_strand_from_substrate,
     fit_rna_strand_from_substrate,
@@ -97,7 +97,7 @@ class InjectedCalibrationPriors:
     gdna_strand_overdispersion: float | None = None
     rna_strand_overdispersion: float | None = None
     enrichment_prior: DensityNPMLE | None = None
-    intron_background: IntronBackground | None = None
+    intron_background: GdnaBackground | None = None
     background: BackgroundReference | None = None
 
 
@@ -111,7 +111,7 @@ def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config,
     path. gDNA is strand-symmetric, so this factor lives purely on ``λ`` (peels gDNA; the residual RNA's tilt is
     left to the solver), and is consumed identically by the single-strand and AMBIG per-node solves.
 
-    ``bg`` (an injected population :class:`IntronBackground`) overrides the internal fit — a tiny toy's own
+    ``bg`` (an injected population :class:`GdnaBackground`) overrides the internal fit — a tiny toy's own
     intergenic pool is too sparse to fit the background the introns are peeled against."""
     if bg is None:
         bg = fit_intron_background(substrate, region_arrays, region_eff_len, include_introns=False)
@@ -129,7 +129,7 @@ def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config,
     ridx = idx[is_intron]
     count = np.asarray(substrate.contained.n_unspliced, dtype=np.float64)[ridx]
     eff_g = np.asarray(region_eff_len, dtype=np.float64)[ridx]
-    prior[is_intron] = intron_lambda_factor(bg, count, eff_g, fg)
+    prior[is_intron] = density_lambda_factor(bg, count, eff_g, fg)
     return prior
 
 

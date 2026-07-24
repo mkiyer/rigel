@@ -8,9 +8,10 @@ sources of ``docs/calibration/variance_model_concepts.md``:
 1. **MEASURED** counts get **Poisson** precision. Intergenic / intergenic-exon nodes are structurally pure
    gDNA (``f_g = 1``, composition CERTAIN); their gDNA density carries only the count precision ``1/n`` (so
    the own precision is the raw count ``n``). This is the anchor the whole prior-free pass leans on.
-2. **INTRON FACTORY** — an intron's gDNA is deconvolved against the intergenic-background NegBinom
-   (`gdna_intron_factory`); the curvature of that per-intron ``λ``-factor is honest, count-derived composition
-   evidence, registered here as ``τ_λ`` (`factory_precision`).
+2. **DENSITY DECONVOLUTION** — a node's gDNA is peeled against a gDNA density prior via NegBinom
+   (`density_deconv`); the curvature of that per-node ``λ``-factor is honest, count-derived composition
+   evidence, registered here as ``τ_λ`` (`density_factor_precision`). The **intron factory** is its special
+   case (the gDNA prior = the intergenic node distribution).
 3. **STRAND DECONVOLUTION** — a 1-DOF (single-strand) node solves its ``f_g`` directly from the Beta-Binomial
    tilt; a 2-DOF (AMBIG) node gets only a partial (tilt) solve. The strand Fisher information seeds ``τ_λ``
    (`strand_evidence`), and is IDENTICALLY zero on unstranded data (κ=½) by a derived noise-floor deadband.
@@ -18,7 +19,7 @@ sources of ``docs/calibration/variance_model_concepts.md``:
    (``τ_λ = 0 ⇒ Var(log f) = ∞ ⇒ p = 0``), left for the sweep + population prior to resolve.
 
 The precision arithmetic (sources → per-component ``Var(log f_c)`` → precision) is pure and unit-tested here.
-Layer: imports only lower layers (`node_geometry`, `simplex_logodds`, `gdna_intron_factory`), never
+Layer: imports only lower layers (`node_geometry`, `simplex_logodds`, `density_deconv`), never
 `bp_solver`, so it sits cleanly beneath the solver that consumes :func:`build_node_init`.
 """
 
@@ -28,6 +29,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .density_deconv import density_factor_precision
 from .node_chain import REGION, NodeChain
 from .node_geometry import NodeGeometry, NodeStatics, node_global_geometry
 from .simplex_logodds import _logodds_grid, _solve_nodes_logodds_all
@@ -37,7 +39,6 @@ __all__ = [
     "own_composition_logvar",
     "own_precision",
     "strand_evidence",
-    "factory_precision",
     "build_node_init",
 ]
 
@@ -145,33 +146,8 @@ def strand_evidence(
     return i_strand, struct_lock
 
 
-# ── source 2: the intron-factory factor precision (I_factory) ──────────────────────────────────────────────
-
-
-def factory_precision(lam_logprior, lam_grid):
-    """``I_factory`` — the composition evidence a per-intron ``λ``-factor carries, read off its own CURVATURE.
-
-    The gDNA intron factory (`gdna_intron_factory`) tabulates ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` over the
-    σ(λ) solve grid — a genuine, reference-free likelihood on ``λ`` (external ``ρ_bg`` information about this
-    node's composition), so its precision belongs in ``τ_λ`` alongside I_strand. ``τ_λ = 1/Var_λ`` under the
-    normalized factor. A FLAT row (every non-intron node, or an uninformative background) carries NO
-    information ⇒ ``τ = 0``. Returns ``(m,)`` (all-zero when ``lam_logprior`` is None)."""
-    if lam_logprior is None:
-        return None
-    lp = np.asarray(lam_logprior, np.float64)
-    lam = np.asarray(lam_grid, np.float64)
-    live = (
-        np.ptp(lp, axis=1) > _EPS
-    )  # a flat factor carries NO information (τ=0), never the grid's own width
-    tau = np.zeros(lp.shape[0], np.float64)
-    if not bool(live.any()):
-        return tau
-    w = np.exp(lp[live] - np.max(lp[live], axis=1, keepdims=True))
-    w /= np.maximum(w.sum(axis=1, keepdims=True), _EPS)
-    mu = w @ lam
-    var = w @ (lam * lam) - mu * mu
-    tau[live] = np.where(var > _EPS, 1.0 / np.maximum(var, _EPS), 0.0)
-    return tau
+# ── source 2 (the intron-factory density-deconv precision `I_density`) lives in `density_deconv.py`
+#    (`density_factor_precision`) — a factor's curvature is the density deconvolution's own precision. ──
 
 
 # ── the assembly ───────────────────────────────────────────────────────────────────────────────────────────
@@ -255,7 +231,7 @@ def build_node_init(
         locked=locked,
     )
     lam_grid, _ = _logodds_grid(int(n_grid), float(logodds_window))
-    tau_fac = factory_precision(intron_prior, lam_grid)
+    tau_fac = density_factor_precision(intron_prior, lam_grid)
     if tau_fac is not None:
         tau_lam = tau_lam + tau_fac
 
