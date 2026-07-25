@@ -327,7 +327,79 @@ no-junction 0.0553 → 0.1010) — the peel is fixed but something else is still
 
 Both argue for purpose-built scenarios rather than relying on the tail of the current suite.
 
-## 9. Tools
+## 9. ⭐ THE BOUNDARY REFRAME — what is validated, what is irreducible, and THE REMAINING TASK
+
+**Owner's correction, and it invalidates §8's REASONING even though §8 won its A/B.** There is no difference
+between mature and nascent RNA — that distinction is manufactured for our own bookkeeping. Only SPLICED vs
+UNSPLICED is observable. So "mature cannot continue past an exon→intron seam" is not physics; RNA crosses
+either way. `mrna_active_s` is therefore **not** a statement about what can cross. §8's gate is compensating
+for a broken peel, and it must be revisited once the peel is fixed (§9.3).
+
+**The owner's model of a junction boundary — two sides, two frames.** The side facing the EXON has a total
+density INCLUDING the spliced fragments and shares the exon's content; the side facing the INTRON EXCLUDES
+them (they have spliced away) and shares the intron's content. Each side's ρ_tot ratio to its neighbour should
+therefore be a pure CAPTURE step. And because the boundary sits on an enrichment slope, **the peel must be
+done by COMPOSITION, not by subtraction.**
+
+### 9.1 What is VALIDATED (`scratchpad/b2_faces.py`)
+
+The two-sided reframe IS the shipped design (`node_total_density`'s docstring states it), and **the
+intron-facing side is correct**: excluding the spliced there scores 0.077–0.924 against the true capture step
+while including it scores 0.499–1.875 — 3–6× worse. Confirmed, keep.
+
+### 9.2 What is REFUTED — do not re-run
+
+| item | verdict |
+|---|---|
+| Making the face selector STRUCTURAL (`faces an exon`) instead of observational (`carries spliced mass`) | **No effect.** The two agree on **94.6–96.0 %** of junction boundaries; the structural version scores marginally WORSE (0.479→0.493, 0.269→0.275, 1.139→1.145, 0.283→0.327). |
+| Folding the spliced into the exon-facing density differently (`ρ_u + S/E_r`, `ρ_u·(M+S)/M`, unspliced-only) | **No variant wins** across regimes (0.494/0.413/1.155/0.576 vs shipped 0.577/0.396/1.278/0.424). And `E_spl/E_r = 1.000`, so the eff-length is not the culprit. |
+| Blaming the exon-side error on a contaminated `f_g` | **Refuted.** Substituting the ORACLE `f_g` into `node_total_density` does not help: 0.577→0.614, 0.396→0.320, 1.278→1.239, 0.424→0.725. |
+
+### 9.3 What is IRREDUCIBLE, and what actually remains
+
+The exon-facing residual is **0.4–1.3 nats and survives perfect inputs**. That is not a formula error — it is
+§4.2's confirmed physics: a boundary samples a ~`fl_mean` window around a point while an exon samples its
+whole interior, so when probes sit mid-exon the ends are depleted and **the "capture step" between a point and
+a region average is genuinely large and scattered** (§4.2 measured p25–p75 = 0.55–2.9 at verystrong). Without
+probe placement it cannot be recovered.
+
+**But it mostly does not matter, and that tells us exactly where to work.** §3 established that `_pin_v`
+cancels `r` on **87.6 %** of the error — wherever all components are supplied. The one place scale does NOT
+cancel is a **subtraction**, and the peel is the only subtraction in the solver:
+
+```
+    tp = max(tp − spl_*_f[df], 0)        an ABSOLUTE density subtracted from a differently-framed one
+```
+
+**So the owner's prescription is precisely right and is the remaining task: peel by COMPOSITION.** The
+boundary's own solved state supplies both parts in ITS OWN frame, so enrichment cancels inside the ratio:
+
+```
+    w_continue = ρ_ν / (ρ_ν + ρ_μ)          ρ_ν = (1−f_g)·U/E_r  (solved),  ρ_μ = S/E_spl  (measured)
+    message to the intron side = ρ_R(exon) · r · w_continue        a scale-free FRACTION, not a difference
+```
+
+This replaces the only scale-sensitive operation in the message path with a scale-free one, and it is what
+makes the exon-side slope scatter harmless rather than load-bearing.
+
+### 9.4 THE PLAN (owner asked for next steps)
+
+1. **Implement the composition peel** — `w_continue` from the boundary's own solved composition, applied
+   multiplicatively; delete the subtraction. Both sites (`_relay`, `_transport`).
+2. **Derive its precision.** A ratio of two solved quantities: `Var(log w)` by the delta method from the
+   boundary's own `Var(λ)` and the spliced count `1/n_spl`. MC-validate as M10 in
+   `scripts/debug/message_variance_mc.py`, the way M1–M9 were.
+3. **Re-test §8's `mrna_active` gate.** Its justification is void (§9 opening); if the composition peel makes
+   it unnecessary — which is the expectation — remove it. Do not leave a compensation in place next to a fix.
+4. **Per-condition A/B at refit=0 AND refit=1**, then certify per boundary class: `exon|exon` with and without
+   a junction, `exon|intron` with and without, retained-intron, and both enrichment orderings.
+5. **Then** revisit `exon|exon` boundaries, which §8.1 shows are structurally starved (no factory within
+   reach on 97 %, no strand when unstranded) — they need a source, not a better transport.
+
+**No new simulations are required for 1–4.** §8.2's coverage gaps (very-high-nascent, inverted enrichment)
+matter for CERTIFYING step 4 across regimes, not for deriving or landing the fix.
+
+## 10. Tools
 
 `scripts/debug/pass0_error_table.py` — the suite state of play in READS with the trust (`errQ1conf`) view.
 `scratchpad/t1_char.py` (characterize + ψ ablation, bit-exact), `t2_strata.py` (channel-arrival strata +
