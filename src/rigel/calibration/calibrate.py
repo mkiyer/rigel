@@ -326,15 +326,15 @@ def calibrate(
         if (config.intron_factory and intron_background is not None)
         else None
     )
-    # Message precision is the source's OWN honest belief precision (strand + count), computed inside the
-    # unified sweep from the per-node self-solve (`node_init.build_node_init`) — there is nothing to fit here.
-    # The message-transport variance (σ²_transfer) rides on the enrichment NPMLE (`node_sweep`) and is the
-    # density-uniformity proxy being redone (`docs/calibration/variance_model_handoff.md`).
+    # Message precision is entirely SELF-CONTAINED in the sweep: the source's own honest belief precision
+    # (strand + count, from `node_init.build_node_init`), degraded by the reframe's scale variance
+    # (σ²_transfer = Var(log r)) and the DerSimonian–Laird composition-mismatch b̂² — all derived from counts and
+    # effective lengths inside the pass (`message_variance_derivation.md`). There is nothing to fit here.
 
     # When ``_debug`` is on, the LAST sweep also fills ``_debug["capture"]`` with the per-node message
     # internals (local vs final belief, each channel's message mode/precision) — the substrate for the
     # message-corruption trace (`scripts/debug/msg_trace.py`). Inert in production.
-    def _sweep(prior, enrichment_prior=None):
+    def _sweep(prior):
         capture = {} if _debug is not None else None
         out = node_sweep(
             chain,
@@ -353,7 +353,6 @@ def calibrate(
             n_tilt=config.sweep_n_tilt,
             n_grid_ss=config.sweep_n_grid_single_strand,
             gdna_prior=prior,
-            enrichment_prior=enrichment_prior,
             intron_prior=intron_prior,
             fold_coarse_k=config.fold_coarse_k,
             fold_fine_k=config.fold_fine_k,
@@ -365,11 +364,13 @@ def calibrate(
             _debug["capture"] = capture
         return out
 
-    # THE ENRICHMENT NPMLE (Role A) — fit ONCE on ALL nodes' TOTAL unspliced density (belief-free). It models
-    # the hybrid-capture ENRICHMENT/DEPLETION landscape, NOT composition: a total-density prior is
-    # composition-vacuous (count-zero-information — CALIBRATION_MASTER.md §2/§5). Its ONLY role here is message
-    # PRECISION — σ²_transfer projects each node's density onto it ("enriched or depleted?") inside
-    # ``node_sweep``. It is NEVER fed to the composition (gDNA) arm.
+    # THE ENRICHMENT NPMLE — fit ONCE on ALL nodes' TOTAL unspliced density (belief-free). It models the
+    # hybrid-capture ENRICHMENT/DEPLETION landscape, NOT composition: a total-density prior is
+    # composition-vacuous (count-zero-information — CALIBRATION_MASTER.md §2/§5), so it is NEVER fed to the
+    # composition (gDNA) arm. Its old second role — supplying the message σ²_transfer by projection — is
+    # RETIRED (that was a density-uniformity proxy, invalid under capture, and identically 0 in pass-0); the
+    # solver now derives σ²_transfer itself. What remains is the QC report's P(ρ) landscape + the toy-injection
+    # substrate, so it is fit here and consumed below, never inside the sweep.
     mass_global, eff_global = node_global_geometry(chain, geometry)
     if inj is not None and inj.enrichment_prior is not None:
         # INJECTED population enrichment landscape — a toy has too few nodes to resolve enriched vs depleted
@@ -381,14 +382,14 @@ def calibrate(
             mass_global, eff_global, bandwidth=config.npmle_bandwidth
         )
     # PHASE 1 — the INITIAL solve is PRIOR-FREE of the DNA composition prior: the inert Beta(½,½) reference
-    # alone (``gdna_prior=None``) + the strand likelihood + the belief-free forward-backward messages, with
-    # σ²_transfer supplied by the enrichment NPMLE above. Single-strand nodes self-solve from strand; unstranded
+    # alone (``gdna_prior=None``) + the strand likelihood + the belief-free forward-backward messages.
+    # Single-strand nodes self-solve from strand; unstranded
     # AMBIG nodes are grounded only by the messages here (the two-root DNA ambiguity, CALIBRATION_MASTER.md §4,
     # is resolved by the DECONVOLVED-gDNA hyperprior in Phase 2 — fit on this solve's peeled DNA, then a refit).
-    belief = _sweep(None, enrichment_prior=enrichment_prior)
+    belief = _sweep(None)
     belief_pass0 = belief  # the initial (prior-free) solve — kept for the refit before/after (movie / debug)
     logger.debug(
-        "calibration: PHASE 1 prior-free initial solve (enrichment NPMLE %d cells → σ²_transfer only)",
+        "calibration: PHASE 1 prior-free initial solve (enrichment NPMLE %d cells → QC only)",
         enrichment_prior.n_cells,
     )
 
@@ -417,7 +418,7 @@ def calibrate(
         if gdna_hyperprior is None:
             break
         belief = _init_belief()
-        belief = _sweep(gdna_hyperprior, enrichment_prior=enrichment_prior)
+        belief = _sweep(gdna_hyperprior)
         logger.debug(
             "calibration: PHASE 2 gDNA-hyperprior refit %d/%d (%d cells)",
             it + 1,
@@ -440,7 +441,7 @@ def calibrate(
             substrate=substrate,
             boundary_substrate=boundary_substrate,
             region_arrays=region_arrays,
-            gdna_prior=enrichment_prior,  # the ENRICHMENT NPMLE (σ²_transfer)
+            gdna_prior=enrichment_prior,  # the ENRICHMENT NPMLE (QC landscape / injection substrate)
             gdna_hyperprior=gdna_hyperprior,  # the DECONVOLVED-gDNA composition hyperprior (None if no refit)
             rna_sense_frac=rna_sense_frac,
             region_eff_len=region_eff_len,

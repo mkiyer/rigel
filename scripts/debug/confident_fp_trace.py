@@ -100,7 +100,7 @@ def main():
         return fg[j] * mass[j] / e
 
     order = ([int(x) for x in a.nodes.split(",")] if a.nodes else np.argsort(wm)[::-1][: a.top])
-    print(f"\nTRACE  (strand→loc→FINAL(var); gDNA msg; RNA msg; NEIGHBOURS):")
+    print("\nTRACE  (strand→loc→FINAL(var); gDNA msg; RNA msg; NEIGHBOURS):")
     for i in order:
         rho_i = mass[i] / max(eff[i], _EPS)
         print(f"\n  node {i} [{cls[i]}]  m={mass[i]:.0f}  log10ρtot={np.log10(max(rho_i,1e-12)):.2f}")

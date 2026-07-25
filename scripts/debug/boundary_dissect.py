@@ -63,7 +63,10 @@ for cond in conds:
     fp = np.asarray(cap["free_pos"], bool); fn = np.asarray(cap["free_neg"], bool)
     pg, pp, pn = np.asarray(cap["prec_g"]), np.asarray(cap["prec_p"]), np.asarray(cap["prec_n"])
     t0 = np.asarray(cap["_tau0_lam"]); kind = np.asarray(chain.kind)
-    mu_proj, var_proj = np.asarray(cap["_mu_proj"]), np.asarray(cap["_var_proj"])
+    # the LIVE enrichment scale + its variance (the retired NPMLE projection's replacement)
+    _us = cap["_uni_static"]
+    mu_proj = np.log(np.maximum(np.asarray(_us["rho_node0"]), 1e-12))
+    var_proj = np.asarray(_us["logvar_tot"])
     a_fwd, b_bwd = cap["a_fwd"], cap["b_bwd"]  # (amg,apg,amp,app,amn,apn) each; fwd=left msg, bwd=right msg
     mgl, pgl = np.asarray(a_fwd[0]), np.asarray(a_fwd[1])  # gDNA message from the LEFT flank
     mgr, pgr = np.asarray(b_bwd[0]), np.asarray(b_bwd[1])  # gDNA message from the RIGHT flank

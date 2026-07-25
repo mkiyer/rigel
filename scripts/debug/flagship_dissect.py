@@ -95,7 +95,7 @@ def main():
         chain, s["st"], s["geom"], s["b0"], s["ra"], s["bsub"], rna_sense_frac=s["kappa"],
         gdna_strand_overdispersion=s["od_g"], rna_strand_overdispersion=s["od_r"], n_grid=cc.sweep_n_grid,
         logodds_window=cc.sweep_logodds_window, n_tilt=cc.sweep_n_tilt,
-        n_grid_ss=cc.sweep_n_grid_single_strand, gdna_prior=prior, transfer_variance=True, _capture=cap,
+        n_grid_ss=cc.sweep_n_grid_single_strand, gdna_prior=prior, _capture=cap,
     )
     fg = np.asarray(belief.f_g, float)
     fg_loc = np.asarray(cap["fg_loc"], float)

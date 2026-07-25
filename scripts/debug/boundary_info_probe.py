@@ -66,7 +66,7 @@ for cond in conds:
     msgL = _impl(np.asarray(a_fwd[0]), np.asarray(a_fwd[1]))  # left-flank gDNA message
     msgR = _impl(np.asarray(b_bwd[0]), np.asarray(b_bwd[1]))  # right-flank gDNA message
     spl = np.asarray(cap["spl_l"]) + np.asarray(cap["spl_r"])
-    mu_proj = np.asarray(cap["_mu_proj"]); left, right = np.asarray(chain.left), np.asarray(chain.right)
+    mu_proj = np.log(np.maximum(np.asarray(cap["_uni_static"]["rho_node0"]), 1e-12)); left, right = np.asarray(chain.left), np.asarray(chain.right)
     cliff = np.array([abs((mu_proj[left[i]] if left[i] >= 0 else mu_proj[i]) -
                           (mu_proj[right[i]] if right[i] >= 0 else mu_proj[i])) for i in range(len(fg))])
     bnd = (kind != REGION) & np.isfinite(fo) & (mass > _EPS)

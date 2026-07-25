@@ -38,7 +38,6 @@ from flagship_interrogate import _oracle_per_node  # noqa: E402
 from selfsolve_diag import _scan_and_truth  # noqa: E402
 
 from rigel.calibration.bp_solver import REGION  # noqa: E402
-from rigel.calibration.node_geometry import _node_region_type  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402

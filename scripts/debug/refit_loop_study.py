@@ -116,14 +116,13 @@ def _setup(inp, index, cfg):
     )
 
 
-def _sweep(s, belief, prior, transfer_variance=True):
+def _sweep(s, belief, prior):
     cc = s["cc"]
     return node_sweep(
         s["chain"], s["st"], s["geom"], belief, s["ra"], s["bsub"], rna_sense_frac=s["kappa"],
         gdna_strand_overdispersion=s["od_g"], rna_strand_overdispersion=s["od_r"], n_grid=cc.sweep_n_grid,
         logodds_window=cc.sweep_logodds_window, n_tilt=cc.sweep_n_tilt,
-        n_grid_ss=cc.sweep_n_grid_single_strand, gdna_prior=prior, transfer_variance=transfer_variance,
-    )
+        n_grid_ss=cc.sweep_n_grid_single_strand, gdna_prior=prior,     )
 
 
 def _disagreement(u, left, edge_ok):
@@ -182,23 +181,23 @@ def run_condition_noprior(s):
     """Single pass-0 sweep with gdna_prior=None → PURE symmetric Beta(½,½) Jeffreys reference (½log f_g +
     ½log(1−f_g)) and NO σ²_transfer. The zero-infrastructure baseline: does the NPMLE+σ²_transfer stack beat
     the plain symmetric reference?"""
-    belief = _sweep(s, s["b0"], None, transfer_variance=False)
+    belief = _sweep(s, s["b0"], None)
     return [_measure(s, belief, None, None)]
 
 
-def run_condition(s, bandwidth, passes, cold=False, conf_frac=1.0, transfer_variance=True, no_floor=False):
+def run_condition(s, bandwidth, passes, cold=False, conf_frac=1.0, no_floor=False):
     """Refit loop; return per-pass measurements. ``cold`` restarts each sweep from the init belief b0
     (isolates the prior-sharpening feedback from the warm-continue accumulation); default WARM-CONTINUES
     from the previous solve, mirroring calibrate.py's closure. ``conf_frac`` < 1 fits the refit prior ONLY
     on the most-confident fraction of live nodes (smallest Var(log f_g)) — the owner's HOLD-OUT idea: keep
     ambiguous, unreliable nodes OUT of the population fit so the prior is not trained on its own guesses.
-    ``transfer_variance=False`` reproduces the OLD regime (σ²_transfer=0) to test whether wiring the
+    (σ²_transfer is now derived inside the sweep — `message_variance_derivation.md` — and has no toggle;
     projection broke the previously-beneficial refit. ``no_floor`` drops the DNA-background floor + pinned
     component (background=None) to A/B the PRODUCTION (floor-on) regime against the pre-P2/P3 regime the
     original study measured."""
     bg = None if no_floor else s["bg"]  # production default = floor+pinned ON
     prior = DensityNPMLE.fit(s["mass_g"], s["eff_g"], background=bg, bandwidth=bandwidth)  # pass-0
-    belief = _sweep(s, s["b0"], prior, transfer_variance=transfer_variance)
+    belief = _sweep(s, s["b0"], prior)
     recs = [_measure(s, belief, prior, None)]
     mass_g, eff_g = s["mass_g"], s["eff_g"]
     live = (eff_g > 1e-9 * 1.001) & (mass_g > _EPS)
@@ -215,7 +214,7 @@ def run_condition(s, bandwidth, passes, cold=False, conf_frac=1.0, transfer_vari
         prior = DensityNPMLE.fit(
             g_hat[keep], eff_g[keep], background=bg, var_g=vg[keep], bandwidth=bandwidth
         )
-        belief = _sweep(s, s["b0"] if cold else belief, prior, transfer_variance=transfer_variance)
+        belief = _sweep(s, s["b0"] if cold else belief, prior)
         recs.append(_measure(s, belief, prior, recs[-1]["fg"]))
     return recs
 
@@ -256,7 +255,7 @@ def main():
                       flush=True)
                 break
             recs = run_condition(s, bw, a.passes, cold=a.cold, conf_frac=a.conf_frac,
-                                 transfer_variance=not a.no_tv, no_floor=a.no_floor)
+                                 no_floor=a.no_floor)
             tag = ("  COLD" if a.cold else "") + (f"  conf={a.conf_frac}" if a.conf_frac < 1.0 else "") \
                 + ("  noTV" if a.no_tv else "") + ("  noFLOOR" if a.no_floor else "")
             if a.compact:

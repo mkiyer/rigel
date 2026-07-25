@@ -378,11 +378,15 @@ def test_gdna_sweep_factor1_intergenic_anchors():
 
 
 @pytest.mark.xfail(
-    reason="The unified solver's message VARIANCE MODEL is the NEXT task (variance_model_handoff.md §3-4). "
-    "On a uniform-gDNA chain it does not yet recover ρ exactly at an unstranded AMBIG node between two "
-    "intergenic anchors (reads ρ_g≈0.39 vs the true 0.50). The anchors themselves are exact "
-    "(test_gdna_sweep_factor1_intergenic_anchors); this xfail marks the known AMBIG-recovery gap the "
-    "composition-transport variance closes. Un-xfail when the variance model lands.",
+    reason="THE MINIMAL REPRODUCTION OF THE AMBIG RESIDUAL — the Phase-2 (gDNA hyperprior) entry point. On a "
+    "uniform-gDNA chain the unstranded AMBIG node between two exact ρ=0.5 intergenic anchors reads ρ_g=0.3914 "
+    "(21.7% low); the anchors themselves are exact (test_gdna_sweep_factor1_intergenic_anchors). This is NOT a "
+    "precision defect: an AMBIG node has τ_own=0, so the DL composition-mismatch term is inert there BY DESIGN "
+    "(that inertness is what preserves the M5 unstranded/capture win) and the anchors' messages arrive "
+    "essentially undamped — the error is in the message MODE, not its confidence. It briefly xpassed under the "
+    "σ²_cliff=(log r)² proxy, which damped those messages indiscriminately; that proxy was retired because it "
+    "over-damped extreme capture. The honest fix is the trained hyperprior supplying a finite v_own on AMBIG "
+    "nodes (SESSION_2026_07_24_HANDOFF_5.md §7.1) — until then this toy is the fastest way to see the gap.",
     strict=False,
 )
 def test_gdna_sweep_factor1_ambig_recovery():
@@ -392,6 +396,27 @@ def test_gdna_sweep_factor1_ambig_recovery():
     ambig = 3  # region node R1 (AMBIG)
     assert np.allclose(rho_g_left[ambig], rho, atol=0.05)
     assert np.allclose(rho_g_right[ambig], rho, atol=0.05)
+
+
+def test_interior_anchor_is_immovable_and_produces_no_nan():
+    """The `struct_lock` interior-anchor regression (HANDOFF_5 §6). A composition-CERTAIN node has
+    ``Var(log f_c) = 0``, so any code path that forms a fusion weight as ``1/Var`` produces ``∞`` and cascades
+    a nan through the whole chain. Pin both halves of the contract on the factor-1 chain, whose two intergenic
+    REGION nodes are exactly such anchors sitting INTERIOR to the chain (each has a live neighbour):
+
+    1. **no nan anywhere** — beliefs and variances stay finite (``∞`` is the honest 'unsolved' state and is
+       allowed on a variance; nan never is);
+    2. **the anchor is IMMOVABLE** — it reads back the true ρ exactly despite receiving messages from an AMBIG
+       neighbour that is itself wrong by 22%. Note what does the work: the anchor's own ``pg_own = n`` in the
+       relay fuse, NOT the DL ``v_own = 0`` branch (which is inert at the combine because a struct_lock node is
+       never `solvable`, so its ψ output is discarded)."""
+    rho = 0.5
+    rho_g_left, rho_g_right = _factor1_uniform_rho()
+    for v in (rho_g_left, rho_g_right):
+        assert not np.any(np.isnan(v)), v
+        assert np.all(np.isfinite(v)), v
+    assert np.allclose(rho_g_left[[1, 5]], rho, atol=1e-9)  # exact, not merely close
+    assert np.allclose(rho_g_right[[1, 5]], rho, atol=1e-9)
 
 
 def test_gdna_emits_across_tss_tes_seam():

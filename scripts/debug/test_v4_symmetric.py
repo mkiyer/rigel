@@ -41,7 +41,7 @@ def _pass0(s, bw, patched):
     slo._gdna_arm = _v4_gdna_arm if patched else _orig_gdna_arm
     try:
         prior = DensityNPMLE.fit(s["mass_g"], s["eff_g"], bandwidth=bw)
-        belief = R._sweep(s, s["b0"], prior, transfer_variance=True)
+        belief = R._sweep(s, s["b0"], prior)
         return R._measure(s, belief, prior, None)
     finally:
         slo._gdna_arm = _orig_gdna_arm

@@ -99,26 +99,30 @@ def node_sweep(
     n_tilt: int | None = None,
     n_grid_ss: int | None = None,
     gdna_prior=None,
-    enrichment_prior=None,
     intron_prior=None,
     fold_coarse_k: int = 33,
     fold_fine_k: int = 33,
     fold_sigma_coverage: float = 6.0,
     fold_refine_iters: int = 3,
-    transfer_variance: bool = True,
     _capture: dict | None = None,
 ):
     """The belief-propagation sweep over the chain — gDNA AND per-strand RNA messages, in COUNT space (no
     ``(M/E)²`` Jacobian) — as a single **FORWARD-BACKWARD** pass.
 
     The chain is a forest of linear paths, so BP is exact in one forward + one backward pass (vs Gauss-Seidel /
-    Jacobi which propagate one hop per pass). The message precision is the source's own HONEST belief precision
-    plus the belief-free transfer variance: ``pr = 1/(Var(log f_c^src) + 1/n_src + σ²_transfer)`` — strand
-    (composition), count (sampling), and the enrichment-crossing damping ``σ²_transfer`` from the NPMLE
-    projection (fit once, belief-free — ``docs/calibration/npmle_projection_variance_design.md``; off when
-    ``transfer_variance=False`` or there is no prior). There is no precision to refit and no outer
-    fixed-point loop. The global prior is ANCHORED (every input fit once before the solve), so the single FB
-    pass is exact.
+    Jacobi which propagate one hop per pass). A message's precision is the source's own HONEST belief precision
+    degraded by the two independent defects a cross-node imputation suffers
+    (`docs/calibration/message_variance_derivation.md`)::
+
+        p = 1 / ( Var(log f_c^src) + 1/n_src  +  σ²_transfer  +  b̂² )
+                 \\__ strand ___/   \\_count_/    \\_ SCALE _/    \\_ COMPOSITION _/
+
+    — the composition and count precision the source actually earned, the reframe's own scale uncertainty
+    ``σ²_transfer = Var(log r)`` (M5; 0 on the matched graft where ``r`` is common-mode), and the
+    DerSimonian–Laird estimate of how wrong the imputation PREMISE itself is (``b̂²``, M7 — the message's
+    composition against the destination's independent self-solve). All four are computed inside the pass from
+    counts and effective lengths: nothing is fitted, there is no precision to refit and no outer fixed-point
+    loop. The global prior is ANCHORED (every input fit once before the solve), so the single FB pass is exact.
 
     BEFORE the pass: the pass-0 NPMLE gDNA hyperprior (:class:`~.npmle.DensityNPMLE`), fit once,
     belief-free, and passed as ``gdna_prior``. ``gdna_prior=None`` is a first-class PRIOR-FREE solve: ψ then
@@ -233,19 +237,12 @@ def node_sweep(
         gdna_prior.logprior(solve_grid, mass_global, eff_global) if gdna_prior is not None else None
     )
 
-    # The belief-free PROJECTION message transfer variance (transfer_variance_formal_derivation.md): each node's
-    # total density projected onto the NPMLE ENRICHMENT landscape → (mu_proj, var_proj). The per-edge
-    # σ²_transfer = var_proj[dst] + (mu_proj[dst] − mu_proj[src])² damps a message across a capture-enrichment
-    # crossing (mode gap²) and floors at h². This is Role A — message PRECISION, not a composition claim — so it
-    # runs on the ENRICHMENT NPMLE (``enrichment_prior``), INDEPENDENTLY of the composition arm above. Fit once,
-    # belief-free, ANCHORED. Falls back to ``gdna_prior`` for callers that pass one prior (backward compat).
-    # σ²_transfer = 0 with no prior or when disabled (``transfer_variance=False``, for ablation).
-    proj_prior = enrichment_prior if enrichment_prior is not None else gdna_prior
-    if transfer_variance and proj_prior is not None:
-        mu_proj, var_proj = proj_prior.project(mass_global, eff_global)
-    else:
-        mu_proj = np.zeros_like(mass_global)
-        var_proj = np.zeros_like(mass_global)
+    # (RETIRED: the belief-free NPMLE-PROJECTION σ²_transfer — ``var_proj[dst] + (μ_proj[dst]−μ_proj[src])²``,
+    # a density-uniformity proxy that hybrid capture invalidates, and which was identically 0 in pass-0 anyway.
+    # σ²_transfer is now the DERIVED ``Var(log r)`` (M5, from ``composition_logvar``) and the composition half of
+    # the cliff cost is the DL ``b̂²`` — both computed inside the pass from counts and eff-lengths, so no
+    # enrichment prior enters the solver at all. The ENRICHMENT NPMLE itself is still fit in `calibrate` for the
+    # QC report + the toy-injection substrate; it simply no longer feeds message precision.)
 
     # Genomic node order for the forward/backward scans (within each ref path; left/right break at −1). The
     # scans are sequential per node, so iterate as a Python list of ints (faster than numpy scalar indexing).
@@ -391,8 +388,11 @@ def node_sweep(
         # ── the OWN-belief composition variances: the DL estimator's "second study" ─────────────────────────
         # Reused from `node_init` so ONE law defines them (the τ_λ FOUNDATION Jacobians). Three states, and the
         # DL term's three regimes fall out of them with no gate and no constant:
-        #   * struct_lock (composition CERTAIN) → v_own = 0   ⇒ excess = G² in full: an intergenic anchor cannot
-        #     be talked out of being gDNA by any message;
+        #   * struct_lock (composition CERTAIN) → v_own = 0   ⇒ excess = G² in full. NOTE this regime is INERT at
+        #     the combine: `struct_lock = ~solvable & is_region` ⊆ `~solvable`, so such a node's ψ output is
+        #     discarded by the write-back gate anyway (and `op+on = 0` there kills the λ gap). What actually
+        #     makes an intergenic anchor immovable is its own `pg_own = n` in the relay's fuse, NOT this branch;
+        #     it is kept because it is the correct limit, not because it is load-bearing today;
         #   * real evidence τ_own > 0          → v_own finite ⇒ a message that CONFLICTS with a confident own
         #     belief is killed (the stranded arm's fix), one that AGREES is barely touched;
         #   * no evidence τ_own = 0            → v_own = ∞    ⇒ excess ≡ 0: NO mismatch damping. Every AMBIG
@@ -400,11 +400,11 @@ def node_sweep(
         #     M5 unstranded/capture win propagates untouched. (Phase 2's hyperprior is what supplies a finite
         #     v_own there; until then the honest statement is "this node has no opinion to contradict".)
         v_own_g, v_own_r = own_composition_logvar(_ni.f_g, tau_own, _struct)
-        # the same three states on the λ axis, for the single-DOF composition stream (Var(λ) = 1/τ_λ).
-        with np.errstate(divide="ignore"):
-            v_own_lam = np.where(
-                _struct, 0.0, np.where(tau_own > _EPS, 1.0 / np.maximum(tau_own, _EPS), np.inf)
-            )
+        # the same three states on the λ axis, for the single-DOF composition stream (Var(λ) = 1/τ_λ — the two
+        # per-component arms are perfectly anti-correlated, so their Jacobians sum to 1 and the count cancels).
+        v_own_lam = np.where(
+            _struct, 0.0, np.where(tau_own > _EPS, 1.0 / np.maximum(tau_own, _EPS), np.inf)
+        )
 
         def _fuse(a, pa, b, pb):  # scalar precision-weighted density fuse
             p = pa + pb
@@ -612,7 +612,21 @@ def node_sweep(
                 # contradiction on EITHER arm contradicts the λ claim (a message with no RNA at all is asserting
                 # λ = +∞, i.e. "this node is pure gDNA").
                 g_R, c_R = mismatch_gap(tp + tn, op + on)
+                _tau_pre = ttau
                 ttau = mismatch_deflate(ttau, g_g - g_R, c_g | c_R, v_own_lam)
+                if _capture is not None:  # inert: the per-message gaps + the τ-stream kill, for the dissect loop
+                    _capture.setdefault("_dl", []).append(
+                        {
+                            "df": df,
+                            "G_g": g_g.copy(),
+                            "G_p": g_p.copy(),
+                            "G_n": g_n.copy(),
+                            "G_lam": (g_g - g_R),
+                            "contra": (c_g | c_R).copy(),
+                            "tau_pre": _tau_pre.copy(),
+                            "tau_post": ttau.copy(),
+                        }
+                    )
             return tg, tp, tn, tpg, tpp, tpn, tmg, tmp, tmn, ttau
 
         def _fuse_add(a, b):  # additive (inverse-variance) fuse of two independent precision streams
@@ -845,12 +859,10 @@ def node_sweep(
             # replay _solve_nodes_logodds_all with message channels ablated (message help/hurt attribution).
             global_lp=global_lp,
             solve_grid=solve_grid,
-            # DIAGNOSTIC (inert in production): the composition-evidence seed + the bare enrichment projection
-            # (mu_proj, var_proj) that σ²_transfer = var_proj[dst]+(mu_proj[dst]−mu_proj[src])² is built from, so a
-            # diagnostic can recompute per-flank σ²_transfer + the DOF verdict offline (boundary-rule tooling).
+            # DIAGNOSTIC (inert in production): the composition-evidence seed. (The retired NPMLE projection
+            # ``_mu_proj``/``_var_proj`` is gone; the LIVE enrichment scale + its variance are ``rho_node0`` and
+            # ``logvar_tot`` in ``_uni_static``, from which σ²_transfer = logvar_tot[dst]+logvar_tot[src].)
             _tau0_lam=_ni.tau_lam,
-            _mu_proj=mu_proj,
-            _var_proj=var_proj,
             # the incoming belief (the final solve's ``fg_ref``) + the intron-factory λ arm, so an ablation
             # replay of `_solve_nodes_logodds_all` reproduces the shipped f_g exactly before ablating.
             fg_init=_fg_init,

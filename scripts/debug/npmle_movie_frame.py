@@ -31,7 +31,6 @@ import sys
 
 sys.path.insert(0, str(Path("/Users/mkiyer/proj/rigel/scripts/debug")))
 from selfsolve_diag import _scan_and_truth  # noqa: E402
-from sigma2_transfer_ab import solve as _solve_mwae  # keeps the solve path identical  # noqa: E402
 
 from rigel.calibration.bp_solver import REGION, node_global_geometry, node_sweep
 from rigel.calibration.density_model import node_gdna_density
@@ -113,7 +112,7 @@ def solve_belief(inp, index, cfg):
         chain, st, geom, b0, ra, bsub, rna_sense_frac=kappa, gdna_strand_overdispersion=od_g,
         rna_strand_overdispersion=od_r, n_grid=cc.sweep_n_grid, logodds_window=cc.sweep_logodds_window,
         n_tilt=cc.sweep_n_tilt, n_grid_ss=cc.sweep_n_grid_single_strand, gdna_prior=prior,
-        transfer_variance=True, _capture=cap,
+        _capture=cap,
     )
     solve_belief.last = dict(prior=prior, cap=cap, mass_g=mass_g, eff_g=eff_g)
     # oracle G/R per chain node

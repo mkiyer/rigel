@@ -53,7 +53,8 @@ def main():
     ctype = coarse_type_array(np.asarray(ra.signature)).astype(int)
     fg = np.asarray(cap["f_g"]); fgl = np.asarray(cap["fg_loc"])
     mass = np.asarray(cap["mass_global"]); eff = np.asarray(cap["eff_global"])
-    mu_p = np.asarray(cap["_mu_proj"]); var_p = np.asarray(cap["_var_proj"])
+    _us = cap["_uni_static"]
+    mu_p = np.log(np.maximum(np.asarray(_us["rho_node0"]), 1e-12)); var_p = np.asarray(_us["logvar_tot"])
     dens = np.where(eff > _EPS, mass / np.maximum(eff, _EPS), 0.0)
 
     def ntype(n):
@@ -86,7 +87,7 @@ def main():
           f"{'σ²T':>7} {'shift?':>6} | {'src_or':>6} {'dst_or':>6}")
     for e in em:
         s, d = e["src"], e["dst"]
-        s2t = var_p[d] + (mu_p[d] - mu_p[s]) ** 2
+        s2t = var_p[d] + var_p[s]  # M5: sigma^2_transfer = Var(log r), the derived law
         so, do = orac(s), orac(d)
         print(f"  {s:>4}{('(' + ntype(s) + ')'):>7}->{d:>4}{('(' + ntype(d) + ')'):>7} | {e['rho_g']:>8.4f} "
               f"{e['mode_g']:>7.2f} {e['prec_g']:>7.2f} | {s2t:>7.3f} {str(e['use_shift']):>6} | "

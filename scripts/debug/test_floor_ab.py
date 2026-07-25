@@ -35,7 +35,7 @@ from rigel.index import TranscriptIndex  # noqa: E402
 
 def _pass0(s, bg):
     prior = DensityNPMLE.fit(s["mass_g"], s["eff_g"], background=bg, bandwidth=0.15)
-    belief = R._sweep(s, s["b0"], prior, transfer_variance=True)
+    belief = R._sweep(s, s["b0"], prior)
     return R._measure(s, belief, prior, None)
 
 

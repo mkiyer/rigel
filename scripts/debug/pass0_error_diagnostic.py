@@ -60,7 +60,7 @@ def solve(inp):
                     rna_strand_overdispersion=0.0011, gdna_strand_overdispersion=0.0012,
                     n_gdna_obs=gp + gn, n_rna_obs=float(bal.n_observations), n_grid=cc.sweep_n_grid,
                     n_grid_ss=cc.sweep_n_grid_single_strand, logodds_window=cc.sweep_logodds_window,
-                    n_tilt=cc.sweep_n_tilt, gdna_prior=None, enrichment_prior=ep, intron_prior=ip)
+                    n_tilt=cc.sweep_n_tilt, gdna_prior=None, intron_prior=ip)
     idx = np.asarray(chain.ref_idx, np.int64); is_r = np.asarray(chain.kind) == REGION
     tf_r, m_r = _true_fg(inp["region_pools"]); tf_b, m_b = _true_fg(inp["boundary_pools"])
 
