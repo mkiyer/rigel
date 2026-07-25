@@ -358,22 +358,33 @@ def node_sweep(
         spl_n_f = tuple(
             np.where(SN[k] > _EPS, SN[k] / np.maximum(ESP[k], _EPS), 0.0) for k in (0, 1)
         )
-        # ── AN EXON HAS NO RNA CLAIM ACROSS A SPLICE JUNCTION ──────────────────────────────────────────
-        # A boundary carrying spliced mass on either face has an ACTIVE junction. Across it, MATURE RNA
-        # splices out by definition — what continues unspliced is the nascent read-through, and an exon
-        # cannot measure how much of its own RNA that is. So the exon's RNA density is not a claim about what
-        # is on the other side, and the honest emission is NONE (density AND precision), not a partial peel.
+        # ── AN EXON HAS NO RNA CLAIM WHERE ITS MATURE CANNOT CONTINUE ──────────────────────────────────
+        # A boundary's unspliced crossing is `gDNA + RNA that continues`. WHICH RNA can continue is a
+        # STRUCTURAL fact, already computed: ``mrna_active_s`` = the exon bit set on BOTH flanks, i.e. mature
+        # runs contiguously past this seam on strand s.
+        #   * ``mrna_active_s`` TRUE  — an exon↔exon seam (including the retained-intron / alternative-isoform
+        #     case: TA splices 2000→9000 while TB reads straight through). Mature IS contiguous here, so the
+        #     exon's RNA legitimately transports and the measured peel removes what splices away.
+        #   * ``mrna_active_s`` FALSE — an exon↔intron seam. Mature splices out by definition; only nascent
+        #     read-through continues, and an exon CANNOT measure how much of its own RNA that is. Its RNA
+        #     density is therefore not a claim about the other side at all, and the honest emission is NONE
+        #     (density AND precision) rather than a partial subtraction.
         #
-        # The shipped peel subtracts the MEASURED spliced flux as a proxy for "the mature that leaves". It
-        # under-consumes badly. Measured on `nrna_none` (where the oracle RNA at an exon|intron boundary and
-        # inside the intron is EXACTLY 0): the relay still delivered ρ_R = 0.53 at the boundary and 0.0041 at
-        # the intron, the peel removed only ~16 % of the reframed RNA, and it did not fire at all on 14–17 %
-        # of edges (no spliced mass measured on that face). Meanwhile gDNA transported essentially perfectly
-        # across the same hops (relayed/oracle 0.96–0.99) — so the RNA channel alone was contaminating the
-        # chain, and introns (which the density deconvolution solves accurately) were the visible victims.
+        # Why the shipped peel is not enough on that second case: it subtracts the MEASURED spliced flux as a
+        # proxy for "the mature that leaves", and it under-consumes badly. Measured on `nrna_none` (where the
+        # oracle RNA at an exon|intron boundary and inside the intron is EXACTLY 0) the relay still delivered
+        # ρ_R = 0.53 at the boundary and 0.0041 at the intron; the peel removed only ~16 % of the reframed RNA
+        # and did not fire at all on 14–17 % of edges. Across the same hops gDNA transported essentially
+        # perfectly (relayed/oracle 0.96–0.99), so the RNA channel alone was contaminating the chain and
+        # introns — which the density deconvolution solves accurately — were the visible victims.
+        #
         # This is the component-set refusal `enrichment_frame.gdna_fallback_admissible` already describes:
-        # where the two ends do not share a component set, emit nothing rather than a wrong frame.
-        _junc = ((SP[0] + SN[0] + SP[1] + SN[1]) > _EPS) & is_bnd_a
+        # where the two ends do not share a component set, emit nothing rather than a wrong frame. Gating on
+        # the STRUCTURE (`mrna_active_s`) rather than on observed spliced mass matters in both directions — it
+        # fires on the 14–17 % of exon↔intron seams whose junction was never observed, and it does NOT fire on
+        # exon↔exon seams, where an earlier junction-presence test wrongly silenced a legitimate claim.
+        _mr_p = np.asarray(statics.mrna_active_pos, bool)
+        _mr_n = np.asarray(statics.mrna_active_neg, bool)
         accept_l = (
             SP[0] + SN[0]
         ) > _EPS  # the LEFT face carries the spliced (acceptor) ⇒ WITH-spliced ρ_tot
@@ -539,10 +550,12 @@ def node_sweep(
                     tmp += _spc
                     tmn += _snc
                 if is_bnd_a[i] and ex_a[s]:  # EXON → boundary: PEEL the departing mature
-                    if _junc[i]:  # across a junction the exon has NO RNA claim — see `_junc` above
-                        tp, tn, tpp, tpn, tmp, tmn = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-                    else:
-                        tp, tn = max(tp - spl_p_f[df][i], 0.0), max(tn - spl_n_f[df][i], 0.0)
+                    tp = max(tp - spl_p_f[df][i], 0.0) if _mr_p[i] else 0.0
+                    tn = max(tn - spl_n_f[df][i], 0.0) if _mr_n[i] else 0.0
+                    if not _mr_p[i]:
+                        tpp, tmp = 0.0, 0.0  # mature cannot continue ⇒ the exon has no RNA claim at all
+                    if not _mr_n[i]:
+                        tpn, tmn = 0.0, 0.0
                 if not fp_a[i]:
                     tp, tpp, tmp = 0.0, 0.0, 0.0
                 if not fn_a[i]:
@@ -638,12 +651,12 @@ def node_sweep(
             tpp, tpn = tpp + _spc, tpn + _snc  # into the mode-fusion precision …
             tmp, tmn = tmp + _spc, tmn + _snc  # … and the measurement stream (a count, never composition τ)
             peel = is_bnd_a & ex_a[src] & valid  # EXON → boundary: PEEL the departing mature
-            _kill = peel & _junc  # no RNA claim across a junction (see the relay's twin)
             tp = np.where(peel, np.maximum(tp - spl_p_f[df], 0.0), tp)
             tn = np.where(peel, np.maximum(tn - spl_n_f[df], 0.0), tn)
-            tp, tn = np.where(_kill, 0.0, tp), np.where(_kill, 0.0, tn)
-            tpp, tpn = np.where(_kill, 0.0, tpp), np.where(_kill, 0.0, tpn)
-            tmp, tmn = np.where(_kill, 0.0, tmp), np.where(_kill, 0.0, tmn)
+            # … and where mature CANNOT continue, no RNA claim at all (see the relay's twin)
+            _kp, _kn = peel & ~_mr_p, peel & ~_mr_n
+            tp, tpp, tmp = np.where(_kp, 0.0, tp), np.where(_kp, 0.0, tpp), np.where(_kp, 0.0, tmp)
+            tn, tpn, tmn = np.where(_kn, 0.0, tn), np.where(_kn, 0.0, tpn), np.where(_kn, 0.0, tmn)
             tp, tpp, tmp = np.where(fp_a, tp, 0.0), np.where(fp_a, tpp, 0.0), np.where(fp_a, tmp, 0.0)
             tn, tpn, tmn = np.where(fn_a, tn, 0.0), np.where(fn_a, tpn, 0.0), np.where(fn_a, tmn, 0.0)
             tg, tp, tn = _pin_v(

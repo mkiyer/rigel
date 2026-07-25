@@ -267,7 +267,67 @@ partial mitigation available without the index work"). That is the next thing to
 Also open, from §6: ψ weights the `intron_prior` ARRAY while `v_own` reads `tau_lam` — the same quantity down
 two paths that then disagree (proved by the ×100 saturation test). Worth unifying.
 
-## 8. Tools
+## 8. ⭐⭐⭐ THE BOUNDARY RULE — an exon has no RNA claim where its MATURE cannot continue (LANDED)
+
+**Owner's refinement of §7, and it corrects an over-reach in it.** §7 gated on *junction presence* (spliced
+mass observed). That is the wrong predicate in both directions. The right one is **structural and already
+computed**: `statics.mrna_active_s` = the exon bit set on BOTH flanks, i.e. *mature runs contiguously past
+this seam on strand s*.
+
+* `mrna_active_s` **TRUE** — an exon↔exon seam, including the owner's alternative-isoform case
+  (`TA+ (1000,2000),(9000,10000)` splices 2000→9000 while `TB+ (1000,10000)` reads straight through). **Mature
+  IS contiguous here**, so the exon's RNA legitimately transports and the measured peel removes what splices
+  away. §7's junction gate wrongly silenced these: `exon|exon` junction boundaries had **`c_tau = 0.00`** —
+  no composition message at all — and they are 24–36 % of boundary error.
+* `mrna_active_s` **FALSE** — an exon↔intron seam. Mature splices out by definition; only nascent read-through
+  continues and the exon cannot measure how much of its own RNA that is ⇒ **no RNA claim** (density AND
+  precision). This also fires on the **14–17 % of exon↔intron seams whose junction was never observed**, which
+  the observational gate missed entirely.
+
+| arm | refit=0 | | refit=1 | |
+|---|---|---|---|---|
+| M8 | 0.0900 | — | 0.0700 | — |
+| §7 junction-presence gate | 0.0892 | 16 better / 16 worse | 0.0677 | 23 / 6 / 3 |
+| **§8 `mrna_active` rule (LANDED)** | **0.0884** | **16 better / 11 worse / 5 flat** | **0.0678** | **23 better / 4 worse / 5 flat** |
+
+Better aggregate at refit=0 and **fewer regressions at both**. `exon|exon` regains its composition message
+(`c_tau` 0.00 → 12.28) and the intron leak tightens further (relayed ρ_R at an exon|intron boundary
+0.5280 → 0.2381 → **0.2030**, at the intron 0.0041 → 0.0028 → **0.0022**, against an oracle of exactly 0).
+
+**Suite: 12,561,367 → 12,343,147 error reads (−1.7 %).** The honesty gain at boundaries is the headline:
+`errQ1conf` **single 12.8 % → 6.6 %, AMBIG 17.7 % → 2.2 %** — the contaminated RNA messages had been
+manufacturing *confidently wrong* boundaries, precisely what would poison the Phase-2 hyperprior fit.
+
+### 8.1 The boundary census — what each class has to work with
+
+`scratchpad/b1_boundary.py`, per flanking pair × junction, with the ORACLE composition of the crossing mass
+and which of the three deconvolution sources reaches it (strand τ, factory-intron neighbour, exon gDNA):
+
+| class (gdna300 ss0.99 present capON) | share of bnd ERR | oracle f_g | self → ship | τ>0 | facNbr | c_tau |
+|---|---|---|---|---|---|---|
+| exon \| intron, junction | 52.4 % | 0.6257 | 0.0403 → 0.0542 | 89 % | 100 % | 10.63 |
+| **exon \| exon, junction** | **26.6 %** | 0.5621 | 0.1098 → 0.0992 | 49 % | **3 %** | 12.28 |
+| exon \| intron, no junction | 11.5 % | 0.9764 | 0.0553 → 0.1010 | 90 % | 99 % | 4.26 |
+
+**`exon|exon` boundaries are structurally starved**: both flanks are exons, so there is **no intron factory
+within reach (3 %)** and on unstranded data no strand either — the owner's "the boundary is the crux" case
+with the fewest sources. That is where to look next.
+
+Note also two classes where **messages still make the boundary worse** (`exon|intron` junction 0.0403 → 0.0542;
+no-junction 0.0553 → 0.1010) — the peel is fixed but something else is still contaminating those.
+
+### 8.2 Coverage of the owner's untested regimes (measured, for the simulator question)
+
+* **Unspliced RNA density > spliced RNA density at a junction boundary** — present but only in the tail:
+  fraction > 1 is **28.7 % / 1.7 % / 9.4 % / 14.9 %** across scenarios, median ratio 0.12–0.48. The
+  *very* high-nascent regime the owner describes is NOT well covered.
+* **Inverted enrichment (probe over the boundary, boundary MORE enriched than the exon)** — boundary/exon
+  oracle gDNA-density ratio median 0.13–0.83, but **boundary > exon on 3 % / 12 % / 22 % / 28 %** of edges. So
+  it exists, thinly, and only as a by-product rather than by design.
+
+Both argue for purpose-built scenarios rather than relying on the tail of the current suite.
+
+## 9. Tools
 
 `scripts/debug/pass0_error_table.py` — the suite state of play in READS with the trust (`errQ1conf`) view.
 `scratchpad/t1_char.py` (characterize + ψ ablation, bit-exact), `t2_strata.py` (channel-arrival strata +
