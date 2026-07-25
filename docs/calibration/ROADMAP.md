@@ -2,6 +2,11 @@
 
 **This is the single entry point for calibration work. Read it first.** Last updated: 2026-07-25.
 
+> **⭐ ORDER OF WORK (owner, 2026-07-25): the pass-0 SOLVER must be CORRECT before the gDNA hyperprior fit.**
+> Off-capture, single-strand pass-0 is essentially solved (mwae **0.0051**); what remains is (a) capture
+> degrading single-strand 10× → 0.0476, and (b) AMBIG at ~50 % of all error mass. **Next study: single-strand ×
+> capture** — `SESSION_2026_07_25_HANDOFF_7.md` §4–§5. Debug single-strand before AMBIG.
+>
 > **Status in one line:** the message-variance model is **COMPLETE** — derived, MC-validated, independently
 > verified, implemented, and A/B-won. A message's precision is now
 > `1/(Var(log f_c^src) + 1/n_src + σ²_transfer + b̂²)`: the source's earned composition+count precision, the
@@ -40,11 +45,11 @@ The only other docs that are live (everything else is in `archive/`, kept for hi
   total (52–71 % of nodes; p99 31–288×). Holds the measured evidence, the derivation brief, the two adjacent
   modelling gaps (§4: **no TSS/TES in the region/boundary map**; **the boundary is a slope, not a cliff — three
   enrichment ratios, not one**), and the record of what was tried and rejected.
-* **`SESSION_2026_07_25_HANDOFF_6.md` — the LIVE handoff. START HERE for the next session**; it has
-  the A/B state to beat, the measured Phase-2 experiment, the invariants, and a kickoff prompt.
-  `SESSION_2026_07_24_HANDOFF_5.md` (the DL term's plan, now DONE) and `..._HANDOFF_4.md` (the full arc + the
-  audit/design workflow findings) are the reference for how the variance model got here. (Handoffs 1–3 are
-  historical.)
+* **`SESSION_2026_07_25_HANDOFF_7.md` — ⭐ THE LIVE HANDOFF. START HERE for the next session.** The state,
+  the boundary-class census, the exact next study (**single-strand × capture**), the environment/tooling
+  setup, the do-not-re-run list, the invariants, and a copy-paste kickoff prompt. `..._HANDOFF_6.md` (whose
+  "next task is Phase 2" is WITHDRAWN), `..._HANDOFF_5.md` (the DL term's plan, now DONE) and `..._HANDOFF_4.md`
+  are the arc. (Handoffs 1–3 are historical.)
 * `message_variance_derivation.md` — the derived + MC-validated + independently-verified message-variance laws
   (M1–M5), the M6 combine finding, and the empirical results (§6). Live.
 * `variance_model_concepts.md` — the owner's spec for the **initialization** phase (the four sources).
