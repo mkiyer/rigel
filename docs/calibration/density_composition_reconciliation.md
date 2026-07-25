@@ -117,16 +117,112 @@ for the hyperprior.
 
 ---
 
-## 3. The derivation to do
+## 2b. DERIVATION RESULTS (2026-07-25) — steps 1 and 2 are done
 
-### 3.1 The ceiling — pin the relay
-`Σ_c ρ_c·E_c ≤ M` at **every** node, not only at the combine. The pin leaves the **share** untouched
-(composition regime intact) and forces the **scale** to the node's observed mass (density regime enforced). It
-is the existing operator applied where its own docstring says it belongs, and it introduces no constant.
-*Derivation needed:* the relay currently has no per-hop pin, and adding one changes what `σ²_transfer` and the
-DL `b̂²` are measured against — check the composition, do not assume it.
+### 2b.1 The mass bound is an IDENTITY under the imputation premise
+Under the premise (source and destination share composition), reframing gives
+`ρ_c^msg = a_c·ρ_tot(dst) = ρ_c^dst,true`, hence `Σ_c ρ_c E_c = M` **exactly**. So its violation *is* the
+premise error, measured against a hard observable, with no prior needed. But the sensitivity is limited:
 
-### 3.2 The discarded evidence — the pin correction must cost precision
+```
+    k = M / Σ_c ρ_c^msg E_c = [ Σ_c a_c^dst E_c ] / [ Σ_c a_c^src E_c ]
+```
+
+`k` sees a share mismatch **only through the eff-length-weighted average**, so when `E_g ≈ E_r` it is blind to
+composition error entirely. Max `|log k|` from composition alone: **×1.04** on a contained region (E=2701/2801),
+**×1.50** at a boundary crossing (300/200), ×3.3 on a pathological short region. **Therefore the measured p99 of
+31–288× and max 519× cannot be single-hop composition error — they are ACCUMULATED drift** (the multiplicative
+random walk `_relay`'s own comment describes). The mass bound's value is as a per-hop **anchor that stops the
+drift compounding**, NOT as a per-hop composition detector. This materially changes §3.2 — see §3.2 below.
+
+### 2b.2 Is the single `r` mis-specified, or is the premise wrong? — THE PREMISE (settled)
+The orchestrator flagged that §4.2 might subsume §3. It does not. gDNA is uniformly present along the genome,
+so the **true** capture step between two nodes is `[G(dst)/E_g(dst)] / [G(src)/E_g(src)]` from the oracle
+(`scratchpad/derive_1_ratio_check.py`):
+
+| condition | model `r` vs true capture step | RNA vs the capture premise |
+|---|---|---|
+| capture **off** | ×1.03 (corr 0.12 — no variation to track) | **×3.22** |
+| capture on | ×1.07 (corr 0.923, slope 0.979) | ×2.67 |
+| capture on + nRNA | ×1.13 (corr 0.917, slope 0.991) | ×2.23 |
+| verystrong | ×1.43 (corr 0.955, slope 1.026) | ×1.97 |
+
+The reframe estimates the true capture step **well** (slope ≈ 1, corr 0.92–0.96). The channel mixing of §4.2 is
+real and sits exactly where predicted — `exon↔boundary` edges ×1.3 (×2.4 at verystrong) vs ×1.0 on
+intron/intergenic edges — but it is the SMALLER effect. **The clean discriminator is capture-OFF: there is no
+enrichment to mis-specify (reframe error ×1.03) and RNA still deviates ×3.22.** That is pure expression
+difference, i.e. the imputation premise itself. So: fix the scale anchor (§3.1) first; per-channel `r` (§4.2) is
+a separate, smaller, additive improvement.
+
+### 2b.3 WHICH HOPS break the identity — graft and peel, not plain reframes
+Bit-exact offline replay of `_relay` (`scratchpad/derive_2_relay_pin.py`, validated `max|Δρ| = 0.000e+00`
+against the shipped arrays), per-hop `|log k|`:
+
+| edge kind | median | p90 | fraction > 1.5× |
+|---|---|---|---|
+| **plain** reframe | ×1.05–1.11 | ×1.67–2.50 | 15–18 % |
+| **graft** | ×1.08–1.12 | ×11.6–**84.4** | 22–29 % |
+| **peel** | ×**1.31–1.58** | ×4.9–10.8 | **42–53 %** |
+
+Plain reframes preserve the identity to within the §2b.1 analytic bound — **the theory is confirmed exactly
+where it should hold**. The violations are concentrated at the ROUTING operations, which add (graft) or
+subtract (peel) an **absolute measured density** into a **relative** claim. This is the same exon↔boundary face
+§4.2 is about, reached independently.
+
+### 2b.4 Pinning the relay: `_pin_v` semantics matter, and it works
+Three variants replayed (RNA density vs oracle, mass-weighted `|Δ|`):
+
+| | shipped | `pin=fused` (scale all three blindly) | **`pin=context`** (`_pin_v` semantics) |
+|---|---|---|---|
+| gdna100 ss0.50 present capON | 35.29 | 18.90 | 29.12 |
+| gdna300 present capON | 27.23 | 22.14 | 25.01 |
+| gdna300 present capture **OFF** | 0.176 | **0.641** ✗ | **0.068** ✓ |
+| overshoot p99 / max | 31–288 / 519 | 1.00 / 1.00 | **1.47–1.58 / 1.9** |
+
+`pin=fused` rescales all components blindly and **regresses capture-OFF 3.6×** — it forces a partial context to
+account for the node's whole mass. `pin=context` applies the operator's real semantics (substitute the node's
+own density for any component the context does not supply, so a partial claim stays partial), improves both
+regimes, and **bounds the accumulated overshoot to the §2b.1 analytic bound** rather than to 1 — which is the
+correct target, since the eff-length slack is legitimate.
+
+## 3. The derivation
+
+### 3.1 ✅ LANDED — the ceiling: anchor the relay context to the node's observed mass
+`Σ_c ρ_c·E_c = M` at **every** node, not only at the combine — the identity of §2b.1, enforced with `_pin_v`'s
+own semantics (a component the context does not supply is filled from the node's own density, so a PARTIAL
+claim stays partial). It leaves the **share** untouched (composition regime intact) and forces the **scale** to
+the node's observed mass (density regime enforced). No constant.
+
+**A/B (32 conditions, `OMP_NUM_THREADS=1`):**
+
+| | HEAD | + relay pin |
+|---|---|---|
+| refit=0 aggregate | 0.0964 | **0.0926** |
+| refit=0 unstranded × capON | 0.1813 | **0.1720** |
+| refit=0 capture OFF | 0.0474 | **0.0439** |
+| refit=0 stranded ss_0.99 | 0.0390 | **0.0377** |
+| refit=0 verystrong | 0.1865 | 0.1902 ⬆ |
+| refit=0 gdna_none | 0.1065 | 0.1084 ⬆ |
+| refit=1 aggregate | 0.0819 | **0.0779** |
+| refit=1 unstranded × capON | 0.1681 | **0.1585** |
+
+**14 better / 5 worse / 13 flat** (refit=0), **15 / 4 / 13** (refit=1). No zero-gDNA regression (unlike the
+graft-frame fix of §5.1). The only losses are `verystrong` on the lowest-gDNA scenarios (gdna1/gdna5), where
+capture is most extreme and the eff-length slack the pin permits is loosest — carry this into §4.2, which is
+the per-channel enrichment work that should relieve it.
+
+### 3.2 ⚠ RE-SCOPED BY §2b.1 — the pin correction as a variance term
+**The original proposal (charge `(log k)²` as a scale-mismatch variance, the third sibling of `σ²_transfer` and
+`b̂²`) is weaker than it first appeared, and must not be written as stated.** §2b.1 proves `k` sees composition
+error only through the eff-length-weighted average, so on a contained region (`E_g ≈ E_r`) it is **blind** —
+a maximally wrong composition produces `|log k| ≤ 0.036`. Charging `(log k)²` would therefore price the ROUTING
+residual (graft/peel, §2b.3) and the accumulated drift, not composition mismatch, and after §3.1 the drift is
+gone by construction. Before implementing anything here, settle: (a) what is left in `log k` once the relay is
+pinned — measure it, it is the graft/peel identity break; (b) whether that residual is better priced as a
+variance or removed by §4.2's per-channel ratios; (c) the null `Var(log k) = 1/n_dst + …` and the legitimate
+`k ≠ 1` case. Original motivation retained below.
+
+#### (original framing, for the record)
 `k = M / Σ_c ρ_c E_c` is measured against a **hard observable**: the node's fragment count. When `k = 1/227`
 the message's absolute claim was wrong by 227×, and today the pin silently renormalises that into a
 confident-looking composition. That factor is free, already computed, and is the "no reads left to justify

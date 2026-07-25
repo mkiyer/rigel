@@ -522,6 +522,29 @@ def node_sweep(
                     tp, tpp, tmp = 0.0, 0.0, 0.0
                 if not fn_a[i]:
                     tn, tpn, tmn = 0.0, 0.0, 0.0
+                # ── ANCHOR THE CONTEXT TO THIS NODE'S OBSERVED MASS (the scalar twin of `_pin_v`) ───────────
+                # `Σ_c ρ_c·E_c = M` is an IDENTITY under the imputation premise, not an approximation: a matched
+                # reframe delivers ρ_c^msg = a_c·ρ_tot(dst) = ρ_c^dst,true, so the components account for exactly
+                # the fragments the node observed. Its violation therefore MEASURES the premise error — against a
+                # hard observable, with no prior. Enforcing it here is what `_pin_v`'s own docstring already
+                # prescribes ("applied at EVERY node rather than only at the final combine"); until now the relay
+                # ran unanchored and the residual COMPOUNDED — a multiplicative random walk reaching
+                # `Σ_c ρ_c E_c / M` p99 = 31–288× and max 519× (52–71 % of nodes over 1).
+                # Note what this does NOT do: one hop's violation from composition error alone is bounded by the
+                # eff-length ratio (k = [Σ a_c^dst E_c]/[Σ a_c^src E_c] ⇒ ×1.04 on a contained region, ×1.50 at a
+                # boundary crossing), and plain reframes measure exactly that (median ×1.05–1.11). The heavy tail
+                # is the ROUTING: graft p90 ×11.6–84.4, peel median ×1.31–1.58 — they add/subtract an ABSOLUTE
+                # measured density into a RELATIVE claim. So this is an anti-drift anchor, not a composition test.
+                # The `_pin_v` semantics are load-bearing: a component the context does not supply is filled from
+                # the node's OWN density, so a PARTIAL claim stays partial. Rescaling all three blindly instead
+                # regresses capture-OFF 3.6× (derivation: `scratchpad/derive_2_relay_pin.py`).
+                _sg = tg if tpg > 0.0 else og[i]
+                _sp = tp if tpp > 0.0 else op[i]
+                _sn = tn if tpn > 0.0 else on[i]
+                _sv = _sg * E_g[i] + (_sp + _sn) * E_r[i]
+                if _sv > _EPS and M[i] > _EPS:
+                    _k = M[i] / _sv
+                    tg, tp, tn = tg * _k, tp * _k, tn * _k
                 rg[i], pg[i] = _fuse(og[i], pg_own[i], tg, tpg)
                 rp[i], pp[i] = _fuse(op[i], pp_own[i], tp, tpp)
                 rn[i], pn[i] = _fuse(on[i], pn_own[i], tn, tpn)
