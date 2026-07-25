@@ -2,17 +2,18 @@
 
 **This is the single entry point for calibration work. Read it first.** Last updated: 2026-07-24.
 
-> **Status in one line:** the message-variance model is **derived, MC-validated, and independently verified**
-> (M1–M5); the pure layer is landed; **M5 `σ²_transfer` is wired and is a large win on the error-mass arm**
-> (aggregate refit=1 0.1234→**0.0945**, unstr-capON 0.387→**0.163**) **but regresses the stranded arm** — traced
-> (dissection) to the two-message per-component combine's rank-1 double-count, NOT the variance laws. **The next
-> task is the committed fix: the single-λ combine on a λ-space relay** (`SESSION_2026_07_24_HANDOFF_4.md` §6).
-> **NOT ready to ship.**
+> **Status in one line:** the message-variance model is **derived, MC-validated, verified, AND implemented** — the
+> **single-λ combine on a three-stream relay** (M6 double-count fixed) and a **cross-cliff precision term** (a
+> message crossing an enrichment cliff must lose precision) are both landed. Shipped cliff term `σ²_cliff=(log r)²`
+> recovers the stranded regression (net win refit=0) but over-damps the extreme-enrichment (verystrong) arm.
+> **The next task is the honest replacement: the DerSimonian–Laird composition-mismatch term `b̂²`**
+> (`SESSION_2026_07_24_HANDOFF_5.md` §4 — the exact plan). **NOT ready to ship.**
 >
-> **Update 2026-07-24 (message-variance session).** Retired the density-uniformity `σ²_transfer` proxy (it was
-> identically 0 in pass-0) for the honest, prior-free, direction-dependent `Var(log r)`; the derivation +
-> independent-verification workflow settled the laws and proved the two-message combine is 2–7× over-confident
-> (rank-1). START at `SESSION_2026_07_24_HANDOFF_4.md`.
+> **Update 2026-07-24 (message-variance session, end).** Two multi-agent workflows (audit + design) root-caused
+> the stranded regression (the `σ²_transfer=0` exemption preserved precision across cliffs) and derived the fix.
+> GOVERNING PRINCIPLE (owner): **pass-0 must be WEAK and correctable** — an over-confident message that pins a
+> node wrong is worse than a weak one slightly off (measured: the fix drops the median precision ~4 orders of
+> magnitude AND halves the error). START at `SESSION_2026_07_24_HANDOFF_5.md`.
 >
 > **Update 2026-07-24 (post-handoff session).** Retired `_scan` + all its flags/helpers (`bp_solver.py` 1871 →
 > ~730 lines); extracted the per-node self-solve into `node_init.build_node_init` (the four init sources of
@@ -25,9 +26,10 @@ The only other docs that are live (everything else is in `archive/`, kept for hi
 * `unified_solver_design.md` — the target solver's architecture (the reframe + ÷M_dst mode). Its **precision /
   variance sections (§8 R1–R4) are SUPERSEDED** by `variance_model_handoff.md`; the mode design stands.
 * `gdna_intron_factory_design.md` — a shipped feature (the intron gDNA factory). Live.
-* **`SESSION_2026_07_24_HANDOFF_4.md` — the LIVE handoff. START HERE for the next session** (the single-λ
-  combine); it has the full arc, the A/B numbers, the diagnosis, the ordered steps, and a kickoff prompt.
-  (Handoffs 1–3 are historical.)
+* **`SESSION_2026_07_24_HANDOFF_5.md` — the LIVE handoff. START HERE for the next session** (the
+  DerSimonian–Laird composition-mismatch cliff-precision term + pass-0 cleanup + Phase 2); it has the exact
+  implementation plan, the A/B state to beat, the invariants, and a kickoff prompt. `SESSION_2026_07_24_HANDOFF_4.md`
+  is the full-arc reference (the audit + design workflow findings). (Handoffs 1–3 are historical.)
 * `message_variance_derivation.md` — the derived + MC-validated + independently-verified message-variance laws
   (M1–M5), the M6 combine finding, and the empirical results (§6). Live.
 * `variance_model_concepts.md` — the owner's spec for the **initialization** phase (the four sources).
