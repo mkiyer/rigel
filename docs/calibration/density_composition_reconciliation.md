@@ -241,7 +241,48 @@ be *scale mismatch vs the observed mass*. **Its decisive advantage over `b̂²` 
 the node's own density so that "a seam sending gDNA only still gives `f_g < 1`". That case must not be charged.
 MC-validate as we did M7 (`scripts/debug/message_variance_mc.py`), then implement, then per-condition A/B.
 
-### 3.3 The floor — a node must be able to say "my mass is ALL RNA"
+### 3.3 ⚠ RESOLVED AS A NON-TASK (category c) — but it uncovered a real modelling gap
+**Derivation result, 2026-07-25.** The floor as framed — give pass-0 a way to know a node is pure RNA — is
+**not achievable prior-free**, and the attempt is what proves it:
+
+* **100 % of the `gdna_none` error mass sits on `τ_own = 0` nodes** (no composition evidence of their own).
+  Median posterior `Var` there is 2.20 / 0.053 / 1.83 in log space — mostly a nearly flat belief, i.e. the
+  solver IS saying "I don't know"; mwae scores the mode and punishes that.
+* **There is no ignored per-node RNA measurement.** `mass_spliced` is > 0 only at BOUNDARIES — spliced
+  fragments cross junctions and junctions are boundaries by construction. **Exons have `mass_spliced = 0`,
+  always.** So the "use the node's own spliced mass" idea has no substrate where the error is (exons carry
+  81–96 % of the `gdna_none` error mass).
+* **At boundaries the spliced measurement is a WEAK predictor** of the unspliced RNA density it would have to
+  bound: median `ρ_R/ρ_μ` = 0.584 / 0.303 / 0.562 across conditions, `corr(log, log)` = 0.405 / **0.014** /
+  0.421. Not a usable quantitative floor.
+* "This library contains no gDNA" is a **population** statement — the third information source, i.e. the
+  hyperprior, by construction (`CALIBRATION_ARCHITECTURE.md`). Pass-0 cannot derive it from one node.
+
+**Consequence for the graft-frame fix (§5.1): it stays REVERTED, and the "mwae punishes honesty" defence
+fails on measurement.** With the fix applied, `gdna_none` nodes become *more confidently wrong*, not more
+uncertain: mode 0.378 → 0.492, median `Var` 2.20 → 2.01, fraction with `Var < 0.02` **26.6 % → 30.4 %**
+(capture-off: 0.367 → 0.437, 41.5 % → 45.4 %). Moving the mode further from truth while raising confidence is
+the forbidden direction, so §5.1 must wait for the hyperprior, not for a pass-0 floor.
+
+### 3.3b ⭐ NEW — the mature-overlap channel at a boundary (the real gap this uncovered)
+`simplex_logodds`'s docstring asserts: *"at a junction mature RNA splices, so the unspliced crossing mass is
+gDNA + nascent, a channel genuinely disjoint from the spliced mass."* **That claim is FALSIFIED.** In libraries
+with **no gDNA and no nascent RNA**, boundaries still carry substantial unspliced mass and it is **100 % RNA**:
+
+| condition | boundaries w/ unspliced mass | unspliced mass | oracle gDNA | oracle RNA |
+|---|---|---|---|---|
+| gdna_none ss0.50 nrna_none capON | 61 | 53,973 | **0** | **53,973 (100 %)** |
+| gdna_none ss0.50 nrna_none capOFF | 81 | 44,710 | **0** | **44,710 (100 %)** |
+| gdna_none ss0.99 nrna_none capON | 60 | 54,702 | **0** | **54,702 (100 %)** |
+
+The disjointness claim predicts ~0 there. So a boundary's unspliced crossing has a **third contributor the
+model does not represent** — mature RNA that overlaps the seam without crossing the junction. Most likely
+mature fragments spanning a transcript START/END, which ties this directly to §4.1 (the region/boundary map has
+no TSS/TES): a fragment at a transcript's 5′ end genuinely spans that position unspliced, and the model has
+nowhere to put it. **Pin the mechanism before modelling it** — window-overlap vs transcript-end are different
+fixes, and the second is §4.1's deferred index work.
+
+#### (original framing, for the record)
 Discovered the hard way (§5.1). In a zero-gDNA library every fragment at every node is RNA, but **nothing in
 prior-free pass-0 can establish that**: with no strand signal (`ss_0.50`) and no gDNA anywhere, a node has no
 intrinsic evidence and ψ's uninformative Jeffreys reference drifts toward gDNA. A wrong 82× RNA over-claim in
