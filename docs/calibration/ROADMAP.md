@@ -146,7 +146,10 @@ hyperprior first; the AMBIG fix then lands almost for free.**
 * **AMBIG nodes** — prior-free they have no composition evidence at all (`τ_own = 0`), so they are carried by
   messages alone and the DL term does not protect them. The minimal reproduction is the factor-1 bedrock toy
   (`test_gdna_sweep_factor1_ambig_recovery`, xfail): on a uniform ρ=0.5 chain the AMBIG node between two exact
-  anchors reads **0.3914**. The error is in the message MODE, not its precision. Fixed by §4, not by pass-0.
+  anchors reads **0.3914**. This is the designed weakness, NOT a mode defect — the shortfall shrinks
+  monotonically with depth (21.7% at ρ=0.5 → 0.8% at ρ=5000), so the transported mode is right and what is
+  missing is WEIGHT: messages arrive at their honest `1/n`, and ψ's uninformative reference holds the node off
+  the vertex until the data earn it. Fixed by §4 (a trained prior), not by more damping.
 
 ## 6. The path to production (ordered)
 

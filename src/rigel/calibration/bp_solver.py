@@ -596,6 +596,22 @@ def node_sweep(
             # message to this node's own mass, so the common scale (the reframe residual) is gone from G and only
             # the share drift is left. Every stream is deflated — the anchor recovers only when the composition
             # τ-stream is damped alongside the measurement one (ablation-confirmed, HANDOFF_4 §6).
+            # ── THE λ-EMISSION GATE (structural, and PRIOR to any damping question) ────────────────────────
+            # A composition message is a claim about the SPLIT, ``λ = log(f_g/f_R)``. A source that carries only
+            # ONE component has no such claim to make — λ is not "large" for it, it is UNDEFINED. The canonical
+            # case is exactly the geometry ``intergenic | seam | EXON``: RNA cannot cross a gene boundary, so the
+            # seam is structurally RNA-free, while the exon it feeds has RNA. The combine builds the λ mode as
+            # ``mo_g − mo_R`` with ``mo_R`` floored at ``log(_EPS)``, so a zero-RNA message silently becomes the
+            # maximally confident assertion "this node is 100 % gDNA" — a numerical artifact of the floor — while
+            # its precision is real, having been accumulated along the relay by nodes that never said that.
+            # Measured (`scratchpad/seam_lambda_audit.py`) on unstranded capture-ON: 90 nodes received that
+            # artifact and every one of them was solved to f_g = 1.000 against a mean oracle of 0.814.
+            # Gating it here, at EMISSION, is the honest fix and it is structural — the same kind of presence
+            # test as the ``fp_a``/``fn_a`` strand gates, no threshold. It must NOT be left to the DL term (which
+            # only reaches it where the destination has its own evidence, i.e. never on unstranded data) and it
+            # is NOT a loss of information: a pure-gDNA source's authority is a DENSITY LEVEL, and that travels
+            # on the measurement stream (``tmg``), which is precisely the three-stream separation.
+            ttau = np.where((tg > _EPS) & ((tp + tn) > _EPS), ttau, 0.0)
             if not _s2t_off:
                 g_g, c_g = mismatch_gap(tg, og)
                 g_p, c_p = mismatch_gap(tp, op)
@@ -661,6 +677,11 @@ def node_sweep(
             cR = cp + cn
             mo_R = np.log(np.maximum(cR * E_r / np.maximum(M, _EPS), _EPS))
             lam_msg = mo_g - mo_R
+            # …and the same structural gate on the FUSED pair, which is what this mode is actually built from.
+            # `_transport`'s per-message gate cannot catch every case: a message may carry an RNA DENSITY while
+            # contributing zero mode-fusion PRECISION, in which case `cR` collapses to 0 here and `mo_R` hits
+            # the floor again. A λ message exists only when BOTH components of the pair reached this node.
+            c_tau = np.where((cg > _EPS) & (cR > _EPS), c_tau, 0.0)
             # (2) ANCHOR gDNA MEASUREMENT → gdna_imp (mode mo_g, precision ``cm_g``). (3) SPLICED RNA MEASUREMENT
             #     → rna_imp (mode mo_p/mo_n, precision ``cm_p``/``cm_n``). INDEPENDENT of the composition, so
             #     fused separately (an RNA-only spliced measurement constrains f_g via f_R with NO gDNA info).

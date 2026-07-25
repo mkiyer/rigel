@@ -378,15 +378,17 @@ def test_gdna_sweep_factor1_intergenic_anchors():
 
 
 @pytest.mark.xfail(
-    reason="THE MINIMAL REPRODUCTION OF THE AMBIG RESIDUAL — the Phase-2 (gDNA hyperprior) entry point. On a "
-    "uniform-gDNA chain the unstranded AMBIG node between two exact ρ=0.5 intergenic anchors reads ρ_g=0.3914 "
-    "(21.7% low); the anchors themselves are exact (test_gdna_sweep_factor1_intergenic_anchors). This is NOT a "
-    "precision defect: an AMBIG node has τ_own=0, so the DL composition-mismatch term is inert there BY DESIGN "
-    "(that inertness is what preserves the M5 unstranded/capture win) and the anchors' messages arrive "
-    "essentially undamped — the error is in the message MODE, not its confidence. It briefly xpassed under the "
-    "σ²_cliff=(log r)² proxy, which damped those messages indiscriminately; that proxy was retired because it "
-    "over-damped extreme capture. The honest fix is the trained hyperprior supplying a finite v_own on AMBIG "
-    "nodes (SESSION_2026_07_24_HANDOFF_5.md §7.1) — until then this toy is the fastest way to see the gap.",
+    reason="THE MINIMAL REPRODUCTION OF THE PRIOR-FREE AMBIG WEAKNESS — the Phase-2 (gDNA hyperprior) entry "
+    "point. On a uniform-gDNA chain the unstranded AMBIG node between two exact ρ=0.5 intergenic anchors reads "
+    "ρ_g=0.3914 (21.7% low) while the anchors are exact to 1e-9. It is NOT a mode defect and NOT a bug: the "
+    "shortfall shrinks monotonically with DEPTH — 21.7% at ρ=0.5, 14.2% at ρ=10, 5.6% at ρ=50, 0.8% at ρ=5000 "
+    "(scratchpad depth sweep) — so the transported mode is right and what is missing is WEIGHT. An AMBIG node "
+    "has τ_own=0 (the strand likelihood constrains only the tilt), so it has no evidence of its own; all it "
+    "gets is its neighbours' messages at their honest count precision 1/n, and ψ's uninformative Jeffreys "
+    "reference deliberately holds it off the f_g=1 vertex until the data earn it. That is the designed "
+    "prior-free weakness, and it is exactly what the trained hyperprior replaces (HANDOFF_6 §3). Do NOT attack "
+    "it with more damping, and do not read the brief xpass under the retired σ²_cliff=(log r)² proxy as a fix — "
+    "that damped every message indiscriminately and over-damped extreme capture.",
     strict=False,
 )
 def test_gdna_sweep_factor1_ambig_recovery():

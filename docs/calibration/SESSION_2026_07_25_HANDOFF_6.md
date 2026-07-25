@@ -135,9 +135,15 @@ the refit loop is at fault.
 **The minimal reproduction is a 3-node toy, not the 10 Mb suite:**
 `tests/calibration/test_bp_solver.py::test_gdna_sweep_factor1_ambig_recovery` (xfail) — on a uniform ρ=0.5
 chain, the AMBIG node between two intergenic anchors reads **0.3914** while the anchors are exact to 1e-9.
-The messages arrive essentially undamped there, so **this is an error in the message MODE, not its
-precision** — do not attack it with more damping. It briefly xpassed under `(log r)²`, which damped those
-messages indiscriminately; that is not a fix worth keeping. Solve it with §3.1 + §3.2.
+
+**It is not a mode defect and not a bug — it is the designed prior-free weakness.** Depth sweep (uniform
+composition, counts scaled): 21.7% low at ρ=0.5, 14.2% at ρ=10, 5.6% at ρ=50, 2.1% at ρ=500, 0.8% at ρ=5000.
+The transported mode is CORRECT and converges; what is missing is WEIGHT. An AMBIG node has `τ_own = 0`, so it
+contributes no evidence of its own; it gets only its neighbours' messages at their honest `1/n` count
+precision, against ψ's uninformative Jeffreys reference, which deliberately holds it off the `f_g=1` vertex
+until the data earn it. **Do NOT attack this with more damping or by hunting a mode bug** (an earlier draft of
+this handoff said "the error is in the message MODE" — that was wrong, and the depth sweep is the disproof).
+The fix is a trained prior replacing the uninformative reference: §3.1 + §3.2.
 
 ## 4. Open items, ranked (each is real, each has numbers)
 
