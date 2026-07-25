@@ -465,6 +465,21 @@ and part boundary-frame (the unspliced part), and one `r` is derived from the mi
 
 ## 5. What was tried and REJECTED — do not re-run
 
+### 5.1 The graft-frame fix ("F1") — RE-MEASURED 2026-07-25, still NOT landable; its PREMISE is now M8
+
+> **⭐ RESOLVED (2026-07-25, `SESSION_2026_07_25_HANDOFF_8.md`).** The premise below is now *derived and
+> measured with oracle densities*: the grafted `ρ_μ` is a spliced measurement anchored in the flanking EXONS,
+> so it already sits in the destination's frame (`ρ_R(exon)/ρ_spl(bnd)` = 1.02–1.86, capture-INVARIANT) while
+> `ρ_g^src` sits in the boundary's, which capture pushes 6.1–6.8× lower. Since `r` cancels from the delivered
+> share (verified `1.8e-15`), the graft edge never reframes the gDNA — that is the entire single-strand ×
+> capture defect. **But `1/r` is the wrong correction** and this is now measured, not inferred: the required
+> per-edge frame factor has median `log c` = +0.009/−0.008/+0.054 off-capture (so the SHIPPED `c = 1` is
+> exact there and `1/r` over-corrects) and `log r` does not predict `log c` on-capture (corr ≤ 0.35). Re-run
+> on today's post-relay-pin baseline (arm `m11`) the fix scores 0.0853/0.0666 with **9 better / 23 worse** and
+> reproduces the `gdna_none` regression exactly (0.3668 → 0.4369). **It stays reverted.** What shipped instead
+> is **M8** — the same premise priced as a VARIANCE, `(log r)²` on the grafted component only, which improves
+> `gdna_none` rather than damaging it (`message_variance_derivation.md` §8).
+
 ### 5.1 The graft-frame fix ("F1") — correct in isolation, NOT landable alone
 The measured mature `ρ_μ = S/E_spl` is added to the source boundary's RNA **before** `·r`, so the destination
 exon's enrichment step is applied to a measurement that already carries it. At node 1909: `ρ_μ = 0.1741`,

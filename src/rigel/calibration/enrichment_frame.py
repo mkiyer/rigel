@@ -42,6 +42,7 @@ __all__ = [
     # ── the pass-0 message-VARIANCE laws (message_variance_derivation.md) ──
     "transport_seed_logvar",
     "graft_rna_logvar",
+    "graft_frame_logvar",
     "peel_rna_logvar",
     "transfer_logvar",
     "message_precision",
@@ -276,6 +277,46 @@ def graft_rna_logvar(v_nu, v_mu, w_nu, w_mu):
     (its message log-variance is just its transport seed). MC <1%."""
     wn, wm = np.asarray(w_nu, np.float64), np.asarray(w_mu, np.float64)
     return wn * wn * np.asarray(v_nu, np.float64) + wm * wm * np.asarray(v_mu, np.float64)
+
+
+def graft_frame_logvar(r):
+    """M8 — the GRAFT's **frame-mislift** log-variance: ``(log r)²`` on the MEASURED spliced component.
+
+    M5 sets ``σ²_transfer = 0`` on a graft edge because ``r`` is common-mode across the matched set ``{g, R}``
+    and cancels in the composition. That is true of the IMPUTED continue ``ρ_ν``, which travels with ``ρ_g``
+    from the same source — but it is **false of the grafted ``ρ_μ``**. The delivered share is
+
+        f_g : f_R  =  ρ_g^src·E_g^dst : (ρ_ν^src + ρ_μ)·E_r^dst
+
+    (``r`` and the ``_pin_v`` factor multiply every component alike and cancel exactly — verified to 1.8e-15
+    against the shipped arrays). So ``ρ_μ`` is being ratioed against the **source's** gDNA density. But a
+    spliced fragment's two blocks lie in the flanking EXONS, so ``ρ_μ = S/E_spl`` is measured in the
+    DESTINATION exon's frame, not the boundary's — structurally, the same kind of geometric fact as the
+    ``free_pos``/``free_neg`` strand gates. Measured on the suite (oracle densities, no solver in the loop):
+    ``ρ_R(exon)/ρ_spl(bnd)`` = 1.02–1.86 and is capture-INVARIANT, while the exon↔boundary gDNA step goes
+    1.03 → 6.1–6.8 under capture.
+
+    So the grafted component has **no matched gDNA partner to cancel ``r`` against** — exactly M5's peel /
+    partial-anchor case, where ``σ²_transfer`` is load-bearing. The un-modelled frame step is what the message
+    gets wrong, its magnitude is the step itself, and the model's own estimate of that step is ``r``; charging
+    ``(log r)²`` is the method-of-moments second moment of a single observation of it — the same logic as M7's
+    ``b̂²``, and with no tuned constant. It is identically 0 when there is no frame change (``r = 1``), which is
+    why the shipped model is EXACT off-capture (measured required correction ``log c`` = +0.009/−0.008/+0.054)
+    and only bites where capture opens a step.
+
+    ⚠ This is NOT the retired ``σ²_cliff = (log r)²`` proxy, which charged the whole cliff on **matched**
+    reframes — where the composition genuinely IS preserved across the enrichment step, so it over-damped.
+    Here the component set is *unmatched by construction*, so the cliff really is un-cancelled error.
+
+    Applied to the spliced measurement's OWN precision (``1/n_spl ⊕ (log r)²``), so M2's share weighting
+    ``w_μ²`` arises implicitly from the inverse-variance fusion with the correctly-framed ``ρ_ν`` arm — a
+    graft that is a minority of the RNA is damped proportionately less.
+
+    Calibration (delivered ``λ`` vs oracle, graft edges into exons): ``z2 = E[Δ²]/E[v]`` 58–310 → **2.1–3.8**,
+    consistently across capture off and on."""
+    rr = _f(r)
+    lr = np.log(np.where(rr > _EPS, rr, 1.0))
+    return lr * lr
 
 
 def peel_rna_logvar(v_log_rho_R, s2_transfer, v_mu, u):

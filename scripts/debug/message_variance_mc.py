@@ -423,6 +423,28 @@ def dl_fusion_anchor(N, *, fg_truth=0.985, fg_own=0.953, tau_own=1.6, v_msg=1.0 
     return ok
 
 
+def graft_frame_mislift(N, *, rho_mu_true, n_spl, r, E_r, M_d):
+    """M8 — the GRAFT's frame MISLIFT: the measured spliced is already in the DESTINATION's frame, so the
+    reframe ``r`` applied to it is pure error, and its second moment is ``1/n_spl + (log r)²``.
+
+    M5 exempts the graft from ``σ²_transfer`` because ``r`` is common-mode across the matched set ``{g, R}``.
+    That holds for the IMPUTED continue ``ρ_ν`` (it travels with ``ρ_g`` from the same source) but NOT for the
+    grafted ``ρ_μ``: a spliced fragment's two blocks lie in the flanking EXONS, so ``ρ_μ = S/E_spl`` measures
+    the DESTINATION exon's RNA density directly. Here that is the generative truth — ``ρ_R^dst,true = ρ_μ`` up
+    to the spliced Poisson count — and the model nevertheless delivers ``ρ_μ·r``. The delivered log-error is
+    therefore ``log r`` plus sampling, exactly M5's peel/partial case (no matched partner to cancel ``r``).
+
+    Set ``r = 1`` and the term vanishes identically: that is why the shipped model is exact off-capture."""
+    S = rng.poisson(n_spl, N).astype(np.float64)  # the junction's spliced COUNT
+    rho_mu = rho_mu_true * S / n_spl  # the measured density, Poisson-noisy
+    f_R_true = rho_mu_true * E_r / M_d  # truth: the spliced measurement IS the dst RNA density
+    delivered = np.log(np.maximum(rho_mu, 1e-300) * r * E_r / M_d)
+    mse = float(np.mean((delivered - np.log(f_R_true)) ** 2))
+    return _report(
+        f"M8 MSE = 1/n_spl + (log r)²  [r={r:.4g}]", 1.0 / n_spl + np.log(r) ** 2, mse, tol=0.03
+    )
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--draws", type=int, default=400_000)
@@ -477,6 +499,11 @@ def main():
     dl_regimes(N)
     print("\n [M7e] the anchor (node 1909) under fusion: DL keeps the weak-but-correct own belief\n")
     dl_fusion_anchor(N)
+
+    print("\n\n═══ M8 the GRAFT's FRAME MISLIFT: the measured spliced is already in the dst frame ═══\n")
+    graft_frame_mislift(N, rho_mu_true=4.57, n_spl=6000, r=1.0, E_r=1850.0, M_d=66544.0)
+    graft_frame_mislift(N, rho_mu_true=4.57, n_spl=6000, r=2.6, E_r=1850.0, M_d=66544.0)
+    graft_frame_mislift(N, rho_mu_true=4.57, n_spl=6000, r=6.1, E_r=1850.0, M_d=66544.0)
 
 
 if __name__ == "__main__":

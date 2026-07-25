@@ -346,3 +346,92 @@ unstranded/capture arm — retiring `(log r)²` is. The two effects are disjoint
 cleanly: deleting `(log r)²` recovers verystrong (0.2779→0.1864 refit=0), `b̂²` recovers stranded
 (0.0792→0.0390), and neither costs the other. Protecting AMBIG nodes requires a finite `v_own` there, which
 only the trained gDNA hyperprior can supply — Phase 2 (`SESSION_2026_07_25_HANDOFF_6.md` §3).
+
+---
+
+## 8. M8 — the GRAFT's FRAME MISLIFT: the measured spliced is already in the destination's frame
+
+**Status: DERIVED, MC-validated, implemented, A/B-won (2026-07-25).** Found by the single-strand × capture
+study (`SESSION_2026_07_25_HANDOFF_8.md`). This is the term M5's graft exemption was hiding.
+
+### 8.1 The defect
+
+M5 sets `σ²_transfer = 0` on a graft edge because "`r` is common-mode across the matched set `{g, R}` and
+cancels in the composition". **That cancellation is real** — verified to `1.8e-15` against the shipped arrays:
+the delivered exon composition is exactly
+
+```
+    f_g : f_R  =  ρ_g^src·E_g^dst : (ρ_ν^src + ρ_μ)·E_r^dst
+```
+
+with the reframe `r` and the `_pin_v` factor `k` multiplying every component alike and dropping out. But the
+exemption's *premise* is false for one of the three terms. `ρ_ν` is an imputed density that travels with
+`ρ_g` from the same source, so `r` genuinely is common-mode for it. `ρ_μ = S/E_spl` is not: **a spliced
+fragment's two blocks lie in the flanking EXONS**, so it measures the *destination's* RNA density directly.
+
+Measured on the suite with oracle densities and no solver in the loop:
+
+| | `ρ_R(exon)/ρ_spl(bnd)` | gDNA step exon↔boundary |
+|---|---|---|
+| capture OFF | 1.02 / 1.08 | **1.03** |
+| capture ON | 1.16 / 1.86 | **6.1 / 6.8** |
+
+The RNA channel is **capture-invariant** — the graft's own value needs no correction (the required frame
+factor solved per edge has median `log c` = +0.009 / −0.008 / +0.054 off-capture). What changes under capture
+is the *other* side of the ratio: the boundary's gDNA density falls 6× below the exon's, and since `r`
+cancels, the graft edge never reframes it. The delivered claim is therefore wrong by exactly that step —
+measured delivered bias −1.6 to −2.6 nats of RNA over-claim, against +0.4 to +1.0 off-capture.
+
+So the grafted component has **no matched partner to cancel `r` against** — precisely M5's peel /
+partial-anchor case, where `σ²_transfer` is load-bearing.
+
+### 8.2 The law
+
+```
+    Var(log ρ_μ^msg)  +=  (log r)²
+```
+
+the method-of-moments second moment of a single observation of the un-cancelled frame step, with the model's
+own `r` as the estimate of that step — the same logic as M7's `b̂²`, and **no tuned constant**. It is
+identically 0 at `r = 1`, which is why the shipped model is exact off-capture. Applied to the spliced
+measurement's OWN precision (`1/n_spl ⊕ (log r)²`), so M2's share weighting `w_μ²` arises implicitly from the
+inverse-variance fusion with the correctly-framed `ρ_ν` arm: a graft that is a minority of the RNA is damped
+proportionately less. **MC-validated** (`message_variance_mc.py`, M8): rel 0.24 % / 0.02 % / 0.01 % at
+`r = 1 / 2.6 / 6.1`.
+
+Calibration of the delivered `λ` against the oracle, on graft edges into exons —
+`z2 = E[Δ²]/E[v]`, 1.0 = honest:
+
+| | z2 shipped | z2 with M8 |
+|---|---|---|
+| gdna300 ss0.99 nrna_none capOFF | 62.0 | **3.4** |
+| gdna300 ss0.99 nrna_none capON | 57.5 | **3.8** |
+| gdna300 ss0.99 present capOFF | 58.7 | **3.7** |
+| gdna300 ss0.99 present capON | 31.4 | **3.0** |
+| gdna100 ss0.99 present capOFF | 111.5 | **2.1** |
+| gdna100 ss0.99 present capON | 83.3 | **2.8** |
+| gdna100 verystrong | 310.2 | **3.8** |
+
+### 8.3 Why it is a VARIANCE and not a mode correction
+
+The mode correction is available and it is §5.1's "graft outside the reframe" — and it was re-measured on
+today's (post-relay-pin) baseline as part of this derivation. It wins more aggregate and **reproduces §5.1's
+documented failure exactly**: it regresses every zero-gDNA condition (`gdna_none` capOFF 0.3668 → 0.4369,
+capON 0.3780 → 0.4917), which is `density_composition_reconciliation.md` §3.3's forbidden direction (more
+confidently *wrong*). M8 alone is the only variant that improves `gdna_none` rather than damaging it, because
+it can only *remove* confidence — it never moves a mode toward a wrong answer. That is the governing
+principle ("pass-0 must be WEAK and CORRECTABLE") deciding between two arms that the aggregate alone would
+have decided the other way. Full ablation in `SESSION_2026_07_25_HANDOFF_8.md` §4.
+
+**A/B (32 conditions, `OMP_NUM_THREADS=1`):** aggregate **0.0926 → 0.0900** (refit=0, 15 better / 9 worse /
+8 flat) and **0.0779 → 0.0700** (refit=1, 20 better / 6 worse / 6 flat).
+
+### 8.4 Known cost, and the next refinement
+
+`r` conflates the capture step with genuine density structure — off-capture `r ≈ 1.15–1.3` boundary→exon
+because the exon really does carry more RNA per base, while the true frame step is 1.03. So M8 over-damps
+off-capture (charging `(log 1.2)² = 0.033` where the truth is 0.0009) and under-damps on-capture (`(log 2.6)²
+= 0.91` where the truth is `(log 6.4)² = 3.4`). The measured cost is concentrated on **capture-OFF
+unstranded**, the one arm where the graft is the only RNA information and damping it is pure loss:
+`gdna100_ss_0.50_capOFF` 0.0866 → 0.1129, `gdna300_ss_0.50_capOFF` 0.0504 → 0.0631. Isolating the *enrichment*
+part of `r` prior-free is the open refinement.

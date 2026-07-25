@@ -23,6 +23,7 @@ from rigel.calibration.enrichment_frame import (
     enrichment_ratio,
     f_g_from_k,
     gdna_fallback_admissible,
+    graft_frame_logvar,
     graft_rna_logvar,
     k_from_belief,
     message_precision,
@@ -392,6 +393,32 @@ def test_transfer_logvar_feeds_off_composition_logvar():
     vd = float(composition_logvar(0.6, EG_BND, ER_BND, var_fg=0.01, n=100.0))
     vs = float(composition_logvar(0.9, EG_REG, ER_REG, var_fg=0.005, n=50.0))
     assert float(transfer_logvar(vd, vs, graft=False)) == pytest.approx(vd + vs, rel=1e-14)
+
+
+# ── M8 the graft's frame-mislift variance ──
+
+
+def test_graft_frame_logvar_is_zero_without_a_frame_change():
+    """M8's defining limit: no frame step ⇒ no mislift. This is what makes the term inert off-capture, where
+    the shipped graft is measured to be EXACT (required correction log c = +0.009/−0.008/+0.054)."""
+    assert float(graft_frame_logvar(1.0)) == 0.0
+    assert list(graft_frame_logvar(np.array([1.0, 1.0]))) == [0.0, 0.0]
+
+
+def test_graft_frame_logvar_is_the_squared_log_step_and_direction_free():
+    """``(log r)²`` — the method-of-moments second moment of a single observation of the un-cancelled frame
+    step. Symmetric in r ↔ 1/r: a depletion mislifts exactly as badly as an equal enrichment."""
+    assert float(graft_frame_logvar(np.e)) == pytest.approx(1.0, rel=1e-14)
+    assert float(graft_frame_logvar(6.1)) == pytest.approx(np.log(6.1) ** 2, rel=1e-14)
+    assert float(graft_frame_logvar(4.0)) == pytest.approx(float(graft_frame_logvar(0.25)), rel=1e-14)
+
+
+def test_graft_frame_logvar_guards_a_degenerate_ratio():
+    """A node with no frame (r ≤ 0 — no mass, no ρ_tot) must give 0, not a nan: the relay passes such a
+    message through at r = 1, so there is no mislift to charge."""
+    out = graft_frame_logvar(np.array([0.0, -1.0, 2.0]))
+    assert np.all(np.isfinite(out))
+    assert list(out[:2]) == [0.0, 0.0]
 
 
 # ── M4 ÷M_dst precision conversion ──

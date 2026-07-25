@@ -37,6 +37,7 @@ import numpy as np
 
 from .enrichment_frame import (
     composition_logvar,
+    graft_frame_logvar,
     mismatch_deflate,
     mismatch_gap,
     transfer_logvar,
@@ -510,8 +511,13 @@ def node_sweep(
                 # and would otherwise drop the graft on the floor. It enters BOTH the mode-fusion (full) and the
                 # MEASUREMENT stream (never the composition τ — a count is not a composition vote).
                 if _gr:
-                    _spc = SP[sf][s] / (1.0 + SP[sf][s] * s2t) if SP[sf][s] > _EPS else 0.0
-                    _snc = SN[sf][s] / (1.0 + SN[sf][s] * s2t) if SN[sf][s] > _EPS else 0.0
+                    # M8 (`graft_frame_logvar`): the grafted spliced density is measured in the DESTINATION
+                    # exon's frame (its fragments' blocks lie in the exons), so it has no matched gDNA partner
+                    # to cancel ``r`` against and M5's graft-zero does not cover it. Charge the frame step it
+                    # is implicitly mis-lifted by. Identically 0 at r = 1.
+                    _s2f = s2t + (0.0 if _s2t_off else float(graft_frame_logvar(r)))
+                    _spc = SP[sf][s] / (1.0 + SP[sf][s] * _s2f) if SP[sf][s] > _EPS else 0.0
+                    _snc = SN[sf][s] / (1.0 + SN[sf][s] * _s2f) if SN[sf][s] > _EPS else 0.0
                     tpp += _spc
                     tpn += _snc
                     tmp += _spc
@@ -602,6 +608,12 @@ def node_sweep(
             # zero-count node has logvar_tot=+inf ⇒ s2t=inf; ``0·inf`` would nan the masked branch np.where evals).
             _sp, _sn = np.where(graft, SP[sf][src], 0.0), np.where(graft, SN[sf][src], 0.0)
             _s2t_spl = np.where(np.isfinite(s2t), s2t, 0.0)
+            # M8 — the graft's FRAME-MISLIFT variance (see the relay's twin and `graft_frame_logvar`): the
+            # measured spliced already sits in the destination exon's frame, so ``r`` is NOT common-mode for it
+            # and M5's graft-zero does not cover it. 0 where r = 1, so it is inert without a capture step.
+            _s2t_spl = _s2t_spl + (
+                np.zeros_like(r) if _s2t_off else np.where(graft, graft_frame_logvar(r), 0.0)
+            )
             _spc = np.where(_sp > _EPS, _sp / (1.0 + _sp * _s2t_spl), 0.0)
             _snc = np.where(_sn > _EPS, _sn / (1.0 + _sn * _s2t_spl), 0.0)
             tpp, tpn = tpp + _spc, tpn + _snc  # into the mode-fusion precision …
