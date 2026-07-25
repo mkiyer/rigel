@@ -264,7 +264,56 @@ uncertain: mode 0.378 → 0.492, median `Var` 2.20 → 2.01, fraction with `Var 
 (capture-off: 0.367 → 0.437, 41.5 % → 45.4 %). Moving the mode further from truth while raising confidence is
 the forbidden direction, so §5.1 must wait for the hyperprior, not for a pass-0 floor.
 
-### 3.3b ⭐ NEW — the mature-overlap channel at a boundary (the real gap this uncovered)
+### 3.3c ⭐ OWNER'S CORRECTION + the boundary-class census (2026-07-25)
+
+**RNA is just RNA.** Mature and nascent are not different species — they are RNA in two places. The only
+distinction the data supports is **SPLICED vs UNSPLICED**. And a boundary can be an exon↔exon boundary that is
+ALSO a splice junction: RNA can be contiguous across it *while* other RNA splices in or out. Both at once:
+
+```
+    TA+ exons (1000,2000), (9000,10000)      splices 2000 -> 9000
+    TB+ exons (1000,10000)                   reads straight through  (retained intron)
+```
+
+At 2000, TA splices out while TB is contiguous; region 2000–9000 is TA's INTRON and TB's EXON simultaneously.
+The 4-bit signature represents this exactly (`BIT_EXON_POS | BIT_INTRON_POS`), but `coarse_type_array`
+collapses it ("exon wins over intron") and `bp_solver.is_exon_node` uses the coarse type.
+
+**This RESOLVES §3.3b's "falsified claim" and retires its explanation.** The `simplex_logodds` docstring's
+"the unspliced crossing mass is gDNA + nascent, disjoint from the spliced" assumes every boundary is an
+exon→intron splice junction. The 100 %-RNA unspliced boundaries in `gdna_none` are **`exon | exon`**
+(23 without a junction + 15 with) and `exon | exon+intron(x-strand)` (19) — **not transcript ends**. At an
+exon|exon boundary RNA is simply CONTIGUOUS, so unspliced RNA crossing it is normal. There is no third
+channel; the earlier "mature overlapping the seam / TSS-TES" hypothesis is REFUTED. The docstring is wrong
+only in assuming the exon→intron geometry.
+
+**Census — the structured cases are handled; AMBIG is not** (`scratchpad/derive_4_boundary_classes.py`,
+regions classified by RAW signature bits, stranded conditions):
+
+| region class | DOF | capture OFF mwae | capture ON mwae | share of err (capON) |
+|---|---|---|---|---|
+| exon | single | **0.0046** | 0.0499 | 43.8 % |
+| **RETAINED** | single | **0.0051** ✔ | 0.0746 | 1.8 % |
+| intron | single | 0.0136 | 0.0378 | 1.0 % |
+| intergenic | single | **0.0000** ✔ | **0.0000** ✔ | 0.0 % |
+| exon | AMBIG | 0.1759 | 0.1879 | 17.3 % |
+| **exon+intron(x-strand)** | AMBIG | 0.1191 | **0.1684** | **25.8 %** |
+| RETAINED | AMBIG | 0.0806 | 0.1881 | 0.9 % |
+| **TOTAL single-strand** | | **0.0051** | 0.0476 | 50.7 % |
+| **TOTAL AMBIG** | | **0.0845** | **0.1771** | 49.3 % |
+
+Boundaries: `exon | exon` scores **0.0305** without a junction and **0.0477** with one — both BETTER than the
+suite average, so the owner's exon↔exon case is handled. The worst boundary classes all touch the
+cross-strand region: `exon | exon+intron(x-strand)` 0.2468 (junction) / 0.2708 (none),
+`RETAINED | exon+intron(x-strand)` 0.2691.
+
+**Conclusion.** Without capture, single-strand pass-0 is essentially SOLVED (0.0051), retained introns and
+exon|exon boundaries included. The two remaining axes are (1) **capture degrades single-strand 10×**
+(0.0051 → 0.0476) and (2) **AMBIG**, ~50 % of the error mass at 3.7–16× the single-strand rate, concentrated
+on `exon+intron(x-strand)` — a region that is one strand's exon and the other's intron. **Owner's directive:
+pass-0 must be correct before the hyperprior fit; debug single-strand first, then AMBIG.**
+
+### 3.3b ⚠ SUPERSEDED by §3.3c — the "mature-overlap channel" hypothesis (refuted)
 `simplex_logodds`'s docstring asserts: *"at a junction mature RNA splices, so the unspliced crossing mass is
 gDNA + nascent, a channel genuinely disjoint from the spliced mass."* **That claim is FALSIFIED.** In libraries
 with **no gDNA and no nascent RNA**, boundaries still carry substantial unspliced mass and it is **100 % RNA**:
