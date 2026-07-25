@@ -1,8 +1,60 @@
-# Session handoff — the AMBIG study: the prize is located, quantified, and the fix is DESIGNED + VALIDATED
+# Session handoff — the AMBIG study (⛔ §2–§4 CORRECTED by §0b — read §0b FIRST)
 
 **This is the LIVE handoff. Read `docs/calibration/ROADMAP.md` first, then this.** It supersedes
 `SESSION_2026_07_25_HANDOFF_8.md` (whose §6 "next study: AMBIG" is this file). Do NOT read
 `docs/calibration/archive/`. Date: 2026-07-25. Branch `calib-ambig-init-wip`, HEAD `b0955493` (M8).
+
+---
+
+## 0b. ⛔ CORRECTION (owner, same day) — §2–§4 BELOW OVERSTATE THE CASE. READ THIS FIRST.
+
+The owner rejected the estimator §2–§4 are built on, and the MC arbiter (`scratchpad/ambig_8_mc.py`, laws
+M9a–M9e, all passing) confirms it. **Three claims below are wrong or overstated:**
+
+1. **`d̂ = (p_obs−½)/(κ−½)` is degenerate and is not an admissible estimator.** `κ` is FITTED — posterior
+   `Beta(n_same+1, n_opp+1)`, so `Var(κ) = κ(1−κ)/(n_obs+3)`, already computed as
+   `StrandBalance.rna_strand_overdispersion` (currently labelled "QC-only, NOT fed into the deconv"). On
+   unstranded data `|κ̂−½|` is **smaller than its own posterior sd** (measured `|κ−½|/sd` = **0.0–1.3**;
+   `|κ̂−½|` = 0.00004 vs sd 0.00088) and it sits in a **denominator**. The observed excess is not zero either
+   — pure gDNA splits 506/494, not 500/500 (med `|e|` = 0.0018–0.0047). Result: med `|d̂|` up to **118**,
+   **80–99 % of mass with `|d̂| > 1`**, and `B` clipped to 0 asserting "100 % RNA" against an oracle `f_g` of
+   0.272. That is noise amplification, not a bound. (`scratchpad/ambig_7_kappa_degeneracy.py`)
+
+2. **The SHIPPED solver was never degenerate — only my estimator was.** M9c: at κ≈½ the plug-in-κ
+   *likelihood* is already flat (max/min = 1.000) because `A ≪ σ_e` regardless; marginalizing κ gives 1.001.
+   So the shipped 2-D solve marginalizes the tilt correctly and never divides. §4's "catastrophic on
+   unstranded" is a property of `cons`/`B`, **not** of the solver, and §2's framing of the unstranded failure
+   ("d̂ is noise") mis-attributes it: the cause is the division by a quantity smaller than its own error.
+
+3. **The residual AMBIG bias is the TILT PRIOR, not discarded information.** M9d: the *correct Bayesian
+   marginal* under the solver's own uniform-in-θ tilt reference is itself biased **−0.10 to −0.15 when
+   τ = 1** — which is exactly the 0.09–0.14 under-estimate §1/§2 attribute to the solver failing to extract
+   the bound. It is not failing to extract anything. `B` scores well in §3/§4 **only because τ ≈ ±1 in this
+   suite** (the minority strand at an `exon+intron(x-strand)` region is the unbaited intron) — a POPULATION
+   fact, precisely what pass-0 may not assume. **So §3's "85–91 % of the AMBIG prize" is an offline
+   substitution with an inadmissible estimator, not an achievable prior-free target.**
+
+**What SURVIVES.** The census (§1) — AMBIG is 31.6 % of suite error mass, `τ_own = 0` on every AMBIG node,
+messages roughly double AMBIG error, and the λ message is the dominant message defect (bit-exact ablation
+0.1444 → 0.0986). The algebra `f_g ≤ 1 − |d|` is true. §5's two reverted A/B arms stand as measured.
+
+**THE CORRECTED FORMULATION (derived + MC-validated, M9a/M9b).** Never form `d̂`. The strand likelihood
+depends on `f_g` and `κ` **only** through the achievable strand-excess amplitude
+
+```
+    A(f_g, κ) = (1 − f_g)·|κ − ½|          L(f_g) = ∫∫ BetaBin(u₊; n, ½ + A·τ, ω)·π(τ)·π(κ) dτ dκ
+```
+
+(the sign of `κ−½` is absorbed by τ's symmetry — M9a, exact to 0.00 %). No division anywhere, so there is no
+degeneracy: as `κ → ½`, `A → 0` for EVERY `f_g` and the factor flattens — **"no information" is recovered as a
+LIMIT, not asserted by a guard**, which also subsumes the existing `disc` deadband. In the sharp limit
+(`σ_e ≪ A`, κ known) it has the closed form `p(f_g) ∝ 1/√((1−f_g)² − d²)` on `[0, 1−|d|]` — an *integrable
+spike* at the bound, not a hard wall — with median `1 − |d|·cosh(arccosh(1/|d|)/2)` (M9b, rel 0.02–0.08 %).
+
+**THE REAL LEVER, therefore, is the TILT MESSAGE, not a bound.** What converts the constraint into an
+estimate is knowing τ ≈ ±1, and the prior-free source for that is the neighbours' per-strand RNA imputation —
+which the solver already carries as `theta_imp` and which the ablation shows is **nearly inert**
+(0.1444 → 0.1417 when removed). That is the next thing to investigate, and it replaces §6's plan.
 
 ---
 
@@ -139,7 +191,7 @@ quantities. The bound is **one-sided** information and a symmetric DL cannot con
 messages violate the bound on 42–46 % of AMBIG nodes, but **those nodes have LOWER error than the compliant
 ones** (0.0711 vs 0.1623) — so one-sided clipping is not the fix either.
 
-## 6. ▶ NEXT — implement the constrained AMBIG estimator as a ψ FACTOR
+## 6. ▶ (SUPERSEDED BY §0b — the estimator below is inadmissible; kept for the record)
 
 Not as a post-hoc override. The work, in this project's order:
 
