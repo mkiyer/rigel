@@ -45,6 +45,8 @@ __all__ = [
     "peel_rna_logvar",
     "transfer_logvar",
     "message_precision",
+    "mismatch_gap",
+    "mismatch_deflate",
 ]
 
 _EPS = 1.0e-12
@@ -318,3 +320,74 @@ def message_precision(var_log_rho_msg):
     v = np.asarray(var_log_rho_msg, np.float64)
     ok = np.isfinite(v) & (v > _EPS)
     return np.where(ok, 1.0 / np.maximum(v, _EPS), 0.0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# M7 — the CROSS-CLIFF COMPOSITION-MISMATCH variance (`SESSION_2026_07_24_HANDOFF_5.md` §4).
+#
+# M1–M5 price a message's SAMPLING error. They do not price the imputation PREMISE — "my neighbour and I share a
+# composition" — being false, and that premise is the message's whole content. The delivered mode error splits
+# EXACTLY (MC-validated to machine precision, `scripts/debug/message_variance_mc.py` M7a/M7b) into
+#
+#     mo_c − log f_c^dst,true  =  log(s_c^src/s_c^dst,true)  +  log(r̂/r_true)   ⇒   σ² = v_msg + b_c²
+#
+# — a composition-SHARE mismatch plus the reframe's own scale noise (M5's σ²_transfer, already inside v_msg).
+# The bias b_c is a POPULATION quantity (the third information source), unavailable prior-free — but the
+# destination holds an INDEPENDENT estimate of the same composition: its own message-free self-solve. Two
+# estimators of one quantity is a two-study random-effects meta-analysis, and its between-study variance has a
+# closed-form method-of-moments estimator (DerSimonian & Laird 1986) that introduces NO tuned constant.
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+def mismatch_gap(rho_msg, rho_own):
+    """M7 — the observed composition gap ``G`` between a message and the destination's own belief, and the
+    CONTRADICTED mask. Both densities are per-component and in the destination's frame, already normalized to
+    the destination's mass, so ``E_c`` and ``M_dst`` cancel and ``G = log(ρ^msg/ρ^own) = mo^msg − mo^own`` is a
+    pure statement about the SPLIT.
+
+    ``contradicted`` marks exactly one side being zero. A message with ``ρ^msg = 0`` asserts the component is
+    ABSENT (``log f_c → −∞``) — an infinitely large gap against a destination whose own evidence says it is
+    present, so its honest mismatch variance is ``+∞`` rather than whatever a numerical floor would make it.
+    Returning it as a MASK is what keeps the zero-test ``_EPS`` a zero-test instead of promoting it to a model
+    constant that sets the surviving precision. Both sides zero ⇒ ``G = 0``: nobody has an opinion.
+
+    Returns ``(gap, contradicted)``."""
+    t, o = _f(rho_msg), _f(rho_own)
+    live_t, live_o = t > _EPS, o > _EPS
+    both = live_t & live_o
+    gap = np.where(both, np.log(np.maximum(t, _EPS) / np.maximum(o, _EPS)), 0.0)
+    return gap, live_t ^ live_o
+
+
+def mismatch_deflate(precision, gap, contradicted, var_own):
+    """M7 — deflate a message precision by the DerSimonian–Laird between-source mismatch variance::
+
+        b̂² = max(0, G² − v_msg − v_own)          v_msg = 1/precision
+        p_effective = 1 / (v_msg + b̂²) = 1 / max(v_msg, G² − v_own)
+
+    The three regimes fall out of ``var_own`` alone, with no gate and no threshold:
+
+    * ``var_own = +inf`` — the destination has NO composition evidence (τ_λ = 0: every AMBIG node, and every
+      node on unstranded data) ⇒ ``b̂² = 0`` ⇒ the message passes at full precision. This is deliberate and it
+      is what makes the term safe: where messages are the only information, there is no own opinion to
+      contradict them, and inventing one would be the count-votes-composition regression.
+    * ``var_own`` finite — a message that AGREES is barely touched; one that CONFLICTS is killed.
+    * ``var_own = 0`` — composition CERTAIN (a structural pure-gDNA anchor) ⇒ the full ``G²`` is charged.
+
+    The closed form ``p_eff = 1/max(v_msg, G²−v_own)`` states the safety property exactly: **a message can only
+    out-weigh the destination's own belief when it agrees with it to within ``√2·σ_own``**, at every node and
+    every composition — "pass-0 must be weak and correctable" as an inequality rather than a tuning knob.
+
+    ``precision = 0`` (no message) stays 0; a CONTRADICTED claim goes to 0 wherever the destination has any
+    evidence at all. Never returns a nan or an ``∞`` (the ``+inf`` var_own is substituted BEFORE the
+    subtraction, so there is no ``inf − inf``). At ``b = 0`` the estimator is positively biased by
+    ``E[max(0, χ²₁−1)]·(v_msg+v_own) ≈ 0.484·(v_msg+v_own)`` — the OVER-damping direction, and harmless because
+    a message that agrees with the own belief moves the fused mode nowhere."""
+    p = _f(precision)
+    g = _f(gap)
+    vo = _f(var_own)
+    known = np.isfinite(vo)
+    v_msg = np.where(p > 0.0, 1.0 / np.maximum(p, _EPS), 0.0)
+    b2 = np.where(known, np.maximum(0.0, g * g - v_msg - np.where(known, vo, 0.0)), 0.0)
+    out = np.where((p > 0.0) & (b2 > 0.0), 1.0 / np.maximum(v_msg + b2, _EPS), p)
+    return np.where(np.asarray(contradicted, bool) & known, 0.0, out)

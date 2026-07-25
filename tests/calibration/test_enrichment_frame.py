@@ -26,6 +26,8 @@ from rigel.calibration.enrichment_frame import (
     graft_rna_logvar,
     k_from_belief,
     message_precision,
+    mismatch_deflate,
+    mismatch_gap,
     peel_rna_logvar,
     reframe_density,
     total_density,
@@ -403,3 +405,84 @@ def test_message_precision_is_reciprocal_no_jacobian():
     assert p[1] == 0.0 and p[2] == 0.0 and p[3] == 0.0  # no message, never a nan/∞
     assert p[4] == pytest.approx(4.0, rel=1e-14)
     assert not np.any(np.isnan(p)) and np.all(np.isfinite(p))
+
+
+# ── M7 the cross-cliff COMPOSITION-MISMATCH variance (DerSimonian–Laird) ──
+
+
+def test_mismatch_gap_is_the_log_ratio_and_flags_only_one_sided_absence():
+    """M7: G = log(ρ^msg/ρ^own). ``contradicted`` marks exactly one side absent (an assertion of ``f_c = 0``
+    against a node that has the component, or vice versa); BOTH absent is not a contradiction, it is silence."""
+    g, c = mismatch_gap(np.array([2.0, 0.0, 5.0, 0.0]), np.array([0.5, 3.0, 0.0, 0.0]))
+    assert g[0] == pytest.approx(np.log(4.0), rel=1e-14)
+    assert list(c) == [False, True, True, False]
+    assert g[3] == 0.0  # both silent ⇒ no gap, nothing to price
+
+
+def test_mismatch_deflate_is_the_closed_form_and_never_strengthens():
+    """M7: p_eff = 1/max(v_msg, G²−v_own) — and a deflation can only ever REDUCE a precision."""
+    p = np.array([25.0, 25.0, 25.0])
+    gap = np.array([0.0, 0.5, 2.7])
+    v_own = np.full(3, 0.56)
+    out = mismatch_deflate(p, gap, np.zeros(3, bool), v_own)
+    want = 1.0 / np.maximum(1.0 / p, gap * gap - v_own)
+    assert out == pytest.approx(want, rel=1e-12)
+    assert np.all(out <= p + 1e-12)
+
+
+def test_mismatch_deflate_is_inert_without_own_evidence():
+    """M7's safety property: τ_own = 0 ⇒ v_own = ∞ ⇒ b̂² = 0 ⇒ the message passes BIT-IDENTICALLY. This is the
+    AMBIG / unstranded regime — where cross-node messages are the only information — so the term must not
+    touch it, and a CONTRADICTED claim is not damped there either (there is no evidence to contradict it)."""
+    p = np.array([25.0, 3.0, 0.0])
+    out = mismatch_deflate(p, np.array([0.0, 9.9, 4.0]), np.array([False, True, True]), np.full(3, np.inf))
+    assert out.tolist() == p.tolist()
+
+
+def test_mismatch_deflate_kills_a_contradicted_claim_where_there_is_evidence():
+    """A message asserting a component is ABSENT at a node whose own evidence says otherwise is the b̂² → ∞
+    limit ⇒ precision 0 — expressed as a mask so the numerical zero-test ``_EPS`` never sets the answer."""
+    out = mismatch_deflate(np.array([50.0, 50.0]), np.zeros(2), np.array([True, False]), np.array([0.1, 0.1]))
+    assert out[0] == 0.0 and out[1] == pytest.approx(50.0, rel=1e-12)
+
+
+def test_mismatch_deflate_charges_the_full_gap_when_the_node_is_composition_certain():
+    """v_own = 0 (a structural pure-gDNA anchor: composition CERTAIN) ⇒ the whole G² is charged, so no message
+    can talk it off its composition."""
+    out = mismatch_deflate(np.array([100.0]), np.array([1.5]), np.zeros(1, bool), np.array([0.0]))
+    assert out[0] == pytest.approx(1.0 / 2.25, rel=1e-12)
+
+
+def test_mismatch_deflate_pin_safety_invariant():
+    """THE governing-principle invariant, as an exact inequality: a message out-weighs the destination's own
+    belief iff it agrees to within √2·σ_own. From p_eff = 1/max(v_msg,G²−v_own), p_eff > 1/v_own ⟺ G² < 2·v_own
+    — independent of the message's own precision, so no amount of source depth can buy a pin."""
+    v_own = 0.32
+    p_own = 1.0 / v_own
+    for scale, expect_wins in ((0.9, True), (1.1, False)):
+        gap = scale * np.sqrt(2.0 * v_own)
+        # even an ARBITRARILY confident message obeys the threshold
+        out = mismatch_deflate(np.array([1e6]), np.array([gap]), np.zeros(1, bool), np.array([v_own]))
+        assert bool(out[0] > p_own) is expect_wins
+
+
+def test_mismatch_deflate_recovers_the_true_bias_squared_by_mc():
+    """M7c: DerSimonian–Laird is a method-of-moments estimator of the between-source variance, so for a REAL
+    mismatch b̂² → b² — the load-bearing claim, with no tuned constant. (`scripts/debug/message_variance_mc.py`
+    M7c is the full sweep; this pins the identity in-repo.)"""
+    rng = np.random.default_rng(20260725)
+    v_msg, v_own, b, n = 0.04, 0.30, 2.6, 200_000
+    gap = b + rng.normal(0.0, np.sqrt(v_msg + v_own), n)
+    p_eff = mismatch_deflate(np.full(n, 1.0 / v_msg), gap, np.zeros(n, bool), np.full(n, v_own))
+    b2_hat = float(np.mean(1.0 / p_eff)) - v_msg
+    assert b2_hat == pytest.approx(b * b, rel=0.02)
+
+
+def test_mismatch_deflate_is_finite_over_every_degenerate_input():
+    """No nan, no ∞, no 1/0 — over zero precisions, zero gaps, ∞ and 0 own variances, contradicted or not."""
+    p = np.array([0.0, 1e-12, 25.0, 25.0, 25.0, 0.0])
+    gap = np.array([0.0, 3.0, 0.0, -4.0, 1e3, 1e3])
+    contra = np.array([True, False, True, False, True, True])
+    v_own = np.array([np.inf, 0.0, 0.5, np.inf, 0.0, 0.0])
+    out = mismatch_deflate(p, gap, contra, v_own)
+    assert np.all(np.isfinite(out)) and np.all(out >= 0.0) and np.all(out <= p + 1e-12)

@@ -40,8 +40,26 @@ CLAIMS (each MC-validated below):
   M6  RECONCILIATION with the k-mode (shown, not assumed, handoff §3b): two INDEPENDENT ψ messages on
         (log f_g, log f_R) vs the single joint k. On the matched graft they DIVERGE by the shared node count
         (ρ_g, ρ_ν share M) — the ÷M-independent form double-counts 1/n in the composition. Quantify it.
+  M7  the CROSS-CLIFF composition-MISMATCH term (`SESSION_2026_07_24_HANDOFF_5.md` §4) — the honest replacement
+        for the shipped `σ²_cliff = (log r)²` proxy. Four sub-claims:
+        M7a  the EXACT delivered-mode error is the composition-SHARE mismatch, to machine precision:
+               mo_c − log f_c^dst,true = log(s_c^src / s_c^dst,true),   s_c = ρ_c/ρ_tot
+             (the reframe r, the destination mass M_dst and BOTH eff-lengths cancel identically).
+        M7b  the delivered variance is ADDITIVE over the two independent defects — the source/scale SAMPLING
+             (v_src ⊕ M5's σ²_transfer = Var(log r), which the code already folds into the stream precision)
+             and the composition-mismatch BIAS²:   σ²_delivered = v_src + σ²_transfer + b².
+        M7c  DerSimonian–Laird recovers b² prior-free from the gap against the node's OWN self-solve:
+               b̂² = max(0, G² − v_msg − v_own),  G = mo^msg − mo^own,  v_own from τ_λ.
+             Positively biased at b≈0 by E[max(0,χ²₁−1)]·(v_msg+v_own) ≈ 0.484·(v_msg+v_own) — the SAFE
+             (over-damping) direction, and harmless because a message that agrees with the own belief moves
+             the fused mode nowhere.
+        M7d  the three REGIMES fall out with no gate and no constant: confident own belief + conflict ⇒ the
+             message is killed; τ_own = 0 (AMBIG/unstranded) ⇒ v_own = ∞ ⇒ b̂² = 0 ⇒ NO damping (the M5
+             unstranded/capture win is preserved); struct_lock (v_own = 0) ⇒ full G² damping.
+        M7e  the FUSION punchline on the anchor (node 1909): a weak-but-correct own belief survives a strong
+             WRONG cross-cliff message under DL, and does not under the M5-only precision.
 
-    OMP_NUM_THREADS=1 python scratchpad/message_variance_mc.py [--draws 400000]
+    OMP_NUM_THREADS=1 python scripts/debug/message_variance_mc.py [--draws 400000]
 """
 
 from __future__ import annotations
@@ -252,6 +270,159 @@ def reconcile_km_vs_percomp(N, *, f_g, var_fg, n_b, n_s, E_g, E_r, E_spl, M_b, S
     print("        RNA messages are the SAME λ DOF viewed twice; ψ counts it ~2×). Design fork for the combine.")
 
 
+# ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# M7 — the CROSS-CLIFF composition-MISMATCH term (HANDOFF_5 §4): the DerSimonian–Laird b̂², which REPLACES the
+#      shipped `σ²_cliff = (log r)²` proxy. `(log r)²` prices the whole cliff as mismatch (so it over-damps a
+#      pure-ENRICHMENT cliff, where the composition is preserved); b̂² prices ONLY the mismatch.
+# ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+def _node(f_g, M, E_g, E_r):
+    """A node's per-component densities + total + shares: ``ρ_c = f_c·M/E_c``, ``s_c = ρ_c/ρ_tot``."""
+    rg, rR = f_g * M / E_g, (1.0 - f_g) * M / E_r
+    tot = rg + rR
+    return rg, rR, tot, rg / tot, rR / tot
+
+
+def share_mismatch_identity(*, fg_s, M_s, Eg_s, Er_s, fg_d, M_d, Eg_d, Er_d):
+    """M7a — the delivered-mode error IS the composition-share mismatch, to machine precision.
+
+    ``mo_c = log(ρ_c^src·r·E_c^dst/M_dst)`` with ``r = ρ_tot^dst/ρ_tot^src``; the truth is
+    ``log f_c^dst = log(ρ_c^dst·E_c^dst/M_dst)``. Everything that is not a SHARE cancels — deliberately run
+    with different masses AND different eff-lengths on the two sides so that a surviving ``M`` or ``E`` would
+    show up. This is the claim the whole term rests on: the cliff itself is NOT the error."""
+    rg_s, rR_s, tot_s, sg_s, sR_s = _node(fg_s, M_s, Eg_s, Er_s)
+    rg_d, rR_d, tot_d, sg_d, sR_d = _node(fg_d, M_d, Eg_d, Er_d)
+    r = tot_d / tot_s
+    ok = True
+    for cname, rho_s, Ec, f_true, s_s, s_d in (
+        ("gDNA", rg_s, Eg_d, fg_d, sg_s, sg_d),
+        ("RNA ", rR_s, Er_d, 1.0 - fg_d, sR_s, sR_d),
+    ):
+        err = np.log(rho_s * r * Ec / M_d) - np.log(f_true)
+        ok &= _report(
+            f"M7a [{cname}] mo−truth = log(s^src/s^dst)  [cliff r={r:.4g}]",
+            float(np.log(s_s / s_d)),
+            float(err),
+            tol=1e-9,
+        )
+    return ok
+
+
+def delivered_variance_additive(N, *, fg_s, M_s, Eg_s, Er_s, fg_d, M_d, Eg_d, Er_d, v_src, s2_transfer):
+    """M7b — the delivered variance is ``v_src + σ²_transfer + b²``: the SAMPLING defects (the source's own
+    log-variance and M5's reframe-scale variance, both already in the stream precision) and the composition
+    BIAS², additively. Confirms that restoring M5 `Var(log r)` and ADDING b̂² is the right composition, not a
+    double-count: the two terms describe orthogonal defects (scale noise vs share drift)."""
+    rg_s, rR_s, tot_s, sg_s, sR_s = _node(fg_s, M_s, Eg_s, Er_s)
+    rg_d, rR_d, tot_d, sg_d, sR_d = _node(fg_d, M_d, Eg_d, Er_d)
+    r = tot_d / tot_s
+    # Draw the multiplicative noise MEDIAN-preserving (zero-mean in LOG space) — the variance laws live in log
+    # space, so `_lognormal`'s mean-preserving −σ²/2 shift would leak a (bias × shift) cross-term into the MSE
+    # and read as a law error. (It is exactly that cross-term, verified: it accounts for the whole discrepancy.)
+    scale = np.exp(rng.normal(0.0, np.sqrt(s2_transfer), N))  # the reframe's own scale noise (M5)
+    ok = True
+    for cname, rho_s, Ec, f_true, s_s, s_d in (
+        ("gDNA", rg_s, Eg_d, fg_d, sg_s, sg_d),
+        ("RNA ", rR_s, Er_d, 1.0 - fg_d, sR_s, sR_d),
+    ):
+        msg = rho_s * np.exp(rng.normal(0.0, np.sqrt(v_src), N)) * r * scale
+        mse = float(np.mean((np.log(msg * Ec / M_d) - np.log(f_true)) ** 2))
+        b = np.log(s_s / s_d)
+        ok &= _report(
+            f"M7b [{cname}] MSE = v_src+σ²t+b²  [b={b:+.3f}]", v_src + s2_transfer + b * b, mse, tol=0.01
+        )
+    return ok
+
+
+def dl_recovers_bias(N, *, v_msg=0.04, v_own=0.30):
+    """M7c — the DerSimonian–Laird between-source estimator recovers b² prior-free, with NO tuned constant:
+    ``b̂² = max(0, G² − v_msg − v_own)`` where ``G`` is the observed gap between the message mode and the
+    destination's OWN (independent) self-solve mode. Swept over the mismatch size; also pins the b≈0 positive
+    bias at the analytic ``E[max(0,χ²₁−1)]·(v_msg+v_own) ≈ 0.4839·(v_msg+v_own)`` (the SAFE direction)."""
+    print(f"  v_msg={v_msg}  v_own={v_own}   (own belief unbiased for the truth; both estimate the same log f_c)")
+    ok = True
+    for b in (0.0, 0.5, 1.5, 2.6, 3.75):
+        msg = b + rng.normal(0.0, np.sqrt(v_msg), N)  # message mode error = bias + sampling
+        own = rng.normal(0.0, np.sqrt(v_own), N)  # own belief error = sampling only
+        bhat2 = float(np.mean(np.maximum(0.0, (msg - own) ** 2 - v_msg - v_own)))
+        mse = float(np.mean(msg**2))  # the honest delivered variance = v_msg + b²
+        tag = f"M7c b={b:4.2f}  b̂²(DL)={bhat2:8.4f} vs b²={b * b:8.4f}"
+        if b >= 1.5:  # a REAL mismatch: DL must recover it (the load-bearing claim)
+            ok &= _report(f"{tag}  → σ²_DL vs true MSE", v_msg + bhat2, mse, tol=0.02)
+        else:  # small mismatch: DL over-estimates — assert only that it errs SAFE (never over-confident)
+            print(f"      OK  {tag}  → σ²_DL={v_msg + bhat2:.4f} ≥ true MSE={mse:.4f} (over-damping = safe)")
+            assert v_msg + bhat2 >= mse - 1e-9, "DL must never be MORE confident than the honest MSE"
+    # the b=0 floor, pinned analytically: E[max(0,G²−v)] = v·E[max(0,χ²₁−1)] = v·0.48394…
+    g0 = rng.normal(0.0, np.sqrt(v_msg + v_own), N)
+    ok &= _report(
+        "M7c b=0 floor = 0.4839·(v_msg+v_own)   [the SAFE positive bias]",
+        0.48394 * (v_msg + v_own),
+        float(np.mean(np.maximum(0.0, g0**2 - v_msg - v_own))),
+        tol=0.03,
+    )
+    return ok
+
+
+def dl_regimes(N, *, v_msg=0.04):
+    """M7d — the three regimes, with no gate and no constant. ``v_own`` comes from the τ_λ foundation
+    (`node_init.own_composition_logvar`): ``0`` when the node is composition-CERTAIN (struct_lock), ``+∞``
+    when it has NO composition evidence (τ_own = 0 — every AMBIG node, and every node on unstranded data)."""
+    G_matched, G_conflict = 0.0, 2.7  # a matched message vs the node-1909 conflict (≈ log(0.718/0.047))
+    rows = []
+    for label, v_own, G in (
+        ("matched msg, weak own (τ≈1.6)", 0.56, G_matched),
+        ("CONFLICT, weak own (τ≈1.6) — the anchor", 0.56, G_conflict),
+        ("CONFLICT, struct_lock own (v_own=0)", 0.0, G_conflict),
+        ("CONFLICT, AMBIG own (τ_own=0 ⇒ v_own=∞)", np.inf, G_conflict),
+        ("matched msg, AMBIG own (τ_own=0)", np.inf, G_matched),
+    ):
+        v_o = 0.0 if not np.isfinite(v_own) else v_own
+        g = G + rng.normal(0.0, np.sqrt(v_msg + v_o), N)
+        bhat2 = np.zeros(N) if not np.isfinite(v_own) else np.maximum(0.0, g**2 - v_msg - v_own)
+        p = float(np.median(1.0 / (v_msg + bhat2)))
+        rows.append((label, p))
+        print(f"      {label:<44} b̂²(med)={float(np.median(bhat2)):8.3f}   p: {1.0 / v_msg:7.2f} → {p:7.3f}")
+    p_matched, p_anchor, p_lock, p_ambig, p_ambig_m = (x[1] for x in rows)
+    ok = _report("M7d AMBIG: message UNDAMPED (p unchanged ⇒ the M5 win is preserved)",
+                 1.0 / v_msg, p_ambig, tol=1e-12)
+    ok &= _report("M7d AMBIG matched: also undamped", 1.0 / v_msg, p_ambig_m, tol=1e-12)
+    ok &= _report("M7d anchor CONFLICT: precision collapses to ~1/b²", 1.0 / (v_msg + G_conflict**2),
+                  p_anchor, tol=0.10)
+    assert p_lock < p_anchor, "struct_lock (v_own=0) must damp AT LEAST as hard as a weak own belief"
+    assert p_matched > 20.0 * p_anchor, "a matched message must keep far more precision than a conflicting one"
+    print(f"      → matched keeps p={p_matched:.2f} (of {1.0 / v_msg:.0f}); conflict is killed to {p_anchor:.3f}")
+    return ok
+
+
+def dl_fusion_anchor(N, *, fg_truth=0.985, fg_own=0.953, tau_own=1.6, v_msg=1.0 / 26.0, fpos_msg=0.718):
+    """M7e — the FUSION punchline, the anchor (node 1909: a high-mass mostly-gDNA exon flanked by a tiny
+    high-RNA boundary across an r≈407 cliff). ψ fuses the own λ belief (precision τ_own) with the RNA
+    message's implied λ. Under the M5-only precision the message wins and f_g collapses; under DL the
+    mismatch is priced and the weak-but-correct own belief survives. This is the A/B's mechanism, in one line."""
+    lam_own = np.log(fg_own / (1.0 - fg_own))
+    lam_msg = np.log(max(1.0 - fpos_msg, 1e-6) / max(fpos_msg, 1e-6))
+    # the observed gap on log f_R: the message says f_R = 0.718, the own self-solve says 1−f_g^own
+    v_own_R = fg_own**2 / tau_own  # the τ_λ Jacobian for the RNA arm
+    G = np.log(fpos_msg / (1.0 - fg_own)) + rng.normal(0.0, np.sqrt(v_msg + v_own_R), N)
+    p_m5 = 1.0 / v_msg
+    p_dl = float(np.median(1.0 / (v_msg + np.maximum(0.0, G**2 - v_msg - v_own_R))))
+
+    def _fuse(p):
+        return 1.0 / (1.0 + np.exp(-(tau_own * lam_own + p * lam_msg) / (tau_own + p)))
+
+    fg_m5, fg_dl = _fuse(p_m5), _fuse(p_dl)
+    print(f"      truth f_g={fg_truth:.3f}  own self-solve={fg_own:.3f} (τ={tau_own})   "
+          f"message claims f_R={fpos_msg:.3f}")
+    print(f"      M5-only  p={p_m5:7.2f} → fused f_g={fg_m5:.3f}   |err|={abs(fg_m5 - fg_truth):.3f}")
+    print(f"      DL       p={p_dl:7.4f} → fused f_g={fg_dl:.3f}   |err|={abs(fg_dl - fg_truth):.3f}")
+    ok = abs(fg_dl - fg_truth) < abs(fg_m5 - fg_truth)
+    assert ok, "DL must beat the M5-only precision on the anchor"
+    assert fg_dl > 0.90, f"the anchor must keep its own belief under DL (got {fg_dl:.3f})"
+    print(f"  {'OK ' if ok else '***'} M7e anchor recovers under DL (0.51-class collapse → {fg_dl:.3f})")
+    return ok
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--draws", type=int, default=400_000)
@@ -288,6 +459,24 @@ def main():
     print()
     reconcile_km_vs_percomp(N, f_g=0.40, var_fg=0.004, n_b=800, n_s=10**9, E_g=110.0, E_r=200.0,
                             E_spl=100.0, M_b=900.0, S_b=1e-9, Egx=380.0, Erx=290.0)
+
+    print("\n\n═══ M7 the CROSS-CLIFF composition-MISMATCH term (DerSimonian–Laird b̂²) ═══")
+    print("\n [M7a] the delivered-mode error IS the share mismatch (r, M_dst, E_c all cancel — machine precision)\n")
+    # deliberately mismatched masses AND eff-lengths on the two sides: a surviving M or E would show up here.
+    share_mismatch_identity(fg_s=0.36, M_s=14.0, Eg_s=170.0, Er_s=95.0,
+                            fg_d=0.985, M_d=66544.0, Eg_d=2100.0, Er_d=1850.0)
+    share_mismatch_identity(fg_s=0.965, M_s=14.0, Eg_s=170.0, Er_s=95.0,   # matched composition, same cliff
+                            fg_d=0.970, M_d=66544.0, Eg_d=2100.0, Er_d=1850.0)
+    print("\n [M7b] the delivered variance is ADDITIVE: v_src + σ²_transfer(M5) + b²\n")
+    delivered_variance_additive(N, fg_s=0.36, M_s=14.0, Eg_s=170.0, Er_s=95.0,
+                                fg_d=0.985, M_d=66544.0, Eg_d=2100.0, Er_d=1850.0,
+                                v_src=1.0 / 26.0, s2_transfer=0.05)
+    print("\n [M7c] DerSimonian–Laird recovers b² prior-free (no constant), and errs SAFE at b≈0\n")
+    dl_recovers_bias(N)
+    print("\n [M7d] the three regimes fall out with no gate: conflict / AMBIG(τ_own=0) / struct_lock(v_own=0)\n")
+    dl_regimes(N)
+    print("\n [M7e] the anchor (node 1909) under fusion: DL keeps the weak-but-correct own belief\n")
+    dl_fusion_anchor(N)
 
 
 if __name__ == "__main__":
