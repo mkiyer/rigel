@@ -33,6 +33,15 @@
 > prior-free source is the neighbours' per-strand RNA imputation — already carried as `theta_imp`, and
 > measured **nearly inert** (0.1444 → 0.1417 when ablated).
 >
+> **⭐ THE PASS-0 / PHASE-2 BOUNDARY IS NOW MEASURED (`SESSION_2026_07_25_HANDOFF_10.md`).** Suite state of
+> play: **12.56 M of 116.7 M node-attributed fragments misassigned (10.8 %)**; unstranded carries **84 %**,
+> single-strand exons **61 %**. On the largest scenario, 87.6 % of the error sits where `_pin_v` cancels the
+> reframe `r`, so the delivered mode is the source's composition — and neighbours differ by
+> **|Δf_g| = 0.2400**. Oracle modes remove 67–75 %; scaling every precision ×10 removes NOTHING. **That
+> residual is the hyperprior's, and its precision is already honest** (`errQ1conf` 4.1 %, gDNA channel
+> z2 = 0.4–1.5). The Phase-2 RISK is elsewhere: **stranded capture-OFF puts 58–76 % of its error on the
+> most-confident quartile, and introns 90.2 %** — and introns are where gDNA density is measured.
+>
 > **Status in one line:** the message-variance model is **COMPLETE** — derived, MC-validated, independently
 > verified, implemented, and A/B-won. A message's precision is
 > `1/(Var(log f_c^src) + 1/n_src + σ²_transfer + b̂²)`, plus **M8's `(log r)²` on the grafted spliced
@@ -72,7 +81,12 @@ The only other docs that are live (everything else is in `archive/`, kept for hi
   total (52–71 % of nodes; p99 31–288×). Holds the measured evidence, the derivation brief, the two adjacent
   modelling gaps (§4: **no TSS/TES in the region/boundary map**; **the boundary is a slope, not a cliff — three
   enrichment ratios, not one**), and the record of what was tried and rejected.
-* **`SESSION_2026_07_25_HANDOFF_9.md` — ⭐ THE LIVE HANDOFF. START HERE for the next session.** The AMBIG
+* **`SESSION_2026_07_25_HANDOFF_10.md` — ⭐ THE LIVE HANDOFF. START HERE for the next session.** The deep
+  dive on the suite's largest error scenario: the intron factory's gDNA is excluded from the measurement
+  stream (a real prior-free defect, fix validated at refit=0 but regressing refit=1 — decision needed), and
+  the **count-zero-information wall measured**: on 87.6 % of that error the pin cancels `r`, and neighbouring
+  nodes differ in composition by |Δf_g| = 0.24, so no prior-free message can beat it.
+  `..._HANDOFF_9.md` — the AMBIG
   study: the simplex-bound result, the ceiling, the validated prior-free estimator, the two neutral A/B arms
   (both reverted), and the implementation plan. `..._HANDOFF_8.md` (the single-strand × capture result — M8,
   the 8-step measurement chain, and the four-arm ablation that chose the variance over the mode fix),
