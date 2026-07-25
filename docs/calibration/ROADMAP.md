@@ -35,8 +35,12 @@ The only other docs that are live (everything else is in `archive/`, kept for hi
 * `unified_solver_design.md` — the target solver's architecture (the reframe + ÷M_dst mode). Its **precision /
   variance sections (§8 R1–R4) are SUPERSEDED** by `variance_model_handoff.md`; the mode design stands.
 * `gdna_intron_factory_design.md` — a shipped feature (the intron gDNA factory). Live.
-* **`SESSION_2026_07_25_HANDOFF_6.md` — the LIVE handoff. START HERE for the next session** (Phase 2: the gDNA
-  hyperprior — fix the refit's unstranded-capON regression, then feed the hyperprior into DL's `v_own`); it has
+* **`density_composition_reconciliation.md` — ⭐ THE NEXT SUBSTANTIVE TASK** (owner-directed 2026-07-25). The
+  composition regime is scale-blind: relayed claims assert more reads of a component than the node sequenced in
+  total (52–71 % of nodes; p99 31–288×). Holds the measured evidence, the derivation brief, the two adjacent
+  modelling gaps (§4: **no TSS/TES in the region/boundary map**; **the boundary is a slope, not a cliff — three
+  enrichment ratios, not one**), and the record of what was tried and rejected.
+* **`SESSION_2026_07_25_HANDOFF_6.md` — the LIVE handoff. START HERE for the next session**; it has
   the A/B state to beat, the measured Phase-2 experiment, the invariants, and a kickoff prompt.
   `SESSION_2026_07_24_HANDOFF_5.md` (the DL term's plan, now DONE) and `..._HANDOFF_4.md` (the full arc + the
   audit/design workflow findings) are the reference for how the variance model got here. (Handoffs 1–3 are
@@ -171,9 +175,25 @@ hyperprior first; the AMBIG fix then lands almost for free.**
 3. ✅ **DONE — the unified solver wins the A/B**: 0.0969 (refit=0) / 0.0828 (refit=1) vs the 0.0949
    legacy-with-factory target — and note the current suite gained the hard `verystrong`/`gdna1`/`gdna5`
    scenarios since that number was set, so gate on in-run A/B deltas, not the absolute.
-4. **The gDNA hyperprior refit** (§4) — **the NEXT task**, on the now-clean solver. Fix the unstranded-capON
-   refit regression, then re-apply the measured 6-line Phase-2 step (hyperprior → DL `v_own`, which fixes AMBIG),
-   then the re-solve, then a ship candidate. Exact plan + numbers: `SESSION_2026_07_25_HANDOFF_6.md`.
+4. ⭐ **RECONCILE THE ABSOLUTE-DENSITY AND COMPOSITION REGIMES — the NEXT task**
+   (`density_composition_reconciliation.md`). The composition regime is scale-blind: it reasons only in shares,
+   so a claim can be internally consistent, propagate for hops, and still assert more reads than the node
+   sequenced. Measured: the relay's `Σ_c ρ_c·E_c / M` exceeds 1 on **52–71 %** of nodes (p99 31–288×, max 519×),
+   and `_pin_v` — the operator that enforces the bound, whose own docstring says it belongs "at EVERY node" — is
+   applied only in the combine. Worth ≈ **2.2 M error mass (16.5 % of suite)**, it is a MODE defect, and it is
+   correctable in pass-0 **without** the hyperprior. It also supplies the missing "my mass is all RNA" authority
+   (§3.3) that currently blocks the graft-frame fix.
+5. **The gDNA hyperprior refit** (§4). Fix the unstranded-capON refit regression, then re-apply the measured
+   6-line Phase-2 step (hyperprior → DL `v_own`, which fixes AMBIG), then the re-solve, then a ship candidate.
+   Exact plan + numbers: `SESSION_2026_07_25_HANDOFF_6.md`.
+6. **⚠ DEFERRED STRUCTURAL (reaches to the index + accumulator): the region/boundary map has no TSS/TES.** A
+   transcript END is not represented in the partition, so the solver models the density drop there as a capture
+   cliff when the RNA simply stops. Real defect; explicitly not being fixed now, and expected to be low-impact
+   on real data (it was exposed by a simulator artifact — an exon interval coinciding exactly with a
+   multi-exonic transcript, putting a transcript end and a splice junction at the same position, which
+   essentially never occurs biologically). Details + the partial mitigation already available
+   (`mrna_active_pos/neg`, computed but unused on the measurement stream):
+   `density_composition_reconciliation.md` §4.1.
 
 ## 7. How we work (methodology — see memory `pass0_debug_iteration_loop`)
 

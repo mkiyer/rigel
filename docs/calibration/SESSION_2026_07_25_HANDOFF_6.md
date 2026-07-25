@@ -6,6 +6,29 @@ Do NOT read `docs/calibration/archive/`. Date: 2026-07-25.
 
 ---
 
+> ## ⭐ SUPERSEDING UPDATE (2026-07-25, later the same day) — read this before §0
+>
+> A suite-wide dissection of where pass-0's error actually lives changed the ordering below. **The next task is
+> NOT Phase 2 — it is `density_composition_reconciliation.md`** (owner-directed). Summary of what changed:
+> * **92.2 %** of suite error mass is on `τ_own = 0` nodes that cannot self-solve, and messages *halve* their
+>   error (0.333 → 0.164) — they are doing their job. The tractable bug set is 7,462 full-rank nodes the
+>   messages made **worse** (707 k err-mass, self 0.021 → solved 0.090; 81.7 % exons, 92.4 % stranded × capON).
+> * Root cause: **the composition regime is scale-blind.** Relayed claims assert more reads of a component than
+>   the node sequenced in total — `Σ_c ρ_c·E_c / M > 1` on **52–71 %** of nodes (p99 31–288×, max 519×).
+>   `_pin_v` enforces that bound and its own docstring says it belongs "at EVERY node"; it runs only in the
+>   combine. Worth ≈ **2.2 M error mass (16.5 % of suite)**, a MODE defect, fixable **without** the hyperprior.
+> * Landed since: the **λ-emission gate** (`b81e926e`) — a source with only one component has no composition
+>   claim to make; 0 scenarios worse, refit=1 aggregate **0.0819**, unstranded × capON **0.1681**.
+> * Tried and **reverted**: the graft-frame fix (measured mature must not be reframed — premise proven by
+>   oracle, 82× over-claim at node 1909, aggregate 0.0964→0.0789). It regresses zero-gDNA libraries
+>   (solved `f_g` 0.32 vs oracle 0.0000 over 72 % of mass) because the over-claim was **load-bearing**. Land it
+>   only together with the density anchor. Full record: `density_composition_reconciliation.md` §5.
+> * Two adjacent modelling gaps recorded there: **no TSS/TES in the region/boundary map** (§4.1, deferred,
+>   reaches to the index/accumulator) and **the boundary is a slope, not a cliff — three enrichment ratios, not
+>   one** (§4.2, probe placement; oracle-measured 0.97 → 0.87 → 0.54 as capture strengthens).
+>
+> §3 below (Phase 2) remains correct and is the task **after** that.
+
 ## 0. TL;DR — what to do next (one paragraph)
 
 The message-variance model is **finished and winning**: the cross-cliff cost is now split into the two objects
