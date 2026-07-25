@@ -647,6 +647,26 @@ def node_sweep(
             # is NOT a loss of information: a pure-gDNA source's authority is a DENSITY LEVEL, and that travels
             # on the measurement stream (``tmg``), which is precisely the three-stream separation.
             ttau = np.where((tg > _EPS) & ((tp + tn) > _EPS), ttau, 0.0)
+            # ── A DIRECT MEASUREMENT OUTRANKS AN IMPUTATION ON THE SAME AXIS ───────────────────────────
+            # The density deconvolution (`density_deconv`, the intron factory) MEASURES this node's own
+            # gDNA-vs-RNA split against a fitted background — it is evidence about λ itself, not an
+            # imputation. The λ message asserts the opposite kind of thing: "my neighbour and I share a
+            # composition". Where the node has already measured that quantity, the imputation has nothing
+            # to add and every opportunity to do harm, so it is not admitted. Structural, no threshold —
+            # the same presence test as the `fp_a`/`fn_a` strand gates and the λ-emission gate above.
+            #
+            # Why M7's DL does not already handle it: its safety property lets a message out-weigh the own
+            # belief when it agrees to within `√2·σ_own`, and the factory's σ_own is LARGE (its λ variance is
+            # measured 3–10× conservative, vertex-free `z2 = E[(λ_self−λ_true)²]/E[1/τ]` = 0.10–0.32). So at a
+            # real intron `|G_lam| = 2.08 < √2·σ_own = 2.81` and DL correctly permits it — after which ψ hands
+            # the imputed message 70.8 % of the composition weight against the factory's 29.2 %. Measured
+            # consequence: messages made introns WORSE in 16/16 scenario × DOF strata (the only class where
+            # that happened), and ablating the λ message alone recovered 12–37 % of the intron error.
+            # Scoped to the FACTORY half of τ (`tau_factory`), never the strand half: I_strand is itself a
+            # composition vote, so gating on it would silence λ messages at every stranded node.
+            # The TILT message is deliberately untouched — an AMBIG intron knows its split but not which
+            # strand the RNA sits on, and θ is exactly what it needs from its neighbours.
+            ttau = np.where(np.asarray(_ni.tau_factory, np.float64) > _EPS, 0.0, ttau)
             if not _s2t_off:
                 g_g, c_g = mismatch_gap(tg, og)
                 g_p, c_p = mismatch_gap(tp, op)

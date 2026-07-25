@@ -1,8 +1,9 @@
-# Session handoff — the `gdna300_ss_0.50_nrna_none_capture_on` deep dive: the count-zero-info wall, measured
+# Session handoff — the largest-scenario deep dive + the INTRON fix (landed)
 
 **LIVE handoff. Read `docs/calibration/ROADMAP.md` first, then this.** Supersedes
 `SESSION_2026_07_25_HANDOFF_9.md` (still the AMBIG record — read its §0b). Do NOT read `archive/`.
-Date: 2026-07-25. Branch `calib-ambig-init-wip`, HEAD `3c9360ce` (M8: 0.0900 refit=0 / 0.0700 refit=1).
+Date: 2026-07-25. Branch `calib-ambig-init-wip`. **HEAD now 0.0898 refit=0 / 0.0697 refit=1** (M8 +
+the intron λ gate of §6, which is the one thing LANDED this session).
 
 ---
 
@@ -153,7 +154,58 @@ risk): **stranded capture-OFF** scenarios put **58–76 %** of their error on th
 are precisely where gDNA density is measured for the hyperprior. **That, not the big unstranded scenarios,
 is what would poison Phase 2.**
 
-## 6. Tools
+## 6. ⭐ THE INTRON RESULT — a direct measurement was being out-voted by an imputation (LANDED)
+
+Owner's model, and it is right: the density deconvolution delivers the **λ axis only** (gDNA vs RNA-total)
+plus a precision — it does NOT assign the tilt. So a **single-strand intron** has θ structurally locked and
+λ measured ⇒ a COMPLETE self-solve needing no messages; an **AMBIG intron** knows its split but not which
+strand the RNA sits on ⇒ it needs messages for **θ only, never for λ**.
+
+**What was happening.** Messages made introns worse in **16 of 16** scenario × DOF strata — the only class
+where that happens (suite-wide self 0.0103 → solved 0.0133). Channel ablation isolates it to the **λ
+composition message** (−12 % … −37 % when removed); `-gdna` and `-tilt` do nothing to introns.
+
+**Why DL did not stop it.** M7's safety property lets a message out-weigh the own belief when it agrees to
+within `√2·σ_own`. At a real intron:
+
+```
+factory τ_own = 0.254  ⇒  σ_own = 1.98,  √2·σ_own = 2.81
+λ message |G_lam| = 2.08  <  2.81      ⇒  DL correctly PERMITS it
+ψ then weights c_tau = 0.6151 vs the factory's 0.2540  ⇒  the imputation gets 70.8 %
+```
+
+DL is behaving exactly as designed. `σ_own` is large because the factory's λ variance is **conservative**:
+vertex-free calibration `z2 = E[(λ_self−λ_true)²]/E[1/τ]` = **0.10–0.32** (1.0 = honest), i.e. under-confident
+by 3–10×. ⚠ **Correction to an earlier reading in this session and to the owner's hypothesis: the NB factory
+is NOT over-confident.** The 20–26 figures first reported were a logit-clipping artifact at `f_g = 1.0`.
+
+**The fix (LANDED).** A node holding a *direct density measurement* of its own composition does not accept an
+*imputed* composition message on that same axis — structural, no threshold, the same kind of presence test as
+the strand gates. Scoped to the FACTORY half of τ (`NodeInit.tau_factory`, new), never the strand half, since
+`I_strand` is itself a composition vote. **The tilt message is untouched**, which is what AMBIG introns need.
+
+| | refit=0 | | refit=1 | |
+|---|---|---|---|---|
+| M8 | 0.0900 | — | 0.0700 | — |
+| **+ intron gate** | **0.0898** | **10 better / 0 worse / 22 flat** | **0.0697** | **13 better / 3 worse / 16 flat** |
+
+Intron error **244,504 → 213,636 reads (−12.6 %)**; per-scenario −37 % / −12 % on the two capture-ON
+gdna300 conditions. Aggregate movement is small because introns are only 1.7 % of suite error — **the value
+is substrate quality for Phase 2**, since introns are where gDNA density is measured.
+
+**Refuted while getting there** (do not re-run): replacing the factory's grid-variance precision with the
+CURVATURE at the mode — which is what `density_factor_precision`'s own docstring specifies — makes it
+**worse** (intron error 5,882 → 7,099), because for `f_g → 1` introns the factor's mode sits on the λ-grid
+edge and the second difference is then taken in the tail. And scaling `tau_fac` alone saturates
+(6,872 → 5,753 at ×100) because ψ weights the `intron_prior` array while `v_own` reads `tau_lam` — the same
+quantity down two paths that then disagree. **That split is a latent defect worth fixing properly.**
+
+**Still open on introns:** after the λ gate, the residual message damage is the relayed **RNA measurement**
+(4,341 → 3,189 when ablated, vs 3,181 for no messages at all). The same "direct measurement outranks
+imputation" argument applies to it — but `th_prec = cm_p + cm_n`, so gating it would also kill the tilt
+channel AMBIG introns depend on. Needs the two separated first.
+
+## 7. Tools
 
 `scripts/debug/pass0_error_table.py` — the suite state of play in READS with the trust (`errQ1conf`) view.
 `scratchpad/t1_char.py` (characterize + ψ ablation, bit-exact), `t2_strata.py` (channel-arrival strata +
