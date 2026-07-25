@@ -1,19 +1,28 @@
 # Calibration ROADMAP — status, architecture, and the path to production
 
-**This is the single entry point for calibration work. Read it first.** Last updated: 2026-07-24.
+**This is the single entry point for calibration work. Read it first.** Last updated: 2026-07-25.
 
-> **Status in one line:** the message-variance model is **derived, MC-validated, verified, AND implemented** — the
-> **single-λ combine on a three-stream relay** (M6 double-count fixed) and a **cross-cliff precision term** (a
-> message crossing an enrichment cliff must lose precision) are both landed. Shipped cliff term `σ²_cliff=(log r)²`
-> recovers the stranded regression (net win refit=0) but over-damps the extreme-enrichment (verystrong) arm.
-> **The next task is the honest replacement: the DerSimonian–Laird composition-mismatch term `b̂²`**
-> (`SESSION_2026_07_24_HANDOFF_5.md` §4 — the exact plan). **NOT ready to ship.**
+> **Status in one line:** the message-variance model is **COMPLETE** — derived, MC-validated, independently
+> verified, implemented, and A/B-won. A message's precision is now
+> `1/(Var(log f_c^src) + 1/n_src + σ²_transfer + b̂²)`: the source's earned composition+count precision, the
+> reframe's **scale** uncertainty (M5 `Var(log r)`), and the **DerSimonian–Laird composition-mismatch** `b̂²`
+> (M7) — the honest replacement for the `(log r)²` proxy. **Best aggregate on record: 0.0969 (refit=0) /
+> 0.0828 (refit=1)** vs the 0.1267/0.1234 pre-fix baseline. **The next task is Phase 2 — the gDNA hyperprior**
+> (`SESSION_2026_07_25_HANDOFF_6.md`). **NOT ready to ship** (the hyperprior refit still regresses
+> unstranded-capON, and that is now the single binding constraint).
 >
-> **Update 2026-07-24 (message-variance session, end).** Two multi-agent workflows (audit + design) root-caused
-> the stranded regression (the `σ²_transfer=0` exemption preserved precision across cliffs) and derived the fix.
-> GOVERNING PRINCIPLE (owner): **pass-0 must be WEAK and correctable** — an over-confident message that pins a
-> node wrong is worse than a weak one slightly off (measured: the fix drops the median precision ~4 orders of
-> magnitude AND halves the error). START at `SESSION_2026_07_24_HANDOFF_5.md`.
+> **Update 2026-07-25 (DL cliff-term session).** `(log r)²` charged the WHOLE enrichment cliff as composition
+> drift, which recovered the stranded arm but over-damped extreme capture. The delivered message error splits
+> exactly into a composition-SHARE mismatch plus the reframe's scale noise, so the two are now priced
+> separately; `b̂²` is estimated prior-free against the node's own self-solve (a two-study random-effects
+> meta-analysis) with **no tuned constant**. Its safety property is exact: **a message can out-weigh a node's own
+> belief only if it agrees within `√2·σ_own`** — the governing principle as an inequality rather than a knob.
+> Attribution is clean and the two effects are disjoint: deleting `(log r)²` recovers verystrong, `b̂²` recovers
+> stranded, neither costs the other. Also retired the dead NPMLE-projection σ²_transfer plumbing: **no prior of
+> any kind now enters message precision.**
+>
+> **GOVERNING PRINCIPLE (owner):** **pass-0 must be WEAK and correctable** — an over-confident message that pins
+> a node wrong is worse than a weak one slightly off. Prefer the under-confident option when unsure.
 >
 > **Update 2026-07-24 (post-handoff session).** Retired `_scan` + all its flags/helpers (`bp_solver.py` 1871 →
 > ~730 lines); extracted the per-node self-solve into `node_init.build_node_init` (the four init sources of
@@ -26,10 +35,12 @@ The only other docs that are live (everything else is in `archive/`, kept for hi
 * `unified_solver_design.md` — the target solver's architecture (the reframe + ÷M_dst mode). Its **precision /
   variance sections (§8 R1–R4) are SUPERSEDED** by `variance_model_handoff.md`; the mode design stands.
 * `gdna_intron_factory_design.md` — a shipped feature (the intron gDNA factory). Live.
-* **`SESSION_2026_07_24_HANDOFF_5.md` — the LIVE handoff. START HERE for the next session** (the
-  DerSimonian–Laird composition-mismatch cliff-precision term + pass-0 cleanup + Phase 2); it has the exact
-  implementation plan, the A/B state to beat, the invariants, and a kickoff prompt. `SESSION_2026_07_24_HANDOFF_4.md`
-  is the full-arc reference (the audit + design workflow findings). (Handoffs 1–3 are historical.)
+* **`SESSION_2026_07_25_HANDOFF_6.md` — the LIVE handoff. START HERE for the next session** (Phase 2: the gDNA
+  hyperprior — fix the refit's unstranded-capON regression, then feed the hyperprior into DL's `v_own`); it has
+  the A/B state to beat, the measured Phase-2 experiment, the invariants, and a kickoff prompt.
+  `SESSION_2026_07_24_HANDOFF_5.md` (the DL term's plan, now DONE) and `..._HANDOFF_4.md` (the full arc + the
+  audit/design workflow findings) are the reference for how the variance model got here. (Handoffs 1–3 are
+  historical.)
 * `message_variance_derivation.md` — the derived + MC-validated + independently-verified message-variance laws
   (M1–M5), the M6 combine finding, and the empirical results (§6). Live.
 * `variance_model_concepts.md` — the owner's spec for the **initialization** phase (the four sources).
@@ -74,31 +85,49 @@ now lives in `node_init.py` (`build_node_init` — the four sources, unit-tested
 is **expected and accepted on this WIP branch**; the variance model (§3) is what recovers it. Nothing ships
 until it does.
 
-## 3. ⛔ THE BLOCKER — the variance model
+## 3. ✅ RESOLVED — the variance model (historical; see `message_variance_derivation.md` for the final laws)
 
-The conceptual shift is: the old solver compared **absolute densities** between nodes; the new solver compares
-**compositions**, normalizing between nodes by an **enrichment ratio** that cancels hybrid-capture
-enrichment/depletion. This works for the **mode** in almost all cases (measured: exon message f_g 0.682 vs
-oracle 0.677). But the **variance model** was built for density transfer under a **genome-wide uniformity
-assumption**, and hybrid capture breaks uniformity (it enriches targeted regions, depletes off-target ones).
-So the variance model is now wrong for the solver we are building.
+The conceptual shift was: the old solver compared **absolute densities** between nodes; the new solver compares
+**compositions**, normalizing by an **enrichment ratio** `r` that cancels hybrid-capture enrichment/depletion.
+The old variance model assumed genome-wide density **uniformity**, which capture breaks — so it had to be
+rebuilt for a composition transport. It now is (`message_variance_derivation.md`, laws M1–M7, every one
+MC-validated in `scripts/debug/message_variance_mc.py`, which runs 0 failures end-to-end):
 
-The derivation work done this session, and the reason it must be redone, is in **`variance_model_handoff.md`**.
-The short version: we derived a share-weighted precision for the RNA graft and a difference-variance for the
-peel and validated them by Monte-Carlo — but discovered late that they were written in the **ratio (k)
-parameterization**, which is singular at the pure-gDNA anchor, whereas the code uses the **÷M_dst density
-mode**, for which the right form is a **per-component density variance**. The unifying framework
-(`Var(log ρ_c) = Σ_k (ρ_k/ρ_c)²·v_k + σ²_transfer`) is identified but **not yet derived clean or validated**,
-and the **transfer-variance term (`σ²_transfer`) needs a ground-up redo** for the composition solver — the
-current `σ²_transfer` is a density-uniformity proxy.
+```
+    p_message = 1 / ( Var(log f_c^src) + 1/n_src  +  σ²_transfer  +  b̂² )
+                     \__ strand ___/   \_count_/    \_ SCALE _/    \_ COMPOSITION _/
+```
 
-## 4. The gDNA hyperprior (the second WIP workstream)
+The last two are the cross-cliff cost, and the session's central result is that they are **different objects**
+that must be priced separately. The delivered message error splits EXACTLY (to machine precision) into
+`log(s_c^src/s_c^dst,true) + log(r̂/r_true)` — a composition-SHARE mismatch plus the reframe's own scale noise.
+`σ²_transfer = Var(log r)` (M5) prices the scale; `b̂²` (M7) prices the imputation PREMISE ("my neighbour and I
+share a composition") being false. The retired `(log r)²` proxy charged the whole cliff as mismatch, which is
+why it fixed the stranded arm but over-damped extreme capture, where the composition really is preserved
+across a 1000× enrichment step.
 
-Fitting the gDNA hyperprior from the pass-0 result was working well and is much of the way there, but
-**pass-0 development this session exposed solver bugs**, which is why effort pivoted back to the solver. The
-hyperprior is what makes the re-solve possible (esp. AMBIG). It is not done. (Production config ships
-`calib_refit_iters=1` — one hyperprior-refit pass — but that refit currently *regresses* unstranded
-capture-ON pass-0 badly; see the session handoff §“open problems”.)
+`b̂²` is a population quantity we lack prior-free — but the destination has an **independent** estimate of its
+own composition: its message-free self-solve. Two estimators of one quantity is a two-study random-effects
+meta-analysis, so the **DerSimonian–Laird** between-study estimator supplies it with **no tuned constant**:
+`b̂² = max(0, G² − v_msg − v_own)`, giving `p_eff = 1/max(v_msg, G² − v_own)`. Its three regimes fall out of
+`v_own` (from the `τ_λ` foundation) with no gate, and the middle one is the safety property, exact: **a message
+can out-weigh a node's own belief only if it agrees within `√2·σ_own`.** Where a node has NO composition
+evidence (`τ_own = 0` — every AMBIG node, all unstranded data) `v_own = ∞` and the term switches itself off, so
+messages propagate untouched exactly where they are the only information. That inertness is deliberate — and it
+is also why the remaining AMBIG error is Phase 2's problem, not this term's.
+
+## 4. ⛔ THE BLOCKER — the gDNA hyperprior refit
+
+This is now the single binding constraint. Fitting the hyperprior from the pass-0 result was working well and
+is much of the way there, and it is what makes the re-solve possible (esp. AMBIG). But production config ships
+`calib_refit_iters=1` and **that refit regresses unstranded capture-ON**, which is the largest error-mass arm.
+
+That regression is no longer just a scoring problem — it is what blocks the AMBIG fix. Measured this session
+(`SESSION_2026_07_25_HANDOFF_6.md` §3): feeding the hyperprior's own λ-curvature into DL's `v_own` — the
+committed Phase-2 step, ~6 lines — improves exactly the arms it should (stranded 0.0376→0.0333, verystrong
+0.1292→0.1196, capture-off 0.0354→0.0168) and regresses unstranded-capON 0.1702→0.2177, because where the
+hyperprior is wrong DL now *enforces* it against the messages that would have corrected it. **Fix the
+hyperprior first; the AMBIG fix then lands almost for free.**
 
 ## 5. What SHIPPED (is correct and on by default) vs WIP
 
@@ -109,10 +138,15 @@ capture-ON pass-0 badly; see the session handoff §“open problems”.)
   32-scenario suite: **mwae 0.1361 → 0.0949, corr 0.688 → 0.736**, 20 better / 1 worse / 11 flat; intron mwae
   0.1781 → 0.0117; every stranded scenario better-or-flat.
 
-**Work in progress (not shipped, flag-gated off):**
-* The **unified solver** (`RIGEL_UNIFIED`) — mode largely correct, variance model wrong (§3), still behind.
-* The **variance model** — being redone (§3, `variance_model_handoff.md`).
-* The **gDNA hyperprior refit** (§4).
+* The **message-variance model** (§3, M1–M7) — the sole message-precision law, no flags, no prior input.
+  Pass-0-vs-oracle over the 32-scenario suite: **0.1267 → 0.0969 (refit=0), 0.1234 → 0.0828 (refit=1)**.
+
+**Work in progress (NOT ready to ship):**
+* The **gDNA hyperprior refit** (§4) — the blocker.
+* **AMBIG nodes** — prior-free they have no composition evidence at all (`τ_own = 0`), so they are carried by
+  messages alone and the DL term does not protect them. The minimal reproduction is the factor-1 bedrock toy
+  (`test_gdna_sweep_factor1_ambig_recovery`, xfail): on a uniform ρ=0.5 chain the AMBIG node between two exact
+  anchors reads **0.3914**. The error is in the message MODE, not its precision. Fixed by §4, not by pass-0.
 
 ## 6. The path to production (ordered)
 
@@ -125,12 +159,18 @@ capture-ON pass-0 badly; see the session handoff §“open problems”.)
    validated + independently re-verified, and independently critiqued (both converge on approach E + Option B).
    Phase 1 (the strand-gate bug fix — AMBIG gets zero strand f_g credit) is landed + A/B-validated (stranded arm
    improves, no regression), committed `c6df8c50`.
-2. **The MESSAGE variance model** (`variance_model_handoff.md`) — **the NEXT task**. Builds the message precision
-   on the `τ_λ` foundation; absorbs the deferred **composition/sampling separation** (move `1/n` out of the
-   fusion weight into the transport transfer function + the `struct_lock` hard-override; plan v4 §4). Per-node
-   density variance + a composition-appropriate transfer variance. Validate by MC + the per-condition A/B.
-3. **Make the unified solver win the A/B** (≥ the legacy-with-factory baseline, no stranded regression).
-4. **Return to the gDNA hyperprior refit** (§4) on the clean solver, then the re-solve, then a ship candidate.
+2. ✅ **DONE — the MESSAGE variance model** (§3; `message_variance_derivation.md`, laws M1–M7). The M1–M5
+   per-component transport laws, the single-λ combine on a three-stream relay (the M6 rank-1 double-count), and
+   the cross-cliff cost split into the M5 scale term + the M7 DerSimonian–Laird composition-mismatch `b̂²`. The
+   composition/sampling separation came out of the three-stream relay (τ carries composition only, the
+   measurement stream the counts). Every law MC-validated; `b̂²` additionally re-derived and adversarially
+   audited by a 4-agent workflow. Commits `44f1ecc6`…`1a3e0a89`.
+3. ✅ **DONE — the unified solver wins the A/B**: 0.0969 (refit=0) / 0.0828 (refit=1) vs the 0.0949
+   legacy-with-factory target — and note the current suite gained the hard `verystrong`/`gdna1`/`gdna5`
+   scenarios since that number was set, so gate on in-run A/B deltas, not the absolute.
+4. **The gDNA hyperprior refit** (§4) — **the NEXT task**, on the now-clean solver. Fix the unstranded-capON
+   refit regression, then re-apply the measured 6-line Phase-2 step (hyperprior → DL `v_own`, which fixes AMBIG),
+   then the re-solve, then a ship candidate. Exact plan + numbers: `SESSION_2026_07_25_HANDOFF_6.md`.
 
 ## 7. How we work (methodology — see memory `pass0_debug_iteration_loop`)
 
@@ -141,6 +181,10 @@ directives: **no magic numbers** (pause and discuss before any new constant); de
 scenarios; keep the module/constant count small. **⚠ The synthetic suite is Poisson by construction** (memory
 `synthetic_suite_is_poisson_omega_zero`), so it **cannot validate anything overdispersion-dependent.**
 
-Key tools (in `scripts/debug/`): `pass0_error_concentration.py` (suite → where the error is),
-`pass0_node_dissect.py` (exact-replay ψ channel ablation + per-node dumps), `unified_message_audit.py`
-(Σ_c f_c invariant), `message_precision_mc.py` (variance-law MC validation).
+Key tools (in `scripts/debug/`): `pass0_oracle_bench.py` (THE A/B — `--arm`, `P0_REFIT`, `--report`),
+`pass0_error_concentration.py` (suite → where the error is), `pass0_node_dissect.py` (exact-replay ψ channel
+ablation + per-node dumps), `message_variance_mc.py` (the variance-law MC arbiter, M1–M7),
+`unified_message_audit.py` (Σ_c f_c invariant). In `scratchpad/`: `dl_dissect.py` (error mass attributed by
+DL-protection state / strand DOF / node class, + per-node message provenance), `dump_node.py`.
+Env `RIGEL_S2T_OFF=1` disables both cliff terms for isolation; `_capture["_dl"]` publishes the per-message
+gaps and the τ-stream kill.

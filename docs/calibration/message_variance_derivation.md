@@ -1,6 +1,17 @@
 # The MESSAGE variance model — derivation (per-component density form)
 
-**Status:** derivation for review, 2026-07-24. Built on the settled `τ_λ` FOUNDATION
+**Status: COMPLETE and LANDED (2026-07-25).** M1–M5 + the M6 single-λ fix + **M7, the cross-cliff cost** (§7,
+added 2026-07-25 — the term that finished the model). Every law is MC-validated in
+`scripts/debug/message_variance_mc.py` (0 failures end-to-end). The shipped message precision is
+
+```
+    p = 1 / ( Var(log f_c^src) + 1/n_src  +  σ²_transfer  +  b̂² )
+```
+
+and no prior of any kind enters it. A/B: aggregate pass-0-vs-oracle 0.1267→**0.0969** (refit=0),
+0.1234→**0.0828** (refit=1). §6's "next task" is done; the live handoff is `SESSION_2026_07_25_HANDOFF_6.md`.
+
+Original header: derivation for review, 2026-07-24. Built on the settled `τ_λ` FOUNDATION
 (`variance_foundation_proposal.md`). Retires the density-uniformity `σ²_transfer` proxy
 (`variance_model_handoff.md` §4) and the singular ratio-`k` parameterization (§3). Every law below is
 Monte-Carlo-validated in `scripts/debug/message_variance_mc.py` (the arbiter; pure numpy, mirrors the template
@@ -245,3 +256,93 @@ with the **joint** `Var(log k)` (the T2 form `w_μ²(1/n+1/n_s) + (1−w_μ f_g)
 through the relay — so the λ-relay is what makes the joint precision computable without a cross-component
 covariance. Two regimes: single-λ where both components live; the ÷M gDNA density mode at structural anchors
 (`ρ_R ≡ 0`, k singular). This retires the two-message per-component combine entirely.
+
+---
+
+## 7. M7 — the CROSS-CLIFF cost: SCALE (`σ²_transfer`) vs COMPOSITION (`b̂²`)
+
+M1–M5 price a message's **sampling** error. They do not price the imputation **premise** — "my neighbour and I
+share a composition" — being false, and that premise is the message's entire content. That omission was the
+solver's last real defect: a message crossing a 407× enrichment cliff arrived at full confidence and
+steamrolled a weak-but-correct own belief (the anchor, node 1909: an oracle-0.985 mostly-gDNA exon collapsed
+to 0.51 by a flanking boundary's spliced measurement).
+
+### 7.1 The error splits into two orthogonal defects — exactly
+
+Holding the truth fixed, the delivered mode error is (MC-validated to machine precision, M7a/M7b):
+
+```
+    mo_c − log f_c^dst,true  =  log( s_c^src / s_c^dst,true )  +  log( r̂ / r_true )
+                                └── composition-SHARE mismatch ──┘  └── the reframe's own scale noise ──┘
+    ⇒   σ²_c,delivered  =  v_src,c  +  σ²_transfer  +  b_c²
+```
+
+`s_c = ρ_c/ρ_tot`. Both the destination mass `M_dst` and BOTH effective lengths cancel identically — run the
+MC with deliberately mismatched masses and eff-lengths on the two sides and the identity holds to 1e-16.
+
+**This is why the shipped `σ²_cliff = (log r)²` proxy had to go.** It charged the *whole* cliff as mismatch,
+which is conservative and did recover the stranded arm — but `log r` is dominated by the mass ratio, i.e. by
+ENRICHMENT, so on the extreme-capture arm it over-damped messages whose composition was in fact preserved
+across a 1000× density step. Pricing the two terms separately is what lets a pure-enrichment cliff cost
+nothing while a composition-mismatch cliff costs everything.
+
+### 7.2 `b̂²` prior-free: DerSimonian–Laird against the node's own self-solve
+
+`b_c` is a POPULATION quantity — the third information source (`CALIBRATION_ARCHITECTURE.md`) — and pass-0 has
+no population prior. But the destination holds an **independent** estimate of the same composition: its
+message-free self-solve (`node_init`). Two estimators of one quantity is a two-study random-effects
+meta-analysis, whose between-study variance has a closed-form method-of-moments estimator with **no tuned
+constant** (the coefficient is 1 because it is a second moment; the truncation at 0 is the method's own):
+
+```
+    b̂_c² = max( 0 , G_c² − v_msg,c − v_own,c )     G_c = mo_c^msg − mo_c^own
+    p_eff = 1/(v_msg + b̂²) = 1 / max( v_msg , G² − v_own )
+```
+
+with `v_own` the `τ_λ` FOUNDATION variance (`node_init.own_composition_logvar`), and `v_msg` the stream's own
+variance — which already contains `σ²_transfer`, so the scale noise is correctly SUBTRACTED from the gap
+rather than double-counted as mismatch.
+
+**Three regimes, no gate, no constant** — they fall out of `v_own` alone:
+
+| `v_own` | node | behaviour |
+|---|---|---|
+| finite (`τ_own > 0`) | strand- or factory-solved | a CONFLICTING message is killed, an agreeing one barely touched — **the stranded arm's fix** |
+| `+∞` (`τ_own = 0`) | every AMBIG node; ALL unstranded data | `b̂² ≡ 0`, the message passes **bit-identically** — where messages are the only information there is no own opinion to contradict them, so **the M5 unstranded/capture win propagates untouched** |
+| `0` (`struct_lock`) | structural pure-gDNA anchor | the full `G²` is charged (inert at the combine today — such a node is never `solvable`) |
+
+**The safety property, exact.** `p_eff = 1/max(v_msg, G²−v_own)` ⇒ a message out-weighs the own belief **iff
+`|G| < √2·σ_own`** — at every node, every composition, and independently of the source's depth. This is the
+owner's "pass-0 must be weak and correctable" as an inequality rather than a knob, and it is the invariant to
+preserve under any future change.
+
+**Estimator quality (MC, M7c):** recovers the true `b²` to 0.1–0.4% for real mismatches (`b ≥ 1.5`); at `b ≈ 0`
+it over-estimates by exactly `E[max(0,χ²₁−1)]·(v_msg+v_own) = 0.4839·(v_msg+v_own)` — the OVER-damping
+direction, and harmless, because a message that agrees with the own belief moves the fused mode nowhere.
+
+### 7.3 Where it is applied, and three choices that are load-bearing
+
+`bp_solver._transport`, after `_pin_v`, on all three streams (mode-fusion, measurement, composition τ).
+
+1. **POST-`_pin_v`.** The pin rescales the message to the destination's own mass, which removes its SCALE
+   claim; what remains in `G` is purely a disagreement about the SPLIT. Verified: at matched composition the
+   pinned gap is 0 to 2.4e-16 at cliffs `r = 1, 10, 407, 10⁴`. A pre-pin gap would re-import `log r` and
+   recreate the `(log r)²` over-damping.
+2. **The composition stream gets ONE λ-axis gap** (`G_λ = G_g − G_R`, `v_own,λ = 1/τ_own`), because it delivers
+   one Gaussian on λ. A per-component gap there is a category error (λ-space variances minus a log-`f_c`-space
+   gap) and, since `G_λ ≡ G_g − G_R` with opposite signs, satisfies `G_λ²/4 ≤ max_c G_c² ≤ G_λ²` — i.e. it
+   under-damps by 1–4×, worst exactly when the gap straddles `f_g = ½`. Always the forbidden direction.
+3. **A one-sided absence is the `b̂² → ∞` limit, carried as a MASK.** A source with no RNA at all (a pure-gDNA
+   seam; a fully-consumed peel) asserts `f_c = 0` to ψ — the most confidently-wrong claim in the solver.
+   Reporting the excess as `+∞` (⇒ precision 0) rather than as `log(t_c/_EPS)` keeps `_EPS` a numerical
+   zero-test instead of promoting it to the constant that sets the surviving precision. (Measured identical to
+   4 decimals against the floored variant across the suite — but the mask form has no constant in it.)
+
+### 7.4 What M7 does NOT do
+
+It is **inert wherever `τ_own = 0`**, which on unstranded data is every exon and every boundary (`i_strand ≡ 0`
+by the κ=½ deadband, so `τ_own = τ_factory`, nonzero only at introns). So M7 is not what recovers the
+unstranded/capture arm — retiring `(log r)²` is. The two effects are disjoint and the A/B separates them
+cleanly: deleting `(log r)²` recovers verystrong (0.2779→0.1864 refit=0), `b̂²` recovers stranded
+(0.0792→0.0390), and neither costs the other. Protecting AMBIG nodes requires a finite `v_own` there, which
+only the trained gDNA hyperprior can supply — Phase 2 (`SESSION_2026_07_25_HANDOFF_6.md` §3).
