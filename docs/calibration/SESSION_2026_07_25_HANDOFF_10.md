@@ -205,7 +205,69 @@ quantity down two paths that then disagree. **That split is a latent defect wort
 imputation" argument applies to it — but `th_prec = cm_p + cm_n`, so gating it would also kill the tilt
 channel AMBIG introns depend on. Needs the two separated first.
 
-## 7. Tools
+## 7. ⭐⭐ THE ROOT CAUSE — an exon has no RNA claim across a splice junction (LANDED)
+
+**Owner's call, and it was right: §6's intron λ gate was a band-aid.** The messages themselves are bad. They
+travel through exon↔intron boundaries, are contaminated with the exon's RNA, over-estimate RNA, and then
+poison introns — which the density deconvolution had solved accurately. Fix the message, not the victim.
+
+**Measured, on `nrna_none`, where the oracle RNA at an exon|intron boundary AND inside the intron is EXACTLY
+0** (`scratchpad/p1_path.py`):
+
+| node kind | n | oracle ρ_R | relayed ρ_R | oracle ρ_g | relayed ρ_g | ratio |
+|---|---|---|---|---|---|---|
+| EXON (source) | 681 | 5.5050 | 13.4281 | 27.5491 | 25.2997 | 0.96 |
+| exon\|intron BOUNDARY | 1145 | **0.0000** | **0.5280** | 14.8641 | 13.8969 | 0.98 |
+| INTRON | 571 | **0.0000** | **0.0041** | 0.0524 | 0.0514 | 0.99 |
+
+```
+THE PEEL, exon -> exon|intron boundary
+dir      n   ρ_R(exon)  reframed  peel amt  post-peel  oracle@bnd   peel==0
+L->R   572     18.3554    7.8185    1.2189     2.0373      0.0000       17%
+R->L   573     15.4216    5.9309    1.4768     1.4256      0.0000       14%
+```
+
+**gDNA transports essentially perfectly across every hop (0.96–0.99). The RNA channel alone is the
+contaminant.** The peel removes only ~16 % of the reframed RNA and **does not fire at all on 14–17 % of
+edges**.
+
+**Why.** The peel subtracts the MEASURED spliced flux as a proxy for "the mature that leaves". But across an
+active junction **mature RNA splices out by definition**; what continues unspliced is nascent read-through,
+and an exon cannot measure how much of its own RNA that is. So the exon's RNA density is not a claim about
+the other side at all — the component sets differ, which is exactly the refusal
+`enrichment_frame.gdna_fallback_admissible` already describes. The honest emission is **none** (density AND
+precision), not a partial subtraction.
+
+**A/B.** `_junc` = the boundary carries spliced mass on either face; on such a peel edge the exon emits no
+RNA claim:
+
+| arm | refit=0 | | refit=1 | |
+|---|---|---|---|---|
+| M8 | 0.0900 | — | 0.0700 | — |
+| **+ junction rule (LANDED)** | **0.0892** | 16 better / 16 worse | **0.0677** | **23 better / 6 worse / 3 flat** |
+| + junction rule + §6 intron gate | 0.0888 | 18 / 14 | 0.0672 | 25 / 3 / 4 |
+
+**The §6 intron gate was REMOVED** (with `NodeInit.tau_factory` and its tests) now that the root cause is
+fixed — owner's directive. Note the trade recorded above: keeping it buys a further 0.0004 / 0.0005 and cuts
+refit=1 regressions from 6 to 3. Also note intron error is 217,301 reads without it vs 208,599 at the M8
+baseline and 183,148 with it — **introns alone are marginally worse than baseline**, while the suite and the
+boundaries are clearly better. That is a live decision, not a settled one.
+
+**The honesty gain is the real headline.** Boundary `errQ1conf` (share of a class's error sitting on the
+most-confident quartile) collapses: **single 12.8 % → 4.3 %, AMBIG 17.7 % → 1.5 %**. The contaminated RNA
+messages were producing *confidently wrong* boundaries, which is precisely what would poison the Phase-2
+hyperprior fit. Suite total: **12,561,367 → 12,447,440 error reads**; stranded × capON 0.0565 → 0.0520.
+
+**Residual, and the next step.** The leak is reduced, not closed: relayed ρ_R at the boundary 0.5280 → 0.2381
+against an oracle of 0. What is left is the **14–17 % of edges where `_junc` is false** — the gate is
+OBSERVATIONAL (spliced mass was measured) where it should be STRUCTURAL (the annotation says a junction is
+there). `build_node_statics` already computes `mrna_active_pos/neg` and it is unused (§4.1 flags this as "a
+partial mitigation available without the index work"). That is the next thing to try.
+
+Also open, from §6: ψ weights the `intron_prior` ARRAY while `v_own` reads `tau_lam` — the same quantity down
+two paths that then disagree (proved by the ×100 saturation test). Worth unifying.
+
+## 8. Tools
 
 `scripts/debug/pass0_error_table.py` — the suite state of play in READS with the trust (`errQ1conf`) view.
 `scratchpad/t1_char.py` (characterize + ψ ablation, bit-exact), `t2_strata.py` (channel-arrival strata +

@@ -70,7 +70,6 @@ class NodeInit:
     prec_neg: np.ndarray
     struct_lock: np.ndarray
     tau_lam: np.ndarray
-    tau_factory: np.ndarray
 
 
 # ── the precision arithmetic (pure) ───────────────────────────────────────────────────────────────────────
@@ -246,7 +245,6 @@ def build_node_init(
     tau_lam = np.where(single_strand, i_strand, 0.0)
     lam_grid, _ = _logodds_grid(int(n_grid), float(logodds_window))
     tau_fac = density_factor_precision(intron_prior, lam_grid)  # I_density (NB curvature) on the λ axis
-    tau_factory = np.zeros_like(tau_lam) if tau_fac is None else np.asarray(tau_fac, np.float64)
     if tau_fac is not None:
         tau_lam = tau_lam + tau_fac
 
@@ -303,5 +301,4 @@ def build_node_init(
         prec_neg=prec_neg,
         struct_lock=struct_lock,
         tau_lam=tau_lam,
-        tau_factory=tau_factory,
     )

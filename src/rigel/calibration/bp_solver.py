@@ -358,6 +358,22 @@ def node_sweep(
         spl_n_f = tuple(
             np.where(SN[k] > _EPS, SN[k] / np.maximum(ESP[k], _EPS), 0.0) for k in (0, 1)
         )
+        # ── AN EXON HAS NO RNA CLAIM ACROSS A SPLICE JUNCTION ──────────────────────────────────────────
+        # A boundary carrying spliced mass on either face has an ACTIVE junction. Across it, MATURE RNA
+        # splices out by definition — what continues unspliced is the nascent read-through, and an exon
+        # cannot measure how much of its own RNA that is. So the exon's RNA density is not a claim about what
+        # is on the other side, and the honest emission is NONE (density AND precision), not a partial peel.
+        #
+        # The shipped peel subtracts the MEASURED spliced flux as a proxy for "the mature that leaves". It
+        # under-consumes badly. Measured on `nrna_none` (where the oracle RNA at an exon|intron boundary and
+        # inside the intron is EXACTLY 0): the relay still delivered ρ_R = 0.53 at the boundary and 0.0041 at
+        # the intron, the peel removed only ~16 % of the reframed RNA, and it did not fire at all on 14–17 %
+        # of edges (no spliced mass measured on that face). Meanwhile gDNA transported essentially perfectly
+        # across the same hops (relayed/oracle 0.96–0.99) — so the RNA channel alone was contaminating the
+        # chain, and introns (which the density deconvolution solves accurately) were the visible victims.
+        # This is the component-set refusal `enrichment_frame.gdna_fallback_admissible` already describes:
+        # where the two ends do not share a component set, emit nothing rather than a wrong frame.
+        _junc = ((SP[0] + SN[0] + SP[1] + SN[1]) > _EPS) & is_bnd_a
         accept_l = (
             SP[0] + SN[0]
         ) > _EPS  # the LEFT face carries the spliced (acceptor) ⇒ WITH-spliced ρ_tot
@@ -523,7 +539,10 @@ def node_sweep(
                     tmp += _spc
                     tmn += _snc
                 if is_bnd_a[i] and ex_a[s]:  # EXON → boundary: PEEL the departing mature
-                    tp, tn = max(tp - spl_p_f[df][i], 0.0), max(tn - spl_n_f[df][i], 0.0)
+                    if _junc[i]:  # across a junction the exon has NO RNA claim — see `_junc` above
+                        tp, tn, tpp, tpn, tmp, tmn = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+                    else:
+                        tp, tn = max(tp - spl_p_f[df][i], 0.0), max(tn - spl_n_f[df][i], 0.0)
                 if not fp_a[i]:
                     tp, tpp, tmp = 0.0, 0.0, 0.0
                 if not fn_a[i]:
@@ -619,8 +638,12 @@ def node_sweep(
             tpp, tpn = tpp + _spc, tpn + _snc  # into the mode-fusion precision …
             tmp, tmn = tmp + _spc, tmn + _snc  # … and the measurement stream (a count, never composition τ)
             peel = is_bnd_a & ex_a[src] & valid  # EXON → boundary: PEEL the departing mature
+            _kill = peel & _junc  # no RNA claim across a junction (see the relay's twin)
             tp = np.where(peel, np.maximum(tp - spl_p_f[df], 0.0), tp)
             tn = np.where(peel, np.maximum(tn - spl_n_f[df], 0.0), tn)
+            tp, tn = np.where(_kill, 0.0, tp), np.where(_kill, 0.0, tn)
+            tpp, tpn = np.where(_kill, 0.0, tpp), np.where(_kill, 0.0, tpn)
+            tmp, tmn = np.where(_kill, 0.0, tmp), np.where(_kill, 0.0, tmn)
             tp, tpp, tmp = np.where(fp_a, tp, 0.0), np.where(fp_a, tpp, 0.0), np.where(fp_a, tmp, 0.0)
             tn, tpn, tmn = np.where(fn_a, tn, 0.0), np.where(fn_a, tpn, 0.0), np.where(fn_a, tmn, 0.0)
             tg, tp, tn = _pin_v(
@@ -647,26 +670,7 @@ def node_sweep(
             # is NOT a loss of information: a pure-gDNA source's authority is a DENSITY LEVEL, and that travels
             # on the measurement stream (``tmg``), which is precisely the three-stream separation.
             ttau = np.where((tg > _EPS) & ((tp + tn) > _EPS), ttau, 0.0)
-            # ── A DIRECT MEASUREMENT OUTRANKS AN IMPUTATION ON THE SAME AXIS ───────────────────────────
-            # The density deconvolution (`density_deconv`, the intron factory) MEASURES this node's own
-            # gDNA-vs-RNA split against a fitted background — it is evidence about λ itself, not an
-            # imputation. The λ message asserts the opposite kind of thing: "my neighbour and I share a
-            # composition". Where the node has already measured that quantity, the imputation has nothing
-            # to add and every opportunity to do harm, so it is not admitted. Structural, no threshold —
-            # the same presence test as the `fp_a`/`fn_a` strand gates and the λ-emission gate above.
-            #
-            # Why M7's DL does not already handle it: its safety property lets a message out-weigh the own
-            # belief when it agrees to within `√2·σ_own`, and the factory's σ_own is LARGE (its λ variance is
-            # measured 3–10× conservative, vertex-free `z2 = E[(λ_self−λ_true)²]/E[1/τ]` = 0.10–0.32). So at a
-            # real intron `|G_lam| = 2.08 < √2·σ_own = 2.81` and DL correctly permits it — after which ψ hands
-            # the imputed message 70.8 % of the composition weight against the factory's 29.2 %. Measured
-            # consequence: messages made introns WORSE in 16/16 scenario × DOF strata (the only class where
-            # that happened), and ablating the λ message alone recovered 12–37 % of the intron error.
-            # Scoped to the FACTORY half of τ (`tau_factory`), never the strand half: I_strand is itself a
-            # composition vote, so gating on it would silence λ messages at every stranded node.
-            # The TILT message is deliberately untouched — an AMBIG intron knows its split but not which
-            # strand the RNA sits on, and θ is exactly what it needs from its neighbours.
-            ttau = np.where(np.asarray(_ni.tau_factory, np.float64) > _EPS, 0.0, ttau)
+# (intron λ gate removed — see if EXP-E alone suffices)
             if not _s2t_off:
                 g_g, c_g = mismatch_gap(tg, og)
                 g_p, c_p = mismatch_gap(tp, op)
