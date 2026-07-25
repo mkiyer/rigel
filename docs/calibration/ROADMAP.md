@@ -3,14 +3,25 @@
 **This is the single entry point for calibration work. Read it first.** Last updated: 2026-07-25.
 
 > **⭐ ORDER OF WORK (owner, 2026-07-25): the pass-0 SOLVER must be CORRECT before the gDNA hyperprior fit.**
-> The **single-strand × capture study is DONE** — see `SESSION_2026_07_25_HANDOFF_8.md` (the LIVE handoff).
+> The **single-strand × capture study is DONE** — see `SESSION_2026_07_25_HANDOFF_8.md`.
 > Its answer: the 10× capture degradation is 77–92 % on EXONS and is a message **MODE** defect with an exact
 > mechanism — the grafted junction flux `ρ_μ` is a spliced measurement already in the destination exon's
 > frame, but it is ratioed against the *boundary's* gDNA density, and since the reframe `r` cancels from the
 > delivered share (verified to `1.8e-15`) the graft edge **never reframes the gDNA at all**. Under capture
 > that step is 6.1–6.8× (1.03× without capture). Fixed by **M8** (`graft_frame_logvar`), which prices the
 > un-cancelled step as a variance `(log r)²` on the grafted component — derived, MC-validated, A/B-won:
-> **0.0926 → 0.0900 (refit=0), 0.0779 → 0.0700 (refit=1)**. **Next study: AMBIG**, the remaining ~50 %.
+> **0.0926 → 0.0900 (refit=0), 0.0779 → 0.0700 (refit=1)**.
+>
+> **The AMBIG study is DONE too — `SESSION_2026_07_25_HANDOFF_9.md` (the LIVE handoff).** Its result overturns
+> §5 below: an AMBIG node is **not** opinion-free prior-free. gDNA is strand-symmetric, so it drops out of the
+> strand mean `p = ½ + (κ−½)·d` — which is *why* the Schur complement is 0, and equally why the tilt `d` is
+> DIRECTLY observed. The simplex then gives the hard bound `f_g ≤ B = 1 − |d̂|`: zero Fisher information is not
+> zero knowledge when the profile likelihood has BOUNDED SUPPORT. Under capture `B` is nearly unbiased
+> (0.7894 vs oracle 0.7896) and snapping AMBIG to it captures **85–91 % of the entire AMBIG prize**. The
+> prior-free estimator is the exact identity `f_g = 1 − |d| − 2·min(f₊,f₋)` with the minority strand taken from
+> the solver's OWN per-strand imputation — validated offline (AMBIG mwae halves on every stranded condition).
+> **NEXT: implement it as a ψ factor** (derive the precision → MC → A/B), HANDOFF_9 §6. Expected ≈ −0.02
+> aggregate, the largest item left.
 >
 > **Status in one line:** the message-variance model is **COMPLETE** — derived, MC-validated, independently
 > verified, implemented, and A/B-won. A message's precision is
@@ -19,7 +30,8 @@
 > (M5 `Var(log r)`), the **DerSimonian–Laird composition-mismatch** `b̂²` (M7), and the graft's **un-cancelled
 > frame step** (M8). **Best aggregate on record: 0.0900 (refit=0) / 0.0700 (refit=1)** vs the 0.1267/0.1234
 > pre-fix baseline. **NOT ready to ship** (the hyperprior refit still regresses unstranded-capON), and per the
-> owner's directive the hyperprior is NOT the next task — **AMBIG is** (`SESSION_2026_07_25_HANDOFF_8.md` §6).
+> owner's directive the hyperprior is NOT the next task — implementing the **AMBIG simplex-bound estimator**
+> is (`SESSION_2026_07_25_HANDOFF_9.md` §6).
 >
 > **Update 2026-07-25 (DL cliff-term session).** `(log r)²` charged the WHOLE enrichment cliff as composition
 > drift, which recovered the stranded arm but over-damped extreme capture. The delivered message error splits
@@ -50,9 +62,10 @@ The only other docs that are live (everything else is in `archive/`, kept for hi
   total (52–71 % of nodes; p99 31–288×). Holds the measured evidence, the derivation brief, the two adjacent
   modelling gaps (§4: **no TSS/TES in the region/boundary map**; **the boundary is a slope, not a cliff — three
   enrichment ratios, not one**), and the record of what was tried and rejected.
-* **`SESSION_2026_07_25_HANDOFF_8.md` — ⭐ THE LIVE HANDOFF. START HERE for the next session.** The
-  single-strand × capture result (M8), the 8-step measurement chain, the four-arm ablation that chose the
-  variance over the mode fix, M8's known cost + the open refinement, and the next study (**AMBIG**).
+* **`SESSION_2026_07_25_HANDOFF_9.md` — ⭐ THE LIVE HANDOFF. START HERE for the next session.** The AMBIG
+  study: the simplex-bound result, the ceiling, the validated prior-free estimator, the two neutral A/B arms
+  (both reverted), and the implementation plan. `..._HANDOFF_8.md` (the single-strand × capture result — M8,
+  the 8-step measurement chain, and the four-arm ablation that chose the variance over the mode fix),
   `..._HANDOFF_7.md` (the boundary-class census — still the map; its §4–§5 study is now DONE),
   `..._HANDOFF_6.md` (whose "next task is Phase 2" is WITHDRAWN), `..._HANDOFF_5.md` and `..._HANDOFF_4.md`
   are the arc. (Handoffs 1–3 are historical.)
@@ -158,8 +171,11 @@ hyperprior first; the AMBIG fix then lands almost for free.**
 
 **Work in progress (NOT ready to ship):**
 * The **gDNA hyperprior refit** (§4) — the blocker.
-* **AMBIG nodes** — prior-free they have no composition evidence at all (`τ_own = 0`), so they are carried by
-  messages alone and the DL term does not protect them. The minimal reproduction is the factor-1 bedrock toy
+* **AMBIG nodes** — ⚠ **the "no composition evidence at all" framing below is SUPERSEDED by
+  `SESSION_2026_07_25_HANDOFF_9.md` §2**: `τ_own = 0` is the *interior* Schur result, but the simplex bound
+  `f_g ≤ 1 − |d̂|` is real, prior-free, structural evidence, and it carries 85–91 % of the AMBIG prize under
+  capture. What follows remains true of the SHIPPED solver, not of what is achievable. Prior-free they are
+  carried by messages alone and the DL term does not protect them. The minimal reproduction is the factor-1 bedrock toy
   (`test_gdna_sweep_factor1_ambig_recovery`, xfail): on a uniform ρ=0.5 chain the AMBIG node between two exact
   anchors reads **0.3914**. This is the designed weakness, NOT a mode defect — the shortfall shrinks
   monotonically with depth (21.7% at ρ=0.5 → 0.8% at ρ=5000), so the transported mode is right and what is
