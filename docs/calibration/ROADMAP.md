@@ -194,6 +194,12 @@ hyperprior first; the AMBIG fix then lands almost for free.**
    essentially never occurs biologically). Details + the partial mitigation already available
    (`mrna_active_pos/neg`, computed but unused on the measurement stream):
    `density_composition_reconciliation.md` §4.1.
+7. **⚠ REFUTED, do not build: per-channel enrichment ratios at the boundary face.** The physics is real and
+   measured (the boundary sits on a capture SLOPE: at verystrong it is 0.125× the exon and 2113× the intron),
+   but item 4's relay pin retired the motivation — substituting the ORACLE capture step for the model's `r`
+   buys ~0 (−0.16/−0.17/−0.33, +0.013) and ≈4 % at verystrong, because the reframe only carries SCALE and the
+   pin re-derives scale from the observed mass. What remains live is frame ASSIGNMENT of the measured spliced
+   channel (`density_composition_reconciliation.md` §5.1), not ratio accuracy.
 
 ## 7. How we work (methodology — see memory `pass0_debug_iteration_loop`)
 

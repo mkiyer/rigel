@@ -289,7 +289,40 @@ none. Note there is already an unused structural bool for the mature channel —
 in `build_node_statics` — while the measurement stream is gated only by `fp_a/fn_a`, the *nascent* gate. That
 is a partial mitigation available without the index work.
 
-### 4.2 The boundary is a SLOPE, not a vertical cliff — we need three enrichment ratios, not one
+### 4.2 ⚠ THE PHYSICS IS CONFIRMED, BUT THE FIX IS REFUTED — do not build per-channel ratios for the relay
+
+**Derivation result, 2026-07-25** (`scratchpad/derive_3_channel_ratios.py`, `derive_2_relay_pin.py`). The
+owner's slope model is **true and now measured** (tables below). But the proposed remedy — replace the single
+`r` with per-channel enrichment ratios — was tested at its **upper bound** and buys essentially nothing.
+
+**The measurement.** gDNA is uniformly present along the genome, so any ratio of true gDNA densities IS a ratio
+of capture efficiencies. Substituting that ORACLE capture step for the model's `r` in the (now pinned) relay is
+the best any per-channel model could possibly achieve for the unspliced channel:
+
+| condition | pinned, model `r` | pinned, **ORACLE** `r` | gain |
+|---|---|---|---|
+| gdna300 ss0.99 capON | 16.06 | 16.22 | **−0.16** |
+| gdna300 present capON | 25.01 | 25.18 | **−0.17** |
+| gdna100 ss0.50 present capON | 29.12 | 29.45 | **−0.33** |
+| gdna300 present capture OFF | 0.0676 | 0.0543 | +0.013 |
+| gdna100 verystrong | 43.08 | 41.26 | +1.83 (≈4 %) |
+| gdna5 / gdna1 / none verystrong | 10.50 / 9.45 / 10.17 | 10.23 / 9.81 / 10.17 | +0.27 / −0.36 / 0.00 |
+
+(mass-weighted `|Δ|` of the relayed RNA density vs oracle; replay fidelity against the shipped pinned relay is
+`max|Δρ| = 0.00e+00`.)
+
+**Why a perfect `r` buys nothing.** The reframe's only job is to convert density **scale** between frames, and
+**composition is invariant under a common scale**. `r` already cancels in the pin (`k ∝ 1/r`). Once §3.1 pins
+the relay at every hop, the scale is re-derived from the node's *observed mass* at each node, so `r` only has
+to be roughly right — the pin absorbs the rest. **§3.1 retired §4.2's relay motivation.** Attempting a
+per-channel `r` earlier, before the pin, would have looked productive and been superseded.
+
+**What the channel distinction is STILL needed for.** Not ratio *accuracy* — frame *assignment* of the MEASURED
+channels: whether the junction's spliced flux should be lifted by `r` at all. That is §5.1 (the graft-frame
+fix), an 82× error at node 1909, and it remains live and blocked on §3.3. The spliced-channel half of the
+owner's model is therefore real work; the unspliced-channel half is not.
+
+**The physics, measured (retained — it is correct, and it is why §5.1 matters):**
 **Owner, 2026-07-25.** Probe placement determines what happens across a boundary, and the current model has a
 single `r` built from total density. Reality:
 
@@ -308,13 +341,26 @@ equals the intron's density on the unspliced side.** The boundary genuinely sits
 | boundary ↔ exon, **unspliced** channel | fragments straddling the exon↔intron seam, partly unbaited | assumed via the single `r` |
 | boundary ↔ intron, unspliced channel | — | assumed via the single `r` |
 
-**Measured support (oracle only, no solver in the loop)** — `ρ_μ(junction) / ρ_R(exon interior)`:
+**Measured support (oracle only, no solver in the loop).** Using oracle gDNA density ratios as pure capture
+measurements, and oracle RNA for the spliced channel:
 
-| condition | ratio (median) | p25 | p75 |
+| condition | e(B unspliced)/e(EXON) | e(B unspliced)/e(INTRON) | e(B spliced)/e(EXON) |
 |---|---|---|---|
-| capture **off** | 0.966 / 0.973 | 0.85 | 1.01 |
-| capture on | 0.871 / 0.866 | 0.70 | 1.06 |
-| capture **verystrong** | **0.539** | 0.45 | 0.66 |
+| capture **off** (control) | 0.980 | 0.985 | 0.975 |
+| capture on | **0.549** | **1.282** (p75 49.6) | 0.863 |
+| capture on + nRNA | 0.467 | 1.158 (p75 45.8) | 0.543 |
+| **verystrong** | **0.125** | **2113** | 0.560 |
+
+The control is clean: with capture off all three ratios are ≈1 — no capture, no slope. Under capture the
+boundary sits genuinely INTERMEDIATE and the face steepens sharply: at verystrong the exon:intron capture ratio
+is ~17,000×, and the boundary sits at 0.125× the exon but 2113× the intron — i.e. **pulled strongly toward the
+exon**, as expected for a seam-straddling fragment anchored on the baited side. The model's single face ratio is
+roughly unbiased in the median but scattered per-edge on exon↔boundary (p25–p75 0.55–2.9 at verystrong) while
+intron↔boundary is tight (0.88–0.99).
+
+Two mechanisms were tested and did NOT explain the exon-edge error: excluding the spliced from the face
+`ρ_tot` is WORSE at normal capture (−0.199, −0.106 in log) and better only at verystrong (+0.276); and
+substituting the oracle capture step buys ~nothing (table above).
 
 So the spliced channel's ratio to the exon interior is ≈1 with no capture and degrades smoothly as capture
 strengthens — a **slope, graded by capture strength**, exactly as described, and measurable. (The simulator
