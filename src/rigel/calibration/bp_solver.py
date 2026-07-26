@@ -898,6 +898,13 @@ def node_sweep(
             tau_tilt = np.clip(np.where(cR > _EPS, (cp - cn) / np.maximum(cR, _EPS), 0.0), -1.0, 1.0)
             th_msg = np.arcsin(tau_tilt)
             th_prec = np.where(is_amb, cm_p + cm_n, 0.0)
+            # DIAGNOSTIC ONLY (P1, `docs/calibration/PASS0_FINISH_PLAN.md`): ablate the RNA MEASUREMENT ψ
+            # factor. It is the channel that carries 75 % of the posterior precision on the confidently-wrong
+            # unstranded × capture-OFF exons — and ablating it is NOT the fix: 0.0895 → 0.1033, 4 better / 17
+            # worse, because it is also the only thing that lets a zero-gDNA library say "my mass is all RNA"
+            # (`gdna_none` 0.1063 → 0.1438). Kept for developing the real fix.
+            if os.environ.get("RIGEL_RNAMEAS_OFF"):
+                cm_p, cm_n = np.zeros_like(cm_p), np.zeros_like(cm_n)
             dc_fin = _local_solve(
                 global_lp, mo_g, cm_g, (mo_p, mo_n), (cm_p, cm_n),
                 lam_imp=(lam_msg, c_tau), theta_imp=(th_msg, th_prec),

@@ -10,7 +10,7 @@ do not start a competing list.
 |---|---|---|
 | **P0** | change the debug loop's loss to **confidently-wrong mass** | ✅ **DONE** 2026-07-26 |
 | ~~P2~~ | ~~introns at 91 % `errQ1conf`~~ | ⛔ **REFUTED** — a selection artifact, §P2 |
-| **P1** | root-cause the **capture-OFF** confident error | ▶ **NEXT** (promoted; sharply localized) |
+| **P1** | root-cause the **capture-OFF** confident error | 🔬 **ROOT-CAUSED** — fix needs a design call, §P1 |
 | **P3** | AMBIG exon over-confidence — **z2\|Q1 = 183**, the worst defect in the solver | ▶ **PROMOTED** above P4/P5 |
 | P4 | FAR → a proper opposite-direction message; M11's pre-DL precision | queued |
 | P5 | re-test `r` from the gDNA channel (the "moot" verdict is stale) | queued |
@@ -139,7 +139,65 @@ quartile (because the factory legitimately makes them confident), then `errQ1con
 effect and there is nothing to fix. **Measure quartile membership and `z2` per class before changing
 anything.**
 
-## P1 — the capture-OFF confident error (~540 k reads, 35 % of the problem)
+## 🔬 P1 — ROOT-CAUSED (2026-07-26). The RNA measurement channel wears a borrowed mode.
+
+**The population** (`scratchpad/p1_capoff.py`, paired against the same nodes at capture-ON — same genome,
+same partition, so the node index is the same DNA). Single-strand exons, unstranded, capture-OFF, in the
+suite-wide confident quartile: **216 nodes, 513,966 reads, z2 = 36.6**.
+
+```
+  stratum                                n       reads   |err|      sd      z2    c_tau     cm_g     cm_R
+  capture OFF  all exon-single         487   1,616,671  0.2279  0.1115     5.7    10.36    63.92   929.09
+  capture OFF  confident quartile      216     513,966  0.2815  0.0487    36.6     6.87   109.20   651.07
+  capture ON   same nodes as above     216   1,663,473  0.0879  0.1396     0.5     4.10    72.61    61.36
+```
+
+**Where the posterior precision comes from, on exactly those nodes:**
+
+| | `c_tau` (λ) | `cm_g` (gDNA meas.) | **`cm_R` (RNA meas.)** | `tau_own` |
+|---|---|---|---|---|
+| capture OFF | 6.87 (1.9 %) | 109.20 (23.2 %) | **651.07 (74.9 %)** | 0.000 |
+| capture ON | 4.10 (14.9 %) | 72.61 (61.6 %) | 61.36 (23.5 %) | 0.000 |
+
+The individual nodes are stark — oracle `f_g` = 0.016–0.069 (i.e. **93–98 % RNA**), self-solve 0.49–0.51
+(ψ's uninformed reference, as expected with `τ_own = 0`), **solved 0.23–0.59** — barely moved off the
+reference — at `sd` = 0.044–0.056, so **z = 4.5–10.1**. Enormous precision, almost no movement.
+
+**Why it is capture-OFF specific.** Three damping terms exist and capture-OFF removes the last one:
+* `τ_own = 0` on unstranded data ⇒ `v_own = ∞` ⇒ the DL mismatch term is **inert by design** (M7);
+* `r ≈ 1` off-capture ⇒ M5's `σ²_transfer ≈ 0`;
+* and **M8's `graft_frame_logvar = (log r)²` is identically 0 at `r = 1` by construction** — it is the ONLY
+  thing damping the grafted spliced count `_spc = SP/(1 + SP·σ²)`, so off-capture the spliced count enters at
+  its **raw Poisson precision** (measured `cm_R` up to 2,025 on a single node).
+
+**⛔ Ablating the channel is NOT the fix** (arm `abl_r0`, `RIGEL_RNAMEAS_OFF=1`): **0.0895 → 0.1033, 4 better
+/ 17 worse**, and catastrophic exactly where the channel is load-bearing — `gdna_none` 0.1063 → **0.1438**,
+`none_ss0.50_nrna_none_capOFF` 0.3624 → **0.5049**. It is the only thing that lets a zero-gDNA library say
+"my mass is all RNA". It did help the arms M11 regressed (stranded 0.0347 → 0.0331, 3 better / 1 worse), which
+is consistent: the channel is *essential* where RNA is everything and *harmful* where gDNA is high.
+
+### ⭐ The defect, and it is structural
+
+`bp_solver` builds the RNA measurement ψ factor as
+
+```
+    rna_imp = (mo_p, mo_n), (cm_p, cm_n)      mo_p = log(cp·E_r/M)     cp = _fuse_v(ap, app, bp, bpp)
+```
+
+— the **mode comes from the FUSED density** (both directions, weighted by the full mode-fusion precisions)
+while the **precision comes from the MEASUREMENT stream alone** (`mg`/`mp`/`mn`, which are *precisions with no
+companion density*: the relay carries `mg[i] = mg_own[i] + tmg` and nothing else). So a spliced COUNT's
+confidence is being attached to a mode that count does not determine. Where the fused mode happens to be right
+(RNA-rich libraries) the high precision helps; where it is wrong (gDNA-rich) it pins the node hard and wrong.
+That is exactly the observed split, and it is why "huge precision, almost no movement" can co-occur.
+
+**The fix is a design call, not a patch:** the three-stream separation tracks three precisions but only one
+density. Either give the measurement stream its own density (so its ψ factor is its own claim at its own
+precision), or price the premise gap between the two — a spliced count measures the JUNCTION's flux exactly
+but the destination exon's RNA density only under the imputation premise "my RNA all flows through this
+junction", and that premise error is currently unpriced. **Do not start building before deciding which.**
+
+## P1 (historical) — the item as written before the investigation
 
 Flagged in `SESSION_2026_07_25_HANDOFF_10.md` §5 as "the more important Phase-2 risk" and **never
 investigated**. It is also the cleanest regime available: **no capture cliff**, so `r ≈ 1` and the reframe is
