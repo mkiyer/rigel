@@ -11,6 +11,16 @@ re-scoped** — an unaudited addition is exactly the compounding risk the questi
 
 ## 1. The ledger
 
+> ⚠ **The M1/M2/M3 reference implementations were DELETED in the 2026-07-26 cleanup** (`total_density`,
+> `k_from_belief`, `f_g_from_k`, `boundary_unspliced_from_k`, `enrichment_ratio`, `reframe_density`,
+> `density_mode_logfrac`, `gdna_fallback_admissible`, `transport_seed_logvar`, `graft_rna_logvar`,
+> `message_precision`). They had **no production caller and no MC-arbiter caller** — only their own unit
+> tests — because the laws they state are now realised implicitly by the solver's inverse-variance fusion
+> (M2's `w_μ²` share weighting, for instance, "arises implicitly from the fusion with the correctly-framed
+> `ρ_ν` arm"). The DERIVATIONS below stand; the redundant code does not. `peel_rna_logvar` was KEPT — it is
+> still the oracle a shipped-code test scores against.
+
+
 A message's precision is `p = 1/Var(log ρ_c^msg)`. Every term below is an *additive* contribution to that
 log-variance except where noted.
 
