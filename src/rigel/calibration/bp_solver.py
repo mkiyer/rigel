@@ -83,9 +83,28 @@ __all__ = [
 
 _EPS = 1.0e-9
 
-# The number of lazy-ρ_tot combine iterations (`unified_solver_design.md` §10.6): iteration 2 recomputes
-# ρ_tot from the both-message composition. A numerical-resolution knob, not a model constant.
-_RHO_ITERS = 2
+# ⭐ ONE ρ-iteration. The combine's reframe needs the DESTINATION's composition, which is what the messages
+# are trying to determine — so a second iteration reframed off the FUSED posterior, i.e. the message from L
+# into i was framed using a belief that already contained the message from R into i. That is a BP violation
+# (a message may depend on anything except its own destination's other messages), and it was the last of
+# three: `_far` (the destination's other NEIGHBOUR) and `_p_nu_own` (the destination's OWN evidence) are
+# already deleted. With ONE iteration the frame comes from `_init_belief()`, which is a pure function of the
+# chain / substrate / statics and the three fitted library scalars — belief-free — so no posterior feeds back
+# and the chain's forward-backward pass is exact BP.
+#
+# PRICE, measured over all 32 conditions: refit=0 **−0.0002** (4 better / 2 worse / 26 flat — removing it is
+# slightly BETTER), refit=1 **+0.0011** (4/4/24), concentrated in unstranded × capON (+0.0104, 0 better /
+# 3 worse). Held-fixed-node-set z2 is flat (ALL 8.53 → 8.50; exon-AMBIG 59.4 → 54.3 and boundary 4.27 → 4.09
+# better, exon-single 3.57 → 3.84 worse). Fit-substrate mwae +0.0002.
+#
+# ⛔ That price is also the answer to "does the elegant refactor earn itself?" — NO. Carrying each message as
+# a FUNCTION of the destination's state (a pairwise potential ψ(x_s, x_i) evaluated inside the destination's
+# own ψ solve) is the principled way to get the composition-aware frame back legally, but it is a rewrite of
+# the message representation and it is bidding for ~0.001. Revisit only if the frame becomes load-bearing for
+# another reason. A belief-FREE constant frame (`node_total_density`'s pure-gDNA fallback) was also
+# prototyped: it costs more (+0.0003 suite, +0.0010 fit-substrate) and is neutral-to-worse on a held-fixed
+# z2, so it is not a better trade than simply dropping the iteration.
+_RHO_ITERS = 1
 
 
 def node_sweep(
@@ -451,20 +470,6 @@ def node_sweep(
         mp_own = np.zeros_like(np.asarray(pp_own, np.float64))
         mn_own = np.zeros_like(np.asarray(pn_own, np.float64))
 
-        # ── the OWN-belief composition variances: the DL estimator's "second study" ─────────────────────────
-        # Reused from `node_init` so ONE law defines them (the τ_λ FOUNDATION Jacobians). Three states, and the
-        # DL term's three regimes fall out of them with no gate and no constant:
-        #   * struct_lock (composition CERTAIN) → v_own = 0   ⇒ excess = G² in full. NOTE this regime is INERT at
-        #     the combine: `struct_lock = ~solvable & is_region` ⊆ `~solvable`, so such a node's ψ output is
-        #     discarded by the write-back gate anyway (and `op+on = 0` there kills the λ gap). What actually
-        #     makes an intergenic anchor immovable is its own `pg_own = n` in the relay's fuse, NOT this branch;
-        #     it is kept because it is the correct limit, not because it is load-bearing today;
-        #   * real evidence τ_own > 0          → v_own finite ⇒ a message that CONFLICTS with a confident own
-        #     belief is killed (the stranded arm's fix), one that AGREES is barely touched;
-        #   * no evidence τ_own = 0            → v_own = ∞    ⇒ excess ≡ 0: NO mismatch damping. Every AMBIG
-        #     node and all of unstranded data sit here — exactly where messages are the ONLY information — so the
-        #     M5 unstranded/capture win propagates untouched. (Phase 2's hyperprior is what supplies a finite
-        #     v_own there; until then the honest statement is "this node has no opinion to contradict".)
         v_own_g, v_own_r = own_composition_logvar(_ni.f_g, tau_own, _struct)
         # the same three states on the λ axis, for the single-DOF composition stream (Var(λ) = 1/τ_λ — the two
         # per-component arms are perfectly anti-correlated, so their Jacobians sum to 1 and the count cancels).

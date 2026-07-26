@@ -390,7 +390,15 @@ premises above have changed, **that measurement is the single highest-value next
    message's delivered claim) was prototyped and is **illegal and worthless** — it does not remove the
    reuse and recovers 0.000117 of 0.000696.
 
-   ⚠ **P4b — `_far` was NOT the last third-node dependence.** `_RHO_ITERS = 2`, and the second iteration's
+   ✅ **P4b — FIXED (`_RHO_ITERS = 1`). The solver is now BP-legal.** Price: **−0.0002 at refit=0** (4
+   better / 2 worse / 26 flat — removing the violation is slightly BETTER) and **+0.0011 at refit=1**,
+   concentrated in unstranded × capON (+0.0104). Held-fixed z2 flat (ALL 8.53 → 8.50). With one iteration
+   the frame comes from `_init_belief()`, which is belief-free, so no posterior feeds back.
+   **⛔ The "elegant" pairwise-potential refactor is NOT justified by this price** — it would bid a rewrite
+   of the message representation against ~0.001. A belief-free constant frame was also prototyped and is a
+   worse trade (+0.0003 suite, +0.0010 fit-substrate, neutral-to-worse on held-fixed z2).
+
+   **(historical) `_far` was NOT the last third-node dependence.** `_RHO_ITERS = 2`, and the second iteration's
    reframe faces are built from the destination's **fused posterior** — i.e. from the other message.
    Measured median `|Δlog ρ_face|` between iterations 0.0116 (stranded capOFF) → 0.1242 (unstranded capON),
    >1 % on 52.7–79.0 % of nodes. **The solver is not BP-legal yet.** The legal way to recover what `_far`
