@@ -31,14 +31,12 @@ INITIALIZATION self-solve (the four sources → each node's own ``(density, prec
 
 from __future__ import annotations
 
-import os
 
 import numpy as np
 from scipy.special import polygamma
 
 from .enrichment_frame import (
     composition_logvar,
-    conservation_rescale,
     graft_frame_logvar,
     graft_premise_logvar,
     mismatch_deflate,
@@ -358,7 +356,6 @@ def node_sweep(
         # INDEPENDENT estimate of the same composition: its own message-free self-solve (`_ni`). Treating the
         # message and the own belief as two studies of one quantity, the DerSimonian–Laird between-source
         # estimator recovers b² with NO tuned constant (`_dl` below). Applied in `_transport`.
-        _s2t_off = bool(os.environ.get("RIGEL_S2T_OFF"))  # DIAGNOSTIC ONLY: disable BOTH cliff terms
 
         # per-strand spliced (mature) DENSITY — one-sided per-face density (0 on regions); the acceptor face.
         def _face_spl(sp):
@@ -435,10 +432,6 @@ def node_sweep(
 
 
         # P1d is ON by default; `RIGEL_GLV_OFF=1` ablates it (bit-identical to the pre-P1d path).
-        _glv = not os.environ.get("RIGEL_GLV_OFF")
-        # ⭐ P1e — the conservation SURPRISE, ON by default. `RIGEL_P1E_OFF=1` ablates it;
-        # unset ⇒ the whole block is skipped and the path is bit-identical.
-        _p1e = 0.0 if os.environ.get("RIGEL_P1E_OFF") else float(os.environ.get("RIGEL_P1E") or 1.0)
         vgp_prem = vgn_prem = None  # per-ρ-iteration, in the destination's frame; set before each transport
 
         # own per-component densities + precisions — the message-free SELF-SOLVE (`node_init.build_node_init`,
@@ -491,33 +484,26 @@ def node_sweep(
         # message partial (a seam sending gDNA only still gives ``f_g < 1``, §2) instead of renormalizing it into
         # the shift's "the missing component is absent". A structurally-dead strand has own density 0 and so
         # contributes nothing, correctly. Applied per-message in the combine (`_transport`).
-        def _pin_v(g, p, n, pg_, pp_, pn_, v_common=None):
-            """Per-message pin: scale a claim to the node's mass. STEP 4 — the same M12 law as the combine,
-            with the message's own common-mode variance (the reframe ⊕ the source's count). At the per-message
-            level that common part is usually DOMINANT — the reframe is the shared error — so this is expected
-            to sit near the common-factor limit it replaces."""
-            if v_common is None or not os.environ.get("RIGEL_M12_MSG"):
-                sg = np.where(pg_ > 0.0, g, og)
-                sp = np.where(pp_ > 0.0, p, op)
-                sn = np.where(pn_ > 0.0, n, on)
-                s = sg * E_g + (sp + sn) * E_r
-                k = np.where((s > _EPS) & (M > _EPS), M / np.maximum(s, _EPS), 1.0)
-                return g * k, p * k, n * k
-            _p3 = np.stack([pg_, pp_, pn_], axis=-1)
-            return tuple(
-                np.moveaxis(
-                    conservation_rescale(
-                        M,
-                        np.stack([g, p, n], axis=-1),
-                        np.stack([E_g, E_r, E_r], axis=-1),
-                        np.where(_p3 > 0.0, 1.0 / np.maximum(_p3, _EPS), np.inf),
-                        v_common,
-                        np.stack([og, op, on], axis=-1),
-                    ),
-                    -1,
-                    0,
-                )
-            )
+        def _pin_v(g, p, n, pg_, pp_, pn_):
+            """Scale a claim to the node's observed mass: `Σ_c ρ_c·E_c = M`, an IDENTITY under the imputation
+            premise, restored by a common factor `k = M/S`.
+
+            The partial-claim semantics are load-bearing: a component the claim does not SUPPLY (precision 0)
+            contributes the node's OWN density to the mass budget and does not move, which is what keeps a
+            partial claim partial — a message carrying gDNA only still delivers `f_g < 1`. Rescaling all
+            three blindly instead regresses capture-OFF 3.6×.
+
+            The weighted alternative (M12 — apportion the correction
+            by how badly each component is known, of which this common factor is the `w → 0` limit) was
+            derived, implemented and A/B'd, and is NOT used: once λ is fused by its own precision (the
+            message packet) it is completely INERT — 0 better / 0 worse / 32 flat — and the per-message
+            variant is a net loss. Recorded in `weighted_rescale_design.md` §9 and `PASS0_FINISH_PLAN.md`."""
+            sg = np.where(pg_ > 0.0, g, og)
+            sp = np.where(pp_ > 0.0, p, op)
+            sn = np.where(pn_ > 0.0, n, on)
+            s_ = sg * E_g + (sp + sn) * E_r
+            k = np.where((s_ > _EPS) & (M > _EPS), M / np.maximum(s_, _EPS), 1.0)
+            return g * k, p * k, n * k
 
         # ── THE DerSimonian–LAIRD COMPOSITION-MISMATCH DEFLATION (`message_variance_mc.py` M7c/M7d) ─────────
         # The message and the destination's own message-free self-solve are two INDEPENDENT estimators of the
@@ -747,7 +733,7 @@ def node_sweep(
                 # the combine's job (`_transport`): the relay has no destination self-solve to measure a gap
                 # against — its running belief is already fused with the messages, so a DL gap here would be
                 # feedback, not evidence.
-                s2t = 0.0 if (_s2t_off or _gr) else (logvar_tot[i] + logvar_tot[s])
+                s2t = 0.0 if _gr else (logvar_tot[i] + logvar_tot[s])
                 gp = spl_p_f[sf][s] if _gr else 0.0
                 gn = spl_n_f[sf][s] if _gr else 0.0
                 tg, tp, tn = rg[s] * r, (rp[s] + gp) * r, (rn[s] + gn) * r
@@ -763,17 +749,17 @@ def node_sweep(
                     # exon's frame (its fragments' blocks lie in the exons), so it has no matched gDNA partner
                     # to cancel ``r`` against and M5's graft-zero does not cover it. Charge the frame step it
                     # is implicitly mis-lifted by. Identically 0 at r = 1.
-                    _s2f = s2t + (0.0 if _s2t_off else float(graft_frame_logvar(r)))
+                    _s2f = s2t + float(graft_frame_logvar(r))
                     _spc = SP[sf][s] / (1.0 + SP[sf][s] * _s2f) if SP[sf][s] > _EPS else 0.0
                     _snc = SN[sf][s] / (1.0 + SN[sf][s] * _s2f) if SN[sf][s] > _EPS else 0.0
                     tpp += _spc
                     tpn += _snc
                     tmp += _spc
                     tmn += _snc
-                    if _glv:  # ⭐ P1d — the graft's PREMISE variance (`_transport`'s twin)
-                        _vgp, _vgn = float(vgp_prem[i]), float(vgn_prem[i])
-                        tpp, tmp = _damp_v(tpp, _vgp), _damp_v(tmp, _vgp)
-                        tpn, tmn = _damp_v(tpn, _vgn), _damp_v(tmn, _vgn)
+                    _vgp, _vgn = float(vgp_prem[i]), float(vgn_prem[i])
+                    tpp, tmp = _damp_v(tpp, _vgp), _damp_v(tmp, _vgp)
+                    tpn, tmn = _damp_v(tpn, _vgn), _damp_v(tmn, _vgn)
+
                 if is_bnd_a[i] and ex_a[s]:  # EXON → boundary: PEEL by COMPOSITION (scale by the share)
                     (_wp, _vwp), (_wn, _vwn) = _peel_share(i, df, tg, tpg, tp, tn)
                     tp, tn = tp * float(_wp), tn * float(_wn)
@@ -868,9 +854,8 @@ def node_sweep(
                     )
                 out.append(np.full_like(per, pooled))
             return out[0], out[1]
-
-        if _glv:  # the relay runs on the INPUT-belief faces, so its pair is formed from those
-            vgp_prem, vgn_prem = _seam_pair(rho_l0, rho_r0)
+        # the relay runs on the INPUT-belief faces, so its seam pair is formed from those
+        vgp_prem, vgn_prem = _seam_pair(rho_l0, rho_r0)
         fwd = _relay(order_list, left, rho_l0, rho_r0, 0, 1)
         bwd = _relay(order_list[::-1], right, rho_r0, rho_l0, 1, 0)
         # ── the COMBINE: transport α (from left neighbour) + β (from right neighbour) into the node's frame with
@@ -897,7 +882,7 @@ def node_sweep(
             # plain reframe / partial-anchor — r load-bearing). This is the SCALE half of the cliff cost; the
             # COMPOSITION half is the DL b̂² applied at the end of this function. See the relay's twin.
             s2t = (
-                np.zeros_like(r) if _s2t_off else transfer_logvar(logvar_tot, logvar_tot[src], graft)
+                transfer_logvar(logvar_tot, logvar_tot[src], graft)
             )
 
             def _dv(p, s2=s2t):
@@ -916,23 +901,21 @@ def node_sweep(
             # M8 — the graft's FRAME-MISLIFT variance (see the relay's twin and `graft_frame_logvar`): the
             # measured spliced already sits in the destination exon's frame, so ``r`` is NOT common-mode for it
             # and M5's graft-zero does not cover it. 0 where r = 1, so it is inert without a capture step.
-            _s2t_spl = _s2t_spl + (
-                np.zeros_like(r) if _s2t_off else np.where(graft, graft_frame_logvar(r), 0.0)
-            )
+            _s2t_spl = _s2t_spl + np.where(graft, graft_frame_logvar(r), 0.0)
             _spc = np.where(_sp > _EPS, _sp / (1.0 + _sp * _s2t_spl), 0.0)
             _snc = np.where(_sn > _EPS, _sn / (1.0 + _sn * _s2t_spl), 0.0)
             tpp, tpn = tpp + _spc, tpn + _snc  # into the mode-fusion precision …
             tmp, tmn = tmp + _spc, tmn + _snc  # … and the measurement stream (a count, never composition τ)
-            if _glv:
-                # ⭐ P1d — the graft's PREMISE variance (`graft_premise_logvar`), applied to the WHOLE RNA
-                # claim after the spliced arm is folded in, because the premise is about the SUM: measured
-                # FLAT in the spliced share w_μ (Var 2.02 → 1.83 across w_μ 0.47 → 1.00, while Var/w_μ²
-                # swings 5×), so charging the spliced arm alone would reach only 10–93 % of the delivered
-                # confidence while the error contaminates 63–95 % of the delivered density.
-                _vgp = np.where(graft, vgp_prem, 0.0)
-                _vgn = np.where(graft, vgn_prem, 0.0)
-                tpp, tmp = tpp / (1.0 + tpp * _vgp), tmp / (1.0 + tmp * _vgp)
-                tpn, tmn = tpn / (1.0 + tpn * _vgn), tmn / (1.0 + tmn * _vgn)
+            # ⭐ P1d — the graft's PREMISE variance (`graft_premise_logvar`), applied to the WHOLE RNA
+            # claim after the spliced arm is folded in, because the premise is about the SUM: measured
+            # FLAT in the spliced share w_μ (Var 2.02 → 1.83 across w_μ 0.47 → 1.00, while Var/w_μ²
+            # swings 5×), so charging the spliced arm alone would reach only 10–93 % of the delivered
+            # confidence while the error contaminates 63–95 % of the delivered density.
+            _vgp = np.where(graft, vgp_prem, 0.0)
+            _vgn = np.where(graft, vgn_prem, 0.0)
+            tpp, tmp = tpp / (1.0 + tpp * _vgp), tmp / (1.0 + tmp * _vgp)
+            tpn, tmn = tpn / (1.0 + tpn * _vgn), tmn / (1.0 + tmn * _vgn)
+
             peel = is_bnd_a & ex_a[src] & valid  # EXON → boundary: PEEL by COMPOSITION (the relay's twin)
             (_wp, _vwp), (_wn, _vwn) = _peel_share(slice(None), df, tg, tpg, tp, tn)
             tp = np.where(peel, tp * _wp, tp)
@@ -961,77 +944,67 @@ def node_sweep(
                         "graft": np.asarray(graft).copy(),
                     }
                 )
-            if _p1e:
-                # ── P1e: the conservation SURPRISE as a DerSimonian–Laird damping term ────────────────────
-                # The claim asserts S = Σ_c ρ_c·E_c fragments; the node observed M. That is an IDENTITY, and
-                # `_pin_v` restores it by fiat and DISCARDS the residual. Price the residual instead:
-                #     δ = log(M/S),  Σ = σ_cm²·11ᵀ + diag(w),  αᵀΣα = Σ_c α_c s_c   (M12's own error model)
-                #     b̂²_cons = max(0, δ² − αᵀΣα − 1/n_dst)                          (the DL between-study form)
-                # and attribute it by the conditional mean of the error given the observed violation,
-                # E[ε | αᵀε = −δ] = −δ·s/(αᵀΣα), i.e. the rank-1 inflation Σ += b̂²·s sᵀ/(αᵀΣα)², whose
-                # diagonal is Δv_c = b̂²·(s_c/αᵀΣα)². The scale multiplies b̂² (1.0 = the derived term).
-                _p3 = np.stack([tpg, tpp, tpn], axis=-1)
-                _sup = _p3 > 0.0
-                _mc = np.where(_sup, np.stack([tg, tp, tn], axis=-1), np.stack([og, op, on], axis=-1))
-                _mc = _mc * np.stack([E_g, E_r, E_r], axis=-1)
-                _S = _mc.sum(axis=-1)
-                _okc = valid & (_S > _EPS) & (M > _EPS)
-                _al = _mc / np.maximum(_S, _EPS)[..., None]
-                _vc = np.where(_sup, 1.0 / np.maximum(_p3, _EPS), 0.0)
-                _s2c = (np.where(np.isfinite(s2t), s2t, 0.0) + 1.0 / np.maximum(_n_node[src], _EPS))[
-                    ..., None
-                ]
-                _sv = np.where(_sup, _s2c + _al * np.maximum(_vc - _s2c, 0.0), 0.0)
-                _aSa = np.sum(_al * _sv, axis=-1)
-                _dlt = np.where(_okc, np.log(np.maximum(M, _EPS) / np.maximum(_S, _EPS)), 0.0)
-                _den = _aSa + 1.0 / np.maximum(_n_node, _EPS)
-                _b2 = _p1e * np.maximum(_dlt * _dlt - _den, 0.0)
-                # ⚠⚠ **PARTLY A DEBT — THIS PRICES A BIAS AS A VARIANCE.** On a large share of its firing mass
-                # ``δ`` is systematic (``E[δ]`` ≈ −0.5 to −1.5; bias share 53–77 % on graft × one-component,
-                # 98.9–99.2 % at intergenic destinations), and a variance cannot move a mode toward truth. It is
-                # landed because it is the only change measured to improve ACCURACY and honest PRECISION together,
-                # not because the bias half is derived. It was hoped those strata were inert (intergenic is
-                # ``solvable=False``) — **measured and REFUTED: 90–100 % of the damping mass lands on solvable
-                # destinations.** The magnitude is also not what works: a flat pooled constant beats the derived
-                # ``b̂²`` on 3 of 4 conditions and ``b̂² := δ²`` is identical, while permuting ``b̂²`` FAILS — so
-                # ``δ`` selects WHICH message to distrust and the calibration adds nothing (ω_graft's shape again).
-                # **When the bias strata are diagnosed, this term must SHRINK.** See `variance_ledger.md` §6.
+            # ── P1e: the conservation SURPRISE as a DerSimonian–Laird damping term ────────────────────
+            # The claim asserts S = Σ_c ρ_c·E_c fragments; the node observed M. That is an IDENTITY, and
+            # `_pin_v` restores it by fiat and DISCARDS the residual. Price the residual instead:
+            #     δ = log(M/S),  Σ = σ_cm²·11ᵀ + diag(w),  αᵀΣα = Σ_c α_c s_c   (M12's own error model)
+            #     b̂²_cons = max(0, δ² − αᵀΣα − 1/n_dst)                          (the DL between-study form)
+            # and attribute it by the conditional mean of the error given the observed violation,
+            # E[ε | αᵀε = −δ] = −δ·s/(αᵀΣα), i.e. the rank-1 inflation Σ += b̂²·s sᵀ/(αᵀΣα)², whose
+            # diagonal is Δv_c = b̂²·(s_c/αᵀΣα)². The scale multiplies b̂² (1.0 = the derived term).
+            _p3 = np.stack([tpg, tpp, tpn], axis=-1)
+            _sup = _p3 > 0.0
+            _mc = np.where(_sup, np.stack([tg, tp, tn], axis=-1), np.stack([og, op, on], axis=-1))
+            _mc = _mc * np.stack([E_g, E_r, E_r], axis=-1)
+            _S = _mc.sum(axis=-1)
+            _okc = valid & (_S > _EPS) & (M > _EPS)
+            _al = _mc / np.maximum(_S, _EPS)[..., None]
+            _vc = np.where(_sup, 1.0 / np.maximum(_p3, _EPS), 0.0)
+            _s2c = (np.where(np.isfinite(s2t), s2t, 0.0) + 1.0 / np.maximum(_n_node[src], _EPS))[
+                ..., None
+            ]
+            _sv = np.where(_sup, _s2c + _al * np.maximum(_vc - _s2c, 0.0), 0.0)
+            _aSa = np.sum(_al * _sv, axis=-1)
+            _dlt = np.where(_okc, np.log(np.maximum(M, _EPS) / np.maximum(_S, _EPS)), 0.0)
+            _den = _aSa + 1.0 / np.maximum(_n_node, _EPS)
+            _b2 = np.maximum(_dlt * _dlt - _den, 0.0)
+            # ⚠⚠ **PARTLY A DEBT — THIS PRICES A BIAS AS A VARIANCE.** On a large share of its firing mass
+            # ``δ`` is systematic (``E[δ]`` ≈ −0.5 to −1.5; bias share 53–77 % on graft × one-component,
+            # 98.9–99.2 % at intergenic destinations), and a variance cannot move a mode toward truth. It is
+            # landed because it is the only change measured to improve ACCURACY and honest PRECISION together,
+            # not because the bias half is derived. It was hoped those strata were inert (intergenic is
+            # ``solvable=False``) — **measured and REFUTED: 90–100 % of the damping mass lands on solvable
+            # destinations.** The magnitude is also not what works: a flat pooled constant beats the derived
+            # ``b̂²`` on 3 of 4 conditions and ``b̂² := δ²`` is identical, while permuting ``b̂²`` FAILS — so
+            # ``δ`` selects WHICH message to distrust and the calibration adds nothing (ω_graft's shape again).
+            # **When the bias strata are diagnosed, this term must SHRINK.** See `variance_ledger.md` §6.
 
-                # ── ⭐ THE SCOPE: only the OVER-claim direction is evidence against the MESSAGE ─────────────
-                # `S` is a COMPLETE budget: `_pin_v`'s partial-claim semantics fill every component the
-                # message does not supply from the node's OWN density. So a shortfall (δ > 0, "your
-                # components account for fewer fragments than you observed") can be the node's own density
-                # being too low just as easily as the message being wrong — it does not attribute. The
-                # OVER-claim direction does: every density is non-negative, so nothing the unsupplied
-                # components could be would rescue a budget that already exceeds `M`. Charging only that
-                # half is the licensed statement, and it is where the term is a contradiction of a hard
-                # observable rather than a disagreement with a guess.
-                # `RIGEL_P1E_SCOPE`: `neg` (default) = δ < 0 · `sup` = the strictly harder test, the
-                # SUPPLIED components alone over-claim · `all` = unscoped (both directions).
-                _scope = os.environ.get("RIGEL_P1E_SCOPE", "neg")
-                if _scope == "neg":
-                    _b2 = np.where(_dlt < 0.0, _b2, 0.0)
-                elif _scope == "sup":
-                    _b2 = np.where(np.sum(np.where(_sup, _mc, 0.0), axis=-1) > M, _b2, 0.0)
-                elif _scope != "all":
-                    raise ValueError(f"RIGEL_P1E_SCOPE must be neg|sup|all; got {_scope!r}")
-                # ⭐ THE COMMON DIRECTION (the derived law). Because ``αᵀ1 ≡ 1`` — α is a share vector over the
-                # same budget S — adding the SCALAR b̂² to every supplied component's log-variance satisfies
-                # the constraint ``αᵀΣ'α = αᵀΣα + b̂²`` exactly, and it leaves ``Var(λ)`` **identically
-                # unchanged**: a common shift of both arms cannot move the split. That is the whole reason to
-                # prefer it. The rank-1 form borrows the CONDITIONAL MEAN's direction and applies it as a
-                # variance inflation, which MC shows over-damps λ 5× when the true error is a pure scale
-                # error (λ z² 1.00 → 0.21) while still leaving the RNA arm over-confident (z² 2.88).
-                # A scalar cannot identify a direction: one observation, one parameter. The rank-1 variant was
-                # implemented, MC-refuted and DELETED — see `variance_ledger.md` §6; do not rebuild it.
-                _dg = _dp = _dn = np.where(_sup.any(axis=-1), _b2, 0.0)
-                tpg, tmg = tpg / (1.0 + tpg * _dg), tmg / (1.0 + tmg * _dg)
-                tpp, tmp = tpp / (1.0 + tpp * _dp), tmp / (1.0 + tmp * _dp)
-                tpn, tmn = tpn / (1.0 + tpn * _dn), tmn / (1.0 + tmn * _dn)
-            tg, tp, tn = _pin_v(  # the message is a claim about THIS node's mass
-                tg, tp, tn, tpg, tpp, tpn,
-                np.where(np.isfinite(s2t), s2t, 0.0) + 1.0 / np.maximum(_n_node[src], _EPS),
-            )
+            # ── ⭐ THE SCOPE: only the OVER-claim direction is evidence against the MESSAGE ─────────────
+            # `S` is a COMPLETE budget: `_pin_v`'s partial-claim semantics fill every component the
+            # message does not supply from the node's OWN density. So a shortfall (δ > 0, "your
+            # components account for fewer fragments than you observed") can be the node's own density
+            # being too low just as easily as the message being wrong — it does not attribute. The
+            # OVER-claim direction does: every density is non-negative, so nothing the unsupplied
+            # components could be would rescue a budget that already exceeds `M`. Charging only that
+            # half is the licensed statement, and it is where the term is a contradiction of a hard
+            # observable rather than a disagreement with a guess.
+            # `RIGEL_P1E_SCOPE`: `neg` (default) = δ < 0 · `sup` = the strictly harder test, the
+            # SUPPLIED components alone over-claim · `all` = unscoped (both directions).
+            _b2 = np.where(_dlt < 0.0, _b2, 0.0)
+            # ⭐ THE COMMON DIRECTION (the derived law). Because ``αᵀ1 ≡ 1`` — α is a share vector over the
+            # same budget S — adding the SCALAR b̂² to every supplied component's log-variance satisfies
+            # the constraint ``αᵀΣ'α = αᵀΣα + b̂²`` exactly, and it leaves ``Var(λ)`` **identically
+            # unchanged**: a common shift of both arms cannot move the split. That is the whole reason to
+            # prefer it. The rank-1 form borrows the CONDITIONAL MEAN's direction and applies it as a
+            # variance inflation, which MC shows over-damps λ 5× when the true error is a pure scale
+            # error (λ z² 1.00 → 0.21) while still leaving the RNA arm over-confident (z² 2.88).
+            # A scalar cannot identify a direction: one observation, one parameter. The rank-1 variant was
+            # implemented, MC-refuted and DELETED — see `variance_ledger.md` §6; do not rebuild it.
+            _dg = _dp = _dn = np.where(_sup.any(axis=-1), _b2, 0.0)
+            tpg, tmg = tpg / (1.0 + tpg * _dg), tmg / (1.0 + tmg * _dg)
+            tpp, tmp = tpp / (1.0 + tpp * _dp), tmp / (1.0 + tmp * _dp)
+            tpn, tmn = tpn / (1.0 + tpn * _dn), tmn / (1.0 + tmn * _dn)
+            tg, tp, tn = _pin_v(tg, tp, tn, tpg, tpp, tpn)  # a claim about THIS node's mass
             # ── the COMPOSITION half of the cliff cost: the DL mismatch deflation, on the PINNED densities.
             # Pinning first is what makes the gap a pure COMPOSITION statement: `_pin_v` has already rescaled the
             # message to this node's own mass, so the common scale (the reframe residual) is gone from G and only
@@ -1059,37 +1032,37 @@ def node_sweep(
             # Testing the density conflates the two and silences λ wherever a legitimate zero is emitted.
             ttau = np.where((tpg > 0.0) & ((tpp + tpn) > 0.0), ttau, 0.0)
 # (intron λ gate removed — see if EXP-E alone suffices)
-            if not _s2t_off:
-                g_g, c_g = mismatch_gap(tg, og)
-                g_p, c_p = mismatch_gap(tp, op)
-                g_n, c_n = mismatch_gap(tn, on)
-                tpg = mismatch_deflate(tpg, g_g, c_g, v_own_g)
-                tpp = mismatch_deflate(tpp, g_p, c_p, v_own_r)
-                tpn = mismatch_deflate(tpn, g_n, c_n, v_own_r)
-                tmg = mismatch_deflate(tmg, g_g, c_g, v_own_g)
-                tmp = mismatch_deflate(tmp, g_p, c_p, v_own_r)
-                tmn = mismatch_deflate(tmn, g_n, c_n, v_own_r)
-                # the composition stream is ONE DOF (λ), so its gap is measured on the λ axis — the message's
-                # log(f_g/f_R) minus the own belief's, built from the SAME quantities the combine builds
-                # ``lam_msg = mo_g − mo_R`` from, so the gap is exactly the error of the claim ψ receives. A
-                # contradiction on EITHER arm contradicts the λ claim (a message with no RNA at all is asserting
-                # λ = +∞, i.e. "this node is pure gDNA").
-                g_R, c_R = mismatch_gap(tp + tn, op + on)
-                _tau_pre = ttau
-                ttau = mismatch_deflate(ttau, g_g - g_R, c_g | c_R, v_own_lam)
-                if _capture is not None:  # inert: the per-message gaps + the τ-stream kill, for the dissect loop
-                    _capture.setdefault("_dl", []).append(
-                        {
-                            "df": df,
-                            "G_g": g_g.copy(),
-                            "G_p": g_p.copy(),
-                            "G_n": g_n.copy(),
-                            "G_lam": (g_g - g_R),
-                            "contra": (c_g | c_R).copy(),
-                            "tau_pre": _tau_pre.copy(),
-                            "tau_post": ttau.copy(),
-                        }
-                    )
+            g_g, c_g = mismatch_gap(tg, og)
+            g_p, c_p = mismatch_gap(tp, op)
+            g_n, c_n = mismatch_gap(tn, on)
+            tpg = mismatch_deflate(tpg, g_g, c_g, v_own_g)
+            tpp = mismatch_deflate(tpp, g_p, c_p, v_own_r)
+            tpn = mismatch_deflate(tpn, g_n, c_n, v_own_r)
+            tmg = mismatch_deflate(tmg, g_g, c_g, v_own_g)
+            tmp = mismatch_deflate(tmp, g_p, c_p, v_own_r)
+            tmn = mismatch_deflate(tmn, g_n, c_n, v_own_r)
+            # the composition stream is ONE DOF (λ), so its gap is measured on the λ axis — the message's
+            # log(f_g/f_R) minus the own belief's, built from the SAME quantities the combine builds
+            # ``lam_msg = mo_g − mo_R`` from, so the gap is exactly the error of the claim ψ receives. A
+            # contradiction on EITHER arm contradicts the λ claim (a message with no RNA at all is asserting
+            # λ = +∞, i.e. "this node is pure gDNA").
+            g_R, c_R = mismatch_gap(tp + tn, op + on)
+            _tau_pre = ttau
+            ttau = mismatch_deflate(ttau, g_g - g_R, c_g | c_R, v_own_lam)
+            if _capture is not None:  # inert: the per-message gaps + the τ-stream kill, for the dissect loop
+                _capture.setdefault("_dl", []).append(
+                    {
+                        "df": df,
+                        "G_g": g_g.copy(),
+                        "G_p": g_p.copy(),
+                        "G_n": g_n.copy(),
+                        "G_lam": (g_g - g_R),
+                        "contra": (c_g | c_R).copy(),
+                        "tau_pre": _tau_pre.copy(),
+                        "tau_post": ttau.copy(),
+                    }
+                )
+
             # ── THE MESSAGE PACKET: a LEVEL claim per component, and SEPARATE SPLIT + TILT claims ────────
             # A message must let the destination do three independent things: set each component's LEVEL
             # (``mo_g`` with ``cm_g``, ``mo_p``/``mo_n`` with ``cm_p``/``cm_n``), set the SPLIT (``λ``, with
@@ -1145,7 +1118,7 @@ def node_sweep(
         #     delivered the split at a confidence it was never weighted by — a message with almost no
         #     composition evidence but a large, well-counted density could set it, and one with real
         #     composition evidence but little mass could not. Measured: 0.0889 → 0.0862, 13 better / 3
-        #     worse, and it makes the `conservation_rescale` that preceded it completely INERT (0/0/32) —
+        #     worse, and it makes the M12 conservation rescale that preceded it completely INERT (0/0/32) —
         #     that operator had been correcting this same mismatch by a longer route.
         cR = cp + cn
         lam_msg = np.where(c_tau > _EPS, (atau * alam + btau * blam) / np.maximum(c_tau, _EPS), 0.0)
@@ -1169,8 +1142,6 @@ def node_sweep(
         # unstranded × capture-OFF exons — and ablating it is NOT the fix: 0.0895 → 0.1033, 4 better / 17
         # worse, because it is also the only thing that lets a zero-gDNA library say "my mass is all RNA"
         # (`gdna_none` 0.1063 → 0.1438). Kept for developing the real fix.
-        if os.environ.get("RIGEL_RNAMEAS_OFF"):
-            cm_p, cm_n = np.zeros_like(cm_p), np.zeros_like(cm_n)
         dc_fin = _local_solve(
             global_lp, mo_g, cm_g, (mo_p, mo_n), (cm_p, cm_n),
             lam_imp=(lam_msg, c_tau), theta_imp=(th_msg, th_prec),

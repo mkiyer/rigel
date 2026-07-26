@@ -137,13 +137,11 @@ Unchanged from `SESSION_2026_07_26_HANDOFF_13.md` §6, plus one flag. Gates:
 `pytest tests/ -q` = 1248+7 pass / 2 xfail / 2 xpass · `ruff check src/ tests/ scripts/` ·
 `python scripts/debug/message_variance_mc.py` = 0 failures.
 
-| flag | what it ablates |
-|---|---|
-| **`RIGEL_GLV_OFF=1`** | **P1d** (bit-identical to the pre-P1d path, verified 32/32) |
-| `RIGEL_P1E_OFF=1` | **P1e** (the conservation surprise) |
-| `RIGEL_S2T_OFF=1` | both cliff terms (M5 + M8) |
-| `RIGEL_RNAMEAS_OFF=1` | the RNA measurement ψ factor |
-| `RIGEL_M12_MSG=1` | the per-message pin → the weighted rescale |
+**⛔ There are no A/B / ablation flags left.** All six (`RIGEL_S2T_OFF`, `RIGEL_GLV_OFF`, `RIGEL_P1E*`,
+`RIGEL_M12_MSG`, `RIGEL_RNAMEAS_OFF`, `RIGEL_XVAR`) were removed in the 2026-07-26 cleanup — the A/Bs are
+done and the production path has converged. Their results are recorded in `variance_ledger.md`,
+`PASS0_FINISH_PLAN.md` and this file's do-not-re-run table. To re-run an ablation, reintroduce the branch
+locally; do not re-add a flag.
 
 New in `scratchpad/`: `x2_poisson.py` (the five-count Poisson decomposition), `x3_share.py` (the structural
 partition + the regressions), `x4_estimator.py` (the estimator audit + the four claim forms),
