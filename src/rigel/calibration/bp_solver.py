@@ -999,26 +999,45 @@ def node_sweep(
                 _dlt = np.where(_okc, np.log(np.maximum(M, _EPS) / np.maximum(_S, _EPS)), 0.0)
                 _den = _aSa + 1.0 / np.maximum(_n_node, _EPS)
                 _b2 = _p1e * np.maximum(_dlt * _dlt - _den, 0.0)
-                _dvc = np.where(
-                    (_aSa > _EPS)[..., None],
-                    _b2[..., None] * (_sv / np.maximum(_aSa, _EPS)[..., None]) ** 2,
-                    0.0,
-                )
-                _dg, _dp, _dn = _dvc[..., 0], _dvc[..., 1], _dvc[..., 2]
+                # ⭐ THE COMMON DIRECTION (the derived law; `RIGEL_P1E_RANK1=1` restores the superseded
+                # rank-1-along-Σα form for comparison). Because ``αᵀ1 ≡ 1`` — α is a share vector over the
+                # same budget S — adding the SCALAR b̂² to every supplied component's log-variance satisfies
+                # the constraint ``αᵀΣ'α = αᵀΣα + b̂²`` exactly, and it leaves ``Var(λ)`` **identically
+                # unchanged**: a common shift of both arms cannot move the split. That is the whole reason to
+                # prefer it. The rank-1 form borrows the CONDITIONAL MEAN's direction and applies it as a
+                # variance inflation, which MC shows over-damps λ 5× when the true error is a pure scale
+                # error (λ z² 1.00 → 0.21) while still leaving the RNA arm over-confident (z² 2.88).
+                # A scalar cannot identify a direction: one observation, one parameter.
+                if os.environ.get("RIGEL_P1E_RANK1"):
+                    _dvc = np.where(
+                        (_aSa > _EPS)[..., None],
+                        _b2[..., None] * (_sv / np.maximum(_aSa, _EPS)[..., None]) ** 2,
+                        0.0,
+                    )
+                    _dg, _dp, _dn = _dvc[..., 0], _dvc[..., 1], _dvc[..., 2]
+                    _tRs = tp + tn
+                    _bp = np.where(_tRs > _EPS, tp / np.maximum(_tRs, _EPS), 0.0)
+                    _sR = _bp * _sv[..., 1] + (1.0 - _bp) * _sv[..., 2]
+                    ttau = ttau / (
+                        1.0
+                        + ttau
+                        * np.where(
+                            _aSa > _EPS,
+                            _b2 * ((_sv[..., 0] - _sR) / np.maximum(_aSa, _EPS)) ** 2,
+                            0.0,
+                        )
+                    )
+                else:
+                    _dg = _dp = _dn = np.where(_sup.any(axis=-1), _b2, 0.0)
                 tpg, tmg = tpg / (1.0 + tpg * _dg), tmg / (1.0 + tmg * _dg)
                 tpp, tmp = tpp / (1.0 + tpp * _dp), tmp / (1.0 + tmp * _dp)
                 tpn, tmn = tpn / (1.0 + tpn * _dn), tmn / (1.0 + tmn * _dn)
-                # the λ axis is the SAME rank-1 inflation projected on ∂λ = (+1, −β_p, −β_n): a common shift
-                # of both arms cannot move the split, so only the DIFFERENCE of the s's charges λ.
-                _tRs = tp + tn
-                _bp = np.where(_tRs > _EPS, tp / np.maximum(_tRs, _EPS), 0.0)
-                _sR = _bp * _sv[..., 1] + (1.0 - _bp) * _sv[..., 2]
-                _dlam = np.where(
-                    _aSa > _EPS,
-                    _b2 * ((_sv[..., 0] - _sR) / np.maximum(_aSa, _EPS)) ** 2,
-                    0.0,
-                )
-                ttau = ttau / (1.0 + ttau * _dlam)
+                if _capture is not None:  # inert: the surprise's provenance, for the P1e decision
+                    _capture.setdefault("_p1e", []).append(
+                        {"b2": _b2.copy(), "delta": _dlt.copy(), "aSa": _aSa.copy(),
+                         "ok": np.asarray(_okc).copy(), "graft": np.asarray(graft).copy(),
+                         "nsup": _sup.sum(axis=-1).copy(), "mass": np.asarray(M).copy()}
+                    )
             tg, tp, tn = _pin_v(  # the message is a claim about THIS node's mass
                 tg, tp, tn, tpg, tpp, tpn,
                 np.where(np.isfinite(s2t), s2t, 0.0) + 1.0 / np.maximum(_n_node[src], _EPS),
