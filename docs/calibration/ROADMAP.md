@@ -99,7 +99,17 @@ The only other docs that are live (everything else is in `archive/`, kept for hi
   total (52–71 % of nodes; p99 31–288×). Holds the measured evidence, the derivation brief, the two adjacent
   modelling gaps (§4: **no TSS/TES in the region/boundary map**; **the boundary is a slope, not a cliff — three
   enrichment ratios, not one**), and the record of what was tried and rejected.
-* **`SESSION_2026_07_26_HANDOFF_12.md` — ⭐ THE LIVE HANDOFF. START HERE for the next session.** The
+* **`PASS0_FINISH_PLAN.md` — ⭐ THE PRIORITIZED WORK LIST for finishing pass-0.** Owner-agreed; read its §0b
+  first (the state of play, and the `z2` measurement that says pass-0 is NOT finished even though the error
+  mass is near its ceiling). Holds P0–P6 with status, what was refuted, and why the list is ordered by
+  confidently-wrong mass rather than error mass.
+* **`variance_ledger.md` — ⭐ THE STANDING AUDIT of every variance term** in a message's precision: what each
+  one prices, why none of them overlap (including the proof that M7's DerSimonian–Laird cannot double-count
+  with anything), and the one measured gap that is still unbuilt. **Update it whenever a variance term is
+  added, removed or re-scoped.**
+* `weighted_rescale_design.md` — the conservation rescale (M12) and, in §9, the MESSAGE PACKET that subsumed
+  it: λ and θ carried explicitly and fused by their own precisions.
+* **`SESSION_2026_07_26_HANDOFF_12.md` — the boundary/composition-peel handoff.** The
   composition peel LANDED: the three questions of HANDOFF_11 answered, M11 derived + MC-validated +
   unit-tested, the level as a three-way FUSE, the `mrna_active` gate removed, the full per-condition A/B and
   the trust view, the do-not-re-run list, and the remaining deficit localized to one regime with its

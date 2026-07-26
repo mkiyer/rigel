@@ -14,7 +14,8 @@ do not start a competing list.
 | **P1c** | the WEIGHTED RESCALE | ⤳ **SUPERSEDED** by P1f, which makes it inert (0/0/32); law kept, path removed |
 | **P1f** | **the MESSAGE PACKET** — λ and θ carried explicitly, fused by their OWN precisions | ✅ **LANDED** — `weighted_rescale_design.md` §9 |
 | **P1e** | the composition **SURPRISE** `z² = δ²/(αᵀΣα)` as a damping term — never inert | ▶ **NEXT** (owner-directed) |
-| P1d | the EXTRAPOLATION variance (a 100 bp junction speaking for a 2,100 bp exon) | queued, next after P1c |
+| — | **`variance_ledger.md`** — every variance term, what it prices, and the no-overlap proof | ✅ **the standing audit; update it whenever a term changes** |
+| **P1d** | the graft's **EXTRAPOLATION** variance | 📐 **DERIVED + SIZED** — prize measured, ESTIMATOR open, `variance_ledger.md` §3–5 |
 | **P3** | AMBIG exon over-confidence — **z2\|Q1 = 183**, the worst defect in the solver | ▶ **PROMOTED** above P4/P5 |
 | P4 | FAR → a proper opposite-direction message; M11's pre-DL precision | queued |
 | P5 | re-test `r` from the gDNA channel (the "moot" verdict is stale) | queued |
@@ -22,6 +23,26 @@ do not start a competing list.
 | — | **THEN** the gDNA hyperprior refit + the re-solve | blocked on the above |
 
 ---
+
+## 0b. ⭐ STATE OF PLAY (2026-07-26, end of session)
+
+Suite **0.0855 (refit=0) / 0.0671 (refit=1)** against the session's starting HEAD of 0.0885 / 0.0678 —
+**20 better / 5 worse / 7 flat** and **17 / 7 / 8**. And on the axis that decides whether pass-0 is finished:
+
+| | session start | now |
+|---|---|---|
+| suite error | 12,344,845 | **11,928,101** |
+| **confidently-wrong** | 1,777,658 (14.4 %) | **1,186,552 (9.9 %)** |
+| exon AMBIG confidently-wrong | 693,557 (20.1 %) | **378,285 (11.8 %)** |
+
+**But the mass is not the whole story, and this is the number that says pass-0 is NOT finished:** `z2` inside
+the confident quartile — *is the confidence earned?* — is still **8.4 on single-strand exons, 92.1 on AMBIG
+exons, 15.5 overall.** Introns (1.5) are the only honest class. A node at `z2 = 9` will be weighted nine times
+too heavily by a hyperprior fit that trusts declared precision, which is precisely the poison mechanism.
+
+**So: the error MASS is close to its prior-free ceiling; the CALIBRATION of that error is not.** Everything
+still on the list below is chosen for its effect on `z2`, not on mwae. P1d alone is measured at
+**exon-single `z2` 8.4 → 1.2** (`variance_ledger.md` §4).
 
 ## 0. Why the list is ordered this way — the goal is a SUBSTRATE, not a score
 

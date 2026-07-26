@@ -793,6 +793,11 @@ def node_sweep(
             _s2t_spl = _s2t_spl + (
                 np.zeros_like(r) if _s2t_off else np.where(graft, graft_frame_logvar(r), 0.0)
             )
+            # PROBE ONLY (P1d): a flat extrapolation variance on the grafted spliced measurement, to SIZE the
+            # prize before investing in a prior-free estimator for it. Not a candidate for landing.
+            _x = os.environ.get("RIGEL_XVAR")
+            if _x:
+                _s2t_spl = _s2t_spl + np.where(graft, float(_x), 0.0)
             _spc = np.where(_sp > _EPS, _sp / (1.0 + _sp * _s2t_spl), 0.0)
             _snc = np.where(_sn > _EPS, _sn / (1.0 + _sn * _s2t_spl), 0.0)
             tpp, tpn = tpp + _spc, tpn + _snc  # into the mode-fusion precision …
