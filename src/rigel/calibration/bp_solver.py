@@ -442,9 +442,9 @@ def node_sweep(
         # P1d is ON by default; `RIGEL_GLV_OFF=1` ablates it (bit-identical to the pre-P1d path).
         _glv = not os.environ.get("RIGEL_GLV_OFF")
         _glv_shrink = bool(os.environ.get("RIGEL_GLV_SHRINK"))  # partial pooling, see the law
-        # PROBE ONLY, DEFAULT OFF (P1e): the conservation SURPRISE as a damping term. `RIGEL_P1E=<scale>`;
+        # ⭐ P1e — the conservation SURPRISE, ON by default. `RIGEL_P1E_OFF=1` ablates it;
         # unset ⇒ the whole block is skipped and the path is bit-identical.
-        _p1e = float(os.environ.get("RIGEL_P1E") or 0.0)
+        _p1e = 0.0 if os.environ.get("RIGEL_P1E_OFF") else float(os.environ.get("RIGEL_P1E") or 1.0)
         vgp_prem = vgn_prem = None  # per-ρ-iteration, in the destination's frame; set before each transport
 
         # own per-component densities + precisions — the message-free SELF-SOLVE (`node_init.build_node_init`,
@@ -975,7 +975,7 @@ def node_sweep(
                     }
                 )
             if _p1e:
-                # ── PROBE ONLY (P1e): the conservation SURPRISE as a DerSimonian–Laird damping term ───────
+                # ── P1e: the conservation SURPRISE as a DerSimonian–Laird damping term ────────────────────
                 # The claim asserts S = Σ_c ρ_c·E_c fragments; the node observed M. That is an IDENTITY, and
                 # `_pin_v` restores it by fiat and DISCARDS the residual. Price the residual instead:
                 #     δ = log(M/S),  Σ = σ_cm²·11ᵀ + diag(w),  αᵀΣα = Σ_c α_c s_c   (M12's own error model)
@@ -999,6 +999,35 @@ def node_sweep(
                 _dlt = np.where(_okc, np.log(np.maximum(M, _EPS) / np.maximum(_S, _EPS)), 0.0)
                 _den = _aSa + 1.0 / np.maximum(_n_node, _EPS)
                 _b2 = _p1e * np.maximum(_dlt * _dlt - _den, 0.0)
+                # ⚠⚠ **PARTLY A DEBT — THIS PRICES A BIAS AS A VARIANCE.** On a large share of its firing mass
+                # ``δ`` is systematic (``E[δ]`` ≈ −0.5 to −1.5; bias share 53–77 % on graft × one-component,
+                # 98.9–99.2 % at intergenic destinations), and a variance cannot move a mode toward truth. It is
+                # landed because it is the only change measured to improve ACCURACY and honest PRECISION together,
+                # not because the bias half is derived. It was hoped those strata were inert (intergenic is
+                # ``solvable=False``) — **measured and REFUTED: 90–100 % of the damping mass lands on solvable
+                # destinations.** The magnitude is also not what works: a flat pooled constant beats the derived
+                # ``b̂²`` on 3 of 4 conditions and ``b̂² := δ²`` is identical, while permuting ``b̂²`` FAILS — so
+                # ``δ`` selects WHICH message to distrust and the calibration adds nothing (ω_graft's shape again).
+                # **When the bias strata are diagnosed, this term must SHRINK.** See `variance_ledger.md` §6.
+
+                # ── ⭐ THE SCOPE: only the OVER-claim direction is evidence against the MESSAGE ─────────────
+                # `S` is a COMPLETE budget: `_pin_v`'s partial-claim semantics fill every component the
+                # message does not supply from the node's OWN density. So a shortfall (δ > 0, "your
+                # components account for fewer fragments than you observed") can be the node's own density
+                # being too low just as easily as the message being wrong — it does not attribute. The
+                # OVER-claim direction does: every density is non-negative, so nothing the unsupplied
+                # components could be would rescue a budget that already exceeds `M`. Charging only that
+                # half is the licensed statement, and it is where the term is a contradiction of a hard
+                # observable rather than a disagreement with a guess.
+                # `RIGEL_P1E_SCOPE`: `neg` (default) = δ < 0 · `sup` = the strictly harder test, the
+                # SUPPLIED components alone over-claim · `all` = unscoped (both directions).
+                _scope = os.environ.get("RIGEL_P1E_SCOPE", "neg")
+                if _scope == "neg":
+                    _b2 = np.where(_dlt < 0.0, _b2, 0.0)
+                elif _scope == "sup":
+                    _b2 = np.where(np.sum(np.where(_sup, _mc, 0.0), axis=-1) > M, _b2, 0.0)
+                elif _scope != "all":
+                    raise ValueError(f"RIGEL_P1E_SCOPE must be neg|sup|all; got {_scope!r}")
                 # ⭐ THE COMMON DIRECTION (the derived law; `RIGEL_P1E_RANK1=1` restores the superseded
                 # rank-1-along-Σα form for comparison). Because ``αᵀ1 ≡ 1`` — α is a share vector over the
                 # same budget S — adding the SCALAR b̂² to every supplied component's log-variance satisfies

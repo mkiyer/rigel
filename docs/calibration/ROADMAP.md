@@ -73,6 +73,34 @@
 > **That un-defers §6 below.** The missing TSS/TES in the region/boundary map was deferred as "expected to be
 > low-impact on real data"; it is measured at **62–72 % of the graft's premise error**. → **P1g.**
 >
+> ### ⚠⚠ P1e IS PARTLY A DEBT — IT PRICES A BIAS AS A VARIANCE. DO NOT LET THIS BE FORGOTTEN
+>
+> P1e damps a message by the unexplained part of its conservation violation `δ = log(M/S)`. **On a large
+> share of its firing mass `δ` is a systematic BIAS, not scatter** — measured `E[δ]` ≈ −0.5 to −1.5, with a
+> bias share of **53–77 %** on graft × one-component messages and **98.9–99.2 %** at intergenic
+> destinations. A variance prices random scatter; pricing a bias as a variance does not move the mode toward
+> truth, it only weakens the message — **and it never shrinks**, which breaks the ledger §2.2 guarantee that
+> a DerSimonian–Laird residual vanishes as the model improves.
+>
+> **It is landed anyway** because it is the only change measured to improve ACCURACY and honest PRECISION at
+> the same time (suite 0.0870 → 0.0841, fit-substrate 0.0883 → **0.0845**, held-fixed `z2` ALL 8.53 → **1.74**,
+> exon-single 3.57 → **0.88**), and because pass-0 is explicitly allowed to be weak-and-correctable. That is
+> a pragmatic trade, not a derivation.
+>
+> **Four things that must not be overlooked:**
+> 1. ⛔ **It was hoped the bias-dominated strata were inert** (intergenic nodes are `solvable = False`).
+>    **Measured and REFUTED: 90–100 % of the damping mass lands on solvable destinations.** The bias is live.
+> 2. **The magnitude is not what works.** Control arms: a flat pooled constant on the same firing set beats
+>    the derived `b̂²` on 3 of 4 conditions, and `b̂² := δ²` with no null subtraction is identical. Permuting
+>    `b̂²` within edge class FAILS and damping all grafts uniformly FAILS — so **`δ` identifies WHICH message
+>    to distrust, and the calibrated magnitude adds nothing.** Exactly ω_graft's shape.
+> 3. **`δ` is not the hard observable it was scoped as.** It is **M-free at every region node** (verified to
+>    1.9e-16 — the message is built ∝ `M`, so `M` cancels). On a plain edge it is a composition disagreement
+>    with the destination's own belief. The genuine content is in the ROUTING: **84.2 % of Σδ² is on peel and
+>    graft edges.**
+> 4. **The right fix for the bias half is a MODE fix, not a variance.** When the bias strata are diagnosed,
+>    P1e must SHRINK — if it does not, the model has not improved.
+>
 > ### ⚠⚠ `ω_graft` IS A DEBT, NOT A MODEL — DO NOT LET THIS BE FORGOTTEN
 >
 > P1d's fitted `ω_graft` **partially compensates for a FAILURE IN OUR STRUCTURAL REPRESENTATION.** The
@@ -372,7 +400,13 @@ premises above have changed, **that measurement is the single highest-value next
    stated goal. Cheapest high-value experiment on the list by a wide margin. Gate it on the trust view, not
    on mwae.
 
-6. **P1e — the conservation SURPRISE `z² = δ²/(αᵀΣα)`.** The only damping term that is **never inert** (M7's
+6. ✅ **DONE — P1e, the conservation SURPRISE.** The only damping term that is never inert, and the only
+   change measured to improve **accuracy and honest precision together**: suite 0.0870 → **0.0841**,
+   fit-substrate 0.0883 → **0.0845**, held-fixed `z2` ALL 8.53 → **1.74**, exon-single 3.57 → **0.88**,
+   intron (the measurement class) **untouched** at 1.54. Common-direction (λ and θ provably unmoved), scoped
+   to the licensed `δ < 0`, default ON, `RIGEL_P1E_OFF=1` ablates. Cost: unstranded × capON +0.0085.
+   ⚠ **Partly a DEBT — it prices a bias as a variance**; see the banner at the top of this file and
+   `variance_ledger.md` §6. **(historical)** M7's
    DL needs `τ_own > 0` and so switches off on all unstranded data; a node's own mass is always known). It is
    also the fix for **P1d's own residual regression**: that regression is localized to unstranded × gDNA-rich
    × capture-OFF, which is P1b's population, where the RNA claim is a near-exact measurement and the **gDNA**

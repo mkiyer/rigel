@@ -22,6 +22,15 @@ Rigel is a Bayesian RNA-seq transcript quantification tool that jointly models m
 > (Beta-Binomial tilt; constrains only the tilt, so AMBIG nodes get NO f_g from it), **cross-node imputation**
 > (neighbour messages), and the **population gDNA prior** (the hyperprior, WIP).
 >
+> **⚠⚠ STANDING DEBT — P1e (`conservation surprise`) PRICES A BIAS AS A VARIANCE.** It damps a message by
+> the unexplained part of `δ = log(M/S)`, but on a large share of its firing mass `δ` is systematic, not
+> scatter (bias share 53–77 % on graft × one-component, 98.9–99.2 % at intergenic destinations), and
+> **90–100 % of that damping lands on solvable nodes** — it is not inert. A variance cannot move a mode
+> toward truth and it never shrinks. Landed anyway (the only change to improve accuracy AND honest precision
+> together) and **scoped to the licensed direction `δ < 0`**; `RIGEL_P1E_OFF=1` ablates. The magnitude is
+> also not what works — `δ` selects WHICH message to distrust and the calibration adds nothing.
+> **When the bias strata are diagnosed, this term must SHRINK.** `variance_ledger.md` §6.
+>
 > **⚠⚠ STANDING DEBT — `ω_graft` (P1d) COMPENSATES FOR A STRUCTURAL FAILURE, AND MUST BE RE-DERIVED.**
 > The region/boundary map has **no TSS/TES**, so the solver cannot tell a splice junction from a transcript
 > terminus. `calibration/enrichment_frame.graft_premise_logvar` prices the graft's premise error with **one

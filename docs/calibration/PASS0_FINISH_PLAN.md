@@ -15,7 +15,7 @@ do not start a competing list.
 | **P1c** | the WEIGHTED RESCALE | ⤳ **SUPERSEDED** by P1f, which makes it inert (0/0/32); law kept, path removed |
 | **P1f** | **the MESSAGE PACKET** — λ and θ carried explicitly, fused by their OWN precisions | ✅ **LANDED** — `weighted_rescale_design.md` §9 |
 | **P2a** | ⭐ **RE-TEST the Phase-2 λ-curvature step at HEAD** (~6 lines, `HANDOFF_6` §3) | ▶ **THE NEXT ACTION.** Both reasons it was shelved have evaporated: the refit no longer regresses unstranded-capON (0.1523 → **0.1275** at HEAD, 25/7 overall), and the hyperprior's substrate is at `z2` = **2.26**. If it holds, **Phase 2 unblocks** |
-| **P1e** | the composition **SURPRISE** `z² = δ²/(αᵀΣα)` as a damping term — never inert | ▶ next after P2a. P1d's residual regression points straight at it: the premium must go to the arm whose premise FAILED, and `claim/obs` is the observable that says which |
+| **P1e** | the conservation **SURPRISE** — never inert | ✅ **LANDED** 2026-07-26, common-direction, **scoped to `δ < 0`**, default ON (`RIGEL_P1E_OFF=1` ablates). suite 0.0870 → **0.0841**, fit-substrate 0.0883 → **0.0845**, held-fixed z2 ALL 8.53 → **1.74**, exon-single → **0.88**. ⚠ **partly a DEBT — prices a bias as a variance**, `variance_ledger.md` §6. Historical: P1d's residual regression points straight at it: the premium must go to the arm whose premise FAILED, and `claim/obs` is the observable that says which |
 | — | **`variance_ledger.md`** — every variance term, what it prices, and the no-overlap proof | ✅ **the standing audit; update it whenever a term changes** |
 | **P1d** | the graft's **PREMISE** variance (was: "extrapolation" — refuted) | ✅ **LANDED** 2026-07-26, `graft_premise_logvar` — ONE library-level MoM scalar, default ON. Confidently-wrong **−36.6 %**, z2 ALL 15.55 → **8.98**, exon-single 8.60 → **2.46**, for +1.2 % mwae. (A per-edge two-seam variant landed first and was reverted same-day — χ²₁ noise + a BP violation.) The mechanism is **transcript TERMINI**, not extrapolation — `variance_ledger.md` §3.0 |
 | **P3** | AMBIG exon over-confidence — `z2\|Q1` 183 → 92.1 → **64.4** | ⤵ **DEMOTED.** Still the largest single defect (259,493 CWRONG, 34 %) but **excluded from the hyperprior fit by construction**, so it blocks the RE-SOLVE's quality, not Phase 2's start. Largely downstream of the trained prior |
@@ -25,11 +25,39 @@ do not start a competing list.
 | P6 | fragment length as a FOURTH information source — **gated** | scoping only |
 | **P1g** | ⭐ **put TSS/TES in the region/boundary map — THE STRUCTURAL DEBT BEHIND `ω_graft`** (owner: high priority, forthcoming). `ROADMAP.md` §6 deferred it as "expected to be low-impact"; it is measured at **62–72 % of the graft's premise error** and a free annotation bit splits ω̂ **≥30×**. P1d prices it blind through the two-seam gap; naming it directly would price it exactly | ▶ **UN-DEFERRED by measurement** |
 | **P-hold** | hold out / reset the nodes not used to fit the hyperprior | ⛔ **MEASURED UNNECESSARY.** The refit *already resets* (`calibrate.py:420`), and holding the excluded half out moves the fit substrate by **±0.0006** — there is no contamination worth removing. A stronger version of the same idea (skip unidentified nodes, defer to the prior) was already derived, implemented and **empirically refuted** in `solve_gate_design.md`: +0.010 (r0) / +0.025 (r1) |
-| **P-solv** | ⭐ **a clean `solvable` predicate** | ▶ open, and it looks valuable. `τ_own > 0` separates hard: 29.6 % of nodes at mwae **0.0227** (7.7 % of error mass) vs 70.4 % at **0.1143** (92.3 %). A composite prior-free predicate splits 45.6 % @ 0.0147 vs 54.4 % @ 0.1480 — **10.4× on unstranded**. ⚠ The existing `cap["solvable"]` flag agrees with it only **45.7 %** of the time, so it is not that predicate |
+| **P-solv** | ⭐ **a clean `solvable` predicate**, and expose it to the prior fit | ▶ **NEXT.** Owner: *"a solvable flag is helpful for now"* — expose it; the EXCLUSION question (which nodes to drop from the fit) is deliberately deferred, because dropping a node that reports a real enriched mode could hurt badly. Evidence: `τ_own > 0` separates hard: 29.6 % of nodes at mwae **0.0227** (7.7 % of error mass) vs 70.4 % at **0.1143** (92.3 %). A composite prior-free predicate splits 45.6 % @ 0.0147 vs 54.4 % @ 0.1480 — **10.4× on unstranded**. ⚠ The existing `cap["solvable"]` flag agrees with it only **45.7 %** of the time, so it is not that predicate |
 | — | **THEN** the re-solve + a ship candidate | the hyperprior fit itself is no longer blocked — see P2a |
 
 ---
 
+> ### ⚠⚠ P1e IS PARTLY A DEBT — IT PRICES A BIAS AS A VARIANCE. DO NOT LET THIS BE FORGOTTEN
+>
+> P1e damps a message by the unexplained part of its conservation violation `δ = log(M/S)`. **On a large
+> share of its firing mass `δ` is a systematic BIAS, not scatter** — measured `E[δ]` ≈ −0.5 to −1.5, with a
+> bias share of **53–77 %** on graft × one-component messages and **98.9–99.2 %** at intergenic
+> destinations. A variance prices random scatter; pricing a bias as a variance does not move the mode toward
+> truth, it only weakens the message — **and it never shrinks**, which breaks the ledger §2.2 guarantee that
+> a DerSimonian–Laird residual vanishes as the model improves.
+>
+> **It is landed anyway** because it is the only change measured to improve ACCURACY and honest PRECISION at
+> the same time (suite 0.0870 → 0.0841, fit-substrate 0.0883 → **0.0845**, held-fixed `z2` ALL 8.53 → **1.74**,
+> exon-single 3.57 → **0.88**), and because pass-0 is explicitly allowed to be weak-and-correctable. That is
+> a pragmatic trade, not a derivation.
+>
+> **Four things that must not be overlooked:**
+> 1. ⛔ **It was hoped the bias-dominated strata were inert** (intergenic nodes are `solvable = False`).
+>    **Measured and REFUTED: 90–100 % of the damping mass lands on solvable destinations.** The bias is live.
+> 2. **The magnitude is not what works.** Control arms: a flat pooled constant on the same firing set beats
+>    the derived `b̂²` on 3 of 4 conditions, and `b̂² := δ²` with no null subtraction is identical. Permuting
+>    `b̂²` within edge class FAILS and damping all grafts uniformly FAILS — so **`δ` identifies WHICH message
+>    to distrust, and the calibrated magnitude adds nothing.** Exactly ω_graft's shape.
+> 3. **`δ` is not the hard observable it was scoped as.** It is **M-free at every region node** (verified to
+>    1.9e-16 — the message is built ∝ `M`, so `M` cancels). On a plain edge it is a composition disagreement
+>    with the destination's own belief. The genuine content is in the ROUTING: **84.2 % of Σδ² is on peel and
+>    graft edges.**
+> 4. **The right fix for the bias half is a MODE fix, not a variance.** When the bias strata are diagnosed,
+>    P1e must SHRINK — if it does not, the model has not improved.
+>
 > ### ⚠⚠ `ω_graft` IS A DEBT, NOT A MODEL — DO NOT LET THIS BE FORGOTTEN
 >
 > P1d's fitted `ω_graft` **partially compensates for a FAILURE IN OUR STRUCTURAL REPRESENTATION.** The

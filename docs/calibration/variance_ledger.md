@@ -25,7 +25,7 @@ log-variance except where noted.
 | M7 | `b̂²` (`mismatch_deflate`) | the imputation **premise** being false — DerSimonian–Laird against the destination's own self-solve | every stream, **but inert wherever `τ_own = 0`** (all AMBIG, all unstranded ⇒ 84 % of error mass) | live |
 | — | `1/n_spl` | the spliced measurement's own count | the graft | live |
 | **P1d** | `ω_graft` = `max(0, E[d²]−E[noise])/2` (`graft_premise_logvar`) — **ONE library-level scalar**, MoM. ⚠ **A DEBT, not a model — §3.5** | the graft's **premise**: a seam's RNA used as the exon's RNA, when it is only a LOWER BOUND on it | the WHOLE grafted RNA claim, both code paths | **LIVE** (2026-07-26) — §3, and ⚠ **its mechanism is NOT what §3 originally said**, see §3.0 |
-| P1e | the conservation **surprise** `δ²/(αᵀΣα)` | how implausible the claim is against the node's own observed mass | every message | not built |
+| **P1e** | `b̂²_cons = max(0, δ²−αᵀΣα−ν)` on every LEVEL (`conservation surprise`) | the claim asserting more fragments than the node observed | every message, **scoped to `δ < 0`**; λ and θ untouched | **LIVE** (2026-07-26) — ⚠ **partly a DEBT, §6** |
 | — | ~~NPMLE projection `var_proj + (Δμ_proj)²`~~ | a **density** disagreement between two nodes | — | **RETIRED**; `DensityNPMLE.project` is called nowhere. ⚠ `CalibrationConfig`'s docstring still describes it and is stale |
 
 ## 2. ⭐ Why they do not compound — the two rules
@@ -171,6 +171,34 @@ there it is conflated with the frame step M8 already prices — which is exactly
 
 ## 3.5 The fitted scalar `ω_graft` — what it is, and the four questions answered about it
 
+> ### ⚠⚠ P1e IS PARTLY A DEBT — IT PRICES A BIAS AS A VARIANCE. DO NOT LET THIS BE FORGOTTEN
+>
+> P1e damps a message by the unexplained part of its conservation violation `δ = log(M/S)`. **On a large
+> share of its firing mass `δ` is a systematic BIAS, not scatter** — measured `E[δ]` ≈ −0.5 to −1.5, with a
+> bias share of **53–77 %** on graft × one-component messages and **98.9–99.2 %** at intergenic
+> destinations. A variance prices random scatter; pricing a bias as a variance does not move the mode toward
+> truth, it only weakens the message — **and it never shrinks**, which breaks the ledger §2.2 guarantee that
+> a DerSimonian–Laird residual vanishes as the model improves.
+>
+> **It is landed anyway** because it is the only change measured to improve ACCURACY and honest PRECISION at
+> the same time (suite 0.0870 → 0.0841, fit-substrate 0.0883 → **0.0845**, held-fixed `z2` ALL 8.53 → **1.74**,
+> exon-single 3.57 → **0.88**), and because pass-0 is explicitly allowed to be weak-and-correctable. That is
+> a pragmatic trade, not a derivation.
+>
+> **Four things that must not be overlooked:**
+> 1. ⛔ **It was hoped the bias-dominated strata were inert** (intergenic nodes are `solvable = False`).
+>    **Measured and REFUTED: 90–100 % of the damping mass lands on solvable destinations.** The bias is live.
+> 2. **The magnitude is not what works.** Control arms: a flat pooled constant on the same firing set beats
+>    the derived `b̂²` on 3 of 4 conditions, and `b̂² := δ²` with no null subtraction is identical. Permuting
+>    `b̂²` within edge class FAILS and damping all grafts uniformly FAILS — so **`δ` identifies WHICH message
+>    to distrust, and the calibrated magnitude adds nothing.** Exactly ω_graft's shape.
+> 3. **`δ` is not the hard observable it was scoped as.** It is **M-free at every region node** (verified to
+>    1.9e-16 — the message is built ∝ `M`, so `M` cancels). On a plain edge it is a composition disagreement
+>    with the destination's own belief. The genuine content is in the ROUTING: **84.2 % of Σδ² is on peel and
+>    graft edges.**
+> 4. **The right fix for the bias half is a MODE fix, not a variance.** When the bias strata are diagnosed,
+>    P1e must SHRINK — if it does not, the model has not improved.
+>
 > ### ⚠⚠ `ω_graft` IS A DEBT, NOT A MODEL — DO NOT LET THIS BE FORGOTTEN
 >
 > P1d's fitted `ω_graft` **partially compensates for a FAILURE IN OUR STRUCTURAL REPRESENTATION.** The
@@ -339,3 +367,39 @@ refuted, so a different statistic is needed — one whose correlation with the s
 
 Until that observable is found, P1d stays unbuilt. The probe (`RIGEL_XVAR`, default off, verified
 bit-identical when unset) stays so the next attempt can size any candidate estimator against the same numbers.
+
+
+## 6. ⚠ P1e — what is derived, what is landed, and what is owed
+
+**Derived and MC-validated:** the COMMON direction. `αᵀ1 ≡ 1` (α is a share vector over one budget), so
+adding the scalar `b̂²` to every supplied component's log-variance satisfies `αᵀΣ'α = αᵀΣα + b̂²` exactly and
+leaves **`Var(λ)` identically unchanged** — a common shift of both arms cannot move the split. The rank-1
+alternative (inflate along `Σα`) borrows the *conditional mean's* direction and applies it as a variance;
+MC shows it over-damps λ **5×** on a pure scale error (λ z² 1.00 → 0.21) while still leaving the RNA arm
+over-confident (2.88). **A scalar observation cannot identify a direction.**
+
+**Derived:** the scope. `S` is a COMPLETE budget — `_pin_v` fills every unsupplied component from the node's
+OWN density — so a shortfall (`δ > 0`) can be the node's own density being too low just as easily as the
+message being wrong; it does not attribute. The over-claim direction does: all densities are non-negative,
+so nothing the unsupplied components could be would rescue a budget already exceeding `M`. Measured, the
+`δ > 0` half is **inert** (scoped 0.0841 vs unscoped 0.0841 to 4 dp), so scoping costs nothing and removes
+the unlicensed half. A strictly harder test (`sup` — the SUPPLIED components alone over-claim) is available
+behind `RIGEL_P1E_SCOPE=sup` and costs +0.0004.
+
+**Landed (all 32 conditions, `RIGEL_P1E_OFF=1` ablates, verified bit-identical 32/32):**
+
+| | HEAD | **P1e** |
+|---|---|---|
+| suite mwae r0 / r1 | 0.0870 / 0.0697 | **0.0841 / 0.0679** |
+| **fit-substrate mwae** | 0.0883 | **0.0845** |
+| suite ERR reads | 12,167,916 | **11,729,507** |
+| capture OFF | 0.0457 | **0.0349** (4 better / **0 worse**) |
+| unstranded × capON | 0.1572 | 0.1657 (1 / 4) ← the cost |
+| held-fixed z2 ALL | 8.53 | **1.74** |
+| z2 exon-single | 3.57 | **0.88** |
+| z2 exon-AMBIG | 59.4 | **19.8** |
+| z2 intron (the measurement class) | 1.55 | **1.54** — untouched |
+
+**Owed — see the banner at the top of this file.** The bias half, the uncalibrated magnitude, and the fact
+that `δ` is M-free at region nodes (so it is a composition disagreement with the destination's own belief on
+a plain edge, and only the ROUTING — 84.2 % of Σδ² — carries hard-observable content).
