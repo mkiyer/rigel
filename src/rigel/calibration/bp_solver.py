@@ -423,6 +423,7 @@ def node_sweep(
 
         # P1d is ON by default; `RIGEL_GLV_OFF=1` ablates it (bit-identical to the pre-P1d path).
         _glv = not os.environ.get("RIGEL_GLV_OFF")
+        _glv_shrink = bool(os.environ.get("RIGEL_GLV_SHRINK"))  # partial pooling, see the law
         vgp_prem = vgn_prem = None  # per-ρ-iteration, in the destination's frame; set before each transport
 
         # own per-component densities + precisions — the message-free SELF-SOLVE (`node_init.build_node_init`,
@@ -812,7 +813,7 @@ def node_sweep(
                 # each seam's own noise: its spliced COUNT (never the mass) ⊕ its lift's scale sampling
                 # (M5's source leg; the destination's leg is common to both lifts and cancels in ``d``).
                 _lv = np.where(np.isfinite(logvar_tot), logvar_tot, 0.0)
-                per, pooled = graft_premise_logvar(
+                per, pooled, shrunk = graft_premise_logvar(
                     fl,
                     fr,
                     np.where(_vl_a, _v_mu_f[1][vmu][_sl_a] + _lv[_sl_a], np.inf),
@@ -833,7 +834,19 @@ def node_sweep(
                 #    a non-adjacent node's data reached the destination twice. Now no message's precision
                 #    depends on anything but its own edge and one library-level constant — the same standing
                 #    as ``κ`` and both strand overdispersions.
-                out.append(np.full_like(per, pooled))
+                if _capture is not None:  # inert: the fitted scalar and the population it was fitted on
+                    _ok = (fl > _EPS) & (fr > _EPS)
+                    _d = np.log(np.maximum(fl, _EPS)) - np.log(np.maximum(fr, _EPS))
+                    _vv = np.where(_vl_a, _v_mu_f[1][vmu][_sl_a] + _lv[_sl_a], 0.0) + np.where(
+                        _vr_a, _v_mu_f[0][vmu][_sr_a] + _lv[_sr_a], 0.0
+                    )
+                    _capture.setdefault("_glv", []).append(
+                        {"strand": vmu, "omega": pooled, "n_pairs": int(_ok.sum()),
+                         "ok": _ok.copy(), "d": _d.copy(), "noise": _vv.copy(),
+                         "Ed2": float((_d[_ok] ** 2).mean()) if _ok.any() else 0.0,
+                         "Enoise": float(_vv[_ok].mean()) if _ok.any() else 0.0}
+                    )
+                out.append(shrunk if _glv_shrink else np.full_like(per, pooled))
             return out[0], out[1]
 
         if _glv:  # the relay runs on the INPUT-belief faces, so its pair is formed from those

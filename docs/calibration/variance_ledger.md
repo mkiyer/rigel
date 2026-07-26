@@ -169,6 +169,61 @@ is roughly a thousand times more confident than it has earned.** Under capture t
 there it is conflated with the frame step M8 already prices — which is exactly why any P1d term must be
 **capture-independent**, or it double-counts M8.
 
+## 3.5 The fitted scalar `ω_graft` — what it is, and the four questions answered about it
+
+`ω = max(0, E[d²] − E[noise])/2` over exons with spliced flux on **both** flanking boundaries.
+`d = log(ρ_μ(left)/ρ_μ(right))`, both lifted into the exon's frame; `noise` = the two seams' spliced counts
+⊕ the two lifts' `logvar_tot`. **One scalar per strand per library.** Measured (relay fit, + strand):
+
+| condition | pairs | E[d²] | E[noise] | **ω** | SE(ω) | sd(d) | med\|d\| |
+|---|---|---|---|---|---|---|---|
+| gdna300 ss0.99 capOFF | 192 | 0.692 | 0.099 | **0.297** | 0.111 | 0.827 | 0.102 |
+| gdna300 ss0.50 capOFF | 194 | 0.676 | 0.209 | **0.233** | 0.108 | 0.819 | 0.115 |
+| gdna300 ss0.99 capON | 153 | 1.155 | 0.312 | **0.421** | 0.159 | 1.074 | 0.331 |
+| gdna100 verystrong | 105 | 0.995 | 0.177 | **0.409** | 0.172 | 0.997 | 0.230 |
+| none ss0.50 capOFF | 197 | 0.620 | 0.220 | **0.200** | 0.093 | 0.786 | 0.046 |
+
+Fit population: **~190–200 of 1,698 regions (≈11 %), 100 % exons** — an intron never qualifies, because its
+flanking boundaries carry their spliced flux on the face pointing at the *exon*. Against the variance the
+graft was charged before (0.008–0.09), `ω` dominates by **5–36×**: it says a seam's RNA claim about its exon
+is good to about **±0.55 nats — a factor of 1.7 — before a single read is counted**.
+
+**Q1 — is it belief-dependent?** Weakly, yes. The two fluxes are lifted by frames read off `ρ_tot(f_cur)`, so
+it is refit 3× per sweep: 0.2968 / 0.2968 / **0.2937**, <2 % movement. The count and `logvar_tot` legs are
+fixed data. The feedback can only WIDEN, so it cannot manufacture confidence.
+
+**Q2 — should the average be confidence-weighted (DerSimonian–Laird)?** No, and for a reason, not a
+preference: DL is the efficient estimator of a **common** effect, and there is no common effect
+(`τ²_between` = 1.35–3.0 vs sampling 0.26–0.78). The quantity to charge a message is the expected squared
+premise error of a randomly-drawn edge — `E[ω_i]`, the arithmetic mean — which the plain moment difference
+estimates and DL does not. Measured they agree to ~1 % anyway (762,000 vs 755,727 confidently-wrong, DL
+slightly worse on mass), so the argument is correctness, not score.
+
+**Q3 — can it be per-node instead of library-wide?** ⛔ **Tested twice, lost twice.**
+
+| variant | confidently-wrong | z2 ALL | z2 exon-single |
+|---|---|---|---|
+| raw per-edge (own `d²`) | 870,245 | 11.12 | 5.68 |
+| **derived PARTIAL POOLING** (`B = τ²_b/(τ²_b+Var(ω̂_i))`, `Var(ω̂_i) = (2ω+v_i)²/2` from the χ²₁) | 765,281 | 9.23 | 2.68 |
+| **pooled scalar** | **762,000** | **8.98** | **2.46** |
+
+And the shrinkage weight comes out **B = 0.82–0.89**, i.e. the estimator itself says the between-node
+variation is real and dominant — the heterogeneity is NOT a fitting artifact. It still loses, and the reason
+is the **loss function's asymmetry**: over-charging only widens a message (cheap), under-charging leaves a
+node confidently wrong (poisons the hyperprior). `ω_i` is heavily right-skewed — the top decile of pairs
+carries **78–92 %** of `Σd²` — so any per-node point estimate, shrunk or not, charges the median node ≈0.
+**The population mean is the right single number precisely because the loss is asymmetric.**
+
+**Q4 — so what would actually fix it?** Not a better *estimate* of `ω_i` — a **classifier** for which nodes
+are in the high-`ω` class. That is the terminus bit (P1g): `ω̂` 1.7–1.9 vs 0.04–0.06, a ≥30× split the
+current map cannot see. `graft_premise_logvar` then becomes two scalars keyed on a structural bit, fitted by
+the same equation, and the partial-pooling machinery already in the law is where it plugs in.
+
+⚠ **Do not over-read the fitted value.** `E[d²]` is tail-dominated over ~200 pairs, so SE(ω) is **30–50 %
+relative**, and the value is the mean of a bimodal population. That P1d works is robust to it: the flat probe
+`RIGEL_XVAR=0.3` and DL's 0.11–0.27 all buy most of the same gain. **The fitted-ness matters for portability
+to real data, not for the score here.**
+
 ## 4. What pricing it is worth — measured, with an oracle-free probe
 
 `RIGEL_XVAR` adds a flat extra variance to the grafted spliced component (a **probe to size the prize**, not a

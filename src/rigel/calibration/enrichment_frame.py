@@ -776,6 +776,21 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
       own edge and one library constant, which is exactly the standing ``κ`` and both strand overdispersions
       already have.
 
+    **Two things about the fit that were asked and are settled by measurement (2026-07-26):**
+
+    * **A plain average, not an inverse-variance (DerSimonian–Laird) one.** DL is the efficient estimator of
+      a *common* effect; there is no common effect here (`τ²_between` = 1.35–3.0 against a sampling variance
+      of 0.26–0.78). What must be charged to a message is the EXPECTED squared premise error of a
+      randomly-drawn edge, i.e. the arithmetic mean `E[ω_i]` — which is exactly what the plain moment
+      difference estimates and DL does not. Measured, the two land within ~1 % of each other anyway
+      (confidently-wrong 762,000 vs 755,727; DL slightly worse on error mass), so this is a correctness
+      argument, not a scoring one.
+    * **The value is fitted from the CURRENT belief, weakly.** The two fluxes are lifted by frames read off
+      `ρ_tot(f_cur)`, so the fit is recomputed 3× per sweep — measured 0.2968 / 0.2968 / 0.2937, i.e. it
+      moves <2 % as the belief updates. The count and `logvar_tot` legs of the noise subtraction are fixed
+      data. The feedback loop this creates can only ever WIDEN a message, so it cannot manufacture
+      confidence.
+
     The *population* the scalar is fitted on is still exons that have two live seams — and that population
     is not representative in the owner's sense: an exon whose flank is a transcript terminus or an
     exon↔exon boundary has no second seam and never enters the fit, and it is measurably the WORSE-behaved
@@ -813,5 +828,19 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
     v = np.where(np.isfinite(va), va, 0.0) + np.where(np.isfinite(vb), vb, 0.0)
     per = np.where(ok, np.maximum(0.0, d * d - v) * 0.5, 0.0)
     if not np.any(ok):
-        return per, 0.0
-    return per, float(max(0.0, float((d[ok] ** 2).mean()) - float(v[ok].mean())) * 0.5)
+        return per, 0.0, per
+    d2, vv = d[ok] ** 2, v[ok]
+    pooled = float(max(0.0, float(d2.mean()) - float(vv.mean())) * 0.5)
+    # ── PARTIAL POOLING (the shrunk per-node estimate; the caller chooses whether to use it) ─────────────
+    # ``ω_i`` from one pair is a χ²₁ draw, so its sampling variance is known EXACTLY and needs no constant:
+    # ``d_i² ~ (2ω + v_i)·χ²₁`` ⇒ ``Var(d_i²) = 2(2ω+v_i)²`` ⇒ ``Var(ω̂_i) = (2ω+v_i)²/2``. The BETWEEN-node
+    # variance is what the population's spread has left over after that, and the James–Stein / hierarchical
+    # weight follows: ``B_i = τ²_b / (τ²_b + Var(ω̂_i))``. Every piece is estimated from the same data.
+    # ``B → 0`` (full pooling) exactly when the population is explained by sampling noise alone; ``B → 1``
+    # (per-node) when the between-node spread dominates. No knob decides which — the data does.
+    v_samp = (2.0 * pooled + vv) ** 2 * 0.5
+    tau_b = max(0.0, float(per[ok].var()) - float(v_samp.mean()))
+    b = tau_b / np.maximum(tau_b + v_samp, _EPS)
+    shrunk = np.full(per.shape, pooled)
+    shrunk[ok] = np.maximum(0.0, pooled + b * (per[ok] - pooled))
+    return per, pooled, shrunk
