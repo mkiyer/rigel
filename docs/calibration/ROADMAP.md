@@ -281,6 +281,37 @@ on is exactly the classes P1d made honest:
 **All of the remaining two-orders-of-magnitude over-confidence sits in the population the hyperprior never
 sees.** So P3 (AMBIG) is a pass-0 *quality* item for the re-solve, **not** a Phase-2 blocker.
 
+### 4b. ⭐ THE RE-SOLVE ALREADY RESETS — verified 2026-07-26, and it sharpens the objective
+
+`calibrate.py:419-420`, inside the Phase-2 refit loop:
+
+```python
+    belief = _init_belief()            # ← FULL reset to the signature-binary default
+    belief = _sweep(gdna_hyperprior)   # ← re-solve from scratch, WITH the prior
+```
+
+Nothing from pass-0 survives into the re-solve except **the fitted hyperprior itself**. The owner's option
+"after fitting the hyperprior, reset all nodes and re-solve from scratch" is therefore **already what
+ships** — the failure mode "an over-confident node won't budge when the prior arrives" **cannot occur through
+belief inheritance.**
+
+**What that means for pass-0's objective — and the owner's ruling (2026-07-26):**
+
+> *"Honest precision is critical. We may adopt an iterative strategy. We may decide to use a
+> precision-weighted gDNA hyperprior fit. So honest precision can be beneficial in many ways. If we push
+> towards a combination of ACCURACY with honest precision, we will prevail."*
+
+So **both** metrics are live, and they are not in competition:
+
+* **ACCURACY on the fit substrate** (`REGION & (single | gonly)`) is what the hyperprior is built from, and
+  it is the number that was NOT being tracked. Suite-wide mwae is a proxy for it, not a substitute — the
+  substrate is a *subset*, and a change can move the two in opposite directions.
+* **Honest precision** has three live consumers, so it is not merely instrumental: (i) it sets pass-0's own
+  fused MODE, hence the substrate's accuracy; (ii) the non-additive hyperprior fit is **precision-weighted**
+  (`var_gdna` weights the NPMLE — `_fit_gdna_hyperprior`); (iii) an iterative re-solve strategy remains open.
+
+**Do NOT relitigate P1d or P4 on the grounds that the re-solve resets.** Both remain landed.
+
 ⚠ **What has NOT been re-tested at HEAD** is the specific committed Phase-2 step — feeding the hyperprior's
 own λ-curvature into DL's `v_own` (~6 lines, `SESSION_2026_07_25_HANDOFF_6.md` §3). At its original HEAD it
 improved stranded / verystrong / capture-off and regressed unstranded-capON 0.1702 → 0.2177. Given both

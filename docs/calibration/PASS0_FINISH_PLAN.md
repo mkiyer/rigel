@@ -48,6 +48,26 @@ do not start a competing list.
 > 3. **Until then, treat every `ω`-dependent result as provisional**, and never quote the fitted value as
 >    if it were a measured constant of the library.
 
+## 0a. ⭐ THE OBJECTIVE (owner, 2026-07-26) — ACCURACY **and** honest precision, together
+
+The Phase-2 re-solve **already resets** (`calibrate.py:419-420`: `belief = _init_belief()` before
+`_sweep(gdna_hyperprior)`), so nothing from pass-0 is inherited but the fitted prior. That does **not**
+demote precision — the owner's ruling is explicit:
+
+> *"Honest precision is critical. We may adopt an iterative strategy. We may decide to use a
+> precision-weighted gDNA hyperprior fit. If we push towards a combination of ACCURACY with honest
+> precision, we will prevail."*
+
+Three live consumers of honest precision: pass-0's own fused **mode** (hence the substrate's accuracy), the
+**precision-weighted** hyperprior fit (`var_gdna` weights the NPMLE), and a possible iterative re-solve.
+
+**The number that was missing:** ACCURACY restricted to the hyperprior's fit substrate
+(`REGION & (single | gonly) & live` — exon-single, intron-single, and the exact intergenic anchors).
+Suite-wide mwae is a proxy for it, not a substitute. **Track both from now on**, plus `z2`.
+
+**Also standing (owner):** the code must reach Phase 2 *efficient, clear, concise, readable, maintainable —
+not over-engineered, as simple as possible.* Simplification is a gate, not a nicety.
+
 ## 0b. ⭐ STATE OF PLAY (2026-07-26, end of session)
 
 Suite **0.0855 (refit=0) / 0.0671 (refit=1)** against the session's starting HEAD of 0.0885 / 0.0678 —
