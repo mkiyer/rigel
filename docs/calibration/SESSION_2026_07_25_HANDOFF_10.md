@@ -399,7 +399,64 @@ makes the exon-side slope scatter harmless rather than load-bearing.
 **No new simulations are required for 1–4.** §8.2's coverage gaps (very-high-nascent, inverted enrichment)
 matter for CERTIFYING step 4 across regimes, not for deriving or landing the fix.
 
-## 10. Tools
+## 10. ⭐ THE BOUNDARY DEFAULT AND THE TWO-STEP — measured; the blocker is ψ's vertex
+
+**Owner:** "intronic unspliced fragments are gDNA until proven otherwise" — the default at an exon↔intron
+boundary should be 100 % gDNA at low/zero precision, not 50/50. Otherwise it is a **two-step solve**: the
+intron message (or the strand) sets the gDNA-vs-unspliced-RNA level, and only then does the composition scale
+work.
+
+### 10.1 Both halves are one estimator, and both are measured right in their regime
+
+The continuing share `w = ρ_ν/(ρ_ν + ρ_μ)`, scored against truth (mass-weighted |Δ|):
+
+| condition | `w` TRUE | from the boundary's SELF-solve | **from the far INTRON** | "gDNA default" (w=0) |
+|---|---|---|---|---|
+| gdna300 ss0.99 present capON | 0.391 | 0.110 | 0.192 | 0.391 |
+| gdna300 ss0.50 none capON | **0.000** | **0.628** | 0.294 | **0.000** |
+| gdna100 verystrong | 0.413 | 0.156 | **0.126** | 0.413 |
+| gdna300 ss0.99 present capOFF | 0.168 | 0.070 | **0.052** | 0.168 |
+| gdna100 ss0.50 present capON | 0.403 | 0.160 | **0.100** | 0.403 |
+
+The owner's two prescriptions are complementary and both correct: **w = 0 is EXACT with no nascent RNA**, and
+**the intron sets the level when there is**. And the intron-sourced share *is* the two-step — it returns ~0
+when the intron's density deconvolution finds no RNA and rises when it does, reaching the safe default as a
+LIMIT of a measurement rather than asserting it.
+
+### 10.2 ⛔ But both wirings LOSE — do not re-run
+
+| arm | refit=0 | refit=1 |
+|---|---|---|
+| HEAD (`expF`) | **0.0884** | **0.0678** |
+| own belief → 100 % gDNA at zero precision (`gdna_fallback_admissible`, finally wired) | 0.0906 (3 better / 15 worse) | 0.0690 |
+| two-step: composition peel with the **intron-sourced** share | 0.0893 (10 / 21) | 0.0690 (7 / 25) |
+
+* The **fallback default** loses for a mechanical reason worth recording: zeroing `op`/`on` breaks `_pin_v`'s
+  partial-claim semantics (`sp = where(pp > 0, p, op)`), so a gDNA-only message is renormalised onto the
+  node's whole mass and asserts `f_g → 1` — the over-confidence that operator's own docstring warns about.
+  (`gdna_fallback_admissible` had been designed, documented and unit-tested in `enrichment_frame` and never
+  called; it is still never called.)
+* The **two-step** loses despite a better average share, because **its residual is an OVER-claim**, and RNA
+  over-claim is the damaging direction — the one thing every study this session has agreed on. HEAD's
+  conservative full peel errs the safe way and wins.
+
+### 10.3 ⭐ THE BLOCKER, and it is one number
+
+The intron-sourced share gives **0.294 where the truth is 0.000** in `nrna_none`. That floor is not the
+estimator — it is the intron's own answer: the factory self-solves an RNA-free intron to **f_g = 0.9821
+against an oracle of 1.0000**. That 1.8 % phantom RNA, reframed to the seam, is the entire 0.294.
+
+And the 1.8 % is **ψ's reference, by construction**: `_JEFFREYS_REF` makes the composition Beta(½,½), which
+is proper precisely because it **forbids the simplex vertices** — `reference_prior_derivation.md` §10.5
+already records this as the known cost, "it forbids the simplex vertices, where some truth genuinely lives".
+A library with no nascent RNA has introns *at* the vertex.
+
+So the chain is: ψ's proper-prior choice → intron `f_g = 0.982` not 1.000 → share 0.294 not 0 → RNA
+over-claim at the seam → intron contamination. **The two-step cannot beat the conservative peel until a node
+whose truth is at the vertex can reach it.** That is the next thing to solve, and it is a ψ-reference
+question, not a message question.
+
+## 11. Tools
 
 `scripts/debug/pass0_error_table.py` — the suite state of play in READS with the trust (`errQ1conf`) view.
 `scratchpad/t1_char.py` (characterize + ψ ablation, bit-exact), `t2_strata.py` (channel-arrival strata +
