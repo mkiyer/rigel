@@ -760,21 +760,34 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
     ``/2`` is the measured independence and the truncation at 0 is the method's own ("no detectable
     premise error"). Returns ``(per_edge, pooled)``.
 
-    **Why PER-EDGE and not a single pooled ω.** The premise error is not a count law. Binned by the
-    junction's spliced count it spans 23×, but that gradient is a **proxy**: it is flat inside every
-    structural class (junction-only excess 0.036 → 0.073 across a 200× count range), flat in the
-    extrapolation ratio the term was originally scoped as (1.13× over a 6.7× range), and flat in exon
-    length. What it actually tracks is whether the boundary carries a **transcript terminus** — ``ω̂`` 1.7–1.9
-    there against 0.04–0.06 at junction-only seams, a **≥30×** split, with 20.8 % of edges carrying 71.7 %
-    of the squared deviation. The two-seam gap sees that directly; a pooled ω would over-charge the ~79 %
-    junction-only edges by an order of magnitude and under-charge the rest.
+    **⭐ The POOLED value is what is used — the per-edge one is returned for diagnostics only.** Both halves
+    of that were wrong in the first landing (2026-07-26) and are corrected here:
 
-    **The pooled value is still needed**, for the ~52 % of graft edges with only one live seam (a terminal
-    exon, or a partner carrying no spliced flux). There is no second study there, so the per-edge statistic
-    does not exist — but the library-level one does, and it is this same estimator pooled. It is fitted on
-    the measurably BETTER-behaved half (premise 0.48, against 0.60 on one-seam edges and 2.69 where no seam
-    carries spliced flux), so it UNDER-charges: the count-zero-information-safe direction, and the "pass-0
-    must be weak and correctable" one.
+    * **Statistically**, ``d²`` from ONE pair is a single draw of a χ²₁ scaled by the true variance, so its
+      own coefficient of variation is √2. A per-edge "measurement" of a variance from one pair is mostly
+      noise, and it both over- and UNDER-charges around the right mean — the under-charging half doing the
+      damage, because it REPLACES the population value on the ~48 % of edges where a pair exists. Measured:
+      per-edge+pooled 870,245 confidently-wrong reads at ``z2`` 11.12; pooled alone **762,000 at 8.98**, with
+      exon-single ``z2`` 5.68 → **2.46**. Shrinking all the way to the pooled mean is simply the better
+      estimator, and this is the ordinary empirical-Bayes result, not a tuning choice.
+    * **Structurally** (owner, 2026-07-26), a per-edge form makes the message from the LEFT seam carry a
+      variance computed from the RIGHT seam's counts, so a non-adjacent node's data reaches the destination
+      twice — a real BP violation. With the pooled form no message's precision depends on anything but its
+      own edge and one library constant, which is exactly the standing ``κ`` and both strand overdispersions
+      already have.
+
+    The *population* the scalar is fitted on is still exons that have two live seams — and that population
+    is not representative in the owner's sense: an exon whose flank is a transcript terminus or an
+    exon↔exon boundary has no second seam and never enters the fit, and it is measurably the WORSE-behaved
+    half (premise 0.60 with one seam, 2.69 with none, against 0.48 with two). So the fit UNDER-states:
+    the count-zero-information-safe direction, and the "weak and correctable" one.
+
+    **What the term does NOT claim.** It does not claim the second seam is a good proxy for the exon's RNA on
+    any individual exon. It uses the seam pairs only to estimate ONE library-level number — the typical size
+    of the graft's premise failure — because that failure is an UNDER-claim, and an under-claim has **no
+    local signature**: a seam accounting for less mass than the exon holds is indistinguishable from an exon
+    with more gDNA, which is count-zero-information exactly. The over-claim direction *is* locally visible
+    (``claim/obs``) and belongs to P1e.
 
     **What the caller must pass.** Both fluxes ALREADY LIFTED into the destination's frame, so a capture
     step common to the two seams cancels out of ``d`` and only a genuine abundance difference is charged;

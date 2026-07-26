@@ -34,8 +34,8 @@
 > measured **nearly inert** (0.1444 → 0.1417 when ablated).
 >
 > **⭐ CURRENT (2026-07-26): the composition peel, the MESSAGE PACKET and **P1d** are LANDED; the next task
-> is P1e.** Suite **0.0871 (refit=0) / 0.0684 (refit=1)** — deliberately up from 0.0855 / 0.0671, bought
-> against a 27.5 % cut in confidently-wrong mass. **Read `SESSION_2026_07_26_HANDOFF_14.md` — it is the LIVE
+> is P1e.** Suite **0.0865 (refit=0) / 0.0676 (refit=1)** — deliberately up from 0.0855 / 0.0671, bought
+> against a 36.6 % cut in confidently-wrong mass. **Read `SESSION_2026_07_26_HANDOFF_14.md` — it is the LIVE
 > handoff and has the run instructions.**
 >
 > **The frame for everything that remains:** the error MASS is close to its prior-free ceiling (HANDOFF_10 §3:
@@ -54,9 +54,13 @@
 > back off the density fuse. The packet alone drove 0.0889 → 0.0855 and cut AMBIG-exon confidently-wrong 45 %.
 >
 > **⭐ P1d IS LANDED (2026-07-26) — and its mechanism was NOT what the term was named for.**
-> `graft_premise_logvar`, default ON, `RIGEL_GLV_OFF=1` ablates it. Confidently-wrong **1,200,951 → 870,245
-> (−27.5 %)**, `z2` ALL **15.55 → 11.12**, exon-single **8.60 → 5.68**, exon-AMBIG **92.10 → 65.28**, for
-> **+1.9 % error mass** (0.0855 → 0.0871 / 0.0671 → 0.0684, 10 better / 7 worse / 15 flat).
+> `graft_premise_logvar` — **ONE library-level MoM scalar** applied to every graft edge, default ON,
+> `RIGEL_GLV_OFF=1` ablates it. Confidently-wrong **1,200,951 → 762,000 (−36.6 %)**, `z2` ALL
+> **15.55 → 8.98**, exon-single **8.60 → 2.46**, exon-AMBIG **92.10 → 64.39**, for **+1.2 % error mass**
+> (0.0855 → 0.0865 / 0.0671 → 0.0676; 9 better / 6 worse / 17 flat, 8/4/20 at refit=1).
+> ⚠ A **per-edge** variant using each exon's own two-seam gap landed first and was **reverted the same day**:
+> a variance from one pair is a χ²₁ (CV = √2), so it is mostly noise, and it made the LEFT seam's message
+> carry a variance built from the RIGHT seam's counts — a BP violation. Pooled-only is better on every axis.
 >
 > **"Extrapolation" is refuted as the mechanism.** The premise residual is FLAT in the extrapolation ratio
 > (1.13× over a 6.7× range) and flat in exon length. What the graft actually gets wrong is that its claim is a

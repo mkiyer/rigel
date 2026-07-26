@@ -24,7 +24,7 @@ log-variance except where noted.
 | M11 | `ψ'(k) + 1/(n·E[f_R]²)` (`residual_level`) | the **level** the peel share is formed from | inside M10's `v_ν` | live |
 | M7 | `b̂²` (`mismatch_deflate`) | the imputation **premise** being false — DerSimonian–Laird against the destination's own self-solve | every stream, **but inert wherever `τ_own = 0`** (all AMBIG, all unstranded ⇒ 84 % of error mass) | live |
 | — | `1/n_spl` | the spliced measurement's own count | the graft | live |
-| **P1d** | `max(0, d²−v_a−v_b)/2` (`graft_premise_logvar`) | the graft's **premise**: a seam's RNA used as the exon's RNA, when it is only a LOWER BOUND on it | the WHOLE grafted RNA claim, both code paths | **LIVE** (2026-07-26) — §3, and ⚠ **its mechanism is NOT what §3 originally said**, see §3.0 |
+| **P1d** | `ω_graft` = `max(0, E[d²]−E[noise])/2` (`graft_premise_logvar`) — **ONE library-level scalar**, MoM | the graft's **premise**: a seam's RNA used as the exon's RNA, when it is only a LOWER BOUND on it | the WHOLE grafted RNA claim, both code paths | **LIVE** (2026-07-26) — §3, and ⚠ **its mechanism is NOT what §3 originally said**, see §3.0 |
 | P1e | the conservation **surprise** `δ²/(αᵀΣα)` | how implausible the claim is against the node's own observed mass | every message | not built |
 | — | ~~NPMLE projection `var_proj + (Δμ_proj)²`~~ | a **density** disagreement between two nodes | — | **RETIRED**; `DensityNPMLE.project` is called nowhere. ⚠ `CalibrationConfig`'s docstring still describes it and is stale |
 
@@ -112,7 +112,8 @@ premise fails hardest exactly where RNA does not flow through the seam — a tra
 
 | variant | verdict |
 |---|---|
-| the **VARIANCE**, per-edge from the two seams' gap + a pooled MoM fallback + M5's lift noise subtracted | ✅ **LANDED** |
+| the **VARIANCE** as ONE library-level MoM scalar `ω_graft`, applied to every graft edge, with M5's lift noise subtracted | ✅ **LANDED** |
+| the same term **per-edge**, using each exon's own two-seam gap | ⛔ **REVERTED same day** (owner's objection, and the measurement agrees). `d²` from ONE pair is a χ²₁ draw — CV = √2 — so a per-edge variance is mostly noise, and it *replaces* the population value on the ~48 % of edges where a pair exists, UNDER-charging as often as over. Pooled-only is better on every axis: confidently-wrong **870,245 → 762,000**, `z2` ALL **11.12 → 8.98**, exon-single **5.68 → 2.46**, and mwae **+0.0016 → +0.0010**. It also removed a real BP violation: the LEFT seam's message was carrying a variance built from the RIGHT seam's counts |
 | the **MODE** fix (replace the claim with the dominant seam's flux, `max`) | ⛔ **not landed.** Right physics, wrong regime: capture-OFF **14/14 better, 0 worse**; capture-ON 8 worse. Under capture the graft ALREADY over-states (median φ = 2.45, an M8 frame problem), so no bound-tightening can help. Framing the two seams before comparing halves the damage but does not remove it. `min` is worse than either bound alone (0.514 vs 0.487) and `sum` over-states by +0.61 nats — both exactly as the algebra predicts, which is what makes the `max` result structural rather than a selection artifact |
 | omitting M5's lift noise from the MoM subtraction | ⛔ inflates the fit in proportion to gDNA depth and over-charges precisely where the RNA claim is near-exact and the gDNA claim is the wrong one (P1b's population). Costs +0.0010 mwae to fix, and it is the honest form |
 
@@ -121,14 +122,15 @@ premise fails hardest exactly where RNA does not flow through the seam — a tra
 | | mwae r0 / r1 | **confidently-wrong** | z2 exon-single | z2 exon-AMBIG | **z2 ALL** |
 |---|---|---|---|---|---|
 | pre-P1d (`pk2`) | 0.0855 / 0.0671 | 1,200,951 | 8.60 | 92.10 | 15.55 |
-| **P1d** | 0.0871 / 0.0684 | **870,245 (−27.5 %)** | **5.68 (−34 %)** | **65.28 (−29 %)** | **11.12 (−28 %)** |
+| per-edge + pooled (reverted) | 0.0871 / 0.0680 | 870,245 (−27.5 %) | 5.68 | 65.28 | 11.12 |
+| **P1d, pooled scalar only** | **0.0865 / 0.0676** | **762,000 (−36.6 %)** | **2.46 (−71 %)** | **64.39 (−30 %)** | **8.98 (−42 %)** |
 
-10 better / 7 worse / 15 flat at refit=0. **The trade is +1.9 % error mass for −27.5 % confidently-wrong
-mass** — the trade `PASS0_FINISH_PLAN.md` §0b says decides pass-0. For comparison the un-landable flat probe
-`RIGEL_XVAR=0.3` bought −42 % for +2.4 %, and it reaches only one of the two code paths.
+9 better / 6 worse / 17 flat at refit=0; 8 / 4 / 20 at refit=1. **The trade is +1.2 % error mass for −36.6 %
+confidently-wrong mass** — the trade `PASS0_FINISH_PLAN.md` §0b says decides pass-0. The un-landable flat
+probe `RIGEL_XVAR=0.3` bought −42 % for +2.4 % and reaches only one of the two code paths; P1d gets most of
+that for half the mass, prior-free and with no constant.
 
-⚠ **The residual regression is localized and has a known mechanism**: unstranded × gDNA-rich × capture-OFF
-(`gdna100_ss0.50_none_capOFF` +0.0406, `gdna300_ss0.50_*_capOFF` +0.012). That is P1b's population, where the
+⚠ **The residual regression is localized and has a known mechanism**: unstranded × gDNA-rich × capture-OFF. That is P1b's population, where the
 RNA claim is a near-exact measurement (36.6453 vs 36.6734) and the **gDNA** claim is 47× too big — so damping
 the RNA arm is the wrong arm. Charging the premium to the arm whose premise actually failed is the follow-up.
 

@@ -16,7 +16,7 @@ do not start a competing list.
 | **P1f** | **the MESSAGE PACKET** — λ and θ carried explicitly, fused by their OWN precisions | ✅ **LANDED** — `weighted_rescale_design.md` §9 |
 | **P1e** | the composition **SURPRISE** `z² = δ²/(αᵀΣα)` as a damping term — never inert | ▶ **NEXT** (owner-directed). P1d's residual regression points straight at it: the premium must go to the arm whose premise FAILED, and `claim/obs` is the observable that says which |
 | — | **`variance_ledger.md`** — every variance term, what it prices, and the no-overlap proof | ✅ **the standing audit; update it whenever a term changes** |
-| **P1d** | the graft's **PREMISE** variance (was: "extrapolation" — refuted) | ✅ **LANDED** 2026-07-26, `graft_premise_logvar`, default ON. Confidently-wrong **−27.5 %**, z2 ALL 15.55 → **11.12**, for +1.9 % mwae. The mechanism is **transcript TERMINI**, not extrapolation — `variance_ledger.md` §3.0 |
+| **P1d** | the graft's **PREMISE** variance (was: "extrapolation" — refuted) | ✅ **LANDED** 2026-07-26, `graft_premise_logvar` — ONE library-level MoM scalar, default ON. Confidently-wrong **−36.6 %**, z2 ALL 15.55 → **8.98**, exon-single 8.60 → **2.46**, for +1.2 % mwae. (A per-edge two-seam variant landed first and was reverted same-day — χ²₁ noise + a BP violation.) The mechanism is **transcript TERMINI**, not extrapolation — `variance_ledger.md` §3.0 |
 | **P3** | AMBIG exon over-confidence — z2\|Q1 was 183, then 92.1, now **65.3** after P1d | ▶ **PROMOTED** above P4/P5; still the largest single defect |
 | P4 | FAR → a proper opposite-direction message; M11's pre-DL precision | queued |
 | P5 | re-test `r` from the gDNA channel (the "moot" verdict is stale) | queued |

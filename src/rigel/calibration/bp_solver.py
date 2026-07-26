@@ -803,8 +803,9 @@ def node_sweep(
         # dst faces its source on its LEFT (face 0); the source faces the dst on its RIGHT (face 1) — and mirrored
         # for the backward pass. The face pair selects BOTH the per-side ρ_tot and the per-face mature flux.
         def _seam_pair(rho_lface, rho_rface):
-            """Per strand: the graft's premise log-variance, from the destination-frame disagreement of the
-            node's two flanking seams (`graft_premise_logvar`)."""
+            """Per strand: the graft's premise log-variance — ONE library-level scalar, fitted by method of
+            moments from the destination-frame disagreement of exons' flanking seam PAIRS
+            (`graft_premise_logvar`) and applied to every graft edge."""
             out = []
             for spf, vmu in ((spl_p_f, 0), (spl_n_f, 1)):
                 fl, fr = _flank_dom(rho_lface, rho_rface, spf)
@@ -817,8 +818,22 @@ def node_sweep(
                     np.where(_vl_a, _v_mu_f[1][vmu][_sl_a] + _lv[_sl_a], np.inf),
                     np.where(_vr_a, _v_mu_f[0][vmu][_sr_a] + _lv[_sr_a], np.inf),
                 )
-                # measured per-edge where a second seam exists; the pooled fit where one does not.
-                out.append(np.where((fl > _EPS) & (fr > _EPS), per, pooled))
+                # ⭐ The POOLED fit is applied to EVERY graft edge; the per-edge value is NOT used. Two
+                # reasons, and the statistical one is decisive:
+                #
+                #  * ``d²`` from ONE pair is a single draw of a χ²₁ scaled by the true variance, so its own
+                #    coefficient of variation is √2 — a per-edge "measurement" of a variance is mostly noise,
+                #    and it both over- and UNDER-charges around the right mean. The under-charging half is
+                #    what does the damage, because it REPLACES the population value on the ~48 % of edges
+                #    where it fires. Measured: per-edge+pooled 870,245 confidently-wrong reads / z2 11.12,
+                #    pooled alone **762,000 / 8.98**, and exon-single z2 5.68 → **2.46**. Shrinking all the
+                #    way to the pooled mean is simply the better estimator.
+                #  * it also removes a real BP objection (owner, 2026-07-26): with the per-edge form, the
+                #    message from the LEFT seam carried a variance computed from the RIGHT seam's counts, so
+                #    a non-adjacent node's data reached the destination twice. Now no message's precision
+                #    depends on anything but its own edge and one library-level constant — the same standing
+                #    as ``κ`` and both strand overdispersions.
+                out.append(np.full_like(per, pooled))
             return out[0], out[1]
 
         if _glv:  # the relay runs on the INPUT-belief faces, so its pair is formed from those

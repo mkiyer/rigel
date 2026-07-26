@@ -751,6 +751,8 @@ def test_conservation_rescale_degenerate_inputs_are_safe():
 
 
 # ── P1d: graft_premise_logvar — the two-seam method-of-moments premise variance ──────────────────────
+# ⚠ The SOLVER uses only the pooled (second) return value; the per-edge array is a diagnostic. A variance
+# estimated from a single pair is a χ²₁ (CV = √2), so per-edge is mostly noise — see the docstring.
 
 
 def test_graft_premise_logvar_agreeing_seams_charge_nothing():
@@ -819,3 +821,15 @@ def test_graft_premise_logvar_never_negative_and_finite():
     per, pooled = graft_premise_logvar(fa, fb, va, vb)
     assert np.isfinite(per).all() and (per >= 0.0).all()
     assert np.isfinite(pooled) and pooled >= 0.0
+
+
+def test_graft_premise_logvar_pooled_is_the_load_bearing_return():
+    """The solver applies the POOLED scalar to every edge. It must therefore exist and be finite even when
+    most edges have no pair at all — the terminal-exon / exon↔exon-boundary case the owner flagged."""
+    fa = np.array([np.e, 0.0, 0.0, 0.0, 0.0])  # one pair, four seams with no partner
+    fb = np.array([1.0, 0.0, 0.0, 0.0, 0.0])
+    v = np.zeros(5)
+    per, pooled = graft_premise_logvar(fa, fb, v, v)
+    assert list(per[1:]) == [0.0, 0.0, 0.0, 0.0]
+    assert pooled == pytest.approx(0.5, rel=1e-12)  # d² = 1, no noise, halved
+    assert np.isfinite(pooled)
