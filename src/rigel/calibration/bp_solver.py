@@ -682,7 +682,12 @@ def node_sweep(
             # only reaches it where the destination has its own evidence, i.e. never on unstranded data) and it
             # is NOT a loss of information: a pure-gDNA source's authority is a DENSITY LEVEL, and that travels
             # on the measurement stream (``tmg``), which is precisely the three-stream separation.
-            ttau = np.where((tg > _EPS) & ((tp + tn) > _EPS), ttau, 0.0)
+            # The gate asks whether the source SUPPLIED both components of the λ pair. "Supplied" is a
+            # statement about PRECISION, not about the density's value: a component carrying zero precision is
+            # not supplied however large its density, and a component at zero density with live precision IS
+            # supplied — it is the claim "there is none of this here", which is exactly a composition claim.
+            # Testing the density conflates the two and silences λ wherever a legitimate zero is emitted.
+            ttau = np.where((tpg > 0.0) & ((tpp + tpn) > 0.0), ttau, 0.0)
 # (intron λ gate removed — see if EXP-E alone suffices)
             if not _s2t_off:
                 g_g, c_g = mismatch_gap(tg, og)

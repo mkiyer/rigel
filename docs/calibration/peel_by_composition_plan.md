@@ -277,10 +277,31 @@ the unstranded arm, exactly the risk registered in §8).
 * **§4.5's claim that the share subsumes the `mrna_active` gate is WRONG.** Removing it costs 0.0926 → 0.0932
   and 0.0676 → 0.0683 (step 4). The structural rule contributes independently of the share.
 
-### 10.3 The λ-gate defect is REAL but INERT — do not re-run
+### 10.3 The λ-gate fix — LANDED (and §10.3's first verdict was wrong)
 
-Step 5 (test the precision rather than the density, §4.2) moves nothing: 0.0927 / 0.0676 against step 3's
-0.0926 / 0.0676. The inconsistency is genuine and worth knowing about; it is not worth a commit.
+⚠ **Correction.** The first pass judged step 5 "inert, not worth a commit" from a single stacked measurement
+(0.0927 vs step 3's 0.0926) — but that was step 5 *on top of step 3*, where the share had already changed the
+density landscape underneath it, and **step 5 was never tested on its own**. Owner's call to test it properly.
+
+Measured alone against HEAD: **0.0885 / 0.0678** vs 0.0884 / 0.0678, with **29/32 and 27/32 conditions
+completely unchanged**. But the mechanism is *not* inert — instrumenting the two predicates directly, they
+disagree on a substantial set:
+
+| condition | disagree (all msgs) | live λ msgs | disagree \| live | rate |
+|---|---|---|---|---|
+| gdna300 ss0.50 none capON | 2,948 | 10,240 | **1,610** | **15.7 %** |
+| gdna300 ss0.99 present capON | 638 | 11,824 | 397 | 3.4 % |
+| gdna100 verystrong | 2,760 | 2,448 | 285 | 11.6 % |
+
+So the fix silences 3.4–15.7 % of live λ messages that the density test had let through — a real set whose
+claims simply were not moving the answer. **Theoretically correct, fires on a real population,
+behaviour-neutral**: a correctness cleanup, landed on that basis rather than on a score.
+
+It also matters *forward*. The disagreement is almost entirely one-directional today (density-supplied but
+precision-empty: 2,942 of 2,948). The opposite case — a legitimate ZERO density at live precision, i.e. the
+claim "there is none of this here", which is exactly a composition claim — is currently rare (6 / 3 / 3 / 0)
+**but is precisely what a composition peel emits**. With the density test in place that claim would have been
+silently discarded. This removes a trap the next attempt would have walked into.
 
 ### 10.4 ⭐ The honest-precision trade, and it is the interesting result
 
