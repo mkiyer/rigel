@@ -456,7 +456,87 @@ over-claim at the seam → intron contamination. **The two-step cannot beat the 
 whose truth is at the vertex can reach it.** That is the next thing to solve, and it is a ψ-reference
 question, not a message question.
 
-## 11. Tools
+## 11. ⭐ THE ψ VERTEX, interrogated — the bias is REAL, the obvious fix is UNAVAILABLE, and why
+
+§10.3 traced the two-step's blocker to one number: an RNA-free intron solves to `f_g = 0.9821` against an
+oracle of 1.0000. Interrogated (`scratchpad/v1_vertex.py`), four findings.
+
+### 11.1 It IS the reference, and only at the vertex
+
+Reconstructing the intron λ-posterior offline from the captured factory factor:
+
+| ψ variant | median | mean f_g | mode | \|med − oracle\| |
+|---|---|---|---|---|
+| factory + reference (**shipped**) | 0.9744 | 0.9672 | 0.9552 | **0.0256** |
+| **factory ONLY** | 0.9953 | 0.9858 | 0.9777 | **0.0047** |
+| reference only | 0.5423 | 0.5000 | 0.5423 | 0.4577 |
+
+**5.4× better without the reference at the vertex, and ~no difference away from it** (`nrna_present`, truth
+0.8478: 0.0297 → 0.0293). The mechanism is exact: the reference's `e^{−λ/2}` tail shifts the median by
+`2·ln 2 = 1.386` nats whenever the likelihood is flat above the mode — measured shift λ 5.36 → 3.94 = 1.42.
+The READOUT is not at fault: the median (0.9744) beats both the mean (0.9672) and the mode (0.9552), so
+`_posterior_median_fg` is already the best of the three. Nor is the grid: σ(L) = 0.999955, nowhere near
+binding at 0.982.
+
+### 11.2 ⛔ But dropping the reference is NOT available — the factory-only ψ is improper
+
+| L | 6 | 10 | 14 | 20 | 30 |
+|---|---|---|---|---|---|
+| factory-only median | 0.9835 | 0.9954 | 0.9983 | 0.9993 | 0.9995 |
+
+The median drifts monotonically with the window, i.e. **L silently becomes the prior strength** — exactly what
+`_JEFFREYS_REF`'s docstring warns about ("an improper ψ has plateau mass growing linearly in L"). So the
+reference is load-bearing and must stay. `_rna_arm`'s own docstring already said it: "the reference is what
+bounds the `f_g → 1` vertex today, and it is the ONLY thing doing so."
+
+### 11.3 The deeper reading — the likelihood SATURATES, so 0.975 is honest
+
+That L-drift is not a numerical artifact, it is the diagnosis: **the data carries no information above
+λ ≈ 4**, because `f_g = 0.98` and `f_g = 0.9999` both predict "essentially all gDNA". The factory's NB factor
+is flat there. So the posterior tail is prior-determined by construction, `f_g = 0.975` is the honest median
+of a proper posterior, and the "phantom" 2.5 % RNA is really the statement *"I cannot rule out 2.5 % RNA"*.
+
+**This reframes the problem.** There is no better point estimate to find — the defect is that a SATURATED
+quantity is being propagated as though it were measured. `reference_prior_derivation.md` §10.5 already
+licensed the cost ("it forbids the simplex vertices, where some truth genuinely lives"); what was missing is
+that pass-0 then *uses* the forbidden-vertex answer as if it were a measurement.
+
+### 11.4 A constant-free SATURATION DETECTOR exists and works
+
+Saturation is directly observable: **is the factory log-factor still rising at the top of the λ grid?** — a
+comparison of the last two grid cells, no threshold.
+
+| condition | oracle f_g | % saturated | f_g \| SAT | f_g \| not |
+|---|---|---|---|---|
+| gdna300 ss0.50 nrna_none capON | 1.0000 | 45 % | 1.0000 | 1.0000 |
+| gdna300 ss0.99 nrna_none capON | 1.0000 | 48 % | 1.0000 | 1.0000 |
+| gdna300 ss0.99 present capON | 0.8478 | 14 % | **0.9874** | 0.8246 |
+| gdna100 ss0.50 present capON | 0.6520 | 9 % | **0.9690** | 0.6216 |
+| gdna300 ss0.99 present capOFF | 0.6843 | 4 % | **0.9932** | 0.6700 |
+
+It fires on 45–48 % of introns where the truth is at the vertex and 4–14 % where it is not — and *within* a
+nascent-RNA library it picks out precisely the introns that are individually RNA-free (0.969–0.993 vs
+0.62–0.82). That is a usable, constant-free flag.
+
+⚠ One correction it forced: `w_true` at seams beside saturated introns reads 0.31–0.65, not 0 — but that
+average is contaminated by boundaries with NO spliced mass, where the share is undefined and the probe
+defaults it to 1. Do not read those numbers as "RNA continues past an RNA-free intron"; re-measure on
+junction-bearing seams only before using them.
+
+### 11.5 What this says to do
+
+1. **Do not chase a better point estimate at the vertex** — §11.1–11.3 close that off; the reference is
+   correct and required, and the median is already the best readout.
+2. **Use the detector for PRECISION, not for the mode.** Where the factory is saturated, the node's RNA level
+   is *unidentified*, so its RNA claim should carry ~zero precision rather than the precision of a median it
+   cannot support. That is the governing principle applied exactly, and it is what pass-0 owes Phase 2 — an
+   honest "I don't know", not a confident 2.5 %.
+3. **The remaining headroom is the UNSATURATED regime.** Where the intron is genuinely RNA-bearing the
+   two-step's share estimator was decent (|Δ| 0.05–0.19, §10.1) while HEAD's conservative `w = 0` is badly
+   wrong (0.17–0.41). A regime-aware share — intron estimate when unsaturated, conservative when saturated —
+   is the concrete next experiment, and the detector makes it constant-free.
+
+## 12. Tools
 
 `scripts/debug/pass0_error_table.py` — the suite state of play in READS with the trust (`errQ1conf`) view.
 `scratchpad/t1_char.py` (characterize + ψ ablation, bit-exact), `t2_strata.py` (channel-arrival strata +
