@@ -10,7 +10,9 @@ do not start a competing list.
 |---|---|---|
 | **P0** | change the debug loop's loss to **confidently-wrong mass** | ✅ **DONE** 2026-07-26 |
 | ~~P2~~ | ~~introns at 91 % `errQ1conf`~~ | ⛔ **REFUTED** — a selection artifact, §P2 |
-| **P1** | root-cause the **capture-OFF** confident error | 🔬 **ROOT-CAUSED (corrected)** — the conservation rescale, §P1b |
+| **P1** | root-cause the **capture-OFF** confident error | 🔬 **ROOT-CAUSED**, §P1b |
+| **P1c** | **the WEIGHTED RESCALE** — derived + prototyped, ready to build | 📐 `weighted_rescale_design.md` |
+| P1d | the EXTRAPOLATION variance (a 100 bp junction speaking for a 2,100 bp exon) | queued, next after P1c |
 | **P3** | AMBIG exon over-confidence — **z2\|Q1 = 183**, the worst defect in the solver | ▶ **PROMOTED** above P4/P5 |
 | P4 | FAR → a proper opposite-direction message; M11's pre-DL precision | queued |
 | P5 | re-test `r` from the gDNA channel (the "moot" verdict is stale) | queued |

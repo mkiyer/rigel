@@ -791,6 +791,21 @@ def node_sweep(
             tpn, tmn = _dv_arr(tpn, _vwn), _dv_arr(tmn, _vwn)
             tp, tpp, tmp = np.where(fp_a, tp, 0.0), np.where(fp_a, tpp, 0.0), np.where(fp_a, tmp, 0.0)
             tn, tpn, tmn = np.where(fn_a, tn, 0.0), np.where(fn_a, tpn, 0.0), np.where(fn_a, tmn, 0.0)
+            if _capture is not None:  # inert: the PRE-PIN state, for the weighted-rescale prototype
+                _capture.setdefault("_pin", []).append(
+                    {
+                        "df": df, "src": np.asarray(src).copy(), "valid": np.asarray(valid).copy(),
+                        "tg": tg.copy(), "tp": tp.copy(), "tn": tn.copy(),
+                        "tpg": tpg.copy(), "tpp": tpp.copy(), "tpn": tpn.copy(),
+                        # the COMMON-mode variance every component shares: the reframe's scale (M5) plus the
+                        # source's own count. Everything else in a component's variance is its own.
+                        "s2t": np.where(np.isfinite(s2t), s2t, 0.0),
+                        "n_src": np.asarray(_n_node)[src].copy(),
+                        # the graft: how much of the RNA claim is a MEASUREMENT rather than an imputation
+                        "spl_p": _sp.copy(), "spl_n": _sn.copy(), "spl_prec": (_spc + _snc).copy(),
+                        "graft": np.asarray(graft).copy(),
+                    }
+                )
             tg, tp, tn = _pin_v(
                 tg, tp, tn, tpg, tpp, tpn
             )  # the message is a claim about THIS node's mass
