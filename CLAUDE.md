@@ -22,6 +22,16 @@ Rigel is a Bayesian RNA-seq transcript quantification tool that jointly models m
 > (Beta-Binomial tilt; constrains only the tilt, so AMBIG nodes get NO f_g from it), **cross-node imputation**
 > (neighbour messages), and the **population gDNA prior** (the hyperprior, WIP).
 >
+> **⚠⚠ STANDING DEBT — `ω_graft` (P1d) COMPENSATES FOR A STRUCTURAL FAILURE, AND MUST BE RE-DERIVED.**
+> The region/boundary map has **no TSS/TES**, so the solver cannot tell a splice junction from a transcript
+> terminus. `calibration/enrichment_frame.graft_premise_logvar` prices the graft's premise error with **one
+> library-wide fitted scalar** standing in for a quantity measured to split **≥30×** on exactly that missing
+> bit (`ω̂` 1.7–1.9 at termini vs 0.04–0.06 at junction-only seams). It works because over-charging a variance
+> is cheap and under-charging is expensive — **not because it is right**, and it is **expected to be fragile
+> on real data**. **When TSS/TES enter the region map (P1g), `ω` MUST be re-derived per structural class** —
+> same equation, one scalar per class; the partial-pooling block in that function is the plug-in point. Do
+> not treat the fitted value as a measured constant of the library.
+>
 > **`bp_solver.py` now holds ONE solve path** (2026-07-24): the legacy density-transfer `_scan` and all its
 > flags were deleted; the composition/enrichment-ratio unified solver is the sole `node_sweep`. The per-node
 > **initialization self-solve** was extracted into `node_init.py` (`build_node_init` — the four sources:

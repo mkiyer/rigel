@@ -73,6 +73,26 @@
 > **That un-defers §6 below.** The missing TSS/TES in the region/boundary map was deferred as "expected to be
 > low-impact on real data"; it is measured at **62–72 % of the graft's premise error**. → **P1g.**
 >
+> ### ⚠⚠ `ω_graft` IS A DEBT, NOT A MODEL — DO NOT LET THIS BE FORGOTTEN
+>
+> P1d's fitted `ω_graft` **partially compensates for a FAILURE IN OUR STRUCTURAL REPRESENTATION.** The
+> region/boundary map has no TSS/TES, so the solver **cannot tell a splice junction from a transcript
+> terminus** — and that distinction is the whole of the effect `ω` prices: measured `ω̂` = **1.7–1.9 at
+> terminus boundaries vs 0.04–0.06 at junction-only ones, a ≥30× split**, with 20.8 % of edges carrying
+> 71.7 % of the error. `ω` is a single library-wide average standing in for a bimodal quantity. It works
+> because over-charging a variance is cheap and under-charging is expensive — **not because it is right.**
+>
+> **Three consequences that must not be overlooked:**
+> 1. **It is expected to be fragile on real data.** It is fitted on ~200 exons with a 30–50 % standard
+>    error, on a suite that is Poisson by construction and whose isoforms are only nested truncations plus
+>    exon skips. Real annotations have alternative TSS/TES *inside* exons, mutually exclusive exons and
+>    retained introns — none of which this suite contains.
+> 2. **`ω` MUST be re-derived as a per-class quantity the moment TSS/TES enter the region map.** Same
+>    estimating equation, two (or more) scalars keyed on the structural bit, each fitted over a
+>    homogeneous population. The partial-pooling code already in `graft_premise_logvar` is the plug-in point.
+> 3. **Until then, treat every `ω`-dependent result as provisional**, and never quote the fitted value as
+>    if it were a measured constant of the library.
+>
 > **⭐ THE PASS-0 / PHASE-2 BOUNDARY IS NOW MEASURED (`SESSION_2026_07_25_HANDOFF_10.md`).** Suite state of
 > play: **12.56 M of 116.7 M node-attributed fragments misassigned (10.8 %)**; unstranded carries **84 %**,
 > single-strand exons **61 %**. On the largest scenario, 87.6 % of the error sits where `_pin_v` cancels the
@@ -227,18 +247,44 @@ evidence (`τ_own = 0` — every AMBIG node, all unstranded data) `v_own = ∞` 
 messages propagate untouched exactly where they are the only information. That inertness is deliberate — and it
 is also why the remaining AMBIG error is Phase 2's problem, not this term's.
 
-## 4. ⛔ THE BLOCKER — the gDNA hyperprior refit
+## 4. ✅ THE "BLOCKER" IS STALE — re-measured 2026-07-26, and Phase 2 is much closer than this file said
 
-This is now the single binding constraint. Fitting the hyperprior from the pass-0 result was working well and
-is much of the way there, and it is what makes the re-solve possible (esp. AMBIG). But production config ships
-`calib_refit_iters=1` and **that refit regresses unstranded capture-ON**, which is the largest error-mass arm.
+This section used to read *"⛔ THE BLOCKER — production ships `calib_refit_iters=1` and **that refit regresses
+unstranded capture-ON**."* **That is no longer true.** Measured at HEAD (mass-weighted, all 32 conditions,
+`refit=0 → refit=1`):
 
-That regression is no longer just a scoring problem — it is what blocks the AMBIG fix. Measured this session
-(`SESSION_2026_07_25_HANDOFF_6.md` §3): feeding the hyperprior's own λ-curvature into DL's `v_own` — the
-committed Phase-2 step, ~6 lines — improves exactly the arms it should (stranded 0.0376→0.0333, verystrong
-0.1292→0.1196, capture-off 0.0354→0.0168) and regresses unstranded-capON 0.1702→0.2177, because where the
-hyperprior is wrong DL now *enforces* it against the messages that would have corrected it. **Fix the
-hyperprior first; the AMBIG fix then lands almost for free.**
+| stratum | refit 0 | refit 1 | Δ | better/worse |
+|---|---|---|---|---|
+| ALL 32 | 0.0865 | **0.0676** | −0.0188 | 25 / 7 |
+| stranded ss_0.99 | 0.0313 | **0.0293** | −0.0020 | 10 / 2 |
+| **unstranded × capON** | 0.1523 | **0.1275** | **−0.0248** | 4 / 4 |
+| capture OFF | 0.0475 | **0.0319** | −0.0156 | 14 / 0 |
+| verystrong | 0.1844 | **0.1264** | −0.0579 | 3 / 1 |
+| gdna_none | 0.0941 | **0.0029** | −0.0912 | 9 / 0 |
+
+**The refit improves every stratum, including the one it was recorded as regressing** — and it already did so
+before P1d (pre-P1d unstranded × capON 0.1547 → 0.1001). The regression was real when it was written and has
+been fixed by the intervening work (the message packet, M11, the relay pin); the note simply outlived it.
+
+**And the second reason Phase 2 looked blocked is also wrong: AMBIG's over-confidence does not reach the
+hyperprior.** `_fit_gdna_hyperprior` already selects **REGION nodes that are single-strand or structural
+gDNA — no AMBIG, no boundaries** ("non-circular", `calibrate.py`). So the substrate the prior actually trains
+on is exactly the classes P1d made honest:
+
+| population | confidently-wrong | **z2 \| Q1** |
+|---|---|---|
+| **the hyperprior's training substrate** (region × single-strand) | 431,708 | **2.26** |
+| … its exon half | 246,391 | 2.46 |
+| … its intron half | 185,317 | 1.50 |
+| EXCLUDED from training (AMBIG + boundary) | 330,292 | **42.04** |
+
+**All of the remaining two-orders-of-magnitude over-confidence sits in the population the hyperprior never
+sees.** So P3 (AMBIG) is a pass-0 *quality* item for the re-solve, **not** a Phase-2 blocker.
+
+⚠ **What has NOT been re-tested at HEAD** is the specific committed Phase-2 step — feeding the hyperprior's
+own λ-curvature into DL's `v_own` (~6 lines, `SESSION_2026_07_25_HANDOFF_6.md` §3). At its original HEAD it
+improved stranded / verystrong / capture-off and regressed unstranded-capON 0.1702 → 0.2177. Given both
+premises above have changed, **that measurement is the single highest-value next experiment** → **P2a**.
 
 ## 5. What SHIPPED (is correct and on by default) vs WIP
 
@@ -285,31 +331,44 @@ hyperprior first; the AMBIG fix then lands almost for free.**
 3. ✅ **DONE — the unified solver wins the A/B**: 0.0969 (refit=0) / 0.0828 (refit=1) vs the 0.0949
    legacy-with-factory target — and note the current suite gained the hard `verystrong`/`gdna1`/`gdna5`
    scenarios since that number was set, so gate on in-run A/B deltas, not the absolute.
-4. ⭐ **RECONCILE THE ABSOLUTE-DENSITY AND COMPOSITION REGIMES — the NEXT task**
-   (`density_composition_reconciliation.md`). The composition regime is scale-blind: it reasons only in shares,
-   so a claim can be internally consistent, propagate for hops, and still assert more reads than the node
-   sequenced. Measured: the relay's `Σ_c ρ_c·E_c / M` exceeds 1 on **52–71 %** of nodes (p99 31–288×, max 519×),
-   and `_pin_v` — the operator that enforces the bound, whose own docstring says it belongs "at EVERY node" — is
-   applied only in the combine. Worth ≈ **2.2 M error mass (16.5 % of suite)**, it is a MODE defect, and it is
-   correctable in pass-0 **without** the hyperprior. It also supplies the missing "my mass is all RNA" authority
-   (§3.3) that currently blocks the graft-frame fix.
-5. **The gDNA hyperprior refit** (§4). Fix the unstranded-capON refit regression, then re-apply the measured
-   6-line Phase-2 step (hyperprior → DL `v_own`, which fixes AMBIG), then the re-solve, then a ship candidate.
-   Exact plan + numbers: `SESSION_2026_07_25_HANDOFF_6.md`.
-6. **⚠ UN-DEFERRED 2026-07-26 (now P1g) — the region/boundary map has no TSS/TES.** The "low-impact"
-   expectation below is **refuted by measurement**: a terminus boundary's graft premise error is
-   **30–100× larger** than a junction-only one, and terminus boundaries carry **62–72 %** of it
-   (`variance_ledger.md` §3.0). P1d prices this blind, through the two flanking seams' disagreement; naming
-   the bit directly would price it exactly. The original text follows.
-   **(historical) ⚠ DEFERRED STRUCTURAL (reaches to the index + accumulator): the region/boundary map has no TSS/TES.** A
-   transcript END is not represented in the partition, so the solver models the density drop there as a capture
-   cliff when the RNA simply stops. Real defect; explicitly not being fixed now, and expected to be low-impact
-   on real data (it was exposed by a simulator artifact — an exon interval coinciding exactly with a
-   multi-exonic transcript, putting a transcript end and a splice junction at the same position, which
-   essentially never occurs biologically). Details + the partial mitigation already available
-   (`mrna_active_pos/neg`, computed but unused on the measurement stream):
-   `density_composition_reconciliation.md` §4.1.
-7. **⚠ REFUTED, do not build: per-channel enrichment ratios at the boundary face.** The physics is real and
+4. ✅ **DONE — the composition peel, the MESSAGE PACKET, and P1d.** Suite 0.0865 (r0) / 0.0676 (r1);
+   confidently-wrong 1,777,658 → **762,000**; `z2` ALL 15.55 → **8.98**, exon-single 8.60 → **2.46**.
+
+5. ⭐ **P2a — RE-TEST THE PHASE-2 λ-CURVATURE STEP AT HEAD. THIS IS THE NEXT ACTION.** ~6 lines, already
+   written and measured once at a much older HEAD (`SESSION_2026_07_25_HANDOFF_6.md` §3). Both reasons it was
+   shelved have since evaporated (§4): the refit no longer regresses unstranded-capON, and the hyperprior's
+   training substrate is now at `z2` = 2.26. **If it holds up, Phase 2 unblocks immediately** — which is the
+   stated goal. Cheapest high-value experiment on the list by a wide margin. Gate it on the trust view, not
+   on mwae.
+
+6. **P1e — the conservation SURPRISE `z² = δ²/(αᵀΣα)`.** The only damping term that is **never inert** (M7's
+   DL needs `τ_own > 0` and so switches off on all unstranded data; a node's own mass is always known). It is
+   also the fix for **P1d's own residual regression**: that regression is localized to unstranded × gDNA-rich
+   × capture-OFF, which is P1b's population, where the RNA claim is a near-exact measurement and the **gDNA**
+   claim is 47× too big — so P1d currently damps the wrong arm. `claim/obs` is the prior-free observable that
+   says which arm failed, and nothing uses it as evidence.
+
+7. **P4 — the FAR level estimator is a LOOKUP, not a message.** A BP correctness violation of exactly the
+   kind P1d's per-edge form was reverted for: the left message's share depends on the RIGHT neighbour's
+   belief, so the two messages share information and the fused belief is *structurally* over-confident.
+   Boundary `z2` is 5.58 (single) / 18.89 (AMBIG), the worst outside AMBIG exons. Load-bearing (ablating
+   costs 0.0010) — **replace, do not delete.**
+
+8. ⭐ **P1g — PUT TSS/TES IN THE REGION/BOUNDARY MAP.** The structural debt behind `ω_graft` (see the banner
+   at the top of this file). Owner-flagged as a high priority and forthcoming. It reaches the index build
+   (`boundary_df` today carries only `boundary_id`/`ref_name`/`position`; `t_df` already has the transcript
+   spans, so the bit is derivable with no new input). On landing, **re-derive `ω_graft` per structural
+   class** — same equation, one scalar per class.
+
+9. **P3 — AMBIG exon over-confidence** (`z2 | Q1` = 64.39, 259,493 confidently-wrong reads, 34 % of what
+   remains). **Demoted from "promoted": it is excluded from the hyperprior fit by construction**, so it
+   blocks the *re-solve's* quality, not Phase 2's start. Established as the designed weakness, not a mode
+   bug (`SESSION_2026_07_25_HANDOFF_9.md` §0b) — a trained prior is the fix, which means it is largely
+   *downstream* of Phase 2 rather than upstream of it.
+
+10. **Then the re-solve and a ship candidate.**
+
+11. **⚠ REFUTED, do not build: per-channel enrichment ratios at the boundary face.** The physics is real and
    measured (the boundary sits on a capture SLOPE: at verystrong it is 0.125× the exon and 2113× the intron),
    but item 4's relay pin retired the motivation — substituting the ORACLE capture step for the model's `r`
    buys ~0 (−0.16/−0.17/−0.33, +0.013) and ≈4 % at verystrong, because the reframe only carries SCALE and the

@@ -54,6 +54,26 @@ fitted by method of moments from the population of exons whose **two flanking se
 at refit=1 `unstranded × capON` −0.0017 (3 better / **0 worse**). Arms in `/tmp/pass0_oracle_bench.tsv`:
 `pk2` (pre), `p1dp` (HEAD), `final_p1d` (the reverted per-edge variant), `pool` ≡ `p1dp`.
 
+> ### ⚠⚠ `ω_graft` IS A DEBT, NOT A MODEL — DO NOT LET THIS BE FORGOTTEN
+>
+> P1d's fitted `ω_graft` **partially compensates for a FAILURE IN OUR STRUCTURAL REPRESENTATION.** The
+> region/boundary map has no TSS/TES, so the solver **cannot tell a splice junction from a transcript
+> terminus** — and that distinction is the whole of the effect `ω` prices: measured `ω̂` = **1.7–1.9 at
+> terminus boundaries vs 0.04–0.06 at junction-only ones, a ≥30× split**, with 20.8 % of edges carrying
+> 71.7 % of the error. `ω` is a single library-wide average standing in for a bimodal quantity. It works
+> because over-charging a variance is cheap and under-charging is expensive — **not because it is right.**
+>
+> **Three consequences that must not be overlooked:**
+> 1. **It is expected to be fragile on real data.** It is fitted on ~200 exons with a 30–50 % standard
+>    error, on a suite that is Poisson by construction and whose isoforms are only nested truncations plus
+>    exon skips. Real annotations have alternative TSS/TES *inside* exons, mutually exclusive exons and
+>    retained introns — none of which this suite contains.
+> 2. **`ω` MUST be re-derived as a per-class quantity the moment TSS/TES enter the region map.** Same
+>    estimating equation, two (or more) scalars keyed on the structural bit, each fitted over a
+>    homogeneous population. The partial-pooling code already in `graft_premise_logvar` is the plug-in point.
+> 3. **Until then, treat every `ω`-dependent result as provisional**, and never quote the fitted value as
+>    if it were a measured constant of the library.
+
 ## 2. ⭐ What the measurement refuted — read before touching P1d again
 
 | §5.2 / §3 claim | verdict |
@@ -91,19 +111,25 @@ at refit=1 `unstranded × capON` −0.0017 (3 better / **0 worse**). Arms in `/t
 
 Everything in HANDOFF_13 §5, HANDOFF_11 §8 and HANDOFF_10 §4/§9.2 still holds.
 
-## 4. ▶ NEXT
+## 4. ▶ NEXT — and the order changed, on two measurements made after P1d landed
 
-1. **P1e — the conservation SURPRISE**, and P1d's own residual regression points straight at it. The
-   regression is localized to **unstranded × gDNA-rich × capture-OFF** (`gdna100_ss0.50_none_capOFF` +0.0406,
-   `gdna300_ss0.50_*_capOFF` +0.012) — which is exactly P1b's population, where the RNA claim is a near-exact
-   measurement (36.6453 claimed vs 36.6734 true) and the **gDNA** claim is 47× too big. P1d damps the RNA arm
-   there, which is the wrong arm. `claim/obs` is the prior-free observable that says which arm failed
-   (`PASS0_FINISH_PLAN.md` §P1b: 1.00–1.01× ⇒ excellent, 1.26–1.33× ⇒ bad), and nothing uses it as evidence.
-2. **P1g — put TSS/TES in the region/boundary map** (un-deferred from `ROADMAP.md` §6). P1d prices this bit
-   blind, through the two seams' gap; naming it directly prices it exactly, and it is 62–72 % of the error.
-   Reaches the index schema (`boundary_df` has only `boundary_id`/`ref_name`/`position` today; `t_df` has the
-   transcript spans, so the bit is derivable at index-build with no new input).
-3. **P3 — AMBIG exon over-confidence.** `z2|Q1` 183 → 92.1 → **65.3**, still the largest single defect.
+**Both of the reasons Phase 2 was "blocked" turn out to be stale.** See `ROADMAP.md` §4 for the tables.
+
+1. **The refit no longer regresses.** `refit=0 → refit=1` at HEAD improves EVERY stratum, including the one
+   on record as the blocker: unstranded × capON **0.1523 → 0.1275** (25 better / 7 worse overall). It was
+   already true pre-P1d (0.1547 → 0.1001), so the intervening work fixed it and the note outlived it.
+2. **AMBIG's over-confidence never reached the hyperprior.** `_fit_gdna_hyperprior` selects REGION nodes that
+   are single-strand or structural gDNA — **no AMBIG, no boundaries** ("non-circular"). That substrate is at
+   `z2 | Q1` = **2.26** (exon half 2.46, intron half 1.50); the 42.04 sits entirely in the excluded half.
+
+| # | item | why |
+|---|---|---|
+| **P2a** | ⭐ **re-test the Phase-2 λ-curvature step at HEAD** (~6 lines, `HANDOFF_6` §3) | **THE NEXT ACTION.** Both premises for shelving it are gone. If it holds, **Phase 2 unblocks** |
+| **P1e** | the conservation **SURPRISE** `z² = δ²/(αᵀΣα)` | never inert, and it is the fix for P1d's own residual regression — there the RNA claim is near-exact and the **gDNA** claim is 47× too big, so P1d damps the wrong arm. `claim/obs` says which |
+| **P4** | FAR is a LOOKUP, not a message | the same BP violation P1d's per-edge form was reverted for. Boundary `z2` 5.58 / 18.89 |
+| **P1g** | **TSS/TES in the region map** | the structural debt behind `ω_graft`; owner-flagged, forthcoming. On landing, re-derive `ω` per class |
+| P3 | AMBIG exon over-confidence | `z2` 64.4, 34 % of what remains — but **excluded from the hyperprior**, so it is the re-solve's problem, downstream of the trained prior |
+| — | then the re-solve + a ship candidate | |
 
 ## 5. HOW TO RUN EVERYTHING
 

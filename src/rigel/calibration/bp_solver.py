@@ -806,7 +806,11 @@ def node_sweep(
         def _seam_pair(rho_lface, rho_rface):
             """Per strand: the graft's premise log-variance — ONE library-level scalar, fitted by method of
             moments from the destination-frame disagreement of exons' flanking seam PAIRS
-            (`graft_premise_logvar`) and applied to every graft edge."""
+            (`graft_premise_logvar`) and applied to every graft edge.
+
+            ⚠⚠ **A DEBT, not a model.** The one scalar stands in for a quantity that splits ≥30× on whether
+            the boundary carries a transcript TERMINUS — a bit the region map does not have. Re-derive this
+            per structural class when TSS/TES land (P1g). See `graft_premise_logvar`."""
             out = []
             for spf, vmu in ((spl_p_f, 0), (spl_n_f, 1)):
                 fl, fr = _flank_dom(rho_lface, rho_rface, spf)

@@ -760,6 +760,17 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
     ``/2`` is the measured independence and the truncation at 0 is the method's own ("no detectable
     premise error"). Returns ``(per_edge, pooled)``.
 
+    ⚠⚠ **`ω_graft` IS A DEBT, NOT A MODEL.** It partially compensates for a FAILURE IN THE STRUCTURAL
+    REPRESENTATION: the region/boundary map has no TSS/TES, so the solver cannot tell a splice junction from
+    a transcript terminus — and that distinction is the whole of the effect this term prices (`ω̂` 1.7–1.9 at
+    terminus boundaries vs 0.04–0.06 at junction-only ones, a ≥30× split, with 20.8 % of edges carrying
+    71.7 % of the error). One library-wide average is standing in for a bimodal quantity. It works because
+    over-charging a variance is cheap and under-charging is expensive, **not because it is right**, and it is
+    expected to be FRAGILE ON REAL DATA (fitted on ~200 exons at 30–50 % SE, on a Poisson-by-construction
+    suite whose isoforms are only nested truncations plus exon skips). **It MUST be re-derived as a per-class
+    quantity the moment TSS/TES enter the region map (P1g)** — same equation, one scalar per structural class;
+    the partial-pooling block below is the plug-in point.
+
     **⭐ The POOLED value is what is used — the per-edge one is returned for diagnostics only.** Both halves
     of that were wrong in the first landing (2026-07-26) and are corrected here:
 

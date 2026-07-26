@@ -14,17 +14,38 @@ do not start a competing list.
 | **P1** | root-cause the **capture-OFF** confident error | 🔬 **ROOT-CAUSED**, §P1b |
 | **P1c** | the WEIGHTED RESCALE | ⤳ **SUPERSEDED** by P1f, which makes it inert (0/0/32); law kept, path removed |
 | **P1f** | **the MESSAGE PACKET** — λ and θ carried explicitly, fused by their OWN precisions | ✅ **LANDED** — `weighted_rescale_design.md` §9 |
-| **P1e** | the composition **SURPRISE** `z² = δ²/(αᵀΣα)` as a damping term — never inert | ▶ **NEXT** (owner-directed). P1d's residual regression points straight at it: the premium must go to the arm whose premise FAILED, and `claim/obs` is the observable that says which |
+| **P2a** | ⭐ **RE-TEST the Phase-2 λ-curvature step at HEAD** (~6 lines, `HANDOFF_6` §3) | ▶ **THE NEXT ACTION.** Both reasons it was shelved have evaporated: the refit no longer regresses unstranded-capON (0.1523 → **0.1275** at HEAD, 25/7 overall), and the hyperprior's substrate is at `z2` = **2.26**. If it holds, **Phase 2 unblocks** |
+| **P1e** | the composition **SURPRISE** `z² = δ²/(αᵀΣα)` as a damping term — never inert | ▶ next after P2a. P1d's residual regression points straight at it: the premium must go to the arm whose premise FAILED, and `claim/obs` is the observable that says which |
 | — | **`variance_ledger.md`** — every variance term, what it prices, and the no-overlap proof | ✅ **the standing audit; update it whenever a term changes** |
 | **P1d** | the graft's **PREMISE** variance (was: "extrapolation" — refuted) | ✅ **LANDED** 2026-07-26, `graft_premise_logvar` — ONE library-level MoM scalar, default ON. Confidently-wrong **−36.6 %**, z2 ALL 15.55 → **8.98**, exon-single 8.60 → **2.46**, for +1.2 % mwae. (A per-edge two-seam variant landed first and was reverted same-day — χ²₁ noise + a BP violation.) The mechanism is **transcript TERMINI**, not extrapolation — `variance_ledger.md` §3.0 |
-| **P3** | AMBIG exon over-confidence — z2\|Q1 was 183, then 92.1, now **65.3** after P1d | ▶ **PROMOTED** above P4/P5; still the largest single defect |
-| P4 | FAR → a proper opposite-direction message; M11's pre-DL precision | queued |
+| **P3** | AMBIG exon over-confidence — `z2\|Q1` 183 → 92.1 → **64.4** | ⤵ **DEMOTED.** Still the largest single defect (259,493 CWRONG, 34 %) but **excluded from the hyperprior fit by construction**, so it blocks the RE-SOLVE's quality, not Phase 2's start. Largely downstream of the trained prior |
+| **P4** | FAR → a proper opposite-direction message; M11's pre-DL precision | ▲ **promoted above P3.** The same BP violation P1d's per-edge form was reverted for; boundary `z2` 5.58 / 18.89 |
 | P5 | re-test `r` from the gDNA channel (the "moot" verdict is stale) | queued |
 | P6 | fragment length as a FOURTH information source — **gated** | scoping only |
-| **P1g** | ⭐ **NEW — put TSS/TES in the region/boundary map.** `ROADMAP.md` §6 deferred it as "expected to be low-impact"; it is measured at **62–72 % of the graft's premise error** and a free annotation bit splits ω̂ **≥30×**. P1d prices it blind through the two-seam gap; naming it directly would price it exactly | ▶ **UN-DEFERRED by measurement** |
-| — | **THEN** the gDNA hyperprior refit + the re-solve | blocked on the above |
+| **P1g** | ⭐ **put TSS/TES in the region/boundary map — THE STRUCTURAL DEBT BEHIND `ω_graft`** (owner: high priority, forthcoming). `ROADMAP.md` §6 deferred it as "expected to be low-impact"; it is measured at **62–72 % of the graft's premise error** and a free annotation bit splits ω̂ **≥30×**. P1d prices it blind through the two-seam gap; naming it directly would price it exactly | ▶ **UN-DEFERRED by measurement** |
+| — | **THEN** the re-solve + a ship candidate | the hyperprior fit itself is no longer blocked — see P2a |
 
 ---
+
+> ### ⚠⚠ `ω_graft` IS A DEBT, NOT A MODEL — DO NOT LET THIS BE FORGOTTEN
+>
+> P1d's fitted `ω_graft` **partially compensates for a FAILURE IN OUR STRUCTURAL REPRESENTATION.** The
+> region/boundary map has no TSS/TES, so the solver **cannot tell a splice junction from a transcript
+> terminus** — and that distinction is the whole of the effect `ω` prices: measured `ω̂` = **1.7–1.9 at
+> terminus boundaries vs 0.04–0.06 at junction-only ones, a ≥30× split**, with 20.8 % of edges carrying
+> 71.7 % of the error. `ω` is a single library-wide average standing in for a bimodal quantity. It works
+> because over-charging a variance is cheap and under-charging is expensive — **not because it is right.**
+>
+> **Three consequences that must not be overlooked:**
+> 1. **It is expected to be fragile on real data.** It is fitted on ~200 exons with a 30–50 % standard
+>    error, on a suite that is Poisson by construction and whose isoforms are only nested truncations plus
+>    exon skips. Real annotations have alternative TSS/TES *inside* exons, mutually exclusive exons and
+>    retained introns — none of which this suite contains.
+> 2. **`ω` MUST be re-derived as a per-class quantity the moment TSS/TES enter the region map.** Same
+>    estimating equation, two (or more) scalars keyed on the structural bit, each fitted over a
+>    homogeneous population. The partial-pooling code already in `graft_premise_logvar` is the plug-in point.
+> 3. **Until then, treat every `ω`-dependent result as provisional**, and never quote the fitted value as
+>    if it were a measured constant of the library.
 
 ## 0b. ⭐ STATE OF PLAY (2026-07-26, end of session)
 

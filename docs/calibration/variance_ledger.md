@@ -24,7 +24,7 @@ log-variance except where noted.
 | M11 | `ψ'(k) + 1/(n·E[f_R]²)` (`residual_level`) | the **level** the peel share is formed from | inside M10's `v_ν` | live |
 | M7 | `b̂²` (`mismatch_deflate`) | the imputation **premise** being false — DerSimonian–Laird against the destination's own self-solve | every stream, **but inert wherever `τ_own = 0`** (all AMBIG, all unstranded ⇒ 84 % of error mass) | live |
 | — | `1/n_spl` | the spliced measurement's own count | the graft | live |
-| **P1d** | `ω_graft` = `max(0, E[d²]−E[noise])/2` (`graft_premise_logvar`) — **ONE library-level scalar**, MoM | the graft's **premise**: a seam's RNA used as the exon's RNA, when it is only a LOWER BOUND on it | the WHOLE grafted RNA claim, both code paths | **LIVE** (2026-07-26) — §3, and ⚠ **its mechanism is NOT what §3 originally said**, see §3.0 |
+| **P1d** | `ω_graft` = `max(0, E[d²]−E[noise])/2` (`graft_premise_logvar`) — **ONE library-level scalar**, MoM. ⚠ **A DEBT, not a model — §3.5** | the graft's **premise**: a seam's RNA used as the exon's RNA, when it is only a LOWER BOUND on it | the WHOLE grafted RNA claim, both code paths | **LIVE** (2026-07-26) — §3, and ⚠ **its mechanism is NOT what §3 originally said**, see §3.0 |
 | P1e | the conservation **surprise** `δ²/(αᵀΣα)` | how implausible the claim is against the node's own observed mass | every message | not built |
 | — | ~~NPMLE projection `var_proj + (Δμ_proj)²`~~ | a **density** disagreement between two nodes | — | **RETIRED**; `DensityNPMLE.project` is called nowhere. ⚠ `CalibrationConfig`'s docstring still describes it and is stale |
 
@@ -170,6 +170,27 @@ there it is conflated with the frame step M8 already prices — which is exactly
 **capture-independent**, or it double-counts M8.
 
 ## 3.5 The fitted scalar `ω_graft` — what it is, and the four questions answered about it
+
+> ### ⚠⚠ `ω_graft` IS A DEBT, NOT A MODEL — DO NOT LET THIS BE FORGOTTEN
+>
+> P1d's fitted `ω_graft` **partially compensates for a FAILURE IN OUR STRUCTURAL REPRESENTATION.** The
+> region/boundary map has no TSS/TES, so the solver **cannot tell a splice junction from a transcript
+> terminus** — and that distinction is the whole of the effect `ω` prices: measured `ω̂` = **1.7–1.9 at
+> terminus boundaries vs 0.04–0.06 at junction-only ones, a ≥30× split**, with 20.8 % of edges carrying
+> 71.7 % of the error. `ω` is a single library-wide average standing in for a bimodal quantity. It works
+> because over-charging a variance is cheap and under-charging is expensive — **not because it is right.**
+>
+> **Three consequences that must not be overlooked:**
+> 1. **It is expected to be fragile on real data.** It is fitted on ~200 exons with a 30–50 % standard
+>    error, on a suite that is Poisson by construction and whose isoforms are only nested truncations plus
+>    exon skips. Real annotations have alternative TSS/TES *inside* exons, mutually exclusive exons and
+>    retained introns — none of which this suite contains.
+> 2. **`ω` MUST be re-derived as a per-class quantity the moment TSS/TES enter the region map.** Same
+>    estimating equation, two (or more) scalars keyed on the structural bit, each fitted over a
+>    homogeneous population. The partial-pooling code already in `graft_premise_logvar` is the plug-in point.
+> 3. **Until then, treat every `ω`-dependent result as provisional**, and never quote the fitted value as
+>    if it were a measured constant of the library.
+
 
 `ω = max(0, E[d²] − E[noise])/2` over exons with spliced flux on **both** flanking boundaries.
 `d = log(ρ_μ(left)/ρ_μ(right))`, both lifted into the exon's frame; `noise` = the two seams' spliced counts

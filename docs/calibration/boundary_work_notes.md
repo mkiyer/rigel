@@ -59,11 +59,9 @@ boundary density = (0.5 spliced) + (0.05 - 0.2 unspliced)
 
 enrichment ratio = boundary density / exon density
 
-so just from fragment length alone, the enrichment ratio:
-- lower bound = (boundary 100% rna = 1.0) / (exon 100% gdna = 40) = 0.025
-- upper bound = (boundary 100% dna = 2.5) / (exon 100% rna = 10) = 0.25
+so just from fragment length alone, the enrichment ratio can vary. can we can compute the upper and lower bound if RNA and gDNA are free parameters.
 
-*so enrichment ratio can vary by factor of 10 maximum*
+*so enrichment ratio can vary by a known range*
 
 but this neglects a key assumption:
 ** gDNA is (relatively, usually) uniform. uniform is a reasonable approximation **
@@ -101,34 +99,65 @@ ENRICHED 1kb exon with 2000 counts
 
 now the boundary:
 - say the boundary is partially enriched, just 5X
-- gdna density 0.05 x 50 = 2.5 counts
-- we said we had 1000 
-rna density = 
+- gdna density 0.05 x 50 = 2.5 counts (round to 2)
+- we said we had 100 spliced counts and 10 unspliced counts
+
+- rna density = (100 / 200) + (8 / 200) = 0.54
+- dna density = (2 / 50) = 0.04
+- total density = 0.58
+
+so total density ratio is 2.475 / 0.58 = 4.26X
+
+# enrichment ratio error is affected by fragment length difference
+
+- above it is clear that difference in dna vs rna fragment length distribution affects enrichment ratio
+
+enrichment ratio variance includes:
+- rna count variance
+- dna count variance
+- rna FL distribution variability (RNA can have many different fragment lengths)
+- dna FL distribution variability (DNA can have many fragment lengths)
+
+All of this can vary for each node, and we take the ratio of two nodes.
+
+# precision (belief) of a node affects the precision of the enrichment ratio
+
+- an imprecise node can vary between RNA and gDNA, so the fragment length differential -> total density variation -> translates to larger variation of the enrichment ratio
+- a PRECISE node has hardened its RNA vs DNA fraction -> fixed composition -> fixed enrichment ratio.
+
+
+# open question: can we derive the "most likely" composition?
+
+- does minimizing the "disagreement" in total density between two nodes lead to a "correct" solution?
+
+- i don't think so.. but we may be onto a helpful computation or arithmetic that helps our solver.
 
 
 
+=======
 
 
 
+This term psi "φ = (the RNA at the seam, unspliced + spliced) / (the exon's actual RNA density), both in a common frame"
 
+I think the literature has referred to this as percent spliced in or percent spliced out.
 
+My intuition is that we might be able to try to derive this at least for Poisson counting without needing to model it in the data. The problem is the data will be over dispersed, and the Poisson model will be overconfident, but it probably adds what we're missing now. So let me talk you through what I'm envisioning.
 
+We have a boundary with measured splice fragments, and so we have a defined density at the boundary. It's an RNA density. It's measured. It's fixed. It's invariant, and so we have that. And we can assume Poisson for the count process, but we really will have over dispersion in real data. It would be best to model with real data and not derive this from theoretical standpoint, but I think starting from theoretical underpinnings will help us to develop this better, and then we can figure out how to add over dispersion or change the model to a nonparametric model and of some sort.
 
+So the derivation that needs to be done is assume we have a unknown RNA density. The unknown ground truth RNA density is being estimated. The exon itself is estimating the RNA density. If we assume we have ZERO gDNA, then we can model the variance of the imputation.
 
+If we have zero DNA, then the boundary density is pure RNA regardless of whether it is spliced or unspliced, and we have a boundary density. That boundary density is imprecise because the boundary is short. In other words, it's a short, uh, fragment length that gives us our estimate. So whatever the counts are are measured over a very short length and adjusting the counts can cause significant changes to the density. Of course, this obscures away the problem of DNA, which, as you know, creates another source of variance because the density changes as the composition of DNA versus RNA changes because the fragment lengths change, and so that creates additional variation.
 
+but in the most simple DNA free case, we just have RNA density at the boundary. And then in the exon, we have pure RNA density as well that's measured over a much longer exon length usually. Sometimes exons can be tiny and empty. In fact, if the length of an exon is too small, then the exon will have zero fragments. And so this all collapses in those cases. The exon length has to be large enough to accommodate many fragments. And so if the exon length is much larger than a fragment length, all of this is reasonably accurate. So we do have a case where the exon length becomes too small, in which case we can't really model the disagreement aware variance.
 
+So we have two estimates of the same thing. One is coming from a short fragment length boundary with some fairly imprecise estimate. The other is coming from the exon itself, which may be more precise. Both of these are trying to estimate the same unknown ground truth RNA density.
 
-# error is bounded by fragment length difference
+So from a theoretical standpoint, we can understand this transfer variance concept. If we say we're measuring Poisson estimate of RNA at the boundary and Poisson estimate of RNA at the exon, we can derive what the error will be between the two estimates. and the error should be dependent on the region length because the exon region could be very short, in which case the error... exon will be very imprecise. and the axon could be very long, in which case it will be more precise. Either way, that's a baseline for what the disagreement will be and what the error will be based on Poisson counting principles.
 
+So my question is, are we modeling at the very least this type of error, which is the disagreement between two Poisson processes estimating the same latent RNA density that is unknown. 
 
-# idea: minimize absolute density difference?
+I think we can build up a correct count based error model this way. Then we need to add in over dispersion, which is difficult to measure again for the same reasons. We need some sort of observable measure of over dispersion, which we don't really have, and we have the circularity issues. And then we need to account for DNA, which is ALSO unknown. when we account for DNA, we have a similar error where the DNA is uniform between the boundary and the exon, and we have two estimations of the unknown DNA level, one at the exon, one at the boundary, and we can model the disagreement of those estimates the same way. So we can have a DNA transfer error imputation error, uh, and an RNA imputation error.
 
-here is an concept probably worth exploring:
-
-"the composition that minimizes the absolute difference between two nodes is most likely to be correct"
-
-If the gDNA FL == RNA FL, then this does not matter.
-
-When gDNA FL != RNA FL, then differences in the composition affect the total density of the node.
-
-The total density
+So this is my concept or mental model of what we're trying to model here. And I could be completely off base or off target, but I'd like you to take this, integrate it with what your thoughts are, and see if we can improve.
