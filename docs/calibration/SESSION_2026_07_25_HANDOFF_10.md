@@ -536,7 +536,66 @@ junction-bearing seams only before using them.
    wrong (0.17–0.41). A regime-aware share — intron estimate when unsaturated, conservative when saturated —
    is the concrete next experiment, and the detector makes it constant-free.
 
-## 12. Tools
+## 12. ⭐⭐ THE GRID IS NOT THE PROBLEM, AND THE PRECISION IS ALREADY HONEST
+
+Owner asked the right three questions — finer grid? linear-scale grid? different point distribution? — with
+the right instinct behind them: *honest uncertainty should manifest as LOWER PRECISION, which keeps boundaries
+honest and stops messages contaminating near-pure-gDNA introns*. Answers, in order.
+
+### 12.1 Finer grid — NO
+
+Resolution near the vertex is `Δf_g = f_g(1−f_g)·Δλ = 0.982·0.018·0.078 ≈ 0.0014` on the single-strand grid
+(K = 256, L = 10) — **15× finer than the 0.021 bias**. And §11.2's L-sweep held resolution CONSTANT (K scaled
+with L) and the drift persisted, so it is the WINDOW, not the spacing.
+
+### 12.2 Linear-scale grid / different point distribution — NO, and it cannot be
+
+**The median is transform-invariant**: `median f_g = σ(median λ)` in any coordinate. Re-gridding changes
+quadrature accuracy, not the answer. What a coordinate change *would* alter is the implied MEASURE — flat in λ
+is Beta(0,0) (improper, §11.2's drift), flat in `f_g` is Beta(1,1) — but the code writes an EXPLICIT reference
+(`_JEFFREYS_REF`), so the measure is Beta(½,½) in either coordinate, deliberately. The parameterization is not
+carrying the problem; the prior is, and §11.2 shows the prior is required.
+
+### 12.3 ⭐ The precision is ALREADY honest — measured, and conservative
+
+`z2 = E[err²]/E[Var]`, 1.0 = honest, at introns split by the §11.4 saturation detector:
+
+| condition | sat? | n | f_g | oracle | \|err\| | sd(f_g) | **z2 f_g** | ρ_ν | sd | **z2 ρ_ν** |
+|---|---|---|---|---|---|---|---|---|---|---|
+| gdna300 ss0.50 none capON | SAT | 287 | 0.9885 | 1.0000 | 0.0115 | 0.0230 | **0.25** | 0.0006 | 0.0012 | **0.21** |
+| | not | 285 | 0.9637 | 1.0000 | 0.0363 | 0.0365 | **1.20** | 0.0028 | 0.0069 | 0.13 |
+| gdna300 ss0.99 none capON | SAT | 276 | 0.9897 | 1.0000 | 0.0103 | 0.0180 | **0.37** | 0.0006 | 0.0012 | 0.14 |
+| | not | 295 | 0.9740 | 1.0000 | 0.0260 | 0.0273 | **1.22** | 0.0017 | 0.0028 | 0.21 |
+| gdna300 ss0.99 present capON | SAT | 117 | 0.9884 | 0.9874 | 0.0130 | 0.0224 | **0.55** | 0.0006 | 0.0012 | 0.48 |
+| | not | 454 | 0.8200 | 0.8246 | 0.0283 | 0.0354 | **0.95** | 0.0150 | 0.0032 | 0.25 |
+
+**At saturated nodes the reported sd is ~2× the realized error, and the node reports ρ_ν = 0.0006 ± 0.0012 —
+consistent with ZERO.** The architecture is not degrading precision; the node is already saying exactly what
+the owner wants it to say. Away from the vertex it is well calibrated (z2 = 0.95–1.22).
+
+⚠ **This CORRECTS §11's emphasis.** The larger intron error is on the NON-saturated nodes (0.0363 vs 0.0115),
+where the FACTORY's own mode sits below the vertex — not on the reference-limited saturated ones. The
+reference effect (§11.1) is real and worth ~0.021 on every intron, but it is not the dominant intron error.
+
+### 12.4 So the defect is that the CONSUMERS discard the precision
+
+A node saying `ρ_ν = 0.0006 ± 0.0012` cannot contaminate anything — *unless a consumer takes the 0.0006 and
+drops the ±0.0012*. That is exactly what happened: the two-step's share was computed as a ratio of MODES
+(§10.1), and the relay's density fuse is precision-weighted but a lone weak claim still sets the fused mode
+when nothing competes with it.
+
+**The fix is therefore not in ψ, the grid, or the reference — it is to make the peel consume the DISTRIBUTION
+rather than the mode.** `peel_share_logvar` (M10, derived, MC-validated to 0.2–1.0 %, landed as a pure law and
+still unused) is precisely that object. And it comes with a bonus that closes the loop on the owner's
+"gDNA until proven otherwise": a claim of `0.0006 ± 0.0012` has a posterior for `w` piled at ~0, so the safe
+default is REPRODUCED BY THE UNCERTAINTY rather than asserted by a rule.
+
+**Next experiment**, concretely: carry `(ρ_ν, Var(log ρ_ν))` into the share, form `w` and `Var(log w)` via
+`peel_continue_share` / `peel_share_logvar`, and let the message precision — not a gate — decide how much of
+the exon's RNA survives the seam. Per-condition A/B at both refits, watching `nrna_none` (where `w → 0` must
+be reproduced) and `nrna_present` (where §10.1 shows `w = 0` is badly wrong, 0.17–0.41).
+
+## 13. Tools
 
 `scripts/debug/pass0_error_table.py` — the suite state of play in READS with the trust (`errQ1conf`) view.
 `scratchpad/t1_char.py` (characterize + ψ ablation, bit-exact), `t2_strata.py` (channel-arrival strata +
