@@ -108,7 +108,64 @@ confidently-wrong mass disappears, for 2.4 % more error mass.** On mwae it costs
 the expected trade — damping a channel always costs mass when its mode is doing work — but mwae is not what
 pass-0 owes Phase 2. This is the single largest trust improvement available anywhere on the list.
 
-## 5. The open piece: a prior-free estimator, with two candidates already refuted
+## 5. ⛔→✅ THE ESTIMATOR EXISTS. The earlier refutation was MY STATISTICAL ERROR.
+
+### 5.1 The correction
+
+An exon's two flanking junctions each claim its RNA density, so under the graft's premise they should agree,
+and their disagreement is a free two-study estimate of the premise error. I first reported this as **refuted**
+— "under-states by 20×, the two junctions are ~0.95 correlated". **That conclusion was wrong.** It compared
+the *median* |gap| (0.14 — a robust statistic) against the full *sd* of log φ (0.76 — a non-robust one) on a
+distribution whose variance is 7–9× concentrated in its tails. Apples to oranges.
+
+With **matched statistics** (variance against variance):
+
+| condition | `Var(log φ)` (truth, oracle) | `Var(gap)` | `Var(gap)/2` (the estimate) | ratio |
+|---|---|---|---|---|
+| `gdna300 ss0.99 present capOFF` | 0.583 | 1.287 | **0.644** | **0.91×** |
+| `gdna300 ss0.50 present capOFF` | 0.574 | 1.319 | **0.659** | **0.87×** |
+
+The two junctions are **essentially independent**, and `Var(gap)/2` recovers the target to within 9–13 %.
+Subtracting the Poisson part gives the method-of-moments form the calibrator already uses twice
+(`gdna_strand_overdispersion`, `rna_strand_overdispersion`):
+
+```
+    ω_graft = max( 0 , Var(gap) − E[ 1/n_left + 1/n_right ] ) / 2
+            = 0.594  and  0.601        against a true Var(log φ) of 0.583 and 0.574   —  within 2 %
+```
+
+**Prior-free, no constant, and it lands on the magnitude the probe showed is worth 42 % of the
+confidently-wrong mass.** (This does not resurrect the *left/right message gap* refuted in
+`SESSION_2026_07_25_HANDOFF_10.md` §4 — that was a different statistic, comparing two fused BP messages that
+share a reframe. These are two independent spliced COUNTS at two different loci, each already in the
+destination exon's frame by M8's argument.)
+
+### 5.2 ⭐ The open piece is now the SHAPE, not the magnitude
+
+A single pooled ω would be a crude first cut, because the dispersion is strongly count-dependent — and **not
+as `1/n`**:
+
+| junction spliced count | `Var(log φ)` | `1/n` (Poisson) | excess |
+|---|---|---|---|
+| < 30 | 1.799 | 0.125 | **1.674** |
+| 30–100 | 0.451 | 0.015 | 0.436 |
+| 100–300 | 0.558 | 0.006 | 0.552 |
+| 300–1000 | 0.145 | 0.002 | 0.143 |
+| > 1000 | 0.042 | 0.0004 | **0.041** |
+
+A **40× range** in the premise error across the count range, with the Poisson term explaining almost none of
+it. A pooled ω = 0.59 would over-charge the well-counted junctions by 14× and under-charge the sparse ones by
+3×.
+
+The physical reading, and it is the thing to confirm against real data: **the count is a proxy for the
+junction's SHARE of its exon's RNA.** A junction carrying most of the exon's transcripts is representative
+(φ → 1, small variance); a minor-isoform junction carries little and represents little (φ ≪ 1, and `log φ` is
+volatile). If that is the mechanism, the right per-junction observable is the junction's flux **relative to
+the exon's total RNA flux** — for which the flux at the exon's *other* junction is the obvious prior-free
+stand-in.
+
+## 6. (superseded) the original "two candidates refuted" note
+
 
 The magnitude needed is ~0.3–0.6. It must come from the data, not a constant.
 

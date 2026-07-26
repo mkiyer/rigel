@@ -15,7 +15,7 @@ do not start a competing list.
 | **P1f** | **the MESSAGE PACKET** — λ and θ carried explicitly, fused by their OWN precisions | ✅ **LANDED** — `weighted_rescale_design.md` §9 |
 | **P1e** | the composition **SURPRISE** `z² = δ²/(αᵀΣα)` as a damping term — never inert | ▶ **NEXT** (owner-directed) |
 | — | **`variance_ledger.md`** — every variance term, what it prices, and the no-overlap proof | ✅ **the standing audit; update it whenever a term changes** |
-| **P1d** | the graft's **EXTRAPOLATION** variance | 📐 **DERIVED + SIZED** — prize measured, ESTIMATOR open, `variance_ledger.md` §3–5 |
+| **P1d** | the graft's **EXTRAPOLATION** variance | 📐 **DERIVED + SIZED + ESTIMATOR FOUND** (MoM, within 2 %); the SHAPE is the open piece — `variance_ledger.md` §3–5 |
 | **P3** | AMBIG exon over-confidence — **z2\|Q1 = 183**, the worst defect in the solver | ▶ **PROMOTED** above P4/P5 |
 | P4 | FAR → a proper opposite-direction message; M11's pre-DL precision | queued |
 | P5 | re-test `r` from the gDNA channel (the "moot" verdict is stale) | queued |
