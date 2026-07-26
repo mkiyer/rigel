@@ -33,6 +33,12 @@
 > prior-free source is the neighbours' per-strand RNA imputation — already carried as `theta_imp`, and
 > measured **nearly inert** (0.1444 → 0.1417 when ablated).
 >
+> **⭐ CURRENT: the BOUNDARY work, and it is UNFINISHED BY DESIGN.** Suite **0.0885 (refit=0) / 0.0678
+> (refit=1)**. The composition peel (M10) is derived, MC-validated and its laws are landed, but every wiring
+> has bottomed out on the same thing — **there is no LEVEL at the seams that matter** (no factory within reach
+> at 97 % of `exon|exon` boundaries, no strand when unstranded). The owner has AGREED steps 1–5 in principle;
+> the revert is provisional. **Read `SESSION_2026_07_25_HANDOFF_11.md` before touching any of it.**
+>
 > **⭐ THE PASS-0 / PHASE-2 BOUNDARY IS NOW MEASURED (`SESSION_2026_07_25_HANDOFF_10.md`).** Suite state of
 > play: **12.56 M of 116.7 M node-attributed fragments misassigned (10.8 %)**; unstranded carries **84 %**,
 > single-strand exons **61 %**. On the largest scenario, 87.6 % of the error sits where `_pin_v` cancels the
@@ -81,7 +87,14 @@ The only other docs that are live (everything else is in `archive/`, kept for hi
   total (52–71 % of nodes; p99 31–288×). Holds the measured evidence, the derivation brief, the two adjacent
   modelling gaps (§4: **no TSS/TES in the region/boundary map**; **the boundary is a slope, not a cliff — three
   enrichment ratios, not one**), and the record of what was tried and rejected.
-* **`SESSION_2026_07_25_HANDOFF_10.md` — ⭐ THE LIVE HANDOFF. START HERE for the next session.** The deep
+* **`SESSION_2026_07_25_HANDOFF_11.md` — ⭐ THE LIVE HANDOFF. START HERE for the next session.** The BOUNDARY
+  work: steps 1–5 of the composition peel are **AGREED IN PRINCIPLE by the owner** and the revert is
+  PROVISIONAL. Holds the owner's per-step verdict, the three questions to pursue (why the regression / how to
+  compute the precision of a density ratio / how to split unspliced boundary fragments), the one-command
+  restore (`git apply scratchpad/steps_1_to_4.patch`), and the full do-not-re-run list.
+* **`peel_by_composition_plan.md`** — the plan for steps 1–5 with pre-registered gates; §10/§11 hold the
+  execution results, including two of its own assumptions being refuted.
+* `SESSION_2026_07_25_HANDOFF_10.md` — the boundary evidence base. The deep
   dive on the suite's largest error scenario: the intron factory's gDNA is excluded from the measurement
   stream (a real prior-free defect, fix validated at refit=0 but regressing refit=1 — decision needed), and
   the **count-zero-information wall measured**: on 87.6 % of that error the pin cancels `r`, and neighbouring
