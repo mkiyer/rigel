@@ -13,6 +13,19 @@ row splits the error mass by the node's own posterior ``Var(log f_g)``, at the s
 data-defined split, not a threshold): an honest solver puts far less than 25 % of its error in the
 most-confident quartile.
 
+**P0 (owner-agreed 2026-07-26, `docs/calibration/PASS0_FINISH_PLAN.md`): the scenario table is now ordered by
+CONFIDENTLY-WRONG MASS, not by error mass.** Ordering by error mass points at the premise-limited arms every
+time (`SESSION_2026_07_25_HANDOFF_10.md` §3: 67-75 % of the error there is reachable by a better MODE only,
+and x10 on every precision moves nothing) - those are the hyperprior's problem, not pass-0's. Ordering by
+`ERR x errQ1conf` produces a completely different, actionable list.
+
+**Two metrics, and they answer different questions - read both:**
+  * ``errQ1conf`` - the share of a class's ERROR sitting on confident nodes. It is confounded by SELECTION:
+    if a whole class is legitimately confident, its errQ1conf is high without any over-confidence. The
+    ``%nodeQ1`` column is printed beside it so the confound is visible.
+  * ``z2 = E[(f_g - oracle)^2] / E[Var(f_g)]`` - the CALIBRATION. 1.0 = honest, >1 = genuinely
+    over-confident, <1 = conservative. This is the one that says whether there is a defect to fix.
+
     OMP_NUM_THREADS=1 python scripts/debug/pass0_error_table.py [--refit 0] [--out /tmp/pass0_state.npz]
 """
 
@@ -92,19 +105,37 @@ unsure = (~finite) | (var >= q3)  # least-confident quartile (non-finite = no op
 
 print(f"\n{'=' * 132}\nPASS-0 STATE OF PLAY  (refit={a.refit})   "
       f"error = Σ mass·|f_g − oracle|, i.e. FRAGMENTS on the wrong side of the gDNA/RNA split\n{'=' * 132}")
+# the per-node calibration inputs: raw |f_g - oracle| and the node's own stated Var(f_g)
+raw = np.where(mass > _EPS, err / np.maximum(mass, _EPS), 0.0)
+
+
+def _z2(m):
+    """E[(f_g-oracle)^2]/E[Var(f_g)], mass-weighted. 1.0 = honest, >1 = over-confident."""
+    v = var[m]
+    k = m.copy()
+    k[m] = np.isfinite(v)
+    if not k.any():
+        return float("nan")
+    num = float(np.sum(mass[k] * raw[k] ** 2))
+    den = float(np.sum(mass[k] * var[k]))
+    return num / den if den > 0 else float("nan")
+
+
 print(f"{'scenario':<48}{'reads':>12}{'ERR reads':>11}{'mwae':>8}{'selfERR':>10}|"
-      f"{'single':>10}{'AMBIG':>10}|{'errQ1conf':>10}{'errQ4unsure':>12}")
-order = sorted(set(cond), key=lambda c: -err[cond == c].sum())
+      f"{'single':>10}{'AMBIG':>10}|{'CWRONG':>10}{'errQ1conf':>10}{'z2':>7}{'errQ4unsure':>12}")
+order = sorted(set(cond), key=lambda c: -err[(cond == c) & conf].sum())  # P0: by CONFIDENTLY-WRONG mass
 for c in order:
     m = cond == c
     e = err[m].sum()
     print(f"{c[5:]:<48}{mass[m].sum():>12,.0f}{e:>11,.0f}{e / mass[m].sum():>8.4f}"
           f"{sel[m].sum():>10,.0f}|{err[m & ~amb].sum():>10,.0f}{err[m & amb].sum():>10,.0f}|"
-          f"{err[m & conf].sum() / max(e, _EPS):>10.1%}{err[m & unsure].sum() / max(e, _EPS):>12.1%}")
+          f"{err[m & conf].sum():>10,.0f}{err[m & conf].sum() / max(e, _EPS):>10.1%}{_z2(m):>7.2f}"
+          f"{err[m & unsure].sum() / max(e, _EPS):>12.1%}")
 E = err.sum()
-print(f"{'-' * 132}\n{'TOTAL':<48}{mass.sum():>12,.0f}{E:>11,.0f}{E / mass.sum():>8.4f}{sel.sum():>10,.0f}|"
+print(f"{'-' * 139}\n{'TOTAL':<48}{mass.sum():>12,.0f}{E:>11,.0f}{E / mass.sum():>8.4f}{sel.sum():>10,.0f}|"
       f"{err[~amb].sum():>10,.0f}{err[amb].sum():>10,.0f}|"
-      f"{err[conf].sum() / E:>10.1%}{err[unsure].sum() / E:>12.1%}")
+      f"{err[conf].sum():>10,.0f}{err[conf].sum() / E:>10.1%}{_z2(np.ones_like(conf)):>7.2f}"
+      f"{err[unsure].sum() / E:>12.1%}")
 
 print(f"\n{'axis rollup':<34}{'reads':>13}{'ERR reads':>12}{'mwae':>8}{'share of ERR':>14}")
 AX = {"capture off": lambda c: "capture_off" in c, "capture on": lambda c: "capture_on" in c,
@@ -122,7 +153,7 @@ for lab, f in AX.items():
           f"{err[m].sum() / mass[m].sum():>8.4f}{err[m].sum() / E:>14.1%}")
 
 print(f"\n{'node class':<20}{'reads':>13}{'ERR reads':>12}{'mwae':>8}{'share of ERR':>14}"
-      f"{'errQ1conf':>11}")
+      f"{'CWRONG':>11}{'errQ1conf':>11}{'%nodeQ1':>9}{'z2':>7}")
 for c in ("exon", "boundary", "intron", "intergenic"):
     for lab, m2 in ((" single", ~amb), (" AMBIG", amb)):
         m = (d["cls"] == c) & m2
@@ -130,7 +161,12 @@ for c in ("exon", "boundary", "intron", "intergenic"):
             continue
         print(f"{c + lab:<20}{mass[m].sum():>13,.0f}{err[m].sum():>12,.0f}"
               f"{err[m].sum() / max(mass[m].sum(), _EPS):>8.4f}{err[m].sum() / E:>14.1%}"
-              f"{err[m & conf].sum() / max(err[m].sum(), _EPS):>11.1%}")
+              f"{err[m & conf].sum():>11,.0f}"
+              f"{err[m & conf].sum() / max(err[m].sum(), _EPS):>11.1%}"
+              f"{conf[m].mean():>9.1%}{_z2(m):>7.2f}")
+print("\n  ⚠ errQ1conf is confounded by SELECTION — compare it against %nodeQ1 (the share of the class's "
+      "NODES\n    that are in the confident quartile at all). A class with %nodeQ1 ≈ errQ1conf is confident "
+      "for a\n    legitimate reason; z2 is what says whether that confidence is EARNED.")
 print(f"\n  TRUST: Var(log f_g) quartiles q1={q1:.4g} q3={q3:.4g}; "
       f"{(~finite).sum():,} nodes have no finite variance. An HONEST solver keeps the most-confident "
       f"quartile's share of error well under 25 %.")
