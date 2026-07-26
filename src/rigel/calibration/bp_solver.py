@@ -441,7 +441,6 @@ def node_sweep(
 
         # P1d is ON by default; `RIGEL_GLV_OFF=1` ablates it (bit-identical to the pre-P1d path).
         _glv = not os.environ.get("RIGEL_GLV_OFF")
-        _glv_shrink = bool(os.environ.get("RIGEL_GLV_SHRINK"))  # partial pooling, see the law
         # ⭐ P1e — the conservation SURPRISE, ON by default. `RIGEL_P1E_OFF=1` ablates it;
         # unset ⇒ the whole block is skipped and the path is bit-identical.
         _p1e = 0.0 if os.environ.get("RIGEL_P1E_OFF") else float(os.environ.get("RIGEL_P1E") or 1.0)
@@ -839,7 +838,7 @@ def node_sweep(
                 # each seam's own noise: its spliced COUNT (never the mass) ⊕ its lift's scale sampling
                 # (M5's source leg; the destination's leg is common to both lifts and cancels in ``d``).
                 _lv = np.where(np.isfinite(logvar_tot), logvar_tot, 0.0)
-                per, pooled, shrunk = graft_premise_logvar(
+                per, pooled = graft_premise_logvar(
                     fl,
                     fr,
                     np.where(_vl_a, _v_mu_f[1][vmu][_sl_a] + _lv[_sl_a], np.inf),
@@ -872,7 +871,7 @@ def node_sweep(
                          "Ed2": float((_d[_ok] ** 2).mean()) if _ok.any() else 0.0,
                          "Enoise": float(_vv[_ok].mean()) if _ok.any() else 0.0}
                     )
-                out.append(shrunk if _glv_shrink else np.full_like(per, pooled))
+                out.append(np.full_like(per, pooled))
             return out[0], out[1]
 
         if _glv:  # the relay runs on the INPUT-belief faces, so its pair is formed from those
@@ -927,11 +926,6 @@ def node_sweep(
             _s2t_spl = _s2t_spl + (
                 np.zeros_like(r) if _s2t_off else np.where(graft, graft_frame_logvar(r), 0.0)
             )
-            # PROBE ONLY (P1d): a flat extrapolation variance on the grafted spliced measurement, to SIZE the
-            # prize before investing in a prior-free estimator for it. Not a candidate for landing.
-            _x = os.environ.get("RIGEL_XVAR")
-            if _x:
-                _s2t_spl = _s2t_spl + np.where(graft, float(_x), 0.0)
             _spc = np.where(_sp > _EPS, _sp / (1.0 + _sp * _s2t_spl), 0.0)
             _snc = np.where(_sn > _EPS, _sn / (1.0 + _sn * _s2t_spl), 0.0)
             tpp, tpn = tpp + _spc, tpn + _snc  # into the mode-fusion precision …
@@ -1028,45 +1022,19 @@ def node_sweep(
                     _b2 = np.where(np.sum(np.where(_sup, _mc, 0.0), axis=-1) > M, _b2, 0.0)
                 elif _scope != "all":
                     raise ValueError(f"RIGEL_P1E_SCOPE must be neg|sup|all; got {_scope!r}")
-                # ⭐ THE COMMON DIRECTION (the derived law; `RIGEL_P1E_RANK1=1` restores the superseded
-                # rank-1-along-Σα form for comparison). Because ``αᵀ1 ≡ 1`` — α is a share vector over the
+                # ⭐ THE COMMON DIRECTION (the derived law). Because ``αᵀ1 ≡ 1`` — α is a share vector over the
                 # same budget S — adding the SCALAR b̂² to every supplied component's log-variance satisfies
                 # the constraint ``αᵀΣ'α = αᵀΣα + b̂²`` exactly, and it leaves ``Var(λ)`` **identically
                 # unchanged**: a common shift of both arms cannot move the split. That is the whole reason to
                 # prefer it. The rank-1 form borrows the CONDITIONAL MEAN's direction and applies it as a
                 # variance inflation, which MC shows over-damps λ 5× when the true error is a pure scale
                 # error (λ z² 1.00 → 0.21) while still leaving the RNA arm over-confident (z² 2.88).
-                # A scalar cannot identify a direction: one observation, one parameter.
-                if os.environ.get("RIGEL_P1E_RANK1"):
-                    _dvc = np.where(
-                        (_aSa > _EPS)[..., None],
-                        _b2[..., None] * (_sv / np.maximum(_aSa, _EPS)[..., None]) ** 2,
-                        0.0,
-                    )
-                    _dg, _dp, _dn = _dvc[..., 0], _dvc[..., 1], _dvc[..., 2]
-                    _tRs = tp + tn
-                    _bp = np.where(_tRs > _EPS, tp / np.maximum(_tRs, _EPS), 0.0)
-                    _sR = _bp * _sv[..., 1] + (1.0 - _bp) * _sv[..., 2]
-                    ttau = ttau / (
-                        1.0
-                        + ttau
-                        * np.where(
-                            _aSa > _EPS,
-                            _b2 * ((_sv[..., 0] - _sR) / np.maximum(_aSa, _EPS)) ** 2,
-                            0.0,
-                        )
-                    )
-                else:
-                    _dg = _dp = _dn = np.where(_sup.any(axis=-1), _b2, 0.0)
+                # A scalar cannot identify a direction: one observation, one parameter. The rank-1 variant was
+                # implemented, MC-refuted and DELETED — see `variance_ledger.md` §6; do not rebuild it.
+                _dg = _dp = _dn = np.where(_sup.any(axis=-1), _b2, 0.0)
                 tpg, tmg = tpg / (1.0 + tpg * _dg), tmg / (1.0 + tmg * _dg)
                 tpp, tmp = tpp / (1.0 + tpp * _dp), tmp / (1.0 + tmp * _dp)
                 tpn, tmn = tpn / (1.0 + tpn * _dn), tmn / (1.0 + tmn * _dn)
-                if _capture is not None:  # inert: the surprise's provenance, for the P1e decision
-                    _capture.setdefault("_p1e", []).append(
-                        {"b2": _b2.copy(), "delta": _dlt.copy(), "aSa": _aSa.copy(),
-                         "ok": np.asarray(_okc).copy(), "graft": np.asarray(graft).copy(),
-                         "nsup": _sup.sum(axis=-1).copy(), "mass": np.asarray(M).copy()}
-                    )
             tg, tp, tn = _pin_v(  # the message is a claim about THIS node's mass
                 tg, tp, tn, tpg, tpp, tpn,
                 np.where(np.isfinite(s2t), s2t, 0.0) + 1.0 / np.maximum(_n_node[src], _EPS),

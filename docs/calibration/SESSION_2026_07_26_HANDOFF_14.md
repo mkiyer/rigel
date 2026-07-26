@@ -140,10 +140,10 @@ Unchanged from `SESSION_2026_07_26_HANDOFF_13.md` §6, plus one flag. Gates:
 | flag | what it ablates |
 |---|---|
 | **`RIGEL_GLV_OFF=1`** | **P1d** (bit-identical to the pre-P1d path, verified 32/32) |
+| `RIGEL_P1E_OFF=1` | **P1e** (the conservation surprise) |
 | `RIGEL_S2T_OFF=1` | both cliff terms (M5 + M8) |
 | `RIGEL_RNAMEAS_OFF=1` | the RNA measurement ψ factor |
 | `RIGEL_M12_MSG=1` | the per-message pin → the weighted rescale |
-| `RIGEL_XVAR=<v>` | the flat probe (superseded by P1d; reaches only `_transport`) |
 
 New in `scratchpad/`: `x2_poisson.py` (the five-count Poisson decomposition), `x3_share.py` (the structural
 partition + the regressions), `x4_estimator.py` (the estimator audit + the four claim forms),

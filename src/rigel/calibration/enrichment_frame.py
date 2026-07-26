@@ -779,8 +779,14 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
       noise, and it both over- and UNDER-charges around the right mean — the under-charging half doing the
       damage, because it REPLACES the population value on the ~48 % of edges where a pair exists. Measured:
       per-edge+pooled 870,245 confidently-wrong reads at ``z2`` 11.12; pooled alone **762,000 at 8.98**, with
-      exon-single ``z2`` 5.68 → **2.46**. Shrinking all the way to the pooled mean is simply the better
-      estimator, and this is the ordinary empirical-Bayes result, not a tuning choice.
+      exon-single ``z2`` 5.68 → **2.46**. A derived PARTIAL-POOLING variant (James–Stein, with the shrinkage
+      weight ``B = τ²_b/(τ²_b + Var(ω̂_i))`` and ``Var(ω̂_i) = (2ω+v_i)²/2`` exact from the χ²₁) was also
+      implemented and **deleted**: its own weight comes out **B = 0.82–0.89** — the between-node heterogeneity
+      is real and dominant — and it STILL loses (765,281 / 9.23), because ``ω_i`` is right-skewed (the top
+      decile of pairs carries 78–92 % of ``Σd²``) so any per-node point estimate charges the median node ≈0,
+      and the loss is asymmetric: over-charging only widens a message, under-charging leaves a node
+      confidently wrong. **The population mean is right precisely because the loss is asymmetric.**
+      Do not rebuild the per-node form.
     * **Structurally** (owner, 2026-07-26), a per-edge form makes the message from the LEFT seam carry a
       variance computed from the RIGHT seam's counts, so a non-adjacent node's data reaches the destination
       twice — a real BP violation. With the pooled form no message's precision depends on anything but its
@@ -839,19 +845,7 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
     v = np.where(np.isfinite(va), va, 0.0) + np.where(np.isfinite(vb), vb, 0.0)
     per = np.where(ok, np.maximum(0.0, d * d - v) * 0.5, 0.0)
     if not np.any(ok):
-        return per, 0.0, per
+        return per, 0.0
     d2, vv = d[ok] ** 2, v[ok]
-    pooled = float(max(0.0, float(d2.mean()) - float(vv.mean())) * 0.5)
-    # ── PARTIAL POOLING (the shrunk per-node estimate; the caller chooses whether to use it) ─────────────
-    # ``ω_i`` from one pair is a χ²₁ draw, so its sampling variance is known EXACTLY and needs no constant:
-    # ``d_i² ~ (2ω + v_i)·χ²₁`` ⇒ ``Var(d_i²) = 2(2ω+v_i)²`` ⇒ ``Var(ω̂_i) = (2ω+v_i)²/2``. The BETWEEN-node
-    # variance is what the population's spread has left over after that, and the James–Stein / hierarchical
-    # weight follows: ``B_i = τ²_b / (τ²_b + Var(ω̂_i))``. Every piece is estimated from the same data.
-    # ``B → 0`` (full pooling) exactly when the population is explained by sampling noise alone; ``B → 1``
-    # (per-node) when the between-node spread dominates. No knob decides which — the data does.
-    v_samp = (2.0 * pooled + vv) ** 2 * 0.5
-    tau_b = max(0.0, float(per[ok].var()) - float(v_samp.mean()))
-    b = tau_b / np.maximum(tau_b + v_samp, _EPS)
-    shrunk = np.full(per.shape, pooled)
-    shrunk[ok] = np.maximum(0.0, pooled + b * (per[ok] - pooled))
-    return per, pooled, shrunk
+    return per, float(max(0.0, float(d2.mean()) - float(vv.mean())) * 0.5)
+

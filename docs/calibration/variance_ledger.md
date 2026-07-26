@@ -275,8 +275,8 @@ to real data, not for the score here.**
 
 ## 4. What pricing it is worth — measured, with an oracle-free probe
 
-`RIGEL_XVAR` adds a flat extra variance to the grafted spliced component (a **probe to size the prize**, not a
-candidate: a flat constant is not landable). At 0.3:
+The (now deleted) `RIGEL_XVAR` flat probe added extra variance to the grafted spliced component, to size
+the prize before investing in a prior-free estimator. At 0.3:
 
 | | suite error | **confidently-wrong** | z2\|Q1 all | **exon-single** | exon-AMBIG |
 |---|---|---|---|---|---|
@@ -365,8 +365,8 @@ overdispersions. Those are *fitted parameters*, not tuned constants, and the "no
 always permitted them. What is still missing is the **observable** to fit against: the two-junction gap is
 refuted, so a different statistic is needed — one whose correlation with the shared premise error is not ≈1.
 
-Until that observable is found, P1d stays unbuilt. The probe (`RIGEL_XVAR`, default off, verified
-bit-identical when unset) stays so the next attempt can size any candidate estimator against the same numbers.
+(historical — P1d is built; §3.0/§3.5. The `RIGEL_XVAR` flat probe that sized it has been **deleted**, since
+P1d itself is now the estimator.)
 
 
 ## 6. ⚠ P1e — what is derived, what is landed, and what is owed
