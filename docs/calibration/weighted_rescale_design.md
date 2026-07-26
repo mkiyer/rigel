@@ -282,3 +282,96 @@ term in the solver that is never inert.
 Note the two are now coupled: step 4 shows the per-message rescale is *right* on capture-OFF and *wrong* on
 capture-ON. A per-message surprise term would damp exactly the messages whose violation the model cannot
 explain, which is a candidate mechanism for making step 4 safe.
+
+
+---
+
+## 9. ⭐ THE MESSAGE PACKET (2026-07-26) — and it SUBSUMES the rescale
+
+Owner's framing, and it was right: *"we still need to ship the densities and the messages... the composition is
+present in the densities, but the λ term and the θ term are not, and the precision of the composition is not
+known. So we need the same message, but provide the raw densities as well."*
+
+### 9.1 The design
+
+A message must let the destination do **three independent things**, and they are three different claims at
+three different precisions:
+
+| claim | content | precision | scale-free? |
+|---|---|---|---|
+| **LEVEL**, per component | "your gDNA density is ρ_g" | the measurement stream `cm_g` / `cm_p` / `cm_n` | no — absolute |
+| **SPLIT** | `λ = log(f_g/f_R)` | `τ` (the Schur composition precision) | **yes** |
+| **TILT** | `θ` | the measured RNA | **yes** |
+
+The solver was reading the split and the tilt back **off the fused densities** — so both arrived weighted by
+the *level* precisions instead of their own. That is a mode/precision mismatch with a concrete consequence: a
+message with almost no composition evidence but a large, well-counted density could set the split, and one
+with real composition evidence but little mass could not.
+
+Because λ and θ are **scale-free** (the node's mass cancels out of both), a message can state them directly —
+no density reconstruction needed at the destination, and no rescaling of the level claims can perturb them.
+So the packet is: *the same per-component densities and precisions as before, plus λ and θ explicitly.*
+
+### 9.2 Results — and the rescale turns out to be a longer route to the same fix
+
+| arm | refit=0 | refit=1 | vs the previous row |
+|---|---|---|---|
+| `m12c` (the conservation rescale, landed §7) | 0.0889 | 0.0686 | — |
+| `pkt` — λ fused by τ, from a conservation-rescaled per-message λ | 0.0862 | 0.0686 | **13 better / 3 worse** |
+| `pktL` — λ fused by τ, from the **plain** per-message λ | 0.0862 | 0.0686 | **identical to `pkt`** |
+| `pktN` — `pktL` with the fused conservation rescale **removed** | 0.0862 | 0.0686 | **0 better / 0 worse / 32 flat** |
+| **`pk2` — + θ fused by its own precision** | **0.0855** | **0.0671** | **7/0** and **12/0** |
+
+Two ablations settle the design:
+
+1. **`pkt` ≡ `pktL`** — the per-message conservation rescale contributes **nothing**. The entire win is the
+   **τ-weighting** of the λ fuse.
+2. **`pktN` ≡ `pktL` (0/0/32)** — once λ is fused by its own precision, the fused conservation rescale is
+   **completely inert.** It had been correcting this same mismatch by a longer route. **Removed.**
+
+So the M12 rescale was a real effect measured through a proxy; the packet is the direct fix, and it replaces
+two mechanisms with one. `conservation_rescale` stays in `enrichment_frame` as a derived, tested law (it is
+still called by the `RIGEL_M12_MSG` diagnostic, and §8's surprise term needs its `αᵀΣα`) but no longer sits in
+the default path.
+
+### 9.3 Against the pre-session HEAD
+
+| | HEAD (`g5`) | **now (`pk2`)** | |
+|---|---|---|---|
+| refit=0 | 0.0885 | **0.0855** | **20 better / 5 worse / 7 flat** |
+| refit=1 | 0.0678 | **0.0671** | **17 better / 7 worse / 8 flat** |
+| capture OFF (r0 / r1) | 0.0486 / 0.0323 | **0.0440 / 0.0289** | 8/0 and 8/0 |
+| verystrong | 0.1908 / 0.1336 | **0.1849 / 0.1286** | 4/0 and 3/0 |
+| gdna_none | 0.1075 / 0.0167 | **0.1024 / 0.0107** | 8/0 and 8/0 |
+| low gDNA | 0.1035 / 0.0681 | **0.0970 / 0.0641** | 19/1 and 16/3 |
+
+And on the axis this workstream exists for:
+
+| | HEAD | now | |
+|---|---|---|---|
+| suite error | 12,344,845 | **11,928,101** | −3.4 % |
+| **confidently-wrong** | 1,777,658 (14.4 %) | **1,186,552 (9.9 %)** | **−33 %** |
+| **exon AMBIG** (P3, the largest block) | 693,557 CW (20.1 %) | **378,285 CW (11.8 %)** | **−45 %** |
+| boundary single | 691,635 err / 6.6 % | **620,529 / 4.9 %** | both down |
+| boundary AMBIG | 384,852 / 2.2 % | 409,638 / **1.8 %** | CW down |
+
+**P3 — AMBIG exon over-confidence, the largest confidently-wrong block in the solver — is down 45 % without
+ever being worked on directly.** It was a symptom of the same mismatch: AMBIG nodes have `τ_own = 0`, so their
+composition comes entirely from messages, and those messages were being weighted by density precision rather
+than composition precision.
+
+Remaining regressions, both narrow: `gdna300 ss0.50 nrna_none capON` (+0.0092 / +0.0121) and the stranded
+`nrna_none capON` pair at refit=1.
+
+### 9.4 On the "disagreement-aware variance"
+
+Owner's recollection is accurate. The original mechanism is
+`σ²_transfer = var_proj[dst] + (μ_proj[dst] − μ_proj[src])²` — the NPMLE projection's **density
+disagreement** between two nodes. On this branch it is fully **retired**: `DensityNPMLE.project` is called
+nowhere in `src/`, the enrichment NPMLE survives only for the QC report, and `σ²_transfer` is now the derived
+`Var(log r)` (M5). The `CalibrationConfig` docstring still describes the retired version and is stale.
+
+The concept was right and the **observable** was wrong. A density disagreement is composition-vacuous
+(count-zero-information) and confounded by capture, which is why it degenerated into a near-constant damper.
+The conservation violation is the same idea against a **hard identity** instead — which is §8's surprise term,
+and it is next.

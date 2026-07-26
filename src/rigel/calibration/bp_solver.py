@@ -887,7 +887,29 @@ def node_sweep(
                             "tau_post": ttau.copy(),
                         }
                     )
-            return tg, tp, tn, tpg, tpp, tpn, tmg, tmp, tmn, ttau
+            # ── THE MESSAGE PACKET: a LEVEL claim per component, and SEPARATE SPLIT + TILT claims ────────
+            # A message must let the destination do three independent things: set each component's LEVEL
+            # (``mo_g`` with ``cm_g``, ``mo_p``/``mo_n`` with ``cm_p``/``cm_n``), set the SPLIT (``λ``, with
+            # ``τ``), and set the TILT (``θ``). Those are three different claims carried at three different
+            # precisions — so the message states the split and the tilt EXPLICITLY. Reading them back off the
+            # fused densities instead (as the combine used to) delivers them weighted by the LEVEL precisions
+            # rather than their own, which is a mode/precision mismatch: a message with almost no composition
+            # evidence but a large, well-counted density would set the split, and one with real composition
+            # evidence but little mass would not.
+            #
+            # Both are scale-free — the node's mass cancels out of ``log(f_g/f_R)`` and out of the tilt — so a
+            # message can state them without the destination reconstructing any density, and no rescaling of
+            # the level claims can perturb them.
+            _tR = tp + tn
+            tlam = np.where(
+                (tg > _EPS) & (_tR > _EPS),
+                np.log(np.maximum(tg * E_g, _EPS)) - np.log(np.maximum(_tR * E_r, _EPS)),
+                0.0,
+            )
+            tth = np.arcsin(
+                np.clip(np.where(_tR > _EPS, (tp - tn) / np.maximum(_tR, _EPS), 0.0), -1.0, 1.0)
+            )
+            return tg, tp, tn, tpg, tpp, tpn, tmg, tmp, tmn, ttau, tlam, tth
 
         def _fuse_add(a, b):  # additive (inverse-variance) fuse of two independent precision streams
             return np.asarray(a, np.float64) + np.asarray(b, np.float64)
@@ -900,74 +922,46 @@ def node_sweep(
         f_cur = np.asarray(f_g, np.float64).copy()
         for _ in range(_RHO_ITERS):
             _, rho_lf, rho_rf = _rho_faces(f_cur)
-            ag, ap, an, apg, app, apn, amg, amp, amn, atau = _transport(
+            ag, ap, an, apg, app, apn, amg, amp, amn, atau, alam, ath = _transport(
                 sl, vl, 0, 1, fwd, rho_lf, rho_rf
             )  # left msg: dst face 0, src face 1
-            bg, bp, bn, bpg, bpp, bpn, bmg, bmp, bmn, btau = _transport(
+            bg, bp, bn, bpg, bpp, bpn, bmg, bmp, bmn, btau, blam, bth = _transport(
                 sr, vr, 1, 0, bwd, rho_rf, rho_lf
             )  # right msg: dst face 1, src face 0
             cg, cpg = _fuse_v(ag, apg, bg, bpg)  # density MODE (full precision-weighted)
             cp, cpp = _fuse_v(ap, app, bp, bpp)
             cn, cpn = _fuse_v(an, apn, bn, bpn)
-            # ── THE CONSERVATION RESCALE, SCOPED TO THE COMPOSITION (M12, `conservation_rescale`) ──────
-            # `Σ_c ρ_c·E_c = M` is an identity, and the fused claim is the one place it was never imposed.
-            # Each MESSAGE is pinned inside `_transport` so each individually satisfies it — but the fuse
-            # above is PER COMPONENT (gDNA weighted by the gDNA precisions, RNA by the RNA precisions), and a
-            # per-component weighted average of two claims that each sum to M does NOT sum to M. Measured: the
-            # fused claim asserts 1.24–1.31× the fragments the node sequenced on the arms where pass-0 is
-            # confidently wrong, and 1.00–1.02× where it is accurate — the violation PREDICTS the error.
-            #
-            # ⚠ SCOPED TO THE λ CHANNEL ONLY, and that scoping is measured, not stylistic. The fused densities
-            # feed two different kinds of ψ factor: the COMPOSITION (λ = mo_g − mo_R, a pure ratio) and the two
-            # per-component LEVELS (`mo_g` with `cm_g`, `mo_p`/`mo_n` with `cm_p`/`cm_n`), which carry their
-            # own measured authority — the spliced count's "my mass is all RNA". Rescaling the levels as well
-            # costs `none_ss0.50_nrna_none` 0.3624 → 0.5118, IDENTICALLY under the common-factor limit and the
-            # weighted direction, i.e. the damage is the rescale touching the levels at all, not the
-            # apportionment. The identity is a statement about how the shares must SPLIT the observed mass, so
-            # it belongs on the split. λ is scale-invariant, so this term is exactly the DIFFERENTIAL part of
-            # the correction and nothing else.
-            _cP = np.stack([cpg, cpp, cpn], axis=-1)
-            _cV = np.where(_cP > 0.0, 1.0 / np.maximum(_cP, _EPS), np.inf)
-            # Both messages were already pinned to the SAME M, so no common scale error survives the fuse —
-            # the residual violation is pure composition DISAGREEMENT between the two directions.
-            _lg, _lp, _ln = np.moveaxis(
-                conservation_rescale(
-                    M,
-                    np.stack([cg, cp, cn], axis=-1),
-                    np.stack([E_g, E_r, E_r], axis=-1),
-                    _cV,
-                    np.zeros_like(M),
-                    np.stack([og, op, on], axis=-1),
-                ),
-                -1,
-                0,
-            )
             cm_g, cm_p, cm_n = _fuse_add(amg, bmg), _fuse_add(amp, bmp), _fuse_add(amn, bmn)
             c_tau = _fuse_add(atau, btau)
             mo_g = np.log(np.maximum(cg * E_g / np.maximum(M, _EPS), _EPS))
             mo_p = np.log(np.maximum(cp * E_r / np.maximum(M, _EPS), _EPS))
             mo_n = np.log(np.maximum(cn * E_r / np.maximum(M, _EPS), _EPS))
             # ── THE THREE-STREAM SINGLE-λ COMBINE (the M6 rank-1 fix, message_variance_derivation.md §4) ──
-            # (1) COMPOSITION → ONE λ-message on λ = log(f_g/f_R): mode ``mo_g − mo_R`` (from the density relay),
-            #     precision ``c_tau`` (the fused Schur τ) — ψ counts the composition DOF ONCE, not twice.
+            # (1) COMPOSITION → ONE λ-message on λ = log(f_g/f_R), precision ``c_tau`` (the fused Schur τ) — ψ
+            #     counts the composition DOF ONCE, not twice. **Each claim is fused by ITS OWN precision**: the
+            #     λ mode is the τ-weighted mean of the two messages' λ, not a ratio read back off the density
+            #     fuse (where each component was averaged by its own MODE-FUSION precision). That mismatch
+            #     delivered the split at a confidence it was never weighted by — a message with almost no
+            #     composition evidence but a large, well-counted density could set it, and one with real
+            #     composition evidence but little mass could not. Measured: 0.0889 → 0.0862, 13 better / 3
+            #     worse, and it makes the `conservation_rescale` that preceded it completely INERT (0/0/32) —
+            #     that operator had been correcting this same mismatch by a longer route.
             cR = cp + cn
-            # the λ claim is formed from the CONSERVATION-RESCALED pair (see above): it is the composition,
-            # and the composition is what the identity constrains. The level channels above are untouched.
-            _lR = _lp + _ln
-            lam_msg = np.log(np.maximum(_lg * E_g / np.maximum(M, _EPS), _EPS)) - np.log(
-                np.maximum(_lR * E_r / np.maximum(M, _EPS), _EPS)
-            )
-            # …and the same structural gate on the FUSED pair, which is what this mode is actually built from.
-            # `_transport`'s per-message gate cannot catch every case: a message may carry an RNA DENSITY while
-            # contributing zero mode-fusion PRECISION, in which case `cR` collapses to 0 here and `mo_R` hits
-            # the floor again. A λ message exists only when BOTH components of the pair reached this node.
-            c_tau = np.where((_lg > _EPS) & (_lR > _EPS), c_tau, 0.0)
+            lam_msg = np.where(c_tau > _EPS, (atau * alam + btau * blam) / np.maximum(c_tau, _EPS), 0.0)
+            # A λ message exists only where BOTH components of the pair reached this node — the structural
+            # presence test. `_transport`'s per-message gate cannot catch every case: a message may carry an
+            # RNA DENSITY while contributing zero mode-fusion PRECISION, in which case ``cR`` collapses here.
+            c_tau = np.where((cg > _EPS) & (cR > _EPS), c_tau, 0.0)
             # (2) ANCHOR gDNA MEASUREMENT → gdna_imp (mode mo_g, precision ``cm_g``). (3) SPLICED RNA MEASUREMENT
             #     → rna_imp (mode mo_p/mo_n, precision ``cm_p``/``cm_n``). INDEPENDENT of the composition, so
             #     fused separately (an RNA-only spliced measurement constrains f_g via f_R with NO gDNA info).
-            # θ TILT (AMBIG): τ_tilt = (c_p − c_n)/(c_p + c_n) → arcsin; precision the summed measured RNA.
-            tau_tilt = np.clip(np.where(cR > _EPS, (cp - cn) / np.maximum(cR, _EPS), 0.0), -1.0, 1.0)
-            th_msg = np.arcsin(tau_tilt)
+            # (4) θ TILT (AMBIG) — fused by the MEASURED RNA that carries it, for the same reason as λ.
+            _tha, _thb = amp + amn, bmp + bmn
+            th_msg = np.where(
+                (_tha + _thb) > _EPS,
+                (_tha * ath + _thb * bth) / np.maximum(_tha + _thb, _EPS),
+                0.0,
+            )
             th_prec = np.where(is_amb, cm_p + cm_n, 0.0)
             # DIAGNOSTIC ONLY (P1, `docs/calibration/PASS0_FINISH_PLAN.md`): ablate the RNA MEASUREMENT ψ
             # factor. It is the channel that carries 75 % of the posterior precision on the confidently-wrong

@@ -11,7 +11,8 @@ do not start a competing list.
 | **P0** | change the debug loop's loss to **confidently-wrong mass** | ✅ **DONE** 2026-07-26 |
 | ~~P2~~ | ~~introns at 91 % `errQ1conf`~~ | ⛔ **REFUTED** — a selection artifact, §P2 |
 | **P1** | root-cause the **capture-OFF** confident error | 🔬 **ROOT-CAUSED**, §P1b |
-| **P1c** | **the WEIGHTED RESCALE** | ✅ **LANDED** (steps 1–3, scoped to λ); step 4 measured, not landed |
+| **P1c** | the WEIGHTED RESCALE | ⤳ **SUPERSEDED** by P1f, which makes it inert (0/0/32); law kept, path removed |
+| **P1f** | **the MESSAGE PACKET** — λ and θ carried explicitly, fused by their OWN precisions | ✅ **LANDED** — `weighted_rescale_design.md` §9 |
 | **P1e** | the composition **SURPRISE** `z² = δ²/(αᵀΣα)` as a damping term — never inert | ▶ **NEXT** (owner-directed) |
 | P1d | the EXTRAPOLATION variance (a 100 bp junction speaking for a 2,100 bp exon) | queued, next after P1c |
 | **P3** | AMBIG exon over-confidence — **z2\|Q1 = 183**, the worst defect in the solver | ▶ **PROMOTED** above P4/P5 |
