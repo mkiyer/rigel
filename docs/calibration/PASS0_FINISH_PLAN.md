@@ -10,7 +10,7 @@ do not start a competing list.
 |---|---|---|
 | **P0** | change the debug loop's loss to **confidently-wrong mass** | ✅ **DONE** 2026-07-26 |
 | ~~P2~~ | ~~introns at 91 % `errQ1conf`~~ | ⛔ **REFUTED** — a selection artifact, §P2 |
-| **P1** | root-cause the **capture-OFF** confident error | 🔬 **ROOT-CAUSED** — fix needs a design call, §P1 |
+| **P1** | root-cause the **capture-OFF** confident error | 🔬 **ROOT-CAUSED (corrected)** — the conservation rescale, §P1b |
 | **P3** | AMBIG exon over-confidence — **z2\|Q1 = 183**, the worst defect in the solver | ▶ **PROMOTED** above P4/P5 |
 | P4 | FAR → a proper opposite-direction message; M11's pre-DL precision | queued |
 | P5 | re-test `r` from the gDNA channel (the "moot" verdict is stale) | queued |
@@ -176,7 +176,14 @@ reference — at `sd` = 0.044–0.056, so **z = 4.5–10.1**. Enormous precision
 "my mass is all RNA". It did help the arms M11 regressed (stranded 0.0347 → 0.0331, 3 better / 1 worse), which
 is consistent: the channel is *essential* where RNA is everything and *harmful* where gDNA is high.
 
-### ⭐ The defect, and it is structural
+### ⛔ CORRECTION (2026-07-26, later the same day) — the paragraph below is WRONG
+
+The "borrowed mode" reading was inferred from precision bookkeeping, not measured. Dumping one node in
+fragments and base pairs (`scratchpad/p1_worked.py`) refutes it: **the spliced-RNA claim is essentially
+EXACT.** See §P1b. The passage is kept because the precision bookkeeping it describes is real and still
+explains the *confidence*; it simply does not explain the *error*.
+
+### The defect as first (mis)diagnosed — the mode/precision mismatch
 
 `bp_solver` builds the RNA measurement ψ factor as
 
@@ -263,3 +270,70 @@ per-fragment observable like its *strand*, not a count vote), and the minimal im
 float per node** in the C++ accumulator — the per-node mean fragment length is a sufficient statistic for a
 two-component method-of-moments split, `E[ℓ] = f_g·μ_g + (1−f_g)·μ_r`. The accumulator's existing FL pools are
 library-wide (3 region-types × 2 compartments), so they cannot serve this as they stand.
+
+
+## ⭐ P1b — THE ACTUAL DEFECT: the conservation rescale punishes a measurement to accommodate a guess
+
+One node, in fragments and base pairs (`scratchpad/p1_worked.py`, node 2651,
+`gdna300_ss_0.50_nrna_present_capture_off`, 78,742 fragments — the largest confidently-wrong exon):
+
+```
+  the exon:      78,742 unspliced fragments over ~2,100 bp   ->  37.3 fragments/bp if it were 100 % RNA
+  TRUTH:         98.4 % RNA  (gDNA density 0.58/bp,  RNA density 36.7/bp)
+  the junction next door:  7,069 spliced fragments over 100 bp  ->  35.3 fragments/bp
+
+  what the two channels claim, in the exon's own frame:
+                        claimed      TRUTH    ratio
+      gDNA density      27.6319     0.5827    47.4x        <-- an IMPUTATION, 47x too big
+      RNA  density      36.6453    36.6734     1.0x        <-- a MEASUREMENT, essentially exact
+
+  together they claim 138,000 fragments.  The exon observed 78,742.  ->  1.75x
+```
+
+**The RNA claim is right. The gDNA claim is 47× wrong. And the conservation rescale (`_pin_v`) divides BOTH
+by 1.75** — so it takes 43 % off a direct measurement in order to make room for a guess. The result is
+`f_gDNA = 0.322` against a truth of 0.016, stated with a std-dev of 0.049: **6.2 σ wrong**.
+
+Had the whole correction gone to the gDNA claim (the uncertain one), the residual would be
+78,742 − 77,395 = 1,347 gDNA fragments ⇒ **`f_gDNA` = 0.017 against a truth of 0.016.**
+
+### Neither extreme is right — the correction must be APPORTIONED
+
+Exon-single nodes, mass-weighted |f_g − oracle|, against two counterfactual rescales:
+
+| condition | claim/obs | SHIPPED | RNA-claim exact | gDNA-claim exact |
+|---|---|---|---|---|
+| `gdna300 ss0.50 present capOFF` | **1.31×** | 0.2179 | **0.0647** | 0.3690 |
+| `gdna300 ss0.50 none capOFF` | **1.33×** | 0.2096 | **0.0469** | 0.3713 |
+| `gdna100 ss0.50 present capOFF` | **1.26×** | 0.1651 | **0.0434** | 0.2950 |
+| `gdna1 ss0.50 present capON` | 1.03× | 0.0322 | **0.0047** | 0.0301 |
+| `gdna300 ss0.99 present capOFF` | **1.01×** | **0.0056** | 0.0419 | 0.0440 |
+| `none ss0.50 present capOFF` | 1.00× | **0.0007** | 0.0002 | 0.0001 |
+| `gdna300 ss0.50 present capON` | 1.15× | **0.1524** | 0.2012 | 0.1814 |
+| `gdna300 ss0.99 present capON` | 1.19× | **0.0477** | 0.2176 | 0.1203 |
+| `gdna300 ss0.50 none capON` | 1.20× | **0.1834** | 0.3209 | 0.1893 |
+| `gdna100 verystrong` | 1.04× | **0.1953** | 0.2238 | 0.2150 |
+
+Two things fall out, and the second is the useful one:
+
+1. **Neither extreme wins everywhere.** RNA-exact is 3.4–6.9× better on unstranded capture-OFF and on
+   low-gDNA, and much worse on gDNA-rich capture-ON. So the fix is not "trust the measurement" — it is
+   **apportion the conservation correction by how well each component is known**, which is the weighted pin
+   derived earlier this session (`SESSION_2026_07_26_HANDOFF_12.md` working notes): with a common frame error
+   `σ²_r` and independent composition errors, the correction splits as
+   `a = δ(σ²_r + α·v_g)/(σ²_r + α²v_g + β²v_R)`, `b = δ(σ²_r + β·v_R)/(…)`. Today's blind common rescale is
+   the `v → 0` limit of that formula (correct only when the *only* error is a common frame error), and
+   "RNA-exact" is the `v_R → 0` limit. The general form is what is needed.
+2. **`claim/obs` PREDICTS the error, with no oracle.** 1.00–1.01× ⇒ the shipped answer is excellent
+   (0.0007, 0.0056). 1.26–1.33× ⇒ it is bad (0.165–0.218). This is a **directly observable, prior-free
+   diagnostic of message error** — the owner's *"what is the likelihood my available counts account for this
+   composition?"* — and nothing in the solver currently uses it as evidence. `_pin_v` merely erases it.
+
+### Why the error is also CONFIDENT (the second half, and the first diagnosis survives here)
+
+The size of the mistake is §P1b. The *confidence* attached to it is the precision bookkeeping: with
+`τ_own = 0` (unstranded) the DL term is inert by design, `r ≈ 1` off-capture makes `σ²_transfer ≈ 0`, and
+`graft_frame_logvar = (log r)²` is identically 0 at `r = 1` — so the grafted spliced count enters at its raw
+Poisson precision (up to 2,025 on one node) as a claim about a whole exon. The owner's framing is exact: **a
+spliced measurement taken over a ~100 bp junction window is being asked to speak for a ~2,100 bp exon — a 12–21×
+extrapolation — and it is charged no transfer variance for that at all.**
