@@ -1,6 +1,7 @@
 # The weighted rescale — derivation, prototype, and implementation plan
 
-**Status: DERIVED + PROTOTYPED 2026-07-26. Not implemented in the solver.** Owner-directed. Read
+**Status: BUILT AND LANDED 2026-07-26 (steps 1–3, scoped). Step 4 measured and NOT landed — §7.**
+Owner-directed. Read
 `PASS0_FINISH_PLAN.md` §P1b first (the measurement that motivates it), then this.
 Prototype: `scratchpad/wp1_prototype.py`. Instrumentation: the inert `_capture["_pin"]` hook in `bp_solver`.
 
@@ -198,3 +199,86 @@ the node's own composition evidence and is therefore inert wherever `τ_own = 0`
 83.9 % of suite error mass) **the node's own mass is always known**. This would be the first message-damping
 term that is never inert. It is deliberately *not* part of the rescale change: separate derivation, separate
 prototype, separate A/B.
+
+
+---
+
+## 7. BUILD RESULTS (2026-07-26)
+
+### Steps 1–3 — landed, and the scoping was the whole game
+
+| step | what | refit=0 | refit=1 | verdict |
+|---|---|---|---|---|
+| 1 | the law + 7 closed-form tests, called nowhere | — | — | bit-identical ✓ |
+| 2 | apply at the combine, **common-factor limit**, all three densities | 0.0971 | 0.0761 | **WORSE** |
+| 3 | apply at the combine, **weighted direction**, all three densities | 0.0938 | 0.0704 | worse, but wins stranded 7/0 |
+| **3b** | **weighted, SCOPED to the λ (composition) channel** | **0.0889** | **0.0686** | **LANDED** — 5/2/25 and 5/1/26 |
+
+**Step 2 is the measurement that mattered.** The prototype said a common rescale is inert on composition
+(`f_g` is scale-invariant) — and it is. But it is *not* inert in the solver, because the fused densities also
+feed two per-component **LEVEL** channels (`mo_g` with `cm_g`, `mo_p`/`mo_n` with `cm_p`/`cm_n`) which carry
+the spliced count's *"my mass is all RNA"* authority and are not scale-invariant. Rescaling them costs
+`none_ss0.50_nrna_none` **0.3624 → 0.5118**, and — decisively — **identically under the common-factor limit
+and under the weighted direction**. Identical damage under a correction that cannot change any composition
+proves the harm is the rescale touching the levels at all, not the apportionment.
+
+So the operator is scoped: **the identity is a statement about how the shares SPLIT the observed mass, so it
+belongs on the split.** `λ` is scale-invariant, so applying it there is exactly the *differential* part of the
+correction and nothing else. The step-3 blowups vanish completely (`gdna_none`, `verystrong` and capture-OFF
+are all *exactly* flat) and the wins survive.
+
+**Landed result** — refit=0 0.0895 → **0.0889** (5 better / 2 worse / 25 flat), refit=1 0.0693 → **0.0686**
+(5/1/26); stranded 0.0347 → 0.0329 (4/0) and 0.0310 → 0.0299 (3/0); capture-ON 0.1106 → 0.1091. And on the
+axis this workstream exists for:
+
+| | before | after |
+|---|---|---|
+| suite error | 12,490,634 | **12,404,762** |
+| **confidently-wrong** | 1,514,652 (12.1 %) | **1,445,214 (11.7 %)** |
+| **exon AMBIG** (the largest CWRONG block, P3) | 3,498,633 err / 630,558 CW (18.0 %) | **3,390,812 err / 555,669 CW (16.4 %)** |
+
+AMBIG exons improve on **both** axes — error −107,821 reads and confidently-wrong −74,889 (−11.9 %) — which
+is P3's target hit as a side-effect of P1's fix.
+
+### ⛔ Step 4 — the per-message pin. MEASURED, NOT LANDED, and it hides a large prize.
+
+Replacing `_pin_v`'s common factor with the same law (common variance = `σ²_transfer + 1/n_src`) is a net
+loss — 0.0889 → 0.0958 (refit=0), 0.0686 → 0.0833 (refit=1) — but the split is extreme and informative:
+
+| stratum | refit=0 | refit=1 |
+|---|---|---|
+| **capture OFF** | 0.0484 → **0.0473** (7 better / 3 worse) | 0.0326 → **0.0158** (8/2) — **a 2× improvement** |
+| `gdna100 ss0.50 none capOFF` | 0.1132 → **0.0914** | 0.0961 → **0.0300** |
+| `gdna300 ss0.50 none capOFF` | 0.0632 → **0.0510** | 0.0547 → **0.0170** |
+| capture ON | 0.1091 → 0.1213 | 0.0911 → **0.1388** |
+| `gdna300 ss0.50 none capON` | 0.1739 → 0.2226 | 0.1737 → **0.3583** |
+| `none ss0.50 nrna_none` | 0.3624 → **0.5118** | 0.0614 → 0.0992 |
+
+**Capture-OFF is exactly P1's target regime** (35 % of all confidently-wrong mass) and the per-message
+weighted pin **halves its error at refit=1**. The regression is the *same level-channel damage step 2
+identified* — the zero-gDNA numbers are bit-for-bit the step-2/step-3 values (0.5118 / 0.5056), which is the
+signature.
+
+**Why it cannot simply be scoped the way step 3b was:** the per-message pin's output *is* the density that
+gets fused and then feeds both the composition and the levels. Separating them requires carrying **two claims
+per message** — a composition claim (conservation-rescaled) and a level claim (untouched) — through the fuse.
+That is a real refactor of the three-stream design and deserves its own derivation, not a rider on this one.
+
+Left behind the `RIGEL_M12_MSG` diagnostic flag (default off, verified bit-identical when off) so the next
+attempt starts from a working prototype rather than rebuilding it.
+
+## 8. NEXT — the "surprise", now with a second reason to want it
+
+Owner-directed as the follow-up. `claim/obs` predicts the error with no oracle (1.00–1.02× ⇒ 0.02–0.06;
+1.24–1.31× ⇒ 0.21–0.24), and in this derivation's own terms the statistic is the Mahalanobis distance
+`z² = δ²/(αᵀΣα)`: *how surprised should I be that this claim misses my observed mass by this much?* Today the
+rescale **erases** it — it forces the identity and discards the residual.
+
+It is DerSimonian–Laird-shaped but measured against a **hard observable**, and unlike M7's `b̂²` — which needs
+the node's own composition evidence and is therefore inert wherever `τ_own = 0`, i.e. on all unstranded data,
+83.9 % of suite error mass — **the node's own mass is always known.** It would be the first message-damping
+term in the solver that is never inert.
+
+Note the two are now coupled: step 4 shows the per-message rescale is *right* on capture-OFF and *wrong* on
+capture-ON. A per-message surprise term would damp exactly the messages whose violation the model cannot
+explain, which is a candidate mechanism for making step 4 safe.

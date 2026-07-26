@@ -433,15 +433,33 @@ def node_sweep(
         # message partial (a seam sending gDNA only still gives ``f_g < 1``, §2) instead of renormalizing it into
         # the shift's "the missing component is absent". A structurally-dead strand has own density 0 and so
         # contributes nothing, correctly. Applied per-message in the combine (`_transport`).
-        def _pin_v(
-            g, p, n, pg_, pp_, pn_
-        ):  # per-message pin (the combine): scale a claim to the node's mass
-            sg = np.where(pg_ > 0.0, g, og)
-            sp = np.where(pp_ > 0.0, p, op)
-            sn = np.where(pn_ > 0.0, n, on)
-            s = sg * E_g + (sp + sn) * E_r
-            k = np.where((s > _EPS) & (M > _EPS), M / np.maximum(s, _EPS), 1.0)
-            return g * k, p * k, n * k
+        def _pin_v(g, p, n, pg_, pp_, pn_, v_common=None):
+            """Per-message pin: scale a claim to the node's mass. STEP 4 — the same M12 law as the combine,
+            with the message's own common-mode variance (the reframe ⊕ the source's count). At the per-message
+            level that common part is usually DOMINANT — the reframe is the shared error — so this is expected
+            to sit near the common-factor limit it replaces."""
+            if v_common is None or not os.environ.get("RIGEL_M12_MSG"):
+                sg = np.where(pg_ > 0.0, g, og)
+                sp = np.where(pp_ > 0.0, p, op)
+                sn = np.where(pn_ > 0.0, n, on)
+                s = sg * E_g + (sp + sn) * E_r
+                k = np.where((s > _EPS) & (M > _EPS), M / np.maximum(s, _EPS), 1.0)
+                return g * k, p * k, n * k
+            _p3 = np.stack([pg_, pp_, pn_], axis=-1)
+            return tuple(
+                np.moveaxis(
+                    conservation_rescale(
+                        M,
+                        np.stack([g, p, n], axis=-1),
+                        np.stack([E_g, E_r, E_r], axis=-1),
+                        np.where(_p3 > 0.0, 1.0 / np.maximum(_p3, _EPS), np.inf),
+                        v_common,
+                        np.stack([og, op, on], axis=-1),
+                    ),
+                    -1,
+                    0,
+                )
+            )
 
         # ── THE DerSimonian–LAIRD COMPOSITION-MISMATCH DEFLATION (`message_variance_mc.py` M7c/M7d) ─────────
         # The message and the destination's own message-free self-solve are two INDEPENDENT estimators of the
@@ -807,9 +825,10 @@ def node_sweep(
                         "graft": np.asarray(graft).copy(),
                     }
                 )
-            tg, tp, tn = _pin_v(
-                tg, tp, tn, tpg, tpp, tpn
-            )  # the message is a claim about THIS node's mass
+            tg, tp, tn = _pin_v(  # the message is a claim about THIS node's mass
+                tg, tp, tn, tpg, tpp, tpn,
+                np.where(np.isfinite(s2t), s2t, 0.0) + 1.0 / np.maximum(_n_node[src], _EPS),
+            )
             # ── the COMPOSITION half of the cliff cost: the DL mismatch deflation, on the PINNED densities.
             # Pinning first is what makes the gap a pure COMPOSITION statement: `_pin_v` has already rescaled the
             # message to this node's own mass, so the common scale (the reframe residual) is gone from G and only
