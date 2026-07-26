@@ -180,21 +180,95 @@ The MASS estimator carries 57 % of the fuse and is the one that is wrong (1.396 
 FAR (0.505) are close. Its input is the exon's gDNA claim, and at a **capture-ON** exon→boundary edge that
 claim is mis-scaled by the probe-placement step — the irreducible 0.4–1.3 nats of HANDOFF_10 §9.3.
 
-**And here is the specific, actionable gap:** `σ²_transfer` does **not** see that step. `composition_logvar`
-prices only counting plus composition uncertainty in `ρ_tot`, and at a boundary `E_g ≈ E_r` kills the
-composition term, so `logvar_tot ≈ 1/n ≈ 2e-4`. The 0.4–1.3 nats of genuine exon-vs-boundary capture scatter
-is **entirely unpriced**. Everywhere else that has not mattered, because `_pin_v` cancels `r` on 87.6 % of the
-error (HANDOFF_10 §3) — **M11 is the first consumer in the solver for which `r` does not cancel**, so it is
-the first to be exposed to it.
+**⚠ CORRECTION (measured 2026-07-26, after this file was first written).** The first draft of this section
+claimed the gap was that `σ²_transfer` is *blind* at a boundary because `E_g ≈ E_r` kills the composition
+term. **That was inferred, not measured, and it is wrong.** Measured (`scratchpad/e1_enrichment.py`):
 
-Three candidate directions, none tried:
-* price the exon↔boundary frame step honestly. M8 (`graft_frame_logvar`) is the precedent for a
-  non-cancelling `r`, but its `(log r)²` would over-damp `verystrong` — which currently *wins* 4/0, so
-  whatever is charged must be the un-modelled part only, not the whole step;
-* feed M11 the **intron's** gDNA density at `exon|intron` seams (factory-measured, and the intron→boundary
-  reframe is the shorter step) rather than the exon's, or fuse the two gDNA claims before M11;
-* a DL-style between-estimator excess on the level fuse itself. ⚠ Note it pulls the fused level *toward* the
-  larger estimate here, so it is unlikely to help on its own — check that before building it.
+| class | E_g | E_r | E_g/E_r | composition coefficient `|(1/E_g−1/E_r)/B|` |
+|---|---|---|---|---|
+| exon | 1254 | 1166 | 7.81 (mass-wtd) | 0.17 |
+| intron | 8578 | 8489 | 1.03 | 0.02 |
+| **boundary** | **96–144** | **181–184** | **0.54–0.78** | **0.24–0.60** |
+
+The composition→density coupling is **largest at boundaries**, not smallest — the owner's fragment-length
+argument (`boundary_work_notes.md`) is exactly right and is already what `composition_logvar` implements. And
+measured `sd(log r)` on peel edges is **0.11–0.47 (median), 0.19–0.62 (p75)** — the same order as the 0.4–1.3
+nats of probe-placement scatter, not 10–30× under it.
+
+**The correct diagnosis, decomposed** (`v_g` = the log-variance of the gDNA claim M11 consumes, mass-weighted
+over peel edges):
+
+| condition | `v_g` total | source's own | frame `σ²_transfer` | frame share | `σ_f = φ√v_g` |
+|---|---|---|---|---|---|
+| `gdna300 ss0.99 present capON` | 0.234 | 0.042 | 0.192 | 31 % | 0.27 |
+| `gdna300 ss0.50 none capON` | 0.439 | 0.168 | 0.271 | 49 % | 0.61 |
+| `gdna100 verystrong` | 4.168 | 3.947 | 0.220 | 11 % | 1.87 |
+| `gdna300 ss0.99 present capOFF` | 1.247 | 0.010 | 1.237 | 44 % | 0.42 |
+
+So the frame term is **31–49 % of `v_g` on the capture-ON arms** — material, but the source exon's *own*
+accumulated uncertainty is the other half (and dominates at verystrong). The real mechanism is simpler than a
+missing variance: **even a correctly priced `v_g ≈ 0.4` makes `σ_f ≈ 0.6`, which puts M11 in its
+near-uninformative regime at a gDNA-rich seam (`φ ≈ 0.95` ⇒ `f̂_R ≈ 0.46` against a truth of 0) — and an
+UNINFORMATIVE M11 still out-weighs the INFORMATIVE far-intron estimator in the fuse.** That is a relative-
+weighting problem, not a missing-term problem.
+
+Candidate directions, re-ordered by what the measurement now supports:
+* **make the gDNA claim more precise where M11 consumes it** — it is half the battle and it is the channel we
+  already trust. Note M11 reads `tpg` BEFORE the DL deflation runs (`mismatch_deflate` is at the end of
+  `_transport`), so the claim it consumes is missing M7's `b̂²` composition-mismatch term. On unstranded data
+  DL is inert anyway (`v_own = ∞`), but **on stranded data it is live — and stranded × capON is exactly where
+  this regresses.** Cheapest thing to try next;
+* re-examine the fuse weights directly: an M11 in its uniform regime declares `k = 3`, which may still be too
+  confident against a factory intron's linear-space claim. Check whether `k = 3` is being reached or whether
+  the intermediate regime is over-confident;
+* the exon↔boundary probe-placement step is real but is NOT the dominant term — de-prioritized;
+* **`r_M/E_g` as the frame ratio was REFUTED in HANDOFF_10 §4 as "moot, because `_pin_v` cancels `r` on 87.6 %
+  of the error". That verdict is now STALE** — M11 is the first consumer for which `r` does not cancel, and
+  the refuted estimator scored 0.808 → 0.330 against the true capture step. Worth re-running scoped to M11's
+  input only.
+
+## 5b. ⭐ AN UNUSED FOURTH INFORMATION SOURCE — the per-fragment FRAGMENT LENGTH
+
+Falling out of the same measurement, and it is much larger than anything else on the table. The gDNA and RNA
+fragment-length distributions **differ substantially in this suite** — gDNA mean 100–154 bp against RNA
+200 bp, total-variation distance **0.46–0.997** — so a fragment's LENGTH is informative about which component
+it came from. The per-fragment Fisher information about `f_g` from the FL mixture
+`P(ℓ) = f_g·p_g(ℓ) + (1−f_g)·p_r(ℓ)`:
+
+| condition | `I_FL` per fragment | strand `I` per fragment |
+|---|---|---|
+| `gdna300 ss0.99 present capON` | **3.18** | 1.26 (at κ = 0.99, the best case) |
+| `gdna300 ss0.50 none capON` | **3.98** | **0** (κ = ½ — identically zero) |
+| `gdna100 verystrong` | **1.19** | 0 |
+
+Converted into the model's own currency (`τ_λ = n·I·(f_g(1−f_g))²`) and compared with what the solver
+actually has today:
+
+| class (ss0.50 capON) | median n | `τ_own` now | `τ_FL` would be | `τ_own = 0` on |
+|---|---|---|---|---|
+| exon | 117 | **0.000** | **29.1** | 100 % of nodes |
+| boundary | 14 | **0.000** | **2.49** | 100 % of nodes |
+| intron | 289 | 0.196 (the factory) | 0.36 | 0 % |
+
+For scale: the intron factory's `τ` — the anchor the entire prior-free pass leans on — was measured at
+**0.254**. **This is non-zero exactly where the strand is exactly zero**, which is 83.9 % of the suite's error
+mass.
+
+**Four caveats, and they matter:**
+1. **This is inflated by the simulator.** TV = 0.997 means the two length distributions are nearly disjoint —
+   a fragment is essentially *labelled* by its length, which is why `I_FL → 1/(f_g(1−f_g)) = 4`. Real
+   libraries size-select gDNA and RNA together and overlap far more. Treat the numbers as an upper bound of
+   the same family as `synthetic_suite_is_poisson_omega_zero`. The signal is real; this magnitude is not.
+2. **It is not currently reachable.** The accumulator's FL pools are LIBRARY-WIDE (3 region-types × 2
+   compartments, `scan_payload.fl_pool_mass`), not per-node. But the minimal version is cheap: the per-node
+   **mean** fragment length is a sufficient statistic for a two-component method-of-moments split
+   (`E[ℓ] = f_g·μ_g + (1−f_g)·μ_r`), i.e. **one extra float per node** in the C++ accumulator.
+3. **It does NOT violate count-zero-information.** The principle is that a fragment *count* carries no
+   intrinsic gDNA/RNA information. A fragment *length* does, exactly as a fragment's *strand* does — this
+   would be a fourth source of the same kind as the strand likelihood, not a count vote.
+4. **Check for circularity before building it.** `fl.py`'s gDNA/RNA pmfs must be estimated from anchors that
+   do not depend on calibration's own answer — intergenic regions are pure gDNA and spliced fragments are
+   pure RNA, so both marginals are directly observable, but this needs verifying rather than assuming.
 
 ## 6. Bootstrap
 
