@@ -246,3 +246,58 @@ RNA is **one species**. "Mature" and "nascent" are bookkeeping, not biology — 
 observable. A boundary can be an exon↔exon boundary that is *also* a splice junction, with RNA contiguous
 across it while other RNA splices in or out. Both at once. The peel is about **spliced vs unspliced**, never
 about mature vs nascent.
+
+---
+
+## 13. ▶ KICKOFF PROMPT (copy-paste to start the next session)
+
+> We are developing Rigel calibration — the prior-free first pass, "pass-0". Read
+> `docs/calibration/ROADMAP.md`, then `docs/calibration/SESSION_2026_07_25_HANDOFF_11.md` (START HERE — it has
+> my position on every open decision, the three questions, the restore command and the do-not-re-run list),
+> then `docs/calibration/peel_by_composition_plan.md` (the plan for steps 1–5; **§10 and §11 are the execution
+> results, and two of the plan's own assumptions are refuted there**), then
+> `docs/calibration/SESSION_2026_07_25_HANDOFF_10.md` (the boundary evidence base). Do NOT read
+> `docs/calibration/archive/`.
+>
+> Setup: `source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel`, always
+> `OMP_NUM_THREADS=1`, repo `/Users/mkiyer/proj/rigel`, branch `calib-ambig-init-wip` at `3dea0ade`. Gates:
+> `pytest tests/ -q` = 1236 pass / 2 xfail / 2 xpass, `ruff check src/ tests/ scripts/` clean,
+> `python scripts/debug/message_variance_mc.py` = 0 failures over M1–M10. Benchmark (32 conditions, cached,
+> ~1 s/scenario): `~/Downloads/rigel_runs/ambig_dense_10mb`; the A/B is
+> `P0_REFIT=0|1 python scripts/debug/pass0_oracle_bench.py --arm NAME` and HEAD's arms are `g5_r0`/`g5_r1`
+> (**0.0885 refit=0 / 0.0678 refit=1**). `scripts/debug/pass0_error_table.py` gives the suite in READS plus
+> the trust view. Untracked `scratchpad/` holds the derivation scripts — keep it.
+>
+> **THE TASK: finish the BOUNDARY work — the composition peel.** Steps 1–5 of `peel_by_composition_plan.md`
+> are **agreed in principle; the revert at the end of last session was provisional, not a rejection.** Restore
+> them with **`git apply scratchpad/steps_1_to_4.patch`** (verified bit-identical to the `full` arm; step 5 is
+> already at HEAD). My position per step: **1** keep; **2** we must SCALE not subtract — the question is how;
+> **3** we must carry the uncertainty — the question is how to compute it correctly; **4** the `mrna_active`
+> structural gate MUST go, it is a band-aid; **5** "missing" means precision == 0, already landed. **Do not
+> re-litigate whether to do steps 1–4. Make them work.**
+>
+> **Pursue three questions.** (1) **Why the regression?** Steps 1–5 combined score 0.0934/0.0684 vs HEAD's
+> 0.0885/0.0678 — HANDOFF_11 §5 has already localized it to level-precedence **case 3**, which sets
+> `v_ν = ∞` and silences the RNA channel in low-gDNA libraries where RNA is the entire signal; the job is to
+> give case 3 something better than silence *and* better than the subtraction, not to re-measure it.
+> (2) **How do you compute the precision of a density RATIO?** `w = ρ_ν/(ρ_ν+ρ_μ)`; the delta method
+> (`Var(log w) = w_μ²(v_ν+v_μ)`) is MC-validated, so suspect `v_ν` itself, and check the `w → 0`
+> linearization. (3) **How should the unspliced boundary crossing be split RNA vs gDNA?** That is the
+> standing blocker: **there is no LEVEL at the seams that matter** — |Δw| = 0.628 from the boundary's own
+> self-solve, 0.294 from the far intron, and `exon|exon` boundaries have no factory within reach on 97 % and
+> no strand when unstranded.
+>
+> Method: derive → MC-validate if it is a law → implement → **per-condition A/B at refit=0 AND refit=1 over
+> the whole 32-condition battery**, reporting the full output, not just the aggregate. **Do NOT revert on tiny
+> error differences** — if an idea is theoretically sound and has no catastrophic regression, run the battery
+> and show me. Call out `stranded ss_0.99`, `unstranded × capON`, `verystrong` and `gdna_none` explicitly, and
+> report `errQ1conf` (confidently-wrong share) alongside mwae — a trustworthy substrate matters more to Phase
+> 2 than the score. **No magic numbers**: structural presence tests, derived quantities and exact limits only.
+> **Pass-0 must be WEAK and CORRECTABLE** — an over-confident message that pins a node wrong is worse than a
+> weak one slightly off. Check HANDOFF_11 §8 before trying anything; the ψ-vertex questions (finer grid,
+> linear grid, dropping the reference) are all closed. Regenerate goldens LAST.
+>
+> Vocabulary: **RNA is ONE species** — "mature"/"nascent" are bookkeeping, only SPLICED vs UNSPLICED is
+> observable; a boundary can be an exon↔exon boundary that is ALSO a splice junction, with RNA contiguous
+> across it while other RNA splices in or out. The peel is about spliced vs unspliced, never mature vs
+> nascent. `docs/calibration/boundary_work_notes.md` is my own notes file — do not overwrite it.
