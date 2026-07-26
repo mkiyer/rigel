@@ -1,6 +1,8 @@
 # The composition peel — implementation plan
 
-**Status: PLAN, not yet implemented. Owner-directed 2026-07-25.** Read `ROADMAP.md`, then
+**Status: EXECUTED 2026-07-25 — G1 FAILED, reverted per the rollback rule. §10 holds the results.**
+Owner-directed. The plan below is unchanged from before execution (it is the pre-registration);
+§10 records what happened, including two of its own assumptions being refuted. Read `ROADMAP.md`, then
 `SESSION_2026_07_25_HANDOFF_10.md` (§9–§12 are the evidence this plan rests on), then this.
 
 The peel's **subtraction** is the last absolute-density operation left from the pre-composition solver. It is
@@ -237,3 +239,69 @@ expected to look like the failed arm, which is the point.
 * The **ψ vertex** / `_JEFFREYS_REF`. HANDOFF_10 §11–§12 close this: the reference is required for properness,
   the median is already the best readout, the grid is not the problem, and the precision is already honest.
 * The **hyperprior**. Nothing here needs it, and it is not the current task.
+
+
+---
+
+## 10. EXECUTION RESULT (2026-07-25) — G1 failed, reverted; four findings stand
+
+All five steps run, each measured separately as specified. **HEAD restored** (`expF`, 0.0884 / 0.0678).
+
+| step | change | refit=0 | vs HEAD | refit=1 | vs HEAD |
+|---|---|---|---|---|---|
+| 1 | scaffolding, unused | — | **bit-identical** ✓ | — | — |
+| 2 | share replaces subtraction, precision unchanged | 0.1024 | 2 / 30 | 0.0821 | 3 / 29 |
+| **3** | **+ `Var(log w)` in the precision** | **0.0926** | 5 / 23 | **0.0676** | 12 / 10 / 10 |
+| 4 | remove the `mrna_active` gate | 0.0932 | 2 / 30 | 0.0683 | 9 / 16 / 7 |
+| 5 | λ-gate: density test → precision test | 0.0927 | 6 / 23 | 0.0676 | 12 / 10 / 10 |
+
+**Gate outcome.** G1 **FAILS**: best arm (step 3) is 0.0926 vs HEAD's 0.0884 at refit=0, and 10 better / 21
+worse against `m8` where HEAD is 16 / 11 / 5. G2 is a wash (0.0676 vs 0.0678, 12 / 10 / 10). G3 is
+**unchanged at 0.2030** — because the structural gate is retained, so the share never reaches the
+`exon|intron` seams where the leak is. G4 **improves markedly** (below). Per the pre-agreed rollback rule:
+reverted.
+
+### 10.1 The thesis is CONFIRMED directionally, and it is not enough
+
+Step 2 → step 3 is the whole claim, and the variance does exactly what M10 says: **0.1024 → 0.0926** (refit=0)
+and **0.0821 → 0.0676** (refit=1). Adding `w_μ²(v_ν + v_μ)` recovers most of the mode-only damage and brings
+refit=1 level with HEAD. The derivation is not in question; the *level* still is (§2 case 2's |Δw| = 0.294 on
+the unstranded arm, exactly the risk registered in §8).
+
+### 10.2 ⛔ TWO ASSUMPTIONS OF THIS PLAN ARE REFUTED
+
+* **§7's claim that steps 2 and 3 are separable is WRONG.** Case 3's conservative mode (`w = 0`) is only
+  defensible *paired with* its zero precision; applying the mode at full precision costs 0.0884 → 0.1024. At
+  an `exon|exon` seam neither flank has a factory, so on unstranded data the precedence falls to case 3 and
+  step 2 kills a claim that should flow. Mode and variance are one object here, not two.
+* **§4.5's claim that the share subsumes the `mrna_active` gate is WRONG.** Removing it costs 0.0926 → 0.0932
+  and 0.0676 → 0.0683 (step 4). The structural rule contributes independently of the share.
+
+### 10.3 The λ-gate defect is REAL but INERT — do not re-run
+
+Step 5 (test the precision rather than the density, §4.2) moves nothing: 0.0927 / 0.0676 against step 3's
+0.0926 / 0.0676. The inconsistency is genuine and worth knowing about; it is not worth a commit.
+
+### 10.4 ⭐ The honest-precision trade, and it is the interesting result
+
+Step 3 makes boundaries **markedly more honest and somewhat more wrong**:
+
+| | HEAD | step 3 |
+|---|---|---|
+| boundary single `errQ1conf` | 6.6 % | **2.5 %** |
+| boundary AMBIG `errQ1conf` | 2.2 % | **1.6 %** |
+| boundary single ERR (reads) | 692,306 | 939,360 |
+
+So the share is doing precisely what it was designed to do — it converts confident boundary error into
+*declared uncertainty* — but pays for it in error mass, and mwae scores only the mass. **That is a real
+tension between G1 and G4, and it is the owner's call, not a technical one:** if what pass-0 owes Phase 2 is a
+trustworthy substrate rather than a low score, a 2.6× reduction in confidently-wrong boundary error may be
+worth 0.004 of aggregate mwae. G1 was pre-registered as a hard gate, so the default action was revert.
+
+### 10.5 What would have to change for a retry
+
+The binding constraint is the LEVEL, not the law. §2 case 2 (the far intron) carries |Δw| = 0.294 on the
+unstranded arm, and case 3 (no evidence at all) covers `exon|exon` seams entirely — where HANDOFF_10 §8.1
+already showed the boundary is structurally starved (no factory within reach on 97 %, no strand when
+unstranded). **A better share needs a source that does not exist yet at those seams**, which is the same
+conclusion the boundary study reached from the other direction. Retry only after that source exists.
