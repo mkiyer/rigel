@@ -151,6 +151,17 @@ def _fit_gdna_hyperprior(
     regions only** (``single``) — intergenic / structural-gDNA (``gonly``) are dropped and represented by the
     weak floor instead of flooding the depleted mode. Occupancy-weighted, fixed bandwidth (``var_g=None`` — no
     per-node τ discounting, so the enriched minority renders at its occupancy height)."""
+    # ⭐ THE EVIDENCE CLASS IS AVAILABLE HERE (`belief.evidence`: EV_LOCKED / EV_OWN / EV_IMPUTED — see
+    # `node_geometry.NodeBelief`). It says where each node's composition CAME FROM, which neither `f_g` nor
+    # `var_gdna` reveals: an IMPUTED node can be confidently wrong, and that is the poison path into this fit.
+    # Measured over the suite: IMPUTED is **91.9 % of all error on 54.1 % of the mass**, at 6.2× OWN's rate,
+    # and it is NOT currently excluded — the substrate below keeps every single-strand REGION node regardless.
+    #
+    # ⚠ DELIBERATELY NOT ACTED ON. Excluding IMPUTED nodes is an open question with a real downside: a node
+    # reporting a genuine ENRICHED mode may be exactly the one dropped, and the prior would lose the mode it
+    # most needs. `solve_gate_design.md` also records a stronger version of the same idea as derived,
+    # implemented and EMPIRICALLY REFUTED (+0.010 refit=0 / +0.025 refit=1). The flag is here so the question
+    # can be MEASURED — it decides nothing yet.
     isr = np.asarray(chain.kind) == REGION
     fp = np.asarray(statics.free_pos, dtype=bool)
     fn = np.asarray(statics.free_neg, dtype=bool)

@@ -16,6 +16,9 @@ from rigel.calibration.bp_solver import (
     node_sweep,
 )
 from rigel.calibration.node_geometry import (
+    EV_IMPUTED,
+    EV_LOCKED,
+    EV_OWN,
     build_node_geometry,
     build_node_statics,
     init_beliefs,
@@ -1069,3 +1072,78 @@ def test_node_sweep_deterministic():
     for nm in ("mode_g", "prec_g", "mode_p", "prec_p", "mode_n", "prec_n"):
         x, y = np.asarray(capa[nm]), np.asarray(capb[nm])
         assert np.array_equal(x, y, equal_nan=True), (nm, x, y)
+
+
+# ── P-solv: NodeBelief.evidence — where each node's composition came from ────────────────────────────
+
+
+def _evidence_case():
+    """The factor-1 bedrock chain with a SINGLE-STRAND exon, so all three evidence classes are present:
+    the intergenic ends are structurally locked, the exon has its own strand evidence, and the boundaries
+    have none. Returns ``(solved belief, init belief, capture)``."""
+    rho = 0.5
+    gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
+    chain = build_node_chain(np.array([0, 3]), np.array([0, 4]))
+    L = np.array([1000.0, 1000.0, 1000.0])
+    sig = np.array([0, BIT_EXON_POS, 0], dtype=np.int64)
+    sc = np.array([TS_NONE, TS_POS, TS_NONE], dtype=np.int8)
+    region_arrays = SimpleNamespace(strand_class=sc, signature=sig, region_size_bp=L)
+    reg_eff = region_eff_length(L, gdna_fl)
+    cmass = rho * reg_eff
+    substrate = SimpleNamespace(
+        contained=_cview(cmass, np.zeros(3), mass_u=cmass, mass_spl=np.zeros(3))
+    )
+    side_eff = boundary_side_eff_length(gdna_fl, L)
+    lr, rr = np.array([-1, 0, 1, 2]), np.array([0, 1, 2, -1])
+    lmass = np.where(lr >= 0, rho * side_eff[np.clip(lr, 0, 2)], 0.0)
+    rmass = np.where(rr >= 0, rho * side_eff[np.clip(rr, 0, 2)], 0.0)
+    bsub = SimpleNamespace(
+        left_region=lr, right_region=rr,
+        left=_cview(lmass, np.zeros(4), mass_u=lmass, mass_spl=np.zeros(4)),
+        right=_cview(rmass, np.zeros(4), mass_u=rmass, mass_spl=np.zeros(4)),
+        junction_strand=np.zeros(len(lr), dtype=np.int8),
+    )
+    geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
+    st = build_node_statics(chain, substrate, bsub, region_arrays)
+    b0 = init_beliefs(
+        chain, substrate, bsub, region_arrays, rna_sense_frac=0.7, n_grid=40, statics=st
+    )
+    cap: dict = {}
+    final = node_sweep(
+        chain, st, geom, b0, region_arrays, bsub, rna_sense_frac=0.7, n_grid=40, _capture=cap
+    )
+    return final, b0, cap
+
+
+def test_node_belief_evidence_is_a_total_disjoint_partition():
+    """P-solv: `evidence` labels EVERY node exactly once, and it is derived from the two structural facts it
+    claims — LOCKED iff not `solvable`, and among solvable nodes OWN iff it has own composition evidence."""
+    final, _, cap = _evidence_case()
+    ev = final.evidence
+    assert ev is not None
+    assert ev.dtype == np.int8 and ev.shape == final.f_g.shape
+    assert set(np.unique(ev).tolist()) <= {EV_LOCKED, EV_OWN, EV_IMPUTED}
+    solvable = np.asarray(cap["solvable"], bool)
+    tau = np.asarray(cap["_uni_static"]["tau_own"], float)
+    assert np.array_equal(ev == EV_LOCKED, ~solvable)
+    assert np.array_equal(ev == EV_OWN, solvable & (tau > 0.0))
+    assert np.array_equal(ev == EV_IMPUTED, solvable & (tau <= 0.0))
+    n = int((ev == EV_LOCKED).sum() + (ev == EV_OWN).sum() + (ev == EV_IMPUTED).sum())
+    assert n == ev.size  # total and disjoint
+
+
+def test_init_belief_declares_no_evidence_class():
+    """The init has solved nothing, so it must report `None` rather than defaulting every node to a class."""
+    _, b0, _ = _evidence_case()
+    assert b0.evidence is None
+
+
+def test_locked_nodes_are_exactly_the_structural_gdna_sinks():
+    """LOCKED must mean what it says: no admissible RNA strand, so the node is pure gDNA by construction and
+    keeps `f_g = 1`. This is the measured-gDNA anchor the hyperprior leans on — it must never be damped."""
+    final, _, cap = _evidence_case()
+    locked = final.evidence == EV_LOCKED
+    assert locked.any()
+    fp, fn = np.asarray(cap["free_pos"], bool), np.asarray(cap["free_neg"], bool)
+    assert not (fp | fn)[locked].any()
+    assert np.allclose(final.f_g[locked], 1.0)

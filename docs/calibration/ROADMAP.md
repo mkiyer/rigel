@@ -439,6 +439,26 @@ premises above have changed, **that measurement is the single highest-value next
    supplied, if wanted: carry the peel share as a FUNCTION of the destination's state (a proper pairwise
    potential) rather than a plugged-in point estimate.
 
+8. ✅ **DONE — P-solv: `NodeBelief.evidence`.** The existing `solvable` flag is a **structural** gate
+   ("admits ≥1 RNA strand and has mass"), not a statement about whether the answer can be trusted — and
+   `τ_own == 0` does NOT mean unsolvable, those nodes get solved by imputation, often badly. So the belief
+   now carries a three-way evidence class, measured over all 32 conditions:
+
+   | class | nodes | mass share | mwae | share of ALL error |
+   |---|---|---|---|---|
+   | `EV_LOCKED` — no admissible RNA strand, pure gDNA by construction | 11,804 | 16.4 % | **0.0000** | 0.0 % |
+   | `EV_OWN` — has its own composition evidence (`τ_λ > 0`) | 26,813 | 29.6 % | **0.0229** | 8.1 % |
+   | `EV_IMPUTED` — solvable but `τ_λ = 0`, carried entirely by neighbours | 35,877 | 54.1 % | **0.1430** | **91.9 %** |
+
+   **`IMPUTED` is 92 % of all error on 54 % of the mass, at 6.2× `OWN`'s rate** — and it is currently kept in
+   the hyperprior's training substrate, unmarked. The flag is now visible at `_fit_gdna_hyperprior`.
+
+   ⚠ **Exposed, deliberately NOT acted on.** Excluding `IMPUTED` has a real downside — a node reporting a
+   genuine ENRICHED mode may be exactly the one dropped, and the prior would lose the mode it most needs —
+   and `solve_gate_design.md` records a stronger version of the same idea as derived, implemented and
+   **empirically refuted** (+0.010 refit=0 / +0.025 refit=1). The flag exists so the question can be
+   MEASURED; it decides nothing. Behaviour-neutral (32/32), 3 unit tests.
+
 8. ⭐ **P1g — PUT TSS/TES IN THE REGION/BOUNDARY MAP.** The structural debt behind `ω_graft` (see the banner
    at the top of this file). Owner-flagged as a high priority and forthcoming. It reaches the index build
    (`boundary_df` today carries only `boundary_id`/`ref_name`/`position`; `t_df` already has the transcript
