@@ -732,3 +732,73 @@ def mismatch_deflate(precision, gap, contradicted, var_own):
     b2 = np.where(known, np.maximum(0.0, g * g - v_msg - np.where(known, vo, 0.0)), 0.0)
     out = np.where((p > 0.0) & (b2 > 0.0), 1.0 / np.maximum(v_msg + b2, _EPS), p)
     return np.where(np.asarray(contradicted, bool) & known, 0.0, out)
+
+
+def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
+    """⭐ P1d — the GRAFT's PREMISE log-variance, measured from an exon's two flanking seams.
+
+    **The event it prices.** The graft hands an exon the RNA at one seam — ``ρ_ν + ρ_μ`` — as *the* exon's
+    RNA density. Every molecule counted there is in the exon, but the exon may also hold molecules that
+    never touch that seam: ones that reach it by the other flank, or that start or end inside it. So what
+    the graft knows is an **inequality**, ``ρ_R(exon) ≥ ρ_ν(B) + ρ_μ(B)``, and it uses it as an equality.
+    Nothing else in the ledger prices that. **M8 comes closest and does not cover it**: M8 charges
+    ``(log r)²``, i.e. it assumes the only reason a seam and an exon differ is the capture step between
+    them — so off-capture ``r = 1`` and M8 charges exactly zero, while a seam and a region still differ.
+    ``1/n_spl`` does not cover it either, and never will however large it grows: a count says *how many I
+    counted*, this says *whether what I counted speaks for the exon*.
+
+    **The estimator.** The exon's two flanking seams are two INDEPENDENT statements of the same claim —
+    measured, not assumed: ``corr(log φ_left, log φ_right)`` is **0.017 raw, −0.036 after the Poisson part**
+    at capture-OFF over 14 conditions (0.30 under capture, where the two do share a frame error). So the
+    part of their squared gap that their own noise cannot explain IS the premise variance, halved because
+    each seam carries half of the gap::
+
+        v_premise = max(0, d² − v_a − v_b) / 2 ,      d = log(ρ_μ^a / ρ_μ^b)
+
+    the same **method of moments** the calibrator already uses for ``κ`` and for both strand
+    overdispersions — a fitted quantity, not a tuned constant, and there is no coefficient to choose: the
+    ``/2`` is the measured independence and the truncation at 0 is the method's own ("no detectable
+    premise error"). Returns ``(per_edge, pooled)``.
+
+    **Why PER-EDGE and not a single pooled ω.** The premise error is not a count law. Binned by the
+    junction's spliced count it spans 23×, but that gradient is a **proxy**: it is flat inside every
+    structural class (junction-only excess 0.036 → 0.073 across a 200× count range), flat in the
+    extrapolation ratio the term was originally scoped as (1.13× over a 6.7× range), and flat in exon
+    length. What it actually tracks is whether the boundary carries a **transcript terminus** — ``ω̂`` 1.7–1.9
+    there against 0.04–0.06 at junction-only seams, a **≥30×** split, with 20.8 % of edges carrying 71.7 %
+    of the squared deviation. The two-seam gap sees that directly; a pooled ω would over-charge the ~79 %
+    junction-only edges by an order of magnitude and under-charge the rest.
+
+    **The pooled value is still needed**, for the ~52 % of graft edges with only one live seam (a terminal
+    exon, or a partner carrying no spliced flux). There is no second study there, so the per-edge statistic
+    does not exist — but the library-level one does, and it is this same estimator pooled. It is fitted on
+    the measurably BETTER-behaved half (premise 0.48, against 0.60 on one-seam edges and 2.69 where no seam
+    carries spliced flux), so it UNDER-charges: the count-zero-information-safe direction, and the "pass-0
+    must be weak and correctable" one.
+
+    **What the caller must pass.** Both fluxes ALREADY LIFTED into the destination's frame, so a capture
+    step common to the two seams cancels out of ``d`` and only a genuine abundance difference is charged;
+    and each ``var`` must carry every noise source the model knows — the seam's spliced COUNT (never its
+    mass) **⊕ its lift's own scale sampling** (M5's source leg; the destination's leg is common to both
+    lifts and cancels in ``d``). Method of moments books as premise error every noise it fails to subtract,
+    and omitting the lift term inflates the fit in proportion to gDNA depth (the frame is read off ``ρ_tot``,
+    which gDNA makes noisier) — measurably the worst place to over-charge, because that is exactly where the
+    RNA claim is a near-exact measurement and the gDNA claim is the wrong one.
+
+    **It cannot double-count with M7** for the reason `variance_ledger.md` §2.2 proves in general: DL's
+    ``max()`` means a newly-modelled variance *replaces* the part of the gap M7 was absorbing as unexplained
+    drift, one for one, until ``b̂²`` hits its floor at 0.
+
+    ⚠ The suite this was measured on is **Poisson by construction**, so the premise variance here is purely
+    structural/annotation-driven. Real libraries add overdispersion on top of every term, which makes this
+    an under-estimate rather than an over-estimate — but the SHAPE (terminus vs junction-only) must be
+    re-measured on a real annotation before it is trusted quantitatively."""
+    fa, fb = _f(flux_a), _f(flux_b)
+    ok = (fa > _EPS) & (fb > _EPS)
+    d = np.log(np.maximum(fa, _EPS)) - np.log(np.maximum(fb, _EPS))
+    va, vb = _f(var_a), _f(var_b)
+    v = np.where(np.isfinite(va), va, 0.0) + np.where(np.isfinite(vb), vb, 0.0)
+    per = np.where(ok, np.maximum(0.0, d * d - v) * 0.5, 0.0)
+    if not np.any(ok):
+        return per, 0.0
+    return per, float(max(0.0, float((d[ok] ** 2).mean()) - float(v[ok].mean())) * 0.5)

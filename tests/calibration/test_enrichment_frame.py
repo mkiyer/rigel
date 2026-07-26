@@ -25,6 +25,7 @@ from rigel.calibration.enrichment_frame import (
     f_g_from_k,
     gdna_fallback_admissible,
     graft_frame_logvar,
+    graft_premise_logvar,
     graft_rna_logvar,
     k_from_belief,
     message_precision,
@@ -747,3 +748,74 @@ def test_conservation_rescale_degenerate_inputs_are_safe():
     M, rho, v = cases[3]
     out = conservation_rescale(M, rho, eff, v, np.zeros(1), rho)
     assert (out * eff).sum() == pytest.approx(M[0], rel=1e-10)
+
+
+# ── P1d: graft_premise_logvar — the two-seam method-of-moments premise variance ──────────────────────
+
+
+def test_graft_premise_logvar_agreeing_seams_charge_nothing():
+    """Two seams that agree carry no detectable premise error — the truncation is the method's own."""
+    per, pooled = graft_premise_logvar(
+        np.array([3.0, 7.0]), np.array([3.0, 7.0]), np.array([0.01, 0.01]), np.array([0.01, 0.01])
+    )
+    assert list(per) == [0.0, 0.0]
+    assert pooled == 0.0
+
+
+def test_graft_premise_logvar_is_the_mom_second_moment_halved():
+    """``max(0, d² − noise)/2`` exactly, with no coefficient to choose."""
+    fa, fb = np.array([np.e**2]), np.array([1.0])  # d = 2 exactly
+    va = vb = np.array([0.25])
+    per, _ = graft_premise_logvar(fa, fb, va, vb)
+    assert float(per[0]) == pytest.approx((4.0 - 0.5) / 2.0, rel=1e-12)
+
+
+def test_graft_premise_logvar_subtracts_noise_and_is_direction_free():
+    """A gap fully explained by the seams' own noise leaves nothing; a↔b swap cannot change the answer."""
+    fa, fb = np.array([np.e]), np.array([1.0])  # d = 1
+    per, _ = graft_premise_logvar(fa, fb, np.array([0.6]), np.array([0.6]))  # noise 1.2 > d² = 1
+    assert float(per[0]) == 0.0
+    p1, _ = graft_premise_logvar(fa, fb, np.array([0.1]), np.array([0.2]))
+    p2, _ = graft_premise_logvar(fb, fa, np.array([0.2]), np.array([0.1]))
+    assert float(p1[0]) == pytest.approx(float(p2[0]), rel=1e-14)
+
+
+def test_graft_premise_logvar_needs_two_live_seams():
+    """One live seam ⇒ no second study ⇒ per-edge 0, and the pooled fit ignores that edge entirely."""
+    per, pooled = graft_premise_logvar(
+        np.array([5.0, np.e**2]), np.array([0.0, 1.0]), np.array([0.0, 0.0]), np.array([0.0, 0.0])
+    )
+    assert float(per[0]) == 0.0
+    assert float(per[1]) == pytest.approx(2.0, rel=1e-12)
+    assert pooled == pytest.approx(2.0, rel=1e-12)  # fitted on the ONE edge that has a pair
+
+
+def test_graft_premise_logvar_pooled_is_the_population_second_moment():
+    """The pooled fit is the same estimator over the population — NOT the mean of the per-edge values,
+    which would truncate each edge separately and bias the fit upward."""
+    fa = np.exp(np.array([2.0, 0.0, 0.0]))  # d² = 4, 0, 0 against a per-seam noise of 0.5+0.5
+    fb = np.ones(3)
+    v = np.full(3, 0.5)
+    per, pooled = graft_premise_logvar(fa, fb, v, v)
+    d2 = np.array([4.0, 0.0, 0.0])
+    assert list(per) == pytest.approx([1.5, 0.0, 0.0], rel=1e-12)
+    assert pooled == pytest.approx(max(0.0, d2.mean() - 1.0) / 2.0, rel=1e-12)
+    assert pooled < float(np.mean(per))  # the per-edge truncation really does bias upward
+
+
+def test_graft_premise_logvar_infinite_noise_is_ignored_not_propagated():
+    """A seam with no count (var = inf) must not nan the estimate — it contributes no subtraction."""
+    per, pooled = graft_premise_logvar(
+        np.array([np.e**2]), np.array([1.0]), np.array([np.inf]), np.array([0.0])
+    )
+    assert np.isfinite(per).all() and np.isfinite(pooled)
+    assert float(per[0]) == pytest.approx(2.0, rel=1e-12)
+
+
+def test_graft_premise_logvar_never_negative_and_finite():
+    rng = np.random.default_rng(11)
+    fa, fb = rng.lognormal(0.0, 1.5, 400), rng.lognormal(0.0, 1.5, 400)
+    va, vb = rng.gamma(2.0, 0.3, 400), rng.gamma(2.0, 0.3, 400)
+    per, pooled = graft_premise_logvar(fa, fb, va, vb)
+    assert np.isfinite(per).all() and (per >= 0.0).all()
+    assert np.isfinite(pooled) and pooled >= 0.0

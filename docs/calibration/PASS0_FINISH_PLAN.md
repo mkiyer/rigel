@@ -14,13 +14,14 @@ do not start a competing list.
 | **P1** | root-cause the **capture-OFF** confident error | 🔬 **ROOT-CAUSED**, §P1b |
 | **P1c** | the WEIGHTED RESCALE | ⤳ **SUPERSEDED** by P1f, which makes it inert (0/0/32); law kept, path removed |
 | **P1f** | **the MESSAGE PACKET** — λ and θ carried explicitly, fused by their OWN precisions | ✅ **LANDED** — `weighted_rescale_design.md` §9 |
-| **P1e** | the composition **SURPRISE** `z² = δ²/(αᵀΣα)` as a damping term — never inert | ▶ **NEXT** (owner-directed) |
+| **P1e** | the composition **SURPRISE** `z² = δ²/(αᵀΣα)` as a damping term — never inert | ▶ **NEXT** (owner-directed). P1d's residual regression points straight at it: the premium must go to the arm whose premise FAILED, and `claim/obs` is the observable that says which |
 | — | **`variance_ledger.md`** — every variance term, what it prices, and the no-overlap proof | ✅ **the standing audit; update it whenever a term changes** |
-| **P1d** | the graft's **EXTRAPOLATION** variance | 📐 **DERIVED + SIZED + ESTIMATOR FOUND** (MoM, within 2 %); the SHAPE is the open piece — `variance_ledger.md` §3–5 |
-| **P3** | AMBIG exon over-confidence — **z2\|Q1 = 183**, the worst defect in the solver | ▶ **PROMOTED** above P4/P5 |
+| **P1d** | the graft's **PREMISE** variance (was: "extrapolation" — refuted) | ✅ **LANDED** 2026-07-26, `graft_premise_logvar`, default ON. Confidently-wrong **−27.5 %**, z2 ALL 15.55 → **11.12**, for +1.9 % mwae. The mechanism is **transcript TERMINI**, not extrapolation — `variance_ledger.md` §3.0 |
+| **P3** | AMBIG exon over-confidence — z2\|Q1 was 183, then 92.1, now **65.3** after P1d | ▶ **PROMOTED** above P4/P5; still the largest single defect |
 | P4 | FAR → a proper opposite-direction message; M11's pre-DL precision | queued |
 | P5 | re-test `r` from the gDNA channel (the "moot" verdict is stale) | queued |
 | P6 | fragment length as a FOURTH information source — **gated** | scoping only |
+| **P1g** | ⭐ **NEW — put TSS/TES in the region/boundary map.** `ROADMAP.md` §6 deferred it as "expected to be low-impact"; it is measured at **62–72 % of the graft's premise error** and a free annotation bit splits ω̂ **≥30×**. P1d prices it blind through the two-seam gap; naming it directly would price it exactly | ▶ **UN-DEFERRED by measurement** |
 | — | **THEN** the gDNA hyperprior refit + the re-solve | blocked on the above |
 
 ---

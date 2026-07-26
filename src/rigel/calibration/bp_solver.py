@@ -40,6 +40,7 @@ from .enrichment_frame import (
     composition_logvar,
     conservation_rescale,
     graft_frame_logvar,
+    graft_premise_logvar,
     mismatch_deflate,
     mismatch_gap,
     peel_continue_share,
@@ -369,6 +370,61 @@ def node_sweep(
         ) > _EPS  # the LEFT face carries the spliced (acceptor) ⇒ WITH-spliced ρ_tot
         accept_r = (SP[1] + SN[1]) > _EPS
 
+        # ── P1d: the graft's RNA claim is a LOWER BOUND, and the tightest one is the DOMINANT flank ──────
+        # A boundary hands the exon next door ``ρ_ν + ρ_μ`` as *the* exon RNA density. Every molecule
+        # counted there is in the exon — but the exon may also hold molecules that never touch this seam:
+        # ones that reach it by the OTHER flank, or that start/end inside it. So what the graft actually
+        # knows is an INEQUALITY,
+        #     ρ_R(exon) ≥ ρ_ν(B) + ρ_μ(B)       for every boundary B flanking the exon,
+        # and it uses it as an equality. That — not the 100 bp → 2,100 bp extrapolation the term was
+        # originally scoped as — is the graft's premise error: measured FLAT in the extrapolation ratio
+        # (1.13× over a 6.7× range) and flat in exon length, but 30–100× larger at boundaries carrying a
+        # transcript terminus, i.e. exactly where RNA does NOT flow through the seam.
+        #
+        # Both flanks bound the SAME quantity, so the tightest available bound is the larger flux. This is
+        # a structural fact about which molecules cross a seam, with no fitted constant: the alternatives
+        # all fail in the direction their algebra predicts — ``min`` is worse than either bound alone
+        # (0.514 vs 0.487), ``sum`` over-states by +0.61 nats as a sum of two bounds must, and doubling the
+        # arriving flux does nothing (0.503), so it is specifically the OTHER seam's VALUE that is missing.
+        _li_a, _ri_a = np.asarray(left, np.int64), np.asarray(right, np.int64)
+        _vl_a, _vr_a = _li_a >= 0, _ri_a >= 0
+        _sl_a, _sr_a = np.clip(_li_a, 0, n - 1), np.clip(_ri_a, 0, n - 1)
+
+# ⚠ The two seams must be compared IN THE DESTINATION'S OWN FRAME. Each is lifted by its own
+        # enrichment step ``r``, and under capture those steps differ (the two seams sit at different probe
+        # positions), so comparing unlifted fluxes reads a capture difference as an abundance difference.
+        # Measured on the MODE variant of this idea (replace the claim by the dominant seam's flux): raw is
+        # uniformly better off-capture (14/14 conditions, 0 worse) and uniformly worse on (8 worse); lifting
+        # first halves the on-capture damage. That MODE fix is NOT landed — under capture the graft already
+        # OVER-states (median φ = 2.45, an M8 frame problem), so no bound-tightening can help there — but the
+        # same seam pair is what measures the variance below, and it must be framed for that too.
+        def _flank_dom(rho_lface, rho_rface, spf):
+            """Per-node: the flux each of its two flanking BOUNDARIES sends it, ALREADY lifted into this
+            node's frame, per strand.
+
+            ``spf[1]`` is a node's right face — what a LEFT neighbour presents to us — and ``spf[0]`` its
+            left face, what a RIGHT neighbour presents; the matching frame steps are the same pairs the
+            relay and the combine form. Zero wherever a flank is absent or is not a boundary, so on a
+            one-junction exon this degenerates exactly to that junction's own lifted flux."""
+
+            def _side(ok, nb, src_face, dst_face, face):
+                r = np.where(
+                    ok & (src_face[nb] > _EPS) & (dst_face > _EPS),
+                    dst_face / np.maximum(src_face[nb], _EPS),
+                    1.0,
+                )
+                return np.where(ok & is_bnd_a[nb], spf[face][nb] * r, 0.0)
+
+            return (
+                _side(_vl_a, _sl_a, rho_rface, rho_lface, 1),
+                _side(_vr_a, _sr_a, rho_lface, rho_rface, 0),
+            )
+
+
+        # P1d is ON by default; `RIGEL_GLV_OFF=1` ablates it (bit-identical to the pre-P1d path).
+        _glv = not os.environ.get("RIGEL_GLV_OFF")
+        vgp_prem = vgn_prem = None  # per-ρ-iteration, in the destination's frame; set before each transport
+
         # own per-component densities + precisions — the message-free SELF-SOLVE (`node_init.build_node_init`,
         # the four sources). ``rho_*`` are the own densities; ``prec_*`` combine the strand + intron-factory
         # composition evidence ``τ_λ`` (Var(log f_g)=(1−f_g)²/τ, Var(log f_r)=f_g²/τ) with the Poisson count
@@ -697,6 +753,10 @@ def node_sweep(
                     tpn += _snc
                     tmp += _spc
                     tmn += _snc
+                    if _glv:  # ⭐ P1d — the graft's PREMISE variance (`_transport`'s twin)
+                        _vgp, _vgn = float(vgp_prem[i]), float(vgn_prem[i])
+                        tpp, tmp = _damp_v(tpp, _vgp), _damp_v(tmp, _vgp)
+                        tpn, tmn = _damp_v(tpn, _vgn), _damp_v(tmn, _vgn)
                 if is_bnd_a[i] and ex_a[s]:  # EXON → boundary: PEEL by COMPOSITION (scale by the share)
                     (_wp, _vwp), (_wn, _vwn) = _peel_share(i, df, tg, tpg, tp, tn)
                     tp, tn = tp * float(_wp), tn * float(_wn)
@@ -742,6 +802,27 @@ def node_sweep(
 
         # dst faces its source on its LEFT (face 0); the source faces the dst on its RIGHT (face 1) — and mirrored
         # for the backward pass. The face pair selects BOTH the per-side ρ_tot and the per-face mature flux.
+        def _seam_pair(rho_lface, rho_rface):
+            """Per strand: the graft's premise log-variance, from the destination-frame disagreement of the
+            node's two flanking seams (`graft_premise_logvar`)."""
+            out = []
+            for spf, vmu in ((spl_p_f, 0), (spl_n_f, 1)):
+                fl, fr = _flank_dom(rho_lface, rho_rface, spf)
+                # each seam's own noise: its spliced COUNT (never the mass) ⊕ its lift's scale sampling
+                # (M5's source leg; the destination's leg is common to both lifts and cancels in ``d``).
+                _lv = np.where(np.isfinite(logvar_tot), logvar_tot, 0.0)
+                per, pooled = graft_premise_logvar(
+                    fl,
+                    fr,
+                    np.where(_vl_a, _v_mu_f[1][vmu][_sl_a] + _lv[_sl_a], np.inf),
+                    np.where(_vr_a, _v_mu_f[0][vmu][_sr_a] + _lv[_sr_a], np.inf),
+                )
+                # measured per-edge where a second seam exists; the pooled fit where one does not.
+                out.append(np.where((fl > _EPS) & (fr > _EPS), per, pooled))
+            return out[0], out[1]
+
+        if _glv:  # the relay runs on the INPUT-belief faces, so its pair is formed from those
+            vgp_prem, vgn_prem = _seam_pair(rho_l0, rho_r0)
         fwd = _relay(order_list, left, rho_l0, rho_r0, 0, 1)
         bwd = _relay(order_list[::-1], right, rho_r0, rho_l0, 1, 0)
 
@@ -802,6 +883,16 @@ def node_sweep(
             _snc = np.where(_sn > _EPS, _sn / (1.0 + _sn * _s2t_spl), 0.0)
             tpp, tpn = tpp + _spc, tpn + _snc  # into the mode-fusion precision …
             tmp, tmn = tmp + _spc, tmn + _snc  # … and the measurement stream (a count, never composition τ)
+            if _glv:
+                # ⭐ P1d — the graft's PREMISE variance (`graft_premise_logvar`), applied to the WHOLE RNA
+                # claim after the spliced arm is folded in, because the premise is about the SUM: measured
+                # FLAT in the spliced share w_μ (Var 2.02 → 1.83 across w_μ 0.47 → 1.00, while Var/w_μ²
+                # swings 5×), so charging the spliced arm alone would reach only 10–93 % of the delivered
+                # confidence while the error contaminates 63–95 % of the delivered density.
+                _vgp = np.where(graft, vgp_prem, 0.0)
+                _vgn = np.where(graft, vgn_prem, 0.0)
+                tpp, tmp = tpp / (1.0 + tpp * _vgp), tmp / (1.0 + tmp * _vgp)
+                tpn, tmn = tpn / (1.0 + tpn * _vgn), tmn / (1.0 + tmn * _vgn)
             peel = is_bnd_a & ex_a[src] & valid  # EXON → boundary: PEEL by COMPOSITION (the relay's twin)
             (_wp, _vwp), (_wn, _vwn) = _peel_share(slice(None), df, tg, tpg, tp, tn)
             tp = np.where(peel, tp * _wp, tp)
@@ -927,6 +1018,8 @@ def node_sweep(
         f_cur = np.asarray(f_g, np.float64).copy()
         for _ in range(_RHO_ITERS):
             _, rho_lf, rho_rf = _rho_faces(f_cur)
+            if _glv:  # re-form the destination-frame seam pair against THIS iteration's faces
+                vgp_prem, vgn_prem = _seam_pair(rho_lf, rho_rf)
             ag, ap, an, apg, app, apn, amg, amp, amn, atau, alam, ath = _transport(
                 sl, vl, 0, 1, fwd, rho_lf, rho_rf
             )  # left msg: dst face 0, src face 1

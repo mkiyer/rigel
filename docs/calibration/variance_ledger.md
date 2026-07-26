@@ -24,7 +24,7 @@ log-variance except where noted.
 | M11 | `ψ'(k) + 1/(n·E[f_R]²)` (`residual_level`) | the **level** the peel share is formed from | inside M10's `v_ν` | live |
 | M7 | `b̂²` (`mismatch_deflate`) | the imputation **premise** being false — DerSimonian–Laird against the destination's own self-solve | every stream, **but inert wherever `τ_own = 0`** (all AMBIG, all unstranded ⇒ 84 % of error mass) | live |
 | — | `1/n_spl` | the spliced measurement's own count | the graft | live |
-| **P1d** | **the graft's extrapolation** | a junction measured over ~100 bp used as the RNA density of a ~2,100 bp exon | the grafted spliced component only | **NOT BUILT** — §3 |
+| **P1d** | `max(0, d²−v_a−v_b)/2` (`graft_premise_logvar`) | the graft's **premise**: a seam's RNA used as the exon's RNA, when it is only a LOWER BOUND on it | the WHOLE grafted RNA claim, both code paths | **LIVE** (2026-07-26) — §3, and ⚠ **its mechanism is NOT what §3 originally said**, see §3.0 |
 | P1e | the conservation **surprise** `δ²/(αᵀΣα)` | how implausible the claim is against the node's own observed mass | every message | not built |
 | — | ~~NPMLE projection `var_proj + (Δμ_proj)²`~~ | a **density** disagreement between two nodes | — | **RETIRED**; `DensityNPMLE.project` is called nowhere. ⚠ `CalibrationConfig`'s docstring still describes it and is stale |
 
@@ -41,8 +41,16 @@ is switched off structurally rather than by judgement:
 * **M10 vs M8** — different edges. The peel is exon → boundary; the graft is boundary → exon.
 * **M11 vs M1** — M11 is the level *inside* M10's share, not a second opinion about the same density.
 * **`1/n_spl` vs P1d** — sampling versus premise. Charging a measurement its Poisson count says "I counted
-  this many"; charging it an extrapolation says "and this many are not necessarily representative of the
-  region I am applying them to". A count cannot see the second and never will, however large it is.
+  this many"; charging it a premise variance says "and what I counted does not necessarily speak for the
+  region I am applying it to". A count cannot see the second and never will, however large it is.
+* **M8 vs P1d** — both sit on the graft and they are disjoint in the way §2.1 requires: M8 prices the CAPTURE
+  step (`(log r)²`, **identically 0 off-capture**), P1d prices the structural premise (measured
+  capture-INVARIANT: residual 0.41–0.46 across gdna1…gdna300 and both strandednesses). M8 is the only term
+  that could plausibly have absorbed P1d, and off-capture it charges exactly zero while the premise error is
+  at its full 0.485 — which is how the gap was found.
+* **M10 vs P1d** — the exact mirror pair, on opposite edges. M10 prices the share on the peel (exon →
+  boundary); P1d prices the graft's (boundary → exon), which had **no** share term at all. Neither fires on
+  the other's edge.
 
 ### 2.2 M7's DerSimonian–Laird **cannot** double-count with anything — this is provable
 
@@ -63,7 +71,73 @@ terms M1/M5/M8/M10, and §2.1 shows each pair is either structurally exclusive o
 discipline to keep is: **before adding a term, name the physical event it prices and show which existing term
 would otherwise have absorbed it.**
 
-## 3. P1d — the one gap the ledger exposes, and it is large
+## 3.0 ⭐ P1d IS BUILT — and the mechanism below it is NOT extrapolation. Read this before §3–§5.
+
+**Landed 2026-07-26** as `enrichment_frame.graft_premise_logvar`, ON by default, `RIGEL_GLV_OFF=1` ablates it
+(verified bit-identical to the pre-P1d path, 32/32). §3–§5 below are kept as the evidence trail, but **three
+of their load-bearing claims are now refuted by measurement**, and one of the refutations reverses the name of
+the term.
+
+**① "Extrapolation" is the wrong mechanism.** §3 attributes the error to a ~100 bp junction speaking for a
+~2,100 bp exon, a 12–21× extrapolation. Binned by that very ratio the premise residual is **FLAT — 1.13× over
+a 6.7× range** — and flat in exon length too. It is not a geometry effect.
+
+**② The 40× count gradient of §5.2 is a PROXY, not a law.** Stratify by one structural bit — does the boundary
+carry a **transcript terminus** — and the count gradient vanishes *inside* each stratum (junction-only excess
+0.036 → 0.073 across a 200× count range), while the strata themselves differ by **≥30×**:
+
+| stratum | edges | median φ | **ω̂** | share of squared deviation |
+|---|---|---|---|---|
+| boundary carries a **TERMINUS** | 20.8 % | 0.70 | **1.7–1.9** | **71.7 %** |
+| **junction-only** boundary | 79.2 % | 1.10 | **0.04–0.06** | 28.3 % |
+
+Verified three ways including variance components across independent simulated libraries (`Var_within` = the
+counting noise = 0.1414; floor+step = 0.1406, a 0.6 % match). That check is also what caught the first pass
+leaving the ORACLE capture step's own two gDNA counts inside the junction-only figure — 0.086 → **0.04**.
+**This is `ROADMAP.md` §6's deferred structural item ("the region/boundary map has no TSS/TES", deferred as
+"expected to be low-impact"), and it is 62–72 % of the graft's premise error.**
+
+**③ The Poisson floor was under-subtracted, but it is not the story.** §3's `sd(log φ) = 0.76 ⇒ 0.58` is a
+statistic built from FIVE counts with only one subtracted. With all five subtracted at exact trigamma, Poisson
+explains **16–24 %** and the residual is **0.485** (MC null returns −0.017, so the law-of-total-variance
+subtraction is sound). ⚠ §5.2's own "excess" column additionally used the spliced **mass**, which is ~2× the
+count — the error `bp_solver.py`'s own comment warns about.
+
+**The physical statement that replaced "extrapolation".** Every molecule counted at a seam is in the exon; the
+exon may hold molecules that never touch that seam. So the graft knows an **inequality**,
+`ρ_R(exon) ≥ ρ_ν(B) + ρ_μ(B)`, and asserts it as an equality (`φ ≡ 1` to 2.2e-16 in both code paths). The
+premise fails hardest exactly where RNA does not flow through the seam — a transcript terminus.
+
+**What landed, and what did not.**
+
+| variant | verdict |
+|---|---|
+| the **VARIANCE**, per-edge from the two seams' gap + a pooled MoM fallback + M5's lift noise subtracted | ✅ **LANDED** |
+| the **MODE** fix (replace the claim with the dominant seam's flux, `max`) | ⛔ **not landed.** Right physics, wrong regime: capture-OFF **14/14 better, 0 worse**; capture-ON 8 worse. Under capture the graft ALREADY over-states (median φ = 2.45, an M8 frame problem), so no bound-tightening can help. Framing the two seams before comparing halves the damage but does not remove it. `min` is worse than either bound alone (0.514 vs 0.487) and `sum` over-states by +0.61 nats — both exactly as the algebra predicts, which is what makes the `max` result structural rather than a selection artifact |
+| omitting M5's lift noise from the MoM subtraction | ⛔ inflates the fit in proportion to gDNA depth and over-charges precisely where the RNA claim is near-exact and the gDNA claim is the wrong one (P1b's population). Costs +0.0010 mwae to fix, and it is the honest form |
+
+**Measured effect (32 conditions, `RIGEL_GLV_OFF=1` vs default):**
+
+| | mwae r0 / r1 | **confidently-wrong** | z2 exon-single | z2 exon-AMBIG | **z2 ALL** |
+|---|---|---|---|---|---|
+| pre-P1d (`pk2`) | 0.0855 / 0.0671 | 1,200,951 | 8.60 | 92.10 | 15.55 |
+| **P1d** | 0.0871 / 0.0684 | **870,245 (−27.5 %)** | **5.68 (−34 %)** | **65.28 (−29 %)** | **11.12 (−28 %)** |
+
+10 better / 7 worse / 15 flat at refit=0. **The trade is +1.9 % error mass for −27.5 % confidently-wrong
+mass** — the trade `PASS0_FINISH_PLAN.md` §0b says decides pass-0. For comparison the un-landable flat probe
+`RIGEL_XVAR=0.3` bought −42 % for +2.4 %, and it reaches only one of the two code paths.
+
+⚠ **The residual regression is localized and has a known mechanism**: unstranded × gDNA-rich × capture-OFF
+(`gdna100_ss0.50_none_capOFF` +0.0406, `gdna300_ss0.50_*_capOFF` +0.012). That is P1b's population, where the
+RNA claim is a near-exact measurement (36.6453 vs 36.6734) and the **gDNA** claim is 47× too big — so damping
+the RNA arm is the wrong arm. Charging the premium to the arm whose premise actually failed is the follow-up.
+
+⚠ The suite is **Poisson by construction**, so everything above is structural/annotation-driven dispersion
+with no overdispersion component, and the terminus/junction split must be re-measured on a real annotation.
+The suite's isoform structure is nested 5'/3' truncations plus exon skips of a shared chain — no alternative
+TSS/TES *inside* an exon, no mutually exclusive exons, no retained introns.
+
+## 3. P1d — the one gap the ledger exposes, and it is large (⚠ superseded in part by §3.0)
 
 **The event:** the graft hands an exon a spliced density `ρ_μ = S/E_spl` measured over the junction's
 ~100 bp window and uses it as a claim about the exon's RNA density over ~2,100 bp — a **12–21×

@@ -33,9 +33,10 @@
 > prior-free source is the neighbours' per-strand RNA imputation — already carried as `theta_imp`, and
 > measured **nearly inert** (0.1444 → 0.1417 when ablated).
 >
-> **⭐ CURRENT (2026-07-26): the composition peel and the MESSAGE PACKET are LANDED; the next task is P1d.**
-> Suite **0.0855 (refit=0) / 0.0671 (refit=1)**, from 0.0885 / 0.0678. **Read
-> `SESSION_2026_07_26_HANDOFF_13.md` — it is the LIVE handoff and has the run instructions.**
+> **⭐ CURRENT (2026-07-26): the composition peel, the MESSAGE PACKET and **P1d** are LANDED; the next task
+> is P1e.** Suite **0.0871 (refit=0) / 0.0684 (refit=1)** — deliberately up from 0.0855 / 0.0671, bought
+> against a 27.5 % cut in confidently-wrong mass. **Read `SESSION_2026_07_26_HANDOFF_14.md` — it is the LIVE
+> handoff and has the run instructions.**
 >
 > **The frame for everything that remains:** the error MASS is close to its prior-free ceiling (HANDOFF_10 §3:
 > 67–75 % of it is premise-limited, and ×10 on every precision moves nothing), but the **CALIBRATION of that
@@ -52,10 +53,21 @@
 > **the MESSAGE PACKET** — λ and θ carried explicitly and fused by their **own** precisions rather than read
 > back off the density fuse. The packet alone drove 0.0889 → 0.0855 and cut AMBIG-exon confidently-wrong 45 %.
 >
-> **NEXT: P1d, the graft's extrapolation variance** — derived, sized and with a working estimator; only its
-> *shape* is open. A junction measured over ~100 bp is used as the RNA density of a ~2,100 bp exon and is
-> charged nothing for it (M8 charges only the capture step, which is identically 0 off-capture). Pricing it is
-> worth **42 % of all confidently-wrong mass** and takes exon-single `z2` from 8.4 to **1.2 — honest**.
+> **⭐ P1d IS LANDED (2026-07-26) — and its mechanism was NOT what the term was named for.**
+> `graft_premise_logvar`, default ON, `RIGEL_GLV_OFF=1` ablates it. Confidently-wrong **1,200,951 → 870,245
+> (−27.5 %)**, `z2` ALL **15.55 → 11.12**, exon-single **8.60 → 5.68**, exon-AMBIG **92.10 → 65.28**, for
+> **+1.9 % error mass** (0.0855 → 0.0871 / 0.0671 → 0.0684, 10 better / 7 worse / 15 flat).
+>
+> **"Extrapolation" is refuted as the mechanism.** The premise residual is FLAT in the extrapolation ratio
+> (1.13× over a 6.7× range) and flat in exon length. What the graft actually gets wrong is that its claim is a
+> **LOWER BOUND used as an equality** — `ρ_R(exon) ≥ ρ_ν(B) + ρ_μ(B)`, asserted as `φ ≡ 1` to 2.2e-16 — and it
+> fails hardest where RNA does not flow through the seam. **A single structural bit, "does this boundary carry
+> a transcript TERMINUS", splits `ω̂` ≥30× (1.7–1.9 vs 0.04–0.06) and 20.8 % of edges carry 71.7 % of the
+> squared deviation.** The 40× junction-count gradient the term's shape was to be fitted to is a *proxy* for
+> that bit: flat inside every structural class. Full record + the refutations: `variance_ledger.md` §3.0.
+>
+> **That un-defers §6 below.** The missing TSS/TES in the region/boundary map was deferred as "expected to be
+> low-impact on real data"; it is measured at **62–72 % of the graft's premise error**. → **P1g.**
 >
 > **⭐ THE PASS-0 / PHASE-2 BOUNDARY IS NOW MEASURED (`SESSION_2026_07_25_HANDOFF_10.md`).** Suite state of
 > play: **12.56 M of 116.7 M node-attributed fragments misassigned (10.8 %)**; unstranded carries **84 %**,
@@ -280,7 +292,12 @@ hyperprior first; the AMBIG fix then lands almost for free.**
 5. **The gDNA hyperprior refit** (§4). Fix the unstranded-capON refit regression, then re-apply the measured
    6-line Phase-2 step (hyperprior → DL `v_own`, which fixes AMBIG), then the re-solve, then a ship candidate.
    Exact plan + numbers: `SESSION_2026_07_25_HANDOFF_6.md`.
-6. **⚠ DEFERRED STRUCTURAL (reaches to the index + accumulator): the region/boundary map has no TSS/TES.** A
+6. **⚠ UN-DEFERRED 2026-07-26 (now P1g) — the region/boundary map has no TSS/TES.** The "low-impact"
+   expectation below is **refuted by measurement**: a terminus boundary's graft premise error is
+   **30–100× larger** than a junction-only one, and terminus boundaries carry **62–72 %** of it
+   (`variance_ledger.md` §3.0). P1d prices this blind, through the two flanking seams' disagreement; naming
+   the bit directly would price it exactly. The original text follows.
+   **(historical) ⚠ DEFERRED STRUCTURAL (reaches to the index + accumulator): the region/boundary map has no TSS/TES.** A
    transcript END is not represented in the partition, so the solver models the density drop there as a capture
    cliff when the RNA simply stops. Real defect; explicitly not being fixed now, and expected to be low-impact
    on real data (it was exposed by a simulator artifact — an exon interval coinciding exactly with a
