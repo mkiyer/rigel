@@ -26,6 +26,7 @@ do not start a competing list.
 | **P1g** | ⭐ **put TSS/TES in the region/boundary map — THE STRUCTURAL DEBT BEHIND `ω_graft`** (owner: high priority, forthcoming). `ROADMAP.md` §6 deferred it as "expected to be low-impact"; it is measured at **62–72 % of the graft's premise error** and a free annotation bit splits ω̂ **≥30×**. P1d prices it blind through the two-seam gap; naming it directly would price it exactly | ▶ **UN-DEFERRED by measurement** |
 | **P-hold** | hold out / reset the nodes not used to fit the hyperprior | ⛔ **MEASURED UNNECESSARY.** The refit *already resets* (`calibrate.py:420`), and holding the excluded half out moves the fit substrate by **±0.0006** — there is no contamination worth removing. A stronger version of the same idea (skip unidentified nodes, defer to the prior) was already derived, implemented and **empirically refuted** in `solve_gate_design.md`: +0.010 (r0) / +0.025 (r1) |
 | **P-solv** | ⛔ **WITHDRAWN as posed** — "solvable" is not one predicate, and `τ_own` is not it | ⛔ 2026-07-26. Landed as `NodeBelief.evidence` and **reverted the same day**: `τ_own == 0` is largely a *library* property (it is true of ALL unstranded data), while the owner's "solvable" is a *structural* one. See §P-solv |
+| **P-sub** | ⭐ **HYPERPRIOR SUBSTRATE RESEARCH** (owner-directed, replaces P-solv) | ▶ a dedicated phase, **after** P2a. Which nodes should the prior be fitted from? Empirical, not a predicate: sweep candidate substrates (all / single-strand / AMBIG-included / by evidence provenance / precision-weighted vs not) and score each fitted prior against the ORACLE-fitted prior (TV, and the downstream refit). The measured anchors to start from: today's achievable prior is already ~83 % of the way from "a different library's prior" to perfect, it is 33 % too BROAD rather than displaced, and **zeroing the declared widths costs 0.0234 TV — 10× the entire P1d+P4 accuracy regression**, so precision-weighting is load-bearing |
 | — | **THEN** the re-solve + a ship candidate | the hyperprior fit itself is no longer blocked — see P2a |
 
 ---
@@ -464,10 +465,16 @@ are not the same thing, and only the structural one survives a change of library
 | **AMBIG** — opposite-strand overlap, RNA+ and RNA− both active | the strand likelihood constrains only the TILT, never `f_g` (memory `strand_likelihood_constrains_tilt_not_fg`) | ✅ **yes** — `statics.free_pos & free_neg` |
 | **single-exon transcripts** | no splice junction ⇒ **no direct RNA measurement at all**; RNA must be inferred from gDNA, and gDNA is only measured at boundaries | ⚠ **not flagged.** Structurally observable (no spliced flux on either flank) but nothing computes it. Related: memory `nascent_rna_identifiability_intron_required` — single-exon ⇒ mature ≡ nascent |
 
-**And the framing has changed: solvability is no longer a binary gate.** It is context-dependent — a node can
-be unsolvable for `f_g` and perfectly solvable for the tilt, or resolvable at one gDNA depth and not another.
-**Do not build another binary flag.** The right sequence is to experiment with the hyperprior and let the
-best fit tell us which nodes it wants; the flag, if any, follows that.
+**⛔ AND THE CONCEPT IS RETIRED (owner, 2026-07-26). There is no solvable gate to build.**
+
+> *"I think our concept of 'solvable' is different. We are now SOLVING nodes that were previously
+> unsolvable — the solution is just inaccurate. We probably don't need a solvable gate anymore. We just need
+> a dedicated research phase for the hyperprior to see what substrate should be used."*
+
+The gate was a pass-0-era idea from when unsolvable meant *unanswered*. Pass-0 now answers every node; the
+open question is only which answers the hyperprior should be **fitted from**, and that is an empirical
+question about the prior, not a predicate on the solver. **Do not build a solvable flag.** → the
+**HYPERPRIOR SUBSTRATE RESEARCH PHASE** (below).
 
 **What the reverted work still established** (kept because it is measured, and it is a real fact about where
 the error lives — just not the definition of "solvable"):
