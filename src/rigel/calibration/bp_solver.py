@@ -126,10 +126,6 @@ def node_sweep(
     n_grid_ss: int | None = None,
     gdna_prior=None,
     intron_prior=None,
-    fold_coarse_k: int = 33,
-    fold_fine_k: int = 33,
-    fold_sigma_coverage: float = 6.0,
-    fold_refine_iters: int = 3,
     _capture: dict | None = None,
 ):
     """The belief-propagation sweep over the chain — gDNA AND per-strand RNA messages, in COUNT space (no
@@ -195,8 +191,7 @@ def node_sweep(
     # The per-node solve is the log-density 1-D/2-D log-odds solver (simplex_logodds, O(m·K),
     # genome-scale-tractable). The "solve grid" is the f_g axis the global NB prior is evaluated on (the
     # log-odds σ(λ) lattice).
-    _lam_lo, _fg_lo = _logodds_grid(int(n_grid), float(logodds_window))
-    solve_grid = _fg_lo
+    _, solve_grid = _logodds_grid(int(n_grid), float(logodds_window))
     kappa = float(rna_sense_frac)
     od_g, od_r = gdna_strand_overdispersion, rna_strand_overdispersion
 
@@ -880,9 +875,7 @@ def node_sweep(
         bwd = _relay(order_list[::-1], right, rho_r0, rho_l0, 1, 0)
         # ── the COMBINE: transport α (from left neighbour) + β (from right neighbour) into the node's frame with
         # the LAZY ρ_tot (two-iteration — the 2nd uses the both-message composition), fuse, ÷M_dst → the ψ solve.
-        li, ri = np.asarray(left), np.asarray(right)
-        vl, vr = li >= 0, ri >= 0
-        sl, sr = np.clip(li, 0, n - 1), np.clip(ri, 0, n - 1)
+        li, ri, vl, vr, sl, sr = _li_a, _ri_a, _vl_a, _vr_a, _sl_a, _sr_a
 
         def _transport(src, valid, df, sf, fwd_arrs, dst_face_v, src_face_v):
             rg, rp, rn, pg, pp, pn, mg, mp, mn, tau = fwd_arrs
@@ -1128,115 +1121,101 @@ def node_sweep(
             p = pa + pb
             return np.where(p > _EPS, (pa * a + pb * b) / np.maximum(p, _EPS), 0.0), p
 
-        dc_fin = None
-        f_cur = np.asarray(f_g, np.float64).copy()
-        for _ in range(_RHO_ITERS):
-            _, rho_lf, rho_rf = _rho_faces(f_cur)
-            if _glv:  # re-form the destination-frame seam pair against THIS iteration's faces
-                vgp_prem, vgn_prem = _seam_pair(rho_lf, rho_rf)
-            ag, ap, an, apg, app, apn, amg, amp, amn, atau, alam, ath = _transport(
-                sl, vl, 0, 1, fwd, rho_lf, rho_rf
-            )  # left msg: dst face 0, src face 1
-            bg, bp, bn, bpg, bpp, bpn, bmg, bmp, bmn, btau, blam, bth = _transport(
-                sr, vr, 1, 0, bwd, rho_rf, rho_lf
-            )  # right msg: dst face 1, src face 0
-            cg, cpg = _fuse_v(ag, apg, bg, bpg)  # density MODE (full precision-weighted)
-            cp, cpp = _fuse_v(ap, app, bp, bpp)
-            cn, cpn = _fuse_v(an, apn, bn, bpn)
-            cm_g, cm_p, cm_n = _fuse_add(amg, bmg), _fuse_add(amp, bmp), _fuse_add(amn, bmn)
-            c_tau = _fuse_add(atau, btau)
-            mo_g = np.log(np.maximum(cg * E_g / np.maximum(M, _EPS), _EPS))
-            mo_p = np.log(np.maximum(cp * E_r / np.maximum(M, _EPS), _EPS))
-            mo_n = np.log(np.maximum(cn * E_r / np.maximum(M, _EPS), _EPS))
-            # ── THE THREE-STREAM SINGLE-λ COMBINE (the M6 rank-1 fix, message_variance_derivation.md §4) ──
-            # (1) COMPOSITION → ONE λ-message on λ = log(f_g/f_R), precision ``c_tau`` (the fused Schur τ) — ψ
-            #     counts the composition DOF ONCE, not twice. **Each claim is fused by ITS OWN precision**: the
-            #     λ mode is the τ-weighted mean of the two messages' λ, not a ratio read back off the density
-            #     fuse (where each component was averaged by its own MODE-FUSION precision). That mismatch
-            #     delivered the split at a confidence it was never weighted by — a message with almost no
-            #     composition evidence but a large, well-counted density could set it, and one with real
-            #     composition evidence but little mass could not. Measured: 0.0889 → 0.0862, 13 better / 3
-            #     worse, and it makes the `conservation_rescale` that preceded it completely INERT (0/0/32) —
-            #     that operator had been correcting this same mismatch by a longer route.
-            cR = cp + cn
-            lam_msg = np.where(c_tau > _EPS, (atau * alam + btau * blam) / np.maximum(c_tau, _EPS), 0.0)
-            # A λ message exists only where BOTH components of the pair reached this node — the structural
-            # presence test. `_transport`'s per-message gate cannot catch every case: a message may carry an
-            # RNA DENSITY while contributing zero mode-fusion PRECISION, in which case ``cR`` collapses here.
-            c_tau = np.where((cg > _EPS) & (cR > _EPS), c_tau, 0.0)
-            # (2) ANCHOR gDNA MEASUREMENT → gdna_imp (mode mo_g, precision ``cm_g``). (3) SPLICED RNA MEASUREMENT
-            #     → rna_imp (mode mo_p/mo_n, precision ``cm_p``/``cm_n``). INDEPENDENT of the composition, so
-            #     fused separately (an RNA-only spliced measurement constrains f_g via f_R with NO gDNA info).
-            # (4) θ TILT (AMBIG) — fused by the MEASURED RNA that carries it, for the same reason as λ.
-            _tha, _thb = amp + amn, bmp + bmn
-            th_msg = np.where(
-                (_tha + _thb) > _EPS,
-                (_tha * ath + _thb * bth) / np.maximum(_tha + _thb, _EPS),
-                0.0,
+        # ONE ρ-iteration (see `_RHO_ITERS`), so this is straight-line: the frames are the INPUT-belief
+        # faces `rho_l0`/`rho_r0` already built above, and there is no next iteration to feed.
+        ag, ap, an, apg, app, apn, amg, amp, amn, atau, alam, ath = _transport(
+            sl, vl, 0, 1, fwd, rho_l0, rho_r0
+        )  # left msg: dst face 0, src face 1
+        bg, bp, bn, bpg, bpp, bpn, bmg, bmp, bmn, btau, blam, bth = _transport(
+            sr, vr, 1, 0, bwd, rho_r0, rho_l0
+        )  # right msg: dst face 1, src face 0
+        cg, cpg = _fuse_v(ag, apg, bg, bpg)  # density MODE (full precision-weighted)
+        cp, cpp = _fuse_v(ap, app, bp, bpp)
+        cn, cpn = _fuse_v(an, apn, bn, bpn)
+        cm_g, cm_p, cm_n = _fuse_add(amg, bmg), _fuse_add(amp, bmp), _fuse_add(amn, bmn)
+        c_tau = _fuse_add(atau, btau)
+        mo_g = np.log(np.maximum(cg * E_g / np.maximum(M, _EPS), _EPS))
+        mo_p = np.log(np.maximum(cp * E_r / np.maximum(M, _EPS), _EPS))
+        mo_n = np.log(np.maximum(cn * E_r / np.maximum(M, _EPS), _EPS))
+        # ── THE THREE-STREAM SINGLE-λ COMBINE (the M6 rank-1 fix, message_variance_derivation.md §4) ──
+        # (1) COMPOSITION → ONE λ-message on λ = log(f_g/f_R), precision ``c_tau`` (the fused Schur τ) — ψ
+        #     counts the composition DOF ONCE, not twice. **Each claim is fused by ITS OWN precision**: the
+        #     λ mode is the τ-weighted mean of the two messages' λ, not a ratio read back off the density
+        #     fuse (where each component was averaged by its own MODE-FUSION precision). That mismatch
+        #     delivered the split at a confidence it was never weighted by — a message with almost no
+        #     composition evidence but a large, well-counted density could set it, and one with real
+        #     composition evidence but little mass could not. Measured: 0.0889 → 0.0862, 13 better / 3
+        #     worse, and it makes the `conservation_rescale` that preceded it completely INERT (0/0/32) —
+        #     that operator had been correcting this same mismatch by a longer route.
+        cR = cp + cn
+        lam_msg = np.where(c_tau > _EPS, (atau * alam + btau * blam) / np.maximum(c_tau, _EPS), 0.0)
+        # A λ message exists only where BOTH components of the pair reached this node — the structural
+        # presence test. `_transport`'s per-message gate cannot catch every case: a message may carry an
+        # RNA DENSITY while contributing zero mode-fusion PRECISION, in which case ``cR`` collapses here.
+        c_tau = np.where((cg > _EPS) & (cR > _EPS), c_tau, 0.0)
+        # (2) ANCHOR gDNA MEASUREMENT → gdna_imp (mode mo_g, precision ``cm_g``). (3) SPLICED RNA MEASUREMENT
+        #     → rna_imp (mode mo_p/mo_n, precision ``cm_p``/``cm_n``). INDEPENDENT of the composition, so
+        #     fused separately (an RNA-only spliced measurement constrains f_g via f_R with NO gDNA info).
+        # (4) θ TILT (AMBIG) — fused by the MEASURED RNA that carries it, for the same reason as λ.
+        _tha, _thb = amp + amn, bmp + bmn
+        th_msg = np.where(
+            (_tha + _thb) > _EPS,
+            (_tha * ath + _thb * bth) / np.maximum(_tha + _thb, _EPS),
+            0.0,
+        )
+        th_prec = np.where(is_amb, cm_p + cm_n, 0.0)
+        # DIAGNOSTIC ONLY (P1, `docs/calibration/PASS0_FINISH_PLAN.md`): ablate the RNA MEASUREMENT ψ
+        # factor. It is the channel that carries 75 % of the posterior precision on the confidently-wrong
+        # unstranded × capture-OFF exons — and ablating it is NOT the fix: 0.0895 → 0.1033, 4 better / 17
+        # worse, because it is also the only thing that lets a zero-gDNA library say "my mass is all RNA"
+        # (`gdna_none` 0.1063 → 0.1438). Kept for developing the real fix.
+        if os.environ.get("RIGEL_RNAMEAS_OFF"):
+            cm_p, cm_n = np.zeros_like(cm_p), np.zeros_like(cm_n)
+        dc_fin = _local_solve(
+            global_lp, mo_g, cm_g, (mo_p, mo_n), (cm_p, cm_n),
+            lam_imp=(lam_msg, c_tau), theta_imp=(th_msg, th_prec),
+        )
+        nonlocal _uni_msg
+        _uni_msg = (mo_g, cpg, mo_p, cpp, mo_n, cpn)  # publish for the shared diagnostics
+        if (
+            _capture is not None
+        ):  # inert diagnostic: the fused per-component densities + the frames
+            _capture.setdefault("_uni", []).append(
+                {
+                    "cg": cg.copy(),
+                    "cp": cp.copy(),
+                    "cn": cn.copy(),
+                    "pg": cpg.copy(),
+                    "pp": cpp.copy(),
+                    "pn": cpn.copy(),
+                    "ag": ag.copy(),
+                    "ap": ap.copy(),
+                    "an": an.copy(),
+                    "bg": bg.copy(),
+                    "bp": bp.copy(),
+                    "bn": bn.copy(),
+                    "apg": apg.copy(),
+                    "app": app.copy(),
+                    "bpg": bpg.copy(),
+                    "bpp": bpp.copy(),
+                    "rho_lf": rho_l0.copy(),
+                    "rho_rf": rho_r0.copy(),
+                    "mo_g": mo_g.copy(),
+                    "mo_p": mo_p.copy(),
+                    "mo_n": mo_n.copy(),
+                    "lam_msg": lam_msg.copy(),
+                    "c_tau": c_tau.copy(),
+                    "cm_g": cm_g.copy(),
+                    "cm_p": cm_p.copy(),
+                    "cm_n": cm_n.copy(),
+                    "amp": amp.copy(),
+                    "bmp": bmp.copy(),
+                    "amn": amn.copy(),
+                    "bmn": bmn.copy(),
+                    "cpg": cpg.copy(),
+                    "fg_out": np.clip(np.asarray(dc_fin.gdna_frac, np.float64), 0.0, 1.0),
+                }
             )
-            th_prec = np.where(is_amb, cm_p + cm_n, 0.0)
-            # DIAGNOSTIC ONLY (P1, `docs/calibration/PASS0_FINISH_PLAN.md`): ablate the RNA MEASUREMENT ψ
-            # factor. It is the channel that carries 75 % of the posterior precision on the confidently-wrong
-            # unstranded × capture-OFF exons — and ablating it is NOT the fix: 0.0895 → 0.1033, 4 better / 17
-            # worse, because it is also the only thing that lets a zero-gDNA library say "my mass is all RNA"
-            # (`gdna_none` 0.1063 → 0.1438). Kept for developing the real fix.
-            if os.environ.get("RIGEL_RNAMEAS_OFF"):
-                cm_p, cm_n = np.zeros_like(cm_p), np.zeros_like(cm_n)
-            dc_fin = _local_solve(
-                global_lp, mo_g, cm_g, (mo_p, mo_n), (cm_p, cm_n),
-                lam_imp=(lam_msg, c_tau), theta_imp=(th_msg, th_prec),
-            )
-            # ⚠ KNOWN DEFECT, deliberately NOT fixed here (it is orthogonal to this term, and the fix REGRESSES
-            # the gated arm — decide it on its own evidence, not as a rider). ψ's output at an UNSOLVABLE node
-            # (no free RNA strand: an intergenic region, a TSS/TES seam) is discarded by the write-back gate,
-            # but it still feeds the NEXT iteration's reframe here — and the solver returns 0 for a node it
-            # never solved, so every gDNA anchor is re-framed as if it were 100 % RNA (ρ_tot off by E_g/E_r,
-            # up to 1.8×, on every edge incident to an anchor). The one-line fix is
-            # ``np.where(solvable, ..., f_g)``; measured A/B (arm ``dl4``): aggregate 0.0969→0.0972 (refit=0),
-            # 0.0828→0.0832 (refit=1), unstranded-capON 0.1702→0.1740 — i.e. the CORRECT arithmetic scores
-            # slightly worse, which means something downstream is compensating for it. Investigate the pair.
-            f_cur = np.clip(np.asarray(dc_fin.gdna_frac, np.float64), 0.0, 1.0)
-            nonlocal _uni_msg
-            _uni_msg = (mo_g, cpg, mo_p, cpp, mo_n, cpn)  # publish for the shared diagnostics
-            if (
-                _capture is not None
-            ):  # inert diagnostic: the fused per-component densities + the frames
-                _capture.setdefault("_uni", []).append(
-                    {
-                        "cg": cg.copy(),
-                        "cp": cp.copy(),
-                        "cn": cn.copy(),
-                        "pg": cpg.copy(),
-                        "pp": cpp.copy(),
-                        "pn": cpn.copy(),
-                        "ag": ag.copy(),
-                        "ap": ap.copy(),
-                        "an": an.copy(),
-                        "bg": bg.copy(),
-                        "bp": bp.copy(),
-                        "bn": bn.copy(),
-                        "apg": apg.copy(),
-                        "app": app.copy(),
-                        "bpg": bpg.copy(),
-                        "bpp": bpp.copy(),
-                        "rho_lf": rho_lf.copy(),
-                        "rho_rf": rho_rf.copy(),
-                        "mo_g": mo_g.copy(),
-                        "mo_p": mo_p.copy(),
-                        "mo_n": mo_n.copy(),
-                        "lam_msg": lam_msg.copy(),
-                        "c_tau": c_tau.copy(),
-                        "cm_g": cm_g.copy(),
-                        "cm_p": cm_p.copy(),
-                        "cm_n": cm_n.copy(),
-                        "amp": amp.copy(),
-                        "bmp": bmp.copy(),
-                        "amn": amn.copy(),
-                        "bmn": bmn.copy(),
-                        "cpg": cpg.copy(),
-                        "fg_out": f_cur.copy(),
-                    }
-                )
         if _capture is not None:
             _capture.update(
                 _uni_static={
@@ -1339,9 +1318,6 @@ def node_sweep(
             fn_loc=_ni.f_neg,
             vg_loc=_dc_loc.gdna_frac_var,
             vp_loc=_dc_loc.rna_pos_frac_var,
-            vn_loc=_dc_loc.rna_neg_frac_var,
-            a_fwd=None,
-            b_bwd=None,
             mode_g=mode_g,
             prec_g=prec_g,
             mode_p=mode_p,

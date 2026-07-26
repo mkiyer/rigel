@@ -354,10 +354,6 @@ def calibrate(
             n_grid_ss=config.sweep_n_grid_single_strand,
             gdna_prior=prior,
             intron_prior=intron_prior,
-            fold_coarse_k=config.fold_coarse_k,
-            fold_fine_k=config.fold_fine_k,
-            fold_sigma_coverage=config.fold_sigma_coverage,
-            fold_refine_iters=config.fold_refine_iters,
             _capture=capture,
         )
         if capture is not None:

@@ -284,17 +284,6 @@ class CalibrationConfig:
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
     sweep_n_tilt: int | None = None
 
-    #: **Relay fold quadrature** (the coherent ``(λ,θ)`` EP relay — ``bp_solver._fold_lambda``,
-    #: ``docs/calibration/dof_pie_relay_implementation_plan.md`` §6.1). The relay folds each incoming message
-    #: onto the running ``λ`` belief by a two-stage self-correcting grid moment-match: a COARSE grid locates the
-    #: posterior peak + curvature, a FINE grid re-centered on it (``refine`` iterations) resolves the moments.
-    #: These are **numerical-resolution knobs, NOT model dials** — the same class as ``sweep_n_grid``. The
-    #: prototype (``scripts/debug/dof_pie_relay_check.py`` C8) tracks a 4001-point reference to 2.5e-3 at these
-    #: defaults; they are conservative, trade only against compute, and are to be hardened on genome-scale data.
-    fold_coarse_k: int = 33
-    fold_fine_k: int = 33
-    fold_sigma_coverage: float = 6.0
-    fold_refine_iters: int = 3
 
     #: **NPMLE bandwidth** ``h`` (decades) for the Fixed-Kernel Poisson-lognormal Mixture NPMLE
     #: (``calibration.npmle.DensityNPMLE``) — shared by both its uses (the enrichment fit for σ²_transfer and
