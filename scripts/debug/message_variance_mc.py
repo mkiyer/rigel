@@ -445,6 +445,72 @@ def graft_frame_mislift(N, *, rho_mu_true, n_spl, r, E_r, M_d):
     )
 
 
+def peel_composition(N, *, rho_R_x, var_log_rhoR, r, var_log_r, rho_nu_B, v_nu_B, n_spl):
+    """M10 — the PEEL as a COMPOSITION (a scaling) instead of a DIFFERENCE (a subtraction).
+
+    What continues past a junction is a FRACTION of the RNA at the seam, and a fraction is enrichment-free —
+    capture multiplies the continuing and the splicing channels alike, so e(B) cancels EXACTLY inside it:
+
+        w = rho_nu / (rho_nu + rho_mu)          rho_nu = e(B)*c_nu,  rho_mu = e(B)*c_mu
+        rho_nu^msg = rho_R(x) * r * w
+
+    Delta method on log w = log x - log(x+y), with w_mu = 1 - w the SPLICED share:
+        d log w / d log x = 1 - w = w_mu ,   d log w / d log y = -(1-w) = -w_mu
+        Var(log w) = w_mu^2 * ( Var(log rho_nu^B) + 1/n_spl )
+
+    so the delivered variance is
+        Var(log rho_nu^msg) = Var(log rho_R(x)) + sigma^2_transfer + w_mu^2*(v_nu^B + 1/n_spl)
+
+    The weights are CONVEX (w_mu <= 1) — the mirror of M2's graft SUM — whereas M3's subtraction carries
+    u = 1/(fraction continuing) >= 1 and AMPLIFIES. That is the whole point: the irreducible exon-face reframe
+    error (measured 0.4-1.3 nats, a real capture slope) passes through M10 unamplified and through M3 as
+    u * delta, with u's p75 ~ 3 on real junctions."""
+    # draws: the source density, the reframe scale, the boundary's own RNA belief, and the spliced COUNT
+    src = _lognormal(rho_R_x, var_log_rhoR, N)
+    scale = np.exp(rng.normal(0.0, np.sqrt(var_log_r), N))
+    nu_B = _lognormal(rho_nu_B, v_nu_B, N)
+    S = rng.poisson(n_spl, N).astype(np.float64)
+    mu_B = rho_mu_hat * S / n_spl
+    w = nu_B / np.maximum(nu_B + mu_B, 1e-300)
+    msg = src * r * scale * w
+    w0 = rho_nu_B / (rho_nu_B + rho_mu_hat)
+    w_mu = 1.0 - w0
+    pred = var_log_rhoR + var_log_r + w_mu * w_mu * (v_nu_B + 1.0 / n_spl)
+    emp = float(np.var(np.log(msg)))
+    return _report(f"M10 Var(log rho_nu^msg)  [w={w0:.3f}, w_mu={w_mu:.3f}]", pred, emp, tol=0.06)
+
+
+def peel_amplification(*, delta, u):
+    """M10b — the CONDITIONING claim, stated exactly. A systematic log-scale error ``delta`` in the reframed
+    source arrives through the SUBTRACTION as
+
+        log( u*exp(delta) - (u-1) )        -> u*delta   as delta -> 0     (u = A/rho_nu >= 1)
+
+    and through the COMPOSITION as ``delta``, exactly, for every u and every delta — a scaling commutes with a
+    scaling. So the subtraction AMPLIFIES a scale error (by u in the small-delta limit, less than u for finite
+    delta because the log is concave) while the composition is transparent to it. This is why the peel must
+    stop being a difference: the exon-face reframe error is irreducibly 0.4-1.3 nats (a real capture slope),
+    and u's p75 on real junctions is ~3."""
+    A0, nu0 = 1.0, 1.0 / u
+    mu = A0 - nu0
+    sub_exact = np.log(u * np.exp(delta) - (u - 1.0))
+    sub = np.log(max(A0 * np.exp(delta) - mu, 1e-300) / nu0)
+    w = nu0 / (nu0 + mu)
+    comp = np.log((A0 * np.exp(delta) * w) / (A0 * w))
+    ok = _report(f"M10b subtraction error = log(u e^d -(u-1))  [u={u:g}, d={delta:g}]", sub_exact, sub, tol=1e-12)
+    ok &= _report(f"M10b composition error = d, exactly        [u={u:g}, d={delta:g}]", delta, comp, tol=1e-12)
+    print(f"      amplification: subtraction {sub / delta:5.2f}x   composition {comp / delta:5.2f}x"
+          f"   (small-delta limit of the subtraction is u = {u:g})")
+    return ok
+
+
+def peel_amplification_limit(*, u):
+    """M10b(ii) — the small-delta limit IS u, verified numerically."""
+    d = 1e-6
+    slope = np.log(u * np.exp(d) - (u - 1.0)) / d
+    return _report(f"M10b lim_(d->0) subtraction/d = u          [u={u:g}]", u, slope, tol=1e-4)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--draws", type=int, default=400_000)
@@ -499,6 +565,20 @@ def main():
     dl_regimes(N)
     print("\n [M7e] the anchor (node 1909) under fusion: DL keeps the weak-but-correct own belief\n")
     dl_fusion_anchor(N)
+
+    print("\n\n═══ M10 the PEEL as a COMPOSITION (a scaling) rather than a DIFFERENCE ═══\n")
+    global rho_mu_hat
+    for w_target, n_spl in ((0.5, 4000), (0.25, 4000), (0.10, 8000)):
+        rho_nu_B = 1.0
+        rho_mu_hat = rho_nu_B * (1.0 - w_target) / w_target
+        peel_composition(N, rho_R_x=40.0, var_log_rhoR=1.0 / 5000, r=200.0, var_log_r=0.004,
+                         rho_nu_B=rho_nu_B, v_nu_B=0.02, n_spl=n_spl)
+    print()
+    for u in (2.0, 3.0, 10.0):
+        peel_amplification(delta=0.30, u=u)
+    print()
+    for u in (2.0, 3.0, 10.0):
+        peel_amplification_limit(u=u)
 
     print("\n\n═══ M8 the GRAFT's FRAME MISLIFT: the measured spliced is already in the dst frame ═══\n")
     graft_frame_mislift(N, rho_mu_true=4.57, n_spl=6000, r=1.0, E_r=1850.0, M_d=66544.0)

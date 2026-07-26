@@ -44,6 +44,8 @@ __all__ = [
     "graft_rna_logvar",
     "graft_frame_logvar",
     "peel_rna_logvar",
+    "peel_continue_share",
+    "peel_share_logvar",
     "transfer_logvar",
     "message_precision",
     "mismatch_gap",
@@ -337,6 +339,50 @@ def peel_rna_logvar(v_log_rho_R, s2_transfer, v_mu, u):
     uu = np.asarray(u, np.float64)
     vT = np.asarray(v_log_rho_R, np.float64) + np.asarray(s2_transfer, np.float64)
     return uu * uu * vT + (uu - 1.0) ** 2 * np.asarray(v_mu, np.float64)
+
+
+def peel_continue_share(rho_nu, rho_mu):
+    """M10 — the fraction of a seam's RNA that CONTINUES unspliced: ``w = ρ_ν/(ρ_ν + ρ_μ)``.
+
+    This is the object that retires the peel's SUBTRACTION. What continues past a junction is a *share* of the
+    RNA at the seam, and a share is **enrichment-free**: capture multiplies the continuing and the splicing
+    channels alike (``ρ_ν = e·c_ν``, ``ρ_μ = e·c_μ``), so ``e`` cancels identically inside ``w``. Both inputs
+    are taken in the BOUNDARY's own frame — its solved unspliced-RNA density and its measured spliced density.
+
+    **Why a share and not a difference.** The old peel formed ``ρ_ν = ρ_R(x)·r − ρ_μ``, a difference of two
+    absolute densities, and a difference does not commute with a scale error. With ``u = A/ρ_ν ≥ 1`` (the
+    reciprocal of the continuing fraction), a systematic log-scale error ``δ`` in the reframed source arrives
+    as ``log(u·e^δ − (u−1))`` — which is ``u·δ`` in the small-``δ`` limit and is measured at 1.77× / 2.39× /
+    5.01× for ``u = 2 / 3 / 10`` at ``δ = 0.30``. Through this share it arrives as ``δ``, EXACTLY, for every
+    ``u`` and every ``δ``: a scaling commutes with a scaling. That matters because the exon-facing reframe
+    error is irreducible — the boundary samples a ``fl_mean`` window around a point while the exon samples its
+    interior, so with mid-exon probes the two sit at genuinely different capture (measured 0.4–1.3 nats), and
+    ``u``'s p75 on real junctions is ≈ 3. MC: `message_variance_mc.py` M10b, exact to 1e-12.
+
+    Degenerate limits, both structural: no spliced flux (``ρ_μ = 0``) ⇒ ``w = 1``, nothing splices away and
+    nothing is peeled; no RNA at the seam at all (``ρ_ν + ρ_μ = 0``) ⇒ ``w = 1``, there is nothing to
+    apportion and the caller's own gates decide. ``w`` is always in ``[0, 1]`` — the peel can no longer go
+    negative, which retires the zero-truncation defect (a fully-consumed peel used to emit ``ρ_ν = 0``, "no
+    RNA continues past here", at a live precision)."""
+    nu, mu = _f(rho_nu), _f(rho_mu)
+    tot = nu + mu
+    return np.where(tot > _EPS, nu / np.maximum(tot, _EPS), 1.0)
+
+
+def peel_share_logvar(w_mu, v_nu, v_mu):
+    """M10 — the log-variance the continuing SHARE contributes: ``w_μ²·(v_ν + v_μ)``.
+
+    Delta method on ``log w = log ρ_ν − log(ρ_ν + ρ_μ)``: both partials are ``±w_μ``, the SPLICED share
+    ``w_μ = 1 − w``, so::
+
+        Var(log w) = w_μ²·( Var(log ρ_ν^B) + Var(log ρ_μ^B) ) ,   v_μ = 1/n_spl (measured, count-only)
+
+    and the delivered message variance is ``Var(log ρ_R(x)) + σ²_transfer + Var(log w)``. The weights are
+    **CONVEX** (``w_μ ≤ 1``) — the exact mirror of M2's graft SUM — where M3's difference carried ``u ≥ 1`` and
+    amplified. So this move takes the peel out of the ill-conditioned regime entirely; there is no ``ε``/``u``
+    validity limit to respect and no over-confidence tail. MC: `message_variance_mc.py` M10, rel 0.2–1.0 %."""
+    wm = _f(w_mu)
+    return wm * wm * (_f(v_nu) + _f(v_mu))
 
 
 def transfer_logvar(logvar_tot_dst, logvar_tot_src, graft):

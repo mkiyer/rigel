@@ -29,7 +29,9 @@ from rigel.calibration.enrichment_frame import (
     message_precision,
     mismatch_deflate,
     mismatch_gap,
+    peel_continue_share,
     peel_rna_logvar,
+    peel_share_logvar,
     reframe_density,
     total_density,
     transfer_logvar,
@@ -513,3 +515,47 @@ def test_mismatch_deflate_is_finite_over_every_degenerate_input():
     v_own = np.array([np.inf, 0.0, 0.5, np.inf, 0.0, 0.0])
     out = mismatch_deflate(p, gap, contra, v_own)
     assert np.all(np.isfinite(out)) and np.all(out >= 0.0) and np.all(out <= p + 1e-12)
+
+
+# ── M10 the peel as a composition (a share), not a subtraction ──
+
+
+def test_peel_continue_share_is_enrichment_free():
+    """M10's defining property: the continuing SHARE is invariant under a common capture factor, because
+    capture multiplies the continuing and the splicing channels alike. This is the whole reason the peel
+    becomes a scaling — a scaling commutes with the reframe, a subtraction does not."""
+    nu, mu = 3.0, 7.0
+    base = float(peel_continue_share(nu, mu))
+    for e in (1e-3, 0.5, 1.0, 40.0, 1e4):
+        assert float(peel_continue_share(nu * e, mu * e)) == pytest.approx(base, rel=1e-14)
+    assert base == pytest.approx(0.3, rel=1e-14)
+
+
+def test_peel_continue_share_structural_limits():
+    """No spliced flux ⇒ nothing is peeled (w = 1). No RNA at the seam at all ⇒ nothing to apportion (w = 1),
+    the caller's own gates decide. And w never leaves [0, 1] — which is what retires the old peel's
+    zero-truncation (a fully-consumed subtraction emitted ρ_ν = 0 at a LIVE precision)."""
+    assert float(peel_continue_share(5.0, 0.0)) == 1.0
+    assert float(peel_continue_share(0.0, 0.0)) == 1.0
+    assert float(peel_continue_share(0.0, 5.0)) == 0.0
+    out = peel_continue_share(np.array([1.0, 0.0, 4.0, 0.0]), np.array([1.0, 3.0, 0.0, 0.0]))
+    assert np.all((out >= 0.0) & (out <= 1.0))
+
+
+def test_peel_share_logvar_is_convex_unlike_the_subtraction():
+    """M10 vs M3. The share's delta-method weights are w_μ² ≤ 1 (convex — the mirror of M2's graft SUM),
+    where the subtraction carried u² ≥ 1 and AMPLIFIED. At the same operating point the share must therefore
+    cost strictly less than the difference it replaces."""
+    v_nu, v_mu = 0.02, 1.0 / 4000.0
+    for w in (0.5, 0.25, 0.1):
+        w_mu = 1.0 - w
+        share = float(peel_share_logvar(w_mu, v_nu, v_mu))
+        assert share == pytest.approx(w_mu * w_mu * (v_nu + v_mu), rel=1e-14)
+        assert share <= v_nu + v_mu  # convex: never worse than its own inputs
+        u = 1.0 / w  # the M3 difference at the same continuing fraction
+        assert share < float(peel_rna_logvar(v_nu, 0.0, v_mu, u))
+
+
+def test_peel_share_logvar_vanishes_with_no_spliced():
+    """w_μ = 0 (nothing splices away) ⇒ the share contributes NO variance: the message passes through intact."""
+    assert float(peel_share_logvar(0.0, 0.5, 0.25)) == 0.0

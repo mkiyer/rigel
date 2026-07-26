@@ -435,3 +435,71 @@ off-capture (charging `(log 1.2)² = 0.033` where the truth is 0.0009) and under
 unstranded**, the one arm where the graft is the only RNA information and damping it is pure loss:
 `gdna100_ss_0.50_capOFF` 0.0866 → 0.1129, `gdna300_ss_0.50_capOFF` 0.0504 → 0.0631. Isolating the *enrichment*
 part of `r` prior-free is the open refinement.
+
+
+---
+
+## 10. M10 — the PEEL as a COMPOSITION, not a subtraction (derived + MC-validated; NOT yet landed)
+
+**Status: DERIVED and MC-VALIDATED (2026-07-25); the wiring is measured and does NOT land yet — the blocker
+is the SHARE ESTIMATOR, not the law.** Owner-directed: the subtraction is the last absolute-density operation
+left from the pre-composition solver and must be retired.
+
+### 10.1 The law
+
+Of the RNA at a seam, a fraction continues unspliced and the rest splices away. That is a **share**, and a
+share is **enrichment-free** — capture multiplies both channels alike, so `e(B)` cancels identically:
+
+```
+    w = ρ_ν / (ρ_ν + ρ_μ)         ρ_ν = e·c_ν , ρ_μ = e·c_μ   ⇒  e cancels EXACTLY
+    ρ_ν^msg = ρ_R(x) · r · w                                     a SCALING, not a difference
+    Var(log ρ_ν^msg) = Var(log ρ_R(x)) + σ²_transfer + w_μ²·(v_ν^B + 1/n_spl)      w_μ = 1 − w
+```
+
+Delta method on `log w = log ρ_ν − log(ρ_ν+ρ_μ)`: both partials are `±w_μ`. The weights are **CONVEX**
+(`w_μ ≤ 1`) — the exact mirror of M2's graft SUM — where M3's difference carried `u = 1/w ≥ 1` and amplified.
+**MC (`message_variance_mc.py` M10): rel 0.20–0.96 %.**
+
+### 10.2 Why it matters — the conditioning result (M10b, exact to 1e-12)
+
+A systematic log-scale error `δ` in the reframed source arrives:
+
+| through | delivered error | at δ = 0.30 |
+|---|---|---|
+| the SUBTRACTION `A − ρ_μ` | `log(u·e^δ − (u−1))` → `u·δ` as δ→0 | **1.77× / 2.39× / 5.01×** for u = 2/3/10 |
+| the SHARE `A·w` | `δ`, exactly, for every u and every δ | **1.00×** |
+
+This is load-bearing because the exon-facing reframe error is **irreducible**: a boundary samples an `fl_mean`
+window around a point while an exon samples its interior, so with mid-exon probes they sit at genuinely
+different capture — measured **0.4–1.3 nats, and unchanged when fed the ORACLE `f_g`**. Meanwhile `u`'s p75 on
+real junctions is ≈ 3. The subtraction is the ONLY place in the solver where a scale error does not cancel
+(`_pin_v` cancels `r` on 87.6 % of the error).
+
+It also retires two known defects for free: `w ∈ [0,1]` so the peel can no longer go negative (the
+zero-truncation that emitted "no RNA continues past here" at a live precision), and M3's ill-conditioned
+`u ≳ 3` tail ceases to exist.
+
+### 10.3 ⚠ WHY IT DOES NOT LAND YET — the share estimator
+
+`A·w = A − ρ_μ` **exactly** when `w = 1 − ρ_μ/A`. So the subtraction already *is* a composition peel whose
+share is taken from the exon's own claim. Switching to a share therefore only helps if `w` comes from
+somewhere **better** — and the obvious source, the boundary's own self-solve, is not:
+
+| condition | `w` from the boundary self-solve | `w` TRUE | \|Δ\| |
+|---|---|---|---|
+| gdna300 ss0.99 present capON | 0.531 | 0.435 | 0.115 |
+| **gdna300 ss0.50 none capON** | **0.664** | **0.124** | **0.548** |
+| gdna100 verystrong | 0.475 | 0.463 | 0.160 |
+
+On unstranded data the boundary says 66 % of its RNA continues when 12 % does — because there its self-solve
+IS the uninformed ~0.5 default. Wired that way the A/B loses: **0.0907 / 0.0707** vs HEAD's 0.0884 / 0.0678
+(10 better / 13 worse at refit=0). A purely observable upper bound (treat all unspliced mass as RNA) is worse
+still (\|Δ\| 0.282 / 0.626 / 0.142).
+
+**Conclusion, and it is the next task's specification:** M10 is the correct vehicle and its conditioning
+advantage is real and proven, but it must be applied AFTER the boundary has solved its own composition from
+its three sources (strand tilt, the neighbouring intron's density deconvolution, the exon's gDNA claim).
+Peel-by-composition and a properly-solved boundary are one piece of work, not two.
+
+The pure laws are landed and unit-tested (`enrichment_frame.peel_continue_share`, `peel_share_logvar`);
+only the solver wiring waits.
