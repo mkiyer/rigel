@@ -47,7 +47,6 @@ from .enrichment_frame import (
     peel_share_logvar,
     residual_level,
     transfer_logvar,
-    transport_seed_logvar,
 )
 from .node_chain import REGION, NodeChain
 from .signature import coarse_type_array
@@ -582,10 +581,16 @@ def node_sweep(
         # strand's share is formed against that strand's measured spliced flux. `v_μ` uses the spliced COUNT,
         # never the mass: the accumulator deposits fragments fractionally, so at a junction face the median
         # count is 33 against a median mass of 11 and the mass would over-state `v_μ` ~3×.
-        _v_nu_own = transport_seed_logvar(v_own_r, _n_node)
-        _p_nu_own = np.where(
-            np.isfinite(_v_nu_own) & ((op + on) > _EPS), 1.0 / np.maximum(_v_nu_own, _EPS), 0.0
-        )
+        # ── ⛔ THE DESTINATION-OWN PLUG-IN IS DELETED — the second BP violation ──────────────────────────
+        # `_p_nu_own` fused the DESTINATION's own message-free self-solve into the level that shapes the
+        # message arriving AT that destination. In BP a message m_{s→i}(x_i) must not contain φ_i, the
+        # destination's own local evidence, because the belief is b_i ∝ φ_i · Π_j m_{j→i} — so φ_i would be
+        # counted twice. Measured in the relay: 909/909 forward peel hops carry it. Removing it is FREE
+        # (0 better / 0 worse / 32 flat, +0.0000 mwae) and marginally better on trust (boundary-single
+        # z2|Q1 4.27 → 4.15), so there is no reason to keep an illegal term that buys nothing.
+        # The level now fuses TWO legal estimators: the message's own claim, and M11's `residual_level`
+        # (the destination's observed MASS closed against the message's gDNA claim — count-zero-information
+        # legal, because the information is the imputed DENSITY and the count only converts it to a share).
         _mu_f = ((spl_p_f[0], spl_n_f[0]), (spl_p_f[1], spl_n_f[1]))
         _v_mu_f = tuple(
             tuple(np.where(c > 0.0, 1.0 / np.maximum(c, _EPS), np.inf) for c in cs)
@@ -642,9 +647,9 @@ def node_sweep(
             _A = np.asarray(tp, np.float64) + np.asarray(tn, np.float64)
             _a_p = np.where(_A > _EPS, np.asarray(tp, np.float64) / np.maximum(_A, _EPS), 0.0)
             out = []
-            for _a, _nu_o, _mu, _vmu in (
-                (_a_p, op[k], _mu_f[df][0][k], _v_mu_f[df][0][k]),
-                (1.0 - _a_p, on[k], _mu_f[df][1][k], _v_mu_f[df][1][k]),
+            for _a, _mu, _vmu in (
+                (_a_p, _mu_f[df][0][k], _v_mu_f[df][0][k]),
+                (1.0 - _a_p, _mu_f[df][1][k], _v_mu_f[df][1][k]),
             ):
                 # ── THE FUSE, in LINEAR density space (see `residual_level`'s return contract) ──────────
                 # Each estimator is (ρ_i, Var_i); an own/far claim carrying a delta-method log-variance v is
@@ -660,12 +665,11 @@ def node_sweep(
                 _pm = np.where(
                     np.isfinite(_vl_m) & (_nu_ms > _EPS), 1.0 / np.maximum(_vl_s, _EPS), 0.0
                 )
-                _po = np.where(_nu_o > _EPS, _p_nu_own[k] / np.maximum(_nu_o * _nu_o, _EPS), 0.0)
-                _pt = _po + _pm
+                _pt = _pm
                 _live = _pt > _EPS
                 _nu = np.where(
                     _live,
-                    (_po * _nu_o + _pm * _nu_ms) / np.maximum(_pt, _EPS),
+                    (_pm * _nu_ms) / np.maximum(_pt, _EPS),
                     0.0,
                 )
                 # back to the model's currency: the fused level's effective fragment COUNT k = ρ̂²/Var̂, and
@@ -677,8 +681,7 @@ def node_sweep(
                 if _capture is not None and isinstance(k, slice):  # the vectorized combine only
                     _capture.setdefault("_lvl", []).append(  # inert: the level's provenance, per face
                         {"df": df, "nu": np.asarray(_nu).copy(), "v_nu": np.asarray(_v_nu).copy(),
-                         "po": np.asarray(_po).copy(),
-                         "pm": np.asarray(_pm).copy(), "nu_o": np.asarray(_nu_o).copy(),
+                         "pm": np.asarray(_pm).copy(),
                          "nu_m": np.asarray(_nu_ms).copy(),
                          "mu": np.asarray(_mu).copy(), "w": np.asarray(_w).copy(),
                          "v_g": np.asarray(_vg).copy(),
