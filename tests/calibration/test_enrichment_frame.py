@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from scipy.special import polygamma
 
 from rigel.calibration.enrichment_frame import (
     boundary_unspliced_from_k,
@@ -32,6 +33,7 @@ from rigel.calibration.enrichment_frame import (
     peel_continue_share,
     peel_rna_logvar,
     peel_share_logvar,
+    residual_level,
     reframe_density,
     total_density,
     transfer_logvar,
@@ -559,3 +561,77 @@ def test_peel_share_logvar_is_convex_unlike_the_subtraction():
 def test_peel_share_logvar_vanishes_with_no_spliced():
     """w_μ = 0 (nothing splices away) ⇒ the share contributes NO variance: the message passes through intact."""
     assert float(peel_share_logvar(0.0, 0.5, 0.25)) == 0.0
+
+
+# ── M11: the LEVEL from the node's own mass + an imputed gDNA density ────────────────────────────────────
+
+
+def test_residual_level_pure_rna_limit_is_the_count():
+    """M11 limit 1 — a gDNA claim of ZERO accounts for none of the crossing, so the whole mass is RNA and the
+    only uncertainty left is the node's own Poisson count. This is the limit that makes the level a
+    MEASUREMENT in a low-gDNA library, which is exactly where the old no-evidence default silenced the RNA
+    channel outright. It is exact only because the arithmetic is done on the FRACTION: the count cancels out
+    of ``φ = ρ_g E_g/M``, so ``σ_f → 0`` with ``φ`` and the upper truncation never bites."""
+    rho, v_log, v_lin = residual_level(
+        mass=1.0e4, n_mass=400.0, rho_g=0.0, E_g=1000.0, E_r=900.0, v_g=1.0e-9
+    )
+    assert float(rho) == pytest.approx(1.0e4 / 900.0, rel=1e-12)
+    assert float(v_log) == pytest.approx(1.0 / 400.0, rel=1e-6)
+    assert float(v_lin) == pytest.approx(float(rho) ** 2 * float(v_log), rel=1e-12)
+
+
+def test_residual_level_gdna_explains_everything_gives_a_tight_linear_zero():
+    """M11 limit 2 — a confident gDNA claim that over-explains the crossing drives the RNA density to ~0. The
+    LOG-variance is then large (log of a near-zero quantity is unbounded), but the LINEAR statement is tight:
+    "below a fraction of a percent of my mass". That asymmetry is the whole reason the consumer fuses levels
+    in linear space, and it is what reproduces "intronic unspliced fragments are gDNA until proven otherwise"
+    as a measurement rather than as a rule."""
+    M, E_r = 1.0e4, 900.0
+    rho, v_log, v_lin = residual_level(
+        mass=M, n_mass=400.0, rho_g=40.0, E_g=1000.0, E_r=E_r, v_g=1.0e-9
+    )
+    assert float(rho) / (M / E_r) < 1.0e-6  # essentially no RNA
+    assert float(v_log) > np.pi**2 / 6.0  # ...and it knows the log is uninformative
+    assert np.sqrt(float(v_lin)) / (M / E_r) < 0.01  # ...while the linear claim is tight
+
+
+def test_residual_level_ignorance_is_bounded_and_declared():
+    """M11 limit 3 — the upper truncation. An imputed gDNA claim carrying ~1 nat of log-variance (routine at
+    exon→boundary edges under capture) makes σ_f of order 1. A one-sided positive part would return
+    ``E ≈ 0.8σ`` — "most of my mass is RNA" — asserted out of pure ignorance at a confident-looking k ≈ 2.
+    Bounded above, the same ignorance degrades to its correct limit: the uniform posterior, ``f_R = ½`` at
+    ``k = 3``, wide enough for any real evidence in the fuse to out-weigh it."""
+    M, E_r = 1.0e4, 900.0
+    rho, v_log, _ = residual_level(
+        mass=M, n_mass=1.0e6, rho_g=10.0, E_g=1000.0, E_r=E_r, v_g=100.0
+    )
+    assert float(rho) / (M / E_r) == pytest.approx(0.5, rel=5e-3)  # an asymptote, approached from below
+    assert float(v_log) == pytest.approx(float(polygamma(1, 3.0)), rel=5e-3)
+
+
+def test_residual_level_needs_the_gdna_claim_to_be_SUPPLIED():
+    """M11 — "supplied" is a statement about PRECISION, never about the density's value (the same test the
+    λ-emission gate makes). A gDNA claim at infinite log-variance is not a claim, so there is no level at all
+    — and, the standing trap, it must not come back as a nan from ``0·inf``."""
+    for kwargs in (
+        dict(v_g=np.inf, rho_g=1.0),  # no precision on the claim
+        dict(v_g=0.01, rho_g=1.0, n_mass=0.0),  # no count
+    ):
+        base = dict(mass=1.0e4, n_mass=400.0, E_g=1000.0, E_r=900.0)
+        rho, v_log, v_lin = residual_level(**{**base, **kwargs})
+        assert float(rho) == 0.0
+        assert not np.isfinite(float(v_log))
+        assert not np.isfinite(float(v_lin))
+        assert not np.isnan(float(rho))
+
+
+def test_residual_level_is_monotone_in_the_gdna_claim():
+    """M11 — more imputed gDNA leaves less room for RNA, always. A monotonicity the truncation must not break
+    at either bound (the two closed-form tail branches are the places it could)."""
+    prev = np.inf
+    for rho_g in (0.0, 1.0, 3.0, 5.0, 7.0, 9.0, 9.9, 10.0, 12.0, 40.0, 400.0, 1000.0):
+        rho, _, _ = residual_level(
+            mass=1.0e4, n_mass=400.0, rho_g=rho_g, E_g=1000.0, E_r=900.0, v_g=0.01
+        )
+        assert float(rho) <= prev + 1e-12
+        prev = float(rho)

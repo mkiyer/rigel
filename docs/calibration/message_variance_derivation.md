@@ -503,3 +503,49 @@ Peel-by-composition and a properly-solved boundary are one piece of work, not tw
 
 The pure laws are landed and unit-tested (`enrichment_frame.peel_continue_share`, `peel_share_logvar`);
 only the solver wiring waits.
+
+
+---
+
+## 11. M11 — the LEVEL from a node's own mass and an imputed gDNA density (2026-07-26)
+
+**Derived, MC-validated (`scripts/debug/message_variance_mc.py`), unit-tested
+(`tests/calibration/test_enrichment_frame.py`), A/B-landed.** Implementation:
+`enrichment_frame.residual_level`; consumer: `bp_solver._peel_share`.
+
+M10 gave the peel its law but not its input: `w = ρ_ν/(ρ_ν+ρ_μ)` needs a LEVEL `ρ_ν`, and at the seams that
+carry the error there was none — no factory within reach on 97 % of `exon|exon` boundaries, no strand when
+unstranded. M11 is that level, and it is the generic DENSITY DECONVOLUTION (the intron factory's own
+primitive) with the gDNA prior supplied by a **neighbour** instead of by the intergenic pool::
+
+    φ   = ρ_g·E_g / M                         the share of the crossing the imputed gDNA claim accounts for
+    f_R = 1 − φ , truncated to [0, 1]         σ_f = min(φ,1)·√v_g          ρ_ν = E[f_R]·M / E_r
+    k   = E[f_R]² / Var[f_R]                  Var(log ρ_ν) = ψ'(k) + 1/(n·E[f_R]²)
+
+It is count-zero-information-legal for the same reason the factory is: the *information* is the imputed gDNA
+**density**, and the count only converts a density into a composition.
+
+Five things the derivation turns on, each measured rather than assumed:
+
+1. **Fraction, not mass.** Writing it as `ρ_ν E_r = M − ρ_g E_g` with `s² = M²/n + (ρ_g E_g)² v_g` charges the
+   count twice and breaks the pure-RNA limit — at `ρ_g = 0` the count cancels out of the ratio and the answer
+   is `f_R = 1` exactly, where the mass form leaves an `M/√n` residual against the upper bound.
+2. **Two-sided truncation, and the UPPER bound is the load-bearing one.** The imputed gDNA claim arrives at
+   `√v_g ≈ 1.0–1.2` nats at exon→boundary edges under capture, so `σ_f` is of order 1 and a one-sided positive
+   part returns `E ≈ 0.8σ_f` — *"most of my mass is RNA"*, asserted out of ignorance at a confident-looking
+   `k ≈ 2`. Bounded above, ignorance degrades to `Uniform(0,1)`, `E = ½`, `k = 3`.
+3. **`Var(log) = ψ'(k)`, not the delta method.** `k` is the level's *effective fragment count*, so this is the
+   model's own `Var(log) = 1/n` currency. Exact at both ends (`ψ'(k) → 1/k`; `ψ'(1) = π²/6`), and `k ≥ 1` is
+   an exact consequence of the truncation, not a floor. MC: z2 = **0.99 / 0.93** where the level is a
+   measurement, **0.15–0.41 (conservative, never over-confident)** where it is marginal. The delta method runs
+   1.14× over-confident at `f_R = 0.5` and z2 = **0.02** (50× over-damped) at `f_R = 0.05` — unusable.
+4. **The count carries its exact `1/f_R` Jacobian**, evaluated at the TRUNCATED mean (which is what keeps it
+   finite as `φ → 1`). A bare `+1/n` under-states the variance by the M/f_R covariance — MC-caught at 19 %.
+5. **Linearize at `min(φ,1)`.** A relayed claim asserting more gDNA than the node sequenced is routine
+   (52–71 % of nodes). Linearizing `σ_f` at `φ` there makes the estimator INVERT — more imputed gDNA
+   returning *more* RNA, reaching `f_R = 1` at `φ ≈ 100`.
+
+**The consumer detail that made it work.** Levels are fused in **LINEAR** density space, each estimator
+contributing `Var = ρ²·v`. A log-space (geometric) fuse of positive modes cannot reach zero, so it cannot hear
+a factory-solved intron saying `ρ_ν = 0.0006 ± 0.0012`; the same estimator is inert in log space and
+load-bearing in linear space (ablation: 0.0895 → 0.0905 / 0.0693 → 0.0703).

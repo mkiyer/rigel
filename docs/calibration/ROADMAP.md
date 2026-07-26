@@ -33,11 +33,23 @@
 > prior-free source is the neighbours' per-strand RNA imputation — already carried as `theta_imp`, and
 > measured **nearly inert** (0.1444 → 0.1417 when ablated).
 >
-> **⭐ CURRENT: the BOUNDARY work, and it is UNFINISHED BY DESIGN.** Suite **0.0885 (refit=0) / 0.0678
-> (refit=1)**. The composition peel (M10) is derived, MC-validated and its laws are landed, but every wiring
-> has bottomed out on the same thing — **there is no LEVEL at the seams that matter** (no factory within reach
-> at 97 % of `exon|exon` boundaries, no strand when unstranded). The owner has AGREED steps 1–5 in principle;
-> the revert is provisional. **Read `SESSION_2026_07_25_HANDOFF_11.md` before touching any of it.**
+> **⭐ CURRENT: the BOUNDARY work — the composition peel is LANDED (2026-07-26).** Suite **0.0895 (refit=0) /
+> 0.0693 (refit=1)**. Steps 1–5 of `peel_by_composition_plan.md` are implemented, the `mrna_active` structural
+> gate is REMOVED, and the standing blocker — *"there is no LEVEL at the seams that matter"* — is resolved by a
+> third source that exists everywhere: **M11 `residual_level`**, the node's own observed mass closed against an
+> imputed gDNA **density**. That is the generic density deconvolution (the intron factory's own primitive) with
+> the gDNA prior supplied by a neighbour instead of the intergenic pool, so it reaches `exon|exon` seams (no
+> factory on 97 %) and every seam of a low-gDNA library. Two structural changes made it work: **there is no
+> level PRECEDENCE any more** — three independent estimators (own / across-the-seam / mass-identity) FUSE by
+> inverse variance, so the "no evidence ⇒ silence" arm that wrecked the low-gDNA libraries simply does not
+> exist — and **the fuse is done in LINEAR density space**, because a log-space fuse of positive modes cannot
+> reach zero and therefore cannot hear a factory-solved intron saying "essentially no RNA here".
+> The arms the previous attempt destroyed now BEAT the old HEAD (`gdna1_capON` 0.0689 → 0.0636, `verystrong`
+> 4 better / 0 worse), and **every large node class is more honest**: suite `errQ1conf` 14.4 % → 12.1 %,
+> boundary-single error 692 k → 664 k *with* `errQ1conf` 6.6 % → 5.3 %. **Read
+> `SESSION_2026_07_26_HANDOFF_12.md` before touching any of it** — §5 localizes the whole remaining deficit to
+> `gDNA-rich × capture-ON` and names the exact unpriced quantity (the exon↔boundary probe-placement step,
+> which `composition_logvar` does not see and which M11 is the solver's first consumer to be exposed to).
 >
 > **⭐ THE PASS-0 / PHASE-2 BOUNDARY IS NOW MEASURED (`SESSION_2026_07_25_HANDOFF_10.md`).** Suite state of
 > play: **12.56 M of 116.7 M node-attributed fragments misassigned (10.8 %)**; unstranded carries **84 %**,
@@ -87,11 +99,13 @@ The only other docs that are live (everything else is in `archive/`, kept for hi
   total (52–71 % of nodes; p99 31–288×). Holds the measured evidence, the derivation brief, the two adjacent
   modelling gaps (§4: **no TSS/TES in the region/boundary map**; **the boundary is a slope, not a cliff — three
   enrichment ratios, not one**), and the record of what was tried and rejected.
-* **`SESSION_2026_07_25_HANDOFF_11.md` — ⭐ THE LIVE HANDOFF. START HERE for the next session.** The BOUNDARY
-  work: steps 1–5 of the composition peel are **AGREED IN PRINCIPLE by the owner** and the revert is
-  PROVISIONAL. Holds the owner's per-step verdict, the three questions to pursue (why the regression / how to
-  compute the precision of a density ratio / how to split unspliced boundary fragments), the one-command
-  restore (`git apply scratchpad/steps_1_to_4.patch`), and the full do-not-re-run list.
+* **`SESSION_2026_07_26_HANDOFF_12.md` — ⭐ THE LIVE HANDOFF. START HERE for the next session.** The
+  composition peel LANDED: the three questions of HANDOFF_11 answered, M11 derived + MC-validated +
+  unit-tested, the level as a three-way FUSE, the `mrna_active` gate removed, the full per-condition A/B and
+  the trust view, the do-not-re-run list, and the remaining deficit localized to one regime with its
+  mechanism measured.
+* `SESSION_2026_07_25_HANDOFF_11.md` — the previous handoff (superseded). Its §5/§6/§7 pose the three
+  questions HANDOFF_12 answers; its §8 do-not-re-run list still stands.
 * **`peel_by_composition_plan.md`** — the plan for steps 1–5 with pre-registered gates; §10/§11 hold the
   execution results, including two of its own assumptions being refuted.
 * `SESSION_2026_07_25_HANDOFF_10.md` — the boundary evidence base. The deep

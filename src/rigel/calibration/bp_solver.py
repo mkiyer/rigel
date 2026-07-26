@@ -34,13 +34,18 @@ from __future__ import annotations
 import os
 
 import numpy as np
+from scipy.special import polygamma
 
 from .enrichment_frame import (
     composition_logvar,
     graft_frame_logvar,
     mismatch_deflate,
     mismatch_gap,
+    peel_continue_share,
+    peel_share_logvar,
+    residual_level,
     transfer_logvar,
+    transport_seed_logvar,
 )
 from .node_chain import REGION, NodeChain
 from .signature import coarse_type_array
@@ -358,33 +363,6 @@ def node_sweep(
         spl_n_f = tuple(
             np.where(SN[k] > _EPS, SN[k] / np.maximum(ESP[k], _EPS), 0.0) for k in (0, 1)
         )
-        # ── AN EXON HAS NO RNA CLAIM WHERE ITS MATURE CANNOT CONTINUE ──────────────────────────────────
-        # A boundary's unspliced crossing is `gDNA + RNA that continues`. WHICH RNA can continue is a
-        # STRUCTURAL fact, already computed: ``mrna_active_s`` = the exon bit set on BOTH flanks, i.e. mature
-        # runs contiguously past this seam on strand s.
-        #   * ``mrna_active_s`` TRUE  — an exon↔exon seam (including the retained-intron / alternative-isoform
-        #     case: TA splices 2000→9000 while TB reads straight through). Mature IS contiguous here, so the
-        #     exon's RNA legitimately transports and the measured peel removes what splices away.
-        #   * ``mrna_active_s`` FALSE — an exon↔intron seam. Mature splices out by definition; only nascent
-        #     read-through continues, and an exon CANNOT measure how much of its own RNA that is. Its RNA
-        #     density is therefore not a claim about the other side at all, and the honest emission is NONE
-        #     (density AND precision) rather than a partial subtraction.
-        #
-        # Why the shipped peel is not enough on that second case: it subtracts the MEASURED spliced flux as a
-        # proxy for "the mature that leaves", and it under-consumes badly. Measured on `nrna_none` (where the
-        # oracle RNA at an exon|intron boundary and inside the intron is EXACTLY 0) the relay still delivered
-        # ρ_R = 0.53 at the boundary and 0.0041 at the intron; the peel removed only ~16 % of the reframed RNA
-        # and did not fire at all on 14–17 % of edges. Across the same hops gDNA transported essentially
-        # perfectly (relayed/oracle 0.96–0.99), so the RNA channel alone was contaminating the chain and
-        # introns — which the density deconvolution solves accurately — were the visible victims.
-        #
-        # This is the component-set refusal `enrichment_frame.gdna_fallback_admissible` already describes:
-        # where the two ends do not share a component set, emit nothing rather than a wrong frame. Gating on
-        # the STRUCTURE (`mrna_active_s`) rather than on observed spliced mass matters in both directions — it
-        # fires on the 14–17 % of exon↔intron seams whose junction was never observed, and it does NOT fire on
-        # exon↔exon seams, where an earlier junction-presence test wrongly silenced a legitimate claim.
-        _mr_p = np.asarray(statics.mrna_active_pos, bool)
-        _mr_n = np.asarray(statics.mrna_active_neg, bool)
         accept_l = (
             SP[0] + SN[0]
         ) > _EPS  # the LEFT face carries the spliced (acceptor) ⇒ WITH-spliced ρ_tot
@@ -488,12 +466,163 @@ def node_sweep(
         # INPUT-belief ρ_tot. Returns each node's context belief IN ITS OWN FRAME; the combine re-reframes.
         rho_node0, rho_l0, rho_r0 = _rho_faces(np.asarray(f_g, np.float64))
 
+        # ── THE PEEL, BY COMPOSITION: the LEVEL (M11 ⊕ the own belief) and the SHARE (M10) ─────────────────
+        # A boundary's unspliced crossing is `gDNA + the RNA that CONTINUES`. The exon's RNA arriving at the
+        # seam either continues or splices away, so the honest operator is a SCALING by the continuing share
+        #     w = ρ_ν/(ρ_ν+ρ_μ)                                            (M10, `peel_continue_share`)
+        # not the subtraction `ρ_R·r − ρ_μ` it replaces. `w` is enrichment-free — capture multiplies the
+        # continuing and the splicing channels alike, so `e` cancels identically inside the ratio — and a
+        # scaling COMMUTES with the scale error the reframe carries, where a difference AMPLIFIES it by
+        # `u = 1/w` (measured 1.77× / 2.39× / 5.01× at u = 2/3/10, M10b). That matters because the exon-face
+        # reframe error is irreducible: a boundary samples an `fl_mean` window around a point while an exon
+        # samples its whole interior, so with mid-exon probes the two sit at genuinely different capture
+        # (0.4–1.3 nats, unchanged even with the ORACLE f_g).
+        #
+        # THE LEVEL is the whole difficulty, and it has ONE shape: ρ_ν = (1 − f̂_g)·M/E_r. So there is no
+        # precedence to choose between — there are THREE INDEPENDENT estimators of the same f̂_g and they FUSE
+        # by inverse variance, each contributing exactly the precision it earned and nothing where it has none:
+        #   * the node's OWN belief — precision τ_own, i.e. its strand tilt or its own density deconvolution.
+        #     Identically 0 on unstranded data and at any node with no factory, so it is INERT there rather
+        #     than asserting ψ's uninformative reference as if it were a measurement (that route was measured
+        #     at |Δw| = 0.628 on the unstranded arm);
+        #   * the node ACROSS the seam, reframed — in practice the factory-solved intron, which is the one
+        #     source that knows an RNA-free seam is RNA-free. Also gated by ITS τ_own, and charged the M5
+        #     transfer variance for the hop (measured |Δw| = 0.294 on the unstranded arm);
+        #   * the MASS identity closed with the MESSAGE's own gDNA claim (`residual_level`, M11) — the generic
+        #     density deconvolution with the gDNA prior supplied by the neighbour instead of the intergenic
+        #     pool. This is the one that exists EVERYWHERE: at `exon|exon` seams (97 % have no factory within
+        #     reach and no strand when unstranded) and at every seam of a low-gDNA library. It is built on the
+        #     good channel — gDNA transports across a hop at 0.96–0.99 while the RNA channel is the contaminant.
+        # A pure PRECEDENCE over the first two, with a "no evidence ⇒ v_ν = ∞" third arm, silenced the RNA
+        # channel outright in exactly the libraries where RNA is the entire signal (`gdna1`/`gdna5`/`none` ×
+        # capture-ON, measured 0.0689 → 0.0935 on the worst of them). The fuse has no such arm, because M11 has
+        # no such arm — and where two estimators disagree the fuse is what prices the disagreement, not a rank.
+        #
+        # The level is a λ-axis quantity — a density deconvolution delivers the gDNA-vs-RNA LEVEL and does not
+        # assign the tilt — so M11's total is split across the strands by the MESSAGE's own tilt, and each
+        # strand's share is formed against that strand's measured spliced flux. `v_μ` uses the spliced COUNT,
+        # never the mass: the accumulator deposits fragments fractionally, so at a junction face the median
+        # count is 33 against a median mass of 11 and the mass would over-state `v_μ` ~3×.
+        _v_nu_own = transport_seed_logvar(v_own_r, _n_node)
+        _p_nu_own = np.where(
+            np.isfinite(_v_nu_own) & ((op + on) > _EPS), 1.0 / np.maximum(_v_nu_own, _EPS), 0.0
+        )
+        _mu_f = ((spl_p_f[0], spl_n_f[0]), (spl_p_f[1], spl_n_f[1]))
+        _v_mu_f = tuple(
+            tuple(np.where(c > 0.0, 1.0 / np.maximum(c, _EPS), np.inf) for c in cs)
+            for cs in (
+                (
+                    np.asarray(geometry.spliced_n_pos_left, np.float64),
+                    np.asarray(geometry.spliced_n_neg_left, np.float64),
+                ),
+                (
+                    np.asarray(geometry.spliced_n_pos_right, np.float64),
+                    np.asarray(geometry.spliced_n_neg_right, np.float64),
+                ),
+            )
+        )
+
+        # the node ACROSS the seam, reframed into this node's frame, and its transported log-variance
+        # (its own level seed ⊕ the M5 hop cost). Its precision is 0 wherever that node has no composition
+        # evidence of its own (``τ_own = 0 ⇒ v_own_r = ∞``), so the presence test needs no gate of its own.
+        _liA, _riA = np.asarray(left), np.asarray(right)
+        _far = []
+        for _d in (0, 1):
+            _fi = np.clip(_riA if _d == 0 else _liA, 0, n - 1)
+            _fok = ((_riA if _d == 0 else _liA) >= 0) & (rho_node0[_fi] > _EPS) & (rho_node0 > _EPS)
+            _rf = np.where(_fok, rho_node0 / np.maximum(rho_node0[_fi], _EPS), 0.0)
+            _vf = np.where(_fok, _v_nu_own[_fi] + logvar_tot + logvar_tot[_fi], np.inf)
+            _far.append(
+                (
+                    op[_fi] * _rf,
+                    on[_fi] * _rf,
+                    np.where(np.isfinite(_vf), 1.0 / np.maximum(_vf, _EPS), 0.0),
+                )
+            )
+        _far = tuple(_far)
+
+        def _peel_share(k, df, tg, tpg, tp, tn):
+            """The continuing share ``w`` and ``Var(log w)`` per strand, on face ``df`` of node(s) ``k``, for a
+            message whose gDNA claim is ``(tg, tpg)`` and whose RNA claim is ``(tp, tn)``. Returns
+            ``((w_p, vw_p), (w_n, vw_n))``; ``Var(log w) = +inf`` (⇒ zero precision, an inert message) only
+            where NONE of the three estimators of the level exists."""
+            _vg = np.where(np.asarray(tpg, np.float64) > 0.0, 1.0 / np.maximum(tpg, _EPS), np.inf)
+            _nu_m, _, _vl_m = residual_level(M[k], _n_node[k], tg, E_g[k], E_r[k], _vg)
+            _A = np.asarray(tp, np.float64) + np.asarray(tn, np.float64)
+            _a_p = np.where(_A > _EPS, np.asarray(tp, np.float64) / np.maximum(_A, _EPS), 0.0)
+            out = []
+            for _a, _nu_o, _nu_f, _mu, _vmu in (
+                (_a_p, op[k], _far[df][0][k], _mu_f[df][0][k], _v_mu_f[df][0][k]),
+                (1.0 - _a_p, on[k], _far[df][1][k], _mu_f[df][1][k], _v_mu_f[df][1][k]),
+            ):
+                # ── THE FUSE, in LINEAR density space (see `residual_level`'s return contract) ──────────
+                # Each estimator is (ρ_i, Var_i); an own/far claim carrying a delta-method log-variance v is
+                # the SAME statement as ρ ± ρ√v, so Var_i = ρ_i²·v_i. Linear is the coordinate that lets a
+                # confident near-zero claim (the factory-solved intron across an RNA-free seam, measured
+                # ρ_ν = 0.0006 ± 0.0012) actually pull the level down; a geometric fuse of positive modes
+                # cannot reach zero, which is why "the intron sets the level" kept failing to.
+                #
+                # M11's level is a λ-axis TOTAL, split onto this strand by the message's own tilt. Mask the ∞
+                # BEFORE the product — the standing ``0·inf = nan`` trap, np.where evaluating both branches.
+                _nu_ms = _nu_m * _a
+                _vl_s = np.where(np.isfinite(_vl_m), _vl_m, 0.0) * _a * _a
+                _pm = np.where(
+                    np.isfinite(_vl_m) & (_nu_ms > _EPS), 1.0 / np.maximum(_vl_s, _EPS), 0.0
+                )
+                _po = np.where(_nu_o > _EPS, _p_nu_own[k] / np.maximum(_nu_o * _nu_o, _EPS), 0.0)
+                _pf = np.where(_nu_f > _EPS, _far[df][2][k] / np.maximum(_nu_f * _nu_f, _EPS), 0.0)
+                _pt = _po + _pf + _pm
+                _live = _pt > _EPS
+                _nu = np.where(
+                    _live,
+                    (_po * _nu_o + _pf * _nu_f + _pm * _nu_ms) / np.maximum(_pt, _EPS),
+                    0.0,
+                )
+                # back to the model's currency: the fused level's effective fragment COUNT k = ρ̂²/Var̂, and
+                # its log-variance by the same exact rule M11 uses (ψ'(k) → 1/k for a well-determined level,
+                # → π²/6 for one earned by a single fragment; never over-confident).
+                _kk = np.maximum(_nu * _nu * _pt, 1.0)
+                _v_nu = np.where(_live, polygamma(1, _kk), np.inf)
+                _w = np.where(_live, peel_continue_share(_nu, _mu), 0.0)
+                if _capture is not None and isinstance(k, slice):  # the vectorized combine only
+                    _capture.setdefault("_lvl", []).append(  # inert: the level's provenance, per face
+                        {"df": df, "nu": np.asarray(_nu).copy(), "v_nu": np.asarray(_v_nu).copy(),
+                         "po": np.asarray(_po).copy(), "pf": np.asarray(_pf).copy(),
+                         "pm": np.asarray(_pm).copy(), "nu_o": np.asarray(_nu_o).copy(),
+                         "nu_f": np.asarray(_nu_f).copy(), "nu_m": np.asarray(_nu_ms).copy(),
+                         "mu": np.asarray(_mu).copy(), "w": np.asarray(_w).copy(),
+                         "v_g": np.asarray(_vg).copy(),
+                         "vl_m": np.where(np.isfinite(_vl_m), _vl_s, np.inf),
+                         "phi": np.asarray(tg * E_g / np.maximum(M, _EPS)).copy()}
+                    )
+                # a spliced DENSITY with no spliced COUNT cannot be priced (plan §4.7) ⇒ no claim at all.
+                _ok = _live & (np.isfinite(_vmu) | ~(_mu > _EPS))
+                out.append(
+                    (
+                        _w,
+                        np.where(
+                            _ok,
+                            peel_share_logvar(
+                                1.0 - _w,
+                                np.where(_live, _v_nu, 0.0),
+                                np.where(np.isfinite(_vmu), _vmu, 0.0),
+                            ),
+                            np.inf,
+                        ),
+                    )
+                )
+            return out
+
         # σ²_transfer per-hop damping: add the edge's transfer log-variance to the message's log-variance
         # (1/p → 1/p + σ²_transfer). This is now the DERIVED, direction-dependent M5 variance (0 on the matched
         # graft, Var(log r) on the peel/plain/anchor — computed per edge from ``logvar_tot`` below), retiring the
         # density-uniformity NPMLE proxy (`_mup`/`_vp`, no longer read).
         def _damp(p, s2t):
             return 1.0 / (1.0 / p + s2t) if p > 0.0 else 0.0
+
+        def _damp_v(p, v):
+            """STEP 3: add a log-variance to a precision. 1/p → 1/p + v ; v = ∞ ⇒ 0 (no claim)."""
+            return p / (1.0 + p * v) if (p > 0.0 and np.isfinite(v)) else 0.0
 
         def _relay(seq, nbr, dst_face, src_face, df, sf):
             rg, rp, rn = og.copy(), op.copy(), on.copy()
@@ -549,13 +678,12 @@ def node_sweep(
                     tpn += _snc
                     tmp += _spc
                     tmn += _snc
-                if is_bnd_a[i] and ex_a[s]:  # EXON → boundary: PEEL the departing mature
-                    tp = max(tp - spl_p_f[df][i], 0.0) if _mr_p[i] else 0.0
-                    tn = max(tn - spl_n_f[df][i], 0.0) if _mr_n[i] else 0.0
-                    if not _mr_p[i]:
-                        tpp, tmp = 0.0, 0.0  # mature cannot continue ⇒ the exon has no RNA claim at all
-                    if not _mr_n[i]:
-                        tpn, tmn = 0.0, 0.0
+                if is_bnd_a[i] and ex_a[s]:  # EXON → boundary: PEEL by COMPOSITION (scale by the share)
+                    (_wp, _vwp), (_wn, _vwn) = _peel_share(i, df, tg, tpg, tp, tn)
+                    tp, tn = tp * float(_wp), tn * float(_wn)
+                    _vwp, _vwn = float(_vwp), float(_vwn)
+                    tpp, tmp = _damp_v(tpp, _vwp), _damp_v(tmp, _vwp)
+                    tpn, tmn = _damp_v(tpn, _vwn), _damp_v(tmn, _vwn)
                 if not fp_a[i]:
                     tp, tpp, tmp = 0.0, 0.0, 0.0
                 if not fn_a[i]:
@@ -650,13 +778,17 @@ def node_sweep(
             _snc = np.where(_sn > _EPS, _sn / (1.0 + _sn * _s2t_spl), 0.0)
             tpp, tpn = tpp + _spc, tpn + _snc  # into the mode-fusion precision …
             tmp, tmn = tmp + _spc, tmn + _snc  # … and the measurement stream (a count, never composition τ)
-            peel = is_bnd_a & ex_a[src] & valid  # EXON → boundary: PEEL the departing mature
-            tp = np.where(peel, np.maximum(tp - spl_p_f[df], 0.0), tp)
-            tn = np.where(peel, np.maximum(tn - spl_n_f[df], 0.0), tn)
-            # … and where mature CANNOT continue, no RNA claim at all (see the relay's twin)
-            _kp, _kn = peel & ~_mr_p, peel & ~_mr_n
-            tp, tpp, tmp = np.where(_kp, 0.0, tp), np.where(_kp, 0.0, tpp), np.where(_kp, 0.0, tmp)
-            tn, tpn, tmn = np.where(_kn, 0.0, tn), np.where(_kn, 0.0, tpn), np.where(_kn, 0.0, tmn)
+            peel = is_bnd_a & ex_a[src] & valid  # EXON → boundary: PEEL by COMPOSITION (the relay's twin)
+            (_wp, _vwp), (_wn, _vwn) = _peel_share(slice(None), df, tg, tpg, tp, tn)
+            tp = np.where(peel, tp * _wp, tp)
+            tn = np.where(peel, tn * _wn, tn)
+
+            def _dv_arr(pr, vv):
+                _f = np.isfinite(vv)
+                return np.where(peel, np.where(_f, pr / (1.0 + pr * np.where(_f, vv, 0.0)), 0.0), pr)
+
+            tpp, tmp = _dv_arr(tpp, _vwp), _dv_arr(tmp, _vwp)
+            tpn, tmn = _dv_arr(tpn, _vwn), _dv_arr(tmn, _vwn)
             tp, tpp, tmp = np.where(fp_a, tp, 0.0), np.where(fp_a, tpp, 0.0), np.where(fp_a, tmp, 0.0)
             tn, tpn, tmn = np.where(fn_a, tn, 0.0), np.where(fn_a, tpn, 0.0), np.where(fn_a, tmn, 0.0)
             tg, tp, tn = _pin_v(

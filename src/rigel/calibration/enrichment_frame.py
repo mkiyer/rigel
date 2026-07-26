@@ -28,6 +28,7 @@ retained intron) and a wrong frame is worse than no message.
 from __future__ import annotations
 
 import numpy as np
+from scipy.special import log_ndtr, polygamma
 
 __all__ = [
     "total_density",
@@ -46,6 +47,7 @@ __all__ = [
     "peel_rna_logvar",
     "peel_continue_share",
     "peel_share_logvar",
+    "residual_level",
     "transfer_logvar",
     "message_precision",
     "mismatch_gap",
@@ -383,6 +385,154 @@ def peel_share_logvar(w_mu, v_nu, v_mu):
     validity limit to respect and no over-confidence tail. MC: `message_variance_mc.py` M10, rel 0.2–1.0 %."""
     wm = _f(w_mu)
     return wm * wm * (_f(v_nu) + _f(v_mu))
+
+
+def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
+    """M11 — a node's own RNA density read off its **observed mass** against an imputed gDNA **density**.
+
+    This is the generic DENSITY DECONVOLUTION (`density_deconv`, of which the intron factory is the intron
+    special case) with the gDNA density prior supplied by a NEIGHBOUR instead of by the intergenic pool. It is
+    the only gDNA/RNA split available at a seam with no factory within reach and no strand — i.e. at
+    ``exon|exon`` boundaries (97 % have no factory neighbour) and at every seam of a low-gDNA library — and it
+    is count-zero-information-legal for the same reason the factory is: the *information* is the imputed gDNA
+    DENSITY, and the count only converts that density into a composition::
+
+        φ   = ρ_g·E_g / M              the share of the crossing the imputed gDNA claim accounts for
+        f_R = 1 − φ                    the RNA share of the crossing
+        σ_f = φ·√v_g                   the gDNA claim's own log-variance, entering through the RATIO
+
+    **The BOUNDS are applied on the FRACTION, not on the mass**, because that is where they are exact. Doing
+    the truncation on the mass (``0 ≤ X ≤ M`` with ``X ~ N(M − ρ_g E_g, M²/n + (ρ_g E_g)²v_g)``) uses the
+    OBSERVED ``M`` as a bound on a quantity whose true bound is ``M_true``, and that breaks the pure-RNA
+    limit: at ``ρ_g = 0`` the answer is ``f_R = 1`` exactly — the count cancels out of the ratio — where the
+    mass form leaves an ``M/√n`` residual pressed against the upper bound and under-claims the RNA by
+    ``0.8/√n``. Here ``σ_f → 0`` with ``φ``, as it must.
+
+    **``f_R`` is TRUNCATED TO ``[0, 1]``, not clipped**, and both bounds are structural: an RNA share cannot be
+    negative, and it cannot exceed the whole crossing (the gDNA share it is subtracted from is itself
+    non-negative). The estimator is the moment-matched two-sided truncated normal ``f_R | 0 ≤ f_R ≤ 1`` with
+    ``f_R ~ N(1−φ, σ_f²)``; ``ρ_ν = E[f_R]·M/E_r``. Each bound earns its keep and neither is optional:
+
+    * **the LOWER bound** is what lets the estimator say something at an RNA-free seam. A naive ``max(·, 0)``
+      would report density 0 at infinite variance — "no opinion" — exactly where the node in fact holds a
+      strong one: that its RNA is below its own noise floor.
+    * **the UPPER bound** is what stops it inventing one. The imputed gDNA claim routinely arrives at
+      ``√v_g ≈ 1.0–1.2 nats`` (measured at exon→boundary edges under capture), which makes ``σ_f`` of order 1;
+      a one-sided positive part then returns ``E[f_R] ≈ 0.8·σ_f``, i.e. *"most of my mass is RNA"*, asserted
+      **out of pure ignorance** and at a confident-looking ``k ≈ 2``. With the upper bound the same ignorance
+      degrades to its correct limit — ``σ_f ≫ 1`` ⇒ ``f_R ~ Uniform(0,1)`` ⇒ ``E = ½`` at ``k = 3`` — a wide
+      claim the fuse out-weighs with any real evidence, rather than a narrow wrong one that swamps it.
+
+    **The log-variance is the TRIGAMMA of the level's effective fragment count**, not the delta method::
+
+        k = E[f_R]² / Var[f_R]                    the RNA share's effective COUNT — how many fragments of RNA
+        Var(log ρ_ν) = ψ'(k) + 1/(n·E[f_R]²)      the node has evidence for, in exactly the ``Var(log) = 1/n``
+                                                  sense used everywhere else in the model, ⊕ the LEVEL's own
+                                                  Poisson count
+
+    The second term is the count, propagated with its exact Jacobian: ``ρ_ν·E_r = M − ρ_g E_g``, so
+    ``∂log ρ_ν/∂log M = 1/f_R`` — a count error is amplified by the reciprocal of the RNA share, because the
+    level is a small difference of two large numbers. Dropping that amplification (writing a bare ``+1/n``)
+    under-states the variance by exactly the M/f_R covariance, MC-caught at 19 % on the ``f_R = 0.9`` arm. The
+    linearization point is the TRUNCATED mean, not ``1−φ``, which is what keeps it finite as ``φ → 1``.
+
+    i.e. moment-match a Gamma (the count-posterior family) and take its exact log-variance. This is EXACT in
+    both limits where the answer is known and the delta method is not: ``k → ∞`` gives ``ψ'(k) → 1/k``, the
+    delta/Poisson limit; ``k → 1`` (the deep sub-noise tail, where the truncated normal *is* an exponential)
+    gives ``ψ'(1) = π²/6``, where the delta method returns 1 and is over-confident by 1.6×. **``k ≥ 1``
+    always**, so the level can never carry more than one fragment's worth of unearned confidence — an exact
+    limit of the truncation, not a floor.
+
+    The three operating limits, and they are the reason this exists:
+    * **``ρ_g E_g ≪ M``** (a low-gDNA library — where RNA is the entire signal and the peel's old
+      no-evidence default silenced the channel outright): ``ρ_ν → M/E_r`` at ``Var → 1/n``. A MEASUREMENT.
+    * **``ρ_g E_g → M`` with a precise gDNA claim** (an RNA-free seam): ``ρ_ν → 0``, and the log-variance
+      grows without bound — but the LINEAR statement stays tight (``sd(ρ_ν) ∝ M/(E_r√n)``, i.e. *"below a few
+      percent of my mass"*), which is exactly the information a near-zero level carries and exactly why the
+      consumer fuses in linear space. This is what reproduces "intronic unspliced fragments are gDNA until
+      proven otherwise" as a measurement rather than a rule.
+    * **an imprecise gDNA claim** (``σ_f ≫ 1``): ``ρ_ν → M/(2E_r)`` at ``k = 3``. Uninformative, and declared
+      uninformative — a wide claim the fuse out-weighs with any real evidence.
+
+    Returns ``(ρ_ν, Var(log ρ_ν), Var(ρ_ν))`` — the LINEAR variance as well, because near zero that is the
+    coordinate the information lives in: "0.02 ± 0.04" and "log ρ = −3.9 ± 2.0" are the same linearization,
+    but only the first can be fused with another estimate in a way that lets a confident near-zero claim pull
+    the level DOWN. A log-space (geometric) fuse of positive modes cannot reach zero at all.
+
+    ``(0, +inf, +inf)`` where no level exists — no mass, no count, or a gDNA claim carrying no precision
+    (``v_g = +inf``: "supplied" is a statement about PRECISION, never about the density's value — the same
+    test the λ-emission gate makes)."""
+    m_, n_, rg_ = _f(mass), _f(n_mass), _f(rho_g)
+    eg_, er_, vg_ = _f(E_g), _f(E_r), _f(v_g)
+    ok = (m_ > _EPS) & (n_ > 0.0) & (er_ > _EPS) & np.isfinite(vg_)
+    inv_n = np.where(ok, 1.0 / np.maximum(n_, _EPS), 0.0)
+    # substitute a finite v_g BEFORE any product — np.where evaluates both branches, so a masked-out
+    # ``v_g = +inf`` against ``φ = 0`` would still form ``0·inf = nan`` (the standing trap).
+    vg_fin = np.where(np.isfinite(vg_), np.maximum(vg_, 0.0), 0.0)
+    phi = np.where(ok, np.maximum(rg_, 0.0) * eg_ / np.maximum(m_, _EPS), 0.0)
+    # The claim's log-variance is linearized at the ADMISSIBLE point ``min(φ, 1)``, not at ``φ`` itself. ``φ``
+    # is a share and cannot exceed 1; an estimate that does (routine — a relayed claim asserts more reads of a
+    # component than the node sequenced on 52–71 % of nodes) is "at least all of it", and its relative
+    # uncertainty applies to the largest admissible value. Linearizing at ``φ`` instead makes ``σ_f`` grow
+    # WITH the over-claim, so the [0,1] window widens faster than the mean leaves it and the estimator INVERTS
+    # — more imputed gDNA returning more RNA, reaching ``f_R = 1`` at ``φ ≈ 100``. This is the projection onto
+    # the admissible set, not a clamp on the answer: the mean still uses the full ``φ``.
+    sig = np.minimum(phi, 1.0) * np.sqrt(vg_fin)
+    # the standardized bounds of ``0 ≤ f_R ≤ 1``: β = φ/σ ≥ 0 always, α = β − 1/σ. The two branches below
+    # each subtract two SAME-SIDE normal tails, so neither loses precision to cancellation.
+    tiny = sig <= _EPS
+    ss = np.where(tiny, 1.0, sig)
+    beta = np.where(tiny, 1.0, phi / ss)
+    alpha = beta - 1.0 / ss
+    pdf_a = np.exp(-0.5 * alpha * alpha - 0.5 * np.log(2.0 * np.pi))
+    pdf_b = np.exp(-0.5 * beta * beta - 0.5 * np.log(2.0 * np.pi))
+    Z = np.where(
+        alpha >= 0.0,
+        np.exp(log_ndtr(-alpha)) - np.exp(log_ndtr(-beta)),
+        np.exp(log_ndtr(beta)) - np.exp(log_ndtr(alpha)),
+    )
+    # Two limits where ``Z`` underflows and the ratio would be 0/0. Both are supplied exactly:
+    #   * ``α > 0`` — the whole untruncated mass sits BELOW the lower bound (the gDNA claim over-explains the
+    #     crossing). On [0,1] the density is then an exponential with scale ``σ/α = σ²/(φ−1)``: ``E = V^½``,
+    #     so ``k = 1`` — one fragment's worth of evidence, the least this estimator can ever claim.
+    #   * otherwise — ``σ_f`` swamps the whole unit interval: ``f_R ~ Uniform(0,1)``, ``E = ½``, ``k = 3``.
+    bad = ~(Z > _EPS) & ~tiny
+    lo_tail = bad & (alpha > 0.0)
+    e_tail = np.where(lo_tail, ss / np.where(lo_tail, alpha, 1.0), 0.0)
+    Zs = np.where(Z > _EPS, Z, 1.0)
+    d = (pdf_a - pdf_b) / Zs
+    f_hi = np.clip(1.0 - phi, 0.0, 1.0)
+    f_R = np.clip(
+        np.where(
+            tiny,
+            f_hi,
+            np.where(lo_tail, e_tail, np.where(bad, 0.5, 1.0 - phi + ss * d)),
+        ),
+        0.0,
+        1.0,
+    )
+    v_f = np.where(
+        tiny,
+        0.0,
+        np.where(
+            lo_tail,
+            e_tail * e_tail,
+            np.where(
+                bad,
+                1.0 / 12.0,
+                ss * ss * np.maximum(1.0 + (alpha * pdf_a - beta * pdf_b) / Zs - d * d, 0.0),
+            ),
+        ),
+    )
+    k = np.maximum(f_R * f_R / np.maximum(v_f, _EPS), 1.0)  # the RNA share's effective fragment count
+    v_log = np.where(
+        ok,
+        polygamma(1, np.minimum(k, 1.0 / _EPS))
+        + inv_n / np.maximum(f_R * f_R, _EPS),  # the count, with its exact 1/f_R Jacobian
+        np.inf,
+    )
+    rho = np.where(ok, f_R * m_ / np.maximum(er_, _EPS), 0.0)
+    return rho, v_log, np.where(ok, rho * rho * v_log, np.inf)
 
 
 def transfer_logvar(logvar_tot_dst, logvar_tot_src, graft):

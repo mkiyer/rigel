@@ -3,7 +3,8 @@
 This is the NEXT-task MC (variance_model_handoff.md §3-4): retire the ratio-`k` parameterization (singular at
 the pure-gDNA anchor) and validate the **per-component density** message variance the ÷M_dst unified solver
 actually transports. It is the ground-truth arbiter for the derivation doc `message_variance_derivation.md`.
-Pure numpy (no rigel import); mirrors `scripts/debug/message_precision_mc.py` (the template).
+Pure numpy apart from M11, which is validated through the shipped `enrichment_frame.residual_level`;
+mirrors `scripts/debug/message_precision_mc.py` (the template).
 
 THE OBJECT. The solver transports per-component densities ρ_c (c ∈ {g, R} at a face; {g,+,−} split) and hands
 ψ, per component, a Gaussian on `log f_c^dst` with precision `p_c`. The message mode is
@@ -67,6 +68,8 @@ from __future__ import annotations
 import argparse
 
 import numpy as np
+
+from rigel.calibration.enrichment_frame import residual_level  # M11 is validated AS SHIPPED
 
 rng = np.random.default_rng(20260724)
 
@@ -504,6 +507,69 @@ def peel_amplification(*, delta, u):
     return ok
 
 
+def residual_level_law(N, *, f_R, n, v_g, E_g=1000.0, E_r=900.0, rho_g=1.0):
+    """M11 — the LEVEL from the node's OWN mass closed with an imputed gDNA DENSITY.
+
+        rho_nu*E_r = M - rho_g*E_g ,   s^2 = M^2/n + (rho_g E_g)^2 v_g
+
+    Validated the way every other message law is: against the ESTIMATOR'S OWN ERROR
+    ``Var(log rho_nu_hat - log rho_nu_true)`` under the two noise sources it declares — the node's Poisson
+    count and the imputed gDNA claim's log-variance.
+
+    The claim has two halves and they are asserted separately, because the law is deliberately NOT symmetric:
+      (a) where the level is a MEASUREMENT (the gDNA claim is a minor part of the mass, f_R >~ 1/2 — a
+          low-gDNA library, which is exactly the arm the old no-evidence default silenced) it must be HONEST;
+      (b) where the residual approaches its own noise floor it must be CONSERVATIVE (z2 <= 1), never
+          over-confident — the governing principle as a testable property rather than a preference.
+    The plain delta method is reported alongside: it satisfies neither, running 1.13x over-confident at
+    f_R = 0.5 and then exploding to z2 = 0.02 (50x over-damped) at f_R = 0.05."""
+    g_mass = rho_g * E_g
+    M0 = g_mass / (1.0 - f_R)  # the true crossing mass at this RNA fraction
+    nu_true = f_R * M0 / E_r
+    M = _lognormal(M0, 1.0 / n, N)
+    gh = _lognormal(rho_g, v_g, N)
+    rho, v, _vl = residual_level(mass=M, n_mass=np.full(N, float(n)), rho_g=gh, E_g=E_g, E_r=E_r,
+                                 v_g=np.full(N, float(v_g)))
+    live = rho > 0.0
+    emp = float(np.var(np.log(rho[live]) - np.log(nu_true)))
+    pred = float(np.mean(v[live]))
+    delta = (1.0 / n + (1.0 - f_R) ** 2 * v_g) / f_R**2
+    tag = f"[f_R={f_R:g}, n={n:g}, v_g={v_g:g}]"
+    if f_R >= 0.5:  # (a) the measurement regime — must be HONEST
+        ok = _report(f"M11 Var(log rho_nu) HONEST  {tag}", pred, emp, tol=0.15)
+    else:  # (b) the marginal regime — must be CONSERVATIVE, never over-confident
+        ok = emp <= pred
+        print(f"  {'OK ' if ok else '***'} {f'M11 Var(log rho_nu) CONSERVATIVE {tag}':<56} "
+              f"pred {pred:12.6g}   emp {emp:12.6g}   rel {abs(pred - emp) / emp:7.2%}")
+    print(f"      z2 = {emp / pred:5.2f}  (1.0 = honest, <1 = conservative)"
+          f"   delta method would claim {delta:.4g}  (z2 = {emp / delta:5.2f})")
+    return ok
+
+
+def residual_level_limits():
+    """M11 — the two operating limits, exactly, through the shipped implementation."""
+    ok = True
+    # (i) gDNA a negligible part of the mass (a low-gDNA library) -> the pure count
+    rho, v, _ = residual_level(mass=1.0e4, n_mass=400.0, rho_g=0.0, E_g=1000.0, E_r=900.0, v_g=1e-6)
+    ok &= _report("M11 lim rho_g->0: rho_nu = M/E_r", 1.0e4 / 900.0, float(rho), tol=1e-3)
+    ok &= _report("M11 lim rho_g->0: Var(log) = 1/n", 1.0 / 400.0, float(v), tol=0.02)
+    # (ii) the gDNA claim accounts for the whole crossing -> ~0 density at pi^2/6
+    rho, v, _ = residual_level(mass=1.0e4, n_mass=400.0, rho_g=40.0, E_g=1000.0, E_r=900.0, v_g=1e-9)
+    ok &= _report("M11 lim rho_g*E_g>>M: rho_nu/(M/E_r) -> 0",
+                  1.0, 1.0 - float(rho) / (1.0e4 / 900.0), tol=1e-6)
+    print(f"      Var(log) there is {float(v):.4g} (>= pi^2/6 = {np.pi**2 / 6.0:.4g}: "
+          f"{'OK' if float(v) >= np.pi**2 / 6.0 else 'FAIL'}), and the LINEAR sd is "
+          f"{np.sqrt(float(v)) * float(rho) / (1.0e4 / 900.0):.4g} of the crossing")
+    ok &= float(v) >= np.pi**2 / 6.0
+    # (iii) no gDNA precision supplied -> no level at all
+    _r0, v0, _ = residual_level(mass=1.0e4, n_mass=400.0, rho_g=1.0, E_g=1000.0, E_r=900.0, v_g=np.inf)
+    no_level = (not np.isfinite(float(v0))) and float(_r0) == 0.0
+    print(f"  {'OK ' if no_level else '***'} "
+          f"{'M11 v_g=inf (gDNA not SUPPLIED) -> no level at all':<56} "
+          f"rho_nu {float(_r0):12.6g}   Var {float(v0):12.6g}")
+    return ok and no_level
+
+
 def peel_amplification_limit(*, u):
     """M10b(ii) — the small-delta limit IS u, verified numerically."""
     d = 1e-6
@@ -579,6 +645,13 @@ def main():
     print()
     for u in (2.0, 3.0, 10.0):
         peel_amplification_limit(u=u)
+
+    print("\n\n═══ M11 the LEVEL from the node's OWN mass + an imputed gDNA density (positive-part) ═══\n")
+    for f_R, n, v_g in ((0.90, 400, 0.02), (0.50, 400, 0.02), (0.20, 400, 0.02),
+                        (0.05, 400, 0.02), (0.02, 400, 0.02), (0.20, 40, 0.20)):
+        residual_level_law(N, f_R=f_R, n=n, v_g=v_g)
+    print()
+    residual_level_limits()
 
     print("\n\n═══ M8 the GRAFT's FRAME MISLIFT: the measured spliced is already in the dst frame ═══\n")
     graft_frame_mislift(N, rho_mu_true=4.57, n_spl=6000, r=1.0, E_r=1850.0, M_d=66544.0)

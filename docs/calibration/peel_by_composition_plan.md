@@ -1,6 +1,6 @@
 # The composition peel — implementation plan
 
-**Status: EXECUTED 2026-07-25 — G1 FAILED, reverted per the rollback rule. §10 holds the results.**
+**Status: LANDED 2026-07-26. §12 holds the retry that worked; §10/§11 are the 2026-07-25 attempt that did not.**
 Owner-directed. The plan below is unchanged from before execution (it is the pre-registration);
 §10 records what happened, including two of its own assumptions being refuted. Read `ROADMAP.md`, then
 `SESSION_2026_07_25_HANDOFF_10.md` (§9–§12 are the evidence this plan rests on), then this.
@@ -371,3 +371,38 @@ matter.** Case 2 (the far intron) carries |Δw| = 0.294 unstranded; case 3 cover
 and every seam in a low-gDNA library. The law is right, the wiring is right, the *input* does not exist yet.
 Retry only once a boundary-level source exists — which is exactly what HANDOFF_10 §8.1 identified from the
 opposite direction (`exon|exon` boundaries: no factory within reach on 97 %, no strand when unstranded).
+
+
+---
+
+## 12. THE RETRY THAT LANDED (2026-07-26) — §11.3's "the input does not exist yet" was wrong
+
+§11.3 concluded: *"The law is right, the wiring is right, the INPUT does not exist yet. Retry only once a
+boundary-level source exists."* The source did exist — it just had not been recognized as one. **The node's
+own observed mass, closed against an imputed gDNA DENSITY** (`enrichment_frame.residual_level`, M11) is a
+level at every seam, and it is the same primitive the intron factory already uses, with the gDNA prior
+supplied by a neighbour rather than by the intergenic pool.
+
+Two structural corrections to this plan turned it from a loss into a win, and both invalidate parts of §2:
+
+* **§2's PRECEDENCE is wrong as a shape, not just in its ordering.** Every candidate level is
+  `ρ_ν = (1 − f̂_g)·M/E_r`, so they are three estimators of ONE quantity and must FUSE by inverse variance.
+  A precedence needs a "no evidence" arm; a fuse does not, and that arm (case 3) was the entire regression.
+* **§3's law is right and its CONSUMER was in the wrong coordinate.** Levels must be fused in LINEAR density
+  space. `Var(log w) = w_μ²(v_ν+v_μ)` is untouched; what changed is how `v_ν` is formed.
+
+| arm | refit=0 | vs HEAD | refit=1 | vs HEAD |
+|---|---|---|---|---|
+| HEAD (`g5`) | 0.0885 | — | 0.0678 | — |
+| §10/§11 FULL (precedence) | 0.0934 | 1 / 31 | 0.0684 | 9 / 18 / 5 |
+| **§12 (fuse + M11), gate REMOVED** | **0.0895** | **9 / 9 / 14** | **0.0693** | **4 / 8 / 20** |
+
+**The pre-registered gates.** G1/G2 are marginal misses on aggregate (+0.0010 / +0.0015) but the
+better/worse counts are transformed (1/31 → 9/9). **G4 passes decisively and is now free**: boundary
+`errQ1conf` 6.6 % → 5.3 % *while boundary error mass FALLS* 692 k → 664 k — where §10.4's arm had to buy its
+honesty with 247 k of extra boundary error. G5 holds (`message_variance_mc.py` 0 failures over M1–**M11**;
+the DL inequality untouched). §10.4's G1-vs-G4 tension is therefore **dissolved, not traded**.
+
+Per §11.3's own standard — *"the law is right, the wiring is right"* — and the owner's standing instruction
+not to revert on tiny error differences, this is landed. The remaining +0.0010 is one regime
+(`gDNA-rich × capture-ON`) with a measured mechanism: see `SESSION_2026_07_26_HANDOFF_12.md` §5.
