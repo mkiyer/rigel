@@ -326,3 +326,48 @@ unstranded arm, and case 3 (no evidence at all) covers `exon|exon` seams entirel
 already showed the boundary is structurally starved (no factory within reach on 97 %, no strand when
 unstranded). **A better share needs a source that does not exist yet at those seams**, which is the same
 conclusion the boundary study reached from the other direction. Retry only after that source exists.
+
+
+---
+
+## 11. THE FULL SET (steps 1–5 combined), run on the whole battery — owner-requested
+
+The earlier execution measured the steps as a ladder; this is all five **combined**, which is what was
+actually being advocated. Step 5 was already at HEAD by then (landed separately as a correctness fix).
+
+| arm | refit=0 | vs HEAD | refit=1 | vs HEAD |
+|---|---|---|---|---|
+| `m8` (pre-boundary baseline) | 0.0900 | — | 0.0700 | — |
+| **HEAD** (`mrna_active` gate + λ precision gate) | **0.0885** | — | **0.0678** | — |
+| FULL (steps 1–5) | 0.0934 | 1 better / 31 worse | 0.0684 | 9 better / 18 worse / 5 flat |
+| HYBRID (share where a level exists, subtraction where not) | 0.0893 | 14 / 14 / 4 | 0.0693 | 4 / 22 / 6 |
+
+Note the FULL arm still beats `m8` at refit=1 (0.0684 vs 0.0700, **22 better / 6 worse**) — the boundary work
+as a whole is winning; it is the composition peel specifically that costs.
+
+### 11.1 Where the FULL set breaks, and why
+
+The damage is concentrated on the **low-gDNA arms**: `gdna1_ss0.50_present_capON` 0.0689 → 0.0935,
+`gdna5_..._capON` 0.0906 → 0.1133, `none_ss0.50_present_capON` 0.0588 → 0.0841. In those libraries the intron
+factory has almost no background to fit, so `τ_factory = 0`, the level precedence falls to **case 3**, and
+`v_ν = ∞` **silences the RNA channel outright** — in libraries where RNA is the whole signal.
+
+That is the same failure shape as the `mrna_active` over-reach and as §10.2's finding: a conservative default
+is only safe when something else can still carry the channel.
+
+### 11.2 The HYBRID repair — right diagnosis, still not a win
+
+Falling back to the **subtraction** in case 3 (we cannot form a share, but the spliced flux demonstrably left,
+which is a measured fact) recovers most of the refit=0 damage — 0.0934 → 0.0893, and 1/31 → 14/14. It costs
+refit=1 (0.0684 → 0.0693, 4 / 22). So the diagnosis is confirmed and the repair works in the direction
+predicted, but neither arm reaches HEAD.
+
+**Reverted.** HEAD stands at 0.0885 / 0.0678.
+
+### 11.3 The standing conclusion is unchanged and now has a third independent confirmation
+
+Every route into the composition peel has failed at the same place: **there is no level at the seams that
+matter.** Case 2 (the far intron) carries |Δw| = 0.294 unstranded; case 3 covers `exon|exon` seams entirely
+and every seam in a low-gDNA library. The law is right, the wiring is right, the *input* does not exist yet.
+Retry only once a boundary-level source exists — which is exactly what HANDOFF_10 §8.1 identified from the
+opposite direction (`exon|exon` boundaries: no factory within reach on 97 %, no strand when unstranded).
