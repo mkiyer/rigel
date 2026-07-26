@@ -348,11 +348,23 @@ premises above have changed, **that measurement is the single highest-value next
    claim is 47× too big — so P1d currently damps the wrong arm. `claim/obs` is the prior-free observable that
    says which arm failed, and nothing uses it as evidence.
 
-7. **P4 — the FAR level estimator is a LOOKUP, not a message.** A BP correctness violation of exactly the
-   kind P1d's per-edge form was reverted for: the left message's share depends on the RIGHT neighbour's
-   belief, so the two messages share information and the fused belief is *structurally* over-confident.
-   Boundary `z2` is 5.58 (single) / 18.89 (AMBIG), the worst outside AMBIG exons. Load-bearing (ablating
-   costs 0.0010) — **replace, do not delete.**
+7. ✅ **DONE — P4: the `_far` across-the-seam level estimator is DELETED.** It was a **100 % structural
+   data reuse**: the node it read is *identically* the source of the destination's OTHER message (verified
+   on 35,421 peel edges, every condition), so that node's evidence reached the destination twice and the
+   fuse added the two precisions as if independent. Deleting it is a **trust win as well as a correctness
+   fix** — on a held-fixed node set (HEAD's own confident quartile) boundary-single `z2` **5.58 → 2.98**,
+   boundary-AMBIG 18.89 → 15.84, exon-AMBIG 64.39 → 52.39, ALL 8.98 → **8.28**, because the declared
+   variance there was inflated **2.81×** (8.54× in the top decile). Price **+0.0007 (r0) / +0.0009 (r1)**,
+   0 better / 2 worse / 30 flat. ⚠ The plan's own proposed replacement (give the left message the RIGHT
+   message's delivered claim) was prototyped and is **illegal and worthless** — it does not remove the
+   reuse and recovers 0.000117 of 0.000696.
+
+   ⚠ **P4b — `_far` was NOT the last third-node dependence.** `_RHO_ITERS = 2`, and the second iteration's
+   reframe faces are built from the destination's **fused posterior** — i.e. from the other message.
+   Measured median `|Δlog ρ_face|` between iterations 0.0116 (stranded capOFF) → 0.1242 (unstranded capON),
+   >1 % on 52.7–79.0 % of nodes. **The solver is not BP-legal yet.** The legal way to recover what `_far`
+   supplied, if wanted: carry the peel share as a FUNCTION of the destination's state (a proper pairwise
+   potential) rather than a plugged-in point estimate.
 
 8. ⭐ **P1g — PUT TSS/TES IN THE REGION/BOUNDARY MAP.** The structural debt behind `ω_graft` (see the banner
    at the top of this file). Owner-flagged as a high priority and forthcoming. It reaches the index build

@@ -424,6 +424,9 @@ def node_sweep(
         # P1d is ON by default; `RIGEL_GLV_OFF=1` ablates it (bit-identical to the pre-P1d path).
         _glv = not os.environ.get("RIGEL_GLV_OFF")
         _glv_shrink = bool(os.environ.get("RIGEL_GLV_SHRINK"))  # partial pooling, see the law
+        # PROBE ONLY, DEFAULT OFF (P1e): the conservation SURPRISE as a damping term. `RIGEL_P1E=<scale>`;
+        # unset ⇒ the whole block is skipped and the path is bit-identical.
+        _p1e = float(os.environ.get("RIGEL_P1E") or 0.0)
         vgp_prem = vgn_prem = None  # per-ρ-iteration, in the destination's frame; set before each transport
 
         # own per-component densities + precisions — the message-free SELF-SOLVE (`node_init.build_node_init`,
@@ -598,24 +601,36 @@ def node_sweep(
             )
         )
 
-        # the node ACROSS the seam, reframed into this node's frame, and its transported log-variance
-        # (its own level seed ⊕ the M5 hop cost). Its precision is 0 wherever that node has no composition
-        # evidence of its own (``τ_own = 0 ⇒ v_own_r = ∞``), so the presence test needs no gate of its own.
-        _liA, _riA = np.asarray(left), np.asarray(right)
-        _far = []
-        for _d in (0, 1):
-            _fi = np.clip(_riA if _d == 0 else _liA, 0, n - 1)
-            _fok = ((_riA if _d == 0 else _liA) >= 0) & (rho_node0[_fi] > _EPS) & (rho_node0 > _EPS)
-            _rf = np.where(_fok, rho_node0 / np.maximum(rho_node0[_fi], _EPS), 0.0)
-            _vf = np.where(_fok, _v_nu_own[_fi] + logvar_tot + logvar_tot[_fi], np.inf)
-            _far.append(
-                (
-                    op[_fi] * _rf,
-                    on[_fi] * _rf,
-                    np.where(np.isfinite(_vf), 1.0 / np.maximum(_vf, _EPS), 0.0),
-                )
-            )
-        _far = tuple(_far)
+        # ── ⛔ THE ACROSS-THE-SEAM (`_far`) LEVEL ESTIMATOR IS DELETED — it was a BP VIOLATION ──────────
+        # It read the node ACROSS the seam and fused it into the peel share's level. That node is
+        # **IDENTICALLY the source of the destination's OTHER message** — verified structurally on 35,421
+        # peel edges, every condition — so its evidence reached the destination twice: once through its own
+        # message and once inside this one, and the fuse added the two precisions as if independent. That is
+        # the one term whose scope was a THIRD node; BP's rule is that a message into `i` may depend on
+        # anything except `i`'s message back to its own source, and never on `i`'s OTHER neighbour.
+        #
+        # Deleting it is the cheapest CORRECT option and it is also a trust win. On a held-fixed node set
+        # (HEAD's own confident quartile, so the arms are comparable): boundary-single `z2` **5.58 → 2.98**,
+        # boundary-AMBIG 18.89 → 15.84, exon-AMBIG 64.39 → 52.39, ALL 8.98 → 8.28 — because the declared
+        # variance there was inflated 2.81× (8.54× in the top decile) by the double count. Price: +0.0007
+        # (refit 0) / +0.0009 (refit 1), 0 better / 2 worse / 30 flat.
+        #
+        # ⚠ The plan's proposed replacement — give the left message the RIGHT MESSAGE's delivered claim as
+        # its far level — was prototyped and is **illegal AND worthless**: it does not remove the reuse (the
+        # far node is still the other message's source, and its relayed belief carries strictly MORE of that
+        # node's data than the raw self-solve did), and it recovers only 0.000117 of the 0.000696 price.
+        #
+        # ⚠ AND `_far` WAS NOT THE LAST THIRD-NODE DEPENDENCE. `_RHO_ITERS = 2`, and the second iteration's
+        # reframe faces are built from the destination's FUSED posterior — i.e. from the other message —
+        # so the reframe itself still reuses it (measured median |Δlog ρ_face| between iterations 0.0116
+        # stranded-capOFF to 0.1242 unstranded-capON, >1 % on 52.7–79.0 % of nodes). Deleting `_far` does
+        # NOT make the message BP-legal; it removes the largest and most direct of two violations. The
+        # remaining one is recorded in `PASS0_FINISH_PLAN.md` as P4b.
+        #
+        # The legal way to recover what `_far` supplied, if it is ever wanted back: carry the peel share as
+        # a FUNCTION of the destination's state (a proper pairwise potential ψ(x_L, x_k)) instead of a
+        # plugged-in point estimate, and let the destination's own ψ solve modulate it. No data reuse at
+        # all. Structurally available, unimplemented, unmeasured.
 
         def _peel_share(k, df, tg, tpg, tp, tn):
             """The continuing share ``w`` and ``Var(log w)`` per strand, on face ``df`` of node(s) ``k``, for a
@@ -627,9 +642,9 @@ def node_sweep(
             _A = np.asarray(tp, np.float64) + np.asarray(tn, np.float64)
             _a_p = np.where(_A > _EPS, np.asarray(tp, np.float64) / np.maximum(_A, _EPS), 0.0)
             out = []
-            for _a, _nu_o, _nu_f, _mu, _vmu in (
-                (_a_p, op[k], _far[df][0][k], _mu_f[df][0][k], _v_mu_f[df][0][k]),
-                (1.0 - _a_p, on[k], _far[df][1][k], _mu_f[df][1][k], _v_mu_f[df][1][k]),
+            for _a, _nu_o, _mu, _vmu in (
+                (_a_p, op[k], _mu_f[df][0][k], _v_mu_f[df][0][k]),
+                (1.0 - _a_p, on[k], _mu_f[df][1][k], _v_mu_f[df][1][k]),
             ):
                 # ── THE FUSE, in LINEAR density space (see `residual_level`'s return contract) ──────────
                 # Each estimator is (ρ_i, Var_i); an own/far claim carrying a delta-method log-variance v is
@@ -646,12 +661,11 @@ def node_sweep(
                     np.isfinite(_vl_m) & (_nu_ms > _EPS), 1.0 / np.maximum(_vl_s, _EPS), 0.0
                 )
                 _po = np.where(_nu_o > _EPS, _p_nu_own[k] / np.maximum(_nu_o * _nu_o, _EPS), 0.0)
-                _pf = np.where(_nu_f > _EPS, _far[df][2][k] / np.maximum(_nu_f * _nu_f, _EPS), 0.0)
-                _pt = _po + _pf + _pm
+                _pt = _po + _pm
                 _live = _pt > _EPS
                 _nu = np.where(
                     _live,
-                    (_po * _nu_o + _pf * _nu_f + _pm * _nu_ms) / np.maximum(_pt, _EPS),
+                    (_po * _nu_o + _pm * _nu_ms) / np.maximum(_pt, _EPS),
                     0.0,
                 )
                 # back to the model's currency: the fused level's effective fragment COUNT k = ρ̂²/Var̂, and
@@ -663,9 +677,9 @@ def node_sweep(
                 if _capture is not None and isinstance(k, slice):  # the vectorized combine only
                     _capture.setdefault("_lvl", []).append(  # inert: the level's provenance, per face
                         {"df": df, "nu": np.asarray(_nu).copy(), "v_nu": np.asarray(_v_nu).copy(),
-                         "po": np.asarray(_po).copy(), "pf": np.asarray(_pf).copy(),
+                         "po": np.asarray(_po).copy(),
                          "pm": np.asarray(_pm).copy(), "nu_o": np.asarray(_nu_o).copy(),
-                         "nu_f": np.asarray(_nu_f).copy(), "nu_m": np.asarray(_nu_ms).copy(),
+                         "nu_m": np.asarray(_nu_ms).copy(),
                          "mu": np.asarray(_mu).copy(), "w": np.asarray(_w).copy(),
                          "v_g": np.asarray(_vg).copy(),
                          "vl_m": np.where(np.isfinite(_vl_m), _vl_s, np.inf),
@@ -857,7 +871,6 @@ def node_sweep(
             vgp_prem, vgn_prem = _seam_pair(rho_l0, rho_r0)
         fwd = _relay(order_list, left, rho_l0, rho_r0, 0, 1)
         bwd = _relay(order_list[::-1], right, rho_r0, rho_l0, 1, 0)
-
         # ── the COMBINE: transport α (from left neighbour) + β (from right neighbour) into the node's frame with
         # the LAZY ρ_tot (two-iteration — the 2nd uses the both-message composition), fuse, ÷M_dst → the ψ solve.
         li, ri = np.asarray(left), np.asarray(right)
@@ -953,6 +966,51 @@ def node_sweep(
                         "graft": np.asarray(graft).copy(),
                     }
                 )
+            if _p1e:
+                # ── PROBE ONLY (P1e): the conservation SURPRISE as a DerSimonian–Laird damping term ───────
+                # The claim asserts S = Σ_c ρ_c·E_c fragments; the node observed M. That is an IDENTITY, and
+                # `_pin_v` restores it by fiat and DISCARDS the residual. Price the residual instead:
+                #     δ = log(M/S),  Σ = σ_cm²·11ᵀ + diag(w),  αᵀΣα = Σ_c α_c s_c   (M12's own error model)
+                #     b̂²_cons = max(0, δ² − αᵀΣα − 1/n_dst)                          (the DL between-study form)
+                # and attribute it by the conditional mean of the error given the observed violation,
+                # E[ε | αᵀε = −δ] = −δ·s/(αᵀΣα), i.e. the rank-1 inflation Σ += b̂²·s sᵀ/(αᵀΣα)², whose
+                # diagonal is Δv_c = b̂²·(s_c/αᵀΣα)². The scale multiplies b̂² (1.0 = the derived term).
+                _p3 = np.stack([tpg, tpp, tpn], axis=-1)
+                _sup = _p3 > 0.0
+                _mc = np.where(_sup, np.stack([tg, tp, tn], axis=-1), np.stack([og, op, on], axis=-1))
+                _mc = _mc * np.stack([E_g, E_r, E_r], axis=-1)
+                _S = _mc.sum(axis=-1)
+                _okc = valid & (_S > _EPS) & (M > _EPS)
+                _al = _mc / np.maximum(_S, _EPS)[..., None]
+                _vc = np.where(_sup, 1.0 / np.maximum(_p3, _EPS), 0.0)
+                _s2c = (np.where(np.isfinite(s2t), s2t, 0.0) + 1.0 / np.maximum(_n_node[src], _EPS))[
+                    ..., None
+                ]
+                _sv = np.where(_sup, _s2c + _al * np.maximum(_vc - _s2c, 0.0), 0.0)
+                _aSa = np.sum(_al * _sv, axis=-1)
+                _dlt = np.where(_okc, np.log(np.maximum(M, _EPS) / np.maximum(_S, _EPS)), 0.0)
+                _den = _aSa + 1.0 / np.maximum(_n_node, _EPS)
+                _b2 = _p1e * np.maximum(_dlt * _dlt - _den, 0.0)
+                _dvc = np.where(
+                    (_aSa > _EPS)[..., None],
+                    _b2[..., None] * (_sv / np.maximum(_aSa, _EPS)[..., None]) ** 2,
+                    0.0,
+                )
+                _dg, _dp, _dn = _dvc[..., 0], _dvc[..., 1], _dvc[..., 2]
+                tpg, tmg = tpg / (1.0 + tpg * _dg), tmg / (1.0 + tmg * _dg)
+                tpp, tmp = tpp / (1.0 + tpp * _dp), tmp / (1.0 + tmp * _dp)
+                tpn, tmn = tpn / (1.0 + tpn * _dn), tmn / (1.0 + tmn * _dn)
+                # the λ axis is the SAME rank-1 inflation projected on ∂λ = (+1, −β_p, −β_n): a common shift
+                # of both arms cannot move the split, so only the DIFFERENCE of the s's charges λ.
+                _tRs = tp + tn
+                _bp = np.where(_tRs > _EPS, tp / np.maximum(_tRs, _EPS), 0.0)
+                _sR = _bp * _sv[..., 1] + (1.0 - _bp) * _sv[..., 2]
+                _dlam = np.where(
+                    _aSa > _EPS,
+                    _b2 * ((_sv[..., 0] - _sR) / np.maximum(_aSa, _EPS)) ** 2,
+                    0.0,
+                )
+                ttau = ttau / (1.0 + ttau * _dlam)
             tg, tp, tn = _pin_v(  # the message is a claim about THIS node's mass
                 tg, tp, tn, tpg, tpp, tpn,
                 np.where(np.isfinite(s2t), s2t, 0.0) + 1.0 / np.maximum(_n_node[src], _EPS),
