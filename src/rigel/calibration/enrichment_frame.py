@@ -532,7 +532,8 @@ def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
         np.inf,
     )
     rho = np.where(ok, f_R * m_ / np.maximum(er_, _EPS), 0.0)
-    return rho, v_log, np.where(ok, rho * rho * v_log, np.inf)
+    # mask the ∞ BEFORE the product (np.where evaluates both branches: ``0·inf = nan``, the standing trap).
+    return rho, v_log, np.where(ok, rho * rho * np.where(ok, v_log, 0.0), np.inf)
 
 
 def transfer_logvar(logvar_tot_dst, logvar_tot_src, graft):
