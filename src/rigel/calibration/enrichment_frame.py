@@ -48,6 +48,7 @@ __all__ = [
     "peel_continue_share",
     "peel_share_logvar",
     "residual_level",
+    "conservation_rescale",
     "transfer_logvar",
     "message_precision",
     "mismatch_gap",
@@ -55,6 +56,13 @@ __all__ = [
 ]
 
 _EPS = 1.0e-12
+
+# Numerical-resolution knobs for :func:`conservation_rescale`'s root solve, NOT model constants: the bracket
+# doubles from ±1 so 48 expansions reach |mu| ~ 1e14, and 96 bisections then resolve it to ~1e-14 of the
+# bracket. Both are "enough to be exact in float64", not tunables — the answer is the unique root either way.
+_RESCALE_BRACKET = 48
+_RESCALE_BISECT = 96
+_EXP_LIM = 700.0  # the float64 overflow guard on exp()
 
 
 def _f(x):
@@ -534,6 +542,101 @@ def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
     rho = np.where(ok, f_R * m_ / np.maximum(er_, _EPS), 0.0)
     # mask the ∞ BEFORE the product (np.where evaluates both branches: ``0·inf = nan``, the standing trap).
     return rho, v_log, np.where(ok, rho * rho * np.where(ok, v_log, 0.0), np.inf)
+
+
+def conservation_rescale(mass, rho, eff, var, var_common, own):
+    """M12 — restore ``Σ_c ρ_c·E_c = M`` by moving each component in proportion to how badly it is known.
+
+    A claim about a node asserts a fragment count, ``S = Σ_c ρ_c·E_c``, and the node observed ``M``. That the
+    two agree is an IDENTITY, not an approximation. When they do not, the claim must be projected onto the
+    constraint — and the only question is **which component gives ground**. Today's operator (`_pin_v`) scales
+    every component by the same ``k = M/S``, which punishes a component that is right in order to accommodate
+    one that is wrong; measured on the failing arms, that is a direct spliced-RNA measurement (claimed/true
+    1.0×) being shrunk 43 % to make room for an imputed gDNA level that is 47× too large.
+
+    **The derivation.** Write the claim's error in log space, ``ρ_c = ρ_c^true·exp(ε_c)``, and take the
+    correction ``a_c`` (``ρ_c → ρ_c·exp(a_c)``) that is most likely under the error covariance ``Σ``::
+
+        minimise  aᵀΣ⁻¹a   subject to   Σ_c m_c·exp(a_c) = M ,    m_c = ρ_c·E_c
+
+    Linearising the constraint (``α_c = m_c/S``, ``δ = log(M/S)`` ⇒ ``αᵀa = δ``) and solving the Lagrangian
+    gives ``a = δ·Σα/(αᵀΣα)``. **Only the DIRECTION ``s = Σα`` comes from the error model.** The magnitude is
+    then re-solved EXACTLY along that direction — ``find μ with Σ_c m_c·exp(μ·s_c) = M`` — because the
+    constraint is an identity and deserves to hold exactly rather than to first order. ``g(μ)`` is
+    non-decreasing for ``s ≥ 0``, so the root is unique and a bracketed bisection reaches it with no step
+    control, no cap and no tuned constant.
+
+    **The error model.** Every component of a message shares the reframe and the source's own count, so those
+    are common-mode; whatever is left in a component's variance is its own::
+
+        Σ = σ_cm²·11ᵀ + diag(w) ,   w_c = max(0, v_c − σ_cm²)   ⇒   s_c = σ_cm² + α_c·w_c
+
+    **Two exact limits, and they are the justification:**
+
+    * ``w → 0`` — the only error is the shared frame ⇒ ``s_c`` is constant ⇒ every component moves by the same
+      factor. **That is exactly ``_pin_v``**: the shipped operator is the zero-independent-variance limit of
+      this one, not a different operator.
+    * ``σ_cm² → 0`` and one component's ``w_c → 0`` — that component is a MEASUREMENT, not an imputation ⇒
+      ``s_c = 0`` ⇒ it does not move at all and the others absorb the whole residual.
+
+    Capture-OFF drives the second limit (``r ≈ 1`` ⇒ ``σ_cm² ≈ 0``) exactly where the grafted spliced count
+    makes the RNA arm a measurement; capture-ON drives the first (``Var(log r)`` large). The regime switch is
+    not a rule — it is what the variances already say.
+
+    **The rank-1 composition term is deliberately NOT in Σ, and that is a result.** A source's own ``f_g``
+    error moves its components in opposite directions (``u = (f_R, −f_g)``, the shipped
+    `node_init.own_composition_logvar`), and ``uᵀα = ∂log S/∂λ`` vanishes whenever the two nodes' effective-
+    length RATIOS agree — so under a strict rank-1 model a conservation violation says nothing about
+    composition and this operator degenerates to the common rescale. The violations actually observed
+    (1.24–1.31×) far exceed the eff-length bound on composition drift (×1.04 contained, ×1.50 at a boundary
+    crossing), so the error is **component-specific**, which rank-1 forbids and ``diag(w)`` admits. It can be
+    component-specific because the RNA arm receives an independent additive measurement — the graft — that the
+    gDNA arm does not.
+
+    **"Supplied" is a statement about PRECISION** (``var`` finite), never about the density's value — the same
+    test the λ-emission gate makes. A component the claim does not supply contributes the node's OWN density
+    to the mass budget and **does not move**, which is what keeps a partial claim partial (a message carrying
+    gDNA only still delivers ``f_g < 1``); rescaling all components blindly instead regresses capture-OFF 3.6×
+    (`scratchpad/derive_2_relay_pin.py`).
+
+    Arguments are ``mass`` ``(n,)``, ``var_common`` ``(n,)``, and ``rho`` / ``eff`` / ``var`` / ``own``
+    ``(n, C)`` over the components. Returns the corrected ``rho`` ``(n, C)``. Unchanged where the claim
+    already balances, where there is no mass, or where nothing may move."""
+    M = _f(mass)
+    r, E, v, o = _f(rho), _f(eff), _f(var), _f(own)
+    vc = np.maximum(_f(var_common), 0.0)[..., None]
+    supplied = np.isfinite(v)
+    m = np.where(supplied, r, o) * E  # `_pin_v`'s partial-claim budget substitution
+    S = m.sum(axis=-1)
+    ok = (S > _EPS) & (M > _EPS)
+    alpha = m / np.maximum(S, _EPS)[..., None]
+    # the component's OWN variance: what is left once the shared part is removed. Mask the +inf BEFORE the
+    # subtraction — an unsupplied component is zeroed by `supplied` anyway, but `inf - finite` would leak.
+    w = np.maximum(np.where(supplied, v, 0.0) - vc, 0.0)
+    s = np.where(supplied, vc + alpha * w, 0.0)
+    # nothing may move (no supplied component, or a model with no uncertainty anywhere): fall back to the
+    # common factor over whatever IS supplied — the σ_cm² → 0, w → 0 corner, which is `_pin_v`.
+    dead = ~(s > _EPS).any(axis=-1)
+    s = np.where(dead[..., None] & supplied, 1.0, s)
+    tgt = np.where(ok, M, S)
+
+    def _tot(mu):
+        return np.sum(m * np.exp(np.clip(mu[..., None] * s, -_EXP_LIM, _EXP_LIM)), axis=-1)
+
+    lo = np.full(S.shape, -1.0)
+    hi = np.full(S.shape, 1.0)
+    for _ in range(_RESCALE_BRACKET):  # geometric expansion until the root is straddled
+        need_lo, need_hi = _tot(lo) > tgt, _tot(hi) < tgt
+        if not (need_lo.any() or need_hi.any()):
+            break
+        lo = np.where(need_lo, lo * 2.0, lo)
+        hi = np.where(need_hi, hi * 2.0, hi)
+    for _ in range(_RESCALE_BISECT):  # bisection: g is non-decreasing in mu, so this is exact
+        mid = 0.5 * (lo + hi)
+        up = _tot(mid) < tgt
+        lo, hi = np.where(up, mid, lo), np.where(up, hi, mid)
+    mu = np.where(ok, 0.5 * (lo + hi), 0.0)
+    return r * np.exp(np.clip(mu[..., None] * s, -_EXP_LIM, _EXP_LIM))
 
 
 def transfer_logvar(logvar_tot_dst, logvar_tot_src, graft):

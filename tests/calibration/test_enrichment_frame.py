@@ -32,6 +32,7 @@ from rigel.calibration.enrichment_frame import (
     mismatch_gap,
     peel_continue_share,
     peel_rna_logvar,
+    conservation_rescale,
     peel_share_logvar,
     residual_level,
     reframe_density,
@@ -635,3 +636,114 @@ def test_residual_level_is_monotone_in_the_gdna_claim():
         )
         assert float(rho) <= prev + 1e-12
         prev = float(rho)
+
+
+# ── M12: the conservation rescale — restore Σ_c ρ_c·E_c = M by moving what is least known ────────────────
+
+_CR_RHO = np.array([[2.0, 3.0, 1.0], [0.4, 12.0, 0.0], [55.0, 0.02, 0.03]])
+_CR_EFF = np.array([[2100.0, 1900.0, 1900.0], [110.0, 180.0, 180.0], [9000.0, 8800.0, 8800.0]])
+_CR_M = (_CR_RHO * _CR_EFF).sum(axis=1) * np.array([0.7, 1.4, 1.0])  # 0.7x under, 1.4x over, balanced
+
+
+def _cr_total(rho):
+    return (rho * _CR_EFF).sum(axis=1)
+
+
+def test_conservation_rescale_common_limit_is_the_shipped_pin():
+    """M12 limit 1 — when the ONLY error is the shared frame (``w = 0``, i.e. every component's variance is
+    the common one) the direction is constant across components, so every component moves by the same factor
+    ``k = M/S``. That is exactly what ``_pin_v`` does: the shipped operator is the zero-independent-variance
+    limit of this one, not a different operator. Nothing is being replaced."""
+    v = np.full_like(_CR_RHO, 0.05)
+    out = conservation_rescale(_CR_M, _CR_RHO, _CR_EFF, v, np.full(3, 0.05), _CR_RHO)
+    k = _CR_M / _cr_total(_CR_RHO)
+    assert out == pytest.approx(_CR_RHO * k[:, None], rel=1e-12)
+
+
+def test_conservation_rescale_certain_component_does_not_move():
+    """M12 limit 2 — a component with NO independent variance is a MEASUREMENT, not an imputation, so it must
+    not give any ground: the others absorb the entire residual. This is the limit that matters, because the
+    grafted spliced count makes the RNA arm a measurement exactly where pass-0 is confidently wrong."""
+    v = np.array([[0.5, 0.0, 0.5], [0.3, 0.0, 0.3], [0.9, 0.0, 0.9]])
+    out = conservation_rescale(_CR_M, _CR_RHO, _CR_EFF, v, np.zeros(3), _CR_RHO)
+    assert out[:, 1] == pytest.approx(_CR_RHO[:, 1], rel=1e-12)  # untouched
+    assert _cr_total(out) == pytest.approx(_CR_M, rel=1e-10)  # ...and the identity still holds
+
+
+def test_conservation_rescale_restores_the_identity_exactly():
+    """M12 — the constraint is an IDENTITY, so it is imposed exactly rather than to first order: the
+    magnitude is re-solved along the direction the error model chose. Checked over six orders of magnitude of
+    density and of violation, because the linearised form would drift badly at the extremes."""
+    rng = np.random.default_rng(20260726)
+    for scale in (1e-3, 1.0, 1e3):
+        rho = rng.lognormal(0.0, 2.0, size=(64, 3)) * scale
+        eff = rng.uniform(50.0, 9000.0, size=(64, 3))
+        M = (rho * eff).sum(axis=1) * rng.uniform(0.1, 8.0, size=64)
+        v = rng.lognormal(-2.0, 1.5, size=(64, 3))
+        out = conservation_rescale(M, rho, eff, v, rng.uniform(0.0, 0.1, 64), rho)
+        assert (out * eff).sum(axis=1) == pytest.approx(M, rel=1e-10)
+
+
+def test_conservation_rescale_keeps_a_partial_claim_partial():
+    """M12 — "supplied" is a statement about PRECISION, never about the density's value. An unsupplied
+    component (``var = +inf``) contributes the NODE'S OWN density to the mass budget and does not move, so a
+    message carrying gDNA only still delivers ``f_g < 1``. Rescaling all components blindly instead regresses
+    capture-OFF 3.6x (`scratchpad/derive_2_relay_pin.py`) — this is the load-bearing semantic."""
+    rho = np.array([[3.0, 0.0, 0.0]])
+    own = np.array([[1.0, 4.0, 2.0]])
+    eff = np.array([[2000.0, 1800.0, 1800.0]])
+    M = np.array([20000.0])
+    v = np.array([[0.2, np.inf, np.inf]])
+    out = conservation_rescale(M, rho, eff, v, np.zeros(1), own)
+    assert out[0, 1] == 0.0 and out[0, 2] == 0.0  # not supplied ⇒ not moved, still absent
+    # the budget used the node's OWN density for the two unsupplied arms, so the gDNA arm absorbs only the
+    # residual against them — it is NOT renormalised onto the whole mass:
+    assert out[0, 0] * eff[0, 0] == pytest.approx(M[0] - (own[0, 1] + own[0, 2]) * eff[0, 1], rel=1e-10)
+    assert not np.isnan(out).any()
+
+
+def test_conservation_rescale_is_idempotent_when_it_already_balances():
+    """M12 — a claim that already accounts for exactly the observed mass is left alone (``μ = 0``), and
+    applying the operator twice changes nothing further."""
+    rho = np.array([[2.0, 3.0, 1.0]])
+    eff = np.array([[2100.0, 1900.0, 1900.0]])
+    M = _f_total = (rho * eff).sum(axis=1)
+    v = np.array([[0.4, 0.01, 0.4]])
+    once = conservation_rescale(M, rho, eff, v, np.zeros(1), rho)
+    assert once == pytest.approx(rho, rel=1e-10)
+    assert conservation_rescale(M, once, eff, v, np.zeros(1), rho) == pytest.approx(once, rel=1e-12)
+
+
+def test_conservation_rescale_is_monotone_in_the_violation():
+    """M12 — a bigger violation produces a bigger correction, in the same direction, for every component.
+    The two closed-form branches (bracket expansion and the dead/fallback corner) are where this could break."""
+    rho = np.array([[2.0, 3.0, 1.0]])
+    eff = np.array([[2100.0, 1900.0, 1900.0]])
+    v = np.array([[0.4, 0.02, 0.4]])
+    S = (rho * eff).sum()
+    prev = None
+    for f in (0.25, 0.5, 0.9, 1.0, 1.2, 2.0, 6.0):
+        out = conservation_rescale(np.array([S * f]), rho, eff, v, np.zeros(1), rho)[0]
+        if prev is not None:
+            assert np.all(out >= prev - 1e-12)
+        prev = out
+
+
+def test_conservation_rescale_degenerate_inputs_are_safe():
+    """M12 — no nan, no inf, and no silent identity violation at any degenerate input: zero mass, a zero
+    claim, a single supplied component, and a model that admits no uncertainty at all (in which case there is
+    nothing to apportion and the common factor is the honest fallback)."""
+    eff = np.array([[2100.0, 1900.0, 1900.0]])
+    cases = [
+        (np.array([0.0]), np.array([[2.0, 3.0, 1.0]]), np.array([[0.1, 0.1, 0.1]])),  # no mass
+        (np.array([5000.0]), np.zeros((1, 3)), np.array([[0.1, 0.1, 0.1]])),  # no claim
+        (np.array([5000.0]), np.array([[2.0, 0.0, 0.0]]), np.array([[0.1, np.inf, np.inf]])),  # one arm
+        (np.array([5000.0]), np.array([[2.0, 3.0, 1.0]]), np.zeros((1, 3))),  # no uncertainty anywhere
+    ]
+    for M, rho, v in cases:
+        out = conservation_rescale(M, rho, eff, v, np.zeros(1), rho)
+        assert np.isfinite(out).all()
+    # the no-uncertainty corner must still balance, via the common-factor fallback
+    M, rho, v = cases[3]
+    out = conservation_rescale(M, rho, eff, v, np.zeros(1), rho)
+    assert (out * eff).sum() == pytest.approx(M[0], rel=1e-10)
