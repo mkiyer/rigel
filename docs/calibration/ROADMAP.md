@@ -33,23 +33,29 @@
 > prior-free source is the neighbours' per-strand RNA imputation — already carried as `theta_imp`, and
 > measured **nearly inert** (0.1444 → 0.1417 when ablated).
 >
-> **⭐ CURRENT: the BOUNDARY work — the composition peel is LANDED (2026-07-26).** Suite **0.0895 (refit=0) /
-> 0.0693 (refit=1)**. Steps 1–5 of `peel_by_composition_plan.md` are implemented, the `mrna_active` structural
-> gate is REMOVED, and the standing blocker — *"there is no LEVEL at the seams that matter"* — is resolved by a
-> third source that exists everywhere: **M11 `residual_level`**, the node's own observed mass closed against an
-> imputed gDNA **density**. That is the generic density deconvolution (the intron factory's own primitive) with
-> the gDNA prior supplied by a neighbour instead of the intergenic pool, so it reaches `exon|exon` seams (no
-> factory on 97 %) and every seam of a low-gDNA library. Two structural changes made it work: **there is no
-> level PRECEDENCE any more** — three independent estimators (own / across-the-seam / mass-identity) FUSE by
-> inverse variance, so the "no evidence ⇒ silence" arm that wrecked the low-gDNA libraries simply does not
-> exist — and **the fuse is done in LINEAR density space**, because a log-space fuse of positive modes cannot
-> reach zero and therefore cannot hear a factory-solved intron saying "essentially no RNA here".
-> The arms the previous attempt destroyed now BEAT the old HEAD (`gdna1_capON` 0.0689 → 0.0636, `verystrong`
-> 4 better / 0 worse), and **every large node class is more honest**: suite `errQ1conf` 14.4 % → 12.1 %,
-> boundary-single error 692 k → 664 k *with* `errQ1conf` 6.6 % → 5.3 %. **Read
-> `SESSION_2026_07_26_HANDOFF_12.md` before touching any of it** — §5 localizes the whole remaining deficit to
-> `gDNA-rich × capture-ON` and names the exact unpriced quantity (the exon↔boundary probe-placement step,
-> which `composition_logvar` does not see and which M11 is the solver's first consumer to be exposed to).
+> **⭐ CURRENT (2026-07-26): the composition peel and the MESSAGE PACKET are LANDED; the next task is P1d.**
+> Suite **0.0855 (refit=0) / 0.0671 (refit=1)**, from 0.0885 / 0.0678. **Read
+> `SESSION_2026_07_26_HANDOFF_13.md` — it is the LIVE handoff and has the run instructions.**
+>
+> **The frame for everything that remains:** the error MASS is close to its prior-free ceiling (HANDOFF_10 §3:
+> 67–75 % of it is premise-limited, and ×10 on every precision moves nothing), but the **CALIBRATION of that
+> error is not**. Confidently-wrong mass fell 14.4 % → **9.9 %** this session (1,777,658 → 1,186,552 reads),
+> yet `z2` inside the confident quartile is still **8.4 on single-strand exons, 92.1 on AMBIG exons, 15.5
+> overall** — introns (1.5) are the only honest class. A node at `z2 = 9` gets nine times too much weight in a
+> hyperprior fit that trusts declared precision. **So pass-0 is nearly done on mwae and is not done on trust,
+> and the remaining work is chosen for its effect on `z2`.**
+>
+> What landed: **M11 `residual_level`** (the seam's RNA level from the node's own mass closed against an
+> imputed gDNA density — the source that resolves "there is no LEVEL at the seams that matter"), the
+> **three-way level FUSE in LINEAR space** (a log fuse cannot represent "confidently near zero"), the
+> `mrna_active` structural gate **removed**, **M12 `conservation_rescale`** (law kept, path superseded), and
+> **the MESSAGE PACKET** — λ and θ carried explicitly and fused by their **own** precisions rather than read
+> back off the density fuse. The packet alone drove 0.0889 → 0.0855 and cut AMBIG-exon confidently-wrong 45 %.
+>
+> **NEXT: P1d, the graft's extrapolation variance** — derived, sized and with a working estimator; only its
+> *shape* is open. A junction measured over ~100 bp is used as the RNA density of a ~2,100 bp exon and is
+> charged nothing for it (M8 charges only the capture step, which is identically 0 off-capture). Pricing it is
+> worth **42 % of all confidently-wrong mass** and takes exon-single `z2` from 8.4 to **1.2 — honest**.
 >
 > **⭐ THE PASS-0 / PHASE-2 BOUNDARY IS NOW MEASURED (`SESSION_2026_07_25_HANDOFF_10.md`).** Suite state of
 > play: **12.56 M of 116.7 M node-attributed fragments misassigned (10.8 %)**; unstranded carries **84 %**,

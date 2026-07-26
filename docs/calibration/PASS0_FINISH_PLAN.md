@@ -1,6 +1,7 @@
 # Finishing pass-0 — the prioritized work list
 
-**Owner-agreed 2026-07-26. Order of work: P0 → P2 → P1, then the rest.** Read `ROADMAP.md` first, then
+**Owner-agreed 2026-07-26. Live status in the table below; the run instructions are in
+`SESSION_2026_07_26_HANDOFF_13.md` §6.** Read `ROADMAP.md` first, then
 `SESSION_2026_07_26_HANDOFF_12.md` (the live handoff), then this.
 
 This document exists so the set does not get lost between sessions. **Update the status column in place**;
