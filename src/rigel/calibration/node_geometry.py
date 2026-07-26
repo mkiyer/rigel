@@ -361,11 +361,6 @@ def node_total_density(chain: NodeChain, geometry: NodeGeometry, f_g):
     return rho_unspl, rho_unspl + rho_spliced
 
 
-EV_LOCKED = 0  # structurally pure gDNA — no admissible RNA strand (intergenic, a gene-boundary seam).
-EV_OWN = 1  # the node has its OWN composition evidence (τ_λ > 0: the strand deconv or the intron factory).
-EV_IMPUTED = 2  # solvable, but τ_λ = 0 — the composition is carried ENTIRELY by neighbours' messages.
-
-
 @dataclass(frozen=True, slots=True)
 class NodeBelief:
     """Per-node solved state on the chain: the composition pie `(f_pos, f_neg, f_g)` over the node's UNSPLICED
@@ -378,28 +373,7 @@ class NodeBelief:
     communication noise, so an unsure node speaks quietly (Phase 2). The composition is stored as a FRACTION
     (the face-invariant quantity — a boundary has two faces but one composition); density `ρ=f·M_face/E_face`
     is the message currency (computed inline in `bp_solver.node_sweep`), mass `m=f·M_face` (`NodeDeconv`) the
-    output.
-**The `evidence` classes.**
-
-    Measured over the 32-condition suite at ``refit=0`` — the separation is why the flag exists:
-
-    ===========  =========  ==========  ========  ==========
-    class        nodes      mass share  mwae      error share
-    ===========  =========  ==========  ========  ==========
-    ``LOCKED``   11,804     16.4 %      0.0000    0.0 %
-    ``OWN``      26,813     29.6 %      0.0229    8.1 %
-    ``IMPUTED``  35,877     54.1 %      0.1430    **91.9 %**
-    ===========  =========  ==========  ========  ==========
-
-    ``IMPUTED`` carries **92 % of all error on 54 % of the mass**, at **6.2×** ``OWN``'s error rate.
-
-    ⚠ **This is deliberately NOT wired into any selection yet.** Whether to drop ``IMPUTED`` nodes from the
-    gDNA hyperprior fit is an open question with a real downside: a node that reports a genuine ENRICHED mode
-    could be exactly the one excluded, and the prior would lose the mode it most needs. There is also direct
-    evidence that exclusion can backfire — ``solve_gate_design.md`` records a stronger version of the same
-    idea (skip unidentified nodes, defer to the prior) as derived, implemented and **empirically refuted**
-    (+0.010 at refit=0, +0.025 at refit=1): the prior resolves an imperfectly-solved node better than a
-    deferred ``f_g = 1``. The flag is exposed so that question can be **measured**; it decides nothing."""
+    output."""
 
     f_pos: np.ndarray
     f_neg: np.ndarray
@@ -407,12 +381,6 @@ class NodeBelief:
     var_pos: np.ndarray
     var_neg: np.ndarray
     var_gdna: np.ndarray
-    # ⭐ WHERE THIS NODE'S COMPOSITION CAME FROM — the EVIDENCE class (`EV_*` below). ``None`` on the
-    # signature-binary init (nothing has been solved yet); set by every `bp_solver.node_sweep`. It exists so
-    # a consumer — above all the gDNA hyperprior fit — can tell a MEASURED node from an IMPUTED one, which
-    # the composition and its variance do NOT say on their own: an imputed node can arrive at a confident
-    # wrong answer, and that is the poison path into Phase 2.
-    evidence: "np.ndarray | None" = None
 
 
 # ---------------------------------------------------------------------------
@@ -641,7 +609,7 @@ def init_beliefs(
     )
     return NodeBelief(
         f_pos=f_pos, f_neg=f_neg, f_g=f_g, var_pos=var_p, var_neg=var_n, var_gdna=var_g
-    )  # `evidence` stays None — nothing has been solved yet
+    )
 
 
 # ---------------------------------------------------------------------------

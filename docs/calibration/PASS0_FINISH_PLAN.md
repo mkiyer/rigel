@@ -25,7 +25,7 @@ do not start a competing list.
 | P6 | fragment length as a FOURTH information source — **gated** | scoping only |
 | **P1g** | ⭐ **put TSS/TES in the region/boundary map — THE STRUCTURAL DEBT BEHIND `ω_graft`** (owner: high priority, forthcoming). `ROADMAP.md` §6 deferred it as "expected to be low-impact"; it is measured at **62–72 % of the graft's premise error** and a free annotation bit splits ω̂ **≥30×**. P1d prices it blind through the two-seam gap; naming it directly would price it exactly | ▶ **UN-DEFERRED by measurement** |
 | **P-hold** | hold out / reset the nodes not used to fit the hyperprior | ⛔ **MEASURED UNNECESSARY.** The refit *already resets* (`calibrate.py:420`), and holding the excluded half out moves the fit substrate by **±0.0006** — there is no contamination worth removing. A stronger version of the same idea (skip unidentified nodes, defer to the prior) was already derived, implemented and **empirically refuted** in `solve_gate_design.md`: +0.010 (r0) / +0.025 (r1) |
-| **P-solv** | a clean solvability signal, exposed to the prior fit | ✅ **LANDED** 2026-07-26 as `NodeBelief.evidence` (`EV_LOCKED` / `EV_OWN` / `EV_IMPUTED`), behaviour-neutral (32/32), 3 unit tests. **Exposed, NOT acted on** — exclusion deliberately deferred. Owner: *"a solvable flag is helpful for now"* — expose it; the EXCLUSION question (which nodes to drop from the fit) is deliberately deferred, because dropping a node that reports a real enriched mode could hurt badly. Evidence: `τ_own > 0` separates hard: 29.6 % of nodes at mwae **0.0227** (7.7 % of error mass) vs 70.4 % at **0.1143** (92.3 %). A composite prior-free predicate splits 45.6 % @ 0.0147 vs 54.4 % @ 0.1480 — **10.4× on unstranded**. ⚠ The existing `cap["solvable"]` flag agrees with it only **45.7 %** of the time, so it is not that predicate |
+| **P-solv** | ⛔ **WITHDRAWN as posed** — "solvable" is not one predicate, and `τ_own` is not it | ⛔ 2026-07-26. Landed as `NodeBelief.evidence` and **reverted the same day**: `τ_own == 0` is largely a *library* property (it is true of ALL unstranded data), while the owner's "solvable" is a *structural* one. See §P-solv |
 | — | **THEN** the re-solve + a ship candidate | the hyperprior fit itself is no longer blocked — see P2a |
 
 ---
@@ -436,3 +436,45 @@ The size of the mistake is §P1b. The *confidence* attached to it is the precisi
 Poisson precision (up to 2,025 on one node) as a claim about a whole exon. The owner's framing is exact: **a
 spliced measurement taken over a ~100 bp junction window is being asked to speak for a ~2,100 bp exon — a 12–21×
 extrapolation — and it is charged no transfer variance for that at all.**
+
+
+## ⛔ P-solv — WITHDRAWN AS POSED. What "solvable" actually means (owner, 2026-07-26)
+
+I built a three-way `NodeBelief.evidence` flag keyed on `τ_own > 0` and **reverted it the same day**, because
+it names the wrong axis. Recording the correction so the next attempt targets the right one.
+
+> *"'tau own' or 'own precision' is only for self-solve nodes that don't depend on anything. That's not what
+> I mean by 'solvable'. Generally, I mean AMBIGUOUS nodes — overlapping transcripts on opposite strands,
+> where we have both RNA+ and RNA− active. A gDNA hyperprior gives a huge boost to those; that was the
+> concept of solvable. Single-exon transcripts are challenging because there is no direct RNA measurement
+> (no splice junction), so RNA must be inferred from gDNA, and gDNA is only measured at boundaries. A gDNA
+> prior would be helpful there. Overall, the extensive pass-0 work has changed the meaning of 'solvable' —
+> no longer a binary gate. It can mean different things in different contexts. We will need to experiment
+> with the hyperprior and see what the best fit looks like."*
+
+**Why `τ_own` is the wrong axis.** `τ_own = 0` on ALL unstranded data regardless of a node's structure — it
+is a property of `κ ≈ ½`, i.e. of the *library*. The owner's "solvable" is a property of the *annotation*:
+which nodes are structurally short of the information the prior supplies. The two populations overlap but
+are not the same thing, and only the structural one survives a change of library.
+
+**The two structural populations the hyperprior is for:**
+
+| population | why the prior-free pass cannot resolve it | already available? |
+|---|---|---|
+| **AMBIG** — opposite-strand overlap, RNA+ and RNA− both active | the strand likelihood constrains only the TILT, never `f_g` (memory `strand_likelihood_constrains_tilt_not_fg`) | ✅ **yes** — `statics.free_pos & free_neg` |
+| **single-exon transcripts** | no splice junction ⇒ **no direct RNA measurement at all**; RNA must be inferred from gDNA, and gDNA is only measured at boundaries | ⚠ **not flagged.** Structurally observable (no spliced flux on either flank) but nothing computes it. Related: memory `nascent_rna_identifiability_intron_required` — single-exon ⇒ mature ≡ nascent |
+
+**And the framing has changed: solvability is no longer a binary gate.** It is context-dependent — a node can
+be unsolvable for `f_g` and perfectly solvable for the tilt, or resolvable at one gDNA depth and not another.
+**Do not build another binary flag.** The right sequence is to experiment with the hyperprior and let the
+best fit tell us which nodes it wants; the flag, if any, follows that.
+
+**What the reverted work still established** (kept because it is measured, and it is a real fact about where
+the error lives — just not the definition of "solvable"):
+
+| class | nodes | mass share | mwae | share of ALL error |
+|---|---|---|---|---|
+| structurally locked (no admissible RNA strand) | 11,804 | 16.4 % | **0.0000** | 0.0 % |
+| `τ_own > 0` | 26,813 | 29.6 % | **0.0229** | 8.1 % |
+| `τ_own = 0`, solvable | 35,877 | 54.1 % | **0.1430** | **91.9 %** |
+

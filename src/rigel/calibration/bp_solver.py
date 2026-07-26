@@ -56,9 +56,6 @@ from .node_geometry import (
     NodeStatics,
     build_node_geometry,
     build_node_statics,
-    EV_IMPUTED,
-    EV_LOCKED,
-    EV_OWN,
     init_beliefs,
     node_global_geometry,
     node_total_density,
@@ -1428,17 +1425,6 @@ def node_sweep(
         var_pos=var_pos,
         var_neg=var_neg,
         var_gdna=var_g,
-        # ⭐ WHERE EACH NODE'S ANSWER CAME FROM. The composition and its variance do not say this on their
-        # own — an IMPUTED node can arrive at a confident wrong answer, which is exactly the poison path
-        # into the hyperprior. Three structural classes, no threshold beyond `τ_λ > 0` vs `= 0`:
-        #   LOCKED  — no admissible RNA strand ⇒ pure gDNA by construction. EXACT (measured mwae 0.0000).
-        #   OWN     — has its own composition evidence (strand deconv or the intron factory). mwae 0.0229.
-        #   IMPUTED — solvable but τ_λ = 0 ⇒ carried entirely by neighbours. mwae 0.1430, and it is
-        #             **91.9 % of all suite error on 54.1 % of the mass** — 6.2× OWN's rate.
-        # Exposed, NOT acted on: see `NodeBelief`'s docstring for why exclusion is deliberately deferred.
-        evidence=np.where(
-            ~solvable, EV_LOCKED, np.where(np.asarray(_ni.tau_lam, np.float64) > 0.0, EV_OWN, EV_IMPUTED)
-        ).astype(np.int8),
     )
 
 
