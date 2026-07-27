@@ -63,7 +63,6 @@ def index_command(args: argparse.Namespace) -> int:
         collapse_duplicate_transcripts=args.collapse_duplicate_transcripts,
         nrna_tolerance=args.nrna_tolerance,
         alignable_zarr_path=(Path(args.alignable_zarr) if args.alignable_zarr else None),
-        mappability_read_length=args.mappability_read_length,
         splice_blacklist_min_count=args.splice_blacklist_min_count,
     )
     return 0
@@ -1148,18 +1147,6 @@ def build_parser() -> argparse.ArgumentParser:
             "Default 2 matches the historical alignable threshold. Lower values "
             "(e.g. 1) admit more singleton artifacts; higher values keep only "
             "the most reproducible. Ignored when --no-mappability is set."
-        ),
-    )
-    idx.add_argument(
-        "--mappability-read-length",
-        dest="mappability_read_length",
-        type=int,
-        default=100,
-        help=(
-            "(Advanced) Read-length bin to query in the alignable Zarr store "
-            "when computing per-region mappable effective length. Must match "
-            "one of the bins the store was built with (commonly 50, 75, 100, "
-            "125). Default 100. Ignored when --no-mappability is set."
         ),
     )
     idx.set_defaults(func=index_command)

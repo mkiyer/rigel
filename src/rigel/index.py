@@ -845,7 +845,6 @@ class TranscriptIndex:
         collapse_duplicate_transcripts: bool = False,
         nrna_tolerance: int = NRNA_MERGE_TOLERANCE,
         alignable_zarr_path: str | Path | None = None,
-        mappability_read_length: int = 100,
         splice_blacklist_min_count: int = 2,
     ) -> None:
         """Build the rigel reference index and write to disk.
@@ -882,10 +881,6 @@ class TranscriptIndex:
             ``splice_blacklist.feather`` in the index.  When ``None``,
             no blacklist is written.  (Per-region mappability was
             removed in v0.5.0; SRD calibration does not consume it.)
-        mappability_read_length : int
-            Read-length bin to query in the alignable store when
-            building the splice-artifact blacklist.  Default 100.
-            Ignored when ``alignable_zarr_path`` is None.
         splice_blacklist_min_count : int
             Minimum per-row count for a (chrom, intron, read_length)
             artifact to enter the blacklist.  Default ``2``.

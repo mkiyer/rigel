@@ -140,10 +140,5 @@ class StrandSummary:
             n_opposite=int(model.n_opposite),
         )
 
-    @classmethod
-    def uninformative(cls) -> "StrandSummary":
-        """Return the no-strand-information summary."""
-        return cls(p_r1_sense=0.5, n_observations=0)
-
 
 __all__ = ["StrandSummary", "STRAND_CONTRAST_NUMERICAL_FLOOR", "strand_contrast_identifiable"]
