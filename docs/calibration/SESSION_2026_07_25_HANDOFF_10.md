@@ -1,6 +1,13 @@
+> ## ⛔ SUPERSEDED — THIS IS NOT THE LIVE HANDOFF
+> The live handoff is **`SESSION_2026_07_26_HANDOFF_14.md`**; the entry point is **`ROADMAP.md`**.
+> This file is kept as HISTORY — what was tried, measured and refuted. Its numbers describe the
+> code as it was on its own date and many are now superseded. **Do not act on it without checking
+> the live handoff first.** Its own DO-NOT-RE-RUN findings (if it has any) remain HERE and still
+> stand — HANDOFF_14 §3 indexes which files carry them.
+
 # Session handoff — the largest-scenario deep dive + the INTRON fix (landed)
 
-**LIVE handoff. Read `docs/calibration/ROADMAP.md` first, then this.** Supersedes
+*(this file's own original header — superseded)* Supersedes
 `SESSION_2026_07_25_HANDOFF_9.md` (still the AMBIG record — read its §0b). Do NOT read `archive/`.
 Date: 2026-07-25. Branch `calib-ambig-init-wip`. **HEAD now 0.0898 refit=0 / 0.0697 refit=1** (M8 +
 the intron λ gate of §6, which is the one thing LANDED this session).

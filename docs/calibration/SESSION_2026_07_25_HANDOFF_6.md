@@ -1,6 +1,13 @@
+> ## ⛔ SUPERSEDED — THIS IS NOT THE LIVE HANDOFF
+> The live handoff is **`SESSION_2026_07_26_HANDOFF_14.md`**; the entry point is **`ROADMAP.md`**.
+> This file is kept as HISTORY — what was tried, measured and refuted. Its numbers describe the
+> code as it was on its own date and many are now superseded. **Do not act on it without checking
+> the live handoff first.** Its own DO-NOT-RE-RUN findings (if it has any) remain HERE and still
+> stand — HANDOFF_14 §3 indexes which files carry them.
+
 # Session handoff — the message-variance model is DONE; Phase 2 (the gDNA hyperprior) is the blocker
 
-**Read `docs/calibration/ROADMAP.md` first, then this. This is the LIVE handoff** — it supersedes
+*(this file's own original header — superseded)* — it supersedes
 `SESSION_2026_07_24_HANDOFF_5.md` (whose §4 task is now complete; keep it and `..._HANDOFF_4.md` for the arc).
 Do NOT read `docs/calibration/archive/`. Date: 2026-07-25.
 

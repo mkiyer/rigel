@@ -109,7 +109,18 @@ at refit=1 `unstranded × capON` −0.0017 (3 better / **0 worse**). Arms in `/t
 | `RIGEL_XVAR` as a size estimate | It reaches only `_transport`, not `_relay` — 3,636 of 5,454 graft firings (67 %, **not** the 50 % first computed: `_RHO_ITERS = 2` and `_transport` runs 4× per sweep while `_relay` runs 2×) |
 | "M7 is inert at graft destinations" | **False.** M7 is live at 62–75 % of them and fires at 21–50 %, including on unstranded data. §2.2's `max()` no-double-count argument is untouched; only the belt-and-braces sentence was wrong |
 
-Everything in HANDOFF_13 §5, HANDOFF_11 §8 and HANDOFF_10 §4/§9.2 still holds.
+**Earlier sessions' do-not-re-run tables still stand and are NOT reproduced here.** Each lives in its own
+(now `⛔ SUPERSEDED`-stamped) handoff — those files are kept for exactly this content:
+
+| file | what its do-not-re-run table covers |
+|---|---|
+| `SESSION_2026_07_26_HANDOFF_13.md` §5 | the composition-peel / message-packet dead ends: the conservation rescale at the combine and its common-factor and weighted variants, the per-message λ rescale, the node-frame gDNA correction |
+| `SESSION_2026_07_25_HANDOFF_11.md` §8 | the pre-peel arms |
+| `SESSION_2026_07_25_HANDOFF_10.md` §4, §9.2 | the left/right message gap as a DL second study; the premise-limited ceiling |
+| `SESSION_2026_07_25_HANDOFF_9.md` | the two AMBIG arms (both neutral, both reverted) and the retracted plug-in `d̂` |
+| `SESSION_2026_07_25_HANDOFF_6.md` §3 | the Phase-2 λ-curvature measurement (⚠ its premises have since changed — `ROADMAP.md` §4) |
+
+Also standing: `solve_gate_design.md` — the solve gate, derived, implemented and empirically refuted.
 
 ## 4. ▶ NEXT — and the order changed, on two measurements made after P1d landed
 

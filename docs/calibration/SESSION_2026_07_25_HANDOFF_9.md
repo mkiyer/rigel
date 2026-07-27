@@ -1,6 +1,13 @@
+> ## ⛔ SUPERSEDED — THIS IS NOT THE LIVE HANDOFF
+> The live handoff is **`SESSION_2026_07_26_HANDOFF_14.md`**; the entry point is **`ROADMAP.md`**.
+> This file is kept as HISTORY — what was tried, measured and refuted. Its numbers describe the
+> code as it was on its own date and many are now superseded. **Do not act on it without checking
+> the live handoff first.** Its own DO-NOT-RE-RUN findings (if it has any) remain HERE and still
+> stand — HANDOFF_14 §3 indexes which files carry them.
+
 # Session handoff — the AMBIG study (⛔ §2–§4 CORRECTED by §0b — read §0b FIRST)
 
-**This is the LIVE handoff. Read `docs/calibration/ROADMAP.md` first, then this.** It supersedes
+*(this file's own original header — superseded)* It supersedes
 `SESSION_2026_07_25_HANDOFF_8.md` (whose §6 "next study: AMBIG" is this file). Do NOT read
 `docs/calibration/archive/`. Date: 2026-07-25. Branch `calib-ambig-init-wip`, HEAD `b0955493` (M8).
 

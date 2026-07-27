@@ -1,3 +1,10 @@
+> ## ⛔ SUPERSEDED — THIS IS NOT THE LIVE HANDOFF
+> The live handoff is **`SESSION_2026_07_26_HANDOFF_14.md`**; the entry point is **`ROADMAP.md`**.
+> This file is kept as HISTORY — what was tried, measured and refuted. Its numbers describe the
+> code as it was on its own date and many are now superseded. **Do not act on it without checking
+> the live handoff first.** Its own DO-NOT-RE-RUN findings (if it has any) remain HERE and still
+> stand — HANDOFF_14 §3 indexes which files carry them.
+
 # Session handoff — 2026-07-24 (session 2: convergence + the variance foundation)
 
 Read `ROADMAP.md` first, then this. **Supersedes `SESSION_2026_07_24_HANDOFF.md`** (session 1).

@@ -1,6 +1,13 @@
+> ## ⛔ SUPERSEDED — THIS IS NOT THE LIVE HANDOFF
+> The live handoff is **`SESSION_2026_07_26_HANDOFF_14.md`**; the entry point is **`ROADMAP.md`**.
+> This file is kept as HISTORY — what was tried, measured and refuted. Its numbers describe the
+> code as it was on its own date and many are now superseded. **Do not act on it without checking
+> the live handoff first.** Its own DO-NOT-RE-RUN findings (if it has any) remain HERE and still
+> stand — HANDOFF_14 §3 indexes which files carry them.
+
 # Session handoff — the composition peel LANDS: the level is a fuse of three estimators, not a precedence
 
-**This is the LIVE handoff. START HERE.** Date: 2026-07-26. Branch `calib-ambig-init-wip`.
+*(this file's own original header — superseded)* Date: 2026-07-26. Branch `calib-ambig-init-wip`.
 Supersedes `SESSION_2026_07_25_HANDOFF_11.md` (its §5/§6/§7 questions are all answered below).
 Gates all green: `pytest tests/ -q` **1241 pass / 2 xfail / 2 xpass**, `ruff check src/ tests/ scripts/` clean,
 `message_variance_mc.py` **0 failures over M1–M11**, goldens regenerated.

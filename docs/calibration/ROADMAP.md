@@ -1,6 +1,6 @@
 # Calibration ROADMAP — status, architecture, and the path to production
 
-**This is the single entry point for calibration work. Read it first.** Last updated: 2026-07-25.
+**This is the single entry point for calibration work. Read it first.** Last updated: 2026-07-26.
 
 > **⭐ ORDER OF WORK (owner, 2026-07-25): the pass-0 SOLVER must be CORRECT before the gDNA hyperprior fit.**
 > The **single-strand × capture study is DONE** — see `SESSION_2026_07_25_HANDOFF_8.md`.
@@ -49,7 +49,7 @@
 > What landed: **M11 `residual_level`** (the seam's RNA level from the node's own mass closed against an
 > imputed gDNA density — the source that resolves "there is no LEVEL at the seams that matter"), the
 > **three-way level FUSE in LINEAR space** (a log fuse cannot represent "confidently near zero"), the
-> `mrna_active` structural gate **removed**, **M12 `conservation_rescale`** (law kept, path superseded), and
+> `mrna_active` structural gate **removed**, **M12 the conservation rescale** (law derived, path superseded, code deleted 2026-07-26), and
 > **the MESSAGE PACKET** — λ and θ carried explicitly and fused by their **own** precisions rather than read
 > back off the density fuse. The packet alone drove 0.0889 → 0.0855 and cut AMBIG-exon confidently-wrong 45 %.
 >
@@ -135,8 +135,8 @@
 > `1/(Var(log f_c^src) + 1/n_src + σ²_transfer + b̂²)`, plus **M8's `(log r)²` on the grafted spliced
 > component only**: the source's earned composition+count precision, the reframe's **scale** uncertainty
 > (M5 `Var(log r)`), the **DerSimonian–Laird composition-mismatch** `b̂²` (M7), and the graft's **un-cancelled
-> frame step** (M8). **Best aggregate on record: 0.0900 (refit=0) / 0.0700 (refit=1)** vs the 0.1267/0.1234
-> pre-fix baseline. **NOT ready to ship** (the hyperprior refit still regresses unstranded-capON), and per the
+> frame step** (M8). (Superseded numbers; the current suite is **0.0841 (refit=0) / 0.0679 (refit=1)** — see the banner at
+> the top of this file.) **NOT ready to ship** (the hyperprior refit still regresses unstranded-capON), and per the
 > owner's directive the hyperprior is NOT the next task — the **AMBIG tilt message** is
 > (`SESSION_2026_07_25_HANDOFF_9.md` §0b).
 >
@@ -432,12 +432,9 @@ premises above have changed, **that measurement is the single highest-value next
    of the message representation against ~0.001. A belief-free constant frame was also prototyped and is a
    worse trade (+0.0003 suite, +0.0010 fit-substrate, neutral-to-worse on held-fixed z2).
 
-   **(historical) `_far` was NOT the last third-node dependence.** `_RHO_ITERS = 2`, and the second iteration's
-   reframe faces are built from the destination's **fused posterior** — i.e. from the other message.
-   Measured median `|Δlog ρ_face|` between iterations 0.0116 (stranded capOFF) → 0.1242 (unstranded capON),
-   >1 % on 52.7–79.0 % of nodes. **The solver is not BP-legal yet.** The legal way to recover what `_far`
-   supplied, if wanted: carry the peel share as a FUNCTION of the destination's state (a proper pairwise
-   potential) rather than a plugged-in point estimate.
+   **(historical, now FIXED)** `_far` was not the last third-node dependence: `_RHO_ITERS = 2` meant the
+   second iteration's reframe faces came from the destination's fused posterior. That was closed the same
+   day by `_RHO_ITERS = 1` (item 7 above) — **the solver IS BP-legal.**
 
 8. ✅ **DONE — P-solv: `NodeBelief.evidence`.** The existing `solvable` flag is a **structural** gate
    ("admits ≥1 RNA strand and has mass"), not a statement about whether the answer can be trusted — and
@@ -494,5 +491,6 @@ Key tools (in `scripts/debug/`): `pass0_oracle_bench.py` (THE A/B — `--arm`, `
 ablation + per-node dumps), `message_variance_mc.py` (the variance-law MC arbiter, M1–M7),
 `unified_message_audit.py` (Σ_c f_c invariant). In `scratchpad/`: `dl_dissect.py` (error mass attributed by
 DL-protection state / strand DOF / node class, + per-node message provenance), `dump_node.py`.
-Env `RIGEL_S2T_OFF=1` disables both cliff terms for isolation; `_capture["_dl"]` publishes the per-message
-gaps and the τ-stream kill.
+**There are no ablation flags** — all six were removed in the 2026-07-26 cleanup once their A/Bs were
+settled, and `bp_solver.py` now reads no environment variables. `_capture["_dl"]` still publishes the
+per-message DL gaps and the τ-stream kill for the dissect loop.
