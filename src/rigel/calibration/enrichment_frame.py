@@ -36,6 +36,7 @@ __all__ = [
     "composition_logvar",
     # ── the pass-0 message-VARIANCE laws (message_variance_derivation.md) ──
     "graft_frame_logvar",
+    "graft_frame_logvar_scalar",
     "peel_rna_logvar",
     "peel_continue_share",
     "peel_continue_share_scalar",
@@ -141,6 +142,14 @@ def graft_frame_logvar(r):
     consistently across capture off and on."""
     rr = _f(r)
     lr = np.log(np.where(rr > _EPS, rr, 1.0))
+    return lr * lr
+
+
+def graft_frame_logvar_scalar(r):
+    """Scalar twin of :func:`graft_frame_logvar` — see that docstring for the model.
+
+    ⚠ TWIN: mirror any change into both. Pinned bit-for-bit by ``test_enrichment_frame.py``."""
+    lr = math.log(r) if r > _EPS else 0.0  # r ≤ _EPS (or nan) ⇒ no frame step ⇒ log 1 = 0
     return lr * lr
 
 

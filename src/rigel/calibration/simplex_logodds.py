@@ -82,10 +82,21 @@ _JEFFREYS_REF = 0.5
 # `bp_solver.node_sweep` threads `logodds_window` (=10.0) explicitly.
 _DEFAULT_L = 10.0
 
-# Memory-tiling batch for the AMBIG 2-D (λ,θ) cube — bounds the (B,K,K_t) materialized array at genome scale.
-# NOT a model parameter: AMBIG nodes solve INDEPENDENTLY (no cross-node coupling), so any batch size yields
-# bit-identical results — it only caps peak memory (the full subset at once is ~O(m·K²), like the old lattice).
-_AMBIG_BATCH = 8192
+# Cache-tiling target for BOTH per-node solves, as a working-set size rather than a row count — the per-row
+# footprint differs ~7× between the 1-D grid (K f64) and the 2-D cube (K·K_t f32), so no single row count
+# serves both. `_block_rows` turns it into rows.
+#
+# NOT a model parameter. Every node solves INDEPENDENTLY and every reduction in both solvers is WITHIN a row
+# (the ψ logsumexp, the moment sums, the CDF cumsum, and the `post @ log f` gemv), so the block size cannot
+# reach the arithmetic — verified bitwise for all five reduction kinds at block sizes from 64 to 65,536.
+# It is purely a memory knob, and at genome scale it is the dominant one: the 1-D path runs 357,739
+# single-strand nodes at K=256, i.e. a **699 MB temporary** per intermediate, ~10 of them live, streamed
+# from DRAM. Blocking makes the same arithmetic run out of cache.
+_SOLVE_BLOCK_BYTES = 1 << 20
+
+
+def _block_rows(cells_per_row: int, itemsize: int) -> int:
+    return max(1, _SOLVE_BLOCK_BYTES // max(1, int(cells_per_row) * int(itemsize)))
 
 
 def _lse(a, axis, keepdims=False):
@@ -642,39 +653,46 @@ def _solve_nodes_logodds_all(
     if bool(ss.any()):
         # Single-strand nodes solve on the FINE 1-D grid (Fix 3, n_grid_ss); the coarse-grid global prior is
         # regridded onto it. AMBIG keeps the coarse n_grid (the expensive 2-D cube). n_grid_ss=None ⇒ n_grid.
+        # Tiled into row blocks for the same reason as the AMBIG cube below — see `_SOLVE_BLOCK_BYTES`. The
+        # regrid rides inside the loop, so its (block, K_ss) temporaries are tiled too.
         k_ss = int(n_grid_ss) if n_grid_ss else int(n_grid)
-        _scatter(
-            ss,
-            _solve_nodes_logodds(
-                u_pos[ss],
-                u_neg[ss],
-                allow_pos[ss],
-                allow_neg[ss],
-                fg_ref[ss],
-                fpos_ref[ss],
-                fneg_ref[ss],
-                kappa=kappa,
-                od_g=od_g,
-                od_r=od_r,
-                n_grid=k_ss,
-                L=L,
-                global_logprior=_regrid_global(_s(global_logprior, ss), n_grid, k_ss, L),
-                gdna_imp_mode=_s(gdna_imp_mode, ss),
-                gdna_imp_prec=_s(gdna_imp_prec, ss),
-                rna_imp_mode=_sp(rna_imp_mode, ss),
-                rna_imp_prec=_sp(rna_imp_prec, ss),
-                lam_logprior=_regrid_global(_s(lam_logprior, ss), n_grid, k_ss, L),
-                lam_imp_mode=_s(lam_imp_mode, ss),
-                lam_imp_prec=_s(lam_imp_prec, ss),
-            ),
-        )
+        ss_idx = np.where(ss)[0]
+        rows = _block_rows(k_ss, 8)
+        for s0 in range(0, ss_idx.size, rows):
+            bidx = ss_idx[s0 : s0 + rows]
+            _scatter(
+                bidx,
+                _solve_nodes_logodds(
+                    u_pos[bidx],
+                    u_neg[bidx],
+                    allow_pos[bidx],
+                    allow_neg[bidx],
+                    fg_ref[bidx],
+                    fpos_ref[bidx],
+                    fneg_ref[bidx],
+                    kappa=kappa,
+                    od_g=od_g,
+                    od_r=od_r,
+                    n_grid=k_ss,
+                    L=L,
+                    global_logprior=_regrid_global(_s(global_logprior, bidx), n_grid, k_ss, L),
+                    gdna_imp_mode=_s(gdna_imp_mode, bidx),
+                    gdna_imp_prec=_s(gdna_imp_prec, bidx),
+                    rna_imp_mode=_sp(rna_imp_mode, bidx),
+                    rna_imp_prec=_sp(rna_imp_prec, bidx),
+                    lam_logprior=_regrid_global(_s(lam_logprior, bidx), n_grid, k_ss, L),
+                    lam_imp_mode=_s(lam_imp_mode, bidx),
+                    lam_imp_prec=_s(lam_imp_prec, bidx),
+                ),
+            )
     if bool(amb.any()):
         # The 2-D (λ,τ) cube is (B,K,K_t); materialized for ALL ambig nodes at once it is ~O(m·K²) (the
-        # memory the lattice OOM'd on). AMBIG nodes solve independently, so tile the subset into row-batches
-        # — bit-identical results, peak memory bounded to one (≤_AMBIG_BATCH, K, K_t) cube.
+        # memory the lattice OOM'd on). AMBIG nodes solve independently, so tile the subset into row blocks
+        # — bit-identical results, peak memory bounded to one (rows, K, K_t) cube.
         amb_idx = np.where(amb)[0]
-        for s0 in range(0, amb_idx.size, _AMBIG_BATCH):
-            bidx = amb_idx[s0 : s0 + _AMBIG_BATCH]
+        rows = _block_rows(int(n_grid) * (int(n_tilt) if n_tilt else int(n_grid)), 4)
+        for s0 in range(0, amb_idx.size, rows):
+            bidx = amb_idx[s0 : s0 + rows]
             _scatter(
                 bidx,
                 _solve_ambig_logodds(

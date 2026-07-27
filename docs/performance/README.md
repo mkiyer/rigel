@@ -215,8 +215,11 @@ benchmark.
   `memray` on the isolated calibration / quant stages will localize it.
 
 ### 6. Tunable knobs already in place
-- `simplex_logodds._AMBIG_BATCH` (8192) bounds the AMBIG cube's peak — lower it to trade speed for peak
-  memory (bit-identical; AMBIG nodes solve independently).
+- `simplex_logodds._SOLVE_BLOCK_BYTES` (1 MB) tiles BOTH per-node solves — bit-identical at any value
+  (every node solves independently and every reduction is within a row), so it is purely a cache/peak-memory
+  knob. Measured at genome scale: flat from 1–16 MB, ~20 % slower unblocked, and sharply worse below
+  256 KB where per-call overhead takes over. It replaced `_AMBIG_BATCH` (8192 rows), which bounded peak
+  memory but sat 100× outside cache.
 - The KDE lattice density (`_KDE_LATTICE_PTS_PER_BW=16`) trades interpolation accuracy for tabulation
   cost — already comfortably below any real regression.
 

@@ -23,6 +23,7 @@ from scipy.special import polygamma, zeta
 from rigel.calibration.enrichment_frame import (
     composition_logvar,
     graft_frame_logvar,
+    graft_frame_logvar_scalar,
     graft_premise_logvar,
     mismatch_deflate,
     mismatch_gap,
@@ -562,3 +563,11 @@ def test_peel_continue_share_scalar_is_bit_identical_to_the_array_form():
     ref = peel_continue_share(u, v)
     for i in range(u.size):
         assert _same_bits(ref[i], peel_continue_share_scalar(float(u[i]), float(v[i])))
+
+
+def test_graft_frame_logvar_scalar_is_bit_identical_to_the_array_form():
+    vals = [0.0, -0.0, 1e-13, 1e-12, 1e-9, 0.5, 1.0, 2.6, 6.1, 1e6, np.inf, -np.inf, np.nan, -1.0]
+    rng = np.random.default_rng(9)
+    draws = np.exp(rng.uniform(-20, 20, 3000))
+    for r in [*vals, *draws.tolist()]:
+        assert _same_bits(graft_frame_logvar(r), graft_frame_logvar_scalar(r)), r

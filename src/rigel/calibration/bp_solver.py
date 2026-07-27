@@ -40,6 +40,7 @@ from .enrichment_frame import (
     _fmax,
     composition_logvar,
     graft_frame_logvar,
+    graft_frame_logvar_scalar,
     graft_premise_logvar,
     mismatch_deflate,
     mismatch_gap,
@@ -595,6 +596,25 @@ def node_sweep(
             )
         )
 
+        # ── ⭐ THE SEQUENTIAL SCAN'S OPERANDS, AS PYTHON LISTS (`*_l`) ──────────────────────────────────
+        # `_relay` reads every one of these ONE ELEMENT AT A TIME — it is a Gauss-Seidel scan and cannot be
+        # vectorised — and at genome scale that is ~6 M edge-iterations, ~40 reads each. `.tolist()` is
+        # exact on float64 / int64 / bool (identical IEEE-754 doubles, identical ints), so this is
+        # BIT-IDENTICAL by construction, and it buys ~3×: `lst[i]` costs a third of `arr[i]`, and it yields
+        # a PYTHON float, whose arithmetic is ~3× `np.float64`'s because no intermediate is boxed in a 0-d
+        # array. The array forms stay — the vectorised combine (`_transport`, `_peel_share`) needs them.
+        (og_l, op_l, on_l, pg_own_l, pp_own_l, pn_own_l, mg_own_l, mp_own_l, mn_own_l, tau_own_l,
+         M_l, E_g_l, E_r_l, n_node_l, logvar_l) = (
+            np.asarray(a, np.float64).tolist()
+            for a in (og, op, on, pg_own, pp_own, pn_own, mg_own, mp_own, mn_own, tau_own,
+                      M, E_g, E_r, _n_node, logvar_tot)
+        )
+        ex_l, bnd_l, fp_l, fn_l = (a.tolist() for a in (ex_a, is_bnd_a, fp_a, fn_a))
+        spl_p_l, spl_n_l, SP_l, SN_l = (
+            [f.tolist() for f in t] for t in (spl_p_f, spl_n_f, SP, SN)
+        )
+        mu_l, v_mu_l = ([[c.tolist() for c in face] for face in t] for t in (_mu_f, _v_mu_f))
+
         # ── ⛔ THE ACROSS-THE-SEAM (`_far`) LEVEL ESTIMATOR IS DELETED — it was a BP VIOLATION ──────────
         # It read the node ACROSS the seam and fused it into the peel share's level. That node is
         # **IDENTICALLY the source of the destination's OTHER message** — verified structurally on 35,421
@@ -707,15 +727,15 @@ def node_sweep(
             it encodes, so the dead arms (`ζ(2,·)` and `residual_level`'s four `log_ndtr`s at a node with
             no level) are no longer evaluated and discarded. Measured 25× on this path, which is the bulk
             of a genome-scale calibration."""
-            _vg = 1.0 / _fmax(float(tpg), _EPS) if tpg > 0.0 else math.inf
-            _nu_m, _, _vl_m = residual_level_scalar(M[i], _n_node[i], tg, E_g[i], E_r[i], _vg)
+            _vg = 1.0 / _fmax(tpg, _EPS) if tpg > 0.0 else math.inf
+            _nu_m, _, _vl_m = residual_level_scalar(M_l[i], n_node_l[i], tg, E_g_l[i], E_r_l[i], _vg)
             _fin = math.isfinite(_vl_m)
-            _A = float(tp) + float(tn)
-            _a_p = float(tp) / _A if _A > _EPS else 0.0
+            _A = tp + tn
+            _a_p = tp / _A if _A > _EPS else 0.0
             out = []
             for _a, _mu, _vmu in (
-                (_a_p, float(_mu_f[df][0][i]), float(_v_mu_f[df][0][i])),
-                (1.0 - _a_p, float(_mu_f[df][1][i]), float(_v_mu_f[df][1][i])),
+                (_a_p, mu_l[df][0][i], v_mu_l[df][0][i]),
+                (1.0 - _a_p, mu_l[df][1][i], v_mu_l[df][1][i]),
             ):
                 _nu_ms = _nu_m * _a
                 _pm = (
@@ -768,11 +788,15 @@ def node_sweep(
         # them to `r = 0`; (2) `_damp` uses the raw `p` where `_dv` uses `max(p, _EPS)`, which differ only for
         # `0 < p < _EPS`; (3) the relay short-circuits the graft block under `if _gr:` while the combine
         # evaluates `graft_frame_logvar(r)` on every edge and masks. Any merge must reconcile all three.
+        # The relay's side of the pair is now scalar-native throughout — Python-float operands (the `*_l`
+        # block) calling the `*_scalar` twins of the shared primitives — which is what makes it fast, and
+        # one more reason the two forms cannot collapse into one.
         def _relay(seq, nbr, dst_face, src_face, df, sf):
-            rg, rp, rn = og.copy(), op.copy(), on.copy()
-            pg, pp, pn = pg_own.copy(), pp_own.copy(), pn_own.copy()  # full → MODE fusion
-            mg, mp, mn = mg_own.copy(), mp_own.copy(), mn_own.copy()  # MEASUREMENT (anchor gDNA + spliced RNA)
-            tau = tau_own.copy()  # COMPOSITION (τ_λ) → the λ-message
+            # every operand here is a Python float or bool — see the `*_l` block above
+            rg, rp, rn = og_l.copy(), op_l.copy(), on_l.copy()
+            pg, pp, pn = pg_own_l.copy(), pp_own_l.copy(), pn_own_l.copy()  # full → MODE fusion
+            mg, mp, mn = mg_own_l.copy(), mp_own_l.copy(), mn_own_l.copy()  # MEASUREMENT (anchor + spliced)
+            tau = tau_own_l.copy()  # COMPOSITION (τ_λ) → the λ-message
             for i in seq:
                 s = nbr[i]
                 if s < 0:
@@ -792,16 +816,16 @@ def node_sweep(
                 # applied after. Both use the face that FACES the other endpoint (``sf``/``df``), never the
                 # node-pooled sum. Only an EXON receives the graft — an intron carries no mature (`ex_a[i]`,
                 # not `is_reg_a[i]`, which grafted the junction's whole mature flux into every flanking intron).
-                _gr = ex_a[i] and is_bnd_a[s]
+                _gr = ex_l[i] and bnd_l[s]
                 # σ²_transfer = Var(log r) (M5): 0 on the matched-set GRAFT (r is common-mode across {g,R} and
                 # cancels in the composition — charging it there is a double-count), Var(log r) elsewhere (peel /
                 # plain reframe / partial-anchor, where r is load-bearing). The COMPOSITION-mismatch term b̂² is
                 # the combine's job (`_transport`): the relay has no destination self-solve to measure a gap
                 # against — its running belief is already fused with the messages, so a DL gap here would be
                 # feedback, not evidence.
-                s2t = 0.0 if _gr else (logvar_tot[i] + logvar_tot[s])
-                gp = spl_p_f[sf][s] if _gr else 0.0
-                gn = spl_n_f[sf][s] if _gr else 0.0
+                s2t = 0.0 if _gr else (logvar_l[i] + logvar_l[s])
+                gp = spl_p_l[sf][s] if _gr else 0.0
+                gn = spl_n_l[sf][s] if _gr else 0.0
                 tg, tp, tn = rg[s] * r, (rp[s] + gp) * r, (rn[s] + gn) * r
                 tpg, tpp, tpn = _damp(pg[s], s2t), _damp(pp[s], s2t), _damp(pn[s], s2t)  # full (mode)
                 tmg, tmp, tmn = _damp(mg[s], s2t), _damp(mp[s], s2t), _damp(mn[s], s2t)  # measurement
@@ -815,25 +839,27 @@ def node_sweep(
                     # exon's frame (its fragments' blocks lie in the exons), so it has no matched gDNA partner
                     # to cancel ``r`` against and M5's graft-zero does not cover it. Charge the frame step it
                     # is implicitly mis-lifted by. Identically 0 at r = 1.
-                    _s2f = s2t + float(graft_frame_logvar(r))
-                    _spc = SP[sf][s] / (1.0 + SP[sf][s] * _s2f) if SP[sf][s] > _EPS else 0.0
-                    _snc = SN[sf][s] / (1.0 + SN[sf][s] * _s2f) if SN[sf][s] > _EPS else 0.0
+                    _s2f = s2t + graft_frame_logvar_scalar(r)
+                    _sps = SP_l[sf][s]
+                    _spc = _sps / (1.0 + _sps * _s2f) if _sps > _EPS else 0.0
+                    _sns = SN_l[sf][s]
+                    _snc = _sns / (1.0 + _sns * _s2f) if _sns > _EPS else 0.0
                     tpp += _spc
                     tpn += _snc
                     tmp += _spc
                     tmn += _snc
-                    _vgp, _vgn = float(vgp_prem[i]), float(vgn_prem[i])
+                    _vgp, _vgn = vgp_l[i], vgn_l[i]
                     tpp, tmp = _damp_v(tpp, _vgp), _damp_v(tmp, _vgp)
                     tpn, tmn = _damp_v(tpn, _vgn), _damp_v(tmn, _vgn)
 
-                if is_bnd_a[i] and ex_a[s]:  # EXON → boundary: PEEL by COMPOSITION (scale by the share)
+                if bnd_l[i] and ex_l[s]:  # EXON → boundary: PEEL by COMPOSITION (scale by the share)
                     (_wp, _vwp), (_wn, _vwn) = _peel_share_scalar(i, df, tg, tpg, tp, tn)
                     tp, tn = tp * _wp, tn * _wn
                     tpp, tmp = _damp_v(tpp, _vwp), _damp_v(tmp, _vwp)
                     tpn, tmn = _damp_v(tpn, _vwn), _damp_v(tmn, _vwn)
-                if not fp_a[i]:
+                if not fp_l[i]:
                     tp, tpp, tmp = 0.0, 0.0, 0.0
-                if not fn_a[i]:
+                if not fn_l[i]:
                     tn, tpn, tmn = 0.0, 0.0, 0.0
                 # ── ANCHOR THE CONTEXT TO THIS NODE'S OBSERVED MASS (the scalar twin of `_pin_v`) ───────────
                 # `Σ_c ρ_c·E_c = M` is an IDENTITY under the imputation premise, not an approximation: a matched
@@ -851,22 +877,26 @@ def node_sweep(
                 # The `_pin_v` semantics are load-bearing: a component the context does not supply is filled from
                 # the node's OWN density, so a PARTIAL claim stays partial. Rescaling all three blindly instead
                 # regresses capture-OFF 3.6× (derivation: `scratchpad/derive_2_relay_pin.py`).
-                _sg = tg if tpg > 0.0 else og[i]
-                _sp = tp if tpp > 0.0 else op[i]
-                _sn = tn if tpn > 0.0 else on[i]
-                _sv = _sg * E_g[i] + (_sp + _sn) * E_r[i]
-                if _sv > _EPS and M[i] > _EPS:
-                    _k = M[i] / _sv
+                _sg = tg if tpg > 0.0 else og_l[i]
+                _sp = tp if tpp > 0.0 else op_l[i]
+                _sn = tn if tpn > 0.0 else on_l[i]
+                _sv = _sg * E_g_l[i] + (_sp + _sn) * E_r_l[i]
+                if _sv > _EPS and M_l[i] > _EPS:
+                    _k = M_l[i] / _sv
                     tg, tp, tn = tg * _k, tp * _k, tn * _k
-                rg[i], pg[i] = _fuse(og[i], pg_own[i], tg, tpg)
-                rp[i], pp[i] = _fuse(op[i], pp_own[i], tp, tpp)
-                rn[i], pn[i] = _fuse(on[i], pn_own[i], tn, tpn)
+                rg[i], pg[i] = _fuse(og_l[i], pg_own_l[i], tg, tpg)
+                rp[i], pp[i] = _fuse(op_l[i], pp_own_l[i], tp, tpp)
+                rn[i], pn[i] = _fuse(on_l[i], pn_own_l[i], tn, tpn)
                 # measurement + composition precisions are INDEPENDENT evidence → additive (inverse-variance) fuse
-                mg[i] = mg_own[i] + tmg
-                mp[i] = mp_own[i] + tmp
-                mn[i] = mn_own[i] + tmn
-                tau[i] = tau_own[i] + ttau
-            return rg, rp, rn, pg, pp, pn, mg, mp, mn, tau
+                mg[i] = mg_own_l[i] + tmg
+                mp[i] = mp_own_l[i] + tmp
+                mn[i] = mn_own_l[i] + tmn
+                tau[i] = tau_own_l[i] + ttau
+            # back to arrays for the vectorised combine — exact, they are the same doubles
+            return tuple(
+                np.asarray(a, np.float64)
+                for a in (rg, rp, rn, pg, pp, pn, mg, mp, mn, tau)
+            )
 
         # dst faces its source on its LEFT (face 0); the source faces the dst on its RIGHT (face 1) — and mirrored
         # for the backward pass. The face pair selects BOTH the per-side ρ_tot and the per-face mature flux.
@@ -921,8 +951,11 @@ def node_sweep(
             return out[0], out[1]
         # the relay runs on the INPUT-belief faces, so its seam pair is formed from those
         vgp_prem, vgn_prem = _seam_pair(rho_l0, rho_r0)
-        fwd = _relay(order_list, left, rho_l0, rho_r0, 0, 1)
-        bwd = _relay(order_list[::-1], right, rho_r0, rho_l0, 1, 0)
+        vgp_l, vgn_l = vgp_prem.tolist(), vgn_prem.tolist()
+        left_l, right_l = left.tolist(), right.tolist()
+        rho_l0_l, rho_r0_l = rho_l0.tolist(), rho_r0.tolist()
+        fwd = _relay(order_list, left_l, rho_l0_l, rho_r0_l, 0, 1)
+        bwd = _relay(order_list[::-1], right_l, rho_r0_l, rho_l0_l, 1, 0)
         # ── the COMBINE: transport α (from left neighbour) + β (from right neighbour) into the node's frame with
         # the LAZY ρ_tot (two-iteration — the 2nd uses the both-message composition), fuse, ÷M_dst → the ψ solve.
         li, ri, vl, vr, sl, sr = _li_a, _ri_a, _vl_a, _vr_a, _sl_a, _sr_a
