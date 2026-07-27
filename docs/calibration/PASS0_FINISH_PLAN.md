@@ -1,8 +1,8 @@
 # Finishing pass-0 — the prioritized work list
 
-**Owner-agreed 2026-07-26. Live status in the table below; the run instructions are in
-`SESSION_2026_07_26_HANDOFF_13.md` §6.** Read `ROADMAP.md` first, then
-`SESSION_2026_07_26_HANDOFF_12.md` (the live handoff), then this.
+**Owner-agreed 2026-07-26. Live status in the table below; the run book is in
+`SESSION_2026_07_26_HANDOFF_15.md` §4.** Read `ROADMAP.md` first, then
+`SESSION_2026_07_26_HANDOFF_15.md` (the live handoff), then this.
 
 This document exists so the set does not get lost between sessions. **Update the status column in place**;
 do not start a competing list.
