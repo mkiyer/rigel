@@ -1005,7 +1005,6 @@ class TranscriptIndex:
         manifest = {
             "format_version": INDEX_FORMAT_VERSION,
             "rigel_version": _rigel_version(),
-            "mappability": None,
         }
         with open(output_dir / MANIFEST_JSON, "w") as fh:
             json.dump(manifest, fh, indent=2, sort_keys=True)

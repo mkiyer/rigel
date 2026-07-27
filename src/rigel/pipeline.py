@@ -297,7 +297,6 @@ def scan_and_buffer(
         _wire_calibration_regions(
             scanner,
             index,
-            region_df,
             scan.max_frag_length,
         )
 
@@ -366,7 +365,6 @@ def scan_and_buffer(
 def _wire_calibration_regions(
     scanner,
     index: TranscriptIndex,
-    region_df,
     max_frag_length: int,
 ) -> None:
     """Install the index's region partition into a native BamScanner.
