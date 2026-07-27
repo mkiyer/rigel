@@ -50,15 +50,6 @@ class NodeDeconv:
     gdna_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_g)
     rna_pos_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_pos)
     rna_neg_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_neg)
-    # The grid-posterior moments in the FREE COORDINATES of the composition manifold — the seed for the
-    # coherent (λ,θ) relay (docs/calibration/dof_pie_relay_implementation_plan.md §2/§4 S3). λ = logit(f_g)
-    # (gDNA-vs-RNA-total log-odds); θ = arcsin(tilt) (the strand tilt, AMBIG only — single-strand nodes lock
-    # it at ±π/2). Populated by the per-node solve; None on the chain projections. Additive — the existing
-    # `*_frac` / `*_frac_var` fields (the current readout) are unchanged.
-    lam_mean: "np.ndarray | None" = None  # float64[K] — E[λ] over the grid posterior
-    lam_var: "np.ndarray | None" = None  # float64[K] — Var[λ]
-    theta_mean: "np.ndarray | None" = None  # float64[K] — E[θ] (±π/2 locked for single-strand)
-    theta_var: "np.ndarray | None" = None  # float64[K] — Var[θ] (0 for single-strand)
 
 
 @dataclass(frozen=True, slots=True)

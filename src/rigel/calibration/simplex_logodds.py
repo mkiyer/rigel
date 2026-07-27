@@ -385,12 +385,6 @@ def _solve_nodes_logodds(
     var_act = np.maximum(post @ (La * La) - mLa * mLa, 0.0)
     var_pos = np.where(ap & ~an, var_act, 0.0)
     var_neg = np.where(an & ~ap, var_act, 0.0)
-    # Coordinate-moment seed for the (λ,θ) relay (S3): E[λ]/Var[λ] over the grid posterior; θ is LOCKED for a
-    # single-strand node (all RNA on the live strand → τ=±1 → θ=±π/2, var 0).
-    lam_mean = post @ lam
-    lam_var = np.maximum(post @ (lam * lam) - lam_mean * lam_mean, 0.0)
-    theta_mean = np.where(ap & ~an, 0.5 * np.pi, np.where(an & ~ap, -0.5 * np.pi, 0.0))
-    theta_var = np.zeros_like(lam_var)
     active = (u_pos + u_neg) > 0.0
     f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
     f_pos = np.where(active, np.clip(f_pos, 0.0, 1.0), 0.0)
@@ -398,8 +392,6 @@ def _solve_nodes_logodds(
     var_g = np.where(active, var_g, 0.0)
     var_pos = np.where(active, var_pos, 0.0)
     var_neg = np.where(active, var_neg, 0.0)
-    lam_mean = np.where(active, lam_mean, 0.0)
-    lam_var = np.where(active, lam_var, 0.0)
     return NodeDeconv(
         gdna_frac=f_g,
         rna_pos_frac=f_pos,
@@ -407,10 +399,6 @@ def _solve_nodes_logodds(
         gdna_frac_var=var_g,
         rna_pos_frac_var=var_pos,
         rna_neg_frac_var=var_neg,
-        lam_mean=lam_mean,
-        lam_var=lam_var,
-        theta_mean=theta_mean,
-        theta_var=theta_var,
     )
 
 
@@ -551,13 +539,6 @@ def _solve_ambig_logodds(
     var_neg = np.maximum(
         np.sum(post2d * log_fneg * log_fneg, axis=(1, 2), dtype=np.float64) - mLn * mLn, 0.0
     )
-    # Coordinate-moment seed for the (λ,θ) relay (S3): E[λ]/Var[λ] over the θ-marginal λ-posterior; E[θ]/Var[θ]
-    # over the λ-marginal θ-posterior (both free for an AMBIG node — λ⊥θ, so the marginals are the belief).
-    lam_mean = post_lam @ lam
-    lam_var = np.maximum(post_lam @ (lam * lam) - lam_mean * lam_mean, 0.0)
-    post_theta = np.sum(post2d, axis=1, dtype=np.float64)  # (m,Kt) λ-marginal θ-posterior
-    theta_mean = post_theta @ theta
-    theta_var = np.maximum(post_theta @ (theta * theta) - theta_mean * theta_mean, 0.0)
     active = n > 0.0
     f_g = np.where(active, np.clip(f_g, 0.0, 1.0), 0.0)
     f_pos = np.where(active, np.clip(f_pos, 0.0, 1.0), 0.0)
@@ -565,10 +546,6 @@ def _solve_ambig_logodds(
     var_g = np.where(active, var_g, 0.0)
     var_pos = np.where(active, var_pos, 0.0)
     var_neg = np.where(active, var_neg, 0.0)
-    lam_mean = np.where(active, lam_mean, 0.0)
-    lam_var = np.where(active, lam_var, 0.0)
-    theta_mean = np.where(active, theta_mean, 0.0)
-    theta_var = np.where(active, theta_var, 0.0)
     return NodeDeconv(
         gdna_frac=f_g,
         rna_pos_frac=f_pos,
@@ -576,10 +553,6 @@ def _solve_ambig_logodds(
         gdna_frac_var=var_g,
         rna_pos_frac_var=var_pos,
         rna_neg_frac_var=var_neg,
-        lam_mean=lam_mean,
-        lam_var=lam_var,
-        theta_mean=theta_mean,
-        theta_var=theta_var,
     )
 
 
@@ -640,7 +613,7 @@ def _solve_nodes_logodds_all(
         fneg_ref = np.asarray(fneg_ref, np.float64)
     out = {
         k: np.zeros(m, dtype=np.float64)
-        for k in ("fg", "fp", "fn", "vg", "vp", "vn", "lam", "lvar", "thm", "thv")
+        for k in ("fg", "fp", "fn", "vg", "vp", "vn")
     }
     # Skip EMPTY nodes — no per-strand counts AND no unspliced/spliced mass. Both per-class solvers zero
     # every output for an inactive node (gdna/rna_mass = f_g·M = (1−f_g)·M + S = 0 when all are 0), so an
@@ -669,10 +642,6 @@ def _solve_nodes_logodds_all(
         out["vg"][msk] = dc.gdna_frac_var
         out["vp"][msk] = dc.rna_pos_frac_var
         out["vn"][msk] = dc.rna_neg_frac_var
-        out["lam"][msk] = dc.lam_mean
-        out["lvar"][msk] = dc.lam_var
-        out["thm"][msk] = dc.theta_mean
-        out["thv"][msk] = dc.theta_var
 
     if bool(ss.any()):
         # Single-strand nodes solve on the FINE 1-D grid (Fix 3, n_grid_ss); the coarse-grid global prior is
@@ -747,8 +716,4 @@ def _solve_nodes_logodds_all(
         gdna_frac_var=out["vg"],
         rna_pos_frac_var=out["vp"],
         rna_neg_frac_var=out["vn"],
-        lam_mean=out["lam"],
-        lam_var=out["lvar"],
-        theta_mean=out["thm"],
-        theta_var=out["thv"],
     )
