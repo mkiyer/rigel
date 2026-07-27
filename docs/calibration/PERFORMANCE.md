@@ -116,7 +116,13 @@ scope for this phase.
 `_relay` is ~22 % and is now ~11 s of straight-line Python over ~6 M edge-iterations. Nothing left short of
 moving the scan to C++ — a real option, and a much larger change than this phase was scoped for.
 
-## 7. The rules for this phase
+## 7. ⏸ THIS PHASE IS PAUSED (owner, 2026-07-27)
+
+Further optimization waits until the full pipeline is finished. What is left, and what it costs, is
+§6. When it resumes, start by re-reading §1 and re-profiling at genome scale — these numbers will
+have moved.
+
+## 8. The rules for this phase
 
 * **Every change must be verified BIT-IDENTICAL** at both refits (§4). A performance change that moves a
   number is a **bug**, not a trade.

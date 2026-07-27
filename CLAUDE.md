@@ -22,6 +22,13 @@ Rigel is a Bayesian RNA-seq transcript quantification tool that jointly models m
 > (Beta-Binomial tilt; constrains only the tilt, so AMBIG nodes get NO f_g from it), **cross-node imputation**
 > (neighbour messages), and the **population gDNA prior** (the hyperprior, WIP).
 >
+> **⚠⚠ THE TWO STANDING DEBTS (P1e and `ω_graft`) — read `docs/calibration/P1D_P1E_DEBTS.md`.** Measured
+> 2026-07-27 to be **REDUNDANT** (they price opposite directions of one failure: the graft's inequality
+> used as an equality), and **both are RETAINED deliberately** until TSS/TES enter the region map (P1g),
+> which is the structural fix both stand in for. ⚠ The 10 Mb synthetic **overstates P1e's damping by
+> 26–300×** against real cfRNA (31.1 % of solver precision vs 0.10–1.18 %), and `ω_graft` fits **10×
+> apart on two real samples** — so neither term's toy A/B is a production number.
+>
 > **⚠⚠ STANDING DEBT — P1e (`conservation surprise`) PRICES A BIAS AS A VARIANCE.** It damps a message by
 > the unexplained part of `δ = log(M/S)`, but on a large share of its firing mass `δ` is systematic, not
 > scatter (bias share 53–77 % on graft × one-component, 98.9–99.2 % at intergenic destinations), and
@@ -40,6 +47,11 @@ Rigel is a Bayesian RNA-seq transcript quantification tool that jointly models m
 > on real data**. **When TSS/TES enter the region map (P1g), `ω` MUST be re-derived per structural class** —
 > same equation, one scalar per class; the partial-pooling block in that function is the plug-in point. Do
 > not treat the fitted value as a measured constant of the library.
+>
+> **PERFORMANCE (2026-07-27): calibration is ~4× faster at genome scale (266 s → 67 s), bit-identically.**
+> `docs/calibration/PERFORMANCE.md` is authoritative; its §1 is the lesson — **the 10 Mb synthetic ranks
+> the hotspots BACKWARDS**, so profile on the cached real cfRNA payloads, never the toy. The relay is
+> scalar-native (`*_scalar` twins + Python-list operands) and both ψ solves are cache-blocked.
 >
 > **`bp_solver.py` holds ONE solve path, and as of 2026-07-26 it reads no environment variables** — every
 > prototyping A/B gate has been removed and the production path has converged. The per-node

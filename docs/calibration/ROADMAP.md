@@ -33,10 +33,23 @@
 > prior-free source is the neighbours' per-strand RNA imputation — already carried as `theta_imp`, and
 > measured **nearly inert** (0.1444 → 0.1417 when ablated).
 >
-> **⭐ CURRENT (2026-07-26): the composition peel, the MESSAGE PACKET and **P1d** are LANDED; the next task
-> is P1e.** Suite **0.0865 (refit=0) / 0.0676 (refit=1)** — deliberately up from 0.0855 / 0.0671, bought
-> against a 36.6 % cut in confidently-wrong mass. **Read `SESSION_2026_07_26_HANDOFF_15.md` — it is the LIVE
-> handoff and has the run instructions.**
+> **⭐ CURRENT (2026-07-27): pass-0 is DONE for now; the next task is the gDNA HYPERPRIOR (Phase 2).**
+> Suite **0.084566 (refit=0) / 0.067973 (refit=1)**; fit substrate 0.085304 / 0.068407.
+> **Read `SESSION_2026_07_27_HANDOFF_16.md` — it is the LIVE handoff.** Its §0 is mandatory: one commit
+> (`08cfa0e9`) changed the solver's output, so **every stored A/B baseline is stale** and must be
+> re-recorded from a `git stash` of HEAD in the same session.
+>
+> The 2026-07-27 session was optimization + cleanup + audit, not modelling:
+> * **calibration is ~4× faster at genome scale (266 s → 67 s)**, all bit-identical — `PERFORMANCE.md`,
+>   rewritten. Its §1 is the lesson: the 10 Mb synthetic ranks the hotspots BACKWARDS, so profile on
+>   `cfrna:LBX0190`. Further perf work is PAUSED until the pipeline is finished.
+> * **the over-engineering audit** — `ABLATION_CAMPAIGN.md` (P1e and P1d are measurably REDUNDANT; the
+>   toy overstates P1e's damping by 26–300× against real cfRNA) and `P1D_P1E_DEBTS.md` (the brief for
+>   re-evaluating both once TSS/TES land — **both are RETAINED deliberately**).
+> * **one real bug fixed** (`08cfa0e9`): the peel level's log-variance was capped at `ψ'(1) = π²/6`, so a
+>   level declared 10 nats uncertain was delivered as 1.6. Phase 2 should care — the hyperprior is fitted
+>   precision-weighted by `var_gdna`, and it has never been fitted without that ceiling.
+> * tests: **1202 pass, 0 xfail / 0 xpass / 0 warnings**.
 >
 > **The frame for everything that remains:** the error MASS is close to its prior-free ceiling (HANDOFF_10 §3:
 > 67–75 % of it is premise-limited, and ×10 on every precision moves nothing), but the **CALIBRATION of that
