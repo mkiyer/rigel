@@ -484,8 +484,15 @@ def _solve_ambig_logodds(
     log_fg_grid = _log_fg(lam)  # (K,) f64 = log f_g (moments use f64)
     log_fg32 = log_fg_grid.astype(F)  # (K,) f32 for the cube message
     frac_floor = (1.0 / (n + 1.0)).astype(F)[:, None, None]  # (m,1,1) f32
-    log_fpos = np.log(np.maximum(fpk[None, :, :], frac_floor))  # (m,K,Kt) f32
-    log_fneg = np.log(np.maximum(fnk[None, :, :], frac_floor))
+    # ``log ∘ max ≡ max ∘ log``, BITWISE, because numpy's float32 ``log`` is monotone — verified
+    # exhaustively over ALL 1,065,353,217 float32 values in [0,1], which is the entire domain both
+    # arguments live in (a fraction and ``1/(n+1)``). So the log is taken on the (K,K_t) GRID and the
+    # (m,K,K_t) cube only ever sees a ``maximum``: ~140× fewer transcendental evaluations, same bits.
+    # ``τ = ±1`` puts one strand's fraction at exactly 0 ⇒ ``log 0 = −inf``, which the floor then discards.
+    with np.errstate(divide="ignore"):
+        log_fpk, log_fnk, log_floor = np.log(fpk), np.log(fnk), np.log(frac_floor)
+    log_fpos = np.maximum(log_fpk[None, :, :], log_floor)  # (m,K,Kt) f32
+    log_fneg = np.maximum(log_fnk[None, :, :], log_floor)
     # ── the two composition arms (θ-independent — they live on the λ axis, which is exactly what makes the
     #    tilt a nuisance). Identical call to the 1-D path; see `_gdna_arm` / `_rna_arm`. ──
     psi += np.asarray(_gdna_arm(lam, global_logprior) + _rna_arm(lam), F)[:, :, None]
