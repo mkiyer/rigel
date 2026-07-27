@@ -35,7 +35,6 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from scipy.special import zeta
 
 from .enrichment_frame import (
     _fmax,
@@ -651,7 +650,7 @@ def node_sweep(
 
             ⚠ TWIN of `_peel_share_scalar` (the sequential relay's arm) — mirror any change into both."""
             _vg = np.where(np.asarray(tpg, np.float64) > 0.0, 1.0 / np.maximum(tpg, _EPS), np.inf)
-            _nu_m, _, _vl_m = residual_level(M, _n_node, tg, E_g, E_r, _vg)
+            _nu_m, _vlog_m, _vl_m = residual_level(M, _n_node, tg, E_g, E_r, _vg)
             _A = np.asarray(tp, np.float64) + np.asarray(tn, np.float64)
             _a_p = np.where(_A > _EPS, np.asarray(tp, np.float64) / np.maximum(_A, _EPS), 0.0)
             out = []
@@ -683,8 +682,16 @@ def node_sweep(
                 # back to the model's currency: the fused level's effective fragment COUNT k = ρ̂²/Var̂, and
                 # its log-variance by the same exact rule M11 uses (ψ'(k) → 1/k for a well-determined level,
                 # → π²/6 for one earned by a single fragment; never over-confident).
-                _kk = np.maximum(_nu * _nu * _pt, 1.0)
-                _v_nu = np.where(_live, zeta(2.0, _kk), np.inf)
+                # M11 already returned this level's log-variance; use it. The round trip it replaces
+                # (`k = ρ̂²/V̂` then `ψ'(k)`) is EXACTLY `ψ'(1/v_log)`, and `_peel_share` was discarding
+                # the `v_log` it re-derived. That mattered: `residual_level`'s `k ≥ 1` floor is an exact
+                # limit of the TRUNCATION — k is the RNA share's effective fragment COUNT, and one
+                # fragment is the least evidence a level can carry. Here `k` is a reciprocal variance,
+                # not a count, so the same floor became a hard CEILING of `ψ'(1) = π²/6` on `_v_nu`: a
+                # level M11 declared 10 nats uncertain was delivered as 1.64, over-stating its
+                # confidence 6× on exactly the seams where the level is least determined. Measured:
+                # accuracy 0 better / 0 worse / 32 flat at both refits, z2 better on every population.
+                _v_nu = np.where(_live, _vlog_m, np.inf)
                 _w = np.where(_live, peel_continue_share(_nu, _mu), 0.0)
                 if _capture is not None:
                     _capture.setdefault("_lvl", []).append(  # inert: the level's provenance, per face
@@ -725,7 +732,7 @@ def node_sweep(
             no level) are no longer evaluated and discarded. Measured 25× on this path, which is the bulk
             of a genome-scale calibration."""
             _vg = 1.0 / _fmax(tpg, _EPS) if tpg > 0.0 else math.inf
-            _nu_m, _, _vl_m = residual_level_scalar(M_l[i], n_node_l[i], tg, E_g_l[i], E_r_l[i], _vg)
+            _nu_m, _vlog_m, _vl_m = residual_level_scalar(M_l[i], n_node_l[i], tg, E_g_l[i], E_r_l[i], _vg)
             _fin = math.isfinite(_vl_m)
             _A = tp + tn
             _a_p = tp / _A if _A > _EPS else 0.0
@@ -743,8 +750,11 @@ def node_sweep(
                 if not _pm > _EPS:  # no level ⇒ no claim: w = 0 at zero precision, an inert message
                     out.append((0.0, math.inf))
                     continue
-                _nu = (_pm * _nu_ms) / _pm  # ⚠ NOT `_nu_ms` — `(a·b)/a ≠ b` in floating point
-                _v_nu = float(zeta(2.0, _fmax(_nu * _nu * _pm, 1.0)))
+                # ⚠ NOT `_nu_ms`: `(a·b)/a ≠ b` in floating point. This is the one-estimator remnant of
+                # a three-estimator fuse (`_far` and the destination-own plug-in were deleted); kept
+                # verbatim so this commit's delta is attributable to `_v_nu` alone.
+                _nu = (_pm * _nu_ms) / _pm
+                _v_nu = _vlog_m  # M11's own log-variance — see the twin
                 _w = peel_continue_share_scalar(_nu, _mu)
                 _wm = 1.0 - _w
                 # a spliced DENSITY with no spliced COUNT cannot be priced (plan §4.7) ⇒ no claim at all.
