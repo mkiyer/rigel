@@ -702,6 +702,26 @@ def node_sweep(
             """STEP 3: add a log-variance to a precision. 1/p → 1/p + v ; v = ∞ ⇒ 0 (no claim)."""
             return p / (1.0 + p * v) if (p > 0.0 and np.isfinite(v)) else 0.0
 
+        # ── ⚠ `_relay` AND `_transport` ARE DELIBERATE TWINS. DO NOT MERGE THEM. ────────────────────────
+        # They implement the SAME eight-step per-edge transform in the same order — reframe `r` → detect the
+        # graft → σ²_transfer (M5) → graft the source's spliced → damp the three precision streams → graft
+        # precision ⊕ M8 ⊕ P1d → peel by composition (M10) → strand filter → pin to M — and the correspondence
+        # is line-for-line. Merging them into one polymorphic routine (`k` = a scalar index for the relay,
+        # `slice(None)` for the combine) IS structurally possible; `_peel_share` already proves the pattern.
+        #
+        # ⛔ IT WAS MEASURED AND REJECTED. `_relay` is a SEQUENTIAL Gauss-Seidel scan — it reads
+        # `rg[s]`/`pg[s]`/… at a source that an earlier iteration of the same pass may already have written
+        # (verified: every one of `rg pg pp pn mg mp mn tau` is both read at `s` and written at `i`), so it
+        # cannot be vectorised and its per-node arithmetic is plain Python floats. Routing that through the
+        # combine's numpy form costs **15.7×** per operation (0.083 µs → 1.307 µs measured), i.e. **+5.5 s per
+        # calibration** on a 74,494-node chain — to save ~60 lines. Bad trade.
+        #
+        # ⚠ SO THE DUPLICATION IS REAL AND MUST BE MAINTAINED BY HAND. A change to ONE of these must be
+        # mirrored in the other. The two also differ deliberately in three edge cases, and those differences
+        # are NOT bugs to unify: (1) the relay skips invalid edges with `continue` while the combine masks
+        # them to `r = 0`; (2) `_damp` uses the raw `p` where `_dv` uses `max(p, _EPS)`, which differ only for
+        # `0 < p < _EPS`; (3) the relay short-circuits the graft block under `if _gr:` while the combine
+        # evaluates `graft_frame_logvar(r)` on every edge and masks. Any merge must reconcile all three.
         def _relay(seq, nbr, dst_face, src_face, df, sf):
             rg, rp, rn = og.copy(), op.copy(), on.copy()
             pg, pp, pn = pg_own.copy(), pp_own.copy(), pn_own.copy()  # full → MODE fusion
@@ -862,6 +882,7 @@ def node_sweep(
         # the LAZY ρ_tot (two-iteration — the 2nd uses the both-message composition), fuse, ÷M_dst → the ψ solve.
         li, ri, vl, vr, sl, sr = _li_a, _ri_a, _vl_a, _vr_a, _sl_a, _sr_a
 
+        # The VECTORISED twin of `_relay` — see the DO-NOT-MERGE note there, which applies to both.
         def _transport(src, valid, df, sf, fwd_arrs, dst_face_v, src_face_v):
             rg, rp, rn, pg, pp, pn, mg, mp, mn, tau = fwd_arrs
             # A node with no frame (no mass ⇒ no ρ_tot, §5) cannot reframe: the message passes through at r=1.
