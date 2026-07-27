@@ -80,7 +80,10 @@ is removed, at flat variance. P1d *is* doing real accuracy work on exactly the p
 **P1d is therefore not a clean delete** — it is a trade of exon-single accuracy against exon-AMBIG
 over-confidence.
 
-## 4. Verdicts
+## 4. Verdicts — ⚠ SUPERSEDED FOR P1d/P1e BY §8
+
+These were reached from the 10 Mb synthetic alone. **§8's real-data firing diagnostic overturns the
+P1d and P1e rows** — read it before acting on this table. The level-fuse and M5 rows still stand.
 
 | term | verdict |
 |---|---|
