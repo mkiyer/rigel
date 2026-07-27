@@ -158,7 +158,26 @@
 > `variance_model_concepts.md`, one unit test each), behavior-preserving (byte-identical to the pre-refactor
 > unified path across all 32 scenarios). Goldens regenerated to the unified default. §2 below is now historical.
 
+> **⭐ THE gDNA-HYPERPRIOR TRACK IS RESURRECTED (2026-07-26) — `gdna_hyperprior_resurrection.md`.** The Role-B
+> work paused on 2026-07-21 pending exactly the pass-0 rebuild that has since happened; it has now been
+> re-measured on rebuilt beliefs. **The enriched mode is no longer blind** (mass ratio 0 → **0.70**; exact on
+> stranded data), but a **single directional bias survives** — unstranded enriched nodes under-call gDNA by
+> **0.15–0.22 decades** — and it shows up identically in three places. ⚠ **A symmetric sampling-likelihood
+> projection cannot correct it: substituting a PERFECT (oracle) landscape recovers only +0.03…+0.08 against
+> that bias.** Same structural failure as P1e — variance-shaped machinery cannot move a biased mode. Also
+> fixed there: **two label bugs in the exploration cache** that mis-bucketed 6 real-gDNA conditions as
+> zero-gDNA and labelled `capture_verystrong` as capture-OFF, which invalidates some archived numbers
+> (the "fabrication" crisis was half an artifact).
+
+⭐ **`PERFORMANCE.md` — the solver's performance baseline and optimization targets** (measured 2026-07-26):
+0.50 s (refit=0) / 0.90 s (refit=1) on a 3,397-node chain, with two roughly equal hotspot clusters — the
+relay's per-node SCALAR path (~34 %, and it calls numpy on scalars, which measured 15.7× slower than plain
+floats) and the NPMLE hyperprior EM (~28 %). Read it before any optimization work.
+
 The only other docs that are live (everything else is in `archive/`, kept for history, NOT to be referenced):
+* **`gdna_hyperprior_resurrection.md` — ⭐ THE Role-B / hyperprior ENTRY POINT.** Where that track paused and
+  why, the archived doc map, the resurrected run book, and the three re-measurements at the rebuilt pass-0.
+  Read it before P-sub — its §2.3 constrains what a substrate sweep can possibly buy.
 * `CALIBRATION_ARCHITECTURE.md` — the authoritative theory (count-zero-information; the three information
   sources). Still correct; read second.
 * `unified_solver_design.md` — the target solver's architecture (the reframe + ÷M_dst mode). Its **precision /
