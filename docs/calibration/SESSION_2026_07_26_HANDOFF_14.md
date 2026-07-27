@@ -1,6 +1,11 @@
+> ## ⛔ SUPERSEDED — THIS IS NOT THE LIVE HANDOFF
+> The live handoff is **`SESSION_2026_07_26_HANDOFF_15.md`**; the entry point is **`ROADMAP.md`**.
+> This file is kept as HISTORY — it is the P1d / P4 record, and its §3 DO-NOT-RE-RUN table (which
+> also indexes the earlier sessions' tables) still stands.
+
 # Session handoff — P1d is LANDED, and the mechanism it was named for is refuted
 
-**This is the LIVE handoff. START HERE.** Date: 2026-07-26. Branch `calib-ambig-init-wip`.
+*(this file's own original header — superseded)* Date: 2026-07-26. Branch `calib-ambig-init-wip`.
 Supersedes `SESSION_2026_07_26_HANDOFF_13.md` (still the composition-peel / message-packet record).
 
 Suite **0.0865 (refit=0) / 0.0676 (refit=1)** — deliberately UP from 0.0855 / 0.0671, bought against a

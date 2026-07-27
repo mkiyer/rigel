@@ -35,7 +35,7 @@
 >
 > **⭐ CURRENT (2026-07-26): the composition peel, the MESSAGE PACKET and **P1d** are LANDED; the next task
 > is P1e.** Suite **0.0865 (refit=0) / 0.0676 (refit=1)** — deliberately up from 0.0855 / 0.0671, bought
-> against a 36.6 % cut in confidently-wrong mass. **Read `SESSION_2026_07_26_HANDOFF_14.md` — it is the LIVE
+> against a 36.6 % cut in confidently-wrong mass. **Read `SESSION_2026_07_26_HANDOFF_15.md` — it is the LIVE
 > handoff and has the run instructions.**
 >
 > **The frame for everything that remains:** the error MASS is close to its prior-free ceiling (HANDOFF_10 §3:

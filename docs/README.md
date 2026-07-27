@@ -32,7 +32,7 @@ is small; **do not reference `archive/`.**
 | [`variance_model_handoff.md`](calibration/variance_model_handoff.md) | **the variance-model derivation, to be REDONE** — why the composition solver breaks the old density-uniformity variance model; the per-component form to derive; the peel; the transfer-variance redo; the ω decision. |
 | [`unified_solver_design.md`](calibration/unified_solver_design.md) | the target solver's **mode** design (the reframe + ÷M_dst). **Its precision/variance sections are superseded** by the handoff above. |
 | [`gdna_intron_factory_design.md`](calibration/gdna_intron_factory_design.md) | a **shipped** feature — the intron gDNA factory (`intron_factory=True` default). |
-| [`SESSION_2026_07_26_HANDOFF_14.md`](calibration/SESSION_2026_07_26_HANDOFF_14.md) | the LIVE session handoff — state, what landed, the do-not-re-run table, and how to run every gate. Earlier `SESSION_*_HANDOFF_*.md` files are superseded history. |
+| [`SESSION_2026_07_26_HANDOFF_15.md`](calibration/SESSION_2026_07_26_HANDOFF_15.md) | the LIVE session handoff — state, what landed, the do-not-re-run table, and how to run every gate. Earlier `SESSION_*_HANDOFF_*.md` files are superseded history. |
 | [`archive/`](calibration/archive/) | **provenance, not current** — all superseded roadmaps, derivations, and per-session notes. Do not cite. |
 
 ## Accumulator (`accumulator/`)
