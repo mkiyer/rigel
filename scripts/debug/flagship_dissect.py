@@ -92,7 +92,7 @@ def main():
     bg = None if a.no_floor else s["bg"]
     prior = DensityNPMLE.fit(mass_g, eff_g, background=bg, bandwidth=a.bandwidth)
     belief = node_sweep(
-        chain, s["st"], s["geom"], s["b0"], s["ra"], s["bsub"], rna_sense_frac=s["kappa"],
+        chain, s["st"], s["geom"], s["b0"], s["ra"], rna_sense_frac=s["kappa"],
         gdna_strand_overdispersion=s["od_g"], rna_strand_overdispersion=s["od_r"], n_grid=cc.sweep_n_grid,
         logodds_window=cc.sweep_logodds_window, n_tilt=cc.sweep_n_tilt,
         n_grid_ss=cc.sweep_n_grid_single_strand, gdna_prior=prior, _capture=cap,

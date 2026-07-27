@@ -342,7 +342,6 @@ def calibrate(
             geometry,
             belief,
             region_arrays,
-            boundary_substrate,
             rna_sense_frac=rna_sense_frac,
             gdna_strand_overdispersion=gdna_strand_overdispersion,
             rna_strand_overdispersion=rna_strand_overdispersion,

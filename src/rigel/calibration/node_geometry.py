@@ -92,7 +92,7 @@ class NodeGeometry:
     # needs (`Var(log rho_m) = 1/n`, not `1/mass` — mass sums fractional per-fragment shares, so `1/mass`
     # over-states the variance; the Kish n_eff = (sum w)^2/sum w^2 >= mass). Precedent for carrying both:
     # `_boundary_strand_stats` already takes the integer flux for the BB strand power and the float mass for
-    # the pie base. Currently UNUSED by the solver — plumbed for the priority-#3 mature-measurement channel
+    # the pie base. Consumed by the solver as M10's ``v_μ`` (`bp_solver` builds `_v_mu_f` from it) — the spliced COUNT,
     # (docs/calibration/archive/boundary_spliced_channel_design.md §4.1); inert until that lands.
     spliced_n_pos_left: np.ndarray
     spliced_n_pos_right: np.ndarray

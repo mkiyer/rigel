@@ -146,7 +146,6 @@ def self_solve(inp, index, cfg, stage="both"):
             geom,
             belief,
             ra,
-            bsub,
             rna_sense_frac=kappa,
             n_grid=cc.sweep_n_grid,
             n_grid_ss=cc.sweep_n_grid_single_strand,

@@ -178,15 +178,14 @@ def _gdna_arm(lam, global_logprior):
     return np.asarray(global_logprior, np.float64)
 
 
-def _rna_arm(lam, rna_logprior=None):
+def _rna_arm(lam):
     """The RNA-**total** arm of ψ over the λ grid → broadcastable to ``(m, K)``.
 
-    ``logP_r(log ρ_r)`` when fitted, else the ``_JEFFREYS_REF`` reference ``+½·log(1 − f_g)`` → ``(1, K)``.
+    The ``_JEFFREYS_REF`` reference ``+½·log(1 − f_g)`` → ``(1, K)``. ``logP_r`` is NOT fitted — there is no
+    parameter to pass one, by design, because nothing produces it today.
     This is the **two-group** arm (gDNA vs RNA-total): the per-strand split is the nuisance tilt, integrated
     out on the θ axis, and needs no prior of its own. `logP_r` is not fitted yet — the reference is what bounds
     the ``f_g → 1`` vertex today, and it is the ONLY thing doing so."""
-    if rna_logprior is not None:
-        return np.asarray(rna_logprior, np.float64)
     return _JEFFREYS_REF * _log1m_fg(lam)[None, :]
 
 
@@ -528,18 +527,17 @@ def _solve_ambig_logodds(
         tm_ = np.asarray(theta_imp_mode, F)[:, None, None]
         tp_ = np.asarray(theta_imp_prec, F)[:, None, None]
         psi -= F(0.5) * tp_ * (theta.astype(F)[None, None, :] - tm_) ** 2
-    psi_full = psi  # (m,K,Kt) f32
     # θ-marginal λ-posterior (m,K) — lift to f64 so the posterior median + moments are full-precision.
-    psi_lam = _lse(psi_full, axis=2).astype(np.float64)
+    psi_lam = _lse(psi, axis=2).astype(np.float64)
     post_lam = np.exp(psi_lam - _lse(psi_lam, axis=1, keepdims=True))
     f_g = _posterior_median_fg(post_lam, fg)
     # precision state = Var(log f_g) over the θ-marginal λ-posterior (D2).
     mLg = post_lam @ log_fg_grid
     var_g = np.maximum(post_lam @ (log_fg_grid * log_fg_grid) - mLg * mLg, 0.0)
     # f_pos/f_neg MEANS + Var(log f_pos/neg) over the FULL 2-D posterior (f32 cube; sums accumulate in f64).
-    flat = psi_full.reshape(psi_full.shape[0], -1)
+    flat = psi.reshape(psi.shape[0], -1)
     post2d = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(
-        psi_full.shape
+        psi.shape
     )  # (m,K,Kt) f32
     fp_grid = fpk[None, :, :]
     fn_grid = fnk[None, :, :]

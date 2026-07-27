@@ -119,7 +119,7 @@ def _setup(inp, index, cfg):
 def _sweep(s, belief, prior):
     cc = s["cc"]
     return node_sweep(
-        s["chain"], s["st"], s["geom"], belief, s["ra"], s["bsub"], rna_sense_frac=s["kappa"],
+        s["chain"], s["st"], s["geom"], belief, s["ra"], rna_sense_frac=s["kappa"],
         gdna_strand_overdispersion=s["od_g"], rna_strand_overdispersion=s["od_r"], n_grid=cc.sweep_n_grid,
         logodds_window=cc.sweep_logodds_window, n_tilt=cc.sweep_n_tilt,
         n_grid_ss=cc.sweep_n_grid_single_strand, gdna_prior=prior,     )

@@ -56,7 +56,7 @@ def solve(inp):
     ip = _build_intron_prior(chain, sub, ra, reff, cc)
     be = init_beliefs(chain, sub, bsub, ra, rna_sense_frac=kappa, n_grid=cc.sweep_n_grid,
                       n_grid_ss=cc.sweep_n_grid_single_strand, logodds_window=cc.sweep_logodds_window, statics=st)
-    fb = node_sweep(chain, st, geom, be, ra, bsub, rna_sense_frac=kappa,
+    fb = node_sweep(chain, st, geom, be, ra, rna_sense_frac=kappa,
                     rna_strand_overdispersion=0.0011, gdna_strand_overdispersion=0.0012,
                     n_gdna_obs=gp + gn, n_rna_obs=float(bal.n_observations), n_grid=cc.sweep_n_grid,
                     n_grid_ss=cc.sweep_n_grid_single_strand, logodds_window=cc.sweep_logodds_window,

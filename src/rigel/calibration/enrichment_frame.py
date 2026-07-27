@@ -20,9 +20,7 @@ across a frame change is a known past defect (§2 of the junction doc). And the 
 carried as a **variance**, not a bool gate: the bounding lemma (§2) says a totally wrong composition still
 pins ``ρ_tot`` to within the effective-length ratio (1.04–1.5× for normal nodes, 4×+ for short regions), which
 is a continuous quantity — :func:`composition_logvar` derives it with no tuned threshold, so a short region
-down-weights itself automatically. The only genuine bool is :func:`gdna_fallback_admissible`, the §5
-*structural* refusals where the 100 %-gDNA default is qualitatively wrong (AMBIG, exon↔exon, no junction,
-retained intron) and a wrong frame is worse than no message.
+down-weights itself automatically, with no ``L ≲ fl_mean`` cut anywhere in the module.
 """
 
 from __future__ import annotations

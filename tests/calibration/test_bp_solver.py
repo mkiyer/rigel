@@ -357,7 +357,6 @@ def _factor1_uniform_rho():
         geom,
         belief,
         region_arrays,
-        bsub,
         rna_sense_frac=0.7,
         n_grid=40,
     )
@@ -468,7 +467,6 @@ def test_gdna_emits_across_tss_tes_seam():
         geom,
         belief,
         region_arrays,
-        bsub,
         rna_sense_frac=0.7,
         n_grid=40,
         _capture=cap,
@@ -534,7 +532,6 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
         geom,
         belief,
         region_arrays,
-        bsub,
         rna_sense_frac=0.95,
         n_rna_obs=10000.0,  # library sample sizes so the stranded (κ=0.95) intron seeds fire (τ noise floor)
         n_gdna_obs=10000.0,
@@ -688,7 +685,6 @@ def _sweep(args, kappa=0.95, n_rna_obs=10000.0, n_gdna_obs=10000.0):
         geom,
         belief,
         ra,
-        bsub,
         rna_sense_frac=kappa,
         # The τ strand seed needs the library sample sizes to size its overdispersion noise floor
         # ¼·(1/N + ω); a strongly-stranded fixture (κ=0.95) fires only when N is supplied (the default 0 ⇒

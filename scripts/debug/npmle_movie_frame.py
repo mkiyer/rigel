@@ -109,7 +109,7 @@ def solve_belief(inp, index, cfg):
     prior = DensityNPMLE.fit(mass_g, eff_g, bandwidth=cc.npmle_bandwidth)
     cap = {}
     belief = node_sweep(
-        chain, st, geom, b0, ra, bsub, rna_sense_frac=kappa, gdna_strand_overdispersion=od_g,
+        chain, st, geom, b0, ra, rna_sense_frac=kappa, gdna_strand_overdispersion=od_g,
         rna_strand_overdispersion=od_r, n_grid=cc.sweep_n_grid, logodds_window=cc.sweep_logodds_window,
         n_tilt=cc.sweep_n_tilt, n_grid_ss=cc.sweep_n_grid_single_strand, gdna_prior=prior,
         _capture=cap,

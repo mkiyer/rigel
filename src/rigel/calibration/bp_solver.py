@@ -15,9 +15,10 @@ per-side spliced), the inactive strands are FILTERED at the destination, the mat
 exon / peel out of an exon, via the boundary's measured spliced), then each component becomes a factor on the
 destination's ``f_c`` by the density mode ÷ its own observed mass ``M_dst`` (the pure arithmetic in
 `enrichment_frame`). The forward-backward relay carries per-component densities + precisions; the combine
-transports both neighbours into the node's frame and runs the ψ solve. ⚠ **The message VARIANCE model
-(``σ²_transfer`` / the per-hop damping) is the density-uniformity proxy and is being REDONE**
-(`docs/calibration/variance_model_handoff.md` §3-4) — it is deliberately left as-is here.
+transports both neighbours into the node's frame and runs the ψ solve. The message VARIANCE model is
+COMPLETE — laws M1–M11 derived, MC-validated (`scripts/debug/message_variance_mc.py`) and A/B-won; see
+`docs/calibration/message_variance_derivation.md`, audited in `docs/calibration/variance_ledger.md`. The
+density-uniformity NPMLE proxy it replaced is retired.
 
 Module layout. The per-node geometry / belief / statics / init primitives and the pure geometry helpers
 (`build_node_geometry`, `build_node_statics`, `init_beliefs`, `node_global_geometry`, `node_total_density`,
@@ -86,7 +87,7 @@ __all__ = [
 
 _EPS = 1.0e-9
 
-# ⭐ ONE ρ-iteration. The combine's reframe needs the DESTINATION's composition, which is what the messages
+# ⭐ ONE ρ-iteration (straight-line, no loop — see the combine below). The combine's reframe needs the DESTINATION's composition, which is what the messages
 # are trying to determine — so a second iteration reframed off the FUSED posterior, i.e. the message from L
 # into i was framed using a belief that already contained the message from R into i. That is a BP violation
 # (a message may depend on anything except its own destination's other messages), and it was the last of
@@ -107,7 +108,6 @@ _EPS = 1.0e-9
 # another reason. A belief-FREE constant frame (`node_total_density`'s pure-gDNA fallback) was also
 # prototyped: it costs more (+0.0003 suite, +0.0010 fit-substrate) and is neutral-to-worse on a held-fixed
 # z2, so it is not a better trade than simply dropping the iteration.
-_RHO_ITERS = 1
 
 
 def node_sweep(
@@ -116,7 +116,6 @@ def node_sweep(
     geometry: NodeGeometry,
     belief: NodeBelief,
     region_arrays,
-    boundary_substrate,
     *,
     rna_sense_frac: float,
     gdna_strand_overdispersion: float = 0.0,
@@ -405,7 +404,7 @@ def node_sweep(
         _vl_a, _vr_a = _li_a >= 0, _ri_a >= 0
         _sl_a, _sr_a = np.clip(_li_a, 0, n - 1), np.clip(_ri_a, 0, n - 1)
 
-# ⚠ The two seams must be compared IN THE DESTINATION'S OWN FRAME. Each is lifted by its own
+        # ⚠ The two seams must be compared IN THE DESTINATION'S OWN FRAME. Each is lifted by its own
         # enrichment step ``r``, and under capture those steps differ (the two seams sit at different probe
         # positions), so comparing unlifted fluxes reads a capture difference as an abundance difference.
         # Measured on the MODE variant of this idea (replace the claim by the dominant seam's flux): raw is
@@ -436,8 +435,6 @@ def node_sweep(
             )
 
 
-        # P1d is ON by default; `RIGEL_GLV_OFF=1` ablates it (bit-identical to the pre-P1d path).
-        vgp_prem = vgn_prem = None  # per-ρ-iteration, in the destination's frame; set before each transport
 
         # own per-component densities + precisions — the message-free SELF-SOLVE (`node_init.build_node_init`,
         # the four sources). ``rho_*`` are the own densities; ``prec_*`` combine the strand + intron-factory
@@ -634,7 +631,7 @@ def node_sweep(
         # far node is still the other message's source, and its relayed belief carries strictly MORE of that
         # node's data than the raw self-solve did), and it recovers only 0.000117 of the 0.000696 price.
         #
-        # ⚠ AND `_far` WAS NOT THE LAST THIRD-NODE DEPENDENCE. `_RHO_ITERS = 2`, and the second iteration's
+        # ⚠ AND `_far` WAS NOT THE LAST THIRD-NODE DEPENDENCE. When the sweep ran TWO ρ-iterations, the second's
         # reframe faces are built from the destination's FUSED posterior — i.e. from the other message —
         # so the reframe itself still reuses it (measured median |Δlog ρ_face| between iterations 0.0116
         # stranded-capOFF to 0.1242 unstranded-capON, >1 % on 52.7–79.0 % of nodes). Deleting `_far` does
@@ -1130,7 +1127,6 @@ def node_sweep(
             # supplied — it is the claim "there is none of this here", which is exactly a composition claim.
             # Testing the density conflates the two and silences λ wherever a legitimate zero is emitted.
             ttau = np.where((tpg > 0.0) & ((tpp + tpn) > 0.0), ttau, 0.0)
-# (intron λ gate removed — see if EXP-E alone suffices)
             g_g, c_g = mismatch_gap(tg, og)
             g_p, c_p = mismatch_gap(tp, op)
             g_n, c_n = mismatch_gap(tn, on)
@@ -1193,7 +1189,7 @@ def node_sweep(
             p = pa + pb
             return np.where(p > _EPS, (pa * a + pb * b) / np.maximum(p, _EPS), 0.0), p
 
-        # ONE ρ-iteration (see `_RHO_ITERS`), so this is straight-line: the frames are the INPUT-belief
+        # ONE ρ-iteration (see the note at the top of the module), so this is straight-line: the frames
         # faces `rho_l0`/`rho_r0` already built above, and there is no next iteration to feed.
         ag, ap, an, apg, app, apn, amg, amp, amn, atau, alam, ath = _transport(
             sl, vl, 0, 1, fwd, rho_l0, rho_r0
@@ -1236,11 +1232,10 @@ def node_sweep(
             0.0,
         )
         th_prec = np.where(is_amb, cm_p + cm_n, 0.0)
-        # DIAGNOSTIC ONLY (P1, `docs/calibration/PASS0_FINISH_PLAN.md`): ablate the RNA MEASUREMENT ψ
-        # factor. It is the channel that carries 75 % of the posterior precision on the confidently-wrong
-        # unstranded × capture-OFF exons — and ablating it is NOT the fix: 0.0895 → 0.1033, 4 better / 17
-        # worse, because it is also the only thing that lets a zero-gDNA library say "my mass is all RNA"
-        # (`gdna_none` 0.1063 → 0.1438). Kept for developing the real fix.
+        # ⛔ The RNA MEASUREMENT ψ factor was ablated here behind a flag (now removed). Do not re-try it:
+        # it carries 75 % of the posterior precision on the confidently-wrong unstranded × capture-OFF
+        # exons, and removing it measured 0.0895 → 0.1033, 4 better / 17 worse — it is also the only thing
+        # that lets a zero-gDNA library say "my mass is all RNA" (`gdna_none` 0.1063 → 0.1438).
         dc_fin = _local_solve(
             global_lp, mo_g, cm_g, (mo_p, mo_n), (cm_p, cm_n),
             lam_imp=(lam_msg, c_tau), theta_imp=(th_msg, th_prec),

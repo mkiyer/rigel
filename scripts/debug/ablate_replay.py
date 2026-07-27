@@ -63,7 +63,7 @@ def build(inp, index, cfg):
     )
     cap: dict = {}
     node_sweep(
-        chain, st, geom, belief, ra, bsub, rna_sense_frac=kappa, n_grid=cc.sweep_n_grid,
+        chain, st, geom, belief, ra, rna_sense_frac=kappa, n_grid=cc.sweep_n_grid,
         n_grid_ss=cc.sweep_n_grid_single_strand, logodds_window=cc.sweep_logodds_window,
         n_tilt=cc.sweep_n_tilt, gdna_prior=None, _capture=cap,
     )
