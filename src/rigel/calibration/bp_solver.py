@@ -31,19 +31,23 @@ INITIALIZATION self-solve (the four sources → each node's own ``(density, prec
 
 from __future__ import annotations
 
+import math
 
 import numpy as np
-from scipy.special import polygamma
+from scipy.special import zeta
 
 from .enrichment_frame import (
+    _fmax,
     composition_logvar,
     graft_frame_logvar,
     graft_premise_logvar,
     mismatch_deflate,
     mismatch_gap,
     peel_continue_share,
+    peel_continue_share_scalar,
     peel_share_logvar,
     residual_level,
+    residual_level_scalar,
     transfer_logvar,
 )
 from .node_chain import REGION, NodeChain
@@ -622,19 +626,21 @@ def node_sweep(
         # plugged-in point estimate, and let the destination's own ψ solve modulate it. No data reuse at
         # all. Structurally available, unimplemented, unmeasured.
 
-        def _peel_share(k, df, tg, tpg, tp, tn):
-            """The continuing share ``w`` and ``Var(log w)`` per strand, on face ``df`` of node(s) ``k``, for a
+        def _peel_share(df, tg, tpg, tp, tn):
+            """The continuing share ``w`` and ``Var(log w)`` per strand, on face ``df`` of every node, for a
             message whose gDNA claim is ``(tg, tpg)`` and whose RNA claim is ``(tp, tn)``. Returns
             ``((w_p, vw_p), (w_n, vw_n))``; ``Var(log w) = +inf`` (⇒ zero precision, an inert message) only
-            where NONE of the three estimators of the level exists."""
+            where NONE of the three estimators of the level exists.
+
+            ⚠ TWIN of `_peel_share_scalar` (the sequential relay's arm) — mirror any change into both."""
             _vg = np.where(np.asarray(tpg, np.float64) > 0.0, 1.0 / np.maximum(tpg, _EPS), np.inf)
-            _nu_m, _, _vl_m = residual_level(M[k], _n_node[k], tg, E_g[k], E_r[k], _vg)
+            _nu_m, _, _vl_m = residual_level(M, _n_node, tg, E_g, E_r, _vg)
             _A = np.asarray(tp, np.float64) + np.asarray(tn, np.float64)
             _a_p = np.where(_A > _EPS, np.asarray(tp, np.float64) / np.maximum(_A, _EPS), 0.0)
             out = []
             for _a, _mu, _vmu in (
-                (_a_p, _mu_f[df][0][k], _v_mu_f[df][0][k]),
-                (1.0 - _a_p, _mu_f[df][1][k], _v_mu_f[df][1][k]),
+                (_a_p, _mu_f[df][0], _v_mu_f[df][0]),
+                (1.0 - _a_p, _mu_f[df][1], _v_mu_f[df][1]),
             ):
                 # ── THE FUSE, in LINEAR density space (see `residual_level`'s return contract) ──────────
                 # Each estimator is (ρ_i, Var_i); an own/far claim carrying a delta-method log-variance v is
@@ -661,9 +667,9 @@ def node_sweep(
                 # its log-variance by the same exact rule M11 uses (ψ'(k) → 1/k for a well-determined level,
                 # → π²/6 for one earned by a single fragment; never over-confident).
                 _kk = np.maximum(_nu * _nu * _pt, 1.0)
-                _v_nu = np.where(_live, polygamma(1, _kk), np.inf)
+                _v_nu = np.where(_live, zeta(2.0, _kk), np.inf)
                 _w = np.where(_live, peel_continue_share(_nu, _mu), 0.0)
-                if _capture is not None and isinstance(k, slice):  # the vectorized combine only
+                if _capture is not None:
                     _capture.setdefault("_lvl", []).append(  # inert: the level's provenance, per face
                         {"df": df, "nu": np.asarray(_nu).copy(), "v_nu": np.asarray(_v_nu).copy(),
                          "pm": np.asarray(_pm).copy(),
@@ -691,6 +697,46 @@ def node_sweep(
                 )
             return out
 
+        def _peel_share_scalar(i, df, tg, tpg, tp, tn):
+            """The SCALAR twin of `_peel_share`, for one node ``i`` — see that docstring for the model.
+
+            ⚠ TWIN: mirror any change into both. It exists because `_relay` is a sequential Gauss-Seidel
+            scan (it cannot be vectorised) and calls this once per node per direction, so the array form
+            runs ~50 numpy ops on 0-d arrays per call — 0.5–0.7 µs each against ~0.02 µs for the float
+            expression. Same arithmetic in the same association order; every `np.where` becomes the branch
+            it encodes, so the dead arms (`ζ(2,·)` and `residual_level`'s four `log_ndtr`s at a node with
+            no level) are no longer evaluated and discarded. Measured 25× on this path, which is the bulk
+            of a genome-scale calibration."""
+            _vg = 1.0 / _fmax(float(tpg), _EPS) if tpg > 0.0 else math.inf
+            _nu_m, _, _vl_m = residual_level_scalar(M[i], _n_node[i], tg, E_g[i], E_r[i], _vg)
+            _fin = math.isfinite(_vl_m)
+            _A = float(tp) + float(tn)
+            _a_p = float(tp) / _A if _A > _EPS else 0.0
+            out = []
+            for _a, _mu, _vmu in (
+                (_a_p, float(_mu_f[df][0][i]), float(_v_mu_f[df][0][i])),
+                (1.0 - _a_p, float(_mu_f[df][1][i]), float(_v_mu_f[df][1][i])),
+            ):
+                _nu_ms = _nu_m * _a
+                _pm = (
+                    1.0 / _fmax((_vl_m if _fin else 0.0) * _a * _a, _EPS)
+                    if (_fin and _nu_ms > _EPS)
+                    else 0.0
+                )
+                if not _pm > _EPS:  # no level ⇒ no claim: w = 0 at zero precision, an inert message
+                    out.append((0.0, math.inf))
+                    continue
+                _nu = (_pm * _nu_ms) / _pm  # ⚠ NOT `_nu_ms` — `(a·b)/a ≠ b` in floating point
+                _v_nu = float(zeta(2.0, _fmax(_nu * _nu * _pm, 1.0)))
+                _w = peel_continue_share_scalar(_nu, _mu)
+                _wm = 1.0 - _w
+                # a spliced DENSITY with no spliced COUNT cannot be priced (plan §4.7) ⇒ no claim at all.
+                _ok = math.isfinite(_vmu) or not _mu > _EPS
+                out.append(
+                    (_w, _wm * _wm * (_v_nu + (_vmu if math.isfinite(_vmu) else 0.0)) if _ok else math.inf)
+                )
+            return out
+
         # σ²_transfer per-hop damping: add the edge's transfer log-variance to the message's log-variance
         # (1/p → 1/p + σ²_transfer). This is now the DERIVED, direction-dependent M5 variance (0 on the matched
         # graft, Var(log r) on the peel/plain/anchor — computed per edge from ``logvar_tot`` below), retiring the
@@ -700,7 +746,7 @@ def node_sweep(
 
         def _damp_v(p, v):
             """STEP 3: add a log-variance to a precision. 1/p → 1/p + v ; v = ∞ ⇒ 0 (no claim)."""
-            return p / (1.0 + p * v) if (p > 0.0 and np.isfinite(v)) else 0.0
+            return p / (1.0 + p * v) if (p > 0.0 and math.isfinite(v)) else 0.0
 
         # ── ⚠ `_relay` AND `_transport` ARE DELIBERATE TWINS. DO NOT MERGE THEM. ────────────────────────
         # They implement the SAME eight-step per-edge transform in the same order — reframe `r` → detect the
@@ -781,9 +827,8 @@ def node_sweep(
                     tpn, tmn = _damp_v(tpn, _vgn), _damp_v(tmn, _vgn)
 
                 if is_bnd_a[i] and ex_a[s]:  # EXON → boundary: PEEL by COMPOSITION (scale by the share)
-                    (_wp, _vwp), (_wn, _vwn) = _peel_share(i, df, tg, tpg, tp, tn)
-                    tp, tn = tp * float(_wp), tn * float(_wn)
-                    _vwp, _vwn = float(_vwp), float(_vwn)
+                    (_wp, _vwp), (_wn, _vwn) = _peel_share_scalar(i, df, tg, tpg, tp, tn)
+                    tp, tn = tp * _wp, tn * _wn
                     tpp, tmp = _damp_v(tpp, _vwp), _damp_v(tmp, _vwp)
                     tpn, tmn = _damp_v(tpn, _vwn), _damp_v(tmn, _vwn)
                 if not fp_a[i]:
@@ -938,7 +983,7 @@ def node_sweep(
             tpn, tmn = tpn / (1.0 + tpn * _vgn), tmn / (1.0 + tmn * _vgn)
 
             peel = is_bnd_a & ex_a[src] & valid  # EXON → boundary: PEEL by COMPOSITION (the relay's twin)
-            (_wp, _vwp), (_wn, _vwn) = _peel_share(slice(None), df, tg, tpg, tp, tn)
+            (_wp, _vwp), (_wn, _vwn) = _peel_share(df, tg, tpg, tp, tn)
             tp = np.where(peel, tp * _wp, tp)
             tn = np.where(peel, tn * _wn, tn)
 

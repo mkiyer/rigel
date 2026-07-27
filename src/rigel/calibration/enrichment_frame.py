@@ -27,8 +27,10 @@ retained intron) and a wrong frame is worse than no message.
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
-from scipy.special import log_ndtr, polygamma
+from scipy.special import log_ndtr, zeta
 
 __all__ = [
     "composition_logvar",
@@ -36,19 +38,40 @@ __all__ = [
     "graft_frame_logvar",
     "peel_rna_logvar",
     "peel_continue_share",
+    "peel_continue_share_scalar",
     "peel_share_logvar",
     "residual_level",
+    "residual_level_scalar",
     "transfer_logvar",
     "mismatch_gap",
     "mismatch_deflate",
 ]
 
 _EPS = 1.0e-12
-
+_INV_EPS = 1.0 / _EPS
+_HALF_LOG_2PI = 0.5 * np.log(2.0 * np.pi)  # folded once; the same bits as the inline expression
 
 
 def _f(x):
     return np.asarray(x, dtype=np.float64)
+
+
+# ── scalar twins of the three numpy selectors, for the SCALAR path below ───────────────────────────────
+# They exist because `np.maximum`/`np.minimum` PROPAGATE nan (`(a > b || isnan(a)) ? a : b`) where a bare
+# `x if x > c else c` would silently swallow it, and because `np.clip` KEEPS x inside the interval (so it
+# preserves −0.0) rather than composing max-then-min. Both differences are reachable, both are bugs if
+# mismatched, and both are one token wide. Bitwise-verified against numpy over every (x, constant) pair
+# this module forms, including ±inf / nan / ±0.0 (`test_enrichment_frame.py`).
+def _fmax(x, c):
+    return x if x > c or x != x else c
+
+
+def _fmin(x, c):
+    return x if x < c or x != x else c
+
+
+def _fclip01(x):
+    return x if x != x else (0.0 if x < 0.0 else (1.0 if x > 1.0 else x))
 
 
 def composition_logvar(f_g, E_g, E_r, var_fg, n):
@@ -169,6 +192,14 @@ def peel_continue_share(rho_nu, rho_mu):
     return np.where(tot > _EPS, nu / np.maximum(tot, _EPS), 1.0)
 
 
+def peel_continue_share_scalar(rho_nu, rho_mu):
+    """Scalar twin of :func:`peel_continue_share` — see that docstring for the model.
+
+    ⚠ TWIN: mirror any change into both. Pinned bit-for-bit by ``test_enrichment_frame.py``."""
+    tot = rho_nu + rho_mu
+    return rho_nu / tot if tot > _EPS else 1.0
+
+
 def peel_share_logvar(w_mu, v_nu, v_mu):
     """M10 — the log-variance the continuing SHARE contributes: ``w_μ²·(v_ν + v_μ)``.
 
@@ -282,8 +313,8 @@ def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
     ss = np.where(tiny, 1.0, sig)
     beta = np.where(tiny, 1.0, phi / ss)
     alpha = beta - 1.0 / ss
-    pdf_a = np.exp(-0.5 * alpha * alpha - 0.5 * np.log(2.0 * np.pi))
-    pdf_b = np.exp(-0.5 * beta * beta - 0.5 * np.log(2.0 * np.pi))
+    pdf_a = np.exp(-0.5 * alpha * alpha - _HALF_LOG_2PI)
+    pdf_b = np.exp(-0.5 * beta * beta - _HALF_LOG_2PI)
     Z = np.where(
         alpha >= 0.0,
         np.exp(log_ndtr(-alpha)) - np.exp(log_ndtr(-beta)),
@@ -323,15 +354,65 @@ def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
         ),
     )
     k = np.maximum(f_R * f_R / np.maximum(v_f, _EPS), 1.0)  # the RNA share's effective fragment count
+    # ψ'(k) — as ``zeta(2, k)``, which is what ``scipy.special.polygamma(1, k)`` reduces to exactly (its
+    # ``(−1)^(n+1)`` and ``Γ(n+1)`` prefactors are both 1.0 at n=1) without also evaluating ψ(k) and
+    # discarding it. Bitwise-identical; the equality is pinned in `test_enrichment_frame.py`.
     v_log = np.where(
         ok,
-        polygamma(1, np.minimum(k, 1.0 / _EPS))
+        zeta(2.0, np.minimum(k, _INV_EPS))
         + inv_n / np.maximum(f_R * f_R, _EPS),  # the count, with its exact 1/f_R Jacobian
         np.inf,
     )
     rho = np.where(ok, f_R * m_ / np.maximum(er_, _EPS), 0.0)
     # mask the ∞ BEFORE the product (np.where evaluates both branches: ``0·inf = nan``, the standing trap).
     return rho, v_log, np.where(ok, rho * rho * np.where(ok, v_log, 0.0), np.inf)
+
+
+def residual_level_scalar(mass, n_mass, rho_g, E_g, E_r, v_g):
+    """Scalar twin of :func:`residual_level` — see that docstring for the model and the derivation.
+
+    Same arithmetic in the same association order, with every ``np.where`` turned back into the branch it
+    encodes. That is where the speed is: the array form must evaluate BOTH arms of all 21 selectors, so a
+    node with no level still pays for ``log_ndtr`` ×4 and ``ζ(2,·)``, and every one of those ops costs
+    0.5–0.7 µs on a 0-d array against ~0.02 µs for the float expression. 25× on the main branch, 223× on
+    the no-level early-out — and the relay calls this once per node per direction, sequentially, which is
+    the bulk of a genome-scale calibration.
+
+    ⚠ TWIN of :func:`residual_level`: mirror any change into both. The equality is pinned bit-for-bit,
+    over every branch and every ±inf/nan/±0.0 corner, by ``test_enrichment_frame.py``."""
+    m_, n_, rg_ = float(mass), float(n_mass), float(rho_g)
+    eg_, er_, vg_ = float(E_g), float(E_r), float(v_g)
+    if not (m_ > _EPS and n_ > 0.0 and er_ > _EPS and math.isfinite(vg_)):
+        return 0.0, math.inf, math.inf  # no level exists
+    inv_n = 1.0 / _fmax(n_, _EPS)
+    phi = _fmax(rg_, 0.0) * eg_ / _fmax(m_, _EPS)
+    sig = _fmin(phi, 1.0) * math.sqrt(_fmax(vg_, 0.0))
+    if sig <= _EPS:  # a certain gDNA claim ⇒ the share is exactly what it leaves over
+        f_R, v_f = _fclip01(1.0 - phi), 0.0
+    else:
+        beta = phi / sig
+        alpha = beta - 1.0 / sig
+        if alpha >= 0.0:  # subtract SAME-SIDE tails — neither branch loses precision to cancellation
+            Z = math.exp(log_ndtr(-alpha)) - math.exp(log_ndtr(-beta))
+        else:
+            Z = math.exp(log_ndtr(beta)) - math.exp(log_ndtr(alpha))
+        if not Z > _EPS:  # Z underflowed — the two exact limits the docstring supplies
+            if alpha > 0.0:  # the claim over-explains the crossing: an exponential on [0,1], k = 1
+                e_tail = sig / alpha
+                f_R, v_f = _fclip01(e_tail), e_tail * e_tail
+            else:  # σ_f swamps the unit interval: f_R ~ Uniform(0,1), k = 3
+                f_R, v_f = 0.5, 1.0 / 12.0
+        else:
+            pdf_a = math.exp(-0.5 * alpha * alpha - _HALF_LOG_2PI)
+            pdf_b = math.exp(-0.5 * beta * beta - _HALF_LOG_2PI)
+            d = (pdf_a - pdf_b) / Z
+            f_R = _fclip01(1.0 - phi + sig * d)
+            v_f = sig * sig * _fmax(1.0 + (alpha * pdf_a - beta * pdf_b) / Z - d * d, 0.0)
+    fr2 = f_R * f_R
+    k = _fmin(_fmax(fr2 / _fmax(v_f, _EPS), 1.0), _INV_EPS)
+    v_log = float(zeta(2.0, k)) + inv_n / _fmax(fr2, _EPS)
+    rho = f_R * m_ / _fmax(er_, _EPS)
+    return rho, v_log, rho * rho * v_log
 
 
 def transfer_logvar(logvar_tot_dst, logvar_tot_src, graft):

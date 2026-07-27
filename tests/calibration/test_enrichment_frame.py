@@ -13,9 +13,12 @@ load-bearing identities the whole framework rests on (``docs/calibration/archive
 
 from __future__ import annotations
 
+import itertools
+import math
+
 import numpy as np
 import pytest
-from scipy.special import polygamma
+from scipy.special import polygamma, zeta
 
 from rigel.calibration.enrichment_frame import (
     composition_logvar,
@@ -24,9 +27,11 @@ from rigel.calibration.enrichment_frame import (
     mismatch_deflate,
     mismatch_gap,
     peel_continue_share,
+    peel_continue_share_scalar,
     peel_rna_logvar,
     peel_share_logvar,
     residual_level,
+    residual_level_scalar,
     transfer_logvar,
 )
 
@@ -492,3 +497,68 @@ def test_graft_premise_logvar_pooled_is_the_load_bearing_return():
     assert list(per[1:]) == [0.0, 0.0, 0.0, 0.0]
     assert pooled == pytest.approx(0.5, rel=1e-12)  # d² = 1, no noise, halved
     assert np.isfinite(pooled)
+
+
+# ── THE SCALAR TWINS ───────────────────────────────────────────────────────────────────────────────────
+# `bp_solver._relay` is a sequential Gauss-Seidel scan, so it calls these primitives once per node with a
+# SCALAR — where the array form's ~50 numpy ops on 0-d arrays cost ~25x the equivalent float expression.
+# The scalar twins earn that back only if they are the SAME FUNCTION: a performance twin that is merely
+# *approximately* equal is a silent modelling change. So these tests assert the BITS, never `approx`.
+
+
+def _same_bits(a, b):
+    a, b = float(a), float(b)
+    return (math.isnan(a) and math.isnan(b)) or np.float64(a).view(np.int64) == np.float64(b).view(
+        np.int64
+    )
+
+
+def test_polygamma_1_is_exactly_zeta_2():
+    """Both twins evaluate ψ'(k) as ``zeta(2, k)``. That is what ``scipy.special.polygamma(1, k)`` reduces
+    to — its ``(−1)^(n+1)`` and ``Γ(n+1)`` prefactors are both exactly 1.0 at n=1 — but it is an
+    implementation detail of scipy, so pin it here: if scipy ever changes, this fails before the A/B does."""
+    k = np.concatenate([[1.0, 3.0, 1.0 / 1.0e-12], np.exp(np.linspace(0.0, 27.0, 5000))])
+    assert np.array_equal(polygamma(1, k).view(np.int64), zeta(2.0, k).view(np.int64))
+
+
+def test_residual_level_scalar_is_bit_identical_to_the_array_form():
+    """Every branch and every argument corner — ±inf, nan, ±0.0, sub-_EPS — because the twins differ in
+    exactly the places a mechanical transliteration gets wrong: ``np.maximum``/``np.minimum`` propagate nan
+    where a bare ``if`` swallows it, and ``np.clip`` keeps x (hence −0.0) inside the interval."""
+    corners = (
+        [0.0, 1e-13, 1e-12, 1.0, 12.0, np.inf, np.nan],  # mass
+        [0.0, 1e-13, 1.0, 33.0, np.inf, np.nan],  # n_mass
+        [-1.0, -0.0, 1e-15, 0.4, 1e3, np.inf, np.nan],  # rho_g
+        [0.0, 1e-9, 210.0],  # E_g
+        [0.0, 1e-12, 260.0],  # E_r
+        [0.0, 1.0, 1e6, 1e300, np.inf, np.nan, -1.0],  # v_g
+    )
+    for a in itertools.product(*corners):
+        arr, sca = residual_level(*a), residual_level_scalar(*a)
+        assert all(_same_bits(arr[c], sca[c]) for c in range(3)), a
+
+    rng = np.random.default_rng(3)
+    n = 4000
+    draws = (
+        np.exp(rng.uniform(-14, 14, n)) * (rng.random(n) > 0.05),
+        np.floor(np.exp(rng.uniform(-1, 12, n))) * (rng.random(n) > 0.05),
+        np.exp(rng.uniform(-16, 8, n)) * (rng.random(n) > 0.1),
+        np.exp(rng.uniform(-2, 12, n)),
+        np.exp(rng.uniform(-2, 12, n)),
+        np.where(rng.random(n) > 0.1, np.exp(rng.uniform(-30, 6, n)), np.inf),
+    )
+    arr = residual_level(*draws)
+    for i in range(n):
+        sca = residual_level_scalar(*(float(d[i]) for d in draws))
+        assert all(_same_bits(arr[c][i], sca[c]) for c in range(3)), i
+
+
+def test_peel_continue_share_scalar_is_bit_identical_to_the_array_form():
+    vals = [0.0, -0.0, 1e-13, 1e-12, 1e-9, 0.5, 1.0, 1e6, np.inf, -np.inf, np.nan, -1.0]
+    for x, y in itertools.product(vals, vals):
+        assert _same_bits(peel_continue_share(x, y), peel_continue_share_scalar(x, y)), (x, y)
+    rng = np.random.default_rng(5)
+    u, v = np.exp(rng.uniform(-20, 12, 4000)), np.exp(rng.uniform(-20, 12, 4000))
+    ref = peel_continue_share(u, v)
+    for i in range(u.size):
+        assert _same_bits(ref[i], peel_continue_share_scalar(float(u[i]), float(v[i])))
