@@ -24,7 +24,7 @@ from rigel.index import TranscriptIndex  # noqa: E402
 
 import argparse  # noqa: E402
 
-_SCR = "/private/tmp/claude-503/-Users-mkiyer-proj-rigel/4f7a248b-0c78-4b40-9030-462373aefb19/scratchpad"
+_SCR = "/Users/mkiyer/proj/rigel/scratchpad"  # durable; NOT a session scratchpad (see gdna_explore_lib._CACHE)
 _ap = argparse.ArgumentParser()
 _ap.add_argument("--suite", default="/Users/mkiyer/Downloads/rigel_runs/ambig_dense_10mb")
 _ap.add_argument("--out", default=f"{_SCR}/gdna_substrate_cache.pkl")
@@ -40,6 +40,24 @@ conds = sorted(d.name for d in suite.iterdir()
                if (d / "sim_oracle.bam").exists() and d.name.startswith("gdna_"))
 rtype_all = coarse_type_array(np.asarray(ra.signature)).astype(np.int64)
 
+
+def _group(cond: str) -> tuple[str, str, str, str]:
+    """(capture, gDNA level, strand-specificity, nascent) parsed POSITIONALLY from
+    `gdna_<dna>_ss_<ss>_nrna_<nrna>_capture_<cap>`.
+
+    ⚠ Two substring-matching bugs lived here until 2026-07-26, and both corrupted the strata every
+    downstream metric is broken out by:
+      * `"none" in cond` matched `nrna_none`, so 6 real-gDNA conditions (e.g. gdna100 … nrna_none …) were
+        bucketed as the ZERO-gDNA level. The `fabrication` specificity canary selects on exactly that
+        bucket, so it was scoring gDNA-bearing scenarios.
+      * `capture_verystrong` fell through `"capture_on" in cond` to "OFF" — the STRONGEST capture arm was
+        labelled capture-off. Now its own level, so it never silently joins either.
+    """
+    p = cond.split("_")           # gdna | <dna> | ss | <ss> | nrna | <nrna> | capture | <cap>
+    dna, ss, nrna, cap = p[1], p[3], p[5], p[7]
+    return ({"on": "ON", "off": "OFF", "verystrong": "VSTRONG"}.get(cap, cap.upper()), dna, ss,
+            "none" if nrna == "none" else "nrna")
+
 scen = []
 for cond in conds:
     inp = _scan_and_truth(suite, cond, index, cfg, work, cache)
@@ -53,13 +71,10 @@ for cond in conds:
     isr = np.asarray(chain.kind) == REGION
     idx = np.asarray(chain.ref_idx, np.int64)
     ntype = np.where(isr, rtype_all[np.clip(idx, 0, len(rtype_all) - 1)], 3)  # 0/1/2 region-type, 3 boundary
-    dbkt = next((k for k in ("none", "gdna1000", "gdna300", "gdna100", "gdna5", "gdna1") if k in cond), "?")
     f0 = np.asarray(dbg["belief"].f_g, float)
     scen.append(dict(
         cond=cond,
-        group=("ON" if "capture_on" in cond else "OFF", dbkt,
-               "0.99" if "0.99" in cond else "0.50",
-               "nrna" if ("present" in cond or "rnd" in cond) else "none"),
+        group=_group(cond),
         is_region=isr,
         ntype=ntype.astype(np.int8),
         fp=np.asarray(cap["free_pos"], bool),

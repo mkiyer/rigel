@@ -27,8 +27,9 @@ _EPS = 1e-12
 LN10 = np.log(10.0)
 GRID = np.linspace(-5.0, 2.5, 260)  # log10 rho_g
 _lnat = GRID * LN10
-_CACHE = Path("/private/tmp/claude-503/-Users-mkiyer-proj-rigel/4f7a248b-0c78-4b40-9030-462373aefb19/"
-              "scratchpad/gdna_substrate_cache.pkl")
+# The caches live in the repo's untracked `scratchpad/` — NOT a session scratchpad. The original location was
+# a per-session /private/tmp dir, which is volatile: the 2026-07-21 caches were lost when that session ended.
+_CACHE = Path("/Users/mkiyer/proj/rigel/scratchpad/gdna_substrate_cache.pkl")
 
 
 _SCR = _CACHE.parent
