@@ -120,16 +120,6 @@ def validate_signature(signature: int) -> int:
 # ---------------------------------------------------------------------------
 
 
-def coarse_type_from_signature(signature: int) -> int:
-    """Derive the coarse :class:`RegionType` from a signature (exon > intron)."""
-    value = validate_signature(signature)
-    if value & (BIT_EXON_POS | BIT_EXON_NEG):
-        return int(RegionType.EXON)
-    if value & (BIT_INTRON_POS | BIT_INTRON_NEG):
-        return int(RegionType.INTRON)
-    return int(RegionType.INTERGENIC)
-
-
 def coarse_strand_from_signature(signature: int) -> int:
     """Derive the coarse :class:`RegionStrand` from all active signature bits."""
     value = validate_signature(signature)
@@ -142,11 +132,6 @@ def coarse_strand_from_signature(signature: int) -> int:
     if has_neg:
         return int(RegionStrand.NEG)
     return int(RegionStrand.NONE)
-
-
-def is_ambiguous_signature(signature: int) -> bool:
-    """Return whether the derived coarse strand is ambiguous (both strands)."""
-    return coarse_strand_from_signature(signature) == int(RegionStrand.AMBIG)
 
 
 def coarse_type_array(signature: np.ndarray) -> np.ndarray:
@@ -226,10 +211,8 @@ __all__ = [
     "TS_AMBIG",
     "pack_signature",
     "validate_signature",
-    "coarse_type_from_signature",
     "coarse_strand_from_signature",
     "coarse_type_array",
-    "is_ambiguous_signature",
     "transcript_strand_class",
     "nrna_active_strands",
     "mrna_active_strands",

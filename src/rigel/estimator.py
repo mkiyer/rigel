@@ -267,15 +267,6 @@ class AbundanceEstimator:
         return self._gdna_em_total
 
     @property
-    def gdna_contamination_rate(self) -> float:
-        """Fraction of all fragments attributed to gDNA."""
-        total_rna = float(self.unambig_counts.sum() + self.em_counts.sum())
-        total = total_rna + self._gdna_em_total
-        if total == 0:
-            return 0.0
-        return self._gdna_em_total / total
-
-    @property
     def nrna_em_count(self) -> float:
         """Total nRNA count (sum of EM + unambig counts for synthetic nRNA transcripts)."""
         mask = self._synthetic_mask

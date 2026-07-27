@@ -28,7 +28,6 @@ class StrandBalance:
     rna_strand_overdispersion: float  # 1/(n_obs+3); QC strand-power diagnostic, not in the deconv
     n_observations: int  # spliced strand observations (fragments) backing the posterior
     fallback_used: bool  # True when there are no spliced observations (rna_sense_frac → 0.5)
-    fallback_reason: str
 
 
 def fit_strand_balance(strand_model: "StrandModels") -> StrandBalance:
@@ -55,7 +54,6 @@ def fit_strand_balance(strand_model: "StrandModels") -> StrandBalance:
         rna_strand_overdispersion=rna_strand_overdispersion,
         n_observations=int(round(n_obs)),
         fallback_used=(n_obs == 0.0),
-        fallback_reason="no spliced observations" if n_obs == 0.0 else "",
     )
 
 

@@ -16,10 +16,7 @@ from rigel.calibration.signature import (
     TS_NONE,
     TS_POS,
     RegionStrand,
-    RegionType,
     coarse_strand_from_signature,
-    coarse_type_from_signature,
-    is_ambiguous_signature,
     mrna_active_strands,
     nrna_active_strands,
     pack_signature,
@@ -49,22 +46,12 @@ def test_validate_signature_range():
         validate_signature(-1)
 
 
-def test_coarse_type_exon_wins_over_intron():
-    assert coarse_type_from_signature(0) == int(RegionType.INTERGENIC)
-    assert coarse_type_from_signature(BIT_INTRON_POS) == int(RegionType.INTRON)
-    assert coarse_type_from_signature(BIT_EXON_NEG) == int(RegionType.EXON)
-    # Mixed exon + intron → EXON (exon wins).
-    assert coarse_type_from_signature(BIT_EXON_POS | BIT_INTRON_POS) == int(RegionType.EXON)
-
-
 def test_coarse_strand_from_signature():
     assert coarse_strand_from_signature(0) == int(RegionStrand.NONE)
     assert coarse_strand_from_signature(BIT_EXON_POS) == int(RegionStrand.POS)
     assert coarse_strand_from_signature(BIT_INTRON_NEG) == int(RegionStrand.NEG)
     # Both strands present → AMBIG.
     assert coarse_strand_from_signature(BIT_EXON_POS | BIT_INTRON_NEG) == int(RegionStrand.AMBIG)
-    assert is_ambiguous_signature(BIT_EXON_POS | BIT_EXON_NEG)
-    assert not is_ambiguous_signature(BIT_EXON_POS)
 
 
 def test_transcript_strand_class_array():

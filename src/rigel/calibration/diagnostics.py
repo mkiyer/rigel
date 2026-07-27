@@ -18,10 +18,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-#: Cap on the number of training-node "rug" points carried for the report. Real
-#: genomes have millions of teacher nodes; the rug only needs enough to show the
-#: shape, so we stride-downsample to this many.
-_RUG_CAP = 3000
 
 
 @dataclass(frozen=True)

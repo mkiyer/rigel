@@ -60,8 +60,6 @@ class NodeDensity:
     #   gDNA-fraction vote in the solve (the BP sweep owns the gDNA/RNA call).
     region_count_observable: np.ndarray  # bool[R] — count-observable region (non-exonic)
     boundary_count_observable: np.ndarray  # bool[R] — count-observable boundary right of region r
-    n_region_count_observable: int
-    n_boundary_count_observable: int
 
 
 def count_observable_masks(
@@ -170,8 +168,6 @@ def node_gdna_density(
         count_gdna_frac=count_gdna_frac,
         region_count_observable=region_count_observable,
         boundary_count_observable=boundary_count_observable,
-        n_region_count_observable=int(region_count_observable.sum()),
-        n_boundary_count_observable=int(boundary_count_observable.sum()),
     )
 
 
