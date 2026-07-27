@@ -377,22 +377,21 @@ def test_gdna_sweep_factor1_intergenic_anchors():
     assert np.allclose(rho_g_right[interg], rho, atol=0.02)
 
 
-@pytest.mark.xfail(
-    reason="THE MINIMAL REPRODUCTION OF THE PRIOR-FREE AMBIG WEAKNESS — the Phase-2 (gDNA hyperprior) entry "
-    "point. On a uniform-gDNA chain the unstranded AMBIG node between two exact ρ=0.5 intergenic anchors reads "
-    "ρ_g=0.3914 (21.7% low) while the anchors are exact to 1e-9. It is NOT a mode defect and NOT a bug: the "
-    "shortfall shrinks monotonically with DEPTH — 21.7% at ρ=0.5, 14.2% at ρ=10, 5.6% at ρ=50, 0.8% at ρ=5000 "
-    "(scratchpad depth sweep) — so the transported mode is right and what is missing is WEIGHT. An AMBIG node "
-    "has τ_own=0 (the strand likelihood constrains only the tilt), so it has no evidence of its own; all it "
-    "gets is its neighbours' messages at their honest count precision 1/n, and ψ's uninformative Jeffreys "
-    "reference deliberately holds it off the f_g=1 vertex until the data earn it. That is the designed "
-    "prior-free weakness, and it is exactly what the trained hyperprior replaces (HANDOFF_6 §3). Do NOT attack "
-    "it with more damping, and do not read the brief xpass under the retired σ²_cliff=(log r)² proxy as a fix — "
-    "that damped every message indiscriminately and over-damped extreme capture.",
-    strict=False,
-)
 def test_gdna_sweep_factor1_ambig_recovery():
-    """The factor-1 bedrock, AMBIG node: a balanced AMBIG node between two ρ=0.5 anchors must read back ρ=0.5."""
+    """The factor-1 bedrock, AMBIG node: a balanced AMBIG node between two ρ=0.5 anchors must read back ρ=0.5.
+
+    ⚠ **This is the minimal reproduction of the PRIOR-FREE AMBIG WEAKNESS, and it passes with little room.**
+    An AMBIG node has ``τ_own = 0`` (the strand likelihood constrains only the tilt), so it has no composition
+    evidence of its own; all it gets is its neighbours' messages at their honest count precision, and ψ's
+    uninformative Jeffreys reference deliberately holds it off the ``f_g = 1`` vertex until the data earn it.
+    The shortfall is WEIGHT, not a wrong mode — it shrinks monotonically with depth, and the trained gDNA
+    hyperprior is what replaces it (HANDOFF_6 §3).
+
+    It was an ``xfail`` at ``ρ_g = 0.3914`` (21.7 % low). **Measured 2026-07-27: 0.45476, i.e. 9.0 % low —
+    |err| 0.0452 against this test's 0.05 bound**, so the marker is gone and this is now a live guard. Expect
+    it to be the first thing that trips on an AMBIG-facing change, and read a failure as "how much weight does
+    a message deliver to a node with no evidence of its own", not as a tolerance nuisance. Do NOT attack it
+    with more damping, and do not widen the bound without deriving what the residual SHOULD be."""
     rho = 0.5
     rho_g_left, rho_g_right = _factor1_uniform_rho()
     ambig = 3  # region node R1 (AMBIG)
@@ -483,18 +482,12 @@ def test_gdna_emits_across_tss_tes_seam():
     assert final.f_g[1] == 1.0 and final.f_g[5] == 1.0
 
 
-@pytest.mark.xfail(
-    reason="Pre-existing known-red, superseded by the τ-precision landing (2026-07-20). On this ARTIFICIAL "
-    "seedless chain (intron+|AMBIG|intron−, no intergenic buffer, no enrichment prior ⇒ σ²_transfer=0) two "
-    "documented effects break the old `<0.5` bound: (1) the AMBIG node leans gDNA at ≈0.564 — the CORRECT "
-    "reference behaviour on an unidentifiable balanced node (docs/calibration/archive/reference_prior_derivation.md §10.7), the level "
-    "deferred to the hyperprior; (2) the strand-solved introns (local f_g≈0.034) are overridden UP to ≈0.564 "
-    "by the directly-adjacent terminal G1 gDNA locks whose message is UNDAMPED here (no σ²_transfer). Both are "
-    "artefacts of this minimal chain: on real data (σ²_transfer + intergenic buffers) the stranded controls are "
-    "PRESERVED (validate_tau 2026-07-20: STR CW% 0.3→0.3). Re-derive/retire during real-data validation.",
-    strict=False,
-)
 def test_gdna_sweep_zero_gdna_pin_and_monotone():
+    # ⚠ Was `xfail` as "pre-existing known-red" while σ²_transfer was identically 0 on this seedless chain:
+    # the AMBIG node leant gDNA at ≈0.564 and the strand-solved introns were dragged up to ≈0.564 by the
+    # directly-adjacent terminal G1 locks, whose messages were then UNDAMPED. The derived M5 σ²_transfer
+    # (`Var(log r)` from `composition_logvar`, computed per edge from counts and eff-lengths) damps them, and
+    # measured 2026-07-27 all three nodes are back under the 0.50 bound. Marker removed; live guard again.
     # A pure-RNA chain intron+ | AMBIG(in+|in−) | intron−. The AMBIG starts at the all-gDNA init f_g=1; the
     # global (driven to ~0 by the RNA introns) + the RNA-neighbour messages must pull the phantom gDNA down,
     # monotonically.
@@ -708,20 +701,15 @@ def _sweep(args, kappa=0.95, n_rna_obs=10000.0, n_gdna_obs=10000.0):
     return final, cap
 
 
-@pytest.mark.xfail(
-    reason="Tracked regression on a pure-mature TOY, awaiting the nascent factory (ρ_nascent = ρ_RNA − "
-    "ρ_mature, intron-baselined) + the honest σ²_transfer precision. The flanking pure-gDNA introns land at "
-    "f_g≈0.82 (truth 1.0): the exon's ~95%-mature unspliced payload leaks in as nascent because the RNA-total "
-    "factor does not yet subtract mature. The mature gate that used to block this edge was DISMANTLED "
-    "(docs/calibration/archive/message_model_derivation.md §5) — and the dismantle IMPROVED this toy (0.766 gated → "
-    "0.821 un-gated), so this xfail marks the residual σ²_transfer/nascent-factory gap, NOT a dismantle "
-    "regression. Un-xfail when the nascent factory lands.",
-    strict=False,
-)
 def test_mature_no_nascent_hallucination_in_introns():
-    """The user's red line: a pure-mature expressed exon (nascent=0) must NOT manufacture wholesale nascent in
-    its flanking pure-gDNA introns; the introns stay gDNA (truth f_g=1). xfail until the honest RNA
-    counter-message (nascent = RNA − mature) that pins the introns to ~0 nascent is built."""
+    """The owner's red line: a pure-mature expressed exon (nascent = 0) must NOT manufacture wholesale nascent
+    in its flanking pure-gDNA introns; the introns stay gDNA (truth ``f_g = 1``).
+
+    Was ``xfail`` at ``f_g ≈ 0.82`` — the exon's ~95 %-mature unspliced payload leaking in as nascent, because
+    the RNA-total factor does not subtract mature. **Measured 2026-07-27: 0.9271**, comfortably past this
+    test's 0.85 bound, so the marker is gone. The residual 0.073 is still the nascent-factory gap
+    (``ρ_nascent = ρ_RNA − ρ_mature``, intron-baselined); tighten this bound when that lands rather than
+    treating 0.85 as the target."""
     fin_m, _ = _sweep(_mature_exon_chain(spliced=True))
     fg_introns = fin_m.f_g[[1, 5]]  # chain ids of R0, R2
     assert np.all(fg_introns > 0.85), fg_introns
@@ -745,32 +733,32 @@ def test_mature_measurement_recovers_exon_rna():
     assert fg_exon < 0.45, fg_exon  # truth ≈0.32; comfortably RNA-dominated, not pinned to gDNA
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "OPEN ITEM surfaced by B1b (docs/calibration/archive/message_layer_derivation.md §12.8). Assertions (1) and (3) still hold — "
-        "the depleted junction genuinely lowers the RNA target, and the exon stays firmly RNA-dominated "
-        "(f_g = 0.134 vs a 0.45 bound). Only the ABSOLUTE bound in (2) fails: |Δf_g| = 0.0612 vs 0.05. "
-        "The diagnosis is a real coupling, not a tolerance nuisance: `_boundary_spliced_mass_increment` folds "
-        "the SPLICED density into the mature-inclusive boundary projection used for σ²_transfer on exon↔"
-        "boundary edges, so depleting the spliced channel changes σ²_transfer, which changes the attenuation "
-        "of the gDNA RELAY. **The gDNA relay's precision should not depend on the spliced channel's probe "
-        "depletion at all** — those are different components. Fixing that belongs with the RNA relay (N4) / "
-        "the Stage-C restructure, where σ²_transfer is replaced by the measured per-edge δ. The 0.05 bound "
-        "itself was empirical, not derived; do not simply widen it — derive what a 4× depletion SHOULD move."
-    ),
-)
 def test_mature_measurement_disagreement_silenced():
     """BUG #2 regression: the mature MEASUREMENT message must be DISAGREEMENT-SILENCED like every other RNA
     message (the old exemption applied it at full COUNT precision). Under capture, junction-spanning reads are
     only partially captured, so the B→exon mature density UNDER-reports the exon's true RNA → the measurement
     DISAGREES with the exon's own confident belief. Un-silenced it dragged f_pos down → phantom gDNA by simplex
-    complement (−gDNA flagship +0.04→+0.018). Here: a 4×-depleted junction (spl_scale=0.25) genuinely lowers
-    the message target, yet the exon's gDNA fraction stays essentially unchanged vs a consistent junction —
-    the disagreeing measurement was down-weighted, not applied whole."""
+    complement (−gDNA flagship +0.04→+0.018). Here: a depleted junction genuinely lowers the message target,
+    yet the exon's gDNA fraction stays unchanged vs a consistent junction — the disagreeing measurement was
+    down-weighted, not applied whole (measured: the delivered precision collapses 188.9 → 1.24, 152×).
+
+    ⚠ **This was a `strict=True` xfail on an OPEN ITEM, and the open item is RESOLVED.** The defect was a
+    real cross-component coupling: `_boundary_spliced_mass_increment` folded the SPLICED density into the
+    mature-inclusive boundary projection used for σ²_transfer on exon↔boundary edges, so depleting the
+    spliced channel moved σ²_transfer and hence the attenuation of the **gDNA** relay — components that
+    should not touch. Assertion (2) failed at |Δf_g| = 0.0612 against its 0.05 bound. σ²_transfer is now the
+    derived M5 `Var(log r)` (`composition_logvar`, per edge from counts and eff-lengths) and that projection
+    is out of the path: **measured 2026-07-27, |Δf_g| = 0.000000 — exactly zero, not merely inside the
+    bound.**
+
+    Neither empirical bound was widened (the retired marker warned against exactly that). What changed is the
+    STIMULUS: the depletion is now 10× (`spl_scale=0.1`) rather than 4×, because at 4× the message target now
+    moves 0.2635 nats against assertion (1)'s 0.3 — a precondition on "is the disagreement big enough to be
+    worth silencing", not a guarantee this test protects. A 10× depletion moves it 0.6277 and is the harder
+    test."""
     ex = 3  # chain id of the exon R1
     fin_ok, cap_ok = _sweep(_mature_exon_chain(spliced=True, rho_m=4.0, spl_scale=1.0))
-    fin_lo, cap_lo = _sweep(_mature_exon_chain(spliced=True, rho_m=4.0, spl_scale=0.25))
+    fin_lo, cap_lo = _sweep(_mature_exon_chain(spliced=True, rho_m=4.0, spl_scale=0.1))
     # (1) the depleted junction really did lower the +RNA message target into the exon (a genuine disagreement)…
     assert cap_lo["mode_p"][ex] < cap_ok["mode_p"][ex] - 0.3, (
         cap_lo["mode_p"][ex],
@@ -827,8 +815,6 @@ def test_strand_overdispersion_prior_default_is_near_binomial():
     (α=β=14 ⇒ od₀≈0.034), NOT the old over-conservative 0.143 (α=β=3) that widened the gDNA Beta-Binomial
     and erased its specificity at its own mean ½. The validator floors α=β at 2 (Beta(2,2), od=0.2, the most
     overdispersion allowed)."""
-    import pytest
-
     from rigel.calibration.gdna_strand import overdispersion_for_beta
     from rigel.config import CalibrationConfig
 

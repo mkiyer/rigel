@@ -534,9 +534,12 @@ def test_residual_level_scalar_is_bit_identical_to_the_array_form():
         [0.0, 1e-12, 260.0],  # E_r
         [0.0, 1.0, 1e6, 1e300, np.inf, np.nan, -1.0],  # v_g
     )
-    for a in itertools.product(*corners):
-        arr, sca = residual_level(*a), residual_level_scalar(*a)
-        assert all(_same_bits(arr[c], sca[c]) for c in range(3)), a
+    # the corners ARE inf/nan/0 — the array form legitimately forms `inf*0` and `0/0` in the branches
+    # `np.where` then discards, so its warnings are the test working, not a defect.
+    with np.errstate(all="ignore"):
+        for a in itertools.product(*corners):
+            arr, sca = residual_level(*a), residual_level_scalar(*a)
+            assert all(_same_bits(arr[c], sca[c]) for c in range(3)), a
 
     rng = np.random.default_rng(3)
     n = 4000
@@ -548,16 +551,18 @@ def test_residual_level_scalar_is_bit_identical_to_the_array_form():
         np.exp(rng.uniform(-2, 12, n)),
         np.where(rng.random(n) > 0.1, np.exp(rng.uniform(-30, 6, n)), np.inf),
     )
-    arr = residual_level(*draws)
-    for i in range(n):
-        sca = residual_level_scalar(*(float(d[i]) for d in draws))
-        assert all(_same_bits(arr[c][i], sca[c]) for c in range(3)), i
+    with np.errstate(all="ignore"):
+        arr = residual_level(*draws)
+        for i in range(n):
+            sca = residual_level_scalar(*(float(d[i]) for d in draws))
+            assert all(_same_bits(arr[c][i], sca[c]) for c in range(3)), i
 
 
 def test_peel_continue_share_scalar_is_bit_identical_to_the_array_form():
     vals = [0.0, -0.0, 1e-13, 1e-12, 1e-9, 0.5, 1.0, 1e6, np.inf, -np.inf, np.nan, -1.0]
-    for x, y in itertools.product(vals, vals):
-        assert _same_bits(peel_continue_share(x, y), peel_continue_share_scalar(x, y)), (x, y)
+    with np.errstate(all="ignore"):  # `inf + -inf` and `0/0` are the corners under test
+        for x, y in itertools.product(vals, vals):
+            assert _same_bits(peel_continue_share(x, y), peel_continue_share_scalar(x, y)), (x, y)
     rng = np.random.default_rng(5)
     u, v = np.exp(rng.uniform(-20, 12, 4000)), np.exp(rng.uniform(-20, 12, 4000))
     ref = peel_continue_share(u, v)
@@ -569,5 +574,6 @@ def test_graft_frame_logvar_scalar_is_bit_identical_to_the_array_form():
     vals = [0.0, -0.0, 1e-13, 1e-12, 1e-9, 0.5, 1.0, 2.6, 6.1, 1e6, np.inf, -np.inf, np.nan, -1.0]
     rng = np.random.default_rng(9)
     draws = np.exp(rng.uniform(-20, 20, 3000))
-    for r in [*vals, *draws.tolist()]:
-        assert _same_bits(graft_frame_logvar(r), graft_frame_logvar_scalar(r)), r
+    with np.errstate(all="ignore"):
+        for r in [*vals, *draws.tolist()]:
+            assert _same_bits(graft_frame_logvar(r), graft_frame_logvar_scalar(r)), r
