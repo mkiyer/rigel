@@ -121,3 +121,94 @@ combine; the Schur AMBIG τ gate. Ranked reasoning in the load-bearing inventory
 * Always confirm `base` reproduces the benchmark before reading any arm.
 * Freeze the `z2` node set on the BASELINE arm and let each arm bring its own error and variance. And
   **decompose the ratio** — §3 shows the AMBIG conclusion inverts if you read `z2` alone.
+
+---
+
+# 8. ⭐⭐ THE REAL-DATA FIRING DIAGNOSTIC — and it inverts the toy
+
+**Measured 2026-07-27** on the cached real cfRNA samples (human index v7, ~1.5 M nodes, ~3 M messages),
+where neither term had ever been characterised. `scratchpad/p1de_firing.py`; the P1e replay reproduces the
+live damped precisions **exactly** (max rel err 0.000e+00), so these are the solver's own numbers.
+
+## 8.1 P1e does 26–300× less work on real data than on the toy
+
+| | toy (10 Mb) | cfRNA LBX0190 | cfRNA vcap |
+|---|---|---|---|
+| firing rate (of valid & supplied messages) | **16.5 %** | **0.09 %** | 1.13 % |
+| **share of total precision it removes** | **31.1 %** | **0.10 %** | 1.18 % |
+| of `δ < 0`, share clearing the noise floor | 36.6 % | 5.1 % | 3.6 % |
+| median `den = αᵀΣα + 1/n_dst` | 0.080 | 3.16 | — |
+
+The mechanism is not subtle: `b̂² = max(0, δ² − αᵀΣα − 1/n_dst)`, and on a **sparse** library `1/n_dst` is
+large, so the DL noise floor swallows `δ²` almost everywhere. The toy is dense by construction.
+
+**Consequence: P1e's measured toy benefit (+0.0022 / +0.0033 mwae to remove) will not transfer.** Every A/B
+in the ledger scored with P1e active was scored on a solver whose P1e does 26–300× more work than it will in
+production.
+
+And where it does fire it is **more** bias than on the toy — bias share `E[δ]²/E[δ²]` = **0.692** (toy
+0.438). The standing debt is worse on real data, not better.
+
+⚠ It also fires on a **different population**. Unconditionally, the sign of `δ` REVERSES between toy and
+real on both edge types — graft `E[δ]` −0.90 → **+0.27**, peel +0.78 → **−0.85** — so the `δ < 0` scope
+gate selects grafts on the toy (62 % of the damping) and **peels on real data (83.5 %)**. The scope
+argument itself is theoretical (non-negativity ⇒ only the over-claim attributes) and still holds; but its
+empirical validation was done on a population it does not target in reality.
+
+## 8.2 P1d's fitted scalar is not a library constant — it is an extreme-tail estimate
+
+| | toy | LBX0190 | vcap |
+|---|---|---|---|
+| fitted `ω` (pos / neg) | ~0.30 | **0.25 / 0.40** | **2.80 / 3.41** |
+| graft edges with a live seam pair | ~48 % | 12–17 % | 28–34 % |
+| per-pair truncation (`d² ≤ noise`, contributes 0) | — | **95.5–96.2 %** | 73.6–73.7 % |
+| pairs with `d == 0` exactly | — | **92.1–93.9 %** | 37.5–42.4 % |
+| top-decile share of `Σd²` | 78–92 % | **100.0 %** | 98.2 % |
+| effective n behind `E[d²]` (IPR) | — | **767 of 51,406 = 1.5 %** | 4.9–6.1 % |
+
+**`ω` swings 10× between two real samples of the same assay.** On the sparse sample 92–94 % of seam pairs
+report `d = 0` exactly and 96 % truncate to zero, so the library-wide scalar is fitted from ~1.5 % of the
+pairs, with 70–76 % of `Σd²` coming from the top **1 %**. That is not "one library-level number" — it is a
+handful of outlier pairs, and it multiplies the damping on **every** graft edge.
+
+## 8.3 The redundancy mechanism — CONFIRMED, and wildly sample-dependent
+
+Undoing P1d's damping on the same captured messages (P1e's `αᵀΣα` is built from post-P1d precisions, so
+P1d structurally suppresses P1e):
+
+| | firing | precision removed |
+|---|---|---|
+| toy | 946 → 959 | 6.19e4 → 6.28e4 (+1.5 %) |
+| LBX0190 | 272 → 272 | 119.3 → 119.3 (**no effect**) |
+| **vcap** | 12,334 → **14,014** | 1.52e4 → **4.95e4 (3.3×)** |
+| vcap, graft edges only | 408 → **2,088** | 241 → **34,510 (143×)** |
+
+Confirmed: P1d suppresses P1e, entirely on graft edges (non-graft is unchanged to the digit in all three).
+But the magnitude ranges from **zero to 143×** across samples — so the toy's measured interaction
+(−0.0008 to −0.0022) is not a transferable number either.
+
+## 8.4 Verdict: retire **P1d**, keep P1e — with an honest caveat
+
+On the owner's stated criteria:
+
+* **theoretically sound** — P1e's trigger is a contradiction of a *hard observable* (`M`, the node's own
+  count) with **no fitted parameter**, so there is nothing to mis-fit on new data. P1d's estimator is sound
+  in *form* (MoM on a measured independent replicate) but its *population* is now measured to be a 1.5–6 %
+  tail with 10× cross-sample instability.
+* **cheapest / simplest** — P1e is ~30 lines inline, no fit, no extra pass. P1d is ~90 lines
+  (`_seam_pair`, `_flank_dom`, both-seam frame lifting, `graft_premise_logvar`) plus a re-fit 3× per sweep.
+* **failure direction** — P1e only ever widens, so it fails toward under-confidence (safe, correctable).
+  P1d's pooled scalar on a bimodal population necessarily under-charges the high class (termini: 20.8 % of
+  edges carrying 71.7 % of the error), and under-charging leaves messages over-confident — the expensive
+  direction, and the one the whole project is fighting.
+
+⚠ **The caveat that must travel with this decision:** removing P1d is not "keeping the effective term".
+P1e is nearly inert on real data (0.1–1.2 % of damping mass). Retiring P1d means accepting that the graft's
+premise error is **priced by essentially nothing** until **P1g** puts TSS/TES in the region map and `ω`
+can be re-derived per structural class — which is where the ≥30× split becomes representable and the
+quantity becomes principled rather than a stand-in. That is the real fix, and this measurement raises its
+priority rather than lowering it.
+
+⚠ Counter-evidence, kept in view: on the toy, removing P1d raises exon-single MSE 11 % on the confident
+quartile — it *is* doing work where it was fitted. The case above is that the work is done by blanket
+over-damping of the majority class, at a scalar that does not survive contact with a second real sample.
