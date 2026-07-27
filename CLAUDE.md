@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Rigel is a Bayesian RNA-seq transcript quantification tool that jointly models mRNA, nascent RNA (nRNA), and genomic DNA contamination (gDNA). It uses a single-pass C++ BAM scanner, a per-region **calibration** stage that deconvolves the library into gDNA vs RNA, and a locus-level EM solver. Python package name is `rigel-rnaseq` on PyPI; the import and CLI are `rigel`.
 
-> **Calibration (WIP — mid-migration between two solvers; NOT ready to ship).** ⚠ **Read
+> **Calibration (WIP — NOT ready to ship).** ⚠ **Read
 > `docs/calibration/ROADMAP.md` before doing any calibration work — it is the single entry point.** Most docs
 > in `docs/calibration/` were archived to `archive/` on 2026-07-24; only the handful named in the ROADMAP are
 > live. Do NOT reference anything in `archive/`.
@@ -41,13 +41,14 @@ Rigel is a Bayesian RNA-seq transcript quantification tool that jointly models m
 > same equation, one scalar per class; the partial-pooling block in that function is the plug-in point. Do
 > not treat the fitted value as a measured constant of the library.
 >
-> **`bp_solver.py` now holds ONE solve path** (2026-07-24): the legacy density-transfer `_scan` and all its
-> flags were deleted; the composition/enrichment-ratio unified solver is the sole `node_sweep`. The per-node
-> **initialization self-solve** was extracted into `node_init.py` (`build_node_init` — the four sources:
-> measured/intergenic, intron-factory, strand-deconv, unsolved-default). The remaining blocker is that the
-> unified solver's **message variance model is wrong** for a composition transport (the old model assumed
-> genome-wide density uniformity, which hybrid capture breaks — see
-> `docs/calibration/variance_model_handoff.md`); deriving it is the next task. The
+> **`bp_solver.py` holds ONE solve path, and as of 2026-07-26 it reads no environment variables** — every
+> prototyping A/B gate has been removed and the production path has converged. The per-node
+> **initialization self-solve** lives in `node_init.py` (`build_node_init` — the four sources:
+> measured/intergenic, intron-factory, strand-deconv, unsolved-default). The **message-variance model is
+> COMPLETE**, not a blocker: laws M1–M11 are derived, MC-validated in `scripts/debug/message_variance_mc.py`
+> and A/B-won (`docs/calibration/message_variance_derivation.md`, audited in
+> `docs/calibration/variance_ledger.md`). **The solver is now BP-legal** — all three third-node dependences
+> (`_far`, the destination-own plug-in, and the two-ρ-iteration reframe loop) were removed on 2026-07-26. The
 > **gDNA intron factory** is shipped (`intron_factory=True` default): it is the **intron special case** of the
 > generic **density deconvolution** (`density_deconv.py`) — deconvolve counts into gDNA + RNA against a gDNA
 > density prior (the intergenic node distribution, for introns), carrying its NB-derived precision
@@ -135,11 +136,11 @@ ruff format src/ tests/
 
 - `calibrate.py` — the calibrator orchestrator: RNA strand balance κ → gDNA/RNA strand overdispersions (seeded from `density_model.node_gdna_density` raw counts + `strand_deconv.boundary_side_seeds`) → build chain + geometry + statics → signature-binary `init_beliefs` → **`bp_solver.node_sweep`** (the single forward-backward pass; `σ²_imp` + every global-prior input fit once before the pass, no per-pass refit) → `chain_region_deconv` + `chain_boundary_side_deconv` → `gdna_density_global`. `sweep_n_grid`
 - `node_chain.py` — builds the bipartite **region↔boundary** node chain (genomic B-R-B-…-B interleave + left/right adjacency) from the payload offsets; pure index arithmetic, no C++
-- `bp_solver.py` — **the BP solver** (unified/composition, one path): the single forward-backward `node_sweep` (build the per-node self-solve → reframe/route/÷M relay + combine → ψ solve) + the region / boundary-side projections (`chain_region_deconv` / `chain_boundary_side_deconv`). ⚠ The message **variance model** (`σ²_transfer`) is the density-uniformity proxy being redone (`docs/calibration/variance_model_handoff.md`)
+- `bp_solver.py` — **the BP solver** (unified/composition, one path): the single forward-backward `node_sweep` (build the per-node self-solve → reframe/route/÷M relay + combine → ψ solve) + the region / boundary-side projections (`chain_region_deconv` / `chain_boundary_side_deconv`).
 - `node_init.py` — **the pass-0 per-node INITIALIZATION**: `build_node_init` runs the message-free self-solve and assembles each node's own `(density, precision)` from the four sources of `docs/calibration/variance_model_concepts.md` — MEASURED (intergenic → Poisson precision), DENSITY DECONVOLUTION (`density_deconv`, `τ_λ` from NB curvature; intron factory = special case), STRAND DECONV (`strand_evidence`, the I_strand deadband), UNSOLVED default (100% gDNA, ZERO precision). Pure precision arithmetic (`own_composition_logvar`, `own_precision`); unit-tested per source in `tests/calibration/test_node_init.py`
 - `density_deconv.py` — the generic **density deconvolution** primitive: fit a gDNA density prior NegBinom from a pure-gDNA pool (`fit_gdna_background`) + the per-node λ-factor `log NegBinom(f_g·C; ρ_bg·E_g, α_eff)` (`density_lambda_factor`) + its curvature precision (`density_factor_precision`). The **intron factory** is `fit_intron_background` (the gDNA prior = the intergenic node distribution)
 - `node_geometry.py` — the per-node chain primitives beneath the solver: per-face geometry (`build_node_geometry`), the belief / density types, the static solver inputs (`build_node_statics`), the signature-binary `init_beliefs`, the pure geometry helpers `node_global_geometry` / `node_total_density`, and `_node_region_type`. Imports only lower layers (`node_chain`, `signature`, `effective_length`, `simplex_logodds`), so it sits below `bp_solver` / `node_init`
-- `gdna_density_prior.py` — the trained **Phase-2** gDNA-density KDE prior (`GdnaDensityPrior.fit` + `build_training_substrate` over gDNA-clean training nodes); consumed by `bp_solver._kde_logprior` in the pass
+- `npmle.py` — `DensityNPMLE`: the **Phase-2 gDNA-density hyperprior**, fitted in `calibrate._fit_gdna_hyperprior` from the pass-0 beliefs (REGION × single-strand nodes, precision-weighted by `var_gdna`) and consumed as ψ's composition arm on the re-solve
 - `substrate.py` — `CalibrationSubstrate` (payload → per-region contained / left / right views) + `BoundarySubstrate` (the per-boundary view: the bipartite graph's boundary nodes)
 - `region_arrays.py` / `regions.py` — region geometry (`RegionArrays`, build partition from `index.region_df`)
 - `signature.py` — region 4-bit strand/type signature + `strand_class` (POS/NEG/NONE/AMBIG)

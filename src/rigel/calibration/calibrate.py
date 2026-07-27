@@ -147,7 +147,7 @@ def _fit_gdna_hyperprior(
     ``additive=False`` (EM path): SELECTED = single-strand OR structural-gDNA (``single | gonly``),
     precision-weighted by ``var_gdna``; HYBRID (``background`` set) drops intergenic into the aggregate cell.
 
-    ``additive=True`` (the Role-B KDE — ``gdna_kde_restore_plan.md``): SELECTED = **single-strand expressed
+    ``additive=True`` (the Role-B KDE — ``docs/calibration/archive/gdna_kde_restore_plan.md``): SELECTED = **single-strand expressed
     regions only** (``single``) — intergenic / structural-gDNA (``gonly``) are dropped and represented by the
     weak floor instead of flooding the depleted mode. Occupancy-weighted, fixed bandwidth (``var_g=None`` — no
     per-node τ discounting, so the enriched minority renders at its occupancy height)."""
@@ -362,7 +362,7 @@ def calibrate(
 
     # THE ENRICHMENT NPMLE — fit ONCE on ALL nodes' TOTAL unspliced density (belief-free). It models the
     # hybrid-capture ENRICHMENT/DEPLETION landscape, NOT composition: a total-density prior is
-    # composition-vacuous (count-zero-information — CALIBRATION_MASTER.md §2/§5), so it is NEVER fed to the
+    # composition-vacuous (count-zero-information — docs/calibration/archive/CALIBRATION_MASTER.md §2/§5), so it is NEVER fed to the
     # composition (gDNA) arm. Its old second role — supplying the message σ²_transfer by projection — is
     # RETIRED (that was a density-uniformity proxy, invalid under capture, and identically 0 in pass-0); the
     # solver now derives σ²_transfer itself. What remains is the QC report's P(ρ) landscape + the toy-injection
@@ -380,7 +380,7 @@ def calibrate(
     # PHASE 1 — the INITIAL solve is PRIOR-FREE of the DNA composition prior: the inert Beta(½,½) reference
     # alone (``gdna_prior=None``) + the strand likelihood + the belief-free forward-backward messages.
     # Single-strand nodes self-solve from strand; unstranded
-    # AMBIG nodes are grounded only by the messages here (the two-root DNA ambiguity, CALIBRATION_MASTER.md §4,
+    # AMBIG nodes are grounded only by the messages here (the two-root DNA ambiguity, docs/calibration/archive/CALIBRATION_MASTER.md §4,
     # is resolved by the DECONVOLVED-gDNA hyperprior in Phase 2 — fit on this solve's peeled DNA, then a refit).
     belief = _sweep(None)
     belief_pass0 = belief  # the initial (prior-free) solve — kept for the refit before/after (movie / debug)
@@ -389,7 +389,7 @@ def calibrate(
         enrichment_prior.n_cells,
     )
 
-    # PHASE 2 — the DECONVOLVED-gDNA hyperprior REFIT (CALIBRATION_MASTER.md §4/§5). Fit the gDNA-rate NPMLE on
+    # PHASE 2 — the DECONVOLVED-gDNA hyperprior REFIT (docs/calibration/archive/CALIBRATION_MASTER.md §4/§5). Fit the gDNA-rate NPMLE on
     # the initial solve's peeled gDNA, then RE-SOLVE with it as the composition arm — resolving the two-root DNA
     # ambiguity the prior-free pass leaves at unstranded AMBIG nodes. Repeated ``calib_refit_iters`` times.
     # ANCHORED, EXTREMELY WEAK. The aggregate DNA-background reference (`ρ_bg`, pooled pure intergenic/intron —

@@ -3,11 +3,11 @@ rather than against solver behaviour.
 
 Every function in :mod:`rigel.calibration.enrichment_frame` is a pure identity, so each test here is a
 closed-form check that cannot drift with the solver — the same contract as ``test_message_frames.py``. The two
-load-bearing identities the whole framework rests on (``enrichment_ratio_generalization.md``):
+load-bearing identities the whole framework rests on (``docs/calibration/archive/enrichment_ratio_generalization.md``):
 
 * the composed total-density identity ``ρ_tot = M·(k+1)/(k·E_g + E_r)`` (§1 + §4), which makes
   ``total_density ∘ f_g_from_k ∘ (mass identity)`` mutually exact;
-* the r₂ ``(k+1)`` cancellation (§5b, ``junction_enrichment_scaling.md``), verified there to 5.8e−16 over
+* the r₂ ``(k+1)`` cancellation (§5b, ``docs/calibration/archive/junction_enrichment_scaling.md``), verified there to 5.8e−16 over
   20 000 draws — reproduced here as an exact algebraic equality.
 """
 

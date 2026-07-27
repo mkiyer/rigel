@@ -93,7 +93,7 @@ class NodeGeometry:
     # over-states the variance; the Kish n_eff = (sum w)^2/sum w^2 >= mass). Precedent for carrying both:
     # `_boundary_strand_stats` already takes the integer flux for the BB strand power and the float mass for
     # the pie base. Currently UNUSED by the solver — plumbed for the priority-#3 mature-measurement channel
-    # (docs/calibration/boundary_spliced_channel_design.md §4.1); inert until that lands.
+    # (docs/calibration/archive/boundary_spliced_channel_design.md §4.1); inert until that lands.
     spliced_n_pos_left: np.ndarray
     spliced_n_pos_right: np.ndarray
     spliced_n_neg_left: np.ndarray
@@ -184,7 +184,7 @@ def build_node_geometry(
     b_spl_pos_l, b_spl_pos_r = _spliced_faces(TS_POS, exon_pos_l, exon_pos_r, bspl_l, bspl_r)
     b_spl_neg_l, b_spl_neg_r = _spliced_faces(TS_NEG, exon_neg_l, exon_neg_r, bspl_l, bspl_r)
 
-    # ── the ONE-SIDED SPLICED eff-length: which divisor, per face (A1/A2, message_layer_derivation.md) ──
+    # ── the ONE-SIDED SPLICED eff-length: which divisor, per face (A1/A2, docs/calibration/archive/message_layer_derivation.md) ──
     # A spliced fragment credits only its exon flank. Enumerating the accumulator's deposit rule
     # ((slice_len/ℓ)/n_cross) over the fragment's ``a`` bases on this side, with flank length ``R``:
     #     a ≤ R  → the near slice lies inside the flank      → END slice,      n_cross=1 → a/ℓ
@@ -367,7 +367,7 @@ class NodeBelief:
     mass + its per-component posterior VARIANCE `(var_pos, var_neg, var_gdna)` = `Var(f_c)`. All length
     ``n_nodes``.
 
-    The variance is the **precision state** (`docs/calibration/precision_state_design.md`): `Var(f_c)=0` ⇒
+    The variance is the **precision state** (`docs/calibration/archive/precision_state_design.md`): `Var(f_c)=0` ⇒
     locked/certain (e.g. a forbidden strand), `=∞` ⇒ no information (unsolved). It feeds the honest message
     send — a source's outgoing precision is degraded from its own `Var_own = (M/E)²·Var(f_c)` by the
     communication noise, so an unsure node speaks quietly (Phase 2). The composition is stored as a FRACTION
@@ -389,7 +389,7 @@ class NodeBelief:
 #
 # A strand axis is hard-LOCKED (a forbidden strand, an intergenic sink) by the per-node ``allow_pos`` /
 # ``allow_neg`` forbid mask in the solve. The init ALSO sets the per-component precision state ``var(f_c)``
-# (`precision_state_design.md`): ``0`` = locked/certain (a forbidden strand, an intergenic gDNA sink), ``inf`` =
+# (`docs/calibration/archive/precision_state_design.md`): ``0`` = locked/certain (a forbidden strand, an intergenic gDNA sink), ``inf`` =
 # no information (an admissible-but-unsolved axis — it will listen to messages, and emits none until solved).
 # A solved single-strand (G2) node takes the strand-solve posterior variance.
 
@@ -411,7 +411,7 @@ def _type_belief(free_pos, free_neg, deconv, mass_unspl):
       (``inf``) variance; the sweep resolves it from neighbour messages + the global prior.
 
     Returns the six per-node arrays ``(f_pos, f_neg, f_g, var_pos, var_neg, var_gdna)`` — the composition + the
-    precision state (`precision_state_design.md`): ``var=0`` locked, ``inf`` no-information, else the strand-solve
+    precision state (`docs/calibration/archive/precision_state_design.md`): ``var=0`` locked, ``inf`` no-information, else the strand-solve
     posterior variance.
     """
     n = free_pos.shape[0]
@@ -452,12 +452,12 @@ def _boundary_strand_stats(boundary_substrate, region_arrays):
     pie base) = both sides summed (conserved). The spliced floor is the one-sided motif-stranded sense spliced
     on that strand's exon flank (a clean exon↔intron transition), never summed across sides.
 
-    The allow mask is the **transcript-structure CONTINUITY gate** (`rna_imputation_transcript_structure.md`):
+    The allow mask is the **transcript-structure CONTINUITY gate** (`docs/calibration/archive/rna_imputation_transcript_structure.md`):
     a strand-s unspliced crossing is nascent RNA only where strand s is present on BOTH flanks, so
     ``free_s = nrna_active_s(left) & nrna_active_s(right)``. This BLOCKS RNA at a TSS/TES (intergenic↔exon →
     neither strand continuous → a gDNA sink) and at a mixed exon↔AMBIG seam (the non-shared strand cannot
     cross). ``mrna_active_s = exon_s(left) & exon_s(right)`` is the tighter **mature**-crossing gate
-    (contiguous exon on both flanks) that selects the per-node prior (`node_prior_design.md` §3).
+    (contiguous exon on both flanks) that selects the per-node prior (`docs/calibration/archive/node_prior_design.md` §3).
     """
     bs = boundary_substrate
     lr = np.asarray(bs.left_region, dtype=np.int64)
@@ -505,7 +505,7 @@ class NodeStatics:
     :class:`NodeBelief`; these never change. ``free_pos``/``free_neg`` are the nascent-RNA-active axes (a
     region's ±transcript bits / a boundary's ±continuity — the RNA-crossing gate); ``mrna_active_pos``/
     ``mrna_active_neg`` are the mature-RNA-active axes (a region's ±exon bits / a boundary's ±contiguous
-    exon) that select the per-node solver prior (`node_prior_design.md` §3). All ``float64`` except the four
+    exon) that select the per-node solver prior (`docs/calibration/archive/node_prior_design.md` §3). All ``float64`` except the four
     bool masks."""
 
     n_nodes: int

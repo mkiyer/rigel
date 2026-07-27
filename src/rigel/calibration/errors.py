@@ -1,4 +1,4 @@
-"""Calibration error types (doc ``04_interface_contract.md`` §9)."""
+"""Calibration error types."""
 
 from __future__ import annotations
 

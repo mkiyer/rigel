@@ -839,7 +839,6 @@ def run_pipeline(
     # payload, then hand both (plus the trained strand model and the gDNA FL pmf)
     # to the calibrator. Single feed-forward pass: deconvolve each node into
     # gDNA/RNA and derive ρ_0 + per-node exposure. See
-    # docs/futureprs/acyclic_deconvolution_design.md.
     from .calibration import calibrate
     from .calibration.region_arrays import RegionArrays
 

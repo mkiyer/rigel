@@ -49,7 +49,7 @@ VALID_ZF_VALUES = {
 
 
 def _assert_zf_invariants(zf: int) -> None:
-    """Assert the 6 ZF invariants from docs/annotated_bam_fix/ZF_TAG_REDESIGN.md."""
+    """Assert the 6 ZF invariants."""
     is_resolved = bool(zf & AF_RESOLVED)
     is_mrna = bool(zf & AF_MRNA_BIT)
     is_gdna = bool(zf & AF_GDNA_BIT)

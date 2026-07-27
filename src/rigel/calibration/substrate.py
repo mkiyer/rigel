@@ -26,7 +26,7 @@ The substrate exposes channels **raw** — it does not pre-orient:
 Boundary views use the **per-side** flux (and mass): for region ``r``, the
 *left* view is the right side of ``r``'s left boundary, the *right* view is
 the left side of ``r``'s right boundary (the D1 side-attribution; see
-``00_implementation_plan.md`` §4 D1, and the per-side flux in PR 2.5).
+the per-side flux in PR 2.5).
 """
 
 from __future__ import annotations

@@ -6,7 +6,7 @@ accumulator's own deposit rule (``docs/accumulator/00_design.md`` §4.3, referen
 ``tests/native/_accumulator_reference.py``), which is enumerable in closed form, so these tests do not depend
 on any solver behaviour and cannot drift with it.
 
-Derivations: ``docs/calibration/message_layer_derivation.md`` §11 (A1/A2, the spliced effective length) and
+Derivations: ``docs/calibration/archive/message_layer_derivation.md`` §11 (A1/A2, the spliced effective length) and
 the ``c_b`` denominator note in ``bp_solver`` (A3).
 """
 

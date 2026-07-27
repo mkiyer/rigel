@@ -257,14 +257,14 @@ class TestNrnaDoubleCounting:
             # (>= 0.85) is unaffected.
             #
             # Widened (170 → 250) by the density-correct gDNA effective length
-            # (effective_length_redesign_plan.md §8: per-region effective-support divisors, transport-free).
+            # (docs/calibration/archive/effective_length_redesign_plan.md §8: per-region effective-support divisors, transport-free).
             # The eff-len change perturbs the SAME weak-SS imperfect-strand phantom (the count/strand
             # combine, NOT the eff-len): t1 ~11.8% off at ss=0.65. The residual is the gDNA-SOLVE phantom
             # (count-bias-at-AMBIG), tracked separately; High-SS (>= 0.85) is unaffected; this is the
             # accepted near-random zero-gDNA corner.
             #
             # The mid-SS branch was widened (40 → 100) by the pass-0 gDNA-rate NPMLE prior
-            # (docs/calibration/npmle_struggles.md). We now start every node at f_g=1 (total density) with an
+            # (docs/calibration/archive/npmle_struggles.md). We now start every node at f_g=1 (total density) with an
             # extremely-weak prior and peel RNA via strand + messages; on a 0-gDNA, 90%-stranded library the
             # imperfect strand cannot peel the last ~4% (t1 ~4.2% off), the SAME imperfect-SS false-gDNA
             # phantom, now surfaced by the total-density start. Perfect-SS (>= 0.99) is unaffected (tol 20).

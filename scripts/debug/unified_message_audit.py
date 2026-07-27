@@ -1,7 +1,7 @@
 """UNIFIED-SOLVER MESSAGE AUDIT — the fused per-component densities vs the TRUTH, per node class.
 
 The unified solver (`RIGEL_UNIFIED=1`) washes ``f_g`` toward ~0.3 regardless of truth
-(`docs/calibration/UNIFIED_SOLVER_HANDOFF.md` §4). This probe answers the §5 question: **is the message
+(`docs/calibration/archive/UNIFIED_SOLVER_HANDOFF.md` §4). This probe answers the §5 question: **is the message
 wrong, or does the ψ solve mis-weight a right message?** It dumps, per node, the fused message's implied
 composition ``(f_g, f_p, f_n)^msg = (cg·E_g, cp·E_r, cn·E_r)/M`` alongside the oracle's, plus the own-only
 seed, the left/right half-messages, the reframe ratios, and the precisions — so each candidate cause of

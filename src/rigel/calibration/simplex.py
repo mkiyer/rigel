@@ -30,7 +30,7 @@ def _mixture_strand_loglik(
     Broadcasts ``(u_pos, n)`` of shape ``(nodes, 1)`` against the lattice ``(f_*)`` of shape
     ``(1, P)`` → ``(nodes, P)``. Mean ``N·p`` with ``p = ½·f_g + κ·f₊ + (1−κ)·f₋``.
 
-    **Count-zero-information freeze** (`docs/calibration/node_prior_design.md` §2): the mean stays LIVE in
+    **Count-zero-information freeze** (`docs/calibration/archive/node_prior_design.md` §2): the mean stays LIVE in
     the solved composition ``(f_g, f_pos, f_neg)`` — the legitimate strand channel — but the variance is
     evaluated at the fixed REFERENCE composition ``(f_g_ref, f_pos_ref, f_neg_ref)`` (per-node scalars,
     broadcast). This keeps the heteroscedastic precision (the count still sets a composition-aware variance

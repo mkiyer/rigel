@@ -1,5 +1,5 @@
 """VALIDATE the honest per-position metric against ALL node types. The pooled corr(f_g, oracle) in
-`solve_gate_design.md` says single-strand + AMBIG REGIONS resolve (0.63/0.69) while boundaries are coin-flips
+`docs/calibration/archive/solve_gate_design.md` says single-strand + AMBIG REGIONS resolve (0.63/0.69) while boundaries are coin-flips
 (0.13). But `boundary_dissect.py` showed the pooled corr is Simpson-confounded by between-structure signal — and
 the honest per-position corr (hold a node FIXED, vary the gDNA level across the 20 unstranded scenarios, ask if
 its solve tracks its oracle) collapses EVERY boundary stratum to ~0.

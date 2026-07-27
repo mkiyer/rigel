@@ -1,5 +1,5 @@
 """RETIRED total-density σ²_imp helpers — relocated out of production (`bp_solver`) into this debug util
-(Phase-0 cleanup, `docs/calibration/background_reference_implementation_plan.md`). These estimated the old
+(Phase-0 cleanup, `docs/calibration/archive/background_reference_implementation_plan.md`). These estimated the old
 adjacent-node disagreement variance that the NPMLE projection σ²_transfer replaced; kept ONLY for the historical
 σ²_transfer investigation harnesses that still import them. Not part of any production path.
 """

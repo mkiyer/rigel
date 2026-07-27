@@ -8,7 +8,7 @@ Counts, per directed boundary↔region edge, the quantities the gate's correctne
                           would silence (``n_nasc → 0``).
   * ``gated_live_nmat`` — gated edges that ALSO carry a live spliced measurement ``n_mat = SPs[src] > 0``.
                           **Must be 0** — that is why the gate touches only ``n_nasc`` and leaves the ``n_mat``
-                          measurement path intact (``docs/calibration/mature_crossing_gate.md`` §3d). If this
+                          measurement path intact (``docs/calibration/archive/mature_crossing_gate.md`` §3d). If this
                           is > 0 the gate as written would silence a real measurement — STOP and re-plan.
   * ``absorb`` / ``absorb_gated`` / ``absorb_survives`` — edges where the dst-face mature absorption
                           ``− SPd[dst]/ESPd[dst]`` fires; how many the gate subsumes; and how many still fire

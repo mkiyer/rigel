@@ -982,7 +982,6 @@ def _resolve_quant_args(
             raise ValueError(
                 f"Configuration option(s) {names} were removed in adaptive prior v5. "
                 "The grouped EM prior is now parameter-free. "
-                "See docs/prior/adaptive_prior_v5.md."
             )
         # I/O keys and extra flags are valid in config YAML
         valid_keys = set(defaults) | {"bam_file", "index_dir", "output_dir", "tsv"}

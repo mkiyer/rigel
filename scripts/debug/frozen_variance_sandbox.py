@@ -1,6 +1,6 @@
 """Frozen-variance sandbox — validate the count-zero-information fix (O2) before touching production.
 
-Design: `docs/calibration/node_prior_design.md` §2, §9 (the count-zero-info tradeoff).
+Design: `docs/calibration/archive/node_prior_design.md` §2, §9 (the count-zero-info tradeoff).
 
 THE CLAIM. `_mixture_strand_loglik` is a correct heteroscedastic Gaussian-BB, but its variance normalizer
 (`-½·log var` + `(u-mean)²/var`) depends on the composition `f_g`, so when the mean channel degenerates

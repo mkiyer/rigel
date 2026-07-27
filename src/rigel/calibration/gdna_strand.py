@@ -361,7 +361,7 @@ def fit_rna_strand_from_substrate(
     (``accumulator.cpp``), so multi-junction fragments are double-counted across sides. This
     inflates the effective count and mildly *under*-estimates the overdispersion (correlated
     repeats look more Binomial); accepted for v1, tracked as future work (count one side per
-    boundary) — see ``docs/em_strand/05_rna_strand_bb_plan.md`` §9.
+    boundary).
     """
     sense = np.concatenate(
         [

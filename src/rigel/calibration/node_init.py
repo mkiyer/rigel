@@ -79,7 +79,7 @@ def own_composition_logvar(f_g, tau_lam, struct_lock):
     """The message-free composition variance of a node's own belief, on the two log-fraction arms — the
     honest "how well does this node know its gDNA/RNA split?" (`variance_model_concepts.md`).
 
-    Three states, nothing between (`emission_and_precision_derivation.md` §2):
+    Three states, nothing between (`docs/calibration/archive/emission_and_precision_derivation.md` §2):
 
     * **structural lock** → composition CERTAIN → variance ``0`` (an intergenic pure-gDNA node);
     * **real evidence ``τ_λ > 0``** → ``Var(log f_g) = (1−f_g)²/τ_λ`` and ``Var(log f_r) = f_g²/τ_λ`` (the

@@ -1,6 +1,6 @@
 """IDENTIFIABILITY CENSUS — which nodes can be solved by messages alone, and which need the hyperprior?
 
-The derived rank test (docs/calibration/message_layer_derivation.md §3):
+The derived rank test (docs/calibration/archive/message_layer_derivation.md §3):
 
     free DOF of a node = number of ACTIVE RNA strands
       (unknowns rho_g, rho_+, rho_-  minus the HARD observation constraint  sum_c rho_c E_c = M;

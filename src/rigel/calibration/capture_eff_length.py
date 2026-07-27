@@ -18,8 +18,8 @@ only the captured case contracts. No new readout — it reuses the calibration's
 same IPR shape as the gDNA component (the standard 1-pseudocount convention + ``1e-9`` numerical floors used
 throughout calibration; not tuned constants). The density-correct node model (effective-support
 divisors, averaged-side-density pooled seams, transport-free) is documented in
-``docs/calibration/effective_length_redesign_plan.md`` §8 (the *why* is in
-``capture_effective_length_design.md``).
+``docs/calibration/archive/effective_length_redesign_plan.md`` §8 (the *why* is in
+``docs/calibration/archive/capture_effective_length_design.md``).
 """
 
 from __future__ import annotations
@@ -157,7 +157,7 @@ def _global_reference_density(mass: np.ndarray, support: np.ndarray) -> "float |
 
     The rightmost significant peak of the **mass-weighted** log-density KDE over the per-region gDNA
     densities ``ρ = mass/support`` — the fully-captured gDNA level, detected from the data with no assumption
-    about probe locations (``docs/calibration/enriched_mode_reference_density.md``). Mass-weighting is the
+    about probe locations (``docs/calibration/archive/enriched_mode_reference_density.md``). Mass-weighting is the
     key: a small captured panel is a tiny COUNT bump but the dominant MASS peak (enriched nodes carry ~100×
     the mass), so its enriched mode is detectable. Unimodal (capture-off / no enrichment) ⇒ the single mode
     ⇒ every node lands at ``w = 1`` ⇒ no contraction. The result is SNAPPED to a real node density so a
@@ -253,7 +253,7 @@ def transcript_capture_eff_lengths(
       above the median and manufacture a small spurious contraction. The deferred unimodal / gDNA-abundance
       guard (require a genuine bimodal separation, or cap ρ_ref at a high mass-weighted-density quantile for
       outlier resistance) would neutralise both this and a single high-mass region dominating ρ_ref
-      genome-wide; see docs/calibration/enriched_mode_reference_density.md;
+      genome-wide; see docs/calibration/archive/enriched_mode_reference_density.md;
     * **no detectable gDNA** ⇒ ``ρ_ref = None`` ⇒ factor 1 (no contraction);
     * **concentrated gDNA** (capture) ⇒ depleted nodes have ρ_n ≪ ρ_ref ⇒ ``min(m_n/ρ_ref, S_n) ≪ S_n``
       ⇒ the eff-len contracts to the enriched footprint.
@@ -262,8 +262,8 @@ def transcript_capture_eff_lengths(
     construction — no inversion — and is stable because gDNA barely varies across loci (a few-fold even in
     cancer), unlike RNA. This REPLACES the former per-transcript ``ρ* = G_c/E_c``, which contracted on
     within-transcript density variation including noise — it fired even with NO gDNA and drove the nascent
-    siphon. Full derivation + 16-scenario validation: ``docs/calibration/enriched_mode_reference_density.md``
-    and ``efflen_shared_reference_fix_plan.md``.
+    siphon. Full derivation + 16-scenario validation: ``docs/calibration/archive/enriched_mode_reference_density.md``
+    and ``docs/calibration/archive/efflen_shared_reference_fix_plan.md``.
     """
     fl = np.asarray(fl_eff_lengths, dtype=np.float64)
     n_t = fl.shape[0]
@@ -285,7 +285,7 @@ def transcript_capture_eff_lengths(
     # so eff(nascent) ≥ eff(mature) by construction. Unimodal (capture-off / no enrichment) ⇒ single mode ⇒
     # every node w=1 ⇒ no contraction. Replaces the per-transcript ρ*=G_c/E_c, which contracted on
     # within-transcript density variation incl. noise — it fired even with NO gDNA, driving the nascent
-    # siphon. See docs/calibration/enriched_mode_reference_density.md.
+    # siphon. See docs/calibration/archive/enriched_mode_reference_density.md.
     rho_ref = _global_reference_density(contained_m, contained_S)
     if rho_ref is None or rho_ref <= 0.0:
         return fl.copy()  # no detectable gDNA reference ⇒ no contraction

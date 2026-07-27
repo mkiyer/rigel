@@ -1,4 +1,4 @@
-"""Verification for the priority-#3 design review (docs/calibration/boundary_spliced_channel_design.md §7).
+"""Verification for the priority-#3 design review (docs/calibration/archive/boundary_spliced_channel_design.md §7).
 
 Four checks, each settling a review claim without touching a BAM:
 

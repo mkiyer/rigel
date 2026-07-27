@@ -5,7 +5,7 @@ A 1 Mb single-chromosome genome with **10 genes**, each a single transcript of
 **two 1 kb exons separated by a 20 kb intron** (genomic span 22 kb), spaced 100 kb
 apart on the + strand. This is the deliberately trivial scenario for deriving and
 making contractual the IPR / exposure-weighted gDNA effective length under a
-hybrid-capture energy sweep (docs/futureprs/exposure_efflen_reimplementation_plan.md).
+hybrid-capture energy sweep.
 
 Why a custom builder (not ``simulate_suite.py``'s generator): the random generator
 caps introns at 10 kb and cannot emit an exact 2-exon / 1 kb / 20 kb structure. We

@@ -5,7 +5,7 @@ Reads summary.json from each library run under
 ``--root srd_v2_vcap_mixture/default`` and (optionally) the SRD v1
 baseline at ``--baseline srd_v1_vcap_mixture/default``, then prints a
 side-by-side table of the acceptance metrics from
-``docs/calibration/srd_v2_phase2plus_handoff.md`` §5a.
+the SRD v2 phase-2+ handoff §5a.
 """
 
 from __future__ import annotations

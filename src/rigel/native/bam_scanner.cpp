@@ -1418,7 +1418,6 @@ private:
         // fragment's contiguous genomic span(s) onto the genome-wide region
         // partition, so an intergenic fragment lands in its intergenic region's
         // contained mass (previously these were telemetry-only; see
-        // docs/calibration/density_sweep_implementation_plan.md Phase 0).
         //
         // Splice class drives BOTH the channel and the spans (see
         // docs/calibration/accumulator_fragment_span_redesign.md):
@@ -1567,7 +1566,6 @@ private:
         // (Phase A burndown 2026-05-29: per-fragment calibration
         // observation capture removed; rebuilt against the new
         // fractional-accumulator binding in Phase B — see
-        // docs/acc_caljointmodel/00_implementation_plan.md.)
         stats.n_fragments++;
 
         for (const auto& [r1_reads, r2_reads] : all_hits) {

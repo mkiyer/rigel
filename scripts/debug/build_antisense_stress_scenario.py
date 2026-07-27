@@ -13,7 +13,7 @@ case common in the human transcriptome. This builds a richer oracle scenario:
 
 Parametrized by gDNA abundance, strand specificity, and capture so the AMBIG handling can be swept
 across the SS × capture spectrum (the regime where the current categorical count-vs-strand fix is
-expected to floor; see docs/calibration/clue_integration_reliability_design.md).
+expected to floor).
 
   python scripts/debug/build_antisense_stress_scenario.py            # gDNA on, ss0.99, no capture
 """

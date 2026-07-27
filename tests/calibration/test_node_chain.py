@@ -97,7 +97,7 @@ def test_spliced_flux_plumbing_matches_mass_routing():
     """The integer spliced COUNT must be routed EXACTLY like the spliced MASS: same motif/exon gate, same
     faces, zero on regions. It is the Poisson count a message VARIANCE needs (`1/n`), where the mass — a sum
     of fractional per-fragment shares — would over-state it. Inert until the priority-#3 mature-measurement
-    channel consumes it (docs/calibration/boundary_spliced_channel_design.md §4.1), so this test guards the
+    channel consumes it (docs/calibration/archive/boundary_spliced_channel_design.md §4.1), so this test guards the
     plumbing, not a behaviour.
     """
     payload, ra = make_synthetic_payload()

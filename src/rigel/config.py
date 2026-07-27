@@ -291,11 +291,11 @@ class CalibrationConfig:
     #: fit by plain EM — deterministic, no spline. The fixed ``h`` is the KDE-style bandwidth: it forbids any
     #: peak sharper than ``h`` (smooth, never a bed-of-nails) and the projected prior is extremely weak
     #: (``n_eff≈0.15`` pseudo-obs), so strand + messages dominate. Grid size / EM iters are perf-only knobs
-    #: left at the fitter's defaults. Design: ``docs/calibration/npmle_struggles.md``.
+    #: left at the fitter's defaults. Design: ``docs/calibration/archive/npmle_struggles.md``.
     npmle_bandwidth: float = 0.15
 
     #: **Aggregate DNA-background floor** (`calibration.background_reference`,
-    #: ``docs/calibration/background_reference_derivation.md``). Measure the genome-wide DNA background as a
+    #: ``docs/calibration/archive/background_reference_derivation.md``). Measure the genome-wide DNA background as a
     #: pooled scalar ``(log ρ_bg, σ_bg)`` and apply it as a ONE-SIDED log-floor in the gDNA prior — data-driven
     #: crush protection that is DORMANT for a DNA-free / fully-depleted library (never manufactures gDNA) and
     #: never a scale/denominator. ``False`` ⇒ no floor (the pre-background behaviour).
@@ -336,7 +336,7 @@ class CalibrationConfig:
 
     #: **gDNA composition prior representation (Role B).** ``False`` (default) = the EM Poisson-mixture NPMLE.
     #: ``True`` = the **additive, occupancy-weighted, fixed-bandwidth KDE** on the deconvolved gDNA + a weak
-    #: 1-pseudo-observation floor (``gdna_kde_restore_plan.md``): every node deposits its own kernel so a
+    #: 1-pseudo-observation floor (``docs/calibration/archive/gdna_kde_restore_plan.md``): every node deposits its own kernel so a
     #: capture-enriched minority is never competed away, and the intergenic flood is a single weak floor rather
     #: than an ``n_regions`` tower. Affects ONLY the gDNA hyperprior fit (Role B) — NOT the enrichment NPMLE
     #: (Role A / σ²_transfer) and NOT the solve's gDNA messages. Experimental; being A/B-gated before default-on.

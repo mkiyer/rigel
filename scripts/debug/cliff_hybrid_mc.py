@@ -1,5 +1,5 @@
 """Monte-Carlo + fold validation of the HYBRID enrichment-corrected density message mode
-(docs/calibration/cliff_message_derivation.md §9) against the two predecessors it unifies.
+(docs/calibration/archive/cliff_message_derivation.md §9) against the two predecessors it unifies.
 
 THE CLAIM. A region↔boundary message provides two soft targets to the dst's λ-fold: a gDNA factor on
 ``log f_g`` and an RNA-total factor on ``log f_r``. Write ``M_c^pred = ρ_c^src·E_c^dst`` (source density in the

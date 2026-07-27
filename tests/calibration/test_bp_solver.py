@@ -422,7 +422,7 @@ def test_interior_anchor_is_immovable_and_produces_no_nan():
 
 
 def test_gdna_emits_across_tss_tes_seam():
-    """Structural-gate regression (`message_state_separation.md`): gDNA is genomically continuous, so the
+    """Structural-gate regression (`docs/calibration/archive/message_state_separation.md`): gDNA is genomically continuous, so the
     gene-boundary seams (TSS/TES) flanking a SINGLE-EXON gene must RELAY a gDNA message into it from the
     intergenic regions beyond — even though neither RNA strand is continuous across those seams. Before the
     fix the gDNA message was gated by RNA strand-continuity (`solvable`), so such a gene (both flanks
@@ -487,7 +487,7 @@ def test_gdna_emits_across_tss_tes_seam():
     reason="Pre-existing known-red, superseded by the τ-precision landing (2026-07-20). On this ARTIFICIAL "
     "seedless chain (intron+|AMBIG|intron−, no intergenic buffer, no enrichment prior ⇒ σ²_transfer=0) two "
     "documented effects break the old `<0.5` bound: (1) the AMBIG node leans gDNA at ≈0.564 — the CORRECT "
-    "reference behaviour on an unidentifiable balanced node (reference_prior_derivation.md §10.7), the level "
+    "reference behaviour on an unidentifiable balanced node (docs/calibration/archive/reference_prior_derivation.md §10.7), the level "
     "deferred to the hyperprior; (2) the strand-solved introns (local f_g≈0.034) are overridden UP to ≈0.564 "
     "by the directly-adjacent terminal G1 gDNA locks whose message is UNDAMPED here (no σ²_transfer). Both are "
     "artefacts of this minimal chain: on real data (σ²_transfer + intergenic buffers) the stranded controls are "
@@ -570,7 +570,7 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     assert final.f_g[1] < 0.50 and final.f_g[5] < 0.50
 
 
-# --- density-Gaussian message form: two-sided pull + emergent deference (precision_state_design.md §5) --------
+# --- density-Gaussian message form: two-sided pull + emergent deference (docs/calibration/archive/precision_state_design.md §5) --------
 
 
 def test_density_message_two_sided_mode_not_vertex():
@@ -625,7 +625,7 @@ def test_density_message_defers_to_decisive_strand():
 
 
 # --- mature absorption: the spliced mass "absorbs" the imputed RNA, leaving only NASCENT ---------------
-# (`spliced_mature_nascent_message.md`). The RNA message src→dst is
+# (`docs/calibration/archive/spliced_mature_nascent_message.md`). The RNA message src→dst is
 #   ρ = src_nascent/E_r + SP[sf][src]/E_spl_src − SP[df][dst]/E_spl_dst.
 # The dst-face term subtracts the mature a junction boundary measures, so a pure-mature exon imputes
 # ≈0 nascent into the intron beyond it — no wholesale nascent hallucination.
@@ -713,7 +713,7 @@ def _sweep(args, kappa=0.95, n_rna_obs=10000.0, n_gdna_obs=10000.0):
     "ρ_mature, intron-baselined) + the honest σ²_transfer precision. The flanking pure-gDNA introns land at "
     "f_g≈0.82 (truth 1.0): the exon's ~95%-mature unspliced payload leaks in as nascent because the RNA-total "
     "factor does not yet subtract mature. The mature gate that used to block this edge was DISMANTLED "
-    "(docs/calibration/message_model_derivation.md §5) — and the dismantle IMPROVED this toy (0.766 gated → "
+    "(docs/calibration/archive/message_model_derivation.md §5) — and the dismantle IMPROVED this toy (0.766 gated → "
     "0.821 un-gated), so this xfail marks the residual σ²_transfer/nascent-factory gap, NOT a dismantle "
     "regression. Un-xfail when the nascent factory lands.",
     strict=False,
@@ -748,7 +748,7 @@ def test_mature_measurement_recovers_exon_rna():
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "OPEN ITEM surfaced by B1b (message_layer_derivation.md §12.8). Assertions (1) and (3) still hold — "
+        "OPEN ITEM surfaced by B1b (docs/calibration/archive/message_layer_derivation.md §12.8). Assertions (1) and (3) still hold — "
         "the depleted junction genuinely lowers the RNA target, and the exon stays firmly RNA-dominated "
         "(f_g = 0.134 vs a 0.45 bound). Only the ABSOLUTE bound in (2) fails: |Δf_g| = 0.0612 vs 0.05. "
         "The diagnosis is a real coupling, not a tolerance nuisance: `_boundary_spliced_mass_increment` folds "
@@ -786,7 +786,7 @@ def test_mature_measurement_disagreement_silenced():
 
 
 def test_tau_gag_fix_spliced_junction_emits_when_unstranded():
-    """τ-GAG REGRESSION (`message_system_implementation_plan.md` §Phase B, 2026-07-21). On UNSTRANDED data
+    """τ-GAG REGRESSION (`docs/calibration/archive/message_system_implementation_plan.md` §Phase B, 2026-07-21). On UNSTRANDED data
     (κ=½ ⇒ the strand Fisher info ``I_strand`` is identically 0), a splice-junction boundary still carries
     motif-stranded spliced (mature-RNA) fragments — a DIRECT measurement, independent of strand. That
     measurement MUST reach the exon. The bug: the τ-evidence emission gate (keyed on ``I_strand``+``I_struct``
@@ -889,7 +889,7 @@ def test_pure_gdna_node_confident_at_near_binomial_od():
 
 # ---------------------------------------------------------------------------
 # RNA-message routing after the mature-crossing gate was DISMANTLED
-# (docs/calibration/message_model_derivation.md §5).
+# (docs/calibration/archive/message_model_derivation.md §5).
 #
 # Only the STRUCTURAL per-strand `free_s` continuity gate remains: each RNA strand's density flows wherever that
 # strand is continuous on BOTH endpoints (intron↔exon in either direction, intron→boundary, boundary→exon), and
@@ -1024,7 +1024,7 @@ def test_spliced_routing_is_strand_aware_at_ambig_seams():
 
 # --------------------------------------------------------------------------------------------------
 # DOF pie relay (item 2) — S2: a test that FAILS on today's incoherent relay and flips when the
-# coordinate (λ,θ) relay lands (docs/calibration/dof_pie_relay_implementation_plan.md §7 S2).
+# coordinate (λ,θ) relay lands (docs/calibration/archive/dof_pie_relay_implementation_plan.md §7 S2).
 # --------------------------------------------------------------------------------------------------
 def test_sweep_finite_over_extreme_configs():
     """F: no nan/inf reaches the fold. The real node_sweep over spliced/±, stranded/unstranded, and extreme

@@ -12,7 +12,7 @@ Two properties make it the trustworthy A/B basis (both verified by independent r
   * **Basis.** ``msgfree`` here is phase-D with all message precisions zeroed — NOT ``selfsolve_diag --stage
     self`` (which runs ``init_beliefs`` alone). The two differ; this one (``0.0098`` intron on
     ``gdna300_ss0.99_none_capOFF``) is the message-free floor the gate is judged against, reported as
-    ``msgfree``. See ``docs/calibration/mature_crossing_gate.md`` §4.4.
+    ``msgfree``. See ``docs/calibration/archive/mature_crossing_gate.md`` §4.4.
 
 Truth basis: the oracle region/boundary pools in ``<suite>/_selfsolve_cache`` (7 conditions, gdna300, with
 truth). Reproduces the item-1 doc's §1 4-row table.

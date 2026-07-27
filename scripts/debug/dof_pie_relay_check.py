@@ -1,9 +1,9 @@
 """Validate the DOF pie relay — the coherent (lambda, theta) belief-propagation update.
 
 Theory-only (numpy/scipy; NO rigel imports, NO biology), the companion to
-docs/calibration/dof_pie_relay_derivation.md — the numerical proof that a reviewer can rerun standalone.
+docs/calibration/archive/dof_pie_relay_derivation.md — the numerical proof that a reviewer can rerun standalone.
 
-The defect (measured in production, dof_pie_model_fix.md Sec 1): bp_solver._scan maintains the running relay
+The defect (measured in production, docs/calibration/archive/dof_pie_model_fix.md Sec 1): bp_solver._scan maintains the running relay
 belief as THREE INDEPENDENT log-fraction Gaussians on (log f_g, log f_pos, log f_neg) and combines each
 component alone. That (a) violates the pie constraint f_g+f_pos+f_neg=1 (measured 62-70% of solvable nodes),
 so a relayed 'composition' has a component fraction > 1 (B740 relays fbp=51.9), and (b) applies message
@@ -68,7 +68,7 @@ half = p_g * 0.25 + p_r * 0.25
 print(f"\n  at f_g=1/2 with p_g=p_r=p the coherent curvature is p/2 (here {half:.3f} = (p_g+p_r)/4);"
       f" independent asserts {p_g + p_r:.3f}.")
 print("  => the independent relay OVER-states lambda-precision by up to 2x and breaks the pie. The kept")
-print("     identity from the retracted message_precision_and_dof.md is reproduced exactly.  CONFIRMED.")
+print("     identity from the retracted docs/calibration/archive/message_precision_and_dof.md is reproduced exactly.  CONFIRMED.")
 print()
 
 

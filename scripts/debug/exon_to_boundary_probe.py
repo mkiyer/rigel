@@ -1,4 +1,4 @@
-"""Direct observation of what the exon -> boundary edge emits (message_layer_derivation.md §10.1).
+"""Direct observation of what the exon -> boundary edge emits (docs/calibration/archive/message_layer_derivation.md §10.1).
 
 HYPOTHESIS (from the derivation): on an exon -> splice-junction-boundary edge the code suppresses the exon's
 RNA density to `SPs/_esp - absorb_p`, and a REGION has `spliced_* == 0`, so that term is <= 0. The shift

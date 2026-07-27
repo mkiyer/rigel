@@ -195,7 +195,7 @@ def analyze_library(label: str, library_dir: Path, rigel_subdir: str = "rigel_v0
         # Emergent totals. The nascent total is the SYNTHETIC nascent-shadow EM mass — the estimator's own
         # ``nrna_em_count`` scalar. Do NOT sum "rigel_count" over is_nrna: that count is 0 for synthetics
         # (Trap 1) and is_nrna also flags real annotated single-exon transcripts (Trap 2). See
-        # docs/calibration/siphon_measurement.md. Annotated single-exon transcripts stay in mrna_total (their
+        # docs/calibration/archive/siphon_measurement.md. Annotated single-exon transcripts stay in mrna_total (their
         # count is real); mrna_total is all annotated RNA (synthetic count is 0, so it doesn't leak in).
         mrna_total = float(rigel["rigel_count"].sum())
         nrna_total = rigel_summary.get("nrna_em_count")

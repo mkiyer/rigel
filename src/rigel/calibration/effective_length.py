@@ -89,7 +89,7 @@ def region_eff_length(region_len_bp: np.ndarray, fl_pmf: np.ndarray) -> np.ndarr
     on such faces (≈26 % of junction faces on ``ambig_dense_10mb``). It is functionally **inert today** — an A/B
     through the sweep moves ``f_g`` by ≤1e-4 because the spliced channel is heavily down-weighted — but it is a
     real geometry error that becomes load-bearing once the spliced-measurement channel is un-gagged (priority #3).
-    See ``docs/calibration/mature_crossing_gate.md`` §6.2. **Deferred, not cosmetic.**)
+    See ``docs/calibration/archive/mature_crossing_gate.md`` §6.2. **Deferred, not cosmetic.**)
     """
     p = _as_pmf(fl_pmf)
     n = p.shape[0]

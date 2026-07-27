@@ -6,8 +6,7 @@ per-locus Dirichlet scalars** the locus EM consumes — ``rna_prior_count`` and
 
 The prior's only job is to split each locus's unspliced fragments between gDNA
 and RNA; it does **not** attribute RNA mass to individual transcripts (that is
-what the EM is for). See ``docs/acc_caljointmodel/prs/PR06_integrate.md`` §I and
-``docs/caljointmodel/04_interface_contract.md`` §6.
+what the EM is for).
 """
 
 from __future__ import annotations
@@ -118,7 +117,7 @@ def _gdna_region_node_arrays(
     """Per-region node arrays ``(gdna_region, support_len, pooled, seam_len)`` for the gDNA region +
     pooled-seam nodes — the SHARED node model with ``transcript_capture_eff_lengths`` (via _pooled_seam_arrays).
 
-    The density-correct, transport-free gDNA node model (``effective_length_redesign_plan.md`` §8 —
+    The density-correct, transport-free gDNA node model (``docs/calibration/archive/effective_length_redesign_plan.md`` §8 —
     the first-principles rev). The node set over a region chain is the per-region CONTAINED node plus
     one POOLED SEAM node per internal boundary (genomically adjacent, same reference), keyed to its
     left-flank region ``r``::
@@ -209,7 +208,7 @@ def assemble_priors(
     """Build the per-locus EM prior from the calibration result.
 
     The gDNA node set is the **density-correct, transport-free** region + pooled-seam model
-    (``effective_length_redesign_plan.md`` §8; see ``_gdna_region_node_arrays``):
+    (``docs/calibration/archive/effective_length_redesign_plan.md`` §8; see ``_gdna_region_node_arrays``):
 
         region node r:    mass = mass_gdna_contained[r],   effective support S_r = E[max(0, L_r − ℓ)]
         seam node (r,r+1): mass = mass_gdna_right[r] + mass_gdna_left[r+1] (the two halves POOLED),
@@ -252,7 +251,7 @@ def assemble_priors(
             f"{region_arrays.n_regions}; they must address the same partition."
         )
 
-    # Density-correct, transport-free gDNA node model (effective_length_redesign_plan.md §8): per-region
+    # Density-correct, transport-free gDNA node model (docs/calibration/archive/effective_length_redesign_plan.md §8): per-region
     # CONTAINED node (effective support gdna_region_eff_len = E[max(0,L−ℓ)]) + one POOLED SEAM node per
     # internal boundary (support = ½ the sum of the flanking E[min(ℓ,L)] = averaged gdna_boundary_len),
     # keyed to the left-flank region — the SAME node model _pooled_seam_arrays gives the transcript
@@ -267,7 +266,7 @@ def assemble_priors(
     #   elen = min(contained/ρ_ref, S_region) + min(pooled/ρ_ref, S_seam).
     # Folding the two into one min() would UNDER-contract a captured exon whose seam runs into a depleted
     # intron (up to ~13% per region under capture, verified). ρ_ref None (no detectable gDNA) ⇒ elen =
-    # support (no contraction). See docs/calibration/enriched_mode_reference_density.md.
+    # support (no contraction). See docs/calibration/archive/enriched_mode_reference_density.md.
     from .capture_eff_length import _global_reference_density
 
     contained = np.asarray(calibration.mass_gdna_contained, dtype=np.float64)

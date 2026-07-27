@@ -1,7 +1,7 @@
 """Tests for the per-intron SPLICED_IMPLICIT discriminant.
 
 Implements the 14-case acceptance matrix from
-``docs/calibration/spliced_implicit_bug_fix_2026-05-09.md`` Section 4.
+the implicit-splice bug fix (2026-05-09), section 4.
 
 Strategy
 --------

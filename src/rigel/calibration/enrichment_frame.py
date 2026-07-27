@@ -8,8 +8,8 @@ arithmetic and nothing else: it is a pure function of masses, compositions, and 
 no substrate, no solver state — so its facts are pinned by closed-form unit tests
 (``tests/calibration/test_enrichment_frame.py``) that cannot drift with solver behaviour.
 
-Derivation: ``docs/calibration/enrichment_ratio_generalization.md`` (the framework, §1 the total-density
-pivot, §2 the bounding lemma, §4 the step-wise junction solve) and ``junction_enrichment_scaling.md`` (the
+Derivation: ``docs/calibration/archive/enrichment_ratio_generalization.md`` (the framework, §1 the total-density
+pivot, §2 the bounding lemma, §4 the step-wise junction solve) and ``docs/calibration/archive/junction_enrichment_scaling.md`` (the
 junction instance + §5b the r₂/r₁ asymmetry). The solver wiring that consumes these is phase E2 (behind a
 flag); this module is frame-agnostic by construction (arrays in, arrays out), so the per-face-vs-node-level
 frame question E2 must settle cannot invalidate anything here.
@@ -54,7 +54,7 @@ def _f(x):
 def composition_logvar(f_g, E_g, E_r, var_fg, n):
     """``Var(log ρ_tot)`` — the composition assumption carried as a **variance**, not a bool gate.
 
-    Two independent sources of uncertainty in a total density (``enrichment_ratio_generalization.md`` §2, the
+    Two independent sources of uncertainty in a total density (``docs/calibration/archive/enrichment_ratio_generalization.md`` §2, the
     bounding lemma, made continuous):
 
     * **counting** — ``M`` is a Poisson count, so ``Var(log M) = 1/n``;
