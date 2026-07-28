@@ -802,6 +802,7 @@ _PARAM_SPECS: tuple[_ParamSpec, ...] = (
     _ParamSpec("mismatch_alpha", "scoring.mismatch_log_penalty", "log_penalty"),
     _ParamSpec("pruning_min_posterior", "scoring.pruning_min_posterior"),
     # -- CalibrationConfig: advanced --
+    _ParamSpec("calib_refit_iters", "calibration.calib_refit_iters"),
     _ParamSpec("npmle_bandwidth", "calibration.npmle_bandwidth"),
     _ParamSpec("sweep_n_grid_single_strand", "calibration.sweep_n_grid_single_strand"),
     # -- Fan-out: total threads → both EM and scan budgets --
@@ -1339,6 +1340,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Convergence threshold for EM parameter updates (default: 1e-6).",
+    )
+    adv.add_argument(
+        "--calib-refit-iters",
+        dest="calib_refit_iters",
+        type=int,
+        default=None,
+        help="Calibration prior-bootstrap iterations (default 3). Each one re-fits the population gDNA "
+        "landscape on the current solve, resets the belief, and re-solves. The bootstrap converges "
+        "geometrically and iteration 3 captures ~96%% of the available gain; cost is linear (one extra "
+        "full sweep each). 0 = the prior-free pass-0 alone. Advanced calibration knob.",
     )
     adv.add_argument(
         "--gdna-rate-prior-bandwidth",
