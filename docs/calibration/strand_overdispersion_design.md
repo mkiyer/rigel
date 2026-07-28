@@ -344,16 +344,73 @@ output is finite.
 is wrong by 131× puts a systematic offset straight into the numerator, squared. The estimator is measuring
 the distance between κ and its own seeds and reporting it as overdispersion.
 
-**The likely mechanism — two different orientation frames** (strong hypothesis from the code, not yet
-isolated):
+### ⛔ CORRECTION (same day) — "κ IS WRONG" WAS THE WRONG ATTRIBUTION. **κ IS RIGHT.**
 
-* **κ** comes from `fit_strand_balance(strand_model)` — the `StrandModel` trained during the **BAM scan
-  from unique mappers**, oriented relative to the **transcript**.
-* **the seeds** come from the accumulator's boundary-side spliced counts, and
-  `fit_rna_strand_from_substrate`'s own docstring says **"orientation is motif-relative"**.
+The first draft of this section blamed κ and hypothesised a transcript-relative / motif-relative frame
+mismatch. **Measured, and refuted: κ agrees with the deep junctions almost exactly.** What is wrong is the
+**seed population**.
 
-**Transcript-relative and motif-relative are not the same coordinate.** Handing a transcript-relative mean
-to motif-relative counts is a category error, and it would produce exactly this signature.
+**The owner's framing is the correct physical one and it is what the measurement confirms.** During dUTP
+prep the reverse-strand synthesis is degraded so a fragment can be traced to its strand; the process is
+imperfect. The aligner reports only Forward/Reverse, which is **not** a strand call — but **iff a fragment
+is SPLICED, the genomic GT/AG motif gives the true strand independently of prep**. Comparing motif strand
+to aligner orientation over spliced fragments therefore **measures library-prep efficiency**, and κ is its
+mean. ⚠ And the owner's power point is the crux: **at κ ≈ 0.99 (or ≈ 0.01) you need a junction with many
+reads to see even one disagreeing read.**
+
+**Agreement rate by junction depth — this is the whole story:**
+
+| sample | κ | all seeds | depth ≥ 10 | **depth ≥ 100** | **depth ≥ 1000** |
+|---|---|---|---|---|---|
+| LBX0190 | **0.00231** | 0.3032 | 0.2682 | **0.0029** ✅ | **0.0038** ✅ |
+| LBX0588 | **0.01203** | 0.3311 | 0.0319 | **0.0011** ✅ | — |
+| MO_3021 | **0.00203** | 0.4661 | **0.4876** ⚠ | **0.0136** ✅ | **0.0024** ✅ |
+| vcap | **0.00006** | 0.0681 | 0.0542 | 0.0083 | **0.0014** ✅ |
+
+**The deep junctions reproduce κ.** LBX0190's κ = 0.0023 against 0.0029 / 0.0038 measured at depth. κ is a
+sound estimate of prep efficiency.
+
+**The seed population is not.** It is dominated by *millions* of shallow boundary sides — 818 k seeds for
+2.4 M fragments, i.e. ~1–2 each — whose agreement rate sits at **0.30–0.49**. MO_3021 at depth ≥ 10 reads
+**0.4876**: dead on ½, the signature of **effectively random orientation**, not of prep efficiency. Those
+shallow sides disagree with κ by ~100×, and `excess = (sense − N·κ)²` turns that offset into an enormous
+numerator.
+
+⚠ **A related but MINOR defect, worth fixing anyway:** a seed with `n = 1` contributes
+`excess ≈ (1 − κ)² ≈ 1` to the numerator but `scale = n(n−1)·κ(1−κ) = 0` to the denominator — it inflates
+`od` without being able to inform it. Measured share of `Σexcess`: **0.1 – 9.1 %**, and excluding those
+seeds moves `od` only 10.73 → 10.22. **Real, but not the cause.** (It is the same principle as P2: a seed
+with one fragment has no pair to correlate. Here the asymmetry is a plain bug — it counts in one sum and
+not the other.)
+
+### ⭐⭐ THE HONEST RNA OVERDISPERSION, AND THE OWNER WAS RIGHT
+
+Restricted to junctions deep enough to carry the information, and re-centred on their own mean so a mean
+misfit cannot masquerade as dispersion:
+
+| sample | depth ≥ 100 | depth ≥ 1000 | implied `Beta(a,a)` |
+|---|---|---|---|
+| LBX0190 | 0.0047 | **0.0035** | a ≈ 107–141 |
+| LBX0588 | **0.0020** | — | a ≈ 250 |
+| MO_3021 | 0.0158 | **0.0023** | a ≈ 31–218 |
+| vcap | 0.0075 | **0.0011** | a ≈ 66–464 |
+
+> **The true RNA strand overdispersion is 0.001–0.016 — 13 to 180× BELOW the ceiling of 0.2** — and it
+> agrees with the synthetic suite's 0.0008–0.0017. **The owner's prediction was exactly right on both
+> counts: there is no danger of overestimating RNA overdispersion, and it is hard to measure — only
+> 16–3,011 junctions per library reach depth 1000.**
+
+**⇒ THE FIX, and it needs no new constant:** the RNA overdispersion must be fitted from junctions that can
+inform it. That is P2's principle again — weight by **pairs**, `n(n−1)/2`, which is zero for a singleton
+and negligible for a shallow side — plus repairing the numerator/denominator asymmetry so a seed that
+contributes no denominator contributes no numerator either. A depth *threshold* is then unnecessary: the
+pair weighting demotes shallow sides automatically.
+
+**⇒ AND THE CEILING QUESTION IS ANSWERED:** the owner proposed dropping the RNA ceiling on the grounds that
+annotated junctions are reliable. **That is right in principle, and the measurement supports it** — the
+honest value is 100× below the ceiling, so the ceiling would never bind. ⚠ **But do not drop it until the
+seed weighting is fixed**, because today it is the only thing standing between the strand likelihood and an
+`od` of 10–80.
 
 **⇒ THREE CONSEQUENCES:**
 
