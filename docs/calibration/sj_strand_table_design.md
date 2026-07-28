@@ -6,6 +6,45 @@ neither the accumulator, the mass channels, nor the solver.
 
 ---
 
+## 0. ✅ IMPLEMENTED AND GATED (2026-07-28) — every gate passed. Read §7 for the execution record.
+
+![od_r before and after](figures/sj_strand_table_od_r.png)
+
+| gate | result |
+|---|---|
+| **1 — κ bit-identical** (the falsification test) | ✅ the table's marginal 2×2 **equals the existing 2×2 exactly** on **32/32** synthetic conditions and **4/4** real cfRNA libraries |
+| **2 — ⭐ `od_r` on real data in 0.001–0.016, off the ceiling** | ✅ **0.00858 / 0.01368 / 0.00736 / 0.01341** (LBX0190 / LBX0588 / MO_3021 / vcap). 4/4 in band, 4/4 off the ceiling. ⭐ **The RAW MoM went 10.7–79.9 → 0.0074–0.0137: admissible on every library, clipped on none.** |
+| **3 — synthetic stays small** | ✅ mean **0.00001**, max **0.00006** (truth is 0); max \|Δ\| vs OLD = 3e-5 |
+| **4 — 32-condition A/B, both refits** | ✅ **neutral**: ALL 32 −0.000002 (r0) / +0.000008 (r1); stranded falsifier +0.000001 / +0.000020; `gdna_none` untouched |
+| **5 — goldens LAST** | ✅ 21 regenerated; **1213 tests pass**, ruff clean |
+
+⚠ **The suite could not have demonstrated this fix, and that is itself the finding.** The synthetic's
+boundary-spliced population is *not* contaminated (its OLD `od_r` was already 0.0000–0.0001), so Gate 4 is a
+**safety check, not a demonstration**. Only real data shows the defect, exactly as §5 Gate 3 predicted.
+
+**The §3 cleanup landed with it, and is proven behaviour-neutral** — the 32-condition A/B after the cleanup
+is **bit-identical** to the A/B before it, at both refit settings. What went: the observe/finalize lifecycle
+and `_cached_p_sense` (§3.2); `StrandBalance`'s `1/(n_obs+3)` field (**deleted**, not renamed — no consumer
+in `src/`, so removing it retires the name collision without inventing a second name); the whole
+`to_dict`/`write_json` serialization cluster on `StrandModel`/`StrandModels` (`summary.json` is hand-built in
+`cli.py`; `SJStrandTable.to_dict` is the live one and stays); `StrandModel.strand_likelihood` (scoring reads
+the two scalars and does the arithmetic in C++); `n_major` + `minor_rate_posterior_alpha/beta` +
+`SJStrandTable.p_sense` (fed only the dead serializer / duplicated `p_r1_sense`); the C++
+`exonic_spliced_obs`/`exonic_spliced_truth` label vectors (two int8 pushes per qualified fragment, merged and
+exported, with no Python reader once the 2×2 became the table's marginal); and
+`FragmentResolver::set_gene_strands` + `g_to_strand_arr_`, which was write-only — the exonic diagnostic uses
+`t_strand_arr_`, so `pipeline.py` was building a full per-gene Python list for a value nothing read.
+
+⭐ **What replaces the deleted 2×2 cross-check:** `scan_and_buffer` now asserts the table's total depth
+against `stats.n_strand_trained`, which the scanner counts independently of the table it builds. That is the
+invariant to break if the crediting rule ever changes.
+
+⛔ **Two audit claims were checked and REJECTED, do not re-raise them:** `BamScanner::scan`'s `t_strand_arr`
+is **live** (`bam_scanner.cpp:1394`, `acc.finalize_zero_copy`), and `exonic_obs`/`exonic_truth` are **live**
+(`report/model.py:250` renders `exonic_all_*` / `contamination_gap`).
+
+---
+
 ## 1. THE DEFECT
 
 **The two halves of the same Beta-Binomial are trained on different populations.**
@@ -133,10 +172,14 @@ is arbitrary but unbiased. If it ever matters, the alternative is a 1/K split �
 
 1. ⭐ **One source of truth.** The 2×2 becomes a derived property of the junction table (§2.1), not four
    independently-maintained counters.
-2. **Retire the observe/finalize lifecycle if it is now vestigial.** `observe()` / `observe_batch()` /
-   `_cached_p_sense` / `_finalized` exist because the model was built incrementally. If it is now built
-   once from arrays, a frozen constructor + computed properties is simpler and removes a mutable-state
-   footgun. ⚠ Check `observe()`'s remaining callers first.
+2. ✅ **DONE — the observe/finalize lifecycle is retired.** `observe()` / `observe_batch()` /
+   `_cached_p_sense` / `_cached_p_antisense` / `_finalized` are gone; all three classes are frozen and
+   built once from the scanner's arrays. `observe()` had no caller outside its own tests, and
+   `_cached_p_sense` defaulted to **0.0** and was read by private attribute access from another module
+   (`scoring.py`), so a missed `finalize()` would have built a silently-wrong scorer with no error.
+   ⚠ Deliberately NOT `slots=True` on `StrandModel`/`StrandModels`: the `_selfsolve_cache` /
+   `_calib_cache` development pickles hold instances, and a slotted class cannot restore a
+   `__dict__`-based pickle state.
 3. ⚠ **Rename `StrandBalance.rna_strand_overdispersion`.** It is `1/(n_obs+3)` — a **posterior width**, a
    QC-only thin-count power diagnostic — and it *collides by name* with the decode's genuine Beta-Binomial
    `rna_strand_overdispersion` from `gdna_strand.py`. CLAUDE.md already has to warn that these are

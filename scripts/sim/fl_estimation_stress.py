@@ -294,7 +294,6 @@ def _run_case(
         scan_config,
     )
     try:
-        strand_models.finalize()
         if payload is None:
             raise RuntimeError("scan did not produce a calibration payload")
         calibration = calibrate(

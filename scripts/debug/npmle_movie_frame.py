@@ -48,7 +48,7 @@ from rigel.calibration.npmle import (
 )
 from rigel.calibration.gdna_strand import (
     fit_gdna_strand_from_substrate,
-    fit_rna_strand_from_substrate,
+    fit_rna_strand_from_sj_table,
 )
 from rigel.calibration.node_chain import build_node_chain
 from rigel.calibration.node_geometry import build_node_geometry, build_node_statics, init_beliefs
@@ -89,8 +89,8 @@ def solve_belief(inp, index, cfg):
     od_g = fit_gdna_strand_from_substrate(
         sub, ra, nd, bnd_el, rna_sense_frac=kappa
     ).gdna_strand_overdispersion
-    od_r = fit_rna_strand_from_substrate(
-        sub, rna_sense_frac=kappa
+    od_r = fit_rna_strand_from_sj_table(
+        inp["strand_model"].sj_table, rna_sense_frac=kappa
     ).rna_strand_overdispersion
     chain = build_node_chain(pl.ref_region_offsets, pl.ref_boundary_offsets)
     geom = build_node_geometry(chain, sub, bsub, ra, gfl, rfl)

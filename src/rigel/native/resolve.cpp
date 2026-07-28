@@ -48,6 +48,9 @@ NB_MODULE(_resolve_impl, m) {
         .def_ro("exon_bp_neg", &ResolvedFragment::exon_bp_neg)
         .def_ro("tx_bp_pos", &ResolvedFragment::tx_bp_pos)
         .def_ro("tx_bp_neg", &ResolvedFragment::tx_bp_neg)
+        .def_ro("sj_key_ref", &ResolvedFragment::sj_key_ref)
+        .def_ro("sj_key_start", &ResolvedFragment::sj_key_start)
+        .def_ro("sj_key_end", &ResolvedFragment::sj_key_end)
         .def_prop_ro("is_chimeric", &ResolvedFragment::get_is_chimeric)
         .def_prop_ro("is_same_strand", &ResolvedFragment::get_is_same_strand)
         .def_prop_ro("is_strand_qualified",
@@ -111,9 +114,6 @@ NB_MODULE(_resolve_impl, m) {
              nb::arg("frag"),
              "Resolve a Fragment object to its compatible transcript set.\n\n"
              "Returns a ResolvedFragment or None for intergenic fragments.")
-        .def("set_gene_strands", &FragmentResolver::set_gene_strands,
-             nb::arg("g_to_strand"),
-             "Set gene strand mapping for BAM scanner model training.")
         .def("set_transcript_strands", &FragmentResolver::set_transcript_strands,
              nb::arg("t_strand"),
              "Set per-transcript strand array (direct lookup, no gene indirection).")

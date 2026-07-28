@@ -485,6 +485,12 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "n_training_fragments": sm.n_observations,
             "posterior_variance": round(sm_primary.posterior_variance(), 8),
             "ci_95": [round(ci_lo, 6), round(ci_hi, 6)],
+            # The per-junction SJ strand table this 2×2 is the marginal of. "How many
+            # junctions are deep enough to measure the strand dispersion" is a
+            # first-class question about a library: at κ ≈ 0.002 a junction needs
+            # hundreds of reads before one disagreeing read is even expected, and the
+            # RNA strand overdispersion is fitted from exactly this population.
+            "junctions": sm.sj_table.to_dict(),
             # All-exonic (RNA+gDNA) diagnostic model, never used for scoring.
             # A positive ``contamination_gap`` means unstranded gDNA is dragging
             # the mixed all-exonic estimate toward 0.5 relative to the clean

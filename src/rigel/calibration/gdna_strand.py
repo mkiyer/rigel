@@ -12,9 +12,15 @@ that asymmetry made the strand likelihood *spuriously informative on unstranded 
 ``−½·log var`` term prefers the lower-variance component, pulling balanced nodes toward RNA). Both
 components now carry a fitted overdispersion with the **same default prior**, so under sparse data
 the two collapse to the same distribution and an unstranded node is uninformative — as it must be.
-The gDNA mean ½ and RNA mean κ are unchanged; only RNA gains the overdispersion term. The RNA
-overdispersion is fit from **boundary-side spliced counts** (spliced ⇒ pure RNA); see
-:func:`fit_rna_strand_overdispersion` and the substrate wrapper in :mod:`calibrate`.
+The gDNA mean ½ and RNA mean κ are unchanged; only RNA gains the overdispersion term.
+
+⭐ **The RNA overdispersion is fit from the PER-JUNCTION SJ strand table — the same population κ is the
+marginal of** (:func:`fit_rna_strand_from_sj_table`). It used to be scavenged from the accumulator's
+boundary spliced channels, which pool unannotated and implicit splices; an implicit splice has no
+sequenced motif, so its sense bit is arbitrary, and fitting a dispersion about κ ≈ 0.002 from seeds
+sitting at ½ produced a raw ``od_mom`` of 10.7–79.9 — impossible for an intra-class correlation — clipped
+to the ceiling on 4/4 real libraries. Two halves of one Beta-Binomial, two different populations.
+``docs/calibration/sj_strand_table_design.md``.
 
 **Breaking the circularity** (gDNA only). Fitting the overdispersion needs to know which fragments are gDNA,
 which is what the deconvolution determines — circular. We break it with the count⊥strand
@@ -54,8 +60,10 @@ The MoM is closed-form, ``O(n_seed_nodes)``, and uses the **same variance decomp
 applies** (:mod:`strand_likelihood`), so fit and application are consistent. The two constants live in this
 module, next to the estimator they parameterise.
 
-The substrate→seed-node extraction wrapper lives in :mod:`calibrate` (it needs the region/
-boundary geometry); this module is the pure estimator + model so it is trivially testable.
+Each component pairs a pure estimator with a thin seed-extraction wrapper, so the estimator itself
+is trivially testable: :func:`fit_gdna_strand_overdispersion` / :func:`fit_gdna_strand_from_substrate`
+for gDNA (the wrapper needs the region/boundary geometry), and
+:func:`fit_rna_strand_overdispersion` / :func:`fit_rna_strand_from_sj_table` for RNA.
 """
 
 from __future__ import annotations
@@ -124,6 +132,7 @@ def _prior_information() -> float:
     unit fixtures. That inertness is why the *shape* assertion above costs nothing.
     """
     b, m = _MAX_OVERDISPERSION, _PRIOR_OVERDISPERSION
+
     # max-entropy density on [0, b] with mean m is ∝ exp(−λx); solve mean(λ) = m by bisection.
     def _mean(lam: float) -> float:
         z = lam * b
@@ -173,11 +182,13 @@ class GdnaStrandModel:
 class RnaStrandModel:
     """Fitted RNA strand model: the global Beta-Binomial overdispersion of the spliced (pure-RNA)
     strand split + fit provenance. The RNA sense *mean* (``rna_sense_frac``) lives in
-    :class:`strand_balance.StrandBalance`; this carries only the between-boundary overdispersion."""
+    :class:`strand_balance.StrandBalance`; this carries only the between-JUNCTION overdispersion."""
 
     rna_strand_overdispersion: float  # intra-class correlation in [0, _MAX_OVERDISPERSION]
-    n_seed_nodes: int  # boundary sides that carried spliced fragments
-    n_seed_fragments: int  # total spliced fragments across seed sides (with junction double-count)
+    n_seed_nodes: int  # splice junctions that carried strand-qualified fragments
+    n_seed_fragments: (
+        int  # total strand-qualified fragments (exactly one per fragment, no double-count)
+    )
     fallback_used: bool  # True ⇒ no spliced strand signal ⇒ returned the prior overdispersion
 
     def beta_concentration(self) -> float:
@@ -273,9 +284,7 @@ def _fit_overdispersion(
         # 160k singleton seeds outvote the prior by four orders of magnitude on a library that has
         # almost no pairs. ``_null_information`` is the honest measure and makes the expression an
         # exact Normal–Normal posterior mean (see :func:`_prior_information`).
-        info = _null_information(
-            comp_frags[valid], np.broadcast_to(comp_var, total.shape)[valid]
-        )
+        info = _null_information(comp_frags[valid], np.broadcast_to(comp_var, total.shape)[valid])
         total_weight = info + prior_weight
         od = (
             (info * od_mom + prior_weight * prior_overdispersion) / total_weight
@@ -297,9 +306,10 @@ def fit_gdna_strand_overdispersion(
 ) -> GdnaStrandModel:
     """Pooled method-of-moments fit of the global gDNA strand overdispersion, with prior shrinkage.
 
-    The pooled MoM point estimate is shrunk toward ``prior_overdispersion`` by seed-node count:
-    ``od = (n_seed_nodes·od_mom + prior_weight·prior_overdispersion) / (n_seed_nodes + prior_weight)``.
-    Sparse seed sets (few informative nodes) lean on the prior; abundant sets on the fit. This
+    The pooled MoM point estimate is shrunk toward ``prior_overdispersion`` weighted by
+    INFORMATION (:func:`_null_information`), not by seed-node count:
+    ``od = (I·od_mom + prior_weight·prior_overdispersion) / (I + prior_weight)``.
+    Seed sets carrying little information lean on the prior; abundant ones on the fit. This
     replaces the earlier hard min-node / significance gates (no thresholds — graceful with data).
     The result is clamped to ``[0, _MAX_OVERDISPERSION]`` (the ``Beta(2, 2)`` ceiling).
 
@@ -315,7 +325,8 @@ def fit_gdna_strand_overdispersion(
         Prior overdispersion to shrink toward (the ``Beta(a, a)`` "floor"; see
         :func:`overdispersion_for_beta`). ``0`` with ``prior_weight = 0`` ⇒ pure MoM.
     prior_weight : float
-        Prior strength in effective seed-node units. ``0`` ⇒ no shrinkage.
+        Prior strength in the estimator's own INFORMATION units (:func:`_prior_information`
+        derives the production value). ``0`` ⇒ no shrinkage.
 
     Returns
     -------
@@ -416,17 +427,22 @@ def fit_rna_strand_overdispersion(
 ) -> RnaStrandModel:
     """Pooled method-of-moments fit of the global RNA strand overdispersion, with prior shrinkage.
 
-    The twin of :func:`fit_gdna_strand_overdispersion`, on **pure-RNA spliced** nodes: spliced
-    fragments are pure RNA, so each seed node is all-RNA — ``node_mean = rna_sense_frac`` (κ) and
-    the component fraction is ``1`` (the whole node is the RNA component). The excess variance of
+    The twin of :func:`fit_gdna_strand_overdispersion`, on **pure-RNA spliced** seeds: an annotated
+    splice junction proves RNA origin, so each seed is all-RNA — ``node_mean = rna_sense_frac`` (κ)
+    and the component fraction is ``1`` (the whole seed is the RNA component). The excess variance of
     the sense split beyond ``Binomial(N, κ)`` identifies the overdispersion. Shrinks toward
-    ``prior_overdispersion`` by seed-node count and clamps to ``[0, _MAX_OVERDISPERSION]`` exactly
+    ``prior_overdispersion`` by INFORMATION and clamps to ``[0, _MAX_OVERDISPERSION]`` exactly
     like the gDNA fit, so under sparse data the two collapse to the same prior.
+
+    ⚠ The information here is NOT the pair count. ``I = Σ n(n−1)/2`` holds only at ``μ = ½``; at the
+    RNA fit's κ the measured ``I/pairs`` is 0.05–0.14, so :func:`_null_information`'s general form is
+    required (see its docstring).
 
     Parameters
     ----------
     sense, total : np.ndarray
-        Per-seed-node motif-relative spliced sense count and total spliced count ``N``.
+        Per-seed motif-relative sense count and total qualified count ``N``. The production caller
+        is :func:`fit_rna_strand_from_sj_table`, one seed per splice junction.
     rna_sense_frac : float
         Library RNA sense fraction ``κ`` (the spliced-channel ``StrandModel`` mean) — the node mean.
     """
@@ -451,44 +467,44 @@ def fit_rna_strand_overdispersion(
     )
 
 
-def fit_rna_strand_from_substrate(
-    substrate,
+def fit_rna_strand_from_sj_table(
+    sj_table,
     *,
     rna_sense_frac: float,
     prior_overdispersion: float = _PRIOR_OVERDISPERSION,
     prior_weight: float = _PRIOR_INFORMATION,
 ) -> RnaStrandModel:
-    """Fit the global RNA strand overdispersion from boundary-side spliced counts.
+    """Fit the global RNA strand overdispersion from the **per-junction SJ strand table**.
 
-    Spliced fragments cross splice junctions, so they live on the **boundary sides** (the
-    accumulator deposits a spliced jump as boundary flux), not in the region-contained view — and
-    spliced ⇒ pure RNA. Each boundary side's motif-relative ``(n_spliced_sense, n_spliced_total)``
-    is one seed node; the ``left`` and ``right`` sides are pooled. Sides with no spliced fragments
-    drop out (the estimator filters ``total > 0``); orientation is motif-relative, so AMBIG regions
-    are fine (no count-observable filter, unlike the gDNA fit).
+    ⭐ **One population, one source of truth.** ``rna_sense_frac`` (κ, the mean) is the marginal of
+    this same table — both halves of the Beta-Binomial are now estimated from the same
+    strand-qualified population (``SPLICE_SPLICED_ANNOT``, unique-mapper, unambiguous exon and SJ
+    strand, non-chimeric), one observation per fragment. Each junction ``j`` is one seed:
+    ``(sense_j, n_j)``, and the dispersion is the spread of those splits ACROSS junctions at mean κ.
 
-    **Known approximation (v1):** a fragment spanning K junctions credits ~K boundary sides
-    (``accumulator.cpp``), so multi-junction fragments are double-counted across sides. This
-    inflates the effective count and mildly *under*-estimates the overdispersion (correlated
-    repeats look more Binomial); accepted for v1, tracked as future work (count one side per
-    boundary).
+    ⛔ **What this replaces, and why.** ``od_r`` used to be scavenged from the accumulator's
+    boundary spliced channels, whose population also pools ``SPLICED_UNANNOT`` and — the damaging
+    one — ``SPLICED_IMPLICIT``. An implicit splice's mate gap spans an annotated intron, so it lands
+    on exactly the annotated boundaries where the genuine junctions live, and its motif was never
+    sequenced (the annotation supplies the strand), so its sense bit is arbitrary: measured ~0.49 at
+    depth ≥ 10 on real cfRNA. Fitting a dispersion about κ ≈ 0.002 from seeds sitting at ½ gave a
+    raw pooled ``od_mom`` of **10.7–79.9** — impossible for an intra-class correlation, which is
+    bounded by 1 — clipped to the 0.2 ceiling on 4/4 real libraries. That was a mean misfit being
+    reported as dispersion, and it left ``od_r`` carrying no information about any real library.
+    ``docs/calibration/sj_strand_table_design.md``.
+
+    ⚠ The accumulator's spliced MASS channel is deliberately untouched: it legitimately wants
+    implicit and novel RNA for the peel, the graft and the mature-RNA floor. This fix belongs in the
+    strand model, not in the deposit predicate.
+
+    A junction with one fragment contributes no pair to correlate and so no information; the
+    information-currency shrinkage (:func:`_null_information`) handles that with no depth threshold.
     """
-    sense = np.concatenate(
-        [
-            np.asarray(substrate.left.n_spliced_sense, dtype=np.float64),
-            np.asarray(substrate.right.n_spliced_sense, dtype=np.float64),
-        ]
-    )
-    antisense = np.concatenate(
-        [
-            np.asarray(substrate.left.n_spliced_antisense, dtype=np.float64),
-            np.asarray(substrate.right.n_spliced_antisense, dtype=np.float64),
-        ]
-    )
-    total = sense + antisense
+    n_sense = np.asarray(sj_table.n_sense, dtype=np.float64)
+    n_total = n_sense + np.asarray(sj_table.n_antisense, dtype=np.float64)
     return fit_rna_strand_overdispersion(
-        sense,
-        total,
+        n_sense,
+        n_total,
         rna_sense_frac,
         prior_overdispersion=prior_overdispersion,
         prior_weight=prior_weight,
@@ -501,6 +517,6 @@ __all__ = [
     "fit_gdna_strand_overdispersion",
     "fit_gdna_strand_from_substrate",
     "fit_rna_strand_overdispersion",
-    "fit_rna_strand_from_substrate",
+    "fit_rna_strand_from_sj_table",
     "overdispersion_for_beta",
 ]

@@ -142,8 +142,8 @@ class FragmentScorer:
             Lower values are more conservative (keep more candidates).
         """
         rna_sm = strand_models.exonic_spliced
-        p_sense = rna_sm._cached_p_sense
-        p_antisense = rna_sm._cached_p_antisense
+        p_sense = rna_sm.p_r1_sense
+        p_antisense = rna_sm.p_r1_antisense
 
         fl_log_prob = rna_fl._log_prob  # numpy array or None
         fl_max_size = rna_fl.max_size

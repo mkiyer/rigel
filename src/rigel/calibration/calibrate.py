@@ -59,7 +59,7 @@ from .effective_length import (
 from .density_deconv import GdnaBackground, density_lambda_factor, fit_intron_background
 from .gdna_strand import (
     fit_gdna_strand_from_substrate,
-    fit_rna_strand_from_substrate,
+    fit_rna_strand_from_sj_table,
 )
 from .node_chain import build_node_chain
 from .result import CalibrationResult
@@ -119,7 +119,9 @@ def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config,
         return None
     kind = np.asarray(chain.kind)
     idx = np.asarray(chain.ref_idx, dtype=np.int64)
-    rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)  # 0/1/2 per REGION
+    rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(
+        np.int64
+    )  # 0/1/2 per REGION
     R = rtype.shape[0]
     is_intron = (kind == REGION) & (rtype[np.clip(idx, 0, R - 1)] == 1)  # INTRON == 1
     if not bool(is_intron.any()):
@@ -137,7 +139,9 @@ def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config,
 _MIN_TRAIN = 5
 
 
-def _fit_gdna_hyperprior(chain, belief, statics, region_arrays, mass_global, eff_global, *, strength):
+def _fit_gdna_hyperprior(
+    chain, belief, statics, region_arrays, mass_global, eff_global, *, strength
+):
     """Select the training substrate from the chain and fit the :class:`GdnaLandscape` on the initial solve's
     peeled gDNA — the composition (gDNA) arm of ψ for the Phase-2 refit. ``None`` if it cannot be fit.
 
@@ -167,7 +171,9 @@ def _fit_gdna_hyperprior(chain, belief, statics, region_arrays, mass_global, eff
     ridx = np.clip(np.asarray(chain.ref_idx, dtype=np.int64), 0, rtype.shape[0] - 1)
     expressed = isr & (eff_global > 1.0e-9) & (mass_global > 1.0e-12)
     # the zero-count structural anchor: an intergenic or intronic region that sequenced no unspliced mass
-    anchor = isr & (eff_global > 1.0e-9) & (mass_global <= 1.0e-12) & (rtype[ridx] != RegionType.EXON)
+    anchor = (
+        isr & (eff_global > 1.0e-9) & (mass_global <= 1.0e-12) & (rtype[ridx] != RegionType.EXON)
+    )
     sel = (expressed & ((fp ^ fn) | (~fp & ~fn))) | anchor
     if int(sel.sum()) < _MIN_TRAIN:
         return None
@@ -238,10 +244,16 @@ def calibrate(
 
     # Strand-module parameters — the two Beta-Binomial overdispersions. gDNA (mean ½) fitted from the
     # count-observable seed regions/sides using the raw count-clue gDNA weight (breaks the circularity:
-    # the seed weight is the strand MEAN ½, not the dispersion). RNA (mean κ) fitted from boundary-side
-    # spliced counts. Both shrunk toward the SAME default prior, so under sparse data they collapse to
-    # one distribution and an unstranded node (κ=½) is uninformative. See docs/em_strand/03+05.
-    _gd_seed = _rna_seed = (-1, -1, False)  # (n_seed_nodes, n_seed_frags, fallback) — QC log only; -1 = injected
+    # the seed weight is the strand MEAN ½, not the dispersion). RNA (mean κ) fitted from the PER-JUNCTION
+    # SJ strand table — the same strand-qualified population κ itself is the marginal of, so both halves of
+    # the RNA Beta-Binomial come from one source (docs/calibration/sj_strand_table_design.md). Both shrunk
+    # toward the SAME default prior, so under sparse data they collapse to one distribution and an
+    # unstranded node (κ=½) is uninformative. See docs/em_strand/03+05.
+    _gd_seed = _rna_seed = (
+        -1,
+        -1,
+        False,
+    )  # (n_seed_nodes, n_seed_frags, fallback) — QC log only; -1 = injected
     if inj is not None and inj.gdna_strand_overdispersion is not None:
         gdna_strand_overdispersion = float(inj.gdna_strand_overdispersion)
     else:
@@ -253,12 +265,16 @@ def calibrate(
             rna_sense_frac=rna_sense_frac,
         )
         gdna_strand_overdispersion = gdna_strand.gdna_strand_overdispersion
-        _gd_seed = (gdna_strand.n_seed_nodes, gdna_strand.n_seed_fragments, gdna_strand.fallback_used)
+        _gd_seed = (
+            gdna_strand.n_seed_nodes,
+            gdna_strand.n_seed_fragments,
+            gdna_strand.fallback_used,
+        )
     if inj is not None and inj.rna_strand_overdispersion is not None:
         rna_strand_overdispersion = float(inj.rna_strand_overdispersion)
     else:
-        rna_strand = fit_rna_strand_from_substrate(
-            substrate,
+        rna_strand = fit_rna_strand_from_sj_table(
+            strand_model.sj_table,
             rna_sense_frac=rna_sense_frac,
         )
         rna_strand_overdispersion = rna_strand.rna_strand_overdispersion
@@ -283,11 +299,17 @@ def calibrate(
     # sizes to size the sampling part of the floor ¼·(1/N + ω). N_gdna=0 (a gDNA-free library) ⇒ 1/N_gdna → ∞ ⇒
     # the strand seed is gated off (nothing to distinguish RNA from).
     if inj is not None and inj.n_gdna_obs is not None:
-        n_gdna_obs = float(inj.n_gdna_obs)  # INJECTED intergenic gDNA sample size (toy intergenic is sparse)
+        n_gdna_obs = float(
+            inj.n_gdna_obs
+        )  # INJECTED intergenic gDNA sample size (toy intergenic is sparse)
     else:
         _inter = coarse_type_array(np.asarray(region_arrays.signature)) == 0
-        _gpos = float(np.sum(np.asarray(substrate.contained.n_unspliced_pos, dtype=np.float64)[_inter]))
-        _gneg = float(np.sum(np.asarray(substrate.contained.n_unspliced_neg, dtype=np.float64)[_inter]))
+        _gpos = float(
+            np.sum(np.asarray(substrate.contained.n_unspliced_pos, dtype=np.float64)[_inter])
+        )
+        _gneg = float(
+            np.sum(np.asarray(substrate.contained.n_unspliced_neg, dtype=np.float64)[_inter])
+        )
         n_gdna_obs = _gpos + _gneg
     # n_rna_obs is set above (injected or from the strand-balance fit).
 
@@ -322,7 +344,9 @@ def calibrate(
         )
     )
     intron_prior = (
-        _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config, bg=intron_background)
+        _build_intron_prior(
+            chain, substrate, region_arrays, region_eff_len, config, bg=intron_background
+        )
         if (config.intron_factory and intron_background is not None)
         else None
     )
@@ -382,7 +406,9 @@ def calibrate(
     # AMBIG nodes are grounded only by the messages here (the two-root DNA ambiguity, docs/calibration/archive/CALIBRATION_MASTER.md §4,
     # is resolved by the DECONVOLVED-gDNA hyperprior in Phase 2 — fit on this solve's peeled DNA, then a refit).
     belief = _sweep(None)
-    belief_pass0 = belief  # the initial (prior-free) solve — kept for the refit before/after (movie / debug)
+    belief_pass0 = (
+        belief  # the initial (prior-free) solve — kept for the refit before/after (movie / debug)
+    )
     logger.debug(
         "calibration: PHASE 1 prior-free initial solve (enrichment NPMLE %d cells → QC only)",
         enrichment_prior.n_cells,
@@ -394,10 +420,14 @@ def calibrate(
     # ANCHORED, EXTREMELY WEAK. The aggregate DNA-background reference (`ρ_bg`, pooled pure intergenic/intron —
     # belief-free) is the refit floor; ``None`` when disabled.
     if inj is not None and inj.background is not None:
-        background = inj.background  # INJECTED aggregate ρ_bg (pooled pure intergenic/intron — population-scale)
+        background = (
+            inj.background
+        )  # INJECTED aggregate ρ_bg (pooled pure intergenic/intron — population-scale)
     elif config.background_floor:
         background = measure_background(
-            substrate, region_arrays, region_eff_len,
+            substrate,
+            region_arrays,
+            region_eff_len,
             include_introns=config.background_include_introns,
             robust_trim_mad=config.background_robust_trim_mad,
         )
@@ -406,7 +436,12 @@ def calibrate(
     gdna_hyperprior: GdnaLandscape | None = None
     for it in range(int(config.calib_refit_iters)):
         gdna_hyperprior = _fit_gdna_hyperprior(
-            chain, belief, statics, region_arrays, mass_global, eff_global,
+            chain,
+            belief,
+            statics,
+            region_arrays,
+            mass_global,
+            eff_global,
             strength=config.gdna_prior_strength,
         )
         if gdna_hyperprior is None:
@@ -509,7 +544,7 @@ def calibrate(
     logger.debug(
         "calibration: R=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
         "gdna_strand_overdispersion=%.4g (%d seed nodes, %d frags%s) "
-        "rna_strand_overdispersion=%.4g (%d seed sides, %d frags%s) "
+        "rna_strand_overdispersion=%.4g (%d junctions, %d frags%s) "
         "[boundary-spliced sense_frac=%.3f vs κ=%.3f]",
         result.n_regions,
         result.gdna_density_global,

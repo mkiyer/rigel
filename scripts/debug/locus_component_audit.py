@@ -50,7 +50,6 @@ def main():
     cfg = PipelineConfig()
     scan = dc_replace(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     _stats, sm, flm, _buf, payload = scan_and_buffer(bam, index, scan)
-    sm.finalize()
     ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
     fl = build_fl_models(
         global_counts=flm.global_model.counts,

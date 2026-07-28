@@ -78,3 +78,35 @@ def make_gdna_fl_pmf(mean: int = 50, max_size: int = 200) -> np.ndarray:
     pmf = np.zeros(max_size + 1, dtype=np.float64)
     pmf[mean] = 1.0
     return pmf
+
+
+def make_strand_models(p_r1_sense: float, n_observations: int, n_junctions: int = 1):
+    """A real :class:`StrandModels` with a chosen κ and observation count.
+
+    The calibrator now reads BOTH halves of the RNA strand Beta-Binomial from the per-junction SJ
+    strand table — κ as its marginal, the overdispersion as its spread — so a unit fixture must
+    supply a real table rather than duck-type two scalars. Observations are spread evenly over
+    ``n_junctions`` motif-POS junctions, sense/antisense split to give exactly ``p_r1_sense``.
+    """
+    from rigel.strand_model import SJStrandTable, StrandModel, StrandModels
+    from rigel.types import Strand
+
+    per = n_observations // n_junctions
+    rem = n_observations - per * n_junctions
+    depth = np.full(n_junctions, per, dtype=np.int64)
+    if n_junctions:
+        depth[0] += rem
+    n_sense = np.rint(depth * float(p_r1_sense)).astype(np.int64)
+    # Repair rounding so the marginal is EXACTLY the requested rate where it can be.
+    want = int(round(n_observations * float(p_r1_sense)))
+    if n_junctions and n_sense.sum() != want:
+        n_sense[0] = np.clip(n_sense[0] + (want - n_sense.sum()), 0, depth[0])
+    table = SJStrandTable(
+        ref_id=np.zeros(n_junctions, dtype=np.int32),
+        start=np.arange(n_junctions, dtype=np.int64) * 1000,
+        end=np.arange(n_junctions, dtype=np.int64) * 1000 + 100,
+        motif_strand=np.full(n_junctions, int(Strand.POS), dtype=np.int8),
+        n_sense=n_sense,
+        n_antisense=depth - n_sense,
+    )
+    return StrandModels(exonic_spliced=StrandModel.from_sj_table(table))

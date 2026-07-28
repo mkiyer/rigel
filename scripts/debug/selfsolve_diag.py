@@ -81,7 +81,6 @@ def _scan_and_truth(suite: Path, cond: str, index, cfg, work_dir: Path, cache_di
     bam = str(suite / cond / "sim_oracle.bam")
     sc = dc(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     _stats, sm, flm, _buf, payload = scan_and_buffer(bam, index, sc)
-    sm.finalize()
     fl = build_fl_models(
         global_counts=flm.global_model.counts,
         rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,

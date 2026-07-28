@@ -104,21 +104,6 @@ def _sj_tag_to_spec(sj_strand_tag) -> str:
     return "none"
 
 
-def _replay_strand_observations(
-    strand_dict: dict,
-    strand_models: StrandModels,
-) -> None:
-    """Replay C++ strand observation arrays into Python StrandModels."""
-    for prefix, model in [
-        ("exonic_spliced", strand_models.exonic_spliced),
-        ("exonic", strand_models.exonic),
-    ]:
-        obs = strand_dict.get(f"{prefix}_obs", [])
-        truth = strand_dict.get(f"{prefix}_truth", [])
-        if len(obs) > 0:
-            model.observe_batch(obs, truth)
-
-
 def _replay_fraglen_observations(
     fraglen_dict: dict,
     frag_length_models: FragmentLengthModels,
@@ -248,7 +233,6 @@ def scan_and_buffer(
         no ``regions.feather`` (legacy indexes pre-v3).
     """
     stats = PipelineStats()
-    strand_models = StrandModels()
     frag_length_models = FragmentLengthModels(max_size=scan.max_frag_length)
     buffer = FragmentBuffer(
         t_strand_arr=index.t_to_strand_arr,
@@ -258,9 +242,11 @@ def scan_and_buffer(
     )
     logger.info("[START] Native C++ BAM scan → resolve + train + buffer")
 
-    # Provide gene strand info for exonic fallback strand model training
+    # Per-transcript strands drive the all-exonic diagnostic strand model.
+    # (A parallel per-GENE array was pushed here too; the resolver stored it and
+    # never read it, so both the setter and this full-length list build were
+    # deleted 2026-07-28.)
     resolve_ctx = index.resolver
-    resolve_ctx.set_gene_strands(index.g_to_strand_arr.tolist())
     resolve_ctx.set_transcript_strands(index.t_to_strand_arr.tolist())
 
     # Provide nRNA status so FL training excludes synthetic nRNA candidates
@@ -328,8 +314,21 @@ def scan_and_buffer(
     # Replay stats
     _apply_scan_stats(stats, result["stats"])
 
-    # Replay strand observations into Python models
-    _replay_strand_observations(result["strand_observations"], strand_models)
+    # Build the strand models from the scanner's observations. Immutable and built
+    # once — the spliced 2×2 is the marginal of its per-junction SJ strand table.
+    strand_models = StrandModels.from_scan(result["strand_observations"])
+    # ONE strand-qualified fragment credits ONE junction. That is what makes the 2×2
+    # exactly the table's marginal, so both halves of the RNA strand Beta-Binomial are
+    # fitted on one population (docs/calibration/sj_strand_table_design.md §2.1). The
+    # C++ counts the fragments independently of the table it builds, so this is a real
+    # cross-check, and it is the invariant to break if the crediting rule ever changes.
+    n_credited = strand_models.sj_table.n_observations
+    if n_credited != stats.n_strand_trained:
+        raise RuntimeError(
+            f"SJ strand table credited {n_credited:,} observations but the scanner "
+            f"qualified {stats.n_strand_trained:,} fragments; one qualified fragment must "
+            "credit exactly one junction (see sj_strand_table_design.md §2.3)."
+        )
 
     # Replay fragment-length observations into Python models
     _replay_fraglen_observations(
@@ -825,8 +824,6 @@ def run_pipeline(
         bam_path, index, scan
     )
 
-    # -- Finalize models: cache derived values for fast scoring --
-    strand_models.finalize()
     # NOTE: ``frag_length_models`` holds the scanner's raw global + per-splice-category
     # histograms only. The RNA / gDNA / global FL distributions used for calibration +
     # scoring (and surfaced as QC) are built below via build_fl_models() (EB-smoothed,

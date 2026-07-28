@@ -8,19 +8,17 @@ seed extraction → fit → result.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import numpy as np
 import pandas as pd
 import pytest
-from _synthetic import make_gdna_fl_pmf
+from _synthetic import make_gdna_fl_pmf, make_strand_models
 
 from rigel.calibration import calibrate
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.config import CalibrationConfig
 from rigel.scan_payload import AccumulatorPayload
 
-_STRAND_MODEL = SimpleNamespace(p_r1_sense=0.95, n_observations=200)
+_STRAND_MODEL = make_strand_models(0.95, 200)
 
 
 def _intergenic_betabinom_payload(n_regions, depth, overdispersion, seed):

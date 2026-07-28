@@ -7,10 +7,8 @@ rescue, exon→RNA) needs realistic data and is covered by the scenario suite.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import numpy as np
-from _synthetic import make_gdna_fl_pmf, make_synthetic_payload
+from _synthetic import make_gdna_fl_pmf, make_strand_models, make_synthetic_payload
 
 from rigel.calibration import calibrate
 from rigel.calibration.result import CalibrationResult
@@ -19,7 +17,7 @@ from rigel.config import CalibrationConfig
 
 def _run(config=None):
     payload, ra = make_synthetic_payload()
-    strand_model = SimpleNamespace(p_r1_sense=0.95, n_observations=40)
+    strand_model = make_strand_models(0.95, 40)
     return calibrate(
         payload=payload,
         region_arrays=ra,
@@ -83,7 +81,7 @@ def test_kappa_matches_strand_balance():
     # κ_rna is the posterior-predictive strand fit; the calibrator passes it through.
     from rigel.calibration.strand_balance import fit_strand_balance
 
-    sb = fit_strand_balance(SimpleNamespace(p_r1_sense=0.95, n_observations=40))
+    sb = fit_strand_balance(make_strand_models(0.95, 40))
     assert _run().rna_sense_frac == sb.rna_sense_frac
 
 

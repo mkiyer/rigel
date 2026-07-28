@@ -2,9 +2,9 @@
 
 Two properties:
 
-* **Estimator** — RNA overdispersion drawn at a known level (from boundary-side spliced counts) is
-  recovered by :func:`fit_rna_strand_overdispersion` (its component mean is κ, not ½, so the
-  excess-variance scale must be κ(1−κ), not ¼).
+* **Estimator** — RNA overdispersion drawn at a known level (per splice junction) is recovered by
+  :func:`fit_rna_strand_overdispersion` (its component mean is κ, not ½, so the excess-variance
+  scale must be κ(1−κ), not ¼).
 * **Deconv symmetry** — with the RNA strand modelled as Beta-Binomial too (same default prior as
   gDNA), an *unstranded* node (κ = ½) is **uninformative**, and a balanced node grows more
   gDNA-like as the library becomes more stranded. The earlier gDNA-only overdispersion broke this
@@ -21,7 +21,7 @@ import pytest
 from rigel.calibration.gdna_strand import (
     _MAX_OVERDISPERSION,
     RnaStrandModel,
-    fit_rna_strand_from_substrate,
+    fit_rna_strand_from_sj_table,
     fit_rna_strand_overdispersion,
     overdispersion_for_beta,
 )
@@ -129,43 +129,48 @@ def test_shrinks_to_prior_when_sparse():
     assert model.rna_strand_overdispersion == pytest.approx(prior, abs=0.03)
 
 
-# ---------------------------------------------------------------- fit-from-substrate wrapper
+# ---------------------------------------------------------------- fit-from-SJ-table wrapper
 
 
-def _substrate_with_spliced(left_sense, left_anti, right_sense, right_anti):
-    """Minimal duck-typed substrate exposing .left/.right SubstrateView spliced counts."""
-    left = SimpleNamespace(
-        n_spliced_sense=np.asarray(left_sense, dtype=np.int64),
-        n_spliced_antisense=np.asarray(left_anti, dtype=np.int64),
+def _sj_table(sense, antisense):
+    """Minimal duck-typed SJStrandTable exposing the two count arrays the fit reads."""
+    return SimpleNamespace(
+        n_sense=np.asarray(sense, dtype=np.int64),
+        n_antisense=np.asarray(antisense, dtype=np.int64),
     )
-    right = SimpleNamespace(
-        n_spliced_sense=np.asarray(right_sense, dtype=np.int64),
-        n_spliced_antisense=np.asarray(right_anti, dtype=np.int64),
-    )
-    return SimpleNamespace(left=left, right=right)
 
 
-def test_fit_from_substrate_pools_both_sides():
-    """The substrate wrapper pools left+right spliced sides; sides with no spliced mass drop out."""
+def test_fit_from_sj_table_uses_every_junction():
+    """The wrapper fits one seed per junction; junctions with no fragments drop out."""
     rng = np.random.default_rng(5)
     kappa = 0.9
-    ls, lt = _beta_binom_nodes(rng, 3000, 120, 0.10, kappa)
-    rs, rt = _beta_binom_nodes(rng, 3000, 120, 0.10, kappa)
-    sub = _substrate_with_spliced(ls, lt - ls, rs, rt - rs)
-    model = fit_rna_strand_from_substrate(
-        sub, rna_sense_frac=kappa, prior_overdispersion=1 / 7, prior_weight=5.0
+    sense, total = _beta_binom_nodes(rng, 6000, 120, 0.10, kappa)
+    model = fit_rna_strand_from_sj_table(
+        _sj_table(sense, total - sense),
+        rna_sense_frac=kappa,
+        prior_overdispersion=1 / 7,
+        prior_weight=5.0,
     )
-    assert model.n_seed_nodes == 6000  # both sides, all with spliced fragments
+    assert model.n_seed_nodes == 6000
     assert model.rna_strand_overdispersion == pytest.approx(0.10, rel=0.25, abs=0.01)
 
 
-def test_fit_from_substrate_empty_is_fallback():
-    """No spliced fragments on any side → fallback to prior."""
-    sub = _substrate_with_spliced([0, 0], [0, 0], [0, 0], [0, 0])
-    model = fit_rna_strand_from_substrate(
-        sub, rna_sense_frac=0.9, prior_overdispersion=1 / 7, prior_weight=30.0
+def test_fit_from_sj_table_empty_is_fallback():
+    """No junctions carrying fragments → fallback to prior (a library with no spliced reads)."""
+    model = fit_rna_strand_from_sj_table(
+        _sj_table([0, 0], [0, 0]),
+        rna_sense_frac=0.9,
+        prior_overdispersion=1 / 7,
+        prior_weight=30.0,
     )
     assert model.fallback_used
+
+
+def test_fit_from_sj_table_matches_the_real_table_type():
+    """The production ``SJStrandTable`` satisfies the wrapper's contract (no duck typing)."""
+    from rigel.strand_model import SJStrandTable
+
+    assert fit_rna_strand_from_sj_table(SJStrandTable.empty(), rna_sense_frac=0.9).fallback_used
 
 
 # --------------------------------------------------------------------------- deconv symmetry

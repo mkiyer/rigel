@@ -412,17 +412,20 @@ honest value is 100× below the ceiling, so the ceiling would never bind. ⚠ **
 seed weighting is fixed**, because today it is the only thing standing between the strand likelihood and an
 `od` of 10–80.
 
-**⇒ THREE CONSEQUENCES:**
+**⇒ THREE CONSEQUENCES:** *(all three are now DISCHARGED — `sj_strand_table_design.md`, 2026-07-28)*
 
 1. ⛔ **Do NOT remove the RNA ceiling yet.** The owner's reasoning about contamination is right, but the
    saturation is not contamination — and without the ceiling `od_r` would be **10–80**, destroying the
    strand likelihood on every real library. **The ceiling is currently load-bearing for a reason nobody
-   intended.**
+   intended.** → ✅ **No longer load-bearing:** the raw MoM is now 0.0074–0.0137 on all four libraries, so
+   the clamp never binds. Whether to *remove* it remains the owner's open call.
 2. ⭐ **`od_r` carries no information today.** Every real library gets the same clipped 0.2 regardless of
    its data, so the RNA strand channel is running at maximum dispersion — i.e. **maximally uninformative**
-   — on all real data. That is a much bigger deal than the gDNA side.
+   — on all real data. That is a much bigger deal than the gDNA side. → ✅ **Fixed:** four libraries now
+   give four different, data-earned values.
 3. **The fix is upstream of the estimator**: get the mean and the seeds into the same orientation frame.
-   No amount of robustification helps a mean that is wrong by three orders of magnitude.
+   No amount of robustification helps a mean that is wrong by three orders of magnitude. → ✅ **Exactly
+   what was done** — the mean was left alone (R4) and the SEEDS were moved onto the mean's own population.
 
 ⚠ **The synthetic suite hides this** (`od_r` = 0.0008–0.0017 there), so it is another defect only real data
 could show — and the reason to check the frames explicitly rather than infer them.
@@ -571,7 +574,7 @@ it matters is the zero-seed fallback and real sparse libraries.
 | **P2 for the RNA fit** | ⛔ **NOT READY.** `I = pairs` holds only at `μ = ½`; the proposed closed form `I_r = (Σc)²/Σ[N·pq + pq²(2N² − 6N)]` comes from ONE agent and has not been MC-verified. Measured `I_r/pairs` = 0.05–0.14, so using pairs would overstate RNA information 7–20× |
 | **The `n = 1` asymmetry** (contributes `excess ≈ 1` to the numerator, `0` to the denominator) | ⚠ **A real bug, not yet addressed by anyone.** 0.1–9.1 % of `Σexcess`. Small, but it is a correctness defect and belongs in the same edit — needs its gDNA-side magnitude measured first |
 | **The ceiling `a = 2 → 3`** | ⛔ **NOT SETTLED.** The ONLY change here that moves real data (1.4× sharpening on every node). Needs its own pre-registered A/B with stranded conditions as falsifier. **Must not be bundled** |
-| **The RNA saturation** | ⛔ **NOT SOLVED, and the fix is upstream.** `od_r` = 0.2000 on 4/4 is bias from a seed population dominated by shallow, effectively-random-orientation sides (§3). R4 forbids refitting the mean. Diagnose the population split first |
+| **The RNA saturation** | ✅ **SOLVED 2026-07-28 — `sj_strand_table_design.md`, implemented and gated.** The population split §3 said to diagnose first was the whole cause: `od_r` is now fitted from the **per-junction SJ strand table**, the same strand-qualified population κ is the marginal of. Real cfRNA `od_r` = **0.00858 / 0.01368 / 0.00736 / 0.01341**, all four inside the deep-junction band and off the ceiling — and the **raw** MoM went 10.7–79.9 → 0.0074–0.0137, admissible with no clipping. R4 is respected: the mean was NOT refitted. ⚠ The ceiling is consequently no longer load-bearing for `od_r`, which un-blocks the owner's question about dropping it — a separate, still-open decision |
 | **Gate 0 injection harness** | ⛔ **NOT BUILT.** The synthetic has `od = 0` by construction, so it validates only one side. The pooled MoM recovers a true non-zero `od` but manufactures dispersion at zero |
 
 **⇒ RECOMMENDATION: implement the constants cleanup + gDNA P2 as one behaviour-neutral commit** (gates:

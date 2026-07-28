@@ -226,14 +226,32 @@ struct QnameBatch {
 // Model training observation collectors
 // ================================================================
 
-struct StrandObservations {
-    // exonic_spliced: (align_strand, sj_strand) for strand-qualified
-    std::vector<int8_t> exonic_spliced_obs;
-    std::vector<int8_t> exonic_spliced_truth;
+/// Per-junction sense / antisense counts.  ⚠ These ARE counts, unlike the
+/// int8 label vectors below (whose count is the vector's size()), so they are
+/// sized as counts: uint64 removes the overflow question permanently at a cost
+/// of ~2.4 MB over a human junction set.
+struct SJStrandCounts {
+    uint64_t n_sense = 0;
+    uint64_t n_antisense = 0;
+};
 
-    // exonic: (align_strand, gene_strand) for unique-gene unambiguous strand
+struct StrandObservations {
+    // exonic: (align_strand, transcript_strand) for unique-gene unambiguous strand
     std::vector<int8_t> exonic_obs;
     std::vector<int8_t> exonic_truth;
+
+    // ⭐ The per-junction SJ strand table (docs/calibration/sj_strand_table_design.md).
+    // A junction is uniquely specified by (ref, start, end, motif strand); each
+    // strand-qualified fragment credits its leftmost ANNOTATED junction with one
+    // sense (align_strand == sj_strand) or antisense observation.
+    //
+    // ⭐ This is a strict REFINEMENT of the exonic_spliced 2×2 above, which is
+    // exactly its marginal: summing n_sense over motif-POS junctions gives
+    // pos_pos, n_antisense over motif-POS gives neg_pos, and symmetrically for
+    // motif-NEG.  Populated from the SAME `get_is_strand_qualified()` branch, one
+    // observation per fragment, so the identity is unconditional.  It exists
+    // because a dispersion ACROSS junctions cannot be recovered from the 2×2.
+    std::unordered_map<SJKey, SJStrandCounts, SJKeyHash> sj_strand_table;
 };
 
 struct FragLenObservations {
@@ -384,16 +402,16 @@ struct WorkerState {
 
 // Merge observations
 static void merge_strand_obs(StrandObservations& dst, StrandObservations& src) {
-    dst.exonic_spliced_obs.insert(dst.exonic_spliced_obs.end(),
-                                  src.exonic_spliced_obs.begin(),
-                                  src.exonic_spliced_obs.end());
-    dst.exonic_spliced_truth.insert(dst.exonic_spliced_truth.end(),
-                                    src.exonic_spliced_truth.begin(),
-                                    src.exonic_spliced_truth.end());
     dst.exonic_obs.insert(dst.exonic_obs.end(),
                           src.exonic_obs.begin(), src.exonic_obs.end());
     dst.exonic_truth.insert(dst.exonic_truth.end(),
                             src.exonic_truth.begin(), src.exonic_truth.end());
+    for (const auto& [key, counts] : src.sj_strand_table) {
+        auto& dst_counts = dst.sj_strand_table[key];
+        dst_counts.n_sense     += counts.n_sense;
+        dst_counts.n_antisense += counts.n_antisense;
+    }
+    src.sj_strand_table.clear();
 }
 
 static void merge_fraglen_obs(FragLenObservations& dst, FragLenObservations& src) {
@@ -1684,8 +1702,24 @@ private:
 
             if (is_unique_mapper) {
                 if (result.get_is_strand_qualified()) {
-                    strand_obs.exonic_spliced_obs.push_back(static_cast<int8_t>(result.align_strand));
-                    strand_obs.exonic_spliced_truth.push_back(static_cast<int8_t>(result.sj_strand));
+                    // ⭐ ONE observation per strand-qualified fragment, keyed by
+                    // JUNCTION. `sj_strand` is qualified to POS/NEG here and is the
+                    // motif strand of every annotated junction the fragment crosses,
+                    // so `sense` is exactly the align==sj bit the 2×2 is built from
+                    // and `sj_key_*` is necessarily set.
+                    //
+                    // Two parallel int8 label vectors used to be pushed here as well,
+                    // one pair per fragment, and the Python 2×2 was counted from them.
+                    // The table's marginal IS that 2×2 (verified exact on 32 synthetic
+                    // conditions and 4 real libraries), so they were pure duplication
+                    // and were deleted 2026-07-28. `stats.n_strand_trained` below still
+                    // counts the fragments, and Python asserts it against the table's
+                    // total depth — the invariant that one fragment credits one junction.
+                    SJKey sj_key{result.sj_key_ref, result.sj_key_start,
+                                 result.sj_key_end, result.sj_strand};
+                    auto& counts = strand_obs.sj_strand_table[sj_key];
+                    if (result.align_strand == result.sj_strand) counts.n_sense++;
+                    else                                         counts.n_antisense++;
                     stats.n_strand_trained++;
                 } else if (result.splice_type != SPLICE_SPLICED_ANNOT) {
                     stats.n_strand_skipped_no_sj++;
@@ -1819,10 +1853,44 @@ private:
 
         // Strand observations
         nb::dict strand_dict;
-        strand_dict["exonic_spliced_obs"]   = vec_to_ndarray(std::move(strand_obs_.exonic_spliced_obs));
-        strand_dict["exonic_spliced_truth"] = vec_to_ndarray(std::move(strand_obs_.exonic_spliced_truth));
         strand_dict["exonic_obs"]           = vec_to_ndarray(std::move(strand_obs_.exonic_obs));
         strand_dict["exonic_truth"]         = vec_to_ndarray(std::move(strand_obs_.exonic_truth));
+
+        // The per-junction SJ strand table, as six parallel arrays.  Sorted by
+        // (ref, start, end, motif strand) because the source is an unordered_map
+        // merged across workers, and every downstream number must not depend on
+        // thread scheduling or hash order.
+        {
+            std::vector<SJKey> keys;
+            keys.reserve(strand_obs_.sj_strand_table.size());
+            for (const auto& [key, counts] : strand_obs_.sj_strand_table) keys.push_back(key);
+            std::sort(keys.begin(), keys.end(), [](const SJKey& a, const SJKey& b) {
+                if (a.ref_id != b.ref_id) return a.ref_id < b.ref_id;
+                if (a.start  != b.start)  return a.start  < b.start;
+                if (a.end    != b.end)    return a.end    < b.end;
+                return a.strand < b.strand;
+            });
+            size_t n_sj = keys.size();
+            std::vector<int32_t>  sj_ref(n_sj);
+            std::vector<int64_t>  sj_start(n_sj), sj_end(n_sj);
+            std::vector<int8_t>   sj_motif(n_sj);
+            std::vector<uint64_t> sj_sense(n_sj), sj_antisense(n_sj);
+            for (size_t i = 0; i < n_sj; i++) {
+                const auto& c = strand_obs_.sj_strand_table.at(keys[i]);
+                sj_ref[i]       = keys[i].ref_id;
+                sj_start[i]     = keys[i].start;   // int32 upstream; widened once, here
+                sj_end[i]       = keys[i].end;
+                sj_motif[i]     = static_cast<int8_t>(keys[i].strand);
+                sj_sense[i]     = c.n_sense;
+                sj_antisense[i] = c.n_antisense;
+            }
+            strand_dict["sj_ref_id"]       = vec_to_ndarray(std::move(sj_ref));
+            strand_dict["sj_start"]        = vec_to_ndarray(std::move(sj_start));
+            strand_dict["sj_end"]          = vec_to_ndarray(std::move(sj_end));
+            strand_dict["sj_motif_strand"] = vec_to_ndarray(std::move(sj_motif));
+            strand_dict["sj_n_sense"]      = vec_to_ndarray(std::move(sj_sense));
+            strand_dict["sj_n_antisense"]  = vec_to_ndarray(std::move(sj_antisense));
+        }
         result["strand_observations"] = strand_dict;
 
         // Fragment length observations

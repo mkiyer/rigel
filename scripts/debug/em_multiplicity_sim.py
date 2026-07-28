@@ -72,7 +72,6 @@ def run(res, N):
                 true_g += 1
     sc = dc(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     stats, sm, flm, buffer, payload = scan_and_buffer(bam, index, sc)
-    sm.finalize()
     fl = build_fl_models(global_counts=flm.global_model.counts,
                          rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,
                          gdna_counts=gdna_fl_mass(payload), max_size=flm.max_size)

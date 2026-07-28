@@ -205,6 +205,41 @@ struct RawResolveResult {
     // to SPLICE_ARTIFACT.
     int32_t n_sj_blacklisted = 0;
 
+    // --- The per-junction SJ strand table's key (docs/calibration/sj_strand_table_design.md) ---
+    // Coordinates of the LEFTMOST ANNOTATED CIGAR-N junction this fragment
+    // crosses; -1 when it crosses none.  `sj_strand` above is the fragment's
+    // motif strand (one XS/ts tag per fragment), which completes the key.
+    //
+    // ⚠ Crediting the FIRST annotated junction is a CHOICE, recorded here so it
+    // is not mistaken for a derivation.  A qualified fragment carries ONE sense
+    // bit: `sj_strand` is read from the BAM XS/ts tag, which is per RECORD, and
+    // mates that disagree OR to STRAND_AMBIGUOUS, which the qualification
+    // rejects.  So all K junctions of a fragment necessarily agree.
+    //
+    // Two measured reasons for credit-one (2026-07-28):
+    //   (a) the 2×2 marginal identity REQUIRES one row per fragment;
+    //   (b) the K >= 2 stratum is a materially cleaner population (minor rate
+    //       0.35x at K=2, 0.14x at K=3, 0 at K>=4), so crediting all K shifts
+    //       kappa by 21-34% — and the fit feeds kappa in as the MoM node mean.
+    // ⛔ NOT because credit-all "inflates" the dispersion: measured null bias is
+    // -7.3e-5 +/- 3.0e-4 on LBX0190, i.e. none. That reasoning was refuted.
+    // ⛔ A 1/K split is provably BIASED (4-12 sigma): Var(sum w_i X_i) = pq*sum w^2
+    // but the estimator subtracts pq*sum w. Do not use it.
+    //
+    // ⚠ Two costs of the deterministic leftmost pick, recorded so they are not
+    // rediscovered as bugs: od_mom is 0.85-0.99x the random-pick value, and 3-5%
+    // of junctions never receive an observation (leftmost and rightmost agree, so
+    // this is concentration on fewer junctions, not a 5'/3' bias). Determinism
+    // wins anyway — random-pick jitter is 3.8% CV and this repo has goldens.
+    //
+    // ⚠ ANNOTATED, not merely leftmost: `sj_strand` is the OR of the ANNOTATED
+    // introns' strands only, so an unannotated intron may carry a different (or
+    // absent) tag.  Keying on an annotated junction is what makes the 2×2
+    // marginal identity of §2.1 hold unconditionally.
+    int32_t sj_key_ref = -1;
+    int32_t sj_key_start = -1;
+    int32_t sj_key_end = -1;
+
     // Implicit-splice introns: annotated introns found wholly inside a
     // paired-end mate gap (SPLICE_IMPLICIT). One per matched gap, carrying the
     // matched transcript's strand. The accumulator cuts these out of the

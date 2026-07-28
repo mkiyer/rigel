@@ -43,7 +43,6 @@ def build(bam: str, index_dir: str, out: str, cfg: PipelineConfig | None = None)
     sj_tag = _native_detect_sj_tag(bam)
     sc = dc(cfg.scan, sj_strand_tag=sj_tag)
     _stats, sm, flm, _buf, payload = scan_and_buffer(bam, index, sc)
-    sm.finalize()
     fl = build_fl_models(
         global_counts=flm.global_model.counts,
         rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,
@@ -93,7 +92,6 @@ def _verify(bam: str, index_dir: str, inp: dict, cfg: PipelineConfig) -> None:
     ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
     sc = dc(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     _s, sm, flm, _b, payload = scan_and_buffer(bam, index, sc)
-    sm.finalize()
     fl = build_fl_models(
         global_counts=flm.global_model.counts,
         rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,

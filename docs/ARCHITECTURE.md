@@ -61,7 +61,7 @@ BAM ──scan_and_buffer──▶ FragmentBuffer + AccumulatorPayload + trained
 | `estimator.py` | `AbundanceEstimator` — per-locus EM dispatch, output dataframes |
 | `scan_payload.py` / `_accumulator.py` | `AccumulatorPayload` schema + Python `Accumulator` wrapper |
 | `buffer.py` | memory-efficient columnar fragment buffer |
-| `strand_model.py` / `frag_length_model.py` | model training from unique mappers |
+| `strand_model.py` / `frag_length_model.py` | model training from unique mappers; `StrandModel` is immutable and carries the per-junction `SJStrandTable` its 2×2 is the marginal of |
 | `splice.py` / `splice_blacklist.py` | splice-type encoding + artifact blacklist |
 | `annotate.py` | optional annotated-BAM writer (per-fragment tags ZT/ZG/ZF/ZC/ZL/ZW) |
 | `native.py` | interface to the C++ extension modules |
@@ -81,9 +81,9 @@ BAM ──scan_and_buffer──▶ FragmentBuffer + AccumulatorPayload + trained
 | `substrate.py` | `CalibrationSubstrate` (payload → per-region contained/left/right views) + `BoundarySubstrate` (the boundary-node view) |
 | `region_arrays.py` / `regions.py` | region geometry (`RegionArrays`, partition from `index.region_df`) |
 | `signature.py` | 4-bit exon/intron×strand signature + `strand_class` (POS/NEG/NONE/AMBIG) |
-| `strand_balance.py` / `strand_summary.py` | RNA strand *mean* `rna_sense_frac` (κ); `rna_strand_overdispersion` here is a QC-only thin-count diagnostic |
+| `strand_balance.py` / `strand_summary.py` | RNA strand *mean* `rna_sense_frac` (κ); the QC-only `1/(n_obs+3)` field that used to sit here was deleted 2026-07-28 (no consumer; the name collided with the decode's genuine overdispersion in `gdna_strand.py`)|
 | `density_model.py` | per-region gDNA density via local boundary-anchored imputation on the raw unspliced counts (`count_gdna_frac`): the gDNA strand-overdispersion fit's seed selector + the signature-partition masks the global prior uses |
-| `gdna_strand.py` | both strand Beta-Binomial overdispersions (shared component-agnostic MoM core), applied symmetrically so unstranded data is uninformative |
+| `gdna_strand.py` | both strand Beta-Binomial overdispersions (shared component-agnostic MoM core), applied symmetrically so unstranded data is uninformative; the RNA one is fitted from the per-junction SJ strand table — the population κ is the marginal of |
 | `effective_length.py` / `capture_eff_length.py` / `fl.py` | FL-marginal effective lengths; capture-aware EM effective lengths (gDNA-enrichment IPR contraction); gDNA/RNA/global FL pmfs |
 | `run_fill.py` | run/neighbour helpers (`same_ref_left_right`) for the boundary-side and chain geometry |
 | `derive.py` | `gdna_density_global` (a QC scalar) from the deconvolved masses |

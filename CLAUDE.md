@@ -140,7 +140,7 @@ ruff format src/ tests/
 - `estimator.py` — `AbundanceEstimator` (per-locus EM dispatch, output dataframes)
 - `scan_payload.py` / `_accumulator.py` — `AccumulatorPayload` schema + Python `Accumulator` wrapper
 - `buffer.py` — memory-efficient columnar fragment buffer
-- `strand_model.py` / `frag_length_model.py` — model training from unique mappers
+- `strand_model.py` / `frag_length_model.py` — model training from unique mappers. `StrandModel` is **immutable** (no observe/finalize lifecycle) and carries the **per-junction `SJStrandTable`**, of which its 2×2 is exactly the marginal — one source of truth for κ and the RNA strand dispersion alike (`docs/calibration/sj_strand_table_design.md`)
 - `splice.py` / `splice_blacklist.py` — splice-type encoding + artifact blacklist
 - `native.py` — public interface to the C++ extension modules
 
@@ -158,8 +158,8 @@ ruff format src/ tests/
 - `region_arrays.py` / `regions.py` — region geometry (`RegionArrays`, build partition from `index.region_df`)
 - `signature.py` — region 4-bit strand/type signature + `strand_class` (POS/NEG/NONE/AMBIG)
 - `density_model.py` — per-region gDNA **density** via local boundary-anchored imputation on the **raw** unspliced counts (`pos+neg`) + the signature-partition masks (`region_count_observable` / `boundary_count_observable`); returns `count_gdna_frac`, consumed only as the gDNA strand-overdispersion fit's seed selector + the partition masks the global prior uses
-- `strand_balance.py` / `strand_summary.py` — **RNA** strand *mean*: `rna_sense_frac` (used by the decode). `StrandBalance.rna_strand_overdispersion` here is a QC-only thin-count power diagnostic (`1/(n_obs+3)`), distinct from the decode's RNA overdispersion (see `gdna_strand.py`)
-- `gdna_strand.py` — **both** strand Beta-Binomial overdispersions (shared component-agnostic MoM core): `gdna_strand_overdispersion` (mean ½, fit from count-observable seed regions + boundary sides) and `rna_strand_overdispersion` (mean κ, fit from boundary-side spliced counts). Both applied symmetrically in `strand_likelihood` with the same default prior, so unstranded data is uninformative (see `docs/calibration/CALIBRATION_ARCHITECTURE.md`)
+- `strand_balance.py` / `strand_summary.py` — **RNA** strand *mean*: `rna_sense_frac` (used by the decode). ⚠ `StrandBalance` also carried the posterior's own width `1/(n_obs+3)` under the name `rna_strand_overdispersion`, colliding with the decode's genuine one in `gdna_strand.py`; it had **no consumer in `src/`** and was **deleted 2026-07-28**, so that name now means exactly one thing
+- `gdna_strand.py` — **both** strand Beta-Binomial overdispersions (shared component-agnostic MoM core): `gdna_strand_overdispersion` (mean ½, fit from count-observable seed regions + boundary sides) and `rna_strand_overdispersion` (mean κ, fit from the **per-junction SJ strand table** — the same strand-qualified population κ is the marginal of, so both halves of one Beta-Binomial come from one source). Both applied symmetrically in `strand_likelihood` with the same default prior, so unstranded data is uninformative (see `docs/calibration/CALIBRATION_ARCHITECTURE.md`)
 - `strand_likelihood.py` — `strand_loglik`: the two-component gDNA/RNA strand Beta-Binomial log-likelihood of one node over a `gdna_frac` grid (the only INTRINSIC gDNA/RNA signal; both overdispersions applied symmetrically)
 - `strand_deconv.py` — the per-node `NodeDeconv` result type (the schema `bp_solver`'s projections + `simplex_logodds._solve_nodes_logodds_all` return) + `boundary_side_seeds` (the exon↔intron / exon↔intergenic boundary-side seeds for the gDNA strand-overdispersion fit, complementing the contained-region seeds under capture)
 - `derive.py` — `gdna_density_global`: the library-average gDNA density (a QC scalar) from the deconvolved masses

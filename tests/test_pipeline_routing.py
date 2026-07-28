@@ -18,7 +18,7 @@ from rigel.frag_length_model import FragmentLengthModel, FragmentLengthModels
 from rigel.scoring import FragmentScorer
 from rigel.scan import FragmentRouter
 from rigel.stats import PipelineStats
-from rigel.strand_model import StrandModels
+from rigel.strand_model import StrandModel, StrandModels
 from rigel.types import Strand
 
 
@@ -143,10 +143,9 @@ class _Index:
 
 
 def _make_env(index):
-    strand_models = StrandModels()
-    for _ in range(20):
-        strand_models.exonic_spliced.observe(Strand.POS, Strand.POS)
-    strand_models.finalize()
+    strand_models = StrandModels(
+        exonic_spliced=StrandModel.from_labels([int(Strand.POS)] * 20, [int(Strand.POS)] * 20)
+    )
     frag_length_models = FragmentLengthModels(max_size=1000)
     frag_length_models.observe(200, SpliceType.UNSPLICED)
     estimator = AbundanceEstimator(index.num_transcripts, em_config=EMConfig(seed=1))

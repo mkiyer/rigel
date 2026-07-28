@@ -341,6 +341,17 @@ floats) and the NPMLE hyperprior EM (~28 %). Read it before any optimization wor
 > with 49 % of mass moving >0.05. Two findings the toy structurally **cannot** produce:
 > * ⛔⛔ **the strand overdispersion SATURATES its `Beta(2,2)` ceiling on 4/4 real samples for `od_r` and
 >   2/4 for `od_g`**, where the synthetic suite fits **0.0008–0.0017** — 120–250× below it.
+>   ✅✅ **THE `od_r` HALF IS FIXED (2026-07-28) — `sj_strand_table_design.md` §0, implemented and gated.**
+>   The two halves of one Beta-Binomial were trained on different populations: κ from `SPLICED_ANNOT`
+>   only (clean), `od_r` from the accumulator's boundary spliced channels, which also pool `UNANNOT` and
+>   `IMPLICIT` — and an implicit splice lands on exactly the right boundaries with **no sequenced motif**,
+>   so its sense bit is arbitrary. `od_r` is now fitted from a **per-junction SJ strand table** whose
+>   marginal IS the existing 2×2 (verified EXACT on 32/32 synthetic + 4/4 real; κ bit-identical).
+>   Real `od_r` **0.2000 (all four, clipped) → 0.00858 / 0.01368 / 0.00736 / 0.01341**, and the **raw** MoM
+>   **10.7–79.9 → 0.0074–0.0137**, i.e. admissible with no clipping anywhere. The 32-condition A/B is
+>   neutral at 1e-6 on every stratum — ⚠ **the synthetic suite structurally cannot exercise this fix**
+>   (its boundary-spliced population is not contaminated: OLD `od_r` there was already 0.0000–0.0001).
+>   ⚠ **`od_g` still saturates on 2/4** — the gDNA half is untouched and the paragraph below still stands.
 >   ⭐⭐ **THE CEILING IS A GUARD AND SATURATION IS A CANARY (owner, 2026-07-28) — do NOT raise it.**
 >   **gDNA is symmetric around 50/50 by construction**, so excess strand variance on a node believed to be
 >   pure gDNA is evidence that **the node is not pure gDNA** — transcription where the annotated reference

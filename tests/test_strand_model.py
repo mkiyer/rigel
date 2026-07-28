@@ -1,15 +1,40 @@
-"""Tests for rigel.strand_model — strand model."""
+"""Tests for rigel.strand_model — the strand model and its per-junction SJ strand table."""
 
-import json
-
+import numpy as np
 import pytest
 
 from rigel.types import Strand
-from rigel.strand_model import StrandModel, StrandModels
+from rigel.strand_model import SJStrandTable, StrandModel, StrandModels
 
 
-class TestStrandModelObserve:
-    """Test the 2×2 contingency table and derived counts."""
+def _labels(pairs):
+    """Expand ``[(align, sj, count), ...]`` into the C++ scanner's two parallel label arrays."""
+    align, sj = [], []
+    for a, s, n in pairs:
+        align += [int(a)] * n
+        sj += [int(s)] * n
+    return np.asarray(align, dtype=np.int8), np.asarray(sj, dtype=np.int8)
+
+
+def _model(pairs) -> StrandModel:
+    return StrandModel.from_labels(*_labels(pairs))
+
+
+def _table(rows) -> SJStrandTable:
+    """Build a table from ``[(motif_strand, n_sense, n_antisense), ...]``."""
+    motif = [int(m) for m, _, _ in rows]
+    return SJStrandTable(
+        ref_id=np.zeros(len(rows), dtype=np.int32),
+        start=np.arange(len(rows), dtype=np.int64) * 1000,
+        end=np.arange(len(rows), dtype=np.int64) * 1000 + 100,
+        motif_strand=np.asarray(motif, dtype=np.int8),
+        n_sense=np.asarray([s for _, s, _ in rows], dtype=np.int64),
+        n_antisense=np.asarray([a for _, _, a in rows], dtype=np.int64),
+    )
+
+
+class TestStrandModelCounts:
+    """The 2×2 contingency table and derived counts."""
 
     def test_default_counts_are_zero(self):
         sm = StrandModel()
@@ -18,169 +43,123 @@ class TestStrandModelObserve:
         assert sm.neg_pos == 0
         assert sm.neg_neg == 0
         assert sm.n_observations == 0
+        assert sm.sj_table is None
 
-    def test_observe_pos_pos(self):
-        sm = StrandModel()
-        sm.observe(Strand.POS, Strand.POS)
-        assert sm.pos_pos == 1
-        assert sm.n_same == 1
-        assert sm.n_opposite == 0
+    def test_from_labels_fills_each_cell(self):
+        sm = _model(
+            [
+                (Strand.POS, Strand.POS, 3),
+                (Strand.POS, Strand.NEG, 5),
+                (Strand.NEG, Strand.POS, 7),
+                (Strand.NEG, Strand.NEG, 11),
+            ]
+        )
+        assert (sm.pos_pos, sm.pos_neg, sm.neg_pos, sm.neg_neg) == (3, 5, 7, 11)
+        assert sm.n_same == 3 + 11
+        assert sm.n_opposite == 5 + 7
+        assert sm.n_observations == 26
 
-    def test_observe_pos_neg(self):
-        sm = StrandModel()
-        sm.observe(Strand.POS, Strand.NEG)
-        assert sm.pos_neg == 1
-        assert sm.n_same == 0
-        assert sm.n_opposite == 1
+    def test_is_immutable(self):
+        sm = _model([(Strand.POS, Strand.POS, 1)])
+        with pytest.raises(Exception):
+            sm.pos_pos = 99
 
-    def test_observe_neg_pos(self):
-        sm = StrandModel()
-        sm.observe(Strand.NEG, Strand.POS)
-        assert sm.neg_pos == 1
-        assert sm.n_opposite == 1
 
-    def test_observe_neg_neg(self):
-        sm = StrandModel()
-        sm.observe(Strand.NEG, Strand.NEG)
-        assert sm.neg_neg == 1
-        assert sm.n_same == 1
+class TestSJStrandTable:
+    """The per-junction refinement and the marginal identity that licenses it."""
 
-    def test_n_observations(self):
-        sm = StrandModel()
-        sm.observe(Strand.POS, Strand.POS)
-        sm.observe(Strand.POS, Strand.NEG)
-        sm.observe(Strand.NEG, Strand.POS)
-        assert sm.n_observations == 3
+    def test_empty(self):
+        t = SJStrandTable.empty()
+        assert t.n_junctions == 0
+        assert t.n_observations == 0
+        assert t.contingency() == (0, 0, 0, 0)
+
+    def test_marginal_is_the_2x2(self):
+        """⭐ THE correctness argument: the 2×2 is exactly the table's marginal."""
+        t = _table([(Strand.POS, 3, 7), (Strand.POS, 10, 2), (Strand.NEG, 5, 4)])
+        pos_pos, pos_neg, neg_pos, neg_neg = t.contingency()
+        assert pos_pos == 3 + 10  # sense on motif-POS junctions
+        assert neg_pos == 7 + 2  # antisense on motif-POS junctions
+        assert neg_neg == 5  # sense on motif-NEG junctions
+        assert pos_neg == 4  # antisense on motif-NEG junctions
+
+    def test_from_sj_table_agrees_with_from_labels(self):
+        """Both constructors, one population: the same fragments give the same 2×2 and κ."""
+        rows = [(Strand.POS, 3, 7), (Strand.POS, 10, 2), (Strand.NEG, 5, 4)]
+        from_table = StrandModel.from_sj_table(_table(rows))
+        # The same fragments as raw labels: motif POS + sense ⇒ (align POS, sj POS), etc.
+        from_labels = _model(
+            [
+                (Strand.POS, Strand.POS, 13),  # sense on motif POS
+                (Strand.NEG, Strand.POS, 9),  # antisense on motif POS
+                (Strand.NEG, Strand.NEG, 5),  # sense on motif NEG
+                (Strand.POS, Strand.NEG, 4),  # antisense on motif NEG
+            ]
+        )
+        assert (from_table.pos_pos, from_table.pos_neg, from_table.neg_pos, from_table.neg_neg) == (
+            from_labels.pos_pos,
+            from_labels.pos_neg,
+            from_labels.neg_pos,
+            from_labels.neg_neg,
+        )
+        assert from_table.p_r1_sense == pytest.approx(from_labels.p_r1_sense)
+
+    def test_depth_and_totals(self):
+        t = _table([(Strand.POS, 3, 7), (Strand.NEG, 100, 0)])
+        np.testing.assert_array_equal(t.depth, [10, 100])
+        assert t.n_observations == 110
+        assert t.n_junctions == 2
+        assert StrandModel.from_sj_table(t).p_r1_sense == pytest.approx(103 / 110)
+
+    def test_to_dict_reports_deep_junctions(self):
+        t = _table([(Strand.POS, 1, 1), (Strand.POS, 60, 60), (Strand.NEG, 900, 200)])
+        d = t.to_dict()
+        assert d["n_junctions"] == 3
+        assert d["n_observations"] == 2 + 120 + 1100
+        assert d["n_junctions_depth_ge_100"] == 2
+        assert d["n_junctions_depth_ge_1000"] == 1
+        assert d["depth_max"] == 1100
+
+    def test_model_carries_table_through(self):
+        t = _table([(Strand.POS, 4, 1)])
+        sm = StrandModel.from_sj_table(t)
+        assert sm.sj_table is t
+        assert sm.n_observations == 5
 
 
 class TestStrandModelPosterior:
-    """Test MLE probability computation."""
+    """MLE probability computation."""
 
     def test_no_observations(self):
-        sm = StrandModel()
-        assert sm.p_r1_sense == 0.5
+        assert StrandModel().p_r1_sense == 0.5
 
     def test_strong_fr_library(self):
-        """Simulate a strongly R1-sense library (most same-direction)."""
-        sm = StrandModel()
-        for _ in range(95):
-            sm.observe(Strand.POS, Strand.POS)
-        for _ in range(5):
-            sm.observe(Strand.POS, Strand.NEG)
-        # p_r1_sense = 95 / 100 = 0.95
+        """A strongly R1-sense library (most same-direction)."""
+        sm = _model([(Strand.POS, Strand.POS, 95), (Strand.POS, Strand.NEG, 5)])
         assert sm.p_r1_sense == pytest.approx(0.95)
         assert sm.strand_specificity > 0.9
         assert sm.read1_sense is True
 
     def test_strong_rf_library(self):
-        """Simulate a strongly R1-antisense library (most opposite-direction)."""
-        sm = StrandModel()
-        for _ in range(5):
-            sm.observe(Strand.POS, Strand.POS)
-        for _ in range(95):
-            sm.observe(Strand.POS, Strand.NEG)
+        """A strongly R1-antisense library (most opposite-direction)."""
+        sm = _model([(Strand.POS, Strand.POS, 5), (Strand.POS, Strand.NEG, 95)])
         assert sm.p_r1_sense < 0.1
         assert sm.p_r1_antisense > 0.9
         assert sm.strand_specificity > 0.9
         assert sm.read1_sense is False
 
 
-class TestStrandModelLikelihood:
-    """Test the strand_likelihood() method."""
-
-    def test_same_direction_returns_p_r1_sense(self):
-        sm = StrandModel()
-        for _ in range(50):
-            sm.observe(Strand.POS, Strand.POS)
-        sm.finalize()
-        p = sm.strand_likelihood(Strand.POS, Strand.POS)
-        assert p == pytest.approx(sm.p_r1_sense)
-
-    def test_opposite_direction_returns_p_r1_antisense(self):
-        sm = StrandModel()
-        for _ in range(50):
-            sm.observe(Strand.POS, Strand.POS)
-        sm.finalize()
-        p = sm.strand_likelihood(Strand.POS, Strand.NEG)
-        assert p == pytest.approx(sm.p_r1_antisense)
-
-    def test_ambiguous_exon_returns_half(self):
-        sm = StrandModel()
-        sm.observe(Strand.POS, Strand.POS)
-        sm.finalize()
-        p = sm.strand_likelihood(Strand.AMBIGUOUS, Strand.POS)
-        assert p == 0.5
-
-    def test_none_tx_strand_returns_half(self):
-        sm = StrandModel()
-        sm.observe(Strand.POS, Strand.POS)
-        sm.finalize()
-        p = sm.strand_likelihood(Strand.POS, Strand.NONE)
-        assert p == 0.5
-
-
-class TestStrandModelSerialization:
-    """Test to_dict and write_json."""
-
-    def test_to_dict_structure(self):
-        sm = StrandModel()
-        sm.observe(Strand.POS, Strand.POS)
-        sm.observe(Strand.NEG, Strand.POS)
-        d = sm.to_dict()
-        assert "observations" in d
-        assert "estimate" in d
-        assert "probabilities" in d
-        assert "protocol" in d
-        assert d["observations"]["total"] == 2
-        assert d["observations"]["n_same"] == 1
-        assert d["observations"]["n_opposite"] == 1
-
-    def test_write_json_creates_file(self, tmp_path):
-        sm = StrandModel()
-        for _ in range(20):
-            sm.observe(Strand.POS, Strand.POS)
-        path = tmp_path / "strand.json"
-        sm.write_json(path)
-        assert path.exists()
-        data = json.loads(path.read_text())
-        assert "strand_model" in data
-        assert "estimate" in data["strand_model"]
-
-    def test_write_json_includes_ci_with_enough_observations(self, tmp_path):
-        sm = StrandModel()
-        for _ in range(50):
-            sm.observe(Strand.POS, Strand.POS)
-        for _ in range(5):
-            sm.observe(Strand.POS, Strand.NEG)
-        path = tmp_path / "strand.json"
-        sm.write_json(path)
-        data = json.loads(path.read_text())
-        ci = data["strand_model"]["estimate"].get("ci_95")
-        assert ci is not None
-        assert len(ci) == 2
-        assert ci[0] < ci[1]
-
-
 class TestStrandModelProperties:
     def test_posterior_variance_with_data(self):
-        sm = StrandModel()
-        for _ in range(80):
-            sm.observe(Strand.POS, Strand.POS)
-        for _ in range(20):
-            sm.observe(Strand.POS, Strand.NEG)
+        sm = _model([(Strand.POS, Strand.POS, 80), (Strand.POS, Strand.NEG, 20)])
         # p = 80/100 = 0.8, variance = 0.8 * 0.2 / 100 = 0.0016
         assert sm.posterior_variance() == pytest.approx(0.0016)
 
     def test_posterior_variance_no_observations(self):
-        sm = StrandModel()
-        assert sm.posterior_variance() == 0.25
+        assert StrandModel().posterior_variance() == 0.25
 
     def test_posterior_95ci(self):
-        sm = StrandModel()
-        for _ in range(95):
-            sm.observe(Strand.POS, Strand.POS)
-        for _ in range(5):
-            sm.observe(Strand.POS, Strand.NEG)
+        sm = _model([(Strand.POS, Strand.POS, 95), (Strand.POS, Strand.NEG, 5)])
         lo, hi = sm.posterior_95ci()
         assert lo < hi
         assert lo > 0.88  # should be heavily skewed towards 1.0
@@ -188,54 +167,57 @@ class TestStrandModelProperties:
 
 
 class TestStrandModelsContainer:
-    """Test the simplified StrandModels container."""
+    """The StrandModels container and its construction from a scanner dict."""
+
+    def _scan_dict(self, rows, exonic=()):
+        t = _table(rows)
+        align, sj = _labels(exonic) if exonic else (np.empty(0, np.int8), np.empty(0, np.int8))
+        return {
+            "sj_ref_id": t.ref_id,
+            "sj_start": t.start,
+            "sj_end": t.end,
+            "sj_motif_strand": t.motif_strand,
+            "sj_n_sense": t.n_sense,
+            "sj_n_antisense": t.n_antisense,
+            "exonic_obs": align,
+            "exonic_truth": sj,
+        }
 
     def test_delegation_to_exonic_spliced(self):
-        models = StrandModels()
-        for _ in range(50):
-            models.exonic_spliced.observe(Strand.POS, Strand.POS)
-        models.finalize()
+        models = StrandModels.from_scan(self._scan_dict([(Strand.POS, 50, 0)]))
         assert models.strand_specificity == models.exonic_spliced.strand_specificity
         assert models.p_r1_sense == models.exonic_spliced.p_r1_sense
         assert models.read1_sense == models.exonic_spliced.read1_sense
         assert models.n_observations == models.exonic_spliced.n_observations
 
-    def test_mle_on_finalize(self):
-        models = StrandModels()
-        for _ in range(10):
-            models.exonic_spliced.observe(Strand.POS, Strand.POS)
-        models.finalize()
-        # MLE: p_r1_sense = 10/10 = 1.0
+    def test_mle_from_scan(self):
+        models = StrandModels.from_scan(self._scan_dict([(Strand.POS, 10, 0)]))
         assert models.p_r1_sense == pytest.approx(1.0)
 
+    def test_spliced_2x2_is_the_table_marginal(self):
+        """The container's spliced model has ONE source of truth — the junction table."""
+        rows = [(Strand.POS, 30, 3), (Strand.NEG, 12, 5)]
+        models = StrandModels.from_scan(self._scan_dict(rows))
+        assert models.exonic_spliced.contingency_matches_table()
+        assert models.sj_table.n_junctions == 2
+
     def test_zero_observations_warns(self, caplog):
-        models = StrandModels()
         with caplog.at_level("WARNING"):
-            models.finalize()
+            models = StrandModels.from_scan(self._scan_dict([]))
         assert "No spliced strand observations" in caplog.text
         assert models.p_r1_sense == 0.5
 
     def test_low_observations_warns(self, caplog):
-        models = StrandModels()
-        for _ in range(5):
-            models.exonic_spliced.observe(Strand.POS, Strand.POS)
         with caplog.at_level("WARNING"):
-            models.finalize()
+            StrandModels.from_scan(self._scan_dict([(Strand.POS, 5, 0)]))
         assert "Only 5 spliced strand observations" in caplog.text
 
-    def test_diagnostic_models_finalized(self):
-        models = StrandModels()
-        for _ in range(10):
-            models.exonic.observe(Strand.POS, Strand.POS)
-        models.finalize()
-        assert models.exonic._finalized
+    def test_diagnostic_model_built_from_labels_and_has_no_table(self):
+        models = StrandModels.from_scan(
+            self._scan_dict([(Strand.POS, 1, 0)], exonic=[(Strand.POS, Strand.POS, 10)])
+        )
+        assert models.exonic.n_observations == 10
+        assert models.exonic.sj_table is None
 
-    def test_to_dict_structure(self):
-        models = StrandModels()
-        for _ in range(20):
-            models.exonic_spliced.observe(Strand.POS, Strand.POS)
-        models.finalize()
-        d = models.to_dict()
-        assert "exonic_spliced" in d
-        assert "diagnostics" in d
-        assert "exonic" in d["diagnostics"]
+    def test_default_container_has_an_empty_table(self):
+        assert StrandModels().sj_table.n_junctions == 0

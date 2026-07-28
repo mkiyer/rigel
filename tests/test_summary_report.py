@@ -157,6 +157,20 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
     assert splice["sj_blacklist_loaded"] is False
     assert splice["sj_blacklist_size"] == 0
 
+    # per-junction SJ strand table QC: "how many junctions are deep enough to
+    # measure the strand dispersion" is a first-class question about a library.
+    junc = summary["strand_model"]["junctions"]
+    assert {
+        "n_junctions",
+        "n_observations",
+        "depth_median",
+        "depth_max",
+        "n_junctions_depth_ge_100",
+        "n_junctions_depth_ge_1000",
+    } <= set(junc)
+    # The table's total IS the 2x2's total — one observation per qualified fragment.
+    assert junc["n_observations"] == summary["strand_model"]["n_training_fragments"]
+
     # strand contamination diagnostic present
     diag = summary["strand_model"]["diagnostics"]
     assert {

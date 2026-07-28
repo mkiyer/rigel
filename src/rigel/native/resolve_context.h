@@ -73,6 +73,14 @@ public:
     int32_t num_hits = 1;
     int32_t nm = 0;
 
+    // Leftmost ANNOTATED junction (ref, start, end); -1 when the fragment
+    // crosses none.  With `sj_strand` this is the per-junction SJ strand
+    // table's key — see RawResolveResult in constants.h for why it is the
+    // first ANNOTATED junction and why only one junction is credited.
+    int32_t sj_key_ref = -1;
+    int32_t sj_key_start = -1;
+    int32_t sj_key_end = -1;
+
     // Per-transcript parallel arrays (same order as t_inds)
     std::vector<int32_t> frag_lengths;      // -1 if missing
     std::vector<int32_t> exon_bp;
@@ -187,6 +195,9 @@ public:
         r.exon_bp_neg = cr.exon_bp_neg;
         r.tx_bp_pos = cr.tx_bp_pos;
         r.tx_bp_neg = cr.tx_bp_neg;
+        r.sj_key_ref = cr.sj_key_ref;
+        r.sj_key_start = cr.sj_key_start;
+        r.sj_key_end = cr.sj_key_end;
         if (cr.frag_lengths.size() == n_t) {
             r.frag_lengths = std::move(cr.frag_lengths);
         } else {
@@ -534,9 +545,6 @@ public:
     std::vector<int32_t> t_to_g_arr_;
     int32_t n_transcripts_ = 0;
 
-    // --- Gene strand metadata (for BAM scanner model training) ---
-    std::vector<int32_t> g_to_strand_arr_;
-
     // --- Transcript strand metadata (direct lookup, no gene indirection) ---
     std::vector<int32_t> t_strand_arr_;
 
@@ -697,9 +705,6 @@ public:
     }
 
     /// Set gene strand mapping (for BAM scanner model training)
-    void set_gene_strands(const std::vector<int32_t>& g_to_strand) {
-        g_to_strand_arr_ = g_to_strand;
-    }
 
     /// Set per-transcript strand array (direct lookup, no gene indirection).
     void set_transcript_strands(const std::vector<int32_t>& t_strand) {
@@ -1216,6 +1221,10 @@ public:
         bool has_annotated_sj = false;
         bool has_unannotated_sj = false;
         cr.sj_strand = STRAND_NONE;
+        // Reset alongside sj_strand: `cr` is an out-param taken by reference, so a
+        // caller that reuses one across fragments would otherwise carry the previous
+        // fragment's junction key forward. Every call site builds a fresh `cr` today.
+        cr.sj_key_ref = cr.sj_key_start = cr.sj_key_end = -1;
 
         for (int ii = 0; ii < n_introns; ii++) {
             sj_t_sets_vec.emplace_back();
@@ -1225,6 +1234,13 @@ public:
             if (!sj_t.empty()) {
                 has_annotated_sj = true;
                 cr.sj_strand |= introns[ii].strand;
+                if (cr.sj_key_start < 0) {
+                    // First ANNOTATED junction (introns arrive sorted by
+                    // ref/start/end) — the per-junction strand table's key.
+                    cr.sj_key_ref   = introns[ii].ref_id;
+                    cr.sj_key_start = introns[ii].start;
+                    cr.sj_key_end   = introns[ii].end;
+                }
             } else {
                 sj_t_sets_vec.pop_back();
                 has_unannotated_sj = true;
