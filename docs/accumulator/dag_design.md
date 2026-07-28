@@ -1,3 +1,21 @@
+> **⭐ The two open questions in this draft are DERIVED AND MEASURED in
+> [`02_redesign_derivation.md`](02_redesign_derivation.md) (2026-07-27).** That document answers the
+> multi-region-fragment question (the `(start region, end region, path)` cell decomposition; integer counts,
+> `Σ_Z E(A,Z) = |A|` exactly), the migration question (the linear chain is a *projection* of the cell store),
+> and carries the real-human-index measurements — including the finding that **59.5 % of transcript termini
+> are strictly inside a region**, which changes the P1g plan. Read it alongside this draft.
+
+our goal is an overhaul of the current "fractional accumulator" phase. this is the module that counts fragments over genomic regions/boundaries which is the input to the calibration phase.
+
+the accumulator was originally designed and written quite a long time ago. the code and philosophy has changed considerably. for example, at the time the accumulator was designed, we were not modeling hybrid capture data.
+
+previously, boundaries did not "own" fragment mass. boundaries were merely locations where "flux" could be measured
+
+hybrid capture changed that philosophy, because boundary crossing fragments became a critical source of information about hybrid capture. 
+
+we have not updated or overhauled the accumulator, even though an overhaul is overdue. it can be simplified in many ways. if can be made more efficiency. it can be made more clear, concise, readable, and maintainable.
+
+critically, we have missing functionality. we are missing TSS and TES annotations. we now have evidence that this is harming calibration substantially, especially in exonic regions where there are multiple transcription start sites within a single node.
 
 
 # current behavior
@@ -282,6 +300,115 @@ But we could decide to store unspliced fragment lengths (as a histogram, even a 
 - what happens to 'tiny' nodes? small regions cannot harbor contained fragments. they will be sparse or zero, but they will remain connected to other nodes via the acyclic graph
 
 - empty nodes will 'relay' messages during belief propagation
+
+
+
+
+# updates
+
+
+I want to simplify the accumulator design considerably. We won't make use of path information.
+
+
+
+# Second draft of accumulator rework
+
+## Architecture
+
+- acyclic graph
+- nodes store mass (density)
+- edges store flux (where the mass goes)
+
+
+
+## NODES
+
+- a node is a contiguous genomic interval (ref, start, end)
+- nodes will own ALL mass (edges track flux)
+- nodes must separate spliced from unspliced mass
+- spliced fragments accumulate to the spliced channel
+- unspliced fragment accumulate to the unspliced channel
+
+Node therefore must track:
+
+- node id
+- signature bits (exon+, exon-, intron+, intron-)
+- spliced mass (counts/L) per strand (+, -)
+- spliced total integer counts per strand
+- unspliced mass (counts/L) per strand (+, -)
+- unspliced total integer counts per strand
+
+
+## EDGES
+
+- an edge tracks fragments crossing nodes
+- edges have zero mass
+- edges track flux only
+- splice junction edges are stranded (directed)
+- genomically contiguous regions are unstranded (undirected)
+
+Edge must track:
+- src/dst node IDs
+- spliced/unspliced
+- strand (genomic edges are unstranded, splice junctions are stranded)
+- raw integer counts along the edge
+- splice junction edges need to store only one integer (strand known, edge is directed)
+- unspliced (linear) edges need to store total counts per strand (two integer, edge is undirected)
+
+
+
+## Accumulator Logic
+
+Fragments 'deposit' onto the acyclic graph.
+
+- Fragment accumulates both integer count (+1) and integer length (+L).
+- This allows density/abundance estimates (counts/L)
+- fragment must have valid length to be accumulated properly
+
+Procedure:
+1) map fragment to sequences of nodes along graph (path)
+2) accumulate fragment at each node along path:
+
+for each node along path:
+- compute overlap between fragment and node in bp
+- add to node counts (+1) and length (+overlap bp)
+- add fragment to the appropriate channel:
+- spliced/unspliced x pos/neg strand
+
+Example:
+- A 200bp fragment overlaps three nodes (A=50 overlap, E=100bp overlap, F=50bp overlap). Fragment is spliced (+ strand).
+- Node A: spliced_count[+] += 1, spliced_len[+] += 50
+- Node B: spliced_count[+] += 1, spliced_len[+] += 100
+- Node C: spliced_count[+] += 1, spliced_len[+] += 50
+
+3) accumulate fragment along its edges:
+
+- Edge (A,E), spliced[+], counts += 1
+- Edge (E,F), unspliced[+], counts += 1
+
+
+
+## Belief Propagation
+
+The new accumulator does not introduce "loopy" BP.
+
+We will continue to run forward-backward belief propagation along the genomically contiguous (linear) path.
+
+Splice just edges are measured, fixed, invariant quantities. They are not deconvolved. They are static. They are maintained to assist with density handling
+
+between two regions with FLUX (# of fragments crossing).
+
+
+## Enrichment weighted effective length
+
+We apply an effective length shrinkage method that shrinks region and boundary nodes separately.
+
+In the production version, boundaries OWN fragment mass and length. Hybrid capture enriches nodes with probe overlap and depletes the off-target nodes.
+
+Modeling boundaries as independent nodes with mass and length allowed us to compute effective length shrinkage separately for boundary nodes.
+
+If we keep this design, the effective length arithmetic must change. ALL mass is contained within NODES (regions). Therefore, effective length is the length of the entire node from end-to-end. Previously the effective length was (region length - fragment length + 1). Now, it is just (region length)
+
 
 
 
