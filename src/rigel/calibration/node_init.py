@@ -244,7 +244,9 @@ def build_node_init(
     single_strand = np.asarray(fp, bool) ^ np.asarray(fn, bool)
     tau_lam = np.where(single_strand, i_strand, 0.0)
     lam_grid, _ = _logodds_grid(int(n_grid), float(logodds_window))
-    tau_fac = density_factor_precision(intron_prior, lam_grid)  # I_density (NB curvature) on the λ axis
+    tau_fac = density_factor_precision(
+        intron_prior, lam_grid
+    )  # I_density (NB curvature) on the λ axis
     if tau_fac is not None:
         tau_lam = tau_lam + tau_fac
 

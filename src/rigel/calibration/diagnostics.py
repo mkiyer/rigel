@@ -19,7 +19,6 @@ from dataclasses import dataclass
 import numpy as np
 
 
-
 @dataclass(frozen=True)
 class CalibrationDiagnostics:
     """gDNA-density KDE curve + labeled modes for the report (no verdict)."""

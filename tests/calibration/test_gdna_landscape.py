@@ -67,7 +67,9 @@ def test_zero_count_anchor_is_native_and_low():
     )
     d = _density(ls)
     assert d.argmax() < len(d) // 4, "zero-count mass must pile at the bottom of the grid"
-    assert np.all(np.diff(d[d.argmax():]) <= 1e-12), "the zero-count kernel must decay monotonically"
+    assert np.all(np.diff(d[d.argmax() :]) <= 1e-12), (
+        "the zero-count kernel must decay monotonically"
+    )
 
 
 def test_reliability_weight_damps_but_never_deletes():
@@ -163,7 +165,19 @@ def test_logprior_tracks_the_node_mass():
 
 
 def test_declines_gracefully_on_degenerate_input():
-    assert fit_gdna_landscape(np.array([1.0]), np.array([1.0]), np.array([0.0]),
-                              np.array([1.0]), anchor=np.array([False])) is None
-    assert fit_gdna_landscape(np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0),
-                              anchor=np.zeros(0, bool)) is None
+    assert (
+        fit_gdna_landscape(
+            np.array([1.0]),
+            np.array([1.0]),
+            np.array([0.0]),
+            np.array([1.0]),
+            anchor=np.array([False]),
+        )
+        is None
+    )
+    assert (
+        fit_gdna_landscape(
+            np.zeros(0), np.zeros(0), np.zeros(0), np.zeros(0), anchor=np.zeros(0, bool)
+        )
+        is None
+    )

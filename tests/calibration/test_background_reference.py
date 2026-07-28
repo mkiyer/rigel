@@ -45,7 +45,9 @@ def test_zero_counts_is_dormant():
     assert bg.log_rho_bg == -np.inf
     assert bg.sigma_bg == np.inf
     assert bg.n_counts == 0.0
-    assert bg.eff_total == 6000.0  # support is still measured (the aggregate exists; the signal is zero)
+    assert (
+        bg.eff_total == 6000.0
+    )  # support is still measured (the aggregate exists; the signal is zero)
 
 
 def test_intron_with_nascent_does_not_leak_into_background():
@@ -64,7 +66,9 @@ def test_intron_with_nascent_does_not_leak_into_background():
 
 def test_no_intergenic_regions():
     """No signature-0 region at all ⇒ empty pool ⇒ dormant (no crash)."""
-    sub, ra, eff = _substrate(sig=[BIT_EXON_POS, BIT_INTRON_POS], pos=[5, 5], neg=[5, 5], eff=[100, 100])
+    sub, ra, eff = _substrate(
+        sig=[BIT_EXON_POS, BIT_INTRON_POS], pos=[5, 5], neg=[5, 5], eff=[100, 100]
+    )
     bg = measure_background(sub, ra, eff)
     assert bg.log_rho_bg == -np.inf
     assert bg.eff_total == 0.0
@@ -79,7 +83,9 @@ def test_zero_efflength_regions_excluded():
 
 
 def test_deterministic():
-    sub, ra, eff = _substrate(sig=[0, 0, BIT_EXON_POS], pos=[10, 20, 5], neg=[11, 21, 5], eff=[1e3, 2e3, 1e3])
+    sub, ra, eff = _substrate(
+        sig=[0, 0, BIT_EXON_POS], pos=[10, 20, 5], neg=[11, 21, 5], eff=[1e3, 2e3, 1e3]
+    )
     a = measure_background(sub, ra, eff)
     b = measure_background(sub, ra, eff)
     assert a == b
@@ -96,19 +102,38 @@ def test_include_introns_adds_intron_span():
     )
     intergenic = measure_background(sub, ra, eff)  # default: Σg = 10
     assert intergenic.n_counts == 10.0
-    with_introns = measure_background(sub, ra, eff, include_introns=True)  # + two introns: 10 + 100 + 100
+    with_introns = measure_background(
+        sub, ra, eff, include_introns=True
+    )  # + two introns: 10 + 100 + 100
     assert with_introns.n_counts == 210.0  # exon (1998) still excluded
 
 
 def test_robust_trim_drops_nascent_outlier_intron():
     """The MAD fence drops a single nascent-heavy intron (a high per-region density outlier) so it cannot
     inflate the pooled background — the real-data safeguard for sparse nascent."""
-    bg = [8.0, 9.0, 10.0, 11.0, 12.0, 8.0, 9.0, 10.0, 11.0, 12.0]  # background ~ density 0.01, varied
+    bg = [
+        8.0,
+        9.0,
+        10.0,
+        11.0,
+        12.0,
+        8.0,
+        9.0,
+        10.0,
+        11.0,
+        12.0,
+    ]  # background ~ density 0.01, varied
     sig = [0] * len(bg) + [BIT_INTRON_POS]  # + one nascent-contaminated intron
     counts = bg + [5000.0]  # the outlier: density 5.0 ≫ 0.01
     eff = [1000.0] * (len(bg) + 1)
-    sub, ra, e = _substrate(sig=sig, pos=[c / 2 for c in counts], neg=[c / 2 for c in counts], eff=eff)
+    sub, ra, e = _substrate(
+        sig=sig, pos=[c / 2 for c in counts], neg=[c / 2 for c in counts], eff=eff
+    )
     plain = measure_background(sub, ra, e, include_introns=True)
     trimmed = measure_background(sub, ra, e, include_introns=True, robust_trim_mad=5.0)
-    assert trimmed.log_rho_bg < plain.log_rho_bg  # the outlier is removed ⇒ lower, correct background
-    assert trimmed.n_counts == float(sum(bg))  # only the background regions remain (outlier dropped)
+    assert (
+        trimmed.log_rho_bg < plain.log_rho_bg
+    )  # the outlier is removed ⇒ lower, correct background
+    assert trimmed.n_counts == float(
+        sum(bg)
+    )  # only the background regions remain (outlier dropped)

@@ -198,9 +198,7 @@ def node_sweep(
     kappa = float(rna_sense_frac)
     od_g, od_r = gdna_strand_overdispersion, rna_strand_overdispersion
 
-    def _local_solve(
-        g_arr, gm=None, gp=None, rm=None, rp=None, lam_imp=None, theta_imp=None
-    ):
+    def _local_solve(g_arr, gm=None, gp=None, rm=None, rp=None, lam_imp=None, theta_imp=None):
         """The per-node local/final solve (log-density log-odds backend). Returns the :class:`NodeDeconv`
         (the readout ``*_frac``/``*_frac_var`` + the free-coordinate seed ``lam_mean``/``lam_var``/
         ``theta_mean``/``theta_var``). Phase A calls it message-free; phase D passes the FB messages.
@@ -317,7 +315,9 @@ def node_sweep(
             is_exon_node, dtype=bool
         )  # source-is-exon selector for the mature routing
         fp_a, fn_a = np.asarray(fp, bool), np.asarray(fn, bool)
-        is_amb = fp_a & fn_a  # AMBIG: both strands live → the tilt θ is a free DOF (its own message)
+        is_amb = (
+            fp_a & fn_a
+        )  # AMBIG: both strands live → the tilt θ is a free DOF (its own message)
         M = np.asarray(mass_global, np.float64)
         E_g = np.asarray(eff_global, np.float64)
         E_r = np.where(is_reg_a, ER[0], ER[0] + ER[1]).astype(
@@ -434,8 +434,6 @@ def node_sweep(
                 _side(_vl_a, _sl_a, rho_rface, rho_lface, 1),
                 _side(_vr_a, _sr_a, rho_lface, rho_rface, 0),
             )
-
-
 
         # own per-component densities + precisions — the message-free SELF-SOLVE (`node_init.build_node_init`,
         # the four sources). ``rho_*`` are the own densities; ``prec_*`` combine the strand + intron-factory
@@ -619,16 +617,44 @@ def node_sweep(
         # BIT-IDENTICAL by construction, and it buys ~3×: `lst[i]` costs a third of `arr[i]`, and it yields
         # a PYTHON float, whose arithmetic is ~3× `np.float64`'s because no intermediate is boxed in a 0-d
         # array. The array forms stay — the vectorised combine (`_transport`, `_peel_share`) needs them.
-        (og_l, op_l, on_l, pg_own_l, pp_own_l, pn_own_l, mg_own_l, mp_own_l, mn_own_l, tau_own_l,
-         M_l, E_g_l, E_r_l, n_node_l, logvar_l) = (
+        (
+            og_l,
+            op_l,
+            on_l,
+            pg_own_l,
+            pp_own_l,
+            pn_own_l,
+            mg_own_l,
+            mp_own_l,
+            mn_own_l,
+            tau_own_l,
+            M_l,
+            E_g_l,
+            E_r_l,
+            n_node_l,
+            logvar_l,
+        ) = (
             np.asarray(a, np.float64).tolist()
-            for a in (og, op, on, pg_own, pp_own, pn_own, mg_own, mp_own, mn_own, tau_own,
-                      M, E_g, E_r, _n_node, logvar_tot)
+            for a in (
+                og,
+                op,
+                on,
+                pg_own,
+                pp_own,
+                pn_own,
+                mg_own,
+                mp_own,
+                mn_own,
+                tau_own,
+                M,
+                E_g,
+                E_r,
+                _n_node,
+                logvar_tot,
+            )
         )
         ex_l, bnd_l, fp_l, fn_l = (a.tolist() for a in (ex_a, is_bnd_a, fp_a, fn_a))
-        spl_p_l, spl_n_l, SP_l, SN_l = (
-            [f.tolist() for f in t] for t in (spl_p_f, spl_n_f, SP, SN)
-        )
+        spl_p_l, spl_n_l, SP_l, SN_l = ([f.tolist() for f in t] for t in (spl_p_f, spl_n_f, SP, SN))
         mu_l, v_mu_l = ([[c.tolist() for c in face] for face in t] for t in (_mu_f, _v_mu_f))
 
         # ── ⛔ THE ACROSS-THE-SEAM (`_far`) LEVEL ESTIMATOR IS DELETED — it was a BP VIOLATION ──────────
@@ -714,14 +740,21 @@ def node_sweep(
                 _v_nu = np.where(_live, _vlog_m, np.inf)
                 _w = np.where(_live, peel_continue_share(_nu, _mu), 0.0)
                 if _capture is not None:
-                    _capture.setdefault("_lvl", []).append(  # inert: the level's provenance, per face
-                        {"df": df, "nu": np.asarray(_nu).copy(), "v_nu": np.asarray(_v_nu).copy(),
-                         "pm": np.asarray(_pm).copy(),
-                         "nu_m": np.asarray(_nu_ms).copy(),
-                         "mu": np.asarray(_mu).copy(), "w": np.asarray(_w).copy(),
-                         "v_g": np.asarray(_vg).copy(),
-                         "vl_m": np.where(np.isfinite(_vl_m), _vl_s, np.inf),
-                         "phi": np.asarray(tg * E_g / np.maximum(M, _EPS)).copy()}
+                    _capture.setdefault(
+                        "_lvl", []
+                    ).append(  # inert: the level's provenance, per face
+                        {
+                            "df": df,
+                            "nu": np.asarray(_nu).copy(),
+                            "v_nu": np.asarray(_v_nu).copy(),
+                            "pm": np.asarray(_pm).copy(),
+                            "nu_m": np.asarray(_nu_ms).copy(),
+                            "mu": np.asarray(_mu).copy(),
+                            "w": np.asarray(_w).copy(),
+                            "v_g": np.asarray(_vg).copy(),
+                            "vl_m": np.where(np.isfinite(_vl_m), _vl_s, np.inf),
+                            "phi": np.asarray(tg * E_g / np.maximum(M, _EPS)).copy(),
+                        }
                     )
                 # a spliced DENSITY with no spliced COUNT cannot be priced (plan §4.7) ⇒ no claim at all.
                 _ok = _live & (np.isfinite(_vmu) | ~(_mu > _EPS))
@@ -752,7 +785,9 @@ def node_sweep(
             no level) are no longer evaluated and discarded. Measured 25× on this path, which is the bulk
             of a genome-scale calibration."""
             _vg = 1.0 / _fmax(tpg, _EPS) if tpg > 0.0 else math.inf
-            _nu_m, _vlog_m, _vl_m = residual_level_scalar(M_l[i], n_node_l[i], tg, E_g_l[i], E_r_l[i], _vg)
+            _nu_m, _vlog_m, _vl_m = residual_level_scalar(
+                M_l[i], n_node_l[i], tg, E_g_l[i], E_r_l[i], _vg
+            )
             _fin = math.isfinite(_vl_m)
             _A = tp + tn
             _a_p = tp / _A if _A > _EPS else 0.0
@@ -780,7 +815,12 @@ def node_sweep(
                 # a spliced DENSITY with no spliced COUNT cannot be priced (plan §4.7) ⇒ no claim at all.
                 _ok = math.isfinite(_vmu) or not _mu > _EPS
                 out.append(
-                    (_w, _wm * _wm * (_v_nu + (_vmu if math.isfinite(_vmu) else 0.0)) if _ok else math.inf)
+                    (
+                        _w,
+                        _wm * _wm * (_v_nu + (_vmu if math.isfinite(_vmu) else 0.0))
+                        if _ok
+                        else math.inf,
+                    )
                 )
             return out
 
@@ -822,7 +862,11 @@ def node_sweep(
             # every operand here is a Python float or bool — see the `*_l` block above
             rg, rp, rn = og_l.copy(), op_l.copy(), on_l.copy()
             pg, pp, pn = pg_own_l.copy(), pp_own_l.copy(), pn_own_l.copy()  # full → MODE fusion
-            mg, mp, mn = mg_own_l.copy(), mp_own_l.copy(), mn_own_l.copy()  # MEASUREMENT (anchor + spliced)
+            mg, mp, mn = (
+                mg_own_l.copy(),
+                mp_own_l.copy(),
+                mn_own_l.copy(),
+            )  # MEASUREMENT (anchor + spliced)
             tau = tau_own_l.copy()  # COMPOSITION (τ_λ) → the λ-message
             for i in seq:
                 s = nbr[i]
@@ -854,8 +898,16 @@ def node_sweep(
                 gp = spl_p_l[sf][s] if _gr else 0.0
                 gn = spl_n_l[sf][s] if _gr else 0.0
                 tg, tp, tn = rg[s] * r, (rp[s] + gp) * r, (rn[s] + gn) * r
-                tpg, tpp, tpn = _damp(pg[s], s2t), _damp(pp[s], s2t), _damp(pn[s], s2t)  # full (mode)
-                tmg, tmp, tmn = _damp(mg[s], s2t), _damp(mp[s], s2t), _damp(mn[s], s2t)  # measurement
+                tpg, tpp, tpn = (
+                    _damp(pg[s], s2t),
+                    _damp(pp[s], s2t),
+                    _damp(pn[s], s2t),
+                )  # full (mode)
+                tmg, tmp, tmn = (
+                    _damp(mg[s], s2t),
+                    _damp(mp[s], s2t),
+                    _damp(mn[s], s2t),
+                )  # measurement
                 ttau = _damp(tau[s], s2t)  # composition
                 # The grafted mature is a MEASUREMENT (a junction COUNT), not an imputation, so it carries its
                 # own precision and is NOT τ-gated — the source's PREDICTION precision is 0 on unstranded data
@@ -879,7 +931,9 @@ def node_sweep(
                     tpp, tmp = _damp_v(tpp, _vgp), _damp_v(tmp, _vgp)
                     tpn, tmn = _damp_v(tpn, _vgn), _damp_v(tmn, _vgn)
 
-                if bnd_l[i] and ex_l[s]:  # EXON → boundary: PEEL by COMPOSITION (scale by the share)
+                if (
+                    bnd_l[i] and ex_l[s]
+                ):  # EXON → boundary: PEEL by COMPOSITION (scale by the share)
                     (_wp, _vwp), (_wn, _vwn) = _peel_share_scalar(i, df, tg, tpg, tp, tn)
                     tp, tn = tp * _wp, tn * _wn
                     tpp, tmp = _damp_v(tpp, _vwp), _damp_v(tmp, _vwp)
@@ -921,8 +975,7 @@ def node_sweep(
                 tau[i] = tau_own_l[i] + ttau
             # back to arrays for the vectorised combine — exact, they are the same doubles
             return tuple(
-                np.asarray(a, np.float64)
-                for a in (rg, rp, rn, pg, pp, pn, mg, mp, mn, tau)
+                np.asarray(a, np.float64) for a in (rg, rp, rn, pg, pp, pn, mg, mp, mn, tau)
             )
 
         # dst faces its source on its LEFT (face 0); the source faces the dst on its RIGHT (face 1) — and mirrored
@@ -962,20 +1015,29 @@ def node_sweep(
                 #    a non-adjacent node's data reached the destination twice. Now no message's precision
                 #    depends on anything but its own edge and one library-level constant — the same standing
                 #    as ``κ`` and both strand overdispersions.
-                if _capture is not None:  # inert: the fitted scalar and the population it was fitted on
+                if (
+                    _capture is not None
+                ):  # inert: the fitted scalar and the population it was fitted on
                     _ok = (fl > _EPS) & (fr > _EPS)
                     _d = np.log(np.maximum(fl, _EPS)) - np.log(np.maximum(fr, _EPS))
                     _vv = np.where(_vl_a, _v_mu_f[1][vmu][_sl_a] + _lv[_sl_a], 0.0) + np.where(
                         _vr_a, _v_mu_f[0][vmu][_sr_a] + _lv[_sr_a], 0.0
                     )
                     _capture.setdefault("_glv", []).append(
-                        {"strand": vmu, "omega": pooled, "n_pairs": int(_ok.sum()),
-                         "ok": _ok.copy(), "d": _d.copy(), "noise": _vv.copy(),
-                         "Ed2": float((_d[_ok] ** 2).mean()) if _ok.any() else 0.0,
-                         "Enoise": float(_vv[_ok].mean()) if _ok.any() else 0.0}
+                        {
+                            "strand": vmu,
+                            "omega": pooled,
+                            "n_pairs": int(_ok.sum()),
+                            "ok": _ok.copy(),
+                            "d": _d.copy(),
+                            "noise": _vv.copy(),
+                            "Ed2": float((_d[_ok] ** 2).mean()) if _ok.any() else 0.0,
+                            "Enoise": float(_vv[_ok].mean()) if _ok.any() else 0.0,
+                        }
                     )
                 out.append(np.full_like(per, pooled))
             return out[0], out[1]
+
         # the relay runs on the INPUT-belief faces, so its seam pair is formed from those
         vgp_prem, vgn_prem = _seam_pair(rho_l0, rho_r0)
         vgp_l, vgn_l = vgp_prem.tolist(), vgn_prem.tolist()
@@ -1020,9 +1082,7 @@ def node_sweep(
             # cancels — a double-count otherwise), Var(log r) = logvar_tot[dst]+logvar_tot[src] elsewhere (peel /
             # plain reframe / partial-anchor — r load-bearing). This is the SCALE half of the cliff cost; the
             # COMPOSITION half is the DL b̂² applied at the end of this function. See the relay's twin.
-            s2t = (
-                transfer_logvar(logvar_tot, logvar_tot[src], graft)
-            )
+            s2t = transfer_logvar(logvar_tot, logvar_tot[src], graft)
 
             def _dv(p, s2=s2t):
                 return np.where(
@@ -1044,7 +1104,10 @@ def node_sweep(
             _spc = np.where(_sp > _EPS, _sp / (1.0 + _sp * _s2t_spl), 0.0)
             _snc = np.where(_sn > _EPS, _sn / (1.0 + _sn * _s2t_spl), 0.0)
             tpp, tpn = tpp + _spc, tpn + _snc  # into the mode-fusion precision …
-            tmp, tmn = tmp + _spc, tmn + _snc  # … and the measurement stream (a count, never composition τ)
+            tmp, tmn = (
+                tmp + _spc,
+                tmn + _snc,
+            )  # … and the measurement stream (a count, never composition τ)
             # ⭐ P1d — the graft's PREMISE variance (`graft_premise_logvar`), applied to the WHOLE RNA
             # claim after the spliced arm is folded in, because the premise is about the SUM: measured
             # FLAT in the spliced share w_μ (Var 2.02 → 1.83 across w_μ 0.47 → 1.00, while Var/w_μ²
@@ -1055,31 +1118,51 @@ def node_sweep(
             tpp, tmp = tpp / (1.0 + tpp * _vgp), tmp / (1.0 + tmp * _vgp)
             tpn, tmn = tpn / (1.0 + tpn * _vgn), tmn / (1.0 + tmn * _vgn)
 
-            peel = is_bnd_a & ex_a[src] & valid  # EXON → boundary: PEEL by COMPOSITION (the relay's twin)
+            peel = (
+                is_bnd_a & ex_a[src] & valid
+            )  # EXON → boundary: PEEL by COMPOSITION (the relay's twin)
             (_wp, _vwp), (_wn, _vwn) = _peel_share(df, tg, tpg, tp, tn)
             tp = np.where(peel, tp * _wp, tp)
             tn = np.where(peel, tn * _wn, tn)
 
             def _dv_arr(pr, vv):
                 _f = np.isfinite(vv)
-                return np.where(peel, np.where(_f, pr / (1.0 + pr * np.where(_f, vv, 0.0)), 0.0), pr)
+                return np.where(
+                    peel, np.where(_f, pr / (1.0 + pr * np.where(_f, vv, 0.0)), 0.0), pr
+                )
 
             tpp, tmp = _dv_arr(tpp, _vwp), _dv_arr(tmp, _vwp)
             tpn, tmn = _dv_arr(tpn, _vwn), _dv_arr(tmn, _vwn)
-            tp, tpp, tmp = np.where(fp_a, tp, 0.0), np.where(fp_a, tpp, 0.0), np.where(fp_a, tmp, 0.0)
-            tn, tpn, tmn = np.where(fn_a, tn, 0.0), np.where(fn_a, tpn, 0.0), np.where(fn_a, tmn, 0.0)
+            tp, tpp, tmp = (
+                np.where(fp_a, tp, 0.0),
+                np.where(fp_a, tpp, 0.0),
+                np.where(fp_a, tmp, 0.0),
+            )
+            tn, tpn, tmn = (
+                np.where(fn_a, tn, 0.0),
+                np.where(fn_a, tpn, 0.0),
+                np.where(fn_a, tmn, 0.0),
+            )
             if _capture is not None:  # inert: the PRE-PIN state, for the weighted-rescale prototype
                 _capture.setdefault("_pin", []).append(
                     {
-                        "df": df, "src": np.asarray(src).copy(), "valid": np.asarray(valid).copy(),
-                        "tg": tg.copy(), "tp": tp.copy(), "tn": tn.copy(),
-                        "tpg": tpg.copy(), "tpp": tpp.copy(), "tpn": tpn.copy(),
+                        "df": df,
+                        "src": np.asarray(src).copy(),
+                        "valid": np.asarray(valid).copy(),
+                        "tg": tg.copy(),
+                        "tp": tp.copy(),
+                        "tn": tn.copy(),
+                        "tpg": tpg.copy(),
+                        "tpp": tpp.copy(),
+                        "tpn": tpn.copy(),
                         # the COMMON-mode variance every component shares: the reframe's scale (M5) plus the
                         # source's own count. Everything else in a component's variance is its own.
                         "s2t": np.where(np.isfinite(s2t), s2t, 0.0),
                         "n_src": np.asarray(_n_node)[src].copy(),
                         # the graft: how much of the RNA claim is a MEASUREMENT rather than an imputation
-                        "spl_p": _sp.copy(), "spl_n": _sn.copy(), "spl_prec": (_spc + _snc).copy(),
+                        "spl_p": _sp.copy(),
+                        "spl_n": _sn.copy(),
+                        "spl_prec": (_spc + _snc).copy(),
                         "graft": np.asarray(graft).copy(),
                     }
                 )
@@ -1192,7 +1275,9 @@ def node_sweep(
             g_R, c_R = mismatch_gap(pin_p + pin_n, op + on)
             _tau_pre = ttau
             ttau = mismatch_deflate(ttau, g_g - g_R, c_g | c_R, v_own_lam)
-            if _capture is not None:  # inert: the per-message gaps + the τ-stream kill, for the dissect loop
+            if (
+                _capture is not None
+            ):  # inert: the per-message gaps + the τ-stream kill, for the dissect loop
                 _capture.setdefault("_dl", []).append(
                     {
                         "df": df,
@@ -1230,7 +1315,9 @@ def node_sweep(
             )
             return tg, tp, tn, tpg, tpp, tpn, tmg, tmp, tmn, ttau, tlam, tth
 
-        def _fuse_add(a, b):  # additive (inverse-variance) fuse of two independent precision streams
+        def _fuse_add(
+            a, b
+        ):  # additive (inverse-variance) fuse of two independent precision streams
             return np.asarray(a, np.float64) + np.asarray(b, np.float64)
 
         def _fuse_v(a, pa, b, pb):
@@ -1285,14 +1372,17 @@ def node_sweep(
         # exons, and removing it measured 0.0895 → 0.1033, 4 better / 17 worse — it is also the only thing
         # that lets a zero-gDNA library say "my mass is all RNA" (`gdna_none` 0.1063 → 0.1438).
         dc_fin = _local_solve(
-            global_lp, mo_g, cm_g, (mo_p, mo_n), (cm_p, cm_n),
-            lam_imp=(lam_msg, c_tau), theta_imp=(th_msg, th_prec),
+            global_lp,
+            mo_g,
+            cm_g,
+            (mo_p, mo_n),
+            (cm_p, cm_n),
+            lam_imp=(lam_msg, c_tau),
+            theta_imp=(th_msg, th_prec),
         )
         nonlocal _uni_msg
         _uni_msg = (mo_g, cpg, mo_p, cpp, mo_n, cpn)  # publish for the shared diagnostics
-        if (
-            _capture is not None
-        ):  # inert diagnostic: the fused per-component densities + the frames
+        if _capture is not None:  # inert diagnostic: the fused per-component densities + the frames
             _capture.setdefault("_uni", []).append(
                 {
                     "cg": cg.copy(),
@@ -1361,20 +1451,27 @@ def node_sweep(
                     # ── AUDIT_2 instrumentation (invariant scan) ──
                     "order": np.asarray(order_list, np.int64),
                     "logvar_tot": logvar_tot.copy(),
-                    "SP_l": SP[0].copy(), "SP_r": SP[1].copy(),
-                    "SN_l": SN[0].copy(), "SN_r": SN[1].copy(),
+                    "SP_l": SP[0].copy(),
+                    "SP_r": SP[1].copy(),
+                    "SN_l": SN[0].copy(),
+                    "SN_r": SN[1].copy(),
                     "n_unspl_l": np.asarray(geometry.n_unspl_left, np.float64),
                     "n_unspl_r": np.asarray(geometry.n_unspl_right, np.float64),
                     "spl_n_pos_l": np.asarray(geometry.spliced_n_pos_left, np.float64),
                     "spl_n_pos_r": np.asarray(geometry.spliced_n_pos_right, np.float64),
                     "spl_n_neg_l": np.asarray(geometry.spliced_n_neg_left, np.float64),
                     "spl_n_neg_r": np.asarray(geometry.spliced_n_neg_right, np.float64),
-                    "tau_own": tau_own.copy(), "mg_own": mg_own.copy(),
+                    "tau_own": tau_own.copy(),
+                    "mg_own": mg_own.copy(),
                     "struct_lock": _struct.copy(),
-                    "fwd_mp": fwd[7], "bwd_mp": bwd[7],
-                    "fwd_mn": fwd[8], "bwd_mn": bwd[8],
-                    "fwd_mg": fwd[6], "bwd_mg": bwd[6],
-                    "fwd_tau": fwd[9], "bwd_tau": bwd[9],
+                    "fwd_mp": fwd[7],
+                    "bwd_mp": bwd[7],
+                    "fwd_mn": fwd[8],
+                    "bwd_mn": bwd[8],
+                    "fwd_mg": fwd[6],
+                    "bwd_mg": bwd[6],
+                    "fwd_tau": fwd[9],
+                    "bwd_tau": bwd[9],
                     "is_bnd": is_bnd_a,
                     "is_exon": ex_a,
                     "left": li,

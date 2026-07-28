@@ -71,7 +71,9 @@ def test_spliced_efflen_continuing_exon_is_boundary_side_not_half_triangle(ell, 
     two_sided = float(boundary_side_eff_length(pmf, np.array([float(R)]))[0])
     half_tri = float(spliced_side_eff_length(pmf, np.array([float(R)]))[0])
 
-    assert brute == pytest.approx(two_sided, rel=1e-9), "E[min(l,R)]/2 must reproduce the deposit rule"
+    assert brute == pytest.approx(two_sided, rel=1e-9), (
+        "E[min(l,R)]/2 must reproduce the deposit rule"
+    )
     # and the half-triangle is wrong here, by the derived factor l/R
     assert two_sided / half_tri == pytest.approx(ell / R, rel=1e-9)
 

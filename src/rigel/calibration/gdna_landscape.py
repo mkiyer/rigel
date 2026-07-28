@@ -229,7 +229,9 @@ def _reliability(count: np.ndarray, var: np.ndarray, anchor: np.ndarray) -> np.n
     return np.where(anchor, 1.0, ref / (v + ref))
 
 
-def _render(kernels: np.ndarray, weights: np.ndarray, widths: np.ndarray, grid: np.ndarray) -> np.ndarray:
+def _render(
+    kernels: np.ndarray, weights: np.ndarray, widths: np.ndarray, grid: np.ndarray
+) -> np.ndarray:
     """Sum the weighted kernels, each widened to the population resolution → an unnormalised density.
 
     Convolution is linear, so widening every kernel and then summing equals summing and then convolving —

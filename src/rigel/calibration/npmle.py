@@ -157,13 +157,17 @@ class DensityNPMLE:
     logP: (
         np.ndarray
     )  #: (G,) log P(log ρ) — kernel-rendered, uniform-floored inside the support, real tails
-    weights: np.ndarray  #: (G,) mixture component weights w_j (Σ w_j·N(μ_j, h²)) — for :meth:`project`
+    weights: (
+        np.ndarray
+    )  #: (G,) mixture component weights w_j (Σ w_j·N(μ_j, h²)) — for :meth:`project`
     bandwidth: float  #: h (decades), the kernel width
     n_cells: int  #: collapsed-cell count (diagnostic)
     #: The aggregate DNA-background reference (`background_reference.measure_background`) — the ONE-SIDED
     #: log-floor `:meth:`logprior`` applies. ``-inf``/``+inf`` (the default) ⇒ dormant, so an unmeasured
     #: background leaves the prior EXACTLY as before (safe default; the A/B gate + the wire-in are separate).
-    log_rho_bg: float = -np.inf  #: natural-log background rate; `-inf` ⇒ no floor (DNA-free / fully depleted)
+    log_rho_bg: float = (
+        -np.inf
+    )  #: natural-log background rate; `-inf` ⇒ no floor (DNA-free / fully depleted)
     sigma_bg: float = np.inf  #: Poisson softness of the floor (√Var(log ρ_bg)); `+inf` ⇒ no floor
 
     @classmethod
@@ -280,7 +284,9 @@ class DensityNPMLE:
             ln = np.exp(logL - logL.max(axis=1, keepdims=True))
             logL_sm = np.log(np.maximum(ln @ kk, _EPS))
             w_full = _em_weights(logL_sm, np.log(wc)[:, None], em_iters, em_tol)
-            dens_grid = kk @ w_full  # (G,) smooth mixture density (the aggregate cell shaped its low mode)
+            dens_grid = (
+                kk @ w_full
+            )  # (G,) smooth mixture density (the aggregate cell shaped its low mode)
             dens_grid = dens_grid / max(float(dens_grid.sum()), _EPS)
             w = w_full  # the aggregate is a DATA cell, not an extra component ⇒ no column to strip
 
@@ -356,7 +362,9 @@ class DensityNPMLE:
         eff = np.maximum(np.asarray(eff, dtype=np.float64), _EPS)
         mass = np.maximum(np.asarray(mass, dtype=np.float64), _EPS)
         d = np.log(mass) - np.log(eff)  # (n,) belief-free total log-density
-        h = float(self.bandwidth) * np.log(10.0)  # bandwidth in natural-log units (μ_j = log_rho is ln)
+        h = float(self.bandwidth) * np.log(
+            10.0
+        )  # bandwidth in natural-log units (μ_j = log_rho is ln)
         logw = np.log(np.maximum(self.weights, _EPS))  # (G,) — the pre-kernel component weights
         mu_out = np.empty_like(d)
         var_out = np.empty_like(d)

@@ -233,13 +233,25 @@ def test_ambig_stranded_strand_gives_zero_fg_precision():
         & (np.asarray(statics.mass_unspliced, float) > 0.0)
     )
     i_strand, _ = strand_evidence(
-        statics.u_pos, statics.u_neg, np.full(chain.n_nodes, 0.5),
-        kappa=0.9, od_g=0.2, od_r=0.1, n_gdna_obs=230.0, n_rna_obs=85.0, is_region=is_reg, locked=locked,
+        statics.u_pos,
+        statics.u_neg,
+        np.full(chain.n_nodes, 0.5),
+        kappa=0.9,
+        od_g=0.2,
+        od_r=0.1,
+        n_gdna_obs=230.0,
+        n_rna_obs=85.0,
+        is_region=is_reg,
+        locked=locked,
     )
-    assert i_strand[am] > 0.0  # the un-gated single-strand strand term is positive (the phantom the fix removes)
+    assert (
+        i_strand[am] > 0.0
+    )  # the un-gated single-strand strand term is positive (the phantom the fix removes)
     ni, _ = _init(kappa=0.9)
     assert not ni.struct_lock[am]
-    assert ni.tau_lam[am] == 0.0  # ...but the assembled τ_λ gates the strand term to 0 for the AMBIG node
+    assert (
+        ni.tau_lam[am] == 0.0
+    )  # ...but the assembled τ_λ gates the strand term to 0 for the AMBIG node
     assert ni.prec_g[am] == 0.0
 
 

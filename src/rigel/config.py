@@ -237,7 +237,6 @@ class CalibrationConfig:
     #: (``{gdna,rna}_strand_prior_{alpha_beta,weight}``) collapsed to two constants + one
     #: structural zero; see `docs/calibration/strand_overdispersion_design.md`.
 
-
     #: **Sweep grid resolution** ``K`` for the per-node log-density log-odds solve over ``λ = logit(f_g)``
     #: (``simplex_logodds``, driven by ``bp_solver.node_sweep``; single-strand nodes are exact 1-D, AMBIG
     #: nodes marginalize the RNA tilt ``τ``). ``K=60`` matches per-node accuracy at a tractable cost
@@ -259,7 +258,6 @@ class CalibrationConfig:
     #: **Inner tilt-grid resolution** ``K_t`` for AMBIG nodes' RNA tilt ``τ`` (the 2-D ``(λ,τ)`` solve).
     #: ``None`` ⇒ reuse ``sweep_n_grid``.
     sweep_n_tilt: int | None = None
-
 
     #: **NPMLE bandwidth** ``h`` (decades) for the Fixed-Kernel Poisson-lognormal Mixture NPMLE
     #: (``calibration.npmle.DensityNPMLE``) — shared by both its uses (the enrichment fit for σ²_transfer and
@@ -343,7 +341,10 @@ class CalibrationConfig:
                 "CalibrationConfig.gdna_prior_strength must be >= 0 (0 disables the prior term); "
                 f"got {self.gdna_prior_strength}."
             )
-        if self.background_robust_trim_mad is not None and float(self.background_robust_trim_mad) <= 0.0:
+        if (
+            self.background_robust_trim_mad is not None
+            and float(self.background_robust_trim_mad) <= 0.0
+        ):
             raise ValueError(
                 "CalibrationConfig.background_robust_trim_mad must be > 0 (or None); "
                 f"got {self.background_robust_trim_mad}."

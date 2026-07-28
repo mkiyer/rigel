@@ -50,7 +50,9 @@ class BackgroundReference:
     log_rho_bg: float  #: log(Σg/ΣE) over the intergenic pool; −inf when Σg=0 (a DIAGNOSTIC — the aggregate is
     #: still informative there: Σg=0 over a genome-scale ΣE is a *precise near-zero*, resolvable to ~1/ΣE)
     sigma_bg: float  #: √Var(log ρ_bg) ≈ 1/√Σg ; +inf at zero counts
-    n_counts: float  #: Σg — pooled DNA counts (the aggregate Poisson observation's count; works at Σg=0)
+    n_counts: (
+        float  #: Σg — pooled DNA counts (the aggregate Poisson observation's count; works at Σg=0)
+    )
     eff_total: float  #: ΣE — pooled gDNA effective length (the aggregate support; the source of its precision)
     n_regions: int = 0  #: number of pooled regions — the aggregate cell's EM weight (the population it stands for)
     #: log ρ_floor — the DERIVED background-floor location (docs/calibration/archive/gdna_background_floor_derivation.md). The pooled rate
@@ -103,8 +105,12 @@ def measure_background(
     nr = int(pool.sum())
     if se <= _EPS:  # no pooled support at all — genuinely nothing to say
         return BackgroundReference(
-            log_rho_bg=-np.inf, sigma_bg=np.inf, log_rho_floor=-np.inf,
-            n_counts=sg, eff_total=se, n_regions=nr,
+            log_rho_bg=-np.inf,
+            sigma_bg=np.inf,
+            log_rho_floor=-np.inf,
+            n_counts=sg,
+            eff_total=se,
+            n_regions=nr,
         )
     # THE DERIVED FLOOR (docs/calibration/archive/gdna_background_floor_derivation.md). The old ``1/ΣE`` seed pools the background as ONE
     # genome-sized region ⇒ claims a resolution n× finer than any single region delivers (~3 logs too low = the
@@ -129,6 +135,10 @@ def measure_background(
     log_rho_bg = float(np.log(sg) - np.log(se)) if sg > _EPS else -np.inf
     sigma_bg = float(1.0 / np.sqrt(sg)) if sg > _EPS else np.inf
     return BackgroundReference(
-        log_rho_bg=log_rho_bg, sigma_bg=sigma_bg, log_rho_floor=log_rho_floor,
-        n_counts=sg, eff_total=se, n_regions=nr,
+        log_rho_bg=log_rho_bg,
+        sigma_bg=sigma_bg,
+        log_rho_floor=log_rho_floor,
+        n_counts=sg,
+        eff_total=se,
+        n_regions=nr,
     )

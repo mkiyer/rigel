@@ -191,7 +191,9 @@ def test_graft_frame_logvar_is_the_squared_log_step_and_direction_free():
     step. Symmetric in r ↔ 1/r: a depletion mislifts exactly as badly as an equal enrichment."""
     assert float(graft_frame_logvar(np.e)) == pytest.approx(1.0, rel=1e-14)
     assert float(graft_frame_logvar(6.1)) == pytest.approx(np.log(6.1) ** 2, rel=1e-14)
-    assert float(graft_frame_logvar(4.0)) == pytest.approx(float(graft_frame_logvar(0.25)), rel=1e-14)
+    assert float(graft_frame_logvar(4.0)) == pytest.approx(
+        float(graft_frame_logvar(0.25)), rel=1e-14
+    )
 
 
 def test_graft_frame_logvar_guards_a_degenerate_ratio():
@@ -233,14 +235,18 @@ def test_mismatch_deflate_is_inert_without_own_evidence():
     AMBIG / unstranded regime — where cross-node messages are the only information — so the term must not
     touch it, and a CONTRADICTED claim is not damped there either (there is no evidence to contradict it)."""
     p = np.array([25.0, 3.0, 0.0])
-    out = mismatch_deflate(p, np.array([0.0, 9.9, 4.0]), np.array([False, True, True]), np.full(3, np.inf))
+    out = mismatch_deflate(
+        p, np.array([0.0, 9.9, 4.0]), np.array([False, True, True]), np.full(3, np.inf)
+    )
     assert out.tolist() == p.tolist()
 
 
 def test_mismatch_deflate_kills_a_contradicted_claim_where_there_is_evidence():
     """A message asserting a component is ABSENT at a node whose own evidence says otherwise is the b̂² → ∞
     limit ⇒ precision 0 — expressed as a mask so the numerical zero-test ``_EPS`` never sets the answer."""
-    out = mismatch_deflate(np.array([50.0, 50.0]), np.zeros(2), np.array([True, False]), np.array([0.1, 0.1]))
+    out = mismatch_deflate(
+        np.array([50.0, 50.0]), np.zeros(2), np.array([True, False]), np.array([0.1, 0.1])
+    )
     assert out[0] == 0.0 and out[1] == pytest.approx(50.0, rel=1e-12)
 
 
@@ -260,7 +266,9 @@ def test_mismatch_deflate_pin_safety_invariant():
     for scale, expect_wins in ((0.9, True), (1.1, False)):
         gap = scale * np.sqrt(2.0 * v_own)
         # even an ARBITRARILY confident message obeys the threshold
-        out = mismatch_deflate(np.array([1e6]), np.array([gap]), np.zeros(1, bool), np.array([v_own]))
+        out = mismatch_deflate(
+            np.array([1e6]), np.array([gap]), np.zeros(1, bool), np.array([v_own])
+        )
         assert bool(out[0] > p_own) is expect_wins
 
 
@@ -369,10 +377,10 @@ def test_residual_level_ignorance_is_bounded_and_declared():
     Bounded above, the same ignorance degrades to its correct limit: the uniform posterior, ``f_R = ½`` at
     ``k = 3``, wide enough for any real evidence in the fuse to out-weigh it."""
     M, E_r = 1.0e4, 900.0
-    rho, v_log, _ = residual_level(
-        mass=M, n_mass=1.0e6, rho_g=10.0, E_g=1000.0, E_r=E_r, v_g=100.0
-    )
-    assert float(rho) / (M / E_r) == pytest.approx(0.5, rel=5e-3)  # an asymptote, approached from below
+    rho, v_log, _ = residual_level(mass=M, n_mass=1.0e6, rho_g=10.0, E_g=1000.0, E_r=E_r, v_g=100.0)
+    assert float(rho) / (M / E_r) == pytest.approx(
+        0.5, rel=5e-3
+    )  # an asymptote, approached from below
     assert float(v_log) == pytest.approx(float(polygamma(1, 3.0)), rel=5e-3)
 
 
@@ -408,7 +416,9 @@ def test_residual_level_is_monotone_in_the_gdna_claim():
 
 _CR_RHO = np.array([[2.0, 3.0, 1.0], [0.4, 12.0, 0.0], [55.0, 0.02, 0.03]])
 _CR_EFF = np.array([[2100.0, 1900.0, 1900.0], [110.0, 180.0, 180.0], [9000.0, 8800.0, 8800.0]])
-_CR_M = (_CR_RHO * _CR_EFF).sum(axis=1) * np.array([0.7, 1.4, 1.0])  # 0.7x under, 1.4x over, balanced
+_CR_M = (_CR_RHO * _CR_EFF).sum(axis=1) * np.array(
+    [0.7, 1.4, 1.0]
+)  # 0.7x under, 1.4x over, balanced
 
 
 def _cr_total(rho):

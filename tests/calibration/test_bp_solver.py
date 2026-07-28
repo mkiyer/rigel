@@ -1117,7 +1117,9 @@ def test_float32_log_is_monotone_so_the_ambig_cube_may_hoist_it():
         rng = np.random.default_rng(4)
         grid = rng.random((60, 60)).astype(np.float32)  # the (K,K_t) fraction grid
         grid[rng.random(grid.shape) < 0.05] = 0.0  # the tau = +-1 edges: f_s exactly 0
-        floor = (1.0 / (1.0 + np.exp(rng.uniform(0.0, 14.0, 500)))).astype(np.float32)[:, None, None]
+        floor = (1.0 / (1.0 + np.exp(rng.uniform(0.0, 14.0, 500)))).astype(np.float32)[
+            :, None, None
+        ]
         direct = np.log(np.maximum(grid[None, :, :], floor))
         hoisted = np.maximum(np.log(grid)[None, :, :], np.log(floor))
     assert np.array_equal(direct.view(np.int32), hoisted.view(np.int32))

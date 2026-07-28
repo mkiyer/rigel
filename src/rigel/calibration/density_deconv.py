@@ -97,7 +97,12 @@ def fit_gdna_background(g_counts, eff_g, *, log_rho_floor: float) -> GdnaBackgro
             alpha = sum_mu2 / excess  # finite ⇒ over-dispersed; else Poisson (α=∞)
 
     return GdnaBackground(
-        log_mu_bg=log_mu_bg, alpha=float(alpha), sg=sg, n0=n0, n_regions=n_reg, informative=informative
+        log_mu_bg=log_mu_bg,
+        alpha=float(alpha),
+        sg=sg,
+        n0=n0,
+        n_regions=n_reg,
+        informative=informative,
     )
 
 
@@ -189,7 +194,9 @@ def density_factor_precision(lam_logprior, lam_grid):
         return None
     lp = np.asarray(lam_logprior, dtype=np.float64)
     lam = np.asarray(lam_grid, dtype=np.float64)
-    live = np.ptp(lp, axis=1) > _EPS  # a flat factor carries NO information (τ=0), never the grid's own width
+    live = (
+        np.ptp(lp, axis=1) > _EPS
+    )  # a flat factor carries NO information (τ=0), never the grid's own width
     tau = np.zeros(lp.shape[0], dtype=np.float64)
     if not bool(live.any()):
         return tau

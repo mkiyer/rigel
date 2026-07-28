@@ -32,12 +32,21 @@ def test_lambda_message_pulls_f_g_to_sigma_lambda():
     u_pos, u_neg, ap, an, mu, ms = _nodes()
     lam_target = np.array([-2.0, 0.0, 2.0, 1.0])
     dc = _solve_nodes_logodds_all(
-        u_pos, u_neg, ap, an, mu, ms,
-        lam_imp_mode=lam_target, lam_imp_prec=np.full(4, 50.0), **_BASE,
+        u_pos,
+        u_neg,
+        ap,
+        an,
+        mu,
+        ms,
+        lam_imp_mode=lam_target,
+        lam_imp_prec=np.full(4, 50.0),
+        **_BASE,
     )
     for i in range(4):
         assert abs(float(dc.gdna_frac[i]) - float(expit(lam_target[i]))) < 0.02, (
-            i, dc.gdna_frac[i], expit(lam_target[i]),
+            i,
+            dc.gdna_frac[i],
+            expit(lam_target[i]),
         )
     assert not np.any(np.isnan(dc.gdna_frac))
 
@@ -47,8 +56,15 @@ def test_lambda_message_zero_precision_is_a_noop():
     u_pos, u_neg, ap, an, mu, ms = _nodes()
     dc0 = _solve_nodes_logodds_all(u_pos, u_neg, ap, an, mu, ms, **_BASE)
     dc1 = _solve_nodes_logodds_all(
-        u_pos, u_neg, ap, an, mu, ms,
-        lam_imp_mode=np.full(4, 3.0), lam_imp_prec=np.zeros(4), **_BASE,
+        u_pos,
+        u_neg,
+        ap,
+        an,
+        mu,
+        ms,
+        lam_imp_mode=np.full(4, 3.0),
+        lam_imp_prec=np.zeros(4),
+        **_BASE,
     )
     assert np.allclose(dc0.gdna_frac, dc1.gdna_frac)
 
@@ -60,7 +76,12 @@ def test_theta_message_tilts_ambig_node():
     common = dict(lam_imp_mode=lam, lam_imp_prec=np.full(4, 50.0), **_BASE)
     dc_flat = _solve_nodes_logodds_all(u_pos, u_neg, ap, an, mu, ms, **common)
     dc_tilt = _solve_nodes_logodds_all(
-        u_pos, u_neg, ap, an, mu, ms,
+        u_pos,
+        u_neg,
+        ap,
+        an,
+        mu,
+        ms,
         theta_imp_mode=np.array([0.0, 0.0, 0.0, 1.2]),
         theta_imp_prec=np.array([0.0, 0.0, 0.0, 50.0]),
         **common,

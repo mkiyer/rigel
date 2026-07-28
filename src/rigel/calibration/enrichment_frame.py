@@ -360,7 +360,9 @@ def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
             ),
         ),
     )
-    k = np.maximum(f_R * f_R / np.maximum(v_f, _EPS), 1.0)  # the RNA share's effective fragment count
+    k = np.maximum(
+        f_R * f_R / np.maximum(v_f, _EPS), 1.0
+    )  # the RNA share's effective fragment count
     # ψ'(k) — as ``zeta(2, k)``, which is what ``scipy.special.polygamma(1, k)`` reduces to exactly (its
     # ``(−1)^(n+1)`` and ``Γ(n+1)`` prefactors are both 1.0 at n=1) without also evaluating ψ(k) and
     # discarding it. Bitwise-identical; the equality is pinned in `test_enrichment_frame.py`.
@@ -399,7 +401,9 @@ def residual_level_scalar(mass, n_mass, rho_g, E_g, E_r, v_g):
     else:
         beta = phi / sig
         alpha = beta - 1.0 / sig
-        if alpha >= 0.0:  # subtract SAME-SIDE tails — neither branch loses precision to cancellation
+        if (
+            alpha >= 0.0
+        ):  # subtract SAME-SIDE tails — neither branch loses precision to cancellation
             Z = math.exp(log_ndtr(-alpha)) - math.exp(log_ndtr(-beta))
         else:
             Z = math.exp(log_ndtr(beta)) - math.exp(log_ndtr(alpha))
@@ -603,4 +607,3 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
         return per, 0.0
     d2, vv = d[ok] ** 2, v[ok]
     return per, float(max(0.0, float(d2.mean()) - float(vv.mean())) * 0.5)
-

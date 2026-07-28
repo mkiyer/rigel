@@ -542,9 +542,7 @@ def _solve_ambig_logodds(
     var_g = np.maximum(post_lam @ (log_fg_grid * log_fg_grid) - mLg * mLg, 0.0)
     # f_pos/f_neg MEANS + Var(log f_pos/neg) over the FULL 2-D posterior (f32 cube; sums accumulate in f64).
     flat = psi.reshape(psi.shape[0], -1)
-    post2d = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(
-        psi.shape
-    )  # (m,K,Kt) f32
+    post2d = np.exp(flat - _lse(flat, axis=1, keepdims=True)).reshape(psi.shape)  # (m,K,Kt) f32
     fp_grid = fpk[None, :, :]
     fn_grid = fnk[None, :, :]
     f_pos = np.sum(post2d * fp_grid, axis=(1, 2), dtype=np.float64)
@@ -629,10 +627,7 @@ def _solve_nodes_logodds_all(
         fg_ref = np.asarray(fg_ref, np.float64)
         fpos_ref = np.asarray(fpos_ref, np.float64)
         fneg_ref = np.asarray(fneg_ref, np.float64)
-    out = {
-        k: np.zeros(m, dtype=np.float64)
-        for k in ("fg", "fp", "fn", "vg", "vp", "vn")
-    }
+    out = {k: np.zeros(m, dtype=np.float64) for k in ("fg", "fp", "fn", "vg", "vp", "vn")}
     # Skip EMPTY nodes — no per-strand counts AND no unspliced/spliced mass. Both per-class solvers zero
     # every output for an inactive node (gdna/rna_mass = f_g·M = (1−f_g)·M + S = 0 when all are 0), so an
     # empty node's solve is identical to the zero-initialized `out` — skipping is BIT-IDENTICAL. At genome
