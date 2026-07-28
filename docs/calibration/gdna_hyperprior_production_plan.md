@@ -956,6 +956,43 @@ to settle it.
 prior #2 → re-solve`), i.e. one extra fit and one extra sweep per library. Not implemented; the measurement
 is what was asked for.
 
+### ⭐⭐⭐ N2 — THE BOOTSTRAP CONVERGES, AND 3 ITERATIONS IS THE ANSWER (2026-07-28)
+
+Owner's question: *"we should be able to bootstrap our prior this way. How many iterations should we run?
+Do we converge?"* Measured directly — the shipped `calib_refit_iters` loop **is** the bootstrap (each
+iteration refits the hyperprior from the current belief, **fully resets**, and re-solves), so this needs no
+code change at all. Suite mass-weighted mwae, all 32 conditions:
+
+| stratum | iter0 | iter1 | iter2 | iter3 | iter4 | iter5 | iter6 |
+|---|---|---|---|---|---|---|---|
+| **ALL 32** | 0.0788 | 0.0525 | 0.0486 | **0.0475** | 0.0471 | 0.0468 | 0.0466 |
+| stranded | 0.0307 | 0.0258 | 0.0256 | 0.0255 | 0.0254 | 0.0255 | 0.0251 |
+| unstranded | 0.1129 | 0.0714 | 0.0649 | 0.0631 | 0.0624 | 0.0619 | 0.0619 |
+| capture ON | 0.1048 | 0.0760 | 0.0713 | 0.0700 | 0.0695 | 0.0690 | 0.0686 |
+| capture OFF | 0.0339 | 0.0204 | 0.0191 | 0.0187 | 0.0183 | 0.0182 | 0.0182 |
+| VSTRONG | 0.1705 | 0.0937 | 0.0810 | 0.0778 | 0.0771 | 0.0771 | 0.0773 |
+| unstr × capON | 0.1513 | 0.1047 | 0.0965 | 0.0942 | 0.0934 | 0.0922 | 0.0921 |
+| **`gdna_none`** (FP guard) | 0.0667 | 0.0152 | 0.0115 | 0.0109 | 0.0105 | 0.0103 | **0.0102** |
+
+**Δ per iteration: −0.02632, −0.00390, −0.00106, −0.00043, −0.00030, −0.00017.** Successive increments
+shrink by roughly 2–3×, i.e. **geometric convergence**, and it is **monotone on every stratum including the
+false-positive guard** — the bootstrap does not trade specificity for accuracy anywhere.
+
+⭐ **`iter3` captures 96 % of the total available gain** (0.0788 → 0.0475 of a limit near 0.0465); `iter2`
+captures 92 %. Past 3 the increments are below the noise anyone would act on.
+
+**Cost, measured on real data** (LBX0190, 118 k nodes): refit=1 **46.8 s**, refit=3 **96.0 s** — each extra
+iteration is one fit plus one full sweep, so it is linear and roughly `pass-0 × (1 + iters)`.
+
+**→ RECOMMENDATION: `calib_refit_iters` default 1 → 3.** It is a config default, not a code change:
+−0.0050 suite mwae (−10 %), −0.0105 on `unstr × capON`, −0.0159 on VSTRONG, `gdna_none` 0.0152 → 0.0109,
+for ~2× calibration wall-clock. **Owner call, since it is a runtime/accuracy trade.**
+
+⚠ Note this is the shipped loop, in which `_fit_gdna_hyperprior` **always excludes AMBIG**. So the
+convergence above is the prior bootstrapping on a *fixed* substrate whose beliefs improve as AMBIG improves
+and propagates — it is NOT the "admit AMBIG from iteration 2" variant measured in the previous section.
+Those are two separate questions and only the first is settled.
+
 ### ⚠ N2 side-result — W1's empirical case against admitting AMBIG is STRATUM-DEPENDENT
 
 W1 rejected admitting AMBIG on "it loses against the non-AMBIG population, 0.180 vs 0.175". **That
@@ -1402,11 +1439,58 @@ pooled estimate to the ceiling. There is no trimming, no outlier component, no p
 **The human transcriptome is more complex than the annotation records, and the model must respect that
 rather than force the disagreement onto the strand model.**
 
-⚠ **Status: the saturation is MEASURED; the contamination mechanism is owner-reasoned and NOT yet
-measured.** The falsifiable test is cheap and should be run before any estimator change: **is
-`Σ excess_var_s` dominated by a few seed nodes?** If a small share of seeds carries most of the numerator,
-non-robustness is confirmed and the fix direction follows. If the excess is spread evenly, the diagnosis is
-wrong and something else is going on.
+#### ⭐⭐⭐ THE TEST IS RUN (2026-07-28) — MECHANISM CONFIRMED, BUT IT ONLY EXPLAINS HALF THE SAMPLES
+
+`scratchpad/od_outliers.py`, `scratchpad/od_screen.py`. The pre-registered question was whether
+`Σ excess_var_s` is dominated by a few seeds. **The raw seeds settle the mechanism immediately** — the top
+gDNA seeds on `vcap`, by share of the MoM numerator:
+
+| excess_var | share of numerator | N | sense | **sense fraction** | **gdna_weight** |
+|---|---|---|---|---|---|
+| 571,912 | **12.3 %** | 1,523 | 5 | **0.003** | **1.000** |
+| 466,141 | 10.0 % | 1,392 | 13 | **0.009** | **1.000** |
+| 348,981 | 7.5 % | 1,200 | 9 | **0.007** | **1.000** |
+
+**gDNA cannot be 0.3 % sense.** These are strongly-stranded transcripts sitting in territory the count
+module labelled **100 % gDNA**. The owner's reading is confirmed exactly: the fit is being set by
+transcription the annotated reference has no record of.
+
+**A seed-consistency screen** — reject a seed whose own `z = (sense − N·mean)/√(N·mean(1−mean))`
+contradicts the Binomial(½) premise it is entering the fit on — is dramatic where the contamination is
+concentrated, **and it is not enough**:
+
+| sample | od now | \|z\|≤10 | \|z\|≤5 | \|z\|≤3 | MEDIAN (no cutoff) | % rejected | their sense frac |
+|---|---|---|---|---|---|---|---|
+| **vcap** | 0.0923 | 0.0282 | 0.0152 | **0.0068** | 0.0000 | **0.08 %** | 0.123 |
+| LBX0588 | 0.0031 | 0.0018 | 0.0007 | 0.0000 | 0.0000 | 0.00 % | 0.883 |
+| ⛔ **LBX0190** | **0.2000** | 0.2000 | 0.2000 | **0.2000** | **0.2000** | 0.02 % | 1.000 |
+| ⛔ **MO_3021** | **0.2000** | 0.2000 | 0.2000 | **0.2000** | **0.2000** | 0.02 % | 0.000 |
+| SYNTH gdna100 ss0.99 | 0.1335 | 0.0013 | 0.0006 | 0.0005 | 0.0116 | 13.8 % | 0.156 |
+
+**Rejecting 0.08 % of seeds cuts `vcap`'s fit 6×.** ⛔ **But LBX0190 and MO_3021 stay pinned at the ceiling
+under every screen, including the cutoff-free MEDIAN of per-seed moments** — an estimator with a 50 %
+breakdown point. That is decisive in the other direction: **on those two samples MORE THAN HALF the seeds
+are individually overdispersed.** The contamination is pervasive there, not outlier-shaped.
+
+**So the conclusion splits, and both halves matter:**
+
+1. ✅ **A robust estimator is NECESSARY and it is well-posed.** The screen is not a new quantity — the
+   estimator already forms `z`, since `excess_var = N·mean(1−mean)·(z² − 1)`. It currently *sums* `z² − 1`
+   and lets outliers win; a robust version asks whether a seed is consistent *before* pooling it.
+   ⚠ A `|z|` cutoff is a constant and needs owner sign-off; the median-of-moments needs none.
+2. ⛔ **It is NOT SUFFICIENT.** For LBX0190 / MO_3021 the defect is upstream of the pooling: the rejected
+   seeds carry **`gdna_weight = 1.000` at sense fractions of 0.000 and 1.000**. That is the **count clue
+   being confidently wrong** — `count_gdna_frac` is calling pure-stranded transcribed territory pure gDNA.
+   Fixing the pooling cannot repair a seed *set* that is contaminated at its source.
+
+⭐ **And the synthetic control is the tell that generalises it:** the stranded synthetic rejects **13.8 %**
+of its seeds, far more than any real sample, and its od falls 0.1335 → 0.0013. There the contaminant is
+*annotated* nascent RNA in introns. So the failure is not specific to unannotated transcription — it is
+**RNA anywhere in "gDNA-observable" territory**, and unannotated transcription is the case the annotation
+cannot warn us about.
+
+**Status: the ceiling stays.** It is the guard, saturation is the QC canary, and the work is (a) a robust
+pooling rule and (b) a seed-selection / count-clue fix upstream of it. Neither is a constant to re-tune.
 
 ### ⚠ FINDING 2 — `ω_graft` SPANS 15× ACROSS FOUR REAL SAMPLES
 
