@@ -237,6 +237,30 @@ the value recorded in the constants ledger as asserted-not-derived.**
 
 ### P2 — ⭐ shrink toward the prior by INFORMATION, not by seed count (addresses D2)
 
+> ## ⛔⛔ READ FIRST — P2 IS **SHIPPED**, AND ITS SATURATION CLAIM IS **REFUTED** BY §3b R2 BELOW
+>
+> This section is the ORIGINAL DESIGN, and one of its central claims did not survive measurement. It is
+> kept for the record; **do not act on its closing sentence.**
+>
+> * ✅ **P2 SHIPPED** in `c99c399f` — `gdna_strand._null_information` / `_prior_information`, wired into
+>   `_fit_overdispersion`. The units fix is real and it is in the tree. It is a genuine correctness
+>   improvement: it makes the zero-seed fallback and the unit fixtures behave.
+> * ⛔ **But it does NOT release the `od_g` saturation, and it was never going to.** This section's closing
+>   line — *"the change most likely to release the saturation honestly, because saturation on
+>   LBX0190/MO_3021 is a **power failure**, not a dispersion measurement"* — is **wrong**, and §3b R2
+>   retracts it in those words: *"The saturation is **BIAS, not power**… `od_mom = 0.9313` sits **66–600 σ
+>   above the ceiling**. No shrinkage rule reaches that."* Fitted `od_g` is **identical to 4 d.p.** at
+>   `W ∈ {30 … 2658}` **and with the shrinkage deleted entirely**.
+> * ⛔ **`od_g` still saturates on 2/4 real libraries at HEAD** — re-measured 2026-07-28:
+>   **0.200000 / 0.003149 / 0.200000 / 0.092339**. Unchanged by P2, exactly as pre-registered.
+> * ⇒ **The saturation is D1, not D2.** Its cause is the contaminated seed channel, and §5 says the fix is
+>   upstream in the accumulator/index rework. `SESSION_2026_07_28_HANDOFF_18.md` §2 R1.
+>
+> ⚠ **This file is chronologically layered and later sections OVERRIDE earlier ones.** §3 is the original
+> design; **§3b is an 11-agent independent review that refutes three of §3's claims** (P1's `Beta(3,3)`
+> screen, P2's saturation claim, and "more dispersion = weaker"); §3c and §3d are the measured verdicts.
+> A reader who stops at §3 will conclude the gDNA saturation is fixed. **It is not.**
+
 #### What a "pair count" is, and why it is the right currency
 
 **Overdispersion is a statement about CORRELATION BETWEEN FRAGMENTS inside one node** — "if this fragment
@@ -572,7 +596,7 @@ it matters is the zero-seed fallback and real sparse libraries.
 | **Constants cleanup** (4 config fields + 2 literals + wrong currency → K1/K2/structural zero; `W = 909` derived; integer `N`; delete the dead gDNA/RNA mixture) | ✅ **READY.** Pre-registered as no-change on real data, ≤ 0.0011 on toys, verified above |
 | **P2 for the gDNA fit** (pairs as the currency) | ✅ **READY** — it is the same edit as the cleanup |
 | **P2 for the RNA fit** | ⛔ **NOT READY.** `I = pairs` holds only at `μ = ½`; the proposed closed form `I_r = (Σc)²/Σ[N·pq + pq²(2N² − 6N)]` comes from ONE agent and has not been MC-verified. Measured `I_r/pairs` = 0.05–0.14, so using pairs would overstate RNA information 7–20× |
-| **The `n = 1` asymmetry** (contributes `excess ≈ 1` to the numerator, `0` to the denominator) | ⚠ **A real bug, not yet addressed by anyone.** 0.1–9.1 % of `Σexcess`. Small, but it is a correctness defect and belongs in the same edit — needs its gDNA-side magnitude measured first |
+| **The `n = 1` asymmetry** (contributes `excess ≈ 1` to the numerator, `0` to the denominator) | ✅ **RESOLVED 2026-07-28 — it is STRUCTURALLY INERT on the gDNA side; no edit needed.** The gDNA-side magnitude this row asked for is **exactly zero**, algebraically: at `n = 1`, `excess = (sense − μ)² − μ(1−μ)`, and at `μ = ½` that is `(±½)² − ¼ ≡ 0` for **both** `sense = 0` and `sense = 1`. gDNA's `node_mean` **is** identically ½ (`gdna_weight ≡ 1.0`, so `½·w + κ(1−w) ≡ ½`), so every singleton seed contributes `0.000000` to `Σexcess`. The 0.1–9.1 % figure was measured on the **RNA** fit, where `μ = κ ≠ ½` and a `sense = 1` singleton contributes `+0.993` (κ = 0.0023) — and that fit no longer uses those seeds (SJ strand table, row below). **Both halves are clear; close this item.** |
 | **The ceiling `a = 2 → 3`** | ⛔ **NOT SETTLED.** The ONLY change here that moves real data (1.4× sharpening on every node). Needs its own pre-registered A/B with stranded conditions as falsifier. **Must not be bundled** |
 | **The RNA saturation** | ✅ **SOLVED 2026-07-28 — `sj_strand_table_design.md`, implemented and gated.** The population split §3 said to diagnose first was the whole cause: `od_r` is now fitted from the **per-junction SJ strand table**, the same strand-qualified population κ is the marginal of. Real cfRNA `od_r` = **0.00858 / 0.01368 / 0.00736 / 0.01341**, all four inside the deep-junction band and off the ceiling — and the **raw** MoM went 10.7–79.9 → 0.0074–0.0137, admissible with no clipping. R4 is respected: the mean was NOT refitted. ⚠ The ceiling is consequently no longer load-bearing for `od_r`, which un-blocks the owner's question about dropping it — a separate, still-open decision |
 | **Gate 0 injection harness** | ⛔ **NOT BUILT.** The synthetic has `od = 0` by construction, so it validates only one side. The pooled MoM recovers a true non-zero `od` but manufactures dispersion at zero |

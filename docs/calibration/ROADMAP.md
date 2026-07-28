@@ -24,12 +24,20 @@
 > 2. ⛔ **The gDNA REFRAME at transcript termini** (`gdna_reframe_terminus.md`) — the reframe is **96 %** of
 >    a +1.564-decade error; 33 % of edges carry 66–68 % of the mass; worth **−0.0349** on its own stratum.
 >    **This is P1g**, subsumed by the accumulator redesign.
-> 3. **N2's iterative two-fit prior** — measured to win on every axis (fabrication 14.5× → 6.7×).
->    **An owner decision, not a task.**
-> 4. ⚠ **`z2` has a UNITS MISMATCH** — `var_gdna` is a *log-space* variance compared against a *linear*
->    squared error, so **every `z2` number in this file and the handoffs is on a mixed scale**. The
->    production weight is consistent; only the diagnostic is broken. Cheap to fix, and it is the metric the
->    pass-0 work list is ordered by.
+> 3. **N2's iterative two-fit prior.** ⚠ **The "wins on every axis" claim does NOT survive contact with
+>    HEAD.** Its `fabrication 14.5× → 6.7×` is scored against the **retired refit=1 baseline**. HEAD runs
+>    refit=3, so its own baseline is the plan's "#2 re-solved, AMBIG out" row: admitting AMBIG then wins
+>    recovery (0.562 → 0.757) and EMD (0.2945 → 0.2544) but **LOSES 4.7× → 6.7× on the zero-gDNA fabrication
+>    guard**. The bootstrap alone already delivered 14.5× → 4.7×. Implemented behind
+>    `calib_admit_ambig_final` (default **False**); see HANDOFF_18 §2 R3 for the measured verdict.
+> 4. ✅ **`z2` UNITS MISMATCH — FIXED 2026-07-28, and it INVERTED the work list.** `var_gdna` is
+>    `Var(log f_g)` (confirmed at `simplex_logodds:394-396`, not merely inferred from the ¼ bound), compared
+>    against a *linear* squared error. **Every `z2` number in this file and in HANDOFF_1..18 is on a mixed
+>    scale.** Production was re-verified consistent on both consumers; the bug was the diagnostic plus two
+>    wrong-units docstrings. Corrected, the suite total is **0.046 → 1.007** (pass-0 is honestly calibrated)
+>    and the per-class ranking **exactly reverses**: the classes holding 88 % of the error mass are honest
+>    (exon single 0.92, exon AMBIG 1.14), while the only over-confident classes are the **introns**
+>    (2.15 / 2.87) that §3 calls solved. Re-read any z2-ordered work list. HANDOFF_18 §2 R4.
 >
 > ⚠ **Validation gaps:** `gdna_benchmark_5mb` has never been run for any of this work, and the Gate-0
 > injection harness does not exist (the synthetic suite has `od = 0` by construction, so it validates only
