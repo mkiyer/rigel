@@ -73,8 +73,10 @@ if args.arm:
         inp = _scan_and_truth(SUITE, cond, index, cfg, Path("/tmp/rigel_selfsolve"), SUITE / "_selfsolve_cache")
         dbg: dict = {}
         _fac = os.environ.get('P0_FACTORY')
+        _str = os.environ.get('P0_PRIOR_STRENGTH')  # gDNA-hyperprior temperature (W4 sweep)
         cc = dataclasses.replace(cfg.calibration, calib_refit_iters=int(os.environ.get('P0_REFIT', '0')),  # 0=PASS-0
-                                 **({} if _fac is None else {'intron_factory': _fac != '0'}))
+                                 **({} if _fac is None else {'intron_factory': _fac != '0'}),
+                                 **({} if _str is None else {'gdna_prior_strength': float(_str)}))
         calmod.calibrate(
             inp["payload"], ra, inp["strand_model"],
             np.asarray(inp["gdna_fl_pmf"]), np.asarray(inp["rna_fl_pmf"]), cc, _debug=dbg,

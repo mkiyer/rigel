@@ -1,6 +1,6 @@
 """The DNA-prior PROJECTION (the endpoint): observed DNA log10-density -> anchor mu* onto the fitted landscape.
 
-THE ELEGANT-CORE RESULT (this session): clean unified landscape (gdna_landscape_recipe.py) + ASYMMETRIC-UPWARD
+THE ELEGANT-CORE RESULT (2026-07-21): clean unified landscape (`gdna_explore_lib.recipe`) + ASYMMETRIC-UPWARD
 projection. Pass-0 systematically UNDER-calls enriched gDNA, so a node's observed density is a LOWER bracket:
 trust landscape mass ABOVE it (wide hup), refuse mass BELOW it (tight hdn->0), bounded to cap_up decades. This
 recovers the under-called enriched nodes (enr_recovery -0.05 -> +0.25, err improves 0.226 -> ~0.20 cross-suite),
@@ -64,10 +64,6 @@ def score_enriched(suite, recipe, proj=project_asym):
 
 
 if __name__ == "__main__":
-    uni = {}
-    with open("/Users/mkiyer/proj/rigel/scripts/debug/gdna_landscape_recipe.py") as _f:
-        exec(_f.read(), uni)
-    recipe = uni["recipe"]
     for su in ("ambig", "quick"):
-        r, e, f = score_enriched(su, recipe)
+        r, e, f = score_enriched(su, L.recipe)
         print(f"{su:6s}  enr_recovery={r:+.3f}  enr_abs_err={e:.3f}  fabrication={f:+.3f}")

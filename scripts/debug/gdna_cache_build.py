@@ -16,9 +16,10 @@ sys.path.insert(0, "/Users/mkiyer/proj/rigel/scripts/debug")
 from selfsolve_diag import _scan_and_truth  # noqa: E402
 from flagship_interrogate import _oracle_per_node  # noqa: E402
 from rigel.calibration import calibrate  # noqa: E402
+from rigel.calibration.calibrate import _fit_gdna_hyperprior  # noqa: E402
 from rigel.calibration.bp_solver import REGION  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
-from rigel.calibration.signature import coarse_type_array  # noqa: E402
+from rigel.calibration.signature import RegionType, coarse_type_array  # noqa: E402
 from rigel.config import PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 
@@ -58,6 +59,44 @@ def _group(cond: str) -> tuple[str, str, str, str]:
     return ({"on": "ON", "off": "OFF", "verystrong": "VSTRONG"}.get(cap, cap.upper()), dna, ss,
             "none" if nrna == "none" else "nrna")
 
+
+_GRID = np.linspace(-5.0, 2.5, 260)          # log10 rho_g — must match gdna_explore_lib.GRID
+_LN10 = np.log(10.0)
+
+
+def _production_prior(dbg, chain, mass_global, eff_global):
+    """Run the PRODUCTION hyperprior fit on the pass-0 belief — exactly what `calibrate` does at the top of
+    its Phase-2 refit loop — and render it on the shared log10 grid so it can be plotted against the oracle.
+
+    Returns (density_on_GRID, n_train, selected_node_mask) or (None, 0, mask) if the fit declines.
+
+    ⚠ Updated 2026-07-27 for **W4**: the production hyperprior is now `GdnaLandscape` and
+    `_fit_gdna_hyperprior` is substrate selection only — its signature lost `background`/`bandwidth`
+    /`additive` (the last was deleted from the config) and gained the `strength` temperature. The substrate
+    predicate below mirrors the shipped one: REGION nodes, AMBIG excluded, boundaries excluded, plus the
+    zero-count structural anchor on non-exon regions."""
+    prior = _fit_gdna_hyperprior(
+        chain, dbg["belief"], dbg["statics"], ra, mass_global, eff_global,
+        strength=cfg.calibration.gdna_prior_strength,
+    )
+    # reproduce the substrate mask the fit selected, for the plots (same predicate, kept in sync by eye)
+    isr = np.asarray(chain.kind) == REGION
+    fp = np.asarray(dbg["statics"].free_pos, bool)
+    fn = np.asarray(dbg["statics"].free_neg, bool)
+    rtype = coarse_type_array(np.asarray(ra.signature))
+    ridx = np.clip(np.asarray(chain.ref_idx, dtype=np.int64), 0, rtype.shape[0] - 1)
+    expressed = isr & (eff_global > 1.0e-9) & (mass_global > 1.0e-12)
+    anchor = isr & (eff_global > 1.0e-9) & (mass_global <= 1.0e-12) & (rtype[ridx] != RegionType.EXON)
+    sel = (expressed & ((fp ^ fn) | (~fp & ~fn))) | anchor
+    if prior is None:
+        return None, 0, sel
+    # the landscape carries logP on its OWN natural-log grid; interpolate onto the shared log10 grid.
+    d = np.exp(np.interp(_GRID * _LN10, prior.log_rho, prior.logP,
+                         left=prior.logP[0], right=prior.logP[-1]))
+    tot = float(d.sum())
+    return (d / tot if tot > 0 else None), int(prior.n_train), sel
+
+
 scen = []
 for cond in conds:
     inp = _scan_and_truth(suite, cond, index, cfg, work, cache)
@@ -72,6 +111,9 @@ for cond in conds:
     idx = np.asarray(chain.ref_idx, np.int64)
     ntype = np.where(isr, rtype_all[np.clip(idx, 0, len(rtype_all) - 1)], 3)  # 0/1/2 region-type, 3 boundary
     f0 = np.asarray(dbg["belief"].f_g, float)
+    mg = np.asarray(cap["mass_global"], np.float64)
+    eg = np.asarray(cap["eff_global"], np.float64)
+    prod_P, prod_cells, prod_sel = _production_prior(dbg, chain, mg, eg)
     scen.append(dict(
         cond=cond,
         group=_group(cond),
@@ -79,15 +121,21 @@ for cond in conds:
         ntype=ntype.astype(np.int8),
         fp=np.asarray(cap["free_pos"], bool),
         fn=np.asarray(cap["free_neg"], bool),
-        mass=np.asarray(cap["mass_global"], np.float64),
-        eff=np.asarray(cap["eff_global"], np.float64),
+        mass=mg,
+        eff=eg,
         f0=f0,
-        g_hat=(f0 * np.asarray(cap["mass_global"], np.float64)),
+        g_hat=(f0 * mg),
         var=np.asarray(dbg["belief"].var_gdna, np.float64),
         G=(Gp + Gn).astype(np.float64),
         R=(Rp + Rn).astype(np.float64),
+        # the PRODUCTION hyperprior fit (DensityNPMLE), rendered on the shared log10 grid + its substrate
+        prod_P=prod_P,
+        prod_cells=prod_cells,
+        prod_sel=prod_sel,
     ))
-    print(f"  cached {cond}: {isr.sum()} region + {(~isr).sum()} boundary nodes")
+    print(f"  cached {cond}: {isr.sum()} region + {(~isr).sum()} boundary nodes; "
+          f"production prior {'OK' if prod_P is not None else 'DECLINED'} "
+          f"({prod_cells} cells, {int(prod_sel.sum())} training nodes)")
 
 OUT.write_bytes(pickle.dumps(scen))
 print(f"\nwrote {len(scen)} scenarios -> {OUT}  ({OUT.stat().st_size / 1e6:.1f} MB)")

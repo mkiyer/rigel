@@ -214,3 +214,10 @@ src/rigel/.DS_Store
 .DS_Store
 .DS_Store
 Log.out
+
+# calibration exploration caches / run outputs (durable on disk, never in git)
+scratchpad/*.pkl
+scratchpad/*.npz
+scratchpad/_*.json
+scratchpad/_*.txt
+scratchpad/_*.err

@@ -1,0 +1,52 @@
+--- /dev/fd/11	2026-07-26 15:48:44
++++ /tmp/ho_snap/rigel/calibration/bp_solver.py	2026-07-26 15:40:01
+@@ -451,6 +451,34 @@
+         mp_own = np.zeros_like(np.asarray(pp_own, np.float64))
+         mn_own = np.zeros_like(np.asarray(pn_own, np.float64))
+ 
++        # ── HOLDOUT PROBE — DIAGNOSTIC, DEFAULT OFF (`RIGEL_HOLDOUT`) ───────────────────────────────────
++        # "Hold out the nodes the gDNA hyperprior never trains on." The fit substrate is REGION × (single |
++        # gonly) = REGION × ¬AMBIG, so its complement (`excl`) is every AMBIG region + every boundary.
++        # A held-out node still RELAYS — the chain must stay connected — because transport needs only its
++        # densities (`og/op/on`), its frame (`rho_tot`, `logvar_tot`) and its observed mass `M`, none of
++        # which are touched here. What is withheld is its OWN EVIDENCE: every own precision goes to 0, so
++        # `_fuse(og[i], 0, tg, tpg)` degenerates to pure pass-through and `own_composition_logvar` returns
++        # v_own = +inf (the node has no opinion for the DL term to test a message against).
++        # ⚠ The graft's spliced junction COUNT (`SP`/`SN`) is deliberately KEPT: it is a direct measurement
++        # at the seam, not a belief, and withholding it would delete the RNA channel rather than test
++        # contamination of it. Unset ⇒ nothing below runs and the path is bit-identical.
++        _ho = os.environ.get("RIGEL_HOLDOUT")
++        if _ho:
++            _hsets = {
++                "amb": is_reg_a & is_amb,        # AMBIG regions only (the owner's "poison" population)
++                "bnd": is_bnd_a,                 # every boundary
++                "excl": ~(is_reg_a & ~is_amb),   # the WHOLE excluded half = the fit substrate's complement
++                "ambany": is_amb,                # AMBIG regions + AMBIG boundaries
++            }
++            if _ho not in _hsets:
++                raise ValueError(f"RIGEL_HOLDOUT must be one of {sorted(_hsets)}; got {_ho!r}")
++            _hset = _hsets[_ho]
++            pg_own = np.where(_hset, 0.0, pg_own)
++            pp_own = np.where(_hset, 0.0, pp_own)
++            pn_own = np.where(_hset, 0.0, pn_own)
++            tau_own = np.where(_hset, 0.0, tau_own)
++            mg_own = np.where(_hset, 0.0, mg_own)
++
+         # ── the OWN-belief composition variances: the DL estimator's "second study" ─────────────────────────
+         # Reused from `node_init` so ONE law defines them (the τ_λ FOUNDATION Jacobians). Three states, and the
+         # DL term's three regimes fall out of them with no gate and no constant:
+@@ -1282,6 +1310,14 @@
+     # (skip unidentified nodes → keep the f_g=1 init, defer to the prior) was DERIVED, IMPLEMENTED, and
+     # EMPIRICALLY REFUTED (solve_gate_design.md): it regresses both standalone (refit=0 +0.010) and with the
+     # hyperprior (refit=1 +0.025) — the prior resolves an imperfectly-SOLVED node better than a deferred f_g=1.
++    # DIAGNOSTIC, DEFAULT OFF (`RIGEL_HOLDOUT_WB`): the WRITE-BACK half of the holdout probe — the excluded
++    # half keeps its init default instead of its solved belief. Strictly WEAKER than `RIGEL_HOLDOUT`: within
++    # a sweep the messages are built from `node_init`'s self-solve and the 2nd ρ-iteration reframes off
++    # `dc_fin` directly, so a suppressed write-back reaches NO other node.
++    if os.environ.get("RIGEL_HOLDOUT_WB"):
++        _amb_wb = np.asarray(fp, bool) & np.asarray(fn, bool)
++        _isr_wb = np.asarray(chain.kind) == REGION
++        solvable = solvable & (_isr_wb & ~_amb_wb)
+     f_g = np.where(solvable, np.clip(mg_, 0.0, 1.0), f_g)
+     f_pos = np.where(solvable, np.clip(mp_, 0.0, 1.0), f_pos)
+     f_neg = np.where(solvable, np.clip(mn_, 0.0, 1.0), f_neg)
