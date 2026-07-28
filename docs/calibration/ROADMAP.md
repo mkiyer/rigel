@@ -1,6 +1,42 @@
 # Calibration ROADMAP — status, architecture, and the path to production
 
-**This is the single entry point for calibration work. Read it first.** Last updated: 2026-07-26.
+**This is the single entry point for calibration work. Read it first.** Last updated: 2026-07-28.
+
+> # ⭐⭐⭐⭐⭐ CURRENT STATE (2026-07-28) — READ `SESSION_2026_07_28_HANDOFF_18.md` FIRST
+>
+> **Branch `calib-ambig-init-wip`, 19 commits, nothing merged. `src/` is fully COMMITTED and green.**
+> Suite mwae **refit=0 `0.079005` · refit=3 `0.046675`**; **1213 tests pass**, ruff clean, goldens current.
+> ⚠ Re-record every A/B baseline from the current tree in the same session — all stored numbers are stale.
+>
+> **Four things landed:** the **W4 `GdnaLandscape`** hyperprior + additive ψ arm + the **`_pin_v` BP fix**
+> (`3fd8fc59`); the **prior BOOTSTRAP** — `calib_refit_iters` 1 → **3**, geometric convergence, monotone on
+> every stratum including the FP guard, now `--calib-refit-iters` (`daa32a13`); the strand-overdispersion
+> **constants cleanup** (4 config fields + 2 literals → 2 asserted constants, the prior weight DERIVED) with
+> the **information-currency** shrinkage (`c99c399f`); and the **per-junction SJ strand table** (`24b09cb9`),
+> which put κ and `od_r` on one population — `od_r` went from a clipped 0.2 on 4/4 real libraries to an
+> honest **0.0074–0.0137**, inside a band measured independently beforehand.
+>
+> **THE FOUR THINGS THAT REMAIN** (HANDOFF_18 §2 ranks them):
+> 1. ⛔ **`od_g` still saturates on 2/4 real libraries** — the gDNA seed channel is contaminated because
+>    `count_gdna_frac` re-encodes the annotation rather than measuring gDNA-ness. It is **bias, not power**
+>    (`od_mom = 0.93` sits 66–600 σ above the ceiling), so no robust estimator reaches it. **Blocked
+>    upstream; the ceiling must stay as guard + QC canary until it lands.**
+> 2. ⛔ **The gDNA REFRAME at transcript termini** (`gdna_reframe_terminus.md`) — the reframe is **96 %** of
+>    a +1.564-decade error; 33 % of edges carry 66–68 % of the mass; worth **−0.0349** on its own stratum.
+>    **This is P1g**, subsumed by the accumulator redesign.
+> 3. **N2's iterative two-fit prior** — measured to win on every axis (fabrication 14.5× → 6.7×).
+>    **An owner decision, not a task.**
+> 4. ⚠ **`z2` has a UNITS MISMATCH** — `var_gdna` is a *log-space* variance compared against a *linear*
+>    squared error, so **every `z2` number in this file and the handoffs is on a mixed scale**. The
+>    production weight is consistent; only the diagnostic is broken. Cheap to fix, and it is the metric the
+>    pass-0 work list is ordered by.
+>
+> ⚠ **Validation gaps:** `gdna_benchmark_5mb` has never been run for any of this work, and the Gate-0
+> injection harness does not exist (the synthetic suite has `od = 0` by construction, so it validates only
+> one side of a two-sided question).
+>
+> **NOT production-ready** — but the branch is WIP-complete, green and documented, and every remaining item
+> is either blocked upstream or an explicit decision.
 
 > **⭐ ORDER OF WORK (owner, 2026-07-25): the pass-0 SOLVER must be CORRECT before the gDNA hyperprior fit.**
 > The **single-strand × capture study is DONE** — see `SESSION_2026_07_25_HANDOFF_8.md`.
