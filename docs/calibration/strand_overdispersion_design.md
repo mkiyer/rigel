@@ -103,9 +103,72 @@ What survives, from `od_shape.py`: **median z = 0.000 on every real sample**, an
 
 ## 3. THE DESIGN
 
-Three changes, each addressing one defect, none introducing a tuned constant except where flagged.
+Three changes, each addressing one defect. ⚠ **P1 was REFUTED by the owner and by measurement after this
+section was first written — read the block immediately below before reading P1 itself.** P2 stands alone
+and is the change that needs no assumption.
 
-### P1 — screen each seed against its OWN premise (addresses D1)
+### ⛔⛔ P1 AS FIRST DRAFTED IS REFUTED (owner objection, 2026-07-28) — READ THIS BEFORE §3.1
+
+The owner's objection: *"we need to be rather generous, or else we will just filter out our overdispersion.
+If we have 10 fragments, 9 sense and 1 antisense, the mean is 90 %. This seems to boil down to a magic
+number. What level do we reject at?"* **That is correct, and it is correct more deeply than stated.**
+
+Testing a seed against **Binomial(½)** is circular: overdispersion *is* seeds landing away from ½, so the
+screen removes the signal. The obvious repair is to test against the model's own **ceiling**, `Beta(2,2)`
+(`od = 0.2`, "the most overdispersion allowed") — a seed inconsistent with the *ceiling* cannot be gDNA
+under any admissible dispersion, and that would be an existing constant rather than a new one.
+
+**Measured: the ceiling rejects NOTHING.** Under intraclass correlation `od`, a seed of `n` fragments
+carries only `n_eff = n/[1 + (n−1)·od]` independent observations:
+
+| n | od = 0.2 | 0.05 | 0.02 | 0.01 | 0 |
+|---|---|---|---|---|---|
+| 10 | 3.6 | 6.9 | 8.5 | 9.2 | 10 |
+| 100 | 4.8 | 16.8 | 33.6 | 50.3 | 100 |
+| **1,523** | **5.0** | 19.8 | 48.4 | 93.9 | 1,523 |
+
+**At the ceiling, a 1,523-fragment seed is worth FIVE coin flips.** Five flips landing 5–0 is ordinary, so
+even `vcap`'s worst seed (N = 1,523, sense = 5) has `p = 1.1e-4` against `BetaBinom(n, 2, 2)` and survives
+Bonferroni over 160 k seeds. And the owner's 9/10 example has `p = 0.22` — comfortably kept, as it must be.
+
+**And the level is not removable, only relocatable.** At what assumed maximum dispersion does that vcap
+seed become rejectable (Bonferroni, `p < 6.2e-6`)?
+
+| assumed max od | 0.200 | **0.100** | 0.050 | 0.020 | 0.010 |
+|---|---|---|---|---|---|
+| p-value | 1.1e-4 | **5.8e-9** | 6.9e-17 | 1.9e-12 | 1.7e-12 |
+| verdict | keep | **REJECT** | REJECT | REJECT | REJECT |
+
+> ⭐ **The rejection level is EXACTLY equivalent to asserting a maximum gDNA dispersion.** There is no
+> screen without that assertion. The magic number is not eliminated by any choice of test statistic — it is
+> the bound itself, wearing a different hat.
+
+**The identifiability statement, which is the real result:** a Beta-Binomial with mean ½ and free
+overdispersion can explain **any** single seed's split. **Contamination and overdispersion are not
+separable at the level of one seed.** They differ only in the *population* shape — `Beta(a,a)` vanishes at
+`p = 0` and `p = 1`, while transcripts pile up exactly there — which is separable in principle by a mixture
+fit, but not on libraries whose **median seed carries 1–2 fragments**.
+
+**Consequences for the design:**
+
+1. ⭐ **P2 is the whole fix that requires no assumption**, and it should land alone first. Where the seeds
+   carry no information it sends the estimate to the prior, which is the correct answer to "this is not
+   identifiable".
+2. **A screen is still worth having for the information-RICH, contaminated case** — `vcap` has 101 M pairs,
+   so P2 will not shrink it, and its pooled fit (0.0923) is demonstrably driven by transcripts. But it can
+   only be run **after** the owner asserts a bound on gDNA dispersion.
+3. ⭐ **The natural bound already exists and is not new: the PRIOR, `Beta(14,14)` ⇒ `od₀ = 0.0345`** — the
+   model's own a-priori statement of what gDNA strand dispersion should be. At `od = 0.05` the vcap seed is
+   rejected at `p = 7e-17`. Using the prior as the screening null therefore adds **no constant**.
+   ⚠ **But be honest about what that buys:** a screen against the prior can only ever *confirm* the prior.
+   If the truth were `od = 0.1`, the seeds carrying that evidence would be the ones rejected. **This is a
+   trade the owner must make explicitly, not a derivation.**
+
+**Recommendation: land P2 alone. Treat any screen as a separate, owner-gated decision that begins with
+"how dispersed can gDNA's strand split actually be?" — a biological question, answered once, and then used
+for both the ceiling and the null.**
+
+### P1 (superseded — kept for the record) — screen each seed against its OWN premise (addresses D1)
 
 A seed entering a **mean-½** fit asserts its gDNA fragments are Binomial(n_c, ½). Test that assertion with
 the statistic the estimator already forms:
@@ -134,6 +197,32 @@ cutoff-free but degenerates on small seeds (see the retraction table). **Recomme
 the value recorded in the constants ledger as asserted-not-derived.**
 
 ### P2 — ⭐ shrink toward the prior by INFORMATION, not by seed count (addresses D2)
+
+#### What a "pair count" is, and why it is the right currency
+
+**Overdispersion is a statement about CORRELATION BETWEEN FRAGMENTS inside one node** — "if this fragment
+is sense, is the next one from the same node more likely to be sense too?" To see a correlation you need
+**two fragments to compare**. One fragment tells you nothing: it has nothing to be correlated *with*.
+
+So the unit of evidence about dispersion is a **PAIR of fragments in the same seed** — not a fragment, and
+certainly not a seed:
+
+| seed size `n` | pairs `n(n−1)/2` | what it can tell you |
+|---|---|---|
+| 1 | **0** | nothing at all |
+| 2 | 1 | one comparison |
+| 10 | 45 | |
+| 1,523 | 1,158,903 | |
+
+Note the estimator's own denominator is `scale_s = n_c(n_c−1)·¼` — **exactly twice the pair count times ¼**.
+**The estimator already weights by pairs internally.** The bug is only that the *prior shrinkage* switched
+currency to seed count on the way out.
+
+The analogy: estimating a variance from 160,000 samples **of size 1** gives you nothing, no matter how many
+samples you have. Counting the samples says "160,000 observations, the prior is irrelevant". Counting the
+pairs says "zero information, keep the prior". The second is right.
+
+#### The change
 
 Replace `n_seed_nodes` in the shrinkage with the **effective number of dispersion-informative pairs**,
 `Σ_s n_c(n_c − 1)/2` (equivalently: make `prior_weight` a weight in the same currency as `Σ scale`). Then:
