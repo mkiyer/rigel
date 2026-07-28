@@ -163,6 +163,16 @@ def _fit_gdna_hyperprior(
     * **geometry → boundaries are EXCLUDED** (owner, 2026-07-27). They cross rather than contain, are ~as
       numerous as regions, and only 5.1 % of them are truly enriched against the regions' 12.1 %; their
       two-flank mixture lands between the two true modes and supplies 74 % of all the mass in the valley.
+
+    ⛔ **Admitting AMBIG into the FINAL fit was implemented, measured and REFUTED (2026-07-28) — do not
+    re-propose it without new evidence.** The non-circular form (``pass-0 → fit #1 (out) → re-solve → … →
+    final fit (IN) → FINAL solve``, so the admitting fit trains on AMBIG estimates produced by a prior that
+    never saw AMBIG) was A/B'd over four paired arms on all 32 conditions. It is **worse on 25/32** at the
+    shipped depth: ALL-32 mwae ``0.046675 → 0.048393``, VSTRONG ``+0.005568``, and the zero-gDNA
+    false-positive guard regresses ``0.010766 → 0.011065``. ``n_train`` grew 1179 → 1395 (+18.3 %), so it was
+    active, not inert. The production plan's "wins on every axis" was scored against the **retired refit=1
+    baseline**; at equal depth its own table already showed fabrication regressing 4.7× → 6.7×.
+    `SESSION_2026_07_28_HANDOFF_18.md` §2 R3.
     """
     isr = np.asarray(chain.kind) == REGION
     fp = np.asarray(statics.free_pos, dtype=bool)

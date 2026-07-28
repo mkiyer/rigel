@@ -40,16 +40,20 @@ class NodeDeconv:
     # by the simplex sweep for the per-strand RNA imputation (the bipartite R↔B↔R chain).
     rna_pos_frac: "np.ndarray | None" = None  # float64[K] — f_pos
     rna_neg_frac: "np.ndarray | None" = None  # float64[K] — f_neg
-    # per-component posterior VARIANCES of the fractions (moment-matched from the lattice). The precision
-    # state for the honest message send (`docs/calibration/archive/precision_state_design.md` §1: Var_own = (M/E)²·Var(f_c)); set by
-    # the per-node solve, consumed when a node emits a message. None on the chain region/boundary projections
-    # (precision is a chain-node property, not needed by the downstream EM prior).
+    # per-component posterior variances in LOG-FRACTION space — `Var(log f_c)`, NOT `Var(f_c)`. They are
+    # grid moments of `log f_c` over the λ lattice (`simplex_logodds._solve_nodes_logodds`), because the
+    # message currency is a log-density and the send precision `1/(Var(log f_c) + 1/n + σ²_transfer)` is
+    # log-space throughout. ⚠ They are therefore NOT bounded by ¼ and routinely exceed it — a consumer that
+    # needs the LINEAR `Var(f_c)` must convert (delta method: `Var(f_c) ≈ f_c²·Var(log f_c)`, as
+    # `bp_solver.node_sweep` does when it builds `_var_fg` for `composition_logvar`). Set by the per-node
+    # solve, consumed when a node emits a message. None on the chain region/boundary projections (precision
+    # is a chain-node property, not needed by the downstream EM prior).
     # the PROJECTION's consumed output (calibrate/derive read ONLY these); None on the per-node solve.
     gdna_mass: "np.ndarray | None" = None  # float64[K]
     rna_mass: "np.ndarray | None" = None  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
-    gdna_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_g)
-    rna_pos_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_pos)
-    rna_neg_frac_var: "np.ndarray | None" = None  # float64[K] — Var(f_neg)
+    gdna_frac_var: "np.ndarray | None" = None  # float64[K] — Var(log f_g)
+    rna_pos_frac_var: "np.ndarray | None" = None  # float64[K] — Var(log f_pos)
+    rna_neg_frac_var: "np.ndarray | None" = None  # float64[K] — Var(log f_neg)
 
 
 @dataclass(frozen=True, slots=True)

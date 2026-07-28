@@ -178,7 +178,9 @@ def build_node_geometry(
     exon_neg_r = (sig_r & BIT_EXON_NEG) != 0
 
     def _spliced_faces(strand_val, exon_l, exon_r, vl, vr):
-        on = js == strand_val  # the junction is on this strand → its SAME-STRAND exon flank carries the mature
+        on = (
+            js == strand_val
+        )  # the junction is on this strand → its SAME-STRAND exon flank carries the mature
         return np.where(on & exon_l, vl, 0.0), np.where(on & exon_r, vr, 0.0)
 
     b_spl_pos_l, b_spl_pos_r = _spliced_faces(TS_POS, exon_pos_l, exon_pos_r, bspl_l, bspl_r)
@@ -240,7 +242,9 @@ def build_node_geometry(
         okb = ok & (fb >= 0)
         fbc = np.clip(fb, 0, B - 1)
         contig = np.where(js == TS_POS, _mact_p[fbc], np.where(js == TS_NEG, _mact_n[fbc], False))
-        splices_on = (js != 0) & (js[fbc] == js)  # the far boundary is a junction on the SAME strand
+        splices_on = (js != 0) & (
+            js[fbc] == js
+        )  # the far boundary is a junction on the SAME strand
         return okb & (contig | splices_on)
 
     def _eff_spl_face(flank_reg, far_bnd_of_reg):
@@ -249,7 +253,9 @@ def build_node_geometry(
         cont = _continues(flank_reg, far_bnd_of_reg)
         return np.where(ok, np.where(cont, side_eff_r[fr], side_eff_spl[fr]), 0.0)
 
-    b_eff_spl_l = _eff_spl_face(blr, lb_of_reg)  # left face: its flank's FAR boundary is that region's left
+    b_eff_spl_l = _eff_spl_face(
+        blr, lb_of_reg
+    )  # left face: its flank's FAR boundary is that region's left
     b_eff_spl_r = _eff_spl_face(brr, rb_of_reg)
     # counts: the SAME gate, so `spliced_n_*` is nonzero exactly where `spliced_*` is
     b_spn_pos_l, b_spn_pos_r = _spliced_faces(TS_POS, exon_pos_l, exon_pos_r, bspn_l, bspn_r)
@@ -353,23 +359,34 @@ def node_total_density(chain: NodeChain, geometry: NodeGeometry, f_g):
     rho_unspl = mass * (fg / np.maximum(eff_g, _EPS) + (1.0 - fg) / np.maximum(eff_r, _EPS))
     # one-sided spliced (mature) DENSITY: spliced mass lands on ONE face, so divide by THAT face's E_spl (a
     # summed-eff divisor would under-state it ~2×). Sum the per-face densities (only the acceptor face is nonzero).
-    spl_l = np.asarray(geometry.spliced_pos_left, np.float64) + np.asarray(geometry.spliced_neg_left, np.float64)
-    spl_r = np.asarray(geometry.spliced_pos_right, np.float64) + np.asarray(geometry.spliced_neg_right, np.float64)
+    spl_l = np.asarray(geometry.spliced_pos_left, np.float64) + np.asarray(
+        geometry.spliced_neg_left, np.float64
+    )
+    spl_r = np.asarray(geometry.spliced_pos_right, np.float64) + np.asarray(
+        geometry.spliced_neg_right, np.float64
+    )
     espl_l = np.maximum(np.asarray(geometry.eff_spl_left, np.float64), _EPS)
     espl_r = np.maximum(np.asarray(geometry.eff_spl_right, np.float64), _EPS)
-    rho_spliced = np.where(spl_l > _EPS, spl_l / espl_l, 0.0) + np.where(spl_r > _EPS, spl_r / espl_r, 0.0)
+    rho_spliced = np.where(spl_l > _EPS, spl_l / espl_l, 0.0) + np.where(
+        spl_r > _EPS, spl_r / espl_r, 0.0
+    )
     return rho_unspl, rho_unspl + rho_spliced
 
 
 @dataclass(frozen=True, slots=True)
 class NodeBelief:
     """Per-node solved state on the chain: the composition pie `(f_pos, f_neg, f_g)` over the node's UNSPLICED
-    mass + its per-component posterior VARIANCE `(var_pos, var_neg, var_gdna)` = `Var(f_c)`. All length
-    ``n_nodes``.
+    mass + its per-component posterior variance in LOG-FRACTION space, `(var_pos, var_neg, var_gdna)` =
+    **`Var(log f_c)`, NOT `Var(f_c)`**. All length ``n_nodes``.
 
-    The variance is the **precision state** (`docs/calibration/archive/precision_state_design.md`): `Var(f_c)=0` ⇒
+    ⚠ **The variances are log-space** — grid moments of `log f_c` over the λ lattice
+    (`simplex_logodds._solve_nodes_logodds`), matching the log-density message currency. They are therefore
+    **not bounded by ¼** and routinely exceed it; a consumer needing the LINEAR `Var(f_c)` must convert
+    (delta method `Var(f_c) ≈ f_c²·Var(log f_c)`, as `bp_solver.node_sweep` does for `composition_logvar`).
+
+    The variance is the **precision state** (`docs/calibration/archive/precision_state_design.md`): `Var(log f_c)=0` ⇒
     locked/certain (e.g. a forbidden strand), `=∞` ⇒ no information (unsolved). It feeds the honest message
-    send — a source's outgoing precision is degraded from its own `Var_own = (M/E)²·Var(f_c)` by the
+    send — a source's outgoing precision is degraded from its own `Var_own` by the
     communication noise, so an unsure node speaks quietly (Phase 2). The composition is stored as a FRACTION
     (the face-invariant quantity — a boundary has two faces but one composition); density `ρ=f·M_face/E_face`
     is the message currency (computed inline in `bp_solver.node_sweep`), mass `m=f·M_face` (`NodeDeconv`) the
@@ -412,7 +429,7 @@ def _type_belief(free_pos, free_neg, deconv, mass_unspl):
 
     Returns the six per-node arrays ``(f_pos, f_neg, f_g, var_pos, var_neg, var_gdna)`` — the composition + the
     precision state (`docs/calibration/archive/precision_state_design.md`): ``var=0`` locked, ``inf`` no-information, else the strand-solve
-    posterior variance.
+    posterior variance. The variances are ``Var(log f_c)`` (log-space, unbounded above), never ``Var(f_c)``.
     """
     n = free_pos.shape[0]
     f_pos = np.zeros(n)

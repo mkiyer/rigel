@@ -26,6 +26,13 @@ and x10 on every precision moves nothing) - those are the hyperprior's problem, 
   * ``z2 = E[(f_g - oracle)^2] / E[Var(f_g)]`` - the CALIBRATION. 1.0 = honest, >1 = genuinely
     over-confident, <1 = conservative. This is the one that says whether there is a defect to fix.
 
+    ⚠ **UNITS FIX, 2026-07-28.** The denominator is now converted from the belief's LOG-space
+    ``Var(log f_g)`` to the linear ``Var(f_g)`` the numerator lives in (:func:`_lin_var`). Before this the
+    two sides were on different scales, so **every z2 recorded in the ROADMAP and in HANDOFF_1..18 is on a
+    mixed scale and its absolute value is meaningless** - only the direction of change was ever readable.
+    Re-measured on the 32-condition suite at refit=0: the suite total moves **0.046 -> ~1.2**, i.e. pass-0
+    is roughly CALIBRATED, not the 20x-conservative it appeared. Re-read any z2-ordered work list.
+
     OMP_NUM_THREADS=1 python scripts/debug/pass0_error_table.py [--refit 0] [--out /tmp/pass0_state.npz]
 """
 
@@ -56,6 +63,9 @@ _EPS = 1e-9
 ap = argparse.ArgumentParser()
 ap.add_argument("--refit", type=int, default=0)
 ap.add_argument("--out", default="/tmp/pass0_state.npz")
+# ⚠ the scan work dir is SHARED and non-namespaced by default: two sessions running suite work at once
+# corrupt each other. Point it somewhere session-local when running concurrently with anyone else.
+ap.add_argument("--work", default="/tmp/rigel_selfsolve")
 a = ap.parse_args()
 
 index = TranscriptIndex.load(str(SUITE / "rigel_index"))
@@ -63,14 +73,18 @@ cfg = PipelineConfig()
 ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
 conds = sorted(d.name for d in SUITE.iterdir() if (d / "sim_oracle.bam").exists())
 
-C = {k: [] for k in ("cond", "mass", "err", "amb", "var", "cls", "self")}
+C = {k: [] for k in ("cond", "mass", "err", "amb", "var", "cls", "self", "fg")}
 for i, cond in enumerate(conds):
-    inp = _scan_and_truth(SUITE, cond, index, cfg, Path("/tmp/rigel_selfsolve"), SUITE / "_selfsolve_cache")
+    inp = _scan_and_truth(SUITE, cond, index, cfg, Path(a.work), SUITE / "_selfsolve_cache")
     dbg: dict = {}
     calmod.calibrate(
-        inp["payload"], ra, inp["strand_model"], np.asarray(inp["gdna_fl_pmf"]),
+        inp["payload"],
+        ra,
+        inp["strand_model"],
+        np.asarray(inp["gdna_fl_pmf"]),
         np.asarray(inp["rna_fl_pmf"]),
-        dataclasses.replace(cfg.calibration, calib_refit_iters=a.refit), _debug=dbg,
+        dataclasses.replace(cfg.calibration, calib_refit_iters=a.refit),
+        _debug=dbg,
     )
     chain, cap, st = dbg["chain"], dbg["capture"], dbg["statics"]
     Gp, Gn, Rp, Rn = _oracle_per_node(inp, chain)
@@ -86,6 +100,8 @@ for i, cond in enumerate(conds):
     C["cond"] += [cond] * int(ok.sum())
     C["mass"] += mass[ok].tolist()
     C["err"] += (np.abs(np.asarray(cap["f_g"]) - fo) * mass)[ok].tolist()
+    # the LINEAR f_g, for the z2 log→linear conversion
+    C["fg"] += np.asarray(cap["f_g"])[ok].tolist()
     C["amb"] += (fp & fn)[ok].tolist()
     C["var"] += np.asarray(cap["var_g"])[ok].tolist()
     C["cls"] += cls[ok].tolist()
@@ -96,6 +112,8 @@ d = {k: np.asarray(v) for k, v in C.items()}
 np.savez_compressed(a.out, **d)
 cond, mass, err, amb, var = d["cond"], d["mass"], d["err"], d["amb"].astype(bool), d["var"]
 sel = d["self"]
+# linear f_g — the scale both the error and the converted variance live on
+fg_lin = np.clip(d["fg"], 0.0, 1.0)
 
 # the TRUST split — suite-wide quartiles of the node's OWN stated Var(log f_g) (data-defined, no threshold)
 finite = np.isfinite(var)
@@ -103,70 +121,121 @@ q1, q3 = np.quantile(var[finite], [0.25, 0.75])
 conf = finite & (var <= q1)  # most-confident quartile
 unsure = (~finite) | (var >= q3)  # least-confident quartile (non-finite = no opinion at all)
 
-print(f"\n{'=' * 132}\nPASS-0 STATE OF PLAY  (refit={a.refit})   "
-      f"error = Σ mass·|f_g − oracle|, i.e. FRAGMENTS on the wrong side of the gDNA/RNA split\n{'=' * 132}")
+print(
+    f"\n{'=' * 132}\nPASS-0 STATE OF PLAY  (refit={a.refit})   "
+    f"error = Σ mass·|f_g − oracle|, i.e. FRAGMENTS on the wrong side of the gDNA/RNA split\n{'=' * 132}"
+)
 # the per-node calibration inputs: raw |f_g - oracle| and the node's own stated Var(f_g)
 raw = np.where(mass > _EPS, err / np.maximum(mass, _EPS), 0.0)
 
 
+def _lin_var(v, f):
+    """Convert the belief's LOG-space ``Var(log f_g)`` to the LINEAR ``Var(f_g)`` the error is measured in.
+
+    ⚠ This conversion is the whole point (fixed 2026-07-28). ``NodeBelief.var_gdna`` is a grid moment of
+    ``log f_g`` (`simplex_logodds._solve_nodes_logodds`), so it is a LOG-space variance and is not bounded by
+    ¼ — measured on the suite it exceeds ¼ on 33 % of scored nodes and reaches 4.48. Dividing a linear
+    squared fraction error by it compared two different units, and every ``z2`` recorded before this date is
+    on that mixed scale (the suite total read 0.046, i.e. "20x conservative", when it is really ≈1).
+
+    Two derived steps, no tuned constant:
+      * ``f_g = exp(log f_g)`` ⇒ ``Var(f_g) = f_g²·(e^v − 1)`` exactly under a lognormal, which reduces to the
+        first-order delta method ``f_g²·v`` as ``v → 0``. The exact form matters here because ``v`` reaches
+        4.5, where the first-order term is not a usable approximation.
+      * capped at ``f_g·(1−f_g)`` — the greatest variance ANY ``[0,1]`` variable with mean ``f_g`` can have.
+        This is the same bound `bp_solver.node_sweep` applies to ``_var_fg`` before `composition_logvar`.
+    """
+    # 700 is a float64 overflow guard on expm1, not a modelling constant: the cap below binds for any
+    # v beyond a few units, so clipping the exponent cannot change the result.
+    return np.minimum(f * f * np.expm1(np.clip(v, 0.0, 700.0)), f * (1.0 - f))
+
+
 def _z2(m):
-    """E[(f_g-oracle)^2]/E[Var(f_g)], mass-weighted. 1.0 = honest, >1 = over-confident."""
+    """E[(f_g-oracle)^2]/E[Var(f_g)], mass-weighted. 1.0 = honest, >1 = over-confident.
+
+    Both sides are LINEAR fraction units: the denominator is converted from the belief's log-space
+    ``Var(log f_g)`` by :func:`_lin_var`. The numerator is left alone deliberately — a log-space numerator
+    would need ``log(oracle)``, and the oracle ``f_g`` is exactly 0 on 23.5 % of scored nodes.
+    """
     v = var[m]
     k = m.copy()
     k[m] = np.isfinite(v)
     if not k.any():
         return float("nan")
     num = float(np.sum(mass[k] * raw[k] ** 2))
-    den = float(np.sum(mass[k] * var[k]))
+    den = float(np.sum(mass[k] * _lin_var(var[k], fg_lin[k])))
     return num / den if den > 0 else float("nan")
 
 
-print(f"{'scenario':<48}{'reads':>12}{'ERR reads':>11}{'mwae':>8}{'selfERR':>10}|"
-      f"{'single':>10}{'AMBIG':>10}|{'CWRONG':>10}{'errQ1conf':>10}{'z2':>7}{'errQ4unsure':>12}")
-order = sorted(set(cond), key=lambda c: -err[(cond == c) & conf].sum())  # P0: by CONFIDENTLY-WRONG mass
+print(
+    f"{'scenario':<48}{'reads':>12}{'ERR reads':>11}{'mwae':>8}{'selfERR':>10}|"
+    f"{'single':>10}{'AMBIG':>10}|{'CWRONG':>10}{'errQ1conf':>10}{'z2':>7}{'errQ4unsure':>12}"
+)
+order = sorted(
+    set(cond), key=lambda c: -err[(cond == c) & conf].sum()
+)  # P0: by CONFIDENTLY-WRONG mass
 for c in order:
     m = cond == c
     e = err[m].sum()
-    print(f"{c[5:]:<48}{mass[m].sum():>12,.0f}{e:>11,.0f}{e / mass[m].sum():>8.4f}"
-          f"{sel[m].sum():>10,.0f}|{err[m & ~amb].sum():>10,.0f}{err[m & amb].sum():>10,.0f}|"
-          f"{err[m & conf].sum():>10,.0f}{err[m & conf].sum() / max(e, _EPS):>10.1%}{_z2(m):>7.2f}"
-          f"{err[m & unsure].sum() / max(e, _EPS):>12.1%}")
+    print(
+        f"{c[5:]:<48}{mass[m].sum():>12,.0f}{e:>11,.0f}{e / mass[m].sum():>8.4f}"
+        f"{sel[m].sum():>10,.0f}|{err[m & ~amb].sum():>10,.0f}{err[m & amb].sum():>10,.0f}|"
+        f"{err[m & conf].sum():>10,.0f}{err[m & conf].sum() / max(e, _EPS):>10.1%}{_z2(m):>7.2f}"
+        f"{err[m & unsure].sum() / max(e, _EPS):>12.1%}"
+    )
 E = err.sum()
-print(f"{'-' * 139}\n{'TOTAL':<48}{mass.sum():>12,.0f}{E:>11,.0f}{E / mass.sum():>8.4f}{sel.sum():>10,.0f}|"
-      f"{err[~amb].sum():>10,.0f}{err[amb].sum():>10,.0f}|"
-      f"{err[conf].sum():>10,.0f}{err[conf].sum() / E:>10.1%}{_z2(np.ones_like(conf)):>7.2f}"
-      f"{err[unsure].sum() / E:>12.1%}")
+print(
+    f"{'-' * 139}\n{'TOTAL':<48}{mass.sum():>12,.0f}{E:>11,.0f}{E / mass.sum():>8.4f}{sel.sum():>10,.0f}|"
+    f"{err[~amb].sum():>10,.0f}{err[amb].sum():>10,.0f}|"
+    f"{err[conf].sum():>10,.0f}{err[conf].sum() / E:>10.1%}{_z2(np.ones_like(conf)):>7.2f}"
+    f"{err[unsure].sum() / E:>12.1%}"
+)
 
 print(f"\n{'axis rollup':<34}{'reads':>13}{'ERR reads':>12}{'mwae':>8}{'share of ERR':>14}")
-AX = {"capture off": lambda c: "capture_off" in c, "capture on": lambda c: "capture_on" in c,
-      "capture verystrong": lambda c: "verystrong" in c,
-      "stranded ss_0.99": lambda c: "ss_0.99" in c, "unstranded ss_0.50": lambda c: "ss_0.50" in c,
-      "nRNA present": lambda c: "nrna_present" in c, "nRNA none": lambda c: "nrna_none" in c,
-      "  unstranded × capON": lambda c: "ss_0.50" in c and "capture_on" in c,
-      "  unstranded × verystrong": lambda c: "ss_0.50" in c and "verystrong" in c,
-      "  stranded × capON": lambda c: "ss_0.99" in c and "capture_on" in c}
+AX = {
+    "capture off": lambda c: "capture_off" in c,
+    "capture on": lambda c: "capture_on" in c,
+    "capture verystrong": lambda c: "verystrong" in c,
+    "stranded ss_0.99": lambda c: "ss_0.99" in c,
+    "unstranded ss_0.50": lambda c: "ss_0.50" in c,
+    "nRNA present": lambda c: "nrna_present" in c,
+    "nRNA none": lambda c: "nrna_none" in c,
+    "  unstranded × capON": lambda c: "ss_0.50" in c and "capture_on" in c,
+    "  unstranded × verystrong": lambda c: "ss_0.50" in c and "verystrong" in c,
+    "  stranded × capON": lambda c: "ss_0.99" in c and "capture_on" in c,
+}
 for lab, f in AX.items():
     m = np.array([f(c) for c in cond])
     if not m.any():
         continue
-    print(f"{lab:<34}{mass[m].sum():>13,.0f}{err[m].sum():>12,.0f}"
-          f"{err[m].sum() / mass[m].sum():>8.4f}{err[m].sum() / E:>14.1%}")
+    print(
+        f"{lab:<34}{mass[m].sum():>13,.0f}{err[m].sum():>12,.0f}"
+        f"{err[m].sum() / mass[m].sum():>8.4f}{err[m].sum() / E:>14.1%}"
+    )
 
-print(f"\n{'node class':<20}{'reads':>13}{'ERR reads':>12}{'mwae':>8}{'share of ERR':>14}"
-      f"{'CWRONG':>11}{'errQ1conf':>11}{'%nodeQ1':>9}{'z2':>7}")
+print(
+    f"\n{'node class':<20}{'reads':>13}{'ERR reads':>12}{'mwae':>8}{'share of ERR':>14}"
+    f"{'CWRONG':>11}{'errQ1conf':>11}{'%nodeQ1':>9}{'z2':>7}"
+)
 for c in ("exon", "boundary", "intron", "intergenic"):
     for lab, m2 in ((" single", ~amb), (" AMBIG", amb)):
         m = (d["cls"] == c) & m2
         if not m.any():
             continue
-        print(f"{c + lab:<20}{mass[m].sum():>13,.0f}{err[m].sum():>12,.0f}"
-              f"{err[m].sum() / max(mass[m].sum(), _EPS):>8.4f}{err[m].sum() / E:>14.1%}"
-              f"{err[m & conf].sum():>11,.0f}"
-              f"{err[m & conf].sum() / max(err[m].sum(), _EPS):>11.1%}"
-              f"{conf[m].mean():>9.1%}{_z2(m):>7.2f}")
-print("\n  ⚠ errQ1conf is confounded by SELECTION — compare it against %nodeQ1 (the share of the class's "
-      "NODES\n    that are in the confident quartile at all). A class with %nodeQ1 ≈ errQ1conf is confident "
-      "for a\n    legitimate reason; z2 is what says whether that confidence is EARNED.")
-print(f"\n  TRUST: Var(log f_g) quartiles q1={q1:.4g} q3={q3:.4g}; "
-      f"{(~finite).sum():,} nodes have no finite variance. An HONEST solver keeps the most-confident "
-      f"quartile's share of error well under 25 %.")
+        print(
+            f"{c + lab:<20}{mass[m].sum():>13,.0f}{err[m].sum():>12,.0f}"
+            f"{err[m].sum() / max(mass[m].sum(), _EPS):>8.4f}{err[m].sum() / E:>14.1%}"
+            f"{err[m & conf].sum():>11,.0f}"
+            f"{err[m & conf].sum() / max(err[m].sum(), _EPS):>11.1%}"
+            f"{conf[m].mean():>9.1%}{_z2(m):>7.2f}"
+        )
+print(
+    "\n  ⚠ errQ1conf is confounded by SELECTION — compare it against %nodeQ1 (the share of the class's "
+    "NODES\n    that are in the confident quartile at all). A class with %nodeQ1 ≈ errQ1conf is confident "
+    "for a\n    legitimate reason; z2 is what says whether that confidence is EARNED."
+)
+print(
+    f"\n  TRUST: Var(log f_g) quartiles q1={q1:.4g} q3={q3:.4g}; "
+    f"{(~finite).sum():,} nodes have no finite variance. An HONEST solver keeps the most-confident "
+    f"quartile's share of error well under 25 %."
+)
