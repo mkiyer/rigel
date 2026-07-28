@@ -176,8 +176,11 @@
 > re-measured on rebuilt beliefs. **The enriched mode is no longer blind** (mass ratio 0 → **0.70**; exact on
 > stranded data), but a **single directional bias survives** — unstranded enriched nodes under-call gDNA by
 > **0.15–0.22 decades** — and it shows up identically in three places. ⚠ **A symmetric sampling-likelihood
-> projection cannot correct it: substituting a PERFECT (oracle) landscape recovers only +0.03…+0.08 against
-> that bias.** Same structural failure as P1e — variance-shaped machinery cannot move a biased mode. Also
+> projection cannot correct it** — same structural failure as P1e, variance-shaped machinery cannot move a
+> biased mode. ⚠⚠ **The companion claim that a perfect landscape "recovers only +0.03…+0.08" is SUPERSEDED
+> (2026-07-27):** it was measured with that inert symmetric projection. With a working heavy-tailed
+> projection an ORACLE landscape nearly DOUBLES the gain and removes every harmed condition — **fit quality
+> is a first-order limiter.** See `gdna_hyperprior_production_plan.md` §W3b. Also
 > fixed there: **two label bugs in the exploration cache** that mis-bucketed 6 real-gDNA conditions as
 > zero-gDNA and labelled `capture_verystrong` as capture-OFF, which invalidates some archived numbers
 > (the "fabrication" crisis was half an artifact).
@@ -187,10 +190,176 @@
 relay's per-node SCALAR path (~34 %, and it calls numpy on scalars, which measured 15.7× slower than plain
 floats) and the NPMLE hyperprior EM (~28 %). Read it before any optimization work.
 
+> **⭐⭐ HYPERPRIOR REBUILD IN PROGRESS (2026-07-27) — read `SESSION_2026_07_27_HANDOFF_17.md` then
+> `gdna_hyperprior_production_plan.md`.** The δ-pin `DensityNPMLE` is being retired (kept, not deleted) for
+> a landscape + projection built from the exploration recipe. Landed: the `tau_prior` admission gate DELETED
+> (3 magic constants, removal free), an adaptive nearest-neighbour-spacing kernel that fixes the overfitting
+> by construction, and the posterior/Student-t projection.
+>
+> **⭐⭐ THE 40 %-ENRICHED-MASS PROBLEM IS SOLVED (2026-07-27, N1) — it was a SUBSTRATE CENSUS effect, not a
+> missing mode.** The recovery decomposes exactly: `0.399 = AMBIG 0.802 × BOUNDARIES 0.682 × WEIGHT 0.687 ×
+> COUNTS 1.014`. **The ~30 unexplained points were BOUNDARY DILUTION** — boundaries are as numerous as
+> regions and only 5.1 % of them are truly enriched (regions: 12.1 %), and truly-depleted boundary nodes
+> deliver **74 % of all the mass in the valley between the two true modes**. PLACEMENT is fine (0.873); the
+> "217 split-crossers" lead is worth ~13 % of the gap; and on the production substrate with flat weights
+> pass-0's own counts match a matched oracle at **1.014** — perfect counts buy nothing because nothing is
+> left to buy. ⛔ Scoring each landscape at its OWN split hides the entire defect (it reads 91 %).
+> ⛔ Moving precision from the mass to the kernel WIDTH is refuted by its own control (a constant τ does the
+> same, i.e. it is a global `h_pop`; and it takes false enrichment on zero-gDNA from 6.2× to 35×).
+>
+> **⭐⭐ AND THE SCORING INSTRUMENT WAS A COMB (N5, owner-spotted).** The per-node kernel is a Poisson
+> *measurement* width, `1/(√g·ln10)` decades, which **shrinks as ρ^(−1/2)** — a **41× collapse** across the
+> axis that goes **below the grid resolution** above +1 decade, where **88 % of nodes carrying 100 % of the
+> band's mass become deltas in one cell**. The FIT was already protected by W2's kNN term (roughness above
+> +1: 46.9 → 5.1); **`oracle_landscape` was not (40.7)** — it rendered the TRUTH with a measurement kernel,
+> though `G` is not an observation of `ρ`, it IS `ρ·E`. **Every EMD-scored decision in W1/W2/W3 was taken
+> against that comb.** Fixed: the reference now renders at POPULATION resolution (validated on ground truth
+> — enriched sd 0.328 vs the truth's 0.307, where production gave 0.169) and the kernel is floored at
+> `GRID_H`. kNN 0.5 survives re-selection. ⚠ **EMD does not discriminate bandwidth — select by SHAPE**, and
+> ⚠ **the W1 substrate table has not been re-scored.**
+>
+> **Owner decisions taken 2026-07-27: boundaries EXCLUDED from the training substrate; the additive
+> `_gdna_arm` KEPT.** `SESSION_2026_07_27_HANDOFF_17.md` §4.0.
+>
+> **⭐⭐ W4 IS IMPLEMENTED (uncommitted).** New `calibration/gdna_landscape.py` (`GdnaLandscape` +
+> `fit_gdna_landscape`); `_fit_gdna_hyperprior` is substrate selection only; `npmle.py` untouched (retired
+> in this role); `gdna_prior_additive` deleted, `gdna_prior_strength` added; 11 new unit tests; **two
+> asserted constants removed by derivation** (the grid is now exactly `logprior`'s own domain; the density
+> floor is one pseudo-node of ignorance). Gates: **refit=0 bit-identical 32/32**, ruff clean, 1193 tests
+> pass, **refit=1 suite 0.0679 → 0.0562 (−17 %)** with `unstranded × capON` **0.1575 → 0.1193** — against
+> ⛔ **`gdna_none` 0.0028 → 0.0315, the FP guard, which FAILS its gate.** Prior strength needs no tuning
+> (monotone; 1.0 optimal on every stratum). Five causes of the `gdna_none` regression are ruled out by
+> measurement — see the plan; do not re-probe them. **20 goldens pending, LAST.**
+
+> **⭐⭐⭐ THE PIN IS A BP VIOLATION ON THE MODE — read `pin_derivation.md` (2026-07-27).**
+> `bp_solver._pin_v` rescales an incoming claim to the destination's observed mass, and **for a component the
+> message does not supply it substitutes the DESTINATION'S OWN density**. The delivered RNA fraction is then
+> exactly **`1/(1 + f_g^own)`** — a pure function of the destination's own strand-only self-solve, verified
+> to 2.1e-16 — so the node confirms itself. On unstranded data `f_g^own` is the uninformative ½, the pin
+> reserves **33.6 %** of the mass budget for imaginary gDNA, and a zero-gDNA library reads back **29.3 %
+> gDNA**; on stranded data the reservation is 1.2 % and the false-positive rate is 1.4 %. **The pin's
+> reservation IS the false-positive rate.**
+> **Scope: 10.9 % of all message-carrying nodes, 16.3 % of destination mass, all 32 conditions** — and
+> `capture_verystrong` has the highest partial rate (26.6–32.8 %), so the *other* open regression may share
+> this cause. The derivation says the pin's goal and its FULL-claim form are correct and BP-admissible; the
+> defect is (i) the partial branch, which should normalize by the SOURCE's own mass, and (ii) routing the
+> spliced-RNA **measurement** stream through a **composition** operator at all. ⚠ P1e's `δ = log(M/S)` is
+> built on the contaminated budget and its own comment already says so ("it does not attribute") — fixing
+> the pin is the diagnosis `variance_ledger.md` §6 says must make P1e shrink.
+>
+> **⭐ P-2 IS IMPLEMENTED AND MEASURED (uncommitted).** `_pin_v`'s result now feeds ONLY the DL mismatch
+> comparison; the delivered densities are left as the source measured them. Verified before editing that
+> this is the whole fix: on all 433 affected exons the λ stream is dead (`c_tau = 0`, gate already firing)
+> and only the RNA measurement is live, and `tlam`/`tth` are scale-free so the pin cancels from them
+> identically. **Suite mwae 0.0841 → 0.0788 at refit=0 (pass-0 itself, −6.3 %) and 0.0565 → 0.0525 at
+> refit=1**; `gdna_none` −0.0263/−0.0160; unstranded × capON −0.0145/−0.0155. **Every pre-registered
+> prediction held, including the falsification test** (stranded barely moves: −0.0005/−0.0007).
+> ⚠ Cost: capture-OFF +0.0009 at refit=1, and mass-weighted corr −0.007/−0.009 while mwae improves.
+> ⛔⛔ **P-1 (the share transfer) WAS IMPLEMENTED AND REVERTED.** It hit every pre-registered target
+> (unstranded × capOFF × gDNA −0.0022, `gdna_none` untouched) and lost everywhere else: suite **+0.0119 /
+> +0.0121**, capture-ON **+0.0264 / +0.0274**. ⭐ **The lesson corrects the derivation: "composition
+> transfers" is a WEAKER premise than "density transfers, reframed"** — an exon and its flanking boundary do
+> NOT share a composition across a capture step (the boundary is 0.125× the exon, 2113× the intron at
+> verystrong). And `r` only *looked* inert because `_pin_v` was cancelling it; once P-2 stopped the pin
+> rewriting the delivered density, **`r` is load-bearing again**. ⛔ Do not re-derive it.
+
+> ### ⭐⭐⭐ THE P-2 RESIDUAL IS DIAGNOSED, AND IT POINTS SOMEWHERE MUCH BIGGER (2026-07-27)
+>
+> `pin_derivation.md` **§12** is the record. **The mechanism on file was wrong in every particular.** §10 had
+> it as an RNA-only (partial) claim UNDER-calling `f_g`; measured, **0.2 %** of the harmed mass is partial,
+> **96–99 %** of the regression is **OVER**-calling, and what the message asserts too much of is **gDNA**
+> (`e^moG` 0.42–0.77 against an oracle `f_g` of 0.008–0.043). An off-simplex reading was pre-registered and
+> also falsified (3.3 % of the error mass).
+>
+> ⛔ **It is NOT fixable at the pin, and two arms prove it.** Split by whether the pin's budget borrowed the
+> destination's own density: P-2's whole `gdna_none` win is on the **contaminated** branch (0 clean nodes
+> there) and the residual is on the **clean** branch — but on the clean branch the conservation violation is
+> only **|δ| = 0.073** (vs 0.46 contaminated), so there is nothing there to correct. Restoring the pin
+> outright wherever it is BP-legal recovers **11 %** of the residual and costs more than it recovers
+> (suite +0.0002 at r1, unstranded × capON +0.0009). A derived conditional-mean shrinkage
+> (`w = σ_cm²/(αᵀΣα + 1/n_dst)`, no new constant, with the pin and P-2 as its `w = 1`/`w = 0` endpoints) is
+> **inert** — correctly, because the model attributes the violation to component-specific error.
+>
+> ⭐⭐ **WHAT THE PIN WAS MASKING IS WORTH 20× THE RESIDUAL.** The old pin applied a **×0.648** median shrink
+> on the contaminated branch, which was damping a gDNA level claim that is **5.4× too large**. The cause is
+> the **reframe applied to the gDNA component**: `r = ρ_tot(dst)/ρ_tot(src)` is meant to carry the capture
+> step, but between an intron/boundary (the source on **100 %** of these edges) and an exon in a gDNA-bearing
+> library it is dominated by **RNA**. gDNA is uniform, so across a capture-OFF hop its correct transfer is
+> `r = 1`, and the numbers flip exactly at capture:
+>
+> | | median `r` | err REFRAMED | err **UN**-reframed |
+> |---|---|---|---|
+> | gdna100 ss0.50 nrna_none **capOFF** | 1.48 | 0.732 dec | **0.170** (80 % of mass improves) |
+> | gdna100 ss0.50 nrna_none **capON** | 2.82 | **0.639** | 1.608 ✗ (11 %) |
+>
+> A full A/B of `r_g ≡ 1` sizes the prize: **unstranded × capOFF × gDNA 0.0495 → 0.0146 (−0.0349, 6/6) at r0
+> and 0.0313 → 0.0077 at r1; capture-OFF overall −0.0178 / −0.0124, 9 better / 0 worse** — against
+> ⛔ unstranded × capON **+0.1728 / +0.2069**, so it is a *sizing* arm, not a candidate. **The residual
+> (+0.0009) is a 5 %-sized symptom of the largest identified lever on capture-OFF.**
+> ⚠ **This re-opens §11 below** — that refutation was measured while the pin was cancelling `r`.
+>
+> ### ⭐⭐⭐⭐ AND IT IS NOW DIAGNOSED TO THE NODE — `gdna_reframe_terminus.md`. IT IS **P1g**.
+>
+> Figure `figures/gdna_reframe_terminus.png`. The decomposition is an **identity** (residual 4.4e-16): the
+> sources are nearly right (+0.110), gDNA really is uniform (−0.054), and **the reframe is 96 % of the error
+> (+1.508 of +1.564 dec)**. The break has one structural cause — `r`'s faces include the **spliced** RNA
+> crossing a seam, so at a splice junction both faces carry it and `r ≈ 1`, but **at a transcript START or
+> END no RNA crosses**, the boundary face is pure gDNA, and `r` becomes the exon's whole RNA-to-gDNA ratio:
+>
+> | source boundary | n | median `log10 r` | median delivered gDNA error |
+> |---|---|---|---|
+> | **TERMINUS** | 426 | **+0.836** | **7.0× too big** |
+> | **junction-only** | 732 | **+0.021** | **1.0× — EXACT** |
+>
+> **33 % of edges carry 66–68 % of the error mass.** Reproduced on `gdna300` and on the **stranded** twin,
+> so it is not a strandedness effect.
+>
+> ⭐⭐ **THE CLOSED FORM, verified to 1e-9 on 63–66 % of terminus edges:** a pure-gDNA source face gives
+> `ρ_tot(src) = rg_src`, so `tg = rg_src·ρ_tot(dst)/ρ_tot(src) = **ρ_tot(dst)**` — the delivered gDNA
+> density becomes the destination's **own total density**, carrying zero source information, and implies
+> `f_g = **1.18–1.27**` at exons that are 99.5 % RNA. **Same signature as the pin bug** (a message that is a
+> pure function of the destination's own mass), which is why P-2 exposed it: `_pin_v` was scaling it back
+> down by ×0.648.
+>
+> **→ This is the SAME missing bit as `ω_graft`'s ≥30× split, doing damage in a second, independent place —
+> and here as a MODE error of up to 190×, not a mis-priced variance. P1g (item 8 below) now pays twice, and
+> is the recommended fix.** ⛔ Not a variance: damping a 190× mode cannot move it toward truth (the P1e
+> lesson, verbatim). Nothing implemented; the tree is bit-identical 32/32.
+>
+> ✅ **The 21 goldens are REGENERATED — 1214 pass, 0 failures.**
+>
+> ### ⭐⭐ N2 IS RE-RUN AND THE VERDICT REVERSES; REAL DATA RAN FOR THE FIRST TIME
+>
+> **N2** (plan §"N2 RE-RUN AFTER W4") — both caches rebuilt at this tree, so prior #1 is the landscape.
+> Q1 strengthens (AMBIG density error **−42 %, 30/32**, capture-ON now 13/14, stranded 12/12). Q2 is no
+> longer contaminated and **the iterative arm now beats what ships on every axis**: enriched recovery
+> 0.572 → **0.757**, EMD-vs-non-AMBIG 0.2930 → **0.2544**, fabrication **14.5× → 6.7×**. The "circular"
+> arm buys 2 % more census for **4×** the fabrication. → **owner decision** (it ships a second prior fit).
+>
+> **REAL DATA** (plan §5b) — 4 cfRNA/capture payloads, both refit settings, **no NaN, no degenerate
+> output**, 33–105 s. On LBX0190 (known ~15 % gDNA) the prior moves mass-weighted `f_g` **0.236 → 0.124**,
+> with 49 % of mass moving >0.05. Two findings the toy structurally **cannot** produce:
+> * ⛔⛔ **the strand overdispersion SATURATES its `Beta(2,2)` ceiling on 4/4 real samples for `od_r` and
+>   2/4 for `od_g`**, where the synthetic suite fits **0.0008–0.0017** — 120–250× below it.
+>   ⭐⭐ **THE CEILING IS A GUARD AND SATURATION IS A CANARY (owner, 2026-07-28) — do NOT raise it.**
+>   **gDNA is symmetric around 50/50 by construction**, so excess strand variance on a node believed to be
+>   pure gDNA is evidence that **the node is not pure gDNA** — transcription where the annotated reference
+>   has no record of it (antisense, unannotated genes, readthrough). The seeds are *"intergenic, intronic,
+>   exon–intron seams"*, precisely where that hides, and the estimator is a **pooled ratio of sums**
+>   (`od_mom = Σ excess_var / Σ gdna_var`) with no trimming — a few contaminated seeds drag it to the
+>   ceiling. Raising the ceiling would import the annotation's incompleteness into the **strand
+>   likelihood, our strongest and only intrinsic gDNA/RNA evidence.** → the work is a **ROBUST estimator**,
+>   not a re-tuned constant. Plan §5b FINDING 1 has the falsifiable test.
+> * ⚠ **`ω_graft` spans 15× across four real samples** (0.25 → 3.83, the two strands agreeing within each
+>   sample) — the "10× apart on two samples" note, confirmed and widened. `P1D_P1E_DEBTS.md` stands.
+
 The only other docs that are live (everything else is in `archive/`, kept for history, NOT to be referenced):
-* **`gdna_hyperprior_resurrection.md` — ⭐ THE Role-B / hyperprior ENTRY POINT.** Where that track paused and
-  why, the archived doc map, the resurrected run book, and the three re-measurements at the rebuilt pass-0.
-  Read it before P-sub — its §2.3 constrains what a substrate sweep can possibly buy.
+* **`SESSION_2026_07_27_HANDOFF_17.md` — ⭐ THE LIVE hyperprior handoff** (state, next steps, and a
+  do-not-repeat table of this session's own mistakes).
+* **`gdna_hyperprior_production_plan.md` — ⭐ THE working plan** (W0–W4, the constants ledger, every
+  measurement).
+* **`gdna_hyperprior_resurrection.md`** — how the track was resurrected + the per-scenario review.
+  ⚠ Its §2.3 "a perfect landscape is worth +0.03" is **SUPERSEDED** (banner in place).
 * `CALIBRATION_ARCHITECTURE.md` — the authoritative theory (count-zero-information; the three information
   sources). Still correct; read second.
 * `unified_solver_design.md` — the target solver's architecture (the reframe + ÷M_dst mode). Its **precision /
@@ -488,11 +657,21 @@ premises above have changed, **that measurement is the single highest-value next
    **empirically refuted** (+0.010 refit=0 / +0.025 refit=1). The flag exists so the question can be
    MEASURED; it decides nothing. Behaviour-neutral (32/32), 3 unit tests.
 
-8. ⭐ **P1g — PUT TSS/TES IN THE REGION/BOUNDARY MAP.** The structural debt behind `ω_graft` (see the banner
-   at the top of this file). Owner-flagged as a high priority and forthcoming. It reaches the index build
-   (`boundary_df` today carries only `boundary_id`/`ref_name`/`position`; `t_df` already has the transcript
-   spans, so the bit is derivable with no new input). On landing, **re-derive `ω_graft` per structural
-   class** — same equation, one scalar per class.
+8. ⭐⭐ **P1g — PUT TSS/TES IN THE REGION/BOUNDARY MAP. ⭐ SCOPED: `P1G_SCOPE.md`.** The structural debt
+   behind `ω_graft` — **and now measured to corrupt the REFRAME as a MODE error of up to 190×**
+   (`gdna_reframe_terminus.md`). It is the highest-value item on this list.
+   * ⭐ **It is a RESTORATION, not a new build.** Index format **v6 already carried
+     `is_tss`/`is_tes`/`is_splice_junction`/`genomic_sj_strand`** on `boundaries.feather`; **v7 removed
+     them** when their consumer (the mature/nascent overlay) was retired. The builder is recoverable
+     verbatim: `git show 1863ef57^:src/rigel/calibration/regions.py`.
+   * ⭐ **No C++ change.** The accumulator keys on `boundary_id` and its `(boundary_positions,
+     ref_pos_offsets, region_types)` ABI is untouched by extra `boundary_df` columns.
+   * ⛔ **Do NOT derive the bit from the signature instead** — measured 83.3 % agreement, and the **73 false
+     negatives are exactly the positions that are BOTH a terminus and a junction** (verified as a subset):
+     where one transcript ends at a point another spans, the *union* signature is structurally blind. The
+     211 false positives are 100 % nRNA-span edges.
+   * ⚠ **The real work is plumbing**: the calibration package **never reads `boundary_df` today**.
+   * On landing, **re-derive `ω_graft` per structural class** — same equation, one scalar per class.
 
 9. **P3 — AMBIG exon over-confidence** (`z2 | Q1` = 64.39, 259,493 confidently-wrong reads, 34 % of what
    remains). **Demoted from "promoted": it is excluded from the hyperprior fit by construction**, so it
