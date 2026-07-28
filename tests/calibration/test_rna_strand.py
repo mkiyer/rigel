@@ -116,12 +116,15 @@ def test_no_spliced_data_falls_back_to_prior():
 
 
 def test_shrinks_to_prior_when_sparse():
-    """One thin seed side ⇒ the prior dominates (continuous shrinkage, no hard gate)."""
+    """One thin seed side ⇒ the prior dominates (continuous shrinkage, no hard gate).
+
+    ⚠ The prior weight is now in INFORMATION units (see `gdna_strand._prior_information`), so it must be
+    given on that scale; a single 10-fragment side carries only ~4 information units at κ = 0.9."""
     sense = np.array([7.0])
     total = np.array([10.0])
     prior = 1 / 7
     model = fit_rna_strand_overdispersion(
-        sense, total, 0.9, prior_overdispersion=prior, prior_weight=30.0
+        sense, total, 0.9, prior_overdispersion=prior, prior_weight=909.0
     )
     assert model.rna_strand_overdispersion == pytest.approx(prior, abs=0.03)
 

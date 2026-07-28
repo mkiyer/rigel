@@ -24,7 +24,7 @@ from rigel.calibration.node_geometry import build_node_statics, init_beliefs
 from rigel.calibration.bp_solver import chain_region_deconv
 from rigel.calibration.strand_balance import fit_strand_balance
 from rigel.calibration.gdna_strand import (
-    fit_gdna_strand_from_substrate, fit_rna_strand_from_substrate, overdispersion_for_beta)
+    fit_gdna_strand_from_substrate, fit_rna_strand_from_substrate)
 from rigel.calibration.density_model import node_gdna_density
 from rigel.splice import SpliceType
 from oracle import OracleTruth
@@ -87,12 +87,8 @@ def run(cond):
     flmean = boundary_eff_length(fl.gdna_pmf)
     kappa = float(fit_strand_balance(sm).rna_sense_frac)
     ndens = node_gdna_density(sub, ra, reg_eff, flmean)
-    gs = fit_gdna_strand_from_substrate(sub, ra, ndens, bnd_eff, rna_sense_frac=kappa,
-        prior_overdispersion=overdispersion_for_beta(cfg.gdna_strand_prior_alpha_beta),
-        prior_weight=cfg.gdna_strand_prior_weight)
-    rs = fit_rna_strand_from_substrate(sub, rna_sense_frac=kappa,
-        prior_overdispersion=overdispersion_for_beta(cfg.rna_strand_prior_alpha_beta),
-        prior_weight=cfg.rna_strand_prior_weight)
+    gs = fit_gdna_strand_from_substrate(sub, ra, ndens, bnd_eff, rna_sense_frac=kappa)
+    rs = fit_rna_strand_from_substrate(sub, rna_sense_frac=kappa)
     chain = build_node_chain(pl.ref_region_offsets, pl.ref_boundary_offsets)
     statics = build_node_statics(chain, sub, bsub, ra)
 

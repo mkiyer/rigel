@@ -34,14 +34,25 @@ boundary side — intergenic, intronic, exon–intron / exon–intergenic seam) 
 
     od_mom = Σ_s excess_var_s / Σ_s gdna_var_s        # pooled point estimate
 
-The point estimate is then **shrunk toward a prior overdispersion** ``od₀`` (a symmetric
-``Beta(a, a)`` "floor"; default ``a = 3`` ⇒ ``od₀ = 1/7``) by seed-node count — sparse/low-signal
-libraries lean on the prior, abundant ones on the fit — and clamped to ``[0, _MAX_OVERDISPERSION]``
-(the ``Beta(2, 2)`` ceiling, ``od = 0.2``, the most overdispersion allowed). This continuous
-shrinkage replaces the earlier hard min-seed-node / significance gates. The MoM is closed-form,
-``O(n_seed_nodes)``, and uses the **same variance decomposition the deconv applies**
-(:mod:`strand_likelihood`), so fit and application are consistent. The prior parameters live on
-``CalibrationConfig`` (``gdna_strand_prior_alpha_beta``, ``gdna_strand_prior_weight``).
+The point estimate is then **shrunk toward a prior overdispersion** ``od₀`` = ``Beta(14,14)`` ⇒ 0.0345,
+**weighted by INFORMATION** (:func:`_null_information`), and clamped to ``[0, _MAX_OVERDISPERSION]`` (the
+``Beta(2,2)`` ceiling, od = 0.2, the most overdispersion allowed).
+
+⭐ **The shrinkage currency is INFORMATION, not seed count, and that is a units fix, not a tuning choice.**
+Overdispersion is a correlation *between* fragments in a node, so a seed with ONE fragment carries none of
+it — it has nothing to be correlated with. Weighting by ``n_seed_nodes`` let 160 k singleton seeds outvote
+the prior by four orders of magnitude on a library that has almost no pairs. With ``I = 1/Var(od_mom)|₀``
+the expression becomes an exact Normal–Normal posterior mean and the prior's weight ``W`` is **DERIVED**
+from the two asserted constants rather than asserted itself (:func:`_prior_information`).
+
+⚠ **Measured: this changes nothing on real data** (identical to 4 d.p.), because real libraries carry
+0.7 M–101 M information units against a prior worth ~909. It binds on the zero-seed fallback and on unit
+fixtures — which is exactly where it should. The saturation seen on real cfRNA is **bias from a
+contaminated seed channel**, not a shrinkage problem; see `docs/calibration/strand_overdispersion_design.md`.
+
+The MoM is closed-form, ``O(n_seed_nodes)``, and uses the **same variance decomposition the deconv
+applies** (:mod:`strand_likelihood`), so fit and application are consistent. The two constants live in this
+module, next to the estimator they parameterise.
 
 The substrate→seed-node extraction wrapper lives in :mod:`calibrate` (it needs the region/
 boundary geometry); this module is the pure estimator + model so it is trivially testable.
@@ -75,6 +86,68 @@ def overdispersion_for_beta(alpha_beta: float) -> float:
 
 #: Overdispersion ceiling (most overdispersion allowed) = ``Beta(2, 2)`` ⇒ ``od = 0.2``.
 _MAX_OVERDISPERSION: float = overdispersion_for_beta(_CEIL_ALPHA_BETA)
+
+#: **K2 — the shrinkage TARGET**, the symmetric ``Beta(a, a)`` the fit falls back to when the data carry
+#: no information. ``a = 14`` ⇒ ``od₀ = 1/29 = 0.0345``. ⭐ **No longer arbitrary**: two assumption-light
+#: measurements now bracket the truth — gDNA from the exact ``od(n=2) = 2·P(both same strand) − 1`` readout
+#: (no Beta assumption, no estimated mean, since μ = ½ is asserted biology) gives a plateau of
+#: **0.007–0.028**; RNA from junctions deep enough to see the minority strand gives **0.0011–0.0158**, and
+#: the synthetic suite (true od = 0 by construction) gives 0.0008–0.0017. ``od₀`` sits **1.2–30× ABOVE** the
+#: top of every honest measurement, i.e. at the conservative end of measured reality, which is what a
+#: fallback should be. It remains ASSERTED — the measurements bracket it, they do not derive it.
+#: **Shared by the gDNA and RNA fits, and that is required, not a convenience**: at κ = ½ with no data the
+#: two components must coincide, or ψ's ``−½·log var`` term hands an unstranded node a spurious gDNA/RNA
+#: preference (see :mod:`.strand_likelihood`). Full record: `docs/calibration/strand_overdispersion_design.md`.
+_PRIOR_ALPHA_BETA: float = 14.0
+_PRIOR_OVERDISPERSION: float = overdispersion_for_beta(_PRIOR_ALPHA_BETA)
+
+
+def _prior_information() -> float:
+    """**DERIVED** prior precision ``W``, in the data's own information units — not asserted.
+
+    The shrinkage ``(I·od_mom + W·od₀)/(I + W)`` is a Normal–Normal posterior mean once ``I`` is the
+    estimator's null information (:func:`_null_information`), because ``Var(od_mom)|₀ = 1/I`` exactly.
+    So ``W = 1/τ²`` with ``τ²`` the PRIOR variance of ``od`` — and the prior is already fully pinned by the
+    two asserted constants: it lives on ``[0, _MAX_OVERDISPERSION]`` (K1) with mean ``od₀`` (K2). The
+    least-committal distribution under exactly those two constraints is the maximum-entropy one (a
+    truncated exponential), whose variance closes the derivation with **no third constant**.
+
+    ⚠ **Name the approximation honestly:** reducing a bounded prior to two moments is *Bühlmann linear
+    credibility*, not exact Bayes (exact Bayes under a bounded prior at these information levels is simply
+    ``clip(od_mom, 0, od_max)``, i.e. no shrinkage at all). The linear rule is adopted because it degrades
+    gracefully in the low-information corner, where the clip alone would return a hard ``0`` — a claim of
+    perfect Binomiality, the *most* confident strand likelihood we could possibly assert.
+
+    ⚠ **And it is measurably INERT on real data**: the fitted overdispersion is identical to four decimals
+    across ``W ∈ {30, 100, 300, 588, 2658}`` and with the shrinkage deleted entirely, because a real library
+    carries 0.7 M–101 M information units against this ~909. It binds only on the zero-seed fallback and on
+    unit fixtures. That inertness is why the *shape* assertion above costs nothing.
+    """
+    b, m = _MAX_OVERDISPERSION, _PRIOR_OVERDISPERSION
+    # max-entropy density on [0, b] with mean m is ∝ exp(−λx); solve mean(λ) = m by bisection.
+    def _mean(lam: float) -> float:
+        z = lam * b
+        if abs(z) < 1e-9:  # λ → 0 is the uniform limit
+            return b / 2.0
+        if z > 700.0:  # e^z overflows; the b/(e^z − 1) term is then exactly negligible
+            return 1.0 / lam
+        return 1.0 / lam - b / np.expm1(z)
+
+    lo, hi = 1e-6, 1e6
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if _mean(mid) > m:
+            lo = mid
+        else:
+            hi = mid
+    lam = 0.5 * (lo + hi)
+    z = lam * b
+    var = 1.0 / lam**2 - b * b * np.exp(z) / np.expm1(z) ** 2 if z < 700 else 1.0 / lam**2
+    return float(1.0 / max(var, 1e-12))
+
+
+#: ``W`` — the prior's weight in information units. ≈ 909; computed, never asserted.
+_PRIOR_INFORMATION: float = _prior_information()
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +186,31 @@ class RnaStrandModel:
         return float("inf") if od <= 0.0 else 0.5 * (1.0 - od) / od
 
 
+def _null_information(comp_frags: np.ndarray, comp_var: np.ndarray | float) -> float:
+    """The estimator's **null information** ``I = 1/Var(od_mom)|₀`` — exact, not asymptotic.
+
+    ``od_mom = Σe_s / Σc_s`` with ``c_s = n_c(n_c−1)·pq`` deterministic, so ``Var(od_mom) = Var(Σe_s)/(Σc_s)²``.
+    Under the null (``od = 0``) the sense count is Binomial, and with ``X = K − n·μ``,
+    ``E[X²] = n·pq`` and ``E[X⁴] = 3(n·pq)² + n·pq(1 − 6pq)``, so ``Var(e_s) = 2(n·pq)² + n·pq(1 − 6pq)``:
+
+        I = (Σ n(n−1)·pq)² / Σ [ 2n²pq² + n·pq − 6n·pq² ]
+
+    ⭐ **At μ = ½ this reduces EXACTLY to the pair count** ``Σ n(n−1)/2`` — the intuition being that
+    overdispersion is a correlation *between* fragments, so the unit of evidence is a PAIR (a seed of one
+    fragment contributes nothing; a seed of ``n`` contributes ``n(n−1)/2``). Verified algebraically and by
+    Monte Carlo (ratio 0.994–1.003 over μ ∈ [0.002, 0.5] and mixed seed-size populations).
+
+    ⚠ **Away from μ = ½ the pair count is WRONG and must not be substituted**: at the RNA fit's κ the
+    measured ``I/pairs`` is **0.05–0.14**, i.e. the raw pair count overstates the information 7–20×. That is
+    why this is a general form rather than a pair count, and why the two components share one code path.
+    """
+    n = np.asarray(comp_frags, dtype=np.float64)
+    pq = np.asarray(comp_var, dtype=np.float64)
+    num = float(np.sum(np.maximum(n * (n - 1.0), 0.0) * pq)) ** 2
+    den = float(np.sum(2.0 * n * n * pq * pq + n * pq - 6.0 * n * pq * pq))
+    return num / den if den > 0.0 else 0.0
+
+
 def _fit_overdispersion(
     sense: np.ndarray,
     total: np.ndarray,
@@ -120,8 +218,8 @@ def _fit_overdispersion(
     component_frac: np.ndarray,
     component_mean: np.ndarray,
     *,
-    prior_overdispersion: float,
-    prior_weight: float,
+    prior_overdispersion: float = _PRIOR_OVERDISPERSION,
+    prior_weight: float = _PRIOR_INFORMATION,
 ) -> tuple[float, int, int, bool]:
     """Shared pooled-MoM + prior-shrinkage core for one component's strand overdispersion.
 
@@ -147,7 +245,10 @@ def _fit_overdispersion(
     valid = total > 0.0
     binom_var = total * node_mean * (1.0 - node_mean)
     excess_var = (sense - total * node_mean) ** 2 - binom_var
-    comp_frags = component_frac * total
+    # ⚠ INTEGER component counts. ``component_frac`` is a float that is 1.0 only to within rounding
+    # (measured min − 1 = −2.2e−16), so ``w·N`` on a 2-fragment seed is 1.9999999999999996 and every
+    # ``n_c ≥ 2`` test silently under-counts. Round: a fragment count is an integer.
+    comp_frags = np.rint(component_frac * total)
     comp_var = component_mean * (1.0 - component_mean)  # μ_c(1−μ_c): ¼ for gDNA, κ(1−κ) for RNA
     # BetaBinom excess-variance scale n_c(n_c − 1)·μ_c(1−μ_c) (clipped ≥ 0 for tiny component mass).
     var_scale = np.maximum(comp_frags * (comp_frags - 1.0), 0.0) * comp_var
@@ -165,10 +266,19 @@ def _fit_overdispersion(
         od = prior_overdispersion
     else:
         od_mom = num / denom
-        # Precision-weighted shrinkage toward the prior overdispersion, by seed-node count.
-        total_weight = n_seed_nodes + prior_weight
+        # ── SHRINKAGE IN THE DATA'S OWN CURRENCY (the units fix) ────────────────────────────────────
+        # This used to weight the data by ``n_seed_nodes``, which is the wrong measure of evidence
+        # about a SECOND moment: overdispersion is a correlation BETWEEN fragments, so a seed with one
+        # fragment carries none of it — it has nothing to be correlated with. Counting seeds let
+        # 160k singleton seeds outvote the prior by four orders of magnitude on a library that has
+        # almost no pairs. ``_null_information`` is the honest measure and makes the expression an
+        # exact Normal–Normal posterior mean (see :func:`_prior_information`).
+        info = _null_information(
+            comp_frags[valid], np.broadcast_to(comp_var, total.shape)[valid]
+        )
+        total_weight = info + prior_weight
         od = (
-            (n_seed_nodes * od_mom + prior_weight * prior_overdispersion) / total_weight
+            (info * od_mom + prior_weight * prior_overdispersion) / total_weight
             if total_weight > 0.0
             else od_mom
         )
@@ -182,8 +292,8 @@ def fit_gdna_strand_overdispersion(
     gdna_weight: np.ndarray,
     rna_sense_frac: float,
     *,
-    prior_overdispersion: float = 0.0,
-    prior_weight: float = 0.0,
+    prior_overdispersion: float = _PRIOR_OVERDISPERSION,
+    prior_weight: float = _PRIOR_INFORMATION,
 ) -> GdnaStrandModel:
     """Pooled method-of-moments fit of the global gDNA strand overdispersion, with prior shrinkage.
 
@@ -263,8 +373,8 @@ def fit_gdna_strand_from_substrate(
     boundary_side_eff_len,
     *,
     rna_sense_frac: float,
-    prior_overdispersion: float = 0.0,
-    prior_weight: float = 0.0,
+    prior_overdispersion: float = _PRIOR_OVERDISPERSION,
+    prior_weight: float = _PRIOR_INFORMATION,
 ) -> GdnaStrandModel:
     """Fit the global gDNA strand overdispersion from the calibration substrate.
 
@@ -301,8 +411,8 @@ def fit_rna_strand_overdispersion(
     total: np.ndarray,
     rna_sense_frac: float,
     *,
-    prior_overdispersion: float = 0.0,
-    prior_weight: float = 0.0,
+    prior_overdispersion: float = _PRIOR_OVERDISPERSION,
+    prior_weight: float = _PRIOR_INFORMATION,
 ) -> RnaStrandModel:
     """Pooled method-of-moments fit of the global RNA strand overdispersion, with prior shrinkage.
 
@@ -345,8 +455,8 @@ def fit_rna_strand_from_substrate(
     substrate,
     *,
     rna_sense_frac: float,
-    prior_overdispersion: float = 0.0,
-    prior_weight: float = 0.0,
+    prior_overdispersion: float = _PRIOR_OVERDISPERSION,
+    prior_weight: float = _PRIOR_INFORMATION,
 ) -> RnaStrandModel:
     """Fit the global RNA strand overdispersion from boundary-side spliced counts.
 

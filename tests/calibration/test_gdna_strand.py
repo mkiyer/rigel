@@ -11,8 +11,8 @@ import numpy as np
 import pytest
 
 from rigel.calibration.gdna_strand import (
+    _PRIOR_OVERDISPERSION,
     _MAX_OVERDISPERSION,
-    _OVERDISPERSION_FLOOR,
     GdnaStrandModel,
     fit_gdna_strand_from_substrate,
     fit_gdna_strand_overdispersion,
@@ -83,12 +83,17 @@ def test_mixture_identifiability(weight):
 
 
 def test_thin_seed_fallback():
-    """§4.3 — no gDNA signal (all weight 0, or empty) → fallback to the floor, no crash."""
+    """§4.3 — no gDNA signal (all weight 0, or empty) → fallback to the PRIOR, no crash.
+
+    ⭐ 2026-07-28: the no-argument fallback is now ``od₀`` (0.0345), not a hard ``0``. A hard zero is a
+    claim of perfect Binomiality — the *most* confident strand likelihood the model can assert — from a
+    library that supplied no evidence at all. Falling back to the near-binomial prior is the honest
+    behaviour, and it is why the shrinkage is kept rather than replaced by a bare clip."""
     empty = fit_gdna_strand_overdispersion(
         np.array([]), np.array([]), np.array([]), rna_sense_frac=0.95
     )
     assert empty.fallback_used
-    assert empty.gdna_strand_overdispersion == _OVERDISPERSION_FLOOR
+    assert empty.gdna_strand_overdispersion == pytest.approx(_PRIOR_OVERDISPERSION)
 
     rng = np.random.default_rng(1)
     total = np.full(10, 100.0)
@@ -97,7 +102,7 @@ def test_thin_seed_fallback():
         sense, total, np.zeros_like(total), rna_sense_frac=0.95
     )
     assert no_gdna.fallback_used
-    assert no_gdna.gdna_strand_overdispersion == _OVERDISPERSION_FLOOR
+    assert no_gdna.gdna_strand_overdispersion == pytest.approx(_PRIOR_OVERDISPERSION)
 
 
 def test_beta_concentration_roundtrip():
@@ -267,23 +272,39 @@ def test_overdispersion_for_beta_conversion():
 
 
 def test_shrinkage_sparse_leans_on_prior_abundant_on_fit():
-    """Few seed nodes → shrink toward the prior; many → follow the fitted MoM."""
+    """LOW-INFORMATION seeds → shrink toward the prior; high-information → follow the fitted MoM.
+
+    ⭐ 2026-07-28: "sparse" is now measured in the right currency. Overdispersion is a correlation
+    BETWEEN fragments, so the evidence unit is a PAIR — a seed of one fragment carries none of it. This
+    test used to call 3 nodes of depth 100 "sparse" and expect the prior to win; that is 14,850 pairs and
+    the fit should win, which is exactly the confusion the information-weighted shrinkage fixes. Genuine
+    sparsity is many SHALLOW seeds."""
     rng = np.random.default_rng(11)
     prior = overdispersion_for_beta(3.0)  # 1/7 ≈ 0.143
+    weight = 909.0  # the derived prior weight, in information units
 
-    # Sparse: 3 nodes of (near-)Binomial gDNA, strong prior weight ⇒ ≈ prior.
-    s, t = _beta_binom_nodes(rng, n_nodes=3, depth=100, overdispersion=0.01)
+    # LOW information: 40 two-fragment seeds = 40 pairs, far below the prior's 909 ⇒ ≈ prior.
+    s, t = _beta_binom_nodes(rng, n_nodes=40, depth=2, overdispersion=0.01)
     sparse = fit_gdna_strand_overdispersion(
-        s, t, np.ones_like(t), rna_sense_frac=0.95, prior_overdispersion=prior, prior_weight=30.0
+        s, t, np.ones_like(t), rna_sense_frac=0.95, prior_overdispersion=prior, prior_weight=weight
     )
     assert sparse.gdna_strand_overdispersion == pytest.approx(prior, abs=0.03)
 
-    # Abundant: 5000 nodes at od=0.05 ⇒ the fit dominates the (30-node) prior.
+    # HIGH information: 5000 nodes at depth 120 = 35.7M pairs ⇒ the fit dominates.
     s, t = _beta_binom_nodes(rng, n_nodes=5000, depth=120, overdispersion=0.05)
     abundant = fit_gdna_strand_overdispersion(
-        s, t, np.ones_like(t), rna_sense_frac=0.95, prior_overdispersion=prior, prior_weight=30.0
+        s, t, np.ones_like(t), rna_sense_frac=0.95, prior_overdispersion=prior, prior_weight=weight
     )
     assert abundant.gdna_strand_overdispersion == pytest.approx(0.05, rel=0.20, abs=0.01)
+
+    # ⭐ And the point of the units fix: 3 DEEP nodes are NOT sparse — they must follow the fit.
+    s, t = _beta_binom_nodes(rng, n_nodes=3, depth=400, overdispersion=0.05)
+    deep_few = fit_gdna_strand_overdispersion(
+        s, t, np.ones_like(t), rna_sense_frac=0.95, prior_overdispersion=prior, prior_weight=weight
+    )
+    assert abs(deep_few.gdna_strand_overdispersion - 0.05) < abs(
+        deep_few.gdna_strand_overdispersion - prior
+    )
 
 
 def test_overdispersion_clamped_to_ceiling():

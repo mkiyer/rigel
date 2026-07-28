@@ -809,18 +809,64 @@ def test_tau_gag_fix_deconvolution_prediction_stays_gated():
 def test_strand_overdispersion_prior_default_is_near_binomial():
     """BUG #1 regression: the shipped default strand-overdispersion prior must be the NEAR-BINOMIAL null
     (α=β=14 ⇒ od₀≈0.034), NOT the old over-conservative 0.143 (α=β=3) that widened the gDNA Beta-Binomial
-    and erased its specificity at its own mean ½. The validator floors α=β at 2 (Beta(2,2), od=0.2, the most
-    overdispersion allowed)."""
-    from rigel.calibration.gdna_strand import overdispersion_for_beta
-    from rigel.config import CalibrationConfig
+    and erased its specificity at its own mean ½.
 
-    cfg = CalibrationConfig()
-    assert cfg.gdna_strand_prior_alpha_beta == 14.0
-    assert cfg.rna_strand_prior_alpha_beta == 14.0
-    assert overdispersion_for_beta(cfg.gdna_strand_prior_alpha_beta) < 0.05
+    ⭐ 2026-07-28: the four ``CalibrationConfig`` prior fields were collapsed into the two asserted module
+    constants next to the estimator, so this now asserts on those. The assertion itself is UNCHANGED and
+    still binds — it is the reason ``od₀ = od_max/2 = 0.1`` (derived independently as the max-entropy mean
+    of the ceiling-bounded prior) was REJECTED: at a = 4.5 it fails this test, and it was measured to
+    collapse a balanced pure-gDNA node's strand log-evidence 305.4 → 113.9 nats."""
+    from rigel.calibration.gdna_strand import (
+        _CEIL_ALPHA_BETA,
+        _MAX_OVERDISPERSION,
+        _PRIOR_ALPHA_BETA,
+        _PRIOR_OVERDISPERSION,
+        overdispersion_for_beta,
+    )
+
+    assert _PRIOR_ALPHA_BETA == 14.0
+    assert _PRIOR_OVERDISPERSION < 0.05  # the near-binomial null — BUG #1's fix
     assert overdispersion_for_beta(3.0) > 0.14  # the old default was ~4× more overdispersed
-    with pytest.raises(ValueError):
-        CalibrationConfig(gdna_strand_prior_alpha_beta=1.5)
+    # the ceiling is the admissibility clamp, and the prior must sit strictly inside it
+    assert _CEIL_ALPHA_BETA == 2.0
+    assert _MAX_OVERDISPERSION == pytest.approx(0.2)
+    assert 0.0 < _PRIOR_OVERDISPERSION < _MAX_OVERDISPERSION
+
+
+def test_strand_overdispersion_prior_weight_is_derived_not_asserted():
+    """The prior's weight ``W`` must be DERIVED from the two asserted constants, in the data's own
+    information units — it used to be an asserted ``30`` in *seed-node* units, which is the wrong currency
+    for a second moment (a 1-fragment seed carries no information about a correlation between fragments).
+
+    ``W = 1/τ²`` with ``τ²`` the variance of the maximum-entropy distribution on ``[0, od_max]`` with mean
+    ``od₀`` — the least-committal prior given exactly what we assert."""
+    from rigel.calibration.gdna_strand import (
+        _MAX_OVERDISPERSION,
+        _PRIOR_INFORMATION,
+        _PRIOR_OVERDISPERSION,
+    )
+
+    # bracketed by the two distribution-shape extremes on the same support and mean
+    two_point = _PRIOR_OVERDISPERSION * (_MAX_OVERDISPERSION - _PRIOR_OVERDISPERSION)
+    assert 1.0 / two_point < _PRIOR_INFORMATION < 1.0 / _PRIOR_OVERDISPERSION**2 * 1.5
+    assert _PRIOR_INFORMATION == pytest.approx(909.1, rel=1e-3)
+
+
+def test_null_information_reduces_to_pair_count_at_symmetric_mean():
+    """``I = 1/Var(od_mom)|₀`` must equal the PAIR COUNT ``Σ n(n−1)/2`` exactly at μ = ½ (the gDNA case),
+    and must NOT be substituted by the pair count away from it (measured ``I/pairs`` = 0.05–0.14 at the RNA
+    fit's κ, i.e. pairs overstate RNA information 7–20×)."""
+    import numpy as np
+
+    from rigel.calibration.gdna_strand import _null_information
+
+    n = np.array([1.0, 2.0, 2.0, 10.0, 100.0])
+    pairs = float((n * (n - 1.0) / 2.0).sum())
+    assert _null_information(n, 0.25) == pytest.approx(pairs, rel=1e-12)
+    # a singleton contributes nothing, so dropping it changes nothing
+    assert _null_information(n[1:], 0.25) == pytest.approx(pairs, rel=1e-12)
+    # away from ½ the information is strictly LESS than the pair count
+    assert _null_information(n, 0.01 * 0.99) < pairs
 
 
 def test_pure_gdna_node_confident_at_near_binomial_od():

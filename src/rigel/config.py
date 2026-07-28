@@ -230,37 +230,13 @@ class CalibrationConfig:
     :func:`rigel.calibration.calibrate.calibrate`.
     """
 
-    #: **gDNA strand-overdispersion prior** (advanced). The gDNA per-region sense rate is
-    #: ``Beta(a, a)``; this is that symmetric shape ``a`` (= α = β). The fitted overdispersion is
-    #: shrunk toward ``od₀ = 1/(2·a + 1)`` for sparse/low-signal libraries. The prior should be the
-    #: **near-binomial null**: gDNA strand is intrinsically random (≈50/50 per region), so the expected
-    #: overdispersion is small (only secondary mappability/GC/PCR effects); the MoM measures any real
-    #: excess from the data. ``a = 14`` ⇒ ``od₀ ≈ 0.034``. (The old ``a = 3`` ⇒ ``od₀ ≈ 0.143`` was an
-    #: over-conservative "FP-safe floor" that pulled EVERY node toward 0.5 — under-calling clean-gDNA
-    #: nodes and over-calling clean-RNA nodes — because an inflated od widens the gDNA Beta-Binomial and
-    #: erases its specificity at its own mean ½. Confirmed at the unit level: a pure-gDNA 50/50 node
-    #: solves to f_g≈1 at od=0 but ≈0.7 at od=0.1.) ``a = 2`` ⇒ ``od = 0.2`` is the **most overdispersion
-    #: allowed** (the fit is capped there), so values below 2 are rejected; larger ``a`` ⇒ less.
-    gdna_strand_prior_alpha_beta: float = 14.0
+    #: ⭐ The strand-overdispersion PRIOR and CEILING are no longer config: they live as the two
+    #: asserted constants ``_PRIOR_ALPHA_BETA`` / ``_CEIL_ALPHA_BETA`` in
+    #: :mod:`rigel.calibration.gdna_strand`, next to the estimator they parameterise, and the
+    #: shrinkage weight is DERIVED from them rather than asserted. Four fields
+    #: (``{gdna,rna}_strand_prior_{alpha_beta,weight}``) collapsed to two constants + one
+    #: structural zero; see `docs/calibration/strand_overdispersion_design.md`.
 
-    #: Strength of the overdispersion prior, in effective seed-node units (advanced). The prior is
-    #: worth this many seed nodes; libraries with far more informative seed nodes follow the fit,
-    #: sparse ones shrink toward the prior. Replaces the old hard min-seed-node / significance
-    #: gates with continuous shrinkage.
-    gdna_strand_prior_weight: float = 30.0
-
-    #: **RNA strand-overdispersion prior** (advanced). The exact twin of
-    #: ``gdna_strand_prior_alpha_beta`` for the *RNA* strand Beta-Binomial (fitted from boundary-side
-    #: spliced counts). Kept at the **same default as gDNA** so that under sparse data both
-    #: components collapse to the same distribution — that symmetry is what keeps an unstranded node
-    #: uninformative (a gDNA-only overdispersion biases the deconvolution toward RNA). RNA-spliced
-    #: strand is motif-deterministic ⇒ also near-binomial, so the same near-binomial null applies. Same
-    #: ``a ≥ 2`` rule (``Beta(2,2)``, od=0.2, is the most overdispersion allowed).
-    rna_strand_prior_alpha_beta: float = 14.0
-
-    #: Strength of the RNA overdispersion prior, in effective seed-node units (advanced). Twin of
-    #: ``gdna_strand_prior_weight``; same default.
-    rna_strand_prior_weight: float = 30.0
 
     #: **Sweep grid resolution** ``K`` for the per-node log-density log-odds solve over ``λ = logit(f_g)``
     #: (``simplex_logodds``, driven by ``bp_solver.node_sweep``; single-strand nodes are exact 1-D, AMBIG
@@ -385,28 +361,6 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.sweep_logodds_window (L) must be > 0; "
                 f"got {self.sweep_logodds_window}."
-            )
-        if self.gdna_strand_prior_alpha_beta < 2.0:
-            raise ValueError(
-                "CalibrationConfig.gdna_strand_prior_alpha_beta must be >= 2.0 "
-                "(Beta(2,2) is the most overdispersion allowed, od=0.2); "
-                f"got {self.gdna_strand_prior_alpha_beta}."
-            )
-        if self.gdna_strand_prior_weight < 0.0:
-            raise ValueError(
-                "CalibrationConfig.gdna_strand_prior_weight must be >= 0; "
-                f"got {self.gdna_strand_prior_weight}."
-            )
-        if self.rna_strand_prior_alpha_beta < 2.0:
-            raise ValueError(
-                "CalibrationConfig.rna_strand_prior_alpha_beta must be >= 2.0 "
-                "(Beta(2,2) is the most overdispersion allowed, od=0.2); "
-                f"got {self.rna_strand_prior_alpha_beta}."
-            )
-        if self.rna_strand_prior_weight < 0.0:
-            raise ValueError(
-                "CalibrationConfig.rna_strand_prior_weight must be >= 0; "
-                f"got {self.rna_strand_prior_weight}."
             )
 
 

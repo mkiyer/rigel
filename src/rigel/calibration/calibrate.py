@@ -60,7 +60,6 @@ from .density_deconv import GdnaBackground, density_lambda_factor, fit_intron_ba
 from .gdna_strand import (
     fit_gdna_strand_from_substrate,
     fit_rna_strand_from_substrate,
-    overdispersion_for_beta,
 )
 from .node_chain import build_node_chain
 from .result import CalibrationResult
@@ -252,8 +251,6 @@ def calibrate(
             node_density_raw,
             boundary_eff_len,
             rna_sense_frac=rna_sense_frac,
-            prior_overdispersion=overdispersion_for_beta(config.gdna_strand_prior_alpha_beta),
-            prior_weight=config.gdna_strand_prior_weight,
         )
         gdna_strand_overdispersion = gdna_strand.gdna_strand_overdispersion
         _gd_seed = (gdna_strand.n_seed_nodes, gdna_strand.n_seed_fragments, gdna_strand.fallback_used)
@@ -263,8 +260,6 @@ def calibrate(
         rna_strand = fit_rna_strand_from_substrate(
             substrate,
             rna_sense_frac=rna_sense_frac,
-            prior_overdispersion=overdispersion_for_beta(config.rna_strand_prior_alpha_beta),
-            prior_weight=config.rna_strand_prior_weight,
         )
         rna_strand_overdispersion = rna_strand.rna_strand_overdispersion
         _rna_seed = (rna_strand.n_seed_nodes, rna_strand.n_seed_fragments, rna_strand.fallback_used)
