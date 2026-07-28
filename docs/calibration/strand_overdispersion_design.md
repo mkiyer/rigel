@@ -168,6 +168,45 @@ fit, but not on libraries whose **median seed carries 1–2 fragments**.
 "how dispersed can gDNA's strand split actually be?" — a biological question, answered once, and then used
 for both the ceiling and the null.**
 
+### ⭐ OWNER RULING (2026-07-28) — the constant must exist, and `Beta(a,a)` is where it belongs
+
+> *"We assume gDNA is symmetric around 0.5 (biological truth). We accept overdispersion due to unknown
+> sequencing factors. At some point the likelihood shifts from 'this is overdispersed gDNA' to 'this is an
+> annotation error'. You are correct that this is a magic number. It needs to exist, and I propose
+> `Beta(2,2)` should be that ceiling because of the mathematical behaviour of `Beta ≥ 2` versus
+> `Beta ≤ 2`: at `Beta(2,2)` the probability of 0.0 or 1.0 becomes zero. In fact I think `Beta(3,3)` might
+> be better. I agree we should reject seeds that violate this ceiling."*
+
+**Accepted, and the mathematical rationale is the right one** — `Beta(a,a)` has density `∝ [p(1−p)]^(a−1)`,
+which vanishes at both ends for `a ≥ 2`. That is what makes "all fragments on one strand at large `n`"
+impossible under the model rather than merely unlikely, and it is why the constant belongs on `a` rather
+than on a p-value.
+
+**And `Beta(3,3)` is measurably better, which vindicates the instinct.** `P(all n on one strand)` decays as
+`6/((n+2)(n+3)) ~ n⁻²` at `a = 2` but `60/((n+3)(n+4)(n+5)) ~ n⁻³` at `a = 3`. Two-sided tail p-values
+(Bonferroni over 160,366 seeds ⇒ reject at `p < 6.2e-6`):
+
+| seed | `Beta(2,2)` | **`Beta(3,3)`** | `Beta(4,4)` |
+|---|---|---|---|
+| **owner's 9 sense / 1 antisense** | 0.217 keep | **0.154 keep** ✅ | 0.120 keep |
+| 10/10 | 0.077 keep | 0.044 keep ✅ | 0.029 keep |
+| 90/100 | 0.070 keep | 0.026 keep ✅ | 0.011 keep |
+| **vcap top seed** (N=1523, sense=5) | 1.08e-4 **keep** ⛔ | **1.88e-6 REJECT** ✅ | 3.85e-8 REJECT |
+| vcap #2 (N=1392, sense=13) | 6.4e-4 keep | 2.4e-5 keep ⚠ | 1.0e-6 REJECT |
+| vcap #3 (N=1200, sense=9) | 4.5e-4 keep | 1.5e-5 keep ⚠ | 5.6e-7 REJECT |
+
+**`Beta(2,2)` cannot reject even the worst contaminant** — the seed that is 12 % of the pooled numerator on
+its own. **`Beta(3,3)` rejects it while comfortably keeping every legitimate-looking split**, including the
+9/10 case the owner raised specifically. `Beta(4,4)` also catches #2 and #3, at the cost of a tighter
+admissible band (`od ≤ 0.111`).
+
+`od = 1/(2a+1)`: **a = 2 ⇒ 0.200, a = 3 ⇒ 0.143, a = 4 ⇒ 0.111.**
+
+⚠ The choice is finely balanced between a = 3 and a = 4, and it is genuinely a judgement about how
+dispersed gDNA's strand split can be from sequencing effects alone. **a = 3 is the conservative choice**
+(more dispersion admitted ⇒ weaker strand likelihood ⇒ the direction the governing principle prefers) and
+it clears the owner's own worked example by a factor of 25,000.
+
 ### P1 (superseded — kept for the record) — screen each seed against its OWN premise (addresses D1)
 
 A seed entering a **mean-½** fit asserts its gDNA fragments are Binomial(n_c, ½). Test that assertion with
