@@ -166,16 +166,22 @@ def _regrid_global(glp, n_from, n_to, L):
 def _gdna_arm(lam, global_logprior):
     """The gDNA arm of ψ over the λ grid → broadcastable to ``(m, K)``.
 
-    ``_JEFFREYS_REF`` reference ``+½·log f_g`` → ``(1, K)`` when no fitted prior. When a prior IS fitted, the
-    fitted ``logP_g(log ρ_g)`` (pre-evaluated on THIS ``f_g`` grid → ``(m, K)``) REPLACES the reference — it
-    carries no information and must not be double-counted.
+    ``_JEFFREYS_REF`` reference ``+½·log f_g`` → ``(1, K)``. When a prior IS fitted, the fitted
+    ``logP_g(log ρ_g)`` (pre-evaluated on THIS ``f_g`` grid → ``(m, K)``) is **ADDED** to it.
 
-    ``None`` means "not fitted", **not** "no term": writing nothing would silently select Haldane at this arm
-    and leave ψ improper at ``f_g → 0``."""
+    ⚠ It used to REPLACE the reference, on the argument that the reference "carries no information and must
+    not be double-counted". That argument is wrong twice over. The reference is not an information claim to
+    be superseded — it is the **measure** ψ is written against, and it is the ONLY term bounding this arm at
+    ``f_g → 0`` (`_rna_arm` bounds the other vertex and is never replaced, so the two arms were not even
+    treated alike). Deleting it left ψ improper at the vertex the fitted prior most often points at, which is
+    the documented node-1055 crush. Bayes composes a prior with a measure by ADDITION in log space; there is
+    no double-count to avoid.
+
+    ``None`` means "not fitted", **not** "no term"."""
     ref = _JEFFREYS_REF * _log_fg(lam)[None, :]
     if global_logprior is None:
         return ref
-    return np.asarray(global_logprior, np.float64)
+    return ref + np.asarray(global_logprior, np.float64)
 
 
 def _rna_arm(lam):

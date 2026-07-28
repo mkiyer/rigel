@@ -147,8 +147,10 @@ def node_sweep(
     counts and effective lengths: nothing is fitted, there is no precision to refit and no outer fixed-point
     loop. The global prior is ANCHORED (every input fit once before the solve), so the single FB pass is exact.
 
-    BEFORE the pass: the pass-0 NPMLE gDNA hyperprior (:class:`~.npmle.DensityNPMLE`), fit once,
-    belief-free, and passed as ``gdna_prior``. ``gdna_prior=None`` is a first-class PRIOR-FREE solve: ψ then
+    BEFORE the pass: the population gDNA hyperprior (:class:`~.gdna_landscape.GdnaLandscape`), fit once on
+    the pass-0 result, and passed as ``gdna_prior``. (It replaced the δ-pin :class:`~.npmle.DensityNPMLE` in
+    this role in W4; the NPMLE is retired here but still fitted for the Role-A enrichment landscape and QC.)
+    ``gdna_prior=None`` is a first-class PRIOR-FREE solve: ψ then
     carries the derived reference alone on both arms (``simplex_logodds._gdna_arm`` / ``_rna_arm``) — prior-free
     is not reference-free.
 
@@ -486,13 +488,31 @@ def node_sweep(
         # the shift's "the missing component is absent". A structurally-dead strand has own density 0 and so
         # contributes nothing, correctly. Applied per-message in the combine (`_transport`).
         def _pin_v(g, p, n, pg_, pp_, pn_):
-            """Scale a claim to the node's observed mass: `Σ_c ρ_c·E_c = M`, an IDENTITY under the imputation
-            premise, restored by a common factor `k = M/S`.
+            """The message's densities re-expressed in the destination's MASS FRAME: `Σ_c ρ_c·E_c = M`, an
+            IDENTITY under the imputation premise, restored by a common factor `k = M/S`.
 
-            The partial-claim semantics are load-bearing: a component the claim does not SUPPLY (precision 0)
-            contributes the node's OWN density to the mass budget and does not move, which is what keeps a
-            partial claim partial — a message carrying gDNA only still delivers `f_g < 1`. Rescaling all
-            three blindly instead regresses capture-OFF 3.6×.
+            ⚠⚠ **THE RESULT IS A COMPARISON FRAME FOR THE MISMATCH TEST — IT IS NOT THE MESSAGE.** It used to
+            replace the delivered densities, and that was a belief-propagation violation ON THE MODE: the
+            budget `S` fills every component the message does not supply from the DESTINATION'S OWN density
+            (`og/op/on`), so the delivered claim became a function of the destination's own self-solve.
+            Measured: with an RNA-only message and `E_g = E_r`, the delivered RNA fraction was **exactly
+            `1/(1 + f_g_own)`** (verified to 2.1e-16) — the node confirming itself. On unstranded data
+            `f_g_own` is the uninformative ½, so the pin reserved **33.6 %** of the mass budget for gDNA the
+            message never claimed and a **zero-gDNA library read back 29.3 % gDNA**; on stranded data, where
+            the strand likelihood resolves `f_g_own` to 0.013, the reservation was 1.2 % and the
+            false-positive rate 1.4 %. The reservation WAS the false-positive rate. Full derivation:
+            `docs/calibration/pin_derivation.md`.
+
+            Feeding the DL mismatch test is what it is legitimately for. That test is M7's two-study
+            random-effects comparison **against the destination's own self-solve**, so destination
+            information is the point of it — and it sets a VARIANCE, which can mis-weight a message but
+            cannot invent a location. Pinning first is what makes the gap a pure COMPOSITION statement: both
+            sides then account for the same total, so the common scale (the reframe residual) is gone from
+            `G` and only the share drift is left.
+
+            The partial-claim semantics are load-bearing FOR THAT COMPARISON: a component the claim does not
+            SUPPLY (precision 0) contributes the node's OWN density to the budget and does not move, which
+            keeps a partial claim partial. Rescaling all three blindly instead regresses capture-OFF 3.6×.
 
             The weighted alternative (M12 — apportion the correction
             by how badly each component is known, of which this common factor is the `w → 0` limit) was
@@ -982,6 +1002,19 @@ def node_sweep(
             graft = ex_a & is_bnd_a[src] & valid
             gp = np.where(graft, spl_p_f[sf][src], 0.0)
             gn = np.where(graft, spl_n_f[sf][src], 0.0)
+            # ⛔ THE SHARE TRANSFER (`pin_derivation.md` (★)) WAS IMPLEMENTED HERE AND REVERTED, 2026-07-27.
+            # It delivers the source's own composition share carried onto the destination's scale —
+            # `f̂_c = ctx_c·E_c[src]/S_src`, then `t_c = f̂_c·M/E_c` — which is BP-clean, keeps a partial
+            # claim partial with the deficit measured AT THE SOURCE, and needs no reframe at all.
+            # It hit every target it was aimed at (unstranded × capture-OFF × gDNA-bearing −0.0022/−0.0020,
+            # `gdna_none` untouched) **and lost badly everywhere else**: suite +0.0119 (r0) / +0.0121 (r1),
+            # capture-ON **+0.0264/+0.0274**, unstranded × capON **+0.0378/+0.0415**, corr −0.033.
+            # ⭐ THE LESSON, and it corrects the derivation: **"composition transfers" is a WEAKER premise
+            # than "density transfers, reframed".** Under capture an exon and its flanking boundary do NOT
+            # share a composition — the boundary sits on the capture slope (0.125× the exon, 2113× the
+            # intron at verystrong) — so discarding `r` in favour of a mass ratio throws away the
+            # enrichment information the reframe carries. `r` only *looked* inert while `_pin_v` was
+            # cancelling it; once the pin no longer rewrites the delivered density, `r` is load-bearing.
             tg, tp, tn = rg[src] * r, (rp[src] + gp) * r, (rn[src] + gn) * r
             # σ²_transfer = Var(log r) (M5, the tested pure law): 0 on the matched-set graft (r common-mode ⇒
             # cancels — a double-count otherwise), Var(log r) = logvar_tot[dst]+logvar_tot[src] elsewhere (peel /
@@ -1110,12 +1143,17 @@ def node_sweep(
             tpg, tmg = tpg / (1.0 + tpg * _dg), tmg / (1.0 + tmg * _dg)
             tpp, tmp = tpp / (1.0 + tpp * _dp), tmp / (1.0 + tmp * _dp)
             tpn, tmn = tpn / (1.0 + tpn * _dn), tmn / (1.0 + tmn * _dn)
-            tg, tp, tn = _pin_v(tg, tp, tn, tpg, tpp, tpn)  # a claim about THIS node's mass
-            # ── the COMPOSITION half of the cliff cost: the DL mismatch deflation, on the PINNED densities.
-            # Pinning first is what makes the gap a pure COMPOSITION statement: `_pin_v` has already rescaled the
-            # message to this node's own mass, so the common scale (the reframe residual) is gone from G and only
-            # the share drift is left. Every stream is deflated — the anchor recovers only when the composition
-            # τ-stream is damped alongside the measurement one (ablation-confirmed, HANDOFF_4 §6).
+            # The mass frame — for the mismatch COMPARISON only. The delivered densities `tg/tp/tn` are left
+            # exactly as the source measured and the reframe delivered them: a component's LEVEL is an
+            # absolute rate, and re-normalising it against a budget built from the destination's own belief
+            # is what made the message self-confirming (`_pin_v`, and `pin_derivation.md`). Note the message
+            # packet's other two claims are unaffected either way — `tlam` and `tth` are scale-free, so the
+            # pin's common factor cancels from them identically.
+            pin_g, pin_p, pin_n = _pin_v(tg, tp, tn, tpg, tpp, tpn)
+            # ── the COMPOSITION half of the cliff cost: the DL mismatch deflation, in the PINNED frame.
+            # Both sides then account for the same total, so the common scale (the reframe residual) is gone
+            # from G and only the share drift is left. Every stream is deflated — the anchor recovers only
+            # when the composition τ-stream is damped alongside the measurement one (HANDOFF_4 §6).
             # ── THE λ-EMISSION GATE (structural, and PRIOR to any damping question) ────────────────────────
             # A composition message is a claim about the SPLIT, ``λ = log(f_g/f_R)``. A source that carries only
             # ONE component has no such claim to make — λ is not "large" for it, it is UNDEFINED. The canonical
@@ -1137,9 +1175,9 @@ def node_sweep(
             # supplied — it is the claim "there is none of this here", which is exactly a composition claim.
             # Testing the density conflates the two and silences λ wherever a legitimate zero is emitted.
             ttau = np.where((tpg > 0.0) & ((tpp + tpn) > 0.0), ttau, 0.0)
-            g_g, c_g = mismatch_gap(tg, og)
-            g_p, c_p = mismatch_gap(tp, op)
-            g_n, c_n = mismatch_gap(tn, on)
+            g_g, c_g = mismatch_gap(pin_g, og)
+            g_p, c_p = mismatch_gap(pin_p, op)
+            g_n, c_n = mismatch_gap(pin_n, on)
             tpg = mismatch_deflate(tpg, g_g, c_g, v_own_g)
             tpp = mismatch_deflate(tpp, g_p, c_p, v_own_r)
             tpn = mismatch_deflate(tpn, g_n, c_n, v_own_r)
@@ -1151,7 +1189,7 @@ def node_sweep(
             # ``lam_msg = mo_g − mo_R`` from, so the gap is exactly the error of the claim ψ receives. A
             # contradiction on EITHER arm contradicts the λ claim (a message with no RNA at all is asserting
             # λ = +∞, i.e. "this node is pure gDNA").
-            g_R, c_R = mismatch_gap(tp + tn, op + on)
+            g_R, c_R = mismatch_gap(pin_p + pin_n, op + on)
             _tau_pre = ttau
             ttau = mismatch_deflate(ttau, g_g - g_R, c_g | c_R, v_own_lam)
             if _capture is not None:  # inert: the per-message gaps + the τ-stream kill, for the dissect loop

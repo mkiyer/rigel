@@ -334,13 +334,14 @@ class CalibrationConfig:
     #: refit (it tracks the running belief). ``0`` ⇒ the pass-0 bootstrap alone (no refit).
     calib_refit_iters: int = 1
 
-    #: **gDNA composition prior representation (Role B).** ``False`` (default) = the EM Poisson-mixture NPMLE.
-    #: ``True`` = the **additive, occupancy-weighted, fixed-bandwidth KDE** on the deconvolved gDNA + a weak
-    #: 1-pseudo-observation floor (``docs/calibration/archive/gdna_kde_restore_plan.md``): every node deposits its own kernel so a
-    #: capture-enriched minority is never competed away, and the intergenic flood is a single weak floor rather
-    #: than an ``n_regions`` tower. Affects ONLY the gDNA hyperprior fit (Role B) — NOT the enrichment NPMLE
-    #: (Role A / σ²_transfer) and NOT the solve's gDNA messages. Experimental; being A/B-gated before default-on.
-    gdna_prior_additive: bool = False
+    #: **gDNA hyperprior STRENGTH** — a temperature on ψ's fitted composition arm
+    #: (``calibration.gdna_landscape.GdnaLandscape``). ``1.0`` is exact Bayes. Below 1 tempers a prior that
+    #: is, after all, fitted from *biased* pass-0 output, which is robustness rather than a fudge: it is what
+    #: lets real data overcome a wrong prior, and it is the intended control for the one measured failure
+    #: direction — on zero-gDNA and capture-OFF libraries the landscape places 0.2–2.4 % of its mass in the
+    #: enriched region where the truth has ~0.01–1 %. Affects ONLY the hyperprior refit (Role B), never the
+    #: enrichment NPMLE (Role A) and never the solve's gDNA messages.
+    gdna_prior_strength: float = 1.0
 
     def __post_init__(self) -> None:
         if self.calib_refit_iters < 0:
@@ -351,6 +352,11 @@ class CalibrationConfig:
             raise ValueError(
                 "CalibrationConfig.npmle_bandwidth must be in (0, 5) decades; "
                 f"got {self.npmle_bandwidth}."
+            )
+        if float(self.gdna_prior_strength) < 0.0:
+            raise ValueError(
+                "CalibrationConfig.gdna_prior_strength must be >= 0 (0 disables the prior term); "
+                f"got {self.gdna_prior_strength}."
             )
         if self.background_robust_trim_mad is not None and float(self.background_robust_trim_mad) <= 0.0:
             raise ValueError(

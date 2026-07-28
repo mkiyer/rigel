@@ -64,7 +64,8 @@ from .gdna_strand import (
 )
 from .node_chain import build_node_chain
 from .result import CalibrationResult
-from .signature import coarse_type_array
+from .gdna_landscape import GdnaLandscape, fit_gdna_landscape
+from .signature import RegionType, coarse_type_array
 from .simplex_logodds import _logodds_grid
 from .strand_balance import fit_strand_balance
 from .substrate import BoundarySubstrate, CalibrationSubstrate
@@ -133,48 +134,52 @@ def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config,
     return prior
 
 
-def _fit_gdna_hyperprior(
-    chain, belief, statics, region_arrays, mass_global, eff_global, *, background, bandwidth, additive=False,
-):
-    """Fit the DECONVOLVED-gDNA hyperprior (:class:`DensityNPMLE`) on the initial solve's peeled gDNA — the
-    composition (gDNA) arm of ψ for the Phase-2 refit. Training set (non-circular): REGION nodes only, AMBIG
-    (both free — the two-root ambiguity it must resolve) and boundaries EXCLUDED. Returns ``None`` if fewer than
-    5 trainable nodes.
+#: Minimum training nodes for a hyperprior fit — below this the population is not a population.
+_MIN_TRAIN = 5
 
-    **This affects only the PRIOR fit — never the solve's gDNA messages** (the G1/TSS/TES boundary emissions in
-    ``node_sweep`` are a separate mechanism and are untouched).
 
-    ``additive=False`` (EM path): SELECTED = single-strand OR structural-gDNA (``single | gonly``),
-    precision-weighted by ``var_gdna``; HYBRID (``background`` set) drops intergenic into the aggregate cell.
+def _fit_gdna_hyperprior(chain, belief, statics, region_arrays, mass_global, eff_global, *, strength):
+    """Select the training substrate from the chain and fit the :class:`GdnaLandscape` on the initial solve's
+    peeled gDNA — the composition (gDNA) arm of ψ for the Phase-2 refit. ``None`` if it cannot be fit.
 
-    ``additive=True`` (the Role-B KDE — ``docs/calibration/archive/gdna_kde_restore_plan.md``): SELECTED = **single-strand expressed
-    regions only** (``single``) — intergenic / structural-gDNA (``gonly``) are dropped and represented by the
-    weak floor instead of flooding the depleted mode. Occupancy-weighted, fixed bandwidth (``var_g=None`` — no
-    per-node τ discounting, so the enriched minority renders at its occupancy height)."""
+    **This affects only the PRIOR fit — never the solve's gDNA messages** (the G1/TSS/TES boundary emissions
+    in ``node_sweep`` are a separate mechanism and are untouched).
+
+    The substrate is the whole of this function's job; the estimator itself is in
+    :mod:`.gdna_landscape`. Four axes decide membership, and conflating them is the mistake this replaces
+    (production plan §2.2):
+
+    * **circularity → structural exclusion.** AMBIG nodes are out. They are the two-root ambiguity the prior
+      exists to resolve, so training on them would have it predict itself. ⚠ Note the *empirical* case
+      alongside this is stratum-dependent — it holds over all conditions but reverses on the ones where an
+      enriched mode exists — so the argument carrying the decision is the circularity, not the EMD.
+    * **identifiability → structural INCLUSION.** A live region with no unspliced mass has density ``0`` for
+      every ``f_g``: "gDNA is absent here" is the strongest depletion evidence there is, and it anchors the
+      depleted mode. Dropping it costs +0.26 / +0.61 EMD (+1.04 on zero-gDNA libraries).
+    * **precision → a continuous weight**, never admission (`gdna_landscape._reliability`).
+    * **geometry → boundaries are EXCLUDED** (owner, 2026-07-27). They cross rather than contain, are ~as
+      numerous as regions, and only 5.1 % of them are truly enriched against the regions' 12.1 %; their
+      two-flank mixture lands between the two true modes and supplies 74 % of all the mass in the valley.
+    """
     isr = np.asarray(chain.kind) == REGION
     fp = np.asarray(statics.free_pos, dtype=bool)
     fn = np.asarray(statics.free_neg, dtype=bool)
-    single = fp ^ fn
-    gonly = ~fp & ~fn  # structural gDNA (intergenic / seam)
-    live = (eff_global > 1.0e-9) & (mass_global > 1.0e-12)
-    if additive:
-        # the Role-B KDE substrate: single-strand expressed regions only (`single`) — intergenic / structural
-        # gDNA (`gonly`) is dropped and represented by the weak floor instead of flooding the depleted mode.
-        sel = live & isr & single
-    else:
-        sel = live & isr & (single | gonly)  # SELECTED: no AMBIG, no boundary ⇒ non-circular
-        if background is not None:  # HYBRID: intergenic → the aggregate cell, drop from the individuals
-            sig = np.asarray(region_arrays.signature)
-            ridx = np.asarray(chain.ref_idx, dtype=np.int64)
-            intergenic = isr & (ridx < sig.shape[0]) & (sig[np.clip(ridx, 0, sig.shape[0] - 1)] == 0)
-            sel = sel & ~intergenic
-    if int(sel.sum()) < 5:
+    rtype = coarse_type_array(np.asarray(region_arrays.signature))
+    ridx = np.clip(np.asarray(chain.ref_idx, dtype=np.int64), 0, rtype.shape[0] - 1)
+    expressed = isr & (eff_global > 1.0e-9) & (mass_global > 1.0e-12)
+    # the zero-count structural anchor: an intergenic or intronic region that sequenced no unspliced mass
+    anchor = isr & (eff_global > 1.0e-9) & (mass_global <= 1.0e-12) & (rtype[ridx] != RegionType.EXON)
+    sel = (expressed & ((fp ^ fn) | (~fp & ~fn))) | anchor
+    if int(sel.sum()) < _MIN_TRAIN:
         return None
-    g_hat = np.asarray(belief.f_g, dtype=np.float64) * mass_global
-    var_g = None if additive else np.asarray(belief.var_gdna, dtype=np.float64)[sel]
-    return DensityNPMLE.fit(
-        g_hat[sel], np.asarray(eff_global, dtype=np.float64)[sel], var_g=var_g, background=background,
-        bandwidth=bandwidth, additive=additive,
+    mass = np.asarray(mass_global, dtype=np.float64)[sel]
+    return fit_gdna_landscape(
+        np.asarray(belief.f_g, dtype=np.float64)[sel] * mass,
+        mass,
+        np.asarray(eff_global, dtype=np.float64)[sel],
+        np.asarray(belief.var_gdna, dtype=np.float64)[sel],
+        anchor=anchor[sel],
+        strength=strength,
     )
 
 
@@ -403,22 +408,23 @@ def calibrate(
         )
     else:
         background = None
-    gdna_hyperprior = None
+    gdna_hyperprior: GdnaLandscape | None = None
     for it in range(int(config.calib_refit_iters)):
         gdna_hyperprior = _fit_gdna_hyperprior(
             chain, belief, statics, region_arrays, mass_global, eff_global,
-            background=background, bandwidth=config.npmle_bandwidth,
-            additive=config.gdna_prior_additive,
+            strength=config.gdna_prior_strength,
         )
         if gdna_hyperprior is None:
             break
+        # FULL reset, then re-solve WITH the prior: nothing from pass-0 survives into the re-solve except
+        # the fitted landscape itself, so an over-confident node cannot refuse to budge when the prior lands.
         belief = _init_belief()
         belief = _sweep(gdna_hyperprior)
         logger.debug(
-            "calibration: PHASE 2 gDNA-hyperprior refit %d/%d (%d cells)",
+            "calibration: PHASE 2 gDNA-hyperprior refit %d/%d (%d training nodes)",
             it + 1,
             config.calib_refit_iters,
-            gdna_hyperprior.n_cells,
+            gdna_hyperprior.n_train,
         )
 
     regions = chain_region_deconv(chain, belief, substrate)
