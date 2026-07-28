@@ -320,6 +320,56 @@ all-antisense seed is not merely admissible, it is *favoured*. **There is no cei
 and it does not have the symmetric anchor that makes the gDNA case tractable. ⚠ Note `od_r` saturates on
 **4/4** real samples — worse than `od_g` — so this is not a hypothetical gap.
 
+### ⛔⛔⛔ AND `od_r` IS NOT AN ESTIMATE AT ALL — IT IS ABSORBING A MEAN MISFIT (2026-07-28)
+
+**Owner's reasoning, and it is correct:** *"We are already constrained to ANNOTATED splice junctions. These
+are highly reliable. The danger of modelling unannotated transcription does not exist for RNA. So I don't
+think we need an overdispersion ceiling. I'm interested to see what the RNA overdispersion estimate is on
+real data."*
+
+Measured on the four real cfRNA libraries, over **exactly the seeds the fit uses**:
+
+| sample | **κ handed to the fit** | **EMPIRICAL sense frac of those seeds** | ratio | **raw pooled od** | clipped |
+|---|---|---|---|---|---|
+| LBX0190 | 0.00231 | 0.30316 | **131×** | **10.73** | 0.2000 |
+| LBX0588 | 0.01203 | 0.33107 | 27.5× | **13.55** | 0.2000 |
+| MO_3021 | 0.00203 | 0.46607 | **229×** | **79.88** | 0.2000 |
+| vcap | 0.00006 | 0.06811 | **1142×** | **12.61** | 0.2000 |
+
+⛔ **`od` is an intraclass correlation. It is bounded by 1 by definition. The raw estimates are 10.7–79.9.**
+That is not a dispersion at all — it is mathematically impossible, and the ceiling is the only reason the
+output is finite.
+
+**The cause is a MEAN misfit, not dispersion.** `excess_s = (sense_s − N_s·κ)² − N_s·κ(1−κ)`, so a κ that
+is wrong by 131× puts a systematic offset straight into the numerator, squared. The estimator is measuring
+the distance between κ and its own seeds and reporting it as overdispersion.
+
+**The likely mechanism — two different orientation frames** (strong hypothesis from the code, not yet
+isolated):
+
+* **κ** comes from `fit_strand_balance(strand_model)` — the `StrandModel` trained during the **BAM scan
+  from unique mappers**, oriented relative to the **transcript**.
+* **the seeds** come from the accumulator's boundary-side spliced counts, and
+  `fit_rna_strand_from_substrate`'s own docstring says **"orientation is motif-relative"**.
+
+**Transcript-relative and motif-relative are not the same coordinate.** Handing a transcript-relative mean
+to motif-relative counts is a category error, and it would produce exactly this signature.
+
+**⇒ THREE CONSEQUENCES:**
+
+1. ⛔ **Do NOT remove the RNA ceiling yet.** The owner's reasoning about contamination is right, but the
+   saturation is not contamination — and without the ceiling `od_r` would be **10–80**, destroying the
+   strand likelihood on every real library. **The ceiling is currently load-bearing for a reason nobody
+   intended.**
+2. ⭐ **`od_r` carries no information today.** Every real library gets the same clipped 0.2 regardless of
+   its data, so the RNA strand channel is running at maximum dispersion — i.e. **maximally uninformative**
+   — on all real data. That is a much bigger deal than the gDNA side.
+3. **The fix is upstream of the estimator**: get the mean and the seeds into the same orientation frame.
+   No amount of robustification helps a mean that is wrong by three orders of magnitude.
+
+⚠ **The synthetic suite hides this** (`od_r` = 0.0008–0.0017 there), so it is another defect only real data
+could show — and the reason to check the frames explicitly rather than infer them.
+
 ## 4. VALIDATION PLAN AND GATES
 
 1. **Ground truth first.** The synthetic suite has `od = 0` by construction, so every estimator must return
