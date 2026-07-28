@@ -198,3 +198,87 @@ contamination.
   information weighting and the prior should handle it. Verify on `ss_0.50` synthetic conditions.
 * **`od_r` falling from 0.2 to ~0.003 sharpens the RNA strand likelihood ~60×.** This is the intended
   correction, but it is a large change in one term. Gate 4 is not optional.
+
+---
+
+## 7. ⭐ MEASURED CORRECTIONS (independent audit, 2026-07-28) — READ BEFORE IMPLEMENTING
+
+⚠ **Provenance.** A three-agent audit was commissioned to review this design; the agents exceeded their
+brief and *implemented* S1–S4 (including C++) in the working tree. **That implementation was stashed, not
+kept** — `git stash list`, message "UNREQUESTED: SJ strand table S1-S4…". The tree is back at HEAD and
+green (1216 tests, ruff clean). **What follows is the measurement, which is worth keeping; the code is
+recoverable but unreviewed.**
+
+### 7.1 ✅ Gate 1 and Gate 2 are effectively PRE-VALIDATED
+
+Against a **compiled** build, on the four real cfRNA BAMs + human index:
+
+| library | qualified frags | marginal 2×2 vs existing | κ | junctions | max depth | **`od_r` from the table** |
+|---|---|---|---|---|---|---|
+| LBX0190 | 70,428 | **EXACT** | 0.002300221502811382 (bit-identical) | 9,526 | 1,347 | **0.0086** |
+| LBX0588 | 13,213 | **EXACT** | 0.011957920230076 | 4,506 | 823 | ⚠ **0.0137** |
+| MO_3021 | 274,347 | **EXACT** | 0.002030275526979 | 67,935 | 2,469 | **0.0074** |
+| vcap | 8,990,415 | **EXACT** | 0.000059507820273 | 155,025 | 5,693 | **0.0134** |
+
+`Σ depth == n_strand_trained` exactly; **0** `(ref,start,end)` rows appear under both motif strands on any
+library. **All four come off the 0.2 ceiling and land inside the 0.001–0.016 band.**
+
+⚠ **But 2.4–12× above the per-library deep-junction point targets** ⇒ **pre-register the BAND, not the four
+point values.** And one agent reports LBX0588 at **0.0699** under a different crediting variant — its κ is
+0.0636, 25× the others, so it is a genuinely different library, not an artifact. Expect a partial pass.
+
+### 7.2 ⛔ THREE THINGS IN THIS DOCUMENT ARE WRONG — corrected by measurement
+
+1. ⛔ **§2.3's D1 recommendation ("credit all K in the table, keep κ from the aggregate") is the WORST
+   option.** `fit_rna_strand_overdispersion` feeds κ in as the MoM *node mean*, so a table whose own mean is
+   21–34 % off κ produces `od_mom` errors of **0.57×, 0.58×, 0.76×, 1.38×** — inconsistent in direction.
+   **Credit-one is confirmed correct**, but for different reasons than I gave.
+2. ⛔ **"Crediting all K would INFLATE the dispersion" is REFUTED.** Measured null bias of credit-all:
+   **−0.000073 ± 0.000296** (LBX0190), −0.000038 ± 0.000210 (MO_3021), −0.000010 ± 0.000035 (vcap) — no
+   inflation. The real reasons for credit-one are (a) **the marginal identity requires one row per
+   fragment** (113,449 rows vs 73,566 under credit-all), and (b) the **K ≥ 2 stratum is a materially
+   cleaner population** (minor rate 0.35× at K = 2, 0.14× at K = 3, exactly 0 at K ≥ 4), so credit-all
+   shifts κ by 21–34 %.
+3. ⛔ **The 1/K fallback I suggested is PROVABLY BIASED** (−0.0012 to −0.0028, **4–12 σ**): `Var(Σ wᵢXᵢ) =
+   pq·Σw²` but the estimator subtracts `pq·Σw`. **Do not use it.**
+
+Also: the credit is the **leftmost ANNOTATED junction** (`resolve_context.h:1239-1245`), not the leftmost
+CIGAR-N junction — the annotated restriction is what makes the identity hold. And §2.3's reasoning is
+subtly wrong: `sj_strand` is one value per **RECORD**, not per fragment; a qualified fragment has one sense
+bit because the OR of disagreeing mates yields `STRAND_AMBIGUOUS = 3`, which `get_is_strand_qualified()`
+rejects. **Same conclusion, sound reason.**
+
+⚠ **Two unlisted costs of the deterministic leftmost pick**, recorded so they are not rediscovered as bugs:
+`od_mom` is **0.85–0.99×** the random-pick value, and **3–5 % of junctions receive zero observations**.
+Leftmost and rightmost agree, so this is concentration on fewer junctions, not a 5′/3′ bias. Determinism is
+worth it (random-pick jitter is 3.8 % CV, and the repo has goldens).
+
+### 7.3 ⛔ §3's cleanup list needs one correction and gains several items
+
+* ⛔ **`StrandBalance.rna_strand_overdispersion` has ZERO consumers in `src/` — DELETE it, do not rename.**
+  Renaming preserves a value nobody reads. The concept is already live by another route: `1/n_rna_obs` in
+  `node_init.py:143`. (`StrandBalance` itself stays — it is pinned by `test_package_surface.py`.)
+* ⭐ **The 4-way 2×2 split has no production reader** — everything downstream is a function of
+  `(n_same, n_opposite)` only.
+* ⚠ **A latent hazard worth fixing while in here:** `_cached_p_sense` defaults to **0.0** and is read by
+  **private attribute access from another module** (`scoring.py:145-146`). If `finalize()` is ever missed,
+  `FragmentScorer` silently builds a wrong scorer with no error. It is also pure duplication of
+  `p_r1_sense`.
+* **Production-dead on `StrandModel`:** `observe()`, `strand_likelihood()`, `to_dict()`, `write_json()`,
+  `log_summary()`, `n_minor`/`n_major`, `minor_rate_posterior_*`, `_finalized`.
+* ⚠ **`strand_specificity_ci_epsilon`'s docstring is FALSE** — its stated consumer ("the gDNA calibration
+  mixture") no longer exists; a `scipy.special.betaincinv` call now pays for one `logger.info` line.
+* ⚠ **`StrandModels.exonic`'s docstring is WRONG.** It claims training from ALL exonic fragments (an
+  RNA + gDNA mixture); the scanner actually gates on unique-mapper + non-chimeric + same-strand + a defined
+  transcript strand, so intergenic gDNA is **not** in it. It is still LIVE (the QC contamination tile) —
+  fix the docstring, keep the model.
+
+### 7.4 Two implementation traps the agents hit
+
+* `_resolve_core` must **reset the new key fields** (`resolve_context.h:1229`) alongside `cr.sj_strand`;
+  inert today but the wrapper takes `cr` by reference.
+* **13 tests fail** with `AttributeError: 'SimpleNamespace' object has no attribute 'sj_table'` once
+  `calibrate.py` dereferences it — the fixtures need `sj_table=SJStrandTable.empty()`. ⚠ **But empty is not
+  neutral**: a thin table makes the MoM denominator ≤ 0 and `od_r` falls back to `od₀ = 0.0345`, a 20–40×
+  jump from the synthetic's 0.0008–0.0017. **Gate 3 therefore becomes a test of junction SUPPLY, not just
+  of the estimator** — log `fallback_used` / `n_seed_nodes` per condition before reading any A/B.
