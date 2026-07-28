@@ -349,7 +349,14 @@ floats) and the NPMLE hyperprior EM (~28 %). Read it before any optimization wor
 >   (`od_mom = Σ excess_var / Σ gdna_var`) with no trimming — a few contaminated seeds drag it to the
 >   ceiling. Raising the ceiling would import the annotation's incompleteness into the **strand
 >   likelihood, our strongest and only intrinsic gDNA/RNA evidence.** → the work is a **ROBUST estimator**,
->   not a re-tuned constant. Plan §5b FINDING 1 has the falsifiable test.
+>   not a re-tuned constant. **⭐ NOW DESIGNED: `strand_overdispersion_design.md`.** The test was run and
+>   found THREE defects, the sharpest being a units error: the prior shrinkage counts **SEED NODES**
+>   (160 k–863 k) against `prior_weight = 30`, so the prior gets **0.003–0.019 %** weight — on libraries
+>   whose **median seed carries 1–2 fragments**, i.e. no information about a variance at all. An
+>   unidentifiable dispersion is reported as a confident fit. On ground truth (synthetic, true `od = 0`)
+>   the shipped estimator **invents 0.1345**; a seed-consistency screen returns **0.0001**.
+>   ⚠ Two intermediate conclusions were **RETRACTED** there as small-N artifacts — read the retraction
+>   table before re-deriving anything.
 > * ⚠ **`ω_graft` spans 15× across four real samples** (0.25 → 3.83, the two strands agreeing within each
 >   sample) — the "10× apart on two samples" note, confirmed and widened. `P1D_P1E_DEBTS.md` stands.
 
