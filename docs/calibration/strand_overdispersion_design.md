@@ -427,6 +427,99 @@ seed weighting is fixed**, because today it is the only thing standing between t
 ⚠ **The synthetic suite hides this** (`od_r` = 0.0008–0.0017 there), so it is another defect only real data
 could show — and the reason to check the frames explicitly rather than infer them.
 
+## 3b. ⛔⛔⛔ INDEPENDENT REVIEW (11-agent workflow, 2026-07-28) — THREE OF MY CLAIMS ARE REFUTED
+
+Five independent derivations, each adversarially verified, plus a re-measurement that reproduces the
+shipped `od_mom` exactly on all 7 datasets. **Read this before acting on anything above it.**
+
+### ⛔ R1 — "`Beta(3,3)` is measurably better" is VOID. A ceiling screen rejects NOTHING at a = 2 OR a = 3.
+
+**My §OWNER-RULING table applied LBX0190's multiplicity (m = 160,366) to a *vcap* seed.** With vcap's own
+`m = 863,246` that seed **survives**. Measured directly by two derivations: **at a ∈ {2,3}, every
+multiple-testing frame rejects ZERO seeds on all four libraries.** The reason is structural —
+`p_min ∝ n^(−a)`, so a Bonferroni level `α = 1/S` needs `n ≳ S^(1/a)` (= 552 at vcap) while the
+contaminants are mostly small.
+
+**⇒ Owner decision D-c ("reject seeds that violate the ceiling") does not survive contact with the data as
+specified.** The ceiling is a sound *admissibility clamp* and a sound *QC canary*; it is not a usable
+screen at any a the owner is willing to assert.
+
+⚠ **But the ceiling choice is still the ONE decision here that moves real data.** `a = 2 → 3` takes
+`od_max` 0.200 → 0.1429 — a **1.4× sharpening of the strand likelihood on every node of every real
+library** (it changes `od_g` on LBX0190 and MO_3021 and `od_r` on all four). Directionally that is *toward*
+the measured truth (0.001–0.03). **It needs its own pre-registered A/B with stranded conditions as the
+falsifier, and must NOT be bundled with the constants cleanup.**
+
+### ⛔ R2 — the prior-currency fix (my "D2, the single clearest defect") changes NOTHING on real data
+
+Measured: fitted `od_g` **identical to 4 decimals** at `W ∈ {30, 100, 300, 588, 2658}` pairs **and with the
+shrinkage deleted entirely**. The prior binds only when `I ≲ 10⁴` pairs, which never happens on a real
+library (they carry 0.7 M – 101 M).
+
+**The saturation is BIAS, not power.** `od_mom = 0.9313` on LBX0190 against `SE|₀ = 0.0012` sits
+**66–600 σ above the ceiling**. No shrinkage rule reaches that. **My "power failure reported as a
+measurement" framing was wrong** — it is a *contaminated / non-exchangeable seed channel*.
+
+✅ **Do the cleanup anyway** — it is correct, it is honest, and it is what makes the low-information corner
+(unit fixtures, and the `denom ≤ 0` fallback that fires on 4/32 synthetic conditions) behave — but expect
+**no change**, and treat any movement as a bug.
+
+### ⛔ R3 — "more dispersion = weaker, so the governing principle prefers it" is FALSE for this parameter
+
+`od` is **not** a confidence knob. It is the gDNA component's *specificity at its own mean ½*, so
+inflating it degrades **both** directions at once. Measured on a balanced pure-gDNA `N = 200` node, raising
+`od₀` to 0.1 collapses the strand log-evidence **305.4 → 113.9 nats** (and it *saturates in N* — depth does
+not recover it), while a clean pure-RNA node's posterior `f_g` rises 0.034 → 0.080. This is a real
+correction to how the "pass-0 must be WEAK" principle applies here.
+
+**⇒ `od₀ = od_max/2 = 0.1` (derived independently by two agents as the max-entropy mean) is REJECTED.** It
+also breaks a live tested bug fix (`test_bp_solver.py:809` asserts `od₀ < 0.05`) and pushes `node_init`'s
+strand deadband from κ\* = 0.631 to 0.724, killing `I_strand` for partially-stranded protocols.
+
+### ✅ WHAT SURVIVED, AND IT IS A REAL CLEANUP
+
+**4 config fields + 2 duplicated literals + 1 wrong currency → 2 asserted constants + 1 structural zero,**
+all in one module:
+
+| | constant | value | jobs | status |
+|---|---|---|---|---|
+| K1 | `_CEIL_ALPHA_BETA` | 2.0 ⇒ `od_max` = 0.2 | admissibility clamp; QC canary | **ASSERTED** (owner's `a ≥ 2` rationale) |
+| K2 | `_PRIOR_ALPHA_BETA` | 14.0 ⇒ `od₀` = 0.0345 | shrinkage target; `denom ≤ 0` fallback; shared gDNA+RNA | **ASSERTED, now bracketed by measurement** |
+| K3 | floor | 0.0 | lower clamp | **STRUCTURAL** — an ICC cannot be negative |
+
+* ⭐ **`W` stops being asserted.** `Var(od_mom)|₀ = 1/I` with `I = Σ N(N−1)/2` is **exact at μ = ½** (not
+  asymptotic; MC-verified), so the shrinkage is literally a Normal–Normal posterior mean and `W = 1/τ²`
+  with `τ²` the prior variance — **909 pairs**, derived from K1 and K2. ⚠ Name the step honestly: reducing
+  a bounded prior to two moments is **Bühlmann linear credibility**, not exact Bayes.
+* ⭐ **`Beta(14,14)` is no longer "completely arbitrary".** Two assumption-light measurements now bracket
+  the truth: gDNA from the exact `od(n=2) = 2·P(same strand) − 1` readout (vcap plateau **0.007–0.028**),
+  and RNA from deep junctions (**0.0011–0.0158**). `od₀ = 0.0345` sits 1.2–30× *above* the top of both —
+  the conservative end of measured reality. **Keep 14.**
+* ⭐ **`gdna_weight ≡ 1.0` on 100 % of fragment-carrying seeds** (min − 1 = −2.2e−16), so `node_mean ≡ ½`
+  and the entire gDNA/RNA mixture in that fit is **dead code**.
+* ⚠ **A floating-point trap that corrupted my own D2 table:** at `w = 1 − 2.2e−16`, a 2-fragment seed gives
+  `n_c = 1.9999999999999996`, so `n_c ≥ 2` under-counts. True informative-seed count on LBX0190 is
+  **109,875**, not the 107,534 I reported. **Use the integer `N`.**
+* ⚠ **`I = pairs` holds ONLY at μ = ½ — it is WRONG for RNA.** Measured `I_r/pairs` = **0.140 / 0.094 /
+  0.095 / 0.050**. The RNA information is 5–14 % of the pair count and needs its own closed form.
+
+### ⛔ R4 — do NOT refit the RNA mean from its own seeds
+
+Tempting given §3's finding, and refuted: the inflated `od_r` is currently **the only thing pricing the
+mean error** in the applied likelihood (the χ² term is exactly 1.00 at `od = b²/κ(1−κ)`). Removing it while
+`_mixture_strand_loglik` still uses κ̂ makes the likelihood **287–1088× over-confident**. And it does not
+even work — `clip(od_mom(κ_seed))` releases the ceiling on **1 of 4** libraries. **Diagnose the population
+split first** (§3's shallow random-orientation sides), then revisit.
+
+### ⚠ R5 — the missing gate nobody has built
+
+The synthetic suite has `od = 0` **by construction**, so it can only reward estimators that return zero —
+it validates **one side** of a two-sided question. **Build an injection harness**: at each library's *real*
+seed-size distribution, inject Beta-Binomial dispersion at `od_true ∈ {0.005 … 0.2}`, with and without
+contamination, and pre-register both **(i)** recover `od_true` and **(ii)** do not manufacture dispersion at
+`od_true = 0`. The pooled MoM passes (i) and fails (ii); a mixture EM does the reverse. **Neither is
+shippable until both pass.**
+
 ## 4. VALIDATION PLAN AND GATES
 
 1. **Ground truth first.** The synthetic suite has `od = 0` by construction, so every estimator must return
