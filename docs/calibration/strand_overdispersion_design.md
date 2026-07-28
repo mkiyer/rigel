@@ -520,6 +520,64 @@ contamination, and pre-register both **(i)** recover `od_true` and **(ii)** do n
 `od_true = 0`. The pooled MoM passes (i) and fails (ii); a mixture EM does the reverse. **Neither is
 shippable until both pass.**
 
+## 3c. ⭐ TOY STABILITY — CHECKED, AND THE USUAL ASSUMPTION IS BACKWARDS
+
+Owner (2026-07-28): *"some of our toy scenarios don't have a large enough genome, so we need some
+stability just for the sake of our development cycle and tests, not for real data."*
+
+Measured across all 32 synthetic conditions (`scratchpad/od_toy_stability.py`), swapping the shrinkage
+currency from seed nodes (`W = 30`) to pairs (`W = 909`):
+
+| | seeds | **pairs `I`** | prior share OLD | prior share NEW |
+|---|---|---|---|---|
+| synthetic `none ss0.50 nrna_present capOFF` | 1,872 | **2,568,576,580** | 1.58 % | **0.00 %** |
+| synthetic, median over 32 | — | — | 1.04 % | **0.00 %** |
+| **real LBX0190** | 160,366 | **699,894** | 0.02 % | 0.13 % |
+
+> ⭐⭐ **THE TOY IS INFORMATION-*RICH*; REAL cfRNA IS INFORMATION-*POOR*.** The toy carries **2.6 billion**
+> pairs against LBX0190's **0.7 million** — **3,700× more** — because a 10 Mb genome at the same sequencing
+> depth concentrates fragments into deep seeds, and pairs grow as `N²`. Real cfRNA spreads over the whole
+> genome at ~1–2 fragments per seed.
+>
+> **So "sparse libraries fall back to the prior" describes REAL DATA, not the toys.** The prior binds
+> *less* on the toy under the new currency, not more.
+
+**✅ And the stability the owner asked for holds anyway, because the toy has so much information that the
+prior is irrelevant there either way:**
+
+| gDNA `od` over 32 synthetic conditions (truth = 0) | OLD | NEW |
+|---|---|---|
+| mean | 0.0224 | **0.0221** |
+| max | 0.2000 | 0.2000 |
+| conditions > 0.05 | 3 | **3** |
+| **max \|NEW − OLD\|** | — | **0.0011** |
+
+* No condition changes category; the three high ones stay high, the rest stay low.
+* **4/32 conditions hit the `denom ≤ 0` fallback** (zero seeds — the `gdna_none × nrna_none` cells, which
+  genuinely have no gDNA to seed from). Both rules return `od₀ = 0.0345` there, identically. **That corner
+  is exactly why the shrinkage must be KEPT rather than deleted**, and it behaves the same before and after.
+* **Real data unchanged**: 0.2000 / 0.0031 / 0.2000 / 0.0923 — matching the workflow's pre-registration.
+
+**⇒ The currency change is safe for the development cycle.** ⚠ But note the honest consequence: on the toy
+the prior is inert under *both* rules, so **the toys cannot validate the shrinkage at all**. The only place
+it matters is the zero-seed fallback and real sparse libraries.
+
+## 3d. READINESS VERDICT — what is implementable now, and what is not
+
+| item | status |
+|---|---|
+| **Constants cleanup** (4 config fields + 2 literals + wrong currency → K1/K2/structural zero; `W = 909` derived; integer `N`; delete the dead gDNA/RNA mixture) | ✅ **READY.** Pre-registered as no-change on real data, ≤ 0.0011 on toys, verified above |
+| **P2 for the gDNA fit** (pairs as the currency) | ✅ **READY** — it is the same edit as the cleanup |
+| **P2 for the RNA fit** | ⛔ **NOT READY.** `I = pairs` holds only at `μ = ½`; the proposed closed form `I_r = (Σc)²/Σ[N·pq + pq²(2N² − 6N)]` comes from ONE agent and has not been MC-verified. Measured `I_r/pairs` = 0.05–0.14, so using pairs would overstate RNA information 7–20× |
+| **The `n = 1` asymmetry** (contributes `excess ≈ 1` to the numerator, `0` to the denominator) | ⚠ **A real bug, not yet addressed by anyone.** 0.1–9.1 % of `Σexcess`. Small, but it is a correctness defect and belongs in the same edit — needs its gDNA-side magnitude measured first |
+| **The ceiling `a = 2 → 3`** | ⛔ **NOT SETTLED.** The ONLY change here that moves real data (1.4× sharpening on every node). Needs its own pre-registered A/B with stranded conditions as falsifier. **Must not be bundled** |
+| **The RNA saturation** | ⛔ **NOT SOLVED, and the fix is upstream.** `od_r` = 0.2000 on 4/4 is bias from a seed population dominated by shallow, effectively-random-orientation sides (§3). R4 forbids refitting the mean. Diagnose the population split first |
+| **Gate 0 injection harness** | ⛔ **NOT BUILT.** The synthetic has `od = 0` by construction, so it validates only one side. The pooled MoM recovers a true non-zero `od` but manufactures dispersion at zero |
+
+**⇒ RECOMMENDATION: implement the constants cleanup + gDNA P2 as one behaviour-neutral commit** (gates:
+real data unchanged to 4 d.p.; synthetic ≤ 0.0011; goldens re-recorded for the ~1e-16 integer-`N` shift).
+**Leave the RNA currency, the ceiling decision, and the RNA seed population as separate, gated work.**
+
 ## 4. VALIDATION PLAN AND GATES
 
 1. **Ground truth first.** The synthetic suite has `od = 0` by construction, so every estimator must return
