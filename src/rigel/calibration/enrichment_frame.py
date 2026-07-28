@@ -73,6 +73,34 @@ def _fclip01(x):
     return x if x != x else (0.0 if x < 0.0 else (1.0 if x > 1.0 else x))
 
 
+def _exp(x):
+    """``np.exp`` on a scalar — **NOT** ``math.exp``, and the difference is load-bearing.
+
+    ⚠ ``np.exp`` and ``math.exp`` are NOT bit-identical, because ``exp`` is not correctly rounded and the
+    two use different implementations: ``math.exp`` is the platform libm, while numpy carries its own
+    AVX2/AVX-512 kernel on x86-64. They agree on arm64 (where numpy's float64 ``exp`` *is* libm) and differ
+    by 1 ULP on x86-64 Linux — so a scalar twin written with ``math.exp`` passes its bit-identity test on a
+    Mac and fails it in CI. That is exactly what happened (`test_residual_level_scalar_...`, corner
+    ``(1.0, 1e-13, 0.4, 210.0, 260.0, 1e6)``).
+
+    1 ULP is not a rounding detail here: :func:`residual_level` subtracts two nearly-equal normal pdfs
+    (``pdf_a − pdf_b``, magnification ~1.2e4 at that corner) and then forms ``1 − φ + σ·d`` (a second
+    cancellation, ``−83.0 + 83.4999…``), so one ULP in ``exp`` moves the result by ~1e6 ULP.
+
+    Using ``np.exp`` on both sides makes the twins identical **by construction on every platform**: numpy's
+    ``exp`` is size-independent (bulk == per-element == 0-d == Python float, verified over 1e5 draws), so
+    the array form's vectorised call and this scalar call return the same bits.
+
+    ⚠ **Any transcendental added to a scalar twin must come from numpy, not ``math``**, for this reason.
+    ``sqrt`` is exempt — IEEE-754 requires it correctly rounded, so the two agree by standard."""
+    return float(np.exp(x))
+
+
+def _log(x):
+    """``np.log`` on a scalar — see :func:`_exp`. Same hazard, same reason, same rule."""
+    return float(np.log(x))
+
+
 def composition_logvar(f_g, E_g, E_r, var_fg, n):
     """``Var(log ρ_tot)`` — the composition assumption carried as a **variance**, not a bool gate.
 
@@ -147,7 +175,7 @@ def graft_frame_logvar_scalar(r):
     """Scalar twin of :func:`graft_frame_logvar` — see that docstring for the model.
 
     ⚠ TWIN: mirror any change into both. Pinned bit-for-bit by ``test_enrichment_frame.py``."""
-    lr = math.log(r) if r > _EPS else 0.0  # r ≤ _EPS (or nan) ⇒ no frame step ⇒ log 1 = 0
+    lr = _log(r) if r > _EPS else 0.0  # r ≤ _EPS (or nan) ⇒ no frame step ⇒ log 1 = 0
     return lr * lr
 
 
@@ -404,9 +432,9 @@ def residual_level_scalar(mass, n_mass, rho_g, E_g, E_r, v_g):
         if (
             alpha >= 0.0
         ):  # subtract SAME-SIDE tails — neither branch loses precision to cancellation
-            Z = math.exp(log_ndtr(-alpha)) - math.exp(log_ndtr(-beta))
+            Z = _exp(log_ndtr(-alpha)) - _exp(log_ndtr(-beta))
         else:
-            Z = math.exp(log_ndtr(beta)) - math.exp(log_ndtr(alpha))
+            Z = _exp(log_ndtr(beta)) - _exp(log_ndtr(alpha))
         if not Z > _EPS:  # Z underflowed — the two exact limits the docstring supplies
             if alpha > 0.0:  # the claim over-explains the crossing: an exponential on [0,1], k = 1
                 e_tail = sig / alpha
@@ -414,8 +442,8 @@ def residual_level_scalar(mass, n_mass, rho_g, E_g, E_r, v_g):
             else:  # σ_f swamps the unit interval: f_R ~ Uniform(0,1), k = 3
                 f_R, v_f = 0.5, 1.0 / 12.0
         else:
-            pdf_a = math.exp(-0.5 * alpha * alpha - _HALF_LOG_2PI)
-            pdf_b = math.exp(-0.5 * beta * beta - _HALF_LOG_2PI)
+            pdf_a = _exp(-0.5 * alpha * alpha - _HALF_LOG_2PI)
+            pdf_b = _exp(-0.5 * beta * beta - _HALF_LOG_2PI)
             d = (pdf_a - pdf_b) / Z
             f_R = _fclip01(1.0 - phi + sig * d)
             v_f = sig * sig * _fmax(1.0 + (alpha * pdf_a - beta * pdf_b) / Z - d * d, 0.0)
