@@ -293,6 +293,33 @@ be a live contaminant on real data. The model must respect that rather than abso
 | information-weighted median / IQR-trimmed mean | degenerates where the median seed has n_c = 2 (per-seed ratio is exactly ±1). Correct on `vcap` (−0.006), meaningless on LBX0190 (1.0000) |
 | bounded-influence cap at `Σscale/√n` | **worse than pooled** on the synthetic (0.5583 vs 0.1345 against a truth of 0) |
 
+### ⚠⚠ THE gDNA ARGUMENT DOES **NOT** TRANSFER TO THE RNA FIT — measured 2026-07-28
+
+`fit_rna_strand_overdispersion` is the twin of the gDNA fit with two substitutions: `node_mean = κ` and
+`component_mean = κ`. Both break the reasoning above, and the second breaks it fatally.
+
+**1. `κ` is a FITTED library parameter, not a biological truth.** "gDNA is symmetric around ½" licenses
+calling a displaced seed an error. There is no equivalent statement for RNA: a spliced seed far from `κ` may
+be **real antisense biology** — an antisense gene, a bidirectional promoter, a readthrough — and rejecting
+it would delete signal rather than contamination.
+
+**2. The ceiling stops being a ceiling exactly where stranded libraries live.** `Beta(a,a)` is symmetric, so
+it is only the right null at mean ½. For RNA it would have to become `Beta(2aκ, 2a(1−κ))`, and the
+owner's "density vanishes at both ends" property requires **both** shape parameters `> 1`:
+
+| a | κ | implied Beta | density at p = 1 | density at p = 0 |
+|---|---|---|---|---|
+| 3 | 0.50 | Beta(3.00, 3.00) | vanishes ✅ | vanishes ✅ |
+| 3 | 0.90 | Beta(5.40, **0.60**) | vanishes | ⛔ **diverges** |
+| 3 | **0.99** | Beta(5.94, **0.06**) | vanishes | ⛔ **diverges** |
+
+At `κ = 0.99` the antisense shape parameter is **0.06** — the density blows up at `p = 0`, so an
+all-antisense seed is not merely admissible, it is *favoured*. **There is no ceiling to violate.**
+
+**⇒ The screen (P1) is licensed for the gDNA fit ONLY.** The RNA overdispersion needs its own treatment,
+and it does not have the symmetric anchor that makes the gDNA case tractable. ⚠ Note `od_r` saturates on
+**4/4** real samples — worse than `od_g` — so this is not a hypothetical gap.
+
 ## 4. VALIDATION PLAN AND GATES
 
 1. **Ground truth first.** The synthetic suite has `od = 0` by construction, so every estimator must return
