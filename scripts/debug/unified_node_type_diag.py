@@ -9,7 +9,7 @@ mis-calls the composition. Run the two arms in separate processes (the RIGEL_UNI
     RIGEL_UNIFIED=1 RIGEL_UNIFIED_ROUTE=0 OMP_NUM_THREADS=1 python scripts/debug/unified_node_type_diag.py uni-nr
 
 Optional 2nd arg = condition name (default a gDNA-present capture-on unstranded scenario, where the bias is
-clearest). See docs/calibration/archive/UNIFIED_SOLVER_HANDOFF.md.
+clearest). See docs/CARRY_FORWARD.md.
 """
 from __future__ import annotations
 

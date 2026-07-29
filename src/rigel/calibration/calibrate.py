@@ -102,7 +102,7 @@ class InjectedCalibrationPriors:
 
 
 def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config, bg=None):
-    """The gDNA intron factory λ-factor per chain node (`docs/calibration/gdna_intron_factory_design.md`).
+    """The gDNA intron factory λ-factor per chain node (`docs/CARRY_FORWARD.md`).
 
     Fits the intergenic-background NegBinom (`fit_intron_background`) and tabulates, for each INTRON REGION node,
     ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` over the σ(λ) solve grid → a ``(n_nodes, K)`` array, ZERO on every
@@ -261,7 +261,7 @@ def calibrate(
     # count-observable seed regions/sides using the raw count-clue gDNA weight (breaks the circularity:
     # the seed weight is the strand MEAN ½, not the dispersion). RNA (mean κ) fitted from the PER-JUNCTION
     # SJ strand table — the same strand-qualified population κ itself is the marginal of, so both halves of
-    # the RNA Beta-Binomial come from one source (docs/calibration/sj_strand_table_design.md). Both shrunk
+    # the RNA Beta-Binomial come from one source (docs/CARRY_FORWARD.md). Both shrunk
     # toward the SAME default prior, so under sparse data they collapse to one distribution and an
     # unstranded node (κ=½) is uninformative. See docs/em_strand/03+05.
     _gd_seed = _rna_seed = (
@@ -346,7 +346,7 @@ def calibrate(
         )
 
     belief = _init_belief()
-    # The gDNA INTRON FACTORY λ-factor (`docs/calibration/gdna_intron_factory_design.md`): peel confident gDNA
+    # The gDNA INTRON FACTORY λ-factor (`docs/CARRY_FORWARD.md`): peel confident gDNA
     # from intron nodes against the intergenic background, BEFORE the pass-0 solve. Built ONCE (belief-free —
     # only the intron count vs the background), applied in every sweep below. ``None`` (disabled / no
     # informative background / no introns) ⇒ byte-identical to the pre-factory pass-0.
@@ -402,7 +402,7 @@ def calibrate(
 
     # THE ENRICHMENT NPMLE — fit ONCE on ALL nodes' TOTAL unspliced density (belief-free). It models the
     # hybrid-capture ENRICHMENT/DEPLETION landscape, NOT composition: a total-density prior is
-    # composition-vacuous (count-zero-information — docs/calibration/archive/CALIBRATION_MASTER.md §2/§5), so it is NEVER fed to the
+    # composition-vacuous (count-zero-information — docs/CARRY_FORWARD.md §2/§5), so it is NEVER fed to the
     # composition (gDNA) arm. Its old second role — supplying the message σ²_transfer by projection — is
     # RETIRED (that was a density-uniformity proxy, invalid under capture, and identically 0 in pass-0); the
     # solver now derives σ²_transfer itself. What remains is the QC report's P(ρ) landscape + the toy-injection
@@ -420,7 +420,7 @@ def calibrate(
     # PHASE 1 — the INITIAL solve is PRIOR-FREE of the DNA composition prior: the inert Beta(½,½) reference
     # alone (``gdna_prior=None``) + the strand likelihood + the belief-free forward-backward messages.
     # Single-strand nodes self-solve from strand; unstranded
-    # AMBIG nodes are grounded only by the messages here (the two-root DNA ambiguity, docs/calibration/archive/CALIBRATION_MASTER.md §4,
+    # AMBIG nodes are grounded only by the messages here (the two-root DNA ambiguity, docs/CARRY_FORWARD.md §4,
     # is resolved by the DECONVOLVED-gDNA hyperprior in Phase 2 — fit on this solve's peeled DNA, then a refit).
     belief = _sweep(None)
     belief_pass0 = (
@@ -431,7 +431,7 @@ def calibrate(
         enrichment_prior.n_cells,
     )
 
-    # PHASE 2 — the DECONVOLVED-gDNA hyperprior REFIT (docs/calibration/archive/CALIBRATION_MASTER.md §4/§5). Fit the gDNA-rate NPMLE on
+    # PHASE 2 — the DECONVOLVED-gDNA hyperprior REFIT (docs/CARRY_FORWARD.md §4/§5). Fit the gDNA-rate NPMLE on
     # the initial solve's peeled gDNA, then RE-SOLVE with it as the composition arm — resolving the two-root DNA
     # ambiguity the prior-free pass leaves at unstranded AMBIG nodes. Repeated ``calib_refit_iters`` times.
     # ANCHORED, EXTREMELY WEAK. The aggregate DNA-background reference (`ρ_bg`, pooled pure intergenic/intron —

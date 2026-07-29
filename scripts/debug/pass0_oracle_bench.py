@@ -59,7 +59,7 @@ ap.add_argument(
     action="store_true",
     help="permit --report to diff arms recorded on DIFFERENT partitions (v7 vs v8). Refused by "
     "default: the v8 partition refines v7, so a raw mwae diff across it confounds the partition "
-    "change with whatever the arm varied. See docs/accumulator/06_implementation_plan.md F8.",
+    "change with whatever the arm varied. See docs/CARRY_FORWARD.md F8.",
 )
 args = ap.parse_args()
 SUITE = RUNS / args.suite

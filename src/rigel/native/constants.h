@@ -205,7 +205,7 @@ struct RawResolveResult {
     // to SPLICE_ARTIFACT.
     int32_t n_sj_blacklisted = 0;
 
-    // --- The per-junction SJ strand table's key (docs/calibration/sj_strand_table_design.md) ---
+    // --- The per-junction SJ strand table's key (docs/CARRY_FORWARD.md) ---
     // Coordinates of the LEFTMOST ANNOTATED CIGAR-N junction this fragment
     // crosses; -1 when it crosses none.  `sj_strand` above is the fragment's
     // motif strand (one XS/ts tag per fragment), which completes the key.

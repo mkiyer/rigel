@@ -1,7 +1,7 @@
 /**
  * accumulator.cpp — Fractional accumulator implementation.
  *
- * Spec: docs/accumulator/00_design.md
+ * Spec: docs/CARRY_FORWARD.md
  * Python reference: tests/native/_accumulator_reference.py
  *
  * Must match the Python reference byte-for-byte (float32 masses,

@@ -17,7 +17,7 @@ TWO ESTIMATORS, and they are NOT the same quantity (adversarial review, 2026-07-
                                                   measured (via `node_global_geometry`, whose eff is
                                                   eff_gdna_*). Cheap and robust, but it is NOT a total density.
   BLENDED      rho = M*[f_g/E_g + (1-f_g)/E_r]    the TOTAL density the enrichment framework actually needs
-                                                  (docs/calibration/archive/enrichment_ratio_generalization.md §1). Composition-
+                                                  (docs/CARRY_FORWARD.md §1). Composition-
                                                   dependent and taken from a SOLVE. The two coincide only at
                                                   f_g = 1.
 

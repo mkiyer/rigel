@@ -123,7 +123,6 @@ rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o 
 | `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides per-base fractional mappability (for gDNA-aware effective length) **and** the splice-junction artifact blacklist (applied at BAM-scan time). Required unless `--no-mappability` is set. |
 | `--no-mappability` | off | Explicitly opt out of mappability + splice-blacklist ingestion (synthetic genomes, stranded-only benchmarks). Mutually exclusive with `--alignable-zarr`. |
 | `--splice-blacklist-min-count N` | `2` | (Advanced) Minimum unique-fragment support per `(chrom, intron, read_length)` for a junction to enter the blacklist. Lower admits more singletons; higher keeps only the most reproducible artifacts. Ignored under `--no-mappability`. |
-| `--mappability-read-length N` | `100` | (Advanced) Read-length bin to query in the alignable store (must match a bin the store was built with; commonly 50/75/100/125). Ignored under `--no-mappability`. |
 | `--nrna-tolerance N` | `20` | Max distance (bp) for clustering transcript start/end sites into shared synthetic nRNA spans |
 | `--collapse-duplicate-transcripts` | off | Collapse transcripts sharing identical exon coordinates (keeps the lexicographically-smallest ID). Default: fail with a report. Useful for GENCODE, which has a few byte-identical annotations. |
 | `--gtf-parse-mode {strict,warn-skip}` | `strict` | `strict` fails on malformed GTF records; `warn-skip` logs warnings and skips them |
@@ -131,10 +130,11 @@ rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o 
 | `--no-tsv` | off | Skip writing TSV mirrors of index files |
 
 **Index artifacts** (Feather, plus `.tsv` mirrors unless `--no-tsv`):
-`transcripts`, `intervals`, `regions` (the calibration region partition),
-`boundaries`, `ref_lengths`, `sj`, `splice_blacklist`, and `manifest.json`.
-`regions.feather` and `boundaries.feather` are **core** calibration
-artifacts — they are consumed directly by the calibration BP sweep.
+`transcripts`, `intervals`, `nodes` and `edges` (the splice graph),
+`ref_lengths`, `sj`, `splice_blacklist`, and `manifest.json`.
+`nodes.feather` and `edges.feather` are **core** calibration artifacts — the
+genome partition and the contiguous/junction edges between its pieces,
+consumed directly by calibration.
 
 ### rigel quant
 
@@ -196,9 +196,10 @@ Every flag is also documented in [parameters.md](parameters.md).
 |------|---------|-------------|
 | `--assignment-min-posterior P` | `0.01` | Minimum posterior for a component to be eligible for discrete assignment (map/sample modes) |
 | `--em-convergence-delta D` | `1e-6` | Convergence threshold for EM parameter updates |
-| `--gdna-prior-mixture-bridge EPS` | `0.01` | Calibration gDNA-density prior mixture-bridge weight in `[0,1)`. Floors the KDE valley between the depleted and enriched modes so a mixture-density node (a capture boundary, a sparse-probe region) reads as an enriched/depleted mixture instead of collapsing to ~0 gDNA. `0` = legacy KDE. Advanced calibration knob. |
 | `--sweep-n-grid-single-strand N` | `256` | Calibration single-strand log-odds grid resolution. Single-strand nodes solve a cheap 1-D grid, so a fine grid de-quantizes the gDNA-fraction readout. Decoupled from the AMBIG 2-D grid (`sweep_n_grid`, which stays coarse for genome-scale memory). Advanced calibration knob. |
 | `--gdna-em-llr-bias B` | `0.0` | gDNA false-positive-aversion: a log-odds (LLR) bias in nats added to the gDNA component in the locus EM. Positive favors gDNA (trades the gDNA→RNA leak for an RNA→gDNA siphon), e.g. `2.2` ≈ require 9:1 RNA evidence before calling a fragment RNA. |
+| `--calib-refit-iters N` | `3` | Number of times calibration re-solves after refitting its population gDNA prior. `0` gives the prior-free first solve only. |
+| `--gdna-rate-prior-bandwidth W` | `0.15` | Kernel width (in log10 density) for the population gDNA-density prior. Advanced calibration knob. |
 | `--overhang-alpha A` | `0.1` | Per-base overhang penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--mismatch-alpha A` | `0.1` | Per-mismatch (`NM` tag) penalty in `[0,1]`. `0` = hard gate, `1` = no penalty. |
 | `--pruning-min-posterior P` | `1e-4` | Minimum posterior for candidate pruning. Lower keeps more candidates; `0` disables pruning. |
@@ -291,7 +292,7 @@ at index time via `--alignable-zarr`. It is used for two things:
 For synthetic genomes, stranded-only benchmarks, or any setting where
 running `alignable` is unnecessary, pass `--no-mappability` (mutually
 exclusive with `--alignable-zarr`). The two advanced knobs
-`--splice-blacklist-min-count` and `--mappability-read-length` tune the
+`--splice-blacklist-min-count` tunes the
 blacklist threshold and the read-length bin queried; both are ignored under
 `--no-mappability`.
 
@@ -658,6 +659,11 @@ is_mm_dropped = (zf & 0x80) != 0
 
 ## Calibration
 
+> ⚠ **Being redesigned.** The fragment tally this stage consumes (the "accumulator") is being replaced;
+> see `docs/CARRY_FORWARD.md`. The behaviour described below is current and correct for the shipped
+> release, but the internals and some flags will change. Calibration is not yet considered production
+> quality.
+
 Calibration is the middle stage of the pipeline. It runs once per `quant`
 invocation, in-process, on the fractional per-region/per-boundary fragment
 mass the C++ scanner deposits during the single BAM pass (no extra read of
@@ -717,8 +723,6 @@ onto per-region and per-boundary-side deconvolved gDNA/RNA mass.
 
 All are advanced; defaults suit standard libraries. Exposed on `rigel quant`:
 
-- `--gdna-prior-mixture-bridge` (default `0.01`) — floors the KDE valley
-  between the depleted and enriched gDNA-density modes.
 - `--sweep-n-grid-single-strand` (default `256`) — single-strand node
   log-odds grid resolution (de-quantizes the gDNA-fraction readout).
 - `--gdna-em-llr-bias` (default `0.0`) — a downstream EM knob, not part of

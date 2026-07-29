@@ -1,7 +1,7 @@
 """Pass-0 KDE landscape diagnostic — can we detect the gDNA enriched/depleted bimodality at INIT
 (no solve), and is the boundary a cleaner window than the region?
 
-Design dialogue: `docs/calibration/archive/node_prior_design.md` §4.4 / Phase C. The thesis (user's):
+Design dialogue: `docs/CARRY_FORWARD.md` §4.4 / Phase C. The thesis (user's):
 
   * A single-stranded **intron↔exon splice-junction** boundary is a structural gDNA window: its
     UNSPLICED crossing mass EXCLUDES mature RNA (mature is spliced away at the junction), so it is

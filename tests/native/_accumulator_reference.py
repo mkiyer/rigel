@@ -2,11 +2,11 @@
 Pure-Python reference implementation of fractional accumulator.
 
 This module is the canonical interpreter of the fractional accumulator spec
-(see docs/accumulator/00_design.md). The native C++ implementation
+(see docs/CARRY_FORWARD.md). The native C++ implementation
 landing in Phase 2 must reproduce this module's behavior on every
 synthetic fragment in tests/native/test_accumulator_spec.py.
 
-Decisions locked in docs/accumulator/audit_phase1.md:
+Decisions locked in docs/CARRY_FORWARD.md:
 - Per-fragment $L = \\sum_k \\ell_k$; each block-region overlap deposits
   overlap_bp / L.
 - Single per-fragment splice flag (not per-junction).
@@ -265,7 +265,7 @@ class Accumulator:
 
     def total_mass_deposited(self) -> float:
         """Sum of all mass + counts. For per-block-side mass conservation
-        details see docs/accumulator/00_design.md §6.
+        details see docs/CARRY_FORWARD.md §6.
         """
         total = 0.0
         for r in self.regions:

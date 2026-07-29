@@ -1,5 +1,5 @@
 """Boundary-rule dissection — WHAT distinguishes the MEANINGFUL boundaries (corr 0.68 with the oracle) from the
-COIN-FLIP ones (corr 0.13)? The §6B DOF gate inverts on boundaries (`docs/calibration/archive/solve_gate_design.md` §4): the boundaries it
+COIN-FLIP ones (corr 0.13)? The §6B DOF gate inverts on boundaries (`docs/CARRY_FORWARD.md` §4): the boundaries it
 calls SOLVABLE are coin-flips, those it WITHHOLDS are meaningful. The owner's hypothesis: it is the ENRICHMENT
 CLIFF — an intron|exon boundary straddles it and its gDNA estimate is muddled by discordant flank messages (the
 depleted-intron message vs the enriched-exon message), NOT a technical DOF/solvability issue.

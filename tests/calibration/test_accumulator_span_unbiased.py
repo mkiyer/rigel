@@ -1,6 +1,6 @@
 """Behavioral guards for the accumulator span redesign.
 
-(``docs/calibration/accumulator_fragment_span_redesign.md``.) The accumulator
+(``docs/CARRY_FORWARD.md``.) The accumulator
 deposits the MOLECULE's contiguous genomic span(s), not the sequenced read blocks:
   - unspliced  → one [min,max] span (mate gap filled) ⇒ the boundary-crossing
     density estimator agrees with the exact contained estimator (no over-count);

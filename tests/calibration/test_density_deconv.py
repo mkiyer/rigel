@@ -1,4 +1,4 @@
-"""Unit tests for the generic density-deconvolution primitive (intron factory = special case) (docs/calibration/gdna_intron_factory_design.md).
+"""Unit tests for the generic density-deconvolution primitive (intron factory = special case) (docs/CARRY_FORWARD.md).
 
 Phase 1 = the factor math: the NegBinom log-pmf, and the per-intron λ-factor's mode / precision / regimes.
 The end-to-end fit-vs-oracle validation lives in scripts/scratch (cached ambig scenarios), not here.

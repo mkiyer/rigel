@@ -5,7 +5,7 @@ message edge captured by ``bp_solver._scan`` (the inert ``_capture`` hook), chec
 
   (1) CODE == DERIVED — the code's emitted mode equals the derivation's formula for the branch it took
       (shift = normalize by the imputed total; density = ÷ the dst's observed ``md``). Confirms
-      ``docs/calibration/archive/message_propagation_arithmetic.md`` §3/§4 is what the code computes.
+      ``docs/CARRY_FORWARD.md`` §3/§4 is what the code computes.
   (2) DENSITY vs SHIFT on exon-facing edges — how much the Stage-4/5 predicate flip would move each message,
       expressed as the target gDNA fraction ``exp(mode_g)``, compared against the destination's ORACLE f_g.
   (3) FLIP-SET CLASSIFICATION — every edge → {clean, B-safe, B-src, A, seam} (the plan §0 classes).

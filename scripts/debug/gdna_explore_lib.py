@@ -373,7 +373,7 @@ def evaluate_suites(recipe, suites=("ambig", "quick")):
 
 # ---------------- THE LANDSCAPE RECIPE (the Role-B candidate; was scripts/debug/gdna_landscape_recipe.py) --
 # Promoted 2026-07-27 from a bare `def recipe(s)` that four call sites loaded with `exec(open(...).read())`.
-# It is the seed of the production `GdnaLandscape` (docs/calibration/gdna_hyperprior_production_plan.md), so
+# It is the seed of the production `GdnaLandscape` (docs/CARRY_FORWARD.md), so
 # it needs to be importable, lintable and diffable. Behaviour is byte-identical to the exec'd version.
 
 #: kernel/grid resolution floor as a log-rate variance — the library's own `fit_kde` bandwidth (0.15 decades).

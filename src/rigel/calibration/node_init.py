@@ -3,7 +3,7 @@
 Calibration's prior-free first pass ("pass-0") deconvolves each node's unspliced fragment mass into
 ``(f_pos, f_neg, f_g)``. Before any message passing, every node is given its OWN belief — a per-component
 density ``ρ_c`` (the message currency) and a per-component precision ``p_c`` — from the four information
-sources of ``docs/calibration/variance_model_concepts.md``:
+sources of ``docs/CARRY_FORWARD.md``:
 
 1. **MEASURED** counts get **Poisson** precision. Intergenic / intergenic-exon nodes are structurally pure
    gDNA (``f_g = 1``, composition CERTAIN); their gDNA density carries only the count precision ``1/n`` (so
@@ -79,7 +79,7 @@ def own_composition_logvar(f_g, tau_lam, struct_lock):
     """The message-free composition variance of a node's own belief, on the two log-fraction arms — the
     honest "how well does this node know its gDNA/RNA split?" (`variance_model_concepts.md`).
 
-    Three states, nothing between (`docs/calibration/archive/emission_and_precision_derivation.md` §2):
+    Three states, nothing between (`docs/CARRY_FORWARD.md` §2):
 
     * **structural lock** → composition CERTAIN → variance ``0`` (an intergenic pure-gDNA node);
     * **real evidence ``τ_λ > 0``** → ``Var(log f_g) = (1−f_g)²/τ_λ`` and ``Var(log f_r) = f_g²/τ_λ`` (the
@@ -234,7 +234,7 @@ def build_node_init(
         is_region=is_reg,
         locked=locked,
     )
-    # APPROACH E (docs/calibration/variance_foundation_proposal.md, verified). The strand Beta-Binomial is
+    # APPROACH E (docs/CARRY_FORWARD.md, verified). The strand Beta-Binomial is
     # RANK-1: it depends on (λ,θ) only through p = ½+(κ−½)(1−f_g)sinθ. So the honest MARGINAL gDNA-level
     # precision (the Schur complement of the 2×2 composition Fisher) is:
     #   * SINGLE-STRAND (1-DOF): θ is STRUCTURALLY locked ⇒ τ_λ gets the full strand λ-term c·a² (strand pins f_g);

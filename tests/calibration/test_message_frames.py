@@ -2,11 +2,11 @@
 
 Every fact here was silently wrong in production at some point, and none of them was caught by the benchmark
 — two were held in place by *compensating* errors and "validated" that way. The ground truth is the
-accumulator's own deposit rule (``docs/accumulator/00_design.md`` §4.3, reference implementation
+accumulator's own deposit rule (``docs/CARRY_FORWARD.md`` §4.3, reference implementation
 ``tests/native/_accumulator_reference.py``), which is enumerable in closed form, so these tests do not depend
 on any solver behaviour and cannot drift with it.
 
-Derivations: ``docs/calibration/archive/message_layer_derivation.md`` §11 (A1/A2, the spliced effective length) and
+Derivations: ``docs/CARRY_FORWARD.md`` §11 (A1/A2, the spliced effective length) and
 the ``c_b`` denominator note in ``bp_solver`` (A3).
 """
 

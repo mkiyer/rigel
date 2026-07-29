@@ -2,8 +2,8 @@
 
 The calibration partition: what the accumulator deposits into, and the structure the solver reads.
 
-    Design: ``docs/index/00_splice_graph_design.md``   ·   Consumer: ``docs/accumulator/05_accumulator_v5.md``
-    Implementation plan + measured amendments: ``docs/accumulator/06_implementation_plan.md``
+    Design: ``docs/CARRY_FORWARD.md``   ·   Consumer: ``docs/CARRY_FORWARD.md``
+    Implementation plan + measured amendments: ``docs/CARRY_FORWARD.md``
 
 **A node** is a genomic interval; nodes tile each reference and are numbered in genomic order.
 **An edge** is a transition, always ``src < dst`` so genomic order is a topological order:
@@ -250,16 +250,6 @@ def build_splice_graph(
     for name, length in reflen.items():
         if length < 0:
             raise ValueError(f"Reference {name!r} has negative length {length}.")
-
-    def _real(
-        tx,
-    ):  # ONE filter: a real annotated transcript. Manufactured nRNA spans are synthetic.
-        return (
-            not tx.is_synthetic
-            and bool(tx.exons)
-            and tx.strand in (Strand.POS, Strand.NEG)
-            and str(tx.ref) in reflen
-        )
 
     ex = _Exons(transcripts, lambda tx: _is_real(tx, reflen))
     for name, s, e in ((str(r), int(a), int(b)) for r, a, b in zip(ex.ref, ex.start, ex.end)):

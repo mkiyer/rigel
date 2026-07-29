@@ -1,5 +1,5 @@
 """Monte-Carlo validation of the EXON region <-> intron-exon BOUNDARY message arithmetic — the mature
-reconciliation layered on the eff-length-frame log-odds shift (docs/calibration/archive/cliff_message_derivation.md §8).
+reconciliation layered on the eff-length-frame log-odds shift (docs/CARRY_FORWARD.md §8).
 
 Physical link: mature RNA has the SAME density rho_m in two frames — contained-unspliced in the exon body
 (eff-len region_eff_length(RNA_FL, L)) and spliced-crossing at the junction (eff-len ~fl_mean(RNA_FL); the code

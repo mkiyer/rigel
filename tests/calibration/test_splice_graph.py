@@ -1,6 +1,6 @@
 """The v8 SPLICE GRAPH test matrix — G1-G18, I1-I12, P1-P5.
 
-    Design: docs/index/00_splice_graph_design.md §7   ·   Plan: docs/accumulator/06_implementation_plan.md
+    Design: docs/CARRY_FORWARD.md §7   ·   Plan: docs/CARRY_FORWARD.md
 
 The graph replaces the v7 region/boundary partition. Its ONE behavioural change is that adjacent
 equal-signature segments are no longer merged, which is what preserves transcript termini — 59.5 % of

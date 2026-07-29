@@ -1,7 +1,7 @@
 /**
  * accumulator.h — Fractional accumulator (per-reference region/boundary split).
  *
- * Canonical spec: docs/accumulator/00_design.md
+ * Canonical spec: docs/CARRY_FORWARD.md
  * Python reference: tests/native/_accumulator_reference.py
  *
  * One Accumulator describes ONE reference. Construction takes the sorted
@@ -114,14 +114,14 @@ public:
     /// [boundaries.front(), boundaries.back()).
     std::int64_t region_of_pos(std::int64_t pos) const noexcept;
 
-    /// Deposit a single fragment's evidence per docs/accumulator/00_design.md.
+    /// Deposit a single fragment's evidence per docs/CARRY_FORWARD.md.
     /// `block_starts`/`block_ends` have length `n_blocks`. Empty / fully
     /// out-of-range fragments are no-ops.
     /// `strand` is the fragment's GENOMIC strand (Strand: POS=1 / NEG=2; 0 = none).
     /// For a SPLICED crossing it is the splice-junction motif strand, recorded on
     /// every boundary the fragment's spliced mass touches (the junction is
     /// single-strand by its GT/AG motif, ≤1 per genomic position — see
-    /// docs/accumulator/01_junction_strand.md). It is ignored for unspliced
+    /// docs/CARRY_FORWARD.md). It is ignored for unspliced
     /// fragments (the ch0/ch1 channels already carry the genome strand) and for
     /// contained fragments (no boundary). The SENSE/ANTISENSE channels are
     /// unaffected — `primary` still selects them.

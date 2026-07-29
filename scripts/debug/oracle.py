@@ -11,7 +11,7 @@ This replaces the retired ``oracle_node_masses`` (in the deleted ``_metrics``/``
 deposited WHOLE fragments by SPAN with no intron-cutting — an INCOMPATIBLE basis with the accumulator the
 calibration actually consumes (per-base coverage, introns cut). That mismatch (e.g. it reported 0 RNA in
 high-expression exons where the accumulator has the real unspliced exon-body mRNA) confounded earlier
-"calibration error" conclusions. See docs/calibration/archive/oracle_and_benchmarking.md.
+"calibration error" conclusions. See docs/CARRY_FORWARD.md.
 
 Accumulator channels (region_contained[R,4] and boundary_mass_{left,right}[B,4]):
   ch0 = unspliced genome+   ch1 = unspliced genome−   ch2 = spliced sense   ch3 = spliced antisense

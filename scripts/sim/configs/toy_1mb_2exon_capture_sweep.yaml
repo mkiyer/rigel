@@ -2,7 +2,7 @@
 # strand-specific (ss=0.99), with a HYBRID-CAPTURE ENERGY SWEEP: none -> weak ->
 # strong -> perfect. The deliberately trivial scenario for deriving + making
 # contractual the IPR / exposure-weighted gDNA effective length
-# (docs/futureprs/exposure_efflen_reimplementation_plan.md).
+# (docs/CARRY_FORWARD.md).
 #
 # The reference is built EXACTLY (not by the random generator) and reused via
 # --skip-existing. Workflow:

@@ -1,7 +1,7 @@
 """Spec tests for ``fragment_genomic_spans`` — the contiguous-genomic-span rule.
 
 Phase A (test-first) of the accumulator span redesign
-(``docs/calibration/accumulator_fragment_span_redesign.md``). The reference
+(``docs/CARRY_FORWARD.md``). The reference
 (`_fragment_spans_reference.py`) is the canonical contract; these table-driven
 cases pin every fragment class. The native-parity test is skipped until the C++
 ``fragment_genomic_spans`` is bound (Phase B).

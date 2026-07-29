@@ -19,7 +19,7 @@ Usage:
 
 Inside the activated `rigel` conda env. The BAM must be name-sorted with NH tags (as `rigel quant`
 requires). For a quick synthetic input, generate an oracle BAM + index with `rigel sim` /
-`simulate_suite.py` (see docs/SIMULATOR.md).
+`simulate_suite.py` (see docs/CARRY_FORWARD.md).
 """
 
 from __future__ import annotations

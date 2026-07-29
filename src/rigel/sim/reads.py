@@ -1,7 +1,7 @@
 """rigel.sim.reads — read-simulation configuration dataclasses.
 
 The read-generation *engine* is :class:`whole_genome.WholeGenomeSimulator` (one fast, vectorized,
-parallel engine; see ``docs/sim/architecture_redesign.md``). This module holds the small
+parallel engine; see ``docs/CARRY_FORWARD.md``). This module holds the small
 ``ReadSimConfig`` / ``GDNAConfig`` dataclasses that :class:`scenario.Scenario` (and its tests) use
 to describe a single-condition run; ``Scenario`` translates them into the engine's
 ``SimulationParams`` / ``GDNASimConfig``.

@@ -1,4 +1,4 @@
-"""Monte-Carlo validation of the cross-node message arithmetic (docs/calibration/archive/cliff_message_derivation.md).
+"""Monte-Carlo validation of the cross-node message arithmetic (docs/CARRY_FORWARD.md).
 
 Simulates gDNA and nascent-RNA fragments over an intron + adjacent exon, deposits contained-in-intron vs
 crossing the intron|exon boundary, measures the TRUE (ground-truth) f_g at each frame, and checks the derived

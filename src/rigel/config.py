@@ -235,7 +235,7 @@ class CalibrationConfig:
     #: :mod:`rigel.calibration.gdna_strand`, next to the estimator they parameterise, and the
     #: shrinkage weight is DERIVED from them rather than asserted. Four fields
     #: (``{gdna,rna}_strand_prior_{alpha_beta,weight}``) collapsed to two constants + one
-    #: structural zero; see `docs/calibration/strand_overdispersion_design.md`.
+    #: structural zero; see `docs/CARRY_FORWARD.md`.
 
     #: **Sweep grid resolution** ``K`` for the per-node log-density log-odds solve over ``λ = logit(f_g)``
     #: (``simplex_logodds``, driven by ``bp_solver.node_sweep``; single-strand nodes are exact 1-D, AMBIG
@@ -265,11 +265,11 @@ class CalibrationConfig:
     #: fit by plain EM — deterministic, no spline. The fixed ``h`` is the KDE-style bandwidth: it forbids any
     #: peak sharper than ``h`` (smooth, never a bed-of-nails) and the projected prior is extremely weak
     #: (``n_eff≈0.15`` pseudo-obs), so strand + messages dominate. Grid size / EM iters are perf-only knobs
-    #: left at the fitter's defaults. Design: ``docs/calibration/archive/npmle_struggles.md``.
+    #: left at the fitter's defaults. Design: ``docs/CARRY_FORWARD.md``.
     npmle_bandwidth: float = 0.15
 
     #: **Aggregate DNA-background floor** (`calibration.background_reference`,
-    #: ``docs/calibration/archive/background_reference_derivation.md``). Measure the genome-wide DNA background as a
+    #: ``docs/CARRY_FORWARD.md``). Measure the genome-wide DNA background as a
     #: pooled scalar ``(log ρ_bg, σ_bg)`` and apply it as a ONE-SIDED log-floor in the gDNA prior — data-driven
     #: crush protection that is DORMANT for a DNA-free / fully-depleted library (never manufactures gDNA) and
     #: never a scale/denominator. ``False`` ⇒ no floor (the pre-background behaviour).
@@ -284,7 +284,7 @@ class CalibrationConfig:
     #: background pool before aggregation; ``None`` ⇒ no trim. Only meaningful with ``background_include_introns``.
     background_robust_trim_mad: float | None = None
 
-    #: **gDNA intron factory** (`docs/calibration/gdna_intron_factory_design.md`). ``True`` ⇒ peel confident gDNA
+    #: **gDNA intron factory** (`docs/CARRY_FORWARD.md`). ``True`` ⇒ peel confident gDNA
     #: from INTRON nodes against the intergenic background BEFORE the pass-0 solve: a per-intron
     #: ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` λ-factor (introns are off-target ⇒ ρ_bg is their TRUE gDNA
     #: density, a two-sided estimate; peels gDNA, not RNA — strand-free). Resolves the unstranded-intron gDNA the

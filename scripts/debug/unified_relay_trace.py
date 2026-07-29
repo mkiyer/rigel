@@ -1,7 +1,7 @@
 """UNIFIED-SOLVER RELAY TRACE — where along the chain does the message amplitude leave the simplex?
 
 The fused message's implied composition must sum to 1 (`unified_solver_design.md` §2). It does not
-(`docs/calibration/archive/UNIFIED_SOLVER_HANDOFF.md`). This probe walks the forward relay hop by hop and reports the **drift**
+(`docs/CARRY_FORWARD.md`). This probe walks the forward relay hop by hop and reports the **drift**
 
     D(i) = [ rho_g(i)*E_g(i) + (rho_p(i)+rho_n(i))*E_r(i) ] / M(i)      (must be ~1)
 

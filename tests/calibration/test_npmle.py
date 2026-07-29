@@ -46,7 +46,7 @@ def test_zero_inflated_native():
 
 def test_projection_is_bare_no_reference_prior():
     """``logprior`` is ``log P(log ρ_g)`` and NOTHING else — no reference prior, no measure, no Jacobian
-    (`docs/calibration/archive/prior_ramp_and_bp_roadmap.md` §2). Regression guard for the ``+0.5·λ`` ramp: any residual linear term
+    (`docs/CARRY_FORWARD.md` §2). Regression guard for the ``+0.5·λ`` ramp: any residual linear term
     in λ is an improper, curvature-free pull whose strength is set only by the grid width."""
     count, eff = _bimodal_counts()
     pr = DensityNPMLE.fit(count, eff)
@@ -75,7 +75,7 @@ def test_prior_is_weak():
     Var(λ) and dragged the mass to the vertex, so the prior *scored* weak while in fact overwhelming every
     unstranded node (it alone returned f_g = 0.9994). Stripping it reveals the kde's true curvature:
     n_eff ≈ 1.2. That is still weak — the strand at κ=0.99, n=100 is worth ~5.3 — but it is honest.
-    See docs/calibration/archive/prior_ramp_and_bp_roadmap.md §2.
+    See docs/CARRY_FORWARD.md §2.
     """
     count, eff = _bimodal_counts()
     pr = DensityNPMLE.fit(count, eff)
@@ -118,7 +118,7 @@ def test_degenerate_all_zero():
     assert (p[: len(p) // 2].sum()) > (p[len(p) // 2 :].sum())
 
 
-# ---- the projection message-transfer-variance (design docs/calibration/archive/npmle_projection_variance_design.md §2) ----
+# ---- the projection message-transfer-variance (design docs/CARRY_FORWARD.md §2) ----
 
 
 def test_projection_floor_is_h_squared():
@@ -159,7 +159,7 @@ def test_projection_deterministic():
     assert np.array_equal(a0, b0) and np.array_equal(a1, b1)
 
 
-# ---- the one-sided background floor (Phase 2; docs/calibration/archive/background_reference_derivation.md §8) ----
+# ---- the one-sided background floor (Phase 2; docs/CARRY_FORWARD.md §8) ----
 
 
 # ---- the aggregate background CELL in the fit (the pooled scalar as one genome-length Poisson observation) ----
@@ -202,7 +202,7 @@ def test_aggregate_cell_zero_counts_anchors_the_derived_floor():
     ``log_rho_floor`` — the per-region resolution wall ``ρ_res = 1/harmmean(E of zero-count regions)`` — NOT the
     old ``1/ΣE`` (which pools the genome as one region ⇒ ~3 logs too low = the confident-FP seed). No single
     region can resolve below its own ``1/E``; the honest floor is where a TYPICAL region still reads ~zero.
-    (docs/calibration/archive/gdna_background_floor_derivation.md.)"""
+    (docs/CARRY_FORWARD.md.)"""
     rng = np.random.default_rng(2)
     eff = rng.uniform(1000.0, 3000.0, 3000)
     count = rng.poisson(1e-2 * eff).astype(float)  # enriched individual nodes
@@ -267,7 +267,7 @@ def test_projection_is_continuous_across_the_valley():
 
 
 # ---------------------------------------------------------------------------
-# The ADDITIVE Role-B representation (docs/calibration/archive/gdna_kde_restore_plan.md): occupancy-weighted, fixed-bandwidth KDE +
+# The ADDITIVE Role-B representation (docs/CARRY_FORWARD.md): occupancy-weighted, fixed-bandwidth KDE +
 # a weak 1-pseudo-observation floor. These pin the three properties the design exists to guarantee.
 # ---------------------------------------------------------------------------
 

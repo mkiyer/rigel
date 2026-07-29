@@ -1,4 +1,4 @@
-"""The relay pie-coherence probe (S1 of docs/calibration/archive/dof_pie_model_fix.md) — measures f_g+f_pos+f_neg per node.
+"""The relay pie-coherence probe (S1 of docs/CARRY_FORWARD.md) — measures f_g+f_pos+f_neg per node.
 
 The calibration relay (`bp_solver._scan`) maintains the per-node running belief as THREE INDEPENDENT
 log-fraction Gaussians and combines each component alone, so the relayed "pie" need not be a composition. This
@@ -9,8 +9,8 @@ per node class and condition:
   * the count of nodes with a component fraction > 1 (= n_src > M, the precision-inflation source);
   * the worst node's trace.
 
-It reproduces `docs/calibration/archive/dof_pie_model_fix.md` Sec 1 and re-derives the case on the POST-GATE residual (the gate is in the
-shipped tree). Theory + fix: `docs/calibration/archive/dof_pie_relay_derivation.md`.
+It reproduces `docs/CARRY_FORWARD.md` Sec 1 and re-derives the case on the POST-GATE residual (the gate is in the
+shipped tree). Theory + fix: `docs/CARRY_FORWARD.md`.
 
     OMP_NUM_THREADS=1 python scripts/debug/pie_probe.py [--suite DIR] [--conditions a,b]
 """

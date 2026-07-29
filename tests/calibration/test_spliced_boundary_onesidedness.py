@@ -19,7 +19,7 @@ This test pins that contract at the substrate level (where the calibration consu
 future change — e.g. "fix" the accumulator to deposit spliced two-sided, or pool spliced across a seam the
 way gDNA is pooled — fails loudly instead of silently corrupting the splice-junction debias. The
 accumulator-level twin is ``tests/native/test_accumulator_spec.py`` T4. Design:
-``docs/calibration/archive/splice_junction_node_architecture.md`` (§1, §5 Phase 0).
+``docs/CARRY_FORWARD.md`` (§1, §5 Phase 0).
 """
 
 from __future__ import annotations

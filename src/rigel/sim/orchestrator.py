@@ -7,7 +7,7 @@ apply the nRNA spike-in, allocate fragment counts, run the :class:`whole_genome.
 write the post-capture truth, and record a manifest entry. That loop lived in two near-identical
 copies (so every new axis had to be wired twice). This is the single implementation both call.
 
-Seeding (intentional, see docs/sim/architecture_redesign.md P4): every condition gets a *distinct*
+Seeding (intentional, see docs/CARRY_FORWARD.md P4): every condition gets a *distinct*
 per-condition seed via :func:`capture_paired_condition_seed`, keyed by ``(gdna, ss, nrna)`` so that
 capture- and overdispersion-variants of one base condition are paired (share a seed) for controlled
 comparison while the main axes are decorrelated. This is the scheme ``suite.main`` already used; it

@@ -1,6 +1,6 @@
 """The unified region↔boundary node chain (the bipartite belief-propagation graph).
 
-`docs/calibration/archive/bp_sweep_rebuild_plan.md` §1/§4. The calibration graph is a LINEAR bipartite chain of
+`docs/CARRY_FORWARD.md` §1/§4. The calibration graph is a LINEAR bipartite chain of
 **region** and **boundary** nodes, interleaved in genomic order. For a reference with ``k`` regions there are
 ``k + 1`` boundary slots, so its node sequence is::
 

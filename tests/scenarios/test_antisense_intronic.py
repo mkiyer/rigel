@@ -207,7 +207,7 @@ class TestAntisenseIntronicMultiIsoform:
         assert_negative_control(bench, strand_specificity=0.9)
         t2 = next(t for t in bench.transcripts if t.t_id == "t2")
         # ⚠ STEP-1 DEBT — restore to 10 when the symmetric prior (Step 2, logP_r) lands.
-        # Removing the improper `+0.5·λ` prior ramp (docs/calibration/archive/prior_ramp_and_bp_roadmap.md §2) deliberately removed
+        # Removing the improper `+0.5·λ` prior ramp (docs/CARRY_FORWARD.md §2) deliberately removed
         # the crude gDNA-abundance stand-in it was providing, WITHOUT yet supplying the real one. Calibration
         # is knowingly under-calling gDNA in this interim (suite-wide: over-call 7.83 M → 1.36 M, but
         # under-call 1.78 M → 15.73 M), and a little of that surplus RNA lands on the wrong isoform: 17/2000

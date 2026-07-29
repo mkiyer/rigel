@@ -325,7 +325,7 @@ def scan_and_buffer(
     strand_models = StrandModels.from_scan(result["strand_observations"])
     # ONE strand-qualified fragment credits ONE junction. That is what makes the 2×2
     # exactly the table's marginal, so both halves of the RNA strand Beta-Binomial are
-    # fitted on one population (docs/calibration/sj_strand_table_design.md §2.1). The
+    # fitted on one population (docs/CARRY_FORWARD.md §2.1). The
     # C++ counts the fragments independently of the table it builds, so this is a real
     # cross-check, and it is the invariant to break if the crediting rule ever changes.
     n_credited = strand_models.sj_table.n_observations

@@ -6,8 +6,8 @@ antisense-RNA / gDNA — over the unified region↔boundary chain (`node_chain`)
 (`simplex_logodds`, the log-density log-odds solver) reconciles three sources of information: the intrinsic
 strand likelihood (the Beta-Binomial tilt — the only signal a count carries), the cross-node imputation
 messages, and the population gDNA prior. Theory: the count-zero-information principle in
-`docs/calibration/CALIBRATION_ARCHITECTURE.md`; the composition (enrichment-ratio) message model in
-`docs/calibration/unified_solver_design.md`.
+`docs/CARRY_FORWARD.md`; the composition (enrichment-ratio) message model in
+`docs/CARRY_FORWARD.md`.
 
 **The UNIFIED (composition) solver — one message mode.** Each message is REFRAMED into the destination's
 frame by the enrichment ratio ``r = ρ_tot(dst)/ρ_tot(src)`` (`node_total_density`, lazy + composition-aware,
@@ -17,7 +17,7 @@ destination's ``f_c`` by the density mode ÷ its own observed mass ``M_dst`` (th
 `enrichment_frame`). The forward-backward relay carries per-component densities + precisions; the combine
 transports both neighbours into the node's frame and runs the ψ solve. The message VARIANCE model is
 COMPLETE — laws M1–M11 derived, MC-validated (`scripts/debug/message_variance_mc.py`) and A/B-won; see
-`docs/calibration/message_variance_derivation.md`, audited in `docs/calibration/variance_ledger.md`. The
+`docs/CARRY_FORWARD.md`, audited in `docs/CARRY_FORWARD.md`. The
 density-uniformity NPMLE proxy it replaced is retired.
 
 Module layout. The per-node geometry / belief / statics / init primitives and the pure geometry helpers
@@ -135,7 +135,7 @@ def node_sweep(
     The chain is a forest of linear paths, so BP is exact in one forward + one backward pass (vs Gauss-Seidel /
     Jacobi which propagate one hop per pass). A message's precision is the source's own HONEST belief precision
     degraded by the two independent defects a cross-node imputation suffers
-    (`docs/calibration/message_variance_derivation.md`)::
+    (`docs/CARRY_FORWARD.md`)::
 
         p = 1 / ( Var(log f_c^src) + 1/n_src  +  σ²_transfer  +  b̂² )
                  \\__ strand ___/   \\_count_/    \\_ SCALE _/    \\_ COMPOSITION _/
@@ -249,7 +249,7 @@ def node_sweep(
     solvable = (fp | fn) & (statics.mass_unspliced > 0.0)
 
     # THE gDNA ARM of ψ — the COMPOSITION prior. The NPMLE's two roles are kept SEPARATE
-    # (docs/calibration/archive/CALIBRATION_MASTER.md §5): this ``gdna_prior`` is the COMPOSITION arm ONLY.
+    # (docs/CARRY_FORWARD.md §5): this ``gdna_prior`` is the COMPOSITION arm ONLY.
     #   * ``gdna_prior=None`` — the INITIAL prior-free solve: the arm is the derived inert reference (½·log f_c
     #     on both arms, added by simplex_logodds). A total-density NPMLE is an ENRICHMENT model, NOT a DNA
     #     composition prior — letting it vote a node's f_g is the count-votes-composition regression (§0).
@@ -499,7 +499,7 @@ def node_sweep(
             message never claimed and a **zero-gDNA library read back 29.3 % gDNA**; on stranded data, where
             the strand likelihood resolves `f_g_own` to 0.013, the reservation was 1.2 % and the
             false-positive rate 1.4 %. The reservation WAS the false-positive rate. Full derivation:
-            `docs/calibration/pin_derivation.md`.
+            `docs/CARRY_FORWARD.md`.
 
             Feeding the DL mismatch test is what it is legitimately for. That test is M7's two-study
             random-effects comparison **against the destination's own self-solve**, so destination
@@ -1490,7 +1490,7 @@ def node_sweep(
     vg_, vp_, vn_ = dc_fin.gdna_frac_var, dc_fin.rna_pos_frac_var, dc_fin.rna_neg_frac_var
     # write back only SOLVABLE nodes (G1 sinks / empty keep their signature-binary init). The §6B DOF SOLVE-GATE
     # (skip unidentified nodes → keep the f_g=1 init, defer to the prior) was DERIVED, IMPLEMENTED, and
-    # EMPIRICALLY REFUTED (docs/calibration/archive/solve_gate_design.md): it regresses both standalone (refit=0 +0.010) and with the
+    # EMPIRICALLY REFUTED (docs/CARRY_FORWARD.md): it regresses both standalone (refit=0 +0.010) and with the
     # hyperprior (refit=1 +0.025) — the prior resolves an imperfectly-SOLVED node better than a deferred f_g=1.
     f_g = np.where(solvable, np.clip(mg_, 0.0, 1.0), f_g)
     f_pos = np.where(solvable, np.clip(mp_, 0.0, 1.0), f_pos)

@@ -9,7 +9,7 @@ hybrid capture lifts the covered nodes into one enriched mode ~2.7 decades above
 sharp and one broad, several decades apart — so the estimator must resolve a spike *and* a wide bump on the
 same axis, which is what fixes the design below.
 
-**Three decisions, each measured** (`docs/calibration/gdna_hyperprior_production_plan.md` §W1–W3, N1, N5):
+**Three decisions, each measured** (`docs/CARRY_FORWARD.md` §W1–W3, N1, N5):
 
 1. **SUBSTRATE** — REGION nodes only, AMBIG excluded, plus the zero-count structural anchor. Boundaries are
    excluded (owner, 2026-07-27): they are ~as numerous as regions but only 5.1 % of them are truly enriched

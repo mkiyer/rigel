@@ -1,4 +1,4 @@
-"""Role-B gDNA hyperprior — the STAGE verification harness (the ruler; docs/calibration/archive/gdna_hyperprior_plan.md §6).
+"""Role-B gDNA hyperprior — the STAGE verification harness (the ruler; docs/CARRY_FORWARD.md §6).
 
 Runs the REAL calibrate end-to-end on the cached ambig_dense_10mb suite and, for the current code, emits:
   (a) docs/figures/<stage>_fit_vs_oracle.png — the fitted gDNA prior P(log10 rho_g) vs the ORACLE landscape,

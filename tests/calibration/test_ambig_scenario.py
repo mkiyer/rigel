@@ -13,7 +13,7 @@ separate multi-exon genes so the strand model trains. It locks two behaviours:
      can't see) — the fix.
   2. gDNA present, no nascent: the AMBIG node reads substantial gDNA — so (1) is not passing trivially.
 
-See `docs/calibration/CALIBRATION_ARCHITECTURE.md` (the count-zero-info theory).
+See `docs/CARRY_FORWARD.md` (the count-zero-info theory).
 """
 
 from __future__ import annotations

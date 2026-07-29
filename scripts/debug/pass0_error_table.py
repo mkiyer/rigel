@@ -13,7 +13,7 @@ row splits the error mass by the node's own posterior ``Var(log f_g)``, at the s
 data-defined split, not a threshold): an honest solver puts far less than 25 % of its error in the
 most-confident quartile.
 
-**P0 (owner-agreed 2026-07-26, `docs/calibration/PASS0_FINISH_PLAN.md`): the scenario table is now ordered by
+**P0 (owner-agreed 2026-07-26, `docs/CARRY_FORWARD.md`): the scenario table is now ordered by
 CONFIDENTLY-WRONG MASS, not by error mass.** Ordering by error mass points at the premise-limited arms every
 time (`SESSION_2026_07_25_HANDOFF_10.md` §3: 67-75 % of the error there is reachable by a better MODE only,
 and x10 on every precision moves nothing) - those are the hyperprior's problem, not pass-0's. Ordering by

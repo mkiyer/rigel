@@ -1,6 +1,6 @@
 """PHASE 0 — does the belief-free NPMLE projection σ²_transfer reproduce the oracle enrichment-crossing strata?
 
-The Phase-0 gate (docs/calibration/archive/npmle_projection_variance_design.md §6): fit P_total belief-free, compute
+The Phase-0 gate (docs/CARRY_FORWARD.md §6): fit P_total belief-free, compute
 the projection σ²_transfer for every edge, and check it reproduces the ORACLE gDNA transfer-variance strata
 (dep-dep small, enr-enr moderate, crossing large) WITHOUT ever touching a solved belief. Settles the two form
 decisions (§5.1 h, §5.2 the σ² formula) against the oracle, not by tuning.

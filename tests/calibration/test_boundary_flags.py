@@ -1,6 +1,6 @@
 """The splice graph's structural flags, re-indexed onto the ACCUMULATOR's boundary axis (plan W1c).
 
-    Plan: docs/accumulator/06_implementation_plan.md §3 (W1c)   ·   Graph: docs/index/00_splice_graph_design.md §2.3
+    Plan: docs/CARRY_FORWARD.md §3 (W1c)   ·   Graph: docs/CARRY_FORWARD.md §2.3
 
 W2 needs to ask, at a seam, *"is this a transcript terminus?"* and *"is this a splice site, on which
 flank?"* — questions the 4-bit signature is structurally blind to. The graph answers them, but in its

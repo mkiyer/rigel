@@ -2,7 +2,7 @@
 Pure-Python reference for ``fragment_genomic_spans`` — the contiguous-genomic-span
 decomposition of a fragment (accumulator span redesign).
 
-Canonical spec: ``docs/calibration/accumulator_fragment_span_redesign.md`` §3, §5.
+Canonical spec: ``docs/CARRY_FORWARD.md`` §3, §5.
 The native C++ ``fragment_genomic_spans`` (landing in Phase B) must reproduce this
 module's output on every case in ``tests/native/test_fragment_spans_spec.py``.
 

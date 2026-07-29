@@ -174,7 +174,7 @@ def nrna_active_strands(signature: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     is the union of that strand's exon and intron bits. This is the boundary solver's
     transcript-continuity gate ``free_s``: a region's ``nrna_active`` is its own bits; a boundary's is the
     AND of its two flanks (both flanks must carry the strand for an unspliced fragment to cross). See
-    ``docs/calibration/archive/node_prior_design.md`` §3.
+    ``docs/CARRY_FORWARD.md`` §3.
     """
     sig = np.asarray(signature)
     return (sig & (BIT_EXON_POS | BIT_INTRON_POS)) != 0, (
@@ -189,7 +189,7 @@ def mrna_active_strands(signature: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     ``mrna_active_s`` implies ``nrna_active_s`` (an exon carries both nascent and mature; an intron only
     nascent). A region's ``mrna_active`` is its own exon bits; a boundary's is the AND of its two flanks
     (mature crosses an unspliced fragment only across contiguous exon — else it would be spliced). This
-    selects the node's solver prior (``docs/calibration/archive/node_prior_design.md`` §3):
+    selects the node's solver prior (``docs/CARRY_FORWARD.md`` §3):
     ``nrna_active ∧ ¬mrna_active`` ⇒ nascent-only ⇒ the nascent≈0 prior.
     """
     sig = np.asarray(signature)

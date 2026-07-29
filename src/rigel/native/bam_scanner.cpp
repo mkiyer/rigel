@@ -240,7 +240,7 @@ struct StrandObservations {
     std::vector<int8_t> exonic_obs;
     std::vector<int8_t> exonic_truth;
 
-    // ⭐ The per-junction SJ strand table (docs/calibration/sj_strand_table_design.md).
+    // ⭐ The per-junction SJ strand table (docs/CARRY_FORWARD.md).
     // A junction is uniquely specified by (ref, start, end, motif strand); each
     // strand-qualified fragment credits its leftmost ANNOTATED junction with one
     // sense (align_strand == sj_strand) or antisense observation.
@@ -740,7 +740,7 @@ static AssembledFragment build_fragment(
 // MOLECULE occupies: per reference, the full extent [min block start, max block
 // end] MINUS the cut introns it splices out. This deposits the molecule (insert
 // gap filled) rather than the sequenced read blocks, removing the paired-end
-// over-count at its source. See docs/calibration/accumulator_fragment_span_redesign.md.
+// over-count at its source. See docs/CARRY_FORWARD.md.
 //
 // Requires `blocks` sorted by (ref_id, start) — build_fragment guarantees this —
 // and `cut_introns` sorted by start within each reference (std::set order). The
@@ -1438,7 +1438,7 @@ private:
         // contained mass (previously these were telemetry-only; see
         //
         // Splice class drives BOTH the channel and the spans (see
-        // docs/calibration/accumulator_fragment_span_redesign.md):
+        // docs/CARRY_FORWARD.md):
         //   - unspliced  → unspliced channel; one [min,max] span (mate gap filled);
         //   - explicit   → spliced channel; cut at the CIGAR-N introns (frag.introns);
         //   - implicit   → spliced channel; cut at the implied introns (in the
@@ -2600,7 +2600,7 @@ NB_MODULE(_bam_impl, m) {
               "BamAnnotationWriter (pass 2: stamp tags → write BAM).";
 
     // ----------------------------------------------------------------
-    // Fractional Accumulator (docs/accumulator/00_design.md)
+    // Fractional Accumulator (docs/CARRY_FORWARD.md)
     // ----------------------------------------------------------------
     //
     // Single-reference accumulator: N regions, N+1 boundaries.

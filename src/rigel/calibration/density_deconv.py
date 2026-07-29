@@ -5,7 +5,7 @@ A node's unspliced count ``C`` (over its gDNA effective length ``E_g``) is ``gDN
 (``g ≈ ρ_bg·E_g``) and read the residual as RNA, with honest, count-derived precision. This is the generic
 count-deconvolution primitive; the **intron factory** is its special case (`fit_intron_background`), where the
 gDNA prior is the intergenic node distribution (introns are off-target, at the same capture depletion as
-intergenic — `docs/calibration/gdna_intron_factory_design.md` §2).
+intergenic — `docs/CARRY_FORWARD.md` §2).
 
 Model (owner-ratified 2026-07-20): the gDNA count ``g ~ NegBinom(mean = ρ_bg·E_g, size = α_eff)``, a
 Gamma-Poisson — the per-region background rate ``ρ ~ Gamma`` (over-dispersion ``α`` = per-region CNV /

@@ -1,6 +1,6 @@
 """WHAT THE SCANNER SEES — the v8 partition wiring (accumulator plan W1b).
 
-    Plan: docs/accumulator/06_implementation_plan.md §3 (W1b)   ·   Graph: docs/index/00_splice_graph_design.md
+    Plan: docs/CARRY_FORWARD.md §3 (W1b)   ·   Graph: docs/CARRY_FORWARD.md
 
 ``build_node_partition_arrays`` is the one function that decides which genomic partition the C++
 accumulator deposits into: the v8 node cut array. :meth:`RegionArrays.from_index` reads the same
@@ -15,7 +15,9 @@ needs a direct assertion that the scanner now sees the v8 cut set, and this is i
 
 The case throughout is **G4 — an alternative TSS strictly interior to another transcript's exon**.
 Both flanks are ``exon_pos``, so the v7 merge deletes the cut and the scanner never learns the
-terminus is there. That is the defect v8 fixes, and 59.5 % of human transcript termini sit in it.
+terminus is there. That is the defect v8 fixes, and **53.4 %** of human transcript termini sit in it
+(232,451 of 435,291). ⚠ The 59.5 % this file used to quote was computed under the buggy
+``~is_synthetic & ~is_nrna`` transcript filter, i.e. it was reading the annotation the way the bug did.
 """
 
 from __future__ import annotations

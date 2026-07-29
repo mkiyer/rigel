@@ -2,7 +2,7 @@
 """Deterministic digest of a simulator suite output — the refactor safety gate.
 
 The `rigel.sim` simulator generates our test/benchmark ground truth, so any refactor of it
-(see docs/sim/architecture_redesign.md) must be **output-identical**. This tool runs a small
+(see docs/CARRY_FORWARD.md) must be **output-identical**. This tool runs a small
 pinned suite and emits a normalized JSON digest (manifest condition identity + per-condition
 truth-file hashes + per-condition oracle-BAM record digest), with all absolute paths / timestamps
 stripped so the digest is location-independent and reproducible from a fixed seed.

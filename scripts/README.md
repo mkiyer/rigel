@@ -9,7 +9,7 @@ Referenced by the CI/skills/docs and expected to keep working across releases:
 
 | dir | what it is |
 |---|---|
-| `sim/` | synthetic-suite drivers (`simulate_suite.py`, `evaluate_suite.py`, `simulate_reads.py`, `gen_ambig_dense.py`, …) + suite YAML configs — used by the `calibration-benchmark` skill and `docs/SIMULATOR.md` / `docs/BENCHMARKING.md` |
+| `sim/` | synthetic-suite drivers (`simulate_suite.py`, `evaluate_suite.py`, `simulate_reads.py`, `gen_ambig_dense.py`, …) + suite YAML configs — used by the `calibration-benchmark` skill and `docs/CARRY_FORWARD.md` / `docs/BENCHMARKING.md` |
 | `benchmarking/` | the real-data benchmark package, run as `python -m scripts.benchmarking` (`docs/BENCHMARKING.md`) |
 | `publishing/` | release scripts (`release.sh`, `post_release.sh`, `conda_publish.sh`) — `docs/PUBLISHING.md` |
 | `profiling/` | profiling drivers (`profiler.py`, `pyspy_driver.py`, `scan_profile.py`) + configs |
@@ -23,7 +23,7 @@ A **small, named** set of current calibration/EM diagnostics (oracle + net-flow 
 canonical tools — `oracle.py`, `oracle_reattribute.py`, `oracle_leak_trace.py`, `benchmark_ab_report.py`,
 `benchmark_ab_render.py`, `dissect_loci.py`, `toy_prod.py`, `pass_trace.py`, `localize_siphon.py`,
 `layer_trace.py`, `locus_component_audit.py`, `em_multiplicity*.py`, … — are documented in
-`docs/calibration/oracle_and_benchmarking.md`.
+`docs/CARRY_FORWARD.md`.
 
 **Policy (so this dir does not regrow into an archive):**
 

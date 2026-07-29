@@ -25,7 +25,7 @@ The refinement exists because a **dispersion across junctions** cannot be recove
 2×2: the RNA strand Beta-Binomial's mean (κ) and its overdispersion must be estimated from the
 same population, and the overdispersion previously came from the accumulator's boundary spliced
 channels, which also pool unannotated and implicit splices.  See
-``docs/calibration/sj_strand_table_design.md``.
+``docs/CARRY_FORWARD.md``.
 
 Models are **immutable**: built once from the scanner's arrays, then read.  There is no
 observe/finalize lifecycle and therefore no way to score against a half-trained model.
