@@ -75,8 +75,8 @@ def test_oracle_override_conserves_node_mass(oracle_scenario, tmp_path):
     orc = OracleTruth.from_bam(
         str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc2"
     )
-    ra = RegionArrays.from_region_df(
-        oracle_scenario.index.region_df, oracle_scenario.index.ref_name_to_id
+    ra = RegionArrays.from_frame(
+        oracle_scenario.index.nodes_df, oracle_scenario.index.ref_name_to_id
     )
     ov = orc.override_masses(ra)
     full_sub = CalibrationSubstrate.from_payload(orc.full, ra)

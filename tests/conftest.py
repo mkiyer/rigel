@@ -97,7 +97,7 @@ def mini_fasta_file(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def build_test_index(tmp_path_factory, gtf_text, genome_size=2000, name="idx"):
+def build_test_index(tmp_path_factory, gtf_text, genome_size=2000, name="idx", refs=None):
     """Build a TranscriptIndex from a GTF string (session/module-scoped helper).
 
     Parameters
@@ -110,6 +110,11 @@ def build_test_index(tmp_path_factory, gtf_text, genome_size=2000, name="idx"):
         Length of chr1 in the synthetic FASTA (default: 2000).
     name : str
         Sub-directory name for this index (keeps separate indexes apart).
+    refs : dict[str, int] | None
+        Optional ``{reference_name: length}`` for a MULTI-reference index. ``None`` (the default) builds
+        the single ``chr1`` of ``genome_size`` bp that every existing caller expects, so this parameter
+        is purely additive. Needed by the splice-graph matrix, whose G17 asserts that node/edge ids stay
+        contiguous per reference and that no edge crosses references.
 
     Returns
     -------
@@ -124,10 +129,11 @@ def build_test_index(tmp_path_factory, gtf_text, genome_size=2000, name="idx"):
 
     fasta_path = base / "genome.fa"
     with open(fasta_path, "w") as f:
-        f.write(">chr1\n")
-        seq = "N" * genome_size
-        for i in range(0, len(seq), 80):
-            f.write(seq[i : i + 80] + "\n")
+        for ref_name, ref_len in (refs or {"chr1": genome_size}).items():
+            f.write(f">{ref_name}\n")
+            seq = "N" * ref_len
+            for i in range(0, len(seq), 80):
+                f.write(seq[i : i + 80] + "\n")
     pysam.faidx(str(fasta_path))
 
     idx_dir = base / "index"

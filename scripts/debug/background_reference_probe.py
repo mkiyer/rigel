@@ -39,7 +39,7 @@ _EPS = 1e-12
 def _production_rho_bg(inp, index):
     """The PRODUCTION `measure_background` scalar (intergenic-only, signature-based) — to compare against the
     oracle-based ρ_bg the probe computes from R<1 nodes."""
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     sub = CalibrationSubstrate.from_payload(inp["payload"], ra)
     reg_el = region_eff_length(ra.region_size_bp, np.asarray(inp["gdna_fl_pmf"]))
     bg = measure_background(sub, ra, reg_el)

@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rigel.calibration.regions import build_region_partition_arrays
+from rigel.calibration.splice_graph import build_node_partition_arrays
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import scan_and_buffer
 from rigel.scan_payload import AccumulatorPayload, N_CHANNELS
@@ -70,7 +70,7 @@ class TestScannerAccumulatorIntegration:
 
     def test_payload_shape_matches_index_partition(self, oracle):
         index = oracle.index
-        boundaries, ref_pos_offsets, region_types = build_region_partition_arrays(index)
+        boundaries, ref_pos_offsets, region_types = build_node_partition_arrays(index)
         payload = _scan(oracle)
 
         np.testing.assert_array_equal(payload.boundaries, boundaries)

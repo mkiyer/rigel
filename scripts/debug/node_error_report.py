@@ -47,7 +47,7 @@ _RTYPE = {0: "intergenic", 1: "intron", 2: "exon"}
 
 def _solve(inp, index, cfg, *, gate: bool):
     """Run the prior-free sweep once. ``gate=False`` forces the `mrna_active_*` mask all-True (un-gated)."""
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     pl = inp["payload"]
     sub = CalibrationSubstrate.from_payload(pl, ra)
     bsub = BoundarySubstrate.from_payload(pl)
@@ -77,7 +77,7 @@ def _solve(inp, index, cfg, *, gate: bool):
 
 def _node_frame(inp, index, cfg):
     """Per-node truth + diagnostic context (independent of the gate)."""
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     pl = inp["payload"]
     sub = CalibrationSubstrate.from_payload(pl, ra)
     bsub = BoundarySubstrate.from_payload(pl)

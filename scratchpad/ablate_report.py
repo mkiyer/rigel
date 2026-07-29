@@ -15,6 +15,10 @@ from pathlib import Path
 
 import numpy as np
 
+import sys as _sys
+_sys.path.insert(0, "/Users/mkiyer/proj/rigel/scripts/debug")
+from z2 import lin_var  # noqa: E402  -- THE single z2 denominator (log Var -> linear Var)
+
 OUT = Path("/tmp/rigel_ablate")
 _EPS = 1e-9
 arms = sys.argv[1:] or ["base"]
@@ -73,7 +77,7 @@ for refit in (0, 1):
         for _, m in pops:
             k = m & np.isfinite(d["var"])
             num = float(np.sum(d["mass"][k] * (d["fg"][k] - d["fo"][k]) ** 2))
-            den = float(np.sum(d["mass"][k] * d["var"][k]))
+            den = float(np.sum(d["mass"][k] * lin_var(d["var"][k], d["fg"][k])))
             z.append(num / den if den > 0 else float("nan"))
         bw = ""
         if arm != BASE:

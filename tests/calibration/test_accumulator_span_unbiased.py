@@ -20,15 +20,15 @@ from rigel.calibration.fl import build_fl_models, gdna_fl_mass
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.substrate import CalibrationSubstrate
 from rigel.config import BamScanConfig
-from rigel.pipeline import _check_region_payload_alignment, scan_and_buffer
+from rigel.pipeline import scan_and_buffer
 from rigel.splice import SpliceType
 
 
 def _crossing_vs_contained_ratio(bam_path, index) -> float:
     """Return crossing-ρ / contained-ρ over count-observable nodes (≈1.0 if unbiased)."""
     _s, sm, fla, _b, pl = scan_and_buffer(str(bam_path), index, BamScanConfig(sj_strand_tag="auto"))
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
-    _check_region_payload_alignment(ra, pl)
+    ra = RegionArrays.from_frame(index.nodes_df, index.ref_name_to_id)
+    CalibrationSubstrate._check_alignment(pl, ra)
     flm = build_fl_models(
         global_counts=fla.global_model.counts,
         rna_counts=fla.category_models[SpliceType.SPLICED_ANNOT].counts,
@@ -114,7 +114,7 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
     _s, sm, _fl, _b, pl = scan_and_buffer(
         str(res.bam_path), res.index, BamScanConfig(sj_strand_tag="auto")
     )
-    ra = RegionArrays.from_region_df(res.index.region_df, res.index.ref_name_to_id)
+    ra = RegionArrays.from_frame(res.index.nodes_df, res.index.ref_name_to_id)
     sub = CalibrationSubstrate.from_payload(pl, ra)
     ctype = coarse_type_array(np.asarray(ra.signature))
     rid = np.asarray(ra.ref_id)

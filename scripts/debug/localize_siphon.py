@@ -16,7 +16,7 @@ S = "/Users/mkiyer/Downloads/rigel_runs/quick_3to1_5mb"
 COND = "gdna_gdna300_ss_0.99_nrna_none_capture_on"
 bam = f"{S}/{COND}/annotated.bam"
 index = TranscriptIndex.load(f"{S}/rigel_index")
-ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+ra = RegionArrays.from_index(index)
 starts = np.asarray(ra.start, np.int64); ends = np.asarray(ra.end, np.int64)
 ref_off = np.asarray(ra.ref_offsets, np.int64); sig = np.asarray(ra.signature).astype(np.int64)
 name2id = index.ref_name_to_id

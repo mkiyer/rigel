@@ -13,6 +13,10 @@ import sys
 
 import numpy as np
 
+import sys as _sys
+_sys.path.insert(0, "/Users/mkiyer/proj/rigel/scripts/debug")
+from z2 import lin_var  # noqa: E402  -- THE single z2 denominator (log Var -> linear Var)
+
 _EPS = 1e-9
 B = np.load(sys.argv[1], allow_pickle=True)
 arms = sys.argv[2:]
@@ -28,7 +32,8 @@ def parts(d, m):
     ms, err, var = d["mass"], d["err"], d["var"]
     raw = np.where(ms > _EPS, err / np.maximum(ms, _EPS), 0.0)
     k = m & np.isfinite(var)
-    return float(np.sum(ms[k] * raw[k] ** 2)), float(np.sum(ms[k] * var[k]))
+    return (float(np.sum(ms[k] * raw[k] ** 2)),
+            float(np.sum(ms[k] * lin_var(var[k], d["fg"][k]))))
 
 
 print(f"node set held FIXED = base's confident quartile (var <= q1 = {q1:.5g}); "

@@ -76,7 +76,7 @@ def measure(inp, index, h):
     from rigel.calibration.node_geometry import build_node_geometry
     from rigel.calibration.region_arrays import RegionArrays
     from rigel.calibration.substrate import BoundarySubstrate, CalibrationSubstrate
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     sub = CalibrationSubstrate.from_payload(ra_pl, ra)
     bsub = BoundarySubstrate.from_payload(ra_pl)
     geom = build_node_geometry(chain, sub, bsub, ra, inp["gdna_fl_pmf"], inp["rna_fl_pmf"])

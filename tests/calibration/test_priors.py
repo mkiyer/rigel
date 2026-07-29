@@ -47,9 +47,10 @@ def _calibration(
         mass_gdna_right=z.copy(),
         mass_rna_right=z.copy(),
         mass_rna_spliced=ms,
-        gdna_boundary_len=np.full(
-            n, fl_mean, dtype=np.float64
-        ),  # per-side density length (seam support)
+        # ⚠ D6 (2026-07-29): the STORED per-side density length is E[min(ℓ,L)]/2, so for a long region
+        # it is fl_mean/2 and a seam's support is the SUM of its two flanks = fl_mean — one whole
+        # crossing opportunity per seam, which is exactly v5 §10.3's `ρ = E[flux]/fl_mean`.
+        gdna_boundary_len=np.full(n, fl_mean / 2.0, dtype=np.float64),
         gdna_region_eff_len=rel.copy(),
         gdna_density_global=gdna_density_global,
         rna_sense_frac=0.9,
@@ -72,14 +73,19 @@ def _uniform_field_cal(region_eff_len, boundary_len, rho) -> CalibrationResult:
     guard on the seam-support choice: with VARIED / short ``boundary_len`` the field is uniform only if the
     helper divides the seam by the AVERAGED side density length — an ``E[ℓ]`` divisor would drift off 1."""
     rel = np.asarray(region_eff_len, dtype=np.float64)
-    bl = np.asarray(boundary_len, dtype=np.float64)
+    bl = np.asarray(boundary_len, dtype=np.float64) / 2.0  # E[min(ℓ,L)] → the STORED E[min(ℓ,L)]/2
     n = rel.shape[0]
     contained = rho * rel
     side_right = np.zeros(n, dtype=np.float64)
     side_left = np.zeros(n, dtype=np.float64)
     if n > 1:
-        side_right[:-1] = rho * bl[:-1] / 2.0  # region r's right side ⇒ ρ·E[min(ℓ,L_r)]/2
-        side_left[1:] = rho * bl[1:] / 2.0  # region r+1's left side ⇒ ρ·E[min(ℓ,L_{r+1})]/2
+        # ⚠ D6 (2026-07-29): ``gdna_boundary_len`` IS the halved per-side density length
+        # ``E[min(ℓ,L)]/2``, and each face carries ``ρ·gdna_boundary_len``. This fixture used to store
+        # the UN-halved ``E[min(ℓ,L)]`` and deposit ``ρ·bl/2``, which put the same mass on each face but
+        # a DOUBLED length in ``gdna_boundary_len`` — exactly cancelling the spurious ½ that
+        # ``_pooled_seam_arrays`` then applied, and hiding the factor-2 from every assertion here.
+        side_right[:-1] = rho * bl[:-1]  # region r's right FACE ⇒ ρ·gdna_boundary_len[r]
+        side_left[1:] = rho * bl[1:]  # region r+1's left FACE ⇒ ρ·gdna_boundary_len[r+1]
     return CalibrationResult(
         mass_gdna_contained=contained,
         mass_rna_contained=np.zeros(n, dtype=np.float64),
@@ -111,7 +117,6 @@ def _regions(starts, ends) -> RegionArrays:
         strand_class=np.zeros(n, dtype=np.int8),
         region_size_bp=(ends - starts).astype(np.float64),
         ref_offsets=np.array([0, n], dtype=np.int32),
-        order=np.arange(n, dtype=np.int64),
         n_refs=1,
     )
 
@@ -230,7 +235,7 @@ def test_gdna_mass_conservation_contained_plus_sides():
         mass_gdna_right=np.array([1.0, 2.0, 0.0]),  # right[2] = terminal (zero)
         mass_rna_right=np.array([0.0, 0.0, 0.0]),
         mass_rna_spliced=np.array([0.0, 0.0, 0.0]),
-        gdna_boundary_len=np.array([50.0, 50.0, 50.0]),
+        gdna_boundary_len=np.array([25.0, 25.0, 25.0]),  # D6: E[min]/2 ⇒ seam support 50
         gdna_region_eff_len=np.array([100.0, 100.0, 100.0]),
         gdna_density_global=0.01,
         rna_sense_frac=0.9,
@@ -327,7 +332,7 @@ def _global_bimodal_cal(rna0: float, gdna0: float = 1.0) -> CalibrationResult:
         mass_gdna_right=z.copy(),
         mass_rna_right=z.copy(),
         mass_rna_spliced=z.copy(),
-        gdna_boundary_len=np.full(ng, 50.0),
+        gdna_boundary_len=np.full(ng, 25.0),
         gdna_region_eff_len=np.full(ng, 100.0),
         gdna_density_global=0.5,
         rna_sense_frac=0.9,
@@ -367,7 +372,7 @@ def _blind_seam_cal(contained_rna: float) -> CalibrationResult:
         mass_gdna_right=np.array([1.0, 2.0, 0.0]),
         mass_rna_right=np.array([0.0, 0.0, 0.0]),
         mass_rna_spliced=np.array([0.0, 0.0, 0.0]),
-        gdna_boundary_len=np.array([50.0, 50.0, 50.0]),
+        gdna_boundary_len=np.array([25.0, 25.0, 25.0]),  # D6: E[min]/2 ⇒ seam support 50
         gdna_region_eff_len=np.array([100.0, 100.0, 100.0]),
         gdna_density_global=0.01,
         rna_sense_frac=0.9,
@@ -444,7 +449,7 @@ def test_gdna_eff_len_factor_one_under_uniform_gdna_with_kde_firing():
         mass_gdna_right=np.full(6, 50.0),
         mass_rna_right=np.zeros(6),
         mass_rna_spliced=np.zeros(6),
-        gdna_boundary_len=np.full(6, 50.0),
+        gdna_boundary_len=np.full(6, 25.0),
         gdna_region_eff_len=np.full(6, 100.0),
         gdna_density_global=0.5,
         rna_sense_frac=0.9,

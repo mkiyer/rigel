@@ -39,6 +39,13 @@ from ..scan_payload import AccumulatorPayload
 from .errors import CalibrationSubstrateError
 from .region_arrays import RegionArrays, boundary_region_indices, region_boundary_indices
 
+#: A geometry/payload mismatch shows up as a shape error deep in the calibrator, which points
+#: nowhere near its cause. Name it here instead.
+PARTITION_MISMATCH_HINT = (
+    "Build the geometry with RegionArrays.from_index(index), and re-scan if the payload was cached "
+    "against a different index (cached payloads are namespaced by index.partition_hash)."
+)
+
 
 def _make_view(counts4: np.ndarray, mass4: np.ndarray) -> "SubstrateView":
     """Split a 4-channel (counts, mass) pair into a per-region view."""
@@ -122,19 +129,22 @@ class CalibrationSubstrate:
 
     @staticmethod
     def _check_alignment(payload: AccumulatorPayload, region_arrays: RegionArrays) -> None:
-        """Enforce that the region geometry addresses the payload 1:1 (doc 04 §4.1)."""
+        """Enforce that the geometry addresses the payload 1:1 — THE one copy of this invariant."""
+        if payload is None:
+            raise CalibrationSubstrateError(
+                "calibration payload is None; BamScanner.set_regions was not called."
+            )
         if region_arrays.n_regions != payload.r_total:
             raise CalibrationSubstrateError(
-                f"region geometry has {region_arrays.n_regions} regions but the payload "
-                f"has {payload.r_total}; rebuild the index."
+                f"region geometry has {region_arrays.n_regions} objects but the payload has "
+                f"{payload.r_total}. {PARTITION_MISMATCH_HINT}"
             )
         expected = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
         actual = np.asarray(payload.ref_region_offsets, dtype=np.int64)
         if not np.array_equal(expected, actual):
             raise CalibrationSubstrateError(
-                "region geometry per-reference offsets do not match the payload "
-                "ref_region_offsets; the accumulator region order differs from "
-                "index.region_df. Rebuild the index."
+                "region geometry per-reference offsets do not match the payload's "
+                f"ref_region_offsets. {PARTITION_MISMATCH_HINT}"
             )
 
 

@@ -28,7 +28,7 @@ def scanned():
     )
     config = PipelineConfig(em=EMConfig(seed=SEED), scan=BamScanConfig(sj_strand_tag="auto"))
     _, _, _, _, payload = scan_and_buffer(str(result.bam_path), result.index, config.scan)
-    ra = RegionArrays.from_region_df(result.index.region_df, result.index.ref_name_to_id)
+    ra = RegionArrays.from_frame(result.index.nodes_df, result.index.ref_name_to_id)
     yield payload, ra
     sc.cleanup()
 

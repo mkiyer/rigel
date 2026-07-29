@@ -93,7 +93,7 @@ def run(name, genes, *, kappa=1.0, n_rna=4000, gdna_fraction=0.5, capture=False,
     if _debug is not None:
         from rigel.calibration.effective_length import boundary_eff_length as _bel
         _debug["gdna_fl_mean"] = float(_bel(fl.gdna_pmf))  # gDNA mean fragment length (tiny-node threshold)
-    ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
+    ra = RegionArrays.from_index(idx)
     from rigel.calibration.strand_balance import fit_strand_balance
     kfit = float(fit_strand_balance(sm).rna_sense_frac)
     cap = {}
@@ -124,7 +124,7 @@ def run(name, genes, *, kappa=1.0, n_rna=4000, gdna_fraction=0.5, capture=False,
             return "intron"
         return "intergenic"
 
-    rdf = idx.region_df
+    rdf = idx.nodes_df
     print(f"\n===== {name}: {kappa=} capture={'ON x'+str(capture_strength) if capture else 'OFF'} "
           f"n_rna={n_rna} gdna_frac={gdna_fraction} nascent={nascent}  (fit κ={kfit:.3f}) =====")
     print(f"  {'reg':>3} {'span':>13} {'type':>10} {'sig':>3} | {'truth':>6} {'solved':>6} {'err':>7}")

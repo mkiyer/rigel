@@ -53,7 +53,7 @@ CONDS = [
 
 index = TranscriptIndex.load(str(SUITE / "rigel_index"))
 cfg = PipelineConfig()
-ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+ra = RegionArrays.from_index(index)
 
 for cond in CONDS:
     inp = _scan_and_truth(SUITE, cond, index, cfg, Path("/tmp/rigel_selfsolve"), SUITE / "_selfsolve_cache")

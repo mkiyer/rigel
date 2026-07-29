@@ -50,7 +50,7 @@ CAP = dict(binding_per_base=10.0, gdna_split_penalty=0.2, off_target_weight=1.0)
 def extract_priors(cond: str):
     """Extract the population priors fitted by calibrate on a cached ambig_dense_10mb condition."""
     index = TranscriptIndex.load(str(SUITE / "rigel_index"))
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     cfg = CalibrationConfig()
     with open(SUITE / "_selfsolve_cache" / f"{cond}.pkl", "rb") as fh:
         c = pickle.load(fh)
@@ -98,11 +98,11 @@ def build_toy(name, *, exons, strand="+", gdna_fraction, nascent, mature, captur
     fl = build_fl_models(global_counts=flm.global_model.counts,
                          rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,
                          gdna_counts=gdna_fl_mass(pl), max_size=flm.max_size)
-    ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
+    ra = RegionArrays.from_index(idx)
     chain = build_node_chain(pl.ref_region_offsets, pl.ref_boundary_offsets)
     truth = _truth_fg(result.bam_path, ra, idx.ref_names)
     return dict(payload=pl, ra=ra, strand_model=sm, gdna_fl_pmf=np.asarray(fl.gdna_pmf),
-                rna_fl_pmf=np.asarray(fl.rna_pmf), chain=chain, truth=truth, rdf=idx.region_df)
+                rna_fl_pmf=np.asarray(fl.rna_pmf), chain=chain, truth=truth, rdf=idx.nodes_df)
 
 
 def _truth_fg(bam_path, ra, ref_names):

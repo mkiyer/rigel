@@ -90,7 +90,7 @@ def project(log_rho, w, h, log_rho_obs, k=None, eff=None):
 
 
 def build(inp, index, bandwidth=0.15):
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     pl = inp["payload"]
     sub = CalibrationSubstrate.from_payload(pl, ra)
     bsub = BoundarySubstrate.from_payload(pl)

@@ -563,3 +563,110 @@ def test_junction_strand_unspliced_noop_reference():
 @XFAIL_NATIVE
 def test_junction_strand_unspliced_noop_native():
     _check_junction_strand_unspliced_noop(_both(NativeAccumulator, partition_exon_intron_exon()))
+
+
+# ---------------------------------------------------------------------------
+# Worker-merge DETERMINISM — the control for accumulator v5's test A9.
+# ---------------------------------------------------------------------------
+#
+# v5 §6 claims that moving every channel to integer / fixed-point storage makes the accumulator
+# "bit-exact at any thread count", because integer addition is associative — and that this REMOVES
+# the known ~2.6 % cross-process nondeterminism rather than merely working around it (memory
+# `calibrate_cross_process_nondeterminism`). Test A9 is that claim.
+#
+# ⚠ Before this, `Accumulator::merge_from` was defined in C++ (accumulator.cpp:234) and called only
+# from `BamScanner::scan` — it was NOT bound to Python, so A9 had no infrastructure and the v5 claim
+# had no *control*: nothing recorded what today's accumulator actually does. These tests are that
+# control. They must keep passing through the v5 rewrite, and the float assertion below is expected
+# to STRENGTHEN from "close" to "exact" when the fractional mass channels disappear.
+
+
+class TestWorkerMergeDeterminism:
+    """Deposit one corpus across K workers in K different orders; merge; compare to a single pass."""
+
+    @staticmethod
+    def _corpus(rng, n, hi):
+        out = []
+        for _ in range(n):
+            s = int(rng.integers(0, hi - 20))
+            w = int(rng.integers(20, 260))
+            spliced = bool(rng.integers(0, 2))
+            blocks = [(s, min(s + w, hi))]
+            if spliced and s + w + 300 < hi:  # a spliced fragment: two blocks over an intron
+                blocks = [(s, s + w), (s + w + 200, min(s + w + 200 + w, hi))]
+            out.append((blocks, spliced, bool(rng.integers(0, 2)), int(rng.integers(0, 3))))
+        return out
+
+    @staticmethod
+    def _cuts():
+        return np.array([0, 500, 550, 560, 561, 1561, 2000], dtype=np.int64)
+
+    def _run(self, frags, n_workers, rng=None):
+        """Shard `frags` across n_workers (in shuffled order when rng is given), merge, return arrays."""
+        cuts = self._cuts()
+        order = list(range(len(frags)))
+        if rng is not None:
+            rng.shuffle(order)
+        accs = [NativeAccumulator(boundary_positions=cuts) for _ in range(n_workers)]
+        for i, k in enumerate(order):
+            blocks, spliced, primary, strand = frags[k]
+            accs[i % n_workers].deposit(blocks, spliced=spliced, primary=primary, strand=strand)
+        merged = accs[0]
+        for a in accs[1:]:
+            merged.merge_from(a)
+        n = merged._native
+        return (
+            np.asarray(n.regions_contained).copy(),
+            np.asarray(n.boundaries_flux_left).copy(),
+            np.asarray(n.boundaries_flux_right).copy(),
+            np.asarray(n.boundaries_mass_left).copy(),
+            np.asarray(n.boundaries_mass_right).copy(),
+        )
+
+    def test_merge_equals_single_pass(self):
+        """K workers + merge == one accumulator seeing every fragment. The merge itself is correct."""
+        frags = self._corpus(np.random.default_rng(20260729), 800, 2000)
+        one = self._run(frags, 1)
+        many = self._run(frags, 4)
+        np.testing.assert_array_equal(one[0], many[0])  # contained counts — INTEGER, exact
+        np.testing.assert_array_equal(one[1], many[1])  # flux left    — INTEGER, exact
+        np.testing.assert_array_equal(one[2], many[2])  # flux right   — INTEGER, exact
+        np.testing.assert_allclose(one[3], many[3], rtol=1e-6)  # mass — float32, see below
+        np.testing.assert_allclose(one[4], many[4], rtol=1e-6)
+
+    @pytest.mark.parametrize("n_workers", [1, 2, 4, 8])
+    def test_integer_channels_are_bit_identical_at_any_worker_count(self, n_workers):
+        """⭐ The INTEGER channels are already exactly worker-count- and order-independent.
+
+        Integer addition is associative and commutative, so no shard split and no merge order can move
+        them. This is the property v5 §6 extends to EVERY channel by replacing the float masses with
+        fixed-point `uint64` sums — at which point this test's float sibling below becomes exact too.
+        """
+        frags = self._corpus(np.random.default_rng(7), 800, 2000)
+        ref = self._run(frags, 1)
+        got = self._run(frags, n_workers, rng=np.random.default_rng(100 + n_workers))
+        np.testing.assert_array_equal(ref[0], got[0])
+        np.testing.assert_array_equal(ref[1], got[1])
+        np.testing.assert_array_equal(ref[2], got[2])
+
+    def test_float_mass_channels_are_NOT_bit_identical_across_shardings(self):
+        """⚠ The CONTROL, and the reason v5 §6 is worth doing: the float channels are order-dependent.
+
+        `mass_left`/`mass_right` accumulate `float32 += share` over a data-dependent worker partition,
+        and float addition is not associative — so a different sharding gives a different sum in the
+        low bits. That is the documented ~2.6 % cross-process nondeterminism at its source.
+
+        This test asserts the CURRENT behaviour: close, but not bit-identical. **When v5's fixed-point
+        `uint64` recip lands, this test must be inverted to assert exact equality** — that inversion is
+        the v5 §6 / test-A9 deliverable, and if it cannot be inverted the claim is false.
+        """
+        frags = self._corpus(np.random.default_rng(11), 4000, 2000)
+        ref = self._run(frags, 1)
+        got = self._run(frags, 8, rng=np.random.default_rng(999))
+        np.testing.assert_allclose(ref[3], got[3], rtol=1e-5)
+        np.testing.assert_allclose(ref[4], got[4], rtol=1e-5)
+        exact = np.array_equal(ref[3], got[3]) and np.array_equal(ref[4], got[4])
+        if exact:  # not a failure — it means the corpus was too small to expose the reassociation
+            pytest.skip(
+                "float masses happened to be bit-identical; corpus too small to reassociate"
+            )

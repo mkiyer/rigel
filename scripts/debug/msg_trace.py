@@ -48,7 +48,7 @@ def main():
     args = ap.parse_args()
 
     index = TranscriptIndex.load(str(Path(args.suite) / "rigel_index"))
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     cfg = PipelineConfig()
     with open(Path(args.cache_dir) / f"{args.condition}.pkl", "rb") as fh:
         inp = pickle.load(fh)

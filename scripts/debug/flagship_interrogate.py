@@ -89,7 +89,7 @@ def _deep_dive(i, chain, index, dbg0, cap0, mass, eff, fo, G, R, Gp, Gn, Rp, Rn,
     kind = np.asarray(chain.kind)
     if kind[i] == REGION:
         rid = int(np.asarray(chain.ref_idx)[i])
-        rdf = index.region_df.iloc[rid]
+        rdf = index.nodes_df.iloc[rid]
         ref, rs, re_, sig = rdf["ref_name"], int(rdf["start"]), int(rdf["end"]), int(rdf["signature"])
         print(f"\n(1) STRUCTURE: region_id={rid} {ref}:{rs}-{re_} len={re_-rs} signature={sig:04b}")
         td = index.t_df
@@ -167,7 +167,7 @@ def main():
     work = Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_selfsolve"
     cache = suite / "_selfsolve_cache"
     inp = _scan_and_truth(suite, a.condition, index, cfg, work, cache)
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
 
     dbg0 = _solve(inp, ra, 0)          # pass-0
     dbgS = _solve(inp, ra, cfg.calibration.calib_refit_iters)  # shipped (refit on)

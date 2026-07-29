@@ -28,7 +28,7 @@ TOPN = int(sys.argv[2]) if len(sys.argv) > 2 else 15
 bam = f"{S}/{COND}/sim_oracle.bam"
 index = TranscriptIndex.load(f"{S}/rigel_index")
 cfg = PipelineConfig()
-ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+ra = RegionArrays.from_index(index)
 wd = Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_oracle_split"
 
 orc = OracleTruth.from_bam(bam, index, cfg, wd, f"{os.path.basename(S)}_{COND}")

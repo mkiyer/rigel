@@ -90,7 +90,7 @@ def _exon_intron_exon_payload() -> tuple[AccumulatorPayload, RegionArrays]:
             "signature": np.array([BIT_EXON_POS, BIT_INTRON_POS, BIT_EXON_POS], dtype=np.uint8),
         }
     )
-    return payload, RegionArrays.from_region_df(region_df, {"chr1": 0})
+    return payload, RegionArrays.from_frame(region_df, {"chr1": 0})
 
 
 def test_spliced_boundary_mass_is_one_sided_at_the_intron():

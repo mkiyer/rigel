@@ -57,7 +57,7 @@ def _intergenic_betabinom_payload(n_regions, depth, overdispersion, seed):
             "signature": np.zeros(n_regions, dtype=np.uint8),  # intergenic ⇒ count-observable
         }
     )
-    return payload, RegionArrays.from_region_df(region_df, {"chr1": 0})
+    return payload, RegionArrays.from_frame(region_df, {"chr1": 0})
 
 
 @pytest.mark.parametrize("od_true", [0.05, 0.10, 0.20])

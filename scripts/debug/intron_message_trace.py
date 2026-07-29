@@ -51,7 +51,7 @@ _EPS = 1e-12
 
 
 def _build(inp, index, cfg):
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     pl = inp["payload"]
     sub = CalibrationSubstrate.from_payload(pl, ra)
     bsub = BoundarySubstrate.from_payload(pl)

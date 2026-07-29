@@ -36,7 +36,7 @@ cond = sys.argv[2] if len(sys.argv) > 2 else "gdna_gdna300_ss_0.50_nrna_present_
 
 index = TranscriptIndex.load(str(SUITE / "rigel_index"))
 cfg = PipelineConfig()
-ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+ra = RegionArrays.from_index(index)
 inp = _scan_and_truth(SUITE, cond, index, cfg, Path("/tmp/rigel_selfsolve"), SUITE / "_selfsolve_cache")
 dbg: dict = {}
 cc = dataclasses.replace(cfg.calibration, calib_refit_iters=0)

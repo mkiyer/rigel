@@ -1,3 +1,5 @@
+> ⛔ **SUPERSEDED by `04_accumulator_v3.md` (2026-07-28). The path/cell store it proposes is **withdrawn** (owner: expensive, and no consumer). Its measurements (§1, §10) and its admissible-start effective length (§2.2) remain valid and are carried forward.**
+
 # Accumulator redesign — specification
 
 **v2, 2026-07-28.** Supersedes v1 (2026-07-27) — see §0 for what was wrong in it.

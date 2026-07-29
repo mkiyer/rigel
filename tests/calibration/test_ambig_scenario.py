@@ -90,7 +90,7 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
     cfg = PipelineConfig()
     scan = dataclasses.replace(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     _st, sm, flm, _buf, pl = scan_and_buffer(bam, idx, scan)
-    ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
+    ra = RegionArrays.from_frame(idx.nodes_df, idx.ref_name_to_id)
     fl = build_fl_models(
         global_counts=flm.global_model.counts,
         rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,

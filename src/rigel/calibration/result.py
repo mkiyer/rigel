@@ -20,11 +20,20 @@ from ..config import CalibrationConfig
 
 
 def _check_region_array(arr: np.ndarray, name: str, n_regions: int) -> None:
-    """Validate a per-region float64 array: shape, dtype, finite, non-negative."""
+    """Validate a per-region numeric array: shape, dtype, finite, non-negative.
+
+    ⚠ The dtype gate was ``float64`` only. Accumulator v5 makes the primary per-object observable an
+    integer **count** (spec §6: no floats anywhere in the data model), so an exact integer array is
+    a *better* input here, not a malformed one — and rejecting it would have blocked every W5
+    consumer arm at its last step. Integer dtypes are admitted; everything else the gate checks
+    (shape, finiteness, sign) is unchanged, and ``np.isfinite`` is well defined on integers.
+    """
     if not isinstance(arr, np.ndarray):
         raise ValueError(f"CalibrationResult.{name} must be a numpy array.")
-    if arr.dtype != np.float64:
-        raise ValueError(f"CalibrationResult.{name} must be float64; got {arr.dtype}.")
+    if arr.dtype != np.float64 and arr.dtype.kind not in ("i", "u"):
+        raise ValueError(
+            f"CalibrationResult.{name} must be float64 or an integer count; got {arr.dtype}."
+        )
     if arr.shape != (n_regions,):
         raise ValueError(
             f"CalibrationResult.{name} has shape {arr.shape}; expected ({n_regions},)."

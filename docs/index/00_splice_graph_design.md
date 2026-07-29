@@ -1,3 +1,25 @@
+> ## ⛔ AMENDED 2026-07-29 — the graph SHIPPED, and three gates below did not survive contact
+>
+> * **P2 is unsatisfiable** (the merge deletes cuts) and **P3 is retired with its comparator.** The v7
+>   partition was deleted at accumulator plan W1b-clean, so "merging v8 reproduces `regions.feather`"
+>   has nothing to compare against. Its content — an independent check on the signature — is now
+>   **I3b**: `validate_graph` recomputes each node's signature from its midpoint by direct interval
+>   containment and asserts equality. No v7 needed, runs at build and load, proven to fire.
+> * **§9's option (b)** ("hold v8 behind the loader until the accumulator lands") was **not** taken.
+>   Option (a) shipped: the graph IS the partition as of W1b, measured. ⚠ Its warning that "shipping
+>   v8 alone changes calibration's numbers" is right in general and **false on the 32-condition
+>   bench**, whose annotation has zero mergeable adjacencies. See ledger W1b.
+> * **§8's scan-deposit budget is MEASURED**, on real cfRNA at the +38.7 % human partition:
+>   **+9.7 %** (LBX0190) / **+6.9 %** (MO_3021). Measurable, small, and now on record for D5/W6.
+>
+> **Still current (2026-07-28).** The graph model, builder, invariants and test matrix below are otherwise
+> unchanged by the accumulator's v5 revision. The consumer is
+> [`../accumulator/05_accumulator_v5.md`](../accumulator/05_accumulator_v5.md).
+> ⭐ **One addition v5 requires:** junction edges also store `reach_donor` / `reach_acceptor` (`int32`
+> each) — the transcript's cumulative exonic length either side of the junction, over the annotation. They
+> feed the junction divisor `E_J` (v5 §4.2b) and are pure index-time arithmetic — the exonic length
+> remaining either side of the junction, maximal over the annotation's isoforms (v5 §4.4).
+
 # The splice graph index — design and implementation plan
 
 **v1, 2026-07-28.** The foundation of the accumulator rework. Scoped as its own effort: the index is
@@ -5,9 +27,9 @@ built once and everything downstream inherits its bugs, so this document specifi
 schema, the build algorithm, the invariants, and a test matrix that must be green before anything consumes
 it.
 
-Companion documents: `../accumulator/03_path_accumulator.md` (what counts paths over this graph),
-`../calibration/PATH_MARGINALIZATION.md` (how calibration consumes them),
-`../accumulator/02_redesign_derivation.md` (why).
+Companion: `../accumulator/05_accumulator_v5.md` — what runs on this graph, and why.
+(`02_redesign_derivation.md`, `03_path_accumulator.md`, `04_accumulator_v3.md` and
+`../calibration/PATH_MARGINALIZATION.md` are superseded drafts; do not cite them.)
 
 ---
 
@@ -98,6 +120,11 @@ They never carried deposits (`00_design.md` §6 invariant 4) and the node chain 
 
 These are **not mutually exclusive** — that is exactly the case v1 of the calibration work showed the
 signature is blind to (73 toy positions that are *both* terminus and junction; at human scale the majority).
+
+⭐ **Set from `~is_synthetic` — ONE filter, the same as the event set** (ledger W1c). A brief attempt
+at `~is_synthetic & ~is_nrna` deleted the TSS/TES of 26,475 real single-exon transcripts, because on
+a non-synthetic row `is_nrna` means "single-exon, so mature ≡ nascent", not "manufactured span".
+Every manufactured span is `is_synthetic`. Invariant **I13** now pins it.
 Two derived predicates matter downstream and are computed, not stored:
 
 ```
@@ -271,7 +298,9 @@ what surfaces stale indexes).
 | **I9** | a JUNCTION's `src` carries the `exon_s` bit and its `dst` carries the `exon_s` bit for that junction's strand `s` |
 | **I10** | `TSS_s`/`TES_s` flag counts equal the distinct terminus-position counts derived independently from `transcripts.feather` |
 | **I11** | every transcript's exon path is walkable: consecutive exons are joined by a JUNCTION edge on that strand, and each exon's interior interfaces are CONTIGUOUS edges ⭐ *the end-to-end structural check* |
-| **I12** | edge rows are sorted by `(src, kind, dst)`; `edge_id` is the row index |
+| **I12** | edge rows are sorted by `(src, kind, dst, strand)`; `edge_id` is the row index. ⚠ **strand is part of the key** — without it two strand-coincident junctions collide and read as a duplicate |
+| **I3b** | ⭐ **the signature, recomputed independently**: each node's 4 bits, re-derived from its MIDPOINT by direct interval containment, equal the stored value. A different algorithm from the builder's cumulative-difference sweep over the same interval sets, so the two can only agree by both being right. *(Replaces the retired P3, which pinned the signature against the deleted v7 partition.)* |
+| **I13** | ⭐ **the flags ARE the events**, both directions: each structural bit is set at exactly the positions that generate it — no event without its flag, no flag without its event. Subsumes I10. ⚠ **One exemption:** an interior interface carries NO flag when adjacent exons of one transcript are **bookended** (a zero-length intron) — an exon endpoint that is neither a terminus nor a splice site. Zero occurrences in GENCODE; constructed by G14. This is why I13 is *"the flags are the events"* and not the tempting *"every interface carries a flag"* |
 
 **I11 is the one that catches real bugs.** It walks every real transcript through the built graph and
 fails if any transcript is not representable. It is `O(total exons)` and it subsumes most of I5/I6/I9.
@@ -376,7 +405,7 @@ choice belongs to the owner:
 * **(a) Ship v8 + the adapter first**, accept a measured calibration delta, then land the accumulator.
   Pro: small, verifiable steps. Con: one arm with a known-degraded intermediate (finer regions on the
   *old* deposit rule move evidence from `EV_OWN` into `EV_IMPUTED`).
-* **(b) ⭐ Recommended: hold v8 behind the loader until the path accumulator lands**, and gate the pair
+* **(b) ⭐ Recommended: hold v8 behind the loader until the accumulator lands**, and gate the pair
   together. The index work is still developed, tested and reviewed on its own (§7 is entirely
   self-contained and needs no accumulator), it just does not become the *default* alone.
 
@@ -405,7 +434,7 @@ X4  SCHEMA + LOADER — nodes/edges feather, INDEX_FORMAT_VERSION 8, CSR at load
 X5  ADAPTER — build_region_partition_arrays from the graph; C++ ABI untouched
     Gate: R2 green; scanner runs end to end on a v8 index
 X6  REBUILD every index + namespace /tmp/rigel_selfsolve by index hash
-X7  hand off to the path accumulator (03_path_accumulator.md)
+X7  hand off to the accumulator (05_accumulator_v5.md)
 ```
 
 **Standing gates on every phase:** ruff; full test suite; no C++ change; determinism (P4) re-checked after
@@ -447,7 +476,7 @@ The three-document plan as first written lands the index, then the accumulator, 
 migration, and **nothing measurable improves until the last of those.** That is a long unrewarded stretch on
 a branch that already has an uncommitted change set.
 
-But the P1g prize does **not** need the path accumulator. `gdna_reframe_terminus.md`'s 190× mode error and
+But the P1g prize does **not** need the accumulator change at all. `gdna_reframe_terminus.md`'s 190× mode error and
 `ω_graft`'s ≥30× split are both fixed by the **structural flags alone** (§2.3), which this document delivers
 at X4. So:
 
@@ -459,7 +488,7 @@ X6b ⭐   C1/C2/C3 from P1G_SCOPE, on the new graph:
           C3  accept_l/accept_r -> rna_crosses_contiguously (structural, coverage-independent)
         gate: the pre-registered A/B of P1G_SCOPE §8, incl. its falsification test
         (junction-only edges must be UNMOVED — they are already exact at 1.0x)
-X7      hand off to the path accumulator
+X7      hand off to the accumulator (05_accumulator_v5.md)
 ```
 
 ⚠ The partition also changes at X4 (median region 305 → 145 bp), so X6b's A/B measures **both** effects at

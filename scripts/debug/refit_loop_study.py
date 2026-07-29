@@ -62,7 +62,7 @@ _LN10 = np.log(10.0)
 def _setup(inp, index, cfg):
     """Everything the sweep needs + the per-node oracle gDNA/RNA mass, in chain-node order."""
     cc = cfg.calibration
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     pl = inp["payload"]
     sub = CalibrationSubstrate.from_payload(pl, ra)
     bsub = BoundarySubstrate.from_payload(pl)

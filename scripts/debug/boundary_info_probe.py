@@ -30,7 +30,7 @@ from rigel.index import TranscriptIndex
 _EPS = 1e-9
 suite = Path("/Users/mkiyer/Downloads/rigel_runs/ambig_dense_10mb")
 index = TranscriptIndex.load(str(suite / "rigel_index")); cfg = PipelineConfig()
-ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+ra = RegionArrays.from_index(index)
 _SS = sys.argv[1] if len(sys.argv) > 1 else "0.50"
 _CAP = sys.argv[2] if len(sys.argv) > 2 else ""  # "" all | "capture_off" | "capture_on" | "capture_verystrong"
 def _capmatch(name):

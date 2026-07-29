@@ -27,7 +27,7 @@ from rigel.index import TranscriptIndex
 _EPS = 1e-9
 suite = Path("/Users/mkiyer/Downloads/rigel_runs/ambig_dense_10mb")
 index = TranscriptIndex.load(str(suite / "rigel_index")); cfg = PipelineConfig()
-ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+ra = RegionArrays.from_index(index)
 _SS = sys.argv[1] if len(sys.argv) > 1 else "0.50"  # "0.50" unstranded (default) | "0.99" stranded
 conds = sorted(d.name for d in suite.iterdir()
                if (d / "sim_oracle.bam").exists() and d.name.startswith("gdna_") and _SS in d.name)

@@ -13,7 +13,7 @@ from rigel.index import TranscriptIndex
 SUITE=Path("/Users/mkiyer/Downloads/rigel_runs/ambig_dense_10mb")
 COND="gdna_gdna300_ss_0.99_nrna_present_capture_on"
 index=TranscriptIndex.load(str(SUITE/"rigel_index")); cfg=PipelineConfig()
-ra=RegionArrays.from_region_df(index.region_df,index.ref_name_to_id)
+ra=RegionArrays.from_frame(index.nodes_df,index.ref_name_to_id)
 inp=_scan_and_truth(SUITE,COND,index,cfg,Path("/tmp/rigel_selfsolve"),SUITE/"_selfsolve_cache")
 os.environ.pop("RIGEL_S2T_OFF",None)
 dbg={}; cc=dataclasses.replace(cfg.calibration,calib_refit_iters=0)

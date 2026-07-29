@@ -93,7 +93,7 @@ def main():
     suite = Path(args.suite)
     cache_dir = Path(args.cache_dir)
     index = TranscriptIndex.load(str(suite / "rigel_index"))
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     cfg = PipelineConfig()  # noqa: F841 (kept for parity with the benchmark wiring)
 
     conds = (

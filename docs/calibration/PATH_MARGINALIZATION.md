@@ -1,3 +1,5 @@
+> ⛔ **SUPERSEDED by `../accumulator/05_accumulator_v5.md` (2026-07-28). The path/cell store this document marginalises is WITHDRAWN, and its §4 mass-allocation ladder is resolved there. Do not cite.**
+
 # Paths → calibration: marginalization, mass allocation, and BP on a splice graph
 
 **v1, 2026-07-28.** The third of three. `../index/00_splice_graph_design.md` builds the graph;

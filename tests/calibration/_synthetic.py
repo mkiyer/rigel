@@ -69,7 +69,7 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
             "signature": np.array([BIT_EXON_POS, BIT_EXON_NEG, 0], dtype=np.uint8),
         }
     )
-    region_arrays = RegionArrays.from_region_df(region_df, {"chr1": 0})
+    region_arrays = RegionArrays.from_frame(region_df, {"chr1": 0})
     return payload, region_arrays
 
 

@@ -28,7 +28,7 @@ from oracle import OracleTruth
 SUITE = Path("/Users/mkiyer/Downloads/rigel_runs/ambig_dense_10mb")
 COND = "gdna_gdna300_ss_0.50_nrna_none_capture_on"
 bam = str(SUITE / COND / "sim_oracle.bam"); idx = TranscriptIndex.load(str(SUITE / "rigel_index"))
-ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id); cfg = CalibrationConfig()
+ra = RegionArrays.from_index(idx); cfg = CalibrationConfig()
 st, sm, flm, buf, pl = scan_and_buffer(bam, idx, dc(BamScanConfig(), sj_strand_tag=_native_detect_sj_tag(bam)))
 sub = CalibrationSubstrate.from_payload(pl, ra); bsub = BoundarySubstrate.from_payload(pl)
 fl = build_fl_models(global_counts=flm.global_model.counts, rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts, gdna_counts=gdna_fl_mass(pl), max_size=flm.max_size)
@@ -64,7 +64,7 @@ for r in range(n):
             s = max(s, spl_dens_node[nb])
     flank_spl[r] = s
 
-ref = np.asarray(ra.ref_id) if hasattr(ra, "ref_id") else idx.region_df["ref_name"].to_numpy()
+ref = np.asarray(ra.ref_id) if hasattr(ra, "ref_id") else idx.nodes_df["ref_name"].to_numpy()
 
 # adjacent same-ref region pairs with real mass on both sides
 FLOOR = 1e-3

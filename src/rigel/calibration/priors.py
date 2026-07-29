@@ -125,13 +125,15 @@ def _gdna_region_node_arrays(
         region node r:     mass m_r = mass_gdna_contained[r],
                            effective support S_r = gdna_region_eff_len[r] = E[max(0, L_r − ℓ)]
         seam node (r,r+1): mass m_s = mass_gdna_right[r] + mass_gdna_left[r+1]   (the two halves POOLED),
-                           effective support S_s = ½·(E[min(ℓ,L_r)] + E[min(ℓ,L_{r+1})])  (the AVERAGE of
+                           effective support S_s = gdna_boundary_len[r] + gdna_boundary_len[r+1]  (the SUM of
                            the two flanking per-side density lengths gdna_boundary_len)
 
     **Why these supports — the bedrock invariant.** Driving the reference accumulator under uniform
     genomic gDNA at density ρ, the expected masses are ``m_r = ρ·E[max(0,L_r−ℓ)]`` (a contained fragment
     must FIT) and ``m_s = ρ·(E[min(ℓ,L_r)] + E[min(ℓ,L_{r+1})])/2`` (each side captures only ``min(ℓ,L_side)``
-    of a crossing fragment, so the pooled mass is ρ times the AVERAGE of the two side density lengths).
+    of a crossing fragment, so the pooled mass is ρ times the SUM of the two stored side density
+    lengths — each of which is already E[min(ℓ,L)]/2, so the sum is ½·(E[min_r]+E[min_{r+1}]). ⚠ Naming
+    it the AVERAGE of gdna_boundary_len is what applied the ½ twice (D6, fixed 2026-07-29).
     Dividing each node's mass by these supports makes EVERY node density ``m_n/S_n = ρ``, so the
     enrichment contraction ``min(m_n/ρ_ref, S_n)`` (applied per node in ``assemble_priors`` against the
     shared ρ_ref) returns ``S_n`` EXACTLY (contraction factor 1) under uniform gDNA — an unenriched library
@@ -139,11 +141,11 @@ def _gdna_region_node_arrays(
     Two divisors are WRONG: the genomic ``region_size_bp`` understates short-region density (verified
     factor 0.878 under uniform); and the count crossing length ``E[ℓ]`` over-states the seam support for
     short flanks (a fragment can only deposit ``min(ℓ,L_side)``, not ``ℓ``), under-contracting exon-flank
-    seams and inflating the gДНК→RNA leak — the averaged side density length is the deposition-faithful
+    seams and inflating the gDNA→RNA leak — the summed side density length is the deposition-faithful
     support.
 
     **Why POOL the seam, not split it.** The two halves ``s_L,s_R`` are one physical crossing event, so the
-    pooled node (one node at the averaged support) is the faithful representation; splitting them into two
+    pooled node (one node at the summed support) is the faithful representation; splitting them into two
     separate nodes would double-count the crossing and over-contract.
 
     Returns ``(gdna_region, support_len, pooled, seam_len)``, each float64[R] keyed to region ``r``::
@@ -212,7 +214,7 @@ def assemble_priors(
 
         region node r:    mass = mass_gdna_contained[r],   effective support S_r = E[max(0, L_r − ℓ)]
         seam node (r,r+1): mass = mass_gdna_right[r] + mass_gdna_left[r+1] (the two halves POOLED),
-                           effective support S_s = ½·(E[min(ℓ,L_r)] + E[min(ℓ,L_{r+1})])  (the average of
+                           effective support S_s = gdna_boundary_len[r] + gdna_boundary_len[r+1]  (the SUM of
                            the flanking per-side density lengths gdna_boundary_len)
 
     keyed to the left-flank region r. The region + seam masses / participations project to loci by
@@ -225,7 +227,7 @@ def assemble_priors(
 
     **The bedrock invariant — factor 1 under uniform gDNA.** Dividing each node's mass by its EFFECTIVE
     sampling support (``S_r`` for contained, ``S_s = ½·(E[min(ℓ,L_r)]+E[min(ℓ,L_{r+1})])`` for the pooled
-    crossing — the AVERAGE per-side density length, NOT ``E[ℓ]`` which over-states it) makes the per-node
+    crossing — the SUM of the two stored per-side density lengths, NOT ``E[ℓ]`` which over-states it) makes the per-node
     density ``m_n/S_n`` exactly the true ρ under a uniform (unenriched) library — because the accumulator
     deposits ``ρ·E[max(0,L−ℓ)]`` of contained mass and ``ρ·S_s`` of pooled crossing mass.
     The Laplace-smoothed IPR then returns ``span`` EXACTLY (``eff_len = span`` ⇒ contraction factor 1):
@@ -253,7 +255,7 @@ def assemble_priors(
 
     # Density-correct, transport-free gDNA node model (docs/calibration/archive/effective_length_redesign_plan.md §8): per-region
     # CONTAINED node (effective support gdna_region_eff_len = E[max(0,L−ℓ)]) + one POOLED SEAM node per
-    # internal boundary (support = ½ the sum of the flanking E[min(ℓ,L)] = averaged gdna_boundary_len),
+    # internal boundary (support = the SUM of the flanking gdna_boundary_len = ½·Σ E[min(ℓ,L)]),
     # keyed to the left-flank region — the SAME node model _pooled_seam_arrays gives the transcript
     # contraction (EFFECTIVE, not genomic, supports; the factor-1-under-uniform bedrock).
     gdna_region, support_len, pooled, seam_len = _gdna_region_node_arrays(
@@ -299,7 +301,7 @@ def assemble_priors(
         {
             "gdna": gdna_region,
             "rna": rna_region,
-            "span": support_len,  # Σ S — the EFFECTIVE support (region_eff_len + averaged seams), NOT genomic
+            "span": support_len,  # Σ S — the EFFECTIVE support (region_eff_len + summed seams), NOT genomic
             # the CONTAINED (unique-mapper) mass per locus — the calibration-blindness discriminator for the
             # eff-len guard below (calibration's accumulator is fed by unique mappers only).
             "gdna_contained": np.asarray(calibration.mass_gdna_contained, dtype=np.float64),

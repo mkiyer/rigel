@@ -17,7 +17,7 @@ its regions), so a uniform enrichment reduces *exactly* to the input length ⇒ 
 only the captured case contracts. No new readout — it reuses the calibration's per-region gDNA mass and the
 same IPR shape as the gDNA component (the standard 1-pseudocount convention + ``1e-9`` numerical floors used
 throughout calibration; not tuned constants). The density-correct node model (effective-support
-divisors, averaged-side-density pooled seams, transport-free) is documented in
+divisors, summed-side-density pooled seams, transport-free) is documented in
 ``docs/calibration/archive/effective_length_redesign_plan.md`` §8 (the *why* is in
 ``docs/calibration/archive/capture_effective_length_design.md``).
 """
@@ -196,9 +196,23 @@ def _pooled_seam_arrays(calibration, region_arrays):
 
     Seam ``r`` is the boundary between region ``r`` and ``r+1`` (genomically adjacent, same reference):
     ``mass = mass_gdna_right[r] + mass_gdna_left[r+1]`` (the two halves POOLED) and ``support =
-    ½·(gdna_boundary_len[r] + gdna_boundary_len[r+1])`` (the AVERAGED per-side density lengths, the
-    deposition-faithful divisor). Zero at terminal / cross-reference boundaries. The gDNA path re-keys some
-    seams to their right flank (intergenic outer boundaries); the transcript path takes them as-is."""
+    gdna_boundary_len[r] + gdna_boundary_len[r+1]`` (the SUMMED per-side density lengths — the divisor
+    that matches the pooled numerator). Zero at terminal / cross-reference boundaries. The gDNA path
+    re-keys some seams to their right flank (intergenic outer boundaries); the transcript path takes them
+    as-is.
+
+    ⚠ **D6, fixed 2026-07-29 (`docs/accumulator/05_accumulator_v5.md` §10.4).** The support was
+    ``½·(gdna_boundary_len[r] + gdna_boundary_len[r+1])`` — the AVERAGE. But ``gdna_boundary_len`` is
+    ALREADY the halved per-side density length ``E[min(ℓ,L)]/2`` (`effective_length.boundary_side_eff_length`,
+    set by `calibrate`'s `boundary_side_eff_length` call), and the accumulator deposits ``ρ·gdna_boundary_len`` on EACH face — so a
+    pooled seam holds ``ρ·(gbl_r + gbl_{r+1})`` and the average divisor read **2ρ** (measured 1.994 / 2.002 /
+    1.981 × truth at region lengths 2000 / 500 / 200, `scratchpad/acc_seam_check.py`). Summing the two faces
+    means summing their two lengths. `priors._gdna_region_node_arrays`'s own docstring already had it right
+    — ``S_s = ½·(E[min_r] + E[min_{r+1}])``, which since ``gbl = E[min]/2`` IS this sum; the prose beside the
+    code said "AVERAGE" and the code followed the prose. No test caught it because the
+    ``min(ρ/ρ_ref, 1)`` clip rescues the uniform case, so the factor-1-under-uniform invariant passed
+    anyway; under capture a seam whose true density lay in ``(ρ_ref/2, ρ_ref)`` clipped and contributed
+    **no contraction when it should have contributed some**."""
     right = np.asarray(calibration.mass_gdna_right, dtype=np.float64)
     left = np.asarray(calibration.mass_gdna_left, dtype=np.float64)
     side_len = np.asarray(calibration.gdna_boundary_len, dtype=np.float64)
@@ -211,7 +225,7 @@ def _pooled_seam_arrays(calibration, region_arrays):
     if n > 1:
         same = ref_id[:-1] == ref_id[1:]  # internal seam: genomically adjacent, same reference
         seam_m[:-1] = np.where(same, right[:-1] + left[1:], 0.0)
-        seam_S[:-1] = np.where(same, 0.5 * (side_len[:-1] + side_len[1:]), 0.0)
+        seam_S[:-1] = np.where(same, side_len[:-1] + side_len[1:], 0.0)
     return seam_m, seam_S
 
 
@@ -230,7 +244,7 @@ def transcript_capture_eff_lengths(
     set:
 
     * a per-region CONTAINED node at effective support ``S_r = E[max(0, L_r − ℓ)]`` (mass ``m_r``);
-    * a per-interior-boundary POOLED SEAM node at averaged per-side support ``S_s = ½·(E[min(ℓ,L_r)] +
+    * a per-interior-boundary POOLED SEAM node at SUMMED per-side support ``S_s = gbl_r + gbl_{r+1} = ½·(E[min(ℓ,L_r)] +
       E[min(ℓ,L_{r+1})])`` (mass ``m_s = right[r] + left[r+1]``) — for boundaries the transcript
       crosses without a splice (interior to an exon);
     * a per-SPLICE-JUNCTION seam node (multi-exon mRNA), same crossing support ``S_j`` but with its mass
@@ -269,7 +283,7 @@ def transcript_capture_eff_lengths(
     n_t = fl.shape[0]
 
     # per-region CONTAINED node (mass, effective support) and per-interior-seam POOLED node. The seam
-    # between region r and r+1 (left-region keyed) pools both boundary halves at the averaged per-side
+    # between region r and r+1 (left-region keyed) pools both boundary halves at the SUMMED per-side
     # density support — the SAME node the gDNA component uses (priors._gdna_region_node_arrays).
     contained_m = np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
     contained_S = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
@@ -315,7 +329,16 @@ def transcript_capture_eff_lengths(
         # its flanking-exon enrichment, not the fabricated full-length weight.
         rho_l = contained_m[jl] / contained_S[jl]
         rho_r = contained_m[jr] / contained_S[jr]
-        s_j = 0.5 * (side_len[jl] + side_len[jr])
+        # ⚠ D6, second site (2026-07-29). The seam SUPPORT is the SUM of the two flanks'
+        # `gdna_boundary_len`, exactly as in `_pooled_seam_arrays` — one definition, used consistently.
+        # This site is not a density bias (the mass is IMPUTED as ρ_avg·s_j, so m_j/s_j = ρ_avg whatever
+        # s_j is); what the old ½ corrupted was the junction seam's WEIGHT in `span_full`. Fixing only
+        # `_pooled_seam_arrays` doubles every genomic seam's weight while leaving junction seams at half,
+        # which strips footprint from spliced mRNAs specifically and re-creates the nascent<mature
+        # inversion (`test_no_nascent_mature_inversion_under_capture`).
+        # The `0.5·(rho_l + rho_r)` below is a genuine AVERAGE OF DENSITIES — the junction's imputed
+        # density is the mean of its two flanks — and is unrelated to the support. It stays.
+        s_j = side_len[jl] + side_len[jr]
         m_j = 0.5 * (rho_l + rho_r) * s_j
         np.add.at(num, jt, np.minimum(m_j * inv, s_j))
         np.add.at(span_full, jt, s_j)

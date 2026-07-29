@@ -172,6 +172,15 @@ class Accumulator:
             ends[i] = e
         self._native.deposit(starts, ends, bool(spliced), bool(primary), int(strand))
 
+    def merge_from(self, other: "Accumulator") -> None:
+        """Element-wise sum of ``other`` into this accumulator (identical boundary positions required).
+
+        This is the per-worker reduction the parallel scan performs internally, exposed so the
+        DETERMINISM contract is directly testable — see
+        ``tests/native/test_accumulator_spec.py::TestWorkerMergeDeterminism``.
+        """
+        self._native.merge_from(other._native)
+
     def total_mass_deposited(self) -> float:
         total = 0.0
         total += float(self._native.regions_contained.sum())

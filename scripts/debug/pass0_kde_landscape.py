@@ -82,7 +82,7 @@ def _sj_boundary_masks(bsub, ra):
 def analyze(suite: Path, cond: str, index, cfg, work_dir: Path) -> dict:
     """Scan + calibrate + oracle for one condition; return per-node arrays (density, oracle f_g, class)."""
     bam = str(suite / cond / "sim_oracle.bam")
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     sc = dc(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
     _stats, sm, flm, _buf, payload = scan_and_buffer(bam, index, sc)
     fl = build_fl_models(

@@ -57,7 +57,7 @@ def main():
     work = Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_selfsolve"
     cache = suite / "_selfsolve_cache"
     inp = _scan_and_truth(suite, a.condition, index, cfg, work, cache)
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
 
     cc0 = dataclasses.replace(cfg.calibration, calib_refit_iters=0)
     dbg = {}

@@ -115,7 +115,7 @@ def _scan_and_truth(suite: Path, cond: str, index, cfg, work_dir: Path, cache_di
 def evaluate_condition(suite: Path, cond: str, index, cfg, work_dir: Path,
                        cache_dir: Path | None = None) -> dict:
     """Run production calibration + the validated oracle on one condition → a pool-error row."""
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     inp = _scan_and_truth(suite, cond, index, cfg, work_dir, cache_dir)
     payload = inp["payload"]
 

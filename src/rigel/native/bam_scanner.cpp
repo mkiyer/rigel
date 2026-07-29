@@ -2766,7 +2766,18 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("block_ends"),
                  nb::arg("spliced"),
                  nb::arg("primary"),
-                 nb::arg("strand") = 0);
+                 nb::arg("strand") = 0)
+            // Element-wise sum of `other` into this accumulator; requires identical boundary
+            // positions. This is the per-worker merge the parallel scan performs internally
+            // (BamScanner::scan), exposed so the DETERMINISM contract can be tested directly:
+            // deposit a fragment corpus into K accumulators in K different orders, merge, and
+            // assert bit-identity against a single-accumulator run. Without this binding that
+            // test cannot be written at all — and it is the property the accumulator v5 rework
+            // makes exact by moving every channel to integer/fixed-point arithmetic (v5 §6, test
+            // A9), so the pre-rework behaviour needs a recorded control.
+            .def("merge_from",
+                 [](Accumulator& a, const Accumulator& other) { a.merge_from(other); },
+                 nb::arg("other"));
         m.attr("ACCUMULATOR_N_CHANNELS") =
             static_cast<int>(rigel::accumulator::kNChannels);
         m.def("accumulator_channel_idx",

@@ -73,7 +73,17 @@ _RTYPE = {0: "intergenic", 1: "intron", 2: "exon"}
 
 
 def _scan_and_truth(suite: Path, cond: str, index, cfg, work_dir: Path, cache_dir: Path) -> dict:
-    """The expensive, solver-INDEPENDENT half: one production scan + the oracle's region AND boundary truth."""
+    """The expensive, solver-INDEPENDENT half: one production scan + the oracle's region AND boundary truth.
+
+    ⚠ Both the cache and the split-BAM work dir are NAMESPACED BY ``index.partition_hash`` (2026-07-29).
+    A cached payload is keyed to the exact partition it was scanned against — region/boundary counts,
+    offsets and ordering all move when the index is rebuilt — and until now the key was the condition
+    name alone. Two consequences it silently produced: a stale payload from a previous index loaded
+    without complaint (the shapes often still matched), and two sessions sharing ``/tmp/rigel_selfsolve``
+    corrupted each other. Both are now impossible: a different partition is a different directory.
+    """
+    ph = index.partition_hash
+    cache_dir, work_dir = cache_dir / ph, work_dir / ph
     cache = cache_dir / f"{cond}.pkl"
     if cache.exists():
         with open(cache, "rb") as fh:
@@ -114,7 +124,7 @@ def _true_fg(pools):
 
 def self_solve(inp, index, cfg, stage="both"):
     """Run the message-free self-solve (and optionally the prior-free FB sweep), aligned to oracle truth."""
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     payload = inp["payload"]
     sub = CalibrationSubstrate.from_payload(payload, ra)
     bsub = BoundarySubstrate.from_payload(payload)

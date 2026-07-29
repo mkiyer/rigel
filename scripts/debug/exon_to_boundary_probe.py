@@ -39,7 +39,7 @@ REF_PREC = 1.0 / 3.289868  # 1/Var_Beta(1/2,1/2)(log f) -- the derived "stronger
 
 index = TranscriptIndex.load(str(SUITE / "rigel_index"))
 cfg = PipelineConfig()
-ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+ra = RegionArrays.from_index(index)
 conds = sorted(
     d.name
     for d in SUITE.iterdir()

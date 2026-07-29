@@ -407,11 +407,33 @@ In the production version, boundaries OWN fragment mass and length. Hybrid captu
 
 Modeling boundaries as independent nodes with mass and length allowed us to compute effective length shrinkage separately for boundary nodes.
 
-If we keep this design, the effective length arithmetic must change. ALL mass is contained within NODES (regions). Therefore, effective length is the length of the entire node from end-to-end. Previously the effective length was (region length - fragment length + 1). Now, it is just (region length)
+If we keep this design, the effective length arithmetic must change. ALL mass is contained within NODES (regions). Therefore, effective length is the length of the entire node from end-to-end. Previously the effective length was (region length - fragment length + 1). Now, it is (region length) because the crossing fragment mass is added.
+
+How would we do effective length shrinkage? In the new design, we have spliced channel (RNA) and unspliced channel (gDNA). Crossing fragments can be deduced from the edges. 
+
+Deriving this is the biggest remaining risk. WE can keep the accumulator arithmetic the same and store within 
 
 
 
 
+# Concept of 'reach' and its importance
+
+The matrix caught a real bug that real data never could. The design doc's edge sort key (src, kind, dst) is not a total order — two strand-coincident junctions share all three and differ only in strand, so ordering is ambiguous and my uniqueness check read them as a duplicate. GENCODE has zero such junctions, so only G18 could ever have found it. Fixed by sorting on (src, kind, dst, strand), which refines the documented order and leaves the CSR contract intact. A second, smaller one: validate_graph indexed an empty array in precisely the corruption case I11 exists to report.
+
+>>> It is biologically impossible to have 'strand-coincident' junctions because splicing depends upon a genomic motif (GT/AG) that is asymmetric (non-palindromic). There are no known splicing motifs that are symmetric (palindromic).
+
+>>> Is it possible for synthetic data (simulated, etc) to be biologically inaccurate and harbor 'strand-coincident' junctions. For this reason, it makes sense to include the full edge sort key with (src, dst, strand, kind) to guard against this kind of issue. Alternatively, we would fail hard if someone tried to build a rigel index from a GTF with strand-coincident junctions.
+
+
+
+
+The v8 builder is 6× leaner than the one it replaces — +0.12 GB vs +0.74 GB head-to-head, while producing 38.7 % more nodes plus 1.45 M edges with flags and reaches. The dict-per-row sweep was the memory cost. The one budget that looked breached (1.75 GB peak) is the Transcript list, which the v7 path holds too.
+
+On C4 — I did not bump INDEX_FORMAT_VERSION. That's the one deviation I'd most like you to sanity-check. Bumping at W1a would have made all 8 existing indexes unloadable and W1a's own gate unrunnable until every one was rebuilt. Instead nodes.feather/edges.feather are written additively and loaded optionally — an older index has nodes_df is None and stays fully usable (asserted by a test). W1b bumps, when the loader starts requiring them. No index has been rebuilt, and since the region builder is untouched, partition_hash is unchanged so every cache remains valid.
+
+Deliberately deferred: the CSR accessors (ref_node_offsets, out_edge_offsets, reverse CSR). They're derived-at-load and have no consumer until W1c/W2 — building them now would be untested plumbing.
+
+Next is W1b, which is the first arm expected to move numbers: flipping build_region_partition_arrays to the node cut array. That one needs the index rebuilds, records the partition-effect delta, and takes golden regeneration 2 of 3.
 
 
 

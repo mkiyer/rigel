@@ -54,7 +54,7 @@ def build(N, total_abund=120.0):
 def run(res, N):
     bam = str(res.bam_path)
     index = res.index
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     orc = OracleTruth.from_bam(bam, index, cfg, WD, f"n{N}")
     override = orc.override_masses(ra)
     # true observed gDNA fragment count from the oracle read names (nrna_abundance=0 ⇒ true nascent=0,

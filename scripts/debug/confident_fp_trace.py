@@ -46,7 +46,7 @@ def main():
     work = Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_selfsolve"
     cache = suite / "_selfsolve_cache"
     inp = _scan_and_truth(suite, a.condition, index, cfg, work, cache)
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
 
     dbg = _solve(inp, ra, 0)
     chain = dbg["chain"]

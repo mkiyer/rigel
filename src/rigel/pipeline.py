@@ -275,11 +275,17 @@ def scan_and_buffer(
         include_multimap=scan.include_multimap,
     )
 
-    # Calibration region wiring: install the per-genome fine-region
-    # partition into the scanner so fractional per-region evidence is
-    # collected during the scan.
-    region_df = getattr(index, "region_df", None)
-    if region_df is not None and len(region_df) > 0:
+    # Calibration region wiring: install the per-genome v8 node partition into the scanner so
+    # per-node evidence is collected during the scan.
+    #
+    # ⚠ This used to be `getattr(index, "region_df", None)` — a SILENT skip. An index that could not
+    # supply a partition disabled calibration with no error anywhere, and the whole pipeline then ran
+    # as though the library had no gDNA. The two cases are now separated: a MISSING graph is a broken
+    # index and raises; an EMPTY one (every reference of length 0) is a degenerate genome with
+    # genuinely nothing to deposit, and is skipped exactly as before.
+    # A genome whose references are all zero-length has no nodes and nothing to deposit; the loader
+    # guarantees the graph itself is present.
+    if len(index.nodes_df) > 0:
         _wire_calibration_regions(
             scanner,
             index,
@@ -366,19 +372,19 @@ def _wire_calibration_regions(
     index: TranscriptIndex,
     max_frag_length: int,
 ) -> None:
-    """Install the index's region partition into a native BamScanner.
+    """Install the index's v8 node partition into a native BamScanner.
 
-    Uses :func:`rigel.calibration.regions.build_region_partition_arrays` to
-    flatten the per-reference region partition into the ``(boundary_positions,
+    Uses :func:`rigel.calibration.splice_graph.build_node_partition_arrays` to
+    flatten the per-reference partition into the ``(boundary_positions,
     ref_pos_offsets, n_refs, region_types, fl_max_size)`` ABI expected by
-    ``BamScanner.set_regions``. The partition is built from ``index.region_df``
-    and ordered to match ``index.ref_names`` (which in turn matches the
-    resolver's reference-id space). ``region_types`` + ``max_frag_length`` enable
-    the gDNA FL pools (PR 4c).
+    ``BamScanner.set_regions``. The partition is built from ``index.nodes_df``
+    (the splice graph) and ordered to match ``index.ref_names`` (which in turn
+    matches the resolver's reference-id space). ``region_types`` +
+    ``max_frag_length`` enable the gDNA FL pools (PR 4c).
     """
-    from .calibration.regions import build_region_partition_arrays
+    from .calibration.splice_graph import build_node_partition_arrays
 
-    boundary_positions, ref_pos_offsets, region_types = build_region_partition_arrays(index)
+    boundary_positions, ref_pos_offsets, region_types = build_node_partition_arrays(index)
     n_refs = len(index.ref_names)
     scanner.set_regions(
         np.ascontiguousarray(boundary_positions, dtype=np.int64),
@@ -387,36 +393,6 @@ def _wire_calibration_regions(
         np.ascontiguousarray(region_types, dtype=np.uint8),
         int(max_frag_length),
     )
-
-
-def _check_region_payload_alignment(region_arrays, payload) -> None:
-    """Verify the region geometry lines up 1:1 with the accumulator payload.
-
-    The calibration arrays are ref-major and must address the payload's
-    region/boundary tables with a single index, so the region count and the
-    per-reference ``ref_region_offsets`` must agree exactly. Raises
-    :class:`~rigel.calibration.errors.CalibrationSubstrateError` on mismatch.
-    """
-    from .calibration.errors import CalibrationSubstrateError
-
-    if payload is None:
-        raise CalibrationSubstrateError(
-            "calibration payload is None; BamScanner.set_regions was not called."
-        )
-    if region_arrays.n_regions != payload.r_total:
-        raise CalibrationSubstrateError(
-            f"region geometry has {region_arrays.n_regions} regions but the accumulator "
-            f"payload has {payload.r_total}; the region order differs from "
-            f"index.region_df. Rebuild the index."
-        )
-    expected = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
-    actual = np.asarray(payload.ref_region_offsets, dtype=np.int64)
-    if not np.array_equal(expected, actual):
-        raise CalibrationSubstrateError(
-            "region geometry per-reference offsets do not match the payload "
-            "ref_region_offsets; the accumulator region order differs from "
-            "index.region_df. Rebuild the index."
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -836,6 +812,7 @@ def run_pipeline(
     # gDNA/RNA and derive ρ_0 + per-node exposure. See
     from .calibration import calibrate
     from .calibration.region_arrays import RegionArrays
+    from .calibration.splice_graph import build_boundary_flags_array
 
     _warn_if_calibration_strand_unidentifiable(strand_models)
     strand_ci_eps = strand_models.strand_specificity_ci_epsilon(confidence=0.99)
@@ -846,8 +823,10 @@ def run_pipeline(
         strand_ci_eps,
     )
 
-    region_arrays = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
-    _check_region_payload_alignment(region_arrays, calibration_payload)
+    # ⚠ No alignment check here: CalibrationSubstrate.from_payload runs the identical one inside
+    # calibrate(), microseconds later, and two copies of an invariant is one too many.
+    region_arrays = RegionArrays.from_index(index)
+    boundary_flags = build_boundary_flags_array(index)
 
     # gDNA FL distribution for the calibrator's effective lengths (PR 4c): derive
     # it from the accumulator's gDNA-dominated FL pools (intergenic + intronic,
@@ -882,6 +861,7 @@ def run_pipeline(
         rna_fl_pmf=fl_models.rna_pmf,
         config=config.calibration,
         diagnostics_out=_calib_diag,
+        boundary_flags=boundary_flags,
     )
     calibration_diagnostics = _calib_diag.get("calibration")
 

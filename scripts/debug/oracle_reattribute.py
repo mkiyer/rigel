@@ -27,7 +27,7 @@ COND = sys.argv[1] if len(sys.argv) > 1 else "gdna_gdna300_ss_0.99_nrna_none_cap
 bam = f"{S}/{COND}/sim_oracle.bam"
 index = TranscriptIndex.load(f"{S}/rigel_index")
 cfg = PipelineConfig()
-ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+ra = RegionArrays.from_index(index)
 wd = Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_oracle_split"
 man = json.load(open(f"{S}/manifest.json"))
 truth = next(c for c in man["conditions"] if c["name"] == COND)

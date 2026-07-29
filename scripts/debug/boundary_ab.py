@@ -72,7 +72,7 @@ def boundary_self_solve(u_pos, u_neg, free_pos, free_neg, mass_uns, mass_spl, ka
 def run(cond):
     bam = str(SUITE / cond / "sim_oracle.bam")
     idx = TranscriptIndex.load(str(SUITE / "rigel_index"))
-    ra = RegionArrays.from_region_df(idx.region_df, idx.ref_name_to_id)
+    ra = RegionArrays.from_index(idx)
     cfg = CalibrationConfig()
     _st, sm, flm, _buf, pl = scan_and_buffer(
         bam, idx, dc(BamScanConfig(), sj_strand_tag=_native_detect_sj_tag(bam)))

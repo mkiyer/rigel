@@ -523,7 +523,17 @@ class NodeStatics:
     region's ±transcript bits / a boundary's ±continuity — the RNA-crossing gate); ``mrna_active_pos``/
     ``mrna_active_neg`` are the mature-RNA-active axes (a region's ±exon bits / a boundary's ±contiguous
     exon) that select the per-node solver prior (`docs/calibration/archive/node_prior_design.md` §3). All ``float64`` except the four
-    bool masks."""
+    bool masks and ``boundary_flags``.
+
+    ``boundary_flags`` carries the splice graph's 8 structural bits (``TSS_s``/``TES_s``/``DONOR_s``/
+    ``ACCEPTOR_s``) at each BOUNDARY node, ``0`` on region nodes and at the two reference terminals.
+    ⭐ **Raw bits, not pre-derived predicates.** Every consumer wants a different combination of them
+    — a terminus gate, a per-face splice-site test — and P1G_SCOPE's own specified predicate was
+    measured to be nearly the COMPLEMENT of what it was meant to replace (plan F10). Carrying the
+    bits means a wrong predicate is a one-line fix in its consumer rather than another plumbing arm.
+    Compose with :func:`~rigel.calibration.splice_graph.is_terminus` /
+    :func:`~rigel.calibration.splice_graph.is_splice_site`. It is ``0`` when no graph was supplied.
+    """
 
     n_nodes: int
     u_pos: np.ndarray
@@ -536,13 +546,24 @@ class NodeStatics:
     mrna_active_neg: np.ndarray  # bool
     mass_unspliced: np.ndarray
     mass_spliced: np.ndarray
+    boundary_flags: np.ndarray  # uint16 — graph structural bits; 0 on region nodes and terminals
 
 
 def build_node_statics(
-    chain: NodeChain, substrate, boundary_substrate, region_arrays
+    chain: NodeChain,
+    substrate,
+    boundary_substrate,
+    region_arrays,
+    boundary_flags: np.ndarray | None = None,
 ) -> NodeStatics:
     """Gather the per-region (contained) and per-boundary (continuity-gated, max-of-sides) strand-solve
-    statistics onto the unified chain."""
+    statistics onto the unified chain.
+
+    ``boundary_flags`` is the per-boundary-slot ``uint16[B]`` from
+    :func:`~rigel.calibration.splice_graph.build_boundary_flags_array`; ``None`` leaves the field
+    zero, which every current consumer treats as "no structural information".
+    """
+    flags = _check_boundary_flags(boundary_flags, chain.n_boundaries)
     r_fp, r_fn, r_mrp, r_mrn, r_up, r_un, r_mu, r_ms = _region_strand_stats(
         substrate, region_arrays
     )
@@ -577,7 +598,27 @@ def build_node_statics(
         mrna_active_neg=pick(r_mrn, b_mrn, False),
         mass_unspliced=pick(r_mu, b_mu),
         mass_spliced=pick(r_ms, b_ms),
+        boundary_flags=np.where(is_bnd, flags[bi_], np.uint16(0)).astype(np.uint16),
     )
+
+
+def _check_boundary_flags(boundary_flags, n_boundaries: int) -> np.ndarray:
+    """Validate the per-boundary-slot flags against the chain, BEFORE anything else is computed.
+
+    A mis-sized array would shift every flag by one seam — a defect invisible in aggregate and
+    undetectable by a bit-identity gate while nothing reads the flags. Refuse it at the door.
+    """
+    if boundary_flags is None:
+        return np.zeros(n_boundaries, dtype=np.uint16)
+    flags = np.asarray(boundary_flags, dtype=np.uint16)
+    if flags.shape != (n_boundaries,):
+        raise ValueError(
+            f"boundary_flags has shape {flags.shape}; expected ({n_boundaries},), one per "
+            f"accumulator boundary slot. Build it with "
+            f"splice_graph.build_boundary_flags_array(index) against the SAME index the payload was "
+            f"scanned on."
+        )
+    return flags
 
 
 def init_beliefs(

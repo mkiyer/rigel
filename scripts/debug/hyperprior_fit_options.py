@@ -96,7 +96,7 @@ def main():
     cfg = PipelineConfig()
     work = Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_selfsolve"
     cache = suite / "_selfsolve_cache"
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
 
     fig, axes = plt.subplots(2, 4, figsize=(20, 9))
     axes = axes.ravel()
@@ -121,7 +121,7 @@ def main():
         g_hat = fg * mass
 
         ridx = np.asarray(chain.ref_idx, np.int64)
-        sig_arr = index.region_df["signature"].to_numpy()
+        sig_arr = index.nodes_df["signature"].to_numpy()
         intergenic = isr & (ridx < sig_arr.shape[0]) & (sig_arr[np.clip(ridx, 0, sig_arr.shape[0] - 1)] == 0)
         region = live & isr
         sel = region & np.isin(cls, ["single", "gonly"])  # no AMBIG, no boundary

@@ -42,9 +42,8 @@ class RegionArrays:
 
     Rows are sorted by ``(ref_id, start)`` so each ref's rows are contiguous
     and ascending. ``ref_offsets`` is the per-ref CSR boundary array; the
-    slice ``[ref_offsets[r]:ref_offsets[r + 1]]`` is one reference's regions,
-    sorted by ``start`` (and by ``end`` — regions are non-overlapping within a
-    reference). ``order`` is the permutation applied to ``region_df`` rows.
+    slice ``[ref_offsets[r]:ref_offsets[r + 1]]`` is one reference's nodes, sorted
+    by ``start`` (and by ``end`` — nodes tile a reference).
     """
 
     ref_id: np.ndarray  # int32, (R,)
@@ -54,7 +53,6 @@ class RegionArrays:
     strand_class: np.ndarray  # int8,  (R,) — TS_NONE/TS_POS/TS_NEG/TS_AMBIG
     region_size_bp: np.ndarray  # float64, (R,) — end - start
     ref_offsets: np.ndarray  # int32, (n_refs + 1,)
-    order: np.ndarray  # int64, (R,)
     n_refs: int
 
     @property
@@ -62,14 +60,30 @@ class RegionArrays:
         return int(self.start.shape[0])
 
     @classmethod
-    def from_region_df(
+    def from_index(cls, index) -> "RegionArrays":
+        """⭐ Build the geometry for **the partition the scanner actually deposits into**.
+
+        This and :func:`~rigel.calibration.splice_graph.build_node_partition_arrays` are the two halves
+        of one contract — the calibration geometry must address the payload the scanner produced —
+        so they read the same frame (``index.nodes_df``, the v8 splice graph) through one accessor.
+        Passing a frame by hand is how the two drift apart, and nothing downstream detects that
+        except as a shape error far from its cause.
+        """
+        return cls.from_frame(index.nodes_df, index.ref_name_to_id)
+
+    @classmethod
+    def from_frame(
         cls,
         region_df: pd.DataFrame,
         ref_name_to_id: Mapping[str, int],
     ) -> "RegionArrays":
+        """Build from a partition frame directly — for tests that construct a partition by hand.
+
+        Production uses :meth:`from_index`, which cannot address a different partition than the
+        scanner did."""
         if "signature" not in region_df.columns:
             raise ValueError(
-                "RegionArrays.from_region_df: region_df is missing the 'signature' "
+                "RegionArrays.from_frame: region_df is missing the 'signature' "
                 "column. Rebuild the index against the current schema."
             )
         n_refs = len(ref_name_to_id)
@@ -79,7 +93,7 @@ class RegionArrays:
         if np.any(pd.isna(ref_id)):
             unknown = region_df.loc[pd.isna(ref_id), "ref_name"].unique().tolist()
             raise ValueError(
-                f"RegionArrays.from_region_df: region_df references {sorted(unknown)} "
+                f"RegionArrays.from_frame: region_df references {sorted(unknown)} "
                 f"which are not in ref_name_to_id. Rebuild the index."
             )
         ref_id = ref_id.astype(np.int32, copy=False)
@@ -97,7 +111,7 @@ class RegionArrays:
         np.cumsum(counts, out=ref_offsets[1:])
         if int(ref_offsets[-1]) != n_regions:
             raise RuntimeError(  # pragma: no cover — invariant guard
-                "RegionArrays.from_region_df: ref_offsets sum mismatch."
+                "RegionArrays.from_frame: ref_offsets sum mismatch."
             )
 
         return cls(
@@ -108,7 +122,6 @@ class RegionArrays:
             strand_class=strand_class,
             region_size_bp=(end - start).astype(np.float64, copy=False),
             ref_offsets=ref_offsets,
-            order=order,
             n_refs=n_refs,
         )
 

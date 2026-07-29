@@ -18,6 +18,10 @@ import sys
 
 import numpy as np
 
+import sys as _sys
+_sys.path.insert(0, "/Users/mkiyer/proj/rigel/scripts/debug")
+from z2 import lin_var  # noqa: E402  -- THE single z2 denominator (log Var -> linear Var)
+
 _EPS = 1e-9
 ARMS = sys.argv[1:]
 D = {a: dict(np.load(f"/tmp/subacc_{a}.npz", allow_pickle=True)) for a in ARMS}
@@ -50,7 +54,7 @@ for a in ARMS:
 
     def z2(m):
         k = m & fin
-        den = float(np.sum(mass[k] * var[k]))
+        den = float(np.sum(mass[k] * lin_var(var[k], fg[k])))
         return float(np.sum(mass[k] * err[k] ** 2)) / den if den > 0 else float("nan")
 
     rt = d["rt"]

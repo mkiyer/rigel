@@ -76,7 +76,7 @@ def _fit_grid(g_hat, eff, log_rho, h=0.15):
 def solve_belief(inp, index, cfg):
     """Same setup as sigma2_transfer_ab.solve but returns the belief + geometry + oracle pools."""
     cc = cfg.calibration
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     pl = inp["payload"]
     sub = CalibrationSubstrate.from_payload(pl, ra)
     bsub = BoundarySubstrate.from_payload(pl)

@@ -1,3 +1,5 @@
+> ⛔ **SUPERSEDED by `04_accumulator_v3.md` (2026-07-28). **The path accumulator is withdrawn.** Kept only as the record of why. Its fixed-point determinism note (§5) is carried forward.**
+
 # The path accumulator — design and implementation plan
 
 **v1, 2026-07-28.** Consumes the splice graph (`../index/00_splice_graph_design.md`), produces the path

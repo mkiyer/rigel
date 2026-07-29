@@ -66,7 +66,7 @@ def main():
     work = Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_selfsolve"
     cache = suite / "_selfsolve_cache"
     inp = _scan_and_truth(suite, a.condition, index, cfg, work, cache)
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
 
     dbg = _solve(inp, ra, 0)  # Phase 1a (the only solve; refit deferred)
     chain = dbg["chain"]
@@ -91,7 +91,7 @@ def main():
     cls = np.where(fp & fn, "AMBIG", np.where(fp | fn, "single", "gonly"))
     cls = np.where(~isr, "bndry", cls)
     # region signature type (regions only)
-    sig_arr = index.region_df["signature"].to_numpy()
+    sig_arr = index.nodes_df["signature"].to_numpy()
     sigt = np.array([
         _sig_type(int(sig_arr[ref_idx[i]])) if (kind[i] == REGION and ref_idx[i] < sig_arr.shape[0]) else "bndry"
         for i in range(fg.shape[0])

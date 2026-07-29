@@ -208,6 +208,7 @@ def calibrate(
     _debug: dict | None = None,
     diagnostics_out: dict | None = None,
     injected_priors: "InjectedCalibrationPriors | None" = None,
+    boundary_flags: "np.ndarray | None" = None,
 ) -> CalibrationResult:
     """Deconvolve the library into gDNA / RNA per node, then derive gdna_density_global.
 
@@ -215,6 +216,10 @@ def calibrate(
     pie); see the module docstring for the data flow. ``gdna_density_global`` may be ``0`` (a zero-gDNA
     library) and a node's deconvolved gDNA mass may be ``0`` (a pure-RNA node); both are valid, graceful
     outputs — not failures.
+
+    ``boundary_flags`` is the splice graph's per-boundary structural bits
+    (:func:`~rigel.calibration.splice_graph.build_boundary_flags_array`), carried onto the chain as
+    ``NodeStatics.boundary_flags``. ``None`` (the default) leaves them zero.
     """
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     inj = injected_priors  # population-scale priors to inject in place of the internal (toy-untrustworthy) fits
@@ -301,7 +306,9 @@ def calibrate(
     geometry = build_node_geometry(
         chain, substrate, boundary_substrate, region_arrays, gdna_fl_pmf, rna_fl_pmf
     )
-    statics = build_node_statics(chain, substrate, boundary_substrate, region_arrays)
+    statics = build_node_statics(
+        chain, substrate, boundary_substrate, region_arrays, boundary_flags
+    )
 
     # Strand-Fisher noise-floor SAMPLE SIZES (bp_solver τ seed): N_gdna (gDNA-eligible unspliced fragments in
     # the structurally pure-gDNA intergenic regions, coarse type 0) and N_spliced (the pure-RNA count κ_RNA was

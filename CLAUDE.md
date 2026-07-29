@@ -65,6 +65,12 @@ Rigel is a Bayesian RNA-seq transcript quantification tool that jointly models m
 > generic **density deconvolution** (`density_deconv.py`) — deconvolve counts into gDNA + RNA against a gDNA
 > density prior (the intergenic node distribution, for introns), carrying its NB-derived precision
 > (`density_deconv.density_factor_precision`).
+> ⭐ **ACCUMULATOR v5 / P1g IS IN FLIGHT — read `docs/accumulator/SESSION_2026_07_30_HANDOFF.md`
+> FIRST for anything touching the calibration partition, the splice graph, or the accumulator.** The
+> v7 region/boundary partition is DELETED: `calibration/regions.py`, `regions.feather` and
+> `boundaries.feather` are gone, `INDEX_FORMAT_VERSION` is 8, and the scanner deposits into the v8
+> splice graph (`calibration/splice_graph.py`). Next arm: W2a.
+>
 > Fractional-accumulator spec in `docs/accumulator/00_design.md`. The full pipeline (scan → calibrate →
 > **quant**) runs end-to-end: `quant_from_buffer` + `calibration.priors.assemble_priors` are wired in
 > `run_pipeline`.

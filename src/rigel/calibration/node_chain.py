@@ -87,7 +87,11 @@ def build_node_chain(ref_region_offsets: np.ndarray, ref_boundary_offsets: np.nd
         k = r1 - r0
         if (b1 - b0) != k + 1:
             raise ValueError(
-                f"reference {f}: {b1 - b0} boundaries for {k} regions (expected {k + 1}); rebuild the index."
+                f"reference {f}: the payload reports {b1 - b0} boundary slots for {k} regions, but "
+                f"a reference with k regions has exactly k+1 boundary slots — its k-1 interior "
+                f"interfaces plus the two terminals (expected {k + 1}). Both "
+                f"offset arrays come from ONE accumulator payload, so this is an accumulator/"
+                f"payload inconsistency, not a stale index — rebuilding will not fix it."
             )
         ref_start = nid
         # interleave B0 R0 B1 R1 ... R(k-1) Bk

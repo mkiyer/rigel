@@ -114,7 +114,7 @@ def test_ambiguous_region_is_flagged_not_silently_oriented():
             "signature": np.array([BIT_EXON_POS | BIT_EXON_NEG], dtype=np.uint8),
         }
     )
-    ra = RegionArrays.from_region_df(region_df, {"chr1": 0})
+    ra = RegionArrays.from_frame(region_df, {"chr1": 0})
     sub = CalibrationSubstrate.from_payload(payload, ra)
 
     assert sub.strand_class[0] == TS_AMBIG
@@ -134,6 +134,6 @@ def test_misaligned_payload_raises():
             "signature": np.array([2, 0], dtype=np.uint8),
         }
     )
-    bad = RegionArrays.from_region_df(region_df, {"chr1": 0})
+    bad = RegionArrays.from_frame(region_df, {"chr1": 0})
     with pytest.raises(CalibrationSubstrateError):
         CalibrationSubstrate.from_payload(payload, bad)

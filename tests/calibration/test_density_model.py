@@ -68,7 +68,7 @@ def _region_arrays(signatures, ref_names=None) -> RegionArrays:
         }
     )
     refmap = {rn: i for i, rn in enumerate(dict.fromkeys(ref_names))}
-    return RegionArrays.from_region_df(df, refmap)
+    return RegionArrays.from_frame(df, refmap)
 
 
 def _substrate(n, contained, left, right) -> CalibrationSubstrate:

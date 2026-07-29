@@ -27,7 +27,7 @@ _EXON = BIT_EXON_POS | BIT_EXON_NEG
 suite = Path("/Users/mkiyer/Downloads/rigel_runs/ambig_dense_10mb")
 index = TranscriptIndex.load(str(suite / "rigel_index"))
 cfg = PipelineConfig()
-ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+ra = RegionArrays.from_index(index)
 
 
 def pass0(cond):

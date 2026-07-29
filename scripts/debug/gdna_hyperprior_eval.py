@@ -51,7 +51,7 @@ a = ap.parse_args()
 
 suite = Path("/Users/mkiyer/Downloads/rigel_runs/ambig_dense_10mb")
 index = TranscriptIndex.load(str(suite / "rigel_index"))
-ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+ra = RegionArrays.from_index(index)
 cfg = PipelineConfig()
 work = Path("/tmp/rigel_selfsolve")
 cache = suite / "_selfsolve_cache"

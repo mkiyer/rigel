@@ -34,12 +34,12 @@ from selfsolve_diag import _scan_and_truth  # noqa: E402
 from rigel.calibration.bp_solver import REGION  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.config import PipelineConfig  # noqa: E402
-from rigel.index import TranscriptIndex  # noqa: E402
+from rigel.index import TranscriptIndex, load_manifest  # noqa: E402
 
 calmod = importlib.import_module("rigel.calibration.calibrate")
 
 _EPS = 1e-9
-SUITE = Path("/Users/mkiyer/Downloads/rigel_runs/ambig_dense_10mb")
+RUNS = Path("/Users/mkiyer/Downloads/rigel_runs")
 OUT = Path(os.environ.get("P0_BENCH_OUT", "/tmp/pass0_oracle_bench.tsv"))
 
 ap = argparse.ArgumentParser()
@@ -47,7 +47,35 @@ ap.add_argument("--arm", help="label for this run's rows, e.g. base / p0 / dircb
 ap.add_argument("--vs", default="base", help="baseline arm label for --report")
 ap.add_argument("--new", default="p0", help="treatment arm label for --report")
 ap.add_argument("--report", action="store_true")
+ap.add_argument(
+    "--suite",
+    default=os.environ.get("P0_SUITE", "ambig_dense_10mb"),
+    help="suite directory name under ~/Downloads/rigel_runs (default ambig_dense_10mb, THE bench). "
+    "⚠ ambig_dense_10mb's annotation has ZERO mergeable adjacencies, so its v8 partition is "
+    "byte-identical to v7 and it CANNOT show the partition effect; quick_3to1_5mb (+25.0 %) can.",
+)
+ap.add_argument(
+    "--coarsen",
+    action="store_true",
+    help="permit --report to diff arms recorded on DIFFERENT partitions (v7 vs v8). Refused by "
+    "default: the v8 partition refines v7, so a raw mwae diff across it confounds the partition "
+    "change with whatever the arm varied. See docs/accumulator/06_implementation_plan.md F8.",
+)
 args = ap.parse_args()
+SUITE = RUNS / args.suite
+
+#: Provenance columns. `partition` is the index format ("v7" = merged signature regions,
+#: "v8" = the splice graph); `mass_kind` names what the mwae weight actually IS, because under
+#: the accumulator v5 rework it changes from a fractional mass to an integer count; `suite` names
+#: the condition set, because the partition effect is suite-dependent (measured 2026-07-29: +0.0 %
+#: on ambig_dense_10mb, +25.0 % on quick_3to1_5mb, +38.7 % on the human annotation) and two suites'
+#: rows are not comparable. Rows written before a column existed are read back as its default,
+#: which is what they were.
+_DEFAULT_PROVENANCE = {
+    "partition": "v7",
+    "mass_kind": "mass_frac",
+    "suite": "ambig_dense_10mb",
+}
 
 
 def wstat(fg, fo, w):
@@ -65,8 +93,10 @@ def wstat(fg, fo, w):
 
 if args.arm:
     index = TranscriptIndex.load(str(SUITE / "rigel_index"))
+    manifest = load_manifest(index.index_dir) or {}
+    partition = f"v{int(manifest.get('format_version', 7))}"
     cfg = PipelineConfig()
-    ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+    ra = RegionArrays.from_index(index)
     conds = sorted(d.name for d in SUITE.iterdir() if (d / "sim_oracle.bam").exists())
     rows = []
     for cond in conds:
@@ -94,23 +124,68 @@ if args.arm:
             e, c = wstat(fg[m], fo[m], mass[m])
             rec[f"mwae_{tag}"], rec[f"corr_{tag}"] = e, c
         rec["mass"] = float(mass[ok].sum())
+        rec["partition"] = partition
+        rec["mass_kind"] = "mass_frac"  # v5 W5a turns this into an integer count
+        rec["suite"] = args.suite
+        rec["refit"] = int(cc.calib_refit_iters)
         rows.append(rec)
         print(f"  {args.arm:>4} {cond:<48} mwae={rec['mwae_all']:.4f} corr={rec['corr_all']:.3f}", flush=True)
     hdr = list(rows[0].keys())
     exists = OUT.exists()
+    if exists:
+        # The header is written once, so appending rows with a DIFFERENT column set silently
+        # misaligns every later read. Refuse instead.
+        with OUT.open() as fh:
+            on_disk = (fh.readline().rstrip("\n").split("\t")) if fh else []
+        if on_disk and on_disk != hdr:
+            raise SystemExit(
+                f"{OUT} has columns {on_disk} but this run writes {hdr}. Point P0_BENCH_OUT at a "
+                f"fresh file rather than appending a different schema."
+            )
     with OUT.open("a", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=hdr, delimiter="\t")
         if not exists:
             w.writeheader()
         w.writerows(rows)
-    print(f"\nwrote {len(rows)} rows -> {OUT}")
+    print(f"\nwrote {len(rows)} rows ({partition}, refit={cc.calib_refit_iters}) -> {OUT}")
 
 if args.report:
     d: dict = {}
     with OUT.open() as fh:
         for r in csv.DictReader(fh, delimiter="\t"):
+            for k, v in _DEFAULT_PROVENANCE.items():
+                r[k] = r.get(k) or v  # rows predating the column were recorded on v7 / fractional mass
             d[(r["arm"], r["cond"])] = r
     conds = sorted({k[1] for k in d})
+
+    def _provenance(arm):
+        return {
+            (r["partition"], r["mass_kind"], r["suite"]) for (a, _), r in d.items() if a == arm
+        }
+
+    prov_b, prov_p = _provenance(args.vs), _provenance(args.new)
+    for arm, prov in ((args.vs, prov_b), (args.new, prov_p)):
+        if len(prov) > 1:
+            raise SystemExit(f"arm {arm!r} mixes provenances {sorted(prov)}; re-record it.")
+    # ⚠ A suite mismatch is NEVER waivable — --coarsen aggregates a refined partition back onto its
+    # own coarse parent, which is meaningless across two different condition sets and genomes.
+    suites_b = {p[2] for p in prov_b}
+    suites_p = {p[2] for p in prov_p}
+    if suites_b and suites_p and suites_b != suites_p:
+        raise SystemExit(
+            f"REFUSING to diff {args.vs!r} on {sorted(suites_b)} against {args.new!r} on "
+            f"{sorted(suites_p)}: different suites are different genomes and different condition "
+            f"sets. There is no aggregation that makes them comparable."
+        )
+    if prov_b and prov_p and prov_b != prov_p and not args.coarsen:
+        raise SystemExit(
+            f"REFUSING to diff {args.vs!r} {sorted(prov_b)} against {args.new!r} {sorted(prov_p)}.\n"
+            "The v8 partition REFINES v7, so a raw per-object mwae diff across it confounds the "
+            "partition change with whatever this arm varied — and effective lengths are "
+            "superadditive, so the two populations are not comparable object-for-object "
+            "(measured: sum E(children)/E(whole) = 0.765). Record a baseline on the SAME partition, "
+            "or pass --coarsen if you have genuinely aggregated to a common object set."
+        )
 
     def show(title, sel):
         print(f"\n{title}")

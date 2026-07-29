@@ -236,8 +236,15 @@ bias stratum now. Re-measure `δ`'s bias share by structural class after C1 land
 Non-negotiable, from the standing methodology:
 
 1. **Re-record the baseline from the current tree in the same session**, both refits. If HEAD-vs-baseline
-   is not 32/32, the *baseline* is broken. Current reference: **r0 0.078786 / r1 0.052470**
-   (mass-weighted over all 32 conditions).
+   is not 32/32, the *baseline* is broken.
+
+   ⚠ **The reference quoted here was STALE and is corrected (2026-07-29).** It read
+   *"r0 0.078786 / **r1** 0.052470"*, but HEAD has run `calib_refit_iters = 3` since `daa32a13` — the
+   refit=1 arm is retired, and the r0 figure predates the P1e/landscape work. **Current reference,
+   re-recorded from the working tree at `3c293038` this session and reproduced 32/32 exactly at both
+   settings: `refit=0` **0.079005** / `refit=3` **0.046675**.** See
+   `../accumulator/accumulator_ledger.md` W0.1. Re-record again before any arm — every stored number goes
+   stale the moment the tree moves.
 2. **Vary one thing per arm.** The index change and each consumer are separate arms. The index change alone
    must be **bit-identical 32/32** — it adds data nobody reads yet. That is the wiring gate.
 3. **Pre-register predictions including a falsification test** before measuring.

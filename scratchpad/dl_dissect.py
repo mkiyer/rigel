@@ -46,7 +46,7 @@ a = ap.parse_args()
 
 index = TranscriptIndex.load(str(SUITE / "rigel_index"))
 cfg = PipelineConfig()
-ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+ra = RegionArrays.from_index(index)
 inp = _scan_and_truth(SUITE, a.cond, index, cfg, Path("/tmp/rigel_selfsolve"), SUITE / "_selfsolve_cache")
 dbg: dict = {}
 cc = dataclasses.replace(cfg.calibration, calib_refit_iters=a.refit)

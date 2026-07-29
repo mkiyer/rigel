@@ -27,7 +27,7 @@ and x10 on every precision moves nothing) - those are the hyperprior's problem, 
     over-confident, <1 = conservative. This is the one that says whether there is a defect to fix.
 
     ⚠ **UNITS FIX, 2026-07-28.** The denominator is now converted from the belief's LOG-space
-    ``Var(log f_g)`` to the linear ``Var(f_g)`` the numerator lives in (:func:`_lin_var`). Before this the
+    ``Var(log f_g)`` to the linear ``Var(f_g)`` the numerator lives in (:mod:`z2`). Before this the
     two sides were on different scales, so **every z2 recorded in the ROADMAP and in HANDOFF_1..18 is on a
     mixed scale and its absolute value is meaningless** - only the direction of change was ever readable.
     Re-measured on the 32-condition suite at refit=0: the suite total moves **0.046 -> ~1.2**, i.e. pass-0
@@ -49,6 +49,7 @@ import numpy as np
 sys.path.insert(0, "/Users/mkiyer/proj/rigel/scripts/debug")
 from flagship_interrogate import _oracle_per_node  # noqa: E402
 from selfsolve_diag import _scan_and_truth  # noqa: E402
+from z2 import z2  # noqa: E402
 
 from rigel.calibration.bp_solver import REGION  # noqa: E402
 from rigel.calibration.node_geometry import _node_region_type  # noqa: E402
@@ -70,7 +71,7 @@ a = ap.parse_args()
 
 index = TranscriptIndex.load(str(SUITE / "rigel_index"))
 cfg = PipelineConfig()
-ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+ra = RegionArrays.from_index(index)
 conds = sorted(d.name for d in SUITE.iterdir() if (d / "sim_oracle.bam").exists())
 
 C = {k: [] for k in ("cond", "mass", "err", "amb", "var", "cls", "self", "fg")}
@@ -129,42 +130,14 @@ print(
 raw = np.where(mass > _EPS, err / np.maximum(mass, _EPS), 0.0)
 
 
-def _lin_var(v, f):
-    """Convert the belief's LOG-space ``Var(log f_g)`` to the LINEAR ``Var(f_g)`` the error is measured in.
-
-    ⚠ This conversion is the whole point (fixed 2026-07-28). ``NodeBelief.var_gdna`` is a grid moment of
-    ``log f_g`` (`simplex_logodds._solve_nodes_logodds`), so it is a LOG-space variance and is not bounded by
-    ¼ — measured on the suite it exceeds ¼ on 33 % of scored nodes and reaches 4.48. Dividing a linear
-    squared fraction error by it compared two different units, and every ``z2`` recorded before this date is
-    on that mixed scale (the suite total read 0.046, i.e. "20x conservative", when it is really ≈1).
-
-    Two derived steps, no tuned constant:
-      * ``f_g = exp(log f_g)`` ⇒ ``Var(f_g) = f_g²·(e^v − 1)`` exactly under a lognormal, which reduces to the
-        first-order delta method ``f_g²·v`` as ``v → 0``. The exact form matters here because ``v`` reaches
-        4.5, where the first-order term is not a usable approximation.
-      * capped at ``f_g·(1−f_g)`` — the greatest variance ANY ``[0,1]`` variable with mean ``f_g`` can have.
-        This is the same bound `bp_solver.node_sweep` applies to ``_var_fg`` before `composition_logvar`.
-    """
-    # 700 is a float64 overflow guard on expm1, not a modelling constant: the cap below binds for any
-    # v beyond a few units, so clipping the exponent cannot change the result.
-    return np.minimum(f * f * np.expm1(np.clip(v, 0.0, 700.0)), f * (1.0 - f))
-
-
 def _z2(m):
-    """E[(f_g-oracle)^2]/E[Var(f_g)], mass-weighted. 1.0 = honest, >1 = over-confident.
+    """E[(f_g-oracle)^2]/E[Var(f_g)], mass-weighted, over the node mask ``m``. 1.0 = honest, >1 = over-confident.
 
-    Both sides are LINEAR fraction units: the denominator is converted from the belief's log-space
-    ``Var(log f_g)`` by :func:`_lin_var`. The numerator is left alone deliberately — a log-space numerator
-    would need ``log(oracle)``, and the oracle ``f_g`` is exactly 0 on 23.5 % of scored nodes.
+    Both sides are LINEAR fraction units; the log→linear conversion of the belief's ``Var(log f_g)`` lives in
+    :mod:`z2`, which is the single definition shared by every diagnostic (see its module docstring for why
+    that matters).
     """
-    v = var[m]
-    k = m.copy()
-    k[m] = np.isfinite(v)
-    if not k.any():
-        return float("nan")
-    num = float(np.sum(mass[k] * raw[k] ** 2))
-    den = float(np.sum(mass[k] * _lin_var(var[k], fg_lin[k])))
-    return num / den if den > 0 else float("nan")
+    return z2(mass, raw, var, fg_lin, m)
 
 
 print(

@@ -43,7 +43,7 @@ def _scrambled_region_df():
 
 def test_from_region_df_csr_ordering():
     df = _scrambled_region_df()
-    ra = RegionArrays.from_region_df(df, {"chr1": 0, "chr2": 1})
+    ra = RegionArrays.from_frame(df, {"chr1": 0, "chr2": 1})
 
     # Sorted by (ref_id, start).
     np.testing.assert_array_equal(ra.ref_id, [0, 0, 0, 1, 1])
@@ -59,7 +59,7 @@ def test_from_region_df_csr_ordering():
 def test_from_region_df_requires_signature():
     df = _scrambled_region_df().drop(columns=["signature"])
     try:
-        RegionArrays.from_region_df(df, {"chr1": 0, "chr2": 1})
+        RegionArrays.from_frame(df, {"chr1": 0, "chr2": 1})
     except ValueError as exc:
         assert "signature" in str(exc)
     else:  # pragma: no cover

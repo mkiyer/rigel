@@ -35,7 +35,7 @@ from rigel.index import TranscriptIndex  # noqa: E402
 _EPS = 1e-12
 suite = Path("/Users/mkiyer/Downloads/rigel_runs/ambig_dense_10mb"); cache = suite / "_selfsolve_cache"
 index = TranscriptIndex.load(str(suite / "rigel_index")); cfg = PipelineConfig(); cc = cfg.calibration
-ra = RegionArrays.from_region_df(index.region_df, index.ref_name_to_id)
+ra = RegionArrays.from_index(index)
 conds = sorted(p.stem for p in cache.glob("*.pkl"))
 
 
