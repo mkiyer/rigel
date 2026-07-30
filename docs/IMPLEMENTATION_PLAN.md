@@ -13,17 +13,15 @@ project's deleted documentation).
 
 | | |
 |---|---|
-| HEAD | `4bb4d191`. ⛔ **S1 and S2 are UNCOMMITTED** — the owner drives commits |
+| HEAD | `7365e12f`. S1, S2, S2.1 and S2.2 are **committed** at `ebfd12c1`; the tree is clean |
 | done | **S1** (index: reach + junction CSR) · **S2** (reference accumulator, spec matrix, scan profiler, real-data shim, adversarial review, two owner rulings) |
 | next | ⭐ **S3 — the C++** (§3.1–§3.4). The doc corrections are done |
 | suite | **1298 pass**, 48 in the accumulator spec matrix; ruff + `ruff format` clean |
 | bench | r0 `0.079005` / r3 `0.046675`, 32/32 flat — unchanged since `3c293038` |
 | deposit budget | **~357 ns/fragment** end-to-end (`scripts/design/scan_profile.py`), plus ~0.108 s fixed for the 1.04 M-node partition |
 
-**Uncommitted:** `docs/{ACCUMULATOR_DESIGN,IMPLEMENTATION_PLAN,LEDGER}.md`, `scripts/design/` (8 scripts),
-`tests/calibration/test_junction_edge_arrays.py`, and edits to `src/rigel/calibration/splice_graph.py`,
-`tests/calibration/test_splice_graph.py`, `tests/native/_accumulator_reference.py`,
-`tests/native/test_accumulator_spec.py`. ⚠ Update this line when the owner commits.
+⚠ Line numbers in §1–§3 are from `4bb4d191` and are still valid: `ebfd12c1` touched no `src/rigel/native/`
+file. S3 is the first step that does.
 
 ### ✅ THE DOC CORRECTIONS — LANDED (2026-07-29)
 
