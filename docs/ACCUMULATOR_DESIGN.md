@@ -256,7 +256,7 @@ quantity ever enters a likelihood.**
 **Every count and density array has exactly two channels, indexed by the fragment's own GENOME strand.**
 
 ```
-CHANNEL_PLUS, CHANNEL_MINUS = 0, 1        # without exception, in every bank
+STRAND_COLUMNS = {Strand.POS: 0, Strand.NEG: 1}   # without exception, in every bank
 ```
 
 **Sense and antisense are the transcript-relative notion, and they are DERIVED, never stored.** A
@@ -323,7 +323,7 @@ junctions too. That matters because §7 must not apply a mature-only taper to th
 No unspliced channel and no structural flags on a junction: it is spliced by definition and is not a
 genomic position with terminus semantics.
 
-⚠ **`motif_strand` no longer selects a channel.** Its only remaining job is to disambiguate the
+⚠ **`sj_strand` no longer selects a channel.** Its only remaining job is to disambiguate the
 (constructible, biologically impossible) case of two annotated junctions sharing a coordinate pair and
 differing only in strand. The `spliced_primary` branch that used to route on it is gone.
 

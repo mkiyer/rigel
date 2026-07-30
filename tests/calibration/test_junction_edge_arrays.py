@@ -269,9 +269,9 @@ def test_the_csr_slot_order_matches_the_reference_accumulator(fixture, request):
     arrays = build_junction_edge_arrays(index)
     reference = _reference_partition(index)
 
-    assert np.array_equal(reference.junction_offsets, arrays.offsets)
-    assert np.array_equal(reference.junction_acceptor_cut, arrays.acceptor_cut)
-    assert np.array_equal(reference.junction_strand, arrays.strand)
+    assert np.array_equal(reference.sj_offsets, arrays.offsets)
+    assert np.array_equal(reference.sj_acceptor_cut, arrays.acceptor_cut)
+    assert np.array_equal(reference.sj_strand, arrays.strand)
 
 
 def test_a_strand_coincident_pair_is_two_distinct_slots(coincident_index):

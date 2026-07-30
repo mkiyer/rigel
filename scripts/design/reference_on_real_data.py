@@ -64,9 +64,9 @@ def build_partition(index) -> Partition:
         node_types=node_types,
         ref_node_offsets=_offsets(cut_offsets, per_ref=1),
         ref_edge_offsets=_offsets(cut_offsets, per_ref=2),
-        junction_offsets=arrays.offsets,
-        junction_acceptor_cut=arrays.acceptor_cut,
-        junction_strand=arrays.strand,
+        sj_offsets=arrays.offsets,
+        sj_acceptor_cut=arrays.acceptor_cut,
+        sj_strand=arrays.strand,
     )
 
 
@@ -84,7 +84,7 @@ def _offsets(cut_offsets: np.ndarray, per_ref: int) -> np.ndarray:
 
 
 def fragment_paths(bam: str, name_to_ref_id: dict[str, int], limit: int | None):
-    """Stream ``(ref_id, lo, hi, introns, align_strand, motif_strand)`` from a name-collated BAM.
+    """Stream ``(ref_id, lo, hi, introns, align_strand, sj_strand)`` from a name-collated BAM.
 
     The path is the design's: blocks joined across the mate gap, broken at CIGAR ``N``. Introns are
     de-duplicated on ``(start, end)`` — ⚠ the scanner reads the ``XS`` tag once per RECORD, so a pair
@@ -218,7 +218,7 @@ def main() -> None:
     print(f"index      {args.index}")
     print(
         f"partition  {partition.n_nodes:,} nodes  {partition.n_edges:,} contiguous edges  "
-        f"{partition.n_junctions:,} junction edges  {partition.cut_positions.size:,} cuts"
+        f"{partition.n_sj:,} junction edges  {partition.cut_positions.size:,} cuts"
     )
     print(f"bam        {args.bam}\n")
 
@@ -236,7 +236,7 @@ def main() -> None:
         args.bam, name_to_ref_id, args.limit or None
     ):
         outcome = acc.deposit(
-            ref_id, lo, hi, introns=introns, align_strand=align, motif_strand=motif
+            ref_id, lo, hi, introns=introns, align_strand=align, sj_strand=motif
         )
         if outcome is not DepositOutcome.DEPOSITED:
             continue
@@ -271,7 +271,7 @@ def main() -> None:
             int(t.edge_unspliced_density.sum()) + int(t.edge_spliced_density.sum()),
             expect_density,
         ),
-        ("junction crossings", int(t.junction_count.sum()), expect_junctions),
+        ("junction crossings", int(t.sj_count.sum()), expect_junctions),
     ]
     ok = True
     for label, got, want in checks:
@@ -288,7 +288,7 @@ def main() -> None:
     print(f"  spanning             {spanning:>12,}")
     print(f"  nodes with any count {int((t.node_contained_count.sum(1) > 0).sum()):>12,}")
     print(f"  edges with any count {int((t.edge_unspliced_count.sum(1) > 0).sum()):>12,}")
-    print(f"  junctions used       {int((t.junction_count.sum(1) > 0).sum()):>12,}")
+    print(f"  junctions used       {int((t.sj_count.sum(1) > 0).sum()):>12,}")
 
     print("\nFRAGMENT-LENGTH POOLS (mean L, from the histogram)")
     bins = np.arange(t.pool_lengths.shape[1])
@@ -352,12 +352,12 @@ def _expected(partition, ref_id, lo, hi, introns, motif):
         if d >= len(cuts) or cuts[d] != s or a >= len(cuts) or cuts[a] != e:
             continue
         for k in range(
-            int(partition.junction_offsets[first + d]),
-            int(partition.junction_offsets[first + d + 1]),
+            int(partition.sj_offsets[first + d]),
+            int(partition.sj_offsets[first + d + 1]),
         ):
-            if int(partition.junction_acceptor_cut[k]) != first + a:
+            if int(partition.sj_acceptor_cut[k]) != first + a:
                 continue
-            if motif != Strand.NONE and int(partition.junction_strand[k]) != int(motif):
+            if motif != Strand.NONE and int(partition.sj_strand[k]) != int(motif):
                 continue
             junctions += 1
             break

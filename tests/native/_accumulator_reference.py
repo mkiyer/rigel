@@ -52,61 +52,35 @@ from rigel.types import Strand
 
 
 __all__ = [
-    "CHANNEL_MINUS",
-    "CHANNEL_PLUS",
     "DENSITY_SCALE",
-    "N_STRANDS",
+    "N_STRAND_COLUMNS",
+    "STRAND_COLUMNS",
     "Accumulator",
     "DepositOutcome",
     "FragmentPool",
     "Partition",
     "Tally",
     "density_quantum",
-    "genome_channel",
-    "is_genome_strand",
 ]
 
 #: ⭐ THE STRAND CONVENTION, and it is the same one everywhere in this file.
 #:
-#: Every count and density array has exactly two channels, indexed by the fragment's own **genome**
-#: strand: ``CHANNEL_PLUS`` for the ``+`` strand of the reference, ``CHANNEL_MINUS`` for ``−``. Nothing
-#: is stored transcript-relative.
+#: Every count and density array is ``[n, N_STRAND_COLUMNS]``, and the two columns **are** the two genome
+#: strands — ``Strand.POS`` and ``Strand.NEG`` — following the index's own ``_pos``/``_neg`` column naming
+#: (``reach_lo_pos``, ``reach_lo_neg``, …). Nothing is stored transcript-relative.
 #:
 #: **Sense / antisense is derived, never stored.** A junction edge carries its own genomic strand, so a
 #: consumer that wants transcript-relative counts computes ``sense = (fragment strand == junction
 #: strand)``. Storing it instead would put two conventions into one schema — which is exactly the defect
 #: this replaced.
-CHANNEL_PLUS, CHANNEL_MINUS = 0, 1
-N_STRANDS = 2
-
-
-def is_genome_strand(strand: int) -> bool:
-    """Whether ``strand`` names one genome strand, i.e. is neither absent nor both.
-
-    ``Strand`` has OR semantics — ``POS | NEG == AMBIGUOUS`` — so "not POS" is **not** the same as "NEG",
-    and a fragment can arrive carrying no strand or carrying both.
-    """
-    return strand == Strand.POS or strand == Strand.NEG
-
-
-def genome_channel(strand: int) -> int:
-    """The channel index for a fragment aligned to genome strand ``strand``.
-
-    ⚠ Raises unless the strand is exactly POS or NEG. This used to be
-    ``CHANNEL_PLUS if strand == Strand.POS else CHANNEL_MINUS``, which silently booked a fragment with
-    **no** strand, or with **both**, into the minus column — not a dropped fragment but one *credited to
-    the wrong strand*, which is the class of error the single convention exists to delete. The caller must
-    reject such a fragment (:attr:`DepositOutcome.STRAND_UNDEFINED`) rather than ask for its channel.
-    """
-    if strand == Strand.POS:
-        return CHANNEL_PLUS
-    if strand == Strand.NEG:
-        return CHANNEL_MINUS
-    raise ValueError(
-        f"no genome channel for strand {strand!r}: the channel axis IS the genome strand, so a fragment "
-        f"that has none (NONE) or both (AMBIGUOUS) has no column. Reject it with "
-        f"DepositOutcome.STRAND_UNDEFINED instead of choosing one."
-    )
+#:
+#: ⚠ ``Strand`` has **four** values, not two: OR semantics make ``POS | NEG == AMBIGUOUS``, and ``NONE``
+#: means no strand at all. Only POS and NEG name a column, so the mapping is a dict and a fragment whose
+#: strand is neither raises ``KeyError`` here rather than being quietly filed under one of them. The
+#: earlier version of this file mapped "anything that is not POS" to the minus column, which credited such
+#: a fragment to the *wrong strand* instead of rejecting it.
+STRAND_COLUMNS: dict[int, int] = {Strand.POS: 0, Strand.NEG: 1}
+N_STRAND_COLUMNS = len(STRAND_COLUMNS)
 
 
 #: Densities accumulate as ``round(DENSITY_SCALE / placements)`` in uint64. Integer addition is
@@ -135,7 +109,7 @@ class DepositOutcome(enum.Enum):
     TOO_LONG = "dropped_too_long"
     EMPTY = "dropped_empty"
     #: The fragment has no single genome strand — NONE, or AMBIGUOUS (``POS | NEG``, which
-    #: ``build_fragment`` produces when the mates agree in reference orientation). The channel axis IS the
+    #: ``build_fragment`` produces when the mates agree in reference orientation). The column axis IS the
     #: genome strand, so there is no column to credit. Required by design §10.3, which lists
     #: strand-undefined fragments among the denominators the accumulator must emit.
     STRAND_UNDEFINED = "dropped_strand_undefined"
@@ -201,11 +175,9 @@ class Partition:
     node_types: np.ndarray  # uint8[n_nodes] — 0 intergenic / 1 intron / 2 exon
     ref_node_offsets: np.ndarray  # int64[n_refs + 1]
     ref_edge_offsets: np.ndarray  # int64[n_refs + 1]
-    junction_offsets: np.ndarray  # int64[n_cuts + 1] — CSR over the donor cut index
-    junction_acceptor_cut: (
-        np.ndarray
-    )  # int64[n_junctions] — flat cut index of the intron's high end
-    junction_strand: np.ndarray  # int8[n_junctions]
+    sj_offsets: np.ndarray  # int64[n_cuts + 1] — CSR over the donor cut index
+    sj_acceptor_cut: np.ndarray  # int64[n_sj] — flat cut index of the intron's high end
+    sj_strand: np.ndarray  # int8[n_sj]
 
     @property
     def n_refs(self) -> int:
@@ -220,8 +192,8 @@ class Partition:
         return int(self.ref_edge_offsets[-1])
 
     @property
-    def n_junctions(self) -> int:
-        return int(self.junction_acceptor_cut.shape[0])
+    def n_sj(self) -> int:
+        return int(self.sj_acceptor_cut.shape[0])
 
     @classmethod
     def from_cuts(cls, cuts_per_ref, node_types=None, junctions=()) -> "Partition":
@@ -276,36 +248,37 @@ class Partition:
         donor_cut, acceptor_cut, strand = donor_cut[order], acceptor_cut[order], strand[order]
 
         n_cuts = int(cut_offsets[-1])
-        junction_offsets = np.zeros(n_cuts + 1, np.int64)
-        np.cumsum(np.bincount(donor_cut, minlength=n_cuts), out=junction_offsets[1:])
+        sj_offsets = np.zeros(n_cuts + 1, np.int64)
+        np.cumsum(np.bincount(donor_cut, minlength=n_cuts), out=sj_offsets[1:])
         return cls(
             cut_positions=cut_positions,
             ref_cut_offsets=cut_offsets,
             node_types=types,
             ref_node_offsets=node_offsets,
             ref_edge_offsets=edge_offsets,
-            junction_offsets=junction_offsets,
-            junction_acceptor_cut=acceptor_cut,
-            junction_strand=strand,
+            sj_offsets=sj_offsets,
+            sj_acceptor_cut=acceptor_cut,
+            sj_strand=strand,
         )
 
 
 def _exact_cut(cut_positions, cut_offsets, ref: int, position: int) -> int:
     """The flat cut index of ``position`` on ``ref``, or -1 if it is not a cut there."""
-    lo, hi = int(cut_offsets[ref]), int(cut_offsets[ref + 1])
-    if hi <= lo:
+    first, last = int(cut_offsets[ref]), int(cut_offsets[ref + 1])
+    if last <= first:
         return -1
-    k = lo + int(np.searchsorted(cut_positions[lo:hi], position))
-    return k if k < hi and int(cut_positions[k]) == position else -1
+    k = first + int(np.searchsorted(cut_positions[first:last], position))
+    return k if k < last and int(cut_positions[k]) == position else -1
 
 
-def _normalise_introns(introns, lo: int, hi: int) -> tuple[list[tuple[int, int]], int]:
-    """The introns as a sorted, DISJOINT set clipped to ``[lo, hi)``, and how many were absorbed.
+def _normalise_introns(introns, start: int, end: int) -> tuple[list[tuple[int, int]], int]:
+    """The introns as a sorted, DISJOINT set clipped to ``[start, end)``, and how many were absorbed.
 
     ⚠ The caller is contracted to hand over a clean set, but a real BAM does not always allow it: the
-    scanner reads the ``XS`` tag once per RECORD, so a pair whose mates disagree about an intron's
-    acceptor produces two overlapping introns for one molecule. Measured on MO_3021: one read group in
-    875,670 (``chr8:138206290-138206943``, three mutually overlapping introns).
+    splice-motif strand tag is read once per RECORD (``XS`` for STAR, ``ts`` for minimap2 — the scanner
+    auto-detects), so a pair whose mates disagree about an intron's acceptor produces two overlapping
+    introns for one molecule. Measured on MO_3021: one read group in 875,670
+    (``chr8:138206290-138206943``, three mutually overlapping introns).
 
     Normalising here — rather than trusting the caller — is what lets ``L`` be *defined* as the total
     length of the path's segments instead of computed by a second, independent formula. Two formulas for
@@ -314,9 +287,9 @@ def _normalise_introns(introns, lo: int, hi: int) -> tuple[list[tuple[int, int]]
     """
     absorbed = 0
     merged: list[tuple[int, int]] = []
-    for start, end in sorted((int(s), int(e)) for s, e in introns):
-        start, end = max(start, lo), min(end, hi)
-        if end <= start:  # zero-length, or entirely outside the fragment
+    for raw_start, raw_end in sorted((int(s), int(e)) for s, e in introns):
+        intron_start, intron_end = max(raw_start, start), min(raw_end, end)
+        if intron_end <= intron_start:  # zero-length, or entirely outside the fragment
             absorbed += 1
             continue
         # Overlapping OR ABUTTING introns are both malformed and both merge. Abutting means a
@@ -325,27 +298,27 @@ def _normalise_introns(introns, lo: int, hi: int) -> tuple[list[tuple[int, int]]
         # legitimately use two abutting introns. The index cannot produce the pair either: a
         # zero-length exon is dropped when the exon arrays are built, which fuses its two flanking
         # introns into one. So an abutting pair in a fragment is an alignment artifact.
-        if merged and start <= merged[-1][1]:
+        if merged and intron_start <= merged[-1][1]:
             previous_start, previous_end = merged[-1]
-            merged[-1] = (previous_start, max(previous_end, end))
+            merged[-1] = (previous_start, max(previous_end, intron_end))
             absorbed += 1
             continue
-        merged.append((start, end))
+        merged.append((intron_start, intron_end))
     return merged, absorbed
 
 
-def _segments(lo: int, hi: int, introns) -> list[tuple[int, int]]:
-    """The path's contiguous genomic segments: ``[lo, hi)`` with the introns cut out.
+def _segments(start: int, end: int, introns) -> list[tuple[int, int]]:
+    """The path's contiguous genomic segments: ``[start, end)`` with the introns cut out.
 
     ``introns`` must already be sorted and disjoint (:func:`_normalise_introns`).
     """
-    out, cursor = [], lo
+    out, cursor = [], start
     for intron_start, intron_end in introns:
         if intron_start > cursor:
             out.append((cursor, intron_start))
         cursor = intron_end
-    if hi > cursor:
-        out.append((cursor, hi))
+    if end > cursor:
+        out.append((cursor, end))
     return out
 
 
@@ -371,18 +344,18 @@ class Tally:
     edge_unspliced_density: np.ndarray  # uint64[n_edges, 2]
     edge_spliced_count: np.ndarray  # uint32[n_edges, 2] — certified RNA: gDNA cannot be spliced
     edge_spliced_density: np.ndarray  # uint64[n_edges, 2]
-    junction_count: np.ndarray  # uint32[n_junctions, 2]
-    junction_density: np.ndarray  # uint64[n_junctions, 2]
+    sj_count: np.ndarray  # uint32[n_sj, 2]
+    sj_density: np.ndarray  # uint64[n_sj, 2]
     pool_lengths: np.ndarray  # int64[5, max_fragment_length + 1] — binned at L, once per fragment
     qc: dict[str, int] = field(default_factory=dict)
 
     @classmethod
-    def zeros(cls, n_nodes: int, n_edges: int, n_junctions: int, max_length: int) -> "Tally":
+    def zeros(cls, n_nodes: int, n_edges: int, n_sj: int, max_length: int) -> "Tally":
         def counts(rows):
-            return np.zeros((rows, N_STRANDS), np.uint32)
+            return np.zeros((rows, N_STRAND_COLUMNS), np.uint32)
 
         def density(rows):
-            return np.zeros((rows, N_STRANDS), np.uint64)
+            return np.zeros((rows, N_STRAND_COLUMNS), np.uint64)
 
         return cls(
             node_contained_count=counts(n_nodes),
@@ -394,11 +367,16 @@ class Tally:
             edge_unspliced_density=density(n_edges),
             edge_spliced_count=counts(n_edges),
             edge_spliced_density=density(n_edges),
-            junction_count=counts(n_junctions),
-            junction_density=density(n_junctions),
+            sj_count=counts(n_sj),
+            sj_density=density(n_sj),
             pool_lengths=np.zeros((len(FragmentPool), max_length + 1), np.int64),
             qc={outcome.value: 0 for outcome in DepositOutcome}
-            | {"unannotated_introns": 0, "inferred_intron_fragments": 0, "introns_absorbed": 0},
+            | {
+                "unannotated_introns": 0,
+                "contradictory_sj_strand": 0,
+                "inferred_intron_fragments": 0,
+                "introns_absorbed": 0,
+            },
         )
 
 
@@ -421,7 +399,7 @@ class Accumulator:
         self.partition = partition
         self.max_fragment_length = int(max_fragment_length)
         self.tally = Tally.zeros(
-            partition.n_nodes, partition.n_edges, partition.n_junctions, self.max_fragment_length
+            partition.n_nodes, partition.n_edges, partition.n_sj, self.max_fragment_length
         )
 
     @property
@@ -435,23 +413,28 @@ class Accumulator:
         end: int,
         introns=(),
         align_strand: int = Strand.POS,
-        motif_strand: int = Strand.NONE,
+        sj_strand: int = Strand.NONE,
         introns_inferred: bool = False,
     ) -> DepositOutcome:
         """Deposit one fragment; return why it did or did not land.
 
         ``[start, end)`` is the full genomic extent — leftmost block start to rightmost block end, mate
         gap included. ``introns`` are the excised gaps inside it as ``(start, end)`` pairs.
-        ``align_strand`` is the fragment's alignment strand and ``motif_strand`` its splice-motif strand;
-        together they select the channel. ``introns_inferred`` marks a fragment whose splice was inferred
-        rather than observed: it deposits normally but is barred from the pure-RNA length pool, because
-        its splice is a product of the very model that pool is used to fit.
+        ``align_strand`` is the fragment's own genome strand and selects the column. ``sj_strand`` is
+        the splice-junction motif strand **observed in the BAM** (the ``XS``/``ts`` tag) and is used *only*
+        to resolve an intron against the annotation (see :meth:`_sj_edge_id`).
+
+        ⚠ Do not confuse ``sj_strand`` with ``Partition.sj_strand``: the first is observed, per
+        fragment; the second is annotated, per junction edge. ``_sj_edge_id`` compares them. ``introns_inferred`` marks a fragment whose splice was inferred rather than
+        observed: it deposits normally but is barred from the pure-RNA length pool, because its splice is a
+        product of the very model that pool is used to fit.
         """
         # ⚠ Checked FIRST, and before any geometry: the strand is a property of the fragment alone, and a
-        # fragment with no single genome strand has no column in any bank. The old scanner gate at
-        # `bam_scanner.cpp:1474-1480` did this before the accumulator ever saw the fragment; moving it in
+        # fragment with no single genome strand has no column in any bank. The scanner's gate at
+        # `bam_scanner.cpp:1474-1480` did this before the old accumulator ever saw the fragment; doing it
         # here is what lets the loss be COUNTED instead of vanishing.
-        if not is_genome_strand(align_strand):
+        column = STRAND_COLUMNS.get(align_strand)
+        if column is None:
             return self._reject(DepositOutcome.STRAND_UNDEFINED)
 
         p = self.partition
@@ -461,14 +444,14 @@ class Accumulator:
         cuts = p.cut_positions[first_cut:last_cut]
 
         # clip to the reference; L is the CLIPPED length, so the placement count stays consistent
-        lo, hi = max(int(start), int(cuts[0])), min(int(end), int(cuts[-1]))
-        if hi <= lo:
+        start, end = max(int(start), int(cuts[0])), min(int(end), int(cuts[-1]))
+        if end <= start:
             return self._reject(DepositOutcome.EMPTY)
 
         # ⚠ ONE definition of L: the total length of the path's segments. Deriving it any other way
         # invites two formulas for one quantity — see _normalise_introns.
-        introns, absorbed = _normalise_introns(introns, lo, hi)
-        segments = _segments(lo, hi, introns)
+        introns, absorbed = _normalise_introns(introns, start, end)
+        segments = _segments(start, end, introns)
         length = sum(b - a for a, b in segments)
         if length <= 0:
             return self._reject(DepositOutcome.EMPTY)
@@ -477,28 +460,28 @@ class Accumulator:
         self.tally.qc["introns_absorbed"] += absorbed
 
         # ── which annotated junctions does this path use? ─────────────────────────────────────────
-        junction_ids = [
-            jid
-            for jid in (
-                self._junction_of(ref, intron_start, intron_end, motif_strand)
-                for intron_start, intron_end in introns
-            )
-            if jid >= 0
-        ]
-        self.tally.qc["unannotated_introns"] += len(introns) - len(junction_ids)
-        spliced = bool(junction_ids)
-
-        # ⭐ ONE strand convention, everywhere: the channel is the fragment's own GENOME strand.
-        # Sense/antisense is a DERIVED quantity, not a stored one — a junction edge already carries its
-        # own genomic strand, so a consumer computes `sense = (fragment strand == junction strand)` and
-        # nothing is lost. Storing some banks by genome strand and others by sense is what put one array
-        # into two conventions: measured on real cfRNA, 65-69 % of node_spanning deposits come from
-        # spliced fragments and 40-44 % of those landed in the opposite column from the unspliced
-        # fragments beside them.
-        channel = genome_channel(align_strand)
+        # ⚠ A contradictory motif strand disqualifies the whole fragment's splices, so it is checked once
+        # here rather than per intron: `sj_strand` is the OR of the per-record strand-tag values, so
+        # AMBIGUOUS means the mates disagreed about the same molecule. That is contradictory EVIDENCE, not
+        # missing evidence, and it is counted on its own denominator — folding it into
+        # `unannotated_introns` would poison the one metric whose job is measuring annotation coverage.
+        if sj_strand == Strand.AMBIGUOUS:
+            sj_ids: list[int] = []
+            self.tally.qc["contradictory_sj_strand"] += 1
+        else:
+            sj_ids = [
+                jid
+                for jid in (
+                    self._sj_edge_id(ref, intron_start, intron_end, sj_strand)
+                    for intron_start, intron_end in introns
+                )
+                if jid >= 0
+            ]
+            self.tally.qc["unannotated_introns"] += len(introns) - len(sj_ids)
+        spliced = bool(sj_ids)
 
         # ⚠ The path's own first and last COVERED base, not the fragment's extent. A leading or trailing
-        # intron means the molecule does not begin at `lo`: with introns [(150,480)] over [150,500) the
+        # intron means the molecule does not begin at `start`: with introns [(150,480)] over [150,500) the
         # path is [480,500) and lives in a different node entirely. Using the extent would attribute the
         # fragment — and the start-count invariant — to a node it never touches.
         first_base, last_base = segments[0][0], segments[-1][1] - 1
@@ -527,18 +510,18 @@ class Accumulator:
             first = int(np.searchsorted(cuts, seg_start, side="right"))
             last = int(np.searchsorted(cuts, seg_end, side="left"))
             for line in range(first, last):
-                edge_count[edge_base + line - 1, channel] += 1
-                edge_density[edge_base + line - 1, channel] += quantum_edge
+                edge_count[edge_base + line - 1, column] += 1
+                edge_density[edge_base + line - 1, column] += quantum_edge
             for line in range(first, last - 1):  # the node between two consecutive crossed lines
-                t.node_spanning_count[node_base + line, channel] += 1
-                t.node_spanning_density[node_base + line, channel] += quantum_node
+                t.node_spanning_count[node_base + line, column] += 1
+                t.node_spanning_density[node_base + line, column] += quantum_node
             if last > first:
                 sole_line = first if (n_crossed == 0 and last - first == 1) else -1
                 n_crossed += last - first
 
-        for jid in junction_ids:
-            t.junction_count[jid, channel] += 1
-            t.junction_density[jid, channel] += quantum_edge
+        for jid in sj_ids:
+            t.sj_count[jid, column] += 1
+            t.sj_density[jid, column] += quantum_edge
 
         # ── contained: the WHOLE path lies inside ONE node ────────────────────────────────────────
         # ⚠ Not merely "crossed no line". An unannotated intron can swallow every line between two
@@ -548,10 +531,10 @@ class Accumulator:
         # so the loss is visible rather than silent.
         first_node = self._local_node(cuts, first_base)
         contained_node = -1
-        if not junction_ids and first_node == self._local_node(cuts, last_base):
+        if not sj_ids and first_node == self._local_node(cuts, last_base):
             contained_node = node_base + first_node
-            t.node_contained_count[contained_node, channel] += 1
-            t.node_contained_density[contained_node, channel] += quantum_node
+            t.node_contained_count[contained_node, column] += 1
+            t.node_contained_density[contained_node, column] += quantum_node
 
         pool = self._pool(spliced, introns_inferred, contained_node, sole_line, node_base)
         if pool is not None:
@@ -569,7 +552,7 @@ class Accumulator:
         """Index within this reference of the node containing ``position``."""
         return min(max(int(np.searchsorted(cuts, position, side="right")) - 1, 0), cuts.size - 2)
 
-    def _junction_of(self, ref: int, intron_start: int, intron_end: int, motif_strand: int) -> int:
+    def _sj_edge_id(self, ref: int, intron_start: int, intron_end: int, sj_strand: int) -> int:
         """The junction-edge id for this intron, or -1 if it is not annotated.
 
         One to three iterations at human scale: 70.4 % of cuts are not a donor at all, and over those
@@ -582,8 +565,8 @@ class Accumulator:
         acceptor = _exact_cut(p.cut_positions, p.ref_cut_offsets, ref, intron_end)
         if acceptor < 0:
             return -1
-        for k in range(int(p.junction_offsets[donor]), int(p.junction_offsets[donor + 1])):
-            if int(p.junction_acceptor_cut[k]) != acceptor:
+        for k in range(int(p.sj_offsets[donor]), int(p.sj_offsets[donor + 1])):
+            if int(p.sj_acceptor_cut[k]) != acceptor:
                 continue
             # ⚠ The strand filter applies only when the motif strand is DEFINITE. AMBIGUOUS means "no
             # strand information", not "a strand that matches nothing" — it used to be treated as the
@@ -595,7 +578,7 @@ class Accumulator:
             # 404,168 human junction coordinates are annotated on both strands, so it can only ever lose a
             # match, never disambiguate one. The resolver already reads a non-definite strand as "either"
             # (`sj_lookup_into` falls back to the union of POS and NEG), so this agrees with it.
-            if is_genome_strand(motif_strand) and int(p.junction_strand[k]) != int(motif_strand):
+            if sj_strand in STRAND_COLUMNS and int(p.sj_strand[k]) != int(sj_strand):
                 continue
             return k
         return -1

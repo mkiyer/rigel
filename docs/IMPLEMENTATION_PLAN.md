@@ -13,17 +13,34 @@ project's deleted documentation).
 
 | | |
 |---|---|
-| HEAD | `4bb4d191`. ⛔ **S1 and S2 are UNCOMMITTED** — the owner drives commits |
+| HEAD | `4a7a78d7`. S1, S2 and the doc corrections are **committed**; the tree is clean |
 | done | **S1** (index: reach + junction CSR) · **S2** (reference accumulator, spec matrix, scan profiler, real-data shim, adversarial review, two owner rulings) |
 | next | ⭐ **S3 — the C++** (§3.1–§3.4). The doc corrections are done |
-| suite | **1298 pass**, 48 in the accumulator spec matrix; ruff + `ruff format` clean |
+| suite | **1303 pass**, 53 in the accumulator spec matrix; ruff + `ruff format` clean |
 | bench | r0 `0.079005` / r3 `0.046675`, 32/32 flat — unchanged since `3c293038` |
 | deposit budget | **~357 ns/fragment** end-to-end (`scripts/design/scan_profile.py`), plus ~0.108 s fixed for the 1.04 M-node partition |
 
-**Uncommitted:** `docs/{ACCUMULATOR_DESIGN,IMPLEMENTATION_PLAN,LEDGER}.md`, `scripts/design/` (8 scripts),
-`tests/calibration/test_junction_edge_arrays.py`, and edits to `src/rigel/calibration/splice_graph.py`,
-`tests/calibration/test_splice_graph.py`, `tests/native/_accumulator_reference.py`,
-`tests/native/test_accumulator_spec.py`. ⚠ Update this line when the owner commits.
+⚠ Line numbers in §1–§3 are from `4bb4d191` and are still valid: nothing committed since has touched
+`src/rigel/native/`. S3 is the first step that does.
+
+### ⭐ NAMING — one word per concept, and they are the codebase's own words
+
+Fixed 2026-07-29 after the owner rejected three inventions. Recorded because the C++ will follow these.
+
+| ⛔ invented | ✅ use | why |
+|---|---|---|
+| `genome_channel`, `CHANNEL_PLUS/MINUS`, `kNChannels` | `STRAND_COLUMNS`, `Strand::POS`/`NEG` | "channel" was leftover vocabulary from the 4-way `spliced × primary` axis being deleted. The axis IS the strand; say strand |
+| `N_STRANDS = 2` | `N_STRAND_COLUMNS = 2` | there are **four** strands (`Strand` has OR semantics: `POS\|NEG == AMBIGUOUS`, plus `NONE`). Only two name a column |
+| `motif_strand`, then `sj_motif_strand` | **`sj_strand`** | `sj` is the codebase's abbreviation already — `sj.feather`, `sj_map`, `SJKey`, `sj_lookup_into`, `cr.sj_strand`. "motif" does not say *which* motif, and a third name for one quantity is worse than an ambiguous one |
+| `lo` / `hi` for a fragment | **`start` / `end`** | the codebase uses `start`/`end` everywhere for coordinates; `lo`/`hi` appears only in `reach_lo_pos`/`reach_hi_pos`, which is a different quantity |
+
+⚠ **The shipped C++ is where `motif_strand` came from**: `bam_scanner.cpp:1468` declares
+`int32_t motif_strand = cr.sj_strand;` — a local alias whose name is worse than the field it copies. S3
+rewrites that adapter, so **delete the alias and use `cr.sj_strand` directly.**
+
+⚠ A junction edge's **annotated** strand and a fragment's **observed** strand are the same quantity from two
+sources, so both are `sj_strand`, disambiguated by scope. The comparison then reads as what it is:
+`if p.sj_strand[k] != sj_strand` — annotated versus observed.
 
 ### ✅ THE DOC CORRECTIONS — LANDED (2026-07-29)
 
@@ -145,7 +162,10 @@ accumulator needs.
 ```cpp
 namespace rigel::accumulator {
 
-inline constexpr std::size_t kNStrands = 2;              // + / −, or sense / antisense
+//: The two array columns ARE the two genome strands, Strand::POS and Strand::NEG. `Strand` has FOUR
+//: values (OR semantics make POS|NEG == AMBIGUOUS, and NONE means no strand), so only these two name a
+//: column and a fragment carrying neither is REJECTED, never filed under one of them.
+inline constexpr std::size_t kNStrandColumns = 2;
 
 //: Densities accumulate as round(kDensityScale / placements). Integer addition is associative, so the
 //: merge is bit-identical at any worker count -- which the float32 mass channels are not.
@@ -154,22 +174,22 @@ inline constexpr std::uint64_t kDensityScale = 1ull << 32;
 inline std::uint64_t density_quantum(std::int64_t placements) noexcept;   // half away from zero
 
 struct Node {                                   // 48 B exactly, no padding
-    std::uint32_t contained_count[kNStrands];
-    std::uint32_t spanning_count[kNStrands];
-    std::uint64_t contained_density[kNStrands];
-    std::uint64_t spanning_density[kNStrands];
+    std::uint32_t contained_count[kNStrandColumns];
+    std::uint32_t spanning_count[kNStrandColumns];
+    std::uint64_t contained_density[kNStrandColumns];
+    std::uint64_t spanning_density[kNStrandColumns];
 };
 
 struct ContiguousEdge {                         // 48 B
-    std::uint32_t unspliced_count[kNStrands];
-    std::uint32_t spliced_count[kNStrands];
-    std::uint64_t unspliced_density[kNStrands];
-    std::uint64_t spliced_density[kNStrands];
+    std::uint32_t unspliced_count[kNStrandColumns];
+    std::uint32_t spliced_count[kNStrandColumns];
+    std::uint64_t unspliced_density[kNStrandColumns];
+    std::uint64_t spliced_density[kNStrandColumns];
 };
 
 struct JunctionEdge {                           // 24 B
-    std::uint32_t count[kNStrands];
-    std::uint64_t density[kNStrands];
+    std::uint32_t count[kNStrandColumns];
+    std::uint64_t density[kNStrandColumns];
 };
 ```
 
@@ -200,7 +220,7 @@ struct FragmentPath {
     const IntronBlock*  introns;        // deduplicated on (ref, start, end), strands OR-ed
     std::size_t         n_introns;
     std::int32_t        align_strand;   // cr.align_strand -- the READ-1 genome orientation. THE channel
-    std::int32_t        motif_strand;   // cr.sj_strand. ⚠ NEVER selects a channel; §3.3 disambiguation only
+    std::int32_t        sj_strand;   // cr.sj_strand. ⚠ NEVER selects a channel; §3.3 disambiguation only
     bool                introns_inferred;   // SPLICE_IMPLICIT -- bars it from the pure-RNA pool
 };
 
@@ -225,7 +245,7 @@ if L <= 0:                     return EMPTY
 if L > max_fragment_length_:    return TOO_LONG              // a QC counter, not a silent drop
 
 // ── which annotated junctions does the path use? this also selects the edge bank ──────────
-for each intron:  jid = junction_of(ref, intron, path.motif_strand)   // §3.3; -1 if unannotated
+for each intron:  jid = sj_edge_id(ref, intron, path.sj_strand)   // §3.3; -1 if unannotated
 spliced = (at least one jid >= 0)
 unannotated_introns_ += n_introns - n_annotated               // deposits nothing across the gap (design §4.1)
 
@@ -303,19 +323,19 @@ against a full binary search over the real chr1 cut array, not a toy.**
 the "is this intron annotated?" test is the binary search the deposit is already doing:
 
 ```cpp
-std::vector<std::int32_t> junction_offsets_;   // size n_cuts + 1, CSR over donor cut index
-std::vector<std::int32_t> junction_acceptor_;  // acceptor CUT INDEX, not a coordinate
-std::vector<std::int8_t>  junction_strand_;    // disambiguates a strand-coincident pair -- nothing else
+std::vector<std::int32_t> sj_offsets_;   // size n_cuts + 1, CSR over donor cut index
+std::vector<std::int32_t> sj_acceptor_cut_;  // acceptor CUT INDEX, not a coordinate
+std::vector<std::int8_t>  sj_strand_;    // disambiguates a strand-coincident pair -- nothing else
 ```
 
-`junction_of(donor_cut, acceptor_cut, motif_strand)` scans `junction_offsets_[d] .. [d+1]` — one to three
+`sj_edge_id(donor_cut, acceptor_cut, sj_strand)` scans `sj_offsets_[d] .. [d+1]` — one to three
 entries at human scale (⭐ 70.4 % of cuts are not a donor at all; over those that are, mean fan-out
 **1.31**, max 25). If the intron's start is not a cut it is unannotated and the search never happens. No
 hash map in the hot loop; the arrays are built once per reference from `edges.feather`'s `kind == 1` rows.
 
 ### ⛔ The junction-edge id IS the CSR slot. There is no third array.
 
-The scan returns `k`, its position in `junction_acceptor_`, and `junction_count[k]` is indexed by it
+The scan returns `k`, its position in `sj_acceptor_cut_`, and `sj_count[k]` is indexed by it
 directly. **The draft's `junction_edge_id_` does not exist** — it was an indirection to
 `edges_df`'s row, and taking that row as the bank index is a memory-safety bug: ⭐ the highest junction row
 is **1,447,755** in a **404,168**-row bank, so `junction[edge_row]` runs off the end, and even in bounds it
@@ -392,8 +412,8 @@ edge_unspliced_count      uint32[n_edges, 2]
 edge_unspliced_density    uint64[n_edges, 2]
 edge_spliced_count        uint32[n_edges, 2]
 edge_spliced_density      uint64[n_edges, 2]
-junction_count            uint32[n_junctions, 2]
-junction_density          uint64[n_junctions, 2]
+sj_count            uint32[n_junctions, 2]
+sj_density          uint64[n_junctions, 2]
 ref_node_offsets          int64[n_refs + 1]
 ref_edge_offsets          int64[n_refs + 1]
 cut_positions             int64[n_cuts]

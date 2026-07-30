@@ -26,9 +26,8 @@ import pytest
 from rigel.types import Strand
 
 from ._accumulator_reference import (
-    CHANNEL_MINUS,
-    CHANNEL_PLUS,
     DENSITY_SCALE,
+    STRAND_COLUMNS,
     Accumulator,
     DepositOutcome,
     FragmentPool,
@@ -171,11 +170,11 @@ def test_a_spliced_jump_deposits_NOTHING_on_the_lines_it_splices_over():
     """⭐ The defect this design removes. The intron [201,900) swallows the line at 400; the old rule,
     which asked only "does another slice follow?", could not tell that from a contiguous crossing."""
     acc = _acc(junctions=[JUNCTION])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], motif_strand=Strand.POS)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS)
     t = acc.tally
     length = (950 - 150) - (900 - 201)
-    assert int(t.junction_count[0, 0]) == 1
-    assert int(t.junction_density[0, 0]) == density_quantum(length - 1)
+    assert int(t.sj_count[0, 0]) == 1
+    assert int(t.sj_density[0, 0]) == density_quantum(length - 1)
     assert int(t.edge_unspliced_count[_edge(0, 4), 0]) == 0, "the swallowed line at 400"
     assert int(t.edge_spliced_count[_edge(0, 4), 0]) == 0
     assert int(t.node_spanning_count[_node(0, 4), 0]) == 0, "a node jumped OVER is not spanned"
@@ -185,7 +184,7 @@ def test_a_spliced_fragments_own_BLOCK_crossings_go_in_the_SPLICED_bank():
     """A spliced fragment is certified RNA — gDNA cannot be spliced — so a line its block genuinely
     crosses is the cleanest RNA marker available at a seam."""
     acc = _acc(junctions=[JUNCTION])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], motif_strand=Strand.POS)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS)
     t = acc.tally
     assert int(t.edge_spliced_count[_edge(0, 2), 0]) == 1, "block [150,201) crosses the line at 200"
     assert t.edge_unspliced_count.sum() == 0
@@ -208,9 +207,9 @@ def test_an_UNANNOTATED_intron_credits_no_junction_and_nothing_across_the_gap():
     UNSPLICED channel and compete with gDNA rather than being certified RNA."""
     acc = _acc(junctions=[JUNCTION])
     # [200,400) is NOT annotated; it swallows the line at 201
-    acc.deposit(0, 50, 500, introns=[(200, 400)], motif_strand=Strand.POS)
+    acc.deposit(0, 50, 500, introns=[(200, 400)], sj_strand=Strand.POS)
     t = acc.tally
-    assert t.junction_count.sum() == 0
+    assert t.sj_count.sum() == 0
     assert t.edge_spliced_count.sum() == 0, "not certified RNA — it competes with gDNA"
     assert int(t.edge_unspliced_count[_edge(0, 1), 0]) == 1, (
         "block [50,200) crosses the line at 100"
@@ -246,10 +245,10 @@ def test_opposite_strand_junctions_at_the_same_coordinates_are_DISTINCT_edges():
     """Biologically impossible — splice motifs are not palindromic — so only a synthetic stress test can
     reach it, which is exactly why one exists."""
     acc = _acc(junctions=[(0, 201, 900, Strand.POS), (0, 201, 900, Strand.NEG)])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, motif_strand=Strand.NEG)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG)
     t = acc.tally
-    assert t.junction_count.sum() == 1
-    assert int(t.junction_count[1, CHANNEL_MINUS]) == 1, "the NEG edge (id 1), genome minus"
+    assert t.sj_count.sum() == 1
+    assert int(t.sj_count[1, STRAND_COLUMNS[Strand.NEG]]) == 1, "the NEG edge (id 1), genome minus"
 
 
 @pytest.mark.parametrize("order", [("POS_first", 1), ("NEG_first", -1)])
@@ -266,7 +265,7 @@ def test_a_junction_id_is_a_function_of_the_PARTITION_not_of_argument_order(orde
     _, direction = order
     junctions = [(0, 201, 900, Strand.POS), (0, 201, 900, Strand.NEG)][::direction]
     part = Partition.from_cuts([CHR1_CUTS], node_types=[CHR1_TYPES], junctions=junctions)
-    assert [int(s) for s in part.junction_strand] == [int(Strand.POS), int(Strand.NEG)], (
+    assert [int(s) for s in part.sj_strand] == [int(Strand.POS), int(Strand.NEG)], (
         "POS must sort to slot 0 whichever order it was passed in"
     )
 
@@ -284,10 +283,10 @@ def test_a_fragment_using_TWO_junctions_credits_BOTH():
         junctions=[(0, 100, 200, Strand.POS), (0, 300, 400, Strand.POS)],
     )
     acc = Accumulator(part, max_fragment_length=10_000)
-    acc.deposit(0, 50, 550, introns=[(100, 200), (300, 400)], motif_strand=Strand.POS)
+    acc.deposit(0, 50, 550, introns=[(100, 200), (300, 400)], sj_strand=Strand.POS)
     t = acc.tally
-    assert int(t.junction_count[0, CHANNEL_PLUS]) == 1
-    assert int(t.junction_count[1, CHANNEL_PLUS]) == 1
+    assert int(t.sj_count[0, STRAND_COLUMNS[Strand.POS]]) == 1
+    assert int(t.sj_count[1, STRAND_COLUMNS[Strand.POS]]) == 1
     assert t.qc["introns_absorbed"] == 0, "a real exon separates them; nothing is malformed"
 
 
@@ -312,18 +311,18 @@ def test_EVERY_bank_including_the_junctions_is_indexed_by_GENOME_strand():
     in the antisense column; under the genome convention it lands in the minus column. Those happen to be
     the same index, so the discriminating case is the next test."""
     acc = _acc(junctions=[JUNCTION])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, motif_strand=Strand.POS)
-    assert int(acc.tally.junction_count[0, CHANNEL_MINUS]) == 1
+    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.POS)
+    assert int(acc.tally.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1
 
 
 def test_a_SENSE_fragment_on_the_minus_strand_is_still_booked_as_MINUS():
     """The discriminating case: sense-to-motif would say column 0, genome strand says column 1."""
     acc = _acc(junctions=[(0, 201, 900, Strand.NEG)])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, motif_strand=Strand.NEG)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG)
     t = acc.tally
-    assert int(t.junction_count[0, CHANNEL_MINUS]) == 1
-    assert int(t.junction_count[0, CHANNEL_PLUS]) == 0
-    assert int(t.edge_spliced_count[_edge(0, 2), CHANNEL_MINUS]) == 1
+    assert int(t.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1
+    assert int(t.sj_count[0, STRAND_COLUMNS[Strand.POS]]) == 0
+    assert int(t.edge_spliced_count[_edge(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -346,9 +345,9 @@ def test_the_limit_applies_to_L_and_NOT_to_the_SPAN():
     """⚠ A 300 bp molecule across a 10 kb intron has a 10 kb span. Limiting the span discards every
     spliced fragment — 37.96 % of read groups measured, against 5.45 % when the limit is on ``L``."""
     acc = _acc(junctions=[JUNCTION], max_fragment_length=200)
-    out = acc.deposit(0, 150, 950, introns=[(201, 900)], motif_strand=Strand.POS)
+    out = acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS)
     assert out is DepositOutcome.DEPOSITED, "span 800, L = 101"
-    assert int(acc.tally.junction_count[0, 0]) == 1
+    assert int(acc.tally.sj_count[0, 0]) == 1
 
 
 def test_a_fragment_is_clipped_to_its_reference_and_L_is_the_clipped_length():
@@ -390,7 +389,7 @@ def test_every_accepted_fragment_increments_exactly_ONE_start_count():
     acc = _acc(junctions=[JUNCTION])
     fragments = [(120, 320, ()), (220, 380, ()), (150, 950, [(201, 900)]), (950, 1200, ())]
     accepted = sum(
-        acc.deposit(0, s, e, introns=i, motif_strand=Strand.POS) is DepositOutcome.DEPOSITED
+        acc.deposit(0, s, e, introns=i, sj_strand=Strand.POS) is DepositOutcome.DEPOSITED
         for s, e, i in fragments
     )
     assert accepted == 4
@@ -409,7 +408,7 @@ def test_each_pool_is_reached_only_by_its_own_structural_class():
     acc.deposit(0, 210, 390)  # contained in n3 — intronic
     acc.deposit(0, 380, 420)  # crosses the line at 400 only — flanks intron|exon
     acc.deposit(0, 950, 990)  # contained in n5 — intergenic
-    acc.deposit(0, 150, 950, introns=[(201, 900)], motif_strand=Strand.POS)  # annotated junction
+    acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS)  # annotated junction
     p = acc.tally.pool_lengths
     assert int(p[FragmentPool.DNA_INTERGENIC].sum()) == 2
     assert int(p[FragmentPool.DNA_INTRONIC].sum()) == 1
@@ -430,9 +429,9 @@ def test_an_INFERRED_intron_is_kept_OUT_of_the_pure_RNA_pool():
     """Its splice is a model inference, not an observation, so certifying it as RNA would make the pool
     depend on the very length model it is used to fit."""
     acc = _acc(junctions=[JUNCTION])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], motif_strand=Strand.POS, introns_inferred=True)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS, introns_inferred=True)
     t = acc.tally
-    assert int(t.junction_count[0, 0]) == 1, "it still deposits"
+    assert int(t.sj_count[0, 0]) == 1, "it still deposits"
     assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 0
     assert t.qc["inferred_intron_fragments"] == 1
 
@@ -583,8 +582,8 @@ def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_be
 def test_a_duplicated_intron_credits_its_junction_ONCE():
     """Two mates reporting the same intron is one splice event, not two."""
     acc = _acc(junctions=[JUNCTION])
-    acc.deposit(0, 150, 950, introns=[(201, 900), (201, 900)], motif_strand=Strand.POS)
-    assert int(acc.tally.junction_count[0, 0]) == 1
+    acc.deposit(0, 150, 950, introns=[(201, 900), (201, 900)], sj_strand=Strand.POS)
+    assert int(acc.tally.sj_count[0, 0]) == 1
     assert acc.tally.qc["introns_absorbed"] == 1
 
 
@@ -596,10 +595,10 @@ def test_ABUTTING_introns_are_MALFORMED_and_merge():
     The index cannot produce it either: a zero-length exon is dropped when the exon arrays are built,
     which fuses its two flanking introns into one. Merged here, and counted."""
     acc = _acc(junctions=[(0, 201, 400, Strand.POS), (0, 400, 900, Strand.POS)])
-    acc.deposit(0, 150, 950, introns=[(201, 400), (400, 900)], motif_strand=Strand.POS)
+    acc.deposit(0, 150, 950, introns=[(201, 400), (400, 900)], sj_strand=Strand.POS)
     t = acc.tally
     assert t.qc["introns_absorbed"] == 1
-    assert t.junction_count.sum() == 0, "the merged span 201->900 is not an annotated junction"
+    assert t.sj_count.sum() == 0, "the merged span 201->900 is not an annotated junction"
 
 
 def test_a_wide_overlap_no_longer_discards_a_good_fragment():
@@ -633,21 +632,23 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
     acc = _acc(junctions=[SPAN_JUNCTION_POS])
     acc.deposit(0, 150, 300, align_strand=Strand.NEG)  # unspliced, genome minus
     acc.deposit(  # spliced, genome minus, ANTISENSE to its + junction
-        0, 150, 950, introns=[(400, 900)], align_strand=Strand.NEG, motif_strand=Strand.POS
+        0, 150, 950, introns=[(400, 900)], align_strand=Strand.NEG, sj_strand=Strand.POS
     )
     t = acc.tally
-    assert int(t.node_spanning_count[_node(0, 2), CHANNEL_MINUS]) == 2, "both genome minus"
-    assert int(t.node_spanning_count[_node(0, 2), CHANNEL_PLUS]) == 0
-    assert int(t.junction_count[0, CHANNEL_MINUS]) == 1, "the junction bank too"
+    assert int(t.node_spanning_count[_node(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 2, (
+        "both genome minus"
+    )
+    assert int(t.node_spanning_count[_node(0, 2), STRAND_COLUMNS[Strand.POS]]) == 0
+    assert int(t.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1, "the junction bank too"
 
 
 def test_a_spliced_SENSE_fragment_books_node_AND_junction_by_GENOME_strand():
     """The discriminating case: sense-to-motif would say column 0 for both; genome strand says 1."""
     acc = _acc(junctions=[SPAN_JUNCTION_NEG])
-    acc.deposit(0, 150, 950, introns=[(400, 900)], align_strand=Strand.NEG, motif_strand=Strand.NEG)
+    acc.deposit(0, 150, 950, introns=[(400, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG)
     t = acc.tally
-    assert int(t.junction_count[0, CHANNEL_MINUS]) == 1
-    assert int(t.node_spanning_count[_node(0, 2), CHANNEL_MINUS]) == 1
+    assert int(t.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1
+    assert int(t.node_spanning_count[_node(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -664,7 +665,7 @@ def test_a_spliced_SENSE_fragment_books_node_AND_junction_by_GENOME_strand():
 def test_an_UNDEFINED_align_strand_is_REJECTED_not_silently_booked_as_MINUS(undefined):
     """⛔ The channel IS the genome strand, so a fragment without one has no channel.
 
-    ``genome_channel`` is ``CHANNEL_PLUS if strand == POS else CHANNEL_MINUS``, so every strand that is
+    ``genome_channel`` is ``STRAND_COLUMNS[Strand.POS] if strand == POS else STRAND_COLUMNS[Strand.NEG]``, so every strand that is
     not POS — including NONE and AMBIGUOUS — used to land in the MINUS column. That is not a dropped
     fragment, it is a fragment **credited to the wrong strand**: exactly the class of error the one-strand
     convention exists to delete.
@@ -682,42 +683,75 @@ def test_an_UNDEFINED_align_strand_is_REJECTED_not_silently_booked_as_MINUS(unde
     assert int(t.node_start_count.sum()) == 0, "a rejected fragment never reaches the invariant"
 
 
-def test_an_AMBIGUOUS_motif_strand_MATCHES_its_junction_on_coordinates():
-    """⛔ AMBIGUOUS means *no strand information*, not *a strand that matches nothing*.
+# ── the splice-junction motif strand is a THREE-WAY distinction, not a two-way one ─────────────────
+#
+# ``sj_strand`` is the OR of the per-record ``XS``/``ts`` tag values, so it carries three
+# genuinely different states and each needs its own rule. The original spec had only two, treating
+# AMBIGUOUS as though it were a definite strand:
+#
+#   NONE       no strand tag in the BAM at all  ->  no information; match on coordinates alone
+#   POS / NEG  one definite observed strand      ->  must agree with the junction edge's own strand
+#   AMBIGUOUS  the two mates' tags DISAGREE      ->  contradictory evidence; trust no splice
+#
+# ⚠ NONE must stay permissive. Aligners differ — STAR writes ``XS``, minimap2 writes ``ts``, and some
+# write neither — so on an untagged BAM every spliced fragment arrives with NONE. Requiring a strand
+# there would delete the entire spliced-RNA signal for that aligner.
 
-    ``_junction_of`` filtered with ``motif_strand != NONE and junction_strand != motif_strand``, so a
-    motif strand of AMBIGUOUS matched no junction at all — ``junction_strand`` is only POS or NEG. The
-    fragment then deposited as **unspliced** and credited ``unannotated_introns``, which poisons the one
-    metric whose purpose is measuring annotation coverage, and dropped it from the pure ``RNA_SPLICED``
-    pool the RNA length model is fitted from. Byte-identical to passing a flatly wrong strand.
 
-    The strand filter exists only to disambiguate two junctions sharing a coordinate pair. ⭐ Measured:
-    **0 of 404,168** human junction coordinates are annotated on both strands, so the filter can only ever
-    lose a match, never disambiguate one. The resolver already treats 3 as "either strand"
-    (``sj_lookup_into`` falls back to the union of POS and NEG whenever the strand is neither), so the
-    spec must agree with it.
+def test_a_MISSING_sj_strand_MATCHES_on_coordinates_alone():
+    """⛔ The case that makes untagged aligners work at all, so it is pinned before the two below.
 
-    ⚠ Also reachable today without any change: ``collect_implicit_splice_introns`` stamps each PE gap's
-    intron with the first matching candidate transcript's strand, and the caller ORs them — so a two-gap
-    fragment matching opposite-strand transcripts arrives here with motif_strand = AMBIGUOUS.
+    An aligner that writes neither ``XS`` nor ``ts`` gives every spliced fragment
+    ``sj_strand = NONE``. If the junction lookup demanded a strand, that BAM would lose 100 % of its
+    annotated junctions — and the loss would look like a stale annotation, not a convention bug.
+    """
+    acc = _acc(junctions=[JUNCTION])  # (0, 201, 900, POS)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.NONE)
+    t = acc.tally
+    assert int(t.sj_count[0, STRAND_COLUMNS[Strand.POS]]) == 1
+    assert t.qc["unannotated_introns"] == 0
+    assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 1, "certified RNA"
+
+
+def test_an_AMBIGUOUS_sj_strand_is_CONTRADICTORY_and_credits_NO_junction():
+    """⛔ AMBIGUOUS is contradictory evidence, not missing evidence — and it is neither of the two things
+    the original rule could express.
+
+    ``sj_strand`` is the OR of a per-RECORD tag, so AMBIGUOUS (``POS | NEG``) means **the two mates
+    disagreed about the same molecule**. That is a data-quality signal of the same family as mates agreeing
+    in reference orientation, so the splice must not be trusted: no junction is credited and the fragment
+    deposits on the unspliced channel, which is the safe direction the design already takes for
+    unannotated junctions.
+
+    ⚠ It must NOT be counted as an unannotated intron. That counter's whole purpose is measuring annotation
+    coverage, so feeding it alignment disagreements makes the metric report a stale annotation whenever the
+    aligner is inconsistent. It gets its own denominator.
+
+    ⚠ Reachable today with no change of ours: ``collect_implicit_splice_introns`` stamps each PE gap's
+    intron with the first matching candidate transcript's strand and the caller ORs them, so a two-gap
+    fragment matching opposite-strand transcripts arrives here as AMBIGUOUS.
     """
     acc = _acc(junctions=[JUNCTION])  # (0, 201, 900, POS)
     outcome = acc.deposit(
-        0, 150, 950, introns=[(201, 900)], align_strand=Strand.POS, motif_strand=Strand.AMBIGUOUS
+        0, 150, 950, introns=[(201, 900)], align_strand=Strand.POS, sj_strand=Strand.AMBIGUOUS
     )
     t = acc.tally
-    assert outcome is DepositOutcome.DEPOSITED
-    assert int(t.junction_count[0, CHANNEL_PLUS]) == 1, "matched on coordinates alone"
+    assert outcome is DepositOutcome.DEPOSITED, "the fragment is real; only its splice is untrusted"
+    assert int(t.sj_count.sum()) == 0
+    assert t.qc["contradictory_sj_strand"] == 1
     assert t.qc["unannotated_introns"] == 0, "the annotation-coverage metric must not be poisoned"
-    assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 1, "still pure RNA"
+    assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 0, "not certified RNA"
+    assert int(t.edge_unspliced_count.sum()) > 0, "it competes with gDNA, the safe direction"
 
 
-def test_a_DEFINITE_but_WRONG_motif_strand_still_misses():
-    """The other half of the contract, so the fix above cannot be over-applied: a definite strand that
-    disagrees with the junction is a real disagreement and must NOT match."""
+def test_a_DEFINITE_but_WRONG_sj_strand_still_misses():
+    """The third arm, so the rule above cannot be over-applied: a definite strand that disagrees with the
+    junction edge's own strand is a real disagreement, and it IS an unannotated intron — that coordinate
+    pair is not annotated on the strand it was observed on."""
     acc = _acc(junctions=[JUNCTION])  # (0, 201, 900, POS)
-    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, motif_strand=Strand.NEG)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG)
     t = acc.tally
-    assert int(t.junction_count.sum()) == 0
+    assert int(t.sj_count.sum()) == 0
     assert t.qc["unannotated_introns"] == 1
-    assert int(t.node_spanning_count[_node(0, 2), CHANNEL_PLUS]) == 0
+    assert t.qc["contradictory_sj_strand"] == 0
+    assert int(t.node_spanning_count[_node(0, 2), STRAND_COLUMNS[Strand.POS]]) == 0
