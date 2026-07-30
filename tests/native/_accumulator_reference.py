@@ -63,6 +63,7 @@ __all__ = [
     "Tally",
     "density_quantum",
     "genome_channel",
+    "is_genome_strand",
 ]
 
 #: ⭐ THE STRAND CONVENTION, and it is the same one everywhere in this file.
@@ -79,9 +80,33 @@ CHANNEL_PLUS, CHANNEL_MINUS = 0, 1
 N_STRANDS = 2
 
 
+def is_genome_strand(strand: int) -> bool:
+    """Whether ``strand`` names one genome strand, i.e. is neither absent nor both.
+
+    ``Strand`` has OR semantics — ``POS | NEG == AMBIGUOUS`` — so "not POS" is **not** the same as "NEG",
+    and a fragment can arrive carrying no strand or carrying both.
+    """
+    return strand == Strand.POS or strand == Strand.NEG
+
+
 def genome_channel(strand: int) -> int:
-    """The channel index for a fragment aligned to genome strand ``strand``."""
-    return CHANNEL_PLUS if strand == Strand.POS else CHANNEL_MINUS
+    """The channel index for a fragment aligned to genome strand ``strand``.
+
+    ⚠ Raises unless the strand is exactly POS or NEG. This used to be
+    ``CHANNEL_PLUS if strand == Strand.POS else CHANNEL_MINUS``, which silently booked a fragment with
+    **no** strand, or with **both**, into the minus column — not a dropped fragment but one *credited to
+    the wrong strand*, which is the class of error the single convention exists to delete. The caller must
+    reject such a fragment (:attr:`DepositOutcome.STRAND_UNDEFINED`) rather than ask for its channel.
+    """
+    if strand == Strand.POS:
+        return CHANNEL_PLUS
+    if strand == Strand.NEG:
+        return CHANNEL_MINUS
+    raise ValueError(
+        f"no genome channel for strand {strand!r}: the channel axis IS the genome strand, so a fragment "
+        f"that has none (NONE) or both (AMBIGUOUS) has no column. Reject it with "
+        f"DepositOutcome.STRAND_UNDEFINED instead of choosing one."
+    )
 
 
 #: Densities accumulate as ``round(DENSITY_SCALE / placements)`` in uint64. Integer addition is
@@ -109,6 +134,11 @@ class DepositOutcome(enum.Enum):
     DEPOSITED = "deposited"
     TOO_LONG = "dropped_too_long"
     EMPTY = "dropped_empty"
+    #: The fragment has no single genome strand — NONE, or AMBIGUOUS (``POS | NEG``, which
+    #: ``build_fragment`` produces when the mates agree in reference orientation). The channel axis IS the
+    #: genome strand, so there is no column to credit. Required by design §10.3, which lists
+    #: strand-undefined fragments among the denominators the accumulator must emit.
+    STRAND_UNDEFINED = "dropped_strand_undefined"
 
 
 class FragmentPool(enum.IntEnum):
@@ -417,6 +447,13 @@ class Accumulator:
         rather than observed: it deposits normally but is barred from the pure-RNA length pool, because
         its splice is a product of the very model that pool is used to fit.
         """
+        # ⚠ Checked FIRST, and before any geometry: the strand is a property of the fragment alone, and a
+        # fragment with no single genome strand has no column in any bank. The old scanner gate at
+        # `bam_scanner.cpp:1474-1480` did this before the accumulator ever saw the fragment; moving it in
+        # here is what lets the loss be COUNTED instead of vanishing.
+        if not is_genome_strand(align_strand):
+            return self._reject(DepositOutcome.STRAND_UNDEFINED)
+
         p = self.partition
         first_cut, last_cut = int(p.ref_cut_offsets[ref]), int(p.ref_cut_offsets[ref + 1])
         if last_cut - first_cut < 2:
@@ -548,7 +585,17 @@ class Accumulator:
         for k in range(int(p.junction_offsets[donor]), int(p.junction_offsets[donor + 1])):
             if int(p.junction_acceptor_cut[k]) != acceptor:
                 continue
-            if motif_strand != Strand.NONE and int(p.junction_strand[k]) != int(motif_strand):
+            # ⚠ The strand filter applies only when the motif strand is DEFINITE. AMBIGUOUS means "no
+            # strand information", not "a strand that matches nothing" — it used to be treated as the
+            # latter, which silently demoted an annotated spliced fragment to an unspliced deposit,
+            # credited `unannotated_introns` (poisoning the one metric that measures annotation coverage),
+            # and dropped it from the pure RNA pool the length model is fitted from.
+            #
+            # The filter exists only to separate two junctions sharing a coordinate pair. ⭐ Measured: 0 of
+            # 404,168 human junction coordinates are annotated on both strands, so it can only ever lose a
+            # match, never disambiguate one. The resolver already reads a non-definite strand as "either"
+            # (`sj_lookup_into` falls back to the union of POS and NEG), so this agrees with it.
+            if is_genome_strand(motif_strand) and int(p.junction_strand[k]) != int(motif_strand):
                 continue
             return k
         return -1

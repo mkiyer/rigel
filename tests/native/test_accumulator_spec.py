@@ -648,4 +648,76 @@ def test_a_spliced_SENSE_fragment_books_node_AND_junction_by_GENOME_strand():
     t = acc.tally
     assert int(t.junction_count[0, CHANNEL_MINUS]) == 1
     assert int(t.node_spanning_count[_node(0, 2), CHANNEL_MINUS]) == 1
+
+
+# ---------------------------------------------------------------------------
+# a strand that is not a strand
+# ---------------------------------------------------------------------------
+#
+# ⛔ Both cases below were found by an adversarial read of this spec before any C++ followed it, and both
+# were confirmed by execution. They exist because `deposit` inherited no equivalent of the scanner's gate
+# at ``bam_scanner.cpp:1474-1480``, which used to reject an undefined strand before the old accumulator
+# ever saw it.
+
+
+@pytest.mark.parametrize("undefined", [Strand.NONE, Strand.AMBIGUOUS])
+def test_an_UNDEFINED_align_strand_is_REJECTED_not_silently_booked_as_MINUS(undefined):
+    """⛔ The channel IS the genome strand, so a fragment without one has no channel.
+
+    ``genome_channel`` is ``CHANNEL_PLUS if strand == POS else CHANNEL_MINUS``, so every strand that is
+    not POS — including NONE and AMBIGUOUS — used to land in the MINUS column. That is not a dropped
+    fragment, it is a fragment **credited to the wrong strand**: exactly the class of error the one-strand
+    convention exists to delete.
+
+    ⚠ AMBIGUOUS is reachable in production, not hypothetical: ``build_fragment`` keys blocks by
+    ``(ref, strand)``, so mates agreeing in reference orientation give ``align_strand = POS|NEG``.
+    The design already requires the count (§10.3 lists strand-undefined fragments as a QC denominator the
+    accumulator must emit); it was simply missing.
+    """
+    acc = _acc()
+    assert acc.deposit(0, 150, 300, align_strand=undefined) is DepositOutcome.STRAND_UNDEFINED
+    t = acc.tally
+    assert t.qc["dropped_strand_undefined"] == 1
+    assert int(t.node_contained_count.sum()) == 0, "must not be booked into either column"
+    assert int(t.node_start_count.sum()) == 0, "a rejected fragment never reaches the invariant"
+
+
+def test_an_AMBIGUOUS_motif_strand_MATCHES_its_junction_on_coordinates():
+    """⛔ AMBIGUOUS means *no strand information*, not *a strand that matches nothing*.
+
+    ``_junction_of`` filtered with ``motif_strand != NONE and junction_strand != motif_strand``, so a
+    motif strand of AMBIGUOUS matched no junction at all — ``junction_strand`` is only POS or NEG. The
+    fragment then deposited as **unspliced** and credited ``unannotated_introns``, which poisons the one
+    metric whose purpose is measuring annotation coverage, and dropped it from the pure ``RNA_SPLICED``
+    pool the RNA length model is fitted from. Byte-identical to passing a flatly wrong strand.
+
+    The strand filter exists only to disambiguate two junctions sharing a coordinate pair. ⭐ Measured:
+    **0 of 404,168** human junction coordinates are annotated on both strands, so the filter can only ever
+    lose a match, never disambiguate one. The resolver already treats 3 as "either strand"
+    (``sj_lookup_into`` falls back to the union of POS and NEG whenever the strand is neither), so the
+    spec must agree with it.
+
+    ⚠ Also reachable today without any change: ``collect_implicit_splice_introns`` stamps each PE gap's
+    intron with the first matching candidate transcript's strand, and the caller ORs them — so a two-gap
+    fragment matching opposite-strand transcripts arrives here with motif_strand = AMBIGUOUS.
+    """
+    acc = _acc(junctions=[JUNCTION])  # (0, 201, 900, POS)
+    outcome = acc.deposit(
+        0, 150, 950, introns=[(201, 900)], align_strand=Strand.POS, motif_strand=Strand.AMBIGUOUS
+    )
+    t = acc.tally
+    assert outcome is DepositOutcome.DEPOSITED
+    assert int(t.junction_count[0, CHANNEL_PLUS]) == 1, "matched on coordinates alone"
+    assert t.qc["unannotated_introns"] == 0, "the annotation-coverage metric must not be poisoned"
+    assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 1, "still pure RNA"
+
+
+def test_a_DEFINITE_but_WRONG_motif_strand_still_misses():
+    """The other half of the contract, so the fix above cannot be over-applied: a definite strand that
+    disagrees with the junction is a real disagreement and must NOT match."""
+    acc = _acc(junctions=[JUNCTION])  # (0, 201, 900, POS)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, motif_strand=Strand.NEG)
+    t = acc.tally
+    assert int(t.junction_count.sum()) == 0
+    assert t.qc["unannotated_introns"] == 1
     assert int(t.node_spanning_count[_node(0, 2), CHANNEL_PLUS]) == 0
