@@ -372,26 +372,38 @@ def _wire_calibration_regions(
     index: TranscriptIndex,
     max_frag_length: int,
 ) -> None:
-    """Install the index's v8 node partition into a native BamScanner.
+    """Install the index's v8 splice graph into a native BamScanner: the node partition, then the junctions.
 
-    Uses :func:`rigel.calibration.splice_graph.build_node_partition_arrays` to
-    flatten the per-reference partition into the ``(boundary_positions,
-    ref_pos_offsets, n_refs, region_types, fl_max_size)`` ABI expected by
-    ``BamScanner.set_regions``. The partition is built from ``index.nodes_df``
-    (the splice graph) and ordered to match ``index.ref_names`` (which in turn
-    matches the resolver's reference-id space). ``region_types`` +
-    ``max_frag_length`` enable the gDNA FL pools (PR 4c).
+    :func:`~rigel.calibration.splice_graph.build_node_partition_arrays` flattens the per-reference
+    partition into the ``(cut_positions, ref_cut_offsets, n_refs, node_types, max_length)`` ABI, and
+    :func:`~rigel.calibration.splice_graph.build_junction_edge_arrays` builds the junction CSR keyed by the
+    flat cut index. Both are derived from ``index.nodes_df``/``index.edges_df`` and ordered to match
+    ``index.ref_names``, which is the resolver's reference-id space.
+
+    ⚠ **Two calls, and both are required.** ``set_regions`` refuses to run twice, which is why the junctions
+    are separate; and ``scan`` refuses to run if the second call is missing, because a missing junction table
+    is invisible — every observed intron would simply read as unannotated, so all 404,168 junction edges and
+    both spliced banks would come back empty from a scan that looked perfectly well-formed.
     """
-    from .calibration.splice_graph import build_node_partition_arrays
+    from .calibration.splice_graph import build_junction_edge_arrays, build_node_partition_arrays
 
-    boundary_positions, ref_pos_offsets, region_types = build_node_partition_arrays(index)
+    cut_positions, ref_cut_offsets, node_types = build_node_partition_arrays(index)
     n_refs = len(index.ref_names)
     scanner.set_regions(
-        np.ascontiguousarray(boundary_positions, dtype=np.int64),
-        np.ascontiguousarray(ref_pos_offsets, dtype=np.int64),
+        np.ascontiguousarray(cut_positions, dtype=np.int64),
+        np.ascontiguousarray(ref_cut_offsets, dtype=np.int64),
         n_refs,
-        np.ascontiguousarray(region_types, dtype=np.uint8),
+        np.ascontiguousarray(node_types, dtype=np.uint8),
         int(max_frag_length),
+    )
+    # ⚠ ``edge_row`` is deliberately NOT passed. It is a join key back to ``index.edges_df``, not the
+    # junction-edge id — that IS the CSR slot — and using it to index a junction bank would write 1.04 M
+    # rows past the end of a 404,168-entry array.
+    junctions = build_junction_edge_arrays(index)
+    scanner.set_junctions(
+        np.ascontiguousarray(junctions.offsets, dtype=np.int64),
+        np.ascontiguousarray(junctions.acceptor_cut, dtype=np.int64),
+        np.ascontiguousarray(junctions.strand, dtype=np.int8),
     )
 
 

@@ -816,13 +816,30 @@ public:
     /// the matched introns so the accumulator can cut them out of the span and
     /// orient the spliced channel (the splice motif itself was not sequenced).
     /// Introns are emitted in genomic (gap) order, so the output is sorted.
+    ///
+    /// ⛔ `out_ambiguous` is set when the candidate transcripts do NOT all imply the same intron set, in
+    /// which case `out_introns` is one arbitrary candidate's answer and must not be tallied (design §9.1).
+    /// The emitted list is only trustworthy when this is false.
+    ///
+    /// ⚠ The test is per gap but it IS the set test, because two vectors are equal exactly when they
+    /// agree component-wise — provided "this transcript implies nothing here" counts as a value. It must:
+    /// without it, a transcript implying an intron only in gap A and another only in gap B would read as
+    /// unanimous, and the emitted union would be a path **no single molecule has**. That union is what
+    /// the per-gap `break` below builds, so this is the check that makes the emission meaningful rather
+    /// than a chimera of two transcripts.
+    ///
+    /// ⚠ The classification is deliberately unchanged: this still returns non-empty on exactly the same
+    /// fragments, so `SPLICE_IMPLICIT` does not move. It is consumed widely (`scoring.cpp`, the buffer,
+    /// the stats); only the accumulator reads `out_ambiguous`.
     bool collect_implicit_splice_introns(
         const std::vector<ExonBlock>& exons,
         const std::vector<int32_t>& candidate_t,
         ResolverScratch& scratch,
-        std::vector<IntronBlock>& out_introns) const
+        std::vector<IntronBlock>& out_introns,
+        bool& out_ambiguous) const
     {
         out_introns.clear();
+        out_ambiguous = false;
         if (exons.size() < 2 || candidate_t.empty() || !has_exon_index()) {
             return false;
         }
@@ -863,16 +880,53 @@ public:
         if (gaps.empty()) return false;
 
         const int32_t K = splicing_anchor_tolerance_;
+        // ⛔ SYNTHETIC ROWS ARE NOT CANDIDATE ISOFORMS AND MUST BE EXCLUDED FROM THE UNANIMITY TEST.
+        // Every gene carries a synthetic nascent shadow transcript spanning its whole locus as ONE exon, so
+        // that row implies no intron in any gap, always. Counting it as a dissenting candidate makes the
+        // test unsatisfiable: ⭐ measured, it deferred **100 %** of implicit fragments on all three real
+        // cfRNA libraries and deposited none. And it conflates two different questions — "which intron did
+        // this molecule splice?" (what this test is for) with "was this molecule nascent?" (a COMPONENT,
+        // which the accumulator deliberately does not decide: RNA is RNA).
+        //
+        // ⚠ The filter is `~is_synthetic` ALONE, which is what `t_is_nrna_` actually holds despite its name
+        // (`pipeline.py` fills it from the `is_synthetic` column). Never `is_nrna`: on a non-synthetic row
+        // that flag means "single-exon, so mature == nascent", and using it as a realness filter has
+        // already deleted the termini of 26,475 real transcripts once.
+        //
+        // ⚠ The EMISSION is unaffected either way — a synthetic shadow is single-exon, so it can never be
+        // the first match — which is what keeps `SPLICE_IMPLICIT` classification exactly where it was.
+        const uint8_t* synthetic = nrna_mask();
+        auto is_real = [&](int32_t t) {
+            return synthetic == nullptr || t < 0 ||
+                   t >= static_cast<int32_t>(t_is_nrna_.size()) || synthetic[t] == 0;
+        };
         for (const GapBlock& gap : gaps) {
+            // The two states a candidate can put this gap in: it implies nothing, or it implies one
+            // intron. Unanimity means every candidate lands in the SAME one, so both are tracked -- a
+            // "first match wins" scan cannot see a candidate that implied nothing BEFORE the first match.
+            bool    seen_none = false, seen_intron = false;
+            int32_t seen_start = 0, seen_end = 0;
             for (int32_t t : candidate_t) {
+                if (!is_real(t)) continue;
                 int32_t is = 0, ie = 0;
-                if (transcript_has_implicit_intron_in_gap(t, gap.start, gap.end, K, &is, &ie)) {
+                if (!transcript_has_implicit_intron_in_gap(t, gap.start, gap.end, K, &is, &ie)) {
+                    seen_none = true;  // a retained-intron isoform: an UNSPLICED L for the same fragment
+                } else if (!seen_intron) {
                     const int32_t strand =
                         (t >= 0 && t < static_cast<int32_t>(t_strand_arr_.size()))
                             ? t_strand_arr_[t]
                             : STRAND_NONE;
-                    out_introns.push_back({gap.ref_id, is, ie, strand});
-                    break;  // one intron per gap (the gap tightly bounds it)
+                    out_introns.push_back({gap.ref_id, is, ie, strand});  // the emission is unchanged
+                    seen_intron = true;
+                    seen_start = is;
+                    seen_end = ie;
+                } else if (is != seen_start || ie != seen_end) {
+                    out_ambiguous = true;
+                    break;
+                }
+                if (seen_none && seen_intron) {
+                    out_ambiguous = true;
+                    break;
                 }
             }
         }
@@ -1395,7 +1449,7 @@ public:
         if (cr.splice_type == SPLICE_UNSPLICED &&
             cr.chimera_type == CHIMERA_NONE &&
             collect_implicit_splice_introns(exons, cr.t_inds, scratch,
-                                            cr.implicit_introns)) {
+                                            cr.implicit_introns, cr.implicit_ambiguous)) {
             cr.splice_type = SPLICE_IMPLICIT;
         }
 

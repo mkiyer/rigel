@@ -93,11 +93,22 @@ molecule) and broken by *introns* (excised, not part of the molecule).
 | intron detection | source | trust |
 |---|---|---|
 | **observed** | a CIGAR `N` operation | high |
-| **inferred** | `SPLICE_IMPLICIT` — an intron sits in the unsequenced mate gap, and the fragment length is otherwise incompatible with the fitted length distribution | **lower — mark it** |
+| **implicit** | `SPLICE_IMPLICIT` — an intron sits in the unsequenced mate gap, and the fragment length is otherwise incompatible with the fitted length distribution | **lower — mark it** |
 
-⚠ An inferred intron must be flagged, and a fragment carrying one **must not enter the pure-RNA pool**
-(§8): its splice is a model inference, not an observation, so certifying it as RNA would make the pool
-depend on the thing it is used to estimate.
+⚠ An implicit splice must be flagged (`sj_implicit`), and a fragment carrying one **must not enter the
+pure-RNA pool** (§8): its splice is a model inference, not an observation, so certifying it as RNA would
+make the pool depend on the thing it is used to estimate.
+
+⭐ **ONE WORD FOR IT: `sj_implicit`** (owner ruling, 2026-07-29). The type is already `SPLICE_IMPLICIT`
+and `sj_` is already the codebase's prefix for a splice-junction attribute (`sj_strand`, `sj.feather`,
+`sj_map`, `SJKey`, `sj_lookup_into`), so a `FragmentPath` carries `sj_strand` and `sj_implicit` — two
+attributes of one splice under one prefix. The earlier `introns_inferred` / `inferred_intron_fragments`
+were a **second** word for a concept that already had one, which is the mistake `sj_strand` was renamed
+to fix. *Inferred* is gone from the vocabulary.
+
+⛔ **`sj_implicit` is NOT a doubt about the path.** It says the splice was not sequenced. A fragment
+whose candidate transcripts imply **different intron sets** has no determined `L` at all — that is
+`path_ambiguous` (§9), a rejection rather than a flag on a deposit.
 
 ⚠ `L` must **not** be the sum of aligned block lengths. That drops the mate gap, which is part of the
 molecule, and collapses the length distribution to a spike at twice the read length.
@@ -578,8 +589,8 @@ in §6. MO_3021 gives 118.4 / 124.1 against 203.3, a 1.7× separation: real, and
 Why these five and no others:
 
 * **junction fragments are pure RNA** — gDNA cannot be spliced. ⭐ Mature RNA crosses an exon↔intron seam
-  0 times in 1,146 seams. ⚠ Excluding `SPLICE_IMPLICIT` fragments (§3.1), whose splice is inferred, not
-  observed — certifying those as RNA would make the pool depend on the model it is used to fit.
+  0 times in 1,146 seams. ⚠ Excluding `sj_implicit` fragments (§3.1), whose splice was never sequenced —
+  certifying those as RNA would make the pool depend on the model it is used to fit.
 * **intergenic and intronic contained fragments are pure gDNA** — ~99 % accurate on real data, the
   standing assumption of the tool.
 * **the two splash pools are the only *on-target* gDNA population** (§8.2), so they are named rather than
@@ -660,6 +671,58 @@ A fragment compatible with several paths (ambiguous junction assignment) or seve
 to a **side buffer** of `(candidate object ids, channel, L)`. After the first pass, when the length models
 and per-path densities exist, each is assigned by **multinomial probability across the matching paths**.
 
+### 9.1 ⭐ The third population: an implicit splice whose intron set is not determined (owner ruling, 2026-07-29)
+
+`SPLICE_IMPLICIT` fragments **do deposit** — an implicit splice overlaps an annotated intron and matches
+in every other way, so the only thing missing is that the splice motif was not sequenced. `sj_strand` is
+then inferred from the implying transcript, which is reasonable **iff there is only one of them**.
+
+⛔ **When several candidate transcripts imply DIFFERENT INTRON SETS the path is not determined, and
+nothing about the fragment can be tallied in the first pass.** The implied intron set fixes `L`, both
+density quanta, the pool bin, the segment list, and therefore *which lines the fragment crosses*. There is
+no partial answer to fall back on:
+
+* it cannot deposit **spliced**, because which junction it used is the unknown;
+* it cannot deposit **unspliced** either — `L` "involves an intron", so it does not fit the fragment-length
+  distribution unless one of the candidate introns is cut out, which is the very choice in doubt. Only
+  breaking the molecule into its aligned blocks and depositing each separately would avoid committing,
+  and that discards the mate gap `L` depends on;
+* and it must not be *forced* — picking one compatible transcript is choosing an `L` at random.
+
+⭐ **The test is on distinct intron SETS, per candidate transcript** — not per gap, and not on `L`. Per gap
+is wrong because a union of per-gap matches can take gap A's intron from transcript T1 and gap B's from
+T2, producing a path **no single molecule has**; and `L` is too weak a key, because two introns of equal
+length at different positions give the same `L` but different segments and hence different crossings.
+⚠ The **empty** set counts as a distinct hypothesis: if some candidates imply an intron and others do not
+(a retained-intron isoform), the fragment is ambiguous between a spliced `L` and an unspliced one.
+
+So the rule is: **deposit iff the candidate transcripts yield exactly one distinct implied intron set;
+otherwise the fragment is `path_ambiguous`** — it deposits on no object, leaves `start_count` untouched,
+and is counted on its own denominator until the side buffer drains it. The second pass can then resolve it
+exactly as it resolves a multimapper, and with more to go on: **the fragment length and the strand both
+discriminate between the candidate transcripts.**
+
+⛔ **The candidates are the REAL transcripts — `~is_synthetic`, alone.** Every gene carries a synthetic
+nascent shadow transcript spanning its locus as one exon, so that row implies no intron in any gap, ever.
+Counting it as a dissenting candidate makes the test unsatisfiable: ⭐ measured, it deferred **100 % of
+implicit fragments on all three real cfRNA libraries and deposited none.** It also conflates two different
+questions — *which intron did this molecule splice?*, which is what the test is for, with *was this molecule
+nascent?*, which is a **component** and one the accumulator deliberately does not decide. ⚠ The filter is
+`~is_synthetic` and never `is_nrna`: on a non-synthetic row that flag means "single-exon, so mature ≡
+nascent", and using it as a realness filter has already deleted the termini of 26,475 real transcripts once
+(`CARRY_FORWARD.md` §3 trap 3).
+
+⭐ **The set test is the WHOLE test — it already implies the candidates agree on strand**, so there is no
+second condition and no code for one. If every candidate implies the same intron at every gap, then every
+candidate implies the *whole* set, so the first candidate that matches a gap is the same transcript at
+every gap, and the strand is that one transcript's. A separate strand check could therefore never fire.
+(An earlier statement of this ruling carried one; it was redundant, and a condition that cannot fire is a
+line a later reader has to disprove.)
+
+⭐ And the ruling *deleted* a special case rather than adding one. A strand-coincident implied intron
+defers with everything else, so `contradictory_sj_strand` keeps its original and narrow meaning — the
+**mates' motif tags disagreed about an observed splice** — and is unreachable for an implicit one.
+
 ⚠ **The assignment must be integral** — one fragment, one path. A fractional `1/NH` split re-creates the
 non-integer observable this redesign exists to delete, and is provably biased for any second-moment
 statistic.
@@ -671,7 +734,8 @@ integral, single-pass, unbiased in aggregate, and free of the winner-take-all bi
 introduce at a 51/49 locus. Sampling would be unbiased per fragment but would make the accumulator
 non-reproducible; iterated ML would add a layer this tool does not need.
 
-Until this phase lands, multimappers do not deposit — and the accumulator must **emit that denominator**,
+Until this phase lands, multimappers and `path_ambiguous` fragments do not deposit — and the accumulator
+must **emit both denominators**,
 because the loss is not uniform. ⭐ Measured multimapper share of intergenic fragments: **59.3 %
 (LBX0190) / 39.5 % (MO_3021) / 20.2 % (vcap) / 16.7 % (LBX0588)** — library-dependent, with LBX0190 (by
 far the smallest library) the extreme. Intronic is **~53.6 %**. Either way the gate thins the pure gDNA
@@ -733,16 +797,17 @@ at boundaries — the structural gDNA/RNA signal. The count is kept as an invari
 
 Not optional, and not derivable afterwards: **dropped multimappers · chimeras · fragments over the length
 limit · blacklisted junctions · strand-undefined fragments · side-buffered ambiguous fragments ·
-unannotated-junction rate · inferred-intron (`SPLICE_IMPLICIT`) rate · measured strandedness · duplicate
-assertion**. Every conservation statement must name its denominator.
+unannotated-junction rate · implicit-splice (`sj_implicit`) rate · **ambiguous-path fragments** ·
+measured strandedness · duplicate assertion**. Every conservation statement must name its denominator.
 
 ### 10.4 The test matrix
 
 Written before the code, each a named case: contained → node only · 4-node crossing → exactly 3 edges ·
 fragment spanning a 1 bp node → both flanking edges **and** that node's spanning counter, contained
 untouched · **spliced → junction edge only, no deposit on the contiguous edges it splices over** ·
-zero-length intron · paired-end mate gap crossing a line → *does* count · inferred intron marked and
-excluded from the RNA pool · unannotated junction → unspliced channel · fragment over the length limit →
+zero-length intron · paired-end mate gap crossing a line → *does* count · `sj_implicit` marked and
+excluded from the RNA pool · **`path_ambiguous` → no deposit anywhere, its own QC denominator, and
+`start_count` untouched** · unannotated junction → unspliced channel · fragment over the length limit →
 no deposit anywhere, QC incremented · clipping at a reference end · single-node reference · opposite-strand
 junctions at identical coordinates are distinct edges · N workers → bit-identical · uniform density
 recovered within [0.98, 1.02] · `Σ1/(L−1)` within [0.98, 1.02] **with no length model supplied**.
@@ -784,6 +849,7 @@ Nothing is reimplemented, so nothing can be subtly wrong.
 | **storage** | counts `uint32`; densities `uint64` fixed point `round(2^32/weight)` |
 | **spanning** | store count and density |
 | **multimappers / ambiguous paths** | side buffer, deterministic largest-remainder apportionment, **a later phase** |
+| **implicit splices** | ⭐ **they deposit**, with `sj_strand` inferred from the implying transcript and `sj_implicit` set, **iff the candidates imply exactly one intron set and agree on strand**. Otherwise `path_ambiguous` → side buffer (§9.1) |
 | **optimisation** | aggressive, after implementation and accuracy |
 | **strand** | ⭐ **ONE convention: genome strand, everywhere** (§5.1). Sense/antisense is derived, never stored |
 | **minimum intron length** | **none — every CIGAR `N` is an intron** (A, below) |

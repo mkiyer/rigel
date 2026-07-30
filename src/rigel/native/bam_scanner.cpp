@@ -388,15 +388,26 @@ struct WorkerState {
     // region partition was provided.
     std::unique_ptr<rigel::accumulator::AccumulatorSet> acc_set;
 
-    // Reusable scratch for fragment_genomic_spans → deposit (the accumulator
-    // span redesign). Cleared and refilled per fragment; capacity amortizes to
-    // the high-water block count, so the deposit path allocates no per-fragment
-    // memory. Bounded by the fragment's block count (#spans <= #blocks).
-    std::vector<int32_t> span_ref;
-    std::vector<int64_t> span_start;
-    std::vector<int64_t> span_end;
+    // Reusable scratch so the deposit path allocates no per-fragment memory. ⭐ Measured on the shipped
+    // accumulator: one per-fragment std::vector cost 22.8 ns, 18 % of the deposit, and was invisible to a
+    // sampling profiler because the time is attributed to `malloc`. Capacity amortizes to the high-water
+    // mark and is never released.
+    //
+    // Two buffers, because they belong to two different owners. `deposit_scratch` is the accumulator's
+    // (normalised introns, path segments, junction ids) and is opaque here. `deposit_introns` is the
+    // ADAPTER's: the fragment's introns restricted to the reference being deposited and de-duplicated,
+    // which is what `FragmentPath::introns` points at.
+    //
+    // ⛔ That restriction is mandatory, not tidiness. `Accumulator::deposit` normalises introns by
+    // coordinate alone — it never looks at `IntronBlock::ref_id` — so an intron from another reference
+    // would be cut out of this reference's path. `fragment_genomic_spans` filtered by ref explicitly; the
+    // filter has to survive its deletion. Multi-reference fragments DO arrive here: the intergenic call
+    // site is not chimera-gated, and `detect_chimera` returns CHIMERA_NONE when the blocks carry empty
+    // transcript sets.
+    rigel::accumulator::DepositScratch deposit_scratch;
+    std::vector<IntronBlock>           deposit_introns;
 
-    WorkerState(int32_t n_transcripts, int64_t /*n_regions*/)
+    WorkerState(int32_t n_transcripts, int64_t /*unused*/)
         : scratch(n_transcripts) {}
 };
 
@@ -733,67 +744,6 @@ static AssembledFragment build_fragment(
 }
 
 // ================================================================
-// fragment_genomic_spans — the molecule's contiguous genomic extent
-// ================================================================
-//
-// Decompose a fragment's aligned blocks into the contiguous genomic span(s) the
-// MOLECULE occupies: per reference, the full extent [min block start, max block
-// end] MINUS the cut introns it splices out. This deposits the molecule (insert
-// gap filled) rather than the sequenced read blocks, removing the paired-end
-// over-count at its source. See docs/CARRY_FORWARD.md.
-//
-// Requires `blocks` sorted by (ref_id, start) — build_fragment guarantees this —
-// and `cut_introns` sorted by start within each reference (std::set order). The
-// number of spans is at most blocks.size(). Outputs are cleared then filled, so
-// the caller's vectors are reused across fragments with no per-fragment alloc.
-// A different ref_id always starts a new span, so no span bridges references.
-static void fragment_genomic_spans(
-    const std::vector<ExonBlock>& blocks,
-    const std::vector<IntronBlock>& cut_introns,
-    std::vector<int32_t>& out_ref,
-    std::vector<int64_t>& out_start,
-    std::vector<int64_t>& out_end)
-{
-    out_ref.clear();
-    out_start.clear();
-    out_end.clear();
-    const std::size_t n = blocks.size();
-    std::size_t bi = 0;
-    while (bi < n) {
-        const int32_t ref = blocks[bi].ref_id;
-        int64_t lo = blocks[bi].start;
-        int64_t hi = blocks[bi].end;
-        std::size_t bj = bi;
-        for (; bj < n && blocks[bj].ref_id == ref; ++bj) {
-            lo = std::min<int64_t>(lo, blocks[bj].start);
-            hi = std::max<int64_t>(hi, blocks[bj].end);
-        }
-        if (hi > lo) {
-            // Subtract the cut introns overlapping [lo, hi) on this reference.
-            int64_t pos = lo;
-            for (const auto& c : cut_introns) {
-                if (c.ref_id != ref) continue;
-                const int64_t c0 = std::max<int64_t>(c.start, lo);
-                const int64_t c1 = std::min<int64_t>(c.end, hi);
-                if (c1 <= c0) continue;  // no overlap with the extent
-                if (c0 > pos) {
-                    out_ref.push_back(ref);
-                    out_start.push_back(pos);
-                    out_end.push_back(c0);
-                }
-                pos = std::max(pos, c1);
-            }
-            if (pos < hi) {
-                out_ref.push_back(ref);
-                out_start.push_back(pos);
-                out_end.push_back(hi);
-            }
-        }
-        bi = bj;
-    }
-}
-
-// ================================================================
 // Hit grouping — ports _group_records_by_hit from bam.py
 // ================================================================
 
@@ -1061,13 +1011,20 @@ public:
     StrandObservations strand_obs_;
     FragLenObservations fraglen_obs_;
 
-    // Calibration region partition (set via set_regions; optional).
-    // One Accumulator per BAM reference; deposits happen into a per-worker
-    // copy during scan(), then are merged back here.
-    std::vector<int64_t> boundary_positions_;
-    std::vector<int64_t> ref_pos_offsets_;
-    std::vector<uint8_t> region_types_;   // PR 4c: per-region FL-pool type (R_total)
-    int                  fl_max_size_ = 0;  // PR 4c: FL histogram max bin (0 = off)
+    // The accumulator's node partition, installed by set_regions() and the junction CSR by
+    // set_junctions(). One Accumulator per BAM reference; deposits go into a per-worker copy during
+    // scan() and are merged back here.
+    //
+    // ⚠ These are MEMBERS because the per-worker sets are built from them inside scan(). Anything
+    // installed after that point is invisible to the workers, which is a silent half-empty tally.
+    std::vector<int64_t> cut_positions_;
+    std::vector<int64_t> ref_cut_offsets_;
+    std::vector<uint8_t> node_types_;      // coarse node type, ref-major, one per node
+    int                  max_length_ = 0;  // the fragment-length limit AND the pool-histogram width
+    std::vector<int64_t> sj_offsets_;       // n_cuts + 1, CSR over the flat cut axis
+    std::vector<int64_t> sj_acceptor_cut_;  // flat cut index of each junction's high end
+    std::vector<int8_t>  sj_strand_;        // each junction's ANNOTATED strand
+    bool                 junctions_set_ = false;
     std::unique_ptr<rigel::accumulator::AccumulatorSet> acc_set_;
 
     BamScanner(FragmentResolver& ctx,
@@ -1082,64 +1039,120 @@ public:
     }
 
     // ----------------------------------------------------------------
-    // Calibration region setup
+    // The accumulator's partition
     // ----------------------------------------------------------------
     //
-    // Install the per-reference region partition used by the fractional
-    // accumulator. Must be called BEFORE scan() if calibration evidence
-    // is required; without it the calibration payload comes back empty.
+    // Install the node partition the accumulator deposits onto. Must be called BEFORE scan(); without it
+    // the calibration payload comes back empty. `set_junctions` is a SECOND call, because this one
+    // refuses to run twice.
     //
     // Inputs:
-    //   boundary_positions: flat int64[B_pos_total], concatenated sorted
-    //                       boundary positions for all references.
-    //   ref_pos_offsets:    int64[n_refs + 1] offsets into boundary_positions.
-    //                       ref f spans boundary_positions[
-    //                         ref_pos_offsets[f] .. ref_pos_offsets[f+1]).
-    //                       A ref with offsets[f+1] == offsets[f] has no
-    //                       partition and accepts no deposits.
-    //   n_refs:             number of references (must match
-    //                       ctx_->ref_to_id_ + 1).
+    //   cut_positions:   flat int64[n_cuts_total], the concatenated sorted cut positions of every
+    //                    reference. A reference contributing c cuts owns c-1 nodes and c-2 lines.
+    //   ref_cut_offsets: int64[n_refs + 1] offsets into cut_positions. A reference with
+    //                    offsets[f+1] == offsets[f] has no partition and accepts no deposits.
+    //   n_refs:          number of references (must match ctx_->ref_to_id_).
+    //   node_types:      uint8[n_nodes_total], the coarse node type, ref-major; it types the length pools.
+    //   max_length:      the fragment-length limit applied to L, and the pool-histogram width.
     void set_regions(
-        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> boundary_positions,
-        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_pos_offsets,
+        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> cut_positions,
+        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_cut_offsets,
         int32_t n_refs,
-        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> region_types,
-        int fl_max_size)
+        nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> node_types,
+        int max_length)
     {
         if (n_refs < 0) {
             throw std::invalid_argument(
                 "set_regions: n_refs must be non-negative");
         }
-        const std::size_t n_off = ref_pos_offsets.shape(0);
+        const std::size_t n_off = ref_cut_offsets.shape(0);
         if (n_off != static_cast<std::size_t>(n_refs) + 1) {
             throw std::invalid_argument(
-                "set_regions: ref_pos_offsets must have length n_refs + 1");
+                "set_regions: ref_cut_offsets must have length n_refs + 1");
         }
         if (acc_set_) {
             throw std::runtime_error(
                 "set_regions: regions already set on this BamScanner; "
                 "create a new instance");
         }
-        boundary_positions_.assign(
-            boundary_positions.data(),
-            boundary_positions.data() + boundary_positions.shape(0));
-        ref_pos_offsets_.assign(
-            ref_pos_offsets.data(),
-            ref_pos_offsets.data() + n_off);
-        // PR 4c: per-region FL-pool type (R_total) + FL histogram size. Empty
-        // region_types or fl_max_size <= 0 disables FL pooling.
-        region_types_.assign(
-            region_types.data(),
-            region_types.data() + region_types.shape(0));
-        fl_max_size_ = fl_max_size;
-        acc_set_ = std::make_unique<rigel::accumulator::AccumulatorSet>(
-            boundary_positions_.data(),
-            boundary_positions_.size(),
-            ref_pos_offsets_.data(),
-            static_cast<std::size_t>(n_refs),
-            region_types_.empty() ? nullptr : region_types_.data(),
-            region_types_.size(),
-            fl_max_size_);
+        // ⚠ Validated HERE, at the boundary, because `BamScanConfig.max_frag_length` has no CLI flag and
+        // no validation anywhere else. It gates L *and* sizes the pool histograms, so at 0 every real
+        // fragment is dropped as too long and the whole tally is silently empty.
+        if (max_length < 1) {
+            throw std::invalid_argument(
+                "set_regions: max_length must be >= 1, got " + std::to_string(max_length) +
+                ". It is the fragment-length limit applied to L as well as the pool-histogram width, so "
+                "at 0 every real fragment is dropped as too long and the tally is silently empty.");
+        }
+        cut_positions_.assign(
+            cut_positions.data(),
+            cut_positions.data() + cut_positions.shape(0));
+        ref_cut_offsets_.assign(
+            ref_cut_offsets.data(),
+            ref_cut_offsets.data() + n_off);
+        node_types_.assign(
+            node_types.data(),
+            node_types.data() + node_types.shape(0));
+        max_length_ = max_length;
+        acc_set_ = make_accumulator_set();
+    }
+
+    // ----------------------------------------------------------------
+    // The accumulator's junction edges
+    // ----------------------------------------------------------------
+    //
+    // A SECOND method rather than two more arguments to set_regions, because that one throws if called
+    // twice. Takes the flat CSR `build_junction_edge_arrays` emits, keyed by the flat cut index;
+    // AccumulatorSet slices it per reference.
+    //
+    // ⚠ Required even when there are none: pass empty arrays to say "this annotation has no junctions".
+    // scan() refuses to run without it, because a missing table is not an error anywhere — every observed
+    // intron simply reads as unannotated, and 404,168 annotated junctions become zero silently.
+    void set_junctions(
+        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> offsets,
+        nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> acceptor_cut,
+        nb::ndarray<const int8_t, nb::ndim<1>, nb::c_contig> sj_strand)
+    {
+        if (!acc_set_) {
+            throw std::runtime_error(
+                "set_junctions: call set_regions first — the junction CSR is keyed by cut index, so "
+                "there is nothing to key it against until the partition is installed");
+        }
+        if (acceptor_cut.shape(0) != sj_strand.shape(0)) {
+            throw std::invalid_argument(
+                "set_junctions: acceptor_cut has " + std::to_string(acceptor_cut.shape(0)) +
+                " entries but sj_strand has " + std::to_string(sj_strand.shape(0)));
+        }
+        sj_offsets_.assign(offsets.data(), offsets.data() + offsets.shape(0));
+        sj_acceptor_cut_.assign(
+            acceptor_cut.data(), acceptor_cut.data() + acceptor_cut.shape(0));
+        sj_strand_.assign(sj_strand.data(), sj_strand.data() + sj_strand.shape(0));
+        junctions_set_ = true;
+        install_junctions(*acc_set_);
+    }
+
+    // Build a per-worker set over the same partition, locally writable so workers never contend.
+    std::unique_ptr<rigel::accumulator::AccumulatorSet> make_accumulator_set() const {
+        auto set = std::make_unique<rigel::accumulator::AccumulatorSet>(
+            cut_positions_.data(),
+            cut_positions_.size(),
+            ref_cut_offsets_.data(),
+            ref_cut_offsets_.empty() ? 0 : ref_cut_offsets_.size() - 1,
+            node_types_.empty() ? nullptr : node_types_.data(),
+            node_types_.size(),
+            max_length_);
+        install_junctions(*set);
+        return set;
+    }
+
+    void install_junctions(rigel::accumulator::AccumulatorSet& set) const {
+        if (!junctions_set_) return;
+        set.set_junctions(sj_offsets_.data(),
+                          sj_offsets_.size(),
+                          sj_acceptor_cut_.data(),
+                          sj_strand_.data(),
+                          sj_acceptor_cut_.size(),
+                          ref_cut_offsets_.data());
     }
 
     // ----------------------------------------------------------------
@@ -1166,6 +1179,17 @@ public:
         if (chunk_size < 1) chunk_size = 1;
         if (qname_batch_size < 1) qname_batch_size = 1;
 
+        // ⚠ Explicit rather than defaulted, because the failure is invisible: with no junction table every
+        // observed intron reads as unannotated, so the spliced banks and every junction edge stay at zero
+        // and the tally still looks well-formed. Pass empty arrays to declare an annotation with none.
+        if (acc_set_ && !junctions_set_) {
+            throw std::runtime_error(
+                "scan: set_regions was called but set_junctions was not. The junction table is not "
+                "optional — without it every observed intron reads as unannotated, so the junction edges "
+                "and the spliced banks are silently empty. Call set_junctions with empty arrays if this "
+                "annotation genuinely has no junctions.");
+        }
+
         // Two queues: input (SPMC) and output (MPSC)
         BoundedQueue<QnameBatch> input_queue(
             static_cast<size_t>(n_workers * 4));
@@ -1180,17 +1204,10 @@ public:
             auto ws = std::make_unique<WorkerState>(n_transcripts, 0);
             // Pre-allocate accumulator for chunk_size
             ws->accumulator.reserve(chunk_size, chunk_size * 3 / 2);
-            // Per-worker fractional accumulator: same partition as the
-            // shared template, locally writable so workers don't contend.
+            // Per-worker accumulator: the same partition and the same junction CSR as the shared
+            // template, locally writable so workers don't contend.
             if (acc_set_) {
-                ws->acc_set = std::make_unique<rigel::accumulator::AccumulatorSet>(
-                    boundary_positions_.data(),
-                    boundary_positions_.size(),
-                    ref_pos_offsets_.data(),
-                    static_cast<std::size_t>(acc_set_->n_refs()),
-                    region_types_.empty() ? nullptr : region_types_.data(),
-                    region_types_.size(),
-                    fl_max_size_);
+                ws->acc_set = make_accumulator_set();
             }
             worker_states.push_back(std::move(ws));
         }
@@ -1431,79 +1448,124 @@ private:
         FragLenObservations& fraglen_obs = ws.fraglen_obs;
         ResolverScratch& scratch = ws.scratch;
 
-        // Fractional-accumulator deposit for a unique-mapper, non-chimeric
-        // fragment — resolved OR intergenic. The accumulator maps the
-        // fragment's contiguous genomic span(s) onto the genome-wide region
-        // partition, so an intergenic fragment lands in its intergenic region's
-        // contained mass (previously these were telemetry-only; see
+        // ── the deposit adapter ───────────────────────────────────────────────────────────────────────
         //
-        // Splice class drives BOTH the channel and the spans (see
-        // docs/CARRY_FORWARD.md):
-        //   - unspliced  → unspliced channel; one [min,max] span (mate gap filled);
-        //   - explicit   → spliced channel; cut at the CIGAR-N introns (frag.introns);
-        //   - implicit   → spliced channel; cut at the implied introns (in the
-        //                  mate gap) and orient by their transcript strand, since
-        //                  the splice motif itself was not sequenced.
-        // Orientation primary bit: unspliced → genome '+'; spliced → SENSE
-        // (read agrees with the motif/transcript strand), valid even inside
-        // strand-ambiguous regions (docs/acc_caljointmodel §4 D2/D7).
+        // Turn one assembled fragment into the accumulator's `FragmentPath` and deposit it. The
+        // accumulator owns the whole deposit rule; this function's only job is to say what the fragment IS
+        // — its extent on one reference, the introns cut out of it, and the two independent strands.
+        //
+        // ⭐ THE TWO STRANDS ARE INDEPENDENT, and collapsing them is the bug this rewrite deletes.
+        //   align_strand  where the read ALIGNED. Every read has one. It selects the array column.
+        //   sj_strand     the splice junction's strand. Spliced reads only. It resolves an intron against
+        //                 the annotation, and nothing else.
+        // The shipped code compared them into a third concept, a bool named `primary`, and used it to pick
+        // a channel labelled *sense* — which is how a dUTP first-strand library ended up with 0.6 % of its
+        // spliced fragments in that column. `primary` is deleted, not renamed, and nothing replaces it:
+        // sense/antisense is DERIVED by a consumer from the fragment strand and the junction's own strand.
+        //
+        // ⚠ No strand gate here either. The deposit rejects an undefined `align_strand` itself and COUNTS
+        // it, which is the point — the old `align_ok`/`motif_ok` gate returned early, so the loss vanished.
         const auto deposit_to_accumulator =
             [&ws](const AssembledFragment& f, const RawResolveResult& cr) {
                 if (!ws.acc_set || f.exons.empty()) return;
                 const int32_t st = cr.splice_type;
-                // Phase D: hold artifact splices (blacklisted CIGAR-N) out of the
-                // accumulator entirely — no deposit, no FL pool. Their true span is
-                // unrecoverable (a blacklisted junction may be a real-but-rejected
-                // junction OR a wholly incorrect alignment, and we'd derive the span
-                // from that suspect alignment), so any reconstruction would inject a
-                // false assumption. Rare; zero extrapolation. Matches the resolver's
-                // SPLICE_ARTIFACT "held out of calibration" intent (resolve_context.h).
+                // Hold artifact splices (blacklisted CIGAR-N) out of the accumulator entirely — no
+                // deposit, no length pool. Their true span is unrecoverable: a blacklisted junction may be
+                // a real-but-rejected junction OR a wholly incorrect alignment, and the span would be
+                // derived from that suspect alignment, so any reconstruction injects a false assumption.
                 if (st == SPLICE_ARTIFACT) return;
-                const bool implicit = (st == SPLICE_IMPLICIT);
-                const bool spliced = (st == SPLICE_SPLICED_ANNOT ||
-                                      st == SPLICE_SPLICED_UNANNOT || implicit);
-                // The motif strand orients the spliced channel: the sequenced
-                // splice motif for explicit splices, the implied introns'
-                // transcript strand for implicit ones.
-                int32_t motif_strand = cr.sj_strand;
-                if (implicit) {
-                    motif_strand = STRAND_NONE;
-                    for (const auto& isj : cr.implicit_introns)
-                        motif_strand |= isj.strand;
-                }
-                const bool align_ok = (cr.align_strand == STRAND_POS ||
-                                       cr.align_strand == STRAND_NEG);
-                const bool motif_ok = (motif_strand == STRAND_POS ||
-                                       motif_strand == STRAND_NEG);
-                // Unspliced needs a defined genome strand; spliced also needs a
-                // defined motif/transcript strand to orient sense.
-                if (!align_ok || (spliced && !motif_ok)) return;
                 const int32_t ref_id = f.exons.front().ref_id;
                 if (ref_id < 0 ||
                     static_cast<std::size_t>(ref_id) >= ws.acc_set->n_refs())
                     return;
-                // Cut introns: explicit CIGAR-N for explicit splices, the implied
-                // introns for implicit ones; none otherwise (these are mutually
-                // exclusive — implicit is only detected when no CIGAR-N exists).
+
+                const bool implicit = (st == SPLICE_IMPLICIT);
+                // Cut introns: the explicit CIGAR-N introns, or the implied ones for an implicit splice.
+                // Mutually exclusive — implicit is only detected when no CIGAR-N exists.
                 const std::vector<IntronBlock>& cut_introns =
                     implicit ? cr.implicit_introns : f.introns;
-                fragment_genomic_spans(f.exons, cut_introns,
-                                       ws.span_ref, ws.span_start, ws.span_end);
-                if (ws.span_start.empty()) return;
-                const bool primary = spliced ? (cr.align_strand == motif_strand)
-                                             : (cr.align_strand == STRAND_POS);
-                // Genomic strand carried to the accumulator: for a spliced fragment
-                // the junction MOTIF strand (recorded per boundary as the mature
-                // anchor's strand); for unspliced the genome strand (unused — the
-                // ch0/ch1 channels already encode it). motif_ok above guarantees a
-                // defined POS/NEG for spliced.
-                const std::int32_t deposit_strand = spliced ? motif_strand : cr.align_strand;
-                // Non-chimeric ⇒ all spans share `ref_id` (chimeras are held out
-                // before the deposit), so a single per-ref deposit is correct.
-                ws.acc_set->at(ref_id).deposit(ws.span_start.data(),
-                                               ws.span_end.data(),
-                                               ws.span_start.size(),
-                                               spliced, primary, deposit_strand);
+
+                // This reference's introns, de-duplicated on (start, end).
+                //
+                // ⛔ Restricting to `ref_id` is DEFINITIONAL, not defensive: `FragmentPath::introns` means
+                // the introns on the reference being deposited, and `Accumulator::deposit` normalises them
+                // by coordinate alone — it never looks at `ref_id`. `fragment_genomic_spans` filtered here
+                // too, and that filter has to survive its deletion.
+                //
+                // ⚠ The de-duplication is for the QC denominator, NOT to prevent double-crediting a
+                // junction: `parse_bam_record` reads XS/ts once per RECORD and `build_fragment` keys
+                // `intron_set` on (ref, start, end, strand), so a pair where one mate carries the tag
+                // yields the same intron twice. Those duplicates cannot double-credit — the deposit builds
+                // its junction ids from the NORMALISED list, where an exact duplicate merges — but each one
+                // would increment `introns_absorbed`, on every spliced pair from such an aligner, and that
+                // counter is a reported denominator. `intron_set` is ordered, so consecutive comparison is
+                // enough; ⛔ it must NOT be re-keyed or merged in `build_fragment`, which shares it with
+                // the resolver (measured: merging demotes SPLICED_ANNOT to SPLICED_UNANNOT and widens
+                // `t_inds`).
+                auto& introns = ws.deposit_introns;
+                introns.clear();
+                for (const auto& intron : cut_introns) {
+                    if (intron.ref_id != ref_id) continue;
+                    if (!introns.empty() && introns.back().start == intron.start &&
+                        introns.back().end == intron.end) {
+                        continue;
+                    }
+                    introns.push_back(intron);
+                }
+
+                // The molecule's extent on this reference: leftmost block start to rightmost block end,
+                // MATE GAP INCLUDED, because the gap is part of the molecule and must count toward L.
+                //
+                // ⛔ A fragment with blocks on MORE THAN ONE REFERENCE deposits nothing. It is not one
+                // molecule (design §3.3), and a `FragmentPath` cannot express it — it carries one extent on
+                // one cut axis. The shipped code had no such check on the intergenic path: it computed a
+                // span per reference and deposited ALL of them onto `exons.front().ref_id`, so chr7
+                // coordinates landed on chr1's cut axis. `ws.span_ref` recorded which reference each span
+                // belonged to and **nothing ever read it**, which is how that survived.
+                //
+                // ⚠ Deliberately narrow: this tests multi-reference, NOT `cr.chimera_type`. That field is
+                // also set for single-reference *cis* chimeras, which the intergenic path deposits today,
+                // and stopping those is a change to WHAT COUNTS AS A FRAGMENT — its own arm with its own
+                // before/after measurement, per the plan's TODO. This step's gate is byte-identity.
+                std::int64_t start = 0, end = 0;
+                bool any = false;
+                for (const auto& block : f.exons) {
+                    if (block.ref_id != ref_id) return;
+                    if (!any) {
+                        start = block.start;
+                        end = block.end;
+                        any = true;
+                    } else {
+                        start = std::min<std::int64_t>(start, block.start);
+                        end = std::max<std::int64_t>(end, block.end);
+                    }
+                }
+                if (!any) return;
+
+                rigel::accumulator::FragmentPath path;
+                path.start = start;
+                path.end = end;
+                path.introns = introns.data();
+                path.n_introns = introns.size();
+                path.align_strand = cr.align_strand;
+                // ⚠ For an explicit splice this is the sequenced motif's strand, straight from `cr`. For an
+                // IMPLICIT one the motif was never sequenced, so the strand comes from the transcript that
+                // implied the intron — which is legitimate precisely because `path_ambiguous` below
+                // guarantees the candidates agreed on that intron, hence on that transcript's answer.
+                path.sj_strand = cr.sj_strand;
+                if (implicit) {
+                    path.sj_strand = STRAND_NONE;
+                    for (const auto& implied : cr.implicit_introns)
+                        path.sj_strand |= implied.strand;
+                }
+                path.sj_implicit = implicit;
+                // ⛔ The candidates disagree about which introns the mate gaps hold, so L — and with it
+                // both quanta, the length pool and the set of lines crossed — is undetermined. It deposits
+                // on nothing and is counted; the second pass separates the candidates by fragment length
+                // and strand. Design §9.1.
+                path.path_ambiguous = implicit && cr.implicit_ambiguous;
+
+                ws.acc_set->at(ref_id).deposit(path, ws.deposit_scratch);
             };
 
         // Per-worker state refs
@@ -1899,141 +1961,154 @@ private:
         fraglen_dict["splice_types"]       = vec_to_ndarray(std::move(fraglen_obs_.splice_types));
         result["frag_length_observations"] = fraglen_dict;
 
-        // Fractional-accumulator calibration payload. Zero-copy ndarray
-        // views over the merged AccumulatorSet's per-ref buffers; the
-        // capsule keeps `acc_set_` alive for the lifetime of the views.
+        // ── the accumulator payload ───────────────────────────────────────────────────────────────────
+        //
+        // ⚠ The keys here are the FIELD NAMES OF THE SPECIFICATION'S `Tally`, character for character
+        // (`tests/native/_accumulator_reference.py`). That is deliberate: the payload, the reference and
+        // the parity gate then all say one name per quantity, and no mapping table can drift.
+        //
+        // ⚠ NOT zero-copy, and the comment that used to claim it was is deleted rather than carried
+        // forward. Each array is a fresh owning vector concatenated across references, so Python gets one
+        // contiguous buffer and does not depend on the AccumulatorSet's internal layout. Arrays are emitted
+        // FLAT; the two-column ones are reshaped Python-side.
+        //
+        // ⚠ And this copy cannot be a memcpy: the accumulator stores AoS (a 48 B `Node` interleaving four
+        // channel pairs) while the payload is SoA, so the transpose is a strided read by construction. That
+        // is the price of the hot struct being 48 B with no padding, which is the right trade — this loop is
+        // O(partition) once per scan, the deposit is O(fragments).
         if (acc_set_) {
             using rigel::accumulator::Accumulator;
-            using rigel::accumulator::Boundary;
-            using rigel::accumulator::Region;
-            using rigel::accumulator::kNChannels;
+            using rigel::accumulator::ContiguousEdge;
+            using rigel::accumulator::JunctionEdge;
+            using rigel::accumulator::Node;
+            using rigel::accumulator::kNFragmentPools;
+            using rigel::accumulator::kNStrandColumns;
 
             const std::size_t n_refs = acc_set_->n_refs();
 
-            // Per-ref offset arrays.
-            std::vector<int64_t> ref_region_offsets(n_refs + 1, 0);
-            std::vector<int64_t> ref_boundary_offsets(n_refs + 1, 0);
+            std::vector<int64_t> ref_node_offsets(n_refs + 1, 0);
+            std::vector<int64_t> ref_edge_offsets(n_refs + 1, 0);
+            std::vector<int64_t> ref_sj_offsets(n_refs + 1, 0);
             for (std::size_t f = 0; f < n_refs; ++f) {
                 const Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
-                ref_region_offsets[f + 1] =
-                    ref_region_offsets[f] + static_cast<int64_t>(a.n_regions());
-                ref_boundary_offsets[f + 1] =
-                    ref_boundary_offsets[f] +
-                    static_cast<int64_t>(a.n_boundaries());
+                ref_node_offsets[f + 1] =
+                    ref_node_offsets[f] + static_cast<int64_t>(a.n_nodes());
+                ref_edge_offsets[f + 1] =
+                    ref_edge_offsets[f] + static_cast<int64_t>(a.n_edges());
+                ref_sj_offsets[f + 1] =
+                    ref_sj_offsets[f] + static_cast<int64_t>(a.n_junctions());
             }
-            const std::size_t R_total =
-                static_cast<std::size_t>(ref_region_offsets.back());
-            const std::size_t B_total =
-                static_cast<std::size_t>(ref_boundary_offsets.back());
+            const auto n_nodes = static_cast<std::size_t>(ref_node_offsets.back());
+            const auto n_edges = static_cast<std::size_t>(ref_edge_offsets.back());
+            const auto n_sj    = static_cast<std::size_t>(ref_sj_offsets.back());
 
-            // Concatenate per-ref buffers into flat owning vectors so the
-            // Python side gets contiguous arrays without depending on the
-            // AccumulatorSet's internal storage layout.
-            auto region_contained = std::make_unique<std::vector<uint32_t>>(
-                R_total * kNChannels, 0u);
-            auto boundary_mass_left = std::make_unique<std::vector<float>>(
-                B_total * kNChannels, 0.0f);
-            auto boundary_mass_right = std::make_unique<std::vector<float>>(
-                B_total * kNChannels, 0.0f);
-            auto boundary_flux_left = std::make_unique<std::vector<uint32_t>>(
-                B_total * kNChannels, 0u);
-            auto boundary_flux_right = std::make_unique<std::vector<uint32_t>>(
-                B_total * kNChannels, 0u);
-            // Per-boundary splice-junction strand (Strand 0/1/2): NOT channelled
-            // (one junction per boundary), so length B_total, not B_total*kNChannels.
-            auto boundary_junction_strand = std::make_unique<std::vector<int8_t>>(
-                B_total, 0);
+            std::vector<uint32_t> node_contained_count(n_nodes * kNStrandColumns, 0u);
+            std::vector<uint64_t> node_contained_density(n_nodes * kNStrandColumns, 0u);
+            std::vector<uint32_t> node_spanning_count(n_nodes * kNStrandColumns, 0u);
+            std::vector<uint64_t> node_spanning_density(n_nodes * kNStrandColumns, 0u);
+            std::vector<uint32_t> node_start_count(n_nodes, 0u);
+            std::vector<uint32_t> edge_unspliced_count(n_edges * kNStrandColumns, 0u);
+            std::vector<uint64_t> edge_unspliced_density(n_edges * kNStrandColumns, 0u);
+            std::vector<uint32_t> edge_spliced_count(n_edges * kNStrandColumns, 0u);
+            std::vector<uint64_t> edge_spliced_density(n_edges * kNStrandColumns, 0u);
+            std::vector<uint32_t> sj_count(n_sj * kNStrandColumns, 0u);
+            std::vector<uint64_t> sj_density(n_sj * kNStrandColumns, 0u);
+
+            const std::size_t pool_row = static_cast<std::size_t>(max_length_) + 1;
+            std::vector<int64_t> pool_lengths(kNFragmentPools * pool_row, 0);
+
+            rigel::accumulator::DepositCounters qc;
 
             for (std::size_t f = 0; f < n_refs; ++f) {
                 const Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
-                const Region* rs = a.regions_data();
-                const Boundary* bs = a.boundaries_data();
-                const int8_t* js = a.boundary_junction_strand_data();
-                const std::size_t r_off =
-                    static_cast<std::size_t>(ref_region_offsets[f]);
-                const std::size_t b_off =
-                    static_cast<std::size_t>(ref_boundary_offsets[f]);
-                for (std::size_t i = 0; i < a.n_regions(); ++i) {
-                    for (std::size_t c = 0; c < kNChannels; ++c) {
-                        (*region_contained)[(r_off + i) * kNChannels + c] =
-                            rs[i].contained[c];
+                const Node* nodes = a.nodes_data();
+                const ContiguousEdge* edges = a.edges_data();
+                const JunctionEdge* junctions = a.junctions_data();
+                const uint32_t* starts = a.node_start_count_data();
+                const auto node_base = static_cast<std::size_t>(ref_node_offsets[f]);
+                const auto edge_base = static_cast<std::size_t>(ref_edge_offsets[f]);
+                const auto sj_base   = static_cast<std::size_t>(ref_sj_offsets[f]);
+
+                for (std::size_t i = 0; i < a.n_nodes(); ++i) {
+                    node_start_count[node_base + i] = starts[i];
+                    for (std::size_t c = 0; c < kNStrandColumns; ++c) {
+                        const std::size_t o = (node_base + i) * kNStrandColumns + c;
+                        node_contained_count[o]   = nodes[i].contained_count[c];
+                        node_contained_density[o] = nodes[i].contained_density[c];
+                        node_spanning_count[o]    = nodes[i].spanning_count[c];
+                        node_spanning_density[o]  = nodes[i].spanning_density[c];
                     }
                 }
-                for (std::size_t i = 0; i < a.n_boundaries(); ++i) {
-                    for (std::size_t c = 0; c < kNChannels; ++c) {
-                        (*boundary_mass_left)[(b_off + i) * kNChannels + c] =
-                            bs[i].mass_left[c];
-                        (*boundary_mass_right)[(b_off + i) * kNChannels + c] =
-                            bs[i].mass_right[c];
-                        (*boundary_flux_left)[(b_off + i) * kNChannels + c] =
-                            bs[i].flux_left[c];
-                        (*boundary_flux_right)[(b_off + i) * kNChannels + c] =
-                            bs[i].flux_right[c];
+                for (std::size_t i = 0; i < a.n_edges(); ++i) {
+                    for (std::size_t c = 0; c < kNStrandColumns; ++c) {
+                        const std::size_t o = (edge_base + i) * kNStrandColumns + c;
+                        edge_unspliced_count[o]   = edges[i].unspliced_count[c];
+                        edge_unspliced_density[o] = edges[i].unspliced_density[c];
+                        edge_spliced_count[o]     = edges[i].spliced_count[c];
+                        edge_spliced_density[o]   = edges[i].spliced_density[c];
                     }
-                    (*boundary_junction_strand)[b_off + i] = js[i];
                 }
+                for (std::size_t i = 0; i < a.n_junctions(); ++i) {
+                    for (std::size_t c = 0; c < kNStrandColumns; ++c) {
+                        const std::size_t o = (sj_base + i) * kNStrandColumns + c;
+                        sj_count[o]   = junctions[i].count[c];
+                        sj_density[o] = junctions[i].density[c];
+                    }
+                }
+                // The pools are library-wide, so the per-reference histograms are SUMMED, not concatenated.
+                // ⚠ A size mismatch throws instead of being skipped: skipping would drop that reference's
+                // pools with nothing to notice it by, which is the failure mode this rework has already
+                // removed twice.
+                if (a.pool_lengths_size() != pool_lengths.size()) {
+                    throw std::runtime_error(
+                        "build_result: reference " + std::to_string(f) + " has " +
+                        std::to_string(a.pool_lengths_size()) + " pool bins but the payload expects " +
+                        std::to_string(pool_lengths.size()));
+                }
+                const int64_t* pools = a.pool_lengths_data();
+                for (std::size_t i = 0; i < pool_lengths.size(); ++i) pool_lengths[i] += pools[i];
+                qc.merge_from(a.counters());
             }
 
             nb::dict cal;
-            // Echo the partition back (positions + per-ref pos offsets).
-            {
-                auto buf = std::make_unique<std::vector<int64_t>>(
-                    boundary_positions_);
-                cal["boundaries"] = vec_to_ndarray(std::move(*buf));
-            }
-            {
-                auto buf = std::make_unique<std::vector<int64_t>>(
-                    ref_pos_offsets_);
-                cal["ref_pos_offsets"] = vec_to_ndarray(std::move(*buf));
-            }
-            cal["ref_region_offsets"] =
-                vec_to_ndarray(std::move(ref_region_offsets));
-            cal["ref_boundary_offsets"] =
-                vec_to_ndarray(std::move(ref_boundary_offsets));
+            // Echo the partition back, so a consumer can locate every object without reloading the index.
+            cal["cut_positions"]   = vec_to_ndarray(std::vector<int64_t>(cut_positions_));
+            cal["ref_cut_offsets"] = vec_to_ndarray(std::vector<int64_t>(ref_cut_offsets_));
+            cal["ref_node_offsets"] = vec_to_ndarray(std::move(ref_node_offsets));
+            cal["ref_edge_offsets"] = vec_to_ndarray(std::move(ref_edge_offsets));
+            cal["ref_sj_offsets"]   = vec_to_ndarray(std::move(ref_sj_offsets));
 
-            // 2-D views via shape reinterpretation. vec_to_ndarray returns
-            // 1-D; reshape on the Python side.
-            cal["region_contained"] = vec_to_ndarray(std::move(*region_contained));
-            cal["boundary_mass_left"] =
-                vec_to_ndarray(std::move(*boundary_mass_left));
-            cal["boundary_mass_right"] =
-                vec_to_ndarray(std::move(*boundary_mass_right));
-            cal["boundary_flux_left"] =
-                vec_to_ndarray(std::move(*boundary_flux_left));
-            cal["boundary_flux_right"] =
-                vec_to_ndarray(std::move(*boundary_flux_right));
-            cal["boundary_junction_strand"] =
-                vec_to_ndarray(std::move(*boundary_junction_strand));
+            cal["node_contained_count"]   = vec_to_ndarray(std::move(node_contained_count));
+            cal["node_contained_density"] = vec_to_ndarray(std::move(node_contained_density));
+            cal["node_spanning_count"]    = vec_to_ndarray(std::move(node_spanning_count));
+            cal["node_spanning_density"]  = vec_to_ndarray(std::move(node_spanning_density));
+            cal["node_start_count"]       = vec_to_ndarray(std::move(node_start_count));
+            cal["edge_unspliced_count"]   = vec_to_ndarray(std::move(edge_unspliced_count));
+            cal["edge_unspliced_density"] = vec_to_ndarray(std::move(edge_unspliced_density));
+            cal["edge_spliced_count"]     = vec_to_ndarray(std::move(edge_spliced_count));
+            cal["edge_spliced_density"]   = vec_to_ndarray(std::move(edge_spliced_density));
+            cal["sj_count"]               = vec_to_ndarray(std::move(sj_count));
+            cal["sj_density"]             = vec_to_ndarray(std::move(sj_density));
+            cal["pool_lengths"]           = vec_to_ndarray(std::move(pool_lengths));
 
-            // gDNA FL pools (PR 4c): sum the per-ref pools into a single
-            // library-wide [kNFlPools, fl_max_size + 1] float64 array (flat;
-            // reshaped Python-side). None when FL pooling was disabled.
-            if (fl_max_size_ > 0) {
-                const std::size_t fl_row =
-                    static_cast<std::size_t>(fl_max_size_) + 1;
-                auto fl_pool = std::make_unique<std::vector<double>>(
-                    rigel::accumulator::kNFlPools * fl_row, 0.0);
-                for (std::size_t f = 0; f < n_refs; ++f) {
-                    const Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
-                    const double* src = a.fl_pool_data();
-                    const std::size_t sz = a.fl_pool_size();
-                    if (sz == fl_pool->size()) {
-                        for (std::size_t i = 0; i < sz; ++i) {
-                            (*fl_pool)[i] += src[i];
-                        }
-                    }
-                }
-                cal["fl_pool_mass"] = vec_to_ndarray(std::move(*fl_pool));
-                cal["fl_max_size"] = static_cast<int>(fl_max_size_);
-            } else {
-                cal["fl_pool_mass"] = nb::none();
-                cal["fl_max_size"] = 0;
-            }
-            cal["n_fl_pools"] =
-                static_cast<int>(rigel::accumulator::kNFlPools);
+            // The QC denominators (design §10.3). Every conservation statement downstream has to be able
+            // to name what it excluded, and none of these is derivable after the fact.
+            nb::dict qc_dict;
+            qc_dict["deposited"]                = qc.deposited;
+            qc_dict["dropped_too_long"]         = qc.dropped_too_long;
+            qc_dict["dropped_empty"]            = qc.dropped_empty;
+            qc_dict["dropped_strand_undefined"] = qc.dropped_strand_undefined;
+            qc_dict["dropped_ambiguous_path"]   = qc.dropped_ambiguous_path;
+            qc_dict["unannotated_introns"]      = qc.unannotated_introns;
+            qc_dict["contradictory_sj_strand"]  = qc.contradictory_sj_strand;
+            qc_dict["sj_implicit_fragments"]    = qc.sj_implicit_fragments;
+            qc_dict["introns_absorbed"]         = qc.introns_absorbed;
+            cal["qc"] = qc_dict;
 
-            cal["n_channels"] = static_cast<int>(kNChannels);
-            cal["n_refs"] = static_cast<int>(n_refs);
+            cal["n_strand_columns"] = static_cast<int>(kNStrandColumns);
+            cal["n_fragment_pools"] = static_cast<int>(kNFragmentPools);
+            cal["max_length"]       = max_length_;
+            cal["n_refs"]           = static_cast<int>(n_refs);
 
             result["calibration"] = cal;
         } else {
@@ -2600,233 +2675,233 @@ NB_MODULE(_bam_impl, m) {
               "BamAnnotationWriter (pass 2: stamp tags → write BAM).";
 
     // ----------------------------------------------------------------
-    // Fractional Accumulator (docs/CARRY_FORWARD.md)
+    // Accumulator — ONE REFERENCE, bound as the parity surface
     // ----------------------------------------------------------------
     //
-    // Single-reference accumulator: N regions, N+1 boundaries.
-    // Region storage:   uint32[N,4]              contained
-    // Boundary storage: float32[N+1,4] mass_left, float32[N+1,4] mass_right,
-    //                   uint32[N+1,4] flux
-    // Channel encoding: ch = (spliced?2:0) + (strand_pos?0:1)
+    // ⚠ THIS BINDING EXISTS TO BE COMPARED. `tests/native/test_accumulator_native_parity.py` drives it and
+    // `tests/native/_accumulator_reference.py` with identical fragments and requires every array, dtype and
+    // QC counter to match. The scan path does not go through here — it calls `deposit` in C++ — so the
+    // property names below are chosen to be the SPECIFICATION'S `Tally` FIELD NAMES, character for
+    // character. The gate reads them off `dataclasses.fields(Tally)`, so a name that drifts fails loudly
+    // instead of quietly dropping out of the comparison.
+    //
+    // ⚠ Every two-column view needs EXPLICIT STRIDES. The storage is AoS with mixed widths — a 48 B `Node`
+    // holds two uint32 pairs then two uint64 pairs — so the row stride is `sizeof(struct)/sizeof(element)`,
+    // not the column count. The binding this replaced passed no strides at all and worked only because the
+    // old `Region` was exactly four contiguous uint32.
     {
         using rigel::accumulator::Accumulator;
+        using rigel::accumulator::ContiguousEdge;
+        using rigel::accumulator::DepositScratch;
+        using rigel::accumulator::FragmentPath;
+        using rigel::accumulator::JunctionEdge;
+        using rigel::accumulator::Node;
+        using rigel::accumulator::kNFragmentPools;
+        using rigel::accumulator::kNStrandColumns;
+
+        // One scratch per bound instance. The class is single-threaded from Python and the scan path uses
+        // its own per-worker scratch, so this is only here to keep the signature allocation-free.
+        static thread_local DepositScratch binding_scratch;
+
         nb::class_<Accumulator>(m, "Accumulator")
             .def("__init__",
                  [](Accumulator* self,
-                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> positions,
-                    nb::object region_types,
-                    int max_fl) {
-                     std::vector<int64_t> p(
-                         positions.data(),
-                         positions.data() + positions.shape(0));
-                     // PR 4c: optional per-region FL-pool type + FL histogram
-                     // size. None / max_fl <= 0 → FL pooling disabled.
-                     std::vector<uint8_t> types;
-                     if (!region_types.is_none()) {
-                         auto rt = nb::cast<
-                             nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig>>(
-                             region_types);
-                         types.assign(rt.data(), rt.data() + rt.shape(0));
-                     }
-                     new (self) Accumulator(std::move(p), std::move(types), max_fl);
+                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> cuts,
+                    nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> node_types,
+                    int max_length) {
+                     std::vector<int64_t> c(cuts.data(), cuts.data() + cuts.shape(0));
+                     std::vector<uint8_t> t(node_types.data(),
+                                            node_types.data() + node_types.shape(0));
+                     new (self) Accumulator(std::move(c), std::move(t), max_length);
                  },
-                 nb::arg("boundary_positions"),
-                 nb::arg("region_types") = nb::none(),
-                 nb::arg("max_fl") = 0)
-            .def_prop_ro("n_regions",
-                 [](const Accumulator& a) { return a.n_regions(); })
-            .def_prop_ro("n_boundaries",
-                 [](const Accumulator& a) { return a.n_boundaries(); })
-            .def_prop_ro("boundary_positions",
-                 [](nb::handle self_h) {
-                     auto& self = nb::cast<Accumulator&>(self_h);
-                     return nb::ndarray<nb::numpy, const int64_t, nb::ndim<1>>(
-                         self.boundary_positions(),
-                         {self.n_boundary_positions()},
-                         self_h).cast();
-                 })
-            // region contained counts: shape (N, 4), uint32
-            .def_prop_ro("regions_contained",
-                 [](nb::handle self_h) {
-                     auto& self = nb::cast<Accumulator&>(self_h);
-                     const size_t n = self.n_regions();
-                     auto* base = reinterpret_cast<uint32_t*>(
-                         self.regions_data());
-                     return nb::ndarray<nb::numpy, uint32_t, nb::ndim<2>>(
-                         base,
-                         {n, rigel::accumulator::kNChannels},
-                         self_h).cast();
-                 })
-            // boundary mass_left:  shape (N+1, 4), float32
-            .def_prop_ro("boundaries_mass_left",
-                 [](nb::handle self_h) {
-                     auto& self = nb::cast<Accumulator&>(self_h);
-                     const size_t n = self.n_boundaries();
-                     auto* base = self.boundaries_data();
-                     // Stride: one Boundary == 48 bytes == 12 float32s
-                     constexpr int64_t row_stride =
-                         static_cast<int64_t>(sizeof(rigel::accumulator::Boundary)
-                                              / sizeof(float));
-                     return nb::ndarray<nb::numpy, float, nb::ndim<2>>(
-                         &base[0].mass_left[0],
-                         {n, rigel::accumulator::kNChannels},
-                         self_h,
-                         {row_stride, int64_t{1}}).cast();
-                 })
-            // boundary mass_right: shape (N+1, 4), float32
-            .def_prop_ro("boundaries_mass_right",
-                 [](nb::handle self_h) {
-                     auto& self = nb::cast<Accumulator&>(self_h);
-                     const size_t n = self.n_boundaries();
-                     auto* base = self.boundaries_data();
-                     constexpr int64_t row_stride =
-                         static_cast<int64_t>(sizeof(rigel::accumulator::Boundary)
-                                              / sizeof(float));
-                     return nb::ndarray<nb::numpy, float, nb::ndim<2>>(
-                         &base[0].mass_right[0],
-                         {n, rigel::accumulator::kNChannels},
-                         self_h,
-                         {row_stride, int64_t{1}}).cast();
-                 })
-            // boundary flux_left: shape (N+1, 4), uint32 (per-side)
-            .def_prop_ro("boundaries_flux_left",
-                 [](nb::handle self_h) {
-                     auto& self = nb::cast<Accumulator&>(self_h);
-                     const size_t n = self.n_boundaries();
-                     auto* base = self.boundaries_data();
-                     constexpr int64_t row_stride =
-                         static_cast<int64_t>(sizeof(rigel::accumulator::Boundary)
-                                              / sizeof(uint32_t));
-                     return nb::ndarray<nb::numpy, uint32_t, nb::ndim<2>>(
-                         &base[0].flux_left[0],
-                         {n, rigel::accumulator::kNChannels},
-                         self_h,
-                         {row_stride, int64_t{1}}).cast();
-                 })
-            // boundary flux_right: shape (N+1, 4), uint32 (per-side)
-            .def_prop_ro("boundaries_flux_right",
-                 [](nb::handle self_h) {
-                     auto& self = nb::cast<Accumulator&>(self_h);
-                     const size_t n = self.n_boundaries();
-                     auto* base = self.boundaries_data();
-                     constexpr int64_t row_stride =
-                         static_cast<int64_t>(sizeof(rigel::accumulator::Boundary)
-                                              / sizeof(uint32_t));
-                     return nb::ndarray<nb::numpy, uint32_t, nb::ndim<2>>(
-                         &base[0].flux_right[0],
-                         {n, rigel::accumulator::kNChannels},
-                         self_h,
-                         {row_stride, int64_t{1}}).cast();
-                 })
-            // gDNA FL pools (PR 4c): shape (kNFlPools, max_fl + 1), float64.
-            // Empty shape (kNFlPools, 0) when FL pooling is disabled.
-            .def_prop_ro("fl_pool_mass",
-                 [](nb::handle self_h) {
-                     auto& self = nb::cast<Accumulator&>(self_h);
-                     const std::size_t n = self.fl_pool_size();
-                     const std::size_t row =
-                         (n == 0) ? 0
-                                  : (static_cast<std::size_t>(self.max_fl()) + 1);
-                     return nb::ndarray<nb::numpy, const double, nb::ndim<2>>(
-                         self.fl_pool_data(),
-                         {rigel::accumulator::kNFlPools, row},
-                         self_h).cast();
-                 })
-            // boundary junction strand: shape (N+1,), int8 (Strand 0/1/2)
-            .def_prop_ro("boundaries_junction_strand",
-                 [](nb::handle self_h) {
-                     auto& self = nb::cast<Accumulator&>(self_h);
-                     const size_t n = self.n_boundaries();
-                     return nb::ndarray<nb::numpy, const int8_t, nb::ndim<1>>(
-                         self.boundary_junction_strand_data(),
-                         {n},
-                         self_h).cast();
-                 })
-            .def("region_of_pos",
-                 [](const Accumulator& a, int64_t pos) {
-                     return a.region_of_pos(pos);
+                 nb::arg("cuts"),
+                 nb::arg("node_types"),
+                 nb::arg("max_length"),
+                 "One reference's sorted cut positions, one coarse type per node, and the\n"
+                 "fragment-length limit (which is also the pool-histogram width).")
+            .def("set_junctions",
+                 [](Accumulator& a,
+                    nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> offsets,
+                    nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> acceptor_cut,
+                    nb::ndarray<const int8_t, nb::ndim<1>, nb::c_contig> sj_strand) {
+                     a.set_junctions(
+                         std::vector<int32_t>(offsets.data(), offsets.data() + offsets.shape(0)),
+                         std::vector<int32_t>(acceptor_cut.data(),
+                                              acceptor_cut.data() + acceptor_cut.shape(0)),
+                         std::vector<int8_t>(sj_strand.data(),
+                                             sj_strand.data() + sj_strand.shape(0)));
                  },
+                 nb::arg("offsets"),
+                 nb::arg("acceptor_cut"),
+                 nb::arg("sj_strand"),
+                 "The junction CSR for THIS reference, keyed by the ref-local donor cut\n"
+                 "index. The junction-edge id is the slot; slot order is a contract.")
+            .def_prop_ro("n_nodes",     [](const Accumulator& a) { return a.n_nodes(); })
+            .def_prop_ro("n_edges",     [](const Accumulator& a) { return a.n_edges(); })
+            .def_prop_ro("n_junctions", [](const Accumulator& a) { return a.n_junctions(); })
+            .def_prop_ro("n_cuts",      [](const Accumulator& a) { return a.n_cuts(); })
+            .def_prop_ro("max_length",  [](const Accumulator& a) { return a.max_length(); })
+
+            // ── nodes ────────────────────────────────────────────────────────────────────────────────
+            .def_prop_ro("node_contained_count", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(Node) / sizeof(uint32_t);
+                return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
+                    &a.nodes_data()[0].contained_count[0], {a.n_nodes(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+            .def_prop_ro("node_spanning_count", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(Node) / sizeof(uint32_t);
+                return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
+                    &a.nodes_data()[0].spanning_count[0], {a.n_nodes(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+            .def_prop_ro("node_contained_density", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(Node) / sizeof(uint64_t);
+                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
+                    &a.nodes_data()[0].contained_density[0], {a.n_nodes(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+            .def_prop_ro("node_spanning_density", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(Node) / sizeof(uint64_t);
+                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
+                    &a.nodes_data()[0].spanning_density[0], {a.n_nodes(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+            .def_prop_ro("node_start_count", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<1>>(
+                    a.node_start_count_data(), {a.n_nodes()}, h).cast();
+            })
+
+            // ── contiguous edges ─────────────────────────────────────────────────────────────────────
+            .def_prop_ro("edge_unspliced_count", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(uint32_t);
+                return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
+                    &a.edges_data()[0].unspliced_count[0], {a.n_edges(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+            .def_prop_ro("edge_spliced_count", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(uint32_t);
+                return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
+                    &a.edges_data()[0].spliced_count[0], {a.n_edges(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+            .def_prop_ro("edge_unspliced_density", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(uint64_t);
+                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
+                    &a.edges_data()[0].unspliced_density[0], {a.n_edges(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+            .def_prop_ro("edge_spliced_density", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(uint64_t);
+                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
+                    &a.edges_data()[0].spliced_density[0], {a.n_edges(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+
+            // ── junction edges ───────────────────────────────────────────────────────────────────────
+            .def_prop_ro("sj_count", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(JunctionEdge) / sizeof(uint32_t);
+                return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
+                    &a.junctions_data()[0].count[0], {a.n_junctions(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+            .def_prop_ro("sj_density", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(JunctionEdge) / sizeof(uint64_t);
+                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
+                    &a.junctions_data()[0].density[0], {a.n_junctions(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+
+            // ── the length pools, and the denominators ───────────────────────────────────────────────
+            .def_prop_ro("pool_lengths", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                const std::size_t row = static_cast<std::size_t>(a.max_length()) + 1;
+                return nb::ndarray<nb::numpy, const int64_t, nb::ndim<2>>(
+                    a.pool_lengths_data(), {kNFragmentPools, row}, h).cast();
+            })
+            .def_prop_ro("qc", [](const Accumulator& a) {
+                const auto& c = a.counters();
+                nb::dict qc;
+                qc["deposited"]                = c.deposited;
+                qc["dropped_too_long"]         = c.dropped_too_long;
+                qc["dropped_empty"]            = c.dropped_empty;
+                qc["dropped_strand_undefined"] = c.dropped_strand_undefined;
+                qc["dropped_ambiguous_path"]   = c.dropped_ambiguous_path;
+                qc["unannotated_introns"]      = c.unannotated_introns;
+                qc["contradictory_sj_strand"]  = c.contradictory_sj_strand;
+                qc["sj_implicit_fragments"]    = c.sj_implicit_fragments;
+                qc["introns_absorbed"]         = c.introns_absorbed;
+                return qc;
+            })
+
+            .def("node_of_pos",
+                 [](const Accumulator& a, int64_t pos) { return a.node_of_pos(pos); },
                  nb::arg("pos"))
+
+            // Returns the QC KEY the deposit incremented, which is the specification's
+            // `DepositOutcome.value` — so the parity gate compares outcomes without an enum mapping, and
+            // the string it compares is the name of the counter that moved.
+            //
+            // ⚠ `introns` here are `(start, end)` pairs on THIS reference. The scan-path adapter is what
+            // restricts a fragment's introns to one reference and de-duplicates them; `deposit` itself
+            // normalises by coordinate and never reads `IntronBlock::ref_id`.
             .def("deposit",
                  [](Accumulator& a,
-                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> starts,
-                    nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ends,
-                    bool spliced,
-                    bool primary,
-                    int32_t strand) {
-                     if (starts.shape(0) != ends.shape(0)) {
-                         throw std::invalid_argument(
-                             "deposit: starts and ends must have same length");
+                    int64_t start,
+                    int64_t end,
+                    nb::iterable introns,
+                    int32_t align_strand,
+                    int32_t sj_strand,
+                    bool sj_implicit,
+                    bool path_ambiguous) {
+                     std::vector<IntronBlock> blocks;
+                     for (nb::handle item : introns) {
+                         auto pair = nb::cast<nb::tuple>(item);
+                         blocks.push_back({0,
+                                           nb::cast<int32_t>(pair[0]),
+                                           nb::cast<int32_t>(pair[1]),
+                                           0});
                      }
-                     a.deposit(starts.data(), ends.data(),
-                               static_cast<size_t>(starts.shape(0)),
-                               spliced, primary, strand);
+                     FragmentPath path;
+                     path.start = start;
+                     path.end = end;
+                     path.introns = blocks.data();
+                     path.n_introns = blocks.size();
+                     path.align_strand = align_strand;
+                     path.sj_strand = sj_strand;
+                     path.sj_implicit = sj_implicit;
+                     path.path_ambiguous = path_ambiguous;
+                     return std::string(
+                         rigel::accumulator::outcome_key(a.deposit(path, binding_scratch)));
                  },
-                 nb::arg("block_starts"),
-                 nb::arg("block_ends"),
-                 nb::arg("spliced"),
-                 nb::arg("primary"),
-                 nb::arg("strand") = 0)
-            // Element-wise sum of `other` into this accumulator; requires identical boundary
-            // positions. This is the per-worker merge the parallel scan performs internally
-            // (BamScanner::scan), exposed so the DETERMINISM contract can be tested directly:
-            // deposit a fragment corpus into K accumulators in K different orders, merge, and
-            // assert bit-identity against a single-accumulator run. Without this binding that
-            // test cannot be written at all — and it is the property the accumulator v5 rework
-            // makes exact by moving every channel to integer/fixed-point arithmetic (v5 §6, test
-            // A9), so the pre-rework behaviour needs a recorded control.
+                 nb::arg("start"),
+                 nb::arg("end"),
+                 nb::arg("introns") = nb::tuple(),
+                 nb::arg("align_strand") = STRAND_POS,
+                 nb::arg("sj_strand") = STRAND_NONE,
+                 nb::arg("sj_implicit") = false,
+                 nb::arg("path_ambiguous") = false)
+
+            // Element-wise sum of `other` into this accumulator — the per-worker merge the parallel scan
+            // performs internally, exposed so the DETERMINISM contract can be tested directly: shard one
+            // fragment corpus K ways, merge, and require bit-identity with the unsharded run. Every channel
+            // is an integer now, so that identity is exact rather than approximate.
             .def("merge_from",
                  [](Accumulator& a, const Accumulator& other) { a.merge_from(other); },
                  nb::arg("other"));
-        m.attr("ACCUMULATOR_N_CHANNELS") =
-            static_cast<int>(rigel::accumulator::kNChannels);
-        m.def("accumulator_channel_idx",
-              [](bool spliced, bool strand_pos) {
-                  return rigel::accumulator::channel_idx(spliced, strand_pos);
-              },
-              nb::arg("spliced"), nb::arg("strand_pos"));
     }
 
-    // Contiguous-genomic-span decomposition (accumulator span redesign). Test /
-    // spec surface mirroring tests/native/_fragment_spans_reference.py; the scan
-    // path calls the same core. Inputs/outputs are lists of (ref, start, end).
-    m.def("fragment_genomic_spans",
-          [](nb::list blocks, nb::list cut_introns) {
-              auto to_blocks = [](nb::list items, auto&& push) {
-                  for (auto h : items) {
-                      auto t = nb::cast<nb::tuple>(h);
-                      push(nb::cast<int32_t>(t[0]),
-                           nb::cast<int32_t>(t[1]),
-                           nb::cast<int32_t>(t[2]));
-                  }
-              };
-              std::vector<ExonBlock> b;
-              std::vector<IntronBlock> c;
-              to_blocks(blocks, [&](int32_t r, int32_t s, int32_t e) {
-                  b.push_back({r, s, e, 0}); });
-              to_blocks(cut_introns, [&](int32_t r, int32_t s, int32_t e) {
-                  c.push_back({r, s, e, 0}); });
-              // The core relies on sorted-by-(ref,start) inputs (build_fragment
-              // guarantees this in the scan path); sort here so arbitrary test
-              // input matches the reference.
-              auto less = [](const auto& x, const auto& y) {
-                  if (x.ref_id != y.ref_id) return x.ref_id < y.ref_id;
-                  if (x.start != y.start) return x.start < y.start;
-                  return x.end < y.end;
-              };
-              std::sort(b.begin(), b.end(), less);
-              std::sort(c.begin(), c.end(), less);
-              std::vector<int32_t> oref;
-              std::vector<int64_t> ostart, oend;
-              fragment_genomic_spans(b, c, oref, ostart, oend);
-              nb::list out;
-              for (std::size_t i = 0; i < oref.size(); ++i)
-                  out.append(nb::make_tuple(oref[i], ostart[i], oend[i]));
-              return out;
-          },
-          nb::arg("blocks"), nb::arg("cut_introns"),
-          "Decompose aligned blocks into contiguous genomic spans (full extent "
-          "per reference minus cut introns). Returns list of (ref, start, end).");
 
     nb::class_<BamScanner>(m, "BamScanner")
         .def(nb::init<FragmentResolver&, const std::string&, bool, bool>(),
@@ -2883,32 +2958,58 @@ NB_MODULE(_bam_impl, m) {
              "    'frag_length_observations'.\n")
           .def("set_regions",
                  [](BamScanner& self,
-                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> boundary_positions,
-                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_pos_offsets,
+                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> cut_positions,
+                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> ref_cut_offsets,
                      int32_t n_refs,
-                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> region_types,
-                     int fl_max_size) {
-                      self.set_regions(boundary_positions, ref_pos_offsets, n_refs,
-                                       region_types, fl_max_size);
+                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> node_types,
+                     int max_length) {
+                      self.set_regions(cut_positions, ref_cut_offsets, n_refs,
+                                       node_types, max_length);
                  },
-                 nb::arg("boundary_positions"),
-                 nb::arg("ref_pos_offsets"),
+                 nb::arg("cut_positions"),
+                 nb::arg("ref_cut_offsets"),
                  nb::arg("n_refs"),
-                 nb::arg("region_types"),
-                 nb::arg("fl_max_size"),
-                 "Install the fractional-accumulator region partition.\n\n"
-                 "boundary_positions : int64[B_pos_total]\n"
-                 "    Flat sorted boundary positions for all references.\n"
-                 "ref_pos_offsets : int64[n_refs + 1]\n"
-                 "    Per-ref offsets into boundary_positions; ref f spans\n"
-                 "    boundary_positions[ref_pos_offsets[f]:ref_pos_offsets[f+1]].\n"
+                 nb::arg("node_types"),
+                 nb::arg("max_length"),
+                 "Install the accumulator's node partition. Call set_junctions next.\n\n"
+                 "cut_positions : int64[n_cuts_total]\n"
+                 "    Flat sorted cut positions for all references. A reference\n"
+                 "    contributing c cuts owns c-1 nodes and c-2 interior lines.\n"
+                 "ref_cut_offsets : int64[n_refs + 1]\n"
+                 "    Per-ref offsets into cut_positions; ref f spans\n"
+                 "    cut_positions[ref_cut_offsets[f]:ref_cut_offsets[f+1]].\n"
                  "n_refs : int\n"
                  "    Number of references (matches FragmentResolver).\n"
-                 "region_types : uint8[R_total]\n"
-                 "    Per-region FL-pool type (0=intergenic,1=intronic,2=exonic),\n"
-                 "    ref-major. Empty disables gDNA FL pooling (PR 4c).\n"
-                 "fl_max_size : int\n"
-                 "    FL histogram max bin; <= 0 disables gDNA FL pooling.\n")
+                 "node_types : uint8[n_nodes_total]\n"
+                 "    Coarse node type (0=intergenic, 1=intron, 2=exon), ref-major.\n"
+                 "    It types the fragment-length pools.\n"
+                 "max_length : int\n"
+                 "    The fragment-length limit applied to L, and the width of the\n"
+                 "    pool histograms. Must be >= 1.\n")
+          .def("set_junctions",
+                 [](BamScanner& self,
+                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> offsets,
+                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> acceptor_cut,
+                     nb::ndarray<const int8_t, nb::ndim<1>, nb::c_contig> sj_strand) {
+                      self.set_junctions(offsets, acceptor_cut, sj_strand);
+                 },
+                 nb::arg("offsets"),
+                 nb::arg("acceptor_cut"),
+                 nb::arg("sj_strand"),
+                 "Install the annotated junction edges, as build_junction_edge_arrays\n"
+                 "emits them. A SECOND call because set_regions refuses to run twice.\n\n"
+                 "offsets : int64[n_cuts_total + 1]\n"
+                 "    CSR over the flat cut axis, keyed by the DONOR cut index.\n"
+                 "acceptor_cut : int64[n_junctions]\n"
+                 "    Flat cut index of each junction's high end. The junction-edge id\n"
+                 "    IS the slot here; edges_df.edge_row is a join key and is not\n"
+                 "    passed. Slot order is a contract: sort on\n"
+                 "    (donor cut, acceptor cut, sj_strand).\n"
+                 "sj_strand : int8[n_junctions]\n"
+                 "    Each junction's ANNOTATED strand.\n\n"
+                 "Not optional: scan() refuses to run without it, because a missing\n"
+                 "table makes every observed intron read as unannotated and empties\n"
+                 "the junction edges silently. Pass empty arrays to declare none.\n")
         ;
 
     nb::class_<BamAnnotationWriter>(m, "BamAnnotationWriter")
