@@ -1,20 +1,21 @@
-"""
-Fractional accumulator specification tests.
+"""THE ACCUMULATOR SPEC — the matrix the reference and the native build are both gated on.
 
-Each test case has two halves:
+    Design: ``docs/ACCUMULATOR_DESIGN.md``   ·   Plan: ``docs/IMPLEMENTATION_PLAN.md`` §3.6, §10.4
 
-1. ``test_<case>_reference`` — runs against the pure-Python reference in
-   ``_accumulator_reference.py``; locks the spec.
-2. ``test_<case>_native`` — runs against the native C++ implementation and
-   must match the reference byte-for-byte.
+``_accumulator_reference.py`` is the executable specification; the native accumulator is required to
+reproduce it byte for byte. This module is what "correct" means for both.
 
-Boundary flux is **per side** (``flux_left`` / ``flux_right``): a contiguous
-crossing credits both sides of its one boundary; a spliced intron-skip credits
-one side of each flanking boundary (no false exon-intron flux). The deposit
-``primary`` bit is the channel-0 selector — genome '+' for unspliced, SENSE
-for spliced (the scanner orients spliced reads by the splice motif).
+THE RULE UNDER TEST, in five lines. The genome is a graph: NODES are half-open intervals tiling each
+reference, and the 0-bp LINES between adjacent nodes are CONTIGUOUS edges. A JUNCTION edge is a directed
+donor→acceptor link from the annotation. A fragment is a PATH — its aligned blocks joined across mate
+gaps and broken by introns — of length ``L = span − Σ intron``. Nodes count fragments CONTAINED and
+SPANNING; edges count fragments CROSSING. Every object stores an integer count and a fixed-point density
+``round(2^32 / placements)``, with ``placements = L`` at a node and ``L − 1`` at an edge.
 
-FL histograms are NOT accumulated (audit_phase1.md decision #6).
+⚠ **No partitioning.** Every crossed edge receives the FULL weight. The chance that a length-``L``
+fragment crosses a given line is proportional to ``L`` and the deposit is ``1/L``, so the two cancel and
+every fragment length contributes equally to each edge. Dividing by the number of edges crossed destroys
+that cancellation and makes the answer depend on node spacing — measured up to **3.6× low**.
 """
 
 from __future__ import annotations
@@ -22,651 +23,629 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from rigel.types import Strand
+
 from ._accumulator_reference import (
+    CHANNEL_MINUS,
+    CHANNEL_PLUS,
+    DENSITY_SCALE,
     Accumulator,
-    channel_idx,
-)
-
-try:
-    from rigel.native import Accumulator as NativeAccumulator  # type: ignore
-
-    HAS_NATIVE = True
-except (ImportError, AttributeError):
-    NativeAccumulator = None  # type: ignore
-    HAS_NATIVE = False
-
-
-XFAIL_NATIVE = pytest.mark.xfail(
-    not HAS_NATIVE,
-    reason="fractional accumulator native binding unavailable",
-    strict=True,
+    DepositOutcome,
+    FragmentPool,
+    Partition,
+    density_quantum,
 )
 
 
-# --- Common partition fixtures -----------------------------------------------
+# ---------------------------------------------------------------------------
+# fixtures
+# ---------------------------------------------------------------------------
 
+#: chr1 cuts   0    100   200   201   400   900   1000
+#: nodes        n0    n1    n2*   n3    n4    n5      (* n2 is 1 bp: [200,201))
+#: lines           1     2     3     4     5          (local cut index)
+CHR1_CUTS = [0, 100, 200, 201, 400, 900, 1000]
+CHR2_CUTS = [0, 500, 1000]
 
-def partition_exon_intron_exon():
-    """exon1 (1000,2000), intron (2000,5000), exon2 (5000,6000)."""
-    return np.array([1000, 2000, 5000, 6000], dtype=np.int64)
+#: coarse node type: 0 intergenic, 1 intron, 2 exon
+CHR1_TYPES = [0, 2, 2, 1, 2, 0]
+CHR2_TYPES = [0, 2]
 
+#: an annotated intron whose endpoints are cuts 3 and 5, so it SWALLOWS the line at cut 4
+JUNCTION = (0, 201, 900, Strand.POS)
 
-def partition_three_adjacent_exons():
-    """Three contiguous regions: (0,100), (100,200), (200,400)."""
-    return np.array([0, 100, 200, 400], dtype=np.int64)
 
+def _partition(junctions=()):
+    return Partition.from_cuts(
+        [CHR1_CUTS, CHR2_CUTS], node_types=[CHR1_TYPES, CHR2_TYPES], junctions=junctions
+    )
 
-def _both(make, edges):
-    return make(boundary_positions=edges)
 
+def _acc(junctions=(), **kw):
+    return Accumulator(_partition(junctions), **kw)
 
-# --- T1: contained single block ---------------------------------------------
 
+def _edge(ref, line):
+    """Global contiguous-edge id of the line at local cut index ``line``."""
+    return (0 if ref == 0 else len(CHR1_CUTS) - 2) + line - 1
 
-def _check_t1(acc):
-    acc.deposit(blocks=[(1100, 1200)], spliced=False, primary=True)
-    ch = channel_idx(spliced=False, primary=True)
-    assert acc.regions[0].contained[ch] == 1
-    assert acc.regions[0].contained.sum() == 1
-    assert acc.regions[1].contained.sum() == 0
-    assert acc.regions[2].contained.sum() == 0
-    for b in acc.boundaries:
-        assert b.mass_left.sum() == 0.0
-        assert b.mass_right.sum() == 0.0
-        assert b.flux_left.sum() == 0
-        assert b.flux_right.sum() == 0
-    assert acc.total_mass_deposited() == pytest.approx(1.0)
 
-
-def test_t1_contained_single_block_reference():
-    _check_t1(_both(Accumulator, partition_exon_intron_exon()))
-
-
-@XFAIL_NATIVE
-def test_t1_contained_single_block_native():
-    _check_t1(_both(NativeAccumulator, partition_exon_intron_exon()))
-
-
-# --- T2: contained, multi-block spliced -------------------------------------
-
-
-def _check_t2(acc):
-    acc.deposit(blocks=[(5100, 5200), (5400, 5500)], spliced=True, primary=True)
-    ch = channel_idx(spliced=True, primary=True)
-    assert acc.regions[2].contained[ch] == 1
-    assert acc.regions[2].contained.sum() == 1
-    assert acc.regions[0].contained.sum() == 0
-    assert acc.regions[1].contained.sum() == 0
-    for b in acc.boundaries:
-        assert b.flux_left.sum() == 0
-        assert b.flux_right.sum() == 0
-        assert b.mass_left.sum() == 0.0
-        assert b.mass_right.sum() == 0.0
-    assert acc.total_mass_deposited() == pytest.approx(1.0)
-
-
-def test_t2_contained_multi_block_spliced_reference():
-    _check_t2(_both(Accumulator, partition_exon_intron_exon()))
-
-
-@XFAIL_NATIVE
-def test_t2_contained_multi_block_spliced_native():
-    _check_t2(_both(NativeAccumulator, partition_exon_intron_exon()))
-
-
-# --- T3: two blocks adjacent regions (contiguous crossing) ------------------
-
-
-def _check_t3(acc):
-    # Block1 R0 = (50,100) len 50; Block2 R1 = (100,180) len 80. L=130.
-    # Contiguous crossing of boundary 1 → BOTH sides credited.
-    acc.deposit(blocks=[(50, 100), (100, 180)], spliced=True, primary=True)
-    ch = channel_idx(spliced=True, primary=True)
-    L = 130.0
-    b = acc.boundaries[1]
-    assert b.mass_left[ch] == pytest.approx(50.0 / L, abs=1e-6)
-    assert b.mass_right[ch] == pytest.approx(80.0 / L, abs=1e-6)
-    assert b.flux_left[ch] == 1
-    assert b.flux_right[ch] == 1
-    for i in (0, 2, 3):
-        assert acc.boundaries[i].mass_left.sum() == 0.0
-        assert acc.boundaries[i].mass_right.sum() == 0.0
-        assert acc.boundaries[i].flux_left.sum() == 0
-        assert acc.boundaries[i].flux_right.sum() == 0
-    for r in acc.regions:
-        assert r.contained.sum() == 0
-    assert acc.total_mass_deposited() == pytest.approx(1.0)
-
-
-def test_t3_two_block_adjacent_regions_reference():
-    _check_t3(_both(Accumulator, partition_three_adjacent_exons()))
-
-
-@XFAIL_NATIVE
-def test_t3_two_block_adjacent_regions_native():
-    _check_t3(_both(NativeAccumulator, partition_three_adjacent_exons()))
-
-
-# --- T4: two blocks non-adjacent (intron skip) — PER-SIDE flux --------------
-
-
-def _check_t4(acc):
-    # B1=(1800,1950) in R0 (150); B2=(5050,5950) in R2 (900). R1 (intron)
-    # skipped. L=1050. The exon1→intron boundary (B1) is credited only on its
-    # LEFT side; the intron→exon2 boundary (B2) only on its RIGHT side — the
-    # intron-facing sides stay zero (no false flux).
-    acc.deposit(blocks=[(1800, 1950), (5050, 5950)], spliced=True, primary=True)
-    ch = channel_idx(spliced=True, primary=True)
-    L = 1050.0
-    b1 = acc.boundaries[1]  # position 2000 (exon1 → intron)
-    b2 = acc.boundaries[2]  # position 5000 (intron → exon2)
-    assert b1.mass_left[ch] == pytest.approx(150.0 / L, abs=1e-6)
-    assert b1.mass_right[ch] == 0.0
-    assert b1.flux_left[ch] == 1
-    assert b1.flux_right[ch] == 0  # intron-facing side: NO false flux
-    assert b2.mass_right[ch] == pytest.approx(900.0 / L, abs=1e-6)
-    assert b2.mass_left[ch] == 0.0
-    assert b2.flux_right[ch] == 1
-    assert b2.flux_left[ch] == 0  # intron-facing side: NO false flux
-
-    for i in (0, 3):
-        assert acc.boundaries[i].mass_left.sum() == 0.0
-        assert acc.boundaries[i].mass_right.sum() == 0.0
-        assert acc.boundaries[i].flux_left.sum() == 0
-        assert acc.boundaries[i].flux_right.sum() == 0
-    for r in acc.regions:
-        assert r.contained.sum() == 0
-    assert acc.total_mass_deposited() == pytest.approx(1.0, abs=1e-6)
-
-
-def test_t4_two_block_non_adjacent_regions_reference():
-    _check_t4(_both(Accumulator, partition_exon_intron_exon()))
-
-
-@XFAIL_NATIVE
-def test_t4_two_block_non_adjacent_regions_native():
-    _check_t4(_both(NativeAccumulator, partition_exon_intron_exon()))
-
-
-# --- T5: three blocks all adjacent (contiguous) -----------------------------
-
-
-def _check_t5(acc):
-    # B1 R0=(0,100); B2 R1=(100,180); B3 R2=(200,320). L=300. R1 is the
-    # ENCOMPASSED interior region (crossed at both boundaries) → its slice mass
-    # (80/L) splits 50/50: 40/L to B1.mass_right and 40/L to B2.mass_left. The
-    # end slices (R0, R2) keep full mass. Fragment mass conserves to 1.0.
-    acc.deposit(blocks=[(0, 100), (100, 180), (200, 320)], spliced=True, primary=True)
-    ch = channel_idx(spliced=True, primary=True)
-    L = 300.0
-    b1 = acc.boundaries[1]
-    b2 = acc.boundaries[2]
-    assert b1.mass_left[ch] == pytest.approx(100.0 / L, abs=1e-6)
-    assert b1.mass_right[ch] == pytest.approx(40.0 / L, abs=1e-6)
-    assert b1.flux_left[ch] == 1
-    assert b1.flux_right[ch] == 1
-    assert b2.mass_left[ch] == pytest.approx(40.0 / L, abs=1e-6)
-    assert b2.mass_right[ch] == pytest.approx(120.0 / L, abs=1e-6)
-    assert b2.flux_left[ch] == 1
-    assert b2.flux_right[ch] == 1
-    assert acc.boundaries[0].mass_left.sum() == 0.0
-    assert acc.boundaries[3].mass_right.sum() == 0.0
-    for r in acc.regions:
-        assert r.contained.sum() == 0
-    assert acc.total_mass_deposited() == pytest.approx(1.0, abs=1e-6)
-
-
-def test_t5_three_block_all_adjacent_reference():
-    _check_t5(_both(Accumulator, partition_three_adjacent_exons()))
-
-
-@XFAIL_NATIVE
-def test_t5_three_block_all_adjacent_native():
-    _check_t5(_both(NativeAccumulator, partition_three_adjacent_exons()))
-
-
-# --- T6: fully spans region (single block straddles regions, contiguous) ----
-
-
-def _check_t6(acc):
-    # Single block (50,250) over partition [0,100,200,300]: R0=(0,100) gets
-    # 50bp, R1=(100,200) is fully ENCOMPASSED (100bp slice), R2=(200,300) gets
-    # 50bp. L=200. R1's slice mass (100/L) splits 50/50 → 50/L to B1.mass_right
-    # and 50/L to B2.mass_left; the end slices keep full mass. Fragment mass
-    # conserves to 1.0 (was the 1.5 double-count bug, PR 5.5).
-    acc.deposit(blocks=[(50, 250)], spliced=False, primary=True)
-    ch = channel_idx(spliced=False, primary=True)
-    L = 200.0
-    b1 = acc.boundaries[1]
-    b2 = acc.boundaries[2]
-    assert b1.mass_left[ch] == pytest.approx(50.0 / L, abs=1e-6)
-    assert b1.mass_right[ch] == pytest.approx(50.0 / L, abs=1e-6)
-    assert b1.flux_left[ch] == 1
-    assert b1.flux_right[ch] == 1
-    assert b2.mass_left[ch] == pytest.approx(50.0 / L, abs=1e-6)
-    assert b2.mass_right[ch] == pytest.approx(50.0 / L, abs=1e-6)
-    assert b2.flux_left[ch] == 1
-    assert b2.flux_right[ch] == 1
-    for r in acc.regions:
-        assert r.contained.sum() == 0
-    assert acc.total_mass_deposited() == pytest.approx(1.0, abs=1e-6)
-
-
-def test_t6_fully_spans_region_reference():
-    _check_t6(_both(Accumulator, np.array([0, 100, 200, 300], dtype=np.int64)))
-
-
-@XFAIL_NATIVE
-def test_t6_fully_spans_region_native():
-    _check_t6(_both(NativeAccumulator, np.array([0, 100, 200, 300], dtype=np.int64)))
-
-
-# --- T6b: mass conservation for region-spanning fragments (PR 5.5) ----------
-
-
-def _check_t6b(acc):
-    # Every fragment — contained, simple crossing, or spanning whole regions —
-    # deposits total mass exactly 1.0. Partition [0,100,..,500] → 5×100bp
-    # regions; fragments span 1..5 regions (with 0..3 encompassed interiors).
-    frags = [
-        [(10, 50)],  # contained in R0 (M=1)
-        [(50, 150)],  # crosses R0→R1 (M=2, no interior)
-        [(50, 250)],  # spans R0, R1(enc), R2 (M=3, 1 interior)
-        [(50, 450)],  # spans R0..R4 (M=5, 3 interiors)
-        [(150, 350)],  # spans R1, R2(enc), R3 (M=3, 1 interior)
-    ]
-    for blocks in frags:
-        acc.deposit(blocks=blocks, spliced=False, primary=True)
-    assert acc.total_mass_deposited() == pytest.approx(float(len(frags)), abs=1e-5)
-
-
-def test_t6b_spanning_mass_conservation_reference():
-    edges = np.array([0, 100, 200, 300, 400, 500], dtype=np.int64)
-    _check_t6b(_both(Accumulator, edges))
-
-
-@XFAIL_NATIVE
-def test_t6b_spanning_mass_conservation_native():
-    edges = np.array([0, 100, 200, 300, 400, 500], dtype=np.int64)
-    _check_t6b(_both(NativeAccumulator, edges))
-
-
-# --- T7: mass conservation over random contained fragments ------------------
-
-
-def _check_t7(acc, edges):
-    rng = np.random.default_rng(42)
-    n = 1000
-    for _ in range(n):
-        r = rng.integers(0, 4)
-        region_start = int(edges[r])
-        region_end = int(edges[r + 1])
-        length = int(rng.integers(50, 200))
-        start = int(rng.integers(region_start, region_end - length))
-        acc.deposit(
-            blocks=[(start, start + length)],
-            spliced=bool(rng.integers(0, 2)),
-            primary=bool(rng.integers(0, 2)),
-        )
-    assert acc.total_mass_deposited() == pytest.approx(float(n), abs=1e-3)
-
-
-def test_t7_mass_conservation_random_reference():
-    edges = np.array([0, 1000, 2000, 3000, 4000], dtype=np.int64)
-    _check_t7(_both(Accumulator, edges), edges)
-
-
-@XFAIL_NATIVE
-def test_t7_mass_conservation_random_native():
-    edges = np.array([0, 1000, 2000, 3000, 4000], dtype=np.int64)
-    _check_t7(_both(NativeAccumulator, edges), edges)
-
-
-# --- T8: per-side flux on contiguous crossing (each side at most once) ------
-
-
-def _check_t8(acc):
-    acc.deposit(blocks=[(50, 100), (100, 180)], spliced=False, primary=True)
-    ch = channel_idx(spliced=False, primary=True)
-    # Contiguous crossing of boundary 1 → each side credited exactly once.
-    assert acc.boundaries[1].flux_left[ch] == 1
-    assert acc.boundaries[1].flux_right[ch] == 1
-    for i in (0, 2, 3):
-        assert acc.boundaries[i].flux_left.sum() == 0
-        assert acc.boundaries[i].flux_right.sum() == 0
-
-
-def test_t8_per_side_flux_adjacent_regions_reference():
-    _check_t8(_both(Accumulator, partition_three_adjacent_exons()))
-
-
-@XFAIL_NATIVE
-def test_t8_per_side_flux_adjacent_regions_native():
-    _check_t8(_both(NativeAccumulator, partition_three_adjacent_exons()))
-
-
-# --- T10: negative-/secondary-channel attribution ---------------------------
-
-
-def _check_t10(acc):
-    acc.deposit(blocks=[(50, 100), (100, 180)], spliced=True, primary=False)
-    ch_sec = channel_idx(spliced=True, primary=False)
-    ch_pri = channel_idx(spliced=True, primary=True)
-    b = acc.boundaries[1]
-    assert b.flux_left[ch_sec] == 1
-    assert b.flux_right[ch_sec] == 1
-    assert b.flux_left[ch_pri] == 0
-    assert b.flux_right[ch_pri] == 0
-    assert b.mass_left[ch_sec] > 0.0
-    assert b.mass_left[ch_pri] == 0.0
-    assert b.mass_right[ch_sec] > 0.0
-    assert b.mass_right[ch_pri] == 0.0
-
-
-def test_t10_secondary_channel_attribution_reference():
-    _check_t10(_both(Accumulator, partition_three_adjacent_exons()))
-
-
-@XFAIL_NATIVE
-def test_t10_secondary_channel_attribution_native():
-    _check_t10(_both(NativeAccumulator, partition_three_adjacent_exons()))
-
-
-# --- T11: spliced flag attribution across channels --------------------------
-
-
-def _check_t11(acc):
-    acc.deposit(blocks=[(110, 190)], spliced=True, primary=True)
-    acc.deposit(blocks=[(110, 190)], spliced=False, primary=True)
-    assert acc.regions[1].contained[channel_idx(spliced=True, primary=True)] == 1
-    assert acc.regions[1].contained[channel_idx(spliced=False, primary=True)] == 1
-    assert acc.regions[1].contained[channel_idx(spliced=True, primary=False)] == 0
-    assert acc.regions[1].contained[channel_idx(spliced=False, primary=False)] == 0
-
-
-def test_t11_spliced_flag_attribution_reference():
-    _check_t11(_both(Accumulator, partition_three_adjacent_exons()))
-
-
-@XFAIL_NATIVE
-def test_t11_spliced_flag_attribution_native():
-    _check_t11(_both(NativeAccumulator, partition_three_adjacent_exons()))
-
-
-# --- T12: native matches reference byte-for-byte on an intron-skip ----------
-
-
-@pytest.mark.skipif(not HAS_NATIVE, reason="native binding unavailable")
-def test_native_matches_reference_intron_skip():
-    edges = partition_exon_intron_exon()
-    ref = Accumulator(boundary_positions=edges)
-    nat = NativeAccumulator(boundary_positions=edges)
-    for acc in (ref, nat):
-        acc.deposit(blocks=[(1800, 1950), (5050, 5950)], spliced=True, primary=True)
-        acc.deposit(blocks=[(1100, 1300)], spliced=False, primary=False)
-    for i in range(len(ref.boundaries)):
-        np.testing.assert_allclose(ref.boundaries[i].mass_left, nat.boundaries[i].mass_left)
-        np.testing.assert_allclose(ref.boundaries[i].mass_right, nat.boundaries[i].mass_right)
-        np.testing.assert_array_equal(ref.boundaries[i].flux_left, nat.boundaries[i].flux_left)
-        np.testing.assert_array_equal(ref.boundaries[i].flux_right, nat.boundaries[i].flux_right)
-    for i in range(len(ref.regions)):
-        np.testing.assert_array_equal(ref.regions[i].contained, nat.regions[i].contained)
-
-
-# --- FL pools (PR 4c): gDNA fragment-length histograms -----------------------
-#
-# Partition [0,100,200,400] → regions (0,100), (100,200), (200,400) with
-# region_types [exon=2, intron=1, intergenic=0]. FL pool index = type*2 +
-# (1 if boundary else 0); gDNA pool = intergenic+intronic, both compartments.
-
-
-def _fl_deposits(acc):
-    # contained in region 2 (intergenic): footprint 50 → INTERGENIC_CONTAINED.
-    acc.deposit(blocks=[(210, 260)], spliced=False, primary=True)
-    # crossing region 1→2 (intron→intergenic): footprint 100, 50/50 each side.
-    acc.deposit(blocks=[(150, 250)], spliced=False, primary=True)
-    # spliced fragment → excluded from FL pools entirely.
-    acc.deposit(blocks=[(10, 50), (110, 150)], spliced=True, primary=True)
-
-
-def _check_fl(acc):
-    fl = np.asarray(acc.fl_pool_mass)
-    assert fl.shape == (6, 1001)
-    np.testing.assert_allclose(fl[0, 50], 1.0)  # INTERGENIC_CONTAINED, bin 50
-    np.testing.assert_allclose(fl[1, 100], 0.5)  # INTERGENIC_BOUNDARY, bin 100
-    np.testing.assert_allclose(fl[3, 100], 0.5)  # INTRONIC_BOUNDARY, bin 100
-    np.testing.assert_allclose(fl.sum(), 2.0)  # 2 unspliced frags; spliced excluded
-
-
-def test_fl_pools_reference():
-    edges = partition_three_adjacent_exons()
-    types = np.array([2, 1, 0], dtype=np.uint8)
-    acc = Accumulator(boundary_positions=edges, region_types=types, max_fl=1000)
-    _fl_deposits(acc)
-    _check_fl(acc)
-
-
-@XFAIL_NATIVE
-def test_fl_pools_native_matches_reference():
-    edges = partition_three_adjacent_exons()
-    types = np.array([2, 1, 0], dtype=np.uint8)
-    ref = Accumulator(boundary_positions=edges, region_types=types, max_fl=1000)
-    nat = NativeAccumulator(boundary_positions=edges, region_types=types, max_fl=1000)
-    _fl_deposits(ref)
-    _fl_deposits(nat)
-    np.testing.assert_allclose(np.asarray(nat.fl_pool_mass), ref.fl_pool_mass)
-    _check_fl(nat)
-
-
-@XFAIL_NATIVE
-def test_fl_pools_disabled_without_region_types():
-    edges = partition_three_adjacent_exons()
-    nat = NativeAccumulator(boundary_positions=edges)  # no region_types → FL off
-    nat.deposit(blocks=[(210, 260)], spliced=False, primary=True)
-    assert np.asarray(nat.fl_pool_mass).shape == (6, 0)
-
-
-# --- FL footprint = SPAN, not covered length (regression) --------------------
-#
-# A fragment whose blocks have an inter-block GAP (paired mates with insert >
-# read1+read2 covered bases) must bin its FL at the genomic SPAN
-# (max end − min start), NOT the covered length (Σ block lengths). Both blocks
-# (210,260) and (310,360) lie in region 2 (intergenic [200,400)): covered =
-# 50+50 = 100, span = 360−210 = 150. Pre-fix the pool binned at the covered
-# length, collapsing long gDNA fragments to a spike at ~2×read_length and
-# leaking typical-length gDNA to RNA in the scorer (which queries the pmf at the
-# genomic footprint = span). The gap case was previously untested.
-
-
-def _fl_gap_deposit(acc):
-    acc.deposit(blocks=[(210, 260), (310, 360)], spliced=False, primary=True)
-
-
-def _check_fl_gap(acc):
-    fl = np.asarray(acc.fl_pool_mass)
-    np.testing.assert_allclose(fl[0, 150], 1.0)  # INTERGENIC_CONTAINED at SPAN 150
-    assert fl[0, 100] == 0.0  # NOT the covered length 100 (the pre-fix bug bin)
-    np.testing.assert_allclose(fl.sum(), 1.0)
-
-
-def test_fl_footprint_is_span_reference():
-    edges = partition_three_adjacent_exons()
-    types = np.array([2, 1, 0], dtype=np.uint8)
-    acc = Accumulator(boundary_positions=edges, region_types=types, max_fl=1000)
-    _fl_gap_deposit(acc)
-    _check_fl_gap(acc)
-
-
-@XFAIL_NATIVE
-def test_fl_footprint_is_span_native():
-    edges = partition_three_adjacent_exons()
-    types = np.array([2, 1, 0], dtype=np.uint8)
-    ref = Accumulator(boundary_positions=edges, region_types=types, max_fl=1000)
-    nat = NativeAccumulator(boundary_positions=edges, region_types=types, max_fl=1000)
-    _fl_gap_deposit(ref)
-    _fl_gap_deposit(nat)
-    np.testing.assert_allclose(np.asarray(nat.fl_pool_mass), ref.fl_pool_mass)
-    _check_fl_gap(nat)
-
-
-# --- Junction strand: per-boundary genomic strand of the splice junction --------
-# A spliced crossing records its motif (genomic) strand on every boundary its
-# spliced mass touches; unspliced/contained fragments leave it 0. Partition:
-# exon1 (1000,2000) | intron (2000,5000) | exon2 (5000,6000) → boundaries at
-# indices 0..3 (positions 1000,2000,5000,6000). A spliced crossing exon1→exon2
-# deposits at the donor boundary (idx 1, pos 2000) and acceptor (idx 2, pos 5000).
-
-
-def _js(acc) -> list[int]:
-    return [int(acc.boundaries[i].junction_strand) for i in range(len(acc.boundaries))]
-
-
-def _check_junction_strand_pos(acc):
-    acc.deposit(blocks=[(1800, 1950), (5050, 5950)], spliced=True, primary=True, strand=1)
-    assert _js(acc) == [0, 1, 1, 0]  # POS on the two junction boundaries only
-
-
-def _check_junction_strand_neg(acc):
-    acc.deposit(blocks=[(1800, 1950), (5050, 5950)], spliced=True, primary=False, strand=2)
-    assert _js(acc) == [0, 2, 2, 0]  # NEG; the SENSE/ANTISENSE (primary) channel is independent
-
-
-def _check_junction_strand_unspliced_noop(acc):
-    # an unspliced contiguous crossing of boundary idx 1 records mass but NO junction strand
-    acc.deposit(blocks=[(1900, 2100)], spliced=False, primary=True, strand=1)
-    assert _js(acc) == [0, 0, 0, 0]
-    assert acc.boundaries[1].mass_left.sum() + acc.boundaries[1].mass_right.sum() > 0.0
-
-
-def test_junction_strand_pos_reference():
-    _check_junction_strand_pos(_both(Accumulator, partition_exon_intron_exon()))
-
-
-@XFAIL_NATIVE
-def test_junction_strand_pos_native():
-    _check_junction_strand_pos(_both(NativeAccumulator, partition_exon_intron_exon()))
-
-
-def test_junction_strand_neg_reference():
-    _check_junction_strand_neg(_both(Accumulator, partition_exon_intron_exon()))
-
-
-@XFAIL_NATIVE
-def test_junction_strand_neg_native():
-    _check_junction_strand_neg(_both(NativeAccumulator, partition_exon_intron_exon()))
-
-
-def test_junction_strand_unspliced_noop_reference():
-    _check_junction_strand_unspliced_noop(_both(Accumulator, partition_exon_intron_exon()))
-
-
-@XFAIL_NATIVE
-def test_junction_strand_unspliced_noop_native():
-    _check_junction_strand_unspliced_noop(_both(NativeAccumulator, partition_exon_intron_exon()))
+def _node(ref, local):
+    return (0 if ref == 0 else len(CHR1_CUTS) - 1) + local
 
 
 # ---------------------------------------------------------------------------
-# Worker-merge DETERMINISM — the control for accumulator v5's test A9.
+# the fixed-point density
 # ---------------------------------------------------------------------------
-#
-# v5 §6 claims that moving every channel to integer / fixed-point storage makes the accumulator
-# "bit-exact at any thread count", because integer addition is associative — and that this REMOVES
-# the known ~2.6 % cross-process nondeterminism rather than merely working around it (memory
-# `calibrate_cross_process_nondeterminism`). Test A9 is that claim.
-#
-# ⚠ Before this, `Accumulator::merge_from` was defined in C++ (accumulator.cpp:234) and called only
-# from `BamScanner::scan` — it was NOT bound to Python, so A9 had no infrastructure and the v5 claim
-# had no *control*: nothing recorded what today's accumulator actually does. These tests are that
-# control. They must keep passing through the v5 rewrite, and the float assertion below is expected
-# to STRENGTHEN from "close" to "exact" when the fractional mass channels disappear.
 
 
-class TestWorkerMergeDeterminism:
-    """Deposit one corpus across K workers in K different orders; merge; compare to a single pass."""
+def test_density_quantum_is_exact_and_rounds_half_away_from_zero():
+    """The rounding mode is part of the contract — byte-identity is undefined without it, and Python's
+    own ``round`` is banker's rounding, which differs at ties."""
+    assert density_quantum(1) == DENSITY_SCALE
+    assert density_quantum(2) == DENSITY_SCALE // 2
+    assert density_quantum(512) * 512 == DENSITY_SCALE
+    assert density_quantum(3) == (2 * DENSITY_SCALE + 3) // 6
+    with pytest.raises(ValueError):
+        density_quantum(0)
 
-    @staticmethod
-    def _corpus(rng, n, hi):
-        out = []
-        for _ in range(n):
-            s = int(rng.integers(0, hi - 20))
-            w = int(rng.integers(20, 260))
-            spliced = bool(rng.integers(0, 2))
-            blocks = [(s, min(s + w, hi))]
-            if spliced and s + w + 300 < hi:  # a spliced fragment: two blocks over an intron
-                blocks = [(s, s + w), (s + w + 200, min(s + w + 200 + w, hi))]
-            out.append((blocks, spliced, bool(rng.integers(0, 2)), int(rng.integers(0, 3))))
-        return out
 
-    @staticmethod
-    def _cuts():
-        return np.array([0, 500, 550, 560, 561, 1561, 2000], dtype=np.int64)
+def test_one_fragment_recovers_its_own_reciprocal_length():
+    acc = _acc()
+    acc.deposit(0, 120, 320)
+    t = acc.tally
+    assert int(t.edge_unspliced_count[_edge(0, 2), 0]) == 1
+    assert int(t.edge_unspliced_density[_edge(0, 2), 0]) == density_quantum(200 - 1)
 
-    def _run(self, frags, n_workers, rng=None):
-        """Shard `frags` across n_workers (in shuffled order when rng is given), merge, return arrays."""
-        cuts = self._cuts()
-        order = list(range(len(frags)))
-        if rng is not None:
-            rng.shuffle(order)
-        accs = [NativeAccumulator(boundary_positions=cuts) for _ in range(n_workers)]
-        for i, k in enumerate(order):
-            blocks, spliced, primary, strand = frags[k]
-            accs[i % n_workers].deposit(blocks, spliced=spliced, primary=primary, strand=strand)
-        merged = accs[0]
-        for a in accs[1:]:
-            merged.merge_from(a)
-        n = merged._native
-        return (
-            np.asarray(n.regions_contained).copy(),
-            np.asarray(n.boundaries_flux_left).copy(),
-            np.asarray(n.boundaries_flux_right).copy(),
-            np.asarray(n.boundaries_mass_left).copy(),
-            np.asarray(n.boundaries_mass_right).copy(),
-        )
 
-    def test_merge_equals_single_pass(self):
-        """K workers + merge == one accumulator seeing every fragment. The merge itself is correct."""
-        frags = self._corpus(np.random.default_rng(20260729), 800, 2000)
-        one = self._run(frags, 1)
-        many = self._run(frags, 4)
-        np.testing.assert_array_equal(one[0], many[0])  # contained counts — INTEGER, exact
-        np.testing.assert_array_equal(one[1], many[1])  # flux left    — INTEGER, exact
-        np.testing.assert_array_equal(one[2], many[2])  # flux right   — INTEGER, exact
-        np.testing.assert_allclose(one[3], many[3], rtol=1e-6)  # mass — float32, see below
-        np.testing.assert_allclose(one[4], many[4], rtol=1e-6)
+# ---------------------------------------------------------------------------
+# contained / crossing / spanning
+# ---------------------------------------------------------------------------
 
-    @pytest.mark.parametrize("n_workers", [1, 2, 4, 8])
-    def test_integer_channels_are_bit_identical_at_any_worker_count(self, n_workers):
-        """⭐ The INTEGER channels are already exactly worker-count- and order-independent.
 
-        Integer addition is associative and commutative, so no shard split and no merge order can move
-        them. This is the property v5 §6 extends to EVERY channel by replacing the float masses with
-        fixed-point `uint64` sums — at which point this test's float sibling below becomes exact too.
-        """
-        frags = self._corpus(np.random.default_rng(7), 800, 2000)
-        ref = self._run(frags, 1)
-        got = self._run(frags, n_workers, rng=np.random.default_rng(100 + n_workers))
-        np.testing.assert_array_equal(ref[0], got[0])
-        np.testing.assert_array_equal(ref[1], got[1])
-        np.testing.assert_array_equal(ref[2], got[2])
+def test_a_contained_fragment_touches_ONE_node_and_no_edge():
+    acc = _acc()
+    assert acc.deposit(0, 220, 380) is DepositOutcome.DEPOSITED
+    t = acc.tally
+    assert int(t.node_contained_count[_node(0, 3), 0]) == 1
+    assert int(t.node_contained_density[_node(0, 3), 0]) == density_quantum(160)
+    assert t.node_contained_count.sum() == 1
+    assert t.edge_unspliced_count.sum() == 0
+    assert t.node_spanning_count.sum() == 0
 
-    def test_float_mass_channels_are_NOT_bit_identical_across_shardings(self):
-        """⚠ The CONTROL, and the reason v5 §6 is worth doing: the float channels are order-dependent.
 
-        `mass_left`/`mass_right` accumulate `float32 += share` over a data-dependent worker partition,
-        and float addition is not associative — so a different sharding gives a different sum in the
-        low bits. That is the documented ~2.6 % cross-process nondeterminism at its source.
+def test_a_fragment_ENDING_AT_a_line_does_not_cross_it():
+    """A line is 0 bp wide: crossing needs a base on each side."""
+    acc = _acc()
+    acc.deposit(0, 120, 200)
+    assert acc.tally.edge_unspliced_count.sum() == 0
+    assert int(acc.tally.node_contained_count[_node(0, 1), 0]) == 1
 
-        This test asserts the CURRENT behaviour: close, but not bit-identical. **When v5's fixed-point
-        `uint64` recip lands, this test must be inverted to assert exact equality** — that inversion is
-        the v5 §6 / test-A9 deliverable, and if it cannot be inverted the claim is false.
-        """
-        frags = self._corpus(np.random.default_rng(11), 4000, 2000)
-        ref = self._run(frags, 1)
-        got = self._run(frags, 8, rng=np.random.default_rng(999))
-        np.testing.assert_allclose(ref[3], got[3], rtol=1e-5)
-        np.testing.assert_allclose(ref[4], got[4], rtol=1e-5)
-        exact = np.array_equal(ref[3], got[3]) and np.array_equal(ref[4], got[4])
-        if exact:  # not a failure — it means the corpus was too small to expose the reassociation
-            pytest.skip(
-                "float masses happened to be bit-identical; corpus too small to reassociate"
-            )
+
+def test_a_fragment_STARTING_AT_a_line_does_not_cross_it():
+    acc = _acc()
+    acc.deposit(0, 201, 390)
+    assert acc.tally.edge_unspliced_count.sum() == 0
+    assert int(acc.tally.node_contained_count[_node(0, 3), 0]) == 1
+
+
+def test_a_fragment_crossing_four_nodes_credits_exactly_THREE_edges_at_FULL_weight():
+    acc = _acc()
+    acc.deposit(0, 150, 500)  # touches n1 n2 n3 n4 -> lines at 200, 201, 400
+    t = acc.tally
+    assert [int(t.edge_unspliced_count[_edge(0, j), 0]) for j in (1, 2, 3, 4, 5)] == [0, 1, 1, 1, 0]
+    quantum = density_quantum(350 - 1)
+    assert all(int(t.edge_unspliced_density[_edge(0, j), 0]) == quantum for j in (2, 3, 4))
+    assert t.node_contained_count.sum() == 0
+
+
+def test_a_fragment_spanning_a_1bp_node_credits_BOTH_lines_and_the_spanning_slot():
+    """1 bp nodes are legal — 15,687 of them at human scale — and nothing may assume length > 1."""
+    acc = _acc()
+    acc.deposit(0, 150, 300)
+    t = acc.tally
+    assert int(t.edge_unspliced_count[_edge(0, 2), 0]) == 1
+    assert int(t.edge_unspliced_count[_edge(0, 3), 0]) == 1
+    assert int(t.node_spanning_count[_node(0, 2), 0]) == 1
+    assert int(t.node_spanning_density[_node(0, 2), 0]) == density_quantum(150)
+    assert int(t.node_contained_count[_node(0, 2), 0]) == 0
+
+
+def test_contained_and_spanning_are_disjoint_and_L_equal_to_node_plus_one_is_in_NEITHER():
+    """``contained`` needs ``L <= node``; ``spanning`` needs ``L >= node + 2``. The length between them
+    crosses exactly one line and belongs to neither population."""
+    acc = _acc()
+    acc.deposit(0, 200, 202)  # n2 is 1 bp, L = 2
+    t = acc.tally
+    assert t.node_contained_count.sum() == 0
+    assert t.node_spanning_count.sum() == 0
+    assert int(t.edge_unspliced_count[_edge(0, 3), 0]) == 1
+
+
+# ---------------------------------------------------------------------------
+# splicing
+# ---------------------------------------------------------------------------
+
+
+def test_a_spliced_jump_deposits_NOTHING_on_the_lines_it_splices_over():
+    """⭐ The defect this design removes. The intron [201,900) swallows the line at 400; the old rule,
+    which asked only "does another slice follow?", could not tell that from a contiguous crossing."""
+    acc = _acc(junctions=[JUNCTION])
+    acc.deposit(0, 150, 950, introns=[(201, 900)], motif_strand=Strand.POS)
+    t = acc.tally
+    length = (950 - 150) - (900 - 201)
+    assert int(t.junction_count[0, 0]) == 1
+    assert int(t.junction_density[0, 0]) == density_quantum(length - 1)
+    assert int(t.edge_unspliced_count[_edge(0, 4), 0]) == 0, "the swallowed line at 400"
+    assert int(t.edge_spliced_count[_edge(0, 4), 0]) == 0
+    assert int(t.node_spanning_count[_node(0, 4), 0]) == 0, "a node jumped OVER is not spanned"
+
+
+def test_a_spliced_fragments_own_BLOCK_crossings_go_in_the_SPLICED_bank():
+    """A spliced fragment is certified RNA — gDNA cannot be spliced — so a line its block genuinely
+    crosses is the cleanest RNA marker available at a seam."""
+    acc = _acc(junctions=[JUNCTION])
+    acc.deposit(0, 150, 950, introns=[(201, 900)], motif_strand=Strand.POS)
+    t = acc.tally
+    assert int(t.edge_spliced_count[_edge(0, 2), 0]) == 1, "block [150,201) crosses the line at 200"
+    assert t.edge_unspliced_count.sum() == 0
+
+
+def test_a_node_is_SPANNED_only_when_ONE_segment_crosses_BOTH_its_lines():
+    """⚠ Not "both lines crossed". Here an unannotated intron sits strictly inside n4 = [400,900), so
+    segment 1 crosses the line at 400 and segment 2 crosses the line at 900 — both of n4's lines — yet
+    the molecule never covers [500,600) and does not span the node."""
+    acc = _acc()
+    acc.deposit(0, 380, 950, introns=[(500, 600)])
+    t = acc.tally
+    assert int(t.edge_unspliced_count[_edge(0, 4), 0]) == 1, "line 400, from segment 1"
+    assert int(t.edge_unspliced_count[_edge(0, 5), 0]) == 1, "line 900, from segment 2"
+    assert int(t.node_spanning_count[_node(0, 4), 0]) == 0, "but n4 is NOT spanned"
+
+
+def test_an_UNANNOTATED_intron_credits_no_junction_and_nothing_across_the_gap():
+    """Owner ruling: unannotated junctions are disproportionately artifactual, so they deposit on the
+    UNSPLICED channel and compete with gDNA rather than being certified RNA."""
+    acc = _acc(junctions=[JUNCTION])
+    # [200,400) is NOT annotated; it swallows the line at 201
+    acc.deposit(0, 50, 500, introns=[(200, 400)], motif_strand=Strand.POS)
+    t = acc.tally
+    assert t.junction_count.sum() == 0
+    assert t.edge_spliced_count.sum() == 0, "not certified RNA — it competes with gDNA"
+    assert int(t.edge_unspliced_count[_edge(0, 1), 0]) == 1, (
+        "block [50,200) crosses the line at 100"
+    )
+    assert int(t.edge_unspliced_count[_edge(0, 3), 0]) == 0, "the swallowed line at 201"
+    assert t.qc["unannotated_introns"] == 1
+
+
+def test_a_fragment_straddling_two_nodes_without_crossing_a_line_is_NOT_contained():
+    """⚠ An unannotated intron can swallow every line between two blocks. The fragment then crosses
+    nothing, yet it straddles two nodes — crediting it as *contained* would put its whole length in a
+    node it only partly overlaps. It deposits on no object, and the start count is what keeps that
+    visible rather than silent."""
+    acc = _acc()
+    acc.deposit(0, 120, 500, introns=[(200, 400)])  # blocks land in n1 and n4, crossing no line
+    t = acc.tally
+    assert t.edge_unspliced_count.sum() == 0
+    assert t.node_contained_count.sum() == 0
+    assert t.node_spanning_count.sum() == 0
+    assert int(t.node_start_count.sum()) == 1, "still counted"
+
+
+def test_an_unannotated_intron_inside_one_node_is_a_contained_unspliced_fragment():
+    acc = _acc()
+    acc.deposit(0, 210, 390, introns=[(300, 340)])
+    t = acc.tally
+    assert int(t.node_contained_count[_node(0, 3), 0]) == 1
+    assert int(t.node_contained_density[_node(0, 3), 0]) == density_quantum(180 - 40)
+    assert t.qc["unannotated_introns"] == 1
+
+
+def test_opposite_strand_junctions_at_the_same_coordinates_are_DISTINCT_edges():
+    """Biologically impossible — splice motifs are not palindromic — so only a synthetic stress test can
+    reach it, which is exactly why one exists."""
+    acc = _acc(junctions=[(0, 201, 900, Strand.POS), (0, 201, 900, Strand.NEG)])
+    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, motif_strand=Strand.NEG)
+    t = acc.tally
+    assert t.junction_count.sum() == 1
+    assert int(t.junction_count[1, CHANNEL_MINUS]) == 1, "the NEG edge (id 1), genome minus"
+
+
+@pytest.mark.parametrize("order", [("POS_first", 1), ("NEG_first", -1)])
+def test_a_junction_id_is_a_function_of_the_PARTITION_not_of_argument_order(order):
+    """⛔ The junction-edge id IS the rank in the sort, so the sort must be total — otherwise the id
+    depends on the order the caller happened to list the junctions in, and the same graph gets two
+    labellings.
+
+    ⚠ This is the ONLY test that pins ``strand`` as part of the sort key. ``np.lexsort`` is stable, so a
+    key of ``(acceptor, donor)`` alone gives the right answer for any input whose ties already arrive in
+    the right order — which is every other test, and both real indexes. Reversing the argument order is
+    what makes the missing key observable, and a strand-coincident pair is the only tie there is.
+    """
+    _, direction = order
+    junctions = [(0, 201, 900, Strand.POS), (0, 201, 900, Strand.NEG)][::direction]
+    part = Partition.from_cuts([CHR1_CUTS], node_types=[CHR1_TYPES], junctions=junctions)
+    assert [int(s) for s in part.junction_strand] == [int(Strand.POS), int(Strand.NEG)], (
+        "POS must sort to slot 0 whichever order it was passed in"
+    )
+
+
+def test_a_fragment_using_TWO_junctions_credits_BOTH():
+    """Owner ruling: each edge owns its own expectation, and the strand model is fitted from a separate
+    scan output, so crediting every junction distorts nothing.
+
+    ⚠ The two introns must be separated by a real exon. Abutting introns imply a zero-length exon and are
+    malformed (see ``test_ABUTTING_introns_are_MALFORMED_and_merge``), so this needs its own partition
+    with room for an exon between them."""
+    part = Partition.from_cuts(
+        [[0, 100, 200, 300, 400, 500, 600]],
+        node_types=[[0, 2, 1, 2, 1, 2]],
+        junctions=[(0, 100, 200, Strand.POS), (0, 300, 400, Strand.POS)],
+    )
+    acc = Accumulator(part, max_fragment_length=10_000)
+    acc.deposit(0, 50, 550, introns=[(100, 200), (300, 400)], motif_strand=Strand.POS)
+    t = acc.tally
+    assert int(t.junction_count[0, CHANNEL_PLUS]) == 1
+    assert int(t.junction_count[1, CHANNEL_PLUS]) == 1
+    assert t.qc["introns_absorbed"] == 0, "a real exon separates them; nothing is malformed"
+
+
+# ---------------------------------------------------------------------------
+# strand channels
+# ---------------------------------------------------------------------------
+
+
+def test_the_unspliced_bank_is_indexed_by_GENOME_strand():
+    acc = _acc()
+    acc.deposit(0, 150, 300, align_strand=Strand.NEG)
+    t = acc.tally
+    assert int(t.edge_unspliced_count[_edge(0, 2), 1]) == 1
+    assert int(t.edge_unspliced_count[_edge(0, 2), 0]) == 0
+
+
+def test_EVERY_bank_including_the_junctions_is_indexed_by_GENOME_strand():
+    """⭐ One convention throughout. Sense/antisense is DERIVED, never stored: the junction edge carries
+    its own genomic strand, so a consumer computes ``sense = (fragment strand == junction strand)``.
+
+    Here a genome-minus fragment splices across a ``+`` junction. Under a sense convention it would land
+    in the antisense column; under the genome convention it lands in the minus column. Those happen to be
+    the same index, so the discriminating case is the next test."""
+    acc = _acc(junctions=[JUNCTION])
+    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, motif_strand=Strand.POS)
+    assert int(acc.tally.junction_count[0, CHANNEL_MINUS]) == 1
+
+
+def test_a_SENSE_fragment_on_the_minus_strand_is_still_booked_as_MINUS():
+    """The discriminating case: sense-to-motif would say column 0, genome strand says column 1."""
+    acc = _acc(junctions=[(0, 201, 900, Strand.NEG)])
+    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, motif_strand=Strand.NEG)
+    t = acc.tally
+    assert int(t.junction_count[0, CHANNEL_MINUS]) == 1
+    assert int(t.junction_count[0, CHANNEL_PLUS]) == 0
+    assert int(t.edge_spliced_count[_edge(0, 2), CHANNEL_MINUS]) == 1
+
+
+# ---------------------------------------------------------------------------
+# bounded influence, clipping, references
+# ---------------------------------------------------------------------------
+
+
+def test_a_fragment_over_the_length_limit_deposits_NOTHING_and_is_COUNTED():
+    """⭐ Bounded influence. Unbounded, 1,000 read groups own 99.8 % of all edge crossings on a real
+    library; with the limit on ``L`` they own 4.16 %. A silent drop would hide that."""
+    acc = _acc(max_fragment_length=200)
+    assert acc.deposit(0, 100, 500) is DepositOutcome.TOO_LONG
+    t = acc.tally
+    assert t.edge_unspliced_count.sum() == 0
+    assert t.node_start_count.sum() == 0
+    assert t.qc["dropped_too_long"] == 1
+
+
+def test_the_limit_applies_to_L_and_NOT_to_the_SPAN():
+    """⚠ A 300 bp molecule across a 10 kb intron has a 10 kb span. Limiting the span discards every
+    spliced fragment — 37.96 % of read groups measured, against 5.45 % when the limit is on ``L``."""
+    acc = _acc(junctions=[JUNCTION], max_fragment_length=200)
+    out = acc.deposit(0, 150, 950, introns=[(201, 900)], motif_strand=Strand.POS)
+    assert out is DepositOutcome.DEPOSITED, "span 800, L = 101"
+    assert int(acc.tally.junction_count[0, 0]) == 1
+
+
+def test_a_fragment_is_clipped_to_its_reference_and_L_is_the_clipped_length():
+    acc = _acc()
+    acc.deposit(0, 950, 1200)  # chr1 ends at 1000
+    t = acc.tally
+    assert int(t.node_contained_count[_node(0, 5), 0]) == 1
+    assert int(t.node_contained_density[_node(0, 5), 0]) == density_quantum(50)
+
+
+def test_a_single_node_reference_has_no_edges_and_still_accepts_a_fragment():
+    acc = Accumulator(Partition.from_cuts([[0, 1000]], node_types=[[0]]))
+    assert acc.n_edges == 0
+    acc.deposit(0, 100, 300)
+    assert int(acc.tally.node_contained_count[0, 0]) == 1
+
+
+def test_the_per_reference_offsets_do_not_bleed():
+    """chr1's fragment crosses its lines 2 and 3; chr2's crosses chr2's line 1. Nothing lands on a
+    reference it did not come from — the failure mode that once dropped 476,719 of 476,732 fragments."""
+    acc = _acc()
+    acc.deposit(0, 150, 300)  # crosses the lines at 200 AND 201
+    acc.deposit(1, 400, 700)  # crosses chr2's line at 500
+    t = acc.tally
+    assert [int(t.edge_unspliced_count[e, 0]) for e in range(acc.n_edges)] == [0, 1, 1, 0, 0, 1]
+    assert int(t.edge_unspliced_count.sum()) == 3
+    assert int(t.node_start_count[_node(0, 1)]) == 1
+    assert int(t.node_start_count[_node(1, 0)]) == 1
+
+
+# ---------------------------------------------------------------------------
+# the invariant that can actually fire
+# ---------------------------------------------------------------------------
+
+
+def test_every_accepted_fragment_increments_exactly_ONE_start_count():
+    """⚠ The crossing and contained totals are tautologies — they can only be evaluated by re-running
+    the deposit. This one is checkable against a number the scanner knows independently."""
+    acc = _acc(junctions=[JUNCTION])
+    fragments = [(120, 320, ()), (220, 380, ()), (150, 950, [(201, 900)]), (950, 1200, ())]
+    accepted = sum(
+        acc.deposit(0, s, e, introns=i, motif_strand=Strand.POS) is DepositOutcome.DEPOSITED
+        for s, e, i in fragments
+    )
+    assert accepted == 4
+    assert int(acc.tally.node_start_count.sum()) == 4
+    assert acc.tally.qc["deposited"] == 4
+
+
+# ---------------------------------------------------------------------------
+# the five fragment-length pools
+# ---------------------------------------------------------------------------
+
+
+def test_each_pool_is_reached_only_by_its_own_structural_class():
+    acc = _acc(junctions=[JUNCTION])
+    acc.deposit(0, 10, 90)  # contained in n0 — intergenic
+    acc.deposit(0, 210, 390)  # contained in n3 — intronic
+    acc.deposit(0, 380, 420)  # crosses the line at 400 only — flanks intron|exon
+    acc.deposit(0, 950, 990)  # contained in n5 — intergenic
+    acc.deposit(0, 150, 950, introns=[(201, 900)], motif_strand=Strand.POS)  # annotated junction
+    p = acc.tally.pool_lengths
+    assert int(p[FragmentPool.DNA_INTERGENIC].sum()) == 2
+    assert int(p[FragmentPool.DNA_INTRONIC].sum()) == 1
+    assert int(p[FragmentPool.DNA_INTRON_EXON].sum()) == 1
+    assert int(p[FragmentPool.RNA_SPLICED].sum()) == 1
+    assert int(p[FragmentPool.DNA_INTERGENIC_EXON].sum()) == 0
+
+
+def test_a_pool_is_binned_at_L_and_only_ONCE_per_fragment():
+    acc = _acc()
+    acc.deposit(0, 210, 390, introns=[(300, 340)])  # L = 180 - 40
+    p = acc.tally.pool_lengths
+    assert int(p[FragmentPool.DNA_INTRONIC, 140]) == 1
+    assert int(p.sum()) == 1
+
+
+def test_an_INFERRED_intron_is_kept_OUT_of_the_pure_RNA_pool():
+    """Its splice is a model inference, not an observation, so certifying it as RNA would make the pool
+    depend on the very length model it is used to fit."""
+    acc = _acc(junctions=[JUNCTION])
+    acc.deposit(0, 150, 950, introns=[(201, 900)], motif_strand=Strand.POS, introns_inferred=True)
+    t = acc.tally
+    assert int(t.junction_count[0, 0]) == 1, "it still deposits"
+    assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 0
+    assert t.qc["inferred_intron_fragments"] == 1
+
+
+def test_a_multi_line_crossing_enters_NO_pool():
+    """A splash read straddles ONE probe edge. A fragment crossing several lines has no single
+    structural class, and an impure pool is worse than a missing one."""
+    acc = _acc()
+    acc.deposit(0, 150, 500)
+    assert int(acc.tally.pool_lengths.sum()) == 0
+
+
+# ---------------------------------------------------------------------------
+# the two arithmetic gates — these are what make the design true
+# ---------------------------------------------------------------------------
+
+
+def _corpus(rng, n, ref_len):
+    lengths = np.clip(rng.normal(200.0, 60.0, n).round().astype(np.int64), 30, 600)
+    starts = rng.integers(0, ref_len - lengths)
+    return starts, starts + lengths, lengths
+
+
+def _uniform_accumulator(node_bp, ref_len):
+    cuts = list(range(0, ref_len + 1, node_bp))
+    return Accumulator(
+        Partition.from_cuts([cuts], node_types=[[0] * (len(cuts) - 1)]), max_fragment_length=10_000
+    )
+
+
+@pytest.mark.parametrize("node_bp", [50, 200, 1000])
+def test_the_crossing_DENSITY_recovers_the_true_density_with_NO_length_model(node_bp):
+    """⭐ ``E[Σ 1/(L−1)] = ρ`` exactly, for ANY fragment-length distribution. This is the identity the
+    whole design rests on and the reason no divisor and no length model appear at an edge.
+
+    It must hold at every node spacing. Partitioning the weight by the number of edges crossed breaks
+    it — measured 0.28× at 50 bp nodes, 0.54× at 100 bp, 0.91× at 200 bp — so this test is also what
+    forbids partitioning.
+    """
+    ref_len, rho = 200_000, 0.05
+    acc = _uniform_accumulator(node_bp, ref_len)
+    rng = np.random.default_rng(7)
+    starts, ends, _ = _corpus(rng, int(rho * ref_len), ref_len)
+    for s, e in zip(starts, ends):
+        acc.deposit(0, int(s), int(e))
+    interior = slice(5, acc.n_edges - 5)
+    estimate = (
+        acc.tally.edge_unspliced_density[interior, :].sum() / DENSITY_SCALE / (acc.n_edges - 10)
+    )
+    assert 0.98 <= estimate / rho <= 1.02, f"{estimate / rho:.4f} at {node_bp} bp nodes"
+
+
+def test_the_crossing_COUNT_recovers_density_times_mean_length():
+    """The companion identity ``E[count] = ρ·(E[L] − 1)``. Together with the line above, this is the 2×2
+    that separates gDNA from RNA by fragment length alone."""
+    ref_len, rho = 200_000, 0.05
+    acc = _uniform_accumulator(200, ref_len)
+    rng = np.random.default_rng(11)
+    starts, ends, lengths = _corpus(rng, int(rho * ref_len), ref_len)
+    for s, e in zip(starts, ends):
+        acc.deposit(0, int(s), int(e))
+    interior = slice(5, acc.n_edges - 5)
+    per_edge = acc.tally.edge_unspliced_count[interior, :].sum() / (acc.n_edges - 10)
+    expected = rho * (lengths.mean() - 1.0)
+    assert 0.98 <= per_edge / expected <= 1.02, f"{per_edge / expected:.4f}"
+
+
+def test_the_deposit_is_independent_of_the_ORDER_fragments_arrive_in():
+    """Integer addition is associative, which is what makes the per-worker merge bit-identical at any
+    thread count — the property the float32 mass channels could not offer."""
+    rng = np.random.default_rng(3)
+    starts, ends, _ = _corpus(rng, 400, 900)
+    order = rng.permutation(len(starts))
+
+    def run(idx):
+        acc = _acc()
+        for k in idx:
+            acc.deposit(0, int(starts[k]), int(ends[k]))
+        return acc.tally
+
+    a, b = run(range(len(starts))), run(order)
+    for field in (
+        "node_contained_count",
+        "node_contained_density",
+        "node_spanning_count",
+        "node_spanning_density",
+        "node_start_count",
+        "edge_unspliced_count",
+        "edge_unspliced_density",
+        "pool_lengths",
+    ):
+        assert np.array_equal(getattr(a, field), getattr(b, field)), field
+
+
+# ---------------------------------------------------------------------------
+# malformed intron lists, and the ONE definition of L
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "introns,expected_length,expected_crossings,expected_absorbed",
+    [
+        ([(210, 260), (240, 300)], 360, 4, 1),  # overlapping
+        ([(200, 400), (250, 300)], 250, 1, 1),  # nested
+        ([(150, 480), (160, 470)], 120, 1, 1),  # wide overlap: the naive formula went NEGATIVE
+        ([(210, 260), (210, 260)], 400, 4, 1),  # duplicated, as two disagreeing mates produce
+        ([(300, 300)], 450, 4, 1),  # zero length
+        ([(210, 260), (300, 340)], 360, 4, 0),  # well formed: nothing absorbed
+    ],
+)
+def test_L_is_the_total_of_the_path_segments_even_when_the_intron_list_is_malformed(
+    introns, expected_length, expected_crossings, expected_absorbed
+):
+    """⚠ ONE definition of ``L``: the total length of the path's segments.
+
+    Computing it separately as ``span − Σ(intron lengths)`` is a *second* formula for the same quantity,
+    and the two disagree the moment introns overlap — by up to 1.5×, and on a wide overlap the second one
+    goes NEGATIVE, so a good fragment is silently discarded. A real BAM produces this: the scanner reads
+    the ``XS`` tag once per record, so a pair whose mates disagree about an acceptor yields overlapping
+    introns for one molecule (measured: 1 read group in 875,670 on MO_3021).
+
+    It matters far beyond that rate, because a C++ author builds the segments first and will naturally
+    sum them — so byte-identity, the only gate this design has, would come down to which of two
+    contradictory rules the file happened to carry.
+    """
+    acc = _acc(max_fragment_length=10_000)
+    assert acc.deposit(0, 50, 500, introns=introns) is DepositOutcome.DEPOSITED
+    t = acc.tally
+    assert t.qc["introns_absorbed"] == expected_absorbed
+    crossings = int(t.edge_unspliced_count.sum())
+    assert crossings == expected_crossings
+    assert int(t.edge_unspliced_density.sum()) == crossings * density_quantum(expected_length - 1)
+
+
+def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_begins():
+    """A leading intron means the molecule does not begin at ``lo``. Attributing it to the node
+    containing ``lo`` would credit the start-count invariant — and possibly the contained deposit — to a
+    node the fragment never touches."""
+    acc = _acc(max_fragment_length=10_000)
+    acc.deposit(0, 150, 500, introns=[(150, 480)])  # the path is only [480,500), inside n4
+    t = acc.tally
+    assert int(t.node_start_count[_node(0, 4)]) == 1, "n4, where the path actually starts"
+    assert int(t.node_start_count[_node(0, 1)]) == 0, "not n1, where the extent begins"
+    assert int(t.node_contained_count[_node(0, 4), 0]) == 1
+    assert int(t.node_contained_density[_node(0, 4), 0]) == density_quantum(20)
+
+
+def test_a_duplicated_intron_credits_its_junction_ONCE():
+    """Two mates reporting the same intron is one splice event, not two."""
+    acc = _acc(junctions=[JUNCTION])
+    acc.deposit(0, 150, 950, introns=[(201, 900), (201, 900)], motif_strand=Strand.POS)
+    assert int(acc.tally.junction_count[0, 0]) == 1
+    assert acc.tally.qc["introns_absorbed"] == 1
+
+
+def test_ABUTTING_introns_are_MALFORMED_and_merge():
+    """⚠ Two introns sharing an endpoint imply a **zero-length exon** between them, which is physically
+    impossible — a transcript with one is molecularly identical to a transcript without it. So a single
+    molecule can never legitimately use both, and the pair is an alignment artifact.
+
+    The index cannot produce it either: a zero-length exon is dropped when the exon arrays are built,
+    which fuses its two flanking introns into one. Merged here, and counted."""
+    acc = _acc(junctions=[(0, 201, 400, Strand.POS), (0, 400, 900, Strand.POS)])
+    acc.deposit(0, 150, 950, introns=[(201, 400), (400, 900)], motif_strand=Strand.POS)
+    t = acc.tally
+    assert t.qc["introns_absorbed"] == 1
+    assert t.junction_count.sum() == 0, "the merged span 201->900 is not an annotated junction"
+
+
+def test_a_wide_overlap_no_longer_discards_a_good_fragment():
+    """The naive formula gave L = −290 here and filed the fragment as ``dropped_empty`` — invisible to
+    the start-count invariant, because a rejected fragment never reaches it."""
+    acc = _acc(max_fragment_length=10_000)
+    assert acc.deposit(0, 150, 500, introns=[(150, 480), (160, 470)]) is DepositOutcome.DEPOSITED
+    assert acc.tally.qc["dropped_empty"] == 0
+    assert int(acc.tally.node_start_count.sum()) == 1
+
+
+# ---------------------------------------------------------------------------
+# the node banks carry ONE strand convention
+# ---------------------------------------------------------------------------
+
+#: a junction far enough right that the first block still spans node n2 = [200,201)
+SPAN_JUNCTION_POS = (0, 400, 900, Strand.POS)
+SPAN_JUNCTION_NEG = (0, 400, 900, Strand.NEG)
+
+
+def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_column():
+    """⚠ One array, one convention.
+
+    A spliced fragment cannot be *contained* — both endpoints of an annotated intron are cuts, so it
+    always crosses its junction edge — but its blocks routinely SPAN a node whole. Measured on real
+    cfRNA, **65–69 % of all node_spanning deposits come from spliced fragments**. Indexing those by
+    sense-relative-to-motif while the unspliced ones beside them use genome strand would put one array
+    into two conventions, and 40–44 % of the spliced deposits would land in the opposite column from
+    their unspliced neighbours.
+    """
+    acc = _acc(junctions=[SPAN_JUNCTION_POS])
+    acc.deposit(0, 150, 300, align_strand=Strand.NEG)  # unspliced, genome minus
+    acc.deposit(  # spliced, genome minus, ANTISENSE to its + junction
+        0, 150, 950, introns=[(400, 900)], align_strand=Strand.NEG, motif_strand=Strand.POS
+    )
+    t = acc.tally
+    assert int(t.node_spanning_count[_node(0, 2), CHANNEL_MINUS]) == 2, "both genome minus"
+    assert int(t.node_spanning_count[_node(0, 2), CHANNEL_PLUS]) == 0
+    assert int(t.junction_count[0, CHANNEL_MINUS]) == 1, "the junction bank too"
+
+
+def test_a_spliced_SENSE_fragment_books_node_AND_junction_by_GENOME_strand():
+    """The discriminating case: sense-to-motif would say column 0 for both; genome strand says 1."""
+    acc = _acc(junctions=[SPAN_JUNCTION_NEG])
+    acc.deposit(0, 150, 950, introns=[(400, 900)], align_strand=Strand.NEG, motif_strand=Strand.NEG)
+    t = acc.tally
+    assert int(t.junction_count[0, CHANNEL_MINUS]) == 1
+    assert int(t.node_spanning_count[_node(0, 2), CHANNEL_MINUS]) == 1
+    assert int(t.node_spanning_count[_node(0, 2), CHANNEL_PLUS]) == 0

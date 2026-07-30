@@ -334,12 +334,36 @@ def test_reach_on_a_contiguous_edge_inside_an_exon():
     assert (lo, hi) == (300, 300)  # transcript "a": 300 exonic bases either side of position 700
 
 
-def test_reach_is_zero_where_no_mature_crosses():
-    """A reach of 0 is meaningful, not a sentinel: no mature molecule crosses ⇒ zero opportunity."""
+def test_contiguous_reach_is_NONZERO_INSIDE_AN_INTRON():
+    """⭐ The reach on a CONTIGUOUS edge is the genomic distance to the transcript's span ends.
+
+    Nascent RNA is an ordinary transcript spanning its gene, so RNA opportunity inside an intron is
+    real — the intron is where nascent RNA lives. An exonic reach would report 0 here and so declare
+    zero RNA opportunity across every intron in the genome.
+
+    Fixture: one + transcript, exons [500,700) and [1200,1500), so span [500,1500) and intron
+    [700,1200). Both interior interfaces sit on that span.
+    """
     n, e = _graph([_tx([(500, 700), (1200, 1500)])])
     ns = _nodes(n)
-    i = ns.index((700, 1200))  # inside the intron
-    assert _reach(e, i, i + 1, EDGE_KIND_CONTIGUOUS) == (0, 0, 0, 0)
+    at_donor = ns.index((500, 700))  # the edge at 700, the intron's low end
+    at_acceptor = ns.index((700, 1200))  # the edge at 1200, the intron's high end
+    assert _reach(e, at_donor, at_donor + 1, EDGE_KIND_CONTIGUOUS) == (200, 800, 0, 0)
+    assert _reach(e, at_acceptor, at_acceptor + 1, EDGE_KIND_CONTIGUOUS) == (700, 300, 0, 0)
+
+
+def test_reach_is_zero_outside_a_span_and_on_a_strand_with_no_transcript():
+    """A reach of 0 is meaningful, not a sentinel — but it now means *no RNA of any form* here.
+
+    Two ways to earn a zero, both asserted: the outward side of a span's own edge (nothing continues
+    past a transcript end), and every position on a strand carrying no transcript at all.
+    """
+    n, e = _graph([_tx([(500, 700), (1200, 1500)], strand=Strand.POS)])
+    ns = _nodes(n)
+    at_tss = ns.index((0, 500))  # the edge at 500 — the span's low edge
+    at_tes = ns.index((1200, 1500))  # the edge at 1500 — the span's high edge
+    assert _reach(e, at_tss, at_tss + 1, EDGE_KIND_CONTIGUOUS) == (0, 1000, 0, 0)
+    assert _reach(e, at_tes, at_tes + 1, EDGE_KIND_CONTIGUOUS) == (1000, 0, 0, 0)
 
 
 def test_a_SYNTHETIC_nrna_span_is_excluded_from_everything():

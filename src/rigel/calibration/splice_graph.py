@@ -41,9 +41,21 @@ is exactly the visibility v8 exists to buy.
 They are NOT mutually exclusive — a position that is both a terminus for one transcript and a splice site
 for another is exactly the case the 4-bit signature is structurally blind to.
 
-**Reaches** — how many bases of the molecule's own sequence remain either side of an edge. A mature
-molecule must fit inside its transcript, so this is what makes the crossing divisor taper near a terminus
-(v5 §4.2/§4.3; measured worth 11.0 % of the mature opportunity genome-wide).
+**Reaches** — how many bases of the molecule's own sequence remain either side of an edge. An RNA
+molecule must fit inside its transcript, so this is what makes the crossing divisor taper near a
+terminus (measured worth 11.0 % of the mature opportunity genome-wide, and ⭐ `Σ1/(L−1)` reads only
+0.108 ρ twenty bases from a transcript end).
+
+⚠ **The two edge kinds carry DIFFERENT reaches, deliberately.**
+
+* A **CONTIGUOUS** edge is crossed by gDNA, by nascent RNA and by mature RNA alike. Nascent RNA is an
+  ordinary transcript that happens to be single-exon and to span its whole gene, and a genomic distance
+  is never shorter than the exonic distance within the same span — so the widest RNA molecule covering
+  a position is the nascent one, and the reach is the **genomic** distance to a covering transcript's
+  span ends. ⚠ It is therefore **nonzero inside an intron**: that is where nascent RNA lives, and an
+  exonic reach would declare zero RNA opportunity across every intron in the genome.
+* A **JUNCTION** edge is used only by a molecule that spliced across it, so what remains either side is
+  **exonic**. :func:`_junction_edges` is deliberately left on the exonic reach.
 
 ⚠ **Named ``lo``/``hi``, NOT ``donor``/``acceptor``.** Edges store ``src < dst``, so ``src`` is genomically
 LEFT whatever the strand — but for a NEG-strand junction the biological donor is on the RIGHT. The
@@ -61,13 +73,16 @@ pair from a single isoform, the two agree exactly on **93.9 %** of disagreeing j
 of **0.9989**, so the simple independent maximum is used. It is one-sided — it over-states opportunity,
 hence under-states ``ρ_mature``, hence over-states ``f_g``.
 
-**A reach of 0 is meaningful, not a sentinel:** no strand-``s`` mature molecule crosses this edge, so the
-opportunity is genuinely zero and the trapezoid returns 0 for free.
+**A reach of 0 is meaningful, not a sentinel:** no strand-``s`` RNA molecule can occupy that side of the
+edge, so the opportunity is genuinely zero and the trapezoid returns 0 for free. On a contiguous edge
+that now means *outside every transcript span on that strand*; on a junction edge, *no strand-``s``
+molecule splices across it*.
 """
 
 from __future__ import annotations
 
 import warnings
+from dataclasses import dataclass
 from typing import Mapping
 
 import numpy as np
@@ -102,6 +117,8 @@ __all__ = [
     "build_splice_graph",
     "build_node_partition_arrays",
     "build_boundary_flags_array",
+    "build_junction_edge_arrays",
+    "JunctionEdgeArrays",
     "is_terminus",
     "is_splice_site",
     "validate_graph",
@@ -498,39 +515,65 @@ def _events_independently(ex: _Exons, rows, intr, i_rows):
     return out
 
 
-def _contiguous_reaches(ma: _Exons, mj, pos):
-    """Per-strand maximal reach either side of each interior interface, over MATURE transcripts.
+def _contiguous_reaches(ex: _Exons, rows, pos):
+    """Per-strand RNA reach either side of each interior interface, over TRANSCRIPT SPANS.
 
-    A strand-``s`` mature molecule crosses interface ``p`` contiguously iff one of its exons contains ``p``
-    strictly inside. Its reach on the low side is (exonic bases before that exon) + (p − exon.start); the
-    high side is the remainder. Maximal over transcripts, independently per side (D2).
+    "Reach" is how much RNA molecule can still exist on each side of the interface — the quantity the
+    fragment-placement count is truncated by near a transcript end.
+
+    Nascent RNA is an ordinary transcript that happens to be single-exon and to span its whole gene, and
+    a genomic distance is never shorter than the exonic distance inside the same span. So the widest RNA
+    molecule covering a position is the nascent one, and the reach is the **genomic** distance to the
+    ends of a covering transcript's span — maximised per side and per strand, independently (D2).
+
+    ⚠ In particular the reach inside an intron is **not zero**: that is precisely where nascent RNA
+    lives. An exonic reach declares zero RNA opportunity across every intron in the genome, which is
+    backwards.
+
+    ⚠ This is the **contiguous-edge** rule only. A junction edge is used solely by a molecule that
+    spliced across it, so what remains either side of it is exonic — see :func:`_junction_edges`, which
+    is deliberately left on the exonic reach.
     """
-    out = {
-        k: np.zeros(pos.shape[0], np.int64)
-        for k in ("reach_lo_pos", "reach_hi_pos", "reach_lo_neg", "reach_hi_neg")
-    }
-    if pos.size == 0 or mj.size == 0:
+    keys = ("reach_lo_pos", "reach_hi_pos", "reach_lo_neg", "reach_hi_neg")
+    out = {k: np.zeros(pos.shape[0], np.int64) for k in keys}
+    if pos.size == 0 or rows.size == 0:
         return out
-    lo_i = np.searchsorted(pos, ma.start[mj], side="right")  # first interface > exon.start
-    hi_i = np.searchsorted(pos, ma.end[mj], side="left")  # first interface >= exon.end
-    cnt = np.maximum(hi_i - lo_i, 0)
-    if int(cnt.sum()) == 0:
-        return out
-    ex = np.repeat(np.arange(mj.size), cnt)  # which exon row
-    off = np.arange(int(cnt.sum())) - np.repeat(np.cumsum(cnt) - cnt, cnt)
-    slot = np.repeat(lo_i, cnt) + off  # which interface
-    p = pos[slot]
-    lo = ma.before[mj][ex] + (p - ma.start[mj][ex])
-    hi = ma.total[mj][ex] - lo
-    st = ma.strand[mj][ex]
-    for s, kl, kh in (
+
+    # per-transcript genomic span on this reference: [min exon start, max exon end)
+    uniq, inv = np.unique(ex.tid[rows], return_inverse=True)
+    span_start = np.full(uniq.size, np.iinfo(np.int64).max, np.int64)
+    span_end = np.full(uniq.size, np.iinfo(np.int64).min, np.int64)
+    np.minimum.at(span_start, inv, ex.start[rows])
+    np.maximum.at(span_end, inv, ex.end[rows])
+    strand_of = np.zeros(uniq.size, np.int8)
+    strand_of[inv] = ex.strand[rows]
+
+    for s, key_lo, key_hi in (
         (Strand.POS, "reach_lo_pos", "reach_hi_pos"),
         (Strand.NEG, "reach_lo_neg", "reach_hi_neg"),
     ):
-        m = st == s
-        if m.any():
-            np.maximum.at(out[kl], slot[m], lo[m])
-            np.maximum.at(out[kh], slot[m], hi[m])
+        keep = strand_of == s
+        if not keep.any():
+            continue
+        lo_edge, hi_edge = span_start[keep], span_end[keep]
+
+        # HIGH side: among spans starting at or before p, the one reaching furthest right. If that
+        # furthest end is still left of p then no span covers p and the reach is 0.
+        n_span = lo_edge.size
+        by_start = np.argsort(lo_edge, kind="stable")
+        furthest_end = np.maximum.accumulate(hi_edge[by_start])
+        i = np.searchsorted(lo_edge[by_start], pos, side="right")
+        covered = i > 0  # some span starts at or before p
+        far = furthest_end[np.maximum(i, 1) - 1]  # clamped: the value is discarded where ~covered
+        out[key_hi] = np.maximum(np.where(covered, far, pos) - pos, 0)
+
+        # LOW side: among spans ending at or after p, the one starting furthest left. Symmetric.
+        by_end = np.argsort(hi_edge, kind="stable")
+        furthest_start = np.minimum.accumulate(lo_edge[by_end][::-1])[::-1]
+        j = np.searchsorted(hi_edge[by_end], pos, side="left")
+        covered = j < n_span  # some span ends at or after p
+        near = furthest_start[np.minimum(j, n_span - 1)]  # clamped, as above
+        out[key_lo] = np.maximum(pos - np.where(covered, near, pos), 0)
     return out
 
 
@@ -897,6 +940,94 @@ def build_node_partition_arrays(index) -> tuple[np.ndarray, np.ndarray, np.ndarr
         offsets,
         np.concatenate(types) if types else np.empty(0, dtype=np.uint8),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class JunctionEdgeArrays:
+    """The junction edges, re-indexed onto **the accumulator's flat cut axis** as a CSR.
+
+    The deposit rule has to answer one question per observed intron, in the BAM-scan hot loop: *is this
+    intron an annotated junction, and if so which edge?* This is the lookup table for it.
+
+    ⭐ It is cheap because of a measured property of the graph: **every annotated intron has both of its
+    endpoints as partition cuts** (100.00 % of 404,168 on the human annotation — forced, since a cut is
+    placed at every exon endpoint). So "is this intron annotated?" reduces to *"are both endpoints cuts,
+    and is the pair registered?"* — and finding the cut index is the binary search the deposit already
+    performs to locate the crossed lines. If an intron's start is not a cut it is unannotated and the
+    table is never consulted.
+
+    Keyed by the **donor** cut index, i.e. the flat index into
+    ``build_node_partition_arrays(index)[0]`` of the intron's LOW endpoint::
+
+        for k in range(offsets[donor_cut], offsets[donor_cut + 1]):
+            if acceptor_cut[k] == observed_acceptor_cut:   # 1-3 iterations at human scale
+                credit junction edge k          # <- the SLOT is the id; see below
+
+    ⚠ **The junction-edge id IS the CSR slot ``k``.** ``edge_row`` is *not* the id — it is the key for
+    joining a payload row back to ``index.edges_df``, and using it to index a junction bank is a
+    memory-safety bug: the highest junction row is **1,447,755** in a **404,168**-entry bank, so the write
+    lands past the end, and even in bounds it permutes every surviving row. The accumulator never receives
+    this column.
+
+    ⚠ **The slot ordering is a contract**, because the id is the rank: this function and the reference
+    accumulator's ``Partition.from_cuts`` must sort identically, or every row permutes and the native
+    build's byte-identity gate compares two different labellings. They disagreed once — ``(acceptor,
+    donor)`` against ``(strand, acceptor, donor)`` — and it is reachable only through a strand-coincident
+    junction pair. Pinned by ``test_the_csr_slot_order_matches_the_reference_accumulator``.
+
+    ``strand`` disambiguates that (biologically improbable, constructible) case of two junctions sharing a
+    coordinate pair and differing only in strand; the caller matches on it when the observed motif strand
+    is known.
+    """
+
+    offsets: np.ndarray  # int64[P + 1] — CSR over the flat cut axis, P = cut_positions.size
+    acceptor_cut: np.ndarray  # int64[J] — flat cut index of the intron's HIGH endpoint
+    edge_row: np.ndarray  # int64[J] — row in index.edges_df. A JOIN KEY, not the junction-edge id
+    strand: np.ndarray  # int8[J]  — the junction's genomic strand (Strand POS/NEG)
+
+
+def build_junction_edge_arrays(index) -> JunctionEdgeArrays:
+    """Build the :class:`JunctionEdgeArrays` CSR for ``index``.
+
+    A junction edge stores node ids; the accumulator works in cut indices. For a reference whose first
+    node is ``node_base`` and whose first cut is ``cut_base``, node ``i`` spans
+    ``[cuts[cut_base + i - node_base], cuts[cut_base + i - node_base + 1])``, so::
+
+        donor cut    = cut_base + (src - node_base) + 1      # the intron starts where src ENDS
+        acceptor cut = cut_base + (dst - node_base)          # and ends where dst BEGINS
+    """
+    nodes_df, edges_df = index.nodes_df, index.edges_df
+    _, cut_offsets, _ = build_node_partition_arrays(index)
+    n_cuts = int(cut_offsets[-1])
+
+    # per-reference node_base, in the same reference order the cut axis uses
+    counts = nodes_df.groupby("ref_name", sort=False).size()
+    node_base = np.zeros(len(index.ref_names) + 1, dtype=np.int64)
+    for i, ref in enumerate(index.ref_names):
+        node_base[i + 1] = node_base[i] + int(counts.get(ref, 0))
+
+    is_junction = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
+    src = edges_df["src"].to_numpy(np.int64)[is_junction]
+    dst = edges_df["dst"].to_numpy(np.int64)[is_junction]
+    strand = edges_df["strand"].to_numpy(np.int8)[is_junction]
+    edge_row = np.flatnonzero(is_junction).astype(np.int64)
+
+    # which reference each junction belongs to: node ids are contiguous per reference (I2)
+    ref_of = np.searchsorted(node_base, src, side="right") - 1
+    shift = cut_offsets[ref_of] - node_base[ref_of]
+    donor_cut = src + shift + 1
+    acceptor_cut = dst + shift
+
+    # ⚠ The sort key includes STRAND, and it must match the reference accumulator's
+    # ``Partition.from_cuts`` exactly — the junction-edge id IS the rank in this order, so the two
+    # disagreeing would permute every row and break byte-identity. It shows up only on a donor/acceptor
+    # pair carrying two strands, which is biologically impossible and therefore only ever reachable from
+    # a synthetic stress test.
+    order = np.lexsort((strand, acceptor_cut, donor_cut))
+    donor_cut, acceptor_cut = donor_cut[order], acceptor_cut[order]
+    offsets = np.zeros(n_cuts + 1, dtype=np.int64)
+    np.cumsum(np.bincount(donor_cut, minlength=n_cuts), out=offsets[1:])
+    return JunctionEdgeArrays(offsets, acceptor_cut, edge_row[order], strand[order])
 
 
 def build_boundary_flags_array(index) -> np.ndarray:

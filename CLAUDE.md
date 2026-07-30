@@ -11,10 +11,21 @@ library into gDNA vs RNA, and a per-locus EM solver assigns RNA to transcripts. 
 
 ## ⭐ Current direction — read this first
 
-**`docs/CARRY_FORWARD.md` is the single knowledge document.** On 2026-07-29 the project's 278 docs
-(74,823 lines) and 142 agent-memory files were deleted and distilled into it: 24 measured facts, 18
-equations the code depends on, **27 traps**, 30 design ideas, and 7 open contradictions. Read its §0
-(open decisions) and §3 (traps) before designing anything. Nothing else in `docs/` is a design document.
+**Four documents are the whole story. Read them in this order:**
+
+| doc | what it is |
+|---|---|
+| **`docs/IMPLEMENTATION_PLAN.md` §0** | ⭐ **START HERE** — live state, next actions, what is uncommitted |
+| `docs/ACCUMULATOR_DESIGN.md` | the design being implemented |
+| `docs/LEDGER.md` | what has landed, its gates, and why each thing is the way it is |
+| `docs/CARRY_FORWARD.md` | 24 measured facts, 18 equations the code depends on, **27 traps**, 30 design ideas |
+
+On 2026-07-29 the project's other 274 docs (74,823 lines) and 132 agent-memory files were deleted and
+distilled into these. **Nothing else in `docs/` is a design document**, and a doc path not listed above
+does not exist — several older references to one were dangling.
+
+**`tests/native/_accumulator_reference.py` is the executable specification** for the accumulator. The C++
+is gated on byte-identity to it; where it and a document disagree, it wins.
 
 **The accumulator is being redesigned and replaced, not patched.** The accumulator is the tally built
 during the BAM scan. Its central defect: it chops each fragment at partition borders and then decides
@@ -39,9 +50,16 @@ The replacement, agreed with the owner:
 - `Σ 1/L` estimates density with **no fragment-length model**, but only at an edge and only where there
   is ≳1.5 fragment lengths of template on both sides. It is not model-free at a node, and near a
   transcript end it under-reads badly (0.11× at 20 bp). Both limits are *signal*, not defects.
+- **ONE strand convention**: everything is stored by **genome** strand (`CHANNEL_PLUS`/`CHANNEL_MINUS`).
+  *Sense*/*antisense* is the transcript-relative notion and is **derived, never stored**.
+- **Two components only, gDNA and RNA.** "RNA is RNA" — no mature/nascent split in the accumulator.
 
-**Phase order:** design → toy Python reference accumulator → new benchmark suite → validate → C++ →
-wire into calibration → then fix calibration. Do not graft new work onto the old accumulator.
+**Phase order** (S1–S6 in the plan): index → **Python reference + spec matrix** → C++ → payload →
+consumers → delete. The reference is written first and is the oracle for everything after it. Do not
+graft new work onto the old accumulator.
+
+⛔ **No version suffixes in file names.** It is `accumulator.py`, never `accumulator_v5.py`. Files are
+rewritten in place and the old path is deleted, not kept for comparison.
 
 ## The index (built, validated, current)
 
@@ -69,7 +87,7 @@ edges, 404,168 junction edges.
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-pytest tests/ -q                               # 94 modules, 1280 tests
+pytest tests/ -q                               # 95 modules, 1298 tests
 pytest tests/ --update-golden                  # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/
 ```

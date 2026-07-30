@@ -289,6 +289,13 @@ nodes + 1,447,763 edges ≈ 2.5 M. Like-for-like the object count **doubles**.
 
 ## §4 IDEAS FOR THE NEW DESIGN
 
+> ⛔ **READ THIS FIRST. §4 is a PRE-SETTLEMENT proposal list**, distilled from the deleted documentation
+> before the design was agreed. Most of it survived into `ACCUMULATOR_DESIGN.md` — but **several items were
+> subsequently measured and rejected**, and they are marked `⛔ SUPERSEDED` in place with what replaced
+> them. **`ACCUMULATOR_DESIGN.md` and `tests/native/_accumulator_reference.py` are the authority; §4 is
+> history.** The markers were added 2026-07-29, when six of them were found to contradict the deposit rule
+> that S3 implements — an unmarked §4 would have handed a C++ author four wrong instructions.
+
 **Object model — the index already ships it** (format v8, on disk, validated, 56 graph tests passing)
 
 - Node = half-open interval tiling a reference, ids contiguous in genomic order. Edge = directed, always `src < dst`, so **genomic order is
@@ -305,19 +312,31 @@ nodes + 1,447,763 edges ≈ 2.5 M. Like-for-like the object count **doubles**.
 
 **Deposit**
 
-- **One rule: a fragment overlapping N nodes deposits `(+1 count, +1/L)` on EACH of the N−1 edges it crosses; crossing none, it is contained
-  and deposits on the node.** No partitioning at any N, because each edge answers its own question and there is no total to conserve across
-  edges. `L` is the fragment's PATH length — exonic bases only, introns excluded.
+- **One rule: a fragment deposits on EVERY edge it crosses, with no partitioning**, because each edge answers its own question and there is no
+  total to conserve across edges. ⛔ **SUPERSEDED in three particulars** (design §4.1, §4.3, §3.1) — as originally written this bullet said
+  `+1/L` at an edge, "crossing none ⇒ contained", and "`L` is exonic bases only":
+  - the edge weight is **`1/(L−1)`**, not `1/L`. A 0-bp line means bases on *both* sides, so there are `L−1` admissible placements; `1/L`
+    reads **0.54 % low**, by exactly `1 − E[1/L]`, verified to four digits on identical draws.
+  - **"crossing none ⇒ contained" is a BUG**, caught by the S2 spec matrix. An unannotated intron can swallow every line between two blocks,
+    leaving a fragment that crosses nothing yet **straddles two nodes**. Contained means *the whole path lies inside one node*.
+  - **`L` is NOT "exonic bases only"** — it is the genomic span with introns cut out, so the **mate gap counts**. Dropping it collapses the
+    length distribution to a spike at twice the read length, and the design calls this out explicitly (§3.1).
 - **Never divide by L at deposit time**, and never move normalisation into the deposit as a per-component correction — that needs to know
   the component, which is the estimand. `Σ1/L` works *because* it is component-blind. Normalisation lives in the effective lengths.
-- **Everything integer or fixed point** (`+= round(2^32/L)`). This REMOVES the known ~2.6 % cross-process nondeterminism.
+- **Everything integer or fixed point.** This REMOVES the known ~2.6 % cross-process nondeterminism. ⛔ The quantum is
+  `round(2^32/placements)` with **`placements = L` at a node and `L−1` at an edge** — two different quantities, deliberately never given one
+  column name (design §10.1). This bullet said `round(2^32/L)` for both.
 - **Keep depositing the molecule's genomic span** (mate gap filled, spliced introns cut), not the sequenced read blocks — it removes the
   paired-end over-count at source. Keep excluding blacklisted-junction fragments entirely (their true span is unrecoverable).
-- **Three exact integer conservation identities** replace fractional mass conservation: `Σ_nodes contained_count == n_contained_fragments`;
-  `Σ_edges count == Σ_f (#edges f crosses)`; `Σ contained_recip == Σ round(2^32/L)`. ⚠ Any conservation test must state its denominator —
-  multimappers, chimeras, blacklisted and strand-undefined fragments never deposit, and overhanging fragments are clipped then renormalized.
-- **Unannotated junctions: never mutate the graph.** Deposit on the contiguous edges the blocks span, in the spliced channel, and report the
-  rate as QC — a rising rate means a stale annotation. The rate has never been measured; measure it on real cfRNA (the toy has none).
+- ⛔ **SUPERSEDED — the "three exact integer conservation identities" are TAUTOLOGIES** and were rejected (design §10.2). Each right-hand side
+  can only be evaluated by re-running the deposit, so they cannot fail: the S2 review's deliberately-broken replay satisfied all three exactly
+  while 91 % of the crossings were junk. **Replaced by one `uint32` per node counting fragments whose START lies in it**, giving
+  `Σ start_count == n_accepted` — checkable against a number the scanner knows independently. ⚠ The denominator warning still stands:
+  multimappers, chimeras, blacklisted and strand-undefined fragments never deposit, and overhanging fragments are clipped.
+- **Unannotated junctions: never mutate the graph**, and report the rate as QC — a rising rate means a stale annotation. ⛔ **SUPERSEDED on the
+  channel: they deposit UNSPLICED, not spliced** (owner ruling; design §4.1). Unannotated junctions are disproportionately artifactual, so they
+  must compete with gDNA rather than be certified as RNA — the safe direction. They also deposit **nothing across the gap**. ⭐ And the rate is
+  now measured: **2.3 % / 1.7 %** of `N` operations, but **18.9 % / 10.8 % of *distinct* junctions**, which is the honest figure.
 - **Ambiguous-path fragments go to a small side buffer** `(candidate ids, channel, L)`, resolved in a second pass by maximum likelihood,
   INTEGRALLY, after the RNA fragment-length model is fitted. Size unmeasured.
 
@@ -343,26 +362,33 @@ nodes + 1,447,763 edges ≈ 2.5 M. Like-for-like the object count **doubles**.
 
 **Fragment-length models**
 
-- **Structurally pure pools remove a circular dependency:** junction-edge fragments are pure mature RNA by construction, intergenic contained
-  fragments are pure gDNA, so `count/Σ(1/L)` is that component's abundance-weighted mean length. Ordering: accumulate (no FL model needed) →
-  fit both FL distributions from the pure pools → effective lengths → calibrate. Nothing is estimated from the fragments it will later
-  explain. ⚠ See C3 — the intergenic pool may be coverage-empty under capture; make exon↔intron "splash" an explicit named pool.
+- **Structurally pure pools remove a circular dependency:** junction-edge fragments are pure RNA by construction, intergenic contained fragments
+  are pure gDNA. Ordering: accumulate (no FL model needed) → fit both FL distributions from the pure pools → effective lengths → calibrate.
+  Nothing is estimated from the fragments it will later explain. ⛔ **SUPERSEDED in three particulars** (design §8, §8.1):
+  - **"pure mature RNA" → pure RNA.** There is no mature/nascent distinction anywhere in the accumulator (owner ruling: "RNA is RNA"), and a
+    partially spliced nascent molecule carries junctions too.
+  - **the mean-length estimator is `count/Σ(1/(L−1)) + 1`, not `count/Σ(1/L)`.** The `+1` is exact at an edge and verified to +0.0001 % on all
+    four libraries; omitting it is low by exactly `1/E[L]`. And at a **contained** node the same ratio converges to the **harmonic** mean —
+    which is a problem, because intergenic-contained is the *only* gDNA pool, i.e. exactly the frame where the naive recipe fails.
+  - **five pools, not two**, and the splash pools are named rather than optional: DNA intergenic / intronic / intron-exon / intergenic-exon and
+    RNA spliced. ⭐ Measured means 88.0 / 88.5 / 138.8 / 211.6 / 220.7 — the splash pools land *between* the two extremes, as expected.
 - **Bin each fragment's length ONCE, as an integer, into a named pool.** Today a crossing fragment smears its length fractionally across
   every region type it touches, accumulated as non-associative `double +=`.
 
 **Validation and benchmarking**
 
-- **Write the toy Python accumulator FIRST and make it the executable spec**, with a byte-for-byte native parity harness. The existing pair
-  (`tests/native/_accumulator_reference.py`, 275 lines, + the spec test) is what made a real double-credit bug provable in thirty seconds.
+- **Write the toy Python accumulator FIRST and make it the executable spec**, with a byte-for-byte native parity harness. ⭐ **Done in S2** —
+  `tests/native/_accumulator_reference.py` plus a 46-case spec matrix, which caught four blocking bugs no later gate could have.
 - **The oracle IS the production accumulator, partitioned by true fragment origin.** Split the simulated BAM by read-name origin, run the
   SAME scanner and accumulator on each partition, assert the partitions sum to the full payload. Four hard gates: integer channels sum
   exactly; mass within float rounding; gDNA is never spliced; every read lands in exactly one partition. Nothing is reimplemented, so
   nothing can be subtly wrong. (An earlier oracle on a *different* deposit basis manufactured a spurious 157 k "fix" and confounded months.)
 - **Keep the concrete test matrix:** contained → node only · 4-node crossing → exactly THREE edges · fragment spanning a 1 bp node → both
-  flanking edges, node untouched · spliced → junction edge only, NO deposit on the contiguous edges it splices over · zero-length intron ·
-  exact count conservation · N workers → bit-identical · opposite-strand junctions at identical coordinates are distinct edges · unannotated
-  junctions · clipping at a reference end · effective lengths vs brute-force enumeration · uniform-density recovery within [0.98, 1.02] ·
-  `Σ1/L` within [0.98, 1.02] **with no FL model supplied**.
+  flanking edges **and that node's SPANNING counter, with contained untouched** (⛔ this bullet said "node untouched", from before `spanning`
+  was stored) · spliced → junction edge only, NO deposit on the contiguous edges it splices over · zero-length intron · N workers →
+  bit-identical · opposite-strand junctions at identical coordinates are distinct edges · unannotated junctions · clipping at a reference end ·
+  effective lengths vs brute-force enumeration · uniform-density recovery within [0.98, 1.02] · `Σ1/(L−1)` within [0.98, 1.02] **with no FL
+  model supplied**. ⛔ "exact count conservation" is dropped — see the tautology note under **Deposit**.
 - **An executable unbiasedness test already exists** and is exactly the property the new edge counter needs:
   `tests/calibration/test_accumulator_span_unbiased.py` asserts crossing density ÷ contained density ≈ 1.0. Keep it, swap the estimator.
 - **Validate by re-deriving with a DIFFERENT algorithm**, sharing only the input definition (node signature by midpoint containment vs
@@ -380,8 +406,11 @@ nodes + 1,447,763 edges ≈ 2.5 M. Like-for-like the object count **doubles**.
   delta is recorded against a baseline re-recorded from the same tree in the same session.
 - **Build the coarsening map (new nodes → old regions) BEFORE the first partition arm.** Once the partition moves, per-node error statistics
   are not comparable across node sets — and scoring granularity ALONE moves the error metric 26 %.
-- **Shadow mode: emit BOTH payloads from one scan**, so every A/B is exact and free and any arm reverts without a rescan. Ship new index
-  tables additively so old indexes stay loadable; bump the format version only when the loader starts *requiring* them.
+- ⛔ **SUPERSEDED — "shadow mode: emit BOTH payloads from one scan" was REJECTED.** Owner ruling: **clean cut** (plan §5). Two payloads is
+  duplicate state kept for comparison, which the standing rules forbid, and it would put both halves of the rework in flight at once — which is
+  exactly what destroys the oracle. What replaces the attribution it would have bought is the **Python reference**: a complete correct
+  implementation before any C++, so "is the C++ right?" and "is calibration rewired right?" are answered independently. Same for "ship new index
+  tables additively so old indexes stay loadable" — no backwards compatibility.
 - **Take the terminus win off the INDEX ALONE first** — the terminus-aware solver fixes need no accumulator change, so that value lands
   before any of the risky work.
 - **Prefer structural (annotation-derived) predicates to observational (coverage-derived) ones:** a structural spliced-face count is constant
