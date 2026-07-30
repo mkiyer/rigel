@@ -15,7 +15,7 @@ from __future__ import annotations
 import numpy as np
 
 from rigel.calibration.density_model import count_observable_masks
-from rigel.calibration.effective_length import boundary_eff_length, region_eff_length
+from rigel.calibration.effective_length import contained_eff_length, fl_mean
 from rigel.calibration.fl import build_fl_models, gdna_fl_mass
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.substrate import CalibrationSubstrate
@@ -36,8 +36,7 @@ def _crossing_vs_contained_ratio(bam_path, index) -> float:
         max_size=fla.max_size,
     )
     gpmf = flm.gdna_pmf
-    reg_eff = region_eff_length(ra.region_size_bp, gpmf)
-    fl_mean = boundary_eff_length(gpmf)
+    reg_eff = contained_eff_length(ra.region_size_bp, gpmf)
     sub = CalibrationSubstrate.from_payload(pl, ra)
     rids = np.asarray(ra.ref_id)
     reg_obs, bnd_obs = count_observable_masks(np.asarray(ra.signature), rids)

@@ -295,7 +295,6 @@ def _main():
     cal_fg = np.where((cal_g + cal_r) > 0, cal_g / np.maximum(cal_g + cal_r, 1e-12), np.nan)
     ok = np.isfinite(true_fg) & np.isfinite(cal_fg)
     w = tot[ok]
-    err_g_mass = cal_g - G  # per-region gDNA contained mass error
     print("\n=== CALIBRATION ACCURACY on the correct (accumulator) basis ===")
     print(
         f"  contained gDNA mass: cal={cal_g.sum():,.0f}  true={G.sum():,.0f}  "

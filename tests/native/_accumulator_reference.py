@@ -20,19 +20,30 @@ THE MODEL
         path        [= block =]~~intron~~[==== block ====]       crosses nothing; uses a junction
 
     Nodes count fragments **contained** (they fit inside) and **spanning** (they cover the node whole);
-    edges count fragments **crossing**. Every object stores an integer count and a fixed-point density.
+    edges count fragments **crossing**. Every object stores THREE sums over the fragments that landed
+    on it: ``count`` = Sum 1, ``inv_length_sum`` = Sum 1/placements (fixed point), ``length_sum`` = Sum L.
 
 WHAT EACH OBJECT'S NUMBERS MEAN
     With ``placements`` the number of admissible start positions — ``L`` at a node, ``L − 1`` at a 0-bp
     line — and a component of start-density ``rho`` and length distribution ``f``::
 
-        E[count]    =  rho * E_f[placements]
-        E[density]  =  rho * E_f[placements * (1 / placements)]  =  rho     <- at an EDGE, exactly
+        E[count]          =  rho * E_f[placements]
+        E[inv_length_sum]  =  rho * E_f[placements * (1/placements)]  =  rho   <- at an EDGE, exactly
+        E[length_sum]      =  rho * E_f[placements * L]
 
     The opportunity factor cancels identically at an edge, for **any** length distribution, which is why
     no divisor and no length model appear there. It does **not** cancel at a node, where the opportunity
-    is ``max(0, node − L + 1)``; there the density term is a better-conditioned second moment and
-    nothing more.
+    is ``max(0, node − L + 1)``; there the term is a better-conditioned second moment and nothing more.
+
+    ⚠ **This is why the channel is called ``inv_length_sum`` and NOT ``density``.** It IS a density at an
+    edge, exactly; at a node it is not one. Naming it ``density`` put one word on two concepts and would
+    mislead every consumer that reads a node. The three names are three sums and are honest everywhere.
+
+    ⭐ **``length_sum`` is what separates two components that share a mean length.** At an edge the count
+    row is ``(mu_g - 1, mu_r - 1)`` and the inv-length row is ``(1, 1)``, so the pair's determinant is
+    ``mu_g - mu_r`` and it carries ZERO information about the gDNA/RNA split when the two means agree --
+    at any depth. ``length_sum`` is a second, independent tilt and removes that blind spot.
+    See ``docs/NODE_DENSITY_DERIVATION.md`` and ``scripts/design/observable_efficiency.py``.
 
 ⚠ NO PARTITIONING. Every crossed edge receives the FULL weight. The chance that a length-``L`` fragment
 crosses a given line is proportional to ``L`` and the deposit is ``1/L``, so the two cancel and every
@@ -52,7 +63,7 @@ from rigel.types import Strand
 
 
 __all__ = [
-    "DENSITY_SCALE",
+    "INV_LENGTH_SCALE",
     "N_STRAND_COLUMNS",
     "STRAND_COLUMNS",
     "Accumulator",
@@ -60,7 +71,7 @@ __all__ = [
     "FragmentPool",
     "Partition",
     "Tally",
-    "density_quantum",
+    "inv_length_quantum",
 ]
 
 #: ⭐ THE STRAND CONVENTION, and it is the same one everywhere in this file.
@@ -88,23 +99,23 @@ STRAND_COLUMNS: dict[int, int] = {Strand.POS: 0, Strand.NEG: 1}
 N_STRAND_COLUMNS = len(STRAND_COLUMNS)
 
 
-#: Densities accumulate as ``round(DENSITY_SCALE / placements)`` in uint64. Integer addition is
+#: Densities accumulate as ``round(INV_LENGTH_SCALE / placements)`` in uint64. Integer addition is
 #: associative, so a per-worker merge is bit-identical at any thread count — which float accumulation is
 #: not, and that nondeterminism propagates to a ~2.6 % difference in the calibration output. The scale is
 #: 2^32 because it keeps the quantisation error (≤ 6.9e-8 relative over ``L`` in [40, 1000]) below
 #: float32's own epsilon while leaving ample headroom under the uint64 ceiling at realistic depth.
-DENSITY_SCALE = 1 << 32
+INV_LENGTH_SCALE = 1 << 32
 
 
-def density_quantum(placements: int) -> int:
-    """``round(DENSITY_SCALE / placements)``, rounding halves AWAY FROM ZERO.
+def inv_length_quantum(placements: int) -> int:
+    """``round(INV_LENGTH_SCALE / placements)``, rounding halves AWAY FROM ZERO.
 
     ⚠ The rounding mode is part of the contract: byte-identity across platforms and languages is
     undefined without it, and Python's built-in ``round`` is banker's rounding, which differs at ties.
     """
     if placements <= 0:
         raise ValueError(f"placements must be positive, got {placements}")
-    return (2 * DENSITY_SCALE + placements) // (2 * placements)
+    return (2 * INV_LENGTH_SCALE + placements) // (2 * placements)
 
 
 class DepositOutcome(enum.Enum):
@@ -339,23 +350,35 @@ def _segments(start: int, end: int, introns) -> list[tuple[int, int]]:
 
 @dataclass(slots=True)
 class Tally:
-    """The accumulator's output. Two arrays per population: an integer count and a fixed-point density.
+    """The accumulator's output. THREE arrays per population, all integer sums over its fragments.
 
-    Both, always — the count carries the statistical power (a Beta-Binomial needs an integer), the
-    density carries the level, and **no fractional quantity ever enters a likelihood**.
+    ``count`` = ``Sum 1`` carries the statistical power (a Beta-Binomial needs an integer);
+    ``inv_length_sum`` = ``Sum 1/placements`` carries the level, and is an exact model-free density at an
+    edge but NOT at a node; ``length_sum`` = ``Sum L`` is the second length tilt, and is what lets two
+    components with the same mean fragment length be told apart at all.
+
+    All three are integers, so **no fractional quantity ever enters a likelihood** and a per-worker merge
+    is bit-identical at any thread count.
     """
 
     node_contained_count: np.ndarray  # uint32[n_nodes, 2]
-    node_contained_density: np.ndarray  # uint64[n_nodes, 2]
+    node_contained_inv_length_sum: np.ndarray  # uint64[n_nodes, 2]
+    node_contained_length_sum: np.ndarray  # uint64[n_nodes, 2] — Sum L, the second length tilt
     node_spanning_count: np.ndarray  # uint32[n_nodes, 2]
-    node_spanning_density: np.ndarray  # uint64[n_nodes, 2]
+    node_spanning_inv_length_sum: np.ndarray  # uint64[n_nodes, 2]
+    node_spanning_length_sum: np.ndarray  # uint64[n_nodes, 2] — Sum L, the second length tilt
     node_start_count: np.ndarray  # uint32[n_nodes] — one per accepted fragment; THE invariant
     edge_unspliced_count: np.ndarray  # uint32[n_edges, 2]
-    edge_unspliced_density: np.ndarray  # uint64[n_edges, 2]
+    edge_unspliced_inv_length_sum: np.ndarray  # uint64[n_edges, 2]
+    edge_unspliced_length_sum: np.ndarray  # uint64[n_edges, 2] — Sum L, the second length tilt
     edge_spliced_count: np.ndarray  # uint32[n_edges, 2] — certified RNA: gDNA cannot be spliced
-    edge_spliced_density: np.ndarray  # uint64[n_edges, 2]
+    edge_spliced_inv_length_sum: np.ndarray  # uint64[n_edges, 2]
+    edge_spliced_length_sum: np.ndarray  # uint64[n_edges, 2] — Sum L, the second length tilt
+    edge_spliced_length_sum: np.ndarray  # uint64[n_edges, 2] — Sum L, the second length tilt
     sj_count: np.ndarray  # uint32[n_sj, 2]
-    sj_density: np.ndarray  # uint64[n_sj, 2]
+    sj_inv_length_sum: np.ndarray  # uint64[n_sj, 2]
+    sj_length_sum: np.ndarray  # uint64[n_sj, 2] — Sum L, the second length tilt
+    sj_length_sum: np.ndarray  # uint64[n_sj, 2] — Sum L, the second length tilt
     pool_lengths: np.ndarray  # int64[5, max_fragment_length + 1] — binned at L, once per fragment
     qc: dict[str, int] = field(default_factory=dict)
 
@@ -364,21 +387,26 @@ class Tally:
         def counts(rows):
             return np.zeros((rows, N_STRAND_COLUMNS), np.uint32)
 
-        def density(rows):
+        def inv_length(rows):
             return np.zeros((rows, N_STRAND_COLUMNS), np.uint64)
 
         return cls(
             node_contained_count=counts(n_nodes),
-            node_contained_density=density(n_nodes),
+            node_contained_inv_length_sum=inv_length(n_nodes),
+            node_contained_length_sum=inv_length(n_nodes),
             node_spanning_count=counts(n_nodes),
-            node_spanning_density=density(n_nodes),
+            node_spanning_inv_length_sum=inv_length(n_nodes),
+            node_spanning_length_sum=inv_length(n_nodes),
             node_start_count=np.zeros(n_nodes, np.uint32),
             edge_unspliced_count=counts(n_edges),
-            edge_unspliced_density=density(n_edges),
+            edge_unspliced_inv_length_sum=inv_length(n_edges),
+            edge_unspliced_length_sum=inv_length(n_edges),
             edge_spliced_count=counts(n_edges),
-            edge_spliced_density=density(n_edges),
+            edge_spliced_inv_length_sum=inv_length(n_edges),
+            edge_spliced_length_sum=inv_length(n_edges),
             sj_count=counts(n_sj),
-            sj_density=density(n_sj),
+            sj_inv_length_sum=inv_length(n_sj),
+            sj_length_sum=inv_length(n_sj),
             pool_lengths=np.zeros((len(FragmentPool), max_length + 1), np.int64),
             qc={outcome.value: 0 for outcome in DepositOutcome}
             | {
@@ -541,30 +569,37 @@ class Accumulator:
         # contiguous index range and no container is needed. A node is SPANNED iff ONE segment crosses
         # both of its lines — not merely "both lines crossed", which would count a node the fragment
         # JUMPS OVER, whose two lines are touched by the two flanking segments from opposite sides.
-        edge_count, edge_density = (
-            (t.edge_spliced_count, t.edge_spliced_density)
+        edge_count, edge_inv_length, edge_length = (
+            (t.edge_spliced_count, t.edge_spliced_inv_length_sum, t.edge_spliced_length_sum)
             if spliced
-            else (t.edge_unspliced_count, t.edge_unspliced_density)
+            else (
+                t.edge_unspliced_count,
+                t.edge_unspliced_inv_length_sum,
+                t.edge_unspliced_length_sum,
+            )
         )
-        quantum_edge = density_quantum(length - 1) if length >= 2 else 0
-        quantum_node = density_quantum(length)
+        quantum_edge = inv_length_quantum(length - 1) if length >= 2 else 0
+        quantum_node = inv_length_quantum(length)
         n_crossed, sole_line = 0, -1
         for seg_start, seg_end in segments:
             first = int(np.searchsorted(cuts, seg_start, side="right"))
             last = int(np.searchsorted(cuts, seg_end, side="left"))
             for line in range(first, last):
                 edge_count[edge_base + line - 1, column] += 1
-                edge_density[edge_base + line - 1, column] += quantum_edge
+                edge_inv_length[edge_base + line - 1, column] += quantum_edge
+                edge_length[edge_base + line - 1, column] += length
             for line in range(first, last - 1):  # the node between two consecutive crossed lines
                 t.node_spanning_count[node_base + line, column] += 1
-                t.node_spanning_density[node_base + line, column] += quantum_node
+                t.node_spanning_inv_length_sum[node_base + line, column] += quantum_node
+                t.node_spanning_length_sum[node_base + line, column] += length
             if last > first:
                 sole_line = first if (n_crossed == 0 and last - first == 1) else -1
                 n_crossed += last - first
 
         for jid in sj_ids:
             t.sj_count[jid, column] += 1
-            t.sj_density[jid, column] += quantum_edge
+            t.sj_inv_length_sum[jid, column] += quantum_edge
+            t.sj_length_sum[jid, column] += length
 
         # ── contained: the WHOLE path lies inside ONE node ────────────────────────────────────────
         # ⚠ Not merely "crossed no line". An unannotated intron can swallow every line between two
@@ -577,7 +612,8 @@ class Accumulator:
         if not sj_ids and first_node == self._local_node(cuts, last_base):
             contained_node = node_base + first_node
             t.node_contained_count[contained_node, column] += 1
-            t.node_contained_density[contained_node, column] += quantum_node
+            t.node_contained_inv_length_sum[contained_node, column] += quantum_node
+            t.node_contained_length_sum[contained_node, column] += length
 
         pool = self._pool(spliced, sj_implicit, contained_node, sole_line, node_base)
         if pool is not None:

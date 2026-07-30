@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from rigel.calibration.node_chain import BOUNDARY, REGION, build_node_chain
+from rigel.calibration.node_chain import EDGE, NODE, build_node_chain
 from rigel.calibration.node_geometry import build_node_statics
 from rigel.calibration.signature import (
     BIT_EXON_NEG,
@@ -77,9 +77,9 @@ def test_classifier_covers_region_and_boundary_types():
     assert np.all(~st.mrna_active_pos | st.free_pos)  # mature ⇒ nascent-active (+)
     assert np.all(~st.mrna_active_neg | st.free_neg)  # (−)
 
-    kind, ref = np.asarray(chain.kind), np.asarray(chain.ref_idx)
-    reg = np.where(kind == REGION)[0]  # R0..R5 (genomic order)
-    bnd = np.where(kind == BOUNDARY)[0]  # B0..B6
+    kind, ref = np.asarray(chain.kind), np.asarray(chain.obj_idx)
+    reg = np.where(kind == NODE)[0]  # R0..R5 (genomic order)
+    bnd = np.where(kind == EDGE)[0]  # B0..B6
     np.testing.assert_array_equal(ref[reg], np.arange(6))  # confirm genomic ordering
     np.testing.assert_array_equal(ref[bnd], np.arange(7))
 

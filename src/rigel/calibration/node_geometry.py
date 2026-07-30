@@ -26,15 +26,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .effective_length import (
-    boundary_side_eff_length,
-    region_eff_length,
-    spliced_side_eff_length,
-)
-from .node_chain import BOUNDARY, REGION, NodeChain
+from .node_chain import EDGE, NODE, NodeChain
 from .signature import (
-    BIT_EXON_NEG,
-    BIT_EXON_POS,
     TS_AMBIG,
     TS_NEG,
     TS_POS,
@@ -108,216 +101,29 @@ def build_node_geometry(
     gdna_fl_pmf: np.ndarray,
     rna_fl_pmf: np.ndarray,
 ) -> NodeGeometry:
-    """Assemble the per-node per-face geometry from the region-/boundary-keyed substrates onto the chain.
+    """⛔ NOT YET REWIRED — this is S5.e (`docs/S5_DESIGN_LOG.md` §2).
 
-    The one-sided spliced (mature) mass is routed to its exon flank by the boundary's KNOWN junction strand
-    (``boundary_substrate.junction_strand``, observed from the splice motif at deposit — ``TS_POS``/``TS_NEG``/0,
-    one motif-stranded junction per boundary). This is correct even at AMBIG / exon↔exon seams, where the
-    flanking region signatures cannot orient the junction."""
-    kind = np.asarray(chain.kind)
-    idx = np.asarray(chain.ref_idx, dtype=np.int64)
-    is_reg = kind == REGION
-    is_bnd = kind == BOUNDARY
+    The per-FACE geometry this built no longer exists. A contiguous edge is a 0-bp line with ONE set of
+    numbers, not two sides in differently-sized flanks, so every ``_left``/``_right`` pair here dissolves;
+    and the three divisors it called (``boundary_side_eff_length``, ``spliced_side_eff_length``,
+    ``region_eff_length``) were deleted in S5.c and replaced by the one placements formula
+    (:mod:`rigel.calibration.effective_length`).
 
-    # --- per-region quantities (contained) ---
-    L = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
-    reg_eff_g = region_eff_length(L, gdna_fl_pmf)  # E_gdna[max(0,L−ℓ)] contained
-    reg_eff_r = region_eff_length(L, rna_fl_pmf)
-    side_eff_g = boundary_side_eff_length(
-        gdna_fl_pmf, L
-    )  # per region: E_gdna[min(ℓ,L)] side crossing
-    side_eff_r = boundary_side_eff_length(rna_fl_pmf, L)
-    side_eff_spl = spliced_side_eff_length(
-        rna_fl_pmf, L
-    )  # one-sided spliced-crossing half-triangle
-    reg_mass = np.asarray(substrate.contained.mass_unspliced, dtype=np.float64)
-    sig = np.asarray(region_arrays.signature).astype(np.int64)
-    R = L.shape[0]
-
-    # --- per-boundary quantities (two sides) ---
-    bsub = boundary_substrate
-    blr = np.asarray(bsub.left_region, dtype=np.int64)
-    brr = np.asarray(bsub.right_region, dtype=np.int64)
-    bmass_l = np.asarray(bsub.left.mass_unspliced, dtype=np.float64)
-    bmass_r = np.asarray(bsub.right.mass_unspliced, dtype=np.float64)
-    # matching integer unspliced flux per side (the Poisson n for the message precision)
-    bn_unspl_l = np.asarray(bsub.left.n_unspliced, dtype=np.float64)
-    bn_unspl_r = np.asarray(bsub.right.n_unspliced, dtype=np.float64)
-    bspl_l = np.asarray(bsub.left.mass_spliced, dtype=np.float64)  # sense+antisense summed
-    bspl_r = np.asarray(bsub.right.mass_spliced, dtype=np.float64)
-    # the matching integer flux (same channels, summed the same way) — the Poisson count for the variance
-    bspn_l = np.asarray(bsub.left.n_spliced_sense, np.float64) + np.asarray(
-        bsub.left.n_spliced_antisense, np.float64
-    )
-    bspn_r = np.asarray(bsub.right.n_spliced_sense, np.float64) + np.asarray(
-        bsub.right.n_spliced_antisense, np.float64
-    )
-    B = blr.shape[0]
-    # a boundary's per-side crossing eff-len = its flank region's E[min(ℓ,L)] (0 at a −1 terminal flank)
-    b_eff_g_l = np.where(blr >= 0, side_eff_g[np.clip(blr, 0, R - 1)], 0.0)
-    b_eff_g_r = np.where(brr >= 0, side_eff_g[np.clip(brr, 0, R - 1)], 0.0)
-    b_eff_r_l = np.where(blr >= 0, side_eff_r[np.clip(blr, 0, R - 1)], 0.0)
-    b_eff_r_r = np.where(brr >= 0, side_eff_r[np.clip(brr, 0, R - 1)], 0.0)
-    # spliced face: route a boundary side's spliced (mature) mass to that side's EXON flank on the junction's
-    # KNOWN genomic strand (``boundary_substrate.junction_strand``, observed from the motif at deposit — one
-    # motif-stranded junction per boundary). Correct at AMBIG / exon↔exon seams the signatures cannot orient.
-    # One-sided per exon: mass_left → left-exon donor, mass_right → right-exon acceptor.
-    sig_l = np.where(blr >= 0, sig[np.clip(blr, 0, R - 1)], 0)
-    sig_r = np.where(brr >= 0, sig[np.clip(brr, 0, R - 1)], 0)
-    js = np.asarray(boundary_substrate.junction_strand).reshape(
-        -1
-    )  # TS_POS / TS_NEG / 0 (== Strand)
-    # STRAND-AWARE routing: mature RNA is single-stranded, and a splice junction is single-stranded with a
-    # KNOWN, data-type-invariant strand (the genomic splice motif). A junction absorbs mature ONLY on its own
-    # strand, so its spliced mass routes to a flank carrying THAT STRAND's exon bit — never merely "any exon".
-    # At an AMBIG seam (overlapping opposite-strand transcripts) a + junction beside a −-only exon must NOT
-    # deposit + mature there, and vice versa. Per strand: TS_POS → BIT_EXON_POS flanks, TS_NEG → BIT_EXON_NEG.
-    exon_pos_l = (sig_l & BIT_EXON_POS) != 0
-    exon_pos_r = (sig_r & BIT_EXON_POS) != 0
-    exon_neg_l = (sig_l & BIT_EXON_NEG) != 0
-    exon_neg_r = (sig_r & BIT_EXON_NEG) != 0
-
-    def _spliced_faces(strand_val, exon_l, exon_r, vl, vr):
-        on = (
-            js == strand_val
-        )  # the junction is on this strand → its SAME-STRAND exon flank carries the mature
-        return np.where(on & exon_l, vl, 0.0), np.where(on & exon_r, vr, 0.0)
-
-    b_spl_pos_l, b_spl_pos_r = _spliced_faces(TS_POS, exon_pos_l, exon_pos_r, bspl_l, bspl_r)
-    b_spl_neg_l, b_spl_neg_r = _spliced_faces(TS_NEG, exon_neg_l, exon_neg_r, bspl_l, bspl_r)
-
-    # ── the ONE-SIDED SPLICED eff-length: which divisor, per face (A1/A2, docs/CARRY_FORWARD.md) ──
-    # A spliced fragment credits only its exon flank. Enumerating the accumulator's deposit rule
-    # ((slice_len/ℓ)/n_cross) over the fragment's ``a`` bases on this side, with flank length ``R``:
-    #     a ≤ R  → the near slice lies inside the flank      → END slice,      n_cross=1 → a/ℓ
-    #     a > R  → it overruns into the NEXT genomic region  → INTERIOR slice, n_cross=2 → R/(2ℓ)
-    # so the per-unit-density deposit is
-    #     Σ_a = R²/(2ℓ) + (ℓ−R)·R/(2ℓ) = min(ℓ,R)/2     when the exon CONTINUES past the flank's far edge
-    #     Σ_a = R²/(2ℓ)                                  when the exon TERMINATES there (no fragment can overrun)
-    # Brute-force verified to 4 d.p. against both closed forms. The half-triangle
-    # (:func:`spliced_side_eff_length`) is therefore correct ONLY for a terminal exon; for every INTERNAL one it
-    # is low by exactly ``ℓ/R`` (measured 2.0× at R=100/ℓ=200, 8.0× at R=25, 12.0× at R=25/ℓ=300), and the
-    # correct divisor is ``E[min(ℓ,R)]/2`` — which is :func:`boundary_side_eff_length`, i.e. ``side_eff_r``,
-    # already computed above on the RNA FL.
-    #
-    # The selector is STRUCTURAL and carries no constant: can the fragment's coverage extend more than ``R``
-    # bases past the junction — i.e. does the MATURE TRANSCRIPT continue past the flank region's far edge?
-    #
-    # ⚠ Verified against the accumulator reference (`tests/native/_accumulator_reference.py`, the crossing
-    # path): a slice is INTERIOR (``n_cross=2``) iff another slice follows it — ``crosses_right = i < n-1`` —
-    # which is a property of the FRAGMENT's slice list, not of region geometry. For a spliced fragment the
-    # next block lands in a different region whether the far boundary is an exon↔exon seam OR an exon↔intron
-    # splice junction. So an INTERNAL exon continues in BOTH cases; only a genuine transcript END terminates.
-    # (A first draft of this used ``mrna_active_s`` alone — exon on both sides — which wrongly called every
-    # exon↔intron junction "terminating" and so left almost every internal exon face on the half-triangle.)
-    #
-    #     continues_s(far boundary)  =  mrna_active_s(far)          exon runs contiguously past it
-    #                                OR  far is a splice junction on strand s   the transcript splices onward
-    #
-    # taken on the JUNCTION's own strand, since that is the strand whose mature is deposited on this face.
-    lb_of_reg = np.full(R, -1, dtype=np.int64)  # region → the boundary on its LEFT
-    rb_of_reg = np.full(R, -1, dtype=np.int64)  # region → the boundary on its RIGHT
-    _m = brr >= 0
-    lb_of_reg[brr[_m]] = np.nonzero(_m)[0]  # boundary b is the LEFT boundary of region brr[b]
-    _m = blr >= 0
-    rb_of_reg[blr[_m]] = np.nonzero(_m)[0]  # ... and the RIGHT boundary of region blr[b]
-
-    def _mrna_active(bit_pos, bit_neg):
-        """Per-BOUNDARY 'mature crosses contiguously', per strand: exon bit on BOTH flank regions."""
-        lp = np.where(blr >= 0, bit_pos[np.clip(blr, 0, R - 1)], False)
-        rp = np.where(brr >= 0, bit_pos[np.clip(brr, 0, R - 1)], False)
-        ln = np.where(blr >= 0, bit_neg[np.clip(blr, 0, R - 1)], False)
-        rn = np.where(brr >= 0, bit_neg[np.clip(brr, 0, R - 1)], False)
-        return lp & rp, ln & rn
-
-    _ex_p_reg = (sig & BIT_EXON_POS) != 0
-    _ex_n_reg = (sig & BIT_EXON_NEG) != 0
-    _mact_p, _mact_n = _mrna_active(_ex_p_reg, _ex_n_reg)
-
-    def _continues(flank_reg, far_bnd_of_reg):
-        """Does the MATURE TRANSCRIPT continue past the flank's far edge, on this junction's strand?"""
-        ok = flank_reg >= 0
-        fr = np.clip(flank_reg, 0, R - 1)
-        fb = np.where(ok, far_bnd_of_reg[fr], -1)
-        okb = ok & (fb >= 0)
-        fbc = np.clip(fb, 0, B - 1)
-        contig = np.where(js == TS_POS, _mact_p[fbc], np.where(js == TS_NEG, _mact_n[fbc], False))
-        splices_on = (js != 0) & (
-            js[fbc] == js
-        )  # the far boundary is a junction on the SAME strand
-        return okb & (contig | splices_on)
-
-    def _eff_spl_face(flank_reg, far_bnd_of_reg):
-        ok = flank_reg >= 0
-        fr = np.clip(flank_reg, 0, R - 1)
-        cont = _continues(flank_reg, far_bnd_of_reg)
-        return np.where(ok, np.where(cont, side_eff_r[fr], side_eff_spl[fr]), 0.0)
-
-    b_eff_spl_l = _eff_spl_face(
-        blr, lb_of_reg
-    )  # left face: its flank's FAR boundary is that region's left
-    b_eff_spl_r = _eff_spl_face(brr, rb_of_reg)
-    # counts: the SAME gate, so `spliced_n_*` is nonzero exactly where `spliced_*` is
-    b_spn_pos_l, b_spn_pos_r = _spliced_faces(TS_POS, exon_pos_l, exon_pos_r, bspn_l, bspn_r)
-    b_spn_neg_l, b_spn_neg_r = _spliced_faces(TS_NEG, exon_neg_l, exon_neg_r, bspn_l, bspn_r)
-
-    # --- gather onto the chain (region nodes ← region arrays; boundary nodes ← boundary arrays) ---
-    ri_ = np.clip(idx, 0, R - 1)  # region index where is_reg
-    bi_ = np.clip(idx, 0, B - 1)  # boundary index where is_bnd
-
-    def pick(reg_vals, bnd_vals):
-        return np.where(is_reg, reg_vals[ri_], np.where(is_bnd, bnd_vals[bi_], 0.0))
-
-    # region presents the same (contained) geometry both ways; boundary presents its per-side geometry.
-    mass_left = pick(reg_mass, bmass_l)
-    mass_right = pick(reg_mass, bmass_r)
-    reg_n_unspl = np.asarray(substrate.contained.n_unspliced, dtype=np.float64)
-    n_unspl_left = pick(reg_n_unspl, bn_unspl_l)
-    n_unspl_right = pick(reg_n_unspl, bn_unspl_r)
-    eff_gdna_left = pick(reg_eff_g, b_eff_g_l)
-    eff_gdna_right = pick(reg_eff_g, b_eff_g_r)
-    eff_rna_left = pick(reg_eff_r, b_eff_r_l)
-    eff_rna_right = pick(reg_eff_r, b_eff_r_r)
-    # one-sided spliced-crossing eff-len: boundaries get the half-triangle of their exon flank; regions
-    # carry no spliced mass (spliced_* = 0) so their value is inert — use the per-region half-triangle.
-    eff_spl_left = pick(side_eff_spl, b_eff_spl_l)
-    eff_spl_right = pick(side_eff_spl, b_eff_spl_r)
-    zeros_R = np.zeros(R)
-    spliced_pos_left = pick(zeros_R, b_spl_pos_l)
-    spliced_pos_right = pick(zeros_R, b_spl_pos_r)
-    spliced_neg_left = pick(zeros_R, b_spl_neg_l)
-    spliced_neg_right = pick(zeros_R, b_spl_neg_r)
-    spliced_n_pos_left = pick(zeros_R, b_spn_pos_l)
-    spliced_n_pos_right = pick(zeros_R, b_spn_pos_r)
-    spliced_n_neg_left = pick(zeros_R, b_spn_neg_l)
-    spliced_n_neg_right = pick(zeros_R, b_spn_neg_r)
-
-    return NodeGeometry(
-        n_nodes=int(chain.n_nodes),
-        mass_left=mass_left,
-        mass_right=mass_right,
-        n_unspl_left=n_unspl_left,
-        n_unspl_right=n_unspl_right,
-        eff_gdna_left=np.maximum(eff_gdna_left, _EPS),
-        eff_gdna_right=np.maximum(eff_gdna_right, _EPS),
-        eff_rna_left=np.maximum(eff_rna_left, _EPS),
-        eff_rna_right=np.maximum(eff_rna_right, _EPS),
-        eff_spl_left=np.maximum(eff_spl_left, _EPS),
-        eff_spl_right=np.maximum(eff_spl_right, _EPS),
-        spliced_pos_left=spliced_pos_left,
-        spliced_pos_right=spliced_pos_right,
-        spliced_neg_left=spliced_neg_left,
-        spliced_neg_right=spliced_neg_right,
-        spliced_n_pos_left=spliced_n_pos_left,
-        spliced_n_pos_right=spliced_n_pos_right,
-        spliced_n_neg_left=spliced_n_neg_left,
-        spliced_n_neg_right=spliced_n_neg_right,
+    ⚠ It raises rather than being deleted outright ONLY so the failure stays where it belongs. Removing
+    the symbol makes ``rigel.calibration`` unimportable, which turns 266 attributable runtime failures
+    into 36 collection errors and destroys the signal every other step is gated on. S5.e replaces this
+    body; nothing calls it successfully today, because ``calibrate()`` cannot run either.
+    """
+    raise NotImplementedError(
+        "build_node_geometry is S5.e: the per-face geometry dissolves with the payload's faces, and "
+        "the divisors it used were replaced by effective_length's one placements formula in S5.c. "
+        "See docs/S5_DESIGN_LOG.md §2."
     )
 
 
 def node_global_geometry(chain: NodeChain, geometry: NodeGeometry):
-    """Per-node 'global' gDNA support ``(mass, eff)``: a REGION uses its contained mass over its contained
-    gDNA eff-length; a BOUNDARY uses its both-side crossing mass over the SUMMED per-side density length
+    """Per-node 'global' gDNA support ``(mass, eff)``: a NODE uses its contained mass over its contained
+    gDNA eff-length; a EDGE uses its both-side crossing mass over the SUMMED per-side density length
     ``E_l + E_r``. This is the basis the enrichment NPMLE (`DensityNPMLE`) is fit on and projected
     onto — shared by :func:`bp_solver.node_sweep` and ``calibrate`` so the fit and the projection use one
     definition.
@@ -326,7 +132,7 @@ def node_global_geometry(chain: NodeChain, geometry: NodeGeometry):
     per-face DENSITY length ``E[min(ℓ,R)]/2`` (`effective_length.boundary_side_eff_length`). The old ½ here
     was silently cancelling the ½ that was *missing* from the face length — which is why this frame read the
     correct ρ while every per-face MESSAGE read ρ/2. Both frames are now the same one."""
-    is_reg = np.asarray(chain.kind) == REGION
+    is_reg = np.asarray(chain.kind) == NODE
     egl = np.asarray(geometry.eff_gdna_left, dtype=np.float64)
     egr = np.asarray(geometry.eff_gdna_right, dtype=np.float64)
     msl = np.asarray(geometry.mass_left, dtype=np.float64)
@@ -350,7 +156,7 @@ def node_total_density(chain: NodeChain, geometry: NodeGeometry, f_g):
     (``f_g = 1``) is only the fallback where composition is genuinely unknown, and the bounding lemma (§2)
     bounds *that* fallback, not this. Mass/eff are the node-level (both-face-pooled) quantities of
     :func:`node_global_geometry`; the RNA eff-length is the RNA-FL twin, summed the same way."""
-    is_reg = np.asarray(chain.kind) == REGION
+    is_reg = np.asarray(chain.kind) == NODE
     mass, eff_g = node_global_geometry(chain, geometry)
     erl = np.asarray(geometry.eff_rna_left, dtype=np.float64)
     err_ = np.asarray(geometry.eff_rna_right, dtype=np.float64)
@@ -526,7 +332,7 @@ class NodeStatics:
     bool masks and ``boundary_flags``.
 
     ``boundary_flags`` carries the splice graph's 8 structural bits (``TSS_s``/``TES_s``/``DONOR_s``/
-    ``ACCEPTOR_s``) at each BOUNDARY node, ``0`` on region nodes and at the two reference terminals.
+    ``ACCEPTOR_s``) at each EDGE node, ``0`` on region nodes and at the two reference terminals.
     ⭐ **Raw bits, not pre-derived predicates.** Every consumer wants a different combination of them
     — a terminus gate, a per-face splice-site test — and P1G_SCOPE's own specified predicate was
     measured to be nearly the COMPLEMENT of what it was meant to replace (plan F10). Carrying the
@@ -571,9 +377,9 @@ def build_node_statics(
         boundary_substrate, region_arrays
     )
     kind = np.asarray(chain.kind)
-    idx = np.asarray(chain.ref_idx, dtype=np.int64)
-    is_reg = kind == REGION
-    is_bnd = kind == BOUNDARY
+    idx = np.asarray(chain.obj_idx, dtype=np.int64)
+    is_reg = kind == NODE
+    is_bnd = kind == EDGE
     R = r_fp.shape[0]
     B = b_fp.shape[0]
     ri_ = np.clip(idx, 0, R - 1)
@@ -585,7 +391,7 @@ def build_node_statics(
     free_pos = pick(r_fp, b_fp, False)
     free_neg = pick(r_fn, b_fn, False)
     return NodeStatics(
-        n_nodes=int(chain.n_nodes),
+        n_nodes=int(chain.n_slots),
         u_pos=pick(r_up, b_up),
         u_neg=pick(r_un, b_un),
         # No per-node spliced FLOOR: spliced (mature) handling is OWNED by the message system (the B→exon
@@ -676,10 +482,10 @@ def init_beliefs(
 
 
 def _node_region_type(chain, region_arrays):
-    """Per-chain-node region type for REGION nodes (0=intergenic, 1=intron, 2=exon; exon>intron), −1 on
-    boundary nodes; plus the per-REGION type array. Single source of truth: :func:`signature.coarse_type_array`."""
+    """Per-chain-node region type for NODE nodes (0=intergenic, 1=intron, 2=exon; exon>intron), −1 on
+    boundary nodes; plus the per-NODE type array. Single source of truth: :func:`signature.coarse_type_array`."""
     kind = np.asarray(chain.kind)
-    idx = np.asarray(chain.ref_idx, dtype=np.int64)
-    rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)  # per REGION
+    idx = np.asarray(chain.obj_idx, dtype=np.int64)
+    rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)  # per NODE
     ri_ = np.clip(idx, 0, rtype.shape[0] - 1)
-    return np.where(kind == REGION, rtype[ri_], -1), rtype
+    return np.where(kind == NODE, rtype[ri_], -1), rtype

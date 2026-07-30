@@ -1,4 +1,9 @@
-"""gDNA / RNA FL distributions: gDNA pool aggregation + smooth-EB build (PR 4c)."""
+"""gDNA / RNA FL distributions: the five PURE pools + the smooth-EB build.
+
+The pools are ``docs/ACCUMULATOR_DESIGN.md`` §8's, and purity is the whole point: a length model is
+fitted only from populations known to be ONE component, so nothing is ever estimated from the fragments
+it will later explain.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +12,20 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from rigel.calibration.fl import build_fl_models, gdna_fl_mass
-from rigel.calibration.fl import N_FL_POOLS
+from rigel.calibration.fl import (
+    build_fl_models,
+    gdna_fl_mass,
+    rna_fl_mass,
+    splash_fl_mass,
+)
+from rigel.scan_payload import (
+    N_FRAGMENT_POOLS,
+    POOL_DNA_INTERGENIC,
+    POOL_DNA_INTERGENIC_EXON,
+    POOL_DNA_INTRONIC,
+    POOL_DNA_INTRON_EXON,
+    POOL_RNA_SPLICED,
+)
 
 
 def _spike(at: int, total: float, n: int = 1001) -> np.ndarray:
@@ -17,21 +34,92 @@ def _spike(at: int, total: float, n: int = 1001) -> np.ndarray:
     return c
 
 
-def test_gdna_fl_mass_sums_intergenic_and_intronic_excludes_exonic():
-    # Pools 0,1 = intergenic (contained, boundary); 2,3 = intronic; 4,5 = exonic.
-    fp = np.zeros((N_FL_POOLS, 5), dtype=np.float64)
-    fp[0, 2] = 1.0
-    fp[1, 2] = 2.0  # intergenic
-    fp[2, 3] = 3.0
-    fp[3, 3] = 4.0  # intronic
-    fp[4, 2] = 99.0
-    fp[5, 3] = 99.0  # exonic — must be EXCLUDED
-    g = gdna_fl_mass(SimpleNamespace(fl_pool_mass=fp))
-    np.testing.assert_allclose(g, [0.0, 0.0, 3.0, 7.0, 0.0])  # bin2: 1+2; bin3: 3+4
+def _pools(n_bins: int = 5) -> np.ndarray:
+    """A ``pool_lengths`` block with a different value in every pool, so a wrong index cannot pass."""
+    pools = np.zeros((N_FRAGMENT_POOLS, n_bins), dtype=np.int64)
+    pools[POOL_DNA_INTERGENIC, 2] = 1
+    pools[POOL_DNA_INTRONIC, 3] = 3
+    pools[POOL_DNA_INTRON_EXON, 2] = 700
+    pools[POOL_DNA_INTERGENIC_EXON, 3] = 900
+    pools[POOL_RNA_SPLICED, 4] = 11
+    return pools
 
 
-def test_gdna_fl_mass_empty_when_pools_absent():
-    assert gdna_fl_mass(SimpleNamespace(fl_pool_mass=None)).size == 0
+def test_the_pool_indices_ARE_the_specifications_FragmentPool():
+    """⛔ The three-way contract: the reference enum, the C++ enum and these constants are one axis.
+
+    A silent disagreement here re-labels every pool — the gDNA model would be fitted from the RNA pool
+    and nothing would look wrong. Checked against the executable specification itself, not a written-out
+    list, for the same reason the payload schema test does.
+    """
+    from tests.native._accumulator_reference import FragmentPool
+
+    assert N_FRAGMENT_POOLS == len(FragmentPool)
+    assert POOL_DNA_INTERGENIC == FragmentPool.DNA_INTERGENIC
+    assert POOL_DNA_INTRONIC == FragmentPool.DNA_INTRONIC
+    assert POOL_DNA_INTRON_EXON == FragmentPool.DNA_INTRON_EXON
+    assert POOL_DNA_INTERGENIC_EXON == FragmentPool.DNA_INTERGENIC_EXON
+    assert POOL_RNA_SPLICED == FragmentPool.RNA_SPLICED
+
+
+def test_gdna_fl_mass_is_the_two_PURE_CONTAINED_pools_and_NOTHING_else():
+    """⭐ The splash pools are deliberately NOT folded in, and this is not cosmetic.
+
+    They are the only ON-TARGET gDNA population (``ACCUMULATOR_DESIGN.md`` §8.2), so they sit between
+    the pure gDNA and RNA means — 139 and 212 against 88 on LBX0190. The shipped model summed four
+    differently-tilted pools and read **146.05** where the pure intergenic pool says **88.0**: biased
+    long by ~40 %, by pooling exactly these. Keeping them out is what makes the comparison a QC output
+    instead of a guess.
+    """
+    g = gdna_fl_mass(SimpleNamespace(pool_lengths=_pools()))
+    np.testing.assert_allclose(g, [0.0, 0.0, 1.0, 3.0, 0.0])
+
+
+def test_gdna_fl_mass_excludes_the_RNA_pool():
+    """The circularity guard: the gDNA length model must never see a certified-RNA fragment."""
+    pools = np.zeros((N_FRAGMENT_POOLS, 5), dtype=np.int64)
+    pools[POOL_RNA_SPLICED, 1] = 12345
+    assert float(gdna_fl_mass(SimpleNamespace(pool_lengths=pools)).sum()) == 0.0
+
+
+def test_rna_fl_mass_is_the_ANNOTATED_JUNCTION_pool_alone():
+    """gDNA cannot be spliced, so an observed annotated junction certifies RNA — and only that pool
+    does. ⚠ ``sj_implicit`` fragments are already excluded by the accumulator, because a splice that was
+    never sequenced is a product of the very model this pool is used to fit."""
+    r = rna_fl_mass(SimpleNamespace(pool_lengths=_pools()))
+    np.testing.assert_allclose(r, [0.0, 0.0, 0.0, 0.0, 11.0])
+
+
+def test_the_splash_pools_are_reachable_SEPARATELY_for_QC():
+    """Named pools, not folded in — so 'is the off-target model mis-centred for the fragments that
+    actually leak?' is answerable rather than assumed."""
+    s = splash_fl_mass(SimpleNamespace(pool_lengths=_pools()))
+    np.testing.assert_allclose(s, [0.0, 0.0, 700.0, 900.0, 0.0])
+
+
+def test_every_pool_reaches_EXACTLY_ONE_accessor():
+    """⛔ Teeth on the partition itself: no pool may be double-counted, and none may be unreachable.
+
+    A pool that no accessor returns is silently discarded evidence; one that two return is
+    double-counted. Both are invisible in any single-accessor test.
+    """
+    payload = SimpleNamespace(pool_lengths=_pools())
+    totals = [
+        float(gdna_fl_mass(payload).sum()),
+        float(rna_fl_mass(payload).sum()),
+        float(splash_fl_mass(payload).sum()),
+    ]
+    assert sum(totals) == float(_pools().sum()), "every pool must land in exactly one accessor"
+    for pool in range(N_FRAGMENT_POOLS):
+        one = np.zeros((N_FRAGMENT_POOLS, 5), dtype=np.int64)
+        one[pool, 1] = 5
+        p = SimpleNamespace(pool_lengths=one)
+        reached = [
+            float(gdna_fl_mass(p).sum()),
+            float(rna_fl_mass(p).sum()),
+            float(splash_fl_mass(p).sum()),
+        ]
+        assert sorted(reached) == [0.0, 0.0, 5.0], f"pool {pool} reaches {reached}, expected exactly one"
 
 
 def test_build_fl_large_pool_is_empirical():

@@ -51,7 +51,7 @@ from .enrichment_frame import (
     residual_level_scalar,
     transfer_logvar,
 )
-from .node_chain import REGION, NodeChain
+from .node_chain import NODE, NodeChain
 from .signature import coarse_type_array
 from .node_geometry import (
     NodeBelief,
@@ -272,8 +272,8 @@ def node_sweep(
     # Per-node EXON-region flag (coarse_type == 2) — the unified relay routes mature into EXON destinations
     # (the graft) and peels it out of EXON sources (`ex_a` in `_unified_solve`).
     _rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
-    _ri = np.clip(np.asarray(chain.ref_idx, dtype=np.int64), 0, _rtype.shape[0] - 1)
-    is_exon_node = ((np.asarray(chain.kind) == REGION) & (_rtype[_ri] == 2)).tolist()
+    _ri = np.clip(np.asarray(chain.obj_idx, dtype=np.int64), 0, _rtype.shape[0] - 1)
+    is_exon_node = ((np.asarray(chain.kind) == NODE) & (_rtype[_ri] == 2)).tolist()
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────
     # THE UNIFIED SOLVER (unified_solver_design.md; owner 2026-07-23) — ONE mode: reframe → filter → route → ÷M.
@@ -309,7 +309,7 @@ def node_sweep(
 
     def _unified_solve():
         n = f_g.shape[0]
-        is_reg_a = np.asarray(chain.kind) == REGION
+        is_reg_a = np.asarray(chain.kind) == NODE
         is_bnd_a = ~is_reg_a
         ex_a = np.asarray(
             is_exon_node, dtype=bool
@@ -1583,13 +1583,13 @@ def node_sweep(
 
 
 def chain_region_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> NodeDeconv:
-    """Project the chain belief's REGION nodes back to a region-keyed :class:`NodeDeconv` — the transitional
+    """Project the chain belief's NODE nodes back to a region-keyed :class:`NodeDeconv` — the transitional
     region projection the existing ``CalibrationResult`` / ``priors`` / ``derive`` consume (the per-node
     first-class schema rewire is P4). gDNA / RNA masses from each region's solved ``f_g`` over its contained
     unspliced (+ the always-RNA contained spliced) mass."""
     kind = np.asarray(chain.kind)
-    idx = np.asarray(chain.ref_idx, dtype=np.int64)
-    reg = kind == REGION
+    idx = np.asarray(chain.obj_idx, dtype=np.int64)
+    reg = kind == NODE
     mass_u = np.asarray(substrate.contained.mass_unspliced, dtype=np.float64)
     mass_s = np.asarray(substrate.contained.mass_spliced, dtype=np.float64)
     R = mass_u.shape[0]
@@ -1610,7 +1610,7 @@ def chain_region_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> Node
 
 
 def chain_boundary_side_deconv(chain: NodeChain, belief: NodeBelief, substrate):
-    """Project the chain belief's BOUNDARY ``f_g`` onto each region's two SIDE views — the boundary-flux that
+    """Project the chain belief's EDGE ``f_g`` onto each region's two SIDE views — the boundary-flux that
     ``priors``' pooled-seam gDNA eff-len + ``derive`` consume.
 
     Region ``r``'s left/right boundary IS its left/right chain neighbour; that boundary's solved ``f_g`` splits
@@ -1619,8 +1619,8 @@ def chain_boundary_side_deconv(chain: NodeChain, belief: NodeBelief, substrate):
     the contained projection). One boundary pie applied to its side mass. Returns ``(left, right)`` region-keyed
     :class:`NodeDeconv`."""
     kind = np.asarray(chain.kind)
-    reg_nodes = np.asarray(chain.order)[kind == REGION]
-    ridx = np.asarray(chain.ref_idx, dtype=np.int64)[reg_nodes]
+    reg_nodes = np.asarray(chain.order)[kind == NODE]
+    ridx = np.asarray(chain.obj_idx, dtype=np.int64)[reg_nodes]
     R = int(ridx.max()) + 1 if ridx.size else 0
     fg = np.asarray(belief.f_g, dtype=np.float64)
     left_fg = np.zeros(R)

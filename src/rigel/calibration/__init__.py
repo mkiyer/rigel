@@ -16,13 +16,13 @@ from .errors import CalibrationSubstrateError
 from .priors import LocusPriors, assemble_priors
 from .result import CalibrationResult
 from .strand_balance import StrandBalance
-from .substrate import CalibrationSubstrate, SubstrateView
+from .substrate import CalibrationSubstrate, PopulationView
 
 __all__ = [
     "CalibrationConfig",
     "CalibrationResult",
     "CalibrationSubstrate",
-    "SubstrateView",
+    "PopulationView",
     "StrandBalance",
     "CalibrationSubstrateError",
     "calibrate",

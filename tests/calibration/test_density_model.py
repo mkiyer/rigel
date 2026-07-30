@@ -20,7 +20,24 @@ from rigel.calibration.signature import (
     BIT_EXON_POS,
     BIT_INTRON_POS,
 )
-from rigel.calibration.substrate import CalibrationSubstrate, SubstrateView
+from rigel.calibration.substrate import CalibrationSubstrate
+
+
+def SubstrateView(*_args, **_kwargs):
+    """⛔ Deleted in S5.d — the 4-channel per-face view is gone.
+
+    It held `[unspliced+, unspliced-, spliced_sense, spliced_antisense]`, i.e. TWO strand conventions in
+    one array, and a `mass` that the accumulator no longer emits. Its successor is
+    `substrate.PopulationView`: three integer sums, genome strand only.
+
+    Bound so this module still IMPORTS: `node_gdna_density` is an S5.e consumer and its tests fail there
+    with a message naming the step, instead of an ImportError taking out the whole file. S5.e deletes it.
+    """
+    raise NotImplementedError(
+        "SubstrateView was deleted in S5.d; use substrate.PopulationView. node_gdna_density is S5.e. "
+        "See docs/S5_DESIGN_LOG.md §2."
+    )
+
 
 INTRON = BIT_INTRON_POS  # 0x8 — intron+, count-observable
 EXON = BIT_EXON_POS  # 0x2 — exon+, NOT count-observable, strand POS

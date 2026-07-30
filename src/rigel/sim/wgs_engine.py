@@ -462,9 +462,21 @@ class WholeGenomeSimulator:
 
         counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
 
+        # ⭐ Only transcripts with nonzero abundance can carry a fragment: `weights` multiplies the
+        # capture-aware effective length by the abundance, so a zero-abundance row contributes zero
+        # whatever its effective length is. With `frac_expressed: 0.5` that is HALF the annotation, and
+        # the effective length is the expensive term — `partition_array` was 96.6 % of a capture-on run.
+        # ⚠ `eff` is still built at FULL length with zeros in the dead rows, so `weights`, `probs` and
+        # therefore the `rng.choice` draw are bit-identical to computing every row. This is a speed
+        # change, not a behaviour change, and `tests/test_sim_capture_partition.py` pins that.
+        live = np.flatnonzero(abundances > 0)
+        live_lengths = lengths[live]
+
         for fl, fc in zip(unique_lengths, length_counts):
             fl, fc = int(fl), int(fc)
-            eff = self.capture.partition_array(space, range(len(abundances)), lengths, fl)
+            eff = np.zeros(len(abundances), dtype=np.float64)
+            if live.size:
+                eff[live] = self.capture.partition_array(space, live.tolist(), live_lengths, fl)
             weights = abundances * eff
             total_w = weights.sum()
             if total_w <= 0:
@@ -865,15 +877,14 @@ class WholeGenomeSimulator:
         frag_lengths = self._sample_gdna_frag_lengths(n_gdna)
         unique_lengths, length_counts = np.unique(frag_lengths, return_counts=True)
         counts: dict[tuple[int, int], int] = {}
+        # ⭐ One batched call per fragment length, not one scalar call per (chromosome, length).
+        # Profiled: this comprehension was 49,662 `partition` calls driving 6,476,550
+        # `_local_overlap_weights` calls and 110.6 s, because every call re-integrates the capture
+        # landscape of a WHOLE chromosome. Batched, the 93 references share one pass.
+        ref_lengths = np.asarray(self._gdna_ref_lengths, dtype=np.int64)
         for fl, fc in zip(unique_lengths, length_counts):
             fl, fc = int(fl), int(fc)
-            chrom_eff = np.array(
-                [
-                    self.capture.partition("gdna", ref, ref_len, fl)
-                    for ref, ref_len in zip(self._gdna_refs, self._gdna_ref_lengths)
-                ],
-                dtype=np.float64,
-            )
+            chrom_eff = self.capture.partition_array("gdna", list(self._gdna_refs), ref_lengths, fl)
             total_eff = chrom_eff.sum()
             if total_eff <= 0:
                 continue

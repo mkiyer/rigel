@@ -131,7 +131,7 @@ def test_flags_align_with_a_REALLY_SCANNED_payload(tmp_path):
     ``NodeStatics`` then places each slot's bits on the right chain node — asserted through the
     chain rather than assumed, because that is the second place an off-by-one could hide.
     """
-    from rigel.calibration.node_chain import BOUNDARY, build_node_chain
+    from rigel.calibration.node_chain import EDGE, build_node_chain
     from rigel.calibration.node_geometry import build_node_statics
     from rigel.calibration.region_arrays import RegionArrays
     from rigel.calibration.substrate import BoundarySubstrate, CalibrationSubstrate
@@ -174,12 +174,12 @@ def test_flags_align_with_a_REALLY_SCANNED_payload(tmp_path):
         flags,
     )
     kind = np.asarray(chain.kind)
-    idx = np.asarray(chain.ref_idx, np.int64)
-    assert not statics.boundary_flags[kind != BOUNDARY].any(), (
+    idx = np.asarray(chain.obj_idx, np.int64)
+    assert not statics.boundary_flags[kind != EDGE].any(), (
         "a region node carries boundary flags"
     )
     np.testing.assert_array_equal(
-        statics.boundary_flags[kind == BOUNDARY], flags[idx[kind == BOUNDARY]]
+        statics.boundary_flags[kind == EDGE], flags[idx[kind == EDGE]]
     )
     assert statics.boundary_flags.any(), "the scenario must set SOME flag, or this asserts nothing"
     sc.cleanup()

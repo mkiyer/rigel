@@ -1,4 +1,4 @@
-"""CI guard for the calibration oracle (scripts/debug/oracle.py).
+"""CI guard for the calibration oracle (``tests/calibration/_oracle.py``).
 
 The oracle's correctness rests on ONE identity: partitioning the sim BAM by true fragment origin and running
 the production accumulator on each partition reproduces the full payload (the accumulator deposits each
@@ -7,17 +7,13 @@ fragment independently, so the per-origin parts must sum to the whole). This tes
 per-fragment linearity, this fails loudly rather than letting a silently-wrong oracle percolate.
 """
 
-import sys
-from pathlib import Path
-
 import numpy as np
 import pytest
 
 from rigel.config import PipelineConfig
 from rigel.sim import Scenario, ReadSimConfig, GDNAConfig
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "debug"))
-from oracle import ORIGINS, OracleTruth  # noqa: E402
+from _oracle import ORIGINS, OracleTruth  # noqa: E402
 
 
 @pytest.fixture(scope="module")

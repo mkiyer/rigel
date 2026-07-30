@@ -303,11 +303,11 @@ DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& sc
     // its lines -- not merely "both lines crossed", which would count a node the fragment JUMPS OVER,
     // whose two lines are touched by the two flanking segments from opposite sides.
     //
-    // ⚠ quantum_edge is 0 at L == 1: a length-1 molecule cannot cross a 0-bp line, and `density_quantum`
+    // ⚠ quantum_edge is 0 at L == 1: a length-1 molecule cannot cross a 0-bp line, and `inv_length_quantum`
     // would divide by zero. Its residue is the schema's only count/density co-support violation -- an
     // L == 1 path on an annotated junction books a count against density 0, which is correct.
-    const std::uint64_t quantum_edge = length >= 2 ? density_quantum(length - 1) : 0;
-    const std::uint64_t quantum_node = density_quantum(length);
+    const std::uint64_t quantum_edge = length >= 2 ? inv_length_quantum(length - 1) : 0;
+    const std::uint64_t quantum_node = inv_length_quantum(length);
     const std::size_t   col          = static_cast<std::size_t>(column);
 
     std::int64_t n_crossed = 0;
@@ -322,16 +322,19 @@ DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& sc
             ContiguousEdge& edge = edges_[static_cast<std::size_t>(line - 1)];
             if (spliced) {
                 edge.spliced_count[col] += 1u;
-                edge.spliced_density[col] += quantum_edge;
+                edge.spliced_inv_length_sum[col] += quantum_edge;
+                edge.spliced_length_sum[col] += static_cast<std::uint64_t>(length);
             } else {
                 edge.unspliced_count[col] += 1u;
-                edge.unspliced_density[col] += quantum_edge;
+                edge.unspliced_inv_length_sum[col] += quantum_edge;
+                edge.unspliced_length_sum[col] += static_cast<std::uint64_t>(length);
             }
         }
         for (std::int64_t line = first; line + 1 < last; ++line) {  // the node between two crossed lines
             Node& node = nodes_[static_cast<std::size_t>(line)];
             node.spanning_count[col] += 1u;
-            node.spanning_density[col] += quantum_node;
+            node.spanning_inv_length_sum[col] += quantum_node;
+            node.spanning_length_sum[col] += static_cast<std::uint64_t>(length);
         }
         if (last > first) {
             sole_line = (n_crossed == 0 && last - first == 1) ? first : -1;
@@ -342,7 +345,8 @@ DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& sc
     for (const std::int32_t id : sj_ids) {
         JunctionEdge& junction = junctions_[static_cast<std::size_t>(id)];
         junction.count[col] += 1u;
-        junction.density[col] += quantum_edge;
+        junction.inv_length_sum[col] += quantum_edge;
+        junction.length_sum[col] += static_cast<std::uint64_t>(length);
     }
 
     // ── contained: the WHOLE path lies inside ONE node ────────────────────────────────────────────
@@ -354,7 +358,8 @@ DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& sc
         contained_node = first_node;
         Node& node = nodes_[static_cast<std::size_t>(contained_node)];
         node.contained_count[col] += 1u;
-        node.contained_density[col] += quantum_node;
+        node.contained_inv_length_sum[col] += quantum_node;
+        node.contained_length_sum[col] += static_cast<std::uint64_t>(length);
     }
 
     if (!pool_lengths_.empty()) {
@@ -426,8 +431,10 @@ void Accumulator::merge_from(const Accumulator& other) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
             nodes_[i].contained_count[c]   += other.nodes_[i].contained_count[c];
             nodes_[i].spanning_count[c]    += other.nodes_[i].spanning_count[c];
-            nodes_[i].contained_density[c] += other.nodes_[i].contained_density[c];
-            nodes_[i].spanning_density[c]  += other.nodes_[i].spanning_density[c];
+            nodes_[i].contained_inv_length_sum[c] += other.nodes_[i].contained_inv_length_sum[c];
+            nodes_[i].spanning_inv_length_sum[c]  += other.nodes_[i].spanning_inv_length_sum[c];
+            nodes_[i].contained_length_sum[c] += other.nodes_[i].contained_length_sum[c];
+            nodes_[i].spanning_length_sum[c]  += other.nodes_[i].spanning_length_sum[c];
         }
         node_start_count_[i] += other.node_start_count_[i];
     }
@@ -435,14 +442,17 @@ void Accumulator::merge_from(const Accumulator& other) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
             edges_[i].unspliced_count[c]   += other.edges_[i].unspliced_count[c];
             edges_[i].spliced_count[c]     += other.edges_[i].spliced_count[c];
-            edges_[i].unspliced_density[c] += other.edges_[i].unspliced_density[c];
-            edges_[i].spliced_density[c]   += other.edges_[i].spliced_density[c];
+            edges_[i].unspliced_inv_length_sum[c] += other.edges_[i].unspliced_inv_length_sum[c];
+            edges_[i].spliced_inv_length_sum[c]   += other.edges_[i].spliced_inv_length_sum[c];
+            edges_[i].unspliced_length_sum[c] += other.edges_[i].unspliced_length_sum[c];
+            edges_[i].spliced_length_sum[c]   += other.edges_[i].spliced_length_sum[c];
         }
     }
     for (std::size_t i = 0; i < junctions_.size(); ++i) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
             junctions_[i].count[c]   += other.junctions_[i].count[c];
-            junctions_[i].density[c] += other.junctions_[i].density[c];
+            junctions_[i].inv_length_sum[c] += other.junctions_[i].inv_length_sum[c];
+            junctions_[i].length_sum[c] += other.junctions_[i].length_sum[c];
         }
     }
     // ⚠ Throws rather than skipping. A size mismatch means the two were built with different `max_length`,

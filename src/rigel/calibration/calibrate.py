@@ -38,7 +38,7 @@ import numpy as np
 
 from .background_reference import BackgroundReference, measure_background
 from .bp_solver import (
-    REGION,
+    NODE,
     build_node_geometry,
     build_node_statics,
     chain_boundary_side_deconv,
@@ -51,11 +51,6 @@ from .density_model import node_gdna_density
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
 from .npmle import DensityNPMLE
-from .effective_length import (
-    boundary_eff_length,
-    boundary_side_eff_length,
-    region_eff_length,
-)
 from .density_deconv import GdnaBackground, density_lambda_factor, fit_intron_background
 from .gdna_strand import (
     fit_gdna_strand_from_substrate,
@@ -67,7 +62,7 @@ from .gdna_landscape import GdnaLandscape, fit_gdna_landscape
 from .signature import RegionType, coarse_type_array
 from .simplex_logodds import _logodds_grid
 from .strand_balance import fit_strand_balance
-from .substrate import BoundarySubstrate, CalibrationSubstrate
+from .substrate import CalibrationSubstrate
 
 if TYPE_CHECKING:
     from ..config import CalibrationConfig
@@ -104,7 +99,7 @@ class InjectedCalibrationPriors:
 def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config, bg=None):
     """The gDNA intron factory λ-factor per chain node (`docs/CARRY_FORWARD.md`).
 
-    Fits the intergenic-background NegBinom (`fit_intron_background`) and tabulates, for each INTRON REGION node,
+    Fits the intergenic-background NegBinom (`fit_intron_background`) and tabulates, for each INTRON NODE node,
     ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` over the σ(λ) solve grid → a ``(n_nodes, K)`` array, ZERO on every
     non-intron node (a no-op there). Returns ``None`` when the factory is disabled, the background pool is
     uninformative, or there are no intron nodes — in which case the sweep is byte-identical to the pre-factory
@@ -118,12 +113,12 @@ def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config,
     if not bg.informative:
         return None
     kind = np.asarray(chain.kind)
-    idx = np.asarray(chain.ref_idx, dtype=np.int64)
+    idx = np.asarray(chain.obj_idx, dtype=np.int64)
     rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(
         np.int64
-    )  # 0/1/2 per REGION
+    )  # 0/1/2 per NODE
     R = rtype.shape[0]
-    is_intron = (kind == REGION) & (rtype[np.clip(idx, 0, R - 1)] == 1)  # INTRON == 1
+    is_intron = (kind == NODE) & (rtype[np.clip(idx, 0, R - 1)] == 1)  # INTRON == 1
     if not bool(is_intron.any()):
         return None
     _, fg = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
@@ -174,11 +169,11 @@ def _fit_gdna_hyperprior(
     baseline**; at equal depth its own table already showed fabrication regressing 4.7× → 6.7×.
     `SESSION_2026_07_28_HANDOFF_18.md` §2 R3.
     """
-    isr = np.asarray(chain.kind) == REGION
+    isr = np.asarray(chain.kind) == NODE
     fp = np.asarray(statics.free_pos, dtype=bool)
     fn = np.asarray(statics.free_neg, dtype=bool)
     rtype = coarse_type_array(np.asarray(region_arrays.signature))
-    ridx = np.clip(np.asarray(chain.ref_idx, dtype=np.int64), 0, rtype.shape[0] - 1)
+    ridx = np.clip(np.asarray(chain.obj_idx, dtype=np.int64), 0, rtype.shape[0] - 1)
     expressed = isr & (eff_global > 1.0e-9) & (mass_global > 1.0e-12)
     # the zero-count structural anchor: an intergenic or intronic region that sequenced no unspliced mass
     anchor = (
@@ -227,9 +222,21 @@ def calibrate(
     # gDNA fragment-length effective lengths: the region-contained length, the per-side boundary
     # density length, and the region-free crossing mean. ``rna_fl_pmf`` feeds the RNA-side effective
     # lengths the sweep's per-strand RNA messages use (geometry built in bp_solver).
-    region_eff_len = region_eff_length(region_arrays.region_size_bp, gdna_fl_pmf)
-    boundary_eff_len = boundary_side_eff_length(gdna_fl_pmf, region_arrays.region_size_bp)
-    fl_mean = boundary_eff_length(gdna_fl_pmf)
+    # ⛔ S5.f. Three things below this line no longer exist, and they are named here rather than in a
+    # commit message because the body underneath is the specification of what S5.f has to rewire:
+    #   * `CalibrationSubstrate` reads payload fields S4 deleted;
+    #   * `region_eff_length` became `effective_length.contained_eff_length` (same quantity);
+    #   * `boundary_side_eff_length` and `boundary_eff_length` have NO successor — they divided a
+    #     per-FACE mass, and a contiguous edge has no faces. Its divisor is `crossing_eff_length`,
+    #     one number per edge, and whether that carries the RNA reach taper is the open A7 decision.
+    raise NotImplementedError(
+        "calibrate() is S5.f. Its substrate still reads payload fields S4 deleted, and its effective "
+        "lengths still assume per-face boundary geometry that S5.c removed. "
+        "See docs/S5_DESIGN_LOG.md §2."
+    )
+    # ⚠ Unreachable, and bound only so the pre-S5 body below stays readable AND lintable — `ruff check`'s
+    # undefined-name list is S6's authoritative delete list, so it must not fill with noise now.
+    region_eff_len = boundary_eff_len = fl_mean = boundary_substrate = None
 
     # RNA strand balance: rna_sense_frac (κ) = posterior-mean spliced sense fraction. The strand
     # channel's discriminability w=(2κ−1)² (set inside the deconv) is the smooth strand→count
@@ -301,7 +308,6 @@ def calibrate(
     # anchored global gDNA prior). The region nodes give the per-region gDNA fraction; the boundary
     # nodes give the per-side boundary flux feeding the per-locus prior (chain_boundary_side_deconv) — the
     # first-class boundary nodes the sweep solves, projected to per-region sides for the prior.
-    boundary_substrate = BoundarySubstrate.from_payload(payload)
     chain = build_node_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     geometry = build_node_geometry(
         chain, substrate, boundary_substrate, region_arrays, gdna_fl_pmf, rna_fl_pmf

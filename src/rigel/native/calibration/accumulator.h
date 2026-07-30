@@ -19,13 +19,20 @@
  *
  *   Nodes count fragments CONTAINED (the whole path fits inside one node) and SPANNING (one segment
  *   covers the node whole); edges count fragments CROSSING. Every object stores a uint32 count and a
- *   uint64 fixed-point density.
+ *   three integer sums: count, inv_length_sum (fixed point) and length_sum.
  *
- * WHY BOTH A COUNT AND A DENSITY
+ * WHY THREE SUMS AND NOT ONE
  *   With `placements` the number of admissible start positions -- L at a node, L-1 at a 0-bp line:
  *
  *       E[count]   = rho * E[placements]
- *       E[density] = rho * E[placements * (1/placements)] = rho      <- at an EDGE, exactly
+ *       E[inv_length_sum] = rho * E[placements * (1/placements)] = rho   <- at an EDGE, exactly
+ *       E[length_sum]     = rho * E[placements * L]
+ *
+ * `inv_length_sum` is deliberately NOT called `density`: it is one at an edge, exactly, and is NOT one
+ * at a node, where the opportunity (node - L + 1)+ does not cancel. `length_sum` is the second tilt, and
+ * without it the (count, inv_length_sum) pair has determinant mu_g - mu_r and so carries NO information
+ * about the gDNA/RNA split whenever the two components share a mean length. See
+ * docs/NODE_DENSITY_DERIVATION.md.
  *
  *   The opportunity factor cancels identically at an edge for ANY length distribution, which is why no
  *   divisor and no length model appear there. It does not cancel at a node.
@@ -53,7 +60,7 @@ namespace rigel::accumulator {
 // the strand column
 // ============================================================================
 
-//: Every count and density array has exactly two columns, and they ARE the two genome strands.
+//: Every array has exactly two columns, and they ARE the two genome strands.
 //: `Strand` has FOUR values -- OR semantics make POS|NEG == AMBIGUOUS, and NONE means no strand at all
 //: -- so only POS and NEG name a column. A fragment carrying neither is REJECTED, never filed under one
 //: of them: that would credit it to the wrong strand rather than lose it, which is the error class this
@@ -71,24 +78,24 @@ inline int strand_column(std::int32_t align_strand) noexcept {
 }
 
 // ============================================================================
-// the fixed-point density
+// the fixed-point reciprocal-opportunity sum
 // ============================================================================
 
-//: Densities accumulate as round(kDensityScale / placements) in uint64. Integer addition is associative,
+//: Densities accumulate as round(kInvLengthScale / placements) in uint64. Integer addition is associative,
 //: so the per-worker merge is bit-identical at any thread count -- which float accumulation is not, and
 //: that nondeterminism propagated to a ~2.6 % difference in the calibration output. The scale is 2^32
 //: because it holds the quantisation error below float32's own epsilon while leaving ample headroom under
 //: the uint64 ceiling at realistic depth.
-inline constexpr std::uint64_t kDensityScale = 1ull << 32;
+inline constexpr std::uint64_t kInvLengthScale = 1ull << 32;
 
-/// round(kDensityScale / placements), rounding halves AWAY FROM ZERO.
+/// round(kInvLengthScale / placements), rounding halves AWAY FROM ZERO.
 ///
 /// ⚠ The rounding mode is part of the contract -- byte-identity with the Python reference is undefined
 /// without it. `placements` must be positive; every caller guards it (a length-1 molecule cannot cross a
 /// 0-bp line, so its edge quantum is 0 rather than a division).
-inline std::uint64_t density_quantum(std::int64_t placements) noexcept {
+inline std::uint64_t inv_length_quantum(std::int64_t placements) noexcept {
     const auto p = static_cast<std::uint64_t>(placements);
-    return (2 * kDensityScale + p) / (2 * p);
+    return (2 * kInvLengthScale + p) / (2 * p);
 }
 
 // ============================================================================
@@ -99,10 +106,12 @@ inline std::uint64_t density_quantum(std::int64_t placements) noexcept {
 struct Node {
     std::uint32_t contained_count[kNStrandColumns];
     std::uint32_t spanning_count[kNStrandColumns];
-    std::uint64_t contained_density[kNStrandColumns];
-    std::uint64_t spanning_density[kNStrandColumns];
+    std::uint64_t contained_inv_length_sum[kNStrandColumns];
+    std::uint64_t spanning_inv_length_sum[kNStrandColumns];
+    std::uint64_t contained_length_sum[kNStrandColumns];
+    std::uint64_t spanning_length_sum[kNStrandColumns];
 };
-static_assert(sizeof(Node) == 48, "Node must be 48 bytes with no padding");
+static_assert(sizeof(Node) == 80, "Node must be 80 bytes with no padding");
 
 /// A contiguous edge: the 0-bp line between two adjacent nodes. `spliced` means the FRAGMENT used an
 /// annotated junction somewhere -- not that this line is one. gDNA cannot be spliced, so a spliced
@@ -110,18 +119,21 @@ static_assert(sizeof(Node) == 48, "Node must be 48 bytes with no padding");
 struct ContiguousEdge {
     std::uint32_t unspliced_count[kNStrandColumns];
     std::uint32_t spliced_count[kNStrandColumns];
-    std::uint64_t unspliced_density[kNStrandColumns];
-    std::uint64_t spliced_density[kNStrandColumns];
+    std::uint64_t unspliced_inv_length_sum[kNStrandColumns];
+    std::uint64_t spliced_inv_length_sum[kNStrandColumns];
+    std::uint64_t unspliced_length_sum[kNStrandColumns];
+    std::uint64_t spliced_length_sum[kNStrandColumns];
 };
-static_assert(sizeof(ContiguousEdge) == 48, "ContiguousEdge must be 48 bytes with no padding");
+static_assert(sizeof(ContiguousEdge) == 80, "ContiguousEdge must be 80 bytes with no padding");
 
 /// A junction edge: one exact donor->acceptor jump. Spliced by construction, so there is no unspliced
 /// population; and it is not a genomic position, so it carries no structural flags.
 struct JunctionEdge {
     std::uint32_t count[kNStrandColumns];
-    std::uint64_t density[kNStrandColumns];
+    std::uint64_t inv_length_sum[kNStrandColumns];
+    std::uint64_t length_sum[kNStrandColumns];
 };
-static_assert(sizeof(JunctionEdge) == 24, "JunctionEdge must be 24 bytes with no padding");
+static_assert(sizeof(JunctionEdge) == 40, "JunctionEdge must be 40 bytes with no padding");
 
 // ============================================================================
 // the fragment-length pools

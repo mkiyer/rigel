@@ -11,29 +11,40 @@ library into gDNA vs RNA, and a per-locus EM solver assigns RNA to transcripts. 
 
 ## ⭐ Current direction — read this first
 
-**Four documents are the whole story. Read them in this order:**
+**Read them in this order:**
 
 | doc | what it is |
 |---|---|
-| **`docs/IMPLEMENTATION_PLAN.md` §0** | ⭐ **START HERE** — live state, next actions, what is uncommitted |
-| `docs/ACCUMULATOR_DESIGN.md` | the design being implemented |
-| `docs/LEDGER.md` | what has landed, its gates, and why each thing is the way it is |
-| `docs/CARRY_FORWARD.md` | 24 measured facts, 18 equations the code depends on, **27 traps**, 30 design ideas |
+| **`docs/S5_DESIGN_LOG.md`** | ⭐ **START HERE for S5** — §0 status, §1 the accumulator changes, §2 the live plan. **It supersedes `IMPLEMENTATION_PLAN.md` §4/§5** |
+| `docs/IMPLEMENTATION_PLAN.md` §0 | live state for everything else |
+| `docs/NODE_DENSITY_DERIVATION.md` | why the deposit weight is what it is, and what each stored channel buys |
 | `docs/TODO.md` | the one deferred-work list, ranked, each item with the reason it is deferred |
+| `docs/ACCUMULATOR_DESIGN.md` | the design being implemented |
+| `docs/LEDGER.md` | what has landed, its gates, and why. Older entries: `LEDGER_ARCHIVE.md` |
+| `docs/CARRY_FORWARD.md` | ⭐ **§3 traps then §2 equations** — the most-used reference in the project |
+| `docs/BENCHMARK_SUITE.md` | the suite: how to build it, and **what it can and cannot judge** |
 
-⛔ **2026-07-30 — every benchmark suite and every index was deleted (owner), and both are being rebuilt.**
-The standing bench baseline (`r0 0.079005 / r3 0.046675`) and the goldens are **void**: they referred to
-`ambig_dense_10mb`, which no longer exists. `LEDGER.md`'s deletion entry says exactly what that voids and
-what survives. The real cfRNA BAMs are **not** part of the deletion; any cached payload beside them is.
+Reference rather than design: `BENCHMARKING.md` (how to evaluate — net fragment flow), `MANUAL.md`,
+`PUBLISHING.md`, `docs/testing/testing_plan.md` (the owner's plan for the cached-substrate harness).
 
-On 2026-07-29 the project's other 274 docs (74,823 lines) and 132 agent-memory files were deleted and
-distilled into these. **Nothing else in `docs/` is a design document.** What else survives is reference
-rather than design: `BENCHMARKING.md`, `MANUAL.md`, `PUBLISHING.md`, and `docs/testing/testing_plan.md`
-(the owner's plan for the cached-substrate benchmark harness). A doc path outside that set does not exist —
-several older references to one were dangling.
+⛔ **`calibrate()` DOES NOT RUN**, and it still gates the benchmark suite producing any number, the scan
+cache's toy seed, and every future A/B. **S5.0/a/b/c/d have landed; S5.e is next**, then S5.f.
+
+⚠ **The 291 failures are not one thing.** ~266 are the original consumer breakage; ~25 are tests of the
+per-face geometry model that S5.c/S5.d deleted, and **those fail with a message naming S5.e or S5.f**. A
+failure that says which step owns it is the normal state here.
+
+⛔ **There is no benchmark baseline.** `r0 0.079005 / r3 0.046675` was the deleted `ambig_dense_10mb`
+suite — do not quote it, compare against it, or try to reproduce it. The replacement suite exists and is
+proven to resolve 6 of its 8 requirements, but cannot produce a calibration number until S5.
 
 **`tests/native/_accumulator_reference.py` is the executable specification** for the accumulator. The C++
 is gated on byte-identity to it; where it and a document disagree, it wins.
+
+⭐ **Every object stores THREE integer sums** (S5.a): `count` = Σ1, `inv_length_sum` = Σ round(2³²/placements),
+`length_sum` = Σ L. ⚠ `inv_length_sum` is **not** called `density` on purpose — it is an exact model-free
+density at an edge and is *not* one at a node. `length_sum` exists because the other two carry **zero**
+information about the gDNA/RNA split when the two components share a mean length.
 
 **The accumulator is being redesigned and replaced, not patched.** The accumulator is the tally built
 during the BAM scan. Its central defect: it chops each fragment at partition borders and then decides
@@ -69,17 +80,20 @@ graft new work onto the old accumulator.
 ⛔ **No version suffixes in file names.** It is `accumulator.py`, never `accumulator_v5.py`. Files are
 rewritten in place and the old path is deleted, not kept for comparison.
 
-## The index (the builder is current; ⛔ NO INDEX EXISTS ON DISK)
+## The index
 
 `INDEX_FORMAT_VERSION 8`, shipped as `nodes.feather` + `edges.feather`, built and checked by
 `calibration/splice_graph.py`.
 
-⛔ **2026-07-30: every built index was DELETED, along with every benchmark suite.** Both are being rebuilt
-from scratch. The builder and its invariants are unaffected — what is gone is the artifacts.
+✅ **2026-07-30: rebuilt from scratch at `~/Downloads/rigel_runs/refs/rigel_index`** after every index was
+deleted. 69 s to build; the build is deterministic (two builds byte-identical in all seven artifacts).
+⭐ **`manifest.json` now records the sources, their sha256 and the build flags**, so it never again has to
+be inferred — the previous one held `format_version` and `rigel_version` and nothing else.
 
-⚠ **The census below describes AN ANNOTATION, not the tool.** It is what the GENCODE-with-controls GTF
-produced: **1,043,881 nodes** (median 151 bp), 1,043,595 contiguous edges, 404,168 junction edges. A
-rebuild from a different GTF moves every one of those numbers, so **re-derive before quoting**.
+⚠ **The census below describes AN ANNOTATION, not the tool** — GENCODE v46 / Ensembl 112 with ERCC
+controls. It re-derived exactly on 2026-07-30: **1,043,881 nodes** (median 151 bp, mean 2,970, 56.7 %
+shorter than one 200 bp fragment), 1,043,595 contiguous edges, 404,168 junction edges. A rebuild from a
+different GTF moves every one of those numbers, so **re-derive** — `scripts/design/index_census.py`.
 
 - Nodes tile each reference, cut at **every exon endpoint** of every non-synthetic transcript, with no
   merging. 53.4 % of real transcript termini were invisible to the previous merged partition.
@@ -101,10 +115,25 @@ rebuild from a different GTF moves every one of those numbers, so **re-derive be
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-pytest tests/ -q                               # 95 modules, 1298 tests
+pytest tests/ -q                               # 1384 pass / 291 fail / 15 error — the failures ARE S5
 pytest tests/ --update-golden                  # regenerate tests/golden/ after intended output changes
-ruff check src/ tests/ scripts/ && ruff format src/ tests/
+ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
+
+**Tooling that is current** (everything else under `scripts/` was deleted 2026-07-30 as unrunnable):
+
+| | |
+|---|---|
+| `scripts/design/index_census.py` | re-derive an index's census — never quote the numbers, run this |
+| `scripts/design/verify_index_rebuild.py` | nodes byte-identical, edges only in contiguous reach |
+| `scripts/design/suite_resolves.py` | ⛔ **run before quoting any suite number** |
+| `scripts/design/build_scan_cache.py` | scan once, calibrate many times |
+| `scripts/design/native_parity_on_real_data.py` | the S3 gate on real cfRNA at full scale |
+| `scripts/design/scan_profile.py` | ns/fragment, regressed over several BAMs |
+| `scripts/design/observable_efficiency.py` | what fraction of the length information a storage choice keeps |
+| `scripts/design/node_density_derivation.py` | the reciprocal-opportunity theorem, T0–T6, each perturbed |
+| `scripts/sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | build the suite |
+| `scripts/sim/evaluate_suite.py` | net fragment flow (`rigel.sim.analysis`) |
 
 Always set `OMP_NUM_THREADS=1` when benchmarking or comparing runs.
 
@@ -174,6 +203,9 @@ Input BAM must be name-sorted with the `NH` tag.
 - **No Greek letters in identifiers** (fine in maths write-ups).
 - **One thing varied per experiment**, with a falsification test written *first* and verified failing,
   and a baseline re-recorded from the current tree in the same session.
+- ⛔ **Real data is a TEST input, NEVER a DESIGN input.** The cfRNA on disk is one far end of the RNA-seq
+  spectrum, not a sample of it. Sweep the plausible space, report the worst case, and bring the owner the
+  domain call — do not adopt whatever the available data happens to say. Owner, 2026-07-30.
 - **Profile and gate on real cfRNA, never a small synthetic suite** — the deleted 10 Mb one ranked
   hotspots backwards, was Poisson by construction, and had zero fragment-length variance. ⚠ The simulator
   is still Poisson (`sim/wgs_engine.py:473`), so the replacement inherits that unless it is built out.

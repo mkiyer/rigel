@@ -79,7 +79,10 @@ class CaptureSampler:
         self._gdna_intervals: dict[str, list[WeightedInterval]] = defaultdict(list)
         self._next_probe_group = 1
 
-        self._mass_cache: dict[tuple[str, int | str, int, int], tuple[np.ndarray, np.ndarray]] = {}
+        #: Probe layout per space, flattened once. Independent of fragment length, so it is built on
+        #: first use and never rebuilt. A one-tuple holding ``None`` means "this space needs the
+        #: per-key path" (a probe group with more than one interval); see `_flat_probes`.
+        self._flat_probe_cache: dict[str, tuple] = {}
 
     @classmethod
     def disabled(
@@ -136,8 +139,56 @@ class CaptureSampler:
         if not self.enabled or self.config.binding_per_base <= 0:
             return float(baseline)
 
-        _, weights = self._extra_landscape(space, key, seq_len, frag_len)
-        return float(baseline + self.config.binding_per_base * weights.sum())
+        # ⭐ Prefer the batched path even for one key. `_extra_landscape` materialises and lexsorts a
+        # per-start array over EVERY probe on the key, which in the gDNA space means every probe on a
+        # whole chromosome: profiled at 6,476,550 `_local_overlap_weights` calls and 110.6 s for one
+        # small run, with `_mass_cache` holding those arrays to 37.2 GB. The batched path covers only
+        # the merged probe neighbourhoods and caches nothing.
+        lengths = np.array([int(seq_len)], dtype=np.int64)
+        return float(self.partition_array(space, [key], lengths, frag_len)[0])
+
+    def _flat_probes(self, space: str) -> tuple[np.ndarray, ...] | None:
+        """Flatten a space's probe intervals ONCE — the layout does not depend on fragment length.
+
+        Returns ``(keys, start, end, scale, probe_group)`` in ``(key, start)`` order, which is what
+        lets `partition_array` find merged probe runs with a single prefix maximum.
+
+        ⚠ ``group`` is carried through rather than collapsed: a group is one physical probe, and a
+        probe split across exons must have its pieces **summed** before the max across probes.
+        `partition_array` slots on ``(group, piece)`` for exactly that reason.
+        """
+        cached = self._flat_probe_cache.get(space)
+        if cached is not None:
+            return cached[0]
+
+        intervals_by_key = {
+            "mrna": self._mrna_intervals,
+            "nrna": self._nrna_intervals,
+            "gdna": self._gdna_intervals,
+        }[space]
+
+        keys: list[int | str] = []
+        starts: list[int] = []
+        ends: list[int] = []
+        scales: list[float] = []
+        groups: list[int] = []
+        for key, intervals in intervals_by_key.items():
+            for interval in sorted(intervals, key=lambda i: (i.start, i.end)):
+                keys.append(key)
+                starts.append(interval.start)
+                ends.append(interval.end)
+                scales.append(interval.scale)
+                groups.append(interval.probe_group)
+
+        flat = (
+            keys,
+            np.asarray(starts, dtype=np.int64),
+            np.asarray(ends, dtype=np.int64),
+            np.asarray(scales, dtype=np.float64),
+            np.asarray(groups, dtype=np.int64),
+        )
+        self._flat_probe_cache[space] = (flat,)
+        return flat
 
     def partition_array(
         self,
@@ -146,17 +197,165 @@ class CaptureSampler:
         lengths: np.ndarray,
         frag_len: int,
     ) -> np.ndarray:
-        """Vector of capture-aware effective lengths for a pool."""
-        eff = np.maximum(0, lengths.astype(np.int64) - int(frag_len) + 1)
+        """Vector of capture-aware effective lengths for a pool, computed for every key at once.
+
+        ⭐ **This is the whole cost of a capture-on simulation.** Profiled before this was batched:
+        123.6 s of a 127.9 s run, 1,052,172 scalar `partition` calls, and `_mass_cache` grown to 18 GB
+        — because the caller loops over every DISTINCT FRAGMENT LENGTH and the old body looped over
+        every transcript inside that, doing ten numpy operations on ~300-element arrays each time. The
+        arithmetic was never the cost; the per-call overhead was.
+
+        ⚠ **The deleted `ambig_dense_10mb` suite had `frag_std: 0` — ONE distinct length.** A realistic
+        distribution draws ~540, so this path is ~540x hotter the moment the suite stops being degenerate
+        in exactly the way that made it unable to test anything length-dependent.
+
+        ⚠ **Nothing is cached here, deliberately.** Each ``(key, fragment length)`` pair is visited
+        exactly once per call, so the old ``_mass_cache`` writes were pure growth with zero reuse —
+        `tests/test_sim_capture_partition.py::TestNoUnboundedCache` pins that.
+        """
+        keys = list(keys)
+        lengths = np.asarray(lengths, dtype=np.int64)
+        width = int(frag_len)
+        eff = np.maximum(0, lengths - width + 1)
         result = eff.astype(np.float64) * self.config.off_target_weight
         if not self.enabled or self.config.binding_per_base <= 0:
             return result
 
-        for pos, key in enumerate(keys):
-            if eff[pos] <= 0 or not self._get_intervals(space, key):
+        flat = self._flat_probes(space)
+        flat_keys, starts, ends, scales, probe_groups = flat
+        if not flat_keys:
+            return result
+
+        key_to_pos = {key: pos for pos, key in enumerate(keys)}
+        positions = np.fromiter(
+            (key_to_pos.get(key, -1) for key in flat_keys), dtype=np.int64, count=len(flat_keys)
+        )
+        landscape = self._run_landscape(
+            positions, starts, ends, scales, probe_groups, eff, int(frag_len)
+        )
+        if landscape is None:
+            return result
+        buffer, run_offset, _run_start, run_first, kept_positions = landscape
+
+        run_sums = np.add.reduceat(buffer, run_offset[:-1])
+        sums = np.bincount(kept_positions[run_first], weights=run_sums, minlength=len(keys))
+        return result + self.config.binding_per_base * sums
+
+    def _run_landscape(self, positions, starts, ends, scales, probe_groups, eff, width):
+        """The capture landscape over MERGED PROBE RUNS — the one hot computation, shared by both users.
+
+        ⭐ `partition_array` reduces it to a per-key sum; `_extra_landscape` reads out its nonzero
+        positions. Both used to have their own implementation, and the second one — a Python loop over
+        every probe on a key plus a lexsort of the concatenation — was **231 s and 38 GB** of a gDNA run
+        on its own, because in that space a key is a whole chromosome.
+
+        Returns ``(buffer, run_offset, run_start, run_first, positions)`` or ``None`` if nothing is live.
+        The buffer holds ``w(s)`` — the best single probe GROUP's total overlap — over the concatenated
+        runs, so run ``r`` covers template positions ``[run_start[r], run_start[r] + run_len[r])``.
+        """
+        key_eff = np.where(positions >= 0, eff[positions], 0)
+        lo = np.maximum(0, starts - width + 1)
+        hi = np.minimum(key_eff, ends)
+        alive = (positions >= 0) & (hi > lo)
+        if not alive.any():
+            return None
+        positions, starts, ends, scales, probe_groups, lo, hi = (
+            positions[alive],
+            starts[alive],
+            ends[alive],
+            scales[alive],
+            probe_groups[alive],
+            lo[alive],
+            hi[alive],
+        )
+        counts = hi - lo
+
+        # ── merged runs: the buffer covers PROBE NEIGHBOURHOODS, never whole templates ─────────────
+        # ⛔ Sizing it by template length is unusable in the gDNA space, where a template is a whole
+        # chromosome. Probes arrive grouped by key and sorted by start, so `lo` is non-decreasing within
+        # a key and a run ends where the next `lo` clears every `hi` seen so far in that key.
+        key_rank = np.concatenate(([0], np.cumsum(positions[1:] != positions[:-1]))).astype(
+            np.int64
+        )
+        stride = int(hi.max()) + 1
+        # ⭐ Offsetting by the key's dense rank makes a GLOBAL prefix max come out per-key correct: every
+        # entry of key k sits above every entry of key k-1, so it cannot carry across a key boundary.
+        running_hi = np.maximum.accumulate(hi + key_rank * stride) - key_rank * stride
+        opens_run = np.empty(len(lo), dtype=bool)
+        opens_run[0] = True
+        opens_run[1:] = (key_rank[1:] != key_rank[:-1]) | (lo[1:] > running_hi[:-1])
+
+        run_id = np.cumsum(opens_run) - 1
+        run_first = np.flatnonzero(opens_run)
+        run_start = lo[run_first]
+        run_end = np.maximum.reduceat(hi, run_first)
+        run_offset = np.concatenate(([0], np.cumsum(run_end - run_start)))
+        buffer = np.zeros(int(run_offset[-1]), dtype=np.float64)
+        base = run_offset[run_id] - run_start[run_id]
+
+        # ── slots: a probe GROUP's rank within its run, and a piece's rank within its group ────────
+        # ⛔ Ranking within the KEY does not work in the gDNA space, where one chromosome carries every
+        # probe. Within a RUN it is a handful, and two probes sharing a slot are then always in
+        # different runs — disjoint buffer ranges, which keeps the scatter duplicate-free.
+        order = np.lexsort((probe_groups, run_id))
+        ordered_run, ordered_group = run_id[order], probe_groups[order]
+        opens_group = np.empty(len(order), dtype=bool)
+        opens_group[0] = True
+        opens_group[1:] = (ordered_run[1:] != ordered_run[:-1]) | (
+            ordered_group[1:] != ordered_group[:-1]
+        )
+        group_first = np.flatnonzero(opens_group)
+        group_sizes = np.diff(np.r_[group_first, len(order)])
+        group_run = ordered_run[group_first]
+        opens_group_run = np.empty(len(group_first), dtype=bool)
+        opens_group_run[0] = True
+        opens_group_run[1:] = group_run[1:] != group_run[:-1]
+        run_first_group = np.maximum.accumulate(
+            np.where(opens_group_run, np.arange(len(group_first)), 0)
+        )
+        group_slot = np.empty(len(order), dtype=np.int64)
+        piece_slot = np.empty(len(order), dtype=np.int64)
+        group_slot[order] = np.repeat(np.arange(len(group_first)) - run_first_group, group_sizes)
+        piece_slot[order] = np.arange(len(order)) - np.repeat(group_first, group_sizes)
+
+        def scatter(selection):
+            """Buffer indices and capture weights for one slot's probes."""
+            s_lo, s_counts = lo[selection], counts[selection]
+            s_start, s_end, s_scale = starts[selection], ends[selection], scales[selection]
+            total = int(s_counts.sum())
+            segment = np.repeat(np.arange(len(s_counts)), s_counts)
+            within = np.arange(total) - np.repeat(np.cumsum(s_counts) - s_counts, s_counts)
+            position = s_lo[segment] + within
+            overlap = np.minimum(position + width, s_end[segment]) - np.maximum(
+                position, s_start[segment]
+            )
+            if self.config.min_overlap > 1:
+                overlap = np.where(overlap >= self.config.min_overlap, overlap, 0)
+            weights = np.maximum(overlap, 0).astype(np.float64) * s_scale[segment]
+            return base[selection][segment] + position, weights
+
+        group_buffer = np.zeros_like(buffer)
+        n_pieces = int(piece_slot.max()) + 1
+        for slot in range(int(group_slot.max()) + 1):
+            in_slot = group_slot == slot
+            touched = []
+            for piece in range(n_pieces):
+                selection = in_slot & (piece_slot == piece)
+                if not selection.any():
+                    continue
+                index, weights = scatter(selection)
+                # ⚠ A probe GROUP is one physical probe; pieces split across exons must be SUMMED at a
+                # shared start before the max across probes. Indices are unique within one
+                # (slot, piece), so `+=` accumulates across pieces without `np.add.at`.
+                group_buffer[index] += weights
+                touched.append(index)
+            if not touched:
                 continue
-            result[pos] = self.partition(space, key, int(lengths[pos]), frag_len)
-        return result
+            index = np.concatenate(touched)
+            buffer[index] = np.maximum(buffer[index], group_buffer[index])
+            group_buffer[index] = 0.0
+
+        return buffer, run_offset, run_start, run_first, positions
 
     def sample_starts(
         self,
@@ -404,63 +603,53 @@ class CaptureSampler:
         seq_len: int,
         frag_len: int,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Return start positions and best single-probe overlap weights."""
-        cache_key = (space, key, int(seq_len), int(frag_len))
-        cached = self._mass_cache.get(cache_key)
-        if cached is not None:
-            return cached
+        """Return start positions and best single-probe-GROUP overlap weights, ascending by position.
 
-        start_chunks: list[np.ndarray] = []
-        weight_chunks: list[np.ndarray] = []
-        group_chunks: list[np.ndarray] = []
-        for interval in self._get_intervals(space, key):
-            starts, weights = self._local_overlap_weights(seq_len, frag_len, interval)
-            if len(starts) == 0:
-                continue
-            scaled_weights = weights * interval.scale
-            keep = scaled_weights > 0
-            if np.any(keep):
-                start_chunks.append(starts[keep])
-                weight_chunks.append(scaled_weights[keep])
-                group_chunks.append(
-                    np.full(int(np.sum(keep)), interval.probe_group, dtype=np.int64),
-                )
+        ⛔ **This was 231 s and 38 GB of a gDNA run.** It looped in Python over every probe on the key
+        and lexsorted the concatenation — and in the gDNA space a key is a whole chromosome carrying
+        every probe, so one call did 281 `_local_overlap_weights` calls and a 76 k-element sort **to
+        place a mean of about four fragments**. Profiled: 22,838 calls, 6,409,160 inner calls, 21 s of
+        `argsort` alone.
 
-        if not start_chunks:
-            empty_starts = np.empty(0, dtype=np.int64)
-            empty_weights = np.empty(0, dtype=np.float64)
-            self._mass_cache[cache_key] = (empty_starts, empty_weights)
-            return empty_starts, empty_weights
+        It now reads out `_run_landscape`, the same vectorised computation `partition_array` uses, so
+        the two can no longer disagree and the Python loop is gone.
 
-        all_starts = np.concatenate(start_chunks)
-        all_weights = np.concatenate(weight_chunks)
-        all_groups = np.concatenate(group_chunks)
+        ⚠ **Nothing is cached.** `sample_starts` asks for each `(key, fragment length)` pair exactly
+        once — the caller iterates a counts dict keyed by exactly that — so every `_mass_cache` entry
+        was written and never read. That was the 38 GB.
+        """
+        width = int(frag_len)
+        eff_len = int(seq_len) - width + 1
+        empty = (np.empty(0, dtype=np.int64), np.empty(0, dtype=np.float64))
+        if eff_len <= 0:
+            return empty
 
-        order = np.lexsort((all_groups, all_starts))
-        sorted_starts = all_starts[order]
-        sorted_groups = all_groups[order]
-        sorted_weights = all_weights[order]
-        start_probe_group_starts = np.flatnonzero(
-            np.r_[
-                True,
-                (sorted_starts[1:] != sorted_starts[:-1])
-                | (sorted_groups[1:] != sorted_groups[:-1]),
-            ],
+        intervals = self._get_intervals(space, key)
+        if not intervals:
+            return empty
+        ordered = sorted(intervals, key=lambda i: (i.start, i.end))
+        n = len(ordered)
+        landscape = self._run_landscape(
+            np.zeros(n, dtype=np.int64),
+            np.fromiter((i.start for i in ordered), dtype=np.int64, count=n),
+            np.fromiter((i.end for i in ordered), dtype=np.int64, count=n),
+            np.fromiter((i.scale for i in ordered), dtype=np.float64, count=n),
+            np.fromiter((i.probe_group for i in ordered), dtype=np.int64, count=n),
+            np.array([eff_len], dtype=np.int64),
+            width,
         )
-        probe_starts = sorted_starts[start_probe_group_starts]
-        probe_weights = np.add.reduceat(sorted_weights, start_probe_group_starts)
+        if landscape is None:
+            return empty
+        buffer, run_offset, run_start, _run_first, _positions = landscape
 
-        order = np.argsort(probe_starts)
-        sorted_probe_starts = probe_starts[order]
-        sorted_probe_weights = probe_weights[order]
-        start_group_starts = np.flatnonzero(
-            np.r_[True, sorted_probe_starts[1:] != sorted_probe_starts[:-1]],
+        # Runs are disjoint and ascending within a key, so concatenating their positions is already
+        # sorted — which is the contract `sample_starts` relies on.
+        run_len = np.diff(run_offset)
+        position = np.repeat(run_start, run_len) + (
+            np.arange(len(buffer)) - np.repeat(run_offset[:-1], run_len)
         )
-        starts = sorted_probe_starts[start_group_starts]
-        weights = np.maximum.reduceat(sorted_probe_weights, start_group_starts)
-
-        self._mass_cache[cache_key] = (starts, weights)
-        return starts, weights
+        nonzero = buffer > 0
+        return position[nonzero], buffer[nonzero]
 
     def _local_overlap_weights(
         self,

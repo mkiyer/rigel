@@ -22,12 +22,25 @@ none owns neither, which is legal. Junction edges are their own axis, sliced by 
 flat slot order is the per-reference banks concatenated in reference order, which is what lets a
 junction-edge id simply BE its slot.
 
-WHAT THE NUMBERS MEAN. Every object stores an integer **count** and a fixed-point **density**
-(``round(2^32 / placements)``), with ``placements = L`` at a node and ``L − 1`` at a 0-bp line. Both,
-always: the count carries the statistical power, the density carries the level, and no fractional quantity
-ever enters a likelihood. The trailing ``2`` on every bank is the **genome strand** — ``Strand.POS`` then
-``Strand.NEG``, without exception. Sense/antisense is transcript-relative, derived by the consumer from the
-junction's own strand, and never stored.
+WHAT THE NUMBERS MEAN. Every object stores **three integer sums** over the fragments that landed on it::
+
+    count           Sum 1
+    inv_length_sum  Sum round(2^32 / placements)     placements = L at a node, L − 1 at a 0-bp line
+    length_sum      Sum L
+
+⚠ **``inv_length_sum`` is NOT called ``density`` on purpose.** It is an exact, model-free density at an
+edge — the opportunity ``L−1`` and the deposit ``1/(L−1)`` cancel identically — and it is *not* a density
+at a node, where the opportunity is ``(node − L + 1)₊`` and nothing cancels. One word for two concepts is
+the defect this naming avoids; see ``docs/NODE_DENSITY_DERIVATION.md``.
+
+⭐ **``length_sum`` exists because the other two are blind to one real case.** At an edge the count row is
+``(mu_g − 1, mu_r − 1)`` and the inv-length row is ``(1, 1)``, so the determinant is ``mu_g − mu_r``: when
+gDNA and RNA share a mean fragment length the pair carries *zero* information about the split, at any
+depth. ``length_sum`` is an independent tilt and removes that blind spot.
+
+The trailing ``2`` on every bank is the **genome strand** — ``Strand.POS`` then ``Strand.NEG``, without
+exception. Sense/antisense is transcript-relative, derived by the consumer from the junction's own
+strand, and never stored.
 
 ⚠ **OWNERSHIP: this object holds VIEWS, and it is the keep-alive.** ``np.ascontiguousarray(x, dtype=D)`` is
 a **no-op** when the array already has dtype ``D``, so nothing here copies — the buffers belong to
@@ -52,6 +65,25 @@ N_STRAND_COLUMNS = 2
 #: Five fragment-length pools, each pure by construction (design §8). The order is
 #: `rigel::accumulator::FragmentPool` and `_accumulator_reference.FragmentPool`.
 N_FRAGMENT_POOLS = 5
+
+#: The pool axis, named. ⚠ **These live here, with the schema, and not in the consumer that indexes by
+#: them** — they are the accumulator's own enum in a third language, and a consumer holding a private
+#: copy is how three files end up disagreeing about which row is which. A disagreement here would fit the
+#: gDNA length model from the RNA pool and nothing downstream would look wrong;
+#: `tests/calibration/test_fl.py` pins them against the executable specification's enum itself.
+#:
+#: Purity is the point (design §8): the two DNA_* contained pools are ~99 % gDNA on real data, and
+#: RNA_SPLICED used an ANNOTATED junction with the splice OBSERVED — gDNA cannot be spliced. ⭐ The two
+#: *_EXON "splash" pools are the only ON-TARGET gDNA population, so they are named rather than folded
+#: into the gDNA model: on-target gDNA runs ~42 bp shorter than off-target (§8.2), and the shipped model
+#: read a gDNA mean of 146.05 against the pure intergenic pool's 88.0 precisely by pooling them in.
+#: There is deliberately NO pool for an exonic contained fragment or a multi-line crossing — those are
+#: gDNA/RNA mixtures, and an impure pool is worse than a missing one.
+POOL_DNA_INTERGENIC = 0  # contained in an intergenic node — pure gDNA
+POOL_DNA_INTRONIC = 1  # contained in an intronic node — pure gDNA
+POOL_DNA_INTRON_EXON = 2  # crossing one line, flanks {intron, exon} — on-target gDNA
+POOL_DNA_INTERGENIC_EXON = 3  # crossing one line, {intergenic, exon} — on-target gDNA
+POOL_RNA_SPLICED = 4  # used an annotated junction, splice OBSERVED — pure RNA
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,20 +132,25 @@ class AccumulatorPayload:
 
     # -- nodes: two disjoint populations, each two genome-strand columns --
     node_contained_count: np.ndarray  # uint32[n_nodes, 2] — the whole path lies inside the node
-    node_contained_density: np.ndarray  # uint64[n_nodes, 2]
+    node_contained_inv_length_sum: np.ndarray  # uint64[n_nodes, 2]
+    node_contained_length_sum: np.ndarray  # uint64[n_nodes, 2] — Sum L
     node_spanning_count: np.ndarray  # uint32[n_nodes, 2] — one segment covers the node whole
-    node_spanning_density: np.ndarray  # uint64[n_nodes, 2]
+    node_spanning_inv_length_sum: np.ndarray  # uint64[n_nodes, 2]
+    node_spanning_length_sum: np.ndarray  # uint64[n_nodes, 2] — Sum L
     node_start_count: np.ndarray  # uint32[n_nodes] — THE invariant; sums to qc.deposited
 
     # -- contiguous edges: the 0-bp line between two adjacent nodes --
     edge_unspliced_count: np.ndarray  # uint32[n_edges, 2] — the mixture being deconvolved
-    edge_unspliced_density: np.ndarray  # uint64[n_edges, 2]
+    edge_unspliced_inv_length_sum: np.ndarray  # uint64[n_edges, 2]
+    edge_unspliced_length_sum: np.ndarray  # uint64[n_edges, 2] — Sum L
     edge_spliced_count: np.ndarray  # uint32[n_edges, 2] — certified RNA: gDNA cannot be spliced
-    edge_spliced_density: np.ndarray  # uint64[n_edges, 2]
+    edge_spliced_inv_length_sum: np.ndarray  # uint64[n_edges, 2]
+    edge_spliced_length_sum: np.ndarray  # uint64[n_edges, 2] — Sum L
 
     # -- junction edges: one exact donor->acceptor jump. Pure RNA by construction --
     sj_count: np.ndarray  # uint32[n_sj, 2]
-    sj_density: np.ndarray  # uint64[n_sj, 2]
+    sj_inv_length_sum: np.ndarray  # uint64[n_sj, 2]
+    sj_length_sum: np.ndarray  # uint64[n_sj, 2] — Sum L
 
     # -- the fragment-length pools, binned at L, once per fragment --
     pool_lengths: np.ndarray  # int64[5, max_length + 1]
@@ -208,15 +245,20 @@ class AccumulatorPayload:
         banks: dict[str, np.ndarray] = {}
         for name, rows, dtype in (
             ("node_contained_count", n_nodes, np.uint32),
-            ("node_contained_density", n_nodes, np.uint64),
+            ("node_contained_inv_length_sum", n_nodes, np.uint64),
+            ("node_contained_length_sum", n_nodes, np.uint64),
             ("node_spanning_count", n_nodes, np.uint32),
-            ("node_spanning_density", n_nodes, np.uint64),
+            ("node_spanning_inv_length_sum", n_nodes, np.uint64),
+            ("node_spanning_length_sum", n_nodes, np.uint64),
             ("edge_unspliced_count", n_edges, np.uint32),
-            ("edge_unspliced_density", n_edges, np.uint64),
+            ("edge_unspliced_inv_length_sum", n_edges, np.uint64),
+            ("edge_unspliced_length_sum", n_edges, np.uint64),
             ("edge_spliced_count", n_edges, np.uint32),
-            ("edge_spliced_density", n_edges, np.uint64),
+            ("edge_spliced_inv_length_sum", n_edges, np.uint64),
+            ("edge_spliced_length_sum", n_edges, np.uint64),
             ("sj_count", n_sj, np.uint32),
-            ("sj_density", n_sj, np.uint64),
+            ("sj_inv_length_sum", n_sj, np.uint64),
+            ("sj_length_sum", n_sj, np.uint64),
         ):
             banks[name] = _bank(cal, name, rows, dtype)
 
@@ -276,6 +318,11 @@ def _bank(cal: dict[str, Any], name: str, rows: int, dtype: type) -> np.ndarray:
 __all__ = [
     "N_FRAGMENT_POOLS",
     "N_STRAND_COLUMNS",
+    "POOL_DNA_INTERGENIC",
+    "POOL_DNA_INTERGENIC_EXON",
+    "POOL_DNA_INTRONIC",
+    "POOL_DNA_INTRON_EXON",
+    "POOL_RNA_SPLICED",
     "AccumulatorPayload",
     "ScanQC",
 ]

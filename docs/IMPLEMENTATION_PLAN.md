@@ -1,151 +1,58 @@
 # Accumulator — implementation plan
 
 This document says *what code to write*, in what order, with real names and line numbers. Line numbers
-are from `4bb4d191`.
+are from `4bb4d191` and are **stale inside `src/rigel/native/`**, which S3 rewrote.
 
-**Read in this order:** this state block · `ACCUMULATOR_DESIGN.md` (the design) · `LEDGER.md` (what has
-landed, and why each thing is the way it is) · `CARRY_FORWARD.md` (measured facts and traps from the
-project's deleted documentation).
+**Read in this order:** this state block · `TODO.md` (the one ranked list) · `ACCUMULATOR_DESIGN.md`
+(the design) · `LEDGER.md` (what landed, with its gates) · `CARRY_FORWARD.md` §3 then §2 (traps, then
+the equations the code depends on) · `BENCHMARK_SUITE.md` (the suite and what it can judge).
 
 ---
 
 ## 0. STATE — start here
 
+### ⭐ FOR S5, READ `docs/S5_DESIGN_LOG.md` FIRST — it supersedes §4 and §5's S5 row
+
+S5 was written in this file as "rewire the four consumers". **It is not that.** Asked which observables
+the rewiring should consume, the design had no answer, so S5 was stopped on 2026-07-30 and turned into a
+derivation first. §4's R1–R4 ranking and §5's S5 row are **superseded**; the live plan is
+`S5_DESIGN_LOG.md` §2, and the derivation it rests on is `NODE_DENSITY_DERIVATION.md`.
+
+### Where things stand (2026-07-30, end of the S5.a–S5.d session)
+
 | | |
 |---|---|
-| `main` | `3fec01fa` — S1, S2 and **S3** committed and pushed |
-| working tree | **S4 is DONE and uncommitted.** The payload is typed against the specification's own field names |
-| ⛔ **2026-07-30** | **EVERY BENCHMARK AND EVERY INDEX WAS DELETED** (owner). Both are being rebuilt from scratch, with a new benchmark suite. See `LEDGER.md`'s deletion entry for exactly what that voids |
-| next | ⭐ **Index building + the new benchmark suite.** S5 waits on the suite — there is nothing to measure it against |
-| suite | **1031 pass**; 266 fail + 15 error, **all of them consumers reading deleted payload attributes** — S5. ⭐ No test depended on the deleted benchmark data |
-| bench | ⛔ **VOID.** `r0 0.079005` / `r3 0.046675` was `ambig_dense_10mb`, which no longer exists. Do not quote it |
-| ⚠ deposit cost | **410 ns/fragment**, fixed **0.348 s** (measured at S4 against ~357 ns / 0.108 s — a regression). Not re-derivable until an index is rebuilt |
+| `main` | S1–S4 + the index/suite session + **S5.0, S5.a, S5.b, S5.c, S5.d** |
+| suite | **1384 passed / 291 failed / 1 xfailed / 15 errors** |
+| ⭐ **next** | **S5.e** — `build_node_geometry` rewritten, `bp_solver`'s per-face consumers collapsed |
+| ⛔ needs a ruling | **A7**: does reach enter the divisors, and how? `S5_DESIGN_LOG.md` §1 A7 |
 
-⚠ Line numbers in §1–§3 are from `4bb4d191` and are **stale inside `src/rigel/native/`**, which S3
-rewrote. They are still valid elsewhere.
+⚠ **The 291 failures are not one thing.** ~266 are the original S5 consumer breakage; ~25 are tests of
+the per-face geometry model that S5.c and S5.d deleted. **The latter fail with a message naming S5.e or
+S5.f**, so a failure that says which step owns it is the normal state here, not a regression. S5.e clears
+the geometry ones; S5.f clears the rest.
 
-### ✅ S3 and S4 — DONE. The five things worth carrying forward
+### What landed, and where it is written down
 
-`LEDGER.md`'s S3 and S4 entries are the full record. What a reader of *this* document needs:
+Per-step attribution is `LEDGER.md` (S5.0, S5.a, S5.b, S5.c, S5.d), never this block.
 
-1. **The gate had two holes and 23 perturbations found them.** A parity harness that passes proves nothing
-   until the code is deliberately broken. The two greens: a battery with **one** annotated junction could
-   not see "credit only the leftmost junction" (a rule the design REVERSED), and `node_of_pos`'s clamp is
-   unreachable from `deposit` but reachable through the binding. Both closed.
-2. **`sj_implicit` is the one word** for the `SPLICE_IMPLICIT` flag. *Inferred* is gone.
-3. **`path_ambiguous` is a new rejection outcome** (design §9.1): an implicit splice whose candidates imply
-   different intron sets has no determined `L` and deposits nothing. ⛔ The candidates are `~is_synthetic`
-   only — counting the synthetic nascent shadow deferred **100 %** of them.
-4. **The payload keys ARE the specification's `Tally` field names**, in the C++, in `scan_payload.py` and
-   in the reference. There is no mapping table anywhere, deliberately, and the schema tests read their
-   field list off `Tally` rather than writing one out.
-5. ⚠ **Performance regressed and is recorded, not glossed:** 410 ns/fragment against a ~350–400 band, and
-   the fixed partition cost **tripled** to 0.348 s. Speed comes later by owner ruling — but later has to be
-   measured against an honest number now.
+| | |
+|---|---|
+| **S5.0** | the derivation. The shipped `(count, Σ1/L)` pair has an **exact blind spot** at equal mean lengths; the deposit weight is the reciprocal **opportunity**; a model-free channel provably carries no composition information |
+| **S5.a** | `length_sum` on every population; `density` renamed `inv_length_sum`. Byte-identical on 60 k real fragments |
+| **S5.b** | `fl.py` re-keyed to the five pure pools. The five-pool table reproduced on real cfRNA |
+| **S5.c** | `effective_length.py` → the one placements formula. 89 tests, every divisor enumerated |
+| **S5.d** | substrate collapsed to ONE type; the chain re-keyed to `N E N … E N`, no terminal slots |
 
-### ⛔ FOUR LANDMINES — each verified, each fails in a way that does not look like its cause
-### 2, 3 and 4 are STILL LIVE RULES. Only 1 is discharged.
+### Standing rules that did not change
 
-1. ✅ **DISCHARGED in S3, and the reasoning is why it was safe.** Removing the C++ `Accumulator` binding
-   would have broken `import rigel`, because `native.py:22` re-exported `_accumulator.Accumulator` and
-   `rigel.native` is imported at module scope by six modules including `pipeline.py`. S3 *rewrote* the
-   binding rather than removing it, and deleted `src/rigel/_accumulator.py` in the same pass with
-   `native.py` re-exporting `_bam_impl.Accumulator` directly. ⚠ The façade had to go: its properties named
-   arrays that no longer exist, and a module that raises when used is worse than one that is absent.
-2. ⛔ **Do NOT merge overlapping introns in `build_fragment`.** Measured: merging `(200,299)+(200,310)`
-   into `(200,310)` demotes `SPLICED_ANNOT → SPLICED_UNANNOT`, deletes the `sj_key` strand-table
-   observation, and widens `t_inds` from `{0}` to `{0,1,3}`. The resolver needs the **unmerged** introns;
-   `f.introns` is shared with `_resolve_core` (`:937`, `:1606`, `:2315`). Merging is the *accumulator's*
-   private job and it already does it. 5 such pairs in 317,696 spliced hits on MO_3021.
-3. **Re-keying `intron_set` in `build_fragment` is also wrong**, for the same shared-list reason: it flips
-   `cr.sj_strand` POS→3, which removes the fragment from strand training *and* from the deposit.
-4. **The junction slot ORDER is a contract.** The id *is* the rank, so
-   `build_junction_edge_arrays` and the spec's `Partition.from_cuts` must sort identically on
-   `(donor cut, acceptor cut, sj_strand)`. Pinned by
-   `test_the_csr_slot_order_matches_the_reference_accumulator` — whose first two versions had **no teeth**
-   until a nested-intron fixture was added (see `LEDGER.md`, S2.2).
-
-### ⚠ TWO PROCESS RULES, learned the hard way this session
-
-* **`ruff format` scope is `src/ tests/` only.** Running it over `scripts/` reformatted ~130 unrelated
-  files and moved a `noqa` so it stopped suppressing. `scripts/` is linted, never formatted.
-* **Do not bulk-rename a file whose locals share a name with its parameters.** A `sed` left
-  `_normalise_introns` using the *fragment's* bounds where it meant the *intron's* — a silent semantic
-  change. Hand-write those edits.
-
-### ⭐ NAMING — one word per concept, and they are the codebase's own words
-
-Fixed 2026-07-29 after the owner rejected three inventions. Recorded because the C++ will follow these.
-
-| ⛔ invented | ✅ use | why |
-|---|---|---|
-| `genome_channel`, `CHANNEL_PLUS/MINUS`, `kNChannels` | `STRAND_COLUMNS`, `Strand::POS`/`NEG` | "channel" was leftover vocabulary from the 4-way `spliced × primary` axis being deleted. The axis IS the strand; say strand |
-| `N_STRANDS = 2` | `N_STRAND_COLUMNS = 2` | there are **four** strands (`Strand` has OR semantics: `POS\|NEG == AMBIGUOUS`, plus `NONE`). Only two name a column |
-| `motif_strand`, then `sj_motif_strand` | **`sj_strand`** | `sj` is the codebase's abbreviation already — `sj.feather`, `sj_map`, `SJKey`, `sj_lookup_into`, `cr.sj_strand`. "motif" does not say *which* motif, and a third name for one quantity is worse than an ambiguous one |
-| ~~`align_strand` → `strand`~~ | **keep `align_strand`** | owner ruling: it is clear enough and appears in 101 places. Consistency with the tree beats a shorter name |
-| `lo` / `hi` for a fragment | **`start` / `end`** | the codebase uses `start`/`end` everywhere for coordinates; `lo`/`hi` appears only in `reach_lo_pos`/`reach_hi_pos`, which is a different quantity |
-| `introns_inferred`, `inferred_intron_fragments`, "inferred" | **`sj_implicit`**, `sj_implicit_fragments` (owner ruling, S3) | the type is already `SPLICE_IMPLICIT` and `sj_` is already the prefix for a splice-junction attribute, so a `FragmentPath` carries `sj_strand` and `sj_implicit` — two attributes of one splice, one prefix. *Inferred* was a **second** word for a concept that had one |
-
-✅ **The shipped C++ was where `motif_strand` came from** — a local alias in the deposit adapter whose name
-was worse than the field it copied. S3 rewrote that adapter; the alias is gone and `cr.sj_strand` is passed
-directly.
-
-⚠ A junction edge's **annotated** strand and a fragment's **observed** strand are the same quantity from two
-sources, so both are `sj_strand`, disambiguated by scope. The comparison then reads as what it is:
-`if p.sj_strand[k] != sj_strand` — annotated versus observed.
-
-### ⭐ TWO STRANDS, AND THEY ARE INDEPENDENT (owner ruling, 2026-07-29)
-
-The accumulator sees exactly two strand quantities. Conflating them is what produced the shipped
-`primary` bug, and it is the reason the old 4-way channel axis existed at all.
-
-| | what it is | who has one | what it does |
-|---|---|---|---|
-| **`align_strand`** | the genomic strand the read **aligned** to, `+` or `−` | **every** read | selects the array column, and nothing else |
-| **`sj_strand`** | a splice junction's strand, from its genomic **motif** — `GT..AG` is `+`, its reverse complement `CT..AC` is `−`. The aligner writes it as `XS` (STAR) or `ts` (minimap2); the scanner auto-detects | **spliced** reads only | resolves an intron against the annotation (§3.3), and nothing else |
-
-⚠ **Neither constrains the other.** An aligned strand says where the read sat; a splice strand says which
-way an intron was spliced. Comparing them yields *sense* vs *antisense* — a **derived** quantity a consumer
-may compute and the accumulator never stores.
-
-⭐ The shipped code collapses that comparison into one bool named `primary` (`bam_scanner.cpp:1493`:
-`primary = spliced ? (align_strand == motif_strand) : (align_strand == STRAND_POS)`), which is a *third*
-concept built out of the two — and is how a dUTP first-strand library ended up with **0.6 %** of its
-spliced fragments in the column labelled *sense*. **`primary` is deleted in S3, not renamed.**
-
-### ✅ THE DOC CORRECTIONS — LANDED (2026-07-29)
-
-The plan and the design are what the C++ follows, so they were corrected before any C++ was written. Four
-were known and listed; **three more of the same class were found while making them.** All seven are
-documentation only — no code changed, so the suite (1293 at the time) and the bench were untouched by
-construction. S2.2 then added 5 tests, taking the suite to 1298.
-
-| | correction | where |
-|---|---|---|
-| 1 | **§5.1 rewritten for the ONE strand convention.** Was `spliced × {sense, antisense}`; now `{genome +, genome −}` in every bank without exception, with sense/antisense stated as **derived, never stored**. Records what the channel physically is: the fragment's **read-1 genome orientation** (`bam_scanner.cpp:661-686`), which makes declared strandedness a header field rather than a channel convention | design §5.1, §5.2 |
-| 2 | **§3.2's pseudocode replaced by a transcription of the reference**, with the four bugs it used to encode listed and each attributed: `crossed == 0` for CONTAINED · `L` from the **unclipped** span by a second formula · `lo`/`hi−1` instead of the path's first and last **covered** base · unguarded `quantum(L−1)`. Plus the ordering constraint the old block violated: the junction lookup must run **before** the crossing loop, because `spliced` picks the edge bank | plan §3.2 |
-| 3 | **§3.3 — `junction_edge_id_` deleted, not documented.** The id **is** the CSR slot. ⭐ Measured on both indexes: the slot equals the dense rank within `flatnonzero(kind == JUNCTION)` for all 404,168 (and 537), so `edges_df.edge_row` is purely a payload→index join key and **never crosses the ABI** | plan §3.3 |
-| 4 | **The `L == 1` guard stated, with its residue**: an `L = 1` path using an annotated junction books a junction count against density 0 — the schema's only count/density co-support violation, and correct | plan §3.2 bug 4 |
-| **5** | ⭐ **found while making the others — §8 said "two structurally pure pools", §8.2 then said "a third", and the settled ruling is five.** §8 now carries the five-pool table with its measured means (gDNA 88.0/88.5, splash 138.8/211.6, RNA 220.7) and the note that this moves the shipped gDNA mean length by ~40 % | design §8, §8.2 |
-| **6** | ⭐ **found while making the others — the plan's S3 gate said "no regression against the 124 ns baseline", but the ledger's S3 budget is ~357 ns/fragment end-to-end.** Two different measurements of two different things, one of them named as the gate in two places with different values. §6 now distinguishes them explicitly and records that S2 built the harness (§6 still claimed none existed) | plan §5 S3 row, §6 |
-| **7** | ⛔ **found while making the others, and the worst of the three — `CARRY_FORWARD.md` §4 is a PRE-SETTLEMENT idea list, and six of its bullets contradict the settled deposit rule.** It told a C++ author to weight an edge `1/L`, to treat "crossed nothing" as contained, that `L` is "exonic bases only", to deposit unannotated junctions on the **spliced** channel, to implement three conservation identities the design rejected as tautologies, and to leave a 1 bp spanned node untouched. §4 now opens with a banner and each item is marked `⛔ SUPERSEDED` in place with what replaced it | `CARRY_FORWARD.md` §4 |
-
-Also landed in the design: **§12.A**, which called the minimum intron length the one item blocking
-implementation, now records both owner rulings — **every CIGAR `N` is an intron, no floor** (a floor would
-be a magic number, and no floor is what ships) and **a zero-length exon is impossible, so ABUTTING introns
-are malformed and merge** (reversing the strict-overlap decision taken during the S2 review). The artifact
-catalogue (§3.3) gained rows for overlapping and abutting introns; §7.2's dangling `§12.A` pointer now
-points at the calibration list where the capture-model question actually lives. **Nothing blocks
-implementation.**
-
-### TODO — it lives in `docs/TODO.md` now
-
-The deferred work moved to **`docs/TODO.md`**, which ranks it and states why each item is deferred. It is
-the one list; add there. This section is a pointer so that two lists cannot drift apart.
-
-⚠ The two items nearest the critical path: **rebuild the 8 indexes on disk before S5** (they carry stale
-`reach`, and `partition_hash` covers `nodes.feather` only, so a stale `edges.feather` verifies clean), and
-**the benchmark suite**, without which S5's "measure the delta" gate has nothing that can resolve it.
+* **No magic numbers** — stop and discuss before any new constant.
+* **One thing per step**, falsification test first, verified failing, **then perturb the code**.
+  ⭐ This session it caught 7 gate holes and 3 bugs in the harnesses/fixtures themselves.
+* **Append to `LEDGER.md` as each step lands**, never retroactively; delete a `TODO.md` item when it lands.
+* ⛔ **Real data is a TEST input, never a DESIGN input** (owner, 2026-07-30). Sweep the plausible space and
+  bring the owner the domain call instead.
+* **The owner drives commits.**
 
 ---
 

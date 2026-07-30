@@ -21,11 +21,11 @@ from rigel.calibration.node_geometry import (
     init_beliefs,
 )
 from rigel.calibration.effective_length import (
-    boundary_side_eff_length,
-    region_eff_length,
-    spliced_side_eff_length,
+    contained_eff_length as region_eff_length,
 )
-from rigel.calibration.node_chain import BOUNDARY, REGION, build_node_chain
+
+
+from rigel.calibration.node_chain import EDGE, NODE, build_node_chain
 from rigel.calibration.signature import (
     BIT_EXON_NEG,
     BIT_EXON_POS,
@@ -39,6 +39,22 @@ from rigel.calibration.signature import (
     mrna_active_strands,
     nrna_active_strands,
 )
+
+
+def _deleted_in_S5c(*_args, **_kwargs):
+    """⛔ A per-FACE divisor. Deleted in S5.c — a contiguous edge is a 0-bp line with ONE set of numbers.
+
+    Bound so this module still IMPORTS: the tests below reach it only after `build_node_geometry`, which
+    is S5.e and raises, so it is never actually called. Without it an ImportError takes out all 28 tests
+    in this file instead of the 4 that test geometry which no longer exists. S5.e deletes both.
+    """
+    raise NotImplementedError(
+        "boundary_side_eff_length / spliced_side_eff_length were deleted in S5.c; the crossing divisor "
+        "is effective_length.crossing_eff_length, one number per edge. See docs/S5_DESIGN_LOG.md §2."
+    )
+
+
+boundary_side_eff_length = spliced_side_eff_length = _deleted_in_S5c
 
 
 def _view(mass_u, mass_spl):
@@ -86,8 +102,8 @@ def test_geometry_exon_intron_exon_plus_gene():
     rbo = np.array([0, 4])
     chain = build_node_chain(rro, rbo)
     # genomic order: B0 R0 B1 R1 B2 R2 B3  → node ids 0..6
-    assert list(chain.kind) == [BOUNDARY, REGION, BOUNDARY, REGION, BOUNDARY, REGION, BOUNDARY]
-    assert list(chain.ref_idx) == [0, 0, 1, 1, 2, 2, 3]
+    assert list(chain.kind) == [EDGE, NODE, EDGE, NODE, EDGE, NODE, EDGE]
+    assert list(chain.obj_idx) == [0, 0, 1, 1, 2, 2, 3]
 
     L = np.array([1000.0, 2000.0, 500.0])
     sig = np.array([BIT_EXON_POS, BIT_INTRON_POS, BIT_EXON_POS], dtype=np.int64)
@@ -402,7 +418,7 @@ def test_interior_anchor_is_immovable_and_produces_no_nan():
     """The `struct_lock` interior-anchor regression (HANDOFF_5 §6). A composition-CERTAIN node has
     ``Var(log f_c) = 0``, so any code path that forms a fusion weight as ``1/Var`` produces ``∞`` and cascades
     a nan through the whole chain. Pin both halves of the contract on the factor-1 chain, whose two intergenic
-    REGION nodes are exactly such anchors sitting INTERIOR to the chain (each has a live neighbour):
+    NODE nodes are exactly such anchors sitting INTERIOR to the chain (each has a live neighbour):
 
     1. **no nan anywhere** — beliefs and variances stay finite (``∞`` is the honest 'unsolved' state and is
        allowed on a variance; nan never is);

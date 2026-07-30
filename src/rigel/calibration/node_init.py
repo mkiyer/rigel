@@ -33,7 +33,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .density_deconv import density_factor_precision
-from .node_chain import REGION, NodeChain
+from .node_chain import NODE, NodeChain
 from .node_geometry import NodeGeometry, NodeStatics, node_global_geometry
 from .simplex_logodds import _logodds_grid, _solve_nodes_logodds_all
 
@@ -132,8 +132,8 @@ def strand_evidence(
     deadband that kills the unstranded phantom). ``1/N_gdna`` gates a gDNA-free library (N_gdna=0 ⇒ σ²_d→∞ ⇒
     disc=0).
 
-    ``struct_lock`` (**I_struct**) — composition CERTAIN — is scoped to true intergenic REGION nodes, never a
-    G1 BOUNDARY seam (TSS/TES): a seam is structurally gDNA but sits between RNA-carrying exons, so its
+    ``struct_lock`` (**I_struct**) — composition CERTAIN — is scoped to true intergenic NODE nodes, never a
+    G1 EDGE seam (TSS/TES): a seam is structurally gDNA but sits between RNA-carrying exons, so its
     crossing mass is RNA-contaminated and a certainty there compounds into a phantom-gDNA emitter; a true
     intergenic region carries ~0 mass in a zero-gDNA library, so it is safe."""
     n_raw = np.asarray(u_pos, np.float64) + np.asarray(u_neg, np.float64)
@@ -182,7 +182,7 @@ def build_node_init(
     count-zero-information variance freeze evaluates the composition variance near the truth, not at a flat ½.
     ``global_logprior`` (the anchored population gDNA prior, ``(m, K)``) and ``intron_prior`` (the intron
     factory ``λ``-factor, ``(m, K)``) enter ψ; ``intron_prior`` additionally seeds I_factory."""
-    is_reg = np.asarray(chain.kind) == REGION
+    is_reg = np.asarray(chain.kind) == NODE
     fp = np.asarray(statics.free_pos, bool)
     fn = np.asarray(statics.free_neg, bool)
 

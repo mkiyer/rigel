@@ -1,0 +1,91 @@
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+#  THE PILOT — 8 conditions on a REAL human backbone (chr22 + 92 ERCC controls)
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+#
+# TODO item 2. The owner's pilot: gDNA {none, 100 %} x strand {unstranded, stranded} x capture
+# {off, on} = 2x2x2 = 8, a clean full factorial. Nascent is the fourth axis and is held at `none`
+# here so the 2^3 stays clean and every gdna_none cell is a pure false-positive test
+# (`BENCHMARKING.md` caveat 3); it enters as an axis in the full grid.
+#
+# ⛔ WHY A REAL BACKBONE AND NOT A GENERATED MINI-GENOME. The deleted `ambig_dense_10mb` suite could
+# not judge what it was used to judge (`CARRY_FORWARD.md` §3 trap 15): its fine node set was
+# row-for-row identical to its merged region set, so it could not see a partition change at all.
+# Measured on this reference by `scripts/design/suite_resolves.py`:
+#
+#     nodes / merged regions      chr22 suite 1.386 x     human 1.387 x     deleted suite 1.000 x
+#     termini the merge hid       chr22 suite 52.72 %     human 53.42 %     deleted suite 0
+#
+# ⚠ EVERY FRAGMENT-LENGTH NUMBER BELOW IS MEASURED, NOT CHOSEN. They are the count-weighted mean and
+# sd of MO_3021's own pools, read off `rigel/fragment_lengths.feather` (the library that is also the
+# S3 byte-identity gate): RNA (spliced_annot) 206.1 +/- 98.3, gDNA 156.5 +/- 124.6. The deleted suite
+# had `frag_std: 0` — every fragment exactly 200 bp — so nothing length-dependent was exercised at
+# all, and length is the core of the new design.
+#
+# Build the inputs first:
+#   python scripts/sim/build_suite_reference.py --fasta genome_controls.fasta.bgz \
+#       --gtf genes_controls.sorted.gtf --refs chr22 --ercc -o <suite>/reference
+#   python scripts/sim/design_suite_probes.py --gtf <suite>/reference/genes.gtf \
+#       -o <suite>/reference/capture_panel.tsv --capture-fraction 0.5
+#
+# Run:  python scripts/sim/simulate_reads.py --config scripts/sim/configs/chr22_pilot.yaml
+
+genome: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genome.fa
+gtf: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genes.gtf
+outdir: /Users/mkiyer/Downloads/rigel_runs/suite/pilot
+transcript_filter: all
+
+# ── Read simulation ─────────────────────────────────────────────────────────────────────────────
+simulation:
+  n_rna_fragments: 5000000   # `testing_plan.md` objective 3
+  sim_seed: 42
+  frag_mean: 206             # ⭐ MO_3021 spliced_annot, measured — NOT a chosen round number
+  frag_std: 98               # ⭐ measured. The deleted suite had 0 here, which is the whole problem
+  frag_min: 50
+  frag_max: 800
+  read_length: 100
+  error_rate: 0.0
+  n_workers: 8
+
+# ── Abundance ───────────────────────────────────────────────────────────────────────────────────
+abundance:
+  mode: random
+  seed: 42
+  min: 1.0
+  max: 10000.0
+  frac_expressed: 0.5
+
+# ── gDNA: the first axis ────────────────────────────────────────────────────────────────────────
+gdna:
+  rates:       [0.0,  1.0]
+  rate_labels: [none, gdna100]
+  frag_mean: 157             # ⭐ MO_3021 gdna pool, measured
+  frag_std: 125              # ⭐ measured; the real gDNA pool is BROAD, not a spike
+  frag_min: 40
+  frag_max: 1000
+
+# ── Strand: the second axis ─────────────────────────────────────────────────────────────────────
+# ⚠ 0.50 is the hard case — the strand likelihood carries EXACTLY zero information about the gDNA
+# fraction at kappa = 1/2, for any count and any overdispersion (`CARRY_FORWARD.md` §2).
+strand_specificities: [0.50, 0.99]
+
+# ── Nascent: held constant for the pilot ────────────────────────────────────────────────────────
+nrna:
+  mode: additive_ratio
+  ratios:       [0.0]
+  ratio_labels: [none]
+
+# ── Capture: the third axis, and requirement (a)'s density step ─────────────────────────────────
+# The panel covers 720 of 1,440 chr22 gene groups, so the captured/uncaptured boundary is a sharp
+# density step with real transcripts on both sides — which is what a uniform background cannot give.
+capture:
+  probe_format: transcript
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
+  configs:
+    - {label: "off", enabled: false}
+    - {label: "on", probes: /Users/mkiyer/Downloads/rigel_runs/suite/reference/capture_panel.tsv}
+
+oracle_bam: true
+verbose: true

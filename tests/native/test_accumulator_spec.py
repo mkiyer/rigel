@@ -26,13 +26,13 @@ import pytest
 from rigel.types import Strand
 
 from ._accumulator_reference import (
-    DENSITY_SCALE,
+    INV_LENGTH_SCALE,
     STRAND_COLUMNS,
     Accumulator,
     DepositOutcome,
     FragmentPool,
     Partition,
-    density_quantum,
+    inv_length_quantum,
 )
 
 
@@ -78,15 +78,15 @@ def _node(ref, local):
 # ---------------------------------------------------------------------------
 
 
-def test_density_quantum_is_exact_and_rounds_half_away_from_zero():
+def test_inv_length_quantum_is_exact_and_rounds_half_away_from_zero():
     """The rounding mode is part of the contract — byte-identity is undefined without it, and Python's
     own ``round`` is banker's rounding, which differs at ties."""
-    assert density_quantum(1) == DENSITY_SCALE
-    assert density_quantum(2) == DENSITY_SCALE // 2
-    assert density_quantum(512) * 512 == DENSITY_SCALE
-    assert density_quantum(3) == (2 * DENSITY_SCALE + 3) // 6
+    assert inv_length_quantum(1) == INV_LENGTH_SCALE
+    assert inv_length_quantum(2) == INV_LENGTH_SCALE // 2
+    assert inv_length_quantum(512) * 512 == INV_LENGTH_SCALE
+    assert inv_length_quantum(3) == (2 * INV_LENGTH_SCALE + 3) // 6
     with pytest.raises(ValueError):
-        density_quantum(0)
+        inv_length_quantum(0)
 
 
 def test_one_fragment_recovers_its_own_reciprocal_length():
@@ -94,7 +94,7 @@ def test_one_fragment_recovers_its_own_reciprocal_length():
     acc.deposit(0, 120, 320)
     t = acc.tally
     assert int(t.edge_unspliced_count[_edge(0, 2), 0]) == 1
-    assert int(t.edge_unspliced_density[_edge(0, 2), 0]) == density_quantum(200 - 1)
+    assert int(t.edge_unspliced_inv_length_sum[_edge(0, 2), 0]) == inv_length_quantum(200 - 1)
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +107,7 @@ def test_a_contained_fragment_touches_ONE_node_and_no_edge():
     assert acc.deposit(0, 220, 380) is DepositOutcome.DEPOSITED
     t = acc.tally
     assert int(t.node_contained_count[_node(0, 3), 0]) == 1
-    assert int(t.node_contained_density[_node(0, 3), 0]) == density_quantum(160)
+    assert int(t.node_contained_inv_length_sum[_node(0, 3), 0]) == inv_length_quantum(160)
     assert t.node_contained_count.sum() == 1
     assert t.edge_unspliced_count.sum() == 0
     assert t.node_spanning_count.sum() == 0
@@ -133,8 +133,8 @@ def test_a_fragment_crossing_four_nodes_credits_exactly_THREE_edges_at_FULL_weig
     acc.deposit(0, 150, 500)  # touches n1 n2 n3 n4 -> lines at 200, 201, 400
     t = acc.tally
     assert [int(t.edge_unspliced_count[_edge(0, j), 0]) for j in (1, 2, 3, 4, 5)] == [0, 1, 1, 1, 0]
-    quantum = density_quantum(350 - 1)
-    assert all(int(t.edge_unspliced_density[_edge(0, j), 0]) == quantum for j in (2, 3, 4))
+    quantum = inv_length_quantum(350 - 1)
+    assert all(int(t.edge_unspliced_inv_length_sum[_edge(0, j), 0]) == quantum for j in (2, 3, 4))
     assert t.node_contained_count.sum() == 0
 
 
@@ -146,7 +146,7 @@ def test_a_fragment_spanning_a_1bp_node_credits_BOTH_lines_and_the_spanning_slot
     assert int(t.edge_unspliced_count[_edge(0, 2), 0]) == 1
     assert int(t.edge_unspliced_count[_edge(0, 3), 0]) == 1
     assert int(t.node_spanning_count[_node(0, 2), 0]) == 1
-    assert int(t.node_spanning_density[_node(0, 2), 0]) == density_quantum(150)
+    assert int(t.node_spanning_inv_length_sum[_node(0, 2), 0]) == inv_length_quantum(150)
     assert int(t.node_contained_count[_node(0, 2), 0]) == 0
 
 
@@ -174,7 +174,7 @@ def test_a_spliced_jump_deposits_NOTHING_on_the_lines_it_splices_over():
     t = acc.tally
     length = (950 - 150) - (900 - 201)
     assert int(t.sj_count[0, 0]) == 1
-    assert int(t.sj_density[0, 0]) == density_quantum(length - 1)
+    assert int(t.sj_inv_length_sum[0, 0]) == inv_length_quantum(length - 1)
     assert int(t.edge_unspliced_count[_edge(0, 4), 0]) == 0, "the swallowed line at 400"
     assert int(t.edge_spliced_count[_edge(0, 4), 0]) == 0
     assert int(t.node_spanning_count[_node(0, 4), 0]) == 0, "a node jumped OVER is not spanned"
@@ -237,7 +237,7 @@ def test_an_unannotated_intron_inside_one_node_is_a_contained_unspliced_fragment
     acc.deposit(0, 210, 390, introns=[(300, 340)])
     t = acc.tally
     assert int(t.node_contained_count[_node(0, 3), 0]) == 1
-    assert int(t.node_contained_density[_node(0, 3), 0]) == density_quantum(180 - 40)
+    assert int(t.node_contained_inv_length_sum[_node(0, 3), 0]) == inv_length_quantum(180 - 40)
     assert t.qc["unannotated_introns"] == 1
 
 
@@ -355,7 +355,7 @@ def test_a_fragment_is_clipped_to_its_reference_and_L_is_the_clipped_length():
     acc.deposit(0, 950, 1200)  # chr1 ends at 1000
     t = acc.tally
     assert int(t.node_contained_count[_node(0, 5), 0]) == 1
-    assert int(t.node_contained_density[_node(0, 5), 0]) == density_quantum(50)
+    assert int(t.node_contained_inv_length_sum[_node(0, 5), 0]) == inv_length_quantum(50)
 
 
 def test_a_single_node_reference_has_no_edges_and_still_accepts_a_fragment():
@@ -479,7 +479,7 @@ def test_the_crossing_DENSITY_recovers_the_true_density_with_NO_length_model(nod
         acc.deposit(0, int(s), int(e))
     interior = slice(5, acc.n_edges - 5)
     estimate = (
-        acc.tally.edge_unspliced_density[interior, :].sum() / DENSITY_SCALE / (acc.n_edges - 10)
+        acc.tally.edge_unspliced_inv_length_sum[interior, :].sum() / INV_LENGTH_SCALE / (acc.n_edges - 10)
     )
     assert 0.98 <= estimate / rho <= 1.02, f"{estimate / rho:.4f} at {node_bp} bp nodes"
 
@@ -515,12 +515,12 @@ def test_the_deposit_is_independent_of_the_ORDER_fragments_arrive_in():
     a, b = run(range(len(starts))), run(order)
     for field in (
         "node_contained_count",
-        "node_contained_density",
+        "node_contained_inv_length_sum",
         "node_spanning_count",
-        "node_spanning_density",
+        "node_spanning_inv_length_sum",
         "node_start_count",
         "edge_unspliced_count",
-        "edge_unspliced_density",
+        "edge_unspliced_inv_length_sum",
         "pool_lengths",
     ):
         assert np.array_equal(getattr(a, field), getattr(b, field)), field
@@ -563,7 +563,7 @@ def test_L_is_the_total_of_the_path_segments_even_when_the_intron_list_is_malfor
     assert t.qc["introns_absorbed"] == expected_absorbed
     crossings = int(t.edge_unspliced_count.sum())
     assert crossings == expected_crossings
-    assert int(t.edge_unspliced_density.sum()) == crossings * density_quantum(expected_length - 1)
+    assert int(t.edge_unspliced_inv_length_sum.sum()) == crossings * inv_length_quantum(expected_length - 1)
 
 
 def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_begins():
@@ -576,7 +576,7 @@ def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_be
     assert int(t.node_start_count[_node(0, 4)]) == 1, "n4, where the path actually starts"
     assert int(t.node_start_count[_node(0, 1)]) == 0, "not n1, where the extent begins"
     assert int(t.node_contained_count[_node(0, 4), 0]) == 1
-    assert int(t.node_contained_density[_node(0, 4), 0]) == density_quantum(20)
+    assert int(t.node_contained_inv_length_sum[_node(0, 4), 0]) == inv_length_quantum(20)
 
 
 def test_a_duplicated_intron_credits_its_junction_ONCE():
@@ -828,3 +828,128 @@ def test_a_DEFINITE_but_WRONG_sj_strand_still_misses():
     assert t.qc["unannotated_introns"] == 1
     assert t.qc["contradictory_sj_strand"] == 0
     assert int(t.node_spanning_count[_node(0, 2), STRAND_COLUMNS[Strand.POS]]) == 0
+
+
+# ---------------------------------------------------------------------------
+# length_sum — the second length tilt (docs/NODE_DENSITY_DERIVATION.md)
+# ---------------------------------------------------------------------------
+
+
+def test_length_sum_records_L_on_EVERY_object_the_fragment_touches():
+    """One fragment, one ``L``, deposited whole on each object it lands on.
+
+    ``length_sum`` is ``Sum L`` over that object's own fragments, so a fragment crossing three lines
+    contributes its FULL ``L`` to each of them — the same no-partitioning rule the count and the
+    reciprocal sum already follow. A share would re-create the partition dependence the redesign deletes.
+    """
+    acc = _acc()
+    acc.deposit(0, 150, 500)  # L = 350, crosses lines 2, 3, 4 and spans nodes n2, n3
+    t = acc.tally
+    assert [int(t.edge_unspliced_length_sum[_edge(0, j), 0]) for j in (2, 3, 4)] == [350, 350, 350]
+    assert [int(t.node_spanning_length_sum[_node(0, k), 0]) for k in (2, 3)] == [350, 350]
+    assert int(t.node_contained_length_sum.sum()) == 0
+
+
+def test_length_sum_is_L_and_NOT_the_genomic_span():
+    """The molecule's length, so a cut intron does not count — the same ``L`` the pools bin at.
+
+    Binning at the covered/genomic length instead is a defect this project has already paid for once:
+    it collapsed the gDNA length pool to a spike at twice the read length (``CARRY_FORWARD.md`` §3
+    trap 8), and here it would put a number in ``length_sum`` that no fragment-length model can explain.
+    """
+    acc = _acc(junctions=[JUNCTION])  # intron (201, 900)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.POS, sj_strand=Strand.POS)
+    t = acc.tally
+    length = (201 - 150) + (950 - 900)  # 101; the genomic span is 800
+    assert int(t.sj_length_sum.sum()) == length
+    # the only line either block crosses is at position 200 — the block [900, 950) crosses none, and
+    # the intron is jumped, never crossed
+    assert int(t.edge_spliced_length_sum[_edge(0, 2), 0]) == length
+    assert int(t.edge_spliced_length_sum.sum()) == length
+
+
+def test_length_sum_and_count_SHARE_a_support():
+    """``length_sum`` is zero exactly where ``count`` is zero, on every bank.
+
+    ⚠ ``inv_length_sum`` does NOT have this property — an ``L == 1`` path on a junction books a count
+    against a reciprocal sum of 0, the schema's one co-support violation — so a consumer must not assume
+    the two behave alike. ``length_sum`` cannot do that: ``L >= 1`` always.
+    """
+    acc = _acc(junctions=[JUNCTION])
+    acc.deposit(0, 150, 500)
+    acc.deposit(0, 220, 380)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS)
+    acc.deposit(0, 500, 501)  # L == 1: the co-support edge case
+    t = acc.tally
+    for count, length_sum in (
+        (t.node_contained_count, t.node_contained_length_sum),
+        (t.node_spanning_count, t.node_spanning_length_sum),
+        (t.edge_unspliced_count, t.edge_unspliced_length_sum),
+        (t.edge_spliced_count, t.edge_spliced_length_sum),
+        (t.sj_count, t.sj_length_sum),
+    ):
+        assert np.array_equal(count > 0, length_sum > 0)
+        assert int(length_sum[count > 0].min(initial=1)) >= 1
+
+
+def test_length_sum_over_count_is_the_MEAN_fragment_length_at_that_object():
+    """The whole point of the channel: it makes an object's own mean fragment length observable.
+
+    Two components are told apart by their length distributions, and this ratio is the first moment of
+    the mixture actually present at this object — no fitted model anywhere in it.
+    """
+    acc = _acc()
+    lengths = (120, 200, 260)
+    for length in lengths:  # each crosses the line at 400 and nothing else
+        acc.deposit(0, 400 - length // 2, 400 - length // 2 + length)
+    t = acc.tally
+    edge = _edge(0, 4)
+    assert int(t.edge_unspliced_count[edge, 0]) == len(lengths)
+    assert int(t.edge_unspliced_length_sum[edge, 0]) == sum(lengths)
+    mean = t.edge_unspliced_length_sum[edge, 0] / t.edge_unspliced_count[edge, 0]
+    assert mean == pytest.approx(sum(lengths) / len(lengths))
+
+
+def test_length_sum_SEPARATES_two_populations_that_count_AND_inv_length_sum_CANNOT():
+    """⭐ THE reason this channel exists, as an exact arithmetic identity rather than a simulation.
+
+    Two fragment sets are constructed with the SAME count and a BYTE-IDENTICAL ``inv_length_sum``
+    (``1/2 + 1/3 + 1/6 == 1/2 + 1/4 + 1/4``, and the fixed-point quanta happen to sum exactly), yet
+    different total length. The shipped ``(count, inv_length_sum)`` pair is provably blind to the
+    difference; ``length_sum`` sees it.
+
+    This is the per-object shadow of the structural result: at an edge the count row is
+    ``(mu_g − 1, mu_r − 1)`` and the reciprocal row is ``(1, 1)``, so the determinant is ``mu_g − mu_r``
+    and the pair carries ZERO information about the gDNA/RNA split when the two means agree.
+    """
+    edge = _edge(0, 4)  # the line at 400, flanked by two wide nodes
+
+    def deposit_lengths(lengths):
+        acc = _acc()
+        for length in lengths:
+            acc.deposit(0, 399, 399 + length)  # every one crosses the line at 400, and only it
+        t = acc.tally
+        return (
+            int(t.edge_unspliced_count[edge, 0]),
+            int(t.edge_unspliced_inv_length_sum[edge, 0]),
+            int(t.edge_unspliced_length_sum[edge, 0]),
+        )
+
+    count_a, inv_a, len_a = deposit_lengths((3, 4, 7))  # placements 2, 3, 6
+    count_b, inv_b, len_b = deposit_lengths((3, 5, 5))  # placements 2, 4, 4
+
+    assert count_a == count_b == 3, "same number of fragments"
+    assert inv_a == inv_b == INV_LENGTH_SCALE, "the OLD pair cannot tell these apart, exactly"
+    assert (len_a, len_b) == (14, 13), "the new channel can"
+
+
+def test_the_density_FIELD_NAME_is_gone_everywhere():
+    """The rename is complete, so no consumer can reach a half-migrated schema.
+
+    ``inv_length_sum`` is an exact density at an edge and is NOT one at a node; keeping the old name
+    would put one word on two concepts, which is ``CARRY_FORWARD.md`` §3 trap 27.
+    """
+    t = _acc().tally
+    stale = [name for name in t.__slots__ if name.endswith("_density")]
+    assert stale == []
+    assert {"node_contained_inv_length_sum", "node_contained_length_sum"} <= set(t.__slots__)

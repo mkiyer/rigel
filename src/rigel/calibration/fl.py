@@ -10,9 +10,23 @@ excluded from calibration. BOTH FLs drive per-node effective lengths in the swee
 (``bp_solver.build_node_geometry``): gDNA eff-lengths use the gDNA FL, RNA (nascent
 unspliced + spliced) eff-lengths use the RNA FL.
 
-The gDNA pool aggregates the accumulator's **intergenic + intronic** FL pools
-(both compartments); exonic pools (mature mRNA) are excluded. The FL pools and
-this pool index match the C++ ``rigel::accumulator::fl_pool_idx`` convention.
+⭐ **Every pool is PURE BY CONSTRUCTION** (`docs/ACCUMULATOR_DESIGN.md` §8), and that purity is what
+removes the circularity: each model is fitted only from a population known to be one component, so
+nothing is ever estimated from the fragments it will later explain.
+
+* **gDNA** = the two *contained* pools, intergenic + intronic. ~99 % gDNA on real data.
+* **RNA** = the annotated-junction pool, splice OBSERVED. gDNA cannot be spliced.
+  ⚠ ``sj_implicit`` fragments are already excluded by the accumulator — a splice that was never
+  sequenced is a product of the very model this pool is used to fit.
+* **splash** = the two *_EXON crossing pools, exposed for QC and **deliberately not folded into the
+  gDNA model**. They are the only ON-TARGET gDNA population, and on-target gDNA runs ~42 bp shorter
+  than off-target (§8.2), so they land between the two pure means. ⭐ The shipped model summed four
+  differently-tilted pools and read a gDNA mean of **146.05** where the pure intergenic pool says
+  **88.0** — biased long by ~40 %, by pooling exactly these.
+
+The pool axis itself lives in :mod:`rigel.scan_payload`, with the schema, because it is the
+accumulator's own enum and a private copy here is how three files come to disagree about which row is
+which.
 """
 
 from __future__ import annotations
@@ -22,12 +36,13 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-#: ⛔ STALE AXIS, AND IT LIVES HERE NOW BECAUSE IT IS THIS MODULE'S, NOT THE PAYLOAD'S. It describes the
-#: OLD six-pool grid — 3 region types x 2 compartments — which the accumulator no longer emits. S4 replaced
-#: it with the five structurally-pure pools of design §8 (`scan_payload.N_FRAGMENT_POOLS`), binned at `L`.
-#: Re-keying this module onto those five is S5's R3; until then the constant belongs with the code that
-#: still indexes by it, rather than reaching into a module that has deleted the concept.
-N_FL_POOLS = 6
+from ..scan_payload import (
+    POOL_DNA_INTERGENIC,
+    POOL_DNA_INTERGENIC_EXON,
+    POOL_DNA_INTRONIC,
+    POOL_DNA_INTRON_EXON,
+    POOL_RNA_SPLICED,
+)
 
 if TYPE_CHECKING:
     from ..frag_length_model import FragmentLengthModel
@@ -36,28 +51,21 @@ if TYPE_CHECKING:
 __all__ = [
     "FLModels",
     "POOL_EB_PRIOR_ESS",
-    "N_FL_POOLS",
-    "gdna_fl_mass",
     "build_fl_models",
+    "gdna_fl_mass",
+    "rna_fl_mass",
+    "splash_fl_mass",
 ]
 
-# gDNA FL-pool indices = region_type * 2 + compartment, matching the C++
-# fl_pool_idx (region_type 0=intergenic, 1=intronic, 2=exonic; compartment
-# 0=contained, 1=boundary).
-FL_POOL_INTERGENIC_CONTAINED = 0
-FL_POOL_INTERGENIC_BOUNDARY = 1
-FL_POOL_INTRONIC_CONTAINED = 2
-FL_POOL_INTRONIC_BOUNDARY = 3
-FL_POOL_EXONIC_CONTAINED = 4
-FL_POOL_EXONIC_BOUNDARY = 5
+#: The pure gDNA pools: contained in an intergenic or intronic node. ⚠ CONTAINED ONLY — see the module
+#: docstring for why the two crossing "splash" pools stay out.
+_GDNA_POOLS = (POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC)
 
-#: The gDNA pool = intergenic + intronic, both compartments (PR04c §1).
-_GDNA_POOLS = (
-    FL_POOL_INTERGENIC_CONTAINED,
-    FL_POOL_INTERGENIC_BOUNDARY,
-    FL_POOL_INTRONIC_CONTAINED,
-    FL_POOL_INTRONIC_BOUNDARY,
-)
+#: The pure RNA pool: an OBSERVED splice across an annotated junction.
+_RNA_POOLS = (POOL_RNA_SPLICED,)
+
+#: On-target gDNA, reported rather than fitted.
+_SPLASH_POOLS = (POOL_DNA_INTRON_EXON, POOL_DNA_INTERGENIC_EXON)
 
 #: Dirichlet pseudo-count for the smooth EB shrink toward the global FL. Not a
 #: cliff: ``pool_total ≫ prior_ess`` → empirical; ``≪`` → the global anchor; ``= 0``
@@ -79,10 +87,9 @@ class FLModels:
       / :meth:`global_model`); the EB smoothing is a <1% perturbation at real
       library scale and stays internal to scoring.
 
-    ``gdna_counts`` is the **structural-pool proxy** (intergenic + intronic FL
-    mass; :func:`gdna_fl_mass`) — i.e. gDNA *plus* intronic/nascent RNA — not a
-    deconvolved pure-gDNA distribution. ``rna_counts`` is the spliced-annotated
-    (SPLICED-ANNOT) histogram.
+    ``gdna_counts`` is the pure contained-pool histogram (:func:`gdna_fl_mass`) — intergenic + intronic,
+    so gDNA *plus* whatever nascent RNA sits in an intron, not a deconvolved pure-gDNA distribution.
+    ``rna_counts`` is the annotated-junction histogram (:func:`rna_fl_mass`).
     """
 
     global_pmf: np.ndarray  # unconditional anchor (no prior)
@@ -119,23 +126,45 @@ class FLModels:
     def gdna_model(self) -> "FragmentLengthModel":
         """Empirical gDNA structural-pool FL distribution (QC).
 
-        The pool is intergenic + intronic FL mass (:func:`gdna_fl_mass`): a
-        gDNA-dominated proxy that also includes intronic/nascent RNA, not a
-        deconvolved pure-gDNA distribution.
+        The pool is the intergenic + intronic CONTAINED mass (:func:`gdna_fl_mass`): a gDNA-dominated
+        proxy that also includes intronic/nascent RNA, not a deconvolved pure-gDNA distribution.
         """
         return self._empirical(self.gdna_counts)
 
 
-def gdna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
-    """Aggregate gDNA FL mass from the accumulator pools (intergenic + intronic).
+def _pool_sum(payload: "AccumulatorPayload", pools) -> np.ndarray:
+    """Sum the named rows of ``payload.pool_lengths`` into one float64 histogram over ``L``.
 
-    Returns float64[fl_max_size + 1], or an empty vector when the payload carries
-    no FL pools (FL pooling disabled) — the caller then falls back to global FL.
+    ⭐ Binned at ``L``, the molecule length — not at the covered length. Binning at covered length
+    collapses the gDNA histogram to a spike at twice the read length, so every long gDNA fragment scores
+    as RNA (`CARRY_FORWARD.md` §3 trap 8). The accumulator's ``L`` already includes the mate gap and
+    excludes cut introns, so it is the molecule length for both components under one rule.
     """
-    fp = payload.fl_pool_mass
-    if fp is None:
+    pool_lengths = payload.pool_lengths
+    if pool_lengths is None:
         return np.zeros(0, dtype=np.float64)
-    return np.asarray(fp, dtype=np.float64)[list(_GDNA_POOLS)].sum(axis=0)
+    return np.asarray(pool_lengths, dtype=np.float64)[list(pools)].sum(axis=0)
+
+
+def gdna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
+    """The pure gDNA length histogram: fragments CONTAINED in an intergenic or intronic node."""
+    return _pool_sum(payload, _GDNA_POOLS)
+
+
+def rna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
+    """The pure RNA length histogram: fragments that used an annotated junction, splice OBSERVED."""
+    return _pool_sum(payload, _RNA_POOLS)
+
+
+def splash_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
+    """The ON-TARGET gDNA length histogram — the two crossing pools, for QC.
+
+    ⚠ Never fold this into :func:`gdna_fl_mass`. Under capture the intergenic pool is *depleted, not
+    impure*, so composition stays clean while coverage does not, and on-target gDNA fragments run ~42 bp
+    shorter. A model fitted off-target is therefore mis-centred for exactly the fragments that leak —
+    and having this as a named pool makes that comparison an output instead of an assumption.
+    """
+    return _pool_sum(payload, _SPLASH_POOLS)
 
 
 def _aligned(counts: np.ndarray, max_size: int) -> np.ndarray:

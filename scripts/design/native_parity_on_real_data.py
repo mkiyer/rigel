@@ -50,16 +50,21 @@ from rigel.index import TranscriptIndex  # noqa: E402
 #: accumulator per reference, and the three axes have different per-reference lengths.
 _AXIS = {
     "node_contained_count": "node",
-    "node_contained_density": "node",
+    "node_contained_inv_length_sum": "node",
+    "node_contained_length_sum": "node",
     "node_spanning_count": "node",
-    "node_spanning_density": "node",
+    "node_spanning_inv_length_sum": "node",
+    "node_spanning_length_sum": "node",
     "node_start_count": "node",
     "edge_unspliced_count": "edge",
-    "edge_unspliced_density": "edge",
+    "edge_unspliced_inv_length_sum": "edge",
+    "edge_unspliced_length_sum": "edge",
     "edge_spliced_count": "edge",
-    "edge_spliced_density": "edge",
+    "edge_spliced_inv_length_sum": "edge",
+    "edge_spliced_length_sum": "edge",
     "sj_count": "sj",
-    "sj_density": "sj",
+    "sj_inv_length_sum": "sj",
+    "sj_length_sum": "sj",
 }
 
 

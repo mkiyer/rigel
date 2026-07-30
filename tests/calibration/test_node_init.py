@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from rigel.calibration.node_chain import REGION, build_node_chain
+from rigel.calibration.node_chain import NODE, build_node_chain
 from rigel.calibration.node_geometry import build_node_geometry, build_node_statics, init_beliefs
 from rigel.calibration.node_init import (
     build_node_init,
@@ -119,7 +119,7 @@ def _init(kappa=0.9, n_gdna_obs=230.0):
         belief=belief,
     )
     n_node = np.where(
-        np.asarray(chain.kind) == REGION,
+        np.asarray(chain.kind) == NODE,
         geometry.n_unspl_left,
         geometry.n_unspl_left + geometry.n_unspl_right,
     )
@@ -189,7 +189,7 @@ def test_strand_evidence_deadband_kills_unstranded():
 
 
 def test_strand_evidence_struct_lock_regions_only():
-    """I_struct (struct_lock) is composition-certainty for LOCKED REGION nodes only — never a boundary seam."""
+    """I_struct (struct_lock) is composition-certainty for LOCKED NODE nodes only — never a boundary seam."""
     z = np.zeros(4)
     _, lock = strand_evidence(
         z,
@@ -227,7 +227,7 @@ def test_ambig_stranded_strand_gives_zero_fg_precision():
     τ_λ from the strand is 0. Only a density (gDNA) prior can pin an AMBIG node's f_g."""
     chain, statics, geometry, belief, ra = _scenario(kappa=0.9)
     am = 5  # AMBIG region node (both strands live), no intron prior in _init ⇒ no density evidence
-    is_reg = np.asarray(chain.kind) == REGION
+    is_reg = np.asarray(chain.kind) == NODE
     locked = ~(
         (np.asarray(statics.free_pos, bool) | np.asarray(statics.free_neg, bool))
         & (np.asarray(statics.mass_unspliced, float) > 0.0)
@@ -235,7 +235,7 @@ def test_ambig_stranded_strand_gives_zero_fg_precision():
     i_strand, _ = strand_evidence(
         statics.u_pos,
         statics.u_neg,
-        np.full(chain.n_nodes, 0.5),
+        np.full(chain.n_slots, 0.5),
         kappa=0.9,
         od_g=0.2,
         od_r=0.1,
@@ -340,7 +340,7 @@ def test_density_factor_precision_flows_into_node_init():
     )  # unstranded ⇒ strand τ=0
     # a sharp λ-factor on the AMBIG node (id 5) — stand in for a confident intron peel
     lam, _ = _logodds_grid(60, 10.0)
-    prior = np.zeros((chain.n_nodes, lam.shape[0]))
+    prior = np.zeros((chain.n_slots, lam.shape[0]))
     prior[5] = -0.5 * ((lam - 2.0) ** 2) / 0.05
     common = dict(
         kappa=0.5,

@@ -845,16 +845,22 @@ def run_pipeline(
     region_arrays = RegionArrays.from_index(index)
     boundary_flags = build_boundary_flags_array(index)
 
-    # gDNA FL distribution for the calibrator's effective lengths (PR 4c): derive
-    # it from the accumulator's gDNA-dominated FL pools (intergenic + intronic,
-    # both compartments) via smooth empirical-Bayes shrinkage toward the global
-    # FL. The RNA FL (spliced) is built alongside for PR 5's RNA effective length.
-    from .calibration.fl import build_fl_models, gdna_fl_mass
-    from .splice import SpliceType
+    # The two COMPONENT fragment-length models the calibrator's effective lengths need, each fitted
+    # from a pool that is PURE BY CONSTRUCTION (docs/ACCUMULATOR_DESIGN.md §8): gDNA from fragments
+    # contained in an intergenic or intronic node, RNA from fragments that used an annotated junction
+    # with the splice OBSERVED. Both are smooth-EB shrunk toward the unconditional global FL.
+    #
+    # ⭐ Both come from the PAYLOAD, not from the scanner's category models. The scanner's spliced
+    # histogram is transcript-space and needs a UNIQUE transcript; the accumulator's pool is a
+    # structural rule over a larger population, is binned at the same L as everything else, and already
+    # excludes `sj_implicit` fragments — whose splice was never sequenced, so certifying them as RNA
+    # would make the pool depend on the model it is used to fit. One quantity, one source.
+    # ⚠ Only `global` still comes from the scan: no pool is unconditional.
+    from .calibration.fl import build_fl_models, gdna_fl_mass, rna_fl_mass
 
     fl_models = build_fl_models(
         global_counts=frag_length_models.global_model.counts,
-        rna_counts=frag_length_models.category_models[SpliceType.SPLICED_ANNOT].counts,
+        rna_counts=rna_fl_mass(calibration_payload),
         gdna_counts=gdna_fl_mass(calibration_payload),
         max_size=frag_length_models.max_size,
     )

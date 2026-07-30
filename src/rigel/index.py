@@ -107,6 +107,63 @@ def _rigel_version() -> str:
         return "unknown"
 
 
+#: Read size for streaming a content digest. An I/O buffer, not a model parameter — it changes how fast
+#: a digest is computed and never what the digest is.
+_DIGEST_CHUNK_BYTES = 1 << 20
+
+
+def _sha256_of_file(path: Path) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while chunk := fh.read(_DIGEST_CHUNK_BYTES):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _sha256_of_directory(path: Path) -> str:
+    """Digest a directory source — an unpackaged ``.zarr`` store — over its sorted relative paths.
+
+    Traversal is ``sorted(rglob)``, so the digest is a property of the tree's contents and layout and
+    never of the filesystem's iteration order.
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    for entry in sorted(p for p in path.rglob("*") if p.is_file()):
+        h.update(str(entry.relative_to(path)).encode())
+        h.update(_sha256_of_file(entry).encode())
+    return h.hexdigest()
+
+
+def source_record(path: str | Path) -> dict:
+    """Provenance for ONE build input: where it was, how big it was, and what it contained.
+
+    ⚠ **This is not** ``CARRY_FORWARD.md`` §3 trap 25. That trap forbids storing a hash of an artifact
+    *beside* that artifact, because the two drift and the stale hash then verifies clean. This hashes an
+    input the index **cannot recompute from itself** — the genome and the annotation are not in the index
+    — so it is provenance, not a cache key. ``partition_hash`` and ``graph_hash`` stay computed on demand.
+
+    ⭐ ``sha256`` rather than the ``blake2b`` used for the two partition keys, deliberately: those are
+    internal cache keys nobody types, while this one is meant to be checked against ``shasum -a 256`` on
+    the command line by whoever is trying to find the source again.
+    """
+    resolved = Path(path).resolve()
+    if resolved.is_dir():
+        files = [p for p in resolved.rglob("*") if p.is_file()]
+        return {
+            "path": str(resolved),
+            "bytes": sum(p.stat().st_size for p in files),
+            "sha256": _sha256_of_directory(resolved),
+        }
+    return {
+        "path": str(resolved),
+        "bytes": resolved.stat().st_size,
+        "sha256": _sha256_of_file(resolved),
+    }
+
+
 def load_manifest(index_dir: str | Path) -> dict | None:
     """Load ``manifest.json`` from an index directory.
 
@@ -1067,10 +1124,36 @@ class TranscriptIndex:
                 bl_df.to_csv(output_dir / SJ_BLACKLIST_TSV, sep="\t", index=False)
 
         # -- Manifest --------------------------------------------------------
+        # ⛔ Everything needed to REBUILD this index, because the previous manifest recorded neither the
+        # sources nor the flags and a rebuild had to infer both (`TODO.md`, and the ledger's index-rebuild
+        # entry). Defaults are written out explicitly: a rebuilder must not have to know this rigel
+        # version's defaults to reproduce the artifact.
+        logger.info("[START] Digesting build sources for the manifest")
         manifest = {
             "format_version": INDEX_FORMAT_VERSION,
             "rigel_version": _rigel_version(),
+            "sources": {
+                "fasta": source_record(fasta_file),
+                "gtf": source_record(gtf_file),
+                # `null`, never omitted: absent says "no store was supplied", a missing key would say
+                # "this manifest predates the field".
+                "alignable_zarr": (
+                    None if alignable_zarr_path is None else source_record(alignable_zarr_path)
+                ),
+            },
+            # ⚠ Hand-listed, and `tests/test_index_provenance.py` reads the expected key set off
+            # `inspect.signature(build)` — so a NEW build parameter that does not reach here fails that
+            # test rather than silently escaping the provenance.
+            "build_flags": {
+                "collapse_duplicate_transcripts": collapse_duplicate_transcripts,
+                "feather_compression": feather_compression,
+                "gtf_parse_mode": gtf_parse_mode,
+                "nrna_tolerance": nrna_tolerance,
+                "splice_blacklist_min_count": splice_blacklist_min_count,
+                "write_tsv": write_tsv,
+            },
         }
+        logger.info("[DONE] Sources digested")
         with open(output_dir / MANIFEST_JSON, "w") as fh:
             json.dump(manifest, fh, indent=2, sort_keys=True)
 

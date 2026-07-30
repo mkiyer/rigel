@@ -2003,16 +2003,21 @@ private:
             const auto n_sj    = static_cast<std::size_t>(ref_sj_offsets.back());
 
             std::vector<uint32_t> node_contained_count(n_nodes * kNStrandColumns, 0u);
-            std::vector<uint64_t> node_contained_density(n_nodes * kNStrandColumns, 0u);
+            std::vector<uint64_t> node_contained_inv_length_sum(n_nodes * kNStrandColumns, 0u);
+            std::vector<uint64_t> node_contained_length_sum(n_nodes * kNStrandColumns, 0u);
             std::vector<uint32_t> node_spanning_count(n_nodes * kNStrandColumns, 0u);
-            std::vector<uint64_t> node_spanning_density(n_nodes * kNStrandColumns, 0u);
+            std::vector<uint64_t> node_spanning_inv_length_sum(n_nodes * kNStrandColumns, 0u);
+            std::vector<uint64_t> node_spanning_length_sum(n_nodes * kNStrandColumns, 0u);
             std::vector<uint32_t> node_start_count(n_nodes, 0u);
             std::vector<uint32_t> edge_unspliced_count(n_edges * kNStrandColumns, 0u);
-            std::vector<uint64_t> edge_unspliced_density(n_edges * kNStrandColumns, 0u);
+            std::vector<uint64_t> edge_unspliced_inv_length_sum(n_edges * kNStrandColumns, 0u);
+            std::vector<uint64_t> edge_unspliced_length_sum(n_edges * kNStrandColumns, 0u);
             std::vector<uint32_t> edge_spliced_count(n_edges * kNStrandColumns, 0u);
-            std::vector<uint64_t> edge_spliced_density(n_edges * kNStrandColumns, 0u);
+            std::vector<uint64_t> edge_spliced_inv_length_sum(n_edges * kNStrandColumns, 0u);
+            std::vector<uint64_t> edge_spliced_length_sum(n_edges * kNStrandColumns, 0u);
             std::vector<uint32_t> sj_count(n_sj * kNStrandColumns, 0u);
-            std::vector<uint64_t> sj_density(n_sj * kNStrandColumns, 0u);
+            std::vector<uint64_t> sj_inv_length_sum(n_sj * kNStrandColumns, 0u);
+            std::vector<uint64_t> sj_length_sum(n_sj * kNStrandColumns, 0u);
 
             const std::size_t pool_row = static_cast<std::size_t>(max_length_) + 1;
             std::vector<int64_t> pool_lengths(kNFragmentPools * pool_row, 0);
@@ -2034,25 +2039,30 @@ private:
                     for (std::size_t c = 0; c < kNStrandColumns; ++c) {
                         const std::size_t o = (node_base + i) * kNStrandColumns + c;
                         node_contained_count[o]   = nodes[i].contained_count[c];
-                        node_contained_density[o] = nodes[i].contained_density[c];
+                        node_contained_inv_length_sum[o] = nodes[i].contained_inv_length_sum[c];
+                        node_contained_length_sum[o] = nodes[i].contained_length_sum[c];
                         node_spanning_count[o]    = nodes[i].spanning_count[c];
-                        node_spanning_density[o]  = nodes[i].spanning_density[c];
+                        node_spanning_inv_length_sum[o]  = nodes[i].spanning_inv_length_sum[c];
+                        node_spanning_length_sum[o] = nodes[i].spanning_length_sum[c];
                     }
                 }
                 for (std::size_t i = 0; i < a.n_edges(); ++i) {
                     for (std::size_t c = 0; c < kNStrandColumns; ++c) {
                         const std::size_t o = (edge_base + i) * kNStrandColumns + c;
                         edge_unspliced_count[o]   = edges[i].unspliced_count[c];
-                        edge_unspliced_density[o] = edges[i].unspliced_density[c];
+                        edge_unspliced_inv_length_sum[o] = edges[i].unspliced_inv_length_sum[c];
+                        edge_unspliced_length_sum[o] = edges[i].unspliced_length_sum[c];
                         edge_spliced_count[o]     = edges[i].spliced_count[c];
-                        edge_spliced_density[o]   = edges[i].spliced_density[c];
+                        edge_spliced_inv_length_sum[o]   = edges[i].spliced_inv_length_sum[c];
+                        edge_spliced_length_sum[o] = edges[i].spliced_length_sum[c];
                     }
                 }
                 for (std::size_t i = 0; i < a.n_junctions(); ++i) {
                     for (std::size_t c = 0; c < kNStrandColumns; ++c) {
                         const std::size_t o = (sj_base + i) * kNStrandColumns + c;
                         sj_count[o]   = junctions[i].count[c];
-                        sj_density[o] = junctions[i].density[c];
+                        sj_inv_length_sum[o] = junctions[i].inv_length_sum[c];
+                        sj_length_sum[o] = junctions[i].length_sum[c];
                     }
                 }
                 // The pools are library-wide, so the per-reference histograms are SUMMED, not concatenated.
@@ -2079,16 +2089,21 @@ private:
             cal["ref_sj_offsets"]   = vec_to_ndarray(std::move(ref_sj_offsets));
 
             cal["node_contained_count"]   = vec_to_ndarray(std::move(node_contained_count));
-            cal["node_contained_density"] = vec_to_ndarray(std::move(node_contained_density));
+            cal["node_contained_length_sum"] = vec_to_ndarray(std::move(node_contained_length_sum));
+            cal["node_contained_inv_length_sum"] = vec_to_ndarray(std::move(node_contained_inv_length_sum));
             cal["node_spanning_count"]    = vec_to_ndarray(std::move(node_spanning_count));
-            cal["node_spanning_density"]  = vec_to_ndarray(std::move(node_spanning_density));
+            cal["node_spanning_length_sum"] = vec_to_ndarray(std::move(node_spanning_length_sum));
+            cal["node_spanning_inv_length_sum"]  = vec_to_ndarray(std::move(node_spanning_inv_length_sum));
             cal["node_start_count"]       = vec_to_ndarray(std::move(node_start_count));
             cal["edge_unspliced_count"]   = vec_to_ndarray(std::move(edge_unspliced_count));
-            cal["edge_unspliced_density"] = vec_to_ndarray(std::move(edge_unspliced_density));
+            cal["edge_unspliced_length_sum"] = vec_to_ndarray(std::move(edge_unspliced_length_sum));
+            cal["edge_unspliced_inv_length_sum"] = vec_to_ndarray(std::move(edge_unspliced_inv_length_sum));
             cal["edge_spliced_count"]     = vec_to_ndarray(std::move(edge_spliced_count));
-            cal["edge_spliced_density"]   = vec_to_ndarray(std::move(edge_spliced_density));
+            cal["edge_spliced_length_sum"] = vec_to_ndarray(std::move(edge_spliced_length_sum));
+            cal["edge_spliced_inv_length_sum"]   = vec_to_ndarray(std::move(edge_spliced_inv_length_sum));
             cal["sj_count"]               = vec_to_ndarray(std::move(sj_count));
-            cal["sj_density"]             = vec_to_ndarray(std::move(sj_density));
+            cal["sj_length_sum"] = vec_to_ndarray(std::move(sj_length_sum));
+            cal["sj_inv_length_sum"]             = vec_to_ndarray(std::move(sj_inv_length_sum));
             cal["pool_lengths"]           = vec_to_ndarray(std::move(pool_lengths));
 
             // The QC denominators (design §10.3). Every conservation statement downstream has to be able
@@ -2757,18 +2772,32 @@ NB_MODULE(_bam_impl, m) {
                     &a.nodes_data()[0].spanning_count[0], {a.n_nodes(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
             })
-            .def_prop_ro("node_contained_density", [](nb::handle h) {
+            .def_prop_ro("node_contained_inv_length_sum", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
                 constexpr int64_t row = sizeof(Node) / sizeof(uint64_t);
                 return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
-                    &a.nodes_data()[0].contained_density[0], {a.n_nodes(), kNStrandColumns}, h,
+                    &a.nodes_data()[0].contained_inv_length_sum[0], {a.n_nodes(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
             })
-            .def_prop_ro("node_spanning_density", [](nb::handle h) {
+            .def_prop_ro("node_contained_length_sum", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
                 constexpr int64_t row = sizeof(Node) / sizeof(uint64_t);
                 return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
-                    &a.nodes_data()[0].spanning_density[0], {a.n_nodes(), kNStrandColumns}, h,
+                    &a.nodes_data()[0].contained_length_sum[0], {a.n_nodes(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+            .def_prop_ro("node_spanning_inv_length_sum", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(Node) / sizeof(uint64_t);
+                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
+                    &a.nodes_data()[0].spanning_inv_length_sum[0], {a.n_nodes(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+            .def_prop_ro("node_spanning_length_sum", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(Node) / sizeof(uint64_t);
+                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
+                    &a.nodes_data()[0].spanning_length_sum[0], {a.n_nodes(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
             })
             .def_prop_ro("node_start_count", [](nb::handle h) {
@@ -2792,18 +2821,32 @@ NB_MODULE(_bam_impl, m) {
                     &a.edges_data()[0].spliced_count[0], {a.n_edges(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
             })
-            .def_prop_ro("edge_unspliced_density", [](nb::handle h) {
+            .def_prop_ro("edge_unspliced_inv_length_sum", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
                 constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(uint64_t);
                 return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
-                    &a.edges_data()[0].unspliced_density[0], {a.n_edges(), kNStrandColumns}, h,
+                    &a.edges_data()[0].unspliced_inv_length_sum[0], {a.n_edges(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
             })
-            .def_prop_ro("edge_spliced_density", [](nb::handle h) {
+            .def_prop_ro("edge_unspliced_length_sum", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
                 constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(uint64_t);
                 return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
-                    &a.edges_data()[0].spliced_density[0], {a.n_edges(), kNStrandColumns}, h,
+                    &a.edges_data()[0].unspliced_length_sum[0], {a.n_edges(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+            .def_prop_ro("edge_spliced_inv_length_sum", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(uint64_t);
+                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
+                    &a.edges_data()[0].spliced_inv_length_sum[0], {a.n_edges(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+            .def_prop_ro("edge_spliced_length_sum", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(uint64_t);
+                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
+                    &a.edges_data()[0].spliced_length_sum[0], {a.n_edges(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
             })
 
@@ -2815,11 +2858,18 @@ NB_MODULE(_bam_impl, m) {
                     &a.junctions_data()[0].count[0], {a.n_junctions(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
             })
-            .def_prop_ro("sj_density", [](nb::handle h) {
+            .def_prop_ro("sj_inv_length_sum", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
                 constexpr int64_t row = sizeof(JunctionEdge) / sizeof(uint64_t);
                 return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
-                    &a.junctions_data()[0].density[0], {a.n_junctions(), kNStrandColumns}, h,
+                    &a.junctions_data()[0].inv_length_sum[0], {a.n_junctions(), kNStrandColumns}, h,
+                    {row, int64_t{1}}).cast();
+            })
+            .def_prop_ro("sj_length_sum", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(JunctionEdge) / sizeof(uint64_t);
+                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<2>>(
+                    &a.junctions_data()[0].length_sum[0], {a.n_junctions(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
             })
 

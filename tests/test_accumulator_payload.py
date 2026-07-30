@@ -51,16 +51,21 @@ def _calibration_dict(**overrides) -> dict:
         "ref_edge_offsets": ref_edge_offsets,
         "ref_sj_offsets": ref_sj_offsets,
         "node_contained_count": np.arange(n_nodes * 2, dtype=np.uint32),
-        "node_contained_density": np.arange(n_nodes * 2, dtype=np.uint64) * 7,
+        "node_contained_inv_length_sum": np.arange(n_nodes * 2, dtype=np.uint64) * 7,
+        "node_contained_length_sum": np.arange(n_nodes * 2, dtype=np.uint64) * 11,
         "node_spanning_count": np.arange(n_nodes * 2, dtype=np.uint32) * 2,
-        "node_spanning_density": np.arange(n_nodes * 2, dtype=np.uint64) * 3,
+        "node_spanning_inv_length_sum": np.arange(n_nodes * 2, dtype=np.uint64) * 3,
+        "node_spanning_length_sum": np.arange(n_nodes * 2, dtype=np.uint64) * 13,
         "node_start_count": np.arange(n_nodes, dtype=np.uint32),
         "edge_unspliced_count": np.arange(n_edges * 2, dtype=np.uint32),
-        "edge_unspliced_density": np.arange(n_edges * 2, dtype=np.uint64),
+        "edge_unspliced_inv_length_sum": np.arange(n_edges * 2, dtype=np.uint64),
+        "edge_unspliced_length_sum": np.arange(n_edges * 2, dtype=np.uint64) * 17,
         "edge_spliced_count": np.arange(n_edges * 2, dtype=np.uint32),
-        "edge_spliced_density": np.arange(n_edges * 2, dtype=np.uint64),
+        "edge_spliced_inv_length_sum": np.arange(n_edges * 2, dtype=np.uint64),
+        "edge_spliced_length_sum": np.arange(n_edges * 2, dtype=np.uint64) * 19,
         "sj_count": np.arange(n_sj * 2, dtype=np.uint32),
-        "sj_density": np.arange(n_sj * 2, dtype=np.uint64),
+        "sj_inv_length_sum": np.arange(n_sj * 2, dtype=np.uint64),
+        "sj_length_sum": np.arange(n_sj * 2, dtype=np.uint64) * 23,
         "pool_lengths": np.arange(5 * (MAX_LENGTH + 1), dtype=np.int64),
         "qc": {
             "deposited": 41,
@@ -111,19 +116,23 @@ def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
     assert (n_nodes, n_edges, n_sj) == (5, 3, 3)
     for name in (
         "node_contained_count",
-        "node_contained_density",
+        "node_contained_inv_length_sum",
+        "node_contained_length_sum",
         "node_spanning_count",
-        "node_spanning_density",
+        "node_spanning_inv_length_sum",
+        "node_spanning_length_sum",
     ):
         assert getattr(payload, name).shape == (n_nodes, N_STRAND_COLUMNS), name
     for name in (
         "edge_unspliced_count",
-        "edge_unspliced_density",
+        "edge_unspliced_inv_length_sum",
+        "edge_unspliced_length_sum",
         "edge_spliced_count",
-        "edge_spliced_density",
+        "edge_spliced_inv_length_sum",
+        "edge_spliced_length_sum",
     ):
         assert getattr(payload, name).shape == (n_edges, N_STRAND_COLUMNS), name
-    for name in ("sj_count", "sj_density"):
+    for name in ("sj_count", "sj_inv_length_sum", "sj_length_sum"):
         assert getattr(payload, name).shape == (n_sj, N_STRAND_COLUMNS), name
     assert payload.node_start_count.shape == (n_nodes,)
     assert payload.pool_lengths.shape == (5, MAX_LENGTH + 1)
@@ -154,8 +163,8 @@ def test_a_WRONG_dtype_is_REJECTED_rather_than_coerced():
     """
     with pytest.raises(ValueError, match="node_contained_count.*dtype"):
         _payload(node_contained_count=np.arange(10, dtype=np.int64))
-    with pytest.raises(ValueError, match="sj_density.*dtype"):
-        _payload(sj_density=np.arange(6, dtype=np.uint32))
+    with pytest.raises(ValueError, match="sj_inv_length_sum.*dtype"):
+        _payload(sj_inv_length_sum=np.arange(6, dtype=np.uint32))
 
 
 def test_a_MISSING_qc_denominator_is_REJECTED():
