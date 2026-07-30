@@ -11,33 +11,17 @@ tidy-up and becomes load-bearing. Nobody has measured it, so this measures it.
 
     OMP_NUM_THREADS=1 python scripts/design/implicit_splice_census.py INDEX BAM [BAM ...]
 
-⚠ THE MONKEYPATCH BELOW IS TRANSIENT. S3 moved the payload keys and S4 rewrites `AccumulatorPayload` to
-read them, so `from_scan_result` cannot parse this scan yet. It lives here, in a measurement script, rather
-than in the pipeline: production code does not get a shim so that a script can run. Delete it at S4.
 """
 
 from __future__ import annotations
 
 import argparse
-import contextlib
+import dataclasses
 from pathlib import Path
 
-from rigel import scan_payload
 from rigel.config import BamScanConfig
 from rigel.index import TranscriptIndex
 from rigel.pipeline import scan_and_buffer
-
-
-@contextlib.contextmanager
-def _raw_payload():
-    original = scan_payload.AccumulatorPayload.from_scan_result
-    scan_payload.AccumulatorPayload.from_scan_result = classmethod(
-        lambda cls, scan_result: scan_result["calibration"]
-    )
-    try:
-        yield
-    finally:
-        scan_payload.AccumulatorPayload.from_scan_result = original
 
 
 #: The denominators worth reading side by side, in the order that tells the story.
@@ -69,11 +53,10 @@ def main() -> None:
     print("-" * len(header))
 
     for bam in args.bams:
-        with _raw_payload():
-            _, _, _, _, payload = scan_and_buffer(
-                bam, index, BamScanConfig(sj_strand_tag="auto", total_threads=args.threads)
-            )
-        qc = dict(payload["qc"])
+        _, _, _, _, payload = scan_and_buffer(
+            bam, index, BamScanConfig(sj_strand_tag="auto", total_threads=args.threads)
+        )
+        qc = {f.name: getattr(payload.qc, f.name) for f in dataclasses.fields(payload.qc)}
         row = f"{Path(bam).parts[-3][:22]:<22}"
         for key in _KEYS:
             row += f"{qc.get(key, 0):>26,}"

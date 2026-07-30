@@ -33,6 +33,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("rigel_analysis")
 
+#: ⚠ A DEVELOPER DEFAULT, not a location the tool owns, and it points into a tree that was cleared on
+#: 2026-07-30 when every benchmark and index was deleted. Pass the suite path explicitly; this exists so
+#: an interactive run has something to type less of, and it will simply not exist on most machines.
 DEFAULT_SIM_BASE = Path("/Users/mkiyer/Downloads/rigel_runs/sim_synthetic")
 
 

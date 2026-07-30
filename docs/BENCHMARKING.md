@@ -489,3 +489,51 @@ scripts/benchmarking/
 **Analysis finds no rigel outputs** — Run `status` first to confirm outputs exist. The analysis looks for `quant.feather` inside `rigel/<config>/` and `rigel_*/` directories. If you ran rigel outside the benchmarking system, ensure the output is in the expected location.
 
 **Slow analysis** — The majority of analysis time is spent loading feather files (254K transcripts × n conditions). Restrict to specific conditions with `--conditions` to speed up iteration. Avoid `parse_fastq_truth: true` unless you need per-fragment ground truth — it takes ~10 minutes per condition to parse 10M FASTQ reads.
+
+---
+
+## What to measure, and why the obvious metric is the wrong one
+
+⭐ **Preserved from the `calibration-benchmark` skill, deleted 2026-07-30 when the suites it pointed at
+were.** The paths and the 20-condition layout are gone; the reasoning below is not, and the replacement
+suite should be evaluated the same way.
+
+### The primary metric is NET FRAGMENT FLOW, not per-fragment label recovery
+
+**Hard per-fragment label recovery is the wrong target.** An unspliced RNA fragment and a gDNA fragment from
+the same locus can be **sequence-identical and genuinely unrecoverable** — and that is fine. What matters is
+the **net** deconvolution error per component.
+
+Build a per-locus flow matrix `flow[true_origin][assigned]` — true origin from the oracle read name,
+assigned from the hard MAP label — then reduce to `net(a→b) = flow[a][b] − flow[b][a]`. Symmetric,
+unrecoverable misassignment cancels; **only systematic bias survives**. Components per locus are its
+transcripts plus one `gdna@L`; intergenic gDNA is `gdna@-1`.
+
+What it answers directly:
+
+* **Pool net leak and its direction** — signed `net_gdna_to_rna` per condition (positive = gDNA→RNA leak,
+  negative = RNA→gDNA siphon), split in-locus vs intergenic. Balanced ⇔ ~0.
+* **Per-transcript Δ = observed − expected**, decomposed into `net_from_gdna` (contamination) vs
+  `net_from_rna_isoforms` (zero-sum RNA reallocation) vs `cross_locus` (residual).
+* **Root cause** — rank correlation of `net_from_gdna` against depth, exon count, single-exon status and
+  spliced length; plus an identifiability diagnostic comparing single-exon (gDNA-identical) against
+  multi-exon transcripts. A single-exon transcript has no isoforms, so its Δ ≈ `net_from_gdna`, and a
+  nonzero class mean is systematic leak concentrated exactly where RNA is sequence-identical to gDNA.
+
+### ⛔ Three caveats, each of which cost something to learn
+
+1. **The hard-label metric is nearly BLIND to a calibration-prior change.** A real change can move the soft
+   3-pool counts by *tens of thousands of fragments* while the frag-level hard-label `net_to_rna` is
+   byte-identical. Use the **soft 3-pool surplus** (assigned − true, for gDNA / nascent / mature) as the
+   primary pool metric, and treat a byte-identical hard-label result as *no evidence*, not as *no change*.
+2. **Report the ABSOLUTE per-transcript error alongside the net.** Net cancels positive against negative
+   per-transcript flow, so `Σ_tx |measured − true|` is the one that notices a redistribution.
+3. **`gdna_none` conditions are pure false-positive tests** — any net gDNA→RNA there is false by
+   construction. Unstranded (ss = 0.50) is the hard case, because there is no strand clue at all;
+   capture-on concentrates gDNA onto exons, co-located with mRNA, so expect *more* in-locus leak.
+
+### Localising an error
+
+Join the per-locus flow to the run's `loci.feather` (`gdna_prior_count`, `rna_prior_count`,
+`gdna_eff_len_em`) to separate **calibration-prior** error — the per-locus prior is wrong — from
+**EM/assignment** error, where the prior is about right and the likelihood mislabels.

@@ -13,19 +13,20 @@ project's deleted documentation).
 
 | | |
 |---|---|
-| `main` | `de26fa76` — **GREEN**. S1, S2, the doc corrections and the naming fixes are committed |
-| branch `s3-accumulator` | **S3 is DONE and uncommitted.** The extension builds; the native accumulator is **byte-identical to the specification on real data**, and bit-identical at 1/2/4/8 workers |
-| next | ⭐ **S4 — the payload** (§3.5). The keys are already the specification's `Tally` field names |
-| suite | **1048 pass**; 240 fail + 17 error, **all 257 from `scan_payload.py:102`** reading the deleted `n_channels` — S4. Verified: no failure comes from the deposit rule |
-| bench | r0 `0.079005` / r3 `0.046675` at `3c293038` — **not re-runnable until S4**, because the pipeline cannot complete a scan |
-| deposit budget | **~357 ns/fragment** end-to-end — ⚠ **deferred to after S4 by owner ruling**; it is measured through the payload, which does not exist yet |
+| `main` | `3fec01fa` — S1, S2 and **S3** committed and pushed |
+| working tree | **S4 is DONE and uncommitted.** The payload is typed against the specification's own field names |
+| ⛔ **2026-07-30** | **EVERY BENCHMARK AND EVERY INDEX WAS DELETED** (owner). Both are being rebuilt from scratch, with a new benchmark suite. See `LEDGER.md`'s deletion entry for exactly what that voids |
+| next | ⭐ **Index building + the new benchmark suite.** S5 waits on the suite — there is nothing to measure it against |
+| suite | **1031 pass**; 266 fail + 15 error, **all of them consumers reading deleted payload attributes** — S5. ⭐ No test depended on the deleted benchmark data |
+| bench | ⛔ **VOID.** `r0 0.079005` / `r3 0.046675` was `ambig_dense_10mb`, which no longer exists. Do not quote it |
+| ⚠ deposit cost | **410 ns/fragment**, fixed **0.348 s** (measured at S4 against ~357 ns / 0.108 s — a regression). Not re-derivable until an index is rebuilt |
 
 ⚠ Line numbers in §1–§3 are from `4bb4d191` and are **stale inside `src/rigel/native/`**, which S3
 rewrote. They are still valid elsewhere.
 
-### ✅ S3 — DONE. What it did, and the four things worth carrying forward
+### ✅ S3 and S4 — DONE. The five things worth carrying forward
 
-`LEDGER.md`'s S3 entry is the full record. The four things a reader of *this* document needs:
+`LEDGER.md`'s S3 and S4 entries are the full record. What a reader of *this* document needs:
 
 1. **The gate had two holes and 23 perturbations found them.** A parity harness that passes proves nothing
    until the code is deliberately broken. The two greens: a battery with **one** annotated junction could
@@ -35,8 +36,12 @@ rewrote. They are still valid elsewhere.
 3. **`path_ambiguous` is a new rejection outcome** (design §9.1): an implicit splice whose candidates imply
    different intron sets has no determined `L` and deposits nothing. ⛔ The candidates are `~is_synthetic`
    only — counting the synthetic nascent shadow deferred **100 %** of them.
-4. **The payload keys ARE the specification's `Tally` field names.** S4 must use them; there is no mapping
-   table, deliberately.
+4. **The payload keys ARE the specification's `Tally` field names**, in the C++, in `scan_payload.py` and
+   in the reference. There is no mapping table anywhere, deliberately, and the schema tests read their
+   field list off `Tally` rather than writing one out.
+5. ⚠ **Performance regressed and is recorded, not glossed:** 410 ns/fragment against a ~350–400 band, and
+   the fixed partition cost **tripled** to 0.348 s. Speed comes later by owner ruling — but later has to be
+   measured against an honest number now.
 
 ### ⛔ FOUR LANDMINES — each verified, each fails in a way that does not look like its cause
 ### 2, 3 and 4 are STILL LIVE RULES. Only 1 is discharged.
@@ -133,39 +138,14 @@ catalogue (§3.3) gained rows for overlapping and abutting introns; §7.2's dang
 points at the calibration list where the capture-model question actually lives. **Nothing blocks
 implementation.**
 
-### TODO — deferred work, none of it blocking S3
+### TODO — it lives in `docs/TODO.md` now
 
-Each item is deferred deliberately, with the reason. This is the project's TODO list; add to it rather than
-starting a new file.
+The deferred work moved to **`docs/TODO.md`**, which ranks it and states why each item is deferred. It is
+the one list; add there. This section is a pointer so that two lists cannot drift apart.
 
-* ⛔ **`detect_chimera` is blind to two real populations, because of one gate.** It considers only blocks
-  with a **non-empty transcript set** (`constants.h:339-343`) and needs ≥ 2 mutually disjoint transcript
-  components, so it returns `CHIMERA_NONE` for both of these:
-  1. **Same-reference-orientation mates.** Paired-end sequencing reads the two ends of one double-stranded
-     molecule, so R1 and R2 must map to **opposite** reference strands; `build_fragment` encodes that by
-     flipping R2, so a normal FR pair collapses to one `(ref, strand)` group. Two groups means the mates
-     agree in reference orientation, which is aberrant — consistent with an inversion placing both ends on
-     the same reference strand. It is evidence of a rearrangement, not a molecule. Today it becomes
-     `align_strand = STRAND_AMBIGUOUS` (`POS|NEG`) and is **silently dropped** at `bam_scanner.cpp:1474-1480`.
-  2. **The multi-megabase spans.** ⭐ 95 % carry a supplementary record, and intergenic blocks have empty
-     transcript sets, so the gate never sees them. Same root cause, second symptom.
-
-  The vocabulary already exists: `CHIMERA_CIS_STRAND_SAME` / `CHIMERA_CIS_STRAND_DIFF`.
-  **Why deferred:** widening the gate reclassifies currently-accepted fragments as chimeras, which moves the
-  bench. That is a change to *what counts as a fragment*, not to how one is tallied — so it is its own arm
-  with its own before/after measurement, after S3 is byte-identical. Owner-agreed 2026-07-29.
-* **The 8 indexes on disk carry stale `reach`.** S1 changed the builder, not the artifacts. Nothing reads
-  those columns so nothing is wrong today, but every index must be rebuilt before S5/S6 makes reach
-  load-bearing. `partition_hash` will not notice — it covers `nodes.feather` only.
-* **The shipped C++ accumulator has no reference test** until S3 replaces it (the old spec matrix tested
-  the fractional rule, which no longer exists). The oracle bench is the guard in that window.
-* **`sj.feather` duplicates junction coordinates.** It is one row per *(junction, transcript)* and feeds
-  `sj_map` at load (`index.py:1351`), so it cannot merge into `edges.feather` (one row per distinct
-  junction). But its `(ref, start, end, strand)` columns duplicate what `(src, dst, strand)` already
-  determines, and nothing enforces they agree. **Available simplification: re-key it to
-  `(junction_edge_id, t_index)`.** Owner's idea; log it for after the accumulator lands.
-* **Goldens moved at the index change** (`gdna_em_count` fell 16–52 %) and that movement has never been
-  validated against truth. The new benchmark suite should adjudicate it, not this sequence.
+⚠ The two items nearest the critical path: **rebuild the 8 indexes on disk before S5** (they carry stale
+`reach`, and `partition_hash` covers `nodes.feather` only, so a stale `edges.feather` verifies clean), and
+**the benchmark suite**, without which S5's "measure the delta" gate has nothing that can resolve it.
 
 ---
 
@@ -572,7 +552,7 @@ are written before it and verified failing, and nothing downstream starts until 
 | **S1** | **Index.** `splice_graph._contiguous_reaches` → genomic span reach (§P1). Add `build_junction_edge_arrays(index)` returning the §3.3 CSR | bench **bit-identical 32/32** — nothing reads reach; 5 named tests in `test_splice_graph.py` updated; I1–I13 pass at human scale. **Independent of everything else; land it alone.** |
 | **S2** | **The Python reference**, rewritten in place, plus design §10.4's test matrix written first and verified failing. Plus the scan-profiling harness (§6) | every test green; the reference runs end to end on a **real cfRNA payload** through a shim, and its QC denominators are sane |
 | **S3** | ✅ **DONE.** C++ types, `deposit`, `merge_from`, the five pools, `set_junctions` as a **second** method, the deposit adapter, the payload keys, the bindings. Plus `sj_implicit` and `path_ambiguous`, which the step turned up | ✅ **byte-identical to the reference** on LBX0190 (60 k fragments) and the whole of MO_3021 (875,670); ✅ **bit-identical at 1/2/4/8 workers**; ✅ 23 perturbations, 2 gate holes found and closed; ⚠ the ns/fragment gate is **deferred to after S4** (owner) — it is measured through the payload |
-| **S4** | **Payload** rewritten against the new keys — ⭐ they are the specification's `Tally` field names, so there is no mapping table. Delete `scan_payload.py:143-149`'s backwards-compat path and the two test-local monkeypatches standing in for the payload. ⛔ NOT `memcpy`: the storage is AoS, so the copy is a strided transpose (§3.5) | schema tests; `Σ node_start_count == deposited` on real data (already passing through the raw dict); the ns/fragment number re-recorded |
+| **S4** | ✅ **DONE.** `AccumulatorPayload` rewritten against the new keys; `ScanQC` typed; offsets re-derived rather than trusted; dtypes asserted rather than coerced; `graph_hash` covers nodes AND edges. The two payload monkeypatches deleted | ✅ 15 schema tests, written first; ✅ 6 perturbations, 2 holes closed; ✅ `Σ node_start_count == qc.deposited` on a real scan through the payload; ⚠ deposit cost re-recorded at **410 ns** / **0.348 s** fixed — a regression |
 | **S5** | **Consumers, in one pass**: substrate collapsed to one type (`CalibrationSubstrate`/`BoundarySubstrate` deleted), `build_node_geometry` rewritten (R1), `effective_length` reduced to the one `placements` formula, `fl.py` re-keyed to the five pools | calibration runs end to end; the delta is **measured and recorded**, not required to be zero — there is no comparable baseline across this change |
 | **S6** | **Delete.** `ruff check src/ tests/ scripts/`; undefined-name failures are the authoritative list | suite green; goldens regenerated **once** |
 
@@ -682,4 +662,4 @@ Observed conventions, not preferences — this is what the tree does everywhere.
 | **malformed introns** | overlapping **and abutting** introns merge, and the merge is counted (design §12.A) |
 | **junction-edge id** | the **CSR slot**. `edges_df.edge_row` is a join key and does not cross the ABI (§3.3) |
 
-Nothing is open. S1, S2 and **S3** are done; the next step is **S4**.
+Nothing is open. S1–S4 and the index rebuild are done. Next: the S5 / benchmark sequencing decision.

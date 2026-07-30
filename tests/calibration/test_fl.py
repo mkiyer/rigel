@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration.fl import build_fl_models, gdna_fl_mass
-from rigel.scan_payload import N_FL_POOLS
+from rigel.calibration.fl import N_FL_POOLS
 
 
 def _spike(at: int, total: float, n: int = 1001) -> np.ndarray:

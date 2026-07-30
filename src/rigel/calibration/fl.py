@@ -22,7 +22,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ..scan_payload import N_FL_POOLS
+#: ⛔ STALE AXIS, AND IT LIVES HERE NOW BECAUSE IT IS THIS MODULE'S, NOT THE PAYLOAD'S. It describes the
+#: OLD six-pool grid — 3 region types x 2 compartments — which the accumulator no longer emits. S4 replaced
+#: it with the five structurally-pure pools of design §8 (`scan_payload.N_FRAGMENT_POOLS`), binned at `L`.
+#: Re-keying this module onto those five is S5's R3; until then the constant belongs with the code that
+#: still indexes by it, rather than reaching into a module that has deleted the concept.
+N_FL_POOLS = 6
 
 if TYPE_CHECKING:
     from ..frag_length_model import FragmentLengthModel

@@ -72,6 +72,9 @@ rebuilt before S5/S6 makes reach load-bearing**, and a rebuilt index will not co
 an old one on `edges.feather`. `partition_hash` will not notice: it covers `nodes.feather` only, and
 nodes are unchanged.
 
+> ✅ **CLOSED 2026-07-30** — see the *Index rebuild* entry at the end of this file. ⭐ It turned out to be
+> **7** distinct indexes, not 8, and **~38 % of human contiguous edges** had the wrong reach.
+
 ### Files touched (S1)
 
 * `src/rigel/calibration/splice_graph.py` — `_contiguous_reaches` rewritten; `JunctionEdgeArrays` +
@@ -805,3 +808,224 @@ Rewrite `AccumulatorPayload` against the new keys (they are the `Tally` field na
 `scan_payload.py:143-149`'s backwards-compat path. Then delete the two test-local monkeypatches that stand
 in for it (`test_accumulator_worker_determinism.py`, `implicit_splice_census.py`) and re-record the
 performance number.
+
+---
+
+## S4 — the payload, typed against the specification's own vocabulary (2026-07-30)
+
+**S4 is closed.** `AccumulatorPayload` is rewritten against the new keys, the scan completes end to end
+again, and the two test-local monkeypatches that stood in for the payload are deleted. The red has moved
+from *"the payload cannot be built"* to *"consumers read fields that no longer exist"* — which is S5, and
+is what the S3 probe predicted it would be.
+
+| gate | result |
+|---|---|
+| schema | **15 pass** (`test_accumulator_payload.py`), written first and verified red |
+| ⭐ perturbations | 6 run, **2 holes found and closed** — see below |
+| parity + workers + implicit | **80 pass**, now driven through the real payload rather than a monkeypatch |
+| `Σ node_start_count == qc.deposited` | holds on a real scan, **through the payload** |
+| suite | **1031 pass**; 266 fail + 15 error, all of them consumers reading old attributes |
+| ruff + `ruff format` | clean |
+| ⚠ deposit cost | **410 ns/fragment**, fixed **0.348 s** — a regression; see below |
+
+### The schema is checked against `Tally`, not against a list
+
+The payload's field names, the C++ payload keys and `_accumulator_reference.Tally`'s field names are now
+the same strings. So `test_accumulator_payload.py` reads its field list off `dataclasses.fields(Tally)`
+rather than writing one out: a hand-written list would be exactly the mapping table this naming convention
+exists to abolish, and it would be free to drift.
+
+⛔ **Two of six perturbations came back green, and both were real holes in the tests.**
+
+| green perturbation | why it passed | closed by |
+|---|---|---|
+| **dtype coerced instead of asserted** | the test checked the payload's OUTPUT dtype, and `ascontiguousarray(x, dtype=uint32)` happily narrows an int64 — so a coercing payload still reports the right dtype and passes a check on itself. What that hides is a C++ side that has stopped agreeing with the schema | `test_a_WRONG_dtype_is_REJECTED_rather_than_coerced` — the wrong dtype now has to arrive and be refused |
+| **a missing QC denominator** | nothing was feeding an incomplete `qc` block | `test_a_MISSING_qc_denominator_is_REJECTED` |
+
+The other four are caught: offsets trusted rather than re-derived · `qc` left as a plain dict · arrays
+copied instead of viewed · the row-divisibility check removed.
+
+### What the payload does beyond reshaping
+
+**`qc` is a typed `ScanQC`, not a dict.** Design §10.3 requires these denominators to be emitted so that
+every conservation statement can name what it excluded. A dict answers a typo with a `KeyError` at the
+call site, possibly far away and possibly never; a frozen dataclass answers at the boundary. Field names
+are the specification's own `Tally.qc` keys, checked against them.
+
+**The per-reference offsets are RE-DERIVED from the cut axis, not trusted.** An offset array of the right
+*length* can still be inconsistent, and every consumer slices by these — a per-reference offset that drifts
+is the defect class that once dropped 476,719 of 476,732 fragments while every golden test passed.
+
+⭐ **Provenance now covers nodes AND edges: `TranscriptIndex.graph_hash`.** `partition_hash` covers
+`nodes.feather` only, and its own docstring says so — it keys a cached *scan*, which sees the cut array.
+This payload is **edge-keyed by construction**: its junction axis is meaningless against a different
+junction CSR. ⚠ The two genuinely differ — the 2026-07-29 flag fix rewrote every `edges.feather` while
+leaving every `nodes.feather` byte-identical, so a nodes-only key would have verified **clean** against a
+stale payload. `graph_hash` is `partition_hash` plus the junction CSR (offsets, acceptor cuts, strands),
+computed on demand and never stored (§3 trap 25). ⚠ `edge_row` is deliberately excluded: it is a join key
+that never crosses the ABI, and hashing it would invalidate a good payload whenever an unrelated edge row
+moved.
+
+**`strandedness`, design §5.2's other header field, is deliberately NOT here.** It is derivable from
+`strand_observations` (the agreement of read-1 orientation with the splice-motif strand over spliced
+fragments) and belongs with the strand model rather than half-built into the payload. Logged in `TODO.md`.
+
+### ⚠ `fl.py` owns its own stale pool count now, and that is not compatibility-keeping
+
+`calibration/fl.py` imported `N_FL_POOLS` from `scan_payload`, which cascaded into **four collection
+errors** — worse than test failures, because a collection error stops the whole suite and destroys failure
+attribution. The constant describes fl.py's OLD six-pool grid (3 region types × 2 compartments), which the
+accumulator no longer emits; re-keying that module onto the five structurally-pure pools is S5's R3. So the
+constant moved to the module that still indexes by it, marked stale, rather than being kept alive in a
+module that has deleted the concept.
+
+### ⚠ The suite: 266 failures + 15 errors, and every one is a consumer
+
+| root cause | count | step |
+|---|---|---|
+| `'AccumulatorPayload' object has no attribute 'fl_pool_mass'` | 243 | S5 R3 |
+| `AccumulatorPayload.__init__() got an unexpected keyword 'boundaries'` | 28 | S5 — test fixtures building the old payload |
+| `region_contained` / `r_total` / `ref_boundary_offsets` / `boundaries` | 10 | S5 R1, R2 |
+
+⭐ Nothing fails at payload *construction* any more, which was the whole of S4. The count rose from 240 to
+266 because four modules that previously died at collection now collect and fail individually — more
+failures, more information.
+
+### ⚠ PERFORMANCE REGRESSED, and both numbers moved
+
+Now measurable again (it runs through the payload), so re-recorded on the same three real cfRNA libraries:
+
+| | before (S2, shipped accumulator) | now | |
+|---|---|---|---|
+| per-fragment deposit `c` | ~357 ns (treat as 350–400; 3 points, visible scatter) | **410.0 ns** | ⚠ at or just above the top of the band |
+| fixed partition cost | 0.108 s | **0.348 s** | ⛔ **3.2×** |
+
+The per-fragment figure is close enough to the old band's edge that scatter could account for some of it;
+**the fixed cost is not** — it is `O(partition)` work that tripled, which is consistent with the payload
+now materialising eleven arrays over 1.04 M / 1.04 M / 404 k rows against six before, plus a larger
+per-worker accumulator. It is paid once per scan, so it amortises on a deep BAM and dominates a shallow
+one. ⚠ Recorded as a regression rather than reported as "roughly unchanged": owner ruling is that speed
+comes later, but the number that comes later has to be measured against an honest one now. Logged in
+`TODO.md`.
+
+### Files touched (S4)
+
+* `src/rigel/scan_payload.py` — rewritten. `ScanQC`; `N_STRAND_COLUMNS` / `N_FRAGMENT_POOLS` replace
+  `N_CHANNELS` / `N_FL_POOLS`; offsets re-derived; dtypes asserted rather than coerced; `graph_hash`.
+* `src/rigel/index.py` — `graph_hash`.
+* `src/rigel/pipeline.py` — passes `index.graph_hash` into the payload.
+* `src/rigel/calibration/fl.py` — owns its stale `N_FL_POOLS`.
+* `tests/test_accumulator_payload.py` — rewritten, 15 tests.
+* `tests/native/test_accumulator_worker_determinism.py`, `tests/native/test_implicit_splice_deposit.py`,
+  `scripts/design/implicit_splice_census.py` — monkeypatches deleted; all three read the payload.
+
+---
+
+## Index rebuild — the artifacts now carry the S1 reach (2026-07-30)
+
+S1 changed `_contiguous_reaches`, the **builder**. The indexes on disk still held the old exonic reach, and
+S5 is what makes reach load-bearing — so they were rebuilt before it, not after. ⚠ The hazard was never
+that something read a wrong number today; it is that `partition_hash` covers `nodes.feather` only, so a
+stale `edges.feather` verifies **clean** (`CARRY_FORWARD.md` §3 trap 25).
+
+⭐ **There were 7 distinct indexes, not 8.** `rigel_runs/rigel_index` and `refs/rigel_index_v7` are
+byte-identical — the same index in two places, despite the name. Both were rebuilt from the same output so
+they stay identical. (Two further `rigel_index_v5_old` directories are format 5; nothing loads a v5 index.)
+
+### The verification is what makes a rebuild safe, and it is a re-derivation
+
+`scripts/design/verify_index_rebuild.py`. A correct rebuild has an exactly predictable shape, because S1
+changed one function:
+
+* **`nodes.feather` byte-identical** — the partition did not move. ⚠ This doubles as the check that the
+  rebuild used the **right source**: a different FASTA or GTF moves the cuts, and nodes differ immediately.
+* **`edges.feather` differing in the four `reach_*` columns of CONTIGUOUS rows and nowhere else.** Junction
+  reach is deliberately unchanged — a junction edge is only used by a molecule that spliced across it, so
+  what remains either side is exonic, and `_junction_edges` stays on the exonic reach.
+
+All 7 rebuilt clean:
+
+| index | contiguous rows whose reach moved | junction rows moved |
+|---|---|---|
+| human (×2 paths) | **37.5 – 39.2 %** of 1,447,763 | **0** |
+| `ambig_dense_10mb` | 26.6 – 41.3 % | 0 |
+| the four 5 Mb scenarios | 25.5 – 34.7 % | 0 |
+| `quick_3to1_5mb` | 31.1 – 34.7 % | 0 |
+
+⭐ **And ~38 % of human contiguous edges had the wrong reach**, which is the size of what S5 would have been
+measured against had this been left.
+
+### ⭐ Both hashes are unchanged, and that is the right answer
+
+`partition_hash` **514f422a85c17163** and `graph_hash` **7856cc59463c903d**, identical before and after.
+Not a null result — it is the provenance design being correct: neither key covers `reach`, because neither
+the scan nor the accumulator reads it. **A reach change genuinely does not invalidate a cached payload.**
+⚠ The corollary is a gap, and it is logged: reach IS consumed by calibration, so anything caching a
+*calibration* output needs a key that includes it. Nothing does today.
+
+Byte-identity re-confirmed against the rebuilt index: LBX0190 (60,000 fragments, 44 refs) and the whole of
+MO_3021 (875,670, 104 refs). Suite and ruff unchanged from S4.
+
+### ⛔ An index cannot be rebuilt from its own manifest
+
+`manifest.json` records `format_version`, `rigel_version` and `mappability` — **not the FASTA, the GTF, or
+the flags**. The human source had to be inferred (by matching node and transcript counts), and
+`--collapse-duplicate-transcripts` was discovered from a build failure: the GENCODE GTF has 141
+duplicate-transcript groups totalling 283 transcripts, which are mathematically unidentifiable and must be
+collapsed. ⚠ The rebuild was only safe because `nodes.feather` byte-identity would have caught a wrong
+source. Logged in `TODO.md`: record the source paths, their hashes and the build flags in the manifest.
+
+### Files touched
+
+* `scripts/design/verify_index_rebuild.py` — new.
+* Seven index directories on disk (outside the repo): `edges.feather` replaced; everything else, including
+  `splice_blacklist.feather`, preserved.
+
+---
+
+## ⛔ Benchmarks and indexes DELETED — the standing baseline is void (2026-07-30)
+
+**Owner decision: every simulated benchmark suite and every built index was deleted**, and both are being
+rebuilt from scratch along with a new benchmark suite. This entry exists so that the numbers above are read
+correctly from here on, rather than silently reused.
+
+⚠ **This file is append-only, so nothing above has been rewritten.** Every measurement in the earlier
+entries stood when it was recorded. What changes is which of them can still be *reproduced*.
+
+### What is VOID — do not quote, compare against, or attempt to reproduce
+
+| | |
+|---|---|
+| **The standing baseline** `r0 0.079005` / `r3 0.046675` | It was the 32-condition `ambig_dense_10mb` suite, which no longer exists. Every "32/32 flat" gate above refers to it |
+| **The goldens** | Same reason. ⚠ Their unexplained 16–52 % `gdna_em_count` move at the index change was **never validated against truth**; the new suite is what should adjudicate it, and that question is still open |
+| **Cached payloads** | Built against a deleted index *and* the pre-S3 payload schema |
+| **The `calibration-benchmark` skill** | Deleted — it pointed exclusively at deleted paths, and a skill that runs a nonexistent command is worse than an absent one. ⭐ Its methodology was preserved into `docs/BENCHMARKING.md`: net fragment flow, why hard per-fragment labels are the wrong target, and the three caveats |
+
+### What SURVIVES, and why
+
+* **The specification and its gates.** `tests/native/_accumulator_reference.py` is code, and the
+  byte-identity result is a statement about **two implementations agreeing**, not about any dataset. It is
+  reproducible against any index.
+* **Every real-cfRNA measurement** — the fragment-length pools (88.0 / 88.5 / 138.8 / 211.6 / 220.7), the
+  implicit-splice census, the multimapper shares, the crossing statistics. These are observations about
+  real libraries, and ⚠ **the cfRNA BAMs are not part of this deletion**.
+* **The whole test suite.** ⭐ Grep-verified: **no test depended on the deleted data.** The four modules
+  that name a suite do so only in comments recording where a number was measured.
+* **The index builder and its invariants** (I1–I13), and `scripts/design/verify_index_rebuild.py`.
+
+### ⚠ What becomes unmeasurable until the rebuild
+
+The **S4 performance numbers** (410 ns/fragment, 0.348 s fixed) were measured against the human index and
+the real cfRNA BAMs. The BAMs survive; the index does not, so those figures cannot be re-derived until an
+index is rebuilt. They are recorded as what they were, not as a live gate.
+
+⚠ **And the census numbers that describe the human graph** — 1,043,881 nodes, 1,043,595 contiguous edges,
+404,168 junction edges, median node 151 bp, 15,687 nodes of length 1 — are properties of **the annotation
+they were built from**, not constants of the tool. A rebuild from a different GTF moves all of them. They
+should be re-derived and re-recorded rather than assumed, and `nodes.feather` byte-identity is the check
+that says whether the source is the same one.
+
+### The immediate consequence for sequencing
+
+The open question in `TODO.md` — *build the benchmark suite before S5, or run S5 blind* — is now settled by
+circumstance: **there is no suite to run S5 against.** The suite comes first.

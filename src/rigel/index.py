@@ -872,6 +872,38 @@ class TranscriptIndex:
             h.update(f"{name}:{length}|".encode())
         return h.hexdigest()
 
+    @property
+    def graph_hash(self) -> str:
+        """16-hex-char content hash of **everything the accumulator payload depends on** — nodes AND edges.
+
+        ⚠ **`partition_hash` is not enough for a payload, and that is not an oversight in either of them.**
+        That hash keys a cached *scan*, and a scan sees the cut array; this one keys a cached *tally*, whose
+        junction axis is meaningless against a different junction CSR. ⭐ The two genuinely differ: the
+        2026-07-29 flag fix rewrote every ``edges.feather`` while leaving every ``nodes.feather``
+        byte-identical, so a nodes-only key would have verified **clean** against a stale payload and fed
+        every downstream comparison the pre-fix junctions.
+
+        So it is ``partition_hash``'s inputs plus the junction CSR — the donor offsets, the acceptor cut
+        indices and the annotated strands, i.e. exactly what crosses into ``set_junctions``.
+
+        ⚠ **Computed on demand, never stored.** A hash written beside the data it describes can go stale
+        against it; this one cannot (``CARRY_FORWARD.md`` §3 trap 25).
+        """
+        import hashlib
+
+        from .calibration.splice_graph import build_junction_edge_arrays
+
+        h = hashlib.blake2b(digest_size=8)
+        h.update(self.partition_hash.encode())
+        junctions = build_junction_edge_arrays(self)
+        # ⚠ `edge_row` is deliberately absent: it is a join key back to `edges_df`, it never crosses the
+        # ABI, and hashing it would invalidate a perfectly good payload whenever an unrelated edge row moved.
+        for array in (junctions.offsets, junctions.acceptor_cut, junctions.strand):
+            contiguous = np.ascontiguousarray(array)
+            h.update(str(contiguous.dtype).encode())
+            h.update(contiguous.tobytes())
+        return h.hexdigest()
+
     # -- build (static) -------------------------------------------------------
 
     @staticmethod

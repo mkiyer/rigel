@@ -360,7 +360,12 @@ def scan_and_buffer(
     from .scan_payload import AccumulatorPayload
 
     if result.get("calibration") is not None:
-        calibration_payload = AccumulatorPayload.from_scan_result(result)
+        # ⚠ The provenance covers nodes AND edges. The payload is edge-keyed by construction — its
+        # junction axis is meaningless against a different junction CSR — and `partition_hash` covers
+        # `nodes.feather` only, deliberately.
+        calibration_payload = AccumulatorPayload.from_scan_result(
+            result, graph_hash=index.graph_hash
+        )
     else:
         calibration_payload = None
 

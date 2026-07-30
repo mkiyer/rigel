@@ -19,10 +19,18 @@ library into gDNA vs RNA, and a per-locus EM solver assigns RNA to transcripts. 
 | `docs/ACCUMULATOR_DESIGN.md` | the design being implemented |
 | `docs/LEDGER.md` | what has landed, its gates, and why each thing is the way it is |
 | `docs/CARRY_FORWARD.md` | 24 measured facts, 18 equations the code depends on, **27 traps**, 30 design ideas |
+| `docs/TODO.md` | the one deferred-work list, ranked, each item with the reason it is deferred |
+
+⛔ **2026-07-30 — every benchmark suite and every index was deleted (owner), and both are being rebuilt.**
+The standing bench baseline (`r0 0.079005 / r3 0.046675`) and the goldens are **void**: they referred to
+`ambig_dense_10mb`, which no longer exists. `LEDGER.md`'s deletion entry says exactly what that voids and
+what survives. The real cfRNA BAMs are **not** part of the deletion; any cached payload beside them is.
 
 On 2026-07-29 the project's other 274 docs (74,823 lines) and 132 agent-memory files were deleted and
-distilled into these. **Nothing else in `docs/` is a design document**, and a doc path not listed above
-does not exist — several older references to one were dangling.
+distilled into these. **Nothing else in `docs/` is a design document.** What else survives is reference
+rather than design: `BENCHMARKING.md`, `MANUAL.md`, `PUBLISHING.md`, and `docs/testing/testing_plan.md`
+(the owner's plan for the cached-substrate benchmark harness). A doc path outside that set does not exist —
+several older references to one were dangling.
 
 **`tests/native/_accumulator_reference.py` is the executable specification** for the accumulator. The C++
 is gated on byte-identity to it; where it and a document disagree, it wins.
@@ -61,11 +69,17 @@ graft new work onto the old accumulator.
 ⛔ **No version suffixes in file names.** It is `accumulator.py`, never `accumulator_v5.py`. Files are
 rewritten in place and the old path is deleted, not kept for comparison.
 
-## The index (built, validated, current)
+## The index (the builder is current; ⛔ NO INDEX EXISTS ON DISK)
 
 `INDEX_FORMAT_VERSION 8`, shipped as `nodes.feather` + `edges.feather`, built and checked by
-`calibration/splice_graph.py`. Human scale: **1,043,881 nodes** (median 151 bp), 1,043,595 contiguous
-edges, 404,168 junction edges.
+`calibration/splice_graph.py`.
+
+⛔ **2026-07-30: every built index was DELETED, along with every benchmark suite.** Both are being rebuilt
+from scratch. The builder and its invariants are unaffected — what is gone is the artifacts.
+
+⚠ **The census below describes AN ANNOTATION, not the tool.** It is what the GENCODE-with-controls GTF
+produced: **1,043,881 nodes** (median 151 bp), 1,043,595 contiguous edges, 404,168 junction edges. A
+rebuild from a different GTF moves every one of those numbers, so **re-derive before quoting**.
 
 - Nodes tile each reference, cut at **every exon endpoint** of every non-synthetic transcript, with no
   merging. 53.4 % of real transcript termini were invisible to the previous merged partition.
@@ -160,6 +174,7 @@ Input BAM must be name-sorted with the `NH` tag.
 - **No Greek letters in identifiers** (fine in maths write-ups).
 - **One thing varied per experiment**, with a falsification test written *first* and verified failing,
   and a baseline re-recorded from the current tree in the same session.
-- **Profile and gate on real cfRNA, never the 10 Mb synthetic suite** — it ranks hotspots backwards,
-  is Poisson by construction, and has zero fragment-length variance.
+- **Profile and gate on real cfRNA, never a small synthetic suite** — the deleted 10 Mb one ranked
+  hotspots backwards, was Poisson by construction, and had zero fragment-length variance. ⚠ The simulator
+  is still Poisson (`sim/wgs_engine.py:473`), so the replacement inherits that unless it is built out.
 - **The owner drives commits.** Do not commit unless asked.

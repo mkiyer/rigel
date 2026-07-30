@@ -1,131 +1,274 @@
-"""Schema invariants for :class:`rigel.scan_payload.AccumulatorPayload`."""
+"""Schema invariants for :class:`rigel.scan_payload.AccumulatorPayload`.
+
+    Spec: ``tests/native/_accumulator_reference.py``   ·   Plan: ``docs/IMPLEMENTATION_PLAN.md`` §3.5
+
+The payload is the boundary where the C++ tally becomes Python. Its field names **are** the
+specification's ``Tally`` field names, character for character, so the tests below check the schema
+against `Tally` itself rather than against a hand-written list — a list would be free to drift, and the
+whole point of sharing one vocabulary is that it cannot.
+"""
 
 from __future__ import annotations
+
+import dataclasses
 
 import numpy as np
 import pytest
 
-from rigel.scan_payload import AccumulatorPayload, N_CHANNELS
+from rigel.scan_payload import N_STRAND_COLUMNS, AccumulatorPayload, ScanQC
+
+from native._accumulator_reference import Tally
 
 
-def _toy_calibration_dict(
-    boundaries_per_ref: list[list[int]],
-) -> dict:
-    """Build a flat calibration-dict that mirrors the C++ scanner ABI.
+#: Two references: chr1 with 4 cuts (3 nodes, 2 lines) and chr2 with 3 (2 nodes, 1 line). A third
+#: reference has NO cuts, which is legal and contributes nothing — the case where per-reference offset
+#: arithmetic goes wrong if it is written as a plain subtraction.
+CUTS_PER_REF = [[0, 100, 200, 600], [0, 500, 900], []]
+MAX_LENGTH = 12
 
-    ``boundaries_per_ref[f]`` is the sorted boundary positions for ref ``f``.
-    A ref with zero positions contributes zero regions and zero boundaries.
-    A ref with ``k+1`` positions contributes ``k`` regions and ``k+1``
-    boundary objects.
-    """
-    n_refs = len(boundaries_per_ref)
 
-    flat_positions: list[int] = []
-    ref_pos_offsets = np.zeros(n_refs + 1, dtype=np.int64)
-    ref_region_offsets = np.zeros(n_refs + 1, dtype=np.int64)
-    ref_boundary_offsets = np.zeros(n_refs + 1, dtype=np.int64)
+def _calibration_dict(**overrides) -> dict:
+    """A flat calibration dict shaped exactly as ``BamScanner::build_result`` emits one."""
+    ref_cut_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
+    ref_node_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
+    ref_edge_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
+    for f, cuts in enumerate(CUTS_PER_REF):
+        ref_cut_offsets[f + 1] = ref_cut_offsets[f] + len(cuts)
+        ref_node_offsets[f + 1] = ref_node_offsets[f] + max(len(cuts) - 1, 0)
+        ref_edge_offsets[f + 1] = ref_edge_offsets[f] + max(len(cuts) - 2, 0)
 
-    for f, positions in enumerate(boundaries_per_ref):
-        flat_positions.extend(int(p) for p in positions)
-        ref_pos_offsets[f + 1] = ref_pos_offsets[f] + len(positions)
-        if len(positions) == 0:
-            ref_region_offsets[f + 1] = ref_region_offsets[f]
-            ref_boundary_offsets[f + 1] = ref_boundary_offsets[f]
-        else:
-            n_regions = len(positions) - 1
-            ref_region_offsets[f + 1] = ref_region_offsets[f] + n_regions
-            ref_boundary_offsets[f + 1] = ref_boundary_offsets[f] + len(positions)
+    n_nodes, n_edges, n_sj = (
+        int(ref_node_offsets[-1]),
+        int(ref_edge_offsets[-1]),
+        3,
+    )
+    ref_sj_offsets = np.asarray([0, 2, 3, 3], np.int64)
 
-    r_total = int(ref_region_offsets[-1])
-    b_total = int(ref_boundary_offsets[-1])
-    return {
-        "boundaries": np.asarray(flat_positions, dtype=np.int64),
-        "ref_pos_offsets": ref_pos_offsets,
-        "ref_region_offsets": ref_region_offsets,
-        "ref_boundary_offsets": ref_boundary_offsets,
-        "region_contained": np.zeros(r_total * N_CHANNELS, dtype=np.uint32),
-        "boundary_mass_left": np.zeros(b_total * N_CHANNELS, dtype=np.float32),
-        "boundary_mass_right": np.zeros(b_total * N_CHANNELS, dtype=np.float32),
-        "boundary_flux_left": np.zeros(b_total * N_CHANNELS, dtype=np.uint32),
-        "boundary_flux_right": np.zeros(b_total * N_CHANNELS, dtype=np.uint32),
-        "n_channels": N_CHANNELS,
-        "n_refs": n_refs,
+    cal = {
+        "cut_positions": np.asarray([c for cuts in CUTS_PER_REF for c in cuts], np.int64),
+        "ref_cut_offsets": ref_cut_offsets,
+        "ref_node_offsets": ref_node_offsets,
+        "ref_edge_offsets": ref_edge_offsets,
+        "ref_sj_offsets": ref_sj_offsets,
+        "node_contained_count": np.arange(n_nodes * 2, dtype=np.uint32),
+        "node_contained_density": np.arange(n_nodes * 2, dtype=np.uint64) * 7,
+        "node_spanning_count": np.arange(n_nodes * 2, dtype=np.uint32) * 2,
+        "node_spanning_density": np.arange(n_nodes * 2, dtype=np.uint64) * 3,
+        "node_start_count": np.arange(n_nodes, dtype=np.uint32),
+        "edge_unspliced_count": np.arange(n_edges * 2, dtype=np.uint32),
+        "edge_unspliced_density": np.arange(n_edges * 2, dtype=np.uint64),
+        "edge_spliced_count": np.arange(n_edges * 2, dtype=np.uint32),
+        "edge_spliced_density": np.arange(n_edges * 2, dtype=np.uint64),
+        "sj_count": np.arange(n_sj * 2, dtype=np.uint32),
+        "sj_density": np.arange(n_sj * 2, dtype=np.uint64),
+        "pool_lengths": np.arange(5 * (MAX_LENGTH + 1), dtype=np.int64),
+        "qc": {
+            "deposited": 41,
+            "dropped_too_long": 1,
+            "dropped_empty": 2,
+            "dropped_strand_undefined": 3,
+            "dropped_ambiguous_path": 4,
+            "unannotated_introns": 5,
+            "contradictory_sj_strand": 6,
+            "sj_implicit_fragments": 7,
+            "introns_absorbed": 8,
+        },
+        "n_strand_columns": N_STRAND_COLUMNS,
+        "n_fragment_pools": 5,
+        "max_length": MAX_LENGTH,
+        "n_refs": len(CUTS_PER_REF),
     }
+    cal.update(overrides)
+    return {"calibration": cal}
 
 
-class TestAccumulatorPayloadFromScanResult:
-    def test_single_ref_three_regions(self):
-        cal = _toy_calibration_dict([[0, 100, 250, 500]])
-        payload = AccumulatorPayload.from_scan_result({"calibration": cal})
+def _payload(**overrides) -> AccumulatorPayload:
+    return AccumulatorPayload.from_scan_result(_calibration_dict(**overrides))
 
-        assert payload.n_refs == 1
-        assert payload.n_channels == N_CHANNELS
-        assert payload.r_total == 3
-        assert payload.b_obj_total == 4
-        assert payload.region_contained.shape == (3, N_CHANNELS)
-        assert payload.boundary_mass_left.shape == (4, N_CHANNELS)
-        assert payload.boundary_mass_right.shape == (4, N_CHANNELS)
-        assert payload.boundary_flux_left.shape == (4, N_CHANNELS)
-        assert payload.boundary_flux_right.shape == (4, N_CHANNELS)
-        assert payload.region_contained.dtype == np.uint32
-        assert payload.boundary_mass_left.dtype == np.float32
-        assert payload.boundary_mass_right.dtype == np.float32
-        assert payload.boundary_flux_left.dtype == np.uint32
-        assert payload.boundary_flux_right.dtype == np.uint32
 
-    def test_multi_ref_mixed_zero(self):
-        # ref0: 2 regions, ref1: empty, ref2: 1 region.
-        cal = _toy_calibration_dict([[0, 50, 200], [], [0, 1000]])
-        payload = AccumulatorPayload.from_scan_result({"calibration": cal})
+# ---------------------------------------------------------------------------
+# the schema IS the specification's Tally
+# ---------------------------------------------------------------------------
 
-        assert payload.n_refs == 3
-        assert payload.r_total == 3  # 2 + 0 + 1
-        assert payload.b_obj_total == 5  # 3 + 0 + 2
-        np.testing.assert_array_equal(payload.ref_pos_offsets, [0, 3, 3, 5])
-        np.testing.assert_array_equal(payload.ref_region_offsets, [0, 2, 2, 3])
-        np.testing.assert_array_equal(payload.ref_boundary_offsets, [0, 3, 3, 5])
 
-    def test_all_refs_empty(self):
-        cal = _toy_calibration_dict([[], [], []])
-        payload = AccumulatorPayload.from_scan_result({"calibration": cal})
-        assert payload.r_total == 0
-        assert payload.b_obj_total == 0
-        assert payload.boundaries.size == 0
+def test_the_payload_carries_every_field_of_the_specifications_Tally():
+    """⛔ Read off ``Tally``, never written out here.
 
-    def test_contiguity(self):
-        cal = _toy_calibration_dict([[0, 10, 20]])
-        payload = AccumulatorPayload.from_scan_result({"calibration": cal})
-        for arr in (
-            payload.boundaries,
-            payload.ref_pos_offsets,
-            payload.ref_region_offsets,
-            payload.ref_boundary_offsets,
-            payload.region_contained,
-            payload.boundary_mass_left,
-            payload.boundary_mass_right,
-            payload.boundary_flux_left,
-            payload.boundary_flux_right,
-        ):
-            assert arr.flags["C_CONTIGUOUS"]
+    The payload, the reference and the parity gate share one vocabulary precisely so that no mapping
+    table exists to drift. A hand-written list in this test would be that table.
+    """
+    payload = _payload()
+    for field in dataclasses.fields(Tally):
+        assert hasattr(payload, field.name), (
+            f"the payload has no {field.name!r}; it is a field of the specification's Tally, so either "
+            f"the payload dropped it or the two vocabularies have diverged"
+        )
 
-    def test_immutable_dataclass(self):
-        cal = _toy_calibration_dict([[0, 10]])
-        payload = AccumulatorPayload.from_scan_result({"calibration": cal})
-        with pytest.raises((AttributeError, TypeError)):
-            payload.n_refs = 99  # frozen
 
-    def test_missing_calibration_raises(self):
-        with pytest.raises(ValueError, match="calibration.*None"):
-            AccumulatorPayload.from_scan_result({"calibration": None})
+def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
+    payload = _payload()
+    n_nodes, n_edges, n_sj = payload.n_nodes, payload.n_edges, payload.n_sj
+    assert (n_nodes, n_edges, n_sj) == (5, 3, 3)
+    for name in (
+        "node_contained_count",
+        "node_contained_density",
+        "node_spanning_count",
+        "node_spanning_density",
+    ):
+        assert getattr(payload, name).shape == (n_nodes, N_STRAND_COLUMNS), name
+    for name in (
+        "edge_unspliced_count",
+        "edge_unspliced_density",
+        "edge_spliced_count",
+        "edge_spliced_density",
+    ):
+        assert getattr(payload, name).shape == (n_edges, N_STRAND_COLUMNS), name
+    for name in ("sj_count", "sj_density"):
+        assert getattr(payload, name).shape == (n_sj, N_STRAND_COLUMNS), name
+    assert payload.node_start_count.shape == (n_nodes,)
+    assert payload.pool_lengths.shape == (5, MAX_LENGTH + 1)
 
-    def test_wrong_n_channels_raises(self):
-        cal = _toy_calibration_dict([[0, 10]])
-        cal["n_channels"] = 8
-        with pytest.raises(ValueError, match="n_channels"):
-            AccumulatorPayload.from_scan_result({"calibration": cal})
 
-    def test_pos_offsets_length_mismatch_raises(self):
-        cal = _toy_calibration_dict([[0, 10]])
-        cal["ref_pos_offsets"] = np.array([0, 1, 2], dtype=np.int64)
-        with pytest.raises(ValueError, match="ref_pos_offsets"):
-            AccumulatorPayload.from_scan_result({"calibration": cal})
+def test_the_dtypes_are_the_specifications_dtypes():
+    """⚠ Counts are uint32 and densities uint64, and the payload must not silently widen either.
+
+    A count that arrives as int64 compares equal to the specification's uint32 by value, so a value-only
+    check would pass while the schema had changed underneath it.
+    """
+    payload = _payload()
+    reference = Tally.zeros(n_nodes=5, n_edges=3, n_sj=3, max_length=MAX_LENGTH)
+    for field in dataclasses.fields(Tally):
+        if field.name == "qc":
+            continue
+        expected = getattr(reference, field.name).dtype
+        assert getattr(payload, field.name).dtype == expected, field.name
+
+
+def test_a_WRONG_dtype_is_REJECTED_rather_than_coerced():
+    """⛔ Checking the output dtype is not enough, and a perturbation proved it.
+
+    ``ascontiguousarray(x, dtype=uint32)`` will happily narrow an int64 array, so a payload that *coerces*
+    still reports the right dtype and passes a check on its own output. What that hides is a C++ side that
+    has stopped agreeing with the schema — the dtype is part of byte-identity, and a widened count compares
+    equal by value all the way down. So the wrong dtype has to arrive and be refused.
+    """
+    with pytest.raises(ValueError, match="node_contained_count.*dtype"):
+        _payload(node_contained_count=np.arange(10, dtype=np.int64))
+    with pytest.raises(ValueError, match="sj_density.*dtype"):
+        _payload(sj_density=np.arange(6, dtype=np.uint32))
+
+
+def test_a_MISSING_qc_denominator_is_REJECTED():
+    """⛔ Also found by perturbation: nothing was feeding an incomplete qc block.
+
+    Design §10.3 requires every one of these to be emitted, because every conservation statement
+    downstream has to be able to name what it excluded. A denominator that silently arrives absent is a
+    statement that cannot.
+    """
+    qc = dict(_calibration_dict()["calibration"]["qc"])
+    del qc["dropped_ambiguous_path"]
+    with pytest.raises(ValueError, match="dropped_ambiguous_path"):
+        _payload(qc=qc)
+
+
+def test_a_reference_with_no_cuts_contributes_nothing_to_any_axis():
+    """The third reference is empty. Per-reference offsets written as a plain subtraction go negative."""
+    payload = _payload()
+    assert payload.ref_node_offsets[-1] == payload.ref_node_offsets[-2]
+    assert payload.ref_edge_offsets[-1] == payload.ref_edge_offsets[-2]
+    assert payload.n_refs == 3
+
+
+# ---------------------------------------------------------------------------
+# the QC denominators
+# ---------------------------------------------------------------------------
+
+
+def test_qc_is_typed_so_a_misspelled_denominator_fails_loudly():
+    """⚠ Design §10.3 requires these to be EMITTED, and every conservation statement to name its
+    denominator. A dict would answer a typo with a KeyError at the call site; a dataclass answers at the
+    boundary, and the field names are the specification's own."""
+    payload = _payload()
+    assert isinstance(payload.qc, ScanQC)
+    assert payload.qc.deposited == 41
+    assert payload.qc.dropped_ambiguous_path == 4
+    assert payload.qc.sj_implicit_fragments == 7
+    with pytest.raises(AttributeError):
+        _ = payload.qc.dropped_ambigous_path  # noqa: B018 — the typo IS the test
+
+
+def test_the_qc_fields_are_exactly_the_specifications_qc_keys():
+    """Same argument as the Tally check: one vocabulary, and no list here to drift from it."""
+    reference_keys = set(Tally.zeros(1, 0, 0, 1).qc)
+    assert {f.name for f in dataclasses.fields(ScanQC)} == reference_keys
+
+
+def test_the_start_count_invariant_is_checkable_from_the_payload_alone():
+    """``Σ node_start_count == deposited`` — the accumulator's one non-tautological invariant.
+
+    It replaced three "conservation identities" whose right-hand sides could only be evaluated by
+    re-running the deposit, so a deliberately broken replay satisfied all three while 91 % of the
+    crossings were junk. This one is checkable against a number the deposit counted independently, and
+    the payload must carry both halves of it.
+    """
+    counts = np.zeros(5, np.uint32)
+    counts[:3] = [10, 20, 11]
+    payload = _payload(node_start_count=counts, qc=dict(_calibration_dict()["calibration"]["qc"]))
+    assert int(payload.node_start_count.sum()) == payload.qc.deposited
+
+
+# ---------------------------------------------------------------------------
+# validation: every failure names both the observed and the expected value
+# ---------------------------------------------------------------------------
+
+
+def test_a_missing_calibration_block_is_an_ERROR_not_an_empty_payload():
+    with pytest.raises(ValueError, match="set_regions"):
+        AccumulatorPayload.from_scan_result({"calibration": None})
+
+
+def test_a_wrong_column_count_is_rejected():
+    with pytest.raises(ValueError, match="n_strand_columns"):
+        _payload(n_strand_columns=4)
+
+
+def test_an_offset_array_of_the_wrong_length_is_rejected():
+    with pytest.raises(ValueError, match="ref_node_offsets"):
+        _payload(ref_node_offsets=np.zeros(2, np.int64))
+
+
+def test_an_array_that_does_not_divide_by_its_axis_is_rejected():
+    """⛔ The failure mode this catches is a payload silently reshaped to the wrong number of rows."""
+    with pytest.raises(ValueError, match="node_contained_count"):
+        _payload(node_contained_count=np.arange(7, dtype=np.uint32))
+
+
+def test_the_offsets_must_agree_with_the_cut_axis_they_describe():
+    """A reference contributing ``c`` cuts owns ``c-1`` nodes and ``c-2`` lines. Re-derived here rather
+    than trusted, because an offset array that merely has the right LENGTH can still be inconsistent."""
+    bad = np.asarray(
+        [0, 3, 5, 5], np.int64
+    )  # chr1 claims 3 nodes; 4 cuts means 3 — chr2 claims 2, ok
+    bad[1] = 99
+    with pytest.raises(ValueError, match="ref_node_offsets"):
+        _payload(ref_node_offsets=bad)
+
+
+# ---------------------------------------------------------------------------
+# ownership
+# ---------------------------------------------------------------------------
+
+
+def test_the_payload_holds_VIEWS_and_does_not_copy():
+    """⚠ A live footgun, documented because someone will be tempted to 'add a cast for safety'.
+
+    ``np.ascontiguousarray(x, dtype=D)`` is a **no-op** when the array already has dtype ``D``, so the
+    payload holds views over the capsule-owned C++ heap and the payload object is the keep-alive. Adding
+    a defensive cast would silently double peak memory on a 1.04 M-node partition.
+    """
+    cal = _calibration_dict()
+    payload = AccumulatorPayload.from_scan_result(cal)
+    source = cal["calibration"]["node_start_count"]
+    assert payload.node_start_count.base is source or payload.node_start_count is source, (
+        "the payload copied an array whose dtype already matched — that doubles peak memory"
+    )

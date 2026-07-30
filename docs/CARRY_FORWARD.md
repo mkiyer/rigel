@@ -57,7 +57,8 @@ nodes + 1,447,763 edges ≈ 2.5 M. Like-for-like the object count **doubles**.
 
 ## §1 MEASURED FACTS
 
-1. **The human splice graph (verified on disk, index format v8):** 1,043,881 nodes (median 151 bp, 15,687 of length 1), 1,043,595 contiguous
+1. ⚠ **Re-derive before quoting — these describe an ANNOTATION, not the tool, and every index was deleted 2026-07-30.**
+   **The human splice graph (as built from the GENCODE-with-controls GTF, index format v8):** 1,043,881 nodes (median 151 bp, 15,687 of length 1), 1,043,595 contiguous
    edges, 404,168 junction edges = 1,447,763 edges. Replaces 752,654 merged regions, +38.7 %. (`splice_graph.py:16-19`)
 2. **53.4 % of real human transcript ends (232,451 of 435,291) fall strictly inside an old merged region** and were invisible to it. This is
    the entire reason for the redesign.
@@ -122,8 +123,10 @@ nodes + 1,447,763 edges ≈ 2.5 M. Like-for-like the object count **doubles**.
 23. **Memory for the new accumulator is flat and small: ~85 MB** at human scale (node 24 B, contiguous edge 48 B, junction edge 24 B), no
     hash map. The old one is ~89 B per node **replicated per worker** = ~130 MB/worker at 1.5 M nodes. Fixed-point headroom is ~800×: with
     L ∈ [20,2000] each `round(2^32/L)` ≤ 2.1e8, so 1e8 fragments sum to ≤2.1e16 against a uint64 ceiling of 1.8e19.
-24. **Old-suite baseline** (only if `ambig_dense_10mb` survives): mass-weighted error 0.079005 prior-free / 0.046675 after 3 prior
-    iterations, 32/32 exactly reproducible at commit `3c293038`.
+24. ⛔ **VOID — the old-suite baseline.** It was 0.079005 prior-free / 0.046675 after 3 prior iterations on `ambig_dense_10mb`,
+    32/32 reproducible at `3c293038`. **That suite was DELETED on 2026-07-30 along with every other benchmark and every index.**
+    The number now refers to nothing: do not quote it, compare against it, or try to reproduce it. Kept only so that a reader who
+    finds it quoted in an older document knows it is dead. See `LEDGER.md`'s deletion entry.
 
 ---
 
@@ -243,11 +246,11 @@ nodes + 1,447,763 edges ≈ 2.5 M. Like-for-like the object count **doubles**.
     confident, and the error propagates. Ablation: prior-refit only 0.118 ✓ / "honest" measured variance only 0.189 ✗ (worst corner 0.52 →
     0.95). *Honesty measured against a wrong belief is not honesty.* Same family: any component trained on the solver's own output is
     self-confirming — refit iterations 1→5 gave 0.0840 → 0.1056, monotonically worse.
-15. **The 32-condition `ambig_dense_10mb` suite cannot judge what it is used to judge.** Its fine node set is row-for-row IDENTICAL to its
+15. ⛔ **DELETED 2026-07-30, and this is WHY it needed replacing. The 32-condition `ambig_dense_10mb` suite could not judge what it was used to judge.** Its fine node set is row-for-row IDENTICAL to its
     merged region set (1,698 == 1,698), so it cannot see a partition change; `frag_std = 0` (every fragment exactly 200 bp), so it cannot
     test anything fragment-length dependent including `Σ1/L`; it is Poisson by construction; it overstates contained efficiency 4.6 ×,
     understates multi-node crossing 3.8×, and over-represents the terminus+splice-site seam 12× (11.8 % vs 1.0 %). **Before running a
-    benchmark, prove it can resolve the axis you are changing.**
+    benchmark, prove it can resolve the axis you are changing.** ⭐ This list is the requirements document for the replacement.
 16. **The toy also ranks performance hotspots BACKWARDS.** At 3.4 k vs 1.5 M nodes: message relay 34 % → 81 %, per-node solves 9 % → 29 %,
     the prior's EM **28 % → 0.7 %**. A whole careful analysis was wasted on the toy's #1 hotspot. Profile on cached real cfRNA payloads.
 17. **A bit-identity gate lied twice, in opposite directions.** An arm with ZERO rows scored "32/32 IDENTICAL" because the comparison looped

@@ -16,12 +16,14 @@ accumulator and shows up here.
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 
-from rigel import scan_payload
 from rigel.config import BamScanConfig
 from rigel.pipeline import scan_and_buffer
+from rigel.scan_payload import AccumulatorPayload
 from rigel.sim import ReadSimConfig, Scenario
 
 
@@ -89,20 +91,8 @@ def oracle(tmp_path):
     scenario.cleanup()
 
 
-def _raw_tally(result, n_workers: int, monkeypatch) -> dict:
-    """Scan at ``n_workers`` and return the accumulator's raw payload dict.
-
-    ⚠ The monkeypatch is a TEST-LOCAL adapter around a boundary that is mid-move: S3 changed the payload
-    keys and S4 rewrites ``AccumulatorPayload`` to read them, so ``from_scan_result`` cannot parse this
-    scan yet. Deleting these two lines at S4 and comparing payload attributes instead is the whole of the
-    follow-up. It is deliberately here rather than in the pipeline: production code does not get a shim to
-    make a test run.
-    """
-    monkeypatch.setattr(
-        scan_payload.AccumulatorPayload,
-        "from_scan_result",
-        classmethod(lambda cls, scan_result: scan_result["calibration"]),
-    )
+def _tally(result, n_workers: int) -> AccumulatorPayload:
+    """Scan at ``n_workers`` and return the accumulator payload."""
     _, _, _, _, payload = scan_and_buffer(
         str(result.bam_path),
         result.index,
@@ -112,8 +102,8 @@ def _raw_tally(result, n_workers: int, monkeypatch) -> dict:
     return payload
 
 
-def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(oracle, monkeypatch):
-    baseline = _raw_tally(oracle, 1, monkeypatch)
+def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(oracle):
+    baseline = _tally(oracle, 1)
 
     # A tally of zeros would satisfy bit-identity trivially, so the baseline has to be shown to contain
     # something first. ⚠ A bit-identity gate in this project has already lied in exactly this way: an arm
@@ -130,33 +120,38 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(oracle, monkeypatch):
         ("sj_count", "no annotated junction was used"),
         ("pool_lengths", "no fragment entered a length pool"),
     ]:
-        assert int(np.asarray(baseline[key]).sum()) > 0, f"{key}: {why}"
+        assert int(getattr(baseline, key).sum()) > 0, f"{key}: {why}"
 
-    array_keys = [key for key, value in baseline.items() if isinstance(value, np.ndarray)]
-    assert len(array_keys) >= 12, (
-        f"only {len(array_keys)} arrays in the payload; the gate is too narrow"
+    # Read off the payload's own fields, so a bank added later joins this gate automatically.
+    array_keys = [
+        f.name
+        for f in dataclasses.fields(AccumulatorPayload)
+        if isinstance(getattr(baseline, f.name), np.ndarray)
+    ]
+    assert len(array_keys) >= 16, (
+        f"only {len(array_keys)} arrays on the payload; the gate is too narrow"
     )
 
     for n_workers in (2, 4, 8):
-        other = _raw_tally(oracle, n_workers, monkeypatch)
-        assert set(other) == set(baseline), f"{n_workers} workers: different payload keys"
+        other = _tally(oracle, n_workers)
+        assert other.graph_hash == baseline.graph_hash, f"{n_workers} workers: different index"
         for key in array_keys:
-            expected = np.asarray(baseline[key])
-            actual = np.asarray(other[key])
+            expected = np.asarray(getattr(baseline, key))
+            actual = np.asarray(getattr(other, key))
             assert actual.dtype == expected.dtype, f"{n_workers} workers: {key} dtype"
             assert np.array_equal(actual, expected), (
                 f"{n_workers} workers: {key} is not bit-identical to the single-worker run — "
                 f"{int(np.count_nonzero(actual != expected))} of {expected.size} cells differ"
             )
-        assert dict(other["qc"]) == dict(baseline["qc"]), f"{n_workers} workers: qc"
+        assert other.qc == baseline.qc, f"{n_workers} workers: qc"
 
 
-def test_the_start_count_invariant_holds_on_a_real_scan(oracle, monkeypatch):
+def test_the_start_count_invariant_holds_on_a_real_scan(oracle):
     """``sum(node_start_count) == deposited`` — the accumulator's one non-tautological invariant.
 
     The three "conservation identities" it replaced could only be evaluated by re-running the deposit, so a
     deliberately broken replay satisfied all three while 91 % of the crossings were junk. This one is
     checkable against a number the deposit counts independently.
     """
-    tally = _raw_tally(oracle, 1, monkeypatch)
-    assert int(np.asarray(tally["node_start_count"]).sum()) == int(tally["qc"]["deposited"])
+    tally = _tally(oracle, 1)
+    assert int(tally.node_start_count.sum()) == tally.qc.deposited

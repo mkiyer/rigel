@@ -339,7 +339,10 @@ def main():
         "--outdir",
         type=Path,
         default=Path("/Users/mkiyer/Downloads/rigel_runs/sim_synthetic"),
-        help="Base output directory",
+        help=(
+            "Base output directory. NOTE: the default is a developer path into a tree cleared on "
+            "2026-07-30 when every benchmark and index was deleted — pass this explicitly."
+        ),
     )
     parser.add_argument(
         "--genome-length",

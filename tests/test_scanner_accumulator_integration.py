@@ -14,7 +14,7 @@ import pytest
 from rigel.calibration.splice_graph import build_node_partition_arrays
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import scan_and_buffer
-from rigel.scan_payload import AccumulatorPayload, N_CHANNELS
+from rigel.scan_payload import AccumulatorPayload
 from rigel.sim import ReadSimConfig, Scenario
 
 SEED = 1234
@@ -66,7 +66,7 @@ class TestScannerAccumulatorIntegration:
         payload = _scan(oracle)
         assert payload is not None
         assert isinstance(payload, AccumulatorPayload)
-        assert payload.n_channels == N_CHANNELS
+        assert payload.n_strand_columns == 2
 
     def test_payload_shape_matches_index_partition(self, oracle):
         index = oracle.index
@@ -90,7 +90,7 @@ class TestScannerAccumulatorIntegration:
         # PR 4c: the scan emits the gDNA FL pools (set_regions passes region_types
         # + fl_max_size), so the payload carries a (N_FL_POOLS, fl_max_size+1) grid.
         from rigel.calibration.fl import gdna_fl_mass
-        from rigel.scan_payload import N_FL_POOLS
+        from rigel.calibration.fl import N_FL_POOLS
 
         payload = _scan(oracle)
         assert payload.fl_pool_mass is not None
