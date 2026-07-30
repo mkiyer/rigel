@@ -35,6 +35,8 @@ from native._accumulator_reference import (  # noqa: E402
     DepositOutcome,
     FragmentPool,
     Partition,
+    _normalise_introns,
+    _segments,
     density_quantum,
 )
 
@@ -142,13 +144,74 @@ def fragment_paths(bam: str, name_to_ref_id: dict[str, int], limit: int | None):
         yield path
 
 
+#: ⛔ The battery ``--self-check`` runs. Every case is an intron pathology on which the naive
+#: ``(hi − lo) − Σ intron`` disagrees with the true segment total, or on which filtering an intron
+#: disagrees with clipping it. Four of the six caught the harness itself on 2026-07-29.
+_SELF_CHECK_CUTS = [0, 100, 200, 300, 400, 500, 600, 1000]
+_SELF_CHECK_CASES = [
+    ("overlapping introns (the MO_3021 chr8 case)", 150, 500, [(210, 260), (240, 300)]),
+    ("nested introns", 150, 500, [(200, 400), (250, 300)]),
+    ("wide nested — the naive L goes NEGATIVE", 150, 500, [(150, 480), (160, 470)]),
+    ("abutting introns — malformed, merge", 150, 500, [(200, 300), (300, 400)]),
+    ("intron straddling the reference end", 900, 1000, [(950, 1200)]),
+    ("clean disjoint introns (the control)", 150, 500, [(200, 250), (300, 350)]),
+]
+
+
+def self_check() -> int:
+    """Cross-check this harness's own re-derivation against the reference, on intron pathologies.
+
+    ⚠ This exists because the harness is the ONLY gate the native accumulator has, and it was wrong. A
+    re-derivation that shares a bug with the thing it checks is worse than no re-derivation, because it
+    reports agreement. Real data cannot catch it: the discriminating fragment is ~1 in 875,670, so the
+    prefix a ``--limit`` run sees is very likely clean.
+    """
+    types = [[0] * (len(_SELF_CHECK_CUTS) - 1)]
+    partition = Partition.from_cuts([_SELF_CHECK_CUTS], node_types=types)
+    print("SELF-CHECK — this harness's re-derivation vs the reference, on intron pathologies\n")
+    print(f"  {'case':44s} {'reference':>10s} {'harness':>8s} {'absorbed':>9s}")
+    failures = 0
+    for label, lo, hi, introns in _SELF_CHECK_CASES:
+        # the reference's L, through the reference's own definition: clip, normalise, sum the segments
+        clipped_lo, clipped_hi = max(lo, _SELF_CHECK_CUTS[0]), min(hi, _SELF_CHECK_CUTS[-1])
+        merged, absorbed = _normalise_introns(introns, clipped_lo, clipped_hi)
+        reference_length = sum(b - a for a, b in _segments(clipped_lo, clipped_hi, merged))
+        _, harness_length, _ = _expected(partition, 0, lo, hi, sorted(introns), Strand.NONE)
+        ok = reference_length == harness_length
+        failures += not ok
+        print(
+            f"  {label:44s} {reference_length:>10d} {harness_length:>8d} {absorbed:>9d}"
+            f"{'' if ok else '   *** DISAGREE ***'}"
+        )
+    print(
+        f"\n  {len(_SELF_CHECK_CASES) - failures}/{len(_SELF_CHECK_CASES)} agree"
+        + ("" if failures else " — the harness may be trusted on real data")
+    )
+    return failures
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("index")
-    ap.add_argument("bam")
+    ap.add_argument("index", nargs="?")
+    ap.add_argument("bam", nargs="?")
     ap.add_argument("--limit", type=int, default=200_000, help="fragments to process (0 = all)")
     ap.add_argument("--max-fragment-length", type=int, default=1000)
+    ap.add_argument(
+        "--self-check",
+        action="store_true",
+        help="run only the intron-pathology battery against the reference; no index or BAM needed",
+    )
     args = ap.parse_args()
+
+    if args.self_check:
+        raise SystemExit(1 if self_check() else 0)
+    if not args.index or not args.bam:
+        ap.error("index and bam are required unless --self-check is given")
+
+    # ⛔ The harness checks itself BEFORE it is used to check anything else.
+    if self_check():
+        raise SystemExit("self-check failed: this harness cannot be trusted to gate the reference")
+    print()
 
     index = TranscriptIndex.load(args.index)
     partition = build_partition(index)
@@ -250,12 +313,22 @@ def main() -> None:
 
 
 def _expected(partition, ref_id, lo, hi, introns, motif):
-    """Crossings, L and annotated-junction count for one fragment, by bisect rather than searchsorted."""
+    """Crossings, L and annotated-junction count for one fragment, by bisect rather than searchsorted.
+
+    ⛔ ``length`` is the TOTAL OF THE SEGMENTS, never ``(hi − lo) − Σ intron``. The two differ the moment
+    two introns overlap, and this function used to use the naive form — reproducing, inside the harness,
+    the exact bug the reference was fixed for (B1). It agreed on real data only because a discriminating
+    fragment is roughly 1 in 875,670. ``--self-check`` now pins the six cases where it matters.
+
+    ⚠ Introns are CLIPPED to ``[lo, hi)``, not filtered by it. Filtering drops an intron that straddles
+    the reference end instead of truncating it, which is a second way to disagree with the reference — the
+    two behaviours differ by 50 bp on the ``[900,1000)`` + intron ``[950,1200)`` case.
+    """
     first, last = int(partition.ref_cut_offsets[ref_id]), int(partition.ref_cut_offsets[ref_id + 1])
     cuts = partition.cut_positions[first:last].tolist()
     lo, hi = max(lo, cuts[0]), min(hi, cuts[-1])
-    introns = [(s, e) for s, e in introns if lo <= s < e <= hi]
-    length = (hi - lo) - sum(e - s for s, e in introns)
+    introns = [(max(s, lo), min(e, hi)) for s, e in introns]
+    introns = sorted((s, e) for s, e in introns if s < e)
 
     crossings, cursor = 0, lo
     segments = []
@@ -265,6 +338,7 @@ def _expected(partition, ref_id, lo, hi, introns, motif):
         cursor = max(cursor, e)
     if hi > cursor:
         segments.append((cursor, hi))
+    length = sum(b - a for a, b in segments)
     for a, b in segments:
         i = bisect.bisect_right(cuts, a)
         while i < len(cuts) and cuts[i] < b:  # one cut at a time, no range arithmetic

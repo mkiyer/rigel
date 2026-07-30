@@ -13,15 +13,17 @@ project's deleted documentation).
 
 | | |
 |---|---|
-| HEAD | `7365e12f`. S1, S2, S2.1 and S2.2 are **committed** at `ebfd12c1`; the tree is clean |
+| HEAD | `4bb4d191`. ⛔ **S1 and S2 are UNCOMMITTED** — the owner drives commits |
 | done | **S1** (index: reach + junction CSR) · **S2** (reference accumulator, spec matrix, scan profiler, real-data shim, adversarial review, two owner rulings) |
 | next | ⭐ **S3 — the C++** (§3.1–§3.4). The doc corrections are done |
 | suite | **1298 pass**, 48 in the accumulator spec matrix; ruff + `ruff format` clean |
 | bench | r0 `0.079005` / r3 `0.046675`, 32/32 flat — unchanged since `3c293038` |
 | deposit budget | **~357 ns/fragment** end-to-end (`scripts/design/scan_profile.py`), plus ~0.108 s fixed for the 1.04 M-node partition |
 
-⚠ Line numbers in §1–§3 are from `4bb4d191` and are still valid: `ebfd12c1` touched no `src/rigel/native/`
-file. S3 is the first step that does.
+**Uncommitted:** `docs/{ACCUMULATOR_DESIGN,IMPLEMENTATION_PLAN,LEDGER}.md`, `scripts/design/` (8 scripts),
+`tests/calibration/test_junction_edge_arrays.py`, and edits to `src/rigel/calibration/splice_graph.py`,
+`tests/calibration/test_splice_graph.py`, `tests/native/_accumulator_reference.py`,
+`tests/native/test_accumulator_spec.py`. ⚠ Update this line when the owner commits.
 
 ### ✅ THE DOC CORRECTIONS — LANDED (2026-07-29)
 
@@ -48,8 +50,27 @@ catalogue (§3.3) gained rows for overlapping and abutting introns; §7.2's dang
 points at the calibration list where the capture-model question actually lives. **Nothing blocks
 implementation.**
 
-### Known-outstanding, not blocking S3
+### TODO — deferred work, none of it blocking S3
 
+Each item is deferred deliberately, with the reason. This is the project's TODO list; add to it rather than
+starting a new file.
+
+* ⛔ **`detect_chimera` is blind to two real populations, because of one gate.** It considers only blocks
+  with a **non-empty transcript set** (`constants.h:339-343`) and needs ≥ 2 mutually disjoint transcript
+  components, so it returns `CHIMERA_NONE` for both of these:
+  1. **Same-reference-orientation mates.** Paired-end sequencing reads the two ends of one double-stranded
+     molecule, so R1 and R2 must map to **opposite** reference strands; `build_fragment` encodes that by
+     flipping R2, so a normal FR pair collapses to one `(ref, strand)` group. Two groups means the mates
+     agree in reference orientation, which is aberrant — consistent with an inversion placing both ends on
+     the same reference strand. It is evidence of a rearrangement, not a molecule. Today it becomes
+     `align_strand = STRAND_AMBIGUOUS` (`POS|NEG`) and is **silently dropped** at `bam_scanner.cpp:1474-1480`.
+  2. **The multi-megabase spans.** ⭐ 95 % carry a supplementary record, and intergenic blocks have empty
+     transcript sets, so the gate never sees them. Same root cause, second symptom.
+
+  The vocabulary already exists: `CHIMERA_CIS_STRAND_SAME` / `CHIMERA_CIS_STRAND_DIFF`.
+  **Why deferred:** widening the gate reclassifies currently-accepted fragments as chimeras, which moves the
+  bench. That is a change to *what counts as a fragment*, not to how one is tallied — so it is its own arm
+  with its own before/after measurement, after S3 is byte-identical. Owner-agreed 2026-07-29.
 * **The 8 indexes on disk carry stale `reach`.** S1 changed the builder, not the artifacts. Nothing reads
   those columns so nothing is wrong today, but every index must be rebuilt before S5/S6 makes reach
   load-bearing. `partition_hash` will not notice — it covers `nodes.feather` only.
