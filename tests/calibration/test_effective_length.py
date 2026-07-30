@@ -104,7 +104,9 @@ def test_contained_is_never_negative():
 @pytest.mark.parametrize("w", [2, 5, 40, 100, 200, 350])
 @pytest.mark.parametrize("reach_lo,reach_hi", [(1, 1), (3, 500), (50, 50), (100, 150), (400, 400)])
 def test_crossing_is_the_enumerated_placement_count(w, reach_lo, reach_hi):
-    got = crossing_eff_length(_spike(w), np.array([float(reach_lo)]), np.array([float(reach_hi)]))[0]
+    got = crossing_eff_length(_spike(w), np.array([float(reach_lo)]), np.array([float(reach_hi)]))[
+        0
+    ]
     assert got == pytest.approx(float(_enumerate_crossing(w, reach_lo, reach_hi)))
 
 

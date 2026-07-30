@@ -145,3 +145,111 @@ def make_strand_models(p_r1_sense: float, n_observations: int, n_junctions: int 
         n_antisense=depth - n_sense,
     )
     return StrandModels(exonic_spliced=StrandModel.from_sj_table(table))
+
+
+# ---------------------------------------------------------------------------
+# The S5.e chain fixture — hand-built numbers on the node / edge / junction axes.
+# ---------------------------------------------------------------------------
+
+
+def delta_pmf(length: int, size: int | None = None) -> np.ndarray:
+    """A fragment-length pmf concentrated at one length — the simplest oracle for a divisor."""
+    p = np.zeros((size or length) + 1, dtype=np.float64)
+    p[length] = 1.0
+    return p
+
+
+def make_chain_parts(
+    signatures,
+    *,
+    node_size_bp=1000.0,
+    node_pos=0.0,
+    node_neg=0.0,
+    edge_pos=0.0,
+    edge_neg=0.0,
+    edge_spliced=0.0,
+    junctions=None,
+    gdna_fl=None,
+    rna_fl=None,
+    ref_names=None,
+):
+    """A chain + substrate + geometry + statics over ``signatures``, on the S5.e axes.
+
+    ⭐ **The axes are off by one per reference and that is the point of the helper**: a reference with
+    ``k`` nodes owns ``k`` node rows and ``k − 1`` contiguous-edge rows, with **no terminal slots**. Every
+    per-object argument is broadcast, so a test states only the numbers it cares about.
+
+    ``junctions`` is a list of ``(src_node, dst_node, strand, reach_lo, reach_hi, count)``; each becomes a
+    row on the junction axis and is placed on the lines it leaves and enters.
+
+    Returns ``SimpleNamespace(chain, substrate, region_arrays, geometry, statics)``.
+    """
+    from types import SimpleNamespace
+
+    from rigel.calibration.node_chain import build_node_chain
+    from rigel.calibration.node_geometry import build_node_geometry, build_node_statics
+    from rigel.calibration.signature import transcript_strand_class
+    from rigel.calibration.splice_graph import JunctionGeometry
+
+    sig = np.asarray(signatures, dtype=np.uint8)
+    n_nodes = sig.shape[0]
+    ref_names = list(ref_names or ["chr1"] * n_nodes)
+    ref_id = np.array(
+        [{n: i for i, n in enumerate(dict.fromkeys(ref_names))}[r] for r in ref_names]
+    )
+    rno = np.zeros(int(ref_id.max()) + 2, dtype=np.int64)
+    np.cumsum(np.bincount(ref_id, minlength=rno.shape[0] - 1), out=rno[1:])
+    reo = np.zeros_like(rno)
+    np.cumsum(np.maximum(np.diff(rno) - 1, 0), out=reo[1:])
+    n_edges = int(reo[-1])
+
+    def pair(pos, neg, n):
+        return np.stack(
+            [
+                np.broadcast_to(np.asarray(pos, float), (n,)),
+                np.broadcast_to(np.asarray(neg, float), (n,)),
+            ],
+            axis=1,
+        ).copy()
+
+    j = list(junctions or [])
+    junction_geometry = JunctionGeometry(
+        src_node=np.array([x[0] for x in j], dtype=np.int64),
+        dst_node=np.array([x[1] for x in j], dtype=np.int64),
+        strand=np.array([x[2] for x in j], dtype=np.int8),
+        reach_lo=np.array([float(x[3]) for x in j]),
+        reach_hi=np.array([float(x[4]) for x in j]),
+    )
+    substrate = SimpleNamespace(
+        node_contained=SimpleNamespace(count=pair(node_pos, node_neg, n_nodes)),
+        node_spanning=SimpleNamespace(count=np.zeros((n_nodes, 2))),
+        edge_unspliced=SimpleNamespace(count=pair(edge_pos, edge_neg, n_edges)),
+        edge_spliced=SimpleNamespace(count=pair(edge_spliced, 0.0, n_edges)),
+        junction=SimpleNamespace(
+            count=np.array([[float(x[5]), 0.0] for x in j]).reshape(len(j), 2)
+        ),
+    )
+    region_arrays = SimpleNamespace(
+        signature=sig,
+        strand_class=transcript_strand_class(sig.astype(np.int64)),
+        region_size_bp=np.broadcast_to(np.asarray(node_size_bp, float), (n_nodes,)).copy(),
+        ref_id=ref_id,
+        ref_offsets=rno,
+        n_regions=n_nodes,
+    )
+    chain = build_node_chain(rno, reo)
+    geometry = build_node_geometry(
+        chain,
+        substrate,
+        region_arrays,
+        junction_geometry,
+        delta_pmf(200, 400) if gdna_fl is None else gdna_fl,
+        delta_pmf(100, 400) if rna_fl is None else rna_fl,
+    )
+    return SimpleNamespace(
+        chain=chain,
+        substrate=substrate,
+        region_arrays=region_arrays,
+        geometry=geometry,
+        statics=build_node_statics(chain, region_arrays),
+    )

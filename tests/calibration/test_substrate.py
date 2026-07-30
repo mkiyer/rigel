@@ -56,7 +56,9 @@ def test_the_columns_are_GENOME_STRAND_and_nothing_is_re_oriented(substrate):
     sub, payload, _ = substrate
     np.testing.assert_array_equal(sub.node_contained.count, payload.node_contained_count)
     for name in dir(sub):
-        assert "sense" not in name, f"{name} names a transcript-relative concept the schema does not store"
+        assert "sense" not in name, (
+            f"{name} names a transcript-relative concept the schema does not store"
+        )
 
 
 def test_no_population_is_a_VIEW_OF_ANOTHER(substrate):

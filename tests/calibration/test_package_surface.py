@@ -8,7 +8,7 @@ EXPECTED_NAMES = [
     "CalibrationConfig",
     "CalibrationResult",
     "CalibrationSubstrate",
-    "SubstrateView",
+    "PopulationView",
     "StrandBalance",
     "CalibrationSubstrateError",
     "calibrate",

@@ -15,7 +15,7 @@ library into gDNA vs RNA, and a per-locus EM solver assigns RNA to transcripts. 
 
 | doc | what it is |
 |---|---|
-| **`docs/S5_DESIGN_LOG.md`** | ⭐ **START HERE for S5** — §0 status, §1 the accumulator changes, §2 the live plan. **It supersedes `IMPLEMENTATION_PLAN.md` §4/§5** |
+| **`docs/S5_DESIGN_LOG.md`** | ⭐ **START HERE for S5** — §0 status, §1 the accumulator changes, §2 the live plan **and THE ROAD TO A PRODUCTION CALIBRATION** (the three phases from here to shippable, each with its gate). **It supersedes `IMPLEMENTATION_PLAN.md` §4/§5** |
 | `docs/IMPLEMENTATION_PLAN.md` §0 | live state for everything else |
 | `docs/NODE_DENSITY_DERIVATION.md` | why the deposit weight is what it is, and what each stored channel buys |
 | `docs/TODO.md` | the one deferred-work list, ranked, each item with the reason it is deferred |
@@ -28,11 +28,14 @@ Reference rather than design: `BENCHMARKING.md` (how to evaluate — net fragmen
 `PUBLISHING.md`, `docs/testing/testing_plan.md` (the owner's plan for the cached-substrate harness).
 
 ⛔ **`calibrate()` DOES NOT RUN**, and it still gates the benchmark suite producing any number, the scan
-cache's toy seed, and every future A/B. **S5.0/a/b/c/d have landed; S5.e is next**, then S5.f.
+cache's toy seed, and every future A/B. **S5.0/a/b/c/d/e have landed; S5.f is next** — and S5.f is the
+pivot: **nothing downstream is measurable until it runs**, so its numbers become the FIRST BASELINE and
+every deferred derivation is deliberately sequenced after it.
 
-⚠ **The 291 failures are not one thing.** ~266 are the original consumer breakage; ~25 are tests of the
-per-face geometry model that S5.c/S5.d deleted, and **those fail with a message naming S5.e or S5.f**. A
-failure that says which step owns it is the normal state here.
+⚠ **The 266 failures are not one thing**, and that count is exactly what the tree carried before S5.c.
+~200 are end-to-end scenario and golden tests that will move **numerically** at S5.f/S6, not merely
+start running, and every calibration failure is now S5.f's. A failure that says which step owns it is
+the normal state here.
 
 ⛔ **There is no benchmark baseline.** `r0 0.079005 / r3 0.046675` was the deleted `ambig_dense_10mb`
 suite — do not quote it, compare against it, or try to reproduce it. The replacement suite exists and is
@@ -115,7 +118,7 @@ different GTF moves every one of those numbers, so **re-derive** — `scripts/de
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-pytest tests/ -q                               # 1384 pass / 291 fail / 15 error — the failures ARE S5
+pytest tests/ -q                               # 1440 pass / 256 fail / 15 error — the failures ARE S5.f
 pytest tests/ --update-golden                  # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```

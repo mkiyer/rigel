@@ -829,7 +829,7 @@ def run_pipeline(
     # gDNA/RNA and derive ρ_0 + per-node exposure. See
     from .calibration import calibrate
     from .calibration.region_arrays import RegionArrays
-    from .calibration.splice_graph import build_boundary_flags_array
+    from .calibration.splice_graph import build_edge_flags_array
 
     _warn_if_calibration_strand_unidentifiable(strand_models)
     strand_ci_eps = strand_models.strand_specificity_ci_epsilon(confidence=0.99)
@@ -843,7 +843,7 @@ def run_pipeline(
     # ⚠ No alignment check here: CalibrationSubstrate.from_payload runs the identical one inside
     # calibrate(), microseconds later, and two copies of an invariant is one too many.
     region_arrays = RegionArrays.from_index(index)
-    boundary_flags = build_boundary_flags_array(index)
+    edge_flags = build_edge_flags_array(index)
 
     # The two COMPONENT fragment-length models the calibrator's effective lengths need, each fitted
     # from a pool that is PURE BY CONSTRUCTION (docs/ACCUMULATOR_DESIGN.md §8): gDNA from fragments
@@ -884,7 +884,7 @@ def run_pipeline(
         rna_fl_pmf=fl_models.rna_pmf,
         config=config.calibration,
         diagnostics_out=_calib_diag,
-        boundary_flags=boundary_flags,
+        edge_flags=edge_flags,
     )
     calibration_diagnostics = _calib_diag.get("calibration")
 

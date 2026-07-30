@@ -119,7 +119,9 @@ def test_every_pool_reaches_EXACTLY_ONE_accessor():
             float(rna_fl_mass(p).sum()),
             float(splash_fl_mass(p).sum()),
         ]
-        assert sorted(reached) == [0.0, 0.0, 5.0], f"pool {pool} reaches {reached}, expected exactly one"
+        assert sorted(reached) == [0.0, 0.0, 5.0], (
+            f"pool {pool} reaches {reached}, expected exactly one"
+        )
 
 
 def test_build_fl_large_pool_is_empirical():

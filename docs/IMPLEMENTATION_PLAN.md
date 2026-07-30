@@ -18,19 +18,24 @@ the rewiring should consume, the design had no answer, so S5 was stopped on 2026
 derivation first. §4's R1–R4 ranking and §5's S5 row are **superseded**; the live plan is
 `S5_DESIGN_LOG.md` §2, and the derivation it rests on is `NODE_DENSITY_DERIVATION.md`.
 
-### Where things stand (2026-07-30, end of the S5.a–S5.d session)
+⭐ **`S5_DESIGN_LOG.md` §2 now also carries THE ROAD TO A PRODUCTION CALIBRATION** — the three phases
+from here to a shippable calibration stage, in dependency order, each step with its gate and the
+measured number it buys. Read it before planning any work in this area.
+
+### Where things stand (2026-07-30, end of the S5.e session)
 
 | | |
 |---|---|
-| `main` | S1–S4 + the index/suite session + **S5.0, S5.a, S5.b, S5.c, S5.d** |
-| suite | **1384 passed / 291 failed / 1 xfailed / 15 errors** |
-| ⭐ **next** | **S5.e** — `build_node_geometry` rewritten, `bp_solver`'s per-face consumers collapsed |
-| ⛔ needs a ruling | **A7**: does reach enter the divisors, and how? `S5_DESIGN_LOG.md` §1 A7 |
+| `main` | S1–S4 + the index/suite session + **S5.0, S5.a, S5.b, S5.c, S5.d, S5.e** |
+| suite | **1430 passed / 266 failed / 1 xfailed / 15 errors** |
+| ⭐ **next** | **S5.f** — `calibrate()` end to end. ⛔ **It is the pivot: nothing downstream is measurable until it runs**, so its numbers become the FIRST BASELINE |
+| ✅ ruled | **A7** — junction edges take their real exonic reach; contiguous edges stay `UNBOUNDED_REACH` and A7 proper lands as S5.g, after the baseline exists |
 
-⚠ **The 291 failures are not one thing.** ~266 are the original S5 consumer breakage; ~25 are tests of
-the per-face geometry model that S5.c and S5.d deleted. **The latter fail with a message naming S5.e or
-S5.f**, so a failure that says which step owns it is the normal state here, not a regression. S5.e clears
-the geometry ones; S5.f clears the rest.
+⚠ **The 266 failures are not one thing**, and the count is exactly what the tree carried before S5.c.
+~200 are end-to-end scenario and golden tests that will move **numerically** at S5.f/S6 rather than
+merely start running; 10 are sweep-behaviour tests in `test_bp_solver.py` whose fixtures are still
+per-face and fail through a shim naming their step. A failure that says which step owns it is the normal
+state here, not a regression.
 
 ### What landed, and where it is written down
 

@@ -479,7 +479,9 @@ def test_the_crossing_DENSITY_recovers_the_true_density_with_NO_length_model(nod
         acc.deposit(0, int(s), int(e))
     interior = slice(5, acc.n_edges - 5)
     estimate = (
-        acc.tally.edge_unspliced_inv_length_sum[interior, :].sum() / INV_LENGTH_SCALE / (acc.n_edges - 10)
+        acc.tally.edge_unspliced_inv_length_sum[interior, :].sum()
+        / INV_LENGTH_SCALE
+        / (acc.n_edges - 10)
     )
     assert 0.98 <= estimate / rho <= 1.02, f"{estimate / rho:.4f} at {node_bp} bp nodes"
 
@@ -563,7 +565,9 @@ def test_L_is_the_total_of_the_path_segments_even_when_the_intron_list_is_malfor
     assert t.qc["introns_absorbed"] == expected_absorbed
     crossings = int(t.edge_unspliced_count.sum())
     assert crossings == expected_crossings
-    assert int(t.edge_unspliced_inv_length_sum.sum()) == crossings * inv_length_quantum(expected_length - 1)
+    assert int(t.edge_unspliced_inv_length_sum.sum()) == crossings * inv_length_quantum(
+        expected_length - 1
+    )
 
 
 def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_begins():

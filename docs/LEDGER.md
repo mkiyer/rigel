@@ -33,6 +33,7 @@ makes attribution meaningful survives. Everything from `I1` on is below in full.
 | **S5.b** | `fl.py` re-keyed to the five pure pools; the scan cache unblocked | below |
 | **S5.c** | `effective_length.py` reduced to the ONE placements formula | below |
 | **S5.d** | substrate collapsed to ONE type; the chain re-keyed to nodes/edges | below |
+| **S5.e** | ⭐ A7 ruled; the 18 per-face arrays became 5; the faces dissolve | below |
 | **B2** | the pilot suite, and B0's verdict on it | below |
 | **B3** | the scan cache — scan once, calibrate many times | below |
 
@@ -1013,3 +1014,175 @@ been exactly the two-names-one-concept defect the naming rules exist to prevent.
 
 `test_density_model.py` binds a `SubstrateView` shim so it still imports; `node_gdna_density` is an S5.e
 consumer and its tests now fail naming that step. Deleted by S5.e.
+
+
+## S5.e — the faces dissolve (2026-07-30)
+
+**A7 was ruled first, before any code**, so it could not be retrofitted to whatever the implementation
+turned out to be (`S5_DESIGN_LOG.md` §1 A7, §4). ⭐ The decision reduces to **one call site**, and that
+is what made it rulable: gDNA at any edge is `taper_g = 1` by physics and the two contained frames take
+no reach argument, so the only question was the RNA component at a *contiguous* edge.
+
+| edge kind | component | reach | why |
+|---|---|---|---|
+| contiguous | gDNA | `UNBOUNDED_REACH` | its template is the chromosome — physics, not a ruling |
+| **contiguous** | **RNA** | ⭐ **`UNBOUNDED_REACH`** | keeps S5.e varying ONE thing; A7 proper is **S5.g**, the only ordering where it gets an end-to-end A/B against S5.f's first baseline |
+| junction | RNA | ⭐ **the real exonic per-strand reach** | a BRAND-NEW population — the predecessor had no junction divisor at all — so wiring it regresses nothing, and it keeps the one code path exercised rather than a dead branch |
+
+⚠ **The first baseline will therefore carry a known bias and S5.f's entry must say so**:
+`CARRY_FORWARD.md` §1 fact 6 — ignoring the taper over-calls gDNA by **11.0 %** genome-wide and by
+**+0.36** in the last node before a polyA site.
+
+### 18 per-face arrays became 5
+
+`NodeGeometry` held a `_left`/`_right` pair for the unspliced mass, its integer flux, three effective
+lengths and four spliced channels. The pairs existed because a boundary's two sides lay in
+differently-sized flanks and so had **different divisors**. A contiguous edge is a 0-bp line. What went
+with them:
+
+* **`mass` versus `n`.** The old accumulator split one fragment's mass across objects, so the density
+  numerator was fractional and a separate integer flux was carried for the Poisson variance. The new one
+  deposits `+1` on every object touched — one `count`, and `Var(log ρ) = 1/n` is honest against it.
+  ⭐ That alone dissolves 12 of the 18.
+* **The junction-strand routing and the exon-bit flank gating**, plus the `_continues`/`_eff_spl_face`
+  far-boundary machinery. All of it existed to *guess* which flank a spliced deposit belonged to, because
+  the old accumulator attributed a splice to the node's edge rather than the junction's own coordinate
+  (trap 6). The v8 index states `(src, dst, strand)`, so the guess is replaced by the chain's own
+  adjacency: a junction's donor is `chain.right[src]`, its acceptor `chain.left[dst]`.
+* **`BoundarySubstrate`'s `left_region`/`right_region` with their `-1` holes**, and the `max(left, right)`
+  that de-duplicated the straddle. An edge always has a node on both sides (S5.d), so the branch has no
+  cases and the `max` has nothing to de-duplicate.
+* **`node_global_geometry`'s two-face sum**, and with it the long note about a `½` here silently
+  cancelling a `½` missing from the per-face length — which is why that frame read the correct ρ while
+  every per-face MESSAGE read ρ/2.
+* In `bp_solver`: the `df`/`sf` face parameters through `_relay`, `_transport`, `_peel_share`,
+  `_peel_share_scalar`, `_seam_pair` and `_flank_dom`; the `accept_l`/`accept_r` acceptor test; and
+  `_rho_faces`' (node, left face, right face) triple, now one ρ_tot per slot.
+  ⚠ **The scalar/vector twins are NOT merged** — `bp_solver` documents a measured **15.7×/op** reason.
+
+### ⭐ The naming, after the owner's review
+
+The first cut called them `count` / `mature_count`, and the owner asked whether `unspliced_count` /
+`spliced_count` would be clearer. It would — and the question exposed a collision: `NodeStatics` already
+held a `spliced_count` (`edge_spliced`), so renaming the junction flux to `spliced_count` would have put
+**two fields of that name on two objects consumed side by side**, holding quantities that differ by two
+orders of magnitude at the same line. That is trap 27 exactly.
+
+Resolved by taking the accumulator's own three bank names, so one vocabulary runs from the executable
+specification to the solver. At one line, of the molecules that touched it:
+
+| field | population | strand axis | what it is |
+|---|---|---|---|
+| `unspliced_count` | `edge_unspliced` / `node_contained` | GENOME | crossed CONTIGUOUSLY, spliced nowhere — **the mixture being deconvolved** |
+| `spliced_count` | `edge_spliced` | GENOME | crossed CONTIGUOUSLY, spliced elsewhere — certified RNA, the **floor** on this line's own population |
+| `junction_count` | `sj_count`, gathered onto donor + acceptor | **TRANSCRIPT** | never crossed it, it **jumped** — the flux the graft hands an exon and the peel measures against |
+
+⛔ **"mature" names nothing now.** It fits both spliced populations and so distinguishes neither.
+Worked example, at a donor seam with 40 nascent read-throughs, 2 spliced-elsewhere crossings and 251
+junction fragments: the peel needs 251 (using 2 puts the continuing share at 0.95 against a true 0.14),
+while the strand floor needs 2 (using 251 asserts 251 certified-RNA fragments inside a population of 42).
+Pinned by `test_spliced_count_and_junction_count_are_DIFFERENT_POPULATIONS` and
+`test_the_word_MATURE_names_no_field`.
+
+⭐ **`NodeStatics` is now structure only** — all three populations live on `NodeGeometry`, where their
+difference is visible, and `build_node_statics` no longer takes a substrate at all. The two strand axes
+stay named apart: `unspliced_count`/`spliced_count` are GENOME strand (where the read aligned, the
+accumulator's one convention); `junction_count`/`eff_junction` are TRANSCRIPT strand, joined from each
+junction's annotated strand — which *is* "sense derived, never stored".
+
+⚠ **The rename is behaviour-neutral and was proven so**: the suite returned byte-identical counts
+(266 / 1428 / 1 / 15) across it, and all 15 perturbations were re-run and still caught.
+
+⭐ **A real defect fixed, not merely ported: the divisor is no longer floored.** The predecessor wrapped
+every effective length in `max(·, _EPS)`. `effective_length`'s own contract and trap 23 say an object
+with no opportunity must emit *nothing*; the floor is what produced densities of ~1e9 on the **12.4 %**
+of fine-partition nodes where the contained effective length collapses to exactly 0.
+
+### ⛔ THE GATE HAD A HOLE, AND ONLY PERTURBATION FOUND IT
+
+23 tests in `tests/calibration/test_node_geometry.py`, written first and **verified failing**, gated on
+**brute-force enumeration of integer start positions** in an explicit Python loop sharing no helper with
+the implementation. Then the implementation was broken fifteen ways. **Fourteen were caught; P15 was
+not:**
+
+| | perturbation | caught |
+|---|---|---|
+| P1–P2 | node/edge populations swapped · genome-strand columns transposed | ✅ |
+| P3 | **A7 accidentally ON** — the contiguous RNA divisor tapers | ✅ (the ruling is PINNED, so turning it on in S5.g must break this test) |
+| P4 | the junction divisor ignores its reach | ✅ |
+| P5 | mature flux keyed by the ALIGN column, not the junction's own strand | ✅ |
+| P6 · P11 | deposits only on the donor line · acceptor taken from `src` | ✅ |
+| P7 | the pooled junction divisor is a MEAN of ratios, not a ratio of sums | ✅ |
+| P8 · P12 · P13 | the divisor floored to `_EPS` · zero divisor yields `inf` · `eff_gdna` floored | ✅ |
+| P9 | the contained divisor collapses the pmf to its mean | ✅ |
+| P10 · P14 | mature written onto NODE slots · junction flux takes one align column | ✅ |
+| **P15** | **`slot_of_node = 2 * arange` — the LAYOUT ASSUMPTION instead of reading the chain** | ⛔ **NO — all 22 passed** |
+
+**Why it hid.** Slot ids run `N E N E N` per reference, so *within the first reference* node `i` really
+does sit at slot `2i`. Every fixture had one reference, and even the two-reference fixture put its
+junction on chr1. chr2's node 3 sits at slot **5**, not 6 — so the assumption misplaces every junction
+on every reference after the first, which at human scale is 285 of 286. Closed by
+`test_a_junction_on_a_LATER_REFERENCE_lands_on_that_references_own_line`; all fifteen now fail the gate.
+
+### Gates
+
+* **`tests/calibration/test_node_geometry.py` — 23 new tests**, 15 perturbations caught.
+* `tests/calibration/test_edge_flags.py` — 5 tests, replacing `test_boundary_flags.py`. The `k+1`
+  boundary axis became a plain per-contiguous-edge array (`S5_DESIGN_LOG.md` §4's ruling), so the
+  "two spaces off by one per reference in opposite directions" problem is gone rather than handled.
+* The whole solver **runs end to end** on the collapsed geometry — `init_beliefs` → `node_sweep` →
+  `chain_node_deconv`/`chain_edge_deconv`, including every `_capture` diagnostic branch.
+* ⭐ **The factor-1 bedrock invariant holds on the new geometry**: lay down a uniform ρ = 0.5 field and
+  the strand-locked intergenic anchors read it back to 1e-9, and the AMBIG-recovery guard (the live
+  9.0 %-low bound) still passes. That is the strongest evidence the port is faithful rather than merely
+  green.
+* Full suite **1440 passed / 256 failed / 1 xfailed / 15 errors** against a baseline of
+  **1384 / 291 / 1 / 15** re-recorded from this tree in this session: **−35 failures, +56 passes**.
+  ⭐ **Every remaining calibration failure is now S5.f's** — `test_calibrate` (9),
+  `test_gdna_strand_integration` (4), `test_spliced_boundary_onesidedness` (3),
+  `test_region_index_alignment` (3), `test_accumulator_span_unbiased` (3),
+  `test_substrate_conservation` (2), `test_oracle` (2), `test_ambig_scenario` (2). Nothing in the tree
+  still fails on the per-face model.
+* `ruff check src/ tests/ scripts/` and `ruff format --check src/ tests/` clean.
+
+### ✅ `test_bp_solver.py` fully ported — 19 failures → 0, and the port found two hidden confounds
+
+Three tests were of the per-face GEOMETRY itself and were **deleted**, not ported: their model does not
+exist, so they could only be rewritten from scratch, and `test_node_geometry.py` is that rewrite (the
+call S5.c made on `test_message_frames.py`). The other 16 are sweep-behaviour tests — the mature
+graft/peel, the τ-gag fix, the intron relay, sweep determinism — and all 16 now run on
+`_synthetic.make_chain_parts`. The `_pending_s5e` shim is deleted.
+
+⭐ **Porting the fixtures exposed two artefacts the old shape had been hiding, and both are now gone
+rather than commented around:**
+
+* **`_mature_exon_chain` had to grow from 3 nodes to 5.** It placed mature flux on two intron↔exon
+  *boundaries* by hand, which only worked because the old accumulator attributed a splice to the node's
+  edge. A junction now states its own `(src, dst)`, so it must HAVE endpoints — the chain became
+  `exon | intron | EXON | intron | exon` and the flux is *derived* from the graph. ⭐ The fixture is
+  also more honest for it: `edge_spliced` is 0 on every seam, which is a measured fact rather than a
+  convenience (mature RNA never crosses an exon↔intron seam — 0 of 1,146, `CARRY_FORWARD.md` §1
+  fact 13).
+* **`test_gdna_sweep_zero_gdna_pin_and_monotone` carried a ten-line comment explaining that its introns
+  read ~0.44 instead of ~0.22 because the chain's two TERMINAL boundary slots were G1-locked and emitted
+  structural all-gDNA into their neighbours** — "an ARTEFACT OF THIS ARTIFICIAL CHAIN". Those slots do
+  not exist any more: `k` nodes own `k−1` lines. The invariant the test protects is unchanged and the
+  artefact is gone with the shape that caused it.
+
+### Files touched
+
+* `src/rigel/calibration/node_geometry.py` — `NodeGeometry` (18 arrays → 5), `build_node_geometry`,
+  `node_global_geometry`, `node_total_density`, `build_node_statics` (the region/boundary twin pair
+  collapsed into one slot-keyed pass), `init_beliefs`, `_rate`, `_check_edge_flags`.
+* `src/rigel/calibration/bp_solver.py` — the six per-face consumers; `chain_region_deconv` /
+  `chain_boundary_side_deconv` → `chain_node_deconv` / `chain_edge_deconv` (per-EDGE, per the §4 ruling
+  that killed the split-then-re-pool trap-2 pattern); `chain.order` → `arange`.
+* `src/rigel/calibration/splice_graph.py` — `build_boundary_flags_array` → `build_edge_flags_array`;
+  `JunctionGeometry` + `build_junction_geometry_arrays`, joining through `build_junction_edge_arrays`'s
+  slot order rather than recomputing it (one implementation of a byte-identity contract).
+* `src/rigel/calibration/node_init.py` · `density_model.py` (two arguments dissolved: `region_eff_len`
+  and `fl_mean` are both the geometry's own `eff_gdna` now) · `calibrate.py` (names only; S5.f owns it) ·
+  `src/rigel/pipeline.py` · `src/rigel/scan_cache.py`.
+* `tests/calibration/_synthetic.py` — `make_chain_parts`, the shared node/edge/junction fixture.
+* `tests/calibration/test_node_geometry.py`, `test_edge_flags.py` — new.
+  `test_boundary_flags.py` deleted.

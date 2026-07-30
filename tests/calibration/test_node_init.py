@@ -8,12 +8,12 @@ the unified pass-0 relay.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 
 import numpy as np
 
-from rigel.calibration.node_chain import NODE, build_node_chain
-from rigel.calibration.node_geometry import build_node_geometry, build_node_statics, init_beliefs
+from rigel.calibration.node_chain import NODE
+from rigel.calibration.node_geometry import init_beliefs
+from _synthetic import make_chain_parts
 from rigel.calibration.node_init import (
     build_node_init,
     own_composition_logvar,
@@ -29,29 +29,11 @@ from rigel.calibration.simplex_logodds import _logodds_grid
 from rigel.calibration.signature import (
     BIT_EXON_POS,
     BIT_EXON_NEG,
-    TS_AMBIG,
     TS_NONE,
-    TS_POS,
 )
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────────────────────────────────
-
-
-def _cview(n_pos, n_neg, spl_sense=None):
-    n_pos = np.asarray(n_pos, float)
-    n_neg = np.asarray(n_neg, float)
-    n = n_pos.shape[0]
-    spl = np.zeros(n) if spl_sense is None else np.asarray(spl_sense, float)
-    return SimpleNamespace(
-        n_unspliced_pos=n_pos,
-        n_unspliced_neg=n_neg,
-        n_spliced_sense=spl,
-        n_spliced_antisense=np.zeros(n),
-        mass_unspliced=n_pos + n_neg,
-        mass_spliced=spl,
-        n_unspliced=n_pos + n_neg,
-    )
 
 
 def _delta_pmf(length):
@@ -61,44 +43,32 @@ def _delta_pmf(length):
 
 
 def _scenario(kappa=0.9):
-    """One ref, 3 regions: intergenic (pure gDNA) | exon+ (single-strand) | AMBIG. Region node ids 1, 3, 5."""
-    rro = np.array([0, 3])
-    rbo = np.array([0, 4])
-    chain = build_node_chain(rro, rbo)
-    sig = np.array([TS_NONE, BIT_EXON_POS, BIT_EXON_POS | BIT_EXON_NEG], dtype=np.int64)
-    sc = np.array([TS_NONE, TS_POS, TS_AMBIG], dtype=np.int8)
-    region_arrays = SimpleNamespace(
-        strand_class=sc,
-        signature=sig,
-        region_size_bp=np.array([1500.0, 900.0, 1200.0]),
-        n_regions=3,
+    """One ref, 3 nodes: intergenic (pure gDNA) | exon+ (single-strand) | AMBIG.
+
+    ⭐ The chain is ``N E N E N`` — 5 slots, the nodes at 0/2/4 — and the two edges carry no counts, so
+    this exercises the node axis alone. The predecessor built ``B R B R B R B`` with four boundary slots
+    including two data-free terminals; those do not exist.
+    """
+    parts = make_chain_parts(
+        [TS_NONE, BIT_EXON_POS, BIT_EXON_POS | BIT_EXON_NEG],
+        node_size_bp=[1500.0, 900.0, 1200.0],
+        # intergenic: symmetric gDNA; exon+: sense-tilted RNA (few antisense); AMBIG: symmetric.
+        node_pos=[120.0, 200.0, 90.0],
+        node_neg=[110.0, 9.0, 92.0],
+        gdna_fl=_delta_pmf(200),
+        rna_fl=_delta_pmf(100),
     )
-    # intergenic: symmetric gDNA; exon+: sense-tilted RNA (few antisense); AMBIG: symmetric.
-    contained = _cview([120.0, 200.0, 90.0], [110.0, 9.0, 92.0])
-    substrate = SimpleNamespace(contained=contained)
-    bsub = SimpleNamespace(
-        left_region=np.array([-1, 0, 1, 2]),
-        right_region=np.array([0, 1, 2, -1]),
-        left=_cview([0.0] * 4, [0.0] * 4),
-        right=_cview([0.0] * 4, [0.0] * 4),
-        junction_strand=np.zeros(4, dtype=np.int8),
-    )
-    gdna_fl, rna_fl = _delta_pmf(200), _delta_pmf(100)
-    geometry = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
-    statics = build_node_statics(chain, substrate, bsub, region_arrays)
     belief = init_beliefs(
-        chain,
-        substrate,
-        bsub,
-        region_arrays,
+        parts.chain,
+        parts.geometry,
+        parts.statics,
         rna_sense_frac=kappa,
         gdna_strand_overdispersion=0.2,
         rna_strand_overdispersion=0.1,
         n_grid=60,
         n_grid_ss=256,
-        statics=statics,
     )
-    return chain, statics, geometry, belief, region_arrays
+    return parts.chain, parts.statics, parts.geometry, belief, parts.region_arrays
 
 
 def _init(kappa=0.9, n_gdna_obs=230.0):
@@ -118,12 +88,8 @@ def _init(kappa=0.9, n_gdna_obs=230.0):
         n_grid_ss=256,
         belief=belief,
     )
-    n_node = np.where(
-        np.asarray(chain.kind) == NODE,
-        geometry.n_unspl_left,
-        geometry.n_unspl_left + geometry.n_unspl_right,
-    )
-    return ni, n_node
+    # ⭐ ONE count per slot: it is both the density numerator and the Poisson n.
+    return ni, np.asarray(geometry.unspliced_count, float).sum(axis=1)
 
 
 # ── the pure precision arithmetic ────────────────────────────────────────────────────────────────────────
@@ -211,7 +177,7 @@ def test_strand_deconv_single_strand_solves_and_is_precise():
     at finite precision, and NO antisense (the − axis is structurally dead). The strand λ-term (c·a²) applies
     to a single-strand node — the tilt is locked, so the strand PINS f_g (approach E)."""
     ni, _ = _init(kappa=0.95)
-    ex = 3  # exon+ region node
+    ex = 2  # exon+ node slot
     assert not ni.struct_lock[ex]
     assert ni.tau_lam[ex] > 0.0  # stranded evidence fires (single-strand ⇒ strand pins f_g)
     assert ni.rho_g[ex] > 0.0 and ni.prec_g[ex] > 0.0
@@ -226,15 +192,15 @@ def test_ambig_stranded_strand_gives_zero_fg_precision():
     AMBIG node (the phantom source), but `build_node_init` GATES it to single-strand nodes, so the AMBIG node's
     τ_λ from the strand is 0. Only a density (gDNA) prior can pin an AMBIG node's f_g."""
     chain, statics, geometry, belief, ra = _scenario(kappa=0.9)
-    am = 5  # AMBIG region node (both strands live), no intron prior in _init ⇒ no density evidence
+    am = 4  # AMBIG node slot (both strands live); no intron prior in _init ⇒ no density evidence
     is_reg = np.asarray(chain.kind) == NODE
     locked = ~(
         (np.asarray(statics.free_pos, bool) | np.asarray(statics.free_neg, bool))
-        & (np.asarray(statics.mass_unspliced, float) > 0.0)
+        & (np.asarray(geometry.unspliced_count, float).sum(axis=1) > 0.0)
     )
     i_strand, _ = strand_evidence(
-        statics.u_pos,
-        statics.u_neg,
+        np.asarray(geometry.unspliced_count, float)[:, 0],
+        np.asarray(geometry.unspliced_count, float)[:, 1],
         np.full(chain.n_slots, 0.5),
         kappa=0.9,
         od_g=0.2,
@@ -262,7 +228,7 @@ def test_measured_intergenic_is_poisson_precision():
     """An intergenic node is structurally pure gDNA (f_g=1, struct_lock, composition variance 0), so its own
     gDNA precision is EXACTLY the Poisson count n — the anchor the whole prior-free pass leans on."""
     ni, n_node = _init(kappa=0.9)
-    ig = 1  # intergenic region node
+    ig = 0  # intergenic node slot
     assert ni.struct_lock[ig]
     assert ni.f_g[ig] == 1.0
     v_fg, _ = own_composition_logvar(
@@ -280,7 +246,7 @@ def test_unsolved_ambig_unstranded_is_zero_precision():
     """An AMBIG node on unstranded data has NO intrinsic gDNA/RNA signal (I_strand=0 by the deadband) and no
     structural lock ⇒ every own precision is 0 (the honest 'no information' default), with no nan."""
     ni, _ = _init(kappa=0.5)  # unstranded
-    am = 5  # AMBIG region node
+    am = 4  # AMBIG node slot
     assert not ni.struct_lock[am]
     assert ni.tau_lam[am] == 0.0
     assert ni.prec_g[am] == 0.0 and ni.prec_pos[am] == 0.0 and ni.prec_neg[am] == 0.0
@@ -341,7 +307,7 @@ def test_density_factor_precision_flows_into_node_init():
     # a sharp λ-factor on the AMBIG node (id 5) — stand in for a confident intron peel
     lam, _ = _logodds_grid(60, 10.0)
     prior = np.zeros((chain.n_slots, lam.shape[0]))
-    prior[5] = -0.5 * ((lam - 2.0) ** 2) / 0.05
+    prior[4] = -0.5 * ((lam - 2.0) ** 2) / 0.05
     common = dict(
         kappa=0.5,
         od_g=0.2,
@@ -356,5 +322,5 @@ def test_density_factor_precision_flows_into_node_init():
     )
     ni_off = build_node_init(chain, statics, geometry, **common)
     ni_on = build_node_init(chain, statics, geometry, intron_prior=prior, **common)
-    assert ni_off.tau_lam[5] == 0.0 and ni_off.prec_g[5] == 0.0  # unstranded, no factory ⇒ silent
-    assert ni_on.tau_lam[5] > 0.0 and ni_on.prec_g[5] > 0.0  # factory ⇒ the node can now speak
+    assert ni_off.tau_lam[4] == 0.0 and ni_off.prec_g[4] == 0.0  # unstranded, no factory ⇒ silent
+    assert ni_on.tau_lam[4] > 0.0 and ni_on.prec_g[4] > 0.0  # factory ⇒ the node can now speak

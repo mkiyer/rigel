@@ -24,8 +24,8 @@ Read `ACCUMULATOR_DESIGN.md` §6 first; this file is its consequence.
 |---|---|
 | stage | **implementing.** S5.0 (derivation) and S5.a (the accumulator) are done |
 | tooling | `scripts/design/observable_efficiency.py` — the harness; re-run it, do not quote this file |
-| suite | **1384 passed / 291 failed / 1 xfailed / 15 errors.** ⚠ +25 against the session baseline: the per-face geometry tests, whose model S5.c/S5.d deleted. They fail naming S5.e/S5.f; **S5.e clears them** |
-| ⛔ blocker | **none.** S5.a/b/c/d landed. **S5.e (`build_node_geometry` + `bp_solver`'s faces) is next** — it is the big one, and it clears the ~25 geometry failures. ⚠ A7 (does reach enter?) must be ruled before S5.e finishes |
+| suite | **1440 passed / 256 failed / 1 xfailed / 15 errors** (S5.e: −35 failures, +56 passes). ⭐ **Every remaining calibration failure is S5.f's** — nothing in the tree still fails on the per-face model |
+| ⛔ blocker | **none.** S5.a/b/c/d/**e** landed complete and **A7 is RULED** (§1 A7 / §4). **S5.f (`calibrate` end to end) is next — and it is the pivot**: nothing downstream is measurable until it runs, so its numbers become the FIRST BASELINE. See §2's road map |
 
 ---
 
@@ -168,17 +168,43 @@ which is exactly wrong for this pair. The overlap must be modelled before the nu
 **Why it is not blocking:** `length_sum` is added per population; if spanning is later dropped, its
 channel goes with it. The architectural question is real but downstream.
 
-### A7 — ⚠ **Reach constrains UNSPLICED edges too, not only junctions** (owner, 2026-07-30)
+### A7 — ✅ **RULED (owner, 2026-07-30): reach enters at JUNCTION edges in S5.e; contiguous edges stay UNBOUNDED until after S5.f**
 
-Recorded because it lands in S5.c and would otherwise be got wrong. A junction edge is certainly
-reach-governed — only a spliced molecule uses it. But an **unspliced** crossing is a gDNA/RNA
-*mixture*: the RNA part is constrained by its transcript's remaining length, the gDNA part is not
-(its template is the chromosome). So reach enters the unspliced divisor **per component**, not as a
-property of the edge — which is what makes it complicated, and is why `taper_g = 1` while `taper_r`
-comes from the annotation (`ACCUMULATOR_DESIGN.md` §7).
+A junction edge is certainly reach-governed — only a spliced molecule uses it. But an **unspliced**
+crossing is a gDNA/RNA *mixture*: the RNA part is constrained by its transcript's remaining length, the
+gDNA part is not (its template is the chromosome). So reach enters the unspliced divisor **per
+component**, not as a property of the edge — which is what makes it complicated, and is why
+`taper_g = 1` while `taper_r` comes from the annotation (`ACCUMULATOR_DESIGN.md` §7).
 
-⚠ **Production currently ignores reach entirely.** Whether to keep ignoring it is undecided — it may
-be the simpler and adequate choice. To be determined in S5.c, not assumed either way.
+⭐ **The decision reduces to ONE call site**, and that is what made it rulable. gDNA at *any* edge takes
+`UNBOUNDED_REACH` on both sides (`taper_g = 1`, i.e. `mu_g − 1`), and the two contained frames take no
+reach argument at all. So the only open question was what `(reach_lo, reach_hi)` the RNA component gets
+at a **contiguous** edge.
+
+| edge kind | component | reach in S5.e |
+|---|---|---|
+| contiguous | gDNA | `UNBOUNDED_REACH` — settled by physics, not by this ruling |
+| **contiguous** | **RNA** | ⭐ **`UNBOUNDED_REACH`** — the ruling |
+| junction | RNA (the only component) | ⭐ **the real per-strand EXONIC reach**, from `edges_df` |
+
+**Why the contiguous edge stays unbounded.** `mu_r − 1` is what production does today, so S5.e varies
+exactly one thing: the faces dissolve. A7 then lands as its **own step after S5.f**, which is the only
+ordering in which it gets a real A/B — against the first baseline S5.f produces. Doing it inside S5.e
+would land a 213-line dissolution *and* a first-ever behaviour change together, with no baseline to
+attribute either against.
+
+⚠ **The price is known and must not be forgotten**: `CARRY_FORWARD.md` §1 fact 6 — ignoring the taper
+over-calls gDNA by **11.0 %** genome-wide, contiguous seams are worse than junctions (0.750 vs 0.886),
+and the gDNA fraction is off by **+0.36** in the last node before a polyA site. **The first baseline
+therefore carries a known bias, and the S5.f ledger entry must say so.**
+
+**Why the junction edge takes its real reach now.** A junction edge is a **brand-new population** — the
+predecessor had no junction divisor at all (spliced mass went to boundary faces on the reach-free
+half-triangle, deleted in S5.c), so there is no number to regress. It also means the reach plumbing is
+**exercised rather than dead**: one code path (`crossing_eff_length`), and "does this edge taper?" is
+answered by which array is passed, not by a flag with one live branch. Leaving it unbounded would ship a
+divisor known to be wrong by up to **4×** at a first exon (`CARRY_FORWARD.md` §2: 199.0 at R=550 against
+50.0 at R=50).
 
 ### A2 — Two alternatives were tested and are NOT recommended.
 
@@ -229,12 +255,129 @@ upstream schema change. Phases, in dependency order:
 | **S5.b** | ✅ **DONE** (`LEDGER.md`) — `fl.py` re-keyed to the five pure pools | ✅ strict xfail XPASSed and was removed; 4 perturbations caught; the §8 pool table reproduced on real cfRNA | done |
 | **S5.c** | ✅ **DONE** (`LEDGER.md`) — `effective_length.py` → the one placements formula | ✅ 89 tests, every formula enumerated; reproduces `CARRY_FORWARD.md` §2's taper table | done |
 | **S5.d** | ✅ **DONE** (`LEDGER.md`) — substrate → ONE type; the chain re-keyed to `N E N … E N` | ✅ 24 tests, 7 perturbations caught incl. the old `k+1` terminal shape | done |
-| **S5.e** | `build_node_geometry` rewritten; the faces dissolve (old R1b, R2) | — | not started |
-| **S5.f** | `calibrate` + `CalibrationResult` + `priors`/`capture_eff_length`/`pipeline` | calibration runs end to end; the numbers become the FIRST baseline | not started |
+| **S5.e-1** | `NodeGeometry` + `build_node_geometry` rewritten; the 18 per-face arrays dissolve (old R1b, R2) | ✅ 23 tests written first and verified failing; **15 perturbations, and P15 found a real hole** — a `2*i` slot-layout assumption that every single-reference fixture was blind to | ✅ **done** |
+| **S5.e-2** | `bp_solver`'s `(left, right)` tuples collapsed through its six consumers; `node_init` + `density_model` re-keyed | ✅ the solver runs end to end; the factor-1 bedrock invariant holds on the new geometry. ⚠ the scalar/vector twins are NOT merged (a measured 15.7×/op) | ✅ **done** |
+| **S5.e-3** | the last per-face test fixtures ported; every transitional shim deleted | ✅ `test_bp_solver.py` 19 failures → **0**; the port exposed two artefacts the old shape hid (a hand-placed mature flux, and a terminal-slot G1 lock that had its own ten-line apology comment) | ✅ **done** |
+| **S5.f** | `calibrate` + `CalibrationResult` + `priors`/`capture_eff_length`/`pipeline` | calibration runs end to end; the numbers become the FIRST baseline. ⚠ **that baseline carries A7's known 11.0 % gDNA over-call and the entry must say so** | not started |
+| **S5.g** | ⭐ **A7 proper** — the contiguous-edge RNA reach turned on (§1 A7) | falsification test first; an **end-to-end A/B against S5.f's baseline**, which is the whole reason it is sequenced here | not started |
 
 ⚠ **The 266 suite failures cannot be a per-step gate.** ~200 are end-to-end scenario and golden tests
 that will move *numerically*, not merely start running. Each phase is gated on the unit tests written
 for it; the suite goes green at S5.f and the goldens are regenerated **once**, at S6.
+
+### ⭐ THE ROAD TO A PRODUCTION CALIBRATION
+
+⛔ **Everything measurable is downstream of one gate.** `calibrate()` does not run, so there is no
+number: no baseline, no A/B, no benchmark verdict, no scan-cache toy seed. **S5.f is therefore the
+pivot** — every deferred derivation below is deliberately sequenced *after* it, because each one needs a
+baseline to be judged against and would otherwise land unfalsifiable.
+
+**Phase 1 — get a number (no new modelling; plumbing only).**
+
+| | step | gate | note |
+|---|---|---|---|
+| 1 | ✅ **S5.e-rest** — the 10 sweep-behaviour tests ported; `_pending_s5e` deleted | ✅ the file is green |
+| 2 | **S5.f** — `calibrate()` + `CalibrationResult` + `priors` + `derive` + `capture_eff_length` + `pipeline` | ⭐ **calibration runs end to end on the chr22 pilot scan caches, and its numbers become the FIRST BASELINE** | also retires `region_arrays`'s `k+1` boundary↔region mapping, the last surviving old axis |
+
+#### ⭐ S5.f, scoped against the actual call sites (2026-07-30)
+
+Every remaining calibration failure is S5.f's, and they are **28 tests over 8 files**: `test_calibrate`
+(9), `test_gdna_strand_integration` (4), `test_spliced_boundary_onesidedness` (3),
+`test_region_index_alignment` (3), `test_accumulator_span_unbiased` (3), `test_substrate_conservation`
+(2), `test_oracle` (2), `test_ambig_scenario` (2).
+
+**The schema change, and it is the whole step.** `CalibrationResult` carries **six** per-region mass
+arrays — `mass_{gdna,rna}_{contained,left,right}` — and `priors.assemble_priors` immediately re-pools
+two of them as `mass_gdna_right[r] + mass_gdna_left[r+1]`, with `capture_eff_length._pooled_seam_arrays`
+doing the identical thing. ⛔ **That split-then-re-pool is a no-op with a history**: `CARRY_FORWARD.md`
+§3 trap 2 records the same sum-then-halve pattern hiding an exact factor of 2 for months. Owner ruling
+(§4): the left/right pair becomes **per-edge arrays**, and the pooling disappears rather than being
+re-derived.
+
+| field | fate |
+|---|---|
+| `mass_{gdna,rna}_contained` | keep, on the NODE axis — they already are per node |
+| `mass_{gdna,rna}_{left,right}` | ⭐ **→ `mass_{gdna,rna}_edge`**, per contiguous edge. `bp_solver.chain_edge_deconv` already returns exactly this |
+| `mass_rna_spliced` | keep; it is what `assemble_priors` WITHHOLDS from `rna_prior_count` (a spliced fragment has no gDNA candidate in the EM, so counting it would double it) |
+| `gdna_region_eff_len` | → `effective_length.contained_eff_length`, a direct successor, same quantity |
+| ⛔ `gdna_boundary_len` | **no successor.** It is `boundary_side_eff_length` = `E[min(ℓ,L)]/2`, deleted in S5.c because it divided a per-FACE mass. Its replacement is the per-edge `crossing_eff_length`, one number, and the `½·(bl[r] + bl[r+1])` averaging in `priors` and `capture_eff_length` goes with it |
+
+**Consumers to rewire, in dependency order:** `result.py` (the schema) → `calibrate.py` (the body; its
+dead code is already the specification of what to rewire) → `priors.py` + `capture_eff_length.py` (the
+pooling) → `derive.py`, `track.py` (contained only — likely untouched) → `pipeline.py:897` (a QC sum
+over the three per-region nodes → two axes).
+
+⚠ **`region_arrays.boundary_region_indices` / `region_boundary_indices` are the last surviving `k+1`
+axis in the tree** and must go with this step, or the old shape outlives the schema that needed it.
+
+⚠ **Test fixtures that hand-build a `CalibrationResult` will all move**: `test_result_schema`,
+`test_priors`, `test_capture_eff_length`, `tests/calibration/_oracle.py`. Several encode the D6 ½
+convention in their comments (`gdna_boundary_len` "IS the halved per-side density length") — that
+convention dies with the field, and those comments must not be carried across.
+
+⛔ **DO NOT LAND THE SCHEMA ALONE.** It was written, measured and **reverted** on 2026-07-30: with
+`calibrate()` still raising, the new fields are consumed by nobody (speculative code) while every
+hand-built fixture fails on the old kwargs — **+35 failures, 256 → 291, none of them informative**.
+The schema and its consumers are ONE step. The target shape, so the next session types it rather than
+re-derives it:
+
+```python
+@dataclass(frozen=True, slots=True)
+class CalibrationResult:
+    mass_gdna_node:        np.ndarray   # float64[n_nodes]   <- chain_node_deconv
+    mass_rna_node:         np.ndarray
+    mass_gdna_edge:        np.ndarray   # float64[n_edges]   <- chain_edge_deconv
+    mass_rna_edge:         np.ndarray
+    mass_rna_spliced_edge: np.ndarray   # the edge_spliced part of mass_rna_edge, WITHHELD by the prior
+    gdna_node_eff_len:     np.ndarray   # contained_eff_length on the gDNA pmf
+    gdna_edge_eff_len:     np.ndarray   # crossing_eff_length  on the gDNA pmf -- one number per line
+    gdna_density_global: float
+    rna_sense_frac: float
+    gdna_strand_overdispersion: float
+    rna_strand_overdispersion: float
+    n_nodes: int
+    n_edges: int
+    config: CalibrationConfig
+```
+
+⚠ `mass_rna_spliced` has **no node twin**, and that is structural rather than an omission:
+`node_contained` is credited only when the fragment used no junction, so a node's contained population
+cannot hold a spliced molecule.
+
+⚠ **Four more modules take the OLD substrate views and were not in the first scope** — found by grep
+while attempting the step: `gdna_strand.fit_gdna_strand_from_substrate`,
+`density_deconv.fit_intron_background`, `background_reference.measure_background`, and
+`calibrate._build_intron_prior`. All four read `substrate.contained.n_unspliced*` /
+`substrate.left`/`right`. Budget for them.
+
+| 3 | **S6** — delete the dead paths; regenerate `tests/golden/` **once** | suite green | ~200 of the 266 remaining failures are end-to-end/golden tests that will move NUMERICALLY, not merely start running |
+
+⚠ **Do not fold any modelling change into 1–3.** The whole point of the ordering is that step 2's output
+is the reference every later change is measured against, so it must be a pure rewiring of what already
+exists — known biases included, and named.
+
+**Phase 2 — the deferred derivations, now A/B-able against that baseline.**
+
+| | step | what it buys, measured | blocked on |
+|---|---|---|---|
+| 4 | **S5.g — A7**: the contiguous-edge RNA reach taper | removes an **11.0 %** genome-wide gDNA over-call and **+0.36** in the last node before a polyA site (`CARRY_FORWARD.md` §1 fact 6) | a baseline. The plumbing is one array; the ruling is already recorded |
+| 5 | **S5.a2 — how `length_sum` enters the solve** | it is stored on every population and consumed by NOBODY. It is the channel that removes the equal-means blind spot: efficiency min `0.000 → 0.078` at an edge, `0.078 → 0.188` at a 151 bp node | its own derivation; must not be folded into S5.f |
+| 6 | **A6 then A3 — `node_spanning`** | ⭐ the largest single win found and it needs no upstream change: at every node shorter than one fragment essentially ALL the information is in the spanning population (0.000 → 0.758 at 25 bp), and **56.7 %** of human nodes are shorter than one 200 bp fragment | ⚠ **A6 first**: spanning is a SUBSET of edge-crossing, so `observable_efficiency.var_set`'s zero cross-population covariance is exactly wrong for the pair. The overlap must be modelled before the number means anything |
+| 7 | **Does `spliced_count` enter the LEVEL?** | it is a contiguous crossing, so in principle it belongs in ν and in ρ_tot; today it enters only the strand solve, which is a faithful port of the predecessor, not a derived choice | S5.a2's frame |
+
+**Phase 3 — productionise.**
+
+| | step | gate |
+|---|---|---|
+| 8 | close the benchmark suite's two known gaps: **(c)** replicate pairs so overdispersion is estimable at all, **(f)** conditions in the **1–10 %** gDNA band real libraries live in | `suite_resolves.py` green on all 8 requirements — ⛔ run it before quoting any suite number |
+| 9 | the real-cfRNA gate at full scale + `scan_profile.py` regression | the S3 byte-identity gate re-run; ns/fragment re-recorded |
+| 10 | the **magic-number audit** | `POOL_EB_PRIOR_ESS = 1000` shifts the fitted pure-gDNA mean **79.4 → 100.3 (+26 %)** against a 4,467-fragment pool; the gDNA strand overdispersion **saturates its 0.2 ceiling on 2 of 4 real libraries** at 66–600 σ, so it is bias and not noise. Both are owner calls, not tuning |
+
+⚠ **The two biggest risks to this plan, both already measured.** (a) The simulator is **Poisson by
+construction** (`sim/wgs_engine.py:473`), so nothing dispersion-dependent validates on the suite until
+step 8 lands — and the first fix considered provably cannot work (`TODO.md`). (b) The suite's own pure
+pools separate by **1.20×** against LBX0190's 2.5×, and that separation is the determinant of every 2×2
+in the deconvolution — so a suite result is not a substitute for the real-cfRNA gate at step 9.
 
 ### Structural deltas the rewiring must absorb (unchanged by the derivation)
 
@@ -352,6 +495,7 @@ orderings of every pool pair, so swapping the two components is the same operati
 
 | | ruling | why |
 |---|---|---|
+| **2026-07-30** | ⭐ **A7: junction edges take their real per-strand EXONIC reach in S5.e; contiguous edges pass `UNBOUNDED_REACH` for BOTH components, and A7 proper lands after S5.f** | The decision reduces to one call site (contiguous-edge RNA) — gDNA is `taper_g = 1` everywhere and the contained frames take no reach. Keeping it unbounded leaves S5.e varying exactly ONE thing and is the only ordering where A7 gets a real A/B, against the first baseline S5.f produces. Junctions are a NEW population with no predecessor divisor, so wiring their reach regresses nothing and keeps the one code path exercised instead of dead. ⚠ The first baseline therefore carries the known 11.0 % genome-wide gDNA over-call. Owner |
 | **2026-07-30** | ⭐ **The three channels are `count` / `inv_length_sum` / `length_sum`** = `Σ1`, `Σ1/placements`, `ΣL`. ⚠ This RENAMES the shipped `density` | `Σ1/L` at a node is not a density — `ACCUMULATOR_DESIGN.md` §6 says so itself ("a better-conditioned second moment and nothing more"); it is an exact density only at an edge. Naming it `density` puts one word on two concepts, which is `CARRY_FORWARD.md` §3 trap 27. The three names are three sums and are honest at every object. Owner |
 | **2026-07-30** | ⭐ **EDGES store `Σ L` as well as nodes** — every population carries the same triple | The edge is where the equal-means blind spot is EXACT (determinant `μ_g − μ_r`, efficiency min 0.000). Excluding it would leave the one hard failure unfixed. Owner |
 | **2026-07-30** | ⭐ **NODES accumulate `(count, Σ1/L, Σ L)` — R-b.** The node density weight stays `1/L`; `Σ1/A` is NOT stored | `Σ L` fixes the equal-means blind spot, the one hard failure (min at a 151 bp node 0.078 → 0.188). `Σ1/A` buys a model-free *level* but almost no information (0.953 → 0.960) and its architectural case is partial — the split still needs the FL models. `Σ L` is a plain integer sum: no fixed point, no scale, no overflow scheme. +70 MB/worker, +6 % of peak RSS. Owner |

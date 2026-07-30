@@ -19,7 +19,7 @@ input                        origin                                      cached?
 ``strand_model``             the scan                                    **yes**
 FL histograms                the scan                                    **yes, RAW**
 ``region_arrays``            ``RegionArrays.from_index``   (0.11 s)      no
-``boundary_flags``           ``build_boundary_flags_array``(0.04 s)      no
+``edge_flags``               ``build_edge_flags_array``    (0.04 s)      no
 ``gdna_fl_pmf``/``rna_fl_pmf``  ``build_fl_models(...)``                 no — derived
 ``config``                   the thing you are varying                   no
 ``injected_priors``          fitted BY ``calibrate``                     no — see below
@@ -356,11 +356,11 @@ def index_derived_inputs(index: "TranscriptIndex") -> dict:
     stored copy is how a cache goes stale against the thing it describes (`CARRY_FORWARD.md` §3 trap 25).
     """
     from .calibration.region_arrays import RegionArrays
-    from .calibration.splice_graph import build_boundary_flags_array
+    from .calibration.splice_graph import build_edge_flags_array
 
     return {
         "region_arrays": RegionArrays.from_index(index),
-        "boundary_flags": build_boundary_flags_array(index),
+        "edge_flags": build_edge_flags_array(index),
     }
 
 

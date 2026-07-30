@@ -116,9 +116,11 @@ __all__ = [
     "FLAG_ACCEPTOR_NEG",
     "build_splice_graph",
     "build_node_partition_arrays",
-    "build_boundary_flags_array",
+    "build_edge_flags_array",
     "build_junction_edge_arrays",
+    "build_junction_geometry_arrays",
     "JunctionEdgeArrays",
+    "JunctionGeometry",
     "is_terminus",
     "is_splice_site",
     "validate_graph",
@@ -1030,27 +1032,23 @@ def build_junction_edge_arrays(index) -> JunctionEdgeArrays:
     return JunctionEdgeArrays(offsets, acceptor_cut, edge_row[order], strand[order])
 
 
-def build_boundary_flags_array(index) -> np.ndarray:
-    """The structural flags, re-indexed onto **the accumulator's boundary axis**.
+def build_edge_flags_array(index) -> np.ndarray:
+    """The structural flags on **the accumulator's contiguous-edge axis** — one entry per edge.
 
-    ⚠ **The two index spaces are off by one per reference, and in opposite directions.** A reference
-    with ``k`` nodes has ``k − 1`` contiguous edges (one per interior interface) but ``k + 1``
-    accumulator boundary slots (the interfaces *plus* the two reference terminals). So::
+    ⭐ **There is no padding, because there are no terminal slots.** The predecessor
+    (``build_boundary_flags_array``) emitted ``k + 1`` entries per reference — the ``k − 1`` interior
+    interfaces plus two data-free terminals — purely so every node had an object on each side. A
+    contiguous edge is the line BETWEEN two adjacent nodes and there is no such line before the first or
+    after the last, so a reference with ``k`` nodes contributes exactly ``k − 1`` entries and the
+    off-by-one commentary that used to live here goes with the slots (`S5_DESIGN_LOG.md` §4).
 
-        slot 0        -> 0   (reference start terminal: not a transition, no edge exists)
-        slot 1..k-1   -> the contiguous edge between nodes (i-1, i)
-        slot k        -> 0   (reference end terminal)
+    A contiguous edge IS the interface to the right of its ``src`` node, so the flags are keyed by
+    ``src``. Junction edges carry no flags — they are not a genomic position — and are excluded.
 
-    The two zeroed terminals are not padding — they are genuinely flag-less. A terminal boundary
-    never carried a deposit either (``00_design.md`` §6 invariant 4), so a zero there is the correct
-    answer rather than a missing one.
-
-    Returns ``uint16[B]`` with ``B == build_node_partition_arrays(index)[1][-1]``, aligned element
-    for element with the payload's ``ref_boundary_offsets``.
+    Returns ``uint16[E]`` with ``E == ref_edge_offsets[-1]``, aligned element for element with the
+    payload's contiguous-edge axis.
     """
     nodes_df, edges_df = index.nodes_df, index.edges_df
-    # A contiguous edge IS the interface to the right of its src node, so key the flags by src.
-    # Junction edges carry no flags (they are not a genomic position) and are excluded.
     contiguous = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_CONTIGUOUS
     by_node = np.zeros(len(nodes_df), dtype=np.uint16)
     by_node[edges_df["src"].to_numpy(np.int64)[contiguous]] = edges_df["flags"].to_numpy(np.uint16)[
@@ -1066,11 +1064,75 @@ def build_boundary_flags_array(index) -> np.ndarray:
         if grp is None or len(grp) == 0:
             continue
         ids = grp.index.to_numpy(np.int64)  # == node_id (I2), and contiguous within a reference
-        k = ids.shape[0]
-        slots = np.zeros(k + 1, dtype=np.uint16)
-        slots[1:k] = by_node[ids[: k - 1]]
-        out.append(slots)
+        out.append(by_node[ids[:-1]])  # the k-1 interior lines; a 1-node reference contributes none
     return np.concatenate(out) if out else np.zeros(0, dtype=np.uint16)
+
+
+@dataclass(frozen=True, slots=True)
+class JunctionGeometry:
+    """The junction edges on **the accumulator's junction axis**, in its own slot order.
+
+    A junction edge is not a chain slot — the graph is a DAG but not a polytree, so a junction must be a
+    **factor on its endpoint nodes** and never a message channel (`CARRY_FORWARD.md` §3 trap 10). This
+    is what a consumer needs to place that factor: where the junction attaches, whose transcript it
+    belongs to, and how much of its own template remains either side.
+
+    ⭐ **``strand`` is the TRANSCRIPT strand**, and it is the whole reason the accumulator does not store
+    sense/antisense. The accumulator's ``sj_count`` columns are the **genome** strand the read aligned
+    to; which transcript the molecule came from is a property of the annotation, stated here. "Sense
+    derived from a junction's own strand" is exactly this join.
+
+    ⚠ **``reach_lo``/``reach_hi`` are EXONIC**, unlike a contiguous edge's (which are genomic spans, so
+    that nascent RNA inside an intron is not declared impossible). Only a spliced molecule uses a
+    junction, so what remains either side of it is exonic — see the module docstring. A reach of 0 is
+    meaningful, not a sentinel.
+
+    ⚠ ``lo``/``hi`` are genomically lower/higher, never donor/acceptor: edges store ``src < dst``, so on
+    a NEG-strand junction the biological donor is on the right.
+    """
+
+    src_node: np.ndarray  # int64[J] — global node id; the intron STARTS where this node ends
+    dst_node: np.ndarray  # int64[J] — global node id; the intron ENDS where this node begins
+    strand: np.ndarray  # int8[J]  — the junction's own genomic strand == the TRANSCRIPT strand
+    reach_lo: np.ndarray  # float64[J] — exonic reach on the junction's OWN strand
+    reach_hi: np.ndarray  # float64[J]
+
+    @property
+    def n_junctions(self) -> int:
+        return int(self.src_node.shape[0])
+
+
+def build_junction_geometry_arrays(index) -> JunctionGeometry:
+    """Build :class:`JunctionGeometry` for ``index``, in the accumulator's junction slot order.
+
+    ⭐ **The slot order is not recomputed here.** It is read off
+    :func:`build_junction_edge_arrays`, whose ``edge_row`` is already the ``edges_df`` row of each
+    junction slot. That ordering is a byte-identity contract against the reference accumulator's
+    ``Partition.from_cuts``, and two implementations of one ordering is how the same quantity comes to
+    differ in two places (`CARRY_FORWARD.md` §3 trap 27) — so there is one, and this joins through it.
+    """
+    rows = build_junction_edge_arrays(index).edge_row
+    edges = index.edges_df
+    strand = edges["strand"].to_numpy(np.int8)[rows]
+    is_pos = strand == np.int8(Strand.POS)
+
+    def reach(column_pos: str, column_neg: str) -> np.ndarray:
+        # A junction row carries ONE strand, so only that strand's pair was populated by the builder;
+        # selecting on the strand is what stops a NEG junction reading a POS column of zeros and
+        # declaring itself opportunity-free.
+        return np.where(
+            is_pos,
+            edges[column_pos].to_numpy(np.int64)[rows],
+            edges[column_neg].to_numpy(np.int64)[rows],
+        ).astype(np.float64)
+
+    return JunctionGeometry(
+        src_node=edges["src"].to_numpy(np.int64)[rows],
+        dst_node=edges["dst"].to_numpy(np.int64)[rows],
+        strand=strand,
+        reach_lo=reach("reach_lo_pos", "reach_lo_neg"),
+        reach_hi=reach("reach_hi_pos", "reach_hi_neg"),
+    )
 
 
 def is_terminus(flags: np.ndarray, strand: int) -> np.ndarray:

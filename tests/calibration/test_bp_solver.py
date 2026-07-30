@@ -1,93 +1,43 @@
-"""The BP-solver per-node geometry (`calibration.node_geometry.build_node_geometry`).
+"""The belief-propagation sweep (`bp_solver.node_sweep`) and the beliefs it starts from.
 
-Verifies the per-face assembly onto the chain against the substrate: a region presents its contained geometry
-both ways; a boundary presents its per-side crossing geometry (left-side / right-side, in the flank regions'
-sizes); the one-sided motif spliced lands on the exon-flank face; per-component FL (gDNA vs RNA) is honoured.
+⭐ **Every fixture here is on the S5.e axes** — ``_synthetic.make_chain_parts``, i.e. a node axis, a
+contiguous-edge axis with ``k − 1`` entries per reference and **no terminal slots**, and a junction axis
+whose edges state their own ``(src, dst, strand)``. The per-FACE fixtures this file used to carry are
+gone; ``NodeGeometry``'s own gate is ``test_node_geometry.py``, written from scratch against enumerated
+start positions.
+
+⚠ **Two things the old shape hid, and their tests say so in place**: a reference terminal was a
+data-free boundary SLOT that could be G1-locked and emit structural all-gDNA into its neighbour
+(`test_gdna_sweep_zero_gdna_pin_and_monotone`), and the mature flux at an intron↔exon seam had to be
+placed by hand rather than derived from a junction's endpoints (`_mature_exon_chain`).
 """
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from rigel.calibration.bp_solver import (
-    node_sweep,
-)
-from rigel.calibration.node_geometry import (
-    build_node_geometry,
-    build_node_statics,
-    init_beliefs,
-)
+from rigel.types import Strand
+
+from rigel.calibration.bp_solver import node_sweep
 from rigel.calibration.effective_length import (
-    contained_eff_length as region_eff_length,
+    UNBOUNDED_REACH,
+    contained_eff_length,
+    crossing_eff_length,
 )
+from rigel.calibration.node_geometry import init_beliefs
 
-
-from rigel.calibration.node_chain import EDGE, NODE, build_node_chain
+from _synthetic import make_chain_parts
 from rigel.calibration.signature import (
     BIT_EXON_NEG,
     BIT_EXON_POS,
     BIT_INTRON_NEG,
     BIT_INTRON_POS,
     N_SIGNATURES,
-    TS_AMBIG,
-    TS_NEG,
-    TS_NONE,
-    TS_POS,
     mrna_active_strands,
     nrna_active_strands,
 )
-
-
-def _deleted_in_S5c(*_args, **_kwargs):
-    """⛔ A per-FACE divisor. Deleted in S5.c — a contiguous edge is a 0-bp line with ONE set of numbers.
-
-    Bound so this module still IMPORTS: the tests below reach it only after `build_node_geometry`, which
-    is S5.e and raises, so it is never actually called. Without it an ImportError takes out all 28 tests
-    in this file instead of the 4 that test geometry which no longer exists. S5.e deletes both.
-    """
-    raise NotImplementedError(
-        "boundary_side_eff_length / spliced_side_eff_length were deleted in S5.c; the crossing divisor "
-        "is effective_length.crossing_eff_length, one number per edge. See docs/S5_DESIGN_LOG.md §2."
-    )
-
-
-boundary_side_eff_length = spliced_side_eff_length = _deleted_in_S5c
-
-
-def _view(mass_u, mass_spl):
-    n = len(mass_u)
-    z = np.zeros(n)
-    return SimpleNamespace(
-        n_unspliced_pos=z.copy(),
-        n_unspliced_neg=z.copy(),
-        n_spliced_sense=z.copy(),
-        n_spliced_antisense=z.copy(),
-        mass_unspliced=np.asarray(mass_u, float),
-        mass_spliced=np.asarray(mass_spl, float),
-        # the integer unspliced flux the real view exposes as a property; these doubles use the
-        # one-fragment-per-unit-mass convention so the Poisson message precision is exercised.
-        n_unspliced=np.asarray(mass_u, float),
-    )
-
-
-def _cview(n_pos, n_neg, spl_sense=None, mass_u=None, mass_spl=None):
-    """A per-region/side view with per-strand unspliced counts (and optional sense-spliced)."""
-    n_pos = np.asarray(n_pos, float)
-    n_neg = np.asarray(n_neg, float)
-    n = n_pos.shape[0]
-    spl = np.zeros(n) if spl_sense is None else np.asarray(spl_sense, float)
-    return SimpleNamespace(
-        n_unspliced_pos=n_pos,
-        n_unspliced_neg=n_neg,
-        n_spliced_sense=spl,
-        n_spliced_antisense=np.zeros(n),
-        mass_unspliced=(n_pos + n_neg) if mass_u is None else np.asarray(mass_u, float),
-        mass_spliced=spl if mass_spl is None else np.asarray(mass_spl, float),
-        n_unspliced=n_pos + n_neg,  # the real view's property: integer unspliced flux
-    )
 
 
 def _delta_pmf(length):
@@ -96,185 +46,66 @@ def _delta_pmf(length):
     return p
 
 
-def test_geometry_exon_intron_exon_plus_gene():
-    # 1 ref, 3 regions (ex+ | in+ | ex+), 4 boundaries (b0 term, b1 ex→in, b2 in→ex, b3 term).
-    rro = np.array([0, 3])
-    rbo = np.array([0, 4])
-    chain = build_node_chain(rro, rbo)
-    # genomic order: B0 R0 B1 R1 B2 R2 B3  → node ids 0..6
-    assert list(chain.kind) == [EDGE, NODE, EDGE, NODE, EDGE, NODE, EDGE]
-    assert list(chain.obj_idx) == [0, 0, 1, 1, 2, 2, 3]
-
-    L = np.array([1000.0, 2000.0, 500.0])
-    sig = np.array([BIT_EXON_POS, BIT_INTRON_POS, BIT_EXON_POS], dtype=np.int64)
-    region_arrays = SimpleNamespace(region_size_bp=L, signature=sig)
-    substrate = SimpleNamespace(contained=_view([100.0, 50.0, 80.0], [0.0, 0.0, 0.0]))
-
-    # boundary sides; b1 spliced on its LEFT (exon r0) side, b2 on its RIGHT (exon r2) side.
-    # b1 (idx 1) and b2 (idx 2) are POS splice junctions (motif strand from the accumulator).
-    left = _view([0.0, 30.0, 20.0, 40.0], [0.0, 88.0, 0.0, 0.0])
-    right = _view([10.0, 31.0, 22.0, 0.0], [0.0, 0.0, 77.0, 0.0])
-    bsub = SimpleNamespace(
-        left=left,
-        right=right,
-        left_region=np.array([-1, 0, 1, 2]),
-        right_region=np.array([0, 1, 2, -1]),
-        junction_strand=np.array([0, 1, 1, 0], dtype=np.int8),
-    )
-
-    gdna_fl = _delta_pmf(300)
-    rna_fl = _delta_pmf(200)
-    g = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
-
-    # R0 (node 1): contained, same both faces; per-component FL.
-    assert g.mass_left[1] == 100.0 and g.mass_right[1] == 100.0
-    assert np.isclose(
-        g.eff_gdna_left[1], region_eff_length(np.array([1000.0]), gdna_fl)[0]
-    )  # 1000-300+1 = 701 start positions
-    # The `+1` is the DISCRETE start-position count (a 300 bp fragment fits in a 1000 bp region at 701
-    # positions, not 700) — irrelevant at this scale, decisive only at L ≈ ell where it is 1 vs 0.
-    assert np.isclose(g.eff_gdna_left[1], 701.0) and np.isclose(g.eff_rna_left[1], 801.0)
-    assert g.spliced_pos_left[1] == 0.0 and g.spliced_pos_right[1] == 0.0
-
-    # B1 (node 2): ex→in junction. left side in r0 (1000bp), right side in r1 (2000bp). spliced on LEFT (exon).
-    assert g.mass_left[2] == 30.0 and g.mass_right[2] == 31.0
-    assert np.isclose(g.eff_gdna_left[2], boundary_side_eff_length(gdna_fl, np.array([1000.0]))[0])
-    # per-face DENSITY length = E[min(ℓ,R)]/2 = min(300,1000)/2. The ½ is the accumulator's deposit
-    # rule (a straddling fragment gives each face its own share, not the whole fragment), NOT a
-    # constant — see effective_length.boundary_side_eff_length. Un-halved it read ρ/2 on every message.
-    assert np.isclose(g.eff_gdna_left[2], 150.0) and np.isclose(g.eff_gdna_right[2], 150.0)
-    assert np.isclose(g.eff_rna_left[2], 100.0)  # RNA-FL min(200,1000)/2
-    assert g.spliced_pos_left[2] == 88.0 and g.spliced_pos_right[2] == 0.0  # exon on the left flank
-
-    # B2 (node 4): in→ex junction. spliced on the RIGHT (exon r2) side.
-    assert g.mass_left[4] == 20.0 and g.mass_right[4] == 22.0
-    assert g.spliced_pos_left[4] == 0.0 and g.spliced_pos_right[4] == 77.0
-    # right side is r2 (500bp): gDNA min(300,500)/2=150, RNA min(200,500)/2=100
-    assert np.isclose(g.eff_gdna_right[4], 150.0) and np.isclose(g.eff_rna_right[4], 100.0)
-
-
-def test_terminal_boundary_zero_off_edge():
-    rro = np.array([0, 3])
-    rbo = np.array([0, 4])
-    chain = build_node_chain(rro, rbo)
-    L = np.array([1000.0, 2000.0, 500.0])
-    region_arrays = SimpleNamespace(region_size_bp=L, signature=np.array([2, 8, 2], dtype=np.int64))
-    substrate = SimpleNamespace(contained=_view([100.0, 50.0, 80.0], [0.0, 0.0, 0.0]))
-    left = _view([0.0, 30.0, 20.0, 40.0], [0.0, 0.0, 0.0, 0.0])
-    right = _view([10.0, 31.0, 22.0, 0.0], [0.0, 0.0, 0.0, 0.0])
-    bsub = SimpleNamespace(
-        left=left,
-        right=right,
-        left_region=np.array([-1, 0, 1, 2]),
-        right_region=np.array([0, 1, 2, -1]),
-        junction_strand=np.zeros(4, dtype=np.int8),
-    )
-    g = build_node_geometry(chain, substrate, bsub, region_arrays, _delta_pmf(300), _delta_pmf(200))
-    # B0 (node 0): left_region=-1 → left face eff = _EPS-floored ~0 (off edge); right face = r0 crossing.
-    assert g.eff_gdna_left[0] <= 1e-6
-    assert np.isclose(g.eff_gdna_right[0], 150.0)  # min(300,1000)/2 — the per-face density length
-    # B3 (node 6): right_region=-1 → right face off edge.
-    assert g.eff_gdna_right[6] <= 1e-6
-
-
-def _empty_boundary_substrate(n_b):
-    z = np.zeros(n_b)
-    side = _cview(z.copy(), z.copy())
-    return SimpleNamespace(
-        left_region=np.full(n_b, -1),
-        right_region=np.full(n_b, -1),
-        left=side,
-        right=side,
-        junction_strand=np.zeros(n_b, dtype=np.int8),
-    )
-
-
 def test_init_zero_gdna_introns_via_strand():
     # The P1 gate: a zero-gDNA library. 3 regions: intergenic | intron+ | AMBIG (one ref).
-    rro = np.array([0, 3])
-    rbo = np.array([0, 4])
-    chain = build_node_chain(rro, rbo)
-    sig = np.array([0, BIT_INTRON_POS, BIT_EXON_POS | BIT_EXON_NEG], dtype=np.int64)
-    sc = np.array([TS_NONE, TS_POS, TS_AMBIG], dtype=np.int8)
-    region_arrays = SimpleNamespace(
-        strand_class=sc,
-        signature=sig,
-        region_size_bp=np.array([1000.0, 2000.0, 800.0]),
-    )
     # intergenic gDNA = strand-symmetric; intron+ RNA = strongly sense-tilted (κ=0.95); AMBIG = symmetric.
-    contained = _cview([50.0, 95.0, 50.0], [50.0, 5.0, 50.0])
-    substrate = SimpleNamespace(contained=contained)
-    bsub = _empty_boundary_substrate(4)
+    parts = make_chain_parts(
+        [0, BIT_INTRON_POS, BIT_EXON_POS | BIT_EXON_NEG],
+        node_size_bp=[1000.0, 2000.0, 800.0],
+        node_pos=[50.0, 95.0, 50.0],
+        node_neg=[50.0, 5.0, 50.0],
+    )
+    b = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
 
-    b = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=60)
-
-    # region node ids on the chain: B0 R0 B1 R1 B2 R2 B3 → regions at 1, 3, 5.
-    rid = [1, 3, 5]
+    # ⭐ the chain is N E N E N, so the nodes are at 0, 2, 4 — there are no terminal slots.
+    rid = [0, 2, 4]
     fg = b.f_g[rid]
     # intergenic: locked gDNA sink {0,0,1}, all precision locked (var 0).
     assert fg[0] == 1.0
-    assert b.var_gdna[1] == 0.0 and b.var_pos[1] == 0.0 and b.var_neg[1] == 0.0
+    assert b.var_gdna[0] == 0.0 and b.var_pos[0] == 0.0 and b.var_neg[0] == 0.0
     # intron+ (zero gDNA): the strand tilt alone drives f_g → 0; the − axis is locked (var 0), + & g finite.
     assert fg[1] < 0.15
-    assert b.var_neg[3] == 0.0 and np.isfinite(b.var_gdna[3]) and np.isfinite(b.var_pos[3])
+    assert b.var_neg[2] == 0.0 and np.isfinite(b.var_gdna[2]) and np.isfinite(b.var_pos[2])
     # AMBIG: unresolved by strand → {0,0,1} default at MAX (inf) variance for the sweep to resolve.
     assert fg[2] == 1.0
-    assert np.isinf(b.var_gdna[5]) and np.isinf(b.var_pos[5]) and np.isinf(b.var_neg[5])
+    assert np.isinf(b.var_gdna[4]) and np.isinf(b.var_pos[4]) and np.isinf(b.var_neg[4])
 
 
 def test_init_boundary_continuity_gate():
-    # 1 ref, 2 regions (exon+ | intron+) → boundaries B0(term) B1(ex+→in+ junction) B2(term).
-    rro = np.array([0, 2])
-    rbo = np.array([0, 3])
-    chain = build_node_chain(rro, rbo)
-    sig = np.array([BIT_EXON_POS, BIT_INTRON_POS], dtype=np.int64)
-    sc = np.array([TS_POS, TS_POS], dtype=np.int8)
-    region_arrays = SimpleNamespace(
-        strand_class=sc,
-        signature=sig,
-        region_size_bp=np.array([1000.0, 2000.0]),
+    # 1 ref, 2 nodes (exon+ | intron+) → ONE line between them. ⭐ The two terminal boundary slots the
+    # predecessor asserted on do not exist: a reference with k nodes owns k-1 lines, so there is nothing
+    # before the first node or after the last to be a sink.
+    parts = make_chain_parts(
+        [BIT_EXON_POS, BIT_INTRON_POS],
+        node_size_bp=[1000.0, 2000.0],
+        node_pos=[80.0, 40.0],
+        node_neg=[4.0, 30.0],
+        # the crossing: sense-tilted unspliced (κ=0.95 ⇒ +) + a certified-RNA (spliced) floor
+        edge_pos=[90.0],
+        edge_neg=[5.0],
+        edge_spliced=[50.0],
     )
-    substrate = SimpleNamespace(contained=_cview([80.0, 40.0], [4.0, 30.0]))
-    # B1 crossing: sense-tilted unspliced (κ=0.95 ⇒ +) + a sense-spliced floor on the exon (left) flank.
-    left = _cview([0.0, 90.0, 0.0], [0.0, 5.0, 0.0], spl_sense=[0.0, 50.0, 0.0])
-    right = _cview([0.0, 91.0, 0.0], [0.0, 6.0, 0.0], spl_sense=[0.0, 0.0, 0.0])
-    bsub = SimpleNamespace(
-        left_region=np.array([-1, 0, 1]), right_region=np.array([0, 1, -1]), left=left, right=right
-    )
-
-    b = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=60)
-    # boundary node ids: B0=0, B1=2, B2=4.
-    # terminals: off-edge flank ⇒ neither strand continuous ⇒ G1 gDNA sink (var locked at 0).
-    assert b.f_g[0] == 1.0 and b.var_gdna[0] == 0.0
-    assert b.f_g[4] == 1.0 and b.var_gdna[4] == 0.0
-    # B1 (ex+→in+): +strand continuous (G2+) ⇒ the strand tilt resolves f_g → 0; − axis locked (var 0).
-    assert b.f_g[2] < 0.15
-    assert b.var_neg[2] == 0.0 and np.isfinite(b.var_gdna[2])
+    b = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
+    # slots: N0=0, E0=1, N1=2.
+    # E0 (ex+→in+): +strand continuous (G2+) ⇒ the strand tilt resolves f_g → 0; − axis locked (var 0).
+    assert b.f_g[1] < 0.15
+    assert b.var_neg[1] == 0.0 and np.isfinite(b.var_gdna[1])
 
 
 def test_init_tss_boundary_is_black_hole():
     # intergenic | exon+ : the internal boundary is a TSS (intergenic↔exon) ⇒ continuity blocks RNA ⇒ sink.
-    rro = np.array([0, 2])
-    rbo = np.array([0, 3])
-    chain = build_node_chain(rro, rbo)
-    sig = np.array([0, BIT_EXON_POS], dtype=np.int64)
-    sc = np.array([TS_NONE, TS_POS], dtype=np.int8)
-    region_arrays = SimpleNamespace(
-        strand_class=sc,
-        signature=sig,
-        region_size_bp=np.array([1000.0, 2000.0]),
-    )
-    substrate = SimpleNamespace(contained=_cview([50.0, 80.0], [50.0, 4.0]))
     # the TSS-crossing fragments are sense-tilted, but continuity must STILL block RNA (the black hole).
-    left = _cview([0.0, 90.0, 0.0], [0.0, 5.0, 0.0])
-    right = _cview([0.0, 91.0, 0.0], [0.0, 6.0, 0.0])
-    bsub = SimpleNamespace(
-        left_region=np.array([-1, 0, 1]), right_region=np.array([0, 1, -1]), left=left, right=right
+    parts = make_chain_parts(
+        [0, BIT_EXON_POS],
+        node_size_bp=[1000.0, 2000.0],
+        node_pos=[50.0, 80.0],
+        node_neg=[50.0, 4.0],
+        edge_pos=[90.0],
+        edge_neg=[5.0],
     )
-
-    b = init_beliefs(chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=60)
-    # B1 (node id 2) is the TSS: a locked gDNA sink despite the sense tilt (all precision locked at 0).
-    assert b.f_g[2] == 1.0 and b.var_gdna[2] == 0.0 and b.var_pos[2] == 0.0 and b.var_neg[2] == 0.0
+    b = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
+    # slot 1 is the TSS line: a locked gDNA sink despite the sense tilt (all precision locked at 0).
+    assert b.f_g[1] == 1.0 and b.var_gdna[1] == 0.0 and b.var_pos[1] == 0.0 and b.var_neg[1] == 0.0
 
 
 def test_precision_state_count_resolution():
@@ -334,62 +165,53 @@ def test_precision_state_count_resolution():
 
 
 def _factor1_uniform_rho():
-    """The factor-1 bedrock fixture: a UNIFORM-gDNA chain intergenic | AMBIG | intergenic, every node's mass
-    laid down as ρ·eff-len (ρ=0.5). Returns ``(rho_g_left, rho_g_right)`` per node after the sweep."""
+    """The factor-1 bedrock fixture: a UNIFORM-gDNA chain intergenic | AMBIG | intergenic, every object's
+    count laid down as ``rho x its own placements`` (rho = 0.5). Returns the per-SLOT gDNA density after
+    the sweep.
+
+    ⭐ **One density per slot, not a (left, right) pair.** The predecessor returned two arrays because a
+    boundary's two sides had different divisors; a 0-bp line has one. The invariant being tested is
+    unchanged: lay down a uniform field and the solver must read it back.
+    """
     rho = 0.5
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
-    chain = build_node_chain(np.array([0, 3]), np.array([0, 4]))
-    L = np.array([1000.0, 1000.0, 1000.0])
-    sig = np.array([0, BIT_EXON_POS | BIT_EXON_NEG, 0], dtype=np.int64)
-    sc = np.array([TS_NONE, TS_AMBIG, TS_NONE], dtype=np.int8)
-    region_arrays = SimpleNamespace(strand_class=sc, signature=sig, region_size_bp=L)
-    reg_eff = region_eff_length(L, gdna_fl)  # [700,700,700]
-    cmass = rho * reg_eff
-    substrate = SimpleNamespace(
-        contained=_cview(cmass / 2, cmass / 2, mass_u=cmass, mass_spl=np.zeros(3))
+    node_eff = contained_eff_length(np.full(3, 1000.0), gdna_fl)  # [701, 701, 701]
+    edge_eff = float(
+        crossing_eff_length(gdna_fl, np.full(1, UNBOUNDED_REACH), np.full(1, UNBOUNDED_REACH))[0]
     )
-    side_eff = boundary_side_eff_length(gdna_fl, L)  # [300,300,300]
-    lr, rr = np.array([-1, 0, 1, 2]), np.array([0, 1, 2, -1])
-    lmass = np.where(lr >= 0, rho * side_eff[np.clip(lr, 0, 2)], 0.0)
-    rmass = np.where(rr >= 0, rho * side_eff[np.clip(rr, 0, 2)], 0.0)
-    left = _cview(lmass / 2, lmass / 2, mass_u=lmass, mass_spl=np.zeros(4))
-    right = _cview(rmass / 2, rmass / 2, mass_u=rmass, mass_spl=np.zeros(4))
-    bsub = SimpleNamespace(
-        left_region=lr,
-        right_region=rr,
-        left=left,
-        right=right,
-        junction_strand=np.zeros(len(lr), dtype=np.int8),
+    node_count, edge_count = rho * node_eff, rho * edge_eff
+    parts = make_chain_parts(
+        [0, BIT_EXON_POS | BIT_EXON_NEG, 0],
+        node_size_bp=1000.0,
+        node_pos=node_count / 2,
+        node_neg=node_count / 2,
+        edge_pos=edge_count / 2,
+        edge_neg=edge_count / 2,
+        gdna_fl=gdna_fl,
+        rna_fl=rna_fl,
     )
-
-    geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
-    st = build_node_statics(chain, substrate, bsub, region_arrays)
-    belief = init_beliefs(
-        chain, substrate, bsub, region_arrays, rna_sense_frac=0.7, n_grid=40, statics=st
-    )
+    belief = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.7, n_grid=40)
     final = node_sweep(
-        chain,
-        st,
-        geom,
+        parts.chain,
+        parts.statics,
+        parts.geometry,
         belief,
-        region_arrays,
+        parts.region_arrays,
         rna_sense_frac=0.7,
         n_grid=40,
     )
-    # gDNA density per face = f_g·M_face / E_gdna_face (the formula the sweep inlines; node_densities removed).
-    rho_g_left = final.f_g * np.asarray(geom.mass_left) / np.asarray(geom.eff_gdna_left)
-    rho_g_right = final.f_g * np.asarray(geom.mass_right) / np.asarray(geom.eff_gdna_right)
-    return rho_g_left, rho_g_right
+    # gDNA density = f_g x count / E_gdna (the formula the sweep inlines).
+    count = np.asarray(parts.geometry.unspliced_count, float).sum(axis=1)
+    return final.f_g * count / np.asarray(parts.geometry.eff_gdna, float)
 
 
 def test_gdna_sweep_factor1_intergenic_anchors():
     """The factor-1 bedrock, anchors: on a UNIFORM-gDNA chain the strand/signature-locked intergenic nodes
     read back ρ EXACTLY — the measured-gDNA anchor invariant, which every phase must hold."""
     rho = 0.5
-    rho_g_left, rho_g_right = _factor1_uniform_rho()
-    interg = [1, 5]  # region nodes: R0/R2 intergenic (strand-anchored)
-    assert np.allclose(rho_g_left[interg], rho, atol=0.02)
-    assert np.allclose(rho_g_right[interg], rho, atol=0.02)
+    rho_g = _factor1_uniform_rho()
+    interg = [0, 4]  # the chain is N E N E N, so the two intergenic nodes are slots 0 and 4
+    assert np.allclose(rho_g[interg], rho, atol=0.02)
 
 
 def test_gdna_sweep_factor1_ambig_recovery():
@@ -408,10 +230,9 @@ def test_gdna_sweep_factor1_ambig_recovery():
     a message deliver to a node with no evidence of its own", not as a tolerance nuisance. Do NOT attack it
     with more damping, and do not widen the bound without deriving what the residual SHOULD be."""
     rho = 0.5
-    rho_g_left, rho_g_right = _factor1_uniform_rho()
-    ambig = 3  # region node R1 (AMBIG)
-    assert np.allclose(rho_g_left[ambig], rho, atol=0.05)
-    assert np.allclose(rho_g_right[ambig], rho, atol=0.05)
+    rho_g = _factor1_uniform_rho()
+    ambig = 2  # the AMBIG node slot
+    assert np.allclose(rho_g[ambig], rho, atol=0.05)
 
 
 def test_interior_anchor_is_immovable_and_produces_no_nan():
@@ -427,12 +248,10 @@ def test_interior_anchor_is_immovable_and_produces_no_nan():
        relay fuse, NOT the DL ``v_own = 0`` branch (which is inert at the combine because a struct_lock node is
        never `solvable`, so its ψ output is discarded)."""
     rho = 0.5
-    rho_g_left, rho_g_right = _factor1_uniform_rho()
-    for v in (rho_g_left, rho_g_right):
-        assert not np.any(np.isnan(v)), v
-        assert np.all(np.isfinite(v)), v
-    assert np.allclose(rho_g_left[[1, 5]], rho, atol=1e-9)  # exact, not merely close
-    assert np.allclose(rho_g_right[[1, 5]], rho, atol=1e-9)
+    rho_g = _factor1_uniform_rho()
+    assert not np.any(np.isnan(rho_g)), rho_g
+    assert np.all(np.isfinite(rho_g)), rho_g
+    assert np.allclose(rho_g[[0, 4]], rho, atol=1e-9)  # exact, not merely close
 
 
 def test_gdna_emits_across_tss_tes_seam():
@@ -448,52 +267,37 @@ def test_gdna_emits_across_tss_tes_seam():
     """
     rho = 0.5
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
-    chain = build_node_chain(np.array([0, 3]), np.array([0, 4]))  # intergenic | exon+ | intergenic
-    L = np.array([1000.0, 1000.0, 1000.0])
-    sig = np.array([0, BIT_EXON_POS, 0], dtype=np.int64)
-    sc = np.array([TS_NONE, TS_POS, TS_NONE], dtype=np.int8)
-    region_arrays = SimpleNamespace(strand_class=sc, signature=sig, region_size_bp=L)
-    cmass = rho * region_eff_length(L, gdna_fl)
-    substrate = SimpleNamespace(
-        contained=_cview(cmass / 2, cmass / 2, mass_u=cmass, mass_spl=np.zeros(3))
-    )
-    side_eff = boundary_side_eff_length(gdna_fl, L)
-    lr, rr = np.array([-1, 0, 1, 2]), np.array([0, 1, 2, -1])
-    lmass = np.where(lr >= 0, rho * side_eff[np.clip(lr, 0, 2)], 0.0)
-    rmass = np.where(rr >= 0, rho * side_eff[np.clip(rr, 0, 2)], 0.0)
-    left = _cview(lmass / 2, lmass / 2, mass_u=lmass, mass_spl=np.zeros(4))
-    right = _cview(rmass / 2, rmass / 2, mass_u=rmass, mass_spl=np.zeros(4))
-    bsub = SimpleNamespace(
-        left_region=lr,
-        right_region=rr,
-        left=left,
-        right=right,
-        junction_strand=np.zeros(len(lr), dtype=np.int8),
-    )
-
-    geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
-    st = build_node_statics(chain, substrate, bsub, region_arrays)
-    belief = init_beliefs(
-        chain, substrate, bsub, region_arrays, rna_sense_frac=0.7, n_grid=40, statics=st
+    L, unb = 1000.0, np.full(1, UNBOUNDED_REACH)
+    node_count = rho * float(contained_eff_length(np.full(1, L), gdna_fl)[0])
+    edge_count = rho * float(crossing_eff_length(gdna_fl, unb, unb)[0])
+    parts = make_chain_parts(  # intergenic | exon+ | intergenic
+        [0, BIT_EXON_POS, 0],
+        node_size_bp=L,
+        node_pos=node_count / 2,
+        node_neg=node_count / 2,
+        edge_pos=edge_count / 2,
+        edge_neg=edge_count / 2,
+        gdna_fl=gdna_fl,
+        rna_fl=rna_fl,
     )
     cap = {}
     final = node_sweep(
-        chain,
-        st,
-        geom,
-        belief,
-        region_arrays,
+        parts.chain,
+        parts.statics,
+        parts.geometry,
+        init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.7, n_grid=40),
+        parts.region_arrays,
         rna_sense_frac=0.7,
         n_grid=40,
         _capture=cap,
     )
-    exon = 3  # chain id of the single-exon gene (R1), flanked on both sides by TSS/TES seams
+    exon = 2  # the single-exon gene, flanked on both sides by TSS/TES seams (chain N E N E N)
     # THE FIX — the exon receives a gDNA relay across the seam (incoming precision > 0). Pre-fix: 0 (no relay).
     assert cap["prec_g"][exon] > 0.0, "single-exon gene got NO gDNA relay across the TSS/TES seam"
     # The intergenic flanks emit ZERO RNA authority: the exon receives no +/− RNA message from them.
     assert cap["prec_p"][exon] == 0.0 and cap["prec_n"][exon] == 0.0
     # State ⊥ messages: the intergenic nodes stay locked all-gDNA (confident own-state, ignore all inputs).
-    assert final.f_g[1] == 1.0 and final.f_g[5] == 1.0
+    assert final.f_g[0] == 1.0 and final.f_g[4] == 1.0
 
 
 def test_gdna_sweep_zero_gdna_pin_and_monotone():
@@ -506,42 +310,27 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     # global (driven to ~0 by the RNA introns) + the RNA-neighbour messages must pull the phantom gDNA down,
     # monotonically.
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
-    chain = build_node_chain(np.array([0, 3]), np.array([0, 4]))
-    L = np.array([2000.0, 2000.0, 2000.0])
-    sig = np.array(
-        [BIT_INTRON_POS, BIT_INTRON_POS | BIT_INTRON_NEG, BIT_INTRON_NEG], dtype=np.int64
+    # sense-tilted RNA (κ=0.95): the + intron aligns genome+, the − intron genome−. The two lines carry
+    # the same tilt as the nodes they separate. ⭐ Two lines, not four: there are no terminal slots, so
+    # the "directly-adjacent terminal G1 lock" the retired xfail blamed no longer exists at all.
+    parts = make_chain_parts(
+        [BIT_INTRON_POS, BIT_INTRON_POS | BIT_INTRON_NEG, BIT_INTRON_NEG],
+        node_size_bp=2000.0,
+        node_pos=[95.0, 50.0, 5.0],
+        node_neg=[5.0, 50.0, 95.0],
+        edge_pos=[40.0, 2.0],
+        edge_neg=[2.0, 40.0],
+        gdna_fl=gdna_fl,
+        rna_fl=rna_fl,
     )
-    sc = np.array([TS_POS, TS_AMBIG, TS_NEG], dtype=np.int8)
-    region_arrays = SimpleNamespace(strand_class=sc, signature=sig, region_size_bp=L)
-    cpos = np.array(
-        [95.0, 50.0, 5.0]
-    )  # sense-tilted RNA (κ=0.95): + intron genome+, − intron genome−
-    cneg = np.array([5.0, 50.0, 95.0])
-    substrate = SimpleNamespace(
-        contained=_cview(cpos, cneg, mass_u=cpos + cneg, mass_spl=np.zeros(3))
+    chain, st, geom, region_arrays = (
+        parts.chain,
+        parts.statics,
+        parts.geometry,
+        parts.region_arrays,
     )
-    lr, rr = np.array([-1, 0, 1, 2]), np.array([0, 1, 2, -1])
-    # crossing counts cleanly sense-tilted like the regions: B0/B1 are +crossings (genome+), B2/B3 are −.
-    lpos = np.array([0.0, 40.0, 2.0, 2.0])
-    lneg = np.array([0.0, 2.0, 40.0, 40.0])
-    rpos = np.array([40.0, 40.0, 2.0, 0.0])
-    rneg = np.array([2.0, 2.0, 40.0, 0.0])
-    left = _cview(lpos, lneg, mass_u=lpos + lneg, mass_spl=np.zeros(4))
-    right = _cview(rpos, rneg, mass_u=rpos + rneg, mass_spl=np.zeros(4))
-    bsub = SimpleNamespace(
-        left_region=lr,
-        right_region=rr,
-        left=left,
-        right=right,
-        junction_strand=np.zeros(len(lr), dtype=np.int8),
-    )
-
-    geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
-    st = build_node_statics(chain, substrate, bsub, region_arrays)
-    belief = init_beliefs(
-        chain, substrate, bsub, region_arrays, rna_sense_frac=0.95, n_grid=40, statics=st
-    )
-    assert belief.f_g[3] == 1.0  # AMBIG starts all-gDNA
+    belief = init_beliefs(chain, geom, st, rna_sense_frac=0.95, n_grid=40)
+    assert belief.f_g[2] == 1.0  # AMBIG starts all-gDNA
     final = node_sweep(
         chain,
         st,
@@ -564,16 +353,15 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     # shows ~0 false gDNA). Still pulled well below the all-gDNA init and RNA-leaning.
     assert final.f_g[3] < 0.50
     # single-strand introns: the decisive strand wins and the floor DEFERS (a hyperprior cannot overrule a
-    # node's own strand evidence) → they stay RNA-leaning. ~0.44 since `emit_locked` defaults ON (was ~0.22
-    # muted): this chain's TERMINAL boundaries are G1-locked, and un-muting them makes them emit their
-    # structural all-gDNA into the flanking introns. That is an ARTEFACT OF THIS ARTIFICIAL CHAIN — an intron
-    # running to the chain edge with no intergenic flank cannot occur in a real annotation (a transcript ends
-    # at a TSS/TES, where a crossing fragment really is gDNA because it has no RNA upstream). On real data the
-    # seams in a zero-gDNA library carry ~no mass, so the `sm > _EPS` gate keeps them silent and the
-    # false-positive guard holds: zero-gDNA mwae is UNCHANGED by `emit_locked` on both suites (0.0088 on
-    # quick_3to1_5mb, 0.0543 on ambig_dense_10mb) with over-call also unchanged. The invariant this test
-    # actually protects — the introns stay RNA-leaning, well below their all-gDNA init — still holds.
-    assert final.f_g[1] < 0.50 and final.f_g[5] < 0.50
+    # node's own strand evidence) → they stay RNA-leaning, well below their all-gDNA init.
+    #
+    # ⭐ **S5.e removed the confound this comment used to be about.** The predecessor read ~0.44 rather
+    # than ~0.22 because the chain's two TERMINAL boundary slots were G1-locked and emitted their
+    # structural all-gDNA into the flanking introns — an artefact of an artificial chain, since an intron
+    # running to the chain edge with no intergenic flank cannot occur in a real annotation. **Those slots
+    # no longer exist**: a reference with k nodes owns k−1 lines, so there is nothing beyond the outer
+    # nodes to emit anything. The invariant the test protects is unchanged; the artefact is gone.
+    assert final.f_g[0] < 0.50 and final.f_g[4] < 0.50
 
 
 # --- density-Gaussian message form: two-sided pull + emergent deference (docs/CARRY_FORWARD.md §5) --------
@@ -637,63 +425,70 @@ def test_density_message_defers_to_decisive_strand():
 # ≈0 nascent into the intron beyond it — no wholesale nascent hallucination.
 
 
+#: slots of the ``_mature_exon_chain`` fixture. The chain is ``N E N E N E N E N`` — 9 slots, nodes at
+#: the even ones — so the exon under test is slot 4 and its two flanking introns are slots 2 and 6.
+MX_EXON, MX_INTRONS = 4, [2, 6]
+
+
 def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_scale=1.0):
-    """A `intron+ | exon+ | intron+` chain, physically consistent for a pure-MATURE expressed exon with
-    NO nascent: the exon's contained unspliced = balanced gDNA + sense (+) mature; the introns' contained
-    + boundary crossings = balanced gDNA only (mature skips the intron as SPLICED, never as an unspliced
-    crossing); the two intron↔exon junctions carry the one-sided sense spliced (mature) on the EXON flank
-    iff ``spliced``. Returns the node_sweep args (chain, statics, geometry, belief, region_arrays, bsub)."""
+    """``exon+ | intron+ | EXON+ | intron+ | exon+`` — a pure-MATURE expressed gene with NO nascent.
+
+    ⭐ **Five nodes, not three, and the extra two are load-bearing.** The predecessor put the mature
+    flux on the two intron↔exon *boundaries* by hand, because the old accumulator attributed a splice to
+    the node's edge. A junction now states its own ``(src, dst)``, so it has to HAVE endpoints: the
+    junction over intron ``n1`` runs ``n0 → n2`` and the one over ``n3`` runs ``n2 → n4``, and
+    `build_node_geometry` places their flux on the lines they leave and enter. The exon under test
+    (``n2``) ends up with mature flux on both its flanking lines — which is what the old fixture asserted
+    by construction, now derived from the graph instead.
+
+    Physically consistent: every exon's contained unspliced is balanced gDNA + sense (+) mature; the
+    introns and every line carry balanced gDNA only. ⭐ **`edge_spliced` is 0 everywhere, and that is a
+    measured fact rather than a convenience** — mature RNA never crosses an exon↔intron seam (0 of 1,146
+    seams over 7 conditions, `CARRY_FORWARD.md` §1 fact 13). It skips the intron as a junction, never as
+    a contiguous crossing.
+    """
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
-    chain = build_node_chain(np.array([0, 3]), np.array([0, 4]))  # B0 R0 B1 R1 B2 R2 B3
-    L = np.array([2000.0, 2000.0, 2000.0])
-    sig = np.array([BIT_INTRON_POS, BIT_EXON_POS, BIT_INTRON_POS], dtype=np.int64)
-    sc = np.array([TS_POS, TS_POS, TS_POS], dtype=np.int8)
-    region_arrays = SimpleNamespace(strand_class=sc, signature=sig, region_size_bp=L)
-    Eg = region_eff_length(L, gdna_fl)  # contained gDNA eff-len  (1700)
-    Er = region_eff_length(L, rna_fl)  # contained RNA  eff-len  (1800)
+    L = 2000.0
+    unb = np.full(1, UNBOUNDED_REACH)
+    Eg = float(contained_eff_length(np.full(1, L), gdna_fl)[0])  # contained gDNA placements
+    Er = float(contained_eff_length(np.full(1, L), rna_fl)[0])  # contained RNA placements
+    cross_g = float(crossing_eff_length(gdna_fl, unb, unb)[0])  # 299
+    cross_r = float(crossing_eff_length(rna_fl, unb, unb)[0])  # 199
     g_half = rho_g * Eg / 2.0  # per-strand contained gDNA count (balanced)
     mat = rho_m * Er  # contained mature count (+ strand only)
-    # exon R1: gDNA (balanced) + mature (+); introns R0/R2: gDNA only.
-    u_pos = np.array([g_half[0], g_half[1] + mat[1], g_half[2]])
-    u_neg = np.array([g_half[0], g_half[1], g_half[2]])
-    contained = _cview(u_pos, u_neg, mass_u=u_pos + u_neg, mass_spl=np.zeros(3))
-    substrate = SimpleNamespace(contained=contained)
-    # boundary crossings: gDNA only (balanced); spliced(mature) on the EXON flank of the two junctions.
-    side_g = boundary_side_eff_length(gdna_fl, L)  # (300)
-    spl_eff = spliced_side_eff_length(rna_fl, L)  # one-sided half-triangle (100)
-    lr, rr = np.array([-1, 0, 1, 2]), np.array([0, 1, 2, -1])
-
-    def gx(r):
-        return np.where(r >= 0, rho_g * side_g[np.clip(r, 0, 2)], 0.0)
-
-    lcross, rcross = gx(lr), gx(rr)
-    # ``spl_scale`` < 1 models a CAPTURE-DEPLETED junction: junction-spanning (spliced) reads are only
-    # partially captured, so the junction under-reports the exon's true mature density ⇒ the B→exon mature
-    # MEASUREMENT DISAGREES with the exon's own (confident) unspliced belief. Used by the silencing test.
-    spl_mat = rho_m * spl_eff[1] * spl_scale  # mature spliced count on the exon flank
-    # B1 (idx1): exon R1 is its RIGHT region → spliced on the RIGHT side. B2 (idx2): exon is its LEFT
-    # region → spliced on the LEFT side. (One-sided, exon flank.)
-    spl_l = np.array([0.0, 0.0, spl_mat if spliced else 0.0, 0.0])
-    spl_r = np.array([0.0, spl_mat if spliced else 0.0, 0.0, 0.0])
-    left = _cview(lcross / 2, lcross / 2, spl_sense=spl_l, mass_u=lcross, mass_spl=spl_l.copy())
-    right = _cview(rcross / 2, rcross / 2, spl_sense=spl_r, mass_u=rcross, mass_spl=spl_r.copy())
-    bsub = SimpleNamespace(
-        left_region=lr,
-        right_region=rr,
-        left=left,
-        right=right,
-        junction_strand=np.array([0, TS_POS, TS_POS, 0], dtype=np.int8),
+    is_exon = np.array([1.0, 0.0, 1.0, 0.0, 1.0])
+    # ``spl_scale`` < 1 models a CAPTURE-DEPLETED junction: junction-spanning reads are only partially
+    # captured, so the junction UNDER-reports the exon's true mature density ⇒ the edge→exon mature
+    # MEASUREMENT disagrees with the exon's own (confident) unspliced belief. Used by the silencing test.
+    j_count = rho_m * cross_r * spl_scale
+    junctions = (
+        [
+            (0, 2, Strand.POS, UNBOUNDED_REACH, UNBOUNDED_REACH, j_count),
+            (2, 4, Strand.POS, UNBOUNDED_REACH, UNBOUNDED_REACH, j_count),
+        ]
+        if spliced
+        else []
     )
-    geom = build_node_geometry(chain, substrate, bsub, region_arrays, gdna_fl, rna_fl)
-    st = build_node_statics(chain, substrate, bsub, region_arrays)
+    parts = make_chain_parts(
+        [BIT_EXON_POS, BIT_INTRON_POS, BIT_EXON_POS, BIT_INTRON_POS, BIT_EXON_POS],
+        node_size_bp=L,
+        node_pos=g_half + mat * is_exon,
+        node_neg=g_half,
+        edge_pos=rho_g * cross_g / 2.0,
+        edge_neg=rho_g * cross_g / 2.0,
+        edge_spliced=0.0,
+        junctions=junctions,
+        gdna_fl=gdna_fl,
+        rna_fl=rna_fl,
+    )
     belief = init_beliefs(
-        chain, substrate, bsub, region_arrays, rna_sense_frac=kappa, n_grid=60, statics=st
+        parts.chain, parts.geometry, parts.statics, rna_sense_frac=kappa, n_grid=60
     )
-    return chain, st, geom, belief, region_arrays, bsub
+    return parts.chain, parts.statics, parts.geometry, belief, parts.region_arrays
 
 
 def _sweep(args, kappa=0.95, n_rna_obs=10000.0, n_gdna_obs=10000.0):
-    chain, st, geom, belief, ra, bsub = args
+    chain, st, geom, belief, ra = args
     cap = {}
     final = node_sweep(
         chain,
@@ -723,7 +518,7 @@ def test_mature_no_nascent_hallucination_in_introns():
     (``ρ_nascent = ρ_RNA − ρ_mature``, intron-baselined); tighten this bound when that lands rather than
     treating 0.85 as the target."""
     fin_m, _ = _sweep(_mature_exon_chain(spliced=True))
-    fg_introns = fin_m.f_g[[1, 5]]  # chain ids of R0, R2
+    fg_introns = fin_m.f_g[MX_INTRONS]
     assert np.all(fg_introns > 0.85), fg_introns
 
 
@@ -741,7 +536,7 @@ def test_mature_measurement_recovers_exon_rna():
     correctly recovered as mostly RNA (its true f_g ≈ ρ_g·E_g/(ρ_g·E_g+ρ_m·E_r) ≈ 0.32), driven by the
     + strand tilt + the mature measurement — so the absorption does not starve the exon of its own RNA."""
     fin_m, _ = _sweep(_mature_exon_chain(spliced=True))
-    fg_exon = float(fin_m.f_g[3])  # chain id of R1 (the exon)
+    fg_exon = float(fin_m.f_g[MX_EXON])
     assert fg_exon < 0.45, fg_exon  # truth ≈0.32; comfortably RNA-dominated, not pinned to gDNA
 
 
@@ -768,7 +563,7 @@ def test_mature_measurement_disagreement_silenced():
     moves 0.2635 nats against assertion (1)'s 0.3 — a precondition on "is the disagreement big enough to be
     worth silencing", not a guarantee this test protects. A 10× depletion moves it 0.6277 and is the harder
     test."""
-    ex = 3  # chain id of the exon R1
+    ex = MX_EXON
     fin_ok, cap_ok = _sweep(_mature_exon_chain(spliced=True, rho_m=4.0, spl_scale=1.0))
     fin_lo, cap_lo = _sweep(_mature_exon_chain(spliced=True, rho_m=4.0, spl_scale=0.1))
     # (1) the depleted junction really did lower the +RNA message target into the exon (a genuine disagreement)…
@@ -797,7 +592,7 @@ def test_tau_gag_fix_spliced_junction_emits_when_unstranded():
     Pins both halves: (1) a spliced junction DELIVERS a +RNA message to its exon even unstranded; (2) the same
     chain with the spliced REMOVED delivers zero +RNA authority (a vacuous unstranded node manufactures no
     phantom RNA — the deconvolution stays gated). This exact pair fails on the pre-fix gated code."""
-    ex = 3  # chain id of the expressed exon R1
+    ex = MX_EXON
     fin_spl, cap_spl = _sweep(_mature_exon_chain(spliced=True, kappa=0.5), kappa=0.5)
     fin_no, cap_no = _sweep(_mature_exon_chain(spliced=False, kappa=0.5), kappa=0.5)
     # (1) THE FIX: the spliced (mature) MEASUREMENT reaches the exon with the strand silent (κ=½).
@@ -815,7 +610,7 @@ def test_tau_gag_fix_deconvolution_prediction_stays_gated():
     gDNA message a vacuous boundary sends carries no manufactured composition confidence beyond the honest
     structural/count evidence — the exon's solved f_g stays near the uninformative reference, not driven to a
     confident vertex by a phantom."""
-    ex = 3
+    ex = MX_EXON
     fin_no, cap_no = _sweep(_mature_exon_chain(spliced=False, kappa=0.5), kappa=0.5)
     # No spliced + no strand ⇒ the exon has no composition evidence of its own; it must not be pinned to a
     # confident vertex by the messages (the phantom would drive it to ~1). It stays mid-range (reference-led).
@@ -1005,71 +800,6 @@ def test_mrna_active_matches_same_strand_exon_rule():
     assert not bool(mn_l[0] and mn_r[0])  # − strand: intron|intron ⇒ no mature
 
 
-def test_spliced_routing_is_strand_aware_at_ambig_seams():
-    """D4 — a splice junction absorbs mature RNA ONLY on its own (motif-known) strand. Mature RNA is
-    single-stranded; a junction's strand is data-type-invariant (the genomic splice motif). At an AMBIG seam
-    (overlapping opposite-strand transcripts) the spliced (mature) mass must land on the flank carrying the
-    junction's OWN-strand exon, never merely "any exon".
-
-    Fixture from the user's complex locus (TA+ 1000-2000/10000-11000/20000-25000, TB+ 9000-25000,
-    TC- 3000-4000/10300-10800/27000-32000, TD- 3000-5000), around 10300-11000:
-      R0 ≈ 10300-10800 : TA+/TB+ exon OVER TC- exon        → EXON_POS | EXON_NEG   (AMBIG exon)
-      R1 ≈ 10800-11000 : TA+ exon OVER TC- intron          → EXON_POS | INTRON_NEG (+exon, −intron)
-      R2 ≈ 11000-…     : TA+ intron OVER TC- exon (elsewhere) → INTRON_POS | EXON_NEG (+intron, −exon)
-      B1 (R0|R1) = the TC- donor junction at 10800  → junction_strand = −
-      B2 (R1|R2) = the TA+ donor junction at 11000  → junction_strand = +
-    The − junction (B1) must route its − mature to R0 (has a − exon) and NOT to R1 (only a + exon).
-    The + junction (B2) must route its + mature to R1 (has a + exon) and NOT to R2 (only a − exon).
-    Strand-BLIND routing (`any_exon`) mis-deposits both onto the opposite-strand exon flank.
-    """
-    rro, rbo = np.array([0, 3]), np.array([0, 4])
-    chain = build_node_chain(rro, rbo)  # B0 R0 B1 R1 B2 R2 B3  → nodes 0..6
-    L = np.array([500.0, 200.0, 5000.0])
-    sig = np.array(
-        [
-            BIT_EXON_POS | BIT_EXON_NEG,  # R0: AMBIG exon
-            BIT_EXON_POS | BIT_INTRON_NEG,  # R1: + exon, − intron
-            BIT_INTRON_POS | BIT_EXON_NEG,  # R2: + intron, − exon
-        ],
-        dtype=np.int64,
-    )
-    region_arrays = SimpleNamespace(region_size_bp=L, signature=sig)
-    substrate = SimpleNamespace(contained=_view([100.0, 50.0, 100.0], [0.0, 0.0, 0.0]))
-    # spliced (mature) mass present on BOTH sides of each junction; routing decides where it lands.
-    left = _view([0.0, 50.0, 70.0, 40.0], [0.0, 50.0, 70.0, 0.0])  # B1.left=50, B2.left=70
-    right = _view([10.0, 60.0, 80.0, 0.0], [0.0, 60.0, 80.0, 0.0])  # B1.right=60, B2.right=80
-    bsub = SimpleNamespace(
-        left=left,
-        right=right,
-        left_region=np.array([-1, 0, 1, 2]),
-        right_region=np.array([0, 1, 2, -1]),
-        junction_strand=np.array([0, TS_NEG, TS_POS, 0], dtype=np.int8),
-    )
-    g = build_node_geometry(chain, substrate, bsub, region_arrays, _delta_pmf(300), _delta_pmf(200))
-
-    # B1 (node 2) — the − junction.
-    assert g.spliced_neg_left[2] == 50.0  # → R0 (has a − exon): correct before & after
-    assert (
-        g.spliced_neg_right[2] == 0.0
-    )  # NOT → R1 (+ exon only): FAILS on strand-blind code (routes 60)
-    assert (
-        g.spliced_pos_left[2] == 0.0 and g.spliced_pos_right[2] == 0.0
-    )  # a − junction carries no + mature
-
-    # B2 (node 4) — the + junction.
-    assert g.spliced_pos_left[4] == 70.0  # → R1 (has a + exon)
-    assert (
-        g.spliced_pos_right[4] == 0.0
-    )  # NOT → R2 (− exon only): FAILS on strand-blind code (routes 80)
-    assert (
-        g.spliced_neg_left[4] == 0.0 and g.spliced_neg_right[4] == 0.0
-    )  # a + junction carries no − mature
-
-
-# --------------------------------------------------------------------------------------------------
-# DOF pie relay (item 2) — S2: a test that FAILS on today's incoherent relay and flips when the
-# coordinate (λ,θ) relay lands (docs/CARRY_FORWARD.md §7 S2).
-# --------------------------------------------------------------------------------------------------
 def test_sweep_finite_over_extreme_configs():
     """F: no nan/inf reaches the fold. The real node_sweep over spliced/±, stranded/unstranded, and extreme
     gDNA/mature densities (pure-gDNA, pure-RNA, empty, tiny, huge) — every final fraction is finite & in range,

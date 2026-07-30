@@ -20,21 +20,27 @@ from rigel.calibration.signature import (
 )
 
 
-def _cview(n):
-    """A zero-count per-region/side substrate view of length ``n`` (counts/masses are irrelevant to the
-    signature-only classifier under test)."""
-    z = np.zeros(n)
+def _substrate(n_nodes, n_edges):
+    """A zero-count substrate of the right shape — the classifier under test is signature-only, so the
+    counts are irrelevant and only ``edge_spliced`` is read (for ``spliced_count``)."""
+
+    def view(n):
+        return SimpleNamespace(count=np.zeros((n, 2)))
+
     return SimpleNamespace(
-        n_unspliced_pos=z.copy(),
-        n_unspliced_neg=z.copy(),
-        mass_unspliced=z.copy(),
-        mass_spliced=z.copy(),
+        node_contained=view(n_nodes), edge_unspliced=view(n_edges), edge_spliced=view(n_edges)
     )
 
 
 def _build_statics(region_sigs):
     """Build a single-reference chain over ``region_sigs`` (genomic order) and return
-    ``(chain, statics)``. Boundaries are the ``N+1`` seams, flanks resolved from the region signatures."""
+    ``(chain, statics)``.
+
+    ⭐ ``k`` nodes own ``k − 1`` interior lines and there are **no terminal slots** — so the old
+    "boundary 0 is the reference-start sink" case does not exist to be classified any more. An edge
+    always has a node on both sides, which is what lets `build_node_statics` read its flanks straight
+    off the chain's adjacency instead of a ``left_region``/``right_region`` array with ``-1`` holes.
+    """
     sig = np.asarray(region_sigs, dtype=np.int64)
     n_reg = sig.shape[0]
     region_arrays = SimpleNamespace(
@@ -42,25 +48,14 @@ def _build_statics(region_sigs):
         signature=sig,
         region_size_bp=np.full(n_reg, 1000.0),
     )
-    substrate = SimpleNamespace(contained=_cview(n_reg))
-    lr = np.arange(-1, n_reg, dtype=np.int64)  # [-1, 0, 1, ..., n_reg-1]
-    rr = np.arange(0, n_reg + 1, dtype=np.int64)
-    rr[-1] = -1  # [0, 1, ..., n_reg-1, -1]
-    n_bnd = lr.shape[0]
-    bsub = SimpleNamespace(
-        left_region=lr,
-        right_region=rr,
-        left=_cview(n_bnd),
-        right=_cview(n_bnd),
-        junction_strand=np.zeros(n_bnd, dtype=np.int8),
-    )
-    chain = build_node_chain(np.array([0, n_reg]), np.array([0, n_bnd]))
-    return chain, build_node_statics(chain, substrate, bsub, region_arrays)
+    n_edge = max(n_reg - 1, 0)
+    chain = build_node_chain(np.array([0, n_reg]), np.array([0, n_edge]))
+    return chain, build_node_statics(chain, region_arrays)
 
 
 def test_classifier_covers_region_and_boundary_types():
-    # R0 exon+ | R1 exon+ | R2 intron+ | R3 intergenic | R4 ambig-exon | R5 ambig-exon
-    # boundaries (7): B0(−1|R0) B1(R0|R1) B2(R1|R2) B3(R2|R3) B4(R3|R4) B5(R4|R5) B6(R5|−1)
+    # N0 exon+ | N1 exon+ | N2 intron+ | N3 intergenic | N4 ambig-exon | N5 ambig-exon
+    # edges (5): E0(N0|N1) E1(N1|N2) E2(N2|N3) E3(N3|N4) E4(N4|N5) — no terminals
     sigs = [
         BIT_EXON_POS,
         BIT_EXON_POS,
@@ -73,15 +68,15 @@ def test_classifier_covers_region_and_boundary_types():
 
     # masks are bool and full-length; the whole-chain invariant mrna_active ⇒ free (nascent) holds.
     for m in (st.free_pos, st.free_neg, st.mrna_active_pos, st.mrna_active_neg):
-        assert m.dtype == bool and m.shape[0] == st.n_nodes
+        assert m.dtype == bool and m.shape[0] == st.n_slots
     assert np.all(~st.mrna_active_pos | st.free_pos)  # mature ⇒ nascent-active (+)
     assert np.all(~st.mrna_active_neg | st.free_neg)  # (−)
 
     kind, ref = np.asarray(chain.kind), np.asarray(chain.obj_idx)
-    reg = np.where(kind == NODE)[0]  # R0..R5 (genomic order)
-    bnd = np.where(kind == EDGE)[0]  # B0..B6
+    reg = np.where(kind == NODE)[0]  # N0..N5 (genomic order)
+    bnd = np.where(kind == EDGE)[0]  # E0..E4
     np.testing.assert_array_equal(ref[reg], np.arange(6))  # confirm genomic ordering
-    np.testing.assert_array_equal(ref[bnd], np.arange(7))
+    np.testing.assert_array_equal(ref[bnd], np.arange(5))
 
     def state(i):
         return (
@@ -102,9 +97,10 @@ def test_classifier_covers_region_and_boundary_types():
     assert state(reg[3]) == (False, False, False, False)  # intergenic: gDNA sink
     assert state(reg[4]) == (True, True, True, True)  # ambig-exon: mature-capable both strands
 
-    # --- boundaries: the four types ---
-    assert state(bnd[1]) == (True, False, True, False)  # exon↔exon+   : MATURE-CAPABLE
-    assert state(bnd[2]) == (True, False, False, False)  # exon↔intron+ : NASCENT-ONLY
-    assert state(bnd[3]) == (False, False, False, False)  # intron↔intergenic: SINK (no + crossing)
-    assert state(bnd[0]) == (False, False, False, False)  # terminal ↔ exon : SINK
-    assert state(bnd[5]) == (True, True, True, True)  # ambig↔ambig  : AMBIG, mature both strands
+    # --- edges: the four types. ⚠ Indices shift by one against the predecessor because the
+    # reference-start terminal slot no longer exists; E0 is now the first REAL line, N0|N1.
+    assert state(bnd[0]) == (True, False, True, False)  # exon↔exon+   : MATURE-CAPABLE
+    assert state(bnd[1]) == (True, False, False, False)  # exon↔intron+ : NASCENT-ONLY
+    assert state(bnd[2]) == (False, False, False, False)  # intron↔intergenic: SINK (no + crossing)
+    assert state(bnd[3]) == (False, False, False, False)  # intergenic↔ambig-exon : SINK
+    assert state(bnd[4]) == (True, True, True, True)  # ambig↔ambig  : AMBIG, mature both strands

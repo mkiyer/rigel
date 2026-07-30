@@ -26,8 +26,8 @@ Module layout. The per-node geometry / belief / statics / init primitives and th
 INITIALIZATION self-solve (the four sources → each node's own ``(density, precision)``) lives in `node_init`
 (`build_node_init`). Both are re-exported here for the calibrator's convenience; this module owns:
 * `node_sweep` — the single forward-backward unified sweep (build the self-solve → relay → combine → ψ solve).
-* `chain_region_deconv` / `chain_boundary_side_deconv` — project the converged belief back to the per-region
-  / per-boundary-side masses the `CalibrationResult` consumes.
+* `chain_node_deconv` / `chain_edge_deconv` — project the converged belief back onto the node axis and
+  the contiguous-edge axis, which is what `CalibrationResult` consumes.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ from .enrichment_frame import (
     residual_level_scalar,
     transfer_logvar,
 )
-from .node_chain import NODE, NodeChain
+from .node_chain import EDGE, NODE, NodeChain
 from .signature import coarse_type_array
 from .node_geometry import (
     NodeBelief,
@@ -80,8 +80,8 @@ __all__ = [
     "node_sweep",
     "node_global_geometry",
     "node_total_density",
-    "chain_region_deconv",
-    "chain_boundary_side_deconv",
+    "chain_node_deconv",
+    "chain_edge_deconv",
 ]
 
 _EPS = 1.0e-9
@@ -180,16 +180,26 @@ def node_sweep(
     # variance at, so a channel-ablation replay must pass the SAME reference to be faithful (inert in prod).
     _fg_init, _fp_init, _fn_init = f_g.copy(), f_pos.copy(), f_neg.copy()
 
-    # per-face geometry as (left, right) pairs, indexed by face (0=left, 1=right).
-    EG = (geometry.eff_gdna_left, geometry.eff_gdna_right)
-    ER = (geometry.eff_rna_left, geometry.eff_rna_right)
-    ESP = (geometry.eff_spl_left, geometry.eff_spl_right)  # one-sided spliced half-triangle eff-len
-    MS = (geometry.mass_left, geometry.mass_right)
-    SP = (geometry.spliced_pos_left, geometry.spliced_pos_right)
-    SN = (geometry.spliced_neg_left, geometry.spliced_neg_right)
-    # per-node "global" gDNA support (region = contained; boundary = both-side crossing over the averaged
-    # per-side density length) — the basis the pass-0 rate prior is fit + projected on.
-    mass_global, eff_global = node_global_geometry(chain, geometry)
+    # ── ⭐ THE FACES ARE GONE (S5.e). ──────────────────────────────────────────────────────────────
+    # These were six ``(left, right)`` tuples indexed by face, because a boundary's two sides lay in
+    # differently-sized flanks and therefore had different divisors. A contiguous edge is a 0-bp line
+    # with ONE set of numbers, so each is a single array and every ``df``/``sf`` face parameter
+    # threaded through `_relay`, `_transport`, `_peel_share` and `_seam_pair` disappears with them.
+    # ⚠ What does NOT disappear is DIRECTION: the forward and backward relays are still distinct, and
+    # a junction's donor and acceptor are still different lines. A face was a property of the GEOMETRY;
+    # a direction is a property of the MESSAGE.
+    EG = np.asarray(geometry.eff_gdna, np.float64)
+    ER = np.asarray(geometry.eff_rna, np.float64)
+    ESP = np.asarray(geometry.eff_junction, np.float64)  # [n, 2] by TRANSCRIPT strand
+    SPL = np.asarray(geometry.junction_count, np.float64)  # [n, 2] by TRANSCRIPT strand
+    CNT = np.asarray(geometry.unspliced_count, np.float64)  # [n, 2] by GENOME strand
+    # the unspliced count is BOTH the density numerator and the Poisson n (S5.e) — one number, not the
+    # old fractional ``mass`` plus a separate integer ``flux``.
+    n_slot = CNT.sum(axis=1)
+    u_pos, u_neg = CNT[:, 0], CNT[:, 1]
+    spliced_slot = np.asarray(geometry.spliced_count, np.float64).sum(axis=1)
+    # per-slot "global" gDNA support — the basis the pass-0 rate prior is fit + projected on.
+    mass_global, eff_global = node_global_geometry(geometry)
 
     # The per-node solve is the log-density 1-D/2-D log-odds solver (simplex_logodds, O(m·K),
     # genome-scale-tractable). The "solve grid" is the f_g axis the global NB prior is evaluated on (the
@@ -205,12 +215,12 @@ def node_sweep(
         ``lam_imp``/``theta_imp`` are the SINGLE-λ composition message + the θ tilt message (2-tuples of
         ``(mode, prec)``), the rank-1 fix that replaces the two per-component ``gm``/``rm`` messages."""
         return _solve_nodes_logodds_all(
-            statics.u_pos,
-            statics.u_neg,
+            u_pos,
+            u_neg,
             fp,
             fn,
-            statics.mass_unspliced,
-            statics.mass_spliced,
+            n_slot,
+            spliced_slot,
             kappa=kappa,
             od_g=od_g,
             od_r=od_r,
@@ -246,7 +256,7 @@ def node_sweep(
     #     its init (RNA cannot cross a gene boundary, so its unspliced mass is purely gDNA).
     #   * EMISSION gate (per component, in `_scan`): which MESSAGES a node sends. A three-term Boolean over the
     #     components gDNA / +RNA / −RNA, structural and symmetric — defined at the top of the scan loop.
-    solvable = (fp | fn) & (statics.mass_unspliced > 0.0)
+    solvable = (fp | fn) & (n_slot > 0.0)
 
     # THE gDNA ARM of ψ — the COMPOSITION prior. The NPMLE's two roles are kept SEPARATE
     # (docs/CARRY_FORWARD.md §5): this ``gdna_prior`` is the COMPOSITION arm ONLY.
@@ -266,9 +276,10 @@ def node_sweep(
     # enrichment prior enters the solver at all. The ENRICHMENT NPMLE itself is still fit in `calibrate` for the
     # QC report + the toy-injection substrate; it simply no longer feeds message precision.)
 
-    # Genomic node order for the forward/backward scans (within each ref path; left/right break at −1). The
-    # scans are sequential per node, so iterate as a Python list of ints (faster than numpy scalar indexing).
-    order_list = [int(x) for x in np.asarray(chain.order)]
+    # Genomic slot order for the forward/backward scans (within each ref path; left/right break at −1).
+    # ⭐ Slot ids ARE the genomic visiting order, so the order is ``arange`` and the chain does not store
+    # it. The scans are sequential, so iterate as a Python list of ints (faster than numpy indexing).
+    order_list = list(range(int(chain.n_slots)))
     # Per-node EXON-region flag (coarse_type == 2) — the unified relay routes mature into EXON destinations
     # (the graft) and peels it out of EXON sources (`ex_a` in `_unified_solve`).
     _rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
@@ -320,22 +331,15 @@ def node_sweep(
         )  # AMBIG: both strands live → the tilt θ is a free DOF (its own message)
         M = np.asarray(mass_global, np.float64)
         E_g = np.asarray(eff_global, np.float64)
-        E_r = np.where(is_reg_a, ER[0], ER[0] + ER[1]).astype(
-            np.float64
-        )  # node-level RNA-FL eff-length
+        E_r = ER  # per-slot RNA-FL eff-length — one number, no faces to sum
 
         # ── M5 σ²_transfer = Var(log r): the per-node total-density log-variance (`message_variance_derivation.md`
         # §3; `enrichment_frame.composition_logvar`). Var(log ρ_tot) = 1/n + [(1/E_g−1/E_r)/B]²·Var(f_g), with
         # Var(f_g) = (f_g(1−f_g))²/τ_λ CAPPED at f_g(1−f_g) (a fraction's max variance) and 0 for a
         # composition-certain (struct_lock) node. Evaluated at the INPUT belief f_g (consistent with the reframe
-        # densities rho_l0/rho_r0). This is the HONEST, prior-free transfer variance that RETIRES the
+        # density rho0). This is the HONEST, prior-free transfer variance that RETIRES the
         # density-uniformity NPMLE proxy (which was identically 0 in pass-0, so pass-0 had NO transfer damping).
-        _n_node = np.where(
-            is_reg_a,
-            np.asarray(geometry.n_unspl_left, np.float64),
-            np.asarray(geometry.n_unspl_left, np.float64)
-            + np.asarray(geometry.n_unspl_right, np.float64),
-        )
+        _n_node = n_slot  # the count IS the Poisson n; no separate flux to pool over faces
         _fg0 = np.clip(np.asarray(f_g, np.float64), 0.0, 1.0)
         _fgfr = _fg0 * (1.0 - _fg0)
         _tau = np.asarray(_ni.tau_lam, np.float64)
@@ -362,28 +366,20 @@ def node_sweep(
         # message and the own belief as two studies of one quantity, the DerSimonian–Laird between-source
         # estimator recovers b² with NO tuned constant (`_dl` below). Applied in `_transport`.
 
-        # per-strand spliced (mature) DENSITY — one-sided per-face density (0 on regions); the acceptor face.
-        def _face_spl(sp):
-            return np.where(sp[0] > _EPS, sp[0] / np.maximum(ESP[0], _EPS), 0.0) + np.where(
-                sp[1] > _EPS, sp[1] / np.maximum(ESP[1], _EPS), 0.0
-            )
+        # ── the per-TRANSCRIPT-STRAND mature (junction) DENSITY at each line ──────────────────────────
+        # ⭐ ONE array per strand, not a (left face, right face) pair. The predecessor needed the pair
+        # because it could not tell a donor flank from an acceptor flank without guessing from the
+        # signature bits; the v8 index states ``(src, dst, strand)`` and `build_node_geometry` has
+        # already placed the flux on the lines the junction actually leaves and enters.
+        # ⚠ And the ``accept_l``/``accept_r`` test goes with them: a line either carries mature flux or
+        # it does not, and ``mature_count == 0`` says so directly.
+        def _mature_rho(strand: int) -> np.ndarray:
+            c, e = SPL[:, strand], ESP[:, strand]
+            live = (c > _EPS) & (e > _EPS)
+            return np.where(live, c / np.where(live, e, 1.0), 0.0)
 
-        spl_p = _face_spl(SP)  # + mature density at a boundary, both faces pooled (0 on regions)
-        spl_n = _face_spl(SN)
-        # PER-FACE mature density, indexed [face] — what the routing must use. The node-pooled ``spl_*`` above
-        # double-counts on an exon↔exon junction (a donor on one flank, an acceptor on the other): each
-        # direction would peel/graft the SUM of both flanks' flux. This is the A3 per-face fix ``_scan`` already
-        # carries in ``mature_dilution[df]``; the routing needs the same face selection.
-        spl_p_f = tuple(
-            np.where(SP[k] > _EPS, SP[k] / np.maximum(ESP[k], _EPS), 0.0) for k in (0, 1)
-        )
-        spl_n_f = tuple(
-            np.where(SN[k] > _EPS, SN[k] / np.maximum(ESP[k], _EPS), 0.0) for k in (0, 1)
-        )
-        accept_l = (
-            SP[0] + SN[0]
-        ) > _EPS  # the LEFT face carries the spliced (acceptor) ⇒ WITH-spliced ρ_tot
-        accept_r = (SP[1] + SN[1]) > _EPS
+        spl_p = _mature_rho(0)  # + transcript mature density at this line (0 on NODE slots)
+        spl_n = _mature_rho(1)
 
         # ── P1d: the graft's RNA claim is a LOWER BOUND, and the tightest one is the DOMINANT flank ──────
         # A boundary hands the exon next door ``ρ_ν + ρ_μ`` as *the* exon RNA density. Every molecule
@@ -413,27 +409,23 @@ def node_sweep(
         # first halves the on-capture damage. That MODE fix is NOT landed — under capture the graft already
         # OVER-states (median φ = 2.45, an M8 frame problem), so no bound-tightening can help there — but the
         # same seam pair is what measures the variance below, and it must be framed for that too.
-        def _flank_dom(rho_lface, rho_rface, spf):
-            """Per-node: the flux each of its two flanking BOUNDARIES sends it, ALREADY lifted into this
-            node's frame, per strand.
+        def _flank_dom(rho, spf):
+            """Per-slot: the flux each of its two flanking EDGES sends it, ALREADY lifted into this
+            slot's frame, per strand.
 
-            ``spf[1]`` is a node's right face — what a LEFT neighbour presents to us — and ``spf[0]`` its
-            left face, what a RIGHT neighbour presents; the matching frame steps are the same pairs the
-            relay and the combine form. Zero wherever a flank is absent or is not a boundary, so on a
-            one-junction exon this degenerates exactly to that junction's own lifted flux."""
+            ⭐ The predecessor took four arguments — a ρ per face and a flux per face — and paired them
+            crosswise (``spf[1]`` is what a LEFT neighbour presents, ``spf[0]`` what a RIGHT one does).
+            With one ρ and one flux per slot the pairing is the identity and only the DIRECTION remains.
+            Zero wherever a flank is absent or is not an edge, so on a one-junction exon this degenerates
+            exactly to that junction's own lifted flux."""
 
-            def _side(ok, nb, src_face, dst_face, face):
+            def _side(ok, nb):
                 r = np.where(
-                    ok & (src_face[nb] > _EPS) & (dst_face > _EPS),
-                    dst_face / np.maximum(src_face[nb], _EPS),
-                    1.0,
+                    ok & (rho[nb] > _EPS) & (rho > _EPS), rho / np.maximum(rho[nb], _EPS), 1.0
                 )
-                return np.where(ok & is_bnd_a[nb], spf[face][nb] * r, 0.0)
+                return np.where(ok & is_bnd_a[nb], spf[nb] * r, 0.0)
 
-            return (
-                _side(_vl_a, _sl_a, rho_rface, rho_lface, 1),
-                _side(_vr_a, _sr_a, rho_lface, rho_rface, 0),
-            )
+            return _side(_vl_a, _sl_a), _side(_vr_a, _sr_a)
 
         # own per-component densities + precisions — the message-free SELF-SOLVE (`node_init.build_node_init`,
         # the four sources). ``rho_*`` are the own densities; ``prec_*`` combine the strand + intron-factory
@@ -534,19 +526,12 @@ def node_sweep(
         # method's own (a negative variance estimate means "no detectable drift"). At b=0 it is positively biased
         # by 0.4839·(v_msg+v_own) — the OVER-damping direction (the count-zero-info-safe one), and harmless
         # because a message that agrees with the own belief moves the fused mode nowhere.
-        def _rho_faces(fgc):
-            """Lazy, composition-aware ρ_tot from the current f_g, split per side (WITH spliced at the acceptor)."""
-            ru, rw = node_total_density(chain, geometry, fgc)
-            rs = rw - ru  # the one-sided spliced density
-            return (
-                ru,
-                ru + np.where(accept_l, rs, 0.0),
-                ru + np.where(accept_r, rs, 0.0),
-            )  # node, left-face, right-face
-
         # ── the RELAY: accumulate the forward/backward context belief (densities), reframed each hop by the
-        # INPUT-belief ρ_tot. Returns each node's context belief IN ITS OWN FRAME; the combine re-reframes.
-        rho_node0, rho_l0, rho_r0 = _rho_faces(np.asarray(f_g, np.float64))
+        # INPUT-belief ρ_tot. Returns each slot's context belief IN ITS OWN FRAME; the combine re-reframes.
+        # ⭐ ONE ρ_tot per slot. The predecessor returned a triple (node, left face, right face) because
+        # only the ACCEPTOR face carried mature; with the faces gone a line either has mature flux or it
+        # does not, so ``rho_with_mature`` already is the per-slot answer.
+        rho_node0, rho0 = node_total_density(geometry, np.asarray(f_g, np.float64))
 
         # ── THE PEEL, BY COMPOSITION: the LEVEL (M11 ⊕ the own belief) and the SHARE (M10) ─────────────────
         # A boundary's unspliced crossing is `gDNA + the RNA that CONTINUES`. The exon's RNA arriving at the
@@ -595,19 +580,12 @@ def node_sweep(
         # The level now fuses TWO legal estimators: the message's own claim, and M11's `residual_level`
         # (the destination's observed MASS closed against the message's gDNA claim — count-zero-information
         # legal, because the information is the imputed DENSITY and the count only converts it to a share).
-        _mu_f = ((spl_p_f[0], spl_n_f[0]), (spl_p_f[1], spl_n_f[1]))
-        _v_mu_f = tuple(
-            tuple(np.where(c > 0.0, 1.0 / np.maximum(c, _EPS), np.inf) for c in cs)
-            for cs in (
-                (
-                    np.asarray(geometry.spliced_n_pos_left, np.float64),
-                    np.asarray(geometry.spliced_n_neg_left, np.float64),
-                ),
-                (
-                    np.asarray(geometry.spliced_n_pos_right, np.float64),
-                    np.asarray(geometry.spliced_n_neg_right, np.float64),
-                ),
-            )
+        # ⚠ ``v_mu`` uses the spliced COUNT, never a mass — and with S5.e the two are the same array, so
+        # the rule is now structural rather than a discipline: `mature_count` IS the junction fragment
+        # count. Indexed by TRANSCRIPT strand, matching ``_mu``.
+        _mu_s = (spl_p, spl_n)
+        _v_mu_s = tuple(
+            np.where(c > 0.0, 1.0 / np.maximum(c, _EPS), np.inf) for c in (SPL[:, 0], SPL[:, 1])
         )
 
         # ── ⭐ THE SEQUENTIAL SCAN'S OPERANDS, AS PYTHON LISTS (`*_l`) ──────────────────────────────────
@@ -654,8 +632,9 @@ def node_sweep(
             )
         )
         ex_l, bnd_l, fp_l, fn_l = (a.tolist() for a in (ex_a, is_bnd_a, fp_a, fn_a))
-        spl_p_l, spl_n_l, SP_l, SN_l = ([f.tolist() for f in t] for t in (spl_p_f, spl_n_f, SP, SN))
-        mu_l, v_mu_l = ([[c.tolist() for c in face] for face in t] for t in (_mu_f, _v_mu_f))
+        spl_p_l, spl_n_l = spl_p.tolist(), spl_n.tolist()
+        SP_l, SN_l = SPL[:, 0].tolist(), SPL[:, 1].tolist()
+        mu_l, v_mu_l = [c.tolist() for c in _mu_s], [c.tolist() for c in _v_mu_s]
 
         # ── ⛔ THE ACROSS-THE-SEAM (`_far`) LEVEL ESTIMATOR IS DELETED — it was a BP VIOLATION ──────────
         # It read the node ACROSS the seam and fused it into the peel share's level. That node is
@@ -688,11 +667,14 @@ def node_sweep(
         # plugged-in point estimate, and let the destination's own ψ solve modulate it. No data reuse at
         # all. Structurally available, unimplemented, unmeasured.
 
-        def _peel_share(df, tg, tpg, tp, tn):
-            """The continuing share ``w`` and ``Var(log w)`` per strand, on face ``df`` of every node, for a
-            message whose gDNA claim is ``(tg, tpg)`` and whose RNA claim is ``(tp, tn)``. Returns
+        def _peel_share(tg, tpg, tp, tn):
+            """The continuing share ``w`` and ``Var(log w)`` per strand, at every slot, for a message whose
+            gDNA claim is ``(tg, tpg)`` and whose RNA claim is ``(tp, tn)``. Returns
             ``((w_p, vw_p), (w_n, vw_n))``; ``Var(log w) = +inf`` (⇒ zero precision, an inert message) only
             where NONE of the three estimators of the level exists.
+
+            ⭐ The ``df`` face selector is gone: the mature flux a peel is measured against is the flux at
+            THIS line, one number per transcript strand.
 
             ⚠ TWIN of `_peel_share_scalar` (the sequential relay's arm) — mirror any change into both."""
             _vg = np.where(np.asarray(tpg, np.float64) > 0.0, 1.0 / np.maximum(tpg, _EPS), np.inf)
@@ -701,8 +683,8 @@ def node_sweep(
             _a_p = np.where(_A > _EPS, np.asarray(tp, np.float64) / np.maximum(_A, _EPS), 0.0)
             out = []
             for _a, _mu, _vmu in (
-                (_a_p, _mu_f[df][0], _v_mu_f[df][0]),
-                (1.0 - _a_p, _mu_f[df][1], _v_mu_f[df][1]),
+                (_a_p, _mu_s[0], _v_mu_s[0]),
+                (1.0 - _a_p, _mu_s[1], _v_mu_s[1]),
             ):
                 # ── THE FUSE, in LINEAR density space (see `residual_level`'s return contract) ──────────
                 # Each estimator is (ρ_i, Var_i); an own/far claim carrying a delta-method log-variance v is
@@ -742,9 +724,8 @@ def node_sweep(
                 if _capture is not None:
                     _capture.setdefault(
                         "_lvl", []
-                    ).append(  # inert: the level's provenance, per face
+                    ).append(  # inert: the level's provenance, per slot
                         {
-                            "df": df,
                             "nu": np.asarray(_nu).copy(),
                             "v_nu": np.asarray(_v_nu).copy(),
                             "pm": np.asarray(_pm).copy(),
@@ -774,8 +755,8 @@ def node_sweep(
                 )
             return out
 
-        def _peel_share_scalar(i, df, tg, tpg, tp, tn):
-            """The SCALAR twin of `_peel_share`, for one node ``i`` — see that docstring for the model.
+        def _peel_share_scalar(i, tg, tpg, tp, tn):
+            """The SCALAR twin of `_peel_share`, for one slot ``i`` — see that docstring for the model.
 
             ⚠ TWIN: mirror any change into both. It exists because `_relay` is a sequential Gauss-Seidel
             scan (it cannot be vectorised) and calls this once per node per direction, so the array form
@@ -793,8 +774,8 @@ def node_sweep(
             _a_p = tp / _A if _A > _EPS else 0.0
             out = []
             for _a, _mu, _vmu in (
-                (_a_p, mu_l[df][0][i], v_mu_l[df][0][i]),
-                (1.0 - _a_p, mu_l[df][1][i], v_mu_l[df][1][i]),
+                (_a_p, mu_l[0][i], v_mu_l[0][i]),
+                (1.0 - _a_p, mu_l[1][i], v_mu_l[1][i]),
             ):
                 _nu_ms = _nu_m * _a
                 _pm = (
@@ -858,8 +839,10 @@ def node_sweep(
         # The relay's side of the pair is now scalar-native throughout — Python-float operands (the `*_l`
         # block) calling the `*_scalar` twins of the shared primitives — which is what makes it fast, and
         # one more reason the two forms cannot collapse into one.
-        def _relay(seq, nbr, dst_face, src_face, df, sf):
-            # every operand here is a Python float or bool — see the `*_l` block above
+        def _relay(seq, nbr, rho):
+            # every operand here is a Python float or bool — see the `*_l` block above.
+            # ⭐ ``dst_face``/``src_face``/``df``/``sf`` are gone: one ρ_tot and one mature flux per slot,
+            # so the only thing that still varies between the forward and backward passes is ``nbr``.
             rg, rp, rn = og_l.copy(), op_l.copy(), on_l.copy()
             pg, pp, pn = pg_own_l.copy(), pp_own_l.copy(), pn_own_l.copy()  # full → MODE fusion
             mg, mp, mn = (
@@ -878,9 +861,9 @@ def node_sweep(
                 # form) left an uncancelled ``1+ρ_spl/ρ_unspl`` at every acceptor boundary, and because the relay
                 # re-scales the SAME running density each hop that factor COMPOUNDS — measured Σf_c ≈ 71 at
                 # introns (a composition must sum to 1) and r up to 10³ into exons.
-                rho_src = src_face[s]
+                rho_src = rho[s]
                 r = (
-                    (dst_face[i] / rho_src) if (rho_src > _EPS and dst_face[i] > _EPS) else 1.0
+                    (rho[i] / rho_src) if (rho_src > _EPS and rho[i] > _EPS) else 1.0
                 )  # no frame ⇒ pass-through
                 # GRAFT (boundary → EXON, §6): the boundary's measured mature is a density AT THE SOURCE, so it
                 # joins the source's RNA BEFORE the reframe; the peel is measured at the destination and so is
@@ -895,8 +878,8 @@ def node_sweep(
                 # against — its running belief is already fused with the messages, so a DL gap here would be
                 # feedback, not evidence.
                 s2t = 0.0 if _gr else (logvar_l[i] + logvar_l[s])
-                gp = spl_p_l[sf][s] if _gr else 0.0
-                gn = spl_n_l[sf][s] if _gr else 0.0
+                gp = spl_p_l[s] if _gr else 0.0
+                gn = spl_n_l[s] if _gr else 0.0
                 tg, tp, tn = rg[s] * r, (rp[s] + gp) * r, (rn[s] + gn) * r
                 tpg, tpp, tpn = (
                     _damp(pg[s], s2t),
@@ -919,9 +902,9 @@ def node_sweep(
                     # to cancel ``r`` against and M5's graft-zero does not cover it. Charge the frame step it
                     # is implicitly mis-lifted by. Identically 0 at r = 1.
                     _s2f = s2t + graft_frame_logvar_scalar(r)
-                    _sps = SP_l[sf][s]
+                    _sps = SP_l[s]
                     _spc = _sps / (1.0 + _sps * _s2f) if _sps > _EPS else 0.0
-                    _sns = SN_l[sf][s]
+                    _sns = SN_l[s]
                     _snc = _sns / (1.0 + _sns * _s2f) if _sns > _EPS else 0.0
                     tpp += _spc
                     tpn += _snc
@@ -934,7 +917,7 @@ def node_sweep(
                 if (
                     bnd_l[i] and ex_l[s]
                 ):  # EXON → boundary: PEEL by COMPOSITION (scale by the share)
-                    (_wp, _vwp), (_wn, _vwn) = _peel_share_scalar(i, df, tg, tpg, tp, tn)
+                    (_wp, _vwp), (_wn, _vwn) = _peel_share_scalar(i, tg, tpg, tp, tn)
                     tp, tn = tp * _wp, tn * _wn
                     tpp, tmp = _damp_v(tpp, _vwp), _damp_v(tmp, _vwp)
                     tpn, tmn = _damp_v(tpn, _vwn), _damp_v(tmn, _vwn)
@@ -978,9 +961,7 @@ def node_sweep(
                 np.asarray(a, np.float64) for a in (rg, rp, rn, pg, pp, pn, mg, mp, mn, tau)
             )
 
-        # dst faces its source on its LEFT (face 0); the source faces the dst on its RIGHT (face 1) — and mirrored
-        # for the backward pass. The face pair selects BOTH the per-side ρ_tot and the per-face mature flux.
-        def _seam_pair(rho_lface, rho_rface):
+        def _seam_pair(rho):
             """Per strand: the graft's premise log-variance — ONE library-level scalar, fitted by method of
             moments from the destination-frame disagreement of exons' flanking seam PAIRS
             (`graft_premise_logvar`) and applied to every graft edge.
@@ -989,16 +970,16 @@ def node_sweep(
             the boundary carries a transcript TERMINUS — a bit the region map does not have. Re-derive this
             per structural class when TSS/TES land (P1g). See `graft_premise_logvar`."""
             out = []
-            for spf, vmu in ((spl_p_f, 0), (spl_n_f, 1)):
-                fl, fr = _flank_dom(rho_lface, rho_rface, spf)
+            for spf, vmu in ((spl_p, 0), (spl_n, 1)):
+                fl, fr = _flank_dom(rho, spf)
                 # each seam's own noise: its spliced COUNT (never the mass) ⊕ its lift's scale sampling
                 # (M5's source leg; the destination's leg is common to both lifts and cancels in ``d``).
                 _lv = np.where(np.isfinite(logvar_tot), logvar_tot, 0.0)
                 per, pooled = graft_premise_logvar(
                     fl,
                     fr,
-                    np.where(_vl_a, _v_mu_f[1][vmu][_sl_a] + _lv[_sl_a], np.inf),
-                    np.where(_vr_a, _v_mu_f[0][vmu][_sr_a] + _lv[_sr_a], np.inf),
+                    np.where(_vl_a, _v_mu_s[vmu][_sl_a] + _lv[_sl_a], np.inf),
+                    np.where(_vr_a, _v_mu_s[vmu][_sr_a] + _lv[_sr_a], np.inf),
                 )
                 # ⭐ The POOLED fit is applied to EVERY graft edge; the per-edge value is NOT used. Two
                 # reasons, and the statistical one is decisive:
@@ -1020,8 +1001,8 @@ def node_sweep(
                 ):  # inert: the fitted scalar and the population it was fitted on
                     _ok = (fl > _EPS) & (fr > _EPS)
                     _d = np.log(np.maximum(fl, _EPS)) - np.log(np.maximum(fr, _EPS))
-                    _vv = np.where(_vl_a, _v_mu_f[1][vmu][_sl_a] + _lv[_sl_a], 0.0) + np.where(
-                        _vr_a, _v_mu_f[0][vmu][_sr_a] + _lv[_sr_a], 0.0
+                    _vv = np.where(_vl_a, _v_mu_s[vmu][_sl_a] + _lv[_sl_a], 0.0) + np.where(
+                        _vr_a, _v_mu_s[vmu][_sr_a] + _lv[_sr_a], 0.0
                     )
                     _capture.setdefault("_glv", []).append(
                         {
@@ -1038,32 +1019,30 @@ def node_sweep(
                 out.append(np.full_like(per, pooled))
             return out[0], out[1]
 
-        # the relay runs on the INPUT-belief faces, so its seam pair is formed from those
-        vgp_prem, vgn_prem = _seam_pair(rho_l0, rho_r0)
+        # the relay runs on the INPUT-belief frame, so its seam pair is formed from that
+        vgp_prem, vgn_prem = _seam_pair(rho0)
         vgp_l, vgn_l = vgp_prem.tolist(), vgn_prem.tolist()
         left_l, right_l = left.tolist(), right.tolist()
-        rho_l0_l, rho_r0_l = rho_l0.tolist(), rho_r0.tolist()
-        fwd = _relay(order_list, left_l, rho_l0_l, rho_r0_l, 0, 1)
-        bwd = _relay(order_list[::-1], right_l, rho_r0_l, rho_l0_l, 1, 0)
+        rho0_l = rho0.tolist()
+        fwd = _relay(order_list, left_l, rho0_l)
+        bwd = _relay(order_list[::-1], right_l, rho0_l)
         # ── the COMBINE: transport α (from left neighbour) + β (from right neighbour) into the node's frame with
         # the LAZY ρ_tot (two-iteration — the 2nd uses the both-message composition), fuse, ÷M_dst → the ψ solve.
         li, ri, vl, vr, sl, sr = _li_a, _ri_a, _vl_a, _vr_a, _sl_a, _sr_a
 
         # The VECTORISED twin of `_relay` — see the DO-NOT-MERGE note there, which applies to both.
-        def _transport(src, valid, df, sf, fwd_arrs, dst_face_v, src_face_v):
+        def _transport(src, valid, fwd_arrs, rho):
             rg, rp, rn, pg, pp, pn, mg, mp, mn, tau = fwd_arrs
-            # A node with no frame (no mass ⇒ no ρ_tot, §5) cannot reframe: the message passes through at r=1.
-            # Falling back to ``rho_src = 1.0`` instead made r the destination's ABSOLUTE density (10³ on a
-            # short node) — a raw scale masquerading as a ratio. The relay already guards this way.
-            framed = valid & (src_face_v[src] > _EPS) & (dst_face_v > _EPS)
-            r = np.where(
-                framed, dst_face_v / np.maximum(src_face_v[src], _EPS), np.where(valid, 1.0, 0.0)
-            )
+            # A slot with no frame (no mass ⇒ no ρ_tot, §5) cannot reframe: the message passes through at
+            # r=1. Falling back to ``rho_src = 1.0`` instead made r the destination's ABSOLUTE density (10³
+            # on a short node) — a raw scale masquerading as a ratio. The relay already guards this way.
+            framed = valid & (rho[src] > _EPS) & (rho > _EPS)
+            r = np.where(framed, rho / np.maximum(rho[src], _EPS), np.where(valid, 1.0, 0.0))
             # GRAFT before the reframe (a density measured AT the source); PEEL after (measured at the dst).
-            # Both per-FACE, and the graft only into an EXON — see the relay's twin.
+            # The graft only into an EXON — see the relay's twin.
             graft = ex_a & is_bnd_a[src] & valid
-            gp = np.where(graft, spl_p_f[sf][src], 0.0)
-            gn = np.where(graft, spl_n_f[sf][src], 0.0)
+            gp = np.where(graft, spl_p[src], 0.0)
+            gn = np.where(graft, spl_n[src], 0.0)
             # ⛔ THE SHARE TRANSFER (`pin_derivation.md` (★)) WAS IMPLEMENTED HERE AND REVERTED, 2026-07-27.
             # It delivers the source's own composition share carried onto the destination's scale —
             # `f̂_c = ctx_c·E_c[src]/S_src`, then `t_c = f̂_c·M/E_c` — which is BP-clean, keeps a partial
@@ -1095,7 +1074,7 @@ def node_sweep(
             # the graft's MEASUREMENT precision — never τ-gated (see the relay's twin). ``_sp``>0 only on a GRAFT
             # edge, where s2t≡0, so the inf→0 substitution below touches only already-masked entries (a
             # zero-count node has logvar_tot=+inf ⇒ s2t=inf; ``0·inf`` would nan the masked branch np.where evals).
-            _sp, _sn = np.where(graft, SP[sf][src], 0.0), np.where(graft, SN[sf][src], 0.0)
+            _sp, _sn = np.where(graft, SPL[:, 0][src], 0.0), np.where(graft, SPL[:, 1][src], 0.0)
             _s2t_spl = np.where(np.isfinite(s2t), s2t, 0.0)
             # M8 — the graft's FRAME-MISLIFT variance (see the relay's twin and `graft_frame_logvar`): the
             # measured spliced already sits in the destination exon's frame, so ``r`` is NOT common-mode for it
@@ -1121,7 +1100,7 @@ def node_sweep(
             peel = (
                 is_bnd_a & ex_a[src] & valid
             )  # EXON → boundary: PEEL by COMPOSITION (the relay's twin)
-            (_wp, _vwp), (_wn, _vwn) = _peel_share(df, tg, tpg, tp, tn)
+            (_wp, _vwp), (_wn, _vwn) = _peel_share(tg, tpg, tp, tn)
             tp = np.where(peel, tp * _wp, tp)
             tn = np.where(peel, tn * _wn, tn)
 
@@ -1146,7 +1125,6 @@ def node_sweep(
             if _capture is not None:  # inert: the PRE-PIN state, for the weighted-rescale prototype
                 _capture.setdefault("_pin", []).append(
                     {
-                        "df": df,
                         "src": np.asarray(src).copy(),
                         "valid": np.asarray(valid).copy(),
                         "tg": tg.copy(),
@@ -1280,7 +1258,6 @@ def node_sweep(
             ):  # inert: the per-message gaps + the τ-stream kill, for the dissect loop
                 _capture.setdefault("_dl", []).append(
                     {
-                        "df": df,
                         "G_g": g_g.copy(),
                         "G_p": g_p.copy(),
                         "G_n": g_n.copy(),
@@ -1324,14 +1301,11 @@ def node_sweep(
             p = pa + pb
             return np.where(p > _EPS, (pa * a + pb * b) / np.maximum(p, _EPS), 0.0), p
 
-        # ONE ρ-iteration (see the note at the top of the module), so this is straight-line: the frames
-        # faces `rho_l0`/`rho_r0` already built above, and there is no next iteration to feed.
-        ag, ap, an, apg, app, apn, amg, amp, amn, atau, alam, ath = _transport(
-            sl, vl, 0, 1, fwd, rho_l0, rho_r0
-        )  # left msg: dst face 0, src face 1
-        bg, bp, bn, bpg, bpp, bpn, bmg, bmp, bmn, btau, blam, bth = _transport(
-            sr, vr, 1, 0, bwd, rho_r0, rho_l0
-        )  # right msg: dst face 1, src face 0
+        # ONE ρ-iteration (see the note at the top of the module), so this is straight-line: the frame
+        # `rho0` is already built above, and there is no next iteration to feed. ⭐ The two calls now
+        # differ ONLY in which neighbour they read — the face arguments dissolved with the faces.
+        ag, ap, an, apg, app, apn, amg, amp, amn, atau, alam, ath = _transport(sl, vl, fwd, rho0)
+        bg, bp, bn, bpg, bpp, bpn, bmg, bmp, bmn, btau, blam, bth = _transport(sr, vr, bwd, rho0)
         cg, cpg = _fuse_v(ag, apg, bg, bpg)  # density MODE (full precision-weighted)
         cp, cpp = _fuse_v(ap, app, bp, bpp)
         cn, cpn = _fuse_v(an, apn, bn, bpn)
@@ -1401,8 +1375,7 @@ def node_sweep(
                     "app": app.copy(),
                     "bpg": bpg.copy(),
                     "bpp": bpp.copy(),
-                    "rho_lf": rho_l0.copy(),
-                    "rho_rf": rho_r0.copy(),
+                    "rho_tot": rho0.copy(),
                     "mo_g": mo_g.copy(),
                     "mo_p": mo_p.copy(),
                     "mo_n": mo_n.copy(),
@@ -1446,21 +1419,13 @@ def node_sweep(
                     "bwd_pp": bwd[4],
                     "bwd_pn": bwd[5],
                     "rho_node0": rho_node0,
-                    "rho_l0": rho_l0,
-                    "rho_r0": rho_r0,
+                    "rho0": rho0,
                     # ── AUDIT_2 instrumentation (invariant scan) ──
                     "order": np.asarray(order_list, np.int64),
                     "logvar_tot": logvar_tot.copy(),
-                    "SP_l": SP[0].copy(),
-                    "SP_r": SP[1].copy(),
-                    "SN_l": SN[0].copy(),
-                    "SN_r": SN[1].copy(),
-                    "n_unspl_l": np.asarray(geometry.n_unspl_left, np.float64),
-                    "n_unspl_r": np.asarray(geometry.n_unspl_right, np.float64),
-                    "spl_n_pos_l": np.asarray(geometry.spliced_n_pos_left, np.float64),
-                    "spl_n_pos_r": np.asarray(geometry.spliced_n_pos_right, np.float64),
-                    "spl_n_neg_l": np.asarray(geometry.spliced_n_neg_left, np.float64),
-                    "spl_n_neg_r": np.asarray(geometry.spliced_n_neg_right, np.float64),
+                    "mature_pos": SPL[:, 0].copy(),
+                    "mature_neg": SPL[:, 1].copy(),
+                    "n_slot": n_slot.copy(),
                     "tau_own": tau_own.copy(),
                     "mg_own": mg_own.copy(),
                     "struct_lock": _struct.copy(),
@@ -1503,12 +1468,12 @@ def node_sweep(
         # strand-ONLY local belief (no global prior, no messages) — to split the LOCAL error into the
         # strand likelihood vs the global gDNA prior contribution. Same log-density solver, global=None.
         fg_strand = _solve_nodes_logodds_all(
-            statics.u_pos,
-            statics.u_neg,
+            u_pos,
+            u_neg,
             fp,
             fn,
-            statics.mass_unspliced,
-            statics.mass_spliced,
+            n_slot,
+            spliced_slot,
             kappa=kappa,
             od_g=od_g,
             od_r=od_r,
@@ -1541,20 +1506,17 @@ def node_sweep(
             solvable=solvable,
             # boundary-emission geometry: gDNA emits iff facing unspliced mass>0 (strand-agnostic);
             # RNA iff free_s on both endpoints & (unspliced or spliced facing mass). Capture the faces.
-            mass_l=MS[0],
-            mass_r=MS[1],
-            spl_l=SP[0] + SN[0],
-            spl_r=SP[1] + SN[1],
+            count=CNT,
+            spliced=spliced_slot,
+            mature=SPL.sum(axis=1),
             free_pos=np.asarray(fp, bool),
             free_neg=np.asarray(fn, bool),
             # global geometry (μ = clip(ρ·eff_global/mass_global, 0, 1) is the implied prior fraction).
             eff_global=eff_global,
             mass_global=mass_global,
             # per-face geometry for message dissection (logodds diagnostics)
-            eff_gdna_l=EG[0],
-            eff_gdna_r=EG[1],
-            eff_rna_l=ER[0],
-            eff_rna_r=ER[1],
+            eff_gdna=EG,
+            eff_rna=ER,
             # the full per-node global prior term on the solve grid (strand-free), so a diagnostic can
             # replay _solve_nodes_logodds_all with message channels ablated (message help/hurt attribution).
             global_lp=global_lp,
@@ -1582,61 +1544,61 @@ def node_sweep(
     )
 
 
-def chain_region_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> NodeDeconv:
-    """Project the chain belief's NODE nodes back to a region-keyed :class:`NodeDeconv` — the transitional
-    region projection the existing ``CalibrationResult`` / ``priors`` / ``derive`` consume (the per-node
-    first-class schema rewire is P4). gDNA / RNA masses from each region's solved ``f_g`` over its contained
-    unspliced (+ the always-RNA contained spliced) mass."""
+def chain_node_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> NodeDeconv:
+    """Project the chain belief's NODE slots back onto the NODE axis as a :class:`NodeDeconv` — what
+    ``CalibrationResult`` / ``priors`` / ``derive`` consume.
+
+    ⚠ **A node's contained population carries no spliced term any more, and that is structural**: the
+    accumulator credits ``node_contained`` only when the fragment used no junction, so a contained
+    fragment is unspliced by construction. The predecessor added ``+ mass_spliced`` here; that quantity
+    is identically zero on the node axis now, and adding it would be adding a channel that cannot exist.
+    """
     kind = np.asarray(chain.kind)
     idx = np.asarray(chain.obj_idx, dtype=np.int64)
     reg = kind == NODE
-    mass_u = np.asarray(substrate.contained.mass_unspliced, dtype=np.float64)
-    mass_s = np.asarray(substrate.contained.mass_spliced, dtype=np.float64)
-    R = mass_u.shape[0]
-    f_g = np.zeros(R)
-    f_pos = np.zeros(R)
-    f_neg = np.zeros(R)
+    count = np.asarray(substrate.node_contained.count, dtype=np.float64).sum(axis=1)
+    n = count.shape[0]
+    f_g = np.zeros(n)
+    f_pos = np.zeros(n)
+    f_neg = np.zeros(n)
     ri = idx[reg]
     f_g[ri] = belief.f_g[reg]
     f_pos[ri] = belief.f_pos[reg]
     f_neg[ri] = belief.f_neg[reg]
     return NodeDeconv(
-        gdna_mass=f_g * mass_u,
-        rna_mass=(1.0 - f_g) * mass_u + mass_s,
+        gdna_mass=f_g * count,
+        rna_mass=(1.0 - f_g) * count,
         gdna_frac=f_g,
         rna_pos_frac=f_pos,
         rna_neg_frac=f_neg,
     )
 
 
-def chain_boundary_side_deconv(chain: NodeChain, belief: NodeBelief, substrate):
-    """Project the chain belief's EDGE ``f_g`` onto each region's two SIDE views — the boundary-flux that
-    ``priors``' pooled-seam gDNA eff-len + ``derive`` consume.
+def chain_edge_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> NodeDeconv:
+    """Project the chain belief's EDGE slots onto the CONTIGUOUS-EDGE axis — the crossing flux that
+    ``priors`` and ``derive`` consume.
 
-    Region ``r``'s left/right boundary IS its left/right chain neighbour; that boundary's solved ``f_g`` splits
-    ``r``'s side crossing mass (``substrate.left[r]`` / ``substrate.right[r]`` — the boundary flux already
-    projected onto the region by the D1 side-attribution) into gDNA / RNA (the RNA spliced-inclusive, matching
-    the contained projection). One boundary pie applied to its side mass. Returns ``(left, right)`` region-keyed
-    :class:`NodeDeconv`."""
+    ⭐ **ONE per-edge result, not a ``(left, right)`` pair of per-region ones.** The predecessor split
+    each edge's flux onto its two flanking regions and ``priors`` then pooled the two halves straight
+    back together — so the split and the re-pool were a no-op, and that exact sum-then-halve pattern is
+    what hid a factor of 2 for months (`CARRY_FORWARD.md` §3 trap 2). Owner ruling, 2026-07-30:
+    ``CalibrationResult``'s per-region ``mass_*_left/right`` become per-edge arrays.
+
+    The RNA mass is spliced-inclusive: an edge's certified-RNA crossings (``edge_spliced``) are RNA
+    whatever the unspliced mixture resolves to, since gDNA cannot be spliced.
+    """
     kind = np.asarray(chain.kind)
-    reg_nodes = np.asarray(chain.order)[kind == NODE]
-    ridx = np.asarray(chain.obj_idx, dtype=np.int64)[reg_nodes]
-    R = int(ridx.max()) + 1 if ridx.size else 0
-    fg = np.asarray(belief.f_g, dtype=np.float64)
-    left_fg = np.zeros(R)
-    right_fg = np.zeros(R)
-    left_fg[ridx] = fg[np.asarray(chain.left)[reg_nodes]]  # f_g of r's left-flank boundary node
-    right_fg[ridx] = fg[np.asarray(chain.right)[reg_nodes]]
-
-    def _side(side_fg, view):
-        m_u = np.asarray(view.mass_unspliced, dtype=np.float64)
-        m_s = np.asarray(view.mass_spliced, dtype=np.float64)
-        return NodeDeconv(
-            gdna_mass=side_fg * m_u,
-            rna_mass=(1.0 - side_fg) * m_u + m_s,
-            gdna_frac=side_fg,
-            rna_pos_frac=np.zeros(R),
-            rna_neg_frac=np.zeros(R),
-        )
-
-    return _side(left_fg, substrate.left), _side(right_fg, substrate.right)
+    idx = np.asarray(chain.obj_idx, dtype=np.int64)
+    edge = kind == EDGE
+    unspliced = np.asarray(substrate.edge_unspliced.count, dtype=np.float64).sum(axis=1)
+    spliced = np.asarray(substrate.edge_spliced.count, dtype=np.float64).sum(axis=1)
+    n = unspliced.shape[0]
+    f_g = np.zeros(n)
+    f_g[idx[edge]] = np.asarray(belief.f_g, dtype=np.float64)[edge]
+    return NodeDeconv(
+        gdna_mass=f_g * unspliced,
+        rna_mass=(1.0 - f_g) * unspliced + spliced,
+        gdna_frac=f_g,
+        rna_pos_frac=np.zeros(n),
+        rna_neg_frac=np.zeros(n),
+    )

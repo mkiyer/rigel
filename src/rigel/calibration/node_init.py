@@ -185,15 +185,21 @@ def build_node_init(
     is_reg = np.asarray(chain.kind) == NODE
     fp = np.asarray(statics.free_pos, bool)
     fn = np.asarray(statics.free_neg, bool)
+    # ⭐ The counts come from the GEOMETRY, which is their single source since S5.e: the unspliced
+    # ``count`` is both the density numerator and the Poisson n, so there is no second copy to drift.
+    count = np.asarray(geometry.unspliced_count, np.float64)
+    u_pos, u_neg = count[:, 0], count[:, 1]
+    n_node = count.sum(axis=1)
+    spliced = np.asarray(geometry.spliced_count, np.float64).sum(axis=1)
 
     # ── source 3: the message-free strand deconvolution (1-DOF solves; AMBIG partial) ──
     dc = _solve_nodes_logodds_all(
-        statics.u_pos,
-        statics.u_neg,
+        u_pos,
+        u_neg,
         fp,
         fn,
-        statics.mass_unspliced,
-        statics.mass_spliced,
+        n_node,
+        spliced,
         kappa=kappa,
         od_g=od_g,
         od_r=od_r,
@@ -214,7 +220,7 @@ def build_node_init(
     vn_loc = np.asarray(dc.rna_neg_frac_var, np.float64)
 
     # a node that does not deconvolve its own split (G1 sink / empty) keeps the signature-binary init.
-    solvable = (fp | fn) & (np.asarray(statics.mass_unspliced, np.float64) > 0.0)
+    solvable = (fp | fn) & (n_node > 0.0)
     locked = ~solvable
     fg_loc = np.where(locked, np.asarray(belief.f_g, np.float64), fg_loc)
     fp_loc = np.where(locked, np.asarray(belief.f_pos, np.float64), fp_loc)
@@ -223,8 +229,8 @@ def build_node_init(
     # ── sources 1 & 3: the composition evidence τ_λ (the Schur-marginal gDNA-level precision) + struct lock ──
     # `strand_evidence` returns the SINGLE-STRAND strand λ-Fisher I_strand = c·a² (the value at the locked tilt).
     i_strand, struct_lock = strand_evidence(
-        statics.u_pos,
-        statics.u_neg,
+        u_pos,
+        u_neg,
         fg_loc,
         kappa=kappa,
         od_g=od_g,
@@ -250,20 +256,9 @@ def build_node_init(
     if tau_fac is not None:
         tau_lam = tau_lam + tau_fac
 
-    # ── the own per-component densities + precisions (node-level, both faces pooled) ──
-    mass_global, eff_global = node_global_geometry(chain, geometry)
-    n_node = np.where(
-        is_reg,
-        np.asarray(geometry.n_unspl_left, np.float64),
-        np.asarray(geometry.n_unspl_left, np.float64)
-        + np.asarray(geometry.n_unspl_right, np.float64),
-    )
-    eff_r = np.where(
-        is_reg,
-        np.asarray(geometry.eff_rna_left, np.float64),
-        np.asarray(geometry.eff_rna_left, np.float64)
-        + np.asarray(geometry.eff_rna_right, np.float64),
-    )
+    # ── the own per-component densities + precisions — ONE set of numbers per slot, no faces to pool ──
+    mass_global, eff_global = node_global_geometry(geometry)
+    eff_r = np.asarray(geometry.eff_rna, np.float64)
     v_log_fg, v_log_fr = own_composition_logvar(fg_loc, tau_lam, struct_lock)
 
     # gDNA (source 1 measured / source 3 strand / source 4 default all flow through here):
