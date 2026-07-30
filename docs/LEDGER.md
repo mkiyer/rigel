@@ -564,3 +564,244 @@ string keys** (`buffer.py:193,342,381` — a parquet column in the spill path �
 `resolve_context.h:307,352`, `tests/test_buffer.py:45`). A string key survives compilation and fails at
 runtime, on the buffer→EM path, which the accumulator rework does not touch. Bundling it into S3 would put
 an unrelated runtime-failure mode inside the one step whose gate is byte-identity.
+
+## S3 (WIP) — `accumulator.{h,cpp}` rewritten; on branch `s3-accumulator` (2026-07-29)
+
+**`main` stays GREEN at `c9fc7c1c`. The rewrite is on branch `s3-accumulator` at `e1114d48`** because
+`bam_scanner.cpp` still calls the old API, so the extension does not build. The two files compile
+standalone (`g++ -std=c++17 -fsyntax-only`), and the deposit is a direct transcription of the spec.
+
+### What landed
+
+`Region` / `Boundary` / the 4-channel `spliced × primary` axis are gone. In their place:
+
+| | size | holds |
+|---|---|---|
+| `Node` | 48 B | `contained_count` / `spanning_count` `uint32[2]` + both densities `uint64[2]` |
+| `ContiguousEdge` | 48 B | `unspliced` / `spliced` count + density |
+| `JunctionEdge` | 24 B | count + density |
+
+`node_start_count_` is its **own flat `uint32` array**, which is what keeps `Node` at 48 B with no padding
+member. `static_assert` on all three sizes.
+
+* `kNStrandColumns = 2`, and **`strand_column()` returns −1** for a strand that names no column. ⚠ The −1 is
+  the whole point: `align_strand == STRAND_POS ? 0 : 1` compiles, is shorter, and silently books an
+  undefined strand into the minus column — the bug this rework exists to delete.
+* `density_quantum()` — `round(2^32 / placements)`, halves away from zero, contract-pinned.
+* `FragmentPath` — one fragment as the scanner has it. ⚠ Its introns **need not** be sorted, disjoint or
+  de-duplicated; `deposit` normalises them, which is what lets `L` be *defined* as the segment total
+  instead of computed by a second formula.
+* `DepositScratch` — reusable buffers, so the deposit allocates nothing. ⭐ The shipped one spent **22.8 ns,
+  18 % of the deposit**, in a per-fragment `std::vector`, invisible to a sampling profiler because the time
+  is attributed to `malloc`.
+* `DepositCounters` — the QC denominators, mergeable.
+* `set_junctions()` as a **second** method, because `set_regions` throws if called twice.
+
+The deposit follows the spec's order, and every ordering decision carries a comment saying why it is that
+order: strand column **first** → clip to the reference → normalise introns (overlapping **and** abutting
+merge) → `L` = **sum of the path's segments**, one formula → the length gate → resolve junctions **before**
+the crossing loop, because `spliced` picks the bank → per-segment crossings via two binary searches over a
+contiguous index range → spanning as the **interior** of that range → junction deposits → contained iff the
+whole path lies in one node → the pool.
+
+⭐ **`max_length < 1` now throws**, with a message that says why, instead of silently disabling itself as
+the shipped code does (`accumulator.cpp:30-72`). It gates `L` *and* sizes the pool histograms, so at 0
+every real fragment is dropped as too long and the entire tally is silently empty. Owner-confirmed.
+
+### What remains
+
+`IMPLEMENTATION_PLAN.md` §0 carries the ordered checklist, the four verified landmines, and the gates. In
+brief: the scanner's `WorkerState`, `set_junctions` plumbing, the deposit adapter (delete `primary`, delete
+the `motif_strand` alias), `build_result`'s keys, the nanobind bindings, the byte-identity gate driven
+**through the bindings** rather than `AccumulatorPayload`, and the deletion of `fragment_genomic_spans`
+plus its parallel spec.
+
+---
+
+## S3 — the C++ wired, and byte-identical to the specification (2026-07-30)
+
+**S3 is closed.** `bam_scanner.cpp` now speaks the new API, the extension builds, and the native
+accumulator reproduces `tests/native/_accumulator_reference.py` **byte for byte on real data at full human
+scale**. The pipeline is red from here until S4 rewrites the payload — by design (§5's clean cut), and every
+one of those failures is attributed below rather than assumed.
+
+| gate | result |
+|---|---|
+| parity, fixtures | **6 pass** (`test_accumulator_native_parity.py`): 45 named cases + 10,000 random fragments + merge bit-identity at 2/4/8 shards |
+| ⭐ parity, **real data** | **BYTE-IDENTICAL** on LBX0190 (60,000 fragments, 44 refs) and on the **whole of MO_3021** (875,670 fragments, 104 refs) — every array, every dtype, every QC counter |
+| ⭐ **bit-identical at 1/2/4/8 workers** | pass, and every bank asserted non-empty first |
+| `Σ node_start_count == deposited` | holds on a real scan |
+| spec matrix | **56 pass** (from 53) |
+| suite | **1048 pass**; 240 fail + 17 error, **all 257 from one line** — see below |
+| ruff + `ruff format` | clean |
+| bench | not run: the pipeline cannot complete a scan until S4, so there is no comparable number |
+
+### ⭐ The gate, and the two holes it had
+
+The parity harness was written **before** the bindings and verified red (5/5, against the old constructor —
+it does not `importorskip`, so a stale extension is a hard error). It reads its field list off
+`dataclasses.fields(Tally)`, so a new specification field joins the gate automatically.
+
+⛔ **Then 23 perturbations of the C++ were run to see whether it actually bites. Two came back GREEN, and
+both were real gaps.**
+
+| green perturbation | why the gate could not see it | fixed by |
+|---|---|---|
+| **only the LEFTMOST annotated junction is credited** | the battery had **one** annotated junction, so no fragment could use two — and this is a rule the design deliberately REVERSED (`CARRY_FORWARD.md` §3 trap 21 still recommends the old one) | three junctions in the partition, and 8 cases using two at once |
+| `node_of_pos` upper clamp removed | unreachable from `deposit` — the path is clipped to the reference first — but the method is **bound**, so a caller can reach it | `test_node_of_pos_agrees_everywhere_including_outside_the_reference` |
+
+Both were re-run after the fix and now fail. The other 21 are caught, including: edge weight `1/L` instead
+of `1/(L−1)` · CONTAINED as "crossed no line" · `L` from the raw introns (B1) · `first_base` from the
+fragment extent · spanning as "both lines crossed" · the spliced bank never used · an undefined strand
+booked into the minus column · truncating instead of rounding half-away-from-zero · the `sj_strand` filter
+applied when NONE · abutting introns not merging · the node quantum using `L−1` · outcome precedence ·
+introns filtered instead of clipped · `start_count` charged to a rejection · a multi-line crossing entering
+a splash pool · the raw introns unsorted · `exact_cut` by `upper_bound` · the junction acceptor ignored ·
+`merge_from` dropping `node_start_count`.
+
+⚠ **Two perturbations are green for reasons that are NOT gate holes, and both are worth knowing.**
+
+1. **`L = (end − start) − Σ intron` over the NORMALISED introns is an algebraic identity**, not a bug —
+   once the introns are sorted, disjoint and clipped, that sum *is* the complement of the segment total. B1
+   is only reachable from the **raw** list, which is what the corrected perturbation used, and that one is
+   caught. ⭐ So the reference's fix ("`L` is *defined* as the segment total") is robust rather than merely
+   correct: normalising first makes the wrong formula unreachable.
+2. **Removing the `L == 1` edge-quantum guard is undetectable on this machine.** ARM64 `udiv` by zero
+   yields 0, which is exactly what the guard produces, so the observable answer is identical. On x86 the
+   same code raises SIGFPE. **The gate cannot defend that guard here**; it is defended by the comment and by
+   review, and this is stated rather than left as an apparent pass.
+
+### What the wiring changed, beyond transcription
+
+**`set_junctions` is a second method, and `scan` refuses to run without it.** A missing junction table is
+invisible — every observed intron simply reads as unannotated, so all 404,168 junction edges and both
+spliced banks come back empty from a scan that looks well-formed. Pass empty arrays to declare an
+annotation with none. `AccumulatorSet::set_junctions` does the per-reference slicing of the flat CSR
+(`offsets[c0..c1] − offsets[c0]`, `acceptor_cut − c0`), which is also why a reference's junction ids are
+`slot − j0` and the payload's junction axis is the flat slot order concatenated in reference order.
+⭐ `native_parity_on_real_data.py` re-derives that slicing **in numpy** and compares, so the two routes to
+the same arithmetic are checked against each other rather than one calling the other.
+
+**⛔ A live bug the new API cannot express, found while writing the adapter.** For a fragment with blocks on
+more than one reference the shipped code computed a span *per reference* and deposited **all of them** onto
+`exons.front().ref_id` — chr7 coordinates landing on chr1's cut axis. `ws.span_ref` recorded which
+reference each span belonged to and **nothing ever read it**, which is how it survived. Such fragments now
+deposit nothing. ⚠ Deliberately narrow: the test is multi-reference, **not** `cr.chimera_type`, which is
+also set for single-reference *cis* chimeras that the intergenic path deposits today — stopping those is a
+change to *what counts as a fragment* and belongs in its own arm (the plan's TODO). ⭐ Measured: the two
+gates admit **identical** fragments on LBX0190 and MO_3021, so the narrow choice costs nothing today.
+
+**`primary` is deleted, not renamed**, and nothing replaces it. The `align_ok`/`motif_ok` gate is gone too:
+the deposit rejects an undefined `align_strand` itself and *counts* it (158 / 615 / 246 on the three
+libraries — a population that used to vanish).
+
+**The `memcpy` §3.5 promised is not available**, and S3 took the other side of the trade. The accumulator
+stores AoS (a 48 B `Node` interleaving two `uint32` pairs and two `uint64` pairs) and the payload is SoA, so
+the copy is a strided transpose and every nanobind view needs explicit strides
+(`sizeof(struct)/sizeof(element)`). It is O(partition) once per scan against a deposit that is
+O(fragments). ⚠ The binding this replaced passed **no strides at all** and was correct only because the old
+`Region` happened to be four contiguous `uint32`.
+
+**The payload keys are the specification's `Tally` field names, character for character.** §3.5 had called
+one of them `fragment_length_pools` where the reference says `pool_lengths` — one quantity, two names, in
+the two files that must agree, which is the `motif_strand` mistake again. `ref_sj_offsets` was missing
+outright and is required: without it a consumer cannot locate a reference's junction rows.
+
+**Three silent-skip branches removed, two of them in code S3 itself wrote.** `node_types` is now required
+whenever a reference owns a node; a pool-histogram width mismatch throws in `merge_from` and in
+`build_result` instead of quietly not summing. All three would have dropped a whole output with nothing to
+notice it by. ⚠ Found in the closing review, not while writing — the habit reproduces itself, so it is worth
+grepping for `if (a.size() == b.size())` deliberately.
+
+**The silent pool-disable is gone.** `node_types` is now required whenever a reference owns a node, and
+throws otherwise. The shipped code disabled the length pools on an empty array — a whole output going
+missing with nothing to notice it by — and the specification has no such state, so a C++ mode the spec
+cannot express could only ever be a way to disagree with it.
+
+### ⭐ One word for the implicit splice: `sj_implicit` (owner ruling)
+
+`introns_inferred` / `inferred_intron_fragments` were a **second** word for a concept that already had one
+(`SPLICE_IMPLICIT`), which is the mistake `sj_strand` was renamed to fix. `sj_` is already the codebase's
+prefix for a splice-junction attribute, so a `FragmentPath` now carries `sj_strand` and `sj_implicit` — two
+attributes of one splice under one prefix. *Inferred* is gone from the vocabulary, in the reference, the
+spec matrix, both C++ files and the two design documents.
+
+### ⭐ `path_ambiguous` — a new rejection outcome, and the measurement that corrected it twice
+
+Owner ruling (design §9.1): an implicit splice **deposits**, with `sj_strand` inferred from the implying
+transcript — but only if the candidates all imply the **same intron set**. Otherwise `L`, both quanta, the
+pool bin and the set of crossed lines are all undetermined, and it cannot fall back to an unspliced deposit
+either, because `L` involves an intron. So it deposits on nothing, leaves `start_count` untouched, and is
+counted on its own denominator until the second-pass side buffer drains it.
+
+Three tests were written first and verified failing, then the reference was perturbed three ways to prove
+they bite (check deleted · precedence swapped · the two concepts conflated). **Precedence is part of the
+contract:** a fragment that is both strand-undefined and path-ambiguous is filed under the **strand**,
+because `dropped_ambiguous_path` sizes the population the second pass can **recover** and a fragment with
+no genome strand is not recoverable.
+
+⛔ **And the first measurement of it looked like a bug, because it was one.** The rule deferred **100 % of
+implicit fragments on all three real libraries and deposited none.** Cause: every gene carries a synthetic
+nascent shadow transcript spanning its locus as one exon, so that row implies no intron in any gap, ever —
+counting it as a dissenting candidate makes the test unsatisfiable. It also conflates *which intron did this
+molecule splice* with *was this molecule nascent*, which is a **component** the accumulator does not decide.
+The candidates are the real transcripts, `~is_synthetic` alone (never `is_nrna`; §3 trap 3).
+
+⚠ **A single-isoform falsification test would have caught it immediately and was not written first.** It is
+now (`test_implicit_splice_deposit.py`), with a vacuity guard — the first version of that test reported "no
+implicit fragment at all", which is how the bug surfaced.
+
+⭐ **Corrected, and the number the side buffer needs:**
+
+| library | implicit splices | deposited | deferred | deferred as a share of everything accepted |
+|---|---|---|---|---|
+| LBX0190 | 1,684 | 403 (23.9 %) | 1,281 (76.1 %) | **1.03 %** |
+| MO_3021 | 4,728 | 1,427 (30.2 %) | 3,301 (69.8 %) | **0.48 %** |
+| LBX0588 | 632 | 159 (25.2 %) | 473 (74.8 %) | **0.04 %** |
+
+Consistent across three libraries: about a quarter to a third of implicit splices have a determined path.
+⚠ The deferred share is small as a fraction of everything, so the side buffer is not urgent — but it is
+**70–76 % of the implicit population**, so that population is mostly unavailable until it lands.
+
+### ⚠ The suite: 240 failures + 17 errors, ALL from one line
+
+`scan_payload.py:102` reads `cal["n_channels"]`, which S3 deleted. Every affected module runs a scan through
+`scan_and_buffer`. ⭐ **Verified rather than assumed:** with payload construction temporarily skipped, every
+remaining failure is a *consumer* reading a payload attribute (`fl_pool_mass`, `region_contained`,
+`r_total`, `ref_boundary_offsets`, `boundaries`). **No failure comes from the deposit rule.** The first
+group is S4, the second S5.
+
+### ⚠ The performance gate is deferred to after S4, by owner ruling
+
+`~357 ns/fragment` is measured through `scripts/design/scan_profile.py` → `scan_and_buffer` → the payload,
+which cannot be constructed until S4, so the gate is unmeasurable now. Owner: *"i'm not worried about the
+performance gate. we will make it fast eventually."* Recorded here rather than papered over with a shim in
+the profiler. ⚠ The deposit is allocation-free per fragment (`DepositScratch` + the adapter's intron
+buffer), which was the one performance requirement with a measured motive — 22.8 ns, 18 % of the shipped
+deposit, in a per-fragment `std::vector`.
+
+### Files touched (S3)
+
+* `src/rigel/native/calibration/accumulator.{h,cpp}` — `sj_implicit`; `path_ambiguous` +
+  `DepositOutcome::kAmbiguousPath` + `outcome_key()`; `AccumulatorSet::set_junctions`; `node_types` required.
+* `src/rigel/native/bam_scanner.cpp` — `WorkerState` scratch; `set_regions` renamed parameters and
+  `max_length >= 1`; new `set_junctions` + the missing-table guard in `scan`; the deposit adapter; the
+  payload; the bindings. **Deleted:** `fragment_genomic_spans`, its binding, `ACCUMULATOR_N_CHANNELS`,
+  `accumulator_channel_idx`.
+* `src/rigel/native/resolve_context.h` — `collect_implicit_splice_introns` reports `out_ambiguous` over the
+  real candidates; the emission and `SPLICE_IMPLICIT` classification are unchanged by construction.
+* `src/rigel/native/constants.h` — `RawResolveResult::implicit_ambiguous`.
+* `src/rigel/pipeline.py` — `_wire_calibration_regions` installs the junction CSR.
+* `src/rigel/native.py` — `Accumulator` comes straight from `_bam_impl`; `fragment_genomic_spans` gone.
+* `tests/native/` — `test_accumulator_native_parity.py`, `test_accumulator_worker_determinism.py`,
+  `test_implicit_splice_deposit.py` new; 3 tests added to the spec matrix.
+* `scripts/design/` — `native_parity_on_real_data.py`, `implicit_splice_census.py` new.
+* **Deleted:** `src/rigel/_accumulator.py`, `tests/native/_fragment_spans_reference.py`,
+  `tests/native/test_fragment_spans_spec.py`.
+
+### What remains — S4
+
+Rewrite `AccumulatorPayload` against the new keys (they are the `Tally` field names) and delete
+`scan_payload.py:143-149`'s backwards-compat path. Then delete the two test-local monkeypatches that stand
+in for it (`test_accumulator_worker_determinism.py`, `implicit_splice_census.py`) and re-record the
+performance number.

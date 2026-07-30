@@ -246,6 +246,15 @@ struct RawResolveResult {
     // fragment span and orients the spliced channel by their strand (the splice
     // motif itself was not sequenced). Empty unless splice_type == SPLICE_IMPLICIT.
     std::vector<IntronBlock> implicit_introns;
+
+    // ⛔ The candidate transcripts do NOT agree on which introns the mate gaps contain, so the implied
+    // intron set -- and therefore L, the density quanta, the length pool and the set of lines the
+    // fragment crosses -- is undetermined. `implicit_introns` above is then only ONE candidate's answer
+    // and must not be tallied: it is the accumulator's `path_ambiguous`, deferred to the second pass,
+    // which can separate the candidates by fragment length and strand. Design §9.1.
+    //
+    // ⚠ Meaningless unless splice_type == SPLICE_IMPLICIT.
+    bool implicit_ambiguous = false;
 };
 
 // ================================================================

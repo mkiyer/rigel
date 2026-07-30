@@ -16,10 +16,12 @@ _cgranges_impl: Interval overlap queries (vendored cgranges)
 from ._bam_impl import BamScanner
 from ._bam_impl import BamAnnotationWriter
 from ._bam_impl import detect_sj_strand_tag
-from ._bam_impl import fragment_genomic_spans
 
-# -- Fractional accumulator -------------------------------------------------
-from ._accumulator import Accumulator
+# -- The accumulator --------------------------------------------------------
+# The native class directly. The `_accumulator.py` row-view façade it used to come through is gone: it
+# existed only so the pre-rework spec tests could write `acc.regions[i].contained[ch]`, and the arrays it
+# wrapped no longer exist.
+from ._bam_impl import Accumulator
 
 # -- Fragment resolution ----------------------------------------------------
 from ._resolve_impl import FragmentResolver
@@ -52,8 +54,7 @@ __all__ = [
     "BamScanner",
     "BamAnnotationWriter",
     "detect_sj_strand_tag",
-    "fragment_genomic_spans",
-    # Fractional accumulator
+    # The accumulator
     "Accumulator",
     # Resolution
     "FragmentResolver",

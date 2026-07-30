@@ -20,9 +20,10 @@ void DepositCounters::merge_from(const DepositCounters& other) noexcept {
     dropped_too_long         += other.dropped_too_long;
     dropped_empty            += other.dropped_empty;
     dropped_strand_undefined += other.dropped_strand_undefined;
+    dropped_ambiguous_path   += other.dropped_ambiguous_path;
     unannotated_introns      += other.unannotated_introns;
     contradictory_sj_strand  += other.contradictory_sj_strand;
-    inferred_intron_fragments += other.inferred_intron_fragments;
+    sj_implicit_fragments    += other.sj_implicit_fragments;
     introns_absorbed         += other.introns_absorbed;
 }
 
@@ -58,6 +59,17 @@ Accumulator::Accumulator(std::vector<std::int64_t> cuts,
     edges_.assign(n_edges, ContiguousEdge{});
     node_start_count_.assign(n_nodes, 0u);
 
+    // ⚠ REQUIRED whenever this reference owns a node, and it throws rather than quietly skipping the
+    // length pools. The shipped accumulator disabled pooling silently on an empty type array, which is a
+    // whole output going missing with nothing to notice it by; and the specification has no such state at
+    // all -- `Partition.from_cuts` always materialises a type per node -- so a C++ mode the spec cannot
+    // express could only ever be a way to disagree with it.
+    if (n_nodes > 0 && node_types.empty()) {
+        throw std::invalid_argument(
+            "accumulator: node_types is empty but this reference has " + std::to_string(n_nodes) +
+            " nodes. It types the fragment-length pools, so an empty array would silently emit no pools "
+            "at all rather than fail.");
+    }
     if (!node_types.empty()) {
         if (node_types.size() != n_nodes) {
             throw std::invalid_argument(
@@ -65,8 +77,8 @@ Accumulator::Accumulator(std::vector<std::int64_t> cuts,
                 " entries but this reference has " + std::to_string(n_nodes) + " nodes");
         }
         node_types_ = std::move(node_types);
-        pool_lengths_.assign(kNFragmentPools * (static_cast<std::size_t>(max_length_) + 1), 0);
     }
+    pool_lengths_.assign(kNFragmentPools * (static_cast<std::size_t>(max_length_) + 1), 0);
 }
 
 void Accumulator::set_junctions(std::vector<std::int32_t> offsets,
@@ -213,6 +225,15 @@ DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& sc
         ++counters_.dropped_strand_undefined;
         return DepositOutcome::kStrandUndefined;
     }
+    // ⚠ SECOND, and the order against the strand is part of the contract, because every fragment must
+    // count exactly ONCE and a fragment can be both. It is filed under the strand, because that is which
+    // denominator stays honest: `dropped_ambiguous_path` sizes the population the SECOND PASS CAN RECOVER,
+    // and a fragment with no genome strand is not recoverable -- the second pass resolves which
+    // transcript, not which strand the read aligned to.
+    if (path.path_ambiguous) {
+        ++counters_.dropped_ambiguous_path;
+        return DepositOutcome::kAmbiguousPath;
+    }
     if (cuts_.size() < 2) {
         ++counters_.dropped_empty;
         return DepositOutcome::kEmpty;
@@ -274,7 +295,7 @@ DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& sc
     const std::int64_t first_node = node_of_pos(first_base);
     node_start_count_[static_cast<std::size_t>(first_node)] += 1u;
     ++counters_.deposited;
-    if (path.introns_inferred) ++counters_.inferred_intron_fragments;
+    if (path.sj_implicit) ++counters_.sj_implicit_fragments;
 
     // ── crossings, per contiguous SEGMENT of the path ─────────────────────────────────────────────
     // A line is crossed iff it lies strictly inside a segment, so per segment the crossed lines are a
@@ -337,7 +358,7 @@ DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& sc
     }
 
     if (!pool_lengths_.empty()) {
-        const std::int64_t pool = fragment_pool(spliced, path.introns_inferred, contained_node, sole_line);
+        const std::int64_t pool = fragment_pool(spliced, path.sj_implicit, contained_node, sole_line);
         if (pool >= 0) {
             pool_lengths_[static_cast<std::size_t>(pool) * (static_cast<std::size_t>(max_length_) + 1) +
                           static_cast<std::size_t>(length)] += 1;
@@ -347,17 +368,17 @@ DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& sc
 }
 
 std::int64_t Accumulator::fragment_pool(bool spliced,
-                                        bool introns_inferred,
+                                        bool sj_implicit,
                                         std::int64_t contained_node,
                                         std::int64_t sole_line) const noexcept
 {
     // Priority, so that every pool stays pure: an OBSERVED splice is unambiguously RNA; a contained
     // fragment is typed by its node; a single-line crossing is a "splash" read typed by its two flanks.
     // Anything else -- an exonic contained fragment, a multi-line crossing -- is a mixture and enters
-    // nothing. An INFERRED splice enters nothing either: its splice is a product of the very model the
-    // pure-RNA pool is used to fit.
+    // nothing. An IMPLICIT splice enters nothing either: it was never sequenced, so certifying it as RNA
+    // would make the pure-RNA pool depend on the very length model it is used to fit.
     if (spliced) {
-        return introns_inferred ? -1 : static_cast<std::int64_t>(FragmentPool::kRnaSpliced);
+        return sj_implicit ? -1 : static_cast<std::int64_t>(FragmentPool::kRnaSpliced);
     }
     if (contained_node >= 0) {
         switch (node_types_[static_cast<std::size_t>(contained_node)]) {
@@ -424,10 +445,17 @@ void Accumulator::merge_from(const Accumulator& other) {
             junctions_[i].density[c] += other.junctions_[i].density[c];
         }
     }
-    if (pool_lengths_.size() == other.pool_lengths_.size()) {
-        for (std::size_t i = 0; i < pool_lengths_.size(); ++i) {
-            pool_lengths_[i] += other.pool_lengths_[i];
-        }
+    // ⚠ Throws rather than skipping. A size mismatch means the two were built with different `max_length`,
+    // and silently not merging would lose one side's pools entirely — the same class of defect as the
+    // shipped accumulator disabling its pools on an empty type array.
+    if (pool_lengths_.size() != other.pool_lengths_.size()) {
+        throw std::invalid_argument(
+            "accumulator: merge_from requires the same pool-histogram width (this has " +
+            std::to_string(pool_lengths_.size()) + " bins, other has " +
+            std::to_string(other.pool_lengths_.size()) + "); they were built with different max_length");
+    }
+    for (std::size_t i = 0; i < pool_lengths_.size(); ++i) {
+        pool_lengths_[i] += other.pool_lengths_[i];
     }
     counters_.merge_from(other.counters_);
 }
@@ -471,6 +499,55 @@ AccumulatorSet::AccumulatorSet(const std::int64_t* cut_positions,
         }
         accs_.emplace_back(std::move(cuts), std::move(types), max_length);
         node_base += n_nodes;
+    }
+}
+
+void AccumulatorSet::set_junctions(const std::int64_t* offsets,
+                                   std::size_t n_offsets,
+                                   const std::int64_t* acceptor_cut,
+                                   const std::int8_t* sj_strand,
+                                   std::size_t n_junctions,
+                                   const std::int64_t* ref_cut_offsets)
+{
+    if (offsets == nullptr || ref_cut_offsets == nullptr) {
+        throw std::invalid_argument(
+            "accumulator set: set_junctions needs both the CSR offsets and ref_cut_offsets");
+    }
+    const std::size_t n_cuts = static_cast<std::size_t>(ref_cut_offsets[accs_.size()]);
+    if (n_offsets != n_cuts + 1) {
+        throw std::invalid_argument(
+            "accumulator set: junction CSR offsets must have length n_cuts + 1 = " +
+            std::to_string(n_cuts + 1) + ", got " + std::to_string(n_offsets));
+    }
+    if (static_cast<std::size_t>(offsets[n_cuts]) != n_junctions) {
+        throw std::invalid_argument(
+            "accumulator set: the junction CSR ends at " + std::to_string(offsets[n_cuts]) +
+            " but " + std::to_string(n_junctions) + " junctions were given");
+    }
+
+    std::vector<std::int32_t> ref_offsets, ref_acceptor;
+    std::vector<std::int8_t>  ref_strand;
+    for (std::size_t f = 0; f < accs_.size(); ++f) {
+        const std::int64_t c0 = ref_cut_offsets[f];
+        const std::int64_t c1 = ref_cut_offsets[f + 1];
+        if (c1 <= c0) continue;  // a reference with no cuts owns no nodes and no junctions
+        const std::int64_t j0 = offsets[c0];
+        const std::int64_t j1 = offsets[c1];
+
+        ref_offsets.clear();
+        ref_offsets.reserve(static_cast<std::size_t>(c1 - c0) + 1);
+        for (std::int64_t c = c0; c <= c1; ++c) {
+            ref_offsets.push_back(static_cast<std::int32_t>(offsets[c] - j0));
+        }
+        ref_acceptor.clear();
+        ref_strand.clear();
+        ref_acceptor.reserve(static_cast<std::size_t>(j1 - j0));
+        ref_strand.reserve(static_cast<std::size_t>(j1 - j0));
+        for (std::int64_t k = j0; k < j1; ++k) {
+            ref_acceptor.push_back(static_cast<std::int32_t>(acceptor_cut[k] - c0));
+            ref_strand.push_back(sj_strand[k]);
+        }
+        accs_[f].set_junctions(ref_offsets, ref_acceptor, ref_strand);
     }
 }
 

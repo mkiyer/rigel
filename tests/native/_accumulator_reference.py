@@ -118,6 +118,11 @@ class DepositOutcome(enum.Enum):
     #: genome strand, so there is no column to credit. Required by design §10.3, which lists
     #: strand-undefined fragments among the denominators the accumulator must emit.
     STRAND_UNDEFINED = "dropped_strand_undefined"
+    #: The fragment's candidate transcripts imply **different intron sets**, so its path — and therefore
+    #: ``L``, both quanta, the pool bin and the set of lines it crosses — is not determined. It deposits
+    #: on nothing and waits for the second pass, which has the fragment length and the strand to
+    #: discriminate with. Design §9.1.
+    AMBIGUOUS_PATH = "dropped_ambiguous_path"
 
 
 class FragmentPool(enum.IntEnum):
@@ -379,7 +384,7 @@ class Tally:
             | {
                 "unannotated_introns": 0,
                 "contradictory_sj_strand": 0,
-                "inferred_intron_fragments": 0,
+                "sj_implicit_fragments": 0,
                 "introns_absorbed": 0,
             },
         )
@@ -419,15 +424,24 @@ class Accumulator:
         introns=(),
         align_strand: int = Strand.POS,
         sj_strand: int = Strand.NONE,
-        introns_inferred: bool = False,
+        sj_implicit: bool = False,
+        path_ambiguous: bool = False,
     ) -> DepositOutcome:
         """Deposit one fragment; return why it did or did not land.
 
         ``[start, end)`` is the full genomic extent — leftmost block start to rightmost block end, mate
         gap included. ``introns`` are the excised gaps inside it as ``(start, end)`` pairs.
-        ``introns_inferred`` marks a fragment whose splice was inferred rather than observed: it deposits
-        normally but is barred from the pure-RNA length pool, because its splice is a product of the very
-        model that pool is used to fit.
+        ``sj_implicit`` marks a fragment whose splice was **implicit** rather than observed — the
+        ``SPLICE_IMPLICIT`` class, where an annotated intron sits inside the unsequenced mate gap. It
+        deposits normally but is barred from the pure-RNA length pool, because its splice is a product of
+        the very model that pool is used to fit.
+
+        ⚠ ``sj_implicit`` says the splice was *not sequenced*; it does **not** say the path is in doubt.
+        A fragment whose candidate transcripts imply **different intron sets** has no determined ``L`` at
+        all, and that is ``path_ambiguous`` — a rejection, not a flag on a deposit. The caller decides it,
+        because only the caller has the candidate-transcript list; the accumulator's job is to make the
+        loss COUNTED rather than silent, which is why it is an outcome here and not a `return` in the
+        scanner.
 
         ⭐ **TWO STRANDS, AND THEY ARE INDEPENDENT.** Every read has the first; only a splice has the second.
 
@@ -457,6 +471,14 @@ class Accumulator:
         column = STRAND_COLUMNS.get(align_strand)
         if column is None:
             return self._reject(DepositOutcome.STRAND_UNDEFINED)
+
+        # ⚠ SECOND, and the order against the strand is part of the contract, because every fragment must
+        # count exactly ONCE and a fragment can be both. It is filed under the strand, because that is
+        # which denominator stays honest: `dropped_ambiguous_path` sizes the population the SECOND PASS
+        # CAN RECOVER, and a fragment with no genome strand is not recoverable — the second pass resolves
+        # which transcript, not which strand the read aligned to.
+        if path_ambiguous:
+            return self._reject(DepositOutcome.AMBIGUOUS_PATH)
 
         p = self.partition
         first_cut, last_cut = int(p.ref_cut_offsets[ref]), int(p.ref_cut_offsets[ref + 1])
@@ -511,8 +533,8 @@ class Accumulator:
         node_base, edge_base = int(p.ref_node_offsets[ref]), int(p.ref_edge_offsets[ref])
         t.node_start_count[node_base + self._local_node(cuts, first_base)] += 1
         t.qc[DepositOutcome.DEPOSITED.value] += 1
-        if introns_inferred:
-            t.qc["inferred_intron_fragments"] += 1
+        if sj_implicit:
+            t.qc["sj_implicit_fragments"] += 1
 
         # ── crossings, per contiguous SEGMENT of the path ─────────────────────────────────────────
         # A line is crossed iff it lies strictly inside a segment, so per segment the crossed lines are a
@@ -557,7 +579,7 @@ class Accumulator:
             t.node_contained_count[contained_node, column] += 1
             t.node_contained_density[contained_node, column] += quantum_node
 
-        pool = self._pool(spliced, introns_inferred, contained_node, sole_line, node_base)
+        pool = self._pool(spliced, sj_implicit, contained_node, sole_line, node_base)
         if pool is not None:
             t.pool_lengths[pool, length] += 1
         return DepositOutcome.DEPOSITED
@@ -604,7 +626,7 @@ class Accumulator:
             return k
         return -1
 
-    def _pool(self, spliced, inferred, contained_node, sole_line, node_base):
+    def _pool(self, spliced, sj_implicit, contained_node, sole_line, node_base):
         """The one length pool this fragment belongs to, or ``None``.
 
         Priority, so that every pool stays pure: an OBSERVED splice is unambiguously RNA; a contained
@@ -614,7 +636,7 @@ class Accumulator:
         """
         types = self.partition.node_types
         if spliced:
-            return None if inferred else FragmentPool.RNA_SPLICED
+            return None if sj_implicit else FragmentPool.RNA_SPLICED
         if contained_node >= 0:
             return _CONTAINED_POOL.get(int(types[contained_node]))
         if sole_line >= 0:

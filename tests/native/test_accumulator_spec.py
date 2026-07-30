@@ -425,15 +425,15 @@ def test_a_pool_is_binned_at_L_and_only_ONCE_per_fragment():
     assert int(p.sum()) == 1
 
 
-def test_an_INFERRED_intron_is_kept_OUT_of_the_pure_RNA_pool():
+def test_an_IMPLICIT_splice_is_kept_OUT_of_the_pure_RNA_pool():
     """Its splice is a model inference, not an observation, so certifying it as RNA would make the pool
     depend on the very length model it is used to fit."""
     acc = _acc(junctions=[JUNCTION])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS, introns_inferred=True)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS, sj_implicit=True)
     t = acc.tally
     assert int(t.sj_count[0, 0]) == 1, "it still deposits"
     assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 0
-    assert t.qc["inferred_intron_fragments"] == 1
+    assert t.qc["sj_implicit_fragments"] == 1
 
 
 def test_a_multi_line_crossing_enters_NO_pool():
@@ -681,6 +681,79 @@ def test_an_UNDEFINED_strand_is_REJECTED_not_silently_booked_as_MINUS(undefined)
     assert t.qc["dropped_strand_undefined"] == 1
     assert int(t.node_contained_count.sum()) == 0, "must not be booked into either column"
     assert int(t.node_start_count.sum()) == 0, "a rejected fragment never reaches the invariant"
+
+
+# ── an AMBIGUOUS PATH deposits nothing, and that is not the same thing as an IMPLICIT splice ────────
+#
+# Owner ruling, 2026-07-29 (design §9.1). A `SPLICE_IMPLICIT` fragment overlaps an annotated intron and
+# matches in every other way, so it DOES deposit — the only thing missing is the sequenced motif, and
+# `sj_implicit` records that. But when several candidate transcripts imply DIFFERENT INTRON SETS, the
+# implied set fixes `L`, both quanta, the pool bin, the segment list and therefore which lines are
+# crossed. There is no partial answer: it cannot deposit spliced (which junction is the unknown), and it
+# cannot deposit unspliced either, because `L` involves an intron and does not fit the length
+# distribution unless one candidate intron is cut out — the very choice in doubt. Forcing a choice is
+# choosing an `L` at random. So it deposits NOTHING and waits for the second pass, which has the
+# fragment length AND the strand to discriminate with.
+
+
+def test_an_AMBIGUOUS_PATH_fragment_deposits_on_NOTHING_and_is_COUNTED():
+    """⛔ The whole point: an undetermined path is a rejection, not a partial deposit.
+
+    The fragment used here would otherwise deposit richly — it crosses lines, uses an annotated junction
+    and lands in a length pool — so a leak into any one bank is visible. And it must be COUNTED: this is
+    the population the side buffer drains, so a silent drop would understate what the second pass owes.
+    """
+    acc = _acc(junctions=[JUNCTION])
+    outcome = acc.deposit(
+        0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS, path_ambiguous=True
+    )
+    assert outcome is DepositOutcome.AMBIGUOUS_PATH
+    t = acc.tally
+    assert t.qc["dropped_ambiguous_path"] == 1
+    assert t.qc["deposited"] == 0
+    for name in (
+        "node_contained_count",
+        "node_spanning_count",
+        "node_start_count",
+        "edge_unspliced_count",
+        "edge_spliced_count",
+        "sj_count",
+        "pool_lengths",
+    ):
+        assert int(getattr(t, name).sum()) == 0, f"{name} must be untouched"
+
+
+def test_an_IMPLICIT_splice_with_a_DETERMINED_path_still_deposits():
+    """The discriminating pair for the test above: `sj_implicit` and `path_ambiguous` are independent.
+
+    One says the splice was not sequenced; the other says the path is not known. Collapsing them would
+    either throw away every implicit fragment (they are a real population) or tally one at a randomly
+    chosen `L`.
+    """
+    acc = _acc(junctions=[JUNCTION])
+    outcome = acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS, sj_implicit=True)
+    assert outcome is DepositOutcome.DEPOSITED
+    t = acc.tally
+    assert int(t.sj_count[0, 0]) == 1
+    assert int(t.node_start_count.sum()) == 1
+    assert t.qc["dropped_ambiguous_path"] == 0
+
+
+def test_a_strand_undefined_AMBIGUOUS_PATH_fragment_is_counted_as_STRAND_UNDEFINED():
+    """⚠ The precedence is part of the contract, because every fragment must count exactly ONCE.
+
+    A fragment can be both. It is filed under the strand, and the reason is which denominator stays
+    honest: ``dropped_ambiguous_path`` sizes the population the **second pass can recover**, and a
+    fragment with no genome strand is not recoverable — the second pass resolves *which transcript*, not
+    *which strand the read aligned to*. Counting it as ambiguous would promise a recovery that cannot
+    happen.
+    """
+    acc = _acc()
+    outcome = acc.deposit(0, 150, 300, align_strand=Strand.AMBIGUOUS, path_ambiguous=True)
+    assert outcome is DepositOutcome.STRAND_UNDEFINED
+    t = acc.tally
+    assert t.qc["dropped_strand_undefined"] == 1
+    assert t.qc["dropped_ambiguous_path"] == 0
 
 
 # ── the splice-junction motif strand is a THREE-WAY distinction, not a two-way one ─────────────────

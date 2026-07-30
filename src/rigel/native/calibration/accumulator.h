@@ -156,7 +156,21 @@ enum class DepositOutcome : std::uint8_t {
     kTooLong         = 1,  // L above the fragment-length limit
     kEmpty           = 2,  // no path left after clipping to the reference
     kStrandUndefined = 3,  // align_strand is NONE or AMBIGUOUS, so it names no column
+    kAmbiguousPath   = 4,  // the candidates imply >1 intron set, so L is undetermined (design §9.1)
 };
+
+/// The QC counter this outcome increments — and the specification's own key for it, so the two cannot
+/// drift apart. Kept beside the enum for the same reason.
+inline const char* outcome_key(DepositOutcome outcome) noexcept {
+    switch (outcome) {
+        case DepositOutcome::kDeposited:       return "deposited";
+        case DepositOutcome::kTooLong:         return "dropped_too_long";
+        case DepositOutcome::kEmpty:           return "dropped_empty";
+        case DepositOutcome::kStrandUndefined: return "dropped_strand_undefined";
+        case DepositOutcome::kAmbiguousPath:   return "dropped_ambiguous_path";
+    }
+    return "";
+}
 
 /// One fragment, as the scanner has it. `[start, end)` is the full genomic extent -- leftmost block
 /// start to rightmost block end, MATE GAP INCLUDED, because the gap is part of the molecule.
@@ -172,7 +186,19 @@ struct FragmentPath {
     std::size_t        n_introns;
     std::int32_t       align_strand;
     std::int32_t       sj_strand;
-    bool               introns_inferred;  // SPLICE_IMPLICIT -- barred from the pure-RNA pool
+
+    /// SPLICE_IMPLICIT: the splice was never sequenced, so it is barred from the pure-RNA pool. This is a
+    /// flag on a DEPOSIT -- such a fragment overlaps an annotated intron and matches in every other way.
+    bool               sj_implicit;
+
+    /// ⛔ The candidate transcripts imply DIFFERENT INTRON SETS, so `L`, both quanta, the pool bin and the
+    /// set of crossed lines are all undetermined. Deposits on NOTHING and is counted; the second pass
+    /// resolves it with the fragment length and the strand. Design §9.1.
+    ///
+    /// ⚠ Not the same thing as `sj_implicit`, and the accumulator cannot decide it -- only the caller has
+    /// the candidate list. It is an outcome here rather than a `return` in the scanner so that the loss is
+    /// COUNTED instead of vanishing.
+    bool               path_ambiguous;
 };
 
 /// Reusable scratch so `deposit` allocates nothing on the per-fragment path.
@@ -193,9 +219,10 @@ struct DepositCounters {
     std::int64_t dropped_too_long       = 0;
     std::int64_t dropped_empty          = 0;
     std::int64_t dropped_strand_undefined = 0;
+    std::int64_t dropped_ambiguous_path = 0;  // >1 implied intron set; the second pass owes these
     std::int64_t unannotated_introns    = 0;  // observed introns with no annotated junction
     std::int64_t contradictory_sj_strand = 0;  // the mates' motif tags disagreed; no splice trusted
-    std::int64_t inferred_intron_fragments = 0;
+    std::int64_t sj_implicit_fragments  = 0;  // SPLICE_IMPLICIT: the splice was not sequenced
     std::int64_t introns_absorbed       = 0;  // overlapping or abutting introns merged away
 
     void merge_from(const DepositCounters& other) noexcept;
@@ -276,7 +303,7 @@ public:
 private:
     /// The one length pool this fragment belongs to, or -1 for none.
     std::int64_t fragment_pool(bool spliced,
-                               bool introns_inferred,
+                               bool sj_implicit,
                                std::int64_t contained_node,
                                std::int64_t sole_line) const noexcept;
 
@@ -323,6 +350,27 @@ public:
                    int max_length);
 
     std::size_t n_refs() const noexcept { return accs_.size(); }
+
+    /// Install the junction CSR for every reference at once, from the FLAT arrays the index emits
+    /// (`build_junction_edge_arrays`), keyed by the flat cut index.
+    ///
+    /// The slicing is pure arithmetic and lives here so it exists once. Reference `f` owns cuts
+    /// `[c0, c1)`, and because the CSR is sorted by flat donor cut while references are cut-major, its
+    /// junctions are the contiguous SLOT range `[offsets[c0], offsets[c1])`. So per reference:
+    ///
+    ///     offsets      -> offsets[c0 .. c1]      - offsets[c0]      (length n_cuts + 1)
+    ///     acceptor_cut -> acceptor_cut[j0 .. j1] - c0               (a ref-local cut index)
+    ///
+    /// ⚠ Two consequences, both load-bearing. A reference's junction-edge ids are `slot - j0`, so the
+    /// payload's junction axis is exactly the flat slot order concatenated in reference order — which is
+    /// what lets `edges_df.edge_row` stay a join key that never crosses the ABI. And the narrowing to
+    /// int32 is safe by census: 1.04 M cuts and 404,168 junctions at human scale.
+    void set_junctions(const std::int64_t* offsets,       // n_cuts_total + 1, over the FLAT cut axis
+                       std::size_t n_offsets,
+                       const std::int64_t* acceptor_cut,  // n_junctions_total, FLAT cut indices
+                       const std::int8_t* sj_strand,
+                       std::size_t n_junctions,
+                       const std::int64_t* ref_cut_offsets);
 
     Accumulator&       at(std::int32_t ref_id);
     const Accumulator& at(std::int32_t ref_id) const;
