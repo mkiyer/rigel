@@ -1,203 +1,332 @@
 /**
- * accumulator.h — Fractional accumulator (per-reference region/boundary split).
+ * accumulator.h — the per-fragment tally built during the single-pass BAM scan.
  *
- * Canonical spec: docs/CARRY_FORWARD.md
- * Python reference: tests/native/_accumulator_reference.py
+ *     SPEC:   tests/native/_accumulator_reference.py  — this file must reproduce it BYTE FOR BYTE.
+ *             Where the two disagree, the Python file wins.
+ *     Design: docs/ACCUMULATOR_DESIGN.md          Plan: docs/IMPLEMENTATION_PLAN.md §3
  *
- * One Accumulator describes ONE reference. Construction takes the sorted
- * boundary-position array of length N+1 (int64 genomic coordinates), giving
- * N contiguous regions and N+1 boundaries:
+ * THE MODEL
+ *   The genome is a graph. One Accumulator holds ONE reference, described by its sorted CUT positions.
+ *   A reference contributing `c` cuts owns `c - 1` NODES and `c - 2` interior LINES, and a line is a
+ *   0-bp CONTIGUOUS EDGE between two adjacent nodes:
  *
- *     regions[i]    = [boundaries[i], boundaries[i+1])
- *     boundaries[i] is positioned at the i-th coordinate
+ *       cuts    0        100       200       600        c = 4
+ *       nodes   [  n0  ][   n1   ][   n2   ]            c - 1 = 3
+ *       lines            line 1    line 2               c - 2 = 2
  *
- * Storage:
- *   Region:   uint32[4] contained                                  (16 B)
- *   Boundary: float32[4] mass_left, float32[4] mass_right,
- *             uint32[4]  flux_left, uint32[4] flux_right            (64 B)
+ *   A JUNCTION EDGE is a directed donor->acceptor link taken from the annotation. A fragment is a
+ *   PATH: its aligned blocks joined across the mate gap, broken by introns.
  *
- * Channel encoding (4 channels):  ch = (spliced ? 2 : 0) + (primary ? 0 : 1)
- *   ch0 = unspliced & primary    ch1 = unspliced & !primary
- *   ch2 = spliced   & primary    ch3 = spliced   & !primary
- * where the scanner sets `primary` to:
- *   unspliced: read aligned to the '+' genome strand (genome strand);
- *   spliced:   read is SENSE to its splice-motif strand
- *              (align_strand == sj_strand) — transcript-relative.
- * So ch0/ch1 are unspliced genome +/−; ch2/ch3 are spliced sense/antisense.
- * The accumulator is channel-agnostic — the scanner assigns `primary`.
+ *   Nodes count fragments CONTAINED (the whole path fits inside one node) and SPANNING (one segment
+ *   covers the node whole); edges count fragments CROSSING. Every object stores a uint32 count and a
+ *   uint64 fixed-point density.
  *
- * Boundary flux is PER SIDE: `flux_left[ch]` / `flux_right[ch]` count
- * fragment-events touching the left / right side of the boundary. An
- * unspliced contiguous crossing credits both sides of its one boundary; a
- * spliced intron-skip credits one side of each flanking boundary (so no false
- * exon-intron flux). Mass (`mass_left`/`mass_right`) is per side as before.
+ * WHY BOTH A COUNT AND A DENSITY
+ *   With `placements` the number of admissible start positions -- L at a node, L-1 at a 0-bp line:
  *
- * The native implementation must match the Python reference byte-for-byte.
+ *       E[count]   = rho * E[placements]
+ *       E[density] = rho * E[placements * (1/placements)] = rho      <- at an EDGE, exactly
+ *
+ *   The opportunity factor cancels identically at an edge for ANY length distribution, which is why no
+ *   divisor and no length model appear there. It does not cancel at a node.
+ *
+ * TWO STRANDS, AND THEY ARE INDEPENDENT
+ *   align_strand   the genomic strand the read ALIGNED to. Every read has one. Selects the column.
+ *   sj_strand      a splice junction's strand, from its genomic MOTIF (GT..AG is +, its reverse
+ *                  complement CT..AC is -). Spliced reads only. Resolves an intron against the
+ *                  annotation, and nothing else.
+ *   Comparing them yields sense vs antisense, which is DERIVED and never stored. The old 4-channel axis
+ *   collapsed that comparison into one bool named `primary`; that concept is gone.
  */
 #pragma once
 
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
+
+#include "../constants.h"
 
 namespace rigel::accumulator {
 
-inline constexpr std::size_t kNChannels = 4;
+// ============================================================================
+// the strand column
+// ============================================================================
 
-inline int channel_idx(bool spliced, bool primary) noexcept {
-    return (spliced ? 2 : 0) + (primary ? 0 : 1);
+//: Every count and density array has exactly two columns, and they ARE the two genome strands.
+//: `Strand` has FOUR values -- OR semantics make POS|NEG == AMBIGUOUS, and NONE means no strand at all
+//: -- so only POS and NEG name a column. A fragment carrying neither is REJECTED, never filed under one
+//: of them: that would credit it to the wrong strand rather than lose it, which is the error class this
+//: single convention exists to delete.
+inline constexpr std::size_t kNStrandColumns = 2;
+
+/// Array column for `align_strand`, or -1 if it names no single genome strand.
+///
+/// ⚠ The -1 is the whole point. `align_strand == STRAND_POS ? 0 : 1` compiles, is shorter, and silently
+/// books an undefined strand into the minus column.
+inline int strand_column(std::int32_t align_strand) noexcept {
+    if (align_strand == STRAND_POS) return 0;
+    if (align_strand == STRAND_NEG) return 1;
+    return -1;
 }
 
-// gDNA fragment-length (FL) pools (PR 4c). Each UNSPLICED fragment's FL mass is
-// binned into one of 6 pools = 3 region-types {0=intergenic, 1=intronic,
-// 2=exonic} × 2 compartments {0=contained, 1=boundary-crossing}. The gDNA FL is
-// later aggregated from the intergenic+intronic pools (both compartments); see
-// rigel.calibration.fl. FL pooling is OPTIONAL — an Accumulator built with empty
-// region_types or max_fl <= 0 skips it entirely (existing behaviour unchanged).
-inline constexpr std::size_t kNRegionTypes    = 3;
-inline constexpr std::size_t kNFlCompartments = 2;
-inline constexpr std::size_t kNFlPools        = kNRegionTypes * kNFlCompartments;  // 6
+// ============================================================================
+// the fixed-point density
+// ============================================================================
 
-inline std::size_t fl_pool_idx(std::uint8_t region_type, bool boundary) noexcept {
-    return static_cast<std::size_t>(region_type) * kNFlCompartments + (boundary ? 1u : 0u);
+//: Densities accumulate as round(kDensityScale / placements) in uint64. Integer addition is associative,
+//: so the per-worker merge is bit-identical at any thread count -- which float accumulation is not, and
+//: that nondeterminism propagated to a ~2.6 % difference in the calibration output. The scale is 2^32
+//: because it holds the quantisation error below float32's own epsilon while leaving ample headroom under
+//: the uint64 ceiling at realistic depth.
+inline constexpr std::uint64_t kDensityScale = 1ull << 32;
+
+/// round(kDensityScale / placements), rounding halves AWAY FROM ZERO.
+///
+/// ⚠ The rounding mode is part of the contract -- byte-identity with the Python reference is undefined
+/// without it. `placements` must be positive; every caller guards it (a length-1 molecule cannot cross a
+/// 0-bp line, so its edge quantum is 0 rather than a division).
+inline std::uint64_t density_quantum(std::int64_t placements) noexcept {
+    const auto p = static_cast<std::uint64_t>(placements);
+    return (2 * kDensityScale + p) / (2 * p);
 }
 
-struct Region {
-    std::uint32_t contained[kNChannels];  // 16 B
-};
-static_assert(sizeof(Region) == 16, "Region must be 16 bytes");
+// ============================================================================
+// what each object stores
+// ============================================================================
 
-struct Boundary {
-    float          mass_left[kNChannels];   // 16 B
-    float          mass_right[kNChannels];  // 16 B
-    std::uint32_t  flux_left[kNChannels];   // 16 B
-    std::uint32_t  flux_right[kNChannels];  // 16 B
+/// A node: an interval. Two disjoint populations, each two columns.
+struct Node {
+    std::uint32_t contained_count[kNStrandColumns];
+    std::uint32_t spanning_count[kNStrandColumns];
+    std::uint64_t contained_density[kNStrandColumns];
+    std::uint64_t spanning_density[kNStrandColumns];
 };
-static_assert(sizeof(Boundary) == 64, "Boundary must be 64 bytes");
+static_assert(sizeof(Node) == 48, "Node must be 48 bytes with no padding");
+
+/// A contiguous edge: the 0-bp line between two adjacent nodes. `spliced` means the FRAGMENT used an
+/// annotated junction somewhere -- not that this line is one. gDNA cannot be spliced, so a spliced
+/// crossing is a certified RNA crossing.
+struct ContiguousEdge {
+    std::uint32_t unspliced_count[kNStrandColumns];
+    std::uint32_t spliced_count[kNStrandColumns];
+    std::uint64_t unspliced_density[kNStrandColumns];
+    std::uint64_t spliced_density[kNStrandColumns];
+};
+static_assert(sizeof(ContiguousEdge) == 48, "ContiguousEdge must be 48 bytes with no padding");
+
+/// A junction edge: one exact donor->acceptor jump. Spliced by construction, so there is no unspliced
+/// population; and it is not a genomic position, so it carries no structural flags.
+struct JunctionEdge {
+    std::uint32_t count[kNStrandColumns];
+    std::uint64_t density[kNStrandColumns];
+};
+static_assert(sizeof(JunctionEdge) == 24, "JunctionEdge must be 24 bytes with no padding");
+
+// ============================================================================
+// the fragment-length pools
+// ============================================================================
+
+//: Five pools, each PURE BY CONSTRUCTION. Purity removes the circularity: a length model is fitted from
+//: a population known to be one component, so nothing is estimated from the fragments it will explain.
+//:
+//: There is deliberately NO pool for an exonic contained fragment or a multi-line crossing -- those are
+//: gDNA/RNA mixtures, and an impure pool is worse than a missing one.
+enum class FragmentPool : std::uint8_t {
+    kDnaIntergenic     = 0,  // contained in an intergenic node
+    kDnaIntronic       = 1,  // contained in an intronic node
+    kDnaIntronExon     = 2,  // crossing exactly one line, flanks {intron, exon} -- a "splash" read
+    kDnaIntergenicExon = 3,  // crossing exactly one line, flanks {intergenic, exon}
+    kRnaSpliced        = 4,  // using an annotated junction, splice OBSERVED
+};
+inline constexpr std::size_t kNFragmentPools = 5;
+
+//: Coarse node types, as `signature.coarse_type_array` emits them.
+inline constexpr std::uint8_t kTypeIntergenic = 0;
+inline constexpr std::uint8_t kTypeIntron     = 1;
+inline constexpr std::uint8_t kTypeExon       = 2;
+
+// ============================================================================
+// the deposit
+// ============================================================================
+
+/// Why a fragment did or did not deposit. Every rejection is counted, never silent.
+enum class DepositOutcome : std::uint8_t {
+    kDeposited       = 0,
+    kTooLong         = 1,  // L above the fragment-length limit
+    kEmpty           = 2,  // no path left after clipping to the reference
+    kStrandUndefined = 3,  // align_strand is NONE or AMBIGUOUS, so it names no column
+};
+
+/// One fragment, as the scanner has it. `[start, end)` is the full genomic extent -- leftmost block
+/// start to rightmost block end, MATE GAP INCLUDED, because the gap is part of the molecule.
+///
+/// ⚠ `introns` need not be sorted, disjoint, or de-duplicated; `deposit` normalises them. That is
+/// deliberate: a real BAM produces overlapping introns when the mates disagree about an acceptor, and
+/// normalising inside is what lets L be DEFINED as the total of the path's segments rather than computed
+/// by a second, independent formula that disagrees with it.
+struct FragmentPath {
+    std::int64_t       start;
+    std::int64_t       end;
+    const IntronBlock* introns;
+    std::size_t        n_introns;
+    std::int32_t       align_strand;
+    std::int32_t       sj_strand;
+    bool               introns_inferred;  // SPLICE_IMPLICIT -- barred from the pure-RNA pool
+};
+
+/// Reusable scratch so `deposit` allocates nothing on the per-fragment path.
+///
+/// ⭐ Measured on the shipped accumulator: the one per-fragment `std::vector` cost 22.8 ns, 18 % of the
+/// deposit -- and it is invisible to any profiler that samples by function, because the time is
+/// attributed to `malloc`. One instance per worker; the vectors keep their capacity across fragments.
+struct DepositScratch {
+    std::vector<std::pair<std::int64_t, std::int64_t>> introns;   // normalised: sorted, disjoint, clipped
+    std::vector<std::pair<std::int64_t, std::int64_t>> segments;  // the path, introns cut out
+    std::vector<std::int32_t>                         sj_ids;     // annotated junction edges used
+};
+
+/// The QC denominators. Not optional and not derivable afterwards: every conservation statement
+/// downstream must be able to name what it excluded.
+struct DepositCounters {
+    std::int64_t deposited              = 0;
+    std::int64_t dropped_too_long       = 0;
+    std::int64_t dropped_empty          = 0;
+    std::int64_t dropped_strand_undefined = 0;
+    std::int64_t unannotated_introns    = 0;  // observed introns with no annotated junction
+    std::int64_t contradictory_sj_strand = 0;  // the mates' motif tags disagreed; no splice trusted
+    std::int64_t inferred_intron_fragments = 0;
+    std::int64_t introns_absorbed       = 0;  // overlapping or abutting introns merged away
+
+    void merge_from(const DepositCounters& other) noexcept;
+};
+
+// ============================================================================
+// Accumulator — one reference
+// ============================================================================
 
 class Accumulator {
 public:
-    /// Construct with a sorted, strictly increasing array of boundary
-    /// positions. `boundaries` is moved into the accumulator. Length must
-    /// be >= 1; n_regions is `boundaries.size() - 1`.
+    /// `cuts` is this reference's sorted, strictly increasing cut positions and is moved in. Length may
+    /// be 0 or 1, which is a reference with no nodes: legal, and it deposits nothing.
     ///
-    /// FL pooling (PR 4c) is enabled iff `region_types` is non-empty (its
-    /// length must then equal n_regions) AND `max_fl > 0`; otherwise the FL
-    /// pools stay empty and deposit() does no FL binning.
-    explicit Accumulator(std::vector<std::int64_t> boundaries,
-                         std::vector<std::uint8_t> region_types = {},
-                         int max_fl = 0);
+    /// `node_types` is either empty or one coarse type per node; it types the length pools. `max_length`
+    /// is the fragment-length limit applied to L and the width of the pool histograms, and must be >= 1
+    /// -- at 0 every real fragment would be dropped as too long and the whole tally would be silently
+    /// empty.
+    explicit Accumulator(std::vector<std::int64_t> cuts,
+                         std::vector<std::uint8_t> node_types,
+                         int max_length);
 
-    std::size_t n_regions()    const noexcept { return regions_.size(); }
-    std::size_t n_boundaries() const noexcept { return boundaries_.size(); }
+    /// Install this reference's junction edges as a CSR keyed by DONOR CUT INDEX -- the index the
+    /// deposit already computes while locating the lines its path crosses.
+    ///
+    /// ⚠ The junction-edge id IS the slot: `sj_acceptor_cut[k]` and the bank entry `k` are the same k.
+    /// There is no indirection to a row in `edges.feather`; using that row as a bank index writes past
+    /// the end of a 404,168-entry array, because the highest such row is 1,447,755.
+    ///
+    /// ⚠ Slot ORDER is part of the contract, because the id is the rank: the caller must sort on
+    /// (donor cut, acceptor cut, sj_strand), matching `Partition.from_cuts` in the Python spec.
+    void set_junctions(std::vector<std::int32_t> offsets,       // size n_cuts + 1
+                       std::vector<std::int32_t> acceptor_cut,  // acceptor CUT INDEX, not a coordinate
+                       std::vector<std::int8_t>  sj_strand);    // the junction's ANNOTATED strand
 
-    const std::int64_t* boundary_positions() const noexcept {
-        return boundary_positions_.data();
-    }
-    std::size_t n_boundary_positions() const noexcept {
-        return boundary_positions_.size();
-    }
+    std::size_t n_nodes()    const noexcept { return nodes_.size(); }
+    std::size_t n_edges()    const noexcept { return edges_.size(); }
+    std::size_t n_junctions() const noexcept { return junctions_.size(); }
+    std::size_t n_cuts()     const noexcept { return cuts_.size(); }
 
-    Region*         regions_data()        noexcept { return regions_.data(); }
-    Boundary*       boundaries_data()     noexcept { return boundaries_.data(); }
-    const Region*   regions_data()   const noexcept { return regions_.data(); }
-    const Boundary* boundaries_data()const noexcept { return boundaries_.data(); }
+    const std::int64_t* cuts_data() const noexcept { return cuts_.data(); }
+    Node*               nodes_data()      noexcept { return nodes_.data(); }
+    const Node*         nodes_data() const noexcept { return nodes_.data(); }
+    ContiguousEdge*     edges_data()      noexcept { return edges_.data(); }
+    const ContiguousEdge* edges_data() const noexcept { return edges_.data(); }
+    JunctionEdge*       junctions_data()      noexcept { return junctions_.data(); }
+    const JunctionEdge* junctions_data() const noexcept { return junctions_.data(); }
 
-    /// gDNA FL pools (PR 4c). Flat float64, pool-major: pool `p` occupies
-    /// `[p*(max_fl+1), (p+1)*(max_fl+1))`, FL bin `min(footprint, max_fl)`.
-    /// Empty when FL pooling is disabled.
-    const double* fl_pool_data() const noexcept { return fl_pool_mass_.data(); }
-    std::size_t   fl_pool_size() const noexcept { return fl_pool_mass_.size(); }
-    int           max_fl()       const noexcept { return max_fl_; }
+    /// One uint32 per node counting fragments whose FIRST COVERED BASE lies in it.
+    ///
+    /// ⭐ This is the accumulator's one real invariant: `sum(node_start_count) == deposited`, checkable
+    /// against a number the scanner knows independently. The three "conservation identities" it replaced
+    /// were tautologies -- each right-hand side could only be evaluated by re-running the deposit, so a
+    /// deliberately broken replay satisfied all three while 91 % of the crossings were junk.
+    const std::uint32_t* node_start_count_data() const noexcept { return node_start_count_.data(); }
 
-    /// Region index containing `pos`, or -1 if `pos` is outside
-    /// [boundaries.front(), boundaries.back()).
-    std::int64_t region_of_pos(std::int64_t pos) const noexcept;
+    /// Length histograms, pool-major: pool p occupies [p*(max_length+1), (p+1)*(max_length+1)), binned
+    /// at L. Empty when this reference has no node types.
+    const std::int64_t* pool_lengths_data() const noexcept { return pool_lengths_.data(); }
+    std::size_t         pool_lengths_size() const noexcept { return pool_lengths_.size(); }
+    int                 max_length()        const noexcept { return max_length_; }
 
-    /// Deposit a single fragment's evidence per docs/CARRY_FORWARD.md.
-    /// `block_starts`/`block_ends` have length `n_blocks`. Empty / fully
-    /// out-of-range fragments are no-ops.
-    /// `strand` is the fragment's GENOMIC strand (Strand: POS=1 / NEG=2; 0 = none).
-    /// For a SPLICED crossing it is the splice-junction motif strand, recorded on
-    /// every boundary the fragment's spliced mass touches (the junction is
-    /// single-strand by its GT/AG motif, ≤1 per genomic position — see
-    /// docs/CARRY_FORWARD.md). It is ignored for unspliced
-    /// fragments (the ch0/ch1 channels already carry the genome strand) and for
-    /// contained fragments (no boundary). The SENSE/ANTISENSE channels are
-    /// unaffected — `primary` still selects them.
-    void deposit(const std::int64_t* block_starts,
-                 const std::int64_t* block_ends,
-                 std::size_t n_blocks,
-                 bool spliced,
-                 bool primary,
-                 std::int32_t strand);
+    const DepositCounters& counters() const noexcept { return counters_; }
 
-    /// Per-boundary splice-junction genomic strand (Strand POS=1/NEG=2, 0=none),
-    /// length n_boundaries. The mature-RNA anchor's strand, observed from the
-    /// motif at deposit. Empty (size 0) iff there are no boundaries.
-    const std::int8_t* boundary_junction_strand_data() const noexcept {
-        return boundary_junction_strand_.data();
-    }
+    /// Index of the node containing `position`, clamped into [0, n_nodes - 1].
+    ///
+    /// ⚠ Clamped, not -1 on miss: `deposit` has already clipped the path into this reference, so a
+    /// position outside cannot arrive, and clamping keeps this byte-compatible with the spec's
+    /// `min(max(searchsorted(cuts, p, 'right') - 1, 0), n_cuts - 2)`.
+    std::int64_t node_of_pos(std::int64_t position) const noexcept;
 
-    /// Element-wise sum of `other` into this accumulator. Requires identical
-    /// boundary positions (asserts at start). Used to merge per-worker
-    /// accumulators after a parallel scan.
+    /// Deposit one fragment. Allocates nothing: `scratch` is reused across calls.
+    DepositOutcome deposit(const FragmentPath& path, DepositScratch& scratch);
+
+    /// Element-wise sum of `other` into this accumulator. Requires identical cut positions.
     void merge_from(const Accumulator& other);
 
 private:
-    std::vector<std::int64_t> boundary_positions_;  // size = n_regions + 1
-    std::vector<Region>       regions_;             // size = n_regions
-    std::vector<Boundary>     boundaries_;          // size = n_regions + 1
-    // Per-boundary junction strand (Strand 0/1/2), size = n_regions + 1. A separate
-    // array so the 64-byte Boundary (mass/flux) layout stays byte-for-byte.
-    std::vector<std::int8_t>  boundary_junction_strand_;
-    std::vector<std::uint8_t> region_types_;        // size = n_regions, or 0 (FL off)
-    int                       max_fl_ = 0;          // FL pooling off iff <= 0
-    std::vector<double>       fl_pool_mass_;         // kNFlPools*(max_fl+1), or 0
+    /// The one length pool this fragment belongs to, or -1 for none.
+    std::int64_t fragment_pool(bool spliced,
+                               bool introns_inferred,
+                               std::int64_t contained_node,
+                               std::int64_t sole_line) const noexcept;
+
+    /// The annotated junction-edge id for one intron, or -1 if it is not an annotated junction.
+    std::int64_t sj_edge_id(std::int64_t intron_start,
+                            std::int64_t intron_end,
+                            std::int32_t sj_strand) const noexcept;
+
+    /// The flat cut index of `position`, or -1 if it is not a cut on this reference.
+    std::int64_t exact_cut(std::int64_t position) const noexcept;
+
+    std::vector<std::int64_t>  cuts_;              // n_cuts, strictly increasing
+    std::vector<Node>          nodes_;             // n_cuts - 1
+    std::vector<ContiguousEdge> edges_;            // n_cuts - 2, the interior lines
+    std::vector<JunctionEdge>  junctions_;         // one per annotated junction on this reference
+    std::vector<std::uint32_t> node_start_count_;  // n_nodes -- its own array, so Node stays 48 B
+
+    std::vector<std::int32_t>  sj_offsets_;        // n_cuts + 1, CSR over the donor cut index
+    std::vector<std::int32_t>  sj_acceptor_cut_;   // n_junctions
+    std::vector<std::int8_t>   sj_strand_;         // n_junctions, the ANNOTATED strand
+
+    std::vector<std::uint8_t>  node_types_;        // n_nodes, or empty (no pools)
+    int                        max_length_ = 0;
+    std::vector<std::int64_t>  pool_lengths_;      // kNFragmentPools * (max_length + 1), or empty
+    DepositCounters            counters_;
 };
 
 // ============================================================================
-// AccumulatorSet — one Accumulator per reference, flat shared partition.
+// AccumulatorSet — one Accumulator per reference over a flat partition
 // ============================================================================
 //
-// Inputs:
-//   - `boundary_positions`: flat int64 array of size B_pos_total holding the
-//     concatenated boundary positions for all references.
-//   - `ref_pos_offsets`: int64 array of size n_refs + 1; the boundary
-//     positions for reference f live in
-//         boundary_positions[ref_pos_offsets[f] .. ref_pos_offsets[f+1])
-//     and define n_regions_f = (ref_pos_offsets[f+1] - ref_pos_offsets[f]) - 1.
-//   - References with fewer than 2 positions (n_regions == 0) are valid and
-//     produce an empty Accumulator with no regions/boundaries.
-//
-// Total counts:
-//   R_total      = sum over refs of n_regions_f
-//   B_obj_total  = sum over refs of (n_regions_f + 1) = R_total + n_refs
-//                  for refs with >=1 region (refs with 0 regions contribute 0).
+// `cut_positions` is the concatenated, reference-major cut array; reference f owns
+// cut_positions[ref_cut_offsets[f] .. ref_cut_offsets[f+1]). A reference with fewer than 2 cuts owns no
+// nodes and no edges, which is legal.
 //
 class AccumulatorSet {
 public:
-    /// FL pooling (PR 4c): `region_types` is the flat ref-major per-region
-    /// type array (length R_total = sum of n_regions over refs); it is sliced
-    /// per reference and forwarded to each Accumulator with `max_fl`. Pass
-    /// `region_types == nullptr` / `max_fl == 0` to disable FL pooling.
-    AccumulatorSet(const std::int64_t* boundary_positions,
+    AccumulatorSet(const std::int64_t* cut_positions,
                    std::size_t n_positions,
-                   const std::int64_t* ref_pos_offsets,
+                   const std::int64_t* ref_cut_offsets,
                    std::size_t n_refs,
-                   const std::uint8_t* region_types = nullptr,
-                   std::size_t n_region_types = 0,
-                   int max_fl = 0);
+                   const std::uint8_t* node_types,
+                   std::size_t n_node_types,
+                   int max_length);
 
-    /// Number of references managed.
     std::size_t n_refs() const noexcept { return accs_.size(); }
 
-    /// Reference accumulator at index `ref_id` (0-based).
     Accumulator&       at(std::int32_t ref_id);
     const Accumulator& at(std::int32_t ref_id) const;
 
-    /// Element-wise merge of `other` into `this`. Requires the per-ref
-    /// boundary positions to match exactly.
     void merge_from(const AccumulatorSet& other);
 
 private:

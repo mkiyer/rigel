@@ -1,344 +1,491 @@
 /**
- * accumulator.cpp — Fractional accumulator implementation.
+ * accumulator.cpp — the deposit rule.
  *
- * Spec: docs/CARRY_FORWARD.md
- * Python reference: tests/native/_accumulator_reference.py
+ *     SPEC: tests/native/_accumulator_reference.py — byte for byte. Where the two disagree, it wins.
  *
- * Must match the Python reference byte-for-byte (float32 masses,
- * uint32 counts).
+ * ⚠ Every ordering decision in `deposit` is load-bearing and each one below was a real bug first. Read
+ * the comments before reordering anything.
  */
 #include "accumulator.h"
 
 #include <algorithm>
-#include <cstring>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace rigel::accumulator {
 
+void DepositCounters::merge_from(const DepositCounters& other) noexcept {
+    deposited                += other.deposited;
+    dropped_too_long         += other.dropped_too_long;
+    dropped_empty            += other.dropped_empty;
+    dropped_strand_undefined += other.dropped_strand_undefined;
+    unannotated_introns      += other.unannotated_introns;
+    contradictory_sj_strand  += other.contradictory_sj_strand;
+    inferred_intron_fragments += other.inferred_intron_fragments;
+    introns_absorbed         += other.introns_absorbed;
+}
+
+// ============================================================================
+// construction
+// ============================================================================
+
+Accumulator::Accumulator(std::vector<std::int64_t> cuts,
+                         std::vector<std::uint8_t> node_types,
+                         int max_length)
+    : cuts_(std::move(cuts)), max_length_(max_length)
+{
+    if (max_length_ < 1) {
+        throw std::invalid_argument(
+            "accumulator: max_length must be >= 1, got " + std::to_string(max_length_) +
+            ". It is the fragment-length limit applied to L as well as the pool-histogram width, so at 0 "
+            "every real fragment is dropped as too long and the whole tally is silently empty.");
+    }
+    for (std::size_t i = 1; i < cuts_.size(); ++i) {
+        if (cuts_[i] <= cuts_[i - 1]) {
+            throw std::invalid_argument(
+                "accumulator: cuts must strictly increase, but cuts[" + std::to_string(i) + "] = " +
+                std::to_string(cuts_[i]) + " <= cuts[" + std::to_string(i - 1) + "] = " +
+                std::to_string(cuts_[i - 1]));
+        }
+    }
+
+    // A reference contributing c cuts owns c-1 nodes and c-2 interior lines; one contributing fewer than
+    // two cuts owns neither, which is legal and deposits nothing.
+    const std::size_t n_nodes = cuts_.size() >= 2 ? cuts_.size() - 1 : 0;
+    const std::size_t n_edges = cuts_.size() >= 2 ? cuts_.size() - 2 : 0;
+    nodes_.assign(n_nodes, Node{});
+    edges_.assign(n_edges, ContiguousEdge{});
+    node_start_count_.assign(n_nodes, 0u);
+
+    if (!node_types.empty()) {
+        if (node_types.size() != n_nodes) {
+            throw std::invalid_argument(
+                "accumulator: node_types has " + std::to_string(node_types.size()) +
+                " entries but this reference has " + std::to_string(n_nodes) + " nodes");
+        }
+        node_types_ = std::move(node_types);
+        pool_lengths_.assign(kNFragmentPools * (static_cast<std::size_t>(max_length_) + 1), 0);
+    }
+}
+
+void Accumulator::set_junctions(std::vector<std::int32_t> offsets,
+                                std::vector<std::int32_t> acceptor_cut,
+                                std::vector<std::int8_t>  sj_strand)
+{
+    if (!offsets.empty() && offsets.size() != cuts_.size() + 1) {
+        throw std::invalid_argument(
+            "accumulator: junction CSR offsets must have length n_cuts + 1 = " +
+            std::to_string(cuts_.size() + 1) + ", got " + std::to_string(offsets.size()));
+    }
+    if (acceptor_cut.size() != sj_strand.size()) {
+        throw std::invalid_argument(
+            "accumulator: junction acceptor_cut has " + std::to_string(acceptor_cut.size()) +
+            " entries but sj_strand has " + std::to_string(sj_strand.size()));
+    }
+    if (!offsets.empty() && static_cast<std::size_t>(offsets.back()) != acceptor_cut.size()) {
+        throw std::invalid_argument(
+            "accumulator: junction CSR ends at " + std::to_string(offsets.back()) +
+            " but there are " + std::to_string(acceptor_cut.size()) + " junctions");
+    }
+    sj_offsets_      = std::move(offsets);
+    sj_acceptor_cut_ = std::move(acceptor_cut);
+    sj_strand_       = std::move(sj_strand);
+    junctions_.assign(sj_acceptor_cut_.size(), JunctionEdge{});
+}
+
+// ============================================================================
+// locating things on the cut axis
+// ============================================================================
+
+std::int64_t Accumulator::node_of_pos(std::int64_t position) const noexcept {
+    if (nodes_.empty()) return -1;
+    const auto it = std::upper_bound(cuts_.begin(), cuts_.end(), position);
+    const std::int64_t node = (it - cuts_.begin()) - 1;
+    return std::min<std::int64_t>(std::max<std::int64_t>(node, 0),
+                                  static_cast<std::int64_t>(nodes_.size()) - 1);
+}
+
+std::int64_t Accumulator::exact_cut(std::int64_t position) const noexcept {
+    const auto it = std::lower_bound(cuts_.begin(), cuts_.end(), position);
+    if (it == cuts_.end() || *it != position) return -1;
+    return it - cuts_.begin();
+}
+
+std::int64_t Accumulator::sj_edge_id(std::int64_t intron_start,
+                                     std::int64_t intron_end,
+                                     std::int32_t sj_strand) const noexcept
+{
+    if (sj_offsets_.empty()) return -1;
+    // ⭐ Every annotated intron has BOTH endpoints as partition cuts (measured: 404,168 of 404,168), so
+    // "is this intron annotated?" reduces to the binary search the deposit already performs. If the start
+    // is not a cut the table is never consulted -- and 70.4 % of cuts are not a donor at all.
+    const std::int64_t donor = exact_cut(intron_start);
+    if (donor < 0) return -1;
+    const std::int64_t acceptor = exact_cut(intron_end);
+    if (acceptor < 0) return -1;
+
+    // ⚠ The strand filter applies only when the observed strand is DEFINITE. NONE means the aligner wrote
+    // no motif tag at all (STAR writes XS, minimap2 ts, some write neither), so on such a BAM every
+    // spliced fragment arrives with NONE -- demanding a strand there would delete 100 % of that aligner's
+    // annotated junctions. AMBIGUOUS never reaches here; `deposit` rejects the whole fragment's splices.
+    const bool definite = (sj_strand == STRAND_POS || sj_strand == STRAND_NEG);
+    const std::int32_t lo = sj_offsets_[static_cast<std::size_t>(donor)];
+    const std::int32_t hi = sj_offsets_[static_cast<std::size_t>(donor) + 1];
+    for (std::int32_t k = lo; k < hi; ++k) {  // one to three iterations at human scale
+        if (sj_acceptor_cut_[static_cast<std::size_t>(k)] != acceptor) continue;
+        if (definite && sj_strand_[static_cast<std::size_t>(k)] != sj_strand) continue;
+        return k;
+    }
+    return -1;
+}
+
+// ============================================================================
+// the deposit
+// ============================================================================
+
 namespace {
 
-// Per-slice scratch entry: (region_idx, start, end).
-struct Slice {
-    std::int64_t region_idx;
-    std::int64_t start;
-    std::int64_t end;
-};
-
-}  // anonymous namespace
-
-Accumulator::Accumulator(std::vector<std::int64_t> boundaries,
-                         std::vector<std::uint8_t> region_types,
-                         int max_fl)
-    : boundary_positions_(std::move(boundaries)),
-      region_types_(std::move(region_types)),
-      max_fl_(max_fl)
+/// The introns as a sorted, DISJOINT set clipped to [start, end); returns how many were absorbed.
+///
+/// ⚠ Overlapping AND ABUTTING introns both merge. Overlapping ones are contradictory observations of one
+/// molecule -- a real BAM produces them when the mates disagree about an acceptor. Abutting ones imply a
+/// zero-length exon, which is physically impossible, so no single molecule can legitimately use both.
+///
+/// ⚠ Sort the RAW pairs and clip inside the loop, in that order, to match the spec exactly.
+std::int64_t normalise_introns(const IntronBlock* introns,
+                               std::size_t n_introns,
+                               std::int64_t start,
+                               std::int64_t end,
+                               std::vector<std::pair<std::int64_t, std::int64_t>>& out)
 {
-    // An empty position array is permitted and yields a no-op accumulator
-    // (n_regions == 0, n_boundaries == 0). This lets AccumulatorSet allocate
-    // a placeholder for references that have no annotated partition.
-    if (boundary_positions_.empty()) {
-        regions_.clear();
-        boundaries_.clear();
-        boundary_junction_strand_.clear();
-        region_types_.clear();
-        max_fl_ = 0;
-        return;
+    out.clear();
+    out.reserve(n_introns);
+    for (std::size_t i = 0; i < n_introns; ++i) {
+        out.emplace_back(static_cast<std::int64_t>(introns[i].start),
+                         static_cast<std::int64_t>(introns[i].end));
     }
-    // Strict monotonicity check.
-    for (std::size_t i = 1; i < boundary_positions_.size(); ++i) {
-        if (boundary_positions_[i] <= boundary_positions_[i - 1]) {
-            throw std::invalid_argument(
-                "Accumulator: boundaries must be strictly increasing");
-        }
-    }
-    const std::size_t n = boundary_positions_.size() - 1;
-    regions_.assign(n, Region{});
-    boundaries_.assign(n + 1, Boundary{});
-    boundary_junction_strand_.assign(n + 1, 0);  // 0 = no junction (Strand convention)
-    // POD zero-init via value-init in assign above; be explicit for clarity.
-    if (n > 0) std::memset(regions_.data(), 0, n * sizeof(Region));
-    std::memset(boundaries_.data(), 0, (n + 1) * sizeof(Boundary));
+    std::sort(out.begin(), out.end());
 
-    // FL pooling (PR 4c) is enabled iff a per-region type array of the right
-    // length is supplied AND max_fl > 0; otherwise it is a no-op.
-    if (max_fl_ > 0 && region_types_.size() == n) {
-        fl_pool_mass_.assign(kNFlPools * (static_cast<std::size_t>(max_fl_) + 1), 0.0);
+    std::int64_t absorbed = 0;
+    std::size_t kept = 0;
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        const std::int64_t intron_start = std::max(out[i].first, start);
+        const std::int64_t intron_end   = std::min(out[i].second, end);
+        if (intron_end <= intron_start) {  // zero-length, or entirely outside the fragment
+            ++absorbed;
+            continue;
+        }
+        if (kept > 0 && intron_start <= out[kept - 1].second) {
+            out[kept - 1].second = std::max(out[kept - 1].second, intron_end);
+            ++absorbed;
+            continue;
+        }
+        out[kept++] = {intron_start, intron_end};  // kept <= i, so this never clobbers an unread slot
+    }
+    out.resize(kept);
+    return absorbed;
+}
+
+/// The path's contiguous genomic segments: [start, end) with the (normalised) introns cut out.
+void build_segments(std::int64_t start,
+                    std::int64_t end,
+                    const std::vector<std::pair<std::int64_t, std::int64_t>>& introns,
+                    std::vector<std::pair<std::int64_t, std::int64_t>>& out)
+{
+    out.clear();
+    std::int64_t cursor = start;
+    for (const auto& [intron_start, intron_end] : introns) {
+        if (intron_start > cursor) out.emplace_back(cursor, intron_start);
+        cursor = intron_end;
+    }
+    if (end > cursor) out.emplace_back(cursor, end);
+}
+
+}  // namespace
+
+DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& scratch) {
+    // ⚠ FIRST, before any geometry: the strand is a property of the fragment alone, and one with no
+    // single genome strand has no column in any bank. Booking it anyway would credit it to the WRONG
+    // strand; rejecting it here is what lets the loss be counted instead of vanishing.
+    const int column = strand_column(path.align_strand);
+    if (column < 0) {
+        ++counters_.dropped_strand_undefined;
+        return DepositOutcome::kStrandUndefined;
+    }
+    if (cuts_.size() < 2) {
+        ++counters_.dropped_empty;
+        return DepositOutcome::kEmpty;
+    }
+
+    // Clip to the reference. L is the CLIPPED length, so the placement count stays consistent.
+    const std::int64_t start = std::max(path.start, cuts_.front());
+    const std::int64_t end   = std::min(path.end,   cuts_.back());
+    if (end <= start) {
+        ++counters_.dropped_empty;
+        return DepositOutcome::kEmpty;
+    }
+
+    // ⚠ ONE definition of L: the total length of the path's segments. Deriving it any other way invites
+    // two formulas for one quantity, and the obvious second formula -- (end - start) - sum(intron) --
+    // disagrees by up to 1.5x on overlapping introns and goes NEGATIVE on a wide overlap.
+    const std::int64_t absorbed =
+        normalise_introns(path.introns, path.n_introns, start, end, scratch.introns);
+    build_segments(start, end, scratch.introns, scratch.segments);
+    std::int64_t length = 0;
+    for (const auto& [a, b] : scratch.segments) length += b - a;
+
+    if (length <= 0) {
+        ++counters_.dropped_empty;
+        return DepositOutcome::kEmpty;
+    }
+    if (length > max_length_) {
+        ++counters_.dropped_too_long;
+        return DepositOutcome::kTooLong;
+    }
+    counters_.introns_absorbed += absorbed;
+
+    // ── which annotated junctions does this path use? this also picks the edge bank ────────────────
+    // ⚠ Resolved BEFORE the crossing loop, because `spliced` chooses which bank the crossings land in.
+    auto& sj_ids = scratch.sj_ids;
+    sj_ids.clear();
+    if (path.sj_strand == STRAND_AMBIGUOUS) {
+        // The motif tag is read once per RECORD, so AMBIGUOUS means the mates DISAGREED about one
+        // molecule: contradictory evidence, not missing evidence. Trust no splice, and count it on its own
+        // denominator -- folding it into `unannotated_introns` would poison the one metric whose job is
+        // measuring annotation coverage.
+        ++counters_.contradictory_sj_strand;
     } else {
-        region_types_.clear();
-        max_fl_ = 0;
-        fl_pool_mass_.clear();
-    }
-}
-
-std::int64_t Accumulator::region_of_pos(std::int64_t pos) const noexcept {
-    if (boundary_positions_.size() < 2) return -1;
-    const std::int64_t lo = boundary_positions_.front();
-    const std::int64_t hi = boundary_positions_.back();
-    if (pos < lo || pos >= hi) return -1;
-    // np.searchsorted(boundaries, pos, side='right') - 1
-    auto it = std::upper_bound(boundary_positions_.begin(),
-                               boundary_positions_.end(), pos);
-    return static_cast<std::int64_t>(
-               std::distance(boundary_positions_.begin(), it)) - 1;
-}
-
-void Accumulator::deposit(const std::int64_t* block_starts,
-                          const std::int64_t* block_ends,
-                          std::size_t n_blocks,
-                          bool spliced,
-                          bool primary,
-                          std::int32_t strand)
-{
-    if (n_blocks == 0 || regions_.empty()) return;
-
-    const int ch = channel_idx(spliced, primary);
-    // The junction strand is recorded only for spliced crossings (a junction is
-    // single-strand by its motif). 0 elsewhere. Cast once; set per touched boundary.
-    const std::int8_t js = spliced ? static_cast<std::int8_t>(strand) : std::int8_t{0};
-    const std::int64_t edge_lo = boundary_positions_.front();
-    const std::int64_t edge_hi = boundary_positions_.back();
-
-    // 1. Expand each block into per-region slices.
-    //    Worst case: each block straddles every region. Reserve a small
-    //    initial capacity; vector growth amortizes.
-    std::vector<Slice> slices;
-    slices.reserve(n_blocks * 2);
-
-    for (std::size_t b = 0; b < n_blocks; ++b) {
-        std::int64_t blk_start = block_starts[b];
-        std::int64_t blk_end   = block_ends[b];
-        if (blk_end <= blk_start) continue;
-        std::int64_t s = std::max(blk_start, edge_lo);
-        std::int64_t e = std::min(blk_end,   edge_hi);
-        if (e <= s) continue;
-        std::int64_t cur = s;
-        std::int64_t r = region_of_pos(cur);
-        while (cur < e && r != -1 &&
-               r < static_cast<std::int64_t>(regions_.size()))
-        {
-            const std::int64_t region_end = boundary_positions_[r + 1];
-            const std::int64_t slice_end  = std::min(e, region_end);
-            slices.push_back(Slice{r, cur, slice_end});
-            cur = slice_end;
-            ++r;
+        for (const auto& [intron_start, intron_end] : scratch.introns) {
+            const std::int64_t id = sj_edge_id(intron_start, intron_end, path.sj_strand);
+            if (id >= 0) sj_ids.push_back(static_cast<std::int32_t>(id));
         }
+        counters_.unannotated_introns +=
+            static_cast<std::int64_t>(scratch.introns.size()) - static_cast<std::int64_t>(sj_ids.size());
     }
+    const bool spliced = !sj_ids.empty();
 
-    if (slices.empty()) return;
+    // ⚠ The path's own first and last COVERED base, not the fragment's extent. With a leading intron the
+    // molecule does not begin at `start`: introns [(150,480)] over [150,500) has its whole path in
+    // [480,500), a different node, and using the extent would credit a node it never touches.
+    const std::int64_t first_base = scratch.segments.front().first;
+    const std::int64_t last_base  = scratch.segments.back().second - 1;
 
-    // 2. Compute L = sum of slice lengths.
-    std::int64_t L = 0;
-    for (const auto& sl : slices) {
-        L += (sl.end - sl.start);
-    }
-    if (L <= 0) return;
-    const double inv_L = 1.0 / static_cast<double>(L);
+    const std::int64_t first_node = node_of_pos(first_base);
+    node_start_count_[static_cast<std::size_t>(first_node)] += 1u;
+    ++counters_.deposited;
+    if (path.introns_inferred) ++counters_.inferred_intron_fragments;
 
-    // gDNA FL pooling (PR 4c): bin this UNSPLICED fragment's footprint (L) into
-    // the FL pool(s) for the region-type(s) it touches — CONTAINED for a
-    // single-region fragment, BOUNDARY (fractional per side) for a crossing.
-    // Spliced fragments are excluded (their genomic span is not the FL; the RNA
-    // FL is the scanner's SPLICED-ANNOT channel). No-op when FL pooling is off.
-    // FL bin = the fragment's genomic SPAN (template footprint), NOT the covered
-    // length L (= Σ slice lengths). For paired mates with an inter-mate gap
-    // (insert > read1+read2 covered bases) the covered length saturates at the
-    // read-length sum, collapsing the gDNA FL distribution to a spike at 2×readlen.
-    // The scorer queries the gDNA FL pmf at the genomic footprint (span = last
-    // block end − first block start; see ResolvedFragment::genomic_footprint), so
-    // the pool MUST bin at the same span or every long gDNA fragment lands in the
-    // pmf floor and scores as RNA. L stays the mass-conservation denominator below.
-    const bool fl_on = !spliced && !fl_pool_mass_.empty();
-    const std::size_t fl_row = static_cast<std::size_t>(max_fl_) + 1;
-    std::int64_t fl_span = 0;
-    if (fl_on) {
-        std::int64_t lo = block_starts[0], hi = block_ends[0];
-        for (std::size_t b = 1; b < n_blocks; ++b) {
-            if (block_starts[b] < lo) lo = block_starts[b];
-            if (block_ends[b]   > hi) hi = block_ends[b];
-        }
-        fl_span = hi - lo;
-    }
-    const std::size_t fl_bin =
-        fl_on ? static_cast<std::size_t>(std::min<std::int64_t>(fl_span, max_fl_)) : 0;
-
-    // 3. Single-region (all slices in same region) → contained.
-    bool all_same = true;
-    const std::int64_t r0 = slices.front().region_idx;
-    for (std::size_t i = 1; i < slices.size(); ++i) {
-        if (slices[i].region_idx != r0) { all_same = false; break; }
-    }
-    if (all_same) {
-        regions_[static_cast<std::size_t>(r0)].contained[ch] += 1u;
-        if (fl_on) {
-            const std::size_t pool = fl_pool_idx(
-                region_types_[static_cast<std::size_t>(r0)], /*boundary=*/false);
-            fl_pool_mass_[pool * fl_row + fl_bin] += 1.0;
-        }
-        return;
-    }
-
-    // 4. Crossing path: distribute each slice's mass across the boundaries it
-    //    crosses, conserving fragment mass (§4.3 of 00_design.md). A slice
-    //    crosses its LEFT boundary iff it is not the first slice, and its RIGHT
-    //    boundary iff it is not the last. A region the fragment *encompasses* —
-    //    a fully-traversed interior slice overlapping BOTH its boundaries —
-    //    splits its mass 50/50: half to the RIGHT side of its left boundary
-    //    (mass_right) and half to the LEFT side of its right boundary
-    //    (mass_left). End slices keep full mass on their single crossed side.
+    // ── crossings, per contiguous SEGMENT of the path ─────────────────────────────────────────────
+    // A line is crossed iff it lies strictly inside a segment, so per segment the crossed lines are a
+    // contiguous index range and no container is needed. A node is SPANNED iff ONE segment crosses both of
+    // its lines -- not merely "both lines crossed", which would count a node the fragment JUMPS OVER,
+    // whose two lines are touched by the two flanking segments from opposite sides.
     //
-    //    Flux is PER SIDE and integer (NOT split): the left region's slice
-    //    credits flux_left of its right boundary; the right region's slice
-    //    credits flux_right of its left boundary. A contiguous crossing credits
-    //    both sides of its one boundary; a spliced jump credits one side of each
-    //    flanking boundary, leaving the intron-facing sides at zero (no false
-    //    exon-intron flux). Slices are monotonic, so each side is credited at
-    //    most once per fragment.
-    const std::size_t n_sl = slices.size();
-    for (std::size_t i = 0; i < n_sl; ++i) {
-        const Slice& sl = slices[i];
-        const bool crosses_left  = (i > 0);
-        const bool crosses_right = (i + 1 < n_sl);
-        const int n_cross = (crosses_left ? 1 : 0) + (crosses_right ? 1 : 0);
-        if (n_cross == 0) continue;  // defensive; single-region handled above
-        const double share = static_cast<double>(sl.end - sl.start) * inv_L
-                             / static_cast<double>(n_cross);
-        if (crosses_right) {
-            const std::size_t b = static_cast<std::size_t>(sl.region_idx + 1);
-            Boundary& bo = boundaries_[b];
-            bo.mass_left[ch] += static_cast<float>(share);
-            bo.flux_left[ch] += 1u;
-            if (js != 0) boundary_junction_strand_[b] = js;  // spliced ⇒ this boundary is a junction
+    // ⚠ quantum_edge is 0 at L == 1: a length-1 molecule cannot cross a 0-bp line, and `density_quantum`
+    // would divide by zero. Its residue is the schema's only count/density co-support violation -- an
+    // L == 1 path on an annotated junction books a count against density 0, which is correct.
+    const std::uint64_t quantum_edge = length >= 2 ? density_quantum(length - 1) : 0;
+    const std::uint64_t quantum_node = density_quantum(length);
+    const std::size_t   col          = static_cast<std::size_t>(column);
+
+    std::int64_t n_crossed = 0;
+    std::int64_t sole_line = -1;
+    for (const auto& [seg_start, seg_end] : scratch.segments) {
+        const std::int64_t first =
+            std::upper_bound(cuts_.begin(), cuts_.end(), seg_start) - cuts_.begin();
+        const std::int64_t last =
+            std::lower_bound(cuts_.begin(), cuts_.end(), seg_end) - cuts_.begin();
+
+        for (std::int64_t line = first; line < last; ++line) {
+            ContiguousEdge& edge = edges_[static_cast<std::size_t>(line - 1)];
+            if (spliced) {
+                edge.spliced_count[col] += 1u;
+                edge.spliced_density[col] += quantum_edge;
+            } else {
+                edge.unspliced_count[col] += 1u;
+                edge.unspliced_density[col] += quantum_edge;
+            }
         }
-        if (crosses_left) {
-            const std::size_t b = static_cast<std::size_t>(sl.region_idx);
-            Boundary& bi = boundaries_[b];
-            bi.mass_right[ch] += static_cast<float>(share);
-            bi.flux_right[ch] += 1u;
-            if (js != 0) boundary_junction_strand_[b] = js;
+        for (std::int64_t line = first; line + 1 < last; ++line) {  // the node between two crossed lines
+            Node& node = nodes_[static_cast<std::size_t>(line)];
+            node.spanning_count[col] += 1u;
+            node.spanning_density[col] += quantum_node;
+        }
+        if (last > first) {
+            sole_line = (n_crossed == 0 && last - first == 1) ? first : -1;
+            n_crossed += last - first;
         }
     }
 
-    // gDNA FL (crossing): each slice's fractional mass → the BOUNDARY-compartment
-    // pool of its region-type, at FL bin = min(footprint, max_fl).
-    if (fl_on) {
-        for (const auto& sl : slices) {
-            const std::size_t pool = fl_pool_idx(
-                region_types_[static_cast<std::size_t>(sl.region_idx)], /*boundary=*/true);
-            fl_pool_mass_[pool * fl_row + fl_bin] +=
-                static_cast<double>(sl.end - sl.start) * inv_L;
+    for (const std::int32_t id : sj_ids) {
+        JunctionEdge& junction = junctions_[static_cast<std::size_t>(id)];
+        junction.count[col] += 1u;
+        junction.density[col] += quantum_edge;
+    }
+
+    // ── contained: the WHOLE path lies inside ONE node ────────────────────────────────────────────
+    // ⚠ Not merely "crossed no line". An unannotated intron can swallow every line between two blocks,
+    // leaving a fragment that crosses nothing yet straddles two nodes. Such a fragment deposits on NO
+    // object but still increments node_start_count, so the loss is visible rather than silent.
+    std::int64_t contained_node = -1;
+    if (sj_ids.empty() && first_node == node_of_pos(last_base)) {
+        contained_node = first_node;
+        Node& node = nodes_[static_cast<std::size_t>(contained_node)];
+        node.contained_count[col] += 1u;
+        node.contained_density[col] += quantum_node;
+    }
+
+    if (!pool_lengths_.empty()) {
+        const std::int64_t pool = fragment_pool(spliced, path.introns_inferred, contained_node, sole_line);
+        if (pool >= 0) {
+            pool_lengths_[static_cast<std::size_t>(pool) * (static_cast<std::size_t>(max_length_) + 1) +
+                          static_cast<std::size_t>(length)] += 1;
         }
     }
+    return DepositOutcome::kDeposited;
 }
+
+std::int64_t Accumulator::fragment_pool(bool spliced,
+                                        bool introns_inferred,
+                                        std::int64_t contained_node,
+                                        std::int64_t sole_line) const noexcept
+{
+    // Priority, so that every pool stays pure: an OBSERVED splice is unambiguously RNA; a contained
+    // fragment is typed by its node; a single-line crossing is a "splash" read typed by its two flanks.
+    // Anything else -- an exonic contained fragment, a multi-line crossing -- is a mixture and enters
+    // nothing. An INFERRED splice enters nothing either: its splice is a product of the very model the
+    // pure-RNA pool is used to fit.
+    if (spliced) {
+        return introns_inferred ? -1 : static_cast<std::int64_t>(FragmentPool::kRnaSpliced);
+    }
+    if (contained_node >= 0) {
+        switch (node_types_[static_cast<std::size_t>(contained_node)]) {
+            case kTypeIntergenic: return static_cast<std::int64_t>(FragmentPool::kDnaIntergenic);
+            case kTypeIntron:     return static_cast<std::int64_t>(FragmentPool::kDnaIntronic);
+            default:              return -1;  // exonic is a gDNA/RNA mixture, absent by design
+        }
+    }
+    if (sole_line >= 1) {
+        const std::uint8_t left  = node_types_[static_cast<std::size_t>(sole_line) - 1];
+        const std::uint8_t right = node_types_[static_cast<std::size_t>(sole_line)];
+        const std::uint8_t lo    = std::min(left, right);
+        const std::uint8_t hi    = std::max(left, right);
+        if (lo == kTypeIntron && hi == kTypeExon) {
+            return static_cast<std::int64_t>(FragmentPool::kDnaIntronExon);
+        }
+        if (lo == kTypeIntergenic && hi == kTypeExon) {
+            return static_cast<std::int64_t>(FragmentPool::kDnaIntergenicExon);
+        }
+    }
+    return -1;
+}
+
+// ============================================================================
+// the per-worker merge
+// ============================================================================
 
 void Accumulator::merge_from(const Accumulator& other) {
-    if (boundary_positions_.size() != other.boundary_positions_.size() ||
-        !std::equal(boundary_positions_.begin(), boundary_positions_.end(),
-                    other.boundary_positions_.begin()))
-    {
+    // ⚠ The cut arrays must match element-wise. A ref-id mismatch here once silently dropped 476,719 of
+    // 476,732 fragments while every golden test passed, so this compares positions rather than sizes.
+    if (cuts_ != other.cuts_) {
         throw std::invalid_argument(
-            "Accumulator::merge_from: boundary positions differ");
+            "accumulator: merge_from requires identical cut positions (this has " +
+            std::to_string(cuts_.size()) + ", other has " + std::to_string(other.cuts_.size()) + ")");
     }
-    const std::size_t n_r = regions_.size();
-    const std::size_t n_b = boundaries_.size();
-    for (std::size_t i = 0; i < n_r; ++i) {
-        for (std::size_t c = 0; c < kNChannels; ++c) {
-            regions_[i].contained[c] += other.regions_[i].contained[c];
+    if (junctions_.size() != other.junctions_.size()) {
+        throw std::invalid_argument(
+            "accumulator: merge_from requires the same junction bank (this has " +
+            std::to_string(junctions_.size()) + ", other has " +
+            std::to_string(other.junctions_.size()) + ")");
+    }
+
+    // Integer addition is associative, so the result is identical at any worker count, on any machine.
+    for (std::size_t i = 0; i < nodes_.size(); ++i) {
+        for (std::size_t c = 0; c < kNStrandColumns; ++c) {
+            nodes_[i].contained_count[c]   += other.nodes_[i].contained_count[c];
+            nodes_[i].spanning_count[c]    += other.nodes_[i].spanning_count[c];
+            nodes_[i].contained_density[c] += other.nodes_[i].contained_density[c];
+            nodes_[i].spanning_density[c]  += other.nodes_[i].spanning_density[c];
+        }
+        node_start_count_[i] += other.node_start_count_[i];
+    }
+    for (std::size_t i = 0; i < edges_.size(); ++i) {
+        for (std::size_t c = 0; c < kNStrandColumns; ++c) {
+            edges_[i].unspliced_count[c]   += other.edges_[i].unspliced_count[c];
+            edges_[i].spliced_count[c]     += other.edges_[i].spliced_count[c];
+            edges_[i].unspliced_density[c] += other.edges_[i].unspliced_density[c];
+            edges_[i].spliced_density[c]   += other.edges_[i].spliced_density[c];
         }
     }
-    for (std::size_t i = 0; i < n_b; ++i) {
-        for (std::size_t c = 0; c < kNChannels; ++c) {
-            boundaries_[i].mass_left[c]  += other.boundaries_[i].mass_left[c];
-            boundaries_[i].mass_right[c] += other.boundaries_[i].mass_right[c];
-            boundaries_[i].flux_left[c]  += other.boundaries_[i].flux_left[c];
-            boundaries_[i].flux_right[c] += other.boundaries_[i].flux_right[c];
-        }
-        // Junction strand: 0 is the identity (no junction); nonzero values agree
-        // across workers (≤1 motif-stranded junction per position), so take the
-        // other's value where this worker saw none.
-        if (boundary_junction_strand_[i] == 0) {
-            boundary_junction_strand_[i] = other.boundary_junction_strand_[i];
+    for (std::size_t i = 0; i < junctions_.size(); ++i) {
+        for (std::size_t c = 0; c < kNStrandColumns; ++c) {
+            junctions_[i].count[c]   += other.junctions_[i].count[c];
+            junctions_[i].density[c] += other.junctions_[i].density[c];
         }
     }
-    // gDNA FL pools (PR 4c): element-wise sum (identical partition ⇒ same size).
-    if (fl_pool_mass_.size() == other.fl_pool_mass_.size()) {
-        for (std::size_t i = 0; i < fl_pool_mass_.size(); ++i) {
-            fl_pool_mass_[i] += other.fl_pool_mass_[i];
+    if (pool_lengths_.size() == other.pool_lengths_.size()) {
+        for (std::size_t i = 0; i < pool_lengths_.size(); ++i) {
+            pool_lengths_[i] += other.pool_lengths_[i];
         }
     }
+    counters_.merge_from(other.counters_);
 }
 
 // ============================================================================
 // AccumulatorSet
 // ============================================================================
 
-AccumulatorSet::AccumulatorSet(const std::int64_t* boundary_positions,
+AccumulatorSet::AccumulatorSet(const std::int64_t* cut_positions,
                                std::size_t n_positions,
-                               const std::int64_t* ref_pos_offsets,
+                               const std::int64_t* ref_cut_offsets,
                                std::size_t n_refs,
-                               const std::uint8_t* region_types,
-                               std::size_t n_region_types,
-                               int max_fl)
+                               const std::uint8_t* node_types,
+                               std::size_t n_node_types,
+                               int max_length)
 {
-    const bool fl_on = (region_types != nullptr && max_fl > 0);
+    if (ref_cut_offsets == nullptr || static_cast<std::size_t>(ref_cut_offsets[n_refs]) != n_positions) {
+        throw std::invalid_argument(
+            "accumulator set: ref_cut_offsets must end at n_positions = " + std::to_string(n_positions));
+    }
     accs_.reserve(n_refs);
-    std::size_t region_off = 0;  // cumulative region offset into region_types
+
+    // A reference contributing c cuts owns c-1 nodes, so the node offset for reference f is
+    // ref_cut_offsets[f] - (number of earlier references that own any node).
+    std::size_t node_base = 0;
     for (std::size_t f = 0; f < n_refs; ++f) {
-        const std::int64_t lo = ref_pos_offsets[f];
-        const std::int64_t hi = ref_pos_offsets[f + 1];
-        if (lo < 0 || hi < lo ||
-            static_cast<std::size_t>(hi) > n_positions)
-        {
-            throw std::invalid_argument(
-                "AccumulatorSet: ref_pos_offsets out of range");
-        }
-        // hi - lo == 0 yields an empty (no-op) Accumulator placeholder for
-        // references with no annotated partition. n_regions = positions - 1.
-        std::vector<std::int64_t> slice(
-            boundary_positions + lo, boundary_positions + hi);
-        const std::size_t pos_count = static_cast<std::size_t>(hi - lo);
-        const std::size_t n_regions_f = (pos_count >= 1) ? (pos_count - 1) : 0;
-        std::vector<std::uint8_t> types_slice;
-        if (fl_on && n_regions_f > 0) {
-            if (region_off + n_regions_f > n_region_types) {
+        const std::size_t lo = static_cast<std::size_t>(ref_cut_offsets[f]);
+        const std::size_t hi = static_cast<std::size_t>(ref_cut_offsets[f + 1]);
+        std::vector<std::int64_t> cuts(cut_positions + lo, cut_positions + hi);
+        const std::size_t n_nodes = hi - lo >= 2 ? hi - lo - 1 : 0;
+
+        std::vector<std::uint8_t> types;
+        if (node_types != nullptr && n_node_types > 0 && n_nodes > 0) {
+            if (node_base + n_nodes > n_node_types) {
                 throw std::invalid_argument(
-                    "AccumulatorSet: region_types shorter than total regions");
+                    "accumulator set: node_types has " + std::to_string(n_node_types) +
+                    " entries but reference " + std::to_string(f) + " needs " +
+                    std::to_string(node_base + n_nodes));
             }
-            types_slice.assign(region_types + region_off,
-                               region_types + region_off + n_regions_f);
+            types.assign(node_types + node_base, node_types + node_base + n_nodes);
         }
-        accs_.emplace_back(std::move(slice), std::move(types_slice),
-                           fl_on ? max_fl : 0);
-        region_off += n_regions_f;
+        accs_.emplace_back(std::move(cuts), std::move(types), max_length);
+        node_base += n_nodes;
     }
-    // Validate one beyond-end offset.
-    if (n_refs > 0 &&
-        static_cast<std::size_t>(ref_pos_offsets[n_refs]) != n_positions)
-    {
-        throw std::invalid_argument(
-            "AccumulatorSet: ref_pos_offsets[n_refs] must equal n_positions");
-    }
-    if (fl_on && region_off != n_region_types) {
-        throw std::invalid_argument(
-            "AccumulatorSet: region_types length != total region count");
-    }
-    (void)n_positions;  // unused when n_refs == 0
 }
 
 Accumulator& AccumulatorSet::at(std::int32_t ref_id) {
-    if (ref_id < 0 ||
-        static_cast<std::size_t>(ref_id) >= accs_.size())
-    {
-        throw std::out_of_range("AccumulatorSet::at: ref_id out of range");
+    if (ref_id < 0 || static_cast<std::size_t>(ref_id) >= accs_.size()) {
+        throw std::out_of_range("accumulator set: ref_id " + std::to_string(ref_id) + " of " +
+                                std::to_string(accs_.size()));
     }
     return accs_[static_cast<std::size_t>(ref_id)];
 }
 
 const Accumulator& AccumulatorSet::at(std::int32_t ref_id) const {
-    if (ref_id < 0 ||
-        static_cast<std::size_t>(ref_id) >= accs_.size())
-    {
-        throw std::out_of_range("AccumulatorSet::at: ref_id out of range");
+    if (ref_id < 0 || static_cast<std::size_t>(ref_id) >= accs_.size()) {
+        throw std::out_of_range("accumulator set: ref_id " + std::to_string(ref_id) + " of " +
+                                std::to_string(accs_.size()));
     }
     return accs_[static_cast<std::size_t>(ref_id)];
 }
@@ -346,11 +493,10 @@ const Accumulator& AccumulatorSet::at(std::int32_t ref_id) const {
 void AccumulatorSet::merge_from(const AccumulatorSet& other) {
     if (accs_.size() != other.accs_.size()) {
         throw std::invalid_argument(
-            "AccumulatorSet::merge_from: n_refs differs");
+            "accumulator set: merge_from requires the same reference count (this has " +
+            std::to_string(accs_.size()) + ", other has " + std::to_string(other.accs_.size()) + ")");
     }
-    for (std::size_t f = 0; f < accs_.size(); ++f) {
-        accs_[f].merge_from(other.accs_[f]);
-    }
+    for (std::size_t f = 0; f < accs_.size(); ++f) accs_[f].merge_from(other.accs_[f]);
 }
 
 }  // namespace rigel::accumulator
