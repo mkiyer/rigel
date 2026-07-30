@@ -80,8 +80,8 @@ __all__ = [
 #: earlier version of this file mapped "anything that is not POS" to the minus column, which credited such
 #: a fragment to the *wrong strand* instead of rejecting it.
 #:
-#: ⭐ **The column is indexed by ``strand`` — the strand the read ALIGNED to — and never by ``sj_strand``.**
-#: The two are independent: ``strand`` is where the read sat on the genome, ``sj_strand`` is which way an
+#: ⭐ **The column is indexed by ``align_strand`` — where the read ALIGNED — never by ``sj_strand``.**
+#: The two are independent: ``align_strand`` is where the read sat on the genome, ``sj_strand`` is which way an
 #: intron was spliced (from its ``GT..AG`` motif). Only a spliced read has the second, and it never selects
 #: a column. Mixing them is what put one array into two conventions.
 STRAND_COLUMNS: dict[int, int] = {Strand.POS: 0, Strand.NEG: 1}
@@ -417,7 +417,7 @@ class Accumulator:
         start: int,
         end: int,
         introns=(),
-        strand: int = Strand.POS,
+        align_strand: int = Strand.POS,
         sj_strand: int = Strand.NONE,
         introns_inferred: bool = False,
     ) -> DepositOutcome:
@@ -431,7 +431,7 @@ class Accumulator:
 
         ⭐ **TWO STRANDS, AND THEY ARE INDEPENDENT.** Every read has the first; only a splice has the second.
 
-        ``strand``
+        ``align_strand``
             The genomic strand the read **aligned** to, ``+`` or ``−``. Every read has one. It selects the
             array column and nothing else.
         ``sj_strand``
@@ -454,7 +454,7 @@ class Accumulator:
         # fragment with no single genome strand has no column in any bank. The scanner's gate at
         # `bam_scanner.cpp:1474-1480` did this before the old accumulator ever saw the fragment; doing it
         # here is what lets the loss be COUNTED instead of vanishing.
-        column = STRAND_COLUMNS.get(strand)
+        column = STRAND_COLUMNS.get(align_strand)
         if column is None:
             return self._reject(DepositOutcome.STRAND_UNDEFINED)
 

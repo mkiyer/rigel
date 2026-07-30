@@ -32,7 +32,7 @@ Fixed 2026-07-29 after the owner rejected three inventions. Recorded because the
 | `genome_channel`, `CHANNEL_PLUS/MINUS`, `kNChannels` | `STRAND_COLUMNS`, `Strand::POS`/`NEG` | "channel" was leftover vocabulary from the 4-way `spliced × primary` axis being deleted. The axis IS the strand; say strand |
 | `N_STRANDS = 2` | `N_STRAND_COLUMNS = 2` | there are **four** strands (`Strand` has OR semantics: `POS\|NEG == AMBIGUOUS`, plus `NONE`). Only two name a column |
 | `motif_strand`, then `sj_motif_strand` | **`sj_strand`** | `sj` is the codebase's abbreviation already — `sj.feather`, `sj_map`, `SJKey`, `sj_lookup_into`, `cr.sj_strand`. "motif" does not say *which* motif, and a third name for one quantity is worse than an ambiguous one |
-| `align_strand` | **`strand`** | it is the plain, universal case — every read has one. Qualify the exception (`sj_strand`), never the norm |
+| ~~`align_strand` → `strand`~~ | **keep `align_strand`** | owner ruling: it is clear enough and appears in 101 places. Consistency with the tree beats a shorter name |
 | `lo` / `hi` for a fragment | **`start` / `end`** | the codebase uses `start`/`end` everywhere for coordinates; `lo`/`hi` appears only in `reach_lo_pos`/`reach_hi_pos`, which is a different quantity |
 
 ⚠ **The shipped C++ is where `motif_strand` came from**: `bam_scanner.cpp:1468` declares
@@ -50,7 +50,7 @@ The accumulator sees exactly two strand quantities. Conflating them is what prod
 
 | | what it is | who has one | what it does |
 |---|---|---|---|
-| **`strand`** | the genomic strand the read **aligned** to, `+` or `−` | **every** read | selects the array column, and nothing else |
+| **`align_strand`** | the genomic strand the read **aligned** to, `+` or `−` | **every** read | selects the array column, and nothing else |
 | **`sj_strand`** | a splice junction's strand, from its genomic **motif** — `GT..AG` is `+`, its reverse complement `CT..AC` is `−`. The aligner writes it as `XS` (STAR) or `ts` (minimap2); the scanner auto-detects | **spliced** reads only | resolves an intron against the annotation (§3.3), and nothing else |
 
 ⚠ **Neither constrains the other.** An aligned strand says where the read sat; a splice strand says which
@@ -108,14 +108,6 @@ starting a new file.
   **Why deferred:** widening the gate reclassifies currently-accepted fragments as chimeras, which moves the
   bench. That is a change to *what counts as a fragment*, not to how one is tallied — so it is its own arm
   with its own before/after measurement, after S3 is byte-identical. Owner-agreed 2026-07-29.
-* **`align_strand` should be `strand` tree-wide, but not in S3.** The accumulator surface is renamed
-  (above); `src/` and `tests/` still carry 101 occurrences of `align_strand`, and **seven of them are
-  STRING keys** — `buffer.py:193,342,381` (a parquet column name in the spill path),
-  `resolve.cpp:38`, `resolve_context.h:307,352`, `tests/test_buffer.py:45`. A string key survives
-  compilation and fails at runtime, and the path it fails on is buffer→EM, which the accumulator rework
-  does not touch. **Why deferred:** it is a mechanical rename of a different subsystem, so it is its own
-  arm with its own green suite — bundling it into S3 would put an unrelated runtime-failure mode inside the
-  one step whose gate is byte-identity.
 * **The 8 indexes on disk carry stale `reach`.** S1 changed the builder, not the artifacts. Nothing reads
   those columns so nothing is wrong today, but every index must be rebuilt before S5/S6 makes reach
   load-bearing. `partition_hash` will not notice — it covers `nodes.feather` only.

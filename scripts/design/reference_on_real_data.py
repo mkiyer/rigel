@@ -236,7 +236,7 @@ def main() -> None:
         args.bam, name_to_ref_id, args.limit or None
     ):
         outcome = acc.deposit(
-            ref_id, lo, hi, introns=introns, strand=align, sj_strand=motif
+            ref_id, lo, hi, introns=introns, align_strand=align, sj_strand=motif
         )
         if outcome is not DepositOutcome.DEPOSITED:
             continue
