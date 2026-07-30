@@ -245,7 +245,7 @@ def test_opposite_strand_junctions_at_the_same_coordinates_are_DISTINCT_edges():
     """Biologically impossible — splice motifs are not palindromic — so only a synthetic stress test can
     reach it, which is exactly why one exists."""
     acc = _acc(junctions=[(0, 201, 900, Strand.POS), (0, 201, 900, Strand.NEG)])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], strand=Strand.NEG, sj_strand=Strand.NEG)
     t = acc.tally
     assert t.sj_count.sum() == 1
     assert int(t.sj_count[1, STRAND_COLUMNS[Strand.NEG]]) == 1, "the NEG edge (id 1), genome minus"
@@ -297,7 +297,7 @@ def test_a_fragment_using_TWO_junctions_credits_BOTH():
 
 def test_the_unspliced_bank_is_indexed_by_GENOME_strand():
     acc = _acc()
-    acc.deposit(0, 150, 300, align_strand=Strand.NEG)
+    acc.deposit(0, 150, 300, strand=Strand.NEG)
     t = acc.tally
     assert int(t.edge_unspliced_count[_edge(0, 2), 1]) == 1
     assert int(t.edge_unspliced_count[_edge(0, 2), 0]) == 0
@@ -311,14 +311,14 @@ def test_EVERY_bank_including_the_junctions_is_indexed_by_GENOME_strand():
     in the antisense column; under the genome convention it lands in the minus column. Those happen to be
     the same index, so the discriminating case is the next test."""
     acc = _acc(junctions=[JUNCTION])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.POS)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], strand=Strand.NEG, sj_strand=Strand.POS)
     assert int(acc.tally.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1
 
 
 def test_a_SENSE_fragment_on_the_minus_strand_is_still_booked_as_MINUS():
     """The discriminating case: sense-to-motif would say column 0, genome strand says column 1."""
     acc = _acc(junctions=[(0, 201, 900, Strand.NEG)])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], strand=Strand.NEG, sj_strand=Strand.NEG)
     t = acc.tally
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.POS]]) == 0
@@ -630,9 +630,9 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
     their unspliced neighbours.
     """
     acc = _acc(junctions=[SPAN_JUNCTION_POS])
-    acc.deposit(0, 150, 300, align_strand=Strand.NEG)  # unspliced, genome minus
+    acc.deposit(0, 150, 300, strand=Strand.NEG)  # unspliced, genome minus
     acc.deposit(  # spliced, genome minus, ANTISENSE to its + junction
-        0, 150, 950, introns=[(400, 900)], align_strand=Strand.NEG, sj_strand=Strand.POS
+        0, 150, 950, introns=[(400, 900)], strand=Strand.NEG, sj_strand=Strand.POS
     )
     t = acc.tally
     assert int(t.node_spanning_count[_node(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 2, (
@@ -645,7 +645,7 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
 def test_a_spliced_SENSE_fragment_books_node_AND_junction_by_GENOME_strand():
     """The discriminating case: sense-to-motif would say column 0 for both; genome strand says 1."""
     acc = _acc(junctions=[SPAN_JUNCTION_NEG])
-    acc.deposit(0, 150, 950, introns=[(400, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG)
+    acc.deposit(0, 150, 950, introns=[(400, 900)], strand=Strand.NEG, sj_strand=Strand.NEG)
     t = acc.tally
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1
     assert int(t.node_spanning_count[_node(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1
@@ -662,7 +662,7 @@ def test_a_spliced_SENSE_fragment_books_node_AND_junction_by_GENOME_strand():
 
 
 @pytest.mark.parametrize("undefined", [Strand.NONE, Strand.AMBIGUOUS])
-def test_an_UNDEFINED_align_strand_is_REJECTED_not_silently_booked_as_MINUS(undefined):
+def test_an_UNDEFINED_strand_is_REJECTED_not_silently_booked_as_MINUS(undefined):
     """⛔ The channel IS the genome strand, so a fragment without one has no channel.
 
     ``genome_channel`` is ``STRAND_COLUMNS[Strand.POS] if strand == POS else STRAND_COLUMNS[Strand.NEG]``, so every strand that is
@@ -671,12 +671,12 @@ def test_an_UNDEFINED_align_strand_is_REJECTED_not_silently_booked_as_MINUS(unde
     convention exists to delete.
 
     ⚠ AMBIGUOUS is reachable in production, not hypothetical: ``build_fragment`` keys blocks by
-    ``(ref, strand)``, so mates agreeing in reference orientation give ``align_strand = POS|NEG``.
+    ``(ref, strand)``, so mates agreeing in reference orientation give ``strand = POS|NEG``.
     The design already requires the count (§10.3 lists strand-undefined fragments as a QC denominator the
     accumulator must emit); it was simply missing.
     """
     acc = _acc()
-    assert acc.deposit(0, 150, 300, align_strand=undefined) is DepositOutcome.STRAND_UNDEFINED
+    assert acc.deposit(0, 150, 300, strand=undefined) is DepositOutcome.STRAND_UNDEFINED
     t = acc.tally
     assert t.qc["dropped_strand_undefined"] == 1
     assert int(t.node_contained_count.sum()) == 0, "must not be booked into either column"
@@ -733,7 +733,7 @@ def test_an_AMBIGUOUS_sj_strand_is_CONTRADICTORY_and_credits_NO_junction():
     """
     acc = _acc(junctions=[JUNCTION])  # (0, 201, 900, POS)
     outcome = acc.deposit(
-        0, 150, 950, introns=[(201, 900)], align_strand=Strand.POS, sj_strand=Strand.AMBIGUOUS
+        0, 150, 950, introns=[(201, 900)], strand=Strand.POS, sj_strand=Strand.AMBIGUOUS
     )
     t = acc.tally
     assert outcome is DepositOutcome.DEPOSITED, "the fragment is real; only its splice is untrusted"
@@ -749,7 +749,7 @@ def test_a_DEFINITE_but_WRONG_sj_strand_still_misses():
     junction edge's own strand is a real disagreement, and it IS an unannotated intron — that coordinate
     pair is not annotated on the strand it was observed on."""
     acc = _acc(junctions=[JUNCTION])  # (0, 201, 900, POS)
-    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG)
+    acc.deposit(0, 150, 950, introns=[(201, 900)], strand=Strand.NEG, sj_strand=Strand.NEG)
     t = acc.tally
     assert int(t.sj_count.sum()) == 0
     assert t.qc["unannotated_introns"] == 1

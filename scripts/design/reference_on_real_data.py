@@ -84,7 +84,7 @@ def _offsets(cut_offsets: np.ndarray, per_ref: int) -> np.ndarray:
 
 
 def fragment_paths(bam: str, name_to_ref_id: dict[str, int], limit: int | None):
-    """Stream ``(ref_id, lo, hi, introns, align_strand, sj_strand)`` from a name-collated BAM.
+    """Stream ``(ref_id, lo, hi, introns, strand, sj_strand)`` from a name-collated BAM.
 
     The path is the design's: blocks joined across the mate gap, broken at CIGAR ``N``. Introns are
     de-duplicated on ``(start, end)`` — ⚠ the scanner reads the ``XS`` tag once per RECORD, so a pair
@@ -236,7 +236,7 @@ def main() -> None:
         args.bam, name_to_ref_id, args.limit or None
     ):
         outcome = acc.deposit(
-            ref_id, lo, hi, introns=introns, align_strand=align, sj_strand=motif
+            ref_id, lo, hi, introns=introns, strand=align, sj_strand=motif
         )
         if outcome is not DepositOutcome.DEPOSITED:
             continue

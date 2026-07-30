@@ -490,3 +490,77 @@ is a good test of a different property, and it was reasonable to think it covere
   (×2 fixtures) and `test_a_strand_coincident_pair_is_two_distinct_slots` new.
 * `tests/native/test_accumulator_spec.py` — `test_a_junction_id_is_a_function_of_the_PARTITION_not_of_argument_order`
   (×2 arms) new.
+
+---
+
+## S2.3 — naming: one word per concept, and they are the codebase's own words (2026-07-29)
+
+**Owner rejected four inventions in the spec. All four were mine, and one of them had CAUSED a bug** — I
+coined a word, then reasoned about the coinage instead of the concept it stood for.
+
+| ⛔ invented | ✅ now | why it was wrong |
+|---|---|---|
+| `genome_channel`, `CHANNEL_PLUS/MINUS` | `STRAND_COLUMNS`, `Strand.POS`/`NEG` | "channel" is leftover vocabulary from the 4-way `spliced × primary` axis this rework **deletes**. The axis is the strand |
+| `N_STRANDS = 2` | `N_STRAND_COLUMNS = 2` | there are **four** strands (`POS\|NEG == AMBIGUOUS`, plus `NONE`); only two name a column |
+| `motif_strand` → `sj_motif_strand` | **`sj_strand`** | already the codebase's name (`sj.feather`, `sj_map`, `SJKey`, `cr.sj_strand`). My "fix" added a *third* name for one quantity |
+| `align_strand` | **`strand`** | it is the universal case; qualify the exception, not the norm |
+| `lo` / `hi` for a fragment | `start` / `end` | the codebase's coordinate names; `lo`/`hi` belongs to `reach_lo_pos`, a different quantity |
+
+### ⭐ The owner's ruling that resolved it: TWO strands, and they are independent
+
+| | what it is | who has one | what it does |
+|---|---|---|---|
+| `strand` | the genomic strand the read **aligned** to | every read | selects the column, nothing else |
+| `sj_strand` | a splice junction's strand, from its genomic **motif** (`GT..AG` → `+`, `CT..AC` → `−`); `XS` for STAR, `ts` for minimap2, auto-detected | spliced reads only | resolves an intron against the annotation, nothing else |
+
+Neither constrains the other. Comparing them yields *sense* vs *antisense*, which is **derived** and never
+stored. ⭐ The shipped code collapses the comparison into a third concept — a bool named `primary`
+(`bam_scanner.cpp:1493`) — and that is how a dUTP library put 0.6 % of its spliced fragments in the column
+labelled *sense*. `primary` is deleted in S3, not renamed.
+
+### ⛔ AND THE RENAME EXPOSED A REAL BUG — which is the whole argument for doing it
+
+S2.2 had made an `AMBIGUOUS` `sj_strand` match a junction *"on coordinates alone"*. **Wrong.** `sj_strand`
+is the OR of a per-RECORD tag, so AMBIGUOUS means **the two mates disagreed about one molecule** —
+contradictory evidence, the same family as mates agreeing in reference orientation. It must credit no
+junction. The rule is three-way, and both my earlier versions had only two:
+
+| `sj_strand` | means | rule |
+|---|---|---|
+| `NONE` | no strand tag in the BAM at all | **no information** → match on coordinates alone |
+| `POS` / `NEG` | one definite observed strand | must agree with the junction edge's own `sj_strand` |
+| `AMBIGUOUS` | the two mates' tags **disagree** | **contradictory** → trust no splice; own QC counter |
+
+⚠ `NONE` staying permissive is load-bearing, and S2.2 had nearly broken it. Aligners differ — STAR writes
+`XS`, minimap2 writes `ts`, some write neither — so on an untagged BAM **every** spliced fragment arrives
+with `NONE`. Demanding a strand there deletes 100 % of that aligner's annotated junctions, and it would
+present as a stale annotation rather than a convention bug. Pinned by
+`test_a_MISSING_sj_strand_MATCHES_on_coordinates_alone`, which did not exist before.
+
+⚠ AMBIGUOUS increments **`contradictory_sj_strand`**, not `unannotated_introns`. That counter measures
+annotation coverage; feeding it alignment disagreements makes it report a stale annotation whenever the
+aligner is inconsistent.
+
+| gate | result |
+|---|---|
+| suite | **1303 pass**, 53 in the spec matrix |
+| ruff + `ruff format` | clean |
+| harness self-check | 6/6 |
+| real-data cross-checks | all four exact |
+
+### ⚠ Two process mistakes of mine, recorded so they are not repeated
+
+* I ran `ruff format` over `scripts/`, reformatting ~130 unrelated files. **The project's format scope is
+  `src/ tests/`**; `scripts/` is linted, not formatted. Reverted.
+* A `sed`-style bulk rename left `_normalise_introns` using the *fragment's* bounds where it meant the
+  *intron's* — the two are both in scope there. Hand-written instead. **Bulk-rename a file whose locals
+  share a name with its parameters and you get a silent semantic change**, which is exactly the failure the
+  spec matrix exists to catch and did.
+
+### Deferred to its own arm
+
+`align_strand` → `strand` **tree-wide**: 101 occurrences remain in `src/` and `tests/`, and **seven are
+string keys** (`buffer.py:193,342,381` — a parquet column in the spill path — plus `resolve.cpp:38`,
+`resolve_context.h:307,352`, `tests/test_buffer.py:45`). A string key survives compilation and fails at
+runtime, on the buffer→EM path, which the accumulator rework does not touch. Bundling it into S3 would put
+an unrelated runtime-failure mode inside the one step whose gate is byte-identity.

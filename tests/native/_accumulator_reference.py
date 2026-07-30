@@ -79,6 +79,11 @@ __all__ = [
 #: strand is neither raises ``KeyError`` here rather than being quietly filed under one of them. The
 #: earlier version of this file mapped "anything that is not POS" to the minus column, which credited such
 #: a fragment to the *wrong strand* instead of rejecting it.
+#:
+#: ⭐ **The column is indexed by ``strand`` — the strand the read ALIGNED to — and never by ``sj_strand``.**
+#: The two are independent: ``strand`` is where the read sat on the genome, ``sj_strand`` is which way an
+#: intron was spliced (from its ``GT..AG`` motif). Only a spliced read has the second, and it never selects
+#: a column. Mixing them is what put one array into two conventions.
 STRAND_COLUMNS: dict[int, int] = {Strand.POS: 0, Strand.NEG: 1}
 N_STRAND_COLUMNS = len(STRAND_COLUMNS)
 
@@ -199,8 +204,8 @@ class Partition:
     def from_cuts(cls, cuts_per_ref, node_types=None, junctions=()) -> "Partition":
         """Build from per-reference cut lists.
 
-        ``junctions`` are ``(ref, intron_start, intron_end, strand)``; both endpoints must be cuts on
-        that reference. Junction ids are assigned by sorting on ``(donor cut, acceptor cut, strand)``,
+        ``junctions`` are ``(ref, intron_start, intron_end, sj_strand)``; both endpoints must be cuts on
+        that reference. Junction ids are assigned by sorting on ``(donor cut, acceptor cut, sj_strand)``,
         so they are a deterministic function of the partition alone.
         """
         cuts_per_ref = [np.asarray(c, dtype=np.int64) for c in cuts_per_ref]
@@ -228,7 +233,7 @@ class Partition:
                 f"{int(node_offsets[-1])} nodes"
             )
 
-        donors, acceptors, strands = [], [], []
+        donors, acceptors, sj_strands = [], [], []
         for ref, intron_start, intron_end, sj_strand in junctions:
             donor = _exact_cut(cut_positions, cut_offsets, ref, intron_start)
             acceptor = _exact_cut(cut_positions, cut_offsets, ref, intron_end)
@@ -240,12 +245,12 @@ class Partition:
                 )
             donors.append(donor)
             acceptors.append(acceptor)
-            strands.append(int(sj_strand))
+            sj_strands.append(int(sj_strand))
         donor_cut = np.asarray(donors, np.int64)
         acceptor_cut = np.asarray(acceptors, np.int64)
-        strand = np.asarray(strands, np.int8)
-        order = np.lexsort((strand, acceptor_cut, donor_cut))
-        donor_cut, acceptor_cut, strand = donor_cut[order], acceptor_cut[order], strand[order]
+        sj_strand = np.asarray(sj_strands, np.int8)
+        order = np.lexsort((sj_strand, acceptor_cut, donor_cut))
+        donor_cut, acceptor_cut, sj_strand = donor_cut[order], acceptor_cut[order], sj_strand[order]
 
         n_cuts = int(cut_offsets[-1])
         sj_offsets = np.zeros(n_cuts + 1, np.int64)
@@ -258,7 +263,7 @@ class Partition:
             ref_edge_offsets=edge_offsets,
             sj_offsets=sj_offsets,
             sj_acceptor_cut=acceptor_cut,
-            sj_strand=strand,
+            sj_strand=sj_strand,
         )
 
 
@@ -412,7 +417,7 @@ class Accumulator:
         start: int,
         end: int,
         introns=(),
-        align_strand: int = Strand.POS,
+        strand: int = Strand.POS,
         sj_strand: int = Strand.NONE,
         introns_inferred: bool = False,
     ) -> DepositOutcome:
@@ -420,20 +425,36 @@ class Accumulator:
 
         ``[start, end)`` is the full genomic extent — leftmost block start to rightmost block end, mate
         gap included. ``introns`` are the excised gaps inside it as ``(start, end)`` pairs.
-        ``align_strand`` is the fragment's own genome strand and selects the column. ``sj_strand`` is
-        the splice-junction motif strand **observed in the BAM** (the ``XS``/``ts`` tag) and is used *only*
-        to resolve an intron against the annotation (see :meth:`_sj_edge_id`).
+        ``introns_inferred`` marks a fragment whose splice was inferred rather than observed: it deposits
+        normally but is barred from the pure-RNA length pool, because its splice is a product of the very
+        model that pool is used to fit.
 
-        ⚠ Do not confuse ``sj_strand`` with ``Partition.sj_strand``: the first is observed, per
-        fragment; the second is annotated, per junction edge. ``_sj_edge_id`` compares them. ``introns_inferred`` marks a fragment whose splice was inferred rather than
-        observed: it deposits normally but is barred from the pure-RNA length pool, because its splice is a
-        product of the very model that pool is used to fit.
+        ⭐ **TWO STRANDS, AND THEY ARE INDEPENDENT.** Every read has the first; only a splice has the second.
+
+        ``strand``
+            The genomic strand the read **aligned** to, ``+`` or ``−``. Every read has one. It selects the
+            array column and nothing else.
+        ``sj_strand``
+            A splice junction's strand, read from the aligner's **genomic-motif** tag (``XS`` for STAR,
+            ``ts`` for minimap2 — auto-detected). A ``GT..AG`` intron is on ``+``, its reverse complement
+            ``CT..AC`` on ``−``. Only spliced reads carry one, and it is used *only* to resolve an intron
+            against the annotation (see :meth:`_sj_edge_id`).
+
+        ⚠ The two are **unrelated**: an aligned strand says where the read sat, a splice strand says which
+        way the intron was spliced, and neither constrains the other. Comparing them yields *sense* versus
+        *antisense*, which is a derived quantity a consumer may compute and this accumulator never stores.
+        ⭐ The shipped code collapses that comparison into one bool named ``primary``
+        (``bam_scanner.cpp:1493``), which is how a dUTP library ended up with 0.6 % of spliced fragments in
+        the column labelled *sense*.
+
+        ⚠ ``sj_strand`` here is **observed**, per fragment. ``Partition.sj_strand`` is **annotated**, per
+        junction edge. One quantity, two sources; :meth:`_sj_edge_id` compares them.
         """
         # ⚠ Checked FIRST, and before any geometry: the strand is a property of the fragment alone, and a
         # fragment with no single genome strand has no column in any bank. The scanner's gate at
         # `bam_scanner.cpp:1474-1480` did this before the old accumulator ever saw the fragment; doing it
         # here is what lets the loss be COUNTED instead of vanishing.
-        column = STRAND_COLUMNS.get(align_strand)
+        column = STRAND_COLUMNS.get(strand)
         if column is None:
             return self._reject(DepositOutcome.STRAND_UNDEFINED)
 
