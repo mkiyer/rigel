@@ -13,15 +13,99 @@ project's deleted documentation).
 
 | | |
 |---|---|
-| HEAD | `4a7a78d7`. S1, S2 and the doc corrections are **committed**; the tree is clean |
-| done | **S1** (index: reach + junction CSR) · **S2** (reference accumulator, spec matrix, scan profiler, real-data shim, adversarial review, two owner rulings) |
-| next | ⭐ **S3 — the C++** (§3.1–§3.4). The doc corrections are done |
-| suite | **1303 pass**, 53 in the accumulator spec matrix; ruff + `ruff format` clean |
+| `main` | `c9fc7c1c` — **GREEN**. S1, S2, the doc corrections and the naming fixes are committed |
+| branch `s3-accumulator` | `e1114d48` — **`accumulator.{h,cpp}` rewritten.** Compiles standalone (`g++ -fsyntax-only`); ⛔ the **extension does not build**, because `bam_scanner.cpp` still calls the old API |
+| next | ⭐ **finish S3** — the checklist below, on the branch |
+| suite (`main`) | **1303 pass**, 53 in the accumulator spec matrix; ruff + `ruff format` clean |
 | bench | r0 `0.079005` / r3 `0.046675`, 32/32 flat — unchanged since `3c293038` |
 | deposit budget | **~357 ns/fragment** end-to-end (`scripts/design/scan_profile.py`), plus ~0.108 s fixed for the 1.04 M-node partition |
 
-⚠ Line numbers in §1–§3 are from `4bb4d191` and are still valid: nothing committed since has touched
-`src/rigel/native/`. S3 is the first step that does.
+⚠ Line numbers throughout §1–§3 are from `4bb4d191` and are **still valid on `main`**: nothing committed
+there has touched `src/rigel/native/`. They are valid on the branch too, except inside
+`calibration/accumulator.{h,cpp}`, which is the rewrite.
+
+### ⛔ FINISH S3 — the checklist, in order
+
+Work on branch `s3-accumulator`. Every line number below was re-verified at `c9fc7c1c`.
+
+**1. `bam_scanner.cpp` — `WorkerState` (`:391-397`).** Replace the three span scratch vectors
+(`span_ref`, `span_start`, `span_end`) with one `rigel::accumulator::DepositScratch`. The deposit builds
+its own segments now, so the span vectors have no other user.
+
+**2. `bam_scanner.cpp` — `set_regions` (`:1102-1143`) and a NEW `set_junctions`.** ⚠ `set_regions` throws
+if called twice (`:1120`, *"regions already set on this BamScanner"*), which is why junctions need a
+**second method** rather than an extra argument. Keep `set_regions`'s 5-positional-arg signature —
+`pipeline.py:389-395` calls it positionally, so a change there is a silent `TypeError` at scan time.
+`set_junctions` must store into members, because the per-worker sets are built from members at `:1186` and
+the shared template at `:1135`; anything installed after those points is invisible to the workers.
+⚠ Validate `max_length >= 1` here, at the boundary. `BamScanConfig.max_frag_length` (`config.py:156`,
+default 1000) has **no CLI flag and no validation anywhere** — verified.
+
+**3. `bam_scanner.cpp` — the deposit adapter (`:1450-1507`).** Build a `FragmentPath` and call
+`deposit(path, ws.scratch)`. Specifically:
+* **delete `primary`** (`:1493-1495`) — it is a third concept built out of the two strands, and the reason
+  a dUTP library put 0.6 % of its spliced fragments in the column labelled *sense*;
+* **delete the `motif_strand` alias** (`:1468`) and pass `cr.sj_strand` directly;
+* **de-duplicate introns on `(ref, start, end)` with the strands OR-ed** *here*, not in `build_fragment` —
+  ⛔ see the measured warning below;
+* keep the `SPLICE_ARTIFACT` hold-out (`:1461`) and the implicit-intron selection (`:1488-1489`);
+* **drop the `align_ok`/`motif_ok` gate** (`:1474-1480`): the deposit now rejects an undefined
+  `align_strand` itself and *counts* it, which is the point.
+
+**4. `bam_scanner.cpp` — `build_result` (`:1902-2041`).** Emit the new keys. ⚠ The comment at `:1902-1904`
+claiming zero-copy views over `acc_set_` is **false** and must not be carried forward — `:1929-1975`
+copies element-wise into fresh vectors and the capsules own those. With the new AoS structs the copy can
+become one `memcpy` per array per reference.
+
+**5. `bam_scanner.cpp` — the nanobind bindings (`nb::class_<Accumulator>` at `:2613-2788`).** Rewrite for
+the new structs. ⚠ `regions_contained` (`:2649-2659`) passes **no strides** and silently assumes `Region`
+is exactly `kNChannels` contiguous `uint32`; the mixed-width 48 B `Node` breaks that, so every view needs
+explicit strides. The stale comments at `:2666`, `:2682`, `:2697`, `:2712` say a `Boundary` is 48 B / 12
+floats; it is 64 B / 16 — delete them, don't port them. `ACCUMULATOR_N_CHANNELS` and
+`accumulator_channel_idx` (`:2781-2787`) have **zero** Python consumers — delete.
+
+**6. The byte-identity gate.** ⚠ **Drive it through the nanobind `Accumulator` class, NOT through
+`AccumulatorPayload`** — `scan_payload.from_scan_result` raises when `n_channels != 4`
+(`scan_payload.py:103-104`), so every scan dies at payload construction until S4. Feed the same fragments
+to the C++ and to `tests/native/_accumulator_reference.py` and assert every array equal.
+
+**7. Converge the segment rule — DELETE the second spec.** Owner-approved, and verified: the only
+production caller of `fragment_genomic_spans` is the deposit adapter. Delete the C++ function
+(`:736-794`), its binding (`:2793-2830`), `native.py:19,55`,
+`tests/native/_fragment_spans_reference.py`, and `tests/native/test_fragment_spans_spec.py`.
+
+**8. Gates before S3 is done.** Byte-identical to the reference on real data · **bit-identical at 1/2/4/8
+workers** (newly achievable now every channel is integer) · no regression against ~357 ns/fragment
+end-to-end · `ruff check src/ tests/ scripts/` · an adversarial review, which has caught real bugs at
+every step.
+
+### ⛔ FOUR LANDMINES — each verified, each fails in a way that does not look like its cause
+
+1. **Removing the C++ `Accumulator` binding breaks `import rigel`.** `native.py:22` re-exports
+   `_accumulator.Accumulator`, and `rigel.native` is imported at module scope by six modules including
+   `pipeline.py`. Deleting the binding without also deleting `src/rigel/_accumulator.py` and
+   `native.py:22,57` **in the same commit** fails at pytest *collection* for the whole suite, which looks
+   nothing like "calibration is broken".
+2. ⛔ **Do NOT merge overlapping introns in `build_fragment`.** Measured: merging `(200,299)+(200,310)`
+   into `(200,310)` demotes `SPLICED_ANNOT → SPLICED_UNANNOT`, deletes the `sj_key` strand-table
+   observation, and widens `t_inds` from `{0}` to `{0,1,3}`. The resolver needs the **unmerged** introns;
+   `f.introns` is shared with `_resolve_core` (`:937`, `:1606`, `:2315`). Merging is the *accumulator's*
+   private job and it already does it. 5 such pairs in 317,696 spliced hits on MO_3021.
+3. **Re-keying `intron_set` in `build_fragment` is also wrong**, for the same shared-list reason: it flips
+   `cr.sj_strand` POS→3, which removes the fragment from strand training *and* from the deposit.
+4. **The junction slot ORDER is a contract.** The id *is* the rank, so
+   `build_junction_edge_arrays` and the spec's `Partition.from_cuts` must sort identically on
+   `(donor cut, acceptor cut, sj_strand)`. Pinned by
+   `test_the_csr_slot_order_matches_the_reference_accumulator` — whose first two versions had **no teeth**
+   until a nested-intron fixture was added (see `LEDGER.md`, S2.2).
+
+### ⚠ TWO PROCESS RULES, learned the hard way this session
+
+* **`ruff format` scope is `src/ tests/` only.** Running it over `scripts/` reformatted ~130 unrelated
+  files and moved a `noqa` so it stopped suppressing. `scripts/` is linted, never formatted.
+* **Do not bulk-rename a file whose locals share a name with its parameters.** A `sed` left
+  `_normalise_introns` using the *fragment's* bounds where it meant the *intron's* — a silent semantic
+  change. Hand-write those edits.
 
 ### ⭐ NAMING — one word per concept, and they are the codebase's own words
 

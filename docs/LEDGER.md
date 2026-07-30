@@ -564,3 +564,56 @@ string keys** (`buffer.py:193,342,381` — a parquet column in the spill path �
 `resolve_context.h:307,352`, `tests/test_buffer.py:45`). A string key survives compilation and fails at
 runtime, on the buffer→EM path, which the accumulator rework does not touch. Bundling it into S3 would put
 an unrelated runtime-failure mode inside the one step whose gate is byte-identity.
+
+---
+
+## S3 (WIP) — `accumulator.{h,cpp}` rewritten; on branch `s3-accumulator` (2026-07-29)
+
+**`main` stays GREEN at `c9fc7c1c`. The rewrite is on branch `s3-accumulator` at `e1114d48`** because
+`bam_scanner.cpp` still calls the old API, so the extension does not build. The two files compile
+standalone (`g++ -std=c++17 -fsyntax-only`), and the deposit is a direct transcription of the spec.
+
+### What landed
+
+`Region` / `Boundary` / the 4-channel `spliced × primary` axis are gone. In their place:
+
+| | size | holds |
+|---|---|---|
+| `Node` | 48 B | `contained_count` / `spanning_count` `uint32[2]` + both densities `uint64[2]` |
+| `ContiguousEdge` | 48 B | `unspliced` / `spliced` count + density |
+| `JunctionEdge` | 24 B | count + density |
+
+`node_start_count_` is its **own flat `uint32` array**, which is what keeps `Node` at 48 B with no padding
+member. `static_assert` on all three sizes.
+
+* `kNStrandColumns = 2`, and **`strand_column()` returns −1** for a strand that names no column. ⚠ The −1 is
+  the whole point: `align_strand == STRAND_POS ? 0 : 1` compiles, is shorter, and silently books an
+  undefined strand into the minus column — the bug this rework exists to delete.
+* `density_quantum()` — `round(2^32 / placements)`, halves away from zero, contract-pinned.
+* `FragmentPath` — one fragment as the scanner has it. ⚠ Its introns **need not** be sorted, disjoint or
+  de-duplicated; `deposit` normalises them, which is what lets `L` be *defined* as the segment total
+  instead of computed by a second formula.
+* `DepositScratch` — reusable buffers, so the deposit allocates nothing. ⭐ The shipped one spent **22.8 ns,
+  18 % of the deposit**, in a per-fragment `std::vector`, invisible to a sampling profiler because the time
+  is attributed to `malloc`.
+* `DepositCounters` — the QC denominators, mergeable.
+* `set_junctions()` as a **second** method, because `set_regions` throws if called twice.
+
+The deposit follows the spec's order, and every ordering decision carries a comment saying why it is that
+order: strand column **first** → clip to the reference → normalise introns (overlapping **and** abutting
+merge) → `L` = **sum of the path's segments**, one formula → the length gate → resolve junctions **before**
+the crossing loop, because `spliced` picks the bank → per-segment crossings via two binary searches over a
+contiguous index range → spanning as the **interior** of that range → junction deposits → contained iff the
+whole path lies in one node → the pool.
+
+⭐ **`max_length < 1` now throws**, with a message that says why, instead of silently disabling itself as
+the shipped code does (`accumulator.cpp:30-72`). It gates `L` *and* sizes the pool histograms, so at 0
+every real fragment is dropped as too long and the entire tally is silently empty. Owner-confirmed.
+
+### What remains
+
+`IMPLEMENTATION_PLAN.md` §0 carries the ordered checklist, the four verified landmines, and the gates. In
+brief: the scanner's `WorkerState`, `set_junctions` plumbing, the deposit adapter (delete `primary`, delete
+the `motif_strand` alias), `build_result`'s keys, the nanobind bindings, the byte-identity gate driven
+**through the bindings** rather than `AccumulatorPayload`, and the deletion of `fragment_genomic_spans`
+plus its parallel spec.
