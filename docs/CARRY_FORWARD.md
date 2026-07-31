@@ -56,12 +56,17 @@ mis-centred exactly for the fragments that leak; the signal lives in exon↔intr
 
 **C4. How much gDNA is in the real cfRNA libraries?** Memory + calibration docs say LBX0190 ≈15 %, vcap ≈20–25 %. Current code measures
 LBX0190 **0.0562**, MO_3021 0.1264, LBX0588 0.7718. No ground truth exists. **← the gDNA half is still open.**
-- ✅ **THE SENSE-FRACTION HALF IS ANSWERED (S5.f, 2026-07-30): it is a CONVENTION FLIP, not biology.** The suspicion was that "sense fraction
-  0.002–0.012 on all four real libraries (nearly fully antisense)" was a read-orientation convention bug. The chr22 pilot has ground truth,
-  and a library simulated at `strand_specificity = 0.99` **calibrates to κ = 0.0101** — i.e. `1 − truth`, on both capture arms. At the
-  unstranded setting (0.50) it reads 0.4990–0.5002, where a flip is invisible by construction. ⚠ This says the flip is real and consistent;
-  it does **not** say where it lives (scanner orientation convention vs simulator output convention), and finding that is its own step.
-  Baseline table: `LEDGER.md` S5.f. (Originally `SESSION_2026_07_30_HANDOFF.md:333-341` vs memory `cfrna_sample_characteristics`)
+- ✅ **THE SENSE-FRACTION HALF IS ANSWERED (S5.f, 2026-07-30): a CONVENTION MIRROR, and the INFERENCE IS CORRECT.** The suspicion was that
+  "sense fraction 0.002–0.012 on all four real libraries (nearly fully antisense)" was a read-orientation bug. The chr22 pilot has ground
+  truth: a library simulated at `strand_specificity = 0.99` **calibrates to κ = 0.0101** — `1 − truth`, on both capture arms (at 0.50 it reads
+  0.4990–0.5002, where a mirror is invisible by construction).
+  ⭐ **But the mirror is CONSISTENT, so it cancels.** Measured on a **zero-gDNA** stranded condition (truth `f_gdna = 0` exactly) by injecting
+  κ: the fitted 0.0100 gives `f_gdna` **0.0030**; forcing the nominal truth 0.99 gives **0.4992** — **166× worse**, and 6× worse than forcing
+  the uninformative 0.50 (0.0792). κ and the per-node sense columns are mirrored the same way, the strand likelihood scores a mirrored
+  observation against a mirrored `p`, and the deconvolution is right. **Only the exported scalar is mis-labelled.**
+  ⚠ **So fact 17's κ column below reads backwards**: the four real libraries are ordinary **highly stranded** libraries, not near-purely
+  antisense ones. ⛔ Any fix must preserve `f_gdna = 0.0030` while moving κ to 0.99 — a change that moves κ alone has broken the inference to
+  fix a label. `TODO.md` §6. (Originally `SESSION_2026_07_30_HANDOFF.md:333-341` vs memory `cfrna_sample_characteristics`)
 
 **C5. Is `+1` on every crossed edge double counting?** Raised and retracted — each edge has its own expectation, so it is unbiased per edge.
 But 12.97 % of human exonic crossing fragments cross more than one interface, and a fragment spanning a short node crosses both its edges,
@@ -138,7 +143,9 @@ nodes + 1,447,763 edges ≈ 2.5 M. Like-for-like the object count **doubles**.
     capture. RNA's own 10⁴ expression range hides the probe pattern; gDNA's uniform baseline does not.
 16. **Capture destroys the intron signal 75×:** intronic unspliced density with real nascent RNA and no gDNA goes 0.0979 (off) → 0.0013 (on)
     against a no-nascent baseline of 0. **Nascent vs gDNA is fundamentally unidentifiable under capture.**
-17. **Real cfRNA strand parameters** (LBX0190 / LBX0588 / MO_3021 / vcap): sense fraction κ = 0.0023 / 0.0120 / 0.0020 / 0.000060; RNA strand
+17. **Real cfRNA strand parameters** (LBX0190 / LBX0588 / MO_3021 / vcap): sense fraction κ = 0.0023 / 0.0120 / 0.0020 / 0.000060
+    — ⚠ **MIRRORED; read these as `1 − κ`, i.e. highly stranded libraries** (§0 C4, measured against ground truth at S5.f). The mirror is
+    consistent and cancels inside the solve, so nothing fitted from them is wrong; the reported SCALAR is; RNA strand
     overdispersion 0.0086 / 0.0137 / 0.0074 / 0.0134 (reproduced independently from deep junctions at 0.001–0.016); gDNA strand
     overdispersion 0.2000 / 0.0031 / 0.2000 / 0.0923 — **saturating its 0.2 ceiling on 2 of 4**, because the "pure gDNA" seed weight is
     identically 1.0 on real data, i.e. it re-encodes "the annotation said intergenic" and pools in unannotated transcription. Open defect;

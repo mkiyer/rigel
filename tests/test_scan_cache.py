@@ -300,21 +300,41 @@ class TestNothingDerivableFromTheIndexIsStored:
         inputs = calibration_inputs(cache, scanned[0])
         accepted = set(inspect.signature(calibrate).parameters)
         assert set(inputs) <= accepted, f"not accepted by calibrate(): {set(inputs) - accepted}"
-        required = {"payload", "region_arrays", "strand_model", "gdna_fl_pmf", "rna_fl_pmf"}
+        # ⚠ EVERY argument without a usable default, not a hand-kept list. `junctions` was added to
+        # `calibrate` at S5.f and this helper was not updated — a hand-kept `required` set cannot catch
+        # that, because the omission is invisible until something calls it.
+        required = {
+            name
+            for name, param in inspect.signature(calibrate).parameters.items()
+            if param.default is inspect.Parameter.empty and name != "config"
+        } | {"junctions"}
         assert required <= set(inputs), f"missing: {required - set(inputs)}"
         assert inputs["gdna_fl_pmf"].sum() == pytest.approx(1.0, abs=1e-9)
 
+    def test_calibration_inputs_ACTUALLY_DRIVE_calibrate(self, scanned, tmp_path):
+        """⭐ The signature check above cannot see a MIS-SIZED argument, only a missing name.
 
-@pytest.mark.xfail(
-    reason=(
-        "STEP 4 (the population-prior seed) is blocked on S5. Extracting "
-        "InjectedCalibrationPriors requires calibrate() to run, and substrate.py still reads "
-        "payload.region_contained / boundary_flux_*, which S4 deleted. This test documents the "
-        "dependency rather than pretending the seed path is verified."
-    ),
-    strict=True,
-)
+        `junctions` must address the same graph the payload was scanned on; an axis of the wrong length
+        places every splice on the wrong line. Calling `calibrate` for real is the only check that
+        covers it, and it is cheap on this fixture.
+        """
+        from rigel.calibration.calibrate import calibrate
+        from rigel.config import CalibrationConfig
+
+        _cache_dir, cache = round_trip(scanned, tmp_path)
+        result = calibrate(**calibration_inputs(cache, scanned[0]), config=CalibrationConfig())
+        assert result.n_nodes > 0
+        assert result.n_junctions == cache.payload.n_sj
+
+
 def test_population_priors_can_be_extracted_from_a_cached_scan(scanned, tmp_path):
+    """✅ Unblocked by S5.f — `calibrate()` runs, so the population-prior seed path is live.
+
+    ⚠ It was a **strict** xfail naming S5 as the blocker. Strict is what made it honest: the moment it
+    started working it would have failed loudly rather than sitting green and forgotten. ⛔ It was in
+    fact still xfailing at S5.f for a DIFFERENT reason than the one recorded — `calibration_inputs` had
+    not been given `junctions` — which is exactly why a stale xfail reason is worth nothing.
+    """
     from rigel.calibration.calibrate import calibrate
     from rigel.config import CalibrationConfig
 

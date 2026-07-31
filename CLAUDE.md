@@ -35,16 +35,22 @@ derivation was deliberately sequenced after it because each one needs a baseline
 ⚠ **Three things the first baseline says**, before anything is built on it:
 1. It carries **A7's known 11.0 % genome-wide gDNA over-call** by deliberate ruling — that is what S5.g
    removes, and measuring the removal is why A7 was deferred.
-2. ⛔ **The fitted κ is `1 − truth`**: a library simulated at `strand_specificity = 0.99` calibrates to
-   κ = 0.0101. This answers `CARRY_FORWARD.md` §0 **C4** against ground truth — the near-zero sense
-   fraction on all four real cfRNA libraries is a **convention flip, not biology**. It needs its own step.
-3. ⚠ **Calibration is bit-identical run to run; something downstream of it is not.** An end-to-end
-   transcript count varies 29–33 on a ~30-count negative control, so calibration-level A/Bs are safe and
-   **end-to-end ones have an uncharacterised noise floor**.
+2. ⚠ **The fitted κ is `1 − truth`, but the MIRROR IS CONSISTENT so the inference is correct.** A library
+   simulated at 0.99 calibrates to κ = 0.0101; forcing the nominal truth 0.99 makes a zero-gDNA library
+   read `f_gdna` **0.4992** against the fitted value's **0.0030** — 166× worse. κ and the per-node sense
+   columns are mirrored the same way and it cancels. ⭐ So this answers `CARRY_FORWARD.md` §0 **C4**: the
+   real cfRNA libraries are ordinary **highly stranded** ones, not near-purely antisense — **only the
+   exported scalar is mis-labelled**. `TODO.md` §6.
+3. ⚠ **Calibration is bit-identical run to run; the EM samples from the posterior BY DESIGN**
+   (`EMConfig.assignment_mode = "sample"`). ⭐ **Run any end-to-end A/B under `map` or `fractional`** —
+   measured spread drops from ~0.5 % to ~1e-10. Hold the mode fixed across both arms: the three modes
+   are different estimators, not one answer at different precision.
 
-⚠ **The 22 remaining failures are two things, both named**: 21 golden files that move NUMERICALLY (S6
-regenerates them **once**) and the one EM-nondeterminism finding above. `tests/calibration/` is fully
-green — 543 passed, 0 failed.
+⭐ **S6 landed too: the goldens are regenerated and the suite is 1752 / 1.** The single remaining failure
+is a **modelling call, not a defect** — a silent transcript leaks ~30 counts against a limit of 25 under
+`assignment_mode` `sample` and `fractional`, and ≤25 under `map`. ⛔ Do not adopt `map` to go green: a
+negative control is one-sided (trap 19) and MAP is the mode that most suppresses assignment.
+`TODO.md` §7.
 
 ⛔ **The OLD benchmark baseline is void.** `r0 0.079005 / r3 0.046675` was the deleted `ambig_dense_10mb`
 suite — do not quote it, compare against it, or try to reproduce it. The replacement suite is proven to
@@ -127,7 +133,7 @@ different GTF moves every one of those numbers, so **re-derive** — `scripts/de
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-pytest tests/ -q                               # 1729 pass / 22 fail / 0 error — 21 goldens (S6) + 1 EM finding
+pytest tests/ -q                               # 1752 pass / 1 fail — the one is TODO.md §7's owner call
 pytest tests/ --update-golden                  # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```

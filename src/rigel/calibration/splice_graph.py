@@ -118,6 +118,7 @@ __all__ = [
     "build_node_partition_arrays",
     "build_edge_flags_array",
     "build_junction_edge_arrays",
+    "build_contiguous_edge_reach_arrays",
     "build_junction_geometry_arrays",
     "JunctionEdgeArrays",
     "JunctionGeometry",
@@ -1066,6 +1067,70 @@ def build_edge_flags_array(index) -> np.ndarray:
         ids = grp.index.to_numpy(np.int64)  # == node_id (I2), and contiguous within a reference
         out.append(by_node[ids[:-1]])  # the k-1 interior lines; a 1-node reference contributes none
     return np.concatenate(out) if out else np.zeros(0, dtype=np.uint16)
+
+
+def build_contiguous_edge_reach_arrays(index) -> tuple[np.ndarray, np.ndarray]:
+    """The RNA **reach** on the accumulator's contiguous-edge axis — ``(reach_lo, reach_hi)``,
+    ``float64[E, 2]``, column 0 the POS-strand transcript's and column 1 the NEG's.
+
+    A crossing molecule must fit in what remains of **its own template** either side of the line. gDNA's
+    template is the chromosome, so its reach is unbounded — physics, not a choice. RNA's ends where its
+    transcript ends, and ignoring that over-calls gDNA by a measured **11.0 %** genome-wide
+    (`CARRY_FORWARD.md` §1 fact 6). This is the array that lets :func:`effective_length.crossing_eff_length`
+    taper the RNA divisor (`S5_DESIGN_LOG.md` §1 A7).
+
+    ⚠ **PER STRAND and per SIDE** — `CARRY_FORWARD.md` §2: reach is "maximised over transcripts
+    independently per side AND per strand". A POS transcript and a NEG one ending in different places
+    give one line two different RNA reaches, and a single averaged number describes neither.
+
+    ⚠ **GENOMIC, unlike a junction's EXONIC reach.** A junction is used only by a spliced molecule, so
+    what remains either side of it is exonic; a contiguous line is also crossed by *nascent* RNA, which
+    is genomic. Taking the exonic reach here would declare an intronic nascent fragment impossible
+    (:class:`JunctionGeometry`).
+
+    ⚠ **A reach of 0 is the ANSWER, not a missing value** — no template of that strand at that line, so
+    that strand's RNA has zero opportunity and the divisor is legitimately 0. The consumer must treat 0
+    as "emit nothing" rather than flooring it (`CARRY_FORWARD.md` §3 trap 23). Measured on the chr22
+    pilot index: **40.6 %** of contiguous edges have no POS template and **42.9 %** no NEG template.
+
+    ⭐ **Keyed by ``src``, exactly as :func:`build_edge_flags_array` is**, and laid out per reference in
+    ``index.ref_names`` order, so the two arrays are the SAME axis element for element and a consumer
+    indexes both with one index. A reference with ``k`` nodes contributes ``k − 1`` entries; one with a
+    single node contributes none.
+    """
+    nodes_df, edges_df = index.nodes_df, index.edges_df
+    contiguous = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_CONTIGUOUS
+    src = edges_df["src"].to_numpy(np.int64)[contiguous]
+
+    # (n_nodes, 2) scratch keyed by the node whose RIGHT interface the edge is, then sliced per
+    # reference. Nodes with no outgoing contiguous edge keep 0, which is also the correct reach for a
+    # line that does not exist — they are dropped by the ``[:-1]`` slice below either way.
+    def by_node(column_pos: str, column_neg: str) -> np.ndarray:
+        out = np.zeros((len(nodes_df), 2), dtype=np.float64)
+        out[src, 0] = edges_df[column_pos].to_numpy(np.float64)[contiguous]
+        out[src, 1] = edges_df[column_neg].to_numpy(np.float64)[contiguous]
+        return out
+
+    lo_by_node = by_node("reach_lo_pos", "reach_lo_neg")
+    hi_by_node = by_node("reach_hi_pos", "reach_hi_neg")
+
+    by_ref: dict[str, pd.DataFrame] = {
+        ref: grp for ref, grp in nodes_df.groupby("ref_name", sort=False)
+    }
+    lo_out: list[np.ndarray] = []
+    hi_out: list[np.ndarray] = []
+    for ref in index.ref_names:
+        grp = by_ref.get(ref)
+        if grp is None or len(grp) == 0:
+            continue
+        ids = grp.index.to_numpy(np.int64)  # == node_id (I2), contiguous within a reference
+        lo_out.append(lo_by_node[ids[:-1]])  # the k-1 interior lines
+        hi_out.append(hi_by_node[ids[:-1]])
+    empty = np.zeros((0, 2), dtype=np.float64)
+    return (
+        np.concatenate(lo_out) if lo_out else empty,
+        np.concatenate(hi_out) if hi_out else empty.copy(),
+    )
 
 
 @dataclass(frozen=True, slots=True)

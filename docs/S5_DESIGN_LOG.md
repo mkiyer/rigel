@@ -22,9 +22,9 @@ Read `ACCUMULATOR_DESIGN.md` §6 first; this file is its consequence.
 
 | | |
 |---|---|
-| stage | **implementing.** S5.0/a/b/c/d/e **and S5.f** are done |
+| stage | **S5 complete through S5.f, and S6 has landed.** S5.g is the next modelling step |
 | tooling | `scripts/design/observable_efficiency.py` — the harness; re-run it, do not quote this file |
-| suite | **1729 passed / 22 failed / 1 xfailed / 0 errors** (S5.f: **−234 failures, +289 passes, −15 errors**). ⭐ **`tests/calibration/` is fully green — 543 passed, 0 failed.** The 22 are 21 golden files (S6's, regenerated ONCE) + 1 EM-nondeterminism finding |
+| suite | ⭐ **1752 passed / 1 failed** (S5.f: −234 failures; S6: the goldens regenerated). The single failure is an owner modelling call, not a defect — `TODO.md` §7 |
 | ⭐ **THE PIVOT IS PASSED** | **`calibrate()` RUNS end to end** on all 8 chr22 pilot conditions, and **the FIRST BASELINE is recorded in `LEDGER.md`'s S5.f entry** — bit-identical on re-run. Every deferred derivation now has something to be A/B'd against |
 | ⛔ blocker | **none. S5.g (A7's taper) is next** — the first change that gets a real A/B. See §2's road map |
 
@@ -36,10 +36,9 @@ Read `ACCUMULATOR_DESIGN.md` §6 first; this file is its consequence.
    **κ = 0.0101**. This answers `CARRY_FORWARD.md` §0 **C4** against ground truth for the first time: the
    near-zero sense fraction on all four real cfRNA libraries is a **convention flip, not biology**.
    Pre-existing — S5.f does not touch `fit_strand_balance` — and it needs its own step.
-3. ⚠ **Calibration is bit-identical run to run; something downstream of it is not.** The scan and
-   `calibrate()` both reproduce exactly; an end-to-end transcript count varies 29–33 on a ~30-count
-   negative control. So calibration-level A/Bs are safe and **end-to-end ones have an uncharacterised
-   noise floor**.
+3. ⚠ **Calibration is bit-identical run to run; the EM samples from the posterior BY DESIGN.** ⭐ Run an
+   end-to-end A/B under `assignment_mode="map"` or `"fractional"` — spread drops ~0.5 % → ~1e-10 — and
+   hold the mode fixed across both arms, since the three modes are different estimators.
 
 ---
 

@@ -10,34 +10,65 @@ Live handoff: `IMPLEMENTATION_PLAN.md` §0. Finished work: `LEDGER.md`. The suit
 
 ## ⭐ THE CRITICAL PATH
 
-| | item | why now / why not yet |
-|---|---|---|
-| **1** | ⭐ **S5 — in progress: S5.e next** | ⛔ **Everything is still behind this** — `calibrate()` does not run, so the suite cannot produce a number and the goldens cannot be adjudicated. ⭐ S5.0/a/b/c/d have landed; the live plan is **`S5_DESIGN_LOG.md` §2**, which supersedes `IMPLEMENTATION_PLAN.md` §4/§5 |
-| **2** | **S6 — delete** | `ruff check` undefined-name failures are the authoritative list; goldens regenerated once |
-| **3** | Close the suite's two open requirements | (c) non-Poisson counts and (f) the low-gDNA corner. `suite_resolves.py` fails on both today and names them |
-| **4** | The stress chromosome | The toy-scenario half of `testing_plan.md`. Needs S5 for the seed to be verifiable |
-| **5** | A new benchmark skill | Only once the suite can produce a number. The old one was deleted; writing one now would be speculative |
+⭐ **The gate that blocked everything is passed.** `calibrate()` runs (S5.f, 2026-07-30) and the FIRST
+BASELINE exists in `LEDGER.md`. Items 3–5 below were all "needs S5" and are now **unblocked**.
+
+⚠ **The rank is the priority; the § is where the detail lives.** They are not the same numbering.
+
+| rank | item | § | why now / why not yet |
+|---|---|---|---|
+| **1** | ⭐ **S6 — delete the dead paths, regenerate the goldens ONCE** | — | ⚠ **The suite reads 22 failed and 21 of them are expected** — that is exactly the state a real regression hides in, and everything after this is an A/B needing "did anything else move?" to be a strong signal. Cheap: the goldens are one command. ⛔ **Regenerate each golden TWICE and diff** (§7) — the goldens run under the default sampling mode, so a flaky expectation baked in now is permanent |
+| **2** | ⭐ **S5.g — A7's contiguous-edge RNA taper** | §1 | The first change with a real A/B, against the baseline that exists for it. Removes a **measured 11.0 %** genome-wide gDNA over-call and **+0.36** in the last node before a polyA site. ⭐ Its gate is a **calibration-level** A/B, which touches no golden — so it can run in parallel with rank 1 |
+| **3** | ⚠ **`EMConfig.seed` does not make `assignment_mode="sample"` reproducible** | §7 | ⭐ **No longer a blocker**: the default draws from the posterior *by design*, and running an A/B under `map`/`fractional` drops the noise 8 orders of magnitude. What remains is that a **seeded** run still does not reproduce, which is what `seed` is for |
+| **4** | Close the suite's two open requirements | §2 | (c) non-Poisson counts and (f) the low-gDNA corner. `suite_resolves.py` fails on both today and names them. ⭐ Now unblocked |
+| **5** | The stress chromosome + the scan cache's prior seed | §3, §4 | The toy-scenario half of `testing_plan.md`. ⭐ Now unblocked — the seed needs wiring, not inventing |
+| **6** | ⚠ `rna_sense_frac` is mirrored | §6 | A **labelling** defect on a correct inference (proven: forcing the nominal truth is 166× worse). Nothing downstream is wrong today, but the reported κ says the opposite of what it means |
+| **7** | A new benchmark skill | — | ⭐ Now unblocked: the suite can produce a number. Wants ranks 3 and 4 first, or it will be a skill that reports noise |
 
 ---
 
-## 1. S5 — in progress. **`S5_DESIGN_LOG.md` §2 is the live plan**
+## 1. S5 — **`S5_DESIGN_LOG.md` §2 is the live plan**
 
 ⭐ S5 is not a rewiring job. It was stopped on 2026-07-30 and turned into a derivation first, because the
 design could not say which observables the rewiring should consume. `IMPLEMENTATION_PLAN.md` §4's R1–R4
 ranking and §5's S5 row are **superseded**.
 
-**Landed:** S5.0 (the derivation) · S5.a (`length_sum` on every population) · S5.b (`fl.py` → the five
-pure pools) · S5.c (`effective_length.py` → the one placements formula) · S5.d (one substrate, the
-`N E N … E N` chain). All in `LEDGER.md`.
+**Landed:** S5.0 (the derivation) · S5.a (`length_sum`) · S5.b (`fl.py` → the five pure pools) · S5.c
+(`effective_length.py` → the one placements formula) · S5.d (one substrate, the `N E N … E N` chain) ·
+S5.e (the faces dissolve; A7 ruled) · ⭐ **S5.f — `calibrate()` runs, and the FIRST BASELINE exists.**
+All in `LEDGER.md`.
 
-**Next: S5.e** — `build_node_geometry` rewritten and `bp_solver`'s per-face consumers collapsed. It
-clears the ~25 geometry failures, which currently fail with a message naming their step. Then **S5.f**
-(`calibrate`, `CalibrationResult`, `priors`, `pipeline`), where calibration runs end to end and its
-numbers become the FIRST entry of a new baseline.
+**Next: S5.g — A7 proper.** The contiguous-edge RNA reach is deliberately `UNBOUNDED_REACH` today, so
+the first baseline carries a **measured 11.0 %** genome-wide gDNA over-call. Turning the taper on is the
+first change that gets a real A/B, which is the whole reason A7 was deferred past S5.f.
 
-⛔ **A7 must be ruled before S5.e finishes:** does reach enter the divisors, and how? An unspliced edge
-has no single reach — the RNA part is bounded by its transcript, the gDNA part is not. `S5_DESIGN_LOG.md`
-§1 A7.
+✅ **S5.g-1 landed** (`LEDGER.md`): `build_contiguous_edge_reach_arrays` gives the per-edge, per-strand
+reach, gated by 6 tests and 6 perturbations, and it independently reproduces fact 6's magnitude (tapered
+/ unbounded = 0.84–0.86 against the recorded 0.8904).
+
+⛔ **S5.g-2 IS BLOCKED ON ONE OWNER DECISION.** Turning the taper on makes `NodeGeometry.eff_rna`
+`[n_slots, 2]`. Two consumers take that without a decision — `node_init._rna` is already called once per
+strand, and `node_total_density` already sums strands for junctions. **`bp_solver.py:334` does not**: its
+`E_r` feeds the transfer variance `Var(log ρ_tot) = 1/n + [(1/E_g − 1/E_r)/B]²·Var(f_g)`, a
+strand-agnostic scalar. The three honest candidates for reducing two divisors to one:
+
+| candidate | for | against |
+|---|---|---|
+| belief-weighted `M·(f_pos+f_neg)/ρ_r_total` | the only one reproducing the true total RNA density | belief-dependent, evaluated at the INPUT belief — trap 11's family |
+| max over strands | at the 40 % of lines with one live strand it IS that strand's reach | ⛔ **no monotone safety argument**: the term is `(1/E_g − 1/E_r)²`, which is ZERO at `E_r = E_g` and grows both sides. On the suite's pools (`E_g` 156, `E_r` unbounded 205) the zero sits INSIDE the tapered range, and at a deep terminus (`E_r` 50) the damping is **79×** the unbounded value |
+| leave it `UNBOUNDED_REACH` | minimal change; it is damping, not a density | ⛔ two meanings on one name — trap 27, the defect S5.e removed |
+
+⚠ **This is a new heuristic and the standing rule is to stop and discuss before adding one.** Nothing is
+guessed; the arrays are in place so the decision is one edit away.
+
+⚠ **A/B on the CALIBRATION numbers, or end to end under a DETERMINISTIC assignment mode** (§7).
+Calibration is bit-identical run to run; the EM's default `assignment_mode="sample"` draws from the
+posterior and moves ~0.5 %, while `map`/`fractional` move ~1e-10.
+
+**Then, in order (`S5_DESIGN_LOG.md` §2 Phase 2):** S5.a2 (how `length_sum` enters the solve — it is
+stored on every population and consumed by nobody) · A6 then A3 (`node_spanning`: the largest single win
+found, 0.000 → 0.758 efficiency at a 25 bp node, and **56.7 %** of human nodes are shorter than one
+fragment — but A6 must settle the spanning⊂crossing overlap first) · does `spliced_count` enter the level.
 
 ## 2. The suite's two unmet requirements
 
@@ -78,7 +109,8 @@ pairs** (`CARRY_FORWARD.md` §3 trap 24 — GENCODE has zero of them, so only a 
 exon3(TES) — intergenic`. The intergenic ends seed the baseline gDNA level that propagates through the
 messages, which is what makes it a complete, self-grounded problem rather than a fragment.
 
-⚠ **Blocked on S5 for the seed**, not for the reference: `scan_cache` step 4 needs `calibrate` to run.
+⭐ **UNBLOCKED (S5.f)**: `scan_cache` step 4 needed `calibrate` to run, and it does. The reference half
+was never blocked.
 
 ## 4. The scan cache's step 4 — the population-prior seed
 
@@ -94,8 +126,9 @@ with `_debug=`, pull the bundle, pass it as `injected_priors=` on the toy.
 ⚠ `testing_plan.md`'s constraint becomes a checkable assertion: the toy must run under the **same**
 strand specificity, fragment-length distributions, gDNA level and capture model as the population scan.
 
-**Why deferred:** extracting the priors requires `calibrate` to run. Pinned by a strict xfail in
-`tests/test_scan_cache.py`.
+⭐ **UNBLOCKED (S5.f)**: extracting the priors required `calibrate` to run, and it does. ⚠ The strict
+xfail in `tests/test_scan_cache.py` should now XPASS once wired — check it rather than assuming, since a
+strict xfail that silently keeps failing is indistinguishable from one nobody touched.
 
 ## 5. The soft 3-pool surplus does not exist
 
@@ -104,11 +137,123 @@ to a calibration-prior change (a real change can move the soft pools by tens of 
 while the hard-label net is byte-identical). `rigel.sim.analysis` implements only the hard-label version.
 
 **Also missing:** the absolute per-transcript error alongside the net (`BENCHMARKING.md` caveat 2 — net
-cancels). **Why deferred:** both need `rigel quant` to run end to end, i.e. S5.
+cancels). ⭐ **UNBLOCKED (S5.f)**: both needed `rigel quant` to run end to end, and it does. ⚠ Build the
+metric against item 7's noise floor — a soft-pool difference smaller than the EM's own run-to-run spread
+is not a result.
+
+## 6. ⚠ `rna_sense_frac` REPORTS THE MIRROR OF WHAT ITS NAME SAYS
+
+⭐ **Measured against ground truth for the first time (S5.f).** A chr22 pilot library simulated at
+`strand_specificity = 0.99` calibrates to **κ = 0.0101**; at 0.50 it reads 0.4990–0.5002, where a mirror
+is invisible by construction. This is `CARRY_FORWARD.md` §0 **C4**'s open question — "sense fraction is
+0.002–0.012 on all four real cfRNA libraries (nearly fully antisense) — possibly a read-orientation
+convention bug" — and the answer is that it **is** a convention flip, not biology.
+
+⭐ **BUT THE FLIP IS CONSISTENT, SO THE INFERENCE IS CORRECT.** This was the thing worth establishing,
+and it is a measurement rather than an argument. On a **zero-gDNA** stranded condition (truth
+`f_gdna = 0` exactly), injecting κ via `InjectedCalibrationPriors`:
+
+| κ used | `f_gdna` on `gdna_none_ss_0.99_capture_off` | on `..._capture_on` |
+|---|---|---|
+| **0.0100 — the FITTED value** | **0.0030** | **0.0016** |
+| 0.99 — the simulated "truth" | ⛔ **0.4992** | ⛔ **0.4822** |
+| 0.50 — uninformative (control) | 0.0792 | 0.0100 |
+
+Forcing the nominal truth is **166× worse** than the fitted value and 6× worse than carrying no strand
+information at all. So κ and the per-node sense columns are mirrored *the same way*: the strand
+likelihood scores a mirrored observation against a mirrored `p`, the mirror cancels, and the
+deconvolution is right. **Only the exported scalar is mis-labelled.**
+
+⚠ **What that costs today, and it is not nothing.** `rna_sense_frac` leaves calibration, reaches the QC
+report and `cli.py`'s summary, and is the number `CARRY_FORWARD.md` §1 fact 17 quotes for the four real
+libraries. Read as written, "κ = 0.002" says those libraries are almost purely antisense — a striking
+claim about the biology. Read correctly, they are ordinary **highly stranded** libraries. Anyone
+reasoning from the reported number is reasoning about a mirror.
+
+**What to do, and the order matters.** (1) Find where the mirror lives — the scanner's genome-strand
+convention or the simulator's read orientation — by checking one known-strand read's flags against
+`sj_strand` and the accumulator column it lands in. (2) Fix the **naming or the orientation, not both**,
+and gate it on the table above: after the fix, the fitted κ must be ≈ 0.99 *and* `f_gdna` must stay at
+0.0030. A change that moves κ without preserving `f_gdna` has broken the inference to fix a label.
+(3) Correct `CARRY_FORWARD.md` §1 fact 17 and §0 C4.
+
+**Why deferred:** it is a labelling defect on a correct inference, so nothing downstream is wrong today.
+⚠ It is nonetheless a **trap 27** in the making — one quantity, two meanings, and the prose disagreeing
+with the code is exactly how this project lost months before.
+
+## 7. ⚠ THE EM's END-TO-END VARIATION IS `assignment_mode="sample"` — BY DESIGN
+
+⭐ **Owner, 2026-07-30: the EM draws each fragment's assignment from its posterior by default
+(`EMConfig.assignment_mode = "sample"`), and that is deliberate, not a defect.** It can be set
+deterministic. Measured, four runs of one scenario, same seed, same BAM, only the mode differing:
+
+| `assignment_mode` | total assigned, 4 runs | spread |
+|---|---|---|
+| **`sample`** (the default) | 5440.7 / 5458.8 / 5465.3 / 5455.8 | ⚠ **~25, i.e. 0.5 %** |
+| `map` | 6002.246879554673 / …736 / …669 / …744 | ~**1e-10** relative |
+| `fractional` | 6276.853933515619 / …675 / …646 / …627 | ~**1e-11** relative |
+
+⭐ **So an A/B has a switch: run it under `map` or `fractional` and the noise drops eight orders of
+magnitude.** The ~1e-10 residual is float accumulation order, the same family as `CARRY_FORWARD.md` §1
+fact 11, and is far below any effect these steps chase. **This is the practical answer for S5.a2, A6/A3
+and the benchmark skill: A/B under a deterministic assignment mode, not the default.**
+
+⚠ **The three modes give materially different totals** (5441 / 6002 / 6277 here) — they are different
+estimators, not the same answer at different precision. An A/B must hold the mode fixed on both arms,
+and a number quoted from one mode is not comparable to one from another.
+
+### ⛔ AND THE ONE FAILING SCENARIO IS NOT FLAKINESS — it is mode-dependent LEAK
+
+⚠ **Established at S6, and it changes the diagnosis.** `test_nrna_double_counting[g20_n0_s100]`'s
+negative control (a silent transcript, truth 0, limit 25) does not fail *because* the answer wobbles —
+every draw is over the limit:
+
+| `assignment_mode` | `t_ctrl` counts | scenario suite (120 tests) |
+|---|---|---|
+| `sample` (default) | 29 / 29 / 32 / 29 / 33 | 1 failed |
+| `fractional` | 30 | 1 failed |
+| **`map`** | ≤ 25 | ⭐ **120 passed** |
+
+⛔ **Do NOT switch the harness to `map` just because it goes green.** MAP assigns each fragment to its
+single highest-posterior component, so it is the mode that most aggressively suppresses low-posterior
+assignment — and a negative control is a **one-sided** metric (`CARRY_FORWARD.md` §3 trap 19: in a
+library with none of X, any change that lowers X scores better). Going green under MAP would be fitting
+the test to the mode. The real question is whether ~30 counts of leak onto a silent transcript is
+acceptable, and that is a **modelling** call, not a testing one.
+
+### ⛔ The separate defect: `EMConfig.seed` does not make `sample` reproducible
+
+The measurement above passed `seed=12345` **explicitly** and `sample` still varied. The seed IS plumbed —
+`estimator.py:187` builds `np.random.default_rng(em_config.seed)`, `:369` draws `rng_seed`, and
+`em_solver.cpp:2165` mixes it per locus as `SplitMix64(rng_seed ^ li·φ)`. So a seeded run **should**
+reproduce and does not. `tests/scenarios/conftest.py:92` already sets `EMConfig(seed=PIPELINE_SEED)` and
+its negative control still returns 29 / 29 / 32 / 29 / 32.
+
+**Candidates, in the order worth checking:** `rng_seed` is drawn once *per call* of the batch entry
+point, so a varying number of calls or a varying batch split shifts every subsequent seed; or the
+per-locus `li` is not stable across runs; or the ~1e-10 posterior jitter flips draws near a decision
+boundary (this would explain a *small* rate, not 0.5 %). ⚠ Note `EMConfig.n_threads` defaults to `0` =
+all cores, so a run that does not also set `OMP_NUM_THREADS` is parallel regardless.
+
+**Why it matters even though the mode switch exists:** reproducibility is what `seed` is *for*, and a
+seed that silently does not reproduce is worse than no seed — it invites exactly the "I ran it twice and
+it agreed" reasoning that is not available here. **First step is characterisation, not a fix:** run one
+scenario N times under `sample` with a fixed seed, record the per-transcript spread, and state the floor.
+
+**Why deferred:** the mode switch removes the blocker for every downstream A/B, so this is now a
+correctness-of-`seed` question rather than a gate on progress.
 
 ---
 
 ## Smaller, self-contained, and each with its reason
+
+### ⚠ `build_scan_cache.py`'s skip logic does not cover the payload schema
+
+It printed `cached / skip` for all eight pilot conditions that `read_scan_cache` then **refused**
+(`payload_schema_digest None != '66b41ea0b645209d'`). `--force` is the workaround; the digest belongs in
+the skip test, which currently checks only that the directory exists. Same family as
+`CARRY_FORWARD.md` §3 trap 25 — a cache key that does not cover the artifact it caches. Cost so far: one
+confusing failure and a 67 s re-scan. **Fix:** attempt the load in the skip branch and rebuild on refusal.
 
 ### ⛔ The simulator hangs on an impossible fragment-length truncation
 
@@ -258,5 +403,6 @@ a step whose gate is byte-identity.
 
 ### The goldens moved at the index change and were never validated
 
-`gdna_em_count` fell 16–52 %. The new suite should adjudicate it once S5 lands; the accumulator sequence
-should not.
+`gdna_em_count` fell 16–52 %. ⭐ S5 has landed, so the new suite can adjudicate it — but ⛔ **not by
+regenerating**: S6 regenerating the goldens records whatever the tree now does, which is not the same as
+validating it. Adjudication is a separate comparison against the suite's truth.

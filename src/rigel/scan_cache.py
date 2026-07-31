@@ -20,6 +20,7 @@ input                        origin                                      cached?
 FL histograms                the scan                                    **yes, RAW**
 ``region_arrays``            ``RegionArrays.from_index``   (0.11 s)      no
 ``edge_flags``               ``build_edge_flags_array``    (0.04 s)      no
+``junctions``                ``build_junction_geometry_arrays``          no
 ``gdna_fl_pmf``/``rna_fl_pmf``  ``build_fl_models(...)``                 no — derived
 ``config``                   the thing you are varying                   no
 ``injected_priors``          fitted BY ``calibrate``                     no — see below
@@ -52,11 +53,16 @@ THE KEY NEEDS THREE PARTS, AND THE MIDDLE ONE IS A GAP THAT WAS ALREADY LOGGED
 numpy-holding dataclasses is fragile exactly across schema changes, and the schema changes at S5 — a
 pickle written today would not load after it. Arrays go to ``.npz``, scalars and provenance to JSON.
 
-⛔ **STEP 4 (the population-prior seed) IS NOT HERE, AND THAT IS DELIBERATE.** Seeding a toy from a
-genome-scale scan needs ``InjectedCalibrationPriors``, which `calibrate` fits and stashes in
-``_debug["calibration_priors"]`` — so extracting it requires `calibrate` to run, and it cannot until S5
-rewires the consumers. `tests/test_scan_cache.py` carries a strict-xfail that documents the dependency
-rather than pretending the seed path is verified.
+✅ **STEP 4 (the population-prior seed) IS LIVE as of S5.f/S6.** Seeding a toy from a genome-scale scan
+needs ``InjectedCalibrationPriors``, which `calibrate` fits and stashes in
+``_debug["calibration_priors"]`` — so it required `calibrate` to run, and it does.
+``test_population_priors_can_be_extracted_from_a_cached_scan`` was a **strict** xfail naming S5 as the
+blocker and is now a live test.
+
+⛔ **It was still xfailing at S5.f for a DIFFERENT reason than the one recorded** — ``calibration_inputs``
+had not been given ``junctions``, which `calibrate` gained at S5.f. A strict xfail proves only that
+something fails, never that the recorded cause is still the cause; that is why the reason has to be
+re-read when the blocker lifts rather than assumed.
 """
 
 from __future__ import annotations
@@ -78,6 +84,7 @@ __all__ = [
     "ScanCache",
     "ScanCacheKeyError",
     "calibration_inputs",
+    "check_scan_config",
     "index_derived_inputs",
     "payload_schema_digest",
     "reach_digest",
@@ -258,8 +265,15 @@ def write_scan_cache(
     return cache_dir
 
 
-def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex") -> ScanCache:
-    """Load a cache and REFUSE it unless it describes this index and this scan configuration."""
+def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex", scan_config=None) -> ScanCache:
+    """Load a cache and REFUSE it unless it describes this index — and, if ``scan_config`` is given,
+    unless it was produced under that configuration.
+
+    ⚠ **Pass ``scan_config`` whenever you have one.** Without it this checks only that the manifest is
+    consistent with ITSELF; a cache scanned under different settings is a different tally and will load
+    silently. The check is :func:`check_scan_config`, which existed and had **no caller at all** until
+    S6 — the docstring promised a guarantee the code did not provide (`CARRY_FORWARD.md` §3 trap 27).
+    """
     cache_dir = Path(cache_dir)
     manifest = json.loads((cache_dir / MANIFEST_JSON).read_text())
 
@@ -315,7 +329,7 @@ def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex") -> ScanCach
             f"partition or the junction CSR moved; this tally does not describe this index."
         )
 
-    return ScanCache(
+    cache = ScanCache(
         payload=payload,
         strand_model=_strand_from_arrays(strand),
         fl_global_counts=fl_global,
@@ -323,6 +337,9 @@ def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex") -> ScanCach
         fl_max_size=int(manifest["fl_max_size"]),
         provenance=manifest,
     )
+    if scan_config is not None:
+        check_scan_config(cache, scan_config)
+    return cache
 
 
 def _payload_from_parts(arrays: dict, scalars: dict) -> AccumulatorPayload:
@@ -340,7 +357,13 @@ def _payload_from_parts(arrays: dict, scalars: dict) -> AccumulatorPayload:
 
 
 def check_scan_config(cache: ScanCache, scan_config) -> None:
-    """Refuse a cache produced under a different scan configuration."""
+    """Refuse a cache produced under a different scan configuration.
+
+    ⚠ Called by :func:`read_scan_cache` when it is given a ``scan_config``. It had **no caller at all**
+    until S6 while ``read_scan_cache``'s docstring claimed the guarantee it provides — two statements
+    about one contract, disagreeing (`CARRY_FORWARD.md` §3 trap 27). Two scans of one BAM under
+    different settings are different tallies, and nothing else notices.
+    """
     expected = _scan_config_digest(scan_config)
     if cache.provenance["scan_config_digest"] != expected:
         raise ScanCacheKeyError(
@@ -356,11 +379,19 @@ def index_derived_inputs(index: "TranscriptIndex") -> dict:
     stored copy is how a cache goes stale against the thing it describes (`CARRY_FORWARD.md` §3 trap 25).
     """
     from .calibration.region_arrays import RegionArrays
-    from .calibration.splice_graph import build_edge_flags_array
+    from .calibration.splice_graph import (
+        build_edge_flags_array,
+        build_junction_geometry_arrays,
+    )
 
     return {
         "region_arrays": RegionArrays.from_index(index),
         "edge_flags": build_edge_flags_array(index),
+        # ⚠ The JUNCTION axis is index-derived too, and it is not optional: `calibrate` refuses an axis
+        # whose length disagrees with the payload's `n_sj`, because one addressing a different graph
+        # would place every splice on the wrong line. Omitting it here was an S5.f miss that only the
+        # guard caught.
+        "junctions": build_junction_geometry_arrays(index),
     }
 
 

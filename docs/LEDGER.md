@@ -38,6 +38,9 @@ makes attribution meaningful survives. Everything from `I1` on is below in full.
 | **S5.d** | substrate collapsed to ONE type; the chain re-keyed to nodes/edges | below |
 | **S5.e** | ⭐ A7 ruled; the 18 per-face arrays became 5; the faces dissolve | below |
 | **S5.f** | ⭐⭐ **`calibrate()` RUNS — the FIRST BASELINE**; the third axis exported; the pooling dissolves | below |
+| **S5.f-addendum** | the κ mirror is CONSISTENT — the inference is correct, only the label is wrong | below |
+| **S6** | ⭐ goldens regenerated; two S5.f defects exposed; the EM's sampling mode measured | below |
+| **S5.g-1** | the per-contiguous-edge RNA reach built + gated; ⛔ one open question gates the divisor | below |
 | **B2** | the pilot suite, and B0's verdict on it | below |
 | **B3** | the scan cache — scan once, calibrate many times | below |
 
@@ -1431,3 +1434,239 @@ pre-existing property that only became observable once `calibrate()` ran.
   (`payload_schema_digest None != '66b41ea0b645209d'`). `--force` is the workaround; the check belongs in
   the skip test. Same family as `CARRY_FORWARD.md` §3 trap 25 — a cache key that does not cover the
   artifact it caches.
+
+---
+
+## S5.f-addendum — the κ mirror is CONSISTENT, so the inference is correct (2026-07-30)
+
+**Not a step; a measurement made against S5.f's baseline, recorded here rather than by editing S5.f's
+entry.** The S5.f entry reported the fitted κ as `1 − truth` and said the flip "needs its own step"
+without establishing how severe it is. It is now established, and it is **much less severe than it
+looks**.
+
+**The question.** κ enters the only intrinsic gDNA/RNA signal — `p = ½·f_g + κ·(1−f_g)`
+(`CARRY_FORWARD.md` §2). If κ were mirrored while the per-node sense counts were not, the strand
+likelihood would score observations against a mirrored `p` and **the one channel that separates gDNA
+from RNA would be read backwards**. If both are mirrored, the mirror cancels and only the label is wrong.
+
+**The experiment.** Inject κ via `InjectedCalibrationPriors.rna_sense_frac` on the two **zero-gDNA**
+stranded pilot conditions, where truth is `f_gdna = 0` **exactly**:
+
+| κ used | `gdna_none_ss_0.99_capture_off` | `gdna_none_ss_0.99_capture_on` |
+|---|---|---|
+| **0.0100 — the FITTED value** | **0.0030** | **0.0016** |
+| 0.99 — the simulated "truth" | ⛔ **0.4992** | ⛔ **0.4822** |
+| 0.50 — uninformative (the control) | 0.0792 | 0.0100 |
+
+⭐ **Forcing the nominal truth is 166× worse than the fitted value, and 6× worse than supplying no strand
+information at all.** So κ and the per-node sense columns are mirrored the same way, the mirror cancels
+inside the solve, and **the deconvolution is correct**. The defect is confined to the exported scalar.
+
+⚠ **The control is what makes this conclusive.** Without the κ = 0.50 row, "0.99 is worse" could have
+been a mis-specified-prior effect of any kind; landing *between* the two — 0.0030 correct, 0.0792
+uninformative, 0.4992 anti-informative — is the signature of a sign error rather than a noisy fit.
+
+**Consequences recorded:** `TODO.md` §6 (ranked 6, with the gate any fix must pass — κ must move to 0.99
+*while* `f_gdna` stays at 0.0030); `CARRY_FORWARD.md` §0 C4 (answered) and §1 fact 17 (its κ column reads
+backwards — the four real cfRNA libraries are ordinary **highly stranded** libraries, not near-purely
+antisense ones, which is a materially different claim about the data).
+
+⚠ **What this does NOT settle:** where the mirror lives — the scanner's genome-strand convention or the
+simulator's read orientation. That is `TODO.md` §6's first step.
+
+---
+
+## S6 — the goldens regenerated, and two defects the regeneration exposed (2026-07-30)
+
+**Gate: suite green; goldens regenerated ONCE.** Suite **1729 passed / 22 failed → 1752 passed /
+1 failed**. The one remaining failure is **not** S6's and **not** flakiness — see below.
+
+### The delete half was already done, and that is the point
+
+S6 is specified as "delete; `ruff check` undefined-name failures are the authoritative list"
+(`IMPLEMENTATION_PLAN.md` §469). That list is **empty**: `ruff check --select F821` passes, there is not
+one `NotImplementedError` shim left in `src/` or `tests/`, and no `_pending_*` markers. S5.a–S5.f each
+deleted as they went, which is what "converge and delete" is supposed to produce — a step whose own
+deletion phase finds nothing.
+
+⭐ **So the dead-code hunt went past what ruff can see**: an AST sweep for module-level symbols defined
+in `src/rigel/` and never referenced anywhere in `src/`, `tests/` or `scripts/`. **One hit**, and it was
+not dead code — it was an **uncalled safety check** (below).
+
+### ⛔ TWO DEFECTS, BOTH INTRODUCED BY S5.f, BOTH INVISIBLE TO A GREEN SUITE
+
+**1. `scan_cache.calibration_inputs` was broken by S5.f.** Its docstring says "Exactly the keyword
+arguments `calibrate` needs"; `calibrate` gained `junctions` at S5.f and this helper was never updated.
+Any caller would trip S5.f's own alignment guard. ⚠ **The existing test could not catch it** — it checked
+a *hand-kept* `required` set, and a hand-kept list cannot notice an argument nobody added to it. Replaced
+with the set of every parameter of `calibrate` that has no usable default, read off `inspect.signature`,
+so the next added argument fails here instead of at a call site. A second test now **actually calls**
+`calibrate(**calibration_inputs(...))`, because a signature check sees a missing NAME and never a
+mis-sized ARRAY — and a junction axis of the wrong length places every splice on the wrong line.
+
+**2. `check_scan_config` had no caller, while `read_scan_cache`'s docstring promised what it does.**
+`read_scan_cache` said it would "REFUSE it unless it describes this index **and this scan
+configuration**". It checked the manifest's `scan_config_digest` against **the config the manifest
+itself records** — self-consistency — and never against the config the caller intends. So a cache
+scanned under `sj_strand_tag="XS"` loaded silently for a caller who wanted `"auto"`. Two statements
+about one contract, disagreeing (`CARRY_FORWARD.md` §3 trap 27). ⭐ Resolved by **wiring it, not deleting
+it**: `read_scan_cache` takes an optional `scan_config` and calls the check when given one. Deleting a
+safety check because nobody calls it is the wrong way to resolve a promise the prose already made.
+
+⭐ **A strict xfail was xfailing for the WRONG REASON.**
+`test_population_priors_can_be_extracted_from_a_cached_scan` was `xfail(strict=True)` naming S5 as the
+blocker. `calibrate()` has run since S5.f — so it should have started passing, and it did not, because
+of defect 1. **Strict is what made this visible at all** (a non-strict xfail would have stayed quietly
+red forever), but strictness proves only that *something* fails, never that the recorded cause is still
+the cause. The xfail is removed and the test is live. ⭐ This closes `TODO.md` §4 (the scan cache's
+population-prior seed) as a side effect.
+
+### ⭐ THE TWICE-AND-DIFF EARNED ITS PLACE, AND THEN DISPROVED ITS OWN PREMISE
+
+The goldens were regenerated **twice** and the two outputs diffed, on the reasoning that the EM's default
+`assignment_mode="sample"` draws from the posterior and a flaky expectation baked into a golden is
+permanent. **2 of 21 scenarios differed between regenerations** — `wide_intron` and
+`higher_frag_count_3k`, exactly the two that had been failing.
+
+⭐ **But the difference is 1–2 ulp of float64, not a resampled assignment.** The COUNTS are identical
+(`331.0`, `0.0`); what moves is `687.9988063212445` vs `687.998806321244` and
+`623458.9808348428` vs `623458.9808348427` — ~**1e-15** relative, float accumulation order, the same
+family as `CARRY_FORWARD.md` §1 fact 11. Against `RTOL = 1e-6` that is **nine orders of magnitude of
+headroom**, and the regenerated goldens pass three consecutive runs. ⚠ Worth recording *because* it came
+out negative: the check cost two minutes and converted "the goldens are probably fine" into a measured
+statement, on precisely the two scenarios where it mattered.
+
+### ⛔ THE ONE REMAINING FAILURE IS A MODELLING QUESTION, NOT A TEST DEFECT
+
+`tests/scenarios/test_nrna_double_counting.py::test_full_sweep[g20_n0_s100]` — a silent transcript
+(truth 0) against a limit of 25. Measured across all three assignment modes:
+
+| `assignment_mode` | `t_ctrl` counts | `tests/scenarios/` (120 tests) |
+|---|---|---|
+| `sample` (the default) | 29 / 29 / 32 / 29 / 33 | 1 failed |
+| `fractional` | 30 | 1 failed |
+| **`map`** | ≤ 25 | ⭐ **120 passed** |
+
+⭐ **It does not fail because the answer wobbles — every draw is over the limit.** The variation is real
+but incidental; the leak is ~30 counts under two of three modes.
+
+⛔ **`map` was NOT adopted, and adopting it would be a mistake.** MAP assigns each fragment to its single
+highest-posterior component, so it is the mode that most suppresses low-posterior assignment — and a
+negative control is a **one-sided** metric (`CARRY_FORWARD.md` §3 trap 19: in a library with none of X,
+any change that lowers X scores better). Going green under MAP would be fitting the test to the mode.
+Whether ~30 counts of leak onto a silent transcript is acceptable is the **owner's modelling call**,
+recorded in `TODO.md` §7.
+
+### ⭐ And the practical consequence for every A/B after this
+
+Owner, 2026-07-30: the EM samples from the posterior **by design**. Measured over four runs of one
+scenario at a fixed seed, varying only the mode: `sample` spreads **~0.5 %** (5440.7 / 5458.8 / 5465.3 /
+5455.8), `map` **~1e-10** (6002.246879554673 / …736 / …669 / …744), `fractional` **~1e-11**. ⭐ **So an
+end-to-end A/B has a switch** — run both arms under `map` or `fractional` and the noise drops eight
+orders of magnitude. ⚠ The three modes give materially different totals (5441 / 6002 / 6277), so they are
+different estimators: hold the mode fixed across both arms, and never compare a number from one mode to
+one from another.
+
+⚠ **A seeded `sample` run still does not reproduce**, and that is a genuine defect — the seed is plumbed
+(`estimator.py:187` → `:369` → `em_solver.cpp:2165`'s `SplitMix64(rng_seed ^ li·φ)`) and
+`tests/scenarios/conftest.py:92` already sets one. `TODO.md` §7 ranks it and lists the candidates.
+
+### Files touched
+
+* `tests/golden/` — **147 files regenerated** (21 scenarios × transcript/gene/loci/scalars, feather+tsv).
+* `src/rigel/scan_cache.py` — `index_derived_inputs` gains `junctions`; `read_scan_cache` gains an
+  optional `scan_config` and calls `check_scan_config`; `check_scan_config` exported; the module
+  docstring's step-4 block corrected (it still said the seed path was blocked on S5).
+* `tests/test_scan_cache.py` — the hand-kept `required` set replaced by `inspect.signature`; a new test
+  that actually drives `calibrate`; the obsolete strict xfail removed.
+* `docs/TODO.md` (§6, §7 + the ranked critical path) · `docs/CARRY_FORWARD.md` (§0 C4, §1 fact 17).
+
+---
+
+## S5.g-1 — the per-contiguous-edge RNA reach, built and gated (2026-07-30)
+
+**The input A7 needs, landed on its own.** S5.g turns on the contiguous-edge RNA taper; this is the
+array that makes it possible, split out because it has an unambiguous correct answer (it must match
+`edges_df` on the payload's edge axis) while the divisor change does **not** — see the open question
+below. Suite **1752 → 1758 passed / 1 failed** (+6 tests, the failure unchanged and unrelated).
+
+`splice_graph.build_contiguous_edge_reach_arrays(index) → (reach_lo, reach_hi)`, each `float64[E, 2]`,
+column 0 the POS-strand transcript's reach and column 1 the NEG's. Keyed by ``src`` and laid out per
+reference exactly as `build_edge_flags_array` is, so the two are **the same axis element for element**.
+
+**Three properties that are not arbitrary, each with its citation:**
+
+* **PER STRAND and per SIDE** — `CARRY_FORWARD.md` §2: reach is "maximised over transcripts
+  independently per side AND per strand". This is what forces `eff_rna` to gain a strand axis; a single
+  averaged reach describes neither transcript.
+* **GENOMIC, not exonic** — unlike a junction's. A junction is used only by a spliced molecule so what
+  remains either side is exonic; a contiguous line is also crossed by *nascent* RNA, which is genomic.
+  Taking the exonic reach here would declare an intronic nascent fragment impossible.
+* ⚠ **A reach of 0 is the ANSWER, not a missing value.** No template of that strand at that line ⇒ zero
+  opportunity ⇒ divisor 0 ⇒ the consumer emits nothing (`CARRY_FORWARD.md` §3 trap 23). Measured on the
+  chr22 pilot index: **40.6 %** of contiguous edges have no POS template, **42.9 %** no NEG.
+
+### ⭐ It independently reproduces fact 6's magnitude
+
+On the chr22 pilot index with the suite's own fragment-length distribution (mean 206, sd 98), over the
+lines where the strand has any template at all:
+
+| | unbounded divisor | tapered mean | ratio |
+|---|---|---|---|
+| POS | 216.6 | 182.5 | **0.8425** |
+| NEG | 216.6 | 186.1 | **0.8592** |
+
+`CARRY_FORWARD.md` §1 fact 6 records a bp-weighted **0.8904** over 3,000 genes, and notes contiguous
+seams are the worse half (0.750 against junctions' 0.886). Different index, different weighting,
+different FL — and the same magnitude. ⭐ That is an independent reproduction of the number A7 exists to
+remove, from an array built for a different purpose.
+
+### Gates
+
+* `tests/calibration/test_edge_reach.py` — **6 tests**, written first and verified failing, with the
+  edge coordinate derived from the PARTITION rather than from the reach builder (trap 1).
+* **Six perturbations, all caught**: strand columns transposed · keyed by `dst` not `src` · `lo`/`hi`
+  swapped · the `k−1` slice becomes `k` (a terminal slot returns) · zero reach floored to
+  `UNBOUNDED_REACH` · reach clipped to a one-fragment minimum.
+  ⚠ The flooring perturbation was **placed wrongly the first time** — after the slices were already
+  taken — and passed. That was a no-op, not a gate hole; re-armed where it bites, it fails 4 of 6. A
+  perturbation that changes nothing proves nothing, and checking *that* is part of the discipline.
+* The fixture is deliberately **multi-reference** with a POS and a NEG transcript that are **disjoint**,
+  so a transposed strand axis moves a non-zero to the wrong line rather than permuting a pair.
+
+### ⛔ OPEN — the one question that gates the rest of S5.g, and it is the owner's
+
+Turning the taper on means `NodeGeometry.eff_rna` becomes `[n_slots, 2]`. Two of its three consumers
+take that without a decision:
+
+* `node_init._rna` is **already called once per strand** — it just needs the matching column.
+* `node_geometry.node_total_density` sums the two strands, exactly as it already does for junctions.
+
+⛔ **`bp_solver.py:334` does not.** There `E_r` feeds the transfer variance
+`Var(log ρ_tot) = 1/n + [(1/E_g − 1/E_r)/B]²·Var(f_g)` — a **strand-agnostic scalar**. Collapsing two
+strand divisors into one for that term requires a reduction rule, and the honest candidates disagree:
+
+| candidate | argument for | argument against |
+|---|---|---|
+| the belief-weighted divisor `M·(f_pos+f_neg) / ρ_r_total` | the only one that reproduces the actual total RNA density | belief-dependent, and this term is evaluated at the INPUT belief — a self-reference of the trap-11 family |
+| max over strands (the loosest reach) | describes the strand with template, and at the 40 % of lines with only one live strand it IS that strand's reach | ⛔ **no monotone safety argument** — see the correction below |
+| leave it at `UNBOUNDED_REACH` | minimal change; it is a damping heuristic, not a density | ⛔ puts two meanings on `eff_rna` — trap 27, the exact defect S5.e removed |
+
+⛔ **CORRECTION, made before this entry was committed.** An earlier draft justified "max over strands"
+as *"conservative: least damping, never over-confident"*. **That is false**, and the arithmetic says so:
+the term is `(1/E_g − 1/E_r)²`, which is **not monotonic in `E_r`** — it is ZERO at `E_r = E_g` and grows
+on both sides. On the suite's own pools (`E_g = mu_g − 1 = 156`, `E_r` unbounded `= 205`):
+
+| `E_r` | 205 (unbounded) | 190 | 170 | **156** | 140 | 100 | 50 |
+|---|---|---|---|---|---|---|---|
+| `(1/E_g − 1/E_r)²` | 2.35e-6 | 1.32e-6 | 2.79e-7 | **0** | 5.37e-7 | 1.29e-5 | **1.85e-4** |
+
+The zero sits **inside the plausible tapered range**, so tapering first *reduces* the damping to nothing
+and then increases it sharply — at a deep terminus (`E_r = 50`) it is **79×** the unbounded value. No
+"larger is safer" argument survives that.
+
+⭐ **And the zero is correct physics, not a pathology**: when the two components convert mass to density
+identically, composition uncertainty cannot move the total density, so its variance genuinely vanishes.
+
+**This is a new heuristic, and the standing rule is to stop and discuss before adding one.** It is
+recorded rather than guessed. `TODO.md` §1.
