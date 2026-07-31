@@ -199,7 +199,7 @@ def test_summary_json_v2_schema_and_companion(tmp_path):
         "gdna_density",
         "gdna_frac",
     ]
-    assert len(track) == pr.calibration.n_regions
+    assert len(track) == pr.calibration.n_nodes
     assert (track["gdna_frac"] >= 0).all() and (track["gdna_frac"] <= 1).all()
     bg = (out / "calibration_track.bedgraph").read_text().splitlines()
     assert bg[0].startswith("track type=bedGraph")

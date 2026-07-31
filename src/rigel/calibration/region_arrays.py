@@ -1,19 +1,29 @@
-"""rigel.calibration.region_arrays — sorted region geometry + boundary mapping.
+"""rigel.calibration.region_arrays — sorted node geometry + the node↔edge mapping.
 
 Two pieces of pure geometry the calibrator builds on:
 
-* :class:`RegionArrays` — a per-reference-CSR view of the region table,
+* :class:`RegionArrays` — a per-reference-CSR view of the node table,
   sorted by ``(ref_id, start)`` so each reference's rows are contiguous and
   ascending. Carries the structural columns plus the int8 transcript-strand
-  class derived from each region's signature (the D2 strand-model input).
+  class derived from each node's signature (the strand-model input).
 
-* The **boundary↔region index mapping** — for each reference with ``k``
-  regions there are ``k + 1`` boundary slots (the two terminals plus the
-  ``k - 1`` internal seams). These functions map a region to the two
-  boundaries flanking it, and a boundary to the regions on either side. They
-  are computed purely from the accumulator payload's topology offsets
-  (``ref_region_offsets`` / ``ref_boundary_offsets``), so they hold whenever
-  the region arrays are aligned 1:1 with the payload.
+* The **node↔contiguous-edge index mapping** — :func:`node_right_edge` and
+  :func:`edge_node_indices`.
+
+⭐ **The ``k + 1`` boundary axis is retired (S5.f).** A reference with ``k`` nodes used to own
+``k + 1`` boundary slots — the ``k − 1`` interior seams plus two data-free terminals that existed
+only so every region had an object on each side. A contiguous edge is the line BETWEEN two adjacent
+nodes: there is no such line before the first or after the last, so a reference owns exactly
+``k − 1`` of them and **an edge always has a node on both sides**. That kills the ``-1``-terminal
+branch, the two-spaces-off-by-one-per-reference arithmetic, and the pair of offset arrays the old
+mapping needed — the edge axis is derivable from ``ref_id`` alone.
+
+⚠ The derivation rests on ONE fact: edge ids are assigned per reference in genomic order, in
+reference order, which is exactly the order adjacent same-reference node pairs appear in a
+``(ref_id, start)``-sorted node table. :func:`~rigel.calibration.node_chain.build_node_chain` lays
+out the same numbering by walking the payload's CSR offsets, and
+``test_edge_numbering_matches_the_chain_built_from_the_payload_offsets`` pins the two against each
+other — a second algorithm, not a second call to the first (`CARRY_FORWARD.md` §3 trap 1).
 
 No tunable parameters: this module is index arithmetic only.
 """
@@ -31,8 +41,8 @@ from .signature import transcript_strand_class
 
 __all__ = [
     "RegionArrays",
-    "region_boundary_indices",
-    "boundary_region_indices",
+    "edge_node_indices",
+    "node_right_edge",
 ]
 
 
@@ -134,72 +144,44 @@ class RegionArrays:
 
 
 # ---------------------------------------------------------------------------
-# Boundary ↔ region index mapping
+# Node ↔ contiguous-edge index mapping
 # ---------------------------------------------------------------------------
 
 
-def _as_offsets(arr: np.ndarray, name: str) -> np.ndarray:
-    offsets = np.asarray(arr, dtype=np.int64)
-    if offsets.ndim != 1 or offsets.shape[0] < 1:
-        raise ValueError(f"{name} must be a 1-D offset array of length n_refs + 1.")
-    return offsets
+def node_right_edge(ref_id: np.ndarray) -> np.ndarray:
+    """``int64[N]`` — the contiguous edge to the right of each node, ``-1`` at a reference's last node.
 
+    Nodes ``r`` and ``r + 1`` share a line exactly when they are in the same reference, so the edge
+    axis is the run of adjacent same-reference pairs, numbered in node order. A reference with one
+    node owns no edge; an empty reference contributes nothing.
 
-def region_boundary_indices(
-    ref_region_offsets: np.ndarray,
-    ref_boundary_offsets: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Map each region to the boundaries flanking it.
-
-    For region ``r`` in reference ``f`` with local index ``i``::
-
-        left_boundary[r]  = ref_boundary_offsets[f] + i
-        right_boundary[r] = ref_boundary_offsets[f] + i + 1
-
-    Returns ``(left_boundary, right_boundary)``, each int64 of length
-    ``R = ref_region_offsets[-1]``. Every region has both indices defined
-    (the first/last region's outer boundary is its reference terminal).
+    ``ref_id`` must be **grouped** (all of a reference's nodes contiguous), which
+    :class:`RegionArrays` guarantees by sorting on ``(ref_id, start)``. Ungrouped input would
+    manufacture edges that straddle references, so it is refused rather than tolerated.
     """
-    rro = _as_offsets(ref_region_offsets, "ref_region_offsets")
-    rbo = _as_offsets(ref_boundary_offsets, "ref_boundary_offsets")
-    if rro.shape != rbo.shape:
-        raise ValueError("ref_region_offsets and ref_boundary_offsets must share length.")
+    ref = np.asarray(ref_id)
+    n = int(ref.shape[0])
+    out = np.full(n, -1, dtype=np.int64)
+    if n < 2:
+        return out
+    same = ref[:-1] == ref[1:]
+    # grouped ⇔ each reference's rows form ONE run ⇔ the number of runs equals the number of
+    # distinct references. `np.unique` counts distinct values; `same` counts run breaks.
+    if int((~same).sum()) + 1 != int(np.unique(ref).shape[0]):
+        raise ValueError(
+            "ref_id is not grouped: each reference's nodes must be contiguous. Build the geometry "
+            "with RegionArrays.from_index / from_frame, which sorts on (ref_id, start)."
+        )
+    out[:-1][same] = np.arange(int(same.sum()), dtype=np.int64)
+    return out
 
-    n_refs = rro.shape[0] - 1
-    r_total = int(rro[-1])
-    region_ref = np.repeat(np.arange(n_refs, dtype=np.int64), np.diff(rro))
-    local = np.arange(r_total, dtype=np.int64) - rro[region_ref]
-    left_boundary = rbo[region_ref] + local
-    return left_boundary, left_boundary + 1
 
+def edge_node_indices(ref_id: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """``(lo_node, hi_node)`` — the two nodes contiguous edge ``e`` lies between, each ``int64[E]``.
 
-def boundary_region_indices(
-    ref_region_offsets: np.ndarray,
-    ref_boundary_offsets: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Map each boundary to the regions on either side.
-
-    For boundary slot ``j`` (0-based within its reference of ``k`` regions),
-    ``left_region`` is the region to its left and ``right_region`` the region
-    to its right, with ``-1`` on the off-edge side of a reference terminal
-    (``j == 0`` has no left region; ``j == k`` has no right region).
-
-    Returns ``(left_region, right_region)``, each int64 of length
-    ``B = ref_boundary_offsets[-1]``. This is the exact inverse of
-    :func:`region_boundary_indices` on internal seams and the natural
-    one-sided attribution at terminals.
+    The exact inverse of :func:`node_right_edge`. ``hi_node == lo_node + 1`` always, and both are in
+    the same reference by construction — there is no terminal case and no ``-1``.
     """
-    rro = _as_offsets(ref_region_offsets, "ref_region_offsets")
-    rbo = _as_offsets(ref_boundary_offsets, "ref_boundary_offsets")
-    if rro.shape != rbo.shape:
-        raise ValueError("ref_region_offsets and ref_boundary_offsets must share length.")
-
-    n_refs = rbo.shape[0] - 1
-    b_total = int(rbo[-1])
-    boundary_ref = np.repeat(np.arange(n_refs, dtype=np.int64), np.diff(rbo))
-    local_b = np.arange(b_total, dtype=np.int64) - rbo[boundary_ref]
-    regions_in_ref = np.diff(rro)[boundary_ref]
-    region_base = rro[boundary_ref]
-    left_region = np.where(local_b >= 1, region_base + local_b - 1, -1)
-    right_region = np.where(local_b <= regions_in_ref - 1, region_base + local_b, -1)
-    return left_region, right_region
+    right = node_right_edge(ref_id)
+    lo = np.flatnonzero(right >= 0).astype(np.int64)
+    return lo, lo + 1

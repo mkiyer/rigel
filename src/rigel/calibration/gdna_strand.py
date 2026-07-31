@@ -72,7 +72,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .strand_deconv import boundary_side_seeds
+from .strand_deconv import edge_seeds
 from .signature import TS_AMBIG, TS_NEG
 
 #: Hard floor on overdispersion — the Binomial limit (no negative overdispersion).
@@ -356,24 +356,27 @@ def fit_gdna_strand_overdispersion(
     )
 
 
-def _region_seeds(substrate, region_arrays, node_density):
-    """``(sense, total, gdna_weight)`` from the count-observable contained regions.
+def _node_seeds(substrate, region_arrays, node_density):
+    """``(sense, total, gdna_weight)`` from the count-observable CONTAINED nodes.
 
-    Intergenic (``TS_NONE``) and intron-only (``TS_POS``/``TS_NEG``) regions — i.e.
-    ``node_density.region_count_observable`` — excluding ``TS_AMBIG`` (both strands, no defined
+    Intergenic (``TS_NONE``) and intron-only (``TS_POS``/``TS_NEG``) nodes — i.e.
+    ``node_density.node_count_observable`` — excluding ``TS_AMBIG`` (both strands, no defined
     sense). The weight is the count-clue gDNA fraction ``node_density.count_gdna_frac`` (=
-    ``clip(density·eff_len / mass)``, density cleaned by the strand *mean* ½, not the dispersion).
+    ``clip(density·eff_gdna / count)``, density cleaned by the strand *mean* ½, not the dispersion).
     It reads the explicit count-prior MEAN (``count_gdna_frac``) directly — decoupled from the
     count-prior concentration, which carries the overdispersion-honest precision.
+
+    ⚠ The columns are GENOME strand, so orienting to transcript sense is this function's job
+    (arbitrary but consistent for ``TS_NONE`` — an intergenic node has no transcript to be sense to,
+    and gDNA's strand mean is ½ either way).
     """
     ts = np.asarray(region_arrays.strand_class)
-    contained = substrate.contained
-    pos = np.asarray(contained.n_unspliced_pos, dtype=np.float64)
-    neg = np.asarray(contained.n_unspliced_neg, dtype=np.float64)
+    count = np.asarray(substrate.node_contained.count, dtype=np.float64)
+    pos, neg = count[:, 0], count[:, 1]
     total = pos + neg
-    sense = np.where(ts == TS_NEG, neg, pos)  # orient to transcript sense (arbitrary for TS_NONE)
+    sense = np.where(ts == TS_NEG, neg, pos)
     weight = np.clip(np.asarray(node_density.count_gdna_frac, dtype=np.float64), 0.0, 1.0)
-    seed = np.asarray(node_density.region_count_observable) & (ts != TS_AMBIG)
+    seed = np.asarray(node_density.node_count_observable) & (ts != TS_AMBIG)
     return sense[seed], total[seed], weight[seed]
 
 
@@ -381,7 +384,6 @@ def fit_gdna_strand_from_substrate(
     substrate,
     region_arrays,
     node_density,
-    boundary_side_eff_len,
     *,
     rna_sense_frac: float,
     prior_overdispersion: float = _PRIOR_OVERDISPERSION,
@@ -391,22 +393,24 @@ def fit_gdna_strand_from_substrate(
 
     Pools two kinds of count-observable seed (the same seeds the density estimator trusts):
 
-    * **contained regions** — intergenic + intron-only (:func:`_region_seeds`);
-    * **boundary sides** — exon–intron / exon–intergenic seams
-      (:func:`strand_deconv.boundary_side_seeds`), needed under hybrid capture, which depletes
-      off-target intergenic/intronic gDNA.
+    * **contained nodes** — intergenic + intron-only (:func:`_node_seeds`);
+    * **contiguous edges** — exon–intron / exon–intergenic lines
+      (:func:`strand_deconv.edge_seeds`), needed under hybrid capture, which depletes off-target
+      intergenic/intronic gDNA.
 
-    Both contribute ``(sense, total, gdna_weight)`` on the same footing — the weight being the
-    overdispersion-free count-clue gDNA fraction — and the pooled estimator fits one global
-    overdispersion, shrunk toward ``prior_overdispersion`` (strength ``prior_weight``).
+    Both contribute ``(sense, total, gdna_weight)`` on the same footing, and the pooled estimator fits
+    one global overdispersion, shrunk toward ``prior_overdispersion`` (strength ``prior_weight``).
+
+    ⚠ **The edge arm contributes one seed per line, not two per boundary** (S5.f). The predecessor
+    counted each physical crossing twice — once from each face — which inflated the pooled sample size
+    2× and paired every observation with a perfectly correlated twin. A dispersion estimator reading
+    its own duplication is the failure mode this removes; see :mod:`strand_deconv`.
     """
-    r_sense, r_total, r_weight = _region_seeds(substrate, region_arrays, node_density)
-    b_sense, b_total, b_weight = boundary_side_seeds(
-        substrate, region_arrays, node_density, boundary_side_eff_len
-    )
-    sense = np.concatenate([r_sense, b_sense])
-    total = np.concatenate([r_total, b_total])
-    weight = np.concatenate([r_weight, b_weight])
+    n_sense, n_total, n_weight = _node_seeds(substrate, region_arrays, node_density)
+    e_sense, e_total, e_weight = edge_seeds(substrate, region_arrays, node_density)
+    sense = np.concatenate([n_sense, e_sense])
+    total = np.concatenate([n_total, e_total])
+    weight = np.concatenate([n_weight, e_weight])
     return fit_gdna_strand_overdispersion(
         sense,
         total,

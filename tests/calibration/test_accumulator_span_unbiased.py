@@ -15,7 +15,11 @@ from __future__ import annotations
 import numpy as np
 
 from rigel.calibration.density_model import count_observable_masks
-from rigel.calibration.effective_length import contained_eff_length, fl_mean
+from rigel.calibration.effective_length import (
+    UNBOUNDED_REACH,
+    contained_eff_length,
+    crossing_eff_length,
+)
 from rigel.calibration.fl import build_fl_models, gdna_fl_mass
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.substrate import CalibrationSubstrate
@@ -25,7 +29,16 @@ from rigel.splice import SpliceType
 
 
 def _crossing_vs_contained_ratio(bam_path, index) -> float:
-    """Return crossing-ρ / contained-ρ over count-observable nodes (≈1.0 if unbiased)."""
+    """Return crossing-ρ / contained-ρ over count-observable objects (≈1.0 if unbiased).
+
+    ⭐ **Both are RATIOS OF SUMS**, pooled over their own axis (`CARRY_FORWARD.md` §2,
+    ``ρ_bg = Σg/ΣE``). The predecessor took the MEAN of the per-boundary fluxes and divided by
+    ``fl_mean``, which is a mean of ratios — a different number whenever the supports differ.
+
+    ⭐ **And a line is ONE number.** The predecessor averaged a boundary's two faces,
+    ``(right[r] + left[r+1]) / 2``, because the old accumulator split one crossing across them. A
+    contiguous edge is a 0-bp line with one count, so the ½ and the loop over flanks both go.
+    """
     _s, sm, fla, _b, pl = scan_and_buffer(str(bam_path), index, BamScanConfig(sj_strand_tag="auto"))
     ra = RegionArrays.from_frame(index.nodes_df, index.ref_name_to_id)
     CalibrationSubstrate._check_alignment(pl, ra)
@@ -36,22 +49,19 @@ def _crossing_vs_contained_ratio(bam_path, index) -> float:
         max_size=fla.max_size,
     )
     gpmf = flm.gdna_pmf
-    reg_eff = contained_eff_length(ra.region_size_bp, gpmf)
+    node_eff = contained_eff_length(ra.region_size_bp, gpmf)
+    # gDNA's template is the chromosome, so a line's divisor is the unbounded-reach limit mu_g − 1 —
+    # the SAME number at every line, which is why the crossing pool needs only a count of lines.
+    edge_eff = float(crossing_eff_length(gpmf, [UNBOUNDED_REACH], [UNBOUNDED_REACH])[0])
     sub = CalibrationSubstrate.from_payload(pl, ra)
-    rids = np.asarray(ra.ref_id)
-    reg_obs, bnd_obs = count_observable_masks(np.asarray(ra.signature), rids)
+    node_obs, edge_obs = count_observable_masks(np.asarray(ra.signature), np.asarray(ra.ref_id))
 
-    c = sub.contained
-    cont_cnt = (c.n_unspliced_pos + c.n_unspliced_neg).astype(np.float64)
-    obs_reg = reg_obs & (reg_eff > 1.0)
-    rho_contained = float(cont_cnt[obs_reg].sum() / reg_eff[obs_reg].sum())
+    live_nodes = node_obs & (node_eff > 1.0)
+    contained = np.asarray(sub.node_contained.count, np.float64).sum(1)
+    rho_contained = float(contained[live_nodes].sum() / node_eff[live_nodes].sum())
 
-    flux = []
-    for r in np.where(bnd_obs)[0]:
-        rs = r + 1
-        if rs < ra.n_regions and rids[r] == rids[rs]:
-            flux.append((float(sub.right.n_unspliced[r]) + float(sub.left.n_unspliced[rs])) / 2.0)
-    rho_crossing = float(np.mean(flux)) / fl_mean
+    crossing = np.asarray(sub.edge_unspliced.count, np.float64).sum(1)
+    rho_crossing = float(crossing[edge_obs].sum() / (edge_eff * int(edge_obs.sum())))
     return rho_crossing / rho_contained
 
 
@@ -119,20 +129,27 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
     rid = np.asarray(ra.ref_id)
     gene = rid == res.index.ref_name_to_id["implicit_chan"]
 
-    # (1) Implicit splices route to the SPLICED channel: the exon-flanking
-    #     boundaries carry spliced crossing flux.
-    spliced_flux = int((sub.left.n_spliced[gene] + sub.right.n_spliced[gene]).sum())
-    assert spliced_flux > 1000, f"expected substantial spliced crossing flux, got {spliced_flux}"
+    # (1) Implicit splices route to the JUNCTION axis — the molecule JUMPED, it did not cross. ⭐ In
+    #     the new model a splice deposits on its junction edge ONLY, never on the contiguous lines it
+    #     splices over, so the evidence is `sj_count` rather than a spliced channel on a boundary.
+    junction_flux = int(np.asarray(sub.junction.count, np.int64).sum())
+    assert junction_flux > 1000, f"expected substantial junction flux, got {junction_flux}"
 
-    # (2) The intron is CUT, not filled: the intron region carries NO unspliced
-    #     mass (contained or crossing) — the implicit molecules skip it.
+    # (2) The intron is CUT, not filled: the intron NODE carries no contained mass, and neither of the
+    #     lines bounding it carries an unspliced crossing — the implicit molecules skip both.
+    from rigel.calibration.region_arrays import node_right_edge
+
     intron = gene & (ctype == 1)
     assert intron.any()
-    intron_unspliced = float(
-        sub.contained.n_unspliced[intron].sum()
-        + sub.left.n_unspliced[intron].sum()
-        + sub.right.n_unspliced[intron].sum()
-    )
+    contained = np.asarray(sub.node_contained.count, np.float64).sum(1)
+    crossing = np.asarray(sub.edge_unspliced.count, np.float64).sum(1)
+    right_edge = node_right_edge(np.asarray(ra.ref_id))
+    bounding = np.zeros(crossing.shape[0], dtype=bool)
+    for r in np.flatnonzero(intron):
+        for e in (right_edge[r], right_edge[r - 1] if r > 0 else -1):
+            if e >= 0:
+                bounding[e] = True
+    intron_unspliced = float(contained[intron].sum() + crossing[bounding].sum())
     assert intron_unspliced == 0.0, f"intron carries unspliced mass {intron_unspliced} (not cut)"
 
 
@@ -207,11 +224,9 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
             )
 
     def total_mass(payload) -> float:
-        return float(
-            payload.region_contained.sum()
-            + payload.boundary_mass_left.sum()
-            + payload.boundary_mass_right.sum()
-        )
+        """Every deposit on every axis. ⭐ ``node_start_count`` is the fragment tally — one per accepted
+        fragment — and is what "mass == n_deposited" means now that mass IS a count."""
+        return float(np.asarray(payload.node_start_count, np.int64).sum())
 
     cfg = BamScanConfig(sj_strand_tag="XS")
 

@@ -2,10 +2,16 @@
 
 Principle: the oracle IS the production accumulator, partitioned by TRUE fragment origin. We split the sim
 BAM into gdna / mrna / nrna by read-name origin (:func:`rigel.sim.read_name.parse_origin`), run the SAME
-production scanner+accumulator on each partition, and assert the partitions sum to the full payload
-(byte-exact on the integer channels; float32-rounding tolerance on boundary mass). Because the accumulator
-deposits each fragment independently, this sum-to-full identity PROVES the partition is the production
-payload split by origin — no reimplementation, nothing to get subtly wrong.
+production scanner+accumulator on each partition, and assert the partitions sum to the full payload.
+Because the accumulator deposits each fragment independently, this sum-to-full identity PROVES the
+partition is the production payload split by origin — no reimplementation, nothing to get subtly wrong.
+
+⭐ **THE TOLERANCE IS GONE (S5.f).** Sum-to-full used to be byte-exact on the integer channels and
+approximate on ``boundary_mass_{left,right}`` — a float32 array, because the old accumulator split one
+fragment's MASS across the objects it touched. The new one deposits ``+1`` on every object touched, so
+every bank is an integer sum and the whole identity is exact. ``boundary_mass_tol`` had no successor
+and is deleted rather than carried at zero: a tolerance parameter that must be zero is a claim that
+some comparison is approximate, and none is.
 
 This replaces the retired ``oracle_node_masses`` (in the deleted ``_metrics``/``oracle_*`` scripts), which
 deposited WHOLE fragments by SPAN with no intron-cutting — an INCOMPATIBLE basis with the accumulator the
@@ -13,13 +19,19 @@ calibration actually consumes (per-base coverage, introns cut). That mismatch (e
 high-expression exons where the accumulator has the real unspliced exon-body mRNA) confounded earlier
 "calibration error" conclusions. See docs/CARRY_FORWARD.md.
 
-Accumulator channels (region_contained[R,4] and boundary_mass_{left,right}[B,4]):
-  ch0 = unspliced genome+   ch1 = unspliced genome−   ch2 = spliced sense   ch3 = spliced antisense
-The gDNA-vs-RNA deconvolution (calibration) is over the UNSPLICED channels (0,1); spliced (2,3) is mature
-RNA that never competes with gDNA (result.py withholds it from the RNA prior). gDNA fragments are never
-spliced (validated: ch2/3 == 0 in the gdna partition).
+⭐ **FIVE POPULATIONS ON THREE AXES**, each an integer count with two GENOME-strand columns::
 
-    OMP_NUM_THREADS=1 python scripts/debug/oracle.py [condition] [--suite DIR]
+    nodes             node_contained     the whole path lies inside the node
+                      node_spanning      one segment covers the node whole
+    contiguous edges  edge_unspliced     the mixture being deconvolved
+                      edge_spliced       certified RNA -- gDNA cannot be spliced
+    junction edges    sj_count           pure RNA by construction
+
+⛔ **"Spliced" is a BANK now, not a channel.** The predecessor packed unspliced-± and spliced-sense/
+antisense into one 4-column array, which put two strand conventions in one schema. gDNA fragments are
+never spliced, and that is validated here as ``edge_spliced`` and ``sj_count`` being identically zero in
+the gdna partition — a stronger statement than "columns 2 and 3 are zero", because it covers the
+junction axis the old layout had no room for.
 """
 
 from __future__ import annotations
@@ -37,8 +49,20 @@ from rigel.pipeline import scan_and_buffer, _native_detect_sj_tag
 from rigel.sim.read_name import parse_origin
 
 ORIGINS = ("gdna", "mrna", "nrna")
-_UNSPL = (0, 1)  # unspliced channels (the gDNA-vs-RNA competition basis)
-_SPL = (2, 3)  # spliced channels (mature RNA; never competes with gDNA)
+
+#: Every per-object bank on the payload. Sum-to-full is asserted over ALL of them: a bank left out of
+#: this tuple is a bank the oracle would silently stop validating.
+_BANKS = (
+    "node_contained_count",
+    "node_spanning_count",
+    "edge_unspliced_count",
+    "edge_spliced_count",
+    "sj_count",
+    "node_start_count",
+)
+
+#: The banks a gDNA fragment can NEVER touch — it does not splice.
+_RNA_ONLY_BANKS = ("edge_spliced_count", "sj_count")
 
 
 def _split_bam(bam: str, out_dir: Path, tag: str) -> tuple[dict[str, str], dict[str, int]]:
@@ -82,7 +106,6 @@ class OracleTruth:
     full: object
     parts: dict  # origin -> payload
     read_counts: dict  # origin -> reads written (every input read accounted for)
-    boundary_mass_tol: float
 
     @classmethod
     def from_bam(
@@ -92,7 +115,6 @@ class OracleTruth:
         cfg,
         work_dir: Path,
         tag: str,
-        boundary_mass_tol: float = 1e-2,
         full_payload=None,
     ) -> "OracleTruth":
         """Split the BAM by origin, scan each partition, and validate sum-to-full.
@@ -104,70 +126,61 @@ class OracleTruth:
         paths, read_counts = _split_bam(bam, work_dir, tag)
         full = full_payload if full_payload is not None else _scan_payload(bam, index, cfg)
         parts = {k: _scan_payload(paths[k], index, cfg) for k in ORIGINS}
-        self = cls(
-            full=full, parts=parts, read_counts=read_counts, boundary_mass_tol=boundary_mass_tol
-        )
+        self = cls(full=full, parts=parts, read_counts=read_counts)
         self._validate()
         return self
 
     def _validate(self) -> None:
-        rc_full = np.asarray(self.full.region_contained, np.int64)
-        rc_sum = sum(np.asarray(self.parts[k].region_contained, np.int64) for k in ORIGINS)
-        if not np.array_equal(rc_sum, rc_full):
-            raise AssertionError(
-                f"oracle INVALID: region_contained partitions do not sum to full "
-                f"(max|diff|={np.abs(rc_sum - rc_full).max()}). The partition is not the production split."
-            )
-        for arr in ("boundary_flux_left", "boundary_flux_right"):
-            af = np.asarray(getattr(self.full, arr), np.int64)
-            asum = sum(np.asarray(getattr(self.parts[k], arr), np.int64) for k in ORIGINS)
-            if not np.array_equal(asum, af):
-                raise AssertionError(f"oracle INVALID: {arr} partitions do not sum to full.")
-        for arr in ("boundary_mass_left", "boundary_mass_right"):
-            af = np.asarray(getattr(self.full, arr), np.float64)
-            asum = sum(np.asarray(getattr(self.parts[k], arr), np.float64) for k in ORIGINS)
-            md = float(np.abs(asum - af).max())
-            if md > self.boundary_mass_tol:
-                raise AssertionError(f"oracle INVALID: {arr} sum-to-full maxdiff {md:.3e} > tol.")
-        # gDNA is never spliced (physical): the gdna partition must have zero spliced contained mass.
-        g_spl = np.asarray(self.parts["gdna"].region_contained, np.int64)[:, _SPL].sum()
-        if g_spl != 0:
-            raise AssertionError(
-                f"oracle INVALID: gdna partition has {g_spl} spliced contained reads (>0)."
-            )
+        """Sum-to-full on EVERY bank, EXACTLY — no tolerance anywhere.
 
-    # ---- per-region TRUE masses on the accumulator basis ----
-    def region_unspliced(self):
-        """(G, R) per region: TRUE unspliced gDNA vs unspliced RNA contained mass — the gDNA-vs-RNA
-        competition basis the calibration deconvolves. R = mrna+nrna unspliced (exon-body + nascent)."""
-        rc = lambda k: np.asarray(self.parts[k].region_contained, np.float64)  # noqa: E731
-        G = rc("gdna")[:, _UNSPL].sum(1)
-        R = (rc("mrna") + rc("nrna"))[:, _UNSPL].sum(1)
-        return G, R
+        ⭐ Every bank is an integer count now, so ``np.array_equal`` is the right comparison for all of
+        them. The predecessor could only be exact on two of its four arrays because the other two were
+        float32 fractional MASS; a tolerance is what hid this project's factor-of-2 bug for months
+        (`CARRY_FORWARD.md` §3 trap 2), and there is no longer any reason to carry one.
+        """
+        for bank in _BANKS:
+            full = np.asarray(getattr(self.full, bank), np.int64)
+            parts = sum(np.asarray(getattr(self.parts[k], bank), np.int64) for k in ORIGINS)
+            if not np.array_equal(parts, full):
+                raise AssertionError(
+                    f"oracle INVALID: {bank} partitions do not sum to full "
+                    f"(max|diff|={np.abs(parts - full).max()}). The partition is not the "
+                    "production split, or the accumulator stopped depositing per fragment."
+                )
+        # gDNA is never spliced (physical), on EITHER spliced bank — including the junction axis, which
+        # the old 4-channel layout had no room for.
+        for bank in _RNA_ONLY_BANKS:
+            g = int(np.asarray(getattr(self.parts["gdna"], bank), np.int64).sum())
+            if g != 0:
+                raise AssertionError(f"oracle INVALID: gdna partition has {g} deposits in {bank}.")
 
-    def region_true_fg(self):
-        """Per-region TRUE gDNA fraction of the unspliced contained mass (NaN where no unspliced mass)."""
-        G, R = self.region_unspliced()
+    # ---- per-NODE TRUE counts on the accumulator basis ----
+    def node_unspliced(self):
+        """``(G, R)`` per node: TRUE contained gDNA vs contained RNA count — the gDNA-vs-RNA competition
+        basis the calibration deconvolves. ``R`` = mrna + nrna (exon-body + nascent).
+
+        ⚠ There is no spliced term to exclude: ``node_contained`` is credited only when the fragment
+        used no junction, so a node's contained population is unspliced by construction.
+        """
+        nc = lambda k: np.asarray(self.parts[k].node_contained_count, np.float64).sum(1)  # noqa: E731
+        return nc("gdna"), nc("mrna") + nc("nrna")
+
+    def node_true_fg(self):
+        """Per-node TRUE gDNA fraction of the contained count (NaN where there is no contained mass)."""
+        G, R = self.node_unspliced()
         tot = G + R
         return np.where(tot > 0, G / np.maximum(tot, 1e-12), np.nan), tot
 
-    def region_pools(self) -> dict:
-        """Per-region TRUE contained mass on the accumulator basis, split by ORIGIN × genome STRAND.
+    def node_pools(self) -> dict:
+        """Per-node TRUE contained count by ORIGIN × GENOME strand.
 
-        The gDNA-vs-RNA calibration deconvolves the **unspliced** channels into the 2-simplex
-        ``(RNA₊, RNA₋, gDNA)`` (genome strand: ch0=+, ch1=−). Spliced (ch2 sense, ch3 antisense) is
-        guaranteed-mature RNA that never competes with gDNA. Calibration cannot split mature from
-        nascent — that is the downstream EM's job — so ``mature`` / ``nascent`` here are the TRUE
-        composition of the RNA the calibration lumps together. Every array is float64[R]; all eight
-        components sum (over origins × channels) to the full per-region contained mass (the validated
-        sum-to-full identity). Keys:
-          gdna_pos/gdna_neg          — unspliced gDNA by genome strand (should be ~50/50)
-          mat_uns_pos/mat_uns_neg    — unspliced mature (exon-body) RNA by genome strand
-          nas_uns_pos/nas_uns_neg    — unspliced nascent RNA by genome strand
-          mat_spl/nas_spl            — spliced RNA (mature / nascent), guaranteed-RNA, no gDNA rival
+        Calibration deconvolves the contained count into ``(RNA₊, RNA₋, gDNA)`` and cannot split mature
+        from nascent — that is the downstream EM's job — so ``mat_*``/``nas_*`` here are the TRUE
+        composition of the RNA calibration lumps together. All six components sum to the full per-node
+        contained count (the validated sum-to-full identity).
         """
-        rc = lambda k: np.asarray(self.parts[k].region_contained, np.float64)  # noqa: E731
-        g, m, n = rc("gdna"), rc("mrna"), rc("nrna")
+        nc = lambda k: np.asarray(self.parts[k].node_contained_count, np.float64)  # noqa: E731
+        g, m, n = nc("gdna"), nc("mrna"), nc("nrna")
         return dict(
             gdna_pos=g[:, 0],
             gdna_neg=g[:, 1],
@@ -175,27 +188,22 @@ class OracleTruth:
             mat_uns_neg=m[:, 1],
             nas_uns_pos=n[:, 0],
             nas_uns_neg=n[:, 1],
-            mat_spl=m[:, 2] + m[:, 3],
-            nas_spl=n[:, 2] + n[:, 3],
         )
 
-    def boundary_pools(self) -> dict:
-        """Per-BOUNDARY TRUE mass by ORIGIN × genome STRAND — the exact mirror of :meth:`region_pools`, on
-        the basis the solver's boundary nodes actually use.
+    def edge_pools(self) -> dict:
+        """Per-LINE TRUE crossing counts by ORIGIN × GENOME strand, plus the certified-RNA bank.
 
-        Basis alignment (``node_geometry._boundary_strand_stats``): a boundary node's pie base is
-        ``mass = left + right`` (both sides SUMMED — conserved), so the truth sums both faces too. (The
-        strand COUNT ``u_±`` uses ``max(left, right)`` instead — de-duplicating the straddle — but that is
-        the BB power, not the mass basis, so it does not enter these pools.) Every array is float64[B].
+        ⭐ The exact mirror of :meth:`node_pools`, on the basis the solver's EDGE slots use — and it is
+        ONE set of numbers per line, not a left/right pair. The predecessor summed ``left + right``
+        because the old accumulator split one crossing across two faces; there is nothing to sum.
+
+        ``*_spl`` is ``edge_spliced``: molecules that crossed this line CONTIGUOUSLY having spliced
+        elsewhere. It is a different population from ``sj_count`` (:meth:`junction_flux`), which never
+        crossed the line at all — it jumped.
         """
-
-        def bm(k):
-            p = self.parts[k]
-            return np.asarray(p.boundary_mass_left, np.float64) + np.asarray(
-                p.boundary_mass_right, np.float64
-            )
-
-        g, m, n = bm("gdna"), bm("mrna"), bm("nrna")
+        eu = lambda k: np.asarray(self.parts[k].edge_unspliced_count, np.float64)  # noqa: E731
+        es = lambda k: np.asarray(self.parts[k].edge_spliced_count, np.float64)  # noqa: E731
+        g, m, n = eu("gdna"), eu("mrna"), eu("nrna")
         return dict(
             gdna_pos=g[:, 0],
             gdna_neg=g[:, 1],
@@ -203,41 +211,50 @@ class OracleTruth:
             mat_uns_neg=m[:, 1],
             nas_uns_pos=n[:, 0],
             nas_uns_neg=n[:, 1],
-            mat_spl=m[:, 2] + m[:, 3],
-            nas_spl=n[:, 2] + n[:, 3],
+            mat_spl=es("mrna").sum(1),
+            nas_spl=es("nrna").sum(1),
         )
+
+    def junction_flux(self) -> dict:
+        """Per-JUNCTION TRUE flux by origin. ⚠ ``gdna`` is identically zero and is returned anyway —
+        an all-zero row is the statement "gDNA does not splice", and omitting it would make the
+        validator blind to a partition that suddenly produced one (`CARRY_FORWARD.md` §3 trap 1)."""
+        sj = lambda k: np.asarray(self.parts[k].sj_count, np.float64).sum(1)  # noqa: E731
+        return {k: sj(k) for k in ORIGINS}
 
     def override_masses(self, region_arrays) -> dict:
-        """The TRUE per-region CalibrationResult mass arrays, built DIRECTLY from the per-origin substrates
-        (the exact schema calibrate assembles). gDNA = the gdna partition's unspliced mass; RNA = the
-        (mrna+nrna) unspliced mass + ALL spliced (spliced-inclusive, matching cal's
-        ``rna = (1−f_g)·M_unspliced + M_spliced``); ``mass_rna_spliced`` = the full spliced (identical to
-        cal — spliced is never deconvolved). Conservation ``gdna+rna = total node mass`` holds because the
-        partitions sum to the full payload (the validated identity). Feed via
-        ``dataclasses.replace(cal, **override_masses(ra))`` for the perfect-calibration lever."""
+        """The TRUE ``CalibrationResult`` mass arrays on all three axes, built DIRECTLY from the
+        per-origin substrates — the exact schema ``calibrate`` assembles, so it can be fed via
+        ``dataclasses.replace(cal, **override_masses(ra))`` as the perfect-calibration lever.
+
+        gDNA = the gdna partition's count; RNA = the (mrna + nrna) count, spliced-INCLUSIVE on the edge
+        axis to match ``chain_edge_deconv``'s ``rna = (1−f_g)·unspliced + spliced``. Conservation
+        ``gdna + rna = the full object count`` holds on both axes because the partitions sum to the full
+        payload (the validated identity).
+
+        ⚠ ``mass_rna_junction`` is the FULL payload's junction flux, not the RNA partitions' — they are
+        equal by the same identity, and taking it from ``full`` says so rather than re-deriving it.
+        """
         from rigel.calibration.substrate import CalibrationSubstrate
 
-        g = CalibrationSubstrate.from_payload(self.parts["gdna"], region_arrays)
-        m = CalibrationSubstrate.from_payload(self.parts["mrna"], region_arrays)
-        n = CalibrationSubstrate.from_payload(self.parts["nrna"], region_arrays)
-        f = CalibrationSubstrate.from_payload(self.full, region_arrays)
+        subs = {k: CalibrationSubstrate.from_payload(self.parts[k], region_arrays) for k in ORIGINS}
+        full = CalibrationSubstrate.from_payload(self.full, region_arrays)
 
-        def U(sub, side):
-            return np.asarray(getattr(sub, side).mass_unspliced, np.float64)
+        def total(sub, population):
+            return np.asarray(getattr(sub, population).count, np.float64).sum(1)
 
-        def Sp(sub, side):
-            return np.asarray(getattr(sub, side).mass_spliced, np.float64)
-
-        rna_u = lambda side: U(m, side) + U(n, side)  # noqa: E731 (unspliced RNA = mrna+nrna)
-        spl = lambda side: Sp(f, side)  # noqa: E731 (all spliced is RNA; == cal's)
+        rna_node = total(subs["mrna"], "node_contained") + total(subs["nrna"], "node_contained")
+        rna_edge_unspliced = total(subs["mrna"], "edge_unspliced") + total(
+            subs["nrna"], "edge_unspliced"
+        )
+        spliced_edge = total(full, "edge_spliced")
         return dict(
-            mass_gdna_contained=U(g, "contained"),
-            mass_rna_contained=rna_u("contained") + spl("contained"),
-            mass_gdna_left=U(g, "left"),
-            mass_rna_left=rna_u("left") + spl("left"),
-            mass_gdna_right=U(g, "right"),
-            mass_rna_right=rna_u("right") + spl("right"),
-            mass_rna_spliced=spl("contained") + spl("left") + spl("right"),
+            mass_gdna_node=total(subs["gdna"], "node_contained"),
+            mass_rna_node=rna_node,
+            mass_gdna_edge=total(subs["gdna"], "edge_unspliced"),
+            mass_rna_edge=rna_edge_unspliced + spliced_edge,
+            mass_rna_spliced_edge=spliced_edge,
+            mass_rna_junction=total(full, "junction"),
         )
 
 
@@ -255,9 +272,9 @@ def _main():
     orc = OracleTruth.from_bam(bam, index, cfg, wd, args.condition)
     print("VALIDATION PASSED: per-origin partitions sum to the full production payload.")
 
-    G, R = orc.region_unspliced()
+    G, R = orc.node_unspliced()
     print(
-        f"\nTRUE unspliced contained mass: gDNA={G.sum():,.0f}  RNA={R.sum():,.0f}  "
+        f"\nTRUE contained count: gDNA={G.sum():,.0f}  RNA={R.sum():,.0f}  "
         f"(RNA = exon-body mRNA + nascent)"
     )
 
@@ -265,6 +282,10 @@ def _main():
     from rigel.calibration import calibrate
     from rigel.calibration.region_arrays import RegionArrays
     from rigel.calibration.fl import build_fl_models, gdna_fl_mass
+    from rigel.calibration.splice_graph import (
+        build_edge_flags_array,
+        build_junction_geometry_arrays,
+    )
     from rigel.splice import SpliceType
     from dataclasses import replace as dc
 
@@ -284,14 +305,16 @@ def _main():
         gdna_fl_pmf=fl.gdna_pmf,
         rna_fl_pmf=fl.rna_pmf,
         config=cfg.calibration,
+        junctions=build_junction_geometry_arrays(index),
+        edge_flags=build_edge_flags_array(index),
     )
-    cal_g = np.asarray(cal.mass_gdna_contained, np.float64)
-    cal_r = np.asarray(cal.mass_rna_contained, np.float64)
-    # cal contained total vs payload unspliced contained (should match — spliced contained ~0)
+    cal_g = np.asarray(cal.mass_gdna_node, np.float64)
+    cal_r = np.asarray(cal.mass_rna_node, np.float64)
+    # cal contained total vs the payload's contained count (a node holds no spliced molecule)
     print(
-        f"\ncal contained total (g+r)={(cal_g + cal_r).sum():,.0f}  vs TRUE unspliced contained={(G + R).sum():,.0f}"
+        f"\ncal contained total (g+r)={(cal_g + cal_r).sum():,.0f}  vs TRUE contained={(G + R).sum():,.0f}"
     )
-    true_fg, tot = orc.region_true_fg()
+    true_fg, tot = orc.node_true_fg()
     cal_fg = np.where((cal_g + cal_r) > 0, cal_g / np.maximum(cal_g + cal_r, 1e-12), np.nan)
     ok = np.isfinite(true_fg) & np.isfinite(cal_fg)
     w = tot[ok]

@@ -11,11 +11,16 @@ from rigel.calibration.signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_N
 
 
 def _substrate(sig, pos, neg, eff):
-    """Minimal stand-ins for the (region_arrays, substrate, region_eff_len) inputs."""
+    """Minimal stand-ins for the ``(substrate, region_arrays, node_eff_len)`` inputs.
+
+    ⭐ ``node_contained`` is ONE array with the two GENOME-strand columns side by side, not a pair of
+    ``n_unspliced_pos``/``n_unspliced_neg`` fields — and ``measure_background`` sums them, because gDNA
+    is strand-symmetric and a background rate is a total.
+    """
     ra = SimpleNamespace(signature=np.asarray(sig))
     sub = SimpleNamespace(
-        contained=SimpleNamespace(
-            n_unspliced_pos=np.asarray(pos, float), n_unspliced_neg=np.asarray(neg, float)
+        node_contained=SimpleNamespace(
+            count=np.stack([np.asarray(pos, float), np.asarray(neg, float)], axis=1)
         )
     )
     return sub, ra, np.asarray(eff, float)

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from .region_arrays import edge_node_indices
 from .signature import BIT_EXON_NEG, BIT_EXON_POS, BIT_INTRON_NEG, BIT_INTRON_POS
 
 if TYPE_CHECKING:
@@ -23,9 +24,9 @@ if TYPE_CHECKING:
     from .region_arrays import RegionArrays
     from .result import CalibrationResult
 
-# A region with none of these strand/type bits is intergenic — it overlaps no locus and is dropped by
-# the per-locus projection, so a seam whose left flank is such a region must be re-attributed to its
-# (locus) right flank or its gDNA is lost (see _gdna_region_node_arrays).
+# A node with none of these strand/type bits is intergenic — it overlaps no locus and is dropped by
+# the per-locus projection, so a line whose left flank is such a node must be re-attributed to its
+# (locus) right flank or its gDNA is lost (see edge_owner_nodes).
 _RNA_SIGNATURE_BITS = BIT_EXON_POS | BIT_EXON_NEG | BIT_INTRON_POS | BIT_INTRON_NEG
 
 # Numerical floor for the gDNA-component effective length: matches the EM's own
@@ -110,96 +111,87 @@ def _project_regions_to_loci(
     return out
 
 
-def _gdna_region_node_arrays(
+def edge_owner_nodes(calibration: "CalibrationResult", region_arrays: "RegionArrays") -> np.ndarray:
+    """``int64[E]`` — which NODE each contiguous edge is attributed to for the locus projection.
+
+    An edge is a 0-bp line, so it has no genomic extent to overlap a locus with; it must be carried by
+    one of its two flanking nodes, which do. Default: the **left** flank ``lo``.
+
+    ⚠ **Except at a locus's far-LEFT outer line.** That is an intergenic→(exon/intron) seam whose left
+    flank is INTERGENIC — a node that overlaps no locus and is dropped by
+    :func:`_project_regions_to_loci`. Keying to the left flank there SILENTLY LOSES that line's crossing
+    gDNA, under-counting the locus gDNA prior AND inflating its eff-length. The far-RIGHT line is
+    already kept (its left flank is the locus's last node), so attributing to the RIGHT flank whenever
+    the left is intergenic and the right is not restores the symmetry.
+    """
+    lo, hi = edge_node_indices(np.asarray(region_arrays.ref_id))
+    sig = np.asarray(region_arrays.signature).astype(np.int64)
+    ig = (
+        sig & _RNA_SIGNATURE_BITS
+    ) == 0  # intergenic: no exon/intron bit ⇒ dropped by the projection
+    return np.where(ig[lo] & ~ig[hi], hi, lo)
+
+
+def _gdna_node_arrays(
     calibration: "CalibrationResult",
     region_arrays: "RegionArrays",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Per-region node arrays ``(gdna_region, support_len, pooled, seam_len)`` for the gDNA region +
-    pooled-seam nodes — the SHARED node model with ``transcript_capture_eff_lengths`` (via _pooled_seam_arrays).
+    """Per-node arrays ``(gdna_total, support_total, edge_mass, edge_support)`` for the gDNA node set —
+    the SHARED node model with ``transcript_capture_eff_lengths``.
 
-    The density-correct, transport-free gDNA node model (``docs/CARRY_FORWARD.md`` §8 —
-    the first-principles rev). The node set over a region chain is the per-region CONTAINED node plus
-    one POOLED SEAM node per internal boundary (genomically adjacent, same reference), keyed to its
-    left-flank region ``r``::
+    The density-correct, transport-free gDNA node model. The object set over a chain is the per-node
+    CONTAINED object plus the per-line CROSSING object, each attributed to a flank node
+    (:func:`edge_owner_nodes`) so the locus projection can pick it up::
 
-        region node r:     mass m_r = mass_gdna_contained[r],
-                           effective support S_r = gdna_region_eff_len[r] = E[max(0, L_r − ℓ)]
-        seam node (r,r+1): mass m_s = mass_gdna_right[r] + mass_gdna_left[r+1]   (the two halves POOLED),
-                           effective support S_s = gdna_boundary_len[r] + gdna_boundary_len[r+1]  (the SUM of
-                           the two flanking per-side density lengths gdna_boundary_len)
+        node r:  mass m_r = mass_gdna_node[r],  effective support S_r = gdna_node_eff_len[r]
+        edge e:  mass m_e = mass_gdna_edge[e],  effective support S_e = gdna_edge_eff_len[e]
 
-    **Why these supports — the bedrock invariant.** Driving the reference accumulator under uniform
-    genomic gDNA at density ρ, the expected masses are ``m_r = ρ·E[max(0,L_r−ℓ)]`` (a contained fragment
-    must FIT) and ``m_s = ρ·(E[min(ℓ,L_r)] + E[min(ℓ,L_{r+1})])/2`` (each side captures only ``min(ℓ,L_side)``
-    of a crossing fragment, so the pooled mass is ρ times the SUM of the two stored side density
-    lengths — each of which is already E[min(ℓ,L)]/2, so the sum is ½·(E[min_r]+E[min_{r+1}]). ⚠ Naming
-    it the AVERAGE of gdna_boundary_len is what applied the ½ twice (D6, fixed 2026-07-29).
-    Dividing each node's mass by these supports makes EVERY node density ``m_n/S_n = ρ``, so the
-    enrichment contraction ``min(m_n/ρ_ref, S_n)`` (applied per node in ``assemble_priors`` against the
-    shared ρ_ref) returns ``S_n`` EXACTLY (contraction factor 1) under uniform gDNA — an unenriched library
-    contracts nothing, EVEN for regions shorter than ``E[ℓ]``.
-    Two divisors are WRONG: the genomic ``region_size_bp`` understates short-region density (verified
-    factor 0.878 under uniform); and the count crossing length ``E[ℓ]`` over-states the seam support for
-    short flanks (a fragment can only deposit ``min(ℓ,L_side)``, not ``ℓ``), under-contracting exon-flank
-    seams and inflating the gDNA→RNA leak — the summed side density length is the deposition-faithful
-    support.
+    ⭐ **THE POOLING IS GONE, NOT RE-DERIVED (S5.f).** This function used to call
+    ``capture_eff_length._pooled_seam_arrays`` to add ``mass_gdna_right[r] + mass_gdna_left[r+1]`` back
+    together and sum the two halved per-side lengths ``gdna_boundary_len[r] + gdna_boundary_len[r+1]``.
+    The calibrator had split one crossing into two faces and this put it back — a no-op with a history,
+    since that exact sum-then-halve pattern hid an *exact factor of 2* for months
+    (`CARRY_FORWARD.md` §3 trap 2). ``chain_edge_deconv`` now returns one number per line, so there is
+    nothing to pool, no ½ anywhere, and no second implementation to keep in step.
 
-    **Why POOL the seam, not split it.** The two halves ``s_L,s_R`` are one physical crossing event, so the
-    pooled node (one node at the summed support) is the faithful representation; splitting them into two
-    separate nodes would double-count the crossing and over-contract.
+    **Why these supports — the bedrock invariant.** Under uniform genomic gDNA at density ρ the
+    accumulator deposits ``m_r = ρ·E_f[(L_r − w + 1)+]`` on a node (a contained fragment must FIT) and
+    ``m_e = ρ·E_f[w − 1]`` on a line (a crossing fragment has ``w − 1`` admissible offsets). Those are
+    exactly ``gdna_node_eff_len`` and ``gdna_edge_eff_len``, so EVERY object's density ``m/S`` is ρ, the
+    enrichment contraction ``min(m/ρ_ref, S)`` returns ``S`` exactly, and an unenriched library
+    contracts NOTHING — even for nodes shorter than one fragment.
 
-    Returns ``(gdna_region, support_len, pooled, seam_len)``, each float64[R] keyed to region ``r``::
+    ⛔ The genomic ``region_size_bp`` is the wrong node divisor: it ignores the fit-inside constraint,
+    so it understates a short node's density and fabricates a contraction with no capture bias present
+    (verified factor 0.878 under uniform).
 
-        gdna_region[r]   = m_r + m_s(r,r+1)   total node mass on region r (contained + pooled seam)
-        support_len[r]   = S_r + S_s(r,r+1)   total effective support (Σ S), for the span + mass projection
-        pooled[r]        = m_s(r,r+1)         the pooled-seam mass ALONE  (per-node contraction in priors)
-        seam_len[r]      = S_s(r,r+1)         the pooled-seam support ALONE
+    Returns four ``float64[N]`` keyed to node ``r``::
 
-    ``assemble_priors`` contracts PER NODE — ``min(contained/ρ_ref, S_r) + min(pooled/ρ_ref, S_s)`` —
-    matching ``transcript_capture_eff_lengths``, NOT over the folded ``gdna_region`` (which would
-    under-contract a captured exon whose seam runs into a depleted intron).
+        gdna_total[r]    = m_r + Σ_{e owned by r} m_e        total mass carried by node r
+        support_total[r] = S_r + Σ_{e owned by r} S_e        total effective support (Σ S)
+        edge_mass[r]     = Σ_{e owned by r} m_e              the crossing mass ALONE
+        edge_support[r]  = Σ_{e owned by r} S_e              the crossing support ALONE
 
-    Mass conservation (no mass moved — transport-free): ``Σ gdna_region = Σ contained +
-    Σ_{internal} (right[r] + left[r+1])`` — every non-terminal boundary side counted exactly once
-    (terminal / cross-reference sides carry zero on real data and are excluded).
+    ``assemble_priors`` contracts PER OBJECT — ``min(m_r/ρ_ref, S_r) + min(edge_mass/ρ_ref, edge_support)``
+    — matching ``transcript_capture_eff_lengths``, NOT over the folded ``gdna_total`` (which would
+    under-contract a captured exon whose line runs into a depleted intron).
+
+    Mass conservation (no mass moved — transport-free): ``Σ gdna_total = Σ m_r + Σ m_e``, every object
+    counted exactly once.
     """
-    from .capture_eff_length import (
-        _pooled_seam_arrays,
-    )  # THE shared seam node model (transcript + gDNA)
+    node_mass = np.asarray(calibration.mass_gdna_node, dtype=np.float64)
+    node_support = np.maximum(np.asarray(calibration.gdna_node_eff_len, dtype=np.float64), 1e-9)
+    n = node_mass.shape[0]
 
-    contained = np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
-    region_eff_len = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
-    ref_id = np.asarray(region_arrays.ref_id)
-    n = contained.shape[0]
+    edge_mass = np.zeros(n, dtype=np.float64)
+    edge_support = np.zeros(n, dtype=np.float64)
+    if calibration.n_edges:
+        owner = edge_owner_nodes(calibration, region_arrays)
+        # a node may own its own right line AND a re-keyed one from its left, hence np.add.at
+        np.add.at(edge_mass, owner, np.asarray(calibration.mass_gdna_edge, dtype=np.float64))
+        np.add.at(edge_support, owner, np.asarray(calibration.gdna_edge_eff_len, dtype=np.float64))
 
-    pooled = np.zeros(n, dtype=np.float64)  # pooled seam mass, attributed to a flank region
-    seam_len = np.zeros(n, dtype=np.float64)  # seam effective support, attributed to a flank region
-    if n > 1:
-        seam_mass, seam_support = _pooled_seam_arrays(
-            calibration, region_arrays
-        )  # left-keyed, length n
-        same = ref_id[:-1] == ref_id[1:]  # internal seam: genomically adjacent, same reference
-        # ATTRIBUTE each seam to a flank REGION so the locus projection picks it up. Default: the LEFT
-        # flank r. BUT a locus's far-LEFT outer boundary is an intergenic→(exon/intron) seam whose left
-        # flank is INTERGENIC — a region that overlaps no locus and is dropped by _project_regions_to_loci.
-        # Keying to the left flank there SILENTLY LOSES that boundary's crossing gDNA, under-counting the
-        # locus gDNA prior AND inflating the eff-length. The far-RIGHT boundary is already kept (its left
-        # flank is the locus's last region), so this restores symmetry: attribute the seam to the RIGHT
-        # flank whenever the left flank is intergenic (no RNA-signature bits) and the right flank is not.
-        sig = np.asarray(region_arrays.signature).astype(np.int64)
-        ig = (
-            sig & _RNA_SIGNATURE_BITS
-        ) == 0  # intergenic: no exon/intron bit ⇒ dropped by the projection
-        rekey_right = same & ig[:-1] & ~ig[1:]  # far-left outer boundary: intergenic → locus region
-        owner = np.where(rekey_right, np.arange(1, n), np.arange(0, n - 1))
-        np.add.at(
-            pooled, owner, seam_mass[:-1]
-        )  # a first-region node may own its right seam + a rekeyed one
-        np.add.at(seam_len, owner, seam_support[:-1])
-
-    gdna_region = contained + pooled
-    support_len = region_eff_len + seam_len
-    return gdna_region, support_len, pooled, seam_len
+    return node_mass + edge_mass, node_support + edge_support, edge_mass, edge_support
 
 
 def assemble_priors(
@@ -209,37 +201,37 @@ def assemble_priors(
 ) -> LocusPriors:
     """Build the per-locus EM prior from the calibration result.
 
-    The gDNA node set is the **density-correct, transport-free** region + pooled-seam model
-    (``docs/CARRY_FORWARD.md`` §8; see ``_gdna_region_node_arrays``):
+    The gDNA object set is the **density-correct, transport-free** node + line model
+    (see :func:`_gdna_node_arrays`):
 
-        region node r:    mass = mass_gdna_contained[r],   effective support S_r = E[max(0, L_r − ℓ)]
-        seam node (r,r+1): mass = mass_gdna_right[r] + mass_gdna_left[r+1] (the two halves POOLED),
-                           effective support S_s = gdna_boundary_len[r] + gdna_boundary_len[r+1]  (the SUM of
-                           the flanking per-side density lengths gdna_boundary_len)
+        node r:  mass = mass_gdna_node[r],  effective support S_r = E_f[(L_r − w + 1)+]
+        edge e:  mass = mass_gdna_edge[e],  effective support S_e = E_f[w − 1]
 
-    keyed to the left-flank region r. The region + seam masses / participations project to loci by
-    genomic-overlap ``share``::
+    with each line attributed to a flank node (:func:`edge_owner_nodes`). Masses and supports project
+    to loci by genomic-overlap ``share``::
 
-        gdna_prior_count = Σ share * (contained + seam)                       (deconvolved gDNA count)
-        rna_prior_count  = Σ share * rna_region         (UNSPLICED RNA; spliced withheld — see below)
-        gdna_eff_len     = (G+1)² / [ Σ share*(contained²/S_r + seam²/S_s) + (2G+1)/span ], capped at span
-                           G = Σ share*(contained+seam),  span = Σ share*(S_r + S_s)  (EFFECTIVE support)
+        gdna_prior_count = Σ share * (node + edge)                            (deconvolved gDNA count)
+        rna_prior_count  = Σ share * rna_node_total   (UNSPLICED RNA; spliced withheld — see below)
+        gdna_eff_len     = (G+1)² / [ Σ share*(node²/S_r + edge²/S_e) + (2G+1)/span ], capped at span
+                           G = Σ share*(node+edge),  span = Σ share*(S_r + S_e)  (EFFECTIVE support)
 
-    **The bedrock invariant — factor 1 under uniform gDNA.** Dividing each node's mass by its EFFECTIVE
-    sampling support (``S_r`` for contained, ``S_s = ½·(E[min(ℓ,L_r)]+E[min(ℓ,L_{r+1})])`` for the pooled
-    crossing — the SUM of the two stored per-side density lengths, NOT ``E[ℓ]`` which over-states it) makes the per-node
-    density ``m_n/S_n`` exactly the true ρ under a uniform (unenriched) library — because the accumulator
-    deposits ``ρ·E[max(0,L−ℓ)]`` of contained mass and ``ρ·S_s`` of pooled crossing mass.
-    The Laplace-smoothed IPR then returns ``span`` EXACTLY (``eff_len = span`` ⇒ contraction factor 1):
-    an unenriched library contracts NOTHING. Using the genomic ``region_size_bp`` instead would
-    understate short-region density and fabricate a contraction even with no capture bias (verified
-    factor 0.878 vs the correct 1.000) — that was the latent defect this redesign removes. Under
-    capture (concentrated gDNA) the IPR contracts below ``span`` toward the probed footprint, so the
-    gDNA component competes at its true local density. This is **transport-free**: no mass is moved
-    (no boundary-flux redistribution — that non-physical heuristic is gone), and the pooled seam
-    quarantines the captured intron↔exon crossing mass at crossing density — recovering
-    the gDNA concentration a region-dilution divisor would lose, by Cauchy–Schwarz strictly better than
-    splitting the seam into two side nodes.
+    **The bedrock invariant — factor 1 under uniform gDNA.** Dividing each object's mass by its
+    EFFECTIVE sampling support makes its density ``m/S`` exactly the true ρ under a uniform (unenriched)
+    library, because the accumulator deposits ``ρ·E_f[(L−w+1)+]`` of contained mass on a node and
+    ``ρ·E_f[w−1]`` of crossing mass on a line. The Laplace-smoothed IPR then returns ``span`` EXACTLY
+    (``eff_len = span`` ⇒ contraction factor 1): an unenriched library contracts NOTHING. Using the
+    genomic ``region_size_bp`` instead would understate short-node density and fabricate a contraction
+    even with no capture bias (verified factor 0.878 vs the correct 1.000) — that was the latent defect
+    this design removes. Under capture (concentrated gDNA) the IPR contracts below ``span`` toward the
+    probed footprint, so the gDNA component competes at its true local density. This is
+    **transport-free**: no mass is moved (no boundary-flux redistribution — that non-physical heuristic
+    is gone), and the line object quarantines the captured intron↔exon crossing mass at crossing
+    density, recovering the gDNA concentration a node-dilution divisor would lose.
+
+    ⭐ **There is no seam POOLING any more.** The predecessor split each crossing into two faces and
+    then summed them back here; ``chain_edge_deconv`` returns one number per line, so the split, the
+    re-pool and the ``gdna_boundary_len`` ½ that travelled with them are all gone (`S5_DESIGN_LOG.md`
+    §4; `CARRY_FORWARD.md` §3 trap 2).
 
     **Laplace-smoothed** by one fragment-equivalent of uniform support (the ``(2G+1)/span`` term), the
     canonical add-one prior with no tunable constant: ``G = 0`` ⇒ ``span`` exactly; abundant gDNA
@@ -247,20 +239,17 @@ def assemble_priors(
     uniform ``span`` in proportion to the gDNA evidence, so the EM cannot amplify a tiny concentrated
     mass past the calibration's call.
     """
-    if calibration.n_regions != region_arrays.n_regions:
+    if calibration.n_nodes != region_arrays.n_regions:
         raise ValueError(
-            f"calibration has {calibration.n_regions} regions but region_arrays has "
+            f"calibration has {calibration.n_nodes} nodes but region_arrays has "
             f"{region_arrays.n_regions}; they must address the same partition."
         )
 
-    # Density-correct, transport-free gDNA node model (docs/CARRY_FORWARD.md §8): per-region
-    # CONTAINED node (effective support gdna_region_eff_len = E[max(0,L−ℓ)]) + one POOLED SEAM node per
-    # internal boundary (support = the SUM of the flanking gdna_boundary_len = ½·Σ E[min(ℓ,L)]),
-    # keyed to the left-flank region — the SAME node model _pooled_seam_arrays gives the transcript
-    # contraction (EFFECTIVE, not genomic, supports; the factor-1-under-uniform bedrock).
-    gdna_region, support_len, pooled, seam_len = _gdna_region_node_arrays(
-        calibration, region_arrays
-    )
+    # Density-correct, transport-free gDNA object model: the per-node CONTAINED object (support
+    # gdna_node_eff_len) + the per-line CROSSING object (support gdna_edge_eff_len), each attributed to
+    # a flank node — the SAME object model transcript_capture_eff_lengths contracts on (EFFECTIVE, not
+    # genomic, supports; the factor-1-under-uniform bedrock).
+    gdna_region, support_len, pooled, seam_len = _gdna_node_arrays(calibration, region_arrays)
 
     # SHARED global reference density — the SAME ρ_ref every transcript contracts against, so the
     # gDNA-vs-transcript density comparison sits on ONE scale. The enrichment contraction is applied PER
@@ -271,9 +260,9 @@ def assemble_priors(
     # support (no contraction). See docs/CARRY_FORWARD.md.
     from .capture_eff_length import _global_reference_density
 
-    contained = np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
-    region_eff = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
-    rho_ref = _global_reference_density(contained, calibration.gdna_region_eff_len)
+    contained = np.asarray(calibration.mass_gdna_node, dtype=np.float64)
+    region_eff = np.maximum(np.asarray(calibration.gdna_node_eff_len, dtype=np.float64), 1e-9)
+    rho_ref = _global_reference_density(contained, calibration.gdna_node_eff_len)
     if rho_ref is None or rho_ref <= 0.0:
         elen = support_len.copy()
     else:
@@ -284,15 +273,23 @@ def assemble_priors(
     # (gDNA does not splice) → they are guaranteed-RNA and the EM assigns them directly; counting
     # them in rna_prior_count would double-count them and unfairly inflate the RNA side of the
     # gDNA-vs-RNA unspliced split (the prior arbitrates only the unspliced fragments, so a_g+a_r
-    # should equal the unspliced competing mass). mass_rna_* is spliced-inclusive (node
-    # conservation); subtracting mass_rna_spliced here yields (1−g)·M_unspliced per region.
-    rna_region = np.maximum(
-        calibration.mass_rna_contained
-        + calibration.mass_rna_left
-        + calibration.mass_rna_right
-        - calibration.mass_rna_spliced,
+    # should equal the unspliced competing mass). mass_rna_edge is spliced-inclusive (per-edge
+    # conservation); subtracting mass_rna_spliced_edge here leaves (1−g)·unspliced on every line.
+    #
+    # ⚠ The JUNCTION flux (``mass_rna_junction``) is deliberately NOT added. It is certified RNA in
+    # exactly the sense the spliced crossings are withheld for, so feeding it in would load the RNA
+    # side of a split that arbitrates only unspliced fragments — and a locus whose RNA is fully spliced
+    # SHOULD have a near-zero rna_prior_count, because its unspliced fragments really are gDNA or
+    # nascent. The result exports the flux for QC; the prior does not read it (owner ruling, 2026-07-30).
+    rna_edge_unspliced = np.maximum(
+        np.asarray(calibration.mass_rna_edge, dtype=np.float64)
+        - np.asarray(calibration.mass_rna_spliced_edge, dtype=np.float64),
         0.0,
     )
+    rna_region = np.asarray(calibration.mass_rna_node, dtype=np.float64).copy()
+    if calibration.n_edges:
+        np.add.at(rna_region, edge_owner_nodes(calibration, region_arrays), rna_edge_unspliced)
+    rna_region = np.maximum(rna_region, 0.0)
 
     proj = _project_regions_to_loci(
         region_arrays,
@@ -304,8 +301,8 @@ def assemble_priors(
             "span": support_len,  # Σ S — the EFFECTIVE support (region_eff_len + summed seams), NOT genomic
             # the CONTAINED (unique-mapper) mass per locus — the calibration-blindness discriminator for the
             # eff-len guard below (calibration's accumulator is fed by unique mappers only).
-            "gdna_contained": np.asarray(calibration.mass_gdna_contained, dtype=np.float64),
-            "rna_contained": np.asarray(calibration.mass_rna_contained, dtype=np.float64),
+            "gdna_contained": np.asarray(calibration.mass_gdna_node, dtype=np.float64),
+            "rna_contained": np.asarray(calibration.mass_rna_node, dtype=np.float64),
             # per-region enrichment-weighted node length (global ρ_ref) → the gDNA component's eff-length.
             "elen": elen,
         },
@@ -337,4 +334,4 @@ def assemble_priors(
     )
 
 
-__all__ = ["LocusPriors", "assemble_priors"]
+__all__ = ["LocusPriors", "assemble_priors", "edge_owner_nodes"]

@@ -108,6 +108,30 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     return payload, RegionArrays.from_frame(region_df, {"chr1": 0})
 
 
+def make_synthetic_junctions():
+    """The :class:`JunctionGeometry` matching :func:`make_synthetic_payload`'s one junction edge.
+
+    ⚠ **It must exist, and match.** The payload declares ``n_sj = 1``; ``calibrate`` refuses a junction
+    axis of a different length, because an axis addressing a different graph would place every splice
+    on the wrong line and nothing downstream would fault on it.
+
+    The junction runs ``node 0 → node 2``, i.e. it splices OVER node 1 — the only shape a 3-node
+    reference admits, and the one that makes the donor and acceptor two DIFFERENT lines (edge 0 and
+    edge 1). A ``0 → 1`` junction would put both endpoints on the same line and hide an
+    endpoint mix-up.
+    """
+    from rigel.calibration.splice_graph import JunctionGeometry
+    from rigel.types import Strand
+
+    return JunctionGeometry(
+        src_node=np.array([0], dtype=np.int64),
+        dst_node=np.array([2], dtype=np.int64),
+        strand=np.array([int(Strand.POS)], dtype=np.int8),
+        reach_lo=np.array([100.0]),
+        reach_hi=np.array([100.0]),
+    )
+
+
 def make_gdna_fl_pmf(mean: int = 50, max_size: int = 200) -> np.ndarray:
     """A spiked gDNA fragment-length pmf for calibration tests (μ_FL = ``mean``)."""
     pmf = np.zeros(max_size + 1, dtype=np.float64)

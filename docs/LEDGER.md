@@ -6,9 +6,12 @@ Design: `ACCUMULATOR_DESIGN.md`. Deferred work: `TODO.md`.
 The point of this file is **attribution**: a delta is only attributable if it is recorded against a
 baseline taken from the same tree in the same session.
 
-⛔ **There is no standing benchmark baseline.** The old one (`r0 0.079005 / r3 0.046675`) was the
-32-condition `ambig_dense_10mb` suite, deleted 2026-07-30. Do not quote it. The replacement suite exists
-(`BENCHMARK_SUITE.md`) but **cannot produce a calibration number until S5** — `calibrate()` does not run.
+⛔ **The old benchmark baseline is VOID.** `r0 0.079005 / r3 0.046675` was the 32-condition
+`ambig_dense_10mb` suite, deleted 2026-07-30. Do not quote it, compare against it, or try to reproduce it.
+
+⭐ **THE FIRST BASELINE EXISTS as of S5.f (2026-07-30)** — eight chr22 pilot conditions, in the S5.f entry
+below, bit-identical on re-run. ⚠ It carries A7's known **11.0 %** genome-wide gDNA over-call by
+deliberate ruling, and it says nothing about dispersion (the simulator is Poisson by construction).
 
 ## The index — every entry, oldest first
 
@@ -34,6 +37,7 @@ makes attribution meaningful survives. Everything from `I1` on is below in full.
 | **S5.c** | `effective_length.py` reduced to the ONE placements formula | below |
 | **S5.d** | substrate collapsed to ONE type; the chain re-keyed to nodes/edges | below |
 | **S5.e** | ⭐ A7 ruled; the 18 per-face arrays became 5; the faces dissolve | below |
+| **S5.f** | ⭐⭐ **`calibrate()` RUNS — the FIRST BASELINE**; the third axis exported; the pooling dissolves | below |
 | **B2** | the pilot suite, and B0's verdict on it | below |
 | **B3** | the scan cache — scan once, calibrate many times | below |
 
@@ -1186,3 +1190,244 @@ rather than commented around:**
 * `tests/calibration/_synthetic.py` — `make_chain_parts`, the shared node/edge/junction fixture.
 * `tests/calibration/test_node_geometry.py`, `test_edge_flags.py` — new.
   `test_boundary_flags.py` deleted.
+
+---
+
+## S5.f — `calibrate()` runs, and there is a number (2026-07-30)
+
+⭐ **THE PIVOT.** `calibrate()` had not run since the accumulator rewrite began; nothing downstream was
+measurable, so nothing downstream could be judged. It runs now, end to end, on all eight chr22 pilot
+conditions — and **its numbers are THE FIRST BASELINE**, recorded below, against which every deferred
+derivation (S5.g, S5.a2, A6/A3) is to be A/B'd.
+
+**Baseline re-recorded from this tree in this session** (trap 17, never a stored one):
+**1440 passed / 256 failed / 1 xfailed / 15 errors**, matching the S5.e handoff exactly.
+**After: 1729 passed / 22 failed / 1 xfailed / 0 errors** — **−234 failures, +289 passes, −15 errors.**
+All 22 remaining are the golden files (21) plus one EM-nondeterminism finding, both recorded below.
+
+### ⛔ The owner's ruling, taken FIRST because it decides the schema
+
+> **Does `CalibrationResult` gain a third (junction) axis?** — **Yes: exported, QC only.**
+
+The accumulator has three populations at a line: `edge_unspliced` (the mixture being deconvolved),
+`edge_spliced` (crossed contiguously, spliced elsewhere) and `sj_count` (jumped). The junction flux was
+already *consumed* — `build_node_geometry` gathers it onto donor/acceptor lines for the graft/peel — but
+never *exported*, so the calibration's own output was silent about the population that at a donor seam is
+251 of 253 fragments. It is now `mass_rna_junction`, carried verbatim (a junction edge is pure mature RNA
+by construction, so there is nothing to deconvolve).
+
+⚠ **`assemble_priors` does NOT read it, and that asymmetry is deliberate.** The prior arbitrates only the
+*unspliced competing* mass: a spliced fragment has no gDNA candidate in the EM, which is exactly why
+`mass_rna_spliced_edge` is withheld. A junction fragment is certified RNA in the same sense, so feeding it
+in would load the RNA side of a split it does not belong to — and a locus whose RNA is fully spliced
+*should* get a near-zero `rna_prior_count`, because its unspliced fragments really are gDNA or nascent.
+Pinned by `test_the_junction_flux_does_NOT_enter_the_rna_prior`.
+
+### ⭐ THE FIRST BASELINE — chr22 pilot, 8 conditions
+
+`scripts/design/build_scan_cache.py --force` (66.6 s for all eight), then `calibrate()` per condition.
+Axes: **N = 22,231 nodes · E = 22,138 edges · J = 8,471 junctions**. ⚠ **Bit-identical on re-run** —
+every digit below reproduces, so this is a baseline rather than a sample.
+
+| condition | s | `rho_g` | κ | `od_g` | `od_r` | gDNA | RNA | junction | **f_gdna** |
+|---|---|---|---|---|---|---|---|---|---|
+| gdna100 ss0.50 capture_off | 6.4 | 0.102275 | 0.5000 | 0.0000 | 0.0000 | 5,370,056 | 5,373,548 | 2,117,198 | **0.4998** |
+| gdna100 ss0.50 capture_on | 5.2 | 0.084227 | 0.4990 | 0.0000 | 0.0000 | 4,384,623 | 7,295,911 | 1,315,320 | **0.3754** |
+| gdna100 ss0.99 capture_off | 6.4 | 0.095879 | 0.0101 | 0.0000 | 0.0000 | 5,034,150 | 5,704,854 | 2,114,778 | **0.4688** |
+| gdna100 ss0.99 capture_on | 5.2 | 0.109805 | 0.0101 | 0.0000 | 0.0000 | 5,714,602 | 5,955,867 | 1,316,066 | **0.4897** |
+| **none** ss0.50 capture_off | 3.7 | 0.008417 | 0.5002 | 0.0345 | 0.0000 | 443,277 | 5,145,770 | 2,117,047 | **0.0793** |
+| **none** ss0.50 capture_on | 2.8 | 0.001066 | 0.4998 | 0.0345 | 0.0000 | 56,141 | 5,502,246 | 1,314,146 | **0.0101** |
+| **none** ss0.99 capture_off | 3.6 | 0.000318 | 0.0100 | 0.0345 | 0.0000 | 16,745 | 5,568,579 | 2,118,177 | **0.0030** |
+| **none** ss0.99 capture_on | 2.8 | 0.000171 | 0.0099 | 0.0345 | 0.0000 | 9,021 | 5,554,579 | 1,315,272 | **0.0016** |
+
+Truth, from the suite manifest: `gdna_rate` 1.0 ("gdna100", ⇒ **f_gdna ≈ 0.5**) or 0.0 ("none", ⇒
+**f_gdna = 0 exactly**); `gdna_strand_overdispersion = 0.0`; `strand_specificity` 0.5 or 0.99.
+
+**What it says, read against that truth:**
+
+* **`od_g` recovers 0.0000 exactly** on every gdna100 condition — the simulator generated gDNA with zero
+  strand overdispersion and the fit returns zero, not a floor. On the zero-gDNA conditions it falls back
+  to `_PRIOR_OVERDISPERSION` = 0.0345 on all four, which is correct: there is no gDNA to fit from.
+* **`od_r` = 0.0000 everywhere**, consistent with the simulator being Poisson by construction
+  (`CARRY_FORWARD.md` §1 fact 18) — so this baseline can say nothing about dispersion, by design.
+* **f_gdna lands within 6 % of truth on 3 of 4** gdna100 conditions.
+* ⚠ **The zero-gDNA false positive is 7.9 % in the worst corner** (unstranded, capture off) and falls to
+  0.16 % when stranded and captured. That ordering is what §2 predicts — at κ = ½ the strand channel
+  carries *exactly zero* information about composition, so the solver has only count and density left.
+  ⛔ Quote it **only alongside the gdna100 column**: a zero-gDNA guard is ONE-SIDED (trap 19) and any
+  change that merely lowers gDNA scores better on it.
+
+### ⚠ TWO ANOMALIES THIS BASELINE SURFACES — neither is S5.f's, both are now measurable
+
+1. ⛔ **The fitted κ is `1 − truth`.** A library simulated at `strand_specificity = 0.99` calibrates to
+   **κ = 0.0101**; at 0.50 it calibrates to 0.4990–0.5002 (where the flip is invisible). This is
+   `CARRY_FORWARD.md` §0 **C4** — "sense fraction is 0.002–0.012 on all four real cfRNA libraries
+   (nearly fully antisense) — possibly a read-orientation convention bug" — now answered against ground
+   truth for the first time: it is a **convention flip, not biology**. S5.f does not touch
+   `fit_strand_balance`, so this is pre-existing and merely became visible. **It needs its own step.**
+2. ⚠ **`gdna100 ss0.50 capture_on` reads f_gdna 0.3754, 25 % low**, and its RNA total (7.30 M) is 21–36 %
+   above every other condition's. The other three gdna100 conditions are within 6 %. Unexplained; it is
+   the both-worst-case corner (no strand information *and* capture), so it is the natural first target.
+
+### ⚠ THE BASELINE CARRIES A KNOWN BIAS, AND IT IS NAMED
+
+**A7 is OFF at contiguous edges by owner ruling** (`S5_DESIGN_LOG.md` §1 A7): the RNA half of an unspliced
+crossing takes `UNBOUNDED_REACH` rather than its transcript's real remaining length. Measured cost,
+already on record (`CARRY_FORWARD.md` §1 fact 6): an **11.0 % genome-wide gDNA over-call**, contiguous
+seams worse than junctions (0.750 vs 0.886), and the gDNA fraction off by **+0.36** in the last node
+before a polyA site. Junction edges *do* take their real exonic reach — a brand-new population with no
+predecessor divisor, so wiring it regresses nothing. **S5.g turns the contiguous taper on and A/Bs it
+against the table above**; that ordering is the entire reason A7 was deferred.
+
+### ⭐ WHAT DISSOLVED, AND THE TRAP IT TAKES WITH IT
+
+`CalibrationResult` carried **six** per-region mass arrays and a per-side length; it now carries three
+axes and two supports.
+
+| gone | successor |
+|---|---|
+| `mass_{gdna,rna}_{left,right}` | ⭐ **`mass_{gdna,rna}_edge`** — one number per 0-bp line |
+| `gdna_boundary_len` (`E[min(ℓ,L)]/2`) | ⛔ **none.** Its ½ existed only because a face's mass was half a crossing. The per-edge divisor is `crossing_eff_length`, and there is no ½ in it |
+| `priors._gdna_region_node_arrays` → `_pooled_seam_arrays` | ⭐ the pooling **disappears**, it is not re-derived |
+| `region_arrays.{region_boundary,boundary_region}_indices` | `edge_node_indices` / `node_right_edge` — the last `k+1` axis in the tree |
+| `strand_deconv.boundary_side_seeds` (+ `_SideQuantities`, `_compute_side`, `_left_right_neighbors`) | `edge_seeds` — **ONE seed per line, not two per boundary** |
+
+⛔ **The split-then-re-pool was a no-op with a history.** `assemble_priors` summed
+`mass_gdna_right[r] + mass_gdna_left[r+1]` straight back together, and `_pooled_seam_arrays` did the
+identical thing — putting back a split the calibrator had just made. That exact sum-then-halve pattern
+hid an **exact factor of 2 for months** (`CARRY_FORWARD.md` §3 trap 2). It cannot recur: there is no face
+to halve and no pair to sum.
+
+⭐ **The evidence that it is really gone is the FIXTURES.** `test_capture_eff_length.py` carried **three
+near-identical result builders** that differed in exactly one thing — whether `gdna_boundary_len` was
+halved — two of which stored an un-halved length *and* deposited half the mass, cancelling exactly and
+hiding the factor-2 from every assertion in the file. They are now **one** builder. `test_priors.py`'s
+uniform-field fixture carried a ten-line note explaining the same convention; it is now three lines
+(`mass = ρ · support`, both axes). And **every span in `test_priors.py` is byte-identical to its
+pre-S5.f value** — 640 / 650 / 700 / 400 / 850 — so the schema moved and the geometry did not.
+
+⭐ **Two further dissolutions, each with its derivation:**
+
+* **The edge seed weight is exactly 1.** It was `clip(density · eff / mass)` where a count-observable
+  side read its own crossing density `mass / eff` — algebraically 1 on every seed the mask admits, with
+  the borrowed-density branch unreachable. With `count` and `mass` the same number that is exact, so the
+  ratio, its effective length, and the `boundary_side_eff_len` argument that carried it all go.
+* **`derive.gdna_density_global`'s terminal masking.** It masked each boundary side with
+  `same_ref_left_right` because a reference terminal has nothing on its far side. `E = N − n_refs` and
+  every entry is a real object, so there is nothing to exclude.
+
+### ⛔ THE GATE HAD A HOLE, AND ONLY PERTURBATION FOUND IT
+
+Nine perturbations across the two new pieces; **eight caught, one not**:
+
+| | perturbation | caught |
+|---|---|---|
+| P1 | edge id = LEFT NODE id — correct on reference 0 only (**the P15 shape**) | ✅ |
+| P2 · P4 | the grouped-`ref_id` check removed · every adjacent pair an edge (lines straddle references) | ✅ |
+| P3 | `hi_node = lo_node` — an edge collapses onto one node | ✅ |
+| P5 | `sense` always takes the POS column (the NEG orientation ignored) | ✅ |
+| P7 | count-observability ignored — a mid-exon line seeds the gDNA fit | ✅ |
+| P8 · P9 | the shared-exon test becomes an OR · edge observability read at the NODE index | ✅ |
+| **P6** | **an AMBIG flank no longer blocks the seed** | ⛔ **NO — all 29 passed** |
+
+**Why it hid, and what it exposed.** `TS_AMBIG` is a fourth distinct value (3), so
+`(ts == TS_POS) | (ts == TS_NONE)` is already `False` on it — the `~either_ambig` guard the predecessor
+carried on both clauses was **dead code reading as the rule**. Deleting it changed nothing, which is
+worse than absent: it invites the belief that the rule lives there. The guard is removed and the rule is
+now pinned by `test_an_AMBIG_flank_cannot_seed`, whose fixture uses INTRON bits on both strands so the
+flank stays *count*-observable and the test can only fail on strand. Re-armed
+(`TS_AMBIG` admitted as POS-compatible), the new test fires.
+
+### ⭐ CALIBRATION IS DETERMINISTIC; SOMETHING DOWNSTREAM IS NOT
+
+`tests/scenarios/test_nrna_double_counting.py::test_full_sweep[g20_n0_s100]` fails its negative-control
+limit (25 counts) — and, run in isolation five times, returns **29 / 29 / 32 / 29 / 32**. Fixing
+`PYTHONHASHSEED` does not stabilise it. Localised:
+
+| stage | two runs, same input | verdict |
+|---|---|---|
+| **scan** — all five banks + `node_start_count` | `np.array_equal` on every one | ✅ bit-identical |
+| **calibrate** — same payload, two calls | `max|diff| = 0.000e+00` on every array; `gdna_density_global` identical to the last digit | ✅ bit-identical |
+| **calibrate** — two INDEPENDENT scans | `max|diff| = 0.000e+00` | ✅ bit-identical |
+
+⭐ So **the first baseline is reproducible** and the nondeterminism is downstream of calibration, in the
+per-locus EM / quantification. ⚠ **It bounds every future end-to-end A/B**: a transcript-count comparison
+is only meaningful above a noise floor of ~3 counts on a ~30-count control, and that floor has not been
+characterised. Calibration-level A/Bs (S5.g's) are unaffected. **Not S5.f's, not chased here** — it is a
+pre-existing property that only became observable once `calibrate()` ran.
+
+### Gates
+
+* **`calibrate()` runs end to end on all 8 chr22 pilot conditions**, 2.6–6.4 s each, and the numbers
+  above are bit-identical on re-run. ⭐ Every number in `test_calibrate.py` is *arithmetic on the
+  fixture's own banks* — node totals 12/21/15, edge totals 5/11 (unspliced + spliced), junction 13,
+  divisors 100−50+1 = 51 contained and 50−1 = 49 crossing — not a recorded output.
+* **`tests/calibration/` is fully green: 543 passed, 0 failed** (was 25 failed at the start of the port).
+* `test_region_arrays.py` — the node↔edge mapping re-derived by a **different algorithm**
+  (`build_node_chain` walking the payload's CSR offsets), on a deliberately **multi-reference** topology
+  with a 3-node, a 2-node and a 1-node reference. Trap 1: a validator calling the builder's own helper
+  validates nothing.
+* `test_result_schema.py` — **31 tests**, every array pinned to its own axis against all three lengths,
+  because `E = N − n_refs` makes a mis-keyed array a *plausible* shape that nothing else would fault on.
+* **The overdispersion end-to-end recovery still holds**: a planted BetaBinom(½, od) over 400 intergenic
+  nodes is recovered at od ∈ {0.05, 0.10, 0.20} through the rewired path, and the Binomial limit still
+  floors below 0.02.
+* **The crossing-vs-contained unbiasedness identity still holds** on a real simulated scan
+  (`CARRY_FORWARD.md` §1 fact 4) — now as a ratio of SUMS on both axes rather than a mean of per-boundary
+  ratios, and with a line's ½-averaged two faces replaced by its one count.
+* **The oracle validates every bank EXACTLY, on all three axes.** Sum-to-full used to be byte-exact on
+  two arrays and *approximate* on the two float32 mass arrays; every bank is an integer count now, so
+  `boundary_mass_tol` is **deleted rather than carried at zero** — a tolerance that must be zero is a
+  claim that some comparison is approximate, and none is. "gDNA is never spliced" is now checked on the
+  junction axis too, which the old 4-channel layout had no room for.
+* `ruff check src/ tests/ scripts/` and `ruff format` clean.
+
+### Deleted rather than ported
+
+* **`tests/calibration/test_spliced_boundary_onesidedness.py`** — its entire subject is that spliced mass
+  sits on the exon FACE of a boundary and zero on the intron-facing one. There are no faces, and a splice
+  now deposits on its **junction edge only, never on the lines it splices over** — a stronger statement,
+  already gated at the specification level (`test_a_spliced_jump_deposits_NOTHING_on_the_lines_it_splices_over`,
+  verified passing before the deletion). The one part that survives — the two edge banks are disjoint
+  populations — is re-pinned in `test_substrate_conservation.py`. Same call S5.c made on
+  `test_message_frames.py` and S5.e made on three `test_bp_solver.py` tests.
+* **`test_capture_eff_length.py`'s two D6 tests** — falsification tests for the pooled-seam factor-2, in
+  which *every quantity named* is gone. The property they protected is kept as
+  `test_a_crossing_object_under_a_uniform_field_reads_RHO` and
+  `test_a_line_below_the_reference_density_CONTRACTS_rather_than_clipping`; what is retired is the
+  specific arithmetic that could break it.
+* **`test_substrate_conservation.py` was rewritten, not ported** — it asserted the region→boundary map
+  attributes "the non-terminal boundary mass, no double count, no loss", a property of the `k+1` axis
+  whose two data-free terminals were the only thing that could lose mass. What is kept is what made it
+  worth having: it runs on a **real scan**, and its invariants are re-derived from the FRAGMENT BUFFER
+  and the INDEX — sources independent of the accumulator. ⚠ Its scenario gained a gDNA arm, because
+  without one every fragment is mature RNA that either sits inside an exon node or jumps, so
+  `edge_unspliced` — the one population calibration deconvolves — was identically zero and the
+  "conservation" test passed over an empty bank.
+
+### Files touched
+
+* `src/rigel/calibration/result.py` — the three-axis schema, per-axis validation.
+* `calibrate.py` — the body; the chain + geometry now built FIRST, so the geometry owns every divisor and
+  the four length models the predecessor passed around (`region_eff_length`, `boundary_side_eff_length`,
+  `boundary_eff_length`, a scalar `fl_mean`) collapse to one projection off `eff_gdna`.
+* `priors.py` (`_gdna_node_arrays`, `edge_owner_nodes`) · `capture_eff_length.py`
+  (`_left_keyed_edge_arrays`) · `derive.py` · `strand_deconv.py` (`edge_seeds`,
+  `edge_strand_orientation`) · `gdna_strand.py` (`_node_seeds`) · `density_model.py`
+  (`count_observable_masks` → the edge axis) · `background_reference.py` · `density_deconv.py` ·
+  `region_arrays.py` · `track.py` · `src/rigel/pipeline.py` · `src/rigel/cli.py`.
+* Tests: `test_result_schema` `test_calibrate` `test_priors` `test_capture_eff_length` `_oracle`
+  `test_oracle` `test_substrate_conservation` `test_gdna_strand` `test_gdna_strand_integration`
+  `test_region_arrays` `test_region_index_alignment` `test_background_reference`
+  `test_accumulator_span_unbiased` `test_ambig_scenario` `_synthetic`
+  `tests/test_scanner_accumulator_integration.py` `tests/test_summary_report.py`.
+
+### ⚠ Left for S6, and one tool defect found on the way
+
+* **21 golden files** are the only remaining failures besides the EM finding. They move NUMERICALLY, not
+  merely start running, and are regenerated **once**, at S6 — `pytest tests/ --update-golden`.
+* ⛔ **`scripts/design/build_scan_cache.py`'s skip logic does not cover the payload schema digest.** It
+  printed `cached / skip` for all eight pilot conditions that `read_scan_cache` then **refused**
+  (`payload_schema_digest None != '66b41ea0b645209d'`). `--force` is the workaround; the check belongs in
+  the skip test. Same family as `CARRY_FORWARD.md` §3 trap 25 — a cache key that does not cover the
+  artifact it caches.

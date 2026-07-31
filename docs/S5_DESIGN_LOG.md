@@ -22,10 +22,24 @@ Read `ACCUMULATOR_DESIGN.md` §6 first; this file is its consequence.
 
 | | |
 |---|---|
-| stage | **implementing.** S5.0 (derivation) and S5.a (the accumulator) are done |
+| stage | **implementing.** S5.0/a/b/c/d/e **and S5.f** are done |
 | tooling | `scripts/design/observable_efficiency.py` — the harness; re-run it, do not quote this file |
-| suite | **1440 passed / 256 failed / 1 xfailed / 15 errors** (S5.e: −35 failures, +56 passes). ⭐ **Every remaining calibration failure is S5.f's** — nothing in the tree still fails on the per-face model |
-| ⛔ blocker | **none.** S5.a/b/c/d/**e** landed complete and **A7 is RULED** (§1 A7 / §4). **S5.f (`calibrate` end to end) is next — and it is the pivot**: nothing downstream is measurable until it runs, so its numbers become the FIRST BASELINE. See §2's road map |
+| suite | **1729 passed / 22 failed / 1 xfailed / 0 errors** (S5.f: **−234 failures, +289 passes, −15 errors**). ⭐ **`tests/calibration/` is fully green — 543 passed, 0 failed.** The 22 are 21 golden files (S6's, regenerated ONCE) + 1 EM-nondeterminism finding |
+| ⭐ **THE PIVOT IS PASSED** | **`calibrate()` RUNS end to end** on all 8 chr22 pilot conditions, and **the FIRST BASELINE is recorded in `LEDGER.md`'s S5.f entry** — bit-identical on re-run. Every deferred derivation now has something to be A/B'd against |
+| ⛔ blocker | **none. S5.g (A7's taper) is next** — the first change that gets a real A/B. See §2's road map |
+
+### ⚠ Three things the first baseline says, and they are not all comfortable
+
+1. **It carries A7's known bias by ruling** — an 11.0 % genome-wide gDNA over-call, +0.36 in the last node
+   before a polyA site. That is what S5.g removes, and measuring the removal is why A7 was deferred.
+2. ⛔ **The fitted κ is `1 − truth`.** A library simulated at `strand_specificity = 0.99` calibrates to
+   **κ = 0.0101**. This answers `CARRY_FORWARD.md` §0 **C4** against ground truth for the first time: the
+   near-zero sense fraction on all four real cfRNA libraries is a **convention flip, not biology**.
+   Pre-existing — S5.f does not touch `fit_strand_balance` — and it needs its own step.
+3. ⚠ **Calibration is bit-identical run to run; something downstream of it is not.** The scan and
+   `calibrate()` both reproduce exactly; an end-to-end transcript count varies 29–33 on a ~30-count
+   negative control. So calibration-level A/Bs are safe and **end-to-end ones have an uncharacterised
+   noise floor**.
 
 ---
 
@@ -258,8 +272,8 @@ upstream schema change. Phases, in dependency order:
 | **S5.e-1** | `NodeGeometry` + `build_node_geometry` rewritten; the 18 per-face arrays dissolve (old R1b, R2) | ✅ 23 tests written first and verified failing; **15 perturbations, and P15 found a real hole** — a `2*i` slot-layout assumption that every single-reference fixture was blind to | ✅ **done** |
 | **S5.e-2** | `bp_solver`'s `(left, right)` tuples collapsed through its six consumers; `node_init` + `density_model` re-keyed | ✅ the solver runs end to end; the factor-1 bedrock invariant holds on the new geometry. ⚠ the scalar/vector twins are NOT merged (a measured 15.7×/op) | ✅ **done** |
 | **S5.e-3** | the last per-face test fixtures ported; every transitional shim deleted | ✅ `test_bp_solver.py` 19 failures → **0**; the port exposed two artefacts the old shape hid (a hand-placed mature flux, and a terminal-slot G1 lock that had its own ten-line apology comment) | ✅ **done** |
-| **S5.f** | `calibrate` + `CalibrationResult` + `priors`/`capture_eff_length`/`pipeline` | calibration runs end to end; the numbers become the FIRST baseline. ⚠ **that baseline carries A7's known 11.0 % gDNA over-call and the entry must say so** | not started |
-| **S5.g** | ⭐ **A7 proper** — the contiguous-edge RNA reach turned on (§1 A7) | falsification test first; an **end-to-end A/B against S5.f's baseline**, which is the whole reason it is sequenced here | not started |
+| **S5.f** | ✅ **DONE** (`LEDGER.md`) — `calibrate` + `CalibrationResult` + `priors`/`capture_eff_length`/`pipeline`, and the junction axis exported | ✅ **calibration runs end to end on all 8 chr22 pilot conditions and the numbers ARE the first baseline**, bit-identical on re-run; `tests/calibration/` green (543/0); 9 perturbations, **P6 found a real hole** (a dead `~either_ambig` guard reading as the rule) | ✅ **done** |
+| **S5.g** | ⭐ **A7 proper** — the contiguous-edge RNA reach turned on (§1 A7) | falsification test first; an A/B against S5.f's baseline, which is the whole reason it is sequenced here. ⚠ **A/B on the CALIBRATION numbers, not end to end**: calibration is bit-identical run to run but a downstream transcript count is not (§0) | ⭐ **NEXT** |
 
 ⚠ **The 266 suite failures cannot be a per-step gate.** ~200 are end-to-end scenario and golden tests
 that will move *numerically*, not merely start running. Each phase is gated on the unit tests written
@@ -277,7 +291,7 @@ baseline to be judged against and would otherwise land unfalsifiable.
 | | step | gate | note |
 |---|---|---|---|
 | 1 | ✅ **S5.e-rest** — the 10 sweep-behaviour tests ported; `_pending_s5e` deleted | ✅ the file is green |
-| 2 | **S5.f** — `calibrate()` + `CalibrationResult` + `priors` + `derive` + `capture_eff_length` + `pipeline` | ⭐ **calibration runs end to end on the chr22 pilot scan caches, and its numbers become the FIRST BASELINE** | also retires `region_arrays`'s `k+1` boundary↔region mapping, the last surviving old axis |
+| 2 | ✅ **S5.f DONE** — `calibrate()` + `CalibrationResult` + `priors` + `derive` + `capture_eff_length` + `pipeline` + the junction axis | ✅ **the FIRST BASELINE, in `LEDGER.md`'s S5.f entry** | ✅ also retired `region_arrays`'s `k+1` boundary↔region mapping, the last surviving old axis, and `strand_deconv`'s two-seeds-per-boundary |
 
 #### ⭐ S5.f, scoped against the actual call sites (2026-07-30)
 

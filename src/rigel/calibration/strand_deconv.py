@@ -1,15 +1,30 @@
-"""Per-node deconvolution result type + the boundary-side seeds for the gDNA strand-overdispersion fit.
+"""Per-node deconvolution result type + the contiguous-edge seeds for the gDNA strand-overdispersion fit.
 
 After the bipartite belief-propagation rebuild (:mod:`rigel.calibration.bp_solver`), the per-node gDNA/RNA
 deconvolution lives in the chain sweep. This module retains only the two pieces that still feed it:
 
-* :class:`NodeDeconv` — the per-node deconvolution result (a region or a boundary side), the schema
-  ``bp_solver``'s ``chain_region_deconv`` / ``chain_boundary_side_deconv`` and
+* :class:`NodeDeconv` — the per-object deconvolution result (a node or a contiguous edge), the schema
+  ``bp_solver``'s ``chain_node_deconv`` / ``chain_edge_deconv`` and
   ``simplex_logodds._solve_nodes_logodds_all`` return, and that ``priors`` / ``derive`` consume.
-* :func:`boundary_side_seeds` — the exon–intron / exon–intergenic boundary-side ``(sense, total, gDNA
-  weight)`` seeds for the gDNA strand-overdispersion fit (:mod:`rigel.calibration.gdna_strand`), complementing
-  the contained-region seeds (needed under hybrid capture, which depletes off-target intergenic / intronic
-  gDNA). The weight is the count-clue gDNA fraction (≈ 1 for a count-observable side — gDNA by signature).
+* :func:`edge_seeds` — the exon–intron / exon–intergenic ``(sense, total, gDNA weight)`` seeds for the
+  gDNA strand-overdispersion fit (:mod:`rigel.calibration.gdna_strand`), complementing the contained-node
+  seeds (needed under hybrid capture, which depletes off-target intergenic / intronic gDNA).
+
+⭐ **ONE SEED PER LINE, NOT TWO PER BOUNDARY (S5.f).** ``boundary_side_seeds`` emitted a seed for each
+of a boundary's two faces — region ``r``'s right side and region ``r+1``'s left side — because the old
+accumulator split one crossing fragment's mass across the two flanks. They are the same physical
+crossing: pooling both into one method-of-moments estimator doubles its apparent sample size and pairs
+every observation with a perfectly correlated twin, which is a dispersion estimate reading its own
+duplication. A contiguous edge is a 0-bp line with one count, so there is one seed and the whole
+``_SideQuantities`` / ``_compute_side`` / ``_left_right_neighbors`` layer dissolves with the faces.
+
+⭐ **And the seed WEIGHT is now exactly 1, provably.** It was
+``clip(density · eff / mass)`` where a count-observable side read its own crossing density
+``density = mass / eff`` — algebraically 1 whenever the seed mask admits it, and the borrowed-density
+branch could never reach a seed. With ``count`` and ``mass`` the same number that identity is exact
+rather than approximate, so the ratio, the effective length it divided by, and the
+``boundary_side_eff_len`` argument that carried it all go. A seed's weight is "this line is gDNA by
+signature", and that is a 1.
 """
 
 from __future__ import annotations
@@ -18,8 +33,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .run_fill import same_ref_left_right
-from .signature import TS_AMBIG, TS_NEG, TS_NONE, TS_POS
+from .region_arrays import edge_node_indices
+from .signature import TS_NEG, TS_NONE, TS_POS
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,135 +71,62 @@ class NodeDeconv:
     rna_neg_frac_var: "np.ndarray | None" = None  # float64[K] — Var(log f_neg)
 
 
-@dataclass(frozen=True, slots=True)
-class _SideQuantities:
-    """Per-region boundary-side quantities consumed by the seed builder."""
+def edge_strand_orientation(ts_lo: np.ndarray, ts_hi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """``(orient_neg, strand_observable)`` per contiguous edge, from its two flanks' strand classes.
 
-    sense: np.ndarray
-    n_side: np.ndarray  # pos + neg (count evidence)
-    count_gdna_frac: np.ndarray  # count module's gDNA fraction for this side (raw density ratio)
-    strand_observable: np.ndarray
-    count_observable: np.ndarray
+    A line is **strand-observable** iff its two flanks define a single consistent transcript sense:
+    ``{POS,POS}`` / ``{NEG,NEG}``, or a gene-edge ``{POS,NONE}`` / ``{NEG,NONE}``. An **intergenic
+    (``TS_NONE``) flank is a strand WILDCARD** — it carries no transcript, so it is compatible with
+    either strand and the line is oriented by its gene flank. Only a genuine conflict — opposite
+    strands ``{POS,NEG}``, or a ``TS_AMBIG`` flank (overlapping ± transcripts) — leaves the sense
+    undefined, and such a line cannot seed the fit at all.
 
+    ⭐ **The rule is SYMMETRIC in the two flanks**, which is precisely why the two faces of the old
+    boundary always agreed about orientation and differed only in which face's count they read — the
+    duplication `edge_seeds` removes.
 
-def _left_right_neighbors(ts, ref_id, boundary_count_observable):
-    """Per-region neighbour strand class + same-ref + boundary count-observability for both sides.
+    ``orient_neg`` selects the NEG genome-strand column as "sense"; where it is ``False`` (and the
+    line is observable) the POS column is sense.
 
-    Region ``r``'s LEFT side is the right side of boundary ``(r−1, r)`` (neighbour ``r−1``); its
-    RIGHT side is the left side of boundary ``(r, r+1)`` (neighbour ``r+1``). ``boundary_count_observable[r]``
-    describes boundary ``(r, r+1)``. Returns
-    ``(left_same, ts_prev, left_observable, right_same, ts_next, right_observable)``.
+    ⚠ **There is no explicit AMBIG guard, and there must not be one.** The predecessor carried an
+    ``~either_ambig`` term on both clauses. ``TS_AMBIG`` is a fourth distinct value, so
+    ``(ts == TS_POS) | (ts == TS_NONE)`` is already ``False`` on it and the term was **dead** — a
+    redundant clause reading as load-bearing, which is worse than absent because it invites the belief
+    that the rule lives there. Perturbing it away changed no test, which is how it was found; the rule
+    is now pinned by ``test_an_AMBIG_flank_cannot_seed`` instead.
     """
-    r = ts.shape[0]
-    left_same, right_same = same_ref_left_right(ref_id)
-    ts_prev = np.zeros(r, dtype=ts.dtype)
-    left_observable = np.zeros(r, dtype=bool)
-    ts_next = np.zeros(r, dtype=ts.dtype)
-    if r > 1:
-        ts_prev[1:] = ts[:-1]
-        left_observable[1:] = boundary_count_observable[:-1]
-        ts_next[:-1] = ts[1:]
-    return left_same, ts_prev, left_observable, right_same, ts_next, boundary_count_observable
+    lo_pos_or_none = (ts_lo == TS_POS) | (ts_lo == TS_NONE)
+    hi_pos_or_none = (ts_hi == TS_POS) | (ts_hi == TS_NONE)
+    lo_neg_or_none = (ts_lo == TS_NEG) | (ts_lo == TS_NONE)
+    hi_neg_or_none = (ts_hi == TS_NEG) | (ts_hi == TS_NONE)
+    cons_pos = lo_pos_or_none & hi_pos_or_none & ((ts_lo == TS_POS) | (ts_hi == TS_POS))
+    cons_neg = lo_neg_or_none & hi_neg_or_none & ((ts_lo == TS_NEG) | (ts_hi == TS_NEG))
+    return cons_neg, cons_pos | cons_neg
 
 
-def _side_strand_orientation(view, same, ts_self, ts_other):
-    """Per-side sense/antisense split + strand-observability (the ``TS_NONE``-wildcard rule).
+def edge_seeds(substrate, region_arrays, node_density) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(sense, total, gdna_weight)`` — ONE seed per count- and strand-observable contiguous edge.
 
-    A side is **strand-observable** iff its two flanks define a single consistent transcript sense:
-    ``{POS,POS}``/``{NEG,NEG}``, or a gene-edge ``{POS,NONE}``/``{NEG,NONE}`` (intergenic ``TS_NONE`` is a
-    wildcard, oriented by the gene side); an opposite-strand ``{POS,NEG}`` or a ``TS_AMBIG`` flank leaves
-    the sense undefined. Returns ``(sense, antisense, n_side, strand_observable)`` (all length R).
-    """
-    pos = view.n_unspliced_pos.astype(np.float64)
-    neg = view.n_unspliced_neg.astype(np.float64)
-    either_ambig = (ts_self == TS_AMBIG) | (ts_other == TS_AMBIG)
-    self_pos_or_none = (ts_self == TS_POS) | (ts_self == TS_NONE)
-    other_pos_or_none = (ts_other == TS_POS) | (ts_other == TS_NONE)
-    self_neg_or_none = (ts_self == TS_NEG) | (ts_self == TS_NONE)
-    other_neg_or_none = (ts_other == TS_NEG) | (ts_other == TS_NONE)
-    cons_pos = (
-        same
-        & ~either_ambig
-        & self_pos_or_none
-        & other_pos_or_none
-        & ((ts_self == TS_POS) | (ts_other == TS_POS))
-    )
-    cons_neg = (
-        same
-        & ~either_ambig
-        & self_neg_or_none
-        & other_neg_or_none
-        & ((ts_self == TS_NEG) | (ts_other == TS_NEG))
-    )
-    strand_observable = cons_pos | cons_neg
-    sense = np.where(cons_neg, neg, pos)
-    n_side = pos + neg
-    return sense, n_side - sense, n_side, strand_observable
+    The exon–intron / exon–intergenic line seeds for the gDNA strand-overdispersion fit
+    (:mod:`gdna_strand`), complementing the contained-node seeds (needed under hybrid capture, which
+    depletes off-target intergenic / intronic gDNA).
 
-
-def _compute_side(
-    view, same, ts_self, ts_other, side_count_observable, eff, region_density
-) -> _SideQuantities:
-    """Per-side sense split, count-prior density, and strand-observability.
-
-    A side is **strand-observable** iff its boundary's two regions define a single, consistent
-    transcript sense (so 'sense' is defined). An **intergenic (TS_NONE) region is a strand wildcard**
-    — it carries no transcript, so it is compatible with either strand: a gene-edge boundary
-    (stranded exon ↔ intergenic) is therefore oriented by the gene side, ``{POS,NONE}→POS``,
-    ``{NEG,NONE}→NEG`` (same as ``{POS,POS}`` / ``{NEG,NEG}``). Only a genuine conflict — opposite
-    strands ``{POS,NEG}`` or a ``TS_AMBIG`` flank (overlapping +/− transcripts) — leaves the sense
-    undefined. The **count** fraction is the raw crossing density ratio: a count-observable side (no
-    shared exon) reads ``count_gdna_frac → 1`` from its own crossing mass; otherwise it borrows the swept
-    region density. (No strand cleaning — the count module is raw.)
-    """
-    mass = view.mass_unspliced
-    sense, _antisense, n_side, strand_observable = _side_strand_orientation(
-        view, same, ts_self, ts_other
-    )
-    with np.errstate(divide="ignore", invalid="ignore"):
-        # Raw crossing density (no strand cleaning); count-observable sides use their own crossing
-        # density, others borrow the swept region density.
-        own = np.where((mass > 0.0) & (eff > 0.0), mass / np.maximum(eff, 1e-12), 0.0)
-        density = np.where(side_count_observable, own, region_density)
-        count_gdna_frac = np.clip(
-            np.where(mass > 0.0, density * eff / np.maximum(mass, 1e-12), 0.0), 0.0, 1.0
-        )
-    return _SideQuantities(
-        sense=sense,
-        n_side=n_side,
-        count_gdna_frac=count_gdna_frac,
-        strand_observable=strand_observable,
-        count_observable=np.asarray(side_count_observable, dtype=bool),
-    )
-
-
-def boundary_side_seeds(substrate, region_arrays, node_density, boundary_side_eff_len):
-    """``(sense, total, gdna_weight)`` seed arrays from count- & strand-observable boundary sides.
-
-    The exon–intron / exon–intergenic seam seeds for the gDNA strand-overdispersion fit
-    (:mod:`gdna_strand`), complementing the contained-region seeds (needed under hybrid capture,
-    which depletes off-target intergenic/intronic gDNA). The weight is the count-clue gDNA fraction
-    ``count_gdna_frac`` (≈ 1 for a count-observable side, gDNA by signature) — the same quantity the
-    contained-region seeds use (``node_density.count_gdna_frac``).
+    ⚠ **``gdna_weight`` is identically 1 on every seed**, and that is a derivation rather than a
+    simplification — see the module docstring. It is returned as an array because the pooled estimator
+    takes a per-seed weight and the contained-node seeds genuinely vary.
     """
     ts = np.asarray(region_arrays.strand_class)
-    ref_id = np.asarray(region_arrays.ref_id)
-    eff = np.asarray(boundary_side_eff_len, dtype=np.float64)
-    region_density = node_density.density
-    l_same, ts_prev, l_obs, r_same, ts_next, r_obs = _left_right_neighbors(
-        ts, ref_id, node_density.boundary_count_observable
-    )
-    sides = (
-        _compute_side(substrate.left, l_same, ts, ts_prev, l_obs, eff, region_density),
-        _compute_side(substrate.right, r_same, ts, ts_next, r_obs, eff, region_density),
-    )
-    senses, totals, weights = [], [], []
-    for sq in sides:
-        seed = sq.count_observable & sq.strand_observable & (sq.n_side > 0.0)
-        senses.append(sq.sense[seed])
-        totals.append(sq.n_side[seed])
-        weights.append(sq.count_gdna_frac[seed])
-    return np.concatenate(senses), np.concatenate(totals), np.concatenate(weights)
+    lo, hi = edge_node_indices(np.asarray(region_arrays.ref_id))
+    count = np.asarray(substrate.edge_unspliced.count, dtype=np.float64)
+    pos, neg = count[:, 0], count[:, 1]
+    total = pos + neg
+
+    orient_neg, strand_observable = edge_strand_orientation(ts[lo], ts[hi])
+    count_observable = np.asarray(node_density.edge_count_observable, dtype=bool)
+    seed = count_observable & strand_observable & (total > 0.0)
+
+    sense = np.where(orient_neg, neg, pos)[seed]
+    return sense, total[seed], np.ones(sense.shape[0], dtype=np.float64)
 
 
-__all__ = ["NodeDeconv", "boundary_side_seeds"]
+__all__ = ["NodeDeconv", "edge_seeds", "edge_strand_orientation"]

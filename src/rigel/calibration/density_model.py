@@ -41,6 +41,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .node_chain import NODE
+from .region_arrays import edge_node_indices
 from .run_fill import runfill_bidirectional
 from .signature import BIT_EXON_NEG, BIT_EXON_POS
 
@@ -52,35 +53,38 @@ _EPS = 1.0e-9
 class NodeDensity:
     """Per-region gDNA density (count clue) after local imputation."""
 
-    density: np.ndarray  # float64[R] — local gDNA density (fragments per effective bp)
+    density: np.ndarray  # float64[N] — local gDNA density (fragments per effective bp)
     count_gdna_frac: (
         np.ndarray
-    )  # float64[R] — count module's gDNA fraction g_count = clip(density·region_eff_len /
-    #   contained_mass): the gDNA fraction of the contained unspliced mass from the (raw) local gDNA
+    )  # float64[N] — count module's gDNA fraction g_count = clip(density·eff_gdna /
+    #   contained count): the gDNA fraction of the contained unspliced mass from the (raw) local gDNA
     #   density. KEPT as the gDNA strand-overdispersion fit SEED selector (gdna_strand.py) — NOT a
     #   gDNA-fraction vote in the solve (the BP sweep owns the gDNA/RNA call).
-    region_count_observable: np.ndarray  # bool[R] — count-observable region (non-exonic)
-    boundary_count_observable: np.ndarray  # bool[R] — count-observable boundary right of region r
+    node_count_observable: np.ndarray  # bool[N] — count-observable node (non-exonic)
+    edge_count_observable: np.ndarray  # bool[E] — count-observable contiguous edge
 
 
 def count_observable_masks(
     signature: np.ndarray, ref_id: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Signature-based count-observability for regions and (right-) boundaries.
+    """Signature-based count-observability, on the two axes it describes.
 
-    Returns ``(region_count_observable, boundary_count_observable)``, both ``bool[R]``. ``boundary_count_observable[r]``
-    describes the internal boundary between region ``r`` and ``r+1`` (defined iff same ref).
+    Returns ``(node_count_observable[N], edge_count_observable[E])``.
+
+    ⭐ **The edge mask is on the EDGE axis now.** It used to be a ``bool[R]`` in which entry ``r``
+    described the seam ``(r, r+1)`` and the last entry of every reference was a padding ``False`` — a
+    node-shaped array standing in for an edge-shaped one, with the ``same``-reference test carried
+    inside it. A contiguous edge is a first-class object with its own axis, so the mask is
+    ``bool[E]`` and the ``same`` test is :func:`~rigel.calibration.region_arrays.edge_node_indices`'s
+    job rather than this function's.
     """
     sig = np.asarray(signature).astype(np.int64)
-    ref = np.asarray(ref_id)
-    r = sig.shape[0]
-    region_count_observable = (sig & _EXON_BITS) == 0
-    boundary_count_observable = np.zeros(r, dtype=bool)
-    if r > 1:
-        same = ref[:-1] == ref[1:]
-        shared_exon = (sig[:-1] & sig[1:] & _EXON_BITS) != 0
-        boundary_count_observable[:-1] = same & ~shared_exon
-    return region_count_observable, boundary_count_observable
+    node_count_observable = (sig & _EXON_BITS) == 0
+    lo, hi = edge_node_indices(ref_id)
+    # observable ⇔ no exon bit is SHARED across the line ⇒ no single exon-strand continues across it
+    # ⇒ no unspliced mature RNA crosses, so the crossing count is gDNA (+ nascent).
+    edge_count_observable = (sig[lo] & sig[hi] & _EXON_BITS) == 0
+    return node_count_observable, edge_count_observable
 
 
 def node_gdna_density(chain, geometry, region_arrays) -> NodeDensity:
@@ -103,7 +107,7 @@ def node_gdna_density(chain, geometry, region_arrays) -> NodeDensity:
     sig = np.asarray(region_arrays.signature)
     ref_id = np.asarray(region_arrays.ref_id)
     r = sig.shape[0]
-    region_count_observable, boundary_count_observable = count_observable_masks(sig, ref_id)
+    node_count_observable, edge_count_observable = count_observable_masks(sig, ref_id)
 
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
@@ -117,8 +121,12 @@ def node_gdna_density(chain, geometry, region_arrays) -> NodeDensity:
     contained_gdna = count[slot_of_node]
     region_eff_len = eff[slot_of_node]
 
-    def flank_density(neighbour: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """The gDNA density at a node's flanking EDGE, and whether that edge exists at all.
+    def flank(neighbour: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """The gDNA density at a node's flanking EDGE, and whether that edge can anchor it.
+
+        ⭐ **The edge is reached through the chain's own adjacency**, and its observability is read on
+        the EDGE axis at that slot's ``obj_idx`` — so "which seam is to my left" is answered by the
+        chain rather than by node-index arithmetic that has to know about reference terminals.
 
         ⚠ An object with no opportunity contributes nothing rather than a floored division
         (`CARRY_FORWARD.md` §3 trap 23) — so a zero divisor makes the flank unusable, not infinite.
@@ -128,25 +136,23 @@ def node_gdna_density(chain, geometry, region_arrays) -> NodeDensity:
         safe = np.clip(slots, 0, max(count.shape[0] - 1, 0))
         e = np.where(exists, eff[safe], 0.0)
         usable = exists & (e > _EPS)
-        return np.where(usable, count[safe] / np.where(usable, e, 1.0), 0.0), usable
+        edge_idx = np.clip(obj[safe], 0, max(edge_count_observable.shape[0] - 1, 0))
+        observable = (
+            usable & edge_count_observable[edge_idx]
+            if edge_count_observable.size
+            else np.zeros(r, dtype=bool)
+        )
+        return np.where(usable, count[safe] / np.where(usable, e, 1.0), 0.0), observable
 
-    left_gdna, left_exists = flank_density(np.asarray(chain.left, dtype=np.int64))
-    right_gdna, right_exists = flank_density(np.asarray(chain.right, dtype=np.int64))
-
-    # Per-side edge observability for node r: its LEFT side uses the seam (r−1, r); its RIGHT side the
-    # seam (r, r+1). ``boundary_count_observable[k]`` describes the seam (k, k+1).
-    left_anchor = np.zeros(r, dtype=bool)
-    right_anchor = np.zeros(r, dtype=bool)
-    if r > 1:
-        left_anchor[1:] = boundary_count_observable[:-1] & left_exists[1:]
-        right_anchor[:-1] = boundary_count_observable[:-1] & right_exists[:-1]
+    left_gdna, left_anchor = flank(np.asarray(chain.left, dtype=np.int64))
+    right_gdna, right_anchor = flank(np.asarray(chain.right, dtype=np.int64))
 
     density = np.full(r, np.nan, dtype=np.float64)
     # Observable node with a usable contained length → its own contained density. (Exons are NOT
     # count-observable and are imputed from the edges below; the strand for an exon enters the
     # deconvolution as ``g_strand`` in the combine, not via the count density — so this stays the
     # signature count-observable set, and ``g_count`` carries count magnitude only, no double-count.)
-    own = region_count_observable & (region_eff_len > _EPS)
+    own = node_count_observable & (region_eff_len > _EPS)
     density[own] = contained_gdna[own] / region_eff_len[own]
     # Everything else: anchor from the available observable edges — the AVERAGE of whichever sides are
     # anchored (both → mean, one → that side, none → stays NaN for the run-fill below).
@@ -181,8 +187,8 @@ def node_gdna_density(chain, geometry, region_arrays) -> NodeDensity:
     return NodeDensity(
         density=density,
         count_gdna_frac=count_gdna_frac,
-        region_count_observable=region_count_observable,
-        boundary_count_observable=boundary_count_observable,
+        node_count_observable=node_count_observable,
+        edge_count_observable=edge_count_observable,
     )
 
 

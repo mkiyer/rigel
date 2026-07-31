@@ -29,33 +29,31 @@ def test_region_arrays_align_with_index(mini_index):
     np.testing.assert_array_equal(ra.ref_offsets, expected)
 
 
+def _payload(n_nodes, ref_node_offsets):
+    """The two fields the alignment guard reads. ⚠ Both are on the NODE axis: the payload's edge and
+    junction axes are sized from it (``E = N − n_refs``), so a node-axis mismatch is the one that has
+    to be caught at the door."""
+    return SimpleNamespace(n_nodes=n_nodes, ref_node_offsets=np.asarray(ref_node_offsets, np.int64))
+
+
 def test_alignment_guard_accepts_matching_payload(mini_index):
     ra = _region_arrays(mini_index)
-    payload = SimpleNamespace(
-        r_total=ra.n_regions,
-        ref_region_offsets=ra.ref_offsets.astype(np.int64),
-    )
     # Should not raise.
-    CalibrationSubstrate._check_alignment(payload, ra)
+    CalibrationSubstrate._check_alignment(_payload(ra.n_regions, ra.ref_offsets), ra)
 
 
 def test_alignment_guard_rejects_count_mismatch(mini_index):
     ra = _region_arrays(mini_index)
-    payload = SimpleNamespace(
-        r_total=ra.n_regions + 1,
-        ref_region_offsets=ra.ref_offsets.astype(np.int64),
-    )
     with pytest.raises(CalibrationSubstrateError):
-        CalibrationSubstrate._check_alignment(payload, ra)
+        CalibrationSubstrate._check_alignment(_payload(ra.n_regions + 1, ra.ref_offsets), ra)
 
 
 def test_alignment_guard_rejects_offset_mismatch(mini_index):
     ra = _region_arrays(mini_index)
     bad = ra.ref_offsets.astype(np.int64).copy()
     bad[1] += 1  # perturb an offset so it no longer matches the geometry
-    payload = SimpleNamespace(r_total=ra.n_regions, ref_region_offsets=bad)
     with pytest.raises(CalibrationSubstrateError):
-        CalibrationSubstrate._check_alignment(payload, ra)
+        CalibrationSubstrate._check_alignment(_payload(ra.n_regions, bad), ra)
 
 
 def test_alignment_guard_rejects_none_payload(mini_index):

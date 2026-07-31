@@ -829,7 +829,10 @@ def run_pipeline(
     # gDNA/RNA and derive ρ_0 + per-node exposure. See
     from .calibration import calibrate
     from .calibration.region_arrays import RegionArrays
-    from .calibration.splice_graph import build_edge_flags_array
+    from .calibration.splice_graph import (
+        build_edge_flags_array,
+        build_junction_geometry_arrays,
+    )
 
     _warn_if_calibration_strand_unidentifiable(strand_models)
     strand_ci_eps = strand_models.strand_specificity_ci_epsilon(confidence=0.99)
@@ -844,6 +847,11 @@ def run_pipeline(
     # calibrate(), microseconds later, and two copies of an invariant is one too many.
     region_arrays = RegionArrays.from_index(index)
     edge_flags = build_edge_flags_array(index)
+    # The junction axis, in the accumulator's own junction slot order: where each junction attaches,
+    # its TRANSCRIPT strand, and its exonic reach either side. The calibrator places it as a FACTOR on
+    # its two endpoint nodes — never as a message channel, since every junction closes an undirected
+    # loop and the graph is not a polytree (`CARRY_FORWARD.md` §3 trap 10).
+    junctions = build_junction_geometry_arrays(index)
 
     # The two COMPONENT fragment-length models the calibrator's effective lengths need, each fitted
     # from a pool that is PURE BY CONSTRUCTION (docs/ACCUMULATOR_DESIGN.md §8): gDNA from fragments
@@ -883,26 +891,31 @@ def run_pipeline(
         gdna_fl_pmf=gdna_fl_pmf,
         rna_fl_pmf=fl_models.rna_pmf,
         config=config.calibration,
+        junctions=junctions,
         diagnostics_out=_calib_diag,
         edge_flags=edge_flags,
     )
     calibration_diagnostics = _calib_diag.get("calibration")
 
+    # ⭐ The QC sum runs over all THREE axes. gDNA lives on two of them — it is contained in a node or
+    # it crosses a line — while RNA also jumps, and the junction flux is the population that at a donor
+    # seam IS the gene's whole mature output. Summing only nodes and lines would report a library's RNA
+    # as a fraction of itself.
     logger.info(
-        "calibration: R=%d gdna_density_global=%.4g rna_sense_frac=%.3f gDNA_mass=%.0f RNA_mass=%.0f",
-        calibration.n_regions,
+        "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
+        "gDNA_mass=%.0f RNA_mass=%.0f (junction %.0f)",
+        calibration.n_nodes,
+        calibration.n_edges,
+        calibration.n_junctions,
         calibration.gdna_density_global,
         calibration.rna_sense_frac,
+        float(calibration.mass_gdna_node.sum() + calibration.mass_gdna_edge.sum()),
         float(
-            calibration.mass_gdna_contained.sum()
-            + calibration.mass_gdna_left.sum()
-            + calibration.mass_gdna_right.sum()
+            calibration.mass_rna_node.sum()
+            + calibration.mass_rna_edge.sum()
+            + calibration.mass_rna_junction.sum()
         ),
-        float(
-            calibration.mass_rna_contained.sum()
-            + calibration.mass_rna_left.sum()
-            + calibration.mass_rna_right.sum()
-        ),
+        float(calibration.mass_rna_junction.sum()),
     )
 
     # -- Quantification: calibration prior → per-locus EM --

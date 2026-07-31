@@ -69,46 +69,49 @@ class TestScannerAccumulatorIntegration:
         assert payload.n_strand_columns == 2
 
     def test_payload_shape_matches_index_partition(self, oracle):
+        """The payload's three axes must be exactly what the index's partition implies.
+
+        ⭐ ``cuts`` are the CUT POSITIONS; a reference with ``k`` cuts owns ``k − 1`` nodes and
+        ``k − 2`` interior lines. The predecessor counted ``k`` boundary objects per reference — the
+        ``k − 1`` interiors plus two data-free terminals — which is the axis S5.f retired.
+        """
         index = oracle.index
-        boundaries, ref_pos_offsets, region_types = build_node_partition_arrays(index)
+        cuts, ref_cut_offsets, node_types = build_node_partition_arrays(index)
         payload = _scan(oracle)
 
-        np.testing.assert_array_equal(payload.boundaries, boundaries)
-        np.testing.assert_array_equal(payload.ref_pos_offsets, ref_pos_offsets)
+        np.testing.assert_array_equal(payload.cut_positions, cuts)
+        np.testing.assert_array_equal(payload.ref_cut_offsets, ref_cut_offsets)
         assert payload.n_refs == len(index.ref_names)
-        assert region_types.shape == (payload.r_total,)  # one type per region
+        assert node_types.shape == (payload.n_nodes,)  # one type per node
 
-        # Per-ref: a ref with k boundary positions contributes (k-1) regions
-        # and k boundary objects; an empty ref contributes (0, 0).
-        diffs = np.diff(ref_pos_offsets)
-        expected_regions = int(np.sum(np.maximum(diffs - 1, 0)))
-        expected_boundaries = int(np.sum(np.where(diffs > 0, diffs, 0)))
-        assert payload.r_total == expected_regions
-        assert payload.b_obj_total == expected_boundaries
+        diffs = np.diff(ref_cut_offsets)
+        expected_nodes = int(np.sum(np.maximum(diffs - 1, 0)))
+        expected_edges = int(np.sum(np.maximum(diffs - 2, 0)))
+        assert payload.n_nodes == expected_nodes
+        assert payload.n_edges == expected_edges
+        # ⚠ E = N − (non-empty refs), stated a second way: the two derivations must agree.
+        n_live_refs = int(np.sum(diffs > 1))
+        assert payload.n_edges == payload.n_nodes - n_live_refs
 
     def test_fl_pools_emitted(self, oracle):
-        # PR 4c: the scan emits the gDNA FL pools (set_regions passes region_types
-        # + fl_max_size), so the payload carries a (N_FL_POOLS, fl_max_size+1) grid.
+        """The scan emits the FIVE PURE fragment-length pools, binned at the same L as every other
+        bank. ⚠ The pools are integer counts on a ``(N_FRAGMENT_POOLS, max_length + 1)`` grid — there
+        is no ``fl_pool_mass`` and no separate ``fl_max_size``, because a pool is a histogram of the
+        same molecule length the accumulator deposits by."""
         from rigel.calibration.fl import gdna_fl_mass
-        from rigel.calibration.fl import N_FL_POOLS
+        from rigel.scan_payload import N_FRAGMENT_POOLS
 
         payload = _scan(oracle)
-        assert payload.fl_pool_mass is not None
-        assert payload.fl_max_size > 0
-        assert payload.fl_pool_mass.shape == (N_FL_POOLS, payload.fl_max_size + 1)
+        assert payload.pool_lengths.shape == (N_FRAGMENT_POOLS, payload.max_length + 1)
         # gDNA pool aggregation is well-formed (non-negative, right length).
         gdna = gdna_fl_mass(payload)
-        assert gdna.shape == (payload.fl_max_size + 1,)
+        assert gdna.shape == (payload.max_length + 1,)
         assert float(gdna.sum()) >= 0.0
 
     def test_at_least_some_mass_deposited(self, oracle):
         payload = _scan(oracle)
-        # Either contained counts, boundary mass, or flux must be non-zero.
-        total = (
-            int(payload.region_contained.sum())
-            + int(payload.boundary_flux_left.sum())
-            + int(payload.boundary_flux_right.sum())
-            + float(payload.boundary_mass_left.sum())
-            + float(payload.boundary_mass_right.sum())
-        )
-        assert total > 0, "scanner did not deposit any fractional mass"
+        # ⭐ ONE tally answers this now: node_start_count is incremented once per ACCEPTED fragment, so
+        # its total IS the deposit count. The predecessor had to add five arrays across two dtypes
+        # because mass was fractional and carried separately from the integer flux.
+        assert int(np.asarray(payload.node_start_count).sum()) > 0, "scanner deposited nothing"
+        assert int(payload.qc.deposited) == int(np.asarray(payload.node_start_count).sum())

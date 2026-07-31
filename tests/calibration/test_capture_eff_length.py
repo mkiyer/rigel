@@ -26,58 +26,70 @@ import pytest
 
 from rigel.calibration.capture_eff_length import (
     _global_reference_density,
-    _pooled_seam_arrays,
+    _left_keyed_edge_arrays,
     _transcript_node_incidence,
     transcript_capture_eff_lengths,
 )
-from rigel.calibration.region_arrays import RegionArrays
+from rigel.calibration.region_arrays import RegionArrays, edge_node_indices
 from rigel.calibration.result import CalibrationResult
 from rigel.config import CalibrationConfig
 from conftest import build_test_index
 
+#: The gDNA crossing effective length every line carries. In production this is
+#: ``crossing_eff_length(pmf, UNBOUNDED_REACH, UNBOUNDED_REACH) = mu_g − 1``, the SAME number at every
+#: line, because gDNA's template is the chromosome and takes no reach taper (`S5_DESIGN_LOG.md` A7).
+_CROSSING_EFF = 180.0
 
-def _uniform_field_cal(region_arrays: RegionArrays, rho: float) -> CalibrationResult:
-    """A genuinely UNIFORM gDNA field over the region partition, built per the TRUE accumulator
-    deposition law: every node (region contained + pooled seam) has density exactly ``rho``.
-    ``contained[r] = rho·region_eff_len[r]``; the per-side density length ``boundary_len[r] =
-    min(region_size_bp[r], 180)`` VARIES (short regions clip below E[ℓ]); each region's two sides carry
-    ``rho·boundary_len[r]/2`` so the POOLED seam(r,r+1) = ``rho·(boundary_len[r]+boundary_len[r+1])/2`` =
-    ``rho·S_s``. The factor-1-under-uniform invariant ⇒ every transcript's contraction factor is 1 ⇒
-    eff_em == fl, EVEN for short exon flanks (the deposition-faithful averaged seam support)."""
-    rel = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
-    # ⚠ D6 (2026-07-29): the STORED per-side density length is E[min(ℓ,L)]/2, and each face carries
-    # ρ·gdna_boundary_len. This used to store the un-halved E[min(ℓ,L)] and deposit ρ·bl/2 — same face
-    # mass, doubled length — which cancelled `_pooled_seam_arrays`' spurious ½ and hid the factor-2.
-    bl = (
-        np.minimum(rel, 180.0) / 2.0
-    )  # per-side density length E[min(ℓ,L)]/2, clips on short regions
-    ref_id = np.asarray(region_arrays.ref_id)
-    n = rel.shape[0]
-    contained = rho * rel
-    side_right = np.zeros(n, dtype=np.float64)
-    side_left = np.zeros(n, dtype=np.float64)
-    if n > 1:
-        same = ref_id[:-1] == ref_id[1:]  # only genomically adjacent same-reference boundaries seam
-        side_right[:-1] = np.where(same, rho * bl[:-1], 0.0)  # ρ·gdna_boundary_len per FACE
-        side_left[1:] = np.where(same, rho * bl[1:], 0.0)
+
+def _cal(region_arrays: RegionArrays, density, node_eff, edge_eff) -> CalibrationResult:
+    """⭐ **THE fixture — there is only one now.** A deposition-faithful result for an arbitrary
+    per-node gDNA DENSITY field: every object's mass is ``ρ × its own effective support``, on both axes.
+
+    ⛔ **Three near-identical builders used to live here** — ``_uniform_field_cal``, ``_field_cal`` and
+    ``_seam_faithful_cal`` — and they differed in exactly one thing: whether ``gdna_boundary_len`` was
+    the halved per-side density length ``E[min(ℓ,L)]/2`` or the un-halved ``E[min(ℓ,L)]``. Two of them
+    stored the un-halved length AND deposited half the mass, which cancelled a spurious ½ in
+    ``_pooled_seam_arrays`` and hid an exact factor of 2 from every assertion in this file for months
+    (`CARRY_FORWARD.md` §3 trap 2). A contiguous edge is a 0-bp line with ONE mass and ONE support, so
+    there is no face, no half, and nothing for three fixtures to disagree about.
+
+    ⚠ A line's density is its **left flank's**. With a varying field the two flanks disagree, so the
+    fixture must SAY which it means rather than average them into a number that is neither.
+    """
+    d = np.asarray(density, dtype=np.float64)
+    node_eff = np.asarray(node_eff, dtype=np.float64)
+    edge_eff = np.asarray(edge_eff, dtype=np.float64)
+    lo, _hi = edge_node_indices(np.asarray(region_arrays.ref_id))
+    n = node_eff.shape[0]
     z = np.zeros(n, dtype=np.float64)
+    ez = np.zeros(lo.shape[0], dtype=np.float64)
     return CalibrationResult(
-        mass_gdna_contained=contained,
-        mass_rna_contained=z.copy(),
-        mass_gdna_left=side_left,
-        mass_rna_left=z.copy(),
-        mass_gdna_right=side_right,
-        mass_rna_right=z.copy(),
-        mass_rna_spliced=z.copy(),
-        gdna_boundary_len=bl,
-        gdna_region_eff_len=rel.copy(),
-        gdna_density_global=rho,
+        mass_gdna_node=d * node_eff,
+        mass_rna_node=z.copy(),
+        mass_gdna_edge=d[lo] * edge_eff,
+        mass_rna_edge=ez.copy(),
+        mass_rna_spliced_edge=ez.copy(),
+        mass_rna_junction=np.zeros(0, dtype=np.float64),
+        gdna_node_eff_len=node_eff,
+        gdna_edge_eff_len=edge_eff,
+        gdna_density_global=float(d.mean()),
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,
-        n_regions=n,
+        n_nodes=n,
+        n_edges=lo.shape[0],
+        n_junctions=0,
         config=CalibrationConfig(),
     )
+
+
+def _uniform_field_cal(region_arrays: RegionArrays, rho: float) -> CalibrationResult:
+    """A genuinely UNIFORM gDNA field: every object's density is exactly ``rho``, with the node support
+    the full genomic size. The factor-1-under-uniform invariant ⇒ every transcript's contraction factor
+    is 1 ⇒ ``eff_em == fl``, even for exon flanks shorter than one fragment."""
+    size = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
+    n_edges = edge_node_indices(np.asarray(region_arrays.ref_id))[0].shape[0]
+    return _cal(region_arrays, np.full(size.shape[0], rho), size, np.full(n_edges, _CROSSING_EFF))
 
 
 # Two same-strand transcripts sharing gene g1. t1's first exon [150, 300) is a sub-interval of t0's
@@ -271,44 +283,15 @@ def _tidx(idx, tid: str) -> int:
 
 
 def _field_cal(
-    region_arrays: RegionArrays, density: np.ndarray, frag: float = 180.0
+    region_arrays: RegionArrays, density: np.ndarray, frag: float = _CROSSING_EFF
 ) -> CalibrationResult:
-    """Deposition-faithful CalibrationResult for an arbitrary per-region gDNA DENSITY field, with an
-    FL-marginal region support (``region_eff_len = size − frag``) and crossing support (``boundary_len =
-    min(size, frag)``). This makes a multi-exon mRNA's junction-dropped ``span_full`` fall BELOW its
-    contiguous FL-marginal length — the exact gap the junction seams close. Uniform density ⇒ every node's
-    m/S = density ⇒ factor 1 (the bedrock invariant), independent of the field values."""
-    rel = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
-    region_eff = np.maximum(rel - frag, 1e-9)
-    bl = np.minimum(rel, frag) / 2.0  # D6: the STORED length is E[min(ℓ,L)]/2
-    ref_id = np.asarray(region_arrays.ref_id)
-    n = rel.shape[0]
-    d = np.asarray(density, dtype=np.float64)
-    contained = d * region_eff
-    side_left = np.zeros(n, dtype=np.float64)
-    side_right = np.zeros(n, dtype=np.float64)
-    if n > 1:
-        same = ref_id[:-1] == ref_id[1:]
-        side_right[:-1] = np.where(same, d[:-1] * bl[:-1], 0.0)  # ρ·gdna_boundary_len per FACE
-        side_left[1:] = np.where(same, d[1:] * bl[1:], 0.0)
-    z = np.zeros(n, dtype=np.float64)
-    return CalibrationResult(
-        mass_gdna_contained=contained,
-        mass_rna_contained=z.copy(),
-        mass_gdna_left=side_left,
-        mass_rna_left=z.copy(),
-        mass_gdna_right=side_right,
-        mass_rna_right=z.copy(),
-        mass_rna_spliced=z.copy(),
-        gdna_boundary_len=bl,
-        gdna_region_eff_len=region_eff,
-        gdna_density_global=float(d.mean()),
-        rna_sense_frac=0.9,
-        gdna_strand_overdispersion=0.05,
-        rna_strand_overdispersion=0.05,
-        n_regions=n,
-        config=CalibrationConfig(),
-    )
+    """An arbitrary per-node gDNA DENSITY field with an **FL-marginal** node support
+    (``node_eff = size − frag``). That makes a multi-exon mRNA's junction-dropped ``span_full`` fall
+    BELOW its contiguous FL-marginal length — the exact gap the junction seams close. Uniform density ⇒
+    every object's m/S = density ⇒ factor 1 (the bedrock invariant), independent of the field values."""
+    size = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
+    n_edges = edge_node_indices(np.asarray(region_arrays.ref_id))[0].shape[0]
+    return _cal(region_arrays, density, np.maximum(size - frag, 1e-9), np.full(n_edges, frag))
 
 
 def test_junction_incidence_multiexon_only(multiexon_index):
@@ -390,99 +373,58 @@ def test_global_reference_density_bimodal_returns_enriched_mode_snapped():
 
 
 # ---------------------------------------------------------------------------
-# D6 — the pooled-seam factor-2 (accumulator v5 §10.4; ledger W0.5).
+# The crossing-object density — what survives of the D6 factor-2 guard.
 # ---------------------------------------------------------------------------
 #
-# ⚠ These two tests are the FALSIFICATION tests for the fix: both MUST fail against the
-# unpatched code, or the diagnosis is wrong. Verified failing at 3c293038 before the fix landed.
+# ⛔ **D6's two falsification tests are DELETED, and the reason is that the defect is now
+# unrepresentable.** D6 was: ``gdna_boundary_len`` IS the halved per-side density length
+# ``E[min(ℓ,L)]/2``, the accumulator deposits ``ρ·gdna_boundary_len`` on EACH face, so a pooled seam
+# holds ``ρ·(gbl_r + gbl_{r+1})`` — and dividing that by the AVERAGE read **2ρ**. Every quantity in
+# that sentence is gone with the faces. There is no per-side length to halve, no pair of faces to sum,
+# and no choice between a sum and an average: a contiguous edge is a 0-bp line with one mass and one
+# support (`S5_DESIGN_LOG.md` §4; `CARRY_FORWARD.md` §3 trap 2).
 #
-# The defect: ``gdna_boundary_len`` IS the halved per-side DENSITY length ``E[min(ℓ,L)]/2``
-# (``effective_length.boundary_side_eff_length``, set at ``calibrate.py:226``), and the accumulator
-# deposits ``ρ·gdna_boundary_len`` on EACH face — so a pooled seam holds ``ρ·(gbl_r + gbl_{r+1})``.
-# Dividing that by the AVERAGE ``½·(gbl_r + gbl_{r+1})`` reads **2ρ**. The correct divisor is the SUM,
-# which is what ``priors._gdna_region_node_arrays``'s own docstring says; the prose beside the code
-# said "AVERAGE" and the code followed the prose.
-#
-# No test caught it because every fixture above builds ``gdna_boundary_len`` as the UN-halved
-# ``E[min(ℓ,L)]`` and deposits ``ρ·bl/2`` per face — a doubled length that exactly cancels the
-# spurious ½ — and because the ``min(ρ/ρ_ref, 1)`` clip rescues the uniform case regardless.
+# ⚠ **The PROPERTY they protected is still real**, and is kept below: a crossing object under a uniform
+# field must read ρ, and a line genuinely below the reference density must contract rather than clip.
+# What is retired is the specific arithmetic that could break it.
 
 
-def _seam_faithful_cal(region_arrays: RegionArrays, density: np.ndarray, frag: float = 180.0):
-    """A CalibrationResult built with PRODUCTION's ``gdna_boundary_len`` semantics.
-
-    Unlike :func:`_field_cal` / :func:`_uniform_field_cal` above, ``gdna_boundary_len`` here is the
-    genuinely halved per-side density length ``E[min(ℓ,L)]/2``, and each face carries
-    ``ρ·gdna_boundary_len`` — exactly what ``boundary_side_eff_length``'s docstring specifies and what
-    the accumulator deposits. A pooled seam therefore holds ``ρ·(gbl_r + gbl_{r+1})``.
-    """
-    rel = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
-    region_eff = np.maximum(rel - frag, 1e-9)
-    gbl = np.minimum(rel, frag) / 2.0  # THE production semantic: E[min(ℓ,L)]/2
-    ref_id = np.asarray(region_arrays.ref_id)
-    n = rel.shape[0]
-    d = np.asarray(density, dtype=np.float64)
-    side_left = np.zeros(n, dtype=np.float64)
-    side_right = np.zeros(n, dtype=np.float64)
-    if n > 1:
-        same = ref_id[:-1] == ref_id[1:]
-        side_right[:-1] = np.where(same, d[:-1] * gbl[:-1], 0.0)  # ρ·gbl per FACE, not ρ·gbl/2
-        side_left[1:] = np.where(same, d[1:] * gbl[1:], 0.0)
-    z = np.zeros(n, dtype=np.float64)
-    return CalibrationResult(
-        mass_gdna_contained=d * region_eff,
-        mass_rna_contained=z.copy(),
-        mass_gdna_left=side_left,
-        mass_rna_left=z.copy(),
-        mass_gdna_right=side_right,
-        mass_rna_right=z.copy(),
-        mass_rna_spliced=z.copy(),
-        gdna_boundary_len=gbl,
-        gdna_region_eff_len=region_eff,
-        gdna_density_global=float(np.mean(d)),
-        rna_sense_frac=0.9,
-        gdna_strand_overdispersion=0.05,
-        rna_strand_overdispersion=0.05,
-        n_regions=n,
-        config=CalibrationConfig(),
-    )
-
-
-def test_pooled_seam_density_recovers_rho(multiexon_index):
-    """⭐ D6: a pooled seam under a uniform field must read ρ, NOT 2ρ.
-
-    Fails on the unpatched code with a ratio of exactly 2. Independently reproduced end-to-end by
-    ``scratchpad/acc_seam_check.py``: 1.994 / 2.002 / 1.981 × truth at region lengths 2000 / 500 / 200.
-    """
+def test_a_crossing_object_under_a_uniform_field_reads_RHO(multiexon_index):
+    """⭐ The surviving half of D6. A line's mass over its own support is the true density — exactly,
+    with no factor to get wrong. Verified end-to-end at 1.994 / 2.002 / 1.981 × truth when the old
+    average-vs-sum defect was live, so this is where that regression would reappear."""
     ra = RegionArrays.from_index(multiexon_index)
     rho = 0.037
-    cal = _seam_faithful_cal(ra, np.full(ra.n_regions, rho))
-    seam_m, seam_S = _pooled_seam_arrays(cal, ra)
-    live = seam_S > 0.0
-    assert live.any(), "fixture produced no internal seams"
-    np.testing.assert_allclose(seam_m[live] / seam_S[live], rho, rtol=1e-12)
+    cal = _field_cal(ra, np.full(ra.n_regions, rho))
+    edge_mass, edge_support = _left_keyed_edge_arrays(cal, ra)
+    live = edge_support > 0.0
+    assert live.any(), "the fixture produced no lines"
+    np.testing.assert_allclose(edge_mass[live] / edge_support[live], rho, rtol=1e-12)
 
 
-def test_seam_inside_the_clip_band_still_contracts(multiexon_index):
-    """⭐ D6, the reason no test caught it: the ``min(ρ/ρ_ref, 1)`` clip rescues the uniform case.
+def test_a_line_below_the_reference_density_CONTRACTS_rather_than_clipping(multiexon_index):
+    """⭐ D6's other half, kept because the ``min(ρ/ρ_ref, 1)`` clip is still there and still hides
+    anything that reads a density too HIGH.
 
-    Put the true seam density strictly inside ``(ρ_ref/2, ρ_ref)``. Read correctly it is BELOW the
-    reference and must contract; read at 2ρ it lands ABOVE, clips to 1, and contributes no contraction
-    at all — so the bug is silent on exactly the seams where the shrinkage was supposed to act.
+    Put the true line density strictly inside ``(ρ_ref/2, ρ_ref)``: read correctly it is below the
+    reference and must contract; read at any inflated multiple it lands above, clips to 1, and
+    contributes no contraction at all — silent on exactly the lines the shrinkage exists to act on.
+
+    ⚠ The ρ_ref anchor sits on the LAST node, not the first. A line takes its LEFT flank's density
+    (:func:`_cal`), so anchoring on node 0 would put line 0 itself at ρ_ref and the assertion would
+    fail on the fixture rather than on the code.
     """
-    idx = multiexon_index
-    ra = RegionArrays.from_index(idx)
-    n = ra.n_regions
-    rho_ref, rho_seam = 1.0, 0.7  # 0.7 ∈ (0.5, 1.0): correct ⇒ contract; doubled ⇒ 1.4 ⇒ clipped
-    dens = np.full(n, rho_ref)
-    dens[1:] = rho_seam  # region 0 anchors ρ_ref; every seam among 1..n-1 sits in the band
-    cal = _seam_faithful_cal(ra, dens)
+    ra = RegionArrays.from_index(multiexon_index)
+    rho_ref, rho_line = 1.0, 0.7  # 0.7 ∈ (0.5, 1.0)
+    dens = np.full(ra.n_regions, rho_line)
+    dens[-1] = rho_ref  # the last node anchors ρ_ref and is no line's LEFT flank
+    cal = _field_cal(ra, dens)
 
-    seam_m, seam_S = _pooled_seam_arrays(cal, ra)
-    band = (seam_S > 0.0) & (seam_m > 0.0)
+    edge_mass, edge_support = _left_keyed_edge_arrays(cal, ra)
+    band = (edge_support > 0.0) & (edge_mass > 0.0)
     assert band.any()
-    ratio = (seam_m[band] / seam_S[band]) / rho_ref
+    ratio = (edge_mass[band] / edge_support[band]) / rho_ref
     assert np.all(ratio < 1.0 - 1e-9), (
-        f"seam density reads {ratio.max():.3f}×ρ_ref — at or above the reference it CLIPS and "
+        f"line density reads {ratio.max():.3f}×ρ_ref — at or above the reference it CLIPS and "
         "contributes no contraction, which is precisely how the factor-2 stayed invisible"
     )

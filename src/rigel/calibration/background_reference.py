@@ -3,11 +3,11 @@
 Derivation + validation: ``docs/CARRY_FORWARD.md`` (reviewer-confirmed). The DNA
 contamination level is NOT a per-region quantity: a region of effective length ``E`` resolves its DNA rate only
 above ``~1/E`` (Fisher information ``ρ·E`` = the expected count), so a faint background — the very case that
-matters under strong hybrid capture — is resolvable ONLY by pooling regions into one aggregate support. This
+matters under strong hybrid capture — is resolvable ONLY by pooling nodes into one aggregate support. This
 module measures that pooled scalar; ``bp_solver`` consumes it as a **one-sided log-floor** (never a scale or
 denominator — see the derivation's strong-capture safeguard).
 
-**Substrate (``include_introns``).** Two region sets, both purely intronic/intergenic (never exonic):
+**Substrate (``include_introns``).** Two node sets, both purely intronic/intergenic (never exonic):
 
 * ``include_introns=False`` (default here for *simulation* development) — **INTERGENIC only** (signature ``0``:
   no gene at all). Carries DNA only — no mature *and* no nascent RNA — so the pool is ``0`` for a DNA-free
@@ -54,10 +54,12 @@ class BackgroundReference:
         float  #: Σg — pooled DNA counts (the aggregate Poisson observation's count; works at Σg=0)
     )
     eff_total: float  #: ΣE — pooled gDNA effective length (the aggregate support; the source of its precision)
-    n_regions: int = 0  #: number of pooled regions — the aggregate cell's EM weight (the population it stands for)
+    n_regions: int = (
+        0  #: number of pooled NODES — the aggregate cell's EM weight (the population it stands for)
+    )
     #: log ρ_floor — the DERIVED background-floor location (docs/CARRY_FORWARD.md). The pooled rate
     #: ``ln(Σg/ΣE)`` Fisher-blended with the per-region RESOLUTION WALL ``ρ_res = 1/harmmean(E of zero-count
-    #: regions)``: ``ln ρ_floor = (Σg·ln(Σg/ΣE) + n0·ln ρ_res)/(Σg + n0)``. EXACT limits: n0=0 ⇒ ln(Σg/ΣE) (the
+    #: nodes)``: ``ln ρ_floor = (Σg·ln(Σg/ΣE) + n0·ln ρ_res)/(Σg + n0)``. EXACT limits: n0=0 ⇒ ln(Σg/ΣE) (the
     #: resolvable case, byte-identical to the old seed); Σg=0 ⇒ ln ρ_res. Replaces the ``1/ΣE`` seed (3 logs too
     #: low = the confident-FP seed) as the low-density mode the consuming NPMLE injects. ``−inf`` iff no support.
     log_rho_floor: float = -np.inf
@@ -66,29 +68,31 @@ class BackgroundReference:
 def measure_background(
     substrate,
     region_arrays,
-    region_eff_len,
+    node_eff_len,
     *,
     include_introns: bool = False,
     robust_trim_mad: float | None = None,
 ) -> BackgroundReference:
-    """Pool the non-exonic regions' contained unspliced counts over their gDNA effective length →
+    """Pool the non-exonic NODES' contained unspliced counts over their gDNA effective length →
     ``(log ρ_bg, σ_bg)``. A pooled Poisson MLE — precise even when ρ_bg is faint (the aggregate ``Σg`` over a
-    genome-scale ``ΣE`` resolves what no single region can), and honestly ``0`` (``σ_bg=∞``) when empty.
+    genome-scale ``ΣE`` resolves what no single node can), and honestly ``0`` (``σ_bg=∞``) when empty.
 
-    ``include_introns`` picks the region set (module docstring): ``False`` = intergenic-only (sim-safe);
+    ``node_eff_len`` is ``effective_length.contained_eff_length`` on the gDNA pmf — the count of start
+    positions that place a whole molecule inside the node, which is the support the counts are a rate over.
+
+    ``include_introns`` picks the node set (module docstring): ``False`` = intergenic-only (sim-safe);
     ``True`` = intergenic + intron (real-data resolution). ``robust_trim_mad`` (only with introns) is an upper
-    MAD fence in log-density: pooled count-bearing regions above ``median + robust_trim_mad·(MAD·1.4826)`` are
+    MAD fence in log-density: pooled count-bearing nodes above ``median + robust_trim_mad·(MAD·1.4826)`` are
     dropped as nascent-contaminated outliers before the pool. ``None`` ⇒ no trim (plain pool)."""
     sig = np.asarray(region_arrays.signature)
-    eff = np.asarray(region_eff_len, dtype=np.float64)
+    eff = np.asarray(node_eff_len, dtype=np.float64)
     exclude = _EXON_BITS if include_introns else _GENE_BITS
     pool = ((sig & exclude) == 0) & (eff > _EPS)
-    pos = np.asarray(substrate.contained.n_unspliced_pos, dtype=np.float64)
-    neg = np.asarray(substrate.contained.n_unspliced_neg, dtype=np.float64)
-    counts = pos + neg
+    # ⚠ The two columns are GENOME strand, and gDNA is strand-symmetric, so the pool is their sum.
+    counts = np.asarray(substrate.node_contained.count, dtype=np.float64).sum(axis=1)
 
     if robust_trim_mad is not None:
-        # Drop the rare high-density (nascent-contaminated) region from the pool. Count-bearing pooled regions
+        # Drop the rare high-density (nascent-contaminated) node from the pool. Count-bearing pooled regions
         # only — a count-0 region is never a HIGH outlier and stays (it is the faint-background bulk).
         nz = pool & (counts > _EPS)
         if int(nz.sum()) >= 8:
@@ -113,12 +117,12 @@ def measure_background(
             n_regions=nr,
         )
     # THE DERIVED FLOOR (docs/CARRY_FORWARD.md). The old ``1/ΣE`` seed pools the background as ONE
-    # genome-sized region ⇒ claims a resolution n× finer than any single region delivers (~3 logs too low = the
+    # genome-sized region ⇒ claims a resolution n× finer than any single node delivers (~3 logs too low = the
     # confident-FP seed). The honest floor is the density a TYPICAL background region still reads as ~zero — the
     # per-region Poisson resolution wall ``ρ_res = mean(1/E_i)`` over the ZERO-count regions (= 1/harmmean(E)),
     # Fisher-blended with the pooled rate ``Σg/ΣE`` (info Σg vs the n0 unresolved-region votes). EXACT limits:
     # n0=0 ⇒ ln(Σg/ΣE) (byte-identical to the old resolvable case); Σg=0 ⇒ ln ρ_res (the wall).
-    zc = pool & (counts <= _EPS)  # the zero-count (unresolved) regions
+    zc = pool & (counts <= _EPS)  # the zero-count (unresolved) nodes
     n0 = int(zc.sum())
     s_recip = float((1.0 / eff[zc]).sum()) if n0 > 0 else 0.0  # Σ(1/E_i)
     rho_res = (s_recip / n0) if n0 > 0 else 0.0  # mean(1/E_i) = 1/harmmean(E of zero-count regions)

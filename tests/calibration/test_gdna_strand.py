@@ -18,7 +18,13 @@ from rigel.calibration.gdna_strand import (
     fit_gdna_strand_overdispersion,
     overdispersion_for_beta,
 )
-from rigel.calibration.signature import TS_AMBIG, TS_NONE
+from rigel.calibration.signature import (
+    BIT_EXON_POS,
+    BIT_INTRON_NEG,
+    BIT_INTRON_POS,
+    TS_AMBIG,
+    TS_NONE,
+)
 from rigel.calibration.strand_likelihood import strand_loglik
 
 
@@ -116,34 +122,46 @@ def test_beta_concentration_roundtrip():
 # --- the substrate wrapper (Phase 2 extraction + fit) ---------------------------------------
 
 
-def _zero_view(n):
-    z = np.zeros(n, dtype=np.float64)
+def _view(pos, neg):
+    """A :class:`PopulationView`-shaped stand-in: ONE genome-strand count array, nothing else.
+
+    ⭐ ``mass_unspliced`` is gone with the fractional numerator — the accumulator deposits ``+1`` on
+    every object the fragment touched, so ``count`` IS the mass and there is no second array to keep
+    consistent with it.
+    """
     return SimpleNamespace(
-        n_unspliced_pos=z.copy(),
-        n_unspliced_neg=z.copy(),
-        mass_unspliced=z.copy(),
-        mass_spliced=z.copy(),
+        count=np.stack(
+            [np.asarray(pos, dtype=np.float64), np.asarray(neg, dtype=np.float64)], axis=1
+        )
     )
 
 
 def _mock_substrate(pos, neg, ts, count_evidence, observable):
-    """Mock with only contained-region signal (boundary sides zeroed ⇒ no boundary seeds)."""
+    """Mock with only contained-NODE signal: the edge axis carries ZERO counts ⇒ no edge seeds.
+
+    ⚠ One reference with ``n`` nodes owns exactly ``n − 1`` lines, so the edge arrays are sized from
+    the node axis rather than left empty — an edge axis inconsistent with its own ``ref_id`` is not a
+    "no edges" fixture, it is a mis-shaped one.
+    """
     pos = np.asarray(pos, dtype=np.float64)
     neg = np.asarray(neg, dtype=np.float64)
     n = pos.shape[0]
+    n_edges = max(n - 1, 0)
     mass = pos + neg
-    contained = SimpleNamespace(n_unspliced_pos=pos, n_unspliced_neg=neg, mass_unspliced=mass)
-    substrate = SimpleNamespace(contained=contained, left=_zero_view(n), right=_zero_view(n))
+    substrate = SimpleNamespace(
+        node_contained=_view(pos, neg),
+        edge_unspliced=_view(np.zeros(n_edges), np.zeros(n_edges)),
+    )
     region_arrays = SimpleNamespace(strand_class=np.asarray(ts), ref_id=np.zeros(n, dtype=np.int64))
-    # New seed weight is count_gdna_frac directly (was count_evidence/mass) — preserve the intent.
+    # The seed weight is count_gdna_frac directly (was count_evidence/mass) — preserve the intent.
     ce = np.asarray(count_evidence, dtype=np.float64)
     with np.errstate(divide="ignore", invalid="ignore"):
         count_gdna_frac = np.clip(np.where(mass > 0.0, ce / mass, 0.0), 0.0, 1.0)
     node_density = SimpleNamespace(
         count_evidence=ce,
         count_gdna_frac=count_gdna_frac,
-        region_count_observable=np.asarray(observable, dtype=bool),
-        boundary_count_observable=np.zeros(n, dtype=bool),  # no boundary seeds
+        node_count_observable=np.asarray(observable, dtype=bool),
+        edge_count_observable=np.zeros(n_edges, dtype=bool),  # no edge seeds
         density=np.zeros(n, dtype=np.float64),
     )
     return substrate, region_arrays, node_density
@@ -160,7 +178,7 @@ def test_wrapper_recovers_overdispersion_from_intergenic_seeds():
         pos, neg, np.full(n, TS_NONE), count_evidence=total.copy(), observable=np.ones(n, bool)
     )  # count_evidence == mass ⇒ weight ≈ 1 (pure gDNA)
     model = fit_gdna_strand_from_substrate(
-        substrate, region_arrays, node_density, np.zeros(n), rna_sense_frac=0.95
+        substrate, region_arrays, node_density, rna_sense_frac=0.95
     )
     assert not model.fallback_used
     assert model.n_seed_nodes == n
@@ -172,14 +190,13 @@ def test_wrapper_excludes_ambig_and_non_observable():
     n = 100
     pos = np.full(n, 50.0)
     neg = np.full(n, 50.0)
-    eff = np.zeros(n)
     # all AMBIG → excluded even though count-observable
     s_ambig, ra_ambig, nd_ambig = _mock_substrate(
         pos, neg, np.full(n, TS_AMBIG), np.full(n, 100.0), np.ones(n, bool)
     )
     assert (
         fit_gdna_strand_from_substrate(
-            s_ambig, ra_ambig, nd_ambig, eff, rna_sense_frac=0.95
+            s_ambig, ra_ambig, nd_ambig, rna_sense_frac=0.95
         ).n_seed_nodes
         == 0
     )
@@ -188,43 +205,137 @@ def test_wrapper_excludes_ambig_and_non_observable():
         pos, neg, np.full(n, TS_NONE), np.full(n, 100.0), np.zeros(n, bool)
     )
     assert fit_gdna_strand_from_substrate(
-        s_exon, ra_exon, nd_exon, eff, rna_sense_frac=0.95
+        s_exon, ra_exon, nd_exon, rna_sense_frac=0.95
     ).fallback_used
 
 
-def test_boundary_side_seeds_extracts_observable_seam_sides():
-    """boundary_side_seeds picks the count- & strand-observable seam sides with count weights."""
-    from rigel.calibration.signature import TS_POS
-    from rigel.calibration.strand_deconv import boundary_side_seeds
+# --- edge seeds: ONE per line, not two per boundary -------------------------------------------
 
-    def view(pos, neg):
-        pos = np.asarray(pos, dtype=np.float64)
-        neg = np.asarray(neg, dtype=np.float64)
-        return SimpleNamespace(
-            n_unspliced_pos=pos,
-            n_unspliced_neg=neg,
-            mass_unspliced=pos + neg,
-            mass_spliced=np.zeros_like(pos),
-        )
 
-    # two adjacent POS regions, one ref; boundary (0,1) is a count-observable seam.
-    left = view([0, 70], [0, 30])  # region 1's left side = right side of boundary (0,1)
-    right = view([80, 0], [20, 0])  # region 0's right side = left side of boundary (0,1)
-    substrate = SimpleNamespace(left=left, right=right, contained=None)
+def _edge_parts(signatures, edge_pos, edge_neg, ref_id=None):
+    """A substrate + geometry-free ``NodeDensity`` over ``signatures``, on the node/edge axes."""
+    from rigel.calibration.density_model import count_observable_masks
+    from rigel.calibration.signature import transcript_strand_class
+
+    sig = np.asarray(signatures, dtype=np.uint8)
+    n = sig.shape[0]
+    ref = np.zeros(n, dtype=np.int64) if ref_id is None else np.asarray(ref_id, dtype=np.int64)
+    node_obs, edge_obs = count_observable_masks(sig, ref)
+    substrate = SimpleNamespace(
+        node_contained=_view(np.zeros(n), np.zeros(n)),
+        edge_unspliced=_view(edge_pos, edge_neg),
+    )
     region_arrays = SimpleNamespace(
-        strand_class=np.array([TS_POS, TS_POS]), ref_id=np.array([0, 0])
+        signature=sig, strand_class=transcript_strand_class(sig.astype(np.int64)), ref_id=ref
     )
     node_density = SimpleNamespace(
-        boundary_count_observable=np.array([True, False]), density=np.zeros(2)
+        count_gdna_frac=np.zeros(n),
+        node_count_observable=node_obs,
+        edge_count_observable=edge_obs,
+        density=np.zeros(n),
     )
-    sense, total, weight = boundary_side_seeds(
-        substrate, region_arrays, node_density, np.array([100.0, 100.0])
+    return substrate, region_arrays, node_density
+
+
+def test_edge_seeds_emits_ONE_seed_per_line_not_two_per_boundary():
+    """⭐ The S5.f collapse, and the whole point of the change.
+
+    The predecessor emitted TWO seeds for one seam — region ``r``'s right side and region ``r+1``'s
+    left side — because the old accumulator split one crossing fragment's mass across the two flanks.
+    They were the same physical crossing, counted twice into one pooled moment estimator, which
+    inflates its apparent sample size by 2× and correlates every pair perfectly. A contiguous edge is
+    a 0-bp line with ONE count, so there is ONE seed.
+    """
+    from rigel.calibration.strand_deconv import edge_seeds
+
+    # intron+ | intron+ : one line, count-observable (no shared EXON bit), sense-POS on both flanks.
+    substrate, region_arrays, node_density = _edge_parts(
+        [BIT_INTRON_POS, BIT_INTRON_POS], edge_pos=[70.0], edge_neg=[30.0]
     )
-    assert sorted(np.round(sense).tolist()) == [70.0, 80.0]
-    assert sorted(total.tolist()) == [100.0, 100.0]
-    # weight = count_gdna_frac: a count-observable seam side reads its own crossing density
-    # (mass/eff), so count_gdna_frac = clip((mass/eff)·eff/mass) = 1 (gDNA by signature).
-    assert np.allclose(weight, 1.0)
+    sense, total, weight = edge_seeds(substrate, region_arrays, node_density)
+    assert sense.shape == (1,)  # ⛔ was (2,) — the same crossing, twice
+    np.testing.assert_allclose(sense, [70.0])
+    np.testing.assert_allclose(total, [100.0])
+    np.testing.assert_allclose(weight, [1.0])
+
+
+def test_edge_seed_sense_follows_the_flanking_transcript_strand():
+    """A NEG-strand line orients to the NEG genome column; the sense count is not always ``pos``."""
+    from rigel.calibration.strand_deconv import edge_seeds
+
+    substrate, region_arrays, node_density = _edge_parts(
+        [BIT_INTRON_NEG, BIT_INTRON_NEG], edge_pos=[70.0], edge_neg=[30.0]
+    )
+    sense, total, _ = edge_seeds(substrate, region_arrays, node_density)
+    np.testing.assert_allclose(sense, [30.0])
+    np.testing.assert_allclose(total, [100.0])
+
+
+def test_an_intergenic_flank_is_a_strand_WILDCARD():
+    """Intergenic carries no transcript, so a gene-edge line is oriented by its gene flank."""
+    from rigel.calibration.strand_deconv import edge_seeds
+
+    substrate, region_arrays, node_density = _edge_parts(
+        [0, BIT_INTRON_NEG], edge_pos=[70.0], edge_neg=[30.0]
+    )
+    sense, _, _ = edge_seeds(substrate, region_arrays, node_density)
+    np.testing.assert_allclose(sense, [30.0])  # oriented NEG by the gene side
+
+
+def test_an_opposite_strand_line_is_not_strand_observable():
+    """``{POS, NEG}`` leaves 'sense' undefined, so the line cannot seed the fit at all."""
+    from rigel.calibration.strand_deconv import edge_seeds
+
+    substrate, region_arrays, node_density = _edge_parts(
+        [BIT_INTRON_POS, BIT_INTRON_NEG], edge_pos=[70.0], edge_neg=[30.0]
+    )
+    sense, _, _ = edge_seeds(substrate, region_arrays, node_density)
+    assert sense.shape == (0,)
+
+
+def test_an_AMBIG_flank_cannot_seed():
+    """⛔ Found by PERTURBATION, not by review: nothing pinned this rule.
+
+    A flank carrying overlapping ± transcripts has no defined transcript sense, so neither genome
+    column is "sense" and the line cannot seed a strand fit. ``edge_strand_orientation`` used to carry
+    an explicit ``~either_ambig`` guard — deleting it broke NOTHING, because ``TS_AMBIG`` is a fourth
+    distinct value that the ``POS-or-NONE`` / ``NEG-or-NONE`` tests already exclude. The guard was
+    dead code claiming to be the rule; this test is the rule.
+
+    ⚠ The fixture uses INTRON bits on both strands, not exon bits: an AMBIG flank must still be
+    count-observable, or the test would pass for the wrong reason.
+    """
+    from rigel.calibration.strand_deconv import edge_seeds
+
+    substrate, region_arrays, node_density = _edge_parts(
+        [BIT_INTRON_POS | BIT_INTRON_NEG, BIT_INTRON_POS], edge_pos=[70.0], edge_neg=[30.0]
+    )
+    assert node_density.edge_count_observable[0]  # count-observable — it fails on STRAND alone
+    sense, _, _ = edge_seeds(substrate, region_arrays, node_density)
+    assert sense.shape == (0,)
+
+
+def test_a_line_inside_one_exon_is_not_count_observable():
+    """A shared exon bit means an exon-strand continues across the line, so unspliced MATURE RNA
+    crosses it and its count is not gDNA."""
+    from rigel.calibration.strand_deconv import edge_seeds
+
+    substrate, region_arrays, node_density = _edge_parts(
+        [BIT_EXON_POS, BIT_EXON_POS], edge_pos=[70.0], edge_neg=[30.0]
+    )
+    sense, _, _ = edge_seeds(substrate, region_arrays, node_density)
+    assert sense.shape == (0,)
+
+
+def test_edge_seeds_never_straddle_a_reference():
+    """Two single-node references own ZERO lines between them — nothing can leak across."""
+    from rigel.calibration.strand_deconv import edge_seeds
+
+    substrate, region_arrays, node_density = _edge_parts(
+        [BIT_INTRON_POS, BIT_INTRON_POS], edge_pos=[], edge_neg=[], ref_id=[0, 1]
+    )
+    sense, _, _ = edge_seeds(substrate, region_arrays, node_density)
+    assert sense.shape == (0,)
 
 
 # --- the deconv application (strand_likelihood) ---------------------------------------------

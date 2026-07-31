@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 
 from ..types import IntervalType
+from .region_arrays import edge_node_indices
 
 if TYPE_CHECKING:
     from ..index import TranscriptIndex
@@ -47,7 +48,7 @@ def _transcript_node_incidence(
 
     Returns ``(inc_t_reg, inc_reg, inc_t_bnd, inc_bnd, inc_t_junc, inc_junc_left, inc_junc_right)``: region
     incidence ``(t, r)``; interior-boundary incidence ``(t, r)`` where boundary ``r`` is the seam between
-    regions ``r`` and ``r+1`` (left-region keyed, matching ``priors._gdna_region_node_arrays``); and
+    nodes ``r`` and ``r+1`` (left-node keyed, matching ``_left_keyed_edge_arrays``); and
     SPLICE-JUNCTION incidence ``(t, r_left, r_right)`` — one per adjacent exon pair of a multi-exon mRNA,
     where ``r_left`` is the previous exon's last region and ``r_right`` this exon's first region. The intron
     between them carries no gDNA (no genomic-adjacent seam), so the junction's crossing mass is IMPUTED by
@@ -189,44 +190,30 @@ def _global_reference_density(mass: np.ndarray, support: np.ndarray) -> "float |
     return float(rho[ok][int(np.argmin(np.abs(x - mode)))])
 
 
-def _pooled_seam_arrays(calibration, region_arrays):
-    """The left-keyed POOLED-SEAM node arrays ``(seam_mass, seam_support)`` — THE one seam node model both
-    the transcript contraction (``transcript_capture_eff_lengths``) and the gDNA component
-    (``priors._gdna_region_node_arrays``) share, so the two contract on an identical node basis.
+def _left_keyed_edge_arrays(calibration, region_arrays):
+    """The left-node-keyed crossing arrays ``(edge_mass, edge_support)``, ``float64[N]``.
 
-    Seam ``r`` is the boundary between region ``r`` and ``r+1`` (genomically adjacent, same reference):
-    ``mass = mass_gdna_right[r] + mass_gdna_left[r+1]`` (the two halves POOLED) and ``support =
-    gdna_boundary_len[r] + gdna_boundary_len[r+1]`` (the SUMMED per-side density lengths — the divisor
-    that matches the pooled numerator). Zero at terminal / cross-reference boundaries. The gDNA path
-    re-keys some seams to their right flank (intergenic outer boundaries); the transcript path takes them
-    as-is.
+    Entry ``r`` carries the line between node ``r`` and ``r + 1``; the last node of every reference
+    carries ``0`` because it owns no line to its right.
 
-    ⚠ **D6, fixed 2026-07-29 (`docs/CARRY_FORWARD.md` §10.4).** The support was
-    ``½·(gdna_boundary_len[r] + gdna_boundary_len[r+1])`` — the AVERAGE. But ``gdna_boundary_len`` is
-    ALREADY the halved per-side density length ``E[min(ℓ,L)]/2`` (`effective_length.boundary_side_eff_length`,
-    set by `calibrate`'s `boundary_side_eff_length` call), and the accumulator deposits ``ρ·gdna_boundary_len`` on EACH face — so a
-    pooled seam holds ``ρ·(gbl_r + gbl_{r+1})`` and the average divisor read **2ρ** (measured 1.994 / 2.002 /
-    1.981 × truth at region lengths 2000 / 500 / 200, `scratchpad/acc_seam_check.py`). Summing the two faces
-    means summing their two lengths. `priors._gdna_region_node_arrays`'s own docstring already had it right
-    — ``S_s = ½·(E[min_r] + E[min_{r+1}])``, which since ``gbl = E[min]/2`` IS this sum; the prose beside the
-    code said "AVERAGE" and the code followed the prose. No test caught it because the
-    ``min(ρ/ρ_ref, 1)`` clip rescues the uniform case, so the factor-1-under-uniform invariant passed
-    anyway; under capture a seam whose true density lay in ``(ρ_ref/2, ρ_ref)`` clipped and contributed
-    **no contraction when it should have contributed some**."""
-    right = np.asarray(calibration.mass_gdna_right, dtype=np.float64)
-    left = np.asarray(calibration.mass_gdna_left, dtype=np.float64)
-    side_len = np.asarray(calibration.gdna_boundary_len, dtype=np.float64)
-    ref_id = np.asarray(region_arrays.ref_id)
-    n = right.shape[0]
-    seam_m = np.zeros(
-        n, dtype=np.float64
-    )  # seam r = boundary between region r and r+1 (left-keyed)
-    seam_S = np.zeros(n, dtype=np.float64)
-    if n > 1:
-        same = ref_id[:-1] == ref_id[1:]  # internal seam: genomically adjacent, same reference
-        seam_m[:-1] = np.where(same, right[:-1] + left[1:], 0.0)
-        seam_S[:-1] = np.where(same, side_len[:-1] + side_len[1:], 0.0)
-    return seam_m, seam_S
+    ⭐ **This is a re-KEYING, not a pooling (S5.f).** ``_pooled_seam_arrays`` used to add
+    ``mass_gdna_right[r] + mass_gdna_left[r+1]`` together and sum the two halved per-side lengths
+    ``gdna_boundary_len[r] + gdna_boundary_len[r+1]`` — putting back together a split the calibrator had
+    just made. That sum-then-halve shape hid an exact factor of 2 for months (`CARRY_FORWARD.md` §3
+    trap 2), and it is gone: a contiguous edge is a 0-bp line carrying ONE mass and ONE support, and all
+    that remains is to hang it off a node so the genomic-overlap projection can reach it.
+
+    ⚠ The transcript path keys every line to its LEFT flank; the gDNA path re-keys the intergenic outer
+    ones to their right flank (:func:`priors.edge_owner_nodes`). Both read the same per-edge arrays.
+    """
+    n = int(calibration.n_nodes)
+    mass = np.zeros(n, dtype=np.float64)
+    support = np.zeros(n, dtype=np.float64)
+    if calibration.n_edges:
+        lo, _hi = edge_node_indices(np.asarray(region_arrays.ref_id))
+        mass[lo] = np.asarray(calibration.mass_gdna_edge, dtype=np.float64)
+        support[lo] = np.asarray(calibration.gdna_edge_eff_len, dtype=np.float64)
+    return mass, support
 
 
 def transcript_capture_eff_lengths(
@@ -244,10 +231,10 @@ def transcript_capture_eff_lengths(
     set:
 
     * a per-region CONTAINED node at effective support ``S_r = E[max(0, L_r − ℓ)]`` (mass ``m_r``);
-    * a per-interior-boundary POOLED SEAM node at SUMMED per-side support ``S_s = gbl_r + gbl_{r+1} = ½·(E[min(ℓ,L_r)] +
-      E[min(ℓ,L_{r+1})])`` (mass ``m_s = right[r] + left[r+1]``) — for boundaries the transcript
-      crosses without a splice (interior to an exon);
-    * a per-SPLICE-JUNCTION seam node (multi-exon mRNA), same crossing support ``S_j`` but with its mass
+    * a per-interior-LINE crossing object at support ``S_e = gdna_edge_eff_len[e] = E_f[w − 1]``
+      (mass ``m_e = mass_gdna_edge[e]``) — for lines the transcript crosses without a splice (interior
+      to an exon);
+    * a per-SPLICE-JUNCTION crossing object (multi-exon mRNA), same crossing support ``S_j`` but with its mass
       IMPUTED from the two flanking exon densities ``m_j = ½·(ρ_left + ρ_right)·S_j`` — the intron between
       the exons holds no gDNA, so the junction's enrichment is that of the exonic sequence a spliced
       fragment covers, not zero (dropping it) nor full length (the FL-marginal's implicit weight).
@@ -282,16 +269,18 @@ def transcript_capture_eff_lengths(
     fl = np.asarray(fl_eff_lengths, dtype=np.float64)
     n_t = fl.shape[0]
 
-    # per-region CONTAINED node (mass, effective support) and per-interior-seam POOLED node. The seam
-    # between region r and r+1 (left-region keyed) pools both boundary halves at the SUMMED per-side
-    # density support — the SAME node the gDNA component uses (priors._gdna_region_node_arrays).
-    contained_m = np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
-    contained_S = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
-    contained_ev = contained_m + np.asarray(calibration.mass_rna_contained, dtype=np.float64)
-    side_len = np.asarray(
-        calibration.gdna_boundary_len, dtype=np.float64
-    )  # for the junction-seam support
-    seam_m, seam_S = _pooled_seam_arrays(calibration, region_arrays)  # the SHARED seam node model
+    # per-node CONTAINED object (mass, effective support) and per-interior-LINE crossing object. The
+    # line between node r and r+1 is keyed to r — the SAME objects the gDNA component uses
+    # (priors._gdna_node_arrays).
+    contained_m = np.asarray(calibration.mass_gdna_node, dtype=np.float64)
+    contained_S = np.maximum(np.asarray(calibration.gdna_node_eff_len, dtype=np.float64), 1e-9)
+    contained_ev = contained_m + np.asarray(calibration.mass_rna_node, dtype=np.float64)
+    seam_m, seam_S = _left_keyed_edge_arrays(calibration, region_arrays)  # the SHARED line objects
+    # A SPLICE junction is not a contiguous line, so it has no entry on the edge axis — but it is still
+    # a crossing, and gDNA's crossing divisor is the same everywhere (UNBOUNDED_REACH both sides ⇒
+    # mu_g − 1). Take it from the edge supports rather than recomputing a length model here: one
+    # definition, and it cannot drift from the one the calibrator divided by.
+    crossing_S = float(seam_S[seam_S > 0.0][0]) if np.any(seam_S > 0.0) else 0.0
 
     rt, rr, bt, br, jt, jl, jr = _transcript_node_incidence(index, region_arrays)
     # GLOBAL reference density ρ_ref = the enriched mode of the MASS-WEIGHTED node-density KDE — the
@@ -329,16 +318,13 @@ def transcript_capture_eff_lengths(
         # its flanking-exon enrichment, not the fabricated full-length weight.
         rho_l = contained_m[jl] / contained_S[jl]
         rho_r = contained_m[jr] / contained_S[jr]
-        # ⚠ D6, second site (2026-07-29). The seam SUPPORT is the SUM of the two flanks'
-        # `gdna_boundary_len`, exactly as in `_pooled_seam_arrays` — one definition, used consistently.
-        # This site is not a density bias (the mass is IMPUTED as ρ_avg·s_j, so m_j/s_j = ρ_avg whatever
-        # s_j is); what the old ½ corrupted was the junction seam's WEIGHT in `span_full`. Fixing only
-        # `_pooled_seam_arrays` doubles every genomic seam's weight while leaving junction seams at half,
-        # which strips footprint from spliced mRNAs specifically and re-creates the nascent<mature
-        # inversion (`test_no_nascent_mature_inversion_under_capture`).
+        # ⭐ The junction seam's SUPPORT is the gDNA crossing effective length — ONE number, the same
+        # every contiguous line uses, taken from the edge supports rather than re-derived. The
+        # predecessor summed two halved per-side lengths here and had to keep that sum in step with
+        # `_pooled_seam_arrays`'s by hand; there is one quantity now, so there is nothing to keep in step.
         # The `0.5·(rho_l + rho_r)` below is a genuine AVERAGE OF DENSITIES — the junction's imputed
         # density is the mean of its two flanks — and is unrelated to the support. It stays.
-        s_j = side_len[jl] + side_len[jr]
+        s_j = np.full(jt.shape[0], crossing_S, dtype=np.float64)
         m_j = 0.5 * (rho_l + rho_r) * s_j
         np.add.at(num, jt, np.minimum(m_j * inv, s_j))
         np.add.at(span_full, jt, s_j)

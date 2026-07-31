@@ -21,14 +21,18 @@ def build_gdna_track(calibration, region_arrays, ref_names) -> pd.DataFrame:
     """Per-region gDNA track: ``(ref, start, end, gdna_mass, rna_mass, gdna_density, gdna_frac)``.
 
     Rows are in genomic order (``RegionArrays`` is sorted by ``(ref_id, start)``),
-    which is the same order the ``CalibrationResult`` per-region arrays are aligned
+    which is the same order the ``CalibrationResult`` per-NODE arrays are aligned
     to. ``gdna_density`` is the density-correct contained gDNA mass per bp
-    (mass / ``gdna_region_eff_len``); ``gdna_frac`` is gDNA's share of the region's
+    (mass / ``gdna_node_eff_len``); ``gdna_frac`` is gDNA's share of the node's
     contained mass.
+
+    ⚠ **Contained only, deliberately.** A contiguous edge is a 0-bp line: it has no genomic extent to
+    occupy a row of a track, and attributing its crossing mass to a flank node would report a density
+    at a position where that mass was never contained.
     """
-    gdna = np.asarray(calibration.mass_gdna_contained, dtype=np.float64)
-    rna = np.asarray(calibration.mass_rna_contained, dtype=np.float64)
-    efflen = np.asarray(calibration.gdna_region_eff_len, dtype=np.float64)
+    gdna = np.asarray(calibration.mass_gdna_node, dtype=np.float64)
+    rna = np.asarray(calibration.mass_rna_node, dtype=np.float64)
+    efflen = np.asarray(calibration.gdna_node_eff_len, dtype=np.float64)
 
     density = np.where(efflen > _EPS, gdna / np.maximum(efflen, _EPS), 0.0)
     total = gdna + rna

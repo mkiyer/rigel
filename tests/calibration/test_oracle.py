@@ -13,7 +13,7 @@ import pytest
 from rigel.config import PipelineConfig
 from rigel.sim import Scenario, ReadSimConfig, GDNAConfig
 
-from _oracle import ORIGINS, OracleTruth  # noqa: E402
+from _oracle import _BANKS, ORIGINS, OracleTruth  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -46,25 +46,35 @@ def test_oracle_validates_and_partitions_sum_to_full(oracle_scenario, tmp_path):
         str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc"
     )
 
-    # region_contained partitions sum to full EXACTLY (integer channels).
-    rc_full = np.asarray(orc.full.region_contained, np.int64)
-    rc_sum = sum(np.asarray(orc.parts[k].region_contained, np.int64) for k in ORIGINS)
-    assert np.array_equal(rc_sum, rc_full)
+    # ⭐ EVERY bank on all three axes sums to full EXACTLY — no tolerance anywhere, because every bank
+    # is an integer count. The predecessor could only be exact on two of its four arrays.
+    for bank in _BANKS:
+        full = np.asarray(getattr(orc.full, bank), np.int64)
+        parts = sum(np.asarray(getattr(orc.parts[k], bank), np.int64) for k in ORIGINS)
+        np.testing.assert_array_equal(parts, full, err_msg=f"{bank} does not sum to full")
 
-    # gDNA is never spliced: zero spliced (ch2,3) contained mass in the gdna partition.
-    assert np.asarray(orc.parts["gdna"].region_contained, np.int64)[:, 2:].sum() == 0
+    # gDNA is never spliced — on the contiguous-edge spliced bank AND on the junction axis.
+    assert np.asarray(orc.parts["gdna"].edge_spliced_count, np.int64).sum() == 0
+    assert np.asarray(orc.parts["gdna"].sj_count, np.int64).sum() == 0
+
+    # ⚠ The scenario must actually EXERCISE the RNA-only banks, or "gDNA is zero there" is vacuous.
+    assert np.asarray(orc.full.sj_count, np.int64).sum() > 0
 
     # every read accounted for; gDNA and mRNA partitions both non-empty (scenario has both).
     assert orc.read_counts["gdna"] > 0 and orc.read_counts["mrna"] > 0
 
-    # the true gDNA fraction is a valid fraction wherever there is unspliced mass.
-    fg, tot = orc.region_true_fg()
+    # the true gDNA fraction is a valid fraction wherever there is contained mass.
+    fg, tot = orc.node_true_fg()
     assert np.all((fg[tot > 0] >= 0) & (fg[tot > 0] <= 1))
 
 
-def test_oracle_override_conserves_node_mass(oracle_scenario, tmp_path):
-    """The override masses (gdna + rna, spliced-inclusive) must equal the full node mass per region —
-    the conservation the EM prior relies on."""
+def test_oracle_override_conserves_mass_on_EACH_AXIS_SEPARATELY(oracle_scenario, tmp_path):
+    """The override masses must equal the full object count — checked **per axis**, not pooled.
+
+    ⚠ Pooling the two axes into one total would let an error on the node axis cancel an equal and
+    opposite one on the edge axis, which is exactly the class of mistake a three-axis schema makes
+    possible. ``E`` and ``N`` differ by only ``n_refs``, so such a cancellation is not far-fetched.
+    """
     from rigel.calibration.region_arrays import RegionArrays
     from rigel.calibration.substrate import CalibrationSubstrate
 
@@ -75,21 +85,60 @@ def test_oracle_override_conserves_node_mass(oracle_scenario, tmp_path):
         oracle_scenario.index.nodes_df, oracle_scenario.index.ref_name_to_id
     )
     ov = orc.override_masses(ra)
-    full_sub = CalibrationSubstrate.from_payload(orc.full, ra)
-    total = (
-        np.asarray(full_sub.contained.mass_unspliced)
-        + np.asarray(full_sub.contained.mass_spliced)
-        + np.asarray(full_sub.left.mass_unspliced)
-        + np.asarray(full_sub.left.mass_spliced)
-        + np.asarray(full_sub.right.mass_unspliced)
-        + np.asarray(full_sub.right.mass_spliced)
+    full = CalibrationSubstrate.from_payload(orc.full, ra)
+
+    # NODE axis: a node's contained population holds no spliced molecule, so its total is one bank.
+    np.testing.assert_allclose(
+        ov["mass_gdna_node"] + ov["mass_rna_node"],
+        np.asarray(full.node_contained.count, np.float64).sum(1),
     )
-    got = (
-        ov["mass_gdna_contained"]
-        + ov["mass_rna_contained"]
-        + ov["mass_gdna_left"]
-        + ov["mass_rna_left"]
-        + ov["mass_gdna_right"]
-        + ov["mass_rna_right"]
+    # EDGE axis: unspliced + spliced, because mass_rna_edge is spliced-inclusive.
+    np.testing.assert_allclose(
+        ov["mass_gdna_edge"] + ov["mass_rna_edge"],
+        np.asarray(full.edge_unspliced.count, np.float64).sum(1)
+        + np.asarray(full.edge_spliced.count, np.float64).sum(1),
     )
-    assert np.allclose(got, total, atol=1e-3)
+    # JUNCTION axis: never deconvolved — the flux verbatim.
+    np.testing.assert_allclose(
+        ov["mass_rna_junction"], np.asarray(full.junction.count, np.float64).sum(1)
+    )
+
+
+def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_path):
+    """⭐ The perfect-calibration lever must actually construct. ``override_masses`` returns exactly the
+    fields ``dataclasses.replace`` needs, so a rename in the schema that it missed would surface here
+    rather than in whatever A/B first tried to use it."""
+    import dataclasses
+
+    from rigel.calibration.region_arrays import RegionArrays
+    from rigel.calibration.result import CalibrationResult
+    from rigel.config import CalibrationConfig
+
+    orc = OracleTruth.from_bam(
+        str(oracle_scenario.bam_path), oracle_scenario.index, PipelineConfig(), tmp_path, "orc3"
+    )
+    ra = RegionArrays.from_frame(
+        oracle_scenario.index.nodes_df, oracle_scenario.index.ref_name_to_id
+    )
+    ov = orc.override_masses(ra)
+    n, e, j = orc.full.n_nodes, orc.full.n_edges, orc.full.n_sj
+    blank = CalibrationResult(
+        mass_gdna_node=np.zeros(n),
+        mass_rna_node=np.zeros(n),
+        mass_gdna_edge=np.zeros(e),
+        mass_rna_edge=np.zeros(e),
+        mass_rna_spliced_edge=np.zeros(e),
+        mass_rna_junction=np.zeros(j),
+        gdna_node_eff_len=np.ones(n),
+        gdna_edge_eff_len=np.ones(e),
+        gdna_density_global=0.0,
+        rna_sense_frac=0.5,
+        gdna_strand_overdispersion=0.0,
+        rna_strand_overdispersion=0.0,
+        n_nodes=n,
+        n_edges=e,
+        n_junctions=j,
+        config=CalibrationConfig(),
+    )
+    truth = dataclasses.replace(blank, **ov)  # __post_init__ re-validates every axis
+    assert truth.mass_rna_junction.sum() > 0

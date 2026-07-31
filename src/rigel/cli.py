@@ -398,7 +398,9 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "rna_sense_frac": round(float(cal.rna_sense_frac), 6),
             "gdna_strand_overdispersion": round(float(cal.gdna_strand_overdispersion), 6),
             "rna_strand_overdispersion": round(float(cal.rna_strand_overdispersion), 6),
-            "n_regions": int(cal.n_regions),
+            "n_nodes": int(cal.n_nodes),
+            "n_edges": int(cal.n_edges),
+            "n_junctions": int(cal.n_junctions),
         }
     )
     # Capture-enrichment diagnostics — mass-weighted (count-median vs gDNA-mass-

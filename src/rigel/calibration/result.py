@@ -1,13 +1,35 @@
 """CalibrationResult — the calibrator's output schema.
 
-Per-region deconvolved gDNA / RNA mass across the region's three nodes (contained
-plus the two boundary sides), the per-region gDNA geometric supports (contained
-``gdna_region_eff_len`` + per-side ``gdna_boundary_len``), and the two library scalars
-(``gdna_density_global``, ``rna_sense_frac``). The calibrator iterates the simplex sweep
-to convergence but carries no per-pass convergence diagnostics in this schema. ``__post_init__``
-enforces the intrinsic invariants (shapes, finiteness, sign); mass conservation against the
-raw fragment counts is checked by the calibrator / tests (it needs the substrate, which the
-result does not carry).
+    Gate: ``tests/calibration/test_result_schema.py``
+
+⭐ **THREE AXES, ONE PER ACCUMULATOR OBJECT KIND.** The calibrator deconvolves a library on the splice
+graph, and the graph has three kinds of object, so the result has three axes::
+
+    nodes            N            deconvolved contained mass + its geometric support
+    contiguous edges E = N − refs deconvolved crossing mass + its geometric support
+    junction edges   J            the jumping flux -- certified RNA, never deconvolved
+
+⛔ **THE ``left``/``right`` PAIR IS GONE, AND SO IS THE ½ IT CARRIED.** The predecessor carried SIX
+per-region mass arrays — ``mass_{gdna,rna}_{contained,left,right}`` — because a boundary had two sides
+sitting in differently-sized flanks. ``priors.assemble_priors`` then pooled two of them straight back
+as ``mass_gdna_right[r] + mass_gdna_left[r+1]``, and ``capture_eff_length._pooled_seam_arrays`` did the
+identical thing. That split-then-re-pool was a no-op with a history: the same sum-then-halve pattern hid
+an exact factor of 2 for months (`CARRY_FORWARD.md` §3 trap 2). A contiguous edge is a 0-bp line with
+ONE set of numbers, so the pair collapses to ``mass_{gdna,rna}_edge`` and the pooling **disappears
+rather than being re-derived** (owner ruling, `S5_DESIGN_LOG.md` §4).
+
+⛔ **``gdna_boundary_len`` HAS NO SUCCESSOR.** It was ``boundary_side_eff_length = E[min(ℓ,L)]/2``, a
+per-FACE divisor whose ½ existed only because the face's mass was half a crossing. S5.c deleted it. The
+per-edge divisor is ``crossing_eff_length``, one number, no ½ — carried here as ``gdna_edge_eff_len``.
+Any comment claiming ``gdna_boundary_len`` "IS the halved per-side density length" describes a quantity
+that no longer exists.
+
+⚠ **``mass_rna_spliced_edge`` has no node twin, structurally.** ``node_contained`` is credited only when
+the fragment used no junction, so a node's contained population cannot hold a spliced molecule.
+
+``__post_init__`` enforces the intrinsic invariants (per-axis shape, dtype, finiteness, sign); mass
+conservation against the raw fragment counts is checked by the calibrator / tests, since it needs the
+substrate the result does not carry.
 """
 
 from __future__ import annotations
@@ -19,14 +41,18 @@ import numpy as np
 from ..config import CalibrationConfig
 
 
-def _check_region_array(arr: np.ndarray, name: str, n_regions: int) -> None:
-    """Validate a per-region numeric array: shape, dtype, finite, non-negative.
+def _check_axis_array(arr: np.ndarray, name: str, n: int) -> None:
+    """Validate one per-object array: shape against ITS OWN axis, dtype, finite, non-negative.
 
-    ⚠ The dtype gate was ``float64`` only. Accumulator v5 makes the primary per-object observable an
-    integer **count** (spec §6: no floats anywhere in the data model), so an exact integer array is
-    a *better* input here, not a malformed one — and rejecting it would have blocked every W5
-    consumer arm at its last step. Integer dtypes are admitted; everything else the gate checks
-    (shape, finiteness, sign) is unchanged, and ``np.isfinite`` is well defined on integers.
+    ⚠ The dtype gate admits exact integers as well as float64. The accumulator's primary per-object
+    observable is an integer **count** (no floats anywhere in the data model), so an integer array is a
+    *better* input here than a float one — ``mass_rna_junction`` is the flux verbatim and arrives
+    integral. Everything else the gate checks is unchanged, and ``np.isfinite`` is well defined on
+    integers.
+
+    ⚠ The shape check is the load-bearing one. ``E = N − n_refs`` differs from ``N`` by only a few
+    hundred genome-wide, so an array keyed to the wrong axis is a *plausible* length and nothing
+    downstream would fault on it — it would just silently read the wrong object's number.
     """
     if not isinstance(arr, np.ndarray):
         raise ValueError(f"CalibrationResult.{name} must be a numpy array.")
@@ -34,53 +60,74 @@ def _check_region_array(arr: np.ndarray, name: str, n_regions: int) -> None:
         raise ValueError(
             f"CalibrationResult.{name} must be float64 or an integer count; got {arr.dtype}."
         )
-    if arr.shape != (n_regions,):
-        raise ValueError(
-            f"CalibrationResult.{name} has shape {arr.shape}; expected ({n_regions},)."
-        )
+    if arr.shape != (n,):
+        raise ValueError(f"CalibrationResult.{name} has shape {arr.shape}; expected ({n},).")
     if not np.all(np.isfinite(arr)):
         raise ValueError(f"CalibrationResult.{name} contains non-finite values.")
     if np.any(arr < 0.0):
         raise ValueError(f"CalibrationResult.{name} must be non-negative.")
 
 
+def _check_unit_interval(value: float, name: str, *, open_upper: bool = False) -> None:
+    v = float(value)
+    upper_ok = v < 1.0 if open_upper else v <= 1.0
+    if not (0.0 <= v and upper_ok):
+        bound = "[0, 1)" if open_upper else "[0, 1]"
+        raise ValueError(f"CalibrationResult.{name} must be in {bound}; got {v}.")
+
+
 @dataclass(frozen=True, slots=True)
 class CalibrationResult:
-    """Per-region deconvolved mass + geometric gDNA length + library scalars."""
+    """Deconvolved gDNA / RNA mass on the node and contiguous-edge axes, the junction flux, the two
+    gDNA geometric supports, and the library scalars."""
 
-    # --- deconvolved mass across the region's 3 nodes (float64[R]) ---
-    mass_gdna_contained: np.ndarray
-    mass_rna_contained: np.ndarray
-    mass_gdna_left: np.ndarray  # right side of the left boundary
-    mass_rna_left: np.ndarray
-    mass_gdna_right: np.ndarray  # left side of the right boundary
-    mass_rna_right: np.ndarray
+    # --- the deconvolved MIXTURE, per node (float64[n_nodes]) ---
+    #: ``chain_node_deconv``: the node's contained unspliced count split by the converged belief.
+    mass_gdna_node: np.ndarray
+    mass_rna_node: np.ndarray
 
-    # Spliced RNA mass per region (Σ over the 3 nodes). Carried so ``assemble_priors`` can
-    # WITHHOLD it from ``rna_prior_count``: a spliced fragment has no gDNA candidate in the EM
-    # (gDNA does not splice), so it is guaranteed-RNA and assigned directly — counting it in the
-    # prior would double-count it and unfairly inflate the RNA side of the gDNA-vs-RNA *unspliced*
-    # split. ``mass_rna_*`` themselves stay spliced-inclusive, so the per-node conservation
-    # ``mass_gdna + mass_rna = total node mass`` is preserved; only the prior subtracts this.
-    mass_rna_spliced: np.ndarray  # float64[R]
+    # --- the deconvolved MIXTURE, per contiguous edge (float64[n_edges]) ---
+    #: ``chain_edge_deconv``: the line's unspliced crossing count split by the converged belief.
+    #: ``mass_rna_edge`` is spliced-INCLUSIVE — an edge's certified-RNA crossings are RNA whatever the
+    #: unspliced mixture resolves to, since gDNA cannot be spliced — so per-edge conservation
+    #: ``mass_gdna_edge + mass_rna_edge == unspliced + spliced`` holds.
+    mass_gdna_edge: np.ndarray
+    mass_rna_edge: np.ndarray
 
-    # --- directional boundary per-side density length 𝓔(L)=E[min(ℓ,L)] per region (geometry) ---
-    # The mass a boundary-crossing fragment deposits on one flank of region r. Doubles as the
-    # POOLED-SEAM effective support: a seam between regions r and r+1 has support
-    # ½·(gdna_boundary_len[r] + gdna_boundary_len[r+1]) — the deposition-faithful divisor that makes
-    # the pooled seam mass ρ·support under uniform gDNA (see assemble_priors / capture_eff_length).
-    gdna_boundary_len: np.ndarray  # float64[R]
+    #: float64[n_edges] — the ``edge_spliced`` part of ``mass_rna_edge``: molecules that crossed this
+    #: line CONTIGUOUSLY having spliced somewhere else. Carried so ``assemble_priors`` can **withhold**
+    #: it from ``rna_prior_count``: a spliced fragment has no gDNA candidate in the EM (gDNA does not
+    #: splice), so it is guaranteed-RNA and assigned directly — counting it in the prior would double
+    #: it and inflate the RNA side of the gDNA-vs-RNA *unspliced* split, which is the only thing the
+    #: prior arbitrates. ``mass_rna_edge`` itself stays spliced-inclusive so conservation is preserved.
+    mass_rna_spliced_edge: np.ndarray
 
-    # --- region-contained gDNA effective support E[max(0,L−ℓ)] per region (geometry) ---
-    # The count of contained-fragment start positions = the effective sampling support of the
-    # region's contained gDNA mass. Under uniform genomic gDNA deposition at density ρ, the
-    # expected contained mass is EXACTLY ρ·gdna_region_eff_len (a fragment must FIT to be
-    # contained), so dividing the contained mass by this recovers the true density ρ — the
-    # bedrock "factor = 1 under uniform gDNA" invariant. This, NOT region_size_bp, is the
-    # density-correct IPR divisor for the region node: region_size_bp understates the density of
-    # short regions (it ignores the fit-inside constraint), manufacturing a spurious contraction
-    # in an unenriched library. Consumed by assemble_priors / capture_eff_length.
-    gdna_region_eff_len: np.ndarray  # float64[R]
+    # --- the JUMPING population, per junction edge (float64[n_junctions]) ---
+    #: ⭐ **Never deconvolved: a junction edge is pure mature RNA by construction**, so this is
+    #: ``sj_count`` summed over the genome-strand columns and nothing else. It is the third population
+    #: at a line, and it is routinely two orders of magnitude larger than ``mass_rna_spliced_edge`` at
+    #: the same place: at a donor seam the junction flux is the gene's whole mature output while the
+    #: spliced crossing is the handful of molecules that read through without splicing.
+    #: ⚠ **``assemble_priors`` does NOT consume it, and that is deliberate.** Junction fragments are
+    #: certified RNA in exactly the sense ``mass_rna_spliced_edge`` is withheld for, so feeding them to
+    #: ``rna_prior_count`` would load the RNA side of a split that arbitrates only unspliced fragments.
+    #: It is exported for QC and reporting — the calibration's output should not be silent about the
+    #: population that dominates a donor seam (owner ruling, 2026-07-30).
+    mass_rna_junction: np.ndarray
+
+    # --- the gDNA geometric supports: expected admissible START POSITIONS, per component ---
+    #: float64[n_nodes] — ``effective_length.contained_eff_length`` on the gDNA pmf,
+    #: ``E_f[(node_len − w + 1)+]``. Under uniform genomic gDNA at density ρ the expected contained
+    #: mass is EXACTLY ``ρ · gdna_node_eff_len`` (a fragment must FIT to be contained), so dividing by
+    #: it recovers ρ — the bedrock "factor 1 under uniform gDNA" invariant. This, NOT the genomic node
+    #: length, is the density-correct divisor: the raw length ignores the fit-inside constraint and so
+    #: understates a short node's density, manufacturing a spurious contraction in an unenriched library.
+    gdna_node_eff_len: np.ndarray
+    #: float64[n_edges] — ``effective_length.crossing_eff_length`` on the gDNA pmf. ⚠ **Uniform across
+    #: edges today, and that is physics rather than a placeholder**: gDNA's template is the chromosome,
+    #: so it takes ``UNBOUNDED_REACH`` on both sides at every line and the divisor collapses to
+    #: ``mu_g − 1``. It stays a per-edge array because that is the axis its consumers index it on.
+    gdna_edge_eff_len: np.ndarray
 
     # --- library scalars ---
     gdna_density_global: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
@@ -88,49 +135,42 @@ class CalibrationResult:
     gdna_strand_overdispersion: float  # in [0, 1), fitted gDNA strand Beta-Binomial dispersion
     rna_strand_overdispersion: float  # in [0, 1), fitted RNA strand Beta-Binomial dispersion
 
-    # --- provenance ---
-    n_regions: int
+    # --- provenance: the three axis lengths, independent of each other ---
+    n_nodes: int
+    n_edges: int
+    n_junctions: int
     config: CalibrationConfig
 
     def __post_init__(self) -> None:
-        n = self.n_regions
-        if n < 0:
-            raise ValueError(f"CalibrationResult.n_regions must be >= 0; got {n}.")
+        for axis in ("n_nodes", "n_edges", "n_junctions"):
+            if int(getattr(self, axis)) < 0:
+                raise ValueError(
+                    f"CalibrationResult.{axis} must be >= 0; got {getattr(self, axis)}."
+                )
 
+        for name in ("mass_gdna_node", "mass_rna_node", "gdna_node_eff_len"):
+            _check_axis_array(getattr(self, name), name, self.n_nodes)
         for name in (
-            "mass_gdna_contained",
-            "mass_rna_contained",
-            "mass_gdna_left",
-            "mass_rna_left",
-            "mass_gdna_right",
-            "mass_rna_right",
-            "mass_rna_spliced",
-            "gdna_boundary_len",
-            "gdna_region_eff_len",
+            "mass_gdna_edge",
+            "mass_rna_edge",
+            "mass_rna_spliced_edge",
+            "gdna_edge_eff_len",
         ):
-            _check_region_array(getattr(self, name), name, n)
+            _check_axis_array(getattr(self, name), name, self.n_edges)
+        _check_axis_array(self.mass_rna_junction, "mass_rna_junction", self.n_junctions)
 
         if not np.isfinite(self.gdna_density_global) or self.gdna_density_global < 0.0:
             raise ValueError(
-                f"CalibrationResult.gdna_density_global must be finite and >= 0; got {self.gdna_density_global}."
+                "CalibrationResult.gdna_density_global must be finite and >= 0; "
+                f"got {self.gdna_density_global}."
             )
-        sense_frac = float(self.rna_sense_frac)
-        if not 0.0 <= sense_frac <= 1.0:
-            raise ValueError(
-                f"CalibrationResult.rna_sense_frac must be in [0, 1]; got {sense_frac}."
-            )
-        overdispersion = float(self.gdna_strand_overdispersion)
-        if not 0.0 <= overdispersion < 1.0:
-            raise ValueError(
-                "CalibrationResult.gdna_strand_overdispersion must be in [0, 1); "
-                f"got {overdispersion}."
-            )
-        rna_overdispersion = float(self.rna_strand_overdispersion)
-        if not 0.0 <= rna_overdispersion < 1.0:
-            raise ValueError(
-                "CalibrationResult.rna_strand_overdispersion must be in [0, 1); "
-                f"got {rna_overdispersion}."
-            )
+        _check_unit_interval(self.rna_sense_frac, "rna_sense_frac")
+        _check_unit_interval(
+            self.gdna_strand_overdispersion, "gdna_strand_overdispersion", open_upper=True
+        )
+        _check_unit_interval(
+            self.rna_strand_overdispersion, "rna_strand_overdispersion", open_upper=True
+        )
 
 
 __all__ = ["CalibrationResult"]

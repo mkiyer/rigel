@@ -97,13 +97,30 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
         gdna_counts=gdna_fl_mass(pl),
         max_size=flm.max_size,
     )
-    result = calibrate(pl, ra, sm, fl.gdna_pmf, fl.rna_pmf, cfg.calibration)
+    # ⚠ The junction axis and the edge flags are BOTH required against the same index the payload was
+    # scanned on: an axis addressing a different graph would place every splice on the wrong line, and
+    # calibrate refuses rather than proceeding.
+    from rigel.calibration.splice_graph import (
+        build_edge_flags_array,
+        build_junction_geometry_arrays,
+    )
+
+    result = calibrate(
+        pl,
+        ra,
+        sm,
+        fl.gdna_pmf,
+        fl.rna_pmf,
+        cfg.calibration,
+        junctions=build_junction_geometry_arrays(idx),
+        edge_flags=build_edge_flags_array(idx),
+    )
     sc.cleanup()
 
     ambig = np.flatnonzero(np.asarray(ra.strand_class) == TS_AMBIG)
     assert ambig.size >= 1, "the overlapping pair did not form an AMBIG node"
-    g = np.asarray(result.mass_gdna_contained)[ambig]
-    r = np.asarray(result.mass_rna_contained)[ambig]
+    g = np.asarray(result.mass_gdna_node)[ambig]
+    r = np.asarray(result.mass_rna_node)[ambig]
     return float(g.sum() / max(g.sum() + r.sum(), 1e-9))
 
 

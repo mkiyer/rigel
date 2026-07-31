@@ -55,8 +55,13 @@ coverage-empty — and on-target gDNA fragments are ~42 bp SHORTER (on-exon mean
 mis-centred exactly for the fragments that leak; the signal lives in exon↔intron "splash" reads (`06_implementation_plan.md:131-141`).
 
 **C4. How much gDNA is in the real cfRNA libraries?** Memory + calibration docs say LBX0190 ≈15 %, vcap ≈20–25 %. Current code measures
-LBX0190 **0.0562**, MO_3021 0.1264, LBX0588 0.7718. No ground truth exists. Also unexplained: sense fraction is 0.002–0.012 on all of them
-(nearly fully antisense) — possibly a read-orientation convention bug. (`SESSION_2026_07_30_HANDOFF.md:333-341` vs memory `cfrna_sample_characteristics`)
+LBX0190 **0.0562**, MO_3021 0.1264, LBX0588 0.7718. No ground truth exists. **← the gDNA half is still open.**
+- ✅ **THE SENSE-FRACTION HALF IS ANSWERED (S5.f, 2026-07-30): it is a CONVENTION FLIP, not biology.** The suspicion was that "sense fraction
+  0.002–0.012 on all four real libraries (nearly fully antisense)" was a read-orientation convention bug. The chr22 pilot has ground truth,
+  and a library simulated at `strand_specificity = 0.99` **calibrates to κ = 0.0101** — i.e. `1 − truth`, on both capture arms. At the
+  unstranded setting (0.50) it reads 0.4990–0.5002, where a flip is invisible by construction. ⚠ This says the flip is real and consistent;
+  it does **not** say where it lives (scanner orientation convention vs simulator output convention), and finding that is its own step.
+  Baseline table: `LEDGER.md` S5.f. (Originally `SESSION_2026_07_30_HANDOFF.md:333-341` vs memory `cfrna_sample_characteristics`)
 
 **C5. Is `+1` on every crossed edge double counting?** Raised and retracted — each edge has its own expectation, so it is unbiased per edge.
 But 12.97 % of human exonic crossing fragments cross more than one interface, and a fragment spanning a short node crosses both its edges,

@@ -107,26 +107,29 @@ def fit_gdna_background(g_counts, eff_g, *, log_rho_floor: float) -> GdnaBackgro
 
 
 def fit_intron_background(
-    substrate, region_arrays, region_eff_g, *, include_introns: bool = False
+    substrate, region_arrays, node_eff_g, *, include_introns: bool = False
 ) -> GdnaBackground:
     """The INTRON special case of :func:`fit_gdna_background`: the gDNA prior IS the intergenic node
     distribution (introns are off-target at the same capture depletion as intergenic —
-    `gdna_intron_factory_design.md` §2).
+    `docs/CARRY_FORWARD.md` §2).
 
     ``include_introns=False`` (default) pools **intergenic only** — the clean, non-circular reference (introns
     are what we deconvolve). The real-data path may add RNA-free introns for resolution
     (`background_reference` docstring), traded for a little circularity. Delegates the NB fit to
     :func:`fit_gdna_background`; the intergenic pool + resolution floor come from
-    :func:`background_reference.measure_background`."""
-    bg = measure_background(substrate, region_arrays, region_eff_g, include_introns=include_introns)
+    :func:`background_reference.measure_background`.
+
+    ``node_eff_g`` is the gDNA CONTAINED effective length per node
+    (:func:`effective_length.contained_eff_length`) — the same array ``measure_background`` pools over,
+    passed through so the fit and the floor sit on one support."""
+    bg = measure_background(substrate, region_arrays, node_eff_g, include_introns=include_introns)
     sig = np.asarray(region_arrays.signature)
-    eff = np.asarray(region_eff_g, dtype=np.float64)
+    eff = np.asarray(node_eff_g, dtype=np.float64)
     ctype = coarse_type_array(sig)  # 0 intergenic / 1 intron / 2 exon
     # the pure-gDNA pool: intergenic only (or non-exonic when include_introns), matching measure_background.
     pool = ((ctype != 2) if include_introns else (ctype == 0)) & (eff > _EPS)
-    counts = np.asarray(substrate.contained.n_unspliced_pos, dtype=np.float64) + np.asarray(
-        substrate.contained.n_unspliced_neg, dtype=np.float64
-    )
+    # ⚠ GENOME-strand columns, summed: gDNA is strand-symmetric, so the background is a total rate.
+    counts = np.asarray(substrate.node_contained.count, dtype=np.float64).sum(axis=1)
     return fit_gdna_background(counts[pool], eff[pool], log_rho_floor=bg.log_rho_floor)
 
 

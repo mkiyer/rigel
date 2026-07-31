@@ -27,19 +27,28 @@ library into gDNA vs RNA, and a per-locus EM solver assigns RNA to transcripts. 
 Reference rather than design: `BENCHMARKING.md` (how to evaluate — net fragment flow), `MANUAL.md`,
 `PUBLISHING.md`, `docs/testing/testing_plan.md` (the owner's plan for the cached-substrate harness).
 
-⛔ **`calibrate()` DOES NOT RUN**, and it still gates the benchmark suite producing any number, the scan
-cache's toy seed, and every future A/B. **S5.0/a/b/c/d/e have landed; S5.f is next** — and S5.f is the
-pivot: **nothing downstream is measurable until it runs**, so its numbers become the FIRST BASELINE and
-every deferred derivation is deliberately sequenced after it.
+⭐ **`calibrate()` RUNS (S5.f, 2026-07-30), and THE FIRST BASELINE EXISTS** — eight chr22 pilot
+conditions, in `LEDGER.md`'s S5.f entry, **bit-identical on re-run**. That was the pivot: every deferred
+derivation was deliberately sequenced after it because each one needs a baseline to be judged against.
+**S5.0/a/b/c/d/e/f have landed; S5.g (A7's taper) is next** and is the first change that gets a real A/B.
 
-⚠ **The 266 failures are not one thing**, and that count is exactly what the tree carried before S5.c.
-~200 are end-to-end scenario and golden tests that will move **numerically** at S5.f/S6, not merely
-start running, and every calibration failure is now S5.f's. A failure that says which step owns it is
-the normal state here.
+⚠ **Three things the first baseline says**, before anything is built on it:
+1. It carries **A7's known 11.0 % genome-wide gDNA over-call** by deliberate ruling — that is what S5.g
+   removes, and measuring the removal is why A7 was deferred.
+2. ⛔ **The fitted κ is `1 − truth`**: a library simulated at `strand_specificity = 0.99` calibrates to
+   κ = 0.0101. This answers `CARRY_FORWARD.md` §0 **C4** against ground truth — the near-zero sense
+   fraction on all four real cfRNA libraries is a **convention flip, not biology**. It needs its own step.
+3. ⚠ **Calibration is bit-identical run to run; something downstream of it is not.** An end-to-end
+   transcript count varies 29–33 on a ~30-count negative control, so calibration-level A/Bs are safe and
+   **end-to-end ones have an uncharacterised noise floor**.
 
-⛔ **There is no benchmark baseline.** `r0 0.079005 / r3 0.046675` was the deleted `ambig_dense_10mb`
-suite — do not quote it, compare against it, or try to reproduce it. The replacement suite exists and is
-proven to resolve 6 of its 8 requirements, but cannot produce a calibration number until S5.
+⚠ **The 22 remaining failures are two things, both named**: 21 golden files that move NUMERICALLY (S6
+regenerates them **once**) and the one EM-nondeterminism finding above. `tests/calibration/` is fully
+green — 543 passed, 0 failed.
+
+⛔ **The OLD benchmark baseline is void.** `r0 0.079005 / r3 0.046675` was the deleted `ambig_dense_10mb`
+suite — do not quote it, compare against it, or try to reproduce it. The replacement suite is proven to
+resolve 6 of its 8 requirements; ⛔ run `suite_resolves.py` before quoting any number from it.
 
 **`tests/native/_accumulator_reference.py` is the executable specification** for the accumulator. The C++
 is gated on byte-identity to it; where it and a document disagree, it wins.
@@ -118,7 +127,7 @@ different GTF moves every one of those numbers, so **re-derive** — `scripts/de
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-pytest tests/ -q                               # 1440 pass / 256 fail / 15 error — the failures ARE S5.f
+pytest tests/ -q                               # 1729 pass / 22 fail / 0 error — 21 goldens (S6) + 1 EM finding
 pytest tests/ --update-golden                  # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
