@@ -132,24 +132,60 @@ def _empty_junction_geometry() -> "JunctionGeometry":
     )
 
 
-def _project_eff_gdna(chain, geometry, payload) -> tuple[np.ndarray, np.ndarray]:
-    """Split the geometry's per-SLOT gDNA divisor back onto the node and contiguous-edge axes.
+def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
+    """Split a per-SLOT divisor back onto the node and contiguous-edge axes.
 
     ⭐ **A projection, not a recomputation.** ``build_node_geometry`` already applied
     ``contained_eff_length`` at NODE slots and ``crossing_eff_length`` at EDGE slots; calling those
     again here would put two implementations of one quantity in the tree, which is precisely how the
     prose and the code came to disagree about a ½ for months (`CARRY_FORWARD.md` §3 traps 2 and 27).
     Whatever the solver divided by is what the result reports.
+
+    ⚠ It takes the ARRAY, not the geometry: ``assemble_priors`` needs the RNA divisor as well as the
+    gDNA one (a mass becomes a density only against its own component's opportunity), and one function
+    called twice is the alternative to a second copy that drifts.
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
-    eff = np.asarray(geometry.eff_gdna, dtype=np.float64)
+    eff = np.asarray(eff_slots, dtype=np.float64)
     is_node, is_edge = kind == NODE, kind == EDGE
     node_eff = np.zeros(int(payload.n_nodes), dtype=np.float64)
     edge_eff = np.zeros(int(payload.n_edges), dtype=np.float64)
     node_eff[obj[is_node]] = eff[is_node]
     edge_eff[obj[is_edge]] = eff[is_edge]
     return node_eff, edge_eff
+
+
+def _build_length_loglik(chain, geometry, region_arrays, gdna_fl_pmf, rna_fl_pmf, config):
+    """The per-slot FRAGMENT-LENGTH log-likelihood on the ψ solve grid → ``(n_slots, K)``, or ``None``.
+
+    ⭐ **The fourth information source, finally wired** (`SOLVER_OBSERVABLES_PLAN.md` §6). The accumulator
+    has measured ``inv_length_sum`` and ``length_sum`` on every population since S5.a and nothing read
+    them; `length_likelihood` turns them into evidence about ``f_g`` on the same ``λ`` grid the strand
+    term lives on, and `node_init` registers its curvature as ``I_length``.
+
+    ⚠ **Built here, once, for the same reason ``intron_prior`` is**: this is the only layer holding the
+    chain, the geometry AND both fitted pmfs at the same time, and building it twice would put two
+    implementations of one quantity in the tree (`CARRY_FORWARD.md` §3 trap 27).
+
+    ⚠ **Strand-agnostic**: the two genome-strand columns are summed. Which strand a read aligned to says
+    nothing about whether its molecule was gDNA or RNA; the strand Beta-Binomial keeps its own columns.
+
+    ⛔ Returns ``None`` when the switch is off, which is byte-identical to the pre-P2 path.
+    """
+    if not getattr(config, "length_likelihood", False):
+        return None
+    from .length_likelihood import build_slot_moments, length_loglik
+
+    _, fg_grid = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
+    return length_loglik(
+        build_slot_moments(chain, region_arrays, gdna_fl_pmf),
+        build_slot_moments(chain, region_arrays, rna_fl_pmf),
+        np.asarray(geometry.unspliced_count, np.float64).sum(axis=1),
+        np.asarray(geometry.unspliced_inv_length_sum, np.float64).sum(axis=1),
+        np.asarray(geometry.unspliced_length_sum, np.float64).sum(axis=1),
+        fg_grid,
+    )
 
 
 def _build_intron_prior(chain, substrate, region_arrays, node_eff_len, config, bg=None):
@@ -263,6 +299,7 @@ def calibrate(
     rna_fl_pmf: "np.ndarray",
     config: "CalibrationConfig",
     junctions: "JunctionGeometry | None" = None,
+    edge_rna_reach=None,
     _debug: dict | None = None,
     diagnostics_out: dict | None = None,
     injected_priors: "InjectedCalibrationPriors | None" = None,
@@ -302,14 +339,18 @@ def calibrate(
     # EDGE slot, one rule, one array. Nothing below computes a second length model.
     chain = build_node_chain(payload.ref_node_offsets, payload.ref_edge_offsets)
     geometry = build_node_geometry(
-        chain, substrate, region_arrays, junctions, gdna_fl_pmf, rna_fl_pmf
+        chain, substrate, region_arrays, junctions, gdna_fl_pmf, rna_fl_pmf, edge_rna_reach
     )
     statics = build_node_statics(chain, region_arrays, edge_flags)
 
     # The result's two gDNA supports, PROJECTED off the geometry rather than recomputed — so the number
     # `priors` divides by is byte-identically the number the solver divided by (`CARRY_FORWARD.md` §3
     # trap 27: two implementations of one quantity is how they come to disagree).
-    node_eff_gdna, edge_eff_gdna = _project_eff_gdna(chain, geometry, payload)
+    node_eff_gdna, edge_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
+    # ⭐ And the RNA twin, on the same two axes. It is what turns ``mass_rna_*`` into a DENSITY in
+    # ``assemble_priors``; without it the RNA side had no divisor at all and the prior's g:r ratio
+    # carried the ``Σ A_g / Σ A_r`` length tilt (`SOLVER_OBSERVABLES_PLAN.md` §2.2).
+    node_eff_rna, edge_eff_rna = _project_eff(chain, geometry.eff_rna, payload)
 
     # RNA strand balance: rna_sense_frac (κ) = posterior-mean spliced sense fraction. The strand
     # channel's discriminability w=(2κ−1)² (set inside the deconv) is the smooth strand→count
@@ -425,6 +466,9 @@ def calibrate(
         if (config.intron_factory and intron_background is not None)
         else None
     )
+    length_loglik_arr = _build_length_loglik(
+        chain, geometry, region_arrays, gdna_fl_pmf, rna_fl_pmf, config
+    )
     # Message precision is entirely SELF-CONTAINED in the sweep: the source's own honest belief precision
     # (strand + count, from `node_init.build_node_init`), degraded by the reframe's scale variance
     # (σ²_transfer = Var(log r)) and the DerSimonian–Laird composition-mismatch b̂² — all derived from counts and
@@ -452,6 +496,7 @@ def calibrate(
             n_grid_ss=config.sweep_n_grid_single_strand,
             gdna_prior=prior,
             intron_prior=intron_prior,
+            length_loglik=length_loglik_arr,
             _capture=capture,
         )
         if capture is not None:
@@ -602,6 +647,8 @@ def calibrate(
         mass_rna_junction=mass_rna_junction,
         gdna_node_eff_len=node_eff_gdna,
         gdna_edge_eff_len=edge_eff_gdna,
+        rna_node_eff_len=node_eff_rna,
+        rna_edge_eff_len=edge_eff_rna,
         gdna_density_global=density_global,
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,

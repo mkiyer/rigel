@@ -10,15 +10,19 @@ Live handoff: `IMPLEMENTATION_PLAN.md` §0. Finished work: `LEDGER.md`. The suit
 
 ## ⭐ THE CRITICAL PATH
 
-⭐ **The gate that blocked everything is passed.** `calibrate()` runs (S5.f, 2026-07-30) and the FIRST
+⛔ **READ `docs/FRAGMENT_LENGTH_AUDIT.md` §0 FIRST — the critical path moved there on 2026-07-31.**
+S5 is finished. The live sequence is C2 → C3 → the P2 A/B → regenerate the goldens once. The ranks below
+are everything *else*, and rank 1 has changed: the goldens must be regenerated **after C3**, not now.
+
+⭐ The gate that blocked everything is passed. `calibrate()` runs (S5.f, 2026-07-30) and the FIRST
 BASELINE exists in `LEDGER.md`. Items 3–5 below were all "needs S5" and are now **unblocked**.
 
 ⚠ **The rank is the priority; the § is where the detail lives.** They are not the same numbering.
 
 | rank | item | § | why now / why not yet |
 |---|---|---|---|
-| **1** | ⭐ **S6 — delete the dead paths, regenerate the goldens ONCE** | — | ⚠ **The suite reads 22 failed and 21 of them are expected** — that is exactly the state a real regression hides in, and everything after this is an A/B needing "did anything else move?" to be a strong signal. Cheap: the goldens are one command. ⛔ **Regenerate each golden TWICE and diff** (§7) — the goldens run under the default sampling mode, so a flaky expectation baked in now is permanent |
-| **2** | ⭐ **S5.g — A7's contiguous-edge RNA taper** | §1 | The first change with a real A/B, against the baseline that exists for it. Removes a **measured 11.0 %** genome-wide gDNA over-call and **+0.36** in the last node before a polyA site. ⭐ Its gate is a **calibration-level** A/B, which touches no golden — so it can run in parallel with rank 1 |
+| **1** | ⚠ **Regenerate the goldens — but AFTER C3, not now** | — | ⛔ **Changed 2026-07-31.** 21 goldens are stale because P1 changed the EM prior's units, and C2/C3 will move them **again** (the FL models change ⇒ scoring and eff-lengths change). Regenerating now would bake in a number that is about to change. ⭐ Still true when the moment comes: **regenerate twice and diff** (§7) — the goldens run under the default sampling mode, so a flaky expectation baked in now is permanent. *(Original note: ⚠ the suite reads 22 failed and 21 of them are expected* — that is exactly the state a real regression hides in, and everything after this is an A/B needing "did anything else move?" to be a strong signal.)* |
+| ~~2~~ | ⛔ **S5.g — A7's taper: MEASURED AND REFUTED** | §1 | The A/B is done (`LEDGER.md` S5.g-2): **≤ 0.0002** on the library gDNA fraction. The 11.0 % was bp-weighted geometry; mass-weighted the taper is 0.9596 and **89 % of edge mass is on lines it never touches**. ⚠ Would not hold for a 3′-biased/degraded library — screening test is the mass-weighted taper ratio |
 | **3** | ⚠ **`EMConfig.seed` does not make `assignment_mode="sample"` reproducible** | §7 | ⭐ **No longer a blocker**: the default draws from the posterior *by design*, and running an A/B under `map`/`fractional` drops the noise 8 orders of magnitude. What remains is that a **seeded** run still does not reproduce, which is what `seed` is for |
 | **4** | Close the suite's two open requirements | §2 | (c) non-Poisson counts and (f) the low-gDNA corner. `suite_resolves.py` fails on both today and names them. ⭐ Now unblocked |
 | **5** | The stress chromosome + the scan cache's prior seed | §3, §4 | The toy-scenario half of `testing_plan.md`. ⭐ Now unblocked — the seed needs wiring, not inventing |

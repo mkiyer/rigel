@@ -18,7 +18,16 @@ sources of ``docs/CARRY_FORWARD.md``:
    λ-term ``c·a²``); a 2-DOF (AMBIG) node's tilt is free, so the strand CANCELS out of ``f_g`` and contributes
    ZERO (it constrains only the tilt). `strand_evidence` returns the single-strand λ-term; `build_node_init`
    gates it to single-strand nodes. Identically zero on unstranded data (κ=½) by a derived noise-floor deadband.
-4. **UNSOLVED** nodes default to **100 % gDNA at ZERO precision** — the honest "no information" state
+4. **FRAGMENT LENGTH** — ⭐ **the source that was measured and never read** (P2). The accumulator stores
+   ``inv_length_sum`` and ``length_sum`` on every population; `length_likelihood` turns them into an
+   ``(m, K)`` log-likelihood on the same ``λ`` grid, and its curvature is registered here as ``τ_len``.
+   ⭐ **It is NOT gated to single-strand nodes, and that asymmetry with source 3 is the whole point.**
+   The strand Beta-Binomial is rank-1 in the tilt ``θ``, so on an AMBIG node its Schur complement on
+   ``λ`` is exactly 0; the length likelihood does not depend on ``θ`` at all, so that argument does not
+   apply to it. `LEDGER.md` P0 measured **13.3–40.1 % of library mass** with no own evidence in EVERY
+   condition (93.3–100 % of AMBIG mass), and **100 %** on an unstranded or zero-gDNA library — this is
+   the only proposed source that reaches any of it. ``None`` ⇒ the pre-P2 path, byte-identically.
+5. **UNSOLVED** nodes default to **100 % gDNA at ZERO precision** — the honest "no information" state
    (``τ_λ = 0 ⇒ Var(log f) = ∞ ⇒ p = 0``), left for the sweep + population prior to resolve.
 
 The precision arithmetic (sources → per-component ``Var(log f_c)`` → precision) is pure and unit-tested here.
@@ -173,6 +182,7 @@ def build_node_init(
     belief,
     global_logprior=None,
     intron_prior=None,
+    length_loglik=None,
 ) -> NodeInit:
     """The pass-0 per-node self-solve → :class:`NodeInit`. Runs the message-free strand deconvolution
     (`simplex_logodds`), compiles the strand + intron-factory composition evidence, and assembles each node's
@@ -209,6 +219,7 @@ def build_node_init(
         n_grid_ss=n_grid_ss,
         global_logprior=global_logprior,
         lam_logprior=intron_prior,
+        length_loglik=length_loglik,
         fg_ref=np.asarray(belief.f_g, np.float64),
         fpos_ref=np.asarray(belief.f_pos, np.float64),
         fneg_ref=np.asarray(belief.f_neg, np.float64),
@@ -255,6 +266,15 @@ def build_node_init(
     )  # I_density (NB curvature) on the λ axis
     if tau_fac is not None:
         tau_lam = tau_lam + tau_fac
+    # ── source 4: I_length. ⭐ **UNGATED — deliberately unlike i_strand.** `density_factor_precision`
+    #    reads the curvature of ANY λ-factor (it is named for its first caller; the maths is generic), and
+    #    a FLAT factor returns exactly 0, so a slot the length channel cannot speak at contributes
+    #    nothing. Gating this to single-strand nodes the way the strand λ-term is gated would delete the
+    #    only evidence AMBIG nodes ever get — which is the defect P2 exists to fix, and is perturbation
+    #    P2e. ──
+    tau_len = density_factor_precision(length_loglik, lam_grid)
+    if tau_len is not None:
+        tau_lam = tau_lam + tau_len
 
     # ── the own per-component densities + precisions — ONE set of numbers per slot, no faces to pool ──
     mass_global, eff_global = node_global_geometry(geometry)

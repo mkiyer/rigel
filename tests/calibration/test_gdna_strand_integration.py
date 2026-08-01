@@ -69,6 +69,7 @@ def _intergenic_betabinom_payload(n_nodes, depth, overdispersion, seed):
         sj_inv_length_sum=np.zeros((0, 2), dtype=np.uint64),
         sj_length_sum=np.zeros((0, 2), dtype=np.uint64),
         pool_lengths=np.zeros((N_FRAGMENT_POOLS, 201), dtype=np.int64),
+        deposited_lengths=np.zeros(201, dtype=np.uint32),
         qc=ScanQC(
             deposited=int(contained.sum()),
             dropped_too_long=0,

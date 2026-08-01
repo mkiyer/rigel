@@ -301,6 +301,23 @@ class CalibrationConfig:
     #: 1.6 %); every stranded scenario better or flat (R4 clean).
     intron_factory: bool = True
 
+    #: **The FRAGMENT-LENGTH composition likelihood** (`calibration.length_likelihood`, P2 —
+    #: `docs/SOLVER_OBSERVABLES_PLAN.md` §6). The accumulator has stored ``inv_length_sum`` and
+    #: ``length_sum`` on every population since S5.a; this turns them into an ``(m, K)`` log-likelihood on
+    #: the ``λ`` grid, added to ψ beside the strand term and the intron factory, with its curvature
+    #: registered as composition evidence ``I_length``.
+    #:
+    #: ⭐ **Why it is the only source that reaches an AMBIG node or an unstranded library.** The strand
+    #: Fisher information is ``I(f_g) ∝ (2κ−1)²`` — identically 0 at ``κ = ½`` — and on a both-strand node
+    #: the strand term is rank-1 in the tilt ``θ``, so its Schur complement on ``λ`` is exactly 0. The
+    #: length likelihood has no ``θ`` dependence at all. `LEDGER.md` P0 measured **13.3–40.1 % of library
+    #: mass** with no own composition evidence in EVERY chr22 pilot condition (93.3–100 % of AMBIG mass),
+    #: and **100 %** on all four zero-gDNA and both unstranded conditions.
+    #:
+    #: ⚠ **DEFAULT OFF for its first landing**, so the A/B has an arm and ``False`` is byte-identical to
+    #: the S5.f/P1 path. The measured effect is the P2 ledger entry; the default is the owner's call.
+    length_likelihood: bool = False
+
     #: **Calibration refit iterations — the prior BOOTSTRAP.** Each iteration re-fits the population gDNA
     #: landscape (:class:`~rigel.calibration.gdna_landscape.GdnaLandscape`) on the *current* solved gDNA
     #: densities + belief widths, then **fully resets the belief** and re-solves with it. So nothing but the

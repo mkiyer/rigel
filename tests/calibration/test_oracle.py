@@ -131,6 +131,8 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
         mass_rna_junction=np.zeros(j),
         gdna_node_eff_len=np.ones(n),
         gdna_edge_eff_len=np.ones(e),
+        rna_node_eff_len=np.ones(n),
+        rna_edge_eff_len=np.ones(e),
         gdna_density_global=0.0,
         rna_sense_frac=0.5,
         gdna_strand_overdispersion=0.0,

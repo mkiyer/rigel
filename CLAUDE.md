@@ -15,7 +15,9 @@ library into gDNA vs RNA, and a per-locus EM solver assigns RNA to transcripts. 
 
 | doc | what it is |
 |---|---|
-| **`docs/S5_DESIGN_LOG.md`** | ⭐ **START HERE for S5** — §0 status, §1 the accumulator changes, §2 the live plan **and THE ROAD TO A PRODUCTION CALIBRATION** (the three phases from here to shippable, each with its gate). **It supersedes `IMPLEMENTATION_PLAN.md` §4/§5** |
+| **`docs/FRAGMENT_LENGTH_AUDIT.md`** | ⭐⭐ **START HERE — §0 IS THE ROADMAP AND THE CRITICAL PATH.** THREE definitions of fragment length were live, two of them summed into one array called "global", and the EB shrinkage mixed frames. C0/C1 done; **C2 is next and carries one owner decision** |
+| **`docs/SOLVER_OBSERVABLES_PLAN.md`** | ⭐ **How we got there.** The accumulator stores three channels and the solver reads **one**; and `assemble_priors` summed an intensive quantity as if it were extensive. §1 is the theory from the ground up. P0/P1 done, **P2 built and gated OFF — blocked on the audit's C2/C3** |
+| `docs/S5_DESIGN_LOG.md` | ⚠ **S5 IS FINISHED** (S5.g measured and refuted). Kept for §1's accumulator derivations and §3's observable measurements, which are still the reference. **It is no longer the live plan** |
 | `docs/IMPLEMENTATION_PLAN.md` §0 | live state for everything else |
 | `docs/NODE_DENSITY_DERIVATION.md` | why the deposit weight is what it is, and what each stored channel buys |
 | `docs/TODO.md` | the one deferred-work list, ranked, each item with the reason it is deferred |
@@ -30,11 +32,15 @@ Reference rather than design: `BENCHMARKING.md` (how to evaluate — net fragmen
 ⭐ **`calibrate()` RUNS (S5.f, 2026-07-30), and THE FIRST BASELINE EXISTS** — eight chr22 pilot
 conditions, in `LEDGER.md`'s S5.f entry, **bit-identical on re-run**. That was the pivot: every deferred
 derivation was deliberately sequenced after it because each one needs a baseline to be judged against.
-**S5.0/a/b/c/d/e/f have landed; S5.g (A7's taper) is next** and is the first change that gets a real A/B.
+**S5.0–S5.g have all landed** (S5.g's taper was measured and **refuted** — ≤ 0.0002). ⭐ **The live work is
+no longer S5**: it is the fragment-length cleanup in `FRAGMENT_LENGTH_AUDIT.md`, reached by way of
+`SOLVER_OBSERVABLES_PLAN.md`. **C2 is next and carries an owner decision** — see that file's §4.
 
 ⚠ **Three things the first baseline says**, before anything is built on it:
-1. It carries **A7's known 11.0 % genome-wide gDNA over-call** by deliberate ruling — that is what S5.g
-   removes, and measuring the removal is why A7 was deferred.
+1. ⛔ **A7's "11.0 % gDNA over-call" DID NOT SURVIVE MEASUREMENT.** The A/B is done (`LEDGER.md` S5.g-2):
+   turning the contiguous-edge RNA taper on moves the library gDNA fraction by **≤ 0.0002**. The 11.0 %
+   was a *bp-weighted* geometric mean; the estimator is *fragment*-weighted, and **89 % of edge mass sits
+   on lines the taper does not touch**. `CARRY_FORWARD.md` §1 fact 6 is corrected.
 2. ⚠ **The fitted κ is `1 − truth`, but the MIRROR IS CONSISTENT so the inference is correct.** A library
    simulated at 0.99 calibrates to κ = 0.0101; forcing the nominal truth 0.99 makes a zero-gDNA library
    read `f_gdna` **0.4992** against the fitted value's **0.0030** — 166× worse. κ and the per-node sense
@@ -46,7 +52,9 @@ derivation was deliberately sequenced after it because each one needs a baseline
    measured spread drops from ~0.5 % to ~1e-10. Hold the mode fixed across both arms: the three modes
    are different estimators, not one answer at different precision.
 
-⭐ **S6 landed too: the goldens are regenerated and the suite is 1752 / 1.** The single remaining failure
+⭐ **S6 landed too, but ⚠ the goldens are STALE AGAIN as of 2026-07-31: the suite is 1809 / 22.** 21 of the
+22 are `test_golden_output` moving numerically because P1 changed the EM prior's units — expected, and
+they regenerate **once**, after C3. The 22nd is the long-standing failure
 is a **modelling call, not a defect** — a silent transcript leaks ~30 counts against a limit of 25 under
 `assignment_mode` `sample` and `fractional`, and ≤25 under `map`. ⛔ Do not adopt `map` to go green: a
 negative control is one-sided (trap 19) and MAP is the mode that most suppresses assignment.
@@ -133,7 +141,8 @@ different GTF moves every one of those numbers, so **re-derive** — `scripts/de
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-pytest tests/ -q                               # 1752 pass / 1 fail — the one is TODO.md §7's owner call
+pytest tests/ -q                               # 1809 pass / 22 fail — 21 stale goldens (regen after C3),
+                                               # 1 is TODO.md §7's owner call
 pytest tests/ --update-golden                  # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
@@ -145,7 +154,10 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format 
 | `scripts/design/index_census.py` | re-derive an index's census — never quote the numbers, run this |
 | `scripts/design/verify_index_rebuild.py` | nodes byte-identical, edges only in contiguous reach |
 | `scripts/design/suite_resolves.py` | ⛔ **run before quoting any suite number** |
-| `scripts/design/build_scan_cache.py` | scan once, calibrate many times |
+| `scripts/design/build_scan_cache.py` | scan once, calibrate many times. ⚠ **re-run after any accumulator change** — the payload schema digest invalidates every cache, by design |
+| `scripts/design/composition_evidence_census.py` | ⭐ how much library mass reaches the solver with NO composition evidence. `--inject-kappa 0.5` is its falsification handle |
+| `scripts/design/prior_units_check.py` | the EM prior in fragment units vs the old incidence sum, both arms from one calibration |
+| `scripts/design/length_likelihood_ab.py` | the P2 A/B: `CalibrationConfig.length_likelihood` False vs True over the pilot |
 | `scripts/design/native_parity_on_real_data.py` | the S3 gate on real cfRNA at full scale |
 | `scripts/design/scan_profile.py` | ns/fragment, regressed over several BAMs |
 | `scripts/design/observable_efficiency.py` | what fraction of the length information a storage choice keeps |

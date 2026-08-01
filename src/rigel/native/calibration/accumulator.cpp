@@ -79,6 +79,11 @@ Accumulator::Accumulator(std::vector<std::int64_t> cuts,
         node_types_ = std::move(node_types);
     }
     pool_lengths_.assign(kNFragmentPools * (static_cast<std::size_t>(max_length_) + 1), 0);
+    // ⭐ C1: allocated ALWAYS, unlike pool_lengths_ which is empty when a reference has no node types.
+    // The unconditional histogram does not depend on node typing -- a fragment has a length whether or
+    // not its node can be classified -- and an anchor that silently vanished on an untyped reference
+    // would be exactly the kind of conditioning this row exists to remove.
+    deposited_lengths_.assign(static_cast<std::size_t>(max_length_) + 1, 0u);
 }
 
 void Accumulator::set_junctions(std::vector<std::int32_t> offsets,
@@ -294,6 +299,10 @@ DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& sc
 
     const std::int64_t first_node = node_of_pos(first_base);
     node_start_count_[static_cast<std::size_t>(first_node)] += 1u;
+    // ⭐ C1: incremented HERE -- beside the start count and the DEPOSITED counter -- so all three
+    // describe one population by construction rather than by agreement. `length` is already clipped to
+    // the reference and gated by the length limit above.
+    deposited_lengths_[static_cast<std::size_t>(length)] += 1u;
     ++counters_.deposited;
     if (path.sj_implicit) ++counters_.sj_implicit_fragments;
 
@@ -437,6 +446,9 @@ void Accumulator::merge_from(const Accumulator& other) {
             nodes_[i].spanning_length_sum[c]  += other.nodes_[i].spanning_length_sum[c];
         }
         node_start_count_[i] += other.node_start_count_[i];
+    }
+    for (std::size_t i = 0; i < deposited_lengths_.size(); ++i) {
+        deposited_lengths_[i] += other.deposited_lengths_[i];
     }
     for (std::size_t i = 0; i < edges_.size(); ++i) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {

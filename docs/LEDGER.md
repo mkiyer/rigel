@@ -41,6 +41,7 @@ makes attribution meaningful survives. Everything from `I1` on is below in full.
 | **S5.f-addendum** | the κ mirror is CONSISTENT — the inference is correct, only the label is wrong | below |
 | **S6** | ⭐ goldens regenerated; two S5.f defects exposed; the EM's sampling mode measured | below |
 | **S5.g-1** | the per-contiguous-edge RNA reach built + gated; ⛔ one open question gates the divisor | below |
+| **S5.g-2** | ⛔ **the A7 taper A/B: it moves the gDNA fraction by ≤0.0002.** Fact 6's 11.0 % was bp-weighted geometry | below |
 | **B2** | the pilot suite, and B0's verdict on it | below |
 | **B3** | the scan cache — scan once, calibrate many times | below |
 
@@ -1670,3 +1671,595 @@ identically, composition uncertainty cannot move the total density, so its varia
 
 **This is a new heuristic, and the standing rule is to stop and discuss before adding one.** It is
 recorded rather than guessed. `TODO.md` §1.
+
+---
+
+## S5.g-2 — the A7 taper A/B: MEASURED, and it does essentially nothing (2026-07-30)
+
+⛔ **The owner challenged the concept of reach, and the measurement backs the challenge.** A7 was
+deferred past S5.f specifically so it could be A/B'd against a baseline. It has been, and **turning the
+contiguous-edge RNA taper on moves the library gDNA fraction by ≤ 0.0002.**
+
+### The gate first: arm A reproduces the committed baseline EXACTLY
+
+`edge_rna_reach` was added to `build_node_geometry`/`calibrate` as ONE optional argument — `None` keeps
+`UNBOUNDED_REACH`, a `(reach_lo, reach_hi)` pair turns the taper on — so the two arms share every line of
+code and differ in one value. **All 8 conditions of arm A are bit-identical to S5.f's recorded baseline**
+(trap 17: if HEAD-vs-baseline is not 100 %, the baseline is what is broken).
+
+Arm B uses the **max over strands** reach. That is the physically right single-number approximation — an
+unspliced crossing could belong to either strand's transcript, so its opportunity is the better of the
+two — and it is also the *least* aggressive taper, hence a **lower bound** on the per-strand version's
+effect. If the generous version moves nothing, the refined one cannot justify its machinery.
+
+### The result
+
+| condition | truth | ARM A | ARM B | Δ |
+|---|---|---|---|---|
+| gdna100 ss0.50 capture_off | ~0.50 | 0.4998 | 0.4999 | +0.0001 |
+| gdna100 ss0.50 capture_on | ~0.50 | 0.3754 | 0.3756 | +0.0002 |
+| gdna100 ss0.99 capture_off/on | ~0.50 | 0.4688 / 0.4897 | 0.4688 / 0.4897 | +0.0000 |
+| **none** ss0.50 capture_off | **0.0000** | 0.0793 | 0.0793 | −0.0000 |
+| **none** ss0.50 capture_on | **0.0000** | 0.0101 | 0.0101 | −0.0000 |
+| **none** ss0.99 capture_off/on | **0.0000** | 0.0030 / 0.0016 | 0.0030 / 0.0016 | −0.0000 |
+
+Direction is *toward* truth on all four zero-gDNA conditions — by less than 1e-4.
+
+### ⭐ THE NULL IS REAL — the taper did reach the solve
+
+A null result is worthless if the change never arrived. It did:
+
+* `eff_rna` changed on **5,030 of 22,138 edges (22.7 %)**; mean edge divisor **233.7 → 204.2**; max
+  single change 233.7 (some edges go to 0).
+* Per-object, **1,297 nodes** and **2,053 edges** moved by more than 1e-9.
+
+### ⛔ AND THE REASON IS THE WEIGHTING — which is what fact 6 got wrong
+
+| taper ratio | value |
+|---|---|
+| **position**-weighted (fact 6's convention) | **0.8738** — reproduces the recorded 0.8904 |
+| **mass**-weighted (what the estimator sees) | ⭐ **0.9596** |
+
+Fragments concentrate mid-transcript, which is exactly where the taper is inert:
+
+| lines | slots | edge mass |
+|---|---|---|
+| taper inert (~1.00×) | 17,559 | ⭐ **89.17 %** |
+| 0.50–0.99× | 1,837 | 7.21 % |
+| 0.25–0.50× | 392 | 0.97 % |
+| **< 0.25× (severe)** | 2,350 | **2.66 %** |
+
+**A bp-weighted mean gives every terminal position equal say with every mid-transcript position. The
+calibration does not.** That single substitution turns an "11.0 % over-call" into a 4.0 % geometric
+effect — and then the solver turns 4.0 % into ≤ 0.0002, because composition is anchored by far more than
+one divisor.
+
+### ⭐ "+0.36 in the last node" IS TRUE, AND IRRELEVANT — both at once
+
+Max per-node `|Δf_gdna|` = **0.3961**, so the original claim is right about the worst node. But:
+
+| `|Δf_gdna| >` | nodes | fragments they carry | share of node mass |
+|---|---|---|---|
+| 0.30 | **6** | **17** | **0.0002 %** |
+| 0.10 | 57 | 454 | 0.0064 % |
+| 0.01 | 662 | 20,398 | 0.29 % |
+
+Total gDNA mass moved: **0.021 %** on nodes, 0.52 % on edges. ⚠ This is the shape trap 19 warns about in
+reverse — the per-object number is dramatic and the pooled number is nothing, and here the pooled number
+is the one that decides. Both were measured rather than one being assumed from the other.
+
+### ⚠ THE CONDITION UNDER WHICH THIS NULL WOULD FAIL, AND THE ONE-NUMBER TEST
+
+The null holds **because mass is mid-transcript**. It would not hold for a 3′-biased or heavily degraded
+library — **cfRNA is degraded** — or where transcripts are short relative to the fragment length. ⛔ So
+this is not "reach never matters"; it is "reach does not matter when mass is mid-transcript".
+
+⭐ **The screening test is the mass-weighted taper ratio** (0.9596 here). It is one number, needs only the
+index and a payload, and costs nothing next to wiring the taper. Compute it before assuming.
+
+### What this decides
+
+`CARRY_FORWARD.md` §1 fact 6 corrected — the geometry stands, the "11.0 % gDNA over-call" label does not.
+`CLAUDE.md` and `S5_DESIGN_LOG.md` §0 updated: A7 was the headline expected gain of S5.g and it is not
+there. ⚠ **The `edge_rna_reach` switch and `build_contiguous_edge_reach_arrays` are now machinery that
+buys ≤ 0.0002 and costs a strand axis on `eff_rna` plus a new reduction heuristic at `bp_solver:334`.**
+Recommendation on the table: delete both under "converge and delete", keep the finding and the screening
+test. Owner's call.
+
+---
+
+## P0 — the composition-evidence census: HOW MUCH MASS REACHES THE SOLVER BLIND (2026-07-31)
+
+    Plan: `docs/SOLVER_OBSERVABLES_PLAN.md` §4   ·   Tool: `scripts/design/composition_evidence_census.py`
+    Prediction recorded BEFORE the run: the ss0.50 conditions carry materially more no-evidence mass
+    than the ss0.99 ones, concentrated on AMBIG slots.
+
+⭐ **CONFIRMED, and the finding is larger than the prediction.** P0 exists to falsify P2's premise before
+P2 is built. It did not falsify it.
+
+**What is measured.** The mass-weighted share of unspliced fragment mass on chain slots with
+`tau_lam <= 1e-9` and **no structural lock** — i.e. slots whose own composition belief carries
+`own_precision = 0`, so their gDNA/RNA split is decided entirely by neighbour messages and the
+population prior. ⚠ Structurally locked (intergenic pure-gDNA) nodes are EXCLUDED: they are composition
+*certain*, not uninformed, and lumping the two would report a correct answer as a failure.
+
+⚠ **`tau_lam = 0` is not "the strand likelihood was ignored".** The local ψ solve still sets the
+*location* `f_g` from strand; what is zero is the *precision*, so the node emits nothing and its own
+answer carries no weight in the fusion. The census measures blindness of the message system, not of the
+per-node read-out.
+
+### The result — 8 chr22 pilot conditions, no production code changed
+
+| condition | κ | **no-ev** | node | edge | AMBIG | 1-str | lock |
+|---|---|---|---|---|---|---|---|
+| gdna100 ss0.50 capture_off | 0.5000 | **49.4 %** | 28.5 | 20.9 | 12.4 | 36.7 | 28.7 % |
+| gdna100 ss0.50 capture_on | 0.4990 | **98.2 %** | 58.7 | 39.5 | 29.0 | 68.1 | 1.0 % |
+| gdna100 ss0.99 capture_off | 0.0101 | **12.7 %** | 6.2 | 6.5 | 12.4 | 0.0 | 28.7 % |
+| gdna100 ss0.99 capture_on | 0.0101 | **30.0 %** | 16.3 | 13.7 | 29.0 | 0.0 | 1.0 % |
+| **none** × 4 (both κ, both capture) | — | **100.0 %** | 61.6–67.2 | 32.8–38.4 | 26.6–40.1 | 59.9–73.4 | 0.0 % |
+
+Unstranded 86.9 % against stranded 60.7 % overall — but the pooled ratio understates it, because the
+`none` arm is saturated at 100 % on both. **On the gdna100 arm, where the comparison is clean, it is
+49.4 % vs 12.7 % and 98.2 % vs 30.0 % — 3.3× and 3.9×.**
+
+### ⭐ Four findings, three of them not predicted
+
+1. **The strand channel's on/off is exact, and visible in one column.** `no-evidence | single-strand` is
+   **0.0 %** on both κ = 0.0101 conditions and **63.6 % / 98.9 %** on the κ = ½ ones. Every single-strand
+   slot in a stranded library has own evidence; most have none in an unstranded one. This is
+   `CARRY_FORWARD.md` §2's `I(f_g) ∝ (2κ−1)²` read off production output for the first time.
+2. ⭐ **AMBIG mass is blind in EVERY condition, stranded or not**: `no-evidence | AMBIG` is **93.3 % –
+   100.0 %** on all eight. That is the Schur gate (`node_init`, approach E) doing exactly what it was
+   designed to do — a both-strand node's tilt is a free nuisance, so strand cancels out of `f_g` — and it
+   means **13.3 – 40.1 % of library mass has never had own composition evidence in any library Rigel has
+   ever run.** ⚠ This is not an unstranded-data problem. It is every both-strand locus, always.
+3. ⭐ **A zero-gDNA library is 100 % blind at any κ.** `strand_evidence`'s derived noise floor is
+   `σ²_d = ¼(1/N_rna + ω_r) + ¼(1/N_gdna + ω_g)`, so `N_gdna = 0 ⇒ σ²_d → ∞ ⇒ disc = 0`. Documented and
+   deliberate, but the consequence had not been quantified: on the `none` arm **nothing** gives any node
+   own evidence, and `none ss0.50 capture_off` nevertheless reports `f_gdna = 0.0793` against a truth of
+   exactly 0 — 443,277 phantom fragments, produced entirely by messages and the prior.
+4. ⭐ **Capture roughly doubles the blindness**, by removing the anchor rather than by adding noise:
+   structurally-locked mass collapses **28.7 % → 1.0 %** because intergenic nodes are depleted, and
+   no-evidence goes 49.4 % → 98.2 % (ss0.50) and 12.7 % → 30.0 % (ss0.99). The pure-gDNA anchor the
+   prior-free pass leans on is a *capture-off* asset.
+
+### The falsification — the census fires, and lands on the natural experiment
+
+⛔ A census that does not move when the thing it claims to measure is switched off measures nothing
+(`falsification_needs_perturbation`). Re-run `gdna100 ss0.99 capture_off` with **κ = 0.5 injected and
+nothing else changed** (`--inject-kappa 0.5`, via `dataclasses.replace` on the condition's own fitted
+`InjectedCalibrationPriors`):
+
+| | no-evidence | no-ev \| single-strand |
+|---|---|---|
+| as fitted, κ = 0.0101 | 12.7 % | 0.0 % |
+| **κ → 0.5 injected** | **49.4 %** | **63.6 %** |
+| `gdna100 ss0.50 capture_off`, the natural experiment | **49.4 %** | **63.6 %** |
+
+⭐ **The injected arm reproduces the natural experiment to the last digit** — same payload, one variable,
+landing on the independently-simulated condition's value. The census tracks the strand channel and
+nothing else.
+
+### What this decides
+
+* **P2 is justified**: the length likelihood is the only proposed source that is independent of κ, of
+  `N_gdna`, and of the single-strand/AMBIG gate. Finding 2 is the strongest case for it — the Schur
+  argument that silences strand on AMBIG nodes does not apply to a channel that has no dependence on the
+  tilt `θ` at all.
+* ⚠ **P2's gate must not be scored on the `none` arm alone.** All four zero-gDNA conditions are saturated
+  at 100 % blind, so any change scores "better" there (trap 19, one-sidedness). The clean comparison is
+  the gdna100 arm, and `gdna100 ss0.50 capture_on` (98.2 % blind, `f_gdna` 0.3754 against ~0.50 — the
+  row S5.f recorded as "unexplained") is the sharpest single target in the suite.
+* **`SOLVER_OBSERVABLES_PLAN.md` §4 updated** with the result. P1 (the units fix) is unaffected by this
+  measurement and remains next.
+
+---
+
+## P1 — the EM prior is a FRAGMENT COUNT, not an object-incidence sum (2026-07-31)
+
+    Plan: `docs/SOLVER_OBSERVABLES_PLAN.md` §5   ·   Unit gates: `tests/calibration/test_prior_units.py`
+    End-to-end gate: `scripts/design/prior_units_check.py`
+
+⭐ **A UNITS BUG, WITH A PROOF — not a modelling change.** ``assemble_priors`` handed the EM two additive
+pseudocounts that are added straight to its own fragment counts (``G = n_gdna + a_g``,
+``em_solver.cpp:apply_grouped_prior_update``), but built them by **summing per-object masses**. A fragment
+deposits on ``max(K, 1)`` objects, so for a partition of spacing ``s``::
+
+    incidences(w) = max( 1 , (w-1)/s )
+
+Counts are conserved exactly where every node is longer than every fragment and become a
+**length-weighted** count where they are not — and the weight is the fragment's own length, so it does
+not cancel between two components with different mean lengths.
+
+**The fix, in one line of model:** density is intensive, so pool it as a ratio of sums and integrate it
+over the span. ``rho_c = Σ share·mass_c / Σ share·A_c``, then ``prior_c = rho_c · span_bp`` — the **same
+genomic span for both components**, so the ratio carries no length tilt. ``A_r`` did not exist:
+``CalibrationResult`` gained ``rna_node_eff_len`` / ``rna_edge_eff_len``, **projected** off
+``NodeGeometry.eff_rna`` (never recomputed — trap 27) exactly as their gDNA twins are.
+
+### The gates, written first and verified failing
+
+⭐ The failure pattern was **self-confirming**, which is why it was worth writing them deterministically
+rather than end to end:
+
+| gate | before | after |
+|---|---|---|
+| partition invariance, 1200 bp re-tiled | ✅ passes at 1200 and 400 bp nodes, ⛔ **fails at 100 bp** | passes at all four tilings |
+| …the RNA prior across that re-tiling | **50.05 → 109.45, a 2.19× swing** with the library unchanged | invariant |
+| prior == true fragment count | 34.53 against 36.0 | exact |
+| g:r flat in ``mu_g/mu_r`` (swept 0.25×–2×, both directions) | ⛔ fails everywhere **except exactly ``mu_g = mu_r``** | flat |
+
+Invariance holding at 1200/400 bp and breaking at 100 bp is precisely the ``max(1, (w-1)/s)`` crossover;
+the ratio test passing at its own null (equal means ⇒ no tilt) identifies the mechanism as the length
+tilt and nothing else. gDNA is *partition-invariant in that fixture* because its 50 bp fragments fit
+inside every node — the swing is entirely on the component whose fragments do not.
+
+### ⛔ Perturbation P1e found a real defect, and the test was the weak one
+
+Five perturbations. Four were caught (RNA÷gDNA opportunity, dropped ``span``, reverted raw sums, mean of
+ratios). **P1e — flooring the divisor to ``1e-9`` instead of testing ``support > 0`` — left all 15 tests
+green**, because the only zero-support fixture also had zero mass.
+
+⚠ **``mass > 0`` with ``support == 0`` is an ordinary configuration.** ``contained_eff_length`` is exactly
+0 wherever a node is shorter than that component's shortest fragment; measured on the chr22 pilot index
+against its own measured pure pools, that is **21.7 % of nodes for RNA and 18.7 % for gDNA**
+(`CARRY_FORWARD.md` §1 fact 9 records 12.4 % genome-wide). The solver can still put mass there — ``f_g``
+is an inference, not a fact. The floor would turn one stray fragment on a 40 bp node into a density of
+~1e9 (trap 23, the mechanism that once seeded false gDNA into neighbouring exons).
+
+⭐ **And behind the weak test was a defect in the fix itself**: leaving that mass in the pooled numerator
+while it contributes nothing to the denominator inflates ``rho`` with no exposure to pay for it. **Both
+sides of a pooled rate, or neither** — ``_mass_where_there_is_opportunity`` now drops it from both, the
+same contract ``node_geometry._rate`` already keeps on the solver side. New test
+``test_mass_on_a_zero_opportunity_object_is_dropped_from_BOTH_sides``; P1e now fails it.
+
+### ⛔ T3 caught a hard violation: the old prior EXCEEDED the whole library
+
+`prior_units_check.py` computes both arms from ONE ``CalibrationResult`` — no re-scan, no second code
+path, no simulation noise:
+
+| condition | fragments | A: raw sum | **B: P1** | A/frag | **B/frag** | A f_gdna | **B f_gdna** |
+|---|---|---|---|---|---|---|---|
+| gdna100 ss0.50 capture_off | 9,634,502 | 6,386,844 | 5,660,367 | 0.663 | 0.588 | 0.4390 | 0.4616 |
+| gdna100 ss0.50 capture_on | 9,775,761 | 10,466,755 | 9,190,222 | ⛔ **1.071** | **0.940** | 0.4085 | 0.4285 |
+| gdna100 ss0.99 capture_off | 9,633,129 | 6,382,577 | 5,650,154 | 0.663 | 0.587 | 0.3863 | 0.4080 |
+| gdna100 ss0.99 capture_on | 9,774,382 | 10,457,211 | 9,268,515 | ⛔ **1.070** | **0.948** | 0.5360 | 0.5556 |
+| none ss0.50 capture_off | 4,636,413 | 3,799,206 | 3,247,412 | 0.819 | 0.700 | 0.1167 | 0.1196 |
+| none ss0.50 capture_on | 4,791,669 | 4,459,761 | 3,784,949 | 0.931 | 0.790 | 0.0126 | 0.0130 |
+| none ss0.99 capture_off | 4,636,640 | 3,797,474 | 3,239,915 | 0.819 | 0.699 | 0.0044 | 0.0045 |
+| none ss0.99 capture_on | 4,792,251 | 4,460,570 | 3,784,966 | 0.931 | 0.790 | 0.0020 | 0.0021 |
+
+⭐ **On both `capture_on` gdna100 conditions the pre-P1 prior totalled MORE pseudocounts than the library
+has accepted fragments** (1.071× and 1.070×) — for a quantity that arbitrates only the *unspliced*
+subset. That is structurally impossible and nothing was checking it. Every arm-B row is now below 1.
+
+⚠ **The f_gdna column is the LOCUS-PROJECTED prior ratio, not `LEDGER`'s library-wide scalar** (intergenic
+nodes are dropped by the projection, and they are gDNA-rich — hence 0.4390 here against the S5.f table's
+0.4998 on the same condition). The two are not comparable and must not be quoted against each other.
+
+### ⚠ The honest scoring, including where it gets worse
+
+The correction moves gDNA **up** on every condition, as §5.4 predicted before the run. On the zero-gDNA
+arm — truth exactly 0, and the one arm whose truth survives the projection — that is **slightly away from
+truth**: 0.1167 → 0.1196 on `none ss0.50 capture_off`, and +0.0001 to +0.0004 on the other three.
+
+⛔ **This is trap 19 in reverse and must not be read as a regression.** On a library with no gDNA, any
+bias that under-calls gDNA scores better; the raw sum's under-call was accidentally flattering exactly
+that arm. P1 is a units error with a proof, not a knob tuned to a scenario, and the residual 0.1196 on a
+zero-gDNA library is **P2's target** — it is the unstranded condition P0 measured at **100 % blind**.
+
+### Suite
+
+**1757 passed / 22 failed**, against HEAD's **1758 / 1** re-measured in the same session by `git stash`
+(trap 17). Accounting is exact: `1758 − 21 golden + 20 new = 1757`. The 21 are `test_golden_output.py`
+moving numerically, which is expected and deliberate — ⚠ **the goldens regenerate ONCE, after P2.** The
+1 pre-existing failure (`test_nrna_double_counting`, `TODO.md` §7) is byte-identical.
+
+`tests/calibration/` **569 passed** (549 baseline + 16 new + 4 new schema parametrizations, the latter
+because `rna_*_eff_len` were added to the shape/sign/dtype guard lists rather than left ungated).
+
+### ⚠ Unrelated finding: commit 49e9b456 is incomplete
+
+`S6 + S5.g-1` committed `splice_graph.build_contiguous_edge_reach_arrays` and `test_edge_reach.py` but
+**left `node_geometry.build_node_geometry`'s `edge_rna_reach` parameter uncommitted**. At HEAD the
+builder therefore has no consumer — the A7 switch exists only in the working tree. Not caused by this
+work and no data was lost; flagged because a builder whose only caller is uncommitted reads as dead code
+to the next reader.
+
+---
+
+## P2 — the fragment-length likelihood: BUILT, MEASURED, and ⛔ **GATED OFF — it is blocked upstream** (2026-07-31)
+
+    Plan: `docs/SOLVER_OBSERVABLES_PLAN.md` §6   ·   Module: `rigel.calibration.length_likelihood`
+    Gates: `tests/calibration/test_length_likelihood.py` (43)   ·   A/B: `scripts/design/length_likelihood_ab.py`
+    Switch: `CalibrationConfig.length_likelihood`, **default False** — the False arm is byte-identical to P1
+
+⭐ **THE MECHANISM WORKS, EXACTLY AS DESIGNED.** P0's headline was that 13.3–40.1 % of library mass
+reaches the solver with no own composition evidence in every condition, and **100 %** on an unstranded or
+zero-gDNA one. Turning this channel on:
+
+| no-evidence mass share | OFF | **ON** |
+|---|---|---|
+| gdna100 ss0.50 capture_off | 49.4 % | **0.0 %** |
+| gdna100 ss0.50 capture_on | 98.2 % | **3.9 %** |
+| gdna100 ss0.99 capture_on | 30.0 % | **1.1 %** |
+| **none** × 4 | 100.0 % | **0.0 %** |
+
+The blind mass is gone. The Schur argument that silences strand on AMBIG nodes does not apply to a term
+with no ``θ`` dependence, and the measurement confirms it.
+
+⛔ **AND THE ANSWER IT GIVES IS WRONG — 15× worse on the only arm with an unambiguous truth.**
+
+| condition | truth | OFF | **ON** |
+|---|---|---|---|
+| none ss0.99 capture_off | **0.0000** | 0.0030 | **0.1269** |
+| none ss0.99 capture_on | **0.0000** | 0.0016 | **0.2664** |
+| none ss0.50 capture_off | **0.0000** | 0.0793 | **0.4689** |
+| none ss0.50 capture_on | **0.0000** | 0.0101 | **0.6156** |
+| gdna100 ss0.50 capture_off | ~0.52 | 0.4998 | 0.6064 (overshoots) |
+| gdna100 ss0.99 capture_on | ~0.52 | 0.4897 | 0.4264 (worse) |
+
+Zero-gDNA arm mean ``|f_gdna|``: **0.0235 → 0.3695**.
+
+### ⭐ THE CAUSE IS UPSTREAM, AND IT IS NOT IN THE LIKELIHOOD
+
+⚠ **CORRECTION, 2026-07-31, same session — the first diagnosis below was half wrong and the owner caught
+it.** "The pmf is FABRICATED" is not what happens. ``build_fl_models`` EB-shrinks each pool toward the
+global histogram, and at ``n_gdna = 0`` it shrinks **all the way**: verified, ``gdna_pmf == global_pmf``
+byte-identically on both zero-gDNA conditions. That is exactly the intended behaviour, and the owner's
+follow-on is also right — **identical pmfs for the two components make this channel exactly inert**, which
+is proven byte-identically end to end (`test_identical_components_are_EXACTLY_inert_not_nearly_inert`).
+
+⭐ **So the real defect is narrower and sharper: on a zero-gDNA library ``global`` and ``rna_fl_pmf``
+describe the SAME population — every fragment is RNA — and they disagree.** Measured on
+`none ss0.99 capture_off`: global **210.1 ± 85.5** against the RNA pool **234.5 ± 146.2**, i.e. **+11.6 %
+in the mean and +71.1 % in the sd**, against `S5_DESIGN_LOG.md` §3.6's independently-predicted +14 % / +50 %
+from junction opportunity. The length likelihood then reads that disagreement as composition, correctly —
+there is no defect in the likelihood at all. ⛔ **The channel is a comparator, and it is being handed two
+rulers of different length.** The original text follows.
+
+**The gDNA fragment-length pmf reads a fallback on a zero-gDNA library.** Measured:
+
+| condition | gDNA pool n | gdna_fl_pmf mean ± sd | rna_fl_pmf mean ± sd |
+|---|---|---|---|
+| gdna100 ss0.50 capture_off | 4,526,536 | 194.4 ± 97.4 | 234.9 ± 146.8 |
+| **none** ss0.50 capture_off | **0** | **210.1 ± 85.5** | 234.7 ± 146.7 |
+| **none** ss0.50 capture_on | **0** | **211.0 ± 85.9** | 242.3 ± 148.0 |
+
+⛔ **Zero observations, and `build_fl_models` still returns a confident pmf** — a fallback that happens to
+differ from the RNA pmf, so the likelihood dutifully discriminates against a component that does not
+exist. **Every other consumer uses `gdna_fl_pmf` as a DIVISOR, where a wrong pmf is a scale error. This is
+the first consumer that uses it as a DISCRIMINANT, where a fabricated pmf manufactures composition out of
+nothing.**
+
+⭐ **`strand_evidence` already guards exactly this case and the length channel does not.** Its derived
+noise floor is `σ²_d = ¼(1/N_rna + ω_r) + ¼(1/N_gdna + ω_g)`, so `N_gdna = 0 ⇒ disc = 0` — the strand
+channel refuses to speak when there is no gDNA to calibrate against. The length channel needs the same
+principle, and it is a **derivation**, not a flag: the discriminant is the separation between two fitted
+pmfs, and it must be gated by the sampling uncertainty of that separation.
+
+⚠ **And a second upstream defect, which the gdna100 overshoot points at.** `ACCUMULATOR_DESIGN.md` §8.1(b)
+records that **every pool histogram is length-biased by its own opportunity** and must be divided by it
+before use; `S5_DESIGN_LOG.md` §3.6 measured the effect on this very suite (the RNA pool reads 234.9
+against a configured 206.1 — **+14 % in the mean, +50 % in the sd** — and the gDNA intergenic pool reads
+195.4 against 156.5, *unexplained*). That correction is listed under §4 **"Not yet decided"**. So the two
+pmfs are already tilted, by different and partly unknown opportunities, and `length_likelihood` tilts them
+a second time by ``A(w)``. ⛔ **§8.1(b) is no longer a tidy-up. It BLOCKS P2.**
+
+### ⭐ Three defects found by the falsification discipline, two of them in my own work
+
+| | found by | what |
+|---|---|---|
+| **P2d** | perturbation | deleting the ``−½ log det`` term left all 41 tests green. Its grid-variation is ``O(1)`` while the quadratic's is ``O(N)``, so it is negligible at depth and **decisive at the median node**: the peak moves **0.32 at N=1**, 0.05 at N=5, 0.004 at N=50. ⚠ It also documents the model's own limit — the Gaussian is asymptotic in ``N`` and at ``N=1`` is not a trustworthy *location*, because the true single-draw mixture likelihood is bimodal |
+| **the equal-pmf null** | A/B | forcing ``rna_fl_pmf = gdna_fl_pmf`` must be byte-identical and was not (0.5008 vs 0.4924) |
+| **⭐ the grid-width leak** | chasing that null | rows that are flat *to 1e-11* rather than to 0 pass `density_factor_precision`'s ``ptp > 1e-12`` gate; the near-uniform posterior then returns ``tau = 1/Var(uniform over λ) = 0.029016`` — **the grid's own width sold as composition evidence**, which is exactly what that function's docstring says must never happen. Measured: **689 slots, max tau 0.02902**. Fixed by gating on the MOMENTS structurally, so the null is now *exactly* zero, and pinned by an **exact-equality** assertion (``assert_allclose`` passes at 1e-11 and would miss it) |
+
+⚠ **The grid-width leak is latent in `density_factor_precision` itself, not only in this caller.** Any
+factor that is nearly-but-not-exactly flat gets 0.029 of free precision from the grid. The intron factory
+is safe today only because its inactive rows are written as exact zeros. A threshold-free fix exists —
+report ``max(0, 1/Var_post − 1/Var_uniform)``, the precision the factor ADDS over the grid's own width —
+but it changes a shipped, default-on feature and needs its own A/B. **Recorded, not smuggled in.**
+
+### What landed, and what did not
+
+**Landed** (behind `length_likelihood=False`, byte-identical when off): `calibration/length_likelihood.py`
+(the tilted moments in closed form — ``O(n_nodes)`` cumulative sums, no ``n_nodes × max_len`` array, which
+would be 8 GB at human scale); the two length channels gathered onto `NodeGeometry`; a `length_loglik`
+argument threaded through `simplex_logodds`'s 1-D and 2-D solves, `node_init` (as **ungated** source 4) and
+`bp_solver`'s local *and* final solve; `_build_length_loglik` in `calibrate`.
+
+**Verified**: U1 against **exact enumeration over integer start positions** (a literal loop, not the
+module's own closed form — trap 1) over 4 pmfs × 6 node lengths, both frames; ``q12 ≡ 1`` at a node as a
+structural identity of the ``1/L`` deposit weight; ``moments.eff`` byte-identical to
+`contained_eff_length`/`crossing_eff_length` (trap 27); 5 perturbations, all now caught.
+
+**Suite**: **1800 passed / 22 failed** — the same 21 golden moves from P1 plus the 1 pre-existing
+`TODO.md` §7 failure; nothing new. `tests/calibration/` 654.
+
+### ⛔ THE VERDICT, AND IT IS NOT MINE TO MAKE
+
+P2 is **implemented and inert**. It must not be switched on until the fragment-length pools are trustworthy
+as a *discriminant*:
+
+1. **`build_fl_models` must not fabricate a pmf from an empty pool.** A zero-observation pool has no
+   distribution, and the honest output is "no gDNA length model", which must make the length channel inert
+   — the same statement `strand_evidence`'s `1/N_gdna` already makes for strand.
+2. **`ACCUMULATOR_DESIGN.md` §8.1(b)'s per-pool opportunity correction must land** — divide each pooled
+   histogram by its own opportunity before normalising. Listed as undecided since S5.b; it is now the
+   blocker.
+3. Only then re-run this A/B. The before-picture (P0's blindness census) and the after-picture (this
+   entry's no-evidence collapse to 0.0 %) are both recorded, so the re-run is a two-command comparison.
+
+⚠ **Do not "fix" this by damping the channel.** The channel is doing what it was built to do; it is being
+fed a length model that does not describe the library. Damping would hide the upstream defect behind a
+tuned constant, which is the failure mode `CARRY_FORWARD.md` §3 trap 12 records three times over.
+
+---
+
+## C0 — ⭐ the accumulator's `L` is PROVEN, and it is fit to be the gold standard (2026-07-31)
+
+    Audit: `docs/FRAGMENT_LENGTH_AUDIT.md`   ·   Gate: `tests/native/test_fragment_length_proof.py`
+    Owner precondition, 2026-07-31: *"the new fragment length computation is the newest implementation
+    and I'm not sure how rigorously it has been tested in all cases; we need to prove that very
+    carefully if it's going to become the gold standard."*
+
+⛔ **The precondition was right, and the existing coverage did not meet it.** `test_accumulator_spec`
+pinned **six hand-picked malformed intron lists**, chosen by the same author as the code they check —
+the coverage pattern that finds what the author thought of and nothing else.
+
+### The oracle is a different ALGORITHM, not a different spelling
+
+`CARRY_FORWARD.md` §3 trap 1. The oracle is **integer set arithmetic**::
+
+    covered = set(range(start, end))  −  ∪ set(range(a, b)) for each intron
+
+No sorting, no merging, no cursor walk, no ``searchsorted``. Every malformed case the production path
+handles by explicit logic — overlapping, nested, abutting, duplicated, zero-length and out-of-range
+introns — the oracle handles **by construction**, because set subtraction is idempotent and order-free.
+
+⭐ **And all four deposit populations fall out of that one set**, which is what makes this a proof of the
+**geometry** and not only of ``L``:
+
+| | oracle |
+|---|---|
+| ``L`` | ``len(covered)`` |
+| line ``p`` crossed | ``p−1 ∈ covered and p ∈ covered`` — `ACCUMULATOR_DESIGN.md` §2's definition, verbatim |
+| node spanned | ``cuts[i]−1 … cuts[i+1]`` all covered |
+| node contained | no junction used, and ``min``/``max`` of ``covered`` fall in one node |
+
+⚠ §3.1 requires that *"whatever counts toward ``L`` must also count as coverage for crossing"*. **Nothing
+tested the two against each other before.** They now come from one set, so they cannot disagree.
+
+### Coverage
+
+| | |
+|---|---|
+| **exhaustive**, 0 introns | 78 configurations |
+| **exhaustive**, 1 intron | 7,098 |
+| **exhaustive**, 2 introns | **326,508** |
+| randomised, ≤4 introns, realistic coordinates (9 kb ref, 3 kb spans, 900 bp introns), fixed seed | 4,000 |
+
+**333,684 exhaustive configurations** — the complete space over a 12 bp reference whose 4 nodes include a
+**1 bp** node — plus a randomised sweep at a scale exhaustive enumeration cannot reach (a 300 bp molecule
+spanning a long intron, the case §3.2's length limit turns on). **All pass.**
+
+### ⭐ The proof was proven to FIRE — 7 perturbations
+
+| | perturbation | |
+|---|---|---|
+| **L1'** | ``L`` from ``span − Σ(RAW intron lengths)`` — the formula §3.3 says goes **negative** on a wide overlap | ✅ caught |
+| **L2'** | introns not clipped to the fragment | ✅ caught |
+| **L4** | fragment not clipped to the reference | ✅ caught |
+| **L5** | crossing boundary ``searchsorted`` side flipped right→left | ✅ caught |
+| **L6** | spanning loop credits one node too many | ✅ caught |
+| **L7** | containment keyed on the fragment EXTENT, not its first/last COVERED base | ✅ caught |
+| **L3** | ABUTTING introns no longer merge | ⚠ **not caught** |
+
+⚠ **L3 is a correct non-failure.** Merging abutting introns changes only the ``introns_absorbed`` QC
+counter — set subtraction removes ``[10,20) ∪ [20,30)`` and ``[10,30)`` identically, so ``L`` and all four
+populations are untouched. The counter is pinned separately by ``test_accumulator_spec``.
+
+⭐ **And a first attempt at L1 was ALSO a no-op**, which is worth recording because it is the design's own
+claim demonstrated: replacing ``Σ segments`` with ``span − Σ introns`` **after** ``_normalise_introns``
+changes nothing, because normalisation is precisely what makes the two formulas agree. The bug §3.3 warns
+about only exists on the RAW list — and that version is caught.
+
+⚠ **An error the oracle caught in ME first**: my first oracle reported crossed lines by *cut* index where
+the deposit writes ``edge_base + line − 1``. Writing the oracle independently forced the offset to be
+re-derived rather than copied, which is the entire point of trap 1.
+
+### ⛔ Scope, stated rather than implied
+
+The fixture carries **no annotated junctions**, so every fragment is unspliced and the **spliced routing**
+(``edge_spliced`` vs ``edge_unspliced``, junction credit, the containment block) is not exercised here;
+``test_accumulator_spec`` covers it. That is the right scope for C1: the unconditional histogram bins by
+``L``, and ``L`` does not depend on which population the fragment is routed to.
+
+⚠ Proving the Python reference proves the C++ too — `test_accumulator_native_parity` gates the C++ on
+byte-identity to it, so a defect here would have been reproduced faithfully in both.
+
+### Verdict
+
+✅ **`L` is fit to be the tool's one definition of fragment length. C1 may proceed.** Suite **1805 / 22**
+(the 21 golden moves + the pre-existing `TODO.md` §7 failure; +5 new proof tests).
+
+---
+
+## C1 — ⭐ the accumulator gets an unconditional length histogram, and the frame mismatch is GONE (2026-07-31)
+
+    Audit: `docs/FRAGMENT_LENGTH_AUDIT.md` §4 C1   ·   Gates: `tests/native/test_fragment_length_proof.py`,
+    `tests/test_accumulator_payload.py`   ·   Precondition: C0 (`L` proven) — done first, by owner ruling
+
+**What.** One `uint32[max_length + 1]` row, `deposited_lengths`, incremented on the same line as
+`node_start_count` and the `DEPOSITED` counter. The five pure pools are untouched — `_pool()` still
+returns `None` for a mixture, because an impure pool is worse than a missing one (`ACCUMULATOR_DESIGN.md`
+§8). ⭐ **This is a separate tally, not a sixth pool**, and that distinction is the whole point.
+
+**Why.** The accumulator binned only *conditioned* pools, so it had no unconditional histogram; the
+empirical-Bayes shrinkage needs one; so the anchor was taken from the **scanner**, which measures length
+by two other rules over another population. C1 removes the reason that borrowing existed.
+
+⭐ **It is "unconditional GIVEN DEPOSIT", and the name says so.** It excludes what the accumulator
+rejects — too long, ambiguous path, strand-undefined, empty — each of which is counted in `qc`. That is
+**exactly** the population the pools are drawn from, which is what makes it the right anchor rather than
+merely a convenient one; an anchor over a *wider* population would re-create the frame mismatch in a new
+place.
+
+### ⭐ THE MEASUREMENT: C1 separated the two mechanisms the audit could only assert were separable
+
+On the zero-gDNA conditions every fragment is RNA, so the anchor and the RNA pool describe **one
+population** and any gap between them is bias:
+
+| | mean | sd |
+|---|---|---|
+| **the old scanner anchor** | 210.1 | 85.5 |
+| ⭐ **C1, the accumulator's own** | **218.0** | **111.2** |
+| the RNA_SPLICED pool | 234.7 | 146.7 |
+
+| gap to the RNA pool | before C1 (scanner anchor) | **after C1** | closed |
+|---|---|---|---|
+| mean | **+11.6 %** | **+7.7 %** | **34 %** |
+| sd | **+71.1 %** | **+32.0 %** | **55 %** |
+| support ceiling | 713 vs 1000 | **1000 vs 1000** | ⭐ **entirely** |
+
+⭐ **The frame component is gone and the opportunity component is now isolated and measurable.** §2 of the
+audit named two mechanisms and could only argue they were separable; C1 separated them. The residual
+**+7.7 % / +32 %** is the junction-opportunity tilt, and it is C3's (§8.1(b)'s) target — now against a
+same-frame reference instead of a confounded one.
+
+⚠ The old anchor's sd was too *small* (85.5) precisely because definition **B** is transcript-space and
+unanimity-gated and its support stopped at 713 bp. An anchor narrower than the thing it anchors is the
+worst direction for an EB prior: it shrinks the pools toward a distribution that cannot produce them.
+
+### Gates
+
+| | |
+|---|---|
+| **G1 byte-identity** | the parity gate reads its field list off `dataclasses.fields(Tally)`, so `deposited_lengths` joined it **automatically**, dtype and shape included. ⭐ Proven to fire: three reference perturbations (stop binning · bin one short · **bin at the SPAN instead of `L`**) all caught |
+| **G2 the invariant** | `Σ deposited_lengths == Σ node_start_count == qc.deposited`, incremented on one line so the three cannot drift by construction. Same externally-checkable form as §10.2's start count and a **different statement**: that one says every fragment was located in space, this one that every fragment was binned by length |
+| **at the payload door** | `from_scan_result` refuses a histogram that does not sum to `qc.deposited`, or is the wrong length. ⚠ It must live at the boundary and not only in the accumulator's tests, because the payload is what a **cached** scan is rebuilt from |
+| **superset** | every pooled fragment is also binned here at the same `L` — the property that makes it a usable anchor. Strict superset in general: an exonic contained fragment and a multi-line crossing enter no pool at all |
+| **rejected ≠ binned** | too-long, ambiguous-path and empty fragments bin nothing |
+
+⭐ **6 perturbations, and the 6th found a hole in the tests rather than the code**: deleting the payload's
+door-check left everything green, because nothing asserted the check *existed*.
+`test_a_deposited_lengths_HISTOGRAM_THAT_DOES_NOT_BIN_EVERY_FRAGMENT_IS_REJECTED` closes it and now fails
+without the check.
+
+### Blast radius, all as designed
+
+* `payload_schema_digest` **66b41ea0b645209d → b7d29676c58b2c65**, so every existing scan cache is refused
+  at load. ⭐ That is exactly what that key exists for (`scan_cache` docstring: S5.a's `length_sum` is the
+  precedent). The 8 pilot caches were rebuilt — **56.0 s**, and all 8 satisfy G2.
+* Cache serialisation is driven by `dataclasses.fields(AccumulatorPayload)`, so the new row persists with
+  **no change to `scan_cache`**.
+* ⚠ **A pre-existing defect fixed in passing**: `Tally` declared `edge_spliced_length_sum` and
+  `sj_length_sum` **twice each**. Harmless (the dataclass de-duplicates to 18 fields) but it is a wart in
+  the file that IS the executable specification, and it was committed.
+
+**Suite 1809 / 22** — the 21 golden moves + the pre-existing `TODO.md` §7 failure; +4 C1 tests. Native
+96/96 including parity and worker determinism.
+
+⛔ **`build_fl_models` still reads the scanner anchor.** C1 makes the correct anchor *exist*; **C2** is
+what switches the consumer over and deletes the scanner histogram. Nothing downstream has moved yet, by
+design — this step is additive and every number in the tool is unchanged.

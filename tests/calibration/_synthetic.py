@@ -81,6 +81,7 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         sj_inv_length_sum=inv(sj, 10),
         sj_length_sum=lengths(sj, 11),
         pool_lengths=np.zeros((N_FRAGMENT_POOLS, 201), dtype=np.int64),
+        deposited_lengths=np.zeros(201, dtype=np.uint32),
         qc=ScanQC(
             deposited=36,
             dropped_too_long=0,
@@ -244,10 +245,47 @@ def make_chain_parts(
         reach_lo=np.array([float(x[3]) for x in j]),
         reach_hi=np.array([float(x[4]) for x in j]),
     )
+    gdna_pmf = delta_pmf(200, 400) if gdna_fl is None else gdna_fl
+    rna_pmf = delta_pmf(100, 400) if rna_fl is None else rna_fl
+    node_sz = np.broadcast_to(np.asarray(node_size_bp, float), (n_nodes,)).copy()
+
+    def _length_channels(counts, frame, node_len=None):
+        """The two length channels a PURE-gDNA library would deposit for these counts.
+
+        ⭐ **A fixture must not carry an arbitrary number.** ``count`` alone does not determine
+        ``inv_length_sum``/``length_sum`` — a test that states only counts has made no statement about
+        fragment lengths — so the convention here is the one self-consistent choice: exactly what the
+        fixture's OWN ``gdna_fl`` pmf would deposit in that frame. A test exercising the length channel
+        for real passes spread pmfs and overrides these.
+
+        ⚠ **Under the default ``delta_pmf`` pmfs the length likelihood is inert anyway, and that is
+        maths rather than luck**: with no within-component spread, ``(Σ1/w, Σw)`` is a deterministic
+        function of how many fragments were gDNA, so the 2x2 covariance is rank-1, ``det == 0``, and
+        `length_likelihood` returns a flat row. Point-mass pools cannot exercise this channel.
+        """
+        from rigel.calibration.length_likelihood import contained_moments, crossing_moments
+
+        m = contained_moments(node_len, gdna_pmf) if frame == "node" else crossing_moments(gdna_pmf)
+        tot = counts.sum(axis=1)
+        m1 = np.broadcast_to(np.asarray(m.m1, float), tot.shape)
+        m2 = np.broadcast_to(np.asarray(m.m2, float), tot.shape)
+        return (
+            np.stack([tot * m1, np.zeros_like(tot)], axis=1),
+            np.stack([tot * m2, np.zeros_like(tot)], axis=1),
+        )
+
+    node_counts = pair(node_pos, node_neg, n_nodes)
+    edge_counts = pair(edge_pos, edge_neg, n_edges)
+    node_inv, node_len_sum = _length_channels(node_counts, "node", node_sz)
+    edge_inv, edge_len_sum = _length_channels(edge_counts, "edge")
     substrate = SimpleNamespace(
-        node_contained=SimpleNamespace(count=pair(node_pos, node_neg, n_nodes)),
+        node_contained=SimpleNamespace(
+            count=node_counts, inv_length_sum=node_inv, length_sum=node_len_sum
+        ),
         node_spanning=SimpleNamespace(count=np.zeros((n_nodes, 2))),
-        edge_unspliced=SimpleNamespace(count=pair(edge_pos, edge_neg, n_edges)),
+        edge_unspliced=SimpleNamespace(
+            count=edge_counts, inv_length_sum=edge_inv, length_sum=edge_len_sum
+        ),
         edge_spliced=SimpleNamespace(count=pair(edge_spliced, 0.0, n_edges)),
         junction=SimpleNamespace(
             count=np.array([[float(x[5]), 0.0] for x in j]).reshape(len(j), 2)
@@ -256,7 +294,7 @@ def make_chain_parts(
     region_arrays = SimpleNamespace(
         signature=sig,
         strand_class=transcript_strand_class(sig.astype(np.int64)),
-        region_size_bp=np.broadcast_to(np.asarray(node_size_bp, float), (n_nodes,)).copy(),
+        region_size_bp=node_sz,
         ref_id=ref_id,
         ref_offsets=rno,
         n_regions=n_nodes,
@@ -267,8 +305,8 @@ def make_chain_parts(
         substrate,
         region_arrays,
         junction_geometry,
-        delta_pmf(200, 400) if gdna_fl is None else gdna_fl,
-        delta_pmf(100, 400) if rna_fl is None else rna_fl,
+        gdna_pmf,
+        rna_pmf,
     )
     return SimpleNamespace(
         chain=chain,

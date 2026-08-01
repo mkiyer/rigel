@@ -129,6 +129,21 @@ class CalibrationResult:
     #: ``mu_g − 1``. It stays a per-edge array because that is the axis its consumers index it on.
     gdna_edge_eff_len: np.ndarray
 
+    # --- the RNA geometric supports: the SAME two frames, on the RNA pmf ---
+    #: float64[n_nodes] / float64[n_edges] — ``contained_eff_length`` and ``crossing_eff_length`` on the
+    #: RNA pmf. ⭐ **They exist because a mass is not a fragment count.** ``assemble_priors`` converts
+    #: each component's per-object mass into a density before integrating it over the locus span, and a
+    #: density needs THAT COMPONENT'S OWN opportunity as its divisor: a fragment deposits on
+    #: ``max(K, 1)`` objects and longer fragments cross more lines, so dividing both components by the
+    #: gDNA opportunity — or by nothing at all, which is what shipped — tilts the prior's g:r ratio by
+    #: ``Sum A_g / Sum A_r``. Measured on the chr22 pilot: gDNA 1.031 incidences per fragment against
+    #: RNA ~1.17, a 13–19 % under-call of gDNA (`SOLVER_OBSERVABLES_PLAN.md` §2.2).
+    #: ⚠ Like their gDNA twins these are PROJECTED off ``NodeGeometry.eff_rna``, never recomputed — the
+    #: number the prior divides by is byte-identically the number the solver divided by
+    #: (`CARRY_FORWARD.md` §3 trap 27).
+    rna_node_eff_len: np.ndarray
+    rna_edge_eff_len: np.ndarray
+
     # --- library scalars ---
     gdna_density_global: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
     rna_sense_frac: float  # in [0, 1], RNA sense fraction used by the strand clue
@@ -148,13 +163,14 @@ class CalibrationResult:
                     f"CalibrationResult.{axis} must be >= 0; got {getattr(self, axis)}."
                 )
 
-        for name in ("mass_gdna_node", "mass_rna_node", "gdna_node_eff_len"):
+        for name in ("mass_gdna_node", "mass_rna_node", "gdna_node_eff_len", "rna_node_eff_len"):
             _check_axis_array(getattr(self, name), name, self.n_nodes)
         for name in (
             "mass_gdna_edge",
             "mass_rna_edge",
             "mass_rna_spliced_edge",
             "gdna_edge_eff_len",
+            "rna_edge_eff_len",
         ):
             _check_axis_array(getattr(self, name), name, self.n_edges)
         _check_axis_array(self.mass_rna_junction, "mass_rna_junction", self.n_junctions)

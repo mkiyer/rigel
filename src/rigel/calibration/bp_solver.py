@@ -127,6 +127,7 @@ def node_sweep(
     n_grid_ss: int | None = None,
     gdna_prior=None,
     intron_prior=None,
+    length_loglik=None,
     _capture: dict | None = None,
 ):
     """The belief-propagation sweep over the chain — gDNA AND per-strand RNA messages, in COUNT space (no
@@ -242,6 +243,10 @@ def node_sweep(
             # to ψ, distinct from the gDNA arm; participates in the local solve AND the relay (a confident
             # intron gDNA belief propagates genomically to the flanking exons/boundaries).
             lam_logprior=intron_prior,
+            # ⭐ the FRAGMENT-LENGTH λ-factor (`length_likelihood`, P2). It enters the LOCAL solve and the
+            # FINAL one, exactly like the intron factory, so a node's own length evidence both sets its
+            # belief and propagates through the relay. ``None`` ⇒ byte-identical to the pre-P2 path.
+            length_loglik=length_loglik,
             # count-zero-info variance freeze (§2, B1): reference = the incoming belief, so the variance —
             # hence the message precision — is evaluated near the truth, not at a flat ½.
             fg_ref=f_g,
@@ -316,6 +321,7 @@ def node_sweep(
         belief=belief,
         global_logprior=global_lp,
         intron_prior=intron_prior,
+        length_loglik=length_loglik,
     )
 
     def _unified_solve():

@@ -27,6 +27,13 @@ CUTS_PER_REF = [[0, 100, 200, 600], [0, 500, 900], []]
 MAX_LENGTH = 12
 
 
+def _deposited_lengths(total: int) -> np.ndarray:
+    """A uint32[MAX_LENGTH + 1] histogram summing to exactly ``total``."""
+    out = np.zeros(MAX_LENGTH + 1, dtype=np.uint32)
+    out[MAX_LENGTH // 2] = total
+    return out
+
+
 def _calibration_dict(**overrides) -> dict:
     """A flat calibration dict shaped exactly as ``BamScanner::build_result`` emits one."""
     ref_cut_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
@@ -67,6 +74,10 @@ def _calibration_dict(**overrides) -> dict:
         "sj_inv_length_sum": np.arange(n_sj * 2, dtype=np.uint64),
         "sj_length_sum": np.arange(n_sj * 2, dtype=np.uint64) * 23,
         "pool_lengths": np.arange(5 * (MAX_LENGTH + 1), dtype=np.int64),
+        # ⭐ C1: the unconditional histogram must bin EXACTLY the deposited fragments, so this fixture
+        # can no longer carry an arbitrary array — 41 here, matching qc.deposited below. That coupling is
+        # the invariant doing its job at the door.
+        "deposited_lengths": _deposited_lengths(41),
         "qc": {
             "deposited": 41,
             "dropped_too_long": 1,
@@ -281,3 +292,26 @@ def test_the_payload_holds_VIEWS_and_does_not_copy():
     assert payload.node_start_count.base is source or payload.node_start_count is source, (
         "the payload copied an array whose dtype already matched — that doubles peak memory"
     )
+
+
+def test_a_deposited_lengths_HISTOGRAM_THAT_DOES_NOT_BIN_EVERY_FRAGMENT_IS_REJECTED():
+    """⭐ **C1's invariant, refused at the door.** ``Σ deposited_lengths`` must equal ``qc.deposited``.
+
+    This histogram is about to become the empirical-Bayes anchor for **every** fragment-length model in
+    the tool (`docs/FRAGMENT_LENGTH_AUDIT.md`), so an off-by-N is not a cosmetic error — it silently
+    re-weights the anchor against the pools it is supposed to anchor, which is a subtler version of the
+    frame mismatch C1 exists to remove.
+
+    ⚠ The check has to live at the payload boundary and not only in the accumulator's own tests, because
+    the payload is what a **cached** scan is rebuilt from — and a cache can be truncated, partially
+    written, or produced by a build whose schema digest happened to collide.
+    """
+    n = MAX_LENGTH + 1
+    with pytest.raises(ValueError, match="deposited_lengths sums to"):
+        _payload(deposited_lengths=_deposited_lengths(40))  # one short of qc.deposited = 41
+    with pytest.raises(ValueError, match="deposited_lengths sums to"):
+        _payload(deposited_lengths=_deposited_lengths(42))  # one too many
+    with pytest.raises(ValueError, match="deposited_lengths has shape"):
+        _payload(deposited_lengths=np.zeros(n - 1, dtype=np.uint32))
+    # the self-consistent one is accepted
+    assert int(_payload().deposited_lengths.sum()) == 41

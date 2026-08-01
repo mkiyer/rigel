@@ -2021,6 +2021,8 @@ private:
 
             const std::size_t pool_row = static_cast<std::size_t>(max_length_) + 1;
             std::vector<int64_t> pool_lengths(kNFragmentPools * pool_row, 0);
+            // ⭐ C1: the unconditional histogram, summed over references exactly like the pools.
+            std::vector<uint32_t> deposited_lengths(pool_row, 0u);
 
             rigel::accumulator::DepositCounters qc;
 
@@ -2077,6 +2079,19 @@ private:
                 }
                 const int64_t* pools = a.pool_lengths_data();
                 for (std::size_t i = 0; i < pool_lengths.size(); ++i) pool_lengths[i] += pools[i];
+                // ⭐ C1. Same size guard, same reason: a silently skipped reference would leave the
+                // anchor short by that reference's fragments with nothing to notice it by, and the
+                // sum(deposited_lengths) == deposited invariant is what would fire -- but only if the
+                // array is the right length in the first place.
+                if (a.deposited_lengths_size() != deposited_lengths.size()) {
+                    throw std::runtime_error(
+                        "build_result: reference " + std::to_string(f) + " has " +
+                        std::to_string(a.deposited_lengths_size()) +
+                        " deposited-length bins but the payload expects " +
+                        std::to_string(deposited_lengths.size()));
+                }
+                const uint32_t* dep = a.deposited_lengths_data();
+                for (std::size_t i = 0; i < deposited_lengths.size(); ++i) deposited_lengths[i] += dep[i];
                 qc.merge_from(a.counters());
             }
 
@@ -2105,6 +2120,7 @@ private:
             cal["sj_length_sum"] = vec_to_ndarray(std::move(sj_length_sum));
             cal["sj_inv_length_sum"]             = vec_to_ndarray(std::move(sj_inv_length_sum));
             cal["pool_lengths"]           = vec_to_ndarray(std::move(pool_lengths));
+            cal["deposited_lengths"]      = vec_to_ndarray(std::move(deposited_lengths));
 
             // The QC denominators (design §10.3). Every conservation statement downstream has to be able
             // to name what it excluded, and none of these is derivable after the fact.
@@ -2879,6 +2895,12 @@ NB_MODULE(_bam_impl, m) {
                 const std::size_t row = static_cast<std::size_t>(a.max_length()) + 1;
                 return nb::ndarray<nb::numpy, const int64_t, nb::ndim<2>>(
                     a.pool_lengths_data(), {kNFragmentPools, row}, h).cast();
+            })
+            .def_prop_ro("deposited_lengths", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<1>>(
+                    a.deposited_lengths_data(),
+                    {static_cast<std::size_t>(a.max_length()) + 1}, h).cast();
             })
             .def_prop_ro("qc", [](const Accumulator& a) {
                 const auto& c = a.counters();

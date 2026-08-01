@@ -243,6 +243,7 @@ def _local_loglik_logodds(
     rna_imp_mode=None,
     rna_imp_prec=None,
     lam_logprior=None,
+    length_loglik=None,
     lam_imp_mode=None,
     lam_imp_prec=None,
 ):
@@ -294,6 +295,13 @@ def _local_loglik_logodds(
     #    introns against the intergenic background; zero on non-intron nodes ⇒ a no-op there. ──
     if lam_logprior is not None:
         psi = psi + np.asarray(lam_logprior, np.float64)
+    # ── ⭐ THE FRAGMENT-LENGTH λ-factor (`length_likelihood`, P2). Same shape and same treatment as the
+    #    intron factory above — an (m,K) log-likelihood on the λ axis — but a DIFFERENT source: it reads
+    #    the accumulator's two length channels rather than a density prior, and it is the only source
+    #    that survives κ=½ and the AMBIG Schur gate. A separate argument, not folded into
+    #    ``lam_logprior``, so the A/B varies ONE thing (the `edge_rna_reach` pattern). ──
+    if length_loglik is not None:
+        psi = psi + np.asarray(length_loglik, np.float64)
     # ── imputation messages: LOG-FRACTION Gaussians (the overhaul). The mode is a log-FRACTION target
     #    (``log`` of the imputed fraction, built in ``_scan``); evaluated against ``log f_c(λ)``. No clip —
     #    an off-grid target (source denser than the dst can hold) is a bounded monotone pull toward the
@@ -349,6 +357,7 @@ def _solve_nodes_logodds(
     rna_imp_mode=None,
     rna_imp_prec=None,
     lam_logprior=None,
+    length_loglik=None,
     lam_imp_mode=None,
     lam_imp_prec=None,
 ) -> NodeDeconv:
@@ -378,6 +387,7 @@ def _solve_nodes_logodds(
         rna_imp_mode=rna_imp_mode,
         rna_imp_prec=rna_imp_prec,
         lam_logprior=lam_logprior,
+        length_loglik=length_loglik,
         lam_imp_mode=lam_imp_mode,
         lam_imp_prec=lam_imp_prec,
     )
@@ -435,6 +445,7 @@ def _solve_ambig_logodds(
     rna_imp_mode=None,
     rna_imp_prec=None,
     lam_logprior=None,
+    length_loglik=None,
     lam_imp_mode=None,
     lam_imp_prec=None,
     theta_imp_mode=None,
@@ -505,6 +516,12 @@ def _solve_ambig_logodds(
     #    [:, :, None] broadcast makes it constant across the tilt, so θ is integrated out cleanly. ──
     if lam_logprior is not None:
         psi += np.asarray(lam_logprior, F)[:, :, None]
+    # ── ⭐ the FRAGMENT-LENGTH λ-factor. θ-independent — the length channels do not depend on the strand
+    #    tilt at all — so it broadcasts across the cube and θ integrates out cleanly. ⭐ **That
+    #    independence is precisely why this source speaks on an AMBIG node where the strand term cannot**:
+    #    the Schur complement that zeroes a rank-1-in-θ term does not apply to a term with no θ. ──
+    if length_loglik is not None:
+        psi += np.asarray(length_loglik, F)[:, :, None]
     # ── gDNA LOG-fraction message on log f_g (τ-independent) ──
     if gdna_imp_mode is not None and gdna_imp_prec is not None:
         mo = np.asarray(gdna_imp_mode, F)[:, None, None]
@@ -593,6 +610,7 @@ def _solve_nodes_logodds_all(
     rna_imp_mode=None,
     rna_imp_prec=None,
     lam_logprior=None,
+    length_loglik=None,
     lam_imp_mode=None,
     lam_imp_prec=None,
     theta_imp_mode=None,
@@ -687,6 +705,7 @@ def _solve_nodes_logodds_all(
                     rna_imp_mode=_sp(rna_imp_mode, bidx),
                     rna_imp_prec=_sp(rna_imp_prec, bidx),
                     lam_logprior=_regrid_global(_s(lam_logprior, bidx), n_grid, k_ss, L),
+                    length_loglik=_regrid_global(_s(length_loglik, bidx), n_grid, k_ss, L),
                     lam_imp_mode=_s(lam_imp_mode, bidx),
                     lam_imp_prec=_s(lam_imp_prec, bidx),
                 ),
@@ -719,6 +738,7 @@ def _solve_nodes_logodds_all(
                     rna_imp_mode=_sp(rna_imp_mode, bidx),
                     rna_imp_prec=_sp(rna_imp_prec, bidx),
                     lam_logprior=_s(lam_logprior, bidx),
+                    length_loglik=_s(length_loglik, bidx),
                     lam_imp_mode=_s(lam_imp_mode, bidx),
                     lam_imp_prec=_s(lam_imp_prec, bidx),
                     theta_imp_mode=_s(theta_imp_mode, bidx),

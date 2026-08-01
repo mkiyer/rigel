@@ -110,10 +110,30 @@ nodes + 1,447,763 edges ≈ 2.5 M. Like-for-like the object count **doubles**.
    **`(count, Σ1/L)` beats `(count, ΣL)` everywhere:** sd 0.017 vs 0.028, condition number 283 vs 1137 (gDNA FL 50, RNA 200, f_g 0.15);
    1.6× more precise, 4× better conditioned, never worse. With the fitted gDNA length wrong by 10 %, total density reads 1.0012× truth vs
    0.9652×. (`scratchpad/acc_proto_g.py`)
-6. **Ignoring the fragment-fit taper near a transcript end over-calls gDNA by 11.0 %** — bp-weighted mean of (crossing effective length ÷
-   mean FL) = 0.8904 over 3,000 genes / 10,957,350 exonic positions, RNA N(200,50). **Contiguous seams are WORSE than junctions (0.750 vs
-   0.886)** — a junction has exons both sides by construction; a contiguous seam is often inside a terminal exon. The gDNA fraction is off
-   by **+0.36** in the last region before a polyA site.
+6. ⛔ **CORRECTED 2026-07-30 — THE GEOMETRY REPRODUCES; THE "11.0 % gDNA OVER-CALL" DOES NOT.** The original text is kept at the foot of
+   this item. What it measured is real; what it was *labelled* is not, and the label was load-bearing (it is why A7 was deferred past S5.f
+   as a step expected to buy 11 %).
+   **The geometry, re-measured on the chr22 pilot index at the suite's own FL:** the position-weighted taper ratio is **0.8738**, against the
+   original 0.8904 on a different index, annotation and FL. ✅ **That half reproduces.**
+   ⛔ **But the estimator is FRAGMENT-weighted, not POSITION-weighted, and that is the whole story.** Weighting each line by the unspliced
+   mass actually on it, the taper ratio is **0.9596** — a 4.0 % geometric effect, not 11.0 %. Fragments concentrate mid-transcript, which is
+   exactly where the taper is inert: **89.2 % of edge mass sits on lines the taper does not touch at all**, and only 2.7 % on lines tapered
+   below 0.25×. A bp-weighted mean gives every terminal position equal say with every mid-transcript position; the calibration does not.
+   ⛔ **And a geometric bias in a divisor does not pass through to composition 1:1.** Measured end to end (A/B on all 8 pilot conditions,
+   arm A bit-identical to the S5.f baseline): turning the taper on moves the library gDNA fraction by **≤ 0.0002**, and *toward* truth on all
+   four zero-gDNA conditions by less than 1e-4. Node gDNA mass moves by 0.021 % in total, edge gDNA mass by 0.52 %.
+   ⭐ **The "+0.36" IS real for an individual node — and irrelevant.** Max per-node |Δf_gdna| = **0.3961**, so the original claim is right
+   about the worst node. But only **6 nodes** move by more than 0.30, and they carry **17 fragments** between them = **0.0002 %** of node
+   mass. Both statements are true at once; only the second decides anything.
+   ⚠ **The condition under which this null would FAIL, and the one-number test for it.** The null holds because mass is mid-transcript. A
+   3′-biased or heavily degraded library — cfRNA is degraded — or transcripts short relative to the fragment length would put mass exactly
+   where the taper bites. **The screening test is the mass-weighted taper ratio** (0.9596 here): compute it before assuming the taper is
+   negligible on a new library. It is far cheaper than wiring the taper.
+   ⚠ **Contiguous seams remain WORSE than junctions (0.750 vs 0.886)** — a junction has exons both sides by construction; a contiguous seam
+   is often inside a terminal exon. That comparison was never the disputed part.
+   *Original text, kept because the geometry in it is sound:* "Ignoring the fragment-fit taper near a transcript end over-calls gDNA by
+   11.0 % — bp-weighted mean of (crossing effective length ÷ mean FL) = 0.8904 over 3,000 genes / 10,957,350 exonic positions, RNA N(200,50).
+   … The gDNA fraction is off by +0.36 in the last region before a polyA site.
 7. **Isoform disagreement about "how much transcript remains" is small enough to ignore:** 75.7 % of exonic positions have every isoform
    agreeing exactly; max-over-isoforms vs mean moves the answer 3.29 %; taking the max independently per side of a junction agrees with the
    best realisable single-isoform pair on 93.9 % of disagreeing junctions (mean ratio 0.9989). 23,240 of 39,288 genes have ≥2 isoforms.

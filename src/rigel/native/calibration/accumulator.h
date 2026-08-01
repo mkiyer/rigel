@@ -295,6 +295,23 @@ public:
     /// at L. Empty when this reference has no node types.
     const std::int64_t* pool_lengths_data() const noexcept { return pool_lengths_.data(); }
     std::size_t         pool_lengths_size() const noexcept { return pool_lengths_.size(); }
+
+    /// ⭐ C1: EVERY deposited fragment, binned at its own L, with NO purity condition.
+    ///
+    /// The five pure pools above are deliberately CONDITIONED (`ACCUMULATOR_DESIGN.md` §8: an impure
+    /// pool is worse than a missing one), so they cannot serve as the unconditional anchor an
+    /// empirical-Bayes shrinkage needs -- which is why that anchor was taken from the SCANNER, which
+    /// measures length by two other rules over another population (`FRAGMENT_LENGTH_AUDIT.md` §1.1).
+    /// This row removes that reason: anchor and pools become one measurement of one quantity.
+    ///
+    /// It is "unconditional GIVEN DEPOSIT" and the name says so: it excludes what the accumulator
+    /// rejects (too long / ambiguous path / strand-undefined / empty), each of which is counted in
+    /// `DepositCounters`. That is exactly the population the pools are drawn from.
+    ///
+    /// Invariant, the same externally-checkable form as node_start_count's and a DIFFERENT statement:
+    /// `sum(deposited_lengths) == sum(node_start_count) == deposited`.
+    const std::uint32_t* deposited_lengths_data() const noexcept { return deposited_lengths_.data(); }
+    std::size_t          deposited_lengths_size() const noexcept { return deposited_lengths_.size(); }
     int                 max_length()        const noexcept { return max_length_; }
 
     const DepositCounters& counters() const noexcept { return counters_; }
@@ -340,6 +357,7 @@ private:
     std::vector<std::uint8_t>  node_types_;        // n_nodes, or empty (no pools)
     int                        max_length_ = 0;
     std::vector<std::int64_t>  pool_lengths_;      // kNFragmentPools * (max_length + 1), or empty
+    std::vector<std::uint32_t> deposited_lengths_; // max_length + 1 -- C1, unconditional given deposit
     DepositCounters            counters_;
 };
 

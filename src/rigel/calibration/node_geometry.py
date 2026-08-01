@@ -117,6 +117,13 @@ class NodeGeometry:
     #: ⭐ It is BOTH the density numerator and the Poisson ``n``: the accumulator deposits ``+1`` on
     #: every object the fragment touched, so there is no fractional mass to carry separately.
     unspliced_count: np.ndarray
+    #: float64[n_slots, 2] — the accumulator's two LENGTH channels for the same population, same keying.
+    #: ``Σ 1/weight`` (weight = L at a node, L−1 at a line) and ``Σ L``. ⭐ Stored since S5.a and read by
+    #: nobody until P2: `length_likelihood` turns them into composition evidence on the λ axis, which is
+    #: the only source that speaks on an AMBIG node or an unstranded library
+    #: (`SOLVER_OBSERVABLES_PLAN.md` §6; `LEDGER.md` P0 measured 13.3–40.1 % of mass blind without it).
+    unspliced_inv_length_sum: np.ndarray
+    unspliced_length_sum: np.ndarray
     #: float64[n_slots] — the gDNA divisor. Contained placements at a NODE, crossing placements at an EDGE.
     eff_gdna: np.ndarray
     #: float64[n_slots] — the RNA divisor, the same frames on the RNA length pmf.
@@ -147,6 +154,7 @@ def build_node_geometry(
     junctions,
     gdna_fl_pmf: np.ndarray,
     rna_fl_pmf: np.ndarray,
+    edge_rna_reach=None,
 ) -> NodeGeometry:
     """Assemble the per-slot geometry from the substrate's five populations onto the chain.
 
@@ -164,6 +172,11 @@ def build_node_geometry(
                       that spliced across it, and it is a brand-new population with no predecessor
                       divisor, so wiring it regresses nothing
     ================  ==========================================================================
+
+    ``edge_rna_reach`` is the **A7 switch**: ``None`` (the default) keeps ``UNBOUNDED_REACH`` at
+    contiguous edges and is byte-identical to the S5.f path; a ``(reach_lo, reach_hi)`` pair per
+    contiguous edge (:func:`~rigel.calibration.splice_graph.build_contiguous_edge_reach_arrays`) turns
+    the taper on. ⚠ It is ONE argument so that an A/B varies one thing and shares every line of code.
 
     **Where a junction attaches.** Its donor is the line to the RIGHT of ``src_node`` and its acceptor
     the line to the LEFT of ``dst_node``; molecules leave the template at the first and arrive at the
@@ -186,21 +199,55 @@ def build_node_geometry(
     spliced_count = np.zeros((n, 2), dtype=np.float64)
     spliced_count[is_edge] = np.asarray(substrate.edge_spliced.count, np.float64)[obj[is_edge]]
 
+    # ⭐ THE TWO LENGTH CHANNELS, gathered from the SAME populations as ``unspliced_count`` — the
+    # accumulator's `inv_length_sum` (Σ 1/weight) and `length_sum` (Σ L). Stored since S5.a and read by
+    # NOBODY until P2; they are what `length_likelihood` turns into composition evidence on the λ axis,
+    # and the fourth information source in `node_init`'s list (`SOLVER_OBSERVABLES_PLAN.md` §6).
+    # ⚠ They must track ``unspliced_count`` population-for-population — node_contained at a NODE,
+    # edge_unspliced at an EDGE — or the moments would describe a different set of fragments than the
+    # count they are conditioned on.
+    def _channel(node_attr: str, edge_attr: str) -> np.ndarray:
+        out = np.zeros((n, 2), dtype=np.float64)
+        out[is_node] = np.asarray(getattr(substrate.node_contained, node_attr), np.float64)[
+            obj[is_node]
+        ]
+        out[is_edge] = np.asarray(getattr(substrate.edge_unspliced, edge_attr), np.float64)[
+            obj[is_edge]
+        ]
+        return out
+
+    unspliced_inv_length_sum = _channel("inv_length_sum", "inv_length_sum")
+    unspliced_length_sum = _channel("length_sum", "length_sum")
+
     # ── the two per-component divisors ───────────────────────────────────────────────────────────
     node_len = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
     n_nodes = node_len.shape[0]
-    node_idx = np.clip(obj, 0, max(n_nodes - 1, 0))
     unbounded = np.full(1, UNBOUNDED_REACH)
 
-    def divisor(pmf: np.ndarray) -> np.ndarray:
-        contained = contained_eff_length(node_len, pmf) if n_nodes else np.zeros(0)
-        crossing = float(crossing_eff_length(pmf, unbounded, unbounded)[0])
-        return np.where(
-            is_node, contained[node_idx] if n_nodes else 0.0, np.where(is_edge, crossing, 0.0)
-        )
+    def divisor(pmf: np.ndarray, edge_reach=None) -> np.ndarray:
+        """Per-slot effective length: contained at a NODE, crossing at an EDGE.
 
+        ``edge_reach`` is ``(reach_lo, reach_hi)`` per contiguous edge, or ``None`` for
+        :data:`UNBOUNDED_REACH` — the A7 switch. ``None`` is byte-identical to the pre-S5.g path, so
+        the two arms of the A/B differ in ONE argument and share every line of code.
+        """
+        contained = contained_eff_length(node_len, pmf) if n_nodes else np.zeros(0)
+        n_edges = max(int(chain.n_edges_total), 1)
+        if edge_reach is None:
+            crossing = np.full(n_edges, float(crossing_eff_length(pmf, unbounded, unbounded)[0]))
+        else:
+            crossing = crossing_eff_length(pmf, edge_reach[0], edge_reach[1])
+        out = np.zeros(n, dtype=np.float64)
+        if n_nodes:
+            out[is_node] = contained[obj[is_node]]
+        if is_edge.any():
+            out[is_edge] = crossing[np.clip(obj[is_edge], 0, crossing.shape[0] - 1)]
+        return out
+
+    # ⭐ gDNA takes NO reach argument, ever: its template is the chromosome, so ``taper_g = 1``. That is
+    # physics, not the A7 ruling — the ruling is only about the RNA component (`S5_DESIGN_LOG.md` §1 A7).
     eff_gdna = divisor(gdna_fl_pmf)
-    eff_rna = divisor(rna_fl_pmf)
+    eff_rna = divisor(rna_fl_pmf, edge_rna_reach)
 
     # ── the JUMPING population: a junction edge is a FACTOR on the lines it leaves and enters ───
     junction_count = np.zeros((n, 2), dtype=np.float64)
@@ -229,6 +276,8 @@ def build_node_geometry(
     return NodeGeometry(
         n_slots=int(n),
         unspliced_count=unspliced_count,
+        unspliced_inv_length_sum=unspliced_inv_length_sum,
+        unspliced_length_sum=unspliced_length_sum,
         eff_gdna=eff_gdna,
         eff_rna=eff_rna,
         spliced_count=spliced_count,

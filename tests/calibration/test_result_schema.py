@@ -31,6 +31,8 @@ def _valid_kwargs() -> dict:
         mass_rna_junction=junction.copy(),
         gdna_node_eff_len=node.copy(),
         gdna_edge_eff_len=edge.copy(),
+        rna_node_eff_len=node.copy(),
+        rna_edge_eff_len=edge.copy(),
         gdna_density_global=1e-3,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
@@ -75,10 +77,12 @@ def test_a_library_with_no_junctions_constructs():
         ("mass_gdna_node", N_NODES),
         ("mass_rna_node", N_NODES),
         ("gdna_node_eff_len", N_NODES),
+        ("rna_node_eff_len", N_NODES),
         ("mass_gdna_edge", N_EDGES),
         ("mass_rna_edge", N_EDGES),
         ("mass_rna_spliced_edge", N_EDGES),
         ("gdna_edge_eff_len", N_EDGES),
+        ("rna_edge_eff_len", N_EDGES),
         ("mass_rna_junction", N_JUNCTIONS),
     ],
 )
@@ -109,7 +113,14 @@ def test_the_error_names_the_axis_it_expected():
 
 @pytest.mark.parametrize(
     "field",
-    ["mass_gdna_node", "gdna_node_eff_len", "mass_gdna_edge", "gdna_edge_eff_len"],
+    [
+        "mass_gdna_node",
+        "gdna_node_eff_len",
+        "mass_gdna_edge",
+        "gdna_edge_eff_len",
+        "rna_node_eff_len",
+        "rna_edge_eff_len",
+    ],
 )
 def test_rejects_negative(field):
     kw = _valid_kwargs()

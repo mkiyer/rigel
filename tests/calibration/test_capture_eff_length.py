@@ -72,6 +72,8 @@ def _cal(region_arrays: RegionArrays, density, node_eff, edge_eff) -> Calibratio
         mass_rna_junction=np.zeros(0, dtype=np.float64),
         gdna_node_eff_len=node_eff,
         gdna_edge_eff_len=edge_eff,
+        rna_node_eff_len=node_eff,
+        rna_edge_eff_len=edge_eff,
         gdna_density_global=float(d.mean()),
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,

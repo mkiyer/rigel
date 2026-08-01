@@ -374,12 +374,26 @@ class Tally:
     edge_spliced_count: np.ndarray  # uint32[n_edges, 2] — certified RNA: gDNA cannot be spliced
     edge_spliced_inv_length_sum: np.ndarray  # uint64[n_edges, 2]
     edge_spliced_length_sum: np.ndarray  # uint64[n_edges, 2] — Sum L, the second length tilt
-    edge_spliced_length_sum: np.ndarray  # uint64[n_edges, 2] — Sum L, the second length tilt
     sj_count: np.ndarray  # uint32[n_sj, 2]
     sj_inv_length_sum: np.ndarray  # uint64[n_sj, 2]
     sj_length_sum: np.ndarray  # uint64[n_sj, 2] — Sum L, the second length tilt
-    sj_length_sum: np.ndarray  # uint64[n_sj, 2] — Sum L, the second length tilt
     pool_lengths: np.ndarray  # int64[5, max_fragment_length + 1] — binned at L, once per fragment
+    #: uint32[max_fragment_length + 1] — ⭐ **C1: EVERY deposited fragment, binned at its own L, with no
+    #: purity condition.** The five pure pools above are deliberately CONDITIONED (`ACCUMULATOR_DESIGN.md`
+    #: §8: an impure pool is worse than a missing one), so they cannot serve as the unconditional anchor an
+    #: empirical-Bayes shrinkage needs — which is why that anchor was taken from the SCANNER, which
+    #: measures length by two other rules over another population (`FRAGMENT_LENGTH_AUDIT.md` §1.1). This
+    #: row removes that reason: anchor and pools become one measurement of one quantity.
+    #:
+    #: ⚠ **It is "unconditional GIVEN DEPOSIT", and the name says so.** It excludes what the accumulator
+    #: rejects — over the length limit, ambiguous path, strand-undefined, empty — every one of which is
+    #: counted in ``qc``. That is exactly the population the pools are drawn from, which is what makes it
+    #: the right anchor and not merely a convenient one.
+    #:
+    #: ⭐ Its invariant is the same externally-checkable form as ``node_start_count``'s, and it is a
+    #: DIFFERENT statement: ``Σ deposited_lengths == Σ node_start_count == qc.deposited``. The first says
+    #: every fragment was binned by length, the second that every fragment was located in space.
+    deposited_lengths: np.ndarray
     qc: dict[str, int] = field(default_factory=dict)
 
     @classmethod
@@ -408,6 +422,7 @@ class Tally:
             sj_inv_length_sum=inv_length(n_sj),
             sj_length_sum=inv_length(n_sj),
             pool_lengths=np.zeros((len(FragmentPool), max_length + 1), np.int64),
+            deposited_lengths=np.zeros(max_length + 1, np.uint32),
             qc={outcome.value: 0 for outcome in DepositOutcome}
             | {
                 "unannotated_introns": 0,
@@ -560,6 +575,10 @@ class Accumulator:
         t = self.tally
         node_base, edge_base = int(p.ref_node_offsets[ref]), int(p.ref_edge_offsets[ref])
         t.node_start_count[node_base + self._local_node(cuts, first_base)] += 1
+        # ⭐ C1: the unconditional length histogram, incremented HERE — beside the start count and the
+        # DEPOSITED counter — so all three describe one population by construction rather than by
+        # agreement. ``length`` is already clipped to the reference and gated by the length limit above.
+        t.deposited_lengths[length] += 1
         t.qc[DepositOutcome.DEPOSITED.value] += 1
         if sj_implicit:
             t.qc["sj_implicit_fragments"] += 1

@@ -155,6 +155,17 @@ class AccumulatorPayload:
     # -- the fragment-length pools, binned at L, once per fragment --
     pool_lengths: np.ndarray  # int64[5, max_length + 1]
 
+    #: uint32[max_length + 1] — ⭐ **C1: EVERY deposited fragment, binned at its own L, no purity
+    #: condition.** The five pools above are deliberately CONDITIONED (an impure pool is worse than a
+    #: missing one), so none of them is an unconditional anchor — which is why the empirical-Bayes
+    #: shrinkage in `calibration.fl` took its anchor from the SCANNER, which measures length by two
+    #: other rules over another population (`docs/FRAGMENT_LENGTH_AUDIT.md`). This is that anchor, in
+    #: the accumulator's own frame.
+    #: ⚠ "Unconditional GIVEN DEPOSIT": it excludes what the accumulator rejects (too long, ambiguous
+    #: path, strand-undefined, empty), each counted in ``qc``. That is exactly the population the pools
+    #: are drawn from, which is what makes it the right anchor rather than merely a convenient one.
+    deposited_lengths: np.ndarray
+
     qc: ScanQC
     max_length: int  # the fragment-length limit applied to L, and the pool-histogram width
     n_refs: int
@@ -274,12 +285,29 @@ class AccumulatorPayload:
                 f"{N_FRAGMENT_POOLS} x (max_length + 1) = {N_FRAGMENT_POOLS * (max_length + 1)}"
             )
 
+        deposited_lengths = np.ascontiguousarray(cal["deposited_lengths"], dtype=np.uint32)
+        if deposited_lengths.shape != (max_length + 1,):
+            raise ValueError(
+                f"deposited_lengths has shape {deposited_lengths.shape}, expected ({max_length + 1},)"
+            )
+        # ⭐ THE C1 INVARIANT, checked at the door. Same externally-checkable form as
+        # ``sum(node_start_count) == deposited`` and a DIFFERENT statement: that one says every fragment
+        # was located in space, this one that every fragment was binned by length. A histogram that is
+        # the anchor for every FL model in the tool must not be allowed in one fragment short.
+        n_binned = int(deposited_lengths.sum())
+        if n_binned != int(cal["qc"]["deposited"]):
+            raise ValueError(
+                f"deposited_lengths sums to {n_binned} but {int(cal['qc']['deposited'])} fragments were "
+                "deposited; the unconditional length histogram must bin every one of them exactly once."
+            )
+
         return cls(
             cut_positions=cut_positions,
             **offsets,
             **banks,
             node_start_count=node_start_count,
             pool_lengths=pool_lengths.reshape(N_FRAGMENT_POOLS, max_length + 1),
+            deposited_lengths=deposited_lengths,
             qc=ScanQC.from_dict(cal["qc"]),
             max_length=max_length,
             n_refs=n_refs,

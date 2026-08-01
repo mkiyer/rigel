@@ -132,12 +132,22 @@ def edge_owner_nodes(calibration: "CalibrationResult", region_arrays: "RegionArr
     return np.where(ig[lo] & ~ig[hi], hi, lo)
 
 
-def _gdna_node_arrays(
+def _component_node_arrays(
     calibration: "CalibrationResult",
     region_arrays: "RegionArrays",
+    mass_node: np.ndarray,
+    mass_edge: np.ndarray,
+    eff_node: np.ndarray,
+    eff_edge: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Per-node arrays ``(gdna_total, support_total, edge_mass, edge_support)`` for the gDNA node set —
+    """Per-node arrays ``(mass_total, support_total, edge_mass, edge_support)`` for ONE component —
     the SHARED node model with ``transcript_capture_eff_lengths``.
+
+    ⭐ **Parameterised by component (P1).** It was ``_gdna_node_arrays`` and reached into the gDNA
+    fields directly. ``assemble_priors`` now needs the identical fold for RNA — because converting a
+    mass into a density requires THAT COMPONENT'S OWN opportunity as the divisor — and one function
+    called twice is the alternative to a second implementation that drifts (`CARRY_FORWARD.md` §3
+    trap 27).
 
     The density-correct, transport-free gDNA node model. The object set over a chain is the per-node
     CONTAINED object plus the per-line CROSSING object, each attributed to a flank node
@@ -176,22 +186,63 @@ def _gdna_node_arrays(
     — matching ``transcript_capture_eff_lengths``, NOT over the folded ``gdna_total`` (which would
     under-contract a captured exon whose line runs into a depleted intron).
 
-    Mass conservation (no mass moved — transport-free): ``Σ gdna_total = Σ m_r + Σ m_e``, every object
-    counted exactly once.
+    ⚠ **OBJECT conservation, not FRAGMENT conservation** — ``Σ mass_total = Σ m_r + Σ m_e``, every
+    OBJECT counted exactly once. That is not the same as every fragment counted once: a fragment
+    deposits on ``max(K, 1)`` objects. Converting to fragments is ``assemble_priors``' job and is what
+    the supports returned here are for.
     """
-    node_mass = np.asarray(calibration.mass_gdna_node, dtype=np.float64)
-    node_support = np.maximum(np.asarray(calibration.gdna_node_eff_len, dtype=np.float64), 1e-9)
+    node_support = np.maximum(np.asarray(eff_node, dtype=np.float64), 0.0)
+    node_mass = _mass_where_there_is_opportunity(mass_node, node_support)
     n = node_mass.shape[0]
 
     edge_mass = np.zeros(n, dtype=np.float64)
     edge_support = np.zeros(n, dtype=np.float64)
     if calibration.n_edges:
         owner = edge_owner_nodes(calibration, region_arrays)
+        e_support = np.maximum(np.asarray(eff_edge, dtype=np.float64), 0.0)
         # a node may own its own right line AND a re-keyed one from its left, hence np.add.at
-        np.add.at(edge_mass, owner, np.asarray(calibration.mass_gdna_edge, dtype=np.float64))
-        np.add.at(edge_support, owner, np.asarray(calibration.gdna_edge_eff_len, dtype=np.float64))
+        np.add.at(edge_mass, owner, _mass_where_there_is_opportunity(mass_edge, e_support))
+        np.add.at(edge_support, owner, e_support)
 
     return node_mass + edge_mass, node_support + edge_support, edge_mass, edge_support
+
+
+def _mass_where_there_is_opportunity(mass: np.ndarray, support: np.ndarray) -> np.ndarray:
+    """Drop a component's mass on objects where that component had **zero opportunity**.
+
+    ⛔ **Both sides of the pooled ratio, or neither.** ``rho = Σm / ΣS`` is a Poisson rate — observations
+    over exposure. An object with zero exposure that nonetheless carries mass is a contradiction in the
+    model, and leaving its mass in the numerator inflates ``rho`` with nothing in the denominator to pay
+    for it. It must contribute to neither: it carries no information about that component's density.
+
+    ⚠ **This is not a hypothetical.** ``contained_eff_length`` is exactly 0 wherever a node is shorter
+    than the shortest fragment in that component's pmf — measured on the chr22 pilot against its own
+    measured pure pools, **21.7 % of nodes for RNA and 18.7 % for gDNA** (`CARRY_FORWARD.md` §1 fact 9
+    records 12.4 % genome-wide). The solver can still put mass there, because ``f_g`` is an inference
+    and not a fact, so ``mass > 0`` with ``support == 0`` is an ordinary configuration.
+
+    ⭐ Found by perturbation P1e: flooring the divisor to ``1e-9`` instead of testing ``support > 0``
+    left every test green, because the only zero-support fixture also had zero mass. The floor would
+    have turned a single stray fragment on a 40 bp node into a density of ``1e9`` — `CARRY_FORWARD.md`
+    §3 trap 23, which is how a "no data" default of 100 % gDNA once seeded false gDNA into neighbouring
+    exons. The same contract as ``node_geometry._rate`` on the solver side.
+    """
+    m = np.asarray(mass, dtype=np.float64)
+    return np.where(np.asarray(support, dtype=np.float64) > 0.0, m, 0.0)
+
+
+def _density_times_span(mass: np.ndarray, support: np.ndarray, span_bp: np.ndarray) -> np.ndarray:
+    """``(Σ mass / Σ support) · span_bp`` — a per-object mass total converted to a FRAGMENT COUNT.
+
+    The three arrays are already per-locus sums. ⛔ Zero support returns **0**, never a floored
+    division: an object with no opportunity for a component must emit nothing (`CARRY_FORWARD.md` §3
+    trap 23). Negative mass cannot occur (``CalibrationResult`` rejects it) but is clamped anyway,
+    because a prior pseudocount below zero is not a prior.
+    """
+    m = np.asarray(mass, dtype=np.float64)
+    s = np.asarray(support, dtype=np.float64)
+    rho = np.divide(m, s, out=np.zeros_like(m), where=s > 0.0)
+    return np.maximum(rho * np.asarray(span_bp, dtype=np.float64), 0.0)
 
 
 def assemble_priors(
@@ -201,19 +252,51 @@ def assemble_priors(
 ) -> LocusPriors:
     """Build the per-locus EM prior from the calibration result.
 
-    The gDNA object set is the **density-correct, transport-free** node + line model
-    (see :func:`_gdna_node_arrays`):
+    Each component's object set is the **density-correct, transport-free** node + line model
+    (see :func:`_component_node_arrays`), on that component's OWN opportunity:
 
-        node r:  mass = mass_gdna_node[r],  effective support S_r = E_f[(L_r − w + 1)+]
-        edge e:  mass = mass_gdna_edge[e],  effective support S_e = E_f[w − 1]
+        node r:  mass = mass_c_node[r],  effective support S_r = E_c[(L_r − w + 1)+]
+        edge e:  mass = mass_c_edge[e],  effective support S_e = E_c[w − 1]
 
     with each line attributed to a flank node (:func:`edge_owner_nodes`). Masses and supports project
     to loci by genomic-overlap ``share``::
 
-        gdna_prior_count = Σ share * (node + edge)                            (deconvolved gDNA count)
-        rna_prior_count  = Σ share * rna_node_total   (UNSPLICED RNA; spliced withheld — see below)
+        rho_c            = Σ share*mass_c / Σ share*S_c            <- pooled density, RATIO OF SUMS
+        {gdna,rna}_prior_count = rho_c * span_bp                   <- the SAME genomic span for both
         gdna_eff_len     = (G+1)² / [ Σ share*(node²/S_r + edge²/S_e) + (2G+1)/span ], capped at span
                            G = Σ share*(node+edge),  span = Σ share*(S_r + S_e)  (EFFECTIVE support)
+
+    ⭐ **THE PRIOR IS A FRAGMENT COUNT, AND A SUM OF PER-OBJECT MASSES IS NOT ONE.** The EM adds these
+    scalars straight to its own fragment counts (``G = n_gdna + a_g``,
+    ``em_solver.cpp:apply_grouped_prior_update``), so they must be in fragment units. But the accumulator
+    deposits ``+1`` on **every** object a fragment touches — ``max(K, 1)`` of them, ``K`` being the lines
+    crossed — so summing per-object masses gives an object-incidence count::
+
+        incidences(w) = max( 1 , (w-1)/s )        for a partition of spacing s
+
+    Counts are conserved exactly where every node is longer than every fragment, and become a
+    **length-weighted** count where they are not — and 56.7 % of human nodes are shorter than one 200 bp
+    fragment. Because the weight is the fragment's own length it does NOT cancel between two components
+    with different mean lengths: measured on the chr22 pilot, gDNA deposits **1.031** incidences per
+    fragment against RNA **≈1.17**, so the raw sum under-called gDNA by 13–19 %. Deterministically:
+    re-tiling 1200 bp from one node to twelve moved the RNA prior **2.19×** with the library unchanged
+    (`tests/calibration/test_prior_units.py`).
+
+    Density is intensive — it is pooled as a ratio of sums and then **integrated over the span**. That is
+    the one-line statement of the model, and it is partition-free because ``mass_c/S_c`` is.
+
+    ⚠ **The pooling is support-weighted, and that is an approximation, not an identity.**
+    ``Σm/ΣS`` is the support-weighted mean density, so ``rho·span`` is exact only where ``rho_c`` is
+    uniform *within* the locus. It is the same pooling `derive.gdna_density_global` and
+    `CARRY_FORWARD.md` §2's ``rho_bg = Σg/ΣE`` already use — a ratio of sums, never a mean of ratios —
+    and it is a strict improvement on the raw sum, but a locus with a strong internal density gradient
+    carries a second-order residual. Under uniform ρ the two components' weightings agree exactly, so
+    the g:r **ratio** is exact there regardless.
+
+    ⚠ **``span_bp`` is the GENOMIC span and is the same number for both components.** Any
+    component-specific span (``ΣS_c``, say) would re-introduce exactly the tilt this removes — ``ρ_c·ΣS_c``
+    *is* the raw sum. Edges contribute mass and support but **zero** ``span_bp``: a contiguous edge is a
+    0-bp line, which is correct and not an omission.
 
     **The bedrock invariant — factor 1 under uniform gDNA.** Dividing each object's mass by its
     EFFECTIVE sampling support makes its density ``m/S`` exactly the true ρ under a uniform (unenriched)
@@ -245,11 +328,19 @@ def assemble_priors(
             f"{region_arrays.n_regions}; they must address the same partition."
         )
 
-    # Density-correct, transport-free gDNA object model: the per-node CONTAINED object (support
-    # gdna_node_eff_len) + the per-line CROSSING object (support gdna_edge_eff_len), each attributed to
-    # a flank node — the SAME object model transcript_capture_eff_lengths contracts on (EFFECTIVE, not
-    # genomic, supports; the factor-1-under-uniform bedrock).
-    gdna_region, support_len, pooled, seam_len = _gdna_node_arrays(calibration, region_arrays)
+    # Density-correct, transport-free object model, PER COMPONENT: the per-node CONTAINED object +
+    # the per-line CROSSING object, each attributed to a flank node — the SAME object model
+    # transcript_capture_eff_lengths contracts on (EFFECTIVE, not genomic, supports; the
+    # factor-1-under-uniform bedrock). ⭐ Called twice: converting a mass to a density needs THAT
+    # COMPONENT'S own opportunity, and using one divisor for both is the tilt P1 removes.
+    gdna_region, support_len, pooled, seam_len = _component_node_arrays(
+        calibration,
+        region_arrays,
+        calibration.mass_gdna_node,
+        calibration.mass_gdna_edge,
+        calibration.gdna_node_eff_len,
+        calibration.gdna_edge_eff_len,
+    )
 
     # SHARED global reference density — the SAME ρ_ref every transcript contracts against, so the
     # gDNA-vs-transcript density comparison sits on ONE scale. The enrichment contraction is applied PER
@@ -286,9 +377,14 @@ def assemble_priors(
         - np.asarray(calibration.mass_rna_spliced_edge, dtype=np.float64),
         0.0,
     )
-    rna_region = np.asarray(calibration.mass_rna_node, dtype=np.float64).copy()
-    if calibration.n_edges:
-        np.add.at(rna_region, edge_owner_nodes(calibration, region_arrays), rna_edge_unspliced)
+    rna_region, rna_support, _, _ = _component_node_arrays(
+        calibration,
+        region_arrays,
+        calibration.mass_rna_node,
+        rna_edge_unspliced,
+        calibration.rna_node_eff_len,
+        calibration.rna_edge_eff_len,
+    )
     rna_region = np.maximum(rna_region, 0.0)
 
     proj = _project_regions_to_loci(
@@ -298,6 +394,12 @@ def assemble_priors(
         {
             "gdna": gdna_region,
             "rna": rna_region,
+            # the two per-component OPPORTUNITY totals — the divisors that turn a mass into a density
+            "gdna_support": support_len,
+            "rna_support": rna_support,
+            # ⭐ the GENOMIC span: the number of start positions, the SAME for both components. Nodes
+            # only — an edge is a 0-bp line and contributes none.
+            "span_bp": np.asarray(region_arrays.region_size_bp, dtype=np.float64),
             "span": support_len,  # Σ S — the EFFECTIVE support (region_eff_len + summed seams), NOT genomic
             # the CONTAINED (unique-mapper) mass per locus — the calibration-blindness discriminator for the
             # eff-len guard below (calibration's accumulator is fed by unique mappers only).
@@ -307,7 +409,17 @@ def assemble_priors(
             "elen": elen,
         },
     )
-    gdna_locus, span = proj["gdna"], proj["span"]
+    span = proj["span"]
+
+    # ⭐ MASS -> DENSITY -> FRAGMENT COUNT. The pooled density is a ratio of sums (never a mean of
+    # ratios, `CARRY_FORWARD.md` §2), integrated over the locus's GENOMIC span — the same span for both
+    # components, so the ratio a_g:a_r is ρ_g:ρ_r and carries no length tilt.
+    # ⛔ `where=` and not a floored divisor: a locus with no opportunity for a component must emit
+    # NOTHING, never a floored division (`CARRY_FORWARD.md` §3 trap 23 — a "no data" default of 100 %
+    # gDNA was actively seeding false gDNA into neighbouring exons).
+    span_bp = proj["span_bp"]
+    gdna_locus = _density_times_span(proj["gdna"], proj["gdna_support"], span_bp)
+    rna_locus = _density_times_span(proj["rna"], proj["rna_support"], span_bp)
     # gDNA EM effective length = the enrichment-weighted length of the locus's gDNA against the SHARED global
     # ρ_ref: eff = Σ_locus share·min(m_n/ρ_ref, S_n) = proj["elen"]. gDNA's node set is ALL the locus's nodes
     # (every region + boundary over its span; the intergenic regions outside are dropped by the projection).
@@ -325,7 +437,7 @@ def assemble_priors(
 
     return LocusPriors(
         gdna_prior_count=gdna_locus,
-        rna_prior_count=proj["rna"],
+        rna_prior_count=rna_locus,
         # Clamp into [min(floor, span), span]: the 1 bp floor (matching the EM's own eff-len floor) applies
         # to every real locus, but must never exceed the locus's own effective span — otherwise a degenerate
         # sub-basepair span (e.g. a microexon-only locus, region shorter than a fragment ⇒ E[max(0,L−ℓ)]≈0)

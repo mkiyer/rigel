@@ -94,6 +94,10 @@ def _parts(signatures, node_count, node_eff, edge_count, edge_eff, ref_names=Non
     geometry = NodeGeometry(
         n_slots=n_slots,
         unspliced_count=count,
+        # the length channels are irrelevant to node_gdna_density (it reads count and eff only);
+        # shape-correct zeros say "this fixture makes no statement about fragment lengths".
+        unspliced_inv_length_sum=np.zeros((n_slots, 2)),
+        unspliced_length_sum=np.zeros((n_slots, 2)),
         spliced_count=np.zeros((n_slots, 2)),
         eff_gdna=eff,
         eff_rna=eff,

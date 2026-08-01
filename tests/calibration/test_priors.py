@@ -1,7 +1,7 @@
 """assemble_priors — acyclic CalibrationResult → per-locus EM prior.
 
 The gDNA component eff-length is the density-correct, transport-free node + line IPR
-(``priors._gdna_node_arrays``): a per-node CONTAINED object at effective support
+(``priors._component_node_arrays``): a per-node CONTAINED object at effective support
 ``S_r = E_f[(L_r − w + 1)+] = gdna_node_eff_len`` plus a per-line CROSSING object at
 ``S_e = E_f[w − 1] = gdna_edge_eff_len``. The bedrock invariant these tests pin: under a UNIFORM gDNA
 field (every object's mass = ρ·S) the Laplace-smoothed IPR returns ``span = ΣS`` exactly — an
@@ -27,7 +27,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rigel.calibration.priors import _gdna_node_arrays, assemble_priors
+from rigel.calibration.priors import _component_node_arrays, assemble_priors
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.result import CalibrationResult
 from rigel.config import CalibrationConfig
@@ -44,17 +44,26 @@ def _result(
     edge_eff=None,
     edge_spliced=None,
     gdna_density_global=0.01,
+    rna_node_eff=None,
+    rna_edge_eff=None,
 ) -> CalibrationResult:
     """Build a result on the three axes. One reference with ``n`` nodes owns exactly ``n − 1`` lines.
 
     ``edge_*`` default to zeros, so a caller that cares only about contained mass writes only the node
     arrays — but the edge axis is still the RIGHT LENGTH, because an edge axis inconsistent with its
     own node axis is a mis-shaped fixture, not a "no edges" one.
+
+    ⭐ **The RNA supports default to the gDNA ones**, so a test that is about projection, conservation
+    or re-keying — not about the length tilt — keeps both components on one support and its ``g:r``
+    ratio is unchanged from the pre-P1 fixture. The tilt itself is exercised where it belongs, in
+    `test_prior_units.py`, by giving the two components genuinely different opportunities.
     """
     ng = np.asarray(node_g, dtype=np.float64)
     n = ng.shape[0]
     ne = max(n - 1, 0)
     ez = np.zeros(ne, dtype=np.float64)
+    node_eff_arr = np.asarray(node_eff, dtype=np.float64)
+    edge_eff_arr = ez.copy() if edge_eff is None else np.asarray(edge_eff, dtype=np.float64)
     return CalibrationResult(
         mass_gdna_node=ng,
         mass_rna_node=np.asarray(node_r, dtype=np.float64),
@@ -64,8 +73,14 @@ def _result(
             ez.copy() if edge_spliced is None else np.asarray(edge_spliced, dtype=np.float64)
         ),
         mass_rna_junction=np.zeros(0, dtype=np.float64),
-        gdna_node_eff_len=np.asarray(node_eff, dtype=np.float64),
-        gdna_edge_eff_len=ez.copy() if edge_eff is None else np.asarray(edge_eff, dtype=np.float64),
+        gdna_node_eff_len=node_eff_arr,
+        gdna_edge_eff_len=edge_eff_arr,
+        rna_node_eff_len=(
+            node_eff_arr if rna_node_eff is None else np.asarray(rna_node_eff, dtype=np.float64)
+        ),
+        rna_edge_eff_len=(
+            edge_eff_arr if rna_edge_eff is None else np.asarray(rna_edge_eff, dtype=np.float64)
+        ),
         gdna_density_global=gdna_density_global,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
@@ -141,8 +156,12 @@ def test_factor_one_under_uniform_gdna():
     ra = _regions([0, 120, 320], [120, 320, 400])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 400)])])
     np.testing.assert_allclose(priors.gdna_eff_len, [span], rtol=1e-9)
-    # per-position gDNA rate = the true density ρ (the deconvolved gDNA mass spread over the eff-len)
-    np.testing.assert_allclose(priors.gdna_prior_count[0] / priors.gdna_eff_len[0], rho, rtol=1e-9)
+    # ⭐ P1: the prior is a FRAGMENT COUNT — the recovered density times the GENOMIC span (400 bp, the
+    # three nodes; the two lines are 0-bp and add none). Under a uniform field Σm/ΣS is ρ exactly, so
+    # this asserts BOTH that the density is recovered and that the conversion uses the genomic span.
+    # ⚠ It replaces `gdna_prior_count / gdna_eff_len == rho`, which held only while the prior was a sum
+    # of per-object masses over the same ΣS the eff-len is built from — the units defect P1 removes.
+    np.testing.assert_allclose(priors.gdna_prior_count, [rho * 400.0], rtol=1e-9)
 
 
 def test_factor_one_holds_for_any_density():
@@ -183,7 +202,14 @@ def test_node_arrays_uniform_density_is_constant():
     rho = 0.02
     cal = _uniform_field(node_eff, edge_eff, rho)
     ra = _regions([0, 120, 320], [120, 320, 400])
-    gdna_total, support_total, edge_mass, edge_support = _gdna_node_arrays(cal, ra)
+    gdna_total, support_total, edge_mass, edge_support = _component_node_arrays(
+        cal,
+        ra,
+        cal.mass_gdna_node,
+        cal.mass_gdna_edge,
+        cal.gdna_node_eff_len,
+        cal.gdna_edge_eff_len,
+    )
     np.testing.assert_allclose(gdna_total / support_total, rho, rtol=1e-9)
     live = edge_support > 0
     np.testing.assert_allclose(edge_mass[live] / edge_support[live], rho, rtol=1e-9)
@@ -192,9 +218,13 @@ def test_node_arrays_uniform_density_is_constant():
 # --- mass / projection (independent of the support choice) ----------------------------------------
 
 
-def test_single_locus_sums_node_objects():
-    # gdna_prior_count = Σ contained gDNA, rna_prior_count = Σ RNA. These are MASS sums, unaffected by
-    # the (effective-support) eff-len divisor. The eff-len magnitude is pinned by the factor-1 tests.
+def test_single_locus_projects_both_components():
+    # ⭐ P1: the priors are DENSITIES INTEGRATED OVER THE SPAN, not mass sums.
+    #   ΣS = Σ node_eff (450) + Σ edge_eff (300) = 750 ;  span_bp = 100+200+150 = 450
+    #   gDNA: Σm 4.5  ⇒ ρ 0.006 ⇒ 0.006·450 = 2.7      (was 4.5, the raw incidence sum)
+    #   RNA : Σm 12.0 ⇒ ρ 0.016 ⇒ 0.016·450 = 7.2      (was 12.0)
+    # ⚠ The g:r RATIO is unchanged (0.375) because this fixture gives both components the same support;
+    # the ratio moves only when their opportunities differ, which is `test_prior_units.py`'s job.
     cal = _result(
         node_g=[1.0, 2.0, 1.5],
         node_r=[3.0, 4.0, 5.0],
@@ -203,8 +233,11 @@ def test_single_locus_sums_node_objects():
     )
     ra = _regions([0, 100, 300], [100, 300, 450])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 450)])])
-    np.testing.assert_allclose(priors.rna_prior_count, [12.0])
-    np.testing.assert_allclose(priors.gdna_prior_count, [4.5])
+    np.testing.assert_allclose(priors.rna_prior_count, [7.2])
+    np.testing.assert_allclose(priors.gdna_prior_count, [2.7])
+    np.testing.assert_allclose(
+        priors.gdna_prior_count[0] / priors.rna_prior_count[0], 4.5 / 12.0, rtol=1e-9
+    )
     span = (100.0 + 200.0 + 150.0) + 2 * 150.0
     assert 0.0 < priors.gdna_eff_len[0] <= span + 1e-9
 
@@ -223,9 +256,19 @@ def test_gdna_mass_conservation_nodes_plus_lines():
     )
     ra = _regions([0, 100, 200], [100, 200, 300])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
-    # all 3 nodes in one locus (share = 1) ⇒ gdna_prior_count = the total conserved gDNA mass.
-    np.testing.assert_allclose(priors.gdna_prior_count, [11.0])
-    gdna_total, _, _, _ = _gdna_node_arrays(cal, ra)
+    # ⭐ OBJECT conservation is what this test is named for and it is UNCHANGED: every object counted
+    # exactly once, Σ = 11, asserted on `_component_node_arrays` below. ⚠ The PRIOR is no longer that
+    # sum — a fragment deposits on max(K,1) objects, so 11 is an incidence count, not a fragment count:
+    #   ΣS = 300 + 100 = 400 ;  span_bp = 300  ⇒  ρ = 11/400 = 0.0275  ⇒  0.0275·300 = 8.25
+    np.testing.assert_allclose(priors.gdna_prior_count, [8.25])
+    gdna_total, _, _, _ = _component_node_arrays(
+        cal,
+        ra,
+        cal.mass_gdna_node,
+        cal.mass_gdna_edge,
+        cal.gdna_node_eff_len,
+        cal.gdna_edge_eff_len,
+    )
     np.testing.assert_allclose(
         gdna_total.sum(), cal.mass_gdna_node.sum() + cal.mass_gdna_edge.sum()
     )
@@ -234,7 +277,11 @@ def test_gdna_mass_conservation_nodes_plus_lines():
 def test_spliced_mass_withheld_from_rna_prior():
     # A spliced fragment has no gDNA candidate in the EM (gDNA does not splice) → it is guaranteed-RNA
     # and assigned directly, so it must NOT load rna_prior_count. Node RNA [3,4,5] (Σ=12) plus line RNA
-    # [4,4] of which [1,3] is spliced ⇒ rna_prior = 12 + (4−1) + (4−3) = 16; gDNA prior unchanged.
+    # [4,4] of which [1,3] is spliced ⇒ RNA mass = 12 + (4−1) + (4−3) = 16 (NOT 20).
+    # ⭐ P1 converts that to a fragment count: ΣS = 450 + 300 = 750, span_bp = 300
+    #   RNA : 16/750 · 300 = 6.4   ·   gDNA: 4.5/750 · 300 = 1.8
+    # The WITHHOLDING is what this test pins, and it survives the units change intact: without it the
+    # RNA mass would be 20 and the prior 8.0.
     cal = _result(
         node_g=[1.0, 2.0, 1.5],
         node_r=[3.0, 4.0, 5.0],
@@ -245,8 +292,9 @@ def test_spliced_mass_withheld_from_rna_prior():
     )
     ra = _regions([0, 100, 200], [100, 200, 300])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
-    np.testing.assert_allclose(priors.rna_prior_count, [16.0])
-    np.testing.assert_allclose(priors.gdna_prior_count, [4.5])
+    np.testing.assert_allclose(priors.rna_prior_count, [6.4])
+    np.testing.assert_allclose(priors.gdna_prior_count, [1.8])
+    assert priors.rna_prior_count[0] < 20.0 / 750.0 * 300.0  # the spliced mass really is withheld
 
 
 def test_the_junction_flux_does_NOT_enter_the_rna_prior():
@@ -312,7 +360,10 @@ def test_a_line_off_an_INTERGENIC_left_flank_is_rekeyed_to_its_right():
     ra = _regions([0, 100, 200], [100, 200, 300], signature=[0, BIT_EXON_POS, BIT_EXON_POS])
     np.testing.assert_array_equal(edge_owner_nodes(cal, ra), [1, 1])  # line 0 re-keyed off node 0
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 100, 300)])])  # the locus is nodes 1-2 only
-    np.testing.assert_allclose(priors.gdna_prior_count, [10.0])  # 7 + 3, nothing lost
+    # ⭐ P1: mass 7+3 = 10 over ΣS = (100+50+50) + 100 = 300, times span_bp = 200 ⇒ 6.6667.
+    # ⚠ The discrimination is UNCHANGED in strength: had line 0 stayed keyed to the dropped intergenic
+    # node 0, the locus would see mass 3 over ΣS 250 ⇒ 2.4, not 6.667.
+    np.testing.assert_allclose(priors.gdna_prior_count, [10.0 / 300.0 * 200.0])  # nothing lost
 
 
 # --- Laplace shrinkage toward the (effective) span ------------------------------------------------
@@ -383,7 +434,9 @@ def test_contained_evidence_shrinkage_reverts_to_span_when_blind():
     ra = _regions([0, 100, 200], [100, 200, 300])
     priors = assemble_priors(_blind_line_cal(0.0), ra, [_ml(0, [(0, 0, 300)])])
     np.testing.assert_allclose(priors.gdna_eff_len, [400.0])  # effective span = 300 + 2·50
-    np.testing.assert_allclose(priors.gdna_prior_count, [5.0])  # lines 2 + 3
+    # ⭐ P1: lines 2+3 = 5 over ΣS = 300 + 100 = 400, times span_bp = 300 ⇒ 3.75. The point stands —
+    # crossing-only mass IS still counted where calibration is contained-blind (it is > 0).
+    np.testing.assert_allclose(priors.gdna_prior_count, [3.75])
 
 
 def test_contained_evidence_shrinkage_is_smooth_not_a_cliff():

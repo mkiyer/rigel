@@ -24,14 +24,16 @@ Read `ACCUMULATOR_DESIGN.md` §6 first; this file is its consequence.
 |---|---|
 | stage | **S5 complete through S5.f, and S6 has landed.** S5.g is the next modelling step |
 | tooling | `scripts/design/observable_efficiency.py` — the harness; re-run it, do not quote this file |
-| suite | ⭐ **1752 passed / 1 failed** (S5.f: −234 failures; S6: the goldens regenerated). The single failure is an owner modelling call, not a defect — `TODO.md` §7 |
+| suite | **1809 passed / 22 failed** (2026-07-31). ⚠ 21 are `test_golden_output` moving numerically after P1's units fix — expected, regenerate **once** after C3. The 22nd is `TODO.md` §7's owner call |
 | ⭐ **THE PIVOT IS PASSED** | **`calibrate()` RUNS end to end** on all 8 chr22 pilot conditions, and **the FIRST BASELINE is recorded in `LEDGER.md`'s S5.f entry** — bit-identical on re-run. Every deferred derivation now has something to be A/B'd against |
-| ⛔ blocker | **none. S5.g (A7's taper) is next** — the first change that gets a real A/B. See §2's road map |
+| ⛔ blocker | **none, and S5 IS FINISHED.** S5.g's taper was measured and refuted (≤ 0.0002). ⭐ **The live work moved on**: `SOLVER_OBSERVABLES_PLAN.md` (P0/P1 done, P2 built-and-gated-off) → **`FRAGMENT_LENGTH_AUDIT.md`, which is where the critical path now is** (C0/C1 done, **C2 next**) |
 
 ### ⚠ Three things the first baseline says, and they are not all comfortable
 
-1. **It carries A7's known bias by ruling** — an 11.0 % genome-wide gDNA over-call, +0.36 in the last node
-   before a polyA site. That is what S5.g removes, and measuring the removal is why A7 was deferred.
+1. ⛔ **A7's bias did NOT survive measurement.** The A/B is done (`LEDGER.md` S5.g-2): the taper moves the
+   library gDNA fraction by **≤ 0.0002**. The 11.0 % figure was bp-weighted geometry, not a calibration
+   error — mass-weighted the taper is 0.9596, and 89 % of edge mass is on lines it never touches.
+   `CARRY_FORWARD.md` §1 fact 6 corrected.
 2. ⛔ **The fitted κ is `1 − truth`.** A library simulated at `strand_specificity = 0.99` calibrates to
    **κ = 0.0101**. This answers `CARRY_FORWARD.md` §0 **C4** against ground truth for the first time: the
    near-zero sense fraction on all four real cfRNA libraries is a **convention flip, not biology**.
@@ -272,7 +274,7 @@ upstream schema change. Phases, in dependency order:
 | **S5.e-2** | `bp_solver`'s `(left, right)` tuples collapsed through its six consumers; `node_init` + `density_model` re-keyed | ✅ the solver runs end to end; the factor-1 bedrock invariant holds on the new geometry. ⚠ the scalar/vector twins are NOT merged (a measured 15.7×/op) | ✅ **done** |
 | **S5.e-3** | the last per-face test fixtures ported; every transitional shim deleted | ✅ `test_bp_solver.py` 19 failures → **0**; the port exposed two artefacts the old shape hid (a hand-placed mature flux, and a terminal-slot G1 lock that had its own ten-line apology comment) | ✅ **done** |
 | **S5.f** | ✅ **DONE** (`LEDGER.md`) — `calibrate` + `CalibrationResult` + `priors`/`capture_eff_length`/`pipeline`, and the junction axis exported | ✅ **calibration runs end to end on all 8 chr22 pilot conditions and the numbers ARE the first baseline**, bit-identical on re-run; `tests/calibration/` green (543/0); 9 perturbations, **P6 found a real hole** (a dead `~either_ambig` guard reading as the rule) | ✅ **done** |
-| **S5.g** | ⭐ **A7 proper** — the contiguous-edge RNA reach turned on (§1 A7) | falsification test first; an A/B against S5.f's baseline, which is the whole reason it is sequenced here. ⚠ **A/B on the CALIBRATION numbers, not end to end**: calibration is bit-identical run to run but a downstream transcript count is not (§0) | ⭐ **NEXT** |
+| **S5.g** | ⛔ **A7 proper — DONE and REFUTED.** The taper moves the library gDNA fraction by **≤ 0.0002**; the 11.0 % was bp-weighted geometry (`LEDGER.md` S5.g-2) | ✅ **done** |
 
 ⚠ **The 266 suite failures cannot be a per-step gate.** ~200 are end-to-end scenario and golden tests
 that will move *numerically*, not merely start running. Each phase is gated on the unit tests written
@@ -374,7 +376,7 @@ exists — known biases included, and named.
 | | step | what it buys, measured | blocked on |
 |---|---|---|---|
 | 4 | **S5.g — A7**: the contiguous-edge RNA reach taper | removes an **11.0 %** genome-wide gDNA over-call and **+0.36** in the last node before a polyA site (`CARRY_FORWARD.md` §1 fact 6) | a baseline. The plumbing is one array; the ruling is already recorded |
-| 5 | **S5.a2 — how `length_sum` enters the solve** | it is stored on every population and consumed by NOBODY. It is the channel that removes the equal-means blind spot: efficiency min `0.000 → 0.078` at an edge, `0.078 → 0.188` at a 151 bp node | its own derivation; must not be folded into S5.f |
+| 5 | **S5.a2 — how `length_sum` enters the solve** ⭐ **now specified: `SOLVER_OBSERVABLES_PLAN.md` §6 (P2), with §5 (P1) as its prerequisite** | it is stored on every population and consumed by NOBODY — and so is `inv_length_sum`. It is the channel that removes the equal-means blind spot: efficiency min `0.000 → 0.078` at an edge, `0.078 → 0.188` at a 151 bp node. ⛔ And a second defect was found alongside it: `assemble_priors` SUMS per-object counts into the EM's fragment-unit pseudocounts, which double-counts a crossing fragment once per line — measured g:r tilt **13–19 %** | its own derivation; must not be folded into S5.f |
 | 6 | **A6 then A3 — `node_spanning`** | ⭐ the largest single win found and it needs no upstream change: at every node shorter than one fragment essentially ALL the information is in the spanning population (0.000 → 0.758 at 25 bp), and **56.7 %** of human nodes are shorter than one 200 bp fragment | ⚠ **A6 first**: spanning is a SUBSET of edge-crossing, so `observable_efficiency.var_set`'s zero cross-population covariance is exactly wrong for the pair. The overlap must be modelled before the number means anything |
 | 7 | **Does `spliced_count` enter the LEVEL?** | it is a contiguous crossing, so in principle it belongs in ν and in ρ_tot; today it enters only the strand solve, which is a faithful port of the predecessor, not a derived choice | S5.a2's frame |
 
