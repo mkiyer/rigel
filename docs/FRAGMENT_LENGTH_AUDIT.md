@@ -41,7 +41,8 @@ one-sided (trap 19) and this was not the change's target.
 | **C0** | Prove the accumulator's `L` before promoting it | ✅ **DONE 2026-07-31** | 333,684 exhaustive configs vs an independent set oracle; 7 perturbations, 6 caught, 7th a proven no-op |
 | **C1** | Give the accumulator an unconditional length histogram (`deposited_lengths`) | ✅ **DONE 2026-07-31** | `Σ = Σ node_start_count = qc.deposited`, enforced in the accumulator AND at the payload door; parity gate auto-covers it; 6 perturbations |
 | **C2** | switch every consumer to the accumulator, delete the scanner histogram, re-point `rigel report` | ✅ **DONE 2026-08-01** | all six sub-gates met; `payload_schema_digest` never moved; report keys identical and now sum to the library. `LEDGER.md` |
-| **C3** | ⭐ **NEXT** — §8.1(b): divide each pool by its own opportunity | unblocked | ⭐ the zero-gDNA inertness test (§5). ⚠ Target the measured residual **+7.7 % / +32.0 %** (`capture_off`) — and note it is **+11.0 % / +43.4 %** with capture ON, so there are TWO effects, not one |
+| **C2.6** | ⛔ ⭐ **NEXT, AND IT IS A DIGRESSION THE OWNER MANDATED** — search EVERY fragment's unsequenced gaps for introns, not only unspliced ones. Spec: **`docs/SPEC_GAP_INTRONS.md`** | **spec written 2026-08-01, NOT implemented**; owner will implement in a separate session and signal back | the anchor's mass ≥700 bp must reach **0** (truth's ceiling is **713 bp**), `qc.dropped_too_long` must collapse from 6.1 % of deposits, and the gDNA control must NOT move |
+| **C3** | §8.1(b): divide each pool by its own opportunity. ⭐ **The formula is DERIVED and PROVEN** — `docs/JUNCTION_OPPORTUNITY.md` | ⛔ **blocked on C2.6** — its reference anchor is contaminated | ⚠ **G3 SPLITS**: G3a (mean) targets the measured **+0.3 %** achievable with true θ; G3b (sd, ceiling) is **C2.6's gate, not C3's**. §5 |
 | **C4** | Gate the length discriminant on both pools having data | independent — any time | the `strand_evidence` analogue |
 | **C5** | Delete `ScanCache.fl_rna_counts`; verify D7 | ✅ **DONE 2026-08-01, inside C2** | grep clean; D7 asserted end to end and perturbation-proven (`tests/test_d7_transcript_eff_lengths.py`) |
 | **→** | **re-run `scripts/design/length_likelihood_ab.py`**, then decide `CalibrationConfig.length_likelihood` | after C3 | `SOLVER_OBSERVABLES_PLAN.md` §6.4 |
@@ -58,9 +59,11 @@ block records the ruling and why both offered options were wrong. C2.0 landed on
   mismatch entirely and **55 %** of the sd gap. Nothing downstream reads it yet; that is C2.
 * ✅ **`build_fl_models` anchors on `deposited_lengths`, and the scanner histogram no longer exists** (C2).
   Its only argument is the payload, so a mixed-frame call is unrepresentable rather than discouraged.
-* The residual **+7.7 % mean / +32 % sd** gap on a zero-gDNA library is the junction-opportunity tilt, and
-  it is C3's target — now measurable against a same-frame reference, and confirmed present in the SHIPPED
-  code by `scripts/design/fl_anchor_gap.py` (C2.1), not merely in principle.
+* ⛔ **The residual is TWO defects, not one — measured 2026-08-01, `docs/JUNCTION_OPPORTUNITY.md`.**
+  The **+7.7 % mean** IS the junction-opportunity tilt and C3 removes it almost exactly (+8.0 % → +0.3 %
+  against truth, corrected with the true θ). The **+32 % sd is NOT**: correcting perfectly closes only
+  **~19 %** of it, because the rest is an **uncut intron** — present in the *anchor* as well, and so in
+  every consumer including the EM's transcript effective lengths. That is **C2.6**.
 
 ---
 

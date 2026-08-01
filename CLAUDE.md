@@ -15,7 +15,9 @@ library into gDNA vs RNA, and a per-locus EM solver assigns RNA to transcripts. 
 
 | doc | what it is |
 |---|---|
-| **`docs/FRAGMENT_LENGTH_AUDIT.md`** | ⭐⭐ **START HERE — §0 IS THE ROADMAP AND THE CRITICAL PATH.** THREE definitions of fragment length were live, two of them summed into one array called "global", and the EB shrinkage mixed frames. **C0 / C1 / C2 have all LANDED (2026-08-01)** — there is now ONE definition. **C3 is next**; §§1–3 are history |
+| **`docs/FRAGMENT_LENGTH_AUDIT.md`** | ⭐⭐ **START HERE — §0 IS THE ROADMAP AND THE CRITICAL PATH.** THREE definitions of fragment length were live, two of them summed into one array called "global", and the EB shrinkage mixed frames. **C0 / C1 / C2 have all LANDED (2026-08-01)** — there is now ONE definition. ⛔ **C2.6 is next**; §§1–3 are history |
+| **`docs/SPEC_GAP_INTRONS.md`** | ⛔ ⭐ **THE LIVE WORK — spec written, NOT implemented.** An intron inside a fragment's unsequenced mate gap is only ever looked for on UNSPLICED fragments, so spliced fragments keep it in `L`. 6.1 % of a pilot library is measured >1000 bp when nothing in it exceeds 713 bp |
+| **`docs/JUNCTION_OPPORTUNITY.md`** | ⭐ C3's formula, **derived and proven** (48,648 exhaustive configs) — and the measurement that found the bug above. ⚠ It also shows C3 fixes the MEAN and not the sd |
 | **`docs/SOLVER_OBSERVABLES_PLAN.md`** | ⭐ **How we got there.** The accumulator stores three channels and the solver reads **one**; and `assemble_priors` summed an intensive quantity as if it were extensive. §1 is the theory from the ground up. P0/P1 done, **P2 built and gated OFF — blocked on the audit's C2/C3** |
 | `docs/S5_DESIGN_LOG.md` | ⚠ **S5 IS FINISHED** (S5.g measured and refuted). Kept for §1's accumulator derivations and §3's observable measurements, which are still the reference. **It is no longer the live plan** |
 | `docs/IMPLEMENTATION_PLAN.md` §0 | live state for everything else |
@@ -43,6 +45,13 @@ the payload and nothing else, so a mixed-frame call is unrepresentable. ⚠ `Fra
 **singular** is the scorer and stays. `rigel report`'s five splice counts are now the **scanner's own
 census** — owner ruling: QC lives where it is generated and is passed through nothing — and for the first
 time they sum to the library.
+
+⛔ **BUT `L` IS NOT YET ACCURATE, and that is the live work (2026-08-01).** An annotated intron lying in a
+fragment's **unsequenced mate gap** is cut only when the fragment is otherwise UNSPLICED, so spliced
+fragments keep it in `L`. Measured on the chr22 pilot: the library's longest molecule is **713 bp**, the
+tally reports **0.97 % of mass ≥ 700 bp** and throws away **6.1 %** as longer than 1000 bp, and the pure
+gDNA pool — which has no introns to miss — is exact to **five decimals**. ⭐ Spec:
+**`docs/SPEC_GAP_INTRONS.md`**. It blocks C3.
 
 ⚠ **Three things the first baseline says**, before anything is built on it:
 1. ⛔ **A7's "11.0 % gDNA over-call" DID NOT SURVIVE MEASUREMENT.** The A/B is done (`LEDGER.md` S5.g-2):
