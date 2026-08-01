@@ -53,7 +53,7 @@ def main() -> None:
     print("-" * len(header))
 
     for bam in args.bams:
-        _, _, _, _, payload = scan_and_buffer(
+        _, _, _, payload = scan_and_buffer(
             bam, index, BamScanConfig(sj_strand_tag="auto", total_threads=args.threads)
         )
         qc = {f.name: getattr(payload.qc, f.name) for f in dataclasses.fields(payload.qc)}

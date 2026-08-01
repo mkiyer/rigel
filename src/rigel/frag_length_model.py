@@ -24,7 +24,6 @@ assigned the same probability as the overflow bin.
 import logging
 import math
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import numpy as np
 
@@ -606,131 +605,13 @@ class FragmentLengthModel:
         }
 
 
-# ---------------------------------------------------------------------------
-# FragmentLengthModels — per-category container
-# ---------------------------------------------------------------------------
-
-
-class FragmentLengthModels:
-    """Container for the scanner's raw global + per-splice-category FL histograms.
-
-    Wraps one ``FragmentLengthModel`` per ``SpliceType`` plus a global
-    model (all fragments). These are the raw, unsmoothed observation
-    histograms; :meth:`observe` routes each observation to the global
-    model plus the appropriate category model.
-
-    The library-wide RNA / gDNA / global FL distributions used for
-    scoring and calibration are built separately from these raw counts by
-    ``rigel.calibration.fl.build_fl_models`` (see :class:`~rigel.calibration.fl.FLModels`).
-    """
-
-    def __init__(self, max_size: int = DEFAULT_MAX_FRAG_SIZE):
-        from .splice import SpliceType
-
-        self.max_size = max_size
-        self.global_model = FragmentLengthModel(max_size=max_size)
-        self.category_models: dict = {
-            cat: FragmentLengthModel(max_size=max_size) for cat in SpliceType
-        }
-
-    @property
-    def n_observations(self) -> int:
-        """Total observations across all categories (delegated to global)."""
-        return self.global_model.n_observations
-
-    def observe(
-        self,
-        frag_length: int,
-        splice_type=None,
-        weight: float = 1.0,
-    ) -> None:
-        """Record one fragment length observation.
-
-        Parameters
-        ----------
-        frag_length : int
-            Fragment fragment length (must be >= 0).
-        splice_type : SpliceType or None
-            The fragment's count category, or ``None`` to record
-            only against the global model.
-        weight : float
-            Observation weight (default 1.0).
-        """
-        self.global_model.observe(frag_length, weight)
-        if splice_type is not None:
-            self.category_models[splice_type].observe(frag_length, weight)
-
-    def observe_batch(
-        self,
-        frag_lengths: "np.ndarray",
-        splice_types: "np.ndarray",
-    ) -> None:
-        """Record a batch of fragment length observations (vectorized).
-
-        Parameters
-        ----------
-        frag_lengths : np.ndarray
-            Integer array of fragment lengths.
-        splice_types : np.ndarray
-            Integer array of splice type values.  Dispatches to
-            category sub-models based on value.
-        """
-        from .splice import SpliceType
-
-        lengths = np.asarray(frag_lengths, dtype=np.intp)
-        stypes = np.asarray(splice_types, dtype=np.intp)
-        # Global model gets all observations
-        self.global_model.observe_batch(lengths)
-        # Per-category sub-models
-        for cat in SpliceType:
-            mask = stypes == int(cat)
-            if mask.any():
-                self.category_models[cat].observe_batch(lengths[mask])
-
-    def to_dict(self) -> dict:
-        """JSON/YAML-serializable summary of the raw global + per-category models.
-
-        The library-wide ``gdna`` / ``rna`` FL distributions are reported
-        separately by the caller from ``FLModels`` (they are built from these
-        raw counts, not stored here).
-        """
-        from .splice import SpliceType
-
-        d: dict = {"global": self.global_model.to_dict()}
-        for cat in SpliceType:
-            d[cat.name.lower()] = self.category_models[cat].to_dict()
-        return d
-
-    def write_json(self, path) -> None:
-        """Write all fragment length models to a single JSON file."""
-        import json
-
-        path = Path(path)
-        with open(path, "w") as fh:
-            json.dump(
-                {"frag_length_models": self.to_dict()},
-                fh,
-                indent=2,
-            )
-        logger.info(f"Wrote fragment length models to {path}")
-
-    def log_summary(self) -> None:
-        """Log a human-readable summary of all fragment length models."""
-        from .splice import SpliceType
-
-        logger.info(
-            f"Fragment length models: {self.global_model.n_observations:,} total observations"
-        )
-        if self.global_model.n_observations > 0:
-            logger.info(
-                f"  Global: mean={self.global_model.mean:.1f}, "
-                f"std={self.global_model.std:.1f}, "
-                f"median={self.global_model.median:.1f}, "
-                f"mode={self.global_model.mode}"
-            )
-        for cat in SpliceType:
-            m = self.category_models[cat]
-            if m.n_observations > 0:
-                logger.info(
-                    f"  {cat.name}: {m.n_observations:,} obs, mean={m.mean:.1f}, mode={m.mode}"
-                )
+# ⛔ `FragmentLengthModels` (PLURAL) lived here and was DELETED by C2 — docs/FRAGMENT_LENGTH_AUDIT.md.
+# It held the scanner's own global + per-SpliceType raw histograms,
+# trained during the BAM scan from two different measurements of "fragment length" — a genomic
+# footprint for one subset of fragments and a transcript-space length for a disjoint one — summed
+# into a single array and used as the empirical-Bayes anchor for pools measured a third way.
+#
+# ⚠ `FragmentLengthModel` (SINGULAR), above, is a different thing and STAYS: it is the scoring and
+# effective-length model, built by `from_pmf` from a pmf that `calibration.fl.build_fl_models`
+# derives from the accumulator payload. The per-splice-type QC counts the plural container used to
+# supply are now the scanner's own census (`rigel.splice.census_field`).

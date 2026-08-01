@@ -206,7 +206,19 @@ def _build_pipeline_config(
 SUMMARY_SCHEMA_VERSION = 2
 
 
-def _fragment_length_report(flm, fl_models):
+#: ``fragment_lengths.feather``'s pure-pool categories, in ``FragmentPool`` order. ⚠ Named here rather
+#: than derived from the enum because these are an OUTPUT CONTRACT — a rename in the enum must not
+#: silently rename a reported category.
+_POOL_REPORT_NAMES = (
+    "pool_dna_intergenic",
+    "pool_dna_intronic",
+    "pool_dna_intron_exon",
+    "pool_dna_intergenic_exon",
+    "pool_rna_spliced",
+)
+
+
+def _fragment_length_report(fl_models):
     """Split the fragment-length models into a lean summary + a tidy histogram table.
 
     Returns ``(summary_by_category, histogram_df)`` where
@@ -218,24 +230,32 @@ def _fragment_length_report(flm, fl_models):
       1-bp histograms, destined for ``fragment_lengths.feather``. This is the bulk
       that used to inflate ``summary.json``.
 
-    Categories: ``global`` + the library ``gdna`` / ``rna`` pools (when
-    ``fl_models`` is present) + the per-splice-category scanner histograms
-    (``unspliced``, ``spliced_annot``, ``spliced_unannot``, ``spliced_implicit``,
-    ``splice_artifact``).
+    ⭐ **Every category is now ONE measurement of ONE quantity** — the accumulator's ``L`` — over a
+    stated population:
+
+    ``global``
+        the unconditional anchor: every deposited fragment, no purity condition.
+    ``gdna`` / ``rna``
+        the two modelled pools, the empirical views of what scoring and calibration actually use.
+    the five ``pool_*`` rows
+        the pure pools **unaggregated**. ``gdna`` is the sum of the two contained rows and ``rna`` is
+        ``pool_rna_spliced``; the two ``*_exon`` crossing rows are ON-TARGET gDNA and are in neither,
+        which is why they are reported separately (``calibration.fl.splash_fl_mass``) — on-target
+        gDNA runs ~42 bp shorter than off-target, and a model fitted off-target is mis-centred for
+        exactly the fragments that leak.
+
+    ⛔ **The per-SpliceType histograms are gone** (``unspliced``, ``spliced_annot``, …). They were the
+    scanner's own, measured by two rules that were neither each other nor ``L``, over a population
+    gated by a unanimity test nobody had stated — ``docs/FRAGMENT_LENGTH_AUDIT.md`` D1–D3. The
+    per-fragment splice COUNTS they were used for survive, from the scanner's census.
     """
     import pandas as pd
 
-    raw = flm.to_dict()  # {"global": {summary, histogram}, <per-splice-category>: ...}
-
-    # Ordered category set: global, then the deconvolved gDNA/RNA pools, then the
-    # raw per-splice-category models. Matches the pre-v2 fragment_length ordering.
-    entries: dict = {"global": raw["global"]}
-    if fl_models is not None:
-        entries["gdna"] = fl_models.gdna_model().to_dict()
-        entries["rna"] = fl_models.rna_model().to_dict()
-    for key, val in raw.items():
-        if key != "global":
-            entries[key] = val
+    entries: dict = {"global": fl_models.global_model().to_dict()}
+    entries["gdna"] = fl_models.gdna_model().to_dict()
+    entries["rna"] = fl_models.rna_model().to_dict()
+    for i, name in enumerate(_POOL_REPORT_NAMES):
+        entries[name] = fl_models._empirical(fl_models.pool_counts[i]).to_dict()
 
     summary_by_category: dict = {}
     cats: list = []
@@ -324,7 +344,6 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     # Build and write summary.json
     stats = result.stats
     sm = result.strand_models
-    flm = result.frag_length_models
     total_mrna = float(quant_df["count"].sum())
     total_nrna = float(estimator.nrna_em_count)
     total_gdna = float(estimator.gdna_em_count)
@@ -353,24 +372,27 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
 
     # Fragment length: lean per-category summary statistics go into summary.json;
     # the raw 1-bp histograms are written separately to fragment_lengths.feather
-    # (they used to inflate summary.json by thousands of lines). Categories:
-    #   global + per-splice-category  ← scanner's raw histograms (frag_length_models)
-    #   gdna + rna                    ← empirical views of the FL models actually used
-    #                                    for scoring/calibration (result.fl_models):
-    #                                    rna = spliced-annotated fragments,
-    #                                    gdna = intergenic+intronic structural pool.
+    # (they used to inflate summary.json by thousands of lines).
+    #
+    # ⭐ ONE SOURCE. Every category comes from result.fl_models, which is built from the accumulator
+    # payload alone — the anchor, the two modelled pools and the five pure pools, all binned at the
+    # accumulator's L. The scanner's parallel histograms were deleted by C2.
     fl_models = result.fl_models
-    fl_summary, fl_histogram_df = _fragment_length_report(flm, fl_models)
+    fl_summary, fl_histogram_df = _fragment_length_report(fl_models)
 
-    # Splice-type breakdown — per-fragment classification from the FL category
-    # models, plus the blacklist tally. Surfaces the ``spliced_implicit`` and
-    # ``splice_artifact`` classes that the scan-level ``with_*_sj`` counters omit.
-    from .splice import SpliceType
-
-    _cat_models = flm.category_models
+    # Splice-type breakdown — the scanner's own per-fragment census, plus the blacklist tally.
+    # Surfaces the ``spliced_implicit`` and ``splice_artifact`` classes that the scan-level
+    # ``with_*_sj`` counters omit.
+    #
+    # ⭐ SCANNER QC, read from where it is generated. These used to be read off the fragment-length
+    # category models, so they counted only fragments that also yielded a length observation — a
+    # population gated by a transcript-space unanimity test and never stated. The census counts every
+    # fragment the scanner offers the accumulator, and its books close against the accumulator's own
+    # qc block (docs/FRAGMENT_LENGTH_AUDIT.md §4, C2.0).
+    from .splice import SpliceType, census_field
 
     def _splice_n(stype) -> int:
-        return int(_cat_models[stype].n_observations)
+        return int(getattr(stats, census_field(stype)))
 
     # Blacklist provenance: distinguishes "detection off (no blacklist in the
     # index)" from "detection on, 0 artifacts found". None on pre-field indexes.

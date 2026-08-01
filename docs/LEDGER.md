@@ -2263,3 +2263,201 @@ without the check.
 ⛔ **`build_fl_models` still reads the scanner anchor.** C1 makes the correct anchor *exist*; **C2** is
 what switches the consumer over and deletes the scanner histogram. Nothing downstream has moved yet, by
 design — this step is additive and every number in the tool is unchanged.
+
+---
+
+## C2 — ⭐ ONE definition of fragment length, and the scanner's histogram is DELETED (2026-08-01)
+
+    Audit: `docs/FRAGMENT_LENGTH_AUDIT.md` §4 (C2.0–C2.5)
+    Gates: `tests/test_one_fragment_length_definition.py` (the standing grep), `tests/test_d7_transcript_eff_lengths.py`,
+           `TestSpliceCensus` + `TestFragmentLengthAnchor` in `tests/test_scanner_accumulator_integration.py`
+    Measurement: `scripts/design/fl_anchor_gap.py` (new)   ·   Report A/B: this tree vs a worktree at `d045d820`
+
+⭐ **The tool now has ONE definition of fragment length — the accumulator's `L` — measured in ONE place,
+over ONE stated population.** D1, D2, D3 and D5 are closed; D6 is closed by deletion (the population that
+was silently dropped no longer exists as a concept); D7 is **verified rather than assumed**, which the
+audit demanded in those words.
+
+### ⛔ THE OWNER'S RULING REJECTED THE PREMISE OF BOTH OPTIONS, AND IT WAS RIGHT
+
+C2 was blocked on one decision: `rigel report`'s five per-fragment splice-type counts had no accumulator
+equivalent. Option **(a)** grew five counters *in the accumulator*; option **(b)** reshaped the report and
+lost two of five categories. The recommendation was (a). The owner ruled **neither**:
+
+> *"There are some QC counts that the scanner must be responsible for. They truly live in the scanner …
+> If the QC counts are generated in one place and have no algorithmic use, there's no need to pass them.
+> … I don't see a reason to propagate artifacts into the accumulator, it's the scanner's job to identify
+> and filter these out."*
+
+⭐ **The principle the audit was missing.** §4's "ONE definition, ONE place, ONE population" governs
+**model inputs**. The five splice counts are not a model input — they are a **census of the scanner's own
+classification decisions**, with no consumer but the report. They were entangled with the histogram only
+because they were *derived from it* (`category_models[stype].n_observations`), an implementation accident.
+So C2.0 is not "move them to the accumulator"; it is **sever them from the histogram and leave them where
+they are generated**.
+
+⛔ **And option (a) would have been wrong on its own terms.** `SPLICE_ARTIFACT` fragments never reach the
+accumulator — the deposit adapter returns early, because a blacklisted junction's span derives from an
+alignment the scanner has already refused to believe — so (a)'s stated gate, *"the five counts sum to
+`qc.deposited`"*, **cannot hold**. That was found by pricing the option, not by building it.
+
+⭐ **What the ruling bought, measured**: `payload_schema_digest` stays **`b7d29676c58b2c65`**. No accumulator
+change, no reopened S3 byte-identity gate, and **all 8 pilot scan caches remained valid** — against option
+(a), which would have moved the digest and rebuilt every one.
+
+### C2.0 — the splice census, and an identity that closes the books across two subsystems
+
+One `std::array<int64_t, NUM_SPLICE_TYPES>` in `BamScanStats`, incremented at **one** site (the top of the
+deposit adapter, before the artifact hold-out), plus **one** counter `n_deposit_not_offered`.
+
+⚠ **An array, not five named fields**, so `census[st]++` is one statement, the merge one loop, the export
+one loop over the *existing* `splice_type_label` table — and a category added to `SpliceType` cannot slip
+past any of the three. ⭐ **No name table anywhere**: `splice_type_label`'s strings are exactly the
+`SpliceType` member names lower-cased, so `rigel.splice.census_field` derives the same key on the Python
+side. The correspondence is **tested**, not asserted — which matters because `_apply_scan_stats` copies with
+`dict.get(key, 0)`, so drift reads as *zero*, not as an error.
+
+⭐ **The gate as written in §4 was unsatisfiable; the replacement is stronger.** In C1's G2 form:
+
+    Σ census − census[SPLICE_ARTIFACT] == qc.deposited + Σ qc.dropped_* + n_deposit_not_offered
+
+⭐ **And the artifact count is derived a SECOND way, by a subsystem that has never heard of an artifact.**
+Scan one BAM against the same index with and without a splice blacklist: blacklisting relabels fragments
+`SPLICED_ANNOT → SPLICE_ARTIFACT`, so `qc.deposited` — which knows nothing of splice types or blacklists —
+must fall by **exactly** the artifact census. Measured 200 → 40 against a census of 160. `CARRY_FORWARD.md`
+§3 trap 1: a check that re-derives the number by the same route checks nothing.
+
+**6 perturbations, all caught — but TWO needed fixtures built for them, and that is the finding:**
+
+| | perturbation | |
+|---|---|---|
+| **PC1** | one category never censused | ✅ caught by 3 tests |
+| **PC2** | census moved AFTER the artifact hold-out | ✅ caught — ⚠ **only by the blacklist fixture** |
+| **PC3** | artifacts counted as `not_offered` as well | ✅ caught |
+| **PC4** | one C++ export key renamed (the `.get(key, 0)` silent-zero) | ✅ caught by 3 tests |
+| **PC5** | the multi-reference hold-out made silent again | ⛔ **NOT caught at first** |
+| **PC6** | census narrowed to only what deposits | ✅ caught by 3 tests |
+
+⛔ **PC5 is the C1-perturbation-6 pattern again**: `n_deposit_not_offered` was zero on both sides of the
+identity in every fixture, so deleting it left the suite green. Unlike C0's L3 that is **not** a proven
+no-op — it is a hole. Closed by `multi_reference_bam`, a hand-written two-contig BAM whose mates land on
+different references and which reaches the adapter *by the intergenic path* — precisely the route the
+shipped defect took. PC5 now fires.
+
+### C2.1 — the anchor moved, and the fix is STRUCTURAL
+
+`build_fl_models(payload)` — **the payload is the only argument**. All three histograms are read off one
+object in one frame, so the mixed-frame call is **unrepresentable**, not merely discouraged. The EB kernel
+over three free histograms survives as `_fl_models_from_histograms`, which production never calls.
+
+⚠ **A value gate alone would have been vacuous.** On the plain oracle fixture the scanner's histogram and
+`deposited_lengths` are **byte-identical** — a perfect BAM with no ambiguity makes definitions A/B and C
+agree — so the test would have passed whichever anchor was wired in. A byte-identical result is no
+evidence (`benchmark_ab_methodology_cautions`). The blacklist fixture separates them (200 vs 40).
+
+⭐ **§2's table re-measured on all 8 pilot conditions — the gate's stated numbers, to the decimal:**
+
+| `gdna_none ss0.50 capture_off` | anchor | RNA pool | gap |
+|---|---|---|---|
+| mean | **218.0** | 234.7 | **+7.7 %** |
+| sd | **111.2** | 146.7 | **+32.0 %** |
+| support ceiling | 1000 | 1000 | ⭐ matched |
+
+C1's numbers exactly, against the pre-C1 **+11.6 % / +71.1 %**. The frame component is gone from the
+*shipped* code, not merely available to it.
+
+⚠ **NEW, and C3 should expect it: the tilt is capture-dependent.** `capture_on` reads **+11.0 % / +43.4 %**
+against `capture_off`'s +7.7 % / +32.0 %. §8.1(b) is aimed at the junction-opportunity tilt; there is a
+second effect riding on it.
+
+⚠ **Three test harnesses had already drifted from production** — `_oracle.py`, `test_ambig_scenario`,
+`test_accumulator_span_unbiased` still built FL models from the scanner's `category_models`, which
+production stopped using at S5.d. They were calibrating against a model the tool does not ship. Converged.
+
+### C2.2 / C2.3 — the deletion, and the report
+
+Deleted: sites **A** and **B**, `FragLenObservations`, `frag_length_observations`,
+`_replay_fraglen_observations`, `FragmentLengthModels` (**plural**), `n_frag_length_{un,}ambiguous`, and
+`get_unique_frag_length_mrna` — **definition B itself**. `scan_and_buffer` returns a 4-tuple; 14 files
+followed.
+
+⚠ **`FragmentLengthModel` (SINGULAR) stays** and has its own survivor test. The two names differ by one
+character and the singular is the scorer; a search-and-delete that caught it would have removed the
+fragment-length term from scoring and reported it as numerical drift.
+
+⭐ **The gate is a standing search over `src/`, not a one-off command** — `tests/test_one_fragment_length_definition.py`.
+A partial delete that still compiles is the failure mode. ⚠ It found **three genuine stale references**
+that a build could not: a nanobind docstring still advertising `'frag_length_observations'` as a returned
+key, a comment in `resolve_context.h`, and a `config.py` docstring. It exempts an explicit
+`DELETED by C2` tombstone and nothing else — a comment that merely *mentions* a deleted symbol is how the
+next reader concludes it still exists.
+
+**The report A/B against a worktree at `d045d820`, same scenario, same seed, `assignment_mode="map"`:**
+
+| splice key | `d045d820` | **C2** |
+|---|---|---|
+| `unspliced` | 1482 | **1547** |
+| `spliced_annotated` | 412 | 412 |
+| `spliced_unannotated` | 0 | 0 |
+| `spliced_implicit` | **8** | **41** |
+| `splice_artifact` | 0 | 0 |
+| **total** | **1902** | ⭐ **2000** |
+
+⭐ **The key set is IDENTICAL — nothing was lost — and the old numbers were missing 4.9 % of the library.**
+2000 is exactly the simulated fragment count. That reproduces G6's 4.6 % scanner-drop rate on a completely
+different fixture, and it is the first time the report's splice section has summed to the library.
+⚠ **`spliced_implicit` was under-counted 5×**: an implicit splice is exactly the case whose transcript-space
+length most often fails the unanimity gate, so it was the worst-hit class.
+
+`fragment_lengths.feather`'s categories change by design: the per-`SpliceType` histograms give way to
+`global` + `gdna`/`rna` + the **five pure pools**. ⭐ That surfaces `splash_fl_mass` — the two crossing
+pools, the only **on-target** gDNA population — for the first time; its own docstring asked to be reported
+("makes that comparison an output instead of an assumption") and nothing was doing it.
+
+### C2.4 / C2.5 — the dead field, and D7 CHECKED
+
+`ScanCache.fl_global_counts`, `fl_rna_counts` (**D5** — written, read back, consumed by nothing) and
+`fl_max_size` (a duplicate of `payload.max_length`) are gone, with `fl.npz` itself. ⚠ **Caches written
+before C2 still load** — an extra file on disk is not a key — and all 8 pilot caches were verified loading
+after the change.
+
+⭐ **D7 is verified, not assumed** — the audit's own instruction. The shipped per-transcript effective
+lengths are asserted **exactly equal** to those rebuilt from the payload alone, end to end through
+`run_pipeline`. Two supporting gates: the quantity is *sensitive* to the pmf (shifting it 50 bp shortens
+every effective length — an equality against a constant array would prove nothing), and perturbation
+**PD1** (feeding `global_pmf` instead of `rna_pmf`) is caught.
+
+⚠ **A finding, pinned rather than fixed**: `pipeline`'s guard `if rna_fl.n_observations > 0` **cannot
+fire**. `from_pmf` sets `_total_weight = 1.0`, so `n_observations` is exactly 1 whatever went in. The
+reachable behaviour is correct — an empty RNA pool EB-shrinks to the unconditional anchor, which beats a
+hard-coded 200 bp mean — but the guard *looks* like a data-presence fallback, and that appearance is what
+would let a future empty-pool bug hide behind it.
+
+### ⚠ Unrelated: `scripts/sim/fl_estimation_stress.py` was ALREADY DEAD and is deleted
+
+It called `calibrate(index=…, scan_trained=…, fl_prior_ess=…, pool_quality_good=…)` — **not one of those
+is a parameter of the current `calibrate`**. Dead since well before this branch; the 2026-07-30 sweep
+missed it. Recoverable: `git checkout d045d820 -- scripts/sim/fl_estimation_stress.py`.
+
+### Suite
+
+**1824 passed / 21 failed**, from a re-measured baseline of **1809 / 22**. Accounting is exact:
+`1809 + 7 (C2.0) + 2 (C2.1 net) + 10 (C2.2 gate) + 2 (C2.3) + 3 (C2.5) − 9 (deleted container tests) = 1824`.
+
+⭐ **The failure count went DOWN by one: `TODO.md` §7's `test_nrna_double_counting[g20_n0_s100]` now
+PASSES.** The silent negative control reads **0 counts against a limit of 25**, where it leaked ~30 before
+— not a marginal pass, and stable across three re-runs. ⚠ **Do not close §7 on this.** A negative control
+is one-sided (trap 19) and this was not the change's target; the honest statement is that correcting the
+fragment-length models removed the leak on this condition, and §7 should be re-read against the other
+modes before it is retired.
+
+⚠ **The 21 remaining are `test_golden_output` and they have now moved TWICE** — P1's units fix and C2's FL
+models. ⛔ Still **do not regenerate**: they move again at C3. Regenerate **once**, after C3, **twice, and
+diff**.
+
+### ⚠ The standing check's INVOCATION matters, and it cost a false alarm
+
+⛔ Use **`python -m pytest`**, not bare `pytest`. Bare `pytest` does not put the repo root on `sys.path`,
+so `tests/calibration/test_fl.py`'s `import tests.native._accumulator_reference` raises and the suite reads
+**1808 / 23**. That 23rd failure is an artefact of the invocation, not a regression — and under the rule
+"a 23rd failure is a regression" it reads as one. `CLAUDE.md`'s command should say `python -m pytest`.

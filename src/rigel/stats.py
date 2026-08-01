@@ -53,10 +53,6 @@ class PipelineStats:
     n_strand_skipped_ambig_strand: int = 0
     n_strand_skipped_ambiguous: int = 0
 
-    # --- Fragment length model training ---
-    n_frag_length_unambiguous: int = 0
-    n_frag_length_ambiguous: int = 0
-
     # --- Routing counters (authoritative) ---
     deterministic_unambig_units: int = 0
     em_routed_unambig_units: int = 0
@@ -74,6 +70,32 @@ class PipelineStats:
     # --- Splice-artifact blacklist (per-read, across all alignments) ---
     n_sj_observed: int = 0
     n_sj_blacklisted: int = 0
+
+    # --- The per-fragment splice census (scanner QC; ``rigel report``'s splice breakdown) ---
+    #
+    # ⭐ ONE observation per fragment the scanner offers the accumulator — unique mapper, resolved,
+    # non-chimeric. That population is STATED, which the predecessor's was not: these counts used to
+    # be read off the fragment-length category models, so they silently counted only the fragments
+    # that also yielded a length observation. ``docs/FRAGMENT_LENGTH_AUDIT.md`` §4.
+    #
+    # ⚠ The field names are derived, not chosen — ``rigel.splice.census_field`` builds each one from
+    # its :class:`~rigel.splice.SpliceType` member name, and the C++ builds the same key from
+    # ``splice_type_label``. Renaming one of these by hand breaks that correspondence silently,
+    # because the copy below uses ``dict.get(key, 0)``.
+    n_census_unspliced: int = 0
+    n_census_spliced_unannot: int = 0
+    n_census_spliced_annot: int = 0
+    n_census_spliced_implicit: int = 0
+    n_census_splice_artifact: int = 0
+
+    #: Censused but never offered to the accumulator's ``deposit()``: the fragment is not one
+    #: molecule on one cut axis (chiefly blocks on more than one reference). It exists so that
+    #:
+    #:   Σ census − n_census_splice_artifact
+    #:       == qc.deposited + Σ qc.dropped_* + n_deposit_not_offered
+    #:
+    #: closes exactly. Those returns were a silent loss before this counter.
+    n_deposit_not_offered: int = 0
 
     @property
     def n_intergenic(self) -> int:

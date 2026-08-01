@@ -35,6 +35,10 @@ static constexpr int32_t SPLICE_SPLICED_ANNOT   = 2;
 // SRD v2 additions:
 static constexpr int32_t SPLICE_IMPLICIT        = 3;  // PE gap spans an annotated intron
 static constexpr int32_t SPLICE_ARTIFACT        = 4;  // CIGAR junction rejected by blacklist
+// ⚠ Must equal `len(rigel.splice.SpliceType)`. It sizes the scanner's per-fragment splice census,
+// so a category added on one side and not the other is caught by `test_every_splice_type_is_censused`
+// rather than reading zero through the stats dict's `.get(key, 0)`.
+static constexpr size_t NUM_SPLICE_TYPES        = 5;
 
 // MergeOutcome (rigel.types.MergeOutcome)
 static constexpr int32_t MC_INTERSECTION          = 0;

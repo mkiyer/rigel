@@ -1,13 +1,11 @@
 """Tests for rigel.frag_length_model — fragment length distribution model."""
 
-import json
 import math
 
 import numpy as np
 import pytest
 
-from rigel.splice import SpliceType
-from rigel.frag_length_model import FragmentLengthModel, FragmentLengthModels
+from rigel.frag_length_model import FragmentLengthModel
 
 
 # =====================================================================
@@ -261,50 +259,7 @@ class TestFragmentLengthModelSerialization:
         assert d["histogram"]["values"] == []
 
 
-# =====================================================================
-# FragmentLengthModels (per-category container)
-# =====================================================================
-
-
-class TestFragmentLengthModels:
-    def test_construction(self):
-        models = FragmentLengthModels(max_size=200)
-        assert models.global_model.max_size == 200
-        assert len(models.category_models) == len(SpliceType)
-
-    def test_observe_routes_to_global_and_category(self):
-        models = FragmentLengthModels()
-        models.observe(250, splice_type=SpliceType.SPLICED_ANNOT)
-        assert models.global_model.n_observations == 1
-        assert models.category_models[SpliceType.SPLICED_ANNOT].n_observations == 1
-        assert models.category_models[SpliceType.UNSPLICED].n_observations == 0
-
-    def test_observe_without_category_only_global(self):
-        models = FragmentLengthModels()
-        models.observe(300, splice_type=None)
-        assert models.global_model.n_observations == 1
-        for cat in SpliceType:
-            assert models.category_models[cat].n_observations == 0
-
-    def test_n_observations_delegates_to_global(self):
-        models = FragmentLengthModels()
-        models.observe(100, splice_type=SpliceType.UNSPLICED)
-        models.observe(200, splice_type=None)
-        assert models.n_observations == 2
-
-    def test_to_dict(self):
-        models = FragmentLengthModels()
-        models.observe(250, splice_type=SpliceType.SPLICED_ANNOT)
-        d = models.to_dict()
-        assert "global" in d
-        assert "spliced_annot" in d
-        assert "unspliced" in d
-
-    def test_write_json(self, tmp_path):
-        models = FragmentLengthModels()
-        models.observe(250, splice_type=SpliceType.SPLICED_ANNOT)
-        path = tmp_path / "frag_length_models.json"
-        models.write_json(path)
-        assert path.exists()
-        data = json.loads(path.read_text())
-        assert "frag_length_models" in data
+# ⛔ `TestFragmentLengthModels` lived here and was DELETED by C2 with the container it tested
+# (docs/FRAGMENT_LENGTH_AUDIT.md). ⚠ `FragmentLengthModel` — SINGULAR, the scorer — is tested above
+# and is not going anywhere; the per-splice-type QC counts the plural container supplied are now the
+# scanner's own census, gated in tests/test_scanner_accumulator_integration.py.

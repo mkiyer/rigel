@@ -39,14 +39,13 @@ def cache_one(index: TranscriptIndex, bam: Path, out_dir: Path) -> tuple[float, 
     scan = BamScanConfig(sj_strand_tag=_native_detect_sj_tag(str(bam)))
 
     start = time.perf_counter()
-    _stats, strand_model, fl_models, _buffer, payload = scan_and_buffer(str(bam), index, scan)
+    _stats, strand_model, _buffer, payload = scan_and_buffer(str(bam), index, scan)
     scan_seconds = time.perf_counter() - start
 
     write_scan_cache(
         out_dir,
         payload=payload,
         strand_model=strand_model,
-        frag_length_models=fl_models,
         index=index,
         bam=str(bam),
         scan_config=scan,

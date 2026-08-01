@@ -19,10 +19,8 @@ import pandas as pd
 
 from rigel import cli
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
-from rigel.frag_length_model import FragmentLengthModels
 from rigel.pipeline import run_pipeline
 from rigel.sim import ReadSimConfig, Scenario
-from rigel.splice import SpliceType
 
 SEED = 42
 
@@ -32,24 +30,44 @@ SEED = 42
 # ---------------------------------------------------------------------------
 
 
-def test_fragment_length_report_splits_lean_summary_from_histograms():
-    flm = FragmentLengthModels(max_size=1000)
-    lengths = np.array([100, 100, 150, 200, 200, 200, 300], dtype=np.intp)
-    stypes = np.array(
-        [
-            SpliceType.UNSPLICED,
-            SpliceType.UNSPLICED,
-            SpliceType.SPLICED_ANNOT,
-            SpliceType.SPLICED_ANNOT,
-            SpliceType.SPLICED_ANNOT,
-            SpliceType.SPLICED_IMPLICIT,
-            SpliceType.SPLICE_ARTIFACT,
-        ],
-        dtype=np.intp,
-    )
-    flm.observe_batch(lengths, stypes)
+def _fl_models(max_size: int = 1000):
+    """An ``FLModels`` built straight from pool histograms, the shape production produces.
 
-    summary, hist_df = cli._fragment_length_report(flm, None)
+    ⚠ Built through the EB kernel rather than through ``build_fl_models``, because that entry point
+    takes a payload — which is the point of C2.1 and is exactly what a unit test of the REPORT does
+    not want to fabricate.
+    """
+    from rigel.calibration.fl import _fl_models_from_histograms
+    from rigel.scan_payload import (
+        N_FRAGMENT_POOLS,
+        POOL_DNA_INTERGENIC,
+        POOL_DNA_INTERGENIC_EXON,
+        POOL_DNA_INTRONIC,
+        POOL_DNA_INTRON_EXON,
+        POOL_RNA_SPLICED,
+    )
+
+    pools = np.zeros((N_FRAGMENT_POOLS, max_size + 1), dtype=np.float64)
+    pools[POOL_DNA_INTERGENIC, 100] = 2.0
+    pools[POOL_DNA_INTRONIC, 150] = 1.0
+    pools[POOL_DNA_INTRON_EXON, 120] = 3.0
+    pools[POOL_DNA_INTERGENIC_EXON, 130] = 4.0
+    pools[POOL_RNA_SPLICED, 200] = 5.0
+
+    unconditional = np.zeros(max_size + 1, dtype=np.float64)
+    unconditional[[100, 150, 200, 300]] = [2.0, 1.0, 3.0, 1.0]
+
+    return _fl_models_from_histograms(
+        global_counts=unconditional,
+        rna_counts=pools[POOL_RNA_SPLICED],
+        gdna_counts=pools[[POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC]].sum(axis=0),
+        max_size=max_size,
+        pool_counts=pools,
+    )
+
+
+def test_fragment_length_report_splits_lean_summary_from_histograms():
+    summary, hist_df = cli._fragment_length_report(_fl_models())
 
     # summary is lean: stats only, never raw per-bin arrays
     assert "global" in summary
@@ -73,6 +91,45 @@ def test_fragment_length_report_splits_lean_summary_from_histograms():
     for cat in hist_df["category"].unique():
         fsum = float(hist_df.loc[hist_df["category"] == cat, "count"].sum())
         assert abs(fsum - summary[cat]["n_observations"]) < 0.5
+
+
+def test_the_reported_categories_are_the_anchor_the_two_models_and_the_FIVE_PURE_POOLS():
+    """⭐ C2.3's output contract, and it is a DIFFERENT set than before C2.
+
+    The per-``SpliceType`` histograms (``unspliced``, ``spliced_annot``, …) are gone: they were the
+    scanner's, measured by two rules that were neither each other nor the accumulator's ``L``. What
+    replaces them is the five pure pools, which are a structural gDNA/RNA classification in the one
+    frame — and the two ``*_exon`` rows are ON-TARGET gDNA, reported here for the first time
+    (``calibration.fl.splash_fl_mass`` was built to be surfaced and never was).
+    """
+    summary, _ = cli._fragment_length_report(_fl_models())
+    assert set(summary) == {
+        "global",
+        "gdna",
+        "rna",
+        "pool_dna_intergenic",
+        "pool_dna_intronic",
+        "pool_dna_intron_exon",
+        "pool_dna_intergenic_exon",
+        "pool_rna_spliced",
+    }
+
+
+def test_the_modelled_pools_are_SUMS_OF_the_reported_pure_pools():
+    """⚠ The aggregates and the primitives must reconcile, or the report shows two truths.
+
+    ``rna`` IS ``pool_rna_spliced``; ``gdna`` is the two CONTAINED rows and deliberately excludes the
+    two crossing ones. That exclusion is the whole point of ``splash`` being separate — the shipped
+    model once summed four differently-tilted pools and read a gDNA mean of 146.05 where the pure
+    intergenic pool says 88.0.
+    """
+    summary, _ = cli._fragment_length_report(_fl_models())
+    n = {k: v["n_observations"] for k, v in summary.items()}
+    assert n["rna"] == n["pool_rna_spliced"]
+    assert n["gdna"] == n["pool_dna_intergenic"] + n["pool_dna_intronic"]
+    assert n["gdna"] < n["gdna"] + n["pool_dna_intron_exon"] + n["pool_dna_intergenic_exon"], (
+        "the on-target crossing pools are empty in this fixture, so their exclusion is untested"
+    )
 
 
 # ---------------------------------------------------------------------------

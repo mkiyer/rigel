@@ -144,7 +144,7 @@ def test_flags_align_with_a_REALLY_SCANNED_payload(tmp_path):
         ),
     )
     index = result.index
-    _stats, _sm, _flm, _buf, payload = scan_and_buffer(
+    _stats, _sm, _buf, payload = scan_and_buffer(
         str(result.bam_path), index, BamScanConfig(sj_strand_tag="auto")
     )
 

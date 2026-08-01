@@ -131,22 +131,15 @@ public:
         return val;
     }
 
-    /// Variant that excludes nRNA candidates from the unanimity check.
-    /// This prevents nRNA's inflated FL (= genomic footprint) from
-    /// blocking legitimate mRNA FL observations during FL model training.
-    int32_t get_unique_frag_length_mrna(const uint8_t* t_is_nrna) const {
-        if (!t_is_nrna) return get_unique_frag_length();
-        int32_t val = -1;
-        for (size_t i = 0; i < frag_lengths.size(); i++) {
-            int32_t fl = frag_lengths[i];
-            if (fl <= 0) continue;
-            if (i < t_inds.size() && t_is_nrna[t_inds[i]]) continue;
-            if (val == -1) val = fl;
-            else if (fl != val) return -1;
-        }
-        return val;
-    }
-
+    // ⛔ `get_unique_frag_length_mrna` was DELETED by C2 — docs/FRAGMENT_LENGTH_AUDIT.md.
+    // It was definition **B**: a TRANSCRIPT-SPACE fragment length, gated on every non-nRNA candidate
+    // agreeing, silently discarding the 4.6 % that did not. Summed into one array with definition
+    // **A** — a GENOMIC footprint over a disjoint subset — and called the library's unconditional
+    // fragment-length distribution, which it was neither unconditional nor one quantity.
+    //
+    // The tool now has ONE definition: the accumulator's `L`, the total length of the fragment's own
+    // path (span minus cut introns, mate gap included), proven exhaustively in C0 and binned for
+    // every deposited fragment by C1's `deposited_lengths`.
     // Return t_inds as a Python frozenset for compatibility
     nb::object get_t_inds() const {
         nb::set s;
@@ -712,8 +705,8 @@ public:
     }
 
     /// Set per-transcript nRNA status (uint8, 1 = nRNA synthetic).
-    /// Used by get_unique_frag_length_mrna() to exclude nRNA candidates
-    /// from the FL unanimity check during model training.
+    /// ⚠ On a NON-SYNTHETIC row `is_nrna` means "single-exon, so mature == nascent" — NOT
+    /// "manufactured span". Read `nrna_mask()`'s own comment before using it as a realness filter.
     void set_nrna_status(const std::vector<uint8_t>& t_is_nrna) {
         t_is_nrna_ = t_is_nrna;
     }

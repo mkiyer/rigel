@@ -43,12 +43,13 @@ from .config import (
     TranscriptGeometry,
 )
 from .estimator import AbundanceEstimator
-from .frag_length_model import FragmentLengthModel, FragmentLengthModels
+from .frag_length_model import FragmentLengthModel
 from .index import TranscriptIndex
 from .native import BamScanner as _NativeBamScanner
 from .native import detect_sj_strand_tag as _native_detect_sj_tag
 from .scan import FragmentRouter
 from .scoring import FragmentScorer
+from .splice import SpliceType, census_field
 from .stats import PipelineStats
 from .strand_model import StrandModels
 
@@ -80,7 +81,6 @@ class PipelineResult:
 
     stats: PipelineStats
     strand_models: StrandModels
-    frag_length_models: FragmentLengthModels
     estimator: AbundanceEstimator
     pipeline_config: "PipelineConfig" = None
     calibration: "CalibrationResult" = None
@@ -103,19 +103,6 @@ def _sj_tag_to_spec(sj_strand_tag) -> str:
         return ",".join(sj_strand_tag) if sj_strand_tag else "none"
     return "none"
 
-
-def _replay_fraglen_observations(
-    fraglen_dict: dict,
-    frag_length_models: FragmentLengthModels,
-) -> None:
-    """Replay C++ fragment-length observation arrays into Python models."""
-    lengths = fraglen_dict.get("lengths", [])
-    splice_types = fraglen_dict.get("splice_types", [])
-    if len(lengths) > 0:
-        frag_length_models.observe_batch(
-            np.asarray(lengths, dtype=np.intp),
-            np.asarray(splice_types, dtype=np.intp),
-        )
 
 
 def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
@@ -155,17 +142,21 @@ def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
         "n_strand_skipped_no_sj",
         "n_strand_skipped_ambig_strand",
         "n_strand_skipped_ambiguous",
-        # Fragment length model training
-        "n_frag_length_unambiguous",
-        "n_frag_length_ambiguous",
         # Multimapper
         "n_multimapper_groups",
         "n_multimapper_alignments",
         # Splice-artifact blacklist
         "n_sj_observed",
         "n_sj_blacklisted",
+        # The deposit hold-out that closes the census identity
+        "n_deposit_not_offered",
     ):
         setattr(stats, key, stats_dict.get(key, 0))
+
+    # ⭐ The splice census, enumerated from the enum rather than listed by hand — the whole point of
+    # deriving the key name on both sides is that no third list can fall out of step with it.
+    for stype in SpliceType:
+        setattr(stats, census_field(stype), stats_dict.get(census_field(stype), 0))
 
 
 def _warn_if_calibration_strand_unidentifiable(strand_models: StrandModels) -> None:
@@ -207,7 +198,6 @@ def scan_and_buffer(
 ) -> tuple[
     PipelineStats,
     StrandModels,
-    FragmentLengthModels,
     FragmentBuffer,
     "object",  # AccumulatorPayload | None
 ]:
@@ -228,12 +218,17 @@ def scan_and_buffer(
     Returns
     -------
     tuple
-        ``(stats, strand_models, frag_length_models, buffer,
-        calibration_payload)`` — the last is ``None`` if the index has
-        no ``regions.feather`` (legacy indexes pre-v3).
+        ``(stats, strand_models, buffer, calibration_payload)`` — the last
+        is ``None`` if the index has no ``regions.feather`` (legacy indexes
+        pre-v3).
+
+    ⭐ **No fragment-length model comes out of here.** The scanner used to train its own histogram
+    during this pass; it measured length by two rules that were neither each other nor the
+    accumulator's ``L``, over a population that was never stated. C2 deleted it. Every
+    fragment-length distribution the tool uses is now built from the payload by
+    :func:`rigel.calibration.fl.build_fl_models` — ``docs/FRAGMENT_LENGTH_AUDIT.md``.
     """
     stats = PipelineStats()
-    frag_length_models = FragmentLengthModels(max_size=scan.max_frag_length)
     buffer = FragmentBuffer(
         t_strand_arr=index.t_to_strand_arr,
         chunk_size=scan.fragments_per_chunk,
@@ -336,12 +331,6 @@ def scan_and_buffer(
             "credit exactly one junction (see sj_strand_table_design.md §2.3)."
         )
 
-    # Replay fragment-length observations into Python models
-    _replay_fraglen_observations(
-        result["frag_length_observations"],
-        frag_length_models,
-    )
-
     logger.info(
         f"[DONE] Native scan: {stats.n_fragments:,} fragments → "
         f"{stats.n_same_strand:,} same-strand, "
@@ -353,7 +342,6 @@ def scan_and_buffer(
         f"{stats.n_multimapper_groups:,} multimapper molecules"
     )
     strand_models.log_summary()
-    frag_length_models.log_summary()
 
     # Calibration payload — Phase B: build the AccumulatorPayload from
     # the C++ scanner's fractional-accumulator results.
@@ -369,7 +357,7 @@ def scan_and_buffer(
     else:
         calibration_payload = None
 
-    return stats, strand_models, frag_length_models, buffer, calibration_payload
+    return stats, strand_models, buffer, calibration_payload
 
 
 def _wire_calibration_regions(
@@ -813,14 +801,9 @@ def run_pipeline(
         scan = _replace(scan, sj_strand_tag=detected_spec)
 
     # -- Single BAM pass (C++ native scanner) --
-    stats, strand_models, frag_length_models, buffer, calibration_payload = scan_and_buffer(
+    stats, strand_models, buffer, calibration_payload = scan_and_buffer(
         bam_path, index, scan
     )
-
-    # NOTE: ``frag_length_models`` holds the scanner's raw global + per-splice-category
-    # histograms only. The RNA / gDNA / global FL distributions used for calibration +
-    # scoring (and surfaced as QC) are built below via build_fl_models() (EB-smoothed,
-    # returned on PipelineResult.fl_models).
 
     # -- Calibration (acyclic) --
     # Build the region geometry, verify it lines up 1:1 with the accumulator
@@ -858,20 +841,18 @@ def run_pipeline(
     # contained in an intergenic or intronic node, RNA from fragments that used an annotated junction
     # with the splice OBSERVED. Both are smooth-EB shrunk toward the unconditional global FL.
     #
-    # ⭐ Both come from the PAYLOAD, not from the scanner's category models. The scanner's spliced
-    # histogram is transcript-space and needs a UNIQUE transcript; the accumulator's pool is a
-    # structural rule over a larger population, is binned at the same L as everything else, and already
-    # excludes `sj_implicit` fragments — whose splice was never sequenced, so certifying them as RNA
-    # would make the pool depend on the model it is used to fit. One quantity, one source.
-    # ⚠ Only `global` still comes from the scan: no pool is unconditional.
-    from .calibration.fl import build_fl_models, gdna_fl_mass, rna_fl_mass
+    # ⭐ ALL THREE come from the PAYLOAD — one object, one frame, one definition of length. The
+    # scanner's spliced histogram is transcript-space and needs a UNIQUE transcript; the
+    # accumulator's pool is a structural rule over a larger population, is binned at the same L as
+    # everything else, and already excludes `sj_implicit` fragments — whose splice was never
+    # sequenced, so certifying them as RNA would make the pool depend on the model it is used to fit.
+    #
+    # ⭐ C2.1: the ANCHOR moved here too, off the scanner's histogram and onto the accumulator's own
+    # `deposited_lengths`. Until then the pools were accumulator-frame and the anchor they were
+    # shrunk toward was not — `docs/FRAGMENT_LENGTH_AUDIT.md` D2.
+    from .calibration.fl import build_fl_models
 
-    fl_models = build_fl_models(
-        global_counts=frag_length_models.global_model.counts,
-        rna_counts=rna_fl_mass(calibration_payload),
-        gdna_counts=gdna_fl_mass(calibration_payload),
-        max_size=frag_length_models.max_size,
-    )
+    fl_models = build_fl_models(calibration_payload)
     gdna_fl_pmf = fl_models.gdna_pmf
     _bins = np.arange(gdna_fl_pmf.size, dtype=np.float64)
     logger.info(
@@ -976,7 +957,6 @@ def run_pipeline(
     return PipelineResult(
         stats=stats,
         strand_models=strand_models,
-        frag_length_models=frag_length_models,
         estimator=estimator,
         pipeline_config=config,
         calibration=calibration,

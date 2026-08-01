@@ -23,13 +23,12 @@ import dataclasses
 import numpy as np
 
 from rigel.calibration.calibrate import calibrate
-from rigel.calibration.fl import build_fl_models, gdna_fl_mass
+from rigel.calibration.fl import build_fl_models
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.signature import TS_AMBIG
 from rigel.config import PipelineConfig
 from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer
 from rigel.sim import GDNAConfig, ReadSimConfig, Scenario
-from rigel.splice import SpliceType
 
 
 def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float) -> float:
@@ -89,14 +88,10 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
     idx, bam = res.index, str(res.bam_path)
     cfg = PipelineConfig()
     scan = dataclasses.replace(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
-    _st, sm, flm, _buf, pl = scan_and_buffer(bam, idx, scan)
+    _st, sm, _buf, pl = scan_and_buffer(bam, idx, scan)
     ra = RegionArrays.from_frame(idx.nodes_df, idx.ref_name_to_id)
-    fl = build_fl_models(
-        global_counts=flm.global_model.counts,
-        rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,
-        gdna_counts=gdna_fl_mass(pl),
-        max_size=flm.max_size,
-    )
+    # ⭐ The same call production makes; see tests/calibration/_oracle.py.
+    fl = build_fl_models(pl)
     # ⚠ The junction axis and the edge flags are BOTH required against the same index the payload was
     # scanned on: an axis addressing a different graph would place every splice on the wrong line, and
     # calibrate refuses rather than proceeding.

@@ -17,11 +17,10 @@ input                        origin                                      cached?
 ===========================  ==========================================  ==========
 ``payload``                  the scan                                    **yes**
 ``strand_model``             the scan                                    **yes**
-FL histograms                the scan                                    **yes, RAW**
 ``region_arrays``            ``RegionArrays.from_index``   (0.11 s)      no
 ``edge_flags``               ``build_edge_flags_array``    (0.04 s)      no
 ``junctions``                ``build_junction_geometry_arrays``          no
-``gdna_fl_pmf``/``rna_fl_pmf``  ``build_fl_models(...)``                 no — derived
+``gdna_fl_pmf``/``rna_fl_pmf``  ``build_fl_models(payload)``             no — derived
 ``config``                   the thing you are varying                   no
 ``injected_priors``          fitted BY ``calibrate``                     no — see below
 ===========================  ==========================================  ==========
@@ -30,9 +29,12 @@ FL histograms                the scan                                    **yes, 
 load that happens anyway, and a stored copy is how a cache goes stale against the thing it describes
 (`CARRY_FORWARD.md` §3 trap 25).
 
-⭐ **The FL histograms are cached RAW, not as the derived pmfs.** `build_fl_models` stays the single
-source of truth; freezing its output would mean a change to the FL model silently does not reach a
-cached scan.
+⭐ **There is no separate FL row any more, and that is C2.** Every fragment-length histogram — the two
+pure pools and the unconditional anchor they are EB-shrunk toward — is a field OF the payload, so
+caching the payload caches them, in one frame, by construction. The scanner's own histogram used to be
+cached alongside it purely to serve as that anchor; `docs/FRAGMENT_LENGTH_AUDIT.md` D1–D3 is what that
+cost. `build_fl_models` remains the single source of truth for the derived pmfs, which are still not
+cached — freezing its output would mean a change to the FL model silently does not reach a cached scan.
 
 THE KEY NEEDS THREE PARTS, AND THE MIDDLE ONE IS A GAP THAT WAS ALREADY LOGGED
 -----------------------------------------------------------------------------
@@ -95,7 +97,6 @@ __all__ = [
 MANIFEST_JSON = "manifest.json"
 PAYLOAD_NPZ = "payload.npz"
 STRAND_NPZ = "strand.npz"
-FL_NPZ = "fl.npz"
 
 #: The four reach columns the key must cover. Named here rather than globbed so that a NEW reach column
 #: fails loudly instead of quietly escaping the digest.
@@ -165,10 +166,17 @@ class ScanCache:
 
     payload: AccumulatorPayload  # the tally — the expensive artifact
     strand_model: object  # StrandModels, including its per-junction table
-    fl_global_counts: np.ndarray  # int64[max_size + 1] — raw, not a pmf
-    fl_rna_counts: np.ndarray  # int64[max_size + 1] — SPLICED_ANNOT, raw
-    fl_max_size: int
     provenance: dict  # the key, the BAM, the scan config, the counts
+
+    # ⛔ `fl_global_counts`, `fl_rna_counts` and `fl_max_size` were DELETED by C2
+    # (docs/FRAGMENT_LENGTH_AUDIT.md). The first was the scanner's histogram, cached so it could be
+    # the empirical-Bayes anchor — the frame mismatch itself, persisted. The second was **D5**: a
+    # field named as if it were live, written and read back and consumed by nothing. The third
+    # duplicated `payload.max_length`.
+    #
+    # ⭐ Every fragment-length histogram now comes off `payload`, so there is nothing left to cache
+    # beside it. ⚠ `fl.npz` is no longer written or read; caches written before C2 still load, since
+    # an extra file on disk is not a key.
 
 
 # ── strand model round-trip ──────────────────────────────────────────────────────────────────────
@@ -215,14 +223,11 @@ def write_scan_cache(
     *,
     payload: AccumulatorPayload,
     strand_model,
-    frag_length_models,
     index: "TranscriptIndex",
     bam: str,
     scan_config,
 ) -> Path:
     """Persist one scan's calibration inputs under *cache_dir*, keyed to this index and config."""
-    from .splice import SpliceType
-
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -239,12 +244,6 @@ def write_scan_cache(
     np.savez_compressed(cache_dir / PAYLOAD_NPZ, **arrays)
     np.savez_compressed(cache_dir / STRAND_NPZ, **_strand_arrays(strand_model))
 
-    global_counts = np.ascontiguousarray(frag_length_models.global_model.counts)
-    rna_counts = np.ascontiguousarray(
-        frag_length_models.category_models[SpliceType.SPLICED_ANNOT].counts
-    )
-    np.savez_compressed(cache_dir / FL_NPZ, global_counts=global_counts, rna_counts=rna_counts)
-
     manifest = {
         # ── the key ──────────────────────────────────────────────────────────────────────────────
         "graph_hash": payload.graph_hash,
@@ -256,7 +255,6 @@ def write_scan_cache(
         "scan_config": dataclasses.asdict(scan_config)
         if dataclasses.is_dataclass(scan_config)
         else dict(scan_config),
-        "fl_max_size": int(frag_length_models.max_size),
         "payload_scalars": scalars,
     }
     (cache_dir / MANIFEST_JSON).write_text(
@@ -314,9 +312,6 @@ def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex", scan_config
         arrays = {name: data[name] for name in data.files}
     with np.load(cache_dir / STRAND_NPZ) as data:
         strand = {name: data[name] for name in data.files}
-    with np.load(cache_dir / FL_NPZ) as data:
-        fl_global, fl_rna = data["global_counts"], data["rna_counts"]
-
     payload = _payload_from_parts(arrays, payload_scalars)
     if payload.graph_hash != manifest["graph_hash"]:
         raise ScanCacheKeyError(
@@ -332,9 +327,6 @@ def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex", scan_config
     cache = ScanCache(
         payload=payload,
         strand_model=_strand_from_arrays(strand),
-        fl_global_counts=fl_global,
-        fl_rna_counts=fl_rna,
-        fl_max_size=int(manifest["fl_max_size"]),
         provenance=manifest,
     )
     if scan_config is not None:
@@ -398,20 +390,15 @@ def index_derived_inputs(index: "TranscriptIndex") -> dict:
 def calibration_inputs(cache: ScanCache, index: "TranscriptIndex") -> dict:
     """Exactly the keyword arguments `calibrate` needs, with the index-derived ones REBUILT.
 
-    ⭐ **Both component histograms come from the PAYLOAD's five pure pools**, not from the scanner's
-    category models. One quantity, one source: the scanner's spliced histogram is transcript-space and
-    requires a UNIQUE transcript, while the accumulator's `RNA_SPLICED` pool is a structural rule over a
-    larger population and already excludes `sj_implicit` fragments. Only the unconditional `global`
-    histogram still comes from the scan, because no pool is unconditional.
+    ⭐ **Every fragment-length histogram comes from the PAYLOAD** — the two pure pools *and*, since
+    C2.1, the unconditional anchor they are shrunk toward. One quantity, one source, one frame: the
+    scanner's spliced histogram is transcript-space and requires a UNIQUE transcript, while the
+    accumulator's `RNA_SPLICED` pool is a structural rule over a larger population and already
+    excludes `sj_implicit` fragments; and the anchor is `deposited_lengths`, binned at the same `L`.
     """
-    from .calibration.fl import build_fl_models, gdna_fl_mass, rna_fl_mass
+    from .calibration.fl import build_fl_models
 
-    fl_models = build_fl_models(
-        global_counts=cache.fl_global_counts,
-        rna_counts=rna_fl_mass(cache.payload),
-        gdna_counts=gdna_fl_mass(cache.payload),
-        max_size=cache.fl_max_size,
-    )
+    fl_models = build_fl_models(cache.payload)
     return {
         "payload": cache.payload,
         "strand_model": cache.strand_model,

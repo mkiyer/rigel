@@ -40,7 +40,7 @@ SIM = ReadSimConfig(
 def _scan(scenario, transcripts):
     scenario.add_gene("g1", "+", transcripts)
     result = scenario.build_oracle(n_fragments=1500, sim_config=SIM)
-    _, _, _, _, payload = scan_and_buffer(
+    _, _, _, payload = scan_and_buffer(
         str(result.bam_path), result.index, BamScanConfig(sj_strand_tag="auto")
     )
     return payload

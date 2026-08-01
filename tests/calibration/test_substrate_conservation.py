@@ -49,7 +49,7 @@ def scanned():
         gdna_config=GDNAConfig(abundance=400.0, frag_mean=250, frag_std=60),
     )
     config = PipelineConfig(em=EMConfig(seed=SEED), scan=BamScanConfig(sj_strand_tag="auto"))
-    _, _, _, buffer, payload = scan_and_buffer(str(result.bam_path), result.index, config.scan)
+    _, _, buffer, payload = scan_and_buffer(str(result.bam_path), result.index, config.scan)
     ra = RegionArrays.from_frame(result.index.nodes_df, result.index.ref_name_to_id)
     yield payload, ra, buffer, result.index
     sc.cleanup()

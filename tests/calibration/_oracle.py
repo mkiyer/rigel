@@ -93,7 +93,7 @@ def _scan_payload(bam: str, index, cfg):
     from dataclasses import replace as dc
 
     sc = dc(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
-    _stats, _sm, _flm, _buf, payload = scan_and_buffer(bam, index, sc)
+    _stats, _sm, _buf, payload = scan_and_buffer(bam, index, sc)
     return payload
 
 
@@ -281,23 +281,21 @@ def _main():
     # calibration accuracy on the CORRECT basis: compare per-region f_g
     from rigel.calibration import calibrate
     from rigel.calibration.region_arrays import RegionArrays
-    from rigel.calibration.fl import build_fl_models, gdna_fl_mass
+    from rigel.calibration.fl import build_fl_models
     from rigel.calibration.splice_graph import (
         build_edge_flags_array,
         build_junction_geometry_arrays,
     )
-    from rigel.splice import SpliceType
     from dataclasses import replace as dc
 
     sc = dc(cfg.scan, sj_strand_tag=_native_detect_sj_tag(bam))
-    stats, sm, flm, buffer, payload = scan_and_buffer(bam, index, sc)
+    stats, sm, buffer, payload = scan_and_buffer(bam, index, sc)
     ra = RegionArrays.from_index(index)
-    fl = build_fl_models(
-        global_counts=flm.global_model.counts,
-        rna_counts=flm.category_models[SpliceType.SPLICED_ANNOT].counts,
-        gdna_counts=gdna_fl_mass(payload),
-        max_size=flm.max_size,
-    )
+    # ⭐ One object, one frame — the same call production makes. This harness used to build its
+    # own mixture: the scanner's histogram as the anchor and the scanner's SPLICED_ANNOT category as
+    # the RNA pool, neither of which production has used since S5.d/C2.1. A test harness that builds
+    # a different model from the shipped one is calibrating something the tool does not ship.
+    fl = build_fl_models(payload)
     cal = calibrate(
         payload=payload,
         region_arrays=ra,

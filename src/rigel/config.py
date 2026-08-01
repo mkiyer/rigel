@@ -419,9 +419,14 @@ class PipelineConfig:
 class TranscriptGeometry:
     """Pre-computed transcript/gene geometry for the EM solver.
 
-    Computed once from ``TranscriptIndex`` + ``FragmentLengthModels`` at the
-    start of ``quant_from_buffer``.  Not user-configurable — these are
-    derived from the reference and trained models.
+    Computed once from ``TranscriptIndex`` + the RNA :class:`~rigel.frag_length_model.FragmentLengthModel`
+    at the start of ``quant_from_buffer``.  Not user-configurable — these are
+    derived from the reference and the fitted models.
+
+    ⚠ That model is built by ``FragmentLengthModel.from_pmf`` from
+    ``FLModels.rna_pmf``, which since C2 is derived from the accumulator payload alone
+    (``docs/FRAGMENT_LENGTH_AUDIT.md`` D7): the effective lengths here and the calibration divisors
+    read the SAME pmf, so a change to it reaches every transcript in the EM, not only calibration.
 
     Parameters
     ----------

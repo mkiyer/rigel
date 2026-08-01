@@ -139,7 +139,7 @@ def _run_one(
     )
     timeline.start()
     t0 = time.perf_counter()
-    stats, strand_models, frag_length_models, buffer, cal_payload = scan_and_buffer(
+    stats, strand_models, buffer, cal_payload = scan_and_buffer(
         str(bam_path),
         index,
         scan_cfg,
@@ -159,7 +159,7 @@ def _run_one(
 
     # Release large scan objects before the next sweep point.
     buffer.release()
-    del buffer, cal_payload, frag_length_models, strand_models
+    del buffer, cal_payload, strand_models
     gc.collect()
     rss_after_release = _snap_rss_current()
 

@@ -15,7 +15,7 @@ library into gDNA vs RNA, and a per-locus EM solver assigns RNA to transcripts. 
 
 | doc | what it is |
 |---|---|
-| **`docs/FRAGMENT_LENGTH_AUDIT.md`** | ⭐⭐ **START HERE — §0 IS THE ROADMAP AND THE CRITICAL PATH.** THREE definitions of fragment length were live, two of them summed into one array called "global", and the EB shrinkage mixed frames. C0/C1 done; **C2 is next and carries one owner decision** |
+| **`docs/FRAGMENT_LENGTH_AUDIT.md`** | ⭐⭐ **START HERE — §0 IS THE ROADMAP AND THE CRITICAL PATH.** THREE definitions of fragment length were live, two of them summed into one array called "global", and the EB shrinkage mixed frames. **C0 / C1 / C2 have all LANDED (2026-08-01)** — there is now ONE definition. **C3 is next**; §§1–3 are history |
 | **`docs/SOLVER_OBSERVABLES_PLAN.md`** | ⭐ **How we got there.** The accumulator stores three channels and the solver reads **one**; and `assemble_priors` summed an intensive quantity as if it were extensive. §1 is the theory from the ground up. P0/P1 done, **P2 built and gated OFF — blocked on the audit's C2/C3** |
 | `docs/S5_DESIGN_LOG.md` | ⚠ **S5 IS FINISHED** (S5.g measured and refuted). Kept for §1's accumulator derivations and §3's observable measurements, which are still the reference. **It is no longer the live plan** |
 | `docs/IMPLEMENTATION_PLAN.md` §0 | live state for everything else |
@@ -34,7 +34,15 @@ conditions, in `LEDGER.md`'s S5.f entry, **bit-identical on re-run**. That was t
 derivation was deliberately sequenced after it because each one needs a baseline to be judged against.
 **S5.0–S5.g have all landed** (S5.g's taper was measured and **refuted** — ≤ 0.0002). ⭐ **The live work is
 no longer S5**: it is the fragment-length cleanup in `FRAGMENT_LENGTH_AUDIT.md`, reached by way of
-`SOLVER_OBSERVABLES_PLAN.md`. **C2 is next and carries an owner decision** — see that file's §4.
+`SOLVER_OBSERVABLES_PLAN.md`. **C0, C1 and C2 have landed; C3 is next** — see that file's §0.
+
+⭐ **ONE DEFINITION OF FRAGMENT LENGTH, as of C2 (2026-08-01).** `L` is proven (C0), the accumulator bins
+every deposited fragment by it (C1), and every consumer reads it (C2) — the scanner's rival histogram,
+`FragmentLengthModels`, and the transcript-space definition are **deleted**, and `build_fl_models` takes
+the payload and nothing else, so a mixed-frame call is unrepresentable. ⚠ `FragmentLengthModel`
+**singular** is the scorer and stays. `rigel report`'s five splice counts are now the **scanner's own
+census** — owner ruling: QC lives where it is generated and is passed through nothing — and for the first
+time they sum to the library.
 
 ⚠ **Three things the first baseline says**, before anything is built on it:
 1. ⛔ **A7's "11.0 % gDNA over-call" DID NOT SURVIVE MEASUREMENT.** The A/B is done (`LEDGER.md` S5.g-2):
@@ -52,13 +60,15 @@ no longer S5**: it is the fragment-length cleanup in `FRAGMENT_LENGTH_AUDIT.md`,
    measured spread drops from ~0.5 % to ~1e-10. Hold the mode fixed across both arms: the three modes
    are different estimators, not one answer at different precision.
 
-⭐ **S6 landed too, but ⚠ the goldens are STALE AGAIN as of 2026-07-31: the suite is 1809 / 22.** 21 of the
-22 are `test_golden_output` moving numerically because P1 changed the EM prior's units — expected, and
-they regenerate **once**, after C3. The 22nd is the long-standing failure
-is a **modelling call, not a defect** — a silent transcript leaks ~30 counts against a limit of 25 under
-`assignment_mode` `sample` and `fractional`, and ≤25 under `map`. ⛔ Do not adopt `map` to go green: a
-negative control is one-sided (trap 19) and MAP is the mode that most suppresses assignment.
-`TODO.md` §7.
+⭐ **S6 landed too, but ⚠ the goldens are STALE AGAIN: the suite is 1824 / 21 as of C2.** All 21 are
+`test_golden_output`, and they have now moved **twice** — P1 changed the EM prior's units, C2 changed the
+fragment-length models. Both expected. ⛔ Regenerate **once**, after C3, **twice, and diff**.
+
+⭐ **`TODO.md` §7's `test_nrna_double_counting[g20_n0_s100]` now PASSES** (C2, 2026-08-01) — the silent
+negative control reads **0 counts against a limit of 25** where it leaked ~30, stable across re-runs.
+⚠ **Do not close §7 on that.** A negative control is one-sided (trap 19), this was not C2's target, and
+§7's substance was always that `map` suppresses assignment most; re-read it against all three modes
+before retiring it.
 
 ⛔ **The OLD benchmark baseline is void.** `r0 0.079005 / r3 0.046675` was the deleted `ambig_dense_10mb`
 suite — do not quote it, compare against it, or try to reproduce it. The replacement suite is proven to
@@ -137,17 +147,22 @@ different GTF moves every one of those numbers, so **re-derive** — `scripts/de
 > **Every build, test and lint command must run inside the activated `rigel` conda environment** — it
 > holds htslib and the compilers, and the C++ build finds htslib via `$CONDA_PREFIX`.
 
+⛔ **Run the suite as `python -m pytest`, never bare `pytest`.** Bare `pytest` does not put the repo root
+on `sys.path`, so `tests/calibration/test_fl.py`'s `import tests.native._accumulator_reference` raises and
+the suite reads one extra failure — which, under "a new failure is a regression", reads as one.
+
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-pytest tests/ -q                               # 1809 pass / 22 fail — 21 stale goldens (regen after C3),
-                                               # 1 is TODO.md §7's owner call
-pytest tests/ --update-golden                  # regenerate tests/golden/ after intended output changes
+python -m pytest tests/ -q                     # 1824 pass / 21 fail — all 21 stale goldens (regen after C3)
+python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-**Tooling that is current** (everything else under `scripts/` was deleted 2026-07-30 as unrunnable):
+**Tooling that is current** (everything else under `scripts/` was deleted 2026-07-30 as unrunnable;
+`scripts/sim/fl_estimation_stress.py` followed on 2026-08-01, having called a `calibrate()` signature that
+had not existed for several milestones):
 
 | | |
 |---|---|
@@ -161,6 +176,7 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format 
 | `scripts/design/native_parity_on_real_data.py` | the S3 gate on real cfRNA at full scale |
 | `scripts/design/scan_profile.py` | ns/fragment, regressed over several BAMs |
 | `scripts/design/observable_efficiency.py` | what fraction of the length information a storage choice keeps |
+| `scripts/design/fl_anchor_gap.py` | ⭐ the zero-gDNA falsification: EB anchor vs RNA pool, over the 8 pilot caches |
 | `scripts/design/node_density_derivation.py` | the reciprocal-opportunity theorem, T0–T6, each perturbed |
 | `scripts/sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | build the suite |
 | `scripts/sim/evaluate_suite.py` | net fragment flow (`rigel.sim.analysis`) |

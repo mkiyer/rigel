@@ -2,7 +2,6 @@
 
 Covers:
 - FragmentLengthModel.from_counts() factory for pre-built distributions
-- FragmentLengthModels.to_dict() = raw global + per-splice-category histograms
 
 The library-wide gDNA / RNA FL distributions are owned by
 ``rigel.calibration.fl.FLModels`` (built from these raw counts); their tests
@@ -16,9 +15,7 @@ import pytest
 
 from rigel.frag_length_model import (
     FragmentLengthModel,
-    FragmentLengthModels,
 )
-from rigel.splice import SpliceType
 
 
 # =====================================================================
@@ -142,48 +139,7 @@ class TestFromCounts:
             ), f"Mismatch at length={length}"
 
 
-# =====================================================================
-# FragmentLengthModels.to_dict() — raw global + per-category histograms
-# =====================================================================
-
-
-class TestToDict:
-    """The container serializes only the scanner's raw models.
-
-    gDNA / RNA FL distributions are reported separately by the caller from
-    ``FLModels`` and are NOT keys of the container's ``to_dict()``.
-    """
-
-    def _populated(self) -> FragmentLengthModels:
-        m = FragmentLengthModels(max_size=500)
-        for fl in [200] * 100:
-            m.observe(fl, splice_type=SpliceType.SPLICED_ANNOT)
-        for fl in [350] * 50:
-            m.observe(fl, splice_type=SpliceType.UNSPLICED)
-        for fl in [400] * 20:
-            m.observe(fl, splice_type=None)  # intergenic → global only
-        return m
-
-    def test_keys_are_global_plus_categories(self):
-        d = self._populated().to_dict()
-        assert "global" in d
-        assert "spliced_annot" in d
-        assert "unspliced" in d
-        # gDNA / RNA live in FLModels, not the raw container.
-        assert "gdna" not in d
-        assert "rna" not in d
-
-    def test_global_includes_all_observations(self):
-        """Global model aggregates every observation regardless of category."""
-        d = self._populated().to_dict()
-        assert d["global"]["summary"]["n_observations"] == 170
-
-    def test_category_summary_matches_live_model(self):
-        """Serialized per-category summary stats match the live model."""
-        m = self._populated()
-        d = m.to_dict()
-        spliced = m.category_models[SpliceType.SPLICED_ANNOT]
-        assert d["spliced_annot"]["summary"]["total_weight"] == pytest.approx(
-            spliced.total_weight, rel=0.01
-        )
-        assert d["spliced_annot"]["summary"]["mean"] == pytest.approx(200.0)
+# ⛔ `TestToDict` lived here and was DELETED by C2 with the container it tested
+# (docs/FRAGMENT_LENGTH_AUDIT.md): it pinned the SCANNER's raw global + per-splice-category
+# histograms, which are gone. The report's fragment-length categories now come from
+# `FLModels` alone and are gated in tests/test_summary_report.py.

@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ..scan_payload import (
+    N_FRAGMENT_POOLS,
     POOL_DNA_INTERGENIC,
     POOL_DNA_INTERGENIC_EXON,
     POOL_DNA_INTRONIC,
@@ -95,13 +96,20 @@ class FLModels:
     global_pmf: np.ndarray  # unconditional anchor (no prior)
     rna_pmf: np.ndarray  # spliced, EB-shrunk toward global
     gdna_pmf: np.ndarray  # gDNA pool, EB-shrunk toward global
-    global_counts: np.ndarray  # raw scanner histogram (all fragments)
+    global_counts: np.ndarray  # the accumulator's deposited_lengths — every deposited fragment at L
     rna_counts: np.ndarray  # raw spliced-annotated histogram
     gdna_counts: np.ndarray  # raw structural pool (intergenic + intronic)
     n_global: float
     n_rna: float
     n_gdna: float
     max_size: int
+    #: float64[N_FRAGMENT_POOLS, max_size + 1] — the five pure pools UNAGGREGATED, straight off the
+    #: payload. ``rna_counts`` and ``gdna_counts`` above are sums of subsets of these rows; the two
+    #: crossing pools (:func:`splash_fl_mass`, on-target gDNA) are in **neither** sum and appear
+    #: nowhere else. ⭐ They are carried here so the report can show each pool separately — that
+    #: function's docstring asks for exactly this ("makes that comparison an output instead of an
+    #: assumption") and nothing was doing it.
+    pool_counts: np.ndarray = None
 
     def _empirical(self, counts: np.ndarray) -> "FragmentLengthModel":
         """Wrap a raw count vector as an unfinalized ``FragmentLengthModel``.
@@ -196,19 +204,59 @@ def _smooth_eb(aligned: np.ndarray, global_pmf: np.ndarray, prior_ess: float):
 
 
 def build_fl_models(
+    payload: "AccumulatorPayload",
+    *,
+    prior_ess: float = POOL_EB_PRIOR_ESS,
+) -> FLModels:
+    """Build the global / RNA / gDNA FL pmfs from ONE payload, in ONE frame.
+
+    ⭐ **All three histograms come off the same object, so they cannot disagree about what a
+    fragment length IS.** The anchor is ``payload.deposited_lengths`` — every deposited fragment
+    binned at its own ``L`` with no purity condition (C1); the two component pools are
+    :func:`rna_fl_mass` and :func:`gdna_fl_mass`, drawn from exactly that same population. RNA and
+    gDNA are EB-shrunk toward the anchor with a single Dirichlet ``prior_ess``.
+
+    ⚠ **The payload is the only argument on purpose** (``docs/FRAGMENT_LENGTH_AUDIT.md`` C2.1). The
+    anchor used to be passed in separately and was taken from the **scanner's** histogram, which
+    measures fragment length by two other rules — ``frag.genomic_footprint()`` for one subset and a
+    transcript-space length for a disjoint one — over a population that was never stated. That is
+    accumulator-frame pools shrunk toward a scanner-frame anchor: ``CARRY_FORWARD.md`` §3 trap 27,
+    in shipped code, and it is what made the length likelihood read a ruler mismatch as composition
+    (``LEDGER.md`` P2). Removing the parameter is what makes the mixed-frame call unrepresentable
+    rather than merely discouraged.
+
+    ⚠ The anchor is unconditional **given deposit**, not unconditional: it excludes what the
+    accumulator rejects (too long, ambiguous path, strand-undefined, empty), each counted in
+    ``payload.qc``. That is precisely the population the pools are drawn from, which is what makes
+    it the right anchor rather than a merely convenient one.
+
+    For the EB kernel over three free histograms — the shape a unit test needs and production never
+    has — see :func:`_fl_models_from_histograms`.
+    """
+    return _fl_models_from_histograms(
+        global_counts=payload.deposited_lengths,
+        rna_counts=rna_fl_mass(payload),
+        gdna_counts=gdna_fl_mass(payload),
+        max_size=int(payload.max_length),
+        prior_ess=prior_ess,
+        pool_counts=payload.pool_lengths,
+    )
+
+
+def _fl_models_from_histograms(
     *,
     global_counts: np.ndarray,
     rna_counts: np.ndarray,
     gdna_counts: np.ndarray,
     max_size: int,
     prior_ess: float = POOL_EB_PRIOR_ESS,
+    pool_counts: np.ndarray | None = None,
 ) -> FLModels:
-    """Build the global / RNA / gDNA FL pmfs under one smooth-EB policy.
+    """The smooth-EB kernel: three histograms in, three pmfs out.
 
-    ``global_counts`` is the scanner's unconditional histogram (the EB anchor),
-    ``rna_counts`` the spliced (SPLICED-ANNOT) histogram, ``gdna_counts`` the
-    aggregated gDNA pool (:func:`gdna_fl_mass`). RNA and gDNA are EB-shrunk toward
-    the global FL with a single Dirichlet ``prior_ess``.
+    ⛔ **Not a production entry point.** Production has exactly one source for all three histograms
+    and reaches it through :func:`build_fl_models`; this exists so the shrinkage policy itself can be
+    exercised over anchors and pools that no real payload would produce.
     """
     global_aligned = _aligned(global_counts, max_size)
     rna_aligned = _aligned(rna_counts, max_size)
@@ -223,6 +271,11 @@ def build_fl_models(
         global_counts=global_aligned,
         rna_counts=rna_aligned,
         gdna_counts=gdna_aligned,
+        pool_counts=(
+            np.zeros((N_FRAGMENT_POOLS, max_size + 1), dtype=np.float64)
+            if pool_counts is None
+            else np.asarray(pool_counts, dtype=np.float64)
+        ),
         n_global=float(global_aligned.sum()),
         n_rna=n_rna,
         n_gdna=n_gdna,

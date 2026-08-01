@@ -20,12 +20,11 @@ from rigel.calibration.effective_length import (
     contained_eff_length,
     crossing_eff_length,
 )
-from rigel.calibration.fl import build_fl_models, gdna_fl_mass
+from rigel.calibration.fl import build_fl_models
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.substrate import CalibrationSubstrate
 from rigel.config import BamScanConfig
 from rigel.pipeline import scan_and_buffer
-from rigel.splice import SpliceType
 
 
 def _crossing_vs_contained_ratio(bam_path, index) -> float:
@@ -39,15 +38,11 @@ def _crossing_vs_contained_ratio(bam_path, index) -> float:
     ``(right[r] + left[r+1]) / 2``, because the old accumulator split one crossing across them. A
     contiguous edge is a 0-bp line with one count, so the ½ and the loop over flanks both go.
     """
-    _s, sm, fla, _b, pl = scan_and_buffer(str(bam_path), index, BamScanConfig(sj_strand_tag="auto"))
+    _s, sm, _b, pl = scan_and_buffer(str(bam_path), index, BamScanConfig(sj_strand_tag="auto"))
     ra = RegionArrays.from_frame(index.nodes_df, index.ref_name_to_id)
     CalibrationSubstrate._check_alignment(pl, ra)
-    flm = build_fl_models(
-        global_counts=fla.global_model.counts,
-        rna_counts=fla.category_models[SpliceType.SPLICED_ANNOT].counts,
-        gdna_counts=gdna_fl_mass(pl),
-        max_size=fla.max_size,
-    )
+    # ⭐ The same call production makes; see tests/calibration/_oracle.py.
+    flm = build_fl_models(pl)
     gpmf = flm.gdna_pmf
     node_eff = contained_eff_length(ra.region_size_bp, gpmf)
     # gDNA's template is the chromosome, so a line's divisor is the unbounded-reach limit mu_g − 1 —
@@ -120,7 +115,7 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
             seed=7,
         ),
     )
-    _s, sm, _fl, _b, pl = scan_and_buffer(
+    _s, sm, _b, pl = scan_and_buffer(
         str(res.bam_path), res.index, BamScanConfig(sj_strand_tag="auto")
     )
     ra = RegionArrays.from_frame(res.index.nodes_df, res.index.ref_name_to_id)
@@ -232,7 +227,7 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
 
     # Control: no blacklist → all 70 deposit (the 50 as annotated splices).
     idx = TranscriptIndex.load(str(idx_dir))
-    s0, _, _, _, pl0 = scan_and_buffer(str(bam), idx, cfg)
+    s0, _, _, pl0 = scan_and_buffer(str(bam), idx, cfg)
     assert s0.n_sj_blacklisted == 0
     assert s0.n_with_annotated_sj == 50
     assert total_mass(pl0) > 65.0  # 20 contained + ~50 spliced crossing mass
@@ -248,7 +243,7 @@ def test_artifact_splice_held_out_and_mass_conserved(tmp_path):
         }
     ).to_feather(idx_dir / SJ_BLACKLIST_FEATHER)
     idx2 = TranscriptIndex.load(str(idx_dir))
-    s1, _, _, _, pl1 = scan_and_buffer(str(bam), idx2, cfg)
+    s1, _, _, pl1 = scan_and_buffer(str(bam), idx2, cfg)
     assert s1.n_sj_blacklisted == 50, "blacklist did not flag the junction"
     # Only the 20 non-artifact unspliced controls remain → mass == n_deposited.
     assert total_mass(pl1) == 20.0, f"artifacts not held out (mass={total_mass(pl1)})"

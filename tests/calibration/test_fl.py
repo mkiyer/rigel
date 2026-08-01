@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration.fl import (
-    build_fl_models,
+    _fl_models_from_histograms,
     gdna_fl_mass,
     rna_fl_mass,
     splash_fl_mass,
@@ -127,7 +127,7 @@ def test_every_pool_reaches_EXACTLY_ONE_accessor():
 def test_build_fl_large_pool_is_empirical():
     glob = _spike(100, 1.0e6)
     gdna = _spike(300, 1.0e7)  # huge gDNA pool ⇒ dominated by its own evidence
-    fl = build_fl_models(
+    fl = _fl_models_from_histograms(
         global_counts=glob, rna_counts=glob, gdna_counts=gdna, max_size=1000, prior_ess=1000.0
     )
     assert int(np.argmax(fl.gdna_pmf)) == 300
@@ -137,7 +137,7 @@ def test_build_fl_large_pool_is_empirical():
 
 def test_build_fl_empty_pool_collapses_to_global():
     glob = _spike(100, 1.0e6)
-    fl = build_fl_models(
+    fl = _fl_models_from_histograms(
         global_counts=glob,
         rna_counts=glob,
         gdna_counts=np.zeros(1001, dtype=np.float64),
@@ -150,7 +150,7 @@ def test_build_fl_empty_pool_collapses_to_global():
 def test_build_fl_small_pool_shrinks_toward_global_no_cliff():
     glob = _spike(100, 1.0e6)  # global mode at 100
     gdna = _spike(300, 1.0)  # a single gDNA fragment at 300
-    fl = build_fl_models(
+    fl = _fl_models_from_histograms(
         global_counts=glob, rna_counts=glob, gdna_counts=gdna, max_size=1000, prior_ess=1000.0
     )
     # Smooth shrinkage (no threshold): with pool_total=1 ≪ ρ_ess=1000 the global
@@ -162,10 +162,10 @@ def test_build_fl_small_pool_shrinks_toward_global_no_cliff():
 def test_build_fl_just_below_5000_is_not_a_cliff():
     # Decision 5: 4999 vs 5001 differ only marginally (no GOOD/WEAK jump).
     glob = _spike(100, 1.0e6)
-    lo = build_fl_models(
+    lo = _fl_models_from_histograms(
         global_counts=glob, rna_counts=glob, gdna_counts=_spike(300, 4999.0), max_size=1000
     )
-    hi = build_fl_models(
+    hi = _fl_models_from_histograms(
         global_counts=glob, rna_counts=glob, gdna_counts=_spike(300, 5001.0), max_size=1000
     )
     np.testing.assert_allclose(lo.gdna_pmf[300], hi.gdna_pmf[300], rtol=1e-3)
@@ -181,7 +181,7 @@ def test_build_fl_stores_raw_aligned_counts():
     glob = _spike(100, 500.0)
     rna = _spike(200, 300.0)
     gdna = _spike(300, 40.0)
-    fl = build_fl_models(
+    fl = _fl_models_from_histograms(
         global_counts=glob, rna_counts=rna, gdna_counts=gdna, max_size=1000, prior_ess=1000.0
     )
     assert fl.global_counts.shape == (1001,)
@@ -199,7 +199,7 @@ def test_build_fl_counts_overflow_folds_into_last_bin():
     """Counts beyond max_size fold into the overflow bin when aligned."""
     over = np.zeros(1201, dtype=np.float64)
     over[1150] = 7.0  # beyond max_size=1000
-    fl = build_fl_models(
+    fl = _fl_models_from_histograms(
         global_counts=_spike(100, 10.0),
         rna_counts=_spike(100, 10.0),
         gdna_counts=over,
@@ -212,7 +212,7 @@ def test_build_fl_counts_overflow_folds_into_last_bin():
 
 def test_accessors_return_empirical_models():
     """rna_model()/gdna_model()/global_model() expose the raw empirical FL."""
-    fl = build_fl_models(
+    fl = _fl_models_from_histograms(
         global_counts=_spike(100, 500.0),
         rna_counts=_spike(200, 300.0),
         gdna_counts=_spike(325, 40.0),

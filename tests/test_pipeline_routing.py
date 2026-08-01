@@ -14,7 +14,7 @@ from rigel.buffer import (
 from rigel.splice import SpliceType
 from rigel.config import EMConfig
 from rigel.estimator import AbundanceEstimator
-from rigel.frag_length_model import FragmentLengthModel, FragmentLengthModels
+from rigel.frag_length_model import FragmentLengthModel
 from rigel.scoring import FragmentScorer
 from rigel.scan import FragmentRouter
 from rigel.stats import PipelineStats
@@ -146,18 +146,19 @@ def _make_env(index):
     strand_models = StrandModels(
         exonic_spliced=StrandModel.from_labels([int(Strand.POS)] * 20, [int(Strand.POS)] * 20)
     )
-    frag_length_models = FragmentLengthModels(max_size=1000)
-    frag_length_models.observe(200, SpliceType.UNSPLICED)
+    # ⚠ Only the SIZE was ever read from the container this replaces — an int, threaded through
+    # several frames as an object. C2 deleted the container (docs/FRAGMENT_LENGTH_AUDIT.md).
+    max_frag_size = 1000
     estimator = AbundanceEstimator(index.num_transcripts, em_config=EMConfig(seed=1))
     stats = PipelineStats()
-    return strand_models, frag_length_models, estimator, stats
+    return strand_models, max_frag_size, estimator, stats
 
 
 def _scan_em_data(
     buffer,
     index,
     strand_models,
-    frag_length_models,
+    max_frag_size,
     estimator,
     stats,
     log_every=1_000_000,
@@ -171,7 +172,7 @@ def _scan_em_data(
     # Routing tests don't exercise FL scoring: pass unfinalized (empty) FL models
     # so the scorer's FL LUT is inert (_log_prob is None), matching the prior use
     # of the container's empty rna/gdna models.
-    empty_fl = FragmentLengthModel(max_size=frag_length_models.max_size)
+    empty_fl = FragmentLengthModel(max_size=max_frag_size)
     ctx = FragmentScorer.from_models(
         strand_models,
         empty_fl,
@@ -197,7 +198,7 @@ def test_multimapper_spliced_annot_skips_shadows():
         t_to_strand=[int(Strand.POS), int(Strand.POS)],
         g_to_strand=[int(Strand.POS)],
     )
-    strand_models, frag_length_models, estimator, stats = _make_env(index)
+    strand_models, max_frag_size, estimator, stats = _make_env(index)
 
     bfs = [
         _BF(
@@ -230,7 +231,7 @@ def test_multimapper_spliced_annot_skips_shadows():
         buffer,
         index,
         strand_models,
-        frag_length_models,
+        max_frag_size,
         estimator,
         stats,
         log_every=1_000_000,
@@ -254,7 +255,7 @@ def test_multimapper_unspliced_adds_nrna_shadows():
         t_to_strand=[int(Strand.POS), int(Strand.POS)],
         g_to_strand=[int(Strand.POS)],
     )
-    strand_models, frag_length_models, estimator, stats = _make_env(index)
+    strand_models, max_frag_size, estimator, stats = _make_env(index)
 
     bfs = [
         _BF(
@@ -287,7 +288,7 @@ def test_multimapper_unspliced_adds_nrna_shadows():
         buffer,
         index,
         strand_models,
-        frag_length_models,
+        max_frag_size,
         estimator,
         stats,
         log_every=1_000_000,
@@ -316,7 +317,7 @@ def test_multimapper_gdna_likelihood_normalizes_by_full_nh():
     )
 
     def scan_for(bfs, frag_ids):
-        strand_models, frag_length_models, estimator, stats = _make_env(index)
+        strand_models, max_frag_size, estimator, stats = _make_env(index)
         chunk = _Chunk(
             bfs=bfs,
             fragment_classes=[FRAG_MULTIMAPPER] * len(bfs),
@@ -326,7 +327,7 @@ def test_multimapper_gdna_likelihood_normalizes_by_full_nh():
             _Buffer([chunk]),
             index,
             strand_models,
-            frag_length_models,
+            max_frag_size,
             estimator,
             stats,
         )
@@ -366,7 +367,7 @@ def test_route_counters_are_exclusive_per_unit():
         t_to_strand=[int(Strand.POS), int(Strand.POS), int(Strand.NEG)],
         g_to_strand=[int(Strand.POS), int(Strand.NEG)],
     )
-    strand_models, frag_length_models, estimator, stats = _make_env(index)
+    strand_models, max_frag_size, estimator, stats = _make_env(index)
 
     bfs = [
         # Deterministic unique: FRAG_UNAMBIG + SPLICED_ANNOT
@@ -448,7 +449,7 @@ def test_route_counters_are_exclusive_per_unit():
         buffer,
         index,
         strand_models,
-        frag_length_models,
+        max_frag_size,
         estimator,
         stats,
         log_every=1_000_000,
@@ -486,7 +487,7 @@ def test_nm_penalty_discriminates_multimapper_hits():
         t_to_strand=[int(Strand.POS), int(Strand.POS)],
         g_to_strand=[int(Strand.POS), int(Strand.POS)],
     )
-    strand_models, frag_length_models, estimator, stats = _make_env(index)
+    strand_models, max_frag_size, estimator, stats = _make_env(index)
 
     # Hit A: maps to t0 with NM=0
     bf_a = _BF(
@@ -522,7 +523,7 @@ def test_nm_penalty_discriminates_multimapper_hits():
         buffer,
         index,
         strand_models,
-        frag_length_models,
+        max_frag_size,
         estimator,
         stats,
         log_every=1_000_000,
@@ -555,7 +556,7 @@ def test_nm_penalty_zero_when_disabled():
         t_to_strand=[int(Strand.POS)],
         g_to_strand=[int(Strand.POS)],
     )
-    strand_models, frag_length_models, estimator_a, stats_a = _make_env(index)
+    strand_models, max_frag_size, estimator_a, stats_a = _make_env(index)
     _, _, estimator_b, stats_b = _make_env(index)
 
     bf_nm0 = _BF(
@@ -591,7 +592,7 @@ def test_nm_penalty_zero_when_disabled():
         _Buffer([chunk_a]),
         index,
         strand_models,
-        frag_length_models,
+        max_frag_size,
         estimator_a,
         stats_a,
         log_every=1_000_000,
@@ -601,7 +602,7 @@ def test_nm_penalty_zero_when_disabled():
         _Buffer([chunk_b]),
         index,
         strand_models,
-        frag_length_models,
+        max_frag_size,
         estimator_b,
         stats_b,
         log_every=1_000_000,

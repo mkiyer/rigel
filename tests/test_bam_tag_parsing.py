@@ -567,7 +567,7 @@ class TestMissingAndInvalidTags:
         from rigel.pipeline import scan_and_buffer
 
         bam_path, index = self._build_scenario_without_xs(tmp_path)
-        _, strand_models, _, _, _ = scan_and_buffer(
+        _, strand_models, _, _ = scan_and_buffer(
             bam_path, index, BamScanConfig(sj_strand_tag="XS")
         )
 
@@ -625,7 +625,7 @@ class TestMissingAndInvalidTags:
             seed=42,
         )
         result = scenario.build_oracle(n_fragments=200, sim_config=sc)
-        _, strand_models, _, _, _ = scan_and_buffer(
+        _, strand_models, _, _ = scan_and_buffer(
             str(result.bam_path), result.index, BamScanConfig(sj_strand_tag="none")
         )
 
@@ -684,7 +684,7 @@ class TestMissingAndInvalidTags:
         pysam.sort("-n", "-o", sorted_bam, modified_bam)
 
         # Invalid values produce STRAND_NONE (no crash); scanner-level check.
-        _, strand_models, _, _, _ = scan_and_buffer(
+        _, strand_models, _, _ = scan_and_buffer(
             sorted_bam, result.index, BamScanConfig(sj_strand_tag="XS")
         )
         sm = strand_models.exonic_spliced

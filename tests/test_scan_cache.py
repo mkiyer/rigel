@@ -84,21 +84,20 @@ def scanned(tmp_path_factory):
         ),
     )
     scan = BamScanConfig(sj_strand_tag="auto")
-    _stats, strand_model, fl_models, _buffer, payload = scan_and_buffer(
+    _stats, strand_model, _buffer, payload = scan_and_buffer(
         str(result.bam_path), result.index, scan
     )
-    yield result.index, str(result.bam_path), scan, payload, strand_model, fl_models
+    yield result.index, str(result.bam_path), scan, payload, strand_model
     scenario.cleanup()
 
 
 def round_trip(scanned, tmp_path: Path) -> tuple:
-    index, bam, scan, payload, strand_model, fl_models = scanned
+    index, bam, scan, payload, strand_model = scanned
     cache_dir = tmp_path / "cache"
     write_scan_cache(
         cache_dir,
         payload=payload,
         strand_model=strand_model,
-        frag_length_models=fl_models,
         index=index,
         bam=bam,
         scan_config=scan,
@@ -147,18 +146,37 @@ class TestTheCachedTallyIsTheSCANNEDTally:
                         getattr(after.sj_table, column), getattr(before.sj_table, column)
                     ), f"{name}.sj_table.{column} moved"
 
-    def test_the_fl_histograms_are_cached_RAW_not_as_derived_pmfs(self, scanned, tmp_path):
-        """⭐ `build_fl_models` must stay the single source of truth. Freezing its output into the
-        cache would mean a change to the FL model silently does not apply to cached scans."""
-        _cache_dir, cache = round_trip(scanned, tmp_path)
-        fl_models = scanned[5]
-        from rigel.splice import SpliceType
+    def test_THE_FL_HISTOGRAMS_ARE_THE_PAYLOAD_AND_ARE_NOT_CACHED_SEPARATELY(
+        self, scanned, tmp_path
+    ):
+        """⭐ C2: there is nothing left to cache beside the payload.
 
-        assert np.array_equal(cache.fl_global_counts, fl_models.global_model.counts)
-        assert np.array_equal(
-            cache.fl_rna_counts, fl_models.category_models[SpliceType.SPLICED_ANNOT].counts
+        The cache used to carry a second FL block — the scanner's own histogram, stored so it could
+        serve as the empirical-Bayes anchor, plus a ``fl_rna_counts`` field (**D5**) that was written,
+        read back, and consumed by nothing. Both are gone. Every fragment-length histogram is a FIELD
+        of the payload now, so caching the payload caches them, in one frame, by construction.
+
+        ⚠ ``build_fl_models`` still stays the single source of truth for the derived pmfs, which are
+        still not cached — freezing its output would mean a change to the FL model silently does not
+        apply to cached scans.
+        """
+        import dataclasses
+
+        from rigel.calibration.fl import build_fl_models
+
+        _cache_dir, cache = round_trip(scanned, tmp_path)
+
+        fields = {f.name for f in dataclasses.fields(cache)}
+        assert not {"fl_global_counts", "fl_rna_counts", "fl_max_size"} & fields, (
+            f"a separate fragment-length block survives on the cache: {sorted(fields)}"
         )
-        assert cache.fl_max_size == fl_models.max_size
+
+        # And the models rebuild from the cached payload alone, identically to the live scan's.
+        live = build_fl_models(scanned[3])
+        cached = build_fl_models(cache.payload)
+        assert np.array_equal(cached.global_counts, live.global_counts)
+        assert np.array_equal(cached.rna_counts, live.rna_counts)
+        assert np.array_equal(cached.gdna_counts, live.gdna_counts)
 
 
 class TestTheKeyRefusesAMovedIndex:

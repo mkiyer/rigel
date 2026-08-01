@@ -1,6 +1,7 @@
 # Fragment length — the audit, and the cleanup
 
-    Status: AUDIT COMPLETE, 2026-07-31. Nothing proposed here has landed.
+    Status: C0, C1, C2 LANDED (2026-07-31 / 2026-08-01). C3 is next; C4 is independent.
+            The audit itself is complete and is kept as the record of WHY.
     Trigger: P2's A/B (`LEDGER.md`) — the length likelihood is the first consumer to use the FL models
     as a DISCRIMINANT rather than as a divisor, and it exposed that they disagree with each other.
 
@@ -19,37 +20,47 @@ calibration-side work lives; that plan's P2 is **blocked on this file's C2 and C
     THE STANDING CHECK -- run this before and after every step
       source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
       pip install --no-build-isolation -e ".[dev]"      # after ANY src/rigel/native/ change
-      pytest tests/ -q                                  # expect 1809 / 22
+      python -m pytest tests/ -q                        # ⛔ `python -m`, NOT bare `pytest` -- see below
       ruff check src/ tests/ scripts/                   # ⚠ never `ruff format scripts/`
 
-⚠ **1809 / 22 is the baseline, and 22 is the CORRECT number right now**: 21 are `test_golden_output`
-moving numerically after P1's units fix, plus `TODO.md` §7's owner call. **A 23rd failure is a
-regression.** Do not regenerate the goldens to make the count look better -- they move again at C2/C3.
+    ⛔ THE INVOCATION MATTERS. Bare `pytest` does not put the repo root on sys.path, so
+    `tests/calibration/test_fl.py`'s `import tests.native._accumulator_reference` raises and the
+    suite reads 1808 / 23. That 23rd failure is an artefact of how it was run, not a regression --
+    and under "a 23rd failure is a regression" it reads as one. Measured 2026-08-01.
+
+⚠ **1824 / 21 is the baseline as of C2** (was 1809 / 22). All 21 are `test_golden_output`, moved twice
+now -- P1's units fix and C2's FL models. **A 22nd failure is a regression.** Do not regenerate the
+goldens to make the count look better -- they move again at C3.
+
+⭐ **The count went DOWN by one: `TODO.md` §7's `test_nrna_double_counting[g20_n0_s100]` now passes**, at
+**0 counts against a limit of 25** (it leaked ~30). ⚠ Do not close §7 on this -- a negative control is
+one-sided (trap 19) and this was not the change's target.
 
 | | step | status | gate |
 |---|---|---|---|
 | **C0** | Prove the accumulator's `L` before promoting it | ✅ **DONE 2026-07-31** | 333,684 exhaustive configs vs an independent set oracle; 7 perturbations, 6 caught, 7th a proven no-op |
 | **C1** | Give the accumulator an unconditional length histogram (`deposited_lengths`) | ✅ **DONE 2026-07-31** | `Σ = Σ node_start_count = qc.deposited`, enforced in the accumulator AND at the payload door; parity gate auto-covers it; 6 perturbations |
-| **C2** | ⭐ **NEXT** — switch every consumer to the accumulator, delete the scanner histogram, re-point `rigel report` | ⛔ **needs one owner decision** (below) | the report's output unchanged under option (a); suite green apart from the known goldens |
-| **C3** | §8.1(b): divide each pool by its own opportunity | blocked on C2 | ⭐ the zero-gDNA inertness test (§5) |
+| **C2** | switch every consumer to the accumulator, delete the scanner histogram, re-point `rigel report` | ✅ **DONE 2026-08-01** | all six sub-gates met; `payload_schema_digest` never moved; report keys identical and now sum to the library. `LEDGER.md` |
+| **C3** | ⭐ **NEXT** — §8.1(b): divide each pool by its own opportunity | unblocked | ⭐ the zero-gDNA inertness test (§5). ⚠ Target the measured residual **+7.7 % / +32.0 %** (`capture_off`) — and note it is **+11.0 % / +43.4 %** with capture ON, so there are TWO effects, not one |
 | **C4** | Gate the length discriminant on both pools having data | independent — any time | the `strand_evidence` analogue |
-| **C5** | Delete `ScanCache.fl_rna_counts`; verify D7 | with C2 | — |
+| **C5** | Delete `ScanCache.fl_rna_counts`; verify D7 | ✅ **DONE 2026-08-01, inside C2** | grep clean; D7 asserted end to end and perturbation-proven (`tests/test_d7_transcript_eff_lengths.py`) |
 | **→** | **re-run `scripts/design/length_likelihood_ab.py`**, then decide `CalibrationConfig.length_likelihood` | after C3 | `SOLVER_OBSERVABLES_PLAN.md` §6.4 |
 | **→** | **regenerate `tests/golden/` ONCE** | after C3 | ⚠ 21 goldens are stale from P1 and will move again at C2/C3 — regenerate **once**, at the end, and ⛔ regenerate twice and diff (`TODO.md` §7) |
 
-⛔ **THE ONE THING BLOCKING C2 IS A DECISION, NOT WORK** — `rigel report`'s five per-fragment splice-type
-counts have no accumulator equivalent. Options **(a)** and **(b)** are priced in §4's "C2 SCOPE" block;
-the recommendation is **(a)**. Nothing else in C2 is uncertain.
+✅ **THE DECISION THAT BLOCKED C2 IS MADE** (owner, 2026-08-01) and it was **neither** option offered:
+the five per-fragment splice-type counts are **scanner QC** and stay in the scanner. §4's "C2 SCOPE"
+block records the ruling and why both offered options were wrong. C2.0 landed on it.
 
 ### What is already true and must not be re-litigated
 
 * ⭐ `L` is proven and **is** the tool's one definition of fragment length (C0).
 * ⭐ The unconditional anchor **exists**, in the accumulator's own frame (C1) — it closed the support-ceiling
   mismatch entirely and **55 %** of the sd gap. Nothing downstream reads it yet; that is C2.
-* ⛔ `build_fl_models` **still** anchors on the scanner histogram. Every FL number in the tool today is
-  still the old one.
+* ✅ **`build_fl_models` anchors on `deposited_lengths`, and the scanner histogram no longer exists** (C2).
+  Its only argument is the payload, so a mixed-frame call is unrepresentable rather than discouraged.
 * The residual **+7.7 % mean / +32 % sd** gap on a zero-gDNA library is the junction-opportunity tilt, and
-  it is C3's target — now measurable against a same-frame reference.
+  it is C3's target — now measurable against a same-frame reference, and confirmed present in the SHIPPED
+  code by `scripts/design/fl_anchor_gap.py` (C2.1), not merely in principle.
 
 ---
 
@@ -64,7 +75,11 @@ That is not a design. It is a gap that was filled with the nearest available arr
 
 ---
 
-## §1 WHAT EXISTS TODAY
+## §1 WHAT EXISTED BEFORE C2 — ⛔ HISTORY, NOT CURRENT STATE
+
+⛔ **Everything in §1–§3 describes the tree BEFORE C2 (2026-08-01) and is kept as the record of what was
+wrong and why.** Definitions **A** and **B** no longer exist; `FragmentLengthModels` no longer exists;
+`build_fl_models` takes the payload and nothing else. Read `LEDGER.md`'s C2 entry for what replaced them.
 
 ### 1.1 Three definitions of "fragment length", all live
 
@@ -220,37 +235,39 @@ distributions and serves `rigel report` as well.
 ordering (D1 first) holds, and C2's rationale is confirmed rather than assumed. ⚠ These counters are
 deleted by C2 and this is the only record of them.
 
-#### ⛔ THE OPEN DECISION: `rigel report`'s SPLICE BREAKDOWN has no accumulator equivalent
+#### ✅ THE DECISION IS MADE, and it was NEITHER of the two options offered — owner, 2026-08-01
 
-`cli.py:376-384` reports **five per-FRAGMENT splice-type counts** off `flm.category_models`, which C2
-deletes. They are a different classification from anything the accumulator keeps:
+Both options assumed the counts had to come from, or be shaped by, the **accumulator**. The owner
+rejected the premise:
 
-| `rigel report` needs (per fragment) | the accumulator has today |
-|---|---|
-| `unspliced` | ⛔ nothing |
-| `spliced_annotated` | ⛔ nothing |
-| `spliced_unannotated` | ⚠ `unannotated_introns` — counts **INTRONS, not fragments** |
-| `spliced_implicit` | ✅ `sj_implicit_fragments` |
-| `splice_artifact` | ⚠ `contradictory_sj_strand` — related, not equal |
+> *"There are some QC counts that the scanner must be responsible for. They truly live in the scanner
+> … If the QC counts are generated in one place and have no algorithmic use, there's no need to pass
+> them. … I don't see a reason to propagate artifacts into the accumulator, it's the scanner's job to
+> identify and filter these out."*
 
-⚠ **The five pure pools are NOT this breakdown either** — they are a structural gDNA/RNA classification
-(`DNA_INTERGENIC` … `RNA_SPLICED`), deliberately conditioned and deliberately incomplete.
+⭐ **THE PRINCIPLE THE AUDIT WAS MISSING.** §4's "ONE definition, ONE place, ONE population" governs
+**model inputs**. The five splice counts are not a model input — they are a **census of the scanner's
+own classification decisions**, with no consumer but the report. They became entangled with the
+histogram only because they were *derived from it* (`category_models[stype].n_observations`), which is
+an implementation accident. So C2.0 is not "move them to the accumulator"; it is **sever them from the
+histogram and leave them where they are generated.**
 
-**Two ways forward, and it is the owner's call:**
+⛔ **And `option (a)` would have been wrong on its own terms**: `SPLICE_ARTIFACT` fragments never reach
+the accumulator (`bam_scanner.cpp`'s deposit adapter returns early — their span derives from an
+alignment the blacklist rejected), so the stated gate "the five counts sum to `qc.deposited`" **cannot
+hold**. That was found by pricing the option, not by building it.
 
-| | option | cost |
-|---|---|---|
-| **a** ⭐ | the accumulator grows **five per-fragment splice-type counters** in `DepositCounters`, mirroring `SpliceType`. The report reads them | small and additive (~15 lines each side), ⚠ reopens the S3 byte-identity gate and moves `payload_schema_digest` again. Keeps the report's output **unchanged**, which is the honest test of "converge, don't lose" |
-| **b** | the report's splice section changes shape to what the accumulator natively knows (the 5 pools + the existing QC counters) | no accumulator change; ⚠ **changes `rigel report`'s output** and loses `unspliced` / `spliced_annotated` entirely |
-
-⭐ **Recommendation: (a).** The owner's stated goal is one code path *without losing the QC*, and (b)
-loses two of five categories. Doing it inside C2 also means the schema digest moves **once**, not twice.
+⚠ **Under EVERY option the five VALUES move**, including (b). Today they count only the fragments that
+also yielded a **length observation** — the transcript-space unanimity gate plus the single-block rule
+on the intergenic path, a population never stated anywhere. The census counts every fragment the
+scanner offers the accumulator. G6 measured that difference at **4.6 %**. The keys are preserved; the
+population becomes *stated*, which is the point.
 
 #### The C2 work list, in order
 
 | | step | files |
 |---|---|---|
-| **C2.0** | **(a) above** — five splice-type counters in the accumulator, reference first, then C++, then payload. Byte-identity gate + a QC-sum invariant | `_accumulator_reference.py`, `accumulator.{h,cpp}`, `bam_scanner.cpp`, `scan_payload.py` |
+| **C2.0** | ✅ **DONE 2026-08-01** — the splice census as **scanner QC**. One `std::array<int64_t, NUM_SPLICE_TYPES>` in `BamScanStats` + `n_deposit_not_offered`. ⭐ **The accumulator is untouched**: no deposit-signature change, no payload field, `payload_schema_digest` **stays `b7d29676c58b2c65`**, no cache rebuild, S3 not reopened | `bam_scanner.cpp`, `constants.h`, `splice.py`, `stats.py`, `pipeline.py` |
 | **C2.1** | `build_fl_models(global_counts=...)` reads **`payload.deposited_lengths`** | `calibration/fl.py`, `pipeline.py:869`, `scan_cache.py:410` |
 | **C2.2** | Delete the scanner's FL histogram: **sites A and B**, `FragLenObservations`, `frag_length_observations`, `_replay_fraglen_observations`, `FragmentLengthModels` (the plural container), `n_frag_length_{un,}ambiguous` | `bam_scanner.cpp`, `pipeline.py`, `frag_length_model.py`, `stats.py` |
 | **C2.3** | Re-point the report: FL histograms from `deposited_lengths` + the 5 pools; splice breakdown from C2.0's counters | `cli.py:355-390` |
@@ -261,7 +278,7 @@ loses two of five categories. Doing it inside C2 also means the schema digest mo
 
 | | gate, written FIRST and verified failing |
 |---|---|
-| **C2.0** | byte-identity to the reference on the new counters (the parity gate picks them up automatically off `dataclasses.fields(Tally)`); a QC-sum invariant in the same form as C1's: the five splice-type counts sum to `qc.deposited`. ⚠ Perturb: drop one category and watch the sum fire |
+| **C2.0** | ✅ **MET.** The gate as originally written was unsatisfiable (artifacts never deposit). The replacement is an exact identity spanning **both** subsystems, in C1's G2 form: `Σ census − census[SPLICE_ARTIFACT] == qc.deposited + Σ qc.dropped_* + n_deposit_not_offered`. ⭐ Plus an **independent** derivation of the artifact count — scan one BAM against the same index with and without a blacklist; `qc.deposited`, from a subsystem that has never heard of an artifact, must fall by exactly the artifact census. **6 perturbations, all caught**; two needed new fixtures built for them (see `LEDGER.md`) |
 | **C2.1** | ⭐ **the anchor really moved** — assert `build_fl_models`' `global_pmf` equals `payload.deposited_lengths` normalised, NOT `frag_length_models.global_model.counts`. Then re-measure §2's table: the mean/sd gap to the RNA pool must read **+7.7 % / +32 %**, the C1 numbers, not the old +11.6 % / +71 % |
 | **C2.2** | ⛔ **grep is the gate**: `grep -rn "FragmentLengthModels\|frag_length_observations\|_replay_fraglen\|n_frag_length_" src/` returns **nothing**. A partial delete that still compiles is the failure mode |
 | **C2.3** | `rigel report` on a pilot condition produces the **same splice-breakdown keys** as before (option (a)); the FL histogram section is sourced from `deposited_lengths` + the 5 pools. ⚠ Diff the JSON against a report generated at `d045d820` |

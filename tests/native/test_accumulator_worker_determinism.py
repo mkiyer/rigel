@@ -93,7 +93,7 @@ def oracle(tmp_path):
 
 def _tally(result, n_workers: int) -> AccumulatorPayload:
     """Scan at ``n_workers`` and return the accumulator payload."""
-    _, _, _, _, payload = scan_and_buffer(
+    _, _, _, payload = scan_and_buffer(
         str(result.bam_path),
         result.index,
         BamScanConfig(sj_strand_tag="auto", total_threads=n_workers),

@@ -254,12 +254,6 @@ struct StrandObservations {
     std::unordered_map<SJKey, SJStrandCounts, SJKeyHash> sj_strand_table;
 };
 
-struct FragLenObservations {
-    // Resolved fragments with unambiguous fragment length
-    std::vector<int32_t> lengths;
-    std::vector<int8_t>  splice_types;  // SpliceType enum: {0, 1, 2}
-};
-
 // ================================================================
 // Stats counters
 // ================================================================
@@ -299,10 +293,6 @@ struct BamScanStats {
     int64_t n_strand_skipped_ambig_strand = 0;
     int64_t n_strand_skipped_ambiguous = 0;
 
-    // Fragment length model training
-    int64_t n_frag_length_unambiguous = 0;
-    int64_t n_frag_length_ambiguous = 0;
-
     // Multimapper
     int64_t n_multimapper_groups = 0;
     int64_t n_multimapper_alignments = 0;
@@ -310,6 +300,30 @@ struct BamScanStats {
     // Splice-junction artifact blacklist (per read, across all alignments)
     int64_t n_sj_observed = 0;
     int64_t n_sj_blacklisted = 0;
+
+    // ── the per-fragment splice census ────────────────────────────────────────────────────────────
+    //
+    // ⭐ ONE observation per fragment the scanner offers the accumulator, filed under the resolver's
+    // own classification. This IS `rigel report`'s splice breakdown, which used to be read off the
+    // fragment-length CATEGORY MODELS — so it counted only the fragments that also yielded a length
+    // observation, a population nobody had stated. The scanner classifies, so the scanner counts.
+    //
+    // ⚠ An ARRAY and not five named fields, deliberately: `census[st]++` is one statement, the merge
+    // is one loop, the export is one loop, and a category added to `SpliceType` cannot slip past any
+    // of the three. The five names exist once, in `splice_type_label`.
+    std::array<int64_t, NUM_SPLICE_TYPES> splice_census{};
+
+    // Censused, then never offered to `deposit()`: the deposit adapter could not express the
+    // fragment as ONE molecule on ONE cut axis (chiefly blocks on more than one reference), or no
+    // accumulator was installed. ⭐ It exists to close the books — without it those `return`s are a
+    // silent loss, which is the pattern this accumulator was rewritten to delete. With it:
+    //
+    //   Σ census − census[SPLICE_ARTIFACT] == qc.deposited + Σ qc.dropped_* + n_deposit_not_offered
+    //
+    // ⚠ Artifacts are subtracted rather than counted here because holding them out is a POSITIVE
+    // scanner decision about the data, not a failure to represent it — and `census[SPLICE_ARTIFACT]`
+    // already reports it exactly.
+    int64_t n_deposit_not_offered = 0;
 
     /// Add all counters from another stats struct (for merge).
     void merge_from(const BamScanStats& o) {
@@ -341,12 +355,13 @@ struct BamScanStats {
         n_strand_skipped_no_sj += o.n_strand_skipped_no_sj;
         n_strand_skipped_ambig_strand += o.n_strand_skipped_ambig_strand;
         n_strand_skipped_ambiguous += o.n_strand_skipped_ambiguous;
-        n_frag_length_unambiguous += o.n_frag_length_unambiguous;
-        n_frag_length_ambiguous += o.n_frag_length_ambiguous;
         n_multimapper_groups += o.n_multimapper_groups;
         n_multimapper_alignments += o.n_multimapper_alignments;
         n_sj_observed += o.n_sj_observed;
         n_sj_blacklisted += o.n_sj_blacklisted;
+        for (size_t i = 0; i < splice_census.size(); i++)
+            splice_census[i] += o.splice_census[i];
+        n_deposit_not_offered += o.n_deposit_not_offered;
     }
 };
 
@@ -382,7 +397,6 @@ struct WorkerState {
     FragmentAccumulator accumulator;
     BamScanStats stats;
     StrandObservations strand_obs;
-    FragLenObservations fraglen_obs;
     // Per-worker fractional accumulator (one Accumulator per ref). Owned
     // here so worker threads never touch the shared template. Null when no
     // region partition was provided.
@@ -423,13 +437,6 @@ static void merge_strand_obs(StrandObservations& dst, StrandObservations& src) {
         dst_counts.n_antisense += counts.n_antisense;
     }
     src.sj_strand_table.clear();
-}
-
-static void merge_fraglen_obs(FragLenObservations& dst, FragLenObservations& src) {
-    dst.lengths.insert(dst.lengths.end(),
-                       src.lengths.begin(), src.lengths.end());
-    dst.splice_types.insert(dst.splice_types.end(),
-                            src.splice_types.begin(), src.splice_types.end());
 }
 
 // ================================================================
@@ -1009,7 +1016,6 @@ public:
     // Results
     BamScanStats stats_;
     StrandObservations strand_obs_;
-    FragLenObservations fraglen_obs_;
 
     // The accumulator's node partition, installed by set_regions() and the junction CSR by
     // set_junctions(). One Accumulator per BAM reference; deposits go into a per-worker copy during
@@ -1365,12 +1371,11 @@ public:
                 // Wait for workers to finish, then close output queue
                 for (auto& w : workers) w.join();
 
-                // Merge worker results (stats, strand, fraglen, accumulator)
+                // Merge worker results (stats, strand, accumulator)
                 for (auto& ws_ptr : worker_states) {
                     WorkerState& ws = *ws_ptr;
                     stats_.merge_from(ws.stats);
                     merge_strand_obs(strand_obs_, ws.strand_obs);
-                    merge_fraglen_obs(fraglen_obs_, ws.fraglen_obs);
                     if (acc_set_ && ws.acc_set) {
                         acc_set_->merge_from(*ws.acc_set);
                     }
@@ -1445,7 +1450,6 @@ private:
         BamScanStats& stats = ws.stats;
         FragmentAccumulator& accumulator = ws.accumulator;
         StrandObservations& strand_obs = ws.strand_obs;
-        FragLenObservations& fraglen_obs = ws.fraglen_obs;
         ResolverScratch& scratch = ws.scratch;
 
         // ── the deposit adapter ───────────────────────────────────────────────────────────────────────
@@ -1467,17 +1471,37 @@ private:
         // it, which is the point — the old `align_ok`/`motif_ok` gate returned early, so the loss vanished.
         const auto deposit_to_accumulator =
             [&ws](const AssembledFragment& f, const RawResolveResult& cr) {
-                if (!ws.acc_set || f.exons.empty()) return;
                 const int32_t st = cr.splice_type;
+
+                // ── the splice census ─────────────────────────────────────────────────────────────
+                //
+                // ⭐ FIRST, and before any gate, because this is the count of what the scanner SAW.
+                // One observation per fragment reaching this adapter — unique mapper, resolved,
+                // non-chimeric — which is exactly the population the accumulator is offered, so the
+                // report's splice breakdown and its fragment-length histograms describe the same
+                // fragments. That was never true of the category models this replaces.
+                //
+                // ⚠ It is deliberately NOT gated on `ws.acc_set`: what the scanner classified does
+                // not depend on whether an accumulator happened to be installed.
+                if (st >= 0 && static_cast<size_t>(st) < ws.stats.splice_census.size())
+                    ws.stats.splice_census[st]++;
+
                 // Hold artifact splices (blacklisted CIGAR-N) out of the accumulator entirely — no
                 // deposit, no length pool. Their true span is unrecoverable: a blacklisted junction may be
                 // a real-but-rejected junction OR a wholly incorrect alignment, and the span would be
                 // derived from that suspect alignment, so any reconstruction injects a false assumption.
+                //
+                // ⚠ Counted by the census above and NOT by `n_deposit_not_offered`: this is a
+                // positive decision about the data, not a failure to represent it.
                 if (st == SPLICE_ARTIFACT) return;
+
+                if (!ws.acc_set || f.exons.empty()) { ws.stats.n_deposit_not_offered++; return; }
                 const int32_t ref_id = f.exons.front().ref_id;
                 if (ref_id < 0 ||
-                    static_cast<std::size_t>(ref_id) >= ws.acc_set->n_refs())
+                    static_cast<std::size_t>(ref_id) >= ws.acc_set->n_refs()) {
+                    ws.stats.n_deposit_not_offered++;
                     return;
+                }
 
                 const bool implicit = (st == SPLICE_IMPLICIT);
                 // Cut introns: the explicit CIGAR-N introns, or the implied ones for an implicit splice.
@@ -1530,7 +1554,7 @@ private:
                 std::int64_t start = 0, end = 0;
                 bool any = false;
                 for (const auto& block : f.exons) {
-                    if (block.ref_id != ref_id) return;
+                    if (block.ref_id != ref_id) { ws.stats.n_deposit_not_offered++; return; }
                     if (!any) {
                         start = block.start;
                         end = block.end;
@@ -1540,7 +1564,7 @@ private:
                         end = std::max<std::int64_t>(end, block.end);
                     }
                 }
-                if (!any) return;
+                if (!any) { ws.stats.n_deposit_not_offered++; return; }
 
                 rigel::accumulator::FragmentPath path;
                 path.start = start;
@@ -1694,22 +1718,6 @@ private:
                 // fragments silently (n_cand <= 0 early skip) so they
                 // don't increment stat_gated either.
                 if (resolved && is_unique_mapper) {
-                    // Feed intergenic FL into global histogram so the
-                    // Dirichlet prior used by both rna_model and
-                    // gdna_model sees the full library FL distribution.
-                    // Single-block only: paired-end intergenic
-                    // genomic_footprint is unreliable (may include
-                    // arbitrary inter-read gaps).
-                    if (!frag.has_introns()) {
-                        int32_t flen = frag.genomic_footprint();
-                        if (flen > 0) {
-                            fraglen_obs.lengths.push_back(flen);
-                            fraglen_obs.splice_types.push_back(
-                                static_cast<int8_t>(SPLICE_UNSPLICED));
-                            stats.n_frag_length_unambiguous++;
-                        }
-                    }
-
                     ResolvedFragment ig_result = ResolvedFragment::from_core(cr);
                     ig_result.num_hits = num_hits;
                     ig_result.nm = frag.nm;
@@ -1806,16 +1814,6 @@ private:
                     }
                 }
 
-                int32_t ufl = result.get_unique_frag_length_mrna(
-                    ctx.nrna_mask());
-                if (ufl > 0) {
-                    fraglen_obs.lengths.push_back(ufl);
-                    fraglen_obs.splice_types.push_back(static_cast<int8_t>(result.splice_type));
-                    stats.n_frag_length_unambiguous++;
-                } else {
-                    stats.n_frag_length_ambiguous++;
-                }
-
                 // Fractional accumulator deposit (resolved unique-mapper,
                 // non-chimeric). See deposit_to_accumulator above.
                 deposit_to_accumulator(frag, cr);
@@ -1905,12 +1903,18 @@ private:
         stats_dict["n_strand_skipped_no_sj"] = stats_.n_strand_skipped_no_sj;
         stats_dict["n_strand_skipped_ambig_strand"] = stats_.n_strand_skipped_ambig_strand;
         stats_dict["n_strand_skipped_ambiguous"] = stats_.n_strand_skipped_ambiguous;
-        stats_dict["n_frag_length_unambiguous"] = stats_.n_frag_length_unambiguous;
-        stats_dict["n_frag_length_ambiguous"] = stats_.n_frag_length_ambiguous;
         stats_dict["n_multimapper_groups"] = stats_.n_multimapper_groups;
         stats_dict["n_multimapper_alignments"] = stats_.n_multimapper_alignments;
         stats_dict["n_sj_observed"] = stats_.n_sj_observed;
         stats_dict["n_sj_blacklisted"] = stats_.n_sj_blacklisted;
+        // ⭐ The splice census, keyed off the ONE name table. `splice_type_label`'s strings are the
+        // `SpliceType` member names lower-cased, so `rigel.splice.census_field` derives the very same
+        // key on the Python side without a second table to drift from this one.
+        for (size_t i = 0; i < stats_.splice_census.size(); i++) {
+            stats_dict[("n_census_" + std::string(splice_type_label(static_cast<int>(i)))).c_str()] =
+                stats_.splice_census[i];
+        }
+        stats_dict["n_deposit_not_offered"] = stats_.n_deposit_not_offered;
         result["stats"] = stats_dict;
 
         // Strand observations
@@ -1954,12 +1958,6 @@ private:
             strand_dict["sj_n_antisense"]  = vec_to_ndarray(std::move(sj_antisense));
         }
         result["strand_observations"] = strand_dict;
-
-        // Fragment length observations
-        nb::dict fraglen_dict;
-        fraglen_dict["lengths"]            = vec_to_ndarray(std::move(fraglen_obs_.lengths));
-        fraglen_dict["splice_types"]       = vec_to_ndarray(std::move(fraglen_obs_.splice_types));
-        result["frag_length_observations"] = fraglen_dict;
 
         // ── the accumulator payload ───────────────────────────────────────────────────────────────────
         //
@@ -3027,7 +3025,7 @@ NB_MODULE(_bam_impl, m) {
              "-------\n"
              "dict\n"
              "    Dict with keys: 'stats', 'strand_observations',\n"
-             "    'frag_length_observations'.\n")
+             "    'calibration'.\n")
           .def("set_regions",
                  [](BamScanner& self,
                      nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> cut_positions,

@@ -30,6 +30,27 @@ class SpliceType(IntEnum):
 
 NUM_SPLICE_TYPES = len(SpliceType)
 
+
+def census_field(stype: SpliceType) -> str:
+    """The :class:`~rigel.stats.PipelineStats` field holding the scanner's count of ``stype``.
+
+    ⭐ **The scanner classifies, so the scanner counts.** The per-fragment splice breakdown is
+    SCANNER QC — it has no algorithmic consumer, only the report — so it lives where it is
+    generated and is passed through nothing to get there. It used to be read off the fragment-length
+    category models, which counted only the fragments that contributed a LENGTH observation; that
+    histogram is deleted by C2 and the population was never stated. See
+    ``docs/FRAGMENT_LENGTH_AUDIT.md`` §4.
+
+    ⚠ **There is no name table, deliberately.** The C++ keys these counters off
+    ``splice_type_label`` (``bam_scanner.cpp``), whose strings are exactly these member names
+    lower-cased. Writing the correspondence as a mapping would create a second place for it to be
+    wrong; deriving it means a category added to :class:`SpliceType` and forgotten in either
+    language is caught by ``test_every_splice_type_is_censused`` rather than silently reading zero
+    through ``dict.get(key, 0)``.
+    """
+    return f"n_census_{stype.name.lower()}"
+
+
 #: Pre-computed int constants for hot-path comparisons (avoid enum overhead).
 SPLICE_UNSPLICED: int = int(SpliceType.UNSPLICED)  # 0
 SPLICE_UNANNOT: int = int(SpliceType.SPLICED_UNANNOT)  # 1
