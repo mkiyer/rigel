@@ -1,9 +1,24 @@
 # SPEC — search every fragment's unsequenced gaps for introns, not just unspliced ones
 
-    Status: SPECIFICATION, 2026-08-01. ⛔ NOT IMPLEMENTED. Written to be executed in a separate session.
+    Status: ✅ **IMPLEMENTED 2026-08-01.** What LANDED, what it MEASURED and what it did NOT close are
+            in `docs/LEDGER.md`'s **C2.6** entry, which supersedes this file wherever they differ.
+            This document is kept as the record of the DESIGN, not of the outcome.
     Cause and evidence: `docs/JUNCTION_OPPORTUNITY.md` §4.
     Owner ruling, 2026-08-01: *"we should be searching for gap introns within every fragment."*
-    Blocks: C3 (the RNA opportunity work) — `docs/FRAGMENT_LENGTH_AUDIT.md` §0.
+    Blocked: C3 (the RNA opportunity work) — ⭐ now UNBLOCKED.
+
+    ⭐ THE THREE THINGS THE MEASUREMENT CHANGED, so this file is not read as the final word:
+      1. G-tail did NOT reach 0. It went 0.00909 -> 0.00137 above the true 713 bp ceiling and
+         `dropped_too_long` 280,558 -> 38,309. ⭐ The residual is **D3**, and that is measured, not
+         assumed: emitting EVERY intron in a gap takes it to 0.00002 / 389. §3's D3 was right to be
+         deferred and is now the ONLY known mechanism left.
+      2. ⛔ **D1 costs more than it buys.** Cutting the intron takes `RNA_SPLICED` from +8.00 % to
+         +0.67 % against truth; then REMOVING the mixed fragments takes it to −9.58 %, because they are
+         the long ones. §3's D1 asked for the two effects to be reported separately — they were, and the
+         answer inverts the recommendation. **Owner decision, one line to reverse.**
+      3. ⛔ **X5's prediction was wrong.** Leaving the union unsorted fails NOTHING, because
+         `normalise_introns` sorts internally in both the C++ and the specification. The sort is
+         defensive, not load-bearing. §4's perturbation table is corrected in the LEDGER.
 
 ---
 

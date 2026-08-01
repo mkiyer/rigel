@@ -351,6 +351,17 @@ nodes + 1,447,763 edges ≈ 2.5 M. Like-for-like the object count **doubles**.
     executes the main repo's source.
 27. **The prose next to the code said "the AVERAGE", the code followed the prose,** while a sibling module's docstring had the correct
     formula the whole time — two docstrings disagreed about one quantity for months and nobody diffed them.
+28. ⛔ **A SUPPORT CEILING THAT MATCHES THE CLAMP IS NOT A MATCH — it is the clamp.** C1 recorded the fragment-length anchor's ceiling moving
+    from 713 bp to 1000 as "the mismatch closed ⭐ entirely"; **713 was the library's true maximum** (`truth_fragment_lengths.tsv`) and 1000 is
+    `max_frag_length`. The narrower estimate was the right one, and the "fix" was an uncut intron. ⚠ Whenever a distribution's support agrees
+    with a configured limit, that is evidence the limit is binding, not evidence of agreement. C2.6, 2026-08-01.
+29. ⭐ **A PURITY FILTER ON A LENGTH POOL IS A LENGTH FILTER.** C2.6's D1 bars a fragment from the pure-RNA pool when part of its `L` was
+    inferred rather than sequenced — but the fragments that qualify are exactly the ones whose mates sit far apart, so the pool the
+    fragment-length model is FITTED FROM became length-selected **short**: **−9.58 % mean / −22.46 % sd** vs truth, where keeping them reads
+    **+0.67 % / +2.40 %**. ⚠ Before excluding a population from a pool, ask what the exclusion criterion correlates with — here it correlates
+    with the axis being measured, so purity and accuracy point in opposite directions.
+30. ⚠ **`git checkout -- <file>` does not undo a perturbation when the work is uncommitted — it deletes the work.** A perturbation harness must
+    restore from a copy of the WORKING TREE. Cost one full re-implementation of a landed change, 2026-08-01.
 
 ---
 

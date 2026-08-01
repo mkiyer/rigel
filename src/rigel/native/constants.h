@@ -244,21 +244,30 @@ struct RawResolveResult {
     int32_t sj_key_start = -1;
     int32_t sj_key_end = -1;
 
-    // Implicit-splice introns: annotated introns found wholly inside a
-    // paired-end mate gap (SPLICE_IMPLICIT). One per matched gap, carrying the
-    // matched transcript's strand. The accumulator cuts these out of the
-    // fragment span and orients the spliced channel by their strand (the splice
-    // motif itself was not sequenced). Empty unless splice_type == SPLICE_IMPLICIT.
-    std::vector<IntronBlock> implicit_introns;
-
-    // ⛔ The candidate transcripts do NOT agree on which introns the mate gaps contain, so the implied
-    // intron set -- and therefore L, the density quanta, the length pool and the set of lines the
-    // fragment crosses -- is undetermined. `implicit_introns` above is then only ONE candidate's answer
-    // and must not be tallied: it is the accumulator's `path_ambiguous`, deferred to the second pass,
-    // which can separate the candidates by fragment length and strand. Design §9.1.
+    // ⭐ EVERY explanation of this fragment's UNSEQUENCED gaps, flat. Hypothesis h owns introns
+    // [gap_intron_offsets[h], gap_intron_offsets[h+1]) and supporting transcripts
+    // [gap_supporting_offsets[h], gap_supporting_offsets[h+1]).
     //
-    // ⚠ Meaningless unless splice_type == SPLICE_IMPLICIT.
-    bool implicit_ambiguous = false;
+    // A mate gap may hold no intron, one, or several, and which it is CANNOT be observed -- the bases are
+    // not there. Each compatible transcript determines exactly one answer (its own introns lying inside
+    // the gaps), so the set is finite and small, and two transcripts implying the same introns are ONE
+    // hypothesis. The accumulator arbitrates. docs/SPEC_GAP_PATHS.md.
+    //
+    // ⚠ An EMPTY hypothesis (no introns) is the UNSPLICED one, and it is the genomic explanation: cutting
+    // nothing means the gap is real template. It is present whenever some compatible transcript implies
+    // nothing there, or whenever the fragment carries no annotated CIGAR-N junction and so could be gDNA.
+    // ⛔ It is never added as a synthetic nascent-shadow candidate -- the shadow IS this hypothesis.
+    std::vector<IntronBlock> gap_introns;
+    std::vector<int32_t>     gap_intron_offsets;      // n_hypotheses + 1, always starts at 0
+    std::vector<int32_t>     gap_sj_strand;           // n_hypotheses
+    std::vector<int32_t>     gap_supporting;          // flat candidate transcript indices
+    std::vector<int32_t>     gap_supporting_offsets;  // n_hypotheses + 1, always starts at 0
+
+    int32_t n_gap_hypotheses() const {
+        return gap_intron_offsets.empty()
+                   ? 0
+                   : static_cast<int32_t>(gap_intron_offsets.size()) - 1;
+    }
 };
 
 // ================================================================

@@ -92,6 +92,19 @@ public:
     int32_t tx_bp_pos = 0;
     int32_t tx_bp_neg = 0;
 
+    // The annotated introns found inside this fragment's UNSEQUENCED gaps, and whether the candidate
+    // transcripts disagreed about them. Carried out of `RawResolveResult` unchanged.
+    //
+    // ⚠ INSTRUMENTATION, and it is load-bearing for one gate that is otherwise unobservable. The
+    // deposit adapter unions these with the observed CIGAR-N introns and the accumulator normalises
+    // the union, so an intron the detector re-derived from an observed splice would be merged away
+    // and leave `L` untouched — i.e. "it was never emitted" and "it was emitted and absorbed" are
+    // indistinguishable downstream. `SPEC_GAP_INTRONS.md` §1 is precisely about the case where they
+    // are NOT the same thing (a NEAR match shortens `L`), so the emission itself has to be visible.
+    std::vector<IntronBlock> gap_introns;
+    std::vector<int32_t>     gap_intron_offsets;
+    int32_t                  n_gap_hypotheses = 0;
+
     // --- Properties for Python model training ---
 
     bool get_is_chimeric() const {
@@ -157,6 +170,21 @@ public:
         return d;
     }
 
+    // Every hypothesis as a list of ``[(ref_id, start, end, strand), ...]``, in enumeration order.
+    // ⭐ An EMPTY inner list is the unspliced (genomic) hypothesis.
+    nb::object get_gap_hypotheses() const {
+        nb::list out;
+        for (int32_t h = 0; h < n_gap_hypotheses; ++h) {
+            nb::list path;
+            for (int32_t i = gap_intron_offsets[h]; i < gap_intron_offsets[h + 1]; ++i) {
+                path.append(nb::make_tuple(gap_introns[i].ref_id, gap_introns[i].start,
+                                           gap_introns[i].end, gap_introns[i].strand));
+            }
+            out.append(path);
+        }
+        return out;
+    }
+
     // Return overlap_bp as a Python dict for compatibility
     nb::dict get_overlap_bp() const {
         nb::dict d;
@@ -191,6 +219,13 @@ public:
         r.sj_key_ref = cr.sj_key_ref;
         r.sj_key_start = cr.sj_key_start;
         r.sj_key_end = cr.sj_key_end;
+        // ⛔ COPIED, NOT MOVED, and the difference is a bug. `bam_scanner.cpp` builds the
+        // ResolvedFragment first and calls `deposit_to_accumulator(frag, cr)` afterwards, so moving
+        // this out of `cr` would hand the deposit adapter an empty intron list and silently stop
+        // cutting every gap intron — the exact defect this field exists to make visible.
+        r.gap_introns = cr.gap_introns;
+        r.gap_intron_offsets = cr.gap_intron_offsets;
+        r.n_gap_hypotheses = cr.n_gap_hypotheses();
         if (cr.frag_lengths.size() == n_t) {
             r.frag_lengths = std::move(cr.frag_lengths);
         } else {
@@ -393,6 +428,7 @@ struct ResolverScratch {
     // (per-fragment block sort + PE-gap collection)
     std::vector<ExonBlock> implicit_blocks;
     std::vector<GapBlock> implicit_gaps;
+    std::vector<IntronBlock> hypothesis_path;  // one candidate's path, while enumerating
 
     // Reusable sorted-vector set-operation buffers for _resolve_core.
     std::vector<std::vector<int32_t>> exon_t_sets;
@@ -757,174 +793,223 @@ public:
         return splicing_anchor_tolerance_;
     }
 
-    /// Test whether transcript ``t`` has any annotated intron whose
-    /// genomic interval is wholly contained in the PE gap
-    /// ``[gap_start, gap_end)`` modulo one-sided slack ``K`` bp. On a match,
-    /// optionally emit the matched intron interval via ``out_start``/``out_end``.
-    inline bool transcript_has_implicit_intron_in_gap(
-        int32_t t, int32_t gap_start, int32_t gap_end, int32_t K,
-        int32_t* out_start = nullptr, int32_t* out_end = nullptr) const
+    /// Does transcript ``t`` contradict the alignment? True when one of its introns overlaps the
+    /// INTERIOR of an aligned block -- the read has bases there, so the molecule cannot have spliced them
+    /// out, and ``t`` is not a candidate explanation for anything.
+    ///
+    /// ⛔ THE CANDIDATE SET IS NOT ALREADY THIS. `cr.t_inds` comes from `merge_sets`, which falls back to
+    /// a UNION when the intersection is empty, so a transcript the reads contradict can be in it. Without
+    /// this test the enumeration would emit hypotheses no molecule has. docs/SPEC_GAP_PATHS.md §3, C1.
+    ///
+    /// ⚠ Abutting is fine: an intron may START where a block ends. And the overlap must exceed the
+    /// SPLICING ANCHOR TOLERANCE K before it counts -- the same slack the gap match uses, because it is
+    /// the same physical thing: an aligner routinely runs a read a base or two past a donor. Without
+    /// this the predicate rejects exactly the fragments K exists to accept.
+    inline bool transcript_contradicts_blocks(int32_t t,
+                                              const std::vector<ExonBlock>& blocks,
+                                              int32_t K) const
     {
         if (t < 0 || t + 1 >= static_cast<int32_t>(exon_offsets_.size())) return false;
-
         const int32_t begin = exon_offsets_[t];
-        const int32_t end = exon_offsets_[t + 1];
-        const int32_t n_introns = end - begin - 1;
-        if (n_introns <= 0 || gap_end <= gap_start) return false;
-
+        const int32_t n_introns = exon_offsets_[t + 1] - begin - 1;
+        if (n_introns <= 0) return false;
         const int32_t* intron_starts = exon_ends_.data() + begin;
         const int32_t* intron_ends   = exon_starts_.data() + begin + 1;
 
-        const int64_t min_start = static_cast<int64_t>(gap_start) - K;
-
-        // Lowest intron index whose start >= min_start (i.e. start - gap_start >= -K).
-        const int32_t by_start = static_cast<int32_t>(
-            std::lower_bound(intron_starts, intron_starts + n_introns, min_start)
-            - intron_starts);
-        // Lowest intron index whose end > gap_start (positive overlap with gap).
-        const int32_t by_end = static_cast<int32_t>(
-            std::upper_bound(intron_ends, intron_ends + n_introns, gap_start)
-            - intron_ends);
-
-        const int64_t max_end = static_cast<int64_t>(gap_end) + K;
-        for (int32_t i = std::max(by_start, by_end); i < n_introns; ++i) {
-            const int32_t is = intron_starts[i];
-            if (is >= gap_end) break;        // no positive overlap with later introns
-            const int32_t ie = intron_ends[i];
-            if (static_cast<int64_t>(ie) > max_end) break;
-            if (ie > is) {                   // all containment/overlap tests hold
-                if (out_start) *out_start = is;
-                if (out_end) *out_end = ie;
-                return true;
+        for (const ExonBlock& block : blocks) {
+            // First intron that could end inside this block, then walk while it still starts before it.
+            int32_t i = static_cast<int32_t>(
+                std::upper_bound(intron_ends, intron_ends + n_introns, block.start) - intron_ends);
+            for (; i < n_introns && intron_starts[i] < block.end; ++i) {
+                const int32_t overlap = std::min(intron_ends[i], block.end) -
+                                        std::max(intron_starts[i], block.start);
+                if (overlap > K) return true;   // the read has bases the transcript splices out
             }
         }
         return false;
     }
 
-    /// Collect the implicit-splice introns of a multi-block fragment: for each
-    /// PE gap, the annotated intron (wholly contained in the gap, K-slack) of
-    /// the first matching candidate transcript, tagged with that transcript's
-    /// strand. Empty ⇒ no implicit splice. Mirrors the former
-    /// ``has_implicit_splice_gap`` (non-empty ⇔ the old ``true``) but records
-    /// the matched introns so the accumulator can cut them out of the span and
-    /// orient the spliced channel (the splice motif itself was not sequenced).
-    /// Introns are emitted in genomic (gap) order, so the output is sorted.
+    /// ⭐ EVERY explanation of this fragment's UNSEQUENCED gaps, grouped so that identical paths are ONE
+    /// hypothesis. The accumulator arbitrates between them; this only enumerates.
     ///
-    /// ⛔ `out_ambiguous` is set when the candidate transcripts do NOT all imply the same intron set, in
-    /// which case `out_introns` is one arbitrary candidate's answer and must not be tallied (design §9.1).
-    /// The emitted list is only trustworthy when this is false.
+    /// A hypothesis is a PATH THROUGH THE ANNOTATION, not "an intron": a gap may hold several introns and
+    /// several whole exons that no read ever touched. Each compatible transcript determines exactly one
+    /// path -- its own introns lying inside the gaps -- so the set is finite and small.
     ///
-    /// ⚠ The test is per gap but it IS the set test, because two vectors are equal exactly when they
-    /// agree component-wise — provided "this transcript implies nothing here" counts as a value. It must:
-    /// without it, a transcript implying an intron only in gap A and another only in gap B would read as
-    /// unanimous, and the emitted union would be a path **no single molecule has**. That union is what
-    /// the per-gap `break` below builds, so this is the check that makes the emission meaningful rather
-    /// than a chimera of two transcripts.
+    /// ⛔ THE GAPS ARE ONLY THE UNSEQUENCED ONES. The walk over consecutive blocks emits every hole, and a
+    /// read `50M200N50M` has two blocks, so a sequenced intron arrives indistinguishable from a mate gap.
+    /// Searching it again is not merely redundant: the ±K anchor tolerance lets a DIFFERENT nearby intron
+    /// answer for it, the two normalise into one wider interval, and L comes out too SHORT. Gaps matching
+    /// an observed intron by EXACT (start, end) equality are dropped -- never by overlap, which would also
+    /// drop a genuine gap intron abutting an observed one.
     ///
-    /// ⚠ The classification is deliberately unchanged: this still returns non-empty on exactly the same
-    /// fragments, so `SPLICE_IMPLICIT` does not move. It is consumed widely (`scoring.cpp`, the buffer,
-    /// the stats); only the accumulator reads `out_ambiguous`.
-    bool collect_implicit_splice_introns(
-        const std::vector<ExonBlock>& exons,
-        const std::vector<int32_t>& candidate_t,
-        ResolverScratch& scratch,
-        std::vector<IntronBlock>& out_introns,
-        bool& out_ambiguous) const
+    /// ⚠ The path is compared WHOLE, across every gap, never per gap. A per-gap union can take gap A's
+    /// intron from T1 and gap B's from T2 and emit a path no single molecule has; grouping by the whole
+    /// path makes that unrepresentable rather than merely avoided. `ACCUMULATOR_DESIGN.md` §9.1.
+    void enumerate_gap_hypotheses(const std::vector<ExonBlock>& exons,
+                                  const std::vector<IntronBlock>& observed_introns,
+                                  const std::vector<int32_t>& candidate_t,
+                                  bool certified_rna,
+                                  ResolverScratch& scratch,
+                                  RawResolveResult& cr) const
     {
-        out_introns.clear();
-        out_ambiguous = false;
-        if (exons.size() < 2 || candidate_t.empty() || !has_exon_index()) {
-            return false;
-        }
+        cr.gap_introns.clear();
+        cr.gap_sj_strand.clear();
+        cr.gap_supporting.clear();
+        cr.gap_intron_offsets.assign(1, 0);
+        cr.gap_supporting_offsets.assign(1, 0);
 
         auto& gaps = scratch.implicit_gaps;
         gaps.clear();
-
-        auto exon_block_less = [](const ExonBlock& a, const ExonBlock& b) {
-            if (a.ref_id != b.ref_id) return a.ref_id < b.ref_id;
-            if (a.start != b.start) return a.start < b.start;
-            if (a.end != b.end) return a.end < b.end;
-            return a.strand < b.strand;
-        };
-
-        const std::vector<ExonBlock>* ordered = &exons;
-        if (!std::is_sorted(exons.begin(), exons.end(), exon_block_less)) {
-            auto& blocks = scratch.implicit_blocks;
-            blocks.assign(exons.begin(), exons.end());
-            std::sort(blocks.begin(), blocks.end(), exon_block_less);
-            ordered = &blocks;
-        }
-
-        int32_t cur_ref = (*ordered)[0].ref_id;
-        int32_t cur_end = (*ordered)[0].end;
-        for (size_t k = 1; k < ordered->size(); ++k) {
-            const auto& block = (*ordered)[k];
-            if (block.ref_id != cur_ref) {
-                cur_ref = block.ref_id;
-                cur_end = block.end;
-            } else if (block.start > cur_end) {
-                gaps.push_back({cur_ref, cur_end, block.start});
-                cur_end = block.end;
-            } else {
-                cur_end = std::max(cur_end, block.end);
+        if (exons.size() >= 2 && has_exon_index()) {
+            auto exon_block_less = [](const ExonBlock& a, const ExonBlock& b) {
+                if (a.ref_id != b.ref_id) return a.ref_id < b.ref_id;
+                if (a.start != b.start) return a.start < b.start;
+                if (a.end != b.end) return a.end < b.end;
+                return a.strand < b.strand;
+            };
+            const std::vector<ExonBlock>* ordered = &exons;
+            if (!std::is_sorted(exons.begin(), exons.end(), exon_block_less)) {
+                auto& blocks = scratch.implicit_blocks;
+                blocks.assign(exons.begin(), exons.end());
+                std::sort(blocks.begin(), blocks.end(), exon_block_less);
+                ordered = &blocks;
             }
+            int32_t cur_ref = (*ordered)[0].ref_id;
+            int32_t cur_end = (*ordered)[0].end;
+            for (size_t k = 1; k < ordered->size(); ++k) {
+                const auto& block = (*ordered)[k];
+                if (block.ref_id != cur_ref) {
+                    cur_ref = block.ref_id;
+                    cur_end = block.end;
+                } else if (block.start > cur_end) {
+                    gaps.push_back({cur_ref, cur_end, block.start});
+                    cur_end = block.end;
+                } else {
+                    cur_end = std::max(cur_end, block.end);
+                }
+            }
+            gaps.erase(std::remove_if(gaps.begin(), gaps.end(),
+                                      [&observed_introns](const GapBlock& gap) {
+                                          for (const auto& observed : observed_introns) {
+                                              if (observed.ref_id == gap.ref_id &&
+                                                  observed.start == gap.start &&
+                                                  observed.end == gap.end) {
+                                                  return true;
+                                              }
+                                          }
+                                          return false;
+                                      }),
+                       gaps.end());
         }
 
-        if (gaps.empty()) return false;
-
+        // ⭐ No unsequenced gap ⇒ one hypothesis, the unspliced one, and nothing to arbitrate. The
+        // degenerate case is the general case: `deposit` still receives a set, of size one.
         const int32_t K = splicing_anchor_tolerance_;
-        // ⛔ SYNTHETIC ROWS ARE NOT CANDIDATE ISOFORMS AND MUST BE EXCLUDED FROM THE UNANIMITY TEST.
-        // Every gene carries a synthetic nascent shadow transcript spanning its whole locus as ONE exon, so
-        // that row implies no intron in any gap, always. Counting it as a dissenting candidate makes the
-        // test unsatisfiable: ⭐ measured, it deferred **100 %** of implicit fragments on all three real
-        // cfRNA libraries and deposited none. And it conflates two different questions — "which intron did
-        // this molecule splice?" (what this test is for) with "was this molecule nascent?" (a COMPONENT,
-        // which the accumulator deliberately does not decide: RNA is RNA).
-        //
-        // ⚠ The filter is `~is_synthetic` ALONE, which is what `t_is_nrna_` actually holds despite its name
-        // (`pipeline.py` fills it from the `is_synthetic` column). Never `is_nrna`: on a non-synthetic row
-        // that flag means "single-exon, so mature == nascent", and using it as a realness filter has
-        // already deleted the termini of 26,475 real transcripts once.
-        //
-        // ⚠ The EMISSION is unaffected either way — a synthetic shadow is single-exon, so it can never be
-        // the first match — which is what keeps `SPLICE_IMPLICIT` classification exactly where it was.
-        const uint8_t* synthetic = nrna_mask();
-        auto is_real = [&](int32_t t) {
-            return synthetic == nullptr || t < 0 ||
-                   t >= static_cast<int32_t>(t_is_nrna_.size()) || synthetic[t] == 0;
-        };
-        for (const GapBlock& gap : gaps) {
-            // The two states a candidate can put this gap in: it implies nothing, or it implies one
-            // intron. Unanimity means every candidate lands in the SAME one, so both are tracked -- a
-            // "first match wins" scan cannot see a candidate that implied nothing BEFORE the first match.
-            bool    seen_none = false, seen_intron = false;
-            int32_t seen_start = 0, seen_end = 0;
-            for (int32_t t : candidate_t) {
-                if (!is_real(t)) continue;
-                int32_t is = 0, ie = 0;
-                if (!transcript_has_implicit_intron_in_gap(t, gap.start, gap.end, K, &is, &ie)) {
-                    seen_none = true;  // a retained-intron isoform: an UNSPLICED L for the same fragment
-                } else if (!seen_intron) {
-                    const int32_t strand =
-                        (t >= 0 && t < static_cast<int32_t>(t_strand_arr_.size()))
-                            ? t_strand_arr_[t]
-                            : STRAND_NONE;
-                    out_introns.push_back({gap.ref_id, is, ie, strand});  // the emission is unchanged
-                    seen_intron = true;
-                    seen_start = is;
-                    seen_end = ie;
-                } else if (is != seen_start || ie != seen_end) {
-                    out_ambiguous = true;
-                    break;
-                }
-                if (seen_none && seen_intron) {
-                    out_ambiguous = true;
-                    break;
-                }
-            }
+        if (gaps.empty()) {
+            emit_unspliced_hypothesis(cr);
+            return;
         }
-        return !out_introns.empty();
+
+        auto& path = scratch.hypothesis_path;
+        bool any_candidate_implies_nothing = false;
+
+        for (int32_t t : candidate_t) {
+            if (transcript_contradicts_blocks(t, exons, K)) continue;
+            path.clear();
+            const int32_t strand = (t >= 0 && t < static_cast<int32_t>(t_strand_arr_.size()))
+                                       ? t_strand_arr_[t]
+                                       : STRAND_NONE;
+            for (const GapBlock& gap : gaps)
+                collect_transcript_introns_in_gap(t, gap, K, strand, path);
+            if (path.empty()) {
+                any_candidate_implies_nothing = true;
+                continue;
+            }
+            add_hypothesis(cr, path, strand, t);
+        }
+
+        // ⭐ The UNSPLICED hypothesis. Present when some compatible transcript implies nothing in the
+        // gaps (a retained-intron isoform), and ALWAYS when no annotated junction was sequenced -- then
+        // the molecule may be gDNA or nascent, and the gap is real template.
+        if (any_candidate_implies_nothing || !certified_rna || cr.n_gap_hypotheses() == 0)
+            emit_unspliced_hypothesis(cr);
     }
+
+private:
+    /// Append every intron of ``t`` lying inside ``gap`` (±K), in genomic order.
+    ///
+    /// ⛔ EVERY one, not the first. Returning the first and stopping is what made a mate gap spanning two
+    /// annotated introns keep only one cut -- measured at 98.5 % of the fragment-length tail that survived
+    /// C2.6 -- and it also broke the ambiguity test, because two transcripts differing only in their
+    /// SECOND intron read as agreeing.
+    inline void collect_transcript_introns_in_gap(int32_t t,
+                                                  const GapBlock& gap,
+                                                  int32_t K,
+                                                  int32_t strand,
+                                                  std::vector<IntronBlock>& out) const
+    {
+        if (t < 0 || t + 1 >= static_cast<int32_t>(exon_offsets_.size())) return;
+        const int32_t begin = exon_offsets_[t];
+        const int32_t n_introns = exon_offsets_[t + 1] - begin - 1;
+        if (n_introns <= 0 || gap.end <= gap.start) return;
+
+        const int32_t* intron_starts = exon_ends_.data() + begin;
+        const int32_t* intron_ends   = exon_starts_.data() + begin + 1;
+        const int64_t  max_end       = static_cast<int64_t>(gap.end) + K;
+
+        int32_t i = static_cast<int32_t>(
+            std::lower_bound(intron_starts, intron_starts + n_introns,
+                             static_cast<int64_t>(gap.start) - K) - intron_starts);
+        const int32_t by_end = static_cast<int32_t>(
+            std::upper_bound(intron_ends, intron_ends + n_introns, gap.start) - intron_ends);
+        for (i = std::max(i, by_end); i < n_introns; ++i) {
+            if (intron_starts[i] >= gap.end) break;                       // no overlap with the gap
+            if (static_cast<int64_t>(intron_ends[i]) > max_end) break;    // protrudes past the slack
+            if (intron_ends[i] > intron_starts[i])
+                out.push_back({gap.ref_id, intron_starts[i], intron_ends[i], strand});
+        }
+    }
+
+    /// Record ``path`` as a hypothesis, or credit ``t`` to the identical one already there.
+    static void add_hypothesis(RawResolveResult& cr,
+                               const std::vector<IntronBlock>& path,
+                               int32_t strand,
+                               int32_t t)
+    {
+        for (int32_t h = 0; h < cr.n_gap_hypotheses(); ++h) {
+            const int32_t lo = cr.gap_intron_offsets[h], hi = cr.gap_intron_offsets[h + 1];
+            if (hi - lo != static_cast<int32_t>(path.size())) continue;
+            bool same = true;
+            for (int32_t i = 0; i < hi - lo && same; ++i) {
+                same = cr.gap_introns[lo + i].start == path[i].start &&
+                       cr.gap_introns[lo + i].end == path[i].end;
+            }
+            if (!same) continue;
+            // ⚠ Inserted in place so the supporting lists stay contiguous per hypothesis.
+            cr.gap_supporting.insert(cr.gap_supporting.begin() + cr.gap_supporting_offsets[h + 1], t);
+            for (int32_t k = h + 1; k < static_cast<int32_t>(cr.gap_supporting_offsets.size()); ++k)
+                ++cr.gap_supporting_offsets[k];
+            return;
+        }
+        cr.gap_introns.insert(cr.gap_introns.end(), path.begin(), path.end());
+        cr.gap_intron_offsets.push_back(static_cast<int32_t>(cr.gap_introns.size()));
+        cr.gap_sj_strand.push_back(strand);
+        cr.gap_supporting.push_back(t);
+        cr.gap_supporting_offsets.push_back(static_cast<int32_t>(cr.gap_supporting.size()));
+    }
+
+    /// The empty path: cut nothing. ⚠ Idempotent, because two routes can both call for it.
+    static void emit_unspliced_hypothesis(RawResolveResult& cr) {
+        for (int32_t h = 0; h < cr.n_gap_hypotheses(); ++h) {
+            if (cr.gap_intron_offsets[h] == cr.gap_intron_offsets[h + 1]) return;
+        }
+        cr.gap_intron_offsets.push_back(static_cast<int32_t>(cr.gap_introns.size()));
+        cr.gap_sj_strand.push_back(STRAND_NONE);
+        cr.gap_supporting_offsets.push_back(static_cast<int32_t>(cr.gap_supporting.size()));
+    }
+
+public:
 
     /// Map a genomic position to transcript-space offset for FL computation.
     ///
@@ -1432,17 +1517,37 @@ public:
                                          cr.frag_lengths, scratch);
         }
 
-        // --- SPLICED_IMPLICIT detection ---
-        // For multi-block (paired-end gap) fragments, classify as implicit
-        // splice when any candidate transcript has an annotated intron
-        // wholly contained in some PE gap (with one-sided K-bp slack on
-        // each boundary). Per-intron whole-containment rejects the
-        // false-positive class where a 200 bp slice of a 50 kb intron
-        // overlaps the gap; that is true-gDNA, not implicit splicing.
-        if (cr.splice_type == SPLICE_UNSPLICED &&
-            cr.chimera_type == CHIMERA_NONE &&
-            collect_implicit_splice_introns(exons, cr.t_inds, scratch,
-                                            cr.implicit_introns, cr.implicit_ambiguous)) {
+        // --- gap-hypothesis enumeration ---
+        //
+        // ⭐ EVERY fragment, whatever its splice type. It used to run only on fragments already
+        // classified SPLICE_UNSPLICED, so one carrying an observed CIGAR-N splice never had its mate gap
+        // examined and kept that intron inside L. ⚠ UNSPLICED never meant "one aligned block": an
+        // unspliced paired-end fragment already has two blocks and a mate gap, and that case always
+        // worked. The missed population is SPLICED fragments that ALSO have a gap intron -- long by
+        // construction, and so exactly the tail the measurement found.
+        //
+        // ⛔ THE ACCUMULATOR ARBITRATES. This only enumerates; whether the fragment deposits or is held
+        // for the second pass is decided where the outcome is reported. docs/SPEC_GAP_PATHS.md §0.
+        //
+        // ⚠ `chimera_type == CHIMERA_NONE` is KEPT: a chimeric fragment's blocks are not one molecule, so
+        // its gaps are not introns. Such a fragment gets the unspliced hypothesis alone.
+        if (cr.chimera_type == CHIMERA_NONE) {
+            enumerate_gap_hypotheses(exons, introns, cr.t_inds,
+                                     cr.splice_type == SPLICE_SPLICED_ANNOT, scratch, cr);
+        } else {
+            cr.gap_introns.clear();
+            cr.gap_sj_strand.assign(1, STRAND_NONE);
+            cr.gap_intron_offsets.assign(2, 0);
+            cr.gap_supporting.clear();
+            cr.gap_supporting_offsets.assign(2, 0);
+        }
+
+        // ⛔ THE SPLICE_IMPLICIT PROMOTION STAYS UNSPLICED-ONLY, and it is now purely DESCRIPTIVE.
+        // `splice_type` is the scanner's census of what it SAW; it feeds scoring, the buffer, the strand
+        // training and `rigel report`. Re-labelling an observed SPLICED_ANNOT fragment would silently move
+        // mass between reported categories. ⚠ The fragment may still be DEFERRED -- the two axes are
+        // independent, which is why the umbrella census is its own axis and not a splice type.
+        if (cr.splice_type == SPLICE_UNSPLICED && cr.n_gap_hypotheses() > 1) {
             cr.splice_type = SPLICE_IMPLICIT;
         }
 

@@ -83,10 +83,9 @@ def _calibration_dict(**overrides) -> dict:
             "dropped_too_long": 1,
             "dropped_empty": 2,
             "dropped_strand_undefined": 3,
-            "dropped_ambiguous_path": 4,
+            "deferred_undetermined_gap": 4,
             "unannotated_introns": 5,
             "contradictory_sj_strand": 6,
-            "sj_implicit_fragments": 7,
             "introns_absorbed": 8,
         },
         "n_strand_columns": N_STRAND_COLUMNS,
@@ -186,8 +185,8 @@ def test_a_MISSING_qc_denominator_is_REJECTED():
     statement that cannot.
     """
     qc = dict(_calibration_dict()["calibration"]["qc"])
-    del qc["dropped_ambiguous_path"]
-    with pytest.raises(ValueError, match="dropped_ambiguous_path"):
+    del qc["deferred_undetermined_gap"]
+    with pytest.raises(ValueError, match="deferred_undetermined_gap"):
         _payload(qc=qc)
 
 
@@ -211,8 +210,7 @@ def test_qc_is_typed_so_a_misspelled_denominator_fails_loudly():
     payload = _payload()
     assert isinstance(payload.qc, ScanQC)
     assert payload.qc.deposited == 41
-    assert payload.qc.dropped_ambiguous_path == 4
-    assert payload.qc.sj_implicit_fragments == 7
+    assert payload.qc.deferred_undetermined_gap == 4
     with pytest.raises(AttributeError):
         _ = payload.qc.dropped_ambigous_path  # noqa: B018 — the typo IS the test
 

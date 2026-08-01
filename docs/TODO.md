@@ -11,8 +11,10 @@ Live handoff: `IMPLEMENTATION_PLAN.md` §0. Finished work: `LEDGER.md`. The suit
 ## ⭐ THE CRITICAL PATH
 
 ⛔ **READ `docs/FRAGMENT_LENGTH_AUDIT.md` §0 FIRST — the critical path moved there on 2026-07-31.**
-S5 is finished. The live sequence is C2 → C3 → the P2 A/B → regenerate the goldens once. The ranks below
-are everything *else*, and rank 1 has changed: the goldens must be regenerated **after C3**, not now.
+S5 is finished. The live sequence is C2 → **C2.6** → C3 → the P2 A/B → regenerate the goldens once. The
+ranks below are everything *else*, and rank 1 has changed: the goldens must be regenerated **after C3**,
+not now. ⭐ **C2 and C2.6 have LANDED (2026-08-01)**; C2.6 left **two items for the owner**, both in
+`LEDGER.md`'s C2.6 entry and both listed at ranks 0a/0b below.
 
 ⭐ The gate that blocked everything is passed. `calibrate()` runs (S5.f, 2026-07-30) and the FIRST
 BASELINE exists in `LEDGER.md`. Items 3–5 below were all "needs S5" and are now **unblocked**.
@@ -21,6 +23,8 @@ BASELINE exists in `LEDGER.md`. Items 3–5 below were all "needs S5" and are no
 
 | rank | item | § | why now / why not yet |
 |---|---|---|---|
+| **0a** | ⛔ ⭐ **OWNER DECISION — reverse C2.6's D1?** Mixed fragments leave `RNA_SPLICED` | `LEDGER.md` C2.6 | **Measured, and the answer inverts the recommendation.** Cutting the intron takes the pool from **+8.00 % → +0.67 %** against truth; then removing the mixed fragments takes it to **−9.58 % / −22.46 %**, because they are the LONG ones. The purity argument is unchanged and still real; its price is now known and it is ~10 % of the pool's mean. ⚠ One line: `path.sj_implicit = implicit_only` |
+| **0b** | ⭐ **C2.7 / D3 — a mate gap holding MORE THAN ONE annotated intron keeps only the first cut** | `LEDGER.md` C2.6 | ⛔ **The only known mechanism left in the fragment-length tail, and it is measured rather than hypothesised**: emitting every intron in a gap takes the anchor's mass above the true 713 bp ceiling from **0.00137 → 0.00002** and `dropped_too_long` from **38,309 → 389**. ⚠ The real work is extending the per-gap unanimity test to compare intron **SETS** rather than one intron — the measurement did not do that, so it is not the fix |
 | **1** | ⚠ **Regenerate the goldens — but AFTER C3, not now** | — | ⛔ **Changed 2026-07-31.** 21 goldens are stale because P1 changed the EM prior's units, and C2/C3 will move them **again** (the FL models change ⇒ scoring and eff-lengths change). Regenerating now would bake in a number that is about to change. ⭐ Still true when the moment comes: **regenerate twice and diff** (§7) — the goldens run under the default sampling mode, so a flaky expectation baked in now is permanent. *(Original note: ⚠ the suite reads 22 failed and 21 of them are expected* — that is exactly the state a real regression hides in, and everything after this is an A/B needing "did anything else move?" to be a strong signal.)* |
 | ~~2~~ | ⛔ **S5.g — A7's taper: MEASURED AND REFUTED** | §1 | The A/B is done (`LEDGER.md` S5.g-2): **≤ 0.0002** on the library gDNA fraction. The 11.0 % was bp-weighted geometry; mass-weighted the taper is 0.9596 and **89 % of edge mass is on lines it never touches**. ⚠ Would not hold for a 3′-biased/degraded library — screening test is the mass-weighted taper ratio |
 | **3** | ⚠ **`EMConfig.seed` does not make `assignment_mode="sample"` reproducible** | §7 | ⭐ **No longer a blocker**: the default draws from the posterior *by design*, and running an A/B under `map`/`fractional` drops the noise 8 orders of magnitude. What remains is that a **seeded** run still does not reproduce, which is what `seed` is for |

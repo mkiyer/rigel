@@ -31,6 +31,7 @@ from ._accumulator_reference import (
     Accumulator,
     DepositOutcome,
     FragmentPool,
+    GapHypothesis,
     Partition,
     inv_length_quantum,
 )
@@ -170,7 +171,7 @@ def test_a_spliced_jump_deposits_NOTHING_on_the_lines_it_splices_over():
     """⭐ The defect this design removes. The intron [201,900) swallows the line at 400; the old rule,
     which asked only "does another slice follow?", could not tell that from a contiguous crossing."""
     acc = _acc(junctions=[JUNCTION])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS)
+    acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
     t = acc.tally
     length = (950 - 150) - (900 - 201)
     assert int(t.sj_count[0, 0]) == 1
@@ -184,7 +185,7 @@ def test_a_spliced_fragments_own_BLOCK_crossings_go_in_the_SPLICED_bank():
     """A spliced fragment is certified RNA — gDNA cannot be spliced — so a line its block genuinely
     crosses is the cleanest RNA marker available at a seam."""
     acc = _acc(junctions=[JUNCTION])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS)
+    acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
     t = acc.tally
     assert int(t.edge_spliced_count[_edge(0, 2), 0]) == 1, "block [150,201) crosses the line at 200"
     assert t.edge_unspliced_count.sum() == 0
@@ -195,7 +196,7 @@ def test_a_node_is_SPANNED_only_when_ONE_segment_crosses_BOTH_its_lines():
     segment 1 crosses the line at 400 and segment 2 crosses the line at 900 — both of n4's lines — yet
     the molecule never covers [500,600) and does not span the node."""
     acc = _acc()
-    acc.deposit(0, 380, 950, introns=[(500, 600)])
+    acc.deposit(0, 380, 950, observed_introns=[(500, 600)])
     t = acc.tally
     assert int(t.edge_unspliced_count[_edge(0, 4), 0]) == 1, "line 400, from segment 1"
     assert int(t.edge_unspliced_count[_edge(0, 5), 0]) == 1, "line 900, from segment 2"
@@ -207,7 +208,7 @@ def test_an_UNANNOTATED_intron_credits_no_junction_and_nothing_across_the_gap():
     UNSPLICED channel and compete with gDNA rather than being certified RNA."""
     acc = _acc(junctions=[JUNCTION])
     # [200,400) is NOT annotated; it swallows the line at 201
-    acc.deposit(0, 50, 500, introns=[(200, 400)], sj_strand=Strand.POS)
+    acc.deposit(0, 50, 500, observed_introns=[(200, 400)], sj_strand=Strand.POS)
     t = acc.tally
     assert t.sj_count.sum() == 0
     assert t.edge_spliced_count.sum() == 0, "not certified RNA — it competes with gDNA"
@@ -224,7 +225,9 @@ def test_a_fragment_straddling_two_nodes_without_crossing_a_line_is_NOT_containe
     node it only partly overlaps. It deposits on no object, and the start count is what keeps that
     visible rather than silent."""
     acc = _acc()
-    acc.deposit(0, 120, 500, introns=[(200, 400)])  # blocks land in n1 and n4, crossing no line
+    acc.deposit(
+        0, 120, 500, observed_introns=[(200, 400)]
+    )  # blocks land in n1 and n4, crossing no line
     t = acc.tally
     assert t.edge_unspliced_count.sum() == 0
     assert t.node_contained_count.sum() == 0
@@ -234,7 +237,7 @@ def test_a_fragment_straddling_two_nodes_without_crossing_a_line_is_NOT_containe
 
 def test_an_unannotated_intron_inside_one_node_is_a_contained_unspliced_fragment():
     acc = _acc()
-    acc.deposit(0, 210, 390, introns=[(300, 340)])
+    acc.deposit(0, 210, 390, observed_introns=[(300, 340)])
     t = acc.tally
     assert int(t.node_contained_count[_node(0, 3), 0]) == 1
     assert int(t.node_contained_inv_length_sum[_node(0, 3), 0]) == inv_length_quantum(180 - 40)
@@ -245,7 +248,9 @@ def test_opposite_strand_junctions_at_the_same_coordinates_are_DISTINCT_edges():
     """Biologically impossible — splice motifs are not palindromic — so only a synthetic stress test can
     reach it, which is exactly why one exists."""
     acc = _acc(junctions=[(0, 201, 900, Strand.POS), (0, 201, 900, Strand.NEG)])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG)
+    acc.deposit(
+        0, 150, 950, observed_introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG
+    )
     t = acc.tally
     assert t.sj_count.sum() == 1
     assert int(t.sj_count[1, STRAND_COLUMNS[Strand.NEG]]) == 1, "the NEG edge (id 1), genome minus"
@@ -283,7 +288,7 @@ def test_a_fragment_using_TWO_junctions_credits_BOTH():
         junctions=[(0, 100, 200, Strand.POS), (0, 300, 400, Strand.POS)],
     )
     acc = Accumulator(part, max_fragment_length=10_000)
-    acc.deposit(0, 50, 550, introns=[(100, 200), (300, 400)], sj_strand=Strand.POS)
+    acc.deposit(0, 50, 550, observed_introns=[(100, 200), (300, 400)], sj_strand=Strand.POS)
     t = acc.tally
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.POS]]) == 1
     assert int(t.sj_count[1, STRAND_COLUMNS[Strand.POS]]) == 1
@@ -311,14 +316,18 @@ def test_EVERY_bank_including_the_junctions_is_indexed_by_GENOME_strand():
     in the antisense column; under the genome convention it lands in the minus column. Those happen to be
     the same index, so the discriminating case is the next test."""
     acc = _acc(junctions=[JUNCTION])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.POS)
+    acc.deposit(
+        0, 150, 950, observed_introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.POS
+    )
     assert int(acc.tally.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1
 
 
 def test_a_SENSE_fragment_on_the_minus_strand_is_still_booked_as_MINUS():
     """The discriminating case: sense-to-motif would say column 0, genome strand says column 1."""
     acc = _acc(junctions=[(0, 201, 900, Strand.NEG)])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG)
+    acc.deposit(
+        0, 150, 950, observed_introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG
+    )
     t = acc.tally
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.POS]]) == 0
@@ -345,7 +354,7 @@ def test_the_limit_applies_to_L_and_NOT_to_the_SPAN():
     """⚠ A 300 bp molecule across a 10 kb intron has a 10 kb span. Limiting the span discards every
     spliced fragment — 37.96 % of read groups measured, against 5.45 % when the limit is on ``L``."""
     acc = _acc(junctions=[JUNCTION], max_fragment_length=200)
-    out = acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS)
+    out = acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
     assert out is DepositOutcome.DEPOSITED, "span 800, L = 101"
     assert int(acc.tally.sj_count[0, 0]) == 1
 
@@ -389,7 +398,7 @@ def test_every_accepted_fragment_increments_exactly_ONE_start_count():
     acc = _acc(junctions=[JUNCTION])
     fragments = [(120, 320, ()), (220, 380, ()), (150, 950, [(201, 900)]), (950, 1200, ())]
     accepted = sum(
-        acc.deposit(0, s, e, introns=i, sj_strand=Strand.POS) is DepositOutcome.DEPOSITED
+        acc.deposit(0, s, e, observed_introns=i, sj_strand=Strand.POS) is DepositOutcome.DEPOSITED
         for s, e, i in fragments
     )
     assert accepted == 4
@@ -408,7 +417,9 @@ def test_each_pool_is_reached_only_by_its_own_structural_class():
     acc.deposit(0, 210, 390)  # contained in n3 — intronic
     acc.deposit(0, 380, 420)  # crosses the line at 400 only — flanks intron|exon
     acc.deposit(0, 950, 990)  # contained in n5 — intergenic
-    acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS)  # annotated junction
+    acc.deposit(
+        0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS
+    )  # annotated junction
     p = acc.tally.pool_lengths
     assert int(p[FragmentPool.DNA_INTERGENIC].sum()) == 2
     assert int(p[FragmentPool.DNA_INTRONIC].sum()) == 1
@@ -419,21 +430,25 @@ def test_each_pool_is_reached_only_by_its_own_structural_class():
 
 def test_a_pool_is_binned_at_L_and_only_ONCE_per_fragment():
     acc = _acc()
-    acc.deposit(0, 210, 390, introns=[(300, 340)])  # L = 180 - 40
+    acc.deposit(0, 210, 390, observed_introns=[(300, 340)])  # L = 180 - 40
     p = acc.tally.pool_lengths
     assert int(p[FragmentPool.DNA_INTRONIC, 140]) == 1
     assert int(p.sum()) == 1
 
 
-def test_an_IMPLICIT_splice_is_kept_OUT_of_the_pure_RNA_pool():
-    """Its splice is a model inference, not an observation, so certifying it as RNA would make the pool
-    depend on the very length model it is used to fit."""
-    acc = _acc(junctions=[JUNCTION])
-    acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS, sj_implicit=True)
-    t = acc.tally
-    assert int(t.sj_count[0, 0]) == 1, "it still deposits"
-    assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 0
-    assert t.qc["sj_implicit_fragments"] == 1
+# ⛔ `test_an_IMPLICIT_splice_is_kept_OUT_of_the_pure_RNA_pool` was DELETED — `SPEC_GAP_PATHS.md` §5.
+#
+# It asserted the pool bar that `sj_implicit` existed to apply: a splice inferred rather than observed
+# made the fragment's length "a product of the very model the pool is used to fit". The criterion is now
+# DETERMINACY, not provenance — a fragment reaches the pool only when exactly ONE hypothesis survived, so
+# its `L` is not in doubt at all, however it was arrived at.
+#
+# ⚠ The old criterion was MEASURED before it was deleted, because the two disagree and the disagreement
+# is large and in the damaging direction: on the chr22 pilot the pool reads +0.67 % mean / +2.40 % sd
+# against truth under determinacy and −9.58 % / −22.46 % under provenance. Barring inferred lengths
+# preferentially bars fragments whose mates sit far apart — a purity filter on a length pool is a length
+# filter. The inverse is now asserted by
+# `test_ONE_SURVIVING_HYPOTHESIS_DEPOSITS_even_though_its_splice_was_never_sequenced`.
 
 
 def test_a_multi_line_crossing_enters_NO_pool():
@@ -560,7 +575,7 @@ def test_L_is_the_total_of_the_path_segments_even_when_the_intron_list_is_malfor
     contradictory rules the file happened to carry.
     """
     acc = _acc(max_fragment_length=10_000)
-    assert acc.deposit(0, 50, 500, introns=introns) is DepositOutcome.DEPOSITED
+    assert acc.deposit(0, 50, 500, observed_introns=introns) is DepositOutcome.DEPOSITED
     t = acc.tally
     assert t.qc["introns_absorbed"] == expected_absorbed
     crossings = int(t.edge_unspliced_count.sum())
@@ -575,7 +590,7 @@ def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_be
     containing ``lo`` would credit the start-count invariant — and possibly the contained deposit — to a
     node the fragment never touches."""
     acc = _acc(max_fragment_length=10_000)
-    acc.deposit(0, 150, 500, introns=[(150, 480)])  # the path is only [480,500), inside n4
+    acc.deposit(0, 150, 500, observed_introns=[(150, 480)])  # the path is only [480,500), inside n4
     t = acc.tally
     assert int(t.node_start_count[_node(0, 4)]) == 1, "n4, where the path actually starts"
     assert int(t.node_start_count[_node(0, 1)]) == 0, "not n1, where the extent begins"
@@ -586,7 +601,7 @@ def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_be
 def test_a_duplicated_intron_credits_its_junction_ONCE():
     """Two mates reporting the same intron is one splice event, not two."""
     acc = _acc(junctions=[JUNCTION])
-    acc.deposit(0, 150, 950, introns=[(201, 900), (201, 900)], sj_strand=Strand.POS)
+    acc.deposit(0, 150, 950, observed_introns=[(201, 900), (201, 900)], sj_strand=Strand.POS)
     assert int(acc.tally.sj_count[0, 0]) == 1
     assert acc.tally.qc["introns_absorbed"] == 1
 
@@ -599,7 +614,7 @@ def test_ABUTTING_introns_are_MALFORMED_and_merge():
     The index cannot produce it either: a zero-length exon is dropped when the exon arrays are built,
     which fuses its two flanking introns into one. Merged here, and counted."""
     acc = _acc(junctions=[(0, 201, 400, Strand.POS), (0, 400, 900, Strand.POS)])
-    acc.deposit(0, 150, 950, introns=[(201, 400), (400, 900)], sj_strand=Strand.POS)
+    acc.deposit(0, 150, 950, observed_introns=[(201, 400), (400, 900)], sj_strand=Strand.POS)
     t = acc.tally
     assert t.qc["introns_absorbed"] == 1
     assert t.sj_count.sum() == 0, "the merged span 201->900 is not an annotated junction"
@@ -609,7 +624,10 @@ def test_a_wide_overlap_no_longer_discards_a_good_fragment():
     """The naive formula gave L = −290 here and filed the fragment as ``dropped_empty`` — invisible to
     the start-count invariant, because a rejected fragment never reaches it."""
     acc = _acc(max_fragment_length=10_000)
-    assert acc.deposit(0, 150, 500, introns=[(150, 480), (160, 470)]) is DepositOutcome.DEPOSITED
+    assert (
+        acc.deposit(0, 150, 500, observed_introns=[(150, 480), (160, 470)])
+        is DepositOutcome.DEPOSITED
+    )
     assert acc.tally.qc["dropped_empty"] == 0
     assert int(acc.tally.node_start_count.sum()) == 1
 
@@ -636,7 +654,7 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
     acc = _acc(junctions=[SPAN_JUNCTION_POS])
     acc.deposit(0, 150, 300, align_strand=Strand.NEG)  # unspliced, genome minus
     acc.deposit(  # spliced, genome minus, ANTISENSE to its + junction
-        0, 150, 950, introns=[(400, 900)], align_strand=Strand.NEG, sj_strand=Strand.POS
+        0, 150, 950, observed_introns=[(400, 900)], align_strand=Strand.NEG, sj_strand=Strand.POS
     )
     t = acc.tally
     assert int(t.node_spanning_count[_node(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 2, (
@@ -649,7 +667,9 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
 def test_a_spliced_SENSE_fragment_books_node_AND_junction_by_GENOME_strand():
     """The discriminating case: sense-to-motif would say column 0 for both; genome strand says 1."""
     acc = _acc(junctions=[SPAN_JUNCTION_NEG])
-    acc.deposit(0, 150, 950, introns=[(400, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG)
+    acc.deposit(
+        0, 150, 950, observed_introns=[(400, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG
+    )
     t = acc.tally
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1
     assert int(t.node_spanning_count[_node(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1
@@ -700,20 +720,24 @@ def test_an_UNDEFINED_strand_is_REJECTED_not_silently_booked_as_MINUS(undefined)
 # fragment length AND the strand to discriminate with.
 
 
-def test_an_AMBIGUOUS_PATH_fragment_deposits_on_NOTHING_and_is_COUNTED():
-    """⛔ The whole point: an undetermined path is a rejection, not a partial deposit.
+def test_TWO_SURVIVING_HYPOTHESES_deposit_on_NOTHING_and_are_BUFFERED_WHOLE():
+    """⛔ The whole point: an undetermined path is not a partial deposit, and not a loss either.
 
     The fragment used here would otherwise deposit richly — it crosses lines, uses an annotated junction
-    and lands in a length pool — so a leak into any one bank is visible. And it must be COUNTED: this is
-    the population the side buffer drains, so a silent drop would understate what the second pass owes.
+    and lands in a length pool — so a leak into any one bank is visible. And it must be RETAINED: this is
+    the population the second pass drains, so a silent drop would understate what that pass owes.
     """
     acc = _acc(junctions=[JUNCTION])
     outcome = acc.deposit(
-        0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS, path_ambiguous=True
+        0,
+        150,
+        950,
+        sj_strand=Strand.POS,
+        hypotheses=(GapHypothesis(((201, 900),), supporting_t_inds=(7,)), GapHypothesis()),
     )
-    assert outcome is DepositOutcome.AMBIGUOUS_PATH
+    assert outcome is DepositOutcome.DEFERRED
     t = acc.tally
-    assert t.qc["dropped_ambiguous_path"] == 1
+    assert t.qc["deferred_undetermined_gap"] == 1
     assert t.qc["deposited"] == 0
     for name in (
         "node_contained_count",
@@ -726,38 +750,100 @@ def test_an_AMBIGUOUS_PATH_fragment_deposits_on_NOTHING_and_is_COUNTED():
     ):
         assert int(getattr(t, name).sum()) == 0, f"{name} must be untouched"
 
+    # ⭐ RETAINED WHOLE, and with every hypothesis — the second pass cannot choose between answers it
+    # was not given, and it needs the supporting transcripts to weight them by abundance.
+    assert len(t.deferred) == 1
+    held = t.deferred[0]
+    assert (held.ref, held.start, held.end) == (0, 150, 950)
+    assert {path.introns for path in held.hypotheses} == {((201, 900),), ()}
+    assert held.hypotheses[0].supporting_t_inds == (7,)
+    # The genomic path competes against exactly one spliced path: the open question is RNA or gDNA.
+    assert t.gap_resolution["gap_deferred_rna_or_gdna"] == 1
 
-def test_an_IMPLICIT_splice_with_a_DETERMINED_path_still_deposits():
-    """The discriminating pair for the test above: `sj_implicit` and `path_ambiguous` are independent.
 
-    One says the splice was not sequenced; the other says the path is not known. Collapsing them would
-    either throw away every implicit fragment (they are a real population) or tally one at a randomly
-    chosen `L`.
+def test_ONE_SURVIVING_HYPOTHESIS_DEPOSITS_even_though_its_splice_was_never_sequenced():
+    """⭐ The discriminating pair for the test above: **determinacy**, not provenance.
+
+    Both fragments have a splice that was never sequenced. This one has only ONE explanation for its gap,
+    so its ``L`` is not in doubt and it deposits — including into the pure-RNA length pool, which the
+    deleted ``sj_implicit`` flag used to bar it from. Measured on the chr22 pilot, that bar cost the pool
+    **−9.58 % mean / −22.46 % sd** against truth where determinacy reads **+0.67 % / +2.40 %**.
     """
     acc = _acc(junctions=[JUNCTION])
-    outcome = acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS, sj_implicit=True)
+    outcome = acc.deposit(
+        0, 150, 950, sj_strand=Strand.POS, hypotheses=(GapHypothesis(((201, 900),)),)
+    )
     assert outcome is DepositOutcome.DEPOSITED
     t = acc.tally
     assert int(t.sj_count[0, 0]) == 1
     assert int(t.node_start_count.sum()) == 1
-    assert t.qc["dropped_ambiguous_path"] == 0
+    assert t.qc["deferred_undetermined_gap"] == 0
+    assert not t.deferred
+    assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 1
+    assert t.gap_resolution["gap_resolved_spliced"] == 1
 
 
-def test_a_strand_undefined_AMBIGUOUS_PATH_fragment_is_counted_as_STRAND_UNDEFINED():
+def test_a_strand_undefined_AMBIGUOUS_fragment_is_counted_as_STRAND_UNDEFINED():
     """⚠ The precedence is part of the contract, because every fragment must count exactly ONCE.
 
     A fragment can be both. It is filed under the strand, and the reason is which denominator stays
-    honest: ``dropped_ambiguous_path`` sizes the population the **second pass can recover**, and a
-    fragment with no genome strand is not recoverable — the second pass resolves *which transcript*, not
-    *which strand the read aligned to*. Counting it as ambiguous would promise a recovery that cannot
-    happen.
+    honest: the deferred queue sizes the population the **second pass can recover**, and a fragment with no
+    genome strand is not recoverable — that pass resolves *which path*, not *which strand the read
+    aligned to*. Buffering it would promise a recovery that cannot happen, and would put a fragment with
+    no column into a queue whose drain needs one.
     """
     acc = _acc()
-    outcome = acc.deposit(0, 150, 300, align_strand=Strand.AMBIGUOUS, path_ambiguous=True)
+    outcome = acc.deposit(
+        0,
+        150,
+        300,
+        align_strand=Strand.AMBIGUOUS,
+        hypotheses=(GapHypothesis(((200, 250),)), GapHypothesis()),
+    )
     assert outcome is DepositOutcome.STRAND_UNDEFINED
     t = acc.tally
     assert t.qc["dropped_strand_undefined"] == 1
-    assert t.qc["dropped_ambiguous_path"] == 0
+    assert t.qc["deferred_undetermined_gap"] == 0
+    assert not t.deferred, "a fragment with no column must not enter the deferred queue"
+
+
+def test_a_hypothesis_LONGER_THAN_THE_LIMIT_is_ruled_out_and_the_rest_stands():
+    """⭐ `max_fragment_length` is not a new rule — it is the one that already makes TOO_LONG a rejection.
+
+    Short-read chemistry does not sequence molecules past the limit, so a hypothesis implying a longer
+    ``L`` is not a molecule this library contains. ⭐ Applied to the GENOMIC hypothesis it is exactly the
+    owner's rule "a fragment whose genomic span exceeds the limit must be RNA": the genomic path's ``L``
+    **is** that span. Here the span is 800 over a limit of 500, so the genomic path dies and the single
+    spliced path — ``L`` = 800 − 699 = 101 — stands alone and deposits.
+    """
+    acc = _acc(max_fragment_length=500, junctions=[JUNCTION])
+    outcome = acc.deposit(
+        0,
+        150,
+        950,
+        sj_strand=Strand.POS,
+        hypotheses=(GapHypothesis(((201, 900),)), GapHypothesis()),
+    )
+    assert outcome is DepositOutcome.DEPOSITED
+    t = acc.tally
+    assert int(t.deposited_lengths.sum()) == 1
+    assert int(np.nonzero(t.deposited_lengths)[0][0]) == 101
+    assert t.gap_resolution["gap_resolved_spliced"] == 1
+    assert not t.deferred
+
+
+def test_when_the_limit_would_rule_out_EVERY_hypothesis_the_survivors_stand():
+    """⚠ The escape clause, and it hands the fragment to the ordinary TOO_LONG rejection.
+
+    Filtering to nothing would mean "this molecule cannot exist", which is not a conclusion the filter is
+    entitled to draw — it is a statement about what the chemistry sequences, and the fragment is in the
+    BAM. So the survivors stand and ``TOO_LONG`` counts it, exactly as it did before any of this.
+    """
+    acc = _acc(max_fragment_length=50)
+    outcome = acc.deposit(0, 150, 950, hypotheses=(GapHypothesis(),))
+    assert outcome is DepositOutcome.TOO_LONG
+    assert acc.tally.qc["dropped_too_long"] == 1
+    assert not acc.tally.deferred
 
 
 # ── the splice-junction motif strand is a THREE-WAY distinction, not a two-way one ─────────────────
@@ -783,7 +869,7 @@ def test_a_MISSING_sj_strand_MATCHES_on_coordinates_alone():
     annotated junctions — and the loss would look like a stale annotation, not a convention bug.
     """
     acc = _acc(junctions=[JUNCTION])  # (0, 201, 900, POS)
-    acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.NONE)
+    acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.NONE)
     t = acc.tally
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.POS]]) == 1
     assert t.qc["unannotated_introns"] == 0
@@ -810,7 +896,12 @@ def test_an_AMBIGUOUS_sj_strand_is_CONTRADICTORY_and_credits_NO_junction():
     """
     acc = _acc(junctions=[JUNCTION])  # (0, 201, 900, POS)
     outcome = acc.deposit(
-        0, 150, 950, introns=[(201, 900)], align_strand=Strand.POS, sj_strand=Strand.AMBIGUOUS
+        0,
+        150,
+        950,
+        observed_introns=[(201, 900)],
+        align_strand=Strand.POS,
+        sj_strand=Strand.AMBIGUOUS,
     )
     t = acc.tally
     assert outcome is DepositOutcome.DEPOSITED, "the fragment is real; only its splice is untrusted"
@@ -826,7 +917,9 @@ def test_a_DEFINITE_but_WRONG_sj_strand_still_misses():
     junction edge's own strand is a real disagreement, and it IS an unannotated intron — that coordinate
     pair is not annotated on the strand it was observed on."""
     acc = _acc(junctions=[JUNCTION])  # (0, 201, 900, POS)
-    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG)
+    acc.deposit(
+        0, 150, 950, observed_introns=[(201, 900)], align_strand=Strand.NEG, sj_strand=Strand.NEG
+    )
     t = acc.tally
     assert int(t.sj_count.sum()) == 0
     assert t.qc["unannotated_introns"] == 1
@@ -862,7 +955,9 @@ def test_length_sum_is_L_and_NOT_the_genomic_span():
     trap 8), and here it would put a number in ``length_sum`` that no fragment-length model can explain.
     """
     acc = _acc(junctions=[JUNCTION])  # intron (201, 900)
-    acc.deposit(0, 150, 950, introns=[(201, 900)], align_strand=Strand.POS, sj_strand=Strand.POS)
+    acc.deposit(
+        0, 150, 950, observed_introns=[(201, 900)], align_strand=Strand.POS, sj_strand=Strand.POS
+    )
     t = acc.tally
     length = (201 - 150) + (950 - 900)  # 101; the genomic span is 800
     assert int(t.sj_length_sum.sum()) == length
@@ -882,7 +977,7 @@ def test_length_sum_and_count_SHARE_a_support():
     acc = _acc(junctions=[JUNCTION])
     acc.deposit(0, 150, 500)
     acc.deposit(0, 220, 380)
-    acc.deposit(0, 150, 950, introns=[(201, 900)], sj_strand=Strand.POS)
+    acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
     acc.deposit(0, 500, 501)  # L == 1: the co-support edge case
     t = acc.tally
     for count, length_sum in (

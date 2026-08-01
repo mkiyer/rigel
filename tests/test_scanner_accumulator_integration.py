@@ -394,7 +394,7 @@ class TestSpliceCensus:
             + int(qc.dropped_too_long)
             + int(qc.dropped_empty)
             + int(qc.dropped_strand_undefined)
-            + int(qc.dropped_ambiguous_path)
+            + int(qc.deferred_undetermined_gap)
             + int(stats.n_deposit_not_offered)
         )
         assert offered - census[SpliceType.SPLICE_ARTIFACT] == accounted, (
@@ -402,7 +402,7 @@ class TestSpliceCensus:
             f"reconcile with deposited={qc.deposited} dropped=("
             f"too_long={qc.dropped_too_long}, empty={qc.dropped_empty}, "
             f"strand_undefined={qc.dropped_strand_undefined}, "
-            f"ambiguous_path={qc.dropped_ambiguous_path}) "
+            f"ambiguous_path={qc.deferred_undetermined_gap}) "
             f"not_offered={stats.n_deposit_not_offered}"
         )
 
@@ -443,7 +443,7 @@ class TestSpliceCensus:
             + int(qc.dropped_too_long)
             + int(qc.dropped_empty)
             + int(qc.dropped_strand_undefined)
-            + int(qc.dropped_ambiguous_path)
+            + int(qc.deferred_undetermined_gap)
             + int(stats.n_deposit_not_offered)
         )
         assert offered - census[SpliceType.SPLICE_ARTIFACT] == accounted
@@ -524,7 +524,7 @@ class TestSpliceCensus:
             + int(qc.dropped_too_long)
             + int(qc.dropped_empty)
             + int(qc.dropped_strand_undefined)
-            + int(qc.dropped_ambiguous_path)
+            + int(qc.deferred_undetermined_gap)
             + int(stats.n_deposit_not_offered)
         )
         assert offered - census[SpliceType.SPLICE_ARTIFACT] == accounted

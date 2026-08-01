@@ -63,12 +63,16 @@ from rigel.types import Strand
 
 
 __all__ = [
+    "UNSPLICED_ONLY",
     "INV_LENGTH_SCALE",
     "N_STRAND_COLUMNS",
     "STRAND_COLUMNS",
     "Accumulator",
+    "DeferredFragment",
     "DepositOutcome",
     "FragmentPool",
+    "GapResolution",
+    "GapHypothesis",
     "Partition",
     "Tally",
     "inv_length_quantum",
@@ -129,11 +133,108 @@ class DepositOutcome(enum.Enum):
     #: genome strand, so there is no column to credit. Required by design §10.3, which lists
     #: strand-undefined fragments among the denominators the accumulator must emit.
     STRAND_UNDEFINED = "dropped_strand_undefined"
-    #: The fragment's candidate transcripts imply **different intron sets**, so its path — and therefore
-    #: ``L``, both quanta, the pool bin and the set of lines it crosses — is not determined. It deposits
-    #: on nothing and waits for the second pass, which has the fragment length and the strand to
-    #: discriminate with. Design §9.1.
-    AMBIGUOUS_PATH = "dropped_ambiguous_path"
+    #: ⭐ **Two or more hypotheses survived, so the path is not determined** — and therefore neither is
+    #: ``L``, either quantum, the pool bin, or the set of lines the fragment crosses. It deposits on
+    #: nothing and goes to the **deferred queue**, where the second pass resolves it with the fragment-length
+    #: distribution and the transcript abundances. `docs/SPEC_GAP_PATHS.md` §0, `ACCUMULATOR_DESIGN.md` §9.
+    #:
+    #: ⚠ **Not "dropped".** The fragment is retained in full and the conservation identity is
+    #: ``deposited + deferred + dropped_* == offered``. The qc key says ``deferred`` for that reason: a
+    #: name that said ``dropped`` for a population that is kept is how a recoverable loss gets read as a
+    #: permanent one.
+    DEFERRED = "deferred_undetermined_gap"
+
+
+@dataclass(frozen=True, slots=True)
+class GapHypothesis:
+    """ONE hypothesis about what a fragment's **unsequenced** gaps contain.
+
+    A fragment's mate gap may hold no intron, one, or several, and which it is cannot be observed — the
+    bases are not there. Each candidate transcript determines exactly one answer (its own introns lying
+    inside the gaps), so the hypotheses are finite and small, and two transcripts implying the same
+    introns are ONE hypothesis. `docs/SPEC_GAP_PATHS.md` §1.
+
+    ⭐ **The empty path is the GENOMIC hypothesis.** Cutting nothing means the gap is real template, i.e.
+    the molecule is gDNA — or nascent RNA, which is the same unspliced span. That is why the accumulator
+    needs no separate "could this be gDNA?" flag and why the nascent shadow transcript is not a candidate:
+    it *is* this hypothesis, and it is always in the set unless something rules it out.
+
+    ⚠ ``introns`` are the IMPLIED ones only. Introns the CIGAR actually stated are cut under **every**
+    hypothesis and are passed to :meth:`Accumulator.deposit` separately, because they are not in doubt.
+    """
+
+    #: The implied introns as ``(start, end)`` pairs. Empty ⇒ the genomic hypothesis.
+    introns: tuple[tuple[int, int], ...] = ()
+    #: The strand the supporting transcripts imply. ⚠ An INFERENCE, and it is only used when no motif was
+    #: sequenced anywhere on the fragment — an observed motif always wins.
+    sj_strand: int = Strand.NONE
+    #: Which candidate transcripts imply this path. The second pass weights hypotheses by their
+    #: abundance, so it needs the ids; the first pass never reads them.
+    supporting_t_inds: tuple[int, ...] = ()
+
+    @property
+    def is_unspliced(self) -> bool:
+        """True for the empty path — cut nothing, so the gap is template."""
+        return not self.introns
+
+
+#: The one hypothesis every fragment has: cut nothing beyond what was sequenced. A fragment with no
+#: unsequenced gap, or with no annotated intron in the gap it has, has exactly this and deposits with no
+#: arbitration at all — ⭐ the degenerate case is the general case, not a branch.
+UNSPLICED_ONLY: tuple[GapHypothesis, ...] = (GapHypothesis(),)
+
+
+class GapResolution(enum.Enum):
+    """⭐ The umbrella, and its subclasses — owner ruling, 2026-08-01.
+
+    Every fragment for which the enumeration produced **at least one non-genomic hypothesis** is counted
+    here: its ``L`` depends on whether a gap intron is cut, so it is a fragment "needing further
+    partitioning". The subclasses are exhaustive and mutually exclusive, so the counts close:
+
+        Sum(GapResolution) == the umbrella total
+        the three DEFERRED_* == qc["deferred_undetermined_gap"]
+
+    ⛔ **This is its own axis and NOT a `splice_type`.** The umbrella cuts ACROSS the splice census: a
+    certified-RNA ``SPLICED_ANNOT`` fragment with an intron in its mate gap needs resolving exactly as
+    much as an ``UNSPLICED`` one does. Putting these values on ``splice_type`` would need two labels per
+    fragment and would break C2.0's property that the splice census sums to the library.
+
+    ⚠ These classify the ARBITRATION, not the deposit. A ``DETERMINED_*`` fragment can still be rejected
+    afterwards as ``TOO_LONG`` — that is a different question and it has its own counter.
+    """
+
+    #: One hypothesis survived and it cuts something: the gap intron is real and ``L`` excludes it.
+    RESOLVED_SPLICED = "gap_resolved_spliced"
+    #: One hypothesis survived and it is the genomic one — every spliced path was ruled out (a path
+    #: longer than ``max_fragment_length`` is not a molecule this chemistry sequences).
+    RESOLVED_UNSPLICED = "gap_resolved_unspliced"
+    #: ⛔ The genomic path against exactly one spliced path. The open question is **RNA or gDNA** — one
+    #: bit, and it is the composition question calibration exists to answer.
+    DEFERRED_RNA_OR_GDNA = "gap_deferred_rna_or_gdna"
+    #: ⛔ Two or more spliced paths and no genomic one: the molecule is certified RNA (gDNA cannot be
+    #: spliced) and the open question is purely **which structure**.
+    DEFERRED_WHICH_INTRONS = "gap_deferred_which_introns"
+    #: ⛔ Both questions at once.
+    DEFERRED_BOTH = "gap_deferred_both"
+
+
+@dataclass(frozen=True, slots=True)
+class DeferredFragment:
+    """A fragment held for the second pass, stored WHOLE.
+
+    ⭐ The fragment is stored, never its consequences. Object ids are large, derived, and would have to be
+    kept consistent with the partition; the fragment is small and replays exactly. The drain re-enters
+    :meth:`Accumulator.deposit` with the chosen hypothesis, so there is no second deposit path, no
+    duplicated crossing logic, and byte-identity with the native accumulator is preserved for free.
+    """
+
+    ref: int
+    start: int
+    end: int
+    align_strand: int
+    sj_strand: int
+    observed_introns: tuple[tuple[int, int], ...]
+    hypotheses: tuple[GapHypothesis, ...]
 
 
 class FragmentPool(enum.IntEnum):
@@ -395,6 +496,12 @@ class Tally:
     #: every fragment was binned by length, the second that every fragment was located in space.
     deposited_lengths: np.ndarray
     qc: dict[str, int] = field(default_factory=dict)
+    #: ⭐ The deferred queue: fragments whose path is not determined, held WHOLE for the second pass.
+    #: ⚠ Not an array, so the parity gate reaches it through :meth:`Tally.deferred_arrays` — the flattening
+    #: is specified here so the two languages still compare one representation.
+    deferred: list[DeferredFragment] = field(default_factory=list)
+    #: ⭐ The umbrella census — one entry per :class:`GapResolution`, incremented at ONE site.
+    gap_resolution: dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def zeros(cls, n_nodes: int, n_edges: int, n_sj: int, max_length: int) -> "Tally":
@@ -427,10 +534,69 @@ class Tally:
             | {
                 "unannotated_introns": 0,
                 "contradictory_sj_strand": 0,
-                "sj_implicit_fragments": 0,
                 "introns_absorbed": 0,
             },
+            deferred=[],
+            gap_resolution={cls.value: 0 for cls in GapResolution},
         )
+
+    def deferred_arrays(self) -> dict[str, np.ndarray]:
+        """The deferred queue flattened to the CSR the payload carries.
+
+        ⭐ Specified HERE, so the readable list above and the native arrays are one representation with
+        one definition rather than two implementations that have to be argued equal. The parity gate
+        compares this.
+
+        Two nested variable-length levels — fragments hold hypotheses, hypotheses hold introns — so there
+        are two offset arrays. Offsets are cumulative and always start at 0, so ``n`` is
+        ``len(offsets) - 1`` and an empty deferred queue is ``[0]``, never ``[]``.
+
+        ⭐ **SORTED, and that is what makes it bit-identical at any worker count.** Every other bank is a
+        sum of integers, and integer addition is associative, so a per-worker merge is exact whatever
+        order the chunks arrived in. The deferred queue is a **list**, and a list has an order — so concatenating
+        per-worker deferred queues would give a different byte sequence at 1, 2, 4 and 8 workers even though the
+        contents are identical. Sorting on the record's own content is the canonical form: two records
+        that tie on this key are identical records, so their relative order cannot be observed.
+        """
+        frag_fields = ("ref", "start", "end", "align_strand", "sj_strand")
+        out: dict[str, list[int]] = {name: [] for name in frag_fields}
+        ordered = sorted(
+            self.deferred,
+            key=lambda f: (
+                f.ref,
+                f.start,
+                f.end,
+                f.align_strand,
+                f.sj_strand,
+                f.observed_introns,
+                tuple((p.introns, p.sj_strand, p.supporting_t_inds) for p in f.hypotheses),
+            ),
+        )
+        out |= {
+            "observed_intron_offsets": [0],
+            "observed_introns": [],
+            "hypothesis_offsets": [0],
+            "hypothesis_sj_strand": [],
+            "hypothesis_intron_offsets": [0],
+            "hypothesis_introns": [],
+            "hypothesis_t_offsets": [0],
+            "hypothesis_t": [],
+        }
+        for frag in ordered:
+            for name in frag_fields:
+                out[name].append(getattr(frag, name))
+            for start, end in frag.observed_introns:
+                out["observed_introns"] += [start, end]
+            out["observed_intron_offsets"].append(len(out["observed_introns"]) // 2)
+            for path in frag.hypotheses:
+                out["hypothesis_sj_strand"].append(int(path.sj_strand))
+                for start, end in path.introns:
+                    out["hypothesis_introns"] += [start, end]
+                out["hypothesis_intron_offsets"].append(len(out["hypothesis_introns"]) // 2)
+                out["hypothesis_t"] += list(path.supporting_t_inds)
+                out["hypothesis_t_offsets"].append(len(out["hypothesis_t"]))
+            out["hypothesis_offsets"].append(len(out["hypothesis_sj_strand"]))
+        return {name: np.asarray(values, dtype=np.int64) for name, values in out.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -464,27 +630,43 @@ class Accumulator:
         ref: int,
         start: int,
         end: int,
-        introns=(),
+        observed_introns=(),
         align_strand: int = Strand.POS,
         sj_strand: int = Strand.NONE,
-        sj_implicit: bool = False,
-        path_ambiguous: bool = False,
+        hypotheses: tuple[GapHypothesis, ...] = UNSPLICED_ONLY,
     ) -> DepositOutcome:
-        """Deposit one fragment; return why it did or did not land.
+        """Deposit one fragment, **or deferred queue it**; return which, and why.
 
         ``[start, end)`` is the full genomic extent — leftmost block start to rightmost block end, mate
-        gap included. ``introns`` are the excised gaps inside it as ``(start, end)`` pairs.
-        ``sj_implicit`` marks a fragment whose splice was **implicit** rather than observed — the
-        ``SPLICE_IMPLICIT`` class, where an annotated intron sits inside the unsequenced mate gap. It
-        deposits normally but is barred from the pure-RNA length pool, because its splice is a product of
-        the very model that pool is used to fit.
+        gap included. ``introns`` are the introns the CIGAR actually stated, as ``(start, end)`` pairs:
+        they are cut under **every** hypothesis, because they are not in doubt.
 
-        ⚠ ``sj_implicit`` says the splice was *not sequenced*; it does **not** say the path is in doubt.
-        A fragment whose candidate transcripts imply **different intron sets** has no determined ``L`` at
-        all, and that is ``path_ambiguous`` — a rejection, not a flag on a deposit. The caller decides it,
-        because only the caller has the candidate-transcript list; the accumulator's job is to make the
-        loss COUNTED rather than silent, which is why it is an outcome here and not a `return` in the
-        scanner.
+        ⭐ **THE ACCUMULATOR IS THE ARBITER** (owner ruling, 2026-08-01). ``hypotheses`` is the set of
+        competing answers about the fragment's *unsequenced* gaps — see :class:`GapHypothesis`, where the empty
+        path is the genomic one. This method filters the set, and then:
+
+        * **exactly one survives** → deposit it. The path is determined and nothing is in doubt;
+        * **two or more survive** → :attr:`DepositOutcome.DEFERRED`, and the fragment goes WHOLE
+          into :attr:`Tally.deferred` for the second pass, which has the fragment-length distribution and
+          the transcript abundances to discriminate with.
+
+        ⛔ The caller used to decide this and pass a bool, and the previous version of this docstring said
+        the accumulator *could not* decide it because only the caller had the candidate list. It could not
+        decide it because the caller **collapsed the answer before handing it over**. Given the set, the
+        decision belongs here — where the outcome was already being reported. The rule is expected to keep
+        changing as the second pass is built, which is the other reason it lives in exactly one place.
+
+        ⭐ **The one filter is ``max_fragment_length``, and it is not a new rule.** Short-read chemistry
+        does not sequence molecules past it — the same statement that makes ``TOO_LONG`` a rejection — so
+        a hypothesis implying a longer ``L`` is not a molecule this library contains. Applying it to the
+        *genomic* hypothesis is exactly the rule "a fragment whose genomic span exceeds the limit must be
+        RNA": the genomic path's ``L`` **is** that span. ⚠ Unless the filter would empty the set, in which
+        case the survivors stand and the ordinary ``TOO_LONG`` rejection counts them, as it does today.
+
+        ⚠ The filter changes CLASSIFICATION, not just cost: hypotheses at 400 and 1200 are determined with
+        it and ambiguous without. It is the second pass's likelihood applied early, at a length where the
+        fragment-length distribution has no mass — defensible, and its false-positive rate is a
+        measurement rather than an assumption.
 
         ⭐ **TWO STRANDS, AND THEY ARE INDEPENDENT.** Every read has the first; only a splice has the second.
 
@@ -515,14 +697,6 @@ class Accumulator:
         if column is None:
             return self._reject(DepositOutcome.STRAND_UNDEFINED)
 
-        # ⚠ SECOND, and the order against the strand is part of the contract, because every fragment must
-        # count exactly ONCE and a fragment can be both. It is filed under the strand, because that is
-        # which denominator stays honest: `dropped_ambiguous_path` sizes the population the SECOND PASS
-        # CAN RECOVER, and a fragment with no genome strand is not recoverable — the second pass resolves
-        # which transcript, not which strand the read aligned to.
-        if path_ambiguous:
-            return self._reject(DepositOutcome.AMBIGUOUS_PATH)
-
         p = self.partition
         first_cut, last_cut = int(p.ref_cut_offsets[ref]), int(p.ref_cut_offsets[ref + 1])
         if last_cut - first_cut < 2:
@@ -534,16 +708,48 @@ class Accumulator:
         if end <= start:
             return self._reject(DepositOutcome.EMPTY)
 
-        # ⚠ ONE definition of L: the total length of the path's segments. Deriving it any other way
-        # invites two formulas for one quantity — see _normalise_introns.
-        introns, absorbed = _normalise_introns(introns, start, end)
-        segments = _segments(start, end, introns)
-        length = sum(b - a for a, b in segments)
+        # ── arbitration: which hypotheses survive, and is exactly one left? ───────────────────────
+        #
+        # ⚠ AFTER the strand and the clip, and the order is part of the contract. Every fragment must
+        # count exactly ONCE and a fragment can fail several ways. A fragment with no genome strand is
+        # not recoverable by the second pass — that pass resolves which PATH, not which strand the read
+        # aligned to — so the strand rejection must win over the deferred queue. And the clip has to come first
+        # because a hypothesis is filtered on its `L`, which is measured after clipping.
+        scored = [
+            (hypothesis, *self._hypothesis_length(start, end, observed_introns, hypothesis))
+            for hypothesis in hypotheses
+        ]
+        survivors = [row for row in scored if row[1] <= self.max_fragment_length] or scored
+        self._record_gap_resolution(hypotheses, survivors)
+        if len(survivors) > 1:
+            self.tally.deferred.append(
+                DeferredFragment(
+                    ref=int(ref),
+                    start=start,
+                    end=end,
+                    align_strand=int(align_strand),
+                    sj_strand=int(sj_strand),
+                    observed_introns=tuple((int(s), int(e)) for s, e in observed_introns),
+                    hypotheses=tuple(hypotheses),
+                )
+            )
+            return self._reject(DepositOutcome.DEFERRED)
+
+        # ⚠ `cut_introns` and not `introns`: these are the introns actually removed from the molecule —
+        # the observed ones UNIONED with the surviving hypothesis's implied ones, normalised and clipped.
+        # Naming them apart from `observed_introns` is what stops the two being confused downstream.
+        hypothesis, length, cut_introns, absorbed = survivors[0]
+        segments = _segments(start, end, cut_introns)
         if length <= 0:
             return self._reject(DepositOutcome.EMPTY)
         if length > self.max_fragment_length:
             return self._reject(DepositOutcome.TOO_LONG)
         self.tally.qc["introns_absorbed"] += absorbed
+        # ⭐ An implied strand is used ONLY when no motif was sequenced anywhere on this fragment. An
+        # observed motif is evidence; an implied strand is an inference from the annotation, and mixing
+        # an inference into an observation is how `primary` went wrong.
+        if sj_strand == Strand.NONE:
+            sj_strand = hypothesis.sj_strand
 
         # ── which annotated junctions does this path use? ─────────────────────────────────────────
         # ⚠ A contradictory motif strand disqualifies the whole fragment's splices, so it is checked once
@@ -559,11 +765,11 @@ class Accumulator:
                 jid
                 for jid in (
                     self._sj_edge_id(ref, intron_start, intron_end, sj_strand)
-                    for intron_start, intron_end in introns
+                    for intron_start, intron_end in cut_introns
                 )
                 if jid >= 0
             ]
-            self.tally.qc["unannotated_introns"] += len(introns) - len(sj_ids)
+            self.tally.qc["unannotated_introns"] += len(cut_introns) - len(sj_ids)
         spliced = bool(sj_ids)
 
         # ⚠ The path's own first and last COVERED base, not the fragment's extent. A leading or trailing
@@ -580,8 +786,6 @@ class Accumulator:
         # agreement. ``length`` is already clipped to the reference and gated by the length limit above.
         t.deposited_lengths[length] += 1
         t.qc[DepositOutcome.DEPOSITED.value] += 1
-        if sj_implicit:
-            t.qc["sj_implicit_fragments"] += 1
 
         # ── crossings, per contiguous SEGMENT of the path ─────────────────────────────────────────
         # A line is crossed iff it lies strictly inside a segment, so per segment the crossed lines are a
@@ -634,7 +838,7 @@ class Accumulator:
             t.node_contained_inv_length_sum[contained_node, column] += quantum_node
             t.node_contained_length_sum[contained_node, column] += length
 
-        pool = self._pool(spliced, sj_implicit, contained_node, sole_line, node_base)
+        pool = self._pool(spliced, contained_node, sole_line, node_base)
         if pool is not None:
             t.pool_lengths[pool, length] += 1
         return DepositOutcome.DEPOSITED
@@ -644,6 +848,45 @@ class Accumulator:
     def _reject(self, outcome: DepositOutcome) -> DepositOutcome:
         self.tally.qc[outcome.value] += 1
         return outcome
+
+    @staticmethod
+    def _hypothesis_length(start, end, observed, path: GapHypothesis):
+        """``(L, normalised introns, absorbed)`` for one hypothesis.
+
+        ⭐ ONE definition of ``L``, and one code path to it, whether the hypothesis wins or is only being
+        scored for the filter. The observed introns and the implied ones are UNIONED — they are disjoint
+        by construction (the enumeration never searches a gap the CIGAR already explained) so this is a
+        union and not a merge, and ``_normalise_introns`` sorts and clips it either way.
+        """
+        introns, absorbed = _normalise_introns(tuple(observed) + path.introns, start, end)
+        return sum(b - a for a, b in _segments(start, end, introns)), introns, absorbed
+
+    def _record_gap_resolution(self, hypotheses, survivors) -> None:
+        """⭐ The umbrella census — the ONE site, so the subclasses cannot drift out of sync.
+
+        Counted only when the enumeration had something to arbitrate: a fragment whose only hypothesis
+        is the unspliced one never had a question to answer, and counting it would quietly make the
+        umbrella's denominator the whole library.
+        """
+        if all(h.is_unspliced for h in hypotheses):
+            return
+        n_spliced = sum(1 for h, *_ in survivors if not h.is_unspliced)
+        unspliced_survives = any(h.is_unspliced for h, *_ in survivors)
+        if len(survivors) == 1:
+            resolution = (
+                GapResolution.RESOLVED_UNSPLICED
+                if unspliced_survives
+                else GapResolution.RESOLVED_SPLICED
+            )
+        elif not unspliced_survives:
+            resolution = (
+                GapResolution.DEFERRED_WHICH_INTRONS
+            )  # certified RNA; only the structure is open
+        elif n_spliced == 1:
+            resolution = GapResolution.DEFERRED_RNA_OR_GDNA  # one bit: was anything spliced at all?
+        else:
+            resolution = GapResolution.DEFERRED_BOTH
+        self.tally.gap_resolution[resolution.value] += 1
 
     @staticmethod
     def _local_node(cuts: np.ndarray, position: int) -> int:
@@ -681,17 +924,28 @@ class Accumulator:
             return k
         return -1
 
-    def _pool(self, spliced, sj_implicit, contained_node, sole_line, node_base):
+    def _pool(self, spliced, contained_node, sole_line, node_base):
         """The one length pool this fragment belongs to, or ``None``.
 
-        Priority, so that every pool stays pure: an OBSERVED splice is unambiguously RNA; a contained
-        fragment is typed by its node; a single-line crossing is a "splash" read typed by its two flank
-        types. Anything else — an exonic contained fragment, a multi-line crossing — is a mixture and
-        enters nothing.
+        Priority, so that every pool stays pure: a splice is unambiguously RNA; a contained fragment is
+        typed by its node; a single-line crossing is a "splash" read typed by its two flank types.
+        Anything else — an exonic contained fragment, a multi-line crossing — is a mixture and enters
+        nothing.
+
+        ⭐ **DETERMINACY, NOT PROVENANCE** (`docs/SPEC_GAP_PATHS.md` §5). There used to be an
+        ``sj_implicit`` condition here barring a fragment whose splice was inferred rather than
+        sequenced, on the grounds that a length partly inferred from the annotation is a product of the
+        model the pool is used to fit. It is gone, and so is the flag: a fragment only reaches this line
+        when **exactly one hypothesis survived**, so its ``L`` is not in doubt at all.
+
+        ⚠ Measured before deleting it, because the two criteria disagree and the disagreement is large:
+        on the chr22 pilot the pool reads **+0.67 % mean / +2.40 % sd** against truth under determinacy
+        and **−9.58 % / −22.46 %** under provenance. Excluding inferred lengths preferentially excludes
+        fragments whose mates sit far apart — **a purity filter on a length pool is a length filter**.
         """
         types = self.partition.node_types
         if spliced:
-            return None if sj_implicit else FragmentPool.RNA_SPLICED
+            return FragmentPool.RNA_SPLICED
         if contained_node >= 0:
             return _CONTAINED_POOL.get(int(types[contained_node]))
         if sole_line >= 0:

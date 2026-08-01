@@ -1,6 +1,6 @@
 # Fragment length — the audit, and the cleanup
 
-    Status: C0, C1, C2 LANDED (2026-07-31 / 2026-08-01). C3 is next; C4 is independent.
+    Status: C0, C1, C2, C2.6 LANDED (2026-07-31 / 2026-08-01). C3 is next; C4 is independent.
             The audit itself is complete and is kept as the record of WHY.
     Trigger: P2's A/B (`LEDGER.md`) — the length likelihood is the first consumer to use the FL models
     as a DISCRIMINANT rather than as a divisor, and it exposed that they disagree with each other.
@@ -28,9 +28,10 @@ calibration-side work lives; that plan's P2 is **blocked on this file's C2 and C
     suite reads 1808 / 23. That 23rd failure is an artefact of how it was run, not a regression --
     and under "a 23rd failure is a regression" it reads as one. Measured 2026-08-01.
 
-⚠ **1824 / 21 is the baseline as of C2** (was 1809 / 22). All 21 are `test_golden_output`, moved twice
-now -- P1's units fix and C2's FL models. **A 22nd failure is a regression.** Do not regenerate the
-goldens to make the count look better -- they move again at C3.
+⚠ **1835 / 21 is the baseline as of C2.6** (was 1824 / 21 at C2, 1809 / 22 before it). All 21 are
+`test_golden_output`, moved **three** times now -- P1's units fix, C2's FL models and C2.6's `L`.
+**A 22nd failure is a regression.** Do not regenerate the goldens to make the count look better -- they
+move again at C3.
 
 ⭐ **The count went DOWN by one: `TODO.md` §7's `test_nrna_double_counting[g20_n0_s100]` now passes**, at
 **0 counts against a limit of 25** (it leaked ~30). ⚠ Do not close §7 on this -- a negative control is
@@ -41,8 +42,9 @@ one-sided (trap 19) and this was not the change's target.
 | **C0** | Prove the accumulator's `L` before promoting it | ✅ **DONE 2026-07-31** | 333,684 exhaustive configs vs an independent set oracle; 7 perturbations, 6 caught, 7th a proven no-op |
 | **C1** | Give the accumulator an unconditional length histogram (`deposited_lengths`) | ✅ **DONE 2026-07-31** | `Σ = Σ node_start_count = qc.deposited`, enforced in the accumulator AND at the payload door; parity gate auto-covers it; 6 perturbations |
 | **C2** | switch every consumer to the accumulator, delete the scanner histogram, re-point `rigel report` | ✅ **DONE 2026-08-01** | all six sub-gates met; `payload_schema_digest` never moved; report keys identical and now sum to the library. `LEDGER.md` |
-| **C2.6** | ⛔ ⭐ **NEXT, AND IT IS A DIGRESSION THE OWNER MANDATED** — search EVERY fragment's unsequenced gaps for introns, not only unspliced ones. Spec: **`docs/SPEC_GAP_INTRONS.md`** | **spec written 2026-08-01, NOT implemented**; owner will implement in a separate session and signal back | the anchor's mass ≥700 bp must reach **0** (truth's ceiling is **713 bp**), `qc.dropped_too_long` must collapse from 6.1 % of deposits, and the gDNA control must NOT move |
-| **C3** | §8.1(b): divide each pool by its own opportunity. ⭐ **The formula is DERIVED and PROVEN** — `docs/JUNCTION_OPPORTUNITY.md` | ⛔ **blocked on C2.6** — its reference anchor is contaminated | ⚠ **G3 SPLITS**: G3a (mean) targets the measured **+0.3 %** achievable with true θ; G3b (sd, ceiling) is **C2.6's gate, not C3's**. §5 |
+| **C2.6** | search EVERY fragment's unsequenced gaps for introns, not only unspliced ones. Spec: **`docs/SPEC_GAP_INTRONS.md`** | ✅ **DONE 2026-08-01** — `LEDGER.md`'s C2.6 entry | ⭐ **G-sd MET: +27.0 % → +1.98 %.** G-tail 85 % met (0.00909 → **0.00137** above the true 713 bp ceiling; `dropped_too_long` **280,558 → 38,309**) and ⛔ **the residual is LOCALISED, not excused** — it is D3, measured at **98.5 %** of what is left. G-gdna control **bit-identical** |
+| **C2.7** | ⭐ **D3 — a mate gap holding MORE THAN ONE annotated intron keeps only the first cut** | ⛔ **the only known mechanism left in the tail.** Measured, not hypothesised: emitting every intron in the gap takes the residual to **0.00002** and `dropped_too_long` to **389** | needs the per-gap unanimity test to compare intron **sets** rather than one intron — that is the real work, and M3 did not do it |
+| **C3** | §8.1(b): divide each pool by its own opportunity. ⭐ **The formula is DERIVED and PROVEN** — `docs/JUNCTION_OPPORTUNITY.md` | ⭐ **UNBLOCKED** — the anchor is clean. ⛔ **But re-run `JUNCTION_OPPORTUNITY.md` §3.2's θ control first**: its +59.8 % sd and +0.3 % mean were measured against the contaminated anchor AND against a pool that has since moved to −9.58 % / −22.46 % | ⚠ **G3 SPLITS**: G3a (mean) targets the measured **+0.3 %** achievable with true θ; G3b (sd, ceiling) was **C2.6's gate** and is met |
 | **C4** | Gate the length discriminant on both pools having data | independent — any time | the `strand_evidence` analogue |
 | **C5** | Delete `ScanCache.fl_rna_counts`; verify D7 | ✅ **DONE 2026-08-01, inside C2** | grep clean; D7 asserted end to end and perturbation-proven (`tests/test_d7_transcript_eff_lengths.py`) |
 | **→** | **re-run `scripts/design/length_likelihood_ab.py`**, then decide `CalibrationConfig.length_likelihood` | after C3 | `SOLVER_OBSERVABLES_PLAN.md` §6.4 |
@@ -59,11 +61,17 @@ block records the ruling and why both offered options were wrong. C2.0 landed on
   mismatch entirely and **55 %** of the sd gap. Nothing downstream reads it yet; that is C2.
 * ✅ **`build_fl_models` anchors on `deposited_lengths`, and the scanner histogram no longer exists** (C2).
   Its only argument is the payload, so a mixed-frame call is unrepresentable rather than discouraged.
-* ⛔ **The residual is TWO defects, not one — measured 2026-08-01, `docs/JUNCTION_OPPORTUNITY.md`.**
+* ⛔ **The residual was TWO defects, not one — measured 2026-08-01, `docs/JUNCTION_OPPORTUNITY.md`.**
   The **+7.7 % mean** IS the junction-opportunity tilt and C3 removes it almost exactly (+8.0 % → +0.3 %
-  against truth, corrected with the true θ). The **+32 % sd is NOT**: correcting perfectly closes only
-  **~19 %** of it, because the rest is an **uncut intron** — present in the *anchor* as well, and so in
-  every consumer including the EM's transcript effective lengths. That is **C2.6**.
+  against truth, corrected with the true θ). The **+32 % sd was NOT**: correcting perfectly closes only
+  **~19 %** of it, because the rest was an **uncut intron** — present in the *anchor* as well, and so in
+  every consumer including the EM's transcript effective lengths. ✅ **C2.6 fixed it**: the anchor's sd
+  against truth is **+1.98 %**, from +26.97 %.
+* ⛔ **BUT C2.6's D1 PUT A NEW BIAS INTO THE POOL, and it is an owner decision.** Removing mixed
+  fragments from `RNA_SPLICED` removes exactly the ones whose mates sit far apart, so the pool the
+  fragment-length model is FITTED FROM is now length-selected **short**: **−9.58 % mean / −22.46 % sd**
+  against truth, where cutting the intron and *keeping* the fragment reads **+0.67 % / +2.40 %**. The
+  purity argument for D1 still holds; what is now known is its price. `LEDGER.md` C2.6.
 
 ---
 

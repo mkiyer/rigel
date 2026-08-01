@@ -77,7 +77,7 @@ def test_every_buffered_fragment_is_ACCEPTED_or_DROPPED_FOR_A_NAMED_REASON(scann
         qc.dropped_too_long
         + qc.dropped_empty
         + qc.dropped_strand_undefined
-        + qc.dropped_ambiguous_path
+        + qc.deferred_undetermined_gap
     )
     assert qc.deposited + dropped == buffer.total_fragments
 

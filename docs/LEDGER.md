@@ -44,6 +44,7 @@ makes attribution meaningful survives. Everything from `I1` on is below in full.
 | **S5.g-2** | ⛔ **the A7 taper A/B: it moves the gDNA fraction by ≤0.0002.** Fact 6's 11.0 % was bp-weighted geometry | below |
 | **B2** | the pilot suite, and B0's verdict on it | below |
 | **B3** | the scan cache — scan once, calibrate many times | below |
+| **C2.6** | ⭐ **gap introns cut on EVERY fragment; the anchor's impossible tail is 85 % gone and the residual is LOCALISED to D3.** ⚠ D1 measured to cost more than it buys | below |
 
 ---
 
@@ -2231,6 +2232,17 @@ same-frame reference instead of a confounded one.
 unanimity-gated and its support stopped at 713 bp. An anchor narrower than the thing it anchors is the
 worst direction for an EB prior: it shrinks the pools toward a distribution that cannot produce them.
 
+> ⛔ **CORRECTION, added 2026-08-01 by C2.6 — THIS ENTRY READ THE SUPPORT CEILING BACKWARDS.**
+> The "713 vs 1000 → 1000 vs 1000, ⭐ entirely" row above is **wrong, and in the reassuring direction**.
+> **713 bp is the library's TRUE maximum**, read from `truth_fragment_lengths.tsv`; **1000 is
+> `max_frag_length`, the clamp**. Definition **B** took its length from the *transcript*, so it could not
+> produce an uncut intron — on the ceiling it was right and `L` was wrong, by an intron that was never
+> sequenced. ⚠ The paragraph immediately above ("the old anchor's sd was too small... its support
+> stopped at 713 bp") is the same error stated a second way. ⭐ The residual "+7.7 % / +32 %" was
+> therefore **not one mechanism**: the mean is the junction tilt (C3's) and the sd was the uncut intron,
+> now fixed — **the anchor's sd against truth is +1.98 %, from +26.97 %.** See the C2.6 entry.
+> ⚠ None of this undoes C1 or C2, whose other reasons all still hold.
+
 ### Gates
 
 | | |
@@ -2461,3 +2473,203 @@ diff**.
 so `tests/calibration/test_fl.py`'s `import tests.native._accumulator_reference` raises and the suite reads
 **1808 / 23**. That 23rd failure is an artefact of the invocation, not a regression — and under the rule
 "a 23rd failure is a regression" it reads as one. `CLAUDE.md`'s command should say `python -m pytest`.
+
+---
+
+## C2.6 — an intron in the mate gap is cut on EVERY fragment, not only unspliced ones (2026-08-01)
+
+    Spec: `docs/SPEC_GAP_INTRONS.md`  ·  Cause and evidence: `docs/JUNCTION_OPPORTUNITY.md` §4
+    Owner ruling, 2026-08-01: *"we should be searching for gap introns within every fragment."*
+    Baseline: e2f41cd0, re-measured in this session — **1824 passed / 21 failed**, all 21 goldens.
+
+C0 proved the accumulator's `L` correct **given its inputs**. This entry is about an input that was
+incomplete. `resolve_context.h` ran implicit-splice detection only on fragments the resolver had already
+classified `SPLICE_UNSPLICED`, so a fragment carrying an observed CIGAR-N splice never had its
+**unsequenced mate gap** examined, and an annotated intron sitting in that gap stayed inside `L`.
+
+⚠ `UNSPLICED` never meant "one aligned block" — an unspliced paired-end fragment already has two blocks
+and a mate gap, and that case always worked. The missed population is **spliced fragments that also have
+a gap intron**, necessarily long because they span two or more introns. That is exactly the tail.
+
+### The change, in three places
+
+| | | |
+|---|---|---|
+| **§2.1** | `collect_implicit_splice_introns` takes the fragment's **observed** introns and drops every gap that matches one by **exact `(start, end)` equality** | ⛔ the trap: the gap finder walks consecutive aligned blocks, so a CIGAR-N intron is a "hole" too |
+| **§2.2** | detection is **unconditional**; the `SPLICE_IMPLICIT` **promotion** stays unspliced-only | `splice_type` feeds scoring, the buffer, strand training and the report's census. This work is about `L`, not classification |
+| **§2.3** | the deposit adapter **unions** the two intron lists (sorted, then de-duplicated), `sj_implicit = !implicit_introns.empty()`, `path_ambiguous = implicit_ambiguous` | the two lists stopped being mutually exclusive |
+
+⭐ **The exact-equality rule is the whole of §1.** `transcript_has_implicit_intron_in_gap` accepts any
+annotated intron inside the gap **± K** (K = 3 by default), so an overlap-based filter — or none — lets a
+**different** nearby intron answer for one the CIGAR already stated. The two then normalise into one
+wider interval and `L` comes out too **SHORT**. Measured under X2 on the hand-written fixture: the
+near-match fragment reads **500 bp where the molecule is 502**.
+
+### ⭐ THE HEADLINE — `gdna_none ss0.99 capture_off`, scored on `truth_fragment_lengths.tsv`
+
+Truth: mean **217.13**, sd **87.41**, ceiling **713 bp**. Every target is read from that file or is a
+control; **nothing here is tuned**.
+
+| the anchor (`deposited_lengths`) | before | after | |
+|---|---|---|---|
+| **sd vs truth** | **+26.97 %** | ⭐ **+1.98 %** | **G-sd — 92.7 % of the excess removed** |
+| mean vs truth | +0.38 % | −1.88 % | ⚠ see the selection effect below |
+| mass **> 713 bp** (truth: **0**) | 0.00909 | ⭐ **0.00137** | **G-tail — 85 % removed, ⛔ not 0** |
+| mass ≥ 700 bp | 0.00965 | 0.00143 | |
+| `qc.dropped_too_long` | **280,558** (5.71 %) | ⭐ **38,309** (0.80 %) | 86 % collapse |
+| `qc.deposited` | 4,636,640 | 4,770,233 | |
+| `qc.dropped_ambiguous_path` | 82,802 | 191,458 | +108,656 — the new deferrals |
+| `qc.sj_implicit_fragments` | 46,700 | 323,654 | 6.8× — the mixed population, seen for the first time |
+| `qc.introns_absorbed` | 0 | **0** | the two lists really are disjoint |
+
+### ⛔ G-gdna — THE CONTROL, AND IT DID NOT MOVE ONE DIGIT
+
+`DNA_INTERGENIC` is pure gDNA and gDNA **has no introns to miss**, so a change there would mean the fix
+reached fragments with no introns — impossible, therefore a bug. On `gdna100 ss0.99 capture_off`:
+
+| | before | after |
+|---|---|---|
+| mean vs truth gdna | −0.5976 % | **−0.5976 %** |
+| sd vs truth gdna | −0.3424 % | **−0.3424 %** |
+| ≥600 / ≥700 bp | 0.00023 / 0.00001 | **0.00023 / 0.00001** |
+| ceiling · n | 785 · 4,527,474 | **785 · 4,527,474** |
+
+⭐ Bit-identical on every statistic **including the fragment count**. The control is clean.
+
+### ⛔ G-tail DID NOT REACH 0 — and the residual is MEASURED, not excused
+
+The gate says the mass above the true ceiling must be 0. It is **0.00137**. Per the spec's §6 the
+remaining mass was measured rather than closed with a constant, by an experiment (**M3**) that emits
+**every** annotated intron inside a gap instead of the first:
+
+| | shipped | M3 (all introns in the gap) |
+|---|---|---|
+| mass > 713 bp | 0.00137 | ⭐ **0.00002** |
+| `dropped_too_long` | 38,309 | ⭐ **389** |
+| anchor sd vs truth | +1.98 % | −1.28 % |
+
+⭐ **D3 is 98.5 % of the residual, and it is now a measurement rather than a hypothesis.**
+`transcript_has_implicit_intron_in_gap` returns the **first** matching intron and stops, so a mate gap
+spanning two annotated introns keeps only one cut. ⚠ M3 is a MEASUREMENT ONLY — it emits multiple
+introns without extending the per-gap unanimity test to compare intron *sets*, which is the real work.
+`TODO.md`-grade, and it is now the only known mechanism left in the tail.
+
+### ⛔ D1 WAS MEASURED AND IT COSTS MORE THAN IT BUYS — the owner's call to revisit
+
+D1 (recommended in the spec, implemented as ruled) removes a mixed fragment from `RNA_SPLICED`, because a
+length partly inferred from the annotation is a product of the model that pool is used to fit. The spec
+required the two effects to be reported **separately**; they were, by an experiment (**M1**) that cuts the
+intron but leaves the fragment in the pool.
+
+| `RNA_SPLICED` vs truth | before | ⭐ M1: intron cut, fragment KEPT | shipped: intron cut, fragment REMOVED |
+|---|---|---|---|
+| **mean** | +8.00 % | ⭐ **+0.67 %** | ⛔ **−9.58 %** |
+| **sd** | +67.35 % | ⭐ **+2.40 %** | ⛔ **−22.46 %** |
+| n | 1,475,626 | 1,609,219 | 1,332,265 |
+| mass > 713 bp | 0.02812 | 0.00364 | 0.00000 |
+
+⭐ **Cutting the intron very nearly fixes the pool (+8.00 → +0.67 mean, +67.35 → +2.40 sd). Removing the
+mixed fragments then breaks it again in the opposite direction**, because the fragments removed are
+exactly the ones whose mates sit far apart — a **length-selection bias**, and the pool is what the
+fragment-length model is fitted from. ⚠ The purity argument for D1 is unchanged and still real; what is
+new is its price, and it is 10 % of the pool's mean. Reversing it is one line
+(`path.sj_implicit = implicit_only`), which is literally M1. **Owner decision.**
+
+### ⚠ The anchor's mean went +0.38 % → −1.88 %, and about half of that is SELECTION
+
+`dropped_ambiguous_path` rose by 108,656 (2.3 % of deposits) because a gap whose candidates disagree now
+defers the fragment even when its *other* splice was observed. Those fragments are long by construction,
+so the surviving anchor is biased short. Experiment **M2** lets them deposit again:
+
+| anchor | shipped | M2 (ambiguous still deposits) |
+|---|---|---|
+| mean vs truth | −1.88 % | **−0.83 %** |
+| sd vs truth | +1.98 % | +4.44 % |
+| mass > 713 bp | 0.00137 | 0.00183 |
+
+⭐ So ~1.05 pp of the −1.88 % is the deferral, not a measurement error — and deferring is the right call
+(`L` genuinely is undetermined), so this is a cost recorded, not a defect.
+
+### Gates
+
+| | | |
+|---|---|---|
+| **U1** | a spliced fragment's mate-gap intron is found, and `L` excludes **both** cuts | ✅ resolver-level and end-to-end (`deposited_lengths` reads exactly `{300, 500, 502}`) |
+| **U2** | the observed CIGAR-N intron is **not** re-derived | ✅ |
+| **U3** | a near match within ±K is **not** substituted, and `L` does not shrink | ✅ |
+| **U4** | `splice_type` does not move; the census is unchanged | ✅ 3 `SPLICED_ANNOT`, 1 `SPLICED_UNANNOT`, **0** implicit |
+| **U5** | a MIXED fragment whose candidates disagree is rejected **and counted** | ✅ |
+| **D1** | only the fully-observed fragment stays in `RNA_SPLICED` | ✅ two-sided |
+| **S3** | byte-identity to `_accumulator_reference.py`, bit-identical at 1/2/4/8 workers | ✅ automatic, unchanged |
+
+⚠ **`_accumulator_reference.py` did NOT move, and that is correct.** The specification describes the
+**accumulator**, whose contract is `FragmentPath` in and a tally out. Which introns a fragment *has* is
+decided upstream, in the resolver and the deposit adapter. `sj_implicit`'s meaning — "this `L` depends on
+an intron that was never sequenced" — is unchanged; what changed is which fragments satisfy it. S3 never
+reopened, and `payload_schema_digest` never moved.
+
+### The perturbations
+
+| | perturbation | result |
+|---|---|---|
+| **X1** | restore the `splice_type == SPLICE_UNSPLICED` gate | ⭐ **6 gates fail** |
+| **X2** | drop the §2.1 observed-gap filter | ⭐ **7 fail**, including U2 and U3. `near` reads **500 bp against 502** — the "L too SHORT" defect, exactly as §1 predicts. ⚠ Also caught by the worker-determinism module's own non-vacuity guard: every spliced fragment re-derives its own observed intron, so **`pool_lengths` sums to zero** |
+| **X3** | `sj_implicit` back on the splice class | ⭐ **D1 alone fails** — precisely the predicted gate, nothing else |
+| **X4** | `path_ambiguous` gated on implicit-only | ⭐ **U5 fails** (+2 collateral) |
+| **X5** | leave the union **unsorted** | ⛔ **NOTHING FAILS — the spec's prediction was wrong** |
+
+### ⛔ X5: the spec predicted S3 byte-identity would break. It does not, and here is why
+
+`normalise_introns` **sorts the intron list itself**, in the C++ accumulator and in
+`_accumulator_reference.py` alike. So an unsorted union cannot change `L`, the segments, the junction ids
+or any tally — the adapter's sort protects exactly one quantity, `qc.introns_absorbed`, by keeping the
+adjacent-pair de-duplication a de-duplication.
+
+⚠ And the case where that matters is close to unreachable: an implied intron can only duplicate an
+observed one under K-slack, and it must then be **non-adjacent** in the concatenation, which needs a
+fragment with ≥2 observed introns *and* a coincident K-slack match. The sort is kept because it costs
+nothing on lists of ≤4 and restores the invariant the de-duplication was written against — but it is
+**defensive, not load-bearing**, and this entry records that rather than claiming a gate it does not have.
+`qc.introns_absorbed == 0` is now asserted on the fixture, which pins §2.1's disjointness claim instead.
+
+### ⚠ Instrumentation added, and why it is not test-only scaffolding
+
+`ResolvedFragment` now exposes `implicit_introns` and `implicit_ambiguous`. Without it **U2 is
+unobservable**: the adapter de-duplicates and the accumulator normalises, so an intron re-derived from an
+observed splice is merged away and "never emitted" is indistinguishable from "emitted and absorbed". §1
+is precisely about the case where they differ, so the emission itself has to be visible. ⛔ It is
+**copied, not moved**, out of `RawResolveResult` — `bam_scanner.cpp` builds the `ResolvedFragment` before
+calling `deposit_to_accumulator(frag, cr)`, so a move would hand the adapter an empty list and silently
+stop cutting every gap intron.
+
+### ⚠ Cost: +8.9 % scan time
+
+`gdna100 ss0.99 capture_off`, 10,000,000 fragments, `OMP_NUM_THREADS=1`, best of three:
+**845.4 ns/fragment against 775.6** with detection gated back to unspliced-only. Detection is now a
+binary search per candidate per gap on every fragment rather than on the unspliced ones.
+
+### Blast radius, as predicted
+
+`payload_schema_digest` **did not move** (no new field), so the 8 pilot caches stayed loadable — ⛔ but
+their contents were wrong and all 8 were rebuilt (45.6 s). The goldens move a **third** time. ⛔ Still
+regenerate **once**, after C3, **twice, and diff**.
+
+### Suite
+
+**1835 passed / 21 failed**, from a re-measured baseline of **1824 / 21** in the same session.
+Accounting is exact: `1824 + 4 (U1–U4, resolver level) + 7 (end-to-end module) = 1835`. All 21 failures
+are `test_golden_output`, unchanged in identity from the C2 entry.
+
+### Files touched
+
+`src/rigel/native/resolve_context.h` · `src/rigel/native/bam_scanner.cpp` · `src/rigel/native/resolve.cpp`
+· `scripts/design/fl_anchor_gap.py` (the truth panel: G-tail, G-sd, G-gdna, D1, D3) ·
+`tests/test_implicit_splice.py` · `tests/native/test_gap_introns_are_cut.py` (new)
+
+### ⚠ A correction to the record, carried from `JUNCTION_OPPORTUNITY.md` §4.4
+
+**C1 read the support ceiling backwards.** It recorded the anchor's ceiling moving from the scanner's
+**713** to the accumulator's **1000** as "the support ceiling mismatch closed entirely". ⛔ **713 was the
+library's true maximum**, to the base pair; 1000 is `max_frag_length`, the clamp. The deleted definition
+**B** took its length from the *transcript*, so it could not produce an uncut intron — on this one
+question it was right and `L` was wrong. ⚠ That does not undo C2, whose reasons all still hold.

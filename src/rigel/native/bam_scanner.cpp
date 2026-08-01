@@ -420,6 +420,7 @@ struct WorkerState {
     // transcript sets.
     rigel::accumulator::DepositScratch deposit_scratch;
     std::vector<IntronBlock>           deposit_introns;
+    std::vector<rigel::accumulator::GapHypothesis> gap_hypotheses;
 
     WorkerState(int32_t n_transcripts, int64_t /*unused*/)
         : scratch(n_transcripts) {}
@@ -1503,54 +1504,69 @@ private:
                     return;
                 }
 
-                const bool implicit = (st == SPLICE_IMPLICIT);
-                // Cut introns: the explicit CIGAR-N introns, or the implied ones for an implicit splice.
-                // Mutually exclusive — implicit is only detected when no CIGAR-N exists.
-                const std::vector<IntronBlock>& cut_introns =
-                    implicit ? cr.implicit_introns : f.introns;
-
-                // This reference's introns, de-duplicated on (start, end).
+                // ── the introns the CIGAR actually stated ─────────────────────────────────────
                 //
-                // ⛔ Restricting to `ref_id` is DEFINITIONAL, not defensive: `FragmentPath::introns` means
-                // the introns on the reference being deposited, and `Accumulator::deposit` normalises them
-                // by coordinate alone — it never looks at `ref_id`. `fragment_genomic_spans` filtered here
-                // too, and that filter has to survive its deletion.
+                // ⭐ These are cut under EVERY hypothesis, so they are NOT part of the hypothesis set.
+                // ⚠ The union with a hypothesis's implied introns happens inside `deposit`, where L is
+                // defined — the adapter used to do it here, and doing it in two places is how one
+                // quantity ends up with two formulas.
+                //
+                // ⛔ Restricting to `ref_id` is DEFINITIONAL, not defensive: `OfferedFragment` means the
+                // introns on the reference being deposited, and `Accumulator::deposit` normalises them by
+                // coordinate alone — it never looks at `ref_id`.
                 //
                 // ⚠ The de-duplication is for the QC denominator, NOT to prevent double-crediting a
                 // junction: `parse_bam_record` reads XS/ts once per RECORD and `build_fragment` keys
                 // `intron_set` on (ref, start, end, strand), so a pair where one mate carries the tag
-                // yields the same intron twice. Those duplicates cannot double-credit — the deposit builds
-                // its junction ids from the NORMALISED list, where an exact duplicate merges — but each one
-                // would increment `introns_absorbed`, on every spliced pair from such an aligner, and that
-                // counter is a reported denominator. `intron_set` is ordered, so consecutive comparison is
-                // enough; ⛔ it must NOT be re-keyed or merged in `build_fragment`, which shares it with
-                // the resolver (measured: merging demotes SPLICED_ANNOT to SPLICED_UNANNOT and widens
-                // `t_inds`).
-                auto& introns = ws.deposit_introns;
-                introns.clear();
-                for (const auto& intron : cut_introns) {
+                // yields the same intron twice. Each duplicate would increment `introns_absorbed`, on
+                // every spliced pair from such an aligner, and that counter is reported. `intron_set` is
+                // ordered, so consecutive comparison is enough; ⛔ it must NOT be re-keyed or merged in
+                // `build_fragment`, which shares it with the resolver (measured: merging demotes
+                // SPLICED_ANNOT to SPLICED_UNANNOT and widens `t_inds`).
+                auto& observed = ws.deposit_introns;
+                observed.clear();
+                for (const auto& intron : f.introns) {
                     if (intron.ref_id != ref_id) continue;
-                    if (!introns.empty() && introns.back().start == intron.start &&
-                        introns.back().end == intron.end) {
+                    if (!observed.empty() && observed.back().start == intron.start &&
+                        observed.back().end == intron.end) {
                         continue;
                     }
-                    introns.push_back(intron);
+                    observed.push_back(intron);
+                }
+
+                // ── every explanation of the unsequenced gaps ─────────────────────────────────────
+                //
+                // ⭐ The resolver enumerated them; the ACCUMULATOR arbitrates. This only re-presents the
+                // flat CSR as the span-of-spans the deposit interface takes. There is always at least
+                // one — the unspliced hypothesis — so `deposit` never receives an empty set.
+                auto& hypotheses = ws.gap_hypotheses;
+                hypotheses.clear();
+                for (std::int32_t h = 0; h < cr.n_gap_hypotheses(); ++h) {
+                    const std::int32_t i0 = cr.gap_intron_offsets[h];
+                    const std::int32_t t0 = cr.gap_supporting_offsets[h];
+                    hypotheses.push_back({
+                        cr.gap_introns.data() + i0,
+                        static_cast<std::size_t>(cr.gap_intron_offsets[h + 1] - i0),
+                        cr.gap_sj_strand[h],
+                        cr.gap_supporting.data() + t0,
+                        static_cast<std::size_t>(cr.gap_supporting_offsets[h + 1] - t0),
+                    });
                 }
 
                 // The molecule's extent on this reference: leftmost block start to rightmost block end,
                 // MATE GAP INCLUDED, because the gap is part of the molecule and must count toward L.
                 //
                 // ⛔ A fragment with blocks on MORE THAN ONE REFERENCE deposits nothing. It is not one
-                // molecule (design §3.3), and a `FragmentPath` cannot express it — it carries one extent on
-                // one cut axis. The shipped code had no such check on the intergenic path: it computed a
-                // span per reference and deposited ALL of them onto `exons.front().ref_id`, so chr7
-                // coordinates landed on chr1's cut axis. `ws.span_ref` recorded which reference each span
-                // belonged to and **nothing ever read it**, which is how that survived.
+                // molecule (design §3.3), and an `OfferedFragment` cannot express it — it carries one
+                // extent on one cut axis. The shipped code had no such check on the intergenic path: it
+                // computed a span per reference and deposited ALL of them onto `exons.front().ref_id`, so
+                // chr7 coordinates landed on chr1's cut axis. `ws.span_ref` recorded which reference each
+                // span belonged to and **nothing ever read it**, which is how that survived.
                 //
                 // ⚠ Deliberately narrow: this tests multi-reference, NOT `cr.chimera_type`. That field is
                 // also set for single-reference *cis* chimeras, which the intergenic path deposits today,
                 // and stopping those is a change to WHAT COUNTS AS A FRAGMENT — its own arm with its own
-                // before/after measurement, per the plan's TODO. This step's gate is byte-identity.
+                // before/after measurement, per the plan's TODO.
                 std::int64_t start = 0, end = 0;
                 bool any = false;
                 for (const auto& block : f.exons) {
@@ -1566,30 +1582,21 @@ private:
                 }
                 if (!any) { ws.stats.n_deposit_not_offered++; return; }
 
-                rigel::accumulator::FragmentPath path;
-                path.start = start;
-                path.end = end;
-                path.introns = introns.data();
-                path.n_introns = introns.size();
-                path.align_strand = cr.align_strand;
-                // ⚠ For an explicit splice this is the sequenced motif's strand, straight from `cr`. For an
-                // IMPLICIT one the motif was never sequenced, so the strand comes from the transcript that
-                // implied the intron — which is legitimate precisely because `path_ambiguous` below
-                // guarantees the candidates agreed on that intron, hence on that transcript's answer.
-                path.sj_strand = cr.sj_strand;
-                if (implicit) {
-                    path.sj_strand = STRAND_NONE;
-                    for (const auto& implied : cr.implicit_introns)
-                        path.sj_strand |= implied.strand;
-                }
-                path.sj_implicit = implicit;
-                // ⛔ The candidates disagree about which introns the mate gaps hold, so L — and with it
-                // both quanta, the length pool and the set of lines crossed — is undetermined. It deposits
-                // on nothing and is counted; the second pass separates the candidates by fragment length
-                // and strand. Design §9.1.
-                path.path_ambiguous = implicit && cr.implicit_ambiguous;
+                rigel::accumulator::OfferedFragment offered;
+                offered.start = start;
+                offered.end = end;
+                offered.observed_introns = observed.data();
+                offered.n_observed_introns = observed.size();
+                offered.align_strand = cr.align_strand;
+                // ⚠ The OBSERVED motif strand, straight from `cr`. A hypothesis carries the strand its
+                // supporting transcripts imply, and `deposit` falls back to that only when nothing was
+                // sequenced. An observed motif is evidence; an implied strand is an inference from the
+                // annotation, and mixing an inference into an observation is how `primary` went wrong.
+                offered.sj_strand = cr.sj_strand;
+                offered.hypotheses = hypotheses.data();
+                offered.n_hypotheses = hypotheses.size();
 
-                ws.acc_set->at(ref_id).deposit(path, ws.deposit_scratch);
+                ws.acc_set->at(ref_id).deposit(offered, ws.deposit_scratch);
             };
 
         // Per-worker state refs
@@ -2127,10 +2134,9 @@ private:
             qc_dict["dropped_too_long"]         = qc.dropped_too_long;
             qc_dict["dropped_empty"]            = qc.dropped_empty;
             qc_dict["dropped_strand_undefined"] = qc.dropped_strand_undefined;
-            qc_dict["dropped_ambiguous_path"]   = qc.dropped_ambiguous_path;
+            qc_dict["deferred_undetermined_gap"] = qc.deferred_undetermined_gap;
             qc_dict["unannotated_introns"]      = qc.unannotated_introns;
             qc_dict["contradictory_sj_strand"]  = qc.contradictory_sj_strand;
-            qc_dict["sj_implicit_fragments"]    = qc.sj_implicit_fragments;
             qc_dict["introns_absorbed"]         = qc.introns_absorbed;
             cal["qc"] = qc_dict;
 
@@ -2722,7 +2728,8 @@ NB_MODULE(_bam_impl, m) {
         using rigel::accumulator::Accumulator;
         using rigel::accumulator::ContiguousEdge;
         using rigel::accumulator::DepositScratch;
-        using rigel::accumulator::FragmentPath;
+        using rigel::accumulator::GapHypothesis;
+        using rigel::accumulator::OfferedFragment;
         using rigel::accumulator::JunctionEdge;
         using rigel::accumulator::Node;
         using rigel::accumulator::kNFragmentPools;
@@ -2907,10 +2914,9 @@ NB_MODULE(_bam_impl, m) {
                 qc["dropped_too_long"]         = c.dropped_too_long;
                 qc["dropped_empty"]            = c.dropped_empty;
                 qc["dropped_strand_undefined"] = c.dropped_strand_undefined;
-                qc["dropped_ambiguous_path"]   = c.dropped_ambiguous_path;
+                qc["deferred_undetermined_gap"] = c.deferred_undetermined_gap;
                 qc["unannotated_introns"]      = c.unannotated_introns;
                 qc["contradictory_sj_strand"]  = c.contradictory_sj_strand;
-                qc["sj_implicit_fragments"]    = c.sj_implicit_fragments;
                 qc["introns_absorbed"]         = c.introns_absorbed;
                 return qc;
             })
@@ -2933,35 +2939,68 @@ NB_MODULE(_bam_impl, m) {
                     nb::iterable introns,
                     int32_t align_strand,
                     int32_t sj_strand,
-                    bool sj_implicit,
-                    bool path_ambiguous) {
-                     std::vector<IntronBlock> blocks;
+                    nb::object hypotheses) {
+                     // ⚠ Reads attributes off whatever it is handed, so the parity gate can pass the
+                     // SAME `GapHypothesis` objects to the specification and to this. A binding with its
+                     // own tuple convention would be a second representation to keep in step.
+                     std::vector<IntronBlock> observed;
                      for (nb::handle item : introns) {
                          auto pair = nb::cast<nb::tuple>(item);
-                         blocks.push_back({0,
-                                           nb::cast<int32_t>(pair[0]),
-                                           nb::cast<int32_t>(pair[1]),
-                                           0});
+                         observed.push_back({0, nb::cast<int32_t>(pair[0]),
+                                             nb::cast<int32_t>(pair[1]), 0});
                      }
-                     FragmentPath path;
-                     path.start = start;
-                     path.end = end;
-                     path.introns = blocks.data();
-                     path.n_introns = blocks.size();
-                     path.align_strand = align_strand;
-                     path.sj_strand = sj_strand;
-                     path.sj_implicit = sj_implicit;
-                     path.path_ambiguous = path_ambiguous;
+                     // ⛔ Reserved up front: the GapHypothesis spans below point INTO these vectors, so a
+                     // reallocation while filling them would dangle every pointer already handed out.
+                     std::vector<IntronBlock> implied;
+                     std::vector<int32_t> supporting;
+                     std::size_t n_implied = 0, n_supporting = 0;
+                     for (nb::handle h : hypotheses) {
+                         n_implied += nb::len(nb::getattr(h, "introns"));
+                         n_supporting += nb::len(nb::getattr(h, "supporting_t_inds"));
+                     }
+                     implied.reserve(n_implied);
+                     supporting.reserve(n_supporting);
+
+                     std::vector<GapHypothesis> spans;
+                     for (nb::handle h : hypotheses) {
+                         const std::size_t i0 = implied.size(), t0 = supporting.size();
+                         for (nb::handle item : nb::getattr(h, "introns")) {
+                             auto pair = nb::cast<nb::tuple>(item);
+                             implied.push_back({0, nb::cast<int32_t>(pair[0]),
+                                                nb::cast<int32_t>(pair[1]), 0});
+                         }
+                         for (nb::handle t : nb::getattr(h, "supporting_t_inds"))
+                             supporting.push_back(nb::cast<int32_t>(t));
+                         spans.push_back({nullptr, implied.size() - i0,
+                                          nb::cast<int32_t>(nb::getattr(h, "sj_strand")),
+                                          nullptr, supporting.size() - t0});
+                         spans.back().introns = reinterpret_cast<const IntronBlock*>(i0);
+                         spans.back().supporting_t = reinterpret_cast<const int32_t*>(t0);
+                     }
+                     for (auto& span : spans) {  // offsets -> pointers, now that nothing more will grow
+                         span.introns = implied.data() + reinterpret_cast<std::size_t>(span.introns);
+                         span.supporting_t =
+                             supporting.data() + reinterpret_cast<std::size_t>(span.supporting_t);
+                     }
+
+                     OfferedFragment offered;
+                     offered.start = start;
+                     offered.end = end;
+                     offered.observed_introns = observed.data();
+                     offered.n_observed_introns = observed.size();
+                     offered.align_strand = align_strand;
+                     offered.sj_strand = sj_strand;
+                     offered.hypotheses = spans.data();
+                     offered.n_hypotheses = spans.size();
                      return std::string(
-                         rigel::accumulator::outcome_key(a.deposit(path, binding_scratch)));
+                         rigel::accumulator::outcome_key(a.deposit(offered, binding_scratch)));
                  },
                  nb::arg("start"),
                  nb::arg("end"),
-                 nb::arg("introns") = nb::tuple(),
+                 nb::arg("observed_introns") = nb::tuple(),
                  nb::arg("align_strand") = STRAND_POS,
                  nb::arg("sj_strand") = STRAND_NONE,
-                 nb::arg("sj_implicit") = false,
-                 nb::arg("path_ambiguous") = false)
+                 nb::arg("hypotheses"))
 
             // Element-wise sum of `other` into this accumulator — the per-worker merge the parallel scan
             // performs internally, exposed so the DETERMINISM contract can be tested directly: shard one

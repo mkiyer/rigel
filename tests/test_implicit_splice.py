@@ -26,6 +26,9 @@ Geometry layout (0-based half-open, after GTF parse)
   g5 (+):
     t_one_exon: exons (59999,60500)                 single-exon, spans whole locus
     t_split   : exons (59999,60100),(60399,60500)   intron (60100,60399)
+  g6 (+):  ⭐ SPEC_GAP_INTRONS.md — the MIXED fragment: an observed splice AND a gap intron
+    t_mixed   : exons (62000,62200),(62400,62600),(62800,63000)
+                introns (62200,62400) and (62600,62800)
 """
 
 from __future__ import annotations
@@ -58,6 +61,9 @@ IMPLICIT_GTF = textwrap.dedent("""\
     chr1\ttest\texon\t60000\t60500\t.\t+\t.\tgene_id "g5"; transcript_id "t_one_exon"; gene_name "G5"; gene_type "protein_coding";
     chr1\ttest\texon\t60000\t60100\t.\t+\t.\tgene_id "g5"; transcript_id "t_split"; gene_name "G5"; gene_type "protein_coding";
     chr1\ttest\texon\t60400\t60500\t.\t+\t.\tgene_id "g5"; transcript_id "t_split"; gene_name "G5"; gene_type "protein_coding";
+    chr1\ttest\texon\t62001\t62200\t.\t+\t.\tgene_id "g6"; transcript_id "t_mixed"; gene_name "G6"; gene_type "protein_coding";
+    chr1\ttest\texon\t62401\t62600\t.\t+\t.\tgene_id "g6"; transcript_id "t_mixed"; gene_name "G6"; gene_type "protein_coding";
+    chr1\ttest\texon\t62801\t63000\t.\t+\t.\tgene_id "g6"; transcript_id "t_mixed"; gene_name "G6"; gene_type "protein_coding";
 """)
 
 
@@ -250,3 +256,107 @@ class TestImplicitSpliceDiscriminant:
         result = _resolve(index, exons=(_exon(1050, 1100), _exon(53050, 53100)))
         assert result is not None
         assert result.splice_type == int(SpliceType.UNSPLICED)
+
+
+class TestGapIntronsAreSearchedWhateverTheSpliceType:
+    """⭐ `docs/SPEC_GAP_INTRONS.md` — detection runs on EVERY fragment, not only unspliced ones.
+
+    An annotated intron sitting in a fragment's **unsequenced mate gap** used to be looked for only when
+    the resolver had already called the fragment ``SPLICE_UNSPLICED``, so a fragment carrying an observed
+    CIGAR-N splice kept that intron inside ``L``. Measured on the chr22 pilot: the library's longest
+    molecule is 713 bp and the tally reported 0.97 % of its mass at ≥ 700 bp.
+
+    ⛔ **The gate is on the SPLICE TYPE, never on the block count.** An unspliced paired-end fragment
+    already has two blocks and a mate gap and always worked; the missed population is *spliced* fragments
+    that ALSO have a gap intron, which are long by construction because they span two or more introns.
+
+    Geometry (g6/t_mixed, 0-based half-open):
+
+        exons     [62000,62200)   [62400,62600)   [62800,63000)
+        introns             [62200,62400)   [62600,62800)
+        fragment  ---=====|~~~~~~~~~|=====|.........|=====---
+                  block1   OBSERVED  block2  mate gap  block3
+                           CIGAR-N            holds [62600,62800)
+    """
+
+    OBSERVED = (62200, 62400)  #: sequenced as CIGAR-N; the detector must NOT re-derive it
+    IMPLIED = (62600, 62800)  #: never sequenced; lies inside the mate gap and must be cut from L
+
+    #: block1 · block2 · block3, with [62200,62400) crossed by an observed CIGAR-N splice and
+    #: [62500,62900) an unsequenced mate gap.
+    MIXED_BLOCKS = ((62100, 62200), (62400, 62500), (62900, 63000))
+
+    #: The same molecule with the observed splice landing 2 bp INSIDE the annotated donor, so the
+    #: observed intron is UNANNOTATED and the annotated one sits within the ±K anchor tolerance of it.
+    NEAR_MISS_BLOCKS = ((62100, 62202), (62400, 62500), (62900, 63000))
+    NEAR_MISS_OBSERVED = (62202, 62400)
+
+    @staticmethod
+    def _emitted(result):
+        """Every hypothesis as a list of ``(start, end)`` pairs. ``[]`` is the unspliced one."""
+        return [[(int(i[1]), int(i[2])) for i in path] for path in result.gap_hypotheses]
+
+    def _resolve_mixed(self, index, blocks, observed):
+        return _resolve(
+            index,
+            exons=tuple(_exon(*b) for b in blocks),
+            introns=(GenomicInterval("chr1", observed[0], observed[1], Strand.POS),),
+        )
+
+    # U1 — the headline: a SPLICED fragment's gap intron is found.
+    def test_U1_a_spliced_fragment_has_the_intron_in_its_mate_gap_found(self, with_tolerance):
+        index, set_k = with_tolerance
+        set_k(3)
+        result = self._resolve_mixed(index, self.MIXED_BLOCKS, self.OBSERVED)
+        assert result is not None
+        assert self._emitted(result) == [[self.IMPLIED]], (
+            "the annotated intron inside the unsequenced mate gap was not found on a fragment that "
+            "also carries an observed CIGAR-N splice — SPEC_GAP_INTRONS.md §0"
+        )
+        assert result.n_gap_hypotheses == 1
+
+    # U2 — ⛔ the observed CIGAR-N gap is NOT re-derived (SPEC §1).
+    def test_U2_the_observed_cigar_n_intron_is_not_re_derived(self, with_tolerance):
+        index, set_k = with_tolerance
+        set_k(3)
+        result = self._resolve_mixed(index, self.MIXED_BLOCKS, self.OBSERVED)
+        assert result is not None
+        assert all(self.OBSERVED not in path for path in self._emitted(result)), (
+            "the gap finder walks consecutive aligned blocks, so a CIGAR-N intron is also a 'hole'. "
+            "It must be dropped by EXACT (start, end) equality against the observed introns"
+        )
+
+    # U3 — ⛔ THE NEAR-MATCH TRAP. A different, nearby annotated intron must not be substituted.
+    def test_U3_a_near_match_to_the_observed_gap_is_not_substituted(self, with_tolerance):
+        index, set_k = with_tolerance
+        set_k(3)
+        result = self._resolve_mixed(index, self.NEAR_MISS_BLOCKS, self.NEAR_MISS_OBSERVED)
+        assert result is not None
+        # ⭐ The genuine mate-gap intron is still found — without this the assertion below would pass
+        # on a detector that never ran at all.
+        #
+        # ⚠ TWO hypotheses, and the empty one is not an accident: this fragment's observed splice is
+        # UNANNOTATED, so it does NOT certify the molecule as RNA (an unannotated CIGAR-N may be a
+        # misalignment, which is why `FragmentPool.RNA_SPLICED` requires an ANNOTATED junction). The
+        # unspliced — genomic — hypothesis therefore stays live and the accumulator will defer.
+        assert self._emitted(result) == [[self.IMPLIED], []], (
+            "the observed gap [62202,62400) is within the K=3 anchor tolerance of the ANNOTATED intron "
+            "[62200,62400), so dropping only exact matches is what stops a DIFFERENT intron being "
+            "substituted for it. Two overlapping introns then normalise into one wider one and L comes "
+            "out too SHORT — SPEC_GAP_INTRONS.md §1"
+        )
+
+    # U4 — the classification does not move. This work is about L, not about labelling.
+    def test_U4_splice_type_does_not_move_when_a_gap_intron_is_found(self, with_tolerance):
+        index, set_k = with_tolerance
+        set_k(3)
+        result = self._resolve_mixed(index, self.MIXED_BLOCKS, self.OBSERVED)
+        assert result is not None
+        assert result.splice_type == int(SpliceType.SPLICED_ANNOT), (
+            "detection is unconditional but the SPLICE_IMPLICIT PROMOTION stays unspliced-only: "
+            "splice_type feeds scoring, the buffer, the strand training and the report's census, and "
+            "re-labelling would silently move mass between reported categories"
+        )
+        near = self._resolve_mixed(index, self.NEAR_MISS_BLOCKS, self.NEAR_MISS_OBSERVED)
+        assert near is not None
+        assert near.splice_type == int(SpliceType.SPLICED_UNANNOT)

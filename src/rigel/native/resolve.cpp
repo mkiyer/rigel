@@ -63,6 +63,9 @@ NB_MODULE(_resolve_impl, m) {
         .def_prop_ro("t_inds", &ResolvedFragment::get_t_inds)
         .def_prop_ro("frag_lengths", &ResolvedFragment::get_frag_lengths)
         .def_prop_ro("overlap_bp", &ResolvedFragment::get_overlap_bp)
+        .def_ro("n_gap_hypotheses", &ResolvedFragment::n_gap_hypotheses)
+        .def_prop_ro("gap_hypotheses",
+                     &ResolvedFragment::get_gap_hypotheses)
         ;
 
     // --- FragmentAccumulator ---

@@ -1,6 +1,16 @@
 # The junction pool's opportunity function — the derivation, and what measuring it found
 
-    Status: DERIVATION COMPLETE, 2026-08-01. ⛔ NO CODE WRITTEN. Two owner decisions at §8.
+    Status: DERIVATION COMPLETE, 2026-08-01. ⛔ NO CODE WRITTEN.
+    ⭐ ENTRY POINT IS NOW `docs/PLAN_TWO_PASS.md`. This work is step S4 there, and it rides on the
+      SAME two-pass structure as the gap-path work — §0 of that file is why.
+    ⚠ §3's numbers PREDATE the side buffer and must be re-measured after the drain — PLAN_TWO_PASS §2.4.
+    ⭐ §8 D1 IS ANSWERED: the uncut intron jumped the queue and LANDED as C2.6 (`LEDGER.md`).
+    ⛔ **§3's MEASUREMENTS ARE NOW STALE AND MUST BE RE-RUN.** Every number in §3 was taken against the
+      contaminated anchor (sd +27.0 %, now +1.98 %) and against an `RNA_SPLICED` pool that has since
+      moved from +8.00 % / +67.35 % to −9.58 % / −22.46 % against truth. ⚠ In particular §3.2's θ
+      control — "corrected, TRUE θ → +0.3 % mean / +59.8 % sd" — is scored on both of those, so
+      **C3's real target is not knowable from this file any more.** §4's diagnosis stands; §1's
+      derivation and its 48,648-configuration proof are untouched.
     Asked for: `ACCUMULATOR_DESIGN.md` §8.1(b) gives the opportunity for two of the three pools and
     leaves the junction pool as "the transcript-level count" — and §"what the accumulator will not
     decide" defers it as *"a fragment-length-model question, downstream of the tally."* So C3's

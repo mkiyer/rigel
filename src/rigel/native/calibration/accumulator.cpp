@@ -20,11 +20,70 @@ void DepositCounters::merge_from(const DepositCounters& other) noexcept {
     dropped_too_long         += other.dropped_too_long;
     dropped_empty            += other.dropped_empty;
     dropped_strand_undefined += other.dropped_strand_undefined;
-    dropped_ambiguous_path   += other.dropped_ambiguous_path;
+    deferred_undetermined_gap += other.deferred_undetermined_gap;
     unannotated_introns      += other.unannotated_introns;
     contradictory_sj_strand  += other.contradictory_sj_strand;
-    sj_implicit_fragments    += other.sj_implicit_fragments;
     introns_absorbed         += other.introns_absorbed;
+}
+
+void GapCensus::merge_from(const GapCensus& other) noexcept {
+    resolved_spliced       += other.resolved_spliced;
+    resolved_unspliced     += other.resolved_unspliced;
+    deferred_rna_or_gdna   += other.deferred_rna_or_gdna;
+    deferred_which_introns += other.deferred_which_introns;
+    deferred_both          += other.deferred_both;
+}
+
+void DeferredFragments::append(const OfferedFragment& fragment,
+                               std::int64_t clipped_start,
+                               std::int64_t clipped_end) {
+    start.push_back(clipped_start);
+    end.push_back(clipped_end);
+    align_strand.push_back(fragment.align_strand);
+    sj_strand.push_back(fragment.sj_strand);
+    for (std::size_t i = 0; i < fragment.n_observed_introns; ++i) {
+        observed_introns.push_back(fragment.observed_introns[i].start);
+        observed_introns.push_back(fragment.observed_introns[i].end);
+    }
+    observed_intron_offsets.push_back(static_cast<std::int64_t>(observed_introns.size() / 2));
+    for (std::size_t h = 0; h < fragment.n_hypotheses; ++h) {
+        const GapHypothesis& hypothesis = fragment.hypotheses[h];
+        hypothesis_sj_strand.push_back(hypothesis.sj_strand);
+        for (std::size_t i = 0; i < hypothesis.n_introns; ++i) {
+            hypothesis_introns.push_back(hypothesis.introns[i].start);
+            hypothesis_introns.push_back(hypothesis.introns[i].end);
+        }
+        hypothesis_intron_offsets.push_back(static_cast<std::int64_t>(hypothesis_introns.size() / 2));
+        for (std::size_t i = 0; i < hypothesis.n_supporting; ++i)
+            hypothesis_t.push_back(hypothesis.supporting_t[i]);
+        hypothesis_t_offsets.push_back(static_cast<std::int64_t>(hypothesis_t.size()));
+    }
+    hypothesis_offsets.push_back(static_cast<std::int64_t>(hypothesis_sj_strand.size()));
+}
+
+void DeferredFragments::merge_from(const DeferredFragments& other) {
+    // ⚠ CSR concatenation: the values append, and the offsets append SHIFTED by this queue's current
+    // extent. Every offset array starts at 0, so `other`'s leading 0 is skipped rather than added.
+    const auto shift_append = [](std::vector<std::int64_t>& into,
+                                 const std::vector<std::int64_t>& from) {
+        const std::int64_t base = into.back();
+        for (std::size_t i = 1; i < from.size(); ++i) into.push_back(base + from[i]);
+    };
+    start.insert(start.end(), other.start.begin(), other.start.end());
+    end.insert(end.end(), other.end.begin(), other.end.end());
+    align_strand.insert(align_strand.end(), other.align_strand.begin(), other.align_strand.end());
+    sj_strand.insert(sj_strand.end(), other.sj_strand.begin(), other.sj_strand.end());
+    shift_append(observed_intron_offsets, other.observed_intron_offsets);
+    observed_introns.insert(observed_introns.end(),
+                            other.observed_introns.begin(), other.observed_introns.end());
+    shift_append(hypothesis_offsets, other.hypothesis_offsets);
+    hypothesis_sj_strand.insert(hypothesis_sj_strand.end(),
+                                other.hypothesis_sj_strand.begin(), other.hypothesis_sj_strand.end());
+    shift_append(hypothesis_intron_offsets, other.hypothesis_intron_offsets);
+    hypothesis_introns.insert(hypothesis_introns.end(),
+                              other.hypothesis_introns.begin(), other.hypothesis_introns.end());
+    shift_append(hypothesis_t_offsets, other.hypothesis_t_offsets);
+    hypothesis_t.insert(hypothesis_t.end(), other.hypothesis_t.begin(), other.hypothesis_t.end());
 }
 
 // ============================================================================
@@ -170,17 +229,25 @@ namespace {
 /// zero-length exon, which is physically impossible, so no single molecule can legitimately use both.
 ///
 /// ⚠ Sort the RAW pairs and clip inside the loop, in that order, to match the spec exactly.
-std::int64_t normalise_introns(const IntronBlock* introns,
-                               std::size_t n_introns,
+std::int64_t normalise_introns(const IntronBlock* observed,
+                               std::size_t n_observed,
+                               const IntronBlock* implied,
+                               std::size_t n_implied,
                                std::int64_t start,
                                std::int64_t end,
                                std::vector<std::pair<std::int64_t, std::int64_t>>& out)
 {
+    // ⚠ Both ranges are emplaced BEFORE the sort, so the union needs no second scratch vector and the
+    // caller never has to think about which list came first.
     out.clear();
-    out.reserve(n_introns);
-    for (std::size_t i = 0; i < n_introns; ++i) {
-        out.emplace_back(static_cast<std::int64_t>(introns[i].start),
-                         static_cast<std::int64_t>(introns[i].end));
+    out.reserve(n_observed + n_implied);
+    for (std::size_t i = 0; i < n_observed; ++i) {
+        out.emplace_back(static_cast<std::int64_t>(observed[i].start),
+                         static_cast<std::int64_t>(observed[i].end));
+    }
+    for (std::size_t i = 0; i < n_implied; ++i) {
+        out.emplace_back(static_cast<std::int64_t>(implied[i].start),
+                         static_cast<std::int64_t>(implied[i].end));
     }
     std::sort(out.begin(), out.end());
 
@@ -221,45 +288,109 @@ void build_segments(std::int64_t start,
 
 }  // namespace
 
-DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& scratch) {
+std::int64_t Accumulator::hypothesis_length(const OfferedFragment& fragment,
+                                           const GapHypothesis& hypothesis,
+                                           std::int64_t start,
+                                           std::int64_t end,
+                                           DepositScratch& scratch,
+                                           std::int64_t* absorbed) const
+{
+    // ⚠ ONE definition of L: the total length of the path's segments. Deriving it any other way invites
+    // two formulas for one quantity, and the obvious second formula -- (end - start) - sum(intron) --
+    // disagrees by up to 1.5x on overlapping introns and goes NEGATIVE on a wide overlap.
+    //
+    // The observed introns and the implied ones are UNIONED. They are disjoint by construction -- the
+    // enumeration never searches a gap the CIGAR already explained -- so this is a union and not a merge,
+    // and `normalise_introns` sorts and clips it either way.
+    *absorbed = normalise_introns(fragment.observed_introns, fragment.n_observed_introns,
+                                  hypothesis.introns, hypothesis.n_introns,
+                                  start, end, scratch.introns);
+    build_segments(start, end, scratch.introns, scratch.segments);
+    std::int64_t length = 0;
+    for (const auto& [a, b] : scratch.segments) length += b - a;
+    return length;
+}
+
+DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScratch& scratch) {
     // ⚠ FIRST, before any geometry: the strand is a property of the fragment alone, and one with no
     // single genome strand has no column in any bank. Booking it anyway would credit it to the WRONG
     // strand; rejecting it here is what lets the loss be counted instead of vanishing.
-    const int column = strand_column(path.align_strand);
+    //
+    // ⚠ And it must win over the deferral, because every fragment counts exactly ONCE and a fragment can
+    // be both. The queue sizes the population the SECOND PASS CAN RECOVER, and a fragment with no genome
+    // strand is not recoverable -- that pass resolves which PATH, not which strand the read aligned to.
+    const int column = strand_column(fragment.align_strand);
     if (column < 0) {
         ++counters_.dropped_strand_undefined;
         return DepositOutcome::kStrandUndefined;
-    }
-    // ⚠ SECOND, and the order against the strand is part of the contract, because every fragment must
-    // count exactly ONCE and a fragment can be both. It is filed under the strand, because that is which
-    // denominator stays honest: `dropped_ambiguous_path` sizes the population the SECOND PASS CAN RECOVER,
-    // and a fragment with no genome strand is not recoverable -- the second pass resolves which
-    // transcript, not which strand the read aligned to.
-    if (path.path_ambiguous) {
-        ++counters_.dropped_ambiguous_path;
-        return DepositOutcome::kAmbiguousPath;
     }
     if (cuts_.size() < 2) {
         ++counters_.dropped_empty;
         return DepositOutcome::kEmpty;
     }
 
-    // Clip to the reference. L is the CLIPPED length, so the placement count stays consistent.
-    const std::int64_t start = std::max(path.start, cuts_.front());
-    const std::int64_t end   = std::min(path.end,   cuts_.back());
+    // Clip to the reference. L is the CLIPPED length, so the placement count stays consistent -- and the
+    // clip must precede arbitration, because a hypothesis is filtered on its L.
+    const std::int64_t start = std::max(fragment.start, cuts_.front());
+    const std::int64_t end   = std::min(fragment.end,   cuts_.back());
     if (end <= start) {
         ++counters_.dropped_empty;
         return DepositOutcome::kEmpty;
     }
 
-    // ⚠ ONE definition of L: the total length of the path's segments. Deriving it any other way invites
-    // two formulas for one quantity, and the obvious second formula -- (end - start) - sum(intron) --
-    // disagrees by up to 1.5x on overlapping introns and goes NEGATIVE on a wide overlap.
-    const std::int64_t absorbed =
-        normalise_introns(path.introns, path.n_introns, start, end, scratch.introns);
-    build_segments(start, end, scratch.introns, scratch.segments);
-    std::int64_t length = 0;
-    for (const auto& [a, b] : scratch.segments) length += b - a;
+    // ── arbitration: which hypotheses survive, and is exactly one left? ───────────────────────────
+    //
+    // ⭐ Short-read chemistry does not sequence molecules past `max_length_` -- the same statement that
+    // makes kTooLong a rejection -- so a hypothesis implying a longer L is not a molecule this library
+    // contains. Applied to the UNSPLICED hypothesis this is exactly "a fragment whose genomic span
+    // exceeds the limit must be RNA": that hypothesis's L IS the span. There is no second rule.
+    // ⚠ Unless the filter would empty the set, in which case the survivors stand and the ordinary
+    // kTooLong rejection counts them, as it did before any of this.
+    auto& survivors = scratch.survivors;
+    survivors.clear();
+    bool any_spliced_hypothesis = false;
+    for (std::size_t h = 0; h < fragment.n_hypotheses; ++h) {
+        std::int64_t absorbed = 0;
+        const std::int64_t candidate_length =
+            hypothesis_length(fragment, fragment.hypotheses[h], start, end, scratch, &absorbed);
+        any_spliced_hypothesis |= !fragment.hypotheses[h].is_unspliced();
+        survivors.push_back({h, candidate_length, absorbed});
+    }
+    const std::size_t n_offered = survivors.size();
+    survivors.erase(std::remove_if(survivors.begin(), survivors.end(),
+                                   [this](const ScoredHypothesis& s) {
+                                       return s.length > max_length_;
+                                   }),
+                    survivors.end());
+    if (survivors.empty()) {
+        for (std::size_t h = 0; h < n_offered; ++h) {
+            std::int64_t absorbed = 0;
+            const std::int64_t candidate_length =
+                hypothesis_length(fragment, fragment.hypotheses[h], start, end, scratch, &absorbed);
+            survivors.push_back({h, candidate_length, absorbed});
+        }
+    }
+    if (any_spliced_hypothesis) record_gap_resolution(fragment, survivors);
+
+    if (survivors.size() > 1) {
+        deferred_.append(fragment, start, end);
+        ++counters_.deferred_undetermined_gap;
+        return DepositOutcome::kDeferred;
+    }
+
+    // The single survivor. ⚠ Re-normalised rather than cached per hypothesis: one extra normalise on the
+    // winner is cheaper than carrying a normalised list for every candidate, and it keeps ONE code path
+    // from a hypothesis to its introns.
+    const GapHypothesis& chosen = fragment.hypotheses[survivors.front().index];
+    std::int64_t absorbed = 0;
+    const std::int64_t length =
+        hypothesis_length(fragment, chosen, start, end, scratch, &absorbed);
+
+    // ⭐ An implied strand is used ONLY when no motif was sequenced anywhere on this fragment. An observed
+    // motif is evidence; an implied strand is an inference from the annotation, and mixing an inference
+    // into an observation is how `primary` went wrong.
+    const std::int32_t sj_strand =
+        fragment.sj_strand == STRAND_NONE ? chosen.sj_strand : fragment.sj_strand;
 
     if (length <= 0) {
         ++counters_.dropped_empty;
@@ -275,7 +406,7 @@ DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& sc
     // ⚠ Resolved BEFORE the crossing loop, because `spliced` chooses which bank the crossings land in.
     auto& sj_ids = scratch.sj_ids;
     sj_ids.clear();
-    if (path.sj_strand == STRAND_AMBIGUOUS) {
+    if (sj_strand == STRAND_AMBIGUOUS) {
         // The motif tag is read once per RECORD, so AMBIGUOUS means the mates DISAGREED about one
         // molecule: contradictory evidence, not missing evidence. Trust no splice, and count it on its own
         // denominator -- folding it into `unannotated_introns` would poison the one metric whose job is
@@ -283,7 +414,7 @@ DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& sc
         ++counters_.contradictory_sj_strand;
     } else {
         for (const auto& [intron_start, intron_end] : scratch.introns) {
-            const std::int64_t id = sj_edge_id(intron_start, intron_end, path.sj_strand);
+            const std::int64_t id = sj_edge_id(intron_start, intron_end, sj_strand);
             if (id >= 0) sj_ids.push_back(static_cast<std::int32_t>(id));
         }
         counters_.unannotated_introns +=
@@ -304,7 +435,6 @@ DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& sc
     // the reference and gated by the length limit above.
     deposited_lengths_[static_cast<std::size_t>(length)] += 1u;
     ++counters_.deposited;
-    if (path.sj_implicit) ++counters_.sj_implicit_fragments;
 
     // ── crossings, per contiguous SEGMENT of the path ─────────────────────────────────────────────
     // A line is crossed iff it lies strictly inside a segment, so per segment the crossed lines are a
@@ -372,7 +502,7 @@ DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& sc
     }
 
     if (!pool_lengths_.empty()) {
-        const std::int64_t pool = fragment_pool(spliced, path.sj_implicit, contained_node, sole_line);
+        const std::int64_t pool = fragment_pool(spliced, contained_node, sole_line);
         if (pool >= 0) {
             pool_lengths_[static_cast<std::size_t>(pool) * (static_cast<std::size_t>(max_length_) + 1) +
                           static_cast<std::size_t>(length)] += 1;
@@ -381,19 +511,44 @@ DepositOutcome Accumulator::deposit(const FragmentPath& path, DepositScratch& sc
     return DepositOutcome::kDeposited;
 }
 
+void Accumulator::record_gap_resolution(const OfferedFragment& fragment,
+                                        const std::vector<ScoredHypothesis>& survivors) noexcept
+{
+    // ⭐ The ONE site, so the subclasses cannot drift out of sync. The caller has already established
+    // that at least one hypothesis was not the unspliced one -- a fragment that never had a question to
+    // answer is not in this population, and counting it would quietly make the umbrella's denominator
+    // the whole library.
+    std::int64_t n_spliced = 0;
+    bool unspliced_survives = false;
+    for (const ScoredHypothesis& s : survivors) {
+        if (fragment.hypotheses[s.index].is_unspliced()) unspliced_survives = true;
+        else ++n_spliced;
+    }
+    if (survivors.size() == 1) {
+        if (unspliced_survives) ++gap_census_.resolved_unspliced;
+        else                    ++gap_census_.resolved_spliced;
+    } else if (!unspliced_survives) {
+        ++gap_census_.deferred_which_introns;   // certified RNA; only the structure is open
+    } else if (n_spliced == 1) {
+        ++gap_census_.deferred_rna_or_gdna;     // one bit: was anything spliced at all?
+    } else {
+        ++gap_census_.deferred_both;
+    }
+}
+
 std::int64_t Accumulator::fragment_pool(bool spliced,
-                                        bool sj_implicit,
                                         std::int64_t contained_node,
                                         std::int64_t sole_line) const noexcept
 {
     // Priority, so that every pool stays pure: an OBSERVED splice is unambiguously RNA; a contained
     // fragment is typed by its node; a single-line crossing is a "splash" read typed by its two flanks.
     // Anything else -- an exonic contained fragment, a multi-line crossing -- is a mixture and enters
-    // nothing. An IMPLICIT splice enters nothing either: it was never sequenced, so certifying it as RNA
-    // would make the pure-RNA pool depend on the very length model it is used to fit.
-    if (spliced) {
-        return sj_implicit ? -1 : static_cast<std::int64_t>(FragmentPool::kRnaSpliced);
-    }
+    // nothing.
+    //
+    // ⭐ DETERMINACY, NOT PROVENANCE: a fragment reaches here only when exactly ONE hypothesis survived,
+    // so its L is not in doubt however it was arrived at. See the declaration for the measurement that
+    // deleted the old `sj_implicit` bar.
+    if (spliced) return static_cast<std::int64_t>(FragmentPool::kRnaSpliced);
     if (contained_node >= 0) {
         switch (node_types_[static_cast<std::size_t>(contained_node)]) {
             case kTypeIntergenic: return static_cast<std::int64_t>(FragmentPool::kDnaIntergenic);
@@ -434,6 +589,9 @@ void Accumulator::merge_from(const Accumulator& other) {
             std::to_string(junctions_.size()) + ", other has " +
             std::to_string(other.junctions_.size()) + ")");
     }
+
+    gap_census_.merge_from(other.gap_census_);
+    deferred_.merge_from(other.deferred_);
 
     // Integer addition is associative, so the result is identical at any worker count, on any machine.
     for (std::size_t i = 0; i < nodes_.size(); ++i) {

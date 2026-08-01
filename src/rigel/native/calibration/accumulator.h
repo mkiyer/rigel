@@ -168,7 +168,8 @@ enum class DepositOutcome : std::uint8_t {
     kTooLong         = 1,  // L above the fragment-length limit
     kEmpty           = 2,  // no path left after clipping to the reference
     kStrandUndefined = 3,  // align_strand is NONE or AMBIGUOUS, so it names no column
-    kAmbiguousPath   = 4,  // the candidates imply >1 intron set, so L is undetermined (design §9.1)
+    kDeferred        = 4,  // >1 surviving hypothesis: the gap is undetermined, so the fragment
+                           //   is held WHOLE for the second pass (docs/SPEC_GAP_PATHS.md §0)
 };
 
 /// The QC counter this outcome increments — and the specification's own key for it, so the two cannot
@@ -179,38 +180,117 @@ inline const char* outcome_key(DepositOutcome outcome) noexcept {
         case DepositOutcome::kTooLong:         return "dropped_too_long";
         case DepositOutcome::kEmpty:           return "dropped_empty";
         case DepositOutcome::kStrandUndefined: return "dropped_strand_undefined";
-        case DepositOutcome::kAmbiguousPath:   return "dropped_ambiguous_path";
+        case DepositOutcome::kDeferred:        return "deferred_undetermined_gap";
     }
     return "";
 }
 
-/// One fragment, as the scanner has it. `[start, end)` is the full genomic extent -- leftmost block
-/// start to rightmost block end, MATE GAP INCLUDED, because the gap is part of the molecule.
+/// ONE hypothesis about what a fragment's UNSEQUENCED gaps contain.
 ///
-/// ⚠ `introns` need not be sorted, disjoint, or de-duplicated; `deposit` normalises them. That is
-/// deliberate: a real BAM produces overlapping introns when the mates disagree about an acceptor, and
+/// A mate gap may hold no intron, one, or several, and which it is cannot be observed -- the bases are
+/// not there. Each candidate transcript determines exactly one answer (its own introns lying inside the
+/// gaps), so the hypotheses are finite and small, and two transcripts implying the same introns are ONE
+/// hypothesis. docs/SPEC_GAP_PATHS.md §1.
+///
+/// ⭐ THE EMPTY HYPOTHESIS IS THE UNSPLICED ONE, and it is the genomic explanation: cutting nothing means
+/// the gap is real template, i.e. the molecule is gDNA -- or nascent RNA, which is the same unspliced
+/// span. That is why the accumulator needs no separate "could this be gDNA?" flag, and why the nascent
+/// shadow transcript is not a candidate: it IS this hypothesis.
+///
+/// ⚠ `introns` are the IMPLIED ones only. Introns the CIGAR actually stated are cut under EVERY
+/// hypothesis and live on `OfferedFragment` instead, because they are not in doubt.
+struct GapHypothesis {
+    const IntronBlock*  introns;        // implied; empty => the unspliced (genomic) hypothesis
+    std::size_t         n_introns;
+    std::int32_t        sj_strand;      // ⚠ an INFERENCE; an observed motif always wins
+    const std::int32_t* supporting_t;   // candidate transcripts implying this path -- the second pass
+    std::size_t         n_supporting;   //   weights hypotheses by their abundance; pass one never reads
+
+    bool is_unspliced() const noexcept { return n_introns == 0; }
+};
+
+/// One fragment offered to the accumulator, with every explanation of its unsequenced gaps.
+///
+/// ⭐ Named for the population the conservation identity counts:
+/// `deposited + deferred + dropped_* == offered`.
+///
+/// `[start, end)` is the full genomic extent -- leftmost block start to rightmost block end, MATE GAP
+/// INCLUDED, because the gap is part of the molecule.
+///
+/// ⚠ `observed_introns` need not be sorted, disjoint, or de-duplicated; `deposit` normalises them. That
+/// is deliberate: a real BAM produces overlapping introns when the mates disagree about an acceptor, and
 /// normalising inside is what lets L be DEFINED as the total of the path's segments rather than computed
 /// by a second, independent formula that disagrees with it.
-struct FragmentPath {
-    std::int64_t       start;
-    std::int64_t       end;
-    const IntronBlock* introns;
-    std::size_t        n_introns;
-    std::int32_t       align_strand;
-    std::int32_t       sj_strand;
+///
+/// ⚠ `hypotheses` must never be empty -- a fragment with no unsequenced gap still has ONE hypothesis,
+/// the unspliced one. The degenerate case is the general case, not a branch.
+struct OfferedFragment {
+    std::int64_t         start;
+    std::int64_t         end;
+    const IntronBlock*   observed_introns;   // CIGAR-N: cut under EVERY hypothesis
+    std::size_t          n_observed_introns;
+    std::int32_t         align_strand;
+    std::int32_t         sj_strand;
+    const GapHypothesis* hypotheses;
+    std::size_t          n_hypotheses;
+};
 
-    /// SPLICE_IMPLICIT: the splice was never sequenced, so it is barred from the pure-RNA pool. This is a
-    /// flag on a DEPOSIT -- such a fragment overlaps an annotated intron and matches in every other way.
-    bool               sj_implicit;
+/// ⭐ The umbrella census (owner ruling, 2026-08-01): every fragment whose enumeration produced at least
+/// one non-unspliced hypothesis, partitioned by how the gap was RESOLVED. Exhaustive and mutually
+/// exclusive, so `sum(GapCensus) == the umbrella` and the three deferred_* == `deferred_undetermined_gap`.
+///
+/// ⛔ Its own axis, NOT a `splice_type`. The umbrella cuts ACROSS the splice census: a certified-RNA
+/// SPLICED_ANNOT fragment with an intron in its mate gap needs resolving exactly as much as an UNSPLICED
+/// one does, so putting these on `splice_type` would need two labels per fragment.
+///
+/// ⚠ These classify the ARBITRATION, not the deposit: a resolved_* fragment can still be rejected
+/// afterwards as TOO_LONG, which is a different question with its own counter.
+struct GapCensus {
+    std::int64_t resolved_spliced        = 0;  // one survivor, and it cuts something
+    std::int64_t resolved_unspliced      = 0;  // one survivor, the unspliced one -- the rest were too long
+    std::int64_t deferred_rna_or_gdna    = 0;  // unspliced vs ONE spliced path: was anything spliced?
+    std::int64_t deferred_which_introns  = 0;  // >= 2 spliced paths, none unspliced: certified RNA
+    std::int64_t deferred_both           = 0;  // both questions at once
 
-    /// ⛔ The candidate transcripts imply DIFFERENT INTRON SETS, so `L`, both quanta, the pool bin and the
-    /// set of crossed lines are all undetermined. Deposits on NOTHING and is counted; the second pass
-    /// resolves it with the fragment length and the strand. Design §9.1.
-    ///
-    /// ⚠ Not the same thing as `sj_implicit`, and the accumulator cannot decide it -- only the caller has
-    /// the candidate list. It is an outcome here rather than a `return` in the scanner so that the loss is
-    /// COUNTED instead of vanishing.
-    bool               path_ambiguous;
+    void merge_from(const GapCensus& other) noexcept;
+};
+
+/// ⭐ Fragments whose gap has more than one surviving explanation, held WHOLE for the second pass
+/// (`ACCUMULATOR_DESIGN.md` §9 calls this the side buffer).
+///
+/// The FRAGMENT is stored, never its consequences. Object ids are large, derived, and would have to be
+/// kept consistent with the partition; the fragment is small and replays exactly. The drain re-enters
+/// `Accumulator::deposit` with the chosen hypothesis, so there is no second deposit path, no duplicated
+/// crossing logic, and byte-identity with the specification is preserved for free.
+///
+/// Two nested variable-length levels -- fragments hold hypotheses, hypotheses hold introns -- so there
+/// are two offset arrays. Offsets are cumulative and start at 0, so an empty queue is `{0}`, never `{}`.
+///
+/// ⛔ ORDER IS OBSERVABLE HERE AND NOWHERE ELSE. Every other bank is a sum of integers and integer
+/// addition is associative, so a per-worker merge is exact whatever order the chunks arrived in. This is
+/// a LIST. Concatenating per-worker queues gives a different byte sequence at 1, 2, 4 and 8 workers with
+/// identical contents -- so the EXPORT sorts on the record's own content, exactly as
+/// `Tally.deferred_arrays()` does in the specification. Two records that tie are identical records.
+struct DeferredFragments {
+    std::vector<std::int64_t> start, end;
+    std::vector<std::int32_t> align_strand, sj_strand;
+    std::vector<std::int64_t> observed_intron_offsets{0};  // in PAIRS, into observed_introns
+    std::vector<std::int64_t> observed_introns;            // flat (start, end)
+    std::vector<std::int64_t> hypothesis_offsets{0};       // into the per-hypothesis arrays below
+    std::vector<std::int64_t> hypothesis_sj_strand;
+    std::vector<std::int64_t> hypothesis_intron_offsets{0};
+    std::vector<std::int64_t> hypothesis_introns;
+    std::vector<std::int64_t> hypothesis_t_offsets{0};
+    std::vector<std::int64_t> hypothesis_t;
+
+    std::size_t size() const noexcept { return start.size(); }
+
+    /// Append one fragment with every hypothesis it arrived with. `start`/`end` are the CLIPPED extent,
+    /// because that is what the drain must replay.
+    void append(const OfferedFragment& fragment, std::int64_t start, std::int64_t end);
+
+    /// Concatenate `other`, shifting its offsets. ⚠ Order is not canonical until the export sorts.
+    void merge_from(const DeferredFragments& other);
 };
 
 /// Reusable scratch so `deposit` allocates nothing on the per-fragment path.
@@ -218,10 +298,17 @@ struct FragmentPath {
 /// ⭐ Measured on the shipped accumulator: the one per-fragment `std::vector` cost 22.8 ns, 18 % of the
 /// deposit -- and it is invisible to any profiler that samples by function, because the time is
 /// attributed to `malloc`. One instance per worker; the vectors keep their capacity across fragments.
+struct ScoredHypothesis {
+    std::size_t  index;     // into OfferedFragment::hypotheses
+    std::int64_t length;    // L under this hypothesis
+    std::int64_t absorbed;  // introns normalise merged away while computing it
+};
+
 struct DepositScratch {
     std::vector<std::pair<std::int64_t, std::int64_t>> introns;   // normalised: sorted, disjoint, clipped
     std::vector<std::pair<std::int64_t, std::int64_t>> segments;  // the path, introns cut out
     std::vector<std::int32_t>                         sj_ids;     // annotated junction edges used
+    std::vector<ScoredHypothesis>                     survivors;  // arbitration, per fragment
 };
 
 /// The QC denominators. Not optional and not derivable afterwards: every conservation statement
@@ -231,10 +318,13 @@ struct DepositCounters {
     std::int64_t dropped_too_long       = 0;
     std::int64_t dropped_empty          = 0;
     std::int64_t dropped_strand_undefined = 0;
-    std::int64_t dropped_ambiguous_path = 0;  // >1 implied intron set; the second pass owes these
+    //: ⭐ >1 surviving hypothesis, so the gap is undetermined. ⚠ NOT dropped -- the fragment is held
+    //: WHOLE in `DeferredFragments` and the identity is deposited + deferred + dropped_* == offered.
+    //: A name saying `dropped` for a population that is kept is how a recoverable loss gets read as
+    //: a permanent one.
+    std::int64_t deferred_undetermined_gap = 0;
     std::int64_t unannotated_introns    = 0;  // observed introns with no annotated junction
     std::int64_t contradictory_sj_strand = 0;  // the mates' motif tags disagreed; no splice trusted
-    std::int64_t sj_implicit_fragments  = 0;  // SPLICE_IMPLICIT: the splice was not sequenced
     std::int64_t introns_absorbed       = 0;  // overlapping or abutting introns merged away
 
     void merge_from(const DepositCounters& other) noexcept;
@@ -315,6 +405,8 @@ public:
     int                 max_length()        const noexcept { return max_length_; }
 
     const DepositCounters& counters() const noexcept { return counters_; }
+    const GapCensus&       gap_census() const noexcept { return gap_census_; }
+    const DeferredFragments& deferred() const noexcept { return deferred_; }
 
     /// Index of the node containing `position`, clamped into [0, n_nodes - 1].
     ///
@@ -324,17 +416,39 @@ public:
     std::int64_t node_of_pos(std::int64_t position) const noexcept;
 
     /// Deposit one fragment. Allocates nothing: `scratch` is reused across calls.
-    DepositOutcome deposit(const FragmentPath& path, DepositScratch& scratch);
+    DepositOutcome deposit(const OfferedFragment& fragment, DepositScratch& scratch);
 
     /// Element-wise sum of `other` into this accumulator. Requires identical cut positions.
     void merge_from(const Accumulator& other);
 
 private:
     /// The one length pool this fragment belongs to, or -1 for none.
+    ///
+    /// ⭐ DETERMINACY, NOT PROVENANCE. There used to be an `sj_implicit` argument barring a fragment
+    /// whose splice was inferred rather than sequenced. It is gone: a fragment reaches this line only
+    /// when exactly ONE hypothesis survived, so its L is not in doubt however it was arrived at.
+    /// Measured before deleting it -- the pool reads +0.67 % mean / +2.40 % sd against truth under
+    /// determinacy and -9.58 % / -22.46 % under provenance, because barring inferred lengths
+    /// preferentially bars fragments whose mates sit far apart. A purity filter on a length pool is a
+    /// length filter. docs/SPEC_GAP_PATHS.md §5.
     std::int64_t fragment_pool(bool spliced,
-                               bool sj_implicit,
                                std::int64_t contained_node,
                                std::int64_t sole_line) const noexcept;
+
+    /// L for one hypothesis: its implied introns UNIONED with the observed ones, normalised and clipped
+    /// into [start, end). Leaves the normalised list in `scratch.introns`. ⭐ ONE definition of L and one
+    /// code path to it, whether the hypothesis wins or is only being scored for the length filter.
+    std::int64_t hypothesis_length(const OfferedFragment& fragment,
+                                   const GapHypothesis& hypothesis,
+                                   std::int64_t start,
+                                   std::int64_t end,
+                                   DepositScratch& scratch,
+                                   std::int64_t* absorbed) const;
+
+    /// ⭐ The umbrella census, at its ONE site. Called only when the fragment had a question to answer,
+    /// i.e. at least one hypothesis was not the unspliced one.
+    void record_gap_resolution(const OfferedFragment& fragment,
+                               const std::vector<ScoredHypothesis>& survivors) noexcept;
 
     /// The annotated junction-edge id for one intron, or -1 if it is not an annotated junction.
     std::int64_t sj_edge_id(std::int64_t intron_start,
@@ -359,6 +473,8 @@ private:
     std::vector<std::int64_t>  pool_lengths_;      // kNFragmentPools * (max_length + 1), or empty
     std::vector<std::uint32_t> deposited_lengths_; // max_length + 1 -- C1, unconditional given deposit
     DepositCounters            counters_;
+    GapCensus                  gap_census_;
+    DeferredFragments          deferred_;
 };
 
 // ============================================================================

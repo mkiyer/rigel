@@ -101,10 +101,11 @@ class ScanQC:
     dropped_too_long: int  # L above --max-fragment-length
     dropped_empty: int  # no path left after clipping to the reference
     dropped_strand_undefined: int  # align_strand named no column, so there was none to credit
-    dropped_ambiguous_path: int  # the candidates imply >1 intron set, so L is undetermined (§9.1)
+    #: ⭐ >1 surviving hypothesis, so the fragment's gap is undetermined. ⚠ NOT dropped — it is held
+    #: WHOLE for the second pass, and the identity is `deposited + deferred + dropped_* == offered`.
+    deferred_undetermined_gap: int
     unannotated_introns: int  # observed introns with no annotated junction
     contradictory_sj_strand: int  # the mates' motif tags disagreed; no splice trusted
-    sj_implicit_fragments: int  # SPLICE_IMPLICIT: deposited, but barred from the pure-RNA pool
     introns_absorbed: int  # overlapping or abutting introns merged away
 
     @classmethod
