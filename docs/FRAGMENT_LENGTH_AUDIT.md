@@ -9,6 +9,23 @@
 **This file is the critical path.** It was reached from `SOLVER_OBSERVABLES_PLAN.md`, which is where the
 calibration-side work lives; that plan's P2 is **blocked on this file's C2 and C3**.
 
+    WHERE THE WORK LIVES
+      branch  fragment-length-gold-standard        (⚠ NOT merged to main)
+      commit  d045d820  "the prior is a fragment count, and L becomes the gold standard"
+              = P1 + P2(off) + C0 + C1, one commit -- LEDGER.md has the per-step narrative
+      main    is one commit BEHIND. Fast-forward when you want it:
+              git checkout main && git merge --ff-only fragment-length-gold-standard
+
+    THE STANDING CHECK -- run this before and after every step
+      source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
+      pip install --no-build-isolation -e ".[dev]"      # after ANY src/rigel/native/ change
+      pytest tests/ -q                                  # expect 1809 / 22
+      ruff check src/ tests/ scripts/                   # ⚠ never `ruff format scripts/`
+
+⚠ **1809 / 22 is the baseline, and 22 is the CORRECT number right now**: 21 are `test_golden_output`
+moving numerically after P1's units fix, plus `TODO.md` §7's owner call. **A 23rd failure is a
+regression.** Do not regenerate the goldens to make the count look better -- they move again at C2/C3.
+
 | | step | status | gate |
 |---|---|---|---|
 | **C0** | Prove the accumulator's `L` before promoting it | ✅ **DONE 2026-07-31** | 333,684 exhaustive configs vs an independent set oracle; 7 perturbations, 6 caught, 7th a proven no-op |
@@ -239,6 +256,20 @@ loses two of five categories. Doing it inside C2 also means the schema digest mo
 | **C2.3** | Re-point the report: FL histograms from `deposited_lengths` + the 5 pools; splice breakdown from C2.0's counters | `cli.py:355-390` |
 | **C2.4** | Delete `ScanCache.fl_global_counts` **and** `fl_rna_counts` (D5) | `scan_cache.py` |
 | **C2.5** | Verify **D7**: `compute_all_transcript_eff_lens` reads the corrected RNA pmf. **Check, do not assume** — that path reaches every transcript's effective length in the EM | `pipeline.py:438` |
+
+#### The gate for each C2 sub-step — so a half-finished C2 is visible, not silent
+
+| | gate, written FIRST and verified failing |
+|---|---|
+| **C2.0** | byte-identity to the reference on the new counters (the parity gate picks them up automatically off `dataclasses.fields(Tally)`); a QC-sum invariant in the same form as C1's: the five splice-type counts sum to `qc.deposited`. ⚠ Perturb: drop one category and watch the sum fire |
+| **C2.1** | ⭐ **the anchor really moved** — assert `build_fl_models`' `global_pmf` equals `payload.deposited_lengths` normalised, NOT `frag_length_models.global_model.counts`. Then re-measure §2's table: the mean/sd gap to the RNA pool must read **+7.7 % / +32 %**, the C1 numbers, not the old +11.6 % / +71 % |
+| **C2.2** | ⛔ **grep is the gate**: `grep -rn "FragmentLengthModels\|frag_length_observations\|_replay_fraglen\|n_frag_length_" src/` returns **nothing**. A partial delete that still compiles is the failure mode |
+| **C2.3** | `rigel report` on a pilot condition produces the **same splice-breakdown keys** as before (option (a)); the FL histogram section is sourced from `deposited_lengths` + the 5 pools. ⚠ Diff the JSON against a report generated at `d045d820` |
+| **C2.4** | `grep -rn "fl_global_counts\|fl_rna_counts" src/` returns nothing; a cache written before C2 is refused (the schema digest moves again) and the 8 pilot caches rebuild |
+| **C2.5** | a test that `compute_all_transcript_eff_lens` is fed the post-C2 RNA pmf. ⚠ This is the one with the largest blast radius and the least visibility — it reaches every transcript's effective length in the EM |
+
+⚠ **Expect the goldens to move at C2 and again at C3.** That is not a regression; it is the FL models
+changing, which is the point. **Do not regenerate until after C3.**
 
 ⚠ **`FragmentLengthModel` (singular) STAYS.** It is the scoring/eff-length model built by `from_pmf`;
 only `FragmentLengthModels` (the plural scanner container) is deleted. Conflating the two would delete the
