@@ -177,15 +177,61 @@ class TestImplicitSpliceDiscriminant:
 
     # (h) two-intron transcript, only one intron contained → SPLICED_IMPLICIT
     def test_h_any_intron_satisfies(self, with_tolerance):
+        """One of a transcript's introns in the gap is enough; the others need not be anywhere near it.
+
+        ⚠ **The geometry moved at S1** and the case's meaning did not. It used to put block 1 at
+        (149,400) — contiguously across ``t_three``'s FIRST intron — which makes ``t_three`` a transcript
+        the read *contradicts*, and a contradicted transcript is no longer a candidate for anything
+        (``SPEC_GAP_PATHS.md`` §3, concern C1; that case is now
+        ``test_h2_a_CONTRADICTED_transcript_is_not_a_candidate``). Block 1 now sits wholly inside exon 2,
+        so intron 1 falls outside the fragment entirely and only intron 2 is in play — which is what "any
+        intron satisfies" was always about.
+        """
         index, set_k = with_tolerance
         set_k(3)
-        # t_three has introns (200,299) and (400,499). Fragment is contiguous
-        # over exons 1+2 in block 1, then jumps via PE gap over intron 2 to
-        # exon 3 in block 2.
-        # blocks (149,400),(499,550); gap = (400,499) == intron 2.
-        result = _resolve(index, exons=(_exon(149, 400), _exon(499, 550)))
+        # t_three has introns (200,299) and (400,499). Block 1 is inside exon 2, block 2 inside exon 3.
+        # blocks (320,400),(499,550); gap = (400,499) == intron 2; intron 1 is outside the fragment.
+        result = _resolve(index, exons=(_exon(320, 400), _exon(499, 550)))
         assert result is not None
         assert result.splice_type == int(SpliceType.SPLICED_IMPLICIT)
+
+    # (h2) a transcript the READ CONTRADICTS is not a candidate → UNSPLICED
+    def test_h2_a_CONTRADICTED_transcript_is_not_a_candidate(self, with_tolerance):
+        """⛔ ``SPEC_GAP_PATHS.md`` §3 concern **C1**, at the resolver level.
+
+        The owner's rule is *"any transcript with a compatible combination of introns + exons is a
+        candidate"*, and ``cr.t_inds`` is **not** that set: it comes from ``merge_sets``, which falls back
+        to a UNION when the intersection is empty, so a transcript the reads contradict can be in it.
+
+        Block 1 runs contiguously from 149 to 400, straight across ``t_three``'s intron (200,299) — the read
+        has 99 sequenced bases where ``t_three`` has no exon, so the molecule cannot be ``t_three``. Without
+        the compatibility predicate the enumeration would take ``t_three``'s *other* intron (400,499) as a
+        gap hypothesis, cut 99 bp out of ``L`` **on the authority of a transcript the read disproves**, and
+        report the fragment as an implicit splice.
+
+        ⭐ What is left is the honest answer: no annotated transcript explains this fragment as spliced, so
+        the only hypothesis is the unspliced one — the molecule is gDNA, or nascent RNA that retains intron
+        1, and the gap is real template. ``t_three`` is still in ``t_inds``; the predicate is what stops it
+        being believed.
+
+        ⚠ A partially spliced *unannotated* path — intron 2 removed, intron 1 retained — is physically real
+        and is deliberately NOT a hypothesis (open decision D-B, owner ruling: unannotated junctions are
+        out of scope). That is a scope decision, not an oversight, and it is why the answer here is
+        UNSPLICED rather than a third possibility.
+        """
+        index, set_k = with_tolerance
+        set_k(3)
+        result = _resolve(index, exons=(_exon(149, 400), _exon(499, 550)))
+        assert result is not None
+        assert 1 in list(result.t_inds), (
+            "t_three must still be in the overlap-derived candidate set, or this test proves nothing "
+            "about the compatibility predicate — it would just be a fragment with no candidates"
+        )
+        assert result.n_gap_hypotheses == 1, (
+            "the only hypothesis may be the unspliced one; a second means t_three's intron (400,499) was "
+            "taken as a gap path on the authority of a transcript the read contradicts"
+        )
+        assert result.splice_type == int(SpliceType.UNSPLICED)
 
     # (i) single-block fragment → UNSPLICED (gate exons.size() >= 2 trips)
     def test_i_single_block(self, with_tolerance):

@@ -121,6 +121,240 @@ class ScanQC:
 
 
 @dataclass(frozen=True, slots=True)
+class GapCensus:
+    """⭐ The umbrella census: how each fragment whose gap needed resolving was resolved.
+
+    Every fragment for which the enumeration produced at least one **spliced** hypothesis is counted here —
+    its ``L`` depends on whether a gap intron is cut. The subclasses are exhaustive and mutually exclusive,
+    and the three ``gap_deferred_*`` are exactly ``qc.deferred_undetermined_gap``.
+
+    ⛔ **Its own axis, and NOT a splice type.** The umbrella cuts ACROSS the splice census: a certified-RNA
+    ``SPLICED_ANNOT`` fragment with an intron in its mate gap needs resolving exactly as much as an
+    ``UNSPLICED`` one does, so putting these on ``splice_type`` would need two labels per fragment and would
+    break C2's property that the splice census sums to the library.
+
+    ⛔ **There is no ``gap_resolved_unspliced``, and that is not an omission.** A spliced hypothesis cuts
+    bases the unspliced one keeps, so ``L_spliced <= L_unspliced`` always, and the one arbitration filter is
+    ``L <= max_fragment_length``. If the unspliced path survives the filter then every spliced path does
+    too — so the unspliced path can never be the sole survivor, and the class it would name is unreachable.
+    The ordering is pinned by ``test_gap_hypothesis_arbitration.py``.
+
+    The field names are the specification's own ``Tally.gap_resolution`` keys.
+    """
+
+    #: One hypothesis survived, and it necessarily cuts something: the gap intron is real and ``L``
+    #: excludes it. ⚠ Classifies the ARBITRATION, not the deposit — such a fragment can still be rejected
+    #: afterwards as ``TOO_LONG``, which is a different question with its own counter.
+    gap_resolved_spliced: int
+    #: ⛔ The unspliced path against exactly one spliced path. The open question is **RNA or gDNA** — one
+    #: bit, and it is the composition question calibration exists to answer.
+    gap_deferred_rna_or_gdna: int
+    #: ⛔ Two or more spliced paths and no unspliced one: gDNA cannot be spliced, so the molecule is
+    #: certified RNA and the open question is purely **which structure**.
+    gap_deferred_which_introns: int
+    #: ⛔ Both questions at once.
+    gap_deferred_both: int
+
+    @classmethod
+    def zeros(cls) -> "GapCensus":
+        """No fragment had a gap to resolve. ⚠ The ONE spelling of that, so a hand-built payload cannot
+        invent a second — and it is a real state: a library with no annotated intron in any mate gap."""
+        return cls(**{field.name: 0 for field in dataclasses.fields(cls)})
+
+    @classmethod
+    def from_dict(cls, census: dict[str, Any]) -> "GapCensus":
+        expected = {field.name for field in dataclasses.fields(cls)}
+        missing = expected - set(census)
+        if missing:
+            raise ValueError(
+                f"the scan's gap_resolution block is missing {sorted(missing)}. The subclasses are "
+                f"exhaustive by construction, so a missing one is a partition that does not close."
+            )
+        return cls(**{name: int(census[name]) for name in expected})
+
+    @property
+    def deferred(self) -> int:
+        """The three ``gap_deferred_*`` summed — which must equal ``qc.deferred_undetermined_gap``."""
+        return (
+            self.gap_deferred_rna_or_gdna + self.gap_deferred_which_introns + self.gap_deferred_both
+        )
+
+
+#: The deferred bank's arrays, in the order :meth:`Tally.deferred_arrays` emits them. ⚠ Read off the
+#: dataclass below rather than written out twice; the tuple exists because the validation needs an order.
+_DEFERRED_RECORD_FIELDS = ("ref", "start", "end", "align_strand", "sj_strand")
+
+
+@dataclass(frozen=True, slots=True)
+class DeferredFragments:
+    """⭐ **THE SIDE BUFFER.** Fragments whose gap has more than one surviving explanation, held WHOLE.
+
+    A fragment's unsequenced mate gap may hold no intron, one, or several, and *which* cannot be observed —
+    the bases are not there. Deciding needs a fragment-length distribution that does not exist until the
+    first pass is over, so the first pass does not guess: it enumerates, and when more than one hypothesis
+    survives it holds the fragment here. `docs/PLAN_TWO_PASS.md` §5.
+
+    ⭐ **The FRAGMENT is stored, never its consequences.** Object ids are large, derived, and would have to
+    be kept consistent with the partition; the fragment is small and replays exactly. The second pass
+    re-enters ``Accumulator::deposit`` with the chosen hypothesis, so there is one tally path and
+    byte-identity with the specification is preserved for free.
+
+    Two nested variable-length levels — fragments hold hypotheses, hypotheses hold introns — so there are
+    two offset arrays at each level. Offsets are cumulative and always start at 0, so an empty bank is
+    ``[0]`` and never ``[]``, and ``n_fragments`` is ``len(offsets) - 1``.
+
+    ⛔ **THIS IS THE ONE BANK WHOSE ORDER IS OBSERVABLE.** Every other is a sum of integers and integer
+    addition is associative, so a per-worker merge is exact whatever order the chunks arrived in. This is a
+    list, so the C++ export **sorts it on the record's own content** before it crosses the ABI — otherwise
+    the same BAM would give a different byte sequence at 1, 2, 4 and 8 workers with identical contents. Two
+    records that tie on that key are identical records, so no tie-break is needed or possible.
+
+    ⚠ Every array is ``int64``, including the two strand columns, which are ``int32`` everywhere else in the
+    scanner. One dtype for one bank: the parity gate compares dtypes, and a narrowing conversion at the
+    boundary compares equal by value.
+    """
+
+    ref: np.ndarray  # int64[n] — which reference; the drain replays onto THAT cut axis
+    start: np.ndarray  # int64[n] — the CLIPPED extent, because that is what the drain must replay
+    end: np.ndarray  # int64[n]
+    align_strand: np.ndarray  # int64[n]
+    sj_strand: np.ndarray  # int64[n] — the OBSERVED motif strand, if any
+    observed_intron_offsets: np.ndarray  # int64[n + 1] — in PAIRS, into observed_introns
+    observed_introns: (
+        np.ndarray
+    )  # int64[2 * n_observed] — flat (start, end); cut under EVERY hypothesis
+    hypothesis_offsets: np.ndarray  # int64[n + 1] — into the per-hypothesis arrays below
+    hypothesis_sj_strand: (
+        np.ndarray
+    )  # int64[n_hypotheses] — INFERRED; an observed motif always wins
+    hypothesis_intron_offsets: np.ndarray  # int64[n_hypotheses + 1] — in PAIRS
+    hypothesis_introns: np.ndarray  # int64[2 * n_implied] — the IMPLIED introns; empty ⇒ unspliced
+    hypothesis_t_offsets: np.ndarray  # int64[n_hypotheses + 1]
+    hypothesis_t: np.ndarray  # int64[n_supporting] — which transcripts imply this path
+
+    @property
+    def n_fragments(self) -> int:
+        return int(self.hypothesis_offsets.shape[0]) - 1
+
+    @property
+    def n_hypotheses(self) -> int:
+        return int(self.hypothesis_sj_strand.shape[0])
+
+    @classmethod
+    def empty(cls) -> "DeferredFragments":
+        """Nothing was deferred. ⚠ Offsets are cumulative and start at 0, so every offset array is ``[0]``
+        and never ``[]`` — spelled once here so a hand-built payload cannot get that boundary wrong."""
+        return cls.from_dict(
+            {
+                field.name: np.asarray(
+                    [0] if field.name.endswith("_offsets") else [], dtype=np.int64
+                )
+                for field in dataclasses.fields(cls)
+            }
+        )
+
+    @classmethod
+    def from_dict(cls, deferred: dict[str, Any]) -> "DeferredFragments":
+        """Validate and adopt the flat arrays the C++ emits.
+
+        ⚠ The two nested CSRs are re-derived rather than trusted, exactly as ``ref_node_offsets`` is. An
+        offset array of the right LENGTH can still be inconsistent, and the second pass indexes every one
+        of these — a truncated bank would score a fragment against another fragment's hypotheses, which is
+        a wrong answer that looks entirely plausible.
+        """
+        names = [field.name for field in dataclasses.fields(cls)]
+        missing = set(names) - set(deferred)
+        if missing:
+            raise ValueError(
+                f"the scan's deferred bank is missing {sorted(missing)}. Every array is part of one "
+                f"record, so a missing one is a fragment the second pass cannot replay."
+            )
+        arrays: dict[str, np.ndarray] = {}
+        for name in names:
+            array = np.ascontiguousarray(deferred[name])
+            if array.dtype != np.int64:
+                raise ValueError(
+                    f"deferred[{name!r}] has dtype {array.dtype}, expected int64. One bank, one dtype — "
+                    f"a narrowed or widened array compares equal by value and would hide the change."
+                )
+            if array.ndim != 1:
+                raise ValueError(
+                    f"deferred[{name!r}] has shape {array.shape}, expected one dimension"
+                )
+            arrays[name] = array
+
+        n = int(arrays["hypothesis_offsets"].shape[0]) - 1
+        if n < 0:
+            raise ValueError(
+                "deferred['hypothesis_offsets'] is empty; offsets are cumulative and start at 0, so an "
+                "empty bank is [0] and never []"
+            )
+        for name in _DEFERRED_RECORD_FIELDS:
+            if arrays[name].shape != (n,):
+                raise ValueError(
+                    f"deferred[{name!r}] has {arrays[name].shape[0]} entries but the offsets describe "
+                    f"{n} fragments"
+                )
+        for offsets_name, values_name, stride in (
+            ("observed_intron_offsets", "observed_introns", 2),
+            ("hypothesis_offsets", "hypothesis_sj_strand", 1),
+            ("hypothesis_intron_offsets", "hypothesis_introns", 2),
+            ("hypothesis_t_offsets", "hypothesis_t", 1),
+        ):
+            offsets = arrays[offsets_name]
+            if offsets.shape[0] == 0 or int(offsets[0]) != 0:
+                raise ValueError(
+                    f"deferred[{offsets_name!r}] must start at 0; offsets are cumulative and an empty "
+                    f"level is [0]"
+                )
+            if np.any(np.diff(offsets) < 0):
+                bad = int(np.argmax(np.diff(offsets) < 0))
+                raise ValueError(
+                    f"deferred[{offsets_name!r}] decreases at {bad}; a CSR offset array cannot go "
+                    f"backwards"
+                )
+            if int(offsets[-1]) * stride != arrays[values_name].shape[0]:
+                raise ValueError(
+                    f"deferred[{offsets_name!r}] ends at {int(offsets[-1])} but "
+                    f"{values_name} has {arrays[values_name].shape[0]} entries "
+                    f"({int(offsets[-1])} x {stride} expected)"
+                )
+        n_hypotheses = int(arrays["hypothesis_offsets"][-1])
+        for name in ("hypothesis_intron_offsets", "hypothesis_t_offsets"):
+            if arrays[name].shape[0] != n_hypotheses + 1:
+                raise ValueError(
+                    f"deferred[{name!r}] has {arrays[name].shape[0]} entries but there are "
+                    f"{n_hypotheses} hypotheses, so it must have {n_hypotheses + 1}"
+                )
+        # ⭐ A fragment is deferred BECAUSE two or more hypotheses survived, so a record carrying fewer
+        # than two is a bank that lost them — and the second pass would then "choose" from a set of one and
+        # deposit an answer nothing supported.
+        runs = np.diff(arrays["hypothesis_offsets"])
+        if n and int(runs.min()) < 2:
+            bad = int(np.argmin(runs))
+            raise ValueError(
+                f"deferred fragment {bad} carries {int(runs[bad])} hypotheses. A fragment is deferred "
+                f"only when two or more survived, so every record must hold at least two."
+            )
+        return cls(**arrays)
+
+    def observed_introns_of(self, i: int) -> np.ndarray:
+        """Fragment ``i``'s observed introns as an ``[k, 2]`` view. Cut under **every** hypothesis."""
+        lo, hi = int(self.observed_intron_offsets[i]), int(self.observed_intron_offsets[i + 1])
+        return self.observed_introns[2 * lo : 2 * hi].reshape(hi - lo, 2)
+
+    def hypothesis_introns_of(self, h: int) -> np.ndarray:
+        """Hypothesis ``h``'s IMPLIED introns as an ``[k, 2]`` view. Empty ⇒ the unspliced hypothesis."""
+        lo, hi = int(self.hypothesis_intron_offsets[h]), int(self.hypothesis_intron_offsets[h + 1])
+        return self.hypothesis_introns[2 * lo : 2 * hi].reshape(hi - lo, 2)
+
+    def supporting_t_of(self, h: int) -> np.ndarray:
+        """Which candidate transcripts imply hypothesis ``h``. Empty for the unspliced one."""
+        lo, hi = int(self.hypothesis_t_offsets[h]), int(self.hypothesis_t_offsets[h + 1])
+        return self.hypothesis_t[lo:hi]
+
+
+@dataclass(frozen=True, slots=True)
 class AccumulatorPayload:
     """One BAM scan's tally. Views over C++-owned buffers; this object is the keep-alive."""
 
@@ -166,6 +400,13 @@ class AccumulatorPayload:
     #: path, strand-undefined, empty), each counted in ``qc``. That is exactly the population the pools
     #: are drawn from, which is what makes it the right anchor rather than merely a convenient one.
     deposited_lengths: np.ndarray
+
+    #: ⭐ **The side buffer** — fragments whose gap has more than one surviving explanation, held WHOLE for
+    #: the second pass. ⚠ NOT a loss: ``deposited + deferred + dropped_* == offered``, and this bank holds
+    #: the fragments ``qc.deferred_undetermined_gap`` counts.
+    deferred: DeferredFragments
+    #: ⭐ How each gap was resolved — its own axis, cutting across the splice census.
+    gap_resolution: GapCensus
 
     qc: ScanQC
     max_length: int  # the fragment-length limit applied to L, and the pool-histogram width
@@ -302,6 +543,27 @@ class AccumulatorPayload:
                 "deposited; the unconditional length histogram must bin every one of them exactly once."
             )
 
+        qc = ScanQC.from_dict(cal["qc"])
+        deferred = DeferredFragments.from_dict(cal["deferred"])
+        # ⭐ THE CONSERVATION HALF, refused at the door. `qc.deferred_undetermined_gap` says how many
+        # fragments were held; this bank is supposed to BE them. The identity
+        # `deposited + deferred + dropped_* == offered` is worth nothing if the deferred term is a number
+        # with no fragments behind it — and a cache can be truncated or partially written, which is
+        # precisely how a bank would arrive short of the counter that describes it.
+        if deferred.n_fragments != qc.deferred_undetermined_gap:
+            raise ValueError(
+                f"the deferred bank holds {deferred.n_fragments} fragments but "
+                f"qc.deferred_undetermined_gap is {qc.deferred_undetermined_gap}; the counter and the "
+                f"fragments it counts must be the same population, or the second pass silently drains a "
+                f"different one."
+            )
+        gap_resolution = GapCensus.from_dict(cal["gap_resolution"])
+        if gap_resolution.deferred != qc.deferred_undetermined_gap:
+            raise ValueError(
+                f"the gap census's three deferred_* sum to {gap_resolution.deferred} but "
+                f"qc.deferred_undetermined_gap is {qc.deferred_undetermined_gap}; the subclasses are "
+                f"exhaustive by construction, so this is a partition that does not close."
+            )
         return cls(
             cut_positions=cut_positions,
             **offsets,
@@ -309,7 +571,9 @@ class AccumulatorPayload:
             node_start_count=node_start_count,
             pool_lengths=pool_lengths.reshape(N_FRAGMENT_POOLS, max_length + 1),
             deposited_lengths=deposited_lengths,
-            qc=ScanQC.from_dict(cal["qc"]),
+            deferred=deferred,
+            gap_resolution=gap_resolution,
+            qc=qc,
             max_length=max_length,
             n_refs=n_refs,
             graph_hash=graph_hash,
@@ -353,5 +617,7 @@ __all__ = [
     "POOL_DNA_INTRON_EXON",
     "POOL_RNA_SPLICED",
     "AccumulatorPayload",
+    "DeferredFragments",
+    "GapCensus",
     "ScanQC",
 ]

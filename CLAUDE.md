@@ -15,12 +15,13 @@ library into gDNA vs RNA, and a per-locus EM solver assigns RNA to transcripts. 
 
 | doc | what it is |
 |---|---|
-| **`docs/PLAN_TWO_PASS.md`** | ⭐⭐ **START HERE — THE LIVE PLAN.** The gap-path problem and junction opportunity are ONE two-pass structure. Carries the order of work, the gates, the second-pass design, and the exact resume point for a red tree |
-| **`docs/FRAGMENT_LENGTH_AUDIT.md`** | ⭐⭐ **START HERE — §0 IS THE ROADMAP AND THE CRITICAL PATH.** THREE definitions of fragment length were live, two of them summed into one array called "global", and the EB shrinkage mixed frames. **C0 / C1 / C2 / C2.6 have all LANDED (2026-08-01)** — there is now ONE definition and it is accurate. ⛔ **C3 is next**; §§1–3 are history |
-| **`docs/LEDGER.md` C2.6** | ⭐ **THE MOST RECENT WORK, and it holds TWO OPEN OWNER DECISIONS** — reverse D1? and C2.7/D3. Read it before C3 |
-| **`docs/SPEC_GAP_INTRONS.md`** | ✅ **IMPLEMENTED.** The design record for C2.6; ⛔ its §3 D1 and §4 X5 were both **overturned by measurement** — the LEDGER supersedes it |
-| **`docs/JUNCTION_OPPORTUNITY.md`** | ⭐ C3's formula, **derived and proven** (48,648 exhaustive configs) — and the measurement that found C2.6's bug. ⛔ **§3's numbers are STALE**: they were scored against the contaminated anchor and must be re-run before C3 |
-| **`docs/SOLVER_OBSERVABLES_PLAN.md`** | ⭐ **How we got there.** The accumulator stores three channels and the solver reads **one**; and `assemble_priors` summed an intensive quantity as if it were extensive. §1 is the theory from the ground up. P0/P1 done, **P2 built and gated OFF — blocked on the audit's C2/C3** |
+| **`docs/SPEC_SECOND_PASS.md`** | ⭐⭐ **START HERE — THE LIVE SPEC AND THE ROADMAP.** S3 in full: the score, the three-factor decomposition, the drain, the open decisions, and the phased path **P0–P6**. ⭐ **P0 and P1 are CLOSED; P2 is PARTIAL — the scorer is built and UNGATED.** §9 carries the exact resume point |
+| **`docs/PLAN_TWO_PASS.md`** | ⭐ **WHY the two-pass structure exists** — the gap-path problem and junction opportunity are ONE problem. S1 and S2 landed; §5 is superseded by `SPEC_SECOND_PASS.md` |
+| **`docs/FRAGMENT_LENGTH_AUDIT.md`** | ⭐ **HOW THE CRITICAL PATH GOT HERE.** THREE definitions of fragment length were live, two of them summed into one array called "global", and the EB shrinkage mixed frames. **C0 / C1 / C2 / C2.6 have all LANDED (2026-08-01)** — there is now ONE definition and it is accurate. ⛔ Its "C3 is next" is **superseded**: C3 rides on the two-pass structure and is sequenced LAST, as S4 of `PLAN_TWO_PASS.md`. §§1–3 are history |
+| **`docs/LEDGER.md`, entries S1 → P2** | ⭐ **THE MOST RECENT WORK, newest last.** S1+S2 (the side buffer), S2.1 (the pipeline made reproducible), P0 (the strand sign bug that wasn't), P1 (strand hygiene), **P2 (the scorer — ⛔ built and UNGATED, read its entry before touching it)** |
+| **`docs/SPEC_GAP_PATHS.md`** | ⭐ **THE SPEC S1 IMPLEMENTS** — the enumeration rule and the interface, §0–§4. Supersedes `SPEC_GAP_INTRONS.md`, which is the C2.6 record and is now history |
+| **`docs/JUNCTION_OPPORTUNITY.md`** | ⭐ C3's formula, **derived and proven** (48,648 exhaustive configs) — and the measurement that found C2.6's bug. ⛔ **EVERY number in it is STALE**: §3's were scored against the contaminated anchor, and the rest predate the side buffer, which holds back exactly the LONG fragments. Re-measure after S3's drain |
+| **`docs/SOLVER_OBSERVABLES_PLAN.md`** | ⚠ **ITS P0/P1/P2 ARE NOT THE SECOND PASS'S** — unrelated phases that happen to share the letter; `SPEC_SECOND_PASS.md` §9's P0–P6 are the live ones. ⭐ **How we got there.** The accumulator stores three channels and the solver reads **one**; and `assemble_priors` summed an intensive quantity as if it were extensive. §1 is the theory from the ground up. P0/P1 done, **P2 built and gated OFF — blocked on the audit's C2/C3** |
 | `docs/S5_DESIGN_LOG.md` | ⚠ **S5 IS FINISHED** (S5.g measured and refuted). Kept for §1's accumulator derivations and §3's observable measurements, which are still the reference. **It is no longer the live plan** |
 | `docs/IMPLEMENTATION_PLAN.md` §0 | live state for everything else |
 | `docs/NODE_DENSITY_DERIVATION.md` | why the deposit weight is what it is, and what each stored channel buys |
@@ -38,7 +39,8 @@ conditions, in `LEDGER.md`'s S5.f entry, **bit-identical on re-run**. That was t
 derivation was deliberately sequenced after it because each one needs a baseline to be judged against.
 **S5.0–S5.g have all landed** (S5.g's taper was measured and **refuted** — ≤ 0.0002). ⭐ **The live work is
 no longer S5**: it is the fragment-length cleanup in `FRAGMENT_LENGTH_AUDIT.md`, reached by way of
-`SOLVER_OBSERVABLES_PLAN.md`. **C0, C1, C2 and C2.6 have landed; C3 is next** — see that file's §0.
+`SOLVER_OBSERVABLES_PLAN.md`. **C0, C1, C2 and C2.6 landed, and then S1 + S2 of `PLAN_TWO_PASS.md`;
+S3 — the second pass — is next.**
 
 ⭐ **ONE DEFINITION OF FRAGMENT LENGTH, as of C2 (2026-08-01).** `L` is proven (C0), the accumulator bins
 every deposited fragment by it (C1), and every consumer reads it (C2) — the scanner's rival histogram,
@@ -58,12 +60,13 @@ nearby intron answer for one and make `L` too **short**. Measured on the chr22 p
   ceiling **0.00909 → 0.00137**; `qc.dropped_too_long` **280,558 → 38,309**.
 * ⛔ **the gDNA control did not move one digit** (it has no introns to miss) — bit-identical on mean, sd,
   every tail, the ceiling and the fragment count.
-* ⛔ **the residual is D3 and it is MEASURED, not assumed**: cutting *every* intron in a gap rather than
-  the first takes it to 0.00002 / 389. That is **C2.7**, `TODO.md` rank 0b.
-* ⛔ **D1 costs more than it buys** — `TODO.md` rank 0a, an owner decision. Cutting the intron fixes the
-  pure-RNA pool (+8.00 % → +0.67 % mean); *removing* the mixed fragments then breaks it the other way
-  (**−9.58 % / −22.46 %**), because they are the long ones. **A purity filter on a length pool is a
-  length filter.**
+* ✅ **the residual was D3, and S1 solved it**: every annotated intron in a gap is cut now, and candidates
+  group by their **whole-fragment path**. ⛔ Its number cannot be re-read until S3's drain — the mass above
+  the ceiling is a statistic of the DEPOSITED set, and the long ambiguous fragments are currently held.
+* ✅ **D1 IS DELETED** (S1). Cutting the intron fixes the pure-RNA pool (+8.00 % → +0.67 % mean);
+  *removing* the mixed fragments then breaks it the other way (**−9.58 % / −22.46 %**), because they are
+  the long ones. **A purity filter on a length pool is a length filter.** The pool is keyed on
+  **determinacy** instead: exactly one surviving hypothesis, so `L` is not in doubt however it was reached.
 * ⚠ cost: **+8.9 % scan time** (845 vs 776 ns/fragment).
 
 ⚠ **Three things the first baseline says**, before anything is built on it:
@@ -71,21 +74,25 @@ nearby intron answer for one and make `L` too **short**. Measured on the chr22 p
    turning the contiguous-edge RNA taper on moves the library gDNA fraction by **≤ 0.0002**. The 11.0 %
    was a *bp-weighted* geometric mean; the estimator is *fragment*-weighted, and **89 % of edge mass sits
    on lines the taper does not touch**. `CARRY_FORWARD.md` §1 fact 6 is corrected.
-2. ⚠ **The fitted κ is `1 − truth`, but the MIRROR IS CONSISTENT so the inference is correct.** A library
-   simulated at 0.99 calibrates to κ = 0.0101; forcing the nominal truth 0.99 makes a zero-gDNA library
-   read `f_gdna` **0.4992** against the fitted value's **0.0030** — 166× worse. κ and the per-node sense
-   columns are mirrored the same way and it cancels. ⭐ So this answers `CARRY_FORWARD.md` §0 **C4**: the
-   real cfRNA libraries are ordinary **highly stranded** ones, not near-purely antisense — **only the
-   exported scalar is mis-labelled**. `TODO.md` §6.
-3. ⚠ **Calibration is bit-identical run to run; the EM samples from the posterior BY DESIGN**
-   (`EMConfig.assignment_mode = "sample"`). ⭐ **Run any end-to-end A/B under `map` or `fractional`** —
-   measured spread drops from ~0.5 % to ~1e-10. Hold the mode fixed across both arms: the three modes
-   are different estimators, not one answer at different precision.
+2. ✅ **THE κ "MIRROR" WAS NOT A DEFECT — closed 2026-08-02, and it had been filed twice.** Two different
+   quantities were both being called strand specificity: the simulator's is protocol **fidelity**
+   (direction-agnostic), `rna_sense_frac` is the **directional** sense fraction. For an R1-antisense
+   (dUTP) protocol — which is what the simulator emits, and what real cfRNA is — they are complements, so
+   comparing them reads as a sign error. ⭐ `StrandModel.strand_specificity` is the matching quantity and
+   already recovers the simulated knob: **1.00 → 1.0000, 0.75 → 0.7701, 0.50 → 0.5020**. So a fitted
+   κ of 0.0101 on a "0.99 stranded" library is **correct**, which is also why forcing 0.99 measured 166×
+   worse. ⛔ The cfRNA libraries are ordinary highly stranded **R1-antisense** ones and the scalar says so.
+3. ✅ **ALL THREE ASSIGNMENT MODES NOW REPRODUCE EXACTLY with a fixed seed** (S2.1, 2026-08-01), so
+   `sample` is a legitimate A/B arm. ⛔ It did not before, and the cause was **not** the seed: the
+   scanner fills the fragment buffer in worker-completion order and the sampled assignment consumed its
+   per-locus RNG in that order. `build_multi_loci` now orders each locus's units by `frag_id`.
+   ⚠ Hold the mode fixed across both arms regardless: the three are different estimators
+   (5441 / 6002 / 6277 on one scenario), not one answer at different precision.
 
-⭐ **S6 landed too, but ⚠ the goldens are STALE AGAIN: the suite is 1835 / 21 as of C2.6.** All 21 are
-`test_golden_output`, and they have now moved **three** times — P1 changed the EM prior's units, C2 changed
-the fragment-length models, C2.6 changed `L` itself. All expected. ⛔ Regenerate **once**, after C3,
-**twice, and diff**.
+⭐ **S6 landed too, but ⚠ the goldens are STALE AGAIN: the suite is 1863 / 21 as of S1+S2.** All 21 are
+`test_golden_output`, and they have now moved **four** times — P1 changed the EM prior's units, C2 changed
+the fragment-length models, C2.6 changed `L` itself, and S1 holds the ambiguous mass out of the tally.
+All expected. ⛔ Regenerate **once**, at the very END of `PLAN_TWO_PASS.md`, **twice, and diff**.
 
 ⭐ **`TODO.md` §7's `test_nrna_double_counting[g20_n0_s100]` now PASSES** (C2, 2026-08-01) — the silent
 negative control reads **0 counts against a limit of 25** where it leaked ~30, stable across re-runs.
@@ -178,7 +185,7 @@ the suite reads one extra failure — which, under "a new failure is a regressio
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-python -m pytest tests/ -q                     # 1835 pass / 21 fail — all 21 stale goldens (regen after C3)
+python -m pytest tests/ -q                     # 1863 pass / 21 fail — all 21 stale goldens (regen at the END)
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```

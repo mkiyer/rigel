@@ -72,6 +72,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import typing
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -136,8 +137,34 @@ def reach_digest(index: "TranscriptIndex") -> str:
     return _digest(*parts)
 
 
+def _payload_field_types() -> dict[str, type]:
+    """``AccumulatorPayload``'s annotations resolved to real classes.
+
+    ⚠ ``dataclasses.fields()`` hands back annotation STRINGS under ``from __future__ import annotations``,
+    so the nested banks cannot be reconstructed from them. Resolving the hints is what lets the read path
+    stay generic instead of carrying a name→class table that a new bank could quietly fall out of.
+    """
+    return typing.get_type_hints(AccumulatorPayload)
+
+
+def _schema_names() -> list[str]:
+    """Every name the cache is keyed by, NESTED BANKS INCLUDED, in a stable order.
+
+    ⭐ This is what makes the digest below cover what it claims to.
+    """
+    types = _payload_field_types()
+    names: list[str] = []
+    for field in dataclasses.fields(AccumulatorPayload):
+        names.append(field.name)
+        nested = types.get(field.name)
+        if dataclasses.is_dataclass(nested):
+            names += [f"{field.name}__{sub.name}" for sub in dataclasses.fields(nested)]
+    return names
+
+
 def payload_schema_digest() -> str:
-    """Hash ``AccumulatorPayload``'s own field list — the schema the cached arrays were written under.
+    """Hash the schema the cached arrays were written under — ``AccumulatorPayload``'s field list **and
+    the fields of every bank nested inside it**.
 
     ⛔ **No other key covers this, and the gap is not hypothetical.** ``graph_hash`` describes the index,
     ``reach_digest`` the reaches, ``scan_config_digest`` the scan settings — none of them changes when the
@@ -145,10 +172,17 @@ def payload_schema_digest() -> str:
     written the day before would have been accepted and then failed deep inside ``_payload_from_parts``
     with a bare ``KeyError``, which reads as a bug in the cache rather than as a stale cache.
 
-    Field names only: a dtype change is already caught at load by ``_bank``'s assertion, and names are
-    what the ``.npz`` is keyed by.
+    ⭐ **THE NESTING IS WHY THIS RECURSES, and it was a real defect.** The digest used to hash the top-level
+    field names ALONE, so a change *inside* ``ScanQC`` was invisible to it: a renamed qc field let a stale
+    cache be accepted by the key and then fail deep in the loader with a bare ``TypeError`` — precisely the
+    failure mode this digest exists to prevent. S1 made that worse rather than better, because
+    ``DeferredFragments`` puts **thirteen** array names inside one field and every one of them is an
+    ``.npz`` key. Recursing one level covers all three nested banks.
+
+    Field names only: a dtype change is already caught at load by ``_bank``'s and
+    ``DeferredFragments.from_dict``'s assertions, and names are what the ``.npz`` is keyed by.
     """
-    return _digest(*(field.name.encode() for field in dataclasses.fields(AccumulatorPayload)))
+    return _digest(*(name.encode() for name in _schema_names()))
 
 
 def _scan_config_digest(scan_config) -> str:
@@ -231,6 +265,11 @@ def write_scan_cache(
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
+    # ⛔ A NESTED BANK'S ARRAYS GO TO THE .npz, NOT TO THE MANIFEST. `dataclasses.asdict` on
+    # `DeferredFragments` yields a dict of ndarrays, and the manifest is written with
+    # `json.dumps(..., default=str)` — which would stringify each array to a TRUNCATED repr, silently, and
+    # read back as text. Nested dataclasses are therefore split by the type of each sub-field: arrays are
+    # prefixed `field__sub` and counters stay scalars.
     arrays: dict[str, np.ndarray] = {}
     scalars: dict[str, object] = {}
     for field in dataclasses.fields(AccumulatorPayload):
@@ -238,7 +277,14 @@ def write_scan_cache(
         if isinstance(value, np.ndarray):
             arrays[field.name] = np.ascontiguousarray(value)
         elif dataclasses.is_dataclass(value):
-            scalars[field.name] = dataclasses.asdict(value)
+            nested: dict[str, object] = {}
+            for sub in dataclasses.fields(value):
+                sub_value = getattr(value, sub.name)
+                if isinstance(sub_value, np.ndarray):
+                    arrays[f"{field.name}__{sub.name}"] = np.ascontiguousarray(sub_value)
+                else:
+                    nested[sub.name] = sub_value
+            scalars[field.name] = nested
         else:
             scalars[field.name] = value
     np.savez_compressed(cache_dir / PAYLOAD_NPZ, **arrays)
@@ -335,14 +381,29 @@ def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex", scan_config
 
 
 def _payload_from_parts(arrays: dict, scalars: dict) -> AccumulatorPayload:
-    from .scan_payload import ScanQC
+    """Rebuild the payload from the ``.npz`` arrays and the manifest's scalars.
 
+    ⭐ Generic over the nested banks: each one's sub-fields are taken from the ``.npz`` when they are arrays
+    and from the manifest when they are counters, so a bank that grows an array joins the round trip with no
+    edit here. ⚠ And it grows the ``payload_schema_digest`` at the same time, which is what refuses a cache
+    written before it existed instead of failing here with a bare ``KeyError``.
+    """
+    types = _payload_field_types()
     kwargs: dict[str, object] = {}
     for field in dataclasses.fields(AccumulatorPayload):
+        nested = types.get(field.name)
         if field.name in arrays:
             kwargs[field.name] = arrays[field.name]
-        elif field.name == "qc":
-            kwargs[field.name] = ScanQC(**scalars[field.name])
+        elif dataclasses.is_dataclass(nested):
+            recorded = scalars[field.name]
+            kwargs[field.name] = nested(
+                **{
+                    sub.name: arrays[f"{field.name}__{sub.name}"]
+                    if f"{field.name}__{sub.name}" in arrays
+                    else recorded[sub.name]
+                    for sub in dataclasses.fields(nested)
+                }
+            )
         else:
             kwargs[field.name] = scalars[field.name]
     return AccumulatorPayload(**kwargs)

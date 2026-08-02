@@ -567,9 +567,7 @@ class TestMissingAndInvalidTags:
         from rigel.pipeline import scan_and_buffer
 
         bam_path, index = self._build_scenario_without_xs(tmp_path)
-        _, strand_models, _, _ = scan_and_buffer(
-            bam_path, index, BamScanConfig(sj_strand_tag="XS")
-        )
+        _, strand_models, _, _ = scan_and_buffer(bam_path, index, BamScanConfig(sj_strand_tag="XS"))
 
         sm = strand_models.exonic_spliced
         assert sm.n_observations == 0, (

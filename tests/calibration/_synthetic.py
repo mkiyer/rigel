@@ -11,7 +11,13 @@ import pandas as pd
 
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.signature import BIT_EXON_NEG, BIT_EXON_POS
-from rigel.scan_payload import N_FRAGMENT_POOLS, AccumulatorPayload, ScanQC
+from rigel.scan_payload import (
+    N_FRAGMENT_POOLS,
+    AccumulatorPayload,
+    DeferredFragments,
+    GapCensus,
+    ScanQC,
+)
 
 #: The fixed-point scale the accumulator deposits ``round(SCALE / placements)`` at. Decoded exactly once,
 #: in ``CalibrationSubstrate.from_payload``; a test that needs the raw integer builds it with this.
@@ -82,6 +88,11 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         sj_length_sum=lengths(sj, 11),
         pool_lengths=np.zeros((N_FRAGMENT_POOLS, 201), dtype=np.int64),
         deposited_lengths=np.zeros(201, dtype=np.uint32),
+        # ⚠ Nothing was deferred here, and that is a real state, not a stub: this fixture has no
+        # annotated intron in any mate gap. The two empty spellings live on the classes so a
+        # hand-built payload cannot get the `[0]`-not-`[]` offset boundary wrong.
+        deferred=DeferredFragments.empty(),
+        gap_resolution=GapCensus.zeros(),
         qc=ScanQC(
             deposited=36,
             dropped_too_long=0,

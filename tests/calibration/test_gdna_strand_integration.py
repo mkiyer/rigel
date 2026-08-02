@@ -16,7 +16,13 @@ from _synthetic import INV_LENGTH_SCALE, make_gdna_fl_pmf, make_strand_models
 from rigel.calibration import calibrate
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.config import CalibrationConfig
-from rigel.scan_payload import N_FRAGMENT_POOLS, AccumulatorPayload, ScanQC
+from rigel.scan_payload import (
+    N_FRAGMENT_POOLS,
+    AccumulatorPayload,
+    DeferredFragments,
+    GapCensus,
+    ScanQC,
+)
 
 _STRAND_MODEL = make_strand_models(0.95, 200)
 _FRAG_LEN = 50  # the delta the gDNA pmf sits at; every fixture fragment is this long
@@ -70,6 +76,11 @@ def _intergenic_betabinom_payload(n_nodes, depth, overdispersion, seed):
         sj_length_sum=np.zeros((0, 2), dtype=np.uint64),
         pool_lengths=np.zeros((N_FRAGMENT_POOLS, 201), dtype=np.int64),
         deposited_lengths=np.zeros(201, dtype=np.uint32),
+        # ⚠ Nothing was deferred here, and that is a real state, not a stub: this fixture has no
+        # annotated intron in any mate gap. The two empty spellings live on the classes so a
+        # hand-built payload cannot get the `[0]`-not-`[]` offset boundary wrong.
+        deferred=DeferredFragments.empty(),
+        gap_resolution=GapCensus.zeros(),
         qc=ScanQC(
             deposited=int(contained.sum()),
             dropped_too_long=0,

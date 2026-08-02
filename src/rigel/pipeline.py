@@ -104,7 +104,6 @@ def _sj_tag_to_spec(sj_strand_tag) -> str:
     return "none"
 
 
-
 def _apply_scan_stats(stats: PipelineStats, stats_dict: dict) -> None:
     """Apply C++ scan statistics to PipelineStats.
 
@@ -801,9 +800,7 @@ def run_pipeline(
         scan = _replace(scan, sj_strand_tag=detected_spec)
 
     # -- Single BAM pass (C++ native scanner) --
-    stats, strand_models, buffer, calibration_payload = scan_and_buffer(
-        bam_path, index, scan
-    )
+    stats, strand_models, buffer, calibration_payload = scan_and_buffer(bam_path, index, scan)
 
     # -- Calibration (acyclic) --
     # Build the region geometry, verify it lines up 1:1 with the accumulator

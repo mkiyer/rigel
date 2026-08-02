@@ -245,9 +245,15 @@ struct OfferedFragment {
 ///
 /// ⚠ These classify the ARBITRATION, not the deposit: a resolved_* fragment can still be rejected
 /// afterwards as TOO_LONG, which is a different question with its own counter.
+///
+/// ⛔ THERE IS NO `resolved_unspliced`, AND IT IS NOT AN OMISSION. The field existed and no fragment could
+/// enter it: a spliced hypothesis CUTS bases the unspliced one keeps, so L_spliced <= L_unspliced always,
+/// and the one filter is `L <= max_length`. If the unspliced path survives the filter then every spliced
+/// path survives it too, so the survivor set can never be exactly {unspliced} while a spliced path was
+/// offered -- which is the condition for being in this census at all. The ORDERING is pinned directly by
+/// `test_gap_hypothesis_arbitration.test_the_GENOMIC_hypothesis_is_ALWAYS_the_LONGEST`.
 struct GapCensus {
-    std::int64_t resolved_spliced        = 0;  // one survivor, and it cuts something
-    std::int64_t resolved_unspliced      = 0;  // one survivor, the unspliced one -- the rest were too long
+    std::int64_t resolved_spliced        = 0;  // one survivor, and it necessarily cuts something
     std::int64_t deferred_rna_or_gdna    = 0;  // unspliced vs ONE spliced path: was anything spliced?
     std::int64_t deferred_which_introns  = 0;  // >= 2 spliced paths, none unspliced: certified RNA
     std::int64_t deferred_both           = 0;  // both questions at once
@@ -271,9 +277,15 @@ struct GapCensus {
 /// a LIST. Concatenating per-worker queues gives a different byte sequence at 1, 2, 4 and 8 workers with
 /// identical contents -- so the EXPORT sorts on the record's own content, exactly as
 /// `Tally.deferred_arrays()` does in the specification. Two records that tie are identical records.
+///
+/// ⚠ EVERY ARRAY IS int64, INCLUDING THE TWO STRAND COLUMNS. They are int32 everywhere else in the
+/// scanner, but the specification's flattening emits one dtype and the parity gate compares dtypes -- so
+/// widening here costs 8 bytes per deferred record and removes a conversion that would otherwise have to
+/// happen at the export, where getting it wrong compares equal by value.
 struct DeferredFragments {
-    std::vector<std::int64_t> start, end;
-    std::vector<std::int32_t> align_strand, sj_strand;
+    std::vector<std::int64_t> ref;                         // which reference: the drain needs the cut axis
+    std::vector<std::int64_t> start, end;                  // the CLIPPED extent
+    std::vector<std::int64_t> align_strand, sj_strand;
     std::vector<std::int64_t> observed_intron_offsets{0};  // in PAIRS, into observed_introns
     std::vector<std::int64_t> observed_introns;            // flat (start, end)
     std::vector<std::int64_t> hypothesis_offsets{0};       // into the per-hypothesis arrays below
@@ -287,10 +299,28 @@ struct DeferredFragments {
 
     /// Append one fragment with every hypothesis it arrived with. `start`/`end` are the CLIPPED extent,
     /// because that is what the drain must replay.
-    void append(const OfferedFragment& fragment, std::int64_t start, std::int64_t end);
+    ///
+    /// ⚠ EVERY hypothesis, including any the length filter removed. The record is what was OFFERED: the
+    /// second pass re-scores from scratch with a fragment-length distribution the first pass did not have,
+    /// so pre-pruning here would decide with the weaker evidence and hide the decision.
+    void append(const OfferedFragment& fragment,
+                std::int64_t ref_id,
+                std::int64_t start,
+                std::int64_t end);
 
-    /// Concatenate `other`, shifting its offsets. ⚠ Order is not canonical until the export sorts.
+    /// Concatenate `other`, shifting its offsets. ⚠ Order is not canonical until `canonicalise` runs.
     void merge_from(const DeferredFragments& other);
+
+    /// ⭐ Reorder the records into the ONE canonical order, which is the specification's:
+    ///
+    ///     (ref, start, end, align_strand, sj_strand, observed_introns, hypotheses)
+    ///
+    /// compared exactly as Python compares those tuples -- element-wise, and a PREFIX sorts BEFORE the
+    /// longer sequence it is a prefix of. Two records that tie on this key are identical records, so their
+    /// relative order cannot be observed and the sort needs no tie-break.
+    ///
+    /// ⚠ Idempotent, and it must be: the export calls it and a merged accumulator may already be sorted.
+    void canonicalise();
 };
 
 /// Reusable scratch so `deposit` allocates nothing on the per-fragment path.
@@ -343,9 +373,15 @@ public:
     /// is the fragment-length limit applied to L and the width of the pool histograms, and must be >= 1
     /// -- at 0 every real fragment would be dropped as too long and the whole tally would be silently
     /// empty.
+    ///
+    /// ⚠ `ref_id` is which reference this accumulator IS, and it is required rather than defaulted. An
+    /// Accumulator is described by its cut positions alone and has no other way to know: it is stamped
+    /// into every DEFERRED record, and the second pass replays those through `deposit` -- onto the wrong
+    /// cut axis if the stamp is wrong, which is the failure mode `merge_from`'s cut comparison exists for.
     explicit Accumulator(std::vector<std::int64_t> cuts,
                          std::vector<std::uint8_t> node_types,
-                         int max_length);
+                         int max_length,
+                         std::int32_t ref_id);
 
     /// Install this reference's junction edges as a CSR keyed by DONOR CUT INDEX -- the index the
     /// deposit already computes while locating the lines its path crosses.
@@ -406,7 +442,13 @@ public:
 
     const DepositCounters& counters() const noexcept { return counters_; }
     const GapCensus&       gap_census() const noexcept { return gap_census_; }
-    const DeferredFragments& deferred() const noexcept { return deferred_; }
+    std::int32_t           ref_id()     const noexcept { return ref_id_; }
+
+    /// The deferred queue in its ONE canonical order. ⛔ Non-const because it sorts: there is deliberately
+    /// no accessor that hands out the append order, because a caller who exported that would produce a
+    /// different byte sequence at every worker count and the determinism gate would fail on a difference
+    /// that means nothing.
+    const DeferredFragments& deferred_canonical();
 
     /// Index of the node containing `position`, clamped into [0, n_nodes - 1].
     ///
@@ -417,6 +459,18 @@ public:
 
     /// Deposit one fragment. Allocates nothing: `scratch` is reused across calls.
     DepositOutcome deposit(const OfferedFragment& fragment, DepositScratch& scratch);
+
+    /// ⭐ `L` under ONE hypothesis, without depositing anything — what the SECOND PASS scores against.
+    ///
+    /// ⛔ Exposed rather than reimplemented. `docs/FRAGMENT_LENGTH_AUDIT.md` C0/C2 left the tool with ONE
+    /// definition of fragment length, and the scorer needs a length per *counterfactual* hypothesis. A
+    /// Python reimplementation would be a second definition of exactly the quantity that audit existed to
+    /// unify — and it would be the one the drain then disagreed with.
+    ///
+    /// Returns the clipped `L`, or 0 when the fragment clips away entirely.
+    std::int64_t length_under(const OfferedFragment& fragment,
+                              std::size_t hypothesis_index,
+                              DepositScratch& scratch) const;
 
     /// Element-wise sum of `other` into this accumulator. Requires identical cut positions.
     void merge_from(const Accumulator& other);
@@ -469,6 +523,7 @@ private:
     std::vector<std::int8_t>   sj_strand_;         // n_junctions, the ANNOTATED strand
 
     std::vector<std::uint8_t>  node_types_;        // n_nodes, or empty (no pools)
+    std::int32_t               ref_id_ = 0;        // stamped into every deferred record
     int                        max_length_ = 0;
     std::vector<std::int64_t>  pool_lengths_;      // kNFragmentPools * (max_length + 1), or empty
     std::vector<std::uint32_t> deposited_lengths_; // max_length + 1 -- C1, unconditional given deposit

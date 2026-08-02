@@ -1000,6 +1000,114 @@ pair_multimapper_reads(
     return paired;
 }
 
+/// One `OfferedFragment` marshalled out of Python, with the storage its spans point into.
+///
+/// ⭐ Shared by `Accumulator.deposit` and `Accumulator.length_under` so the two cannot disagree about how
+/// a hypothesis set crosses the ABI. ⚠ Reads attributes off whatever it is handed, so the parity gate can
+/// pass the SAME `GapHypothesis` objects to the specification and to the binding; a binding with its own
+/// tuple convention would be a second representation to keep in step.
+struct MarshalledFragment {
+    std::vector<IntronBlock> observed;
+    std::vector<IntronBlock> implied;
+    std::vector<int32_t>     supporting;
+    std::vector<rigel::accumulator::GapHypothesis> spans;
+    rigel::accumulator::OfferedFragment offered{};
+
+    MarshalledFragment(int64_t start, int64_t end, nb::iterable introns,
+                       int32_t align_strand, int32_t sj_strand, nb::object hypotheses) {
+        for (nb::handle item : introns) {
+            auto pair = nb::cast<nb::tuple>(item);
+            observed.push_back({0, nb::cast<int32_t>(pair[0]), nb::cast<int32_t>(pair[1]), 0});
+        }
+        // ⛔ Reserved up front: the GapHypothesis spans below point INTO these vectors, so a reallocation
+        // while filling them would dangle every pointer already handed out.
+        std::size_t n_implied = 0, n_supporting = 0;
+        for (nb::handle h : hypotheses) {
+            n_implied += nb::len(nb::getattr(h, "introns"));
+            n_supporting += nb::len(nb::getattr(h, "supporting_t_inds"));
+        }
+        implied.reserve(n_implied);
+        supporting.reserve(n_supporting);
+
+        for (nb::handle h : hypotheses) {
+            const std::size_t i0 = implied.size(), t0 = supporting.size();
+            for (nb::handle item : nb::getattr(h, "introns")) {
+                auto pair = nb::cast<nb::tuple>(item);
+                implied.push_back({0, nb::cast<int32_t>(pair[0]), nb::cast<int32_t>(pair[1]), 0});
+            }
+            for (nb::handle t : nb::getattr(h, "supporting_t_inds"))
+                supporting.push_back(nb::cast<int32_t>(t));
+            spans.push_back({nullptr, implied.size() - i0,
+                             nb::cast<int32_t>(nb::getattr(h, "sj_strand")),
+                             nullptr, supporting.size() - t0});
+            spans.back().introns = reinterpret_cast<const IntronBlock*>(i0);
+            spans.back().supporting_t = reinterpret_cast<const int32_t*>(t0);
+        }
+        for (auto& span : spans) {  // offsets -> pointers, now that nothing more will grow
+            span.introns = implied.data() + reinterpret_cast<std::size_t>(span.introns);
+            span.supporting_t = supporting.data() + reinterpret_cast<std::size_t>(span.supporting_t);
+        }
+
+        offered.start = start;
+        offered.end = end;
+        offered.observed_introns = observed.data();
+        offered.n_observed_introns = observed.size();
+        offered.align_strand = align_strand;
+        offered.sj_strand = sj_strand;
+        offered.hypotheses = spans.data();
+        offered.n_hypotheses = spans.size();
+    }
+};
+
+// ================================================================
+// the two non-array banks, as Python dicts
+// ================================================================
+//
+// ⭐ Written ONCE and used by both the bound `Accumulator` (the parity surface) and `build_result` (the
+// payload). The specification's key strings live here and nowhere else on this side of the ABI, so the two
+// exports cannot disagree about a name — which is the whole reason the payload, the reference and the
+// parity gate share one vocabulary.
+
+/// The umbrella census, keyed by the specification's `GapResolution` values.
+///
+/// ⛔ There is no `gap_resolved_unspliced` key. See `GapCensus`: the unspliced hypothesis is always the
+/// longest, so it can never be the sole survivor, and the class it would name is unreachable.
+static nb::dict gap_census_dict(const rigel::accumulator::GapCensus& census) {
+    nb::dict out;
+    out["gap_resolved_spliced"]       = census.resolved_spliced;
+    out["gap_deferred_rna_or_gdna"]   = census.deferred_rna_or_gdna;
+    out["gap_deferred_which_introns"] = census.deferred_which_introns;
+    out["gap_deferred_both"]          = census.deferred_both;
+    return out;
+}
+
+/// The deferred queue as the CSR `Tally.deferred_arrays()` specifies — same keys, same dtype (int64
+/// throughout), same canonical order.
+///
+/// ⚠ Every array is COPIED out. The caller has just canonicalised, which may have reseated the underlying
+/// vectors, and a later export would reseat them again — a numpy view over them would dangle and read as
+/// plausible coordinates. The queue is 1–3.5 % of a library, so the copy is bounded and one-off.
+static nb::dict deferred_dict(const rigel::accumulator::DeferredFragments& deferred) {
+    nb::dict out;
+    const auto put = [&out](const char* name, const std::vector<int64_t>& v) {
+        out[name] = rigel::vec_to_ndarray(std::vector<int64_t>(v));
+    };
+    put("ref", deferred.ref);
+    put("start", deferred.start);
+    put("end", deferred.end);
+    put("align_strand", deferred.align_strand);
+    put("sj_strand", deferred.sj_strand);
+    put("observed_intron_offsets", deferred.observed_intron_offsets);
+    put("observed_introns", deferred.observed_introns);
+    put("hypothesis_offsets", deferred.hypothesis_offsets);
+    put("hypothesis_sj_strand", deferred.hypothesis_sj_strand);
+    put("hypothesis_intron_offsets", deferred.hypothesis_intron_offsets);
+    put("hypothesis_introns", deferred.hypothesis_introns);
+    put("hypothesis_t_offsets", deferred.hypothesis_t_offsets);
+    put("hypothesis_t", deferred.hypothesis_t);
+    return out;
+}
+
 // ================================================================
 // BamScanner — main scanning class
 // ================================================================
@@ -2030,9 +2138,17 @@ private:
             std::vector<uint32_t> deposited_lengths(pool_row, 0u);
 
             rigel::accumulator::DepositCounters qc;
+            rigel::accumulator::GapCensus      gap_census;
+            // ⭐ The side buffer, concatenated in REFERENCE ORDER — which is already the one canonical
+            // order, and needs no second sort. Each reference's bank is canonicalised on its own, and
+            // every record in it carries that reference's id, so `(ref, start, end, …)` ascends across the
+            // concatenation by construction. `merge_from` is exactly a CSR concatenation.
+            rigel::accumulator::DeferredFragments deferred;
 
             for (std::size_t f = 0; f < n_refs; ++f) {
-                const Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
+                Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
+                deferred.merge_from(a.deferred_canonical());
+                gap_census.merge_from(a.gap_census());
                 const Node* nodes = a.nodes_data();
                 const ContiguousEdge* edges = a.edges_data();
                 const JunctionEdge* junctions = a.junctions_data();
@@ -2139,6 +2255,11 @@ private:
             qc_dict["contradictory_sj_strand"]  = qc.contradictory_sj_strand;
             qc_dict["introns_absorbed"]         = qc.introns_absorbed;
             cal["qc"] = qc_dict;
+
+            // ⭐ The side buffer and the umbrella census, through the SAME two exporters the parity
+            // surface uses, so the payload and the bound Accumulator cannot disagree about a key.
+            cal["deferred"]       = deferred_dict(deferred);
+            cal["gap_resolution"] = gap_census_dict(gap_census);
 
             cal["n_strand_columns"] = static_cast<int>(kNStrandColumns);
             cal["n_fragment_pools"] = static_cast<int>(kNFragmentPools);
@@ -2744,17 +2865,21 @@ NB_MODULE(_bam_impl, m) {
                  [](Accumulator* self,
                     nb::ndarray<const int64_t, nb::ndim<1>, nb::c_contig> cuts,
                     nb::ndarray<const uint8_t, nb::ndim<1>, nb::c_contig> node_types,
-                    int max_length) {
+                    int max_length,
+                    int32_t ref) {
                      std::vector<int64_t> c(cuts.data(), cuts.data() + cuts.shape(0));
                      std::vector<uint8_t> t(node_types.data(),
                                             node_types.data() + node_types.shape(0));
-                     new (self) Accumulator(std::move(c), std::move(t), max_length);
+                     new (self) Accumulator(std::move(c), std::move(t), max_length, ref);
                  },
                  nb::arg("cuts"),
                  nb::arg("node_types"),
                  nb::arg("max_length"),
-                 "One reference's sorted cut positions, one coarse type per node, and the\n"
-                 "fragment-length limit (which is also the pool-histogram width).")
+                 nb::arg("ref"),
+                 "One reference's sorted cut positions, one coarse type per node, the\n"
+                 "fragment-length limit (which is also the pool-histogram width), and WHICH\n"
+                 "reference this is — stamped into every deferred record, because the second\n"
+                 "pass replays those onto that reference's cut axis.")
             .def("set_junctions",
                  [](Accumulator& a,
                     nb::ndarray<const int32_t, nb::ndim<1>, nb::c_contig> offsets,
@@ -2921,6 +3046,22 @@ NB_MODULE(_bam_impl, m) {
                 return qc;
             })
 
+            // ⭐ The umbrella census. The keys are the specification's `GapResolution` VALUES, character
+            // for character, so the parity gate compares dicts and no mapping table exists to drift.
+            .def_prop_ro("gap_resolution", [](const Accumulator& a) {
+                return gap_census_dict(a.gap_census());
+            })
+
+            // ⭐ The deferred queue, flattened exactly as `Tally.deferred_arrays()` specifies and in the
+            // SAME canonical order — the one bank whose order is observable, so the export sorts it.
+            //
+            // ⚠ Copies rather than viewing the C++ vectors. `canonicalise` may replace them wholesale on
+            // the next call, and a numpy view over a vector that is about to be reseated is a dangling
+            // pointer that reads as plausible numbers.
+            .def_prop_ro("deferred", [](Accumulator& a) {
+                return deferred_dict(a.deferred_canonical());
+            })
+
             .def("node_of_pos",
                  [](const Accumulator& a, int64_t pos) { return a.node_of_pos(pos); },
                  nb::arg("pos"))
@@ -2940,60 +3081,9 @@ NB_MODULE(_bam_impl, m) {
                     int32_t align_strand,
                     int32_t sj_strand,
                     nb::object hypotheses) {
-                     // ⚠ Reads attributes off whatever it is handed, so the parity gate can pass the
-                     // SAME `GapHypothesis` objects to the specification and to this. A binding with its
-                     // own tuple convention would be a second representation to keep in step.
-                     std::vector<IntronBlock> observed;
-                     for (nb::handle item : introns) {
-                         auto pair = nb::cast<nb::tuple>(item);
-                         observed.push_back({0, nb::cast<int32_t>(pair[0]),
-                                             nb::cast<int32_t>(pair[1]), 0});
-                     }
-                     // ⛔ Reserved up front: the GapHypothesis spans below point INTO these vectors, so a
-                     // reallocation while filling them would dangle every pointer already handed out.
-                     std::vector<IntronBlock> implied;
-                     std::vector<int32_t> supporting;
-                     std::size_t n_implied = 0, n_supporting = 0;
-                     for (nb::handle h : hypotheses) {
-                         n_implied += nb::len(nb::getattr(h, "introns"));
-                         n_supporting += nb::len(nb::getattr(h, "supporting_t_inds"));
-                     }
-                     implied.reserve(n_implied);
-                     supporting.reserve(n_supporting);
-
-                     std::vector<GapHypothesis> spans;
-                     for (nb::handle h : hypotheses) {
-                         const std::size_t i0 = implied.size(), t0 = supporting.size();
-                         for (nb::handle item : nb::getattr(h, "introns")) {
-                             auto pair = nb::cast<nb::tuple>(item);
-                             implied.push_back({0, nb::cast<int32_t>(pair[0]),
-                                                nb::cast<int32_t>(pair[1]), 0});
-                         }
-                         for (nb::handle t : nb::getattr(h, "supporting_t_inds"))
-                             supporting.push_back(nb::cast<int32_t>(t));
-                         spans.push_back({nullptr, implied.size() - i0,
-                                          nb::cast<int32_t>(nb::getattr(h, "sj_strand")),
-                                          nullptr, supporting.size() - t0});
-                         spans.back().introns = reinterpret_cast<const IntronBlock*>(i0);
-                         spans.back().supporting_t = reinterpret_cast<const int32_t*>(t0);
-                     }
-                     for (auto& span : spans) {  // offsets -> pointers, now that nothing more will grow
-                         span.introns = implied.data() + reinterpret_cast<std::size_t>(span.introns);
-                         span.supporting_t =
-                             supporting.data() + reinterpret_cast<std::size_t>(span.supporting_t);
-                     }
-
-                     OfferedFragment offered;
-                     offered.start = start;
-                     offered.end = end;
-                     offered.observed_introns = observed.data();
-                     offered.n_observed_introns = observed.size();
-                     offered.align_strand = align_strand;
-                     offered.sj_strand = sj_strand;
-                     offered.hypotheses = spans.data();
-                     offered.n_hypotheses = spans.size();
+                     MarshalledFragment m(start, end, introns, align_strand, sj_strand, hypotheses);
                      return std::string(
-                         rigel::accumulator::outcome_key(a.deposit(offered, binding_scratch)));
+                         rigel::accumulator::outcome_key(a.deposit(m.offered, binding_scratch)));
                  },
                  nb::arg("start"),
                  nb::arg("end"),
@@ -3001,6 +3091,30 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("align_strand") = STRAND_POS,
                  nb::arg("sj_strand") = STRAND_NONE,
                  nb::arg("hypotheses"))
+
+            // ⭐ L under ONE hypothesis, without depositing — what the second pass scores against.
+            // ⛔ Exposed rather than reimplemented in Python: C0/C2 left the tool with ONE definition of
+            // fragment length, and a scorer that computed its own would be a second definition of exactly
+            // the quantity that audit unified — and the one the drain would then disagree with.
+            .def("length_under",
+                 [](const Accumulator& a,
+                    int64_t start,
+                    int64_t end,
+                    nb::iterable introns,
+                    int32_t align_strand,
+                    int32_t sj_strand,
+                    nb::object hypotheses,
+                    std::size_t hypothesis_index) {
+                     MarshalledFragment m(start, end, introns, align_strand, sj_strand, hypotheses);
+                     return a.length_under(m.offered, hypothesis_index, binding_scratch);
+                 },
+                 nb::arg("start"),
+                 nb::arg("end"),
+                 nb::arg("observed_introns") = nb::tuple(),
+                 nb::arg("align_strand") = STRAND_POS,
+                 nb::arg("sj_strand") = STRAND_NONE,
+                 nb::arg("hypotheses") = nb::tuple(),
+                 nb::arg("hypothesis_index") = 0)
 
             // Element-wise sum of `other` into this accumulator — the per-worker merge the parallel scan
             // performs internally, exposed so the DETERMINISM contract can be tested directly: shard one

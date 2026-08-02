@@ -986,6 +986,18 @@ private:
                        cr.gap_introns[lo + i].end == path[i].end;
             }
             if (!same) continue;
+            // ⛔ ONE PATH, BUT ITS SUPPORTERS MAY DISAGREE ABOUT THE STRAND. Grouping on coordinates is
+            // right -- two transcripts implying the same introns imply the same molecule -- but the
+            // hypothesis carries ONE `sj_strand`, and keeping the first supporter's would make the answer
+            // depend on the order the transcripts happen to sit in the GTF. AMBIGUOUS is what this state
+            // is called everywhere else (the fragment-level `sj_strand` uses it for exactly this:
+            // contradictory evidence, not missing evidence), and `deposit` already refuses to credit a
+            // junction on it. ⚠ Idempotent: once AMBIGUOUS, any further disagreement keeps it there.
+            //
+            // ⚠ Unreachable on human data -- 0 of 404,168 junction coordinates are annotated on both
+            // strands, and the index warns that it is biologically impossible. Fixed because the
+            // alternative is a silent answer that flips when two GTF lines are swapped.
+            if (cr.gap_sj_strand[h] != strand) cr.gap_sj_strand[h] = STRAND_AMBIGUOUS;
             // ⚠ Inserted in place so the supporting lists stay contiguous per hypothesis.
             cr.gap_supporting.insert(cr.gap_supporting.begin() + cr.gap_supporting_offsets[h + 1], t);
             for (int32_t k = h + 1; k < static_cast<int32_t>(cr.gap_supporting_offsets.size()); ++k)

@@ -199,15 +199,26 @@ class GapResolution(enum.Enum):
     much as an ``UNSPLICED`` one does. Putting these values on ``splice_type`` would need two labels per
     fragment and would break C2.0's property that the splice census sums to the library.
 
-    ⚠ These classify the ARBITRATION, not the deposit. A ``DETERMINED_*`` fragment can still be rejected
+    ⚠ These classify the ARBITRATION, not the deposit. A ``RESOLVED_*`` fragment can still be rejected
     afterwards as ``TOO_LONG`` — that is a different question and it has its own counter.
+
+    ⛔ **THERE IS NO ``RESOLVED_UNSPLICED``, AND IT IS NOT AN OMISSION.** An earlier version of this enum
+    had one, described as "the genomic hypothesis survived alone because every spliced path was longer than
+    ``max_fragment_length``". That is impossible. A spliced hypothesis CUTS bases the genomic one keeps, so
+    ``L_spliced <= L_genomic`` always; the one filter is ``L <= max_fragment_length``; therefore if the
+    genomic path survives the filter **every** spliced path survives it too, and the survivor set can never
+    be exactly ``{genomic}`` while a spliced path was offered — which is the condition for being in this
+    census at all. The class could not be entered by any fragment.
+
+    ⭐ It is deleted rather than left at zero, and the property it depended on is pinned directly by
+    ``test_gap_hypothesis_arbitration.test_the_GENOMIC_hypothesis_is_ALWAYS_the_LONGEST`` — the *reason*,
+    not the consequence, so a future filter that broke the ordering would fail there instead of silently
+    making a deleted class necessary again.
     """
 
-    #: One hypothesis survived and it cuts something: the gap intron is real and ``L`` excludes it.
+    #: One hypothesis survived. It cuts something — see the class docstring for why it cannot be the
+    #: genomic one — so the gap intron is real and ``L`` excludes it.
     RESOLVED_SPLICED = "gap_resolved_spliced"
-    #: One hypothesis survived and it is the genomic one — every spliced path was ruled out (a path
-    #: longer than ``max_fragment_length`` is not a molecule this chemistry sequences).
-    RESOLVED_UNSPLICED = "gap_resolved_unspliced"
     #: ⛔ The genomic path against exactly one spliced path. The open question is **RNA or gDNA** — one
     #: bit, and it is the composition question calibration exists to answer.
     DEFERRED_RNA_OR_GDNA = "gap_deferred_rna_or_gdna"
@@ -873,11 +884,10 @@ class Accumulator:
         n_spliced = sum(1 for h, *_ in survivors if not h.is_unspliced)
         unspliced_survives = any(h.is_unspliced for h, *_ in survivors)
         if len(survivors) == 1:
-            resolution = (
-                GapResolution.RESOLVED_UNSPLICED
-                if unspliced_survives
-                else GapResolution.RESOLVED_SPLICED
-            )
+            # ⛔ The sole survivor is necessarily the SPLICED one, and there is no branch for the other
+            # case because it cannot occur: the genomic path is always the longest, so it can never be the
+            # last one left. See :class:`GapResolution`.
+            resolution = GapResolution.RESOLVED_SPLICED
         elif not unspliced_survives:
             resolution = (
                 GapResolution.DEFERRED_WHICH_INTRONS

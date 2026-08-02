@@ -96,6 +96,51 @@ def test_the_SAME_fragment_deposits_when_only_ONE_transcript_is_compatible():
     assert t.gap_resolution["gap_resolved_spliced"] == 1
 
 
+def test_the_GENOMIC_hypothesis_is_ALWAYS_the_LONGEST():
+    """⭐ The property the census's shape rests on, pinned as the REASON and not as a consequence.
+
+    A spliced hypothesis cuts bases the genomic one keeps, so ``L_spliced <= L_genomic`` — always, for any
+    extent, any observed introns and any implied path. The single arbitration filter is
+    ``L <= max_fragment_length``, so it follows that **if the genomic path survives, every spliced path
+    survives too**, and the survivor set can never be exactly ``{genomic}`` while a spliced path was
+    offered.
+
+    ⛔ That is why :class:`GapResolution` has no ``RESOLVED_UNSPLICED``: the class existed, was documented
+    as "every spliced path was ruled out by length", and **no fragment could enter it**. Deleting the class
+    and pinning the ordering here is what stops it coming back — a future filter that made the ordering
+    false would fail this test rather than quietly need a class that is gone.
+
+    ⚠ Randomised over the whole coordinate space rather than over hand-picked cases, because the claim is
+    universal. Introns are drawn unsorted and may be reversed, zero-length, overlapping, nested, or
+    entirely outside the fragment — every configuration ``_normalise_introns`` exists for.
+    """
+    import random
+
+    acc = _acc()
+    rng = random.Random(20260801)
+    checked = 0
+    for _ in range(20_000):
+        start, end = sorted(rng.sample(range(0, 6001), 2))
+        if end == start:
+            continue
+        observed = tuple(tuple(rng.sample(range(0, 6001), 2)) for _ in range(rng.randint(0, 2)))
+        genomic, _introns, _absorbed = acc._hypothesis_length(start, end, observed, GapHypothesis())
+        for _ in range(rng.randint(1, 3)):
+            spliced_path = GapHypothesis(
+                tuple(tuple(rng.sample(range(0, 6001), 2)) for _ in range(rng.randint(1, 3)))
+            )
+            spliced, _introns, _absorbed = acc._hypothesis_length(
+                start, end, observed, spliced_path
+            )
+            checked += 1
+            assert spliced <= genomic, (
+                f"[{start},{end}) observed={observed} path={spliced_path.introns}: the spliced path "
+                f"L={spliced} exceeds the genomic L={genomic}. Cutting bases cannot lengthen a molecule, "
+                f"so this breaks the ordering GapResolution's shape depends on."
+            )
+    assert checked > 15_000, f"only {checked} pairs compared; the sweep is not doing its job"
+
+
 def test_the_genomic_hypothesis_is_the_EMPTY_path_and_needs_no_flag():
     """⭐ Cutting nothing means the gap is real template — the molecule is gDNA, or nascent, which is the
     same unspliced span. So "could this be genomic?" needs no separate flag, and the nascent shadow
@@ -215,7 +260,6 @@ def test_the_gap_resolution_SUBCLASSES_CLOSE_against_the_umbrella_and_the_deferr
     census = acc.tally.gap_resolution
     assert census == {
         "gap_resolved_spliced": 1,
-        "gap_resolved_unspliced": 0,
         "gap_deferred_rna_or_gdna": 1,
         "gap_deferred_which_introns": 1,
         "gap_deferred_both": 1,

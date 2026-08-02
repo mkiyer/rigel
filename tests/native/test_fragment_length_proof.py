@@ -74,7 +74,7 @@ import itertools
 import numpy as np
 import pytest
 
-from ._accumulator_reference import Accumulator, DepositOutcome, Partition
+from ._accumulator_reference import Accumulator, DepositOutcome, GapHypothesis, Partition
 
 
 # --- the oracle -------------------------------------------------------------------------------------
@@ -163,7 +163,7 @@ def _observed(acc: Accumulator):
 def _check_one(start: int, end: int, introns) -> None:
     """Deposit one fragment and assert every population against the set oracle."""
     acc = _acc()
-    outcome = acc.deposit(0, start, end, introns=introns)
+    outcome = acc.deposit(0, start, end, observed_introns=introns)
     want = oracle_deposits(_CUTS, _REF_LEN, start, end, introns, spliced=False)
 
     if want is None:
@@ -264,7 +264,7 @@ def test_randomised_at_realistic_scale():
             a = int(rng.integers(start - 20, end + 20))
             introns.append((a, a + int(rng.integers(0, 900))))
         acc = Accumulator(part, max_fragment_length=10**9)
-        outcome = acc.deposit(0, start, end, introns=introns)
+        outcome = acc.deposit(0, start, end, observed_introns=introns)
         want = oracle_deposits(cuts, ref_len, start, end, introns, spliced=False)
         ctx = f"[{start},{end}) introns={introns}"
         if want is None:
@@ -302,7 +302,7 @@ def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
     """
     # a paired-end molecule with an unsequenced mate gap: the gap IS part of the molecule
     acc = _acc()
-    acc.deposit(0, 1, 11, introns=[])
+    acc.deposit(0, 1, 11, observed_introns=[])
     assert int(acc.tally.node_contained_count.sum()) == 0
     got_crossed, _, _ = _observed(acc)
     assert got_crossed == {0, 1, 2}, (
@@ -311,7 +311,7 @@ def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
 
     # the same span with the middle excised as an intron: L shrinks AND the lines under it go uncrossed
     acc2 = _acc()
-    acc2.deposit(0, 1, 11, introns=[(3, 9)])
+    acc2.deposit(0, 1, 11, observed_introns=[(3, 9)])
     got2, _, _ = _observed(acc2)
     assert got2 == set(), "an intron must not carry the molecule across the lines it splices over"
     assert len(covered_bases(_REF_LEN, 1, 11, [(3, 9)])) == 4
@@ -339,7 +339,7 @@ def test_deposited_lengths_bins_every_accepted_fragment_exactly_once():
         (-3, 15, []),  # clipped to the reference on both sides
         (0, 12, [(0, 3)]),  # a leading intron: the path starts at 3
     ):
-        assert acc.deposit(0, start, end, introns=introns) is DepositOutcome.DEPOSITED
+        assert acc.deposit(0, start, end, observed_introns=introns) is DepositOutcome.DEPOSITED
         lengths.append(len(covered_bases(_REF_LEN, start, end, introns)))
     t = acc.tally
     assert int(t.deposited_lengths.sum()) == len(lengths)
@@ -354,7 +354,7 @@ def test_deposited_lengths_bins_every_accepted_fragment_exactly_once():
 
 def test_a_REJECTED_fragment_is_not_binned():
     """⚠ "Unconditional GIVEN DEPOSIT" — and the given matters. A fragment over the length limit, or one
-    whose path is ambiguous, deposits nothing and must bin nothing; each is counted in ``qc`` instead.
+    whose path is undetermined, deposits nothing and must bin nothing; each is counted in ``qc`` instead.
 
     ⭐ That is what makes this the right EB anchor rather than merely a convenient one: it describes
     **exactly** the population the five pure pools are drawn from. An anchor over a wider population than
@@ -362,16 +362,21 @@ def test_a_REJECTED_fragment_is_not_binned():
     remove.
     """
     acc = _acc(max_fragment_length=4)
-    assert acc.deposit(0, 0, 12, introns=[]) is DepositOutcome.TOO_LONG
+    assert acc.deposit(0, 0, 12, observed_introns=[]) is DepositOutcome.TOO_LONG
     assert int(acc.tally.deposited_lengths.sum()) == 0
     assert acc.tally.qc[DepositOutcome.TOO_LONG.value] == 1
 
+    # ⭐ A DEFERRED fragment: two hypotheses about its unsequenced gap survive, so its L is not one number
+    # and there is nothing to bin. ⚠ The deferral is now the ACCUMULATOR's verdict — the caller no longer
+    # passes a bool — so it has to be produced by handing over a set with two answers in it.
     acc2 = _acc()
-    assert acc2.deposit(0, 0, 5, introns=[], path_ambiguous=True) is DepositOutcome.AMBIGUOUS_PATH
+    outcome = acc2.deposit(0, 0, 5, hypotheses=(GapHypothesis(((1, 3),)), GapHypothesis()))
+    assert outcome is DepositOutcome.DEFERRED
     assert int(acc2.tally.deposited_lengths.sum()) == 0
+    assert len(acc2.tally.deferred) == 1, "and it is HELD, not dropped"
 
     acc3 = _acc()
-    assert acc3.deposit(0, 4, 4, introns=[]) is DepositOutcome.EMPTY
+    assert acc3.deposit(0, 4, 4, observed_introns=[]) is DepositOutcome.EMPTY
     assert int(acc3.tally.deposited_lengths.sum()) == 0
 
 
@@ -385,7 +390,7 @@ def test_the_unconditional_histogram_is_a_SUPERSET_of_the_pure_pools():
     """
     acc = _acc(max_fragment_length=64)
     for start, end in ((0, 2), (0, 5), (1, 11), (3, 4), (5, 9), (2, 12)):
-        acc.deposit(0, start, end, introns=[])
+        acc.deposit(0, start, end, observed_introns=[])
     t = acc.tally
     pooled = t.pool_lengths.sum(axis=0)
     assert pooled.sum() > 0, "the fixture must actually populate some pools or this proves nothing"

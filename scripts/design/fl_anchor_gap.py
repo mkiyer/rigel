@@ -120,9 +120,16 @@ def measure(cond_name: str, cache, truth: dict[str, np.ndarray] | None) -> dict:
         "qc": {
             "deposited": payload.qc.deposited,
             "dropped_too_long": payload.qc.dropped_too_long,
-            "dropped_ambiguous_path": payload.qc.dropped_ambiguous_path,
-            "sj_implicit_fragments": payload.qc.sj_implicit_fragments,
+            "deferred_undetermined_gap": payload.qc.deferred_undetermined_gap,
             "introns_absorbed": payload.qc.introns_absorbed,
+            # ⭐ The umbrella census, so the deferred total can be read as its three subclasses: is the
+            # open question RNA-or-gDNA, which-structure, or both? `sj_implicit_fragments` used to sit
+            # here and is GONE — D1 is deleted, and "this L was partly inferred" no longer selects
+            # anything: a fragment deposits when exactly ONE hypothesis survives, however it got there.
+            "gap_resolved_spliced": payload.gap_resolution.gap_resolved_spliced,
+            "gap_deferred_rna_or_gdna": payload.gap_resolution.gap_deferred_rna_or_gdna,
+            "gap_deferred_which_introns": payload.gap_resolution.gap_deferred_which_introns,
+            "gap_deferred_both": payload.gap_resolution.gap_deferred_both,
         },
     }
     row["qc"]["dropped_too_long_frac"] = (
@@ -267,21 +274,27 @@ def main() -> int:
         print("      with no introns — impossible, therefore a bug.")
 
         print()
-        print("═══ D1 · mass barred from the pure-RNA pool · D3 · the residual above the ceiling ═══")
-        print(f"{'condition':<44} {'deposited':>10} {'sj_implicit':>12} {'frac':>8} "
-              f"{'ambig_path':>11} {'RNA pool n':>11} {'D3 resid':>9}")
-        print("-" * 116)
+        print("═══ the side buffer · how each gap resolved · D3 · the residual above the ceiling ═══")
+        print(f"{'condition':<44} {'deposited':>10} {'resolved':>9} {'defer':>8} {'frac':>7} "
+              f"{'rna|dna':>8} {'which':>7} {'both':>6} {'RNA pool n':>11} {'D3 resid':>9}")
+        print("-" * 130)
         for r in scored:
             qc = r["qc"]
-            frac = qc["sj_implicit_fragments"] / qc["deposited"] if qc["deposited"] else float("nan")
-            print(f"{r['condition']:<44} {qc['deposited']:10d} {qc['sj_implicit_fragments']:12d} "
-                  f"{_fmt(frac, 8, 4)} {qc['dropped_ambiguous_path']:11d} "
+            offered = qc["deposited"] + qc["deferred_undetermined_gap"]
+            frac = qc["deferred_undetermined_gap"] / offered if offered else float("nan")
+            print(f"{r['condition']:<44} {qc['deposited']:10d} {qc['gap_resolved_spliced']:9d} "
+                  f"{qc['deferred_undetermined_gap']:8d} {_fmt(frac, 7, 4)} "
+                  f"{qc['gap_deferred_rna_or_gdna']:8d} {qc['gap_deferred_which_introns']:7d} "
+                  f"{qc['gap_deferred_both']:6d} "
                   f"{r['rna_pool']['n']:11d} {_fmt(r['anchor_vs_mrna']['mass_above_truth_ceiling'])}")
-        print("   ⚠ `sj_implicit` now counts MIXED fragments too (D1), so both the pool's mean and its")
-        print("      size move, and for two reasons at once — the intron is cut AND the fragment leaves.")
-        print("   ⚠ `D3 resid` is the mass still above the true ceiling. A mate gap holding TWO annotated")
-        print("      introns keeps only the first cut, and this is where that shows up. Measure it; do")
-        print("      NOT close it with a constant.")
+        print("   ⛔ `defer` is HELD, not dropped: those fragments are in the side buffer, whole, and the")
+        print("      identity is deposited + deferred + dropped_* == offered. ⚠ Between S1 and S3 the")
+        print("      tally is deliberately THINNER — do NOT read the anchor's accuracy as a regression.")
+        print("   ⚠ The deferred population is the LONG one: a longer gap admits more hypotheses. So the")
+        print("      surviving anchor is biased SHORT and every junction-opportunity number in the docs")
+        print("      must be re-measured AFTER the drain, not before.")
+        print("   ⚠ `D3 resid` is the mass still above the true ceiling. Measure it; do NOT close it with")
+        print("      a constant.")
 
     if args.json:
         args.json.write_text(json.dumps(rows, indent=2, sort_keys=True))

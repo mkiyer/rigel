@@ -28,15 +28,16 @@ void DepositCounters::merge_from(const DepositCounters& other) noexcept {
 
 void GapCensus::merge_from(const GapCensus& other) noexcept {
     resolved_spliced       += other.resolved_spliced;
-    resolved_unspliced     += other.resolved_unspliced;
     deferred_rna_or_gdna   += other.deferred_rna_or_gdna;
     deferred_which_introns += other.deferred_which_introns;
     deferred_both          += other.deferred_both;
 }
 
 void DeferredFragments::append(const OfferedFragment& fragment,
+                               std::int64_t ref_id,
                                std::int64_t clipped_start,
                                std::int64_t clipped_end) {
+    ref.push_back(ref_id);
     start.push_back(clipped_start);
     end.push_back(clipped_end);
     align_strand.push_back(fragment.align_strand);
@@ -69,6 +70,7 @@ void DeferredFragments::merge_from(const DeferredFragments& other) {
         const std::int64_t base = into.back();
         for (std::size_t i = 1; i < from.size(); ++i) into.push_back(base + from[i]);
     };
+    ref.insert(ref.end(), other.ref.begin(), other.ref.end());
     start.insert(start.end(), other.start.begin(), other.start.end());
     end.insert(end.end(), other.end.begin(), other.end.end());
     align_strand.insert(align_strand.end(), other.align_strand.begin(), other.align_strand.end());
@@ -86,15 +88,160 @@ void DeferredFragments::merge_from(const DeferredFragments& other) {
     hypothesis_t.insert(hypothesis_t.end(), other.hypothesis_t.begin(), other.hypothesis_t.end());
 }
 
+namespace {
+
+/// Python's sequence comparison, exactly: element-wise, and a PREFIX sorts BEFORE the longer sequence it
+/// is a prefix of. Returns -1, 0 or 1.
+///
+/// ⚠ A flat run of (start, end) PAIRS compares identically to Python's tuple-of-pairs, because a pair has
+/// fixed length 2 -- so there is no need to compare pairwise and the same helper serves both the intron
+/// runs and the supporting-transcript runs.
+inline int lex_compare(const std::int64_t* a, std::size_t na,
+                       const std::int64_t* b, std::size_t nb) noexcept
+{
+    const std::size_t common = std::min(na, nb);
+    for (std::size_t i = 0; i < common; ++i) {
+        if (a[i] != b[i]) return a[i] < b[i] ? -1 : 1;
+    }
+    if (na == nb) return 0;
+    return na < nb ? -1 : 1;
+}
+
+inline int scalar_compare(std::int64_t a, std::int64_t b) noexcept {
+    if (a == b) return 0;
+    return a < b ? -1 : 1;
+}
+
+}  // namespace
+
+void DeferredFragments::canonicalise() {
+    const std::size_t n = size();
+    if (n < 2) return;
+
+    // ⭐ The specification's key, in the specification's order:
+    //     (ref, start, end, align_strand, sj_strand, observed_introns, hypotheses)
+    // where `hypotheses` is the sequence of (introns, sj_strand, supporting_t) triples. Compared as Python
+    // compares those tuples -- see `lex_compare` for the prefix rule, which is the part a hand-rolled
+    // comparator gets wrong: a one-intron path is NOT equal to a two-intron path that starts with it.
+    const auto record_less = [this](std::size_t a, std::size_t b) {
+        for (const std::vector<std::int64_t>* column : {&ref, &start, &end, &align_strand, &sj_strand}) {
+            const int c = scalar_compare((*column)[a], (*column)[b]);
+            if (c != 0) return c < 0;
+        }
+        const auto observed_run = [this](std::size_t i) {
+            const std::size_t lo = static_cast<std::size_t>(observed_intron_offsets[i]);
+            const std::size_t hi = static_cast<std::size_t>(observed_intron_offsets[i + 1]);
+            return std::pair{observed_introns.data() + 2 * lo, 2 * (hi - lo)};
+        };
+        const auto [a_obs, a_n_obs] = observed_run(a);
+        const auto [b_obs, b_n_obs] = observed_run(b);
+        const int c_obs = lex_compare(a_obs, a_n_obs, b_obs, b_n_obs);
+        if (c_obs != 0) return c_obs < 0;
+
+        const std::size_t a_h0 = static_cast<std::size_t>(hypothesis_offsets[a]);
+        const std::size_t a_h1 = static_cast<std::size_t>(hypothesis_offsets[a + 1]);
+        const std::size_t b_h0 = static_cast<std::size_t>(hypothesis_offsets[b]);
+        const std::size_t b_h1 = static_cast<std::size_t>(hypothesis_offsets[b + 1]);
+        const std::size_t common = std::min(a_h1 - a_h0, b_h1 - b_h0);
+        for (std::size_t k = 0; k < common; ++k) {
+            const std::size_t ga = a_h0 + k, gb = b_h0 + k;
+            const auto intron_run = [this](std::size_t g) {
+                const std::size_t lo = static_cast<std::size_t>(hypothesis_intron_offsets[g]);
+                const std::size_t hi = static_cast<std::size_t>(hypothesis_intron_offsets[g + 1]);
+                return std::pair{hypothesis_introns.data() + 2 * lo, 2 * (hi - lo)};
+            };
+            const auto [a_in, a_n_in] = intron_run(ga);
+            const auto [b_in, b_n_in] = intron_run(gb);
+            int c = lex_compare(a_in, a_n_in, b_in, b_n_in);
+            if (c != 0) return c < 0;
+            c = scalar_compare(hypothesis_sj_strand[ga], hypothesis_sj_strand[gb]);
+            if (c != 0) return c < 0;
+            const std::size_t a_t0 = static_cast<std::size_t>(hypothesis_t_offsets[ga]);
+            const std::size_t a_t1 = static_cast<std::size_t>(hypothesis_t_offsets[ga + 1]);
+            const std::size_t b_t0 = static_cast<std::size_t>(hypothesis_t_offsets[gb]);
+            const std::size_t b_t1 = static_cast<std::size_t>(hypothesis_t_offsets[gb + 1]);
+            c = lex_compare(hypothesis_t.data() + a_t0, a_t1 - a_t0,
+                            hypothesis_t.data() + b_t0, b_t1 - b_t0);
+            if (c != 0) return c < 0;
+        }
+        return (a_h1 - a_h0) < (b_h1 - b_h0);
+    };
+
+    std::vector<std::size_t> order(n);
+    for (std::size_t i = 0; i < n; ++i) order[i] = i;
+    // ⚠ Not a stable sort, and it does not need to be: two records that tie on the whole key are
+    // byte-identical records, so no permutation of them is observable in the exported arrays.
+    std::sort(order.begin(), order.end(), record_less);
+
+    bool identity = true;
+    for (std::size_t i = 0; i < n && identity; ++i) identity = (order[i] == i);
+    if (identity) return;  // keeps a second export free, which is what makes this idempotent in practice
+
+    DeferredFragments out;
+    out.ref.reserve(n);
+    out.start.reserve(n);
+    out.end.reserve(n);
+    out.align_strand.reserve(n);
+    out.sj_strand.reserve(n);
+    out.observed_intron_offsets.reserve(n + 1);
+    out.observed_introns.reserve(observed_introns.size());
+    out.hypothesis_offsets.reserve(n + 1);
+    out.hypothesis_sj_strand.reserve(hypothesis_sj_strand.size());
+    out.hypothesis_intron_offsets.reserve(hypothesis_sj_strand.size() + 1);
+    out.hypothesis_introns.reserve(hypothesis_introns.size());
+    out.hypothesis_t_offsets.reserve(hypothesis_sj_strand.size() + 1);
+    out.hypothesis_t.reserve(hypothesis_t.size());
+
+    for (const std::size_t i : order) {
+        out.ref.push_back(ref[i]);
+        out.start.push_back(start[i]);
+        out.end.push_back(end[i]);
+        out.align_strand.push_back(align_strand[i]);
+        out.sj_strand.push_back(sj_strand[i]);
+        for (std::size_t p = static_cast<std::size_t>(observed_intron_offsets[i]);
+             p < static_cast<std::size_t>(observed_intron_offsets[i + 1]); ++p) {
+            out.observed_introns.push_back(observed_introns[2 * p]);
+            out.observed_introns.push_back(observed_introns[2 * p + 1]);
+        }
+        out.observed_intron_offsets.push_back(
+            static_cast<std::int64_t>(out.observed_introns.size() / 2));
+        for (std::size_t g = static_cast<std::size_t>(hypothesis_offsets[i]);
+             g < static_cast<std::size_t>(hypothesis_offsets[i + 1]); ++g) {
+            out.hypothesis_sj_strand.push_back(hypothesis_sj_strand[g]);
+            for (std::size_t p = static_cast<std::size_t>(hypothesis_intron_offsets[g]);
+                 p < static_cast<std::size_t>(hypothesis_intron_offsets[g + 1]); ++p) {
+                out.hypothesis_introns.push_back(hypothesis_introns[2 * p]);
+                out.hypothesis_introns.push_back(hypothesis_introns[2 * p + 1]);
+            }
+            out.hypothesis_intron_offsets.push_back(
+                static_cast<std::int64_t>(out.hypothesis_introns.size() / 2));
+            for (std::size_t t = static_cast<std::size_t>(hypothesis_t_offsets[g]);
+                 t < static_cast<std::size_t>(hypothesis_t_offsets[g + 1]); ++t) {
+                out.hypothesis_t.push_back(hypothesis_t[t]);
+            }
+            out.hypothesis_t_offsets.push_back(static_cast<std::int64_t>(out.hypothesis_t.size()));
+        }
+        out.hypothesis_offsets.push_back(static_cast<std::int64_t>(out.hypothesis_sj_strand.size()));
+    }
+    *this = std::move(out);
+}
+
 // ============================================================================
 // construction
 // ============================================================================
 
 Accumulator::Accumulator(std::vector<std::int64_t> cuts,
                          std::vector<std::uint8_t> node_types,
-                         int max_length)
-    : cuts_(std::move(cuts)), max_length_(max_length)
+                         int max_length,
+                         std::int32_t ref_id)
+    : cuts_(std::move(cuts)), ref_id_(ref_id), max_length_(max_length)
 {
+    if (ref_id_ < 0) {
+        throw std::invalid_argument(
+            "accumulator: ref_id must be >= 0, got " + std::to_string(ref_id_) +
+            ". It is stamped into every deferred record and the second pass replays those onto that "
+            "reference's cut axis, so there is no such thing as a fragment held for no reference.");
+    }
     if (max_length_ < 1) {
         throw std::invalid_argument(
             "accumulator: max_length must be >= 1, got " + std::to_string(max_length_) +
@@ -373,7 +520,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     if (any_spliced_hypothesis) record_gap_resolution(fragment, survivors);
 
     if (survivors.size() > 1) {
-        deferred_.append(fragment, start, end);
+        deferred_.append(fragment, ref_id_, start, end);
         ++counters_.deferred_undetermined_gap;
         return DepositOutcome::kDeferred;
     }
@@ -525,8 +672,10 @@ void Accumulator::record_gap_resolution(const OfferedFragment& fragment,
         else ++n_spliced;
     }
     if (survivors.size() == 1) {
-        if (unspliced_survives) ++gap_census_.resolved_unspliced;
-        else                    ++gap_census_.resolved_spliced;
+        // ⛔ The sole survivor is necessarily the SPLICED one, and there is no branch for the other case
+        // because it cannot occur: the unspliced path is always the longest, so it can never be the last
+        // one left. See `GapCensus`.
+        ++gap_census_.resolved_spliced;
     } else if (!unspliced_survives) {
         ++gap_census_.deferred_which_introns;   // certified RNA; only the structure is open
     } else if (n_spliced == 1) {
@@ -571,6 +720,26 @@ std::int64_t Accumulator::fragment_pool(bool spliced,
     return -1;
 }
 
+std::int64_t Accumulator::length_under(const OfferedFragment& fragment,
+                                       std::size_t hypothesis_index,
+                                       DepositScratch& scratch) const
+{
+    // ⚠ The SAME clip `deposit` applies, and in the same order: L is measured after clipping to the
+    // reference, so a scorer that skipped it would score a length the deposit can never produce.
+    if (cuts_.size() < 2 || hypothesis_index >= fragment.n_hypotheses) return 0;
+    const std::int64_t start = std::max(fragment.start, cuts_.front());
+    const std::int64_t end   = std::min(fragment.end,   cuts_.back());
+    if (end <= start) return 0;
+    std::int64_t absorbed = 0;
+    return hypothesis_length(fragment, fragment.hypotheses[hypothesis_index], start, end, scratch,
+                             &absorbed);
+}
+
+const DeferredFragments& Accumulator::deferred_canonical() {
+    deferred_.canonicalise();
+    return deferred_;
+}
+
 // ============================================================================
 // the per-worker merge
 // ============================================================================
@@ -578,6 +747,14 @@ std::int64_t Accumulator::fragment_pool(bool spliced,
 void Accumulator::merge_from(const Accumulator& other) {
     // ⚠ The cut arrays must match element-wise. A ref-id mismatch here once silently dropped 476,719 of
     // 476,732 fragments while every golden test passed, so this compares positions rather than sizes.
+    //
+    // ⭐ And now it can compare the ref id itself, which is what that bug was actually about — two
+    // references with coincidentally identical cut axes would have passed the position check.
+    if (ref_id_ != other.ref_id_) {
+        throw std::invalid_argument(
+            "accumulator: merge_from requires the same reference (this is ref " +
+            std::to_string(ref_id_) + ", other is ref " + std::to_string(other.ref_id_) + ")");
+    }
     if (cuts_ != other.cuts_) {
         throw std::invalid_argument(
             "accumulator: merge_from requires identical cut positions (this has " +
@@ -677,7 +854,8 @@ AccumulatorSet::AccumulatorSet(const std::int64_t* cut_positions,
             }
             types.assign(node_types + node_base, node_types + node_base + n_nodes);
         }
-        accs_.emplace_back(std::move(cuts), std::move(types), max_length);
+        accs_.emplace_back(std::move(cuts), std::move(types), max_length,
+                           static_cast<std::int32_t>(f));
         node_base += n_nodes;
     }
 }

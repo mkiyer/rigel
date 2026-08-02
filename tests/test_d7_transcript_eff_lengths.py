@@ -84,9 +84,7 @@ def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
     shipped = np.asarray(pr.estimator.effective_lengths, dtype=np.float64)
 
     # Rebuilt from the payload alone, by the same route production takes but from an independent scan.
-    _, _, _, payload = scan_and_buffer(
-        str(scenario.bam_path), scenario.index, _config().scan
-    )
+    _, _, _, payload = scan_and_buffer(str(scenario.bam_path), scenario.index, _config().scan)
     fl_models = build_fl_models(payload)
     rna_fl = FragmentLengthModel.from_pmf(fl_models.rna_pmf, fl_models.max_size)
     exonic = scenario.index.t_df["length"].values.astype(np.int64)
@@ -104,9 +102,7 @@ def test_the_eff_lengths_MOVE_when_the_rna_pmf_moves(scenario):
     """
     from rigel.calibration.fl import build_fl_models
 
-    _, _, _, payload = scan_and_buffer(
-        str(scenario.bam_path), scenario.index, _config().scan
-    )
+    _, _, _, payload = scan_and_buffer(str(scenario.bam_path), scenario.index, _config().scan)
     fl_models = build_fl_models(payload)
     exonic = scenario.index.t_df["length"].values.astype(np.int64)
 
@@ -143,9 +139,7 @@ def test_the_n_observations_GUARD_ON_THAT_PATH_CANNOT_FIRE(scenario):
     """
     from rigel.calibration.fl import build_fl_models
 
-    _, _, _, payload = scan_and_buffer(
-        str(scenario.bam_path), scenario.index, _config().scan
-    )
+    _, _, _, payload = scan_and_buffer(str(scenario.bam_path), scenario.index, _config().scan)
     fl_models = build_fl_models(payload)
     rna_fl = FragmentLengthModel.from_pmf(fl_models.rna_pmf, fl_models.max_size)
     assert rna_fl.n_observations == 1

@@ -131,6 +131,17 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(oracle):
     assert len(array_keys) >= 16, (
         f"only {len(array_keys)} arrays on the payload; the gate is too narrow"
     )
+    # ⭐ THE SIDE BUFFER IS THE ONE BANK THIS IS NOT FREE FOR, and it is read the same way — off its own
+    # fields, so an array added to it joins this gate too. Every other bank is a sum of integers and
+    # integer addition is associative, so a per-worker merge is exact whatever order the chunks arrived in.
+    # ⛔ The deferred queue is a LIST. Concatenating per-worker queues gives a different byte sequence at 1,
+    # 2, 4 and 8 workers with identical CONTENTS, so the C++ export sorts on the record's own content — and
+    # this is what says it does.
+    deferred_keys = [f.name for f in dataclasses.fields(baseline.deferred)]
+    assert baseline.deferred.n_fragments > 0, (
+        "no fragment was deferred, so the canonical sort is compared only against an empty bank — which "
+        "is bit-identical for free. The fixture must produce an undetermined gap."
+    )
 
     for n_workers in (2, 4, 8):
         other = _tally(oracle, n_workers)
@@ -143,7 +154,40 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(oracle):
                 f"{n_workers} workers: {key} is not bit-identical to the single-worker run — "
                 f"{int(np.count_nonzero(actual != expected))} of {expected.size} cells differ"
             )
+        for key in deferred_keys:
+            expected = getattr(baseline.deferred, key)
+            actual = getattr(other.deferred, key)
+            assert actual.dtype == expected.dtype, f"{n_workers} workers: deferred.{key} dtype"
+            assert np.array_equal(actual, expected), (
+                f"{n_workers} workers: deferred.{key} is not bit-identical to the single-worker run. "
+                f"The queue's ORDER is observable — this is the canonical sort failing, not a tally bug."
+            )
         assert other.qc == baseline.qc, f"{n_workers} workers: qc"
+        assert other.gap_resolution == baseline.gap_resolution, (
+            f"{n_workers} workers: gap_resolution"
+        )
+
+
+def test_the_deferred_bank_holds_the_fragments_ITS_COUNTER_CLAIMS(oracle):
+    """⭐ **S1's gate, on a real scan.** ``deposited + deferred + dropped_* == offered`` is worth nothing if
+    the deferred term is a number with no fragments behind it.
+
+    Two identities, and they are different statements: the bank holds as many records as the counter says,
+    and the umbrella census's three ``gap_deferred_*`` partition exactly that population. ⚠ The payload
+    refuses both at its door, so this test's real content is that the fixture REACHES the population at all
+    — a conservation identity over an empty term is satisfied by any bookkeeping.
+    """
+    payload = _tally(oracle, 1)
+    assert payload.deferred.n_fragments == payload.qc.deferred_undetermined_gap > 0
+    assert payload.gap_resolution.deferred == payload.qc.deferred_undetermined_gap
+    assert payload.gap_resolution.gap_resolved_spliced > 0, (
+        "no fragment's gap was RESOLVED, so this fixture only exercises the deferral arm"
+    )
+    # Every record replays: two or more hypotheses, an extent inside its own reference, and a strand.
+    runs = np.diff(payload.deferred.hypothesis_offsets)
+    assert int(runs.min()) >= 2
+    assert np.all(payload.deferred.end > payload.deferred.start)
+    assert np.all(payload.deferred.ref < payload.n_refs)
 
 
 def test_the_start_count_invariant_holds_on_a_real_scan(oracle):

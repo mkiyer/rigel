@@ -111,19 +111,61 @@ class TestTheCachedTallyIsTheSCANNEDTally:
     comparison is blocked on S5. Input identity is the strongest available statement."""
 
     def test_every_payload_array_survives_the_round_trip_byte_identical(self, scanned, tmp_path):
+        """⭐ Field by field, and ONE LEVEL DOWN — a nested bank's arrays are the point, not its repr.
+
+        ⛔ This compared nested banks with ``dataclasses.asdict(after) == dataclasses.asdict(before)``,
+        which is a plain ``==`` over whatever they hold. That was adequate while every nested bank held only
+        counters; ``DeferredFragments`` holds thirteen arrays, and the comparison first raised, then — had
+        the arrays been scalars — would have compared two truncated string reprs and passed. Arrays are
+        compared as arrays, with their dtype, at whatever depth they sit.
+        """
         _cache_dir, cache = round_trip(scanned, tmp_path)
         original: AccumulatorPayload = scanned[3]
-        for field in dataclasses.fields(AccumulatorPayload):
-            before = getattr(original, field.name)
-            after = getattr(cache.payload, field.name)
+
+        def compare(before, after, name):
             if isinstance(before, np.ndarray):
-                assert after.dtype == before.dtype, f"{field.name} dtype moved"
-                assert after.shape == before.shape, f"{field.name} shape moved"
-                assert np.array_equal(after, before), f"{field.name} content moved"
+                assert isinstance(after, np.ndarray), f"{name} came back as {type(after).__name__}"
+                assert after.dtype == before.dtype, f"{name} dtype moved"
+                assert after.shape == before.shape, f"{name} shape moved"
+                assert np.array_equal(after, before), f"{name} content moved"
             elif dataclasses.is_dataclass(before):
-                assert dataclasses.asdict(after) == dataclasses.asdict(before), field.name
+                assert type(after) is type(before), (
+                    f"{name} came back as {type(after).__name__}, not {type(before).__name__} — a bank "
+                    f"rebuilt as a plain dict has lost its validation as well as its type"
+                )
+                for sub in dataclasses.fields(before):
+                    compare(
+                        getattr(before, sub.name), getattr(after, sub.name), f"{name}.{sub.name}"
+                    )
             else:
-                assert after == before, field.name
+                assert after == before, name
+
+        for field in dataclasses.fields(AccumulatorPayload):
+            compare(getattr(original, field.name), getattr(cache.payload, field.name), field.name)
+
+    def test_THE_SIDE_BUFFER_SURVIVES_THE_ROUND_TRIP_AND_IS_NOT_EMPTY(self, scanned, tmp_path):
+        """⭐ **S2's gate.** Byte-identity over an empty bank is free, so the fixture must defer something.
+
+        ⛔ And the bank must come back as a ``DeferredFragments``, not as whatever JSON happened to hold.
+        The write path splits a nested dataclass by the type of each sub-field precisely because
+        ``json.dumps(..., default=str)`` would stringify an ndarray to a TRUNCATED repr — silently, and the
+        second pass would then drain coordinates parsed out of text.
+        """
+        from rigel.scan_payload import DeferredFragments
+
+        _cache_dir, cache = round_trip(scanned, tmp_path)
+        original: AccumulatorPayload = scanned[3]
+        assert original.deferred.n_fragments > 0, (
+            "nothing was deferred, so this round trip is asserted over an empty bank — which survives any "
+            "serialisation at all. The fixture must produce an undetermined gap."
+        )
+        assert isinstance(cache.payload.deferred, DeferredFragments)
+        for field in dataclasses.fields(DeferredFragments):
+            before = getattr(original.deferred, field.name)
+            after = getattr(cache.payload.deferred, field.name)
+            assert after.dtype == np.int64 == before.dtype, f"deferred.{field.name} dtype moved"
+            assert np.array_equal(after, before), f"deferred.{field.name} content moved"
+        assert cache.payload.gap_resolution == original.gap_resolution
 
     def test_the_strand_model_survives_including_its_per_junction_table(self, scanned, tmp_path):
         """⚠ The 2x2 is the MARGINAL of the per-junction table; the dispersion fit needs the table
@@ -236,6 +278,54 @@ class TestTheKeyRefusesAMovedIndex:
             assert payload_schema_digest() != before, "dropping a field must move the digest"
         finally:
             scan_payload.AccumulatorPayload.__dataclass_fields__ = original
+        assert payload_schema_digest() == before
+
+    def test_the_schema_digest_moves_when_a_NESTED_BANK_FIELD_moves(self):
+        """⭐ **The defect this key was written to prevent, and for a long time did not.**
+
+        The digest hashed ``AccumulatorPayload``'s top-level field names ALONE, so a change *inside* a
+        nested bank was invisible to it: renaming a ``ScanQC`` field let a stale cache be **accepted by the
+        key** and then fail deep in ``_payload_from_parts`` with a bare ``TypeError`` — precisely the
+        failure mode the docstring above says the key exists to prevent. Two statements about one contract,
+        disagreeing (`CARRY_FORWARD.md` §3 trap 27, the same shape as ``check_scan_config``'s).
+
+        ⛔ S1 made the stakes much higher rather than lower: ``DeferredFragments`` puts **thirteen** array
+        names inside one payload field and every one of them is an ``.npz`` key, so an unrecursed digest
+        would wave through a cache missing an entire bank.
+
+        ⚠ Tested one level down on each of the three nested banks, because "it recurses" is not the claim —
+        the claim is that each specific bank is covered, and a recursion that skipped one would still
+        recurse.
+        """
+        from rigel.scan_cache import _payload_field_types, _schema_names, payload_schema_digest
+
+        before = payload_schema_digest()
+        names = set(_schema_names())
+        banks = {
+            name: cls
+            for name, cls in _payload_field_types().items()
+            if dataclasses.is_dataclass(cls)
+        }
+        assert set(banks) == {"qc", "deferred", "gap_resolution"}, (
+            f"the payload's nested banks are {sorted(banks)}; a new one must join this gate deliberately "
+            f"rather than by a recursion that happens to reach it"
+        )
+        for bank, nested in banks.items():
+            for sub in dataclasses.fields(nested):
+                assert f"{bank}__{sub.name}" in names, (
+                    f"{bank}.{sub.name} is not in the digest's name list, so a cache written before it "
+                    f"existed would be accepted by the key"
+                )
+            original = nested.__dataclass_fields__
+            dropped = next(iter(original))
+            try:
+                nested.__dataclass_fields__ = {k: v for k, v in original.items() if k != dropped}
+                assert payload_schema_digest() != before, (
+                    f"dropping {bank}.{dropped} did not move the digest — a change inside a nested bank "
+                    f"is invisible to the key"
+                )
+            finally:
+                nested.__dataclass_fields__ = original
         assert payload_schema_digest() == before
 
     def test_a_changed_scan_config_is_refused(self, scanned, tmp_path):

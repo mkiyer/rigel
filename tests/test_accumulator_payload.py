@@ -15,9 +15,15 @@ import dataclasses
 import numpy as np
 import pytest
 
-from rigel.scan_payload import N_STRAND_COLUMNS, AccumulatorPayload, ScanQC
+from rigel.scan_payload import N_STRAND_COLUMNS, AccumulatorPayload, GapCensus, ScanQC
+from rigel.types import Strand
 
-from native._accumulator_reference import Tally
+from native._accumulator_reference import (
+    Accumulator,
+    GapHypothesis,
+    Partition,
+    Tally,
+)
 
 
 #: Two references: chr1 with 4 cuts (3 nodes, 2 lines) and chr2 with 3 (2 nodes, 1 line). A third
@@ -25,6 +31,43 @@ from native._accumulator_reference import Tally
 #: arithmetic goes wrong if it is written as a plain subtraction.
 CUTS_PER_REF = [[0, 100, 200, 600], [0, 500, 900], []]
 MAX_LENGTH = 12
+
+#: ⭐ The deferred bank in the fixture is produced by the SPECIFICATION rather than hand-written, so the
+#: nested CSR the payload validates is one the reference actually emits. A hand-written bank is a second
+#: encoding of the same layout, and the two would be free to drift — which is the whole reason the payload's
+#: field names are read off ``Tally`` instead of listed.
+#:
+#: ⚠ Four fragments, because ``qc.deferred_undetermined_gap`` below is 4 and the payload refuses a bank
+#: whose record count disagrees with the counter that describes it.
+_DEFERRED_CUTS = [0, 100, 200, 300, 400, 500, 600]
+
+
+def _deferred_bank(n_fragments: int = 4) -> dict[str, np.ndarray]:
+    """``n_fragments`` deferred records, flattened exactly as ``Tally.deferred_arrays()`` specifies."""
+    partition = Partition.from_cuts([_DEFERRED_CUTS], node_types=[[0, 2, 1, 2, 1, 0]])
+    acc = Accumulator(partition, max_fragment_length=1000)
+    for i in range(n_fragments):
+        outcome = acc.deposit(
+            0,
+            100 + i,
+            500,
+            hypotheses=(
+                GapHypothesis(((200, 300),), sj_strand=Strand.POS, supporting_t_inds=(i,)),
+                GapHypothesis(),
+            ),
+        )
+        assert outcome.value == "deferred_undetermined_gap", outcome
+    return acc.tally.deferred_arrays()
+
+
+def _gap_census(deferred: int = 4) -> dict[str, int]:
+    """A census whose three ``gap_deferred_*`` sum to ``deferred`` — the partition the payload checks."""
+    return {
+        "gap_resolved_spliced": 7,
+        "gap_deferred_rna_or_gdna": deferred,
+        "gap_deferred_which_introns": 0,
+        "gap_deferred_both": 0,
+    }
 
 
 def _deposited_lengths(total: int) -> np.ndarray:
@@ -88,6 +131,8 @@ def _calibration_dict(**overrides) -> dict:
             "contradictory_sj_strand": 6,
             "introns_absorbed": 8,
         },
+        "deferred": _deferred_bank(),
+        "gap_resolution": _gap_census(),
         "n_strand_columns": N_STRAND_COLUMNS,
         "n_fragment_pools": 5,
         "max_length": MAX_LENGTH,
@@ -153,14 +198,44 @@ def test_the_dtypes_are_the_specifications_dtypes():
 
     A count that arrives as int64 compares equal to the specification's uint32 by value, so a value-only
     check would pass while the schema had changed underneath it.
+
+    ⚠ Three ``Tally`` fields are not arrays — ``qc`` and ``gap_resolution`` are dicts of counters and
+    ``deferred`` is a list of records — and each is checked by its own test below. They are skipped by
+    ASKING THE REFERENCE what type it holds, never by naming them here: a name would let a field that
+    stopped being an array drop silently out of this gate.
     """
     payload = _payload()
     reference = Tally.zeros(n_nodes=5, n_edges=3, n_sj=3, max_length=MAX_LENGTH)
+    checked = 0
     for field in dataclasses.fields(Tally):
-        if field.name == "qc":
+        expected = getattr(reference, field.name)
+        if not isinstance(expected, np.ndarray):
             continue
-        expected = getattr(reference, field.name).dtype
-        assert getattr(payload, field.name).dtype == expected, field.name
+        assert getattr(payload, field.name).dtype == expected.dtype, field.name
+        checked += 1
+    assert checked >= 16, f"only {checked} arrays compared; the gate has narrowed"
+
+
+def test_the_DEFERRED_bank_is_int64_throughout_and_carries_the_specifications_arrays():
+    """⭐ The side buffer's own schema check, since it is not one array and cannot join the loop above.
+
+    ⚠ One dtype for the whole bank, and it is ``int64`` even for the two strand columns — which are
+    ``int32`` everywhere else in the scanner. The parity gate compares dtypes, so a narrowing conversion at
+    the ABI would compare equal by value and hide the change.
+    """
+    payload = _payload()
+    reference = Tally.zeros(n_nodes=5, n_edges=3, n_sj=3, max_length=MAX_LENGTH)
+    expected = set(reference.deferred_arrays())
+    actual = {f.name for f in dataclasses.fields(payload.deferred)}
+    assert actual == expected, (
+        f"the payload's deferred bank carries {sorted(actual)}; the specification's flattening emits "
+        f"{sorted(expected)}"
+    )
+    for name in sorted(expected):
+        array = getattr(payload.deferred, name)
+        assert array.dtype == np.int64, f"deferred.{name} has dtype {array.dtype}, expected int64"
+    assert payload.deferred.n_fragments == payload.qc.deferred_undetermined_gap == 4
+    assert payload.deferred.n_hypotheses == 8, "two hypotheses per deferred fragment"
 
 
 def test_a_WRONG_dtype_is_REJECTED_rather_than_coerced():
@@ -219,6 +294,89 @@ def test_the_qc_fields_are_exactly_the_specifications_qc_keys():
     """Same argument as the Tally check: one vocabulary, and no list here to drift from it."""
     reference_keys = set(Tally.zeros(1, 0, 0, 1).qc)
     assert {f.name for f in dataclasses.fields(ScanQC)} == reference_keys
+
+
+def test_the_gap_census_fields_are_exactly_the_specifications_keys():
+    """⛔ Including the ABSENCE of ``gap_resolved_unspliced``.
+
+    That class existed and no fragment could enter it: a spliced hypothesis cuts bases the unspliced one
+    keeps, so the unspliced path is always the longest and can never be the sole survivor. Reading the key
+    set off the specification is what stops it reappearing on one side only.
+    """
+    reference_keys = set(Tally.zeros(1, 0, 0, 1).gap_resolution)
+    assert {f.name for f in dataclasses.fields(GapCensus)} == reference_keys
+    assert "gap_resolved_unspliced" not in reference_keys
+
+
+def test_a_MISSING_gap_census_subclass_is_REJECTED():
+    """The subclasses are exhaustive by construction, so a missing one is a partition that does not close."""
+    census = _gap_census()
+    del census["gap_deferred_both"]
+    with pytest.raises(ValueError, match="gap_deferred_both"):
+        _payload(gap_resolution=census)
+
+
+def test_a_DEFERRED_BANK_THAT_DISAGREES_WITH_ITS_OWN_COUNTER_IS_REJECTED():
+    """⭐ **The conservation half, refused at the door.**
+
+    ``deposited + deferred + dropped_* == offered`` is worth nothing if the deferred term is a number with
+    no fragments behind it. ⚠ The check has to live at the payload boundary and not only in the
+    accumulator's tests, because the payload is what a **cached** scan is rebuilt from — and a cache can be
+    truncated, partially written, or produced by a build whose schema digest happened to collide.
+    """
+    with pytest.raises(ValueError, match="deferred bank holds 3 fragments"):
+        _payload(deferred=_deferred_bank(3))
+    with pytest.raises(ValueError, match="deferred bank holds 5 fragments"):
+        _payload(deferred=_deferred_bank(5))
+    with pytest.raises(ValueError, match="partition that does not close"):
+        _payload(gap_resolution=_gap_census(deferred=3))
+    assert _payload().deferred.n_fragments == 4  # the self-consistent one is accepted
+
+
+def test_a_TRUNCATED_deferred_CSR_is_REJECTED_rather_than_indexed_off_the_end():
+    """⛔ The second pass indexes every one of these arrays.
+
+    A bank whose offsets outrun its values does not fail loudly when it is read — it scores one fragment
+    against another fragment's hypotheses, or reads zeros, and returns a plausible answer. So the CSR is
+    re-derived at the door, exactly as ``ref_node_offsets`` is.
+    """
+    bank = _deferred_bank()
+    truncated = dict(bank) | {"hypothesis_introns": bank["hypothesis_introns"][:-2]}
+    with pytest.raises(ValueError, match="hypothesis_intron_offsets.*ends at"):
+        _payload(deferred=truncated)
+
+    short_record = dict(bank) | {"start": bank["start"][:-1]}
+    with pytest.raises(ValueError, match="deferred\\['start'\\] has 3 entries"):
+        _payload(deferred=short_record)
+
+    backwards = dict(bank) | {"hypothesis_offsets": bank["hypothesis_offsets"][::-1].copy()}
+    with pytest.raises(ValueError, match="hypothesis_offsets"):
+        _payload(deferred=backwards)
+
+    widened = dict(bank) | {"ref": bank["ref"].astype(np.int32)}
+    with pytest.raises(ValueError, match="deferred\\['ref'\\] has dtype int32"):
+        _payload(deferred=widened)
+
+
+def test_a_DEFERRED_RECORD_WITH_FEWER_THAN_TWO_HYPOTHESES_IS_REJECTED():
+    """⭐ A fragment is deferred BECAUSE two or more hypotheses survived.
+
+    A record carrying one is a bank that lost the others, and the second pass would then "choose" from a
+    set of one and deposit an answer nothing supported — the exact outcome the deferral exists to prevent.
+    """
+    bank = _deferred_bank()
+    # Drop the LAST record's second (unspliced) hypothesis, which carries neither introns nor supporting
+    # transcripts — so every other array stays self-consistent and the ONLY thing wrong is the run length.
+    # ⚠ Written this way on purpose: a bank that also broke the CSR would be caught by the test above and
+    # this one would pass for the wrong reason.
+    lone = dict(bank) | {
+        "hypothesis_offsets": np.asarray([0, 2, 4, 6, 7], np.int64),
+        "hypothesis_sj_strand": bank["hypothesis_sj_strand"][:-1],
+        "hypothesis_intron_offsets": bank["hypothesis_intron_offsets"][:-1],
+        "hypothesis_t_offsets": bank["hypothesis_t_offsets"][:-1],
+    }
+    with pytest.raises(ValueError, match="carries 1 hypotheses"):
+        _payload(deferred=lone)
 
 
 def test_the_start_count_invariant_is_checkable_from_the_payload_alone():

@@ -84,6 +84,17 @@ class MultiLocus:
 # ---------------------------------------------------------------------------
 
 
+def _in_bam_order(units: np.ndarray, frag_ids: np.ndarray) -> np.ndarray:
+    """``units`` reordered by their fragments' ``frag_id`` — BAM order. Always a fresh array.
+
+    ⚠ Sorts on the id itself rather than on a densified rank. An earlier version built a global
+    ``rank[unit] -> position in BAM order`` first; it is exactly equivalent, because rank is a monotone
+    function of ``frag_id``, and it cost **five times** as much (731 ms of a 906 ms total at 5 M
+    fragments) to buy nothing.
+    """
+    return units[np.argsort(frag_ids[units], kind="stable")]
+
+
 def build_multi_loci(
     em_data: ScoredFragments,
     index: TranscriptIndex,
@@ -120,6 +131,30 @@ def build_multi_loci(
         t_indices,
         np.int32(n_transcripts),
     )
+
+    # ⭐ THE CANONICAL UNIT ORDER IS BAM ORDER, and `_in_bam_order` below is where it is imposed.
+    #
+    # ``comp_u_indices`` is ascending by unit index, i.e. by the ROW a fragment happens to occupy in the
+    # scan buffer — and that row is not a property of the fragment. The scanner streams finalized chunks
+    # from worker threads in COMPLETION order, so the same BAM fills the buffer differently run to run
+    # (measured: at 16 threads the row order differed on 6 of 6 scans, while the ``frag_id -> fragment``
+    # mapping was byte-identical every time). Ordering by ``frag_id`` — the reader's own BAM-order id —
+    # makes ``unit_indices``, and therefore every per-locus array ``locus_partition`` scatters by it, a
+    # function of the fragment SET alone.
+    #
+    # ⛔ It is not cosmetic. The EM's ``assignment_mode="sample"`` draws one categorical sample per unit
+    # from a per-locus RNG, so permuting the units permutes which fragment gets which draw and the answer
+    # moves by whole counts; ``fractional`` scatters float posteriors into shared accumulators, so a
+    # permutation reorders the summation and it drifts by ULPs. Both were live, and ``EMConfig.seed`` did
+    # not help either — the seed reached the solver bit-identically; the order it was consumed in did not.
+    #
+    # ⛔ ORDER BY IDENTITY, NEVER BY CONTENT. Seeding each draw from a hash of the fragment itself would
+    # also be order-independent and would be WRONG: identical fragments would hash alike and so draw
+    # alike, collapsing a 60/40 posterior to 100/0 for every group of duplicates. ⚠ And a content key
+    # cannot even deliver determinism, because it TIES exactly on the duplicates — measured: ordering by
+    # ``gdna_log_liks`` instead leaves both ``sample`` and ``fractional`` thread-count dependent.
+    # ``frag_id`` is an identity, so it never ties. `docs/PLAN_TWO_PASS.md` §5.3 (D-D) rules the same way
+    # for the second pass.
 
     # Pre-extract transcript coordinates as numpy arrays.
     t_starts_all = index.t_df["start"].values
@@ -189,7 +224,10 @@ def build_multi_loci(
             MultiLocus(
                 multi_locus_id=lid,
                 transcript_indices=t_idx,
-                unit_indices=comp_u_indices[comp_u_offsets[lid] : comp_u_offsets[lid + 1]].copy(),
+                unit_indices=_in_bam_order(
+                    comp_u_indices[comp_u_offsets[lid] : comp_u_offsets[lid + 1]],
+                    em_data.frag_ids,
+                ),
                 gdna_span=max(span, 1),
                 loci=loci_tuple,
             )

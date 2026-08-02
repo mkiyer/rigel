@@ -2673,3 +2673,458 @@ are `test_golden_output`, unchanged in identity from the C2 entry.
 library's true maximum**, to the base pair; 1000 is `max_frag_length`, the clamp. The deleted definition
 **B** took its length from the *transcript*, so it could not produce an uncut intron — on this one
 question it was right and `L` was wrong. ⚠ That does not undo C2, whose reasons all still hold.
+
+---
+
+## S1 + S2 — the accumulator ARBITRATES, and the side buffer exists (2026-08-01)
+
+    Plan: `docs/PLAN_TWO_PASS.md` §4 (S1, S2)   ·   Spec: `docs/SPEC_GAP_PATHS.md` §0–§4
+    Baseline: 750cc8ee — **44 failed / 1824 passed**, of which 21 are the stale goldens and
+    **23 were a half-finished interface change**. After: **21 failed / 1863 passed**, all 21 goldens.
+    ⛔ NOT judged by a calibration A/B, by design — see "what this deliberately does not measure".
+
+`750cc8ee` moved the SPECIFICATION (`tests/native/_accumulator_reference.py`) to the hypothesis
+interface and left the C++ behind it. This entry finishes that migration and lands the side buffer.
+
+> A fragment arrives at the accumulator with its **hypothesis set**, not with one path and a flag. Exactly
+> one survivor **deposits**; two or more and `L` is not one number, so the fragment is **held WHOLE** for
+> the second pass. The empty hypothesis is the genomic one and needs no flag.
+
+### What landed
+
+| | | |
+|---|---|---|
+| **the C++ caught up** | `DeferredFragments` gains `ref`, is int64 throughout, and gains a canonical `sort` | the bank is the ONE tally whose order is observable; everything else is a sum of integers |
+| **`Accumulator` knows which reference it IS** | `ref_id` is a required ctor argument, stamped into every held record | the drain replays a record through `deposit` onto **that** reference's cut axis |
+| **the binding exposes both new banks** | `Accumulator.deferred` and `.gap_resolution`, through the same two exporters `build_result` uses | one set of key strings on this side of the ABI, so the parity surface and the payload cannot disagree |
+| **the payload carries them** | `AccumulatorPayload.deferred` (a validated CSR) and `.gap_resolution` (a typed census) | |
+| **S2: the cache round-trips them** | nested banks split by sub-field type: arrays to the `.npz`, counters to the manifest | ⛔ `dataclasses.asdict` on the bank yields ndarrays, and the manifest is written with `json.dumps(..., default=str)` — which would stringify each array to a **truncated repr**, silently |
+
+### ⭐ THE OWNER'S KNOWN DEFECT IS FIXED, AND IT IS NOW GATED
+
+`payload_schema_digest()` hashed `AccumulatorPayload`'s top-level field names **alone**, so a change
+inside a nested bank was invisible to it — a renamed `ScanQC` field let a stale cache be accepted by the
+key and then fail deep in the loader with a bare `TypeError`, exactly the failure the digest exists to
+prevent. It recurses one level now. ⛔ S1 raised the stakes rather than lowering them: `DeferredFragments`
+puts **thirteen** array names inside one payload field and every one is an `.npz` key.
+
+⚠ **The fix had no gate until a perturbation said so** — see X8 below.
+
+### ⭐ FINDING 1 — `GapResolution.RESOLVED_UNSPLICED` COULD NOT BE ENTERED, and it is deleted
+
+The census had a class documented as *"the genomic hypothesis survived alone because every spliced path
+was longer than `max_fragment_length`"*. **That is impossible.** A spliced hypothesis CUTS bases the
+genomic one keeps, so `L_spliced <= L_genomic` always; the one arbitration filter is
+`L <= max_fragment_length`; therefore if the genomic path survives the filter **every** spliced path does
+too, and the survivor set can never be `{genomic}` while a spliced path was offered — which is the
+condition for being in the census at all.
+
+⭐ **Found by writing the non-vacuity gate**, not by review: the parity battery asserts every census class
+is reached, and this one could not be. Checked before deleting — 200,000 random hypothesis sets, the
+genomic path was the longest in **every one**.
+
+⭐ **The ordering is now pinned as the REASON rather than the class as a consequence**
+(`test_the_GENOMIC_hypothesis_is_ALWAYS_the_LONGEST`, 20,000 randomised sets). A future filter that broke
+the ordering fails there instead of quietly needing a deleted class back.
+
+### ⛔ FINDING 2 — THE REFERENCE STAMP WAS UNTESTABLE, AND TWO FIXTURES HAD TO MOVE
+
+Two perturbations **passed the entire suite of 1860 tests**:
+
+| | perturbation | why nothing caught it |
+|---|---|---|
+| **X2** | `deferred_.append(fragment, 0, …)` — a constant instead of the accumulator's own id | every accumulator-level fixture was reference 0 |
+| **X3** | `AccumulatorSet` gives every reference the id `0` | every scan fixture was single-contig, or deferred only on reference 0 |
+
+⛔ A constant is indistinguishable from a correct value until two references both hold something, and the
+consequence is not cosmetic: the second pass replays each held record onto `ref`'s cut axis, so a constant
+stamp drains one chromosome's coordinates onto another's partition — **the defect the predecessor deposit
+adapter actually had**. Two fixtures changed rather than one assertion added:
+
+* `test_accumulator_native_parity.py` now sits on **reference 3**, with three leading references that
+  contribute no cuts (legal, and it exercises the per-reference offset arithmetic too);
+* `test_gap_introns_are_cut.py` is now **two contigs**, with the disagreeing-isoform gene on chr2.
+
+Both perturbations fire after the change. ⚠ The extent check is the half that matters most: `[66100,67000)`
+is a plausible interval on chr1 as well, so "stamped 1" and "inside reference 1's cut range" are different
+statements and only the second fails against the real partition.
+
+### Behaviour that MOVED, deliberately, and where it is recorded
+
+| | change | why |
+|---|---|---|
+| **D1 is deleted** | the RNA pool is keyed on **determinacy**, not provenance | a fragment enters a pool only when exactly ONE hypothesis survived, so its `L` is not in doubt however it was arrived at. C2.6 measured the alternative: **+0.67 % / +2.40 %** against truth on determinacy, **−9.58 % / −22.46 %** on provenance. ⭐ A purity filter on a length pool is a length filter |
+| **D3 / C2.7 is solved** | every annotated intron in a gap is cut, and candidates group by their **whole-fragment path** | two transcripts differing only in their SECOND intron are now two hypotheses. ⛔ Its measurement cannot be re-read until the drain — see below |
+| ⚠ **a SPLICED_UNANNOT fragment with a gap intron now DEFERS** | `SPEC_GAP_PATHS.md` §2: ∅ is available whenever no **annotated** junction was sequenced | the `near` fixture's junction is 2 bp off the annotation, so the molecule is not certified RNA and the genomic explanation survives. Its `L` gate moved from "deposits at 502" to "the enumeration produced the intron set that yields 502 and never the near-miss that yields 500" — asserted on **coordinates**, which is stronger |
+| ⚠ **a transcript the read CONTRADICTS is no longer a candidate** | `SPEC_GAP_PATHS.md` §3, concern C1 | `test_h_any_intron_satisfies`'s old geometry ran a block contiguously across the transcript's FIRST intron, so the read has bases that transcript splices out. Cutting its *other* intron on that transcript's authority is a path no molecule has. The case keeps its meaning on a geometry that does not contradict, and the contradiction is now its own gate (`test_h2_…`) |
+| ⚠ **the `max_fragment_length` prefilter changes CLASSIFICATION** | `SPEC_GAP_PATHS.md` §8, concern C3 | the same annotation defers or resolves depending only on how far apart the exons sit — a 300 bp intron holds the fragment, an 1800 bp one rules the genomic path out by length and deposits it. ⭐ Now gated **two-sided on a real scan** rather than assumed |
+
+### Gates
+
+| | | |
+|---|---|---|
+| **byte-identity** | C++ ↔ the specification, over every `Tally` field including the deferred CSR and the census, read off `dataclasses.fields(Tally)` | ✅ 54 named cases + 10,000 random fragments with random hypothesis sets |
+| **non-vacuity** | the battery reaches **every** census class, and defers > 100 of the 10,000 | ✅ — this is what found FINDING 1 |
+| **conservation** | `deposited + deferred + dropped_* == offered`, and the bank holds the fragments the counter claims | ✅ at the reference level, at the payload door, and on a real scan against the scanner's **independent** splice census |
+| **determinism** | bit-identical at 1/2/4/8 workers, deferred bank included | ✅ at the accumulator (2/4/8 shards) and end-to-end through the scan |
+| **S2 round trip** | the side buffer survives the cache byte-identically and comes back **typed** | ✅, and the fixture is asserted non-empty first |
+
+### The perturbations
+
+| | perturbation | result |
+|---|---|---|
+| **X1** | the canonical sort does nothing | ⭐ **5 fail** — parity and worker determinism |
+| **X2** | the `ref` stamp is a constant | ⛔ **passed 1860 tests**; after the fixture moved, **7 fail** |
+| **X3** | `AccumulatorSet` stamps every reference 0 | ⛔ **passed 1860 tests**; after the fixture moved, **1 fails** — the one that names it |
+| **X4** | the census swaps `rna_or_gdna` and `which_introns` | ⭐ **6 fail** |
+| **X5** | the fragment is COUNTED as deferred but not HELD | ⭐ **12 fail** — including the payload's door check |
+| **X6** | the length filter keeps only the first hypothesis when the filter empties the set | ⭐ **1 fails** — precisely the case written for it |
+| **X7** | `lex_compare` treats a PREFIX as equal | ⭐ **3 fail** |
+| **X8** | `payload_schema_digest` stops recursing | ⛔ **not caught** — the fix had no gate; one added, then **1 fails** |
+| **X9** | the cache writes a nested bank's arrays into the manifest JSON | ⭐ **2 fail** |
+
+### ⛔ WHAT THIS DELIBERATELY DOES NOT MEASURE
+
+**No calibration A/B, and that is the plan's instruction** (`PLAN_TWO_PASS.md` §4). Between S1 and S3 the
+tally is deliberately **thinner**: the ambiguous mass is held, not yet deposited. And the held population
+is the **long** one — a longer gap admits more hypotheses — so the surviving anchor is biased short.
+
+⛔ **Every junction-opportunity number in the docs predates the drain and must be re-measured after S3,
+not before.** So must D3's residual, which is a statistic of the deposited set.
+
+### Files touched
+
+`src/rigel/native/calibration/accumulator.{h,cpp}` · `src/rigel/native/bam_scanner.cpp` ·
+`src/rigel/scan_payload.py` · `src/rigel/scan_cache.py` · `tests/native/_accumulator_reference.py` ·
+`tests/native/test_accumulator_native_parity.py` · `tests/native/test_gap_hypothesis_arbitration.py` ·
+`tests/native/test_gap_introns_are_cut.py` · `tests/native/test_fragment_length_proof.py` ·
+`tests/native/test_implicit_splice_deposit.py` · `tests/native/test_accumulator_worker_determinism.py` ·
+`tests/test_accumulator_payload.py` · `tests/test_scan_cache.py` · `tests/test_implicit_splice.py` ·
+`tests/calibration/_synthetic.py` · `tests/calibration/test_gdna_strand_integration.py` ·
+`scripts/design/fl_anchor_gap.py` · `scripts/design/implicit_splice_census.py`
+
+### Blast radius
+
+⛔ **`payload_schema_digest` MOVED** — it recurses now, and the payload gained two fields. Every scan cache
+is invalidated **by design**; the 8 pilot caches rebuild (~46 s). The goldens move a **fourth** time.
+⛔ Still regenerate **once**, at the very end, **twice, and diff**.
+
+---
+
+## S2.1 — the pipeline is REPRODUCIBLE, and it was never the seed (2026-08-01)
+
+    Gate: `tests/test_scan_order_independence.py`   ·   Retires: `TODO.md` rank 3
+    Owner question: *"the RNG seed issue seems minor — is there an easy solution?"*
+    Baseline before: 21 failed / 1863 passed. After: **21 failed / 1868 passed**, all 21 goldens.
+
+`TODO.md` rank 3 recorded that `EMConfig.seed` *"does not make `assignment_mode="sample"` reproducible"*
+and filed it under the seed. ⛔ **The seed was never the problem**, and the recorded diagnosis sent the
+investigation to the wrong subsystem.
+
+### What was measured, before anything was changed
+
+| | |
+|---|---|
+| a seeded `sample` run, twice at the default thread count | ⛔ counts differ by up to **22** |
+| the `rng_seed` handed to the C++ EM on those two runs | ⭐ **bit-identical** — `9008465316566228445` |
+| the EM's own thread count (`EMConfig.n_threads` 1 / 2 / 4 / auto) | ⚠ **irrelevant** — fails at all of them |
+| scan `total_threads` = 1, 2, 4 | ✅ reproducible |
+| scan `total_threads` = 8, 16 (**the default** = `os.cpu_count()`) | ⛔ **not** reproducible |
+| the fragment buffer, two 16-thread scans | ⛔ **different row order** (1 chunk → identical; 6 chunks → not) |
+| the `frag_id → fragment` mapping, same two scans | ⭐ **byte-identical**, ids contiguous `0..n-1` in BAM order |
+
+⭐ **So: the scanner streams finalized chunks in worker-COMPLETION order, the fragment buffer inherits
+that, and the EM's sampled assignment consumes its per-locus RNG in buffer-row order.** Permuting the
+units permutes which fragment gets which draw, and units in different equivalence classes have different
+posteriors, so the assignment genuinely moves. ⚠ The 1- and 4-thread passes were an artifact of scale —
+one chunk, nothing to reorder. On a real library, which emits many chunks at any thread count above one,
+the shipped default was **not reproducible at all**.
+
+### The fix — an ORDERING, not a seed, in one place
+
+```python
+unit_indices=_in_bam_order(comp_u_indices[lo:hi], em_data.frag_ids)
+```
+
+`build_multi_loci` orders each locus's units by `frag_id`. Every per-locus array is scattered by that
+index list (`locus_partition.partition_and_free`), so **all of them inherit the canonical order and no
+consumer has to know**. ⚠ `unit_indices` is used nowhere else except for its length, so nothing else moves.
+
+### ⛔ WHY NOT SEED EACH DRAW FROM THE FRAGMENT — the plausible wrong fix, and it is caught
+
+Hashing the fragment's own content would also be order-independent, and would be **wrong**: identical
+fragments hash alike and so draw alike, collapsing a 60/40 posterior to **100/0** for every group of
+duplicates. That is the owner's own D-D ruling (`PLAN_TWO_PASS.md` §5.3) arrived at from the other side.
+
+⭐ **And it fails even on its own terms.** A content key **ties exactly on the duplicates**, so the tie
+falls back to buffer order — measured (perturbation Y2): ordering by `gdna_log_liks` instead of `frag_id`
+leaves **both** `sample` and `fractional` thread-count dependent. `frag_id` is an identity, so it never
+ties; ordering by identity and keeping one stream per locus is what preserves the multinomial spread.
+
+### ⭐ THE CODE GOT SMALLER — 46 lines deleted
+
+`em_solver.cpp`'s `build_equiv_classes` sorted the ROWS within each equivalence class on a
+log-likelihood fingerprint, ~45 lines, explicitly *"because multi-threaded BAM scanning produces
+fragments in non-deterministic order"*. Fixed at the source, that reason is gone: units now arrive
+canonical, so `unit_list` is already canonical. **Deleted, and proven a no-op** — the golden
+`effective_length` reads `501.82302350785244` before and after, to the last digit.
+
+⚠ The **class** sort is KEPT. It guards a different mechanism — `unordered_map` iteration order, which is
+a property of the hash table, not of the scan — and ⛔ it has **no gate**: perturbation Y3 removes it and
+nothing fails, because a single build's hash order is stable. Pre-existing; recorded, not fixed.
+
+### ⭐ A SECOND DEFECT FELL OUT, and it was never filed
+
+`fractional` mode was thread-count dependent too — it scatters float posteriors into shared accumulators,
+so a permutation reorders the summation and the answer drifts by ULPs. Nobody had noticed because nobody
+had compared *across* thread counts. The same ordering fixes it, and the gate covers all three modes.
+
+### Cost
+
+One `argsort` per locus over an int64 key. Measured: **0.15 s at 1 M fragments, 0.91 s at 5 M** — against
+a ~66 s calibration. ⭐ An earlier draft densified the ids into a global rank first; it is exactly
+equivalent (rank is monotone in `frag_id`) and cost **5×** more — 731 ms of that 906 ms — so it was
+deleted too.
+
+### Gates
+
+| | | |
+|---|---|---|
+| **the contract** | one BAM, one seed, one answer — byte-identical across scan thread counts {1, 4, 16} × 2 repeats, in **all three** assignment modes | ✅ |
+| **non-vacuity** | the buffer's row order really does differ between those thread counts | ✅ retried 3×, because it is a race |
+| **the assumption** | no two EM units share a `frag_id` — otherwise the sort ties and falls back to buffer order | ✅ (2,118 unique ids from 3,000 fragments; a subset, so gapped but unique) |
+
+⚠ **Two repeats per thread count, not one.** The permutation is random: a single pair can agree by luck,
+and did — two 16-thread runs disagreed while 1 vs 4 vs 16 matched on the same tree.
+
+### The perturbations
+
+| | perturbation | result |
+|---|---|---|
+| **Y1** | revert to buffer-row order | ⭐ **fires** |
+| **Y2** | order by CONTENT (`gdna_log_liks`) instead of identity | ⭐ **fires on both `sample` and `fractional`** — the wrong fix is caught |
+| **Y3** | delete the equiv-CLASS sort as well | ⛔ **not caught** — pre-existing gap, recorded above |
+
+⚠ Y1 fired via `fractional` rather than `sample` on that run. That is the honest shape of this gate:
+`sample` is the mode that matters and the flaky detector; `fractional` is the reliable one, because ULP
+drift is deterministic given a permutation. Together they hold.
+
+### What this changes for the owner
+
+⭐ **`assignment_mode="sample"` is now a legitimate A/B arm.** `CARRY_FORWARD.md` and `TODO.md` §7 both say
+to A/B under `map`/`fractional` because the default wobbles by ~0.5 %. With a fixed seed all three modes
+now reproduce exactly. ⚠ The three remain **different estimators** — 5441 / 6002 / 6277 on one scenario —
+so an A/B must still hold the mode fixed across both arms.
+
+⭐ **And it answers D-D ahead of S3.** The second pass needs no new seed machinery: S1 already gives the
+deferred queue a canonical order, so `(global_seed, index in that queue)` is well defined for exactly the
+reason established here. The rule is *order by identity, then one stream* — not *hash the content*.
+
+---
+
+## P0 — there was never a strand sign bug (2026-08-02)
+
+    Spec: `docs/SPEC_SECOND_PASS.md` §3.3, P0   ·   Gate: `tests/calibration/test_strand_sense_convention.py`
+    Retires: `TODO.md` rank 6   ·   Corrects: S5.f, S5.f-addendum, `CARRY_FORWARD.md` §1 fact 17 / §0 C4
+    Suite: **21 failed / 1873 passed**, all 21 goldens.
+
+`TODO.md` rank 6 recorded that the fitted κ is `1 − truth` and that *"only the exported scalar is
+mis-labelled"*. ⛔ **Both statements are wrong, and the item had been filed twice.** The owner approved
+fixing the sign; the audit found there is no sign to fix.
+
+### The collision: two quantities, both called "strand specificity"
+
+| | |
+|---|---|
+| `ReadSimConfig.strand_specificity` | *"probability an RNA fragment preserves correct read orientation … an R1↔R2 swap with probability 1 − ss"* — protocol **fidelity**, direction-agnostic |
+| `StrandModel.p_r1_sense` | `P(align_strand == the junction's strand)` — **directional**. Its own docstring already said it: *"High (≈0.95) for R1-sense libraries (KAPA). Low (≈0.05) for R1-antisense (Illumina TruSeq dUTP)."* |
+
+⭐ **For an R1-antisense protocol these are complements**, so comparing one against the other reads as a
+sign error and is not one. The simulator emits R1-antisense — explicit in the gDNA path,
+`r2_seqs, r1_seqs = _batch_extract_reads(...)`, the first extracted read becoming **R2** — which is the
+most common real protocol. A dUTP library at 99 % fidelity genuinely has a sense fraction near 0.01.
+
+### ⭐ THE MEASUREMENT — the tool already exposes the matching quantity
+
+`StrandModel.strand_specificity = max(p_r1_sense, p_r1_antisense)` is direction-agnostic, like the
+simulator's knob. Two genes, one per strand, 4,000 zero-gDNA fragments:
+
+| simulated `ss` | `p_r1_sense` | `strand_specificity` | `rna_sense_frac` |
+|---|---|---|---|
+| 1.00 | 0.0000 | ⭐ **1.0000** | 0.0008 |
+| 0.99 | 0.0156 | **0.9844** | 0.0164 |
+| 0.75 | 0.2299 | **0.7701** | 0.2303 |
+| 0.50 | 0.4980 | **0.5020** | 0.4980 |
+
+⭐ It recovers the simulated parameter directly. The comparison the record should always have made.
+
+⚠ **Opposite-strand genes are load-bearing in that fixture.** On a single-strand locus a convention error
+that swapped the comparison's operands would move both together and be invisible.
+
+### ⭐ And the 166× measurement now has an explanation rather than a rationalisation
+
+S5.f-addendum forced κ to the nominal 0.99 and a zero-gDNA library read `f_gdna = 0.4992` against the
+fitted value's 0.0030, and concluded *"the mirror cancels"*. ⛔ It does not cancel — **there is no mirror**.
+`0.0101` is the right answer for an R1-antisense library, and 0.99 is a different quantity substituted for
+it. The numbers stand; the explanation changes, and it is the simpler one.
+
+### ⭐ What this unblocks
+
+`SPEC_SECOND_PASS.md` §3.3's strand term, immediately and with no fix. `rna_sense_frac` is exactly the
+`P(align_strand agrees | RNA)` the second pass needs to score an unspliced fragment's competing strand
+hypotheses.
+
+⚠ **But mind the direction.** On an R1-antisense library the value is ≈ 0.01, so the RNA hypothesis whose
+implied strand *disagrees* with `align_strand` is the LIKELY one. ⛔ A scorer written as "agreement ⇒
+multiply by `rna_sense_frac`" is exactly backwards on every real cfRNA library. Recorded in the spec.
+
+### ⚠ A real gap found while closing a phantom one
+
+**The simulator can only emit R1-ANTISENSE libraries.** `strand_specificity` is a swap probability about a
+*fixed* orientation, never a choice of orientation, so **no simulated condition exercises the R1-sense
+branch** — and real R1-sense libraries (KAPA-style) exist. Filed as `TODO.md` rank 6b and marked in place
+by a **strict xfail** that deletes itself when the simulator gains the switch. ⚠ Low urgency: the branch is
+a `max()` and a comparison, and real cfRNA is dUTP.
+
+### Gates
+
+| | | |
+|---|---|---|
+| **the recovery** | `StrandModel.strand_specificity` recovers the simulated knob at 1.00 / 0.75 / 0.50 | ✅ within 0.03 — ~4σ of the binomial standard error at 4,000 fragments, loose enough never to flake and far tighter than the 0.5-scale error a real flip would give |
+| **the direction** | a perfectly stranded simulated library has `p_r1_sense ≈ 0`, and `read1_sense` reports the protocol as antisense | ✅ |
+| **one convention** | `rna_sense_frac` is the Beta posterior mean of `p_r1_sense` and does not diverge from it | ✅ — a divergence would mean a second strand convention had appeared between the model and the balance fit |
+
+⛔ **No code changed.** The deliverable is the gate and the corrected record: the absence of that gate is
+what let one non-defect be filed twice, and it is the only thing that stops a third time.
+
+---
+
+## P1 — strand in the gap enumeration: two behaviours gated, one defect fixed (2026-08-02)
+
+    Spec: `docs/SPEC_SECOND_PASS.md` §3.3 and D-5   ·   Gate: `tests/native/test_gap_hypothesis_strand.py`
+    Suite: **21 failed / 1877 passed / 1 xfailed**, all 21 goldens.
+
+The owner's 2026-08-02 ruling: *"any fragment with a splice junction, immediately, we can constrain the
+gap [hypotheses] to that strand … fragments without a splice junction are unspliced and could be either
+strand."* The audit found the first half **already implemented and tested nowhere**; this entry gates both
+halves and fixes the one case that was wrong.
+
+### ⭐ Gated: an observed junction pins the strand
+
+`tP` (+) and `tM` (−) cover the same sequenced blocks and share the observed junction's coordinates, so
+neither annotation nor overlap can separate them — only the sequenced **motif** can. Measured through a
+real scan:
+
+| observed XS motif | hypotheses | outcome |
+|---|---|---|
+| `+` | tP's 400 bp gap intron alone | deposits at **L = 450** |
+| `−` | tM's 200 bp gap intron alone | deposits at **L = 650** |
+
+⭐ The deposited `L` says which transcript was believed, with no need to read the hypothesis set. ⛔ And it
+fires on the count too: without the pin both would survive and the fragment would be **deferred instead of
+deposited**.
+
+### ✅ Gated: an unspliced fragment offers both strands
+
+Same locus, no motif: three hypotheses — `(1600,2000)` on `+`, `(1700,1900)` on `−`, and ∅ — with the two
+spliced ones carrying **opposite** implied strands. ⚠ This is the case that makes the second pass's strand
+term necessary rather than decorative: drop it and these two are separated by length alone.
+
+### ⛔ Fixed: D-5 — one path claimed by both strands
+
+`add_hypothesis` grouped paths by intron **coordinates only**, so two opposite-strand transcripts implying
+the same intron merged into one hypothesis carrying the **first-seen** strand — an answer that flips when
+two GTF lines are swapped. Grouping is right (it *is* one path); the strand is now set to **AMBIGUOUS**
+when supporters disagree, which is what that value already means everywhere else and which `deposit`
+already refuses to credit a junction on. Idempotent, three lines.
+
+⚠ Unreachable on human data — **0 of 404,168** junction coordinates are annotated on both strands, and the
+index warns that it is biologically impossible. Fixed because the alternative is order-dependent.
+
+### ⚠ THE FIXTURE TRAP, recorded because it cost an hour
+
+Driving `FragmentResolver` directly leaves `t_strand_arr_` empty, so **every hypothesis's implied strand
+silently reads NONE** and a strand gate written that way passes against nothing. ⛔ All of these gates go
+through the scan.
+
+### The perturbations
+
+| | perturbation | result |
+|---|---|---|
+| **Z1** | the merged hypothesis keeps the first supporter's strand | ⭐ **fires** — D-5 |
+| **Z2** | the implied strand is dropped; every hypothesis reports NONE | ⭐ **fires on two gates** |
+| **Z3** | `!certified_rna` removed from the ∅ condition | ⛔ **not caught** — and the reason is worth having |
+
+### ⛔ Z3 DOES NOT FIRE, AND THAT IS NOT A WEAK FIXTURE
+
+Measured: the `open` fragment's candidates are `t_inds = [0, 1, 4, 5]`, where **4 and 5 are the nRNA
+shadows** (`RIGEL_NRNA_chr1_{1,2}_1000_2200`, `is_synthetic`). A shadow is single-exon, so it implies
+nothing in the gap, so `any_candidate_implies_nothing` is already true and ∅ is emitted without the clause.
+
+⭐ **That is `SPEC_GAP_PATHS.md` §2's own ruling arriving by a different route** — *"the nascent shadow IS
+the ∅ hypothesis"* — and the two mechanisms agree rather than conflict:
+
+* **spliced** fragment: the observed CIGAR-N intron falls inside the shadow's single exon, so the shadow
+  cannot explain the read and drops out of `t_inds`. ∅ is correctly absent — the certified-RNA `mixed`
+  fragment in `test_gap_introns_are_cut.py` has exactly one hypothesis.
+* **unspliced** fragment: the shadow survives and supplies ∅, which is what §2's table requires.
+
+⚠ So `!certified_rna` is **redundant, not wrong**, and it is KEPT: it states the rule directly rather than
+depending on the shadow mechanism continuing to exist, and a single-exon gene has no separate shadow row
+at all (`is_nrna` on a non-synthetic row means mature ≡ nascent). ⛔ Do not delete it on the strength of
+this perturbation.
+
+### Files touched
+
+`src/rigel/native/resolve_context.h` (the D-5 fix) · `tests/native/test_gap_hypothesis_strand.py` (new)
+
+---
+
+## P2 — the scorer is BUILT and UNGATED (2026-08-02) ⛔ PARTIAL, READ THIS BEFORE USING IT
+
+    Spec: `docs/SPEC_SECOND_PASS.md` §3 and P2   ·   Suite: **21 failed / 1877 passed / 1 xfailed**
+    ⛔ **`src/rigel/second_pass.py` HAS NO TESTS.** It is inert — nothing imports it — but it is
+    production code in `src/` that no gate covers, which is exactly the state where the next reader
+    assumes it works. It does not yet have the right to be believed.
+
+### What landed
+
+| | |
+|---|---|
+| `Accumulator.length_under` | ⭐ `L` under ONE hypothesis without depositing. **Exposed, not reimplemented**: a Python scorer computing its own `L` would be a second definition of the quantity C0/C2 unified, and the one the drain would then disagree with. Verified: spliced 101, genomic 800, clipping correct |
+| `MarshalledFragment` | the binding's hypothesis marshalling factored out, shared by `deposit` and `length_under`, so the two cannot drift about how a hypothesis set crosses the ABI |
+| `src/rigel/second_pass.py` | the scorer: all three terms of §3, each kept separately on `HypothesisTerms` so a regression is attributable to one rather than to "the score moved" |
+
+⚠ **D-1 is a parameter (`min` vs `geometric`) BECAUSE it must be measured.** It is not a tunable to be
+left in: the docstring says it is expected to be deleted once the measurement is in. ⛔ If it is still
+there in a month, that is the failure mode `CARRY_FORWARD.md` warns about.
+
+### ⭐ THE SMOKE RUN ALREADY SHOWS D-3, AND IT IS NOT SUBTLE
+
+Four-fragment fixture, both held records scored **uniform**:
+
+```
+record 0: [62100,63000)   L=502  rho=2.00e-03  f=0.000   -> undecided
+record 1: [66100,67000)   L=500  rho=0.000     f=0.500   -> undecided
+```
+
+On record 1 **both junctions have zero flux** — the only fragment that would have used them is the held
+one. That is exactly the systematic hole the spec predicted: *the held fragments are excluded from the
+tally they are scored against*. On a toy it is 100 %. ⛔ **The real number is unknown and it is the fact
+that decides D-3.**
+
+### ⛔ WHAT IS DELIBERATELY NOT DONE, AND WHY
+
+**The P2 gate is not written.** It says *"on a hand-built locus where the truth is known, the correct
+hypothesis takes the larger share"* — and the available fixture has no depth, so every score is uniform
+and the gate would pass or fail for reasons that have nothing to do with the scorer. ⚠ Writing it against
+this fixture would have produced a green gate over an undecided scorer, which is worse than no gate.
+
+Three things remain, and the order matters:
+
+1. ⭐ **Measure D-3 on the pilot first** — pure measurement, data already on disk
+   (`~/Downloads/rigel_runs/suite/pilot`, 8 conditions with `truth_fragment_lengths.tsv`). It needs no new
+   fixture, and its answer may change what the gate should even assert. ⛔ If the zero-flux share is large
+   the score needs a fallback, and **that is an owner decision — no pseudocount will be invented**.
+2. **A discriminating fixture, then the gate.** Deep enough that rho and f actually separate.
+3. **Measure D-1**, then delete the parameter.

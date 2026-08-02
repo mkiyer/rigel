@@ -316,69 +316,26 @@ static std::vector<EmEquivClass> build_equiv_classes(
     }
 
     // ---- Deterministic ordering ----
-    // Multi-threaded BAM scanning produces fragments in non-deterministic
-    // order.  The unordered_map above inherits that non-determinism in both
-    // (a) the iteration order of equiv classes, and (b) the row order of
-    // units within each class.  Since the EM E-step accumulates column sums
-    // over rows, and FP addition is non-associative, different row orders
-    // produce ULP-level differences that SQUAREM amplifies across iterations
-    // potentially causing large cascading output differences.
+    // The `unordered_map` above iterates in an order that depends on the hash table's internals, so the
+    // equiv classes come out in no fixed order.  The E-step accumulates column sums over rows and FP
+    // addition is non-associative, so an unstable order produces ULP differences that SQUAREM amplifies
+    // across iterations into large cascading output differences.  Sorting by comp_idx pins it.
     //
-    // Fix: sort equiv classes by comp_idx, and sort rows within each class
-    // by their log-likelihood fingerprint.  This makes the EM iteration
-    // fully deterministic regardless of input fragment order.
+    // ⚠ THE ROWS WITHIN A CLASS NEED NO SORT, and there used to be one (~45 lines, keyed on a
+    // log-likelihood fingerprint).  It existed because the multi-threaded BAM scan filled the fragment
+    // buffer in worker-COMPLETION order, so a locus's units arrived permuted.  That is fixed at the
+    // source now: `build_multi_loci` orders each locus's units by `frag_id`, the reader's BAM-order
+    // identity, so `unit_list` below is already canonical and re-sorting it here could only agree.
+    // `tests/test_scan_order_independence.py` is what says so — it requires byte-identical output across
+    // scan thread counts in all three assignment modes, and the fingerprint sort could never deliver
+    // that anyway: it made the ROWS stable while leaving WHICH FRAGMENT sat in each row up to the race,
+    // which is exactly what broke `assignment_mode="sample"`.
 
     // Sort equiv classes by comp_idx (lexicographic)
     std::sort(result.begin(), result.end(),
               [](const EmEquivClass& a, const EmEquivClass& b) {
                   return a.comp_idx < b.comp_idx;
               });
-
-    // Sort rows within each equiv class by log-lik (lexicographic)
-    for (auto& ec : result) {
-        if (ec.n <= 1) continue;
-        int k = ec.k;
-        int n = ec.n;
-
-        // Build sort index
-        std::vector<int> idx(static_cast<size_t>(n));
-        std::iota(idx.begin(), idx.end(), 0);
-
-        std::sort(idx.begin(), idx.end(), [&](int a, int b) {
-            for (int j = 0; j < k; ++j) {
-                double va = ec.ll_flat[static_cast<size_t>(a) * k + j];
-                double vb = ec.ll_flat[static_cast<size_t>(b) * k + j];
-                if (va != vb) return va < vb;
-            }
-            for (int j = 0; j < k; ++j) {
-                double va = ec.wt_flat[static_cast<size_t>(a) * k + j];
-                double vb = ec.wt_flat[static_cast<size_t>(b) * k + j];
-                if (va != vb) return va < vb;
-            }
-            return false;
-        });
-
-        // Check if already sorted (common case for single-unit classes)
-        bool already_sorted = true;
-        for (int i = 0; i < n; ++i) {
-            if (idx[i] != i) { already_sorted = false; break; }
-        }
-        if (already_sorted) continue;
-
-        // Reorder ll_flat and wt_flat
-        std::vector<double> new_ll(static_cast<size_t>(n) * k);
-        std::vector<double> new_wt(static_cast<size_t>(n) * k);
-        for (int i = 0; i < n; ++i) {
-            auto src = static_cast<size_t>(idx[i]) * k;
-            auto dst = static_cast<size_t>(i) * k;
-            std::copy(ec.ll_flat.data() + src, ec.ll_flat.data() + src + k,
-                      new_ll.data() + dst);
-            std::copy(ec.wt_flat.data() + src, ec.wt_flat.data() + src + k,
-                      new_wt.data() + dst);
-        }
-        ec.ll_flat = std::move(new_ll);
-        ec.wt_flat = std::move(new_wt);
-    }
 
     return result;
 }
