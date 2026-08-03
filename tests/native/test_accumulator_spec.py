@@ -1,6 +1,6 @@
 """THE ACCUMULATOR SPEC — the matrix the reference and the native build are both gated on.
 
-    Design: ``docs/ACCUMULATOR_DESIGN.md``   ·   Plan: ``docs/IMPLEMENTATION_PLAN.md`` §3.6, §10.4
+       §10.4
 
 ``_accumulator_reference.py`` is the executable specification; the native accumulator is required to
 reproduce it byte for byte. This module is what "correct" means for both.
@@ -436,7 +436,7 @@ def test_a_pool_is_binned_at_L_and_only_ONCE_per_fragment():
     assert int(p.sum()) == 1
 
 
-# ⛔ `test_an_IMPLICIT_splice_is_kept_OUT_of_the_pure_RNA_pool` was DELETED — `SPEC_GAP_PATHS.md` §5.
+# ⛔ `test_an_IMPLICIT_splice_is_kept_OUT_of_the_pure_RNA_pool` was DELETED —
 #
 # It asserted the pool bar that `sj_implicit` existed to apply: a splice inferred rather than observed
 # made the fragment's length "a product of the very model the pool is used to fit". The criterion is now
@@ -928,7 +928,7 @@ def test_a_DEFINITE_but_WRONG_sj_strand_still_misses():
 
 
 # ---------------------------------------------------------------------------
-# length_sum — the second length tilt (docs/NODE_DENSITY_DERIVATION.md)
+# length_sum — the second length tilt
 # ---------------------------------------------------------------------------
 
 
@@ -951,7 +951,7 @@ def test_length_sum_is_L_and_NOT_the_genomic_span():
     """The molecule's length, so a cut intron does not count — the same ``L`` the pools bin at.
 
     Binning at the covered/genomic length instead is a defect this project has already paid for once:
-    it collapsed the gDNA length pool to a spike at twice the read length (``CARRY_FORWARD.md`` §3
+    it collapsed the gDNA length pool to a spike at twice the read length
     trap 8), and here it would put a number in ``length_sum`` that no fragment-length model can explain.
     """
     acc = _acc(junctions=[JUNCTION])  # intron (201, 900)
@@ -1046,7 +1046,7 @@ def test_the_density_FIELD_NAME_is_gone_everywhere():
     """The rename is complete, so no consumer can reach a half-migrated schema.
 
     ``inv_length_sum`` is an exact density at an edge and is NOT one at a node; keeping the old name
-    would put one word on two concepts, which is ``CARRY_FORWARD.md`` §3 trap 27.
+    would put one word on two concepts, which is.
     """
     t = _acc().tally
     stale = [name for name in t.__slots__ if name.endswith("_density")]

@@ -7,9 +7,9 @@ abundance estimates.
 
 This manual covers installation, the four CLI subcommands (`index`, `quant`,
 `sim`, `export`), the output files, and the calibration stage. For the
-statistical model see [METHODS.md](METHODS.md); for the calibration theory
-see [docs/calibration/CALIBRATION_ARCHITECTURE.md](calibration/CALIBRATION_ARCHITECTURE.md);
-for a flag-by-flag reference see [parameters.md](parameters.md).
+statistical model and the calibration theory, see the design notes under
+`docs/accumulator/` and `docs/calibration/`; `rigel <subcommand> --help` is the
+flag-by-flag reference.
 
 ---
 
@@ -149,7 +149,7 @@ rigel quant \
     --seed 42
 ```
 
-Every flag is also documented in [parameters.md](parameters.md).
+Every flag is also documented by `rigel <subcommand> --help`.
 
 **Input / output**
 
@@ -224,7 +224,7 @@ rigel sim --config scenario.yaml -o sim_out/
 | `--seed N` | `42` | Random seed (overridden by YAML) |
 | `--num-reads N` | `1000` | Number of fragments to simulate (overridden by YAML) |
 
-See [SIMULATOR.md](SIMULATOR.md) for the scenario YAML schema.
+See SIMULATOR.md for the scenario YAML schema.
 
 ### rigel export
 
@@ -660,7 +660,7 @@ is_mm_dropped = (zf & 0x80) != 0
 ## Calibration
 
 > ⚠ **Being redesigned.** The fragment tally this stage consumes (the "accumulator") is being replaced;
-> see `docs/CARRY_FORWARD.md`. The behaviour described below is current and correct for the shipped
+> see `docs/SESSION_HANDOFF.md`. The behaviour described below is current and correct for the shipped
 > release, but the internals and some flags will change. Calibration is not yet considered production
 > quality.
 
@@ -732,7 +732,7 @@ All are advanced; defaults suit standard libraries. Exposed on `rigel quant`:
 The remaining calibration parameters (`sweep_n_grid`,
 `gdna_strand_prior_*`, `rna_strand_prior_*`, `gdna_prior_bandwidth`,
 `calib_kde_*`) live in `CalibrationConfig` and can be set via the YAML
-`--config` file; see [parameters.md](parameters.md).
+`--config` file; see `rigel sim --help`.
 
 ### When to suspect calibration is misfiring
 
@@ -747,10 +747,7 @@ The remaining calibration parameters (`sweep_n_grid`,
   overrides them. If a locus disagrees with calibration, the locus generally
   wins.
 
-For the full theory, see
-[docs/calibration/CALIBRATION_ARCHITECTURE.md](calibration/CALIBRATION_ARCHITECTURE.md)
-(the count-zero-information principle) and the model overview in
-[METHODS.md](METHODS.md).
+For the full theory, see the design notes under `docs/calibration/`.
 
 ---
 
@@ -1019,8 +1016,7 @@ principle). Each node's strand likelihood is a Beta-Binomial tilt; the count
 enters only as its overdispersed Fisher information, so an unstranded or
 low-count node contributes a weak, uninformative tilt and the node's
 composition is then set by cross-node imputation and the global gDNA prior.
-There is no on/off "strand-mode switch." See
-[docs/calibration/CALIBRATION_ARCHITECTURE.md](calibration/CALIBRATION_ARCHITECTURE.md).
+There is no on/off "strand-mode switch."
 
 **Do I need the alignable Zarr store?**
 For real genomes it is recommended — it provides gDNA-aware effective length
@@ -1055,4 +1051,4 @@ component's Dirichlet alpha toward zero; because VBEM E-step weights depend on
 enter an absorbing regime and never recover. `VBEM_CLAMP_FLOOR` (default 0.1)
 sets a minimum alpha after each SQUAREM iteration. It is a compile-time
 constant in `src/rigel/native/em_solver.cpp` and has no effect in MAP-EM mode.
-See [parameters.md](parameters.md) for all compile-time constants.
+Compile-time constants live in `src/rigel/native/constants.h`.

@@ -1,6 +1,6 @@
 """The node<->edge chain: `N E N E ... E N`, and there are NO terminal slots.
 
-    Plan: ``docs/S5_DESIGN_LOG.md`` §2 (S5.d)
+     (S5.d)
 
 ⛔ **What this replaces.** The old chain was `B R B R ... R B` — a reference with `k` regions had `k + 1`
 boundary slots, the two outermost of which were reference terminals carrying no data and existing only

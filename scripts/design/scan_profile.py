@@ -1,6 +1,6 @@
 """What the accumulator costs per fragment, measured on a real BAM.
 
-    Plan: ``docs/IMPLEMENTATION_PLAN.md`` §6
+    
 
 ⚠ WHY THIS EXISTS. There was no scan-profiling harness in this repository, and the only recorded figure
 — *"the BAM scan is ~2 % of runtime"* — was measured on a 39 MB BAM with 155,352 read groups. That

@@ -1,6 +1,6 @@
 """P0 — how much of the library's unspliced mass reaches the solver with NO composition evidence?
 
-    Plan: `docs/SOLVER_OBSERVABLES_PLAN.md` §4   ·   Hook: `bp_solver.node_sweep(_capture=...)`
+       Hook: `bp_solver.node_sweep(_capture=...)`.
 
 ⭐ **THE QUESTION.** `node_init` gives every slot its own composition precision `tau_lam` from three live
 sources — the structural lock, the intron-factory density deconvolution, and the strand Beta-Binomial.
@@ -8,12 +8,12 @@ A slot with `tau_lam == 0` and no structural lock has **no own evidence at all**
 decided entirely by neighbour messages and the population prior. This script measures how much of the
 library sits there, and splits it by the axes that say WHY.
 
-⚠ **The strand source is identically zero at κ = ½** (`CARRY_FORWARD.md` §2: the gDNA fraction cancels
+⚠ **The strand source is identically zero at κ = ½** (the gDNA fraction cancels
 out of the Beta-Binomial mean, verified to 5.6e-17) and is gated OFF on AMBIG slots by the Schur
 argument (`node_init.py`, approach E). So the prediction under test is that the `ss0.50` conditions
 carry materially more no-evidence mass than the `ss0.99` ones, concentrated on AMBIG slots.
 
-⛔ **MASS-WEIGHTED, NEVER NODE-COUNT-WEIGHTED.** `CARRY_FORWARD.md` §1 fact 6 records a claim that
+⛔ **MASS-WEIGHTED, NEVER NODE-COUNT-WEIGHTED.** records a claim that
 survived for months because it was bp-weighted (0.8738) when the estimator is mass-weighted (0.9596).
 80.5 % of partition nodes carry zero fragments; counting them would drown the answer.
 
@@ -129,7 +129,7 @@ def _cond(count: np.ndarray, numer: np.ndarray, denom: np.ndarray) -> float:
 
 def _f_gdna(result) -> float:
     """The library gDNA fraction as the LEDGER reports it. ⚠ This is an incidence-weighted sum, not a
-    fragment count (`SOLVER_OBSERVABLES_PLAN.md` §2.2) — quoted here only to key the row to the
+    fragment count — quoted here only to key the row to the
     baseline table."""
     g = float(np.asarray(result.mass_gdna_node).sum() + np.asarray(result.mass_gdna_edge).sum())
     r = float(np.asarray(result.mass_rna_node).sum() + np.asarray(result.mass_rna_edge).sum())

@@ -1,9 +1,9 @@
 """⭐ An annotated intron in the mate gap is found on EVERY fragment, and never a near-miss for it.
 
-    Spec: ``docs/SPEC_GAP_PATHS.md`` (which supersedes ``SPEC_GAP_INTRONS.md``)
-    Cause and evidence: ``docs/JUNCTION_OPPORTUNITY.md`` §4   ·   Plan: ``docs/PLAN_TWO_PASS.md``
+     (which supersedes)
+    Cause and evidence:
 
-`docs/FRAGMENT_LENGTH_AUDIT.md`'s C2 left the tool with ONE definition of fragment length — the
+'s C2 left the tool with ONE definition of fragment length — the
 accumulator's ``L``, the total length of the fragment's own path. C0 proved that definition correct
 *given its inputs*. This module is about an input that was **incomplete**: implicit-splice detection ran
 only on fragments the resolver had already called ``SPLICE_UNSPLICED``, so a fragment carrying an
@@ -20,7 +20,7 @@ emits every hole, so a CIGAR-N intron is a "hole" too. Dropping only gaps that E
 intron is what stops the detector substituting a *different* annotated intron that happens to lie within
 the ±K anchor tolerance — which would merge into one wider interval and make ``L`` too SHORT.
 
-⭐ **WHAT MOVED AT S1, AND WHY IT IS THE SAME GATE.** ``SPEC_GAP_PATHS.md`` made the ACCUMULATOR the
+⭐ **WHAT MOVED AT S1, AND WHY IT IS THE SAME GATE.** made the ACCUMULATOR the
 arbiter: a fragment arrives with its hypothesis SET, and if more than one hypothesis survives its ``L`` is
 undetermined and it is **held whole in the side buffer** rather than deposited. Two of the four fragments
 here now take that route, so their ``L`` is no longer readable from ``deposited_lengths`` — it is readable
@@ -96,7 +96,7 @@ L_NEAR = 502
 #: * ``near``'s observed CIGAR-N junction is 2 bp off the annotation, so the fragment is
 #:   ``SPLICED_UNANNOT`` and **not certified RNA**. The unspliced (genomic) hypothesis therefore survives
 #:   alongside the spliced one — the molecule may be gDNA or nascent with the gap as real template — and
-#:   two survivors mean ``L`` is undetermined. ``SPEC_GAP_PATHS.md`` §2: ∅ is available whenever no
+# two survivors mean ``L`` is undetermined: ∅ is available whenever no
 #:   *annotated* junction was sequenced.
 #: * ``ambig``'s two isoforms imply DIFFERENT introns in the same gap. gDNA cannot be spliced and its
 #:   junction IS annotated, so the molecule is certified RNA and only the structure is open.
@@ -106,7 +106,7 @@ _DEFERRED = 2
 def _covered_length(start: int, end: int, introns) -> int:
     """``L`` by integer SET ARITHMETIC — a different algorithm from the accumulator's segment walk.
 
-    ⚠ Deliberately not the reference's own ``_hypothesis_length``. ``CARRY_FORWARD.md`` §3 trap 1: a
+    ⚠ Deliberately not the reference's own ``_hypothesis_length``: a
     validator that calls the implementation's helper validates nothing, and the whole point here is that a
     hypothesis's intron set yields 502 rather than 500.
     """
@@ -230,7 +230,7 @@ def test_U1_L_excludes_BOTH_the_observed_intron_and_the_one_in_the_mate_gap(payl
     """
     assert _lengths(payload) == {L_PURE: 1, L_MIXED: 1}, (
         "the deposited fragment lengths are not the molecules this BAM determines. 700 bp for `mixed` "
-        "means the mate-gap intron was never cut (the old SPLICE_UNSPLICED gate) — SPEC_GAP_PATHS.md §0"
+        "means the mate-gap intron was never cut (the old SPLICE_UNSPLICED gate) — "
     )
     assert payload.qc.deposited == 2
     # ⭐ Conservation: nothing is discarded. Four fragments in, two deposited and two held.
@@ -374,7 +374,7 @@ def test_EVERY_HELD_RECORD_IS_STAMPED_WITH_ITS_OWN_REFERENCE(payload):
 
 
 def test_the_RNA_pool_holds_every_fragment_whose_PATH_IS_DETERMINED(payload):
-    """⭐ **D1 IS DELETED, and this is the two-sided gate that replaces it** (``SPEC_GAP_PATHS.md`` §5).
+    """⭐ **D1 IS DELETED, and this is the two-sided gate that replaces it**.
 
     D1 barred a fragment whose splice was *inferred* rather than sequenced, on the grounds that a length
     partly inferred from the annotation is a product of the model the pool is used to fit. The purity

@@ -1,9 +1,9 @@
 """The fragment-length composition likelihood — gates U1–U5.
 
-    Plan: `docs/SOLVER_OBSERVABLES_PLAN.md` §6 (P2)   ·   Module: `rigel.calibration.length_likelihood`
+     (P2) · Module: `rigel.calibration.length_likelihood`
 
 ⛔ **U1 IS VERIFIED BY EXACT ENUMERATION OVER INTEGER START POSITIONS — never against the module's own
-closed form.** `CARRY_FORWARD.md` §3 trap 1: a validator that calls the builder's own helper validates
+closed form.**: a validator that calls the builder's own helper validates
 nothing, and re-deriving by a *different algorithm* is what caught both real bugs in the index work. The
 closed form here is a cumulative-sum identity; the oracle below is a literal loop over every start
 position and every fragment length, with no tolerance beyond float round-off.
@@ -163,7 +163,7 @@ def test_node_cross_moment_is_exactly_one():
 def test_eff_matches_the_solver_divisor(pmf_name):
     """U2 — ``moments.eff`` must be byte-identical to what the solver divides by.
 
-    ⛔ `CARRY_FORWARD.md` §3 trap 27: the prose said "the AVERAGE", the code followed the prose, and a
+    ⛔: the prose said "the AVERAGE", the code followed the prose, and a
     sibling docstring had the right formula the whole time. If these two ever disagree there are two
     implementations of one quantity and one of them is wrong.
     """
@@ -313,7 +313,7 @@ def test_a_flat_row_carries_no_precision():
 def test_inert_where_it_cannot_speak(label, count, eff_kill):
     """U5 — zero count, or zero opportunity for either component, must give a flat row and no nan.
 
-    ⛔ `CARRY_FORWARD.md` §3 trap 23. A node shorter than one RNA fragment has RNA opportunity exactly 0
+    ⛔. A node shorter than one RNA fragment has RNA opportunity exactly 0
     on **21.7 % of chr22 nodes** against the measured pure pools — not a corner case.
     """
     pmf_g = _pmf([(20, 0.5), (30, 0.5)], 700)

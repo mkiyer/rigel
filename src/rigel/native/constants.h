@@ -209,7 +209,7 @@ struct RawResolveResult {
     // to SPLICE_ARTIFACT.
     int32_t n_sj_blacklisted = 0;
 
-    // --- The per-junction SJ strand table's key (docs/CARRY_FORWARD.md) ---
+    // The per-junction SJ strand table's key ---
     // Coordinates of the LEFTMOST ANNOTATED CIGAR-N junction this fragment
     // crosses; -1 when it crosses none.  `sj_strand` above is the fragment's
     // motif strand (one XS/ts tag per fragment), which completes the key.
@@ -251,7 +251,7 @@ struct RawResolveResult {
     // A mate gap may hold no intron, one, or several, and which it is CANNOT be observed -- the bases are
     // not there. Each compatible transcript determines exactly one answer (its own introns lying inside
     // the gaps), so the set is finite and small, and two transcripts implying the same introns are ONE
-    // hypothesis. The accumulator arbitrates. docs/SPEC_GAP_PATHS.md.
+    // hypothesis. The accumulator arbitrates.
     //
     // ⚠ An EMPTY hypothesis (no introns) is the UNSPLICED one, and it is the genomic explanation: cutting
     // nothing means the gap is real template. It is present whenever some compatible transcript implies

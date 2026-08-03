@@ -1,14 +1,14 @@
 """The per-contiguous-edge RNA REACH, on the accumulator's edge axis — S5.g's input.
 
-    Ruling: ``docs/S5_DESIGN_LOG.md`` §1 A7   ·   Equation: ``docs/CARRY_FORWARD.md`` §2
+    Ruling: · Equation:
 
 ⭐ **What reach is for.** A crossing molecule must fit in what remains of **its own template** either
 side of the line. gDNA's template is the chromosome, so its reach is unbounded — that is physics, not a
 choice. RNA's template ends where its transcript ends, so near a terminus the admissible placements
 collapse and the crossing divisor with them. Ignoring that over-calls gDNA by a measured **11.0 %**
-genome-wide and by **+0.36** in the last node before a polyA site (`CARRY_FORWARD.md` §1 fact 6).
+genome-wide and by **+0.36** in the last node before a polyA site.
 
-⚠ **PER STRAND, and per SIDE** — `CARRY_FORWARD.md` §2: reach is "maximised over transcripts
+⚠ **PER STRAND, and per SIDE**: reach is "maximised over transcripts
 independently per side AND per strand". A POS-strand transcript and a NEG-strand one ending at
 different places give a line two different RNA reaches, and averaging them would describe neither.
 
@@ -17,7 +17,7 @@ only by a spliced molecule, so what remains either side of it is exonic. A conti
 *nascent* RNA too, which is genomic — taking the exonic reach there would declare an intronic nascent
 fragment impossible (`splice_graph.JunctionGeometry`).
 
-⚠ **A reach of 0 is MEANINGFUL, not a sentinel** (`CARRY_FORWARD.md` §2). It says there is no template
+⚠ **A reach of 0 is MEANINGFUL, not a sentinel**. It says there is no template
 of that strand at that line at all, so RNA of that strand has zero opportunity — which is what makes
 `crossing_eff_length` return 0 and the consuming `_rate` emit nothing rather than a floored value
 (trap 23). Measured on the chr22 pilot index: **40.6 %** POS and **42.9 %** NEG.
@@ -60,7 +60,7 @@ def _edge_positions(index) -> np.ndarray:
 
     A reference contributing ``c`` cuts owns ``c − 1`` nodes and ``c − 2`` interior lines, and line
     ``e`` sits at cut ``e + 1``. Derived from the PARTITION, not from the reach builder, so the two
-    cannot agree by sharing a helper (`CARRY_FORWARD.md` §3 trap 1).
+    cannot agree by sharing a helper.
     """
     positions, cut_offsets, _types = build_node_partition_arrays(index)
     out = []
@@ -155,7 +155,7 @@ def test_the_taper_COLLAPSES_the_divisor_near_a_terminus(index):
     """⭐ The whole point of A7, as a number rather than an assertion.
 
     ``crossing_eff_length`` at unbounded reach is ``mu − 1``; at a real reach it is far smaller near a
-    transcript end. `CARRY_FORWARD.md` §2 records 199.0 at R=550 against 50.0 at R=50 on RNA N(200,50)
+    transcript end. records 199.0 at R=550 against 50.0 at R=50 on RNA N(200,50)
     — a **4×** error if the mean is used blindly at a first exon.
     """
     from rigel.calibration.effective_length import UNBOUNDED_REACH, crossing_eff_length

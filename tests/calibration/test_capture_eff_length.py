@@ -37,24 +37,24 @@ from conftest import build_test_index
 
 #: The gDNA crossing effective length every line carries. In production this is
 #: ``crossing_eff_length(pmf, UNBOUNDED_REACH, UNBOUNDED_REACH) = mu_g − 1``, the SAME number at every
-#: line, because gDNA's template is the chromosome and takes no reach taper (`S5_DESIGN_LOG.md` A7).
+# line, because gDNA's template is the chromosome and takes no reach taper.
 _CROSSING_EFF = 180.0
 
 
 def _cal(region_arrays: RegionArrays, density, node_eff, edge_eff) -> CalibrationResult:
     """⭐ **THE fixture — there is only one now.** A deposition-faithful result for an arbitrary
-    per-node gDNA DENSITY field: every object's mass is ``ρ × its own effective support``, on both axes.
+     per-node gDNA DENSITY field: every object's mass is ``ρ × its own effective support``, on both axes.
 
-    ⛔ **Three near-identical builders used to live here** — ``_uniform_field_cal``, ``_field_cal`` and
-    ``_seam_faithful_cal`` — and they differed in exactly one thing: whether ``gdna_boundary_len`` was
-    the halved per-side density length ``E[min(ℓ,L)]/2`` or the un-halved ``E[min(ℓ,L)]``. Two of them
-    stored the un-halved length AND deposited half the mass, which cancelled a spurious ½ in
-    ``_pooled_seam_arrays`` and hid an exact factor of 2 from every assertion in this file for months
-    (`CARRY_FORWARD.md` §3 trap 2). A contiguous edge is a 0-bp line with ONE mass and ONE support, so
-    there is no face, no half, and nothing for three fixtures to disagree about.
+     ⛔ **Three near-identical builders used to live here** — ``_uniform_field_cal``, ``_field_cal`` and
+     ``_seam_faithful_cal`` — and they differed in exactly one thing: whether ``gdna_boundary_len`` was
+     the halved per-side density length ``E[min(ℓ,L)]/2`` or the un-halved ``E[min(ℓ,L)]``. Two of them
+     stored the un-halved length AND deposited half the mass, which cancelled a spurious ½ in
+     ``_pooled_seam_arrays`` and hid an exact factor of 2 from every assertion in this file for months
+    A contiguous edge is a 0-bp line with ONE mass and ONE support, so
+     there is no face, no half, and nothing for three fixtures to disagree about.
 
-    ⚠ A line's density is its **left flank's**. With a varying field the two flanks disagree, so the
-    fixture must SAY which it means rather than average them into a number that is neither.
+     ⚠ A line's density is its **left flank's**. With a varying field the two flanks disagree, so the
+     fixture must SAY which it means rather than average them into a number that is neither.
     """
     d = np.asarray(density, dtype=np.float64)
     node_eff = np.asarray(node_eff, dtype=np.float64)
@@ -384,7 +384,7 @@ def test_global_reference_density_bimodal_returns_enriched_mode_snapped():
 # holds ``ρ·(gbl_r + gbl_{r+1})`` — and dividing that by the AVERAGE read **2ρ**. Every quantity in
 # that sentence is gone with the faces. There is no per-side length to halve, no pair of faces to sum,
 # and no choice between a sum and an average: a contiguous edge is a 0-bp line with one mass and one
-# support (`S5_DESIGN_LOG.md` §4; `CARRY_FORWARD.md` §3 trap 2).
+# support ().
 #
 # ⚠ **The PROPERTY they protected is still real**, and is kept below: a crossing object under a uniform
 # field must read ρ, and a line genuinely below the reference density must contract rather than clip.

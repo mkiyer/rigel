@@ -129,7 +129,7 @@ def node_gdna_density(chain, geometry, region_arrays) -> NodeDensity:
         chain rather than by node-index arithmetic that has to know about reference terminals.
 
         ⚠ An object with no opportunity contributes nothing rather than a floored division
-        (`CARRY_FORWARD.md` §3 trap 23) — so a zero divisor makes the flank unusable, not infinite.
+        so a zero divisor makes the flank unusable, not infinite.
         """
         slots = neighbour[slot_of_node]
         exists = slots >= 0

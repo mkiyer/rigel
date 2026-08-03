@@ -240,7 +240,7 @@ struct StrandObservations {
     std::vector<int8_t> exonic_obs;
     std::vector<int8_t> exonic_truth;
 
-    // ⭐ The per-junction SJ strand table (docs/CARRY_FORWARD.md).
+    // ⭐ The per-junction SJ strand table.
     // A junction is uniquely specified by (ref, start, end, motif strand); each
     // strand-qualified fragment credits its leftmost ANNOTATED junction with one
     // sense (align_strand == sj_strand) or antisense observation.

@@ -3,7 +3,6 @@
  *
  *     SPEC:   tests/native/_accumulator_reference.py  — this file must reproduce it BYTE FOR BYTE.
  *             Where the two disagree, the Python file wins.
- *     Design: docs/ACCUMULATOR_DESIGN.md          Plan: docs/IMPLEMENTATION_PLAN.md §3
  *
  * THE MODEL
  *   The genome is a graph. One Accumulator holds ONE reference, described by its sorted CUT positions.
@@ -32,7 +31,6 @@
  * at a node, where the opportunity (node - L + 1)+ does not cancel. `length_sum` is the second tilt, and
  * without it the (count, inv_length_sum) pair has determinant mu_g - mu_r and so carries NO information
  * about the gDNA/RNA split whenever the two components share a mean length. See
- * docs/NODE_DENSITY_DERIVATION.md.
  *
  *   The opportunity factor cancels identically at an edge for ANY length distribution, which is why no
  *   divisor and no length model appear there. It does not cancel at a node.
@@ -169,7 +167,7 @@ enum class DepositOutcome : std::uint8_t {
     kEmpty           = 2,  // no path left after clipping to the reference
     kStrandUndefined = 3,  // align_strand is NONE or AMBIGUOUS, so it names no column
     kDeferred        = 4,  // >1 surviving hypothesis: the gap is undetermined, so the fragment
-                           //   is held WHOLE for the second pass (docs/SPEC_GAP_PATHS.md §0)
+                           // is held WHOLE for the second pass
 };
 
 /// The QC counter this outcome increments — and the specification's own key for it, so the two cannot
@@ -190,7 +188,7 @@ inline const char* outcome_key(DepositOutcome outcome) noexcept {
 /// A mate gap may hold no intron, one, or several, and which it is cannot be observed -- the bases are
 /// not there. Each candidate transcript determines exactly one answer (its own introns lying inside the
 /// gaps), so the hypotheses are finite and small, and two transcripts implying the same introns are ONE
-/// hypothesis. docs/SPEC_GAP_PATHS.md §1.
+/// hypothesis.
 ///
 /// ⭐ THE EMPTY HYPOTHESIS IS THE UNSPLICED ONE, and it is the genomic explanation: cutting nothing means
 /// the gap is real template, i.e. the molecule is gDNA -- or nascent RNA, which is the same unspliced
@@ -262,7 +260,7 @@ struct GapCensus {
 };
 
 /// ⭐ Fragments whose gap has more than one surviving explanation, held WHOLE for the second pass
-/// (`ACCUMULATOR_DESIGN.md` §9 calls this the side buffer).
+/// ( calls this the side buffer).
 ///
 /// The FRAGMENT is stored, never its consequences. Object ids are large, derived, and would have to be
 /// kept consistent with the partition; the fragment is small and replays exactly. The drain re-enters
@@ -424,10 +422,10 @@ public:
 
     /// ⭐ C1: EVERY deposited fragment, binned at its own L, with NO purity condition.
     ///
-    /// The five pure pools above are deliberately CONDITIONED (`ACCUMULATOR_DESIGN.md` §8: an impure
+    /// The five pure pools above are deliberately CONDITIONED (an impure
     /// pool is worse than a missing one), so they cannot serve as the unconditional anchor an
     /// empirical-Bayes shrinkage needs -- which is why that anchor was taken from the SCANNER, which
-    /// measures length by two other rules over another population (`FRAGMENT_LENGTH_AUDIT.md` §1.1).
+    /// measures length by two other rules over another population.
     /// This row removes that reason: anchor and pools become one measurement of one quantity.
     ///
     /// It is "unconditional GIVEN DEPOSIT" and the name says so: it excludes what the accumulator
@@ -462,7 +460,7 @@ public:
 
     /// ⭐ `L` under ONE hypothesis, without depositing anything — what the SECOND PASS scores against.
     ///
-    /// ⛔ Exposed rather than reimplemented. `docs/FRAGMENT_LENGTH_AUDIT.md` C0/C2 left the tool with ONE
+    /// ⛔ Exposed rather than reimplemented. The tool has ONE
     /// definition of fragment length, and the scorer needs a length per *counterfactual* hypothesis. A
     /// Python reimplementation would be a second definition of exactly the quantity that audit existed to
     /// unify — and it would be the one the drain then disagreed with.
@@ -484,7 +482,7 @@ private:
     /// Measured before deleting it -- the pool reads +0.67 % mean / +2.40 % sd against truth under
     /// determinacy and -9.58 % / -22.46 % under provenance, because barring inferred lengths
     /// preferentially bars fragments whose mates sit far apart. A purity filter on a length pool is a
-    /// length filter. docs/SPEC_GAP_PATHS.md §5.
+    /// length filter.
     std::int64_t fragment_pool(bool spliced,
                                std::int64_t contained_node,
                                std::int64_t sole_line) const noexcept;

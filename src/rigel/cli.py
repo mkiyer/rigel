@@ -246,7 +246,7 @@ def _fragment_length_report(fl_models):
 
     ⛔ **The per-SpliceType histograms are gone** (``unspliced``, ``spliced_annot``, …). They were the
     scanner's own, measured by two rules that were neither each other nor ``L``, over a population
-    gated by a unanimity test nobody had stated — ``docs/FRAGMENT_LENGTH_AUDIT.md`` D1–D3. The
+    gated by a unanimity test nobody had stated. The
     per-fragment splice COUNTS they were used for survive, from the scanner's census.
     """
     import pandas as pd
@@ -388,7 +388,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     # category models, so they counted only fragments that also yielded a length observation — a
     # population gated by a transcript-space unanimity test and never stated. The census counts every
     # fragment the scanner offers the accumulator, and its books close against the accumulator's own
-    # qc block (docs/FRAGMENT_LENGTH_AUDIT.md §4, C2.0).
+    # qc block.
     from .splice import SpliceType, census_field
 
     def _splice_n(stype) -> int:

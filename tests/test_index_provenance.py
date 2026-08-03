@@ -7,7 +7,7 @@ the FASTA, not the GTF, not the flags. Rebuilding the human index meant *inferri
 node counts, and `--collapse-duplicate-transcripts` was discovered from a build failure. An artifact that
 cannot be reproduced from its own provenance is one nobody can safely re-derive later.
 
-⚠ **This is not `CARRY_FORWARD.md` §3 trap 25.** That trap forbids storing a hash of an artifact *beside*
+⚠ **This is not.** That trap forbids storing a hash of an artifact *beside*
 that artifact, because the two can drift apart and the stale hash then verifies clean. These hashes are of
 **external inputs the index cannot recompute from itself** — the genome and the annotation are not in the
 index. Provenance, not a cache key. `partition_hash` and `graph_hash` remain computed on demand.
@@ -17,7 +17,7 @@ The teeth are in three places, and each is a different failure this catches:
 * the expected flag set is read off `inspect.signature(TranscriptIndex.build)`, never written out here, so
   a new build parameter that does not reach the manifest fails this file rather than silently escaping it;
 * the digests are re-derived by a **different algorithm** (whole-file read here, streamed chunks in the
-  implementation) — `CARRY_FORWARD.md` §3 trap 1;
+  implementation) —;
 * a one-byte edit to the GTF must move its recorded digest, which is what separates hashing the *content*
   from recording the *path*.
 """

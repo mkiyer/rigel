@@ -10,7 +10,7 @@ terminal's outer boundary has nothing on the far side — "a side that doesn't e
 length". A contiguous edge is the line BETWEEN two adjacent nodes, so there is no such object to
 exclude: ``E = N − n_refs`` and every entry is real. The mask goes with the terminal slots.
 
-⚠ **It is a ratio of SUMS, never a mean of ratios** (`CARRY_FORWARD.md` §2, ``ρ_bg = Σg/ΣE``) — a rate
+⚠ **It is a ratio of SUMS, never a mean of ratios** (``ρ_bg = Σg/ΣE``) — a rate
 pooled over unequal supports is not the average of the per-object rates.
 
 The per-locus **contraction** of the gDNA component's effective length under capture is the inverse
@@ -32,7 +32,7 @@ def gdna_density_global(
     """Library-average gDNA density (QC scalar) = Σ gDNA mass / Σ gDNA effective length, over both axes.
 
     ``0.0`` when there is no support anywhere — an empty library has no density, and a floored
-    division would report one (`CARRY_FORWARD.md` §3 trap 23).
+    division would report one.
     """
     total_g = float(
         np.asarray(node_deconv.gdna_mass, dtype=np.float64).sum()

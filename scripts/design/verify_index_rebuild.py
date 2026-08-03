@@ -13,7 +13,7 @@ reports — and **nothing else**. So a correct rebuild has an exactly predictabl
 
 Anything else is a finding, not a rebuild. A "rebuild" that also moved the flags, the kinds, or the node
 ids would be a different change wearing this one's clothes — and `partition_hash` would not notice, because
-it covers `nodes.feather` only (`CARRY_FORWARD.md` §3 trap 25).
+it covers `nodes.feather` only.
 
     python scripts/design/verify_index_rebuild.py OLD_INDEX NEW_INDEX
 """

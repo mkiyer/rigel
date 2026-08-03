@@ -1,10 +1,10 @@
 """⭐ THE P2 GATE — the second pass's score DISCRIMINATES, on loci where the truth is built in.
 
-    Spec: ``docs/SPEC_SECOND_PASS.md`` §3 (the score) and its P2   ·   Measurement: ``LEDGER.md`` P2.1
+     (the score) and its P2 · Measurement:
     Subject: ``rigel.second_pass.score_held_fragments``, which shipped in `src/` with **no test at all**.
 
 The gate P2 asks for is *"on a hand-built locus where the truth is known, the correct hypothesis takes the
-larger share"*. ⛔ **The hard part is not the assertion, it is the fixture.** `LEDGER.md` P2 records why
+larger share"*. ⛔ **The hard part is not the assertion, it is the fixture.** records why
 this was deliberately not written against the four-fragment smoke fixture: it had no depth, every score
 came out uniform, and the gate would have been green over a scorer that decided nothing.
 
@@ -40,7 +40,7 @@ is on purpose — it holds the strand term constant across each locus's two spli
 module tests ``rho`` and ``f``, and `tests/native/test_gap_hypothesis_strand.py` already gates the strand
 behaviour on its own. The scan warns about it, and the warning is correct.
 
-⛔ **The fixture goes through the SCAN.** `LEDGER.md` P1's trap: driving ``FragmentResolver`` directly
+⛔ **The fixture goes through the SCAN.** 's trap: driving ``FragmentResolver`` directly
 leaves ``t_strand_arr_`` empty and every hypothesis's implied strand silently reads ``NONE``.
 """
 
@@ -61,7 +61,7 @@ L1, L2, L3, L4, L5, L6, L7 = 1000, 4000, 7000, 10_000, 13_000, 16_000, 19_000
 
 #: Depths. ⚠ Fixture quantities, not algorithm constants: the only thing that matters is that DEEP and
 #: SHALLOW are far enough apart to separate and that both are **non-zero**, so the gate tests
-#: discrimination rather than the elimination-by-zero that `LEDGER.md` P2.1 measured separately.
+# discrimination rather than the elimination-by-zero that measured separately.
 DEEP, SHALLOW, CONTIGUOUS = 40, 4, 8
 
 #: ⭐ Ballast sets the LENGTH pmf and touches no locus. `build_fl_models` does **not** smooth the global
@@ -318,7 +318,7 @@ def test_the_STRAND_term_decides_when_rho_and_LENGTH_both_tie(scored):
     term is a function of ``rna_sense_frac``, so a flipped winner isolates it exactly — the same mirror
     argument arms 1/2 use for rho, with no second fixture.
 
-    ⚠ **The direction is the point** (`LEDGER.md` P0). ``rna_sense_frac`` is ``P(align_strand agrees |
+    ⚠ **The direction is the point**. ``rna_sense_frac`` is ``P(align_strand agrees |
     RNA)``, and on a real dUTP cfRNA library it is ≈ 0.01 — so the hypothesis that **disagrees** with
     ``align_strand`` is the likely one. ⛔ A scorer written as "agreement ⇒ multiply by
     ``rna_sense_frac``" is backwards on every real library, and this gate is what says so.
@@ -357,7 +357,7 @@ def test_the_DEEP_junction_takes_the_larger_share(scored):
     ``SHALLOW``; the held fragment is compatible with both. The wide hypothesis must win.
 
     ⚠ Both rivals have **non-zero** flux by construction, so this is a test of discrimination and not of
-    the elimination-by-zero `LEDGER.md` P2.1 measured. That distinction is the whole reason for
+    the elimination-by-zero measured. That distinction is the whole reason for
     ``SHALLOW`` being 4 rather than 0.
     """
     shares = _shares(scored[0], scored[1], L1)
@@ -410,7 +410,7 @@ def test_the_two_arms_differ_ONLY_in_rho(scored):
 
 
 def test_a_DEEPLY_CROSSED_gap_is_won_by_the_GENOMIC_hypothesis(scored):
-    """⛔ **Arm 3 — this is D-6, and it FAILED when it was written** (`LEDGER.md` P2.1/P2.2).
+    """⛔ **Arm 3 — this is D-6, and it FAILED when it was written**.
 
     Locus 3's gap is crossed contiguously by ``DEEP`` fully-sequenced fragments and spliced by only
     ``SHALLOW``, so the evidence says the molecule is genomic. ⭐ Its intron spans **exactly one node** —
@@ -493,7 +493,7 @@ def test_when_rho_TIES_the_LENGTH_term_decides(scored):
 
 
 def test_the_fixture_actually_DECIDES_something(scored):
-    """⛔ The trap this module exists to avoid. `LEDGER.md` P2 records that the P2 gate was **not** written
+    """⛔ The trap this module exists to avoid. records that the P2 gate was **not** written
     against the smoke fixture because every score there came out uniform — a green gate over a scorer that
     decided nothing. Uniformity is therefore a failure condition here, checked directly."""
     payload, result = scored[0], scored[1]

@@ -1,7 +1,7 @@
 """⭐ P4 — the second pass is WIRED IN, ahead of calibration, and the gDNA pools do not move.
 
-    Spec: ``docs/SPEC_SECOND_PASS.md`` §2 (where the drain sits) and its P4
-    Measurement: ``LEDGER.md`` P4 — the tail and the anchor, scored on the pilot against truth
+     (where the drain sits) and its P4
+    Measurement: — the tail and the anchor, scored on the pilot against truth
 
 §2's structural claim is that the drain runs **between the scan and calibration**, which is what lets
 calibration run exactly once on the complete tally. Two things follow that are worth gating rather than
@@ -12,7 +12,7 @@ gDNA length pools move by **exactly zero**, and there is a derivation:
 
 * a held fragment has ≥ 2 hypotheses, so its gap contains ≥ 1 annotated intron, whose endpoints are cuts;
 * if the drain picks ∅ the molecule crosses **both** those lines, making it a multi-line crossing — and
-  `ACCUMULATOR_DESIGN.md` §8 gives a multi-line crossing **no pool**, because it is a gDNA/RNA mixture;
+   gives a multi-line crossing **no pool**, because it is a gDNA/RNA mixture;
 * if the drain picks a spliced path the fragment used an annotated junction, so it is ``RNA_SPLICED``.
 
 So the drain can only ever touch ``RNA_SPLICED``, and measured on all 8 pilot conditions it does: 100 % of
@@ -124,7 +124,7 @@ def test_the_gDNA_LENGTH_POOLS_DO_NOT_MOVE(scanned):
     """⭐ **THE P4 CONTROL, and it is EXACT.** The four pure-gDNA pools are byte-identical after the drain.
 
     ⛔ Not a tolerance. A held fragment's gap holds an annotated intron whose endpoints are cuts, so a
-    chosen ∅ crosses two lines — a multi-line crossing, which `ACCUMULATOR_DESIGN.md` §8 deliberately gives
+    chosen ∅ crosses two lines — a multi-line crossing, which deliberately gives
     **no pool** because it is a gDNA/RNA mixture — and a chosen spliced path used an annotated junction, so
     it is ``RNA_SPLICED``. Either way a drained fragment cannot enter a pool that is supposed to be pure.
 

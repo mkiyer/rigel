@@ -1,9 +1,9 @@
 # SPEC — search every fragment's unsequenced gaps for introns, not just unspliced ones
 
     Status: ✅ **IMPLEMENTED 2026-08-01.** What LANDED, what it MEASURED and what it did NOT close are
-            in `docs/LEDGER.md`'s **C2.6** entry, which supersedes this file wherever they differ.
+            in `docs/WIP.md`'s **C2.6** entry, which supersedes this file wherever they differ.
             This document is kept as the record of the DESIGN, not of the outcome.
-    Cause and evidence: `docs/JUNCTION_OPPORTUNITY.md` §4.
+    Cause and evidence: `docs/accumulator/JUNCTION_OPPORTUNITY.md` §4.
     Owner ruling, 2026-08-01: *"we should be searching for gap introns within every fragment."*
     Blocked: C3 (the RNA opportunity work) — ⭐ now UNBLOCKED.
 
@@ -35,7 +35,7 @@ mate gap; that is the case the detector was built for. The gate is on the **spli
 count. The population being missed is *spliced fragments that also have a gap intron* — necessarily
 long, because they span two or more introns.
 
-### The evidence, restated (`JUNCTION_OPPORTUNITY.md` §4 has the derivation)
+### The evidence, restated (`docs/accumulator/JUNCTION_OPPORTUNITY.md` §4 has the derivation)
 
 The pilot's simulated mRNA support is **50–713 bp**. Measured on the shipped tally:
 
@@ -206,7 +206,7 @@ fail again**. `falsification_needs_perturbation`.
 | **U5** | **`path_ambiguous` fires on a mixed fragment** whose gap candidates disagree, and the deposit is rejected and counted | `tests/native/test_implicit_splice_deposit.py` |
 | **S3** | **Byte-identity**: the C++ matches `_accumulator_reference.py` exactly, and is bit-identical at 1/2/4/8 workers | `tests/native/test_accumulator_native_parity.py` (automatic) |
 | ⭐ **G-tail** | **THE HEADLINE.** On `gdna_none ss0.99 capture_off` the anchor's support ceiling must fall to the library's true maximum — **713 bp**, read from `truth_fragment_lengths.tsv`, not chosen — and `qc.dropped_too_long` must collapse from **280,558**. ⚠ Score the mass ≥700 bp: truth is **0** | new, `scripts/design/fl_anchor_gap.py` extended |
-| ⭐ **G-sd** | The anchor's sd against truth must fall from **+27.0 %**. This is `FRAGMENT_LENGTH_AUDIT.md` G3b, and it is **this work's** gate, not C3's | same |
+| ⭐ **G-sd** | The anchor's sd against truth must fall from **+27.0 %**. This is `docs/accumulator/FRAGMENT_LENGTH_AUDIT.md` G3b, and it is **this work's** gate, not C3's | same |
 | **G-gdna** | ⛔ **The control must not move.** `DNA_INTERGENIC` vs truth gdna stays exact (0.00023 vs 0.00024 at ≥600) — a change there means the fix reached fragments with no introns, which is impossible and therefore a bug | same |
 
 ### The perturbations, chosen to break each distinct claim
@@ -230,9 +230,9 @@ fail again**. `falsification_needs_perturbation`.
 | **goldens** | move a **third** time (P1 units → C2 FL models → this). ⛔ Still regenerate **once**, after C3, twice and diff |
 | **`rigel report`** | splice census **unchanged** by design (§2.2). ⚠ The FL histograms move — that is the point |
 | **every FL consumer** | the scorer, the calibration divisors, and by **D7** every transcript's effective length in the EM. This is upstream of all of them |
-| **`docs/JUNCTION_OPPORTUNITY.md` §3** | ⭐ **re-run the θ control afterwards.** Its +59.8 % sd figure is measured against a contaminated anchor; C3's true target is only knowable once this lands |
+| **`docs/accumulator/JUNCTION_OPPORTUNITY.md` §3** | ⭐ **re-run the θ control afterwards.** Its +59.8 % sd figure is measured against a contaminated anchor; C3's true target is only knowable once this lands |
 
-⚠ **`CARRY_FORWARD.md` §1 and the LEDGER's C1 entry both need a correction note**: C1 recorded the
+⚠ **`docs/SESSION_HANDOFF.md` §1 and the LEDGER's C1 entry both need a correction note**: C1 recorded the
 support ceiling moving 713 → 1000 as a win. **713 was the library's true maximum.** The scanner's deleted
 definition **B** took its length from the transcript, so it could not produce an uncut intron — it was
 right about the ceiling and `L` was wrong. That does not undo C2, whose reasons all still hold.
@@ -256,4 +256,4 @@ green apart from the goldens.
 ⛔ **Do not tune anything to reach those numbers.** Every target above is read from
 `truth_fragment_lengths.tsv` or from a control that must not move. If the residual will not close, the
 remaining mass is D3's multi-intron gaps or a third mechanism — **measure it and report it**, do not
-close the gap with a constant (`CARRY_FORWARD.md` §3 trap 12).
+close the gap with a constant (`docs/SESSION_HANDOFF.md` §3 trap 12).

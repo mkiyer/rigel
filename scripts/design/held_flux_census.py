@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """⭐ **D-3, MEASURED**: how often does a held hypothesis have ZERO flux evidence, and is the zero RIGHT?
 
-    Decision: `docs/SPEC_SECOND_PASS.md` §8 D-3   ·   Phase: its P2
+    Decision: D-3 · Phase: its P2
     Scores through the shipped `rigel.second_pass.score_held_fragments` — the question is what the
     tool does, not what could be done.
 
@@ -294,7 +294,7 @@ def main() -> int:
             payload,
             fl_models=build_fl_models(payload),
             # ⭐ Pass 1's own strand model, not calibration's — the second pass runs BEFORE calibration
-            # (`SPEC_SECOND_PASS.md` §2) and `rna_sense_frac` is the Beta posterior mean of exactly this.
+            # and `rna_sense_frac` is the Beta posterior mean of exactly this.
             rna_sense_frac=cache.strand_model.p_r1_sense,
             node_types=node_types,
             junctions=junctions,

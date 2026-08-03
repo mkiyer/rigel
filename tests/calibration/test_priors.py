@@ -14,7 +14,7 @@ ten-line note explaining that ``gdna_boundary_len`` was ALREADY the halved per-s
 ``E[min(ℓ,L)]/2``, that each face therefore deposited ``ρ·gdna_boundary_len``, and that an earlier
 version of the fixture had stored the UN-halved length while depositing half the mass — cancelling
 exactly, and hiding a factor of 2 from every assertion in this file for months
-(`CARRY_FORWARD.md` §3 trap 2). A contiguous edge is a 0-bp line with one mass and one support, so a
+A contiguous edge is a 0-bp line with one mass and one support, so a
 uniform field is just ``mass = ρ·support`` on both axes and there is no ½ left to get wrong.
 
 ⚠ **Every span below is byte-identical to the pre-S5.f value** (640 / 650 / 700 / 400 / 850). The

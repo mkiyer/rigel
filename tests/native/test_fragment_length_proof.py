@@ -1,8 +1,8 @@
 """⭐ C0 — the PROOF that the accumulator's ``L`` and its deposit geometry are correct.
 
-    Audit: `docs/FRAGMENT_LENGTH_AUDIT.md` §4 (C0, the precondition on C1)
+     (C0, the precondition on C1)
 
-⛔ **WHY THIS FILE EXISTS.** `FRAGMENT_LENGTH_AUDIT.md` proposes making the accumulator's ``L`` the ONE
+⛔ **WHY THIS FILE EXISTS.** proposes making the accumulator's ``L`` the ONE
 definition of fragment length in the tool — the source every FL model is built from. Owner ruling,
 2026-07-31: *"the new fragment length computation is the newest implementation and I'm not sure how
 rigorously it has been tested in all cases; we need to prove that very carefully if it's going to become
@@ -10,7 +10,7 @@ the gold standard."* Correct, and the existing coverage does not meet that bar: 
 pins **six hand-picked malformed intron lists**, chosen by the same author as the code they check. That is
 the coverage pattern that finds what the author thought of and nothing else.
 
-⭐ **THE ORACLE IS A DIFFERENT ALGORITHM, NOT A DIFFERENT SPELLING.** `CARRY_FORWARD.md` §3 trap 1: a
+⭐ **THE ORACLE IS A DIFFERENT ALGORITHM, NOT A DIFFERENT SPELLING.**: a
 validator that calls the builder's own helper validates nothing, and both bugs in the index work were
 caught by re-deriving the answer a different way and by nothing else. So the oracle here is **integer set
 arithmetic**::
@@ -26,13 +26,13 @@ From that one set, all four deposit populations follow with no further machinery
 ===================  =============================================================================
 ``L``                ``len(covered)``
 line ``p`` crossed   ``p-1 in covered and p in covered``   (bases on both sides, adjacent in the
-                     molecule — `ACCUMULATOR_DESIGN.md` §2's definition, verbatim)
+                     molecule — 's definition, verbatim)
 node contained       the path used no junction and ``min(covered)``/``max(covered)`` fall in one node
 node spanned         one segment covers the node whole: ``cuts[i]-1 .. cuts[i+1]`` all covered
 ===================  =============================================================================
 
 ⭐ That crossing rule is the design's own words turned into a predicate, and it is what makes this file a
-proof of the **geometry** rather than only of ``L``: `ACCUMULATOR_DESIGN.md` §3.1 requires that "whatever
+proof of the **geometry** rather than only of ``L``: requires that "whatever
 counts toward ``L`` must also count as coverage for crossing", and until now nothing tested the two
 against each other.
 
@@ -44,7 +44,7 @@ validates nothing). The reference was deliberately broken seven ways:
 
 =====  ==========================================================================  ==========
 L1'    ``L`` from ``span − Σ(RAW intron lengths)`` — the formula                    ✅ caught
-       `ACCUMULATOR_DESIGN.md` §3.3 says goes NEGATIVE on a wide overlap
+        says goes NEGATIVE on a wide overlap
 L2'    introns not clipped to the fragment                                          ✅ caught
 L4     fragment not clipped to the reference                                        ✅ caught
 L5     crossing boundary ``searchsorted`` side flipped right→left                   ✅ caught
@@ -83,7 +83,7 @@ from ._accumulator_reference import Accumulator, DepositOutcome, GapHypothesis, 
 def covered_bases(ref_len: int, start: int, end: int, introns) -> set[int]:
     """The molecule's covered genomic bases, by SET ARITHMETIC — the independent algorithm.
 
-    Clipping to the reference is part of the definition (`ACCUMULATOR_DESIGN.md` §3.3: a fragment
+    Clipping to the reference is part of the definition (a fragment
     overhanging a reference end is clipped, and ``L`` is the clipped length).
     """
     s, e = max(int(start), 0), min(int(end), ref_len)
@@ -237,7 +237,7 @@ def test_randomised_at_realistic_scale():
     """The same oracle at coordinates a real BAM produces, with up to 4 introns.
 
     ⚠ Exhaustive enumeration is only affordable in a tiny coordinate space, and a tiny space cannot
-    produce a 300 bp molecule spanning a 10 kb intron — the case `ACCUMULATOR_DESIGN.md` §3.2 says the
+    produce a 300 bp molecule spanning a 10 kb intron — the case says the
     length limit must be applied to ``L`` and never to the span. Fixed seed: this is a proof, not a
     smoke test, so it must be reproducible.
     """
@@ -294,7 +294,7 @@ def test_randomised_at_realistic_scale():
 
 
 def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
-    """⭐ `ACCUMULATOR_DESIGN.md` §3.1: *"whatever counts toward ``L`` must also count as coverage for
+    """⭐: *"whatever counts toward ``L`` must also count as coverage for
     crossing, or the density estimator is biased."*
 
     Nothing tested the two against each other before. A mate gap must count toward ``L`` **and** cross
@@ -324,7 +324,7 @@ def test_deposited_lengths_bins_every_accepted_fragment_exactly_once():
     """⭐ **THE C1 INVARIANT (G2).** ``Σ deposited_lengths == Σ node_start_count == qc.deposited``.
 
     Three counters, one population, incremented on the same line of `deposit` so they cannot drift by
-    construction. It is the same externally-checkable form as `ACCUMULATOR_DESIGN.md` §10.2's start-count
+    construction. It is the same externally-checkable form as 's start-count
     invariant and a **different statement**: that one says every fragment was located in space, this one
     that every fragment was binned by length. A histogram that is about to become the anchor for every FL
     model in the tool must not be allowed in one fragment short.
@@ -358,7 +358,7 @@ def test_a_REJECTED_fragment_is_not_binned():
 
     ⭐ That is what makes this the right EB anchor rather than merely a convenient one: it describes
     **exactly** the population the five pure pools are drawn from. An anchor over a wider population than
-    the pools would re-create, in a new place, the frame mismatch `FRAGMENT_LENGTH_AUDIT.md` exists to
+    the pools would re-create, in a new place, the frame mismatch exists to
     remove.
     """
     acc = _acc(max_fragment_length=4)
@@ -385,7 +385,7 @@ def test_the_unconditional_histogram_is_a_SUPERSET_of_the_pure_pools():
     at the SAME length. The pools are conditioned subsets of this population, not a different one.
 
     ⚠ It is a strict superset in general — an exonic contained fragment and a multi-line crossing enter
-    no pool at all (`ACCUMULATOR_DESIGN.md` §8: an impure pool is worse than a missing one) — which is
+    no pool at all (an impure pool is worse than a missing one) — which is
     precisely why the pools could never serve as their own anchor.
     """
     acc = _acc(max_fragment_length=64)

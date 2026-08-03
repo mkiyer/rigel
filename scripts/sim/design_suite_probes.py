@@ -2,11 +2,11 @@
 
     TODO item 2, requirement (a)
 
-⭐ **The panel is not scaffolding — it is one of the seven requirements.** `TODO.md` item 2 asks for *a
+⭐ **The panel is not scaffolding — it is one of the seven requirements.** asks for *a
 density step, not just a uniform background*, because over a run of flat nodes a relayed message decays
 geometrically per hop, so a uniform scenario cannot distinguish "the relay works" from "the global prior
 reached it". A capture panel that covers some gene groups and not others IS that step, and a sharp one:
-`CARRY_FORWARD.md` §1 fact 15 measures hybrid capture at **~1000x** on exons and 1.0 off target, so the
+ measures hybrid capture at **~1000x** on exons and 1.0 off target, so the
 captured/uncaptured boundary is a 3-decade cliff in gDNA density with real transcripts on both sides.
 
 ⚠ The whole-genome (existing-reference) simulator **requires** a panel when capture is enabled — unlike

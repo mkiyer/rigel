@@ -1,6 +1,6 @@
 """rigel.scan_payload — the BAM scan's accumulator tally, as a typed Python object.
 
-    Spec: ``tests/native/_accumulator_reference.py``   ·   Design: ``docs/ACCUMULATOR_DESIGN.md`` §5.2
+    Spec: ``tests/native/_accumulator_reference.py``
 
 The C++ scanner returns ``result["calibration"]`` as a dict of **flat** ndarrays
 (``BamScanner::build_result``); this module reshapes the two-column banks and validates the schema.
@@ -31,7 +31,7 @@ WHAT THE NUMBERS MEAN. Every object stores **three integer sums** over the fragm
 ⚠ **``inv_length_sum`` is NOT called ``density`` on purpose.** It is an exact, model-free density at an
 edge — the opportunity ``L−1`` and the deposit ``1/(L−1)`` cancel identically — and it is *not* a density
 at a node, where the opportunity is ``(node − L + 1)₊`` and nothing cancels. One word for two concepts is
-the defect this naming avoids; see ``docs/NODE_DENSITY_DERIVATION.md``.
+the defect this naming avoids.
 
 ⭐ **``length_sum`` exists because the other two are blind to one real case.** At an edge the count row is
 ``(mu_g − 1, mu_r − 1)`` and the inv-length row is ``(1, 1)``, so the determinant is ``mu_g − mu_r``: when
@@ -184,7 +184,7 @@ class GapCensus:
 class DrainQC:
     """⭐ **What the second pass's DRAIN did** — the audit trail of how the final tally was reached.
 
-    `docs/SPEC_SECOND_PASS.md` §6.2. The drain replays each held fragment with one chosen hypothesis, so
+     The drain replays each held fragment with one chosen hypothesis, so
     after it **nothing is held**: the payload's bank is empty, ``qc.deferred_undetermined_gap`` is 0 and
     the three ``gap_deferred_*`` are 0. ⭐ That is deliberate — it keeps *"the counter and the fragments it
     counts are the same population"* absolute, so a drained payload needs no exception at the door. Pass
@@ -207,7 +207,7 @@ class DrainQC:
     #: chosen hypothesis can still be rejected afterwards, which is a different question.
     chose_genomic: int
     chose_spliced: int
-    #: Pass one's arbitration census, kept verbatim so `SPEC_SECOND_PASS.md` §4's per-class before/after
+    # Pass one's arbitration census, kept verbatim so the per-class before/after
     #: is still readable off a drained payload.
     census_before: GapCensus
 
@@ -295,7 +295,7 @@ class DeferredFragments:
     A fragment's unsequenced mate gap may hold no intron, one, or several, and *which* cannot be observed —
     the bases are not there. Deciding needs a fragment-length distribution that does not exist until the
     first pass is over, so the first pass does not guess: it enumerates, and when more than one hypothesis
-    survives it holds the fragment here. `docs/PLAN_TWO_PASS.md` §5.
+    survives it holds the fragment here.
 
     ⭐ **The FRAGMENT is stored, never its consequences.** Object ids are large, derived, and would have to
     be kept consistent with the partition; the fragment is small and replays exactly. The second pass
@@ -497,7 +497,7 @@ class AccumulatorPayload:
     #: condition.** The five pools above are deliberately CONDITIONED (an impure pool is worse than a
     #: missing one), so none of them is an unconditional anchor — which is why the empirical-Bayes
     #: shrinkage in `calibration.fl` took its anchor from the SCANNER, which measures length by two
-    #: other rules over another population (`docs/FRAGMENT_LENGTH_AUDIT.md`). This is that anchor, in
+    # other rules over another population. This is that anchor, in
     #: the accumulator's own frame.
     #: ⚠ "Unconditional GIVEN DEPOSIT": it excludes what the accumulator rejects (too long, ambiguous
     #: path, strand-undefined, empty), each counted in ``qc``. That is exactly the population the pools
@@ -523,7 +523,7 @@ class AccumulatorPayload:
     graph_hash: str | None = None
 
     #: ⭐ **Set once the second pass has DRAINED this tally**, and ``None`` while the side buffer is still
-    #: held. `SPEC_SECOND_PASS.md` §6.2. ⚠ It is the only way to tell the two states apart, because a
+    # held. ⚠ It is the only way to tell the two states apart, because a
     #: drained payload is deliberately indistinguishable in shape: its bank is empty and its held counters
     #: are 0 precisely so that *"the counter and the fragments it counts are the same population"* needs no
     #: exception. Pass one's numbers live in here — see :class:`DrainQC`.
@@ -550,13 +550,13 @@ class AccumulatorPayload:
     def with_drain(self, delta: dict[str, np.ndarray], drain: DrainQC) -> "AccumulatorPayload":
         """⭐ **Pass one plus the drain's delta** — the tally calibration actually consumes.
 
-        `SPEC_SECOND_PASS.md` §6.2. ``delta`` holds one globally-shaped array per additive channel, as
+         ``delta`` holds one globally-shaped array per additive channel, as
         produced by replaying the held fragments through :meth:`Accumulator.deposit`; this method is only
         the arithmetic and the bookkeeping.
 
         ⭐ **The delta arrives as its own object rather than being accumulated in place**, which is what
         makes the drain's contribution *observable*: both payloads exist, so every channel's before/after
-        is a subtraction rather than a rerun. `SPEC_SECOND_PASS.md` §6.3 named that as the reason to prefer
+        is a subtraction rather than a rerun — which is the reason to prefer
         this shape, and it is also why the drain needs no new C++ — every channel is already exported.
 
         After this: the bank is empty, the held counters are 0, and ``drain`` says what pass one held.

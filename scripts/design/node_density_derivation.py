@@ -1,6 +1,6 @@
 """The reciprocal-opportunity deposit: one density rule for every object, node or edge.
 
-    Write-up: ``docs/NODE_DENSITY_DERIVATION.md``   ·   Design: ``docs/ACCUMULATOR_DESIGN.md`` §6/§10.1
+    Write-up: · /§10.1
 
 THE CLAIM UNDER TEST
     At an edge the accumulator deposits ``1/(L-1)`` and the result is an exactly model-free estimate of

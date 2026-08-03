@@ -1,6 +1,6 @@
 """Run the reference accumulator on a REAL BAM against a REAL index, and cross-check it.
 
-    Reference: ``tests/native/_accumulator_reference.py``   ·   Plan: ``docs/IMPLEMENTATION_PLAN.md`` §5 (S2)
+    Reference: ``tests/native/_accumulator_reference.py`` · (S2)
 
 ⚠ WHY. The spec matrix exercises the reference on hand-built fixtures of two to six nodes. That cannot
 catch a defect that only appears at 1.04 M nodes and 404,168 junctions — a per-reference offset that

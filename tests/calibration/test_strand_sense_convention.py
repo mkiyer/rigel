@@ -1,7 +1,7 @@
 """⭐ WHAT `rna_sense_frac` MEANS — and why 0.0101 on a "0.99 stranded" library is CORRECT.
 
-    Retires: `TODO.md` rank 6   ·   Corrects: `LEDGER.md` S5.f + S5.f-addendum, `CARRY_FORWARD.md` §1
-    fact 17 and §0 C4   ·   Unblocks: `SPEC_SECOND_PASS.md` §3.3 (the strand term)
+    Retires: rank 6 · Corrects: + S5.f-addendum,
+    fact 17 and §0 C4 · Unblocks: (the strand term)
 
 ⛔ **THIS WAS FILED TWICE AS A SIGN BUG. IT IS NOT ONE.** The record said the fitted κ was `1 − truth`
 and that "only the exported scalar is mis-labelled". Both statements are wrong, and the reason is a
@@ -27,7 +27,7 @@ most common real protocol. A dUTP library at 99 % fidelity genuinely has a sense
 parameter directly. That is what this module pins, because its absence is what let the same non-defect be
 filed twice.
 
-⚠ **The 166× measurement stands and now has an explanation.** `LEDGER.md` S5.f-addendum forced κ to the
+⚠ **The 166× measurement stands and now has an explanation.** -addendum forced κ to the
 nominal 0.99 and a zero-gDNA library read ``f_gdna = 0.4992`` against the fitted value's ``0.0030``. That
 is not "the mirror cancels" — it is ``0.0101`` being the **right answer** and ``0.99`` being a different
 quantity substituted for it.
@@ -115,7 +115,7 @@ def test_the_simulator_emits_an_R1_ANTISENSE_library_so_the_SENSE_fraction_is_LO
     protocol, not a flip: ``StrandModel``'s own docstring gives ≈0.05 for TruSeq dUTP and ≈0.95 for KAPA.
 
     ⚠ So ``rna_sense_frac ≈ 0.01`` on a "0.99 stranded" simulated library is the correct reading, and
-    forcing it to 0.99 substitutes a different quantity — which `LEDGER.md` S5.f-addendum measured as
+    forcing it to 0.99 substitutes a different quantity — which -addendum measured as
     **166× worse** on a zero-gDNA library.
     """
     model = _strand_model(1.0)
@@ -132,7 +132,7 @@ def test_rna_sense_frac_IS_p_r1_sense_and_is_therefore_ALSO_low():
     """⭐ `rna_sense_frac` is the Beta posterior mean of exactly ``p_r1_sense`` — the same quantity, the
     same direction, the same convention. It is **not** mis-labelled and it needs no sign flip.
 
-    ⭐ This is what unblocks `SPEC_SECOND_PASS.md` §3.3: the second pass needs
+    ⭐ This is what unblocks: the second pass needs
     ``P(align_strand agrees | RNA)`` to score an unspliced fragment's competing strand hypotheses, and
     that is precisely this number, already correct.
     """
@@ -151,7 +151,7 @@ def test_rna_sense_frac_IS_p_r1_sense_and_is_therefore_ALSO_low():
         "⛔ COVERAGE GAP, filed not fixed: the simulator hard-codes an R1-ANTISENSE emission, so no "
         "simulated condition ever exercises the R1-sense branch (KAPA-style). `strand_specificity` is a "
         "swap probability about that fixed orientation, never a choice of orientation. Real R1-sense "
-        "libraries exist and nothing in the suite covers them. See `TODO.md`."
+        "libraries exist and nothing in the suite covers them."
     ),
     strict=True,
 )

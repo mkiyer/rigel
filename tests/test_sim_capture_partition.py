@@ -8,7 +8,7 @@ rule is that every divisor must be **unit-tested against brute-force enumeration
 gated on equality with a reference that literally loops over start positions and takes the max.
 
 ⚠ The oracle here is deliberately naive and slow: an explicit Python loop, no numpy, no shared helper with
-the implementation. `CARRY_FORWARD.md` §3 trap 1 — a validator that calls the builder's own helper
+the implementation. — a validator that calls the builder's own helper
 validates nothing.
 
 The matrix covers what the real panel does NOT, on purpose, because the optimisation must not silently

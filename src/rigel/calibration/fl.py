@@ -10,7 +10,7 @@ excluded from calibration. BOTH FLs drive per-node effective lengths in the swee
 (``bp_solver.build_node_geometry``): gDNA eff-lengths use the gDNA FL, RNA (nascent
 unspliced + spliced) eff-lengths use the RNA FL.
 
-⭐ **Every pool is PURE BY CONSTRUCTION** (`docs/ACCUMULATOR_DESIGN.md` §8), and that purity is what
+⭐ **Every pool is PURE BY CONSTRUCTION**, and that purity is what
 removes the circularity: each model is fitted only from a population known to be one component, so
 nothing is ever estimated from the fragments it will later explain.
 
@@ -145,7 +145,7 @@ def _pool_sum(payload: "AccumulatorPayload", pools) -> np.ndarray:
 
     ⭐ Binned at ``L``, the molecule length — not at the covered length. Binning at covered length
     collapses the gDNA histogram to a spike at twice the read length, so every long gDNA fragment scores
-    as RNA (`CARRY_FORWARD.md` §3 trap 8). The accumulator's ``L`` already includes the mate gap and
+    as RNA. The accumulator's ``L`` already includes the mate gap and
     excludes cut introns, so it is the molecule length for both components under one rule.
     """
     pool_lengths = payload.pool_lengths
@@ -210,28 +210,28 @@ def build_fl_models(
 ) -> FLModels:
     """Build the global / RNA / gDNA FL pmfs from ONE payload, in ONE frame.
 
-    ⭐ **All three histograms come off the same object, so they cannot disagree about what a
-    fragment length IS.** The anchor is ``payload.deposited_lengths`` — every deposited fragment
-    binned at its own ``L`` with no purity condition (C1); the two component pools are
-    :func:`rna_fl_mass` and :func:`gdna_fl_mass`, drawn from exactly that same population. RNA and
-    gDNA are EB-shrunk toward the anchor with a single Dirichlet ``prior_ess``.
+     ⭐ **All three histograms come off the same object, so they cannot disagree about what a
+     fragment length IS.** The anchor is ``payload.deposited_lengths`` — every deposited fragment
+     binned at its own ``L`` with no purity condition (C1); the two component pools are
+     :func:`rna_fl_mass` and :func:`gdna_fl_mass`, drawn from exactly that same population. RNA and
+     gDNA are EB-shrunk toward the anchor with a single Dirichlet ``prior_ess``.
 
-    ⚠ **The payload is the only argument on purpose** (``docs/FRAGMENT_LENGTH_AUDIT.md`` C2.1). The
-    anchor used to be passed in separately and was taken from the **scanner's** histogram, which
-    measures fragment length by two other rules — ``frag.genomic_footprint()`` for one subset and a
-    transcript-space length for a disjoint one — over a population that was never stated. That is
-    accumulator-frame pools shrunk toward a scanner-frame anchor: ``CARRY_FORWARD.md`` §3 trap 27,
-    in shipped code, and it is what made the length likelihood read a ruler mismatch as composition
-    (``LEDGER.md`` P2). Removing the parameter is what makes the mixed-frame call unrepresentable
-    rather than merely discouraged.
+     ⚠ **The payload is the only argument on purpose**. The
+     anchor used to be passed in separately and was taken from the **scanner's** histogram, which
+     measures fragment length by two other rules — ``frag.genomic_footprint()`` for one subset and a
+     transcript-space length for a disjoint one — over a population that was never stated. That is
+     accumulator-frame pools shrunk toward a scanner-frame anchor.
+     in shipped code, and it is what made the length likelihood read a ruler mismatch as composition
+    Removing the parameter is what makes the mixed-frame call unrepresentable
+     rather than merely discouraged.
 
-    ⚠ The anchor is unconditional **given deposit**, not unconditional: it excludes what the
-    accumulator rejects (too long, ambiguous path, strand-undefined, empty), each counted in
-    ``payload.qc``. That is precisely the population the pools are drawn from, which is what makes
-    it the right anchor rather than a merely convenient one.
+     ⚠ The anchor is unconditional **given deposit**, not unconditional: it excludes what the
+     accumulator rejects (too long, ambiguous path, strand-undefined, empty), each counted in
+     ``payload.qc``. That is precisely the population the pools are drawn from, which is what makes
+     it the right anchor rather than a merely convenient one.
 
-    For the EB kernel over three free histograms — the shape a unit test needs and production never
-    has — see :func:`_fl_models_from_histograms`.
+     For the EB kernel over three free histograms — the shape a unit test needs and production never
+     has — see :func:`_fl_models_from_histograms`.
     """
     return _fl_models_from_histograms(
         global_counts=payload.deposited_lengths,

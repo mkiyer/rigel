@@ -16,7 +16,7 @@ All that survives from 278 docs / 74,823 lines + 142 memory files.
 > number was originally measured*; git history is the only place they still exist. Do not chase them —
 > re-derive instead, which is what `scripts/design/index_census.py` is for.
 >
-> ⚠ **§0 is the least current section.** Most of C1–C7 were settled by `ACCUMULATOR_DESIGN.md`; they are
+> ⚠ **§0 is the least current section.** Most of C1–C7 were settled by `docs/accumulator/DESIGN.md`; they are
 > kept because the *measurements* in them are real and were never re-recorded elsewhere. Treat §0 as
 > "measurements attached to questions", not as a live decision queue — the live queue is `TODO.md`.
 > ⛔ **§4 was deleted 2026-07-30** (see the note at the foot of this file).
@@ -190,7 +190,7 @@ nodes + 1,447,763 edges ≈ 2.5 M. Like-for-like the object count **doubles**.
 24. ⛔ **VOID — the old-suite baseline.** It was 0.079005 prior-free / 0.046675 after 3 prior iterations on `ambig_dense_10mb`,
     32/32 reproducible at `3c293038`. **That suite was DELETED on 2026-07-30 along with every other benchmark and every index.**
     The number now refers to nothing: do not quote it, compare against it, or try to reproduce it. Kept only so that a reader who
-    finds it quoted in an older document knows it is dead. See `LEDGER.md`'s deletion entry.
+    finds it quoted in an older document knows it is dead. See `docs/WIP.md`'s deletion entry.
 
 ---
 
@@ -368,11 +368,11 @@ nodes + 1,447,763 edges ≈ 2.5 M. Like-for-like the object count **doubles**.
 ## §4 — DELETED 2026-07-30
 
 It was a **pre-settlement proposal list**, distilled before the design was agreed. Most of it became
-`ACCUMULATOR_DESIGN.md`; six of its bullets had already been measured, rejected and marked
+`docs/accumulator/DESIGN.md`; six of its bullets had already been measured, rejected and marked
 `⛔ SUPERSEDED` in place. A proposal list that contradicts the shipped deposit rule is a hazard, not
-history — `ACCUMULATOR_DESIGN.md` and `tests/native/_accumulator_reference.py` are the authority, and
+history — `docs/accumulator/DESIGN.md` and `tests/native/_accumulator_reference.py` are the authority, and
 git retains the text.
 
 ⭐ Two items from it survived into live documents rather than being lost: the benchmark-suite
-requirements are now `BENCHMARK_SUITE.md` plus `TODO.md`, and the concrete accumulator test matrix is
+requirements are now `docs/testing/BENCHMARK_SUITE.md` plus `TODO.md`, and the concrete accumulator test matrix is
 `tests/native/test_accumulator_spec.py`.

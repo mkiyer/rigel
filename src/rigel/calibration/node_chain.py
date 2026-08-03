@@ -1,6 +1,6 @@
 """rigel.calibration.node_chain — the node<->edge chain the belief-propagation sweep traverses.
 
-    Design: ``docs/ACCUMULATOR_DESIGN.md`` §2   ·   Gate: ``tests/calibration/test_node_chain.py``
+       Gate: ``tests/calibration/test_node_chain.py``
 
 The calibration graph is a **linear bipartite chain of NODE and EDGE slots, interleaved in genomic
 order**. A reference with ``k`` nodes owns exactly ``k − 1`` interior lines, so its slot sequence is::
@@ -23,7 +23,7 @@ its own payload-shaped array — the chain only sequences and links them.
 
 ⚠ **Junction edges are NOT chain slots.** The graph is a DAG but not a polytree: every junction edge
 closes an undirected loop, so a junction must be a FACTOR on its endpoint nodes and never a message
-channel (`CLAUDE.md`; `CARRY_FORWARD.md` §3 trap 10 — never break a cycle by dropping a junction edge,
+channel (— never break a cycle by dropping a junction edge,
 that re-isolates the exon the edge exists for).
 """
 

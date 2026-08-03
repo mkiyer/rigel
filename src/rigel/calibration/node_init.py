@@ -3,7 +3,7 @@
 Calibration's prior-free first pass ("pass-0") deconvolves each node's unspliced fragment mass into
 ``(f_pos, f_neg, f_g)``. Before any message passing, every node is given its OWN belief — a per-component
 density ``ρ_c`` (the message currency) and a per-component precision ``p_c`` — from the four information
-sources of ``docs/CARRY_FORWARD.md``:
+sources below:
 
 1. **MEASURED** counts get **Poisson** precision. Intergenic / intergenic-exon nodes are structurally pure
    gDNA (``f_g = 1``, composition CERTAIN); their gDNA density carries only the count precision ``1/n`` (so
@@ -13,7 +13,7 @@ sources of ``docs/CARRY_FORWARD.md``:
    evidence, registered here as ``τ_λ`` (`density_factor_precision`). The **intron factory** is its special
    case (the gDNA prior = the intergenic node distribution).
 3. **STRAND DECONVOLUTION** — the strand Beta-Binomial is RANK-1 (it informs only ``p``), so its
-   gDNA-level (``λ``) precision is the Schur-marginal (`variance_foundation_proposal.md`, approach E): a 1-DOF
+   gDNA-level (``λ``) precision is the Schur-marginal (approach E): a 1-DOF
    (single-strand) node has its tilt structurally locked, so the strand PINS ``f_g`` (``τ_λ`` gets the strand
    λ-term ``c·a²``); a 2-DOF (AMBIG) node's tilt is free, so the strand CANCELS out of ``f_g`` and contributes
    ZERO (it constrains only the tilt). `strand_evidence` returns the single-strand λ-term; `build_node_init`
@@ -24,7 +24,7 @@ sources of ``docs/CARRY_FORWARD.md``:
    ⭐ **It is NOT gated to single-strand nodes, and that asymmetry with source 3 is the whole point.**
    The strand Beta-Binomial is rank-1 in the tilt ``θ``, so on an AMBIG node its Schur complement on
    ``λ`` is exactly 0; the length likelihood does not depend on ``θ`` at all, so that argument does not
-   apply to it. `LEDGER.md` P0 measured **13.3–40.1 % of library mass** with no own evidence in EVERY
+   apply to it. Measured: **13.3–40.1 % of library mass** has no own evidence in EVERY
    condition (93.3–100 % of AMBIG mass), and **100 %** on an unstranded or zero-gDNA library — this is
    the only proposed source that reaches any of it. ``None`` ⇒ the pre-P2 path, byte-identically.
 5. **UNSOLVED** nodes default to **100 % gDNA at ZERO precision** — the honest "no information" state
@@ -86,9 +86,9 @@ class NodeInit:
 
 def own_composition_logvar(f_g, tau_lam, struct_lock):
     """The message-free composition variance of a node's own belief, on the two log-fraction arms — the
-    honest "how well does this node know its gDNA/RNA split?" (`variance_model_concepts.md`).
+    honest "how well does this node know its gDNA/RNA split?".
 
-    Three states, nothing between (`docs/CARRY_FORWARD.md` §2):
+    Three states, nothing between:
 
     * **structural lock** → composition CERTAIN → variance ``0`` (an intergenic pure-gDNA node);
     * **real evidence ``τ_λ > 0``** → ``Var(log f_g) = (1−f_g)²/τ_λ`` and ``Var(log f_r) = f_g²/τ_λ`` (the
@@ -109,7 +109,7 @@ def own_composition_logvar(f_g, tau_lam, struct_lock):
 
 def own_precision(n, v_log, live):
     """The own-belief precision of one component: ``p = n / (n·Var(log f) + 1) = 1/(Var(log f) + 1/n)`` — the
-    composition variance combined with the Poisson count power (`CALIBRATION_ARCHITECTURE.md` §1.2). It is 0
+    composition variance combined with the Poisson count power. It is 0
     when there is no count (``n = 0``), no evidence (``Var(log f) = ∞``), or the component is not ``live``
     (density ≤ 0) — a composition-vacuous source emits nothing, with no ``0·∞`` nan (the ``∞`` is masked to a
     finite value BEFORE the product, matching ``np.where``'s both-branch evaluation)."""
@@ -251,7 +251,7 @@ def build_node_init(
         is_region=is_reg,
         locked=locked,
     )
-    # APPROACH E (docs/CARRY_FORWARD.md, verified). The strand Beta-Binomial is
+    # APPROACH E (verified). The strand Beta-Binomial is
     # RANK-1: it depends on (λ,θ) only through p = ½+(κ−½)(1−f_g)sinθ. So the honest MARGINAL gDNA-level
     # precision (the Schur complement of the 2×2 composition Fisher) is:
     #   * SINGLE-STRAND (1-DOF): θ is STRUCTURALLY locked ⇒ τ_λ gets the full strand λ-term c·a² (strand pins f_g);

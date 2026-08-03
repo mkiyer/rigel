@@ -14,9 +14,9 @@ per-region mass arrays — ``mass_{gdna,rna}_{contained,left,right}`` — becaus
 sitting in differently-sized flanks. ``priors.assemble_priors`` then pooled two of them straight back
 as ``mass_gdna_right[r] + mass_gdna_left[r+1]``, and ``capture_eff_length._pooled_seam_arrays`` did the
 identical thing. That split-then-re-pool was a no-op with a history: the same sum-then-halve pattern hid
-an exact factor of 2 for months (`CARRY_FORWARD.md` §3 trap 2). A contiguous edge is a 0-bp line with
+an exact factor of 2 for months. A contiguous edge is a 0-bp line with
 ONE set of numbers, so the pair collapses to ``mass_{gdna,rna}_edge`` and the pooling **disappears
-rather than being re-derived** (owner ruling, `S5_DESIGN_LOG.md` §4).
+rather than being re-derived** (owner ruling).
 
 ⛔ **``gdna_boundary_len`` HAS NO SUCCESSOR.** It was ``boundary_side_eff_length = E[min(ℓ,L)]/2``, a
 per-FACE divisor whose ½ existed only because the face's mass was half a crossing. S5.c deleted it. The
@@ -137,10 +137,9 @@ class CalibrationResult:
     #: ``max(K, 1)`` objects and longer fragments cross more lines, so dividing both components by the
     #: gDNA opportunity — or by nothing at all, which is what shipped — tilts the prior's g:r ratio by
     #: ``Sum A_g / Sum A_r``. Measured on the chr22 pilot: gDNA 1.031 incidences per fragment against
-    #: RNA ~1.17, a 13–19 % under-call of gDNA (`SOLVER_OBSERVABLES_PLAN.md` §2.2).
+    # RNA ~1.17, a 13–19 % under-call of gDNA.
     #: ⚠ Like their gDNA twins these are PROJECTED off ``NodeGeometry.eff_rna``, never recomputed — the
     #: number the prior divides by is byte-identically the number the solver divided by
-    #: (`CARRY_FORWARD.md` §3 trap 27).
     rna_node_eff_len: np.ndarray
     rna_edge_eff_len: np.ndarray
 

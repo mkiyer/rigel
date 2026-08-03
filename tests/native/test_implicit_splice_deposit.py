@@ -1,6 +1,6 @@
 """An implicit splice deposits when its path is determined, and defers when it is not.
 
-    Rule: ``docs/ACCUMULATOR_DESIGN.md`` §9.1 (owner ruling, 2026-07-29)
+    Rule: (owner ruling, 2026-07-29)
 
 A `SPLICE_IMPLICIT` fragment has an annotated intron inside its unsequenced mate gap. The splice motif was
 never read, so `sj_strand` comes from the transcript that implied it — which is only legitimate when the
@@ -152,7 +152,7 @@ def test_A_SPAN_OVER_THE_LIMIT_RULES_OUT_the_retained_intron_hypothesis(scenario
     1800 bp apart and a junction-spanning fragment's unspliced ``L`` is ~2100 bp against a limit of 1000, so
     the retained-intron explanation is deleted and the spliced path stands alone and deposits.
 
-    ⛔ **This is the concern ``SPEC_GAP_PATHS.md`` §8 C3 names, and it is why this test exists.** The filter
+    ⛔ **This is the concern names, and it is why this test exists.** The filter
     is *not* purely a cost gate: it changes CLASSIFICATION, so the same annotation defers here and resolves
     there depending only on how far apart the exons sit. Measuring that from both sides is the difference
     between a documented consequence and an assumption.

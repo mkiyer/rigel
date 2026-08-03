@@ -7,7 +7,7 @@ across the documentation as though they were constants of the tool. They are pro
 annotation**. A rebuild from a different GTF moves every one of them, and the deletion entry says so
 explicitly. This script re-derives them so a claim can be checked instead of inherited.
 
-⭐ Two of the rows are **independent re-derivations**, not readbacks (`CARRY_FORWARD.md` §3 trap 1 — a
+⭐ Two of the rows are **independent re-derivations**, not readbacks ( — a
 validator that calls the builder's own helper validates nothing):
 
 * the **merged partition** is rebuilt here by run-length-encoding equal signatures, so "how many termini
@@ -119,7 +119,7 @@ def census_merge_visibility(nodes: pd.DataFrame, edges: pd.DataFrame) -> None:
 def census_junction_cuts(nodes: pd.DataFrame, edges: pd.DataFrame) -> None:
     """⭐ RE-DERIVED: the deposit's junction lookup IS a search in the cut array, so this must be 100 %.
 
-    `IMPLEMENTATION_PLAN.md` §3.3 rests on it — if an annotated intron's start is not a cut, the CSR
+     rests on it — if an annotated intron's start is not a cut, the CSR
     scan never happens and the junction is unfindable, silently.
     """
     junction = edges["kind"].to_numpy() == EDGE_KIND_JUNCTION

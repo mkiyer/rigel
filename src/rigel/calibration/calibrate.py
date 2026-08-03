@@ -27,7 +27,7 @@ handed them around; the density model took a fourth, a scalar ``fl_mean``. That 
 consumer to divide by a length model the solver never used. ``build_node_geometry`` now produces the
 per-slot ``eff_gdna``/``eff_rna`` before anything reads a count, and everything downstream — the density
 clue, the background pool, the intron factory, the result's two supports — reads THAT array
-(`CARRY_FORWARD.md` §3 trap 27).
+
 
 ⛔ **The per-face boundary machinery is gone.** ``boundary_substrate``, the ``left``/``right`` views and
 ``boundary_side_eff_length``'s ``E[min(ℓ,L)]/2`` had no successor: a contiguous edge is a 0-bp line with
@@ -36,8 +36,8 @@ one count and one divisor, ``crossing_eff_length``. A zero-gDNA library
 
 ⚠ **A7 IS OFF AT CONTIGUOUS EDGES, AND THE FIRST BASELINE CARRIES ITS BIAS.** The RNA half of an
 unspliced crossing takes ``UNBOUNDED_REACH`` rather than its transcript's real remaining length
-(`S5_DESIGN_LOG.md` §1 A7, owner-ruled). Cost, already measured: an **11.0 %** genome-wide gDNA
-over-call and **+0.36** in the last node before a polyA site (`CARRY_FORWARD.md` §1 fact 6). It is
+(owner-ruled). Cost, already measured: an **11.0 %** genome-wide gDNA
+over-call and **+0.36** in the last node before a polyA site. It is
 sequenced after this step so that turning it on can be A/B'd against the baseline this step produces.
 Junction edges DO take their real exonic reach — they are a new population with no predecessor divisor.
 """
@@ -138,7 +138,7 @@ def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
     ⭐ **A projection, not a recomputation.** ``build_node_geometry`` already applied
     ``contained_eff_length`` at NODE slots and ``crossing_eff_length`` at EDGE slots; calling those
     again here would put two implementations of one quantity in the tree, which is precisely how the
-    prose and the code came to disagree about a ½ for months (`CARRY_FORWARD.md` §3 traps 2 and 27).
+    prose and the code came to disagree about a ½ for months ( and 27).
     Whatever the solver divided by is what the result reports.
 
     ⚠ It takes the ARRAY, not the geometry: ``assemble_priors`` needs the RNA divisor as well as the
@@ -159,14 +159,14 @@ def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
 def _build_length_loglik(chain, geometry, region_arrays, gdna_fl_pmf, rna_fl_pmf, config):
     """The per-slot FRAGMENT-LENGTH log-likelihood on the ψ solve grid → ``(n_slots, K)``, or ``None``.
 
-    ⭐ **The fourth information source, finally wired** (`SOLVER_OBSERVABLES_PLAN.md` §6). The accumulator
+    ⭐ **The fourth information source, finally wired**. The accumulator
     has measured ``inv_length_sum`` and ``length_sum`` on every population since S5.a and nothing read
     them; `length_likelihood` turns them into evidence about ``f_g`` on the same ``λ`` grid the strand
     term lives on, and `node_init` registers its curvature as ``I_length``.
 
     ⚠ **Built here, once, for the same reason ``intron_prior`` is**: this is the only layer holding the
     chain, the geometry AND both fitted pmfs at the same time, and building it twice would put two
-    implementations of one quantity in the tree (`CARRY_FORWARD.md` §3 trap 27).
+    implementations of one quantity in the tree.
 
     ⚠ **Strand-agnostic**: the two genome-strand columns are summed. Which strand a read aligned to says
     nothing about whether its molecule was gDNA or RNA; the strand Beta-Binomial keeps its own columns.
@@ -189,7 +189,7 @@ def _build_length_loglik(chain, geometry, region_arrays, gdna_fl_pmf, rna_fl_pmf
 
 
 def _build_intron_prior(chain, substrate, region_arrays, node_eff_len, config, bg=None):
-    """The gDNA intron factory λ-factor per chain slot (`docs/CARRY_FORWARD.md`).
+    """The gDNA intron factory λ-factor per chain slot.
 
     Fits the intergenic-background NegBinom (`fit_intron_background`) and tabulates, for each INTRON NODE
     slot, ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` over the σ(λ) solve grid → an ``(n_slots, K)`` array,
@@ -265,7 +265,7 @@ def _fit_gdna_hyperprior(
     false-positive guard regresses ``0.010766 → 0.011065``. ``n_train`` grew 1179 → 1395 (+18.3 %), so it was
     active, not inert. The production plan's "wins on every axis" was scored against the **retired refit=1
     baseline**; at equal depth its own table already showed fabrication regressing 4.7× → 6.7×.
-    `SESSION_2026_07_28_HANDOFF_18.md` §2 R3.
+
     """
     isr = np.asarray(chain.kind) == NODE
     fp = np.asarray(statics.free_pos, dtype=bool)
@@ -344,12 +344,12 @@ def calibrate(
     statics = build_node_statics(chain, region_arrays, edge_flags)
 
     # The result's two gDNA supports, PROJECTED off the geometry rather than recomputed — so the number
-    # `priors` divides by is byte-identically the number the solver divided by (`CARRY_FORWARD.md` §3
-    # trap 27: two implementations of one quantity is how they come to disagree).
+    # `priors` divides by is byte-identically the one the solver divided by. Two implementations
+    # of one quantity is how they come to disagree.
     node_eff_gdna, edge_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
     # ⭐ And the RNA twin, on the same two axes. It is what turns ``mass_rna_*`` into a DENSITY in
     # ``assemble_priors``; without it the RNA side had no divisor at all and the prior's g:r ratio
-    # carried the ``Σ A_g / Σ A_r`` length tilt (`SOLVER_OBSERVABLES_PLAN.md` §2.2).
+    # carried the ``Σ A_g / Σ A_r`` length tilt.
     node_eff_rna, edge_eff_rna = _project_eff(chain, geometry.eff_rna, payload)
 
     # RNA strand balance: rna_sense_frac (κ) = posterior-mean spliced sense fraction. The strand
@@ -382,7 +382,7 @@ def calibrate(
     # count-observable seed regions/sides using the raw count-clue gDNA weight (breaks the circularity:
     # the seed weight is the strand MEAN ½, not the dispersion). RNA (mean κ) fitted from the PER-JUNCTION
     # SJ strand table — the same strand-qualified population κ itself is the marginal of, so both halves of
-    # the RNA Beta-Binomial come from one source (docs/CARRY_FORWARD.md). Both shrunk
+    # the RNA Beta-Binomial come from one source. Both shrunk
     # toward the SAME default prior, so under sparse data they collapse to one distribution and an
     # unstranded node (κ=½) is uninformative. See docs/em_strand/03+05.
     _gd_seed = _rna_seed = (
@@ -445,7 +445,7 @@ def calibrate(
         )
 
     belief = _init_belief()
-    # The gDNA INTRON FACTORY λ-factor (`docs/CARRY_FORWARD.md`): peel confident gDNA
+    # The gDNA INTRON FACTORY λ-factor: peel confident gDNA
     # from intron nodes against the intergenic background, BEFORE the pass-0 solve. Built ONCE (belief-free —
     # only the intron count vs the background), applied in every sweep below. ``None`` (disabled / no
     # informative background / no introns) ⇒ byte-identical to the pre-factory pass-0.
@@ -472,7 +472,7 @@ def calibrate(
     # Message precision is entirely SELF-CONTAINED in the sweep: the source's own honest belief precision
     # (strand + count, from `node_init.build_node_init`), degraded by the reframe's scale variance
     # (σ²_transfer = Var(log r)) and the DerSimonian–Laird composition-mismatch b̂² — all derived from counts and
-    # effective lengths inside the pass (`message_variance_derivation.md`). There is nothing to fit here.
+    # effective lengths inside the pass. There is nothing to fit here.
 
     # When ``_debug`` is on, the LAST sweep also fills ``_debug["capture"]`` with the per-node message
     # internals (local vs final belief, each channel's message mode/precision) — the substrate for the
@@ -505,7 +505,7 @@ def calibrate(
 
     # THE ENRICHMENT NPMLE — fit ONCE on ALL nodes' TOTAL unspliced density (belief-free). It models the
     # hybrid-capture ENRICHMENT/DEPLETION landscape, NOT composition: a total-density prior is
-    # composition-vacuous (count-zero-information — docs/CARRY_FORWARD.md §2/§5), so it is NEVER fed to the
+    # composition-vacuous (count-zero-information — /§5), so it is NEVER fed to the
     # composition (gDNA) arm. Its old second role — supplying the message σ²_transfer by projection — is
     # RETIRED (that was a density-uniformity proxy, invalid under capture, and identically 0 in pass-0); the
     # solver now derives σ²_transfer itself. What remains is the QC report's P(ρ) landscape + the toy-injection
@@ -523,7 +523,7 @@ def calibrate(
     # PHASE 1 — the INITIAL solve is PRIOR-FREE of the DNA composition prior: the inert Beta(½,½) reference
     # alone (``gdna_prior=None``) + the strand likelihood + the belief-free forward-backward messages.
     # Single-strand nodes self-solve from strand; unstranded
-    # AMBIG nodes are grounded only by the messages here (the two-root DNA ambiguity, docs/CARRY_FORWARD.md §4,
+    # AMBIG nodes are grounded only by the messages here (the two-root DNA ambiguity,
     # is resolved by the DECONVOLVED-gDNA hyperprior in Phase 2 — fit on this solve's peeled DNA, then a refit).
     belief = _sweep(None)
     belief_pass0 = (
@@ -534,7 +534,7 @@ def calibrate(
         enrichment_prior.n_cells,
     )
 
-    # PHASE 2 — the DECONVOLVED-gDNA hyperprior REFIT (docs/CARRY_FORWARD.md §4/§5). Fit the gDNA-rate NPMLE on
+    # PHASE 2 — the DECONVOLVED-gDNA hyperprior REFIT. Fit the gDNA-rate NPMLE on
     # the initial solve's peeled gDNA, then RE-SOLVE with it as the composition arm — resolving the two-root DNA
     # ambiguity the prior-free pass leaves at unstranded AMBIG nodes. Repeated ``calib_refit_iters`` times.
     # ANCHORED, EXTREMELY WEAK. The aggregate DNA-background reference (`ρ_bg`, pooled pure intergenic/intron —

@@ -1,13 +1,13 @@
 # SPEC — the mate gap is a PATH problem, and the accumulator arbitrates it
 
-    Status: SPECIFICATION, 2026-08-01. Partly implemented — see `PLAN_TWO_PASS.md` §2.2 for the
+    Status: SPECIFICATION, 2026-08-01. Partly implemented — see `docs/accumulator/PLAN_TWO_PASS.md` §2.2 for the
             exact resume point (reference done, C++ partial, call sites unmigrated).
-    ⭐ ENTRY POINT IS NOW `docs/PLAN_TWO_PASS.md` — it carries the order of work, the gates, and the
+    ⭐ ENTRY POINT IS NOW `docs/accumulator/PLAN_TWO_PASS.md` — it carries the order of work, the gates, and the
       second-pass design. This file remains the detailed enumeration rule and interface (§0–§4).
-    Supersedes: `SPEC_GAP_INTRONS.md` (C2.6, landed) wherever they differ — that spec cut ONE intron
+    Supersedes: `docs/accumulator/SPEC_GAP_INTRONS.md` (C2.6, landed) wherever they differ — that spec cut ONE intron
                 per gap and decided ambiguity in the adapter. Both are corrected here.
     Owner rulings, 2026-08-01, recorded verbatim in §8.
-    Prior art it completes: `ACCUMULATOR_DESIGN.md` §9 (the deferred queue) and §9.1 (distinct intron SETS).
+    Prior art it completes: `docs/accumulator/DESIGN.md` §9 (the deferred queue) and §9.1 (distinct intron SETS).
 
 ---
 
@@ -58,10 +58,10 @@ Both are compatible with every sequenced base. ⭐ **TA's path crosses an exon �
 read ever touched.** So a gap hypothesis is not "an intron"; it is a **path through the annotation**, and
 a path may contain several introns and several exons.
 
-⛔ **This is what `SPEC_GAP_INTRONS.md` got wrong twice.** It searched each gap for the *first* matching
+⛔ **This is what `docs/accumulator/SPEC_GAP_INTRONS.md` got wrong twice.** It searched each gap for the *first* matching
 intron of the *first* matching transcript, so TA reads as "(2000,3000)" — a path **no molecule has** — and
 the unanimity test then compares that against TB's "(2000,4000)" per gap rather than comparing SETS.
-`ACCUMULATOR_DESIGN.md` §9.1 already required the set test; the implementation approximated it, and the
+`docs/accumulator/DESIGN.md` §9.1 already required the set test; the implementation approximated it, and the
 approximation is exact only while a transcript implies **≤ 1 intron per gap**. C2.6's D3 residual is that
 approximation failing, measured at **98.5 %** of the remaining fragment-length tail.
 
@@ -81,7 +81,7 @@ and `∅` — cut nothing — is **the genomic hypothesis**: an unspliced molecu
 is unspliced and gDNA is unspliced… Nascent RNA and gDNA always compete within the boundaries of a
 transcript span. If there is an intron gap between two reads, we are by definition within a transcript
 span."* So the shadow row **is** `∅`, already present. ⚠ This retro-justifies the `~is_synthetic` filter
-with a better reason than `ACCUMULATOR_DESIGN.md` §9.1's — that filter was defended as "not conflating
+with a better reason than `docs/accumulator/DESIGN.md` §9.1's — that filter was defended as "not conflating
 path with component"; the truth is simpler, the shadow is *redundant*.
 
 ⭐ **And it explains the old measurement.** §9.1 records that counting the shadow *"deferred 100 % of
@@ -202,7 +202,7 @@ The owner asked for code cleaner than what is there. It is a net **deletion**:
 | `RawResolveResult.implicit_ambiguous` | the verdict is the accumulator's now |
 | the per-gap `seen_none` / `seen_intron` unanimity scan | ⭐ ~40 lines of subtle bookkeeping, and three comment blocks defending it, replaced by "group candidates by path" — which is what §9.1 asked for in the first place |
 | the `is_real` / `~is_synthetic` filter *as a special case* | the shadow is `∅`, which the enumeration produces anyway |
-| `SPEC_GAP_INTRONS.md`'s D1, D2, D3 | D1 deleted, D2 moot (`sj_strand` is per hypothesis), D3 **solved** rather than deferred |
+| `docs/accumulator/SPEC_GAP_INTRONS.md`'s D1, D2, D3 | D1 deleted, D2 moot (`sj_strand` is per hypothesis), D3 **solved** rather than deferred |
 
 ⚠ **`splice_type` does not move, again.** It classifies what was **observed** and feeds scoring, the
 deferred queue, strand training and the report's census. ⭐ **OPEN DECISION D-A (§8):** `SPLICE_IMPLICIT` now
@@ -213,7 +213,7 @@ purely descriptive?
 
 ## §6 THE SIDE BUFFER
 
-`ACCUMULATOR_DESIGN.md` §9 specifies it as `(candidate object ids, channel, L)` and it **does not exist**.
+`docs/accumulator/DESIGN.md` §9 specifies it as `(candidate object ids, channel, L)` and it **does not exist**.
 
 ⭐ **Store the fragment, not its consequences.** Object ids are large, derived, and would have to be kept
 consistent with the partition; the fragment is small and replays exactly. One record:
@@ -250,7 +250,7 @@ bias directly on the nearest available proxy: excluding the ambiguous long fragm
 
 A short-biased FL prior prefers the **shorter** `L`, which is the **more-spliced** path; those fragments
 then re-enter the fit even shorter. ⛔ **That loop can run away and needs a stopping rule and a measured
-convergence check** — the same requirement `JUNCTION_OPPORTUNITY.md` §7(c) has for θ.
+convergence check** — the same requirement `docs/accumulator/JUNCTION_OPPORTUNITY.md` §7(c) has for θ.
 
 ⭐ **And that is the argument for building it once.** C3 needs post-capture transcript abundance; this
 needs transcript abundance; both want the EM's own. **One two-pass structure, shared.**

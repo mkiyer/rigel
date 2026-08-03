@@ -1,6 +1,6 @@
 """rigel.calibration.effective_length — the divisor that turns a count into a start density.
 
-    Derivation: ``docs/NODE_DENSITY_DERIVATION.md``   ·   Design: ``docs/ACCUMULATOR_DESIGN.md`` §7
+
     Gate: ``tests/calibration/test_effective_length.py`` — every formula enumerated, not restated
 
 An **effective length** is the expected number of admissible fragment START POSITIONS at an object. It is
@@ -22,7 +22,7 @@ ends, so its reaches come from the annotation.
 a gDNA/RNA MIXTURE: the RNA part is bounded by its transcript, the gDNA part is not. So an edge does not
 have "a" reach — each component has its own, and only the RNA one is finite. A junction edge is the easy
 case, since only a spliced molecule uses it. ⛔ Production has ignored reach entirely up to now; whether
-to keep ignoring it is an open decision (`docs/S5_DESIGN_LOG.md` A7), and this module is written so that
+to keep ignoring it is an open decision, and this module is written so that
 "ignore it" is expressible as ``UNBOUNDED_REACH`` rather than as a second code path.
 
 ⚠ **The `+1` in the contained formula is the discrete count of start positions, not a fudge.** A fragment
@@ -32,7 +32,7 @@ epsilon and produced densities of ~1e9 on 12.4 % of fine-partition nodes.
 
 ⚠ **An object with no opportunity must return 0, and the caller must treat 0 as "no evidence" rather than
 flooring it.** A short node genuinely cannot measure a long component; that is physics
-(`CARRY_FORWARD.md` §3 trap 23), and a floored division turns "no data" into a confident wrong answer.
+and a floored division turns "no data" into a confident wrong answer.
 
 ⛔ **The three mass-era divisors are DELETED** — ``boundary_side_eff_length`` (``E[min(l,R)]/2``),
 ``spliced_side_eff_length`` (``E[min²/2l]``) and ``boundary_side_crossing_count_eff_length``. They divided
@@ -79,7 +79,7 @@ def contained_eff_length(node_len_bp: np.ndarray, fl_pmf: np.ndarray) -> np.ndar
 
     ⚠ This is the frame that still NEEDS a length model. Containment probability differs 6.6× between
     gDNA and RNA at a 150 bp node, so a 10 % error in the fitted pmf costs 0.010–0.026 of composition
-    (`ACCUMULATOR_DESIGN.md` §7.2) — the length models are load-bearing here, not hygiene.
+    the length models are load-bearing here, not hygiene.
     """
     p = _as_pmf(fl_pmf)
     n = p.shape[0]

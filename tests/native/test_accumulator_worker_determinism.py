@@ -1,6 +1,6 @@
 """The same BAM must give the same tally at any worker count — bit for bit.
 
-    Plan: ``docs/IMPLEMENTATION_PLAN.md`` §0 step 8   ·   Design: ``ACCUMULATOR_DESIGN.md`` §10.1
+     step 8
 
 ⭐ THIS IS NEWLY ACHIEVABLE, and it is the reason every channel is an integer. The float accumulator this
 replaced differed by only ~3.7e-7 per cell between worker counts — and that propagated to a **~2.6 %

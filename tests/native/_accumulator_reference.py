@@ -4,7 +4,7 @@ The accumulator is the per-fragment tally built during the single-pass BAM scan;
 reads only its output. This module is the reference implementation, and the native accumulator is
 required to reproduce it **byte for byte**. Where this file and a document disagree, this file wins.
 
-    Design: ``docs/ACCUMULATOR_DESIGN.md``   ·   Plan: ``docs/IMPLEMENTATION_PLAN.md``
+
     Spec matrix: ``test_accumulator_spec.py``
 
 THE MODEL
@@ -43,7 +43,7 @@ WHAT EACH OBJECT'S NUMBERS MEAN
     row is ``(mu_g - 1, mu_r - 1)`` and the inv-length row is ``(1, 1)``, so the pair's determinant is
     ``mu_g - mu_r`` and it carries ZERO information about the gDNA/RNA split when the two means agree --
     at any depth. ``length_sum`` is a second, independent tilt and removes that blind spot.
-    See ``docs/NODE_DENSITY_DERIVATION.md`` and ``scripts/design/observable_efficiency.py``.
+    See and ``scripts/design/observable_efficiency.py``.
 
 ⚠ NO PARTITIONING. Every crossed edge receives the FULL weight. The chance that a length-``L`` fragment
 crosses a given line is proportional to ``L`` and the deposit is ``1/L``, so the two cancel and every
@@ -136,7 +136,7 @@ class DepositOutcome(enum.Enum):
     #: ⭐ **Two or more hypotheses survived, so the path is not determined** — and therefore neither is
     #: ``L``, either quantum, the pool bin, or the set of lines the fragment crosses. It deposits on
     #: nothing and goes to the **deferred queue**, where the second pass resolves it with the fragment-length
-    #: distribution and the transcript abundances. `docs/SPEC_GAP_PATHS.md` §0, `ACCUMULATOR_DESIGN.md` §9.
+    # distribution and the transcript abundances.,
     #:
     #: ⚠ **Not "dropped".** The fragment is retained in full and the conservation identity is
     #: ``deposited + deferred + dropped_* == offered``. The qc key says ``deferred`` for that reason: a
@@ -152,7 +152,7 @@ class GapHypothesis:
     A fragment's mate gap may hold no intron, one, or several, and which it is cannot be observed — the
     bases are not there. Each candidate transcript determines exactly one answer (its own introns lying
     inside the gaps), so the hypotheses are finite and small, and two transcripts implying the same
-    introns are ONE hypothesis. `docs/SPEC_GAP_PATHS.md` §1.
+    introns are ONE hypothesis.
 
     ⭐ **The empty path is the GENOMIC hypothesis.** Cutting nothing means the gap is real template, i.e.
     the molecule is gDNA — or nascent RNA, which is the same unspliced span. That is why the accumulator
@@ -491,10 +491,10 @@ class Tally:
     sj_length_sum: np.ndarray  # uint64[n_sj, 2] — Sum L, the second length tilt
     pool_lengths: np.ndarray  # int64[5, max_fragment_length + 1] — binned at L, once per fragment
     #: uint32[max_fragment_length + 1] — ⭐ **C1: EVERY deposited fragment, binned at its own L, with no
-    #: purity condition.** The five pure pools above are deliberately CONDITIONED (`ACCUMULATOR_DESIGN.md`
+    # purity condition.** The five pure pools above are deliberately CONDITIONED
     #: §8: an impure pool is worse than a missing one), so they cannot serve as the unconditional anchor an
     #: empirical-Bayes shrinkage needs — which is why that anchor was taken from the SCANNER, which
-    #: measures length by two other rules over another population (`FRAGMENT_LENGTH_AUDIT.md` §1.1). This
+    # measures length by two other rules over another population. This
     #: row removes that reason: anchor and pools become one measurement of one quantity.
     #:
     #: ⚠ **It is "unconditional GIVEN DEPOSIT", and the name says so.** It excludes what the accumulator
@@ -1051,7 +1051,7 @@ class Accumulator:
         Anything else — an exonic contained fragment, a multi-line crossing — is a mixture and enters
         nothing.
 
-        ⭐ **DETERMINACY, NOT PROVENANCE** (`docs/SPEC_GAP_PATHS.md` §5). There used to be an
+        ⭐ **DETERMINACY, NOT PROVENANCE**. There used to be an
         ``sj_implicit`` condition here barring a fragment whose splice was inferred rather than
         sequenced, on the grounds that a length partly inferred from the annotation is a product of the
         model the pool is used to fit. It is gone, and so is the flag: a fragment only reaches this line

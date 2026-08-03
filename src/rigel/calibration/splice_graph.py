@@ -2,8 +2,6 @@
 
 The calibration partition: what the accumulator deposits into, and the structure the solver reads.
 
-    Design: ``docs/CARRY_FORWARD.md``   ·   Consumer: ``docs/CARRY_FORWARD.md``
-    Implementation plan + measured amendments: ``docs/CARRY_FORWARD.md``
 
 **A node** is a genomic interval; nodes tile each reference and are numbered in genomic order.
 **An edge** is a transition, always ``src < dst`` so genomic order is a topological order:
@@ -1041,7 +1039,7 @@ def build_edge_flags_array(index) -> np.ndarray:
     interfaces plus two data-free terminals — purely so every node had an object on each side. A
     contiguous edge is the line BETWEEN two adjacent nodes and there is no such line before the first or
     after the last, so a reference with ``k`` nodes contributes exactly ``k − 1`` entries and the
-    off-by-one commentary that used to live here goes with the slots (`S5_DESIGN_LOG.md` §4).
+    off-by-one commentary that used to live here goes with the slots.
 
     A contiguous edge IS the interface to the right of its ``src`` node, so the flags are keyed by
     ``src``. Junction edges carry no flags — they are not a genomic position — and are excluded.
@@ -1071,32 +1069,32 @@ def build_edge_flags_array(index) -> np.ndarray:
 
 def build_contiguous_edge_reach_arrays(index) -> tuple[np.ndarray, np.ndarray]:
     """The RNA **reach** on the accumulator's contiguous-edge axis — ``(reach_lo, reach_hi)``,
-    ``float64[E, 2]``, column 0 the POS-strand transcript's and column 1 the NEG's.
+     ``float64[E, 2]``, column 0 the POS-strand transcript's and column 1 the NEG's.
 
-    A crossing molecule must fit in what remains of **its own template** either side of the line. gDNA's
-    template is the chromosome, so its reach is unbounded — physics, not a choice. RNA's ends where its
-    transcript ends, and ignoring that over-calls gDNA by a measured **11.0 %** genome-wide
-    (`CARRY_FORWARD.md` §1 fact 6). This is the array that lets :func:`effective_length.crossing_eff_length`
-    taper the RNA divisor (`S5_DESIGN_LOG.md` §1 A7).
+     A crossing molecule must fit in what remains of **its own template** either side of the line. gDNA's
+     template is the chromosome, so its reach is unbounded — physics, not a choice. RNA's ends where its
+     transcript ends, and ignoring that over-calls gDNA by a measured **11.0 %** genome-wide
+    This is the array that lets :func:`effective_length.crossing_eff_length`
+     taper the RNA divisor.
 
-    ⚠ **PER STRAND and per SIDE** — `CARRY_FORWARD.md` §2: reach is "maximised over transcripts
-    independently per side AND per strand". A POS transcript and a NEG one ending in different places
-    give one line two different RNA reaches, and a single averaged number describes neither.
+     ⚠ **PER STRAND and per SIDE**: reach is "maximised over transcripts
+     independently per side AND per strand". A POS transcript and a NEG one ending in different places
+     give one line two different RNA reaches, and a single averaged number describes neither.
 
-    ⚠ **GENOMIC, unlike a junction's EXONIC reach.** A junction is used only by a spliced molecule, so
-    what remains either side of it is exonic; a contiguous line is also crossed by *nascent* RNA, which
-    is genomic. Taking the exonic reach here would declare an intronic nascent fragment impossible
-    (:class:`JunctionGeometry`).
+     ⚠ **GENOMIC, unlike a junction's EXONIC reach.** A junction is used only by a spliced molecule, so
+     what remains either side of it is exonic; a contiguous line is also crossed by *nascent* RNA, which
+     is genomic. Taking the exonic reach here would declare an intronic nascent fragment impossible
+     (:class:`JunctionGeometry`).
 
-    ⚠ **A reach of 0 is the ANSWER, not a missing value** — no template of that strand at that line, so
-    that strand's RNA has zero opportunity and the divisor is legitimately 0. The consumer must treat 0
-    as "emit nothing" rather than flooring it (`CARRY_FORWARD.md` §3 trap 23). Measured on the chr22
-    pilot index: **40.6 %** of contiguous edges have no POS template and **42.9 %** no NEG template.
+     ⚠ **A reach of 0 is the ANSWER, not a missing value** — no template of that strand at that line, so
+     that strand's RNA has zero opportunity and the divisor is legitimately 0. The consumer must treat 0
+     as "emit nothing" rather than flooring it. Measured on the chr22
+     pilot index: **40.6 %** of contiguous edges have no POS template and **42.9 %** no NEG template.
 
-    ⭐ **Keyed by ``src``, exactly as :func:`build_edge_flags_array` is**, and laid out per reference in
-    ``index.ref_names`` order, so the two arrays are the SAME axis element for element and a consumer
-    indexes both with one index. A reference with ``k`` nodes contributes ``k − 1`` entries; one with a
-    single node contributes none.
+     ⭐ **Keyed by ``src``, exactly as :func:`build_edge_flags_array` is**, and laid out per reference in
+     ``index.ref_names`` order, so the two arrays are the SAME axis element for element and a consumer
+     indexes both with one index. A reference with ``k`` nodes contributes ``k − 1`` entries; one with a
+     single node contributes none.
     """
     nodes_df, edges_df = index.nodes_df, index.edges_df
     contiguous = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_CONTIGUOUS
@@ -1138,7 +1136,7 @@ class JunctionGeometry:
     """The junction edges on **the accumulator's junction axis**, in its own slot order.
 
     A junction edge is not a chain slot — the graph is a DAG but not a polytree, so a junction must be a
-    **factor on its endpoint nodes** and never a message channel (`CARRY_FORWARD.md` §3 trap 10). This
+    **factor on its endpoint nodes** and never a message channel. This
     is what a consumer needs to place that factor: where the junction attaches, whose transcript it
     belongs to, and how much of its own template remains either side.
 
@@ -1174,7 +1172,7 @@ def build_junction_geometry_arrays(index) -> JunctionGeometry:
     :func:`build_junction_edge_arrays`, whose ``edge_row`` is already the ``edges_df`` row of each
     junction slot. That ordering is a byte-identity contract against the reference accumulator's
     ``Partition.from_cuts``, and two implementations of one ordering is how the same quantity comes to
-    differ in two places (`CARRY_FORWARD.md` §3 trap 27) — so there is one, and this joins through it.
+    differ in two places — so there is one, and this joins through it.
     """
     rows = build_junction_edge_arrays(index).edge_row
     edges = index.edges_df

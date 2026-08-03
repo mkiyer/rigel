@@ -26,7 +26,7 @@ Geometry layout (0-based half-open, after GTF parse)
   g5 (+):
     t_one_exon: exons (59999,60500)                 single-exon, spans whole locus
     t_split   : exons (59999,60100),(60399,60500)   intron (60100,60399)
-  g6 (+):  ⭐ SPEC_GAP_INTRONS.md — the MIXED fragment: an observed splice AND a gap intron
+  g6 (+): ⭐ — the MIXED fragment: an observed splice AND a gap intron
     t_mixed   : exons (62000,62200),(62400,62600),(62800,63000)
                 introns (62200,62400) and (62600,62800)
 """
@@ -182,7 +182,7 @@ class TestImplicitSpliceDiscriminant:
         ⚠ **The geometry moved at S1** and the case's meaning did not. It used to put block 1 at
         (149,400) — contiguously across ``t_three``'s FIRST intron — which makes ``t_three`` a transcript
         the read *contradicts*, and a contradicted transcript is no longer a candidate for anything
-        (``SPEC_GAP_PATHS.md`` §3, concern C1; that case is now
+        (concern C1; that case is now
         ``test_h2_a_CONTRADICTED_transcript_is_not_a_candidate``). Block 1 now sits wholly inside exon 2,
         so intron 1 falls outside the fragment entirely and only intron 2 is in play — which is what "any
         intron satisfies" was always about.
@@ -197,7 +197,7 @@ class TestImplicitSpliceDiscriminant:
 
     # (h2) a transcript the READ CONTRADICTS is not a candidate → UNSPLICED
     def test_h2_a_CONTRADICTED_transcript_is_not_a_candidate(self, with_tolerance):
-        """⛔ ``SPEC_GAP_PATHS.md`` §3 concern **C1**, at the resolver level.
+        """⛔ concern **C1**, at the resolver level.
 
         The owner's rule is *"any transcript with a compatible combination of introns + exons is a
         candidate"*, and ``cr.t_inds`` is **not** that set: it comes from ``merge_sets``, which falls back
@@ -305,7 +305,7 @@ class TestImplicitSpliceDiscriminant:
 
 
 class TestGapIntronsAreSearchedWhateverTheSpliceType:
-    """⭐ `docs/SPEC_GAP_INTRONS.md` — detection runs on EVERY fragment, not only unspliced ones.
+    """⭐ — detection runs on EVERY fragment, not only unspliced ones.
 
     An annotated intron sitting in a fragment's **unsequenced mate gap** used to be looked for only when
     the resolver had already called the fragment ``SPLICE_UNSPLICED``, so a fragment carrying an observed
@@ -357,7 +357,7 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
         assert result is not None
         assert self._emitted(result) == [[self.IMPLIED]], (
             "the annotated intron inside the unsequenced mate gap was not found on a fragment that "
-            "also carries an observed CIGAR-N splice — SPEC_GAP_INTRONS.md §0"
+            "also carries an observed CIGAR-N splice — "
         )
         assert result.n_gap_hypotheses == 1
 
@@ -389,7 +389,7 @@ class TestGapIntronsAreSearchedWhateverTheSpliceType:
             "the observed gap [62202,62400) is within the K=3 anchor tolerance of the ANNOTATED intron "
             "[62200,62400), so dropping only exact matches is what stops a DIFFERENT intron being "
             "substituted for it. Two overlapping introns then normalise into one wider one and L comes "
-            "out too SHORT — SPEC_GAP_INTRONS.md §1"
+            "out too SHORT — "
         )
 
     # U4 — the classification does not move. This work is about L, not about labelling.

@@ -226,7 +226,7 @@ def scan_and_buffer(
     during this pass; it measured length by two rules that were neither each other nor the
     accumulator's ``L``, over a population that was never stated. C2 deleted it. Every
     fragment-length distribution the tool uses is now built from the payload by
-    :func:`rigel.calibration.fl.build_fl_models` — ``docs/FRAGMENT_LENGTH_AUDIT.md``.
+    :func:`rigel.calibration.fl.build_fl_models`.
     """
     stats = PipelineStats()
     buffer = FragmentBuffer(
@@ -320,7 +320,7 @@ def scan_and_buffer(
     strand_models = StrandModels.from_scan(result["strand_observations"])
     # ONE strand-qualified fragment credits ONE junction. That is what makes the 2×2
     # exactly the table's marginal, so both halves of the RNA strand Beta-Binomial are
-    # fitted on one population (docs/CARRY_FORWARD.md §2.1). The
+    # fitted on one population. The
     # C++ counts the fragments independently of the table it builds, so this is a real
     # cross-check, and it is the invariant to break if the crediting rule ever changes.
     n_credited = strand_models.sj_table.n_observations
@@ -328,7 +328,7 @@ def scan_and_buffer(
         raise RuntimeError(
             f"SJ strand table credited {n_credited:,} observations but the scanner "
             f"qualified {stats.n_strand_trained:,} fragments; one qualified fragment must "
-            "credit exactly one junction (see sj_strand_table_design.md §2.3)."
+            "credit exactly one junction."
         )
 
     logger.info(
@@ -363,7 +363,7 @@ def scan_and_buffer(
 def _drain_side_buffer(payload, index: TranscriptIndex, strand_models, *, seed: int):
     """⭐ **THE SECOND PASS.** Score the held fragments, draw one hypothesis each, re-deposit.
 
-        Spec: ``docs/SPEC_SECOND_PASS.md`` §2 (where this sits), §5 (the draw), §6 (the drain)
+         (where this sits), §5 (the draw), §6 (the drain)
 
     Pass 1 holds every fragment whose unsequenced gap has more than one surviving explanation — 2–3.5 % of
     a library, and systematically the **long** ones, because a longer gap admits more hypotheses. Nothing
@@ -397,7 +397,7 @@ def _drain_side_buffer(payload, index: TranscriptIndex, strand_models, *, seed: 
         payload,
         fl_models=build_fl_models(payload),
         # ⚠ `P(align_strand agrees | RNA)`, and on an R1-antisense (dUTP) library — which real cfRNA is —
-        # this is ≈ 0.01, so DISAGREEMENT is the likely case. `LEDGER.md` P0.
+        # this is ≈ 0.01, so DISAGREEMENT is the likely case.
         rna_sense_frac=strand_models.p_r1_sense,
         node_types=node_types,
         junctions=junctions,
@@ -896,11 +896,11 @@ def run_pipeline(
     # The junction axis, in the accumulator's own junction slot order: where each junction attaches,
     # its TRANSCRIPT strand, and its exonic reach either side. The calibrator places it as a FACTOR on
     # its two endpoint nodes — never as a message channel, since every junction closes an undirected
-    # loop and the graph is not a polytree (`CARRY_FORWARD.md` §3 trap 10).
+    # loop and the graph is not a polytree.
     junctions = build_junction_geometry_arrays(index)
 
     # The two COMPONENT fragment-length models the calibrator's effective lengths need, each fitted
-    # from a pool that is PURE BY CONSTRUCTION (docs/ACCUMULATOR_DESIGN.md §8): gDNA from fragments
+    # from a pool that is PURE BY CONSTRUCTION: gDNA from fragments
     # contained in an intergenic or intronic node, RNA from fragments that used an annotated junction
     # with the splice OBSERVED. Both are smooth-EB shrunk toward the unconditional global FL.
     #
@@ -912,7 +912,7 @@ def run_pipeline(
     #
     # ⭐ C2.1: the ANCHOR moved here too, off the scanner's histogram and onto the accumulator's own
     # `deposited_lengths`. Until then the pools were accumulator-frame and the anchor they were
-    # shrunk toward was not — `docs/FRAGMENT_LENGTH_AUDIT.md` D2.
+    # shrunk toward was not.
     from .calibration.fl import build_fl_models
 
     fl_models = build_fl_models(calibration_payload)

@@ -16,7 +16,7 @@ Length was the blocker on this whole area. It is finished: **one** definition (C
 (C2.6), and an **unbiased** one — the anchor's error against the simulator's own truth is **+0.00 % mean /
 +0.02 % sd** on the zero-gDNA falsification condition, from −1.61 % / −1.48 %.
 
-⛔ **BUT THE DELIVERABLE GOT WORSE, AND THAT IS WHY C3 IS RANK 0** (`LEDGER.md` **B4**). The library gDNA
+⛔ **BUT THE DELIVERABLE GOT WORSE, AND THAT IS WHY C3 IS RANK 0** (`docs/WIP.md` **B4**). The library gDNA
 fraction's mean |error| on the four contaminated pilot conditions went **0.0381 → 0.0472 (+23.9 %)** once
 the side buffer drains. ~55 % of that is the drain being *right* (truth says **99.8 %** of held fragments
 are RNA, so depositing them genuinely lowers the gDNA fraction, and the estimate was already too low);
@@ -25,25 +25,35 @@ anchor** — and `RNA_SPLICED` went **+2.4 % → +6.2 %** against truth, because
 junction-using fragments into a pool selected on "used an annotated junction", which is itself **+3.8 %**
 longer than the library. C3 is the correction for exactly that.
 
+**THE DOCS FOLDER.** Root holds what you read whatever you are working on — `ROADMAP.md`, `TODO.md`,
+`WIP.md` (+ `WIP_ARCHIVE.md`), `SESSION_HANDOFF.md`, `MANUAL.md`, `PUBLISHING.md`. Subject matter lives in
+`docs/accumulator/`, `docs/calibration/` and `docs/testing/`.
+
+⛔ **THE SOURCE DOES NOT REFERENCE THE DOCS, AND MUST NOT START.** Verified zero `.md` references under
+`src/`. Docs evolve and rot — 73 % of the citations that used to be in the source pointed at documents
+that had already been deleted. A docstring may cite a **test** or the executable specification
+(`tests/native/_accumulator_reference.py`), because code cannot rot silently; it may not cite a document.
+
 **Read them in this order:**
 
 | doc | what it is |
 |---|---|
-| **`docs/TODO.md`** | ⭐⭐ **START HERE — the one ranked list, and rank 0 is C3.** Everything landed is struck through with its measurement |
-| **`docs/LEDGER.md`, entries C0 → B4** | ⭐ **THE MOST RECENT WORK, newest last.** The fragment-length track (C0–C2.6), the two-pass structure (S1, S2, S2.1), the second pass in full (P0–P4.2), and ⭐ **B4 — the composition baseline that sets the priority** |
-| **`docs/JUNCTION_OPPORTUNITY.md`** | ⭐ **C3's formula, derived and proven** over 48,648 exhaustive configurations. ⛔ **EVERY number in §3 is STALE** — scored against the contaminated anchor and the pre-drain pool. §1's derivation is untouched |
-| **`docs/SPEC_SECOND_PASS.md`** | ⭐ the second pass, in full: the score, the draw, the drain. **P0–P4 are all CLOSED**; §8's D-1/D-2/D-3/D-5/D-6 are all decided and **D-4 is the one left** |
-| **`docs/SOLVER_OBSERVABLES_PLAN.md`** | ⚠ its P0/P1/P2 are **not** the second pass's. ⭐ **P2 — the fragment-length likelihood in the per-node solve — is built and gated OFF, blocked on the FL pools**, i.e. on C3. Mechanism proven: blind mass 100 % → 0 % |
-| `docs/PLAN_TWO_PASS.md` | ⚠ **HISTORY** — why the gap-path and junction-opportunity problems are ONE problem. S1–S3 all landed; its §5 is superseded by `SPEC_SECOND_PASS.md` and its §2.4 numbers by B4 |
-| `docs/FRAGMENT_LENGTH_AUDIT.md` | ⚠ **HISTORY** — how the critical path got here. THREE definitions of fragment length were live at once. C0/C1/C2/C2.6 all landed; its "C3 is next" is now correct again |
-| `docs/SPEC_GAP_PATHS.md` | ⚠ **HISTORY** — the enumeration rule pass 1 implements, landed as S1. Supersedes `SPEC_GAP_INTRONS.md`, which is the C2.6 record |
-| `docs/S5_DESIGN_LOG.md` | ⚠ **HISTORY** — S5 is finished. Kept for §1's accumulator derivations and §3's observable measurements, still the reference |
-| `docs/IMPLEMENTATION_PLAN.md` §0 | the live handoff for everything not on the critical path |
-| `docs/NODE_DENSITY_DERIVATION.md` | why the deposit weight is 1/opportunity, and what each stored channel buys |
-| `docs/ACCUMULATOR_DESIGN.md` | the accumulator's design. ⚠ §8's purity claim for the two *splash* pools is **unverified** — see `TODO.md` |
-| `docs/CARRY_FORWARD.md` | ⭐ **§3 traps then §2 equations** — the most-used reference in the project |
-| `docs/BENCHMARK_SUITE.md` | the suite: how to build it, and **what it can and cannot judge** |
-| `docs/LEDGER_ARCHIVE.md` | older ledger entries |
+| **`docs/ROADMAP.md`** | ⭐⭐ **START HERE — what to do next and why, in priority order**, every claim a measured number |
+| **`docs/TODO.md`** | ⭐ the exhaustive ranked list, including the small self-contained items. Rank 0 is C3 |
+| **`docs/WIP.md`, entries C0 → B4** | ⭐ **THE MOST RECENT WORK, newest last.** The fragment-length track (C0–C2.6), the two-pass structure (S1, S2, S2.1), the second pass in full (P0–P4.2), and ⭐ **B4 — the composition baseline that sets the priority** |
+| **`docs/accumulator/JUNCTION_OPPORTUNITY.md`** | ⭐ **C3's formula, derived and proven** over 48,648 exhaustive configurations. ⛔ **EVERY number in §3 is STALE** — scored against the contaminated anchor and the pre-drain pool. §1's derivation is untouched |
+| **`docs/accumulator/SPEC_SECOND_PASS.md`** | ⭐ the second pass, in full: the score, the draw, the drain. **P0–P4 are all CLOSED**; §8's D-1/D-2/D-3/D-5/D-6 are all decided and **D-4 is the one left** |
+| **`docs/calibration/SOLVER_OBSERVABLES_PLAN.md`** | ⚠ its P0/P1/P2 are **not** the second pass's. ⭐ **P2 — the fragment-length likelihood in the per-node solve — is built and gated OFF, blocked on the FL pools**, i.e. on C3. Mechanism proven: blind mass 100 % → 0 % |
+| `docs/accumulator/PLAN_TWO_PASS.md` | ⚠ **HISTORY** — why the gap-path and junction-opportunity problems are ONE problem. S1–S3 all landed; its §5 is superseded by `docs/accumulator/SPEC_SECOND_PASS.md` and its §2.4 numbers by B4 |
+| `docs/accumulator/FRAGMENT_LENGTH_AUDIT.md` | ⚠ **HISTORY** — how the critical path got here. THREE definitions of fragment length were live at once. C0/C1/C2/C2.6 all landed; its "C3 is next" is now correct again |
+| `docs/accumulator/SPEC_GAP_PATHS.md` | ⚠ **HISTORY** — the enumeration rule pass 1 implements, landed as S1. Supersedes `docs/accumulator/SPEC_GAP_INTRONS.md`, which is the C2.6 record |
+| `docs/calibration/S5_DESIGN_LOG.md` | ⚠ **HISTORY** — S5 is finished. Kept for §1's accumulator derivations and §3's observable measurements, still the reference |
+| `docs/accumulator/IMPLEMENTATION_PLAN.md` §0 | the live handoff for everything not on the critical path |
+| `docs/accumulator/NODE_DENSITY_DERIVATION.md` | why the deposit weight is 1/opportunity, and what each stored channel buys |
+| `docs/accumulator/DESIGN.md` | the accumulator's design. ⚠ §8's purity claim for the two *splash* pools is **unverified** — see `TODO.md` |
+| `docs/SESSION_HANDOFF.md` | ⭐ **§3 traps then §2 equations** — the most-used reference in the project |
+| `docs/testing/BENCHMARK_SUITE.md` | the suite: how to build it, and **what it can and cannot judge** |
+| `docs/WIP_ARCHIVE.md` | older ledger entries |
 
 ### ⭐ The four numbers that describe the tool today
 
@@ -57,7 +67,7 @@ longer than the library. C3 is the correction for exactly that.
 ⚠ **The last row is the one to care about.** The first three are upstream plumbing; the fourth is the
 product, and it is what C3 exists to move.
 
-Reference rather than design: `BENCHMARKING.md` (how to evaluate — net fragment flow), `MANUAL.md`,
+Reference rather than design: `docs/testing/BENCHMARKING.md` (how to evaluate — net fragment flow), `MANUAL.md`,
 `PUBLISHING.md`, `docs/testing/testing_plan.md` (the owner's plan for the cached-substrate harness).
 
 ### What is settled, and must not be re-litigated
@@ -89,10 +99,10 @@ direction); a fitted mixture marginal was measured and **refuted** — it destro
 signal, because the discrimination is `(1−p)/p` and any *constant* for ∅ cancels out of it.
 
 ⚠ **Three things the baseline says**, before anything is built on it:
-1. ⛔ **A7's "11.0 % gDNA over-call" DID NOT SURVIVE MEASUREMENT.** The A/B is done (`LEDGER.md` S5.g-2):
+1. ⛔ **A7's "11.0 % gDNA over-call" DID NOT SURVIVE MEASUREMENT.** The A/B is done (`docs/WIP.md` S5.g-2):
    turning the contiguous-edge RNA taper on moves the library gDNA fraction by **≤ 0.0002**. The 11.0 %
    was a *bp-weighted* geometric mean; the estimator is *fragment*-weighted, and **89 % of edge mass sits
-   on lines the taper does not touch**. `CARRY_FORWARD.md` §1 fact 6 is corrected.
+   on lines the taper does not touch**. `docs/SESSION_HANDOFF.md` §1 fact 6 is corrected.
 2. ✅ **THE κ "MIRROR" WAS NOT A DEFECT — closed 2026-08-02, and it had been filed twice.** Two different
    quantities were both being called strand specificity: the simulator's is protocol **fidelity**
    (direction-agnostic), `rna_sense_frac` is the **directional** sense fraction. For an R1-antisense

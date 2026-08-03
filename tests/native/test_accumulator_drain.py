@@ -1,6 +1,6 @@
 """⭐ P3 — THE DRAIN: one tally path, conservation, and byte-identity with the specification.
 
-    Spec: ``docs/SPEC_SECOND_PASS.md`` §5 (the draw), §6 (the drain)   ·   Phase: its P3
+     (the draw), §6 (the drain) · Phase: its P3
     Specification: ``tests/native/_accumulator_reference.py`` — ``Accumulator.drain``
 
 The second pass replays each held fragment with **one** chosen hypothesis. §6.1 makes a strong claim about

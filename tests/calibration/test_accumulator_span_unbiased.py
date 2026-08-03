@@ -1,6 +1,6 @@
 """Behavioral guards for the accumulator span redesign.
 
-(``docs/CARRY_FORWARD.md``.) The accumulator
+(.) The accumulator
 deposits the MOLECULE's contiguous genomic span(s), not the sequenced read blocks:
   - unspliced  → one [min,max] span (mate gap filled) ⇒ the boundary-crossing
     density estimator agrees with the exact contained estimator (no over-count);
@@ -30,7 +30,7 @@ from rigel.pipeline import scan_and_buffer
 def _crossing_vs_contained_ratio(bam_path, index) -> float:
     """Return crossing-ρ / contained-ρ over count-observable objects (≈1.0 if unbiased).
 
-    ⭐ **Both are RATIOS OF SUMS**, pooled over their own axis (`CARRY_FORWARD.md` §2,
+    ⭐ **Both are RATIOS OF SUMS**, pooled over their own axis.
     ``ρ_bg = Σg/ΣE``). The predecessor took the MEAN of the per-boundary fluxes and divided by
     ``fl_mean``, which is a mean of ratios — a different number whenever the supports differ.
 

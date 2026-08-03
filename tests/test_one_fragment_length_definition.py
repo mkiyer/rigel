@@ -1,6 +1,6 @@
 """⭐ C2 — there is ONE definition of fragment length in this tree, and one place that measures it.
 
-``docs/FRAGMENT_LENGTH_AUDIT.md`` found **three** live definitions of "fragment length", two of them
+ found **three** live definitions of "fragment length", two of them
 summed into a single array called ``global_model`` and used as the empirical-Bayes anchor for pools
 measured by the third. This module is the standing gate that they do not come back.
 

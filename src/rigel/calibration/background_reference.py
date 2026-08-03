@@ -1,6 +1,6 @@
 """The aggregate DNA-background reference — a single genome-wide scalar ``(log ρ_bg, σ_bg)``.
 
-Derivation + validation: ``docs/CARRY_FORWARD.md`` (reviewer-confirmed). The DNA
+The DNA
 contamination level is NOT a per-region quantity: a region of effective length ``E`` resolves its DNA rate only
 above ``~1/E`` (Fisher information ``ρ·E`` = the expected count), so a faint background — the very case that
 matters under strong hybrid capture — is resolvable ONLY by pooling nodes into one aggregate support. This
@@ -57,7 +57,7 @@ class BackgroundReference:
     n_regions: int = (
         0  #: number of pooled NODES — the aggregate cell's EM weight (the population it stands for)
     )
-    #: log ρ_floor — the DERIVED background-floor location (docs/CARRY_FORWARD.md). The pooled rate
+    # log ρ_floor — the DERIVED background-floor location. The pooled rate
     #: ``ln(Σg/ΣE)`` Fisher-blended with the per-region RESOLUTION WALL ``ρ_res = 1/harmmean(E of zero-count
     #: nodes)``: ``ln ρ_floor = (Σg·ln(Σg/ΣE) + n0·ln ρ_res)/(Σg + n0)``. EXACT limits: n0=0 ⇒ ln(Σg/ΣE) (the
     #: resolvable case, byte-identical to the old seed); Σg=0 ⇒ ln ρ_res. Replaces the ``1/ΣE`` seed (3 logs too
@@ -116,7 +116,7 @@ def measure_background(
             eff_total=se,
             n_regions=nr,
         )
-    # THE DERIVED FLOOR (docs/CARRY_FORWARD.md). The old ``1/ΣE`` seed pools the background as ONE
+    # THE DERIVED FLOOR. The old ``1/ΣE`` seed pools the background as ONE
     # genome-sized region ⇒ claims a resolution n× finer than any single node delivers (~3 logs too low = the
     # confident-FP seed). The honest floor is the density a TYPICAL background region still reads as ~zero — the
     # per-region Poisson resolution wall ``ρ_res = mean(1/E_i)`` over the ZERO-count regions (= 1/harmmean(E)),

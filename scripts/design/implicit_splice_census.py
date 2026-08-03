@@ -1,6 +1,6 @@
 """How much library mass does the arbitration RESOLVE, and how much goes to the side buffer?
 
-    Rule: ``docs/SPEC_GAP_PATHS.md`` §0–§2   ·   Plan: ``docs/PLAN_TWO_PASS.md``   ·   Ledger: S1
+    Rule: –§2 · Ledger: S1
 
 ⭐ WHY THIS NUMBER IS NEEDED BEFORE THE SECOND PASS IS BUILT. A fragment arrives at the accumulator with
 its hypothesis SET — every explanation of what its unsequenced mate gaps contain, the empty set being the
@@ -11,7 +11,7 @@ side buffer stops being a tidy-up and becomes load-bearing, and the second pass 
 
 ⚠ **The held population is the LONG one** — a longer gap admits more hypotheses — so between S1 and S3 the
 tally is deliberately thinner and biased short. ⛔ Do not read any accuracy number off this state; the gate
-here is conservation, not accuracy (``PLAN_TWO_PASS.md`` §4).
+here is conservation, not accuracy.
 
     OMP_NUM_THREADS=1 python scripts/design/implicit_splice_census.py INDEX BAM [BAM ...]
 

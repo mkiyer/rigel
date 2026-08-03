@@ -20,7 +20,7 @@ boundary spliced channels, which pool unannotated and implicit splices; an impli
 sequenced motif, so its sense bit is arbitrary, and fitting a dispersion about κ ≈ 0.002 from seeds
 sitting at ½ produced a raw ``od_mom`` of 10.7–79.9 — impossible for an intra-class correlation — clipped
 to the ceiling on 4/4 real libraries. Two halves of one Beta-Binomial, two different populations.
-``docs/CARRY_FORWARD.md``.
+
 
 **Breaking the circularity** (gDNA only). Fitting the overdispersion needs to know which fragments are gDNA,
 which is what the deconvolution determines — circular. We break it with the count⊥strand
@@ -54,7 +54,7 @@ from the two asserted constants rather than asserted itself (:func:`_prior_infor
 ⚠ **Measured: this changes nothing on real data** (identical to 4 d.p.), because real libraries carry
 0.7 M–101 M information units against a prior worth ~909. It binds on the zero-seed fallback and on unit
 fixtures — which is exactly where it should. The saturation seen on real cfRNA is **bias from a
-contaminated seed channel**, not a shrinkage problem; see `docs/CARRY_FORWARD.md`.
+contaminated seed channel**, not a shrinkage problem.
 
 The MoM is closed-form, ``O(n_seed_nodes)``, and uses the **same variance decomposition the deconv
 applies** (:mod:`strand_likelihood`), so fit and application are consistent. The two constants live in this
@@ -105,7 +105,7 @@ _MAX_OVERDISPERSION: float = overdispersion_for_beta(_CEIL_ALPHA_BETA)
 #: fallback should be. It remains ASSERTED — the measurements bracket it, they do not derive it.
 #: **Shared by the gDNA and RNA fits, and that is required, not a convenience**: at κ = ½ with no data the
 #: two components must coincide, or ψ's ``−½·log var`` term hands an unstranded node a spurious gDNA/RNA
-#: preference (see :mod:`.strand_likelihood`). Full record: `docs/CARRY_FORWARD.md`.
+# preference (see:mod:`.strand_likelihood`). Full record:.
 _PRIOR_ALPHA_BETA: float = 14.0
 _PRIOR_OVERDISPERSION: float = overdispersion_for_beta(_PRIOR_ALPHA_BETA)
 
@@ -495,7 +495,7 @@ def fit_rna_strand_from_sj_table(
     raw pooled ``od_mom`` of **10.7–79.9** — impossible for an intra-class correlation, which is
     bounded by 1 — clipped to the 0.2 ceiling on 4/4 real libraries. That was a mean misfit being
     reported as dispersion, and it left ``od_r`` carrying no information about any real library.
-    ``docs/CARRY_FORWARD.md``.
+
 
     ⚠ The accumulator's spliced MASS channel is deliberately untouched: it legitimately wants
     implicit and novel RNA for the peel, the graft and the mature-RNA floor. This fix belongs in the

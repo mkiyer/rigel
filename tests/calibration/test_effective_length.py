@@ -1,6 +1,6 @@
 """Effective lengths: ONE placements formula, per component, per frame.
 
-    Derivation: ``docs/NODE_DENSITY_DERIVATION.md``   ·   Design: ``ACCUMULATOR_DESIGN.md`` §7
+
 
 An effective length is the expected number of admissible fragment START POSITIONS — the divisor that
 turns an observed count into a start density. There is one formula per frame and nothing else:
@@ -132,7 +132,7 @@ def test_crossing_is_SYMMETRIC_in_the_two_reaches():
 def test_a_ZERO_reach_gives_ZERO_opportunity_not_a_floor():
     """An object with no opportunity for a component must emit NOTHING, never a floored division.
 
-    ``CARRY_FORWARD.md`` §3 trap 23: a "no data" default of 100 % gDNA was actively seeding false gDNA
+    a "no data" default of 100 % gDNA was actively seeding false gDNA
     into neighbouring exons. Zero is the correct answer here and must survive as zero.
     """
     pmf = _normal_pmf(200.0, 50.0)
@@ -141,7 +141,7 @@ def test_a_ZERO_reach_gives_ZERO_opportunity_not_a_floor():
 
 
 def test_crossing_reproduces_the_MEASURED_taper_table():
-    """⭐ An independent cross-check: ``CARRY_FORWARD.md`` §2's published table, RNA N(200,50).
+    """⭐ An independent cross-check: 's published table, RNA N(200,50).
 
     ⚠ That table mixes two conventions and this test pins both. The first four entries are SYMMETRIC
     (both reaches = R); the last, captioned "at a first exon", is ONE-SIDED — a first exon is short on
@@ -192,7 +192,7 @@ def test_the_THREE_OLD_DIVISORS_ARE_GONE():
     ``boundary_side_eff_length`` (``E[min(l,R)]/2``), ``spliced_side_eff_length`` (``E[min^2/2l]``) and
     ``boundary_side_crossing_count_eff_length`` all divided a per-FACE quantity, and a contiguous edge no
     longer has faces — it is a 0-bp line with one set of numbers. Keeping them would leave two answers
-    for one question, which is how an exact factor of 2 survived 29 tests (``CARRY_FORWARD.md`` §3
+    for one question, which is how an exact factor of 2 survived 29 tests.
     trap 2).
     """
     for dead in (

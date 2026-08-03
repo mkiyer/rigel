@@ -5,9 +5,9 @@ antisense-RNA / gDNA — over the unified region↔boundary chain (`node_chain`)
 (L→R then R→L) belief-propagation pass (exact on the chain, a forest of linear paths). Each per-node solve
 (`simplex_logodds`, the log-density log-odds solver) reconciles three sources of information: the intrinsic
 strand likelihood (the Beta-Binomial tilt — the only signal a count carries), the cross-node imputation
-messages, and the population gDNA prior. Theory: the count-zero-information principle in
-`docs/CARRY_FORWARD.md`; the composition (enrichment-ratio) message model in
-`docs/CARRY_FORWARD.md`.
+messages, and the population gDNA prior. Its two theoretical legs are the count-zero-information
+principle and the composition (enrichment-ratio) message model.
+
 
 **The UNIFIED (composition) solver — one message mode.** Each message is REFRAMED into the destination's
 frame by the enrichment ratio ``r = ρ_tot(dst)/ρ_tot(src)`` (`node_total_density`, lazy + composition-aware,
@@ -16,8 +16,7 @@ exon / peel out of an exon, via the boundary's measured spliced), then each comp
 destination's ``f_c`` by the density mode ÷ its own observed mass ``M_dst`` (the pure arithmetic in
 `enrichment_frame`). The forward-backward relay carries per-component densities + precisions; the combine
 transports both neighbours into the node's frame and runs the ψ solve. The message VARIANCE model is
-COMPLETE — laws M1–M11 derived, MC-validated (`scripts/debug/message_variance_mc.py`) and A/B-won; see
-`docs/CARRY_FORWARD.md`, audited in `docs/CARRY_FORWARD.md`. The
+COMPLETE — laws M1–M11 derived, MC-validated (`scripts/debug/message_variance_mc.py`) and A/B-won. The
 density-uniformity NPMLE proxy it replaced is retired.
 
 Module layout. The per-node geometry / belief / statics / init primitives and the pure geometry helpers
@@ -136,7 +135,7 @@ def node_sweep(
     The chain is a forest of linear paths, so BP is exact in one forward + one backward pass (vs Gauss-Seidel /
     Jacobi which propagate one hop per pass). A message's precision is the source's own HONEST belief precision
     degraded by the two independent defects a cross-node imputation suffers
-    (`docs/CARRY_FORWARD.md`)::
+
 
         p = 1 / ( Var(log f_c^src) + 1/n_src  +  σ²_transfer  +  b̂² )
                  \\__ strand ___/   \\_count_/    \\_ SCALE _/    \\_ COMPOSITION _/
@@ -264,7 +263,7 @@ def node_sweep(
     solvable = (fp | fn) & (n_slot > 0.0)
 
     # THE gDNA ARM of ψ — the COMPOSITION prior. The NPMLE's two roles are kept SEPARATE
-    # (docs/CARRY_FORWARD.md §5): this ``gdna_prior`` is the COMPOSITION arm ONLY.
+    # this ``gdna_prior`` is the COMPOSITION arm ONLY.
     #   * ``gdna_prior=None`` — the INITIAL prior-free solve: the arm is the derived inert reference (½·log f_c
     #     on both arms, added by simplex_logodds). A total-density NPMLE is an ENRICHMENT model, NOT a DNA
     #     composition prior — letting it vote a node's f_g is the count-votes-composition regression (§0).
@@ -292,7 +291,7 @@ def node_sweep(
     is_exon_node = ((np.asarray(chain.kind) == NODE) & (_rtype[_ri] == 2)).tolist()
 
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────
-    # THE UNIFIED SOLVER (unified_solver_design.md; owner 2026-07-23) — ONE mode: reframe → filter → route → ÷M.
+    # THE UNIFIED SOLVER (owner 2026-07-23) — ONE mode: reframe → filter → route → ÷M.
     # ─────────────────────────────────────────────────────────────────────────────────────────────────────
     _uni_msg = (
         None,
@@ -339,8 +338,8 @@ def node_sweep(
         E_g = np.asarray(eff_global, np.float64)
         E_r = ER  # per-slot RNA-FL eff-length — one number, no faces to sum
 
-        # ── M5 σ²_transfer = Var(log r): the per-node total-density log-variance (`message_variance_derivation.md`
-        # §3; `enrichment_frame.composition_logvar`). Var(log ρ_tot) = 1/n + [(1/E_g−1/E_r)/B]²·Var(f_g), with
+        # ── M5 σ²_transfer = Var(log r): the per-node total-density log-variance
+        # (`enrichment_frame.composition_logvar`). Var(log ρ_tot) = 1/n + [(1/E_g−1/E_r)/B]²·Var(f_g), with
         # Var(f_g) = (f_g(1−f_g))²/τ_λ CAPPED at f_g(1−f_g) (a fraction's max variance) and 0 for a
         # composition-certain (struct_lock) node. Evaluated at the INPUT belief f_g (consistent with the reframe
         # density rho0). This is the HONEST, prior-free transfer variance that RETIRES the
@@ -441,7 +440,7 @@ def node_sweep(
         og, op, on = _ni.rho_g, _ni.rho_pos, _ni.rho_neg
         pg_own, pp_own, pn_own = _ni.prec_g, _ni.prec_pos, _ni.prec_neg
 
-        # ── THREE-STREAM precision seeds (the single-λ combine, message_variance_derivation.md §4 / HANDOFF_4
+        # ── THREE-STREAM precision seeds (the single-λ combine)
         # §6). The density precision (pg/pp/pn, unchanged) drives the MODE fusion. TWO extra accumulators
         # SEPARATE the RANK-1 composition (→ ONE λ-message) from the INDEPENDENT measurements (→ their own
         # gdna/rna messages), so ψ counts each ONCE — the fix for the two-message double-count:
@@ -497,7 +496,7 @@ def node_sweep(
             message never claimed and a **zero-gDNA library read back 29.3 % gDNA**; on stranded data, where
             the strand likelihood resolves `f_g_own` to 0.013, the reservation was 1.2 % and the
             false-positive rate 1.4 %. The reservation WAS the false-positive rate. Full derivation:
-            `docs/CARRY_FORWARD.md`.
+
 
             Feeding the DL mismatch test is what it is legitimately for. That test is M7's two-study
             random-effects comparison **against the destination's own self-solve**, so destination
@@ -514,7 +513,7 @@ def node_sweep(
             by how badly each component is known, of which this common factor is the `w → 0` limit) was
             derived, implemented and A/B'd, and is NOT used: once λ is fused by its own precision (the
             message packet) it is completely INERT — 0 better / 0 worse / 32 flat — and the per-message
-            variant is a net loss. Recorded in `weighted_rescale_design.md` §9 and `PASS0_FINISH_PLAN.md`."""
+            variant is a net loss."""
             sg = np.where(pg_ > 0.0, g, og)
             sp = np.where(pp_ > 0.0, p, op)
             sn = np.where(pn_ > 0.0, n, on)
@@ -666,7 +665,7 @@ def node_sweep(
         # so the reframe itself still reuses it (measured median |Δlog ρ_face| between iterations 0.0116
         # stranded-capOFF to 0.1242 unstranded-capON, >1 % on 52.7–79.0 % of nodes). Deleting `_far` does
         # NOT make the message BP-legal; it removes the largest and most direct of two violations. The
-        # remaining one is recorded in `PASS0_FINISH_PLAN.md` as P4b.
+        # remaining one is recorded in as P4b.
         #
         # The legal way to recover what `_far` supplied, if it is ever wanted back: carry the peel share as
         # a FUNCTION of the destination's state (a proper pairwise potential ψ(x_L, x_k)) instead of a
@@ -1049,7 +1048,7 @@ def node_sweep(
             graft = ex_a & is_bnd_a[src] & valid
             gp = np.where(graft, spl_p[src], 0.0)
             gn = np.where(graft, spl_n[src], 0.0)
-            # ⛔ THE SHARE TRANSFER (`pin_derivation.md` (★)) WAS IMPLEMENTED HERE AND REVERTED, 2026-07-27.
+            # ⛔ THE SHARE TRANSFER WAS IMPLEMENTED HERE AND REVERTED, 2026-07-27.
             # It delivers the source's own composition share carried onto the destination's scale —
             # `f̂_c = ctx_c·E_c[src]/S_src`, then `t_c = f̂_c·M/E_c` — which is BP-clean, keeps a partial
             # claim partial with the deficit measured AT THE SOURCE, and needs no reframe at all.
@@ -1183,7 +1182,7 @@ def node_sweep(
             # destinations.** The magnitude is also not what works: a flat pooled constant beats the derived
             # ``b̂²`` on 3 of 4 conditions and ``b̂² := δ²`` is identical, while permuting ``b̂²`` FAILS — so
             # ``δ`` selects WHICH message to distrust and the calibration adds nothing (ω_graft's shape again).
-            # **When the bias strata are diagnosed, this term must SHRINK.** See `variance_ledger.md` §6.
+            # **When the bias strata are diagnosed, this term must SHRINK.**
 
             # ── ⭐ THE SCOPE: only the OVER-claim direction is evidence against the MESSAGE ─────────────
             # `S` is a COMPLETE budget: `_pin_v`'s partial-claim semantics fill every component the
@@ -1205,7 +1204,7 @@ def node_sweep(
             # variance inflation, which MC shows over-damps λ 5× when the true error is a pure scale
             # error (λ z² 1.00 → 0.21) while still leaving the RNA arm over-confident (z² 2.88).
             # A scalar cannot identify a direction: one observation, one parameter. The rank-1 variant was
-            # implemented, MC-refuted and DELETED — see `variance_ledger.md` §6; do not rebuild it.
+            # implemented, MC-refuted and DELETED; do not rebuild it.
             _dg = _dp = _dn = np.where(_sup.any(axis=-1), _b2, 0.0)
             tpg, tmg = tpg / (1.0 + tpg * _dg), tmg / (1.0 + tmg * _dg)
             tpp, tmp = tpp / (1.0 + tpp * _dp), tmp / (1.0 + tmp * _dp)
@@ -1213,7 +1212,7 @@ def node_sweep(
             # The mass frame — for the mismatch COMPARISON only. The delivered densities `tg/tp/tn` are left
             # exactly as the source measured and the reframe delivered them: a component's LEVEL is an
             # absolute rate, and re-normalising it against a budget built from the destination's own belief
-            # is what made the message self-confirming (`_pin_v`, and `pin_derivation.md`). Note the message
+            # is what made the message self-confirming (`_pin_v`). Note the message
             # packet's other two claims are unaffected either way — `tlam` and `tth` are scale-free, so the
             # pin's common factor cancels from them identically.
             pin_g, pin_p, pin_n = _pin_v(tg, tp, tn, tpg, tpp, tpn)
@@ -1320,7 +1319,7 @@ def node_sweep(
         mo_g = np.log(np.maximum(cg * E_g / np.maximum(M, _EPS), _EPS))
         mo_p = np.log(np.maximum(cp * E_r / np.maximum(M, _EPS), _EPS))
         mo_n = np.log(np.maximum(cn * E_r / np.maximum(M, _EPS), _EPS))
-        # ── THE THREE-STREAM SINGLE-λ COMBINE (the M6 rank-1 fix, message_variance_derivation.md §4) ──
+        # ── THE THREE-STREAM SINGLE-λ COMBINE (the M6 rank-1 fix) ──
         # (1) COMPOSITION → ONE λ-message on λ = log(f_g/f_R), precision ``c_tau`` (the fused Schur τ) — ψ
         #     counts the composition DOF ONCE, not twice. **Each claim is fused by ITS OWN precision**: the
         #     λ mode is the τ-weighted mean of the two messages' λ, not a ratio read back off the density
@@ -1461,7 +1460,7 @@ def node_sweep(
     vg_, vp_, vn_ = dc_fin.gdna_frac_var, dc_fin.rna_pos_frac_var, dc_fin.rna_neg_frac_var
     # write back only SOLVABLE nodes (G1 sinks / empty keep their signature-binary init). The §6B DOF SOLVE-GATE
     # (skip unidentified nodes → keep the f_g=1 init, defer to the prior) was DERIVED, IMPLEMENTED, and
-    # EMPIRICALLY REFUTED (docs/CARRY_FORWARD.md): it regresses both standalone (refit=0 +0.010) and with the
+    # EMPIRICALLY REFUTED: it regresses both standalone (refit=0 +0.010) and with the
     # hyperprior (refit=1 +0.025) — the prior resolves an imperfectly-SOLVED node better than a deferred f_g=1.
     f_g = np.where(solvable, np.clip(mg_, 0.0, 1.0), f_g)
     f_pos = np.where(solvable, np.clip(mp_, 0.0, 1.0), f_pos)
@@ -1587,7 +1586,7 @@ def chain_edge_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> NodeDe
     ⭐ **ONE per-edge result, not a ``(left, right)`` pair of per-region ones.** The predecessor split
     each edge's flux onto its two flanking regions and ``priors`` then pooled the two halves straight
     back together — so the split and the re-pool were a no-op, and that exact sum-then-halve pattern is
-    what hid a factor of 2 for months (`CARRY_FORWARD.md` §3 trap 2). Owner ruling, 2026-07-30:
+    what hid a factor of 2 for months. Owner ruling, 2026-07-30:
     ``CalibrationResult``'s per-region ``mass_*_left/right`` become per-edge arrays.
 
     The RNA mass is spliced-inclusive: an edge's certified-RNA crossings (``edge_spliced``) are RNA

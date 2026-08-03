@@ -8,7 +8,7 @@ and are folded in here. Where a number in draft 1 was wrong it is corrected in p
 is noted, because a design document that quietly changes its numbers is how this project accumulated
 seven contradictions in the first place.
 
-**Notation.** ⭐ = measured this session, script named. Companion: `CARRY_FORWARD.md` (measured facts,
+**Notation.** ⭐ = measured this session, script named. Companion: `docs/SESSION_HANDOFF.md` (measured facts,
 equations, traps).
 
 > ⚠ **How to read the measured numbers.** They come from four cached cfRNA samples, three of them
@@ -357,7 +357,7 @@ header       format_version · strandedness · max_fragment_length · graph_prov
 The trailing `2` is the §5.1 channel axis — genome strand — in every array without exception. `count` is
 `uint32`, `density` is `uint64` fixed point (§10.1); the two are never given one column name, because
 their divisors differ (`L` at a node, `L − 1` at a line). The authoritative field list is
-`IMPLEMENTATION_PLAN.md` §3.5.
+`docs/accumulator/IMPLEMENTATION_PLAN.md` §3.5.
 
 **Provenance is not optional.** ⚠ The current cache key covers `nodes.feather` only; on 2026-07-29 an
 edge fix rewrote every `edges.feather` while leaving every `nodes.feather` byte-identical, so a stale
@@ -571,7 +571,7 @@ but the benchmark suite must contain a **step**, or none of this is exercised.
 
 ## 8. Fragment-length models
 
-**Five pools, each structurally pure** (settled; `IMPLEMENTATION_PLAN.md` §3.4 has the enum). Purity is
+**Five pools, each structurally pure** (settled; `docs/accumulator/IMPLEMENTATION_PLAN.md` §3.4 has the enum). Purity is
 the whole point — it is what stops a length model from being fitted to the fragments it will later explain.
 
 | pool | population | ⭐ measured mean `L`, LBX0190 |
@@ -710,7 +710,7 @@ questions — *which intron did this molecule splice?*, which is what the test i
 nascent?*, which is a **component** and one the accumulator deliberately does not decide. ⚠ The filter is
 `~is_synthetic` and never `is_nrna`: on a non-synthetic row that flag means "single-exon, so mature ≡
 nascent", and using it as a realness filter has already deleted the termini of 26,475 real transcripts once
-(`CARRY_FORWARD.md` §3 trap 3).
+(`docs/SESSION_HANDOFF.md` §3 trap 3).
 
 ⭐ **The set test is the WHOLE test — it already implies the candidates agree on strand**, so there is no
 second condition and no code for one. If every candidate implies the same intron at every gap, then every

@@ -39,7 +39,7 @@ def census_field(stype: SpliceType) -> str:
     generated and is passed through nothing to get there. It used to be read off the fragment-length
     category models, which counted only the fragments that contributed a LENGTH observation; that
     histogram is deleted by C2 and the population was never stated. See
-    ``docs/FRAGMENT_LENGTH_AUDIT.md`` §4.
+
 
     ⚠ **There is no name table, deliberately.** The C++ keys these counters off
     ``splice_type_label`` (``bam_scanner.cpp``), whose strings are exactly these member names

@@ -3,11 +3,11 @@ rather than against solver behaviour.
 
 Every function in :mod:`rigel.calibration.enrichment_frame` is a pure identity, so each test here is a
 closed-form check that cannot drift with the solver — the same contract as ``test_message_frames.py``. The two
-load-bearing identities the whole framework rests on (``docs/CARRY_FORWARD.md``):
+load-bearing identities the whole framework rests on:
 
 * the composed total-density identity ``ρ_tot = M·(k+1)/(k·E_g + E_r)`` (§1 + §4), which makes
   ``total_density ∘ f_g_from_k ∘ (mass identity)`` mutually exact;
-* the r₂ ``(k+1)`` cancellation (§5b, ``docs/CARRY_FORWARD.md``), verified there to 5.8e−16 over
+* the r₂ ``(k+1)`` cancellation, verified there to 5.8e−16 over
   20 000 draws — reproduced here as an exact algebraic equality.
 """
 
@@ -88,7 +88,7 @@ def test_composition_logvar_self_excludes_short_regions_without_a_threshold():
 
 
 # ---------------------------------------------------------------------------
-# The UNIFIED SOLVER theorem (unified_solver_design.md §2): reframe + density-mode ÷ M_dst subsumes the shift,
+# The UNIFIED SOLVER theorem: reframe + density-mode ÷ M_dst subsumes the shift,
 # is enrichment-invariant, and handles a PARTIAL (set-mismatched) source correctly where the shift cannot.
 # ---------------------------------------------------------------------------
 
@@ -101,7 +101,7 @@ def _shift_logfrac(rho_c_src, E_c_src_frame, imputed_masses):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
-# The pass-0 message-VARIANCE laws (message_variance_derivation.md M1-M5) — closed-form + MC cross-check.
+# The pass-0 message-VARIANCE laws — closed-form + MC cross-check.
 # The MC ground-truth harness is scratchpad/message_variance_mc.py (independently re-derived + adversarially
 # verified, workflow wf_c952640d, <1% in-regime); these pin the arithmetic and one MC per non-trivial law.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════════════════

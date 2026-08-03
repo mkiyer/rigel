@@ -1,9 +1,9 @@
 """Scan a suite ONCE and cache what calibration needs, so calibration can be iterated on without rescanning.
 
-    TODO item 2 (the cached substrate)   ·   `docs/testing/testing_plan.md`   ·   Library: `rigel.scan_cache`
+    TODO item 2 (the cached substrate) · Library: `rigel.scan_cache`
 
 ⭐ **THE POINT.** Calibration is the phase under development and it is the expensive one — index load
-~8 s, BAM scan ~2 s, **calibration ~66 s** on a real cfRNA library (`CARRY_FORWARD.md` §1 fact 22) — while
+~8 s, BAM scan ~2 s, **calibration ~66 s** on a real cfRNA library — while
 a 5 M-fragment simulated condition costs far more than that to scan. Caching the scan took a 24-condition
 sweep from ~13 min to ~9 s on the old path. One cache per condition, each independently keyed and valid,
 so a partial suite is usable and one condition can be rebuilt without touching the others.

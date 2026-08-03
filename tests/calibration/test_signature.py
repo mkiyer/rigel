@@ -94,7 +94,7 @@ def test_strand_convention_unified():
 
 
 # ---------------------------------------------------------------------------
-# nRNA/mRNA-active classifier (docs/CARRY_FORWARD.md §3)
+# nRNA/mRNA-active classifier
 # ---------------------------------------------------------------------------
 
 
@@ -147,7 +147,7 @@ def test_mrna_implies_nrna_all_signatures():
 
 
 def test_boundary_taxonomy_from_flank_helpers():
-    """The four boundary types (docs/CARRY_FORWARD.md §3) as the AND of the two flanks' helper masks.
+    """The four boundary types as the AND of the two flanks' helper masks.
     A strand crosses (nascent) iff both flanks are nrna-active; it is mature-capable iff both are
     mrna-active."""
     # (left_sig, right_sig) per type, tested on the + strand unless noted.

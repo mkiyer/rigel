@@ -2,7 +2,7 @@
 
     Gate:  ``tests/native/test_accumulator_native_parity.py`` (the same comparison, on fixtures)
     Spec:  ``tests/native/_accumulator_reference.py``
-    Plan:  ``docs/IMPLEMENTATION_PLAN.md`` §0 step 6
+     step 6
 
 ⚠ WHY THIS EXISTS SEPARATELY FROM THE UNIT GATE. The unit gate drives a seven-cut partition. It cannot see
 a defect that only appears at **1,043,881 nodes and 404,168 junctions**: a per-reference offset that drifts,

@@ -2,7 +2,7 @@
 
     Verification: `scripts/design/node_density_derivation.py`   (T0–T6, each perturbed)
     Information:  `scripts/design/observable_efficiency.py`     (756 FL pairs x 3 shapes x 4 phi)
-    Consequences: `docs/S5_DESIGN_LOG.md` §1
+    Consequences: `docs/calibration/S5_DESIGN_LOG.md` §1
 
 ⭐ **Re-run the scripts. Do not quote this file.**
 
@@ -27,7 +27,7 @@ The owner's, and each turns out to be exactly right:
 ## 2. The problem
 
 The accumulator deposits `round(2³²/L)` at a node and `round(2³²/(L−1))` at a line
-(`ACCUMULATOR_DESIGN.md` §10.1). The design already concedes that the node case is not model-free
+(`docs/accumulator/DESIGN.md` §10.1). The design already concedes that the node case is not model-free
 (§6: *"at a node the `1/w` does not cancel `(ℓ−w+1)₊`; it is a better-conditioned second moment and
 nothing more"*), and treats that as a fact of life.
 
@@ -163,7 +163,7 @@ by itself:
 Measured, as `Σ1/A` alone over both node populations: efficiency **0.113 median at a 151 bp node, 0.000 at
 1000 bp** — it recovers the level and almost nothing else. Exactly as the theorem requires.
 
-⚠ **This is the same structural fact as the edge blind spot in `S5_DESIGN_LOG.md` §1 A1**, seen from the
+⚠ **This is the same structural fact as the edge blind spot in `docs/calibration/S5_DESIGN_LOG.md` §1 A1**, seen from the
 other side. There the pair `(count, Σ1/(L−1))` has determinant `μ_g − μ_r` and dies at equal means; here
 the flat channel has determinant 0 outright. **Discrimination requires a deliberately length-TILTED
 channel.** The level and the split are two jobs and no single number does both.
@@ -218,16 +218,16 @@ is as efficient as the raw count *and* exactly unbiased:
 
 * **The edge is untouched.** `1/(L−1)` is already the reciprocal opportunity, and observation 1 stands:
   there is no reason to accumulate `Σ L` at an edge *for the level*. (`Σ L` at an edge is still on the
-  table for the **split** — that is `S5_DESIGN_LOG.md` §1 A1's equal-means blind spot, a different
+  table for the **split** — that is `docs/calibration/S5_DESIGN_LOG.md` §1 A1's equal-means blind spot, a different
   question.)
 * **`weight = L` at a node is simply the wrong argument.** It is neither the opportunity nor a
-  deliberately chosen tilt. `ACCUMULATOR_DESIGN.md` §10.1's *"weight is `L` at a node and `L−1` at an
+  deliberately chosen tilt. `docs/accumulator/DESIGN.md` §10.1's *"weight is `L` at a node and `L−1` at an
   edge"* should read *"weight is the population's own opportunity"*, which then covers both.
-* **`ACCUMULATOR_DESIGN.md` §6's `density = E[placements/weight]` becomes identically 1** at every object
+* **`docs/accumulator/DESIGN.md` §6's `density = E[placements/weight]` becomes identically 1** at every object
   when `weight = placements`. The design wrote the general form and then instantiated it inconsistently.
 
 **The open ruling.** Storing `Σ1/A` buys an exactly model-free density at every object — which removes
-the fitted FL model from the level path entirely, makes `CARRY_FORWARD.md` §2's *"density is the
+the fitted FL model from the level path entirely, makes `docs/SESSION_HANDOFF.md` §2's *"density is the
 frame-invariant currency"* true at nodes as well as edges, and reduces `effective_length.py` (old R4) to
 the count channel alone. It does **not** buy composition information. The composition needs a tilted
 channel, and the measurement says the tilt worth adding is `Σ L`.
@@ -238,7 +238,7 @@ channel, and the measurement says the tilt worth adding is `Σ L`.
 
 | channel | what it buys | can it be dropped? |
 |---|---|---|
-| `count` | the statistical power. A Beta-Binomial needs an integer, and `Var(log ρ_c) = 1/(f_c·n)` (`CARRY_FORWARD.md` §2) | **no** |
+| `count` | the statistical power. A Beta-Binomial needs an integer, and `Var(log ρ_c) = 1/(f_c·n)` (`docs/SESSION_HANDOFF.md` §2) | **no** |
 | one tilted channel (`Σ1/L` *or* `ΣL`) | the gDNA/RNA split at all. `count` alone scores 0.596 median / 0.000 min | **no** |
 | a *second* tilted channel | the **equal-means blind spot** — the one hard failure. Min at 151 bp `0.078 → 0.188`; at an edge `0.000 → 0.078` | only if that failure is accepted |
 | `Σ1/A` | the **model-free level**. Median 151 bp `0.953 → 0.960` — statistically almost nothing | **yes**, on information grounds |
@@ -281,12 +281,12 @@ Flagged in an earlier draft of this file as needing re-pricing before R-c could 
 event, and even assuming every one of 10⁸ fragments did it the accumulator is at 2 % of capacity.
 ⛔ **A second, smaller scale for the `1/A` channel is therefore unnecessary**, and would be actively
 harmful: two scales in one schema is precisely the "do not give two quantities one column name" failure
-`ACCUMULATOR_DESIGN.md` §10.1 warns about.
+`docs/accumulator/DESIGN.md` §10.1 warns about.
 
 ### 7.4 ⚠ Why integers at all — the stated reason is against a strawman
 
-`ACCUMULATOR_DESIGN.md` §10.1 justifies uint64 fixed point by comparing it to **float32** (36.6 MB
-against 73.3 MB at human scale) and `CARRY_FORWARD.md` §1 fact 11's measured nondeterminism — 17/28 and
+`docs/accumulator/DESIGN.md` §10.1 justifies uint64 fixed point by comparing it to **float32** (36.6 MB
+against 73.3 MB at human scale) and `docs/SESSION_HANDOFF.md` §1 fact 11's measured nondeterminism — 17/28 and
 20/28 cells differing, max relative **3.7e-7** — is a **float32** number.
 
 ⛔ **float64 is the same 8 bytes as uint64, and was never compared.** By the same mechanism its
@@ -297,7 +297,7 @@ support the conclusion.**
 The argument that does survive is a testing one, and it should be stated as such: **byte-identity is the
 S3 gate.** The C++ is accepted only if it reproduces `tests/native/_accumulator_reference.py` exactly.
 With floats that gate becomes "agrees within a tolerance", every downstream check inherits a tolerance,
-and this project's most expensive bug (`CARRY_FORWARD.md` §3 trap 2 — an exact factor of 2 hidden for
+and this project's most expensive bug (`docs/SESSION_HANDOFF.md` §3 trap 2 — an exact factor of 2 hidden for
 months behind a `min()` clip and cancelling fixtures) is exactly the class a tolerance conceals. Integer
 accumulation makes a single differing bit a real defect rather than noise.
 
@@ -330,7 +330,7 @@ exploring, since that is what would fix its short-node weakness.
 1. **Fixed-point headroom for `1/A`.** `A` can be **1** (a fragment exactly filling a node), so the
    quantum is `2³²` — the largest value the scheme can emit. At 10⁸ such fragments the sum is 4.3e17,
    inside uint64's 1.8e19 but with far less headroom than the `L ∈ [20,2000]` case
-   `CARRY_FORWARD.md` §1 fact 23 priced. **Must be re-priced before R-c is ruled.**
+   `docs/SESSION_HANDOFF.md` §1 fact 23 priced. **Must be re-priced before R-c is ruled.**
 2. **Junction edges are not in the grid yet** as their own frame with their own reach geometry.
 3. **The `ℓ+1` hole** is quantified (~0.4–0.8 %) but not decided: correct it from the fitted pmf, or
    document it as a known deficit.

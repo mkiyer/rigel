@@ -2,7 +2,7 @@
 
     Status: ⭐⭐ **DERIVATION COMPLETE AND NOW THE CRITICAL PATH (`TODO.md` rank 0), 2026-08-03.**
       ⛔ STILL NO CODE WRITTEN.
-      ⭐ **Why it is rank 0:** `LEDGER.md` B4 measured the deliverable and it got WORSE — the library gDNA
+      ⭐ **Why it is rank 0:** `docs/WIP.md` B4 measured the deliverable and it got WORSE — the library gDNA
       fraction's mean |error| rose 23.9 % when the side buffer drains. `calibrate` fits from the two pure
       POOLS, and the second pass made the *anchor* exact while pushing `RNA_SPLICED` from +2.4 % to +6.2 %
       against truth, because the drain feeds long junction-using fragments into a pool selected on "used an
@@ -11,17 +11,17 @@
       library (mean 225.4 against 217.1) and spans its full range, while `gapless` is hard-censored at
       2x the read length and `gap` is censored below it. That +3.8 % IS junction opportunity, measured
       directly for the first time; after the drain the pool reads +6.2 … +8.1 %.
-    ⭐ ENTRY POINT IS NOW `docs/PLAN_TWO_PASS.md`. This work is step S4 there, and it rides on the
+    ⭐ ENTRY POINT IS NOW `docs/accumulator/PLAN_TWO_PASS.md`. This work is step S4 there, and it rides on the
       SAME two-pass structure as the gap-path work — §0 of that file is why.
     ⚠ §3's numbers PREDATE the side buffer and must be re-measured after the drain — PLAN_TWO_PASS §2.4.
-    ⭐ §8 D1 IS ANSWERED: the uncut intron jumped the queue and LANDED as C2.6 (`LEDGER.md`).
+    ⭐ §8 D1 IS ANSWERED: the uncut intron jumped the queue and LANDED as C2.6 (`docs/WIP.md`).
     ⛔ **§3's MEASUREMENTS ARE NOW STALE AND MUST BE RE-RUN.** Every number in §3 was taken against the
       contaminated anchor (sd +27.0 %, now +1.98 %) and against an `RNA_SPLICED` pool that has since
       moved from +8.00 % / +67.35 % to −9.58 % / −22.46 % against truth. ⚠ In particular §3.2's θ
       control — "corrected, TRUE θ → +0.3 % mean / +59.8 % sd" — is scored on both of those, so
       **C3's real target is not knowable from this file any more.** §4's diagnosis stands; §1's
       derivation and its 48,648-configuration proof are untouched.
-    Asked for: `ACCUMULATOR_DESIGN.md` §8.1(b) gives the opportunity for two of the three pools and
+    Asked for: `docs/accumulator/DESIGN.md` §8.1(b) gives the opportunity for two of the three pools and
     leaves the junction pool as "the transcript-level count" — and §"what the accumulator will not
     decide" defers it as *"a fragment-length-model question, downstream of the tally."* So C3's
     central correction had no formula. This supplies it.
@@ -67,7 +67,7 @@ further **6.1 % as longer than 1000 bp**. Truncating at 600 bp removes **95.5 %*
 
 ### 1.1 What "opportunity" means here
 
-`NODE_DENSITY_DERIVATION.md` §4.1: a population's opportunity `A(w)` is **the number of integer start
+`docs/accumulator/NODE_DENSITY_DERIVATION.md` §4.1: a population's opportunity `A(w)` is **the number of integer start
 positions producing that event**, and because starts are Poisson,
 
 ```
@@ -99,7 +99,7 @@ complement is a partition, so it is exact in one line.
 ### 1.3 It is proven, not asserted
 
 `scratchpad/junction_opportunity_proof.py`. The oracle **enumerates every start position** and tests
-`s < c < s+w` per junction — it shares no code with the formula (`CARRY_FORWARD.md` §3 trap 1).
+`s < c < s+w` per junction — it shares no code with the formula (`docs/SESSION_HANDOFF.md` §3 trap 1).
 
 | coverage | |
 |---|---|
@@ -138,7 +138,7 @@ short exons saturates early (steep tilt), one of few long exons saturates late (
 | crossing | same | ✅ annotation only |
 | **junction (RNA)** | **transcript abundance** | ⛔ **the estimand** |
 
-`ACCUMULATOR_DESIGN.md`'s deferral — *"a fragment-length-model question, downstream of the tally"* — is
+`docs/accumulator/DESIGN.md`'s deferral — *"a fragment-length-model question, downstream of the tally"* — is
 therefore correct and not an oversight. The tally cannot know θ.
 
 ---
@@ -300,7 +300,7 @@ ledger's C1 entry should not be read as evidence that `L`'s support is correct.
 
 ## §5 WHAT THIS MEANS FOR C3
 
-C3 as scoped in `FRAGMENT_LENGTH_AUDIT.md` §4 targets *"the residual +7.7 % / +32 %"*. Measured, that
+C3 as scoped in `docs/accumulator/FRAGMENT_LENGTH_AUDIT.md` §4 targets *"the residual +7.7 % / +32 %"*. Measured, that
 residual is **two unrelated defects**:
 
 | | | fixed by |
@@ -324,7 +324,7 @@ where nothing is longer than 713 bp.
 agree within sampling error, and the support ceilings match."*
 
 ⛔ **As written it cannot pass after C3, and it has no threshold.** "Within sampling error" is
-undefined, and inventing a tolerance would be `CARRY_FORWARD.md` §3 trap 12 — a tuned constant hiding
+undefined, and inventing a tolerance would be `docs/SESSION_HANDOFF.md` §3 trap 12 — a tuned constant hiding
 an upstream defect. It splits:
 
 | | gate | target |
@@ -352,7 +352,7 @@ Given §3.1, C3 needs a θ good enough that the induced mean error is well under
 *bounded by something measurable* rather than by a hope about the annotation.
 
 ⚠ **(b) must not be adopted on the strength of the +0.8 %.** One condition, one simulator, no
-mechanism — that is the shape of a coincidence, and `CARRY_FORWARD.md` §3 trap 19's lesson applies.
+mechanism — that is the shape of a coincidence, and `docs/SESSION_HANDOFF.md` §3 trap 19's lesson applies.
 
 ---
 

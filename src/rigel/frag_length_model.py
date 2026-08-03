@@ -605,7 +605,7 @@ class FragmentLengthModel:
         }
 
 
-# ⛔ `FragmentLengthModels` (PLURAL) lived here and was DELETED by C2 — docs/FRAGMENT_LENGTH_AUDIT.md.
+# ⛔ `FragmentLengthModels` (PLURAL) lived here and was DELETED by C2.
 # It held the scanner's own global + per-SpliceType raw histograms,
 # trained during the BAM scan from two different measurements of "fragment length" — a genomic
 # footprint for one subset of fragments and a transcript-space length for a disjoint one — summed

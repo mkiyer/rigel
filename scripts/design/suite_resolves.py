@@ -1,6 +1,6 @@
 """Can this benchmark suite resolve the axis it is about to be used to judge? Answer BEFORE running it.
 
-    TODO item 2   ·   `CARRY_FORWARD.md` §3 traps 15 and 16
+    TODO item 2 · and 16
 
 ⛔ **WHY THIS EXISTS, AND WHY IT IS WRITTEN BEFORE THE SUITE.** The 32-condition `ambig_dense_10mb` suite
 was used for months to judge a partition change it was **structurally incapable of seeing**: its fine node
@@ -63,7 +63,7 @@ TERMINUS_NEG = FLAG_TSS_NEG | FLAG_TES_NEG
 class Verdict:
     """One requirement, its measurement, and the value a blind suite would score."""
 
-    key: str  # the letter from `TODO.md` item 2
+    key: str # the letter from
     requirement: str
     measured: float
     degenerate: float

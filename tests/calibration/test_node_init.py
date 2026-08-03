@@ -1,6 +1,6 @@
 """Unit tests for the pass-0 per-node INITIALIZATION (`calibration.node_init`).
 
-One test per information source of `docs/CARRY_FORWARD.md` — MEASURED (Poisson
+One test per information source of — MEASURED (Poisson
 precision), INTRON FACTORY, STRAND DECONVOLUTION, UNSOLVED default (100% gDNA, ZERO precision) — plus the
 pure precision arithmetic (`own_composition_logvar`, `own_precision`). These pin the self-solve that seeds
 the unified pass-0 relay.

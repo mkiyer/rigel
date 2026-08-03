@@ -1068,7 +1068,7 @@ def run_analysis(
     pd.DataFrame(condition_summaries).to_csv(outdir / "condition_summary.csv", index=False)
 
     write_report(
-        outdir / "report.md",
+        outdir / "",
         tx_metrics_df,
         gene_metrics_df,
         pd.DataFrame(all_pool_metrics) if all_pool_metrics else None,

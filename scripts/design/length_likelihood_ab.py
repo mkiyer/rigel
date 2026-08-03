@@ -1,11 +1,11 @@
 """P2 A/B — does the fragment-length likelihood reach the mass the strand channel cannot?
 
-    Plan: `docs/SOLVER_OBSERVABLES_PLAN.md` §6.4   ·   Before-picture: `LEDGER.md`, the P0 entry
+       Before-picture:, the P0 entry
 
 ⭐ **ONE ARGUMENT DIFFERS BETWEEN THE ARMS.** ``CalibrationConfig.length_likelihood`` False/True; every
 other line of code is shared, and the False arm is byte-identical to the P1 path.
 
-⛔ **DO NOT SCORE ON THE ZERO-gDNA ARM ALONE** (`CARRY_FORWARD.md` §3 trap 19). All four `none`
+⛔ **DO NOT SCORE ON THE ZERO-gDNA ARM ALONE**. All four `none`
 conditions are saturated at 100 % blind, and on a library with no gDNA *any* change that lowers the gDNA
 fraction scores better — that one-sidedness has reversed a published verdict in this project once. The
 clean comparison is the **gdna100** arm; `gdna100 ss0.50 capture_on` (98.2 % blind, ``f_gdna`` 0.3754

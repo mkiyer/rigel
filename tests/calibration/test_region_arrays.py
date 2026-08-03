@@ -116,7 +116,7 @@ def test_edge_numbering_matches_the_chain_built_from_the_payload_offsets():
     ``edge_node_indices`` counts adjacent same-reference node pairs; ``build_node_chain`` walks the
     payload's two CSR offset arrays and lays out ``N E N E … N`` slot by slot. They must agree, or the
     calibration result's per-edge arrays are keyed to a different axis than the payload's — the exact
-    class of defect that once dropped 476,719 of 476,732 real fragments (`CARRY_FORWARD.md` §3 trap 20)
+    class of defect that once dropped 476,719 of 476,732 real fragments
     while every golden test passed. A validator that called the builder's own helper would prove
     nothing here (trap 1).
     """

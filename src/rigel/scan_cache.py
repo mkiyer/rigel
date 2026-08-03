@@ -1,9 +1,9 @@
 """rigel.scan_cache — scan once, calibrate many times.
 
-    TODO item 2 (the cached substrate)   ·   `docs/testing/testing_plan.md`   ·   Gate: `tests/test_scan_cache.py`
+    TODO item 2 (the cached substrate) · Gate: `tests/test_scan_cache.py`
 
 ⭐ **WHY.** Scanning is the expensive step and calibration is the one under development. On a real cfRNA
-run: index load ~8 s, BAM scan ~2 s, **calibration ~66 s** (`CARRY_FORWARD.md` §1 fact 22) — and a 5 M
+run: index load ~8 s, BAM scan ~2 s, **calibration ~66 s** — and a 5 M
 fragment simulated condition costs far more than that to scan. Caching the scan's output took a
 24-condition sweep from ~13 min to ~9 s on the old path. This is that, rebuilt against the S4 payload.
 
@@ -27,12 +27,12 @@ input                        origin                                      cached?
 
 ⚠ **Anything derivable from the index is rebuilt on load, never stored.** 0.15 s against an 8.45 s index
 load that happens anyway, and a stored copy is how a cache goes stale against the thing it describes
-(`CARRY_FORWARD.md` §3 trap 25).
+
 
 ⭐ **There is no separate FL row any more, and that is C2.** Every fragment-length histogram — the two
 pure pools and the unconditional anchor they are EB-shrunk toward — is a field OF the payload, so
 caching the payload caches them, in one frame, by construction. The scanner's own histogram used to be
-cached alongside it purely to serve as that anchor; `docs/FRAGMENT_LENGTH_AUDIT.md` D1–D3 is what that
+cached alongside it purely to serve as that anchor; is what that
 cost. `build_fl_models` remains the single source of truth for the derived pmfs, which are still not
 cached — freezing its output would mean a change to the FL model silently does not reach a cached scan.
 
@@ -43,7 +43,7 @@ THE KEY NEEDS THREE PARTS, AND THE MIDDLE ONE IS A GAP THAT WAS ALREADY LOGGED
   the accumulator changes, so without it a cache written before an accumulator change is accepted and
   then fails deep inside the loader with a bare ``KeyError``. S5.a made that concrete by adding
   ``length_sum`` to every population.
-* ⭐ **a REACH digest.** `TODO.md`: ``reach`` is consumed by calibration and covered by **neither**
+* ⭐ **a REACH digest.**: ``reach`` is consumed by calibration and covered by **neither**
   ``partition_hash`` **nor** ``graph_hash`` — correctly, since neither the scan nor the accumulator reads
   it — and the gap "becomes live the moment something caches a calibration output". A cache loaded
   against an index is that moment. The 2026-07-30 rebuild moved ~38 % of human contiguous reaches while
@@ -118,7 +118,7 @@ def _digest(*parts: bytes) -> str:
 def reach_digest(index: "TranscriptIndex") -> str:
     """Hash the edge reach columns — the part of the index calibration reads and no other key covers.
 
-    ⚠ Computed on demand, never stored beside the index (`CARRY_FORWARD.md` §3 trap 25). It is stored in
+    ⚠ Computed on demand, never stored beside the index. It is stored in
     the CACHE's manifest, which is a different thing: the cache is describing an external artifact it
     cannot recompute, exactly as `index.source_record` does for the FASTA and the GTF.
     """
@@ -227,7 +227,7 @@ class ScanCache:
     provenance: dict  # the key, the BAM, the scan config, the counts
 
     # ⛔ `fl_global_counts`, `fl_rna_counts` and `fl_max_size` were DELETED by C2
-    # (docs/FRAGMENT_LENGTH_AUDIT.md). The first was the scanner's histogram, cached so it could be
+    # The first was the scanner's histogram, cached so it could be
     # the empirical-Bayes anchor — the frame mismatch itself, persisted. The second was **D5**: a
     # field named as if it were live, written and read back and consumed by nothing. The third
     # duplicated `payload.max_length`.
@@ -295,7 +295,7 @@ def write_scan_cache(
     # read back as text. Nested dataclasses are therefore split by the type of each sub-field: arrays are
     # prefixed `field__sub` and counters stay scalars.
     # ⛔ THE CACHE HOLDS A SCAN, AND A DRAINED PAYLOAD IS NOT ONE. The second pass runs *after* the cache
-    # is read (`SPEC_SECOND_PASS.md` §2), which is what lets one scan be drained repeatedly at different
+    # is read, which is what lets one scan be drained repeatedly at different
     # seeds without re-reading the BAM — the property P5 and P6 both need. Writing a drained payload would
     # bake one draw into the cache, and it would also serialise `DrainQC.census_before` through
     # `json.dumps(default=str)` as a stringified repr, silently, which is X9's defect one level down.
@@ -351,7 +351,7 @@ def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex", scan_config
     ⚠ **Pass ``scan_config`` whenever you have one.** Without it this checks only that the manifest is
     consistent with ITSELF; a cache scanned under different settings is a different tally and will load
     silently. The check is :func:`check_scan_config`, which existed and had **no caller at all** until
-    S6 — the docstring promised a guarantee the code did not provide (`CARRY_FORWARD.md` §3 trap 27).
+    S6 — the docstring promised a guarantee the code did not provide.
     """
     cache_dir = Path(cache_dir)
     manifest = json.loads((cache_dir / MANIFEST_JSON).read_text())
@@ -449,7 +449,7 @@ def check_scan_config(cache: ScanCache, scan_config) -> None:
 
     ⚠ Called by :func:`read_scan_cache` when it is given a ``scan_config``. It had **no caller at all**
     until S6 while ``read_scan_cache``'s docstring claimed the guarantee it provides — two statements
-    about one contract, disagreeing (`CARRY_FORWARD.md` §3 trap 27). Two scans of one BAM under
+    about one contract, disagreeing. Two scans of one BAM under
     different settings are different tallies, and nothing else notices.
     """
     expected = _scan_config_digest(scan_config)
@@ -464,7 +464,7 @@ def index_derived_inputs(index: "TranscriptIndex") -> dict:
     """The calibrate() arguments that come from the INDEX, rebuilt every time.
 
     ⚠ Deliberately not cached: 0.15 s together, against an 8.45 s index load that happens anyway. A
-    stored copy is how a cache goes stale against the thing it describes (`CARRY_FORWARD.md` §3 trap 25).
+    stored copy is how a cache goes stale against the thing it describes.
     """
     from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import (

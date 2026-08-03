@@ -202,7 +202,7 @@ def test_the_per_face_fields_are_gone():
     sides that were then summed back together. S5.c deleted the quantity and S5.e deleted the faces;
     its replacement is the per-edge ``gdna_edge_eff_len``, ONE number at a 0-bp line with no ½ in it.
     Anything still naming the old fields is reading a convention that no longer exists
-    (`CARRY_FORWARD.md` §3 trap 2).
+
     """
     fields = set(CalibrationResult.__dataclass_fields__)
     assert not fields & {

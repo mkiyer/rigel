@@ -1,10 +1,10 @@
 """How much of the gDNA/RNA information does the accumulator's stored pair actually keep?
 
-    Design: ``docs/ACCUMULATOR_DESIGN.md`` §6   ·   Log: ``docs/S5_DESIGN_LOG.md``
+       Log:
 
 THE QUESTION
     Each object stores an integer ``count`` and a fixed-point density ``Sum 1/placements``. Whether
-    that pair is the right one has never been derived -- ``CARRY_FORWARD.md`` §0 C1/C2 are open, and
+    that pair is the right one has never been derived -- /C2 are open, and
     §1 fact 5's ranking was measured at ONE fragment-length setting. The accumulator's deposit weight
     must be fixed BEFORE the scan, because the pure length pools are built in the same pass, so the
     choice has to be robust across every library this tool will ever see -- not tuned to cfRNA.

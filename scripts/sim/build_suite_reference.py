@@ -1,15 +1,15 @@
 """Carve a benchmark-suite reference out of the real human genome, optionally appending a synthetic one.
 
-    TODO item 2   ·   `docs/testing/testing_plan.md` objective 2
+    TODO item 2 · objective 2
 
 ⭐ **WHY A REAL BACKBONE.** The suite this replaces was a generated mini-genome, and it could not judge
-what it was used to judge (`CARRY_FORWARD.md` §3 trap 15): zero fragment-length variance, Poisson by
+what it was used to judge: zero fragment-length variance, Poisson by
 construction, and a fine node set row-for-row identical to its merged one. Real human genes give
 calibration a real fragment-length distribution, a real strand model, and — the point of the v8 partition
 — alternative TSS/TES that fall strictly inside exons. The owner's plan is one chromosome as the training
 substrate, with a synthetic stress chromosome piggybacked on top.
 
-⚠ **The ERCC controls are kept deliberately, and not as filler.** `CARRY_FORWARD.md` §3 trap 20: a
+⚠ **The ERCC controls are kept deliberately, and not as filler.**: a
 single-reference synthetic index hid a reference-id-space mismatch that silently dropped **476,719 of
 476,732** real fragments inside `deposit()` while every golden test passed. 92 tiny references cost
 ~83 kb and make the ref-id space non-trivial, which is the configuration that would have caught it.

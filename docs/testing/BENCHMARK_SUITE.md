@@ -6,7 +6,7 @@ because it could not judge what it was being used to judge.
 
 > ⛔ **Before quoting any number from this suite, run `scripts/design/suite_resolves.py`.** That is not
 > a formality. The suite it replaces was used for months to evaluate a partition change it was
-> *structurally incapable of seeing* (`CARRY_FORWARD.md` §3 trap 15).
+> *structurally incapable of seeing* (`docs/SESSION_HANDOFF.md` §3 trap 15).
 
 ---
 
@@ -27,7 +27,7 @@ because it could not judge what it was being used to judge.
 **A real human backbone, not a generated mini-genome.** `chr22` plus the **92 ERCC** spike-in
 references, carved out of the same GRCh38 + GENCODE v46 sources the production index is built from.
 
-⚠ **The ERCC references are not filler.** `CARRY_FORWARD.md` §3 trap 20: a single-reference synthetic
+⚠ **The ERCC references are not filler.** `docs/SESSION_HANDOFF.md` §3 trap 20: a single-reference synthetic
 index once hid a reference-id-space mismatch that silently dropped **476,719 of 476,732** real fragments
 inside `deposit()` while every golden test passed. 92 extra references cost ~83 kb and make that space
 non-trivial.
@@ -94,7 +94,7 @@ python scripts/design/build_scan_cache.py --index $SUITE/rigel_index --suite $SU
 
 ⭐ The **capture panel is not scaffolding** — it covers 720 of 1,440 chr22 gene groups, so the
 captured/uncaptured boundary is a sharp density step with real transcripts on both sides. Hybrid capture
-is ~1000× on exons (`CARRY_FORWARD.md` §1 fact 15), so that boundary is a 3-decade cliff in gDNA density.
+is ~1000× on exons (`docs/SESSION_HANDOFF.md` §1 fact 15), so that boundary is a 3-decade cliff in gDNA density.
 A uniform background cannot distinguish "the relay works" from "the global prior reached it".
 
 ---
@@ -143,7 +143,7 @@ shape (sd 0, capture off, no replicates).
 
 ⭐ **Net fragment flow is the primary metric, and it is already implemented** — `rigel.sim.analysis`
 (`analyze_net_flow`, `FlowData`), reachable via `scripts/sim/evaluate_suite.py`. The methodology and the
-reasoning behind it are in `BENCHMARKING.md`; the short version:
+reasoning behind it are in `docs/testing/BENCHMARKING.md`; the short version:
 
 * **Hard per-fragment label recovery is the wrong target.** An unspliced RNA fragment and a gDNA
   fragment from the same locus can be sequence-identical and genuinely unrecoverable. Build the per-locus
@@ -156,7 +156,7 @@ reasoning behind it are in `BENCHMARKING.md`; the short version:
 * ⚠ **`gdna_none` conditions are pure false-positive tests** — any net gDNA→RNA there is false by
   construction, and unstranded (ss = 0.50) is the hard case because there is no strand clue at all.
 
-⛔ **The soft 3-pool surplus does not exist yet.** `BENCHMARKING.md` names it as the *primary* pool
+⛔ **The soft 3-pool surplus does not exist yet.** `docs/testing/BENCHMARKING.md` names it as the *primary* pool
 metric and the surviving code computes only the hard-label version. Logged in `TODO.md`.
 
 ---
@@ -166,7 +166,7 @@ metric and the surviving code computes only the hard-label version. Logged in `T
 **It cannot produce a calibration number**, because `calibrate()` does not run. ⚠ The reason has
 changed and the old one is stale: `fl.py` and `substrate.py` were rewired in S5.b and S5.d. What remains
 is **S5.e** (`build_node_geometry` and `bp_solver`'s per-face consumers) and **S5.f** (`calibrate` itself,
-`CalibrationResult`, `priors`, `pipeline`). See `docs/S5_DESIGN_LOG.md` §2.
+`CalibrationResult`, `priors`, `pipeline`). See `docs/calibration/S5_DESIGN_LOG.md` §2.
 
 ⚠ **Every scan cache built before 2026-07-30 is now correctly REFUSED** — S5.a added `length_sum` to the
 payload and S5.a-3 added a `payload_schema_digest` to the cache key, so a stale cache fails at the door

@@ -1,6 +1,6 @@
 """gDNA / RNA FL distributions: the five PURE pools + the smooth-EB build.
 
-The pools are ``docs/ACCUMULATOR_DESIGN.md`` §8's, and purity is the whole point: a length model is
+The pools are 's, and purity is the whole point: a length model is
 fitted only from populations known to be ONE component, so nothing is ever estimated from the fragments
 it will later explain.
 """
@@ -65,7 +65,7 @@ def test_the_pool_indices_ARE_the_specifications_FragmentPool():
 def test_gdna_fl_mass_is_the_two_PURE_CONTAINED_pools_and_NOTHING_else():
     """⭐ The splash pools are deliberately NOT folded in, and this is not cosmetic.
 
-    They are the only ON-TARGET gDNA population (``ACCUMULATOR_DESIGN.md`` §8.2), so they sit between
+    They are the only ON-TARGET gDNA population, so they sit between
     the pure gDNA and RNA means — 139 and 212 against 88 on LBX0190. The shipped model summed four
     differently-tilted pools and read **146.05** where the pure intergenic pool says **88.0**: biased
     long by ~40 %, by pooling exactly these. Keeping them out is what makes the comparison a QC output

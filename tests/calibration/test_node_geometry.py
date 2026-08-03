@@ -1,6 +1,6 @@
 """NodeGeometry — ONE set of numbers per chain slot. Every face concept dissolves.
 
-    Design: ``docs/S5_DESIGN_LOG.md`` §2 (S5.e) · ``docs/ACCUMULATOR_DESIGN.md`` §7
+     (S5.e)
     Divisors: ``rigel.calibration.effective_length`` (S5.c) — the one placements formula
 
 ⛔ **What this replaces.** ``build_node_geometry`` was 213 lines producing **18 per-face arrays** — a
@@ -10,7 +10,7 @@ therefore had **different divisors**. A contiguous edge is a 0-bp line: one set 
 identically from both sides. So the pairs go, and with them the junction-strand routing, the exon-bit
 flank gating and the ``_continues``/``_eff_spl_face`` far-boundary machinery — all of which existed to
 *guess* which flank a spliced deposit belonged to, because the old accumulator attributed a splice to
-the node's edge rather than to the junction's own coordinate (`CARRY_FORWARD.md` §3 trap 6). The v8
+the node's edge rather than to the junction's own coordinate. The v8
 index states ``(src, dst, strand)`` explicitly, so the guess is replaced by index arithmetic.
 
 ⭐ **TWO STRAND AXES, AND THEY ARE NOT THE SAME AXIS.** ``count`` is keyed by **genome** strand — where
@@ -19,7 +19,7 @@ derived from each junction's own annotated strand exactly as the design prescrib
 a junction's own strand"). Putting them in one array under one name is the two-conventions-in-one-schema
 defect the redesign exists to remove, so they are asserted apart here.
 
-⚠ **The brute-force oracles below share no helper with the implementation** (`CARRY_FORWARD.md` §3
+⚠ **The brute-force oracles below share no helper with the implementation**.
 trap 1). They enumerate integer start positions in an explicit Python loop.
 """
 
@@ -258,7 +258,7 @@ def test_the_JUNCTION_divisor_uses_its_REAL_EXONIC_REACH__the_other_half_of_A7(p
     """⭐ **A7, ruled**: a junction edge is used only by a molecule that spliced across it, so what
     remains either side is exonic and the reach is real. A junction is a BRAND-NEW population — the
     predecessor had no junction divisor at all — so wiring it regresses nothing, while leaving it
-    unbounded would ship a divisor wrong by up to 4x at a first exon (`CARRY_FORWARD.md` §2: 199.0 at
+    unbounded would ship a divisor wrong by up to 4x at a first exon (199.0 at
     R=550 against 50.0 at R=50).
 
     Here the reach BINDS: 30 bases of exon either side of an 80 bp molecule.
@@ -301,7 +301,7 @@ def test_a_reach_of_ZERO_gives_ZERO_opportunity_and_is_not_a_sentinel(parts):
 
 
 def test_a_divisor_of_ZERO_is_NOT_FLOORED(parts):
-    """⛔ ``CARRY_FORWARD.md`` §3 trap 23 and `effective_length`'s own contract: an object with no
+    """⛔ and `effective_length`'s own contract: an object with no
     opportunity must return 0 and the CALLER must treat 0 as 'no evidence'. The predecessor floored
     every divisor to ``_EPS``, which is the defect that produced densities of ~1e9 on the 12.4 % of
     fine-partition nodes where the contained effective length collapses to exactly 0.
@@ -347,7 +347,7 @@ def test_a_junction_deposits_on_BOTH_the_donor_and_the_acceptor_line(geometry, p
     """A junction ``(src, dst)`` has its DONOR at the line to the right of ``src`` and its ACCEPTOR at
     the line to the left of ``dst``. Molecules leave the template at the first and arrive at the
     second, so both lines genuinely saw the flux — and the index states both explicitly, which is what
-    replaces the old exon-bit guess (`CARRY_FORWARD.md` §3 trap 6).
+    replaces the old exon-bit guess.
 
     The fixture's junction runs node 0 -> node 2, so it lands on edge 0 (donor) and edge 1 (acceptor)
     — i.e. on BOTH edge slots.
@@ -388,7 +388,7 @@ def test_the_mature_flux_is_keyed_by_the_JUNCTIONS_OWN_STRAND_not_the_align_colu
 
 def test_several_junctions_on_one_line_POOL_their_counts_AND_their_divisors(parts):
     """Two junctions sharing a donor line are two estimates of one rate, so the pooled statement is
-    ``sum(count) / sum(E)`` — the ratio of sums, never the mean of ratios (`CARRY_FORWARD.md` §2:
+    ``sum(count) / sum(E)`` — the ratio of sums, never the mean of ratios.
     ``rho_bg = sum(g)/sum(E)``). Averaging the divisors instead would mis-weight the deeper junction.
     """
     payload, region_arrays, substrate, chain, _ = parts
@@ -633,7 +633,7 @@ def test_spliced_count_and_junction_count_are_DIFFERENT_POPULATIONS(geometry, pa
 
 
 def test_the_word_MATURE_names_no_field(geometry):
-    """It fits both spliced populations, so it cannot be the name of either (`CARRY_FORWARD.md` §3
+    """It fits both spliced populations, so it cannot be the name of either.
     trap 27 — one word on two concepts). The fields carry the accumulator's own three bank names."""
     fields = set(NodeGeometry.__dataclass_fields__)
     assert not any("mature" in f for f in fields), fields

@@ -1,6 +1,6 @@
 """P1 gate T3 — is the EM prior a FRAGMENT COUNT? And the in-process A/B against the raw sum.
 
-    Plan: `docs/SOLVER_OBSERVABLES_PLAN.md` §5   ·   Unit gates: `tests/calibration/test_prior_units.py`
+       Unit gates: `tests/calibration/test_prior_units.py`
 
 ⭐ **THE CHECK.** ``assemble_priors`` hands the EM two additive pseudocounts that are added directly to
 its own fragment counts (``G = n_gdna + a_g``). So ``Σ_loci (a_g + a_r)`` must be commensurate with the
@@ -16,7 +16,7 @@ comparison has no simulation noise, no re-scan and no second code path:
 
 ⚠ **Score against the payload's own fragment counts, never against the S5.f baseline table.** The two
 defects partly cancel today, so the sign of the error flips on the gdna100 arm — the headline moves
-*away* from 0.50 while moving *toward* truth (`SOLVER_OBSERVABLES_PLAN.md` §5.4, recorded before the
+*away* from 0.50 while moving *toward* truth (recorded before the
 run). Comparing to the old number would score the cancellation, not the correction.
 
     python scripts/design/prior_units_check.py --index IDX --cache-root CACHE_DIR

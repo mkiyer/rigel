@@ -5,10 +5,10 @@
 # TODO item 2. The owner's pilot: gDNA {none, 100 %} x strand {unstranded, stranded} x capture
 # {off, on} = 2x2x2 = 8, a clean full factorial. Nascent is the fourth axis and is held at `none`
 # here so the 2^3 stays clean and every gdna_none cell is a pure false-positive test
-# (`BENCHMARKING.md` caveat 3); it enters as an axis in the full grid.
+#; it enters as an axis in the full grid.
 #
 # ⛔ WHY A REAL BACKBONE AND NOT A GENERATED MINI-GENOME. The deleted `ambig_dense_10mb` suite could
-# not judge what it was used to judge (`CARRY_FORWARD.md` §3 trap 15): its fine node set was
+# not judge what it was used to judge: its fine node set was
 # row-for-row identical to its merged region set, so it could not see a partition change at all.
 # Measured on this reference by `scripts/design/suite_resolves.py`:
 #
@@ -36,7 +36,7 @@ transcript_filter: all
 
 # ── Read simulation ─────────────────────────────────────────────────────────────────────────────
 simulation:
-  n_rna_fragments: 5000000   # `testing_plan.md` objective 3
+  n_rna_fragments: 5000000
   sim_seed: 42
   frag_mean: 206             # ⭐ MO_3021 spliced_annot, measured — NOT a chosen round number
   frag_std: 98               # ⭐ measured. The deleted suite had 0 here, which is the whole problem
@@ -65,7 +65,7 @@ gdna:
 
 # ── Strand: the second axis ─────────────────────────────────────────────────────────────────────
 # ⚠ 0.50 is the hard case — the strand likelihood carries EXACTLY zero information about the gDNA
-# fraction at kappa = 1/2, for any count and any overdispersion (`CARRY_FORWARD.md` §2).
+# fraction at kappa = 1/2, for any count and any overdispersion.
 strand_specificities: [0.50, 0.99]
 
 # ── Nascent: held constant for the pilot ────────────────────────────────────────────────────────

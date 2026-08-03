@@ -1,6 +1,6 @@
 """⭐ STRAND, in the gap-hypothesis enumeration — what pins it, what leaves it open, what contradicts it.
 
-    Spec: ``docs/SPEC_SECOND_PASS.md`` §3.3 and D-5   ·   Audit: ``LEDGER.md`` P0/P1
+     and D-5
     Owner ruling, 2026-08-02, recorded verbatim below.
 
 > *"Splice junctions are stranded and asymmetric. And so if we detect one splice junction in a fragment,
@@ -193,7 +193,7 @@ def test_an_UNSPLICED_fragment_offers_BOTH_STRANDS(scanned):
 
     ⚠ **This is the case that makes the second pass's strand term necessary** rather than decorative.
     The two spliced hypotheses here differ in strand *and* in implied length; drop the strand term and
-    they are separated by length alone. `SPEC_SECOND_PASS.md` §3.3.
+    they are separated by length alone.
     """
     hypotheses = _hypotheses(scanned, _record(scanned, 1450))
     introns = {tuple(path[0]) for path, _strand in hypotheses if path}
@@ -270,7 +270,7 @@ def test_the_fixture_reaches_every_branch_it_claims_to(scanned):
 # `RIGEL_NRNA_chr1_{1,2}_1000_2200`, both `is_synthetic`. A shadow is single-exon, so it implies nothing
 # in the gap, so `any_candidate_implies_nothing` is already true and ∅ is emitted without the clause.
 #
-# ⭐ That is `SPEC_GAP_PATHS.md` §2's own ruling arriving by a different route — *"the nascent shadow IS
+# ⭐ That is 's own ruling arriving by a different route — *"the nascent shadow IS
 # the ∅ hypothesis"* — so the two mechanisms agree rather than conflict:
 #
 #   * SPLICED fragment: an observed CIGAR-N intron falls inside the shadow's single exon, so the shadow

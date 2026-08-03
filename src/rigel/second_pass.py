@@ -1,6 +1,6 @@
 """rigel.second_pass — scoring the side buffer's held fragments, and draining it.
 
-    Spec: ``docs/SPEC_SECOND_PASS.md`` — §3 the score (P2), §5 the draw and §6 the drain (P3)
+     §3 the score (P2), §5 the draw and §6 the drain (P3)
 
 Pass 1 holds every fragment whose unsequenced gap has more than one surviving explanation — 2–3.5 % of a
 library, and systematically the **long** ones, because a longer gap admits more hypotheses. This module
@@ -12,7 +12,7 @@ resolves them, in three steps that are three functions::
 
 ⭐ **``drain`` is PURE: payload in, payload out.** It rebuilds one accumulator per reference from the
 payload's own cut axis, so the whole second pass runs off a *cached* scan — which is what lets one scan be
-drained repeatedly at different seeds without re-reading the BAM, and what `SPEC_SECOND_PASS.md` P5 and P6
+drained repeatedly at different seeds without re-reading the BAM, and what and P6
 both need. It also means the drain never sees a thread, so reproducibility is structural.
 
 ⛔ **There is exactly ONE tally path.** The drain re-enters ``Accumulator.deposit`` with a hypothesis set
@@ -27,10 +27,10 @@ abundance, no calibration output, and no second pass over the BAM::
     score(h)  =  rho(h)  x  f(L_h)  x  s(h)
 
 ⚠ **Every input comes from pass 1**, which is what lets this run BEFORE calibration and lets calibration
-then run exactly once, on the complete tally. `SPEC_SECOND_PASS.md` §2.
+then run exactly once, on the complete tally.
 
 ⛔ **``L`` IS NOT COMPUTED HERE.** It comes from ``Accumulator.length_under`` — the same C++ that will
-compute it again at drain time. `docs/FRAGMENT_LENGTH_AUDIT.md` C0/C2 left the tool with ONE definition of
+compute it again at drain time. The tool has ONE definition of
 fragment length, and a scorer with its own would be a second definition of exactly the quantity that audit
 unified.
 """
@@ -61,7 +61,7 @@ __all__ = [
 class HypothesisTerms:
     """The three factors, kept apart. ⭐ Diagnostics, not bookkeeping.
 
-    ``SPEC_SECOND_PASS.md`` §4: the umbrella census partitions the held set by *which question is open*,
+    the umbrella census partitions the held set by *which question is open*,
     which is the same thing as *which factor discriminates*. Reporting the terms separately is what lets a
     regression be attributed to one of them instead of to "the score moved".
 
@@ -155,9 +155,7 @@ def _distinguishing_lines(
 P_ORIENTATION_GIVEN_GDNA = 0.5
 
 
-def strand_terms(
-    *, align: int, implied_strand: int, rna_sense_frac: float
-) -> tuple[float, float]:
+def strand_terms(*, align: int, implied_strand: int, rna_sense_frac: float) -> tuple[float, float]:
     """``(spliced, genomic)`` — the likelihood of the OBSERVED ALIGNMENT ORIENTATION under each hypothesis.
 
     Let ``t`` be the strand a candidate implies, ``a`` the strand the fragment aligned to, and
@@ -286,7 +284,7 @@ class _Accumulators:
     ⭐ **This is what lets the second pass run off a payload rather than off a live scanner.** The
     accumulator is described by its cut positions, and the payload carries them — so a cached scan can be
     scored and drained without re-reading the BAM, which is what keeps `build_scan_cache.py` useful for
-    every re-measurement `SPEC_SECOND_PASS.md` P5 and P6 ask for.
+    every re-measurement and P6 ask for.
 
     ⛔ **`set_junctions` is not optional here and the failure is invisible.** With no junction table every
     observed intron reads as unannotated, so the junction banks stay at zero and the tally still looks
@@ -371,7 +369,7 @@ def score_held_fragments(
     rna_sense_frac
         ``P(align_strand == the transcript's strand | RNA)`` — ``StrandModels.exonic_spliced``, which is
         certified RNA because an annotated splice proves it. ⚠ On an R1-antisense (dUTP) library this is
-        ≈ 0.01, so **disagreement is the likely case** — see `LEDGER.md` P0. It is used as the probability
+        ≈ 0.01, so **disagreement is the likely case**. It is used as the probability
         of agreement it is, never inverted.
     node_types, junctions
         From the index: ``build_node_partition_arrays`` and ``build_junction_edge_arrays``. ⚠ The junction
@@ -465,7 +463,7 @@ def score_held_fragments(
 
             # -- strand ---------------------------------------------------------------------------
             # ⭐ An OBSERVED motif pins the fragment's strand, and pass 1 has already constrained the
-            # hypotheses to it (`LEDGER.md` P1), so the term is constant across the set and cancels.
+            # hypotheses to it, so the term is constant across the set and cancels.
             if observed_motif == int(Strand.NONE):
                 spliced_term, genomic_term = strand_terms(
                     align=align,
@@ -496,7 +494,7 @@ def score_held_fragments(
 def choose_hypotheses(scores: HeldScores, payload: AccumulatorPayload, *, seed: int) -> np.ndarray:
     """⭐ One multinomial draw per held fragment. Returns a LOCAL hypothesis index per record.
 
-    `SPEC_SECOND_PASS.md` §5.1: one hypothesis wins the whole fragment. No fractional deposit — integers
+    one hypothesis wins the whole fragment. No fractional deposit — integers
     stay integers and no transcript is fractionated.
 
     ⭐ **Seeding: order by identity, then ONE stream** — S2.1's rule, applied verbatim. The deferred bank
@@ -537,7 +535,7 @@ def drain(
 ) -> AccumulatorPayload:
     """⭐ **THE DRAIN.** Replay every held fragment with its chosen hypothesis; return the drained payload.
 
-    `SPEC_SECOND_PASS.md` §6. ``choices[i]`` is a local hypothesis index for the ``i``-th record of the
+     ``choices[i]`` is a local hypothesis index for the ``i``-th record of the
     bank's canonical order — :func:`choose_hypotheses` produces exactly that.
 
     ⭐ **ONE TALLY PATH.** Each fragment re-enters ``Accumulator.deposit`` with its chosen hypothesis

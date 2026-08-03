@@ -3,9 +3,9 @@
 This document says *what code to write*, in what order, with real names and line numbers. Line numbers
 are from `4bb4d191` and are **stale inside `src/rigel/native/`**, which S3 rewrote.
 
-**Read in this order:** this state block · `TODO.md` (the one ranked list) · `ACCUMULATOR_DESIGN.md`
-(the design) · `LEDGER.md` (what landed, with its gates) · `CARRY_FORWARD.md` §3 then §2 (traps, then
-the equations the code depends on) · `BENCHMARK_SUITE.md` (the suite and what it can judge).
+**Read in this order:** this state block · `TODO.md` (the one ranked list) · `docs/accumulator/DESIGN.md`
+(the design) · `docs/WIP.md` (what landed, with its gates) · `docs/SESSION_HANDOFF.md` §3 then §2 (traps, then
+the equations the code depends on) · `docs/testing/BENCHMARK_SUITE.md` (the suite and what it can judge).
 
 ---
 
@@ -14,15 +14,15 @@ the equations the code depends on) · `BENCHMARK_SUITE.md` (the suite and what i
 ### ⭐⭐ STATE, 2026-08-03 — FRAGMENT LENGTH IS DONE; THE CRITICAL PATH IS C3
 
 ⛔ **This file is no longer the live plan for anything on the critical path.** Its §4/§5 S5 rows were
-superseded by `S5_DESIGN_LOG.md`, and S5 itself is finished. Read in this order instead:
+superseded by `docs/calibration/S5_DESIGN_LOG.md`, and S5 itself is finished. Read in this order instead:
 
 | | |
 |---|---|
 | **`docs/TODO.md`** | ⭐ the one ranked list, and **rank 0 is C3** |
-| **`docs/JUNCTION_OPPORTUNITY.md`** | C3's formula, proven over 48,648 configurations. ⚠ every number in its §3 is stale |
-| **`docs/LEDGER.md`, entries C0 → B4** | the fragment-length track and the second pass, newest last. ⭐ **B4 is the one that sets the priority** |
-| **`docs/SPEC_SECOND_PASS.md`** | the second pass's spec; P0–P4 all closed |
-| `docs/SOLVER_OBSERVABLES_PLAN.md` | its P2 is built and gated OFF, blocked on the FL pools — which is C3 |
+| **`docs/accumulator/JUNCTION_OPPORTUNITY.md`** | C3's formula, proven over 48,648 configurations. ⚠ every number in its §3 is stale |
+| **`docs/WIP.md`, entries C0 → B4** | the fragment-length track and the second pass, newest last. ⭐ **B4 is the one that sets the priority** |
+| **`docs/accumulator/SPEC_SECOND_PASS.md`** | the second pass's spec; P0–P4 all closed |
+| `docs/calibration/SOLVER_OBSERVABLES_PLAN.md` | its P2 is built and gated OFF, blocked on the FL pools — which is C3 |
 
 ### Where things stand
 
@@ -40,7 +40,7 @@ superseded by `S5_DESIGN_LOG.md`, and S5 itself is finished. Read in this order 
 * **No magic numbers** — stop and discuss before any new constant.
 * **One thing per step**, falsification test first, verified failing, **then perturb the code**.
   ⭐ This session it caught 7 gate holes and 3 bugs in the harnesses/fixtures themselves.
-* **Append to `LEDGER.md` as each step lands**, never retroactively; delete a `TODO.md` item when it lands.
+* **Append to `docs/WIP.md` as each step lands**, never retroactively; delete a `TODO.md` item when it lands.
 * ⛔ **Real data is a TEST input, never a DESIGN input** (owner, 2026-07-30). Sweep the plausible space and
   bring the owner the domain call instead.
 * **The owner drives commits.**

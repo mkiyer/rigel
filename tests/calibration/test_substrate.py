@@ -1,6 +1,6 @@
 """CalibrationSubstrate — ONE type, the payload's own axes, and the fixed point decoded exactly once.
 
-    Design: ``docs/ACCUMULATOR_DESIGN.md`` §5   ·   Plan: ``docs/S5_DESIGN_LOG.md`` §2 (S5.d)
+        (S5.d)
 
 ⛔ **What this replaces.** ``CalibrationSubstrate`` held three per-REGION views (contained / left / right)
 and ``BoundarySubstrate`` held the same numbers re-keyed by boundary. Two classes, one set of numbers,
@@ -124,7 +124,7 @@ def test_mean_length_is_length_sum_over_count(substrate):
 def test_mean_length_at_ZERO_count_is_NAN_not_zero():
     """⛔ An object with no fragments has no mean length, and that is not 0.
 
-    ``CARRY_FORWARD.md`` §3 trap 23: an object with no opportunity must emit NOTHING, never a floored
+    an object with no opportunity must emit NOTHING, never a floored
     value — a "no data" default of 100 % gDNA was actively seeding false gDNA into neighbouring exons.
     Zero here would read as "the fragments here are infinitely short".
     """

@@ -1,6 +1,6 @@
 """Schema invariants for :class:`rigel.scan_payload.AccumulatorPayload`.
 
-    Spec: ``tests/native/_accumulator_reference.py``   ·   Plan: ``docs/IMPLEMENTATION_PLAN.md`` §3.5
+    Spec: ``tests/native/_accumulator_reference.py``
 
 The payload is the boundary where the C++ tally becomes Python. Its field names **are** the
 specification's ``Tally`` field names, character for character, so the tests below check the schema
@@ -454,7 +454,7 @@ def test_a_deposited_lengths_HISTOGRAM_THAT_DOES_NOT_BIN_EVERY_FRAGMENT_IS_REJEC
     """⭐ **C1's invariant, refused at the door.** ``Σ deposited_lengths`` must equal ``qc.deposited``.
 
     This histogram is about to become the empirical-Bayes anchor for **every** fragment-length model in
-    the tool (`docs/FRAGMENT_LENGTH_AUDIT.md`), so an off-by-N is not a cosmetic error — it silently
+    the tool, so an off-by-N is not a cosmetic error — it silently
     re-weights the anchor against the pools it is supposed to anchor, which is a subtler version of the
     frame mismatch C1 exists to remove.
 

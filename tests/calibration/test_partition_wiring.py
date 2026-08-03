@@ -1,6 +1,6 @@
 """WHAT THE SCANNER SEES — the v8 partition wiring (accumulator plan W1b).
 
-    Plan: docs/CARRY_FORWARD.md §3 (W1b)   ·   Graph: docs/CARRY_FORWARD.md
+     (W1b) · Graph:
 
 ``build_node_partition_arrays`` is the one function that decides which genomic partition the C++
 accumulator deposits into: the v8 node cut array. :meth:`RegionArrays.from_index` reads the same

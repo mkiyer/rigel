@@ -79,7 +79,7 @@ def test_junction_flux_is_exported_VERBATIM_and_never_deconvolved():
 
     ⚠ It is two orders of magnitude away from ``mass_rna_spliced_edge`` on real data at the same line
     — 13 vs 0/6 even in this toy — which is why folding the two into one "mature" number names
-    nothing (`CARRY_FORWARD.md`).
+    nothing.
     """
     result = _run()
     np.testing.assert_array_equal(result.mass_rna_junction, JUNCTION_FLUX)
@@ -123,7 +123,7 @@ def test_the_supports_are_the_TWO_FRAMES_of_one_formula_family():
 
 def test_gdna_density_global_is_a_ratio_of_SUMS_over_both_axes():
     """Σ gDNA mass / Σ gDNA support, pooled across nodes AND lines — never a mean of per-object
-    ratios, which is a different number whenever the supports differ (`CARRY_FORWARD.md` §2)."""
+    ratios, which is a different number whenever the supports differ."""
     result = _run()
     expected = (result.mass_gdna_node.sum() + result.mass_gdna_edge.sum()) / (
         result.gdna_node_eff_len.sum() + result.gdna_edge_eff_len.sum()
@@ -165,7 +165,7 @@ def test_density_and_supports_sane():
 def test_a_mismatched_junction_axis_is_REFUSED():
     """⛔ A junction axis built against a different graph would place every splice on the wrong line,
     and nothing downstream would fault on it — the shape is plausible either way. Refuse at the door
-    (`CARRY_FORWARD.md` §3 trap 20: 476,719 of 476,732 real fragments once vanished inside a deposit
+    (476,719 of 476,732 real fragments once vanished inside a deposit
     while every golden test passed)."""
     with pytest.raises(ValueError, match="junction axis"):
         _run(junctions=None)  # the payload declares one junction; an empty axis is not it

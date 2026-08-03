@@ -1,4 +1,4 @@
-"""Phase A of the node-prior redesign (`docs/CARRY_FORWARD.md` §3, §8): the
+"""Phase A of the node-prior redesign (§8): the
 `mrna_active_*` classification carried onto the chain by `build_node_statics`, alongside the existing
 `free_*` (nascent-active / RNA-crossing) masks. Behaviour-neutral — no solver change — so this only
 asserts the new masks are correct across every region type and all four boundary types.

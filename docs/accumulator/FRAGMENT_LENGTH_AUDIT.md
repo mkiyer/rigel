@@ -2,24 +2,24 @@
 
     Status: ⚠ **HISTORY, as of 2026-08-03** — C0, C1, C2 and C2.6 have all landed and the
       fragment-length work is DONE: the anchor's error against truth is +0.00 % mean / +0.02 % sd.
-      ⭐ **Its "C3 is next" is CORRECT AGAIN** and C3 is now `TODO.md` rank 0 — `LEDGER.md` B4
+      ⭐ **Its "C3 is next" is CORRECT AGAIN** and C3 is now `TODO.md` rank 0 — `docs/WIP.md` B4
       measured why: calibration fits from the POOLS, and the RNA pool is what C3 corrects.
       §§1–3 are the history of how three definitions of fragment length came to be live at once.
 
     Status: C0, C1, C2, C2.6 LANDED (2026-07-31 / 2026-08-01). C3 is next; C4 is independent.
             The audit itself is complete and is kept as the record of WHY.
-    Trigger: P2's A/B (`LEDGER.md`) — the length likelihood is the first consumer to use the FL models
+    Trigger: P2's A/B (`docs/WIP.md`) — the length likelihood is the first consumer to use the FL models
     as a DISCRIMINANT rather than as a divisor, and it exposed that they disagree with each other.
 
 ## §0 ⭐ ROADMAP — WHERE WE ARE AND WHAT IS NEXT
 
-**This file is the critical path.** It was reached from `SOLVER_OBSERVABLES_PLAN.md`, which is where the
+**This file is the critical path.** It was reached from `docs/calibration/SOLVER_OBSERVABLES_PLAN.md`, which is where the
 calibration-side work lives; that plan's P2 is **blocked on this file's C2 and C3**.
 
     WHERE THE WORK LIVES
       branch  fragment-length-gold-standard        (⚠ NOT merged to main)
       commit  d045d820  "the prior is a fragment count, and L becomes the gold standard"
-              = P1 + P2(off) + C0 + C1, one commit -- LEDGER.md has the per-step narrative
+              = P1 + P2(off) + C0 + C1, one commit -- docs/WIP.md has the per-step narrative
       main    is one commit BEHIND. Fast-forward when you want it:
               git checkout main && git merge --ff-only fragment-length-gold-standard
 
@@ -47,13 +47,13 @@ one-sided (trap 19) and this was not the change's target.
 |---|---|---|---|
 | **C0** | Prove the accumulator's `L` before promoting it | ✅ **DONE 2026-07-31** | 333,684 exhaustive configs vs an independent set oracle; 7 perturbations, 6 caught, 7th a proven no-op |
 | **C1** | Give the accumulator an unconditional length histogram (`deposited_lengths`) | ✅ **DONE 2026-07-31** | `Σ = Σ node_start_count = qc.deposited`, enforced in the accumulator AND at the payload door; parity gate auto-covers it; 6 perturbations |
-| **C2** | switch every consumer to the accumulator, delete the scanner histogram, re-point `rigel report` | ✅ **DONE 2026-08-01** | all six sub-gates met; `payload_schema_digest` never moved; report keys identical and now sum to the library. `LEDGER.md` |
-| **C2.6** | search EVERY fragment's unsequenced gaps for introns, not only unspliced ones. Spec: **`docs/SPEC_GAP_INTRONS.md`** | ✅ **DONE 2026-08-01** — `LEDGER.md`'s C2.6 entry | ⭐ **G-sd MET: +27.0 % → +1.98 %.** G-tail 85 % met (0.00909 → **0.00137** above the true 713 bp ceiling; `dropped_too_long` **280,558 → 38,309**) and ⛔ **the residual is LOCALISED, not excused** — it is D3, measured at **98.5 %** of what is left. G-gdna control **bit-identical** |
+| **C2** | switch every consumer to the accumulator, delete the scanner histogram, re-point `rigel report` | ✅ **DONE 2026-08-01** | all six sub-gates met; `payload_schema_digest` never moved; report keys identical and now sum to the library. `docs/WIP.md` |
+| **C2.6** | search EVERY fragment's unsequenced gaps for introns, not only unspliced ones. Spec: **`docs/accumulator/SPEC_GAP_INTRONS.md`** | ✅ **DONE 2026-08-01** — `docs/WIP.md`'s C2.6 entry | ⭐ **G-sd MET: +27.0 % → +1.98 %.** G-tail 85 % met (0.00909 → **0.00137** above the true 713 bp ceiling; `dropped_too_long` **280,558 → 38,309**) and ⛔ **the residual is LOCALISED, not excused** — it is D3, measured at **98.5 %** of what is left. G-gdna control **bit-identical** |
 | **C2.7** | ⭐ **D3 — a mate gap holding MORE THAN ONE annotated intron keeps only the first cut** | ⛔ **the only known mechanism left in the tail.** Measured, not hypothesised: emitting every intron in the gap takes the residual to **0.00002** and `dropped_too_long` to **389** | needs the per-gap unanimity test to compare intron **sets** rather than one intron — that is the real work, and M3 did not do it |
-| **C3** | §8.1(b): divide each pool by its own opportunity. ⭐ **The formula is DERIVED and PROVEN** — `docs/JUNCTION_OPPORTUNITY.md` | ⭐ **UNBLOCKED** — the anchor is clean. ⛔ **But re-run `JUNCTION_OPPORTUNITY.md` §3.2's θ control first**: its +59.8 % sd and +0.3 % mean were measured against the contaminated anchor AND against a pool that has since moved to −9.58 % / −22.46 % | ⚠ **G3 SPLITS**: G3a (mean) targets the measured **+0.3 %** achievable with true θ; G3b (sd, ceiling) was **C2.6's gate** and is met |
+| **C3** | §8.1(b): divide each pool by its own opportunity. ⭐ **The formula is DERIVED and PROVEN** — `docs/accumulator/JUNCTION_OPPORTUNITY.md` | ⭐ **UNBLOCKED** — the anchor is clean. ⛔ **But re-run `docs/accumulator/JUNCTION_OPPORTUNITY.md` §3.2's θ control first**: its +59.8 % sd and +0.3 % mean were measured against the contaminated anchor AND against a pool that has since moved to −9.58 % / −22.46 % | ⚠ **G3 SPLITS**: G3a (mean) targets the measured **+0.3 %** achievable with true θ; G3b (sd, ceiling) was **C2.6's gate** and is met |
 | **C4** | Gate the length discriminant on both pools having data | independent — any time | the `strand_evidence` analogue |
 | **C5** | Delete `ScanCache.fl_rna_counts`; verify D7 | ✅ **DONE 2026-08-01, inside C2** | grep clean; D7 asserted end to end and perturbation-proven (`tests/test_d7_transcript_eff_lengths.py`) |
-| **→** | **re-run `scripts/design/length_likelihood_ab.py`**, then decide `CalibrationConfig.length_likelihood` | after C3 | `SOLVER_OBSERVABLES_PLAN.md` §6.4 |
+| **→** | **re-run `scripts/design/length_likelihood_ab.py`**, then decide `CalibrationConfig.length_likelihood` | after C3 | `docs/calibration/SOLVER_OBSERVABLES_PLAN.md` §6.4 |
 | **→** | **regenerate `tests/golden/` ONCE** | after C3 | ⚠ 21 goldens are stale from P1 and will move again at C2/C3 — regenerate **once**, at the end, and ⛔ regenerate twice and diff (`TODO.md` §7) |
 
 ✅ **THE DECISION THAT BLOCKED C2 IS MADE** (owner, 2026-08-01) and it was **neither** option offered:
@@ -67,7 +67,7 @@ block records the ruling and why both offered options were wrong. C2.0 landed on
   mismatch entirely and **55 %** of the sd gap. Nothing downstream reads it yet; that is C2.
 * ✅ **`build_fl_models` anchors on `deposited_lengths`, and the scanner histogram no longer exists** (C2).
   Its only argument is the payload, so a mixed-frame call is unrepresentable rather than discouraged.
-* ⛔ **The residual was TWO defects, not one — measured 2026-08-01, `docs/JUNCTION_OPPORTUNITY.md`.**
+* ⛔ **The residual was TWO defects, not one — measured 2026-08-01, `docs/accumulator/JUNCTION_OPPORTUNITY.md`.**
   The **+7.7 % mean** IS the junction-opportunity tilt and C3 removes it almost exactly (+8.0 % → +0.3 %
   against truth, corrected with the true θ). The **+32 % sd was NOT**: correcting perfectly closes only
   **~19 %** of it, because the rest was an **uncut intron** — present in the *anchor* as well, and so in
@@ -77,7 +77,7 @@ block records the ruling and why both offered options were wrong. C2.0 landed on
   fragments from `RNA_SPLICED` removes exactly the ones whose mates sit far apart, so the pool the
   fragment-length model is FITTED FROM is now length-selected **short**: **−9.58 % mean / −22.46 % sd**
   against truth, where cutting the intron and *keeping* the fragment reads **+0.67 % / +2.40 %**. The
-  purity argument for D1 still holds; what is now known is its price. `LEDGER.md` C2.6.
+  purity argument for D1 still holds; what is now known is its price. `docs/WIP.md` C2.6.
 
 ---
 
@@ -96,7 +96,7 @@ That is not a design. It is a gap that was filled with the nearest available arr
 
 ⛔ **Everything in §1–§3 describes the tree BEFORE C2 (2026-08-01) and is kept as the record of what was
 wrong and why.** Definitions **A** and **B** no longer exist; `FragmentLengthModels` no longer exists;
-`build_fl_models` takes the payload and nothing else. Read `LEDGER.md`'s C2 entry for what replaced them.
+`build_fl_models` takes the payload and nothing else. Read `docs/WIP.md`'s C2 entry for what replaced them.
 
 ### 1.1 Three definitions of "fragment length", all live
 
@@ -151,7 +151,7 @@ Two mechanisms, and they are separable:
 
 * the **junction-opportunity tilt** — longer fragments cross more junctions, so they are over-represented
   in `RNA_SPLICED`. The `rna/global` ratio rises with length (log-ratio vs length, corr **+0.70**), and the
-  measured +11.6 % / +71 % sits against `S5_DESIGN_LOG.md` §3.6's independently-predicted **+14 % / +50 %**;
+  measured +11.6 % / +71 % sits against `docs/calibration/S5_DESIGN_LOG.md` §3.6's independently-predicted **+14 % / +50 %**;
 * the **frame mismatch** — a 53× excess of >500 bp molecules and a support ceiling 287 bp apart is not a
   smooth opportunity effect. Definition **B** is transcript-space and unanimity-gated; **C** is genomic
   path length over everything that deposited.
@@ -163,9 +163,9 @@ Two mechanisms, and they are separable:
 | | defect | evidence |
 |---|---|---|
 | **D1** | **Three definitions of one quantity**, and two of them are summed into a single array | §1.1 |
-| **D2** | **EB shrinkage mixes frames** — accumulator-frame pools shrunk toward a scanner-frame anchor. `CARRY_FORWARD.md` §3 trap 27, and this is the *shipped* instance of it | `fl.build_fl_models` |
+| **D2** | **EB shrinkage mixes frames** — accumulator-frame pools shrunk toward a scanner-frame anchor. `docs/SESSION_HANDOFF.md` §3 trap 27, and this is the *shipped* instance of it | `fl.build_fl_models` |
 | **D3** | **`global_model` is not unconditional**, so it is not a library FL distribution — yet it is the EB anchor *and* the QC number reported as the library's fragment length | §1.1, and the comment at `bam_scanner.cpp:1699` claims otherwise |
-| **D4** | **The pools are opportunity-tilted and uncorrected.** `ACCUMULATOR_DESIGN.md` §8.1(b) names the fix and it has been **"not yet decided"** since S5.b | §2 |
+| **D4** | **The pools are opportunity-tilted and uncorrected.** `docs/accumulator/DESIGN.md` §8.1(b) names the fix and it has been **"not yet decided"** since S5.b | §2 |
 | **D5** | **`ScanCache.fl_rna_counts` is dead** — written from the scanner's `SPLICED_ANNOT` category, read back, and never consumed (`calibration_inputs` uses the accumulator pool instead). A field whose name says it is live | `grep fl_rna` |
 | **D6** | **The scanner silently drops fragments** whose candidate transcripts disagree on length (`n_frag_length_ambiguous`), a population the accumulator handles by a different rule (`path_ambiguous`). Two subsystems, two exclusion policies, one quantity | `resolve_context.h:137-148` |
 | **D7** | **The shrunk pmf is reused for the EM's transcript effective lengths**, so a frame error in the anchor propagates into every transcript's effective length — not only into calibration | `pipeline.py:438` |
@@ -182,7 +182,7 @@ The principle, and everything below follows from it:
 > **ONE definition of fragment length — the accumulator's `L` — measured in ONE place, over ONE stated
 > population, with every conditioning made explicit and corrected for its own opportunity.**
 
-`L` is the right definition and it is already the specification: `ACCUMULATOR_DESIGN.md` §3.1, executable
+`L` is the right definition and it is already the specification: `docs/accumulator/DESIGN.md` §3.1, executable
 in `tests/native/_accumulator_reference.py`. Nothing else needs inventing.
 
 ### C0 — ✅ **DONE 2026-07-31: prove `L` before promoting it.** `tests/native/test_fragment_length_proof.py`
@@ -191,9 +191,9 @@ in `tests/native/_accumulator_reference.py`. Nothing else needs inventing.
 of six hand-picked cases written by the same author as the code. It now has an independent **set-arithmetic
 oracle** (no sorting, no merging, no ``searchsorted``) against which **333,684 exhaustive configurations**
 — the complete space over a 12 bp reference including a 1 bp node — plus 4,000 randomised at realistic
-scale all pass, for ``L`` **and** all four deposit populations. `ACCUMULATOR_DESIGN.md` §3.1's requirement
+scale all pass, for ``L`` **and** all four deposit populations. `docs/accumulator/DESIGN.md` §3.1's requirement
 that "whatever counts toward ``L`` must also count as coverage for crossing" is now enforced from one set.
-**7 perturbations, 6 caught**; the 7th is provably a QC-counter-only no-op. See `LEDGER.md`.
+**7 perturbations, 6 caught**; the 7th is provably a QC-counter-only no-op. See `docs/WIP.md`.
 
 ### C1 — ✅ **DONE 2026-07-31.** Give the accumulator an unconditional length histogram ⭐ **the keystone**
 
@@ -201,7 +201,7 @@ that "whatever counts toward ``L`` must also count as coverage for crossing" is 
 zero-gDNA library the mean gap closed **11.6 % → 7.7 %**, the sd gap **71.1 % → 32.0 %**, and the support
 ceiling mismatch (713 vs 1000) entirely. The residual is the junction-opportunity tilt — C3's target, now
 against a same-frame reference. 6 perturbations; the 6th found a missing test rather than a bug. Every
-existing scan cache was correctly refused and rebuilt (56 s). See `LEDGER.md`.
+existing scan cache was correctly refused and rebuilt (56 s). See `docs/WIP.md`.
 
 ⛔ **Nothing downstream has moved**: `build_fl_models` still reads the scanner anchor. **C2 is the switch.**
 
@@ -295,7 +295,7 @@ population becomes *stated*, which is the point.
 
 | | gate, written FIRST and verified failing |
 |---|---|
-| **C2.0** | ✅ **MET.** The gate as originally written was unsatisfiable (artifacts never deposit). The replacement is an exact identity spanning **both** subsystems, in C1's G2 form: `Σ census − census[SPLICE_ARTIFACT] == qc.deposited + Σ qc.dropped_* + n_deposit_not_offered`. ⭐ Plus an **independent** derivation of the artifact count — scan one BAM against the same index with and without a blacklist; `qc.deposited`, from a subsystem that has never heard of an artifact, must fall by exactly the artifact census. **6 perturbations, all caught**; two needed new fixtures built for them (see `LEDGER.md`) |
+| **C2.0** | ✅ **MET.** The gate as originally written was unsatisfiable (artifacts never deposit). The replacement is an exact identity spanning **both** subsystems, in C1's G2 form: `Σ census − census[SPLICE_ARTIFACT] == qc.deposited + Σ qc.dropped_* + n_deposit_not_offered`. ⭐ Plus an **independent** derivation of the artifact count — scan one BAM against the same index with and without a blacklist; `qc.deposited`, from a subsystem that has never heard of an artifact, must fall by exactly the artifact census. **6 perturbations, all caught**; two needed new fixtures built for them (see `docs/WIP.md`) |
 | **C2.1** | ⭐ **the anchor really moved** — assert `build_fl_models`' `global_pmf` equals `payload.deposited_lengths` normalised, NOT `frag_length_models.global_model.counts`. Then re-measure §2's table: the mean/sd gap to the RNA pool must read **+7.7 % / +32 %**, the C1 numbers, not the old +11.6 % / +71 % |
 | **C2.2** | ⛔ **grep is the gate**: `grep -rn "FragmentLengthModels\|frag_length_observations\|_replay_fraglen\|n_frag_length_" src/` returns **nothing**. A partial delete that still compiles is the failure mode |
 | **C2.3** | `rigel report` on a pilot condition produces the **same splice-breakdown keys** as before (option (a)); the FL histogram section is sourced from `deposited_lengths` + the 5 pools. ⚠ Diff the JSON against a report generated at `d045d820` |
@@ -315,7 +315,7 @@ scorer.
 ⚠ **Expect the goldens to move again** (the FL models change ⇒ scoring and eff-lengths change). They are
 already pending regeneration from P1/P2; regenerate **once**, after C3.
 
-### C3 — Land `ACCUMULATOR_DESIGN.md` §8.1(b): divide each pool by its own opportunity
+### C3 — Land `docs/accumulator/DESIGN.md` §8.1(b): divide each pool by its own opportunity
 
 `placements(w)` for a crossing pool, `(ell − w + 1)+` for a contained pool, **the transcript-level count**
 for the junction pool. §8.1(b) already states the formulas and flags the junction one as the hard case.
@@ -370,4 +370,4 @@ Four such conditions are on disk. Pass/fail.
 
 ⛔ **Do not damp the length channel to make §2's numbers agree.** It is reporting a real disagreement
 between two length models. Damping hides an upstream defect behind a tuned constant —
-`CARRY_FORWARD.md` §3 trap 12, recorded three times over.
+`docs/SESSION_HANDOFF.md` §3 trap 12, recorded three times over.

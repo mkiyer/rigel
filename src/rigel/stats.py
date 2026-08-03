@@ -76,7 +76,7 @@ class PipelineStats:
     # ⭐ ONE observation per fragment the scanner offers the accumulator — unique mapper, resolved,
     # non-chimeric. That population is STATED, which the predecessor's was not: these counts used to
     # be read off the fragment-length category models, so they silently counted only the fragments
-    # that also yielded a length observation. ``docs/FRAGMENT_LENGTH_AUDIT.md`` §4.
+    # that also yielded a length observation.
     #
     # ⚠ The field names are derived, not chosen — ``rigel.splice.census_field`` builds each one from
     # its :class:`~rigel.splice.SpliceType` member name, and the C++ builds the same key from

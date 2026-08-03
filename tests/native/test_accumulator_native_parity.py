@@ -1,7 +1,7 @@
 """THE S3 GATE — the native accumulator against the executable specification, byte for byte.
 
     Spec: ``_accumulator_reference.py``   ·   Matrix: ``test_accumulator_spec.py``
-    Arbitration: ``test_gap_hypothesis_arbitration.py``   ·   Plan: ``docs/PLAN_TWO_PASS.md`` §4 S1
+    Arbitration: ``test_gap_hypothesis_arbitration.py``
 
 ``test_accumulator_spec.py`` says what the deposit rule *is*. This module says the C++ implements that
 exact rule and no neighbouring one: the same fragments go into both accumulators and **every array, every
@@ -25,7 +25,7 @@ WHY THE FIELD LIST IS NOT WRITTEN OUT HERE
 
 ⚠ **This module must never be skipped.** The import is plain, so a missing or stale extension is a hard
 error rather than a silent pass — a gate that can quietly not run is worse than no gate (see
-``CARRY_FORWARD.md`` §3 trap 1).
+
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ from ._accumulator_reference import (
 #
 # ⛔ THREE junctions, not one, and the count is load-bearing. With a single annotated junction no fragment
 # can use two, so "credit only the leftmost junction" — the rule the design deliberately REVERSED, and
-# which `CARRY_FORWARD.md` §3 trap 21 still recommends — was invisible to this gate: a perturbation
+# which still recommends — was invisible to this gate: a perturbation
 # implementing it passed 5/5. [100,200) and [201,900) are separated by the 1 bp exon n2, so one fragment
 # can legitimately use both; [400,900) shares an acceptor with [201,900) but sits on the other strand, so
 # the strand filter has something to discriminate that coordinates alone cannot.

@@ -8,7 +8,7 @@ latent rate ``ρ ~ P(ρ)``; :meth:`~DensityNPMLE.fit` estimates the population `
    density BEFORE the pass. It models the hybrid-capture ENRICHMENT/DEPLETION landscape, **not** composition
    (a total-density model is composition-vacuous — count-zero-information). Its projection gives each node's
    ``(mu_proj, var_proj)``, from which the sweep builds the belief-free message transfer variance σ²_transfer
-   (`docs/CARRY_FORWARD.md`). This is the only NPMLE running in the INITIAL solve; it never
+  This is the only NPMLE running in the INITIAL solve; it never
    votes composition. (`calibrate.enrichment_prior`.)
 
 2. **gDNA hyperprior → ψ** (:meth:`~DensityNPMLE.logprior`). Fit AFTER the pass-0 solve on the **DECONVOLVED
@@ -17,7 +17,7 @@ latent rate ``ρ ~ P(ρ)``; :meth:`~DensityNPMLE.fit` estimates the population `
    ``f_g`` axis is the composition (gDNA) arm of ψ for the REFIT solve. ANCHORED, EXTREMELY WEAK
    (``n_eff ≈ 0.15`` pseudo-obs — the strand likelihood + messages dominate). (`calibrate.gdna_prior`.)
 
-Design (docs/CARRY_FORWARD.md §8-9, docs/CARRY_FORWARD.md; docs/CARRY_FORWARD.md §5 for the two roles):
+Design (the two roles):
 
 * **Fixed-Kernel Poisson Mixture** — ``P(log ρ) = Σ_j w_j·N(log ρ; log ρ_j, h²)``, a mixture of fixed-width
   (bandwidth ``h``) Gaussian kernels on a log-ρ grid; the weights are fit by plain EM (monotone,
@@ -128,7 +128,7 @@ def _em_weights(logL, logwc, n_iter, tol):
 
 def _kde_density(log_rho, a_cells, w_cells, h, *, a_floor=-np.inf, w_floor=0.0, h_floor=None):
     """Additive, occupancy-weighted, fixed-bandwidth KDE on the log-rate grid (the Role-B representation —
-    ``docs/CARRY_FORWARD.md``): ``Σ_c w_c·N(grid; a_c, h) + w_floor·N(grid; a_floor, h_floor)`` → a
+    ``Σ_c w_c·N(grid; a_c, h) + w_floor·N(grid; a_floor, h_floor)`` → a
     normalized density on ``log_rho`` (G,).
 
     Each training cell deposits its OWN fixed-width kernel at its (resolution-floored) deconvolved-gDNA point
@@ -196,7 +196,7 @@ class DensityNPMLE:
         extrapolates ``ρ_g=f_g·M/E`` above the grid — avoiding the clamped-tail false-positive), the bottom
         is below the bulk (zero-anchor room; the low side clamps safely to the depleted level).
 
-        ``additive=True`` builds the **Role-B representation** (``docs/CARRY_FORWARD.md``) instead of the
+        ``additive=True`` builds the **Role-B representation** instead of the
         EM mixture: an **occupancy-weighted, fixed-bandwidth KDE** on the deconvolved-gDNA point estimates
         (each cell one kernel, weighted by node count — no EM competition, occupancy=height) plus a **weak
         1-pseudo-observation floor** at ``background.log_rho_floor`` (NOT the ``n_regions`` aggregate cell).
@@ -223,8 +223,8 @@ class DensityNPMLE:
         )  # ≥ max density ⇒ no upward extrapolation in the projection
         # THE AGGREGATE BACKGROUND CELL — the pooled intergenic[/intron] regions injected as ONE Poisson
         # observation at the DERIVED floor density ``ρ_floor`` (``background.log_rho_floor``) over the genome-scale
-        # ΣE. This is the hybrid the design calls for (docs/CARRY_FORWARD.md §5B; gdna_background_floor_derivation
-        # .md): the pooled rate ``Σg/ΣE`` Fisher-blended with the per-region resolution wall ``1/harmmean(E_zero)``
+        # ΣE. This is the hybrid the design calls for (B; gdna_background_floor_derivation
+        # md): the pooled rate ``Σg/ΣE`` Fisher-blended with the per-region resolution wall ``1/harmmean(E_zero)``
         # — NOT the old ``e^{−ρΣE}`` which drove ρ to ``1/ΣE`` (~3 logs too low, the confident-FP seed). The cell's
         # huge ΣE makes it a SHARP low mode AT ρ_floor; it carries the population weight (``n_regions``). The pooled
         # regions are excluded from ``g_hat`` by the caller, so nothing is double-counted.
@@ -239,7 +239,7 @@ class DensityNPMLE:
 
         gc, ec, tc, wc = _collapse(g_hat, eff, var_g, dlog=log_dlog, dt=tau_dt)
         if additive:
-            # ── THE ROLE-B ADDITIVE KDE (docs/CARRY_FORWARD.md) — occupancy kernels + a weak floor, NO EM. ──
+            # ── THE ROLE-B ADDITIVE KDE — occupancy kernels + a weak floor, NO EM. ──
             # Each cell's point estimate is its deconvolved-gDNA density, floored at the 1-count resolution wall
             # (a zero-ĝ / pure-RNA node reads "gDNA ≤ 1/E", not −∞). Occupancy ``wc`` is the weight; the
             # background is a SEPARATE 1-pseudo-observation floor at ρ_floor — never the ``n_regions`` cell.
@@ -315,7 +315,7 @@ class DensityNPMLE:
         """Project onto the ``f_g`` solve grid → ``(n_nodes, K)`` additive term = ``log P(log ρ_g)`` at
         ``ρ_g = f_g·M/E``. **Bare** — no reference prior, no measure term, no Jacobian.
 
-        This is the ``ψ_λ = strand + logP_g + logP_r`` result (`docs/CARRY_FORWARD.md` §2). The
+        This is the ``ψ_λ = strand + logP_g + logP_r`` result. The
         latents are rates; conditioning on ``M`` contributes no ``f_g``-dependent Jacobian; and because
         ``logP`` is a density in **log**-rate, its conversion to a linear-rate density (``−log ρ_g``, i.e.
         ``−log f_g`` up to a constant) **cancels the ``log σ'(λ)`` change-of-variable Jacobian exactly**.
@@ -330,7 +330,7 @@ class DensityNPMLE:
         The grid top is the max density, so ``ρ_g = f_g·M/E ≤ M/E`` never extrapolates above it; the low
         side clamps to the depleted level.
 
-        **The background enters SMOOTHLY, never as a clamp** (`docs/CARRY_FORWARD.md` §5B). When this prior was
+        **The background enters SMOOTHLY, never as a clamp** (B). When this prior was
         fit with a background, the aggregate ``ρ_bg`` is a **pinned Gaussian component of the mixture** (see
         :meth:`fit`) — it fills the ``[0, 1/E]`` low-density vacuum the NPMLE cannot resolve, as ordinary
         (already-normalized) prior mass in ``logP``. There is **no** one-sided floor / half-Gaussian wall: a
@@ -348,7 +348,7 @@ class DensityNPMLE:
     def project(self, mass, eff, *, chunk: int = 8192):
         """Belief-free projection of each node's total log-density ``d = log(mass/eff)`` onto the mixture
         ``Σ_j w_j·N(μ_j, h²)`` → the latent log-rate's posterior ``(mu_proj, var_proj)`` (design doc
-        `docs/CARRY_FORWARD.md` §1 role 2). The observed density is soft-assigned to the mixture
+         role 2). The observed density is soft-assigned to the mixture
         components by responsibilities ``r_j ∝ w_j·N(d; μ_j, h²)``; then::
 
             mu_proj  = Σ_j r_j·μ_j                              (denoised rate — snaps toward a mode)

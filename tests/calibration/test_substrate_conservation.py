@@ -11,7 +11,7 @@ and S5.e made on three ``test_bp_solver`` tests).
 ⭐ **What is kept is the thing that made it worth having: it runs on a REAL SCAN**, not a hand-built
 fixture, so the payload, the index and the geometry must agree with each other rather than with a
 fixture author. The invariants are re-derived from the FRAGMENT BUFFER and the INDEX — sources
-independent of the accumulator (`CARRY_FORWARD.md` §3 trap 1: a validator that calls the builder's own
+independent of the accumulator (a validator that calls the builder's own
 helper validates nothing).
 """
 

@@ -235,7 +235,7 @@ class CalibrationConfig:
     #: :mod:`rigel.calibration.gdna_strand`, next to the estimator they parameterise, and the
     #: shrinkage weight is DERIVED from them rather than asserted. Four fields
     #: (``{gdna,rna}_strand_prior_{alpha_beta,weight}``) collapsed to two constants + one
-    #: structural zero; see `docs/CARRY_FORWARD.md`.
+    #: structural zero.
 
     #: **Sweep grid resolution** ``K`` for the per-node log-density log-odds solve over ``λ = logit(f_g)``
     #: (``simplex_logodds``, driven by ``bp_solver.node_sweep``; single-strand nodes are exact 1-D, AMBIG
@@ -265,11 +265,11 @@ class CalibrationConfig:
     #: fit by plain EM — deterministic, no spline. The fixed ``h`` is the KDE-style bandwidth: it forbids any
     #: peak sharper than ``h`` (smooth, never a bed-of-nails) and the projected prior is extremely weak
     #: (``n_eff≈0.15`` pseudo-obs), so strand + messages dominate. Grid size / EM iters are perf-only knobs
-    #: left at the fitter's defaults. Design: ``docs/CARRY_FORWARD.md``.
+    #: left at the fitter's defaults.
     npmle_bandwidth: float = 0.15
 
     #: **Aggregate DNA-background floor** (`calibration.background_reference`,
-    #: ``docs/CARRY_FORWARD.md``). Measure the genome-wide DNA background as a
+    # Measure the genome-wide DNA background as a
     #: pooled scalar ``(log ρ_bg, σ_bg)`` and apply it as a ONE-SIDED log-floor in the gDNA prior — data-driven
     #: crush protection that is DORMANT for a DNA-free / fully-depleted library (never manufactures gDNA) and
     #: never a scale/denominator. ``False`` ⇒ no floor (the pre-background behaviour).
@@ -284,7 +284,7 @@ class CalibrationConfig:
     #: background pool before aggregation; ``None`` ⇒ no trim. Only meaningful with ``background_include_introns``.
     background_robust_trim_mad: float | None = None
 
-    #: **gDNA intron factory** (`docs/CARRY_FORWARD.md`). ``True`` ⇒ peel confident gDNA
+    # **gDNA intron factory**. ``True`` ⇒ peel confident gDNA
     #: from INTRON nodes against the intergenic background BEFORE the pass-0 solve: a per-intron
     #: ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)`` λ-factor (introns are off-target ⇒ ρ_bg is their TRUE gDNA
     #: density, a two-sided estimate; peels gDNA, not RNA — strand-free). Resolves the unstranded-intron gDNA the
@@ -302,7 +302,7 @@ class CalibrationConfig:
     intron_factory: bool = True
 
     #: **The FRAGMENT-LENGTH composition likelihood** (`calibration.length_likelihood`, P2 —
-    #: `docs/SOLVER_OBSERVABLES_PLAN.md` §6). The accumulator has stored ``inv_length_sum`` and
+    # The accumulator has stored ``inv_length_sum`` and
     #: ``length_sum`` on every population since S5.a; this turns them into an ``(m, K)`` log-likelihood on
     #: the ``λ`` grid, added to ψ beside the strand term and the intron factory, with its curvature
     #: registered as composition evidence ``I_length``.
@@ -310,7 +310,7 @@ class CalibrationConfig:
     #: ⭐ **Why it is the only source that reaches an AMBIG node or an unstranded library.** The strand
     #: Fisher information is ``I(f_g) ∝ (2κ−1)²`` — identically 0 at ``κ = ½`` — and on a both-strand node
     #: the strand term is rank-1 in the tilt ``θ``, so its Schur complement on ``λ`` is exactly 0. The
-    #: length likelihood has no ``θ`` dependence at all. `LEDGER.md` P0 measured **13.3–40.1 % of library
+    #: length likelihood has no ``θ`` dependence at all. Measured: **13.3–40.1 % of library
     #: mass** with no own composition evidence in EVERY chr22 pilot condition (93.3–100 % of AMBIG mass),
     #: and **100 %** on all four zero-gDNA and both unstranded conditions.
     #:
@@ -394,7 +394,7 @@ class PipelineConfig:
     scan: BamScanConfig = field(default_factory=BamScanConfig)
     scoring: FragmentScoringConfig = field(default_factory=FragmentScoringConfig)
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
-    #: ⭐ The second pass's multinomial draw (`docs/SPEC_SECOND_PASS.md` §5.2). Pass 1 holds every
+    # ⭐ The second pass's multinomial draw. Pass 1 holds every
     #: fragment whose unsequenced gap has more than one surviving explanation; the drain picks one
     #: hypothesis each and re-deposits, and this seeds that draw.
     #:
@@ -427,28 +427,28 @@ class PipelineConfig:
 class TranscriptGeometry:
     """Pre-computed transcript/gene geometry for the EM solver.
 
-    Computed once from ``TranscriptIndex`` + the RNA :class:`~rigel.frag_length_model.FragmentLengthModel`
-    at the start of ``quant_from_buffer``.  Not user-configurable — these are
-    derived from the reference and the fitted models.
+     Computed once from ``TranscriptIndex`` + the RNA :class:`~rigel.frag_length_model.FragmentLengthModel`
+     at the start of ``quant_from_buffer``.  Not user-configurable — these are
+     derived from the reference and the fitted models.
 
-    ⚠ That model is built by ``FragmentLengthModel.from_pmf`` from
-    ``FLModels.rna_pmf``, which since C2 is derived from the accumulator payload alone
-    (``docs/FRAGMENT_LENGTH_AUDIT.md`` D7): the effective lengths here and the calibration divisors
-    read the SAME pmf, so a change to it reaches every transcript in the EM, not only calibration.
+     ⚠ That model is built by ``FragmentLengthModel.from_pmf`` from
+     ``FLModels.rna_pmf``, which since C2 is derived from the accumulator payload alone
+    the effective lengths here and the calibration divisors
+     read the SAME pmf, so a change to it reaches every transcript in the EM, not only calibration.
 
-    Parameters
-    ----------
-    effective_lengths : np.ndarray
-        float64[n_transcripts] — effective transcript lengths.
-    effective_lengths_em : np.ndarray, optional
-        float64[n_transcripts] — EM-only effective transcript lengths. When
-        omitted, EM uses ``effective_lengths``.
-    exonic_lengths : np.ndarray
-        float64[n_transcripts] — spliced exonic lengths.
-    t_to_g : np.ndarray
-        int32[n_transcripts] — transcript-to-gene mapping.
-    transcript_spans : np.ndarray
-        float64[n_transcripts] — genomic transcript spans.
+     Parameters
+     ----------
+     effective_lengths : np.ndarray
+         float64[n_transcripts] — effective transcript lengths.
+     effective_lengths_em : np.ndarray, optional
+         float64[n_transcripts] — EM-only effective transcript lengths. When
+         omitted, EM uses ``effective_lengths``.
+     exonic_lengths : np.ndarray
+         float64[n_transcripts] — spliced exonic lengths.
+     t_to_g : np.ndarray
+         int32[n_transcripts] — transcript-to-gene mapping.
+     transcript_spans : np.ndarray
+         float64[n_transcripts] — genomic transcript spans.
     """
 
     effective_lengths: np.ndarray

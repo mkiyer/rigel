@@ -140,6 +140,6 @@ class TestFromCounts:
 
 
 # ⛔ `TestToDict` lived here and was DELETED by C2 with the container it tested
-# (docs/FRAGMENT_LENGTH_AUDIT.md): it pinned the SCANNER's raw global + per-splice-category
+# it pinned the SCANNER's raw global + per-splice-category
 # histograms, which are gone. The report's fragment-length categories now come from
 # `FLModels` alone and are gated in tests/test_summary_report.py.

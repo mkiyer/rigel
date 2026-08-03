@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Re-measure FRAGMENT_LENGTH_AUDIT.md §2's gap table against the CURRENT anchor, and score it on TRUTH.
+"""Re-measure 's gap table against the CURRENT anchor, and score it on TRUTH.
 
 ⭐ **The falsification this area never had.** On a zero-gDNA condition every fragment is RNA, so the
 unconditional anchor and the RNA pool describe **one population** and any gap between them is bias.
@@ -10,7 +10,7 @@ junction-opportunity tilt (C3's target). This script says which of those the *sh
 ⚠ It reads the anchor **through ``build_fl_models``**, not off the payload directly — the question is
 what the tool is wired to use, not what is available to it.
 
-⭐ **The truth panel (``--truth``) is C2.6's gate**, `docs/SPEC_GAP_INTRONS.md` §4. The simulator writes
+⭐ **The truth panel (``--truth``) is C2.6's gate**, The simulator writes
 ``truth_fragment_lengths.tsv`` beside every condition, so the library's realized fragment-length support
 is known **exactly** and none of the targets below is chosen:
 
@@ -26,7 +26,7 @@ is known **exactly** and none of the targets below is chosen:
 
 ⛔ **Nothing here is tuned.** Every target is read from the truth file or is a control that must not
 move. If a residual will not close, it is measured and reported — never closed with a constant
-(`CARRY_FORWARD.md` §3 trap 12).
+
 
 Usage::
 
@@ -47,7 +47,7 @@ _RUNS = Path.home() / "Downloads" / "rigel_runs"
 DEFAULT_PILOT = _RUNS / "suite" / "pilot" / "scan_cache"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
-#: The tail thresholds the audit and JUNCTION_OPPORTUNITY.md §4 quote, so the two are comparable.
+# The tail thresholds the audit and quote, so the two are comparable.
 TAIL_CUTS = (500, 600, 700, 800)
 
 
@@ -278,7 +278,7 @@ def main() -> int:
     if scored:
         print()
         print("═══ G-tail · the anchor against the library's TRUE support "
-              "(docs/SPEC_GAP_INTRONS.md §4) ═══")
+              " ═══")
         print(f"{'condition':<44} {'true ceil':>9} {'anchor ceil':>11} {'>ceiling':>9} "
               f"{'>=700':>9} {'too_long':>10} {'frac':>8}")
         print("-" * 116)

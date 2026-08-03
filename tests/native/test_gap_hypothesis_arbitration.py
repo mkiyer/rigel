@@ -1,6 +1,6 @@
 """⭐ The accumulator arbitrates: one surviving hypothesis deposits, two or more are deferred.
 
-    Spec: ``docs/SPEC_GAP_PATHS.md``   ·   Owner ruling, 2026-08-01
+       Owner ruling, 2026-08-01
 
 A fragment's unsequenced mate gap may hold no intron, one, or several, and which it is **cannot be
 observed** — the bases are not there. It is a likelihood question, and the likelihood needs a

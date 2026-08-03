@@ -17,7 +17,7 @@ This replaces the retired ``oracle_node_masses`` (in the deleted ``_metrics``/``
 deposited WHOLE fragments by SPAN with no intron-cutting — an INCOMPATIBLE basis with the accumulator the
 calibration actually consumes (per-base coverage, introns cut). That mismatch (e.g. it reported 0 RNA in
 high-expression exons where the accumulator has the real unspliced exon-body mRNA) confounded earlier
-"calibration error" conclusions. See docs/CARRY_FORWARD.md.
+"calibration error" conclusions.
 
 ⭐ **FIVE POPULATIONS ON THREE AXES**, each an integer count with two GENOME-strand columns::
 
@@ -133,10 +133,10 @@ class OracleTruth:
     def _validate(self) -> None:
         """Sum-to-full on EVERY bank, EXACTLY — no tolerance anywhere.
 
-        ⭐ Every bank is an integer count now, so ``np.array_equal`` is the right comparison for all of
-        them. The predecessor could only be exact on two of its four arrays because the other two were
-        float32 fractional MASS; a tolerance is what hid this project's factor-of-2 bug for months
-        (`CARRY_FORWARD.md` §3 trap 2), and there is no longer any reason to carry one.
+         ⭐ Every bank is an integer count now, so ``np.array_equal`` is the right comparison for all of
+         them. The predecessor could only be exact on two of its four arrays because the other two were
+         float32 fractional MASS; a tolerance is what hid this project's factor-of-2 bug for months
+        and there is no longer any reason to carry one.
         """
         for bank in _BANKS:
             full = np.asarray(getattr(self.full, bank), np.int64)
@@ -218,7 +218,7 @@ class OracleTruth:
     def junction_flux(self) -> dict:
         """Per-JUNCTION TRUE flux by origin. ⚠ ``gdna`` is identically zero and is returned anyway —
         an all-zero row is the statement "gDNA does not splice", and omitting it would make the
-        validator blind to a partition that suddenly produced one (`CARRY_FORWARD.md` §3 trap 1)."""
+        validator blind to a partition that suddenly produced one."""
         sj = lambda k: np.asarray(self.parts[k].sj_count, np.float64).sum(1)  # noqa: E731
         return {k: sj(k) for k in ORIGINS}
 

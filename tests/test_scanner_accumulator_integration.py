@@ -126,7 +126,7 @@ def multi_reference_bam(tmp_path):
     """A two-contig index and a BAM holding one fragment whose mates sit on DIFFERENT references.
 
     ⭐ This exists to make ``n_deposit_not_offered`` non-zero. Such a fragment is not one molecule
-    (``ACCUMULATOR_DESIGN.md`` §3.3) and a ``FragmentPath`` cannot express it — it carries one extent
+    and a ``FragmentPath`` cannot express it — it carries one extent
     on one cut axis — so the deposit adapter refuses it. ⚠ The predecessor computed a span per
     reference and deposited **all** of them onto ``exons.front().ref_id``, so one contig's
     coordinates landed on another's cut axis. The refusal is right; being silent about it was not.
@@ -267,7 +267,7 @@ class TestFragmentLengthAnchor:
     ``build_fl_models`` EB-shrinks the accumulator's pure pools toward an anchor. Until C2.1 that
     anchor was the **scanner's** histogram, which measures fragment length by two other rules over
     another population — accumulator-frame pools shrunk toward a scanner-frame anchor, which is
-    ``CARRY_FORWARD.md`` §3 trap 27 in shipped code (``docs/FRAGMENT_LENGTH_AUDIT.md`` D2).
+     in shipped code.
 
     ⚠ These tests use the blacklist fixture on purpose. On the plain oracle the two histograms are
     **byte-identical** — a perfect BAM with no ambiguity makes definitions A/B and C agree — so a
@@ -314,7 +314,7 @@ class TestFragmentLengthAnchor:
         all three histograms are read off that one object in that one frame. There is no
         ``global_counts`` parameter to get wrong.
 
-        ⚠ ``CARRY_FORWARD.md`` §3 trap 27 is "do not recompute what a sibling already holds". D2 is
+        ⚠ is "do not recompute what a sibling already holds". D2 is
         its shipped instance. Making the mixed-frame call *unrepresentable* is a stronger remedy
         than any assertion about the value it would have produced.
         """
@@ -462,7 +462,7 @@ class TestSpliceCensus:
 
             deposited(no blacklist) − deposited(blacklisted) == census[SPLICE_ARTIFACT]
 
-        ⚠ ``CARRY_FORWARD.md`` §3 trap 1: a check that re-derives the number by the same route
+        ⚠: a check that re-derives the number by the same route
         checks nothing. This one crosses a subsystem boundary, so a census placed AFTER the hold-out
         return — reading a confident zero for the very category the report names — cannot survive it.
 
@@ -535,4 +535,4 @@ class TestSpliceCensus:
     # which C2.2 deleted along with the observations it counted. The population statement that
     # survives is the identity above: every censused fragment either deposits, is a named rejection,
     # or is a named hold-out. G6's 4.6 % measurement of the difference is recorded in
-    # docs/FRAGMENT_LENGTH_AUDIT.md §4, which is now the only place it exists.
+    # which is now the only place it exists.

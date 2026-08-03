@@ -1,7 +1,7 @@
 """The log-density 1-D/2-D per-node solver — the single production per-node solve driving
 ``bp_solver.node_sweep`` (the memory-prohibitive 2-simplex lattice it replaced is retired).
 
-Design: ``docs/CARRY_FORWARD.md``. The latent magnitude dof is the
+The latent magnitude dof is the
 gDNA-vs-RNA **log-odds** ``λ = logit(f_g) = log ρ_g − log ρ_rna`` (log-odds bounds the 5–6-decade ρ_g
 range and resolves both ``f_g→0`` and ``f_g→1`` vertices, which the uniform linear lattice cannot). We
 grid ``λ`` on a FIXED ``[−L, L]`` window (no node-adaptivity) and read out the linear fraction
@@ -11,7 +11,7 @@ tractable.
 The ``ψ`` integrand is ``strand + (gDNA arm) + (RNA arm) + the imputation messages``, where each **arm** is
 that component group's fitted log-rate prior when we have one, else the **Jeffreys reference**
 ``+½·log f`` (``_JEFFREYS_REF``). Derivation, review, and the resolved design:
-``docs/CARRY_FORWARD.md`` (§10 is authoritative).
+ (§10 is authoritative).
 
 Three facts that determine this file's shape:
 
@@ -69,7 +69,7 @@ _EPS = 1.0e-9
 #
 # ⚠ A DECLARED CHOICE, not forced by the likelihood: the observed-data Fisher information for f_g is
 # `∝ n(½−κ)²` = EXACTLY 0 on unstranded libraries, where the strand term is bit-flat and the posterior simply
-# IS this reference. Licensed as the "structural Jeffreys" prior (docs/CARRY_FORWARD.md §10.6); §10.5
+# IS this reference. Licensed as the "structural Jeffreys" prior; §10.5
 # records the known cost — it forbids the simplex vertices, where some truth genuinely lives.
 _JEFFREYS_REF = 0.5
 
@@ -258,7 +258,7 @@ def _local_loglik_logodds(
     takes its reference (a PRIOR-FREE solve is not a REFERENCE-FREE solve).
 
     ``f_g_ref`` / ``f_pos_ref`` / ``f_neg_ref`` (per-node ``(m,)``) are the count-zero-information freeze
-    reference (`docs/CARRY_FORWARD.md` §2): the strand mixture's variance is evaluated at THIS fixed
+    reference: the strand mixture's variance is evaluated at THIS fixed
     composition — not the grid ``f_g`` being integrated — so the count sets precision, not composition."""
     ap = np.asarray(allow_pos, bool)
     an = np.asarray(allow_neg, bool)
@@ -289,7 +289,7 @@ def _local_loglik_logodds(
     #    (Beta(½,½) when neither is fitted); the gDNA arm alone would leave f_g→1 unbounded, and the RNA arm
     #    alone would leave f_g→0 unbounded. ──
     psi = psi + _gdna_arm(lam, global_logprior) + _rna_arm(lam)
-    # ── the gDNA INTRON FACTORY λ-factor (gdna_intron_factory_design.md): a per-node (m,K) log-likelihood on
+    # ── the gDNA INTRON FACTORY λ-factor: a per-node (m,K) log-likelihood on
     #    the λ axis, ``log NegBinom(f_g·C; ρ_bg·E_g, α_eff)``, ADDED (not folded into the gDNA arm — that arm
     #    REPLACES the Jeffreys reference; folding would drop the f_g→1 bound). It peels confident gDNA from
     #    introns against the intergenic background; zero on non-intron nodes ⇒ a no-op there. ──
@@ -324,7 +324,7 @@ def _local_loglik_logodds(
             )
     # ── the SINGLE-λ composition message (the M6 rank-1 fix): ONE Gaussian on the log-odds grid variable λ
     #    DIRECTLY (not on log f_c) — the one gDNA-vs-RNA-total DOF, so ψ counts it ONCE, not twice
-    #    (`message_variance_derivation.md` §4). Enrichment-invariant: λ carries no reframe. ──
+    # Enrichment-invariant: λ carries no reframe. ──
     if lam_imp_mode is not None and lam_imp_prec is not None:
         lm_ = np.asarray(lam_imp_mode, np.float64)[:, None]
         lp_ = np.asarray(lam_imp_prec, np.float64)[:, None]
@@ -332,7 +332,7 @@ def _local_loglik_logodds(
     # ── NO change-of-variable Jacobian, and NO reference prior. Both are deliberate, and they are the SAME
     #    fact: `DensityNPMLE.logP` is a density in LOG-rate, so its conversion to a linear-rate density
     #    (−log f_g, up to a constant) cancels log σ'(λ) = log f_g + log(1−f_g) exactly, once per component.
-    #    Writing either alone is what produced the improper +0.5·λ ramp (docs/CARRY_FORWARD.md §2).
+    # Writing either alone is what produced the improper +0.5·λ ramp.
     #    ⇒ ψ_λ = strand + logP_g + logP_r, bare. ──
     return psi, f_pos, f_neg
 

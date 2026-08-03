@@ -1,6 +1,6 @@
 """The splice graph's structural flags on the accumulator's CONTIGUOUS-EDGE axis.
 
-    Graph: ``docs/CARRY_FORWARD.md`` §2.3   ·   Plan: ``docs/S5_DESIGN_LOG.md`` §2 (S5.e)
+    Graph: · (S5.e)
 
 The solver needs to ask, at a line, *"is this a transcript terminus?"* and *"is this a splice site, on
 which flank?"* — questions the 4-bit signature is structurally blind to. The graph answers them, and
@@ -12,7 +12,7 @@ reference *in opposite directions*.
 adjacent nodes, and there is no such line before the first or after the last — so the flags array and
 the payload's edge axis are the same axis, with no padding to align. What is left to test is that the
 flags land on the right LINE, and it is tested by **genomic coordinate** against a really scanned
-payload, never by re-deriving the same index arithmetic (`CARRY_FORWARD.md` §3 trap 1).
+payload, never by re-deriving the same index arithmetic.
 """
 
 from __future__ import annotations

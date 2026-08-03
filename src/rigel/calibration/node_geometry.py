@@ -12,7 +12,7 @@ sides. Dissolved with the pairs:
 
 * the **junction-strand routing** and the **exon-bit flank gating**, which existed to *guess* which flank
   a spliced deposit belonged to — the old accumulator attributed a splice to the node's edge rather than
-  to the junction's own coordinate (`CARRY_FORWARD.md` §3 trap 6). The v8 index states ``(src, dst,
+  to the junction's own coordinate. The v8 index states ``(src, dst,
   strand)`` explicitly, so the guess is replaced by the chain's own adjacency;
 * the ``_continues`` / ``_eff_spl_face`` far-boundary machinery, which chose between two per-face spliced
   divisors. S5.c left ONE crossing formula, so there is nothing to choose;
@@ -72,7 +72,7 @@ _EPS = 1.0e-9
 def _rate(numerator: np.ndarray, divisor: np.ndarray) -> np.ndarray:
     """``numerator / divisor``, and **0 where the divisor is 0** — never a floored division.
 
-    ⛔ `CARRY_FORWARD.md` §3 trap 23 and `effective_length`'s own contract: an object with no opportunity
+    ⛔ and `effective_length`'s own contract: an object with no opportunity
     for a component must emit nothing, at zero precision. The predecessor floored every divisor to
     ``_EPS`` instead, which is what produced densities of ~1e9 on the **12.4 %** of fine-partition nodes
     where the contained effective length collapses to exactly 0 — turning "no data" into a confident
@@ -121,7 +121,7 @@ class NodeGeometry:
     #: ``Σ 1/weight`` (weight = L at a node, L−1 at a line) and ``Σ L``. ⭐ Stored since S5.a and read by
     #: nobody until P2: `length_likelihood` turns them into composition evidence on the λ axis, which is
     #: the only source that speaks on an AMBIG node or an unstranded library
-    #: (`SOLVER_OBSERVABLES_PLAN.md` §6; `LEDGER.md` P0 measured 13.3–40.1 % of mass blind without it).
+    # (measured 13.3–40.1 % of mass blind without it).
     unspliced_inv_length_sum: np.ndarray
     unspliced_length_sum: np.ndarray
     #: float64[n_slots] — the gDNA divisor. Contained placements at a NODE, crossing placements at an EDGE.
@@ -143,7 +143,7 @@ class NodeGeometry:
     junction_count: np.ndarray
     #: float64[n_slots, 2] — the SUMMED junction divisor, same keying. Several junctions on one line are
     #: several estimates of one rate, so the pooled statement is ``Σcount / ΣE`` — the ratio of sums, never
-    #: the mean of ratios (`CARRY_FORWARD.md` §2, ``ρ_bg = Σg/ΣE``).
+    # the mean of ratios (``ρ_bg = Σg/ΣE``).
     eff_junction: np.ndarray
 
 
@@ -158,7 +158,7 @@ def build_node_geometry(
 ) -> NodeGeometry:
     """Assemble the per-slot geometry from the substrate's five populations onto the chain.
 
-    **The divisors, and A7** (`S5_DESIGN_LOG.md` §1 A7, ruled 2026-07-30):
+    **The divisors, and A7** (ruled 2026-07-30):
 
     ================  ==========================================================================
     NODE, both        ``contained_eff_length(node_len, pmf)`` — no reach argument exists
@@ -202,7 +202,7 @@ def build_node_geometry(
     # ⭐ THE TWO LENGTH CHANNELS, gathered from the SAME populations as ``unspliced_count`` — the
     # accumulator's `inv_length_sum` (Σ 1/weight) and `length_sum` (Σ L). Stored since S5.a and read by
     # NOBODY until P2; they are what `length_likelihood` turns into composition evidence on the λ axis,
-    # and the fourth information source in `node_init`'s list (`SOLVER_OBSERVABLES_PLAN.md` §6).
+    # and the fourth information source in `node_init`'s list.
     # ⚠ They must track ``unspliced_count`` population-for-population — node_contained at a NODE,
     # edge_unspliced at an EDGE — or the moments would describe a different set of fragments than the
     # count they are conditioned on.
@@ -245,7 +245,7 @@ def build_node_geometry(
         return out
 
     # ⭐ gDNA takes NO reach argument, ever: its template is the chromosome, so ``taper_g = 1``. That is
-    # physics, not the A7 ruling — the ruling is only about the RNA component (`S5_DESIGN_LOG.md` §1 A7).
+    # physics, not the A7 ruling — the ruling is only about the RNA component.
     eff_gdna = divisor(gdna_fl_pmf)
     eff_rna = divisor(rna_fl_pmf, edge_rna_reach)
 
@@ -315,7 +315,7 @@ def node_total_density(geometry: NodeGeometry, f_g):
     ⚠ **``spliced_count`` is deliberately NOT in either total.** It is a contiguous crossing, so it does
     belong in the level in principle — but the predecessor's ``mass_spliced`` entered only the strand
     solve, and folding it into ρ_tot here would be a modelling change smuggled into a rename. It is
-    S5.a2's question ("how the new channels enter the solve"), recorded in `S5_DESIGN_LOG.md`.
+    S5.a2's question ("how the new channels enter the solve") is still open.
 
     ⭐ **The per-face acceptor test dissolves with the faces.** The predecessor returned a triple (node,
     left face, right face) because only the acceptor FACE carried a junction; a line either carries
@@ -343,7 +343,7 @@ class NodeBelief:
     **not bounded by ¼** and routinely exceed it; a consumer needing the LINEAR `Var(f_c)` must convert
     (delta method `Var(f_c) ≈ f_c²·Var(log f_c)`, as `bp_solver.node_sweep` does for `composition_logvar`).
 
-    The variance is the **precision state** (`docs/CARRY_FORWARD.md`): `Var(log f_c)=0` ⇒
+    The variance is the **precision state**: `Var(log f_c)=0` ⇒
     locked/certain (e.g. a forbidden strand), `=∞` ⇒ no information (unsolved). It feeds the honest message
     send — a source's outgoing precision is degraded from its own `Var_own` by the
     communication noise, so an unsure node speaks quietly (Phase 2). The composition is stored as a FRACTION
@@ -365,7 +365,7 @@ class NodeBelief:
 #
 # A strand axis is hard-LOCKED (a forbidden strand, an intergenic sink) by the per-node ``allow_pos`` /
 # ``allow_neg`` forbid mask in the solve. The init ALSO sets the per-component precision state ``var(f_c)``
-# (`docs/CARRY_FORWARD.md`): ``0`` = locked/certain (a forbidden strand, an intergenic gDNA sink), ``inf`` =
+# ``0`` = locked/certain (a forbidden strand, an intergenic gDNA sink), ``inf`` =
 # no information (an admissible-but-unsolved axis — it will listen to messages, and emits none until solved).
 # A solved single-strand (G2) node takes the strand-solve posterior variance.
 
@@ -387,7 +387,7 @@ def _type_belief(free_pos, free_neg, deconv, mass_unspl):
       (``inf``) variance; the sweep resolves it from neighbour messages + the global prior.
 
     Returns the six per-node arrays ``(f_pos, f_neg, f_g, var_pos, var_neg, var_gdna)`` — the composition + the
-    precision state (`docs/CARRY_FORWARD.md`): ``var=0`` locked, ``inf`` no-information, else the strand-solve
+    precision state: ``var=0`` locked, ``inf`` no-information, else the strand-solve
     posterior variance. The variances are ``Var(log f_c)`` (log-space, unbounded above), never ``Var(f_c)``.
     """
     n = free_pos.shape[0]
@@ -430,7 +430,7 @@ class NodeStatics:
     because the old accumulator's mass was fractional while the strand likelihood needed an integer.
     They are the same number now, so **all three populations sit together on the geometry** — where
     their difference is visible — and a consumer slices them there. One quantity, one place
-    (`CARRY_FORWARD.md` §3 trap 27).
+
 
     ``free_pos``/``free_neg`` are the nascent-RNA-active axes (a node's own ±transcript bits; an edge's
     ±continuity — the RNA-crossing gate); ``mrna_active_pos``/``mrna_active_neg`` are the mature-RNA-active

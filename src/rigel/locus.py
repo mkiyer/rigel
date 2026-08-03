@@ -153,8 +153,7 @@ def build_multi_loci(
     # alike, collapsing a 60/40 posterior to 100/0 for every group of duplicates. ⚠ And a content key
     # cannot even deliver determinism, because it TIES exactly on the duplicates — measured: ordering by
     # ``gdna_log_liks`` instead leaves both ``sample`` and ``fractional`` thread-count dependent.
-    # ``frag_id`` is an identity, so it never ties. `docs/PLAN_TWO_PASS.md` §5.3 (D-D) rules the same way
-    # for the second pass.
+    # ``frag_id`` is an identity, so it never ties. The second pass orders its own queue the same way.
 
     # Pre-extract transcript coordinates as numpy arrays.
     t_starts_all = index.t_df["start"].values

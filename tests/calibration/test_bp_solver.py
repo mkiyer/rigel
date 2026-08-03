@@ -255,7 +255,7 @@ def test_interior_anchor_is_immovable_and_produces_no_nan():
 
 
 def test_gdna_emits_across_tss_tes_seam():
-    """Structural-gate regression (`docs/CARRY_FORWARD.md`): gDNA is genomically continuous, so the
+    """Structural-gate regression: gDNA is genomically continuous, so the
     gene-boundary seams (TSS/TES) flanking a SINGLE-EXON gene must RELAY a gDNA message into it from the
     intergenic regions beyond — even though neither RNA strand is continuous across those seams. Before the
     fix the gDNA message was gated by RNA strand-continuity (`solvable`), so such a gene (both flanks
@@ -364,7 +364,7 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     assert final.f_g[0] < 0.50 and final.f_g[4] < 0.50
 
 
-# --- density-Gaussian message form: two-sided pull + emergent deference (docs/CARRY_FORWARD.md §5) --------
+# density-Gaussian message form: two-sided pull + emergent deference --------
 
 
 def test_density_message_two_sided_mode_not_vertex():
@@ -419,7 +419,7 @@ def test_density_message_defers_to_decisive_strand():
 
 
 # --- mature absorption: the spliced mass "absorbs" the imputed RNA, leaving only NASCENT ---------------
-# (`docs/CARRY_FORWARD.md`). The RNA message src→dst is
+# The RNA message src→dst is
 #   ρ = src_nascent/E_r + SP[sf][src]/E_spl_src − SP[df][dst]/E_spl_dst.
 # The dst-face term subtracts the mature a junction boundary measures, so a pure-mature exon imputes
 # ≈0 nascent into the intron beyond it — no wholesale nascent hallucination.
@@ -444,7 +444,7 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
     Physically consistent: every exon's contained unspliced is balanced gDNA + sense (+) mature; the
     introns and every line carry balanced gDNA only. ⭐ **`edge_spliced` is 0 everywhere, and that is a
     measured fact rather than a convenience** — mature RNA never crosses an exon↔intron seam (0 of 1,146
-    seams over 7 conditions, `CARRY_FORWARD.md` §1 fact 13). It skips the intron as a junction, never as
+    seams over 7 conditions). It skips the intron as a junction, never as
     a contiguous crossing.
     """
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
@@ -581,7 +581,7 @@ def test_mature_measurement_disagreement_silenced():
 
 
 def test_tau_gag_fix_spliced_junction_emits_when_unstranded():
-    """τ-GAG REGRESSION (`docs/CARRY_FORWARD.md` §Phase B, 2026-07-21). On UNSTRANDED data
+    """τ-GAG REGRESSION ( §Phase B, 2026-07-21). On UNSTRANDED data
     (κ=½ ⇒ the strand Fisher info ``I_strand`` is identically 0), a splice-junction boundary still carries
     motif-stranded spliced (mature-RNA) fragments — a DIRECT measurement, independent of strand. That
     measurement MUST reach the exon. The bug: the τ-evidence emission gate (keyed on ``I_strand``+``I_struct``
@@ -728,7 +728,6 @@ def test_pure_gdna_node_confident_at_near_binomial_od():
 
 # ---------------------------------------------------------------------------
 # RNA-message routing after the mature-crossing gate was DISMANTLED
-# (docs/CARRY_FORWARD.md §5).
 #
 # Only the STRUCTURAL per-strand `free_s` continuity gate remains: each RNA strand's density flows wherever that
 # strand is continuous on BOTH endpoints (intron↔exon in either direction, intron→boundary, boundary→exon), and

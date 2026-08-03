@@ -1,6 +1,6 @@
 """assemble_priors — the EM pseudocounts must be FRAGMENT COUNTS, not object-incidence sums.
 
-    Plan: `docs/SOLVER_OBSERVABLES_PLAN.md` §5 (P1)
+     (P1)
 
 ⭐ **THE DEFECT THESE TESTS PIN.** ``gdna_prior_count`` / ``rna_prior_count`` are handed to the EM as
 **additive pseudocounts in fragment units** — ``G = n_gdna + a_g`` in ``apply_grouped_prior_update`` —
@@ -27,7 +27,7 @@ at a line — which is exactly what the accumulator's deposition law divides out
 
 ⚠ **The pooling is A-weighted, and that is an approximation the tests must not hide.** ``SUM m / SUM A``
 is the support-weighted mean density, so ``rho·span`` is exact only where ``rho_c`` is uniform *within*
-the locus. It is the same pooling `derive.gdna_density_global` and `CARRY_FORWARD.md` §2's
+the locus. It is the same pooling `derive.gdna_density_global`'s
 ``rho_bg = Sum g / Sum E`` already use, and it is a strict improvement on the raw sum — but a locus with
 a strong internal density gradient carries a second-order residual. Stated, not tested away.
 
@@ -211,7 +211,7 @@ def test_prior_ratio_is_flat_in_the_length_ratio(mu_g):
 
 
 def test_zero_rna_opportunity_gives_zero_rna_prior():
-    """⛔ `CARRY_FORWARD.md` §3 trap 23: an object with no opportunity for a component must emit NOTHING
+    """⛔: an object with no opportunity for a component must emit NOTHING
     at zero precision — never a floored division. Every node here is shorter than one RNA fragment and
     the RNA crossing opportunity is zeroed, so the RNA support is identically 0.
     """

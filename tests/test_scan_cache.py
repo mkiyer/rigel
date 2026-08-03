@@ -1,16 +1,16 @@
 """Scan once, calibrate many times — and refuse a cache whose index has moved underneath it.
 
-    TODO item 2 (the cached substrate)   ·   `docs/testing/testing_plan.md`
+    TODO item 2 (the cached substrate)
 
 ⭐ **WHY THIS EXISTS.** Scanning is the expensive step and calibration is the one being iterated on: a
-real cfRNA run is index load ~8 s, BAM scan ~2 s, **calibration ~66 s** (`CARRY_FORWARD.md` §1 fact 22),
+real cfRNA run is index load ~8 s, BAM scan ~2 s, **calibration ~66 s**,
 and a 5 M-fragment simulated condition costs far more than that to scan. Caching the scan's output took a
 24-condition sweep from ~13 min to ~9 s on the old path. This is that, rebuilt against the S4 payload.
 
 ⛔ **THE KEY IS THE WHOLE POINT, AND IT NEEDS THREE PARTS, NOT ONE.**
 
 * ``graph_hash`` — nodes plus the junction CSR. The payload already carries it, so the tally self-keys.
-* ⭐ **a REACH digest.** `TODO.md` logs that ``reach`` is consumed by calibration and is covered by
+* ⭐ **a REACH digest.** logs that ``reach`` is consumed by calibration and is covered by
   **neither** ``partition_hash`` **nor** ``graph_hash`` — correctly, since neither the scan nor the
   accumulator reads it — and that the gap "becomes live the moment something caches a calibration
   output". A cache *loaded against an index* is that moment. The 2026-07-30 index rebuild moved ~38 % of
@@ -20,7 +20,7 @@ and a 5 M-fragment simulated condition costs far more than that to scan. Caching
 
 ⚠ Anything derivable from the index is **rebuilt on load, never stored** — `RegionArrays.from_index` is
 0.11 s and `build_edge_flags_array` is 0.04 s against an 8.45 s index load that happens anyway.
-Storing them is how a cache goes stale against the thing it describes (`CARRY_FORWARD.md` §3 trap 25).
+Storing them is how a cache goes stale against the thing it describes.
 """
 
 from __future__ import annotations
@@ -258,7 +258,7 @@ class TestTheKeyRefusesAMovedIndex:
 
     def test_a_cache_predating_the_key_ENTIRELY_is_refused(self, scanned, tmp_path):
         """A manifest written before the key existed has no such entry at all. Absent must not read as
-        agreement — that is how a stale cache verifies clean (`CARRY_FORWARD.md` §3 trap 25)."""
+        agreement — that is how a stale cache verifies clean."""
         cache_dir, _cache = round_trip(scanned, tmp_path)
         manifest = json.loads((cache_dir / "manifest.json").read_text())
         del manifest["payload_schema_digest"]
@@ -287,7 +287,7 @@ class TestTheKeyRefusesAMovedIndex:
         nested bank was invisible to it: renaming a ``ScanQC`` field let a stale cache be **accepted by the
         key** and then fail deep in ``_payload_from_parts`` with a bare ``TypeError`` — precisely the
         failure mode the docstring above says the key exists to prevent. Two statements about one contract,
-        disagreeing (`CARRY_FORWARD.md` §3 trap 27, the same shape as ``check_scan_config``'s).
+        disagreeing (the same shape as ``check_scan_config``'s).
 
         ⛔ S1 made the stakes much higher rather than lower: ``DeferredFragments`` puts **thirteen** array
         names inside one payload field and every one of them is an ``.npz`` key, so an unrecursed digest
@@ -479,7 +479,7 @@ def test_the_schema_digest_sees_fields_nested_TWO_levels_deep():
 def test_the_cache_REFUSES_a_drained_payload(scanned, tmp_path):
     """⛔ The cache holds a SCAN. Caching a drained payload would bake one draw into it and destroy the
     property the whole second-pass design rests on — that one scan can be drained repeatedly at different
-    seeds without re-reading the BAM (`SPEC_SECOND_PASS.md` §2, and P5/P6 both need it).
+    seeds without re-reading the BAM (and P5/P6 both need it).
 
     ⚠ It would also serialise `DrainQC.census_before` through `json.dumps(default=str)` as a stringified
     repr, silently — X9's defect one level down.

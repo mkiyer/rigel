@@ -8,8 +8,8 @@ arithmetic and nothing else: it is a pure function of masses, compositions, and 
 no substrate, no solver state — so its facts are pinned by closed-form unit tests
 (``tests/calibration/test_enrichment_frame.py``) that cannot drift with solver behaviour.
 
-Derivation: ``docs/CARRY_FORWARD.md`` (the framework, §1 the total-density
-pivot, §2 the bounding lemma, §4 the step-wise junction solve) and ``docs/CARRY_FORWARD.md`` (the
+ (the framework, §1 the total-density
+pivot, §2 the bounding lemma, §4 the step-wise junction solve) and (the
 junction instance + §5b the r₂/r₁ asymmetry). The solver wiring that consumes these is phase E2 (behind a
 flag); this module is frame-agnostic by construction (arrays in, arrays out), so the per-face-vs-node-level
 frame question E2 must settle cannot invalidate anything here.
@@ -32,7 +32,7 @@ from scipy.special import log_ndtr, zeta
 
 __all__ = [
     "composition_logvar",
-    # ── the pass-0 message-VARIANCE laws (message_variance_derivation.md) ──
+    # ── the pass-0 message-VARIANCE laws ──
     "graft_frame_logvar",
     "graft_frame_logvar_scalar",
     "peel_rna_logvar",
@@ -104,7 +104,7 @@ def _log(x):
 def composition_logvar(f_g, E_g, E_r, var_fg, n):
     """``Var(log ρ_tot)`` — the composition assumption carried as a **variance**, not a bool gate.
 
-    Two independent sources of uncertainty in a total density (``docs/CARRY_FORWARD.md`` §2, the
+    Two independent sources of uncertainty in a total density (the
     bounding lemma, made continuous):
 
     * **counting** — ``M`` is a Poisson count, so ``Var(log M) = 1/n``;
@@ -617,7 +617,7 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
     which gDNA makes noisier) — measurably the worst place to over-charge, because that is exactly where the
     RNA claim is a near-exact measurement and the gDNA claim is the wrong one.
 
-    **It cannot double-count with M7** for the reason `variance_ledger.md` §2.2 proves in general: DL's
+    **It cannot double-count with M7** for the reason proves in general: DL's
     ``max()`` means a newly-modelled variance *replaces* the part of the gap M7 was absorbing as unexplained
     drift, one for one, until ``b̂²`` hits its floor at 0.
 

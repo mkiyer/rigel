@@ -1,10 +1,10 @@
 # TODO — the project's deferred work, ranked
 
 **This is the one list.** Add here rather than starting another file, and **delete an item when it
-lands** rather than marking it done — `LEDGER.md` records finished work with its gates and its reasoning.
+lands** rather than marking it done — `docs/WIP.md` records finished work with its gates and its reasoning.
 Every item states **why it is deferred**, because "we'll get to it" is how a list stops being read.
 
-Live handoff: `IMPLEMENTATION_PLAN.md` §0. Finished work: `LEDGER.md`. The suite: `BENCHMARK_SUITE.md`.
+Live handoff: `docs/accumulator/IMPLEMENTATION_PLAN.md` §0. Finished work: `docs/WIP.md`. The suite: `docs/testing/BENCHMARK_SUITE.md`.
 
 ---
 
@@ -13,9 +13,9 @@ Live handoff: `IMPLEMENTATION_PLAN.md` §0. Finished work: `LEDGER.md`. The suit
 ⭐⭐ **FRAGMENT LENGTH IS DONE, 2026-08-03.** It was the blocker on this whole area and it is finished:
 one definition (C0–C2), an accurate one (C2.6), and now an **unbiased** one — the anchor's error against
 the simulator's own truth is **+0.00 % mean / +0.02 % sd** on the zero-gDNA falsification condition,
-from −1.61 % / −1.48 %. `LEDGER.md` C0 → P4.2, and `docs/SPEC_SECOND_PASS.md` is its spec.
+from −1.61 % / −1.48 %. `docs/WIP.md` C0 → P4.2, and `docs/accumulator/SPEC_SECOND_PASS.md` is its spec.
 
-⛔⛔ **BUT THE DELIVERABLE GOT WORSE, AND THAT SETS THE PRIORITY** (`LEDGER.md` **B4**, 2026-08-03).
+⛔⛔ **BUT THE DELIVERABLE GOT WORSE, AND THAT SETS THE PRIORITY** (`docs/WIP.md` **B4**, 2026-08-03).
 Scored against the simulator's own origin counts, the library gDNA fraction's mean |error| on the four
 contaminated conditions went **0.0381 → 0.0472 (+23.9 %)** when the side buffer is drained. Decomposed:
 
@@ -30,7 +30,7 @@ contaminated conditions went **0.0381 → 0.0472 (+23.9 %)** when the side buffe
 
 ⛔ **SO THE CRITICAL PATH IS C3 / S4 — JUNCTION OPPORTUNITY.** It is the step that converts the second
 pass's gain into a composition gain; until it lands, a better-measured tally is being fed into a biased
-length model. ⭐ **And it unblocks a second thing**: `SOLVER_OBSERVABLES_PLAN.md` P2 — the fragment-length
+length model. ⭐ **And it unblocks a second thing**: `docs/calibration/SOLVER_OBSERVABLES_PLAN.md` P2 — the fragment-length
 likelihood in the per-node solve, mechanism proven (blind mass 100 % → 0 %) — has been **built and gated
 OFF since 2026-07-31, blocked on the FL pools**. C2 removed half that block; C3 removes the rest.
 
@@ -38,39 +38,39 @@ OFF since 2026-07-31, blocked on the FL pools**. C2 removed half that block; C3 
 
 | rank | item | § | why now / why not yet |
 |---|---|---|---|
-| ~~0a~~ | ✅ **D1 IS DELETED — the RNA pool is keyed on DETERMINACY, not on provenance** | `LEDGER.md` S1 | Landed with S1. The measurement stood: cutting the intron takes the pool from **+8.00 % → +0.67 %** against truth, and then removing the mixed fragments takes it to **−9.58 % / −22.46 %**, because they are the LONG ones. ⭐ **A purity filter on a length pool is a length filter.** What replaces it is stronger, not weaker: a fragment enters a pool only when **exactly one hypothesis survived**, so its `L` is not in doubt however it was arrived at. `sj_implicit` is gone from the flag, the pool rule and the qc block |
-| ~~0b~~ | ✅ **C2.7 / D3 — every annotated intron in a gap is now cut, not just the first** | `LEDGER.md` S1 | Landed with S1, and by the route the item said was the real work: `collect_transcript_introns_in_gap` emits **every** intron of a candidate inside a gap, and the unanimity test was replaced by grouping candidates by their **whole-fragment path**, so two transcripts differing only in their SECOND intron are now two hypotheses rather than one. ✅ **Re-measured after the drain (P4, P4.1):** the mass above the library's true ceiling is **0 fragments on all 8 conditions** — it read 0–3 until the annihilation bug was fixed, and every one of those came from a record the evidence could not separate |
-| ⭐ **0** | ⛔ **C3 / S4 — JUNCTION OPPORTUNITY. The critical path.** | `JUNCTION_OPPORTUNITY.md` (the formula, proven) | ⭐ **The formula exists and is exact** — `A_j(w) = (L − w + 1)₊ − Σ_i (e_i − w + 1)₊`, agreeing with an independent oracle over **48,648 exhaustive configurations**. No code is written. ⛔ **Why it is now rank 0:** `LEDGER.md` B4 measured that calibration fits from the **pools**, the second pass made the **anchor** exact but the `RNA_SPLICED` pool *worse*, and composition error rose 23.9 % as a result. C3 is the correction for exactly that pool. ⚠ **Every number in `JUNCTION_OPPORTUNITY.md` §3 is STALE** — taken against the contaminated anchor and the pre-drain pool — so re-measure before scoping. ⭐ P4.2 supplies the new target: the observed-splice population is **+3.8 %** longer than the library, and the pool after the drain is **+6.2 … +8.1 %** |
+| ~~0a~~ | ✅ **D1 IS DELETED — the RNA pool is keyed on DETERMINACY, not on provenance** | `docs/WIP.md` S1 | Landed with S1. The measurement stood: cutting the intron takes the pool from **+8.00 % → +0.67 %** against truth, and then removing the mixed fragments takes it to **−9.58 % / −22.46 %**, because they are the LONG ones. ⭐ **A purity filter on a length pool is a length filter.** What replaces it is stronger, not weaker: a fragment enters a pool only when **exactly one hypothesis survived**, so its `L` is not in doubt however it was arrived at. `sj_implicit` is gone from the flag, the pool rule and the qc block |
+| ~~0b~~ | ✅ **C2.7 / D3 — every annotated intron in a gap is now cut, not just the first** | `docs/WIP.md` S1 | Landed with S1, and by the route the item said was the real work: `collect_transcript_introns_in_gap` emits **every** intron of a candidate inside a gap, and the unanimity test was replaced by grouping candidates by their **whole-fragment path**, so two transcripts differing only in their SECOND intron are now two hypotheses rather than one. ✅ **Re-measured after the drain (P4, P4.1):** the mass above the library's true ceiling is **0 fragments on all 8 conditions** — it read 0–3 until the annihilation bug was fixed, and every one of those came from a record the evidence could not separate |
+| ⭐ **0** | ⛔ **C3 / S4 — JUNCTION OPPORTUNITY. The critical path.** | `docs/accumulator/JUNCTION_OPPORTUNITY.md` (the formula, proven) | ⭐ **The formula exists and is exact** — `A_j(w) = (L − w + 1)₊ − Σ_i (e_i − w + 1)₊`, agreeing with an independent oracle over **48,648 exhaustive configurations**. No code is written. ⛔ **Why it is now rank 0:** `docs/WIP.md` B4 measured that calibration fits from the **pools**, the second pass made the **anchor** exact but the `RNA_SPLICED` pool *worse*, and composition error rose 23.9 % as a result. C3 is the correction for exactly that pool. ⚠ **Every number in `docs/accumulator/JUNCTION_OPPORTUNITY.md` §3 is STALE** — taken against the contaminated anchor and the pre-drain pool — so re-measure before scoping. ⭐ P4.2 supplies the new target: the observed-splice population is **+3.8 %** longer than the library, and the pool after the drain is **+6.2 … +8.1 %** |
 | **1** | ⚠ **Regenerate the goldens — still AFTER C3, not now** | — | ⛔ **Still true, and they have now moved SIX times** — P1 (EM prior units), C2 (the FL models), C2.6 (`L` itself), S1 (the hold-out), P4 (the drain wired in), P4.2 (the combination rule). C3 will move them again, since the FL models change ⇒ scoring and eff-lengths change. Regenerating now would bake in a number that is about to change. ⭐ Still true when the moment comes: **regenerate twice and diff** (§7) — the goldens run under the default sampling mode, so a flaky expectation baked in now is permanent. *(Original note: ⚠ the suite reads 22 failed and 21 of them are expected* — that is exactly the state a real regression hides in, and everything after this is an A/B needing "did anything else move?" to be a strong signal.)* |
-| ~~2~~ | ⛔ **S5.g — A7's taper: MEASURED AND REFUTED** | §1 | The A/B is done (`LEDGER.md` S5.g-2): **≤ 0.0002** on the library gDNA fraction. The 11.0 % was bp-weighted geometry; mass-weighted the taper is 0.9596 and **89 % of edge mass is on lines it never touches**. ⚠ Would not hold for a 3′-biased/degraded library — screening test is the mass-weighted taper ratio |
-| ~~3~~ | ✅ **THE PIPELINE IS REPRODUCIBLE — and it was never the seed** | `LEDGER.md` S2.1 | ⛔ **The recorded diagnosis was wrong and sent the search to the wrong subsystem.** The `rng_seed` reached the C++ EM **bit-identically** on two runs that disagreed; the EM's own thread count was irrelevant. The cause was the **fragment buffer's row order**, which the scanner fills in worker-completion order, and which the sampled assignment consumed the per-locus RNG in. Fixed by ordering each locus's units by `frag_id` in `build_multi_loci` — one place, and **46 lines of now-redundant C++ deleted**. ⭐ A second, unfiled defect fell out with it: `fractional` was thread-count dependent too, by float summation order. All three modes are now byte-identical across scan thread counts |
+| ~~2~~ | ⛔ **S5.g — A7's taper: MEASURED AND REFUTED** | §1 | The A/B is done (`docs/WIP.md` S5.g-2): **≤ 0.0002** on the library gDNA fraction. The 11.0 % was bp-weighted geometry; mass-weighted the taper is 0.9596 and **89 % of edge mass is on lines it never touches**. ⚠ Would not hold for a 3′-biased/degraded library — screening test is the mass-weighted taper ratio |
+| ~~3~~ | ✅ **THE PIPELINE IS REPRODUCIBLE — and it was never the seed** | `docs/WIP.md` S2.1 | ⛔ **The recorded diagnosis was wrong and sent the search to the wrong subsystem.** The `rng_seed` reached the C++ EM **bit-identically** on two runs that disagreed; the EM's own thread count was irrelevant. The cause was the **fragment buffer's row order**, which the scanner fills in worker-completion order, and which the sampled assignment consumed the per-locus RNG in. Fixed by ordering each locus's units by `frag_id` in `build_multi_loci` — one place, and **46 lines of now-redundant C++ deleted**. ⭐ A second, unfiled defect fell out with it: `fractional` was thread-count dependent too, by float summation order. All three modes are now byte-identical across scan thread counts |
 | **4** | Close the suite's two open requirements | §2 | (c) non-Poisson counts and (f) the low-gDNA corner. `suite_resolves.py` fails on both today and names them. ⭐ Now unblocked |
 | **5** | The stress chromosome + the scan cache's prior seed | §3, §4 | The toy-scenario half of `testing_plan.md`. ⭐ Now unblocked — the seed needs wiring, not inventing |
-| ~~6~~ | ✅ **`rna_sense_frac` IS NOT MIRRORED — there was never a sign bug** | `LEDGER.md` P0 | ⛔ **Filed twice, and it is a collision between two quantities both called "strand specificity".** `ReadSimConfig.strand_specificity` is protocol FIDELITY (direction-agnostic, *"an R1↔R2 swap with probability 1 − ss"*); `p_r1_sense` is DIRECTIONAL, and its own docstring already said *"≈0.05 for R1-antisense libraries (Illumina TruSeq dUTP)"*. For an R1-antisense protocol they are complements, so comparing them reads as a sign error. ⭐ The tool already exposes the matching quantity: `StrandModel.strand_specificity` recovers the simulated knob directly — **1.00 → 1.0000, 0.75 → 0.7701, 0.50 → 0.5020**. Gated by `tests/calibration/test_strand_sense_convention.py` |
-| ~~**7b**~~ | ✅ **THE SECOND PASS IS BUILT, GATED AND WIRED IN** | `LEDGER.md` P0 → P4.2, `SPEC_SECOND_PASS.md` | Pass 1 arbitrates and holds every fragment whose gap has more than one explanation; pass 2 scores the candidates from pass-1 evidence alone, draws one by multinomial sample and re-deposits through the SAME `deposit`. ⭐ **90.5 % of held fragments get exactly the right length** and the mean error is **+0.12 bp**, scored against the simulator's per-fragment truth; the true answer is among the offered candidates **100 %** of the time, so pass 1 never misses it. Runs between the scan and calibration, so calibration still runs **once**. Its own open items are D-4 and the Poisson traffic likelihood, both below |
+| ~~6~~ | ✅ **`rna_sense_frac` IS NOT MIRRORED — there was never a sign bug** | `docs/WIP.md` P0 | ⛔ **Filed twice, and it is a collision between two quantities both called "strand specificity".** `ReadSimConfig.strand_specificity` is protocol FIDELITY (direction-agnostic, *"an R1↔R2 swap with probability 1 − ss"*); `p_r1_sense` is DIRECTIONAL, and its own docstring already said *"≈0.05 for R1-antisense libraries (Illumina TruSeq dUTP)"*. For an R1-antisense protocol they are complements, so comparing them reads as a sign error. ⭐ The tool already exposes the matching quantity: `StrandModel.strand_specificity` recovers the simulated knob directly — **1.00 → 1.0000, 0.75 → 0.7701, 0.50 → 0.5020**. Gated by `tests/calibration/test_strand_sense_convention.py` |
+| ~~**7b**~~ | ✅ **THE SECOND PASS IS BUILT, GATED AND WIRED IN** | `docs/WIP.md` P0 → P4.2, `docs/accumulator/SPEC_SECOND_PASS.md` | Pass 1 arbitrates and holds every fragment whose gap has more than one explanation; pass 2 scores the candidates from pass-1 evidence alone, draws one by multinomial sample and re-deposits through the SAME `deposit`. ⭐ **90.5 % of held fragments get exactly the right length** and the mean error is **+0.12 bp**, scored against the simulator's per-fragment truth; the true answer is among the offered candidates **100 %** of the time, so pass 1 never misses it. Runs between the scan and calibration, so calibration still runs **once**. Its own open items are D-4 and the Poisson traffic likelihood, both below |
 | **6b** | ⚠ **The simulator can only emit R1-ANTISENSE libraries** | — | ⭐ Found while closing rank 6. `strand_specificity` is a swap probability about a *fixed* orientation, never a choice of orientation, so **no simulated condition exercises the R1-sense (KAPA-style) branch** — and real R1-sense libraries exist. A strict xfail in `test_strand_sense_convention.py` marks the spot and deletes itself when the simulator gains the switch. ⚠ Not urgent: the branch is a `max()` and a comparison, and real cfRNA is dUTP |
 | **7** | A new benchmark skill | — | ⭐ Now unblocked: the suite can produce a number. Wants ranks 4 and 5 first, or it will be a skill that reports noise |
-| **8** | ⛔ **The traffic term treats "observed zero" as "impossible"** | `LEDGER.md` P4.2 | Owner-identified 2026-08-03: `rho` enters the second pass's score as a hard multiplicative zero, but zero observations is `P(0 \| rate, exposure) = e^(-λE)`, which is **not** zero. Measured: `rho` is *partially* zero on **62 %** of held records, so a sampling zero hard-eliminates a candidate on most of them. ⭐ It is right 99.9 % of the time *here* — 15 misassignments in 171,534 — because the hard zero is the **large-exposure limit** of the correct likelihood and the pilot has 5 M confident fragments. ⚠ On a shallow library, or a lowly-expressed junction, `e^(-λE)` is not small and the veto is wrong. **Why deferred:** the proper form needs each object's EXPOSURE, which is junction opportunity — so it couples to C3, and `SPEC_SECOND_PASS.md` §1.2 deliberately separated them. ⭐ **Do C3 first, then this becomes cheap.** |
-| **9** | D-4: should a density carry its **weight of evidence**? | `SPEC_SECOND_PASS.md` §8 | The one remaining open decision in the second-pass spec, and it is rank 8's question from the other side: a density of 0.01 from 1000 fragments and from 1 are not the same statement. ⚠ Deferred on the same measurement — 15 fragments — and it wants the same exposure C3 supplies |
+| **8** | ⛔ **The traffic term treats "observed zero" as "impossible"** | `docs/WIP.md` P4.2 | Owner-identified 2026-08-03: `rho` enters the second pass's score as a hard multiplicative zero, but zero observations is `P(0 \| rate, exposure) = e^(-λE)`, which is **not** zero. Measured: `rho` is *partially* zero on **62 %** of held records, so a sampling zero hard-eliminates a candidate on most of them. ⭐ It is right 99.9 % of the time *here* — 15 misassignments in 171,534 — because the hard zero is the **large-exposure limit** of the correct likelihood and the pilot has 5 M confident fragments. ⚠ On a shallow library, or a lowly-expressed junction, `e^(-λE)` is not small and the veto is wrong. **Why deferred:** the proper form needs each object's EXPOSURE, which is junction opportunity — so it couples to C3, and `docs/accumulator/SPEC_SECOND_PASS.md` §1.2 deliberately separated them. ⭐ **Do C3 first, then this becomes cheap.** |
+| **9** | D-4: should a density carry its **weight of evidence**? | `docs/accumulator/SPEC_SECOND_PASS.md` §8 | The one remaining open decision in the second-pass spec, and it is rank 8's question from the other side: a density of 0.01 from 1000 fragments and from 1 are not the same statement. ⚠ Deferred on the same measurement — 15 fragments — and it wants the same exposure C3 supplies |
 
 ---
 
-## 1. S5 — **`S5_DESIGN_LOG.md` §2 is the live plan**
+## 1. S5 — **`docs/calibration/S5_DESIGN_LOG.md` §2 is the live plan**
 
 ⭐ S5 is not a rewiring job. It was stopped on 2026-07-30 and turned into a derivation first, because the
-design could not say which observables the rewiring should consume. `IMPLEMENTATION_PLAN.md` §4's R1–R4
+design could not say which observables the rewiring should consume. `docs/accumulator/IMPLEMENTATION_PLAN.md` §4's R1–R4
 ranking and §5's S5 row are **superseded**.
 
 **Landed:** S5.0 (the derivation) · S5.a (`length_sum`) · S5.b (`fl.py` → the five pure pools) · S5.c
 (`effective_length.py` → the one placements formula) · S5.d (one substrate, the `N E N … E N` chain) ·
 S5.e (the faces dissolve; A7 ruled) · ⭐ **S5.f — `calibrate()` runs, and the FIRST BASELINE exists.**
-All in `LEDGER.md`.
+All in `docs/WIP.md`.
 
 **Next: S5.g — A7 proper.** The contiguous-edge RNA reach is deliberately `UNBOUNDED_REACH` today, so
 the first baseline carries a **measured 11.0 %** genome-wide gDNA over-call. Turning the taper on is the
 first change that gets a real A/B, which is the whole reason A7 was deferred past S5.f.
 
-✅ **S5.g-1 landed** (`LEDGER.md`): `build_contiguous_edge_reach_arrays` gives the per-edge, per-strand
+✅ **S5.g-1 landed** (`docs/WIP.md`): `build_contiguous_edge_reach_arrays` gives the per-edge, per-strand
 reach, gated by 6 tests and 6 perturbations, and it independently reproduces fact 6's magnitude (tapered
 / unbounded = 0.84–0.86 against the recorded 0.8904).
 
@@ -93,7 +93,7 @@ guessed; the arrays are in place so the decision is one edit away.
 Calibration is bit-identical run to run; the EM's default `assignment_mode="sample"` draws from the
 posterior and moves ~0.5 %, while `map`/`fractional` move ~1e-10.
 
-**Then, in order (`S5_DESIGN_LOG.md` §2 Phase 2):** S5.a2 (how `length_sum` enters the solve — it is
+**Then, in order (`docs/calibration/S5_DESIGN_LOG.md` §2 Phase 2):** S5.a2 (how `length_sum` enters the solve — it is
 stored on every population and consumed by nobody) · A6 then A3 (`node_spanning`: the largest single win
 found, 0.000 → 0.758 efficiency at a 25 bp node, and **56.7 %** of human nodes are shorter than one
 fragment — but A6 must settle the spanning⊂crossing overlap first) · does `spliced_count` enter the level.
@@ -106,7 +106,7 @@ fragment — but A6 must settle the spanning⊂crossing overlap first) · does `
 
 Real libraries live at 1–10 % gDNA; the pilot grid is `none`/`100 %` by the owner's 8-condition spec, so
 nothing sits in that band. **Fix:** add one gDNA rate (e.g. `0.05`) to `chr22_pilot.yaml` and re-run those
-conditions. `CARRY_FORWARD.md` §1 fact 15/16: capture destroys the intron signal 75×, and nascent-vs-gDNA
+conditions. `docs/SESSION_HANDOFF.md` §1 fact 15/16: capture destroys the intron signal 75×, and nascent-vs-gDNA
 is unidentifiable under capture — so this corner is where the design's hardest failure mode lives.
 
 ### (c) Non-Poisson counts — **needs a mechanism decision first**
@@ -130,7 +130,7 @@ parameters, different `sim_seed`) so ω is estimable at all.
 A designed synthetic reference appended to the suite backbone, carrying the cases a real chromosome does
 not concentrate: a density step, alternative TSS/TES strictly inside exons, single-stranded neighbourhoods
 flanking ambiguous nodes, 1 bp nodes, overlapping/abutting introns, and **strand-coincident junction
-pairs** (`CARRY_FORWARD.md` §3 trap 24 — GENCODE has zero of them, so only a synthetic test can find it).
+pairs** (`docs/SESSION_HANDOFF.md` §3 trap 24 — GENCODE has zero of them, so only a synthetic test can find it).
 
 ⭐ **The toy geometry that worked before is worth reusing** (from the deleted `toy_inject.py`): a full
 3-exon transcript with **intergenic ends** — `intergenic — exon1(TSS) — intron — exon2 — intron —
@@ -142,7 +142,7 @@ was never blocked.
 
 ## 4. The scan cache's step 4 — the population-prior seed
 
-Steps 1–3 landed (`LEDGER.md` B3). Step 4 seeds a toy from a genome-scale scan.
+Steps 1–3 landed (`docs/WIP.md` B3). Step 4 seeds a toy from a genome-scale scan.
 
 ⭐ **The mechanism already exists and needs wiring, not inventing.** `InjectedCalibrationPriors`
 (`calibrate.py:82`) already carries exactly the population quantities a toy cannot fit — `rna_sense_frac`,
@@ -160,11 +160,11 @@ strict xfail that silently keeps failing is indistinguishable from one nobody to
 
 ## 5. The soft 3-pool surplus does not exist
 
-`BENCHMARKING.md` names it as the **primary** pool metric — because the hard-label metric is nearly blind
+`docs/testing/BENCHMARKING.md` names it as the **primary** pool metric — because the hard-label metric is nearly blind
 to a calibration-prior change (a real change can move the soft pools by tens of thousands of fragments
 while the hard-label net is byte-identical). `rigel.sim.analysis` implements only the hard-label version.
 
-**Also missing:** the absolute per-transcript error alongside the net (`BENCHMARKING.md` caveat 2 — net
+**Also missing:** the absolute per-transcript error alongside the net (`docs/testing/BENCHMARKING.md` caveat 2 — net
 cancels). ⭐ **UNBLOCKED (S5.f)**: both needed `rigel quant` to run end to end, and it does. ⚠ Build the
 metric against item 7's noise floor — a soft-pool difference smaller than the EM's own run-to-run spread
 is not a result.
@@ -173,7 +173,7 @@ is not a result.
 
 ⭐ **Measured against ground truth for the first time (S5.f).** A chr22 pilot library simulated at
 `strand_specificity = 0.99` calibrates to **κ = 0.0101**; at 0.50 it reads 0.4990–0.5002, where a mirror
-is invisible by construction. This is `CARRY_FORWARD.md` §0 **C4**'s open question — "sense fraction is
+is invisible by construction. This is `docs/SESSION_HANDOFF.md` §0 **C4**'s open question — "sense fraction is
 0.002–0.012 on all four real cfRNA libraries (nearly fully antisense) — possibly a read-orientation
 convention bug" — and the answer is that it **is** a convention flip, not biology.
 
@@ -193,7 +193,7 @@ likelihood scores a mirrored observation against a mirrored `p`, the mirror canc
 deconvolution is right. **Only the exported scalar is mis-labelled.**
 
 ⚠ **What that costs today, and it is not nothing.** `rna_sense_frac` leaves calibration, reaches the QC
-report and `cli.py`'s summary, and is the number `CARRY_FORWARD.md` §1 fact 17 quotes for the four real
+report and `cli.py`'s summary, and is the number `docs/SESSION_HANDOFF.md` §1 fact 17 quotes for the four real
 libraries. Read as written, "κ = 0.002" says those libraries are almost purely antisense — a striking
 claim about the biology. Read correctly, they are ordinary **highly stranded** libraries. Anyone
 reasoning from the reported number is reasoning about a mirror.
@@ -203,7 +203,7 @@ convention or the simulator's read orientation — by checking one known-strand 
 `sj_strand` and the accumulator column it lands in. (2) Fix the **naming or the orientation, not both**,
 and gate it on the table above: after the fix, the fitted κ must be ≈ 0.99 *and* `f_gdna` must stay at
 0.0030. A change that moves κ without preserving `f_gdna` has broken the inference to fix a label.
-(3) Correct `CARRY_FORWARD.md` §1 fact 17 and §0 C4.
+(3) Correct `docs/SESSION_HANDOFF.md` §1 fact 17 and §0 C4.
 
 **Why deferred:** it is a labelling defect on a correct inference, so nothing downstream is wrong today.
 ⚠ It is nonetheless a **trap 27** in the making — one quantity, two meanings, and the prose disagreeing
@@ -222,7 +222,7 @@ deterministic. Measured, four runs of one scenario, same seed, same BAM, only th
 | `fractional` | 6276.853933515619 / …675 / …646 / …627 | ~**1e-11** relative |
 
 ⭐ **So an A/B has a switch: run it under `map` or `fractional` and the noise drops eight orders of
-magnitude.** The ~1e-10 residual is float accumulation order, the same family as `CARRY_FORWARD.md` §1
+magnitude.** The ~1e-10 residual is float accumulation order, the same family as `docs/SESSION_HANDOFF.md` §1
 fact 11, and is far below any effect these steps chase. **This is the practical answer for S5.a2, A6/A3
 and the benchmark skill: A/B under a deterministic assignment mode, not the default.**
 
@@ -244,7 +244,7 @@ every draw is over the limit:
 
 ⛔ **Do NOT switch the harness to `map` just because it goes green.** MAP assigns each fragment to its
 single highest-posterior component, so it is the mode that most aggressively suppresses low-posterior
-assignment — and a negative control is a **one-sided** metric (`CARRY_FORWARD.md` §3 trap 19: in a
+assignment — and a negative control is a **one-sided** metric (`docs/SESSION_HANDOFF.md` §3 trap 19: in a
 library with none of X, any change that lowers X scores better). Going green under MAP would be fitting
 the test to the mode. The real question is whether ~30 counts of leak onto a silent transcript is
 acceptable, and that is a **modelling** call, not a testing one.
@@ -280,7 +280,7 @@ correctness-of-`seed` question rather than a gate on progress.
 It printed `cached / skip` for all eight pilot conditions that `read_scan_cache` then **refused**
 (`payload_schema_digest None != '66b41ea0b645209d'`). `--force` is the workaround; the digest belongs in
 the skip test, which currently checks only that the directory exists. Same family as
-`CARRY_FORWARD.md` §3 trap 25 — a cache key that does not cover the artifact it caches. Cost so far: one
+`docs/SESSION_HANDOFF.md` §3 trap 25 — a cache key that does not cover the artifact it caches. Cost so far: one
 confusing failure and a 67 s re-scan. **Fix:** attempt the load in the skip branch and rebuild on refusal.
 
 ### ⛔ The simulator hangs on an impossible fragment-length truncation
@@ -293,7 +293,7 @@ including the obvious way to reproduce the deleted suite's `frag_std: 0`. It cos
 
 ### ⚠ Capture sampling is still O(probes per run) per draw
 
-`LEDGER.md` B1b: after the batching work, `_run_landscape` is 47.8 s over 23,788 calls with `scatter` at
+`docs/WIP.md` B1b: after the batching work, `_run_landscape` is 47.8 s over 23,788 calls with `scatter` at
 511,711 calls — the `(group slot × piece slot)` loop, ~21.5 iterations per call because at large fragment
 lengths probe neighbourhoods merge into big runs. **The remaining lever is a rejection sampler**: propose
 from the separable per-probe trapezoid (closed form, no per-start array), accept with `max_g / Σ_g` at the
@@ -330,7 +330,7 @@ and RNA 227.3 bp, a splash pool's mean implies its composition directly:
 excluded rather than reported. `DNA_INTRON_EXON`'s p90 of 255 bp sits above the RNA *median* of 204 — a
 long tail no gDNA population explains.
 
-⚠ **Both are named as pure-by-construction in `ACCUMULATOR_DESIGN.md` §8 and neither is.** They are QC
+⚠ **Both are named as pure-by-construction in `docs/accumulator/DESIGN.md` §8 and neither is.** They are QC
 only today (S5.b keeps them out of `gdna_fl_mass`), so nothing is currently mis-fitted — but the design's
 claim is wrong as stated, and if they were ever folded in they would bias the gDNA model long by ~29 %.
 
@@ -355,7 +355,7 @@ excluded.
 
 **Why deferred:** it is a debugging project of its own, with its own evidence gathering, and nothing
 currently consumes these pools. Owner-agreed 2026-07-30. ⚠ It blocks nothing, but it does mean
-`ACCUMULATOR_DESIGN.md` §8's purity claim for the two splash pools should be marked **unverified** until
+`docs/accumulator/DESIGN.md` §8's purity claim for the two splash pools should be marked **unverified** until
 it is settled.
 
 ### ⚠ `POOL_EB_PRIOR_ESS = 1000` now dominates the gDNA length model
@@ -366,7 +366,7 @@ chosen when `gdna_counts` was the old four-pool aggregate, several times larger;
 smaller *by design*, so the same number shrinks much harder.
 
 ⚠ It is load-bearing, not cosmetic: `μ_g − μ_r` is the determinant of every 2×2 in
-`ACCUMULATOR_DESIGN.md` §6, and §7.2 measures a 10 % length-model error at 0.010–0.026 of composition.
+`docs/accumulator/DESIGN.md` §6, and §7.2 measures a 10 % length-model error at 0.010–0.026 of composition.
 Shrinking the gDNA mean 26 % toward RNA shrinks that determinant directly.
 
 **Why deferred:** it is a magic number and changing it is the owner's call. Options are not obvious —

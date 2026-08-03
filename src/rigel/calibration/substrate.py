@@ -1,6 +1,6 @@
 """rigel.calibration.substrate — the calibrator-facing view of the accumulator payload.
 
-    Design: ``docs/ACCUMULATOR_DESIGN.md`` §5   ·   Gate: ``tests/calibration/test_substrate.py``
+       Gate: ``tests/calibration/test_substrate.py``
 
 The substrate is the **only** object that knows the payload's encoding. It decodes the fixed point,
 widens the integer banks, and hands the calibrator five populations on three axes. Nothing downstream
@@ -87,7 +87,7 @@ class PopulationView:
 
         ⚠ **NaN where the count is zero, deliberately.** An object with no fragments has no mean length,
         and that is not 0 — zero would read as "the fragments here are infinitely short" and propagate as
-        a confident wrong answer. ``CARRY_FORWARD.md`` §3 trap 23: an object with no opportunity must
+        a confident wrong answer: an object with no opportunity must
         emit nothing, never a floored value.
         """
         count = self.total_count.astype(np.float64)

@@ -1,6 +1,6 @@
 """The junction edges, re-indexed onto the accumulator's flat CUT axis as a CSR.
 
-    Design: docs/ACCUMULATOR_DESIGN.md §4.1   ·   Plan: docs/IMPLEMENTATION_PLAN.md §3.3
+
 
 The deposit rule must answer one question per observed intron, inside the BAM-scan hot loop: *is this
 intron an annotated junction, and if so which edge?* Getting it wrong is not a rounding error — an

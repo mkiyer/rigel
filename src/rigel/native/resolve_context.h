@@ -99,7 +99,7 @@ public:
     // deposit adapter unions these with the observed CIGAR-N introns and the accumulator normalises
     // the union, so an intron the detector re-derived from an observed splice would be merged away
     // and leave `L` untouched — i.e. "it was never emitted" and "it was emitted and absorbed" are
-    // indistinguishable downstream. `SPEC_GAP_INTRONS.md` §1 is precisely about the case where they
+    // indistinguishable downstream. The rule is precisely about the case where they
     // are NOT the same thing (a NEAR match shortens `L`), so the emission itself has to be visible.
     std::vector<IntronBlock> gap_introns;
     std::vector<int32_t>     gap_intron_offsets;
@@ -144,7 +144,7 @@ public:
         return val;
     }
 
-    // ⛔ `get_unique_frag_length_mrna` was DELETED by C2 — docs/FRAGMENT_LENGTH_AUDIT.md.
+    // ⛔ `get_unique_frag_length_mrna` was DELETED by C2.
     // It was definition **B**: a TRANSCRIPT-SPACE fragment length, gated on every non-nRNA candidate
     // agreeing, silently discarding the 4.6 % that did not. Summed into one array with definition
     // **A** — a GENOMIC footprint over a disjoint subset — and called the library's unconditional
@@ -799,7 +799,7 @@ public:
     ///
     /// ⛔ THE CANDIDATE SET IS NOT ALREADY THIS. `cr.t_inds` comes from `merge_sets`, which falls back to
     /// a UNION when the intersection is empty, so a transcript the reads contradict can be in it. Without
-    /// this test the enumeration would emit hypotheses no molecule has. docs/SPEC_GAP_PATHS.md §3, C1.
+    /// this test the enumeration would emit hypotheses no molecule has.
     ///
     /// ⚠ Abutting is fine: an intron may START where a block ends. And the overlap must exceed the
     /// SPLICING ANCHOR TOLERANCE K before it counts -- the same slack the gap match uses, because it is
@@ -845,7 +845,7 @@ public:
     ///
     /// ⚠ The path is compared WHOLE, across every gap, never per gap. A per-gap union can take gap A's
     /// intron from T1 and gap B's from T2 and emit a path no single molecule has; grouping by the whole
-    /// path makes that unrepresentable rather than merely avoided. `ACCUMULATOR_DESIGN.md` §9.1.
+    /// path makes that unrepresentable rather than merely avoided.
     void enumerate_gap_hypotheses(const std::vector<ExonBlock>& exons,
                                   const std::vector<IntronBlock>& observed_introns,
                                   const std::vector<int32_t>& candidate_t,
@@ -1539,7 +1539,7 @@ public:
         // construction, and so exactly the tail the measurement found.
         //
         // ⛔ THE ACCUMULATOR ARBITRATES. This only enumerates; whether the fragment deposits or is held
-        // for the second pass is decided where the outcome is reported. docs/SPEC_GAP_PATHS.md §0.
+        // for the second pass is decided where the outcome is reported.
         //
         // ⚠ `chimera_type == CHIMERA_NONE` is KEPT: a chimeric fragment's blocks are not one molecule, so
         // its gaps are not introns. Such a fragment gets the unspliced hypothesis alone.

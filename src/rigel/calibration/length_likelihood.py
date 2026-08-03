@@ -1,10 +1,10 @@
 """The FRAGMENT-LENGTH composition likelihood — the fourth information source, on the ``λ`` axis.
 
-    Plan: `docs/SOLVER_OBSERVABLES_PLAN.md` §6 (P2)   ·   Gate: `tests/calibration/test_length_likelihood.py`
+     (P2) · Gate: `tests/calibration/test_length_likelihood.py`
 
 ⭐ **WHY THIS EXISTS.** ``node_init`` gives every slot its composition precision from three live sources:
 the structural lock, the intron-factory density deconvolution, and the strand Beta-Binomial. Measured on
-the chr22 pilot (`LEDGER.md`, P0), that leaves **13.3–40.1 % of library mass with no own evidence at all**
+the chr22 pilot (P0), that leaves **13.3–40.1 % of library mass with no own evidence at all**
 in *every* condition — the Schur gate silences strand on both-strand (AMBIG) nodes by construction — and
 **100 %** on an unstranded or zero-gDNA library, because the strand Fisher information is
 ``I(f_g) ∝ (2κ−1)²`` and is identically 0 at ``κ = ½``.
@@ -28,7 +28,7 @@ i.i.d. draws from the mixture ``pi·g_g + (1−pi)·g_r``::
     ll(pi) = −½ (x − mean)' cov⁻¹ (x − mean) − ½ log det cov
 
 ⭐ **The Gaussian is on a SUM, not on a ratio, and that is what makes it legitimate here.** The heavy tail
-recorded in `S5_DESIGN_LOG.md` §3.4 (realised sd 187.5 against a predicted 0.375) is the *ratio estimator*
+recorded in (realised sd 187.5 against a predicted 0.375) is the *ratio estimator*
 ``phi-hat``'s tail; its robust scale matched prediction to ~10 %. This is the same quasi-likelihood
 `scripts/design/observable_efficiency.py` uses to produce every efficiency number in the design log — it
 is being lifted into the solver, not invented.
@@ -45,7 +45,7 @@ likelihood **does not depend on ``theta`` at all**, so that argument does not ap
 
 ⛔ **IT IS NOT A SUBSTITUTE FOR THE LENGTH MODELS.** ``m1``/``m2`` are functionals of the two FITTED pmfs,
 so this channel inherits their error — it is a second *use* of the length model, not a way around it. The
-model-free level channel is a different question (`NODE_DENSITY_DERIVATION.md`, the ``1/A`` weight), and a
+model-free level channel is a different question (the ``1/A`` weight), and a
 model-free channel provably carries zero composition information anyway.
 """
 
@@ -73,7 +73,7 @@ class LandedMoments:
     ``m1 = E[u]``, ``m2 = E[w]``, ``q1 = E[u²]``, ``q2 = E[w²]``, ``q12 = E[u·w]`` — everything the
     conditional mean and covariance of ``(Σu, Σw)`` need, and nothing else. ``eff`` is the tilt's own
     normaliser ``E_c[A]``, carried so a consumer can assert it against the divisor the solver used
-    (they are the same quantity, and two implementations of one quantity is `CARRY_FORWARD.md` §3
+    (they are the same quantity, and two implementations of one quantity is
     trap 27).
 
     All arrays are per object, or scalars broadcastable over objects.
@@ -149,7 +149,7 @@ def crossing_moments(fl_pmf: np.ndarray) -> LandedMoments:
     """Moments for the CROSSING population at UNBOUNDED reach: ``A(w) = (w−1)+``, ``u(w) = 1/(w−1)``.
 
     Every entry is a scalar — under unbounded reach a line's opportunity does not depend on where it is,
-    which is `ACCUMULATOR_DESIGN.md` §6's "every edge has the same expectation" stated in moments.
+    which is the "every edge has the same expectation" property stated in moments.
 
         E[A]     = mu − 1                    <- IS crossing_eff_length at UNBOUNDED_REACH
         E[A·u]   = P(w >= 2)
@@ -160,7 +160,7 @@ def crossing_moments(fl_pmf: np.ndarray) -> LandedMoments:
 
     ⚠ **Unbounded reach only, matching `build_node_geometry`'s default.** With the A7 taper switched on
     (``edge_rna_reach``) the opportunity becomes per-edge and these moments would have to as well. The
-    taper was measured as a null (`LEDGER.md` S5.g-2, ≤ 0.0002), so the default path is the one wired;
+    taper was measured as a null (≤ 0.0002), so the default path is the one wired;
     a consumer that turns the taper on must extend this function rather than silently mismatch.
     """
     p = np.asarray(fl_pmf, dtype=np.float64)
@@ -185,7 +185,7 @@ def crossing_moments(fl_pmf: np.ndarray) -> LandedMoments:
 def _normalise(eff, e_u, e_w, e_uu, e_ww, e_uw) -> LandedMoments:
     """Divide the raw ``E[A··]`` moments by ``E[A]`` to get the tilted-pmf moments.
 
-    ⛔ Zero opportunity ⇒ every moment is 0, never a floored division (`CARRY_FORWARD.md` §3 trap 23).
+    ⛔ Zero opportunity ⇒ every moment is 0, never a floored division.
     A slot with no opportunity for a component contributes nothing, and the caller's ``det > 0`` gate
     then makes the whole term inert there.
     """
@@ -241,8 +241,8 @@ def length_loglik(
     ⛔ **A slot contributes NOTHING — a flat row, not a small one — when it cannot speak**: no count, no
     opportunity for one of the two components, or a degenerate covariance. A flat row carries zero
     information through `density_deconv.density_factor_precision` (which tests ``ptp > 0``) and adds a
-    constant to ψ, which normalises away. That is the honest encoding of "no evidence", and it is
-    `CARRY_FORWARD.md` §3 trap 23's contract: never a floored value.
+    constant to ψ, which normalises away. That is the honest encoding of "no evidence", and it matches
+    `effective_length`'s own contract: never a floored value.
 
     ⚠ **The rows are NOT normalised.** ψ is a log-density up to an additive constant per node and is
     normalised once, at the end, by the caller's log-sum-exp — subtracting a per-row maximum here would

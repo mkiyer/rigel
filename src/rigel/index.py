@@ -140,7 +140,7 @@ def _sha256_of_directory(path: Path) -> str:
 def source_record(path: str | Path) -> dict:
     """Provenance for ONE build input: where it was, how big it was, and what it contained.
 
-    ⚠ **This is not** ``CARRY_FORWARD.md`` §3 trap 25. That trap forbids storing a hash of an artifact
+    ⚠ **This is not the stale-cache trap.** That one forbids storing a hash of an artifact
     *beside* that artifact, because the two drift and the stale hash then verifies clean. This hashes an
     input the index **cannot recompute from itself** — the genome and the annotation are not in the index
     — so it is provenance, not a cache key. ``partition_hash`` and ``graph_hash`` stay computed on demand.
@@ -944,7 +944,7 @@ class TranscriptIndex:
         indices and the annotated strands, i.e. exactly what crosses into ``set_junctions``.
 
         ⚠ **Computed on demand, never stored.** A hash written beside the data it describes can go stale
-        against it; this one cannot (``CARRY_FORWARD.md`` §3 trap 25).
+        against it; this one cannot.
         """
         import hashlib
 
@@ -1125,7 +1125,7 @@ class TranscriptIndex:
 
         # -- Manifest --------------------------------------------------------
         # ⛔ Everything needed to REBUILD this index, because the previous manifest recorded neither the
-        # sources nor the flags and a rebuild had to infer both (`TODO.md`, and the ledger's index-rebuild
+        # sources nor the flags, so a rebuild had to infer both (the index-rebuild
         # entry). Defaults are written out explicitly: a rebuilder must not have to know this rigel
         # version's defaults to reproduce the artifact.
         logger.info("[START] Digesting build sources for the manifest")

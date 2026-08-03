@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 """⭐ **THE DELIVERABLE, SCORED AGAINST TRUTH**: does the second pass reach the gDNA/RNA composition?
 
-    Baseline it replaces: `LEDGER.md` S5.f, which measured `f_gdna` before ANY of the fragment-length
+    Baseline it replaces:, which measured `f_gdna` before ANY of the fragment-length
     work — "within 6 % of truth on 3 of 4 gdna100 conditions", with `gdna100 ss0.50 capture_on` 25 % low.
 
 ⛔ **THIS IS THE QUESTION THE WHOLE FRAGMENT-LENGTH TRACK EXISTS TO ANSWER.** C0–C2.6 and the second pass
 (P0–P4.2) are all upstream plumbing: one definition of fragment length, then an accurate one, then an
 *unbiased* one. None of that is the product. The product is the library's composition, and
-`ACCUMULATOR_DESIGN.md` §7.2 measured the coupling — **a 10 % length-model error is worth 0.010–0.026 of
+ measured the coupling — **a 10 % length-model error is worth 0.010–0.026 of
 composition** — so a length error that went from +27 % to +0.00 % should be visible here or the coupling
 is not what it was thought to be.
 
@@ -15,7 +15,7 @@ is not what it was thought to be.
 whether the side buffer has been **drained** before calibration reads the tally. The undrained arm is
 exactly what shipped before P4.
 
-⛔ **DO NOT SCORE ON THE ZERO-gDNA ARM ALONE** (`CARRY_FORWARD.md` §3 trap 19). Truth there is
+⛔ **DO NOT SCORE ON THE ZERO-gDNA ARM ALONE**. Truth there is
 `f_gdna = 0` *exactly*, so any change that lowers the estimate scores better — a one-sidedness that has
 already reversed a verdict in this project once. The **gdna100** arm carries the real signal: truth is
 5 M mRNA against 5 M gDNA fragments, so `f_gdna = 0.5`.
@@ -60,7 +60,7 @@ def truth_f_gdna(condition_dir: Path) -> float | None:
 
 
 def f_gdna_of(result) -> float:
-    """``f_gdna`` as `LEDGER.md` S5.f defined it, so the two baselines are comparable.
+    """``f_gdna`` as defined it, so the two baselines are comparable.
 
     ⚠ The sum runs over nodes AND edges. gDNA lives on both — contained in a node or crossing a line —
     and summing only one axis reports a library's gDNA as a fraction of part of itself.

@@ -3,11 +3,11 @@
     Status: ⚠ **HISTORY, as of 2026-08-03.** Its S1, S2 and S3 have ALL LANDED — the side buffer, its
       persistence, and the second pass that drains it. ⭐ Read it for §0–§1, which are why the gap-path and
       junction-opportunity problems are ONE problem and still the clearest statement of that.
-      ⛔ **§5 is superseded by `SPEC_SECOND_PASS.md`** and **§2.4's anchor-vs-pool table by `LEDGER.md` B4**,
+      ⛔ **§5 is superseded by `docs/accumulator/SPEC_SECOND_PASS.md`** and **§2.4's anchor-vs-pool table by `docs/WIP.md` B4**,
       which measured the drained numbers §2.4 said could not be read yet. S4 is now `TODO.md` rank 0.
       Originally: CONVERGENCE PLAN, 2026-08-01. This supersedes the separate tracks.
-    Replaces as the entry point: `SPEC_GAP_PATHS.md` (the gap-path track) and
-    `JUNCTION_OPPORTUNITY.md` §7–§8 (the opportunity track). Both remain valid as
+    Replaces as the entry point: `docs/accumulator/SPEC_GAP_PATHS.md` (the gap-path track) and
+    `docs/accumulator/JUNCTION_OPPORTUNITY.md` §7–§8 (the opportunity track). Both remain valid as
     DERIVATIONS; this file is the order of work and the gates.
     ⭐ Written to be handed to ONE session with clean context. Two sessions were working
     these as separate problems; §1 is why they are not.
@@ -74,12 +74,12 @@ plan.
 | | |
 |---|---|
 | `40006126` | **C2** — one definition of fragment length; the scanner's rival histogram deleted; `build_fl_models(payload)` takes the payload and nothing else |
-| `e2f41cd0` | **the junction-opportunity derivation** (`JUNCTION_OPPORTUNITY.md`) and the gap-intron spec |
+| `e2f41cd0` | **the junction-opportunity derivation** (`docs/accumulator/JUNCTION_OPPORTUNITY.md`) and the gap-intron spec |
 
 ### 2.2 ✅ S1 AND S2 HAVE LANDED — the migration is finished and the side buffer exists
 
 **The suite is 21 failed / 1868 passed, and all 21 are `test_golden_output`** — the clean baseline.
-`LEDGER.md`'s **S1 + S2** entry is the record. What was half-done at `750cc8ee` is done:
+`docs/WIP.md`'s **S1 + S2** entry is the record. What was half-done at `750cc8ee` is done:
 
 | was | now |
 |---|---|
@@ -104,7 +104,7 @@ new seed machinery — S2.1 established the rule as *order by identity, then one
 gives the deferred queue its canonical order.
 
 ⚠ `C2.6` (cut a gap intron on every fragment, not only unspliced ones) **did land and is measured** —
-`LEDGER.md`. It is the reason `dropped_too_long` is now 0 and the anchor's sd error fell from +27 % to
+`docs/WIP.md`. It is the reason `dropped_too_long` is now 0 and the anchor's sd error fell from +27 % to
 +2 %. The in-flight work is the *generalisation* of it from "one intron per gap" to "a hypothesis set".
 
 ### 2.3 The size of the problem, measured on the 8 pilot conditions
@@ -175,7 +175,7 @@ in advance and cannot be tuned. Then the code is deliberately broken to confirm 
 |---|---|---|
 | ~~**S1**~~ | ✅ **LANDED** — C++ to the reference, deferred bank across the binding, old call sites | ⭐ **conservation** — `deposited + deferred + dropped_* == offered`, exactly. Plus byte-identity C++↔reference and the same answer at 1/2/4/8 workers. All met; 9 perturbations, two of which found real holes |
 | ~~**S2**~~ | ✅ **LANDED** — the side buffer through `scan_payload` and the scan cache | the queue survives a cache round-trip **byte-identically** and comes back TYPED; its merge is deterministic at any worker count. ⚠ `payload_schema_digest` now recurses into the nested banks, so every existing cache is invalidated by design |
-| **S3** | ⭐ **the second pass** — ⭐ **SPEC'D IN FULL: `docs/SPEC_SECOND_PASS.md`**, which supersedes §5 below and carries the phased path P0–P6 | ⭐ **the tail** — no fragment longer than the library's true longest molecule. On the pilot that is **713 bp**, read from `truth_fragment_lengths.tsv`. ⛔ And the **gDNA control must not move one digit** |
+| **S3** | ⭐ **the second pass** — ⭐ **SPEC'D IN FULL: `docs/accumulator/SPEC_SECOND_PASS.md`**, which supersedes §5 below and carries the phased path P0–P6 | ⭐ **the tail** — no fragment longer than the library's true longest molecule. On the pilot that is **713 bp**, read from `truth_fragment_lengths.tsv`. ⛔ And the **gDNA control must not move one digit** |
 | **S4** | **B** — the junction-opportunity correction, on the drained tally (§6) | on a zero-gDNA library the corrected RNA distribution must agree with the anchor, because there they describe **one population** |
 | **S5** | regenerate `tests/golden/` | ⛔ regenerate **once**, at the very end, **twice, and diff** |
 
@@ -247,7 +247,7 @@ two seeds and report the spread.**
 
 ## §6 B — JUNCTION OPPORTUNITY, ON THE DRAINED TALLY
 
-The formula is **derived and proven** (`JUNCTION_OPPORTUNITY.md`; 48,648 exhaustive configurations
+The formula is **derived and proven** (`docs/accumulator/JUNCTION_OPPORTUNITY.md`; 48,648 exhaustive configurations
 against an independent oracle). For a transcript with exon lengths `e_i` and total `L`:
 
 ```
@@ -273,15 +273,15 @@ actually estimated, not assumed. ⭐ That θ is the same one §5.2's prior needs
 | **D-A** | Does `SPLICE_IMPLICIT` survive as a reported class once such fragments are deferred? | ⭐ **Recommend keep, purely descriptive** — it is the scanner's census of what it saw, and C2 put QC where it is generated |
 | **D-B** | May a *non-annotated* unspliced path be a hypothesis for a certified-RNA fragment? | ⭐ **Recommend no** — that is the unannotated-junction problem, deferred by owner ruling |
 | **D-C** | Which θ estimator feeds §5.2 and §6? | ⭐ **Recommend the EM's own**, with a uniform first pass. It is the only option whose error is bounded by something measurable |
-| **D-D** | Where does the `global_seed` live, and is it exposed on the CLI? | ✅ **ANSWERED, and it needs no new machinery** (`LEDGER.md` S2.1). The rule is **order by identity, then one stream** — never hash the content, which ties on exactly the duplicates it would harm. S1 already gives the deferred queue a canonical order, so `(global_seed, index in that queue)` is well defined. ⚠ The old worry that `EMConfig.seed` was a broken pattern to copy is **retired**: the seed was always fine; the ORDER it was consumed in was not, and that is now fixed for the whole pipeline |
+| **D-D** | Where does the `global_seed` live, and is it exposed on the CLI? | ✅ **ANSWERED, and it needs no new machinery** (`docs/WIP.md` S2.1). The rule is **order by identity, then one stream** — never hash the content, which ties on exactly the duplicates it would harm. S1 already gives the deferred queue a canonical order, so `(global_seed, index in that queue)` is well defined. ⚠ The old worry that `EMConfig.seed` was a broken pattern to copy is **retired**: the seed was always fine; the ORDER it was consumed in was not, and that is now fixed for the whole pipeline |
 
 ### ⛔ What S1 settled, so it is no longer open
 
 | | |
 |---|---|
 | **D1** (was `TODO.md` rank 0a) | **deleted.** The RNA pool is keyed on determinacy, not provenance — a purity filter on a length pool is a length filter |
-| **C1** (`SPEC_GAP_PATHS.md` §3) | **implemented and gated.** A transcript whose intron overlaps an aligned block's interior is not a candidate; `test_h2_a_CONTRADICTED_transcript_is_not_a_candidate` |
-| **C3** (`SPEC_GAP_PATHS.md` §8) | **measured, two-sided, on a real scan.** The `max_fragment_length` prefilter does change classification, and both arms are now fixtures |
+| **C1** (`docs/accumulator/SPEC_GAP_PATHS.md` §3) | **implemented and gated.** A transcript whose intron overlaps an aligned block's interior is not a candidate; `test_h2_a_CONTRADICTED_transcript_is_not_a_candidate` |
+| **C3** (`docs/accumulator/SPEC_GAP_PATHS.md` §8) | **measured, two-sided, on a real scan.** The `max_fragment_length` prefilter does change classification, and both arms are now fixtures |
 | **D3 / C2.7** (was rank 0b) | **solved** by grouping candidates on the whole-fragment path. ⛔ Its residual cannot be re-measured until the drain |
 
 ⚠ **Deferred by owner ruling:** unannotated splice junctions. They are a real source of long fragments in
@@ -295,7 +295,7 @@ residual tail on real cfRNA that survives S3 is the first place to look, and the
 | session | did | state |
 |---|---|---|
 | **the first** | C2 (landed, committed); the junction-opportunity derivation and proof; found the uncut-intron bug and specced it; measured the deferred population; designed the second pass (§5) | ⭐ retired |
-| **the parallel one** | C2.6; `SPEC_GAP_PATHS.md`; the hypothesis machinery in the reference and partly in C++ | ⭐ retired |
+| **the parallel one** | C2.6; `docs/accumulator/SPEC_GAP_PATHS.md`; the hypothesis machinery in the reference and partly in C++ | ⭐ retired |
 | **the convergence one** | ✅ **S1 and S2** — the migration finished, the side buffer landed and persisted, 9 perturbations, two real holes closed | |
 
 ✅ **The tree is green again at the baseline: 21 failed / 1863 passed, all 21 goldens.**
@@ -303,9 +303,9 @@ residual tail on real cfRNA that survives S3 is the first place to look, and the
 ### Reading order for the next session
 
 1. **this file** — the order of work and the gates; §2.2 is the state, §5 is what to build
-2. `LEDGER.md`, the **S1 + S2** entry — what landed, what it found, and what it deliberately did not measure
-3. `SPEC_GAP_PATHS.md` §0–§4 — the enumeration rule and the interface, in detail
-4. `JUNCTION_OPPORTUNITY.md` §1, §4 — the proven formula, and the evidence that found the bug
+2. `docs/WIP.md`, the **S1 + S2** entry — what landed, what it found, and what it deliberately did not measure
+3. `docs/accumulator/SPEC_GAP_PATHS.md` §0–§4 — the enumeration rule and the interface, in detail
+4. `docs/accumulator/JUNCTION_OPPORTUNITY.md` §1, §4 — the proven formula, and the evidence that found the bug
 
 ⛔ **Start with D-D (§7), then S3.** And re-measure B's target *after* the drain — every
 junction-opportunity number in the docs predates it.

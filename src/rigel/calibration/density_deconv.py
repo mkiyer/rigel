@@ -5,7 +5,7 @@ A node's unspliced count ``C`` (over its gDNA effective length ``E_g``) is ``gDN
 (``g ≈ ρ_bg·E_g``) and read the residual as RNA, with honest, count-derived precision. This is the generic
 count-deconvolution primitive; the **intron factory** is its special case (`fit_intron_background`), where the
 gDNA prior is the intergenic node distribution (introns are off-target, at the same capture depletion as
-intergenic — `docs/CARRY_FORWARD.md` §2).
+intergenic —).
 
 Model (owner-ratified 2026-07-20): the gDNA count ``g ~ NegBinom(mean = ρ_bg·E_g, size = α_eff)``, a
 Gamma-Poisson — the per-region background rate ``ρ ~ Gamma`` (over-dispersion ``α`` = per-region CNV /
@@ -111,7 +111,7 @@ def fit_intron_background(
 ) -> GdnaBackground:
     """The INTRON special case of :func:`fit_gdna_background`: the gDNA prior IS the intergenic node
     distribution (introns are off-target at the same capture depletion as intergenic —
-    `docs/CARRY_FORWARD.md` §2).
+
 
     ``include_introns=False`` (default) pools **intergenic only** — the clean, non-circular reference (introns
     are what we deconvolve). The real-data path may add RNA-free introns for resolution
@@ -185,7 +185,7 @@ def density_lambda_factor(
 
 def density_factor_precision(lam_logprior, lam_grid):
     """``I_density`` — the composition evidence a density-deconvolution ``λ``-factor carries, read off its own
-    CURVATURE (`gdna_intron_factory_design.md` §4).
+    CURVATURE.
 
     The factor :func:`density_lambda_factor` is a genuine, reference-FREE likelihood on ``λ`` (external
     ``ρ_bg`` information about this node's composition), so its precision belongs on the composition ``λ``-axis

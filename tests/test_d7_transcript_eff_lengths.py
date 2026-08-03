@@ -1,6 +1,6 @@
 """⭐ C2.5 / D7 — the corrected RNA pmf reaches EVERY TRANSCRIPT'S EFFECTIVE LENGTH in the EM.
 
-``docs/FRAGMENT_LENGTH_AUDIT.md`` D7: *"The shrunk pmf is reused for the EM's transcript effective
+*"The shrunk pmf is reused for the EM's transcript effective
 lengths, so a frame error in the anchor propagates into every transcript's effective length — not only
 into calibration."* The audit is explicit that this must be **checked, not assumed** — it is the path
 with the largest blast radius and the least visibility, and nothing was asserting it.
@@ -14,7 +14,7 @@ The chain under test::
                                                                                         │
                                                                             every transcript row in the EM
 
-⚠ Re-deriving the expected value through the *same* helper would be ``CARRY_FORWARD.md`` §3 trap 1 —
+⚠ Re-deriving the expected value through the *same* helper would be —
 a check that cannot fail. What makes this a real gate is that the left-hand side comes out of a full
 ``run_pipeline`` and the right-hand side is rebuilt from the PAYLOAD ALONE: if the pipeline fed its
 effective lengths from anything else, or from a differently-built model, the two cannot agree.
@@ -64,7 +64,7 @@ def scenario(tmp_path_factory):
 
 def _config():
     # ⚠ `map` — the DETERMINISTIC assignment mode. The EM samples the posterior by default, and an
-    # equality assertion under `sample` would be measuring the sampler (CLAUDE.md).
+    # equality assertion under `sample` would be measuring the sampler.
     return PipelineConfig(
         em=EMConfig(seed=SEED, assignment_mode="map", n_threads=1),
         scan=BamScanConfig(sj_strand_tag="auto"),

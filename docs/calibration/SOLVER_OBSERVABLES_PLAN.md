@@ -1,8 +1,8 @@
 # Getting the accumulator's information into the solver — and back out correctly
 
     Status:   PROPOSED, 2026-07-31. Nothing here has landed.
-    Supersedes: `S5_DESIGN_LOG.md` §2 Phase 2 rows 5 and 7 (S5.a2). Row 4 (S5.g / A7) is already done.
-    Companion: `ACCUMULATOR_DESIGN.md` (what is deposited) · `NODE_DENSITY_DERIVATION.md` (why)
+    Supersedes: `docs/calibration/S5_DESIGN_LOG.md` §2 Phase 2 rows 5 and 7 (S5.a2). Row 4 (S5.g / A7) is already done.
+    Companion: `docs/accumulator/DESIGN.md` (what is deposited) · `docs/accumulator/NODE_DENSITY_DERIVATION.md` (why)
 
 ⭐ **Read §1 before touching anything.** It is the whole theory in one page and every step below is a
 direct consequence of it. §2 states the two defects and the evidence for them. §§4–7 are the executable
@@ -18,9 +18,9 @@ have left the plan.
 
 | step | what | size | status |
 |---|---|---|---|
-| **P0** | Measure the hole. No code changes | ¼ day | ✅ **DONE 2026-07-31** — premise confirmed; see §4 and `LEDGER.md` |
-| **P1** | The units fix in `assemble_priors` — a **bug** | 1–2 days | ✅ **DONE 2026-07-31** — see `LEDGER.md`. ⛔ T3 caught the old prior EXCEEDING the whole library |
-| **P2** | Wire the length likelihood into the per-node solve — the **information fix** | 3–5 days | ⚠ **BUILT + GATED OFF 2026-07-31.** Mechanism proven (blind mass 100 % → 0 %); ⛔ blocked on the FL pools — see `LEDGER.md` |
+| **P0** | Measure the hole. No code changes | ¼ day | ✅ **DONE 2026-07-31** — premise confirmed; see §4 and `docs/WIP.md` |
+| **P1** | The units fix in `assemble_priors` — a **bug** | 1–2 days | ✅ **DONE 2026-07-31** — see `docs/WIP.md`. ⛔ T3 caught the old prior EXCEEDING the whole library |
+| **P2** | Wire the length likelihood into the per-node solve — the **information fix** | 3–5 days | ⚠ **BUILT + GATED OFF 2026-07-31.** Mechanism proven (blind mass 100 % → 0 %); ⛔ blocked on the FL pools — see `docs/WIP.md` |
 | **P3** | Change the node deposit weight `L → A` | 2–3 days | ⚠ **decide after P2, not before** |
 
 ⚠ **Do P1 before P2.** P2's end-to-end A/B is read through P1's code; leaving the units error in means
@@ -95,7 +95,7 @@ invert (count, Sum 1/A):  451·rho_g + 301·rho_r = 7520 ; rho_g + rho_r = 20  -
 
 Both work. ⚠ Note `Sum 1/L / 500 = 0.21`, **not** 10 — `Sum 1/L` has units of *fragments per base of
 fragment*, not per base of node. The quantity that is a genuine node density is `Sum 1/A`
-(`NODE_DENSITY_DERIVATION.md` T1: `1/A` is the **unique** weight with that property).
+(`docs/accumulator/NODE_DENSITY_DERIVATION.md` T1: `1/A` is the **unique** weight with that property).
 
 ### 1.4 Why one channel is not enough — the singular case
 
@@ -148,12 +148,12 @@ sources: (1) structural lock, (2) a population gDNA-density prior, (3) the stran
 
 ⭐ **Why that is the hole.** The strand channel carries information `I(f_g) ∝ (2κ-1)²`, which is
 **exactly zero at κ = ½** — the gDNA fraction cancels identically out of the Beta-Binomial mean
-(`CARRY_FORWARD.md` §2, verified to 5.6e-17). That is why
+(`docs/SESSION_HANDOFF.md` §2, verified to 5.6e-17). That is why
 [node_init.py:250-251](../src/rigel/calibration/node_init.py#L250-L251) credits both-strand (AMBIG)
 nodes **zero** strand evidence. On unstranded data, or at any both-strand locus, sources 1–3 are all
 silent and the solver falls through to source 4.
 
-**The evidence is in the project's own baseline** (`LEDGER.md`, S5.f, truth `f_gdna = 0` exactly on the
+**The evidence is in the project's own baseline** (`docs/WIP.md`, S5.f, truth `f_gdna = 0` exactly on the
 `none` arm):
 
 | condition | `f_gdna` | |
@@ -199,7 +199,7 @@ The bias in the ratio is exactly `SUM A_g / SUM A_r`. Measured on the chr22 pilo
 | share of incidences landing on edges | **8.1 %** | **38.4 %** |
 
 → **the prior's g : r ratio under-calls gDNA by ~13–19 %**, and the error grows as the partition gets
-finer. This is `CARRY_FORWARD.md` §3 trap 4 in the mirror: the old design's fractional mass depended on
+finer. This is `docs/SESSION_HANDOFF.md` §3 trap 4 in the mirror: the old design's fractional mass depended on
 region sizes; the new design's incidence *multiplicity* does.
 
 ⚠ **The baseline's own headline is that sum.** `5,370,056 + 5,373,548 = 10,743,604` equals
@@ -236,7 +236,7 @@ checkable. It is the one axis on which every fragment appears exactly once.
 
 ---
 
-## §4 P0 — MEASURE THE HOLE ✅ **DONE, 2026-07-31 — see `LEDGER.md`'s P0 entry**
+## §4 P0 — MEASURE THE HOLE ✅ **DONE, 2026-07-31 — see `docs/WIP.md`'s P0 entry**
 
     Tool: scripts/design/composition_evidence_census.py   (no production code was changed)
 
@@ -296,13 +296,13 @@ mass, never by node count**:
 | the same, split by single-strand vs AMBIG (`free_pos ^ free_neg`) | isolates the Schur gate |
 | the same, split by NODE vs EDGE slot | tells you which axis P2 must serve first |
 
-⚠ **Mass-weight it.** `CARRY_FORWARD.md` §1 fact 6 records a claim that survived for months because it
+⚠ **Mass-weight it.** `docs/SESSION_HANDOFF.md` §1 fact 6 records a claim that survived for months because it
 was bp-weighted (0.8738) when the estimator is mass-weighted (0.9596). Do not repeat that.
 
 **Recorded prediction, to be written down before the run:** the `ss0.50` conditions show a materially
 larger `tau_lam == 0` mass share than the `ss0.99` conditions, concentrated on AMBIG slots.
 
-**Gate.** None — this is a measurement. But record it in `LEDGER.md`; it is P2's before-picture.
+**Gate.** None — this is a measurement. But record it in `docs/WIP.md`; it is P2's before-picture.
 
 </details>
 
@@ -330,7 +330,7 @@ where
   both components — `rho_c` is defined as fragments of component `c` starting per genomic base, so the
   span cancels out of the ratio and only sets the scale.
 
-⚠ **Ratio of sums, never mean of ratios** (`CARRY_FORWARD.md` §2, `rho_bg = Sum g / Sum E`).
+⚠ **Ratio of sums, never mean of ratios** (`docs/SESSION_HANDOFF.md` §2, `rho_bg = Sum g / Sum E`).
 
 ⚠ Edges contribute mass and support but **zero** `span_bp` — an edge is a 0-bp line. That is correct and
 not an omission.
@@ -349,7 +349,7 @@ node_eff_rna,  edge_eff_rna  = _project_eff(chain, geometry.eff_rna,  payload)
 
 ⚠ Keep the existing docstring's point: **this is a projection, not a recomputation.** Do not call
 `contained_eff_length` / `crossing_eff_length` again here — two implementations of one quantity is
-`CARRY_FORWARD.md` §3 traps 2 and 27.
+`docs/SESSION_HANDOFF.md` §3 traps 2 and 27.
 
 Pass both new arrays into the `CalibrationResult(...)` constructor at the end of `calibrate`.
 
@@ -398,7 +398,7 @@ gdna_prior_count = rho_g * proj["span_bp"]
 rna_prior_count  = rho_r * proj["span_bp"]
 ```
 
-⛔ **Never floor a zero support to epsilon.** `CARRY_FORWARD.md` §3 trap 23: an object with no
+⛔ **Never floor a zero support to epsilon.** `docs/SESSION_HANDOFF.md` §3 trap 23: an object with no
 opportunity for a component must emit **nothing at zero precision**, never a floored division. That
 default once seeded false gDNA into neighbouring exons. Use the `where=` form above.
 
@@ -415,7 +415,7 @@ updated: `tests/calibration/test_result_schema.py`, `test_priors.py`, `test_capt
 
 ### 5.3 Gates — write these FIRST and verify them failing
 
-⛔ **`CARRY_FORWARD.md` §3 trap 1 and the owner's standing rule: a test written after the code proves
+⛔ **`docs/SESSION_HANDOFF.md` §3 trap 1 and the owner's standing rule: a test written after the code proves
 nothing, and a test that is never seen to fail proves less.** Run each one against unmodified `HEAD` and
 record the failure before writing any implementation.
 
@@ -458,11 +458,11 @@ these are approximate and the sign of the P1 move is the load-bearing part, not 
 
 ⛔ **Score P1 against the simulator's own fragment counts, never against the S5.f table.** This is
 trap 2's family (cancelling errors hiding a scale error) and trap 19's (a one-sided metric). Write the
-prediction into `LEDGER.md` **before** the run so it cannot be rationalised afterwards.
+prediction into `docs/WIP.md` **before** the run so it cannot be rationalised afterwards.
 
 ⚠ Run the end-to-end arm under `EMConfig.assignment_mode = "map"` or `"fractional"`, held fixed across
 both arms — calibration is bit-identical run to run but the EM samples from the posterior by design
-(`S5_DESIGN_LOG.md` §0).
+(`docs/calibration/S5_DESIGN_LOG.md` §0).
 
 ---
 
@@ -518,7 +518,7 @@ conditional on the observed integer `N` (the count summed over both strand colum
 ```
 
 ⚠ **Why the Gaussian is legitimate here.** `x` is a **sum of `N` i.i.d. draws**, not a ratio. The heavy
-tail recorded in `S5_DESIGN_LOG.md` §3.4 (realised sd 187.5 against a predicted 0.375) is the *ratio
+tail recorded in `docs/calibration/S5_DESIGN_LOG.md` §3.4 (realised sd 187.5 against a predicted 0.375) is the *ratio
 estimator* `phi-hat`'s tail, and the robust scale there matched prediction to ~10 %. This is the same
 quasi-likelihood `scripts/design/observable_efficiency.py` uses to produce **every** efficiency number
 in the design log — it is being lifted into the solver, not invented.
@@ -580,7 +580,7 @@ the entire point of the step** — it is the only source that speaks on an AMBIG
 
 | id | test |
 |---|---|
-| **U1** | `m1_c`, `m2_c`, `q1_c`, `q2_c`, `q12_c` against **exact enumeration** over integer start positions on a small node (`ell` 5, 10, 25, 151) and a line, for a point-mass pmf and a two-point pmf. ⛔ Enumerate; do not call the module's own helper (`CARRY_FORWARD.md` §3 trap 1) |
+| **U1** | `m1_c`, `m2_c`, `q1_c`, `q2_c`, `q12_c` against **exact enumeration** over integer start positions on a small node (`ell` 5, 10, 25, 151) and a line, for a point-mass pmf and a two-point pmf. ⛔ Enumerate; do not call the module's own helper (`docs/SESSION_HANDOFF.md` §3 trap 1) |
 | **U2** | `E_c[A]` computed inside `length_likelihood` equals `eff_gdna`/`eff_rna` from `build_node_geometry`, to the last bit. If it does not, there are two implementations of the effective length |
 | **U3** | `l(pi)` is maximised at the true `pi` on synthetic data drawn from a known mixture (1000 draws, `mu_g != mu_r`) |
 | **U4** | with `f_g == f_r` (identical pmfs) the log-likelihood is **flat in `pi`** and `tau_len == 0`. A flat factor must carry no information, never the grid's own width |
@@ -603,7 +603,7 @@ OMP_NUM_THREADS=1 python scripts/design/build_scan_cache.py     # already cached
 # then calibrate() per condition, both arms, 2.6-6.4 s each
 ```
 
-⛔ **Score all 8 conditions, both arms.** `CARRY_FORWARD.md` §3 trap 19: on a zero-gDNA library *any*
+⛔ **Score all 8 conditions, both arms.** `docs/SESSION_HANDOFF.md` §3 trap 19: on a zero-gDNA library *any*
 change that lowers the gDNA fraction scores better, and that one-sidedness has reversed a published
 verdict in this project once (reported −13.1 % win; the full battery made it worse). Score per node and
 per condition on **soft** quantities, never on a pooled hard label.
@@ -628,7 +628,7 @@ already damps by the count — not a threshold constant (⛔ **no magic numbers*
 
 ## §6.5 ⛔ P2 IS BLOCKED — THE ROAD OUT
 
-    Measured 2026-07-31; `LEDGER.md`'s P2 entry has the numbers and its own correction note.
+    Measured 2026-07-31; `docs/WIP.md`'s P2 entry has the numbers and its own correction note.
 
 ⭐ **The likelihood is not the defect.** Two owner points, both verified:
 
@@ -649,9 +649,9 @@ already damps by the count — not a threshold constant (⛔ **no magic numbers*
 
 Two causes, and they are separable:
 
-1. **The junction-opportunity tilt** (`ACCUMULATOR_DESIGN.md` §8.1(b)). A fragment enters `RNA_SPLICED`
+1. **The junction-opportunity tilt** (`docs/accumulator/DESIGN.md` §8.1(b)). A fragment enters `RNA_SPLICED`
    by crossing ≥1 annotated junction, which longer fragments do more often. The measured +11.6 % / +71 %
-   sits against `S5_DESIGN_LOG.md` §3.6's independently-predicted **+14 % / +50 %**, and the
+   sits against `docs/calibration/S5_DESIGN_LOG.md` §3.6's independently-predicted **+14 % / +50 %**, and the
    ``rna/global`` ratio rises with length (log-ratio vs length, corr **+0.70**) — the opportunity
    signature. ⚠ §8.1(b) has been **"not yet decided"** since S5.b. **It is now the blocker.**
 2. ⭐ **A FRAME mismatch, which is new and is not a tilt.** ``global`` is the **scanner's** histogram;
@@ -659,10 +659,10 @@ Two causes, and they are separable:
    ceilings differ (713 vs 1000). A 53× excess of >500 bp molecules is not a smooth opportunity effect.
    ⚠ `scan_cache.calibration_inputs`'s own docstring already half-names this — "Only the unconditional
    ``global`` histogram still comes from the scan, because no pool is unconditional" — and **EB-shrinking
-   accumulator-frame pools toward a scanner-frame anchor is `CARRY_FORWARD.md` §3 trap 27**: two
+   accumulator-frame pools toward a scanner-frame anchor is `docs/SESSION_HANDOFF.md` §3 trap 27**: two
    implementations of one quantity, disagreeing.
 
-⭐ **The full audit of this area is `docs/FRAGMENT_LENGTH_AUDIT.md`** — F1/F2 below are C1/C3
+⭐ **The full audit of this area is `docs/accumulator/FRAGMENT_LENGTH_AUDIT.md`** — F1/F2 below are C1/C3
 there, and the audit found four more defects (a dead cache field, the scanner's silent ambiguous-length
 drop, and the shrunk pmf reaching the EM's transcript effective lengths).
 
@@ -671,7 +671,7 @@ drop, and the shrunk pmf reaching the EM's transcript effective lengths).
 | | step | why it is where it is |
 |---|---|---|
 | **F1** | **Give the EB anchor the accumulator's own frame.** Either an unconditional length bin in the accumulator (⚠ reopens the S3 byte-identity gate) or an anchor built from the pools themselves. **Owner call** — the first is correct, the second is cheap | until the anchor and the pools measure the same thing, no downstream length comparison means anything, and F2 cannot be measured |
-| **F2** | **`ACCUMULATOR_DESIGN.md` §8.1(b): divide each pooled histogram by its own opportunity before normalising** — ``placements(w)`` for a crossing pool, ``(ell−w+1)+`` for a contained pool, the transcript-level count for the junction pool | the named blocker. ⚠ The junction pool's opportunity is the hard one and §8.1(b) says so |
+| **F2** | **`docs/accumulator/DESIGN.md` §8.1(b): divide each pooled histogram by its own opportunity before normalising** — ``placements(w)`` for a crossing pool, ``(ell−w+1)+`` for a contained pool, the transcript-level count for the junction pool | the named blocker. ⚠ The junction pool's opportunity is the hard one and §8.1(b) says so |
 | **F3** | **Gate the length channel on BOTH pools having data**, the `strand_evidence` analogue (its noise floor divides by ``n_gdna_obs``, so ``N_gdna = 0 ⇒ disc = 0``). Even with F1+F2 correct, a zero-gDNA library has no gDNA length model and the discriminant is **undefined**, not small | independent of F1/F2 and worth doing regardless; it is the difference between "no evidence" and "confident nonsense" |
 | **F4** | **Re-run `scripts/design/length_likelihood_ab.py`.** Before/after pictures are both recorded | — |
 
@@ -685,7 +685,7 @@ lack of a way to judge it; this is one.
 
 ⛔ **Do not damp the channel to make the numbers look better.** It is reporting a real disagreement
 between two length models. Damping hides an upstream defect behind a tuned constant —
-`CARRY_FORWARD.md` §3 trap 12, recorded three times over.
+`docs/SESSION_HANDOFF.md` §3 trap 12, recorded three times over.
 
 ---
 
@@ -698,21 +698,21 @@ between two length models. Damping hides an upstream defect behind a tuned const
 `(L - ell - 1)` for spanning, instead of `round(2^32 / L)`. The edge is untouched — `1/(L-1)` already
 **is** the reciprocal opportunity. `density_quantum` already takes a placement count and the node length
 is in the cut array the deposit already binary-searches. Overflow is priced and closed
-(`NODE_DENSITY_DERIVATION.md` §7.3: even 10^8 fragments at `A = 1` reaches 2.3 % of uint64).
+(`docs/accumulator/NODE_DENSITY_DERIVATION.md` §7.3: even 10^8 fragments at `A = 1` reaches 2.3 % of uint64).
 
 **Why it might be worth it, and this argument is NOT in the existing ruling.** A4 was ruled R-b (do not
 store `Sum1/A`) on the grounds that it buys almost no **composition** information — median efficiency
 0.953 → 0.960. That pricing scored the *split*. Two consumers of the **level** have since appeared:
 
 1. **P1 needs `rho_c` per locus**, and today `rho_c = count / E_f[A]` depends on the fitted length models
-   in exactly the frame where they are weakest (`ACCUMULATOR_DESIGN.md` §8.1(a): at a contained node the
+   in exactly the frame where they are weakest (`docs/accumulator/DESIGN.md` §8.1(a): at a contained node the
    naive ratio converges to the **harmonic** mean, biased low — and the only pure gDNA pool *is*
    intergenic-contained).
 2. ⭐ **`node_total_density` is the message-reframe currency for the entire belief propagation**
    ([bp_solver.py:534](../src/rigel/calibration/bp_solver.py#L534): `r = rho_tot(dst)/rho_tot(src)`).
    Today it is `node_total_density(geometry, f_g)` — a function of **the belief**, which is why the frame
    had to be frozen at the init belief with a 20-line comment explaining that a second iteration was a BP
-   violation. `Sum1/A` makes `rho_tot` a **measured constant**, so `CARRY_FORWARD.md` §3 trap 11 ("a
+   violation. `Sum1/A` makes `rho_tot` a **measured constant**, so `docs/SESSION_HANDOFF.md` §3 trap 11 ("a
    message may use the destination's CONSTANTS, never its BELIEFS") holds by construction rather than by
    a freeze.
 
@@ -723,7 +723,7 @@ the split. The A4 ruling was made against half the objective.
 already identifies the split on the mean (determinant `A_g - A_r`), so `Sum1/L` is a better-conditioned
 version of the *same* discriminant at short nodes, not an independent one. Measured cost of dropping it:
 `0.960 -> 0.918` at 151 bp but `0.782 -> 0.749` at 1000 bp and `0.832 -> 0.804` at 3000 bp
-(`NODE_DENSITY_DERIVATION.md` §6). ⛔ `SumL` is **not** droppable — it is the only channel that survives
+(`docs/accumulator/NODE_DENSITY_DERIVATION.md` §6). ⛔ `SumL` is **not** droppable — it is the only channel that survives
 equal means.
 
 ---
@@ -732,11 +732,11 @@ equal means.
 
 | | why |
 |---|---|
-| touch the deposit rule's **partition** (no `1/K` split) | measured: `1/K` reads up to **3.6×** low, and agrees with the correct rule only where nodes are coarser than fragments (`ACCUMULATOR_DESIGN.md` §4.2). The per-object estimator is correct and partition-free; only the *aggregation* was wrong |
+| touch the deposit rule's **partition** (no `1/K` split) | measured: `1/K` reads up to **3.6×** low, and agrees with the correct rule only where nodes are coarser than fragments (`docs/accumulator/DESIGN.md` §4.2). The per-object estimator is correct and partition-free; only the *aggregation* was wrong |
 | touch the strand Beta-Binomial | it reads integers per strand and is intact under the new accumulator |
 | touch the message-passing model | P2 adds a term to the per-node ψ solve; the relay, the reframe and the variance laws are untouched |
-| wire `node_spanning` | it is stored, unused, and `S5_DESIGN_LOG.md` §1 A3 measures it as the largest single win available (0.000 → 0.758 at a 25 bp node). ⚠ But A6 must come first: spanning is a **subset** of edge-crossing, so `observable_efficiency.var_set`'s zero cross-population covariance is exactly wrong for that pair. Do it after P2 |
-| revisit the κ mirror | `CARRY_FORWARD.md` §0 C4: the mirror is **consistent** and cancels, so the inference is right and only the exported scalar is mis-labelled. `TODO.md` §6 |
+| wire `node_spanning` | it is stored, unused, and `docs/calibration/S5_DESIGN_LOG.md` §1 A3 measures it as the largest single win available (0.000 → 0.758 at a 25 bp node). ⚠ But A6 must come first: spanning is a **subset** of edge-crossing, so `observable_efficiency.var_set`'s zero cross-population covariance is exactly wrong for that pair. Do it after P2 |
+| revisit the κ mirror | `docs/SESSION_HANDOFF.md` §0 C4: the mirror is **consistent** and cancels, so the inference is right and only the exported scalar is mis-labelled. `TODO.md` §6 |
 | adopt `assignment_mode="map"` to go green on the one failing test | ⛔ a negative control is one-sided (trap 19) and MAP is the mode that most suppresses assignment. `TODO.md` §7 |
 
 ---
@@ -750,7 +750,7 @@ equal means.
 | the baseline's `f_gdna` column is an incidence sum | `5,370,056 + 5,373,548` vs `contained + edge_unspliced + edge_spliced` in `payload.npz` |
 | `(count, Sum1/L)` is singular at equal means | build two pmfs with **realised** means matched (truncation shifts them — match after truncating), form the 2×2 from §1.2, read `cond` |
 | the incidence multiplier `max(1, (w-1)/s)` | `SUM_nodes (ell-w+1)+ + n_lines·(w-1)`, all over `SUM ell`, from `nodes.feather` |
-| the baseline `f_gdna` table | `LEDGER.md`, the S5.f entry |
+| the baseline `f_gdna` table | `docs/WIP.md`, the S5.f entry |
 | 56.7 % of human nodes shorter than one fragment | `scripts/design/index_census.py INDEX --gtf GTF` |
 | the efficiency tables | `scripts/design/observable_efficiency.py` |
 | the opportunity formulas | `scripts/design/node_density_derivation.py`, T0 |

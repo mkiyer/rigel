@@ -23,7 +23,7 @@ reference order, which is exactly the order adjacent same-reference node pairs a
 ``(ref_id, start)``-sorted node table. :func:`~rigel.calibration.node_chain.build_node_chain` lays
 out the same numbering by walking the payload's CSR offsets, and
 ``test_edge_numbering_matches_the_chain_built_from_the_payload_offsets`` pins the two against each
-other — a second algorithm, not a second call to the first (`CARRY_FORWARD.md` §3 trap 1).
+other — a second algorithm, not a second call to the first.
 
 No tunable parameters: this module is index arithmetic only.
 """

@@ -1,6 +1,6 @@
 """⭐ THE SAME BAM MUST GIVE THE SAME ANSWER, whatever the scan's thread count.
 
-    Cause and measurement: `docs/LEDGER.md`, the "scan-order independence" entry
+    Cause and measurement:, the "scan-order independence" entry
     Related: `tests/native/test_accumulator_worker_determinism.py` — the TALLY's version of this
 
 The accumulator's tally is order-independent for free: every bank is a sum of integers and integer
@@ -38,7 +38,7 @@ them inherit the canonical order and no consumer has to know.
 own content would also be order-independent — and would be **wrong**. Identical fragments would hash
 identically and so all draw identically, turning a 60/40 posterior into 100/0 for every group of
 duplicates. Ordering by identity and keeping one stream per locus preserves the multinomial spread, which
-is the whole point of the sampling mode. (Owner ruling, `PLAN_TWO_PASS.md` §5.3, D-D.)
+is the whole point of the sampling mode. (Owner ruling, D-D.)
 """
 
 from __future__ import annotations
