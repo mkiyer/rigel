@@ -450,3 +450,87 @@ def test_population_priors_can_be_extracted_from_a_cached_scan(scanned, tmp_path
     debug: dict = {}
     calibrate(**calibration_inputs(cache, scanned[0]), config=CalibrationConfig(), _debug=debug)
     assert debug["calibration_priors"] is not None
+
+
+# ══ P3 · the drain and the cache ════════════════════════════════════════════════════════════════════
+
+
+def test_the_schema_digest_sees_fields_nested_TWO_levels_deep():
+    """⛔ The digest recursed exactly ONE level until 2026-08-02, and `DrainQC` nests a `GapCensus` inside
+    itself — so `drain__census_before__*` was invisible to the key. That is X8's defect one level down.
+
+    ⚠ **And `drain` is `DrainQC | None`**, for which `dataclasses.is_dataclass` is False, so a plain check
+    dropped the whole bank rather than just its nesting. Both halves are gated here.
+    """
+    from rigel.scan_cache import _schema_names
+
+    names = set(_schema_names())
+    assert "drain" in names
+    assert "drain__offered" in names, (
+        "the drain bank's own fields are missing from the schema key — `DrainQC | None` is a union, and "
+        "`is_dataclass` is False for it."
+    )
+    assert "drain__census_before__gap_resolved_spliced" in names, (
+        "a field nested TWO levels deep is invisible to the schema key; the digest is what refuses a "
+        "stale cache instead of failing deep in the loader."
+    )
+
+
+def test_the_cache_REFUSES_a_drained_payload(scanned, tmp_path):
+    """⛔ The cache holds a SCAN. Caching a drained payload would bake one draw into it and destroy the
+    property the whole second-pass design rests on — that one scan can be drained repeatedly at different
+    seeds without re-reading the BAM (`SPEC_SECOND_PASS.md` §2, and P5/P6 both need it).
+
+    ⚠ It would also serialise `DrainQC.census_before` through `json.dumps(default=str)` as a stringified
+    repr, silently — X9's defect one level down.
+    """
+    import dataclasses
+
+    from rigel.scan_cache import write_scan_cache
+    from rigel.scan_payload import DrainQC, GapCensus
+
+    index, bam, scan_config, payload, strand_model = scanned
+    drained = dataclasses.replace(
+        payload,
+        drain=DrainQC(
+            offered=0,
+            deposited=0,
+            dropped_too_long=0,
+            dropped_empty=0,
+            dropped_strand_undefined=0,
+            chose_genomic=0,
+            chose_spliced=0,
+            census_before=GapCensus.zeros(),
+        ),
+    )
+    with pytest.raises(ValueError, match="DRAINED"):
+        write_scan_cache(
+            tmp_path / "refused",
+            payload=drained,
+            strand_model=strand_model,
+            index=index,
+            bam=bam,
+            scan_config=scan_config,
+        )
+
+
+def test_an_UNDRAINED_payload_still_round_trips_with_the_new_field(scanned, tmp_path):
+    """⚠ The other side of the refusal: adding the field must not break the ordinary path, and `drain` must
+    come back as `None` rather than as the string ``"None"``."""
+    from rigel.scan_cache import read_scan_cache, write_scan_cache
+
+    index, bam, scan_config, payload, strand_model = scanned
+    assert payload.drain is None
+    write_scan_cache(
+        tmp_path / "ok",
+        payload=payload,
+        strand_model=strand_model,
+        index=index,
+        bam=bam,
+        scan_config=scan_config,
+    )
+    loaded = read_scan_cache(tmp_path / "ok", index)
+    assert loaded.payload.drain is None, (
+        f"drain came back as {loaded.payload.drain!r}; a JSON round trip must not turn None into a string"
+    )
+    assert loaded.payload.deferred.n_fragments == payload.deferred.n_fragments

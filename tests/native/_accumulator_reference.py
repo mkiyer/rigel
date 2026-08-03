@@ -551,6 +551,29 @@ class Tally:
             gap_resolution={cls.value: 0 for cls in GapResolution},
         )
 
+    def deferred_canonical(self) -> list["DeferredFragment"]:
+        """The deferred queue in its ONE canonical order — sorted on each record's own content.
+
+        ⭐ **Factored out because the DRAIN needs the same order.** The bank is the one tally whose order
+        is observable, and the second pass indexes into it: a choice vector is meaningless unless the
+        producer of the scores and the consumer of the draw walk the queue identically. Defining the order
+        once, here, is what makes ``choices[i]`` refer to the same fragment in both languages.
+
+        Mirrors ``Accumulator::deferred_canonical`` in the C++.
+        """
+        return sorted(
+            self.deferred,
+            key=lambda f: (
+                f.ref,
+                f.start,
+                f.end,
+                f.align_strand,
+                f.sj_strand,
+                f.observed_introns,
+                tuple((p.introns, p.sj_strand, p.supporting_t_inds) for p in f.hypotheses),
+            ),
+        )
+
     def deferred_arrays(self) -> dict[str, np.ndarray]:
         """The deferred queue flattened to the CSR the payload carries.
 
@@ -571,18 +594,7 @@ class Tally:
         """
         frag_fields = ("ref", "start", "end", "align_strand", "sj_strand")
         out: dict[str, list[int]] = {name: [] for name in frag_fields}
-        ordered = sorted(
-            self.deferred,
-            key=lambda f: (
-                f.ref,
-                f.start,
-                f.end,
-                f.align_strand,
-                f.sj_strand,
-                f.observed_introns,
-                tuple((p.introns, p.sj_strand, p.supporting_t_inds) for p in f.hypotheses),
-            ),
-        )
+        ordered = self.deferred_canonical()
         out |= {
             "observed_intron_offsets": [0],
             "observed_introns": [],
@@ -853,6 +865,103 @@ class Accumulator:
         if pool is not None:
             t.pool_lengths[pool, length] += 1
         return DepositOutcome.DEPOSITED
+
+    # -- the drain --------------------------------------------------------------------------------
+
+    def drain(self, choices) -> dict[str, int]:
+        """⭐ **THE SECOND PASS'S DRAIN.** Replay each held fragment with ONE chosen hypothesis.
+
+        ``choices[i]`` is an index into hypothesis set of the ``i``-th record of
+        :meth:`Tally.deferred_canonical` — the queue's one canonical order, which is why that order is
+        defined in exactly one place.
+
+        ⭐ **There is no second tally path.** Each record re-enters :meth:`deposit` with its chosen
+        hypothesis **alone**: a set of size one, so the arbitration is degenerate and the fragment either
+        deposits or is rejected by the ordinary rules. Every crossing rule, the quantum, the pools and
+        ``L`` itself are reached through the same code that ran in pass one, so byte-identity with the
+        native accumulator is preserved for free rather than argued.
+
+        ⛔ **The drain's outcomes do NOT go into ``gap_resolution``, and that is structural rather than
+        stylistic.** The census has no ``gap_resolved_unspliced`` class because pass-one arbitration can
+        never produce one — a spliced path always cuts bases the genomic path keeps, so the genomic path
+        can never be the sole survivor. ⭐ But the DRAIN can *choose* it. Folding drain outcomes into that
+        census would require resurrecting the class S1 deleted for a proven reason.
+
+        ⚠ **And left alone means RESTORED, not merely not-added-to.** ``deposit`` reaches
+        ``_record_gap_resolution`` on every fragment, and for a set of size one that lands on
+        ``RESOLVED_SPLICED`` — while a chosen ∅ hits the ``all(h.is_unspliced)`` early return and is not
+        counted at all. So a naive drain would grow the census by however many draws happened to pick a
+        spliced path: a census that depends on the RNG. This method snapshots it and puts it back, and the
+        information the census cannot express lives on the drain's own axis as
+        ``chose_genomic`` / ``chose_spliced``.
+
+        ⭐ **After the drain the tally describes the FINAL state**: nothing is held, so the bank is empty
+        *and* ``deferred_undetermined_gap`` is 0 and the three ``gap_deferred_*`` are 0. That keeps
+        "the counter and the fragments it counts are the same population" absolute — the payload refuses a
+        bank that disagrees with its counter at the door, and a drained payload must not need an exception.
+        Pass one's numbers are returned here, and the payload keeps them in its ``drain`` block.
+
+        Returns the drain's own counters plus ``census_before``. The conservation statement is
+        ``deposited + dropped_* == offered``.
+        """
+        held = self.tally.deferred_canonical()
+        if len(choices) != len(held):
+            raise ValueError(
+                f"drain got {len(choices)} choices for {len(held)} held fragments. One choice per held "
+                f"record, in `deferred_canonical` order — a length mismatch means the producer of the "
+                f"scores and the consumer of the draw walked different queues."
+            )
+        counters = {
+            "offered": len(held),
+            "deposited": 0,
+            "dropped_too_long": 0,
+            "dropped_empty": 0,
+            "dropped_strand_undefined": 0,
+            "chose_genomic": 0,
+            "chose_spliced": 0,
+            "census_before": dict(self.tally.gap_resolution),
+        }
+        census_before = dict(self.tally.gap_resolution)
+        # ⚠ Emptied FIRST. `deposit` appends to this list when it defers, and a set of size one cannot
+        # defer — but draining into a live queue would make that assumption invisible instead of checked,
+        # and the assertion below is what checks it.
+        self.tally.deferred = []
+        for fragment, choice in zip(held, choices):
+            path = fragment.hypotheses[int(choice)]
+            counters["chose_genomic" if path.is_unspliced else "chose_spliced"] += 1
+            outcome = self.deposit(
+                fragment.ref,
+                fragment.start,
+                fragment.end,
+                observed_introns=fragment.observed_introns,
+                align_strand=fragment.align_strand,
+                sj_strand=fragment.sj_strand,
+                hypotheses=(path,),
+            )
+            if outcome is DepositOutcome.DEFERRED:
+                raise AssertionError(
+                    "a hypothesis set of size one deferred, which is unreachable: arbitration defers "
+                    "only when two or more hypotheses survive."
+                )
+            counters[outcome.value] += 1
+        if (
+            counters["deposited"] + sum(counters[k] for k in counters if k.startswith("dropped_"))
+            != counters["offered"]
+        ):
+            raise AssertionError(
+                "the drain lost a fragment; deposited + dropped_* must equal offered"
+            )
+
+        # ⭐ The census restored to pass one's, and the held population now zero everywhere it is counted.
+        self.tally.gap_resolution.update(census_before)
+        for key in (
+            GapResolution.DEFERRED_RNA_OR_GDNA,
+            GapResolution.DEFERRED_WHICH_INTRONS,
+            GapResolution.DEFERRED_BOTH,
+        ):
+            self.tally.gap_resolution[key.value] = 0
+        self.tally.qc[DepositOutcome.DEFERRED.value] = 0
+        return counters
 
     # -- helpers ----------------------------------------------------------------------------------
 

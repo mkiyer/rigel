@@ -101,11 +101,25 @@ def _pct(actual: float, reference: float) -> float:
     return 100.0 * (actual - reference) / reference if reference else float("nan")
 
 
-def measure(cond_name: str, cache, truth: dict[str, np.ndarray] | None) -> dict:
-    """Every number this script reports for one condition, as a plain dict (so it can be JSON-diffed)."""
+def _drain(cache, index, node_types, junctions, *, seed: int):
+    """The drained payload for one cached scan — production's own route, via the pipeline's helper.
+
+    ⭐ Calls `pipeline._drain_side_buffer` rather than repeating its three steps, so this measurement
+    cannot drift from what `rigel quant` actually does.
+    """
+    from rigel.pipeline import _drain_side_buffer
+
+    return _drain_side_buffer(cache.payload, index, cache.strand_model, seed=seed)
+
+
+def measure(cond_name: str, payload, truth: dict[str, np.ndarray] | None) -> dict:
+    """Every number this script reports for one condition, as a plain dict (so it can be JSON-diffed).
+
+    ⚠ Takes the PAYLOAD, not the cache, so the same measurement runs on pass one's tally and on the
+    drained one — which is what makes the P4 panel a before/after with one thing varied.
+    """
     from rigel.calibration.fl import build_fl_models, gdna_fl_mass, rna_fl_mass
 
-    payload = cache.payload
     fl = build_fl_models(payload)
     anchor, rna = np.asarray(fl.global_counts), rna_fl_mass(payload)
 
@@ -198,6 +212,13 @@ def main() -> int:
     )
     ap.add_argument("--json", type=Path, default=None, help="also write every number to this file")
     ap.add_argument("--no-truth", action="store_true", help="skip the truth panel")
+    ap.add_argument(
+        "--drain",
+        action="store_true",
+        help="⭐ P4's gate: measure each condition BEFORE and AFTER the second pass drains the side "
+        "buffer, so the tail and the gDNA control are read as a delta",
+    )
+    ap.add_argument("--seed", type=int, default=0, help="the drain's multinomial seed")
     args = ap.parse_args()
 
     if not args.pilot.is_dir():
@@ -211,6 +232,15 @@ def main() -> int:
     # ⚠ A cache is REFUSED unless it describes the index it is loaded against (graph_hash, reach_digest
     # and payload_schema_digest). That refusal is the point of the keys, so it is reported, not caught.
     index = TranscriptIndex.load(str(args.index))
+    node_types = junctions = None
+    if args.drain:
+        from rigel.calibration.splice_graph import (
+            build_junction_edge_arrays,
+            build_node_partition_arrays,
+        )
+
+        _c, _o, node_types = build_node_partition_arrays(index)
+        junctions = build_junction_edge_arrays(index)
 
     conditions = sorted(p for p in args.pilot.iterdir() if p.is_dir())
     rows = []
@@ -226,7 +256,13 @@ def main() -> int:
             continue
         truth_path = suite / cond.name / "truth_fragment_lengths.tsv"
         truth = None if args.no_truth or not truth_path.is_file() else read_truth(truth_path)
-        row = measure(cond.name, cache, truth)
+        row = measure(cond.name, cache.payload, truth)
+        if args.drain:
+            row["drained"] = measure(
+                cond.name,
+                _drain(cache, index, node_types, junctions, seed=args.seed),
+                truth,
+            )
         rows.append(row)
         print(f"{cond.name:<44} {row['anchor']['mean']:11.1f} {row['rna_pool']['mean']:9.1f} "
               f"{row['gap_vs_anchor']['mean_pct']:+6.1f}% {row['anchor']['sd']:10.1f} "
@@ -295,6 +331,46 @@ def main() -> int:
         print("      must be re-measured AFTER the drain, not before.")
         print("   ⚠ `D3 resid` is the mass still above the true ceiling. Measure it; do NOT close it with")
         print("      a constant.")
+
+    drained_rows = [r for r in rows if "drained" in r and "anchor_vs_mrna" in r]
+    if drained_rows:
+        print()
+        print("═══ ⭐ P4 · THE TAIL · the anchor against the library's TRUE ceiling, BEFORE vs AFTER "
+              "the drain ═══")
+        print(f"{'condition':<44} {'true ceil':>9} {'ceil before':>11} {'ceil after':>10} "
+              f"{'>ceil before':>12} {'>ceil after':>11} {'held':>7}")
+        print("-" * 122)
+        for r in drained_rows:
+            b, a = r["anchor_vs_mrna"], r["drained"]["anchor_vs_mrna"]
+            print(f"{r['condition']:<44} {b['truth_ceiling']:>9d} {b['ceiling']:>11d} "
+                  f"{a['ceiling']:>10d} {_fmt(b['mass_above_truth_ceiling'], 12)} "
+                  f"{_fmt(a['mass_above_truth_ceiling'], 11)} "
+                  f"{r['drained']['qc']['deferred_undetermined_gap'] or r['qc']['deferred_undetermined_gap']:>7d}")
+        print("   ⭐ THE GATE: no fragment above the library's true longest molecule. The truth files say")
+        print("      the library contains none, so `>ceil after` is an absolute count of impossible")
+        print("      molecules — not a comparison, and nothing about it is tunable.")
+        print("   ⚠ The drain returns the LONG fragments to the tally, so `ceil after` rising is EXPECTED")
+        print("      and is the point; what must not appear is mass above the TRUE ceiling.")
+
+        print()
+        print("═══ ⛔ P4 · THE gDNA CONTROL, before vs after ═══")
+        print(f"{'condition':<44} {'gdna n before':>13} {'gdna n after':>12} {'d.mean before':>13} "
+              f"{'d.mean after':>12} {'d.sd after':>10}")
+        print("-" * 118)
+        for r in drained_rows:
+            gb, ga = r.get("gdna_pool_vs_gdna"), r["drained"].get("gdna_pool_vs_gdna")
+            if gb is None or ga is None:
+                continue
+            print(f"{r['condition']:<44} {r['gdna_pool']['n']:>13d} "
+                  f"{r['drained']['gdna_pool']['n']:>12d} {gb['mean_pct']:>+12.2f}% "
+                  f"{ga['mean_pct']:>+11.2f}% {ga['sd_pct']:>+9.2f}%")
+        print("   ⛔ On a ZERO-gDNA condition every fragment is RNA, so ANY growth in the gDNA pool is")
+        print("      RNA contaminating it — a drained fragment that chose ∅ and landed contained in an")
+        print("      intronic node. ⚠ On gdna100 growth is LEGITIMATE: a real gDNA fragment whose mate")
+        print("      gap spans an annotated intron is genuinely ambiguous and was genuinely held.")
+        print("   ⚠ So this is not C2.6's control. There the fix could not reach a fragment with no")
+        print("      introns, so any movement was a bug; here the drain reaches fragments it is supposed")
+        print("      to. Read the ZERO-gDNA rows as the false-positive rate of the ∅ choice.")
 
     if args.json:
         args.json.write_text(json.dumps(rows, indent=2, sort_keys=True))

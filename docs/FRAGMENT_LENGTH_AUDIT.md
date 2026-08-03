@@ -1,5 +1,11 @@
 # Fragment length — the audit, and the cleanup
 
+    Status: ⚠ **HISTORY, as of 2026-08-03** — C0, C1, C2 and C2.6 have all landed and the
+      fragment-length work is DONE: the anchor's error against truth is +0.00 % mean / +0.02 % sd.
+      ⭐ **Its "C3 is next" is CORRECT AGAIN** and C3 is now `TODO.md` rank 0 — `LEDGER.md` B4
+      measured why: calibration fits from the POOLS, and the RNA pool is what C3 corrects.
+      §§1–3 are the history of how three definitions of fragment length came to be live at once.
+
     Status: C0, C1, C2, C2.6 LANDED (2026-07-31 / 2026-08-01). C3 is next; C4 is independent.
             The audit itself is complete and is kept as the record of WHY.
     Trigger: P2's A/B (`LEDGER.md`) — the length likelihood is the first consumer to use the FL models

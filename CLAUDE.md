@@ -11,65 +11,84 @@ library into gDNA vs RNA, and a per-locus EM solver assigns RNA to transcripts. 
 
 ## ⭐ Current direction — read this first
 
+⭐⭐ **FRAGMENT LENGTH IS DONE (2026-08-03), AND THE CRITICAL PATH IS NOW C3 — junction opportunity.**
+Length was the blocker on this whole area. It is finished: **one** definition (C0–C2), an **accurate** one
+(C2.6), and an **unbiased** one — the anchor's error against the simulator's own truth is **+0.00 % mean /
++0.02 % sd** on the zero-gDNA falsification condition, from −1.61 % / −1.48 %.
+
+⛔ **BUT THE DELIVERABLE GOT WORSE, AND THAT IS WHY C3 IS RANK 0** (`LEDGER.md` **B4**). The library gDNA
+fraction's mean |error| on the four contaminated pilot conditions went **0.0381 → 0.0472 (+23.9 %)** once
+the side buffer drains. ~55 % of that is the drain being *right* (truth says **99.8 %** of held fragments
+are RNA, so depositing them genuinely lowers the gDNA fraction, and the estimate was already too low);
+~45 % is the fragment-length **pools** moving. ⭐ **`calibrate` fits from the two pure pools, not from the
+anchor** — and `RNA_SPLICED` went **+2.4 % → +6.2 %** against truth, because the drain feeds long
+junction-using fragments into a pool selected on "used an annotated junction", which is itself **+3.8 %**
+longer than the library. C3 is the correction for exactly that.
+
 **Read them in this order:**
 
 | doc | what it is |
 |---|---|
-| **`docs/SPEC_SECOND_PASS.md`** | ⭐⭐ **START HERE — THE LIVE SPEC AND THE ROADMAP.** S3 in full: the score, the three-factor decomposition, the drain, the open decisions, and the phased path **P0–P6**. ⭐ **P0 and P1 are CLOSED; P2 is PARTIAL — the scorer is built and UNGATED.** §9 carries the exact resume point |
-| **`docs/PLAN_TWO_PASS.md`** | ⭐ **WHY the two-pass structure exists** — the gap-path problem and junction opportunity are ONE problem. S1 and S2 landed; §5 is superseded by `SPEC_SECOND_PASS.md` |
-| **`docs/FRAGMENT_LENGTH_AUDIT.md`** | ⭐ **HOW THE CRITICAL PATH GOT HERE.** THREE definitions of fragment length were live, two of them summed into one array called "global", and the EB shrinkage mixed frames. **C0 / C1 / C2 / C2.6 have all LANDED (2026-08-01)** — there is now ONE definition and it is accurate. ⛔ Its "C3 is next" is **superseded**: C3 rides on the two-pass structure and is sequenced LAST, as S4 of `PLAN_TWO_PASS.md`. §§1–3 are history |
-| **`docs/LEDGER.md`, entries S1 → P2** | ⭐ **THE MOST RECENT WORK, newest last.** S1+S2 (the side buffer), S2.1 (the pipeline made reproducible), P0 (the strand sign bug that wasn't), P1 (strand hygiene), **P2 (the scorer — ⛔ built and UNGATED, read its entry before touching it)** |
-| **`docs/SPEC_GAP_PATHS.md`** | ⭐ **THE SPEC S1 IMPLEMENTS** — the enumeration rule and the interface, §0–§4. Supersedes `SPEC_GAP_INTRONS.md`, which is the C2.6 record and is now history |
-| **`docs/JUNCTION_OPPORTUNITY.md`** | ⭐ C3's formula, **derived and proven** (48,648 exhaustive configs) — and the measurement that found C2.6's bug. ⛔ **EVERY number in it is STALE**: §3's were scored against the contaminated anchor, and the rest predate the side buffer, which holds back exactly the LONG fragments. Re-measure after S3's drain |
-| **`docs/SOLVER_OBSERVABLES_PLAN.md`** | ⚠ **ITS P0/P1/P2 ARE NOT THE SECOND PASS'S** — unrelated phases that happen to share the letter; `SPEC_SECOND_PASS.md` §9's P0–P6 are the live ones. ⭐ **How we got there.** The accumulator stores three channels and the solver reads **one**; and `assemble_priors` summed an intensive quantity as if it were extensive. §1 is the theory from the ground up. P0/P1 done, **P2 built and gated OFF — blocked on the audit's C2/C3** |
-| `docs/S5_DESIGN_LOG.md` | ⚠ **S5 IS FINISHED** (S5.g measured and refuted). Kept for §1's accumulator derivations and §3's observable measurements, which are still the reference. **It is no longer the live plan** |
-| `docs/IMPLEMENTATION_PLAN.md` §0 | live state for everything else |
-| `docs/NODE_DENSITY_DERIVATION.md` | why the deposit weight is what it is, and what each stored channel buys |
-| `docs/TODO.md` | the one deferred-work list, ranked, each item with the reason it is deferred |
-| `docs/ACCUMULATOR_DESIGN.md` | the design being implemented |
-| `docs/LEDGER.md` | what has landed, its gates, and why. Older entries: `LEDGER_ARCHIVE.md` |
+| **`docs/TODO.md`** | ⭐⭐ **START HERE — the one ranked list, and rank 0 is C3.** Everything landed is struck through with its measurement |
+| **`docs/LEDGER.md`, entries C0 → B4** | ⭐ **THE MOST RECENT WORK, newest last.** The fragment-length track (C0–C2.6), the two-pass structure (S1, S2, S2.1), the second pass in full (P0–P4.2), and ⭐ **B4 — the composition baseline that sets the priority** |
+| **`docs/JUNCTION_OPPORTUNITY.md`** | ⭐ **C3's formula, derived and proven** over 48,648 exhaustive configurations. ⛔ **EVERY number in §3 is STALE** — scored against the contaminated anchor and the pre-drain pool. §1's derivation is untouched |
+| **`docs/SPEC_SECOND_PASS.md`** | ⭐ the second pass, in full: the score, the draw, the drain. **P0–P4 are all CLOSED**; §8's D-1/D-2/D-3/D-5/D-6 are all decided and **D-4 is the one left** |
+| **`docs/SOLVER_OBSERVABLES_PLAN.md`** | ⚠ its P0/P1/P2 are **not** the second pass's. ⭐ **P2 — the fragment-length likelihood in the per-node solve — is built and gated OFF, blocked on the FL pools**, i.e. on C3. Mechanism proven: blind mass 100 % → 0 % |
+| `docs/PLAN_TWO_PASS.md` | ⚠ **HISTORY** — why the gap-path and junction-opportunity problems are ONE problem. S1–S3 all landed; its §5 is superseded by `SPEC_SECOND_PASS.md` and its §2.4 numbers by B4 |
+| `docs/FRAGMENT_LENGTH_AUDIT.md` | ⚠ **HISTORY** — how the critical path got here. THREE definitions of fragment length were live at once. C0/C1/C2/C2.6 all landed; its "C3 is next" is now correct again |
+| `docs/SPEC_GAP_PATHS.md` | ⚠ **HISTORY** — the enumeration rule pass 1 implements, landed as S1. Supersedes `SPEC_GAP_INTRONS.md`, which is the C2.6 record |
+| `docs/S5_DESIGN_LOG.md` | ⚠ **HISTORY** — S5 is finished. Kept for §1's accumulator derivations and §3's observable measurements, still the reference |
+| `docs/IMPLEMENTATION_PLAN.md` §0 | the live handoff for everything not on the critical path |
+| `docs/NODE_DENSITY_DERIVATION.md` | why the deposit weight is 1/opportunity, and what each stored channel buys |
+| `docs/ACCUMULATOR_DESIGN.md` | the accumulator's design. ⚠ §8's purity claim for the two *splash* pools is **unverified** — see `TODO.md` |
 | `docs/CARRY_FORWARD.md` | ⭐ **§3 traps then §2 equations** — the most-used reference in the project |
 | `docs/BENCHMARK_SUITE.md` | the suite: how to build it, and **what it can and cannot judge** |
+| `docs/LEDGER_ARCHIVE.md` | older ledger entries |
+
+### ⭐ The four numbers that describe the tool today
+
+| | measured on | |
+|---|---|---|
+| fragment length, the **anchor** | 8 pilot conditions vs truth | ⭐ **+0.00 % mean / +0.02 % sd** |
+| the second pass's **per-fragment** accuracy | 171,534 held fragments vs per-fragment truth | ⭐ **90.5 % exact**, mean error **+0.12 bp** |
+| fragments above the library's true longest molecule | all 8 conditions | ⭐ **0** |
+| ⛔ the **deliverable** — library gDNA fraction | 4 contaminated conditions vs truth | ⛔ mean \|error\| **0.0472** (worst row **0.3704 against 0.5**) |
+
+⚠ **The last row is the one to care about.** The first three are upstream plumbing; the fourth is the
+product, and it is what C3 exists to move.
 
 Reference rather than design: `BENCHMARKING.md` (how to evaluate — net fragment flow), `MANUAL.md`,
 `PUBLISHING.md`, `docs/testing/testing_plan.md` (the owner's plan for the cached-substrate harness).
 
-⭐ **`calibrate()` RUNS (S5.f, 2026-07-30), and THE FIRST BASELINE EXISTS** — eight chr22 pilot
-conditions, in `LEDGER.md`'s S5.f entry, **bit-identical on re-run**. That was the pivot: every deferred
-derivation was deliberately sequenced after it because each one needs a baseline to be judged against.
-**S5.0–S5.g have all landed** (S5.g's taper was measured and **refuted** — ≤ 0.0002). ⭐ **The live work is
-no longer S5**: it is the fragment-length cleanup in `FRAGMENT_LENGTH_AUDIT.md`, reached by way of
-`SOLVER_OBSERVABLES_PLAN.md`. **C0, C1, C2 and C2.6 landed, and then S1 + S2 of `PLAN_TWO_PASS.md`;
-S3 — the second pass — is next.**
+### What is settled, and must not be re-litigated
 
-⭐ **ONE DEFINITION OF FRAGMENT LENGTH, as of C2 (2026-08-01).** `L` is proven (C0), the accumulator bins
-every deposited fragment by it (C1), and every consumer reads it (C2) — the scanner's rival histogram,
-`FragmentLengthModels`, and the transcript-space definition are **deleted**, and `build_fl_models` takes
-the payload and nothing else, so a mixed-frame call is unrepresentable. ⚠ `FragmentLengthModel`
-**singular** is the scorer and stays. `rigel report`'s five splice counts are now the **scanner's own
-census** — owner ruling: QC lives where it is generated and is passed through nothing — and for the first
-time they sum to the library.
+⭐ **ONE DEFINITION OF FRAGMENT LENGTH.** `L` = genomic span minus cut introns, proven (C0); the
+accumulator bins every deposited fragment by it (C1); every consumer reads it (C2). The scanner's rival
+histogram, `FragmentLengthModels` and the transcript-space definition are **deleted**, and
+`build_fl_models` takes the payload and nothing else, so a mixed-frame call is unrepresentable.
+⚠ `FragmentLengthModel` **singular** is the scorer and stays.
 
-✅ **AND `L` IS NOW ACCURATE — C2.6 landed 2026-08-01.** An annotated intron in a fragment's
-**unsequenced mate gap** used to be cut only when the fragment was otherwise UNSPLICED, so spliced
-fragments kept it in `L`. Gap introns are now searched for on **every** fragment, with the gaps the CIGAR
-already explained excluded by **exact `(start, end)` equality** — ⛔ overlap would let a *different*
-nearby intron answer for one and make `L` too **short**. Measured on the chr22 pilot:
+⭐ **A GAP INTRON IS CUT ON EVERY FRAGMENT** (C2.6), not only unspliced ones, with the gaps the CIGAR
+already explained excluded by **exact `(start, end)` equality** — ⛔ overlap would let a *different* nearby
+intron answer for one and make `L` too short.
 
-* ⭐ the anchor's **sd against truth: +26.97 % → +1.98 %**, and its mass above the library's true 713 bp
-  ceiling **0.00909 → 0.00137**; `qc.dropped_too_long` **280,558 → 38,309**.
-* ⛔ **the gDNA control did not move one digit** (it has no introns to miss) — bit-identical on mean, sd,
-  every tail, the ceiling and the fragment count.
-* ✅ **the residual was D3, and S1 solved it**: every annotated intron in a gap is cut now, and candidates
-  group by their **whole-fragment path**. ⛔ Its number cannot be re-read until S3's drain — the mass above
-  the ceiling is a statistic of the DEPOSITED set, and the long ambiguous fragments are currently held.
-* ✅ **D1 IS DELETED** (S1). Cutting the intron fixes the pure-RNA pool (+8.00 % → +0.67 % mean);
-  *removing* the mixed fragments then breaks it the other way (**−9.58 % / −22.46 %**), because they are
-  the long ones. **A purity filter on a length pool is a length filter.** The pool is keyed on
-  **determinacy** instead: exactly one surviving hypothesis, so `L` is not in doubt however it was reached.
-* ⚠ cost: **+8.9 % scan time** (845 vs 776 ns/fragment).
+⭐ **THE ACCUMULATOR ARBITRATES** (S1). A fragment arrives with its hypothesis *set*; exactly one survivor
+deposits, two or more are held WHOLE in the side buffer. ⭐ **And the second pass drains it** (P0–P4.2):
+score from pass-1 evidence alone, one multinomial draw, re-deposit through the **same** `deposit`.
 
-⚠ **Three things the first baseline says**, before anything is built on it:
+⭐ **THE POOL IS KEYED ON DETERMINACY, NOT PROVENANCE** (D1, deleted at S1). A fragment enters a length
+pool when exactly ONE hypothesis survived, however it got there. ⛔ **A purity filter on a length pool is a
+length filter**: keying on provenance measured **−9.58 % / −22.46 %** against truth because the excluded
+fragments are the LONG ones.
+
+⭐ **THE SCORE'S COMBINATION RULE** (P4.1/P4.2). `score = rho x f(L) x s`, normalised within one fragment's
+candidate set, factors applied in order of the evidence behind them and skipped when flat-zero among the
+survivors. ⛔ **An all-zero factor is uninformative, not decisive** — it used to annihilate the other two
+and collapse the record to a coin toss. ⭐ **gDNA's strand term is 0.5** (double-stranded, no sense
+direction); a fitted mixture marginal was measured and **refuted** — it destroys 78 % of the orientation
+signal, because the discrimination is `(1−p)/p` and any *constant* for ∅ cancels out of it.
+
+⚠ **Three things the baseline says**, before anything is built on it:
 1. ⛔ **A7's "11.0 % gDNA over-call" DID NOT SURVIVE MEASUREMENT.** The A/B is done (`LEDGER.md` S5.g-2):
    turning the contiguous-edge RNA taper on moves the library gDNA fraction by **≤ 0.0002**. The 11.0 %
    was a *bp-weighted* geometric mean; the estimator is *fragment*-weighted, and **89 % of edge mass sits
@@ -89,10 +108,11 @@ nearby intron answer for one and make `L` too **short**. Measured on the chr22 p
    ⚠ Hold the mode fixed across both arms regardless: the three are different estimators
    (5441 / 6002 / 6277 on one scenario), not one answer at different precision.
 
-⭐ **S6 landed too, but ⚠ the goldens are STALE AGAIN: the suite is 1863 / 21 as of S1+S2.** All 21 are
-`test_golden_output`, and they have now moved **four** times — P1 changed the EM prior's units, C2 changed
-the fragment-length models, C2.6 changed `L` itself, and S1 holds the ambiguous mass out of the tally.
-All expected. ⛔ Regenerate **once**, at the very END of `PLAN_TWO_PASS.md`, **twice, and diff**.
+⚠ **THE GOLDENS ARE STALE AND HAVE MOVED SIX TIMES: the suite is 1923 passed / 21 failed / 1 xfailed.**
+All 21 are `test_golden_output` — P1 (the EM prior's units), C2 (the FL models), C2.6 (`L` itself), S1 (the
+hold-out), P4 (the drain wired in), P4.2 (the combination rule). Every one expected.
+⛔ **Regenerate ONCE, after C3, twice, and diff.** ⭐ "21 failed and all of them goldens" is the standing
+baseline: a 22nd failure, or a non-golden name in the list, is a regression.
 
 ⭐ **`TODO.md` §7's `test_nrna_double_counting[g20_n0_s100]` now PASSES** (C2, 2026-08-01) — the silent
 negative control reads **0 counts against a limit of 25** where it leaked ~30, stable across re-runs.
@@ -185,7 +205,7 @@ the suite reads one extra failure — which, under "a new failure is a regressio
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-python -m pytest tests/ -q                     # 1863 pass / 21 fail — all 21 stale goldens (regen at the END)
+python -m pytest tests/ -q                     # 1923 pass / 21 fail — all 21 stale goldens (regen after C3)
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
@@ -206,7 +226,9 @@ had not existed for several milestones):
 | `scripts/design/native_parity_on_real_data.py` | the S3 gate on real cfRNA at full scale |
 | `scripts/design/scan_profile.py` | ns/fragment, regressed over several BAMs |
 | `scripts/design/observable_efficiency.py` | what fraction of the length information a storage choice keeps |
-| `scripts/design/fl_anchor_gap.py` | ⭐ the zero-gDNA falsification: EB anchor vs RNA pool, over the 8 pilot caches — **plus C2.6's truth panel** (G-tail / G-sd / the gDNA control / D1 / D3), scored on `truth_fragment_lengths.tsv` so no target is chosen |
+| `scripts/design/fl_anchor_gap.py` | ⭐ the zero-gDNA falsification: EB anchor vs RNA pool over the 8 pilot caches, scored on `truth_fragment_lengths.tsv` so no target is chosen. ⭐ **`--drain` measures every panel BEFORE and AFTER the second pass** |
+| `scripts/design/calibration_truth_ab.py` | ⭐⭐ **THE DELIVERABLE, scored against truth** — the library gDNA fraction, undrained vs drained, against the simulator's own origin counts. ⛔ Run this before claiming any calibration improvement |
+| `scripts/design/held_flux_census.py` | D-3: how often a held candidate has ZERO flux evidence, decomposed by cause and scored against `truth_abundances.tsv` |
 | `scripts/design/node_density_derivation.py` | the reciprocal-opportunity theorem, T0–T6, each perturbed |
 | `scripts/sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | build the suite |
 | `scripts/sim/evaluate_suite.py` | net fragment flow (`rigel.sim.analysis`) |

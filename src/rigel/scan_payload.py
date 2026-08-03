@@ -180,6 +180,109 @@ class GapCensus:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class DrainQC:
+    """⭐ **What the second pass's DRAIN did** — the audit trail of how the final tally was reached.
+
+    `docs/SPEC_SECOND_PASS.md` §6.2. The drain replays each held fragment with one chosen hypothesis, so
+    after it **nothing is held**: the payload's bank is empty, ``qc.deferred_undetermined_gap`` is 0 and
+    the three ``gap_deferred_*`` are 0. ⭐ That is deliberate — it keeps *"the counter and the fragments it
+    counts are the same population"* absolute, so a drained payload needs no exception at the door. Pass
+    one's numbers do not vanish; they live here.
+
+    ⛔ **The drain has its OWN axis and does not extend `GapCensus`.** That census has no
+    ``gap_resolved_unspliced`` class because pass-one arbitration cannot produce one — the genomic path is
+    always the longest, so it can never be the sole survivor. ⭐ The drain, however, *chooses*, and it can
+    choose ∅. ``chose_genomic`` / ``chose_spliced`` is the composition the drain assigned and is exactly
+    what the census could not have recorded without resurrecting a class S1 deleted for a proven reason.
+    """
+
+    #: Pass one's ``qc.deferred_undetermined_gap`` — ⭐ the denominator the conservation is checked against.
+    offered: int
+    deposited: int
+    dropped_too_long: int
+    dropped_empty: int
+    dropped_strand_undefined: int
+    #: The drain's own census: ∅ against a spliced path. ⚠ Sums to ``offered``, not to ``deposited`` — a
+    #: chosen hypothesis can still be rejected afterwards, which is a different question.
+    chose_genomic: int
+    chose_spliced: int
+    #: Pass one's arbitration census, kept verbatim so `SPEC_SECOND_PASS.md` §4's per-class before/after
+    #: is still readable off a drained payload.
+    census_before: GapCensus
+
+    @property
+    def dropped(self) -> int:
+        return self.dropped_too_long + self.dropped_empty + self.dropped_strand_undefined
+
+    @property
+    def conserved(self) -> bool:
+        """⭐ §6.2's identity: every offered fragment either deposited or was rejected, exactly once."""
+        return self.deposited + self.dropped == self.offered
+
+    def __post_init__(self) -> None:
+        if not self.conserved:
+            raise ValueError(
+                f"the drain offered {self.offered} fragments but accounts for "
+                f"{self.deposited + self.dropped} (deposited {self.deposited} + dropped {self.dropped}); "
+                f"a drained fragment that is neither deposited nor rejected has been lost."
+            )
+        if self.chose_genomic + self.chose_spliced != self.offered:
+            raise ValueError(
+                f"the drain chose {self.chose_genomic + self.chose_spliced} hypotheses for "
+                f"{self.offered} offered fragments; exactly one hypothesis wins each whole fragment."
+            )
+
+    @classmethod
+    def from_dict(cls, drain: dict[str, Any]) -> "DrainQC":
+        expected = {field.name for field in dataclasses.fields(cls)} - {"census_before"}
+        missing = expected - set(drain)
+        if missing:
+            raise ValueError(f"the drain block is missing {sorted(missing)}")
+        census = drain["census_before"]
+        return cls(
+            **{name: int(drain[name]) for name in expected},
+            census_before=census if isinstance(census, GapCensus) else GapCensus.from_dict(census),
+        )
+
+
+#: ⭐ Every two-column bank, with the axis it is indexed on and its dtype. ⚠ ONE table: `from_scan_result`
+#: validates against it and the drain adds a per-reference delta into it, so a new channel cannot reach one
+#: and miss the other.
+BANK_AXES: tuple[tuple[str, str, Any], ...] = (
+    ("node_contained_count", "node", np.uint32),
+    ("node_contained_inv_length_sum", "node", np.uint64),
+    ("node_contained_length_sum", "node", np.uint64),
+    ("node_spanning_count", "node", np.uint32),
+    ("node_spanning_inv_length_sum", "node", np.uint64),
+    ("node_spanning_length_sum", "node", np.uint64),
+    ("edge_unspliced_count", "edge", np.uint32),
+    ("edge_unspliced_inv_length_sum", "edge", np.uint64),
+    ("edge_unspliced_length_sum", "edge", np.uint64),
+    ("edge_spliced_count", "edge", np.uint32),
+    ("edge_spliced_inv_length_sum", "edge", np.uint64),
+    ("edge_spliced_length_sum", "edge", np.uint64),
+    ("sj_count", "sj", np.uint32),
+    ("sj_inv_length_sum", "sj", np.uint64),
+    ("sj_length_sum", "sj", np.uint64),
+)
+
+
+#: ⭐ **EVERY additive array channel, with the axis it is indexed on** — the two-column banks plus the
+#: three that are not banks. ``"library"`` means the axis is library-wide rather than per reference.
+#:
+#: ⚠ Derived from `BANK_AXES` rather than restated, because the drain must add every additive channel and
+#: miss none. `node_start_count` and `deposited_lengths` are the two externally-checkable invariants (each
+#: sums to `qc.deposited`), so a drain that skipped either would be caught — but `pool_lengths` would just
+#: go quietly short, and nothing downstream would look wrong.
+ADDITIVE_AXES: tuple[tuple[str, str], ...] = (
+    *((name, axis) for name, axis, _dtype in BANK_AXES),
+    ("node_start_count", "node"),
+    ("pool_lengths", "library"),
+    ("deposited_lengths", "library"),
+)
+
+
 #: The deferred bank's arrays, in the order :meth:`Tally.deferred_arrays` emits them. ⚠ Read off the
 #: dataclass below rather than written out twice; the tuple exists because the validation needs an order.
 _DEFERRED_RECORD_FIELDS = ("ref", "start", "end", "align_strand", "sj_strand")
@@ -419,6 +522,13 @@ class AccumulatorPayload:
     #: a stale cache. `None` when the scanner was driven without an index to hash.
     graph_hash: str | None = None
 
+    #: ⭐ **Set once the second pass has DRAINED this tally**, and ``None`` while the side buffer is still
+    #: held. `SPEC_SECOND_PASS.md` §6.2. ⚠ It is the only way to tell the two states apart, because a
+    #: drained payload is deliberately indistinguishable in shape: its bank is empty and its held counters
+    #: are 0 precisely so that *"the counter and the fragments it counts are the same population"* needs no
+    #: exception. Pass one's numbers live in here — see :class:`DrainQC`.
+    drain: DrainQC | None = None
+
     # -- derived, never stored ------------------------------------------------------------------------
 
     @property
@@ -436,6 +546,78 @@ class AccumulatorPayload:
     @property
     def n_sj(self) -> int:
         return int(self.sj_count.shape[0])
+
+    def with_drain(self, delta: dict[str, np.ndarray], drain: DrainQC) -> "AccumulatorPayload":
+        """⭐ **Pass one plus the drain's delta** — the tally calibration actually consumes.
+
+        `SPEC_SECOND_PASS.md` §6.2. ``delta`` holds one globally-shaped array per additive channel, as
+        produced by replaying the held fragments through :meth:`Accumulator.deposit`; this method is only
+        the arithmetic and the bookkeeping.
+
+        ⭐ **The delta arrives as its own object rather than being accumulated in place**, which is what
+        makes the drain's contribution *observable*: both payloads exist, so every channel's before/after
+        is a subtraction rather than a rerun. `SPEC_SECOND_PASS.md` §6.3 named that as the reason to prefer
+        this shape, and it is also why the drain needs no new C++ — every channel is already exported.
+
+        After this: the bank is empty, the held counters are 0, and ``drain`` says what pass one held.
+        """
+        if self.drain is not None:
+            raise ValueError(
+                "this payload has already been drained. The drain consumes the side buffer, so a second "
+                "one would deposit nothing and silently double the bookkeeping."
+            )
+        missing = {name for name, _axis in ADDITIVE_AXES} - set(delta)
+        if missing:
+            raise ValueError(
+                f"the drain delta is missing {sorted(missing)}; every additive channel must be present, "
+                f"because a silently absent one reads as a tally that simply saw fewer fragments."
+            )
+
+        totals: dict[str, np.ndarray] = {}
+        for name, _axis in ADDITIVE_AXES:
+            before = getattr(self, name)
+            added = np.ascontiguousarray(delta[name], dtype=before.dtype)
+            if added.shape != before.shape:
+                raise ValueError(
+                    f"the drain delta for {name!r} has shape {added.shape}, expected {before.shape}"
+                )
+            total = before + added
+            # ⛔ Both terms are non-negative integers, so the sum can only fail to be >= either term by
+            # WRAPPING. Counts are uint32 and a real library can approach that; a silent wrap would read
+            # as a plausible small number in the one bank every density is computed from.
+            if np.any(total < before) or np.any(total < added):
+                raise ValueError(
+                    f"adding the drain's delta to {name!r} overflowed {before.dtype}; the tally cannot "
+                    f"represent pass one and the drain together."
+                )
+            totals[name] = total
+
+        return dataclasses.replace(
+            self,
+            **totals,
+            # ⚠ `deferred_undetermined_gap` goes to 0 with the bank, not kept at pass one's value: the two
+            # must describe one population, and pass one's count is preserved as `drain.offered`.
+            qc=dataclasses.replace(
+                self.qc,
+                deposited=self.qc.deposited + drain.deposited,
+                dropped_too_long=self.qc.dropped_too_long + drain.dropped_too_long,
+                dropped_empty=self.qc.dropped_empty + drain.dropped_empty,
+                dropped_strand_undefined=(
+                    self.qc.dropped_strand_undefined + drain.dropped_strand_undefined
+                ),
+                deferred_undetermined_gap=0,
+            ),
+            # ⛔ `gap_resolved_spliced` is pass one's and is NOT extended. The census classifies pass one's
+            # ARBITRATION, and it has no class for a chosen ∅ — see :class:`DrainQC`.
+            gap_resolution=dataclasses.replace(
+                self.gap_resolution,
+                gap_deferred_rna_or_gdna=0,
+                gap_deferred_which_introns=0,
+                gap_deferred_both=0,
+            ),
+            deferred=DeferredFragments.empty(),
+            drain=drain,
+        )
 
     @classmethod
     def from_scan_result(
@@ -495,25 +677,10 @@ class AccumulatorPayload:
         n_edges = int(offsets["ref_edge_offsets"][-1])
         n_sj = int(offsets["ref_sj_offsets"][-1])
 
+        rows_on = {"node": n_nodes, "edge": n_edges, "sj": n_sj}
         banks: dict[str, np.ndarray] = {}
-        for name, rows, dtype in (
-            ("node_contained_count", n_nodes, np.uint32),
-            ("node_contained_inv_length_sum", n_nodes, np.uint64),
-            ("node_contained_length_sum", n_nodes, np.uint64),
-            ("node_spanning_count", n_nodes, np.uint32),
-            ("node_spanning_inv_length_sum", n_nodes, np.uint64),
-            ("node_spanning_length_sum", n_nodes, np.uint64),
-            ("edge_unspliced_count", n_edges, np.uint32),
-            ("edge_unspliced_inv_length_sum", n_edges, np.uint64),
-            ("edge_unspliced_length_sum", n_edges, np.uint64),
-            ("edge_spliced_count", n_edges, np.uint32),
-            ("edge_spliced_inv_length_sum", n_edges, np.uint64),
-            ("edge_spliced_length_sum", n_edges, np.uint64),
-            ("sj_count", n_sj, np.uint32),
-            ("sj_inv_length_sum", n_sj, np.uint64),
-            ("sj_length_sum", n_sj, np.uint64),
-        ):
-            banks[name] = _bank(cal, name, rows, dtype)
+        for name, axis, dtype in BANK_AXES:
+            banks[name] = _bank(cal, name, rows_on[axis], dtype)
 
         node_start_count = np.ascontiguousarray(cal["node_start_count"], dtype=np.uint32)
         if node_start_count.shape != (n_nodes,):

@@ -394,6 +394,14 @@ class PipelineConfig:
     scan: BamScanConfig = field(default_factory=BamScanConfig)
     scoring: FragmentScoringConfig = field(default_factory=FragmentScoringConfig)
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
+    #: ⭐ The second pass's multinomial draw (`docs/SPEC_SECOND_PASS.md` §5.2). Pass 1 holds every
+    #: fragment whose unsequenced gap has more than one surviving explanation; the drain picks one
+    #: hypothesis each and re-deposits, and this seeds that draw.
+    #:
+    #: ⚠ **Deliberately NOT ``em.seed``.** They are two independent RNG consumers, and sharing one field
+    #: would mean changing the EM's seed silently re-drew every held fragment — so an EM A/B would move
+    #: the tally it was being run against.
+    second_pass_seed: int = 0
     annotated_bam_path: str | Path | None = None
     emit_locus_stats: bool = False
 

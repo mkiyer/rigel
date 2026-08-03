@@ -24,6 +24,7 @@ initialization live in ``locus.py``.  The CSR builder lives in
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, replace as _replace
 from typing import TYPE_CHECKING
 
@@ -357,6 +358,65 @@ def scan_and_buffer(
         calibration_payload = None
 
     return stats, strand_models, buffer, calibration_payload
+
+
+def _drain_side_buffer(payload, index: TranscriptIndex, strand_models, *, seed: int):
+    """⭐ **THE SECOND PASS.** Score the held fragments, draw one hypothesis each, re-deposit.
+
+        Spec: ``docs/SPEC_SECOND_PASS.md`` §2 (where this sits), §5 (the draw), §6 (the drain)
+
+    Pass 1 holds every fragment whose unsequenced gap has more than one surviving explanation — 2–3.5 % of
+    a library, and systematically the **long** ones, because a longer gap admits more hypotheses. Nothing
+    is lost, but nothing is tallied either until this runs.
+
+    ⭐ **IT RUNS HERE, BETWEEN THE SCAN AND CALIBRATION, AND THAT IS THE STRUCTURAL DECISION** (§2). Every
+    input the score needs — the densities at each object, the fragment-length models, the strand model —
+    comes from pass 1 alone, so no calibration output is required. Which is what lets **calibration run
+    exactly once, on the complete tally**, instead of once before the drain and again after it.
+
+    ⚠ **The models the SCORER uses are pass one's; the models CALIBRATION uses are the drained tally's.**
+    That ordering is §7.1's no-iteration rule made concrete: fit once, score once, drain once, stop. The
+    confident set is biased short, so feeding the drained anchor back into the score would prefer the
+    shorter — that is, the more-spliced — path, and that loop can run away.
+    """
+    from .calibration.fl import build_fl_models
+    from .calibration.splice_graph import build_junction_edge_arrays, build_node_partition_arrays
+    from .second_pass import choose_hypotheses, drain, score_held_fragments
+
+    held = payload.deferred.n_fragments
+    if held == 0:
+        # ⚠ Not an error and not a no-op to hide: a library with no annotated intron in any mate gap is a
+        # real state. Left undrained, so `payload.drain is None` continues to mean "pass one only".
+        logger.info("[SP2] nothing held; the side buffer is empty and the drain is skipped")
+        return payload
+
+    start = time.perf_counter()
+    _cuts, _offsets, node_types = build_node_partition_arrays(index)
+    junctions = build_junction_edge_arrays(index)
+    scores = score_held_fragments(
+        payload,
+        fl_models=build_fl_models(payload),
+        # ⚠ `P(align_strand agrees | RNA)`, and on an R1-antisense (dUTP) library — which real cfRNA is —
+        # this is ≈ 0.01, so DISAGREEMENT is the likely case. `LEDGER.md` P0.
+        rna_sense_frac=strand_models.p_r1_sense,
+        node_types=node_types,
+        junctions=junctions,
+    )
+    choices = choose_hypotheses(scores, payload, seed=seed)
+    drained = drain(payload, choices, node_types=node_types, junctions=junctions)
+    report = drained.drain
+    logger.info(
+        "[SP2] drained %d held fragments in %.1f s: %d deposited, %d dropped "
+        "(%d chose the genomic path, %d a spliced one); %d were undecided and drawn uniformly",
+        report.offered,
+        time.perf_counter() - start,
+        report.deposited,
+        report.dropped,
+        report.chose_genomic,
+        report.chose_spliced,
+        scores.n_undecided,
+    )
+    return drained
 
 
 def _wire_calibration_regions(
@@ -801,6 +861,12 @@ def run_pipeline(
 
     # -- Single BAM pass (C++ native scanner) --
     stats, strand_models, buffer, calibration_payload = scan_and_buffer(bam_path, index, scan)
+
+    # -- The second pass: drain the side buffer, BEFORE calibration --
+    if calibration_payload is not None:
+        calibration_payload = _drain_side_buffer(
+            calibration_payload, index, strand_models, seed=config.second_pass_seed
+        )
 
     # -- Calibration (acyclic) --
     # Build the region geometry, verify it lines up 1:1 with the accumulator

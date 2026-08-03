@@ -1,6 +1,16 @@
 # The junction pool's opportunity function — the derivation, and what measuring it found
 
-    Status: DERIVATION COMPLETE, 2026-08-01. ⛔ NO CODE WRITTEN.
+    Status: ⭐⭐ **DERIVATION COMPLETE AND NOW THE CRITICAL PATH (`TODO.md` rank 0), 2026-08-03.**
+      ⛔ STILL NO CODE WRITTEN.
+      ⭐ **Why it is rank 0:** `LEDGER.md` B4 measured the deliverable and it got WORSE — the library gDNA
+      fraction's mean |error| rose 23.9 % when the side buffer drains. `calibrate` fits from the two pure
+      POOLS, and the second pass made the *anchor* exact while pushing `RNA_SPLICED` from +2.4 % to +6.2 %
+      against truth, because the drain feeds long junction-using fragments into a pool selected on "used an
+      annotated junction". This file's formula is the correction for exactly that pool.
+      ⭐ **THE NEW TARGET, measured (P4.2):** the observed-splice population is **+3.8 %** longer than the
+      library (mean 225.4 against 217.1) and spans its full range, while `gapless` is hard-censored at
+      2x the read length and `gap` is censored below it. That +3.8 % IS junction opportunity, measured
+      directly for the first time; after the drain the pool reads +6.2 … +8.1 %.
     ⭐ ENTRY POINT IS NOW `docs/PLAN_TWO_PASS.md`. This work is step S4 there, and it rides on the
       SAME two-pass structure as the gap-path work — §0 of that file is why.
     ⚠ §3's numbers PREDATE the side buffer and must be re-measured after the drain — PLAN_TWO_PASS §2.4.

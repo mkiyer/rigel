@@ -11,43 +11,29 @@ the equations the code depends on) · `BENCHMARK_SUITE.md` (the suite and what i
 
 ## 0. STATE — start here
 
-### ⭐ FOR S5, READ `docs/S5_DESIGN_LOG.md` FIRST — it supersedes §4 and §5's S5 row
+### ⭐⭐ STATE, 2026-08-03 — FRAGMENT LENGTH IS DONE; THE CRITICAL PATH IS C3
 
-S5 was written in this file as "rewire the four consumers". **It is not that.** Asked which observables
-the rewiring should consume, the design had no answer, so S5 was stopped on 2026-07-30 and turned into a
-derivation first. §4's R1–R4 ranking and §5's S5 row are **superseded**; the live plan is
-`S5_DESIGN_LOG.md` §2, and the derivation it rests on is `NODE_DENSITY_DERIVATION.md`.
-
-⭐ **`S5_DESIGN_LOG.md` §2 now also carries THE ROAD TO A PRODUCTION CALIBRATION** — the three phases
-from here to a shippable calibration stage, in dependency order, each step with its gate and the
-measured number it buys. Read it before planning any work in this area.
-
-### Where things stand (2026-07-30, end of the S5.e session)
+⛔ **This file is no longer the live plan for anything on the critical path.** Its §4/§5 S5 rows were
+superseded by `S5_DESIGN_LOG.md`, and S5 itself is finished. Read in this order instead:
 
 | | |
 |---|---|
-| `main` | S1–S4 + the index/suite session + **S5.0, S5.a, S5.b, S5.c, S5.d, S5.e** |
-| suite | **1430 passed / 266 failed / 1 xfailed / 15 errors** |
-| ⭐ **next** | **S5.f** — `calibrate()` end to end. ⛔ **It is the pivot: nothing downstream is measurable until it runs**, so its numbers become the FIRST BASELINE |
-| ✅ ruled | **A7** — junction edges take their real exonic reach; contiguous edges stay `UNBOUNDED_REACH` and A7 proper lands as S5.g, after the baseline exists |
+| **`docs/TODO.md`** | ⭐ the one ranked list, and **rank 0 is C3** |
+| **`docs/JUNCTION_OPPORTUNITY.md`** | C3's formula, proven over 48,648 configurations. ⚠ every number in its §3 is stale |
+| **`docs/LEDGER.md`, entries C0 → B4** | the fragment-length track and the second pass, newest last. ⭐ **B4 is the one that sets the priority** |
+| **`docs/SPEC_SECOND_PASS.md`** | the second pass's spec; P0–P4 all closed |
+| `docs/SOLVER_OBSERVABLES_PLAN.md` | its P2 is built and gated OFF, blocked on the FL pools — which is C3 |
 
-⚠ **The 266 failures are not one thing**, and the count is exactly what the tree carried before S5.c.
-~200 are end-to-end scenario and golden tests that will move **numerically** at S5.f/S6 rather than
-merely start running; 10 are sweep-behaviour tests in `test_bp_solver.py` whose fixtures are still
-per-face and fail through a shim naming their step. A failure that says which step owns it is the normal
-state here, not a regression.
-
-### What landed, and where it is written down
-
-Per-step attribution is `LEDGER.md` (S5.0, S5.a, S5.b, S5.c, S5.d), never this block.
+### Where things stand
 
 | | |
 |---|---|
-| **S5.0** | the derivation. The shipped `(count, Σ1/L)` pair has an **exact blind spot** at equal mean lengths; the deposit weight is the reciprocal **opportunity**; a model-free channel provably carries no composition information |
-| **S5.a** | `length_sum` on every population; `density` renamed `inv_length_sum`. Byte-identical on 60 k real fragments |
-| **S5.b** | `fl.py` re-keyed to the five pure pools. The five-pool table reproduced on real cfRNA |
-| **S5.c** | `effective_length.py` → the one placements formula. 89 tests, every divisor enumerated |
-| **S5.d** | substrate collapsed to ONE type; the chain re-keyed to `N E N … E N`, no terminal slots |
+| branch | `fragment-length-gold-standard`, 6 commits ahead of `main` and **uncommitted work on top** |
+| suite | **21 failed / 1923 passed / 1 xfailed** — all 21 are `test_golden_output`, stale for the **sixth** time. ⛔ Regenerate at the very END, twice, and diff |
+| ✅ **fragment length** | ONE definition (C0–C2), accurate (C2.6), and **unbiased**: the anchor's error against the simulator's own truth is **+0.00 % mean / +0.02 % sd** |
+| ✅ **the second pass** | built, gated, wired in ahead of calibration. **90.5 %** of held fragments get exactly the right length, mean error **+0.12 bp** |
+| ⛔ **the deliverable** | composition error **rose 23.9 %** on the contaminated conditions (B4). `calibrate` fits from the **pools**, and the RNA pool is opportunity-biased — which is C3 |
+| ⛔ worst single row | `gdna100 ss0.50 capture_on`: `f_gdna` **0.3704 against 0.5**, unexplained since S5.f and unmoved by everything since |
 
 ### Standing rules that did not change
 

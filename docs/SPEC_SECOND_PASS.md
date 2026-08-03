@@ -1,6 +1,14 @@
 # SPEC — the second pass: draining the side buffer
 
-    Status: SPECIFICATION, 2026-08-02. Nothing here is built yet.
+    Status: LIVE SPEC, 2026-08-02. ⭐ **P0–P4 ARE ALL CLOSED** — the pass is built, gated, wired into
+    the pipeline and measured (`LEDGER.md` P2.1, P2.2, P3, P4). ⭐⭐ **The anchor's bias against truth
+    is now +0.00 % on the zero-gDNA falsification condition**, from −1.61 %. D-1/D-2/D-3/D-5/D-6 decided.
+    ⭐⭐ **P0–P5 ARE ALL CLOSED; P6 is partial.** ⛔ **THE RESUME POINT IS NOT IN THIS FILE** — it is
+    C3 / S4, junction opportunity, `TODO.md` rank 0. `LEDGER.md` **B4** is why: calibration fits from the
+    fragment-length POOLS, this pass made the *anchor* exact, and the RNA pool it feeds is
+    opportunity-biased — so composition got 23.9 % worse. ⚠ §8's **D-4** is the one decision left here,
+    and it is the same question as `TODO.md` rank 8 (a zero observation is a likelihood, not an
+    impossibility) — both want the EXPOSURE that C3 supplies.
     Entry point: `docs/PLAN_TWO_PASS.md` — this file is its **S3**, in full.
     Prior art it completes: `SPEC_GAP_PATHS.md` (pass 1, landed as S1), `PLAN_TWO_PASS.md` §5 (the
     sketch this replaces), `JUNCTION_OPPORTUNITY.md` (S4, which runs AFTER this).
@@ -146,12 +154,38 @@ Let `G` be the fragment's unsequenced gaps (pass 1's own gap list, minus the gap
   ⚠ A path may also cross contiguous edges *between* its introns (the owner's §1 example: a path can
   cross an exon no read touched). Those are part of the path and count.
 
-⛔ **OPEN — D-1, the aggregation.** A path touches several objects and the molecule must be present at
-**all** of them, so the path's rate is not the sum. The candidates are `min` (the bottleneck: a molecule
-crossing the whole gap is present at every edge, so the scarcest object bounds it) and the geometric mean.
-⚠ `min` is the one with an argument behind it; it is also the one that will be dominated by a single
-zero. **Measure both before choosing** — this is a tunable if picked by taste, and a derivation if picked
-by measurement.
+⭐ **WHICH contiguous edges ∅'s evidence is — settled by the deposit rule, D-6.** A line is crossed iff it
+lies **strictly inside a contiguous segment**, so over a fragment `[s, e)` the ∅ path crosses every line
+in `(s, e)` and a path splicing `[a, b)` crosses those in `(s, a)` and `(b, e)`. The difference — and
+therefore ∅'s evidence — is the lines at cuts **`a <= c <= b`, endpoints INCLUDED**. Both endpoints of an
+annotated intron are cuts by construction, so those two lines always exist and always discriminate.
+⛔ The scorer asked for `a < c < b` until 2026-08-02, which drops exactly those two and is **empty when
+the intron spans one node**; `LEDGER.md` P2.1 measured the damage and P2.2 fixed and gated it.
+
+✅ **THE AGGREGATION IS `min`, THE BOTTLENECK — D-1 is closed and the parameter is deleted** (P2.2). A
+path touches several objects and the molecule was present at **all** of them, so the path's rate is not
+the sum; the scarcest object bounds it. Measured against the geometric mean over the 8 pilot conditions:
+a different winner on **0.47–0.59 %** of held records, with the zero mask **bit-identical**. No accuracy
+argument separates them at that scale, so the one with a derivation wins.
+
+### 3.1a ⭐ HOW THE THREE FACTORS COMBINE — and the one rule that is not just "multiply"
+
+`score(h) = rho(h) * f(L_h) * s(h)`, normalised over the candidate set and nothing else. ⚠ The product is
+**not** a rate and not a calibrated likelihood — `rho` carries units of fragments per base while `f` and `s`
+are probabilities — and it does not need to be, because the normalisation makes any common scale cancel.
+
+⛔ **AN ALL-ZERO FACTOR IS UNINFORMATIVE, NOT DECISIVE** (P4.1, 2026-08-03). That same normalisation is
+why: a factor taking the *same* value for every candidate cancels and cannot affect the answer. Zero is the
+one value where the arithmetic loses that — it destroys the product instead of cancelling, the
+normalisation cannot run, and the record collapses to a coin toss that throws away the factors that did
+know. Measured: of 10 such records, the length term alone would have been right **8 of 8** times it could
+decide. So an all-zero factor is dropped for that fragment.
+
+⛔ **The PARTIAL-zero case is untouched** — a zero for *some* candidates says "no evidence for this path"
+and stays decisive, which is D-3 exactly as ruled. ⭐ And when the product is zero everywhere because two
+factors **contradict**, the coin toss is restricted to candidates whose `L` the length term has not ruled
+out: `f = 0` is already the statement `max_fragment_length` makes, read off the measured distribution.
+`rigel.second_pass.combine_factors` is the one place all of this lives.
 
 ### 3.2 `f_h(L_h)` — the length term
 
@@ -244,7 +278,14 @@ S1 already gives the deferred bank a **canonical order** (sorted on the record's
 at any worker count), so `index in the drained queue` is well defined. Seed each draw from
 `(global_seed, queue index)`.
 
-⚠ `global_seed` lives on the config alongside `EMConfig.seed`. ⛔ The gate is the one S2.1 established for
+✅ **DECIDED (P3): one stream in queue order**, which is S2.1's rule verbatim. The bank's canonical sort
+makes "the i-th record" well defined, so `np.random.default_rng(seed)` consumed in that order is
+reproducible by construction — and it vectorises, which is what makes the correspondence between stream
+position and queue index a property of the code rather than of a loop body. ⛔ The per-index alternative
+was rejected as machinery for a capability (drain a subset, re-draw one record) nothing needs.
+
+⚠ `global_seed` is still a parameter of `drain`, not yet a config field — that is **P4**, where the pass is
+wired in. ⛔ The gate is the one S2.1 established for
 the whole pipeline and this pass must not weaken it: **byte-identical output at 1/2/4/8 workers**, and two
 runs at one seed identical. `PLAN_TWO_PASS.md` §5.6 conceded that calibration "stops being bit-identical"
 after this pass — ⛔ **that concession is withdrawn**; reproducibility is achievable here and is gated.
@@ -326,11 +367,12 @@ silent about it.
 
 | | | |
 |---|---|---|
-| **D-1** | how to aggregate `rho` over the several objects a path uses — `min` (bottleneck) or geometric mean | §3.1. ⛔ **Measure both.** Picked by taste it is a tunable; picked by measurement it is a derivation |
-| **D-2** | the drain's plumbing: live scanner (a) or second set + merge (b) | §6.3. ⭐ Recommend (a) for v1 |
-| **D-3** | ⛔ **a junction with ZERO flux** — impossible, or merely unobserved? | A hard zero makes the hypothesis unselectable and can empty the score vector. ⛔ A pseudocount is a magic number and will not be invented. ⚠ **Measure first**: the held fragments are excluded from the tally they are scored against, so a junction used *only* by deferred fragments reads zero — how often that happens is the fact that decides this |
+| ~~**D-1**~~ | ✅ **CLOSED (P2.2) and the parameter DELETED.** `min`, the bottleneck | §3.1. Measured on the 8 pilot conditions: the two pick a **different winner on 0.47–0.59 %** of held records and leave the **zero mask bit-identical**, so D-1 never interacted with D-3. No accuracy argument separates them at that scale, so the derivation decides. ⚠ Shares move > 0.10 on 1.9–3.4 % of records — the place to look if P4's tail gate misses |
+| ~~**D-2**~~ | ✅ **DECIDED 2026-08-02 — NEITHER (a) nor (b) as written.** The drain is a pure function over the payload | §6.3, and it went against that section's own recommendation. ⛔ (a) forces the drain inside the scan, which bakes one draw into every cached payload and turns each P5/P6 re-measurement into a 61 s rescan of 8 conditions. ⭐ And (b)'s objection — "needs an `AccumulatorSet` binding with a payload export" — is false: every tally channel is already a `def_prop_ro` on the bound per-reference `Accumulator`. So the shape needs **no new C++**, drains a **cached** payload, and keeps the delta observable |
+| ~~**D-3**~~ | ✅ **CLOSED 2026-08-02 — owner ruling: NO fallback.** A hard zero stays hard. Measured (P2.1): | 8 pilot conditions. The empty score vector is **≤ 1 %** of records; the zeros instead **decide** 56–80 % of them. D-3's population is the spliced arm: **17.9–22.8 %** of spliced hypotheses read zero, **100 % of them `annotated_empty`** (zero `unannotated`), and against truth **69–89 % are correctly zero** — nothing expressed the junction. ⛔ **The predicted self-exclusion is not the mechanism**: the heaviest empty slot has **1,509 held claimants and zero truth molecules**, so a pseudocount would hand those a route the library never used. ⚠ The ∅ arm's raw rate is **not data** — see D-6 |
 | **D-4** | should the density carry its **weight of evidence** (the integer `count`) as well as its level? | A density of 0.01 from 1000 fragments and from 1 are not the same statement. The Beta-Binomial machinery calibration already uses is the honest route; ⚠ it is also scope. Measure whether it matters |
 | ~~D-5~~ | ✅ **FIXED (P1).** A merged path whose supporters disagree about the strand is marked **AMBIGUOUS** | `LEDGER.md` P1. Taking the first supporter's strand made the answer depend on GTF line order. ⚠ Unreachable on human data; fixed because the alternative is order-dependent |
+| ~~**D-6**~~ | ✅ **FIXED AND GATED (P2.2).** `_lines_inside` → `_distinguishing_lines`; arm 3 of the P2 gate was verified failing first, and Y1/Y2/Y2b all fire | §3.1. `second_pass._lines_inside` asks for lines **strictly between** an intron's endpoints; the deposit rule says the lines distinguishing ∅ from a spliced path are those at cuts **`a <= c <= b`**, endpoints included — and both endpoints are always cuts, so the two guaranteed discriminators are exactly the two dropped, and the set is **empty when the intron spans one node**. Brute-forced against the reference. Measured: on gdna100-capture-off the shipped rule reads **0.4344** zero and the derived rule reads ⭐ **0.0000**. ⚠ Not a free-standing fix — on zero-gDNA the derived rate is still 0.72, which is **correct** (no gDNA ⇒ nothing crosses an intron contiguously), so it must be judged with D-3, not before it |
 
 ---
 
@@ -348,11 +390,11 @@ in advance and cannot be tuned; then the code is deliberately broken to confirm 
 |---|---|---|
 | ~~**P0**~~ | ✅ **CLOSED 2026-08-02 — there was no bug.** Two quantities were both called strand specificity; `StrandModel.strand_specificity` already recovers the simulated knob (1.00→1.0000, 0.75→0.7701, 0.50→0.5020). No code changed; the deliverable is the gate that stops it being filed a third time | a zero-gDNA library still reads `f_gdna ≈ 0.003`, not 0.499 — the S5.f-addendum measurement, re-run. ⭐ **And the exported scalar now means what it says**, checked against a library simulated at a known sense fraction. ⛔ Blocks §3.3 |
 | ~~**P1**~~ | ✅ **CLOSED 2026-08-02.** D-5 fixed (a merged path whose supporters disagree is AMBIGUOUS); both audited behaviours gated through the scan; 3 perturbations, of which Z3 does not fire for a recorded reason | the audit's two cases as tests, through the **scan** path — ⚠ not the resolver, where `t_strand_arr_` is empty and the hypothesis strand silently reads NONE |
-| **P2** | ⚠ **PARTIAL — built, UNGATED.** `src/rigel/second_pass.py` exists and runs; `Accumulator.length_under` exposes `L` so the scorer does not reimplement it. ⛔ **No test covers the module.** Remaining, in order: **measure D-3 on the pilot**, then a discriminating fixture + the gate, then measure D-1 and delete the parameter | ⛔ **the discrimination is real**: on a hand-built locus where the truth is known, the correct hypothesis takes the larger share. Plus D-1 and D-3 **measured**, not chosen |
-| **P3** | the drain: re-enter `deposit()`, the new counters, the bank consumed | ⭐ **conservation** — `drained_deposited + drained_dropped_* == deferred_undetermined_gap`, exactly, and the bank is empty. Byte-identity C++↔reference. **Byte-identical at 1/2/4/8 workers and across two runs at one seed** (§5.2) |
-| **P4** | wire into the pipeline, ahead of calibration | ⭐ **THE TAIL** — no fragment above the library's true longest molecule, **713 bp** on the pilot, read from `truth_fragment_lengths.tsv`. ⛔ **And the gDNA control must not move one digit** — gDNA has no introns to miss, so any movement there means the drain reached fragments it cannot explain |
-| **P5** | ⭐ **measure** whether a second iteration would move anything | §7.1. A measurement, not a feature. If it would move things, that measurement tells you what damping and what stopping rule are needed — and only then is a loop designed |
-| **P6** | re-measure everything the hold-out invalidated | ⛔ D3's residual above the ceiling; **every** number in `JUNCTION_OPPORTUNITY.md`; `PLAN_TWO_PASS.md` §2.4's anchor-vs-pool table. All are statistics of the deposited set and all currently describe a tally with 2–3.5 % held out |
+| ~~**P2**~~ | ✅ **CLOSED 2026-08-02 (P2.1 + P2.2).** All three steps done: **D-3 measured** (no fallback — owner ruling), the **gate built** (`tests/test_second_pass_scoring.py`, 7 mirror-paired loci, 10 tests, **no threshold anywhere**), and **D-1 measured and its parameter DELETED**. ⭐ Along the way the measurement found **D-6** — ∅'s evidence set was the wrong set of contiguous edges — and it is fixed and gated. ⚠ Two perturbations do not fire and are recorded: §3.2's pmf choice and ∅'s contested-union scoping are both still ungated | ⭐ **the discrimination is real** — ✅ and it is, on `rho` (arms 1/2), the **length** term (arm 5) and the **strand** term (arm 7), each isolated by a mirror rather than a constant. **4 of the 7 loci exist only because a perturbation passed.** D-1 and D-3 **measured**, not chosen |
+| ~~**P3**~~ | ✅ **CLOSED 2026-08-02.** `second_pass.drain()` is a **pure function, payload in / payload out, with ZERO new C++** — D-2 decided against §6.3's recommendation because (a) breaks the scan cache, and because (b)'s stated export cost does not exist. 16 gates, 18 of 19 perturbations fire. ⭐ Two findings: the census would have depended on the RNG, and §6.2's bookkeeping conflicted with a payload door check — the door won. Plus two latent cache holes the new field exposed | ✅ conservation exact, bank empty, **1/2/4/8 workers and two runs at one seed byte-identical**, and ⭐ §6.1's claim checked directly: a drained fragment gives byte-identically the tally that offering only that hypothesis would have given |
+| ~~**P4**~~ | ✅ **CLOSED 2026-08-02.** `_drain_side_buffer` runs between the scan and `build_fl_models`, so calibration sees the complete tally and runs once. Seed on `PipelineConfig.second_pass_seed`, ⭐ deliberately **not** `em.seed`. 5 gates, all 6 perturbations fire | ⭐⭐ **THE ANCHOR IS EXACT**: mean −1.61 % → **+0.00 %**, sd −1.48 % → **+0.02 %** against truth on zero-gDNA. ⭐ **The gDNA control holds EXACTLY** — all four pure pools move by **0**, and it is derived, not a tolerance: a drained fragment is either a multi-line crossing (no pool) or an annotated splice (`RNA_SPLICED`). ✅ **THE TAIL HOLDS EXACTLY as of P4.1** — **0** fragments above the true ceiling on all 8 conditions. It read 0–3 until the annihilation bug was fixed: an all-zero factor was destroying the other two, and the length term had already scored every impossible answer at zero |
+| ~~**P5**~~ | ✅ **ANSWERED 2026-08-03, by measurement rather than by building the loop** | §7.1. ⭐ **NO ITERATION.** Three measurements settle it: (1) the anchor is **exact** after one drain (+0.00 % / +0.02 %), so there is nothing on it for a second pass to improve; (2) the held fragments' assigned lengths are right to **+0.12 bp** on average, so the assignment is not what moves the pool; (3) the pool's residual +6 % is a **selection** effect — the annotated-junction-using population genuinely is +3.8 % longer than the library (P4.2's subpopulation table) — and **iteration cannot fix a selection effect**. ⛔ Only S4's opportunity correction can, which is why `TODO.md` rank 0 is C3 and not a loop |
+| **P6** | ⚠ **PARTIAL** — re-measure everything the hold-out invalidated | ✅ **D3's residual: 0 fragments above the true ceiling on all 8 conditions** (P4/P4.1). ✅ `PLAN_TWO_PASS.md` §2.4's table: superseded by `LEDGER.md` B4. ✅ The FL subpopulations measured against truth (P4.2). ⛔ **STILL OPEN: every number in `JUNCTION_OPPORTUNITY.md` §3**, which is C3's own first task — its §1 derivation is untouched |
 
 Then, and only then: **S4** (junction opportunity, on the drained tally) and **S5** (regenerate the
 goldens — once, at the very end, twice, and diff).

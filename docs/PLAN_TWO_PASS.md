@@ -1,6 +1,11 @@
 # THE PLAN — one two-pass structure, serving both open problems
 
-    Status: CONVERGENCE PLAN, 2026-08-01. This supersedes the separate tracks.
+    Status: ⚠ **HISTORY, as of 2026-08-03.** Its S1, S2 and S3 have ALL LANDED — the side buffer, its
+      persistence, and the second pass that drains it. ⭐ Read it for §0–§1, which are why the gap-path and
+      junction-opportunity problems are ONE problem and still the clearest statement of that.
+      ⛔ **§5 is superseded by `SPEC_SECOND_PASS.md`** and **§2.4's anchor-vs-pool table by `LEDGER.md` B4**,
+      which measured the drained numbers §2.4 said could not be read yet. S4 is now `TODO.md` rank 0.
+      Originally: CONVERGENCE PLAN, 2026-08-01. This supersedes the separate tracks.
     Replaces as the entry point: `SPEC_GAP_PATHS.md` (the gap-path track) and
     `JUNCTION_OPPORTUNITY.md` §7–§8 (the opportunity track). Both remain valid as
     DERIVATIONS; this file is the order of work and the gates.

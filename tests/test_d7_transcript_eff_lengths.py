@@ -79,12 +79,24 @@ def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
     gives a different array.
     """
     from rigel.calibration.fl import build_fl_models
+    from rigel.pipeline import _drain_side_buffer
 
-    pr = run_pipeline(scenario.bam_path, scenario.index, config=_config())
+    config = _config()
+    pr = run_pipeline(scenario.bam_path, scenario.index, config=config)
     shipped = np.asarray(pr.estimator.effective_lengths, dtype=np.float64)
 
     # Rebuilt from the payload alone, by the same route production takes but from an independent scan.
-    _, _, _, payload = scan_and_buffer(str(scenario.bam_path), scenario.index, _config().scan)
+    #
+    # ⭐ **THE DRAIN IS PART OF THAT ROUTE as of P4**, and this test is what noticed: the RNA pmf
+    # calibration sees is fitted from the DRAINED tally, so an undrained payload gives a different array
+    # (measured: ~2.7 bp per transcript, every one of them). ⚠ Production's own helper is called rather
+    # than its three steps repeated, so "the same route" cannot quietly stop being true.
+    _, strand_models, _, payload = scan_and_buffer(
+        str(scenario.bam_path), scenario.index, config.scan
+    )
+    payload = _drain_side_buffer(
+        payload, scenario.index, strand_models, seed=config.second_pass_seed
+    )
     fl_models = build_fl_models(payload)
     rna_fl = FragmentLengthModel.from_pmf(fl_models.rna_pmf, fl_models.max_size)
     exonic = scenario.index.t_df["length"].values.astype(np.int64)

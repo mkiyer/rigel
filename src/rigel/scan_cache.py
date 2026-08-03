@@ -147,19 +147,41 @@ def _payload_field_types() -> dict[str, type]:
     return typing.get_type_hints(AccumulatorPayload)
 
 
-def _schema_names() -> list[str]:
-    """Every name the cache is keyed by, NESTED BANKS INCLUDED, in a stable order.
+def _nested_dataclass(annotation) -> type | None:
+    """The dataclass an annotation names, **looking through ``Optional`` / unions**. ``None`` if none.
 
-    ⭐ This is what makes the digest below cover what it claims to.
+    ⛔ The union is not a corner case: ``AccumulatorPayload.drain`` is ``DrainQC | None``, and
+    ``dataclasses.is_dataclass`` is False for that — so a plain check silently treats the whole bank as a
+    scalar and every field inside it drops out of the schema key.
     """
-    types = _payload_field_types()
-    names: list[str] = []
-    for field in dataclasses.fields(AccumulatorPayload):
-        names.append(field.name)
-        nested = types.get(field.name)
-        if dataclasses.is_dataclass(nested):
-            names += [f"{field.name}__{sub.name}" for sub in dataclasses.fields(nested)]
-    return names
+    if dataclasses.is_dataclass(annotation):
+        return annotation
+    for argument in typing.get_args(annotation):
+        if dataclasses.is_dataclass(argument):
+            return argument
+    return None
+
+
+def _schema_names() -> list[str]:
+    """Every name the cache is keyed by, NESTED BANKS INCLUDED, to any depth, in a stable order.
+
+    ⭐ This is what makes the digest below cover what it claims to. ⚠ **Fully recursive, not one level.**
+    It covered exactly one level until 2026-08-02, which was enough for ``ScanQC`` / ``GapCensus`` /
+    ``DeferredFragments`` and stopped being enough the moment ``DrainQC`` nested a ``GapCensus`` inside
+    itself — the same invisibility X8 was filed for, one level down.
+    """
+
+    def walk(owner: type, prefix: str) -> list[str]:
+        hints = typing.get_type_hints(owner)
+        names: list[str] = []
+        for field in dataclasses.fields(owner):
+            names.append(prefix + field.name)
+            nested = _nested_dataclass(hints.get(field.name))
+            if nested is not None:
+                names += walk(nested, f"{prefix}{field.name}__")
+        return names
+
+    return walk(AccumulatorPayload, "")
 
 
 def payload_schema_digest() -> str:
@@ -177,7 +199,9 @@ def payload_schema_digest() -> str:
     cache be accepted by the key and then fail deep in the loader with a bare ``TypeError`` — precisely the
     failure mode this digest exists to prevent. S1 made that worse rather than better, because
     ``DeferredFragments`` puts **thirteen** array names inside one field and every one of them is an
-    ``.npz`` key. Recursing one level covers all three nested banks.
+    ``.npz`` key. ⚠ It recursed exactly ONE level until 2026-08-02, when ``DrainQC`` nested a ``GapCensus``
+    inside itself and put the same invisibility one level down; :func:`_schema_names` is fully recursive
+    now, and looks through ``Optional``.
 
     Field names only: a dtype change is already caught at load by ``_bank``'s and
     ``DeferredFragments.from_dict``'s assertions, and names are what the ``.npz`` is keyed by.
@@ -270,6 +294,17 @@ def write_scan_cache(
     # `json.dumps(..., default=str)` — which would stringify each array to a TRUNCATED repr, silently, and
     # read back as text. Nested dataclasses are therefore split by the type of each sub-field: arrays are
     # prefixed `field__sub` and counters stay scalars.
+    # ⛔ THE CACHE HOLDS A SCAN, AND A DRAINED PAYLOAD IS NOT ONE. The second pass runs *after* the cache
+    # is read (`SPEC_SECOND_PASS.md` §2), which is what lets one scan be drained repeatedly at different
+    # seeds without re-reading the BAM — the property P5 and P6 both need. Writing a drained payload would
+    # bake one draw into the cache, and it would also serialise `DrainQC.census_before` through
+    # `json.dumps(default=str)` as a stringified repr, silently, which is X9's defect one level down.
+    if payload.drain is not None:
+        raise ValueError(
+            "refusing to cache a DRAINED payload. The cache stores pass one so that the drain can be "
+            "re-run at any seed; cache the payload `scan_and_buffer` returned and drain after loading."
+        )
+
     arrays: dict[str, np.ndarray] = {}
     scalars: dict[str, object] = {}
     for field in dataclasses.fields(AccumulatorPayload):
