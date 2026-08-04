@@ -59,6 +59,37 @@ def truth_f_gdna(condition_dir: Path) -> float | None:
     return gdna / total if total > 0 else None
 
 
+def truth_length_pmf(condition_dir: Path, kind: str, max_size: int) -> "np.ndarray | None":
+    """The simulator's OWN post-capture length distribution for one origin class, as a pmf.
+
+    ⭐⭐ **THIS IS THE CEILING INSTRUMENT** (`docs/TRAPS.md` B1). Handing `calibrate`
+    the right answer for one channel says what *perfecting* that channel is worth, before any of the work
+    to perfect it is done — and it is available whenever the simulator writes truth. It is what showed
+    that a perfect RNA length model was worth 0.0004 while the gDNA pool nobody was ranking was worth
+    22 %: an A/B tells you whether a change helped, a ceiling tells you whether to start.
+
+    ⚠ Read from ``truth_fragment_lengths.tsv``, which is **post-capture empirical** — the realised
+    distribution, not the configured ``frag_mean``. Capture selects for length, so the configured
+    parameters describe a library that was never sequenced
+    (`docs/TRAPS.md` F5).
+    """
+    path = condition_dir / "truth_fragment_lengths.tsv"
+    if not path.is_file():
+        return None
+    pmf = np.zeros(max_size + 1, dtype=np.float64)
+    with open(path) as handle:
+        next(handle)
+        for line in handle:
+            row_kind, length_text, count_text, _fraction = line.rstrip("\n").split("\t")
+            if row_kind != kind:
+                continue
+            length = int(length_text)
+            if 0 <= length <= max_size:
+                pmf[length] += float(count_text)
+    total = pmf.sum()
+    return pmf / total if total > 0 else None
+
+
 def f_gdna_of(result) -> float:
     """``f_gdna`` as defined it, so the two baselines are comparable.
 
@@ -77,6 +108,12 @@ def main() -> int:
     ap.add_argument("--suite", type=Path, default=None, help="where the truth files live")
     ap.add_argument("--conditions", nargs="*", default=None)
     ap.add_argument("--seed", type=int, default=0, help="the drain's multinomial seed")
+    ap.add_argument(
+        "--ceiling",
+        action="store_true",
+        help="also run the three TRUTH-pmf arms: exact gDNA, exact RNA, both. This is the scoping "
+        "number for the whole length phase — what perfecting each length model is worth.",
+    )
     ap.add_argument("--json", type=Path, default=None)
     args = ap.parse_args()
 
@@ -87,6 +124,8 @@ def main() -> int:
 
     from rigel.calibration.calibrate import calibrate
     from rigel.calibration.fl import build_fl_models
+    from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
+    from rigel.calibration.junction_opportunity import crossing_probability_from_index
     from rigel.config import CalibrationConfig
     from rigel.index import TranscriptIndex
     from rigel.pipeline import _drain_side_buffer
@@ -95,14 +134,19 @@ def main() -> int:
     index = TranscriptIndex.load(str(args.index))
     derived = index_derived_inputs(index)
     config = CalibrationConfig()
+    # ⚠ The same de-tilt production uses, built once off the annotation, so it is identical in both
+    # arms and cannot be what moved them.
+    crossing = crossing_probability_from_index(index, 4096)
+    gdna_opp = gdna_opportunity_from_index(index, 4096)
 
-    def run(payload, strand_model):
-        fl = build_fl_models(payload)
+    def run(payload, strand_model, *, gdna_pmf=None, rna_pmf=None):
+        """Calibrate. ``gdna_pmf`` / ``rna_pmf`` override the fitted model — that is the ceiling arm."""
+        fl = build_fl_models(payload, junction_opportunity=crossing, gdna_opportunity=gdna_opp)
         return calibrate(
             payload=payload,
             strand_model=strand_model,
-            gdna_fl_pmf=fl.gdna_pmf,
-            rna_fl_pmf=fl.rna_pmf,
+            gdna_fl_pmf=fl.gdna_pmf if gdna_pmf is None else gdna_pmf,
+            rna_fl_pmf=fl.rna_pmf if rna_pmf is None else rna_pmf,
             config=config,
             **derived,
         )
@@ -116,16 +160,37 @@ def main() -> int:
         before = f_gdna_of(run(cache.payload, cache.strand_model))
         drained = _drain_side_buffer(cache.payload, index, cache.strand_model, seed=args.seed)
         after = f_gdna_of(run(drained, cache.strand_model))
-        rows.append(
-            {
-                "condition": name,
-                "truth_f_gdna": truth,
-                "undrained_f_gdna": before,
-                "drained_f_gdna": after,
-                "held": int(cache.payload.deferred.n_fragments),
-                "seconds": time.perf_counter() - start,
-            }
-        )
+        row = {
+            "condition": name,
+            "truth_f_gdna": truth,
+            "undrained_f_gdna": before,
+            "drained_f_gdna": after,
+            "held": int(cache.payload.deferred.n_fragments),
+        }
+        if args.ceiling:
+            max_size = int(drained.max_length)
+            exact_g = truth_length_pmf(suite / name, "gdna", max_size)
+            exact_r = truth_length_pmf(suite / name, "rna", max_size)
+            # ⚠ A zero-gDNA condition has no gDNA truth histogram at all, so its exact-gDNA arm does not
+            # exist. Reported as None rather than silently falling back to the fitted model, which would
+            # read as "the ceiling arm changed nothing".
+            row["exact_gdna_f_gdna"] = (
+                f_gdna_of(run(drained, cache.strand_model, gdna_pmf=exact_g))
+                if exact_g is not None
+                else None
+            )
+            row["exact_rna_f_gdna"] = (
+                f_gdna_of(run(drained, cache.strand_model, rna_pmf=exact_r))
+                if exact_r is not None
+                else None
+            )
+            row["exact_both_f_gdna"] = (
+                f_gdna_of(run(drained, cache.strand_model, gdna_pmf=exact_g, rna_pmf=exact_r))
+                if exact_g is not None and exact_r is not None
+                else None
+            )
+        row["seconds"] = time.perf_counter() - start
+        rows.append(row)
         print(f"  {name:<44} done in {rows[-1]['seconds']:.0f} s")
 
     print()
@@ -161,6 +226,44 @@ def main() -> int:
                 f"⭐ mean |error| on the {len(contaminated)} CONTAMINATED conditions: "
                 f"{eb:.4f} → {ea:.4f}  ({100 * (ea - eb) / eb:+.1f} %)"
             )
+
+    if args.ceiling:
+        print()
+        print("═══ ⭐⭐ THE CEILING — calibrate handed the simulator's OWN length distribution ═══")
+        print("   Same drained payload, same everything; the fragment-length pmf is the only thing varied.")
+        print(
+            f"{'condition':<44} {'truth':>7} {'⭐ drained':>11} {'exact gDNA':>11} "
+            f"{'exact RNA':>11} {'both exact':>11}"
+        )
+        print("-" * 108)
+        for r in rows:
+            t = r["truth_f_gdna"]
+            cells = "".join(
+                f"{r.get(key):>11.4f}" if r.get(key) is not None else f"{'—':>11}"
+                for key in ("drained_f_gdna", "exact_gdna_f_gdna", "exact_rna_f_gdna", "exact_both_f_gdna")
+            )
+            print(f"{r['condition']:<44} {t if t is None else f'{t:.4f}':>7}{cells}")
+
+        contaminated = [r for r in rows if (r["truth_f_gdna"] or 0.0) > 0.1]
+        if contaminated:
+            print()
+            print(f"⭐ mean |error| over the {len(contaminated)} CONTAMINATED conditions:")
+            base = np.mean([abs(r["drained_f_gdna"] - r["truth_f_gdna"]) for r in contaminated])
+            for label, key in (
+                ("shipped (drained)", "drained_f_gdna"),
+                ("the EXACT gDNA length distribution", "exact_gdna_f_gdna"),
+                ("the EXACT RNA length distribution", "exact_rna_f_gdna"),
+                ("⭐⭐ BOTH exact — the ceiling on the whole length phase", "exact_both_f_gdna"),
+            ):
+                values = [r for r in contaminated if r.get(key) is not None]
+                if len(values) != len(contaminated):
+                    print(f"   {label:<56} — (missing on {len(contaminated) - len(values)} row(s))")
+                    continue
+                mean = np.mean([abs(r[key] - r["truth_f_gdna"]) for r in values])
+                delta = f"{100 * (mean - base) / base:+.1f} %" if base > 0 else "—"
+                print(f"   {label:<56} {mean:.4f}   {delta}")
+            print("   ⚠ A ceiling is what perfecting a channel is WORTH, not a result. Trap 31: it is")
+            print("     available whenever the simulator writes truth, and it costs one afternoon.")
 
     if args.json:
         args.json.write_text(json.dumps(rows, indent=2, sort_keys=True))

@@ -14,15 +14,17 @@ unspliced + spliced) eff-lengths use the RNA FL.
 removes the circularity: each model is fitted only from a population known to be one component, so
 nothing is ever estimated from the fragments it will later explain.
 
-* **gDNA** = the two *contained* pools, intergenic + intronic. ~99 % gDNA on real data.
+* **gDNA** = **all FOUR** gDNA pools — intergenic contained, intronic contained, intron-exon crossing,
+  intergenic-exon crossing — each divided by **its own** opportunity and then combined
+  (:mod:`rigel.calibration.gdna_opportunity`). The contained pair dominates off capture; the crossing
+  pair dominates under it, because a fragment beside a probe *reaches* the exon boundary and stops being
+  contained. Fitting from the contained pair alone measures the short half of one population.
+  ⛔ **Pooling the four RAW is a different operation and it is wrong**: the contained opportunity falls
+  with length and the crossing opportunity rises, and one divisor over the sum read a gDNA mean of
+  **146.05** where the contained pool said **88.0**. Divide each, then combine.
 * **RNA** = the annotated-junction pool, splice OBSERVED. gDNA cannot be spliced.
   ⚠ ``sj_implicit`` fragments are already excluded by the accumulator — a splice that was never
   sequenced is a product of the very model this pool is used to fit.
-* **splash** = the two *_EXON crossing pools, exposed for QC and **deliberately not folded into the
-  gDNA model**. They are the only ON-TARGET gDNA population, and on-target gDNA runs ~42 bp shorter
-  than off-target (§8.2), so they land between the two pure means. ⭐ The shipped model summed four
-  differently-tilted pools and read a gDNA mean of **146.05** where the pure intergenic pool says
-  **88.0** — biased long by ~40 %, by pooling exactly these.
 
 The pool axis itself lives in :mod:`rigel.scan_payload`, with the schema, because it is the
 accumulator's own enum and a private copy here is how three files come to disagree about which row is
@@ -48,25 +50,35 @@ from ..scan_payload import (
 if TYPE_CHECKING:
     from ..frag_length_model import FragmentLengthModel
     from ..scan_payload import AccumulatorPayload
+    from .gdna_opportunity import GdnaOpportunity
 
 __all__ = [
     "FLModels",
     "POOL_EB_PRIOR_ESS",
     "build_fl_models",
+    "gdna_contained_fl_mass",
     "gdna_fl_mass",
     "rna_fl_mass",
     "splash_fl_mass",
 ]
 
-#: The pure gDNA pools: contained in an intergenic or intronic node. ⚠ CONTAINED ONLY — see the module
-#: docstring for why the two crossing "splash" pools stay out.
-_GDNA_POOLS = (POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC)
+#: gDNA contained in exactly one intergenic or intronic node. Dominant OFF capture.
+_GDNA_CONTAINED_POOLS = (POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC)
+
+#: gDNA crossing exactly one line whose flanks are {intron, exon} or {intergenic, exon}. ⭐ Dominant
+#: UNDER capture: a fragment beside a probe reaches the exon boundary, so it leaves the contained pools
+#: and arrives here. Mature RNA never crosses an exon<->intron seam, so these are gDNA by construction.
+_GDNA_CROSSING_POOLS = (POOL_DNA_INTRON_EXON, POOL_DNA_INTERGENIC_EXON)
+
+#: ⭐ All four, in ``rigel.scan_payload`` pool order so they pair 1:1 with ``GdnaOpportunity.pools``.
+_GDNA_POOLS = _GDNA_CONTAINED_POOLS + _GDNA_CROSSING_POOLS
 
 #: The pure RNA pool: an OBSERVED splice across an annotated junction.
 _RNA_POOLS = (POOL_RNA_SPLICED,)
 
-#: On-target gDNA, reported rather than fitted.
-_SPLASH_POOLS = (POOL_DNA_INTRON_EXON, POOL_DNA_INTERGENIC_EXON)
+#: Kept as a name because the report shows on-target gDNA separately; it is now also FITTED, via
+#: ``_GDNA_CROSSING_POOLS``.
+_SPLASH_POOLS = _GDNA_CROSSING_POOLS
 
 #: Dirichlet pseudo-count for the smooth EB shrink toward the global FL. Not a
 #: cliff: ``pool_total ≫ prior_ess`` → empirical; ``≪`` → the global anchor; ``= 0``
@@ -155,8 +167,23 @@ def _pool_sum(payload: "AccumulatorPayload", pools) -> np.ndarray:
 
 
 def gdna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
-    """The pure gDNA length histogram: fragments CONTAINED in an intergenic or intronic node."""
+    """The gDNA length histogram: **all four** pure gDNA pools, summed.
+
+    ⛔ **This sum is only meaningful paired with :meth:`GdnaOpportunity.combined_probability`.** The four
+    pools tilt in opposite directions, so the raw sum is biased long — that is the 146.05-against-88.0
+    defect. :func:`build_fl_models` sums the counts and divides by the summed opportunity, which is a
+    different operation; it never uses this histogram on its own.
+    """
     return _pool_sum(payload, _GDNA_POOLS)
+
+
+def gdna_contained_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
+    """Only the two CONTAINED gDNA pools — the fallback when no annotation divisor is available.
+
+    ⚠ Correct to within ~0.5 % off capture and ~15 % short under it, because capture moves the long half
+    of the population into the crossing pools. Use the four-pool form whenever an index is at hand.
+    """
+    return _pool_sum(payload, _GDNA_CONTAINED_POOLS)
 
 
 def rna_fl_mass(payload: "AccumulatorPayload") -> np.ndarray:
@@ -206,6 +233,8 @@ def _smooth_eb(aligned: np.ndarray, global_pmf: np.ndarray, prior_ess: float):
 def build_fl_models(
     payload: "AccumulatorPayload",
     *,
+    junction_opportunity: np.ndarray | None = None,
+    gdna_opportunity: "GdnaOpportunity | None" = None,
     prior_ess: float = POOL_EB_PRIOR_ESS,
 ) -> FLModels:
     """Build the global / RNA / gDNA FL pmfs from ONE payload, in ONE frame.
@@ -230,13 +259,44 @@ def build_fl_models(
      ``payload.qc``. That is precisely the population the pools are drawn from, which is what makes
      it the right anchor rather than a merely convenient one.
 
+     ⭐ **Each component pool is divided by ITS OWN opportunity, and the two divisors are different
+     objects because the two selections are different.**
+
+     * ``junction_opportunity`` — ``pi(w)``, the chance a uniformly placed length-``w`` fragment crosses
+       an annotated junction at all (:mod:`rigel.calibration.junction_opportunity`). The RNA pool is
+       selected on *"used an annotated junction"*, which longer fragments do more often.
+     * ``gdna_opportunity`` — the four gDNA pools' opportunities and the reference total
+       (:mod:`rigel.calibration.gdna_opportunity`). Two of those pools are *contained in one node*, whose
+       opportunity **falls** with length; two are *crossing exactly one line*, whose opportunity
+       **rises**. ⛔ Folding one divisor into the other, or one divisor over the pooled sum, is a
+       category error — it is the defect that read a gDNA mean of 146.05 where the contained pool said
+       88.0.
+
+     ⚠ **``None`` means no annotation was offered, and the fallback is the honest one, not the
+     convenient one**: the RNA pool stays tilted and the gDNA pool falls back to the CONTAINED pair
+     alone (:func:`gdna_contained_fl_mass`). ⛔ It does **not** fall back to the four pools pooled raw,
+     because that is measurably worse than either.
+
      For the EB kernel over three free histograms — the shape a unit test needs and production never
      has — see :func:`_fl_models_from_histograms`.
     """
+    rna_counts = rna_fl_mass(payload)
+    # ⚠ One de-tilt implementation, shared: it preserves the pool TOTAL (the EB shrinkage reads that as
+    # "how much evidence stands behind this shape") and drops bins the opportunity says are impossible.
+    from .junction_opportunity import detilt_pool
+
+    if junction_opportunity is not None:
+        rna_counts = detilt_pool(rna_counts, junction_opportunity)
+
+    if gdna_opportunity is None:
+        gdna_counts = gdna_contained_fl_mass(payload)
+    else:
+        gdna_counts = detilt_pool(gdna_fl_mass(payload), gdna_opportunity.combined_probability())
+
     return _fl_models_from_histograms(
         global_counts=payload.deposited_lengths,
-        rna_counts=rna_fl_mass(payload),
-        gdna_counts=gdna_fl_mass(payload),
+        rna_counts=rna_counts,
+        gdna_counts=gdna_counts,
         max_size=int(payload.max_length),
         prior_ess=prior_ess,
         pool_counts=payload.pool_lengths,

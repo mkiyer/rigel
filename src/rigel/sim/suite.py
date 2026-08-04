@@ -838,6 +838,9 @@ def main():
         gdna=GDNASimConfig(
             rates=gdna_rates,
             rate_labels=gdna_labels,
+            # ⭐ A synthetic mini-genome carries no RNA-only spike-ins, so its one reference is
+            # genomic. Stated rather than inferred: the engine no longer guesses from the annotation.
+            genomic_refs=[REF_NAME],
             frag_mean=args.gdna_frag_mean,
             frag_std=args.gdna_frag_std,
             frag_min=args.gdna_frag_min,
@@ -924,6 +927,7 @@ def main():
         sim=cfg.simulation,
         gdna=cfg.gdna,
         nrna=cfg.nrna,
+        genomic_refs=list(cfg.gdna.genomic_refs or []),
         gdna_pairs=list(zip(gdna_labels, gdna_rates)),
         gdna_od_pairs=gdna_od_pairs,
         strand_specificities=strand_specs,

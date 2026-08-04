@@ -1,19 +1,24 @@
 # ════════════════════════════════════════════════════════════════════════════════════════════════
-#  THE PILOT — 8 conditions on a REAL human backbone (chr22 + 92 ERCC controls)
+#  THE PILOT — 8 conditions on a REAL human backbone (chr21 + chr22 + 92 ERCC controls)
 # ════════════════════════════════════════════════════════════════════════════════════════════════
 #
-# TODO item 2. The owner's pilot: gDNA {none, 100 %} x strand {unstranded, stranded} x capture
-# {off, on} = 2x2x2 = 8, a clean full factorial. Nascent is the fourth axis and is held at `none`
-# here so the 2^3 stays clean and every gdna_none cell is a pure false-positive test
-#; it enters as an axis in the full grid.
+# The owner's pilot: gDNA {none, 100 %} x strand {unstranded, stranded} x capture {off, on} = 2x2x2 = 8,
+# a clean full factorial. Nascent is the fourth axis and is held at `none` here so the 2^3 stays clean
+# and every gdna_none cell is a pure false-positive test; it enters as an axis in the full grid.
+#
+# ⭐ TWO GENOMIC CHROMOSOMES, AND THE SECOND ONE IS NOT DECORATION. A single-reference synthetic index
+# once hid a reference-id-space mismatch that silently dropped 476,719 of 476,732 real fragments inside
+# `deposit()` while every golden test passed. The 92 ERCC references were added to make that space
+# non-trivial — but they are RNA-only spike-ins, so they only make it non-trivial for RNA. gDNA takes a
+# DIFFERENT path through the scanner (the intergenic branch), and with gDNA on one chromosome that path
+# is single-reference. chr21 is the other small autosome (46.7 Mb against chr22's 50.8 Mb), real, from
+# the same GRCh38 + GENCODE v46 sources, and it keeps the suite honestly human.
 #
 # ⛔ WHY A REAL BACKBONE AND NOT A GENERATED MINI-GENOME. The deleted `ambig_dense_10mb` suite could
-# not judge what it was used to judge: its fine node set was
-# row-for-row identical to its merged region set, so it could not see a partition change at all.
-# Measured on this reference by `scripts/design/suite_resolves.py`:
-#
-#     nodes / merged regions      chr22 suite 1.386 x     human 1.387 x     deleted suite 1.000 x
-#     termini the merge hid       chr22 suite 52.72 %     human 53.42 %     deleted suite 0
+# not judge what it was used to judge: its fine node set was row-for-row identical to its merged region
+# set, so it could not see a partition change at all. Re-derive the census with
+# `scripts/design/index_census.py` and the resolution verdict with `scripts/design/suite_resolves.py` —
+# never quote a stored table, it moves with the reference.
 #
 # ⚠ EVERY FRAGMENT-LENGTH NUMBER BELOW IS MEASURED, NOT CHOSEN. They are the count-weighted mean and
 # sd of MO_3021's own pools, read off `rigel/fragment_lengths.feather` (the library that is also the
@@ -21,13 +26,19 @@
 # had `frag_std: 0` — every fragment exactly 200 bp — so nothing length-dependent was exercised at
 # all, and length is the core of the new design.
 #
+# ⭐ THESE ARE PRE-CAPTURE PARAMETERS AND THE TRUTH FILES ARE POST-CAPTURE. Hybrid capture hybridises
+# probes to sequence, so it selects for length; the simulator draws the length marginal proportional to
+# the capture-weighted opportunity, and the realised distribution therefore differs from the numbers
+# below. Score against `truth_fragment_lengths.tsv`, never against `frag_mean` — exactly as transcript
+# abundances are already scored post-capture. `scripts/design/simulator_gates.py` checks the direction.
+#
 # Build the inputs first:
 #   python scripts/sim/build_suite_reference.py --fasta genome_controls.fasta.bgz \
-#       --gtf genes_controls.sorted.gtf --refs chr22 --ercc -o <suite>/reference
+#       --gtf genes_controls.sorted.gtf --refs chr21 chr22 --ercc -o <suite>/reference
 #   python scripts/sim/design_suite_probes.py --gtf <suite>/reference/genes.gtf \
 #       -o <suite>/reference/capture_panel.tsv --capture-fraction 0.5
 #
-# Run:  python scripts/sim/simulate_reads.py --config scripts/sim/configs/chr22_pilot.yaml
+# Run:  python scripts/sim/simulate_reads.py --config scripts/sim/configs/pilot.yaml -j 8
 
 genome: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genome.fa
 gtf: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genes.gtf
@@ -35,8 +46,13 @@ outdir: /Users/mkiyer/Downloads/rigel_runs/suite/pilot
 transcript_filter: all
 
 # ── Read simulation ─────────────────────────────────────────────────────────────────────────────
+# ⚠ 10,000,000 is the RNA depth, doubled with the reference so that fragments per annotated base —
+# and therefore per NODE — is unchanged from the chr22-only pilot. Calibration accuracy depends on
+# per-node counts, so holding that fixed is what lets the re-baseline attribute its delta to the
+# simulator's defects rather than to a depth change. gDNA is added ON TOP at `rate x n_rna`, so a
+# `gdna100` condition is 10 M RNA + 10 M gDNA = 20 M fragments and a `gdna_none` condition is 10 M.
 simulation:
-  n_rna_fragments: 5000000
+  n_rna_fragments: 10000000
   sim_seed: 42
   frag_mean: 206             # ⭐ MO_3021 spliced_annot, measured — NOT a chosen round number
   frag_std: 98               # ⭐ measured. The deleted suite had 0 here, which is the whole problem
@@ -58,6 +74,13 @@ abundance:
 gdna:
   rates:       [0.0,  1.0]
   rate_labels: [none, gdna100]
+  # ⭐⭐ THE GENOMIC/RNA-ONLY SPLIT, STATED. Every reference in the FASTA is genomic or RNA-only, and
+  # naming the genomic ones classifies both. ⛔ The engine used to infer this from the annotation —
+  # `{t.ref for t in transcripts}` — which is "has an annotation" standing in for "is genomic". Every
+  # ERCC reference carries exactly one transcript, so every ERCC reference qualified, and the panel
+  # filled with gDNA on synthetic RNA spike-ins: molecules that cannot exist, on the very references
+  # whose truth abundance of zero is used as a false-positive control.
+  genomic_refs: [chr21, chr22]
   frag_mean: 157             # ⭐ MO_3021 gdna pool, measured
   frag_std: 125              # ⭐ measured; the real gDNA pool is BROAD, not a spike
   frag_min: 40
@@ -75,8 +98,8 @@ nrna:
   ratio_labels: [none]
 
 # ── Capture: the third axis, and requirement (a)'s density step ─────────────────────────────────
-# The panel covers 720 of 1,440 chr22 gene groups, so the captured/uncaptured boundary is a sharp
-# density step with real transcripts on both sides — which is what a uniform background cannot give.
+# The panel covers half the gene groups, so the captured/uncaptured boundary is a sharp density step
+# with real transcripts on both sides — which is what a uniform background cannot give.
 capture:
   probe_format: transcript
   off_target_weight: 1.0

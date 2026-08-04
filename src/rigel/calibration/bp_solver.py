@@ -58,9 +58,11 @@ from .node_geometry import (
     NodeStatics,
     build_node_geometry,
     build_node_statics,
+    g1_locked,
     init_beliefs,
     node_global_geometry,
     node_total_density,
+    terminus_flank_gain,
 )
 from .node_init import build_node_init, own_composition_logvar
 from .simplex_logodds import (
@@ -371,6 +373,53 @@ def node_sweep(
         # message and the own belief as two studies of one quantity, the DerSimonian–Laird between-source
         # estimator recovers b² with NO tuned constant (`_dl` below). Applied in `_transport`.
 
+        # ── ⭐⭐⭐ THE gDNA SCALE RULE: the reframe is a COMPOSITION imputation, and it needs a LICENCE ───
+        # Substituting ``rho_c(src) = phi_c(src)·rho_tot(src)`` into the reframe shows what ``r`` actually
+        # delivers:
+        #       rho_c^msg(dst) = rho_c(src)·rho_tot(dst)/rho_tot(src) = phi_c(src)·rho_tot(dst)
+        # — the source's density SHARE applied to the destination's observed total. ⭐ So the reframe is a
+        # PURE COMPOSITION IMPUTATION with no level transport in it at all: exact iff the two shares match,
+        # and wrong by exactly ``phi_c(src)/phi_c(dst)``. ⛔ When the source carries only gDNA that ratio is
+        # ``1/phi_g(dst)`` and the delivered level collapses to ``rho_tot(dst)`` — the destination's OWN
+        # total, INDEPENDENTLY of the source's measurement. That is `TRAPS.md` D4 exactly, and it is why the
+        # answer at an evidence-free exon sat flat at f_g ≈ 0.91 across a 1000x RNA sweep while its truth
+        # spanned 1.00 → 0.001; the measured 28.684 delivered against a true 0.0257 is ``M/E_g`` to the
+        # digit, not an approximation.
+        #
+        # So a message makes TWO claims and they need two scales. A COMPOSITION crosses by ``r``, licensed
+        # by the predicate the λ-emission gate already uses — the source must have SUPPLIED both components
+        # of the pair. A source carrying one component has no composition to lend, and its authority is a
+        # LEVEL. ⭐⭐ For gDNA a level crosses **UNSCALED**, and that is not a patch, it is this project's
+        # base assumption: gDNA is uniform along the genome before capture, so its level does not change
+        # across an EDGE.
+        #
+        # ⭐⭐⭐ AND THAT IS THE WHOLE RULE FOR BOTH CAPTURE ARMS, WITH NO BRANCH — because capture is
+        # carried by the pure-gDNA population's OWN measurements rather than by a scale factor. The relay's
+        # mass pin below re-scales the running level to each object's own observed total, and at a
+        # structurally pure-gDNA object that total IS its gDNA density, measured at its own capture stratum.
+        # So the level handed to an exon is its flanking EDGE's own enriched measurement, not the
+        # off-target floor and not the exon's total. A pooled per-capture-class landscape ratio was built to do this
+        # explicitly and measured **byte-identical off capture** and worth 1.2 % of one class on one
+        # capture-ON condition; it is deleted, and `node_geometry` records why so it is not rebuilt.
+        #
+        # ⭐ It also fixes the INTRON-mediated face of the same defect, which was not obvious in advance and
+        # is a measurement rather than an argument: a factory-solved intron reports f_g ≈ 1, hence ~zero RNA
+        # density, hence zero RNA precision — so it cannot lend a composition either. The toy gate that used
+        # to PIN that behaviour (`test_toy_harness`, an exon inheriting its neighbouring intron's
+        # composition, 31x on the ladder donor) failed because the dependence is gone: 1.04x.
+        # ⛔ What is left unfixed is narrower than it first looked — a source with a real MIXED composition
+        # that differs from the destination's, which needs genuine RNA evidence at the source (nascent plus
+        # strand or length). That is the premise being wrong rather than absent: M7's DerSimonian-Laird b̂²,
+        # which needs the destination to have its own self-solve and so is silent on unstranded data.
+        #
+        # ⛔ And the residual under capture: the level delivered to an exon is its flanking EDGE's, and a
+        # fragment spanning that EDGE lies only PARTLY under the probe while one contained in the exon lies
+        # wholly under it, so it is a LOWER bound (for any non-decreasing probe-retention law,
+        # off-probe ≤ spanning an EDGE ≤ on-probe). Closing that needs a
+        # probe-geometry model the tool does not have. ⛔ The affine-in-overlap extrapolation
+        # ``e_g[exon] = 2·e_g[EDGE] − e_g[off-probe]`` is EXACTLY the simulator's own retention law, so fitting
+        # it would be scoring against the substrate that generated it. NOT built.
+
         # ── the per-TRANSCRIPT-STRAND mature (junction) DENSITY at each line ──────────────────────────
         # ⭐ ONE array per strand, not a (left face, right face) pair. The predecessor needed the pair
         # because it could not tell a donor flank from an acceptor flank without guessing from the
@@ -405,6 +454,27 @@ def node_sweep(
         _li_a, _ri_a = np.asarray(left, np.int64), np.asarray(right, np.int64)
         _vl_a, _vr_a = _li_a >= 0, _ri_a >= 0
         _sl_a, _sr_a = np.clip(_li_a, 0, n - 1), np.clip(_ri_a, 0, n - 1)
+
+        # ── ⭐⭐⭐ THE POPULATION HALF OF THE COMPOSITION LICENCE: "is the source measuring the same thing
+        # I am?" ──────────────────────────────────────────────────────────────────────────────────────────
+        # An EDGE counts what spans it CONTIGUOUSLY, so `T(EDGE) = T(left) ∩ T(right)` and a transcript
+        # TERMINUS at the EDGE makes one flank's RNA population strictly larger. Where two objects do not
+        # measure the same population, the density discrepancy between them is not attributable to
+        # hybrid-capture enrichment — enrichment and a population difference are indistinguishable — so the
+        # composition may not be imputed across the step, the gDNA LEVEL crosses UNSCALED, and the mass pin
+        # is off with it (the identity is only implied under the premise).
+        # ⛔ TERMINI ONLY: a DONOR/ACCEPTOR EDGE also changes the population, but there the flux is MEASURED
+        # and the graft and the peel exist to route it. `terminus_flank_gain` carries that scope and the
+        # genomic-versus-TSS/TES reasoning; deriving it there rather than here is what keeps ONE home for
+        # the predicate.
+        # THE PAIR ALGEBRA: the chain strictly alternates, so exactly one slot of an adjacent pair is an
+        # EDGE, and the pair `(i, left[i])` IS the pair `(left[i], right[left[i]])`. So one array answers
+        # the question for the left-hand step of every slot and the other is that array read through
+        # `right`. When `i` is the EDGE its left neighbour is its LEFT flank; when `i` is a NODE it is the
+        # RIGHT flank of the EDGE on its left.
+        _rgain, _lgain = terminus_flank_gain(statics.edge_flags)
+        _pop_l_a = np.where(is_bnd_a, ~_lgain, ~_rgain[_sl_a]) & _vl_a
+        _pop_r_a = np.where(_vr_a, _pop_l_a[_sr_a], False)
 
         # ⚠ The two seams must be compared IN THE DESTINATION'S OWN FRAME. Each is lifted by its own
         # enrichment step ``r``, and under capture those steps differ (the two seams sit at different probe
@@ -637,6 +707,9 @@ def node_sweep(
             )
         )
         ex_l, bnd_l, fp_l, fn_l = (a.tolist() for a in (ex_a, is_bnd_a, fp_a, fn_a))
+        # the destination's own composition CERTAINTY — case (ii) of the mass pin's licence, below. Both
+        # axes: an `intergenic|exon` EDGE is as structurally pure-gDNA as an intergenic NODE.
+        g1_l = g1_locked(fp_a, fn_a).tolist()
         spl_p_l, spl_n_l = spl_p.tolist(), spl_n.tolist()
         SP_l, SN_l = SPL[:, 0].tolist(), SPL[:, 1].tolist()
         mu_l, v_mu_l = [c.tolist() for c in _mu_s], [c.tolist() for c in _v_mu_s]
@@ -822,11 +895,12 @@ def node_sweep(
             return p / (1.0 + p * v) if (p > 0.0 and math.isfinite(v)) else 0.0
 
         # ── ⚠ `_relay` AND `_transport` ARE DELIBERATE TWINS. DO NOT MERGE THEM. ────────────────────────
-        # They implement the SAME eight-step per-edge transform in the same order — reframe `r` → detect the
-        # graft → σ²_transfer (M5) → graft the source's spliced → damp the three precision streams → graft
-        # precision ⊕ M8 ⊕ P1d → peel by composition (M10) → strand filter → pin to M — and the correspondence
-        # is line-for-line. Merging them into one polymorphic routine (`k` = a scalar index for the relay,
-        # `slice(None)` for the combine) IS structurally possible; `_peel_share` already proves the pattern.
+        # They implement the SAME per-edge transform in the same order — reframe `r` → detect the graft →
+        # the composition-imputation LICENCE and the gDNA arm's own scale `r_g` → σ²_transfer (M5) → graft
+        # the source's spliced → damp the three precision streams → graft precision ⊕ M8 ⊕ P1d → peel by
+        # composition (M10) → strand filter → pin to M — and the correspondence is line-for-line. Merging
+        # them into one polymorphic routine (`k` = a scalar index for the relay, `slice(None)` for the
+        # combine) IS structurally possible; `_peel_share` already proves the pattern.
         #
         # ⛔ IT WAS MEASURED AND REJECTED. `_relay` is a SEQUENTIAL Gauss-Seidel scan — it reads
         # `rg[s]`/`pg[s]`/… at a source that an earlier iteration of the same pass may already have written
@@ -844,7 +918,7 @@ def node_sweep(
         # The relay's side of the pair is now scalar-native throughout — Python-float operands (the `*_l`
         # block) calling the `*_scalar` twins of the shared primitives — which is what makes it fast, and
         # one more reason the two forms cannot collapse into one.
-        def _relay(seq, nbr, rho):
+        def _relay(seq, nbr, rho, pop):
             # every operand here is a Python float or bool — see the `*_l` block above.
             # ⭐ ``dst_face``/``src_face``/``df``/``sf`` are gone: one ρ_tot and one mature flux per slot,
             # so the only thing that still varies between the forward and backward passes is ``nbr``.
@@ -885,7 +959,17 @@ def node_sweep(
                 s2t = 0.0 if _gr else (logvar_l[i] + logvar_l[s])
                 gp = spl_p_l[s] if _gr else 0.0
                 gn = spl_n_l[s] if _gr else 0.0
-                tg, tp, tn = rg[s] * r, (rp[s] + gp) * r, (rn[s] + gn) * r
+                # ⭐⭐ THE gDNA SCALE (the scalar twin of the combine's `r_g` — see the derivation above the
+                # relay). ``_lend``: may this source lend a COMPOSITION? Two conditions, and they are
+                # different questions about the same step:
+                #   * SUPPLY — did the source state both components of the pair from its OWN crossing
+                #     population? "Supplied" is a statement about PRECISION, not about a density's value.
+                #   * POPULATION — is the source measuring the same RNA population as the destination?
+                #     `_pop` is that test for this step (derived where `_pop_l_a` is built).
+                # Where either fails, the gDNA LEVEL crosses UNSCALED and the mass pin is off.
+                _lend = pop[i] and pg[s] > 0.0 and (pp[s] + pn[s]) > 0.0
+                r_g = r if _lend else 1.0
+                tg, tp, tn = rg[s] * r_g, (rp[s] + gp) * r, (rn[s] + gn) * r
                 tpg, tpp, tpn = (
                     _damp(pg[s], s2t),
                     _damp(pp[s], s2t),
@@ -930,29 +1014,55 @@ def node_sweep(
                     tp, tpp, tmp = 0.0, 0.0, 0.0
                 if not fn_l[i]:
                     tn, tpn, tmn = 0.0, 0.0, 0.0
-                # ── ANCHOR THE CONTEXT TO THIS NODE'S OBSERVED MASS (the scalar twin of `_pin_v`) ───────────
+                # ── PIN THE CONTEXT TO THIS SLOT'S OBSERVED MASS — WHERE NO BELIEF ENTERS THE BUDGET ──────────
                 # `Σ_c ρ_c·E_c = M` is an IDENTITY under the imputation premise, not an approximation: a matched
                 # reframe delivers ρ_c^msg = a_c·ρ_tot(dst) = ρ_c^dst,true, so the components account for exactly
-                # the fragments the node observed. Its violation therefore MEASURES the premise error — against a
-                # hard observable, with no prior. Enforcing it here is what `_pin_v`'s own docstring already
-                # prescribes ("applied at EVERY node rather than only at the final combine"); until now the relay
-                # ran unanchored and the residual COMPOUNDED — a multiplicative random walk reaching
-                # `Σ_c ρ_c E_c / M` p99 = 31–288× and max 519× (52–71 % of nodes over 1).
-                # Note what this does NOT do: one hop's violation from composition error alone is bounded by the
-                # eff-length ratio (k = [Σ a_c^dst E_c]/[Σ a_c^src E_c] ⇒ ×1.04 on a contained region, ×1.50 at a
-                # boundary crossing), and plain reframes measure exactly that (median ×1.05–1.11). The heavy tail
-                # is the ROUTING: graft p90 ×11.6–84.4, peel median ×1.31–1.58 — they add/subtract an ABSOLUTE
-                # measured density into a RELATIVE claim. So this is an anti-drift anchor, not a composition test.
-                # The `_pin_v` semantics are load-bearing: a component the context does not supply is filled from
-                # the node's OWN density, so a PARTIAL claim stays partial. Rescaling all three blindly instead
-                # regresses capture-OFF 3.6× (derivation: `scratchpad/derive_2_relay_pin.py`).
-                _sg = tg if tpg > 0.0 else og_l[i]
-                _sp = tp if tpp > 0.0 else op_l[i]
-                _sn = tn if tpn > 0.0 else on_l[i]
-                _sv = _sg * E_g_l[i] + (_sp + _sn) * E_r_l[i]
-                if _sv > _EPS and M_l[i] > _EPS:
-                    _k = M_l[i] / _sv
-                    tg, tp, tn = tg * _k, tp * _k, tn * _k
+                # the fragments the slot observed. The pin restores it with a common factor `k = M/S`, and the
+                # budget `S` fills every component the context does NOT supply from the destination's own
+                # density — which is what keeps a partial claim partial, and also what can make the delivered
+                # value a function of the destination's own BELIEF. `TRAPS.md` D4 permits a message to use the
+                # destination's CONSTANTS and its OBSERVATIONS, never its beliefs. So the pin is licensed in
+                # exactly the two states where no belief reaches `S`:
+                #
+                #   (i)  `_lend` — the context SUPPLIED the composition, so the premise is granted and the
+                #        identity is implied. This is the reframe's own predicate: one licence, one place.
+                #   (ii) `g1_l[i]` — the destination is a structurally pure-gDNA object, so there is no
+                #        unsupplied component to fill in. `f_g = 1` there is STRUCTURE, not a belief, and
+                #        `S = ρ_g·E_g` makes `k = (M/E_g)/L_in`: the pin hands the object its OWN MEASURED
+                #        density. ⭐ That is the operator the capture landscape travels on — an
+                #        `intergenic|exon` EDGE measures the gDNA density at its own capture stratum, and the
+                #        exon behind it has no other way to hear it (a per-capture-class landscape ratio built
+                #        to do the same job explicitly measured inert; `node_geometry`'s deleted-landscape note).
+                #        ⚠ Gated on `g1_locked`, which spans BOTH axes, and NOT on `node_init`'s node-only
+                #        `struct_lock` — the object in question is an EDGE. `g1_locked`'s docstring separates the
+                #        two questions; this one is about the destination's own certainty.
+                #
+                # ⛔ ANYWHERE ELSE IT WAS D4 AT FULL STRENGTH. The closed form is `k = 1/(φ_msg + R_own)`, a
+                # saturating map whose fixed point is `(1−R_own)·ρ_tot` with `R_own` the RNA share of the
+                # destination's OWN self-solve — EXACTLY ½ at a slot with no composition evidence. So it drove
+                # the delivered gDNA FRACTION to ½ regardless of the truth and regardless of what the source
+                # measured. Measured on `toy_harness.py --spec nested_exons` (uniform gDNA field, no intron, five
+                # evidence-free exons): the delivered level rose 0.071 → 0.102 → 0.097 → 0.162 → 0.192 → 0.215
+                # with step distance from the gene ends, 2.8× the truth at the deepest slot, and the gene's
+                # mass-weighted |Δf_g| was 0.2618 against 0.0760 licensed. ⚠ It hid because the running product
+                # of the rescales TELESCOPES back to 1 at the far end of a gene, so no aggregate, endpoint or
+                # conservation check could see it.
+                # ⛔ AND IT IS NOT A DELETION: unanchored, the relay's residual compounded to `Σ_c ρ_c E_c / M`
+                # p99 = 31–288× and max 519×, and rescaling all three components blindly instead regressed
+                # capture-OFF 3.6×. Case (ii) is not a caveat on case (i) either — dropping it delivers the
+                # OFF-PROBE floor to every exon under capture (fires `test_gdna_scale_rule`'s capture gate at
+                # 20× and 200×, measured).
+                # ⚠ THE COMBINE NEEDS NO MIRROR OF THIS, and the DO-NOT-MERGE note above should not send the
+                # next reader looking for one: `_transport` leaves the delivered `tg/tp/tn` exactly as measured
+                # and uses `_pin_v` only to build the comparison frame for the DL mismatch test.
+                if _lend or g1_l[i]:
+                    _sg = tg if tpg > 0.0 else og_l[i]
+                    _sp = tp if tpp > 0.0 else op_l[i]
+                    _sn = tn if tpn > 0.0 else on_l[i]
+                    _sv = _sg * E_g_l[i] + (_sp + _sn) * E_r_l[i]
+                    if _sv > _EPS and M_l[i] > _EPS:
+                        _k = M_l[i] / _sv
+                        tg, tp, tn = tg * _k, tp * _k, tn * _k
                 rg[i], pg[i] = _fuse(og_l[i], pg_own_l[i], tg, tpg)
                 rp[i], pp[i] = _fuse(op_l[i], pp_own_l[i], tp, tpp)
                 rn[i], pn[i] = _fuse(on_l[i], pn_own_l[i], tn, tpn)
@@ -1029,14 +1139,15 @@ def node_sweep(
         vgp_l, vgn_l = vgp_prem.tolist(), vgn_prem.tolist()
         left_l, right_l = left.tolist(), right.tolist()
         rho0_l = rho0.tolist()
-        fwd = _relay(order_list, left_l, rho0_l)
-        bwd = _relay(order_list[::-1], right_l, rho0_l)
+        _pop_l_l, _pop_r_l = _pop_l_a.tolist(), _pop_r_a.tolist()
+        fwd = _relay(order_list, left_l, rho0_l, _pop_l_l)
+        bwd = _relay(order_list[::-1], right_l, rho0_l, _pop_r_l)
         # ── the COMBINE: transport α (from left neighbour) + β (from right neighbour) into the node's frame with
         # the LAZY ρ_tot (two-iteration — the 2nd uses the both-message composition), fuse, ÷M_dst → the ψ solve.
         li, ri, vl, vr, sl, sr = _li_a, _ri_a, _vl_a, _vr_a, _sl_a, _sr_a
 
         # The VECTORISED twin of `_relay` — see the DO-NOT-MERGE note there, which applies to both.
-        def _transport(src, valid, fwd_arrs, rho):
+        def _transport(src, valid, fwd_arrs, rho, pop):
             rg, rp, rn, pg, pp, pn, mg, mp, mn, tau = fwd_arrs
             # A slot with no frame (no mass ⇒ no ρ_tot, §5) cannot reframe: the message passes through at
             # r=1. Falling back to ``rho_src = 1.0`` instead made r the destination's ABSOLUTE density (10³
@@ -1048,6 +1159,31 @@ def node_sweep(
             graft = ex_a & is_bnd_a[src] & valid
             gp = np.where(graft, spl_p[src], 0.0)
             gn = np.where(graft, spl_n[src], 0.0)
+            # ⭐⭐ THE gDNA SCALE — see the derivation above the relay, and the relay's own twin. ``lend``
+            # asks two things of the step: the λ-emission gate's predicate of the SOURCE — it may lend a
+            # composition only if it SUPPLIED both components of the pair — and, of the PAIR, whether the
+            # two objects measure the same RNA POPULATION (``pop``; derived where ``_pop_l_a`` is built, and
+            # a property of the (EDGE, side) pair rather than of either object). Where either fails, the
+            # reframe is a false premise and the gDNA LEVEL crosses UNSCALED — gDNA is uniform before
+            # capture, and capture is carried by the pure-gDNA objects' own measurements, not by a scale.
+            #
+            # ⚠ **A GRAFT edge does NOT license it, and that is a deliberate divergence from the λ gate**,
+            # which counts the grafted junction precision as RNA supplied. `TRAPS.md` F9: mature RNA does
+            # not cross an intron↔exon EDGE contiguously, so that EDGE's OWN spanning population is
+            # gDNA + nascent and the junction flux is a measurement of RNA that lives in the DESTINATION —
+            # the routing operator that exists precisely because that component cannot cross by imputation.
+            # Using it to license the imputation would be circular. λ is a claim about the pair; the
+            # reframe is a claim about the source's own crowding. ⚠ M5's graft-zero rests on the premise
+            # this denies; it is a VARIANCE, separately measured and landed, and is left alone.
+            #
+            # ⚠ **The gDNA conjunct is INERT in practice and is kept for faithfulness, not for effect** —
+            # recorded because a perturbation dropping it fires no gate, and that is a fact about the
+            # solver rather than a hole. ``pg[src] == 0`` with RNA precision live requires the source's own
+            # gDNA density to be 0, and then ``rg[src]·r_g`` is 0 whatever the scale; and on any chain with
+            # a structural gDNA anchor (every real one) the relay propagates gDNA precision to every slot,
+            # so the state does not arise. It stays because the predicate is a statement about the PAIR.
+            lend = pop & (pg[src] > 0.0) & ((pp[src] + pn[src]) > 0.0)
+            r_g = np.where(lend, r, np.where(valid, 1.0, 0.0))
             # ⛔ THE SHARE TRANSFER WAS IMPLEMENTED HERE AND REVERTED, 2026-07-27.
             # It delivers the source's own composition share carried onto the destination's scale —
             # `f̂_c = ctx_c·E_c[src]/S_src`, then `t_c = f̂_c·M/E_c` — which is BP-clean, keeps a partial
@@ -1061,7 +1197,7 @@ def node_sweep(
             # intron at verystrong) — so discarding `r` in favour of a mass ratio throws away the
             # enrichment information the reframe carries. `r` only *looked* inert while `_pin_v` was
             # cancelling it; once the pin no longer rewrites the delivered density, `r` is load-bearing.
-            tg, tp, tn = rg[src] * r, (rp[src] + gp) * r, (rn[src] + gn) * r
+            tg, tp, tn = rg[src] * r_g, (rp[src] + gp) * r, (rn[src] + gn) * r
             # σ²_transfer = Var(log r) (M5, the tested pure law): 0 on the matched-set graft (r common-mode ⇒
             # cancels — a double-count otherwise), Var(log r) = logvar_tot[dst]+logvar_tot[src] elsewhere (peel /
             # plain reframe / partial-anchor — r load-bearing). This is the SCALE half of the cliff cost; the
@@ -1132,6 +1268,11 @@ def node_sweep(
                     {
                         "src": np.asarray(src).copy(),
                         "valid": np.asarray(valid).copy(),
+                        # the gDNA scale rule, per hop: the composition-imputation licence and the two
+                        # scales, so an instrument can read the rule off a real run rather than infer it.
+                        "lend": np.asarray(lend).copy(),
+                        "r": r.copy(),
+                        "r_g": r_g.copy(),
                         "tg": tg.copy(),
                         "tp": tp.copy(),
                         "tn": tn.copy(),
@@ -1218,8 +1359,8 @@ def node_sweep(
             pin_g, pin_p, pin_n = _pin_v(tg, tp, tn, tpg, tpp, tpn)
             # ── the COMPOSITION half of the cliff cost: the DL mismatch deflation, in the PINNED frame.
             # Both sides then account for the same total, so the common scale (the reframe residual) is gone
-            # from G and only the share drift is left. Every stream is deflated — the anchor recovers only
-            # when the composition τ-stream is damped alongside the measurement one (HANDOFF_4 §6).
+            # from G and only the share drift is left. Every stream is deflated — measured: the pin recovers
+            # only when the composition τ-stream is damped alongside the measurement one.
             # ── THE λ-EMISSION GATE (structural, and PRIOR to any damping question) ────────────────────────
             # A composition message is a claim about the SPLIT, ``λ = log(f_g/f_R)``. A source that carries only
             # ONE component has no such claim to make — λ is not "large" for it, it is UNDEFINED. The canonical
@@ -1309,8 +1450,12 @@ def node_sweep(
         # ONE ρ-iteration (see the note at the top of the module), so this is straight-line: the frame
         # `rho0` is already built above, and there is no next iteration to feed. ⭐ The two calls now
         # differ ONLY in which neighbour they read — the face arguments dissolved with the faces.
-        ag, ap, an, apg, app, apn, amg, amp, amn, atau, alam, ath = _transport(sl, vl, fwd, rho0)
-        bg, bp, bn, bpg, bpp, bpn, bmg, bmp, bmn, btau, blam, bth = _transport(sr, vr, bwd, rho0)
+        ag, ap, an, apg, app, apn, amg, amp, amn, atau, alam, ath = _transport(
+            sl, vl, fwd, rho0, _pop_l_a
+        )
+        bg, bp, bn, bpg, bpp, bpn, bmg, bmp, bmn, btau, blam, bth = _transport(
+            sr, vr, bwd, rho0, _pop_r_a
+        )
         cg, cpg = _fuse_v(ag, apg, bg, bpg)  # density MODE (full precision-weighted)
         cp, cpp = _fuse_v(ap, app, bp, bpp)
         cn, cpn = _fuse_v(an, apn, bn, bpn)

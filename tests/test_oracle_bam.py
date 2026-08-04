@@ -232,6 +232,7 @@ class TestWholeGenomeOracleBamOrientation:
                 error_rate=0.0,
             ),
             GDNASimConfig(frag_mean=120, frag_std=1, frag_min=120, frag_max=120),
+            genomic_refs=[genome.name],
             strand_specificity=0.5,
             seed=19,
         )

@@ -272,6 +272,8 @@ def main() -> int:
     suite = args.suite or args.pilot.parent
 
     from rigel.calibration.fl import build_fl_models
+    from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
+    from rigel.calibration.junction_opportunity import crossing_probability_from_index
     from rigel.calibration.splice_graph import (
         build_junction_edge_arrays,
         build_node_partition_arrays,
@@ -281,6 +283,10 @@ def main() -> int:
     from rigel.second_pass import score_held_fragments
 
     index = TranscriptIndex.load(str(args.index))
+    # ⚠ The scorer reads the DE-TILTED RNA pool in production; omitting the divisor here would score
+    # the held fragments against a different length model than the one that actually decides them.
+    crossing = crossing_probability_from_index(index, 4096)
+    gdna_opp = gdna_opportunity_from_index(index, 4096)
     _, _, node_types = build_node_partition_arrays(index)
     junctions = build_junction_edge_arrays(index)
     t_ids = index.t_df["t_id"].to_numpy()
@@ -292,7 +298,9 @@ def main() -> int:
         payload = cache.payload
         scored = score_held_fragments(
             payload,
-            fl_models=build_fl_models(payload),
+            fl_models=build_fl_models(
+                payload, junction_opportunity=crossing, gdna_opportunity=gdna_opp
+            ),
             # ⭐ Pass 1's own strand model, not calibration's — the second pass runs BEFORE calibration
             # and `rna_sense_frac` is the Beta posterior mean of exactly this.
             rna_sense_frac=cache.strand_model.p_r1_sense,

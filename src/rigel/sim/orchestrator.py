@@ -19,7 +19,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from itertools import product
 from pathlib import Path
 
@@ -32,7 +32,88 @@ from .whole_genome import (
     write_truth_abundances,
 )
 
-__all__ = ["stable_seed", "capture_paired_condition_seed", "run_condition_grid"]
+__all__ = [
+    "stable_seed",
+    "capture_paired_condition_seed",
+    "run_condition_grid",
+    "ConditionDepths",
+    "resolve_depths",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class ConditionDepths:
+    """How one condition's fragment budget splits. ``n_mrna``/``n_nrna`` are ``None`` in file mode,
+    where the RNA pool is a single population with no explicit mature/nascent split."""
+
+    n_mrna: int | None
+    n_nrna: int | None
+    n_rna: int
+    n_gdna: int
+
+    @property
+    def total(self) -> int:
+        return self.n_rna + self.n_gdna
+
+
+def resolve_depths(sim, *, gdna_rate: float, nrna_ratio, nrna_mode: str) -> ConditionDepths:
+    """Split one condition's fragment budget between RNA and gDNA.
+
+    ⭐ **TWO MODES, AND THE SECOND ONE EXISTS BECAUSE THE FIRST CANNOT REACH THE HIGH-gDNA END.**
+
+    * ``n_total_fragments is None`` (the default, and every pre-existing config) — the legacy
+      behaviour, unchanged: the RNA depth is fixed and gDNA is added ON TOP at ``rate x n_rna``. A
+      ``rate`` of 1.0 is therefore a 50 % gDNA library at *twice* the depth of a ``rate`` of 0.
+    * ``n_total_fragments`` set — the TOTAL is fixed and ``rate`` decides only the SPLIT:
+      ``n_rna = total/(1+rate)``, ``n_gdna = total − n_rna``.
+
+    ⛔ The second mode is not a convenience. Under the first, a 98 % gDNA library is ``rate = 49``,
+    i.e. 490 M fragments against a 10 M RNA depth — unsimulatable. It is also the more faithful model:
+    a sequencing run has a fixed budget and the contamination fraction decides how it is *split*, not
+    how much extra is generated. ⚠ The accepted trade-off (owner, 2026-08-03) is that the RNA side
+    thins as gDNA rises, so per-transcript abundance accuracy degrades at the top of the ladder — that
+    is a property of such libraries, not an artifact.
+
+    ⚠ **Nascent comes OUT of the RNA share, never on top**, so the total holds across the nascent axis
+    too; otherwise turning nascent on would silently change the depth and confound every comparison.
+
+    Gates: ``tests/test_sim_fixed_total_depth.py``.
+    """
+    total = getattr(sim, "n_total_fragments", None)
+    ratio = float(nrna_ratio or 0.0)
+    split = nrna_mode in {"additive_ratio", "random_fraction"}
+
+    if total is None:
+        # ── legacy: RNA depth fixed, gDNA added on top ────────────────────────────────────────
+        if split:
+            n_mrna = int(sim.n_rna_fragments)
+            n_nrna = round(n_mrna * ratio)
+            return ConditionDepths(n_mrna, n_nrna, n_mrna + n_nrna, round(gdna_rate * n_mrna))
+        n_rna = int(sim.n_rna_fragments)
+        return ConditionDepths(None, None, n_rna, round(gdna_rate * n_rna))
+
+    # ── fixed total: `rate` decides the split only ────────────────────────────────────────────
+    total = int(total)
+    n_rna = round(total / (1.0 + float(gdna_rate)))
+    # ⭐ gDNA is the REMAINDER, so the total is conserved by construction rather than by luck.
+    # ⚠ Two plausible-sounding claims about WHY were both written here and both measured FALSE:
+    # ``round(T−x)`` and ``round(rate·n_rna)`` each conserve the total at every rung of the panel
+    # ladder, so neither is what this guards against. What actually breaks conservation is computing
+    # the two shares INDEPENDENTLY WITH TRUNCATION (``int()`` on both), which drifts −1 at four of the
+    # nine rungs. That is the perturbation the gate uses, and it is the only one of the three that
+    # fires — a reminder that "obviously safer" arithmetic deserves a measurement like anything else.
+    n_gdna = total - n_rna
+    if n_rna <= 0:
+        raise ValueError(
+            f"n_total_fragments={total} at gdna_rate={gdna_rate} leaves {n_rna} RNA fragments. "
+            "A condition with no RNA is not an RNA-seq library; raise the total or lower the rate."
+        )
+    if not split:
+        return ConditionDepths(None, None, n_rna, n_gdna)
+    # ⚠ mature is the REMAINDER so mature + nascent == the RNA share exactly, for the same reason
+    # gDNA is a remainder above.
+    n_nrna = round(n_rna * ratio / (1.0 + ratio))
+    return ConditionDepths(n_rna - n_nrna, n_nrna, n_rna, n_gdna)
 
 
 def stable_seed(base_seed: int, *parts: object) -> int:
@@ -68,6 +149,7 @@ def run_condition_grid(
     sim,
     gdna,
     nrna,
+    genomic_refs: list[str],
     gdna_pairs: list[tuple[str, float]],
     gdna_od_pairs: list[tuple[str, float]],
     strand_specificities: list[float],
@@ -139,15 +221,11 @@ def run_condition_grid(
                         continue
                     cond_num += 1
 
-                    if nrna_mode in {"additive_ratio", "random_fraction"}:
-                        n_mrna: int | None = sim.n_rna_fragments
-                        n_nrna: int | None = round(n_mrna * float(nrna_ratio or 0.0))
-                        n_rna = n_mrna + n_nrna
-                        n_gdna = round(gdna_rate * n_mrna)
-                    else:  # file mode: a single RNA pool, no explicit mRNA/nRNA split
-                        n_mrna = n_nrna = None
-                        n_rna = sim.n_rna_fragments
-                        n_gdna = round(gdna_rate * n_rna)
+                    depths = resolve_depths(
+                        sim, gdna_rate=gdna_rate, nrna_ratio=nrna_ratio, nrna_mode=nrna_mode
+                    )
+                    n_mrna, n_nrna = depths.n_mrna, depths.n_nrna
+                    n_rna, n_gdna = depths.n_rna, depths.n_gdna
 
                     condition_seed = capture_paired_condition_seed(
                         base_seed, gdna_label, strand_spec, nrna_label
@@ -217,6 +295,7 @@ def run_condition_grid(
                             cond_transcripts,
                             cond_sim,
                             replace(gdna, strand_overdispersion=gdna_od),
+                            genomic_refs=genomic_refs,
                             strand_specificity=strand_spec,
                             capture_config=capture_scenario.config,
                         )

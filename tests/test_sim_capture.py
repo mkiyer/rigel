@@ -313,6 +313,7 @@ def test_whole_genome_simulator_uses_capture_partition_for_assignment(tmp_path):
             read_length=50,
         ),
         GDNASimConfig(),
+        genomic_refs=[genome.name],
         capture_config=CaptureConfig(probes=str(probes), binding_per_base=10.0),
     )
     try:

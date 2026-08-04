@@ -489,12 +489,21 @@ def calibration_inputs(cache: ScanCache, index: "TranscriptIndex") -> dict:
     ⭐ **Every fragment-length histogram comes from the PAYLOAD** — the two pure pools *and*, since
     C2.1, the unconditional anchor they are shrunk toward. One quantity, one source, one frame: the
     scanner's spliced histogram is transcript-space and requires a UNIQUE transcript, while the
-    accumulator's `RNA_SPLICED` pool is a structural rule over a larger population and already
-    excludes `sj_implicit` fragments; and the anchor is `deposited_lengths`, binned at the same `L`.
+    accumulator's `RNA_SPLICED` pool is a structural rule over a larger population; and the anchor is
+    `deposited_lengths`, binned at the same `L`.
+
+    ⭐ The one thing that does NOT come from the payload is the RNA pool's de-tilt: "used an annotated
+    junction" is a length-dependent selection, and how much so is a fact about the ANNOTATION.
     """
     from .calibration.fl import build_fl_models
+    from .calibration.gdna_opportunity import gdna_opportunity_from_index
+    from .calibration.junction_opportunity import crossing_probability_from_index
 
-    fl_models = build_fl_models(cache.payload)
+    fl_models = build_fl_models(
+        cache.payload,
+        junction_opportunity=crossing_probability_from_index(index, int(cache.payload.max_length)),
+        gdna_opportunity=gdna_opportunity_from_index(index, int(cache.payload.max_length)),
+    )
     return {
         "payload": cache.payload,
         "strand_model": cache.strand_model,

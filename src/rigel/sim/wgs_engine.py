@@ -16,6 +16,7 @@ import multiprocessing
 import shutil
 from collections import defaultdict
 from pathlib import Path
+from typing import Callable, Sequence
 
 import numpy as np
 import pysam
@@ -231,6 +232,7 @@ class WholeGenomeSimulator:
         sim_params: SimulationParams,
         gdna_config: GDNASimConfig,
         *,
+        genomic_refs: Sequence[str],
         strand_specificity: float = 1.0,
         seed: int | None = None,
         capture_config: CaptureConfig | None = None,
@@ -289,14 +291,29 @@ class WholeGenomeSimulator:
         max_mrna = int(self._t_lengths.max()) if N > 0 else 0
         self._frag_max = min(sim_params.frag_max, max_mrna) if max_mrna > 0 else sim_params.frag_max
 
-        # gDNA setup: annotated references weighted by length
-        annotated_refs = {t.ref for t in transcripts}
-        self._gdna_refs: list[str] = []
-        self._gdna_ref_lengths: list[int] = []
-        for ref in self.fasta.references:
-            if ref in annotated_refs:
-                self._gdna_refs.append(ref)
-                self._gdna_ref_lengths.append(self.fasta.get_reference_length(ref))
+        # ⭐ gDNA setup: the GENOMIC references, stated by the caller, weighted by length.
+        # ⛔ This used to be `annotated_refs = {t.ref for t in transcripts}` — "has an annotation"
+        # standing in for "is genomic", and it is not one. An RNA-only spike-in reference carries a
+        # transcript, so it qualified, and the panel filled with gDNA molecules on templates where no
+        # genomic DNA exists. Every reference is genomic or RNA-only and the classification is an
+        # INPUT: `tests/test_sim_genomic_refs.py` pins that, with a fixture whose RNA-only reference
+        # is annotated precisely so the old proxy cannot pass it.
+        unknown = sorted(set(genomic_refs) - set(self.fasta.references))
+        if unknown:
+            raise ValueError(
+                f"genomic_refs not in the reference FASTA: {unknown}. "
+                "A mis-named genomic reference must fail loudly, not silently emit no gDNA."
+            )
+        wanted = set(genomic_refs)
+        #: The references gDNA is drawn from, in FASTA order — so reference ids stay a subsequence
+        #: of the production ordering rather than a reshuffle.
+        self.genomic_refs: tuple[str, ...] = tuple(
+            ref for ref in self.fasta.references if ref in wanted
+        )
+        self._gdna_refs: list[str] = list(self.genomic_refs)
+        self._gdna_ref_lengths: list[int] = [
+            self.fasta.get_reference_length(ref) for ref in self._gdna_refs
+        ]
 
         # Pre-load gDNA chromosomes into cache (major perf win)
         if self._gdna_refs:
@@ -439,6 +456,66 @@ class WholeGenomeSimulator:
             seqs[mask] = bases[self._rng.integers(4, size=n_errors)]
         return seqs
 
+    # -- Post-capture length marginal ---------------------------------------
+
+    def _post_capture_length_allocation(
+        self,
+        drawn_lengths: np.ndarray,
+        weights_at: Callable[[int], np.ndarray],
+        rng: np.random.Generator,
+    ) -> tuple[np.ndarray, list[np.ndarray], np.ndarray]:
+        """Re-allocate a pre-capture length draw in proportion to capture-weighted opportunity.
+
+        ⭐⭐ **THE ONE PLACE `f_post(w) = f_pre(w) . total_eff(w) / Z` IS WRITTEN**, shared by the
+        mature, nascent and gDNA pools so the three cannot drift apart.
+
+        ⛔ **The defect this replaces.** Each pool drew its length marginal FIRST, capture-blind, then
+        computed the capture-aware per-template opportunity ``weights_at(w)`` and threw its TOTAL away
+        by normalising within each length. Capture could then move only *where* a fragment landed,
+        never *whether* its length survived, and the simulated post-capture fragment-length
+        distribution came out byte-identical to the pre-capture one on every condition. Hybrid capture
+        hybridises probes to sequence: a short fragment presents less sequence, binds worse, and is
+        captured less efficiently — so capture SELECTS FOR LENGTH, and that selection lives entirely in
+        the term that was being divided out.
+
+        ⭐ **No new constant.** ``total_eff(w)`` is already computed by machinery that already exists:
+        ``CaptureSampler.fragment_weight`` is ``off_target_weight + binding_per_base * overlap``, and
+        ``overlap`` rises with fragment length until it saturates at the probe length. That is the
+        physics, already parameterised by ``CaptureConfig``.
+
+        ⚠ **It reweights off capture too, and that is also a correction.** With no probes,
+        ``total_eff(w) = off_target_weight * sum_k a_k (L_k - w + 1)+`` — the ordinary effective
+        length. A library CAN'T yield more fragments of a length than its templates have placements
+        for it, and the old code let it. On a whole chromosome the term is flat to 1 part in 10^5, so
+        the gDNA pool barely moves off capture; on transcripts of a few kb it is a real tilt.
+
+        ⚠ **Two-stage, not analytic, on purpose.** ``f_pre`` stays defined by exactly one thing — the
+        shared sampler in :mod:`sampling` — and its empirical draw is reweighted, rather than a second
+        analytic copy of the truncated normal being written here for the marginal to disagree with
+        later. The cost is a ratio estimator's O(1/n) bias, which at the pilot's 5 M fragments over
+        ~800 lengths is a relative 1e-7, and a sqrt(2) inflation of the realised mean's Monte-Carlo
+        sd: 0.063 bp instead of 0.045 bp.
+
+        Returns ``(widths, weights_per_width, counts_per_width)`` — the ascending distinct lengths,
+        each one's unnormalised per-template weight vector, and how many fragments it now carries.
+        The total is preserved exactly: ``counts.sum() == len(drawn_lengths)``.
+        """
+        widths, drawn_counts = np.unique(drawn_lengths, return_counts=True)
+        weights = [weights_at(int(width)) for width in widths]
+        totals = np.array([float(vector.sum()) for vector in weights])
+        posterior = drawn_counts * totals
+        total = float(posterior.sum())
+        if total <= 0.0:
+            return widths, weights, np.zeros(len(widths), dtype=np.int64)
+        counts = rng.multinomial(int(drawn_counts.sum()), posterior / total)
+        logger.debug(
+            "post-capture length marginal: mean %.2f -> %.2f over %d lengths",
+            float(np.average(widths, weights=drawn_counts)),
+            float(np.average(widths, weights=counts)) if counts.sum() else float("nan"),
+            len(widths),
+        )
+        return widths, weights, counts
+
     # -- Fragment count accumulation ----------------------------------------
 
     def _accumulate_pool(
@@ -458,7 +535,6 @@ class WholeGenomeSimulator:
 
         rng = self._rng
         frag_lengths = self._sample_rna_frag_lengths(n_frags)
-        unique_lengths, length_counts = np.unique(frag_lengths, return_counts=True)
 
         counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
 
@@ -470,14 +546,26 @@ class WholeGenomeSimulator:
         # therefore the `rng.choice` draw are bit-identical to computing every row. This is a speed
         # change, not a behaviour change, and `tests/test_sim_capture_partition.py` pins that.
         live = np.flatnonzero(abundances > 0)
+        live_keys = live.tolist()
         live_lengths = lengths[live]
 
-        for fl, fc in zip(unique_lengths, length_counts):
-            fl, fc = int(fl), int(fc)
+        def weights_at(width: int) -> np.ndarray:
             eff = np.zeros(len(abundances), dtype=np.float64)
             if live.size:
-                eff[live] = self.capture.partition_array(space, live.tolist(), live_lengths, fl)
-            weights = abundances * eff
+                eff[live] = self.capture.partition_array(space, live_keys, live_lengths, width)
+            return abundances * eff
+
+        # ⭐ The length marginal is the pre-capture draw reweighted by capture-weighted opportunity;
+        # `weights_at(w)` is then the conditional over templates AT that length. See
+        # `_post_capture_length_allocation` for why the total must not be normalised away.
+        widths, weights_per_width, counts_per_width = self._post_capture_length_allocation(
+            frag_lengths, weights_at, rng
+        )
+
+        for width, weights, fc in zip(widths, weights_per_width, counts_per_width):
+            fl, fc = int(width), int(fc)
+            if fc <= 0:
+                continue
             total_w = weights.sum()
             if total_w <= 0:
                 continue
@@ -547,22 +635,28 @@ class WholeGenomeSimulator:
         rng = self._rng
 
         frag_lengths = self._sample_rna_frag_lengths(n_rna)
-        unique_lengths, length_counts = np.unique(frag_lengths, return_counts=True)
 
         mrna_counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
         nrna_counts: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
 
-        for fl, fc in zip(unique_lengths, length_counts):
-            fl, fc = int(fl), int(fc)
-
-            mrna_eff = self.capture.partition_array("mrna", range(N), self._t_lengths, fl)
-            nrna_eff = self.capture.partition_array("nrna", range(N), self._premrna_lengths, fl)
-            weights = np.concatenate(
+        def weights_at(width: int) -> np.ndarray:
+            mrna_eff = self.capture.partition_array("mrna", range(N), self._t_lengths, width)
+            nrna_eff = self.capture.partition_array("nrna", range(N), self._premrna_lengths, width)
+            return np.concatenate(
                 [
                     self._mrna_abund * mrna_eff,
                     self._nrna_abund * nrna_eff,
                 ]
             )
+
+        widths, weights_per_width, counts_per_width = self._post_capture_length_allocation(
+            frag_lengths, weights_at, rng
+        )
+
+        for width, weights, fc in zip(widths, weights_per_width, counts_per_width):
+            fl, fc = int(width), int(fc)
+            if fc <= 0:
+                continue
             total_w = weights.sum()
             if total_w <= 0:
                 continue
@@ -870,26 +964,46 @@ class WholeGenomeSimulator:
 
         Returns dict[(ref_idx, frag_len)] = count.
         """
-        if n_gdna == 0 or not self._gdna_refs:
+        if n_gdna == 0:
             return {}
+        if not self._gdna_refs:
+            # ⛔ Writing zero of a requested five million fragments is trap 20's failure mode: the
+            # run completes, the truth files agree with themselves, and the deficit is invisible.
+            raise ValueError(
+                f"{n_gdna} gDNA fragments requested but no genomic reference was declared "
+                "(genomic_refs is empty)"
+            )
 
         rng = self._rng
         frag_lengths = self._sample_gdna_frag_lengths(n_gdna)
-        unique_lengths, length_counts = np.unique(frag_lengths, return_counts=True)
         counts: dict[tuple[int, int], int] = {}
         # ⭐ One batched call per fragment length, not one scalar call per (chromosome, length).
         # Profiled: this comprehension was 49,662 `partition` calls driving 6,476,550
         # `_local_overlap_weights` calls and 110.6 s, because every call re-integrates the capture
         # landscape of a WHOLE chromosome. Batched, the 93 references share one pass.
         ref_lengths = np.asarray(self._gdna_ref_lengths, dtype=np.int64)
-        for fl, fc in zip(unique_lengths, length_counts):
-            fl, fc = int(fl), int(fc)
-            chrom_eff = self.capture.partition_array("gdna", list(self._gdna_refs), ref_lengths, fl)
+        gdna_refs = list(self._gdna_refs)
+
+        def weights_at(width: int) -> np.ndarray:
+            return self.capture.partition_array("gdna", gdna_refs, ref_lengths, width)
+
+        # ⭐ The per-chromosome conditional was always right; the length MARGINAL is what was thrown
+        # away. Off capture this term is flat to 1 part in 10^5 on a whole chromosome — which is why
+        # correcting it moves the gDNA pool essentially not at all off capture, and a great deal
+        # under it. See `_post_capture_length_allocation`.
+        widths, weights_per_width, counts_per_width = self._post_capture_length_allocation(
+            frag_lengths, weights_at, rng
+        )
+
+        for width, chrom_eff, fc in zip(widths, weights_per_width, counts_per_width):
+            fl, fc = int(width), int(fc)
+            if fc <= 0:
+                continue
             total_eff = chrom_eff.sum()
             if total_eff <= 0:
                 continue
             chrom_probs = chrom_eff / total_eff
-            chrom_indices = rng.choice(len(self._gdna_refs), size=fc, p=chrom_probs)
+            chrom_indices = rng.choice(len(gdna_refs), size=fc, p=chrom_probs)
             unique_chroms, chrom_counts = np.unique(chrom_indices, return_counts=True)
             for ci, cc in zip(unique_chroms, chrom_counts):
                 counts[(int(ci), fl)] = int(cc)

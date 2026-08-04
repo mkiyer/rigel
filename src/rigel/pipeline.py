@@ -380,6 +380,8 @@ def _drain_side_buffer(payload, index: TranscriptIndex, strand_models, *, seed: 
     shorter — that is, the more-spliced — path, and that loop can run away.
     """
     from .calibration.fl import build_fl_models
+    from .calibration.gdna_opportunity import gdna_opportunity_from_index
+    from .calibration.junction_opportunity import crossing_probability_from_index
     from .calibration.splice_graph import build_junction_edge_arrays, build_node_partition_arrays
     from .second_pass import choose_hypotheses, drain, score_held_fragments
 
@@ -395,7 +397,15 @@ def _drain_side_buffer(payload, index: TranscriptIndex, strand_models, *, seed: 
     junctions = build_junction_edge_arrays(index)
     scores = score_held_fragments(
         payload,
-        fl_models=build_fl_models(payload),
+        # ⭐ The SAME de-tilted RNA pool the calibrator will read. The scorer weighs a candidate
+        # length by `f(L)`, so handing it the tilted pool would make it prefer the longer hypothesis
+        # for the same reason the pool is long in the first place — one definition of the RNA length
+        # distribution, or the second pass and the calibration disagree about the library.
+        fl_models=build_fl_models(
+            payload,
+            junction_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
+            gdna_opportunity=gdna_opportunity_from_index(index, int(payload.max_length)),
+        ),
         # ⚠ `P(align_strand agrees | RNA)`, and on an R1-antisense (dUTP) library — which real cfRNA is —
         # this is ≈ 0.01, so DISAGREEMENT is the likely case.
         rna_sense_frac=strand_models.p_r1_sense,
@@ -906,16 +916,27 @@ def run_pipeline(
     #
     # ⭐ ALL THREE come from the PAYLOAD — one object, one frame, one definition of length. The
     # scanner's spliced histogram is transcript-space and needs a UNIQUE transcript; the
-    # accumulator's pool is a structural rule over a larger population, is binned at the same L as
-    # everything else, and already excludes `sj_implicit` fragments — whose splice was never
-    # sequenced, so certifying them as RNA would make the pool depend on the model it is used to fit.
+    # accumulator's pool is a structural rule over a larger population and is binned at the same L as
+    # everything else. A fragment enters a pool when exactly ONE hypothesis survived, so its `L` is
+    # not in doubt however it was arrived at — determinacy, not provenance.
     #
     # ⭐ C2.1: the ANCHOR moved here too, off the scanner's histogram and onto the accumulator's own
     # `deposited_lengths`. Until then the pools were accumulator-frame and the anchor they were
     # shrunk toward was not.
+    #
+    # ⭐ And the RNA pool is de-tilted by its own junction opportunity: "used an annotated junction"
+    # is a length-dependent selection, so the raw pool is measurably longer than the library.
     from .calibration.fl import build_fl_models
+    from .calibration.gdna_opportunity import gdna_opportunity_from_index
+    from .calibration.junction_opportunity import crossing_probability_from_index
 
-    fl_models = build_fl_models(calibration_payload)
+    fl_models = build_fl_models(
+        calibration_payload,
+        junction_opportunity=crossing_probability_from_index(
+            index, int(calibration_payload.max_length)
+        ),
+        gdna_opportunity=gdna_opportunity_from_index(index, int(calibration_payload.max_length)),
+    )
     gdna_fl_pmf = fl_models.gdna_pmf
     _bins = np.arange(gdna_fl_pmf.size, dtype=np.float64)
     logger.info(

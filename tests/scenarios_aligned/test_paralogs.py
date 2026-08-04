@@ -142,6 +142,24 @@ class TestParalogMultimapping:
             # gDNA fragments that extend into unique flanking sequence
             # map to only one paralog, creating stochastic warm-start
             # asymmetry that SQUAREM amplifies at small N.
+            #
+            # ⛔ **THAT DIAGNOSIS IS WRONG AND THE MITIGATION DOES NOT WORK — measured 2026-08-03.**
+            # The collapse is not small-N noise, it is BIMODAL: the split either lands even or goes
+            # all-or-nothing, and depth does not move which. Same code, same seeds, `gdna=100`, only
+            # `n_fragments` varied:
+            #
+            #     3,000 -> 171 / 0        12,000 -> 679 / 0
+            #     6,000 -> 249 / 237      20,000 -> 773 / 795
+            #
+            # The TOTAL is right in every case (171 against an expected 146, 679 against ~580); it is
+            # only the split between two literally sequence-identical templates that collapses. So
+            # `3000` was a draw that happened to land on the even mode, and the pass was luck.
+            # ⚠ **This is an open EM degeneracy, not a simulator defect.** It surfaced when the
+            # simulator began modelling the effective length (`f_post(w) ∝ f_pre(w)·total_eff(w)`),
+            # which re-rolled the fragment draw — on a 500 nt paralog that tilt is severe, so the
+            # unique-flanking gDNA that breaks the tie got shorter and rarer. ⛔ Do NOT fix this by
+            # moving a seed or a depth until the mode is even; that is tuning to green. Scenario 7
+            # (`TestDistinguishableParalogs`) is the arm where the split is identifiable at all.
             bench = build_and_run(
                 sc,
                 n_fragments=3000,

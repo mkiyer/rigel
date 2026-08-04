@@ -33,7 +33,10 @@ Contents:
   subsystem and `gdna_density_prior`.
 
 Layering: imports only `node_chain`, `signature`, `effective_length`, `simplex_logodds`, `strand_deconv`
-(all lower layers) — never `bp_solver` or `gdna_density_prior`, so it sits cleanly below both.
+and `splice_graph` (all lower layers) — never `bp_solver` or `gdna_density_prior`, so it sits cleanly
+below both. ⚠ `splice_graph` is imported for the four TERMINUS FLAG BITS alone, which
+:func:`terminus_flank_gain` has to know the meaning of; the module already carried the flags array
+through `NodeStatics` without knowing what any bit meant.
 """
 
 from __future__ import annotations
@@ -54,6 +57,7 @@ from .signature import (
     nrna_active_strands,
 )
 from .simplex_logodds import _solve_nodes_logodds_all
+from .splice_graph import FLAG_TES_NEG, FLAG_TES_POS, FLAG_TSS_NEG, FLAG_TSS_POS
 
 __all__ = [
     "NodeGeometry",
@@ -64,6 +68,8 @@ __all__ = [
     "NodeStatics",
     "build_node_statics",
     "init_beliefs",
+    "g1_locked",
+    "terminus_flank_gain",
 ]
 
 _EPS = 1.0e-9
@@ -370,6 +376,76 @@ class NodeBelief:
 # A solved single-strand (G2) node takes the strand-solve posterior variance.
 
 
+def g1_locked(free_pos, free_neg) -> np.ndarray:
+    """The **G1** class: neither RNA strand admissible, so the composition is structurally CERTAIN.
+
+    ⭐ This is the predicate :func:`_type_belief` pins ``{0,0,1}`` at ``Var(log f_g) = 0`` on, and it
+    applies to **both axes** — an intergenic region and an intergenic↔exon seam are both G1, because
+    RNA cannot cross a gene boundary any more than it can occupy intergenic space.
+
+    ⚠⚠ **DO NOT CONFUSE THIS WITH ``node_init.strand_evidence``'s ``struct_lock``, which is
+    deliberately NODE-ONLY.** They are two different quantities that happen to share a word:
+
+    * *this* one answers "is the belief pinned and certain?" — a question about the belief, so both axes;
+    * ``struct_lock`` answers "may this slot EMIT composition certainty into its messages?" and
+      excludes G1 edges on purpose: a seam is structurally gDNA but sits between RNA-carrying exons, so
+      its crossing mass is RNA-contaminated and a certainty there compounds into a phantom-gDNA
+      emitter. ``strand_evidence``'s own docstring carries that reasoning.
+
+    It lives here, beside the code that applies it, so the instruments that classify objects by it read
+    ONE definition rather than each re-deriving it — two homes for one predicate is how a node-only
+    variant survived in two scripts and a test at the same time.
+    """
+    return ~np.asarray(free_pos, bool) & ~np.asarray(free_neg, bool)
+
+
+#: A transcript's genomic **LOW** end. On ``+`` that terminus is the TSS, on ``−`` it is the TES — and
+#: pairing the bits by which genomic end they mark, rather than by TSS/TES, is the whole point.
+_RNA_LOW_END = np.uint16(FLAG_TSS_POS | FLAG_TES_NEG)
+#: A transcript's genomic **HIGH** end: the TES on ``+``, the TSS on ``−``.
+_RNA_HIGH_END = np.uint16(FLAG_TES_POS | FLAG_TSS_NEG)
+
+
+def terminus_flank_gain(edge_flags) -> tuple[np.ndarray, np.ndarray]:
+    """``(right_gains, left_gains)`` — which FLANK of each EDGE carries RNA the EDGE itself cannot see.
+
+    An EDGE is a single genomic position and it counts the fragments spanning it CONTIGUOUSLY, so the
+    transcripts it can see are exactly the ones continuous across it::
+
+        T(EDGE)  =  T(NODE_left)  ∩  T(NODE_right)
+
+    A transcript whose body BEGINS at the EDGE is in the right flank and not in the EDGE, so
+    ``T(EDGE) = T(right)`` fails; one that ENDS there breaks the left equality the same way. Those are
+    equalities and not containments: a composition imputation between two objects needs them to be
+    measuring the same population, and ``phi_R`` too high or too low both corrupt ``phi_g``.
+
+    ⛔⛔ **WRITTEN IN GENOMIC TERMS, AND THAT IS NOT A STYLE CHOICE — TSS/TES DOES NOT DETERMINE THE
+    SIDE, BECAUSE THE STRAND FLIPS IT.** A ``+`` transcript's body extends toward higher coordinates from
+    its TSS; a ``−`` transcript's extends that way from its TES. So the bits are paired by which genomic
+    END they mark and the arrays are named for the FLANK. Gated on two mirror-image annotations —
+    identical geometry, opposite strands — where the flank answer is the same and the TSS bit alone points
+    at the opposite EDGEs (`test_terminus_population_licence`).
+
+    ⚠ **OR over both strands, deliberately.** A composition is a claim about the whole pair
+    {gDNA, RNA+, RNA−}, so a population break on either strand breaks it.
+
+    ⚠ **The two masks are INDEPENDENT, not complements** — a transcript can end where another begins, and
+    then neither flank matches. ``0`` (no graph supplied) means no terminus and so both flanks match.
+
+    ⛔ **TERMINI ONLY: DONOR/ACCEPTOR are excluded on purpose.** A splice site also changes the population
+    — RNA splices out or in — but there the flux is MEASURED (``junction_count``) and the graft and the
+    peel exist to route it. A terminus has no flux to measure: a transcript simply begins. That is the
+    boundary between the two treatments.
+
+    ``edge_flags`` may be on either axis — the per-contiguous-edge array from
+    :func:`~rigel.calibration.splice_graph.build_edge_flags_array`, or :class:`NodeStatics`'s per-slot
+    copy of it (``0`` at NODE slots, which reads as "no terminus" and is correct: a NODE is not a
+    position and breaks no population).
+    """
+    flags = np.asarray(edge_flags, dtype=np.uint16)
+    return (flags & _RNA_LOW_END) != 0, (flags & _RNA_HIGH_END) != 0
+
+
 def _type_belief(free_pos, free_neg, deconv, mass_unspl):
     """Build the per-node composition ``(f_pos, f_neg, f_g)`` for ONE node type (regions OR boundaries) from its
     signature-binary classification + its strand-only solve.
@@ -399,7 +475,7 @@ def _type_belief(free_pos, free_neg, deconv, mass_unspl):
     var_p = np.where(free_pos, np.inf, 0.0)
     var_n = np.where(free_neg, np.inf, 0.0)
 
-    g1 = ~free_pos & ~free_neg
+    g1 = g1_locked(free_pos, free_neg)
     g2 = free_pos ^ free_neg
     g2_active = g2 & (np.asarray(mass_unspl, dtype=np.float64) > 0.0)
 
@@ -607,3 +683,27 @@ def _node_region_type(chain, region_arrays):
     rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)  # per node
     ri_ = np.clip(idx, 0, max(rtype.shape[0] - 1, 0))
     return np.where(kind == NODE, rtype[ri_], -1), rtype
+
+
+# ---------------------------------------------------------------------------
+# ⛔ THE gDNA CAPTURE-CLASS LANDSCAPE WAS BUILT HERE AND DELETED — it is INERT. Do not rebuild it.
+# ---------------------------------------------------------------------------
+#
+# The reasoning was sound and the conclusion is the interesting part. gDNA is uniform BEFORE capture, so a
+# gDNA density claim transports between adjacent objects by the ratio of their CAPTURE EFFICIENCIES and
+# nothing else; that efficiency is fixed by probe geometry, probes are designed from the annotation, so it
+# is a property of the object's structural class; and it is directly observable on any class with
+# structurally-pure-gDNA members (intergenic NODEs, ``intergenic|exon`` EDGEs). Five classes were
+# implemented — NODE/EDGE x off-probe / half-covered / fully-covered — with the pooled rate
+# ``Σcount/ΣE`` per class supplying ``r_g = rate[class(dst)]/rate[class(src)]``.
+#
+# ⭐⭐ **MEASURED INERT, AND THE REASON IS AN OPERATOR THAT ALREADY EXISTS.** The relay's MASS PIN
+# (`bp_solver`'s ``Σ_c rho_c·E_c = M``) rescales the running level to each object's OWN observed total,
+# and at a structurally pure-gDNA object that total IS its gDNA density — measured at its own capture
+# stratum. So the landscape is already carried, per object and locally, by the pure-gDNA population's own
+# measurements; a pooled class ratio only re-derives it, worse. A/B on the ladder: **byte-identical off
+# capture**, and 1.2 % of one class on one capture-ON condition (``node/exon`` mwae 0.2719 → 0.2686).
+# That does not pay for five constants, a helper and two gates.
+#
+# ⭐ The rule that remains is therefore one line and is in `bp_solver`: a gDNA LEVEL crosses a
+# composition-unlicensed hop **unscaled**. Capture-OFF is not a case — it is the same expression.

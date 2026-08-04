@@ -275,8 +275,8 @@ Calibration fits the library hyperparameters (`gdna_density_global`,
 the per-region and per-boundary deconvolved gDNA/RNA mass. These are bridged
 into **two per-locus Dirichlet scalars** (`gdna_prior_count`,
 `rna_prior_count`) that set the gDNA-vs-RNA split feeding the EM. See
-[docs/calibration/CALIBRATION_ARCHITECTURE.md](docs/calibration/CALIBRATION_ARCHITECTURE.md)
-for the full theory.
+[docs/DESIGN.md](docs/DESIGN.md) for the architecture and
+[docs/EQUATIONS.md](docs/EQUATIONS.md) for the derivations.
 
 ### Locus-level EM
 
@@ -299,9 +299,9 @@ configured assignment mode (`sample` by default).
 | Document | Description |
 |----------|-------------|
 | [docs/MANUAL.md](docs/MANUAL.md) | CLI reference, parameter defaults, configuration rules, and output schema |
-| [docs/METHODS.md](docs/METHODS.md) | Algorithmic description of the implemented model and priors |
+| [docs/EQUATIONS.md](docs/EQUATIONS.md) | The derivations the implementation depends on — deposit rule, opportunity functions, strand, priors |
+| [docs/DESIGN.md](docs/DESIGN.md) | What is built, and the rulings behind it |
 | [docs/PUBLISHING.md](docs/PUBLISHING.md) | Release workflow for PyPI and Bioconda |
-| [docs/parameters.md](docs/parameters.md) | Complete parameter reference with defaults and config dataclass mapping |
 
 ---
 

@@ -376,6 +376,7 @@ class Scenario:
             transcripts,
             _to_sim_params(sim_config, n_fragments),
             _to_gdna_sim(effective_gdna),
+            genomic_refs=[self.ref_name],
             strand_specificity=sim_config.strand_specificity,
             capture_config=effective_capture,
         )
@@ -496,6 +497,7 @@ class Scenario:
                 transcripts,
                 _to_sim_params(sim_config, n_rna),
                 _to_gdna_sim(effective_gdna),
+                genomic_refs=[self.ref_name],
                 strand_specificity=sim_config.strand_specificity,
                 capture_config=effective_capture,
             )
@@ -507,6 +509,7 @@ class Scenario:
                 transcripts,
                 _to_sim_params(sim_config, n_fragments),
                 _to_gdna_sim(effective_gdna),
+                genomic_refs=[self.ref_name],
                 strand_specificity=sim_config.strand_specificity,
                 capture_config=effective_capture,
             )

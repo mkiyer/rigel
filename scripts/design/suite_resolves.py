@@ -342,6 +342,81 @@ def requirement_f_low_gdna_corner(conditions: list[dict]) -> list[Verdict]:
     ]
 
 
+def requirement_h_length_gap_regime(suite: Path, conditions: list[dict]) -> list[Verdict]:
+    """(h) ⭐ **G-S7 — does the suite exercise a NARROWED gDNA<->RNA length gap?**
+
+    ``mu_g - mu_r`` is the **only** thing that identifies the fragment-length channel: at equal
+    component means ``(count, sum 1/L)`` carries exactly zero information about composition at any
+    depth. So a suite that presents one single value of that gap cannot resolve anything the length
+    channel does, and a suite whose capture arm leaves the gap untouched has never tested the tool
+    against the regime real capture produces.
+
+    ⛔ **The panel this replaces scored the degenerate value exactly.** Its post-capture truth summaries
+    were byte-identical to the pre-capture ones — gDNA mean 195.57 and RNA 217.24 on BOTH capture arms —
+    so the gap was −21.66 bp twice and the narrowing was 0.00. Hybrid capture hybridises probes to
+    sequence, so it selects for length, and it narrows the gap whenever gDNA is the shorter component
+    because the short tail it removes is disproportionately gDNA.
+
+    ⚠ **Directional, no threshold.** A magnitude would be inventing the capture efficiency curve. The
+    degenerate value is a *measured* 0.00, not a chosen one.
+    """
+    def gap(name: str) -> float | None:
+        path = suite / name / "truth_summary.json"
+        if not path.exists():
+            return None
+        lengths = json.loads(path.read_text()).get("fragment_lengths", {})
+        gdna, rna = lengths.get("gdna") or {}, lengths.get("rna") or {}
+        if not gdna.get("n") or not rna.get("n"):
+            return None
+        return abs(float(gdna["mean"]) - float(rna["mean"]))
+
+    arms: dict[tuple, dict[str, str]] = {}
+    for condition in conditions:
+        key = (
+            condition.get("gdna_label"),
+            condition.get("strand_specificity"),
+            condition.get("nrna_label"),
+            condition.get("gdna_strand_overdispersion"),
+        )
+        arms.setdefault(key, {})[str(condition.get("capture_label"))] = str(condition["name"])
+
+    narrowings: list[tuple[str, float, float]] = []
+    for key, by_label in sorted(arms.items(), key=lambda kv: str(kv[0])):
+        if "on" not in by_label or "off" not in by_label:
+            continue
+        gap_off, gap_on = gap(by_label["off"]), gap(by_label["on"])
+        if gap_off is None or gap_on is None:
+            continue
+        narrowings.append((f"{key[0]} ss{key[1]}", gap_off, gap_on))
+
+    observed = sorted({round(value, 2) for _n, off, on in narrowings for value in (off, on)})
+    worst = min((off - on for _n, off, on in narrowings), default=0.0)
+    detail = (
+        "; ".join(f"{name}: {off:.2f} -> {on:.2f} bp" for name, off, on in narrowings)
+        or "no gDNA-bearing condition with both capture arms"
+    )
+    return [
+        Verdict(
+            "h",
+            "capture narrows |mu_g - mu_r|, WORST condition",
+            worst,
+            0.0,
+            "bp",
+            f"{detail}. At exactly 0.00 the capture arm is length-neutral and the length channel has "
+            f"never been tested against the regime real capture produces.",
+        ),
+        Verdict(
+            "h",
+            "distinct |mu_g - mu_r| regimes presented",
+            len(observed),
+            1.0,
+            "values",
+            f"observed gaps (bp): {observed}. One value is one regime, and the channel the gap "
+            f"identifies cannot be resolved against a constant.",
+        ),
+    ]
+
+
 def requirement_c_overdispersion(conditions: list[dict]) -> list[Verdict]:
     """(c) Non-Poisson counts.
 
@@ -383,6 +458,7 @@ def empirical_verdicts(suite: Path) -> list[Verdict]:
         *requirement_b_fragment_length_variance(suite, conditions),
         *requirement_c_overdispersion(conditions),
         *requirement_f_low_gdna_corner(conditions),
+        *requirement_h_length_gap_regime(suite, conditions),
     ]
 
 

@@ -1,0 +1,124 @@
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+#  THE gDNA LADDER — the debug/optimisation panel. EQUAL fragment lengths, full gDNA spectrum.
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+#
+# ⭐⭐ WHAT THIS PANEL IS FOR, AND WHY IT IS NOT `pilot.yaml`. The pilot exists to judge the
+# accumulator, and its fragment-length axis is real and load-bearing there. This one exists to
+# debug and optimise CALIBRATION, and for that the length channel is a confound rather than a
+# signal: with gDNA and RNA drawn from the SAME length distribution, composition can only be
+# recovered from density and strand, so any residual error is attributable to those two. Owner
+# ruling, 2026-08-03: clean the noise up first, exactly as the accumulator was, and add the
+# fragment-length channel back afterwards as an additional signal.
+#
+# ⚠ **"EQUAL" IS A CONFIGURATION, NOT A GUARANTEE — AND IT IS MEASURED, NOT ASSUMED.** Identical
+# parameters for both origins still leave a realised gap, because a mature fragment must fit inside
+# its transcript and gDNA need not: transcript-length truncation pulls the RNA mean down while gDNA
+# keeps the bare truncated-normal mean. Measured on this exact configuration at 400 k fragments:
+#
+#     capture off   gDNA 216.94   RNA 212.26   gap +4.68 bp  (+2.21 %)
+#     capture on    gDNA 240.61   RNA 237.04   gap +3.57 bp  (+1.50 %)
+#
+# ⭐ And what that residual is WORTH was measured before accepting it, one thing varied (both pmfs
+# replaced by their pooled average, so the gap is exactly zero): the per-object mass-weighted error
+# moves by **−0.0002** off capture and **−0.0054** under it, against a mwae of 0.2169 — under 2.5 %
+# of the error, with a *fitted* gap 3–5x larger than the true residual. Owner ruling: carry it.
+# ⛔ Score the length axis against `truth_fragment_lengths.tsv`, never against the numbers below.
+#
+# ⭐⭐ THE DEPTH MODEL IS `n_total_fragments`, NOT `n_rna_fragments`, AND THAT IS THE POINT. Under the
+# rate model gDNA is added ON TOP of a fixed RNA depth, so a 98 % gDNA library is `rate = 49` —
+# 490 M fragments. Here the TOTAL is fixed and the rate decides only the SPLIT
+# (`rigel.sim.orchestrator.resolve_depths`, gated by `tests/test_sim_fixed_total_depth.py`). That is
+# also the faithful model: a sequencing run has a fixed budget and contamination decides how it is
+# divided. ⚠ Accepted trade-off (owner): the RNA side thins as gDNA rises, so per-transcript
+# abundance accuracy degrades at the top of the ladder. That is a property of such libraries.
+#
+# ⛔ REAL LIBRARIES SPAN THE WHOLE RANGE — from almost zero gDNA to >98 % of all fragments — and
+# Rigel must be robust across all of it. The ladder is `f_gdna = rate/(1+rate)`:
+#
+#     rate    0.0    0.010101  0.052632  0.111111  0.333333   1.0    3.0    9.0    49.0
+#     f_gdna  0 %       1 %       5 %      10 %      25 %     50 %   75 %   90 %   98 %
+#     n_rna   10.0 M   9.90 M    9.50 M    9.00 M    7.50 M   5.0 M  2.5 M  1.0 M  0.20 M
+#
+# ⚠ THE FOCUS CONDITION IS `ss_0.50 + capture_on` (owner). It is where the error is largest and it
+# is the one to optimise; the stranded and capture-off cells are CONTROLS that must not regress, and
+# the `f_gdna = 0` rung is the false-positive check. ⛔ Do not tune on the controls.
+#
+# Build the inputs first (shared with the pilot — same reference, same probes):
+#   python scripts/sim/build_suite_reference.py --fasta genome_controls.fasta.bgz \
+#       --gtf genes_controls.sorted.gtf --refs chr21 chr22 --ercc -o <suite>/reference
+#   python scripts/sim/design_suite_probes.py --gtf <suite>/reference/genes.gtf \
+#       -o <suite>/reference/capture_panel.tsv --capture-fraction 0.5
+#
+# Run:  python scripts/sim/simulate_reads.py --config scripts/sim/configs/gdna_ladder.yaml -j 8
+
+genome: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genome.fa
+gtf: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genes.gtf
+outdir: /Users/mkiyer/Downloads/rigel_runs/suite/ladder
+transcript_filter: all
+
+# ── Read simulation ─────────────────────────────────────────────────────────────────────────────
+# ⚠ `n_total_fragments` is what governs; `n_rna_fragments` is ignored in this mode and is left at
+# the same value only so the file reads sensibly if the total is ever removed.
+simulation:
+  n_total_fragments: 10000000
+  n_rna_fragments: 10000000
+  sim_seed: 42
+  # ⭐ REALISTIC AND IDENTICAL TO THE gDNA BLOCK BELOW. Real fragments run ~50 bp to ~500 bp with
+  # little above that (owner). The mean and sd are MO_3021's measured RNA pool; what has changed
+  # from the pilot is `frag_max` (800 -> 500) and that gDNA now shares every one of these four
+  # values. ⛔ All four must match, not just the mean: a different support is itself a gap.
+  frag_mean: 206
+  frag_std: 98
+  frag_min: 50
+  frag_max: 500
+  read_length: 100
+  error_rate: 0.0
+  n_workers: 8
+
+# ── Abundance ───────────────────────────────────────────────────────────────────────────────────
+abundance:
+  mode: random
+  seed: 42
+  min: 1.0
+  max: 10000.0
+  frac_expressed: 0.5
+
+# ── gDNA: the ladder ────────────────────────────────────────────────────────────────────────────
+gdna:
+  rates:       [0.0, 0.010101, 0.052632, 0.111111, 0.333333, 1.0,  3.0,  9.0,  49.0]
+  rate_labels: [g00, g01,      g05,      g10,      g25,      g50,  g75,  g90,  g98]
+  # ⛔ "Has an annotation" is not "is genomic" — every ERCC reference carries one transcript, so
+  # inferring this from the annotation once filled a panel with gDNA on RNA-only spike-ins, on the
+  # very templates whose truth abundance of zero is the false-positive control. State it.
+  genomic_refs: [chr21, chr22]
+  # ⭐⭐ IDENTICAL to `simulation` above. This is the whole point of the panel.
+  frag_mean: 206
+  frag_std: 98
+  frag_min: 50
+  frag_max: 500
+
+# ── Strand ──────────────────────────────────────────────────────────────────────────────────────
+# ⚠ 0.50 is the focus, not merely the hard case: at kappa = 1/2 the strand likelihood carries
+# EXACTLY zero information about the gDNA fraction, for any count and any overdispersion, so the
+# unstranded cells isolate the density channel completely.
+strand_specificities: [0.50, 0.99]
+
+# ── Nascent: held out, as in the pilot ──────────────────────────────────────────────────────────
+nrna:
+  mode: additive_ratio
+  ratios:       [0.0]
+  ratio_labels: [none]
+
+# ── Capture ─────────────────────────────────────────────────────────────────────────────────────
+capture:
+  probe_format: transcript
+  off_target_weight: 1.0
+  binding_per_base: 10.0
+  gdna_split_penalty: 0.2
+  min_overlap: 1
+  configs:
+    - {label: "off", enabled: false}
+    - {label: "on", probes: /Users/mkiyer/Downloads/rigel_runs/suite/reference/capture_panel.tsv}
+
+oracle_bam: true
+verbose: true

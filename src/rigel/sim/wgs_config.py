@@ -17,6 +17,11 @@ class SimulationParams:
     """Read simulation parameters."""
 
     n_rna_fragments: int = 1_000_000
+    #: ⭐ Fixed TOTAL budget. When set, `gdna.rates` decides only the SPLIT between RNA and gDNA
+    #: (`rigel.sim.orchestrator.resolve_depths`) rather than adding gDNA on top of a fixed RNA depth
+    #: — the only way to reach the high-gDNA end of the spectrum at a simulatable depth. `None`
+    #: keeps the legacy behaviour, so every pre-existing config is unaffected.
+    n_total_fragments: int | None = None
     sim_seed: int = 42
     frag_mean: float = 250.0
     frag_std: float = 50.0
@@ -45,6 +50,13 @@ class GDNASimConfig:
 
     rates: list[float] = field(default_factory=lambda: [0.0])
     rate_labels: list[str] | None = None
+    #: ⭐ The references genomic DNA is drawn from — an EXPLICIT input, never inferred from the
+    #: annotation. Every reference in the FASTA is genomic or RNA-only; naming the genomic ones
+    #: classifies both, since the complement is exactly the RNA-only set. ``None`` is not a default
+    #: for "guess": a config that asks for gDNA without stating this is rejected.
+    #: ⚠ At least TWO real genomic references are wanted, so the gDNA deposit path is exercised over
+    #: a non-trivial reference-id space; see `tests/test_sim_genomic_refs.py`.
+    genomic_refs: list[str] | None = None
     frag_mean: float = 350.0
     frag_std: float = 100.0
     frag_min: int = 100

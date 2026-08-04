@@ -7,9 +7,9 @@ abundance estimates.
 
 This manual covers installation, the four CLI subcommands (`index`, `quant`,
 `sim`, `export`), the output files, and the calibration stage. For the
-statistical model and the calibration theory, see the design notes under
-`docs/accumulator/` and `docs/calibration/`; `rigel <subcommand> --help` is the
-flag-by-flag reference.
+statistical model and the calibration theory, see `docs/EQUATIONS.md` (the
+derivations) and `docs/DESIGN.md` (what is built and why); `rigel <subcommand>
+--help` is the flag-by-flag reference.
 
 ---
 
@@ -660,7 +660,7 @@ is_mm_dropped = (zf & 0x80) != 0
 ## Calibration
 
 > ⚠ **Being redesigned.** The fragment tally this stage consumes (the "accumulator") is being replaced;
-> see `docs/SESSION_HANDOFF.md`. The behaviour described below is current and correct for the shipped
+> see `docs/ROADMAP.md`. The behaviour described below is current and correct for the shipped
 > release, but the internals and some flags will change. Calibration is not yet considered production
 > quality.
 

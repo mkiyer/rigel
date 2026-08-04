@@ -200,6 +200,10 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     sim_raw = raw.get("simulation", {})
     sim = cfg.simulation
     sim.n_rna_fragments = int(sim_raw.get("n_rna_fragments", 1_000_000))
+    # ⭐ Optional FIXED-TOTAL budget: when present, `gdna.rates` decides only the RNA/gDNA
+    # SPLIT instead of adding gDNA on top (`orchestrator.resolve_depths`). Absent ⇒ legacy.
+    _total = sim_raw.get("n_total_fragments")
+    sim.n_total_fragments = None if _total is None else int(_total)
     sim.sim_seed = int(sim_raw.get("sim_seed", 42))
     sim.frag_mean = float(sim_raw.get("frag_mean", 250.0))
     sim.frag_std = float(sim_raw.get("frag_std", 50.0))
@@ -255,6 +259,8 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
     gd = cfg.gdna
     gd.rates = [float(r) for r in gd_raw.get("rates", [0.0])]
     gd.rate_labels = gd_raw.get("rate_labels", None)
+    _genomic_refs = gd_raw.get("genomic_refs", None)
+    gd.genomic_refs = [str(ref) for ref in _genomic_refs] if _genomic_refs is not None else None
     gd.frag_mean = float(gd_raw.get("frag_mean", 350.0))
     gd.frag_std = float(gd_raw.get("frag_std", 100.0))
     gd.frag_min = int(gd_raw.get("frag_min", 100))
@@ -760,6 +766,19 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         label = gdna_label_for_rate(rate, cfg.gdna.rate_labels, i)
         gdna_pairs.append((label, rate))
 
+    # ⭐ The genomic/RNA-only split is a SCENARIO input. A config that asks for gDNA without stating
+    # which references are genomic is rejected rather than guessed at, because the guess that used to
+    # live in the engine — "has an annotation" — put gDNA on RNA-only spike-ins.
+    genomic_refs = cfg.gdna.genomic_refs
+    if genomic_refs is None:
+        if any(rate > 0 for rate in cfg.gdna.rates):
+            raise ValueError(
+                "gdna.genomic_refs must list the references genomic DNA is drawn from whenever any "
+                "gdna.rates entry is non-zero. Every reference is genomic or RNA-only and the "
+                "classification is an input, not an inference from the annotation."
+            )
+        genomic_refs = []
+
     # gDNA strand-overdispersion sweep axis (one condition per value). None ⇒ a single value
     # (= strand_overdispersion), which keeps condition names unchanged when it is 0.
     _od_values = (
@@ -793,6 +812,7 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         sim=sim,
         gdna=cfg.gdna,
         nrna=cfg.nrna,
+        genomic_refs=genomic_refs,
         gdna_pairs=gdna_pairs,
         gdna_od_pairs=gdna_od_pairs,
         strand_specificities=cfg.strand_specificities,

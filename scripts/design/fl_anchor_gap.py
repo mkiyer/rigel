@@ -112,16 +112,25 @@ def _drain(cache, index, node_types, junctions, *, seed: int):
     return _drain_side_buffer(cache.payload, index, cache.strand_model, seed=seed)
 
 
-def measure(cond_name: str, payload, truth: dict[str, np.ndarray] | None) -> dict:
+def measure(
+    cond_name: str, payload, truth: dict[str, np.ndarray] | None, crossing=None, gdna_opp=None
+) -> dict:
     """Every number this script reports for one condition, as a plain dict (so it can be JSON-diffed).
 
     ⚠ Takes the PAYLOAD, not the cache, so the same measurement runs on pass one's tally and on the
     drained one — which is what makes the P4 panel a before/after with one thing varied.
-    """
-    from rigel.calibration.fl import build_fl_models, gdna_fl_mass, rna_fl_mass
 
-    fl = build_fl_models(payload)
+    ⭐ ``crossing`` is the junction-opportunity de-tilt, and passing it is what makes the RNA panel
+    report the pool the tool FITS FROM rather than the raw histogram. ``None`` reports the raw pool,
+    which is the before-C3 arm.
+    """
+    from rigel.calibration.fl import build_fl_models, rna_fl_mass
+    from rigel.calibration.junction_opportunity import detilt_pool
+
+    fl = build_fl_models(payload, junction_opportunity=crossing, gdna_opportunity=gdna_opp)
     anchor, rna = np.asarray(fl.global_counts), rna_fl_mass(payload)
+    if crossing is not None:
+        rna = detilt_pool(rna, crossing)
 
     a_mean, a_sd, a_top = moments(anchor)
     r_mean, r_sd, r_top = moments(rna)
@@ -152,10 +161,11 @@ def measure(cond_name: str, payload, truth: dict[str, np.ndarray] | None) -> dic
         else float("nan")
     )
 
-    # ⛔ THE CONTROL. `DNA_INTERGENIC` is contained-in-an-intergenic-node, i.e. pure gDNA — and gDNA has
-    # no introns to miss. It read 0.00023 at >=600 bp against a truth of 0.00024 BEFORE this work; if it
-    # moves, the change reached fragments that have no introns, which cannot happen.
-    gdna_pool = gdna_fl_mass(payload)
+    # ⭐ The gDNA panel reports the histogram the model is FITTED FROM — `fl.gdna_counts` — not a raw
+    # pool sum. With `gdna_opp` that is the four pools each divided by its own opportunity; without it,
+    # the contained pair. ⛔ Reading `gdna_fl_mass` directly here would report the four pools POOLED RAW,
+    # which is a quantity nothing in the tool uses.
+    gdna_pool = np.asarray(fl.gdna_counts, dtype=np.float64)
     g_mean, g_sd, g_top = moments(gdna_pool)
     row["gdna_pool"] = {
         "mean": g_mean,
@@ -219,6 +229,12 @@ def main() -> int:
         "buffer, so the tail and the gDNA control are read as a delta",
     )
     ap.add_argument("--seed", type=int, default=0, help="the drain's multinomial seed")
+    ap.add_argument(
+        "--raw-pool",
+        action="store_true",
+        help="⚠ report the RAW RNA_SPLICED histogram instead of the de-tilted pool the tool fits "
+        "from — the before-C3 arm, and the only reason to want it is an A/B",
+    )
     args = ap.parse_args()
 
     if not args.pilot.is_dir():
@@ -232,6 +248,21 @@ def main() -> int:
     # ⚠ A cache is REFUSED unless it describes the index it is loaded against (graph_hash, reach_digest
     # and payload_schema_digest). That refusal is the point of the keys, so it is reported, not caught.
     index = TranscriptIndex.load(str(args.index))
+    crossing = None
+    if not args.raw_pool:
+        from rigel.calibration.junction_opportunity import crossing_probability_from_index
+
+        # ⚠ Built once, off the ANNOTATION — it does not depend on the condition or on the drain, so
+        # the same divisor scores every arm and cannot itself be the thing that moved.
+        crossing = crossing_probability_from_index(index, 4096)
+    gdna_opp = None
+    if not args.raw_pool:
+        from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
+
+        # ⭐ The four gDNA pools' own opportunities, likewise annotation-derived and condition-independent.
+        # ⚠ `--raw-pool` drops BOTH divisors, so it is the before arm for the gDNA model as well as the RNA
+        # one — and with both dropped the gDNA pool falls back to the CONTAINED pair, not the raw four.
+        gdna_opp = gdna_opportunity_from_index(index, 4096)
     node_types = junctions = None
     if args.drain:
         from rigel.calibration.splice_graph import (
@@ -256,12 +287,14 @@ def main() -> int:
             continue
         truth_path = suite / cond.name / "truth_fragment_lengths.tsv"
         truth = None if args.no_truth or not truth_path.is_file() else read_truth(truth_path)
-        row = measure(cond.name, cache.payload, truth)
+        row = measure(cond.name, cache.payload, truth, crossing, gdna_opp)
         if args.drain:
             row["drained"] = measure(
                 cond.name,
                 _drain(cache, index, node_types, junctions, seed=args.seed),
                 truth,
+                crossing,
+                gdna_opp,
             )
         rows.append(row)
         print(f"{cond.name:<44} {row['anchor']['mean']:11.1f} {row['rna_pool']['mean']:9.1f} "

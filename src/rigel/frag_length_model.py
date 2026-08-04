@@ -93,8 +93,16 @@ class FragmentLengthModel:
 
     @property
     def n_observations(self) -> int:
-        """Number of observations (derived from total histogram weight)."""
-        return int(self._total_weight)
+        """Number of observations, derived from the total histogram weight.
+
+        ⚠ **ROUNDED, not truncated, and that matters because some histograms are fractional.** A length
+        pool divided by its own opportunity holds non-integer weights by construction (the de-tilt
+        preserves the pool's total but redistributes it), so a total of 552.9 must report 553 and not
+        552 — otherwise the reported count and the histogram the report writes beside it fail to
+        reconcile, and a reader has no way to tell a rounding artefact from a lost fragment.
+        ``total_weight`` is the unrounded quantity for anyone who needs it.
+        """
+        return int(round(self._total_weight))
 
     # ------------------------------------------------------------------
     # Factory methods

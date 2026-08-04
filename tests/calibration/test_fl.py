@@ -14,6 +14,7 @@ import pytest
 
 from rigel.calibration.fl import (
     _fl_models_from_histograms,
+    gdna_contained_fl_mass,
     gdna_fl_mass,
     rna_fl_mass,
     splash_fl_mass,
@@ -62,17 +63,32 @@ def test_the_pool_indices_ARE_the_specifications_FragmentPool():
     assert POOL_RNA_SPLICED == FragmentPool.RNA_SPLICED
 
 
-def test_gdna_fl_mass_is_the_two_PURE_CONTAINED_pools_and_NOTHING_else():
-    """⭐ The splash pools are deliberately NOT folded in, and this is not cosmetic.
+def test_gdna_fl_mass_is_ALL_FOUR_gdna_pools():
+    """⭐ All four, because the contained pair alone measures the SHORT HALF of one population.
 
-    They are the only ON-TARGET gDNA population, so they sit between
-    the pure gDNA and RNA means — 139 and 212 against 88 on LBX0190. The shipped model summed four
-    differently-tilted pools and read **146.05** where the pure intergenic pool says **88.0**: biased
-    long by ~40 %, by pooling exactly these. Keeping them out is what makes the comparison a QC output
-    instead of a guess.
+    Under hybrid capture the surviving off-target gDNA sits beside a probe, and a fragment beside a probe
+    *reaches* the exon boundary — so it stops being contained and becomes crossing. Fitting from the
+    contained pair alone reads ~15 % short under capture; all four, each divided by its own opportunity,
+    read −0.01 % off capture and +7.9 % under it.
+
+    ⛔ **This histogram is only meaningful paired with the matching divisor.** The four pools tilt in
+    opposite directions, so the raw sum is biased LONG — that is the 146.05-against-88.0 defect
+    (`docs/TRAPS.md` C4). Nothing in the tool consumes this sum on its own.
     """
     g = gdna_fl_mass(SimpleNamespace(pool_lengths=_pools()))
-    np.testing.assert_allclose(g, [0.0, 0.0, 1.0, 3.0, 0.0])
+    np.testing.assert_allclose(g, [0.0, 0.0, 701.0, 903.0, 0.0])
+
+
+def test_gdna_contained_fl_mass_is_the_pair_and_is_the_NO_DIVISOR_FALLBACK():
+    """⚠ The honest fallback, not the convenient one.
+
+    With no annotation offered there is no opportunity function, and pooling the four raw would be
+    measurably WORSE than either the contained pair or the de-tilted four. So "no divisor" falls back to
+    the pair — a model that is right off capture and knowably short under it — rather than to a sum that
+    is wrong everywhere.
+    """
+    c = gdna_contained_fl_mass(SimpleNamespace(pool_lengths=_pools()))
+    np.testing.assert_allclose(c, [0.0, 0.0, 1.0, 3.0, 0.0])
 
 
 def test_gdna_fl_mass_excludes_the_RNA_pool():
@@ -97,31 +113,45 @@ def test_the_splash_pools_are_reachable_SEPARATELY_for_QC():
     np.testing.assert_allclose(s, [0.0, 0.0, 700.0, 900.0, 0.0])
 
 
-def test_every_pool_reaches_EXACTLY_ONE_accessor():
-    """⛔ Teeth on the partition itself: no pool may be double-counted, and none may be unreachable.
+def test_the_two_COMPONENT_accessors_partition_every_pool():
+    """⛔ Teeth on the partition itself: no pool double-counted, none unreachable.
 
-    A pool that no accessor returns is silently discarded evidence; one that two return is
+    ``gdna_fl_mass`` and ``rna_fl_mass`` are the two COMPONENT accessors and they must be exhaustive and
+    disjoint — a pool no accessor returns is silently discarded evidence, and one two accessors return is
     double-counted. Both are invisible in any single-accessor test.
+
+    ⚠ ``gdna_contained_fl_mass`` and ``splash_fl_mass`` are named **subsets** of the gDNA side, not
+    members of the partition; the test below pins that they tile it exactly.
     """
     payload = SimpleNamespace(pool_lengths=_pools())
-    totals = [
-        float(gdna_fl_mass(payload).sum()),
-        float(rna_fl_mass(payload).sum()),
-        float(splash_fl_mass(payload).sum()),
-    ]
-    assert sum(totals) == float(_pools().sum()), "every pool must land in exactly one accessor"
+    total = float(gdna_fl_mass(payload).sum()) + float(rna_fl_mass(payload).sum())
+    assert total == float(_pools().sum()), "the two component accessors must be exhaustive"
+
     for pool in range(N_FRAGMENT_POOLS):
         one = np.zeros((N_FRAGMENT_POOLS, 5), dtype=np.int64)
         one[pool, 1] = 5
         p = SimpleNamespace(pool_lengths=one)
-        reached = [
-            float(gdna_fl_mass(p).sum()),
-            float(rna_fl_mass(p).sum()),
-            float(splash_fl_mass(p).sum()),
-        ]
-        assert sorted(reached) == [0.0, 0.0, 5.0], (
-            f"pool {pool} reaches {reached}, expected exactly one"
+        reached = [float(gdna_fl_mass(p).sum()), float(rna_fl_mass(p).sum())]
+        assert sorted(reached) == [0.0, 5.0], (
+            f"pool {pool} reaches {reached}, expected exactly one component"
         )
+
+
+def test_the_gdna_subsets_TILE_the_gdna_side_exactly():
+    """⭐ contained + splash == all four, on every pool individually.
+
+    This is what keeps "the crossing pools are reported separately" and "the crossing pools are fitted"
+    from drifting apart: they are the same rows seen twice, not two different definitions.
+    """
+    payload = SimpleNamespace(pool_lengths=_pools())
+    np.testing.assert_allclose(
+        gdna_contained_fl_mass(payload) + splash_fl_mass(payload), gdna_fl_mass(payload)
+    )
+    for pool in range(N_FRAGMENT_POOLS):
+        one = np.zeros((N_FRAGMENT_POOLS, 5), dtype=np.int64)
+        one[pool, 1] = 5
+        p = SimpleNamespace(pool_lengths=one)
+        np.testing.assert_allclose(gdna_contained_fl_mass(p) + splash_fl_mass(p), gdna_fl_mass(p))
 
 
 def test_build_fl_large_pool_is_empirical():

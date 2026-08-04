@@ -74,11 +74,18 @@ def oracle(tmp_path):
         "-",
         [{"t_id": "t3", "exons": [(3000, 3400), (4000, 4400)], "abundance": 40}],
     )
+    # ⚠ 300 bp mean at 12,000 fragments, and BOTH numbers are load-bearing. The RESOLVED-gap arm needs
+    # a fragment whose two 100 bp mates straddle the junction with the intron strictly inside the gap,
+    # so it needs length ≥ ~300 on a 1,000 nt transcript — and the simulator now models the effective
+    # length, so a 600 bp fragment has 401 placements on that transcript against an 80 bp fragment's
+    # 921 and the long tail is genuinely suppressed (a 2.8x tilt). At the old 220/4,000 the arm read
+    # exactly 0 and the assertion below said so. At 300/12,000 it reads 51, which is a margin rather
+    # than a coincidence.
     result = scenario.build_oracle(
-        n_fragments=4000,
+        n_fragments=12000,
         gdna_fraction=0.3,
         sim_config=ReadSimConfig(
-            frag_mean=220,
+            frag_mean=300,
             frag_std=60,
             frag_min=80,
             frag_max=600,

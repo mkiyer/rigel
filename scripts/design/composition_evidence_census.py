@@ -36,6 +36,7 @@ import numpy as np  # noqa: E402
 
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.node_chain import EDGE, NODE  # noqa: E402
+from rigel.calibration.node_geometry import g1_locked  # noqa: E402
 from rigel.config import CalibrationConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
@@ -78,16 +79,19 @@ def census_one(index: TranscriptIndex, cache_dir: Path, inject_kappa: float | No
     count = np.asarray(cap["count"], np.float64).sum(axis=1)  # unspliced mass per slot, both strands
     free_pos = np.asarray(cap["free_pos"], bool)
     free_neg = np.asarray(cap["free_neg"], bool)
-    solvable = np.asarray(cap["solvable"], bool)
     kind = np.asarray(chain.kind)
 
     is_node = kind == NODE
     is_edge = kind == EDGE
-    # `node_init`'s own definitions, reproduced verbatim so the census asks the solver's question:
-    #   locked      = ~solvable                       (a G1 sink or an empty slot)
-    #   struct_lock = locked & is_region              (composition CERTAIN -- an intergenic pure-gDNA node)
+    #   struct_lock   = the G1 class (composition CERTAIN, pinned {0,0,1} at var 0)
     #   single_strand = free_pos XOR free_neg         (the strand λ-term is gated to these)
-    struct_lock = (~solvable) & is_node
+    # ⛔ struct_lock is BOTH AXES, and it comes from the ONE definition
+    # (`node_geometry.g1_locked`) rather than being re-derived here. It was `(~solvable) & is_node`,
+    # which filed every structurally-locked EDGE — an intergenic<->exon seam, where RNA cannot cross a
+    # gene boundary — as a slot with NO EVIDENCE rather than as one that is certain.
+    # ⚠⚠ NOT the same mask as `node_init.strand_evidence`'s own `struct_lock`, which is node-only ON
+    # PURPOSE (it governs whether a slot may EMIT certainty into its messages). See `g1_locked`.
+    struct_lock = g1_locked(free_pos, free_neg)
     single_strand = free_pos ^ free_neg
     ambig = free_pos & free_neg
 

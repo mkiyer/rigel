@@ -23,7 +23,7 @@ A **small, named** set of current calibration/EM diagnostics (oracle + net-flow 
 canonical tools — `oracle.py`, `oracle_reattribute.py`, `oracle_leak_trace.py`, `benchmark_ab_report.py`,
 `benchmark_ab_render.py`, `dissect_loci.py`, `toy_prod.py`, `pass_trace.py`, `localize_siphon.py`,
 `layer_trace.py`, `locus_component_audit.py`, `em_multiplicity*.py`, … — are documented in
-`docs/SESSION_HANDOFF.md`.
+`docs/TRAPS.md`.
 
 **Policy (so this dir does not regrow into an archive):**
 

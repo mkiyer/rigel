@@ -159,6 +159,7 @@ def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
     Measured on the pilot: the anchor's mean error against truth goes from −1.6 % to **+0.00 %**.
     """
     from rigel.calibration.fl import build_fl_models
+    from rigel.calibration.junction_opportunity import crossing_probability_from_index
     from rigel.pipeline import run_pipeline
 
     config = _config()
@@ -178,7 +179,14 @@ def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
     exonic = scenario.index.t_df["length"].values.astype(np.int64)
     shipped = np.asarray(result.estimator.effective_lengths, dtype=np.float64)
     for label, payload in (("drained", drained), ("pass one", pass_one)):
-        fl = build_fl_models(payload)
+        # ⭐ C3's de-tilt is part of production's route to the RNA pmf, so it is part of this
+        # reproduction; it is the same array for both arms, so it cannot decide which one matches.
+        fl = build_fl_models(
+            payload,
+            junction_opportunity=crossing_probability_from_index(
+                scenario.index, int(payload.max_length)
+            ),
+        )
         expected = FragmentLengthModel.from_pmf(
             fl.rna_pmf, fl.max_size
         ).compute_all_transcript_eff_lens(exonic)

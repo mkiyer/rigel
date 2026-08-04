@@ -126,7 +126,28 @@ class OracleTruth:
         paths, read_counts = _split_bam(bam, work_dir, tag)
         full = full_payload if full_payload is not None else _scan_payload(bam, index, cfg)
         parts = {k: _scan_payload(paths[k], index, cfg) for k in ORIGINS}
-        self = cls(full=full, parts=parts, read_counts=read_counts)
+        return cls.from_parts(full, parts, read_counts)
+
+    @classmethod
+    def from_parts(cls, full, parts: dict, read_counts: dict | None = None) -> "OracleTruth":
+        """Assemble from payloads that are ALREADY scanned, and validate — the entry point a cache
+        needs.
+
+        ⭐ **The validation is not optional here either, and that is the whole reason this exists
+        rather than callers constructing the dataclass directly.** Splitting and re-scanning is
+        minutes per condition, so any instrument that runs the panel more than once wants to persist
+        the partitions; but a cached oracle that skipped sum-to-full would be a *silently* wrong
+        truth source feeding everything downstream. Re-running the identity over loaded arrays costs
+        milliseconds, so the cached path is exactly as gated as the scanned one.
+
+        ⚠ ``read_counts`` is bookkeeping (every input read accounted for) and a cache need not carry
+        it; it defaults to ``-1`` per origin, which is distinguishable from a real count of zero.
+        """
+        self = cls(
+            full=full,
+            parts=parts,
+            read_counts=read_counts if read_counts is not None else {k: -1 for k in ORIGINS},
+        )
         self._validate()
         return self
 
@@ -260,12 +281,15 @@ class OracleTruth:
 
 def _main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("condition", nargs="?", default="gdna_gdna300_ss_0.99_nrna_none_capture_on")
-    ap.add_argument("--suite", default="/Users/mkiyer/Downloads/rigel_runs/quick_3to1_5mb")
+    # ⚠ Defaults track the CURRENT panel. Both were stale for a deleted suite once and cost a session
+    # its first hour; if they are wrong again the fix is here, not in the caller.
+    ap.add_argument("condition", nargs="?", default="gdna_gdna100_ss_0.50_nrna_none_capture_on")
+    ap.add_argument("--suite", default=str(Path.home() / "Downloads/rigel_runs/suite/pilot"))
+    ap.add_argument("--index", default=str(Path.home() / "Downloads/rigel_runs/suite/rigel_index"))
     args = ap.parse_args()
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     wd = Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_oracle_split"
-    index = TranscriptIndex.load(f"{args.suite}/rigel_index")
+    index = TranscriptIndex.load(args.index)
     cfg = PipelineConfig()
     bam = f"{args.suite}/{args.condition}/sim_oracle.bam"
     print(f"=== ORACLE {args.condition} ===")
@@ -295,7 +319,16 @@ def _main():
     # own mixture: the scanner's histogram as the anchor and the scanner's SPLICED_ANNOT category as
     # the RNA pool, neither of which production has used since S5.d/C2.1. A test harness that builds
     # a different model from the shipped one is calibrating something the tool does not ship.
-    fl = build_fl_models(payload)
+    # ⭐ Both divisors, exactly as production passes them — a harness that builds a different model
+    # from the shipped one is calibrating something the tool does not ship.
+    from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
+    from rigel.calibration.junction_opportunity import crossing_probability_from_index
+
+    fl = build_fl_models(
+        payload,
+        junction_opportunity=crossing_probability_from_index(index, int(payload.max_length)),
+        gdna_opportunity=gdna_opportunity_from_index(index, int(payload.max_length)),
+    )
     cal = calibrate(
         payload=payload,
         region_arrays=ra,
