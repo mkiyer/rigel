@@ -617,6 +617,31 @@ SPECS: dict[str, ToySpec] = {
         genome_length=60_000,
         genes=[_gene("g1", "+", [(20_000, 23_000), (28_000, 31_000)], 400.0)],
     ),
+    "spliced_exons": ToySpec(
+        name="spliced_exons",
+        what_it_probes="⭐⭐ OWNER'S SPEC. ONE two-exon transcript TA+ (1,000, 2,000) (9,000, 10,000) "
+        "— so this is `nested_exons`'s TWIN at the same gene boundaries on the same 12 kb "
+        "chromosome, with an INTRON and a JUNCTION where the nesting was. FIVE NODES, FOUR "
+        "contiguous EDGES and ⭐ the ladder's first JUNCTION EDGE:\n"
+        "          NODE intergenic [0, 1000)        EDGE @1,000   intergenic|exon, pure gDNA (TSS+)\n"
+        "          NODE exon  [1000, 2000)   TA e1  EDGE @2,000   intron|exon, the DONOR+ side\n"
+        "          NODE intron [2000, 9000)  TA i1  EDGE @9,000   intron|exon, the ACCEPTOR+ side\n"
+        "          NODE exon  [9000, 10000)  TA e2  EDGE @10,000  intergenic|exon, pure gDNA (TES+)\n"
+        "          NODE intergenic [10000, 12000)\n"
+        "          JUNCTION EDGE 2,000 → 9,000 (+), pure mature RNA, NOT a chain slot\n"
+        "        ⭐⭐ What it adds over every rung before it, and why it is the hard one: the two "
+        "exon↔intron EDGES. Mature RNA cannot cross an exon↔intron seam contiguously, so their truth "
+        "is pure gDNA — but the solver's own continuity gate says a strand IS admissible there "
+        "(nascent RNA could cross), so they are NOT G1 and the solver must *derive* what the structure "
+        "already implies. ⛔ On an `nrna_none` donor that is the maximally-violated case of the "
+        "intron↔exon imputation premise, so a nascent rung is the control this one needs.\n"
+        "        ⭐ And unlike `nested_exons` there IS own evidence inside the gene: the 7,000 bp intron "
+        "NODE is where the intron factory lives, so the gDNA level does not have to travel from the "
+        "gene ends. The two exons each sit between a G1 gene-boundary EDGE and an exon|intron EDGE, and "
+        "the junction's flux is the only measurement of their mature RNA.",
+        genome_length=12_000,
+        genes=[_gene("g1", "+", [(1_000, 2_000), (9_000, 10_000)], 300.0, t_id="TA")],
+    ),
     "nested_exons": ToySpec(
         name="nested_exons",
         what_it_probes="⭐⭐ C11 (owner's spec). THREE nested single-exon transcripts on one gene:\n"
