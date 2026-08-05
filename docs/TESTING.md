@@ -131,6 +131,66 @@ one calibrate (~30 s) and is deliberately **not cached**: the bundle is a functi
 code that fit it, so a stored copy would go stale on exactly the changes the harness exists to test.
 ⭐ Harvest once per session and run many toys against it (`harvest()` then `run_toy()` in a loop).
 
+### ⭐⭐⭐ `spliced_exons` — the CURRENT TARGET RUNG, and the one to understand first
+
+**Owner's spec: ONE gene, ONE transcript, `TA+ (1,000, 2,000) (9,000, 10,000)` on 12 kb.** Deliberately
+`nested_exons`' **twin** — same chromosome, same gene boundaries — with an INTRON and a JUNCTION where the
+nesting was, so the two rungs differ by exactly one structure.
+
+```
+NODE intergenic [0, 1000)         EDGE @1,000   intergenic|exon, pure gDNA (TSS+)   G1
+NODE exon  [1000, 2000)   TA e1   EDGE @2,000   intron|exon, the DONOR+ side        ⭐ NOT G1
+NODE intron [2000, 9000)  TA i1   EDGE @9,000   intron|exon, the ACCEPTOR+ side     ⭐ NOT G1
+NODE exon  [9000, 10000)  TA e2   EDGE @10,000  intergenic|exon, pure gDNA (TES+)   G1
+NODE intergenic [10000, 12000)
+JUNCTION EDGE 2,000 → 9,000 (+), pure mature RNA, ⚠ NOT a chain slot
+```
+
+⭐ **What it adds, and why it is the hard rung: the two exon↔intron EDGEs.** Mature RNA cannot cross an
+exon↔intron seam contiguously (`TRAPS.md` F9), so their truth is pure gDNA — but the solver's own
+continuity gate says a strand IS admissible there (nascent could cross), so they are **not** G1 and the
+solver has to *derive* what the structure already implies. ⛔ Every cached condition is `nrna_none`, so
+their truth is exactly 1.000 and the panel cannot distinguish "no RNA crosses" from "no *mature* RNA
+crosses". Use `nrna_abundance > 0` as the control — it is the only way to test that face non-trivially.
+
+⭐ And unlike `nested_exons` there **is** own evidence inside the gene: the 7,000 bp intron NODE is where
+the intron factory lives (τ ≈ 0.18–0.38, |Δf_g| 0.05–0.08), so the gDNA level need not travel from the
+gene ends. The two exons have essentially **no** own evidence on an unstranded library (τ ≈ 5e−6) and are
+carried entirely by messages.
+
+⭐⭐ **The two FACES of an `intron|exon` EDGE** — the derivation this rung exists to land is
+`EQUATIONS.md` §3.6. Read it before touching the solver.
+
+### ⭐⭐ `toy_panel.py` — one spec × EVERY cached condition × an RNA-density ladder
+
+`toy_harness.py` answers "what does this structure do on ONE library at ONE RNA level". Once a structure is
+the **target** rather than a probe, you want the whole space:
+
+```bash
+# all 36 conditions x 7 RNA rungs, PRIOR-FREE pass-0, per-object.   ~13 s per condition
+python scripts/design/toy_panel.py --spec spliced_exons --out rows.jsonl
+
+# ⛔ capture-ON MUST be lengthened or it measures an empty chromosome
+python scripts/design/toy_panel.py --spec spliced_exons --genome-length 120000 \
+    --conditions $(ls $SUITE/ladder | grep capture_on)
+
+python scripts/design/toy_panel.py --report rows.jsonl        # re-aggregate, no re-measurement
+```
+
+* **Prior-free pass-0 by default** (`--refit-iters 0`) — that is the substrate the gDNA hyperprior is later
+  fitted against, so an object confidently wrong here anchors the prior. `--refit-iters 3` is the shipped
+  solve; ⛔ the two answer different questions, do not quote one for the other.
+* **The RNA density is a MULTIPLE of each donor's own gDNA density**, never absolute — the donors' gDNA
+  rates span ~100×, so at rung `m` the exon's true `f_g` is roughly `1/(1+m)` on every row alike.
+* Four tables: the gene's mwae per stratum × rung; **per object** the error, its share of the error MASS
+  and whether the messages helped or hurt (`loc` vs `pred`); the sweep SHAPE (does the answer track the
+  data?); and ⛔ **who is CONFIDENTLY wrong**, which is the population that corrupts a prior.
+* Shard it with `--conditions`; harvesting is 30 s per donor and is deliberately not cached.
+
+⚠ **Its per-object CEILING is a SUBSTITUTION, not a re-solve** — it replaces one object's answer with the
+truth and re-scores. That is honest for a *sink* and **understates a message SOURCE**, whose value is what
+it carries to its neighbours. For a source, run a real arm.
+
 ### Writing a new spec
 
 Add a `ToySpec` to `SPECS` in the harness. The ladder is ordered simplest-first and **each rung adds
@@ -165,11 +225,36 @@ consequences, all measured, and the sweep prints a ⛔ STARVED banner naming whi
 | starved object | does `--genome-length` help? | why |
 |---|---|---|
 | intergenic **node** | ⚠ barely | counts scale with bp at fixed density, but capture depletes off-target so hard that 57 kb yields **2 counts**. You would need megabases — which is exactly why the real panel is 93 Mb of chr21+chr22, and exactly why the donor **injects** `background` / `intron_background` / ρ_bg. ⭐ Under capture the toy's own intergenic nodes are decoration; the background comes from the donor by design |
-| intergenic\|exon **edge** | ⛔ **no, not at all** | a 0-bp line's counts are `density × mean_FL`, **independent of the chromosome length**. At off-target density that is ~0.26 counts however long you make it |
-| … so what lifts an edge? | ⭐ **a PROBE reaching the transcript end** | which is why toy probes are **TILED** across each transcript rather than centred. A single central probe leaves a 2 kb transcript's ends at off-target density and the whole chain starves. This is the owner's C6 geometry: a probe on a first or last exon partially overlaps the boundary and enriches it |
+| an **edge**, capture **OFF** | ⛔ **no, not at all** | a 0-bp line's counts are `density × mean_FL`, **independent of the chromosome length**. The only lever off capture is library depth |
+| ⭐⭐ an **edge**, capture **ON** | ⭐⭐ **YES — LENGTHEN IT** | and this is the OPPOSITE of the capture-OFF row, which is why the two are listed separately. The gDNA budget is `rate × genome_length` while the probe footprint is **fixed**, and the sampler's on-probe share is `binding·overlap / (off_target·L + binding·overlap)` — so a longer chromosome hands capture a bigger budget to concentrate onto the same probes, and an edge's count grows with `L` until that ratio saturates |
+| … and what else lifts an edge? | ⭐ **probe geometry, then binding strength** | probes must **tile PER EXON** so each one abuts the exon↔intron edges and none straddles a junction (below). Raising `binding_per_base` also works but **un-matches the toy from the donor's chemistry**; lengthening keeps every harvested global intact, so it is the clean lever |
 
-⭐ With tiled probes the capture-ON arm works and shows the **same** defect as capture-OFF (exon truth
-0.049, `fg_loc` 0.510, pred 0.771) — which is what makes "one rule for both arms" testable at all.
+⭐⭐ **Measured, `spliced_exons` × `g75 ss0.50 capture_on`, 12 kb → 120 kb, same donor and same
+chemistry** — this is the table that says capture-ON depletion is *the signal moving*, not starvation:
+
+| object | 12 kb | 120 kb | gDNA density at 120 kb |
+|---|---|---|---|
+| `intron\|exon` EDGE @2,000 | 2 | **20** | 0.0788 |
+| `intron\|exon` EDGE @9,000 | 5 | **36** | 0.1418 |
+| `intergenic\|exon` EDGE @1,000 | 1 | **41** | 0.1615 |
+| exon NODE interiors | 16 / 12 | 121 / 118 | 0.162 / 0.158 |
+| intron NODE (7,000 bp) | 1 | **1** | 0.00015 |
+| intergenic NODE | 0 | 13 / 110 kb | 0.00012 |
+
+⭐ So under capture the gDNA signal **leaves the intergenic and intronic NODEs and arrives at the EDGEs
+abutting the exon**, which end up within 2× of the exon interior and ~1000× above the intron interior.
+⛔ **That makes the capture-ON rung the one the `intron|exon` EDGE actually matters in** — it is then a
+well-counted object at the exon's own capture stratum whose component set excludes mature RNA.
+
+#### ⛔ PROBES TILE PER EXON, and the reason is a real suppression
+
+Probes are written in **transcript** space, so a probe spanning an internal junction offset has a genomic
+footprint in **two blocks** — and `sim/capture/sampler._split_scale` then multiplies every gDNA fragment
+overlapping it by `gdna_split_penalty`. Tiling across the whole transcript put such a split probe over
+every internal junction and thereby suppressed exactly the population that spans an `intron|exon` EDGE.
+`_toy_probes` now tiles **within each exon**, so every probe is unsplit and ends **on** the edge.
+⚠ The split-probe case is real in a real panel and deserves its own rung; it should not be an accident of
+how a tiling loop was written.
 
 ### ⚠ What a toy CANNOT judge
 

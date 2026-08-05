@@ -172,6 +172,36 @@ easy to skip: an exact statement about a relayed level needs a destination with 
 a stranded chain is only the pure-gDNA EDGEs — an **AMBIG** node is the one slot that is precision-free
 without being structurally certain, and that is what makes the gate expressible.
 
+**B15. ⛔⛔ "STARVED" AND "DEPLETED" ARE NOT THE SAME DIAGNOSIS, AND CALLING ONE THE OTHER THREW AWAY HALF A
+PANEL.** Under capture the toy's intron and intergenic NODEs fall to ~1 count and I reported the whole
+capture-ON stratum as an empty chromosome, concluding the bench could not measure it *at any chromosome
+length*. ⛔ Both halves were wrong. Capture **moves** the gDNA signal to the EDGEs abutting the exon — that
+is what capture *is* — and the toy's gDNA budget is `rate × genome_length` against a **fixed** probe
+footprint, so the sampler's on-probe share `binding·overlap/(off_target·L + binding·overlap)` means a
+longer chromosome hands capture more budget to concentrate on the same probes. Measured 12 kb → 120 kb,
+same donor and chemistry: the `intron|exon` EDGEs go **2 → 20** and **5 → 36** counts and the gene-boundary
+EDGEs **1 → 41** and **2 → 35**, while the intron NODE stays at 1 — exactly the redistribution, not a
+depth problem. ⭐ **The check that would have caught it: before declaring an object unmeasurable, ask which
+term in the sampler's own weight law it depends on.** An edge's count is `density × mean_FL` capture-OFF
+(so `L` is inert, correctly) and a share of a `L`-scaling budget capture-ON. One sentence of the retention
+law separates the two, and `docs/TESTING.md` §0b carried the capture-OFF answer for both cases for weeks.
+
+**B16. A TILING LOOP CAN SUPPRESS THE VERY POPULATION UNDER STUDY.** Toy capture probes are written in
+TRANSCRIPT space, so a probe spanning an internal junction offset has a genomic footprint in **two blocks**
+— and `sim/capture/sampler._split_scale` then multiplies every gDNA fragment overlapping it by
+`gdna_split_penalty`. Tiling across the whole transcript therefore put a split probe over every internal
+junction and depressed exactly the fragments that span an `intron|exon` EDGE. ⭐ The lesson is not "tile per
+exon" (though that is the fix); it is that **a substrate knob can be adversarial to the object you are
+measuring, and the way to find out is to read the sampler's weight for that object's own population** —
+here, one `if len(blocks) > 1` in code nobody had reason to open.
+
+**B17. A CEILING BY SUBSTITUTION UNDERSTATES A MESSAGE SOURCE.** Replacing one object's answer with the
+truth and re-scoring is the honest ceiling for a SINK — but a source's value is what it *carries*, and a
+substitution does not propagate. Measured: substituting both `intron|exon` EDGEs removed 9.1 % of the
+gene's error, while the object they feed accounted for 82.7 %. ⭐ For a source the ceiling must be a real
+arm — pin it and RE-SOLVE — and an instrument that offers substitution must say which of the two it is
+doing (`toy_panel.py` now does).
+
 **B12. A STRUCTURALLY LOCKED OBJECT IS NOT A CONTROL.** An `intergenic|exon` seam predicts
 `f_g = 1.0000` exactly against a truth of 1.0, and that was read as the healthy twin of the broken
 `intron|exon` seam beside it — "the same object structurally, and the only difference is the junction

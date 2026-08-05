@@ -188,6 +188,71 @@ PARTLY under the capture probe while one contained in the exon lies wholly under
 ⭐ The second residual that used to be listed here — the mass pin filling unsupplied components from the
 destination's own `f_g ≈ ½` — is **fixed**: §3.5c.
 
+**3.6 ⭐⭐⭐ THE TWO FACES OF AN `intron|exon` EDGE — component-set matching, derived and verified.**
+(Owner, 2026-08-04. Verified against oracle truth on `toy_harness --spec spliced_exons`.)
+
+At **one line** the accumulator stores three populations, and their COMPONENT SETS DIFFER — which is the
+whole content of this section:
+
+| bank | what it counted | components |
+|---|---|---|
+| `unspliced_count` = `U` | crossed the line **contiguously**, spliced nowhere | gDNA + **nascent** |
+| `junction_count` = `J` | never crossed it — it **JUMPED** from here | **mature**, certified |
+| `spliced_count` = `S` | crossed contiguously, spliced *elsewhere* | mature, certified |
+
+⛔ Mature RNA cannot cross an exon↔intron seam contiguously (`TRAPS.md` F9), so it is **absent from `U`**
+and present in `J`. Three densities, one of which needs no deconvolution at all:
+
+    rho_g   = C_g / E_g       unknown split of U          U = C_g + C_nas
+    rho_nas = C_nas / E_r     unknown split of U
+    rho_mat = J / E_J         ⭐ MEASURED — certified RNA, nothing to deconvolve
+
+Now match component sets against each flank:
+
+    T(INTRON) = {gDNA, nascent}            = T(EDGE, U only)        ⇒ shares transferable
+    T(EXON)   = {gDNA, nascent, mature}    = T(EDGE, U + J)         ⇒ shares transferable
+
+so, with **the same `rho_g` in both numerators** and only the denominator changing:
+
+    (I)  INTRON face:  phi_g(EDGE) = rho_g / (rho_g + rho_nas)             ==  phi_g(INTRON)
+    (II) EXON   face:  phi_g(EDGE) = rho_g / (rho_g + rho_nas + rho_mat)   ==  phi_g(EXON)
+
+⭐⭐ **One EDGE, one gDNA density, TWO composition statements — differing only in whether the junction
+term is in the total.** This is what makes the EDGE a *solvable* object rather than a relay: (I) plus the
+edge's own mass identity `U = rho_g·E_g + rho_nas·E_r` is two equations in two unknowns, and the intron's
+composition is prior-free (the intron factory). Then (II) delivers the exon's composition with **every
+term measured** — no imputation, no prior, no strand, no length model.
+
+**Verified against oracle truth**, `g50 ss0.50 capture_off`, residual in `phi_g`:
+
+| arm | INTRON face | EXON face |
+|---|---|---|
+| m=100, `nrna_none` | +0.000000 | −0.0011 / −0.0031 |
+| m=100, **nrna = 60** (the non-trivial control) | +0.0266 / −0.0198 | +0.0039 / −0.0012 |
+
+⚠ The `nrna_none` arm tests (I) only trivially (both sides are 1.000); the nascent arm is the real one, and
+there the edge's nascent density reads 0.572 / 0.631 against the intron's 0.578 — the two edges straddling
+it on 15 and 9 gDNA counts against the intron's 349, i.e. Poisson, not bias.
+
+⛔⛔ **THE ESTIMATOR IS NOT THE IDENTITY, AND THIS IS WHERE IT FAILS.** The junction sees only
+`E_J/(E_J + Σ E_r)` ≈ **11 %** of a two-exon transcript's mature fragments, so at low RNA `rho_mat` is a
+handful of counts: at m=1 with `J = 3`, face (II) returns 0.715 against a truth of 0.458. And an EDGE's
+gDNA count is 8–36 where the intron's is ~349. So:
+
+* ⭐ **face (I)'s job is to transport a WELL-COUNTED gDNA level from the intron to the edge**, not to take
+  the edge's 8 counts as authoritative — measured at m=1, referencing the intron gives the exon
+  `f_g = 0.499` and referencing the edge gives 0.350, against a truth of 0.458 and a shipped answer of
+  0.625;
+* ⭐ **face (II) closes the composition two ways** — via `rho_mat` (tight at high RNA, 5–10 % over-stated,
+  useless at low) or via the exon's own mass identity closed with `rho_g` (strong at low RNA, a small
+  difference of large numbers at high). They are strong in opposite regimes, so they FUSE by inverse
+  variance rather than by precedence.
+
+⚠ **And it corrects a documented sign.** `bp_solver`'s P1d comment asserts the graft's premise is a LOWER
+bound, `rho_R(exon) ≥ rho_nas(B) + rho_mat(B)`, and uses it as an equality. Measured, the ratio
+`(rho_nas + rho_mat)/rho_R(exon)` is **1.103** (no nascent) and **1.049** (with nascent) — an UPPER bound
+by 5–10 %. The variance term built on that assumption is sized from the wrong direction.
+
 ---
 
 ## 4. Opportunity corrections for length pools

@@ -68,11 +68,15 @@ LADDER = (0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0)
 
 
 def measure(spec_name: str, conditions: list[str], *, suite: Path, index_path: Path,
-            work_dir: Path, refit_iters: int, ladder=LADDER):
+            work_dir: Path, refit_iters: int, ladder=LADDER, genome_length=0, nrna=0.0):
     """Yield one dict per (condition, density rung, chain slot)."""
     index = TranscriptIndex.load(str(index_path))
     config = dataclasses.replace(CalibrationConfig(), calib_refit_iters=int(refit_iters))
     spec = TH.SPECS[spec_name]
+    if genome_length:
+        spec = dataclasses.replace(spec, genome_length=int(genome_length))
+    if nrna:
+        spec = dataclasses.replace(spec, nrna_abundance=float(nrna))
     ebp = TH.exon_bp(spec)
     for cond in conditions:
         print(f"  harvesting {cond} …", flush=True)
@@ -232,6 +236,15 @@ def main() -> int:
     ap.add_argument("--index", type=Path, default=P0.DEFAULT_INDEX)
     ap.add_argument("--conditions", nargs="*", default=None, help="omit for every cached condition")
     ap.add_argument("--refit-iters", type=int, default=0, help="0 = the PRIOR-FREE pass-0 solve")
+    ap.add_argument("--genome-length", type=int, default=0,
+                    help="⛔ CAPTURE-ON NEEDS THIS. The gDNA budget is rate x genome_length while the "
+                         "probe footprint is fixed, so a longer chromosome lets capture concentrate a "
+                         "bigger budget onto the same probes and an EDGE's count grows with it. "
+                         "`spliced_exons` needs ~120000 on a capture-ON donor (docs/TESTING.md 0b)")
+    ap.add_argument("--nrna", type=float, default=0.0,
+                    help="nascent abundance. ⭐ THE CONTROL every cached condition lacks: with "
+                         "nrna_none an intron|exon EDGE's truth is exactly 1.000, so the intron-facing "
+                         "identity is only testable non-trivially with this > 0")
     ap.add_argument("--work-dir", type=Path,
                     default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_toy_panel")
     ap.add_argument("--out", type=Path, default=None, help="write the per-object rows as JSONL")
@@ -263,7 +276,8 @@ def main() -> int:
     fh = args.out.open("w") if args.out else None
     try:
         for row in measure(args.spec, conds, suite=args.suite, index_path=args.index,
-                           work_dir=args.work_dir, refit_iters=args.refit_iters):
+                           work_dir=args.work_dir, refit_iters=args.refit_iters,
+                           genome_length=args.genome_length, nrna=args.nrna):
             rows.append(row)
             if fh:
                 fh.write(json.dumps(row) + "\n")
