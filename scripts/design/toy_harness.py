@@ -344,15 +344,32 @@ def _toy_probes(spec: "ToySpec", out: Path, knobs: dict) -> str:
         for t in gene["transcripts"]:
             if spec.captured is not None and t["t_id"] not in spec.captured:
                 continue
-            length = sum(e - s for s, e in t["exons"])
             # ⭐⭐ TILED, not one centred probe. A single central probe leaves a 2 kb transcript's ENDS
             # uncovered, so its `intergenic|exon` edges stay at off-target density -- and a 0-bp line's
             # counts are `density x mean_FL` no matter how long the chromosome is, so those objects then
             # have ~0.26 counts and the chain has nothing to propagate. The donor panels are built with
             # `design_suite_probes.py` at probe_density 1.0, i.e. tiled, which is what enriches a
             # first/last exon's boundary in the first place. Match that.
-            for start in range(0, max(length - plen, 0) + 1, plen):
-                lines.append(f"{t['t_id']}\t{start}\t{min(start + plen, length)}")
+            #
+            # ⭐⭐⭐ AND TILED **PER EXON**, SO EVERY PROBE ABUTS THE intron|exon EDGES AND NONE STRADDLES
+            # A JUNCTION. Probes are written in TRANSCRIPT space, so a probe spanning an internal junction
+            # offset has a genomic footprint in TWO blocks -- and `capture/sampler._split_scale` then
+            # multiplies every gDNA fragment overlapping it by ``gdna_split_penalty``. Tiling across the
+            # whole transcript put a split probe over each internal junction, which SUPPRESSED exactly the
+            # population that spans an intron|exon EDGE: measured on `spliced_exons` x
+            # `g75 ss0.50 capture_on`, the two edges carried 2 and 5 gDNA counts while the exon interiors
+            # carried 16 and 14. Per-exon tiling leaves every probe inside one exon, so it is unsplit, it
+            # ends exactly ON the edge, and an edge-crossing fragment takes the full binding weight for
+            # its exon-side overlap.
+            # ⚠ It is also the honest geometry for the question: a probe boundary at an exon end is what a
+            # real panel produces, and the split-probe case is a SEPARATE population worth its own rung
+            # rather than an accident of how a tiling loop was written.
+            off = 0
+            for s, e in t["exons"]:
+                elen = e - s
+                for start in range(0, elen, plen):
+                    lines.append(f"{t['t_id']}\t{off + start}\t{off + min(start + plen, elen)}")
+                off += elen
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(lines) + "\n")
     return str(out)
@@ -635,6 +652,12 @@ SPECS: dict[str, ToySpec] = {
         "(nascent RNA could cross), so they are NOT G1 and the solver must *derive* what the structure "
         "already implies. ⛔ On an `nrna_none` donor that is the maximally-violated case of the "
         "intron↔exon imputation premise, so a nascent rung is the control this one needs.\n"
+        "        ⛔⛔ CAPTURE-ON NEEDS `--genome-length 120000` ON THIS RUNG. At 12 kb the whole "
+        "chromosome gets ~39 gDNA fragments and the two exon↔intron EDGES carry 2 and 5 — not a solve, an "
+        "empty chromosome. At 120 kb they carry 20 and 36 at the EXON's own capture stratum (density "
+        "0.079–0.142 against the exon interior's 0.158–0.162 and the intron interior's 0.00015), which is "
+        "the regime the object actually matters in. ⭐ That is capture working as intended: the gDNA "
+        "signal LEAVES the intergenic and intronic NODES and arrives at the EDGES abutting the exon.\n"
         "        ⭐ And unlike `nested_exons` there IS own evidence inside the gene: the 7,000 bp intron "
         "NODE is where the intron factory lives, so the gDNA level does not have to travel from the "
         "gene ends. The two exons each sit between a G1 gene-boundary EDGE and an exon|intron EDGE, and "
@@ -813,10 +836,20 @@ def sweep_density(
         print("      changed. Which lever helps depends on WHICH object is starved:")
         print("      • an intergenic NODE  — lengthen the chromosome (--genome-length): counts scale")
         print("        with bp at fixed density;")
-        print("      • an intergenic|exon EDGE — ⛔ lengthening does NOTHING. A 0-bp line's counts are")
-        print("        `density x mean_FL`, independent of the chromosome. Under capture the only thing")
-        print("        that lifts it is a PROBE reaching the transcript end, which is why toy probes are")
-        print("        TILED across the transcript rather than centred (see `_toy_probes`).")
+        print("      • an EDGE, capture OFF — ⛔ lengthening does NOTHING. A 0-bp line's counts are")
+        print("        `density x mean_FL`, independent of the chromosome, so the only lever is depth.")
+        print("      • ⭐⭐ an EDGE, capture ON — LENGTHEN IT. This is the opposite of the capture-OFF")
+        print("        case and the reason is the sampler's own mass split: the gDNA budget is")
+        print("        `rate x genome_length` while the probe footprint is FIXED, and the on-probe share")
+        print("        is `binding x overlap / (off_target x L + binding x overlap)`. So a longer")
+        print("        chromosome hands capture a bigger budget to concentrate onto the same probes, and")
+        print("        the edge count grows with L until that ratio saturates. ⭐ Measured on")
+        print("        `spliced_exons` x `g75 ss0.50 capture_on`, 12 kb -> 120 kb: the two intron|exon")
+        print("        EDGEs go 2 -> 20 and 5 -> 36 counts and the gene-boundary EDGEs 1 -> 41 and")
+        print("        2 -> 35, while the intron NODE stays at 1 and the intergenic NODE at ~0 density")
+        print("        — i.e. the signal moves to the EDGES abutting the exon, which is what capture")
+        print("        does. ⚠ Raising `binding_per_base` also works but un-matches the toy from the")
+        print("        donor's chemistry; lengthening keeps every harvested global intact.")
         print()
     print("   ⭐ THE CHAIN under test:  intergenic → edge → EXON → edge → intergenic. With no intron")
     print("      and no junction, the exon's only route to an answer is the two edges, so a wrong")
