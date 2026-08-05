@@ -568,18 +568,31 @@ def test_node_global_geometry_no_longer_SUMS_TWO_FACES(geometry, parts):
 def test_node_total_density_is_the_SUM_of_component_densities_each_in_its_own_frame(
     geometry, parts
 ):
-    """`unified_solver_design` §2: rho = f_g*(M/E_g) + (1-f_g)*(M/E_r), each component in its OWN
-    length frame, plus the one-sided mature density. Never one shared divisor."""
+    """rho = f_g*(M/E_g) + (1-f_g)*(M/E_r), each component in its OWN length frame, plus the flank's own
+    junction flux. Never one shared divisor.
+
+    ⭐ `node_total_density` returns a PAIR — the total for the genomic-LOW flank and the one for the
+    genomic-HIGH flank — so the unspliced part is what the two have in COMMON, and each side adds only
+    its own half of the flux. At a NODE both banks are 0, so both returns are the unspliced sum exactly.
+    """
     _, _, _, chain, _ = parts
     f_g = np.full(chain.n_slots, 0.25)
-    rho_u, rho_w = node_total_density(geometry, f_g)
+    rho_lo, rho_hi = node_total_density(geometry, f_g)
     mass = geometry.unspliced_count.sum(axis=1)
-    expected = mass * (
+    unspliced = mass * (
         0.25 / np.where(geometry.eff_gdna > 0, geometry.eff_gdna, np.inf)
         + 0.75 / np.where(geometry.eff_rna > 0, geometry.eff_rna, np.inf)
     )
-    np.testing.assert_allclose(rho_u, expected)
-    assert np.all(rho_w >= rho_u)
+    node_slots = np.asarray(chain.kind) == NODE
+    np.testing.assert_allclose(rho_lo[node_slots], unspliced[node_slots])
+    np.testing.assert_allclose(rho_hi[node_slots], unspliced[node_slots])
+    assert np.all(rho_lo >= unspliced) and np.all(rho_hi >= unspliced)
+    # ⛔ and the two halves must ACCOUNT FOR THE WHOLE flux — no junction may fall between them
+    whole = np.zeros(int(chain.n_slots))
+    for s in (0, 1):
+        c, e = geometry.junction_count[:, s], geometry.eff_junction[:, s]
+        whole += np.where((c > 0) & (e > 0), c / np.where(e > 0, e, 1.0), 0.0)
+    np.testing.assert_allclose((rho_lo - unspliced) + (rho_hi - unspliced), whole)
 
 
 def test_a_zero_opportunity_object_emits_ZERO_DENSITY_not_infinity(parts):
@@ -597,14 +610,32 @@ def test_a_zero_opportunity_object_emits_ZERO_DENSITY_not_infinity(parts):
 
 def test_mature_density_pools_the_two_TRANSCRIPT_strands(geometry, parts):
     """rho_mature = sum over transcript strands of count/E, each strand in its own frame — and a strand
-    with no flux contributes nothing rather than a 0/0."""
+    with no flux contributes nothing rather than a 0/0.
+
+    ⭐ Per FLANK: the LOW-flank total carries the flux of junctions whose genomic-low end is this line and
+    the HIGH-flank total the rest, so the pooling over strands is checked inside each side separately."""
     _, _, _, chain, _ = parts
-    rho_u, rho_w = node_total_density(geometry, np.zeros(chain.n_slots))
-    expected = np.zeros(chain.n_slots)
-    for s in (0, 1):
-        c, e = geometry.junction_count[:, s], geometry.eff_junction[:, s]
-        expected += np.where((c > 0) & (e > 0), c / np.where(e > 0, e, 1.0), 0.0)
-    np.testing.assert_allclose(rho_w - rho_u, expected)
+    rho_lo, rho_hi = node_total_density(geometry, np.zeros(chain.n_slots))
+    # with f_g = 0 and E_r > 0 the unspliced part is common to both, so the DIFFERENCE isolates the flux
+    for side, other, count, eff in (
+        (rho_lo, rho_hi, geometry.junction_count_lo, geometry.eff_junction_lo),
+        (rho_hi, rho_lo, geometry.junction_count_hi, geometry.eff_junction_hi),
+    ):
+        expected = np.zeros(int(chain.n_slots))
+        for s in (0, 1):
+            c, e = count[:, s], eff[:, s]
+            expected += np.where((c > 0) & (e > 0), c / np.where(e > 0, e, 1.0), 0.0)
+        other_flux = np.zeros(int(chain.n_slots))
+        for s in (0, 1):
+            c, e = (
+                (geometry.junction_count_hi, geometry.eff_junction_hi)
+                if side is rho_lo
+                else (geometry.junction_count_lo, geometry.eff_junction_lo)
+            )
+            other_flux += np.where(
+                (c[:, s] > 0) & (e[:, s] > 0), c[:, s] / np.where(e[:, s] > 0, e[:, s], 1.0), 0.0
+            )
+        np.testing.assert_allclose(side - (other - other_flux), expected)
 
 
 def test_spliced_count_and_junction_count_are_DIFFERENT_POPULATIONS(geometry, parts):

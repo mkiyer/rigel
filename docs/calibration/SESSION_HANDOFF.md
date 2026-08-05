@@ -1,9 +1,9 @@
-# SESSION HANDOFF — ⭐⭐⭐ THE TWO FACES OF AN `intron|exon` EDGE: derived, verified, NOT BUILT
+# SESSION HANDOFF — ⭐⭐⭐ ψ CANNOT SOLVE TO A SIMPLEX VERTEX, AND ONE VERTEX IS MOST OF THE ANNOTATION
 
-    Written 2026-08-04. ⚠ **WORKING DOC, NOT A PERMANENT FIXTURE.** The six permanent docs are
+    Written 2026-08-05. ⚠ **WORKING DOC, NOT A PERMANENT FIXTURE.** The six permanent docs are
       `CLAUDE.md`, `docs/SUCCESS.md`, `docs/ROADMAP.md`, `docs/TRAPS.md`, `docs/EQUATIONS.md`,
       `docs/DESIGN.md`, `docs/TESTING.md`.
-    ⛔ **DELETE THIS FILE when its steps land**, promoting anything worth keeping into `ROADMAP.md`
+    ⛔ **DELETE THIS FILE when its task lands**, promoting anything worth keeping into `ROADMAP.md`
       (a current number), `TRAPS.md` (a lesson), `EQUATIONS.md` (a derivation) or `DESIGN.md` (a ruling).
 
 ## Read in this order
@@ -11,178 +11,160 @@
 | | |
 |---|---|
 | 1 | `CLAUDE.md` — doc map, working rules, the script table |
-| 2 | ⭐⭐ **`docs/DESIGN.md` §0 — THE BINDING VOCABULARY.** NODE, EDGE, step, the mass pin, structurally pure-gDNA object. Read it before writing a comment |
-| 3 | ⭐⭐⭐ **`docs/EQUATIONS.md` §3.6 — THE DERIVATION THIS HANDOFF IS ABOUT.** It is verified against oracle truth; you are building it, not deciding it |
-| 4 | ⭐⭐⭐ **`docs/TESTING.md` §0b** — the toy harness, the `spliced_exons` rung, `toy_panel.py`, and the capture-ON genome-length rule. **Everything you need to run the bench is there** |
-| 5 | `docs/EQUATIONS.md` §3.5 / §3.5b / §3.5c — the composition licence the last two steps landed; §3.6 extends the same idea to a matched component set |
-| 6 | `docs/calibration/ISSUES.md` **C12, C13, C14** (this work) and **C2, C6** (what it collides with) |
-| 7 | `docs/TRAPS.md` **B15, B16, B17** — three mistakes made *this* session on the bench, all avoidable |
+| 2 | ⭐⭐⭐ **`docs/ROADMAP.md` §2** — the task, measured. §1 is the ranked list, §3 is what must NOT be rebuilt |
+| 3 | ⭐⭐ **`docs/TRAPS.md` D5** (a grid supplies a prior whether you ask or not), **D1** (a variance cannot fix a bias), **A14** (a "no change" arm is not a control until you count the opportunities), **A12** (never the honesty metrics alone) |
+| 4 | ⭐ **`docs/EQUATIONS.md` §9** (priors on a grid) and **§3.5d** (why `r_tot` is not a component's ratio — and why a perfect `r_g` is worth zero here) |
+| 5 | `docs/TESTING.md` §0b — the toy harness and its spec ladder |
 
 ---
 
 ## 1. State of the tree
 
-**Branch `fragment-length-gold-standard`, and it is COMMITTED** — a change from the last handoff. Four
-commits, newest last:
+**Branch `fragment-length-gold-standard`.** Everything from the 2026-08-05 sittings is committed. `src/`
+carries the splice-flux reframe as the **default, ungated** path (owner's ruling — it is theoretically
+correct; the old junction-inclusive total was catastrophically wrong).
 
-| | |
-|---|---|
-| `c6b2ea89` | the message licence: the mass pin gated (C11) + the population conjunct (C4) |
-| `b6a50e65` | the `spliced_exons` rung + `toy_panel.py` |
-| `34da3d71` | probes tile PER EXON; capture-ON edges are lifted by LENGTHENING |
-| *(this one)* | the docs |
-
-**Test baseline: 22 failed / 2214 passed / 2 xfailed.** The 22 are the standing set (21
-`test_golden_output` + `test_paralogs::test_gdna_sweep[gdna_100]`, `TRAPS.md` D9). A 23rd failure or any
-other non-golden name is a regression. `ruff check src/ tests/ scripts/` clean.
+**Test baseline: 22 failed / 2214 passed / 3 xfailed.** The 22 are the standing set — 21
+`test_golden_output` + the paralog row (`TRAPS.md` D9). ⭐ The third xfail is new and is
+`test_toy_harness::test_the_harness_REPRODUCES_the_intron_composition_dependence`, `strict=True`: it is the
+project's detector for the level defect that the reframe's correction un-masked, and **it must go green
+again when step 2's joint arm lands**. ⛔ Its 2.0 bound was deliberately NOT widened.
+`ruff check src/ tests/ scripts/` clean. ⚠ **Never `ruff format scripts/`.**
 ⚠ The oracle cache at `~/Downloads/rigel_runs/suite/ladder/oracle_cache` is **VALID — do not delete.**
 
 ---
 
-## 2. ⭐⭐⭐ WHAT IS ALREADY ESTABLISHED — do not re-derive it
+## 2. ⭐ WARM-UP: FINISH `alt_splice` — 20 minutes, and it closes an owner question
 
-`EQUATIONS.md` §3.6 has the full derivation. The one-paragraph version, because everything below turns on
-it: at one line the accumulator stores three populations whose **component sets differ** —
-`unspliced_count` is `{gDNA, nascent}` (mature cannot cross an exon↔intron seam contiguously),
-`junction_count` is certified mature. So one EDGE carries one gDNA density and **two** composition
-statements, differing only in what is in the denominator:
-
-    (I)  INTRON face:  rho_g / (rho_g + rho_nas)             == phi_g(INTRON)
-    (II) EXON   face:  rho_g / (rho_g + rho_nas + rho_mat)   == phi_g(EXON)     rho_mat = J/E_J, MEASURED
-
-**Verified against oracle truth** on `spliced_exons` × `g50 ss0.50 capture_off`: face (I) residual
-+0.000000 (`nrna_none`) and +0.0266 / −0.0198 on the nascent control; face (II) −0.0011 / −0.0031 at
-m=100. ⚠ The `nrna_none` arm tests (I) only trivially — both sides are 1.000 — so **the nascent control is
-not optional**.
-
-⭐⭐ **And the reason it is worth building** — measured on the exon where pass-0 is worst (m=1):
-
-| route to the exon's `f_g` | value | vs truth 0.458 |
-|---|---|---|
-| the shipped pass-0 answer | 0.625 | +0.167 |
-| the EDGE's own `rho_g` (**8** counts) | 0.350 | −0.108 |
-| ⭐ the INTRON's `rho_g` (**349** counts), carried by face (I) | **0.499** | **+0.041** |
-
----
-
-## 3. ⛔ THE THREE BENCH MISTAKES I MADE, so you do not repeat them
-
-1. **I called capture-ON depletion "starvation" and wrote off half the panel.** It is the signal *moving*
-   to the EDGEs abutting the exon. `--genome-length 120000` turns the two `intron|exon` EDGEs from 2 and 5
-   counts into 20 and 36, at the exon's own capture stratum. `TRAPS.md` B15, table in `TESTING.md` §0b.
-2. **Probes tiled across the transcript put a junction-straddling (split) probe over every internal
-   junction**, and `gdna_split_penalty` then suppressed exactly the edge-crossing gDNA. Fixed to tile per
-   exon. `TRAPS.md` B16.
-3. **`toy_panel`'s per-object ceiling is a SUBSTITUTION and understates a message SOURCE.** It priced the
-   two EDGEs at 9.1 % of the gene's error while the exon they feed carries 82.7 %. `TRAPS.md` B17.
-   ⛔ **This is why step 2 below demands a re-solve arm, not a substitution.**
-
----
-
-## 4. ⭐⭐⭐ THE PLAN — owner-approved, in this order
-
-### STEP 0 — RE-EARN THE CAPTURE-ON NUMBERS (do this first; everything else is scoped by it)
-
-```bash
-python scripts/design/toy_panel.py --spec spliced_exons --genome-length 120000 \
-    --conditions $(ls ~/Downloads/rigel_runs/suite/ladder | grep capture_on) --out capon.jsonl
-```
-
-⛔ **Every capture-ON number anywhere in the git history of this campaign was measured at 12 kb and is an
-empty chromosome.** That includes my claim that capture-ON × unstranded is the worst stratum (0.3044) —
-treat it as unmeasured. Confirm the edges hold ~20–40 counts across the whole gDNA ladder, not just at
-g75. ~8 min sharded. ⭐ Also worth a rung of its own: the **split-probe** geometry, which is real in a real
-panel and now deliberately absent from the toy.
-
-### STEP 1 — THE NASCENT CONTROL, as a panel arm
-
-`--nrna 60`. Every cached condition is `nrna_none`, so an `intron|exon` EDGE's truth is exactly 1.000 and
-face (I) is untestable non-trivially. This is also `ROADMAP.md` step 3 and `ISSUES.md` C10 — the panel may
-be measuring a robustness corner rather than the real case.
-
-### STEP 2 — ⛔ THE RE-SOLVE CEILING FOR FACE (I)
-
-Pin each `intron|exon` EDGE's gDNA density to the **intron's** and RE-SOLVE (not substitute). That is the
-upper bound on step 3 and it is the number that decides whether to build. ⚠ Do it on capture-OFF *and*
-capture-ON (post step 0), because the two regimes reference different objects.
-
-### STEP 3 — BUILD FACE (I): the intron↔EDGE composition transfer
-
-Same shape as the population conjunct that just landed (`EQUATIONS.md` §3.5b): the intron and the EDGE's
-*unspliced* population have the **same component set**, so the composition may cross — and the transport
-must run from the **well-counted** side. ⚠ Mirror it in BOTH twins (`_relay` and `_transport`) and gate the
-relay side directly — `TRAPS.md` B14 records that a combine-only gate let a relay-only deletion pass the
-entire suite.
-
-### STEP 4 — BUILD FACE (II) as an INVERSE-VARIANCE FUSE
-
-Two estimators of the exon's RNA density, strong in opposite regimes: `rho_mat = J/E_J` (tight at high RNA
-— the junction sees only ~11 % of the mature fragments, so it is 3 counts at m=1) and the exon's own mass
-identity closed with the EDGE's `rho_g` (strong at low RNA, a small difference of large numbers at high).
-⛔ **Fuse, do not rank** — a precedence silenced the RNA channel before (`bp_solver`'s peel-level note).
-
-### STEP 5 — the two small ones, both measured
-
-* **C13**: `E_J` vs the exon's `E_r` disagree by 5–10 % — the whole residual of face (II).
-* **C14**: `bp_solver`'s P1d says the graft's premise is a LOWER bound; measured it is an UPPER bound by
-  5–10 %. The variance term built on it is sized from the wrong direction.
-
-### ⚠ Two open questions to settle on the way
-
-* **The e1/e2 asymmetry.** At m=100 the second exon is given ~10× too much gDNA (pred 0.0721 vs truth
-  0.0073) while the first is nearly exact, in both strand regimes. ⚠ **Possibly not a separate mechanism**:
-  the two flanking EDGEs had 13 and 8 gDNA counts and e2 is the one behind the 8-count edge, so it may just
-  be the variance problem step 3 fixes. Confirm before treating it as its own defect.
-* **Does the prior already hide any of this?** Everything above is `--refit-iters 0`. The shipped solve runs
-  3 refits and has never been compared on this rung. One run tells you whether you are fixing something the
-  hyperprior already covers.
-
----
-
-## 5. ⭐⭐ THE BENCH — every command
+The owner asked whether alternative splicing solves correctly and the rung exists but is **UNVERIFIED**. No
+solver number may be read off it until the substrate is verified (`TRAPS.md` A1).
 
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 export OMP_NUM_THREADS=1
-SUITE=~/Downloads/rigel_runs/suite/ladder
-CACHE=$SUITE/oracle_cache            # ⚠ VALID — do not delete
 
-# ⭐ ONE condition, every object beside per-object truth — 13 s including the harvest
-python scripts/design/toy_harness.py --spec spliced_exons \
-    --donor gdna_g50_ss_0.50_nrna_none_capture_off
+python scripts/design/verify_toy_substrate.py --spec alt_splice --no-gdna --n-rna 200000
+python scripts/design/verify_toy_substrate.py --spec alt_splice --n-rna 200000 --nrna 60
+for p in pos_blocks transcript_order single_geom drop_junction; do
+    python scripts/design/verify_toy_substrate.py --spec alt_splice --n-rna 200000 --perturb $p; done
 
-# ⭐⭐ THE PANEL: 36 conditions x 7 RNA rungs, PRIOR-FREE pass-0, per object
-python scripts/design/toy_panel.py --spec spliced_exons --out rows.jsonl
-python scripts/design/toy_panel.py --report rows.jsonl          # re-aggregate, no re-measurement
-#   ⛔ capture-ON: add --genome-length 120000.   ⭐ the nascent control: --nrna 60
-
-# the regression suite for the licence that already landed
-python -m pytest tests/calibration/test_relay_mass_pin.py \
-    tests/calibration/test_terminus_population_licence.py \
-    tests/calibration/test_gdna_scale_rule.py -q
-python -m pytest tests/ -q      # must read 22 failed / 2214 passed / 2 xfailed
-ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
-
-# ⛔ the acceptance test for any SOLVER change — single-process, ~25 min, read weak% BEFORE mwae
-python scripts/design/solvability_audit.py --suite $SUITE --oracle-cache $CACHE
+python scripts/design/reframe_walk.py --arms high --n-rna 200000 --spec alt_splice
+python scripts/design/zero_controls.py --specs alt_splice
 ```
 
-⚠ **`solvability_audit.py` is single-process and ~25 min. Do NOT edit `src/` while it runs.** ⭐ It shards
-cleanly by condition if you need it faster — one process per subset, then concatenate the rows.
+**`alt_splice`** is TA+ (1,000–2,000)(5,000–6,000)(9,000–10,000) and TB+ (1,000–2,000)(9,000–10,000) —
+inclusion and skipping isoforms. Three junctions over two shared sites: 2,000→5,000, 6,000→9,000 and the
+skipping jump 2,000→9,000.
 
-⭐ **Re-record the baseline from the current tree in the same session as any arm** (`TRAPS.md` B8), and
-⚠ **a falsification test first, verified failing — then break the fixed code and watch each gate fire.**
-That second half found a real hole in each of the last two steps.
+| what to check | expected, from `EQUATIONS.md` §3.6c |
+|---|---|
+| EDGE @2,000 | genomic-LOW end of **TWO** junctions ⇒ both fluxes in `junction_count_lo`, `_hi` = 0, pooled `Σcount/ΣE` |
+| EDGE @9,000 | genomic-HIGH end of **TWO** ⇒ both in `_hi` |
+| EDGE @5,000 / @6,000 | one junction each, `_hi` / `_lo` respectively |
+| node [5,000, 6,000) | ⭐ exon AND intron **on the same strand** — TA's middle exon inside TB's intron. No strand bit separates them and `coarse_type_array` calls it `exon` |
+
+⚠ **The prediction I would most like falsified:** the skipping junction (2,000→9,000) passes *over* node
+[5,000,6,000), which is TA's exon. So that node holds TA's mature RNA contained in it **and** TB's mature
+passing over it via a junction it does not attach to. The flank rule says nothing about that population, and
+it is where I expect a surprise.
+
+⚠ What `alt_splice` does **not** cover: an EDGE that is one junction's LOW end and another's HIGH end at
+once. That needs one transcript's intron to END where another's BEGINS; it is gated synthetically in
+`tests/calibration/test_splice_flux_reframe.py::test_ONE_EDGE_can_be_the_LOW_end_of_one_junction_and_the_HIGH_end_of_another`.
 
 ---
 
-## 6. What this session measured, for the record
+## 3. ⭐⭐⭐ THE TASK — ψ CANNOT REACH A VERTEX
+
+`ROADMAP.md` §2 has the full measurement. The one-paragraph version:
+
+A silent gene — every transcript `abundance = 0`, so every object is pure gDNA and the truth is `f_g = 1.000`
+exactly — solves to **0.92 – 0.99**, on every rung, for 0.65–2.51 % of mass. The objects where ψ is BYPASSED
+(structurally pure-gDNA G1 objects) are **exact**. The objects where ψ SOLVES land 5–8 % short of the vertex.
+It is not the messages: what they deliver already implies `f_g` = 0.886–1.148, it does not shrink over a 40×
+count sweep, and it gets **worse** as the log-odds window widens.
+
+⭐ **Why this is step 1 and not the message layer.** Most annotated transcripts are unexpressed, so this is
+the modal object in a real library, not a corner. And because the zero-RNA arm has a *perfect* `r_g` and
+*correct* delivered messages and still lands 5–8 % short, the vertex residual is a **floor under every
+message-layer arm** — which is very likely why panel A/Bs keep returning ±0.5 %.
+
+### ⛔ STEP 1 — FIRST MEASUREMENT, BEFORE ANY DESIGN: is the phantom-gDNA floor the SAME bug?
+
+```bash
+python scripts/design/zero_controls.py --specs silent TA_single_exon spliced_exons nested_exons
+```
+
+Both arms, one command. The zero-**gDNA** arm reads `f_g` = 0.0218 against exactly 0.0000; the zero-**RNA**
+arm reads 0.946 against 1.000. Both are ~2–7 %, both sit at a vertex of the composition simplex
+(`f_g = 0` and `f_g = 1`). ⭐ **If one mechanism covers both vertices, one fix closes two of the owner's
+stated concerns and the value of step 1 doubles. If not, they are separate builds.** Establish which
+before designing anything — this is the ceiling discipline applied to a mechanism rather than a channel.
+
+The falsification handle is already measured and works: sweep `sweep_logodds_window` and watch. If the
+zero-gDNA arm's phantom moves the same way the zero-RNA arm's does, it is one bug.
+
+### ⚠ What is NOT yet known, and must not be assumed
+
+* **Whether the fix is the grid, the reference prior, or the parameterisation.** Three candidates, and the
+  measurement above does not choose between them:
+  1. the log-odds lattice cannot represent a vertex (`log(f_R/f_g) → −∞`), so no posterior median reaches it;
+  2. the reference prior on that lattice is effectively Haldane-ish and amplifies toward the vertices
+     (`TRAPS.md` D5 measured a 0.045-vs-0.525 spread between Jeffreys and Haldane) — ⚠ note the *sign* here
+     is the puzzle: widening made it worse, which a pure "cannot reach the vertex" story does not predict;
+  3. ψ's uninformative reference is being fused as if it were evidence when the object has none.
+* ⛔ **No magic numbers.** A "snap to the vertex when close" rule is exactly the tuned constant this project
+  has refused three times (`TRAPS.md` B11, D4f, D4g). The fix must be a derivation.
+* ⛔ **Measure the CEILING first** (`TRAPS.md` B1 — it has re-ranked this project five times). Hand every
+  evidence-free pure-gDNA object the exact answer and re-solve: what does perfecting the vertex buy on the
+  36-condition ladder? That number decides whether this is a build or a note.
+* ⚠ **Then the panel arm before `src/`** (`TRAPS.md` B18 — three toy-positive changes have been
+  panel-negative). `ladder_arm_ab.py`, ~40 s/condition with the oracle cache; shard with `--conditions` and
+  say which rows carried it.
+
+---
+
+## 4. ⭐⭐ THE OTHER LIVE THREAD — the joint arm (`ROADMAP.md` §1 step 2)
+
+Do not start this before step 1 unless step 1's ceiling comes back ~0. Both halves already exist:
+
+* **half A** is in `src/` and is the default — the splice-flux reframe (`EQUATIONS.md` §3.6c);
+* **half B** is `toy_trace_error.py`'s relay-level arm — withholding the composition licence on the hops out
+  of the intron, measured at **34 %** of that gene's error on its own.
+
+⛔ Alone, half A is panel-negative on the node axis (+0.5 % mwae, +36.9 % confidently-wrong) and positive on
+the edge axis (−0.3 %, −7.7 %, 6/6 better on the shipped solve). `TRAPS.md` D4j says that is not a verdict on
+it: it is half of a **cancelling pair**, and the strict xfail in §1 is the detector. ⭐ The joint arm is the
+only measurement that prices either.
+
+---
+
+## 5. ⭐ THE INSTRUMENTS BUILT THIS CAMPAIGN, and what each is for
+
+All are in `CLAUDE.md`'s script table with their verdicts in their own docstrings.
 
 | | |
 |---|---|
-| ⭐⭐⭐ **the message licence landed** | the mass pin gated by "no BELIEF may enter its budget" (C11) + the terminus POPULATION conjunct (C4). Ladder: confidently-wrong 21,154 → 20,173, overconfidence 2.788 → 2.688, `weak%` 2.91 → 2.80. `ROADMAP.md` §2c |
-| ⛔⛔ **the C11 CEILING said it cost the panel nothing** | deleting the pin outright moves the ladder **+0.0002 (worse)**. It landed on the derivation and on being free. Fourth time the ceiling discipline has re-ranked something |
-| ⭐⭐ **the two-face derivation verified** | `EQUATIONS.md` §3.6, both faces, with and without nascent |
-| ⭐ **the `spliced_exons` rung + `toy_panel.py`** | the owner's two-exon transcript and the instrument that sweeps it over the whole cache |
-| ⛔ **three bench errors found and fixed** | `TRAPS.md` B15/B16/B17 — capture depletion ≠ starvation, split probes, substitution ceilings |
-| ⚠ **C2 promoted to a solver defect** | a boolean licence is flipped at full strength by κ̂ = 0.500689. `TRAPS.md` D4f. It is `ROADMAP.md` step 1 and it caps what step 3 can deliver |
+| `zero_controls.py` | ⭐⭐⭐ **the two zero arms — the owner requires them on every experiment.** How step 1 was found |
+| `reframe_walk.py` | ⭐⭐⭐ every count, both flank totals, every hop in both directions, with `r` as used / as the predecessor gave it / as TRUTH says. §3b decomposes `r_tot` into its per-component ratios |
+| `verify_toy_substrate.py` | ⭐⭐⭐ is the INPUT correct — every bank re-derived from per-fragment truth. Any number of transcripts, either strand. ⛔ Run before reading a solver number off a new rung |
+| `toy_trace_error.py` · `toy_dissect.py` · `toy_ceiling.py` · `ladder_arm_ab.py` · `length_ceiling.py` · `verify_capture.py` | the error trace, the channel dissection, the re-solve ceiling, the panel arm, the length ceiling, the capture A/B |
+
+---
+
+## 6. ⛔ WHAT WAS CLEANED UP, so the next session is not confused by its absence
+
+* **`docs/calibration/ISSUES.md` — DELETED.** Its register had become a second copy of `ROADMAP.md` §1/§3
+  (`TRAPS.md` A11's shape: two homes for one thing). Every live item was folded into `ROADMAP.md` §1, every
+  closed item into §3 as one line, and every `ISSUES.md C-number` citation in `docs/`, `scripts/` and
+  `tests/` was repointed. There are zero dangling references.
+* **`docs/calibration/solver_derivation.md` — DELETED.** Superseded by `EQUATIONS.md` §3.5d/§3.6c.
+* **`docs/calibration/splice_flux_reframe_src.patch` — DELETED.** ⛔ It was a "revert convenience" copy of a
+  `git diff`, i.e. exactly the code-kept-for-comparison defect `TRAPS.md` G3 bans. Git is the revert
+  mechanism.
+* **`ROADMAP.md` 1,030 → ~175 lines**, and it now points forward: state, the ranked list, one line per
+  closed item, the open questions, the rules. ⛔ It had grown a section per campaign, which is a changelog.
+* **`TRAPS.md` 741 → ~514 lines with every label intact.** The `D4` family's ten entries are now one lesson
+  with a ten-row instance table, and the longest B/A entries are compressed to the mistake–tell–rule form.
+  ⛔ **Labels are cited from source and tests, so a label is never renumbered or deleted** — a merged label
+  survives as a table row. The file's header now carries that rule and the pruning discipline.

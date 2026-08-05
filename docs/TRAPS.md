@@ -4,6 +4,14 @@
 measurement that was believed and was wrong. They are here because each one cost time, and several were
 made twice.
 
+⛔⛔ **THE SHAPE OF AN ENTRY, AND IT IS ENFORCED BY PRUNING.** A trap is **the mistake, the tell, and the
+rule** — three or four lines. The investigation that produced it is in git; the number that describes
+current state is in `ROADMAP.md`. ⚠ This file reached 741 lines and 91 entries before its first prune
+(2026-08-05) because entries were being *appended to* as new instances arrived. ⭐ **Instances of ONE lesson
+belong in a LIST inside that lesson, not as new entries** — see `D4`, which is nine costumes of one mistake.
+⛔ Labels are cited from source docstrings and tests, so a label is NEVER renumbered or deleted; a merged
+label survives as a row in its family's table.
+
 ⛔ **This file holds LESSONS, not measurements.** A number appears only where it *is* the lesson (an
 "exact factor of 2", a "12× over-represented"). Current measured state lives in `ROADMAP.md`; anything
 here that reads like a status report is a bug in this file.
@@ -49,16 +57,21 @@ test; repair fixtures, never relax assertions; **an exact algebraic 2 is never a
 approximation.**
 
 **A10. AN ABLATION THAT NEVER RAN READS AS "NO EFFECT", AND TWO IMPORT HABITS MAKE THAT EASY.** An arm
-that deleted the whole junction channel scored **byte-identical to the baseline on every class of every
-condition** — a clean, publishable "this channel is inert". It was inert only because the monkeypatch
-missed the module that actually binds the name: `calibrate.py` does
-`from .bp_solver import build_node_geometry`, so its module global is a separate reference.
-⛔ **And the first repair missed it too**, because `from rigel.calibration import calibrate` returns the
-re-exported **function** of that name, which shadows the submodule — so every `hasattr` on it is False
-and the patch silently skipped it. The submodule must come from `sys.modules`.
-⭐ *The tell that caught it:* the ablation was a strict **superset** of another one, and scored a
-smaller effect. ⭐ *The rule:* every ablation increments a counter and the harness **raises** if it did
-not fire. A5's "bit-identity has lied in both directions" with the lie on the other side.
+deleting a whole channel scored **byte-identical on every class of every condition** — a clean, publishable
+"this channel is inert". It was inert only because the monkeypatch missed the module that binds the name
+(`from .bp_solver import X` makes a separate module global), and the first repair missed it too because
+`from pkg import mod` returns a re-exported *function* of that name which shadows the submodule.
+⭐ *The tell:* the ablation was a strict SUPERSET of another and scored a smaller effect. ⭐ *The rule:*
+every ablation increments a counter and the harness **raises** if it did not fire.
+
+**A12. ⛔⛔ EVERY HONESTY METRIC IMPROVES AS THE SOLVER STOPS KNOWING ANYTHING — SO NONE IS READABLE
+WITHOUT A FIXED-DENOMINATOR ACCURACY NUMBER BESIDE IT.** A destruction control (force a 97-σ real strand
+signal to ½) collapsed accuracy **0.0231 → 0.2064, +792 %, 16/16 worse** — while confidently-wrong Σ|err|
+fell **87 %**, the declared-precision ratio went 4.53 → 0.67 and `weak%` went to 0, all 16/16 "better".
+Three of those four are the Stage-B dashboard's headline columns. ⛔ **The rule: an A/B that moves `solv%`
+has changed its own denominator, so quote `mwae` over ALL objects and the raw Σ|err| alongside — those two
+cannot be gamed by knowing less.** ⚠ It also inverts single-condition readings: one row showed −64 % and
+the same arm over 16 conditions is −0.2 %.
 
 **A11. A TEST THAT RE-DERIVES A DEFINITION CANNOT DETECT DRIFT IN IT.** A gate existed precisely to keep
 two instruments' shared class definition from diverging — and it recomputed that definition inline in
@@ -66,6 +79,24 @@ the test. Changing one instrument fired nothing. It is A1's shape once more: the
 checked have to come from *different* places, and for a shared definition that means **one home**, with
 every consumer importing it. Here the home is production code (`node_geometry.g1_locked`), because the
 predicate is a production concept and `scripts/` is deliberately not importable.
+
+**A13. ⭐⭐ A GATE THAT RECONSTRUCTS A VALUE IS VACUOUS WHEREVER THE CODE DECIDES NOT TO USE IT — GATE A
+SYMMETRY THE CODE CANNOT FAKE INSTEAD.** A relay gate recomputed the delivered gDNA level and asked which
+candidate the relay was closer to. It passed the honest run **and the deliberately mis-paired one**, because
+on an unstranded fixture the composition licence is withheld, the level crosses unscaled, and the ratio
+being reconstructed never enters the observable. Eleven green gates; the one perturbation they existed for
+fired nothing. ⭐ The repair was to stop reconstructing: on a PALINDROMIC chain the relay's two passes must
+be exact mirror images, which needs no assumption about which channels are live. ⛔ **When a gate needs a
+value to flow through a conditional path, it is a gate on that conditional. Prefer an invariance.**
+
+**A14. ⛔⛔ "THE ARM CHANGED NOTHING" IS NOT A CONTROL UNTIL YOU CHECK THE ARM COULD HAVE CHANGED
+SOMETHING.** A zero-gDNA condition was reported as a free falsification control because the new and old
+reframe ratios agreed on every hop. They did, and the arm tested nothing: the composition licence was
+withheld everywhere (no gDNA ⇒ no gDNA precision ⇒ no source can lend), and **6 of 8 hops per direction were
+NO-FRAME** — the intron NODE had zero counts, so the reframe was skipped with `r` forced to 1 by the
+divide-by-zero guard. The only framed hops were the ones the change does not touch.
+⭐ **For every "no change" arm, count the opportunities the change had to fire and print that count beside
+the result.** Same family as A13 and A8: *the measurement was never in a position to say anything.*
 
 **A7. Prove the SUBSTRATE before proving the code.** For two milestones the simulated panel's
 post-capture fragment-length distribution was byte-identical to its pre-capture one, and everything
@@ -111,80 +142,37 @@ error and a +75.4 k error reading as a "nearly perfect" −1.9 k.
 184,271. **A net error is a lower bound on the real one, and it can be an arbitrarily weak one.** Report
 `Σ|err|` beside every net, and the directional split beside both.
 
-**B10. THE DEFAULT INSTINCT IS A POOLED AVERAGE, AND IT IS WRONG HERE THREE DIFFERENT WAYS.** B3, B4
-and B5 are each one instance; the pattern is worth naming because it recurred three times in a single
-session, each time in a NEW instrument, each time caught by review rather than by the tool:
-*(i)* averaging an error over objects that **cannot be solved**, so honest ignorance reads as error and
-buries the real answer (0.0456 reported as 0.3150); *(ii)* averaging across **saturated zero-target
-rows**, where any change that lowers the estimate "improves" the row; *(iii)* averaging a rate over
-objects whose **mass differs by four orders of magnitude**. ⭐ The habit that prevents all three:
-**report the partition BEFORE the aggregate, and make every aggregate state which population it is
-over.** An instrument whose headline is a single number is one refactor away from pooling the wrong
-things again.
+**B10. THE DEFAULT INSTINCT IS A POOLED AVERAGE, AND IT IS WRONG HERE THREE WAYS.** (i) averaging error
+over objects that cannot be solved buries the answer — but an exclusion is a promise to check that class
+some other way (B13); (ii) a pooled mean hides a sign flip between strata; (iii) mass-weighting lets one
+huge object set the number. ⭐ Report per stratum, with the denominator named.
 
-**B11. A BINARY CUT ON A FITTED PARAMETER'S RESIDUE IS NOT A POPULATION TEST — AND A BETTER THRESHOLD
-IS NOT THE FIX.** B10 (i) was corrected by excluding objects with *no* own evidence, tested as
-`tau_lam > 1e-9`. But the strand arm carries `I(f_g) ∝ (2κ−1)²`, exactly zero only at κ = **½**, and κ
-is *fitted*: at 10 M fragments κ̂ = 0.500689 on a genuinely unstranded library, so τ lands at ~5e-7
-instead of 0 and the cut promotes the object to "solvable" while its own statement has
-**sd(λ) = 1,377 nats against a solver that represents λ only on ±10**.
-⭐ **Nothing upstream is wrong** — the derived deadband `disc = 4·max(0, (κ−½)² − σ²_d)` correctly
-*admits* it, because κ̂−½ is a real **1.9σ** fluctuation at that depth. The information is
-statistically genuine and physically nil. The defect is the **binary cut**, which cannot tell those
-apart.
-⛔ **And the obvious repair was implemented and REFUTED by its own gate:** a resolving-power floor at
-`1/(2L)²` requires an empty interval to sit in, and τ is **continuous** across that region on 4 of 5
-ladder conditions (only unstranded × capture-OFF is bimodal, and there the two clusters are the silent
-strand arm at ~1e-7 and the live intron factory at ~1e-1). With no gap, any floor is a tuned constant.
-⭐ *What replaced it:* report `sd(λ) = 1/√τ` as a **curve over decades**, the same device the
-instrument already used for confidence. It needs no cut, and it says the thing directly — on
-`g75 ss0.50 capture_off`, **79.1 % of the "solvable" error sits on objects with sd(λ) ≥ 10 nats.**
-⚠ Its second consequence: two strata that were reported as different *regimes* (unstranded
-capture-OFF "2.0–96.2 % solvable" vs capture-ON "0.1–6.3 %") differ only by which side of 1e-9 κ̂
-landed on — 0.500689 against 0.499972.
+**B11. A BINARY CUT ON A FITTED PARAMETER'S RESIDUE IS NOT A POPULATION TEST — AND A BETTER THRESHOLD IS
+NOT THE FIX.** `τ > 1e-9` promoted objects whose own statement was 1,377 nats wide into the scored
+population, hiding a 1.06 M-fragment error. ⛔ A floor was implemented and refuted: τ is continuous across
+the region, so any floor is a tuned constant. ⭐ The honest repair is to propagate the fitted parameter's
+own variance, which drives the arm to ~0 by derivation (D4f).
 
 **B13. ⛔⛔ EXCLUDING A POPULATION FROM THE DENOMINATOR WITHOUT GATING ITS OWN FAILURE MODE HIDES THE
-LARGEST ERROR IN THE LIBRARY.** B10 (i) is right — averaging error over objects that cannot be solved
-buries the answer, and the undetermined class was correctly excluded. But an exclusion is a promise to
-check that class *some other way*, and `SUCCESS.md` even named the check ("its only failure mode is the
-opposite one: claiming a precision it has not earned") — and nothing implemented it. So on
-`gdna_g25_ss_0.50_nrna_none_capture_off`, whose reported score is **mwae 0.0170** on a 39.5 % solvable
-set, the excluded class carried **1,056,019 fragments** of error, with **6,425 objects moved a mean
-0.414 away from ½ and 100 % of them declaring a finite precision**. The single worst mechanism — 87 deep
-exon nodes driven to `f_g = 0.829` against a truth of 0.009, 395,251 fragments — was **0.0 % scored on
-every rung but one**, and the one rung where it *was* scored is the row the roadmap had already flagged
-as inexplicably anomalous. ⭐ **The rule: every population you exclude needs its own gate, written at the
-same time as the exclusion.** An object with no evidence reporting ½ at zero precision is correct; the
-same object reporting 0.83 at finite precision is the relay inventing an answer, and it is invisible to
-a metric that does not look. ⚠ And the tell was available: the *reason* to exclude a class is that its
-answer should be uninformative, so **measure how far from uninformative it actually is.**
+LARGEST ERROR IN THE LIBRARY.** A condition reporting **mwae 0.0170** on a 39.5 %-solvable set had
+**1,056,019 fragments** of error in the excluded class, with 6,425 objects moved a mean 0.414 from ½ and
+100 % of them declaring a finite precision. The single worst mechanism was **0.0 % scored on every rung but
+one**. ⭐ **The rule: every population you exclude needs its own gate, written at the same time as the
+exclusion.** The tell is free — the *reason* to exclude a class is that its answer should be
+uninformative, so measure how far from uninformative it actually is.
 
 **B14. ⭐⭐ IF EVERY GATE FOR A CHANGE READS ONE INSTRUMENT, THE CHANGE IS GATED IN ONE PLACE — AND
-`_relay`/`_transport` ARE TWO.** The population licence landed in both twins and the gate set for it was
-ten tests, all sound, all reading `_capture['_pin']` — which is the COMBINE's publication. Perturbation:
-delete the conjunct from `_relay` alone and **the entire calibration suite passes**. The relay's own output
-is observable (`fwd_g`, the running level, before the combine touches it), so the missing gate was cheap
-once the hole was known. ⭐ **The generalisable check: for each place the change was made, name the
-observable that would move, and confirm at least one gate reads it.** A count of gates says nothing —
-`test_gdna_scale_rule`'s gate 5 exists for exactly this reason and its docstring says so, and the hole was
-still re-opened by the next change to the same pair. ⚠ And the readable-destination problem is why it is
-easy to skip: an exact statement about a relayed level needs a destination with no own precision, which on
-a stranded chain is only the pure-gDNA EDGEs — an **AMBIG** node is the one slot that is precision-free
-without being structurally certain, and that is what makes the gate expressible.
+`_relay`/`_transport` ARE TWO (now three, with `_flank_dom`).** Ten sound tests all read the combine's
+publication; deleting the conjunct from `_relay` alone left **the entire calibration suite green**.
+⭐ **For each place the change was made, name the observable that would move and confirm at least one gate
+reads it.** A count of gates says nothing. ⚠ Re-opened by the very next change to the same pair, and again
+by a third consumer nobody had listed (A13).
 
-**B15. ⛔⛔ "STARVED" AND "DEPLETED" ARE NOT THE SAME DIAGNOSIS, AND CALLING ONE THE OTHER THREW AWAY HALF A
-PANEL.** Under capture the toy's intron and intergenic NODEs fall to ~1 count and I reported the whole
-capture-ON stratum as an empty chromosome, concluding the bench could not measure it *at any chromosome
-length*. ⛔ Both halves were wrong. Capture **moves** the gDNA signal to the EDGEs abutting the exon — that
-is what capture *is* — and the toy's gDNA budget is `rate × genome_length` against a **fixed** probe
-footprint, so the sampler's on-probe share `binding·overlap/(off_target·L + binding·overlap)` means a
-longer chromosome hands capture more budget to concentrate on the same probes. Measured 12 kb → 120 kb,
-same donor and chemistry: the `intron|exon` EDGEs go **2 → 20** and **5 → 36** counts and the gene-boundary
-EDGEs **1 → 41** and **2 → 35**, while the intron NODE stays at 1 — exactly the redistribution, not a
-depth problem. ⭐ **The check that would have caught it: before declaring an object unmeasurable, ask which
-term in the sampler's own weight law it depends on.** An edge's count is `density × mean_FL` capture-OFF
-(so `L` is inert, correctly) and a share of a `L`-scaling budget capture-ON. One sentence of the retention
-law separates the two, and `docs/TESTING.md` §0b carried the capture-OFF answer for both cases for weeks.
+**B15. ⛔⛔ "STARVED" AND "DEPLETED" ARE NOT THE SAME DIAGNOSIS.** An object with almost no counts because
+the experiment is too small is starved; one with almost no counts because the biology puts nothing there is
+depleted. The first is fixed by more data, the second never is — and reading a depleted object as starved
+threw away half a session chasing depth. ⭐ Decide which by asking whether the count grows with the lever
+you have.
 
 **B16. A TILING LOOP CAN SUPPRESS THE VERY POPULATION UNDER STUDY.** Toy capture probes are written in
 TRANSCRIPT space, so a probe spanning an internal junction offset has a genomic footprint in **two blocks**
@@ -194,6 +182,34 @@ junction and depressed exactly the fragments that span an `intron|exon` EDGE. �
 exon" (though that is the fix); it is that **a substrate knob can be adversarial to the object you are
 measuring, and the way to find out is to read the sampler's weight for that object's own population** —
 here, one `if len(blocks) > 1` in code nobody had reason to open.
+
+**B22. ⛔⛔ AN RNA "LEVEL" THAT IS A MULTIPLE OF THE gDNA DENSITY IS NOT COMPARABLE ACROSS THE CAPTURE
+AXIS.** At rung `m = 100` the exon's true `f_g` is **0.010 off capture and 0.31 on it**, because the
+multiple is taken against the OFF-TARGET density while capture concentrates gDNA onto the exon ~65×. ⛔
+**Key an operating point on a REALISED quantity you can see in the truth, never on a knob you set** — and
+print the realised value so a row that cannot reach the target says so.
+
+**B21. ⛔⛔ PRICE THE HALVES SEPARATELY — A DIAGNOSED DEFECT AND A VALUABLE ONE ARE NOT THE SAME DEFECT.**
+Pricing two length models together read −6.31 % and looked like one finding; split one pmf at a time it is
+**−5.90 % gDNA / −0.43 % RNA**, and all of the gDNA half is capture-ON. The half that was fully diagnosed
+was worth ~nothing and the half worth 14× more had not been looked at.
+
+**B18. ⛔⛔ A TOY CEILING IS NOT A PANEL CEILING, AND THAT HAS NOW COST THREE BUILDS.** A re-solve ceiling
+worth −0.009 on the toy carried to the 36-condition ladder as **+0.0013 (worse)**; a second change was
+toy-positive and panel-negative the same way; a third improved its target rung 26 % and regressed the panel
+axis that carries the mass. ⛔ **Run the panel arm before writing a mechanism into `src/`.** ⚠ And when the
+panel disagrees, ask whether the defect is half of a cancelling pair before concluding (D4j).
+
+**B19. ⛔ "THE WELL-COUNTED SIDE" IS NOT A FIXED SIDE — CAPTURE INVERTS IT.** Off capture an intron NODE
+holds ~349 gDNA counts against a flanking EDGE's 8–36; under capture the intron holds **1** and the EDGE
+holds 20–40, unchanged from 120 kb to 1.08 Mb. So a rule that transports from "the well-counted side"
+silently reverses direction with the protocol, and transferring a DENSITY instead of a SHARE measured
+**+0.207** on capture-ON × unstranded.
+
+**B20. ⛔ ADMITTING AN OBJECT TO THE SCORED POPULATION IS A COST, AND A MECHANISM CAN DO IT SILENTLY.** A
+prototype gave a class certainty it had not earned; `solv%` rose 43.1 → 48.2 and the edge-axis mwae went
+0.0216 → **0.1449** — not because the answers got worse but because wrong answers started being counted.
+⭐ Report `solv%` beside every accuracy number (B13 inverted).
 
 **B17. A CEILING BY SUBSTITUTION UNDERSTATES A MESSAGE SOURCE.** Replacing one object's answer with the
 truth and re-scoring is the honest ceiling for a SINK — but a source's value is what it *carries*, and a
@@ -229,17 +245,9 @@ support "agreeing" with `max_frag_length` was recorded as a fix; the narrower es
 and the "fix" was an uncut intron.
 
 **B7. Every "is the declared precision earned?" number written before 2026-07-28 compared a LOG-space
-variance against a LINEAR squared error.** Corrected, one suite total went 0.046 → 1.007 and the
-per-class ranking INVERTED.
-⛔ **AND THE TRAP IS STILL ARMED, BECAUSE THE FIELD IS NAMED FOR THE WRONG SPACE.**
-``NodeBelief.var_gdna`` / ``NodeDeconv.gdna_frac_var`` is ``Var(log f_g)`` — the grid moment of
-``_log_fg(lam)``, stated in `simplex_logodds` and required by D2 — while both names read as "the
-variance of the fraction". So the obvious way to write *confidently wrong*,
-``|f_g − truth| / sqrt(var_gdna)``, silently re-commits B7. ⭐ The standardised discrepancy must be
-``(log f_g − log f_truth) / sqrt(var_gdna)``, and where the truth is 0 or 1 (a pure-RNA or
-structurally-pure-gDNA object, both common) the clip is **the solver's own λ-grid endpoints** — not a
-chosen epsilon. The solver cannot express a fraction outside its grid, so clipping truth to that
-support is the only comparison it could ever have won.
+variance against a LINEAR-space error.** `Var(log f)` is not `Var(f)`; the delta method
+(`Var(f) ≈ f²·Var(log f)`) converts, and at small `f` the two differ by orders of magnitude. Every
+overconfidence figure from before that date is void, not merely imprecise.
 
 **B8. A delta is only attributable if its baseline came from the same tree in the same session.** Re-record
 the before-picture, do not quote a stored one.
@@ -247,6 +255,16 @@ the before-picture, do not quote a stored one.
 ---
 
 ## C. Pools, selections and divisors
+
+**C0. ⭐⭐ TWO DIVISORS BUILT FROM ONE pmf CAN STILL DISAGREE — IF THEY RESPOND TO IT WITH OPPOSITE SIGN.**
+`E_J = E[w]−1` RISES with the mean fragment length while `E_r = e−E[w]+1` FALLS, so a length-model error
+appears as a junction-vs-exon frame gap of `Δ·(1/E_J + 1/E_r)` = **0.62 %/bp**. The two are exactly
+consistent (202.8 + 797.2 = 1000.0) and still disagree by 10 %. ⭐ **When two quantities built from one
+model disagree, differentiate BOTH with respect to that model before looking for a bug in either.**
+⛔⛔ And the second term added here was WRONG, which is the sharper lesson: a "finite-transcript placement"
+factor of 1.024 was sound arithmetic about a generative model **the simulator does not use** — it reweights
+the length marginal by the same opportunity, so the factor cancels exactly. ⭐ **Before pricing a selection
+effect in a simulated substrate, read the simulator's own sampling code — not the docstring, the code.**
 
 **C1. A PURITY FILTER ON A LENGTH POOL IS A LENGTH FILTER.** Barring fragments whose length was partly
 *inferred* rather than sequenced selects exactly the ones whose mates sit far apart, so the pool became
@@ -301,82 +319,27 @@ over-confident, rising to ~7× with deep spliced content.
 variance collapses, the messages turn confident, and the error propagates. *Honesty measured against a
 wrong belief is not honesty.* Same family: **any component trained on the solver's own output is
 self-confirming** — refit iterations 1→5 went 0.0840 → 0.1056, monotonically worse.
+**D4. ⭐⭐⭐ A MESSAGE COMPUTED FROM THE DESTINATION'S OWN BELIEF CARRIES ZERO INFORMATION AND CONFIRMS THE
+DESTINATION.** **A message may use the destination's CONSTANTS — geometry, lengths — and its OBSERVATIONS;
+never its BELIEFS.** Any "fix" that divides the destination's belief back out rebuilds the bug. ⭐ The check
+is *"is the delivered value independent of the destination's own state?"*, and a prediction that does not
+move when the data moves by four orders of magnitude is the tell.
 
-**D4. A message computed from the destination's own belief carries zero information and confirms the
-destination.** Hit twice: one delivered exactly `1/(1+f_own)`, reserving 33.6 % of the budget for
-imaginary gDNA so a zero-gDNA library read back 29.3 %; and at a gene end the rescale ratio became
-`1/f(dst)`, making the delivered density the destination's own total (7× too big in the median, up to
-190×). **A message may use the destination's CONSTANTS — geometry, lengths — never its BELIEFS.** Any
-"fix" that divides the destination's belief back out rebuilds the bug.
+⚠⚠ **THIS ONE LESSON HAS RECURRED NINE TIMES IN DIFFERENT COSTUMES.** Each sub-label below is cited from
+source and tests, so the labels are kept; the investigations that produced them are in git, not here.
 
-**D4b. D4 CAME BACK, AT A GENE END, AT 1,118× — AND A "TOTAL DENSITY" RATIO IS HOW.** D4 says a message
-computed from the destination's own belief carries zero information and confirms the destination. The
-reframe `r = ρ_tot(dst)/ρ_tot(src)` re-creates it whenever `ρ_tot(dst)` is dominated by a component the
-message is not about: at an `intergenic|exon edge → EXON` hop the edge's *correct* gDNA density
-(0.0257 counts/bp) is multiplied by the exon's total density ratio and delivered as **28.684**, which is
-`≈ M/E_g` — **the exon's own total density**. Because the inflation is itself proportional to the
-destination's density, the delivered gDNA level *always* equals the destination's total, so the answer is
-**flat at `f_g ≈ 0.90` across a 10,000× sweep of RNA density** while the truth spans 0.914 → 0.001. ⭐ **A
-prediction that does not move when the data moves by four orders of magnitude is the tell**, and a sweep
-on a five-object toy exposes it in 0.1 s where a 36-condition panel had hidden it for weeks.
-*The rule:* a scale factor must be built from the component the claim is **about**, never from a total —
-and D4's check is "is the delivered value independent of the destination's own state?", which this
-failed.
-
-**D4c. AND THE FIX WAS NOT A BETTER SCALE — IT WAS NOTICING THE REFRAME HAS NO LEVEL IN IT.**
-`ρ_c(src)·ρ_tot(dst)/ρ_tot(src) ≡ φ_c(src)·ρ_tot(dst)`: the reframe is a **pure composition imputation**,
-the source's share applied to the destination's total, with no level transport whatever. So there is no
-correction factor that repairs it — the missing factor is `φ_c(dst)`, the destination's own belief, and
-multiplying it back in *is* D4. ⭐ **The fix is a LICENCE, not a scale:** the reframe is allowed exactly
-where a composition imputation is allowed (the source SUPPLIED both components — the λ-emission gate's
-own predicate, which was already derived and was being applied to the τ stream only), and where it is
-not, the gDNA **level crosses unscaled** because gDNA is uniform before capture.
-⭐⭐ *The lesson that generalises past this bug:* **before correcting an operator, substitute its own
-definitions and read what it delivers.** Two sessions were spent looking for a better `r` — capture
-efficiencies, class landscapes, probe geometry — for an expression that never carried a level. `EQUATIONS.md`
-§3.5. ⚠ Two things measured on the way, both worth not repeating: a per-capture-class gDNA landscape ratio
-is **byte-identical off capture** (the mass pin already carries the landscape through each pure-gDNA
-object's own measurement), and the tempting affine extrapolation `e_g[exon] = 2·e_g[crossing] − e_g[off]`
-is **exactly the simulator's own retention law** (`sim/capture/sampler.py`: `off_target + gain·overlap`), so
-fitting it would score against the substrate that generated it.
-
-**D4d. THE THIRD D4 WAS IN THE OPERATOR BUILT TO DEFEND AGAINST THE SECOND, AND ITS TELL WAS A FIXED
-POINT AT ½.** The relay's mass pin restores `Σ_c ρ_c·E_c = M` with `k = M/S`, filling every component the
-message did not supply from the destination's OWN density. Substituting its own definitions (D4c's lesson,
-applied again) gives `k = 1/(φ_msg + R_own)` — a saturating map with fixed point `(1−R_own)·ρ_tot`, and
-`R_own`, the RNA share of the destination's own self-solve, is **exactly ½** at any object with no
-composition evidence. So it drove the delivered gDNA FRACTION to ½ regardless of the truth and regardless
-of what the source measured; at `R_own = 0` it collapsed to the destination's own total with the incoming
-level cancelled algebraically. ⭐ **The fix is the same licence, and the derivation is one sentence: the
-identity holds only under the imputation premise, so where the premise is withheld there is nothing to
-restore.** ⚠⚠ **AND IT HID FROM EVERY AGGREGATE**: the running product of the per-step rescales telescopes
-back to exactly 1 at the far end of a gene, and the last step into a pure-gDNA object rewrites the level to
-that object's own total anyway. No conservation, endpoint or aggregate check could see it — it is visible
-only per object, and only away from a pure-gDNA object. `EQUATIONS.md` §3.5c.
-
-**D4e. ⭐⭐ "IT USES THE DESTINATION'S OWN NUMBER" IS NOT THE TEST — D4 IS ABOUT BELIEFS, AND AN OBSERVATION
-IS NOT ONE.** Gating the pin off wherever it read the destination's own density looked like the clean fix
-and it **broke the capture landscape**: the off-probe intergenic floor leaked through every gene-boundary
-EDGE into the exon behind it (measured, `test_gdna_scale_rule`'s capture gate at 20× and 200×). At a
-*structurally pure-gDNA* object there is only one component, so `f_g = 1` is STRUCTURE and `M/E_g` is a
-direct **observation** of the very quantity the message is about — and it is a better one than anything
-relayed, because a G1 EDGE measures the gDNA density at its own capture stratum while carrying `prec_g = 0`
-and so having no other channel (`ISSUES.md` C6). ⭐ **The general form: state the licence as "no BELIEF may
-enter", not as "the destination's numbers may not enter"** — the first is D4 and admits the structural
-case; the second is a superstition that costs a real mechanism. Two states satisfy it, not one.
-
-**D4f. ⭐⭐ B11 IS NO LONGER ONLY A MEASUREMENT DEFECT — IT NOW GRANTS A LICENCE INSIDE THE SOLVER.** B11
-records that κ̂ = 0.500689 on a genuinely unstranded library leaves `I(f_g) ∝ (2κ−1)²` at ~5e-7 instead of
-0, and concludes that the damage is to the *classification*. It is not only that any more: the composition
-licence asks whether the source SUPPLIED a component, "supplied" being a statement about **precision** with
-no threshold — correctly, by design — so those same 1e-6…1e-4 precisions now **grant the imputation
-licence** at every evidence-free exon. Measured: on the `nested_exons` toy the licensed mass pin still
-fires through the whole gene interior, so licensing recovers 0.2618 → **0.2264** where switching the pin off
-entirely reaches **0.0760**. ⭐ **The lesson is not "add a floor"** — B11 already refuted that, and it would
-be a tuned constant. It is that a **structural** zero (κ = ½ ⇒ no strand information, exactly) is
-represented by a point estimate whose own variance covers it, so the honest repair is to propagate
-`Var(κ̂)` into the strand arm's precision, where it drives that arm to ~0 by derivation. Same family as
-`ISSUES.md` C2/C7.
+| | the costume it wore | the lesson that generalises |
+|---|---|---|
+| **D4** | delivered exactly `1/(1+f_own)`, reserving 33.6 % of the budget for imaginary gDNA so a zero-gDNA library read back 29.3 %; and at a gene end the rescale became `1/f(dst)`, 7× too big in the median, up to 190× | the rule above |
+| **D4b** | ⛔ **a "TOTAL DENSITY" ratio is how D4 comes back.** `r = ρ_tot(dst)/ρ_tot(src)` re-creates it whenever `ρ_tot(dst)` is dominated by a component the message is not about: a correct 0.0257 gDNA density delivered as **28.684**, and `f_g` then FLAT at 0.90 across a 10,000× RNA sweep | **a scale factor must be built from the component the claim is ABOUT, never from a total** |
+| **D4c** | and the fix was not a better scale — substituting the definitions shows `ρ_c(src)·r ≡ φ_c(src)·ρ_tot(dst)`, a **pure composition imputation with no level in it**, so no corrective factor exists | ⭐⭐ **before correcting an operator, substitute its own definitions and read what it delivers.** Two sessions were spent hunting a better `r` for an expression that never carried a level |
+| **D4d** | the third D4 was inside the operator built to defend against the second: the mass pin's `k = 1/(φ_msg + R_own)` has a fixed point at `R_own = ½`, so it drove the delivered gDNA FRACTION to ½ regardless of truth | ⚠ **and it hid from every aggregate** — the per-step rescales telescope back to 1 at a gene's far end, so only a per-object check away from a pure-gDNA object can see it |
+| **D4e** | gating the pin wherever it read the destination's own density looked clean and **broke the capture landscape** — the off-probe floor leaked into every exon | ⭐⭐ **state the licence as "no BELIEF may enter", not "the destination's numbers may not enter".** The first is D4 and admits the structural case; the second is a superstition that costs a real mechanism |
+| **D4f** | κ̂ = 0.500689 on a genuinely unstranded library leaves `I(f_g) ∝ (2κ−1)²` at ~5e-7, and a licence that tests a PRECISION with no floor is granted by it | a **structural** zero represented by a point estimate whose own variance covers it; the repair is to propagate `Var(κ̂)`, not to add a floor (B11 refuted the floor) |
+| **D4g** | the same shape with a much larger trigger: an intron's **2.5 % phantom RNA** is the only nonzero RNA precision in a chain, and it alone unlocks a reframe that compounds a gDNA level to **2.16×** | ⭐ **a predicate that gates a MULTIPLICATION must be sized by how much density stands behind it, not by whether a precision is strictly positive** |
+| **D4h** | removing each ψ channel in turn moved the worst object by ≤0.016 of a 0.217 error while removing all of them moved it the whole way — because all three are built from the same relayed level | ⛔ **when single ablations are all small and the joint one is large, stop ablating consumers and go one stage upstream** |
+| **D4i** | an "enrichment ratio" of 1.46 with capture OFF looked impossible and was correct: `ρ_tot` is a TOTAL and the destination held 55 RNA fragments where the source held 0. Compounded, 2.159 used vs 2.153 true | ⭐ **recompute the quantity from the ORACLE before assuming the formula is broken** — the alternative reading sends you to rewrite a correct function |
+| **D4j** | ⛔⛔ **fixing one of two errors that CANCEL is worse than fixing neither.** D4i's leak cancels across a two-hop pair; correcting one hop alone moved a toy's evidence-free exon 0.0107 → **0.0244** while the rung it was aimed at improved 26 % | ⭐ **when a fix is negative and its object sits on a multi-hop path, price it in the arm that also removes the other defect.** A pair of defects that cancel is one experiment, not two |
 
 **D5. "No prior" does not exist on a grid — omitting a term lets the grid supply Haldane**
 (`p(x) ∝ 1/x`, improper, an amplifier toward the vertices). Posterior median spread over grid half-widths
@@ -459,16 +422,11 @@ sum) must be sorted on its own content before it crosses the ABI.
 work.** A perturbation harness must restore from a copy of the WORKING TREE. Cost one full
 re-implementation.
 
-**E14. TWO DIFFERENT MASKS SHARED THE WORD `struct_lock`, AND BOTH WERE RIGHT.**
-`node_init.strand_evidence`'s `struct_lock` is **node-only on purpose** — it governs whether a slot may
-*emit* composition certainty into its messages, and a G1 edge is excluded because a seam is structurally
-gDNA yet sits between RNA-carrying exons, so certainty there compounds into a phantom-gDNA emitter.
-`_type_belief`'s G1 lock is **both axes** — it answers "is the belief pinned and certain?". Three
-instruments classified objects with the node-only version while documenting the both-axes meaning, and
-the mismatch quietly moved every structurally-locked **edge** out of the scored population and into
-"honest ignorance". ⭐ *The fix is not to unify them* — they answer different questions — *it is to name
-them differently and give the shared one a single home.* E13's lesson with the disagreement between two
-**masks** rather than two docstrings.
+**E14. TWO DIFFERENT MASKS SHARED THE WORD `struct_lock`, AND BOTH WERE RIGHT.** One answers "is this
+belief pinned and certain?" (both axes); the other "may this slot EMIT composition certainty into its
+messages?" (NODE-only on purpose, because a seam is structurally gDNA but sits between RNA-carrying exons).
+⭐ Two correct predicates under one name is worse than either being wrong: give each its own name and ONE
+home, and let every consumer import it (A11).
 
 **E13. The prose next to the code said "the AVERAGE" and the code followed the prose,** while a sibling
 module's docstring had the correct formula the whole time. Two docstrings disagreed about one quantity for
@@ -520,18 +478,11 @@ elsewhere.
 **F8. "Effective lengths cancel, so a node's marginal is just its length" is FALSE near any transcript
 end** — a mature fragment must fit in the remaining transcript; gDNA need not.
 
-**F11. EQUAL CONFIGURED FRAGMENT LENGTHS DO NOT GIVE EQUAL REALISED ONES.** Handing the simulator
-identical `frag_mean`/`frag_std`/`frag_min`/`frag_max` for gDNA and RNA still produced a **+4.60 bp
-(+2.16 %)** realised gap at 206 ± 98 — *larger off capture than on it*, so capture is not the cause.
-A mature fragment must fit inside its transcript and gDNA need not (§F8), so transcript-length
-truncation pulls the RNA mean down while gDNA keeps the bare truncated-normal mean. ⚠ That residual is
-the same order as the gap the length channel is meant to read, so "equal FL" as a way of switching the
-length signal OFF has to be **measured on `truth_fragment_lengths.tsv`, never assumed from the config**.
-*What works:* a fragment distribution short and narrow relative to transcript lengths — 150 ± 30 over
-[100, 250] measured **+0.43 bp / −0.06 bp**, and the sign differs between capture arms, which is what
-no-signal looks like. ⛔ *And it has a side effect that must be paid for:* at read length 100 the mates
-then OVERLAP, the unsequenced gap vanishes, and the held fraction collapses **1.73 % → 0.04 %**, leaving
-the side buffer and the drain untested. Shortening the read to 2×75 restores it to 0.78 %.
+**F11. EQUAL CONFIGURED FRAGMENT LENGTHS DO NOT GIVE EQUAL REALISED ONES.** Handing the simulator one
+mean for gDNA and RNA still yields different realised means, because each pool's length marginal is
+reweighted by its own template opportunity — a 2 kb transcript truncates the tail that a whole chromosome
+does not. ⭐ So "equal lengths" is a claim about the CONFIG and never about the library; gate the axis on the
+realised truth (A7).
 
 **F9. Mature RNA never crosses an exon↔intron seam** (0 of 1,146 seams, 7/7 conditions). Exon↔exon seams
 do. This is the hard empirical case that a contiguous seam and a splice junction are physically different

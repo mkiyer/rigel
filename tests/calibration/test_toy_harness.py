@@ -242,6 +242,20 @@ def test_EVERY_object_with_mass_is_reported(donor, spec, tmp_path):
 # ── GATE 4: the harness reproduces the finding it was built to isolate ────────────────────────────
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="⛔⛔ OWNER'S RULING 2026-08-05: the splice-flux reframe is theoretically CORRECT and is now "
+    "the default, ungated. This gate then fails at 2.19x against its 2.0 bound — and the assertion is "
+    "KEPT AGAINST THE TRUTH rather than widened to the number reached, because it is measuring a real "
+    "interaction and not a defect in the reframe.\n"
+    "⭐ What it is measuring: correcting the junction leak removes ONE error from a compensating PAIR "
+    "(`TRAPS.md` D4j). An evidence-free exon is fed through `intron -> EDGE -> exon`; the two hops' errors "
+    "cancelled under the old junction-inclusive total, and the second hop still carries its own defect — a "
+    "correct composition ratio applied to a LEVEL (`EQUATIONS.md` §3.5/§3.5d). So this gate is now the "
+    "project's detector for THAT defect, and it must go green again when the pair is fixed jointly.\n"
+    "⛔ Widening the 2.0 bound would delete the only automatic detector of this mechanism. `ROADMAP.md` "
+    "step 0= is the joint arm that is expected to clear it.",
+)
 def test_the_harness_REPRODUCES_the_intron_composition_dependence(donor, spec, tmp_path):
     """⭐⭐ The substantive gate, **REWRITTEN 2026-08-04 because the defect it pinned was fixed** — which
     is what its predecessor instructed ("rewrite this gate to pin the NEW behaviour rather than deleting

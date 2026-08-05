@@ -665,6 +665,87 @@ SPECS: dict[str, ToySpec] = {
         genome_length=12_000,
         genes=[_gene("g1", "+", [(1_000, 2_000), (9_000, 10_000)], 300.0, t_id="TA")],
     ),
+    "alt_splice": ToySpec(
+        name="alt_splice",
+        what_it_probes="⭐⭐⭐ OWNER'S SPEC, 2026-08-05 — ALTERNATIVE SPLICING: several junctions meeting "
+        "at ONE edge, which is the case a per-EDGE junction total cannot represent.\n"
+        "          TA+ (1,000, 2,000) (5,000, 6,000) (9,000, 10,000)   3 exons — the INCLUSION isoform\n"
+        "          TB+ (1,000, 2,000) (9,000, 10,000)                  2 exons — the SKIPPING isoform\n"
+        "        THREE junctions over TWO shared sites:\n"
+        "          j 2,000 -> 5,000   (TA's first intron)\n"
+        "          j 6,000 -> 9,000   (TA's second intron)\n"
+        "          j 2,000 -> 9,000   (TB's only intron — the exon-skipping jump)\n"
+        "        ⭐⭐ SO THE SITES ARE SHARED, AND THAT IS THE POINT: the EDGE @2,000 is the genomic-LOW "
+        "end of TWO junctions and the EDGE @9,000 is the genomic-HIGH end of TWO. Both of @2,000's fluxes "
+        "belong to its LOW flank and both of @9,000's to its HIGH flank, so each bank must POOL them as "
+        "`Sum(count)/Sum(E)` — the ratio of sums, never the mean of ratios. ⛔ A single junction-inclusive "
+        "total per EDGE cannot express this at all, and neither can a per-junction rule that forgets the "
+        "two share a line.\n"
+        "        ⭐ It also adds a node that is exon AND intron on the SAME strand: [5,000, 6,000) is TA's "
+        "middle exon and lies inside TB's intron. `splice_both_strands` had that contrast only ACROSS "
+        "strands; here it is within one, so no strand bit can separate them and `coarse_type_array` calls "
+        "it `exon`.\n"
+        "        ⚠ What it does NOT cover: an EDGE that is one junction's LOW end and another's HIGH end "
+        "at once. That needs one transcript's intron to END where another's BEGINS, and it is gated in "
+        "`tests/calibration/test_splice_flux_reframe.py` rather than simulated here.",
+        genome_length=12_000,
+        genes=[
+            {
+                "gene_id": "gA",
+                "strand": "+",
+                "transcripts": [
+                    {
+                        "t_id": "TA",
+                        "exons": [(1_000, 2_000), (5_000, 6_000), (9_000, 10_000)],
+                        "abundance": 300.0,
+                    },
+                    {"t_id": "TB", "exons": [(1_000, 2_000), (9_000, 10_000)], "abundance": 300.0},
+                ],
+            },
+        ],
+        n_rna_fragments=4_000,
+    ),
+    "splice_both_strands": ToySpec(
+        name="splice_both_strands",
+        what_it_probes="⭐⭐⭐ OWNER'S SPEC, 2026-08-05 — the rung the SPLICE-FLUX REFRAME logic must be "
+        "derived against. FOUR transcripts, BOTH strands, overlapping exons AND overlapping introns, "
+        "and TWO splice junctions pointing opposite ways:\n"
+        "          TA+ (2,000, 3,000) (9,000, 10,000)      2 exons, + strand, intron 3,000-9,000\n"
+        "          TB+ (2,000, 10,000)                     1 exon,  + strand, spans TA's intron\n"
+        "          TC− (1,000, 11,000)                     1 exon,  − strand, spans everything\n"
+        "          TD− (1,000, 2,500) (8,500, 11,000)      2 exons, − strand, intron 2,500-8,500\n"
+        "        ⭐⭐ WHY THIS ONE. Every previous rung let an EDGE answer 'is my neighbour an exon?' "
+        "with a yes or a no. Here it cannot: THREE nodes are simultaneously an INTRON on one strand and "
+        "an EXON on the other — [2,500, 3,000), [3,000, 8,500) and [8,500, 9,000) — so 'exon' is not a "
+        "property of a node at all, it is a property of (node, strand). And the two junctions are on "
+        "OPPOSITE strands, so an edge can be the DONOR of one and sit beside the ACCEPTOR of the other.\n"
+        "        ⛔ The question it exists to answer is per (EDGE, side, strand, donor-or-acceptor, "
+        "message direction): when this edge reframes against that neighbour, does its splice flux belong "
+        "in the total or not? `docs/calibration/SESSION_HANDOFF.md` carries the derivation task.\n"
+        "        ⚠ MY READING OF THE OWNER'S SPEC, flagged rather than assumed: the owner wrote the last "
+        "two transcripts both as `TC-`. Two transcripts cannot share an id, so they are TC− and TD− "
+        "here. If the intent was one transcript with two isoforms the ids change and nothing else does.",
+        genome_length=12_000,
+        genes=[
+            {
+                "gene_id": "gP",
+                "strand": "+",
+                "transcripts": [
+                    {"t_id": "TA", "exons": [(2_000, 3_000), (9_000, 10_000)], "abundance": 300.0},
+                    {"t_id": "TB", "exons": [(2_000, 10_000)], "abundance": 300.0},
+                ],
+            },
+            {
+                "gene_id": "gM",
+                "strand": "-",
+                "transcripts": [
+                    {"t_id": "TC", "exons": [(1_000, 11_000)], "abundance": 300.0},
+                    {"t_id": "TD", "exons": [(1_000, 2_500), (8_500, 11_000)], "abundance": 300.0},
+                ],
+            },
+        ],
+        n_rna_fragments=4_000,
+    ),
     "nested_exons": ToySpec(
         name="nested_exons",
         what_it_probes="⭐⭐ C11 (owner's spec). THREE nested single-exon transcripts on one gene:\n"

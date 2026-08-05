@@ -25,6 +25,24 @@ was in use for a concept that already had a name, and the ambiguity cost a reade
 | **density** = **abundance** | counts per base. The two words mean the same thing | ⛔ not the simulator's molar `abundance=` field, which is a per-transcript weight |
 | **crossing fragment** | ⭐ a **fragment** that spans an EDGE. Legitimate and necessary — `crossing_eff_length` is the opportunity for exactly this — and it stays | ⛔ only the *object* sense is banned: objects are NODEs and EDGEs, never "crossings" |
 | **switched off** | an A/B in which one code path is disabled and the run repeated, to establish that it is the cause | `ablated` |
+| **splice-out** | ⭐ owner, 2026-08-05. A message crossing an EDGE **in the direction in which mature RNA departs** through the junction there. The fragments that splice away leave the contiguous population; the residual continues | ⛔ `peel` |
+| **splice-in** | ⭐ owner, 2026-08-05. A message crossing an EDGE **in the direction in which mature RNA arrives** through the junction there — the spliced flux joins the destination's population | ⛔ `graft` |
+
+⭐⭐ **`splice-out` / `splice-in` are DIRECTIONAL, and that is the whole reason for the rename.** "Peel"
+and "graft" named two operators; the same EDGE is a splice-out for a message travelling one way and a
+splice-in for a message travelling the other, so the pair names one thing seen from two sides. ⚠ The old
+words are everywhere in `src/` (`_peel_share`, `graft_frame_logvar`, `graft_premise_logvar`, `_gr`) and
+are converged as each area is touched, per this section's standing policy — not in one sweep.
+
+⭐⭐⭐ **AND THE DERIVATION SHARPENED THAT INTO A RULING (2026-08-05, `EQUATIONS.md` §3.6c).** The two words
+name the SEMANTICS of a step and **not** its arithmetic. An EDGE presents one total to its genomic-LOW
+neighbour and another to its genomic-HIGH one, and a hop between adjacent slots always uses the low slot's
+HIGH-flank total against the high slot's LOW-flank total — *whichever* of them is the source. So the
+message direction decides only whether the step is called a splice-out or a splice-in; it never decides
+which number is used. ⛔ **A predicate on the message direction is therefore the wrong shape for anything in
+this family, and one on the SIDE is the right one.** ⚠ The corollary that matters when writing the plumbing:
+this is still not expressible as one array per pass, because within a single forward pass an EDGE presents
+its LOW-flank total as a destination and its HIGH-flank total as the very next hop's source.
 
 ⚠ **`docs/TESTING.md` §0b carries the counts/density half of this table** for readers who arrive there
 first; this section is the canonical one.

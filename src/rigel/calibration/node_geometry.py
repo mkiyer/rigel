@@ -151,6 +151,24 @@ class NodeGeometry:
     #: several estimates of one rate, so the pooled statement is ``Σcount / ΣE`` — the ratio of sums, never
     # the mean of ratios (``ρ_bg = Σg/ΣE``).
     eff_junction: np.ndarray
+    #: ⭐⭐ float64[n_slots, 2] — the SAME flux, split by WHICH GENOMIC END of its junction this EDGE is.
+    #: ``_lo`` is the flux of junctions whose genomic-LOW end is here; ``_hi`` the genomic-HIGH end's.
+    #: ⛔ **This split is what makes the reframe's total well defined**, and the reason is that the two
+    #: halves belong to DIFFERENT FLANKS of the same EDGE. A molecule that splices at this position has
+    #: its body in the exon on ONE side of it — the low side if this is the junction's low end, the high
+    #: side if this is its high end — and it never enters the other flank at all. So the total this EDGE
+    #: presents to its low neighbour must count ``_lo`` and not ``_hi``, and vice versa
+    #: (:func:`node_total_density`). Summing them, as ``junction_count`` above does, is right for the
+    #: GRAFT — which is about the whole flux leaving this line — and wrong for the reframe.
+    #: ⚠ Written in GENOMIC terms, never donor/acceptor: the index's ``FLAG_DONOR_s`` bit marks the
+    #: genomic-LOW end of an ``s``-strand intron on BOTH strands, so on ``−`` it sits at the transcript's
+    #: biological ACCEPTOR. Naming these ``_lo``/``_hi`` is what stops that being a sign error
+    #: (`test_splice_flux_reframe`).
+    junction_count_lo: np.ndarray
+    junction_count_hi: np.ndarray
+    #: float64[n_slots, 2] — the matching divisors, split the same way.
+    eff_junction_lo: np.ndarray
+    eff_junction_hi: np.ndarray
 
 
 def build_node_geometry(
@@ -258,6 +276,11 @@ def build_node_geometry(
     # ── the JUMPING population: a junction edge is a FACTOR on the lines it leaves and enters ───
     junction_count = np.zeros((n, 2), dtype=np.float64)
     eff_junction = np.zeros((n, 2), dtype=np.float64)
+    #: the same flux kept apart by which genomic END of its junction the line is — see the dataclass.
+    jc_lo = np.zeros((n, 2), dtype=np.float64)
+    jc_hi = np.zeros((n, 2), dtype=np.float64)
+    ej_lo = np.zeros((n, 2), dtype=np.float64)
+    ej_hi = np.zeros((n, 2), dtype=np.float64)
     if junctions.n_junctions:
         slot_of_node = np.zeros(int(chain.n_nodes_total), dtype=np.int64)
         slot_of_node[obj[is_node]] = np.flatnonzero(is_node)
@@ -275,9 +298,14 @@ def build_node_geometry(
         flux = np.asarray(substrate.junction.count, np.float64).sum(axis=1)
         eff = crossing_eff_length(rna_fl_pmf, junctions.reach_lo, junctions.reach_hi)
         column = np.where(np.asarray(junctions.strand) == np.int8(Strand.POS), 0, 1)
-        for line in (donor, acceptor):
+        # ⚠ ``donor`` is the line at the junction's genomic-LOW end and ``acceptor`` the genomic-HIGH
+        # one — for BOTH strands, because ``chain.right``/``chain.left`` are genomic and edges run
+        # ``src < dst`` (`splice_graph`, DESIGN §2). The names are the index's; the meaning is genomic.
+        for line, jc, ej in ((donor, jc_lo, ej_lo), (acceptor, jc_hi, ej_hi)):
             np.add.at(junction_count, (line, column), flux)
             np.add.at(eff_junction, (line, column), eff)
+            np.add.at(jc, (line, column), flux)
+            np.add.at(ej, (line, column), eff)
 
     return NodeGeometry(
         n_slots=int(n),
@@ -289,6 +317,10 @@ def build_node_geometry(
         spliced_count=spliced_count,
         junction_count=junction_count,
         eff_junction=eff_junction,
+        junction_count_lo=jc_lo,
+        junction_count_hi=jc_hi,
+        eff_junction_lo=ej_lo,
+        eff_junction_hi=ej_hi,
     )
 
 
@@ -308,34 +340,65 @@ def node_global_geometry(geometry: NodeGeometry):
 
 
 def node_total_density(geometry: NodeGeometry, f_g):
-    """The LAZY, composition-aware total density: the SUM of component densities, each in its OWN FL
-    frame, from the current belief ``f_g``::
+    """⭐⭐⭐ The LAZY, composition-aware total density — **as a PAIR, one per FLANK**::
 
         ρ_unspliced = f_g · (M/E_g)  +  (1−f_g) · (M/E_r)        gDNA-FL for gDNA, RNA-FL for RNA
-        ρ_junction  = Σ_s  junction_count_s / eff_junction_s      per TRANSCRIPT strand, edges only
+        ρ_lo        = ρ_unspliced + Σ_s junction_count_lo_s / eff_junction_lo_s
+        ρ_hi        = ρ_unspliced + Σ_s junction_count_hi_s / eff_junction_hi_s
 
-    Returns ``(rho_unspliced, rho_with_junction)`` per slot. This is NEVER a pure-gDNA precompute —
-    ``f_g`` is the best current composition; gDNA-FL alone (``f_g = 1``) is only the fallback where
-    composition is genuinely unknown.
+    Returns ``(rho_lo, rho_hi)``: the total to use when this slot is compared against its genomic-LOW
+    neighbour, and the one for its genomic-HIGH neighbour. ⚠ **Equal at every NODE** — a NODE stores
+    only CONTAINED fragments and a contained fragment used no junction, so both banks are 0 there and the
+    pair degenerates to ``ρ_unspliced``. The distinction exists only at an EDGE.
+
+    ⛔⛔ **WHY IT IS A PAIR, AND WHY ONE NUMBER PER SLOT CANNOT BE RIGHT.** The reframe
+    ``r = ρ_tot(dst)/ρ_tot(src)`` is a COMPOSITION imputation, so its numerator and denominator must be
+    totals over the SAME component set — the intersection of what the two slots can carry. At an EDGE the
+    junction flux is the density of molecules that SPLICE at this position, and such a molecule's body
+    lies in the exon on exactly ONE side of it: the low side if this EDGE is the junction's genomic-LOW
+    end, the high side if it is the genomic-HIGH end. It never enters the other flank. So:
+
+        against the LOW neighbour  → count the flux of junctions that START here    (ρ_lo)
+        against the HIGH neighbour → count the flux of junctions that END here      (ρ_hi)
+
+    Using one junction-inclusive total on both sides — which is what the predecessor's second return
+    value did, on every hop, in both directions and both twins — inflates the side facing the INTRON by
+    exactly ``ρ_J/ρ_unspliced``: measured **1.28×** and **1.43×** at the two ``intron|exon`` EDGEs of a
+    two-exon toy, against a TRUTH ratio the split reproduces to 3 %. ⚠ It inflates each hop of a
+    two-hop pair in opposite directions and therefore CANCELS in a compounded ratio, which is why no
+    endpoint or aggregate check saw it. Using the unspliced-only total on both sides is the other
+    mistake, and it was measured worse: at an EDGE→EXON step the exon genuinely contains the spliced
+    population and the term belongs.
+
+    ⭐ This is `EQUATIONS.md` §3.6's two faces, made per-step and per-junction rather than per-object: the
+    INTRON face is whichever flank is not the exonic side of the junction, and the EXON face is the other.
+
+    ⛔ Written in GENOMIC terms, never donor/acceptor or TSS/TES. The index's ``FLAG_DONOR_s`` marks the
+    genomic-LOW end of an ``s``-strand intron on BOTH strands, so on ``−`` it sits at the transcript's
+    biological ACCEPTOR — a predicate phrased biologically flips sign with the strand and a genomic one
+    does not. Gated on a ``−``-strand junction specifically (`test_splice_flux_reframe`).
+
+    This is NEVER a pure-gDNA precompute — ``f_g`` is the best current composition; gDNA-FL alone
+    (``f_g = 1``) is only the fallback where composition is genuinely unknown.
 
     ⚠ **``spliced_count`` is deliberately NOT in either total.** It is a contiguous crossing, so it does
     belong in the level in principle — but the predecessor's ``mass_spliced`` entered only the strand
-    solve, and folding it into ρ_tot here would be a modelling change smuggled into a rename. It is
-    S5.a2's question ("how the new channels enter the solve") is still open.
-
-    ⭐ **The per-face acceptor test dissolves with the faces.** The predecessor returned a triple (node,
-    left face, right face) because only the acceptor FACE carried a junction; a line either carries
-    junction flux or it does not, so there is one answer per slot and ``junction_count == 0`` says so.
+    solve, and folding it into ρ_tot here would be a modelling change smuggled into a rename.
     """
     mass, eff_g = node_global_geometry(geometry)
     fg = np.clip(np.asarray(f_g, dtype=np.float64), 0.0, 1.0)
     rho_unspl = mass * (
         _rate(fg, eff_g) + _rate(1.0 - fg, np.asarray(geometry.eff_rna, np.float64))
     )
-    junction = np.asarray(geometry.junction_count, np.float64)
-    eff_j = np.asarray(geometry.eff_junction, np.float64)
-    rho_junction = _rate(junction[:, 0], eff_j[:, 0]) + _rate(junction[:, 1], eff_j[:, 1])
-    return rho_unspl, rho_unspl + rho_junction
+
+    def _flux(count, eff):
+        c, e = np.asarray(count, np.float64), np.asarray(eff, np.float64)
+        return _rate(c[:, 0], e[:, 0]) + _rate(c[:, 1], e[:, 1])
+
+    return (
+        rho_unspl + _flux(geometry.junction_count_lo, geometry.eff_junction_lo),
+        rho_unspl + _flux(geometry.junction_count_hi, geometry.eff_junction_hi),
+    )
 
 
 @dataclass(frozen=True, slots=True)

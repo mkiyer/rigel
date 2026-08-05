@@ -188,6 +188,64 @@ PARTLY under the capture probe while one contained in the exon lies wholly under
 ⭐ The second residual that used to be listed here — the mass pin filling unsupplied components from the
 destination's own `f_g ≈ ½` — is **fixed**: §3.5c.
 
+**3.5d ⭐⭐⭐ WHY `r` FROM TOTALS IS NOT A COMPONENT'S OWN RATIO — the share-weighted-average identity.**
+(Owner's question, 2026-08-05; measured by `reframe_walk.py` §3b.)
+
+§3.5 says the reframe delivers `φ_c(src)·ρ_tot(dst)` and is exact iff `φ_c(src) = φ_c(dst)`. This is the
+same statement read from the other end, and it is the one that says **what to do**:
+
+    r_tot  =  [ρ_g(dst) + ρ_R(dst)] / [ρ_g(src) + ρ_R(src)]  =  φ_g(src)·r_g  +  φ_R(src)·r_R
+
+⭐⭐ **The ratio of TOTALS is the share-weighted average of the components' OWN density ratios, weighted by
+each component's share of the SOURCE's mass.** Verified to floating point on every hop where both ratios
+exist. Two immediate consequences:
+
+| `φ_g(src)` | what `r_tot` is | is scaling the gDNA arm by it valid? |
+|---|---|---|
+| **1** (intron, intergenic NODE, a gDNA-only EDGE flank) | `r_tot ≡ r_g`, identically | ⭐ **yes** — nothing foreign enters |
+| **≈ 0.0006** (an expressed exon) | `0.9994·r_R + 0.0006·r_g` | ⛔ **no** — it is the RNA ratio wearing a total's name |
+
+Measured, `spliced_exons` × `g75 ss0.50 capture_off`, 200 k RNA: at `exon → intron|exon @2,000`,
+`r_g = 1.3545`, `r_R = 1.1026`, `r_tot = 1.1027`. On the eight hops whose both ends are pure gDNA,
+`r_tot` and `r_g` agree to 4 dp.
+
+⛔⛔ **AND THE TWO COMPONENTS FAIL IN DIFFERENT WAYS, WHICH IS WHY DEPTH CANNOT SETTLE THIS.** With capture
+off every one of these ratios should be exactly **1.0** — the true enrichment is 1, gDNA is uniform along
+the genome, mature RNA is uniform along its transcript. Standard errors from 1.0, same run:
+
+* the **gDNA** arm at an EDGE: **0.6–1.8 se**. That is NOISE, and depth shrinks it. An EDGE is 0 bp, so its
+  opportunity is ~one mean fragment length whatever the chromosome does (`E_g = 215.7`, `E_J = 202.7`) —
+  measured, the 7,000 bp intron NODE holds **518** gDNA counts while the two EDGEs hold **19** and **24**.
+  ⚠ Only library DEPTH helps; lengthening the reference does nothing off capture (`TESTING.md` §0b).
+* the **RNA** arm across a junction: **13.5–13.7 se**. That is a BIAS. Depth makes it MORE significant, not
+  smaller. It is §3.6b's frame gap: `E_J = E[w]−1` rises with the fitted mean fragment length while
+  `E_r = e−E[w]+1` falls, so a length-model error is amplified with opposite sign at 0.62 %/bp.
+  ⛔ `TRAPS.md` D1 — a variance cannot fix a biased mode.
+
+⭐ **So the existing `σ²_transfer = Var(log r)` is the right medicine for the gDNA arm and the wrong
+medicine for this**: `r_tot` is not a *noisy* estimate of `r_g`, it is a *precise* estimate of a different
+quantity. Damping it treats a targeting error as an uncertainty.
+
+⛔⛔ **THE EXTREME CASE, where the identity cannot be written at all.** If the source has ZERO of a
+component the destination has plenty of, `r_R` is undefined, `φ_R(src) = 0`, and the product is `0·∞`:
+`r_tot` then contains a term with **no counterpart at the source**. Measured at
+`intergenic|exon @1,000 → exon`: `r_g = 0.7014` while `r_tot = 1187.87` — **1,694× apart**. ⭐ This is
+exactly what §3.5b's SUPPLY conjunct catches, and it does: `lend` is False there and the gDNA level crosses
+unscaled. The licence is right; what §3.5d adds is that between that extreme and `φ_g = 1` there is a
+**continuum**, and the licence is a boolean across it.
+
+⭐⭐⭐ **WHAT THE IDENTITY LICENSES, since the error is now a closed form.** The error of `r_tot` as an
+estimator of `r_g` is
+
+    r_tot − r_g  =  φ_R(src) · (r_R − r_g)
+
+and every term on the right is measurable from the solver's own state. So the choice is no longer
+boolean-or-nothing: `r_g` is directly available and unbiased-but-noisy, `r_tot` is precise-but-biased with a
+**computable** bias, and two estimators with opposite failure modes fuse by inverse variance — the same
+shape §3.6 already uses for its two closures and M11 for the level. ⛔ No threshold, which matters because
+a threshold here has been refused three times (`TRAPS.md` B11, D4f, D4g). ⚠ Unbuilt and unpriced: the
+ceiling to measure first is what a PERFECT per-component `r_g` at every hop is worth, re-solved.
+
 **3.6 ⭐⭐⭐ THE TWO FACES OF AN `intron|exon` EDGE — component-set matching, derived and verified.**
 (Owner, 2026-08-04. Verified against oracle truth on `toy_harness --spec spliced_exons`.)
 
@@ -243,15 +301,125 @@ gDNA count is 8–36 where the intron's is ~349. So:
   the edge's 8 counts as authoritative — measured at m=1, referencing the intron gives the exon
   `f_g = 0.499` and referencing the edge gives 0.350, against a truth of 0.458 and a shipped answer of
   0.625;
-* ⭐ **face (II) closes the composition two ways** — via `rho_mat` (tight at high RNA, 5–10 % over-stated,
-  useless at low) or via the exon's own mass identity closed with `rho_g` (strong at low RNA, a small
-  difference of large numbers at high). They are strong in opposite regimes, so they FUSE by inverse
-  variance rather than by precedence.
+* ⭐ **face (II) closes the composition two ways** — via `rho_mat` (tight at high RNA, over-stated by
+  §3.6b, useless at low) or via the exon's own mass identity closed with `rho_g` (strong at low RNA, a
+  small difference of large numbers at high). They are strong in opposite regimes, so they FUSE by
+  inverse variance rather than by precedence.
 
-⚠ **And it corrects a documented sign.** `bp_solver`'s P1d comment asserts the graft's premise is a LOWER
-bound, `rho_R(exon) ≥ rho_nas(B) + rho_mat(B)`, and uses it as an equality. Measured, the ratio
-`(rho_nas + rho_mat)/rho_R(exon)` is **1.103** (no nascent) and **1.049** (with nascent) — an UPPER bound
-by 5–10 %. The variance term built on that assumption is sized from the wrong direction.
+⛔⛔ **AND THE WELL-COUNTED SIDE IS NOT A FIXED SIDE.** The 349-vs-8 ranking above is capture-OFF. Under
+capture the intron NODE holds **1** count — median 0, max 3, unchanged from 120 kb to 1.08 Mb, because its
+bp is fixed and its density is off-probe — while the `intron|exon` EDGE holds **20–40** at the exon's own
+capture stratum. So the direction of transport inverts with capture, and only the SHARE survives that:
+transferring the intron's DENSITY instead is measured at **+0.207** mass-weighted `|Δf_g|` on capture-ON ×
+unstranded. `TRAPS.md` B19.
+
+⛔⛔ **WHAT THE CEILING SAID, AND IT IS THE REASON NOTHING WAS BUILT** (2026-08-04, `toy_ceiling.py` then
+`ladder_arm_ab.py`). Handing both `intron|exon` EDGEs the ORACLE truth and **re-solving the whole chain**
+is worth **−0.000** on capture-OFF × unstranded and −0.033 on capture-ON × unstranded; the achievable
+form (the intron's share) captures 82 % of that. Carried to the 36-condition ladder it is **negative**:
+solvable mwae 0.0413 → 0.0426, confidently-wrong 20,173 → 22,336. ⭐ The identity above is not what
+failed — improving that EDGE is simply not worth anything where the tool is wrong. `ROADMAP.md` §3.
+
+**3.6c ⭐⭐⭐ THE SPLICE-FLUX REFRAME — AN EDGE HAS TWO TOTALS, ONE PER FLANK.** (Owner's framing
+2026-08-05; derived and gated the same day. `test_splice_flux_reframe`, `node_total_density`.)
+
+§3.6 gives the two faces of an `intron|exon` EDGE as a property of the OBJECT. Made per-STEP it becomes a
+statement about which of the two flanks a hop is talking to, and then it applies at every EDGE with
+junction flux rather than only where the coarse types happen to read `intron|exon`.
+
+The reframe is a composition imputation, so numerator and denominator must be totals over the **same
+component set** — the intersection of what the two slots can carry. At an EDGE the accumulator holds two
+disjoint populations: what crosses **contiguously** (`U`, a gDNA/RNA mixture) and the **junction flux**
+(`J`, certified mature). A molecule counted in `J` spliced *at this position*, so its body lies in the
+exon on exactly **one** side of it and it never enters the other flank:
+
+    at a junction's genomic-LOW  end   its exon is on the LOW  side
+    at a junction's genomic-HIGH end   its exon is on the HIGH side
+
+⭐⭐ Hence one total per flank, and the split is **per junction**, summed over the junctions attached that
+way:
+
+    rho_lo  =  rho_U  +  Σ_{j : low end here}   J_j / E_J,j          — used against the LOW  neighbour
+    rho_hi  =  rho_U  +  Σ_{j : high end here}  J_j / E_J,j          — used against the HIGH neighbour
+
+and at a NODE both sums are empty — a NODE stores only CONTAINED fragments and a contained fragment used
+no junction — so `rho_lo = rho_hi = rho_U` there and every junction-free chain is unchanged.
+
+⭐⭐⭐ **THE PAIRING RULE, AND DIRECTION DOES NOT ENTER IT.** A hop joins adjacent slots `(k, k+1)`.
+Whichever is the source, the pair is the same pair, so
+
+    r  =  rho_lo[k+1] / rho_hi[k]
+
+always. Travelling low→high (mature departing — a **splice-out**, `DESIGN.md` §0) versus high→low (mature
+arriving — a **splice-in**) changes only which is numerator; it never changes which total each slot
+presents. ⛔ **But it is NOT one array per direction**: within ONE forward pass an EDGE at a junction's low
+end is the DESTINATION of the hop from its low flank (flux INCLUDED) and the SOURCE of the next hop into
+its high flank (EXCLUDED). Two arrays indexed by ROLE is what expresses that; one per pass is not.
+
+⛔⛔ **WHAT THE PREDECESSOR DID AND WHAT IT COST.** One junction-inclusive total per slot, on every hop, in
+both directions and in both twins. Measured against origin-split truth on `g50 ss0.50 nrna_none
+capture_off`, the intron-facing side of the two `intron|exon` EDGEs is inflated by exactly `J/E_J`:
+
+| step | shipped `r` | flank-pair `r` | TRUTH ratio | shipped/true | pair/true |
+|---|---|---|---|---|---|
+| intron → EDGE @9,000 | 1.4595 | **1.1789** | 1.1421 | ⛔ 1.28× | ✅ 1.03× |
+| intron → EDGE @2,000 | 1.0061 | **0.7255** | 0.7029 | ⛔ 1.43× | ✅ 1.03× |
+
+⚠ It inflates the two hops of a two-hop pair in opposite directions and therefore **cancels in a
+compounded ratio** (2.159 used vs 2.153 true), which is why no endpoint, conservation or aggregate check
+saw it — `TRAPS.md` D4i. ⛔ And the opposite error is not available either: using `rho_U` on both sides was
+measured WORSE, because at an EDGE→EXON step the exon genuinely contains the spliced population.
+
+⛔⛔ **WRITE THE PREDICATE IN GENOMIC TERMS — §3.5b's ruling, and here is where it bites.**
+`splice_graph`'s `FLAG_DONOR_s` marks the genomic-LOW end of an `s`-strand intron on **both** strands
+(`don_bit ← intron_start`, inside a loop over strand that changes nothing else), so on `−` it sits at the
+transcript's biological **acceptor**. The names are a misnomer on `−` and the data is uniform, which is
+exactly the arrangement in which a genomically-phrased predicate is safe and a biologically-phrased one
+flips sign silently. The derivation above never asks the biological question, the fields are named
+`_lo`/`_hi`, and keying the split on the junction's strand instead fires **exactly one** of twelve gates.
+
+⭐ **And a rule keyed on the coarse node type provably cannot do this.** On `splice_both_strands` three
+nodes are simultaneously intron and exon and `coarse_type_array` reports **every** gene-body node as
+`exon`, so `intron|exon` never appears. Nor is "does the neighbour admit mature RNA on strand `s`?"
+enough: at EDGE @3,000 the flanking node carries mature⁺ (from a single-exon transcript spanning the
+intron) but not the mature⁺ population *that junction's* flux belongs to.
+
+⛔⛔ **BUILT AND MEASURED, AND IT DOES NOT PAY ON ITS OWN (2026-08-05).** The derivation above is not what
+failed — it reproduces the truth ratio to 3 % where the shipped total is 28–43 % off. What the panel says is
+that the **EDGEs improve and the NODEs get worse**: on a 6-condition shard spanning all four strata, the
+edge axis moves mwae 0.16046 → 0.16000 with confidently-wrong −7.7 % and the shipped solve better on 6 of 6,
+while the node axis moves 0.12232 → **0.12297** with confidently-wrong **+36.9 %** and Σ|err| +20,884
+fragments. `solv%` is byte-identical in both arms, so this is not a moved denominator.
+⭐ **The reason is `TRAPS.md` D4j and it was predictable from D4i**: an evidence-free exon is fed through
+`intron → EDGE → exon`, the two hops' errors cancel, and the second hop carries a *different* defect (§3.5's
+composition ratio applied to a level). Correcting one of a cancelling pair is worse than correcting neither.
+⛔ **So this is priced jointly with that defect or not at all** — `EQUATIONS.md` §3.6c.
+
+**3.6b ⭐⭐ THE JUNCTION AND CONTAINED FRAMES ARE A LEVER ON THE FRAGMENT-LENGTH MEAN, AT 0.62 %/bp.**
+`E_J` and the exon's `E_r` are built from one pmf and are exactly consistent — measured 202.8 and 797.2 on
+a 1,000 bp exon, summing to 1,000.0. But they differentiate with **opposite sign**:
+
+    E_J   = E[w] − 1          →   dE_J/dE[w]  = +1
+    E_r   = e − E[w] + 1      →   dE_r/dE[w]  = −1
+    ⇒  d log(rho_mat / rho_R) / dE[w]  =  1/E_J + 1/E_r  =  0.0062 per bp
+
+so a length model that is wrong by `Δ` reports the junction estimator as `1 + 0.0062·Δ` times the exon's
+own. Measured: the fitted RNA pmf's mean is **203.80 against a true 212.20 on all 36 ladder conditions**
+(−8.4 bp off capture, −3.5 bp under it), and −8.4 bp predicts **1.1125** against a measured 1.103 / 1.111.
+✅ **AND THERE IS NO SECOND TERM.** A "finite-transcript placement" contribution of 1.024 was recorded
+here and is **WITHDRAWN**: it assumed the simulator draws a length and then places it uniformly among the
+`L − w + 1` legal starts. It does not — `wgs_engine._post_capture_length_allocation` reweights the length
+MARGINAL by that same opportunity (`f_post(w) = f_pre(w)·total_eff(w)/Z`), so the realised crossing count
+at length `w` is `f_pre(w)·(L−w+1)·(w−1)/(L−w+1) = f_pre(w)·(w−1)` and the factor cancels identically.
+Computed exactly from the pmf, `k = 1.000000` at every transcript length. ⛔ The whole gap is the
+length-model mismatch, with no geometric component. `TRAPS.md` C0.
+
+✅ **This WITHDRAWS the sign correction this section used to carry.** `bp_solver`'s P1d asserts
+`rho_R(exon) ≥ rho_nas(B) + rho_mat(B)`, a LOWER bound, and that is **right**: the measured ratio of
+**1.103** (no nascent) and **1.049** (with) is `1 + (1−s)(k−1)` with `k` the frame gap above and `s` the
+nascent share of the exon's RNA — the nascent arm is measured in the exon's own frame and dilutes it,
+which is precisely what identifies the inflation as `rho_mat`'s rather than the bound's. ⚠ What does
+survive is that `graft_premise_logvar` is fitted on fluxes carrying the same inflation, so it inherits it.
 
 ---
 

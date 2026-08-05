@@ -55,7 +55,7 @@ through the gene interior, because ``lend`` is a PRECISION test with no floor an
 rather than exactly ½ on a nominally unstranded library — so ``I(f_g) ∝ (2κ−1)²`` lands at 1e-6…1e-4
 instead of 0 and every evidence-free exon "supplies" a composition whose own statement is 10²–10³ nats
 wide against a ±10-nat grid. Switching the pin off entirely reaches 0.0760 on this toy; the difference is
-that leak. ⛔ A precision floor here would be a tuned constant and is not this change (`ISSUES.md` C2).
+that leak. ⛔ A precision floor here would be a tuned constant and is not this change (`ROADMAP.md` §1 step 3).
 
 ⚠ **Perturbation-verified**, and here is the coverage (`scratchpad/perturb.sh`). ⭐ Note that dropping
 the composition branch is caught by gates in OTHER files — so both branches have an independently
@@ -183,7 +183,11 @@ def _relay_walk(parts, *, kappa=0.5, n_obs=0.0):
     )
     st = cap["_uni_static"]
     M, EG, ER, fwd = st["M"], st["E_g"], st["E_r"], st["fwd_g"]
-    op, on, pg_own, rho0 = st["op"], st["on"], st["pg_own"], st["rho0"]
+    op, on, pg_own = st["op"], st["on"], st["pg_own"]
+    # ⭐ the reframe frame is a PAIR, one total per FLANK, and a hop pairs them by ROLE: this walk follows
+    # the FORWARD relay, whose source is the genomic-LOW neighbour, so the destination presents its
+    # LOW-flank total and the source its HIGH-flank one (`node_total_density`).
+    rho_lo, rho_hi = st["rho_lo"], st["rho_hi"]
     left = np.asarray(parts.chain.left, np.int64)
     g1 = g1_locked(parts.statics.free_pos, parts.statics.free_neg)
     out = []
@@ -207,7 +211,9 @@ def _relay_walk(parts, *, kappa=0.5, n_obs=0.0):
                 "lend": lend,
                 "g1": bool(g1[s]),
                 "pinned": (bool(lend or g1[s]) if has_src else None),
-                "r": float(rho0[s] / rho0[p]) if (has_src and rho0[p] > 0.0) else float("nan"),
+                "r": float(rho_lo[s] / rho_hi[p])
+                if (has_src and rho_hi[p] > 0.0)
+                else float("nan"),
                 "level_in": level_in,
                 "phi_msg": level_in * EG[s] / M[s],
                 "level_out": float(fwd[s]),
@@ -448,7 +454,7 @@ def test_a_structurally_pure_gdna_destination_IS_told_its_own_measurement():
 
     ⭐⭐ **THIS IS THE OPERATOR THE CAPTURE LANDSCAPE TRAVELS ON.** An ``intergenic|exon`` EDGE measures
     the gDNA density at its own capture stratum, and the exon behind it has no other way to hear it — a
-    G1 EDGE carries ``prec_g = 0`` and so cannot ORIGINATE a level through the fuse (`ISSUES.md` C6). Drop
+    G1 EDGE carries ``prec_g = 0`` and so cannot ORIGINATE a level through the fuse (`ROADMAP.md` §1 step 4=). Drop
     case (ii) and the off-probe intergenic floor leaks straight through to the exon: measured, and it
     fires `test_gdna_scale_rule.test_capture_step_is_carried_and_the_off_probe_floor_is_not` at 20x and
     200x. A per-capture-class landscape ratio built to do this job explicitly measured inert

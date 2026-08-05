@@ -24,8 +24,10 @@ There are six. They do not overlap, and none of them is a changelog.
 
 Reference rather than design: `docs/MANUAL.md` (user-facing), `docs/PUBLISHING.md`.
 
-⚠ **`docs/calibration/` holds EPHEMERAL working docs** — a session handoff, a scratch measurement — used
-to pass one task between the owner and a session. They are **not** permanent fixtures and are **not** in
+⚠ **`docs/calibration/` holds EPHEMERAL working docs** — currently just `SESSION_HANDOFF.md` — used
+to pass one task between the owner and a session. ⛔ A per-issue REGISTER used to live here too and was
+deleted on 2026-08-05: it had become a second copy of `ROADMAP.md`'s ranked list, which is `TRAPS.md` A11's
+"two homes for one predicate" in documentation form. One ranked list, in `ROADMAP.md`. They are **not** permanent fixtures and are **not** in
 the six above. ⛔ Read the handoff if one is present and you are picking up its task; **delete it when that
 task lands**, promoting anything worth keeping into `ROADMAP.md` (a current number), `TRAPS.md` (a lesson)
 or `DESIGN.md` (a settled decision).
@@ -73,25 +75,42 @@ C++ is gated on byte-identity to it; where it and a document disagree, it wins.
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-python -m pytest tests/ -q                     # baseline: 22 fail — 21 stale goldens + the paralog row
+python -m pytest tests/ -q                     # baseline: 22 fail / 3 xfail — 21 goldens + the paralog row
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
 ⭐ **"22 failures, 21 goldens and the paralog row" is the standing baseline.** A 23rd failure, or any other
 non-golden name in the list, is a regression. See `docs/TESTING.md` §6.
+⭐ **And 3 xfails, one of them STRICT and load-bearing**: `test_toy_harness`'s intron-composition gate is the
+project's detector for the level defect that the splice-flux reframe un-masked. It must go green — not be
+widened — when the joint arm lands (`SESSION_HANDOFF.md` §1, §4).
 
 Always set `OMP_NUM_THREADS=1` when benchmarking or comparing runs.
 
 ## Tooling under `scripts/`
 
 `docs/SUCCESS.md` lists these in the order you would run them. ⚠ Everything not listed here was deleted as
-unrunnable; if a script is not in this table it does not exist.
+unrunnable; if a script is not in this table, treat it as not existing.
+⛔ **That claim is currently FALSE for eight files** and the drift is recorded rather than silently
+tolerated: `bam_spans.py`, `implicit_splice_census.py`, `inv_L_limits.py`, `length_sieve.py`,
+`partition_test.py`, `reference_on_real_data.py`, `sigma_inv_L.py`, `spanning.py` are on disk and unlisted.
+They pre-date 2026-08-05, none was run this campaign, and none should be trusted without re-running it —
+either promote a row or delete the file, but do not assume the table is complete until that is done.
 
 | | |
 |---|---|
 | **⭐⭐ the toy harness** | |
 | `design/toy_panel.py` | ⭐⭐ **one toy spec × EVERY cached condition × an RNA-density ladder, scored per object** — what you run once a structure is the *target* rather than a probe. Prior-free pass-0 by default; the RNA density is a multiple of each donor's OWN gDNA density. ⛔ Reports which object carries the error, whether the messages helped or hurt it, and which objects are CONFIDENTLY wrong. ⚠ 13 s per condition; shard with `--conditions` |
+| `design/verify_toy_substrate.py` | ⭐⭐⭐ **IS THE INPUT CORRECT? — no solver runs.** Every accumulator bank re-derived from the simulator's per-fragment TRUTH by an independent implementation, plus the splice combinatorics and the length marginal. ⛔ Run this on any new toy spec BEFORE reading a solver number off it |
+| `design/verify_capture.py` | ⭐⭐ **hybrid capture, probes ON vs OFF on identical geometry** — the gDNA landscape, the length selection and the junction depletion, each gated on the direction the knobs predict |
+| `design/toy_trace_error.py` | ⭐⭐⭐ **the full error trace for ONE scenario** — every node and edge ranked by error MASS, the four init sources, the relay hop by hop with the licence state, then a ψ channel ABLATION (fidelity-checked to 1e-6) and ⭐ a RELAY-level arm that withholds the composition licence in both twins at once. ⛔ This is what "dissect the error" means |
+| `design/zero_controls.py` | ⭐⭐⭐ **THE TWO ZERO CONTROLS — and the owner requires them on every experiment.** ZERO RNA (silent genes, truth `f_g = 1.000` everywhere) and ZERO gDNA (the `g00` donor, truth `0.000`). The truth is a CONSTANT, so every deviation is a false positive with nothing to cancel it. ⭐ The zero-RNA arm is the **biologically dominant** case: most annotated transcripts are OFF. ⛔ Prints the three-rung ladder (strand → self-solve → final), what the MESSAGES delivered as an implied `f_g`, and flags any EMPTY object, because a zero arm can be degenerate and then it tests nothing (`TRAPS.md` A14) |
+| `design/reframe_walk.py` | ⭐⭐⭐ **THE REFRAME, WALKED — every count, both flank totals, and every hop in BOTH directions, on one two-exon transcript.** Not a summary statistic: per hop it prints `r` as used, `r` as the predecessor's single total would have given it, what TRUTH says the same ratio is, and the true gDNA-density ratio beside it — so the include/exclude decision at each `(EDGE, side)` is a number. ⭐ Three gDNA arms (zero / high / very high), capture-OFF × unstranded, HIGH RNA so nothing is sparse. ⛔ The geometry is rebuilt and GATED against the solver's published frames to 1e-12 |
+| `design/toy_dissect.py` | ⭐⭐ **one scenario opened to every slot and every channel** — the solver's own ladder (strand-only → self-solve → final) beside `cm_g` / `c_tau` / `cg`, so a dead channel is visible as a zero rather than inferred. ⛔ Step 3 of the debug loop, for a toy |
+| `design/toy_ceiling.py` | ⭐⭐ **the RE-SOLVE ceiling** — hand one object class a different own belief and re-solve the whole chain, six arms sharing one simulation. ⛔ This is what `TRAPS.md` B17 demands instead of a substitution, and `--arms base noop` is its own falsification (must be byte-identical). Its docstring carries what it measured |
+| `design/ladder_arm_ab.py` | ⭐⭐ **the same override on the REAL 36-condition ladder**, scored by `solvability_audit.py`. ⛔⛔ **Run this before writing a mechanism into `src/`** — twice now a toy-positive change has been panel-negative (`TRAPS.md` B18). 40 s per condition with the oracle cache |
+| `design/length_ceiling.py` | ⭐ **what a PERFECT length model is worth, on the ladder, ONE pmf at a time.** ⛔ Pricing the pair together hid a 14× split between them (`TRAPS.md` B21). Reports the pass-0 solvable yardstick beside the mass-weighted one, because they disagree |
 | `design/toy_harness.py` | ⭐⭐ **a mini chromosome you define, calibrated in 0.1–5 s** (`docs/TESTING.md` §0b), with every object's answer beside per-object truth. The library-level priors a toy cannot fit are harvested from a real cached condition and INJECTED; the gDNA depth is DERIVED to match that donor, never set by hand. `--list` for the spec ladder. ⭐ Reach for this FIRST when a mechanism needs isolating — it found C1's mechanism candidate in one sweep |
 | **the substrate** | |
 | `design/simulator_gates.py` | ⛔ the simulator's own gates G-S1…G-S6, scored on per-fragment truth. Run before trusting the panel |

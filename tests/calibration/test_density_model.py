@@ -103,6 +103,12 @@ def _parts(signatures, node_count, node_eff, edge_count, edge_eff, ref_names=Non
         eff_rna=eff,
         junction_count=np.zeros((n_slots, 2)),
         eff_junction=np.zeros((n_slots, 2)),
+        # the per-FLANK split of the same flux; this fixture has no junction at all, so all four are 0
+        # and the two flank totals coincide (`node_total_density`).
+        junction_count_lo=np.zeros((n_slots, 2)),
+        junction_count_hi=np.zeros((n_slots, 2)),
+        eff_junction_lo=np.zeros((n_slots, 2)),
+        eff_junction_hi=np.zeros((n_slots, 2)),
     )
     return node_gdna_density(chain, geometry, ra)
 

@@ -344,7 +344,8 @@ def node_sweep(
         # (`enrichment_frame.composition_logvar`). Var(log ρ_tot) = 1/n + [(1/E_g−1/E_r)/B]²·Var(f_g), with
         # Var(f_g) = (f_g(1−f_g))²/τ_λ CAPPED at f_g(1−f_g) (a fraction's max variance) and 0 for a
         # composition-certain (struct_lock) node. Evaluated at the INPUT belief f_g (consistent with the reframe
-        # density rho0). This is the HONEST, prior-free transfer variance that RETIRES the
+        # frame pair ``rho_lo``/``rho_hi``, which share exactly this belief). This is the HONEST,
+        # prior-free transfer variance that RETIRES the
         # density-uniformity NPMLE proxy (which was identically 0 in pass-0, so pass-0 had NO transfer damping).
         _n_node = n_slot  # the count IS the Poisson n; no separate flux to pool over faces
         _fg0 = np.clip(np.asarray(f_g, np.float64), 0.0, 1.0)
@@ -484,7 +485,7 @@ def node_sweep(
         # first halves the on-capture damage. That MODE fix is NOT landed — under capture the graft already
         # OVER-states (median φ = 2.45, an M8 frame problem), so no bound-tightening can help there — but the
         # same seam pair is what measures the variance below, and it must be framed for that too.
-        def _flank_dom(rho, spf):
+        def _flank_dom(rho_lo_a, rho_hi_a, spf):
             """Per-slot: the flux each of its two flanking EDGES sends it, ALREADY lifted into this
             slot's frame, per strand.
 
@@ -492,15 +493,26 @@ def node_sweep(
             crosswise (``spf[1]`` is what a LEFT neighbour presents, ``spf[0]`` what a RIGHT one does).
             With one ρ and one flux per slot the pairing is the identity and only the DIRECTION remains.
             Zero wherever a flank is absent or is not an edge, so on a one-junction exon this degenerates
-            exactly to that junction's own lifted flux."""
+            exactly to that junction's own lifted flux.
 
-            def _side(ok, nb):
+            ⭐ The lift is the same reframe ``r`` the relay uses, so it takes the same FLANK PAIR and the
+            same role pairing: for the LEFT flank the neighbour is the genomic-LOW slot, so this slot
+            presents ``rho_lo`` and the neighbour ``rho_hi``; the RIGHT flank is the mirror. Reading one
+            junction-inclusive total on both sides here lifted each flux by a ratio inflated on exactly the
+            side facing an intron, which is the same defect `node_total_density` documents."""
+
+            def _side(ok, nb, rho_here, rho_there):
                 r = np.where(
-                    ok & (rho[nb] > _EPS) & (rho > _EPS), rho / np.maximum(rho[nb], _EPS), 1.0
+                    ok & (rho_there[nb] > _EPS) & (rho_here > _EPS),
+                    rho_here / np.maximum(rho_there[nb], _EPS),
+                    1.0,
                 )
                 return np.where(ok & is_bnd_a[nb], spf[nb] * r, 0.0)
 
-            return _side(_vl_a, _sl_a), _side(_vr_a, _sr_a)
+            return (
+                _side(_vl_a, _sl_a, rho_lo_a, rho_hi_a),
+                _side(_vr_a, _sr_a, rho_hi_a, rho_lo_a),
+            )
 
         # own per-component densities + precisions — the message-free SELF-SOLVE (`node_init.build_node_init`,
         # the four sources). ``rho_*`` are the own densities; ``prec_*`` combine the strand + intron-factory
@@ -606,7 +618,27 @@ def node_sweep(
         # ⭐ ONE ρ_tot per slot. The predecessor returned a triple (node, left face, right face) because
         # only the ACCEPTOR face carried mature; with the faces gone a line either has mature flux or it
         # does not, so ``rho_with_mature`` already is the per-slot answer.
-        rho_node0, rho0 = node_total_density(geometry, np.asarray(f_g, np.float64))
+        # ⭐⭐⭐ THE REFRAME FRAME IS A PAIR, ONE TOTAL PER FLANK — `node_total_density`'s docstring has the
+        # derivation. ``rho_lo[k]`` is the total slot ``k`` presents to its genomic-LOW neighbour and
+        # ``rho_hi[k]`` the one it presents to its genomic-HIGH neighbour; they differ only at an EDGE, and
+        # only by which junctions' flux belongs on which side.
+        #
+        # ⭐⭐ THE PAIRING RULE, and it is the whole of the plumbing: a hop always joins two ADJACENT slots
+        # ``(k, k+1)``. Whichever of them is the source, the pair is the same pair, so
+        #
+        #       r  =  rho_lo[k+1] / rho_hi[k]           for a hop between k and k+1
+        #
+        # — the HIGH-flank total of the low slot over the LOW-flank total of the high slot. ⛔ **DIRECTION
+        # DOES NOT ENTER.** Whether the message travels low→high (a splice-OUT at a junction's low end) or
+        # high→low (a splice-IN) changes only which of the two is numerator; it never changes which total
+        # each slot presents. So the forward relay reads ``(num=rho_lo, den=rho_hi)`` and the backward one
+        # ``(num=rho_hi, den=rho_lo)``, and there is no per-hop predicate anywhere.
+        #
+        # ⛔ It is NOT expressible as one array per direction, which is the trap: within ONE forward pass an
+        # EDGE at a junction's low end is the DESTINATION of a hop from its low flank (junction flux
+        # INCLUDED) and the SOURCE of the next hop into its high flank (EXCLUDED). Two arrays indexed by
+        # ROLE, not one array per pass, is what expresses that.
+        rho_lo, rho_hi = node_total_density(geometry, np.asarray(f_g, np.float64))
 
         # ── THE PEEL, BY COMPOSITION: the LEVEL (M11 ⊕ the own belief) and the SHARE (M10) ─────────────────
         # A boundary's unspliced crossing is `gDNA + the RNA that CONTINUES`. The exon's RNA arriving at the
@@ -918,7 +950,7 @@ def node_sweep(
         # The relay's side of the pair is now scalar-native throughout — Python-float operands (the `*_l`
         # block) calling the `*_scalar` twins of the shared primitives — which is what makes it fast, and
         # one more reason the two forms cannot collapse into one.
-        def _relay(seq, nbr, rho, pop):
+        def _relay(seq, nbr, rho_dst, rho_src_a, pop):
             # every operand here is a Python float or bool — see the `*_l` block above.
             # ⭐ ``dst_face``/``src_face``/``df``/``sf`` are gone: one ρ_tot and one mature flux per slot,
             # so the only thing that still varies between the forward and backward passes is ``nbr``.
@@ -940,9 +972,15 @@ def node_sweep(
                 # form) left an uncancelled ``1+ρ_spl/ρ_unspl`` at every acceptor boundary, and because the relay
                 # re-scales the SAME running density each hop that factor COMPOUNDS — measured Σf_c ≈ 71 at
                 # introns (a composition must sum to 1) and r up to 10³ into exons.
-                rho_src = rho[s]
+                # ⭐ The two arrays are indexed by ROLE: ``rho_dst`` is read at the destination and
+                # ``rho_src_a`` at the source, and the CALLER pairs them by direction (see the pairing rule
+                # above `_relay`). The forward pass gets ``(rho_lo, rho_hi)`` and the backward
+                # ``(rho_hi, rho_lo)``, so each slot presents the total that belongs to the flank it is
+                # actually being compared against.
+                rho_src = rho_src_a[s]
+                rho_dst_i = rho_dst[i]
                 r = (
-                    (rho[i] / rho_src) if (rho_src > _EPS and rho[i] > _EPS) else 1.0
+                    (rho_dst_i / rho_src) if (rho_src > _EPS and rho_dst_i > _EPS) else 1.0
                 )  # no frame ⇒ pass-through
                 # GRAFT (boundary → EXON, §6): the boundary's measured mature is a density AT THE SOURCE, so it
                 # joins the source's RNA BEFORE the reframe; the peel is measured at the destination and so is
@@ -1076,7 +1114,7 @@ def node_sweep(
                 np.asarray(a, np.float64) for a in (rg, rp, rn, pg, pp, pn, mg, mp, mn, tau)
             )
 
-        def _seam_pair(rho):
+        def _seam_pair(rho_lo_a, rho_hi_a):
             """Per strand: the graft's premise log-variance — ONE library-level scalar, fitted by method of
             moments from the destination-frame disagreement of exons' flanking seam PAIRS
             (`graft_premise_logvar`) and applied to every graft edge.
@@ -1086,7 +1124,7 @@ def node_sweep(
             per structural class when TSS/TES land (P1g). See `graft_premise_logvar`."""
             out = []
             for spf, vmu in ((spl_p, 0), (spl_n, 1)):
-                fl, fr = _flank_dom(rho, spf)
+                fl, fr = _flank_dom(rho_lo_a, rho_hi_a, spf)
                 # each seam's own noise: its spliced COUNT (never the mass) ⊕ its lift's scale sampling
                 # (M5's source leg; the destination's leg is common to both lifts and cancels in ``d``).
                 _lv = np.where(np.isfinite(logvar_tot), logvar_tot, 0.0)
@@ -1135,25 +1173,31 @@ def node_sweep(
             return out[0], out[1]
 
         # the relay runs on the INPUT-belief frame, so its seam pair is formed from that
-        vgp_prem, vgn_prem = _seam_pair(rho0)
+        vgp_prem, vgn_prem = _seam_pair(rho_lo, rho_hi)
         vgp_l, vgn_l = vgp_prem.tolist(), vgn_prem.tolist()
         left_l, right_l = left.tolist(), right.tolist()
-        rho0_l = rho0.tolist()
+        rho_lo_l, rho_hi_l = rho_lo.tolist(), rho_hi.tolist()
         _pop_l_l, _pop_r_l = _pop_l_a.tolist(), _pop_r_a.tolist()
-        fwd = _relay(order_list, left_l, rho0_l, _pop_l_l)
-        bwd = _relay(order_list[::-1], right_l, rho0_l, _pop_r_l)
+        # ⭐ the FORWARD pass reads its source at ``i−1``, the slot's genomic-LOW neighbour — so the
+        # destination presents its LOW-flank total and the source its HIGH-flank one. The backward pass is
+        # the mirror. That single swap is the whole direction dependence.
+        fwd = _relay(order_list, left_l, rho_lo_l, rho_hi_l, _pop_l_l)
+        bwd = _relay(order_list[::-1], right_l, rho_hi_l, rho_lo_l, _pop_r_l)
         # ── the COMBINE: transport α (from left neighbour) + β (from right neighbour) into the node's frame with
         # the LAZY ρ_tot (two-iteration — the 2nd uses the both-message composition), fuse, ÷M_dst → the ψ solve.
         li, ri, vl, vr, sl, sr = _li_a, _ri_a, _vl_a, _vr_a, _sl_a, _sr_a
 
         # The VECTORISED twin of `_relay` — see the DO-NOT-MERGE note there, which applies to both.
-        def _transport(src, valid, fwd_arrs, rho, pop):
+        def _transport(src, valid, fwd_arrs, rho_dst, rho_src_a, pop):
             rg, rp, rn, pg, pp, pn, mg, mp, mn, tau = fwd_arrs
             # A slot with no frame (no mass ⇒ no ρ_tot, §5) cannot reframe: the message passes through at
             # r=1. Falling back to ``rho_src = 1.0`` instead made r the destination's ABSOLUTE density (10³
             # on a short node) — a raw scale masquerading as a ratio. The relay already guards this way.
-            framed = valid & (rho[src] > _EPS) & (rho > _EPS)
-            r = np.where(framed, rho / np.maximum(rho[src], _EPS), np.where(valid, 1.0, 0.0))
+            # ⭐ ``rho_dst``/``rho_src_a`` are the flank pair, indexed by ROLE — see the relay's twin.
+            framed = valid & (rho_src_a[src] > _EPS) & (rho_dst > _EPS)
+            r = np.where(
+                framed, rho_dst / np.maximum(rho_src_a[src], _EPS), np.where(valid, 1.0, 0.0)
+            )
             # GRAFT before the reframe (a density measured AT the source); PEEL after (measured at the dst).
             # The graft only into an EXON — see the relay's twin.
             graft = ex_a & is_bnd_a[src] & valid
@@ -1448,13 +1492,16 @@ def node_sweep(
             return np.where(p > _EPS, (pa * a + pb * b) / np.maximum(p, _EPS), 0.0), p
 
         # ONE ρ-iteration (see the note at the top of the module), so this is straight-line: the frame
-        # `rho0` is already built above, and there is no next iteration to feed. ⭐ The two calls now
-        # differ ONLY in which neighbour they read — the face arguments dissolved with the faces.
+        # pair is already built above, and there is no next iteration to feed. ⭐ The two calls differ
+        # ONLY in which neighbour they read and, with it, which flank total each side presents.
+        # ⚠ the SAME role pairing as the relay: the left-hand message's source is the genomic-LOW
+        # neighbour, so the destination presents ``rho_lo`` and the source ``rho_hi``; the right-hand
+        # message is the mirror. `TRAPS.md` B14 — the change is in both twins, and each has its own gate.
         ag, ap, an, apg, app, apn, amg, amp, amn, atau, alam, ath = _transport(
-            sl, vl, fwd, rho0, _pop_l_a
+            sl, vl, fwd, rho_lo, rho_hi, _pop_l_a
         )
         bg, bp, bn, bpg, bpp, bpn, bmg, bmp, bmn, btau, blam, bth = _transport(
-            sr, vr, bwd, rho0, _pop_r_a
+            sr, vr, bwd, rho_hi, rho_lo, _pop_r_a
         )
         cg, cpg = _fuse_v(ag, apg, bg, bpg)  # density MODE (full precision-weighted)
         cp, cpp = _fuse_v(ap, app, bp, bpp)
@@ -1525,7 +1572,11 @@ def node_sweep(
                     "app": app.copy(),
                     "bpg": bpg.copy(),
                     "bpp": bpp.copy(),
-                    "rho_tot": rho0.copy(),
+                    # ⭐ the FLANK PAIR, both published: an instrument reconstructing a hop's ``r`` must
+                    # pair them by role — ``rho_lo[high slot] / rho_hi[low slot]`` — and one array cannot
+                    # express that.
+                    "rho_lo": rho_lo.copy(),
+                    "rho_hi": rho_hi.copy(),
                     "mo_g": mo_g.copy(),
                     "mo_p": mo_p.copy(),
                     "mo_n": mo_n.copy(),
@@ -1568,8 +1619,8 @@ def node_sweep(
                     "bwd_pg": bwd[3],
                     "bwd_pp": bwd[4],
                     "bwd_pn": bwd[5],
-                    "rho_node0": rho_node0,
-                    "rho0": rho0,
+                    "rho_lo": rho_lo,
+                    "rho_hi": rho_hi,
                     # ── AUDIT_2 instrumentation (invariant scan) ──
                     "order": np.asarray(order_list, np.int64),
                     "logvar_tot": logvar_tot.copy(),
@@ -1672,8 +1723,8 @@ def node_sweep(
             global_lp=global_lp,
             solve_grid=solve_grid,
             # DIAGNOSTIC (inert in production): the composition-evidence seed. (The retired NPMLE projection
-            # ``_mu_proj``/``_var_proj`` is gone; the LIVE enrichment scale + its variance are ``rho_node0`` and
-            # ``logvar_tot`` in ``_uni_static``, from which σ²_transfer = logvar_tot[dst]+logvar_tot[src].)
+            # ``_mu_proj``/``_var_proj`` is gone; the LIVE enrichment scale + its variance are the
+            # ``rho_lo``/``rho_hi`` flank pair and ``logvar_tot`` in ``_uni_static``, from which σ²_transfer = logvar_tot[dst]+logvar_tot[src].)
             _tau0_lam=_ni.tau_lam,
             # the incoming belief (the final solve's ``fg_ref``) + the intron-factory λ arm, so an ablation
             # replay of `_solve_nodes_logodds_all` reproduces the shipped f_g exactly before ablating.

@@ -161,6 +161,67 @@ carried entirely by messages.
 ⭐⭐ **The two FACES of an `intron|exon` EDGE** — the derivation this rung exists to land is
 `EQUATIONS.md` §3.6. Read it before touching the solver.
 
+### ⭐⭐⭐ `splice_both_strands` — the rung the SPLICE-FLUX REFRAME must be derived against
+
+**Owner's spec, 2026-08-05.** Four transcripts, both strands, overlapping exons AND overlapping introns,
+two junctions pointing opposite ways, on the same 12 kb chromosome:
+
+```
+TA+ (2,000, 3,000) (9,000, 10,000)     2 exons, + strand, intron 3,000–8,999
+TB+ (2,000, 10,000)                    1 exon,  + strand, spans TA's intron
+TC− (1,000, 11,000)                    1 exon,  − strand, spans everything
+TD− (1,000, 2,500) (8,500, 11,000)     2 exons, − strand, intron 2,500–8,499
+```
+
+⭐⭐ **What it breaks, and it breaks it immediately.** Every earlier rung let an EDGE ask "is my
+neighbour an exon?" and get a yes or a no. Here the question has no answer — the 4-bit signature the
+index stores is `{intron₊, intron₋, exon₊, exon₋}` and three nodes carry both kinds at once:
+
+| node | signature | what it is |
+|---|---|---|
+| [1,000, 2,000) | `0001` | exon₋ |
+| [2,000, 2,500) | `0011` | exon₊ + exon₋ |
+| [2,500, 3,000) | `0111` | ⭐ **intron₋** + exon₊ + exon₋ |
+| [3,000, 8,500) | `1111` | ⭐⭐ **intron₊ + intron₋ + exon₊ + exon₋ — all four** |
+| [8,500, 9,000) | `1011` | ⭐ **intron₊** + exon₊ + exon₋ |
+| [9,000, 10,000) | `0011` | exon₊ + exon₋ |
+| [10,000, 11,000) | `0001` | exon₋ |
+
+⛔⛔ **And `coarse_type_array` reports EVERY one of them as `exon`** — exon wins over intron, and the
+strand is collapsed. So on this rung the string `intron|exon` never appears, and any rule phrased on the
+coarse node type is silent exactly where it is needed. ⭐ The information is not missing; it is discarded
+one layer above the place that needs it.
+
+⭐ **The junction axis and the edge flags carry the rest of it, already plumbed:**
+
+| | src → dst | genomic | strand |
+|---|---|---|---|
+| junction 0 | node 2 → node 5 | 2,500 → 8,500 | − |
+| junction 1 | node 3 → node 6 | 3,000 → 9,000 | + |
+
+| edge | position | flag bits |
+|---|---|---|
+| #0 | 1,000 | `FLAG_TES_NEG` |
+| #1 | 2,000 | `FLAG_TSS_POS` |
+| #2 | 2,500 | ⭐ `FLAG_DONOR_NEG` |
+| #3 | 3,000 | ⭐ `FLAG_DONOR_POS` |
+| #4 | 8,500 | ⭐ `FLAG_ACCEPTOR_NEG` |
+| #5 | 9,000 | ⭐ `FLAG_ACCEPTOR_POS` |
+| #6 | 10,000 | `FLAG_TES_POS` |
+| #7 | 11,000 | `FLAG_TSS_NEG` |
+
+⚠⚠ **CHECK THE `_NEG` CONVENTION BEFORE RELYING ON IT.** Edge 2,500 is flagged `DONOR_NEG` and edge
+8,500 `ACCEPTOR_NEG` — but on a **−** transcript the molecule runs right-to-left, so the biological
+splice **donor** of TD−'s intron is at 8,500 and the **acceptor** at 2,500. Whether these bits mean
+"genomic-low end of a − intron" or "the transcript's actual donor" decides the sign of the whole
+derivation. ⛔ `EQUATIONS.md` §3.5b already ruled that this family of predicates must be written in
+GENOMIC terms and never in transcript terms, and it is exactly where a sign gets flipped silently.
+
+⚠ **The substrate verifier does NOT yet cover this rung.** `verify_toy_substrate.py` is written for ONE
+transcript on the **+** strand and refuses anything else. Extending it to multi-transcript and − strand
+is a prerequisite for reading a solver number off this spec (`TRAPS.md` A1: re-derive by a different
+algorithm before trusting).
+
 ### ⭐⭐ `toy_panel.py` — one spec × EVERY cached condition × an RNA-density ladder
 
 `toy_harness.py` answers "what does this structure do on ONE library at ONE RNA level". Once a structure is
@@ -245,6 +306,48 @@ chemistry** — this is the table that says capture-ON depletion is *the signal 
 abutting the exon**, which end up within 2× of the exon interior and ~1000× above the intron interior.
 ⛔ **That makes the capture-ON rung the one the `intron|exon` EDGE actually matters in** — it is then a
 well-counted object at the exon's own capture stratum whose component set excludes mature RNA.
+
+##### ⛔⛔ …BUT THAT TABLE IS ONE CONDITION (`g75`), AND 20–40 COUNTS IS **NOT** TRUE ACROSS THE LADDER
+
+Re-measured 2026-08-04 on all 18 capture-ON conditions × 7 RNA rungs at 120 kb. The `intron|exon` EDGE's
+count range, min–max over the rungs:
+
+| donor | `@2,000` | `@9,000` | | donor | `@2,000` | `@9,000` |
+|---|---|---|---|---|---|---|
+| `g00` | 0–0 | 0–0 | | `g50` | 13–32 | 14–25 |
+| `g01` | 0–1 | 0–2 | | `g75` | 20–35 | 24–36 |
+| `g05` | 0–1 | 1–3 | | `g90` | 25–43 | 26–47 |
+| `g10` | 2–6 | 1–8 | | `g98` | 29–44 | 29–50 |
+| `g25` | 5–13 | 6–15 | | | | |
+
+⭐ **`g50` and up are a solve; `g25` and below are not, and `g00` never can be — a zero-gDNA library has no
+gDNA fragments to place.** ⛔ So `--genome-length 120000` earns the claim on **8 of 18** capture-ON
+conditions, and any capture-ON aggregate over the whole ladder is averaging 8 solves with 10 empty
+objects. Say which rows carried it.
+
+⭐ **Lengthening still works at the low-gDNA end — it has not saturated by 1.08 Mb.** Same donor, same
+chemistry, m=1, one variable moved (the RNA count is a multiple of the donor's own gDNA DENSITY, so it
+does not depend on `L`):
+
+| | 120 kb | 360 kb | 1,080 kb |
+|---|---|---|---|
+| `g25` `intron\|exon` @2,000 / @9,000 | 5 / 9 | **28 / 18** | **50 / 46** |
+| `g05` `intron\|exon` @2,000 / @9,000 | 1 / 1 | 4 / 5 | 7 / 12 |
+| ⛔ the intron NODE (7,000 bp), `g25` | **0** | **1** | **0** |
+
+⭐⭐ **And the row that matters most is the last one: the intron NODE is dead under capture at EVERY
+chromosome length.** Its bp is fixed and its density is off-probe, so lengthening cannot reach it — while
+the EDGE beside it grows without bound. ⛔ **The well-counted side therefore INVERTS with capture**
+(`TRAPS.md` B19): off capture the intron holds ~315 counts against the EDGE's 12–13, on capture it holds 1
+against the EDGE's 20–40.
+
+⚠ **Two length slips in the harness itself, found on the way and worth fixing** (`_donor_sim_params`):
+`frag_mean` is read from `truth_summary.json`'s **`all`** row — the gDNA+RNA MIXTURE — and handed to the
+toy's RNA draw, which is +2.25 bp on `g50`; and that value is a **post-truncation realised** mean fed back
+in as the **pre-truncation generating** mean, which the `[50, 500]` truncation then re-inflates by a
+further +5.6 bp. Together they make the toy a ~7.8 bp longer-fragment library than its donor. ⭐ They are
+small next to the solver-side gap they sit beside (`EQUATIONS.md` §3.6b, −8.4 bp) but they are the same
+units and they add.
 
 #### ⛔ PROBES TILE PER EXON, and the reason is a real suppression
 
