@@ -461,10 +461,29 @@ def transfer_logvar(logvar_tot_dst, logvar_tot_src, graft):
     DIRECTION-dependent: on the **graft** the reframe ``r`` is common-mode across the matched component set and
     CANCELS in the composition (return 0 — applying it there is the double-count the density-uniformity proxy
     committed); on the **peel** / partial-anchor message it is LOAD-BEARING. This one law replaces the retired
-    ``var_proj[dst] + (μ_proj[dst]−μ_proj[src])²`` proxy and covers BOTH the relay and the combine. MC 0.02–0.27%."""
+    ``var_proj[dst] + (μ_proj[dst]−μ_proj[src])²`` proxy and covers BOTH the relay and the combine. MC 0.02–0.27%.
+
+    ⭐⭐⭐ **AND ``Var(log r) = ∞`` IS THE SECOND CASE WHERE ``r`` IS NOT APPLIED, so it returns 0 for the
+    SAME reason the graft does — an unapplied scale contributes no scale uncertainty.** A slot with zero
+    total density has ``log ρ_tot = −∞`` hence ``logvar_tot = +∞``: the RATIO IS UNDEFINED, so the reframe
+    is skipped and the level crosses UNSCALED (``r`` forced to 1 — `bp_solver`'s ``r_g = r if _lend else
+    1.0``, and this project's base assumption that a gDNA level does not change across an EDGE). Charging
+    that hop ``Var(log r)`` prices a scale factor that was never used.
+
+    ⛔⛔ **AND IT WAS NOT A ROUNDING DETAIL — IT SILENCED THE STRONGEST STATEMENT IN THE LIBRARY.**
+    ``1/(1/p + ∞) = 0`` annihilates ALL THREE streams of every message such a slot sends, including the
+    MEASUREMENT stream, which never multiplies by ``r`` at all. Measured on a zero-gDNA library, where
+    1,298 intergenic nodes hold no fragments over 50.7 Mb of opportunity and therefore know the gDNA
+    density is zero: slots receiving a gDNA level measurement went **0 → 26,839** (capture_off) and
+    **0 → 29,532** (capture_on), and the EDGE-axis error fell **−10.1 %** and **−22.8 %**. `TRAPS.md`
+    C0c/C0d — "there is none here" was unsayable because the channel priced it at infinite uncertainty.
+
+    ⚠ ``+∞`` is the only value treated this way, and it is a STRUCTURAL statement (an undefined ratio),
+    not a threshold — a large-but-finite ``Var(log r)`` is a real scale uncertainty and is still charged
+    in full."""
     g = np.asarray(graft, bool)
     s = np.asarray(logvar_tot_dst, np.float64) + np.asarray(logvar_tot_src, np.float64)
-    return np.where(g, 0.0, s)
+    return np.where(g | ~np.isfinite(s), 0.0, s)
 
 
 def mismatch_gap(rho_msg, rho_own):
