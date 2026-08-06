@@ -83,6 +83,22 @@ exactly 0. ⚠ The population prior papers over this downstream (that object's s
 but pass-0 **is** the substrate the prior is fitted on, and a prior fitted on "everything is ½" cannot
 be rescued per-object on a heterogeneous sample.
 
+**C0d. ⛔⛔⛔ THE RELAY'S CURRENCY IS A DENSITY *RATIO*, AND ZERO IS NOT IN THE MULTIPLICATIVE GROUP —
+SO "THERE IS NONE HERE" IS UNREPRESENTABLE BY CONSTRUCTION, NOT BY AN OVERSIGHT.** C0c's repair was
+built, gated (18 gates, 4 firing perturbations) and **measured at +0.0 % on the 36-condition panel, with
+the four `g00` rows BYTE-IDENTICAL** — the conditions it was designed for did not move at all. The
+two-step probe says exactly why: after the fix `NodeInit.prec_g > 0` at **1,298** intergenic slots
+(value exactly `1/trigamma(½) = 0.2026`), and the relay publishes `prec_g > 0` at **0** of them. ⭐ The
+reframe transports `r = ρ_tot(dst)/ρ_tot(src)` and every guard on that path is `rho > _EPS`
+(`bp_solver` ~433, 506, 983, 1197): a ratio with a zero denominator is undefined, so a source whose true
+density is **0** cannot participate however precisely it knows it. ⛔⛔ **That is why the single most
+informative statement available at a zero-gDNA library — 50.7 Mb of opportunity with no fragments — is
+structurally unsayable.** ⭐ The lesson generalises past this solver: *before fixing a source that will
+not speak, check whether the channel can carry the value it wants to send.* A multiplicative transport
+cannot carry zero, and no amount of precision at the source changes that. ⚠ And the fix is not wasted —
+it is a precondition: the source must be able to form the claim before the channel can be taught to
+carry it. But it must be priced as what it measured, which is nothing.
+
 **A12b. ⛔⛔ A NOISE DEADBAND WHOSE CUSHION IS SUPPLIED BY AN UNRELATED SAMPLE SIZE FAILS EXACTLY WHERE
 THAT SAMPLE GETS BIG — AND IT FAILS SILENTLY, INTO THE HONESTY COLUMNS.** `strand_evidence` gates the
 strand channel on `disc = 4·max(0, (κ̂−½)² − σ²_d)` with `σ²_d = ¼(1/N_rna + ω_r) + ¼(1/N_gdna + ω_g)`.

@@ -40,6 +40,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.special import polygamma
 
 from .density_deconv import density_factor_precision
 from .node_chain import NODE, NodeChain
@@ -48,6 +49,7 @@ from .simplex_logodds import _logodds_grid, _solve_nodes_logodds_all
 
 __all__ = [
     "NodeInit",
+    "count_logvar",
     "has_own_composition_evidence",
     "own_composition_logvar",
     "own_precision",
@@ -136,19 +138,48 @@ def own_composition_logvar(f_g, tau_lam, struct_lock):
     return v_fg, v_fr
 
 
+def count_logvar(count) -> np.ndarray:
+    """``Var(log ρ)`` for a Poisson rate observed as ``count`` events over an opportunity — **exactly**,
+    at every count including zero.
+
+    ⭐⭐ **ONE EXPRESSION WHERE THERE WERE TWO CASES AND AN ASYMPTOTE.** A rate ``ρ`` seen as ``a`` events
+    over exposure ``E``, under the SAME Jeffreys prior ψ is built on (`simplex_logodds._JEFFREYS_REF`
+    derives it as Jeffreys for a Poisson rate), has posterior ``Gamma(a + ½, E)``. Its log has variance
+    ``trigamma(a + ½)`` — independent of ``E``, because the opportunity moves the location and cannot
+    sharpen the claim.
+
+    This *is* the ``1/n`` the code used to carry: ``trigamma(a + ½) → 1/a``, agreeing to better than
+    0.1 % for ``a ≥ 10``. The whole difference is at small counts, and at ``a = 0`` it is the difference
+    between ``π²/2 = 4.93`` (sd 2.22 nats — loose, but a statement) and ``∞`` (silence).
+
+    ⛔⛔ **THAT SILENCE WAS THE DEFECT** (`TRAPS.md` C0c). At a zero-gDNA library all 1,298 intergenic
+    nodes hold exactly zero counts over 50.7 Mb of gDNA opportunity — the most precise statement in the
+    library, "there is no gDNA" — and every one of them emitted nothing, because ``1/n`` diverges. A
+    zero count over a known opportunity is a MEASUREMENT; only a zero OPPORTUNITY is an absence of data,
+    and that is handled structurally by :func:`rate_posterior_mean`.
+    """
+    return polygamma(1, np.asarray(count, np.float64) + 0.5)
+
+
 def own_precision(n, v_log, live):
-    """The own-belief precision of one component: ``p = n / (n·Var(log f) + 1) = 1/(Var(log f) + 1/n)`` — the
-    composition variance combined with the Poisson count power. It is 0
-    when there is no count (``n = 0``), no evidence (``Var(log f) = ∞``), or the component is not ``live``
-    (density ≤ 0) — a composition-vacuous source emits nothing, with no ``0·∞`` nan (the ``∞`` is masked to a
-    finite value BEFORE the product, matching ``np.where``'s both-branch evaluation)."""
-    n = np.asarray(n, np.float64)
+    """The own-belief precision of one component: ``p = 1/(Var(log f) + Var(log ρ_count))`` — the
+    composition variance combined with the count's own.
+
+    ⭐ The count term is :func:`count_logvar`, the EXACT Poisson log-rate variance, in place of the
+    ``1/n`` asymptote it replaces. That deletes the ``n > 0`` branch outright: a zero count is a
+    measurement with finite precision, so there is nothing to special-case.
+
+    It is still 0 where there is genuinely nothing to say — no evidence (``Var(log f) = ∞``) or a
+    component that is not ``live`` (structurally inadmissible). ⭐ **Those two remain and they are the
+    point of the distinction**: ignorance and impossibility both silence a source, a zero count does
+    not. No ``0·∞`` nan — the ``∞`` is masked to a finite value BEFORE the sum, matching ``np.where``'s
+    both-branch evaluation."""
     v = np.asarray(v_log, np.float64)
     ok = np.isfinite(v)
     v_fin = np.where(ok, v, 0.0)
     return np.where(
-        (n > 0.0) & ok & np.asarray(live, bool),
-        n / (n * np.maximum(v_fin, 0.0) + 1.0),
+        ok & np.asarray(live, bool),
+        1.0 / (np.maximum(v_fin, 0.0) + count_logvar(n)),
         0.0,
     )
 
@@ -256,8 +287,6 @@ def build_node_init(
     fg_loc = np.asarray(dc.gdna_frac, np.float64)
     fp_loc = np.asarray(dc.rna_pos_frac, np.float64)
     fn_loc = np.asarray(dc.rna_neg_frac, np.float64)
-    vp_loc = np.asarray(dc.rna_pos_frac_var, np.float64)
-    vn_loc = np.asarray(dc.rna_neg_frac_var, np.float64)
 
     # a node that does not deconvolve its own split (G1 sink / empty) keeps the signature-binary init.
     solvable = (fp | fn) & (n_node > 0.0)
@@ -310,30 +339,43 @@ def build_node_init(
     eff_r = np.asarray(geometry.eff_rna, np.float64)
     v_log_fg, v_log_fr = own_composition_logvar(fg_loc, tau_lam, struct_lock)
 
-    # gDNA (source 1 measured / source 3 strand / source 4 default all flow through here):
-    rho_g = np.where(
-        (mass_global > _EPS) & (eff_global > _EPS),
-        fg_loc * mass_global / np.maximum(eff_global, _EPS),
+    # ⭐⭐ THE LOCATION IS UNCHANGED AND THAT IS DELIBERATE — only the PRECISION was ever broken.
+    #    ``rho_c = f_c*M/E_c`` keeps the composition identity ``sum_c rho_c*E_c = M`` exactly, which is
+    #    what the relay's mass pin exists to enforce; and the relay fuses in LINEAR density space
+    #    (`bp_solver._fuse`), so ``rho = 0`` is perfectly expressible. A zero density was never the
+    #    problem — an INFINITE precision on it was (`TRAPS.md` C0c).
+    #    ⛔ A first version of this fix also moved the location to the ``Gamma(a+½, E)`` posterior mean
+    #    ``(a+½)/E``. That is right for one rate in isolation and WRONG here: three components each
+    #    gaining ``+½`` breaks ``sum_c rho_c*E_c = M`` by exactly 3/2, which `test_relay_mass_pin` caught
+    #    as ``R_own = 0.5 + 1/M``. The half belongs to the rate's VARIANCE, not to a share of a total.
+    #
+    # ⛔ What DID change is the ``live`` predicate: STRUCTURAL (opportunity, strand admissibility), never
+    #    the count. A zero count is a measurement; only a zero opportunity is an absence of data.
+    #
+    # gDNA (source 1 measured / source 3 strand / source 4 default all flow through here). It is
+    # genomically continuous, so it is admissible wherever it has opportunity — there is no gDNA analogue
+    # of a forbidden strand.
+    rho_g = np.maximum(
+        np.where(eff_global > 0.0, fg_loc * mass_global / np.where(eff_global > 0.0, eff_global, 1.0), 0.0),
         0.0,
     )
-    rho_g = np.maximum(rho_g, 0.0)
-    prec_g = own_precision(n_node, v_log_fg, rho_g > _EPS)
+    prec_g = own_precision(fg_loc * mass_global, v_log_fg, eff_global > 0.0)
 
-    # RNA per strand — the density is live iff the strand is free, there is mass, and the local solve gave a
-    # finite posterior variance (a node the strand could actually resolve on this axis):
-    def _rna(frac_loc, var_loc, free_s):
-        rho_raw = np.where(
-            (mass_global > _EPS) & (eff_r > _EPS) & np.asarray(free_s, bool),
-            np.asarray(frac_loc, np.float64) * mass_global / np.maximum(eff_r, _EPS),
-            0.0,
+    # RNA per strand — admissible iff the annotation allows that strand here AND there is opportunity.
+    # ⚠ ``np.isfinite(var_loc)`` used to gate this too and is GONE as redundant, not as a change of
+    # meaning: ``own_precision`` already returns exactly 0 on a non-finite composition variance, so the
+    # unresolvable node emitted nothing before and emits nothing now.
+    def _rna(frac_loc, free_s):
+        admissible = np.asarray(free_s, bool)
+        count = np.asarray(frac_loc, np.float64) * mass_global
+        live = admissible & (eff_r > 0.0)
+        return (
+            np.where(live, count / np.where(live, eff_r, 1.0), 0.0),
+            own_precision(count, v_log_fr, live),
         )
-        live = (n_node > 0.0) & np.isfinite(np.asarray(var_loc, np.float64)) & (rho_raw > _EPS)
-        rho = np.where(live, rho_raw, 0.0)
-        prec = own_precision(n_node, v_log_fr, rho > _EPS)
-        return rho, prec
 
-    rho_pos, prec_pos = _rna(fp_loc, vp_loc, fp)
-    rho_neg, prec_neg = _rna(fn_loc, vn_loc, fn)
+    rho_pos, prec_pos = _rna(fp_loc, fp)
+    rho_neg, prec_neg = _rna(fn_loc, fn)
 
     return NodeInit(
         f_g=fg_loc,

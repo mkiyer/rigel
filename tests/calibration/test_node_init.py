@@ -110,13 +110,22 @@ def test_own_composition_logvar_three_states():
 
 
 def test_own_precision_monotone_and_zeros():
-    """p = n/(n·v+1): monotone in the count; 0 at n=0 or v=∞ or dead component; no 0·∞ nan."""
+    """``p = 1/(v + trigamma(n+½))``: monotone in the count; 0 only at ``v=∞`` or a dead component.
+
+    ⭐⭐ **RE-POINTED 2026-08-05 — the line this used to carry, ``assert p[2] == 0.0  # no count``, WAS
+    THE DEFECT** (`TRAPS.md` C0c). It asserted that an object with zero counts must emit nothing, which
+    is true of ``1/n`` and false of the world: a zero count over a known opportunity is a measurement,
+    and at a structurally pure-gDNA object it is the strongest one in the library. Measured cost of the
+    old behaviour: all 1,298 intergenic nodes silent at ``g00``, and 34–38 % phantom gDNA on a library
+    with none. ⛔ The two zeros that REMAIN are the real ones — ignorance (``v = ∞``) and impossibility
+    (a dead component) — and they are asserted below precisely so this does not become "everything now
+    speaks"."""
     n = np.array([10.0, 400.0, 0.0, 50.0])
     v = np.array([0.1, 0.1, 0.1, np.inf])
     live = np.array([True, True, True, True])
     p = own_precision(n, v, live)
     assert p[1] > p[0] > 0.0  # more count ⇒ sharper
-    assert p[2] == 0.0  # no count
+    assert 0.0 < p[2] < p[0]  # ⭐ zero counts SPEAK, and speak most quietly of the three
     assert p[3] == 0.0  # no evidence (v=∞), and no nan
     assert (
         own_precision(n, np.full(4, 0.1), np.array([False, True, True, True]))[0] == 0.0
