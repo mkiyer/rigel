@@ -106,6 +106,9 @@ class OracleTruth:
     full: object
     parts: dict  # origin -> payload
     read_counts: dict  # origin -> reads written (every input read accounted for)
+    #: ⭐ held records whose ORIGIN attribution the lift could not determine — 0 unless ``drain_with``
+    #: was used. It bounds the truth error exactly; a caller must REPORT it (`second_pass.lift_choices`).
+    n_ambiguous: int = 0
 
     @classmethod
     def from_bam(
@@ -116,20 +119,52 @@ class OracleTruth:
         work_dir: Path,
         tag: str,
         full_payload=None,
+        drain_with=None,
     ) -> "OracleTruth":
         """Split the BAM by origin, scan each partition, and validate sum-to-full.
 
         ``full_payload`` lets a caller that has ALREADY scanned the full BAM (e.g. to run
         ``calibrate`` on it) hand that payload in, skipping a redundant full re-scan. It must be
         the production scan of ``bam`` with the same ``cfg`` — sum-to-full then also PROVES the
-        oracle partitions reconstruct the exact payload the calibration consumed."""
+        oracle partitions reconstruct the exact payload the calibration consumed.
+
+        ⭐⭐ ``drain_with`` makes the oracle valid for a DRAINED tally. Without it, every number an
+        instrument reads off this class is an **undrained** one, because the second pass conditions on
+        the whole tally and partitions drained independently do not sum to the whole drained
+        (`TRAPS.md` B9). Pass ``(undrained_whole, choices, node_types, junctions)`` — exactly what
+        ``pipeline._drain_side_buffer(_lift=...)`` publishes — and each partition is drained by
+        REPLAYING the whole's already-drawn choices inside it (`second_pass.lift_choices`).
+
+        ⛔ **The two payloads are different objects and swapping them is the one way to get this
+        wrong.** ``full_payload`` takes the **DRAINED** whole — it is what sum-to-full is asserted
+        against and what calibration read. ``drain_with[0]`` takes the **UNDRAINED** whole — the drained
+        bank is empty by design, so it cannot supply the key pool and every partition would raise. That
+        failure is at least loud; ⭐ and in the other direction ``from_parts``' existing sum-to-full
+        becomes the drain's own end-to-end identity gate, for free.
+        """
         paths, read_counts = _split_bam(bam, work_dir, tag)
         full = full_payload if full_payload is not None else _scan_payload(bam, index, cfg)
         parts = {k: _scan_payload(paths[k], index, cfg) for k in ORIGINS}
-        return cls.from_parts(full, parts, read_counts)
+        n_ambiguous = 0
+        if drain_with is not None:
+            from rigel.second_pass import drain, lift_choices
+
+            undrained_whole, choices, node_types, junctions = drain_with
+            # ⭐ ALL partitions in ONE call — the per-key queue's state is shared across them, so each
+            # of the whole's choices is handed out exactly once (`lift_choices`' own docstring).
+            lifted, n_ambiguous = lift_choices(
+                undrained_whole, [parts[k] for k in ORIGINS], choices
+            )
+            parts = {
+                k: drain(parts[k], ch, node_types=node_types, junctions=junctions)
+                for k, ch in zip(ORIGINS, lifted)
+            }
+        return cls.from_parts(full, parts, read_counts, n_ambiguous=n_ambiguous)
 
     @classmethod
-    def from_parts(cls, full, parts: dict, read_counts: dict | None = None) -> "OracleTruth":
+    def from_parts(
+        cls, full, parts: dict, read_counts: dict | None = None, n_ambiguous: int = 0
+    ) -> "OracleTruth":
         """Assemble from payloads that are ALREADY scanned, and validate — the entry point a cache
         needs.
 
@@ -147,6 +182,7 @@ class OracleTruth:
             full=full,
             parts=parts,
             read_counts=read_counts if read_counts is not None else {k: -1 for k in ORIGINS},
+            n_ambiguous=int(n_ambiguous),
         )
         self._validate()
         return self

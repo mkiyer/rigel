@@ -42,7 +42,12 @@ from dataclasses import dataclass
 import numpy as np
 
 from ._bam_impl import Accumulator as NativeAccumulator
-from .scan_payload import ADDITIVE_AXES, AccumulatorPayload, DrainQC
+from .scan_payload import (
+    _DEFERRED_RECORD_FIELDS,
+    ADDITIVE_AXES,
+    AccumulatorPayload,
+    DrainQC,
+)
 from .types import Strand
 
 
@@ -52,6 +57,7 @@ __all__ = [
     "choose_hypotheses",
     "combine_factors",
     "drain",
+    "lift_choices",
     "score_held_fragments",
     "strand_terms",
 ]
@@ -489,6 +495,105 @@ def score_held_fragments(
         ),
         n_undecided=n_undecided,
     )
+
+
+def lift_choices(whole: AccumulatorPayload, parts, choices: np.ndarray):
+    """⭐⭐ Carry hypothesis choices made on the WHOLE library onto its origin PARTITIONS.
+
+    ⛔ **WHY THIS EXISTS, AND IT IS AN IDENTITY NOT A CONVENIENCE.** Splitting a BAM by fragment origin
+    and re-scanning reconstructs the pass-one payload exactly, because pass one deposits each fragment
+    independently — that identity is what makes an origin-split oracle a valid truth source. The second
+    pass breaks it: its multinomial is scored against the *whole* payload's densities, so draining three
+    partitions separately is a different operation from draining the whole and
+    ``Sum(partitions) != whole``.
+
+    ⭐ The constraint is on **WHERE the choice is made, not on whether it can be made at all.** Score and
+    draw ONCE on the whole library, then replay each fragment's already-chosen hypothesis inside whichever
+    partition holds it. Every fragment then deposits independently *given its choice*, the identity is
+    restored, and each partition's drained tally is comparable with the whole's::
+
+        scores  = score_held_fragments(whole, ...)
+        choices = choose_hypotheses(scores, whole, seed=...)      # <- ONCE, on the whole
+        drained = drain(whole, choices, ...)                      # the tally the solver reads
+        lifted, ambiguous = lift_choices(whole, partitions, choices)     # the truth, per origin
+        for p, ch in zip(partitions, lifted):
+            drain(p, ch, ...)
+
+    ⛔⛔ **EVERY PARTITION IS LIFTED IN ONE CALL, AND THAT IS THE WHOLE POINT OF THE SIGNATURE.** A record's
+    choice is consumed from a per-key queue, so the queue's state has to be shared across the partitions or
+    two of them can take the SAME entry and leave another unused — ``Sum(partitions) != whole`` again, by a
+    different route. Taking a sequence makes the identity a property of this function rather than of a
+    caller's discipline. ⚠ A one-partition caller passes ``[p]``.
+    ⭐ *This was found by perturbation, not by design*: the first version took a single partition and a
+    per-call queue, and the gate set could not see the defect (`TRAPS.md` A2).
+
+    ⭐ **The key is the bank's own canonical sort key** — ``_DEFERRED_RECORD_FIELDS``, the tuple the C++
+    sorts on before the bank crosses the ABI, imported rather than restated so there is one definition of
+    record identity (`TRAPS.md` A11). :class:`DeferredFragments` guarantees the property this rests on:
+    *"two records that tie on that key are identical records, so no tie-break is needed or possible."*
+    Identical records have identical hypothesis SETS — enumeration reads the span and the annotation, never
+    the origin — so a LOCAL hypothesis index transfers between them unchanged.
+
+    ⚠ **The one ambiguity, counted rather than hidden.** When several whole-library records share a key and
+    are split across origins, no partition can know which of them it holds; the assignment is greedy in
+    canonical order. The deposits are interchangeable (identical records, identical hypothesis sets) but the
+    ORIGIN attribution is not — swapping a choice between a gDNA and an RNA fragment of the same span would
+    credit one origin's mass to the other. ⛔ So the count is RETURNED, never swallowed: a caller must
+    report it, and it bounds the truth error exactly. On distinct-span substrates it is 0 and the lift is
+    exact.
+
+    Returns ``(lifted, n_ambiguous)`` — ``lifted`` is one ``int64`` array per partition, each aligned with
+    that partition's ``deferred.hypothesis_offsets``.
+
+    :raises ValueError: if a partition holds a record ``whole`` does not, or holds more copies of one key
+        than ``whole`` does. Either means the payloads are not a partition of one scan, and nothing
+        downstream is meaningful.
+    """
+    w = whole.deferred
+    parts = list(parts)
+    choices = np.asarray(choices, np.int64)
+    if choices.shape[0] != w.n_fragments:
+        raise ValueError(
+            f"lift_choices got {choices.shape[0]} choices for {w.n_fragments} whole-library held "
+            "records. One choice per held record, in the bank's canonical order."
+        )
+
+    def _keys(d):
+        return list(
+            zip(*(np.asarray(getattr(d, f), np.int64).tolist() for f in _DEFERRED_RECORD_FIELDS))
+        )
+
+    # key -> the whole's choices for that key, in canonical order. Consumed left to right ACROSS all
+    # partitions, so each entry is handed out exactly once.
+    pool: dict[tuple, list[int]] = {}
+    for i, k in enumerate(_keys(w)):
+        pool.setdefault(k, []).append(int(choices[i]))
+    taken: dict[tuple, int] = {}
+
+    out, ambiguous = [], 0
+    for p in parts:
+        d = p.deferred
+        lifted = np.zeros(d.n_fragments, np.int64)
+        for j, k in enumerate(_keys(d)):
+            run = pool.get(k)
+            if run is None:
+                raise ValueError(
+                    f"lift_choices: a partition holds record {j} with key {k}, which is not in the whole "
+                    "library's held bank. The payloads are not a partition of one scan — check they came "
+                    "from the same BAM."
+                )
+            at = taken.get(k, 0)
+            if at >= len(run):
+                raise ValueError(
+                    f"lift_choices: the partitions hold more records with key {k} ({at + 1}) than the "
+                    f"whole library does ({len(run)}). They are not a partition of one scan."
+                )
+            if len(run) > 1:
+                ambiguous += 1
+            lifted[j] = run[at]
+            taken[k] = at + 1
+        out.append(lifted)
+    return out, ambiguous
 
 
 def choose_hypotheses(scores: HeldScores, payload: AccumulatorPayload, *, seed: int) -> np.ndarray:

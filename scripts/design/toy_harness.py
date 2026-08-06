@@ -88,7 +88,11 @@ from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
-from rigel.pipeline import _native_detect_sj_tag, scan_and_buffer  # noqa: E402
+from rigel.pipeline import (  # noqa: E402
+    _drain_side_buffer,
+    _native_detect_sj_tag,
+    scan_and_buffer,
+)
 from rigel.scan_cache import index_derived_inputs  # noqa: E402
 from rigel.sim import CaptureConfig, GDNAConfig, ReadSimConfig, Scenario  # noqa: E402
 
@@ -444,10 +448,35 @@ def run_toy(
 
     bam = str(res.bam_path)
     scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
-    _stats, strand_model, _buf, payload = scan_and_buffer(bam, res.index, scan)
+    _stats, strand_model, _buf, pass_one = scan_and_buffer(bam, res.index, scan)
     ra = RegionArrays.from_index(res.index)
+
+    # ── ⭐⭐ THE SECOND PASS, on the WHOLE, exactly as production runs it ─────────────────────────
+    # ⛔ Until this landed every number the toy reported was an UNDRAINED tally, and the population it
+    # understates is the spliced one: a held fragment is held precisely because its unsequenced gap
+    # admits more than one intron path. On `tes_readthrough` TA's and TB's junctions share the donor at
+    # 2,000 and differ only in acceptor, so 0.65 % of fragments defer — and they understate the
+    # certified channel at @9,100 by a measured 13.5 %.
+    # ⭐ `_lift` is what makes the ORACLE valid afterwards: score and draw ONCE on the whole, then replay
+    # each fragment's chosen hypothesis inside whichever origin partition holds it (`TRAPS.md` B9).
+    lift: dict = {}
+    payload = _drain_side_buffer(
+        pass_one, res.index, strand_model, seed=pipeline_config.second_pass_seed, _lift=lift
+    )
     truth = OracleTruth.from_bam(
-        bam, res.index, pipeline_config, wd / "split", spec.name, full_payload=payload
+        bam,
+        res.index,
+        pipeline_config,
+        wd / "split",
+        spec.name,
+        # ⛔ DRAINED whole here (it is what calibration reads and what sum-to-full is asserted against);
+        # UNDRAINED whole inside `drain_with` (the drained bank holds nothing, so it has no key pool).
+        full_payload=payload,
+        drain_with=(
+            (lift["undrained"], lift["choices"], lift["node_types"], lift["junctions"])
+            if lift
+            else None
+        ),
     )
 
     debug: dict = {}
@@ -557,6 +586,14 @@ def report(r: ToyResult) -> None:
           f"{r.spec.n_rna_fragments:,} RNA fragments · {r.n_gdna_target:,} gDNA fragments "
           f"(DERIVED to match the donor's density) · nrna={r.spec.nrna_abundance:g}")
     print(f"   {r.seconds:.1f} s end to end")
+    # ⭐ THE DRAIN, printed rather than assumed. ``held`` is what pass one could not resolve; ``ambig`` is
+    # how many of those the origin lift could not attribute — it BOUNDS the truth error, so a run that
+    # does not show it is a run whose oracle carries an unstated error bar (`second_pass.lift_choices`).
+    d = getattr(r.payload, "drain", None)
+    print(f"   second pass: {0 if d is None else d.offered:,} held · "
+          f"{0 if d is None else d.deposited:,} deposited · "
+          f"{0 if d is None else d.chose_spliced:,} chose a spliced path · "
+          f"oracle lift ambiguous = {r.truth.n_ambiguous:,}")
     rows = object_rows(r)
     print()
     print(f"   {'slot':>4} {'kind':<6} {'type':<20} {'where':>17} {'bp':>7} {'counts':>8} "
@@ -700,6 +737,46 @@ SPECS: dict[str, ToySpec] = {
                         "abundance": 300.0,
                     },
                     {"t_id": "TB", "exons": [(1_000, 2_000), (9_000, 10_000)], "abundance": 300.0},
+                ],
+            },
+        ],
+        n_rna_fragments=4_000,
+    ),
+    "tes_readthrough": ToySpec(
+        name="tes_readthrough",
+        what_it_probes="⭐⭐⭐ OWNER'S SPEC, 2026-08-05 — the CERTIFIED-RNA CHANNEL AT A TERMINUS EDGE, "
+        "which is the case no other rung can produce at all.\n"
+        "          TA+ (1,050, 2,000) (9,000,  9,100)\n"
+        "          TB+ (1,000, 2,000) (9,050, 11,000)\n"
+        "        Two junctions from ONE shared donor: j 2,000 -> 9,000 (TA) and j 2,000 -> 9,050 (TB).\n"
+        "        ⭐⭐⭐ **EDGE @9,100 IS THE POINT.** It is TA's TES and NO junction touches it — yet "
+        "transcription CONTINUES past it, because TB's second exon runs to 11,000. A TB fragment that "
+        "USED TB's junction and reaches >50 bp past 9,050 crosses 9,100 **contiguously having spliced "
+        "elsewhere**, so it lands in `edge_spliced` at a line with no junction to price it against. That "
+        "is exactly the population the new TSS/TES edges create, and if it is not binned as spliced it "
+        "falls into the UNSPLICED pool and gets deconvolved — certified RNA fed to the gDNA solver.\n"
+        "        ⛔ **No previous toy can make this fragment.** On every earlier rung the exons ARE the "
+        "nodes, so a spliced molecule never crosses an interior line contiguously and `edge_spliced` is "
+        "structurally zero everywhere (measured 0 on `alt_splice`, including at exons holding 68,000 RNA "
+        "fragments).\n"
+        "        ⭐ The other three structures, each a separate stress:\n"
+        "          EDGE @9,050 — TB's junction ACCEPTOR **and** a plain contiguity line for TA, whose "
+        "exon 2 spans 9,000-9,100 unbroken. So one line carries junction flux for one transcript and an "
+        "unspliced RNA crossing for another.\n"
+        "          EDGE @1,050 — TA's TSS, with TB already transcribing through it.\n"
+        "          NODE [9,000, 9,050) — TA exon AND TB intron on the SAME strand, 50 bp wide, so it is "
+        "also below one fragment length and has no resolvable density of its own (`TRAPS.md` D8).\n"
+        "        ⚠ Both `abundance` values are meant to be SWEPT: the certified channel's strength at "
+        "@9,100 is TB's alone, while the unspliced crossing there is gDNA + TB, so the TA/TB ratio moves "
+        "the two independently. A single abundance pair tests one corner of that.",
+        genome_length=13_000,
+        genes=[
+            {
+                "gene_id": "gA",
+                "strand": "+",
+                "transcripts": [
+                    {"t_id": "TA", "exons": [(1_050, 2_000), (9_000, 9_100)], "abundance": 300.0},
+                    {"t_id": "TB", "exons": [(1_000, 2_000), (9_050, 11_000)], "abundance": 300.0},
                 ],
             },
         ],

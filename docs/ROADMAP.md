@@ -46,9 +46,40 @@ origin-split oracle, ⚠ undrained:
 
 ## §1 ⭐⭐⭐ WHAT TO DO NEXT
 
+> ⛔⛔ **RE-RANKED 2026-08-05, and two entries below are STALE — read this box first.**
+>
+> **Step 1 (the vertex) is CLOSED as a build.** `vertex_ceiling.py` prices it and its own docstring leads
+> with the verdict: the 24.4 % is **the value of missing information, not headroom** — evidence-free
+> objects sit at median `|Δ|/sd(f_g)` = **z = 0.5–0.6**, inside their own 1σ, and no prior-free solve can
+> do better. `test_certified_rna_licence.py` `C2b` independently closed the one channel that might have
+> supplied vertex evidence. §2 below is kept as the *measurement*; it is not a build.
+>
+> **Step 3 (`Var(κ̂)`) is REPRICED — it is a REPORTING fix, not an accuracy fix, and it is now urgent for
+> a different reason.** Measured 2026-08-05: the deadband opens on **3 of 18** unstranded conditions, and
+> at `g75 ss0.50 capture_off` forcing κ = ½ takes `solv%` **77–90 % → 0.0 %** while Σ|err| moves
+> −0.6 %/−5.3 %/**+4.6 %** across the three big classes (a wash, reproducing §3's −0.2 %). ⛔ **So the
+> panel's `solv%` / `weak%` / `conf-wrong` / `calib` columns are inflated by the defect at those three
+> conditions, and any ranking that reads them is reading the bug** (`TRAPS.md` A12b). Fix it to make the
+> instrument trustworthy, not to move the error.
+>
+> ⭐ **What the same dissection says the ERROR actually is** — the classes, which are ablation-invariant,
+> at `g75 ss0.50 capture_off`:
+>
+> | class | objects | mass | true `f_g` | pred `f_g` | Σ\|err\| |
+> |---|---|---|---|---|---|
+> | `edge/exon\|exon` | 12,811 | 1,742,598 | **0.1177** | **0.2291** | **320,297** |
+> | `node/exon` | 11,304 | 1,383,829 | 0.1725 | 0.2683 | 242,309 |
+> | `edge/intron\|exon` | 19,610 | 319,314 | 1.0000 | 0.7462 | 81,032 |
+>
+> **88 % of the error is the two exon classes, both biased the same way — gDNA over-called ~2×** — because
+> on an unstranded off-capture library an exon object has **no working evidence channel at all**: strand is
+> structurally silent, `length_likelihood` is OFF by ruling, and the intron factory is intron-NODE-only. It
+> falls back to ψ's uninformative reference (~0.5) against a true `f_g` of 0.12–0.17. ⭐ **That, not the
+> vertex, is the modal defect on the contaminated panel.**
+
 | | step | shape | why now |
 |---|---|---|---|
-| ⭐⭐⭐ **1** | **ψ CANNOT REACH A SIMPLEX VERTEX, AND ONE VERTEX IS THE MAJORITY OF THE ANNOTATION** | a solve/prior question — NOT a message question | §2 below. The zero-RNA control reads **0.92–0.99 against a truth of exactly 1.000** on every rung, 0.65–2.51 % of mass. Most annotated transcripts are unexpressed, so this is the modal object. ⭐ Localised away from the messages three independent ways, and it is a floor under every message-layer arm |
+| ⛔ ~~**1**~~ | ~~**ψ CANNOT REACH A SIMPLEX VERTEX**~~ | **CLOSED — see the box above** | §2 below. The zero-RNA control reads **0.92–0.99 against a truth of exactly 1.000** on every rung, 0.65–2.51 % of mass. ⚠ Kept because the measurement is sound and re-deriving it is expensive; ⛔ the *conclusion* that it is a build is withdrawn |
 | ⭐⭐ **2** | **PRICE THE SPLICE-FLUX REFRAME JOINTLY WITH THE LEVEL DEFECT** (`EQUATIONS.md` §3.6c + §4) | nothing to design: one is in `src/`, the other is `toy_trace_error.py`'s relay-level arm | The reframe is correct by derivation and now DEFAULT (owner's ruling, 2026-08-05), but alone it is panel-negative on the node axis. `TRAPS.md` D4j says that is not a verdict on it: it is half of a **cancelling pair**. Neither defect has an honest price until the joint arm runs |
 | ⭐⭐ **3** | **PROPAGATE `Var(κ̂)` INTO THE STRAND ARM'S PRECISION** (`ROADMAP.md` §1 step 3) | a derivation, then one term | κ = ½ means *exactly* zero strand information, but κ̂ = 0.500689 leaves `I(f_g) ∝ (2κ−1)²` at 1e-6…1e-4 — and a boolean licence on a precision is flipped as hard by 1e-6 as by 1e+6 (`TRAPS.md` D4f). ⛔ **Not a floor** — B11 implemented and refuted that. Pays for C7's "declared precision not earned, up to 8.9× overconfident" at the same time |
 | **4** | **The graft's frame under capture** (`ROADMAP.md` §1 step 4) + **`graft_premise_logvar` per structural class** (C4b) | design, and a ceiling first | Deleting the junction channel *improves* `node/exon` 25 % under capture and wrecks it off capture, so the graft is right off capture and over-states under it (median φ = 2.45). C4b is the DEBT the terminus bit was waiting for; ⛔ its scope is DONOR/ACCEPTOR, which the terminus licence deliberately left alone |

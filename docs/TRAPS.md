@@ -64,6 +64,24 @@ deleting a whole channel scored **byte-identical on every class of every conditi
 ⭐ *The tell:* the ablation was a strict SUPERSET of another and scored a smaller effect. ⭐ *The rule:*
 every ablation increments a counter and the harness **raises** if it did not fire.
 
+**A12b. ⛔⛔ A NOISE DEADBAND WHOSE CUSHION IS SUPPLIED BY AN UNRELATED SAMPLE SIZE FAILS EXACTLY WHERE
+THAT SAMPLE GETS BIG — AND IT FAILS SILENTLY, INTO THE HONESTY COLUMNS.** `strand_evidence` gates the
+strand channel on `disc = 4·max(0, (κ̂−½)² − σ²_d)` with `σ²_d = ¼(1/N_rna + ω_r) + ¼(1/N_gdna + ω_g)`.
+On unstranded data the TRUE κ is ½, so `(κ̂−½)²` is pure fitting noise — a χ²₁ with mean `Var(κ̂) ≈
+¼/N_rna`, which a χ²₁ exceeds ~32 % of the time. ⭐ **The `¼/N_rna` half of the deadband is exactly the
+right bias correction; the `¼/N_gdna` half is a different job** (gating a gDNA-free library) doing the
+first job's arithmetic. So the cushion **shrinks as gDNA grows**, and the gate opens on **exactly 3 of 18**
+unstranded ladder conditions — `g75`/`g90 ss0.50 capture_off` and `g98 ss0.50 capture_on` — measured
+`(κ̂−½)²` = 4.74e-07 against `σ²_d` = 3.42e-07 at g75, a margin of 1.39×. ⛔ **And `I_strand = N_eff·disc·[…]`
+then MULTIPLIES noise by the depth**, so the phantom information grows linearly in coverage. ⭐⭐ The damage
+is not accuracy — forcing κ = ½ moves Σ|err| by −0.6 %/−5.3 %/**+4.6 %** across the three big classes, a
+wash, reproducing `ROADMAP` §3's −0.2 %. **The damage is that `solv%` goes 77–90 % → 0.0 %**: the panel
+declared 92,154 objects confidently wrong and `calib` = 3.67 at a condition with *no solvable objects at
+all*. ⛔⛔ **So the column used to pick the worst condition was inflated by the defect being looked for** —
+A12's lesson with the arrow reversed. ⭐ The repair is to propagate rather than gate:
+`I = (½−κ̂)² / [p(1−p)/N_eff + (1−f_g)²·Var(κ̂)]`, which is smooth, needs no `max(0,·)`, and whose
+`Var(κ̂)` denominator cancels the depth exactly. `ROADMAP` §1 step 3.
+
 **A12. ⛔⛔ EVERY HONESTY METRIC IMPROVES AS THE SOLVER STOPS KNOWING ANYTHING — SO NONE IS READABLE
 WITHOUT A FIXED-DENOMINATOR ACCURACY NUMBER BESIDE IT.** A destruction control (force a 97-σ real strand
 signal to ½) collapsed accuracy **0.0231 → 0.2064, +792 %, 16/16 worse** — while confidently-wrong Σ|err|
@@ -265,6 +283,21 @@ model disagree, differentiate BOTH with respect to that model before looking for
 factor of 1.024 was sound arithmetic about a generative model **the simulator does not use** — it reweights
 the length marginal by the same opportunity, so the factor cancels exactly. ⭐ **Before pricing a selection
 effect in a simulated substrate, read the simulator's own sampling code — not the docstring, the code.**
+
+**C0b. ⭐⭐⭐ A TERM THAT IS FRAME-FREE IS NOT THEREFORE ASSUMPTION-FREE — LOOK AT THE NUISANCE YOU
+PROFILED OUT, NOT ONLY AT THE DIVISOR THAT CANCELLED.** `edge_spliced` is certified RNA, so the obvious
+move is a coefficient `S` on ψ's RNA arm: `E[S] = c·(1−f_g)·M`, and every opportunity ratio lives in `c`,
+which multiplies the MEAN and is therefore an additive constant in log space. That reasoning is correct —
+C0's opposite-sign trap is structurally absent, neither divisor reaches the retained term — and it is
+**not enough**, because the *same* `c` contains the splice-visibility `q`, whose dropped term
+`−(q/(1−q))(1−f_g)M` is the same size as the term kept. ⛔ With `q` free the profile likelihood in `f_g`
+is **exactly flat on [0,1)**: the whole channel carries ONE BIT, "`f_g ≠ 1`". Measured on all 36 ladder
+conditions against origin-split truth, the raw-count term is **worse than the uninformative reference on
+12 of them**, worst **+0.4578** mwae. ⭐⭐ **The tell was free and general: its benefit tracked the ANSWER,
+not the evidence** — −0.49 at `g00` where the truth is all-RNA, +0.45 at `g98` where it is all-gDNA. **A
+channel whose sign follows the truth is a prior, not information** (A12's shape, and the two zero controls
+are what made it visible). ⭐ Ask of any "one-sided floor": *is the term I am dropping bounded, or is it
+the dominant one?* `SESSION_HANDOFF` §8 · `certified_q_census.py` · `test_certified_rna_licence.py`.
 
 **C1. A PURITY FILTER ON A LENGTH POOL IS A LENGTH FILTER.** Barring fragments whose length was partly
 *inferred* rather than sequenced selects exactly the ones whose mates sit far apart, so the pool became

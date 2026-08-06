@@ -360,7 +360,9 @@ def scan_and_buffer(
     return stats, strand_models, buffer, calibration_payload
 
 
-def _drain_side_buffer(payload, index: TranscriptIndex, strand_models, *, seed: int):
+def _drain_side_buffer(
+    payload, index: TranscriptIndex, strand_models, *, seed: int, _lift: dict | None = None
+):
     """⭐ **THE SECOND PASS.** Score the held fragments, draw one hypothesis each, re-deposit.
 
          (where this sits), §5 (the draw), §6 (the drain)
@@ -378,6 +380,16 @@ def _drain_side_buffer(payload, index: TranscriptIndex, strand_models, *, seed: 
     That ordering is §7.1's no-iteration rule made concrete: fit once, score once, drain once, stop. The
     confident set is biased short, so feeding the drained anchor back into the score would prefer the
     shorter — that is, the more-spliced — path, and that loop can run away.
+
+    ⭐ **``_lift`` — the out-parameter an origin-split ORACLE needs, and why it is not a second
+    implementation.** `TRAPS.md` B9: the drain conditions on the WHOLE tally, so partitions drained
+    independently do not sum to the whole drained. `second_pass.lift_choices` repairs that by replaying
+    the whole's already-drawn choices inside each partition — which needs the choices, the undrained
+    whole they were drawn on, and the two index-derived arrays `drain` takes. All four exist only inside
+    this function, so it publishes them into ``_lift`` rather than letting a caller re-derive them and
+    drift (`TRAPS.md` A11). Same convention as ``calibrate(_debug=)`` / ``node_sweep(_capture=)``, and
+    inert in production, where nobody passes it. ⚠ An empty side buffer leaves ``_lift`` UNTOUCHED — the
+    early return below is the "nothing was drained" signal on this path too.
     """
     from .calibration.fl import build_fl_models
     from .calibration.gdna_opportunity import gdna_opportunity_from_index
@@ -414,6 +426,12 @@ def _drain_side_buffer(payload, index: TranscriptIndex, strand_models, *, seed: 
     )
     choices = choose_hypotheses(scores, payload, seed=seed)
     drained = drain(payload, choices, node_types=node_types, junctions=junctions)
+    if _lift is not None:
+        # ⛔ ``undrained`` is the payload as it entered here, NOT ``drained``: the drained bank is empty by
+        # design ("after it nothing is held"), so it cannot supply `lift_choices`' key pool.
+        _lift.update(
+            undrained=payload, choices=choices, node_types=node_types, junctions=junctions
+        )
     report = drained.drain
     logger.info(
         "[SP2] drained %d held fragments in %.1f s: %d deposited, %d dropped "
