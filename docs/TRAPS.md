@@ -64,6 +64,25 @@ deleting a whole channel scored **byte-identical on every class of every conditi
 ⭐ *The tell:* the ablation was a strict SUPERSET of another and scored a smaller effect. ⭐ *The rule:*
 every ablation increments a counter and the harness **raises** if it did not fire.
 
+**C0c. ⛔⛔⛔ A ZERO COUNT IS A MEASUREMENT OF A DENSITY, NOT AN ABSENCE OF DATA — AND KEYING PRECISION
+ON THE COUNT MAKES THE STRONGEST STATEMENT IN THE LIBRARY THE QUIETEST.** At `g00` (zero gDNA by
+construction) pass-0 attributes **34–38 %** of unstranded mass to gDNA, Σ|err| **1.56 M / 1.95 M**
+fragments, and **100 %** of it is `relay_only` with **0 %** `own_evidence` and **0 %** `struct_lock` on
+both axes. The reason is a single census: all **1,298** intergenic nodes hold **exactly zero** counts
+over **50.7 Mb** of gDNA opportunity, and **all 1,298 emit nothing** — against 915–959 emitting at
+`g25`/`g50`, so the anchor is healthy elsewhere and completely silent here. ⭐ Those nodes are
+structurally pure gDNA and `struct_lock`ed, i.e. composition-**CERTAIN** — and `own_precision`'s
+`n > 0` still zeroes them, so they are *certain and silent at the same time*. ⛔ **The general defect is
+that `p = n/(n·Var+1)` reads the COUNT as the evidence when the claim is a DENSITY: zero over 50.7 Mb
+and zero over 200 bp are the same number to this code and opposite statements about the world.** ⭐ The
+derived repair needs no new constant and reuses the reference ψ already carries: a Poisson rate with
+`a` events over exposure `E` under the Jeffreys prior ψ is built on (`_JEFFREYS_REF`) has posterior
+`Gamma(a+½, E)` — proper, finite precision at `a = 0`, mean `0.5/E`. At `ΣE = 50.7 Mb` that is
+`9.9e-9 ± 1.4e-8`, which would take the worst object from `f_g = 0.510` to ~`7e-9` against a truth of
+exactly 0. ⚠ The population prior papers over this downstream (that object's shipped answer is 0.054),
+but pass-0 **is** the substrate the prior is fitted on, and a prior fitted on "everything is ½" cannot
+be rescued per-object on a heterogeneous sample.
+
 **A12b. ⛔⛔ A NOISE DEADBAND WHOSE CUSHION IS SUPPLIED BY AN UNRELATED SAMPLE SIZE FAILS EXACTLY WHERE
 THAT SAMPLE GETS BIG — AND IT FAILS SILENTLY, INTO THE HONESTY COLUMNS.** `strand_evidence` gates the
 strand channel on `disc = 4·max(0, (κ̂−½)² − σ²_d)` with `σ²_d = ¼(1/N_rna + ω_r) + ¼(1/N_gdna + ω_g)`.

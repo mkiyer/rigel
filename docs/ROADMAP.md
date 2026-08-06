@@ -114,6 +114,34 @@ origin-split oracle, ⚠ undrained:
 > falls back to ψ's uninformative reference (~0.5) against a true `f_g` of 0.12–0.17. ⭐ **That, not the
 > vertex, is the modal defect on the contaminated panel.**
 
+> ### ⭐⭐⭐ AND THE DISSECTION LANDED — the new step 1, `TRAPS.md` C0c
+>
+> Scenario picked by the fixed-denominator columns: **`g00 ss0.50`, both capture arms, optimised
+> together**. Worst single object, capture_off: **`chr22:18,088,119-18,101,611`**, a 13.5 kb `+` exon
+> holding 112,333 fragments, `true_fg` = **0.000**, pass-0 `pred_fg` = **0.510**, error **+57,268
+> phantom gDNA fragments**. `fg_loc == pred_fg` exactly, so the messages delivered nothing.
+> Concentration: top 100 objects = **50.9 %** of Σ|err| (capture_off) and **73.4 %** (capture_on) ⇒ a
+> mechanism, not a bias. Class shares on both conditions × both axes: **100 % `relay_only`, 0 %
+> `own_evidence`, 0 % `struct_lock`.**
+>
+> **The census that explains all of it:**
+>
+> | condition | intergenic nodes | with n = 0 | Σ counts | Σ `E_g` | anchor `ρ_g` | **emitting** |
+> |---|---|---|---|---|---|---|
+> | `g00` capture_off | 1,298 | **1,298** | **0** | 50,755,315 | 0.000000 | **0** |
+> | `g00` capture_on | 1,298 | **1,298** | **0** | 50,723,222 | 0.000000 | **0** |
+> | `g25` capture_off | 1,298 | 60 | 1,302,041 | 50,745,684 | 0.025658 | 915 |
+> | `g50` capture_off | 1,298 | 51 | 2,601,241 | 50,745,570 | 0.051260 | 959 |
+>
+> ⛔ **Zero counts over 50.7 Mb of opportunity is the most precise statement in the library — "there is
+> no gDNA" — and it is emitted by nobody**, because `own_precision`'s `n > 0` and `live = ρ_g > 0` both
+> key on the COUNT while the claim is a DENSITY. The same nodes anchor normally at `g25`/`g50`, so this
+> is not a substrate problem. ⭐ **Fix: `Gamma(a+½, E)` — the posterior of a Poisson rate under the very
+> Jeffreys prior ψ already uses.** Proper and finite at `a = 0`, mean `0.5/E`; no new constant. Predicted
+> effect on the worst object: `f_g` 0.510 → ~7e-9 against a truth of 0.
+> ⚠ Pass-0 only — the fitted prior takes that object to 0.054 in the shipped solve. But pass-0 **is** the
+> substrate the prior is fitted on.
+
 | | step | shape | why now |
 |---|---|---|---|
 | ⛔ ~~**1**~~ | ~~**ψ CANNOT REACH A SIMPLEX VERTEX**~~ | **CLOSED — see the box above** | §2 below. The zero-RNA control reads **0.92–0.99 against a truth of exactly 1.000** on every rung, 0.65–2.51 % of mass. ⚠ Kept because the measurement is sound and re-deriving it is expensive; ⛔ the *conclusion* that it is a build is withdrawn |
