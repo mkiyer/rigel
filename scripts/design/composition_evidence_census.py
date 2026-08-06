@@ -41,9 +41,10 @@ from rigel.config import CalibrationConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
-#: Below this the slot has no own composition evidence. ⚠ Not a tunable: `own_composition_logvar` tests
-#: `tau > _EPS` with exactly this value, so the census must ask the same question the solver asks.
-_EPS = 1.0e-9
+#: ⭐ The census asks the SOLVER's question by IMPORTING the solver's predicate, not by restating its
+#: constant (`TRAPS.md` A11 — the previous arrangement had this number written out here, in
+#: ``pass0_vs_oracle.py`` and in the solver, each claiming to match the others).
+from rigel.calibration.node_init import has_own_composition_evidence  # noqa: E402
 
 
 def census_one(index: TranscriptIndex, cache_dir: Path, inject_kappa: float | None = None) -> dict:
@@ -97,7 +98,7 @@ def census_one(index: TranscriptIndex, cache_dir: Path, inject_kappa: float | No
 
     # ⭐ THE QUANTITY. Not "tau == 0" -- a structurally locked node is CERTAIN, not uninformed, and
     # lumping the two would report a pure-gDNA intergenic node as a failure of the solver.
-    no_evidence = (tau <= _EPS) & (~struct_lock)
+    no_evidence = ~has_own_composition_evidence(tau) & (~struct_lock)
 
     total = float(count.sum())
 

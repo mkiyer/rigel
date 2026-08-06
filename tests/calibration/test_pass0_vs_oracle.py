@@ -25,6 +25,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from rigel.calibration.node_init import has_own_composition_evidence
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.substrate import CalibrationSubstrate
 from rigel.config import CalibrationConfig, PipelineConfig
@@ -438,6 +439,13 @@ def test_the_solver_classes_match_the_composition_evidence_census(measured, toy)
     SAME question, or the project acquires two definitions of one class and they drift — which has
     already happened here once, between a docstring and the code it sat beside, for months.
 
+    ⭐⭐ **RE-POINTED 2026-08-05, AND THE RE-POINTING IS THE FIX THIS GATE WAS ASKING FOR.** It used to
+    compare two hand-written copies of ``1e-9`` (``P0._EPS == census._EPS``) — a drift DETECTOR for a
+    definition that had three homes. ``node_init.has_own_composition_evidence`` is now the single home
+    and every instrument imports it, so there is no longer anything to drift; the honest gate is that
+    the census's partition IS the solver's predicate, evaluated by calling it. `TRAPS.md` A11's own
+    prescription: one home, every consumer importing, rather than a gate policing copies.
+
     PERTURBATION: shift the evidence threshold off ``node_init``'s and watch the partition move.
     """
     census = _load_sibling("composition_evidence_census.py")
@@ -450,13 +458,17 @@ def test_the_solver_classes_match_the_composition_evidence_census(measured, toy)
     # `(~solvable) & is_node` filed every structurally-locked EDGE as `relay_only`, i.e. as an object
     # whose answer came from its neighbours, when nothing was ever asked of it.
     census_lock = ~np.asarray(cap["free_pos"], bool) & ~np.asarray(cap["free_neg"], bool)
-    census_no_ev = (tau <= census._EPS) & (~census_lock)
+    # ⭐ the census asks the SOLVER's question by calling the solver's own predicate — imported, not
+    #   restated. This line IS the census's line (`composition_evidence_census.census_one`).
+    census_no_ev = ~census.has_own_composition_evidence(tau) & (~census_lock)
 
     slot = P0.solver_slot_classes(cap, chain)
     np.testing.assert_array_equal(slot["struct_lock"], census_lock)
     np.testing.assert_array_equal(slot["relay_only"], census_no_ev)
     np.testing.assert_array_equal(slot["own_evidence"], ~(census_lock | census_no_ev))
-    assert P0._EPS == census._EPS, "the two instruments disagree about what 'no evidence' means"
+    # ⭐ and the census's predicate is production's, by identity rather than by an equal-constants
+    #   assertion — the object itself, not two numbers that happen to agree.
+    assert census.has_own_composition_evidence is has_own_composition_evidence
 
     # PERTURBATION 1: a threshold above every finite tau collapses own-evidence into relay-only.
     moved = P0.solver_slot_classes(cap, chain, eps=float(np.max(tau)) + 1.0)

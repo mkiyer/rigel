@@ -112,11 +112,12 @@ _RUNS = Path.home() / "Downloads" / "rigel_runs"
 DEFAULT_SUITE = _RUNS / "suite" / "pilot"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
-#: Below this a slot has no own composition evidence. ⚠ NOT a tunable and NOT chosen here:
-#: ``node_init.own_composition_logvar`` tests ``tau > 1e-9``, and
-#: ``composition_evidence_census.py`` asks the same question with the same value. A gate asserts the
-#: two instruments still agree; if this number is ever edited, that gate is what stops the two
-#: definitions of "no evidence" drifting apart.
+#: ⭐ NOT DEFINED HERE ANY MORE. "Has own composition evidence" has ONE home in production —
+#: :func:`~rigel.calibration.node_init.has_own_composition_evidence` — and every instrument imports
+#: it. It used to be restated here and in ``composition_evidence_census.py``, each beside a comment
+#: saying it must match the solver, which is precisely the arrangement `TRAPS.md` A11 names: a change
+#: to the solver would have moved neither. Kept as a name only because ``solver_slot_classes`` takes
+#: it as a MOVEABLE argument so a gate can perturb the partition and watch it move.
 _EPS = 1.0e-9
 
 #: The two axes ``CalibrationResult`` deconvolves. The junction axis is pure RNA by construction —

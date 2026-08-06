@@ -48,6 +48,7 @@ from .simplex_logodds import _logodds_grid, _solve_nodes_logodds_all
 
 __all__ = [
     "NodeInit",
+    "has_own_composition_evidence",
     "own_composition_logvar",
     "own_precision",
     "strand_evidence",
@@ -55,6 +56,31 @@ __all__ = [
 ]
 
 _EPS = 1.0e-9
+
+
+def has_own_composition_evidence(tau_lam) -> np.ndarray:
+    """⭐⭐ **THE ONE DEFINITION of "this slot has own composition evidence", and it lives here so
+    every consumer imports it instead of restating the number.**
+
+    ``tau_lam`` is the λ-axis Fisher precision summed over the sources
+    (:func:`build_node_init`); anything above the divide-by-zero guard is a live channel, and
+    :func:`own_composition_logvar` returns a finite variance there and ``∞`` below it. That is the
+    whole content — the predicate is read off the solver's behaviour, not chosen.
+
+    ⛔ **IT IS NOT A RESOLVING-POWER TEST, AND MUST NOT BECOME ONE.** ``τ`` is continuous across the
+    interesting region, so a floor on it is a tuned constant: one at ``1/(2L)²`` was derived,
+    implemented and refuted by its own insensitivity gate. On an unstranded library the strand arm
+    carries ``I ≈ Var(κ̂)·N_eff/(p(1−p))`` — roughly the node's depth over the library's spliced
+    depth — which is genuinely nonzero and physically nil, and no derivation makes it exactly zero.
+    ⭐ **The consumer's defence is a FIXED-DENOMINATOR score, not a better cut**
+    (``solvability_audit.summarise``'s ``all_mwae`` / ``abs_err``, gated in
+    ``test_solvability_denominator.py``).
+
+    ⚠ Three instruments each restated this as ``_EPS = 1.0e-9`` beside a comment saying it must match
+    the solver; changing the solver would have moved none of them. The home is production because the
+    predicate is a production concept and ``scripts/`` is deliberately not importable.
+    """
+    return np.asarray(tau_lam, np.float64) > _EPS
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,9 +127,12 @@ def own_composition_logvar(f_g, tau_lam, struct_lock):
     fr = 1.0 - fg
     tau = np.asarray(tau_lam, np.float64)
     lock = np.asarray(struct_lock, bool)
+    # ⭐ the predicate is :func:`has_own_composition_evidence` — ONE definition, imported by the
+    #   instruments rather than restated, so the solver and everything that reports on it cannot drift.
+    seen = has_own_composition_evidence(tau)
     with np.errstate(divide="ignore", invalid="ignore"):
-        v_fg = np.where(lock, 0.0, np.where(tau > _EPS, fr * fr / np.maximum(tau, _EPS), np.inf))
-        v_fr = np.where(lock, 0.0, np.where(tau > _EPS, fg * fg / np.maximum(tau, _EPS), np.inf))
+        v_fg = np.where(lock, 0.0, np.where(seen, fr * fr / np.maximum(tau, _EPS), np.inf))
+        v_fr = np.where(lock, 0.0, np.where(seen, fg * fg / np.maximum(tau, _EPS), np.inf))
     return v_fg, v_fr
 
 

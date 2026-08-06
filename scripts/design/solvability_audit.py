@@ -559,6 +559,20 @@ def summarise(a: dict) -> dict:
         return float(np.sum(w * np.abs(a["ladder"][key][det] - f_true[det])) / max(w.sum(), 1))
 
     local, final = rung("fg_loc"), rung("f_g")
+    # ⭐⭐⭐ THE TWO FIXED-DENOMINATOR FIELDS — `TRAPS.md` A12's own prescription, and the reason this
+    # table can be ranked on at all. Every field above is defined over the DETERMINED set, whose size
+    # the solver moves by declining to answer; these two are defined over the LIVE population, so
+    # nothing the solver does to its own confidence can touch them.
+    # ⛔ They exist because the boolean `determined` flips on FITTING NOISE at some conditions and not
+    # others (A12b): `g75 ss0.50 capture_off` reports solv% 96.2 %, weak% 65.4 %, conf-wrong 92,154
+    # and calib 3.67 — and forcing κ = ½ takes solv% to 0.0 % while Σ|err| moves −0.6/−5.3/+4.6 %
+    # across the three big classes. The row is a reporting artefact, and ranking the ladder on the
+    # gameable columns picked it as the panel's worst. These two would not have.
+    mass_live = float(total[live].sum())
+    return_extra = {
+        "all_mwae": float(err[live].sum()) / max(mass_live, 1.0),
+        "abs_err": float(err[live].sum()),
+    }
     # ⭐⭐ THE COMPANION COLUMN THAT MAKES ``solv%`` SAFE TO READ. ``solv%`` counts objects the SOLVER
     # treats as evidenced (``tau > 1e-9``), and that admits a strand arm whose own statement is 10³ nats
     # wide — statistically real, physically nil (`TRAPS.md` B11). So report, beside it, the share of the
@@ -579,6 +593,7 @@ def summarise(a: dict) -> dict:
         "local_mwae": local,
         "final_mwae": final,
         "relay_delta": final - local,
+        **return_extra,
     }
 
 
@@ -597,8 +612,13 @@ def panel_report(rows: list[tuple[str, float, dict]]) -> None:
     print("      sd(λ) ≥ 10 nats — i.e. on objects that had no answer of their own after all. A row")
     print("      with weak% near 100 is reporting the relay and the reference, not a solve.")
     print()
+    print("   ⭐⭐ AND RANK ON THE LAST TWO, NOT ON `solv%`/`mwae`/`conf-wrong`/`calib`. Those four")
+    print("      share a denominator the SOLVER moves — `determined` is a boolean on a continuous τ,")
+    print("      and it flips on fitting noise (TRAPS A12b). `mwae_all` and `Σ|err|` are over every")
+    print("      LIVE object, so nothing the solver does to its own confidence can touch them.")
     print(f"   {'condition':<46} {'f_gdna':>7} {'solv%':>6} {'weak%':>6} {'mwae':>7} "
-          f"{'conf-wrong':>11} {'calib':>6} {'local':>7} {'final':>7} {'relay Δ':>9}")
+          f"{'conf-wrong':>11} {'calib':>6} {'local':>7} {'final':>7} {'relay Δ':>9} "
+          f"{'mwae_all':>9} {'Σ|err|':>11}")
     print("   " + "-" * 125)
     for name, truth, s in rows:
         print(
@@ -606,7 +626,7 @@ def panel_report(rows: list[tuple[str, float, dict]]) -> None:
             f"{s['weak_evidence_err_share']:>5.1%} "
             f"{s['solvable_mwae']:>7.4f} {s['conf_wrong_err']:>11,.0f} "
             f"{s['calibration_ratio']:>6.2f} {s['local_mwae']:>7.4f} {s['final_mwae']:>7.4f} "
-            f"{s['relay_delta']:>+9.4f}"
+            f"{s['relay_delta']:>+9.4f} {s['all_mwae']:>9.4f} {s['abs_err']:>11,.0f}"
         )
     # ⛔ ZERO-gDNA ROWS ARE NEVER AVERAGED IN. Truth is 0 exactly there, so every log-space
     # discrepancy is measured against the grid floor and any change that lowers the estimate

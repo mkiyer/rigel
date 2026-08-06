@@ -62,6 +62,43 @@ origin-split oracle, ⚠ undrained:
 > conditions, and any ranking that reads them is reading the bug** (`TRAPS.md` A12b). Fix it to make the
 > instrument trustworthy, not to move the error.
 >
+> ⭐⭐⭐ **AND WITH A FIXED DENOMINATOR THE PANEL RE-RANKS COMPLETELY (2026-08-05).** `summarise` now
+> carries A12's two ungameable columns, `mwae_all` and raw `Σ|err|` over every LIVE object. The
+> production change behind them is a pure refactor — byte-identical on all 36 rows × 9 pre-existing
+> columns. What they show:
+>
+> | stratum | rows | `Σ\|err\|` | share |
+> |---|---|---|---|
+> | **unstranded × capture_ON** | 9 | **16,111,456** | **65 %** |
+> | unstranded × capture_OFF | 9 | 6,172,690 | 25 % |
+> | stranded × capture_ON | 9 | 1,507,178 | 6 % |
+> | stranded × capture_OFF | 9 | 888,134 | 4 % |
+>
+> ⭐ **90 % of the panel's error is UNSTRANDED**, and the top five rows by both fixed-denominator
+> columns are all `ss_0.50 capture_on`. The three gameable columns rank a different five each.
+> ⛔ **`g75 ss0.50 capture_off` shows NO spike at all** — `Σ|err|` = 336,101, sitting monotonically
+> between g50's 465,399 and g90's 239,100. It was an artefact of the boolean denominator, and it is
+> what the dissection two steps above chased.
+>
+> ⛔⛔ **AND THE ZERO-gDNA CONTROLS WERE READING PERFECT WHILE CARRYING THE PANEL'S LARGEST FALSE
+> POSITIVES.** Truth is exactly 0 there, so every attributed fragment is a false positive with nothing
+> to cancel it:
+>
+> | row | `solv%` | `mwae` | `conf-wrong` | **`mwae_all`** | **`Σ\|err\|`** |
+> |---|---|---|---|---|---|
+> | `g00 ss0.50 capture_off` | 0.0 % | 0.0000 | 0 | **0.3411** | **1,563,556** |
+> | `g00 ss0.50 capture_on` | 0.0 % | 0.0000 | 0 | **0.3776** | **1,954,739** |
+> | `g00 ss0.99 capture_off` | 0.0 % | 0.0000 | 0 | 0.0172 | 79,018 |
+> | `g00 ss0.99 capture_on` | 0.0 % | 0.0000 | 0 | 0.0128 | 66,474 |
+>
+> **On a library with NO gDNA the solver calls 34–38 % of unstranded mass gDNA** — and the old table
+> read `0.0000` because the solvable set was EMPTY, so its mwae was vacuously zero (`TRAPS.md` A14 at
+> the level of the whole instrument). The stranded twins are 20–30× better, so **the phantom is an
+> unstranded phenomenon**, and it is the same fact as the exon-class table below: with no evidence
+> channel an unstranded object sits at ψ's uninformative reference (~0.5) and the truth is far lower.
+> ⭐ This is the "phantom-gDNA floor" §2 lists as a HYPOTHESIS, now measured on the real panel at
+> **0.34–0.38**, not the toy's 0.0218.
+>
 > ⭐ **What the same dissection says the ERROR actually is** — the classes, which are ablation-invariant,
 > at `g75 ss0.50 capture_off`:
 >
