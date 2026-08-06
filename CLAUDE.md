@@ -46,9 +46,11 @@ C++ is gated on byte-identity to it; where it and a document disagree, it wins.
   must be derived from the deposit rule and unit-tested against brute-force enumeration.
 - **A falsification test first, verified failing — then break the fixed code and watch each gate fire.**
   The second half is not optional; it has found holes in already-green gates repeatedly.
-- ⭐⭐ **Measure the CEILING before building the correction.** Hand the consumer the *exact* answer for one
-  channel and see what perfecting it is worth. `calibration_truth_ab.py --ceiling`. This has re-ranked the
-  project twice, and it is also how you learn a phase is finished.
+- ⭐⭐ **Measure the CEILING before building the correction** — *when a ceiling is the right instrument.*
+  `calibration_truth_ab.py --ceiling`. It has re-ranked the project twice and is how you learn a phase is
+  finished. ⛔ **But a ceiling prices something that may be unreachable, so it is NOT the default** (owner,
+  2026-08-05). The loop that produced the 39 % win is: run the panel → take the worst scenario → dissect it
+  to the single highest-error object → find the cause → fix → REPEAT. Reach for that first.
 - **One thing varied per experiment**, and a baseline re-recorded from the current tree in the same
   session.
 - **Score against TRUTH, not against the previous run.** The simulator writes per-fragment ground truth
@@ -75,7 +77,7 @@ C++ is gated on byte-identity to it; where it and a document disagree, it wins.
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-python -m pytest tests/ -q                     # baseline: 22 fail / 2240 pass / 3 xfail — 21 goldens + the paralog row
+python -m pytest tests/ -q                     # baseline: 22 fail / 2290 pass / 3 xfail — 21 goldens + the paralog row
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
@@ -84,7 +86,7 @@ ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format 
 non-golden name in the list, is a regression. See `docs/TESTING.md` §6.
 ⭐ **And 3 xfails, one of them STRICT and load-bearing**: `test_toy_harness`'s intron-composition gate is the
 project's detector for the level defect that the splice-flux reframe un-masked. It must go green — not be
-widened — when the joint arm lands (`SESSION_HANDOFF.md` §1, §4).
+widened — when the joint arm lands (`ROADMAP.md` §1 step 3).
 
 Always set `OMP_NUM_THREADS=1` when benchmarking or comparing runs.
 
