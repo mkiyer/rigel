@@ -33,181 +33,55 @@ placement model, for ~1.7 % of a number that is 97 % dominated by something else
 consumes is the *gap* `μ_g − μ_r`, which correct capture narrows to −8.0 bp on a ~230 bp mean — a regime
 where the 2×2 is barely identified at all (`EQUATIONS.md` §3.1, `TRAPS.md` F3).
 
-**Stage B — calibration — is where the error is.** Per-object, mass-weighted `|Δf_g|` against the
-origin-split oracle, ⚠ undrained:
+**Stage B — calibration.** ⭐⭐ **A 39 % PANEL-WIDE ERROR REDUCTION LANDED 2026-08-06** (`80254008`,
+`0ed8eceb`). Σ|err| over every LIVE object, pass-0, all 36 ladder conditions, against origin-split truth:
 
-| | node axis | edge axis |
-|---|---|---|
-| ⛔ **pass-0** (prior-free — the substrate the gDNA hyperprior is fitted against) | **0.1192** | **0.1350** |
-| the shipped final solve (3 refits) | 0.0586 | 0.0633 |
-| the deliverable, library gDNA fraction, 4 contaminated pilot conditions | ⛔ mean \|error\| **0.0263** | — |
+| | Σ\|err\| before | after | |
+|---|---|---|---|
+| **THE PANEL** | 24,682,284 | **15,048,672** | **−39.0 %** · 23/36 better |
+| unstranded | 22,288,865 | 12,442,326 | −44.2 % · 16/18 |
+| capture_OFF | 7,060,421 | 2,599,789 | −63.2 % · 12/18 |
+| capture_ON | 17,621,863 | 12,448,883 | −29.4 % · 11/18 |
+| ⛔ **stranded** | 2,393,419 | **2,606,346** | **+8.9 %** · 7/18 — the residual, `SESSION_HANDOFF.md` |
 
----
+⭐ **The zero-gDNA controls are now essentially exact** — truth is 0 there, so every fragment was a false
+positive: `mwae_all` **0.3776 → 0.0076** (`g00 ss0.50 capture_on`), **0.3411 → 0.0080** (capture_off),
+**0.0172 → 0.0003** and **0.0128 → 0.0002** on the stranded pair. And the win runs far past `g00` along
+the whole low-gDNA unstranded axis: `g01` −85 %, `g05` −72/−77 %, `g10` −58/−73 %, `g25` −28/−62 %.
+
+⚠ **The per-axis `mwae` figures this table used to carry (node 0.1192 / edge 0.1350 at pass-0, 0.0586 /
+0.0633 shipped) are STALE and are not restated here** — they pre-date the fix and nobody has re-derived
+them. Re-run `solvability_audit.py --suite` rather than quoting a number from memory.
+
+⛔ **And read `mwae_all` / `Σ|err|`, never `solv%` / `mwae` / `conf-wrong` / `calib`.** Those four share a
+denominator the solver moves by declining to answer, and it flips on fitting noise at three conditions
+(`TRAPS.md` A12b). The two fixed-denominator columns landed in `a3d45031` for exactly this reason.
 
 ## §1 ⭐⭐⭐ WHAT TO DO NEXT
 
-> ⛔⛔ **RE-RANKED 2026-08-05, and two entries below are STALE — read this box first.**
->
-> **Step 1 (the vertex) is CLOSED as a build.** `vertex_ceiling.py` prices it and its own docstring leads
-> with the verdict: the 24.4 % is **the value of missing information, not headroom** — evidence-free
-> objects sit at median `|Δ|/sd(f_g)` = **z = 0.5–0.6**, inside their own 1σ, and no prior-free solve can
-> do better. `test_certified_rna_licence.py` `C2b` independently closed the one channel that might have
-> supplied vertex evidence. §2 below is kept as the *measurement*; it is not a build.
->
-> **Step 3 (`Var(κ̂)`) is REPRICED — it is a REPORTING fix, not an accuracy fix, and it is now urgent for
-> a different reason.** Measured 2026-08-05: the deadband opens on **3 of 18** unstranded conditions, and
-> at `g75 ss0.50 capture_off` forcing κ = ½ takes `solv%` **77–90 % → 0.0 %** while Σ|err| moves
-> −0.6 %/−5.3 %/**+4.6 %** across the three big classes (a wash, reproducing §3's −0.2 %). ⛔ **So the
-> panel's `solv%` / `weak%` / `conf-wrong` / `calib` columns are inflated by the defect at those three
-> conditions, and any ranking that reads them is reading the bug** (`TRAPS.md` A12b). Fix it to make the
-> instrument trustworthy, not to move the error.
->
-> ⭐⭐⭐ **AND WITH A FIXED DENOMINATOR THE PANEL RE-RANKS COMPLETELY (2026-08-05).** `summarise` now
-> carries A12's two ungameable columns, `mwae_all` and raw `Σ|err|` over every LIVE object. The
-> production change behind them is a pure refactor — byte-identical on all 36 rows × 9 pre-existing
-> columns. What they show:
->
-> | stratum | rows | `Σ\|err\|` | share |
-> |---|---|---|---|
-> | **unstranded × capture_ON** | 9 | **16,111,456** | **65 %** |
-> | unstranded × capture_OFF | 9 | 6,172,690 | 25 % |
-> | stranded × capture_ON | 9 | 1,507,178 | 6 % |
-> | stranded × capture_OFF | 9 | 888,134 | 4 % |
->
-> ⭐ **90 % of the panel's error is UNSTRANDED**, and the top five rows by both fixed-denominator
-> columns are all `ss_0.50 capture_on`. The three gameable columns rank a different five each.
-> ⛔ **`g75 ss0.50 capture_off` shows NO spike at all** — `Σ|err|` = 336,101, sitting monotonically
-> between g50's 465,399 and g90's 239,100. It was an artefact of the boolean denominator, and it is
-> what the dissection two steps above chased.
->
-> ⛔⛔ **AND THE ZERO-gDNA CONTROLS WERE READING PERFECT WHILE CARRYING THE PANEL'S LARGEST FALSE
-> POSITIVES.** Truth is exactly 0 there, so every attributed fragment is a false positive with nothing
-> to cancel it:
->
-> | row | `solv%` | `mwae` | `conf-wrong` | **`mwae_all`** | **`Σ\|err\|`** |
-> |---|---|---|---|---|---|
-> | `g00 ss0.50 capture_off` | 0.0 % | 0.0000 | 0 | **0.3411** | **1,563,556** |
-> | `g00 ss0.50 capture_on` | 0.0 % | 0.0000 | 0 | **0.3776** | **1,954,739** |
-> | `g00 ss0.99 capture_off` | 0.0 % | 0.0000 | 0 | 0.0172 | 79,018 |
-> | `g00 ss0.99 capture_on` | 0.0 % | 0.0000 | 0 | 0.0128 | 66,474 |
->
-> **On a library with NO gDNA the solver calls 34–38 % of unstranded mass gDNA** — and the old table
-> read `0.0000` because the solvable set was EMPTY, so its mwae was vacuously zero (`TRAPS.md` A14 at
-> the level of the whole instrument). The stranded twins are 20–30× better, so **the phantom is an
-> unstranded phenomenon**, and it is the same fact as the exon-class table below: with no evidence
-> channel an unstranded object sits at ψ's uninformative reference (~0.5) and the truth is far lower.
-> ⭐ This is the "phantom-gDNA floor" §2 lists as a HYPOTHESIS, now measured on the real panel at
-> **0.34–0.38**, not the toy's 0.0218.
->
-> ⭐ **What the same dissection says the ERROR actually is** — the classes, which are ablation-invariant,
-> at `g75 ss0.50 capture_off`:
->
-> | class | objects | mass | true `f_g` | pred `f_g` | Σ\|err\| |
-> |---|---|---|---|---|---|
-> | `edge/exon\|exon` | 12,811 | 1,742,598 | **0.1177** | **0.2291** | **320,297** |
-> | `node/exon` | 11,304 | 1,383,829 | 0.1725 | 0.2683 | 242,309 |
-> | `edge/intron\|exon` | 19,610 | 319,314 | 1.0000 | 0.7462 | 81,032 |
->
-> **88 % of the error is the two exon classes, both biased the same way — gDNA over-called ~2×** — because
-> on an unstranded off-capture library an exon object has **no working evidence channel at all**: strand is
-> structurally silent, `length_likelihood` is OFF by ruling, and the intron factory is intron-NODE-only. It
-> falls back to ψ's uninformative reference (~0.5) against a true `f_g` of 0.12–0.17. ⭐ **That, not the
-> vertex, is the modal defect on the contaminated panel.**
-
-> ### ⭐⭐⭐ AND THE DISSECTION LANDED — the new step 1, `TRAPS.md` C0c
->
-> Scenario picked by the fixed-denominator columns: **`g00 ss0.50`, both capture arms, optimised
-> together**. Worst single object, capture_off: **`chr22:18,088,119-18,101,611`**, a 13.5 kb `+` exon
-> holding 112,333 fragments, `true_fg` = **0.000**, pass-0 `pred_fg` = **0.510**, error **+57,268
-> phantom gDNA fragments**. `fg_loc == pred_fg` exactly, so the messages delivered nothing.
-> Concentration: top 100 objects = **50.9 %** of Σ|err| (capture_off) and **73.4 %** (capture_on) ⇒ a
-> mechanism, not a bias. Class shares on both conditions × both axes: **100 % `relay_only`, 0 %
-> `own_evidence`, 0 % `struct_lock`.**
->
-> **The census that explains all of it:**
->
-> | condition | intergenic nodes | with n = 0 | Σ counts | Σ `E_g` | anchor `ρ_g` | **emitting** |
-> |---|---|---|---|---|---|---|
-> | `g00` capture_off | 1,298 | **1,298** | **0** | 50,755,315 | 0.000000 | **0** |
-> | `g00` capture_on | 1,298 | **1,298** | **0** | 50,723,222 | 0.000000 | **0** |
-> | `g25` capture_off | 1,298 | 60 | 1,302,041 | 50,745,684 | 0.025658 | 915 |
-> | `g50` capture_off | 1,298 | 51 | 2,601,241 | 50,745,570 | 0.051260 | 959 |
->
-> ⛔ **Zero counts over 50.7 Mb of opportunity is the most precise statement in the library — "there is
-> no gDNA" — and it is emitted by nobody**, because `own_precision`'s `n > 0` and `live = ρ_g > 0` both
-> key on the COUNT while the claim is a DENSITY. The same nodes anchor normally at `g25`/`g50`, so this
-> is not a substrate problem. ⭐ **Fix: `Gamma(a+½, E)` — the posterior of a Poisson rate under the very
-> Jeffreys prior ψ already uses.** Proper and finite at `a = 0`, mean `0.5/E`; no new constant. Predicted
-> effect on the worst object: `f_g` 0.510 → ~7e-9 against a truth of 0.
-> ⚠ Pass-0 only — the fitted prior takes that object to 0.054 in the shipped solve. But pass-0 **is** the
-> substrate the prior is fitted on.
-
 | | step | shape | why now |
 |---|---|---|---|
-| ⛔ ~~**1**~~ | ~~**ψ CANNOT REACH A SIMPLEX VERTEX**~~ | **CLOSED — see the box above** | §2 below. The zero-RNA control reads **0.92–0.99 against a truth of exactly 1.000** on every rung, 0.65–2.51 % of mass. ⚠ Kept because the measurement is sound and re-deriving it is expensive; ⛔ the *conclusion* that it is a build is withdrawn |
-| ⭐⭐ **2** | **PRICE THE SPLICE-FLUX REFRAME JOINTLY WITH THE LEVEL DEFECT** (`EQUATIONS.md` §3.6c + §4) | nothing to design: one is in `src/`, the other is `toy_trace_error.py`'s relay-level arm | The reframe is correct by derivation and now DEFAULT (owner's ruling, 2026-08-05), but alone it is panel-negative on the node axis. `TRAPS.md` D4j says that is not a verdict on it: it is half of a **cancelling pair**. Neither defect has an honest price until the joint arm runs |
-| ⭐⭐ **3** | **PROPAGATE `Var(κ̂)` INTO THE STRAND ARM'S PRECISION** (`ROADMAP.md` §1 step 3) | a derivation, then one term | κ = ½ means *exactly* zero strand information, but κ̂ = 0.500689 leaves `I(f_g) ∝ (2κ−1)²` at 1e-6…1e-4 — and a boolean licence on a precision is flipped as hard by 1e-6 as by 1e+6 (`TRAPS.md` D4f). ⛔ **Not a floor** — B11 implemented and refuted that. Pays for C7's "declared precision not earned, up to 8.9× overconfident" at the same time |
-| **4** | **The graft's frame under capture** (`ROADMAP.md` §1 step 4) + **`graft_premise_logvar` per structural class** (C4b) | design, and a ceiling first | Deleting the junction channel *improves* `node/exon` 25 % under capture and wrecks it off capture, so the graft is right off capture and over-states under it (median φ = 2.45). C4b is the DEBT the terminus bit was waiting for; ⛔ its scope is DONOR/ACCEPTOR, which the terminus licence deliberately left alone |
-| ⭐ **4=** | **THE `intergenic\|exon` EDGE ↔ intergenic NODE PAIR AS A gDNA REFERENCE** | small build, ceiling first | ⭐ Owner: *"we must use this as a measure of gDNA density. The intergenic NODE ↔ intergenic-exon EDGE can be solved. They can be assumed to be pure gDNA and have the same composition."* — so it is a **solvable pair**, not an anchor. Mechanism identified: `struct_lock` is NODE-only, so a G1 EDGE gets `Var = ∞` and can only RELAY a level, never ORIGINATE one. ⚠ Under capture that matters: the EDGE carries **8.6×** more mass per object (139.7 vs 16.2) while the intergenic NODEs it depends on are depleted ~24×, and on the capture-ON toy the EDGE→exon message is **dead** (`cm_g = 0`) at low RNA. ⭐ On the toy the EDGE has 23 counts and the NODE beside it 60 — neither alone is the answer, the inverse-variance fuse of the two is. ⛔ `strand_evidence`'s docstring argues for the NODE-only scope and that argument must be re-examined for a G1 EDGE specifically: RNA cannot cross a gene boundary, so fragments spanning it are **not** RNA-contaminated |
-| **5** | **The relay, panel-wide** | design, not measurement | Steps 1–2 are this defect's sharpest instances; do them first. ⚠ The two numbers that used to rank this both partition on the retired `τ > 1e-9` cut (`TRAPS.md` B11) — re-derive before designing. ⭐ A fix must explain the SIGN: the relay rescues some objects and wrecks others |
-| **6** | ⚠ **Add a 1–10 % gDNA rate to `pilot.yaml`** | one config line + a re-run | `suite_resolves.py` requirement (f); every §0 length number was measured at 0 %/100 %. The *ladder* already covers 0.01–0.98, so this blocks only the Stage-A numbers |
-| **7** | ⚠ **The multimapper hole** | `SUCCESS.md` A3 | Cost still **unmeasured**; measure it as a ceiling first |
+| ⭐⭐⭐ **1** | **THE STRANDED × CAPTURE-ON RESIDUAL** | dissect → localize → fix, the standard loop | `SESSION_HANDOFF.md` has it in full. Every `ss_0.99 capture_on` row at `g10`+ is **20–34 % WORSE** after the 39 % win — one coherent stratum, not noise. Hypothesis (UNPROVEN): under capture an empty intergenic node means *no probe here*, not *no gDNA here*, so the new zero-count anchor asserts `ρ_g ≈ 0` where it should assert nothing. Worst row `g75 ss0.99 capture_on`, **+100,599** |
+| ⭐⭐ **2** | **THE CAPTURE LEVEL RESIDUAL** (`EQUATIONS.md` §3.5c) | a build, ceiling-free dissection first | Still the largest untouched axis: an exon's own total density equals its true gDNA density to **0.2 %** (923× vs 921×) while the relay delivers **270×**, because it is measured at the flanking EDGE whose fragments straddle the probe boundary. ⚠ Plausibly the SAME root as step 1 — both are "capture broke the opportunity model" — so do step 1 first and check whether it subsumes this |
+| ⭐⭐ **3** | **PRICE THE SPLICE-FLUX REFRAME JOINTLY WITH THE LEVEL DEFECT** (`EQUATIONS.md` §3.6c) | nothing to design: one is in `src/`, the other is `toy_trace_error.py`'s relay-level arm | The reframe is correct by derivation and DEFAULT, but alone it is panel-negative on the node axis. `TRAPS.md` D4j: half of a **cancelling pair**, so neither has an honest price alone. ⚠ Its numbers pre-date the 39 % win and must be re-measured |
+| ⭐ **4** | **THE `intergenic\|exon` EDGE ↔ intergenic NODE PAIR AS A gDNA REFERENCE** | small build, ceiling first | Owner-requested. Mechanism identified: `struct_lock` is NODE-only, so a G1 EDGE gets `Var = ∞` and can only RELAY a level, never ORIGINATE one. ⚠ **Re-check first** — the zero-count fix may already have moved this |
+| **5** | ⚠ **Add a 1–10 % gDNA rate to `pilot.yaml`** | one config line + a re-run | `suite_resolves.py` requirement (f); the pilot is only 0 %/100 %. Blocks the Stage-A numbers only |
+| **6** | ⚠ **The multimapper hole** | `SUCCESS.md` A3 | Cost still **unmeasured**; measure it as a ceiling first |
 
----
+⛔ **`Var(κ̂)` / the strand deadband is CLOSED as an accuracy item** — measured a wash (−0.6 / −5.3 / +4.6 %
+across the three big classes) and it is a REPORTING defect, fixed instrument-side in `a3d45031`
+(`TRAPS.md` A12b). Do not re-open it as a solver change; three designs were refuted.
 
-## §2 ⛔⛔⛔ STEP 1 IN FULL — THE VERTEX PROBLEM
+## §2 ⛔ THE VERTEX PROBLEM — CLOSED, kept as one paragraph so it is not rebuilt
 
-⭐ **Why it ranks first, in one sentence:** the annotation has >50,000 genes and perhaps ~10,000 are
-expressed in any one sample, so **most annotated transcripts are OFF** — their objects are pure gDNA, they
-are the majority of the genome's objects, and there is nothing to deconvolve, yet the solver is 5–8 % wrong
-on them. Instrument: `scripts/design/zero_controls.py`.
-
-| spec | G1 objects (ψ BYPASSED) | gene-body objects (ψ SOLVES) | worst Δ | error share of mass |
-|---|---|---|---|---|
-| `silent` | ✅ **1.0000 exact** | ⛔ 0.946 – 0.989 | −0.0540 | 0.65 % |
-| `TA_single_exon` | ✅ **1.0000 exact** | ⛔ 0.922 | −0.0779 | 2.51 % |
-| `spliced_exons` | ✅ **1.0000 exact** | ⛔ 0.928 – 0.984 | −0.0725 | 2.01 % |
-
-**It is not the message layer, and three independent lines say so:**
-
-1. **What the messages deliver is right.** The relay hands each gene-body slot a gDNA density whose implied
-   composition `cg·E_g/M` is **0.886 – 1.148** — `f_g ≈ 1` to within the Poisson noise of the 14–21 counts at
-   the source EDGEs — and on 4 of 10 objects it already implies **≥ 1**. ψ then returns 0.93–0.96.
-2. **It does not shrink with counts.** Silent-exon length swept 1 kb → 30 kb at fixed gDNA density (57 →
-   2,266 counts, 40×): Δ = −0.084, −0.078, −0.063, **−0.111**. Not a sampling error.
-3. **It moves with the SOLVE's own parameterisation.** `sweep_logodds_window` 10 → 20 → 40 gives Δ = −0.073,
-   −0.093, **−0.115** — ⛔ **widening the grid makes it WORSE**, which is `TRAPS.md` D5 (a grid supplies a
-   prior whether you ask for one or not, and a wider window puts more mass away from the vertex).
-   `sweep_n_grid` converges by 120, so it is not a resolution problem.
-
-⭐ **The contrast that settles it:** the G1 objects are structurally PINNED, so ψ is bypassed — and they are
-exact at 1.0000, while their own incoming messages imply 0.77–1.33. **Where ψ solves, the answer lands 5–8 %
-short of the vertex; where ψ is bypassed, it is exact.**
-
-⚠ This is the residual already pinned as a strict xfail (`ROADMAP.md` §2, "ψ's uninformative reference at
-the vertex"). What is new is that it is measured on the dominant population, localised away from the
-messages, and shown insensitive to depth and sensitive to the grid.
-
-### ⭐⭐ Two things this already decides for you
-
-* **A perfect per-component `r_g` (`EQUATIONS.md` §3.5d) is worth ZERO on the unexpressed population.** On a
-  silent gene the true gDNA density is uniform, so the true `r_g` is exactly 1.0 on every hop — and that is
-  already what the solver uses, because a G1 source has no RNA precision, `lend` is False, and the level
-  crosses unscaled. This arm therefore **already has a perfect `r_g`** and still lands 5–8 % short. ⛔ Do not
-  build the `r_g` fuse before the vertex is settled.
-* ⚠ **The phantom-gDNA floor may be the SAME bug at the other vertex, and that is a HYPOTHESIS not a
-  finding.** The zero-gDNA arm reads `f_g` = 0.0218 against exactly 0.0000; the zero-RNA arm reads 0.946
-  against 1.000. Both ~2–7 %, both at a vertex. ⭐ Establishing whether one fix covers both is step 1's first
-  measurement, because it doubles or halves the value of everything after it.
-
-### The intron row, a second and smaller thing in the same table
-
-The intron has real own evidence (`tau` 0.22–0.25) and its factory gets it to within 1 % (`fg_loc`
-0.986–0.991). ⛔ The messages then make it **worse** — gap closed −17 %, delivered message implies
-`f_g` = 0.68. Small (0.011–0.016), but it is the message layer degrading an object that already had the
-right answer, on the simplest scenario that exists.
-
----
+ψ lands 5–8 % short of `f_g = 1` on unexpressed genes, and that was ranked #1 for a campaign. It is
+**not a build**: `vertex_ceiling.py` prices it and evidence-free objects sit at median `|Δ|/sd(f_g)` =
+**z = 0.5–0.6**, inside their own 1σ — the 24.4 % it measures is *the value of missing information, not
+headroom*. No prior-free solve can beat it: every proper prior on [0,1] has a median strictly inside
+(0,1). ⭐ `test_certified_rna_licence.py` `C2b` independently closed the one channel that might have
+supplied vertex evidence — a zero certified count is consistent with `f_g = 1` too. ⚠ Its companion
+hypothesis, the **phantom-gDNA floor**, turned out to be a DIFFERENT and much larger bug and is now
+fixed: `TRAPS.md` C0c/C0d, §0's 39 %.
 
 ## §3 ⛔ WHAT IS DELIBERATELY NOT NEXT — one line each, so it is not rebuilt
 
