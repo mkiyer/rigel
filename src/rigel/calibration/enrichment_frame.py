@@ -28,7 +28,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from scipy.special import log_ndtr, zeta
+from scipy.special import log_ndtr, polygamma, zeta
 
 __all__ = [
     "composition_logvar",
@@ -101,19 +101,42 @@ def _log(x):
     return float(np.log(x))
 
 
+def count_logvar(count) -> np.ndarray:
+    """``Var(log ρ)`` for a Poisson rate seen as ``count`` events over an opportunity — **exactly**, at
+    every count including zero. ⭐⭐ **THE ONE HOME**, imported by every consumer.
+
+    A rate seen as ``a`` events over exposure ``E``, under the SAME Jeffreys prior ψ is built on
+    (`simplex_logodds._JEFFREYS_REF` derives it as Jeffreys for a Poisson rate), has posterior
+    ``Gamma(a + ½, E)`` whose log has variance ``trigamma(a + ½)`` — independent of ``E``, since the
+    opportunity moves the location and cannot sharpen the claim.
+
+    This IS the ``1/n`` it replaces: ``trigamma(a + ½) → 1/a``, agreeing to <0.1 % for ``a ≥ 10``. The
+    whole difference is at small counts, and at ``a = 0`` it is ``π²/2 = 4.93`` (sd 2.22 nats) instead of
+    ``∞``.
+
+    ⛔⛔ **THE SAME ASYMPTOTE WAS WRITTEN OUT TWICE AND BOTH COPIES BROKE THE SAME WAY** (`TRAPS.md` C0c,
+    C0d). In ``own_precision`` it made a zero-count object emit nothing; in :func:`composition_logvar` it
+    made ``Var(log ρ_tot) = ∞``, hence ``σ²_transfer = ∞``, hence ``1/(1/p + ∞) = 0`` — annihilating every
+    message that object sent, on all three streams. Fixing one and not the other is why the repair moved
+    the refit solve and not pass-0. ⭐ It lives HERE, in the leaf module, so there is one definition and
+    nothing to keep in step."""
+    return polygamma(1, np.asarray(count, np.float64) + 0.5)
+
+
 def composition_logvar(f_g, E_g, E_r, var_fg, n):
     """``Var(log ρ_tot)`` — the composition assumption carried as a **variance**, not a bool gate.
 
     Two independent sources of uncertainty in a total density (the
     bounding lemma, made continuous):
 
-    * **counting** — ``M`` is a Poisson count, so ``Var(log M) = 1/n``;
+    * **counting** — ``M`` is a Poisson count, so ``Var(log M) = trigamma(M + ½)``
+      (:func:`count_logvar`; ``→ 1/n``, but FINITE at ``n = 0``, which ``1/n`` was not);
     * **composition** — ``ρ_tot = M·B(f_g)`` with ``B = f_g/E_g + (1−f_g)/E_r``, and ``dB/df_g = 1/E_g − 1/E_r``,
       so by the delta method ``Var(log ρ_tot | composition) = [(1/E_g − 1/E_r)/B]²·Var(f_g)``.
 
     ::
 
-        Var(log ρ_tot) = 1/n  +  [ (1/E_g − 1/E_r) / B ]² · Var(f_g)
+        Var(log ρ_tot) = trigamma(M + ½)  +  [ (1/E_g − 1/E_r) / B ]² · Var(f_g)
 
     **No tuned constant.** The bracket is the bounding lemma's factor expressed as a coefficient: it is ≈0.036
     for a long contained region (composition barely matters), ≈0.4 for a boundary crossing (E_g≠E_r), and
@@ -127,8 +150,7 @@ def composition_logvar(f_g, E_g, E_r, var_fg, n):
     B = fg * inv_g + (1.0 - fg) * inv_r
     coeff = (inv_g - inv_r) / np.maximum(B, _EPS)
     comp = coeff * coeff * np.maximum(vfg, 0.0)
-    count = np.where(nn > 0.0, 1.0 / np.maximum(nn, _EPS), np.inf)
-    return count + comp
+    return count_logvar(nn) + comp
 
 
 def graft_frame_logvar(r):
@@ -463,27 +485,15 @@ def transfer_logvar(logvar_tot_dst, logvar_tot_src, graft):
     committed); on the **peel** / partial-anchor message it is LOAD-BEARING. This one law replaces the retired
     ``var_proj[dst] + (μ_proj[dst]−μ_proj[src])²`` proxy and covers BOTH the relay and the combine. MC 0.02–0.27%.
 
-    ⭐⭐⭐ **AND ``Var(log r) = ∞`` IS THE SECOND CASE WHERE ``r`` IS NOT APPLIED, so it returns 0 for the
-    SAME reason the graft does — an unapplied scale contributes no scale uncertainty.** A slot with zero
-    total density has ``log ρ_tot = −∞`` hence ``logvar_tot = +∞``: the RATIO IS UNDEFINED, so the reframe
-    is skipped and the level crosses UNSCALED (``r`` forced to 1 — `bp_solver`'s ``r_g = r if _lend else
-    1.0``, and this project's base assumption that a gDNA level does not change across an EDGE). Charging
-    that hop ``Var(log r)`` prices a scale factor that was never used.
-
-    ⛔⛔ **AND IT WAS NOT A ROUNDING DETAIL — IT SILENCED THE STRONGEST STATEMENT IN THE LIBRARY.**
-    ``1/(1/p + ∞) = 0`` annihilates ALL THREE streams of every message such a slot sends, including the
-    MEASUREMENT stream, which never multiplies by ``r`` at all. Measured on a zero-gDNA library, where
-    1,298 intergenic nodes hold no fragments over 50.7 Mb of opportunity and therefore know the gDNA
-    density is zero: slots receiving a gDNA level measurement went **0 → 26,839** (capture_off) and
-    **0 → 29,532** (capture_on), and the EDGE-axis error fell **−10.1 %** and **−22.8 %**. `TRAPS.md`
-    C0c/C0d — "there is none here" was unsayable because the channel priced it at infinite uncertainty.
-
-    ⚠ ``+∞`` is the only value treated this way, and it is a STRUCTURAL statement (an undefined ratio),
-    not a threshold — a large-but-finite ``Var(log r)`` is a real scale uncertainty and is still charged
-    in full."""
+    ⭐⭐ **``s`` CAN NO LONGER BE ``+∞``, and that is why there is no second case here.** It used to be,
+    at any zero-count slot, because :func:`composition_logvar`'s counting term was ``1/n``; ``1/(1/p + ∞)``
+    then annihilated all three streams of every message such a slot sent — including the MEASUREMENT
+    stream, which never multiplies by ``r`` at all. That was one bug in two places, and it is fixed at the
+    source: :func:`count_logvar`. ⛔ An ``~isfinite`` guard was briefly added HERE instead and is deleted —
+    it treated the symptom, and it silently made every genuinely-unscaled hop free. `TRAPS.md` C0c/C0d."""
     g = np.asarray(graft, bool)
     s = np.asarray(logvar_tot_dst, np.float64) + np.asarray(logvar_tot_src, np.float64)
-    return np.where(g | ~np.isfinite(s), 0.0, s)
+    return np.where(g, 0.0, s)
 
 
 def mismatch_gap(rho_msg, rho_own):

@@ -40,9 +40,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.special import polygamma
 
 from .density_deconv import density_factor_precision
+from .enrichment_frame import count_logvar
 from .node_chain import NODE, NodeChain
 from .node_geometry import NodeGeometry, NodeStatics, node_global_geometry
 from .simplex_logodds import _logodds_grid, _solve_nodes_logodds_all
@@ -136,29 +136,6 @@ def own_composition_logvar(f_g, tau_lam, struct_lock):
         v_fg = np.where(lock, 0.0, np.where(seen, fr * fr / np.maximum(tau, _EPS), np.inf))
         v_fr = np.where(lock, 0.0, np.where(seen, fg * fg / np.maximum(tau, _EPS), np.inf))
     return v_fg, v_fr
-
-
-def count_logvar(count) -> np.ndarray:
-    """``Var(log ρ)`` for a Poisson rate observed as ``count`` events over an opportunity — **exactly**,
-    at every count including zero.
-
-    ⭐⭐ **ONE EXPRESSION WHERE THERE WERE TWO CASES AND AN ASYMPTOTE.** A rate ``ρ`` seen as ``a`` events
-    over exposure ``E``, under the SAME Jeffreys prior ψ is built on (`simplex_logodds._JEFFREYS_REF`
-    derives it as Jeffreys for a Poisson rate), has posterior ``Gamma(a + ½, E)``. Its log has variance
-    ``trigamma(a + ½)`` — independent of ``E``, because the opportunity moves the location and cannot
-    sharpen the claim.
-
-    This *is* the ``1/n`` the code used to carry: ``trigamma(a + ½) → 1/a``, agreeing to better than
-    0.1 % for ``a ≥ 10``. The whole difference is at small counts, and at ``a = 0`` it is the difference
-    between ``π²/2 = 4.93`` (sd 2.22 nats — loose, but a statement) and ``∞`` (silence).
-
-    ⛔⛔ **THAT SILENCE WAS THE DEFECT** (`TRAPS.md` C0c). At a zero-gDNA library all 1,298 intergenic
-    nodes hold exactly zero counts over 50.7 Mb of gDNA opportunity — the most precise statement in the
-    library, "there is no gDNA" — and every one of them emitted nothing, because ``1/n`` diverges. A
-    zero count over a known opportunity is a MEASUREMENT; only a zero OPPORTUNITY is an absence of data,
-    and that is handled structurally by :func:`rate_posterior_mean`.
-    """
-    return polygamma(1, np.asarray(count, np.float64) + 0.5)
 
 
 def own_precision(n, v_log, live):

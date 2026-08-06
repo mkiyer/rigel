@@ -21,6 +21,7 @@ import pytest
 from scipy.special import polygamma, zeta
 
 from rigel.calibration.enrichment_frame import (
+    count_logvar,
     composition_logvar,
     graft_frame_logvar,
     graft_frame_logvar_scalar,
@@ -64,9 +65,20 @@ EG_BND, ER_BND = 300.0, 200.0  # a boundary crossing (E_g = fl_mean_gdna, E_r = 
 
 def test_composition_logvar_is_pure_counting_at_the_structural_corner():
     """At ``f_g = 1`` with ``Var(f_g) = 0`` (a structural gDNA node) the composition term vanishes and
-    ``Var(log ρ_tot) = 1/n`` — the honest counting precision, no composition penalty."""
+    ``Var(log ρ_tot) = count_logvar(n)`` — the honest counting precision, no composition penalty.
+
+    ⭐⭐ **RE-POINTED 2026-08-06.** The claim is unchanged; the counting term is now the EXACT Poisson
+    log-rate variance ``trigamma(n + ½)`` rather than its ``1/n`` asymptote, and the two agree to 0.05 %
+    at ``n = 25`` (asserted below, so the re-pointing cannot hide a real change).
+    ⛔ The asymptote was NOT a rounding detail: at ``n = 0`` it is ``∞``, which made ``σ²_transfer`` ∞ and
+    annihilated every message a zero-count slot sent, on all three streams — the second copy of
+    `TRAPS.md` C0c, and the reason its first repair moved only the refit solve."""
     v = float(composition_logvar(1.0, EG_BND, ER_BND, var_fg=0.0, n=25.0))
-    assert v == pytest.approx(1.0 / 25.0, rel=1e-14)
+    assert v == pytest.approx(float(count_logvar(np.array([25.0]))[0]), rel=1e-14)
+    assert v == pytest.approx(1.0 / 25.0, rel=1e-3)  # ⭐ still the asymptote, to 0.05 %
+    # ⛔ and FINITE at zero counts, which 1/n was not — the whole point.
+    z = float(composition_logvar(1.0, EG_BND, ER_BND, var_fg=0.0, n=0.0))
+    assert np.isfinite(z) and z == pytest.approx(np.pi**2 / 2.0, rel=1e-12)
 
 
 def test_composition_logvar_self_excludes_short_regions_without_a_threshold():
