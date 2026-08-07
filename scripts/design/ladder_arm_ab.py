@@ -705,6 +705,68 @@ def _wrap_node_sweep():
     return orig
 
 
+def _install_msgfree(where: str):
+    """⭐⭐⭐ **HOW MUCH OF THE MESSAGE LAYER DOES THE SUBSTRATE ACTUALLY NEED?** — the consolidation arm.
+
+    ⛔ **Pass-0's ONLY job is to be a training substrate for the gDNA hyperprior** (owner, 2026-08-07;
+    ``variance_model_notes.md`` A2). It is not required to be accurate, and it is not the deliverable. So
+    the question that sizes the whole backbone has never been asked: **if pass-0 sends no messages at all,
+    is the fitted prior worse?**
+
+    Two arms, because they answer two different questions and conflating them would be one experiment
+    pretending to be two:
+
+    ``msgfree_p0``   psi's four imputed channels are muted during the PRIOR-FREE sweep ONLY; every refit
+                     sweep runs untouched. ⭐ This is the one that sizes the SUBSTRATE: it asks whether the
+                     prior needs message-imputed values at the objects that have no evidence of their own.
+    ``msgfree_all``  muted in every sweep. This asks whether the DELIVERABLE needs messages at all, and it
+                     is the floor: whatever it scores is what the accumulator plus psi plus the fitted
+                     prior are worth with no belief propagation whatsoever.
+
+    ⚠ **What is muted is exactly the four ``*_imp`` arguments** — ``gdna_imp``, ``rna_imp``, ``lam_imp``,
+    ``theta_imp``. Everything else psi receives is the slot's OWN evidence (its two strand counts, its
+    spliced count, the reference, the fitted prior, the intron factory) and is untouched, so a difference
+    is attributable to the message layer and to nothing else. ⭐ The whole relay still RUNS; only its
+    delivery into psi is withheld. That keeps one thing varied and leaves the geometry identical.
+
+    ⛔ A10 — ``_solve_nodes_logodds_all`` is bound as a module global in THREE places
+    (``simplex_logodds``, ``node_init``, ``bp_solver``); all three are patched and the arm raises if it
+    never fired. And the pass-0-vs-refit switch is read off ``gdna_prior is None``, which is exactly how
+    ``calibrate`` itself distinguishes the two phases (``calibrate.py:528`` vs ``:572``).
+    """
+    import rigel.calibration.simplex_logodds as SL
+
+    state = {"muted": where == "all"}
+    orig_solve = SL._solve_nodes_logodds_all
+
+    def solve(*a, **kw):
+        if state["muted"]:
+            _fire(f"msgfree_{where}")
+            for k in ("gdna_imp_mode", "gdna_imp_prec", "rna_imp_mode", "rna_imp_prec",
+                      "lam_imp_mode", "lam_imp_prec", "theta_imp_mode", "theta_imp_prec"):
+                kw[k] = None
+        return orig_solve(*a, **kw)
+
+    for mod in (SL, NI, bp_solver):
+        if hasattr(mod, "_solve_nodes_logodds_all"):
+            mod._solve_nodes_logodds_all = solve
+
+    if where == "p0":
+        orig_sweep = bp_solver.node_sweep
+
+        def sweep(chain, statics, geometry, belief, region_arrays, *a, **kw):
+            # the prior-free sweep is the one `calibrate` calls with `gdna_prior=None`
+            state["muted"] = kw.get("gdna_prior") is None
+            try:
+                return orig_sweep(chain, statics, geometry, belief, region_arrays, *a, **kw)
+            finally:
+                state["muted"] = False
+
+        for mod in (CAL, bp_solver):
+            if hasattr(mod, "node_sweep"):
+                mod.node_sweep = sweep
+
+
 def _install_eta(mute_level: bool = False):
     """⭐⭐⭐ THE ``eta`` REBUILD — the whole sweep replaced, not one term overridden.
 
@@ -812,6 +874,8 @@ def main() -> int:
             "base",
             "eta",
             "eta_nolevel",
+            "msgfree_p0",
+            "msgfree_all",
             "intron_phi",
             "kappa_half",
             "zc_noop",
@@ -893,6 +957,8 @@ def main() -> int:
     #   the shipped one — wrapping first would leave the base sweep in the chain.
     if args.arm in ("eta", "eta_nolevel"):
         _install_eta(mute_level=args.arm == "eta_nolevel")
+    elif args.arm in ("msgfree_p0", "msgfree_all"):
+        _install_msgfree("p0" if args.arm == "msgfree_p0" else "all")
     else:
         _wrap_node_sweep()
     if args.arm == "intron_phi":
