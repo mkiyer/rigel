@@ -10,9 +10,11 @@ from __future__ import annotations
 
 
 import numpy as np
+import pytest
 
 from rigel.calibration.node_chain import NODE
-from rigel.calibration.node_geometry import init_beliefs
+from rigel.calibration.enrichment_frame import composition_logvar, count_logvar
+from rigel.calibration.node_geometry import g1_locked, init_beliefs
 from _synthetic import make_chain_parts
 from rigel.calibration.node_init import (
     build_node_init,
@@ -333,3 +335,189 @@ def test_density_factor_precision_flows_into_node_init():
     ni_on = build_node_init(chain, statics, geometry, intron_prior=prior, **common)
     assert ni_off.tau_lam[4] == 0.0 and ni_off.prec_g[4] == 0.0  # unstranded, no factory ⇒ silent
     assert ni_on.tau_lam[4] > 0.0 and ni_on.prec_g[4] > 0.0  # factory ⇒ the node can now speak
+
+
+# ── the scope of struct_lock: STRUCTURALLY PURE gDNA, never merely EMPTY ─────────────────────────────────
+
+
+#: ⛔⛔⛔ THE DEFECT THESE THREE GATE IS PROVEN AND ITS FIX IS PANEL-NEGATIVE ALONE — so they are STRICT
+#: xfails, not deletions, and they must go GREEN rather than be widened.
+#:
+#: ``struct_lock = locked & is_region`` with ``locked = ~solvable`` declares composition CERTAINTY at every
+#: zero-count NODE: measured **19,709** slots on the gDNA ladder against **1,312** that are actually
+#: ``g1_locked``, so **18,397** empty exons and introns claim a certainty they have not earned. That
+#: contradicts ``strand_evidence``'s own docstring ("scoped to true intergenic NODE nodes") and bypasses
+#: `node_geometry.g1_locked`, the designated ONE HOME for the predicate.
+#:
+#: ⚠ It was INERT until 2026-08-06: ``own_precision``'s ``n > 0`` gate silenced every zero-count slot, so the
+#: certainty could not leave them. Removing that gate un-masked it.
+#:
+#: ⛔ Scoping it to ``g1_locked ∧ NODE`` was PROTOTYPED AND MEASURED on the ladder
+#: (`ladder_arm_ab.py --arm zc_struct_lock_g1`): the stranded × capture-ON row it was aimed at moved only
+#: **−1.2 %**, ``g98`` went **+0.4 %** (worse), and the zero-gDNA control went **+3,207 %** (2,103 →
+#: 69,532 fragments) — the mis-scoped mask is load-bearing for the zero-gDNA win. `TRAPS.md` D4j: it is half
+#: of a cancelling pair, and the other half is the ``intergenic|exon`` seam claiming its whole
+#: RNA-contaminated crossing mass as gDNA. Price them TOGETHER or not at all.
+_STRUCT_LOCK_XFAIL = pytest.mark.xfail(
+    strict=True,
+    reason="struct_lock is ~solvable & NODE, not g1_locked & NODE — proven, and the scoping fix is "
+    "panel-negative alone (zero-gDNA control +3,207 %). Must go green with the seam-composition arm.",
+)
+
+
+def _empty_exon_scenario(kappa=0.9):
+    """The same three-node chain, with the AMBIG EXON's counts set to ZERO.
+
+    ⭐ It must go through `build_node_init`, not through `strand_evidence` directly. The pre-existing gate
+    `test_strand_evidence_struct_lock_regions_only` hands ``locked`` in as an argument, so it re-derives the
+    caller's own input and cannot see what the caller computes — `TRAPS.md` A11, and the same hole A2's P3
+    perturbation found in ``own_precision``.
+    """
+    parts = make_chain_parts(
+        [TS_NONE, BIT_EXON_POS, BIT_EXON_POS | BIT_EXON_NEG],
+        node_size_bp=[1500.0, 900.0, 1200.0],
+        node_pos=[120.0, 200.0, 0.0],  # ⭐ the AMBIG exon is EMPTY
+        node_neg=[110.0, 9.0, 0.0],
+        gdna_fl=_delta_pmf(200),
+        rna_fl=_delta_pmf(100),
+    )
+    belief = init_beliefs(
+        parts.chain,
+        parts.geometry,
+        parts.statics,
+        rna_sense_frac=kappa,
+        gdna_strand_overdispersion=0.2,
+        rna_strand_overdispersion=0.1,
+        n_grid=60,
+        n_grid_ss=256,
+    )
+    ni = build_node_init(
+        parts.chain,
+        parts.statics,
+        parts.geometry,
+        kappa=kappa,
+        od_g=0.2,
+        od_r=0.1,
+        n_gdna_obs=230.0,
+        n_rna_obs=85.0,
+        n_grid=60,
+        logodds_window=10.0,
+        n_tilt=None,
+        n_grid_ss=256,
+        belief=belief,
+    )
+    return ni, parts
+
+
+@_STRUCT_LOCK_XFAIL
+def test_an_EMPTY_exon_is_not_composition_certain():
+    """⛔⛔ ``struct_lock`` MEANS "STRUCTURALLY PURE gDNA". AN EMPTY EXON IS NOT THAT — IT IS UNMEASURED.
+
+    ``strand_evidence`` is handed ``locked = ~solvable`` with
+    ``solvable = (free_pos | free_neg) & (n_node > 0)``, so ``struct_lock = locked & is_region`` was true at
+    **every zero-count NODE** — an exon and an intron included. ``own_composition_logvar`` then returns
+    ``Var(log f_g) = 0`` there: composition CERTAIN, on a slot whose ``f_g`` is a default belief and whose
+    evidence is nothing at all.
+
+    ⭐ The predicate the docstring names is `node_geometry.g1_locked` — neither RNA strand admissible — and
+    it is the ONE HOME for it (`TRAPS.md` A11). An AMBIG exon frees both strands, so it can never be G1
+    however few fragments land in it.
+    """
+    ni, parts = _empty_exon_scenario()
+    am = 4  # the AMBIG exon NODE slot
+    assert np.asarray(parts.geometry.unspliced_count, float).sum(axis=1)[am] == 0.0  # it IS empty
+    assert not g1_locked(parts.statics.free_pos, parts.statics.free_neg)[
+        am
+    ]  # both strands admissible
+    assert not ni.struct_lock[am], "an EMPTY exon was declared composition-CERTAIN"
+
+
+@_STRUCT_LOCK_XFAIL
+def test_struct_lock_is_exactly_g1_locked_on_the_node_axis():
+    """The mask must equal ``g1_locked ∧ NODE``, computed from a DIFFERENT expression than the solver's.
+
+    ⭐ ``g1_locked`` is production code and is imported, not restated — so this cannot drift the way A11's
+    two-homes predicate did. The `~np.asarray(...)` form here is the *consumer* side; the point of the gate
+    is that the two agree on a fixture where ``~solvable`` and ``g1_locked`` DISAGREE, which is what the
+    empty exon supplies."""
+    ni, parts = _empty_exon_scenario()
+    want = g1_locked(parts.statics.free_pos, parts.statics.free_neg) & (
+        np.asarray(parts.chain.kind) == NODE
+    )
+    assert list(np.asarray(ni.struct_lock, bool)) == list(want)
+
+
+#: ⛔⛔⛔ THE SECOND, LARGER DEFECT — AND THE PERTURBATION OF THE THREE ABOVE IS WHAT FOUND IT.
+#: Scoping ``struct_lock`` to G1 was expected to restore the composition half of ``Var(log ρ_tot)`` at an
+#: empty exon. It does not, and the reason is a CORNER DEGENERACY that has nothing to do with
+#: ``struct_lock``: an evidence-free slot's default belief is ``f_g = 1`` exactly (the unsolved 100 %-gDNA
+#: init), and ``node_sweep`` caps ``Var(f_g)`` at ``f_g(1−f_g)`` — **which is 0 at the corner.** So
+#: ``logvar_tot`` at every evidence-free slot is ``count_logvar(n)`` and nothing else, and with
+#: ``count_logvar`` finite there is now NO damping there at all. The ``1/n = ∞`` that the 39 % win removed
+#: had been the only thing damping those hops.
+#:
+#: ⭐ The derived repair needs no tuned constant: with ``τ_λ = 0`` there is no evidence, so ``Var(f_g)`` is
+#: the variance of ψ's OWN reference — ``Beta(½, ½)`` (`simplex_logodds._JEFFREYS_REF`) — which is exactly
+#: **1/8**, and is nonzero wherever the point estimate sits. ``f_g(1−f_g)`` is a BERNOULLI variance and is
+#: the right scale only away from the corner; at the corner it asserts a composition known exactly on a slot
+#: with no data. ⭐ And the coefficient it multiplies, ``[(1/E_g − 1/E_r)/B]²``, diverges as ``E_g``
+#: collapses — so the restored damping is largest exactly at the SHORT capture-depleted slots the stranded ×
+#: capture-ON regression lives on.
+_CORNER_VAR_XFAIL = pytest.mark.xfail(
+    strict=True,
+    reason="Var(f_g) is capped at f_g(1-f_g), which is 0 at the f_g=1 default of an evidence-free slot, "
+    "so logvar_tot carries no composition term there and the hop is undamped.",
+)
+
+
+@_CORNER_VAR_XFAIL
+def test_an_evidence_free_slot_is_not_certain_of_its_composition():
+    """⭐⭐ THE OBSERVABLE: ``Var(f_g)`` at a slot with ``τ_λ = 0`` must be the reference prior's variance,
+    not zero.
+
+    ⛔ Gated as a strict inequality against ``0``, and separately against the STRUCTURALLY certain twin in
+    the same fixture, so it cannot be satisfied by making everything uncertain: the intergenic node is
+    genuinely G1 and must still be exactly certain.
+
+    ⚠ This reads `bp_solver.node_sweep`'s expression, restated here because it is a LOCAL there. That is a
+    second home for one predicate (`TRAPS.md` A11) and is the reason the repair must move it into a named
+    function beside `own_composition_logvar` when it lands."""
+    ni, parts = _empty_exon_scenario()
+    ig, am = 0, 4  # the intergenic NODE (truly G1) and the EMPTY AMBIG exon
+    fg = np.asarray(ni.f_g, float)
+    tau = np.asarray(ni.tau_lam, float)
+    assert tau[am] == 0.0 and fg[am] == 1.0  # evidence-free, and parked at the corner
+    fgfr = fg * (1.0 - fg)
+    var_fg = np.where(
+        np.asarray(ni.struct_lock, bool),
+        0.0,
+        np.where(tau > 1e-9, np.minimum(fgfr * fgfr / np.maximum(tau, 1e-9), fgfr), fgfr),
+    )
+    assert var_fg[ig] == 0.0  # structural certainty is real and must survive
+    assert var_fg[am] > 0.0, "an evidence-free slot declares Var(f_g) = 0 at the f_g = 1 corner"
+
+
+@_CORNER_VAR_XFAIL
+def test_an_evidence_free_slot_pays_a_composition_transfer_variance():
+    """⭐⭐⭐ AND THE CONSEQUENCE, in the currency the relay actually spends: ``σ²_transfer``.
+
+    ``node_sweep`` hands that ``Var(f_g)`` to `enrichment_frame.composition_logvar`, whose output IS
+    ``σ²_transfer`` (via `transfer_logvar`). With the composition term at 0 the evidence-free slot pays only
+    ``count_logvar(n)``, so every message it touches crosses at ``1/(1/p + trigamma(½))`` — which is why a
+    zero-mass slot went from a relay BARRIER to a CONDUIT when ``1/n`` was replaced.
+
+    ⛔ The intergenic twin must still pay counting alone: it is composition-CERTAIN by structure, and a
+    repair that damps it too would be widening the gate rather than fixing the defect."""
+    ni, parts = _empty_exon_scenario()
+    ig, am = 0, 4
+    E_g = np.asarray(parts.geometry.eff_gdna, float)
+    E_r = np.asarray(parts.geometry.eff_rna, float)
+    n = np.asarray(parts.geometry.unspliced_count, float).sum(axis=1)
+    fg = np.asarray(ni.f_g, float)
+    fgfr = fg * (1.0 - fg)
+    var_fg = np.where(np.asarray(ni.struct_lock, bool), 0.0, fgfr)  # tau = 0 at both slots
+    lv = composition_logvar(fg, E_g, E_r, var_fg, n)
+    assert lv[ig] == count_logvar(np.array([n[ig]]))[0]  # certain ⇒ counting only, unchanged
+    assert lv[am] > count_logvar(np.array([n[am]]))[0], (
+        "an evidence-free slot pays no composition transfer variance, so its hops are undamped"
+    )

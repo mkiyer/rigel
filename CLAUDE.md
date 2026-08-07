@@ -4,10 +4,46 @@ Guidance for Claude Code working in this repository.
 
 ## What Rigel is
 
-A Bayesian RNA-seq transcript quantifier that jointly models mRNA, nascent RNA and genomic DNA
-contamination. A single-pass C++ BAM scanner tallies fragments, a **calibration** stage deconvolves the
-library into gDNA vs RNA, and a per-locus EM solver assigns RNA to transcripts. PyPI package
-`rigel-rnaseq`; the import and CLI are `rigel`.
+A Bayesian RNA-seq transcript quantifier that separates **RNA from genomic-DNA contamination**. A
+single-pass C++ BAM scanner tallies fragments, a **calibration** stage deconvolves the library into gDNA vs
+RNA, and a per-locus EM solver assigns RNA to transcripts. PyPI package `rigel-rnaseq`; the import and CLI
+are `rigel`.
+
+## ⛔⛔⛔ AXIOM 0 — RNA IS RNA. READ THIS BEFORE ANYTHING ELSE
+
+**There are THREE populations and there is no fourth: `gDNA`, `RNA+`, `RNA−`.**
+
+⛔ **"Mature" and "nascent" are NOT populations, NOT species, and NOT a degree of freedom.** RNA inside an
+intron is RNA that has not spliced *at that position*. The only distinction that exists is whether a
+fragment **is spliced** — certified RNA, gDNA cannot splice, needs no deconvolution — or **is not**, which
+is the entire deconvolution problem.
+
+⚠ **This paragraph replaced one that said Rigel "jointly models mRNA, nascent RNA and genomic DNA", and
+that sentence caused the error it is written to prevent** (2026-08-06): a derivation opened with the
+population set `{gDNA, nascent+, nascent−, mature+, mature−}` and every table built on it came out wrong.
+The axiom was already in `DESIGN.md` §0 and in memory; the *first sentence of this file* contradicted it,
+and the first sentence won.
+
+⭐ **The set is a function of TWO BITS, which is what makes this structural rather than something to
+remember:**
+
+```
+T(slot) = {gDNA}                                  # always — gDNA is genomically continuous
+        ∪ {RNA+ if statics.free_pos[slot]}        # iff the annotation admits that strand here
+        ∪ {RNA− if statics.free_neg[slot]}
+```
+
+so `|T| ∈ {1,2,3}`, always. **No expression in this codebase may produce a fourth population.**
+
+⛔ **The tell that you have just violated this:** you have written a population set with more than three
+members, or the words "mature"/"nascent"/"subspecies" while describing a *solver*, *composition* or
+*population* question, or you have concluded that something needs "a third component". Stop, and re-ask the
+question as **"what is this channel's OPPORTUNITY for RNA at this object?"** — the answer is a geometry, it
+is derivable from the index, and it dissolves the objection every time.
+
+⚠ The words survive in exactly two places, as **simulator inputs and never as model concepts**: the
+simulator's `nrna_abundance` knob and the toy harness's `--nrna` arm, both of which exist to put RNA inside
+introns so the solver can be tested on it.
 
 ## ⭐ The docs — read them in this order
 
@@ -77,16 +113,19 @@ C++ is gated on byte-identity to it; where it and a document disagree, it wins.
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-python -m pytest tests/ -q                     # baseline: 22 fail / 2290 pass / 3 xfail — 21 goldens + the paralog row
+python -m pytest tests/ -q                     # baseline: 22 fail / 2314 pass / 7 xfail — 21 goldens + the paralog row
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **"22 failures, 21 goldens and the paralog row" is the standing baseline** (2,290 passing as of 2026-08-06). A 23rd failure, or any other
+⭐ **"22 failures, 21 goldens and the paralog row" is the standing baseline** (2,314 passing as of 2026-08-06 — 2,290 plus the 24 `test_eta_transfer` gates). A 23rd failure, or any other
 non-golden name in the list, is a regression. See `docs/TESTING.md` §6.
-⭐ **And 3 xfails, one of them STRICT and load-bearing**: `test_toy_harness`'s intron-composition gate is the
-project's detector for the level defect that the splice-flux reframe un-masked. It must go green — not be
-widened — when the joint arm lands (`ROADMAP.md` §1 step 3).
+⭐ **And 7 xfails, five of them STRICT and load-bearing.** `test_toy_harness`'s intron-composition gate is
+the project's detector for the level defect the splice-flux reframe un-masked, and `test_node_init.py` carries
+**four** more added 2026-08-06 for two PROVEN defects whose fixes are panel-negative alone: `struct_lock` is
+`~solvable & NODE` rather than `g1_locked & NODE` (19,709 slots against 1,312), and `Var(f_g)` is capped at
+`f_g(1−f_g)`, which is 0 at the `f_g = 1` default of an evidence-free slot. ⛔ All five must go GREEN — not
+be widened — when `ROADMAP.md` §1 step 1's paired arm lands. `TRAPS.md` A11b, D4k.
 
 Always set `OMP_NUM_THREADS=1` when benchmarking or comparing runs.
 
@@ -114,7 +153,8 @@ either promote a row or delete the file, but do not assume the table is complete
 | `design/certified_q_census.py` | ⭐⭐ **CAN A CERTIFIED COUNT SPEAK ABOUT THE UNSPLICED SPLIT? — the answer is NO, and this is why.** Measures the splice-visibility `q = S/(S+C_R)` directly off the origin-split oracle on all 36 conditions; no solver runs, so the whole ladder is seconds. ⛔ Its verdict is a NEGATIVE and the docstring says so first: `q`'s mass-weighted median is 0.19–0.71, so the term §2d drops is the same size as the one it keeps, and the raw-count λ term is **worse than the uninformative reference on 12 of 36 conditions** (worst +0.4578). ⭐ Its two extreme rungs ARE the two zero controls, which is what makes the diagnosis certain |
 | `design/vertex_ceiling.py` | ⭐⭐ **the re-solve ceiling on the REAL ladder** — pins oracle truth at a chosen object class in `build_node_init` and re-solves, with a `noop` arm that MUST be byte-identical (`TRAPS.md` A5). ⛔ Its own verdict is a NEGATIVE and the docstring says so first: the 24.4 % it measures is the value of MISSING INFORMATION, not headroom. ⭐ Reusable override plumbing for any `build_node_init` prototype |
 | `design/toy_ceiling.py` | ⭐⭐ **the RE-SOLVE ceiling** — hand one object class a different own belief and re-solve the whole chain, six arms sharing one simulation. ⛔ This is what `TRAPS.md` B17 demands instead of a substitution, and `--arms base noop` is its own falsification (must be byte-identical). Its docstring carries what it measured |
-| `design/ladder_arm_ab.py` | ⭐⭐ **the same override on the REAL 36-condition ladder**, scored by `solvability_audit.py`. ⛔⛔ **Run this before writing a mechanism into `src/`** — twice now a toy-positive change has been panel-negative (`TRAPS.md` B18). 40 s per condition with the oracle cache |
+| `design/eta_node_sweep.py` | ⛔ **THE `η` REBUILD PROTOTYPE — BUILT, GATED, AND PANEL-NEGATIVE (+103 % on the deliverable, 6/32 better).** A drop-in for `bp_solver.node_sweep` carrying the frame-free composition transfer with the mass pin, the reframe, `framed`, the flank pair and graft/peel gating all deleted. Injected by `ladder_arm_ab.py --arm eta`; `--arm eta_nolevel` is its attribution handle. ⭐ Its algebra lives in `tests/calibration/_eta_reference.py` (ONE home, gated by `test_eta_transfer.py`) — read `SESSION_HANDOFF.md` §4/§5/§6 before touching it |
+| `design/ladder_arm_ab.py` | ⭐⭐ **the same override on the REAL 36-condition ladder**, scored by `solvability_audit.py`. ⛔⛔ **Run this before writing a mechanism into `src/`** — FOUR times now a toy- or single-condition-positive change has been panel-negative (`TRAPS.md` B18). ⭐⭐ **`--jobs 8` runs the whole 36-condition panel in ~2.2 min** (was ~20 min), byte-identical on all 648 scored fields: the two unused `c_input_*` arms are no longer built and the MAIN scan payload is cached beside the oracle cache. ⭐ Carries the eight `zc_*` arms that attributed the stranded × capture-ON residual and refused six candidate fixes (`TRAPS.md` C0e); `--arm zc_noop` must be BYTE-IDENTICAL to `base` and is the harness's own falsification (A5) |
 | `design/length_ceiling.py` | ⭐ **what a PERFECT length model is worth, on the ladder, ONE pmf at a time.** ⛔ Pricing the pair together hid a 14× split between them (`TRAPS.md` B21). Reports the pass-0 solvable yardstick beside the mass-weighted one, because they disagree |
 | `design/toy_harness.py` | ⭐⭐ **a mini chromosome you define, calibrated in 0.1–5 s** (`docs/TESTING.md` §0b), with every object's answer beside per-object truth. The library-level priors a toy cannot fit are harvested from a real cached condition and INJECTED; the gDNA depth is DERIVED to match that donor, never set by hand. `--list` for the spec ladder. ⭐ Reach for this FIRST when a mechanism needs isolating — it found C1's mechanism candidate in one sweep |
 | **the substrate** | |
@@ -136,6 +176,7 @@ either promote a row or delete the file, but do not assume the table is complete
 | `design/pass0_vs_oracle.py` | T (the origin-split payload) vs P (`calib_refit_iters=0`) vs two levered ceilings, per object and per class. ⛔⛔ **ITS HEADLINE MASS-WEIGHTED ERROR IS THE WRONG YARDSTICK FOR PASS-0** — it scores every object with mass, so honest ignorance reads as error and buried a 0.0456 answer inside a 0.3150 one. Use it for the T/C/P decomposition and the oracle plumbing; use `solvability_audit.py` to judge pass-0. ⛔ undrained on every arm. `--oracle-cache` makes repeat runs cheap: the oracle depends on the accumulator and index, never on calibration, so one cache serves a whole debugging campaign |
 | `design/worst_objects.py` | ⭐⭐ **step 3 of the debug loop** — one condition dissected to individual nodes/edges, ranked by error **MASS**. Read the CONCENTRATION curve first (concentrated ⇒ a mechanism exists; diffuse ⇒ a systematic bias). `fg_loc` vs `pred_fg` separates a wrong local solve from wrong messages |
 | **diagnostics** | |
+| `design/anchor_opportunity_census.py` | ⭐⭐ **IS A ZERO-COUNT ANCHOR'S DENSITY CLAIM TRUE OF ITS NEIGHBOURHOOD? — no solver runs.** Every slot's TRUE gDNA density re-derived from the origin-split oracle through the SHIPPED `build_node_geometry`, then the empty structurally-pure-gDNA population against what its own chain neighbours measure. ⛔ Its verdict is that the claim is false by **346×** under capture and true off it — which is NECESSARY for the "empty means no probe here" hypothesis and, as the panel arms then showed, not sufficient |
 | `design/composition_evidence_census.py` | how much library mass reaches the solver with NO composition evidence. `--inject-kappa 0.5` is its falsification handle |
 | `design/held_flux_census.py` | how often a held candidate has ZERO flux evidence, by cause |
 | `design/prior_units_check.py` | the EM prior in fragment units vs the old incidence sum |

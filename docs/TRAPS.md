@@ -99,6 +99,25 @@ cannot carry zero, and no amount of precision at the source changes that. ⚠ An
 it is a precondition: the source must be able to form the claim before the channel can be taught to
 carry it. But it must be priced as what it measured, which is nothing.
 
+**C0e. ⛔⛔⛔ THE DIVERGENCE WAS DOING A SECOND JOB, AND REMOVING IT TURNED A RELAY BARRIER INTO A
+CONDUIT.** C0c/C0d replaced ``1/n`` with ``trigamma(n+½)`` in **two** places and won 39 % panel-wide — and
+one coherent stratum, stranded × capture-ON at ``g10``+, got **20–34 % worse**. The whole regression is
+owned by ONE of the two: ``composition_logvar``'s counting term, i.e. by ``σ²_transfer =
+logvar_tot[dst] + logvar_tot[src]`` no longer being ``∞``. Reverting only that term reproduces the published
+"before" column **to the fragment** (295,453 and 304,815), and a from-git pre-fix tree agrees to 0.17 %.
+⭐⭐ **The mechanism is not the zero-count SOURCE, it is every hop that TOUCHES a zero-mass slot.**
+``1/(1/p + ∞) = 0`` annihilated messages in both directions, so ``_fuse`` fell back to the destination's own
+belief and **the chain was cut into segments at every empty slot**. Under capture the off-probe gaps between
+probe islands ARE the zero-mass slots, so a gDNA level now travels between capture strata that were
+isolated — and it crosses UNSCALED, because ``framed`` needs ``ρ_tot > 0`` at both ends and forces ``r = 1``.
+⛔ Muting every zero-mass emitter recovers **1.2–7.7 %**; restoring the barrier recovers **100 %**. So it is
+PROPAGATION, not origination, and the previous session's hypothesis — an empty intergenic anchor asserting
+``ρ_g ≈ 0`` — is refuted as the cause even though its premise is true and measured (the true gDNA density at
+those anchors' neighbours is **346×** what a non-empty anchor reports). ⭐ **The lesson: before crediting a
+divergence's removal, ask what the divergence was suppressing.** An ``∞`` in a damping term is a
+STRUCTURAL gate wearing a variance's clothes, and it had been the only thing pricing a premise nothing else
+prices — here "a gDNA level does not change across an EDGE", which capture falsifies by ~350×.
+
 **A12b. ⛔⛔ A NOISE DEADBAND WHOSE CUSHION IS SUPPLIED BY AN UNRELATED SAMPLE SIZE FAILS EXACTLY WHERE
 THAT SAMPLE GETS BIG — AND IT FAILS SILENTLY, INTO THE HONESTY COLUMNS.** `strand_evidence` gates the
 strand channel on `disc = 4·max(0, (κ̂−½)² − σ²_d)` with `σ²_d = ¼(1/N_rna + ω_r) + ¼(1/N_gdna + ω_g)`.
@@ -126,6 +145,20 @@ has changed its own denominator, so quote `mwae` over ALL objects and the raw Σ
 cannot be gamed by knowing less.** ⚠ It also inverts single-condition readings: one row showed −64 % and
 the same arm over 16 conditions is −0.2 %.
 
+**A11b. ⛔⛔ A PREDICATE CAN CONTRADICT ITS OWN DOCSTRING FOR MONTHS IF SOMETHING ELSE IS MASKING IT —
+AND THE WRONG VERSION CAN BE LOAD-BEARING.** ``strand_evidence``'s ``struct_lock`` is documented as "scoped
+to true intergenic NODE nodes" — i.e. ``g1_locked ∧ NODE``, and `node_geometry.g1_locked` exists as the
+designated ONE HOME for exactly that predicate (A11). The code is handed ``locked = ~solvable`` with
+``solvable = (free_pos|free_neg) & (n > 0)``, so it is true at **every zero-count NODE**: measured **19,709**
+ladder slots against **1,312** that are actually G1, so **18,397** empty exons and introns declare their
+composition CERTAIN. ⚠ It was INERT until 2026-08-06 because ``own_precision``'s ``n > 0`` gate silenced
+every zero-count slot; removing that gate un-masked it. ⛔⛔ **And scoping it correctly is
+PANEL-NEGATIVE**: the target row moved −1.2 %, ``g98`` went +0.4 % (worse), and the zero-gDNA control went
+**+3,207 %** — the mis-scoped mask is what carries the zero-gDNA win. ⭐ *Lessons:* a gate that hands the
+predicate in as an ARGUMENT cannot see the caller compute it wrong (`test_strand_evidence_struct_lock_regions_only`
+did exactly that, and passed throughout) — gate it through the PRODUCTION path; and when a docstring and its
+code disagree, find out which one the panel is relying on before "fixing" either.
+
 **A11. A TEST THAT RE-DERIVES A DEFINITION CANNOT DETECT DRIFT IN IT.** A gate existed precisely to keep
 two instruments' shared class definition from diverging — and it recomputed that definition inline in
 the test. Changing one instrument fired nothing. It is A1's shape once more: the check and the thing
@@ -141,6 +174,55 @@ being reconstructed never enters the observable. Eleven green gates; the one per
 fired nothing. ⭐ The repair was to stop reconstructing: on a PALINDROMIC chain the relay's two passes must
 be exact mirror images, which needs no assumption about which channels are live. ⛔ **When a gate needs a
 value to flow through a conditional path, it is a gate on that conditional. Prefer an invariance.**
+
+**A16. ⛔⛔⛔ A MESSAGE MODE OUTSIDE ITS GRID'S DOMAIN IS NOT A WEAK CLAIM, IT IS A PIN AT THE BOUNDARY —
+AND A CHANNEL ABSENT FROM THE CAPTURE IS A CHANNEL NO DISSECTION CAN RANK.** The `eta` prototype delivered
+a raw log-odds `log(u₊/u₋)` into ψ's `theta_imp` slot. ψ's tilt grid is the **ANGLE** `arcsin(τ)` and
+spans exactly `[−π/2, +π/2]`; the delivered modes were **±4.6**, 2.9× outside the whole domain. A Gaussian
+`−½p(θ−m)²` with `m` off-grid is **monotone across every grid point**, so the tilt pinned at `τ = ±1`, the
+AMBIG Schur protection that keeps the strand term out of `f_g` was destroyed, and the strand likelihood
+explained the residue by calling the mass gDNA. **74 % of the `g00` error, one unit error.** ⭐⭐ *Three
+lessons, and the second is the general one.* (i) **An out-of-range mode is the most confident statement a
+channel can make, not the least** — the penalty has no interior minimum, so precision buys a corner rather
+than a location. (ii) ⛔ **The tilt was the ONE message stream the prototype did not publish into
+`_capture`, and five hypotheses died in the space it left.** The tell was free and unread the whole time:
+the delivered `f_g` was the identical value `0.9898` at slot after slot — a **grid point**, i.e. a
+posterior pinned into one cell. ⭐ *The rule:* **every channel a solver delivers must appear in its debug
+capture, or no instrument can rank it and its absence reads as innocence.** A14 one level up — not "the
+arm could not have fired" but "the arm could not be SEEN". (iii) ⚠ **Correcting the coordinate was NOT
+the fix**: F2 gives `τ_obs = (2κ−1)(1−f_g)·τ`, so a raw COUNT tilt is the tilt of the *mass* and inverts
+sign on an antisense protocol (`κ = 0.0101` ⇒ `2κ−1 = −0.98`). Build a message in the destination's own
+coordinates — here the self-solve's RNA densities, which are ψ's `f_pos`/`f_neg` up to a factor that
+cancels — and neither κ nor a belief is needed. **`SESSION_HANDOFF.md` §1.**
+
+**A17. ⛔⛔ A WORD BORROWED FROM A COMMENT IS NOT A MEASUREMENT, AND ONE PROPAGATED INTO THE DOCS INVENTED
+A REGRESSION THAT NEVER HAPPENED.** `bp_solver:937` calls `_relay` "a SEQUENTIAL Gauss-Seidel scan" — its
+own shorthand for *in-place, therefore un-vectorisable*, written to justify the 15.7× do-not-merge twin. A
+session read that phrase, wrote "HEAD is Gauss-Seidel, the rebuild is not" into `ROADMAP.md` and
+`SESSION_HANDOFF.md` as if it were a structural finding, and a reviewer reading only the docs then
+correctly derived a build plan from it — for a defect that does not exist. **Both sweeps run one forward
+and one backward pass, both accumulate in place, and both combine at slot `i` from each neighbour's state
+and never `i`'s own.** On a chain an in-place forward accumulation *is* the forward half of
+forward-backward. ⭐ *The real difference the word was hiding is a good question:* HEAD relays **ten**
+arrays (three component densities, three mode precisions, three MEASUREMENT precisions, `tau`); the
+rebuild relays **four**. So the question is **which streams belong in the relayed state**, which is
+answerable and already has one measurement against it (`eta_node_sweep:265` — a chain-fused LEVEL is
+dominated by the intergenic anchors and hands every exon the off-probe floor, 346×). ⛔ *The rule:*
+**before repeating a source comment as a finding, check what the comment was written to justify** — and
+never let a term of art cross from a code comment into a design doc without re-deriving it from the code.
+Same family as E13, one layer up: there, two docstrings disagreed about one quantity; here, a docstring
+and a document agreed on a word that meant different things in each.
+
+**A15. ⛔⛔⛔ AN INTERMEDIATE METRIC IS NOT THE DELIVERABLE UNTIL SOMEBODY MEASURES THE COUPLING — AND HERE
+IT IS 10×.** Stage B was ranked, campaigned and celebrated on pass-0 `Σ|err|` for months. Measured
+2026-08-06 on the same runs, in the same session, by reading a column that had been written all along
+(`abs_err_all_final`): a **−37.2 %** pass-0 win is **−3.9 %** on the shipped solve, because the fitted prior
+was already compensating for most of what pass-0 got wrong. ⛔⛔ **And the same change's REGRESSION grew
+through the refit, +14.9 % → +30.0 %** — a pass-0 biased in the prior's own direction trains the prior to
+repeat the bias, so the refit compounds instead of correcting. ⭐ *The rule:* when an intermediate stage
+feeds a fitted stage, an improvement upstream can be absorbed and a bias upstream can be amplified —
+**report both columns on every arm**, and never rank on the upstream one alone. ⚠ The tell was free the
+whole time: the instrument already emitted the downstream number.
 
 **A14. ⛔⛔ "THE ARM CHANGED NOTHING" IS NOT A CONTROL UNTIL YOU CHECK THE ARM COULD HAVE CHANGED
 SOMETHING.** A zero-gDNA condition was reported as a free falsification control because the new and old
@@ -408,6 +490,7 @@ source and tests, so the labels are kept; the investigations that produced them 
 | **D4h** | removing each ψ channel in turn moved the worst object by ≤0.016 of a 0.217 error while removing all of them moved it the whole way — because all three are built from the same relayed level | ⛔ **when single ablations are all small and the joint one is large, stop ablating consumers and go one stage upstream** |
 | **D4i** | an "enrichment ratio" of 1.46 with capture OFF looked impossible and was correct: `ρ_tot` is a TOTAL and the destination held 55 RNA fragments where the source held 0. Compounded, 2.159 used vs 2.153 true | ⭐ **recompute the quantity from the ORACLE before assuming the formula is broken** — the alternative reading sends you to rewrite a correct function |
 | **D4j** | ⛔⛔ **fixing one of two errors that CANCEL is worse than fixing neither.** D4i's leak cancels across a two-hop pair; correcting one hop alone moved a toy's evidence-free exon 0.0107 → **0.0244** while the rung it was aimed at improved 26 % | ⭐ **when a fix is negative and its object sits on a multi-hop path, price it in the arm that also removes the other defect.** A pair of defects that cancel is one experiment, not two |
+| **D4k** | ⛔⛔ **A VARIANCE CAP OF ``f(1−f)`` ASSERTS CERTAINTY AT THE CORNER, AND AN EVIDENCE-FREE SLOT'S DEFAULT BELIEF PARKS THERE.** ``node_sweep`` caps ``Var(f_g)`` at ``f_g(1−f_g)`` ("a fraction's max variance"), and the unsolved init is ``f_g = 1`` **exactly** — so the composition half of ``Var(log ρ_tot)`` is 0 at every slot with no evidence, and ``σ²_transfer`` there is the counting term alone. ⭐ Found by PERTURBING a gate for a different defect (A2): the gate still failed with ``struct_lock`` corrected, because the corner and not the mask is what zeroes it | ⭐ Replacing it with the reference prior's own variance — ``Beta(½,½)`` ⇒ ``⅛``, no tuned constant — is derivable, passes the zero control BYTE-IDENTICALLY, and is **inert (−0.3 %)**: at ``f_g = 1`` the coefficient ``[(1/E_g − 1/E_r)/B]²`` collapses to ``(1 − E_g/E_r)² ≲ 1`` too, so the term is bounded by ⅛ against ``trigamma(½) = 4.93``. ⛔ **The "coefficient diverges as ``E_g`` collapses" behaviour ``composition_logvar`` promises needs ``f_g < 1``** — any repair routed through that term is bounded by this |
 
 **D5. "No prior" does not exist on a grid — omitting a term lets the grid supply Haldane**
 (`p(x) ∝ 1/x`, improper, an amplifier toward the vertices). Posterior median spread over grid half-widths

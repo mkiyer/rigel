@@ -526,7 +526,27 @@ def measure_condition(
     """
     start = time.perf_counter()
     scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
-    _stats, strand_model, _buffer, payload = scan_and_buffer(bam, index, scan)
+    # ⭐⭐ THE MAIN PAYLOAD IS CACHED TOO, and it is the same argument the oracle cache already makes:
+    # the scan depends ONLY on the BAM, the index and the scan config — never on calibration — so one
+    # cache serves every arm of a whole debugging campaign. Measured 8.3 s of a 24.5 s condition
+    # (**34 %**), and it was being paid again for every arm of every A/B.
+    # ⛔ Keyed by the SHIPPED loader, never a home-made key: ``read_scan_cache`` refuses a payload whose
+    # ``graph_hash`` / ``reach_digest`` / ``payload_schema_digest`` / scan config does not describe this
+    # index, and ``reach`` is covered by no other hash. A refusal here is loud and falls through to a
+    # rescan; a home-made key would load a stale tally silently.
+    _sc_dir = None if oracle_cache is None else Path(oracle_cache) / tag / "_main"
+    payload = strand_model = None
+    if _sc_dir is not None:
+        try:
+            _sc = read_scan_cache(_sc_dir, index, scan)
+            payload, strand_model = _sc.payload, _sc.strand_model
+        except (FileNotFoundError, KeyError, ScanCacheKeyError):
+            payload = strand_model = None
+    if payload is None:
+        _stats, strand_model, _buffer, payload = scan_and_buffer(bam, index, scan)
+        if _sc_dir is not None:
+            write_scan_cache(_sc_dir, payload=payload, strand_model=strand_model, index=index,
+                             bam=bam, scan_config=scan)
 
     # T. ⭐ Sum-to-full is validated on every bank exactly and RAISES if it does not hold — on the
     # cached path as well as the scanned one — so nothing below can run on an oracle that is not the

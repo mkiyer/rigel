@@ -37,11 +37,18 @@ class CalibrationDiagnostics:
 
     @classmethod
     def from_prior(cls, prior) -> "CalibrationDiagnostics":
-        """Build from any fitted log-density prior carrying ``log_rho`` / ``logP`` — the
-        :class:`~rigel.calibration.gdna_landscape.GdnaLandscape` gDNA hyperprior, or the
-        :class:`~rigel.calibration.npmle.DensityNPMLE` enrichment landscape (Role A). Modes are the local
-        maxima of the fitted log-density curve (neither carries per-node training points, so the rug is
-        empty)."""
+        """Build from a fitted :class:`~rigel.calibration.npmle.DensityNPMLE` enrichment landscape (Role A).
+        Modes are the local maxima of the fitted log-density curve (it carries no per-node training points,
+        so the rug is empty).
+
+        ⛔ **It does NOT accept a**
+        :class:`~rigel.calibration.gdna_landscape.GdnaLandscape` — that landscape has no ``bandwidth`` and no
+        ``n_cells``, so this raises ``AttributeError`` on one. This docstring claimed it did; the claim was
+        never exercised, because `calibrate` only ever calls this with the enrichment prior.
+        ⚠ **So the QC report's "bimodal ⇒ capture enrichment" caption is computed from the TOTAL-density
+        landscape, which is composition-vacuous** — it reads enrichment, never the gDNA split. Pointing it at
+        the gDNA hyperprior is a real change with a real audience and is left as an owner call, not smuggled
+        in behind a docstring."""
         x = np.asarray(prior.log_rho, dtype=np.float64)
         logp = np.asarray(prior.logP, dtype=np.float64)
         # local maxima of the log-density curve, tallest first → the dominant depleted/enriched pair.

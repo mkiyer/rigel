@@ -52,13 +52,19 @@ _WIDTH_BINS = 12
 #: it is monotone in smoothing at every reference — so do not re-select on it.
 _KNN_SCALE = 0.5
 #: Reference variance scale in the reliability weight, as a log-rate variance (0.15 decades).
-#: ⚠⚠ **THIS IS A TUNING CONSTANT IN DISGUISE, AND IT IS THE SINGLE BIGGEST LEVER LEFT ON THE ENRICHED
-#: CENSUS.** It is presented as "the kernel resolution floor", but the actual rendering resolution is the
-#: grid step (~0.025 dec), and substituting that makes the weight *more* aggressive and the census *worse*.
-#: What it really does is cap how far a confident node can be down-weighted. Measured consequence: enriched
-#: recovery is 0.69 at capture-ON and **0.29 at VSTRONG**, against 0.84 / 1.24 with flat weights — and
-#: ORACLE COUNTS BUY NOTHING (0.28 vs 0.29), so this is the binding constraint, not pass-0's accuracy.
-#: Changing it is its own measured experiment; it must not ride along with anything else.
+#: ⚠ It is a tuning constant in disguise: it is presented as "the kernel resolution floor", but the actual
+#: rendering resolution is the grid step (~0.025 dec), and substituting that makes the weight *more*
+#: aggressive and the census *worse*. What it really does is cap how far a confident node can be
+#: down-weighted. Changing it is its own measured experiment; it must not ride along with anything else.
+#:
+#: ⛔ **IT IS NO LONGER THE BINDING CONSTRAINT ON THE ENRICHED CENSUS, AND THIS NOTE USED TO SAY IT WAS.**
+#: The old reading — enriched recovery 0.69 at capture-ON and 0.29 at VSTRONG against 0.84 / 1.24 with flat
+#: weights — was taken on the retired 32-condition suite and predates the 2026-08-06 pass-0 change, which
+#: shrank ``Var(log f_g)`` across the board and so drove ``ref/(v+ref)`` toward 1. Re-measured on the
+#: 36-condition ladder through the production refit: the mean weight is **0.90–0.93** (not the 0.46 this
+#: file records for exons) and shipped-vs-flat moves the enriched prior mass by **0.97× / 1.07× / 1.08×**
+#: at ``g75`` capture-ON / capture-OFF / ``g00`` — i.e. nothing. ⚠ VSTRONG is not a ladder condition, so the
+#: old worst case is *unreproduced here*, not disproven.
 _S0 = (0.15 * _LN10) ** 2
 
 
