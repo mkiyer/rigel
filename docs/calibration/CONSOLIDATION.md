@@ -168,6 +168,86 @@ restructure changed nothing. Any temptation to "fix it while I'm in here" destro
 
 ---
 
+## §3a ⭐⭐ THE MINIMAL RELAYED STATE IS **FOUR** ARRAYS, NOT TEN
+
+`_relay` carries ten: three component densities, three mode-fusion precisions, three measurement
+precisions, and `tau`. ⭐ **ψ never sees the mode-fusion triple** — `cpg`/`cpp`/`cpn` set the fused
+density `cg`/`cp`/`cn` (`bp_solver.py:1506-1508`) which becomes the MODE at `:1511-1513`, while the
+precision ψ receives is the separate measurement stream `cm_g`/`cm_p`/`cm_n` (`:1509`, `:1545-1550`). So
+the honest minimum is **three levels plus one precision triple**, with `tau` a fifth array only if the λ
+channel survives (its Schur gating at `node_init.py:296-297` is structural and not derivable per hop).
+
+**The policy signature, and the part that matters is the contract:**
+
+```python
+def policy(src, dst, rho_src, prec_src, ctx) -> (rho_msg, prec_msg):
+    """Return the message in the DESTINATION's frame.
+
+    CONTRACT (D4), enforceable by construction: index `ctx` at `src` freely, and at `dst`
+    ONLY through `ctx.obs` and `ctx.geom`. Never `ctx.belief`, never relay state at `dst`.
+    """
+```
+
+⭐ `StepContext` splits its fields into three headings — **observations** (readable at either end),
+**geometry/structure** (readable at either end), and **source-side only** (`belief_fg`, `own_rho`,
+`own_prec`). That heading is what turns D4 from a discipline into something an assertion can catch.
+
+## §3b ⛔⛔ THE OPERATOR LEDGER — five families, inventoried and adversarially verified
+
+⚠ **Where the inventory and its verifier disagree, the verdict is UNKNOWN and it needs an arm.** That rule
+moved three operators out of CUT.
+
+| operator | verdict | the evidence that decides it |
+|---|---|---|
+| the scan skeleton, the forward and backward calls | **BACKBONE** | the only thing in the family that is unambiguously backbone; the whole direction dependence reduces to which neighbour array is read |
+| `_fuse` (inverse-variance in linear density space) | **BACKBONE** | the fusion rule; the near-zero pass-through argument is sound |
+| the write-back on `solvable` | **BACKBONE** | ⭐ "the messages reach the answer only as a mode and a precision handed to ψ" — state this as a design invariant |
+| `count_logvar = trigamma(n+½)` | **KEEP** | the only operator with a panel-wide accuracy number: **39 %** |
+| `own_precision` · `g1_locked` · `terminus_flank_gain` | **KEEP** | measured, one home each, belief-free |
+| `residual_level` | **KEEP, PROMOTE** | D4-clean, and the only estimator of its kind |
+| ⭐⭐⭐ the certified-RNA channel's **SIDEDNESS** | **RE-DERIVE** | **the single highest-value change any family admits** — see §3c |
+| `node_total_density` | **RE-DERIVE** | ⛔ it reads the DESTINATION's own `f_g`, and slots where a *solved* belief (not the `{0,0,1}` default) sets the frame carry **57–77 % of library mass**. D4, live in the tree |
+| the reframe `r` · `r_g` | **RE-DERIVE** | keep the rule ("a gDNA level crosses unscaled"), re-derive the scope |
+| `own_composition_logvar` | **KEEP fn, RE-DERIVE mask** | the three-state logic has no substitute; `struct_lock` is the wrong mask (A11b) |
+| the `_damp`/`_damp_v`/`_dv`/`_dv_arr` inlines | **RE-DERIVE** | one named function per twin, delete the inlines |
+| `peel_rna_logvar` | **CUT** | no production consumer — `CLAUDE.md` G3 exactly |
+| `_pin_v` | **CUT** | its sole consumer is the DL gap |
+| P1e, the DerSimonian–Laird conservation term | **CUT** | ⭐ its own comment: *"PARTLY A DEBT — THIS PRICES A BIAS AS A VARIANCE … a variance cannot move a mode toward truth"* |
+| the flank pair `rho_lo`/`rho_hi` · `_flank_dom` | **CUT with `r`** | ⚠ it is a **100×–10,000× correction on a third of live EDGEs** — but the panel measured it node-axis NEGATIVE (**+0.5 % mwae, +36.9 % confidently-wrong**), and ⛔ **that number appears in no source file**, so a reader of the source alone would believe it is panel-positive |
+| `graft_premise_logvar` | **CUT from backbone** | re-derive per class only when TSS/TES land |
+| ⭐ `transfer_logvar`'s non-graft branch | **UNKNOWN** | *"the most important UNKNOWN in this family"* — nothing has ever measured deleting it alone |
+| `mismatch_deflate` | **UNKNOWN** | ⚠ the inventory said CUT on a coverage number the verifier proved **INVERTED**; it is live on ~82 % of stranded mass |
+| `_lend` | **UNKNOWN** | inventory RE-DERIVE, verifier UNKNOWN — "no measured benefit of its own" is false |
+| `framed`'s fallback · `peel` · `peel_share_logvar` | **UNKNOWN** | each needs its own arm; `framed`'s question narrows to the graft subset |
+
+⚠ **Two facts the ledger turns up that nothing in the tree records.** `spliced_count` is deliberately
+excluded from the reframe's total, and the excluded component measures **1.69× the retained total** on
+50–60 % of live-EDGE mass at low gDNA — not a rounding decision. And the certified-RNA bound reaches ψ
+**twice**, both times two-sided: once as `rna_imp`, and again through `tlam` → `lam_imp`
+(`bp_solver.py:1474-1479`, `:1525`).
+
+## §3c ⭐⭐⭐ THE ONE CHANGE TO MAKE FIRST — the certified-RNA channel is a BOUND delivered as an EQUALITY
+
+`bp_solver.py:439-447` states it in the source, verbatim: *"what the graft actually knows is an
+INEQUALITY, `ρ_R(exon) ≥ ρ_ν(B) + ρ_μ(B)` … and it uses it as an equality."* The chain from that
+inequality to ψ passes through **three operators that price it as a VARIANCE** — `graft_frame_logvar`,
+`graft_premise_logvar`, and P1e — and through **zero that price it as a DIRECTION**. P1e's own comment
+says why that cannot work.
+
+ψ applies `-1/2 * p * (log f - mo)^2` in **both** code paths (`simplex_logodds.py:531-540` and
+`:315-324`). **There is no hinge, no truncation, no one-sided term anywhere in the file.** A destination
+holding MORE RNA than the bound — which the inequality explicitly permits — is penalised exactly as hard
+as one holding less. Measured consequence at `g01 ss0.50 capture_on`: HEAD's self-solve is 0.0086 against
+a truth of 0.0023, the message drives it to **0.3219** at precision 327, and muting the channel returns
+**0.0005**.
+
+    psi += -1/2 * p * max(0, mo_p - log f_active)^2
+
+One expression, both paths, **no new constant**, and — unlike all eleven refused candidates — it adds
+doubt in **only one direction**, so the `g00` control cannot refuse it: there `f_active = 1` satisfies
+every bound and the channel goes inert. ⚠ If it lands, re-price `graft_premise_logvar` immediately: a
+one-sided factor and a premise-variance debt are two compensations for one defect and would double-charge.
+
 ## §4 ⭐⭐ WHY THE TWO CORNERS PULL APART, AND WHY THAT STOPS MATTERING
 
 The owner's diagnosis, and it is the right one: a zero-gDNA library is solved by making the gDNA messages
