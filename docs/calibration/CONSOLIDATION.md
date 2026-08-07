@@ -168,6 +168,88 @@ restructure changed nothing. Any temptation to "fix it while I'm in here" destro
 
 ---
 
+## §2b ⭐⭐⭐ THE MESSAGE-PRECISION SWEEP — NO PLATEAU, AND THAT IS THE ANSWER
+
+The owner's account from shipping the production tool: *"messages do not need to be confident. When they
+become confident they overwrite the strand-specific data. On unstranded data every node has precision
+zero, so the weakest of weak messages still works, because it is more precision than zero."* That is a
+quantitative claim with a shape — **one scalar on every message precision, swept.**
+
+`abs_err_all_final`, relative to `base`, per stratum, `g00` excluded. `scale = 1` is `base`, `scale = 0`
+is `msgfree_all`:
+
+| stratum | 0 | 0.001 | 0.01 | 0.1 | **0.5** | 1 |
+|---|---|---|---|---|---|---|
+| stranded × capture ON | **−58.3 %** | −58.5 % | −57.4 % | −45.0 % | −18.4 % | 0 |
+| stranded × capture OFF | **−43.7 %** | −43.6 % | −42.1 % | −32.4 % | −12.8 % | 0 |
+| unstranded × capture ON | +154.8 % | +154.2 % | +140.0 % | +37.1 % | **−0.4 %** | 0 |
+| unstranded × capture OFF | −32.1 % | −35.7 % | **−41.8 %** | −37.5 % | −16.8 % | 0 |
+| **ALL** | +99.9 % | +99.2 % | +88.6 % | +16.1 % | ⭐ **−4.9 %** | 0 |
+| ⛔ `g00` | +8,003 % | +6,462 % | +3,576 % | +146 % | +5 % | 0 |
+
+⛔⛔ **THERE IS NO PLATEAU.** The four strata's own optima are at scale **0.001, 0, 0.5 and 0.01**. Between
+0.01 and 0.5 unstranded × capture-ON gains 140 points while the two stranded strata give back 39 — a
+genuine trade, in opposite directions, over the same parameter. **No single attenuation serves both
+regimes, so the defect is not a mis-calibration of loudness.**
+
+⭐⭐⭐ **AND THE STRANDED OPTIMUM IS ZERO, WHICH IS THE SHARP FORM OF THE FINDING.** If the messages were
+merely over-confident, attenuating them would improve stranded *monotonically toward a nonzero optimum*.
+Instead stranded is flat-best from scale 0 to 0.01 and degrades from there. **A message whose optimal
+weight is zero carries no information — it is not a loud message, it is a wrong one.**
+
+⛔⛔ **So this is a BIAS, not a precision — and `TRAPS.md` D1 says a variance cannot fix a bias.** D1 was
+established three times independently before this; the sweep is its fourth demonstration, and it is why
+three variance terms have failed to fix the one-sided bound in §3c. ⭐ **Fix the bias first. Attenuation
+is a variance fix and cannot reach it.**
+
+⚠ **One real, free result to keep:** `scale = 0.5` beats `base` on **all four strata** and −4.9 % overall,
+with `g00` at only +5 %. That bounds a genuine precision debt of roughly 2× *on top of* the bias — but it
+is a tuned constant (`CLAUDE.md` G1) and must not ship. It is a bound, not a fix.
+
+## §2c ⛔ ONE CORRECTION TO THE PREMISE — it is not "unstranded", it is "unstranded × capture-ON"
+
+Unstranded × capture-**OFF** is **−32.1 % better with no messages at all** (14/16 conditions). The message
+layer's entire value sits in **one** stratum. ⭐ And the reason is legible: off capture the gDNA background
+is uniform, so the fitted prior's single mode is already a good per-slot answer; under capture the
+landscape is **bimodal at 2.98 decades**, so a slot's own density says nothing about its composition unless
+you know which capture stratum it sits in — and that is what a neighbour can tell it.
+
+⭐⭐ **So the message layer's job, stated as narrowly as the evidence supports: carry the LOCAL CAPTURE
+LEVEL to a slot that has no own composition evidence.** That is much smaller than "carry composition", it
+names a level rather than a share, and it is scoped by two predicates the code already computes
+(`tau_lam == 0`, and the capture stratum the fitted landscape already resolves).
+
+## §2d ⛔⛔ THE LENGTH CHANNEL CANNOT BE PRICED ON THIS PANEL — measure the substrate first
+
+`length_likelihood` defaults **False** (`config.py:319`) and is the **only** channel that can give an
+unstranded slot its OWN composition evidence: it is θ-independent, so the Schur complement that zeroes the
+strand term at an AMBIG node does not apply to it (`simplex_logodds.py:519-524`), and `tau_len` enters
+`tau_lam` **ungated** (`node_init.py:304-312`). The source says so itself: gating it *"would delete the
+only evidence AMBIG nodes ever get."*
+
+⛔ **But `TRAPS.md` F3: at equal component mean lengths the length channel carries EXACTLY ZERO information
+about composition, at any depth — the 2×2 is identified only through `μ_g − μ_r`.** Measured on the ladder,
+from the simulator's own post-capture truth:
+
+| condition | `μ_gdna` | `μ_rna` | gap |
+|---|---|---|---|
+| `g50 ss0.50 capture_off` | 216.7 | 212.2 | **+4.5** |
+| `g50 ss0.50 capture_on` | 240.4 | 236.9 | **+3.5** |
+| `g75 ss0.99 capture_on` | 240.4 | 236.8 | +3.6 |
+| `g01 ss0.50 capture_on` | 240.5 | 237.0 | +3.5 |
+
+**A 1.5 % separation.** The ladder is near-blind to the length channel *by construction* — it was built
+with equal configured fragment lengths. ⛔ **Enabling `length_likelihood` here would measure approximately
+nothing, and that would be read as "the feature does not work."** `TRAPS.md` A8 exactly: prove the
+benchmark can resolve the axis before running it.
+
+⭐⭐ **And this re-reads §2's headline result.** On this panel an unstranded AMBIG slot has **no own
+composition evidence available even in principle** — strand is dead at κ = ½, length is dead at
+`μ_g ≈ μ_r`, and density needs the prior. So *"unstranded needs messages"* may be a property of the
+**PANEL** rather than of the tool. On a library where gDNA and RNA lengths genuinely differ — which cfRNA
+does — the length channel could carry that stratum with no messages at all. ⚠ **Unmeasurable until the
+substrate exists**, and building it is one config line plus a re-simulation, not a solver change.
+
 ## §3a ⭐⭐ THE MINIMAL RELAYED STATE IS **FOUR** ARRAYS, NOT TEN
 
 `_relay` carries ten: three component densities, three mode-fusion precisions, three measurement

@@ -705,6 +705,59 @@ def _wrap_node_sweep():
     return orig
 
 
+def _install_msgscale(scale: float):
+    """⭐⭐⭐ **DO MESSAGES ONLY NEED TO BE WEAK?** — the owner's hypothesis, as a one-parameter sweep.
+
+    The owner's account, from having shipped the production tool: *"messages do not need to be confident.
+    When messages become confident they overwrite the strand-specific data, and so they harm scenarios
+    with strand specificity. When we have unstranded data none of the nodes has a solution — all have a
+    precision of zero — so the weakest of weak messages is still going to work, because it is more
+    precision than zero."*
+
+    That is a quantitative claim and it has a shape: **multiply every message precision by one scalar and
+    sweep it.** ``scale = 1`` is ``base``; ``scale = 0`` is ``msgfree_all``, which is already measured. If
+    the account is right there is a PLATEAU at small scale where the stranded strata sit at their
+    message-free optimum (because the messages have become negligible against real strand evidence) and
+    unstranded x capture-ON still works (because any positive precision beats zero).
+
+    ⛔⛔ **THIS IS A DIAGNOSTIC, NOT A PROPOSED FIX.** A global damping scalar is a tuned constant and
+    `CLAUDE.md` G1 forbids one. What the sweep decides is which KIND of defect this is:
+
+      * a PLATEAU exists  => the precision model is wrong by a roughly constant factor, the fix is a
+                             derivation that produces that factor, and the backbone keeps the message
+                             layer's structure;
+      * NO plateau        => no single attenuation serves both regimes, the defect is structural rather
+                             than a mis-calibration, and the backbone must change the messages themselves.
+
+    ⚠ All four channels are scaled together — ``gdna_imp``, ``rna_imp``, ``lam_imp``, ``theta_imp`` — which
+    is ONE thing varied and is exactly the claim as stated. Scaling them separately is a different, later
+    experiment. The MODES are untouched, so nothing about what a message SAYS changes; only how loudly.
+    ⛔ A10 — all three ``_solve_nodes_logodds_all`` bindings are patched and the arm raises if unfired.
+    """
+    import rigel.calibration.simplex_logodds as SL
+
+    orig_solve = SL._solve_nodes_logodds_all
+    k = float(scale)
+
+    def _s(p):
+        if p is None:
+            return None
+        if isinstance(p, tuple):
+            return tuple(_s(q) for q in p)
+        return np.asarray(p, np.float64) * k
+
+    def solve(*a, **kw):
+        _fire(f"msgscale_{scale:g}")
+        for key in ("gdna_imp_prec", "rna_imp_prec", "lam_imp_prec", "theta_imp_prec"):
+            if kw.get(key) is not None:
+                kw[key] = _s(kw[key])
+        return orig_solve(*a, **kw)
+
+    for mod in (SL, NI, bp_solver):
+        if hasattr(mod, "_solve_nodes_logodds_all"):
+            mod._solve_nodes_logodds_all = solve
+
+
 def _install_msgfree(where: str):
     """⭐⭐⭐ **HOW MUCH OF THE MESSAGE LAYER DOES THE SUBSTRATE ACTUALLY NEED?** — the consolidation arm.
 
@@ -876,6 +929,10 @@ def main() -> int:
             "eta_nolevel",
             "msgfree_p0",
             "msgfree_all",
+            "msgscale_0.001",
+            "msgscale_0.01",
+            "msgscale_0.1",
+            "msgscale_0.5",
             "intron_phi",
             "kappa_half",
             "zc_noop",
@@ -959,6 +1016,8 @@ def main() -> int:
         _install_eta(mute_level=args.arm == "eta_nolevel")
     elif args.arm in ("msgfree_p0", "msgfree_all"):
         _install_msgfree("p0" if args.arm == "msgfree_p0" else "all")
+    elif args.arm.startswith("msgscale_"):
+        _install_msgscale(float(args.arm.split("_", 1)[1]))
     else:
         _wrap_node_sweep()
     if args.arm == "intron_phi":
