@@ -860,32 +860,6 @@ def _install_msgfree(where: str):
                 mod.node_sweep = sweep
 
 
-def _install_eta(mute_level: bool = False):
-    """⭐⭐⭐ THE ``eta`` REBUILD — the whole sweep replaced, not one term overridden.
-
-    Every other arm in this file overrides a single expression inside the shipped sweep. This one swaps
-    the sweep itself for `eta_node_sweep.eta_node_sweep`, which is the point: the derivation deletes the
-    mass pin, the reframe ``r``, ``framed``, the flank pair and the graft/peel gating TOGETHER, and a
-    sequence of partial edits would leave each new piece fighting the operators that remain.
-
-    ⛔ A10 — ``node_sweep`` is bound as a module global in ``calibrate`` (``from .bp_solver import
-    node_sweep``) as well as in ``bp_solver`` itself. BOTH are patched, and the arm asserts it fired: an
-    arm that never ran scores byte-identical to base and reads as a clean "the rebuild is neutral", which
-    is exactly the false negative this campaign must not publish.
-    """
-    ETA = _sibling("eta_node_sweep.py")
-    ETA.MUTE_LEVEL[0] = bool(mute_level)
-
-    def wrapper(chain, statics, geometry, belief, region_arrays, *a, **kw):
-        _RA["region_arrays"] = region_arrays
-        _fire("eta_nolevel" if mute_level else "eta")
-        return ETA.eta_node_sweep(chain, statics, geometry, belief, region_arrays, *a, **kw)
-
-    for mod in (CAL, bp_solver):
-        if hasattr(mod, "node_sweep"):
-            mod.node_sweep = wrapper
-
-
 def _install_face_one():
     """⭐ FACE (I) AS DERIVED (`EQUATIONS.md` §3.6): the `intron|exon` EDGE takes the flanking INTRON's
     COMPOSITION — never its level — and closes the level with its OWN observed mass.
@@ -965,8 +939,6 @@ def main() -> int:
         "--arm",
         choices=(
             "base",
-            "eta",
-            "eta_nolevel",
             "msgfree_p0",
             "msgfree_all",
             "msgscale_0.001",
@@ -1009,8 +981,8 @@ def main() -> int:
     # ── ⭐⭐ SHARDED PARALLELISM. Conditions are completely independent — separate BAMs, separate
     # calibrations, nothing shared but the read-only index and oracle cache — so this is a pure
     # wall-clock win with NO effect on any measurement. It re-invokes the SAME single-process path on
-    # a subset rather than parallelising inside it, so the arm-installation logic every `zc_*` and the
-    # `eta` arm depends on is byte-for-byte the code that was verified serially.
+    # a subset rather than parallelising inside it, so the arm-installation logic every arm depends on
+    # is byte-for-byte the code that was verified serially.
     # ⚠ ``OMP_NUM_THREADS=1`` is already forced at import, so the workers do not fight over threads.
     if args.jobs > 1:
         names = args.conditions or sorted(
@@ -1051,11 +1023,8 @@ def main() -> int:
         print(f"  ⭐ {args.arm}: {n} rows from {len(shards)} shards -> {args.out}", flush=True)
         return 0
 
-    # ⚠ the eta arm REPLACES the sweep, so it installs its own region_arrays stash rather than wrapping
     #   the shipped one — wrapping first would leave the base sweep in the chain.
-    if args.arm in ("eta", "eta_nolevel"):
-        _install_eta(mute_level=args.arm == "eta_nolevel")
-    elif args.arm in ("msgfree_p0", "msgfree_all"):
+    if args.arm in ("msgfree_p0", "msgfree_all"):
         _install_msgfree("p0" if args.arm == "msgfree_p0" else "all")
     elif args.arm.startswith("msgscale_"):
         _install_msgscale(float(args.arm.split("_", 1)[1]))
@@ -1153,7 +1122,15 @@ def main() -> int:
     #   arm's own name. The guard tripped on `zc_ref_prior_damp` AFTER a complete, valid run — it caught a
     #   bookkeeping gap, not a measurement one, and narrowing it here keeps A10's teeth for the real case
     #   (nothing fired at all).
-    if (args.arm.startswith("eta") and not _FIRED.get(args.arm)) or (
+    if (
+        args.arm in ("msgfree_p0", "msgfree_all", "onesided_rna")
+        or args.arm.startswith("msgscale_")
+    ) and not _FIRED.get(args.arm):
+        raise RuntimeError(
+            f"arm {args.arm!r} NEVER FIRED — the patched name is not the one the solver calls. "
+            f"fired: {_FIRED or '{}'} (TRAPS.md A10)"
+        )
+    if (
         args.arm.startswith("zc_")
         and not any(k.startswith("zc_") and not k.endswith("_slots") for k in _FIRED)
     ):

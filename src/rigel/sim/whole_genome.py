@@ -285,6 +285,11 @@ def parse_yaml_config(path: str | Path) -> WholeGenomeSimConfig:
 
     # Misc
     cfg.oracle_bam = bool(raw.get("oracle_bam", True))
+    # ⭐ Drop sim_R1/R2.fq.gz after each condition's truth is written. No calibration
+    # instrument reads a FASTQ and they are ~half a panel's on-disk size; ``scripts/benchmarking/``
+    # DOES read them, so a panel built this way cannot be compared against another tool
+    # without re-simulating. `sim.orchestrator.run_condition_grid`.
+    cfg.emit_fastq = bool(raw.get("emit_fastq", True))
     cfg.verbose = bool(raw.get("verbose", True))
 
     return cfg
@@ -822,6 +827,7 @@ def run_simulation(cfg: WholeGenomeSimConfig) -> list[dict]:
         base_seed=sim.sim_seed,
         oracle_bam=cfg.oracle_bam,
         skip_existing=True,
+        emit_fastq=getattr(cfg, "emit_fastq", True),
     )
 
     # 4. Write manifest

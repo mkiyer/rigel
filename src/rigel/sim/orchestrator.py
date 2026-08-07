@@ -159,6 +159,7 @@ def run_condition_grid(
     base_seed: int,
     oracle_bam: bool = True,
     skip_existing: bool = True,
+    emit_fastq: bool = True,
     selected_conditions: set[str] | None = None,
     capture_meta_by_label: dict[str, dict] | None = None,
 ) -> list[dict]:
@@ -281,7 +282,17 @@ def run_condition_grid(
                         "fastq_r2": f"{cond_name}/sim_R2.fq.gz",
                     }
 
-                    if skip_existing and (cond_dir / "sim_R1.fq.gz").exists():
+                    # ⭐⭐ THE EXISTENCE KEY IS THE ORACLE BAM WHENEVER ONE IS REQUESTED, and that is a
+                    # correctness fix rather than a convenience. It used to be ``sim_R1.fq.gz``, so a
+                    # panel whose FASTQs had been dropped — deliberately by ``--no-fastq``, or by hand
+                    # to reclaim disk — would silently RE-SIMULATE every condition on the next run,
+                    # which for the 36-condition ladder is hours and a rewritten oracle. The BAM is the
+                    # artifact every instrument actually reads, so it is the honest key.
+                    # ⚠ The trade, stated: on a panel whose BAM exists but whose FASTQs are gone, a run
+                    # that WANTS FASTQs will skip instead of regenerating them. Delete the BAM, or pass
+                    # ``--no-skip-existing``, to force it.
+                    _exists_key = cond_dir / ("sim_oracle.bam" if oracle_bam else "sim_R1.fq.gz")
+                    if skip_existing and _exists_key.exists():
                         print("    Output exists, skipping", flush=True)
                         cond_entry["oracle_bam"] = (
                             f"{cond_name}/sim_oracle.bam" if oracle_bam else None
@@ -327,6 +338,20 @@ def run_condition_grid(
                         molecular_truth=molecular_truth_name,
                         gdna_strand_overdispersion=gdna_od,
                     )
+                    # ⭐⭐ **THE FASTQs ARE DROPPED AFTER THE TRUTH IS WRITTEN** (owner, 2026-08-07).
+                    # No calibration instrument reads one — nothing under ``scripts/design/`` or
+                    # ``src/rigel/calibration/`` opens a FASTQ — and ``write_post_capture_truth``
+                    # prefers the oracle BAM and returns before touching the FASTQ path
+                    # (``sim.truth._iter_origins_from_source``), so this cannot change a truth file.
+                    # ⚠ They are 30 G of a 67 G suite and ARE read by ``scripts/benchmarking/`` for the
+                    # third-party tool comparison; a panel built with this off cannot be benchmarked
+                    # against another tool without re-simulating. ⛔ Deleted only AFTER the truth is
+                    # written, never before, so an interrupted run cannot lose the origin counts.
+                    if not emit_fastq:
+                        for _fq in (cond_dir / "sim_R1.fq.gz", cond_dir / "sim_R2.fq.gz"):
+                            if _fq.exists():
+                                _fq.unlink()
+
                     origin_counts = truth_summary["origin_counts"]
                     cond_entry["n_mrna_observed"] = int(origin_counts.get("mrna", 0))
                     cond_entry["n_nrna_observed"] = int(origin_counts.get("nrna", 0))

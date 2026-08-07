@@ -537,6 +537,16 @@ def main():
         help="Generate only the synthetic reference FASTA/GTF and exit",
     )
     parser.add_argument(
+        "--no-fastq",
+        action="store_true",
+        help=(
+            "drop sim_R1/R2.fq.gz after each condition's truth is written. ⭐ No calibration "
+            "instrument reads a FASTQ, and they are ~half the on-disk size of a panel. "
+            "⛔ scripts/benchmarking/ DOES read them, so a panel built with this cannot be "
+            "compared against another tool without re-simulating."
+        ),
+    )
+    parser.add_argument(
         "--skip-existing",
         action="store_true",
         help="Skip conditions that already have output files",
@@ -937,6 +947,7 @@ def main():
         base_seed=args.seed,
         oracle_bam=True,
         skip_existing=args.skip_existing,
+        emit_fastq=not args.no_fastq,
         selected_conditions=selected_conditions or None,
         capture_meta_by_label=capture_meta_by_label,
     )

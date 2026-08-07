@@ -388,6 +388,87 @@ doubt in **only one direction**, so the `g00` control cannot refuse it: there `f
 every bound and the channel goes inert. ⚠ If it lands, re-price `graft_premise_logvar` immediately: a
 one-sided factor and a premise-variance debt are two compensations for one defect and would double-charge.
 
+## §3d ⭐⭐⭐ THE ARCHITECTURE — the backbone is a FOLD, and every argument lives in ONE function
+
+The elegance is not decoration; it is the mechanism by which the next session cannot repeat this one's
+mistakes. Three files, and a new reader needs only the first two.
+
+```
+src/rigel/calibration/
+  sweep.py                 ⭐ THE BACKBONE. ~150 lines. Two directional scans, one combine, one
+                              write-back, five assertions. It knows nothing about capture, grafts,
+                              reframes, pins or enrichment — those words do not appear in it.
+  messages/
+    __init__.py               the Policy protocol, StepContext, PsiMessage.  ~60 lines.
+    silent.py              ⭐ SilentPolicy — sends nothing. THE DEFAULT. ~5 lines.
+    head.py                   HeadPolicy — every current operator, each behind a NAMED switch.
+    variance.py               what was `enrichment_frame.py`: the policy's toolbox, not the backbone's.
+```
+
+⛔ `bp_solver.py` is deleted the moment `HeadPolicy` is byte-identical. Not before, not gradually.
+
+**The whole backbone, in the shape it should be written:**
+
+```python
+def solve_chain(chain, ctx, policy) -> NodeBelief:
+    own = build_node_init(...)                            # unchanged, backbone
+    fwd = _scan(range(n),           chain.left,  own, policy, ctx)
+    bwd = _scan(reversed(range(n)), chain.right, own, policy, ctx)
+    msg = policy.deliver(fwd, bwd, chain, ctx)            # sees ONLY neighbour state
+    dc  = psi(ctx.obs, msg)                               # unchanged, backbone
+    return _write_back(dc, ctx.belief, ctx.solvable)
+```
+
+⭐⭐ **THE FIVE ASSERTIONS LIVE IN THE BACKBONE, NOT IN THE POLICY — that is the whole design.** A future
+policy can be as wrong as it likes and still cannot commit any of these, each of which has shipped at
+least once:
+
+| the backbone asserts | it would have caught |
+|---|---|
+| `deliver` is handed only the two NEIGHBOUR states | **D4 — nine recurrences in nine costumes** |
+| every message mode lies inside its coordinate's own grid | **A16** — the tilt bug, 74 % of `g00`'s error |
+| every delivered share is in `[0, 1]` | the over-unit certified-RNA claim (85,477 fragments at a slot holding 5) |
+| `\|T\| ≤ 3` | AXIOM 0, made executable |
+| the write-back touches only `solvable` slots | the basis mismatch that made an A5 gate read `max\|Δ\| = 1.0` |
+
+**And the interface is one function with one contract:**
+
+```python
+def policy(src, dst, rho_src, prec_src, ctx) -> (rho_msg, prec_msg):
+    """CONTRACT (D4): index `ctx` at `src` freely, and at `dst` ONLY through `ctx.obs`
+    and `ctx.geom`. Never `ctx.belief`, never relay state at `dst`."""
+```
+
+`StepContext` splits its fields under three headings — **observations** (either end),
+**geometry/structure** (either end), **source-side only** (`belief_fg`, `own_rho`, `own_prec`). That
+heading is what turns D4 from a discipline into something the backbone can check.
+
+⭐ **Why `SilentPolicy` is the default and why that is the point.** A new session reads `sweep.py` plus
+five lines and holds the entire working system in their head. `head.py` is opt-in, clearly labelled as the
+legacy arm being dismantled, and every operator inside it is a switch — so `ladder_arm_ab.py` prices them
+**one at a time** instead of as a block, which §3b says is exactly what is needed ("every single ablation
+is small and the joint one is large").
+
+**Two acceptance gates, both A5, both cheap:**
+
+| | must be |
+|---|---|
+| `--arm backbone_head` (all switches on) | **byte-identical to `base`** — proves the restructure changed nothing |
+| `--arm backbone` (SilentPolicy) | **byte-identical to `msgfree_all`** — proves the off-switch is the off-switch |
+
+⛔ **Step 1 is a restructure and must not become a rewrite.** Its entire value is that byte-identity proves
+it changed nothing; any temptation to fix something while in there destroys the proof and puts us back
+where the `eta` rebuild was — a change whose sign nobody could attribute.
+
+### §3e What is deleted, and when
+
+| | when | why |
+|---|---|---|
+| `scripts/design/eta_node_sweep.py` | ⭐ **DONE, 2026-08-07** | the prototype is superseded; its two findings are `TRAPS.md` A16/A17 and §2/§3 here |
+| `--arm eta` / `--arm eta_nolevel` | ⭐ **DONE** | no consumer |
+| `tests/calibration/_eta_reference.py` + `test_eta_transfer.py` | **with the backbone commit** | they gate η algebra HEAD does not use, so they gate dead code — but three of their derivations become the backbone's assertions, and deleting the gates before their replacement exists is a strictly worse state for exactly one step |
+| `src/rigel/calibration/bp_solver.py` | when `HeadPolicy` is byte-identical | one commit, no overlap period |
+
 ## §4 ⭐⭐ WHY THE TWO CORNERS PULL APART, AND WHY THAT STOPS MATTERING
 
 The owner's diagnosis, and it is the right one: a zero-gDNA library is solved by making the gDNA messages
