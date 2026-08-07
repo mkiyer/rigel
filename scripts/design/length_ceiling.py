@@ -19,7 +19,7 @@ for the other:
   partition **held fixed at the fitted-pmf run's** so the two arms are scored on the same population
   (`solvability_audit`'s own rule: a class that moves between arms cannot compare them).
 
-⭐⭐ **AND IT PRICES EACH pmf SEPARATELY, WHICH IS THE WHOLE POINT** (`TRAPS.md` B21). The both-exact arm
+⭐⭐ **AND IT PRICES EACH pmf SEPARATELY, WHICH IS THE WHOLE POINT** (TRAPS: price-the-halves-separately). The both-exact arm
 alone hid a 14x split: measured on the ladder, the shipped solve's **-6.31 %** is **-5.90 % gDNA and
 -0.43 % RNA**, all of it capture-ON (capture-OFF: -0.0000), while at pass-0 the RNA model is worth
 **-0.02 %** on the solvable set and **+0.21 % (worse)** on all objects. A ceiling on an INPUT is not a

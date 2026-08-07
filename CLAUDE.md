@@ -60,13 +60,20 @@ There are six. They do not overlap, and none of them is a changelog.
 
 Reference rather than design: `docs/MANUAL.md` (user-facing), `docs/PUBLISHING.md`.
 
-⚠ **`docs/calibration/` holds EPHEMERAL working docs** — currently just `SESSION_HANDOFF.md` — used
-to pass one task between the owner and a session. ⛔ A per-issue REGISTER used to live here too and was
-deleted on 2026-08-05: it had become a second copy of `ROADMAP.md`'s ranked list, which is `TRAPS.md` A11's
-"two homes for one predicate" in documentation form. One ranked list, in `ROADMAP.md`. They are **not** permanent fixtures and are **not** in
-the six above. ⛔ Read the handoff if one is present and you are picking up its task; **delete it when that
-task lands**, promoting anything worth keeping into `ROADMAP.md` (a current number), `TRAPS.md` (a lesson)
-or `DESIGN.md` (a settled decision).
+⭐⭐ **`docs/dev/` IS THE SANDBOX, AND IT IS ENCOURAGED.** Working notes, a feature write-up, a handoff, a
+half-finished argument — put them there. ⛔ **Nothing in `docs/dev/` is authoritative and nothing may cite
+it**: not the source, not a test, and not one of the eight permanent docs. It is how the owner talks to
+collaborators mid-flight, so it is expected to be provisional, contradictory and occasionally wrong.
+
+⛔⛔ **THE ONE RULE THAT MATTERS: A DEV DOC MUST NEVER BECOME THE STATE.** Two of them once grew to
+**1,181 lines — larger than DESIGN + ROADMAP + SUCCESS combined** — and a new session was being pointed at
+one as "THE STATE". ⭐ The failure was not that they existed; it was that nothing ever moved out of them, so
+the temporary copy became the real one. **When a finding is settled, MOVE it — a current number to
+`ROADMAP.md`, a lesson to `TRAPS.md`, a ruling to `DESIGN.md`, a derivation to `EQUATIONS.md` — and delete
+it from the dev doc in the same edit.** Copying is what creates two homes; moving does not.
+
+⚠ A dev doc that has not been touched in a while is not a problem. A dev doc that a permanent doc *depends
+on* is.
 
 ⛔ **THE SOURCE DOES NOT REFERENCE THE DOCS, AND MUST NOT START.** Docs evolve and rot — 73 % of the
 citations that used to be in the source pointed at documents that had already been deleted. A docstring may
@@ -75,6 +82,59 @@ cannot rot silently; it may not cite a document.
 
 ⛔ **`tests/native/_accumulator_reference.py` is the executable specification** for the accumulator. The
 C++ is gated on byte-identity to it; where it and a document disagree, it wins.
+
+## ⭐⭐⭐ WHERE DOES A CHANGE GO? — the calibration layering
+
+`src/rigel/calibration/` is 39 modules. It is **not a knot** — measured from the AST there are no import
+cycles, and 18 of them have exactly one importer. It was a **FLAT PILE of peers**, which is the one shape
+that cannot tell you where to add anything. `rigel/calibration/_layers.py` names the layers that were
+already in the edges, and `tests/calibration/test_layering.py` enforces them.
+
+**THE ONE RULE: an import may point DOWN a layer or SIDEWAYS within one. Never UP.** A module that needs
+something from a higher layer is telling you the thing belongs lower — a TYPE almost always does.
+
+| if the change is about… | it goes in |
+|---|---|
+| what a fragment tally MEANS | **1 · the payload view** — `splice_graph` `substrate` `region_arrays` |
+| how many places a fragment COULD have sat | **2 · opportunity** — `effective_length` `capture_eff_length` `junction_opportunity` `gdna_opportunity` `fl` |
+| one slot's own numbers, and ψ | **3 · geometry + the per-slot solve** — `node_geometry` `simplex_logodds` |
+| which strand a fragment came from | **4 · strand** — `gdna_strand` `strand_deconv` `strand_balance` `strand_summary`, and `strand_likelihood` (an executable REFERENCE, gated) |
+| how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `npmle` `gdna_landscape` `background_reference` `length_likelihood` `run_fill` |
+| what one neighbour tells another | **6 · the solve** — `sweep` (the backbone) + `messages/` (the policy) + `node_init` |
+| turning the solve into a result | **7 · assemble** — `calibrate` `priors` `result` `derive` `diagnostics` `track` |
+
+⭐ **Run `python scripts/design/module_census.py` rather than trusting this table** — it re-derives the
+graph, prints every layer, and flags any import that points up. ⚠ It also flags **docstrings that name a
+sibling with no import edge**: 14 were measured on 2026-08-07 and **6 were genuinely stale**, including one
+claiming four consumers that had one. A layer is *not* a claim that its modules are the right SIZE — layer 4
+is five modules for one concept — and that question is deliberately still open.
+
+## ⛔⛔⛔ MESSAGE PROPAGATION IS OFF BY DEFAULT
+
+`CalibrationConfig.message_propagation = False` (owner, 2026-08-07) installs `messages.silent.SilentPolicy`
+— ψ carries each slot's OWN evidence alone. ⭐ A measurement put it there: muting the relay is a net
+improvement on **three of the four strata** (−58.3 % / −43.7 % / −32.1 %, and 16/16 on the two stranded
+ones). ⛔ **The price is large and concentrated**: +154.8 % on unstranded × capture-ON, which carries 73 %
+of the panel's error, and on zero-gDNA golden scenarios the false-positive gDNA mass goes up ~1,900–3,100×.
+
+⚠ **So this is a STUDY configuration, not a shipping one.** Develop against it — the tool's own evidence is
+finally visible — but the exit is to give an AMBIG slot its own composition evidence (`length_likelihood`,
+the only θ-independent channel), not to re-tune the relay. Turning it back on is one config flag, and every
+operator inside `HeadPolicy` is still behind its own named switch.
+
+## ⛔⛔ CITE A RULE BY ITS NAME. NUMBERED LABELS ARE BANNED
+
+`TRAPS.md`'s rules used to be `A16`, `D4j`, `C0b`. They are **named**: cite them as
+`TRAPS: off-grid-message-mode`, `TRAPS: a-cancelling-defect-pair`,
+`TRAPS: frame-free-is-not-assumption-free`. ⭐ The name IS the identifier, so a citation says what it means
+without a lookup and is still one greppable string with one home.
+⛔ `tests/test_no_jargon_labels.py` enforces it and its allowlist is scoped, never blanket.
+
+⚠ **The numbers were not merely opaque, they were AMBIGUOUS.** `A1` was a validation trap here *and*
+`SUCCESS.md`'s FIDELITY criterion; `C1` was a pool trap *and* a moment variable in `length_likelihood.py`;
+and **`G1` meant "no magic numbers" AND "a structurally pure-gDNA object" — 201 occurrences, and a reader
+could not tell which.** That is this project's own `TRAPS: two-masks-one-name`, committed by the labelling
+scheme. The rename rewrote **980 citations across 114 files** and correctly left 66 alone.
 
 ## Working rules
 
@@ -113,14 +173,16 @@ C++ is gated on byte-identity to it; where it and a document disagree, it wins.
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-python -m pytest tests/ -q                     # baseline: 22 fail / 2314 pass / 7 xfail — 21 goldens + the paralog row
+python -m pytest tests/ -q                     # baseline: 22 fail / 2310 pass / 7 xfail — 21 goldens + the paralog row
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **"22 failures, 21 goldens and the paralog row" is the standing baseline** (2,314 passing as of 2026-08-06 — 2,290 plus the 24 `test_eta_transfer` gates). A 23rd failure, or any other
-non-golden name in the list, is a regression. See `docs/TESTING.md` §6.
-⭐ **And 7 xfails, five of them STRICT and load-bearing.** `test_toy_harness`'s intron-composition gate is
+⭐ **"22 failures, 21 goldens and the paralog row" is the standing baseline** (**2,310 passing as of
+2026-08-07** — 2,343 minus the 33 `test_eta_transfer` gates, deleted with the backbone, plus the 20 in
+`test_sweep_backbone.py`). A 23rd failure, or any other non-golden name in the list, is a regression. See
+`docs/TESTING.md` §6.
+⭐ **And 7 xfails, five of them STRICT and load-bearing** — unchanged by the backbone commit.** `test_toy_harness`'s intron-composition gate is
 the project's detector for the level defect the splice-flux reframe un-masked, and `test_node_init.py` carries
 **four** more added 2026-08-06 for two PROVEN defects whose fixes are panel-negative alone: `struct_lock` is
 `~solvable & NODE` rather than `g1_locked & NODE` (19,709 slots against 1,312), and `Var(f_g)` is capped at
@@ -141,6 +203,11 @@ either promote a row or delete the file, but do not assume the table is complete
 
 | | |
 |---|---|
+| **⭐⭐⭐ where to develop** | |
+| `design/module_census.py` | ⭐⭐⭐ **WHERE DOES A CHANGE GO?** — the calibration package's real shape, re-derived from the AST: the layering with every upward import, the graph with each module's importers inside and outside, ⭐ **docstrings that name a sibling with no import edge** (14 measured, 6 genuinely stale), and dead public surface. ⛔ It REPORTS, it does not judge — an entry point looks dead, and a gated reference implementation looks duplicated |
+| **⭐⭐⭐ the backbone** | |
+| `design/arm_identity.py` | ⭐⭐⭐ **IS THIS ARM BYTE-IDENTICAL TO THAT ONE? — the A5 gate.** `arm_score.py` AGGREGATES, so a difference that cancels between two fields is invisible there; this compares **every scored field of every row** and exits nonzero on any difference. ⛔ Both of A5's recorded lies are gated: the row-key sets must be EQUAL (an arm with ZERO rows once scored "32/32 IDENTICAL") and both files' mtimes are printed (a stale baseline is what A5 warns about — re-record it, B8). ⭐ Falsified by perturbation: it resolves a **1-ULP** nudge and refuses an empty file |
+| `design/backbone_parity.py` | ⭐⭐⭐ **WHAT DOES ONE MESSAGE OPERATOR DO, PER SLOT?** — two policies, one real 70,176-slot chain, one process, every output array compared element by element, plus every diagnostic `_capture` key and ⭐ the five backbone assertions with their ELIGIBLE sets (A14). Strictly stronger per condition than the panel and strictly weaker across conditions, so run it FIRST. `--arm-a head --arm-b no_<switch>`. ⛔ Its verdict on the restructure: **421,056 output elements and 18,245,830 diagnostic elements, zero differences** |
 | **⭐⭐ the toy harness** | |
 | `design/toy_panel.py` | ⭐⭐ **one toy spec × EVERY cached condition × an RNA-density ladder, scored per object** — what you run once a structure is the *target* rather than a probe. Prior-free pass-0 by default; the RNA density is a multiple of each donor's OWN gDNA density. ⛔ Reports which object carries the error, whether the messages helped or hurt it, and which objects are CONFIDENTLY wrong. ⚠ 13 s per condition; shard with `--conditions` |
 | `design/verify_toy_substrate.py` | ⭐⭐⭐ **IS THE INPUT CORRECT? — no solver runs.** Every accumulator bank re-derived from the simulator's per-fragment TRUTH by an independent implementation, plus the splice combinatorics and the length marginal. ⛔ Run this on any new toy spec BEFORE reading a solver number off it |
@@ -153,7 +220,6 @@ either promote a row or delete the file, but do not assume the table is complete
 | `design/certified_q_census.py` | ⭐⭐ **CAN A CERTIFIED COUNT SPEAK ABOUT THE UNSPLICED SPLIT? — the answer is NO, and this is why.** Measures the splice-visibility `q = S/(S+C_R)` directly off the origin-split oracle on all 36 conditions; no solver runs, so the whole ladder is seconds. ⛔ Its verdict is a NEGATIVE and the docstring says so first: `q`'s mass-weighted median is 0.19–0.71, so the term §2d drops is the same size as the one it keeps, and the raw-count λ term is **worse than the uninformative reference on 12 of 36 conditions** (worst +0.4578). ⭐ Its two extreme rungs ARE the two zero controls, which is what makes the diagnosis certain |
 | `design/vertex_ceiling.py` | ⭐⭐ **the re-solve ceiling on the REAL ladder** — pins oracle truth at a chosen object class in `build_node_init` and re-solves, with a `noop` arm that MUST be byte-identical (`TRAPS.md` A5). ⛔ Its own verdict is a NEGATIVE and the docstring says so first: the 24.4 % it measures is the value of MISSING INFORMATION, not headroom. ⭐ Reusable override plumbing for any `build_node_init` prototype |
 | `design/toy_ceiling.py` | ⭐⭐ **the RE-SOLVE ceiling** — hand one object class a different own belief and re-solve the whole chain, six arms sharing one simulation. ⛔ This is what `TRAPS.md` B17 demands instead of a substitution, and `--arms base noop` is its own falsification (must be byte-identical). Its docstring carries what it measured |
-| `design/eta_node_sweep.py` | ⛔ **THE `η` REBUILD PROTOTYPE — BUILT, GATED, AND PANEL-NEGATIVE (+103 % on the deliverable, 6/32 better).** A drop-in for `bp_solver.node_sweep` carrying the frame-free composition transfer with the mass pin, the reframe, `framed`, the flank pair and graft/peel gating all deleted. Injected by `ladder_arm_ab.py --arm eta`; `--arm eta_nolevel` is its attribution handle. ⭐ Its algebra lives in `tests/calibration/_eta_reference.py` (ONE home, gated by `test_eta_transfer.py`) — read `SESSION_HANDOFF.md` §4/§5/§6 before touching it |
 | `design/psi_channel_ablation.py` | ⭐⭐⭐ **WHICH ψ CHANNEL IS DOING THE WORK?** — one level below `worst_objects.py`: that says which OBJECTS carry the error, this says which CHANNEL put it there. Records every argument of the final ψ combine, then re-solves with one `*_imp` channel nulled at a time, so an attribution is a re-solve of the REAL call. ⛔ A5 — the `as-is` arm must reproduce the run bit-identically, and that means reproducing the WRITE-BACK too (the first version read `max\|Δ\| = 1.0` for exactly that reason). ⭐ Read the per-slot table, not the totals: D4h says all-small-singly + large-jointly means the channels share an upstream quantity |
 | `design/arm_score.py` · `design/arm_sweep.py` | ⭐⭐ score two `ladder_arm_ab` arms against each other, and sweep a family, **per stratum**. ⛔ Never pooled — the panel total hides a sign flip between strata, and both print `abs_err_all_final` (the deliverable) beside `abs_err_all` (pass-0) on every row, per `TRAPS.md` A15. `$RIGEL_ARMS` points at the `--out` directory |
 | `design/ladder_arm_ab.py` | ⭐⭐ **the same override on the REAL 36-condition ladder**, scored by `solvability_audit.py`. ⛔⛔ **Run this before writing a mechanism into `src/`** — FOUR times now a toy- or single-condition-positive change has been panel-negative (`TRAPS.md` B18). ⭐⭐ **`--jobs 8` runs the whole 36-condition panel in ~2.2 min** (was ~20 min), byte-identical on all 648 scored fields: the two unused `c_input_*` arms are no longer built and the MAIN scan payload is cached beside the oracle cache. ⭐ Carries the eight `zc_*` arms (`TRAPS.md` C0e) plus ⭐⭐ `msgfree_p0` / `msgfree_all` / `msgscale_<k>` / `onesided_rna`, which between them price the whole message layer. `--arm zc_noop` must be BYTE-IDENTICAL to `base` and is the harness's own falsification (A5) |

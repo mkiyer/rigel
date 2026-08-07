@@ -158,7 +158,7 @@ def crossing_moments(fl_pmf: np.ndarray) -> LandedMoments:
         E[A·w²]  = E[w³] − E[w²]
         E[A·u·w] = mu                        (u(w)·w = w/(w−1), so Σ f(w)(w−1)·w/(w−1) = mu)
 
-    ⚠ **Unbounded reach only, matching `build_node_geometry`'s default.** With the A7 taper switched on
+    ⚠ **Unbounded reach only, matching `build_node_geometry`'s default.** With the TRAPS: prove-the-substrate taper switched on
     (``edge_rna_reach``) the opportunity becomes per-edge and these moments would have to as well. The
     taper was measured as a null (≤ 0.0002), so the default path is the one wired;
     a consumer that turns the taper on must extend this function rather than silently mismatch.

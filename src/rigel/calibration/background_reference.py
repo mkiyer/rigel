@@ -4,7 +4,7 @@ The DNA
 contamination level is NOT a per-region quantity: a region of effective length ``E`` resolves its DNA rate only
 above ``~1/E`` (Fisher information ``ρ·E`` = the expected count), so a faint background — the very case that
 matters under strong hybrid capture — is resolvable ONLY by pooling nodes into one aggregate support. This
-module measures that pooled scalar; ``bp_solver`` consumes it as a **one-sided log-floor** (never a scale or
+module measures that pooled scalar; the sweep consumes it as a **one-sided log-floor** (never a scale or
 denominator — see the derivation's strong-capture safeguard).
 
 **Substrate (``include_introns``).** Two node sets, both purely intronic/intergenic (never exonic):

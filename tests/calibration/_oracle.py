@@ -131,7 +131,7 @@ class OracleTruth:
         ⭐⭐ ``drain_with`` makes the oracle valid for a DRAINED tally. Without it, every number an
         instrument reads off this class is an **undrained** one, because the second pass conditions on
         the whole tally and partitions drained independently do not sum to the whole drained
-        (`TRAPS.md` B9). Pass ``(undrained_whole, choices, node_types, junctions)`` — exactly what
+        (TRAPS: draining-breaks-the-oracle). Pass ``(undrained_whole, choices, node_types, junctions)`` — exactly what
         ``pipeline._drain_side_buffer(_lift=...)`` publishes — and each partition is drained by
         REPLAYING the whole's already-drawn choices inside it (`second_pass.lift_choices`).
 
@@ -353,7 +353,7 @@ def _main():
     ra = RegionArrays.from_index(index)
     # ⭐ One object, one frame — the same call production makes. This harness used to build its
     # own mixture: the scanner's histogram as the anchor and the scanner's SPLICED_ANNOT category as
-    # the RNA pool, neither of which production has used since S5.d/C2.1. A test harness that builds
+    # the RNA pool, neither of which production has used since S5.d/TRAPS: pure-and-length-censored.1. A test harness that builds
     # a different model from the shipped one is calibrating something the tool does not ship.
     # ⭐ Both divisors, exactly as production passes them — a harness that builds a different model
     # from the shipped one is calibrating something the tool does not ship.

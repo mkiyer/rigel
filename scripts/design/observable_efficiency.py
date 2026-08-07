@@ -4,7 +4,7 @@
 
 THE QUESTION
     Each object stores an integer ``count`` and a fixed-point density ``Sum 1/placements``. Whether
-    that pair is the right one has never been derived -- /C2 are open, and
+    that pair is the right one has never been derived -- /TRAPS: pure-and-length-censored are open, and
     §1 fact 5's ranking was measured at ONE fragment-length setting. The accumulator's deposit weight
     must be fixed BEFORE the scan, because the pure length pools are built in the same pass, so the
     choice has to be robust across every library this tool will ever see -- not tuned to cfRNA.

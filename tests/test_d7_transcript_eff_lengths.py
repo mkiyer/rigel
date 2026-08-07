@@ -1,4 +1,4 @@
-"""⭐ C2.5 / D7 — the corrected RNA pmf reaches EVERY TRANSCRIPT'S EFFECTIVE LENGTH in the EM.
+"""⭐ TRAPS: pure-and-length-censored.5 / TRAPS: an-all-zero-factor-is-inert — the corrected RNA pmf reaches EVERY TRANSCRIPT'S EFFECTIVE LENGTH in the EM.
 
 *"The shrunk pmf is reused for the EM's transcript effective
 lengths, so a frame error in the anchor propagates into every transcript's effective length — not only
@@ -72,7 +72,7 @@ def _config():
 
 
 def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
-    """⭐ D7, verified rather than assumed.
+    """⭐ TRAPS: an-all-zero-factor-is-inert, verified rather than assumed.
 
     The pipeline's per-transcript effective lengths must be **exactly** what the payload's RNA pmf
     produces. Any other source — a stale model, the scanner's deleted histogram, a default fallback —
@@ -98,7 +98,7 @@ def test_every_transcript_eff_length_comes_from_the_PAYLOADS_rna_pmf(scenario):
     payload = _drain_side_buffer(
         payload, scenario.index, strand_models, seed=config.second_pass_seed
     )
-    # ⭐ C3: the RNA pool is de-tilted by its own junction opportunity before the model is fitted, so
+    # ⭐ TRAPS: divide-by-a-probability: the RNA pool is de-tilted by its own junction opportunity before the model is fitted, so
     # the reproduction has to include it. Omitting it here would not merely mismatch — it would make
     # this gate pass on the day production DROPPED the divisor.
     fl_models = build_fl_models(
@@ -119,7 +119,7 @@ def test_the_eff_lengths_MOVE_when_the_rna_pmf_moves(scenario):
     """⚠ The equality above is worth nothing unless the quantity is actually sensitive to the pmf.
 
     A constant array would satisfy it. Perturbing the RNA pmf must change the effective lengths, or
-    D7's blast radius is imaginary and the check is decoration.
+    TRAPS: an-all-zero-factor-is-inert's blast radius is imaginary and the check is decoration.
     """
     from rigel.calibration.fl import build_fl_models
 

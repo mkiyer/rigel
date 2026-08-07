@@ -224,7 +224,7 @@ def scan_and_buffer(
 
     ⭐ **No fragment-length model comes out of here.** The scanner used to train its own histogram
     during this pass; it measured length by two rules that were neither each other nor the
-    accumulator's ``L``, over a population that was never stated. C2 deleted it. Every
+    accumulator's ``L``, over a population that was never stated. TRAPS: pure-and-length-censored deleted it. Every
     fragment-length distribution the tool uses is now built from the payload by
     :func:`rigel.calibration.fl.build_fl_models`.
     """
@@ -382,12 +382,12 @@ def _drain_side_buffer(
     shorter — that is, the more-spliced — path, and that loop can run away.
 
     ⭐ **``_lift`` — the out-parameter an origin-split ORACLE needs, and why it is not a second
-    implementation.** `TRAPS.md` B9: the drain conditions on the WHOLE tally, so partitions drained
+    implementation.** TRAPS: draining-breaks-the-oracle: the drain conditions on the WHOLE tally, so partitions drained
     independently do not sum to the whole drained. `second_pass.lift_choices` repairs that by replaying
     the whole's already-drawn choices inside each partition — which needs the choices, the undrained
     whole they were drawn on, and the two index-derived arrays `drain` takes. All four exist only inside
     this function, so it publishes them into ``_lift`` rather than letting a caller re-derive them and
-    drift (`TRAPS.md` A11). Same convention as ``calibrate(_debug=)`` / ``node_sweep(_capture=)``, and
+    drift (TRAPS: a-test-that-redefines). Same convention as ``calibrate(_debug=)`` / ``node_sweep(_capture=)``, and
     inert in production, where nobody passes it. ⚠ An empty side buffer leaves ``_lift`` UNTOUCHED — the
     early return below is the "nothing was drained" signal on this path too.
     """
@@ -429,9 +429,7 @@ def _drain_side_buffer(
     if _lift is not None:
         # ⛔ ``undrained`` is the payload as it entered here, NOT ``drained``: the drained bank is empty by
         # design ("after it nothing is held"), so it cannot supply `lift_choices`' key pool.
-        _lift.update(
-            undrained=payload, choices=choices, node_types=node_types, junctions=junctions
-        )
+        _lift.update(undrained=payload, choices=choices, node_types=node_types, junctions=junctions)
     report = drained.drain
     logger.info(
         "[SP2] drained %d held fragments in %.1f s: %d deposited, %d dropped "
@@ -938,7 +936,7 @@ def run_pipeline(
     # everything else. A fragment enters a pool when exactly ONE hypothesis survived, so its `L` is
     # not in doubt however it was arrived at — determinacy, not provenance.
     #
-    # ⭐ C2.1: the ANCHOR moved here too, off the scanner's histogram and onto the accumulator's own
+    # ⭐ TRAPS: pure-and-length-censored.1: the ANCHOR moved here too, off the scanner's histogram and onto the accumulator's own
     # `deposited_lengths`. Until then the pools were accumulator-frame and the anchor they were
     # shrunk toward was not.
     #

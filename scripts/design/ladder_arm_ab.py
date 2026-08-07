@@ -10,7 +10,7 @@ the answer is in the currency the project actually ships.
 
 ⭐ **The override goes in at `node_init.build_node_init`** — the per-object message-free self-solve —
 which is the one place a mechanism can be expressed without touching either relay twin, so a prototype
-cannot accidentally be gated in one twin and not the other (`TRAPS.md` B14). `region_arrays` reaches the
+cannot accidentally be gated in one twin and not the other (TRAPS: name-the-observable-per-site). `region_arrays` reaches the
 wrapper by way of a `node_sweep` wrapper, because `build_node_init` is not handed it.
 
 ⚠ **A prototype here is an UPPER bound on the built form, not a model of it**: it overwrites the
@@ -32,13 +32,13 @@ relay Δ                 +0.0021     **+0.0034**    14 / 18 / 0
 ======================  ==========  =============  ===================
 
 ⛔ **REFUTED.** And on the EDGE axis it is worse still (mwae 0.0216 → 0.1449) because it ADMITS those
-EDGEs into the scored population (``solv%`` 43.1 → 48.2) carrying a wrong composition — `TRAPS.md` B13
+EDGEs into the scored population (``solv%`` 43.1 → 48.2) carrying a wrong composition — TRAPS: excluding-a-population-hides-it
 inverted. ⭐ The one real signal in it: the split is by STRAND, not by capture. Every unstranded row is
 worse and every stranded capture-OFF row is better, which is the DL mismatch test having nothing to
 check an imported composition against when the destination has no self-solve.
 
-⭐ C11 is the precedent that makes this run mandatory rather than optional: its toy delta was LARGER
-(−0.035) and the ladder said it cost the panel nothing. `TRAPS.md` B1.
+⭐ The NESTED-EXONS probe is the precedent that makes this run mandatory rather than optional: its toy delta was LARGER
+(−0.035) and the ladder said it cost the panel nothing. TRAPS: measure-the-ceiling-first.
 
 ---
 
@@ -68,10 +68,10 @@ construction: on a stranded, gDNA-rich exon the RNA arms' component count ``f_c�
 ``n_node``, so their precision falls by orders of magnitude, while an unstranded object splits its RNA
 evenly and barely moves.
 
-⛔ Each arm asserts it FIRED (`TRAPS.md` A10 — an ablation that never ran reads as "no effect", and
-``composition_logvar`` is bound as a module global in ``bp_solver`` as well as in its own leaf module, so
-patching one name is exactly the miss A10 records). ``--arm base`` against itself is the byte-identity
-falsification (`TRAPS.md` A5).
+⛔ Each arm asserts it FIRED (TRAPS: an-ablation-that-never-ran — an ablation that never ran reads as "no effect", and
+``composition_logvar`` is bound as a module global in ``messages.head`` as well as in its own leaf module, so
+patching one name is exactly the miss TRAPS: an-ablation-that-never-ran records). ``--arm base`` against itself is the byte-identity
+falsification (TRAPS: byte-identity-gate).
 """
 
 from __future__ import annotations
@@ -108,7 +108,8 @@ SA = _sibling("solvability_audit.py")
 P0 = _sibling("pass0_vs_oracle.py")
 
 import rigel.calibration.strand_balance  # noqa: E402,F401  (registers the module for patching)
-from rigel.calibration import bp_solver, node_init as NI  # noqa: E402
+from rigel.calibration import node_init as NI, sweep as SW  # noqa: E402
+from rigel.calibration.messages import head as HD  # noqa: E402
 from rigel.calibration.node_chain import NODE  # noqa: E402
 from rigel.calibration.node_geometry import g1_locked, node_global_geometry  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
@@ -124,7 +125,7 @@ _RA: dict = {}
 
 
 def _install_kappa_half():
-    """⭐⭐ THE ARM `ROADMAP.md` §1 step 3 ASKS FOR IN ITS OWN WORDS: "inject κ = 0.5 exactly and diff".
+    """⭐⭐ THE ARM `ROADMAP.md` §1 **the-capture-level-residual** ASKS FOR IN ITS OWN WORDS: "inject κ = 0.5 exactly and diff".
 
     On a genuinely unstranded library the strand channel carries **exactly** zero information about
     composition — the Fisher information is ``∝ (2κ−1)²`` and κ is ½. But κ is FITTED, so it lands on
@@ -153,7 +154,7 @@ def _install_kappa_half():
     SB.fit_strand_balance = wrapper
 
 
-#: ⛔ A10 — every ablation increments a counter and `main` RAISES if it did not fire. An arm that never
+#: ⛔ TRAPS: an-ablation-that-never-ran — every ablation increments a counter and `main` RAISES if it did not fire. An arm that never
 #: ran scores byte-identical to base, which reads as "this change is inert" and is publishable and wrong.
 _FIRED: dict = {}
 
@@ -170,7 +171,7 @@ def _install_zc_own_count():
     large-count LIMIT of the same expression, which diverges at ``n = 0`` and so returns 0 there.
 
     ⚠ ``own_precision`` is called as a MODULE GLOBAL from inside ``build_node_init``, so rebinding
-    ``NI.own_precision`` is sufficient and `bp_solver`'s re-export of ``build_node_init`` shares the same
+    ``NI.own_precision`` is sufficient and `sweep`'s re-export of ``build_node_init`` shares the same
     function object. The counter proves it rather than the reader assuming it."""
     orig = NI.own_precision
 
@@ -233,7 +234,7 @@ def _rebuild_own(ni, statics, geometry, *, total_n: bool, count_live: bool):
 
 def _install_rebuild(name: str, **flags):
     """Wrap ``build_node_init`` with one :func:`_rebuild_own` variant. ⚠ Both bindings are rebound —
-    ``bp_solver`` re-exports the name (A10)."""
+    ``sweep`` re-exports the name (TRAPS: an-ablation-that-never-ran)."""
     orig = NI.build_node_init
 
     def wrapper(chain, statics, geometry, **kw):
@@ -242,7 +243,7 @@ def _install_rebuild(name: str, **flags):
         return _rebuild_own(ni, statics, geometry, **flags)
 
     NI.build_node_init = wrapper
-    bp_solver.build_node_init = wrapper
+    SW.build_node_init = wrapper
     return orig
 
 
@@ -252,10 +253,10 @@ def _install_zc_transfer():
 
     ``Var(log ρ_tot) = ∞`` ⇒ ``σ²_transfer = logvar_tot[dst] + logvar_tot[src] = ∞`` ⇒
     ``1/(1/p + ∞) = 0`` on all three streams of every message that slot sends, the MEASUREMENT stream
-    included. That is the annihilation `TRAPS.md` C0d records, and it is the half of the fix the 39 %
+    included. That is the annihilation TRAPS: a-ratio-cannot-carry-zero records, and it is the half of the fix the 39 %
     was actually attributed to.
 
-    ⛔⛔ **BOTH BINDINGS ARE PATCHED, and that is A10 verbatim.** ``bp_solver`` does
+    ⛔⛔ **BOTH BINDINGS ARE PATCHED, and that is TRAPS: an-ablation-that-never-ran verbatim.** ``messages.head`` does
     ``from .enrichment_frame import composition_logvar``, which makes a SEPARATE module global; patching
     only the leaf module leaves the solver calling the original and the arm reads as inert.
     ⚠ ``transfer_logvar``'s ``~isfinite`` guard is NOT restored — it was deleted as treating the
@@ -271,7 +272,7 @@ def _install_zc_transfer():
         return orig(f_g, E_g, E_r, var_fg, n) - EF.count_logvar(nn) + asym
 
     EF.composition_logvar = wrapper
-    bp_solver.composition_logvar = wrapper
+    HD.composition_logvar = wrapper
     return orig
 
 
@@ -283,7 +284,7 @@ def _zero_mass_locked(ni, geometry):
     zero-mass slot has ``tau_lam = 0``, so ``own_composition_logvar`` returns ``∞`` and the precision is 0
     — **unless** ``struct_lock`` short-circuits the variance to 0. So "zero density with a live claim"
     is exactly ``struct_lock ∧ M = 0``: an empty intergenic NODE.
-    ⚠ Printed as a count by both callers, because an arm acting on an empty set is not a control (A14)."""
+    ⚠ Printed as a count by both callers, because an arm acting on an empty set is not a control (TRAPS: could-the-arm-have-fired)."""
     M = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
     return np.asarray(ni.struct_lock, bool) & (M <= 0.0), M
 
@@ -309,7 +310,7 @@ def _install_zc_anchor_mute():
         return dataclasses.replace(ni, prec_g=prec_g)
 
     NI.build_node_init = wrapper
-    bp_solver.build_node_init = wrapper
+    SW.build_node_init = wrapper
     return orig
 
 
@@ -320,7 +321,7 @@ def _install_zc_jeffreys_mean():
     ``a`` events over exposure ``E`` under the Jeffreys prior ψ is built on has posterior
     ``Gamma(a + ½, E)`` — the same posterior :func:`count_logvar` takes its variance from. Its mean is
     ``(a + ½)/E``, so at ``a = 0`` it is ``½/E``: **a long empty region says ~0 and a short empty region
-    says "below about 1/E"**, which is `TRAPS.md` C0c's own sentence ("zero over 50.7 Mb and zero over
+    says "below about 1/E"**, which is TRAPS: a-zero-count-is-a-measurement's own sentence ("zero over 50.7 Mb and zero over
     200 bp are the same number to this code and opposite statements about the world") applied to the
     LOCATION rather than to the variance.
 
@@ -346,7 +347,7 @@ def _install_zc_jeffreys_mean():
         return dataclasses.replace(ni, rho_g=rho_g)
 
     NI.build_node_init = wrapper
-    bp_solver.build_node_init = wrapper
+    SW.build_node_init = wrapper
     return orig
 
 
@@ -378,7 +379,7 @@ def _install_zc_reference_var():
     object IS composition-certain, so the zero-gDNA anchor's true claim is still undamped. That is what makes
     this different from every arm above, all of which cost the ``g00`` control.
 
-    ⚠ Both bindings of ``composition_logvar`` are patched (`TRAPS.md` A10), and ``tau_lam``/``struct_lock``
+    ⚠ Both bindings of ``composition_logvar`` are patched (TRAPS: an-ablation-that-never-ran), and ``tau_lam``/``struct_lock``
     are captured from the ``build_node_init`` call that ``node_sweep`` makes immediately before."""
     orig_bni = NI.build_node_init
     orig_cl = sys.modules["rigel.calibration.enrichment_frame"].composition_logvar
@@ -401,14 +402,14 @@ def _install_zc_reference_var():
         return orig_cl(f_g, E_g, E_r, v, n)
 
     NI.build_node_init = bni
-    bp_solver.build_node_init = bni
+    SW.build_node_init = bni
     sys.modules["rigel.calibration.enrichment_frame"].composition_logvar = cl
-    bp_solver.composition_logvar = cl
+    HD.composition_logvar = cl
     return orig_cl
 
 
 def _discrepancy_logshift(phi_g, phi_r):
-    """⭐⭐⭐ §5 OF `variance_model_notes.md` — THE DISCREPANCY INTEGRAL, as a pure function.
+    """⭐⭐⭐ THE DISCREPANCY INTEGRAL, as a pure function.
 
     ``phi_g`` is the share of the destination's OWN observed mass that the gDNA message accounts for, and
     ``phi_r`` the share the RNA arms account for. Both are observables: a measured message over a measured
@@ -462,15 +463,15 @@ def _install_zc_ref_prior():
 
     ⭐⭐ **And the form is ADDITIVE, not a floor:** ``τ_eff = τ_λ + 1/π²``. A posterior precision is the prior's
     plus the evidence's, which is the same inverse-variance addition used everywhere else — so this is not
-    `TRAPS.md` B11/D4f's refused threshold, it **deletes the ``τ = 0`` branch** instead of clipping it.
+    TRAPS: a-threshold-on-a-fitted-residue/TRAPS: a-licence-with-no-floor's refused threshold, it **deletes the ``τ = 0`` branch** instead of clipping it.
     Continuous, monotone, no discontinuity for a residue to flip.
 
     ⚠ ``struct_lock`` still short-circuits to 0: a structurally pure-gDNA object IS certain, and the
     reference must not weaken it — otherwise the zero-gDNA anchor loses its claim and the `g00` win with it.
     ⚠ ``has_own_composition_evidence`` is NOT touched, so the instruments' `relay_only`/`own_evidence`
-    classification is unchanged and `solv%` cannot move (`TRAPS.md` B20 — admitting objects to the scored
+    classification is unchanged and `solv%` cannot move (TRAPS: admitting-an-object-costs — admitting objects to the scored
     population is a cost that would confound the reading).
-    ⚠ ``bp_solver``'s ``v_own_lam`` is a SEPARATE expression with its own ``∞`` branch inside a closure and
+    ⚠ ``messages.head``'s ``v_own_lam`` is a SEPARATE expression with its own ``∞`` branch inside a closure and
     is NOT reachable here, so the λ stream keeps ``∞`` while the per-component streams get the reference.
     Inconsistent, and deliberate for a prototype — it is one of the things the standalone sweep unifies."""
     ref_tau = 1.0 / (np.pi**2)  # = 1/(2·psi_1(1/2)); the Jeffreys reference's own precision on lambda
@@ -489,7 +490,7 @@ def _install_zc_ref_prior():
         )
 
     NI.own_composition_logvar = wrapper
-    bp_solver.own_composition_logvar = wrapper
+    HD.own_composition_logvar = wrapper
     return orig
 
 
@@ -509,7 +510,7 @@ def _install_zc_disc_var():
     ⭐⭐⭐ **The error: ``γ = 1`` is not one point among many on ``[1, D]`` — it is the NULL, and the only value
     with physical backing.** Off capture gDNA is uniform and ``γ = 1`` exactly; capture makes ``γ > 1``
     *possible*, and nothing in pass-0 is evidence that it *happened*. A flat-in-log prior over ``[1, D]``
-    silently converts "capture is possible" into "capture occurred, by ``√D``". `TRAPS.md` A12's shape: a
+    silently converts "capture is possible" into "capture occurred, by ``√D``". TRAPS: honesty-metrics-reward-ignorance's shape: a
     channel whose correction tracks the answer rather than the evidence.
 
     ⭐ **So keep the mode at the null and charge only the width.** ``σ²_disc = (log D)²/12`` is still the
@@ -521,25 +522,25 @@ def _install_zc_disc_var():
     ⭐⭐ This is the owner's own proposal with my correction removed: *"the message doesn't need to change …
     the recipient converts the uncertainty into variance."* The dampening instinct was the right half.
     ⭐ And it should bite exactly where the regression is: on STRANDED data 82 % of the mass has its own
-    evidence for the damped message to lose to, against 5 % unstranded (`SESSION_HANDOFF.md` §2)."""
+    evidence for the damped message to lose to, against 5 % unstranded."""
     return _install_discrepancy(shift=False)
 
 
 def _install_zc_discrepancy():
     """⭐⭐⭐ **S1a** — the geometric midpoint and its variance, applied to the delivered gDNA share.
 
-    ⛔ **THE PATCH POINT IS CHOSEN SO THAT NOTHING IN `src/` MOVES** (`TRAPS.md` B18). The operator belongs
-    at `bp_solver.py:1511`, inside `node_sweep`'s closure and therefore unreachable — but everything it needs
+    ⛔ **THE PATCH POINT IS CHOSEN SO THAT NOTHING IN `src/` MOVES** (TRAPS: panel-before-src). The operator belongs
+    in ``messages.head``'s combine, inside a closure and therefore unreachable — but everything it needs
     is reconstructible one call later, at `simplex_logodds._solve_nodes_logodds_all`, which is module-level:
 
         gdna_imp_mode = log(cg·E_g/M) = log φ_g^msg      ⭐ ALREADY the delivered gDNA SHARE
         rna_imp_mode  = (log φ_p, log φ_n)
 
     so ``φ_g = exp(gdna_imp_mode)`` and ``φ_r = exp(mo_p) + exp(mo_n)`` — the two arguments §5 needs, with no
-    access to any belief. **D4 holds**: the shift is built from the message and the destination's own count.
+    access to any belief. **TRAPS: a-message-from-the-destinations-belief holds**: the shift is built from the message and the destination's own count.
 
-    ⚠ Patched on ``bp_solver``'s binding, which is a SEPARATE module global from the leaf module's
-    (`TRAPS.md` A10). ``node_init`` and ``node_geometry`` also import the name, but their calls pass no
+    ⚠ Patched on ``sweep``'s binding, which is a SEPARATE module global from the leaf module's
+    (TRAPS: an-ablation-that-never-ran). ``node_init`` and ``node_geometry`` also import the name, but their calls pass no
     imputation modes, so the operator cannot fire there — and the counter proves it rather than the reader
     assuming it.
 
@@ -580,7 +581,7 @@ def _install_discrepancy(*, shift: bool):
         )
 
     SL._solve_nodes_logodds_all = wrapper
-    bp_solver._solve_nodes_logodds_all = wrapper
+    SW._solve_nodes_logodds_all = wrapper
     return orig
 
 
@@ -597,7 +598,7 @@ def _install_zc_struct_lock_g1():
 
     ⚠ It was INERT until 2026-08-06: ``own_precision``'s ``n > 0`` gate silenced every zero-count slot, so
     a certainty granted to 18,511 empty nodes could not leave them. Removing that gate un-masked it.
-    ⭐ ``g1_locked`` is the ONE HOME for the predicate (`TRAPS.md` A11) and already exists; this arm simply
+    ⭐ ``g1_locked`` is the ONE HOME for the predicate (TRAPS: a-test-that-redefines) and already exists; this arm simply
     calls it. At ``g00`` every intergenic anchor is G1, so the arm must KEEP the zero-gDNA win — that is
     what makes it different from muting the anchors."""
     orig = NI.build_node_init
@@ -631,7 +632,7 @@ def _install_zc_struct_lock_g1():
         )
 
     NI.build_node_init = wrapper
-    bp_solver.build_node_init = wrapper
+    SW.build_node_init = wrapper
     return orig
 
 
@@ -667,7 +668,7 @@ def _install_zc_logmean():
         return dataclasses.replace(ni, rho_g=rho_g)
 
     NI.build_node_init = wrapper
-    bp_solver.build_node_init = wrapper
+    SW.build_node_init = wrapper
     return orig
 
 
@@ -693,22 +694,85 @@ def _targets(chain, region_arrays):
     return edges, srcs
 
 
+def _install_backbone(silent: bool):
+    """⭐⭐⭐ **THE TWO ACCEPTANCE GATES FOR THE BACKBONE RESTRUCTURE, and both are TRAPS: byte-identity-gate.**
+
+    The solver is now a BACKBONE (``sweep.solve_chain`` — two directional scans, one combine, one write-back,
+    five assertions) plus a message-composition POLICY (``messages/``). The restructure's whole value is that
+    byte-identity PROVES it changed nothing, so it is gated twice and in opposite directions:
+
+    ``backbone_head``  ``HeadPolicy()``, every switch ON — **must be BYTE-IDENTICAL to ``base``.** This is
+                       what production runs, so the arm changes nothing and instead ASSERTS that the policy
+                       reaching the solver is a full HeadPolicy. ⭐ That is not a tautology: ``solve_chain``
+                       defaults to ``SilentPolicy``, so a future edit that drops ``calibrate``'s ``policy=``
+                       argument would be a ~50 % behaviour change with no error, and this arm is the thing
+                       that would catch it.
+    ``backbone``       ``SilentPolicy()``, which sends nothing — **must be BYTE-IDENTICAL to
+                       ``msgfree_all``**, the arm that mutes psi's four imputed channels. ⭐ Passing it also
+                       PROVES the relay reaches the answer ONLY through those four channels, because one arm
+                       runs the whole relay and discards it while the other never runs it at all.
+
+    ⛔ TRAPS: an-ablation-that-never-ran — ``rigel.calibration.calibrate`` is SHADOWED by the re-exported function, so the patch goes
+    through ``sys.modules`` (``CAL``, set at import), and the arm RAISES if it never fired.
+    """
+    from rigel.calibration.messages.head import HeadPolicy
+    from rigel.calibration.messages.silent import SilentPolicy
+
+    orig = CAL.solve_chain
+    tag = "backbone" if silent else "backbone_head"
+
+    def wrapper(chain, statics, geometry, belief, region_arrays, *a, **kw):
+        _RA["region_arrays"] = region_arrays
+        pol = kw.get("policy")
+        if silent:
+            kw["policy"] = SilentPolicy()
+        else:
+            # ⛔ TRAPS: could-the-arm-have-fired in its strongest form: this arm changes NOTHING, so it has to prove that what it left
+            # alone is what we think it is. A silent or partially-switched-off policy here would make the
+            # identity gate below vacuous.
+            if not isinstance(pol, HeadPolicy):
+                raise RuntimeError(
+                    f"backbone_head: calibrate passed policy={pol!r}, not a HeadPolicy. The shipped "
+                    f"answer is HeadPolicy with every switch on; `solve_chain` DEFAULTS to SilentPolicy, "
+                    f"so this is a real behaviour change and not a naming detail (TRAPS.md an-ablation-that-never-ran/TRAPS: could-the-arm-have-fired)."
+                )
+            if pol.switches.off():
+                raise RuntimeError(
+                    f"backbone_head: HeadPolicy has switches OFF: {pol.switches.off()}. "
+                    f"This arm is the all-on identity gate."
+                )
+        _fire(tag)
+        return orig(chain, statics, geometry, belief, region_arrays, *a, **kw)
+
+    CAL.solve_chain = wrapper
+
+
 def _wrap_node_sweep():
-    """Stash `region_arrays` — `node_sweep` receives it and calls `build_node_init` after."""
-    orig = CAL.node_sweep
+    """Stash `region_arrays` — the sweep receives it and calls `build_node_init` after.
+
+    ⚠ The name it patches is ``calibrate.solve_chain`` (the BACKBONE). It used to be ``node_sweep``, and
+    that rename is exactly the TRAPS: an-ablation-that-never-ran hazard: patching a name the caller no longer calls raises nothing, sets
+    no ``region_arrays``, and every override arm downstream silently overrides nothing. So it is asserted
+    rather than assumed."""
+    if not hasattr(CAL, "solve_chain"):
+        raise RuntimeError(
+            "calibrate has no `solve_chain` binding — the name the sweep is called by has moved again, "
+            "and every arm that stashes region_arrays through it would silently do nothing (TRAPS.md an-ablation-that-never-ran)."
+        )
+    orig = CAL.solve_chain
 
     def wrapper(chain, statics, geometry, belief, region_arrays, *a, **kw):
         _RA["region_arrays"] = region_arrays
         return orig(chain, statics, geometry, belief, region_arrays, *a, **kw)
 
-    CAL.node_sweep = wrapper
+    CAL.solve_chain = wrapper
     return orig
 
 
 def _install_onesided_rna():
     """⭐⭐⭐ **THE CERTIFIED-RNA CLAIM IS A LOWER BOUND. DELIVER IT AS ONE.**
 
-    ``bp_solver.py:439-447`` states the premise in the source's own words: *"what the graft actually knows
+    ``messages/head.py``'s peel-share docstring states the premise in the source's own words: *"what the graft actually knows
     is an INEQUALITY, ``rho_R(exon) >= rho_nu(B) + rho_mu(B)`` … and it uses it as an equality."* ψ then
     applies ``-1/2 p (log f_active - mo_p)^2`` in BOTH code paths — symmetric in the residual, no hinge
     anywhere in the file — so a destination holding MORE RNA than the bound, which the inequality
@@ -717,7 +781,7 @@ def _install_onesided_rna():
     ⛔ **And an UNDER-claiming RNA message therefore drives ``f_g`` UP.** On an unstranded 1 %-gDNA library
     an exon's mass is essentially all RNA (``f_active`` near 1), so a message saying "the RNA share is 0.3"
     is read as "70 % of this is gDNA". Measured at ``g01 ss0.50 capture_on`` by ψ-boundary ablation with
-    the A5 identity exact: HEAD's self-solve is 0.0086 against a truth of 0.0023, the message drives it to
+    the byte-identity gate identity exact: HEAD's self-solve is 0.0086 against a truth of 0.0023, the message drives it to
     **0.3219** at precision 327, and muting the channel returns **0.0005**. Eight of HEAD's twelve worst
     slots behave that way.
 
@@ -726,18 +790,18 @@ def _install_onesided_rna():
     resolve to *no* gDNA. This adds doubt in **one direction only** — "at least this much RNA" — so at
     ``g00``, where the truth is ``f_active = 1``, every bound is satisfied and the channel goes **inert**
     rather than harmful. ⭐ And the message-precision sweep says the defect is a BIAS rather than a
-    loudness (no plateau; the stranded optimum is exactly zero), which is `TRAPS.md` D1: a variance cannot
+    loudness (no plateau; the stranded optimum is exactly zero), which is TRAPS: a-variance-cannot-fix-a-bias: a variance cannot
     fix a bias, and all three operators currently pricing this inequality are variances.
 
     ⚠ **Only the RNA channel.** The gDNA measurement is arguably a lower bound too — under capture
     ``gamma >= 1``, so the destination may hold MORE gDNA than a neighbour reports — but that is a second
     thing varied and a separate arm. ⚠ The bound also reaches ψ a SECOND time through ``tlam`` ->
-    ``lam_imp`` (``bp_solver.py:1474-1479``), also two-sided; this arm does not touch that path, so a
+    ``lam_imp`` (the combine's ``tlam``), also two-sided; this arm does not touch that path, so a
     partial recovery is the expected shape rather than a full one.
 
     ⛔ The switch is `simplex_logodds.ONE_SIDED_RNA`, default False and byte-identical off — with the flag
     down `_rna_residual` returns its input difference unmodified, which is why ``--arm base`` must still
-    reproduce the pre-refactor panel exactly (A5).
+    reproduce the pre-refactor panel exactly (TRAPS: byte-identity-gate).
     """
     import rigel.calibration.simplex_logodds as SL
 
@@ -761,7 +825,7 @@ def _install_msgscale(scale: float):
     unstranded x capture-ON still works (because any positive precision beats zero).
 
     ⛔⛔ **THIS IS A DIAGNOSTIC, NOT A PROPOSED FIX.** A global damping scalar is a tuned constant and
-    `CLAUDE.md` G1 forbids one. What the sweep decides is which KIND of defect this is:
+    TRAPS: no-magic-numbers forbids one. What the sweep decides is which KIND of defect this is:
 
       * a PLATEAU exists  => the precision model is wrong by a roughly constant factor, the fix is a
                              derivation that produces that factor, and the backbone keeps the message
@@ -772,7 +836,7 @@ def _install_msgscale(scale: float):
     ⚠ All four channels are scaled together — ``gdna_imp``, ``rna_imp``, ``lam_imp``, ``theta_imp`` — which
     is ONE thing varied and is exactly the claim as stated. Scaling them separately is a different, later
     experiment. The MODES are untouched, so nothing about what a message SAYS changes; only how loudly.
-    ⛔ A10 — all three ``_solve_nodes_logodds_all`` bindings are patched and the arm raises if unfired.
+    ⛔ TRAPS: an-ablation-that-never-ran — all three ``_solve_nodes_logodds_all`` bindings are patched and the arm raises if unfired.
     """
     import rigel.calibration.simplex_logodds as SL
 
@@ -793,7 +857,7 @@ def _install_msgscale(scale: float):
                 kw[key] = _s(kw[key])
         return orig_solve(*a, **kw)
 
-    for mod in (SL, NI, bp_solver):
+    for mod in (SL, NI, SW):
         if hasattr(mod, "_solve_nodes_logodds_all"):
             mod._solve_nodes_logodds_all = solve
 
@@ -802,7 +866,7 @@ def _install_msgfree(where: str):
     """⭐⭐⭐ **HOW MUCH OF THE MESSAGE LAYER DOES THE SUBSTRATE ACTUALLY NEED?** — the consolidation arm.
 
     ⛔ **Pass-0's ONLY job is to be a training substrate for the gDNA hyperprior** (owner, 2026-08-07;
-    ``variance_model_notes.md`` A2). It is not required to be accurate, and it is not the deliverable. So
+    TRAPS: perturb-every-gate). It is not required to be accurate, and it is not the deliverable. So
     the question that sizes the whole backbone has never been asked: **if pass-0 sends no messages at all,
     is the fitted prior worse?**
 
@@ -822,8 +886,8 @@ def _install_msgfree(where: str):
     is attributable to the message layer and to nothing else. ⭐ The whole relay still RUNS; only its
     delivery into psi is withheld. That keeps one thing varied and leaves the geometry identical.
 
-    ⛔ A10 — ``_solve_nodes_logodds_all`` is bound as a module global in THREE places
-    (``simplex_logodds``, ``node_init``, ``bp_solver``); all three are patched and the arm raises if it
+    ⛔ TRAPS: an-ablation-that-never-ran — ``_solve_nodes_logodds_all`` is bound as a module global in THREE places
+    (``simplex_logodds``, ``node_init``, ``sweep``); all three are patched and the arm raises if it
     never fired. And the pass-0-vs-refit switch is read off ``gdna_prior is None``, which is exactly how
     ``calibrate`` itself distinguishes the two phases (``calibrate.py:528`` vs ``:572``).
     """
@@ -840,12 +904,13 @@ def _install_msgfree(where: str):
                 kw[k] = None
         return orig_solve(*a, **kw)
 
-    for mod in (SL, NI, bp_solver):
+    for mod in (SL, NI, SW):
         if hasattr(mod, "_solve_nodes_logodds_all"):
             mod._solve_nodes_logodds_all = solve
 
     if where == "p0":
-        orig_sweep = bp_solver.node_sweep
+        orig_sweep = SW.solve_chain
+        n_wrapped = 0
 
         def sweep(chain, statics, geometry, belief, region_arrays, *a, **kw):
             # the prior-free sweep is the one `calibrate` calls with `gdna_prior=None`
@@ -855,9 +920,12 @@ def _install_msgfree(where: str):
             finally:
                 state["muted"] = False
 
-        for mod in (CAL, bp_solver):
-            if hasattr(mod, "node_sweep"):
-                mod.node_sweep = sweep
+        for mod in (CAL, SW):
+            if hasattr(mod, "solve_chain"):
+                mod.solve_chain = sweep
+                n_wrapped += 1
+        if not n_wrapped:
+            raise RuntimeError("msgfree_p0: no `solve_chain` binding to wrap (TRAPS.md an-ablation-that-never-ran)")
 
 
 def _install_face_one():
@@ -930,7 +998,7 @@ def _install_face_one():
             struct_lock=lock, tau_lam=tau,
         )
 
-    bp_solver.build_node_init = wrapper
+    SW.build_node_init = wrapper
 
 
 def main() -> int:
@@ -939,6 +1007,8 @@ def main() -> int:
         "--arm",
         choices=(
             "base",
+            "backbone_head",
+            "backbone",
             "msgfree_p0",
             "msgfree_all",
             "msgscale_0.001",
@@ -1013,7 +1083,7 @@ def main() -> int:
             else:
                 print(f"  shard {i}: {len(shards[i])} conditions ok", flush=True)
         if rc:
-            # ⛔ A10's shape: a shard that died leaves a SHORT output file, and concatenating it
+            # ⛔ TRAPS: an-ablation-that-never-ran's shape: a shard that died leaves a SHORT output file, and concatenating it
             # silently would publish a partial panel that reads like a complete one.
             raise RuntimeError(f"{args.arm}: a shard failed; refusing to concatenate a partial panel")
         with args.out.open("w") as fh:
@@ -1024,7 +1094,9 @@ def main() -> int:
         return 0
 
     #   the shipped one — wrapping first would leave the base sweep in the chain.
-    if args.arm in ("msgfree_p0", "msgfree_all"):
+    if args.arm in ("backbone", "backbone_head"):
+        _install_backbone(silent=args.arm == "backbone")
+    elif args.arm in ("msgfree_p0", "msgfree_all"):
         _install_msgfree("p0" if args.arm == "msgfree_p0" else "all")
     elif args.arm.startswith("msgscale_"):
         _install_msgscale(float(args.arm.split("_", 1)[1]))
@@ -1038,7 +1110,7 @@ def main() -> int:
         _install_kappa_half()
     # ⭐ ``zc_noop`` re-derives HEAD's own two decisions through the SAME rebuild path as the three
     #   reverts, so it must come out byte-identical to ``base``. That is the falsification for the
-    #   rebuild itself (`TRAPS.md` A5) — if noop ≠ base, no zc_* reading means anything.
+    #   rebuild itself (TRAPS: byte-identity-gate) — if noop ≠ base, no zc_* reading means anything.
     elif args.arm == "zc_noop":
         _install_rebuild("zc_noop", total_n=False, count_live=False)
     elif args.arm == "zc_own_count":
@@ -1068,7 +1140,7 @@ def main() -> int:
     elif args.arm == "zc_ref_prior_damp":
         # ⭐ the PAIR: the own belief exists (step 1) AND the message is damped by the discrepancy
         #   (`zc_disc_var`). Neither can work alone — damping needs something to lose to, and an own
-        #   belief without damping just competes with an undamped message. `TRAPS.md` D4j.
+        #   belief without damping just competes with an undamped message. TRAPS: a-cancelling-defect-pair.
         _install_zc_ref_prior()
         _install_zc_disc_var()
 
@@ -1089,7 +1161,7 @@ def main() -> int:
                 # harness reads ``pass0`` and ``final`` ONLY — so those two calibrate runs were pure
                 # waste. Measured: 35.2 s -> 24.5 s per condition (**-30 %**), 10 node_sweep calls -> 5,
                 # and all four scored fields BYTE-IDENTICAL on both axes. ⭐ Verified, not assumed
-                # (`TRAPS.md` A5): dropping work that changes a number is a different change entirely.
+                # (TRAPS: byte-identity-gate): dropping work that changes a number is a different change entirely.
                 truth_pmfs=None,
                 oracle_cache=args.oracle_cache,
             )
@@ -1098,7 +1170,7 @@ def main() -> int:
                 # ⛔⛔ FIXED-DENOMINATOR COMPANIONS. `solvable_mwae`'s denominator is the SOLVABLE set,
                 # and an arm that changes what counts as solvable changes its own denominator — so a
                 # fall in it can be "solved better" or "stopped scoring the hard ones" and the number
-                # cannot tell you which (`TRAPS.md` B13/B20). These three cannot move that way:
+                # cannot tell you which (TRAPS: excluding-a-population-hides-it/TRAPS: admitting-an-object-costs). These three cannot move that way:
                 #   * `mwae_all`  — every object with mass, so the denominator is the library.
                 #   * `abs_err_all` — the raw error MASS, no denominator at all.
                 #   * `library_f_gdna` — the deliverable itself, one number per condition.
@@ -1117,18 +1189,18 @@ def main() -> int:
                                      "f_gdna": truth, **s}) + "\n")
                 fh.flush()
             print(f"  {name} {time.perf_counter() - t0:.0f}s", flush=True)
-    # ⛔⛔ A10 — an ablation that never ran scores byte-identical to base and reads as "inert".
+    # ⛔⛔ TRAPS: an-ablation-that-never-ran — an ablation that never ran scores byte-identical to base and reads as "inert".
     # ⚠ a COMPOSITE arm fires only its components' names, so require ANY zc_* firing rather than this
     #   arm's own name. The guard tripped on `zc_ref_prior_damp` AFTER a complete, valid run — it caught a
-    #   bookkeeping gap, not a measurement one, and narrowing it here keeps A10's teeth for the real case
+    #   bookkeeping gap, not a measurement one, and narrowing it here keeps TRAPS: an-ablation-that-never-ran's teeth for the real case
     #   (nothing fired at all).
     if (
-        args.arm in ("msgfree_p0", "msgfree_all", "onesided_rna")
+        args.arm in ("msgfree_p0", "msgfree_all", "onesided_rna", "backbone", "backbone_head")
         or args.arm.startswith("msgscale_")
     ) and not _FIRED.get(args.arm):
         raise RuntimeError(
             f"arm {args.arm!r} NEVER FIRED — the patched name is not the one the solver calls. "
-            f"fired: {_FIRED or '{}'} (TRAPS.md A10)"
+            f"fired: {_FIRED or '{}'} (TRAPS.md an-ablation-that-never-ran)"
         )
     if (
         args.arm.startswith("zc_")
@@ -1136,7 +1208,7 @@ def main() -> int:
     ):
         raise RuntimeError(
             f"arm {args.arm!r} NEVER FIRED — the patched name is not the one the solver calls. "
-            f"fired: {_FIRED or '{}'} (TRAPS.md A10)"
+            f"fired: {_FIRED or '{}'} (TRAPS.md an-ablation-that-never-ran)"
         )
     if _FIRED:
         print(f"  ⭐ ablation fired {_FIRED} time(s) — {args.arm}", flush=True)

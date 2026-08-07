@@ -20,7 +20,7 @@ point of this instrument is to separate three populations that a mass-weighted e
    neighbours and anchors the prior.
 
 ⛔ **THE CONFIDENCE COMPARISON MUST BE IN LOG SPACE, AND THE FIELD NAME LIES ABOUT THIS.**
-``var_gdna`` / ``gdna_frac_var`` is ``Var(log f_g)`` (`simplex_logodds`, required by D2), while both
+``var_gdna`` / ``gdna_frac_var`` is ``Var(log f_g)`` (`simplex_logodds`, required by TRAPS: two-gaussians-one-latent), while both
 names read as the variance of the fraction. Writing ``|f_g − truth| / sqrt(var_gdna)`` is a linear
 error over a log-space variance — the exact defect that, when corrected once before, moved a suite
 total 0.046 → 1.007 and INVERTED the per-class ranking. So the standardised discrepancy here is::
@@ -133,7 +133,7 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
     used, and with the length channel off, whatever remains of ``tau_lam`` is the strand arm. So these
     are the solver's own numbers, split, not a second opinion about them.
 
-    ⛔ **``locked`` IS THE G1 CLASS ON BOTH AXES** (:func:`~rigel.calibration.node_geometry.g1_locked`).
+    ⛔ **``locked`` IS THE TRAPS: no-magic-numbers CLASS ON BOTH AXES** (:func:`~rigel.calibration.node_geometry.g1_locked`).
     It used to be ``~solvable & (kind == NODE)``, which dropped every structurally-locked **edge** — an
     intergenic↔exon seam, where RNA cannot cross a gene boundary and ``_type_belief`` pins ``{0,0,1}``
     at ``Var(log f_g) = 0`` — into ``none``, i.e. excluded it from the scored population as honest
@@ -154,7 +154,7 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
             f"capture['_tau0_lam'] has shape {tau.shape}; expected ({int(chain.n_slots)},), one per "
             f"chain slot. The capture and the chain describe different partitions."
         )
-    # G1, from the ONE definition (`node_geometry.g1_locked`) — see there for why this is both axes
+    # TRAPS: no-magic-numbers, from the ONE definition (`node_geometry.g1_locked`) — see there for why this is both axes
     # and why `node_init.struct_lock` is deliberately NOT.
     locked = g1_locked(capture["free_pos"], capture["free_neg"])
     lam_grid, _ = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
@@ -378,7 +378,7 @@ def report(m, a: dict, config=None) -> None:
     print(f"   {'sd(λ) nats':<14} {'objects':>9} {'mass':>14} {'Σ|err|':>14} {'err share':>10} "
           f"{'pred f_g':>9} {'true f_g':>9}")
     _lock = a["channels"]["locked"] & live
-    print(f"   {'CERTAIN (G1)':<14} {int(_lock.sum()):>9,} {total[_lock].sum():>14,.0f} "
+    print(f"   {'CERTAIN (TRAPS: no-magic-numbers)':<14} {int(_lock.sum()):>9,} {total[_lock].sum():>14,.0f} "
           f"{err[_lock].sum():>14,.0f} {err[_lock].sum() / max(err[det].sum(), 1):>9.1%} "
           f"{'—':>9} {'—':>9}   structurally pure gDNA; nothing was asked of it")
     for label, n, mass, e, pred, true in resolving_power_rows(a, det & ~_lock):
@@ -559,12 +559,12 @@ def summarise(a: dict) -> dict:
         return float(np.sum(w * np.abs(a["ladder"][key][det] - f_true[det])) / max(w.sum(), 1))
 
     local, final = rung("fg_loc"), rung("f_g")
-    # ⭐⭐⭐ THE TWO FIXED-DENOMINATOR FIELDS — `TRAPS.md` A12's own prescription, and the reason this
+    # ⭐⭐⭐ THE TWO FIXED-DENOMINATOR FIELDS — TRAPS: honesty-metrics-reward-ignorance's own prescription, and the reason this
     # table can be ranked on at all. Every field above is defined over the DETERMINED set, whose size
     # the solver moves by declining to answer; these two are defined over the LIVE population, so
     # nothing the solver does to its own confidence can touch them.
     # ⛔ They exist because the boolean `determined` flips on FITTING NOISE at some conditions and not
-    # others (A12b): `g75 ss0.50 capture_off` reports solv% 96.2 %, weak% 65.4 %, conf-wrong 92,154
+    # others (TRAPS: deadband-from-the-wrong-sample): `g75 ss0.50 capture_off` reports solv% 96.2 %, weak% 65.4 %, conf-wrong 92,154
     # and calib 3.67 — and forcing κ = ½ takes solv% to 0.0 % while Σ|err| moves −0.6/−5.3/+4.6 %
     # across the three big classes. The row is a reporting artefact, and ranking the ladder on the
     # gameable columns picked it as the panel's worst. These two would not have.
@@ -575,7 +575,7 @@ def summarise(a: dict) -> dict:
     }
     # ⭐⭐ THE COMPANION COLUMN THAT MAKES ``solv%`` SAFE TO READ. ``solv%`` counts objects the SOLVER
     # treats as evidenced (``tau > 1e-9``), and that admits a strand arm whose own statement is 10³ nats
-    # wide — statistically real, physically nil (`TRAPS.md` B11). So report, beside it, the share of the
+    # wide — statistically real, physically nil (TRAPS: a-threshold-on-a-fitted-residue). So report, beside it, the share of the
     # scored error that sits on objects whose own evidence cannot resolve one nat in ten. ⚠ 10 is a
     # DECADE off the curve, a read point, not a cut: nothing branches on it, and the curve above it in
     # the single-condition report is what a reader should actually consult.
@@ -608,13 +608,13 @@ def panel_report(rows: list[tuple[str, float, dict]]) -> None:
     print("      moved objects that HAD their own answer away from truth.")
     print("   ⛔⛔ READ `weak%` BEFORE `mwae`. `solv%` counts what the SOLVER treats as evidenced, and")
     print("      that admits a strand arm whose own statement is 10³ nats wide against a ±10-nat grid")
-    print("      (TRAPS B11). `weak%` is the share of the scored ERROR sitting on objects with")
+    print("      (TRAPS a-threshold-on-a-fitted-residue). `weak%` is the share of the scored ERROR sitting on objects with")
     print("      sd(λ) ≥ 10 nats — i.e. on objects that had no answer of their own after all. A row")
     print("      with weak% near 100 is reporting the relay and the reference, not a solve.")
     print()
     print("   ⭐⭐ AND RANK ON THE LAST TWO, NOT ON `solv%`/`mwae`/`conf-wrong`/`calib`. Those four")
     print("      share a denominator the SOLVER moves — `determined` is a boolean on a continuous τ,")
-    print("      and it flips on fitting noise (TRAPS A12b). `mwae_all` and `Σ|err|` are over every")
+    print("      and it flips on fitting noise (TRAPS deadband-from-the-wrong-sample). `mwae_all` and `Σ|err|` are over every")
     print("      LIVE object, so nothing the solver does to its own confidence can touch them.")
     print(f"   {'condition':<46} {'f_gdna':>7} {'solv%':>6} {'weak%':>6} {'mwae':>7} "
           f"{'conf-wrong':>11} {'calib':>6} {'local':>7} {'final':>7} {'relay Δ':>9} "

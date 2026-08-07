@@ -317,7 +317,7 @@ def _expected(partition, ref_id, lo, hi, introns, motif):
 
     ⛔ ``length`` is the TOTAL OF THE SEGMENTS, never ``(hi − lo) − Σ intron``. The two differ the moment
     two introns overlap, and this function used to use the naive form — reproducing, inside the harness,
-    the exact bug the reference was fixed for (B1). It agreed on real data only because a discriminating
+    the exact bug the reference was fixed for (TRAPS: measure-the-ceiling-first). It agreed on real data only because a discriminating
     fragment is roughly 1 in 875,670. ``--self-check`` now pins the six cases where it matters.
 
     ⚠ Introns are CLIPPED to ``[lo, hi)``, not filtered by it. Filtering drops an intron that straddles

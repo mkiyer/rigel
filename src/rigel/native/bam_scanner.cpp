@@ -2134,7 +2134,7 @@ private:
 
             const std::size_t pool_row = static_cast<std::size_t>(max_length_) + 1;
             std::vector<int64_t> pool_lengths(kNFragmentPools * pool_row, 0);
-            // ⭐ C1: the unconditional histogram, summed over references exactly like the pools.
+            // ⭐ TRAPS: a-purity-filter-is-a-length-filter — the unconditional histogram, summed over references exactly like the pools.
             std::vector<uint32_t> deposited_lengths(pool_row, 0u);
 
             rigel::accumulator::DepositCounters qc;
@@ -2200,7 +2200,7 @@ private:
                 }
                 const int64_t* pools = a.pool_lengths_data();
                 for (std::size_t i = 0; i < pool_lengths.size(); ++i) pool_lengths[i] += pools[i];
-                // ⭐ C1. Same size guard, same reason: a silently skipped reference would leave the
+                // ⭐ TRAPS: a-purity-filter-is-a-length-filter. Same size guard, same reason: a silently skipped reference would leave the
                 // anchor short by that reference's fragments with nothing to notice it by, and the
                 // sum(deposited_lengths) == deposited invariant is what would fire -- but only if the
                 // array is the right length in the first place.
@@ -3093,7 +3093,7 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("hypotheses"))
 
             // ⭐ L under ONE hypothesis, without depositing — what the second pass scores against.
-            // ⛔ Exposed rather than reimplemented in Python: C0/C2 left the tool with ONE definition of
+            // ⛔ Exposed rather than reimplemented in Python: the pool rules left the tool with ONE definition of
             // fragment length, and a scorer that computed its own would be a second definition of exactly
             // the quantity that audit unified — and the one the drain would then disagree with.
             .def("length_under",

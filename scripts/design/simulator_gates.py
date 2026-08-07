@@ -4,7 +4,7 @@ r"""The simulator's acceptance gates — G-S1..G-S6, scored on the panel's own p
 
 ⭐ **Every gate here is DIRECTIONAL or an absolute count.** Not one of them carries a threshold: a pass
 mark on "how much longer is a captured fragment" would be inventing the capture efficiency curve, which
-is `docs/TRAPS.md` G1. The *sign* is physics — hybrid capture hybridises probes to
+is `docs/TRAPS.md` no-magic-numbers. The *sign* is physics — hybrid capture hybridises probes to
 sequence, so a short fragment presents less sequence, binds worse, and is captured less efficiently —
 and the sign is all that is asserted. The magnitude is whatever `binding_per_base` and the probe length
 imply.
@@ -19,20 +19,20 @@ imply.
 | G-S6 | gDNA fragments longer than their own reference | absolute count, must be 0 |
 
 ⚠ **G-S4 is scored on PROBE OVERLAP, not on the start's territory, and the difference is not cosmetic**
-(`docs/TRAPS.md` F6). Conditioned on being captured, a fragment whose start is in the intron is one that
+(`docs/TRAPS.md` on-target-by-start-is-geometry). Conditioned on being captured, a fragment whose start is in the intron is one that
 was **long enough to reach the probe**, so an intronic start selects long fragments by construction
 (weight ~ w^2/2) while an exonic start does not (weight ~ p^2/2, flat in w). So an exonic-start population
 reads SHORTER than an intronic-start one under any capture model of this form, and gating on that pair is
 gating on geometry. The population that physically binds is the one that **overlaps a probe**, so that is
 what is scored; the start-territory table is printed underneath as the diagnostic it is.
 
-⚠ **G-S4 is a REGRESSION GUARD, not a falsification** (`docs/TRAPS.md` A3): it passed with the capture
+⚠ **G-S4 is a REGRESSION GUARD, not a falsification** (`docs/TRAPS.md` a-gate-that-already-passed): it passed with the capture
 defect present, because the engine's per-fragment conditional was right and only the marginal was being
 discarded. G-S3 is the gate that falsifies.
 
 ⚠ **G-S3 and G-S5 read `truth_fragment_lengths.tsv`**, the panel's own post-capture empirical truth,
 and never the configured `frag_mean`. The configured value describes a library that was never
-sequenced; post-capture is the baseline (`docs/TRAPS.md` F5).
+sequenced; post-capture is the baseline (`docs/TRAPS.md` capture-selects-for-length).
 
     python scripts/design/simulator_gates.py --suite ~/Downloads/rigel_runs/suite/pilot \\
         --reference ~/Downloads/rigel_runs/suite/reference [--genomic-refs chr21 chr22]

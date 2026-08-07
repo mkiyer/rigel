@@ -197,7 +197,7 @@ class GapResolution(enum.Enum):
     ⛔ **This is its own axis and NOT a `splice_type`.** The umbrella cuts ACROSS the splice census: a
     certified-RNA ``SPLICED_ANNOT`` fragment with an intron in its mate gap needs resolving exactly as
     much as an ``UNSPLICED`` one does. Putting these values on ``splice_type`` would need two labels per
-    fragment and would break C2.0's property that the splice census sums to the library.
+    fragment and would break TRAPS: pure-and-length-censored.0's property that the splice census sums to the library.
 
     ⚠ These classify the ARBITRATION, not the deposit. A ``RESOLVED_*`` fragment can still be rejected
     afterwards as ``TOO_LONG`` — that is a different question and it has its own counter.
@@ -490,7 +490,7 @@ class Tally:
     sj_inv_length_sum: np.ndarray  # uint64[n_sj, 2]
     sj_length_sum: np.ndarray  # uint64[n_sj, 2] — Sum L, the second length tilt
     pool_lengths: np.ndarray  # int64[5, max_fragment_length + 1] — binned at L, once per fragment
-    #: uint32[max_fragment_length + 1] — ⭐ **C1: EVERY deposited fragment, binned at its own L, with no
+    #: uint32[max_fragment_length + 1] — ⭐ **TRAPS: a-purity-filter-is-a-length-filter: EVERY deposited fragment, binned at its own L, with no
     # purity condition.** The five pure pools above are deliberately CONDITIONED
     #: §8: an impure pool is worse than a missing one), so they cannot serve as the unconditional anchor an
     #: empirical-Bayes shrinkage needs — which is why that anchor was taken from the SCANNER, which
@@ -804,7 +804,7 @@ class Accumulator:
         t = self.tally
         node_base, edge_base = int(p.ref_node_offsets[ref]), int(p.ref_edge_offsets[ref])
         t.node_start_count[node_base + self._local_node(cuts, first_base)] += 1
-        # ⭐ C1: the unconditional length histogram, incremented HERE — beside the start count and the
+        # ⭐ TRAPS: a-purity-filter-is-a-length-filter: the unconditional length histogram, incremented HERE — beside the start count and the
         # DEPOSITED counter — so all three describe one population by construction rather than by
         # agreement. ``length`` is already clipped to the reference and gated by the length limit above.
         t.deposited_lengths[length] += 1

@@ -3,14 +3,14 @@
 
 ⭐ **The falsification this area never had.** On a zero-gDNA condition every fragment is RNA, so the
 unconditional anchor and the RNA pool describe **one population** and any gap between them is bias.
-§2 measured that gap at **+11.6 % mean / +71.1 % sd** with the scanner's histogram as the anchor; C1
+§2 measured that gap at **+11.6 % mean / +71.1 % sd** with the scanner's histogram as the anchor; TRAPS: a-purity-filter-is-a-length-filter
 built the accumulator's own histogram and measured **+7.7 % / +32.0 %**, isolating the residual as the
-junction-opportunity tilt (C3's target). This script says which of those the *shipped* code is on.
+junction-opportunity tilt (TRAPS: divide-by-a-probability's target). This script says which of those the *shipped* code is on.
 
 ⚠ It reads the anchor **through ``build_fl_models``**, not off the payload directly — the question is
 what the tool is wired to use, not what is available to it.
 
-⭐ **The truth panel (``--truth``) is C2.6's gate**, The simulator writes
+⭐ **The truth panel (``--truth``) is TRAPS: pure-and-length-censored.6's gate**, The simulator writes
 ``truth_fragment_lengths.tsv`` beside every condition, so the library's realized fragment-length support
 is known **exactly** and none of the targets below is chosen:
 
@@ -20,8 +20,8 @@ is known **exactly** and none of the targets below is chosen:
     G-gdna   ⛔ THE CONTROL. `DNA_INTERGENIC` is pure gDNA and gDNA has NO INTRONS TO MISS, so it was
              already exact to five decimals. If it MOVES, the fix reached fragments with no introns —
              which is impossible, and therefore a bug
-    D1       how much mass leaves `RNA_SPLICED` because its `L` depends on an unsequenced intron
-    D3       the residual above the true ceiling, which is where a mate gap holding TWO introns shows
+    TRAPS: a-variance-cannot-fix-a-bias       how much mass leaves `RNA_SPLICED` because its `L` depends on an unsequenced intron
+    TRAPS: variance-fitted-on-the-belief       the residual above the true ceiling, which is where a mate gap holding TWO introns shows
              up (`transcript_has_implicit_intron_in_gap` returns the FIRST match and stops)
 
 ⛔ **Nothing here is tuned.** Every target is read from the truth file or is a control that must not
@@ -147,7 +147,7 @@ def measure(
             "introns_absorbed": payload.qc.introns_absorbed,
             # ⭐ The umbrella census, so the deferred total can be read as its three subclasses: is the
             # open question RNA-or-gDNA, which-structure, or both? `sj_implicit_fragments` used to sit
-            # here and is GONE — D1 is deleted, and "this L was partly inferred" no longer selects
+            # here and is GONE — TRAPS: a-variance-cannot-fix-a-bias is deleted, and "this L was partly inferred" no longer selects
             # anything: a fragment deposits when exactly ONE hypothesis survives, however it got there.
             "gap_resolved_spliced": payload.gap_resolution.gap_resolved_spliced,
             "gap_deferred_rna_or_gdna": payload.gap_resolution.gap_deferred_rna_or_gdna,
@@ -305,7 +305,7 @@ def main() -> int:
     print()
     print("⭐ The ZERO-gDNA rows (`gdna_none_*`) are the falsification: every fragment there is RNA,")
     print("   so anchor and RNA pool describe ONE population and the gap is bias, not composition.")
-    print("   §2 (scanner anchor): +11.6 % / +71.1 %.   C1 (accumulator anchor): +7.7 % / +32.0 %.")
+    print("   §2 (scanner anchor): +11.6 % / +71.1 %.   TRAPS: a-purity-filter-is-a-length-filter (accumulator anchor): +7.7 % / +32.0 %.")
 
     scored = [r for r in rows if "anchor_vs_mrna" in r]
     if scored:
@@ -343,9 +343,9 @@ def main() -> int:
         print("      with no introns — impossible, therefore a bug.")
 
         print()
-        print("═══ the side buffer · how each gap resolved · D3 · the residual above the ceiling ═══")
+        print("═══ the side buffer · how each gap resolved · TRAPS: variance-fitted-on-the-belief · the residual above the ceiling ═══")
         print(f"{'condition':<44} {'deposited':>10} {'resolved':>9} {'defer':>8} {'frac':>7} "
-              f"{'rna|dna':>8} {'which':>7} {'both':>6} {'RNA pool n':>11} {'D3 resid':>9}")
+              f"{'rna|dna':>8} {'which':>7} {'both':>6} {'RNA pool n':>11} {'TRAPS: variance-fitted-on-the-belief resid':>9}")
         print("-" * 130)
         for r in scored:
             qc = r["qc"]
@@ -362,7 +362,7 @@ def main() -> int:
         print("   ⚠ The deferred population is the LONG one: a longer gap admits more hypotheses. So the")
         print("      surviving anchor is biased SHORT and every junction-opportunity number in the docs")
         print("      must be re-measured AFTER the drain, not before.")
-        print("   ⚠ `D3 resid` is the mass still above the true ceiling. Measure it; do NOT close it with")
+        print("   ⚠ `TRAPS: variance-fitted-on-the-belief resid` is the mass still above the true ceiling. Measure it; do NOT close it with")
         print("      a constant.")
 
     drained_rows = [r for r in rows if "drained" in r and "anchor_vs_mrna" in r]
@@ -401,7 +401,7 @@ def main() -> int:
         print("      RNA contaminating it — a drained fragment that chose ∅ and landed contained in an")
         print("      intronic node. ⚠ On gdna100 growth is LEGITIMATE: a real gDNA fragment whose mate")
         print("      gap spans an annotated intron is genuinely ambiguous and was genuinely held.")
-        print("   ⚠ So this is not C2.6's control. There the fix could not reach a fragment with no")
+        print("   ⚠ So this is not TRAPS: pure-and-length-censored.6's control. There the fix could not reach a fragment with no")
         print("      introns, so any movement was a bug; here the drain reaches fragments it is supposed")
         print("      to. Read the ZERO-gDNA rows as the false-positive rate of the ∅ choice.")
 

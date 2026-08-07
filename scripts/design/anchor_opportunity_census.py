@@ -2,7 +2,7 @@
 """⭐⭐⭐ IS A ZERO-COUNT ANCHOR'S DENSITY CLAIM TRUE OF ITS NEIGHBOURHOOD? — no solver runs.
 
 ⛔ **THE QUESTION.** A structurally pure-gDNA NODE (intergenic, ``struct_lock``) with **zero** counts now
-forms and transmits the claim ``rho_g = 0`` at precision ``1/trigamma(1/2) = 0.2026`` (`TRAPS.md` C0c/C0d).
+forms and transmits the claim ``rho_g = 0`` at precision ``1/trigamma(1/2) = 0.2026`` (TRAPS: a-zero-count-is-a-measurement/TRAPS: a-ratio-cannot-carry-zero).
 Off capture that is the strongest true statement in a gDNA-free library. **Under capture an empty
 intergenic node may mean "no probe here" rather than "no gDNA here"** — and the relay's currency is a
 density RATIO, so a source claiming zero multiplies every destination it reaches to zero.

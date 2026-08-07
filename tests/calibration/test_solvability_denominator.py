@@ -1,4 +1,4 @@
-"""⛔⛔ THE RANKING COLUMN MUST NOT BE GAMEABLE BY THE SOLVER KNOWING LESS — `TRAPS.md` A12, A12b.
+"""⛔⛔ THE RANKING COLUMN MUST NOT BE GAMEABLE BY THE SOLVER KNOWING LESS — TRAPS: honesty-metrics-reward-ignorance, TRAPS: deadband-from-the-wrong-sample.
 
 `solvability_audit`'s headline scores the SOLVABLE population, and "solvable" is a BOOLEAN on a
 CONTINUOUS quantity: `own_composition_logvar` treats any `tau_lam > 1e-9` as own evidence. On an
@@ -6,23 +6,23 @@ unstranded library the strand arm carries a genuinely nonzero but physically nil
 measured `I ≈ Var(κ̂)·N_eff/(p(1−p))`, i.e. roughly the node's depth over the library's spliced
 depth — so that boolean flips on fitting noise at some conditions and not others.
 
-⭐ **That is not fixable in the solver and three designs prove it** (`SESSION_HANDOFF`, `TRAPS` A12b):
+⭐ **That is not fixable in the solver and three designs prove it** (TRAPS: deadband-from-the-wrong-sample):
 a resolving-power floor at `1/(2L)²` was derived, implemented and REFUTED (τ is continuous across
 the region — no empty interval, so any floor is a tuned constant); subtracting exactly `Var(κ̂)`
 instead of `σ²_d` OPENS the zero-gDNA control; and propagating `Var(κ̂)` into the Schur denominator
 is inert because the node's own binomial noise dominates it by 87×–5,179×.
 
-⛔ **So the headline needs a FIXED-DENOMINATOR companion, which is exactly what A12 already
+⛔ **So the headline needs a FIXED-DENOMINATOR companion, which is exactly what TRAPS: honesty-metrics-reward-ignorance already
 prescribes and what the table did not carry:** ``mwae`` over ALL live objects, and the raw
 ``Σ|err|`` in fragments. Neither has a denominator the solver can move by declining to answer.
 
 ===  ===========================================================================================
-D1   ``summarise`` emits ``all_mwae`` and ``abs_err``
-D2   ⭐ they are FIXED-DENOMINATOR — shrinking the solvable set leaves both BIT-IDENTICAL, while
+TRAPS: a-variance-cannot-fix-a-bias   ``summarise`` emits ``all_mwae`` and ``abs_err``
+TRAPS: two-gaussians-one-latent   ⭐ they are FIXED-DENOMINATOR — shrinking the solvable set leaves both BIT-IDENTICAL, while
      every existing headline field moves. This is the property the whole file exists for
-D3   ``all_mwae`` is the honest mass-weighted mean over the live population (brute-forced)
-D4   ONE HOME for "has own composition evidence" — the instruments import the solver's predicate
-     instead of restating ``1e-9`` (`TRAPS.md` A11)
+TRAPS: variance-fitted-on-the-belief   ``all_mwae`` is the honest mass-weighted mean over the live population (brute-forced)
+TRAPS: a-message-from-the-destinations-belief   ONE HOME for "has own composition evidence" — the instruments import the solver's predicate
+     instead of restating ``1e-9`` (TRAPS: a-test-that-redefines)
 ===  ===========================================================================================
 """
 
@@ -43,15 +43,23 @@ def _fixture(n=400, seed=3):
     err = np.abs(f_pred - f_true) * total
     # τ spanning six decades either side of the 1e-9 boolean, which is the whole point
     tau = 10.0 ** rng.uniform(-14.0, 2.0, n)
-    return dict(total=total, f_true=f_true, f_pred=f_pred, err=err, tau=tau,
-                live=np.ones(n, bool), z=rng.normal(0.0, 3.0, n), gap=rng.normal(0.0, 0.4, n))
+    return dict(
+        total=total,
+        f_true=f_true,
+        f_pred=f_pred,
+        err=err,
+        tau=tau,
+        live=np.ones(n, bool),
+        z=rng.normal(0.0, 3.0, n),
+        gap=rng.normal(0.0, 0.4, n),
+    )
 
 
-# ── D4 — one home ───────────────────────────────────────────────────────────────────────────────
+# ── TRAPS: a-message-from-the-destinations-belief — one home ───────────────────────────────────────────────────────────────────────────────
 
 
 def test_D4_the_evidence_predicate_has_ONE_home_and_the_instruments_import_it():
-    """⭐ `TRAPS.md` A11: a gate that re-derives a definition cannot detect drift in it, so the
+    """⭐ TRAPS: a-test-that-redefines: a gate that re-derives a definition cannot detect drift in it, so the
     definition must live in ONE place with every consumer importing it. The home is production —
     the predicate is a production concept and ``scripts/`` is deliberately not importable.
 
@@ -67,14 +75,14 @@ def test_D4_the_evidence_predicate_has_ONE_home_and_the_instruments_import_it():
 
 
 def test_D4_perturbation_a_DIFFERENT_predicate_stops_matching_the_solver():
-    """⚠ The falsification for D4 — if a consumer picked its own cut, the identity above breaks."""
+    """⚠ The falsification for TRAPS: a-message-from-the-destinations-belief — if a consumer picked its own cut, the identity above breaks."""
     tau = np.array([0.0, 1e-12, 1e-9, 2e-9, 1e-4, 1.0])
     theirs = tau > 1e-6  # a plausible, wrong, home-made floor
     v_fg, _ = own_composition_logvar(np.full(tau.shape, 0.4), tau, np.zeros(tau.shape, bool))
     assert not np.array_equal(theirs, np.isfinite(v_fg))
 
 
-# ── D1/D3 — the two fixed-denominator fields ────────────────────────────────────────────────────
+# ── TRAPS: a-variance-cannot-fix-a-bias/TRAPS: variance-fitted-on-the-belief — the two fixed-denominator fields ────────────────────────────────────────────────────
 
 
 def _summarise(fx, det):
@@ -92,11 +100,18 @@ def _summarise(fx, det):
     SA = sys.modules[key]
     n = fx["total"].shape[0]
     a = dict(
-        determined=det, total=fx["total"], err=fx["f_pred"] - fx["f_true"], live=fx["live"],
-        # ⚠ z must be WIDE enough that |z| ≥ 2 selects a real subset, or D2's "the gameable columns
-        # moved" control is vacuous — `conf_wrong` would be 0 in both arms and prove nothing (A14).
-        z=fx["z"], sd=np.full(n, 0.5), gap=fx["gap"], sd_lam=np.full(n, 1.0),
-        f_true=fx["f_true"], ladder={"fg_loc": fx["f_pred"], "f_g": fx["f_pred"]},
+        determined=det,
+        total=fx["total"],
+        err=fx["f_pred"] - fx["f_true"],
+        live=fx["live"],
+        # ⚠ z must be WIDE enough that |z| ≥ 2 selects a real subset, or TRAPS: two-gaussians-one-latent's "the gameable columns
+        # moved" control is vacuous — `conf_wrong` would be 0 in both arms and prove nothing (TRAPS: could-the-arm-have-fired).
+        z=fx["z"],
+        sd=np.full(n, 0.5),
+        gap=fx["gap"],
+        sd_lam=np.full(n, 1.0),
+        f_true=fx["f_true"],
+        ladder={"fg_loc": fx["f_pred"], "f_g": fx["f_pred"]},
     )
     a["err"] = (fx["f_pred"] - fx["f_true"]) * fx["total"]
     return SA.summarise(a)
@@ -114,11 +129,11 @@ def test_D1_D3_summarise_emits_all_mwae_and_abs_err_and_they_are_correct():
     assert s["abs_err"] == pytest.approx(float(err.sum()), rel=1e-12)
 
 
-# ── D2 — the property the whole file exists for ─────────────────────────────────────────────────
+# ── TRAPS: two-gaussians-one-latent — the property the whole file exists for ─────────────────────────────────────────────────
 
 
 def test_D2_the_new_columns_are_BIT_IDENTICAL_when_the_solvable_set_SHRINKS():
-    """⭐⭐⭐ THE GATE. A12's destruction control, in miniature: make the solver "know less" by
+    """⭐⭐⭐ THE GATE. TRAPS: honesty-metrics-reward-ignorance's destruction control, in miniature: make the solver "know less" by
     shrinking the determined set, and check which columns move.
 
     Every existing headline field is defined over the determined population, so all of them move.
@@ -134,7 +149,8 @@ def test_D2_the_new_columns_are_BIT_IDENTICAL_when_the_solvable_set_SHRINKS():
     # the fixed-denominator pair: BIT identical
     assert a["all_mwae"] == b["all_mwae"]
     assert a["abs_err"] == b["abs_err"]
-    # and the gameable ones genuinely moved, so this is not a vacuous comparison (`TRAPS.md` A14)
-    moved = [k for k in ("solvable_mass_share", "solvable_mwae", "conf_wrong_objects")
-             if a[k] != b[k]]
+    # and the gameable ones genuinely moved, so this is not a vacuous comparison (TRAPS: could-the-arm-have-fired)
+    moved = [
+        k for k in ("solvable_mass_share", "solvable_mwae", "conf_wrong_objects") if a[k] != b[k]
+    ]
     assert len(moved) == 3, (moved, a, b)

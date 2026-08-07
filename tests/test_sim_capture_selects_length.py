@@ -20,7 +20,7 @@ pre-capture ones (gDNA mean 195.57 on both arms). The fix is to keep the term:
 ``f_post(w) ∝ f_pre(w) · total_eff(w)``.
 
 ⚠ **G-S3 and G-S5 are DIRECTIONAL, with no threshold.** Choosing a magnitude would be inventing the
-capture efficiency curve, which is `docs/TRAPS.md` G1. The sign is physics; the
+capture efficiency curve, which is `docs/TRAPS.md` no-magic-numbers. The sign is physics; the
 magnitude is whatever ``binding_per_base`` and the probe length imply.
 
 ⚠ **G-S5 is conditional on gDNA being the shorter, broader component**, which is what this fixture
@@ -234,14 +234,14 @@ class TestTheConditionalWasAlreadyRight:
     because the engine's *conditional* was correct all along: at a fixed width, the probability of landing
     on a probe rises with the width. What was missing was the *marginal* — the engine normalised
     ``total_eff(w)`` away, so the length distribution never moved. ⭐ So the marginal gate above is the
-    falsification and this one is a guard on the piece that already worked (`docs/TRAPS.md` A3, A4).
+    falsification and this one is a guard on the piece that already worked (`docs/TRAPS.md` a-gate-that-already-passed, TRAPS: right-conditional-wrong-marginal).
 
     ⛔ **And an on-target population defined by the START's territory cannot be satisfied by any capture
     model of this form.** Measured: on-target (probe-overlapping) 197.30 vs off-target 155.05 — correct —
     while by the territory the START lands in, exonic reads 190.93 against intronic 237.63. That inversion
     is geometry: conditioned on being captured, a fragment whose start is in the intron is one that was
     long enough to *reach* the probe, so an intronic start carries weight ~ w^2/2 while an exonic start
-    carries ~ p^2/2, flat in w. `docs/TRAPS.md` F6, and the sibling of C1 and C2 — ask what a pool's
+    carries ~ p^2/2, flat in w. `docs/TRAPS.md` on-target-by-start-is-geometry, and the sibling of TRAPS: a-purity-filter-is-a-length-filter and TRAPS: pure-and-length-censored — ask what a pool's
     selection rule correlates with, not only what the selected fragments are.
     """
 

@@ -68,7 +68,7 @@ def _build_scenario(tmp_path):
         work_dir=tmp_path,
     )
     scenario.add_gene(
-        gene_id="G1",
+        gene_id="TRAPS: no-magic-numbers",
         strand="+",
         transcripts=[
             {

@@ -139,7 +139,7 @@ class TestFromCounts:
             ), f"Mismatch at length={length}"
 
 
-# ⛔ `TestToDict` lived here and was DELETED by C2 with the container it tested
+# ⛔ `TestToDict` lived here and was DELETED by TRAPS: pure-and-length-censored with the container it tested
 # it pinned the SCANNER's raw global + per-splice-category
 # histograms, which are gone. The report's fragment-length categories now come from
 # `FLModels` alone and are gated in tests/test_summary_report.py.

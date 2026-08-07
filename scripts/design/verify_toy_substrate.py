@@ -48,10 +48,10 @@ that line legitimately. On `splice_both_strands` TB+ and TC− both do, at all s
 
 ⭐⭐⭐ **ANY NUMBER OF TRANSCRIPTS, ON EITHER STRAND (2026-08-05).** The predecessor refused a ``−``
 transcript and refused more than one, which made the rung the splice-flux reframe must be derived against
-unverifiable input (`TRAPS.md` A1). Both restrictions are gone, and the mechanism is one idea: work in
+unverifiable input (TRAPS: self-checking-validator). Both restrictions are gone, and the mechanism is one idea: work in
 ``u``-space, the transcript coordinate RE-ORIENTED to ascend with the genome. See :class:`Geom`. The
 reflections are transcribed from `rigel.sim.bam.transcript_to_genomic_blocks` and
-``premrna_to_genomic_interval`` rather than assumed, per `TRAPS.md` C0's rule about reading the
+``premrna_to_genomic_interval`` rather than assumed, per TRAPS: two-divisors-opposite-sign's rule about reading the
 simulator's code.
 
 ⛔⛔ **WHAT IT MEASURED, 2026-08-05.** Every bank matched the truth-derived deposit **exactly** on
@@ -67,7 +67,7 @@ resolve against its own transcript. The implicit-splice path is not lossy here �
 toy a clean substrate, and what says a pool shortfall on the real panel is about ANNOTATION AMBIGUITY,
 not read length.
 
-⚠ **Perturbations — `TRAPS.md` A1's second half, and they are a ``--perturb`` FLAG rather than a hand
+⚠ **Perturbations — TRAPS: self-checking-validator's second half, and they are a ``--perturb`` FLAG rather than a hand
 edit so every claim here is reproducible.** All six fire:
 
 | perturbation | what fired |
@@ -84,7 +84,7 @@ edit so every claim here is reproducible.** All six fire:
 drawn-vs-realised length discrimination needs the templates to be short enough to tilt the marginal: on
 `splice_both_strands` the four templates (2/8/10/4 kb) separate the two laws by only 1.10 bp, so the arm
 needs ≳ 83 k mRNA fragments before that check has teeth, and it prints the required depth when it does
-not (`TRAPS.md` B22). ⭐ The start-uniformity test is POOLED across lengths by standardising each
+not (TRAPS: key-on-a-realised-quantity). ⭐ The start-uniformity test is POOLED across lengths by standardising each
 fragment against its own ``(eff−1)/2 ± √((eff²−1)/12)``, which is exact and has teeth at any depth — the
 per-length form it replaces needed n ≥ 500 in ONE length and therefore reported "not checked" on every
 toy, which reads as a pass.
@@ -124,7 +124,7 @@ TYPE_NAMES = {0: "intergenic", 1: "intron", 2: "exon"}
 
 FAIL: list[str] = []
 
-#: ⭐⭐ THE PERTURBATION UNDER TEST — `TRAPS.md` A1's second half, as a flag rather than a hand edit so
+#: ⭐⭐ THE PERTURBATION UNDER TEST — TRAPS: self-checking-validator's second half, as a flag rather than a hand edit so
 #: every claim below is reproducible by anyone. ``--perturb <name>`` corrupts exactly one thing and the
 #: run must then FAIL; a perturbation that fires nothing is a hole in the gate set, not a pass.
 #: The verdicts are in this module's docstring.
@@ -172,7 +172,7 @@ class Geom:
     cumulative lengths, and a uniform draw over ``t`` is a uniform draw over ``u``. So placement
     combinatorics, containment and per-junction crossing are all strand-FREE once expressed here.
 
-    ⛔ The reflection is transcribed from the simulator's own code, not assumed — `TRAPS.md` C0's rule.
+    ⛔ The reflection is transcribed from the simulator's own code, not assumed — TRAPS: two-divisors-opposite-sign's rule.
     """
 
     exons: tuple[tuple[int, int], ...]  #: genomic [start, end) per exon, ascending
@@ -288,7 +288,7 @@ class TruthTally:
 
     ⚠ Deliberately NOT a copy of the production code path: it takes the TRUE genomic segments (from the
     read name, mapped through the annotation) rather than the aligned records, so a disagreement with
-    the payload is a real statement about fidelity and not a tautology (`TRAPS.md` A1)."""
+    the payload is a real statement about fidelity and not a tautology (TRAPS: self-checking-validator)."""
 
     def __init__(self, cuts: np.ndarray, n_nodes: int, n_edges: int, junctions: dict):
         self.cuts = np.asarray(cuts, np.int64)
@@ -410,7 +410,7 @@ def _pool_length_gate(label, widths, templates, donor, tag):
     # ⛔ So an unconditional "it must be 4 se from the drawn mean" FAILS on a long-template spec for a
     # reason that has nothing to do with fidelity. The honest form is `suite_resolves.py`'s: assert the
     # discrimination where the design supplies it, and where it does not, say so and say what depth
-    # would (`TRAPS.md` B22 — key the claim on a realised quantity, and print it).
+    # would (TRAPS: key-on-a-realised-quantity — key the claim on a realised quantity, and print it).
     gap = abs(mu_pred - mu_drawn)
     if gap > 4 * se:
         check(abs(w.mean() - mu_drawn) > 4 * se,
@@ -658,8 +658,8 @@ def gate_capture(mrna, nrna, gdna, geoms, res, donor, spec):
 
 
 def gate_accumulator(frags, geoms, res, payload, ra, spec):
-    """A1 — every bank, re-derived from the TRUTH, against the payload. The main event."""
-    print("\n── GATE A1: THE ACCUMULATOR, AGAINST TRUTH-DERIVED DEPOSITS ──────────────────────────")
+    """TRAPS: self-checking-validator — every bank, re-derived from the TRUTH, against the payload. The main event."""
+    print("\n── GATE TRAPS: self-checking-validator: THE ACCUMULATOR, AGAINST TRUTH-DERIVED DEPOSITS ──────────────────────────")
     index = res.index
     cuts = np.asarray(payload.cut_positions, np.int64)
     n_nodes, n_edges = int(payload.n_nodes), int(payload.n_edges)
@@ -741,12 +741,12 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
 
     # ── ⭐⭐ THE ZERO THAT IS STRUCTURAL, PREDICTED FROM THE ANNOTATION ALONE ──────────────────────
     # On a pure-mRNA library an EDGE can carry unspliced flux only where some transcript's EXON spans
-    # its position — mature RNA cannot cross an exon↔intron seam contiguously (`TRAPS.md` F9). ⛔ The
+    # its position — mature RNA cannot cross an exon↔intron seam contiguously (TRAPS: mature-rna-never-crosses-a-seam). ⛔ The
     # predecessor asserted `edge_unspliced == 0` EVERYWHERE, which is true only of a one-transcript
     # two-exon toy and false the moment another transcript's exon spans the intron: on
     # `splice_both_strands` TB+ and TC− both do. So the prediction is now a SET, derived from the exon
     # intervals with no reference to the fragments, and the gate is an EQUALITY in both directions —
-    # a spurious nonzero and a missing one are both failures (`TRAPS.md` A1's "emit all classes").
+    # a spurious nonzero and a missing one are both failures (TRAPS: self-checking-validator's "emit all classes").
     e_un = col(payload.edge_unspliced_count)
     mrna_only = all(f["kind"] == "mrna" for f in frags)
     if mrna_only:
@@ -769,8 +769,8 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
 
 
 def gate_invariants(payload, tt, frags):
-    """A2 — the accumulator's own externally-checkable identities."""
-    print("\n── GATE A2: THE ACCUMULATOR'S OWN INVARIANTS ─────────────────────────────────────────")
+    """TRAPS: perturb-every-gate — the accumulator's own externally-checkable identities."""
+    print("\n── GATE TRAPS: perturb-every-gate: THE ACCUMULATOR'S OWN INVARIANTS ─────────────────────────────────────────")
     qc = {f.name: getattr(payload.qc, f.name) for f in dataclasses.fields(payload.qc)}
     start_sum = int(np.asarray(payload.node_start_count, np.int64).sum())
     dep_len_sum = int(np.asarray(payload.deposited_lengths, np.int64).sum())
@@ -799,7 +799,7 @@ def main() -> int:
                     help="⭐ the cleanest arm: a pure-mRNA library, where every prediction is exact")
     ap.add_argument("--work-dir", type=Path, default=Path("/tmp/rigel_verify_substrate"))
     ap.add_argument("--perturb", default="none", choices=sorted(PERTURBATIONS),
-                    help="⭐⭐ corrupt ONE thing and confirm a gate fires (`TRAPS.md` A1). "
+                    help="⭐⭐ corrupt ONE thing and confirm a gate fires (TRAPS: self-checking-validator). "
                          + " · ".join(f"{k}: {v}" for k, v in PERTURBATIONS.items()))
     args = ap.parse_args()
     global PERTURB

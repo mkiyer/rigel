@@ -1,4 +1,16 @@
-"""Enrichment-frame primitives — the generalized enrichment-ratio solver's pure arithmetic (phase E1).
+"""The message POLICY's variance toolbox — pure arithmetic, no chain and no solver state.
+
+       Gate: ``tests/calibration/test_enrichment_frame.py``
+
+⭐ This was ``calibration/enrichment_frame.py``. It moved under ``messages/`` because every function in it
+prices a step a MESSAGE takes, so it belongs to the policy rather than to the backbone — the backbone owns
+the loop, the combine, the write-back and the five assertions, and none of them needs a variance.
+
+⚠ **ONE function crosses the layer and it is deliberate**: :func:`count_logvar` is also imported by
+``node_init``, which builds the per-slot self-solve the backbone hands the policy as its seed. That is the
+Poisson log-count variance and it has exactly ONE home (TRAPS: a-test-that-redefines) — the same ``1/n`` had been written
+out twice, and unifying it is what the panel-wide **39 %** belongs to. It stays here, imported.
+
 
 Hybrid capture multiplies *every* component of a node's density by the same efficiency ``e(x)``, so it is
 visible in the **total density and only in the total** (a composition *ratio* ``k = ρ_g/ρ_R`` cancels ``e``).
@@ -10,9 +22,9 @@ no substrate, no solver state — so its facts are pinned by closed-form unit te
 
  (the framework, §1 the total-density
 pivot, §2 the bounding lemma, §4 the step-wise junction solve) and (the
-junction instance + §5b the r₂/r₁ asymmetry). The solver wiring that consumes these is phase E2 (behind a
+junction instance + §5b the r₂/r₁ asymmetry). The solver wiring that consumes these is phase TRAPS: annotated-is-not-genomic (behind a
 flag); this module is frame-agnostic by construction (arrays in, arrays out), so the per-face-vs-node-level
-frame question E2 must settle cannot invalidate anything here.
+frame question TRAPS: annotated-is-not-genomic must settle cannot invalidate anything here.
 
 The design principle behind the API shape: **transport ``k``, never ``f_g``.** ``k`` is enrichment-free and
 component-set-shared; ``f_g`` depends on the node's own crossing-vs-contained effective lengths, so copying it
@@ -114,8 +126,8 @@ def count_logvar(count) -> np.ndarray:
     whole difference is at small counts, and at ``a = 0`` it is ``π²/2 = 4.93`` (sd 2.22 nats) instead of
     ``∞``.
 
-    ⛔⛔ **THE SAME ASYMPTOTE WAS WRITTEN OUT TWICE AND BOTH COPIES BROKE THE SAME WAY** (`TRAPS.md` C0c,
-    C0d). In ``own_precision`` it made a zero-count object emit nothing; in :func:`composition_logvar` it
+    ⛔⛔ **THE SAME ASYMPTOTE WAS WRITTEN OUT TWICE AND BOTH COPIES BROKE THE SAME WAY** (TRAPS: a-zero-count-is-a-measurement,
+    TRAPS: a-ratio-cannot-carry-zero). In ``own_precision`` it made a zero-count object emit nothing; in :func:`composition_logvar` it
     made ``Var(log ρ_tot) = ∞``, hence ``σ²_transfer = ∞``, hence ``1/(1/p + ∞) = 0`` — annihilating every
     message that object sent, on all three streams. Fixing one and not the other is why the repair moved
     the refit solve and not pass-0. ⭐ It lives HERE, in the leaf module, so there is one definition and
@@ -154,9 +166,9 @@ def composition_logvar(f_g, E_g, E_r, var_fg, n):
 
 
 def graft_frame_logvar(r):
-    """M8 — the GRAFT's **frame-mislift** log-variance: ``(log r)²`` on the MEASURED spliced component.
+    """the-graft-frame-variance — the GRAFT's **frame-mislift** log-variance: ``(log r)²`` on the MEASURED spliced component.
 
-    M5 sets ``σ²_transfer = 0`` on a graft edge because ``r`` is common-mode across the matched set ``{g, R}``
+    the-reframe-scale-variance sets ``σ²_transfer = 0`` on a graft edge because ``r`` is common-mode across the matched set ``{g, R}``
     and cancels in the composition. That is true of the IMPUTED continue ``ρ_ν``, which travels with ``ρ_g``
     from the same source — but it is **false of the grafted ``ρ_μ``**. The delivered share is
 
@@ -170,10 +182,10 @@ def graft_frame_logvar(r):
     ``ρ_R(exon)/ρ_spl(bnd)`` = 1.02–1.86 and is capture-INVARIANT, while the exon↔boundary gDNA step goes
     1.03 → 6.1–6.8 under capture.
 
-    So the grafted component has **no matched gDNA partner to cancel ``r`` against** — exactly M5's peel /
+    So the grafted component has **no matched gDNA partner to cancel ``r`` against** — exactly the-reframe-scale-variance's peel /
     partial-anchor case, where ``σ²_transfer`` is load-bearing. The un-modelled frame step is what the message
     gets wrong, its magnitude is the step itself, and the model's own estimate of that step is ``r``; charging
-    ``(log r)²`` is the method-of-moments second moment of a single observation of it — the same logic as M7's
+    ``(log r)²`` is the method-of-moments second moment of a single observation of it — the same logic as the-mismatch-deflation's
     ``b̂²``, and with no tuned constant. It is identically 0 when there is no frame change (``r = 1``), which is
     why the shipped model is EXACT off-capture (measured required correction ``log c`` = +0.009/−0.008/+0.054)
     and only bites where capture opens a step.
@@ -182,7 +194,7 @@ def graft_frame_logvar(r):
     reframes — where the composition genuinely IS preserved across the enrichment step, so it over-damped.
     Here the component set is *unmatched by construction*, so the cliff really is un-cancelled error.
 
-    Applied to the spliced measurement's OWN precision (``1/n_spl ⊕ (log r)²``), so M2's share weighting
+    Applied to the spliced measurement's OWN precision (``1/n_spl ⊕ (log r)²``), so the-composition-variance's share weighting
     ``w_μ²`` arises implicitly from the inverse-variance fusion with the correctly-framed ``ρ_ν`` arm — a
     graft that is a minority of the RNA is damped proportionately less.
 
@@ -202,7 +214,7 @@ def graft_frame_logvar_scalar(r):
 
 
 def peel_rna_logvar(v_log_rho_R, s2_transfer, v_mu, u):
-    """M3 — the PEEL (exon→boundary) RNA-continue message log-variance. The boundary receives only what
+    """the-peel-share-variance — the PEEL (exon→boundary) RNA-continue message log-variance. The boundary receives only what
     CONTINUES: ``ρ_ν = ρ_R(x)/r − ρ_μ`` — a **difference** (an absolute measured density is subtracted, so
     enrichment does NOT cancel). The delta method gives u-weighted (≥1) terms::
 
@@ -222,7 +234,7 @@ def peel_rna_logvar(v_log_rho_R, s2_transfer, v_mu, u):
 
 
 def peel_continue_share(rho_nu, rho_mu):
-    """M10 — the fraction of a seam's RNA that CONTINUES unspliced: ``w = ρ_ν/(ρ_ν + ρ_μ)``.
+    """the-continuing-share — the fraction of a seam's RNA that CONTINUES unspliced: ``w = ρ_ν/(ρ_ν + ρ_μ)``.
 
     This is the object that retires the peel's SUBTRACTION. What continues past a junction is a *share* of the
     RNA at the seam, and a share is **enrichment-free**: capture multiplies the continuing and the splicing
@@ -237,7 +249,7 @@ def peel_continue_share(rho_nu, rho_mu):
     ``u`` and every ``δ``: a scaling commutes with a scaling. That matters because the exon-facing reframe
     error is irreducible — the boundary samples a ``fl_mean`` window around a point while the exon samples its
     interior, so with mid-exon probes the two sit at genuinely different capture (measured 0.4–1.3 nats), and
-    ``u``'s p75 on real junctions is ≈ 3. MC: `message_variance_mc.py` M10b, exact to 1e-12.
+    ``u``'s p75 on real junctions is ≈ 3. MC: `message_variance_mc.py` the-continuing-share, exact to 1e-12.
 
     Degenerate limits, both structural: no spliced flux (``ρ_μ = 0``) ⇒ ``w = 1``, nothing splices away and
     nothing is peeled; no RNA at the seam at all (``ρ_ν + ρ_μ = 0``) ⇒ ``w = 1``, there is nothing to
@@ -258,7 +270,7 @@ def peel_continue_share_scalar(rho_nu, rho_mu):
 
 
 def peel_share_logvar(w_mu, v_nu, v_mu):
-    """M10 — the log-variance the continuing SHARE contributes: ``w_μ²·(v_ν + v_μ)``.
+    """the-continuing-share — the log-variance the continuing SHARE contributes: ``w_μ²·(v_ν + v_μ)``.
 
     Delta method on ``log w = log ρ_ν − log(ρ_ν + ρ_μ)``: both partials are ``±w_μ``, the SPLICED share
     ``w_μ = 1 − w``, so::
@@ -266,15 +278,15 @@ def peel_share_logvar(w_mu, v_nu, v_mu):
         Var(log w) = w_μ²·( Var(log ρ_ν^B) + Var(log ρ_μ^B) ) ,   v_μ = 1/n_spl (measured, count-only)
 
     and the delivered message variance is ``Var(log ρ_R(x)) + σ²_transfer + Var(log w)``. The weights are
-    **CONVEX** (``w_μ ≤ 1``) — the exact mirror of M2's graft SUM — where M3's difference carried ``u ≥ 1`` and
+    **CONVEX** (``w_μ ≤ 1``) — the exact mirror of the-composition-variance's graft SUM — where the-peel-share-variance's difference carried ``u ≥ 1`` and
     amplified. So this move takes the peel out of the ill-conditioned regime entirely; there is no ``ε``/``u``
-    validity limit to respect and no over-confidence tail. MC: `message_variance_mc.py` M10, rel 0.2–1.0 %."""
+    validity limit to respect and no over-confidence tail. MC: `message_variance_mc.py` the-continuing-share, rel 0.2–1.0 %."""
     wm = _f(w_mu)
     return wm * wm * (_f(v_nu) + _f(v_mu))
 
 
 def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
-    """M11 — a node's own RNA density read off its **observed mass** against an imputed gDNA **density**.
+    """the-residual-level — a node's own RNA density read off its **observed mass** against an imputed gDNA **density**.
 
     This is the generic DENSITY DECONVOLUTION (`density_deconv`, of which the intron factory is the intron
     special case) with the gDNA density prior supplied by a NEIGHBOUR instead of by the intergenic pool. It is
@@ -477,7 +489,7 @@ def residual_level_scalar(mass, n_mass, rho_g, E_g, E_r, v_g):
 
 
 def transfer_logvar(logvar_tot_dst, logvar_tot_src, graft):
-    """M5 — ``σ²_transfer = Var(log r)``, the enrichment-ratio uncertainty that damps a message across a capture
+    """the-reframe-scale-variance — ``σ²_transfer = Var(log r)``, the enrichment-ratio uncertainty that damps a message across a capture
     cliff: ``Var(log r) = Var(log ρ_tot^dst) + Var(log ρ_tot^src)`` (each from :func:`composition_logvar`).
 
     DIRECTION-dependent: on the **graft** the reframe ``r`` is common-mode across the matched component set and
@@ -490,14 +502,14 @@ def transfer_logvar(logvar_tot_dst, logvar_tot_src, graft):
     then annihilated all three streams of every message such a slot sent — including the MEASUREMENT
     stream, which never multiplies by ``r`` at all. That was one bug in two places, and it is fixed at the
     source: :func:`count_logvar`. ⛔ An ``~isfinite`` guard was briefly added HERE instead and is deleted —
-    it treated the symptom, and it silently made every genuinely-unscaled hop free. `TRAPS.md` C0c/C0d."""
+    it treated the symptom, and it silently made every genuinely-unscaled hop free. TRAPS: a-zero-count-is-a-measurement/TRAPS: a-ratio-cannot-carry-zero."""
     g = np.asarray(graft, bool)
     s = np.asarray(logvar_tot_dst, np.float64) + np.asarray(logvar_tot_src, np.float64)
     return np.where(g, 0.0, s)
 
 
 def mismatch_gap(rho_msg, rho_own):
-    """M7 — the observed composition gap ``G`` between a message and the destination's own belief, and the
+    """the-mismatch-deflation — the observed composition gap ``G`` between a message and the destination's own belief, and the
     CONTRADICTED mask. Both densities are per-component and in the destination's frame, already normalized to
     the destination's mass, so ``E_c`` and ``M_dst`` cancel and ``G = log(ρ^msg/ρ^own) = mo^msg − mo^own`` is a
     pure statement about the SPLIT.
@@ -517,7 +529,7 @@ def mismatch_gap(rho_msg, rho_own):
 
 
 def mismatch_deflate(precision, gap, contradicted, var_own):
-    """M7 — deflate a message precision by the DerSimonian–Laird between-source mismatch variance::
+    """the-mismatch-deflation — deflate a message precision by the DerSimonian–Laird between-source mismatch variance::
 
         b̂² = max(0, G² − v_msg − v_own)          v_msg = 1/precision
         p_effective = 1 / (v_msg + b̂²) = 1 / max(v_msg, G² − v_own)
@@ -557,9 +569,9 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
     RNA density. Every molecule counted there is in the exon, but the exon may also hold molecules that
     never touch that seam: ones that reach it by the other flank, or that start or end inside it. So what
     the graft knows is an **inequality**, ``ρ_R(exon) ≥ ρ_ν(B) + ρ_μ(B)``, and it uses it as an equality.
-    Nothing else in the ledger prices that. **M8 comes closest and does not cover it**: M8 charges
+    Nothing else in the ledger prices that. **the-graft-frame-variance comes closest and does not cover it**: the-graft-frame-variance charges
     ``(log r)²``, i.e. it assumes the only reason a seam and an exon differ is the capture step between
-    them — so off-capture ``r = 1`` and M8 charges exactly zero, while a seam and a region still differ.
+    them — so off-capture ``r = 1`` and the-graft-frame-variance charges exactly zero, while a seam and a region still differ.
     ``1/n_spl`` does not cover it either, and never will however large it grows: a count says *how many I
     counted*, this says *whether what I counted speaks for the exon*.
 
@@ -640,14 +652,14 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
     **What the caller must pass.** Both fluxes ALREADY LIFTED into the destination's frame, so a capture
     step common to the two seams cancels out of ``d`` and only a genuine abundance difference is charged;
     and each ``var`` must carry every noise source the model knows — the seam's spliced COUNT (never its
-    mass) **⊕ its lift's own scale sampling** (M5's source leg; the destination's leg is common to both
+    mass) **⊕ its lift's own scale sampling** (the-reframe-scale-variance's source leg; the destination's leg is common to both
     lifts and cancels in ``d``). Method of moments books as premise error every noise it fails to subtract,
     and omitting the lift term inflates the fit in proportion to gDNA depth (the frame is read off ``ρ_tot``,
     which gDNA makes noisier) — measurably the worst place to over-charge, because that is exactly where the
     RNA claim is a near-exact measurement and the gDNA claim is the wrong one.
 
-    **It cannot double-count with M7** for the reason proves in general: DL's
-    ``max()`` means a newly-modelled variance *replaces* the part of the gap M7 was absorbing as unexplained
+    **It cannot double-count with the-mismatch-deflation** for the reason proves in general: DL's
+    ``max()`` means a newly-modelled variance *replaces* the part of the gap the-mismatch-deflation was absorbing as unexplained
     drift, one for one, until ``b̂²`` hits its floor at 0.
 
     ⚠ The suite this was measured on is **Poisson by construction**, so the premise variance here is purely

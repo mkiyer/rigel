@@ -152,7 +152,7 @@ def test_a_single_node_reference_contributes_no_entry(tmp_path_factory):
 
 
 def test_the_taper_COLLAPSES_the_divisor_near_a_terminus(index):
-    """⭐ The whole point of A7, as a number rather than an assertion.
+    """⭐ The whole point of TRAPS: prove-the-substrate, as a number rather than an assertion.
 
     ``crossing_eff_length`` at unbounded reach is ``mu − 1``; at a real reach it is far smaller near a
     transcript end. records 199.0 at R=550 against 50.0 at R=50 on RNA N(200,50)

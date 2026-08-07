@@ -238,7 +238,7 @@ class CalibrationConfig:
     #: structural zero.
 
     #: **Sweep grid resolution** ``K`` for the per-node log-density log-odds solve over ``λ = logit(f_g)``
-    #: (``simplex_logodds``, driven by ``bp_solver.node_sweep``; single-strand nodes are exact 1-D, AMBIG
+    #: (``simplex_logodds``, driven by ``sweep.solve_chain``; single-strand nodes are exact 1-D, AMBIG
     #: nodes marginalize the RNA tilt ``τ``). ``K=60`` matches per-node accuracy at a tractable cost
     #: (``K=20`` over-calls / under-resolves the zero-DNA case).
     sweep_n_grid: int = 60
@@ -293,7 +293,7 @@ class CalibrationConfig:
     #: pre-factory pass-0.
     #:
     #: **DEFAULT ON since 2026-07-23**, once the factor's precision was registered as composition evidence
-    #: (``bp_solver._lambda_factor_precision`` — ``I_factory``). Before that the factory shifted an intron's own
+    #: (``messages.head`` — ``I_factory``). Before that the factory shifted an intron's own
     #: mode but carried no ``τ``, so the intron had no standing to EMIT and the correction died one hop out
     #: (measured: intron belief +93 %, neighbour ``prec_g`` bit-identical). With the evidence channel wired,
     #: pass-0 vs oracle over the 32-scenario ambig_dense_10mb suite: mwae 0.1361 → 0.0949, corr 0.688 → 0.736,
@@ -317,6 +317,38 @@ class CalibrationConfig:
     #: ⚠ **DEFAULT OFF for its first landing**, so the A/B has an arm and ``False`` is byte-identical to
     #: the S5.f/P1 path. The measured effect is the P2 ledger entry; the default is the owner's call.
     length_likelihood: bool = False
+
+    #: ⛔⛔⛔ **MESSAGE PROPAGATION — the belief-propagation relay between neighbouring slots. DEFAULT OFF**
+    #: (owner, 2026-08-07). ``False`` installs ``messages.silent.SilentPolicy``, which sends nothing: ψ
+    #: carries each slot's OWN evidence alone — its two strand counts, its spliced count, the derived
+    #: reference, the fitted gDNA prior and the intron factory. ``True`` installs
+    #: ``messages.head.HeadPolicy``, every operator behind its own named switch.
+    #:
+    #: ⭐ **A MEASUREMENT PUT IT OFF, not a preference.** On the 36-condition ladder, muting the message
+    #: layer is a net IMPROVEMENT on THREE OF THE FOUR STRATA::
+    #:
+    #:     stranded   x capture ON    -58.3 %   16/16 conditions better
+    #:     stranded   x capture OFF   -43.7 %   16/16 better
+    #:     unstranded x capture OFF   -32.1 %   14/16 better
+    #:     unstranded x capture ON   +154.8 %    0/16 better
+    #:
+    #: ⛔⛔ **AND THE PRICE IS CONCENTRATED, LARGE, AND ON THE ZERO CONTROL.** The panel total is +99.9 %
+    #: worse because that one stratum carries 73 % of the error — and end-to-end it is worse than the
+    #: panel suggests. On golden scenarios whose TRUTH IS ZERO gDNA, the false-positive gDNA mass goes::
+    #:
+    #:     antisense_contained   0.029  ->  89.93     (~3,100x)
+    #:     antisense_overlap     0.005  ->   9.58     (~1,900x)
+    #:     single_exon_clean     0.008  ->   0.104
+    #:     multi_exon_spliced    0.001  ->   0.031
+    #:
+    #: ⭐ Both AMBIG loci, which is exactly where ``κ = ½`` makes the strand λ-term identically 0 so the
+    #: slot has NO own composition evidence and a message is the only source there is.
+    #:
+    #: ⚠ **So this default is a STUDY CONFIGURATION, and the way out is to give that slot its own
+    #: evidence rather than to keep tuning the relay** — ``length_likelihood`` above is the only channel
+    #: that can, being the one with no ``θ`` dependence. Until it is priced on a panel that can resolve it,
+    #: turning this back on is one word and every operator remains individually switchable.
+    message_propagation: bool = False
 
     #: **Calibration refit iterations — the prior BOOTSTRAP.** Each iteration re-fits the population gDNA
     #: landscape (:class:`~rigel.calibration.gdna_landscape.GdnaLandscape`) on the *current* solved gDNA
@@ -432,7 +464,7 @@ class TranscriptGeometry:
      derived from the reference and the fitted models.
 
      ⚠ That model is built by ``FragmentLengthModel.from_pmf`` from
-     ``FLModels.rna_pmf``, which since C2 is derived from the accumulator payload alone
+     ``FLModels.rna_pmf``, which since TRAPS: pure-and-length-censored is derived from the accumulator payload alone
     the effective lengths here and the calibration divisors
      read the SAME pmf, so a change to it reaches every transcript in the EM, not only calibration.
 

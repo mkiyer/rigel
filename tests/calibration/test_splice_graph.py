@@ -265,7 +265,7 @@ def test_G18_coincident_opposite_strand_junctions():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
-# The REACH columns (plan C1/C2/C3) — not in the original matrix, added because the schema is new.
+# The REACH columns (plan TRAPS: a-purity-filter-is-a-length-filter/TRAPS: pure-and-length-censored/TRAPS: divide-by-a-probability) — not in the original matrix, added because the schema is new.
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 
@@ -293,7 +293,7 @@ def test_reach_on_a_junction_is_the_exonic_length_either_side():
 
 
 def test_reach_is_maximal_over_isoforms_independently_per_side():
-    """D2: a position open on ANY isoform is open. The two isoforms disagree on BOTH sides here."""
+    """TRAPS: two-gaussians-one-latent: a position open on ANY isoform is open. The two isoforms disagree on BOTH sides here."""
     n, e = _graph(
         [
             _tx([(400, 600), (1000, 1100)], t_id="short"),  # lo 200, hi 100
@@ -306,7 +306,7 @@ def test_reach_is_maximal_over_isoforms_independently_per_side():
 
 
 def test_reach_is_per_strand_and_does_not_mix():
-    """⚠ plan C2: the two strands have different reaches at the SAME endpoints and must not be conflated.
+    """⚠ plan TRAPS: pure-and-length-censored: the two strands have different reaches at the SAME endpoints and must not be conflated.
 
     Both transcripts splice 200→600, so this is also a G18 coincident-junction pair: two edges sharing
     ``(src, dst)`` and differing only in strand. Each must carry its OWN reach in its OWN columns and
@@ -326,7 +326,7 @@ def test_reach_is_per_strand_and_does_not_mix():
 
 
 def test_reach_on_a_contiguous_edge_inside_an_exon():
-    """⭐ plan C1/Q1: reaches live on CONTIGUOUS edges too, which is where the taper near a TES bites."""
+    """⭐ plan TRAPS: a-purity-filter-is-a-length-filter/Q1: reaches live on CONTIGUOUS edges too, which is where the taper near a TES bites."""
     n, e = _graph([_tx([(400, 1000)], t_id="a"), _tx([(700, 1000)], t_id="b")])
     ns = _nodes(n)
     i = ns.index((400, 700))
@@ -476,9 +476,9 @@ def test_I3b_FIRES_on_a_corrupted_signature():
 
 
 def test_a_single_exon_transcript_is_a_REAL_transcript_with_REAL_termini():
-    """⛔ THE BUG plan F1's second filter caused, pinned.
+    """⛔ THE BUG plan TRAPS: specificity-and-sense-are-complements' second filter caused, pinned.
 
-    F1 specified the flags and reaches as ``~is_synthetic & ~is_nrna``, reasoning that "an nRNA span's
+    TRAPS: specificity-and-sense-are-complements specified the flags and reaches as ``~is_synthetic & ~is_nrna``, reasoning that "an nRNA span's
     ends are not real transcript termini". True — but on a NON-synthetic row ``is_nrna`` does not mean
     "manufactured span": it means **the transcript is single-exon, so mature ≡ nascent**. Measured on
     the human annotation, all **26,475** ``is_nrna & ~is_synthetic`` rows have ``n_exons == 1`` and

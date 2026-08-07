@@ -1,5 +1,5 @@
 """The log-density 1-D/2-D per-node solver — the single production per-node solve driving
-``bp_solver.node_sweep`` (the memory-prohibitive 2-simplex lattice it replaced is retired).
+``sweep.solve_chain`` (the memory-prohibitive 2-simplex lattice it replaced is retired).
 
 The latent magnitude dof is the
 gDNA-vs-RNA **log-odds** ``λ = logit(f_g) = log ρ_g − log ρ_rna`` (log-odds bounds the 5–6-decade ρ_g
@@ -38,7 +38,7 @@ genuinely disjoint from the (directly observed, already-pure-RNA) spliced mass.
 Single-strand nodes (exactly one of ``allow_pos`` / ``allow_neg``) are an exact 1-D solve over ``λ``; AMBIG
 nodes (both set) marginalize the tilt on a 2-D ``(λ, θ)`` grid (``_solve_ambig_logodds``).
 ``_solve_nodes_logodds_all`` dispatches between the two. Structurally RNA-free nodes (neither strand live —
-intergenic / TSS / TES) have no composition DOF and never reach either solver: ``bp_solver.node_sweep`` gates
+intergenic / TSS / TES) have no composition DOF and never reach either solver: ``sweep.solve_chain`` gates
 them out via ``solvable``, so no reference is applied to a node whose composition is known structurally.
 """
 
@@ -47,10 +47,9 @@ from __future__ import annotations
 import numpy as np
 from scipy.special import expit, log_expit
 
-from .simplex import _mixture_strand_loglik
-from .strand_deconv import NodeDeconv
+from .node_chain import NodeDeconv
 
-# Public surface consumed by bp_solver / node_geometry. The remaining private helpers stay importable
+# Public surface consumed by sweep / messages / node_geometry. The remaining private helpers stay importable
 # for tests but are not part of the module's external API.
 __all__ = ["_logodds_grid", "_solve_nodes_logodds_all"]
 
@@ -74,10 +73,10 @@ _EPS = 1.0e-9
 _JEFFREYS_REF = 0.5
 
 #: ⛔⛔ **THE CERTIFIED-RNA CLAIM IS A LOWER BOUND, AND ψ HAS ALWAYS APPLIED IT AS A TWO-SIDED GAUSSIAN.**
-#: ``bp_solver`` states the premise in its own words — ``rho_R(exon) >= rho_nu(B) + rho_mu(B)``, because
+#: the message policy states the premise in its own words — ``rho_R(exon) >= rho_nu(B) + rho_mu(B)``, because
 #: the exon may also hold molecules that never touch that seam — "and it uses it as an equality". Three
 #: operators price that inequality as a VARIANCE and none prices it as a DIRECTION, which is `TRAPS.md`
-#: D1: a variance cannot move a mode toward truth.
+#: TRAPS: a-variance-cannot-fix-a-bias: a variance cannot move a mode toward truth.
 #: ⭐ ``True`` selects the one-sided form: no penalty when the destination holds MORE RNA than the bound,
 #: full penalty when it holds less. ⛔ ``False`` is today's behaviour and is BYTE-IDENTICAL by
 #: construction — :func:`_rna_residual` then returns its input difference unmodified.
@@ -108,7 +107,7 @@ def _rna_residual(log_f, mode):
 # lies outside L=10, and the answer is L-invariant. An improper ψ (either arm omitted) has plateau mass
 # growing linearly in L, and then L silently sets the prior strength — which is what the `+0.5·λ` ramp was.
 # **L-invariance is the acceptance test for this file.** NB: production does not read this default —
-# `bp_solver.node_sweep` threads `logodds_window` (=10.0) explicitly.
+# `sweep.solve_chain` threads `logodds_window` (=10.0) explicitly.
 _DEFAULT_L = 10.0
 
 # Cache-tiling target for BOTH per-node solves, as a working-set size rather than a row count — the per-row
@@ -144,6 +143,50 @@ def _lse(a, axis, keepdims=False):
         s = np.sum(np.exp(a - m), axis=axis, keepdims=True, dtype=np.float64)
         r = (m + np.log(s)).astype(m.dtype, copy=False)
     return r if keepdims else np.squeeze(r, axis=axis)
+
+
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────
+# ⭐ THE THREE-COMPONENT STRAND LIKELIHOOD — folded in from `simplex.py`, which was 55 lines with ZERO
+# public names and exactly ONE importer: this file. A module whose whole surface is one private function
+# used in one place is a file a reader has to open to learn nothing, and the flat pile was made of those.
+# ⚠ Its TWO-component special case lives in `strand_likelihood.strand_loglik` and is an executable
+# REFERENCE, not dead code — `test_strand_likelihood_reference.py` gates that this generalization collapses
+# onto it when one RNA strand is dead. That gate did not exist until 2026-08-07 even though `simplex.py`'s
+# docstring asserted it did ("the no-regression guard"), which is why the reference read as unused.
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+def _mixture_strand_loglik(
+    u_pos, n, f_g, f_pos, f_neg, kappa, od_g, od_r, f_g_ref, f_pos_ref, f_neg_ref
+):
+    """Three-component gDNA/RNA₊/RNA₋ strand loglik — :func:`strand_loglik` generalized to two RNA strands.
+
+    Broadcasts ``(u_pos, n)`` of shape ``(nodes, 1)`` against the lattice ``(f_*)`` of shape
+    ``(1, P)`` → ``(nodes, P)``. Mean ``N·p`` with ``p = ½·f_g + κ·f₊ + (1−κ)·f₋``.
+
+    **Count-zero-information freeze**: the mean stays LIVE in
+    the solved composition ``(f_g, f_pos, f_neg)`` — the legitimate strand channel — but the variance is
+    evaluated at the fixed REFERENCE composition ``(f_g_ref, f_pos_ref, f_neg_ref)`` (per-node scalars,
+    broadcast). This keeps the heteroscedastic precision (the count still sets a composition-aware variance
+    via the reference) while removing the ``f_g``-tilt of the normalizer, so the raw count can no longer
+    manufacture a composition preference toward the variance-minimum when the mean degenerates (κ→½). The
+    reference is a NEUTRAL structural default at init and the incoming belief in the sweep.
+    """
+    p = (
+        0.5 * f_g + kappa * f_pos + (1.0 - kappa) * f_neg
+    )  # LIVE mean channel (the composition solved)
+    mean = n * p
+    rscale = kappa * (1.0 - kappa)  # κ(1−κ): each RNA strand's μ(1−μ)
+    # Variance at the REFERENCE composition (NOT the solved f_g) — the freeze.
+    p_ref = 0.5 * f_g_ref + kappa * f_pos_ref + (1.0 - kappa) * f_neg_ref
+    var = (
+        n * p_ref * (1.0 - p_ref)
+        + (n * f_g_ref) ** 2 * 0.25 * od_g
+        + (n * f_pos_ref) ** 2 * rscale * od_r
+        + (n * f_neg_ref) ** 2 * rscale * od_r
+    )
+    var = np.maximum(var, _EPS)
+    return -0.5 * (u_pos - mean) ** 2 / var - 0.5 * np.log(var)
 
 
 def _log_fg(lam):
@@ -351,7 +394,7 @@ def _local_loglik_logodds(
                 * np.asarray(ps, np.float64)[:, None]
                 * _rna_residual(log_fact, np.asarray(ms, np.float64)[:, None]) ** 2
             )
-    # ── the SINGLE-λ composition message (the M6 rank-1 fix): ONE Gaussian on the log-odds grid variable λ
+    # ── the SINGLE-λ composition message (the the-single-lambda-combine rank-1 fix): ONE Gaussian on the log-odds grid variable λ
     #    DIRECTLY (not on log f_c) — the one gDNA-vs-RNA-total DOF, so ψ counts it ONCE, not twice
     # Enrichment-invariant: λ carries no reframe. ──
     if lam_imp_mode is not None and lam_imp_prec is not None:
@@ -524,7 +567,7 @@ def _solve_ambig_logodds(
         np.asarray(f_neg_ref, F)[:, None, None],
     )
     # ── LOG-fraction grids (the overhaul): log f_g (τ-independent) + log f_pos/f_neg over the cube,
-    #    floored at one pseudo-fragment 1/(n+1) (D5: the τ=±1 edges have f_s=0 → log(0); the count floor
+    #    floored at one pseudo-fragment 1/(n+1) (TRAPS: no-prior-means-haldane: the τ=±1 edges have f_s=0 → log(0); the count floor
     #    keeps it finite + consistent with pois_log). ──
     log_fg_grid = _log_fg(lam)  # (K,) f64 = log f_g (moments use f64)
     log_fg32 = log_fg_grid.astype(F)  # (K,) f32 for the cube message
@@ -583,7 +626,7 @@ def _solve_ambig_logodds(
     psi_lam = _lse(psi, axis=2).astype(np.float64)
     post_lam = np.exp(psi_lam - _lse(psi_lam, axis=1, keepdims=True))
     f_g = _posterior_median_fg(post_lam, fg)
-    # precision state = Var(log f_g) over the θ-marginal λ-posterior (D2).
+    # precision state = Var(log f_g) over the θ-marginal λ-posterior (TRAPS: two-gaussians-one-latent).
     mLg = post_lam @ log_fg_grid
     var_g = np.maximum(post_lam @ (log_fg_grid * log_fg_grid) - mLg * mLg, 0.0)
     # f_pos/f_neg MEANS + Var(log f_pos/neg) over the FULL 2-D posterior (f32 cube; sums accumulate in f64).
@@ -660,7 +703,7 @@ def _solve_nodes_logodds_all(
     m = int(np.asarray(u_pos).shape[0])
     ap_all = np.asarray(allow_pos, bool)
     an_all = np.asarray(allow_neg, bool)
-    # Count-zero-info variance-freeze reference (§2, B1). Supplied by the sweep as the incoming belief; at
+    # Count-zero-info variance-freeze reference (§2, TRAPS: measure-the-ceiling-first). Supplied by the sweep as the incoming belief; at
     # init (None) use the structural-neutral default: f_g=½ with the remaining ½ split among the LIVE
     # strands (single-strand → ½ on its strand; AMBIG → ¼ each). Location is prior/likelihood-set; the
     # reference only fixes the variance/precision.

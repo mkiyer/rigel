@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""⛔⛔ THE RE-SOLVE CEILING for the `intron|exon` EDGE — NOT a substitution (`TRAPS.md` B17).
+"""⛔⛔ THE RE-SOLVE CEILING for the `intron|exon` EDGE — NOT a substitution (TRAPS: substitution-understates-a-source).
 
 A substitution replaces one object's answer with the truth and re-scores; that is honest for a SINK and
 it UNDERSTATES a message SOURCE, whose whole value is what it carries to its neighbours. So every arm
@@ -19,16 +19,16 @@ arm              the EDGE's own ``f_g``      ``struct_lock``     what the delta 
 ``intron_phi``   the flanking INTRON's       off                 ⭐ what face (I) as DERIVED can deliver
 ``intron_rho``   from the INTRON's DENSITY   off                 the LEVEL-transfer variant
 ``oracle_phi``   ORACLE TRUTH                off                 is the intron's VALUE good enough?
-``lock_only``    its own self-solve          ⭐ ON               C6: does the EDGE need to ORIGINATE?
+``lock_only``    its own self-solve          ⭐ ON               TRAPS: conservation-misses-mis-attribution: does the EDGE need to ORIGINATE?
 ``oracle_lock``  ORACLE TRUTH                ⭐ ON               the absolute ceiling for this object
 ===============  ==========================  ==================  =====================================
 
-⚠ ``struct_lock`` is what admits a slot to the MEASUREMENT stream (`bp_solver`'s ``mg_own``), and
+⚠ ``struct_lock`` is what admits a slot to the MEASUREMENT stream (``messages.head``'s ``mg_own``), and
 `node_init.strand_evidence` scopes it to NODE slots — so an EDGE can only ever RELAY a gDNA level, never
-ORIGINATE one. That is `ROADMAP.md` §1 step 4= stated as code, and ``lock_only`` is its ceiling.
+ORIGINATE one. That is `ROADMAP.md` §1 **reframe-and-level-together**= stated as code, and ``lock_only`` is its ceiling.
 
 The override reuses `node_init`'s own `own_precision` / `own_composition_logvar`, so there is no second
-implementation of the precision arithmetic to drift (`TRAPS.md` E13).
+implementation of the precision arithmetic to drift (TRAPS: two-docstrings-one-quantity).
 
 ⭐ **`--arms base noop` IS THE FALSIFICATION.** ``noop`` runs the whole wrapper with an empty target set
 and must come back BYTE-IDENTICAL to ``base``; if it does not, every other arm is measuring the rebuild
@@ -87,7 +87,7 @@ def _sibling(name: str, path: Path):
 DESIGN = Path(__file__).resolve().parent
 TH = _sibling("toy_harness.py", DESIGN)
 
-from rigel.calibration import bp_solver, node_init as NI  # noqa: E402
+from rigel.calibration import node_init as NI, sweep as SW  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.node_chain import NODE  # noqa: E402
 from rigel.calibration.node_geometry import node_global_geometry  # noqa: E402
@@ -348,9 +348,9 @@ def run_arm(sub: Substrate, arm: str, config) -> dict:
     """Calibrate the shared substrate under one arm and return the per-slot rows."""
     override = make_override(arm, sub.region_arrays, sub.truth)
     debug: dict = {}
-    orig = bp_solver.build_node_init
+    orig = SW.build_node_init
     if override is not None:
-        bp_solver.build_node_init = override
+        SW.build_node_init = override
     try:
         out = calibrate(
             payload=sub.payload,
@@ -363,7 +363,7 @@ def run_arm(sub: Substrate, arm: str, config) -> dict:
             **index_derived_inputs(sub.index),
         )
     finally:
-        bp_solver.build_node_init = orig
+        SW.build_node_init = orig
     r = TH.ToyResult(
         spec=sub.spec,
         donor=sub.donor,
@@ -379,7 +379,7 @@ def run_arm(sub: Substrate, arm: str, config) -> dict:
     )
     rows = TH.object_rows(r)
     # ⭐ the channel state at every slot, so a null result can be ATTRIBUTED rather than guessed:
-    # `cm_g` is the gDNA MEASUREMENT precision ψ receives (0 ⇒ the gDNA message is inert — C6).
+    # `cm_g` is the gDNA MEASUREMENT precision ψ receives (0 ⇒ the gDNA message is inert — TRAPS: conservation-misses-mis-attribution).
     uni = debug["capture"]["_uni"][-1]
     for s, row in enumerate(rows):
         row["cm_g"] = float(uni["cm_g"][s])
@@ -468,7 +468,7 @@ def report(rows, spec_name, refit_iters):
           f"{len(arms)} arms, refit={refit_iters}, nrna={nrna}")
     print("=" * 136)
     print("   Every arm RE-SOLVES the whole chain on the SAME simulated fragments; the arms differ only")
-    print("   in what the two `intron|exon` EDGEs believe about themselves. ⛔ Not a substitution (B17).")
+    print("   in what the two `intron|exon` EDGEs believe about themselves. ⛔ Not a substitution (TRAPS: substitution-understates-a-source).")
 
     def _cells(fmt, cells, width=15):
         """arm 0 plain; every other arm with its DELTA from arm 0 beside it."""
@@ -532,7 +532,7 @@ def report(rows, spec_name, refit_iters):
     print()
     print("── 4. ⭐⭐ THE CHANNEL: is the EDGE→exon gDNA message ALIVE? (`cm_g` at the EXON slots) ────")
     print("   `cm_g` is the gDNA MEASUREMENT precision ψ receives. 0 ⇒ the level is carried only as a")
-    print("   mode with no weight — `ROADMAP.md` §1 step 4=, a G1 EDGE cannot ORIGINATE.")
+    print("   mode with no weight — `ROADMAP.md` §1 **reframe-and-level-together**=, a G1 EDGE cannot ORIGINATE.")
     exon_keys = [k for k in by if k.startswith("exon@")]
     print(f"\n   {'object':<26} {'arm':<14} {'cm_g':>12} {'c_tau':>12} {'% slots cm_g=0':>16}")
     for k in exon_keys:

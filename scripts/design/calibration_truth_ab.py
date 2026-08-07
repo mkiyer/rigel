@@ -4,7 +4,7 @@
     Baseline it replaces:, which measured `f_gdna` before ANY of the fragment-length
     work — "within 6 % of truth on 3 of 4 gdna100 conditions", with `gdna100 ss0.50 capture_on` 25 % low.
 
-⛔ **THIS IS THE QUESTION THE WHOLE FRAGMENT-LENGTH TRACK EXISTS TO ANSWER.** C0–C2.6 and the second pass
+⛔ **THIS IS THE QUESTION THE WHOLE FRAGMENT-LENGTH TRACK EXISTS TO ANSWER.** TRAPS: two-divisors-opposite-sign–TRAPS: pure-and-length-censored.6 and the second pass
 (P0–P4.2) are all upstream plumbing: one definition of fragment length, then an accurate one, then an
 *unbiased* one. None of that is the product. The product is the library's composition, and
  measured the coupling — **a 10 % length-model error is worth 0.010–0.026 of
@@ -62,7 +62,7 @@ def truth_f_gdna(condition_dir: Path) -> float | None:
 def truth_length_pmf(condition_dir: Path, kind: str, max_size: int) -> "np.ndarray | None":
     """The simulator's OWN post-capture length distribution for one origin class, as a pmf.
 
-    ⭐⭐ **THIS IS THE CEILING INSTRUMENT** (`docs/TRAPS.md` B1). Handing `calibrate`
+    ⭐⭐ **THIS IS THE CEILING INSTRUMENT** (`docs/TRAPS.md` measure-the-ceiling-first). Handing `calibrate`
     the right answer for one channel says what *perfecting* that channel is worth, before any of the work
     to perfect it is done — and it is available whenever the simulator writes truth. It is what showed
     that a perfect RNA length model was worth 0.0004 while the gDNA pool nobody was ranking was worth
@@ -71,7 +71,7 @@ def truth_length_pmf(condition_dir: Path, kind: str, max_size: int) -> "np.ndarr
     ⚠ Read from ``truth_fragment_lengths.tsv``, which is **post-capture empirical** — the realised
     distribution, not the configured ``frag_mean``. Capture selects for length, so the configured
     parameters describe a library that was never sequenced
-    (`docs/TRAPS.md` F5).
+    (`docs/TRAPS.md` capture-selects-for-length).
     """
     path = condition_dir / "truth_fragment_lengths.tsv"
     if not path.is_file():

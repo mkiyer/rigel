@@ -24,7 +24,7 @@ described below. Under the shipped filter it is **53.4 %**.
 so that single predicate already excludes all of them — which is what P1G_SCOPE §5's "211/211 signature
 false positives are nRNA-span edges" actually requires.
 
-⚠ **It was briefly TWO filters, and the second one was a measured bug** (plan F1 proposed
+⚠ **It was briefly TWO filters, and the second one was a measured bug** (plan TRAPS: specificity-and-sense-are-complements proposed
 ``~is_synthetic & ~is_nrna`` for the flags and reaches, reasoning that "an nRNA span's ends are not real
 transcript termini"). The reasoning is right; the predicate is not. On a **non-synthetic** row
 ``is_nrna`` does not mean "manufactured span" — it means **this real transcript is single-exon, so its
@@ -64,9 +64,9 @@ half of the 404,168 junctions. ``lo``/``hi`` means genomically lower/higher and 
 transcript have different reaches, and a strand-agnostic maximum would over-state one of them — on exactly
 the population that carries 31.6 % of the calibration suite's error mass.
 
-**Maximal over isoforms, independently per side** (decision D2). A genomic position usually belongs to
+**Maximal over isoforms, independently per side** (decision TRAPS: two-gaussians-one-latent). A genomic position usually belongs to
 several transcripts that disagree about where the molecule ends, and the isoform abundances are precisely
-what calibration does not know. Measured (plan C3): against the alternative of taking the best *realisable*
+what calibration does not know. Measured (plan TRAPS: divide-by-a-probability): against the alternative of taking the best *realisable*
 pair from a single isoform, the two agree exactly on **93.9 %** of disagreeing junctions with a mean ratio
 of **0.9989**, so the simple independent maximum is used. It is one-sided — it over-states opportunity,
 hence under-states ``ρ_mature``, hence over-states ``f_g``.
@@ -525,7 +525,7 @@ def _contiguous_reaches(ex: _Exons, rows, pos):
     Nascent RNA is an ordinary transcript that happens to be single-exon and to span its whole gene, and
     a genomic distance is never shorter than the exonic distance inside the same span. So the widest RNA
     molecule covering a position is the nascent one, and the reach is the **genomic** distance to the
-    ends of a covering transcript's span — maximised per side and per strand, independently (D2).
+    ends of a covering transcript's span — maximised per side and per strand, independently (TRAPS: two-gaussians-one-latent).
 
     ⚠ In particular the reach inside an intron is **not zero**: that is precisely where nascent RNA
     lives. An exonic reach declares zero RNA opportunity across every intron in the genome, which is

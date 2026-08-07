@@ -131,7 +131,7 @@ class GapCensus:
     ⛔ **Its own axis, and NOT a splice type.** The umbrella cuts ACROSS the splice census: a certified-RNA
     ``SPLICED_ANNOT`` fragment with an intron in its mate gap needs resolving exactly as much as an
     ``UNSPLICED`` one does, so putting these on ``splice_type`` would need two labels per fragment and would
-    break C2's property that the splice census sums to the library.
+    break TRAPS: pure-and-length-censored's property that the splice census sums to the library.
 
     ⛔ **There is no ``gap_resolved_unspliced``, and that is not an omission.** A spliced hypothesis cuts
     bases the unspliced one keeps, so ``L_spliced <= L_unspliced`` always, and the one arbitration filter is
@@ -493,7 +493,7 @@ class AccumulatorPayload:
     # -- the fragment-length pools, binned at L, once per fragment --
     pool_lengths: np.ndarray  # int64[5, max_length + 1]
 
-    #: uint32[max_length + 1] — ⭐ **C1: EVERY deposited fragment, binned at its own L, no purity
+    #: uint32[max_length + 1] — ⭐ **TRAPS: a-purity-filter-is-a-length-filter: EVERY deposited fragment, binned at its own L, no purity
     #: condition.** The five pools above are deliberately CONDITIONED (an impure pool is worse than a
     #: missing one), so none of them is an unconditional anchor — which is why the empirical-Bayes
     #: shrinkage in `calibration.fl` took its anchor from the SCANNER, which measures length by two
@@ -699,7 +699,7 @@ class AccumulatorPayload:
             raise ValueError(
                 f"deposited_lengths has shape {deposited_lengths.shape}, expected ({max_length + 1},)"
             )
-        # ⭐ THE C1 INVARIANT, checked at the door. Same externally-checkable form as
+        # ⭐ THE TRAPS: a-purity-filter-is-a-length-filter INVARIANT, checked at the door. Same externally-checkable form as
         # ``sum(node_start_count) == deposited`` and a DIFFERENT statement: that one says every fragment
         # was located in space, this one that every fragment was binned by length. A histogram that is
         # the anchor for every FL model in the tool must not be allowed in one fragment short.

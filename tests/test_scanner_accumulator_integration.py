@@ -59,7 +59,7 @@ def blacklisted_oracle(tmp_path):
 
     ⭐ This exists so the ``SPLICE_ARTIFACT`` term of the census identity is exercised rather than
     asserted over a zero. A gate that can only ever see 0 on the term it was built for is the
-    failure mode C1's sixth perturbation found: everything green because nothing made the check
+    failure mode TRAPS: a-purity-filter-is-a-length-filter's sixth perturbation found: everything green because nothing made the check
     matter.
     """
     import pandas as pd
@@ -262,9 +262,9 @@ class TestScannerAccumulatorIntegration:
 
 
 class TestFragmentLengthAnchor:
-    """⭐ C2.1 — the empirical-Bayes anchor is the ACCUMULATOR's unconditional histogram.
+    """⭐ TRAPS: pure-and-length-censored.1 — the empirical-Bayes anchor is the ACCUMULATOR's unconditional histogram.
 
-    ``build_fl_models`` EB-shrinks the accumulator's pure pools toward an anchor. Until C2.1 that
+    ``build_fl_models`` EB-shrinks the accumulator's pure pools toward an anchor. Until TRAPS: pure-and-length-censored.1 that
     anchor was the **scanner's** histogram, which measures fragment length by two other rules over
     another population — accumulator-frame pools shrunk toward a scanner-frame anchor, which is
      in shipped code.
@@ -299,22 +299,22 @@ class TestFragmentLengthAnchor:
             fl.global_pmf, np.asarray(payload.deposited_lengths) / payload.qc.deposited
         )
 
-    # ⛔ `test_the_anchor_is_no_longer_the_scanners_histogram` lived here and was DELETED at C2.2 —
+    # ⛔ `test_the_anchor_is_no_longer_the_scanners_histogram` lived here and was DELETED at TRAPS: pure-and-length-censored.2 —
     # exactly as its own docstring said it would be. It compared the anchor against the scanner's
     # histogram, and there is no longer a scanner histogram to compare against. What replaced it is
     # stronger and structural: tests/test_one_fragment_length_definition.py asserts the whole
     # machinery is gone from the source, which no comparison of values could establish.
 
     def test_a_FOREIGN_ANCHOR_CANNOT_BE_PASSED_AT_ALL(self):
-        """⭐ The real gate for C2.1 is STRUCTURAL, not a value.
+        """⭐ The real gate for TRAPS: pure-and-length-censored.1 is STRUCTURAL, not a value.
 
         The two tests above pin what ``build_fl_models`` returns; neither can catch a *call site*
         that hands it the wrong array — and a correct function called with the wrong argument is
-        exactly the defect C2.1 exists to end. So the public entry point takes the **payload**, and
+        exactly the defect TRAPS: pure-and-length-censored.1 exists to end. So the public entry point takes the **payload**, and
         all three histograms are read off that one object in that one frame. There is no
         ``global_counts`` parameter to get wrong.
 
-        ⚠ is "do not recompute what a sibling already holds". D2 is
+        ⚠ is "do not recompute what a sibling already holds". TRAPS: two-gaussians-one-latent is
         its shipped instance. Making the mixed-frame call *unrepresentable* is a stronger remedy
         than any assertion about the value it would have produced.
         """
@@ -332,12 +332,12 @@ class TestFragmentLengthAnchor:
 
 
 class TestSpliceCensus:
-    """⭐ C2.0 — the per-fragment splice breakdown is SCANNER QC, and it closes the books.
+    """⭐ TRAPS: pure-and-length-censored.0 — the per-fragment splice breakdown is SCANNER QC, and it closes the books.
 
     ``rigel report``'s five splice-type counts used to be read off the fragment-length CATEGORY
     MODELS (``flm.category_models[stype].n_observations``), so they counted only the fragments that
     contributed a length observation — a population gated by the transcript-space unanimity test and
-    by the single-block rule on the intergenic path, and never stated anywhere. C2 deletes that
+    by the single-block rule on the intergenic path, and never stated anywhere. TRAPS: pure-and-length-censored deletes that
     histogram, so the counts move to where the classification is MADE.
 
     ⛔ **Nothing is routed through the accumulator to obtain them.** The accumulator's subject is
@@ -378,7 +378,7 @@ class TestSpliceCensus:
         molecule on one cut axis — chiefly blocks on more than one reference. Those returns were
         silent before this counter; the identity is what makes them countable.
 
-        ⚠ This is the same externally-checkable form as C1's ``Σ deposited_lengths == qc.deposited``
+        ⚠ This is the same externally-checkable form as TRAPS: a-purity-filter-is-a-length-filter's ``Σ deposited_lengths == qc.deposited``
         and a **different statement**: that one says every deposited fragment was binned by length,
         this one says every classified fragment was accounted for on its way to the deposit.
         """
@@ -530,9 +530,9 @@ class TestSpliceCensus:
         assert offered - census[SpliceType.SPLICE_ARTIFACT] == accounted
 
     # ⛔ `test_the_census_counts_fragments_not_length_observations` lived here and was DELETED at
-    # C2.2. It asserted the census is a SUPERSET of the fragment-length observation population — true,
+    # TRAPS: pure-and-length-censored.2. It asserted the census is a SUPERSET of the fragment-length observation population — true,
     # and the entire reason the census exists — but its comparand was `n_frag_length_unambiguous`,
-    # which C2.2 deleted along with the observations it counted. The population statement that
+    # which TRAPS: pure-and-length-censored.2 deleted along with the observations it counted. The population statement that
     # survives is the identity above: every censused fragment either deposits, is a named rejection,
     # or is a named hold-out. G6's 4.6 % measurement of the difference is recorded in
     # which is now the only place it exists.

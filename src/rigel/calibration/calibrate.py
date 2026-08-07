@@ -6,7 +6,7 @@ count-zero-information architecture a node's composition is set by three sources
 overdispersed Fisher information), the **cross-node imputation** (the neighbour density messages, at the
 source's own honest belief precision (strand + count) ``pr = n_src/(n_src·vb_src + 1)``), and the
 **population gDNA prior** (the conservative intergenic+intron floor + the Phase-2 density KDE). The solver
-is the belief-propagation SWEEP over the ``N E N E … N`` chain (:mod:`rigel.calibration.bp_solver`)::
+is the belief-propagation SWEEP over the ``N E N E … N`` chain (:mod:`rigel.calibration.sweep`)::
 
     substrate  (five populations on three axes)
       -> build chain + geometry + statics      (the geometry owns EVERY divisor)
@@ -34,7 +34,7 @@ clue, the background pool, the intron factory, the result's two supports — rea
 one count and one divisor, ``crossing_eff_length``. A zero-gDNA library
 (``gdna_density_global == 0``, per-object gDNA mass ``0``) remains a valid, graceful output.
 
-⚠ **A7 IS OFF AT CONTIGUOUS EDGES, AND THE FIRST BASELINE CARRIES ITS BIAS.** The RNA half of an
+⚠ **TRAPS: prove-the-substrate IS OFF AT CONTIGUOUS EDGES, AND THE FIRST BASELINE CARRIES ITS BIAS.** The RNA half of an
 unspliced crossing takes ``UNBOUNDED_REACH`` rather than its transcript's real remaining length
 (owner-ruled). Cost, already measured: an **11.0 %** genome-wide gDNA
 over-call and **+0.36** in the last node before a polyA site. It is
@@ -51,17 +51,16 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .background_reference import BackgroundReference, measure_background
-from .bp_solver import (
-    EDGE,
-    NODE,
+from .messages.head import HeadPolicy
+from .messages.silent import SilentPolicy
+from .node_chain import EDGE, NODE
+from .node_geometry import (
     build_node_geometry,
     build_node_statics,
-    chain_edge_deconv,
-    chain_node_deconv,
     init_beliefs,
     node_global_geometry,
-    node_sweep,
 )
+from .sweep import chain_edge_deconv, chain_node_deconv, solve_chain
 from .density_model import node_gdna_density
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
@@ -415,7 +414,7 @@ def calibrate(
         rna_strand_overdispersion = rna_strand.rna_strand_overdispersion
         _rna_seed = (rna_strand.n_seed_nodes, rna_strand.n_seed_fragments, rna_strand.fallback_used)
 
-    # Strand-Fisher noise-floor SAMPLE SIZES (bp_solver τ seed): N_gdna (gDNA-eligible unspliced fragments in
+    # Strand-Fisher noise-floor SAMPLE SIZES (the sweep's τ seed): N_gdna (gDNA-eligible unspliced fragments in
     # the structurally pure-gDNA intergenic nodes, coarse type 0) and N_spliced (the pure-RNA count κ_RNA was
     # fit from). gDNA's sense mean is ½ by biology (dsDNA symmetry — not fitted); the seed only needs the sample
     # sizes to size the sampling part of the floor ¼·(1/N + ω). N_gdna=0 (a gDNA-free library) ⇒ 1/N_gdna → ∞ ⇒
@@ -479,7 +478,7 @@ def calibrate(
     # message-corruption trace (`scripts/debug/msg_trace.py`). Inert in production.
     def _sweep(prior):
         capture = {} if _debug is not None else None
-        out = node_sweep(
+        out = solve_chain(
             chain,
             statics,
             geometry,
@@ -497,6 +496,27 @@ def calibrate(
             gdna_prior=prior,
             intron_prior=intron_prior,
             length_loglik=length_loglik_arr,
+            # ⛔⛔⛔ **MESSAGE PROPAGATION IS OFF (owner, 2026-08-07), AND A MEASUREMENT PUT IT THERE.**
+            # `SilentPolicy` sends nothing: psi carries each slot's OWN evidence alone — its two strand
+            # counts, its spliced count, the derived reference, the fitted gDNA prior and the intron
+            # factory. Measured on the 36-condition ladder, muting the message layer is a net IMPROVEMENT
+            # on THREE OF THE FOUR STRATA:
+            #
+            #     stranded   x capture ON    -58.3 %   16/16 conditions better
+            #     stranded   x capture OFF   -43.7 %   16/16 better
+            #     unstranded x capture OFF   -32.1 %   14/16 better
+            #     unstranded x capture ON   +154.8 %    0/16 better
+            #
+            # ⚠ The panel TOTAL is +99.9 % worse, because the one stratum the messages help carries 73 % of
+            # the panel's error — so this is a deliberate trade and not a free win. `ROADMAP.md` carries it.
+            # ⭐ That stratum is exactly where kappa = 1/2 makes the strand lambda-term exactly 0, so a slot
+            # has no own composition evidence at all and a message is the only source there is. The way out
+            # is to GIVE it one — `length_likelihood` is the only channel that is theta-independent and can
+            # — not to keep tuning a layer that is harmful everywhere else.
+            #
+            # ⛔ Switching back is ONE WORD, `HeadPolicy()`, and every operator is still there behind its
+            # own named switch, so this is reversible and each operator stays individually priceable.
+            policy=HeadPolicy() if config.message_propagation else SilentPolicy(),
             _capture=capture,
         )
         if capture is not None:

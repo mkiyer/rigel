@@ -18,7 +18,7 @@ gDNA length pools move by **exactly zero**, and there is a derivation:
 So the drain can only ever touch ``RNA_SPLICED``, and measured on all 8 pilot conditions it does: 100 % of
 the ``pool_lengths`` delta lands there and the four gDNA rows are byte-identical.
 
-⚠ **This is NOT C2.6's gDNA control, and the difference matters.** There the fix could not reach a fragment
+⚠ **This is NOT TRAPS: pure-and-length-censored.6's gDNA control, and the difference matters.** There the fix could not reach a fragment
 with no introns, so *any* movement was a bug. Here the drain reaches fragments it is supposed to reach —
 on a gdna100 library a real gDNA fragment whose mate gap spans an annotated intron is genuinely ambiguous
 and was genuinely held. What this gate says is that a drained fragment never lands in a pool that is
@@ -179,7 +179,7 @@ def test_CALIBRATION_sees_the_DRAINED_tally(scenario):
     exonic = scenario.index.t_df["length"].values.astype(np.int64)
     shipped = np.asarray(result.estimator.effective_lengths, dtype=np.float64)
     for label, payload in (("drained", drained), ("pass one", pass_one)):
-        # ⭐ C3's de-tilt is part of production's route to the RNA pmf, so it is part of this
+        # ⭐ TRAPS: divide-by-a-probability's de-tilt is part of production's route to the RNA pmf, so it is part of this
         # reproduction; it is the same array for both arms, so it cannot decide which one matches.
         fl = build_fl_models(
             payload,

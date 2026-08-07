@@ -75,7 +75,7 @@ class GdnaLandscape:
     ``strength`` is a temperature on the whole term. Default 1 is exact Bayes; below 1 tempers a prior that
     was, after all, fitted from *biased* pass-0 output, which is robustness rather than a fudge — it is what
     lets real data overcome a wrong prior. It lives here rather than at the call site so the object is
-    self-describing and `bp_solver` needs no knowledge of it.
+    self-describing and the sweep needs no knowledge of it.
     """
 
     log_rho: np.ndarray

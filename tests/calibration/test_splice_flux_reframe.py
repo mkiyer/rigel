@@ -36,8 +36,8 @@ on `toy_harness --spec splice_both_strands` three nodes are simultaneously intro
 ``coarse_type_array`` reports **every** gene-body node as ``exon``, so the string ``intron|exon`` never
 appears on the rung where the question is hardest.
 
-⚠⚠ **PERTURBATIONS — `TRAPS.md` A1's second half, all EIGHT applied and each one's gate named. Two of
-them fired NOTHING against the first version of this file, and both holes were exactly the shape B14
+⚠⚠ **PERTURBATIONS — TRAPS: self-checking-validator's second half, all EIGHT applied and each one's gate named. Two of
+them fired NOTHING against the first version of this file, and both holes were exactly the shape TRAPS: name-the-observable-per-site
 predicts** — a change made in three places, gated in one.
 
 | # | perturbation | fires |
@@ -64,10 +64,14 @@ have said "twelve" either way.
 
 from __future__ import annotations
 
+import functools
+
 import numpy as np
 import pytest
 
-from rigel.calibration.bp_solver import node_sweep
+from rigel.calibration.messages.head import HeadPolicy
+from rigel.calibration.sweep import solve_chain
+
 from rigel.calibration.node_chain import EDGE, NODE
 from rigel.calibration.node_geometry import (
     NodeGeometry,
@@ -79,6 +83,12 @@ from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
 from rigel.types import Strand
 
 from _synthetic import make_chain_parts
+
+
+#: ⚠ These gates exercise HEADPOLICY's operators, so the policy is named EXPLICITLY. ``solve_chain``
+#: defaults to ``SilentPolicy``, which sends nothing — every assertion below would then be vacuous, which
+#: is TRAPS: could-the-arm-have-fired exactly ("check the arm COULD have changed something").
+node_sweep = functools.partial(solve_chain, policy=HeadPolicy())
 
 _N_GRID = 41
 
@@ -267,9 +277,7 @@ def test_a_chain_with_NO_junction_has_ONE_frame_and_is_the_falsification_arm():
     identically equal, so the pair cannot be measuring the split — it is measuring the rebuild. If this
     fails, every other gate in the file is reading an artefact."""
     parts = _gene_parts(junctions=[])
-    rho_lo, rho_hi = node_total_density(
-        parts.geometry, np.full(int(parts.chain.n_slots), 0.4)
-    )
+    rho_lo, rho_hi = node_total_density(parts.geometry, np.full(int(parts.chain.n_slots), 0.4))
     np.testing.assert_array_equal(rho_lo, rho_hi)
 
 
@@ -326,7 +334,7 @@ def test_the_SOLVER_publishes_the_pair_and_they_differ_only_at_the_junction_EDGE
 
 
 def test_THE_RELAYS_TWO_PASSES_ARE_MIRROR_IMAGES_ON_A_PALINDROMIC_CHAIN():
-    """⭐⭐⭐ `TRAPS.md` B14's gate, read off the RELAY's OWN output — a combine-only gate once let a
+    """⭐⭐⭐ TRAPS: name-the-observable-per-site's gate, read off the RELAY's OWN output — a combine-only gate once let a
     relay-only deletion pass the entire calibration suite — and it is exact rather than approximate.
 
     **The construction.** The fixture is a PALINDROME: signatures ``[·, exon, intron, exon, ·]``, uniform
@@ -344,7 +352,7 @@ def test_THE_RELAYS_TWO_PASSES_ARE_MIRROR_IMAGES_ON_A_PALINDROMIC_CHAIN():
     junction-bearing EDGEs — the forward pass then takes the flux-free total where its mirror takes the
     flux-bearing one. ⚠ It does NOT break for a one-total-per-slot implementation, which is symmetric by
     construction; that case is caught by the placement and frame gates above. The two halves of the change
-    therefore have DIFFERENT gates, which is the point of B14 rather than a gap.
+    therefore have DIFFERENT gates, which is the point of TRAPS: name-the-observable-per-site rather than a gap.
 
     ⭐ Both arrays compared here are the relay's, before the combine has touched anything.
     """
@@ -352,16 +360,21 @@ def test_THE_RELAYS_TWO_PASSES_ARE_MIRROR_IMAGES_ON_A_PALINDROMIC_CHAIN():
     st = _sweep(parts, kappa=0.99)["_uni_static"]
     n = int(parts.chain.n_slots)
     lo_edge, hi_edge = _low_high_edges(parts.chain)
-    assert lo_edge == n - 1 - hi_edge, "the fixture must be a palindrome for this gate to mean anything"
+    assert lo_edge == n - 1 - hi_edge, (
+        "the fixture must be a palindrome for this gate to mean anything"
+    )
     # the frames themselves must mirror, or the chain is not palindromic and the gate is vacuous
     np.testing.assert_allclose(
         np.asarray(st["rho_lo"], float), np.asarray(st["rho_hi"], float)[::-1]
     )
     for a, b in (("fwd_g", "bwd_g"), ("fwd_p", "bwd_p"), ("fwd_pg", "bwd_pg")):
         np.testing.assert_allclose(
-            np.asarray(st[a], float), np.asarray(st[b], float)[::-1], rtol=1e-9, atol=0.0,
+            np.asarray(st[a], float),
+            np.asarray(st[b], float)[::-1],
+            rtol=1e-9,
+            atol=0.0,
             err_msg=f"{a} is not the mirror of {b}: the relay's two passes disagree about which "
-                    "flank total belongs to which role",
+            "flank total belongs to which role",
         )
     # ⛔ and the mirror is a real constraint here, not an identity: the two flank totals genuinely
     # differ at the junction EDGEs, so a mis-paired pass has somewhere to go wrong.
@@ -371,7 +384,7 @@ def test_THE_RELAYS_TWO_PASSES_ARE_MIRROR_IMAGES_ON_A_PALINDROMIC_CHAIN():
 
 
 def test_THE_SEAM_PAIR_LIFT_pairs_the_frames_the_same_way_ON_AN_ASYMMETRIC_CHAIN():
-    """⭐ The THIRD consumer of the frame, and it needed its own gate for the reason B14 gives.
+    """⭐ The THIRD consumer of the frame, and it needed its own gate for the reason TRAPS: name-the-observable-per-site gives.
 
     ``_seam_pair`` fits ``graft_premise_logvar`` from the two flanking EDGEs' fluxes lifted into the
     exon's frame, and the lift is the same reframe ``r`` — so it takes the same flank pair with the same
@@ -381,7 +394,7 @@ def test_THE_SEAM_PAIR_LIFT_pairs_the_frames_the_same_way_ON_AN_ASYMMETRIC_CHAIN
     the two lifts differ, and the gate reads the published per-pair log gap ``d`` directly.
 
     ⚠ What this protects is a library-level VARIANCE, not a location, so its accuracy weight is
-    second-order (`TRAPS.md` D1) — but an unobserved term is an unobserved term.
+    second-order (TRAPS: a-variance-cannot-fix-a-bias) — but an unobserved term is an unobserved term.
     """
     parts = make_chain_parts(
         [np.uint8(0), _EXON, _INTRON, _EXON, np.uint8(0)],
@@ -467,9 +480,7 @@ def test_a_junction_free_chain_SOLVES_IDENTICALLY_under_both_pairings():
     parts = _gene_parts(junctions=[])
     cap = _sweep(parts)
     st = cap["_uni_static"]
-    np.testing.assert_array_equal(
-        np.asarray(st["rho_lo"], float), np.asarray(st["rho_hi"], float)
-    )
+    np.testing.assert_array_equal(np.asarray(st["rho_lo"], float), np.asarray(st["rho_hi"], float))
     pins = cap["_pin"]
     rho = np.asarray(st["rho_lo"], float)
     left = np.asarray(parts.chain.left, np.int64)

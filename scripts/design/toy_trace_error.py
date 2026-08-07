@@ -22,7 +22,7 @@ one at a time to say which one is responsible.
    so this replay is possible without re-solving the chain.
 
 ⚠ **It ablates, it does not fix.** Removing a channel tells you what that channel contributed; it is not
-a proposal, and a channel whose removal helps here may be load-bearing elsewhere (`TRAPS.md` A12 — read
+a proposal, and a channel whose removal helps here may be load-bearing elsewhere (TRAPS: honesty-metrics-reward-ignorance — read
 an accuracy number, not an honesty number, when judging an ablation).
 """
 
@@ -296,7 +296,7 @@ def main() -> int:
     print("   hop, in BOTH twins at once, and is the only way to ask whether the licensed reframe is")
     print("   what inflates the delivered level. ⚠ A DIAGNOSTIC, not a proposal: the licence is")
     print("   load-bearing elsewhere (`EQUATIONS.md` §3.5b/§3.5c).")
-    from rigel.calibration import bp_solver as BP
+    from rigel.calibration import sweep as BP
 
     orig = BP.terminus_flank_gain
 

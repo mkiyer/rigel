@@ -32,7 +32,7 @@ spelled "is there a TSS here" passes on one index and fails on its mirror.
 ⛔ **TERMINI ONLY.** A DONOR/ACCEPTOR EDGE also changes the population — RNA splices out or in — but
 there the flux is MEASURED (``junction_count``) and the graft and the peel exist to route it. A terminus
 has no flux to measure: a transcript simply begins. That is the derived boundary between the two
-treatments, and extending this licence to splice sites is a separate experiment (`ROADMAP.md` §1 step 4).
+treatments, and extending this licence to splice sites is a separate experiment (`ROADMAP.md` §1 **reframe-and-level-together**).
 
 ⭐ Measured on `toy_harness.py --spec nested_exons`, where every EDGE carries a terminus: the gene's
 mass-weighted ``|Δf_g|`` goes **0.2264 → 0.0541**, and its strand mirror ``nested_exons_neg``
@@ -57,6 +57,8 @@ this is not a slower route to the same place: withholding the licence stops the 
 """
 
 from __future__ import annotations
+
+import functools
 
 import numpy as np
 import pytest
@@ -219,7 +221,7 @@ def test_a_SPLICE_SITE_alone_breaks_no_population_here():
     double-count. This predicate must therefore read the four TERMINUS bits and nothing else.
 
     ⚠ Extending it to splice sites is a separate experiment with its own measurement: deleting the
-    junction channel was measured *better* under capture and *worse* off it (`ROADMAP.md` §1 step 4)."""
+    junction channel was measured *better* under capture and *worse* off it (`ROADMAP.md` §1 **reframe-and-level-together**)."""
     from rigel.calibration.splice_graph import (
         FLAG_ACCEPTOR_NEG,
         FLAG_ACCEPTOR_POS,
@@ -284,7 +286,13 @@ def _hop_licence(parts):
     scale ``r_g`` actually applied — so the gate reads the rule off a real solve rather than re-deriving
     it. The two appended entries are the left-source and right-source messages, in that order.
     """
-    from rigel.calibration.bp_solver import node_sweep
+    # ⚠ this gate exercises a HEADPOLICY operator (the population half of the composition licence), so
+    # the policy is named explicitly — `solve_chain` defaults to SilentPolicy and the gate would be
+    # vacuous (TRAPS: could-the-arm-have-fired).
+    from rigel.calibration.messages.head import HeadPolicy
+    from rigel.calibration.sweep import solve_chain
+
+    node_sweep = functools.partial(solve_chain, policy=HeadPolicy())
 
     cap = {}
     node_sweep(
@@ -374,7 +382,7 @@ def _ambig_chain(flags_by_edge):
     ⭐ **Built for READABILITY of the relay's own output.** An exact statement about a relayed level needs
     a destination with no own gDNA precision — otherwise the fuse mixes its belief into the running value
     — and on a stranded chain every single-strand genic slot earns some. An **AMBIG** exon is the
-    exception: both strands are admissible, so it is G3, holds ``{0,0,1}`` at MAX variance, and has
+    exception: both strands are admissible, so it is TRAPS: converge-and-delete, holds ``{0,0,1}`` at MAX variance, and has
     precision 0 while NOT being structurally pure gDNA. Its flanking EDGE is single-strand (the ``+``
     neighbour has no ``−`` transcript), so the EDGE does earn evidence and can lend a composition.
     """
@@ -398,7 +406,13 @@ def _ambig_chain(flags_by_edge):
 
 def _relay_levels(parts):
     """``(pg_own, forward running gDNA level)`` per slot — the RELAY's own output, before the combine."""
-    from rigel.calibration.bp_solver import node_sweep
+    # ⚠ this gate exercises a HEADPOLICY operator (the population half of the composition licence), so
+    # the policy is named explicitly — `solve_chain` defaults to SilentPolicy and the gate would be
+    # vacuous (TRAPS: could-the-arm-have-fired).
+    from rigel.calibration.messages.head import HeadPolicy
+    from rigel.calibration.sweep import solve_chain
+
+    node_sweep = functools.partial(solve_chain, policy=HeadPolicy())
 
     cap = {}
     node_sweep(
@@ -420,7 +434,7 @@ def _relay_levels(parts):
 def test_the_RELAY_honours_the_population_test_TOO():
     """⭐⭐⭐ **THE TWIN-DRIFT GATE, and it is not decoration: without it, deleting the population test
     from ``_relay`` alone fires NOTHING in the whole calibration suite (measured).** ``_relay`` and
-    ``_transport`` are two hand-maintained copies of one transform — the DO-NOT-MERGE note in `bp_solver`
+    ``_transport`` are two hand-maintained copies of one transform — the twin note on ``messages.head``'s ``scan``
     exists for exactly this — and every other gate in this file reads ``_capture['_pin']``, which is the
     COMBINE's. This one reads ``fwd_g``, the relay's running level, which the combine has not yet touched.
 

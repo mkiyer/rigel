@@ -17,7 +17,7 @@ probability::
 
 ⭐ The retained term's coefficient is the RAW COUNT and is **frame-free** — any opportunity ratio between
 the two banks' divisors multiplies ``E[S]``, so in log space it is an additive constant and cannot reach
-the coefficient of ``log(1−f_g)``. `TRAPS.md` C0's opposite-sign trap is structurally absent here: neither
+the coefficient of ``log(1−f_g)``. TRAPS: two-divisors-opposite-sign's opposite-sign trap is structurally absent here: neither
 ``eff_rna`` nor ``eff_junction`` appears in the retained term at all. **That half of the derivation is
 sound and `tests/calibration/test_certified_rna_licence.py` gates it.**
 
@@ -56,7 +56,7 @@ mass** sits on EDGEs whose truth is gDNA-rich (mean true ``f_g`` = 0.84) and the
 certain rather than suggestive.** At ``g00`` the truth is all-RNA and the term is worth −0.49 — the best
 result on the panel. At ``g98`` the truth is nearly all-gDNA and the term is worth +0.35 — the worst. The
 sign of the effect is the sign of the truth. ⛔ **A channel whose benefit tracks the answer rather than
-the evidence has not added information; it has added a prior** (`TRAPS.md` A12's shape).
+the evidence has not added information; it has added a prior** (TRAPS: honesty-metrics-reward-ignorance's shape).
 
 **4. And ``q`` is a property of the RNA GEOMETRY, not of the composition.** Per-EDGE ``q`` at ``g00`` vs
 ``g50`` agrees to a Spearman **ρ = 0.9257** on 5,241 shared EDGEs — a 50-point swing in the gDNA fraction

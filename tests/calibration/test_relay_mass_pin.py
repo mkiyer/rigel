@@ -1,7 +1,7 @@
 """⭐⭐⭐ THE RELAY'S MASS PIN IS GATED BY THE COMPOSITION-IMPUTATION LICENCE.
 
 The relay used to restore ``Sum_c rho_c·E_c = M`` at **every** slot, filling components the message did
-NOT supply from the **destination's own** density (`bp_solver`'s ``_relay``, the ``_k`` block; the scalar
+NOT supply from the **destination's own** density (``messages.head``'s scan kernel, the ``_k`` block; the scalar
 twin of ``_pin_v``). For a gDNA-only message that rescale had an exact closed form in two published
 quantities::
 
@@ -13,7 +13,7 @@ exactly half. So the pin reserved half the mass budget for RNA the message never
 gDNA level was doubled, and because ``k`` depended on ``phi_msg`` the level then random-walked along a
 chain: in fraction space the map ``phi -> phi / (phi + R_own)`` has fixed points ``0`` (repelling) and
 ``1 - R_own`` = 1/2 (attracting), so **the pin pushed every message's composition toward the
-destination's own uninformative half.** In the limit ``R_own -> 0`` it was `TRAPS.md` D4 at full
+destination's own uninformative half.** In the limit ``R_own -> 0`` it was TRAPS: a-message-from-the-destinations-belief at full
 strength: ``k -> 1/phi_msg`` and the delivered level became ``M/E_g``, the destination's own total
 density with the message's value cancelled out algebraically.
 
@@ -21,7 +21,7 @@ density with the message's value cancelled out algebraically.
 BUDGET.** ``Sum_c rho_c·E_c = M`` is an identity **under the imputation premise** — a matched reframe
 delivers ``rho_c^msg = phi_c·rho_tot(dst) = rho_c^dst,true``, so the components account for exactly the
 fragments the destination observed. The pin restores it with ``k = M/S``, and ``S`` fills every component
-the message did not supply from the destination's own density. `TRAPS.md` D4 permits a message to use the
+the message did not supply from the destination's own density. TRAPS: a-message-from-the-destinations-belief permits a message to use the
 destination's CONSTANTS and its OBSERVATIONS and never its BELIEFS, so the pin is licensed in exactly the
 two states where nothing believed reaches ``S``:
 
@@ -50,18 +50,18 @@ rose monotonically and symmetrically with step distance from the gene ends — *
 **0.2618**. Licensing the pin takes it to **0.2264**, and the whole 36-condition gDNA ladder moves
 0.0415 → 0.0414 with **no condition regressing**.
 
-⚠⚠ **AND THE REST OF THE WAY IS BLOCKED BY C2/B11, NOT BY THIS.** On the same toy the pin still fires
+⚠⚠ **AND THE REST OF THE WAY IS BLOCKED BY TRAPS: pure-and-length-censored/TRAPS: a-threshold-on-a-fitted-residue, NOT BY THIS.** On the same toy the pin still fires
 through the gene interior, because ``lend`` is a PRECISION test with no floor and κ is FITTED at 0.500689
 rather than exactly ½ on a nominally unstranded library — so ``I(f_g) ∝ (2κ−1)²`` lands at 1e-6…1e-4
 instead of 0 and every evidence-free exon "supplies" a composition whose own statement is 10²–10³ nats
 wide against a ±10-nat grid. Switching the pin off entirely reaches 0.0760 on this toy; the difference is
-that leak. ⛔ A precision floor here would be a tuned constant and is not this change (`ROADMAP.md` §1 step 3).
+that leak. ⛔ A precision floor here would be a tuned constant and is not this change (`ROADMAP.md` §1 **the-capture-level-residual**).
 
 ⚠ **Perturbation-verified**, and here is the coverage (`scratchpad/perturb.sh`). ⭐ Note that dropping
 the composition branch is caught by gates in OTHER files — so both branches have an independently
 measured consequence and neither is decoration:
 
-    ``if g1_l[i]``                (drop the composition branch)  2: test_bp_solver's
+    ``if g1_l[i]``                (drop the composition branch)  2: test_sweep's
                                                                    mature_measurement_disagreement_silenced,
                                                                    test_toy_harness's intron_composition_dependence
     ``if _lend``                  (drop the structural branch)   3: test_gdna_scale_rule's capture gate at
@@ -74,10 +74,14 @@ measured consequence and neither is decoration:
 
 from __future__ import annotations
 
+import functools
+
 import numpy as np
 import pytest
 
-from rigel.calibration.bp_solver import node_sweep
+from rigel.calibration.messages.head import HeadPolicy
+from rigel.calibration.sweep import solve_chain
+
 from rigel.calibration.effective_length import (
     UNBOUNDED_REACH,
     contained_eff_length,
@@ -87,6 +91,12 @@ from rigel.calibration.node_geometry import g1_locked, init_beliefs
 from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
 
 from _synthetic import make_chain_parts
+
+
+#: ⚠ These gates exercise HEADPOLICY's operators, so the policy is named EXPLICITLY. ``solve_chain``
+#: defaults to ``SilentPolicy``, which sends nothing — every assertion below would then be vacuous, which
+#: is TRAPS: could-the-arm-have-fired exactly ("check the arm COULD have changed something").
+node_sweep = functools.partial(solve_chain, policy=HeadPolicy())
 
 _N_GRID = 200
 
@@ -103,7 +113,7 @@ def _uniform_field_chain(*, rho=1.0, rna, bp=1000.0, rho_first=None):
 
     ⭐ The gDNA field is UNIFORM by construction, so the truth is ``rho`` at every object and any
     departure of the relayed level from ``rho`` is the relay's own doing. ``rho_first`` overrides the
-    field on the FIRST node only — the handle for the D4 invariance test.
+    field on the FIRST node only — the handle for the TRAPS: a-message-from-the-destinations-belief invariance test.
 
     ⚠ **No step on this chain is licensed**, and that is the point of it: the library is unstranded and
     there is no junction anywhere, so no slot ever earns RNA precision of its own and no source can lend
@@ -272,7 +282,7 @@ def test_an_unpinned_step_does_not_rescale_the_level_at_all():
 def test_the_pin_fires_ONLY_where_no_belief_can_reach_its_budget():
     """⭐⭐⭐ **THIS IS A LICENCE AND NOT A DELETION, and this gate is the whole difference.** The pin's
     budget fills every component the message did not supply from the destination's own density, so
-    `TRAPS.md` D4 permits it in exactly two states — and this gate asserts both of them fire and that
+    TRAPS: a-message-from-the-destinations-belief permits it in exactly two states — and this gate asserts both of them fire and that
     nothing else does.
 
     * **(ii) the destination is structurally pure gDNA.** There is no unsupplied component to fill in:
@@ -414,7 +424,7 @@ def test_the_running_product_of_the_rescales_is_exactly_one_at_every_step():
 
 
 def test_the_delivered_level_tracks_the_gdna_FIELD_and_not_any_destinations_own_total():
-    """⛔⛔ **D4, AS AN INVARIANCE, AT THE DESTINATIONS WHERE D4 ACTUALLY BIT.** The old pin's fixed point
+    """⛔⛔ **TRAPS: a-message-from-the-destinations-belief, AS AN INVARIANCE, AT THE DESTINATIONS WHERE TRAPS: a-message-from-the-destinations-belief ACTUALLY BIT.** The old pin's fixed point
     was half the destination's OWN total observed density, so the delivered level was a function of each
     destination's crowding rather than of the gDNA field. The check needs no tolerance: **scale the whole
     gDNA field by 10x with the RNA held fixed, and every delivered level must scale by 10x exactly.**
@@ -445,8 +455,8 @@ def test_the_delivered_level_tracks_the_gdna_FIELD_and_not_any_destinations_own_
 
 def test_a_structurally_pure_gdna_destination_IS_told_its_own_measurement():
     """⭐⭐⭐ **AND HERE THE DELIVERED LEVEL *IS* THE DESTINATION'S OWN NUMBER — DELIBERATELY, AND IT IS
-    NOT D4.** At a structurally pure-gDNA object the composition is certain by STRUCTURE, so ``M/E_g`` is
-    a direct OBSERVATION of the very quantity the message is about, not a belief about it. D4 forbids a
+    NOT TRAPS: a-message-from-the-destinations-belief.** At a structurally pure-gDNA object the composition is certain by STRUCTURE, so ``M/E_g`` is
+    a direct OBSERVATION of the very quantity the message is about, not a belief about it. TRAPS: a-message-from-the-destinations-belief forbids a
     message built from the destination's beliefs and explicitly permits its constants and its data; this
     is the latter. So the pin fires here by case (ii) of its licence and overwrites the relayed level —
     and it must, because an upstream level that disagrees is simply worse evidence about the gDNA density
@@ -454,7 +464,7 @@ def test_a_structurally_pure_gdna_destination_IS_told_its_own_measurement():
 
     ⭐⭐ **THIS IS THE OPERATOR THE CAPTURE LANDSCAPE TRAVELS ON.** An ``intergenic|exon`` EDGE measures
     the gDNA density at its own capture stratum, and the exon behind it has no other way to hear it — a
-    G1 EDGE carries ``prec_g = 0`` and so cannot ORIGINATE a level through the fuse (`ROADMAP.md` §1 step 4=). Drop
+    G1 EDGE carries ``prec_g = 0`` and so cannot ORIGINATE a level through the fuse (`ROADMAP.md` §1 **reframe-and-level-together**=). Drop
     case (ii) and the off-probe intergenic floor leaks straight through to the exon: measured, and it
     fires `test_gdna_scale_rule.test_capture_step_is_carried_and_the_off_probe_floor_is_not` at 20x and
     200x. A per-capture-class landscape ratio built to do this job explicitly measured inert
@@ -485,10 +495,10 @@ def test_a_structurally_pure_gdna_destination_IS_told_its_own_measurement():
 
 @pytest.mark.xfail(
     reason=(
-        "NOT C11, and not the mass pin: the level reaching the RNA-free interior exon is now the field "
+        "NOT the nested-exons probe, and not the mass pin: the level reaching the RNA-free interior exon is now the field "
         "EXACTLY (see the gate above it), and the exon still reads 0.914 rather than 1.000. What is "
         "left is psi's uninformative reference holding an evidence-free node off the f_g = 1 vertex by "
-        "~0.08 on its own — test_bp_solver.test_gdna_sweep_factor1_ambig_recovery measures the same "
+        "~0.08 on its own — test_sweep.test_gdna_sweep_factor1_ambig_recovery measures the same "
         "residual from the other side. Strict: the bound is the TRUTH and must not be widened to the "
         "number the solver currently reaches."
     ),

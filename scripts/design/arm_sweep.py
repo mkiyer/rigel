@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """The message-precision sweep, per stratum — is there a PLATEAU?
 
-⛔ Read the STRATA, never the total. `CONSOLIDATION.md` §2 shows the panel total hides a sign flip
+⛔ Read the STRATA, never the total. `ROADMAP.md` §0 shows the panel total hides a sign flip
 between them, so a pooled curve would average the two regimes the sweep exists to separate.
 """
 

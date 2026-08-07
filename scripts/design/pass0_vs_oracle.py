@@ -115,7 +115,7 @@ DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 #: ⭐ NOT DEFINED HERE ANY MORE. "Has own composition evidence" has ONE home in production —
 #: :func:`~rigel.calibration.node_init.has_own_composition_evidence` — and every instrument imports
 #: it. It used to be restated here and in ``composition_evidence_census.py``, each beside a comment
-#: saying it must match the solver, which is precisely the arrangement `TRAPS.md` A11 names: a change
+#: saying it must match the solver, which is precisely the arrangement TRAPS: a-test-that-redefines names: a change
 #: to the solver would have moved neither. Kept as a name only because ``solver_slot_classes`` takes
 #: it as a MOVEABLE argument so a gate can perturb the partition and watch it move.
 _EPS = 1.0e-9

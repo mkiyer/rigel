@@ -67,7 +67,7 @@ class _P:
 #: IN `sj_strand`.** That is deliberate and it is what gives the key-completeness gate teeth: with every
 #: record differing in (ref, start, end) already, dropping a trailing key field changes nothing and the
 #: fixture is invariant under a weaker identity — which is exactly the hole perturbation P1 found in the
-#: first version of this file (`TRAPS.md` A2's "one length bin" shape).
+#: first version of this file (TRAPS: perturb-every-gate's "one length bin" shape).
 _RECS = [
     (0, 100, 300, 0, 0),
     (0, 400, 700, 0, 1),
@@ -169,12 +169,16 @@ def test_L7_the_key_uses_EVERY_field_of_the_record_identity():
     records differing in (ref, start, end), the fixture was invariant under a weaker identity."""
     whole = _P(_bank(_RECS))
     lifted, ambiguous = lift_choices(whole, [whole], _CHOICES)
-    assert ambiguous == 0, "the fixture must have no duplicate FULL keys, or this gate proves nothing"
+    assert ambiguous == 0, (
+        "the fixture must have no duplicate FULL keys, or this gate proves nothing"
+    )
     assert np.array_equal(lifted[0], _CHOICES)
-    # the two near-duplicate pairs must have drawn DIFFERENT choices, or the gate is vacuous (A14)
+    # the two near-duplicate pairs must have drawn DIFFERENT choices, or the gate is vacuous (TRAPS: could-the-arm-have-fired)
     order = sorted(_RECS)
-    for a, b in (((1, 50, 260, 0, 0), (1, 50, 260, 1, 0)),
-                 ((1, 800, 1000, 0, 0), (1, 800, 1000, 0, 1))):
+    for a, b in (
+        ((1, 50, 260, 0, 0), (1, 50, 260, 1, 0)),
+        ((1, 800, 1000, 0, 0), (1, 800, 1000, 0, 1)),
+    ):
         ca, cb = _CHOICES[order.index(a)], _CHOICES[order.index(b)]
         assert ca != cb, (a, b, ca, cb)
 
@@ -185,7 +189,7 @@ def test_L8_partitions_holding_MORE_copies_of_a_key_than_the_whole_RAISES():
     second partition would silently re-use the first's choice, and ``Sum(partitions) > whole``.
 
     ⭐ Written because perturbation P5 (delete the guard) passed every other gate: no fixture over-consumed,
-    so the guard was never reached (`TRAPS.md` A14 — count the opportunities the change had to fire)."""
+    so the guard was never reached (TRAPS: could-the-arm-have-fired — count the opportunities the change had to fire)."""
     only = (0, 100, 300, 0, 0)
     whole = _P(_bank([only, (0, 500, 700, 0, 0)]))
     ch = np.array([0, 1], np.int64)

@@ -613,7 +613,7 @@ class FragmentLengthModel:
         }
 
 
-# ⛔ `FragmentLengthModels` (PLURAL) lived here and was DELETED by C2.
+# ⛔ `FragmentLengthModels` (PLURAL) lived here and was DELETED by TRAPS: pure-and-length-censored.
 # It held the scanner's own global + per-SpliceType raw histograms,
 # trained during the BAM scan from two different measurements of "fragment length" — a genomic
 # footprint for one subset of fragments and a transcript-space length for a disjoint one — summed

@@ -1,7 +1,7 @@
 """⭐ WHAT `rna_sense_frac` MEANS — and why 0.0101 on a "0.99 stranded" library is CORRECT.
 
     Retires: rank 6 · Corrects: + S5.f-addendum,
-    fact 17 and §0 C4 · Unblocks: (the strand term)
+    fact 17 and §0 TRAPS: opposite-tilts-must-not-pool · Unblocks: (the strand term)
 
 ⛔ **THIS WAS FILED TWICE AS A SIGN BUG. IT IS NOT ONE.** The record said the fitted κ was `1 − truth`
 and that "only the exported scalar is mis-labelled". Both statements are wrong, and the reason is a

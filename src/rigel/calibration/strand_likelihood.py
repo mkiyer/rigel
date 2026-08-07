@@ -1,7 +1,16 @@
 """Strand likelihood — the two-component gDNA/RNA strand log-likelihood of one node.
 
-Used by the per-node strand module (:mod:`strand_deconv`). A region's unspliced fragments are a
-mix of **gDNA** and **RNA**, both **Beta-Binomial overdispersed**:
+⭐⭐ **THIS IS AN EXECUTABLE REFERENCE, NOT A PRODUCTION PATH — and saying so is the point.** Nothing in
+``src/`` calls it. What ships is the THREE-component generalization in
+``simplex_logodds._mixture_strand_loglik``, and this two-component special case is what that form is gated
+against: ``tests/calibration/test_strand_likelihood_reference.py`` asserts the collapse when one RNA strand
+is dead, so a drift between them fires a test instead of a comment being quietly wrong.
+
+⛔ This docstring used to say "Used by the per-node strand module (`strand_deconv`)", and `strand_deconv`
+does not import it. It read as dead code for that reason, and the guard the source claimed elsewhere
+("collapses to ``strand_loglik`` exactly — the no-regression guard") **did not exist until 2026-08-07**.
+
+A region's unspliced fragments are a mix of **gDNA** and **RNA**, both **Beta-Binomial overdispersed**:
 
 * gDNA is unstranded (oriented-sense rate ½) with intra-class correlation
   ``gdna_strand_overdispersion`` (fitted in :mod:`gdna_strand`).

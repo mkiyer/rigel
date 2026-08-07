@@ -2,7 +2,7 @@
 
 **Every formula here is implemented somewhere and gated by a test.** This file exists so the derivation
 does not have to be reconstructed from the code, and so two modules cannot come to disagree about one
-quantity (`TRAPS.md` E13).
+quantity (TRAPS: two-docstrings-one-quantity).
 
 ⛔ **No measurements here.** Where a number appears it is a property of the *formula* (a limit, a
 degenerate case, a worked value that makes the shape concrete), never a property of a library.
@@ -103,7 +103,7 @@ variances **cannot be pooled across two partitions**; only truth pools additivel
 Identified **iff the two MEAN lengths differ**; the second row being literally `[1,1]` is what makes the
 2×2 well conditioned. `N / Σ(1/L)` is the abundance-weighted mean fragment length.
 ⛔ **So the identifying quantity is the GAP `μ_g − μ_r`, not either mean.** At equal means the channel
-carries exactly zero information at any depth (`TRAPS.md` F3).
+carries exactly zero information at any depth (TRAPS: equal-lengths-carry-no-composition).
 
 **3.2 Density is the frame-invariant currency; a fraction is not.** `ρ_c = C_c/E_c` agrees across the
 contained / crossing / spliced frames to ~0.36 % and does not degrade across 1×/30×/300× capture. The
@@ -126,7 +126,7 @@ delivers:
 — the source's density **share** applied to the destination's observed total. There is **no level transport
 in it at all**: it is exact iff `φ_c(src) = φ_c(dst)`, and wrong by exactly `φ_c(src)/φ_c(dst)`.
 ⛔ When the source carries only gDNA that factor is `1/φ_g(dst)` and the delivered level collapses to
-`ρ_tot(dst)`, the destination's **own** total, independently of the source's measurement — `TRAPS.md` D4/D4b.
+`ρ_tot(dst)`, the destination's **own** total, independently of the source's measurement — TRAPS: a-message-from-the-destinations-belief/TRAPS: a-total-density-ratio.
 
 ⭐ So a message makes two claims and they need two scales:
 
@@ -164,13 +164,13 @@ transcript simply begins. That is the derived boundary between the two treatment
 
 **3.5c ⭐⭐ THE MASS PIN CARRIES THE SAME LICENCE, PLUS ONE STRUCTURAL CASE.** `Σ_c ρ_c·E_c = M` is an
 identity *under the imputation premise*, restored by `k = M/S` with `S` filling every unsupplied component
-from the destination's **own** density. D4 permits a message to use the destination's constants and
+from the destination's **own** density. TRAPS: a-message-from-the-destinations-belief permits a message to use the destination's constants and
 observations, never its beliefs — so the pin is licensed in exactly the two states where no belief reaches
 `S`: **(i)** the message supplied the composition (§3.5b, nothing is filled in), or **(ii)** the
 destination is a **structurally pure-gDNA object**, where there is no unsupplied component and `f_g = 1` is
 structure, so `S = ρ_g·E_g` and the pin hands the object its own **measured** `M/E_g`.
 ⭐ Case (ii) is how the capture landscape reaches an exon at all — a G1 EDGE has `prec_g = 0` and cannot
-originate a level through the fuse, so the pin is its only channel. Unlicensed, the pin was D4 at full
+originate a level through the fuse, so the pin is its only channel. Unlicensed, the pin was TRAPS: a-message-from-the-destinations-belief at full
 strength: `k = 1/(φ_msg + R_own)`, fixed point `(1−R_own)·ρ_tot`, and `R_own` is **exactly ½** at a slot
 with no composition evidence — so it drove the delivered gDNA *fraction* to ½ regardless of the truth.
 
@@ -220,7 +220,7 @@ the genome, mature RNA is uniform along its transcript. Standard errors from 1.0
 * the **RNA** arm across a junction: **13.5–13.7 se**. That is a BIAS. Depth makes it MORE significant, not
   smaller. It is §3.6b's frame gap: `E_J = E[w]−1` rises with the fitted mean fragment length while
   `E_r = e−E[w]+1` falls, so a length-model error is amplified with opposite sign at 0.62 %/bp.
-  ⛔ `TRAPS.md` D1 — a variance cannot fix a biased mode.
+  ⛔ TRAPS: a-variance-cannot-fix-a-bias — a variance cannot fix a biased mode.
 
 ⭐ **So the existing `σ²_transfer = Var(log r)` is the right medicine for the gDNA arm and the wrong
 medicine for this**: `r_tot` is not a *noisy* estimate of `r_g`, it is a *precise* estimate of a different
@@ -242,8 +242,8 @@ estimator of `r_g` is
 and every term on the right is measurable from the solver's own state. So the choice is no longer
 boolean-or-nothing: `r_g` is directly available and unbiased-but-noisy, `r_tot` is precise-but-biased with a
 **computable** bias, and two estimators with opposite failure modes fuse by inverse variance — the same
-shape §3.6 already uses for its two closures and M11 for the level. ⛔ No threshold, which matters because
-a threshold here has been refused three times (`TRAPS.md` B11, D4f, D4g). ⚠ Unbuilt and unpriced: the
+shape §3.6 already uses for its two closures and the-residual-level for the level. ⛔ No threshold, which matters because
+a threshold here has been refused three times (TRAPS: a-threshold-on-a-fitted-residue, TRAPS: a-licence-with-no-floor, TRAPS: a-multiplication-gated-by-a-trace). ⚠ Unbuilt and unpriced: the
 ceiling to measure first is what a PERFECT per-component `r_g` at every hop is worth, re-solved.
 
 **3.6 ⭐⭐⭐ THE TWO FACES OF AN `intron|exon` EDGE — component-set matching, derived and verified.**
@@ -258,7 +258,7 @@ whole content of this section:
 | `junction_count` = `J` | never crossed it — it **JUMPED** from here | **mature**, certified |
 | `spliced_count` = `S` | crossed contiguously, spliced *elsewhere* | mature, certified |
 
-⛔ Mature RNA cannot cross an exon↔intron seam contiguously (`TRAPS.md` F9), so it is **absent from `U`**
+⛔ Mature RNA cannot cross an exon↔intron seam contiguously (TRAPS: mature-rna-never-crosses-a-seam), so it is **absent from `U`**
 and present in `J`. Three densities, one of which needs no deconvolution at all:
 
     rho_g   = C_g / E_g       unknown split of U          U = C_g + C_nas
@@ -311,7 +311,7 @@ capture the intron NODE holds **1** count — median 0, max 3, unchanged from 12
 bp is fixed and its density is off-probe — while the `intron|exon` EDGE holds **20–40** at the exon's own
 capture stratum. So the direction of transport inverts with capture, and only the SHARE survives that:
 transferring the intron's DENSITY instead is measured at **+0.207** mass-weighted `|Δf_g|` on capture-ON ×
-unstranded. `TRAPS.md` B19.
+unstranded. TRAPS: capture-inverts-the-counted-side.
 
 ⛔⛔ **WHAT THE CEILING SAID, AND IT IS THE REASON NOTHING WAS BUILT** (2026-08-04, `toy_ceiling.py` then
 `ladder_arm_ab.py`). Handing both `intron|exon` EDGEs the ORACLE truth and **re-solving the whole chain**
@@ -367,7 +367,7 @@ capture_off`, the intron-facing side of the two `intron|exon` EDGEs is inflated 
 
 ⚠ It inflates the two hops of a two-hop pair in opposite directions and therefore **cancels in a
 compounded ratio** (2.159 used vs 2.153 true), which is why no endpoint, conservation or aggregate check
-saw it — `TRAPS.md` D4i. ⛔ And the opposite error is not available either: using `rho_U` on both sides was
+saw it — TRAPS: recompute-from-the-oracle. ⛔ And the opposite error is not available either: using `rho_U` on both sides was
 measured WORSE, because at an EDGE→EXON step the exon genuinely contains the spliced population.
 
 ⛔⛔ **WRITE THE PREDICATE IN GENOMIC TERMS — §3.5b's ruling, and here is where it bites.**
@@ -390,7 +390,7 @@ that the **EDGEs improve and the NODEs get worse**: on a 6-condition shard spann
 edge axis moves mwae 0.16046 → 0.16000 with confidently-wrong −7.7 % and the shipped solve better on 6 of 6,
 while the node axis moves 0.12232 → **0.12297** with confidently-wrong **+36.9 %** and Σ|err| +20,884
 fragments. `solv%` is byte-identical in both arms, so this is not a moved denominator.
-⭐ **The reason is `TRAPS.md` D4j and it was predictable from D4i**: an evidence-free exon is fed through
+⭐ **The reason is TRAPS: a-cancelling-defect-pair and it was predictable from TRAPS: recompute-from-the-oracle**: an evidence-free exon is fed through
 `intron → EDGE → exon`, the two hops' errors cancel, and the second hop carries a *different* defect (§3.5's
 composition ratio applied to a level). Correcting one of a cancelling pair is worse than correcting neither.
 ⛔ **So this is priced jointly with that defect or not at all** — `EQUATIONS.md` §3.6c.
@@ -412,7 +412,7 @@ here and is **WITHDRAWN**: it assumed the simulator draws a length and then plac
 MARGINAL by that same opportunity (`f_post(w) = f_pre(w)·total_eff(w)/Z`), so the realised crossing count
 at length `w` is `f_pre(w)·(L−w+1)·(w−1)/(L−w+1) = f_pre(w)·(w−1)` and the factor cancels identically.
 Computed exactly from the pmf, `k = 1.000000` at every transcript length. ⛔ The whole gap is the
-length-model mismatch, with no geometric component. `TRAPS.md` C0.
+length-model mismatch, with no geometric component. TRAPS: two-divisors-opposite-sign.
 
 ✅ **This WITHDRAWS the sign correction this section used to carry.** `bp_solver`'s P1d asserts
 `rho_R(exon) ≥ rho_nas(B) + rho_mat(B)`, a LOWER bound, and that is **right**: the measured ratio of
@@ -420,6 +420,118 @@ length-model mismatch, with no geometric component. `TRAPS.md` C0.
 nascent share of the exon's RNA — the nascent arm is measured in the exon's own frame and dilutes it,
 which is precisely what identifies the inflation as `rho_mat`'s rather than the bound's. ⚠ What does
 survive is that `graft_premise_logvar` is fitted on fluxes carrying the same inflation, so it inherits it.
+
+---
+
+
+### 3.7 ⭐⭐⭐ THE FRAME-FREE COMPOSITION COORDINATE — and what it does and does not buy
+
+    ⭐ Promoted verbatim from a working doc (`variance_model_notes.md` §4–§5) when it was
+    deleted (2026-08-07). ⛔ **The DERIVATION below is sound and is worth keeping; the REBUILD that was
+    based on it measured +85–103 % on the panel and is deleted.** `DESIGN.md` §6.1 records why those two
+    facts are compatible: the rebuild's regression decomposed into a correct derivation, a UNIT ERROR and a
+    STRUCTURAL disconnection, and only the first of the three is written here.
+    ⚠ So read this as *"what a composition coordinate would have to look like"*, not as a design that is
+    waiting to be re-attempted.
+
+
+⛔ **The first draft of this document claimed "composition transfer is the identity on λ". THAT IS FALSE**,
+and the error matters because it is the difference between a belief-free exact operation and a wrong one.
+
+**What actually transfers is the DENSITY, not the share.** "gDNA is uniform" and "the same transcripts run
+through both slots" are statements about *densities*. Shares are derived, and they move whenever the two
+slots' opportunity ratio differs — which between a NODE and an EDGE it always does. Verified:
+
+| `E_g,E_r` at source → destination | `φ_g` | `λ` | `η` |
+|---|---|---|---|
+| (100, 200) → (250, 100) | 0.3333 → 0.7143 | −0.6931 → +0.9163 | **0 → 0** |
+| (3000, 1500) → (254, 254) | 0.6667 → 0.5000 | +0.6931 → +0.0000 | **0 → 0** |
+| (50, 400) → (900, 300) | 0.1111 → 0.7500 | −2.0794 → +1.0986 | **0 → 0** |
+
+Since `λ = log(φ_g/φ_R) = log(ρ_g/ρ_R) + log(E_g/E_r)`, define
+
+$$\boxed{\;\eta \;\equiv\; \lambda - \log\frac{E_g}{E_r} \;=\; \log\frac{\rho_g}{\rho_R}\;}$$
+
+**`η` is the frame-free composition coordinate, and it transfers as the IDENTITY across any edge with
+`T_s = T_d`.** The tilt `θ` — built from `(ρ_p − ρ_n)/ρ_R`, in which the common `E_r` cancels — likewise
+transfers as the identity.
+
+**Four consequences, and together they are the whole simplification:**
+
+1. **The conversion is a known geometric constant.** `λ_d = λ_s + [log(E_g/E_r)_d − log(E_g/E_r)_s]`. No
+   belief, no count, no unknown — read off the index.
+2. **The mass identity holds by construction.** Rebuild at the destination as
+   `ρ_c(d) = φ_c(d)·M_d/E_c(d)` with `φ` from `λ_d`; then `Σ_c ρ_c E_c = M_d Σφ_c = M_d`, exactly, for any
+   `η` (verified to 1e-10). ⭐⭐ **So there is nothing for the mass pin to restore.**
+3. **No ratio of totals is ever formed** — so no reframe `r`, no `framed` guard, no undefined ratio, no
+   `rho > _EPS` guards.
+3b. ⭐⭐ **AND THIS — NOT §2 — IS WHAT DISSOLVES TRAPS: a-ratio-cannot-carry-zero.** TRAPS: a-ratio-cannot-carry-zero says a MULTIPLICATIVE transport
+   cannot carry zero, so "there is none here" is unrepresentable by construction. Under §4/§5 the
+   conversion is an **additive constant in log space** and the shared density crosses as the **identity**:
+   `rho_g = 0` needs no `rho > _EPS` guard, is never a denominator, and arrives as `f_g = 0` intact. ⛔ The
+   first draft credited this to §2's Jeffreys location, which is the opposite of true — §2's positive floor
+   is what *destroys* the zero, and it cost +96,299 % on the control to find out (§6).
+4. ⭐ **It explains what the reframe was for.** `r = ρ_tot(d)/ρ_tot(s)` is the code compensating, with
+   *beliefs*, for working in `λ` where it should have worked in `η`. The correct compensation is exact and
+   belief-free.
+
+⚠ **The premise `η` inherits, stated plainly:** `η` is invariant only where gDNA density and RNA density are
+each unchanged — i.e. within one capture stratum, with the same transcripts. `T_s = T_d` is a proxy for the
+second condition; the first is the same uniform-gDNA assumption the whole tool rests on. This is not a new
+weakness, but §4 does not remove it.
+
+⚠ The **spliced** bank is untouched: a spliced fragment is certified RNA, entering as a *measurement* of the
+RNA side. The identity above is over the **unspliced** bank, which is what needs deconvolving.
+
+---
+
+### 3.8 THE MISMATCHED EDGE — under the null there is NO UNKNOWN
+
+`T_s ⊊ T_d`: the source (say an `intergenic|exon` seam, `T_s = {g}`) knows only `ρ_g`.
+
+⭐ **A density is already frame-free.** So under the null — gDNA uniform, no capture enrichment —
+`ρ_g` crosses **unchanged**, and the destination's own observations convert it:
+
+$$f_g(d) \;=\; \frac{\rho_g(s)\cdot E_g(d)}{M_d}, \qquad \text{RNA mass} = M_d - \rho_g(s) E_g(d)$$
+
+**Fully determined. No interval, no free parameter, no scale to integrate out.** The newly-active
+population is not "unconstrained by the message" — the null *implies* it as the residual of the
+destination's own count. This is the owner's formulation and it is a strict improvement on the first draft's
+interval framing.
+
+⭐⭐ **And this is exactly what HEAD already computes** — `mo_g = log(c_g·E_g/M) = log f_g`.
+
+#### 3.8.1 The general case — TSS/TES and strand changes, in one rule
+
+Let `C = T_s \cap T_d` (shared) and `N = T_d \setminus T_s` (newly active). Under the null:
+
+1. **Within `C`, the density RATIOS are frame-free and transfer as identities** (§4) — so the relative
+   composition *among the shared populations* crosses exactly.
+2. **Each shared density crosses unchanged**, so the destination-frame mass they account for is determined:
+   $$A \;=\; \sum_{c \in C} \rho_c(s)\,E_c(d)$$
+3. **`N` takes the residual** `M_d − A`, and how it splits depends only on `|N|`:
+
+| `\|N\|` | example | the split |
+|---|---|---|
+| 0 | `T_s = T_d` | §4 — nothing new; the message is complete |
+| 1 | a `+`-strand TSS: `{g} → {g, R⁺}`; or `{g,R⁺} → {g,R⁺,R⁻}` | **determined** — one unknown, one equation |
+| 2 | `{g} → {g, R⁺, R⁻}` (an intergenic seam into a both-strand exon) | the RNA **total** is determined; the **tilt** `θ` is not, and falls to ψ's reference |
+
+⭐⭐⭐ **So the only thing a component mismatch ever leaves undetermined is the TILT, and only when both
+strands are newly active.** The gDNA-vs-RNA split — the quantity the tool exists to estimate — is
+determined in every case. That is a much smaller residual unknown than the first draft supposed, and it is
+`θ`, a nuisance parameter, not `λ`.
+
+⚠ `A > M_d` is possible from sampling noise (the shared populations "account for" more than the destination
+observed). Then the null is inconsistent with the destination's own count and the honest reading is `f_N = 0`
+with the excess absorbed by the shared claim's own uncertainty. ⛔ Do **not** introduce a shift here; §6.
+
+⛔⛔ **So the open problem is not "what crosses". It is: HOW MUCH SHOULD THE DESTINATION DOUBT THE NULL?**
+Capture makes `ρ_g(d) = γ·ρ_g(s)` with `γ ≥ 1` possible; nothing at pass-0 is evidence that it *happened*.
+§6 shows that every rule that introduces doubt is refused by the zero control, and §8 says where the doubt
+must come from instead.
+
+---
 
 ---
 
@@ -433,7 +545,7 @@ population.
 
     pi(w) = A(w) / T(w)          fitted(w) = count(w) / pi(w)
 
-⛔ Never `count(w)/A(w)` — see `TRAPS.md` C3.
+⛔ Never `count(w)/A(w)` — see TRAPS: divide-by-a-probability.
 
 **4.2 The junction pool** (`calibration/junction_opportunity.py`). For a transcript with exon lengths
 `e_1..e_K` and total `L = Σ e_i`, the starts at which a length-`w` window crosses **at least one**
@@ -457,7 +569,7 @@ crossing-exactly-one-line (§1.4), with `T(w) = Σ_refs (L_ref − w + 1)₊`. T
 ⭐ **This is the opportunity-weighted average of the four de-tilted pools**, `Σ_p A_p f_p / Σ_p A_p`, and
 under Poisson counts `Var(count_p) ∝ A_p`, so those weights are exactly **inverse-variance**. There is no
 tunable weight. ⛔ It is *not* the same as pooling the four histograms and applying one divisor
-(`TRAPS.md` C4).
+(TRAPS: opposite-tilts-must-not-pool).
 
 **4.4 What an opportunity correction cannot do.** Both forms above assume the population is placed
 **uniformly** over its template. Under hybrid capture gDNA is not: placement is proportional to a capture
@@ -532,7 +644,7 @@ knob.
 ## 9. Priors on a grid
 
 `p(ρ_c) ∝ ρ_c^(c−1)` gives `Beta(c,c)`. `c = ½` (Jeffreys) is the only grid-width-stable choice — see
-`TRAPS.md` D5 for what omitting the term does instead.
+TRAPS: no-prior-means-haldane for what omitting the term does instead.
 
 ---
 
@@ -541,7 +653,7 @@ knob.
     score  =  ρ × f(L) × s
 
 normalised within one fragment's candidate set, factors applied in order of the evidence behind them and
-**skipped when flat-zero among the survivors** (`TRAPS.md` D7). One multinomial draw per fragment, in the
+**skipped when flat-zero among the survivors** (TRAPS: an-all-zero-factor-is-inert). One multinomial draw per fragment, in the
 side buffer's canonical order, from a single RNG stream.
 ⛔ Never key the draw on the fragment's **content**: a content hash ties on exactly the duplicates it
 would harm, so 100 identical fragments would draw identically and a 60/40 posterior would collapse to

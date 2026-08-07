@@ -1,4 +1,4 @@
-"""⛔⛔⛔ A ZERO COUNT OVER A KNOWN OPPORTUNITY IS A MEASUREMENT — `TRAPS.md` C0c.
+"""⛔⛔⛔ A ZERO COUNT OVER A KNOWN OPPORTUNITY IS A MEASUREMENT — TRAPS: a-zero-count-is-a-measurement.
 
 The message currency is a **log**-density, and ``own_precision``'s count term was ``1/n``: the
 LARGE-COUNT LIMIT of the Poisson log-rate variance. At ``n = 0`` that limit diverges, so an object with
@@ -47,7 +47,7 @@ from rigel.calibration.node_init import (
 @pytest.mark.parametrize("n", [0.0, 1.0, 3.0, 10.0, 250.0, 112_333.0])
 def test_Z1_the_count_term_is_the_exact_Poisson_log_rate_variance(n):
     """``Var(log ρ) = trigamma(a + ½)`` for ``ρ ~ Gamma(a + ½, E)`` — scored against scipy's own
-    ``polygamma``, which is a different implementation from ours (`TRAPS.md` A11)."""
+    ``polygamma``, which is a different implementation from ours (TRAPS: a-test-that-redefines)."""
     assert count_logvar(np.array([n]))[0] == pytest.approx(polygamma(1, n + 0.5), rel=1e-12)
 
 
@@ -152,9 +152,19 @@ def _init_with(geometry, chain, statics, belief):
     from rigel.calibration.node_init import build_node_init
 
     return build_node_init(
-        chain, statics, geometry, kappa=0.9, od_g=0.2, od_r=0.1,
-        n_gdna_obs=230.0, n_rna_obs=85.0, n_grid=60, logodds_window=10.0,
-        n_tilt=None, n_grid_ss=256, belief=belief,
+        chain,
+        statics,
+        geometry,
+        kappa=0.9,
+        od_g=0.2,
+        od_r=0.1,
+        n_gdna_obs=230.0,
+        n_rna_obs=85.0,
+        n_grid=60,
+        logodds_window=10.0,
+        n_tilt=None,
+        n_grid_ss=256,
+        belief=belief,
     )
 
 
@@ -162,12 +172,12 @@ def test_Z7_build_node_init_lets_a_ZERO_COUNT_STRUCTURALLY_CERTAIN_slot_EMIT():
     """⛔⛔ **THE GATE THE FIRST PERTURBATION PASS WAS MISSING.** Z1–Z6 all call ``own_precision``
     directly with ``live=True`` handed in, so re-gating ``build_node_init``'s ``live`` back onto the
     COUNT (``rho_g > _EPS``) fired **nothing** — and that is the half of the fix that actually reaches
-    the intergenic anchor. `TRAPS.md` A2/B14: name the observable for *each place* the change was made.
+    the intergenic anchor. TRAPS: perturb-every-gate/TRAPS: name-the-observable-per-site: name the observable for *each place* the change was made.
 
     ⭐ The fixture is the shipped one with ONE thing varied — an intergenic slot's counts zeroed — so it
     is the ``g00`` intergenic node in miniature: ``struct_lock`` (composition certain), zero counts,
     positive gDNA opportunity. Under the retired count-keyed predicate its ``rho_g`` is 0, so
-    ``rho_g > _EPS`` is False and it is silent. That silence, times 1,298, is `TRAPS.md` C0c.
+    ``rho_g > _EPS`` is False and it is silent. That silence, times 1,298, is TRAPS: a-zero-count-is-a-measurement.
     """
     import dataclasses
 
@@ -187,7 +197,9 @@ def test_Z7_build_node_init_lets_a_ZERO_COUNT_STRUCTURALLY_CERTAIN_slot_EMIT():
     emptied[slot] = 0.0
     ni = _init_with(dataclasses.replace(geometry, unspliced_count=emptied), chain, statics, belief)
 
-    assert bool(np.asarray(ni.struct_lock, bool)[slot]), "zeroing the count unlocked it — bad fixture"
+    assert bool(np.asarray(ni.struct_lock, bool)[slot]), (
+        "zeroing the count unlocked it — bad fixture"
+    )
     assert ni.rho_g[slot] == 0.0, "the location must stay exactly zero (Z5)"
     assert ni.prec_g[slot] > 0.0, (
         "a certain, zero-count, positive-opportunity slot is still silent — `live` is keyed on the "

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Score two ladder arms against each other, on the DELIVERABLE and on pass-0, per stratum.
 
-⛔ `abs_err_all_final` is the deliverable (`TRAPS.md` A15 — a −37.2 % pass-0 win was −3.9 % shipped);
+⛔ `abs_err_all_final` is the deliverable (TRAPS: the-intermediate-is-not-the-deliverable — a −37.2 % pass-0 win was −3.9 % shipped);
 `abs_err_all` is pass-0. BOTH are printed on every row, always.
 ⛔ `g00` is reported SEPARATELY, never inside the ALL row: its truth is exactly 0, so its relative
 change is unbounded and would swamp the other 35 conditions in either direction.

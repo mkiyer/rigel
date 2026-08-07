@@ -32,7 +32,7 @@ sources below:
 
 The precision arithmetic (sources → per-component ``Var(log f_c)`` → precision) is pure and unit-tested here.
 Layer: imports only lower layers (`node_geometry`, `simplex_logodds`, `density_deconv`), never
-`bp_solver`, so it sits cleanly beneath the solver that consumes :func:`build_node_init`.
+`sweep`, so it sits cleanly beneath the backbone that consumes :func:`build_node_init`.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .density_deconv import density_factor_precision
-from .enrichment_frame import count_logvar
+from .messages.variance import count_logvar
 from .node_chain import NODE, NodeChain
 from .node_geometry import NodeGeometry, NodeStatics, node_global_geometry
 from .simplex_logodds import _logodds_grid, _solve_nodes_logodds_all
@@ -319,8 +319,8 @@ def build_node_init(
     # ⭐⭐ THE LOCATION IS UNCHANGED AND THAT IS DELIBERATE — only the PRECISION was ever broken.
     #    ``rho_c = f_c*M/E_c`` keeps the composition identity ``sum_c rho_c*E_c = M`` exactly, which is
     #    what the relay's mass pin exists to enforce; and the relay fuses in LINEAR density space
-    #    (`bp_solver._fuse`), so ``rho = 0`` is perfectly expressible. A zero density was never the
-    #    problem — an INFINITE precision on it was (`TRAPS.md` C0c).
+    #    (the scan's inverse-variance fuse), so ``rho = 0`` is perfectly expressible. A zero density was never the
+    #    problem — an INFINITE precision on it was (TRAPS: a-zero-count-is-a-measurement).
     #    ⛔ A first version of this fix also moved the location to the ``Gamma(a+½, E)`` posterior mean
     #    ``(a+½)/E``. That is right for one rate in isolation and WRONG here: three components each
     #    gaining ``+½`` breaks ``sum_c rho_c*E_c = M`` by exactly 3/2, which `test_relay_mass_pin` caught
@@ -333,7 +333,11 @@ def build_node_init(
     # genomically continuous, so it is admissible wherever it has opportunity — there is no gDNA analogue
     # of a forbidden strand.
     rho_g = np.maximum(
-        np.where(eff_global > 0.0, fg_loc * mass_global / np.where(eff_global > 0.0, eff_global, 1.0), 0.0),
+        np.where(
+            eff_global > 0.0,
+            fg_loc * mass_global / np.where(eff_global > 0.0, eff_global, 1.0),
+            0.0,
+        ),
         0.0,
     )
     prec_g = own_precision(fg_loc * mass_global, v_log_fg, eff_global > 0.0)

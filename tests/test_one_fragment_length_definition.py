@@ -1,4 +1,4 @@
-"""⭐ C2 — there is ONE definition of fragment length in this tree, and one place that measures it.
+"""⭐ TRAPS: pure-and-length-censored — there is ONE definition of fragment length in this tree, and one place that measures it.
 
  found **three** live definitions of "fragment length", two of them
 summed into a single array called ``global_model`` and used as the empirical-Bayes anchor for pools
@@ -41,7 +41,7 @@ DELETED_BY_C2 = {
 #: codebase keeps them deliberately. ⚠ The exemption is a LITERAL, exact marker rather than "any
 #: comment": a stale comment that merely *mentions* a deleted symbol is precisely how the next reader
 #: concludes it still exists, and three such were found and fixed when this gate first ran.
-TOMBSTONE = "DELETED by C2"
+TOMBSTONE = "DELETED by TRAPS: pure-and-length-censored"
 
 
 def _sources() -> list[Path]:
@@ -64,7 +64,7 @@ def test_the_scanners_fragment_length_machinery_is_GONE(name: str) -> None:
         if pattern.search(line) and TOMBSTONE not in line
     ]
     assert not hits, (
-        f"`{name}` survives C2 in {len(hits)} place(s) — {why}\n"
+        f"`{name}` survives TRAPS: pure-and-length-censored in {len(hits)} place(s) — {why}\n"
         f"(a deletion record is exempt only on a line containing {TOMBSTONE!r})\n"
         + "\n".join(hits[:20])
     )

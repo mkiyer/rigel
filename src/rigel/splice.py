@@ -38,7 +38,7 @@ def census_field(stype: SpliceType) -> str:
     SCANNER QC — it has no algorithmic consumer, only the report — so it lives where it is
     generated and is passed through nothing to get there. It used to be read off the fragment-length
     category models, which counted only the fragments that contributed a LENGTH observation; that
-    histogram is deleted by C2 and the population was never stated. See
+    histogram is deleted by TRAPS: pure-and-length-censored and the population was never stated. See
 
 
     ⚠ **There is no name table, deliberately.** The C++ keys these counters off

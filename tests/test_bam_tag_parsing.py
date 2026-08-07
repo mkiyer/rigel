@@ -284,7 +284,7 @@ class TestXSTagTypeVariants:
             work_dir=tmp_path / "scenario",
         )
         scenario.add_gene(
-            gene_id="G1",
+            gene_id="TRAPS: no-magic-numbers",
             strand="+",
             transcripts=[
                 {
@@ -413,7 +413,7 @@ class TestTsTagFlipping:
             work_dir=tmp_path / "scenario",
         )
         scenario.add_gene(
-            gene_id="G1",
+            gene_id="TRAPS: no-magic-numbers",
             strand="+",
             transcripts=[
                 {
@@ -517,7 +517,7 @@ class TestMissingAndInvalidTags:
             work_dir=tmp_path / "scenario",
         )
         scenario.add_gene(
-            gene_id="G1",
+            gene_id="TRAPS: no-magic-numbers",
             strand="+",
             transcripts=[
                 {
@@ -603,7 +603,7 @@ class TestMissingAndInvalidTags:
             work_dir=tmp_path / "scenario",
         )
         scenario.add_gene(
-            gene_id="G1",
+            gene_id="TRAPS: no-magic-numbers",
             strand="+",
             transcripts=[
                 {
@@ -646,7 +646,7 @@ class TestMissingAndInvalidTags:
             work_dir=tmp_path / "scenario",
         )
         scenario.add_gene(
-            gene_id="G1",
+            gene_id="TRAPS: no-magic-numbers",
             strand="+",
             transcripts=[
                 {
@@ -709,7 +709,7 @@ class TestOracleBamXSType:
             work_dir=tmp_path / "scenario",
         )
         scenario.add_gene(
-            gene_id="G1",
+            gene_id="TRAPS: no-magic-numbers",
             strand="+",
             transcripts=[
                 {
@@ -769,7 +769,7 @@ class TestIntegerTags:
             work_dir=tmp_path / "scenario",
         )
         scenario.add_gene(
-            gene_id="G1",
+            gene_id="TRAPS: no-magic-numbers",
             strand="+",
             transcripts=[
                 {
@@ -844,7 +844,7 @@ class TestSJTagPriority:
             work_dir=tmp_path / "scenario",
         )
         scenario.add_gene(
-            gene_id="G1",
+            gene_id="TRAPS: no-magic-numbers",
             strand="+",
             transcripts=[
                 {
@@ -924,7 +924,7 @@ class TestSJTagPriority:
             work_dir=tmp_path / "scenario",
         )
         scenario.add_gene(
-            gene_id="G1",
+            gene_id="TRAPS: no-magic-numbers",
             strand="+",
             transcripts=[
                 {

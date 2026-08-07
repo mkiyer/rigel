@@ -57,7 +57,8 @@ fixtures — which is exactly where it should. The saturation seen on real cfRNA
 contaminated seed channel**, not a shrinkage problem.
 
 The MoM is closed-form, ``O(n_seed_nodes)``, and uses the **same variance decomposition the deconv
-applies** (:mod:`strand_likelihood`), so fit and application are consistent. The two constants live in this
+applies** (ψ's ``simplex_logodds._mixture_strand_loglik``; its two-component reference is
+:mod:`strand_likelihood`), so fit and application are consistent. The two constants live in this
 module, next to the estimator they parameterise.
 
 Each component pairs a pure estimator with a thin seed-extraction wrapper, so the estimator itself

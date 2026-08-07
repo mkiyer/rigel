@@ -1,4 +1,4 @@
-"""Closed-form facts of the enrichment-frame primitives (phase E1), pinned against ALGEBRAIC GROUND TRUTH
+"""Closed-form facts of the enrichment-frame primitives (phase TRAPS: one-reference-hides-refid-bugs), pinned against ALGEBRAIC GROUND TRUTH
 rather than against solver behaviour.
 
 Every function in :mod:`rigel.calibration.enrichment_frame` is a pure identity, so each test here is a
@@ -20,7 +20,7 @@ import numpy as np
 import pytest
 from scipy.special import polygamma, zeta
 
-from rigel.calibration.enrichment_frame import (
+from rigel.calibration.messages.variance import (
     count_logvar,
     composition_logvar,
     graft_frame_logvar,
@@ -72,7 +72,7 @@ def test_composition_logvar_is_pure_counting_at_the_structural_corner():
     at ``n = 25`` (asserted below, so the re-pointing cannot hide a real change).
     ⛔ The asymptote was NOT a rounding detail: at ``n = 0`` it is ``∞``, which made ``σ²_transfer`` ∞ and
     annihilated every message a zero-count slot sent, on all three streams — the second copy of
-    `TRAPS.md` C0c, and the reason its first repair moved only the refit solve."""
+    TRAPS: a-zero-count-is-a-measurement, and the reason its first repair moved only the refit solve."""
     v = float(composition_logvar(1.0, EG_BND, ER_BND, var_fg=0.0, n=25.0))
     assert v == pytest.approx(float(count_logvar(np.array([25.0]))[0]), rel=1e-14)
     assert v == pytest.approx(1.0 / 25.0, rel=1e-3)  # ⭐ still the asymptote, to 0.05 %
@@ -133,17 +133,17 @@ def _beta_mc(mean, var, size):
     return _MC.beta(m * c, (1.0 - m) * c, size=size)
 
 
-# ── M1 transport seed ──
+# ── the-count-variance transport seed ──
 
 
-# ── M2 graft (SUM, share-weighted) ──
+# ── the-composition-variance graft (SUM, share-weighted) ──
 
 
-# ── M3 peel (DIFFERENCE, u-weighted) ──
+# ── the-peel-share-variance peel (DIFFERENCE, u-weighted) ──
 
 
 def test_peel_rna_is_u_weighted_difference():
-    """M3: Var(log ρ_ν) = u²·(Var(log ρ_R)+σ²_t) + (u−1)²·v_μ. u=1 (all continues) ⇒ just Var(log T)."""
+    """the-peel-share-variance: Var(log ρ_ν) = u²·(Var(log ρ_R)+σ²_t) + (u−1)²·v_μ. u=1 (all continues) ⇒ just Var(log T)."""
     assert float(peel_rna_logvar(0.005, 0.01, 0.002, 1.0)) == pytest.approx(0.015, rel=1e-14)
     # u=3: 9·(0.005+0.01) + 4·0.002
     assert float(peel_rna_logvar(0.005, 0.01, 0.002, 3.0)) == pytest.approx(
@@ -167,11 +167,11 @@ def test_peel_rna_matches_mc_in_regime():
     assert pred == pytest.approx(emp, rel=0.12)
 
 
-# ── M5 transfer variance (direction-dependent) ──
+# ── the-reframe-scale-variance transfer variance (direction-dependent) ──
 
 
 def test_transfer_logvar_cancels_on_graft_and_adds_on_peel():
-    """M5: σ²_transfer = 0 on the GRAFT (r common-mode, cancels), = Var(log ρ_tot^dst)+Var(log ρ_tot^src) on
+    """the-reframe-scale-variance: σ²_transfer = 0 on the GRAFT (r common-mode, cancels), = Var(log ρ_tot^dst)+Var(log ρ_tot^src) on
     the PEEL. Vectorized over a mixed direction mask."""
     dst = np.array([0.1, 0.1, 0.1])
     src = np.array([0.3, 0.3, 0.3])
@@ -188,11 +188,11 @@ def test_transfer_logvar_feeds_off_composition_logvar():
     assert float(transfer_logvar(vd, vs, graft=False)) == pytest.approx(vd + vs, rel=1e-14)
 
 
-# ── M8 the graft's frame-mislift variance ──
+# ── the-graft-frame-variance the graft's frame-mislift variance ──
 
 
 def test_graft_frame_logvar_is_zero_without_a_frame_change():
-    """M8's defining limit: no frame step ⇒ no mislift. This is what makes the term inert off-capture, where
+    """the-graft-frame-variance's defining limit: no frame step ⇒ no mislift. This is what makes the term inert off-capture, where
     the shipped graft is measured to be EXACT (required correction log c = +0.009/−0.008/+0.054)."""
     assert float(graft_frame_logvar(1.0)) == 0.0
     assert list(graft_frame_logvar(np.array([1.0, 1.0]))) == [0.0, 0.0]
@@ -216,14 +216,14 @@ def test_graft_frame_logvar_guards_a_degenerate_ratio():
     assert list(out[:2]) == [0.0, 0.0]
 
 
-# ── M4 ÷M_dst precision conversion ──
+# ── the-strand-variance ÷M_dst precision conversion ──
 
 
-# ── M7 the cross-cliff COMPOSITION-MISMATCH variance (DerSimonian–Laird) ──
+# ── the-mismatch-deflation the cross-cliff COMPOSITION-MISMATCH variance (DerSimonian–Laird) ──
 
 
 def test_mismatch_gap_is_the_log_ratio_and_flags_only_one_sided_absence():
-    """M7: G = log(ρ^msg/ρ^own). ``contradicted`` marks exactly one side absent (an assertion of ``f_c = 0``
+    """the-mismatch-deflation: G = log(ρ^msg/ρ^own). ``contradicted`` marks exactly one side absent (an assertion of ``f_c = 0``
     against a node that has the component, or vice versa); BOTH absent is not a contradiction, it is silence."""
     g, c = mismatch_gap(np.array([2.0, 0.0, 5.0, 0.0]), np.array([0.5, 3.0, 0.0, 0.0]))
     assert g[0] == pytest.approx(np.log(4.0), rel=1e-14)
@@ -232,7 +232,7 @@ def test_mismatch_gap_is_the_log_ratio_and_flags_only_one_sided_absence():
 
 
 def test_mismatch_deflate_is_the_closed_form_and_never_strengthens():
-    """M7: p_eff = 1/max(v_msg, G²−v_own) — and a deflation can only ever REDUCE a precision."""
+    """the-mismatch-deflation: p_eff = 1/max(v_msg, G²−v_own) — and a deflation can only ever REDUCE a precision."""
     p = np.array([25.0, 25.0, 25.0])
     gap = np.array([0.0, 0.5, 2.7])
     v_own = np.full(3, 0.56)
@@ -243,7 +243,7 @@ def test_mismatch_deflate_is_the_closed_form_and_never_strengthens():
 
 
 def test_mismatch_deflate_is_inert_without_own_evidence():
-    """M7's safety property: τ_own = 0 ⇒ v_own = ∞ ⇒ b̂² = 0 ⇒ the message passes BIT-IDENTICALLY. This is the
+    """the-mismatch-deflation's safety property: τ_own = 0 ⇒ v_own = ∞ ⇒ b̂² = 0 ⇒ the message passes BIT-IDENTICALLY. This is the
     AMBIG / unstranded regime — where cross-node messages are the only information — so the term must not
     touch it, and a CONTRADICTED claim is not damped there either (there is no evidence to contradict it)."""
     p = np.array([25.0, 3.0, 0.0])
@@ -285,9 +285,9 @@ def test_mismatch_deflate_pin_safety_invariant():
 
 
 def test_mismatch_deflate_recovers_the_true_bias_squared_by_mc():
-    """M7c: DerSimonian–Laird is a method-of-moments estimator of the between-source variance, so for a REAL
+    """the-mismatch-deflation: DerSimonian–Laird is a method-of-moments estimator of the between-source variance, so for a REAL
     mismatch b̂² → b² — the load-bearing claim, with no tuned constant. (`scripts/debug/message_variance_mc.py`
-    M7c is the full sweep; this pins the identity in-repo.)"""
+    the-mismatch-deflation is the full sweep; this pins the identity in-repo.)"""
     rng = np.random.default_rng(20260725)
     v_msg, v_own, b, n = 0.04, 0.30, 2.6, 200_000
     gap = b + rng.normal(0.0, np.sqrt(v_msg + v_own), n)
@@ -306,11 +306,11 @@ def test_mismatch_deflate_is_finite_over_every_degenerate_input():
     assert np.all(np.isfinite(out)) and np.all(out >= 0.0) and np.all(out <= p + 1e-12)
 
 
-# ── M10 the peel as a composition (a share), not a subtraction ──
+# ── the-continuing-share the peel as a composition (a share), not a subtraction ──
 
 
 def test_peel_continue_share_is_enrichment_free():
-    """M10's defining property: the continuing SHARE is invariant under a common capture factor, because
+    """the-continuing-share's defining property: the continuing SHARE is invariant under a common capture factor, because
     capture multiplies the continuing and the splicing channels alike. This is the whole reason the peel
     becomes a scaling — a scaling commutes with the reframe, a subtraction does not."""
     nu, mu = 3.0, 7.0
@@ -332,7 +332,7 @@ def test_peel_continue_share_structural_limits():
 
 
 def test_peel_share_logvar_is_convex_unlike_the_subtraction():
-    """M10 vs M3. The share's delta-method weights are w_μ² ≤ 1 (convex — the mirror of M2's graft SUM),
+    """the-continuing-share vs the-peel-share-variance. The share's delta-method weights are w_μ² ≤ 1 (convex — the mirror of the-composition-variance's graft SUM),
     where the subtraction carried u² ≥ 1 and AMPLIFIED. At the same operating point the share must therefore
     cost strictly less than the difference it replaces."""
     v_nu, v_mu = 0.02, 1.0 / 4000.0
@@ -341,7 +341,7 @@ def test_peel_share_logvar_is_convex_unlike_the_subtraction():
         share = float(peel_share_logvar(w_mu, v_nu, v_mu))
         assert share == pytest.approx(w_mu * w_mu * (v_nu + v_mu), rel=1e-14)
         assert share <= v_nu + v_mu  # convex: never worse than its own inputs
-        u = 1.0 / w  # the M3 difference at the same continuing fraction
+        u = 1.0 / w  # the the-peel-share-variance difference at the same continuing fraction
         assert share < float(peel_rna_logvar(v_nu, 0.0, v_mu, u))
 
 
@@ -350,11 +350,11 @@ def test_peel_share_logvar_vanishes_with_no_spliced():
     assert float(peel_share_logvar(0.0, 0.5, 0.25)) == 0.0
 
 
-# ── M11: the LEVEL from the node's own mass + an imputed gDNA density ────────────────────────────────────
+# ── the-residual-level: the LEVEL from the node's own mass + an imputed gDNA density ────────────────────────────────────
 
 
 def test_residual_level_pure_rna_limit_is_the_count():
-    """M11 limit 1 — a gDNA claim of ZERO accounts for none of the crossing, so the whole mass is RNA and the
+    """the-residual-level limit 1 — a gDNA claim of ZERO accounts for none of the crossing, so the whole mass is RNA and the
     only uncertainty left is the node's own Poisson count. This is the limit that makes the level a
     MEASUREMENT in a low-gDNA library, which is exactly where the old no-evidence default silenced the RNA
     channel outright. It is exact only because the arithmetic is done on the FRACTION: the count cancels out
@@ -368,7 +368,7 @@ def test_residual_level_pure_rna_limit_is_the_count():
 
 
 def test_residual_level_gdna_explains_everything_gives_a_tight_linear_zero():
-    """M11 limit 2 — a confident gDNA claim that over-explains the crossing drives the RNA density to ~0. The
+    """the-residual-level limit 2 — a confident gDNA claim that over-explains the crossing drives the RNA density to ~0. The
     LOG-variance is then large (log of a near-zero quantity is unbounded), but the LINEAR statement is tight:
     "below a fraction of a percent of my mass". That asymmetry is the whole reason the consumer fuses levels
     in linear space, and it is what reproduces "intronic unspliced fragments are gDNA until proven otherwise"
@@ -383,7 +383,7 @@ def test_residual_level_gdna_explains_everything_gives_a_tight_linear_zero():
 
 
 def test_residual_level_ignorance_is_bounded_and_declared():
-    """M11 limit 3 — the upper truncation. An imputed gDNA claim carrying ~1 nat of log-variance (routine at
+    """the-residual-level limit 3 — the upper truncation. An imputed gDNA claim carrying ~1 nat of log-variance (routine at
     exon→boundary edges under capture) makes σ_f of order 1. A one-sided positive part would return
     ``E ≈ 0.8σ`` — "most of my mass is RNA" — asserted out of pure ignorance at a confident-looking k ≈ 2.
     Bounded above, the same ignorance degrades to its correct limit: the uniform posterior, ``f_R = ½`` at
@@ -397,7 +397,7 @@ def test_residual_level_ignorance_is_bounded_and_declared():
 
 
 def test_residual_level_needs_the_gdna_claim_to_be_SUPPLIED():
-    """M11 — "supplied" is a statement about PRECISION, never about the density's value (the same test the
+    """the-residual-level — "supplied" is a statement about PRECISION, never about the density's value (the same test the
     λ-emission gate makes). A gDNA claim at infinite log-variance is not a claim, so there is no level at all
     — and, the standing trap, it must not come back as a nan from ``0·inf``."""
     for kwargs in (
@@ -413,7 +413,7 @@ def test_residual_level_needs_the_gdna_claim_to_be_SUPPLIED():
 
 
 def test_residual_level_is_monotone_in_the_gdna_claim():
-    """M11 — more imputed gDNA leaves less room for RNA, always. A monotonicity the truncation must not break
+    """the-residual-level — more imputed gDNA leaves less room for RNA, always. A monotonicity the truncation must not break
     at either bound (the two closed-form tail branches are the places it could)."""
     prev = np.inf
     for rho_g in (0.0, 1.0, 3.0, 5.0, 7.0, 9.0, 9.9, 10.0, 12.0, 40.0, 400.0, 1000.0):
@@ -424,7 +424,7 @@ def test_residual_level_is_monotone_in_the_gdna_claim():
         prev = float(rho)
 
 
-# ── M12: the conservation rescale — restore Σ_c ρ_c·E_c = M by moving what is least known ────────────────
+# ── the-weighted-rescale: the conservation rescale — restore Σ_c ρ_c·E_c = M by moving what is least known ────────────────
 
 _CR_RHO = np.array([[2.0, 3.0, 1.0], [0.4, 12.0, 0.0], [55.0, 0.02, 0.03]])
 _CR_EFF = np.array([[2100.0, 1900.0, 1900.0], [110.0, 180.0, 180.0], [9000.0, 8800.0, 8800.0]])
@@ -523,7 +523,8 @@ def test_graft_premise_logvar_pooled_is_the_load_bearing_return():
 
 
 # ── THE SCALAR TWINS ───────────────────────────────────────────────────────────────────────────────────
-# `bp_solver._relay` is a sequential Gauss-Seidel scan, so it calls these primitives once per node with a
+# ``messages.head``'s scan kernel is sequential and IN PLACE (not iterative — TRAPS: a-comment-quoted-as-a-finding), so it calls these
+# primitives once per slot with a
 # SCALAR — where the array form's ~50 numpy ops on 0-d arrays cost ~25x the equivalent float expression.
 # The scalar twins earn that back only if they are the SAME FUNCTION: a performance twin that is merely
 # *approximately* equal is a silent modelling change. So these tests assert the BITS, never `approx`.

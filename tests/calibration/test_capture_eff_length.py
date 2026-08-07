@@ -375,11 +375,11 @@ def test_global_reference_density_bimodal_returns_enriched_mode_snapped():
 
 
 # ---------------------------------------------------------------------------
-# The crossing-object density — what survives of the D6 factor-2 guard.
+# The crossing-object density — what survives of the TRAPS: prefer-shares-to-differences factor-2 guard.
 # ---------------------------------------------------------------------------
 #
-# ⛔ **D6's two falsification tests are DELETED, and the reason is that the defect is now
-# unrepresentable.** D6 was: ``gdna_boundary_len`` IS the halved per-side density length
+# ⛔ **TRAPS: prefer-shares-to-differences' two falsification tests are DELETED, and the reason is that the defect is now
+# unrepresentable.** TRAPS: prefer-shares-to-differences was: ``gdna_boundary_len`` IS the halved per-side density length
 # ``E[min(ℓ,L)]/2``, the accumulator deposits ``ρ·gdna_boundary_len`` on EACH face, so a pooled seam
 # holds ``ρ·(gbl_r + gbl_{r+1})`` — and dividing that by the AVERAGE read **2ρ**. Every quantity in
 # that sentence is gone with the faces. There is no per-side length to halve, no pair of faces to sum,
@@ -392,7 +392,7 @@ def test_global_reference_density_bimodal_returns_enriched_mode_snapped():
 
 
 def test_a_crossing_object_under_a_uniform_field_reads_RHO(multiexon_index):
-    """⭐ The surviving half of D6. A line's mass over its own support is the true density — exactly,
+    """⭐ The surviving half of TRAPS: prefer-shares-to-differences. A line's mass over its own support is the true density — exactly,
     with no factor to get wrong. Verified end-to-end at 1.994 / 2.002 / 1.981 × truth when the old
     average-vs-sum defect was live, so this is where that regression would reappear."""
     ra = RegionArrays.from_index(multiexon_index)
@@ -405,7 +405,7 @@ def test_a_crossing_object_under_a_uniform_field_reads_RHO(multiexon_index):
 
 
 def test_a_line_below_the_reference_density_CONTRACTS_rather_than_clipping(multiexon_index):
-    """⭐ D6's other half, kept because the ``min(ρ/ρ_ref, 1)`` clip is still there and still hides
+    """⭐ TRAPS: prefer-shares-to-differences' other half, kept because the ``min(ρ/ρ_ref, 1)`` clip is still there and still hides
     anything that reads a density too HIGH.
 
     Put the true line density strictly inside ``(ρ_ref/2, ρ_ref)``: read correctly it is below the

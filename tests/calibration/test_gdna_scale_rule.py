@@ -4,7 +4,7 @@ The reframe ``r = rho_tot(dst)/rho_tot(src)`` delivers ``phi_c(src)·rho_tot(dst
 SHARE applied to the destination's observed total. It is a composition imputation, and it is exact only
 where the two objects share a composition. At an ``intergenic|exon edge -> EXON`` step the source is
 structurally 100 % gDNA and the destination is not, so ``phi_g(src) = 1`` and the delivered gDNA level
-collapses to the destination's **own** total — `TRAPS.md` D4, the message carrying zero information and
+collapses to the destination's **own** total — TRAPS: a-message-from-the-destinations-belief, the message carrying zero information and
 confirming the destination.
 
 The rule under test: a COMPOSITION crosses by ``r``, licensed by the λ-emission gate's own predicate
@@ -16,7 +16,7 @@ so the level an exon receives is its flanking EDGE's enriched measurement rather
 ⭐ Six gates. The base fixture is the owner's ``TA_single_exon`` geometry in unit-test form:
 ``intergenic | exon+ | intergenic``, chain ``N E N E N``, so the exon (slot 2) can ONLY be solved through
 its two flanking gene-boundary EDGEs (slots 1, 3) — a wrong exon there is a message-passing failure and
-nothing else. Gate 5 extends it to an interior exon, which is where C1's panel mass actually lives.
+nothing else. Gate 5 extends it to an interior exon, which is where TRAPS: a-purity-filter-is-a-length-filter's panel mass actually lives.
 
 ⚠ **Perturbation-verified, and here is what they cover** (`scratchpad/perturb_gates.py`): reverting the
 rule fires 7 of 8, reverting it in EITHER twin alone fires at least gate 5, licensing every step fires 7,
@@ -24,15 +24,19 @@ licensing none fires gate 6, and testing only the gDNA half of the licence fires
 fires NOTHING and that is recorded rather than papered over**: dropping the gDNA conjunct from the licence
 (testing RNA alone) is inert, because ``pg[src] == 0`` with RNA precision live implies the source's own
 gDNA density is 0 and the delivered level is then 0 at any scale. See the note beside ``lend`` in
-`bp_solver`.
+`messages.head`.
 """
 
 from __future__ import annotations
 
+import functools
+
 import numpy as np
 import pytest
 
-from rigel.calibration.bp_solver import node_sweep
+from rigel.calibration.messages.head import HeadPolicy
+from rigel.calibration.sweep import solve_chain
+
 from rigel.calibration.effective_length import (
     UNBOUNDED_REACH,
     contained_eff_length,
@@ -42,6 +46,12 @@ from rigel.calibration.node_geometry import init_beliefs
 from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
 
 from _synthetic import make_chain_parts
+
+
+#: ⚠ These gates exercise HEADPOLICY's operators, so the policy is named EXPLICITLY. ``solve_chain``
+#: defaults to ``SilentPolicy``, which sends nothing — every assertion below would then be vacuous, which
+#: is TRAPS: could-the-arm-have-fired exactly ("check the arm COULD have changed something").
+node_sweep = functools.partial(solve_chain, policy=HeadPolicy())
 
 #: the chain is ``N E N E N``: intergenic(0) EDGE(1) EXON(2) EDGE(3) intergenic(4)
 IG_LEFT, SEAM_LEFT, EXON, SEAM_RIGHT, IG_RIGHT = 0, 1, 2, 3, 4
@@ -64,7 +74,7 @@ def _single_exon_chain(*, rho_node, rho_edge, rna_counts, node_bp=1000.0):
 
     ⚠ The RNA is split evenly across the two GENOME strands, which is what an unstranded library
     deposits, so the strand channel carries exactly zero composition information (`EQUATIONS.md` §5.2)
-    and the exon has no own answer — the state C1 was measured in.
+    and the exon has no own answer — the state TRAPS: a-purity-filter-is-a-length-filter was measured in.
     """
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
     node_eff = contained_eff_length(np.full(3, node_bp), gdna_fl)
@@ -86,7 +96,7 @@ def _single_exon_chain(*, rho_node, rho_edge, rna_counts, node_bp=1000.0):
     )
 
 
-#: ⚠ Not the 40 the older fixtures in `test_bp_solver.py` use. The λ lattice's spacing near ``f_g = ½`` is
+#: ⚠ Not the 40 the older fixtures in `test_sweep.py` use. The λ lattice's spacing near ``f_g = ½`` is
 #: ``2·window/n_grid`` in log-odds, i.e. ~0.12 in ``f_g`` at 40 points — larger than the residual under
 #: test, so a coarse grid would be measuring its own discretization. At 200 the posterior-mean error on
 #: this fixture is < 0.006 on every resolvable rung. It is a computational budget, not a modelling choice.
@@ -128,7 +138,7 @@ def _sweep(rho_node, rho_edge, rna_ladder):
                 # the CONSEQUENCE: the exon's own answer, and the truth the fixture laid down
                 "pred_fg": float(final.f_g[EXON]),
                 "true_fg": float(rho_edge * eff_g[EXON] / count[EXON]),
-                # the destination's OWN total density — what D4 delivers, kept so a failure can name it
+                # the destination's OWN total density — what TRAPS: a-message-from-the-destinations-belief delivers, kept so a failure can name it
                 "m_over_eg": float(count[EXON] / eff_g[EXON]),
                 "rho_g_out": float(rho_g[EXON]),
                 "pure_fg": final.f_g[list(PURE)].copy(),
@@ -143,7 +153,7 @@ _RNA_LADDER = (0.0, 700.0, 7_000.0, 70_000.0, 700_000.0)
 
 
 def test_delivered_gdna_level_is_independent_of_the_destinations_own_total():
-    """⛔⛔ **GATE 1 — `TRAPS.md` D4, stated as an invariance AND as a value.** The gDNA field is PINNED
+    """⛔⛔ **GATE 1 — TRAPS: a-message-from-the-destinations-belief, stated as an invariance AND as a value.** The gDNA field is PINNED
     and only the exon's RNA content moves, over 1000x. The level DELIVERED to the exon is a claim about
     gDNA, so it must not move at all — and since the field is uniform it must equal the field.
 
@@ -155,7 +165,7 @@ def test_delivered_gdna_level_is_independent_of_the_destinations_own_total():
     assert np.all(cg > 0.0), f"the gDNA message died on the ladder: {cg}"
     spread = cg.max() / cg.min()
     assert spread < 1.001, (
-        "the delivered gDNA level tracks the destination's OWN total (D4): "
+        "the delivered gDNA level tracks the destination's OWN total (TRAPS: a-message-from-the-destinations-belief): "
         f"spread {spread:.1f}x over a 1000x RNA sweep, {cg}"
     )
     assert cg == pytest.approx(1.0, rel=1e-9), f"delivered {cg} against a laid-down field of 1.0"
@@ -169,7 +179,7 @@ def test_exon_fg_tracks_its_truth_across_the_density_sweep():
     ⚠ **The zero-RNA rung is excluded from the accuracy bound, and that is not a tolerance dodge.** There
     the exon is structurally pure gDNA with no evidence of its own, and ψ's uninformative Jeffreys
     reference deliberately holds such a node off the ``f_g = 1`` vertex until the data earn it — the same
-    residual `test_bp_solver.test_gdna_sweep_factor1_ambig_recovery` measures from the other side, with the
+    residual `test_sweep.test_gdna_sweep_factor1_ambig_recovery` measures from the other side, with the
     same instruction not to attack it with damping. The delivered LEVEL is exact there too (gate 1); what
     is short is ψ's readout at the vertex, which is a different mechanism and a different fix."""
     rows = _sweep(1.0, 1.0, _RNA_LADDER)
@@ -204,7 +214,7 @@ def test_capture_step_is_carried_and_the_off_probe_floor_is_not(step):
 
     * ``step`` (correct) — the EDGE's own enriched measurement;
     * ``1.0`` — the off-probe floor leaking through an unscaled relay that never re-anchors;
-    * ``rho_tot(exon)`` — D4 again.
+    * ``rho_tot(exon)`` — TRAPS: a-message-from-the-destinations-belief again.
 
     ⭐ Nothing scales the level here: it arrives unscaled and is re-anchored at the EDGE by the relay's
     mass identity, which is what makes the capture landscape a MEASUREMENT rather than a model. Run at
@@ -213,7 +223,7 @@ def test_capture_step_is_carried_and_the_off_probe_floor_is_not(step):
     cg, rho_tot = rows[0]["cg"], rows[0]["m_over_eg"]
     assert cg == pytest.approx(step, rel=0.02), (
         f"delivered {cg:.4g}: expected the on-probe level {step:g} "
-        f"(1.0 = the off-probe floor; {rho_tot:.4g} = rho_tot(exon), i.e. D4)"
+        f"(1.0 = the off-probe floor; {rho_tot:.4g} = rho_tot(exon), i.e. TRAPS: a-message-from-the-destinations-belief)"
     )
     assert rows[0]["pred_fg"] == pytest.approx(rows[0]["true_fg"], abs=0.05)
 
@@ -221,11 +231,11 @@ def test_capture_step_is_carried_and_the_off_probe_floor_is_not(step):
 def test_level_survives_two_hops_through_an_rna_rich_exon():
     """⭐⭐ **GATE 5 — the RELAY's half of the rule, and the INTERIOR exon.** Gates 1–4 all read the
     COMBINE (`_pin`/`_uni`), and on a five-slot chain every message crosses one step, so the sequential
-    relay is never exercised. That is the twin-drift hole the DO-NOT-MERGE note in `bp_solver` exists for:
+    relay is never exercised. That is the twin-drift hole the twin note on ``messages.head``'s ``scan`` exists for:
     ``_relay`` and ``_transport`` are two hand-maintained copies of one transform, and a change landed in
     only one of them must fail something.
 
-    The fixture is C1's real panel population — an exon with no intergenic neighbour at all:
+    The fixture is TRAPS: a-purity-filter-is-a-length-filter's real panel population — an exon with no intergenic neighbour at all:
     ``intergenic | exon+ | exon+ | exon+ | intergenic``. The middle exon carries NO RNA (truth
     ``f_g = 1``) and both its neighbours are RNA-rich, so the correct gDNA level can only reach it by
     relaying THROUGH an RNA-rich object. If any step re-imputes the destination's total on the way, the
@@ -257,7 +267,7 @@ def test_level_survives_two_hops_through_an_rna_rich_exon():
     ====================================  ==========  ==========
 
     ⚠ And under the reverted arms the relay's running level reaches **56.4x** the field at the RNA-rich
-    exon before the pin drags it back — the D4 re-imputation, visible in flight."""
+    exon before the pin drags it back — the TRAPS: a-message-from-the-destinations-belief re-imputation, visible in flight."""
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
     rho, bp_ = 1.0, 1_000.0
     node_eff = contained_eff_length(np.full(5, bp_), gdna_fl)

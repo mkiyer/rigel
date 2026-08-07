@@ -747,7 +747,7 @@ The remaining calibration parameters (`sweep_n_grid`,
   overrides them. If a locus disagrees with calibration, the locus generally
   wins.
 
-For the full theory, see the design notes under `docs/calibration/`.
+For the full theory, see `docs/EQUATIONS.md` and `docs/DESIGN.md`.
 
 ---
 

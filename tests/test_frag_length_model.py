@@ -259,7 +259,7 @@ class TestFragmentLengthModelSerialization:
         assert d["histogram"]["values"] == []
 
 
-# ⛔ `TestFragmentLengthModels` lived here and was DELETED by C2 with the container it tested
+# ⛔ `TestFragmentLengthModels` lived here and was DELETED by TRAPS: pure-and-length-censored with the container it tested
 # ⚠ `FragmentLengthModel` — SINGULAR, the scorer — is tested above
 # and is not going anywhere; the per-splice-type QC counts the plural container supplied are now the
 # scanner's own census, gated in tests/test_scanner_accumulator_integration.py.

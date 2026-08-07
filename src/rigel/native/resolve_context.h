@@ -144,15 +144,15 @@ public:
         return val;
     }
 
-    // ⛔ `get_unique_frag_length_mrna` was DELETED by C2.
+    // ⛔ `get_unique_frag_length_mrna` was DELETED by TRAPS: pure-and-length-censored.
     // It was definition **B**: a TRANSCRIPT-SPACE fragment length, gated on every non-nRNA candidate
     // agreeing, silently discarding the 4.6 % that did not. Summed into one array with definition
     // **A** — a GENOMIC footprint over a disjoint subset — and called the library's unconditional
     // fragment-length distribution, which it was neither unconditional nor one quantity.
     //
     // The tool now has ONE definition: the accumulator's `L`, the total length of the fragment's own
-    // path (span minus cut introns, mate gap included), proven exhaustively in C0 and binned for
-    // every deposited fragment by C1's `deposited_lengths`.
+    // path (span minus cut introns, mate gap included), proven exhaustively in TRAPS: two-divisors-opposite-sign and binned for
+    // every deposited fragment by TRAPS: a-purity-filter-is-a-length-filter's `deposited_lengths`.
     // Return t_inds as a Python frozenset for compatibility
     nb::object get_t_inds() const {
         nb::set s;
@@ -941,7 +941,7 @@ private:
     ///
     /// ⛔ EVERY one, not the first. Returning the first and stopping is what made a mate gap spanning two
     /// annotated introns keep only one cut -- measured at 98.5 % of the fragment-length tail that survived
-    /// C2.6 -- and it also broke the ambiguity test, because two transcripts differing only in their
+    /// the earlier single-cut form -- and it also broke the ambiguity test, because two transcripts differing only in their
     /// SECOND intron read as agreeing.
     inline void collect_transcript_introns_in_gap(int32_t t,
                                                   const GapBlock& gap,

@@ -191,10 +191,10 @@ class TestTheCachedTallyIsTheSCANNEDTally:
     def test_THE_FL_HISTOGRAMS_ARE_THE_PAYLOAD_AND_ARE_NOT_CACHED_SEPARATELY(
         self, scanned, tmp_path
     ):
-        """⭐ C2: there is nothing left to cache beside the payload.
+        """⭐ TRAPS: pure-and-length-censored: there is nothing left to cache beside the payload.
 
         The cache used to carry a second FL block — the scanner's own histogram, stored so it could
-        serve as the empirical-Bayes anchor, plus a ``fl_rna_counts`` field (**D5**) that was written,
+        serve as the empirical-Bayes anchor, plus a ``fl_rna_counts`` field (**TRAPS: no-prior-means-haldane**) that was written,
         read back, and consumed by nothing. Both are gone. Every fragment-length histogram is a FIELD
         of the payload now, so caching the payload caches them, in one frame, by construction.
 

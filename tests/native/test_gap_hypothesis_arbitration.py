@@ -195,13 +195,13 @@ def test_under_the_limit_the_unspliced_hypothesis_SURVIVES_and_the_fragment_is_D
     assert acc.tally.gap_resolution["gap_deferred_rna_or_gdna"] == 1
 
 
-# ── conservation — G1's gate, and it is the only thing G1 may be judged by ──────────────────────────
+# ── conservation — TRAPS: no-magic-numbers' gate, and it is the only thing G1 may be judged by ──────────────────────────
 
 
 def test_EVERY_OFFERED_FRAGMENT_IS_ACCOUNTED_FOR_EXACTLY_ONCE():
-    """⭐ **THE G1 GATE.** ``deposited + deferred + dropped_* == offered``, exactly.
+    """⭐ **THE TRAPS: no-magic-numbers GATE.** ``deposited + deferred + dropped_* == offered``, exactly.
 
-    ⛔ G1 must NOT be judged by a calibration A/B. Between G1 and G2 the tally is deliberately thinner —
+    ⛔ G1 must NOT be judged by a calibration A/B. Between TRAPS: no-magic-numbers and TRAPS: one-thing-varied the tally is deliberately thinner —
     the ambiguous mass is retained in the deferred queue but not yet deposited — so accuracy would read worse for
     a reason that is the design working. Conservation is what says nothing was lost.
 

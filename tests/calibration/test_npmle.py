@@ -136,7 +136,7 @@ def test_projection_floor_is_h_squared():
 
 
 def test_projection_crossing_dominates_within_mode():
-    """The per-edge transfer variance F1 = ``var_dst + (mu_dst − mu_src)²``: a depleted↔enriched crossing is
+    """The per-edge transfer variance TRAPS: specificity-and-sense-are-complements = ``var_dst + (mu_dst − mu_src)²``: a depleted↔enriched crossing is
     orders of magnitude larger than a within-mode edge — this is the enrichment-crossing damping that gags a
     message across a capture boundary while letting same-mode messages flow."""
     count, eff = _bimodal_counts()
@@ -306,7 +306,7 @@ def test_additive_preserves_a_starved_minority_mode():
 
 def test_additive_occupancy_equals_height_despite_imprecision():
     """Occupancy ratio ≈ rendered-height ratio (fixed bandwidth ⇒ no τ discounting), even though the minority
-    is the more imprecise population. This is why A2 (additive) needs A3 (fixed h)."""
+    is the more imprecise population. This is why TRAPS: perturb-every-gate (additive) needs TRAPS: a-gate-that-already-passed (fixed h)."""
     g_hat, eff, var_g = _two_pop(n_dep=400, n_enr=100, tau_enr=0.80)
     kde = DensityNPMLE.fit(g_hat, eff, var_g=var_g, bandwidth=0.15, additive=True)
     ratio = _height(kde, -2.0) / _height(kde, -3.0)
@@ -314,7 +314,7 @@ def test_additive_occupancy_equals_height_despite_imprecision():
 
 
 def test_additive_weak_floor_cannot_dominate_the_flood():
-    """A1: the background floor is ONE pseudo-observation regardless of ``n_regions`` — a 100k-region intergenic
+    """TRAPS: self-checking-validator: the background floor is ONE pseudo-observation regardless of ``n_regions`` — a 100k-region intergenic
     flood must NOT crush the enriched mode (the exact real-data failure the EM aggregate cell would cause)."""
     g_hat, eff, var_g = _two_pop()
     bg = BackgroundReference(

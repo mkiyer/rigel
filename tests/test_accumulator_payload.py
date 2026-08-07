@@ -117,7 +117,7 @@ def _calibration_dict(**overrides) -> dict:
         "sj_inv_length_sum": np.arange(n_sj * 2, dtype=np.uint64),
         "sj_length_sum": np.arange(n_sj * 2, dtype=np.uint64) * 23,
         "pool_lengths": np.arange(5 * (MAX_LENGTH + 1), dtype=np.int64),
-        # ⭐ C1: the unconditional histogram must bin EXACTLY the deposited fragments, so this fixture
+        # ⭐ TRAPS: a-purity-filter-is-a-length-filter: the unconditional histogram must bin EXACTLY the deposited fragments, so this fixture
         # can no longer carry an arbitrary array — 41 here, matching qc.deposited below. That coupling is
         # the invariant doing its job at the door.
         "deposited_lengths": _deposited_lengths(41),
@@ -451,12 +451,12 @@ def test_the_payload_holds_VIEWS_and_does_not_copy():
 
 
 def test_a_deposited_lengths_HISTOGRAM_THAT_DOES_NOT_BIN_EVERY_FRAGMENT_IS_REJECTED():
-    """⭐ **C1's invariant, refused at the door.** ``Σ deposited_lengths`` must equal ``qc.deposited``.
+    """⭐ **TRAPS: a-purity-filter-is-a-length-filter's invariant, refused at the door.** ``Σ deposited_lengths`` must equal ``qc.deposited``.
 
     This histogram is about to become the empirical-Bayes anchor for **every** fragment-length model in
     the tool, so an off-by-N is not a cosmetic error — it silently
     re-weights the anchor against the pools it is supposed to anchor, which is a subtler version of the
-    frame mismatch C1 exists to remove.
+    frame mismatch TRAPS: a-purity-filter-is-a-length-filter exists to remove.
 
     ⚠ The check has to live at the payload boundary and not only in the accumulator's own tests, because
     the payload is what a **cached** scan is rebuilt from — and a cache can be truncated, partially

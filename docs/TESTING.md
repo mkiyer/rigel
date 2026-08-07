@@ -1,6 +1,6 @@
 # TESTING — the substrate, the gates, and what they can judge
 
-**Two rules govern this whole file**, and both came from real failures (`TRAPS.md` A7, A8):
+**Two rules govern this whole file**, and both came from real failures (TRAPS: prove-the-substrate, TRAPS: can-the-benchmark-resolve-it):
 
 > ⛔ **Prove the substrate before you prove the code.** When a simulated axis is the axis you are judging,
 > gate the simulator on it.
@@ -43,7 +43,7 @@ trade-off — it is a property of such libraries, not an artifact.
 regress, and the `g00` rung is the false-positive check. ⛔ Do not tune on the controls.
 
 ⛔ **"EQUAL" IS CONFIGURED, NOT ACHIEVED — AND THE RESIDUAL IS MEASURED, NOT ASSUMED.** Identical
-parameters still leave a realised gap of **+4.68 bp off capture / +3.57 on** (`TRAPS.md` F11: a mature
+parameters still leave a realised gap of **+4.68 bp off capture / +3.57 on** (TRAPS: configured-lengths-are-not-realised: a mature
 fragment must fit inside its transcript, gDNA need not, so transcript truncation pulls RNA down). What
 that residual is WORTH was measured before it was accepted, one thing varied: replacing both pmfs by
 their pooled average moves the per-object error by **−0.0002** off capture and **−0.0054** under it —
@@ -68,7 +68,7 @@ seven times.
 ⛔ **What it replaces.** Every defect found before it was found by sifting a 36-condition, 10-million
 fragment panel for badly-behaved objects and reasoning backwards from a node id. That is slow, the
 example is never quite the one you wanted, and a fix can only be measured in aggregate where two errors
-cancel. The harness root-caused C1 in **five objects and 0.1 s** after weeks of panel-level work.
+cancel. The harness root-caused TRAPS: a-purity-filter-is-a-length-filter in **five objects and 0.1 s** after weeks of panel-level work.
 
 ### The one idea that makes it work
 
@@ -138,17 +138,17 @@ code that fit it, so a stored copy would go stale on exactly the changes the har
 nesting was, so the two rungs differ by exactly one structure.
 
 ```
-NODE intergenic [0, 1000)         EDGE @1,000   intergenic|exon, pure gDNA (TSS+)   G1
-NODE exon  [1000, 2000)   TA e1   EDGE @2,000   intron|exon, the DONOR+ side        ⭐ NOT G1
-NODE intron [2000, 9000)  TA i1   EDGE @9,000   intron|exon, the ACCEPTOR+ side     ⭐ NOT G1
-NODE exon  [9000, 10000)  TA e2   EDGE @10,000  intergenic|exon, pure gDNA (TES+)   G1
+NODE intergenic [0, 1000)         EDGE @1,000   intergenic|exon, pure gDNA (TSS+)   TRAPS: no-magic-numbers
+NODE exon  [1000, 2000)   TA e1   EDGE @2,000   intron|exon, the DONOR+ side        ⭐ NOT TRAPS: no-magic-numbers
+NODE intron [2000, 9000)  TA i1   EDGE @9,000   intron|exon, the ACCEPTOR+ side     ⭐ NOT TRAPS: no-magic-numbers
+NODE exon  [9000, 10000)  TA e2   EDGE @10,000  intergenic|exon, pure gDNA (TES+)   TRAPS: no-magic-numbers
 NODE intergenic [10000, 12000)
 JUNCTION EDGE 2,000 → 9,000 (+), pure mature RNA, ⚠ NOT a chain slot
 ```
 
 ⭐ **What it adds, and why it is the hard rung: the two exon↔intron EDGEs.** Mature RNA cannot cross an
-exon↔intron seam contiguously (`TRAPS.md` F9), so their truth is pure gDNA — but the solver's own
-continuity gate says a strand IS admissible there (nascent could cross), so they are **not** G1 and the
+exon↔intron seam contiguously (TRAPS: mature-rna-never-crosses-a-seam), so their truth is pure gDNA — but the solver's own
+continuity gate says a strand IS admissible there (nascent could cross), so they are **not** TRAPS: no-magic-numbers and the
 solver has to *derive* what the structure already implies. ⛔ Every cached condition is `nrna_none`, so
 their truth is exactly 1.000 and the panel cannot distinguish "no RNA crosses" from "no *mature* RNA
 crosses". Use `nrna_abundance > 0` as the control — it is the only way to test that face non-trivially.
@@ -219,7 +219,7 @@ GENOMIC terms and never in transcript terms, and it is exactly where a sign gets
 
 ⚠ **The substrate verifier does NOT yet cover this rung.** `verify_toy_substrate.py` is written for ONE
 transcript on the **+** strand and refuses anything else. Extending it to multi-transcript and − strand
-is a prerequisite for reading a solver number off this spec (`TRAPS.md` A1: re-derive by a different
+is a prerequisite for reading a solver number off this spec (TRAPS: self-checking-validator: re-derive by a different
 algorithm before trusting).
 
 ### ⭐⭐ `toy_panel.py` — one spec × EVERY cached condition × an RNA-density ladder
@@ -338,7 +338,7 @@ does not depend on `L`):
 ⭐⭐ **And the row that matters most is the last one: the intron NODE is dead under capture at EVERY
 chromosome length.** Its bp is fixed and its density is off-probe, so lengthening cannot reach it — while
 the EDGE beside it grows without bound. ⛔ **The well-counted side therefore INVERTS with capture**
-(`TRAPS.md` B19): off capture the intron holds ~315 counts against the EDGE's 12–13, on capture it holds 1
+(TRAPS: capture-inverts-the-counted-side): off capture the intron holds ~315 counts against the EDGE's 12–13, on capture it holds 1
 against the EDGE's 20–40.
 
 ⚠ **Two length slips in the harness itself, found on the way and worth fixing** (`_donor_sim_params`):
@@ -367,7 +367,7 @@ how a tiling loop was written.
   globals are a different regime. ⛔ Gate on direction and ordering; quote magnitudes with their donor.
 * **It cannot rank defects.** Five objects cannot tell you what fraction of a real library's error a
   mechanism owns. Localise on the panel, isolate on a toy, then re-measure on the panel.
-* **It shares `TRAPS.md` A9's warning** — a toy ranks performance hotspots backwards. It is a
+* **It shares TRAPS: toys-rank-hotspots-backwards' warning** — a toy ranks performance hotspots backwards. It is a
   *correctness* instrument, never a profiling one.
 
 Gates: `tests/calibration/test_toy_harness.py` — 7, each carrying its own perturbation, and the donor is
@@ -382,7 +382,7 @@ references, carved out of the same GRCh38 + GENCODE v46 sources the production i
 
 ⚠ **Neither the ERCC references nor chr21 is filler.** A single-reference synthetic index once hid a
 reference-id-space mismatch that silently dropped 476,719 of 476,732 fragments inside `deposit()` while
-every golden test passed (`TRAPS.md` E1). 92 spike-ins make the reference-id space non-trivial **for
+every golden test passed (TRAPS: one-reference-hides-refid-bugs). 92 spike-ins make the reference-id space non-trivial **for
 RNA** — but they are RNA-only, and gDNA takes a *different* branch through the scanner. **Two genomic
 chromosomes is what makes the space non-trivial on the gDNA path too.**
 
@@ -404,7 +404,7 @@ cfRNA library's own pools: **RNA 206.1 ± 98.3**, **gDNA 156.5 ± 124.6**.
 ⭐⭐ **Those are PRE-capture parameters and the truth files are POST-capture.** Hybrid capture selects for
 length, so the simulator draws the length marginal proportional to the capture-weighted opportunity,
 `f_post(w) ∝ f_pre(w) · total_eff(w)`. ⛔ **Score against `truth_fragment_lengths.tsv`, never against
-`frag_mean`** — the configured parameters describe a library that was never sequenced (`TRAPS.md` F5).
+`frag_mean`** — the configured parameters describe a library that was never sequenced (TRAPS: capture-selects-for-length).
 
 ### ⚠ What the simulator still does NOT do
 
@@ -450,7 +450,7 @@ python scripts/design/suite_resolves.py $SUITE/rigel_index --suite $SUITE/pilot
 
 ⚠ **`pilot.yaml` states `gdna.genomic_refs: [chr21, chr22]` explicitly.** The engine does **not** infer
 which references carry genomic DNA, and a config that asks for gDNA without stating it is rejected — "has
-an annotation" is not "is genomic" (`TRAPS.md` E2).
+an annotation" is not "is genomic" (TRAPS: annotated-is-not-genomic).
 
 ⚠ **The scan cache is refused, not silently accepted, when it does not describe the index it is loaded
 against** — keyed on `graph_hash`, `reach_digest` and `payload_schema_digest`. Any accumulator change
@@ -469,12 +469,12 @@ names). ⭐ **Every one is directional or an absolute count. Not one carries a t
 | **G-S1** | gDNA fragments on an RNA-only reference | absolute count, must be **0** |
 | **G-S2** | genomic references carrying gDNA | **≥ 2**, each non-zero, on every gDNA condition |
 | **G-S3** | gDNA mean length, capture off → on | **strictly greater** under capture |
-| **G-S4** | on-target vs off-target gDNA mean length | on-target **strictly longer**. ⚠ A regression guard, not a falsification — it passed *with* the capture defect present, because the conditional was right and only the marginal was discarded (`TRAPS.md` A3) |
+| **G-S4** | on-target vs off-target gDNA mean length | on-target **strictly longer**. ⚠ A regression guard, not a falsification — it passed *with* the capture defect present, because the conditional was right and only the marginal was discarded (TRAPS: a-gate-that-already-passed) |
 | **G-S5** | \|μ_g − μ_r\|, capture off → on | **strictly narrower** under capture |
 | **G-S6** | gDNA fragments longer than their own reference | **0** |
 
 ⛔ **"On-target" means OVERLAPS A PROBE, not "its start lands in an exon."** The start-territory version is
-geometry-confounded and stays inverted under any correct capture model — `TRAPS.md` F6. The script prints
+geometry-confounded and stays inverted under any correct capture model — TRAPS: on-target-by-start-is-geometry. The script prints
 the start-territory table underneath as the diagnostic it is.
 
 ---
@@ -494,7 +494,7 @@ strong-capture **corner**, (g) **partition resolution**, (h) a **narrowed length
 ⚠ **Two are known-failing and both are named work**, not suite defects:
 * **(c)** needs the overdispersion mechanism built in *and* replicate conditions.
 * **(f)** needs one gDNA rate in the 1–10 % band real libraries live in — one line of `pilot.yaml` plus a
-  re-run of the affected conditions. It opens exactly the regime where `TRAPS.md` F4 says the hardest
+  re-run of the affected conditions. It opens exactly the regime where TRAPS: capture-is-1000x-on-exons says the hardest
   failure mode lives.
 
 ⭐ **The gate's teeth are proven on three degenerate inputs**, each failing for its own reason: a reference
@@ -514,7 +514,7 @@ from the same locus can be sequence-identical and genuinely unrecoverable. Build
 unrecoverable misassignment cancels, and **only systematic bias survives**.
 
 ⚠ **Report absolute per-transcript error alongside the net**, because net cancels.
-⚠ And hard-label metrics are nearly blind to a calibration-prior change — `TRAPS.md` B4.
+⚠ And hard-label metrics are nearly blind to a calibration-prior change — TRAPS: hard-labels-miss-soft-change.
 
 ⛔ **Missing:** the **soft** 3-pool surplus. The surviving code computes only the hard-label version, and
 the soft one is the metric that actually sees a prior change.
@@ -534,7 +534,7 @@ twice, and diff** — they run under the default sampling mode, so a flaky expec
 permanent, and regenerating is **not** validating.
 
 The 22nd is `tests/scenarios_aligned/test_paralogs.py::test_gdna_sweep[gdna_100]` — a real EM
-unidentifiability, not flakiness (`TRAPS.md` D9). ⛔ Do not fix it by moving a seed.
+unidentifiability, not flakiness (TRAPS: identical-paralogs-are-bimodal). ⛔ Do not fix it by moving a seed.
 
 ⭐ **"22 failures, 21 goldens and the paralog row" is the baseline. A 23rd failure, or any other
 non-golden name in the list, is a regression.**
@@ -544,11 +544,11 @@ non-golden name in the list, is a regression.**
 ## 7. Development discipline for test substrates
 
 **Develop on controlled toys, validate on real data.** A big suite has confounds that hide mechanisms; a
-toy ranks hotspots backwards (`TRAPS.md` A9). Both, in that order.
+toy ranks hotspots backwards (TRAPS: toys-rank-hotspots-backwards). Both, in that order.
 
 **Any both-strand stress test needs ample single-stranded nodes** — the population prior trains on them,
 and a "starved toy" is one of the three degenerate inputs `suite_resolves.py` is proven against.
 
 **How to A/B honestly:** in-process, opposite extremes, never on a saturated condition, one thing varied,
-and both arms sharing their random input (`TRAPS.md` A2) — a byte-identical hard-label result is **no
+and both arms sharing their random input (TRAPS: perturb-every-gate) — a byte-identical hard-label result is **no
 evidence**.

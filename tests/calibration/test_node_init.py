@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration.node_chain import NODE
-from rigel.calibration.enrichment_frame import composition_logvar, count_logvar
+from rigel.calibration.messages.variance import composition_logvar, count_logvar
 from rigel.calibration.node_geometry import g1_locked, init_beliefs
 from _synthetic import make_chain_parts
 from rigel.calibration.node_init import (
@@ -115,7 +115,7 @@ def test_own_precision_monotone_and_zeros():
     """``p = 1/(v + trigamma(n+½))``: monotone in the count; 0 only at ``v=∞`` or a dead component.
 
     ⭐⭐ **RE-POINTED 2026-08-05 — the line this used to carry, ``assert p[2] == 0.0  # no count``, WAS
-    THE DEFECT** (`TRAPS.md` C0c). It asserted that an object with zero counts must emit nothing, which
+    THE DEFECT** (TRAPS: a-zero-count-is-a-measurement). It asserted that an object with zero counts must emit nothing, which
     is true of ``1/n`` and false of the world: a zero count over a known opportunity is a measurement,
     and at a structurally pure-gDNA object it is the strongest one in the library. Measured cost of the
     old behaviour: all 1,298 intergenic nodes silent at ``g00``, and 34–38 % phantom gDNA on a library
@@ -184,7 +184,7 @@ def test_strand_evidence_struct_lock_regions_only():
 
 
 def test_strand_deconv_single_strand_solves_and_is_precise():
-    """A single-strand (G2) exon self-solves f_g from the tilt: it carries a live gDNA + sense-RNA own belief
+    """A single-strand (TRAPS: one-thing-varied) exon self-solves f_g from the tilt: it carries a live gDNA + sense-RNA own belief
     at finite precision, and NO antisense (the − axis is structurally dead). The strand λ-term (c·a²) applies
     to a single-strand node — the tilt is locked, so the strand PINS f_g (approach E)."""
     ni, _ = _init(kappa=0.95)
@@ -355,7 +355,7 @@ def test_density_factor_precision_flows_into_node_init():
 #: ⛔ Scoping it to ``g1_locked ∧ NODE`` was PROTOTYPED AND MEASURED on the ladder
 #: (`ladder_arm_ab.py --arm zc_struct_lock_g1`): the stranded × capture-ON row it was aimed at moved only
 #: **−1.2 %**, ``g98`` went **+0.4 %** (worse), and the zero-gDNA control went **+3,207 %** (2,103 →
-#: 69,532 fragments) — the mis-scoped mask is load-bearing for the zero-gDNA win. `TRAPS.md` D4j: it is half
+#: 69,532 fragments) — the mis-scoped mask is load-bearing for the zero-gDNA win. TRAPS: a-cancelling-defect-pair: it is half
 #: of a cancelling pair, and the other half is the ``intergenic|exon`` seam claiming its whole
 #: RNA-contaminated crossing mass as gDNA. Price them TOGETHER or not at all.
 _STRUCT_LOCK_XFAIL = pytest.mark.xfail(
@@ -370,7 +370,7 @@ def _empty_exon_scenario(kappa=0.9):
 
     ⭐ It must go through `build_node_init`, not through `strand_evidence` directly. The pre-existing gate
     `test_strand_evidence_struct_lock_regions_only` hands ``locked`` in as an argument, so it re-derives the
-    caller's own input and cannot see what the caller computes — `TRAPS.md` A11, and the same hole A2's P3
+    caller's own input and cannot see what the caller computes — TRAPS: a-test-that-redefines, and the same hole TRAPS: perturb-every-gate's P3
     perturbation found in ``own_precision``.
     """
     parts = make_chain_parts(
@@ -420,7 +420,7 @@ def test_an_EMPTY_exon_is_not_composition_certain():
     evidence is nothing at all.
 
     ⭐ The predicate the docstring names is `node_geometry.g1_locked` — neither RNA strand admissible — and
-    it is the ONE HOME for it (`TRAPS.md` A11). An AMBIG exon frees both strands, so it can never be G1
+    it is the ONE HOME for it (TRAPS: a-test-that-redefines). An AMBIG exon frees both strands, so it can never be TRAPS: no-magic-numbers
     however few fragments land in it.
     """
     ni, parts = _empty_exon_scenario()
@@ -436,7 +436,7 @@ def test_an_EMPTY_exon_is_not_composition_certain():
 def test_struct_lock_is_exactly_g1_locked_on_the_node_axis():
     """The mask must equal ``g1_locked ∧ NODE``, computed from a DIFFERENT expression than the solver's.
 
-    ⭐ ``g1_locked`` is production code and is imported, not restated — so this cannot drift the way A11's
+    ⭐ ``g1_locked`` is production code and is imported, not restated — so this cannot drift the way TRAPS: a-test-that-redefines'
     two-homes predicate did. The `~np.asarray(...)` form here is the *consumer* side; the point of the gate
     is that the two agree on a fixture where ``~solvable`` and ``g1_locked`` DISAGREE, which is what the
     empty exon supplies."""
@@ -477,13 +477,13 @@ def test_an_evidence_free_slot_is_not_certain_of_its_composition():
 
     ⛔ Gated as a strict inequality against ``0``, and separately against the STRUCTURALLY certain twin in
     the same fixture, so it cannot be satisfied by making everything uncertain: the intergenic node is
-    genuinely G1 and must still be exactly certain.
+    genuinely TRAPS: no-magic-numbers and must still be exactly certain.
 
-    ⚠ This reads `bp_solver.node_sweep`'s expression, restated here because it is a LOCAL there. That is a
-    second home for one predicate (`TRAPS.md` A11) and is the reason the repair must move it into a named
+    ⚠ This reads `sweep.solve_chain`'s expression, restated here because it is a LOCAL there. That is a
+    second home for one predicate (TRAPS: a-test-that-redefines) and is the reason the repair must move it into a named
     function beside `own_composition_logvar` when it lands."""
     ni, parts = _empty_exon_scenario()
-    ig, am = 0, 4  # the intergenic NODE (truly G1) and the EMPTY AMBIG exon
+    ig, am = 0, 4  # the intergenic NODE (truly TRAPS: no-magic-numbers) and the EMPTY AMBIG exon
     fg = np.asarray(ni.f_g, float)
     tau = np.asarray(ni.tau_lam, float)
     assert tau[am] == 0.0 and fg[am] == 1.0  # evidence-free, and parked at the corner

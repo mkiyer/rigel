@@ -3,15 +3,15 @@
      (which supersedes)
     Cause and evidence:
 
-'s C2 left the tool with ONE definition of fragment length — the
-accumulator's ``L``, the total length of the fragment's own path. C0 proved that definition correct
+'s TRAPS: pure-and-length-censored left the tool with ONE definition of fragment length — the
+accumulator's ``L``, the total length of the fragment's own path. TRAPS: two-divisors-opposite-sign proved that definition correct
 *given its inputs*. This module is about an input that was **incomplete**: implicit-splice detection ran
 only on fragments the resolver had already called ``SPLICE_UNSPLICED``, so a fragment carrying an
 observed CIGAR-N splice never had its unsequenced mate gap examined and kept that intron inside ``L``.
 
 ⚠ **Why a hand-written BAM and not the simulator.** Every number below is a fragment length asserted to
 the base pair, and the point of the gate is that ``L`` is *exactly* the molecule. A simulated library
-gives a distribution; four reads written by hand give an answer. ``deposited_lengths`` is C1's
+gives a distribution; four reads written by hand give an answer. ``deposited_lengths`` is TRAPS: a-purity-filter-is-a-length-filter's
 unconditional histogram — one bin per deposited fragment, indexed by ``L`` — so a four-fragment BAM makes
 ``L`` directly readable with no model, no fit and no tolerance.
 
@@ -374,9 +374,9 @@ def test_EVERY_HELD_RECORD_IS_STAMPED_WITH_ITS_OWN_REFERENCE(payload):
 
 
 def test_the_RNA_pool_holds_every_fragment_whose_PATH_IS_DETERMINED(payload):
-    """⭐ **D1 IS DELETED, and this is the two-sided gate that replaces it**.
+    """⭐ **TRAPS: a-variance-cannot-fix-a-bias IS DELETED, and this is the two-sided gate that replaces it**.
 
-    D1 barred a fragment whose splice was *inferred* rather than sequenced, on the grounds that a length
+    TRAPS: a-variance-cannot-fix-a-bias barred a fragment whose splice was *inferred* rather than sequenced, on the grounds that a length
     partly inferred from the annotation is a product of the model the pool is used to fit. The purity
     argument was real; its price was measured and it is larger than what it buys. On the chr22 pilot the
     pool reads **+0.67 % mean / +2.40 % sd** against truth under determinacy and **−9.58 % / −22.46 %**
@@ -410,7 +410,7 @@ def test_U4_the_splice_census_is_unchanged_by_gap_intron_detection(
 ):
     """Detection is unconditional; the ``SPLICE_IMPLICIT`` **promotion** stays unspliced-only.
 
-    ``splice_type`` feeds scoring, the buffer, the strand training and — since C2 — ``rigel report``'s
+    ``splice_type`` feeds scoring, the buffer, the strand training and — since TRAPS: pure-and-length-censored — ``rigel report``'s
     census. All four fragments here carry an observed CIGAR-N splice, so all four must be counted as
     observed splices and **none** as implicit.
     """

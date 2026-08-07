@@ -28,13 +28,13 @@ def test_duplicate_exon_structure_raises(tmp_path: Path):
     _write_gtf(
         gtf,
         [
-            _gtf_line("transcript", 100, 500, "+", "G1", "T1"),
-            _gtf_line("exon", 100, 200, "+", "G1", "T1"),
-            _gtf_line("exon", 400, 500, "+", "G1", "T1"),
+            _gtf_line("transcript", 100, 500, "+", "TRAPS: no-magic-numbers", "T1"),
+            _gtf_line("exon", 100, 200, "+", "TRAPS: no-magic-numbers", "T1"),
+            _gtf_line("exon", 400, 500, "+", "TRAPS: no-magic-numbers", "T1"),
             # Identical exon set, different transcript_id
-            _gtf_line("transcript", 100, 500, "+", "G1", "T2"),
-            _gtf_line("exon", 100, 200, "+", "G1", "T2"),
-            _gtf_line("exon", 400, 500, "+", "G1", "T2"),
+            _gtf_line("transcript", 100, 500, "+", "TRAPS: no-magic-numbers", "T2"),
+            _gtf_line("exon", 100, 200, "+", "TRAPS: no-magic-numbers", "T2"),
+            _gtf_line("exon", 400, 500, "+", "TRAPS: no-magic-numbers", "T2"),
         ],
     )
     with pytest.raises(ValueError, match=r"identical exon coordinates"):
@@ -48,13 +48,13 @@ def test_same_intron_chain_different_utrs_allowed(tmp_path: Path):
     _write_gtf(
         gtf,
         [
-            _gtf_line("transcript", 100, 500, "+", "G1", "T1"),
-            _gtf_line("exon", 100, 200, "+", "G1", "T1"),
-            _gtf_line("exon", 400, 500, "+", "G1", "T1"),
+            _gtf_line("transcript", 100, 500, "+", "TRAPS: no-magic-numbers", "T1"),
+            _gtf_line("exon", 100, 200, "+", "TRAPS: no-magic-numbers", "T1"),
+            _gtf_line("exon", 400, 500, "+", "TRAPS: no-magic-numbers", "T1"),
             # Same intron (200,400) but different 5' and 3' UTR
-            _gtf_line("transcript", 120, 480, "+", "G1", "T2"),
-            _gtf_line("exon", 120, 200, "+", "G1", "T2"),
-            _gtf_line("exon", 400, 480, "+", "G1", "T2"),
+            _gtf_line("transcript", 120, 480, "+", "TRAPS: no-magic-numbers", "T2"),
+            _gtf_line("exon", 120, 200, "+", "TRAPS: no-magic-numbers", "T2"),
+            _gtf_line("exon", 400, 480, "+", "TRAPS: no-magic-numbers", "T2"),
         ],
     )
     txs = read_transcripts(gtf)
@@ -68,12 +68,12 @@ def test_different_strand_not_a_duplicate(tmp_path: Path):
     _write_gtf(
         gtf,
         [
-            _gtf_line("transcript", 100, 500, "+", "G1", "T1"),
-            _gtf_line("exon", 100, 200, "+", "G1", "T1"),
-            _gtf_line("exon", 400, 500, "+", "G1", "T1"),
-            _gtf_line("transcript", 100, 500, "-", "G2", "T2"),
-            _gtf_line("exon", 100, 200, "-", "G2", "T2"),
-            _gtf_line("exon", 400, 500, "-", "G2", "T2"),
+            _gtf_line("transcript", 100, 500, "+", "TRAPS: no-magic-numbers", "T1"),
+            _gtf_line("exon", 100, 200, "+", "TRAPS: no-magic-numbers", "T1"),
+            _gtf_line("exon", 400, 500, "+", "TRAPS: no-magic-numbers", "T1"),
+            _gtf_line("transcript", 100, 500, "-", "TRAPS: one-thing-varied", "T2"),
+            _gtf_line("exon", 100, 200, "-", "TRAPS: one-thing-varied", "T2"),
+            _gtf_line("exon", 400, 500, "-", "TRAPS: one-thing-varied", "T2"),
         ],
     )
     txs = read_transcripts(gtf)
@@ -85,10 +85,10 @@ def test_duplicate_message_lists_offending_ids(tmp_path: Path):
     _write_gtf(
         gtf,
         [
-            _gtf_line("transcript", 100, 500, "+", "G1", "ALPHA"),
-            _gtf_line("exon", 100, 500, "+", "G1", "ALPHA"),
-            _gtf_line("transcript", 100, 500, "+", "G1", "BETA"),
-            _gtf_line("exon", 100, 500, "+", "G1", "BETA"),
+            _gtf_line("transcript", 100, 500, "+", "TRAPS: no-magic-numbers", "ALPHA"),
+            _gtf_line("exon", 100, 500, "+", "TRAPS: no-magic-numbers", "ALPHA"),
+            _gtf_line("transcript", 100, 500, "+", "TRAPS: no-magic-numbers", "BETA"),
+            _gtf_line("exon", 100, 500, "+", "TRAPS: no-magic-numbers", "BETA"),
         ],
     )
     with pytest.raises(ValueError) as excinfo:
@@ -104,10 +104,10 @@ def test_duplicate_error_mentions_collapse_flag(tmp_path: Path):
     _write_gtf(
         gtf,
         [
-            _gtf_line("transcript", 100, 500, "+", "G1", "T1"),
-            _gtf_line("exon", 100, 500, "+", "G1", "T1"),
-            _gtf_line("transcript", 100, 500, "+", "G1", "T2"),
-            _gtf_line("exon", 100, 500, "+", "G1", "T2"),
+            _gtf_line("transcript", 100, 500, "+", "TRAPS: no-magic-numbers", "T1"),
+            _gtf_line("exon", 100, 500, "+", "TRAPS: no-magic-numbers", "T1"),
+            _gtf_line("transcript", 100, 500, "+", "TRAPS: no-magic-numbers", "T2"),
+            _gtf_line("exon", 100, 500, "+", "TRAPS: no-magic-numbers", "T2"),
         ],
     )
     with pytest.raises(ValueError, match=r"--collapse-duplicate-transcripts"):
@@ -123,15 +123,15 @@ def test_collapse_keeps_lexicographically_smallest_id(tmp_path: Path):
         gtf,
         [
             # duplicate pair (identical exons), IDs deliberately out of lexical order
-            _gtf_line("transcript", 100, 500, "+", "G1", "ENST00000002"),
-            _gtf_line("exon", 100, 200, "+", "G1", "ENST00000002"),
-            _gtf_line("exon", 400, 500, "+", "G1", "ENST00000002"),
-            _gtf_line("transcript", 100, 500, "+", "G1", "ENST00000001"),
-            _gtf_line("exon", 100, 200, "+", "G1", "ENST00000001"),
-            _gtf_line("exon", 400, 500, "+", "G1", "ENST00000001"),
+            _gtf_line("transcript", 100, 500, "+", "TRAPS: no-magic-numbers", "ENST00000002"),
+            _gtf_line("exon", 100, 200, "+", "TRAPS: no-magic-numbers", "ENST00000002"),
+            _gtf_line("exon", 400, 500, "+", "TRAPS: no-magic-numbers", "ENST00000002"),
+            _gtf_line("transcript", 100, 500, "+", "TRAPS: no-magic-numbers", "ENST00000001"),
+            _gtf_line("exon", 100, 200, "+", "TRAPS: no-magic-numbers", "ENST00000001"),
+            _gtf_line("exon", 400, 500, "+", "TRAPS: no-magic-numbers", "ENST00000001"),
             # a distinct transcript (different exons) — must survive
-            _gtf_line("transcript", 1000, 1500, "+", "G2", "ENST00000009"),
-            _gtf_line("exon", 1000, 1500, "+", "G2", "ENST00000009"),
+            _gtf_line("transcript", 1000, 1500, "+", "TRAPS: one-thing-varied", "ENST00000009"),
+            _gtf_line("exon", 1000, 1500, "+", "TRAPS: one-thing-varied", "ENST00000009"),
         ],
     )
     txs = read_transcripts(gtf, collapse_duplicate_transcripts=True)
@@ -146,9 +146,9 @@ def test_collapse_three_way_group_keeps_one(tmp_path: Path):
     lines: list[str] = []
     for tid in ("ENST0000C", "ENST0000A", "ENST0000B"):
         lines += [
-            _gtf_line("transcript", 100, 500, "+", "G1", tid),
-            _gtf_line("exon", 100, 200, "+", "G1", tid),
-            _gtf_line("exon", 400, 500, "+", "G1", tid),
+            _gtf_line("transcript", 100, 500, "+", "TRAPS: no-magic-numbers", tid),
+            _gtf_line("exon", 100, 200, "+", "TRAPS: no-magic-numbers", tid),
+            _gtf_line("exon", 400, 500, "+", "TRAPS: no-magic-numbers", tid),
         ]
     _write_gtf(gtf, lines)
     txs = read_transcripts(gtf, collapse_duplicate_transcripts=True)
@@ -162,12 +162,12 @@ def test_collapse_is_noop_without_duplicates(tmp_path: Path):
     _write_gtf(
         gtf,
         [
-            _gtf_line("transcript", 100, 500, "+", "G1", "T1"),
-            _gtf_line("exon", 100, 200, "+", "G1", "T1"),
-            _gtf_line("exon", 400, 500, "+", "G1", "T1"),
-            _gtf_line("transcript", 120, 480, "+", "G1", "T2"),
-            _gtf_line("exon", 120, 200, "+", "G1", "T2"),
-            _gtf_line("exon", 400, 480, "+", "G1", "T2"),
+            _gtf_line("transcript", 100, 500, "+", "TRAPS: no-magic-numbers", "T1"),
+            _gtf_line("exon", 100, 200, "+", "TRAPS: no-magic-numbers", "T1"),
+            _gtf_line("exon", 400, 500, "+", "TRAPS: no-magic-numbers", "T1"),
+            _gtf_line("transcript", 120, 480, "+", "TRAPS: no-magic-numbers", "T2"),
+            _gtf_line("exon", 120, 200, "+", "TRAPS: no-magic-numbers", "T2"),
+            _gtf_line("exon", 400, 480, "+", "TRAPS: no-magic-numbers", "T2"),
         ],
     )
     txs = read_transcripts(gtf, collapse_duplicate_transcripts=True)

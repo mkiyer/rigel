@@ -1,6 +1,6 @@
 """P0 — how much of the library's unspliced mass reaches the solver with NO composition evidence?
 
-       Hook: `bp_solver.node_sweep(_capture=...)`.
+       Hook: `sweep.solve_chain(_capture=...)`.
 
 ⭐ **THE QUESTION.** `node_init` gives every slot its own composition precision `tau_lam` from three live
 sources — the structural lock, the intron-factory density deconvolution, and the strand Beta-Binomial.
@@ -42,7 +42,7 @@ from rigel.index import TranscriptIndex  # noqa: E402
 from rigel.scan_cache import calibration_inputs, read_scan_cache  # noqa: E402
 
 #: ⭐ The census asks the SOLVER's question by IMPORTING the solver's predicate, not by restating its
-#: constant (`TRAPS.md` A11 — the previous arrangement had this number written out here, in
+#: constant (TRAPS: a-test-that-redefines — the previous arrangement had this number written out here, in
 #: ``pass0_vs_oracle.py`` and in the solver, each claiming to match the others).
 from rigel.calibration.node_init import has_own_composition_evidence  # noqa: E402
 

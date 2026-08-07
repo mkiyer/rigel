@@ -1,10 +1,10 @@
 """rigel.locus — Locus graph construction.
 
 * :class:`Locus` — one contiguous genomic interval (the calibration
-  estimation unit; introduced in M5).
+  estimation unit; introduced in the-reframe-scale-variance).
 * :class:`MultiLocus` — one connected component of transcripts linked
   by shared fragments (the unit the EM is run on; was named ``Locus``
-  prior to M5).
+  prior to the-reframe-scale-variance).
 * :func:`build_multi_loci` — connected-component partitioning of
   transcripts producing per-component :class:`MultiLocus` records.
 

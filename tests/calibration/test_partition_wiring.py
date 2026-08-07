@@ -13,7 +13,7 @@ partition is byte-identical to its v7 region partition — 1,698 == 1,698, equal
 ``quick_3to1_5mb`` and **+38.7 %** on the human annotation, and **0.0 %** on the bench. So the arm
 needs a direct assertion that the scanner now sees the v8 cut set, and this is it.
 
-The case throughout is **G4 — an alternative TSS strictly interior to another transcript's exon**.
+The case throughout is **TRAPS: the-source-does-not-cite-docs — an alternative TSS strictly interior to another transcript's exon**.
 Both flanks are ``exon_pos``, so the v7 merge deletes the cut and the scanner never learns the
 terminus is there. That is the defect v8 fixes, and **53.4 %** of human transcript termini sit in it
 (232,451 of 435,291). ⚠ The 59.5 % this file used to quote was computed under the buggy
@@ -72,8 +72,8 @@ def no_alt_tss_index(tmp_path_factory):
 def test_the_cut_is_signature_invisible(alt_tss_index):
     """The premise, asserted rather than assumed: this cut carries NO signature change.
 
-    That is what made it invisible to a merged partition, and it is what makes the fixture a G4 case.
-    If this ever fails the fixture has stopped exercising G4 and every other test here is vacuous.
+    That is what made it invisible to a merged partition, and it is what makes the fixture a TRAPS: the-source-does-not-cite-docs case.
+    If this ever fails the fixture has stopped exercising TRAPS: the-source-does-not-cite-docs and every other test here is vacuous.
     """
     nodes = alt_tss_index.nodes_df
     i = int(np.flatnonzero(nodes["start"].to_numpy() == ALT_TSS_POS)[0])

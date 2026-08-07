@@ -22,12 +22,12 @@ rather than inferred from an aggregate.
 ⚠ **The geometry is REBUILT here, not read out of the solver** — ``build_node_geometry`` is a pure
 function of (chain, substrate, region_arrays, junctions, two pmfs, reach) and this calls it with the same
 arguments `calibrate` did. ⛔ That re-derivation is then GATED against the frames the solver published
-(``_uni_static['rho_lo'/'rho_hi']``) to 1e-12, so it cannot silently drift (`TRAPS.md` A1).
+(``_uni_static['rho_lo'/'rho_hi']``) to 1e-12, so it cannot silently drift (TRAPS: self-checking-validator).
 
 ⚠ **`r_true` is built with the SAME flank rule from the ORACLE's counts**, so it is the ratio of the
 populations the hop actually compares — not a different quantity. ``r_true_gdna`` beside it is the true
-gDNA-density ratio, which is what a gDNA LEVEL should cross at (`TRAPS.md` D4b) and is a DIFFERENT
-number; both are printed because conflating them is `TRAPS.md` D4i.
+gDNA-density ratio, which is what a gDNA LEVEL should cross at (TRAPS: a-total-density-ratio) and is a DIFFERENT
+number; both are printed because conflating them is TRAPS: recompute-from-the-oracle.
 
 Usage:
 
@@ -349,7 +349,7 @@ def section_decompose(r, geom, lab, g_cnt, rna_cnt):
       MORE significant, not smaller. That is the junction-vs-exon frame gap: the junction's divisor
       ``E_J = E[w] - 1`` RISES with the fitted mean fragment length while the exon's ``E_r = e - E[w] + 1``
       FALLS, so a length-model error is amplified with opposite sign (`EQUATIONS.md` §3.6b, 0.62 %/bp).
-      ⛔ `TRAPS.md` D1: a variance cannot fix a biased mode.
+      ⛔ TRAPS: a-variance-cannot-fix-a-bias: a variance cannot fix a biased mode.
     """
     print("\n── 3b. ⭐⭐⭐ WHY r_tot != r_gDNA — the exact decomposition, per hop ─────────────────────")
     print("   r_tot = phi_g(src)·r_g + phi_R(src)·r_R   — a SHARE-WEIGHTED AVERAGE of the two")

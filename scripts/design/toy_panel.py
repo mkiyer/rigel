@@ -193,7 +193,7 @@ def report(rows: list[dict], spec_name: str, refit_iters: int) -> None:
     # ── 3. the sweep shape, for the objects that carry the error ──────────────────────────────────
     print()
     print("── 3. THE SWEEP SHAPE — does the answer TRACK the data? ─────────────────────────────────")
-    print("   ⭐ A prediction that does not move when the truth moves is the tell (`TRAPS.md` D4b).")
+    print("   ⭐ A prediction that does not move when the truth moves is the tell (TRAPS: a-total-density-ratio).")
     for k in order[:4]:
         print(f"\n   {k}")
         print(f"      {'rung':>7} {'true':>7} {'loc':>7} {'pred':>7} {'|Δ|':>7} {'sd':>6} "

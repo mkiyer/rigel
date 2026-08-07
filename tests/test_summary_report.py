@@ -34,7 +34,7 @@ def _fl_models(max_size: int = 1000):
     """An ``FLModels`` built straight from pool histograms, the shape production produces.
 
     ⚠ Built through the EB kernel rather than through ``build_fl_models``, because that entry point
-    takes a payload — which is the point of C2.1 and is exactly what a unit test of the REPORT does
+    takes a payload — which is the point of TRAPS: pure-and-length-censored.1 and is exactly what a unit test of the REPORT does
     not want to fabricate.
     """
     from rigel.calibration.fl import _fl_models_from_histograms
@@ -94,7 +94,7 @@ def test_fragment_length_report_splits_lean_summary_from_histograms():
 
 
 def test_the_reported_categories_are_the_anchor_the_two_models_and_the_FIVE_PURE_POOLS():
-    """⭐ C2.3's output contract, and it is a DIFFERENT set than before C2.
+    """⭐ TRAPS: pure-and-length-censored.3's output contract, and it is a DIFFERENT set than before TRAPS: pure-and-length-censored.
 
     The per-``SpliceType`` histograms (``unspliced``, ``spliced_annot``, …) are gone: they were the
     scanner's, measured by two rules that were neither each other nor the accumulator's ``L``. What

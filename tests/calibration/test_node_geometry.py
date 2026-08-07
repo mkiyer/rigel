@@ -236,7 +236,7 @@ def test_a_NODE_divisor_is_the_CONTAINED_placements_count(geometry, parts):
 
 
 def test_a_CONTIGUOUS_EDGE_divisor_is_the_UNBOUNDED_crossing_count__the_A7_RULING(geometry, parts):
-    """⭐ **A7, ruled 2026-07-30**: at a contiguous edge BOTH components pass ``UNBOUNDED_REACH``, so
+    """⭐ **TRAPS: prove-the-substrate, ruled 2026-07-30**: at a contiguous edge BOTH components pass ``UNBOUNDED_REACH``, so
     both divisors collapse to ``mu - 1`` exactly. gDNA is unbounded by physics (its template is the
     chromosome, ``taper_g = 1``); RNA is unbounded **by the ruling**, which keeps S5.e varying exactly
     one thing and defers the taper to S5.g where it can be A/B'd against S5.f's first baseline.
@@ -255,7 +255,7 @@ def test_a_CONTIGUOUS_EDGE_divisor_is_the_UNBOUNDED_crossing_count__the_A7_RULIN
 
 
 def test_the_JUNCTION_divisor_uses_its_REAL_EXONIC_REACH__the_other_half_of_A7(parts):
-    """⭐ **A7, ruled**: a junction edge is used only by a molecule that spliced across it, so what
+    """⭐ **TRAPS: prove-the-substrate, ruled**: a junction edge is used only by a molecule that spliced across it, so what
     remains either side is exonic and the reach is real. A junction is a BRAND-NEW population — the
     predecessor had no junction divisor at all — so wiring it regresses nothing, while leaving it
     unbounded would ship a divisor wrong by up to 4x at a first exon (199.0 at

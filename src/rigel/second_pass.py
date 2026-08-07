@@ -525,11 +525,11 @@ def lift_choices(whole: AccumulatorPayload, parts, choices: np.ndarray):
     different route. Taking a sequence makes the identity a property of this function rather than of a
     caller's discipline. ⚠ A one-partition caller passes ``[p]``.
     ⭐ *This was found by perturbation, not by design*: the first version took a single partition and a
-    per-call queue, and the gate set could not see the defect (`TRAPS.md` A2).
+    per-call queue, and the gate set could not see the defect (TRAPS: perturb-every-gate).
 
     ⭐ **The key is the bank's own canonical sort key** — ``_DEFERRED_RECORD_FIELDS``, the tuple the C++
     sorts on before the bank crosses the ABI, imported rather than restated so there is one definition of
-    record identity (`TRAPS.md` A11). :class:`DeferredFragments` guarantees the property this rests on:
+    record identity (TRAPS: a-test-that-redefines). :class:`DeferredFragments` guarantees the property this rests on:
     *"two records that tie on that key are identical records, so no tie-break is needed or possible."*
     Identical records have identical hypothesis SETS — enumeration reads the span and the annotation, never
     the origin — so a LOCAL hypothesis index transfers between them unchanged.

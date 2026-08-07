@@ -29,7 +29,7 @@ input                        origin                                      cached?
 load that happens anyway, and a stored copy is how a cache goes stale against the thing it describes
 
 
-⭐ **There is no separate FL row any more, and that is C2.** Every fragment-length histogram — the two
+⭐ **There is no separate FL row any more, and that is TRAPS: pure-and-length-censored.** Every fragment-length histogram — the two
 pure pools and the unconditional anchor they are EB-shrunk toward — is a field OF the payload, so
 caching the payload caches them, in one frame, by construction. The scanner's own histogram used to be
 cached alongside it purely to serve as that anchor; is what that
@@ -226,14 +226,14 @@ class ScanCache:
     strand_model: object  # StrandModels, including its per-junction table
     provenance: dict  # the key, the BAM, the scan config, the counts
 
-    # ⛔ `fl_global_counts`, `fl_rna_counts` and `fl_max_size` were DELETED by C2
+    # ⛔ `fl_global_counts`, `fl_rna_counts` and `fl_max_size` were DELETED by TRAPS: pure-and-length-censored
     # The first was the scanner's histogram, cached so it could be
-    # the empirical-Bayes anchor — the frame mismatch itself, persisted. The second was **D5**: a
+    # the empirical-Bayes anchor — the frame mismatch itself, persisted. The second was **TRAPS: no-prior-means-haldane**: a
     # field named as if it were live, written and read back and consumed by nothing. The third
     # duplicated `payload.max_length`.
     #
     # ⭐ Every fragment-length histogram now comes off `payload`, so there is nothing left to cache
-    # beside it. ⚠ `fl.npz` is no longer written or read; caches written before C2 still load, since
+    # beside it. ⚠ `fl.npz` is no longer written or read; caches written before TRAPS: pure-and-length-censored still load, since
     # an extra file on disk is not a key.
 
 
@@ -487,7 +487,7 @@ def calibration_inputs(cache: ScanCache, index: "TranscriptIndex") -> dict:
     """Exactly the keyword arguments `calibrate` needs, with the index-derived ones REBUILT.
 
     ⭐ **Every fragment-length histogram comes from the PAYLOAD** — the two pure pools *and*, since
-    C2.1, the unconditional anchor they are shrunk toward. One quantity, one source, one frame: the
+    TRAPS: pure-and-length-censored.1, the unconditional anchor they are shrunk toward. One quantity, one source, one frame: the
     scanner's spliced histogram is transcript-space and requires a UNIQUE transcript, while the
     accumulator's `RNA_SPLICED` pool is a structural rule over a larger population; and the anchor is
     `deposited_lengths`, binned at the same `L`.

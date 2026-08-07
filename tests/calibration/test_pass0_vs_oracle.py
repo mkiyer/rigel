@@ -340,7 +340,7 @@ def test_refit_iters_zero_reproduces_debug_belief_pass0(measured, toy):
     PERTURBATION: ask for ONE refit iteration. The refit is the whole point of Phase 2, so a single
     iteration must move the answer; if it does not, the lever is inert and this test is vacuous.
     """
-    from rigel.calibration.bp_solver import chain_node_deconv
+    from rigel.calibration.sweep import chain_node_deconv
 
     ra = RegionArrays.from_frame(toy.index.nodes_df, toy.index.ref_name_to_id)
     substrate = CalibrationSubstrate.from_payload(measured.payload, ra)
@@ -443,7 +443,7 @@ def test_the_solver_classes_match_the_composition_evidence_census(measured, toy)
     compare two hand-written copies of ``1e-9`` (``P0._EPS == census._EPS``) — a drift DETECTOR for a
     definition that had three homes. ``node_init.has_own_composition_evidence`` is now the single home
     and every instrument imports it, so there is no longer anything to drift; the honest gate is that
-    the census's partition IS the solver's predicate, evaluated by calling it. `TRAPS.md` A11's own
+    the census's partition IS the solver's predicate, evaluated by calling it. TRAPS: a-test-that-redefines' own
     prescription: one home, every consumer importing, rather than a gate policing copies.
 
     PERTURBATION: shift the evidence threshold off ``node_init``'s and watch the partition move.
@@ -454,7 +454,7 @@ def test_the_solver_classes_match_the_composition_evidence_census(measured, toy)
 
     tau = np.asarray(cap["_tau0_lam"], np.float64)
     is_node = np.asarray(chain.kind) == P0.NODE
-    # ⛔ G1, on BOTH axes — `_type_belief` locks the class without consulting the axis. The earlier
+    # ⛔ TRAPS: no-magic-numbers, on BOTH axes — `_type_belief` locks the class without consulting the axis. The earlier
     # `(~solvable) & is_node` filed every structurally-locked EDGE as `relay_only`, i.e. as an object
     # whose answer came from its neighbours, when nothing was ever asked of it.
     census_lock = ~np.asarray(cap["free_pos"], bool) & ~np.asarray(cap["free_neg"], bool)

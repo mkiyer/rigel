@@ -586,10 +586,10 @@ class TestEdgeCases:
 
         gtf = (
             "chr1\ttest\texon\t100\t500\t.\t+\t.\t"
-            'gene_id "g1"; transcript_id "t1"; gene_name "G1"; '
+            'gene_id "g1"; transcript_id "t1"; gene_name "TRAPS: no-magic-numbers"; '
             'gene_type "protein_coding"; tag "basic";\n'
             "chr1\ttest\texon\t1000\t1500\t.\t-\t.\t"
-            'gene_id "g2"; transcript_id "t2"; gene_name "G2"; '
+            'gene_id "g2"; transcript_id "t2"; gene_name "TRAPS: one-thing-varied"; '
             'gene_type "lncRNA";\n'
         )
         return build_test_index(tmp_path_factory, gtf, genome_size=2000, name="single_exon_idx")

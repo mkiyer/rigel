@@ -6,15 +6,15 @@ the error; this says WHICH CHANNEL put it there. It records every argument of th
 re-solves with one imputed channel nulled at a time — so an attribution is a re-solve of the real call
 rather than a second implementation of it.
 
-⛔ **A5 — the ``as-is`` arm must reproduce the run BIT-IDENTICALLY, and reproducing it means reproducing
+⛔ **TRAPS: byte-identity-gate — the ``as-is`` arm must reproduce the run BIT-IDENTICALLY, and reproducing it means reproducing
 the WRITE-BACK too.** `node_sweep` keeps the incoming belief wherever ``solvable`` is False, so comparing
 raw ψ output against the stored belief differs by up to 1.0 at every unsolvable slot. The first version of
 this script reported ``max |Δ| = 1.0`` and its numbers were on a different basis than the panel's; the
 `wb()` helper is that fix and the identity line is the gate.
-⛔ **A14 — every ablation prints how many LIVE slots it COULD have moved**, so "no effect" is separable
+⛔ **TRAPS: could-the-arm-have-fired — every ablation prints how many LIVE slots it COULD have moved**, so "no effect" is separable
 from "never fired".
 
-⭐ **Read the per-slot table, not only the totals.** `TRAPS.md` D4h: when every single ablation is small
+⭐ **Read the per-slot table, not only the totals.** TRAPS: all-small-singly-large-jointly: when every single ablation is small
 and the joint one is large, the channels are all built from one upstream quantity and ablating consumers
 tells you nothing. That is exactly what this prints at `g01 ss0.50 capture_on`: −2.3 / −6.8 / −4.9 / −0.1 %
 singly against −60.7 % jointly, while the per-slot rows show the certified-RNA message alone taking eight
@@ -83,13 +83,13 @@ def main() -> int:
     ap.add_argument("--arm", default="final", choices=("pass0", "final"))
     args = ap.parse_args()
 
-    import rigel.calibration.bp_solver as BP
+    import rigel.calibration.sweep as BP
     patched = []
     for mod in (SL, NI, BP):
         if hasattr(mod, "_solve_nodes_logodds_all"):
             setattr(mod, "_solve_nodes_logodds_all", _rec)
             patched.append(mod.__name__)
-    print(f"   [A10] recording ψ in {patched}")
+    print(f"   [TRAPS: an-ablation-that-never-ran] recording ψ in {patched}")
 
     index = TranscriptIndex.load(str(args.index))
     m = P0.measure_condition(
@@ -147,7 +147,7 @@ def main() -> int:
         return np.where(solvable, np.clip(x, 0.0, 1.0), fg)
     base_re = wb(solve())
     d = np.abs(base_re - fg)
-    print(f"   ⛔ A5 — the re-solve reproduces HEAD's own answer: {np.array_equal(base_re, fg)}"
+    print(f"   ⛔ TRAPS: byte-identity-gate — the re-solve reproduces HEAD's own answer: {np.array_equal(base_re, fg)}"
           f"   (max |Δ| = {d.max():.3e} at slot {int(np.argmax(d))})")
 
     def sigma(x):

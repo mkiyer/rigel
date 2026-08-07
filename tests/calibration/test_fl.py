@@ -73,7 +73,7 @@ def test_gdna_fl_mass_is_ALL_FOUR_gdna_pools():
 
     ⛔ **This histogram is only meaningful paired with the matching divisor.** The four pools tilt in
     opposite directions, so the raw sum is biased LONG — that is the 146.05-against-88.0 defect
-    (`docs/TRAPS.md` C4). Nothing in the tool consumes this sum on its own.
+    (`docs/TRAPS.md` opposite-tilts-must-not-pool). Nothing in the tool consumes this sum on its own.
     """
     g = gdna_fl_mass(SimpleNamespace(pool_lengths=_pools()))
     np.testing.assert_allclose(g, [0.0, 0.0, 701.0, 903.0, 0.0])

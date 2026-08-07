@@ -1,4 +1,4 @@
-"""The belief-propagation sweep (`bp_solver.node_sweep`) and the beliefs it starts from.
+"""The belief-propagation sweep (`sweep.solve_chain`) and the beliefs it starts from.
 
 ⭐ **Every fixture here is on the S5.e axes** — ``_synthetic.make_chain_parts``, i.e. a node axis, a
 contiguous-edge axis with ``k − 1`` entries per reference and **no terminal slots**, and a junction axis
@@ -15,12 +15,16 @@ placed by hand rather than derived from a junction's endpoints (`_mature_exon_ch
 from __future__ import annotations
 
 
+import functools
+
 import numpy as np
 import pytest
 
 from rigel.types import Strand
 
-from rigel.calibration.bp_solver import node_sweep
+from rigel.calibration.messages.head import HeadPolicy
+from rigel.calibration.sweep import solve_chain
+
 from rigel.calibration.effective_length import (
     UNBOUNDED_REACH,
     contained_eff_length,
@@ -38,6 +42,12 @@ from rigel.calibration.signature import (
     mrna_active_strands,
     nrna_active_strands,
 )
+
+
+#: ⚠ These gates exercise HEADPOLICY's operators, so the policy is named EXPLICITLY. ``solve_chain``
+#: defaults to ``SilentPolicy``, which sends nothing — every assertion below would then be vacuous, which
+#: is TRAPS: could-the-arm-have-fired exactly ("check the arm COULD have changed something").
+node_sweep = functools.partial(solve_chain, policy=HeadPolicy())
 
 
 def _delta_pmf(length):
@@ -109,7 +119,7 @@ def test_init_tss_boundary_is_black_hole():
 
 
 def test_precision_state_count_resolution():
-    """The log-density solver's precision state is ``Var(log f_g)`` — the message currency (D2). It reflects
+    """The log-density solver's precision state is ``Var(log f_g)`` — the message currency (TRAPS: two-gaussians-one-latent). It reflects
     EVIDENCE: a node with more fragments (same composition) resolves its log-density sharper, so a lower
     ``Var(log f_g)`` ⇒ a more confident message. (In LOG space a confident ``f_g→0`` node has WIDE variance —
     a near-zero gDNA density carries little reliable gDNA-density information to impute, the
@@ -303,7 +313,7 @@ def test_gdna_emits_across_tss_tes_seam():
 def test_gdna_sweep_zero_gdna_pin_and_monotone():
     # ⚠ Was `xfail` as "pre-existing known-red" while σ²_transfer was identically 0 on this seedless chain:
     # the AMBIG node leant gDNA at ≈0.564 and the strand-solved introns were dragged up to ≈0.564 by the
-    # directly-adjacent terminal G1 locks, whose messages were then UNDAMPED. The derived M5 σ²_transfer
+    # directly-adjacent terminal G1 locks, whose messages were then UNDAMPED. The derived the-reframe-scale-variance σ²_transfer
     # (`Var(log r)` from `composition_logvar`, computed per edge from counts and eff-lengths) damps them, and
     # measured 2026-07-27 all three nodes are back under the 0.50 bound. Marker removed; live guard again.
     # A pure-RNA chain intron+ | AMBIG(in+|in−) | intron−. The AMBIG starts at the all-gDNA init f_g=1; the
@@ -523,7 +533,7 @@ def test_mature_no_nascent_hallucination_in_introns():
 
 
 # NOTE: `test_mature_absorption_lowers_nascent_message_into_junction` was RETIRED when the mature-crossing gate
-# landed (Phase 4). It asserted the exon→B1 +RNA message FIRES (`app[b1] > 0`) so its absorption term could
+# landed (Phase 4). It asserted the exon→TRAPS: measure-the-ceiling-first +RNA message FIRES (`app[b1] > 0`) so its absorption term could
 # lower the imputed nascent; the gate now blocks that edge entirely (the exon may not manufacture nascent into
 # its intron-side junction), so the message no longer exists to absorb. Its replacement is
 # `test_exon_does_not_manufacture_nascent_into_intron` (same fixture, same edge, inverted assertion). The
@@ -554,7 +564,7 @@ def test_mature_measurement_disagreement_silenced():
     mature-inclusive boundary projection used for σ²_transfer on exon↔boundary edges, so depleting the
     spliced channel moved σ²_transfer and hence the attenuation of the **gDNA** relay — components that
     should not touch. Assertion (2) failed at |Δf_g| = 0.0612 against its 0.05 bound. σ²_transfer is now the
-    derived M5 `Var(log r)` (`composition_logvar`, per edge from counts and eff-lengths) and that projection
+    derived the-reframe-scale-variance `Var(log r)` (`composition_logvar`, per edge from counts and eff-lengths) and that projection
     is out of the path: **measured 2026-07-27, |Δf_g| = 0.000000 — exactly zero, not merely inside the
     bound.**
 
@@ -754,8 +764,12 @@ def test_intron_relays_nascent_into_exon_both_directions():
     uni = cap["_uni_static"]
     fpp, bpp = uni["fwd_pp"], uni["bwd_pp"]  # forward / backward +RNA precision after the relay
     # +strand-continuous chain ⇒ the fused +RNA precision is live at the junctions and the exon, both directions
-    assert fpp[_B1] > 0.0, fpp[_B1]  # forward relay reaches the intron→exon junction B1
-    assert bpp[_B2] > 0.0, bpp[_B2]  # backward relay reaches the exon→intron junction B2
+    assert fpp[_B1] > 0.0, fpp[
+        _B1
+    ]  # forward relay reaches the intron→exon junction TRAPS: measure-the-ceiling-first
+    assert bpp[_B2] > 0.0, bpp[
+        _B2
+    ]  # backward relay reaches the exon→intron junction TRAPS: score-against-truth
     assert fpp[_R1_EXON] > 0.0 and bpp[_R1_EXON] > 0.0  # the exon receives +RNA from both flanks
 
 

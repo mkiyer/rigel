@@ -420,7 +420,7 @@ public:
     const std::int64_t* pool_lengths_data() const noexcept { return pool_lengths_.data(); }
     std::size_t         pool_lengths_size() const noexcept { return pool_lengths_.size(); }
 
-    /// ⭐ C1: EVERY deposited fragment, binned at its own L, with NO purity condition.
+    /// ⭐ TRAPS: a-purity-filter-is-a-length-filter — EVERY deposited fragment, binned at its own L, with NO purity condition.
     ///
     /// The five pure pools above are deliberately CONDITIONED (an impure
     /// pool is worse than a missing one), so they cannot serve as the unconditional anchor an
@@ -524,7 +524,7 @@ private:
     std::int32_t               ref_id_ = 0;        // stamped into every deferred record
     int                        max_length_ = 0;
     std::vector<std::int64_t>  pool_lengths_;      // kNFragmentPools * (max_length + 1), or empty
-    std::vector<std::uint32_t> deposited_lengths_; // max_length + 1 -- C1, unconditional given deposit
+    std::vector<std::uint32_t> deposited_lengths_; // max_length + 1 -- unconditional given deposit
     DepositCounters            counters_;
     GapCensus                  gap_census_;
     DeferredFragments          deferred_;

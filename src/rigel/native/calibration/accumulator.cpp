@@ -285,7 +285,7 @@ Accumulator::Accumulator(std::vector<std::int64_t> cuts,
         node_types_ = std::move(node_types);
     }
     pool_lengths_.assign(kNFragmentPools * (static_cast<std::size_t>(max_length_) + 1), 0);
-    // ⭐ C1: allocated ALWAYS, unlike pool_lengths_ which is empty when a reference has no node types.
+    // ⭐ TRAPS: a-purity-filter-is-a-length-filter — allocated ALWAYS, unlike pool_lengths_ which is empty when a reference has no node types.
     // The unconditional histogram does not depend on node typing -- a fragment has a length whether or
     // not its node can be classified -- and an anchor that silently vanished on an untyped reference
     // would be exactly the kind of conditioning this row exists to remove.
@@ -577,7 +577,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
 
     const std::int64_t first_node = node_of_pos(first_base);
     node_start_count_[static_cast<std::size_t>(first_node)] += 1u;
-    // ⭐ C1: incremented HERE -- beside the start count and the DEPOSITED counter -- so all three
+    // ⭐ TRAPS: a-purity-filter-is-a-length-filter — incremented HERE -- beside the start count and the DEPOSITED counter -- so all three
     // describe one population by construction rather than by agreement. `length` is already clipped to
     // the reference and gated by the length limit above.
     deposited_lengths_[static_cast<std::size_t>(length)] += 1u;

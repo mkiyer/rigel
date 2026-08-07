@@ -211,7 +211,7 @@ def _enumerate_library(transcripts, theta, pmf):
 
 
 def test_the_correction_RECOVERS_the_library_distribution_from_an_ENUMERATED_pool():
-    """⭐⭐ The gate C3 exists to pass, with nothing tuned and no tolerance beyond float.
+    """⭐⭐ The gate TRAPS: divide-by-a-probability exists to pass, with nothing tuned and no tolerance beyond float.
 
     Build a transcriptome and a fragment-length distribution, enumerate every placement to get both
     the library histogram and the junction-crossing subset of it, then de-tilt the subset. It must

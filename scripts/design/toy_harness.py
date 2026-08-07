@@ -228,7 +228,7 @@ def _rate_from_capture(capture, chain, region_arrays) -> float:
 
     ⭐ Both arrays are the solver's own (``capture['count']`` and ``capture['eff_gdna']``), so the rate
     is in exactly the frame the toy's own nodes will be measured in — no second implementation of an
-    effective length, which is how two definitions of one quantity start to drift (`TRAPS.md` E13).
+    effective length, which is how two definitions of one quantity start to drift (TRAPS: two-docstrings-one-quantity).
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
@@ -248,7 +248,7 @@ def _donor_sim_params(donor_dir: Path, name: str) -> dict:
 
     ⚠ Fragment lengths come from ``truth_summary.json``'s **post-capture** measurement where it
     exists, never from a configured ``frag_mean`` — capture selects for length, so the configured
-    parameters describe a library that was never sequenced (`TRAPS.md` F5). Strand specificity is read
+    parameters describe a library that was never sequenced (TRAPS: capture-selects-for-length). Strand specificity is read
     off the condition name, which is where the panel encodes it.
     """
     ss = 0.5
@@ -458,7 +458,7 @@ def run_toy(
     # 2,000 and differ only in acceptor, so 0.65 % of fragments defer — and they understate the
     # certified channel at @9,100 by a measured 13.5 %.
     # ⭐ `_lift` is what makes the ORACLE valid afterwards: score and draw ONCE on the whole, then replay
-    # each fragment's chosen hypothesis inside whichever origin partition holds it (`TRAPS.md` B9).
+    # each fragment's chosen hypothesis inside whichever origin partition holds it (TRAPS: draining-breaks-the-oracle).
     lift: dict = {}
     payload = _drain_side_buffer(
         pass_one, res.index, strand_model, seed=pipeline_config.second_pass_seed, _lift=lift
@@ -686,7 +686,7 @@ SPECS: dict[str, ToySpec] = {
         "        ⭐⭐ What it adds over every rung before it, and why it is the hard one: the two "
         "exon↔intron EDGES. Mature RNA cannot cross an exon↔intron seam contiguously, so their truth "
         "is pure gDNA — but the solver's own continuity gate says a strand IS admissible there "
-        "(nascent RNA could cross), so they are NOT G1 and the solver must *derive* what the structure "
+        "(nascent RNA could cross), so they are NOT TRAPS: no-magic-numbers and the solver must *derive* what the structure "
         "already implies. ⛔ On an `nrna_none` donor that is the maximally-violated case of the "
         "intron↔exon imputation premise, so a nascent rung is the control this one needs.\n"
         "        ⛔⛔ CAPTURE-ON NEEDS `--genome-length 120000` ON THIS RUNG. At 12 kb the whole "
@@ -765,7 +765,7 @@ SPECS: dict[str, ToySpec] = {
         "unspliced RNA crossing for another.\n"
         "          EDGE @1,050 — TA's TSS, with TB already transcribing through it.\n"
         "          NODE [9,000, 9,050) — TA exon AND TB intron on the SAME strand, 50 bp wide, so it is "
-        "also below one fragment length and has no resolvable density of its own (`TRAPS.md` D8).\n"
+        "also below one fragment length and has no resolvable density of its own (TRAPS: density-below-one-fragment-length).\n"
         "        ⚠ Both `abundance` values are meant to be SWEPT: the certified channel's strength at "
         "@9,100 is TB's alone, while the unspliced crossing there is gDNA + TB, so the TA/TB ratio moves "
         "the two independently. A single abundance pair tests one corner of that.",
@@ -798,7 +798,7 @@ SPECS: dict[str, ToySpec] = {
         "OPPOSITE strands, so an edge can be the DONOR of one and sit beside the ACCEPTOR of the other.\n"
         "        ⛔ The question it exists to answer is per (EDGE, side, strand, donor-or-acceptor, "
         "message direction): when this edge reframes against that neighbour, does its splice flux belong "
-        "in the total or not? `docs/calibration/SESSION_HANDOFF.md` carries the derivation task.\n"
+        "in the total or not? The derivation is open.\n"
         "        ⚠ MY READING OF THE OWNER'S SPEC, flagged rather than assumed: the owner wrote the last "
         "two transcripts both as `TC-`. Two transcripts cannot share an id, so they are TC− and TD− "
         "here. If the intent was one transcript with two isoforms the ids change and nothing else does.",
@@ -825,7 +825,7 @@ SPECS: dict[str, ToySpec] = {
     ),
     "nested_exons": ToySpec(
         name="nested_exons",
-        what_it_probes="⭐⭐ C11 (owner's spec). THREE nested single-exon transcripts on one gene:\n"
+        what_it_probes="⭐⭐ NESTED EXONS (owner's spec). THREE nested single-exon transcripts on one gene:\n"
         "                     TA+ (1,000, 10,000)   TB+ (2,000, 9,000)   TC+ (3,000, 8,000)\n"
         "        The partition is therefore SEVEN NODES and SIX EDGES, and there is NO INTRON "
         "anywhere:\n"
@@ -881,7 +881,7 @@ SPECS: dict[str, ToySpec] = {
     ),
     "deep_exon": ToySpec(
         name="deep_exon",
-        what_it_probes="⭐ C1: a LARGE, RNA-rich exon beside an intron — the relay pins these to ~0.85",
+        what_it_probes="⭐ TRAPS: a-purity-filter-is-a-length-filter: a LARGE, RNA-rich exon beside an intron — the relay pins these to ~0.85",
         genome_length=80_000,
         genes=[_gene("g1", "+", [(20_000, 34_000), (40_000, 43_000)], 3000.0)],
         n_rna_fragments=120_000,

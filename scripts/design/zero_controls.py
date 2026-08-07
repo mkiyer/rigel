@@ -28,7 +28,7 @@ thing the solver ever does: there is nothing to deconvolve.
 If ``fg_loc`` is right and ``f_g`` is not, it is the messages. ⛔ Reading only the final number cannot tell
 those apart, and they have completely different fixes.
 
-⚠ **A zero arm can be DEGENERATE, and then it is not a control at all** (`TRAPS.md` A14). An object with
+⚠ **A zero arm can be DEGENERATE, and then it is not a control at all** (TRAPS: could-the-arm-have-fired). An object with
 zero counts has no density, so the reframe is skipped and every message into it is inert — the arm then
 reports "no error" while testing nothing. So this prints the COUNTS beside every answer and flags any
 object that is empty. ⛔ Judge the arm by how many objects actually carried mass, not by the total.
@@ -123,7 +123,7 @@ def report(spec_name, arm, r, expect):
     print(f"   {'':4} {'TOTAL':<16} {f'{live} live objects':<16} {mass:>8,.0f} {'':>10} {'':>8} "
           f"{'':>8} {'':>8} {'':>9} {tot_err:>10.1f}")
     if live == 0:
-        print("   ⛔⛔ EVERY OBJECT IS EMPTY — this arm is DEGENERATE and tests nothing (`TRAPS.md` A14)")
+        print("   ⛔⛔ EVERY OBJECT IS EMPTY — this arm is DEGENERATE and tests nothing (TRAPS: could-the-arm-have-fired)")
         return
     print(f"   ⭐ worst object: {worst[1]} {worst[2]}  Δ = {worst[0]:+.4f}   "
           f"·   error share of mass = {tot_err / max(mass, 1):.4%}")

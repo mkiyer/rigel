@@ -203,7 +203,7 @@ def _ambiguous_multiexon_gtf(n_transcripts=8):
             lines.append(
                 f"chr1\ttest\texon\t{start}\t{end}\t.\t+\t.\t"
                 f'gene_id "g1"; transcript_id "t{t_idx}"; '
-                f'gene_name "G1"; gene_type "protein_coding"; tag "basic";'
+                f'gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";'
             )
     return "\n".join(lines) + "\n"
 
@@ -214,10 +214,10 @@ def _ambiguous_multiexon_gtf(n_transcripts=8):
 #   t_one_left: exon  (100,200)              transcript span (100,200)
 #   t_one_right: exon (350,500)              transcript span (350,500)
 OVERLAP_GTF = textwrap.dedent("""\
-    chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t_two_exon"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-    chr1\ttest\texon\t351\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t_two_exon"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-    chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t_one_left"; gene_name "G1"; gene_type "protein_coding";
-    chr1\ttest\texon\t351\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t_one_right"; gene_name "G1"; gene_type "protein_coding";
+    chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t_two_exon"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t351\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t_two_exon"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t_one_left"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding";
+    chr1\ttest\texon\t351\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t_one_right"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding";
 """)
 
 
@@ -341,9 +341,9 @@ class TestOverlapProfileViaResolve:
         Fragment (250,350): t0 intron_bp=100, t1 exon_bp=100.
         """
         gtf = textwrap.dedent("""\
-            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-            chr1\ttest\texon\t101\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t1"; gene_name "G1"; gene_type "protein_coding";
+            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t101\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t1"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding";
         """)
         idx = build_test_index(tmp_path_factory, gtf, name="cross_tx")
         tm = _t_map(idx)
@@ -362,9 +362,9 @@ class TestOverlapProfileViaResolve:
         Fragment (250,350): t0 has intron_bp=100, t1 has exon_bp=50
         """
         gtf = textwrap.dedent("""\
-            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-            chr1\ttest\texon\t301\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t1"; gene_name "G1"; gene_type "protein_coding";
+            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t301\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t1"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding";
         """)
         idx = build_test_index(tmp_path_factory, gtf, name="partial_ovl")
         tm = _t_map(idx)
@@ -561,8 +561,8 @@ class TestIntronicBpAccumulation:
         Fragment (250,350) → intron_bp = 100.
         """
         gtf = textwrap.dedent("""\
-            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
         """)
         idx = build_test_index(tmp_path_factory, gtf, name="lone_intron")
         frag = make_fragment(exons=(_exon("chr1", 250, 350),), introns=())
@@ -579,9 +579,9 @@ class TestIntronicBpAccumulation:
         Fragment (250,350) → t0 intron_bp=100, t1 exon_bp=100.
         """
         gtf = textwrap.dedent("""\
-            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-            chr1\ttest\texon\t201\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t1"; gene_name "G1"; gene_type "protein_coding";
+            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t201\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t1"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding";
         """)
         idx = build_test_index(tmp_path_factory, gtf, name="cross_exon")
         tm = _t_map(idx)
@@ -600,9 +600,9 @@ class TestIntronicBpAccumulation:
         Fragment (250,350) → t0 intron_bp=100, t1 exon_bp=50
         """
         gtf = textwrap.dedent("""\
-            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-            chr1\ttest\texon\t301\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t1"; gene_name "G1"; gene_type "protein_coding";
+            chr1\ttest\texon\t101\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t301\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t1"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding";
         """)
         idx = build_test_index(tmp_path_factory, gtf, name="partial_unambig")
         tm = _t_map(idx)
@@ -620,8 +620,8 @@ class TestIntronicBpAccumulation:
         Fragment (150,250) → fully in first exon.
         """
         gtf = textwrap.dedent("""\
-            chr1\ttest\texon\t101\t300\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t101\t300\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+            chr1\ttest\texon\t401\t500\t.\t+\t.\tgene_id "g1"; transcript_id "t0"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
         """)
         idx = build_test_index(tmp_path_factory, gtf, name="exon_only")
         frag = make_fragment(exons=(_exon("chr1", 150, 250),), introns=())

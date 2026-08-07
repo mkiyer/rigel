@@ -43,8 +43,8 @@ def _exon(ref, start, end, strand=Strand.POS):
 #   transcript length = 1001 + 1001 = 2002
 #   intron = (2000, 4999)
 BASIC_GTF = textwrap.dedent("""\
-    chr1\ttest\texon\t1000\t2000\t.\t+\t.\tgene_id "g1"; transcript_id "t_basic"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-    chr1\ttest\texon\t5000\t6000\t.\t+\t.\tgene_id "g1"; transcript_id "t_basic"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t1000\t2000\t.\t+\t.\tgene_id "g1"; transcript_id "t_basic"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t5000\t6000\t.\t+\t.\tgene_id "g1"; transcript_id "t_basic"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
 """)
 
 # Three-exon transcript for multi-intron gap tests
@@ -53,9 +53,9 @@ BASIC_GTF = textwrap.dedent("""\
 #   transcript length = 1001 + 1001 + 1001 = 3003
 #   introns = (2000, 4999), (6000, 8999)
 THREE_EXON_GTF = textwrap.dedent("""\
-    chr1\ttest\texon\t1000\t2000\t.\t+\t.\tgene_id "g1"; transcript_id "t_three"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-    chr1\ttest\texon\t5000\t6000\t.\t+\t.\tgene_id "g1"; transcript_id "t_three"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-    chr1\ttest\texon\t9000\t10000\t.\t+\t.\tgene_id "g1"; transcript_id "t_three"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t1000\t2000\t.\t+\t.\tgene_id "g1"; transcript_id "t_three"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t5000\t6000\t.\t+\t.\tgene_id "g1"; transcript_id "t_three"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t9000\t10000\t.\t+\t.\tgene_id "g1"; transcript_id "t_three"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
 """)
 
 # Four-exon transcript for even larger gap tests
@@ -64,10 +64,10 @@ THREE_EXON_GTF = textwrap.dedent("""\
 #   transcript length = 1001 * 4 = 4004
 #   introns = (2000,4999), (6000,8999), (10000,12999)
 FOUR_EXON_GTF = textwrap.dedent("""\
-    chr1\ttest\texon\t1000\t2000\t.\t+\t.\tgene_id "g1"; transcript_id "t_four"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-    chr1\ttest\texon\t5000\t6000\t.\t+\t.\tgene_id "g1"; transcript_id "t_four"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-    chr1\ttest\texon\t9000\t10000\t.\t+\t.\tgene_id "g1"; transcript_id "t_four"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-    chr1\ttest\texon\t13000\t14000\t.\t+\t.\tgene_id "g1"; transcript_id "t_four"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t1000\t2000\t.\t+\t.\tgene_id "g1"; transcript_id "t_four"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t5000\t6000\t.\t+\t.\tgene_id "g1"; transcript_id "t_four"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t9000\t10000\t.\t+\t.\tgene_id "g1"; transcript_id "t_four"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t13000\t14000\t.\t+\t.\tgene_id "g1"; transcript_id "t_four"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
 """)
 
 # Two isoforms with different exon structures
@@ -76,19 +76,19 @@ FOUR_EXON_GTF = textwrap.dedent("""\
 #   t_short: exons (999, 2000), (4999, 6000)               — 2 exons (skips middle)
 #   transcript lengths: t_long = 3003, t_short = 2002
 ISOFORM_GTF = textwrap.dedent("""\
-    chr1\ttest\texon\t1000\t2000\t.\t+\t.\tgene_id "g1"; transcript_id "t_long"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-    chr1\ttest\texon\t3000\t4000\t.\t+\t.\tgene_id "g1"; transcript_id "t_long"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-    chr1\ttest\texon\t5000\t6000\t.\t+\t.\tgene_id "g1"; transcript_id "t_long"; gene_name "G1"; gene_type "protein_coding"; tag "basic";
-    chr1\ttest\texon\t1000\t2000\t.\t+\t.\tgene_id "g1"; transcript_id "t_short"; gene_name "G1"; gene_type "protein_coding";
-    chr1\ttest\texon\t5000\t6000\t.\t+\t.\tgene_id "g1"; transcript_id "t_short"; gene_name "G1"; gene_type "protein_coding";
+    chr1\ttest\texon\t1000\t2000\t.\t+\t.\tgene_id "g1"; transcript_id "t_long"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t3000\t4000\t.\t+\t.\tgene_id "g1"; transcript_id "t_long"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t5000\t6000\t.\t+\t.\tgene_id "g1"; transcript_id "t_long"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding"; tag "basic";
+    chr1\ttest\texon\t1000\t2000\t.\t+\t.\tgene_id "g1"; transcript_id "t_short"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding";
+    chr1\ttest\texon\t5000\t6000\t.\t+\t.\tgene_id "g1"; transcript_id "t_short"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding";
 """)
 
 # Negative-strand transcript
 # 0-based half-open after parse:
 #   t_neg: exons (999, 2000), (4999, 6000)
 NEG_STRAND_GTF = textwrap.dedent("""\
-    chr1\ttest\texon\t1000\t2000\t.\t-\t.\tgene_id "g1"; transcript_id "t_neg"; gene_name "G1"; gene_type "lncRNA";
-    chr1\ttest\texon\t5000\t6000\t.\t-\t.\tgene_id "g1"; transcript_id "t_neg"; gene_name "G1"; gene_type "lncRNA";
+    chr1\ttest\texon\t1000\t2000\t.\t-\t.\tgene_id "g1"; transcript_id "t_neg"; gene_name "TRAPS: no-magic-numbers"; gene_type "lncRNA";
+    chr1\ttest\texon\t5000\t6000\t.\t-\t.\tgene_id "g1"; transcript_id "t_neg"; gene_name "TRAPS: no-magic-numbers"; gene_type "lncRNA";
 """)
 
 

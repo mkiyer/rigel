@@ -7,7 +7,7 @@ gDNA-dominated regions/boundaries) and the **RNA FL** (spliced fragments), each
 
 This is **not** a per-fragment FL likelihood — that channel is deliberately
 excluded from calibration. BOTH FLs drive per-node effective lengths in the sweep
-(``bp_solver.build_node_geometry``): gDNA eff-lengths use the gDNA FL, RNA (nascent
+(``node_geometry.build_node_geometry``): gDNA eff-lengths use the gDNA FL, RNA (nascent
 unspliced + spliced) eff-lengths use the RNA FL.
 
 ⭐ **Every pool is PURE BY CONSTRUCTION**, and that purity is what
@@ -241,7 +241,7 @@ def build_fl_models(
 
      ⭐ **All three histograms come off the same object, so they cannot disagree about what a
      fragment length IS.** The anchor is ``payload.deposited_lengths`` — every deposited fragment
-     binned at its own ``L`` with no purity condition (C1); the two component pools are
+     binned at its own ``L`` with no purity condition (TRAPS: a-purity-filter-is-a-length-filter); the two component pools are
      :func:`rna_fl_mass` and :func:`gdna_fl_mass`, drawn from exactly that same population. RNA and
      gDNA are EB-shrunk toward the anchor with a single Dirichlet ``prior_ess``.
 

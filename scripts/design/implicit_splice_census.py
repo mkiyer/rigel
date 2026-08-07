@@ -29,7 +29,7 @@ from rigel.pipeline import scan_and_buffer
 
 
 #: The denominators worth reading side by side, in the order that tells the story. ⚠ `sj_implicit_fragments`
-#: used to lead this list and is GONE: D1 is deleted, so "this L was partly inferred" no longer selects
+#: used to lead this list and is GONE: TRAPS: a-variance-cannot-fix-a-bias is deleted, so "this L was partly inferred" no longer selects
 #: anything — a fragment deposits when exactly ONE hypothesis survives, however it got there.
 _KEYS = [
     "deposited",

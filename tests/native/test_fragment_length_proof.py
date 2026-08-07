@@ -1,6 +1,6 @@
-"""⭐ C0 — the PROOF that the accumulator's ``L`` and its deposit geometry are correct.
+"""⭐ TRAPS: two-divisors-opposite-sign — the PROOF that the accumulator's ``L`` and its deposit geometry are correct.
 
-     (C0, the precondition on C1)
+     (TRAPS: two-divisors-opposite-sign, the precondition on TRAPS: a-purity-filter-is-a-length-filter)
 
 ⛔ **WHY THIS FILE EXISTS.** proposes making the accumulator's ``L`` the ONE
 definition of fragment length in the tool — the source every FL model is built from. Owner ruling,
@@ -63,7 +63,7 @@ claim demonstrated: normalisation is exactly what makes the two formulas agree.
 ⛔ **WHAT THIS FILE DOES NOT PROVE.** The fixture carries no annotated junctions, so every fragment is
 unspliced and the **spliced routing** (``edge_spliced`` vs ``edge_unspliced``, junction credit, and the
 containment block) is not exercised here — it is covered by ``test_accumulator_spec``'s dedicated cases.
-That is the right scope for C1's purpose: the unconditional histogram bins by ``L``, and ``L`` does not
+That is the right scope for TRAPS: a-purity-filter-is-a-length-filter's purpose: the unconditional histogram bins by ``L``, and ``L`` does not
 depend on which population the fragment is routed to.
 """
 
@@ -317,11 +317,11 @@ def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
     assert len(covered_bases(_REF_LEN, 1, 11, [(3, 9)])) == 4
 
 
-# --- C1: the unconditional histogram, and its invariant -----------------------------------------------
+# --- TRAPS: a-purity-filter-is-a-length-filter: the unconditional histogram, and its invariant -----------------------------------------------
 
 
 def test_deposited_lengths_bins_every_accepted_fragment_exactly_once():
-    """⭐ **THE C1 INVARIANT (G2).** ``Σ deposited_lengths == Σ node_start_count == qc.deposited``.
+    """⭐ **THE TRAPS: a-purity-filter-is-a-length-filter INVARIANT (TRAPS: one-thing-varied).** ``Σ deposited_lengths == Σ node_start_count == qc.deposited``.
 
     Three counters, one population, incremented on the same line of `deposit` so they cannot drift by
     construction. It is the same externally-checkable form as 's start-count

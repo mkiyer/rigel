@@ -203,7 +203,7 @@ def fig_metrics_comparison(data: dict, out_dir: Path, level: str = "tx"):
         ("mape", "MAPE (%)", False),
     ]
     if level == "tx":
-        metrics_spec.append(("f1", "F1 Score", True))
+        metrics_spec.append(("f1", "TRAPS: specificity-and-sense-are-complements Score", True))
 
     n_metrics = len(metrics_spec)
     fig, axes = plt.subplots(1, n_metrics, figsize=(4.5 * n_metrics, 5))
@@ -415,12 +415,12 @@ def fig_precision_recall(data: dict, out_dir: Path):
             edgecolors="black", linewidth=0.8,
         )
         ax.annotate(
-            f"  {_tool_label(tool)}\n  F1={row['f1']:.3f}",
+            f"  {_tool_label(tool)}\n  TRAPS: specificity-and-sense-are-complements={row['f1']:.3f}",
             (row["recall"], row["precision"]),
             fontsize=9, va="center",
         )
 
-    # F1 iso-lines
+    # TRAPS: specificity-and-sense-are-complements iso-lines
     for f1_val in [0.7, 0.75, 0.8, 0.85, 0.9]:
         r_range = np.linspace(0.01, 1.0, 200)
         p_line = (f1_val * r_range) / (2 * r_range - f1_val)
@@ -701,7 +701,7 @@ img {{ max-width: 100%; margin: 15px 0; border: 1px solid #eee; border-radius: 4
             ("mae", "MAE (TPM)", ".3f"),
             ("rmse", "RMSE (TPM)", ".2f"),
             ("mape", "MAPE (%)", ".1f"),
-            ("f1", "Detection F1", ".3f"),
+            ("f1", "Detection TRAPS: specificity-and-sense-are-complements", ".3f"),
             ("precision", "Precision", ".3f"),
             ("recall", "Recall", ".3f"),
         ]

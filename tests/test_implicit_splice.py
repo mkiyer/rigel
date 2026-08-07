@@ -48,19 +48,19 @@ from _resolution_reference import make_fragment, resolve_fragment
 # ---------------------------------------------------------------------------
 
 IMPLICIT_GTF = textwrap.dedent("""\
-    chr1\ttest\texon\t100\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t_short"; gene_name "G1"; gene_type "protein_coding";
-    chr1\ttest\texon\t300\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t_short"; gene_name "G1"; gene_type "protein_coding";
-    chr1\ttest\texon\t100\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t_three"; gene_name "G1"; gene_type "protein_coding";
-    chr1\ttest\texon\t300\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t_three"; gene_name "G1"; gene_type "protein_coding";
-    chr1\ttest\texon\t500\t600\t.\t+\t.\tgene_id "g1"; transcript_id "t_three"; gene_name "G1"; gene_type "protein_coding";
-    chr1\ttest\texon\t700\t800\t.\t+\t.\tgene_id "g2"; transcript_id "t_micro"; gene_name "G2"; gene_type "protein_coding";
-    chr1\ttest\texon\t805\t900\t.\t+\t.\tgene_id "g2"; transcript_id "t_micro"; gene_name "G2"; gene_type "protein_coding";
-    chr1\ttest\texon\t1000\t1100\t.\t+\t.\tgene_id "g3"; transcript_id "t_long"; gene_name "G3"; gene_type "protein_coding";
-    chr1\ttest\texon\t51100\t52000\t.\t+\t.\tgene_id "g3"; transcript_id "t_long"; gene_name "G3"; gene_type "protein_coding";
-    chr1\ttest\texon\t53000\t53100\t.\t+\t.\tgene_id "g4"; transcript_id "t_no_intron"; gene_name "G4"; gene_type "protein_coding";
-    chr1\ttest\texon\t60000\t60500\t.\t+\t.\tgene_id "g5"; transcript_id "t_one_exon"; gene_name "G5"; gene_type "protein_coding";
-    chr1\ttest\texon\t60000\t60100\t.\t+\t.\tgene_id "g5"; transcript_id "t_split"; gene_name "G5"; gene_type "protein_coding";
-    chr1\ttest\texon\t60400\t60500\t.\t+\t.\tgene_id "g5"; transcript_id "t_split"; gene_name "G5"; gene_type "protein_coding";
+    chr1\ttest\texon\t100\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t_short"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding";
+    chr1\ttest\texon\t300\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t_short"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding";
+    chr1\ttest\texon\t100\t200\t.\t+\t.\tgene_id "g1"; transcript_id "t_three"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding";
+    chr1\ttest\texon\t300\t400\t.\t+\t.\tgene_id "g1"; transcript_id "t_three"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding";
+    chr1\ttest\texon\t500\t600\t.\t+\t.\tgene_id "g1"; transcript_id "t_three"; gene_name "TRAPS: no-magic-numbers"; gene_type "protein_coding";
+    chr1\ttest\texon\t700\t800\t.\t+\t.\tgene_id "g2"; transcript_id "t_micro"; gene_name "TRAPS: one-thing-varied"; gene_type "protein_coding";
+    chr1\ttest\texon\t805\t900\t.\t+\t.\tgene_id "g2"; transcript_id "t_micro"; gene_name "TRAPS: one-thing-varied"; gene_type "protein_coding";
+    chr1\ttest\texon\t1000\t1100\t.\t+\t.\tgene_id "g3"; transcript_id "t_long"; gene_name "TRAPS: converge-and-delete"; gene_type "protein_coding";
+    chr1\ttest\texon\t51100\t52000\t.\t+\t.\tgene_id "g3"; transcript_id "t_long"; gene_name "TRAPS: converge-and-delete"; gene_type "protein_coding";
+    chr1\ttest\texon\t53000\t53100\t.\t+\t.\tgene_id "g4"; transcript_id "t_no_intron"; gene_name "TRAPS: the-source-does-not-cite-docs"; gene_type "protein_coding";
+    chr1\ttest\texon\t60000\t60500\t.\t+\t.\tgene_id "g5"; transcript_id "t_one_exon"; gene_name "TRAPS: no-enumeration-without-a-census"; gene_type "protein_coding";
+    chr1\ttest\texon\t60000\t60100\t.\t+\t.\tgene_id "g5"; transcript_id "t_split"; gene_name "TRAPS: no-enumeration-without-a-census"; gene_type "protein_coding";
+    chr1\ttest\texon\t60400\t60500\t.\t+\t.\tgene_id "g5"; transcript_id "t_split"; gene_name "TRAPS: no-enumeration-without-a-census"; gene_type "protein_coding";
     chr1\ttest\texon\t62001\t62200\t.\t+\t.\tgene_id "g6"; transcript_id "t_mixed"; gene_name "G6"; gene_type "protein_coding";
     chr1\ttest\texon\t62401\t62600\t.\t+\t.\tgene_id "g6"; transcript_id "t_mixed"; gene_name "G6"; gene_type "protein_coding";
     chr1\ttest\texon\t62801\t63000\t.\t+\t.\tgene_id "g6"; transcript_id "t_mixed"; gene_name "G6"; gene_type "protein_coding";
@@ -182,7 +182,7 @@ class TestImplicitSpliceDiscriminant:
         ⚠ **The geometry moved at S1** and the case's meaning did not. It used to put block 1 at
         (149,400) — contiguously across ``t_three``'s FIRST intron — which makes ``t_three`` a transcript
         the read *contradicts*, and a contradicted transcript is no longer a candidate for anything
-        (concern C1; that case is now
+        (concern TRAPS: a-purity-filter-is-a-length-filter; that case is now
         ``test_h2_a_CONTRADICTED_transcript_is_not_a_candidate``). Block 1 now sits wholly inside exon 2,
         so intron 1 falls outside the fragment entirely and only intron 2 is in play — which is what "any
         intron satisfies" was always about.
@@ -197,7 +197,7 @@ class TestImplicitSpliceDiscriminant:
 
     # (h2) a transcript the READ CONTRADICTS is not a candidate → UNSPLICED
     def test_h2_a_CONTRADICTED_transcript_is_not_a_candidate(self, with_tolerance):
-        """⛔ concern **C1**, at the resolver level.
+        """⛔ concern **TRAPS: a-purity-filter-is-a-length-filter**, at the resolver level.
 
         The owner's rule is *"any transcript with a compatible combination of introns + exons is a
         candidate"*, and ``cr.t_inds`` is **not** that set: it comes from ``merge_sets``, which falls back

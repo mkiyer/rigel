@@ -140,7 +140,7 @@ def test_the_LENGTH_MODELS_come_from_the_DONOR_not_from_the_toy(donor, spec, tmp
 
     PERTURBATION: replace the donor's gDNA pmf by a narrow spike far from the RNA one and require the
     answer to move — at equal means the length channel carries exactly zero information
-    (`TRAPS.md` F3), so a harness that ignored these would be indistinguishable from one that used
+    (TRAPS: equal-lengths-carry-no-composition), so a harness that ignored these would be indistinguishable from one that used
     them unless the two pmfs are pulled apart.
     """
     size = donor.gdna_fl_pmf.shape[0]
@@ -198,7 +198,7 @@ def test_there_is_NO_gDNA_KNOB_on_the_spec(donor):
 
 def test_TRUTH_is_the_ORIGIN_SPLIT_and_sums_to_the_full_payload(donor, spec, tmp_path):
     """The per-object truth must be the production accumulator run on the BAM split by true origin —
-    the identity that makes it trustworthy at all (`SUCCESS.md` A1). ``OracleTruth.from_bam`` validates
+    the identity that makes it trustworthy at all (`SUCCESS.md` TRAPS: self-checking-validator). ``OracleTruth.from_bam`` validates
     sum-to-full and RAISES, so this gate checks the harness actually goes through it rather than
     approximating truth from an abundance table.
 
@@ -249,7 +249,7 @@ def test_EVERY_object_with_mass_is_reported(donor, spec, tmp_path):
     "KEPT AGAINST THE TRUTH rather than widened to the number reached, because it is measuring a real "
     "interaction and not a defect in the reframe.\n"
     "⭐ What it is measuring: correcting the junction leak removes ONE error from a compensating PAIR "
-    "(`TRAPS.md` D4j). An evidence-free exon is fed through `intron -> EDGE -> exon`; the two hops' errors "
+    "(TRAPS: a-cancelling-defect-pair). An evidence-free exon is fed through `intron -> EDGE -> exon`; the two hops' errors "
     "cancelled under the old junction-inclusive total, and the second hop still carries its own defect — a "
     "correct composition ratio applied to a LEVEL (`EQUATIONS.md` §3.5/§3.5d). So this gate is now the "
     "project's detector for THAT defect, and it must go green again when the pair is fixed jointly.\n"

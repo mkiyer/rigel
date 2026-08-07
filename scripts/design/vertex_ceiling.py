@@ -2,40 +2,40 @@
 """⭐⭐⭐ WHAT IS PERFECTING THE SIMPLEX VERTEX WORTH? — the re-solve ceiling, on the REAL 36-condition
 ladder, plus the mechanism prototype in the same harness so the two are directly comparable.
 
-⛔⛔ **THIS IS THE MEASUREMENT THAT DECIDES BUILD-VS-NOTE** (`TRAPS.md` B1, which has re-ranked this
+⛔⛔ **THIS IS THE MEASUREMENT THAT DECIDES BUILD-VS-NOTE** (TRAPS: measure-the-ceiling-first, which has re-ranked this
 project five times). A silent gene's objects are pure gDNA and the truth is ``f_g = 1.000`` exactly; a
 zero-gDNA library's objects are pure RNA and the truth is ``0.000`` exactly. The solver lands 2–8 % inside
 both. Before designing anything, hand those objects the exact answer, **re-solve the whole chain**, and
 read what the headroom actually is.
 
-⭐ **A RE-SOLVE, NOT A SUBSTITUTION** (`TRAPS.md` B17). A vertex object is mostly a message SOURCE — its
+⭐ **A RE-SOLVE, NOT A SUBSTITUTION** (TRAPS: substitution-understates-a-source). A vertex object is mostly a message SOURCE — its
 value is what it CARRIES — and substituting its answer after the fact does not propagate. So the pin goes
 in at ``node_init.build_node_init``, the per-object message-free self-solve, and the relay then runs on
 top of it. That is also the one place a mechanism can be expressed without touching either relay twin,
-so a prototype cannot be gated in one twin and not the other (`TRAPS.md` B14).
+so a prototype cannot be gated in one twin and not the other (TRAPS: name-the-observable-per-site).
 
 **THE ARMS.**
 
 | arm | what it does | what it is |
 |---|---|---|
-| ``base`` | nothing | the baseline, re-recorded from the current tree in the same run (`TRAPS.md` B8) |
+| ``base`` | nothing | the baseline, re-recorded from the current tree in the same run (TRAPS: re-record-the-baseline) |
 | ``noop`` | pins the truth at ZERO objects | ⭐ the harness's own falsification — MUST be byte-identical to ``base`` |
 | ``vertex_free`` | pins oracle truth at every vertex-truth object with **no own composition evidence** | ⭐⭐ **THE CEILING.** The population a vertex fix can reach |
 | ``vertex_all`` | pins oracle truth at **every** vertex-truth object | a looser upper bound — includes objects that have their own evidence |
-| ``ref_c=<C>`` | sets ψ's reference exponent to ``C`` instead of ½ | ⭐ the mechanism prototype (`TRAPS.md` B18 — the panel arm before ``src/``) |
+| ``ref_c=<C>`` | sets ψ's reference exponent to ``C`` instead of ½ | ⭐ the mechanism prototype (TRAPS: panel-before-src — the panel arm before ``src/``) |
 
 ⚠ ``vertex_free``'s "no own evidence" test is ``tau_lam <= 1e-4``, and that is a CLASSIFICATION FOR A
-CEILING, never a production predicate — `TRAPS.md` B11 refused exactly this shape as a mechanism. Both
+CEILING, never a production predicate — TRAPS: a-threshold-on-a-fitted-residue refused exactly this shape as a mechanism. Both
 arms are reported side by side so the filter's effect is visible rather than assumed.
 
-⛔ **A12 — the honesty columns are never quoted alone.** Every row carries ``mwae_all`` (denominator =
+⛔ **TRAPS: honesty-metrics-reward-ignorance — the honesty columns are never quoted alone.** Every row carries ``mwae_all`` (denominator =
 every object with mass) and ``abs_err_all`` (no denominator at all) beside the solvable-set numbers,
 because an arm that changes what counts as solvable changes its own denominator.
 
-⛔ **A10 — every arm counts its own firings and RAISES if it did not fire.** An override that never ran
+⛔ **TRAPS: an-ablation-that-never-ran — every arm counts its own firings and RAISES if it did not fire.** An override that never ran
 reads as "no effect", which is publishable and wrong.
 
-⚠ **A14 — the pin count per condition is printed.** An arm with zero opportunities is not a control.
+⚠ **TRAPS: could-the-arm-have-fired — the pin count per condition is printed.** An arm with zero opportunities is not a control.
 
 ---
 
@@ -50,7 +50,7 @@ has posterior = prior, so a vertex is unreachable there in ANY coordinate at ANY
 ⛔ Pass-0 must stay prior-free — its purpose is to produce the substrate a prior is fitted ON — so
 'fit a prior to fix this' is circular. ⭐ Use this number to SIZE the cost of missing information, and
 look for the pass-0 defect in the **confidently-wrong** population instead, which is a different set of
-objects (`SESSION_HANDOFF.md`).
+objects.
 
 ``vertex_free``, against a ``base`` re-recorded in the same run, with ``noop`` byte-identical on all 36
 rows of both axes (the harness's own falsification passing):
@@ -89,11 +89,11 @@ therefore entirely on unstranded data — which is also the panel's worst stratu
 
 * **``vertex_all`` is WORSE than ``vertex_free``** — node pass-0 0.1076 vs 0.0975, and on the shipped
   solve it is worse than *base* (+0.0080). Pinning MORE truth hurts: the extra objects have their own
-  evidence, and declaring them certain overrides it and propagates. That is `TRAPS.md` B20's shape
+  evidence, and declaring them certain overrides it and propagates. That is TRAPS: admitting-an-object-costs's shape
   reached with the TRUTH, so the harm is in the relay's dynamics and not in the values. ⭐ Quote
   ``vertex_free``, and note that a fix which hands out certainty broadly can lose even when it is right.
 * **The honesty columns move the WRONG way** — confidently-wrong Σ\\|err\\| +9,175 (node) / +893 (edge),
-  28 and 16 rows worse — while accuracy improves 22 %. `TRAPS.md` A12 exactly: certainty handed to an
+  28 and 16 rows worse — while accuracy improves 22 %. TRAPS: honesty-metrics-reward-ignorance exactly: certainty handed to an
   object moves it into the confident population. Read ``mwae_all`` and ``abs_err_all``, never these.
 
 Usage::
@@ -139,7 +139,7 @@ def _sibling(name: str):
 SA = _sibling("solvability_audit.py")
 P0 = _sibling("pass0_vs_oracle.py")
 
-from rigel.calibration import bp_solver, node_init as NI  # noqa: E402
+from rigel.calibration import node_init as NI, sweep as SW  # noqa: E402
 from rigel.calibration import simplex_logodds as SL  # noqa: E402
 from rigel.calibration.node_chain import NODE  # noqa: E402
 from rigel.calibration.node_geometry import node_global_geometry  # noqa: E402
@@ -150,13 +150,13 @@ CAL = sys.modules["rigel.calibration.calibrate"]
 
 _EPS = 1.0e-9
 #: the ceiling's own classification of "this object has no composition evidence of its own". ⛔ NOT a
-#: production predicate (`TRAPS.md` B11); the `vertex_all` arm exists so its effect is measured, not
+#: production predicate (TRAPS: a-threshold-on-a-fitted-residue); the `vertex_all` arm exists so its effect is measured, not
 #: assumed.
 _TAU_FREE = 1.0e-4
 
 #: filled by the wrappers, one call before `build_node_init` needs them.
 _CTX: dict = {}
-#: A10 — per-arm firing counters. A zero here RAISES.
+#: TRAPS: an-ablation-that-never-ran — per-arm firing counters. A zero here RAISES.
 _FIRED: dict = {"init": 0, "pinned": 0, "ref_g": 0, "ref_r": 0, "conditions": 0}
 
 
@@ -258,7 +258,7 @@ def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
         if force_empty:
             # ⭐ the `noop` arm: the WHOLE wrapper runs — the oracle is read, the truth is mapped to
             #   slots, the classification is evaluated — and then nothing is pinned. Byte-identical to
-            #   `base` is the assertion; anything else means the wrapper itself moves the answer (A5).
+            #   `base` is the assertion; anything else means the wrapper itself moves the answer (TRAPS: byte-identity-gate).
             at_vertex[:] = False
         tgt = np.flatnonzero(at_vertex)
         _FIRED["pinned"] += int(tgt.size)
@@ -285,7 +285,7 @@ def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
         f_neg[tgt] = rna * share_n
         # ⭐ CERTAIN, the same way a structurally pure-gDNA object is certain — via `struct_lock`, which
         #   `own_composition_logvar` already reads. A ceiling must hand over the answer AND the
-        #   confidence, or the relay simply argues it back (`TRAPS.md` B17).
+        #   confidence, or the relay simply argues it back (TRAPS: substitution-understates-a-source).
         lock[tgt] = True
 
         v_fg, v_fr = NI.own_composition_logvar(f_g, tau, lock)
@@ -320,7 +320,7 @@ def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
             struct_lock=lock, tau_lam=tau,
         )
 
-    bp_solver.build_node_init = wrapper
+    SW.build_node_init = wrapper
 
 
 def _install_ref_exponent(c_value: float):
@@ -330,7 +330,7 @@ def _install_ref_exponent(c_value: float):
     ``+C·log f_g`` bounds ``f_g → 0`` and ``+C·log(1−f_g)`` bounds ``f_g → 1``. Those two terms are the
     ONLY things holding the posterior median off the two vertices.
 
-    ⛔ ``C = 0`` makes ψ improper on both sides (Beta(0,0) — `TRAPS.md` D5's Haldane, a vertex
+    ⛔ ``C = 0`` makes ψ improper on both sides (Beta(0,0) — TRAPS: no-prior-means-haldane's Haldane, a vertex
     amplifier), so a small ``C`` is a PROTOTYPE that bounds what a derived fix could buy, never the fix
     itself. The point of putting it in this harness is that it is priced on the same panel and by the
     same instrument as the ceiling above."""
@@ -354,7 +354,7 @@ def _install_ref_exponent(c_value: float):
 
 def _compare(paths: list[Path]) -> int:
     """Read two or more arm files and print the per-axis deltas, with the fixed-denominator columns
-    first because those are the ones that cannot be gamed by knowing less (`TRAPS.md` A12)."""
+    first because those are the ones that cannot be gamed by knowing less (TRAPS: honesty-metrics-reward-ignorance)."""
     arms: dict[str, dict] = {}
     for p in paths:
         for line in p.read_text().splitlines():
@@ -367,7 +367,7 @@ def _compare(paths: list[Path]) -> int:
         print(f"⛔ need >= 2 arms, got {names}")
         return 1
     base = names[0]
-    # ⛔ A12 ORDER: the two FIXED-DENOMINATOR columns come FIRST, because they are the only two that
+    # ⛔ TRAPS: honesty-metrics-reward-ignorance ORDER: the two FIXED-DENOMINATOR columns come FIRST, because they are the only two that
     #    cannot be gamed by the solver knowing less. `solvable_mwae` and the honesty columns follow.
     cols = [
         ("mwae_all", "mwae ALL", "lower"),
@@ -408,7 +408,7 @@ def _compare(paths: list[Path]) -> int:
                 flat = len(shared) - better - worse
                 print(f"   {'':<22}{nm:<16}{v.mean():>12.4f}{v.mean() - b.mean():>+12.4f}"
                       f"{better:>9}{worse:>7}{flat:>6}   {len(shared)}")
-        # ⛔ A byte-identical arm is NOT evidence of no change (`TRAPS.md` B4/A5) — EXCEPT for `noop`,
+        # ⛔ A byte-identical arm is NOT evidence of no change (TRAPS: hard-labels-miss-soft-change/TRAPS: byte-identity-gate) — EXCEPT for `noop`,
         #   where it is the assertion the arm exists to make. Say which of the two it is.
         for nm in names[1:]:
             shared = [c for (c, a) in arms[nm] if a == axis and (c, a) in arms[base]]
@@ -425,7 +425,7 @@ def _compare(paths: list[Path]) -> int:
                       f" own falsification PASSES: the wrapper does not move the answer by itself.")
             else:
                 print(f"   ⚠ {nm} is byte-identical to {base} on all {len(shared)} rows of this axis"
-                      f" — if that arm was meant to CHANGE something, it did not fire (A10/A5).")
+                      f" — if that arm was meant to CHANGE something, it did not fire (TRAPS: an-ablation-that-never-ran/TRAPS: byte-identity-gate).")
     return 0
 
 
@@ -459,7 +459,7 @@ def main() -> int:
         expect_fire = ["pinned"]
     elif arm == "noop":
         # ⭐ the harness's OWN falsification: the same wrapper, pinning nothing. Must be byte-identical
-        #   to `base`, and if it is not, the wrapper itself is changing the answer (`TRAPS.md` A5).
+        #   to `base`, and if it is not, the wrapper itself is changing the answer (TRAPS: byte-identity-gate).
         _install_vertex_pin(True, force_empty=True)
         expect_fire = ["init"]
     elif arm.startswith("ref_c="):
@@ -492,7 +492,7 @@ def main() -> int:
             for k in expect_fire:
                 if fired.get(k, 0) <= 0:
                     raise SystemExit(
-                        f"⛔ A10: arm {arm!r} did not fire on {name} (counter {k} = 0). "
+                        f"⛔ TRAPS: an-ablation-that-never-ran: arm {arm!r} did not fire on {name} (counter {k} = 0). "
                         "An override that never ran reads as 'no effect'."
                     )
             for axis in ("node", "edge"):
@@ -512,7 +512,7 @@ def main() -> int:
                 fh.write(json.dumps({"arm": arm, "condition": name, "axis": axis,
                                      "f_gdna": truth, **s}) + "\n")
                 fh.flush()
-            # ⚠ A14: the opportunity count, printed beside the result.
+            # ⚠ TRAPS: could-the-arm-have-fired: the opportunity count, printed beside the result.
             print(f"  {name} {time.perf_counter() - t0:.0f}s   pinned={fired.get('pinned', 0)}"
                   f"  init_calls={fired.get('init', 0)}", flush=True)
     return 0

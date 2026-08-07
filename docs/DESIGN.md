@@ -20,7 +20,7 @@ was in use for a concept that already had a name, and the ambiguity cost a reade
 | **slot** | one entry of the chain, which alternates NODE, EDGE, NODE, EDGE … A slot is a NODE **or** an EDGE | — |
 | **step** | one adjacency move along the chain: NODE→EDGE or EDGE→NODE. So NODE→EDGE→NODE is **two steps** | `hop` |
 | **structurally pure-gDNA object** (**G1 object**) | a slot at which no RNA strand is admissible, so its composition is CERTAIN: an intergenic NODE, or an `intergenic\|exon` EDGE. Its gDNA density is directly observed, with nothing to deconvolve. The predicate is `node_geometry.g1_locked` | `anchor` — ⛔ that word had two meanings at once and now has only the one below |
-| **the mass pin** | the operator that rescales a message so that `Σ_c ρ_c·E_c = M` at the destination (`bp_solver._pin_v` and its scalar twin inside `_relay`). "Pin" because the function is named for it | `the mass anchor` |
+| **the mass pin** | the operator that rescales a message so that `Σ_c ρ_c·E_c = M` at the destination (`messages/head.py`'s `_pin_v` and its scalar twin inside the scan kernel). "Pin" because the function is named for it | `the mass anchor` |
 | **counts** | discrete integer fragment counts | — |
 | **density** = **abundance** | counts per base. The two words mean the same thing | ⛔ not the simulator's molar `abundance=` field, which is a per-transcript weight |
 | **crossing fragment** | ⭐ a **fragment** that spans an EDGE. Legitimate and necessary — `crossing_eff_length` is the opportunity for exactly this — and it stays | ⛔ only the *object* sense is banned: objects are NODEs and EDGEs, never "crossings" |
@@ -93,11 +93,11 @@ essentially free and calibration is the whole budget.**
 - A splice jump deposits on its **junction edge only** — never on the contiguous edges it splices over.
 - Edges always run `src < dst`, so **genomic order is a topological order and there is no graph traversal
   anywhere.** The graph is a DAG but **not** a polytree (every junction edge closes one undirected loop),
-  so junction edges must be *factors on their endpoint nodes*, never message channels (`TRAPS.md` E5).
+  so junction edges must be *factors on their endpoint nodes*, never message channels (TRAPS: splicing-makes-the-graph-cyclic).
 - **8 structural flag bits per contiguous edge**: TSS / TES / DONOR / ACCEPTOR × {+,−}, not mutually
   exclusive. Carry the raw bits to the consumer; do not pre-derive predicates in the plumbing.
 - Validated by invariants I1–I13, two of which re-derive the answer by a **different algorithm**
-  (`TRAPS.md` A1).
+  (TRAPS: self-checking-validator).
 - `manifest.json` records the sources, their sha256 and the build flags. The build is deterministic.
 
 ⛔ **Never quote a stored census.** Node and edge counts are properties of an *annotation*, not of the
@@ -105,7 +105,7 @@ tool: run `scripts/design/index_census.py`.
 
 ⚠ **`reach` is covered by no existing hash.** A rebuild moved 38 % of human reaches with both
 `partition_hash` and `graph_hash` byte-identical, so any calibration-facing cache needs a third key
-(`TRAPS.md` E9).
+(TRAPS: a-hash-that-misses-its-artifact).
 
 ---
 
@@ -129,7 +129,7 @@ Fixed-point headroom is ~800×: with `L ∈ [20,2000]` each `round(2³²/L) ≤ 
 contiguous edge 48 B, junction edge 24 B), no hash map.
 
 ⭐ **Every channel is an integer, and that is what makes the tally reproducible across worker counts**
-(`TRAPS.md` E10).
+(TRAPS: integer-channels-reproduce).
 
 ### 3.2 One strand convention
 
@@ -170,10 +170,10 @@ population known to be one component, so nothing is estimated from the fragments
 mixtures, and an impure pool is worse than a missing one.
 
 ⭐ **The pool is keyed on DETERMINACY, not provenance**: a fragment enters when exactly **one** hypothesis
-survived, however it got there (`TRAPS.md` C1).
+survived, however it got there (TRAPS: a-purity-filter-is-a-length-filter).
 
 ⭐ **The two exon-crossing pools are gDNA**, because mature RNA never crosses an exon↔intron seam
-(`TRAPS.md` F9). They were filed for two milestones as "not gDNA"; they are.
+(TRAPS: mature-rna-never-crosses-a-seam). They were filed for two milestones as "not gDNA"; they are.
 
 ### 3.6 Each pool is divided by its OWN opportunity
 
@@ -181,8 +181,8 @@ The gDNA model is fitted from **all four** gDNA pools, each divided by its own o
 combined — `calibration/gdna_opportunity.py`, derivation in `EQUATIONS.md` §4.3. The RNA model is the
 junction pool divided by its own — `calibration/junction_opportunity.py`, `EQUATIONS.md` §4.2.
 
-⛔ **The four gDNA pools must never be pooled raw** (`TRAPS.md` C4), and every divisor is a
-**probability**, not a count (`TRAPS.md` C3).
+⛔ **The four gDNA pools must never be pooled raw** (TRAPS: opposite-tilts-must-not-pool), and every divisor is a
+**probability**, not a count (TRAPS: divide-by-a-probability).
 
 ⭐ **The contained pair dominates off capture; the crossing pair dominates under it.** Under hybrid capture
 the surviving off-target gDNA sits beside a probe, and a fragment beside a probe *reaches* the exon
@@ -225,7 +225,7 @@ into the score would prefer the shorter — more-spliced — path, and that loop
 kept consistent with the partition; the fragment is small and replays exactly.
 
 ⛔ **The side buffer is the one bank whose ORDER is observable** — it is a list, not a sum — so the C++
-export sorts it on the record's own content before it crosses the ABI (`TRAPS.md` E10).
+export sorts it on the record's own content before it crosses the ABI (TRAPS: integer-channels-reproduce).
 
 **After the drain nothing is held**: the bank is empty and the deferred counters are 0, so "the counter and
 the fragments it counts are the same population" stays absolute. Pass one's numbers live in `DrainQC`.
@@ -235,12 +235,12 @@ the fragments it counts are the same population" stays absolute. Pass one's numb
 | | |
 |---|---|
 | ⭐⭐ **a composition may be imputed across a step iff the source SUPPLIED both components AND the two objects measure the same RNA POPULATION** | owner, 2026-08-04: *"is the source of the message measuring the same thing that I am measuring?"* — if yes, attribute the density discrepancy to capture enrichment; if no, you cannot tell enrichment from a population difference. Derivation + the genomic form of the predicate: `EQUATIONS.md` §3.5b. ⛔ **Termini only** — DONOR/ACCEPTOR change the population too, but their flux is *measured* and the graft and the peel route it |
-| ⭐ **the population test is written in GENOMIC terms, never TSS/TES** | the strand flips which flank a terminus implicates; `node_geometry.terminus_flank_gain` is the one home, gated on two mirror-image annotations (`TRAPS.md` D4c family) |
-| ⭐ **the mass pin carries the same licence, plus the structural case** | it fires iff no BELIEF can reach its budget: the composition was supplied, **or** the destination is a structurally pure-gDNA object whose `f_g = 1` is structure and whose `M/E_g` is therefore an observation. `EQUATIONS.md` §3.5c, `TRAPS.md` D4d/D4e |
+| ⭐ **the population test is written in GENOMIC terms, never TSS/TES** | the strand flips which flank a terminus implicates; `node_geometry.terminus_flank_gain` is the one home, gated on two mirror-image annotations (TRAPS: substitute-the-definitions-first family) |
+| ⭐ **the mass pin carries the same licence, plus the structural case** | it fires iff no BELIEF can reach its budget: the composition was supplied, **or** the destination is a structurally pure-gDNA object whose `f_g = 1` is structure and whose `M/E_g` is therefore an observation. `EQUATIONS.md` §3.5c, TRAPS: the-pin-had-a-fixed-point/TRAPS: no-belief-not-no-numbers |
 | gDNA's strand term is **0.5** | double-stranded, no sense direction. A fitted mixture marginal was implemented and refuted (`EQUATIONS.md` §5.3) |
-| a flat-zero factor is **skipped**, not multiplied | `TRAPS.md` D7 |
+| a flat-zero factor is **skipped**, not multiplied | TRAPS: an-all-zero-factor-is-inert |
 | the draw is keyed on **queue position**, never content | `EQUATIONS.md` §10 |
-| ambiguous assignment stays **integral** | `TRAPS.md` C5 |
+| ambiguous assignment stays **integral** | TRAPS: fractional-mass-is-the-problem |
 
 ### 4.2 Still open
 
@@ -258,7 +258,7 @@ transcripts and materialized as ordinary transcript rows in `index.t_df`, flagge
 `is_synthetic`.
 
 ⚠ On a **non-synthetic** row `is_nrna` means "single-exon, so mature ≡ nascent" — **not** "manufactured
-span". **The real-transcript filter is `~is_synthetic`, alone** (`TRAPS.md` E6).
+span". **The real-transcript filter is `~is_synthetic`, alone** (TRAPS: nrna-does-not-mean-synthetic).
 
 ---
 
@@ -268,12 +268,13 @@ span". **The real-transcript filter is `~is_synthetic`, alone** (`TRAPS.md` E6).
 `_accumulator` `locus` `locus_partition` `scored_fragments` `estimator` `strand_model` `frag_length_model`
 `second_pass` `splice` `splice_blacklist` `native` `gtf` `transcript` `annotate` `stats` `types`.
 
-`calibration/`: `calibrate` (orchestrator) · `splice_graph` (the v8 index) · `bp_solver` (the solver) ·
-`node_chain` `node_geometry` `node_init` · `substrate` `region_arrays` `signature` · `effective_length`
-`capture_eff_length` `fl` `junction_opportunity` `gdna_opportunity` · `strand_likelihood` `gdna_strand`
-`strand_balance` `strand_deconv` `strand_summary` · `density_deconv` `density_model` `gdna_landscape`
-`npmle` `background_reference` · `simplex` `simplex_logodds` `enrichment_frame` `derive` `run_fill` ·
-`priors` `result` `errors` `diagnostics` `track`.
+`calibration/`: `calibrate` (orchestrator) · `splice_graph` (the v8 index) · ⭐ **`sweep` (THE BACKBONE)**
+and **`messages/` (the POLICY: `silent` `head` `variance`)** · `node_chain` `node_geometry` `node_init` ·
+`substrate` `region_arrays` `signature` · `effective_length` `capture_eff_length` `fl`
+`junction_opportunity` `gdna_opportunity` · `strand_likelihood` `gdna_strand` `strand_balance`
+`strand_deconv` `strand_summary` · `density_deconv` `density_model` `gdna_landscape` `npmle`
+`background_reference` · `simplex` `simplex_logodds` `derive` `run_fill` · `priors` `result` `errors`
+`diagnostics` `track`.
 
 **C++** (`src/rigel/native/`, nanobind, C++17, `-O3`, LTO, OpenMP):
 
@@ -284,6 +285,109 @@ span". **The real-transcript filter is `~is_synthetic`, alone** (`TRAPS.md` E6).
 | `_scoring_impl` | `scoring.cpp` | fragment likelihood scoring (`-ffast-math`, no SIMD) |
 | `_resolve_impl` | `resolve.cpp` | fragment→transcript resolution via cgranges |
 | `_cgranges_impl` | vendored | interval overlap |
+
+
+### 6.1 ⭐⭐⭐ THE SOLVER IS A BACKBONE PLUS A POLICY — settled 2026-08-07, gated on BYTE-IDENTITY
+
+The belief-propagation solver was ONE 1,635-line function in which the shape of the solve and every
+argument about what a message should say were interleaved. It is now two things, and the split is
+**structural rather than stylistic**:
+
+| | | |
+|---|---|---|
+| `sweep.py` | ⭐ **THE BACKBONE.** Two directional scans, one combine, one ψ solve, one write-back, **five assertions**. | It knows nothing about capture, grafts, reframes, pins or enrichment — ⛔ and `test_sweep_backbone.py` asserts those words appear in none of its IDENTIFIERS, read from the AST rather than grepped, because grepping matches the docstring that says they are absent |
+| `messages/silent.py` | ⭐ `SilentPolicy` — sends nothing. **THE DEFAULT**, five lines. | A reader who holds `sweep.py` plus this holds the entire working system |
+| `messages/head.py` | `HeadPolicy` — every operator the evolved solver carried, each behind a NAMED switch (**17** of them) | So the panel prices them ONE AT A TIME rather than as a block |
+| `messages/variance.py` | was `enrichment_frame.py` — the policy's variance toolbox | ⚠ `count_logvar` is also imported by `node_init`; it has ONE home and this is it |
+
+⭐⭐⭐ **HOW IT WAS ACCEPTED, and this is the part that generalises: a restructure is gated, a rewrite is
+not.** Two TRAPS: byte-identity-gates, opposite in direction, both passed:
+
+| | must be | result |
+|---|---|---|
+| `--arm backbone_head` (every switch ON) | **byte-identical to `base`** | ✅ **1,872 / 1,872 scored fields, 72 / 72 rows** |
+| `--arm backbone` (`SilentPolicy`) | **byte-identical to `msgfree_all`** | ✅ **1,872 / 1,872 scored fields, 72 / 72 rows** |
+
+and, per-array on one real 70,176-slot chain (`scripts/design/backbone_parity.py`): **421,056 output
+elements and 18,245,830 diagnostic elements, zero differences.** ⭐ The second gate is not only plumbing —
+one arm runs the whole relay and discards it while the other never runs it at all, so passing it **PROVES
+the relay reaches the answer ONLY through ψ's four imputed channels**.
+
+⛔ **The alternative was tried and is why this route was chosen.** A clean rebuild came out **+103 %** and
+took two sessions to decompose into a correct derivation, a UNIT ERROR (a log-odds delivered into an
+angle's grid) and a STRUCTURAL disconnection (a one-slot-step channel on a bipartite chain reaches 0
+NODEs). One of the three was a typo-class error no amount of derivation review would have caught. **A
+refactor gated on byte-identity has exactly zero of that risk: any difference is a bug, full stop.**
+
+#### The interface, and its one contract
+
+```python
+relay = policy.prepare(ctx)                  # one working object per sweep
+step, publish = relay.scan(backward=False)   # the per-hop kernel; None ⇒ nothing to relay
+msg = relay.deliver(left_state, right_state) # -> PsiMessage, from the NEIGHBOURS only
+```
+
+⛔⛔ **TRAPS: a-message-from-the-destinations-belief, and the backbone enforces the enforceable half BY CONSTRUCTION.** `deliver` is handed
+:class:`NeighbourState`, whose relayed arrays are **already gathered at the source slot** — so a policy
+holding one has values FOR THE SOURCE and no way to ask the same array about the destination. TRAPS: a-message-from-the-destinations-belief's nine
+costumes were all a message built from the destination's own relayed belief, and none of them is
+expressible through that type. ⭐ A gather is exact, so making the rule structural costs no bits.
+
+`StepContext` splits its fields under three headings — **observations** (either end), **geometry /
+structure** (either end), **beliefs** (SOURCE-SIDE ONLY) — and the heading is what turns TRAPS: a-message-from-the-destinations-belief from a
+discipline into something a reader can check. ⚠ **One belief field is read at the destination by the
+shipped policy and it is a named, measured DEBT rather than an oversight**: `belief_fg` reaches the
+reframe's frame pair, so the frame at a hop is a function of the destination's belief, at slots carrying
+**57–77 % of library mass**.
+
+#### The five assertions, and why they live in the backbone
+
+⭐⭐ **A future policy can be as wrong as it likes and still cannot commit any of these** — each has shipped
+at least once.
+
+| the backbone asserts | it would have caught | on HEAD, `g50 ss0.50 capture_on`, pass-0 |
+|---|---|---|
+| `deliver` sees only the two NEIGHBOUR states | **TRAPS: a-message-from-the-destinations-belief — nine recurrences in nine costumes** | structural — inexpressible, not checked |
+| every message mode lies inside its coordinate's own grid | **TRAPS: off-grid-message-mode** — the tilt bug, 74 % of `g00`'s error | ✅ tilt **0 / 4,795** · ⛔ gDNA **15,240 / 50,984 (29.9 %)** · RNA+ 15.0 % · RNA− 14.0 % · λ 0.46 % |
+| every delivered share is in `[0, 1]` | the over-unit certified-RNA claim | ⛔ **3,013 / 15,629 (19.3 %)**, and the SUM ⛔ **31,174 / 50,984 (61.1 %)** |
+| `\|T\| ≤ 3` | **AXIOM 0**, made executable | ✅ 0 / 70,176, and **9,912** slots reach 3 so it is not vacuous |
+| the write-back touches only `solvable` slots | the basis mismatch that made an TRAPS: byte-identity-gate read `max\|Δ\| = 1.0` | ✅ 0 / 32,817 |
+
+⭐⭐⭐ **AND THE ASSERTIONS PAID FOR THEMSELVES ON THEIR FIRST RUN — six of the ten counts above are new
+facts about the shipped message layer.** The two that matter most:
+
+* ⛔⛔ **61.1 % of live message packets assert that the three components TOGETHER account for MORE fragments
+  than the slot observed.** That is the identity `Σ_c ρ_c·E_c = M` the mass pin exists to restore, and the
+  pin is licensed in only two states, so everywhere else the residual is *delivered* rather than fixed. ⭐ It
+  is consistent with a number already in the tree — `messages/variance.py` records the over-claim on 52–71 %
+  of nodes — but nothing had surfaced it as a **checkable invariant**, so nothing could rank it.
+* ⛔ **29.9 % of live gDNA level modes are outside ψ's own log-share grid**, whose domain is
+  `[log σ(−L), log σ(+L)] = [−10.000045, −4.54e-5]` and **not** `(−inf, 0]`. The cause is the `_EPS = 1e-9`
+  floor: `log(1e-9) = −20.723`, **10.72 nats** below the low end. ⚠ **This is not 29.9 % of the error, and
+  the difference from TRAPS: off-grid-message-mode is the honest part**: TRAPS: off-grid-message-mode's tilt pinned at the *wrong* corner, whereas a low-side
+  share pins at "as little of this component as the grid can express", which at a slot that genuinely holds
+  almost none of it is the *right* answer. What is certain is TRAPS: off-grid-message-mode's mechanism — no interior minimum, so
+  precision buys a CORNER rather than a location. Whether the corner is right is **unmeasured**.
+
+⚠ **The low-side check is the one the first draft of this section did not have**, and it was found by an
+adversarial read rather than by the panel: the gates were already passing byte-identically, so nothing about
+the restructure would ever have surfaced it. ⭐ `share_sum_at_most_one` is a SUPERSET of
+`share_in_unit_interval` by construction — report both, never add them.
+
+⛔⛔ **AN ASSERTION THE SHIPPED POLICY VIOLATES IS WAIVED WITH ITS MEASUREMENT, NEVER WIDENED.** The two
+that fire are recorded in `sweep._KNOWN_VIOLATIONS` with the number beside each, and `test_sweep_backbone.py`
+asserts that every waiver carries a written reason. Widening the predicate to fit the defect is how a gate
+becomes vacuous (TRAPS: perturb-every-gate/TRAPS: a-gate-that-reconstructs); a waiver keeps the count VISIBLE and rankable.
+
+⭐ **Each assertion also reports how many slots were ELIGIBLE for it**, because TRAPS: could-the-arm-have-fired: an assertion reporting
+zero violations where its predicate can never fire is not evidence of anything.
+
+⚠ **One tolerance in the family is derived and not tuned** (TRAPS: no-magic-numbers): the grid-domain check allows
+one **grid SPACING** beyond the outermost grid point, because within one spacing the penalty's minimum is
+still that boundary CELL — for the tilt, the legitimate answer "all RNA on one strand". It is load-bearing:
+the shipped tilt mode overshoots `π/2` by **2 ULP** at 63 of 4,795 live slots, being a convex mean of two
+messages that AGREE on `τ = ±1`, and TRAPS: off-grid-message-mode's real overshoot is **57 spacings** — four orders of magnitude
+apart, so no threshold is being bought.
 
 ---
 
@@ -320,7 +424,7 @@ different instrument. Two things the older sweep could not say:
   ⛔ So the coverage of the density peel is a *frame and region-type restriction*, not a limit of what is
   knowable — and `EQUATIONS.md` §3.2 (density is frame-invariant to ~0.36 %) is the argument that ρ_bg
   should transport to the crossing frame at all. What it cannot survive is non-uniform gDNA placement,
-  which is precisely what capture creates at exons (`TRAPS.md` F4).
+  which is precisely what capture creates at exons (TRAPS: capture-is-1000x-on-exons).
 ⛔⛔ **AND ALL OF THE ABOVE SCORES HONEST IGNORANCE AS ERROR, WHICH IS THE WRONG QUESTION FOR PASS-0.**
 The prior-free solve exists to produce a **substrate the gDNA hyperprior is fitted against**, not to be
 accurate everywhere; an object with no own evidence reporting `f_g ≈ ½` at *zero precision* is stating a

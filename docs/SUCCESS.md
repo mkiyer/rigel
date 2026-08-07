@@ -18,100 +18,38 @@ already spent sessions on the wrong one of the two.
 
 ---
 
-## STAGE A — the accumulator
+## STAGE A — the accumulator: ✅ **DONE, and that is a measurement**
 
-The accumulator is a **lossy summary** of a BAM, by design: it replaces hundreds of millions of fragments
-with a few integer channels per object. Accuracy therefore means three different things, and all three
-have to be asked separately.
+⭐ **The criterion was "handing calibration the exact fragment-length distribution changes nothing", and
+`calibration_truth_ab.py --ceiling` measures exactly that: perfecting BOTH length models is worth 2.6 % of
+the deliverable** (down from 22.2 % before the four-pool model). Anchor −0.00 % ± 0.01; RNA/gDNA models
+−0.21…+1.12 % and −0.01 % off capture; second pass 90.6 % exact per fragment.
 
-### A1. FIDELITY — does the tally contain what it should?
+⛔ **Do NOT chase the gDNA model's +7.9 % under capture.** Its cause is known and is not a divisor — both
+opportunity functions assume gDNA is placed uniformly and capture does not — for ~1.7 % of a number that is
+97 % dominated by something else.
 
-*Is every fragment deposited on exactly the objects the deposit rule names?*
+**The five identities that keep it done**, all still gated and green:
 
-| gate | target | instrument | status |
-|---|---|---|---|
-| C++ matches the executable specification | **byte-identical** | `tests/native/test_accumulator_spec.py`, `test_accumulator_native_parity.py` | ✅ |
-| the same BAM at 1/2/4/8 workers | **bit-identical**, every bank | `tests/native/test_accumulator_worker_determinism.py` | ✅ |
-| `Σ node_start_count == deposited` | exact | `test_accumulator_worker_determinism.py` | ✅ |
-| `deposited + deferred + dropped_* == offered` | exact, and the deferred term must be **non-empty** | same | ✅ |
-| the origin partitions sum to the full payload | exact, every channel | `tests/calibration/_oracle.py` | ✅ |
-
-⭐ **All absolute — no thresholds anywhere.** ⚠ And the fourth row's second half is the load-bearing part:
-a conservation identity over an empty term is satisfied by any bookkeeping (`TRAPS.md` A1).
-
-⭐ **The sum-to-full identity is why the oracle is trustworthy.** The oracle is not a reimplementation: it
-runs the *production* accumulator on the BAM split by true origin. Because the deposit is per-fragment
-independent, the partitions summing to the full payload **proves** the split is the production payload
-partitioned by origin.
-
-### A2. BIAS — are the derived library-level models unbiased?
-
-The accumulator's derived products are the fragment-length models and the per-object densities. These are
-where the current defect lives.
-
-| quantity | scored against | instrument |
+| | | |
 |---|---|---|
-| the **anchor** (`deposited_lengths`) | `truth_fragment_lengths.tsv`, on a zero-gDNA condition where anchor and pool describe ONE population | `fl_anchor_gap.py --drain` |
-| the **RNA** length model | the same | `fl_anchor_gap.py --drain` |
-| the **gDNA** length model | the same | `fl_anchor_gap.py --drain`, `gdna_pool_census.py` |
-| per-fragment length assignment (second pass) | per-fragment truth in the read names | `second_pass_accuracy.py` |
+| C++ vs the executable specification | **byte-identical** | `tests/native/test_accumulator_spec.py` |
+| the same BAM at 1/2/4/8 workers | **bit-identical**, every bank | `test_accumulator_worker_determinism.py` |
+| `Σ node_start_count == deposited` | exact | same |
+| `deposited + deferred + dropped_* == offered` | exact, deferred **non-empty** | same |
+| the origin partitions sum to the full payload | exact, every channel | `tests/calibration/_oracle.py` |
 
-⭐⭐ **THE "DONE" CONDITION IS DERIVED, NOT CHOSEN: a length model is accurate enough when handing
-calibration the EXACT distribution changes nothing.** That is measurable directly —
-`calibration_truth_ab.py --ceiling` runs arms in which the simulator's own pmf replaces the fitted one — so
-the target self-calibrates against the consumer's actual sensitivity instead of against a number somebody
-picked. ⚠ It also cuts both ways: it is how the RNA length model was shown to be **finished** while it was
-still being worked on.
+⚠ **The one open gap is coverage, not accuracy**: the simulator hard-codes an R1-ANTISENSE emission, so no
+condition exercises an R1-sense (KAPA-style) library. Filed as a strict xfail in
+`test_strand_sense_convention.py`, not fixed.
 
-⚠ **The identifying quantity is the GAP `μ_g − μ_r`, not either mean** (`EQUATIONS.md` §3.1). A model can
-be 15 % off and cost little if the other is off the same way; two models each 1 % off in opposite
-directions can cost more. **Report the gap alongside the two errors, always.**
-
-### A3. SUFFICIENCY — what does the tally NOT retain?
-
-*Given the payload and nothing else, is the answer recoverable in principle?*
-
-This is the question a bias measurement cannot ask, and it is answered by the oracle: if the oracle's
-per-object gDNA/RNA split cannot be reconstructed from the payload's channels, **no solver will ever
-recover it** and the fix belongs in the accumulator, not in calibration.
-
-Known and *deliberate* losses, each with the reason:
-
-| lost | why it is acceptable |
-|---|---|
-| which fragment went where | the summary is the point; per-fragment truth is only for scoring |
-| density below one fragment length | not resolvable by **any** design (`TRAPS.md` D8). Composition still is |
-| the mature/nascent split | "RNA is RNA" in the accumulator — an owner ruling, not an oversight |
-| gDNA/RNA per object | that *is* calibration's job; the accumulator stores the channels it deconvolves from |
-
-⛔ **Known and NOT acceptable — this is the live Stage-A work:**
-
-| lost | consequence |
-|---|---|
-| **multimappers deposit nothing at all** | the tally is unique-mappers-only, and multimappers are 16.7–59.3 % of intergenic and ~53.6 % of intronic fragments — biased toward repeats, which is exactly the gDNA pool |
-| single-reference *cis* chimeras deposit on the intergenic path | contaminates the purest gDNA pool |
-| `detect_chimera` is blind to two real populations | same |
-
-### ⭐ Stage A is DONE when
-
-1. every A1 row is exact (**already true**);
-2. the ceiling arms in `calibration_truth_ab.py --ceiling` show that **perfecting either length model
-   changes the deliverable by less than the run-to-run spread of the estimator itself** — i.e. the
-   accumulator is no longer the limiting factor;
-3. the A3 "not acceptable" list is empty, or each entry has a *measured* cost showing it does not matter.
-
-⭐ **Condition 2 is now TRUE, which is what opened Stage B.** Perfecting both length models moves the
-library deliverable by **2.6 %** (`ROADMAP.md` §1) and the per-object answer by **≤ 2.5 %** — negative on
-half the arms (`ROADMAP.md` §2). Condition 3 is still open, and is ranked there.
-
----
 
 ## STAGE B — calibration initialisation and pass-0
 
 ⭐ **OPEN, and step 1 has landed.** Calibration is iterative; pass-0 is the **prior-free** solve, the
 first thing that happens after initialisation, before any fitted prior exists. It is the right place to
 start because it has no feedback loop in it — every later iteration's behaviour is conditional on pass-0
-being sane, and `TRAPS.md` D3 is what happens when a prior is fitted on an unsound belief.
+being sane, and TRAPS: variance-fitted-on-the-belief is what happens when a prior is fitted on an unsound belief.
 
 ### The oracle, and what it buys
 
@@ -127,7 +65,7 @@ each strand. Three quantities follow, and the differences between them are the w
 
 ⭐⭐ **That decomposition is the deliverable of Stage B's first step, and it is a measurement, not a
 build.** It is the per-object form of the ceiling discipline that has twice re-ranked this project
-(`TRAPS.md` B1).
+(TRAPS: measure-the-ceiling-first).
 
 ### ⛔⛔ HOW PASS-0 IS SCORED — and the mistake that has to be avoided
 
@@ -143,21 +81,21 @@ was **0.0456**, and 99.5 % of the difference was the undetermined class.
    is the opposite one: claiming a precision it has not earned. ⛔⛔ **AND THAT CHECK MUST EXIST, OR THE
    EXCLUSION HIDES THE LARGEST ERROR IN THE LIBRARY** — it did not exist until 2026-08-04, and the cost
    was **1,056,019 fragments** of unreported error on a condition publishing `mwae 0.0170`
-   (`TRAPS.md` B13). `undetermined_overreach_rows` buckets the class by `|f_pred − ½|` and reports its
+   (TRAPS: excluding-a-population-hides-it). `undetermined_overreach_rows` buckets the class by `|f_pred − ½|` and reports its
    error and its precision claim; the correct answer for the class is ½ at `sd = ∞`.
 2. **SOLVABLE and right.**
 3. **SOLVABLE and wrong**, split by confidence. ⭐⭐ **Confidently wrong is the defect** — a wrong value
    with a tight variance outvotes correct neighbours *and anchors the prior*, so it propagates.
 
 ⚠ The confidence comparison is in LOG space (`var_gdna` is `Var(log f_g)` despite its name,
-`TRAPS.md` B7), and the headline is a calibration curve, which needs no threshold.
+TRAPS: log-variance-is-not-linear), and the headline is a calibration curve, which needs no threshold.
 
 ⛔⛔ **AND THE PARTITION ALONE IS NOT ENOUGH — "no own evidence" IS NOT A BINARY.** Step 1 was
 implemented as `tau_lam > 1e-9`, and the strand arm's information `I(f_g) ∝ (2κ−1)²` is exactly zero
 only at κ = **½** while κ is *fitted*. At 10 M fragments a genuinely unstranded library fits
 κ̂ = 0.500689, so τ lands at ~5e-7 and the cut promotes the object to "solvable" while its own statement
 has **sd(λ) = 1,377 nats against a solver that represents λ only on ±10**. Measured:
-**79.1 % of the "solvable" error sat on objects with no usable answer of their own** (`TRAPS.md` B11).
+**79.1 % of the "solvable" error sat on objects with no usable answer of their own** (TRAPS: a-threshold-on-a-fitted-residue).
 
 ⭐ **So strength is reported as a CURVE over `sd(λ) = 1/√τ` decades**, beside the partition, and the
 panel table carries a **`weak%`** column — the share of the scored error above 10 nats. ⛔ **A better
@@ -165,10 +103,10 @@ threshold is not available and was refuted:** τ is *continuous* across the regi
 conditions, so any floor would be a tuned constant. ⭐⭐ **Read `weak%` before `mwae`.** A row with
 `weak%` near 100 is reporting the relay and the reference, not a solve.
 
-⚠ And `locked` is the **G1** class on *both* axes (`node_geometry.g1_locked`), never
+⚠ And `locked` is the **TRAPS: no-magic-numbers** class on *both* axes (`node_geometry.g1_locked`), never
 `~solvable & is_node` — a structurally-locked *edge* is certain, not ignorant. ⛔ It is deliberately
 **not** the same mask as `node_init`'s node-only `struct_lock`, which governs message *emission*
-(`TRAPS.md` E14).
+(TRAPS: two-masks-one-name).
 
 ### The instrument — `scripts/design/pass0_vs_oracle.py`
 
@@ -177,7 +115,7 @@ Gates: `tests/calibration/test_pass0_vs_oracle.py`, nine, each carrying its own 
 
 ⛔ **C is TWO ceilings, each defined by a lever that already exists, and never an estimator.** "The best
 split any estimator could produce" is not something you can write down; trying to is the magic-number
-failure mode with an estimator in place of a constant (`TRAPS.md` G1).
+failure mode with an estimator in place of a constant (TRAPS: no-magic-numbers).
 
 | | what it is | what its gap to P means |
 |---|---|---|
@@ -186,7 +124,7 @@ failure mode with an estimator in place of a constant (`TRAPS.md` G1).
 
 ⚠ **C_input is a *length*-input ceiling.** The other library-level inputs are injectable
 (`InjectedCalibrationPriors`) but the simulator writes no truth for them, so injecting one would be an
-A/B against a guess. κ is the one with a truth value and it is not free either (`TRAPS.md` F1); it is the
+A/B against a guess. κ is the one with a truth value and it is not free either (TRAPS: specificity-and-sense-are-complements); it is the
 next lever and a separate measurement.
 
 ⭐⭐ **The cross-tab is the point.** Objects **undetermined by C_info** *and* carried **entirely by the
@@ -218,9 +156,9 @@ different axis, measured by `second_pass_accuracy.py` and `calibration_truth_ab.
 ⛔ **The gate that held Stage B back, kept because it will apply again.** A prior-free solve fed a
 15 %-wrong length model on exactly the conditions it is meant to rescue would be tuned against a
 manufactured discriminant, and every conclusion drawn from it would have to be thrown away when the model
-was fixed. That has already happened once here, on a substrate defect (`TRAPS.md` A7). ⚠ **It is live
+was fixed. That has already happened once here, on a substrate defect (TRAPS: prove-the-substrate). ⚠ **It is live
 again for the per-node length likelihood**: the fitted gap's sign is currently wrong, so wiring that
-channel now would repeat exactly this — see `ROADMAP.md` §2 step 2.
+channel now would repeat exactly this — see `ROADMAP.md` §2 **the-cancelling-pair**.
 
 ---
 
@@ -232,7 +170,7 @@ current error is in calibration rather than in the accumulator. Read it as a the
 steering wheel.
 
 ⚠ **Score the contaminated conditions.** Zero-gDNA rows are saturated at truth = 0 exactly, so anything
-that lowers the estimate "improves" them (`TRAPS.md` B3). They are false-positive checks, nothing more.
+that lowers the estimate "improves" them (TRAPS: zero-target-guards-are-one-sided). They are false-positive checks, nothing more.
 
 ---
 
@@ -243,7 +181,7 @@ source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 export OMP_NUM_THREADS=1
 SUITE=~/Downloads/rigel_runs/suite
 
-# 0. is the SUBSTRATE sound?  (TRAPS A7 — prove the simulator before the code)
+# 0. is the SUBSTRATE sound?  (TRAPS prove-the-substrate — prove the simulator before the code)
 python scripts/design/simulator_gates.py --suite $SUITE/pilot --reference $SUITE/reference
 python scripts/design/suite_resolves.py $SUITE/rigel_index --suite $SUITE/pilot
 
@@ -264,4 +202,4 @@ python scripts/design/pass0_vs_oracle.py
 ```
 
 ⚠ Together these take about 15 minutes on the pilot. **Run them as a set and record them together** —
-`TRAPS.md` B8.
+TRAPS: re-record-the-baseline.

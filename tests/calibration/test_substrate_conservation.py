@@ -6,7 +6,7 @@ map "attributes exactly the non-terminal boundary mass, no double count, no loss
 That axis does not exist: a reference with ``k`` nodes owns ``k − 1`` lines and **every one of them has
 a node on both sides**, so there is no terminal to drop and no face to double. A test of a model that
 no longer exists can only be rewritten from scratch (the call S5.c made on ``test_message_frames.py``
-and S5.e made on three ``test_bp_solver`` tests).
+and S5.e made on three ``test_sweep`` tests).
 
 ⭐ **What is kept is the thing that made it worth having: it runs on a REAL SCAN**, not a hand-built
 fixture, so the payload, the index and the geometry must agree with each other rather than with a

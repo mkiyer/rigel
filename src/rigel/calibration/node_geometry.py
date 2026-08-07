@@ -1,6 +1,6 @@
 """rigel.calibration.node_geometry — per-slot chain geometry, beliefs, densities, statics, and init.
 
-The lower layer beneath the belief-propagation solver (`bp_solver`): everything that describes *what a
+The lower layer beneath the belief-propagation backbone (`sweep`): everything that describes *what a
 chain slot is* before any message passing. Pure functions of the accumulator substrate + the node
 geometry + the junction axis + the FL pmfs — no sweep state, no global prior.
 
@@ -26,14 +26,14 @@ Contents:
 * `NodeGeometry` / `build_node_geometry` — the per-slot static geometry: the unspliced count being
   deconvolved, its two per-component divisors, and the mature (junction) flux with its own.
 * `NodeBelief` — the per-slot pie ``(f_pos, f_neg, f_g)``; the per-component message densities
-  ``rho = f·M/E`` are computed inline in ``bp_solver.node_sweep``.
+  ``rho = f·M/E`` are computed inline in ``sweep.solve_chain``.
 * `NodeStatics` / `build_node_statics` — the static per-slot solver inputs (per-strand counts, masks).
 * `init_beliefs` — the signature-binary G1/G2/G3 initial belief.
 * `_node_region_type` — per-slot coarse node type (intergenic/intron/exon), shared with the prior
   subsystem and `gdna_density_prior`.
 
-Layering: imports only `node_chain`, `signature`, `effective_length`, `simplex_logodds`, `strand_deconv`
-and `splice_graph` (all lower layers) — never `bp_solver` or `gdna_density_prior`, so it sits cleanly
+Layering: LAYER 3. Imports only `node_chain`, `signature`, `effective_length`, `simplex_logodds`
+and `splice_graph` (all lower layers) — never `sweep` or `gdna_density_prior`, so it sits cleanly
 below both. ⚠ `splice_graph` is imported for the four TERMINUS FLAG BITS alone, which
 :func:`terminus_flank_gain` has to know the meaning of; the module already carried the flags array
 through `NodeStatics` without knowing what any bit meant.
@@ -182,7 +182,7 @@ def build_node_geometry(
 ) -> NodeGeometry:
     """Assemble the per-slot geometry from the substrate's five populations onto the chain.
 
-    **The divisors, and A7** (ruled 2026-07-30):
+    **The divisors, and TRAPS: prove-the-substrate** (ruled 2026-07-30):
 
     ================  ==========================================================================
     NODE, both        ``contained_eff_length(node_len, pmf)`` — no reach argument exists
@@ -197,7 +197,7 @@ def build_node_geometry(
                       divisor, so wiring it regresses nothing
     ================  ==========================================================================
 
-    ``edge_rna_reach`` is the **A7 switch**: ``None`` (the default) keeps ``UNBOUNDED_REACH`` at
+    ``edge_rna_reach`` is the **TRAPS: prove-the-substrate switch**: ``None`` (the default) keeps ``UNBOUNDED_REACH`` at
     contiguous edges and is byte-identical to the S5.f path; a ``(reach_lo, reach_hi)`` pair per
     contiguous edge (:func:`~rigel.calibration.splice_graph.build_contiguous_edge_reach_arrays`) turns
     the taper on. ⚠ It is ONE argument so that an A/B varies one thing and shares every line of code.
@@ -252,7 +252,7 @@ def build_node_geometry(
         """Per-slot effective length: contained at a NODE, crossing at an EDGE.
 
         ``edge_reach`` is ``(reach_lo, reach_hi)`` per contiguous edge, or ``None`` for
-        :data:`UNBOUNDED_REACH` — the A7 switch. ``None`` is byte-identical to the pre-S5.g path, so
+        :data:`UNBOUNDED_REACH` — the TRAPS: prove-the-substrate switch. ``None`` is byte-identical to the pre-S5.g path, so
         the two arms of the A/B differ in ONE argument and share every line of code.
         """
         contained = contained_eff_length(node_len, pmf) if n_nodes else np.zeros(0)
@@ -269,7 +269,7 @@ def build_node_geometry(
         return out
 
     # ⭐ gDNA takes NO reach argument, ever: its template is the chromosome, so ``taper_g = 1``. That is
-    # physics, not the A7 ruling — the ruling is only about the RNA component.
+    # physics, not the TRAPS: prove-the-substrate ruling — the ruling is only about the RNA component.
     eff_gdna = divisor(gdna_fl_pmf)
     eff_rna = divisor(rna_fl_pmf, edge_rna_reach)
 
@@ -326,7 +326,7 @@ def build_node_geometry(
 
 def node_global_geometry(geometry: NodeGeometry):
     """Per-slot 'global' gDNA support ``(mass, eff)`` — the basis the enrichment NPMLE (`DensityNPMLE`) is
-    fit on and projected onto, shared by :func:`bp_solver.node_sweep` and ``calibrate`` so the fit and the
+    fit on and projected onto, shared by :func:`sweep.solve_chain` and ``calibrate`` so the fit and the
     projection use one definition.
 
     ⭐ **It no longer sums two faces.** The predecessor returned ``mass_l + mass_r`` over ``E_l + E_r`` at
@@ -410,14 +410,14 @@ class NodeBelief:
     ⚠ **The variances are log-space** — grid moments of `log f_c` over the λ lattice
     (`simplex_logodds._solve_nodes_logodds`), matching the log-density message currency. They are therefore
     **not bounded by ¼** and routinely exceed it; a consumer needing the LINEAR `Var(f_c)` must convert
-    (delta method `Var(f_c) ≈ f_c²·Var(log f_c)`, as `bp_solver.node_sweep` does for `composition_logvar`).
+    (delta method `Var(f_c) ≈ f_c²·Var(log f_c)`, as `sweep.solve_chain` does for `composition_logvar`).
 
     The variance is the **precision state**: `Var(log f_c)=0` ⇒
     locked/certain (e.g. a forbidden strand), `=∞` ⇒ no information (unsolved). It feeds the honest message
     send — a source's outgoing precision is degraded from its own `Var_own` by the
     communication noise, so an unsure node speaks quietly (Phase 2). The composition is stored as a FRACTION
     (the face-invariant quantity — a boundary has two faces but one composition); density `ρ=f·M_face/E_face`
-    is the message currency (computed inline in `bp_solver.node_sweep`), mass `m=f·M_face` (`NodeDeconv`) the
+    is the message currency (computed inline in `sweep.solve_chain`), mass `m=f·M_face` (`NodeDeconv`) the
     output."""
 
     f_pos: np.ndarray
@@ -436,14 +436,14 @@ class NodeBelief:
 # ``allow_neg`` forbid mask in the solve. The init ALSO sets the per-component precision state ``var(f_c)``
 # ``0`` = locked/certain (a forbidden strand, an intergenic gDNA sink), ``inf`` =
 # no information (an admissible-but-unsolved axis — it will listen to messages, and emits none until solved).
-# A solved single-strand (G2) node takes the strand-solve posterior variance.
+# A solved single-strand (TRAPS: one-thing-varied) node takes the strand-solve posterior variance.
 
 
 def g1_locked(free_pos, free_neg) -> np.ndarray:
-    """The **G1** class: neither RNA strand admissible, so the composition is structurally CERTAIN.
+    """The **TRAPS: no-magic-numbers** class: neither RNA strand admissible, so the composition is structurally CERTAIN.
 
     ⭐ This is the predicate :func:`_type_belief` pins ``{0,0,1}`` at ``Var(log f_g) = 0`` on, and it
-    applies to **both axes** — an intergenic region and an intergenic↔exon seam are both G1, because
+    applies to **both axes** — an intergenic region and an intergenic↔exon seam are both TRAPS: no-magic-numbers, because
     RNA cannot cross a gene boundary any more than it can occupy intergenic space.
 
     ⚠⚠ **DO NOT CONFUSE THIS WITH ``node_init.strand_evidence``'s ``struct_lock``, which is
@@ -518,11 +518,11 @@ def _type_belief(free_pos, free_neg, deconv, mass_unspl):
     strand-only :class:`NodeDeconv` (no global, no imputation). The signature-binary default is all-gDNA
     ``{0,0,1}`` (`ARCHITECTURE §3`). The class overrides:
 
-    * **G1** (neither strand free — intergenic region / no-RNA-crossing boundary): a LOCKED gDNA sink — keep
+    * **TRAPS: no-magic-numbers** (neither strand free — intergenic region / no-RNA-crossing boundary): a LOCKED gDNA sink — keep
       ``{0,0,1}``.
-    * **G2** (exactly one strand free, with data): the STRAND DECONVOLUTION alone resolves the pie (a
+    * **TRAPS: one-thing-varied** (exactly one strand free, with data): the STRAND DECONVOLUTION alone resolves the pie (a
       single-strand node is 1-D: ``f_active = 1 − f_g``).
-    * **G3** (both strands free — AMBIG): unresolvable by strand → keep the ``{0,0,1}`` default at MAX
+    * **TRAPS: converge-and-delete** (both strands free — AMBIG): unresolvable by strand → keep the ``{0,0,1}`` default at MAX
       (``inf``) variance; the sweep resolves it from neighbour messages + the global prior.
 
     Returns the six per-node arrays ``(f_pos, f_neg, f_g, var_pos, var_neg, var_gdna)`` — the composition + the
@@ -542,7 +542,7 @@ def _type_belief(free_pos, free_neg, deconv, mass_unspl):
     g2 = free_pos ^ free_neg
     g2_active = g2 & (np.asarray(mass_unspl, dtype=np.float64) > 0.0)
 
-    # G2-active: take the strand-only solve (median f_g, mean f±, and the posterior variances). G1 sinks + G3
+    # G2-active: take the strand-only solve (median f_g, mean f±, and the posterior variances). G1 sinks + TRAPS: converge-and-delete
     # AMBIG keep the {0,0,1} default at MAX variance.
     fgv = np.asarray(deconv.gdna_frac_var, dtype=np.float64)
     fpv = np.asarray(deconv.rna_pos_frac_var, dtype=np.float64)
@@ -579,7 +579,7 @@ class NodeStatics:
     ``ACCEPTOR_s``) at each EDGE slot, ``0`` on NODE slots.
     ⭐ **Raw bits, not pre-derived predicates.** Every consumer wants a different combination of them, and
     P1G_SCOPE's own specified predicate was measured to be nearly the COMPLEMENT of what it was meant to
-    replace (plan F10). Compose with :func:`~rigel.calibration.splice_graph.is_terminus` /
+    replace (plan TRAPS: a-seam-with-rna-is-not-a-junction). Compose with :func:`~rigel.calibration.splice_graph.is_terminus` /
     :func:`~rigel.calibration.splice_graph.is_splice_site`. It is ``0`` when no graph was supplied.
     """
 
@@ -734,7 +734,7 @@ def init_beliefs(
 
 
 # ---------------------------------------------------------------------------
-# Node-type helper (the sweep itself lives in bp_solver.node_sweep).
+# Node-type helper (the sweep itself lives in sweep.solve_chain).
 # ---------------------------------------------------------------------------
 
 
@@ -761,12 +761,12 @@ def _node_region_type(chain, region_arrays):
 # ``Σcount/ΣE`` per class supplying ``r_g = rate[class(dst)]/rate[class(src)]``.
 #
 # ⭐⭐ **MEASURED INERT, AND THE REASON IS AN OPERATOR THAT ALREADY EXISTS.** The relay's MASS PIN
-# (`bp_solver`'s ``Σ_c rho_c·E_c = M``) rescales the running level to each object's OWN observed total,
+# (the scan's ``Σ_c rho_c·E_c = M``) rescales the running level to each object's OWN observed total,
 # and at a structurally pure-gDNA object that total IS its gDNA density — measured at its own capture
 # stratum. So the landscape is already carried, per object and locally, by the pure-gDNA population's own
 # measurements; a pooled class ratio only re-derives it, worse. A/B on the ladder: **byte-identical off
 # capture**, and 1.2 % of one class on one capture-ON condition (``node/exon`` mwae 0.2719 → 0.2686).
 # That does not pay for five constants, a helper and two gates.
 #
-# ⭐ The rule that remains is therefore one line and is in `bp_solver`: a gDNA LEVEL crosses a
+# ⭐ The rule that remains is therefore one line and is in `messages.head`: a gDNA LEVEL crosses a
 # composition-unlicensed hop **unscaled**. Capture-OFF is not a case — it is the same expression.

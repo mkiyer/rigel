@@ -1,9 +1,13 @@
 """Shared region-geometry helpers: same-reference neighbour masks + bidirectional run-fill.
 
-Several calibration stages walk the region partition the same way — they look at each region's
-left/right neighbour *within the same reference*, and they fill unset regions by carrying the nearest
-anchored value inward from both ends of a run. That bookkeeping lives here once and is shared by
-`density_model`, `strand_deconv`, `priors`, and the `bp_solver` chain geometry.
+A stage that walks the region partition looks at each region's left/right neighbour *within the same
+reference*, and fills unset regions by carrying the nearest anchored value inward from both ends of a run.
+That bookkeeping lives here once.
+
+⚠ **ONE consumer today — `density_model`.** This docstring used to claim four (`strand_deconv`, `priors`
+and the chain sweep as well) and was measured wrong by `scripts/design/module_census.py`: the other three
+had stopped calling it and nothing said so. A sentence about the code, inside the code, that nothing gates
+is exactly how a reader is sent looking for something that is not there.
 
 Both helpers treat the region array as a sequence of per-reference runs: a neighbour relation or a
 carry never crosses a reference boundary (``ref_id`` change).

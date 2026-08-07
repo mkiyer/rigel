@@ -33,7 +33,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-__all__ = ["EDGE", "NODE", "NodeChain", "build_node_chain"]
+__all__ = ["EDGE", "NODE", "NodeChain", "NodeDeconv", "build_node_chain"]
 
 NODE = 0
 EDGE = 1
@@ -66,6 +66,50 @@ class NodeChain:
     @property
     def is_edge(self) -> np.ndarray:
         return self.kind == EDGE
+
+
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────
+# ⭐⭐ ONE SLOT'S DECONVOLUTION RESULT — vocabulary, and it lives here because THREE LAYERS need it.
+# It was defined in the STRAND family (layer 4) and imported by `node_geometry` and `simplex_logodds`
+# (layer 3) and `sweep` (layer 6), so three layers reached UPWARD for a type. `module_census.py` is what
+# made that visible, and the repair is the one a layering violation always asks for: the TYPE belongs at
+# the bottom, not the code that happened to define it first. ⚠ It is not a strand concept — the pie
+# `(f_pos, f_neg, f_g)` is the tool's central datum, and a slot is what carries it.
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class NodeDeconv:
+    """Per-node deconvolution result. TWO disjoint uses, hence the optional halves:
+
+    * the per-node SOLVE (`simplex_logodds._solve_nodes_logodds_all`) returns the **composition** —
+      ``*_frac`` + ``*_frac_var`` — and no mass (a node's mass is a per-FACE quantity; the solve is
+      face-invariant, so a single ``*_mass`` here would be meaningless);
+    * the chain PROJECTION (`sweep.chain_node_deconv` / `chain_edge_deconv`) returns the
+      **mass** the downstream `CalibrationResult` consumes, and no precision.
+    """
+
+    gdna_frac: (
+        np.ndarray
+    )  # float64[K] — the node's gDNA composition (face-invariant; mass = frac·M_face)
+    # per-strand RNA fractions of the UNSPLICED mass (posterior means; f_pos+f_neg+gdna_frac = 1), populated
+    # by the simplex sweep for the per-strand RNA imputation (the bipartite R↔B↔R chain).
+    rna_pos_frac: "np.ndarray | None" = None  # float64[K] — f_pos
+    rna_neg_frac: "np.ndarray | None" = None  # float64[K] — f_neg
+    # per-component posterior variances in LOG-FRACTION space — `Var(log f_c)`, NOT `Var(f_c)`. They are
+    # grid moments of `log f_c` over the λ lattice (`simplex_logodds._solve_nodes_logodds`), because the
+    # message currency is a log-density and the send precision `1/(Var(log f_c) + 1/n + σ²_transfer)` is
+    # log-space throughout. ⚠ They are therefore NOT bounded by ¼ and routinely exceed it — a consumer that
+    # needs the LINEAR `Var(f_c)` must convert (delta method: `Var(f_c) ≈ f_c²·Var(log f_c)`, as
+    # `sweep.solve_chain` does when it builds `_var_fg` for `composition_logvar`). Set by the per-node
+    # solve, consumed when a node emits a message. None on the chain region/boundary projections (precision
+    # is a chain-node property, not needed by the downstream EM prior).
+    # the PROJECTION's consumed output (calibrate/derive read ONLY these); None on the per-node solve.
+    gdna_mass: "np.ndarray | None" = None  # float64[K]
+    rna_mass: "np.ndarray | None" = None  # float64[K]  (= (1−gdna_frac)·M_unspliced + spliced mass)
+    gdna_frac_var: "np.ndarray | None" = None  # float64[K] — Var(log f_g)
+    rna_pos_frac_var: "np.ndarray | None" = None  # float64[K] — Var(log f_pos)
+    rna_neg_frac_var: "np.ndarray | None" = None  # float64[K] — Var(log f_neg)
 
 
 def build_node_chain(ref_node_offsets: np.ndarray, ref_edge_offsets: np.ndarray) -> NodeChain:

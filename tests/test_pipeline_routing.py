@@ -147,7 +147,7 @@ def _make_env(index):
         exonic_spliced=StrandModel.from_labels([int(Strand.POS)] * 20, [int(Strand.POS)] * 20)
     )
     # ⚠ Only the SIZE was ever read from the container this replaces — an int, threaded through
-    # several frames as an object. C2 deleted the container.
+    # several frames as an object. TRAPS: pure-and-length-censored deleted the container.
     max_frag_size = 1000
     estimator = AbundanceEstimator(index.num_transcripts, em_config=EMConfig(seed=1))
     stats = PipelineStats()

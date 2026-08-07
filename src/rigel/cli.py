@@ -376,7 +376,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
     #
     # ⭐ ONE SOURCE. Every category comes from result.fl_models, which is built from the accumulator
     # payload alone — the anchor, the two modelled pools and the five pure pools, all binned at the
-    # accumulator's L. The scanner's parallel histograms were deleted by C2.
+    # accumulator's L. The scanner's parallel histograms were deleted by TRAPS: pure-and-length-censored.
     fl_models = result.fl_models
     fl_summary, fl_histogram_df = _fragment_length_report(fl_models)
 
