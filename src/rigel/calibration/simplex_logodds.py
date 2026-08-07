@@ -73,6 +73,35 @@ _EPS = 1.0e-9
 # records the known cost — it forbids the simplex vertices, where some truth genuinely lives.
 _JEFFREYS_REF = 0.5
 
+#: ⛔⛔ **THE CERTIFIED-RNA CLAIM IS A LOWER BOUND, AND ψ HAS ALWAYS APPLIED IT AS A TWO-SIDED GAUSSIAN.**
+#: ``bp_solver`` states the premise in its own words — ``rho_R(exon) >= rho_nu(B) + rho_mu(B)``, because
+#: the exon may also hold molecules that never touch that seam — "and it uses it as an equality". Three
+#: operators price that inequality as a VARIANCE and none prices it as a DIRECTION, which is `TRAPS.md`
+#: D1: a variance cannot move a mode toward truth.
+#: ⭐ ``True`` selects the one-sided form: no penalty when the destination holds MORE RNA than the bound,
+#: full penalty when it holds less. ⛔ ``False`` is today's behaviour and is BYTE-IDENTICAL by
+#: construction — :func:`_rna_residual` then returns its input difference unmodified.
+#: Set by ``ladder_arm_ab.py --arm onesided_rna``.
+ONE_SIDED_RNA = [False]
+
+
+def _rna_residual(log_f, mode):
+    """The residual the RNA imputed-message penalty is built on — ONE HOME for both ψ paths.
+
+    Returns ``log_f - mode``, or its negative part when :data:`ONE_SIDED_RNA` is set. The message asserts
+    ``log_f >= mode`` (the destination holds AT LEAST the RNA the bound accounts for), so only
+    ``log_f < mode`` is a contradiction and only that side may be penalised.
+
+    ⚠ Dtype is preserved deliberately: the AMBIG cube is float32 and the 1-D path float64, and the clamp
+    must not promote either. ⛔ With the flag off this is exactly ``log_f - mode``, which is what makes
+    the default byte-identical rather than approximately so.
+    """
+    d = log_f - mode
+    if not ONE_SIDED_RNA[0]:
+        return d
+    return np.minimum(d, d.dtype.type(0.0))
+
+
 # f_g ∈ [σ(−10), σ(10)] = [4.5e-5, 1−4.5e-5]. A pure STATE-SPACE bracket: the widest f_g the grid can
 # represent, NOT an accuracy knob — but that is a PROPERTY OF A PROPER ψ, not of this constant. It holds
 # because both arms are now always written (`_JEFFREYS_REF`): under Beta(½,½) ~0.9% of the reference's mass
@@ -320,7 +349,7 @@ def _local_loglik_logodds(
                 psi
                 - 0.5
                 * np.asarray(ps, np.float64)[:, None]
-                * (log_fact - np.asarray(ms, np.float64)[:, None]) ** 2
+                * _rna_residual(log_fact, np.asarray(ms, np.float64)[:, None]) ** 2
             )
     # ── the SINGLE-λ composition message (the M6 rank-1 fix): ONE Gaussian on the log-odds grid variable λ
     #    DIRECTLY (not on log f_c) — the one gDNA-vs-RNA-total DOF, so ψ counts it ONCE, not twice
@@ -536,7 +565,7 @@ def _solve_ambig_logodds(
             psi -= (
                 F(0.5)
                 * np.asarray(ps, F)[:, None, None]
-                * (log_f - np.asarray(ms, F)[:, None, None]) ** 2
+                * _rna_residual(log_f, np.asarray(ms, F)[:, None, None]) ** 2
             )
     # ── the SINGLE-λ composition message on λ DIRECTLY (θ-INDEPENDENT — it lives on the λ axis, which is
     #    exactly what makes the tilt a nuisance): one Gaussian, ψ counts the g-vs-R DOF ONCE. ──

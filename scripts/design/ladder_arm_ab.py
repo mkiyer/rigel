@@ -705,6 +705,46 @@ def _wrap_node_sweep():
     return orig
 
 
+def _install_onesided_rna():
+    """⭐⭐⭐ **THE CERTIFIED-RNA CLAIM IS A LOWER BOUND. DELIVER IT AS ONE.**
+
+    ``bp_solver.py:439-447`` states the premise in the source's own words: *"what the graft actually knows
+    is an INEQUALITY, ``rho_R(exon) >= rho_nu(B) + rho_mu(B)`` … and it uses it as an equality."* ψ then
+    applies ``-1/2 p (log f_active - mo_p)^2`` in BOTH code paths — symmetric in the residual, no hinge
+    anywhere in the file — so a destination holding MORE RNA than the bound, which the inequality
+    explicitly permits, is penalised exactly as hard as one holding less.
+
+    ⛔ **And an UNDER-claiming RNA message therefore drives ``f_g`` UP.** On an unstranded 1 %-gDNA library
+    an exon's mass is essentially all RNA (``f_active`` near 1), so a message saying "the RNA share is 0.3"
+    is read as "70 % of this is gDNA". Measured at ``g01 ss0.50 capture_on`` by ψ-boundary ablation with
+    the A5 identity exact: HEAD's self-solve is 0.0086 against a truth of 0.0023, the message drives it to
+    **0.3219** at precision 327, and muting the channel returns **0.0005**. Eight of HEAD's twelve worst
+    slots behave that way.
+
+    ⭐ **Why this is not the twelfth refused candidate.** Every one of the eleven in the graveyard was a
+    rule for how to resolve DOUBT, and each was refused by the ``g00`` control because there the doubt must
+    resolve to *no* gDNA. This adds doubt in **one direction only** — "at least this much RNA" — so at
+    ``g00``, where the truth is ``f_active = 1``, every bound is satisfied and the channel goes **inert**
+    rather than harmful. ⭐ And the message-precision sweep says the defect is a BIAS rather than a
+    loudness (no plateau; the stranded optimum is exactly zero), which is `TRAPS.md` D1: a variance cannot
+    fix a bias, and all three operators currently pricing this inequality are variances.
+
+    ⚠ **Only the RNA channel.** The gDNA measurement is arguably a lower bound too — under capture
+    ``gamma >= 1``, so the destination may hold MORE gDNA than a neighbour reports — but that is a second
+    thing varied and a separate arm. ⚠ The bound also reaches ψ a SECOND time through ``tlam`` ->
+    ``lam_imp`` (``bp_solver.py:1474-1479``), also two-sided; this arm does not touch that path, so a
+    partial recovery is the expected shape rather than a full one.
+
+    ⛔ The switch is `simplex_logodds.ONE_SIDED_RNA`, default False and byte-identical off — with the flag
+    down `_rna_residual` returns its input difference unmodified, which is why ``--arm base`` must still
+    reproduce the pre-refactor panel exactly (A5).
+    """
+    import rigel.calibration.simplex_logodds as SL
+
+    SL.ONE_SIDED_RNA[0] = True
+    _fire("onesided_rna")
+
+
 def _install_msgscale(scale: float):
     """⭐⭐⭐ **DO MESSAGES ONLY NEED TO BE WEAK?** — the owner's hypothesis, as a one-parameter sweep.
 
@@ -933,6 +973,7 @@ def main() -> int:
             "msgscale_0.01",
             "msgscale_0.1",
             "msgscale_0.5",
+            "onesided_rna",
             "intron_phi",
             "kappa_half",
             "zc_noop",
@@ -1018,6 +1059,8 @@ def main() -> int:
         _install_msgfree("p0" if args.arm == "msgfree_p0" else "all")
     elif args.arm.startswith("msgscale_"):
         _install_msgscale(float(args.arm.split("_", 1)[1]))
+    elif args.arm == "onesided_rna":
+        _install_onesided_rna()
     else:
         _wrap_node_sweep()
     if args.arm == "intron_phi":

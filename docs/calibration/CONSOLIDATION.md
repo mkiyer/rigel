@@ -250,6 +250,64 @@ composition evidence available even in principle** — strand is dead at κ = ½
 does — the length channel could carry that stratum with no messages at all. ⚠ **Unmeasurable until the
 substrate exists**, and building it is one config line plus a re-simulation, not a solver change.
 
+## §2e ⭐⭐⭐ THE ONE-SIDED RNA ARM — RIGHT ON THE CONTROL, PANEL-NEGATIVE, AND IT IS **D4j**
+
+`simplex_logodds.ONE_SIDED_RNA` replaces `-1/2 p (log f - mo)^2` with `-1/2 p max(0, mo - log f)^2` on the
+certified-RNA channel, in both ψ paths. ⛔ **A5 first: with the flag OFF the refactor is
+1,728 / 1,728 scored fields IDENTICAL to the pre-refactor panel**, so anything below is the flag and
+nothing else.
+
+| stratum | base | `onesided_rna` | |
+|---|---|---|---|
+| **ALL** (g00 excluded) | 22,807,907 | 23,986,942 | ⛔ **+5.2 %** |
+| stranded × capture ON | 3,469,926 | 3,508,787 | +1.1 % |
+| stranded × capture OFF | 1,148,057 | 1,150,512 | +0.2 % |
+| ⛔ unstranded × capture ON | 16,661,720 | 17,940,779 | **+7.7 %** |
+| ⭐ unstranded × capture OFF | 1,528,204 | 1,386,864 | **−9.2 %** |
+| ⭐⭐ **`g00` zero control** | 28,534 | **5,164** | **−81.9 %, 8/8** |
+
+`library_f_gdna` at `g00`: `0.0015 → 0.0002`, `0.0008 → 0.0002`, `0.0002 → 0.0001` ×2, against a truth of
+exactly 0.
+
+⭐⭐ **The derivation is RIGHT — the zero control says so, 8 of 8, and it is the first mechanism in this
+campaign the control has ever endorsed rather than refused.** The panel is negative anyway, and the reason
+is legible and is a named trap.
+
+⛔⛔ **`TRAPS.md` D4j: fixing one of two errors that CANCEL is worse than fixing neither.** The two-sided
+RNA channel was doing **two** jobs: delivering the RNA lower bound (correct, and now one-sided) and, by
+its *upward* side, acting as a **de-facto gDNA LEVEL channel** (accidental). Making it one-sided removes
+only the second, and on unstranded × capture-ON that second job was load-bearing — because §3b's census
+says **no NODE can receive a gDNA level at all**, so an accidental upward pull from the RNA message was
+the only thing filling that hole. Remove the accident and the real gap is exposed: **+7.7 % on exactly
+the stratum with no working level channel, and −9.2 % on the one where the prior already suffices.**
+
+⭐ **So the one-sided term and the missing gDNA level channel are a cancelling pair and must be priced in
+ONE arm.** D4j's own prescription, verbatim: *"when a fix is negative and its object sits on a multi-hop
+path, price it in the arm that also removes the other defect. A pair of defects that cancel is one
+experiment, not two."* ⛔ Do not land the one-sided term alone, and do not discard it — it is the only
+correction the `g00` control has endorsed.
+
+## §2f ⚠ STORAGE — 30 G of the 67 G is FASTQ that no calibration instrument reads
+
+| panel | conditions | FASTQ | BAM |
+|---|---|---|---|
+| `ladder` | 37 | **23 G** | 26 G |
+| `pilot` | 9 | **7 G** | 8 G |
+
+⛔ **The FASTQs are NOT dead** — `scripts/benchmarking/{aligner,tools,analysis,config}.py` read them for
+the third-party tool comparison, and `sim/orchestrator.py:284` uses `sim_R1.fq.gz`'s existence as its
+`skip_existing` key, so removing them makes the orchestrator re-simulate. ⚠ **Not deleted, and this is an
+owner call** — but no instrument under `scripts/design/` or `src/rigel/calibration/` opens one, so they
+are archivable for calibration work.
+
+⭐ **For the NEW fragment-length arm the saving is available with no such trade.** The arm needs the two
+directions the ladder lacks — `gDNA << RNA` and `gDNA >> RNA`; `gDNA == RNA` is the ladder itself — and it
+does not need the full 36-cell cross. Six conditions at the owner's own focus cell (`ss_0.50 × capture_on`,
+plus the capture-OFF twin and one stranded control per direction) at a mid gDNA rate where both components
+are present in quantity. **6 × 806 M ≈ 4.8 G BAM-only, against 9 G with FASTQs**, and an
+`emit_fastq: false` option in the orchestrator is a small change that makes every future calibration panel
+half the size.
+
 ## §3a ⭐⭐ THE MINIMAL RELAYED STATE IS **FOUR** ARRAYS, NOT TEN
 
 `_relay` carries ten: three component densities, three mode-fusion precisions, three measurement
