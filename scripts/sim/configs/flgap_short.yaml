@@ -39,6 +39,7 @@
 # ⛔ Score the length axis against `truth_fragment_lengths.tsv` (the REALISED post-capture marginal),
 # never against the configured numbers below — `TRAPS.md` F11, and F5: capture selects for length.
 
+genome: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genome.fa
 gtf: /Users/mkiyer/Downloads/rigel_runs/suite/reference/genes.gtf
 outdir: /Users/mkiyer/Downloads/rigel_runs/suite/flgap_short
 transcript_filter: all
