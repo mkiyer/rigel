@@ -270,6 +270,24 @@ to `assemble_priors` on the consuming side. That is what makes it a tractable co
 
 ## 7. Implementation order — each step independently gated
 
+### 7.0 ⚠ THE STEP-1 SUBSTRATE — decided, because it is the first thing that would block
+
+Every panel condition is **10–20 M fragments** and `_accumulator_reference.py` is pure Python, so a
+full condition is not runnable. Three options were considered; the choice is **SUBSAMPLE**:
+
+* ⛔ *A vectorised numpy re-implementation of the deposit* — fast, but it is a SECOND implementation of
+  the rule under test (`TRAPS: a-test-that-redefines`) and would itself need gating against the
+  reference. Rejected: it doubles the work and adds the exact failure mode this project keeps hitting.
+* ⚠ *The toy harness alone* — proves the conservation identity exactly and in seconds, but a toy cannot
+  give the accuracy number (`TRAPS: toys-rank-hotspots-backwards`). **Necessary, not sufficient.**
+* ⭐ **SUBSAMPLE a real condition.** `a_g / truth` is a RATIO, so it is scale-invariant: a deterministic
+  subsample (hash of qname, so the full payload and the three origin partitions stay consistent)
+  preserves it. ~500 k fragments runs in ~1 min of Python and leaves the panel-level ratio tight.
+
+**So step 1 is: prove the identity on the toy, then measure the ratio on a subsample** — one
+implementation, no second one to gate. `native_parity_on_real_data.py` and `reference_on_real_data.py`
+already carry the plumbing to run the reference against a real index.
+
 1. ⭐⭐ **PROTOTYPE THE WHOLE CHANGE IN PYTHON FIRST — no production edit.** Compute
    `edge_unspliced_mass` from `_accumulator_reference.py` on one capture-ON and one capture-OFF
    condition, apply §5.5, and score with `prior_vs_oracle.py` against `F`. **This prices the entire
