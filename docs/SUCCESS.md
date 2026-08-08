@@ -199,7 +199,27 @@ python scripts/design/calibration_truth_ab.py --ceiling
 # B. pass-0 against the oracle, per object and per class (~20 min PER CONDITION: it re-scans the
 #    BAM once per origin partition, and there is no cache for that)
 python scripts/design/pass0_vs_oracle.py
+
+# C. CALIBRATION'S ENDPOINT — LocusPriors, what the EM actually reads, against the oracle.
+#    ~50 s per condition with the oracle cache warm; --jobs 6 does the ladder in ~6 min.
+python scripts/design/prior_vs_oracle.py --suite $SUITE/ladder --jobs 6
+
+# D. THE TOOL, END TO END, against the simulator's per-transcript truth — and the ceiling above it.
+#    ⛔ --jobs 2, not more: run_pipeline holds 7-8.5 GB per 10 M-fragment condition.
+export RIGEL_ARMS=~/Downloads/rigel_runs/arms
+for arm in base noop oracle base_reseed; do
+  python scripts/design/quant_accuracy.py --arm $arm --out $RIGEL_ARMS/qa_$arm.jsonl --jobs 2
+done
+python scripts/design/arm_identity.py $RIGEL_ARMS/qa_base.jsonl $RIGEL_ARMS/qa_noop.jsonl   # MUST pass
+python scripts/design/quant_accuracy.py --report $RIGEL_ARMS/qa_{base,base_reseed,oracle}.jsonl
 ```
 
-⚠ Together these take about 15 minutes on the pilot. **Run them as a set and record them together** —
+⚠ Steps 0–B take about 15 minutes on the pilot. **Run them as a set and record them together** —
 TRAPS: re-record-the-baseline.
+
+⭐⭐ **C AND D ARE WHAT "MEASURE THE WHOLE TOOL" MEANS, AND BOTH ARE NEW (2026-08-07).** Everything above
+them scores an INTERMEDIATE — per-object `f_g`, or the library figure. `prior_vs_oracle.py` scores the
+object the EM is actually handed, and `quant_accuracy.py` scores the transcript table a user reads.
+⛔ D's `noop` arm must be byte-identical to `base` and the seed must be pinned to make that possible
+(`TRAPS: the-deliverable-is-not-reproducible-by-default`); `base_reseed` is the noise floor and any arm
+delta smaller than it is a sampling draw, not an effect.

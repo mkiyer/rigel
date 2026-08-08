@@ -173,16 +173,18 @@ scheme. The rename rewrote **980 citations across 114 files** and correctly left
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-python -m pytest tests/ -q                     # baseline: 22 fail / 2310 pass / 7 xfail — 21 goldens + the paralog row
+python -m pytest tests/ -q                     # baseline: 0 fail / 3209 pass / 2 skip / 9 xfail
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **"22 failures, 21 goldens and the paralog row" is the standing baseline** (**2,310 passing as of
-2026-08-07** — 2,343 minus the 33 `test_eta_transfer` gates, deleted with the backbone, plus the 20 in
-`test_sweep_backbone.py`). A 23rd failure, or any other non-golden name in the list, is a regression. See
-`docs/TESTING.md` §6.
-⭐ **And 7 xfails, five of them STRICT and load-bearing** — unchanged by the backbone commit.** `test_toy_harness`'s intron-composition gate is
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,209 passing, 2 skipped, 9 xfail** (measured
+2026-08-07, and it includes the 23 gates the validation campaign's two instruments brought with them —
+`test_prior_vs_oracle.py` 14, `test_quant_accuracy.py` 9). ⚠ **The predecessor of this paragraph claimed
+"22 fail / 2310 pass / 7 xfail — 21 goldens + the paralog row" and every part of it was stale**; the
+goldens were regenerated and the failures are gone. Any failure at all is now a regression, which is a
+stronger and cheaper rule than counting expected ones. See `docs/TESTING.md` §6.
+⭐ **And 9 xfails, five of them STRICT and load-bearing.** `test_toy_harness`'s intron-composition gate is
 the project's detector for the level defect the splice-flux reframe un-masked, and `test_node_init.py` carries
 **four** more added 2026-08-06 for two PROVEN defects whose fixes are panel-negative alone: `struct_lock` is
 `~solvable & NODE` rather than `g1_locked & NODE` (19,709 slots against 1,312), and `Var(f_g)` is capped at
@@ -203,6 +205,9 @@ either promote a row or delete the file, but do not assume the table is complete
 
 | | |
 |---|---|
+| **⭐⭐⭐ the validation campaign — `ROADMAP.md` §1** | |
+| `design/prior_vs_oracle.py` | ⭐⭐⭐ **CALIBRATION'S ENDPOINT AGAINST TRUTH** — `LocusPriors` (`gdna_prior_count`, `rna_prior_count`, `gdna_eff_len`) is what the EM actually reads, and until 2026-08-07 nothing compared it to anything. Three arms: **P** shipped, **O** the same assembler fed the origin-split truth masses, **F** the direct per-locus fragment count from `node_start_count` — so `P−O` is calibration's error and `O−F` is the ASSEMBLER's, which are different repairs in different files. ⭐ Reports the count, the composition claim `phi = a_g/(a_g+a_r)` and the SCALE separately, per stratum. ⛔ Undrained on both sides, and the caveat is priced not waved (`TRAPS: an-equal-length-panel-defeats-the-lift`) |
+| `design/quant_accuracy.py` | ⭐⭐⭐ **THE TOOL END TO END, AND THE PRIOR-INJECTION CEILING ABOVE IT** — `--arm base` is the transcript-level accuracy table, `--arm oracle` re-quantifies with the perfect prior injected, and the three `oracle_<field>` arms say WHICH of the prior's three numbers carries the value. ⛔ Scores **count against count** against the condition's OWN `truth_abundances.tsv` (the realised observed fragment count); the suite-level table is the *pre-capture molar* abundance and is a different quantity. ⛔ Pins `EMConfig.seed` — the shipped default is `None` (`TRAPS: the-deliverable-is-not-reproducible-by-default`) — and `base_reseed` prints the noise floor beside the effect |
 | **⭐⭐⭐ where to develop** | |
 | `design/module_census.py` | ⭐⭐⭐ **WHERE DOES A CHANGE GO?** — the calibration package's real shape, re-derived from the AST: the layering with every upward import, the graph with each module's importers inside and outside, ⭐ **docstrings that name a sibling with no import edge** (14 measured, 6 genuinely stale), and dead public surface. ⛔ It REPORTS, it does not judge — an entry point looks dead, and a gated reference implementation looks duplicated |
 | **⭐⭐⭐ the backbone** | |

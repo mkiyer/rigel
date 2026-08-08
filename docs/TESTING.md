@@ -528,16 +528,23 @@ python -m pytest tests/ -q                     # ⛔ never bare `pytest` — the
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ```
 
-⚠ **The standing baseline is 21 `test_golden_output` failures plus one.** The 21 are stale expectations,
-expected, and they have moved seven times; ⛔ **regenerate them once, at the end of the accumulator work,
-twice, and diff** — they run under the default sampling mode, so a flaky expectation baked in now is
-permanent, and regenerating is **not** validating.
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,209 passing, 2 skipped, 9 xfail** (measured
+2026-08-07). **Any failure is a regression** — which is a stronger and cheaper rule than counting expected
+ones.
 
-The 22nd is `tests/scenarios_aligned/test_paralogs.py::test_gdna_sweep[gdna_100]` — a real EM
-unidentifiability, not flakiness (TRAPS: identical-paralogs-are-bimodal). ⛔ Do not fix it by moving a seed.
+⚠ **The predecessor of this paragraph said "21 `test_golden_output` failures plus one", and both halves
+have since resolved**: the goldens were regenerated, and
+`tests/scenarios_aligned/test_paralogs.py::test_gdna_sweep[gdna_100]` — a real EM unidentifiability, not
+flakiness (TRAPS: identical-paralogs-are-bimodal) — now passes. ⛔ If that row starts failing again, do
+not fix it by moving a seed.
 
-⭐ **"22 failures, 21 goldens and the paralog row" is the baseline. A 23rd failure, or any other
-non-golden name in the list, is a regression.**
+⛔⛔ **AND THE OLD WARNING ABOUT THE GOLDENS WAS RIGHT ABOUT THE MECHANISM, WHICH IS NOW MEASURED.** It
+said the goldens "run under the default sampling mode, so a flaky expectation baked in now is permanent".
+The default is `EMConfig.seed = None` with `assignment_mode = "sample"`, and two runs of the identical
+pipeline on the identical BAM genuinely return different transcript counts — 4 transcripts differing by
+up to 43 fragments on one small toy. `TRAPS: the-deliverable-is-not-reproducible-by-default`.
+⭐ So: **regenerate the goldens twice and diff**, and pin `EMConfig.seed` in any instrument that compares
+two end-to-end runs (`quant_accuracy.py` does, and prints a `base_reseed` noise floor beside the effect).
 
 ---
 

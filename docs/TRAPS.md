@@ -36,7 +36,7 @@ here that reads like a status report is a bug in this file.
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **97 rules. Read the group that matches what you are about to do, then open only those.** Cite one
+⭐ **98 rules. Read the group that matches what you are about to do, then open only those.** Cite one
 as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.py` keeps it that way.
 
 **Validation and gates**
@@ -50,6 +50,7 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `a-gate-that-already-passed` — A gate that already passes is not a falsification.
 - `right-conditional-wrong-marginal` — When a per-observation conditional is correct, no conditional comparison can detect a missing
 - `byte-identity-gate` — A bit-identity gate has lied in both directions.
+- `the-deliverable-is-not-reproducible-by-default` — THE SHIPPED PIPELINE DOES NOT REPRODUCE ITSELF, SO AN END-TO-END A/B ON
 - `a-clip-hides-a-scale-error` — A min() clip hid an exact factor of 2 for months.
 - `an-ablation-that-never-ran` — AN ABLATION THAT NEVER RAN READS AS "NO EFFECT", AND TWO IMPORT HABITS MAKE THAT EASY.
 - `a-zero-count-is-a-measurement` — A ZERO COUNT IS A MEASUREMENT OF A DENSITY, NOT AN ABSENCE OF DATA — AND KEYING PRECISION
@@ -88,6 +89,7 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `substitution-understates-a-source` — A CEILING BY SUBSTITUTION UNDERSTATES A MESSAGE SOURCE.
 - `a-locked-object-is-not-a-control` — A STRUCTURALLY LOCKED OBJECT IS NOT A CONTROL.
 - `draining-breaks-the-oracle` — A per-fragment-independent partition stops being one the moment a downstream step conditions on
+- `an-equal-length-panel-defeats-the-lift` — THE REPAIR FOR THE RULE ABOVE HAS A SUBSTRATE IT CANNOT WORK ON, AND IT IS THE
 - `weight-it-like-the-consumer` — A bp-weighted mean and a fragment-weighted mean answer different questions.
 - `a-support-ceiling-is-the-clamp` — A SUPPORT CEILING THAT MATCHES THE CLAMP IS NOT A MATCH — it is the clamp.
 - `log-variance-is-not-linear` — Every "is the declared precision earned?" number written before 2026-07-28 compared a LOG-space
@@ -101,7 +103,6 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `pure-and-length-censored` — A POOL CAN BE COMPOSITION-PURE AND LENGTH-CENSORED AT THE SAME TIME, and the second is invisible
 - `divide-by-a-probability` — A POOL DIVIDED BY ITS OPPORTUNITY MUST BE DIVIDED BY A PROBABILITY, NOT BY A COUNT.
 - `opposite-tilts-must-not-pool` — POOLS WITH OPPOSITE TILTS MUST NOT BE POOLED RAW.
-- `146` — 05 where the contained pool alone said 88.0.
 - `fractional-mass-is-the-problem` — Fractional mass IS the partitioning problem.
 - `conservation-misses-mis-attribution` — Mass conservation does not catch mis-attribution.
 
@@ -238,6 +239,22 @@ passes and only a check on the marginal fails.
 because the comparison looped over the new arm's rows; and a stored baseline went stale so unmodified
 HEAD no longer reproduced it. **Re-record the baseline from the current tree in the same session**; if
 HEAD-vs-baseline is not 100 %, the baseline is what is broken.
+
+**the-deliverable-is-not-reproducible-by-default. ⛔⛔ THE SHIPPED PIPELINE DOES NOT REPRODUCE ITSELF, SO AN END-TO-END A/B ON
+THE DEFAULT CONFIG MEASURES ITS EFFECT PLUS A SAMPLING DRAW.** `EMConfig.seed` defaults to **`None`** and
+`assignment_mode` to **`"sample"`**, so the EM's final hard assignment is an *unseeded* categorical draw.
+Two back-to-back runs of the identical pipeline on the identical BAM returned different transcript counts
+— measured on the gate toy: **4 transcripts differing by up to 43 fragments**. Setting any fixed seed makes
+it exact, and so does `assignment_mode="fractional"`.
+⛔ **Found by the byte-identity gate above, on the arm that was supposed to be free.** The first
+end-to-end `noop` arm — a wrapper that builds the oracle prior and then discards it — came back differing
+on 80 % of transcripts, which reads as "the injection plumbing is broken" and is not. Every arm in
+`quant_accuracy.py` now pins the seed, and `base_reseed` re-runs the baseline at `seed + 1` so the noise
+floor is printed in the same units as the effect.
+⚠ **This is a property of the tool, not of the harness, and it has not been ruled on.** A quantifier whose
+output moves run to run is a defensible design (the draw is how a hard assignment is made from a posterior)
+and it is also a surprise to a user diffing two runs. Whether the default should change is an owner call;
+what is settled is that **no measurement of the deliverable is attributable without pinning it.**
 
 **a-clip-hides-a-scale-error. A `min()` clip hid an exact factor of 2 for months.** Pooled seam density read 1.994× truth
 because the code SUMMED two faces' mass and divided by their AVERAGE. It survived 29 tests: all four
@@ -573,6 +590,21 @@ The second pass breaks that: its multinomial is scored against the payload's *ow
 partitions drained separately are not the whole drained. **The identity that makes a truth source valid
 also fixes where in the pipeline it can be taken** — and the honest response is to measure the undrained
 stage rather than to drain the parts and hope.
+
+**an-equal-length-panel-defeats-the-lift. ⛔⛔ THE REPAIR FOR THE RULE ABOVE HAS A SUBSTRATE IT CANNOT WORK ON, AND IT IS THE
+MAIN PANEL.** `lift_choices` restores the identity by replaying the whole library's already-drawn hypotheses
+inside each origin partition, and its own docstring states the one ambiguity: records that tie on the
+deferred bank's canonical key cannot be told apart, so the assignment is greedy and the count is returned
+rather than swallowed. On **distinct-span** substrates that count is 0 and the lift is exact.
+⛔ **The ladder is built with EQUAL configured fragment lengths, which makes span collisions the common case
+by construction.** Measured over all 36 conditions: **265,781 of 6,774,503 held fragments (3.92 %)** are
+ambiguous, and replaying deposits **22,518 spliced records inside the gdna partition** — which
+`OracleTruth._validate` refuses, correctly, because gDNA does not splice.
+⭐ **So the refusal is the finding, not an obstacle to route around.** The right response was to run both
+sides UNDRAINED and then *price* the caveat instead of asserting it was small: re-deriving the shipped prior
+on the drained payload moves it by **0.153 %** (gDNA arm) and **0.462 %** (RNA arm), against effects of
+2.5–94 %. ⚠ A returned-and-reported ambiguity count is what made this a two-minute diagnosis instead of a
+silently biased truth source — the same argument as `waive-with-a-measurement`, one layer down.
 
 **weight-it-like-the-consumer. A bp-weighted mean and a fragment-weighted mean answer different questions.** An "11 % over-call"
 was a bp-weighted geometric mean; the estimator is fragment-weighted, 89 % of the mass sat where the

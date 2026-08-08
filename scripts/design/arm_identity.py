@@ -43,9 +43,15 @@ from pathlib import Path
 #: where `ladder_arm_ab.py --out` wrote the arms. Override with $RIGEL_ARMS.
 D = Path(os.environ.get("RIGEL_ARMS", Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_arms"))
 
-#: ⛔ NOT compared: the arm's own name, which differs BY CONSTRUCTION and would report a difference on
-#: every row. Everything else in the row is a measurement and is compared.
-_NOT_A_MEASUREMENT = frozenset({"arm"})
+#: ⛔ NOT compared: fields that differ BY CONSTRUCTION and would report a difference on every row.
+#: Everything else in the row is a measurement and is compared.
+#:
+#: * ``arm`` — the arm's own name.
+#: * ``seconds`` — wall clock. It is an observation of the MACHINE, not of the arm, and it never
+#:   repeats. ⚠ Added when ``quant_accuracy.py`` became the first producer to record one; keeping the
+#:   set this small is deliberate, because every name added here is a way for a real difference to
+#:   stop being reported. A field belongs here only if it CANNOT be equal between two identical arms.
+_NOT_A_MEASUREMENT = frozenset({"arm", "seconds"})
 
 
 def _resolve(name: str) -> Path:
@@ -99,25 +105,33 @@ def main() -> int:
         fails.append("BOTH arms are empty — this gate would otherwise pass vacuously (TRAPS: byte-identity-gate)")
 
     # ── the field sets must match too: a field added or dropped is a change to what was measured ──────
-    fields_a = {f for r in A.values() for f in r} - _NOT_A_MEASUREMENT
-    fields_b = {f for r in B.values() for f in r} - _NOT_A_MEASUREMENT
-    for f in sorted(fields_a - fields_b):
-        fails.append(f"field {f!r} present ONLY in {a_name}")
-    for f in sorted(fields_b - fields_a):
-        fails.append(f"field {f!r} present ONLY in {b_name}")
-
-    # ── every field of every shared row, compared as bits ─────────────────────────────────────────────
+    #
+    # ⛔⛔ **PER ROW KEY, NEVER OVER THE WHOLE FILE.** This used to union the field names across every
+    # row of an arm and then demand every row carry every name. That holds only while all rows share one
+    # schema — true for `ladder_arm_ab`, whose two axes are `node` and `edge` — and it reports a
+    # spurious failure the moment an arm emits rows of DIFFERENT shapes on different axes:
+    # `quant_accuracy.py` writes a `transcript` row and a `library` row per condition, and the global
+    # union made each one look like it was missing the other's fields. **1,296 false "field missing"
+    # failures on two arms that were in fact byte-identical.**
+    # ⭐ The per-key comparison is also strictly STRONGER, not a relaxation: a field present in A's row
+    # and absent from B's SAME row is still a failure, and it is now attributed to that row instead of
+    # being masked by any other row that happened to carry the name.
     shared = sorted(set(A) & set(B))
-    fields = sorted(fields_a & fields_b)
     n_cmp = 0
     worst: dict[str, tuple[float, tuple[str, str]]] = {}
     n_diff: dict[str, int] = {}
+    all_fields: set[str] = set()
     for k in shared:
         ra, rb = A[k], B[k]
+        fa = set(ra) - _NOT_A_MEASUREMENT
+        fb = set(rb) - _NOT_A_MEASUREMENT
+        for f in sorted(fa - fb):
+            fails.append(f"field {f!r} present ONLY in {a_name} at {k[0]} {k[1]}")
+        for f in sorted(fb - fa):
+            fails.append(f"field {f!r} present ONLY in {b_name} at {k[0]} {k[1]}")
+        fields = sorted(fa & fb)
+        all_fields |= set(fields)
         for f in fields:
-            if f not in ra or f not in rb:
-                fails.append(f"field {f!r} missing from one arm at {k[0]} {k[1]}")
-                continue
             n_cmp += 1
             va, vb = ra[f], rb[f]
             if _same(va, vb):
@@ -129,6 +143,7 @@ def main() -> int:
                 d = math.inf
             if f not in worst or d > worst[f][0]:
                 worst[f] = (d, k)
+    fields = sorted(all_fields)
 
     print()
     print(f"      compared {n_cmp:,} scored fields over {len(shared)} rows x {len(fields)} fields")

@@ -4,7 +4,7 @@
     MOVE it to its permanent home (`ROADMAP.md` for a number, `TRAPS.md` for a lesson, `DESIGN.md` for a
     ruling, `EQUATIONS.md` for a derivation) and delete it here in the same edit. See `docs/dev/README.md`.
 
-    Opened 2026-08-07. ⭐ The settled version of everything below is `ROADMAP.md` §1.
+    Opened 2026-08-07. ⭐ The settled version of everything is `ROADMAP.md` §1.
 
 ## The goal, in one sentence
 
@@ -14,86 +14,42 @@
 ⛔ Both switches stay down for the entire campaign. `length_likelihood`'s panels and oracle caches are built
 and ready and it is still not time: turning it on mid-campaign makes every other number unattributable.
 
-## Where things stand
+## Status
 
-The tool **runs end to end** — 51 s on a 10 M-fragment condition, all outputs written, and **counts conserve
-exactly** (`mrna + nrna + gdna == n_unambig + n_em` to the fragment; the only excluded class is `chimeric`).
-So there is no plumbing to fix. What is unknown is how *accurate* it is, and where the error lives.
+| | item | state |
+|---|---|---|
+| 1 | **calibration-prior-vs-oracle** | ✅ **DONE.** `scripts/design/prior_vs_oracle.py` + 14 gates. Numbers MOVED to `ROADMAP.md` §1.1; lessons MOVED to `TRAPS.md` (`an-equal-length-panel-defeats-the-lift`) |
+| 2 | **tool-absolute-accuracy** | 🔧 instrument built — `scripts/design/quant_accuracy.py --arm base` + 9 gates. Panel running |
+| 3 | **error-downstream-of-calibration** | 🔧 same instrument, `--arm oracle`. Panel running |
+| 4 | **performance** | ⏸ not started. The brief is `ROADMAP.md` §1.0 — ⛔ profile on real cfRNA, not on this panel |
 
-Calibration is accurate on three of four strata (median library `f_gdna` error **0.005–0.012**) and
-**blind on the fourth**: unstranded × capture-ON reports **0.033–0.058** while the truth spans **0.00 → 0.98**.
-That is not a noisy estimate, it is a flat line, and it is the whole open problem.
+## What is still genuinely open — do not re-derive, these are questions
 
-## The four items
-
-### 1. calibration-prior-vs-oracle — ⛔ no instrument exists
-
-Calibration's endpoint is the EM's prior: `LocusPriors` in `calibration/priors.py`, three float64 arrays
-indexed by `multi_locus_id`:
-
-```
-gdna_prior_count   the gDNA component's Dirichlet pseudocount
-rna_prior_count    the RNA group's pseudocount (the EM splits it by evidence)
-gdna_eff_len       the IPR-contracted effective length of the gDNA component
-```
-
-⭐ **These are FRAGMENT COUNTS — the EM adds them straight to its own counts (`G = n_gdna + a_g`)** — which
-is what makes an oracle version computable at all: the origin-split truth gives every locus its true gDNA
-and RNA fragment counts, so "the correct prior" is a well-defined number rather than a modelling opinion.
-
-⚠ **Nothing compares `LocusPriors` to anything.** Grep confirms: every consumer is a unit test of its
-arithmetic, never its accuracy. That instrument is the first build of the campaign.
-
-Suggested shape — `scripts/design/prior_vs_oracle.py`, reusing `pass0_vs_oracle.py`'s oracle plumbing and
-the existing oracle caches:
-- build `LocusPriors` from the shipped calibration;
-- build the oracle `LocusPriors` by projecting origin-split truth onto the same loci;
-- report per locus and per stratum, **mass-weighted and unweighted**, and separately for the gDNA and RNA
-  arms — they are different questions and pooling them would hide a sign flip.
-
-### 2. tool-absolute-accuracy — ⚠ partial
-
-The panels carry `truth_abundances_nrna_none.tsv` (per transcript: `mrna_abundance`, `nrna_abundance`,
-`total_rna`, `spliced_length`), and `rigel.sim.analysis` exists. What does not exist is a per-condition
-transcript-level accuracy table across a whole panel. ⛔ Score against TRUTH, not against a previous run.
-
-### 3. error-downstream-of-calibration — ⛔ needs item 1 first, and it is the one that matters
-
-Inject the ORACLE prior from item 1 and re-quantify. **This decides the project's direction.** Every
-campaign for months has assumed the error is calibration's:
-
-- if a perfect prior removes most of the error → calibration is confirmed as the bottleneck and
-  `length_likelihood` becomes the next build;
-- if most of the error survives → that assumption is **wrong**, and the work belongs in the EM.
-
-⚠ It is a re-solve ceiling, so it needs a `noop` arm that is byte-identical (`TRAPS: byte-identity-gate`),
-and `vertex_ceiling.py` already carries reusable override plumbing of exactly this shape.
-
-### 4. performance — ⚠ measured on the wrong substrate
-
-Measured on one 10 M-fragment ladder condition (35,135-node chr22 index):
-
-```
-per-locus EM        15.9 s   47 %
-native scan          6.5 s   19 %
-calibration          6.5 s   19 %
-second-pass drain    3.5 s   10 %
-                    ------
-total               33.5 s
-```
-
-⭐ **Message propagation costs nothing measurable** — 33.7 s ON vs 33.5 s OFF. A hypothesis that the relay
-was the expensive part is refuted, so do not start there.
-
-⛔⛔ **This profile is upside down from the real one and both are correct.** Calibration cost is
-depth-INDEPENDENT — every node in the index is solved regardless of depth — so it scales with the INDEX
-while the EM scales with the DATA. On real cfRNA at genome scale (~1.5 M nodes) calibration has measured
-~66 s against the EM's ~24 s, the reverse of the table above. **Optimising against this panel would tune
-the wrong stage** (`TRAPS: toys-rank-hotspots-backwards`).
-
-Both substrates are on disk:
-- real cfRNA — `~/Downloads/rigel_runs/cfrna/` (4 samples, e.g. `mctp_vcap_rna20m_dna05m`, 11 G)
-- the genome-scale index — `~/Downloads/rigel_runs/refs/rigel_index`
+- ⛔ **The assembler over-calls gDNA by 15.1 % under capture with PERFECT masses in** (`ROADMAP.md` §1.1
+  ④). Diagnosed and not fixed. The suspect named by `assemble_priors`' own docstring is the
+  support-weighted pooling `Σm/ΣS`, which is exact only where `rho_c` is uniform *inside* the locus —
+  and capture puts a strong gradient there. **Nobody has tested that it is the cause.** A cheap probe:
+  score `O − F` against a per-locus measure of internal gDNA density spread; if the residual tracks it,
+  that is the mechanism.
+- ⚠ **`nrna_est` is a THIRD false-positive channel and nothing was watching it.** On `nrna_none` panels
+  the true nascent count is exactly 0, and at `g25 ss0.50 capture_on` the EM parked **~1.66 M** fragments
+  on synthetic nRNA entities. ⛔ `get_counts_df` DROPS the synthetics, so this is invisible in every
+  transcript-level table — `quant_accuracy.py` reports it on the `library` row for that reason. Whether
+  it is a defect or the expected behaviour of a nascent candidate with no nascent RNA present has not
+  been ruled on.
+- **Is `nrna_parent_count` (44,030) meant to differ from `nrna_total` (30,125)?** Not obviously a defect,
+  but nobody has stated the relation.
+- **`tpm_total_rna` + the nRNA table's `tpm` sums to 1,001,068, not 1,000,000** — 0.107 %, too large for
+  rounding, so the two tables normalise over slightly different denominators
+  (`estimator.py:504-510`). Small, real, and unexplained.
+- ⚠ **`CLAUDE.md`'s script table still cites numbered rule labels** — five distinct ones, in the
+  `arm_identity.py` and `backbone_parity.py` rows and in the xfail paragraph. The naming rule bans them
+  and `tests/test_no_jargon_labels.py` allowlists that one file, so the gate does not fire there.
+  ⛔ Do not paste the labels into this file to list them: the gate DOES cover `docs/dev/`, and it fired
+  on exactly that when this bullet was first written. Run
+  `python -m pytest tests/test_no_jargon_labels.py -q` with `CLAUDE.md` removed from the allowlist to
+  see them. They should be resolved to names, but that means knowing which rule each one WAS, and
+  guessing would be worse than leaving them — someone who has the mapping should do it.
 
 ## Substrate, all cached and verified
 
@@ -104,13 +60,6 @@ Both substrates are on disk:
 | `suite/flgap_long` | 4 | 32 M ✅ | gDNA ≫ RNA (+40.4 %) |
 | `suite/pilot` | 8 | scan cache only | chr22 + ERCC, 0 %/100 % gDNA |
 
-⭐ The flgap caches were verified by a cached re-run that was **byte-identical on all 208 scored fields**
-(2m39s cold → 21 s warm), so they are genuinely hit and not silently stale.
-
-## Open questions I could not answer
-
-- **Is `nrna_parent_count` (44,030) meant to differ from `nrna_total` (30,125)?** Not obviously a defect,
-  but nobody has stated the relation.
-- **`tpm_total_rna` + the nRNA table's `tpm` sums to 1,001,068, not 1,000,000** — 0.107 %, too large for
-  rounding, so the two tables normalise over slightly different denominators
-  (`estimator.py:504-510`). Small, real, and unexplained.
+⚠ **`quant_accuracy.py` needs `--jobs 2`, not 4, on this machine.** `run_pipeline` holds **7–8.5 GB**
+resident per 10 M-fragment condition; four concurrent shards drove the machine into swap and were slower
+than two.
