@@ -365,7 +365,7 @@ def info_class_masks(chain, region_arrays, substrate, gdna_pmf, rna_pmf) -> dict
     for k, view in ((NODE, substrate.node_contained), (EDGE, substrate.edge_unspliced)):
         sel = kind == k
         count[sel] = np.asarray(view.count, np.float64).sum(axis=1)[obj[sel]]
-        inv[sel] = np.asarray(view.inv_length_sum, np.float64).sum(axis=1)[obj[sel]]
+        inv[sel] = np.asarray(view.inv_length_sum, np.float64)[obj[sel]]
 
     eff_g, eff_r = np.asarray(mg.eff, np.float64), np.asarray(mr.eff, np.float64)
     m1_g, m1_r = np.asarray(mg.m1, np.float64), np.asarray(mr.m1, np.float64)

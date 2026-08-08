@@ -19,9 +19,18 @@ THE MODEL
         path        [====== block ======]                       crosses line 1
         path        [= block =]~~intron~~[==== block ====]       crosses nothing; uses a junction
 
-    Nodes count fragments **contained** (they fit inside) and **spanning** (they cover the node whole);
-    edges count fragments **crossing**. Every object stores THREE sums over the fragments that landed
-    on it: ``count`` = Sum 1, ``inv_length_sum`` = Sum 1/placements (fixed point), ``length_sum`` = Sum L.
+    Nodes count fragments **contained** (they fit inside); edges count fragments **crossing**.
+    ⭐ **Each population stores only the channels something reads**, and they differ: the two banks the
+    deconvolution consumes carry ``count`` = Sum 1, ``inv_length_sum`` = Sum 1/placements (fixed
+    point) and ``length_sum`` = Sum L; the certified-RNA banks carry fewer, because nothing
+    deconvolves a fragment that is already known to be RNA.
+
+    ⚠ A ``spanning`` population — one segment covering a node whole — used to exist and was **deleted
+    on evidence**: measured on the panel it reached **0 starved nodes** the bounding edges did not
+    already reach off capture, and 141 nodes / 822 fragments (0.008 %) under it. Its mass is not lost,
+    since a spanning fragment crosses both of the node's lines and is deposited there.
+    ⛔ One consequence, and it is structural: **no spliced fragment now touches the node axis at all**
+    (a spliced fragment can never be *contained* — both endpoints of an annotated intron are cuts).
 
 WHAT EACH OBJECT'S NUMBERS MEAN
     With ``placements`` the number of admissible start positions — ``L`` at a node, ``L − 1`` at a 0-bp
@@ -76,6 +85,7 @@ __all__ = [
     "Partition",
     "Tally",
     "inv_length_quantum",
+    "mass_quantum",
 ]
 
 #: ⭐ THE STRAND CONVENTION, and it is the same one everywhere in this file.
@@ -120,6 +130,27 @@ def inv_length_quantum(placements: int) -> int:
     if placements <= 0:
         raise ValueError(f"placements must be positive, got {placements}")
     return (2 * INV_LENGTH_SCALE + placements) // (2 * placements)
+
+
+def mass_quantum(slice_len: int, length: int, n_cross: int) -> int:
+    """``round(INV_LENGTH_SCALE * slice_len / (length * n_cross))``, halves AWAY FROM ZERO.
+
+    The CONSERVED MASS's quantum. Same fixed point and same rounding mode as
+    :func:`inv_length_quantum`, and for the same reason: integer addition is associative, so a
+    per-worker merge is bit-identical at any thread count, which float accumulation is not.
+
+    ⚠ **The representation is not exact and the identity it carries is.** ``share`` is a rational with
+    denominator ``length * n_cross``; rounding it onto the 2^-32 grid costs at most half a quantum per
+    deposit, so a fragment's deposits sum to ``1 +/- (deposits / 2) * 2^-32``. Measured over five toy
+    rungs: worst per-fragment deviation **4.657e-10 fragments**, worst bank-total drift **2.328e-10**.
+
+    ⚠ No overflow: ``2 * INV_LENGTH_SCALE * slice_len`` is ``2^33 * slice_len`` and ``slice_len`` never
+    exceeds the fragment length, so at any realistic ``max_fragment_length`` it stays far under uint64.
+    """
+    if length <= 0 or n_cross <= 0:
+        raise ValueError(f"length and n_cross must be positive, got {length}, {n_cross}")
+    denominator = length * n_cross
+    return (2 * INV_LENGTH_SCALE * slice_len + denominator) // (2 * denominator)
 
 
 class DepositOutcome(enum.Enum):
@@ -462,33 +493,87 @@ def _segments(start: int, end: int, introns) -> list[tuple[int, int]]:
 
 @dataclass(slots=True)
 class Tally:
-    """The accumulator's output. THREE arrays per population, all integer sums over its fragments.
+    """The accumulator's output — integer sums over the fragments that landed on each object.
 
     ``count`` = ``Sum 1`` carries the statistical power (a Beta-Binomial needs an integer);
     ``inv_length_sum`` = ``Sum 1/placements`` carries the level, and is an exact model-free density at an
     edge but NOT at a node; ``length_sum`` = ``Sum L`` is the second length tilt, and is what lets two
-    components with the same mean fragment length be told apart at all.
+    components with the same mean fragment length be told apart at all; ``mass`` is the conserved
+    fragment count, and sums to ONE per fragment.
+
+    ⭐⭐ **THE POPULATIONS DO NOT ALL CARRY THE SAME CHANNELS, AND THAT IS THE DESIGN.** A channel is
+    stored where something reads it and nowhere else::
+
+        node_contained    count  inv_length_sum  length_sum       the mixture, on the node axis
+        edge_unspliced    count  inv_length_sum  length_sum  mass the mixture, on the line axis
+        edge_spliced      count                              mass certified RNA — nothing deconvolves it
+        junction          count  inv_length_sum                   inv_length_sum is LIVE in second_pass
+
+    ⛔ Six banks were removed on that rule (three ``node_spanning_*``, the two spliced-edge moments and
+    ``sj_length_sum``). ⚠ A future channel is added the same way — because a named consumer needs it,
+    not because the shape would be tidier.
 
     All three are integers, so **no fractional quantity ever enters a likelihood** and a per-worker merge
     is bit-identical at any thread count.
     """
 
     node_contained_count: np.ndarray  # uint32[n_nodes, 2]
-    node_contained_inv_length_sum: np.ndarray  # uint64[n_nodes, 2]
-    node_contained_length_sum: np.ndarray  # uint64[n_nodes, 2] — Sum L, the second length tilt
-    node_spanning_count: np.ndarray  # uint32[n_nodes, 2]
-    node_spanning_inv_length_sum: np.ndarray  # uint64[n_nodes, 2]
-    node_spanning_length_sum: np.ndarray  # uint64[n_nodes, 2] — Sum L, the second length tilt
+    #: ⭐ uint64[n_nodes] — ONE column. See :meth:`Tally.zeros`: the length moments are
+    #: strand-AGNOSTIC, and every consumer summed the two columns before using them.
+    node_contained_inv_length_sum: np.ndarray
+    node_contained_length_sum: np.ndarray  # uint64[n_nodes] — Sum L, the second length tilt
     node_start_count: np.ndarray  # uint32[n_nodes] — one per accepted fragment; THE invariant
     edge_unspliced_count: np.ndarray  # uint32[n_edges, 2]
-    edge_unspliced_inv_length_sum: np.ndarray  # uint64[n_edges, 2]
-    edge_unspliced_length_sum: np.ndarray  # uint64[n_edges, 2] — Sum L, the second length tilt
-    edge_spliced_count: np.ndarray  # uint32[n_edges, 2] — certified RNA: gDNA cannot be spliced
-    edge_spliced_inv_length_sum: np.ndarray  # uint64[n_edges, 2]
-    edge_spliced_length_sum: np.ndarray  # uint64[n_edges, 2] — Sum L, the second length tilt
-    sj_count: np.ndarray  # uint32[n_sj, 2]
-    sj_inv_length_sum: np.ndarray  # uint64[n_sj, 2]
-    sj_length_sum: np.ndarray  # uint64[n_sj, 2] — Sum L, the second length tilt
+    edge_unspliced_inv_length_sum: np.ndarray  # uint64[n_edges] — ONE column
+    edge_unspliced_length_sum: np.ndarray  # uint64[n_edges] — Sum L, the second length tilt
+    #: ⭐⭐ uint64[n_edges] — **THE CONSERVED MASS**, fixed point. See :meth:`Accumulator.deposit`.
+    #: A COUNT and a MASS are two different deposits and one number cannot be both: ``count`` is
+    #: extensive and discrete (a Beta-Binomial needs integers) and is ``+1`` on every line a fragment
+    #: crosses, so a fragment contributes ``max(K, 1)`` of them; this sums to ONE per fragment.
+    #:
+    #: ⛔ **ONE COLUMN, NOT TWO, AND THAT IS DELIBERATE.** Every other edge bank is ``[n_edges, 2]``
+    #: because the two genome strands are read separately — ``strand_deconv`` reads
+    #: ``edge_unspliced.count`` per column. Nothing reads a mass per strand: the mass exists to convert
+    #: an object-incidence total into a fragment count, and that question has no strand in it. A column
+    #: nothing reads is half the bank wasted by construction, which is the defect the surviving
+    #: ``*_length_sum`` banks already carry and this one declines to repeat.
+    edge_unspliced_mass: np.ndarray
+    #: uint32[n_edges, 2] — certified RNA: gDNA cannot be spliced. ⭐ **COUNT AND MASS ONLY.** Its two
+    #: length moments were removed: nothing deconvolves a certified-RNA crossing, so they had no
+    #: consumer, and `pool_lengths`' RNA_SPLICED row already carries that population's lengths.
+    edge_spliced_count: np.ndarray
+    #: ⭐ uint64[n_edges] — the same rule, routed by the same ``spliced`` flag.
+    #:
+    #: ⛔ **A PARTIAL BY CONSTRUCTION, AND NOT A CONSERVATION LEDGER.** A spliced fragment's blocks that
+    #: contain no interior line deposit nothing here — their accounting is on the junction axis — so
+    #: this sums to ``crossed_block_len / L`` per fragment, never to 1. That is correct: it is a
+    #: per-LINE certified-RNA term, exactly commensurate with the unspliced mass at the same line
+    #: (both are "the share of this fragment's bases adjacent to this line"), which is what makes the
+    #: two safe to compare there. ⛔ It is NOT "the number of spliced fragments at this line".
+    #:
+    #: ⭐ It exists so that ``mass`` is not the ONE channel that ignores the spliced/unspliced split.
+    #: Every edge channel is selected by one tuple at deposit time; a spliced fragment's mass landing
+    #: in the unspliced bank would put certified RNA into the competition the prior arbitrates.
+    edge_spliced_mass: np.ndarray
+    #: uint32[n_sj, 2] — ⛔⛔ **BOTH GENOME-STRAND COLUMNS ARE RETAINED, AND NOT BECAUSE ANYTHING READS
+    #: THEM YET** (owner ruling, 2026-08-08). A junction is stranded by its genomic splicing MOTIF, so
+    #: the strand of the *fragments* on it looks redundant, and every consumer today sums the two.
+    #:
+    #: ⭐ **The reason is aligner-artifact detection.** Aligners emit false-positive ``N`` CIGAR ops from
+    #: plain genomic DNA. ``rigel.splice_blacklist`` catches those the sister tool ``alignable`` has
+    #: enumerated by coordinate — an a-priori list, and far from complete. The EMPIRICAL detector is
+    #: this column: in a stranded library a real junction inherits the global strand specificity, while
+    #: an artifact deposits on BOTH strands and deviates from it. ⚠ Unstranded data cannot use it
+    #: (κ = ½ leaves nothing to deviate from), which is a property of the detector, not a reason to drop
+    #: the column.
+    #:
+    #: ⛔ The discriminating information lives ONLY in the split — a clean junction and an artifactual
+    #: one carry the same total. Gated by
+    #: ``test_the_junction_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION``.
+    sj_count: np.ndarray
+    #: uint64[n_sj] — ⭐ LIVE: ``second_pass.py`` scores a held fragment's junction evidence with it.
+    #: ⚠ ``sj_length_sum`` is gone for the same reason the spliced edge moments are.
+    sj_inv_length_sum: np.ndarray
     pool_lengths: np.ndarray  # int64[5, max_fragment_length + 1] — binned at L, once per fragment
     #: uint32[max_fragment_length + 1] — ⭐ **TRAPS: a-purity-filter-is-a-length-filter: EVERY deposited fragment, binned at its own L, with no
     # purity condition.** The five pure pools above are deliberately CONDITIONED
@@ -520,25 +605,26 @@ class Tally:
             return np.zeros((rows, N_STRAND_COLUMNS), np.uint32)
 
         def inv_length(rows):
-            return np.zeros((rows, N_STRAND_COLUMNS), np.uint64)
+            # ⭐ ONE column. The length moments are strand-AGNOSTIC: which strand a read aligned to says
+            # nothing about whether the molecule was gDNA or RNA, and every consumer summed the two.
+            return np.zeros(rows, np.uint64)
+
+        def mass(rows):
+            return np.zeros(rows, np.uint64)  # ⭐ ONE column — see Tally.edge_unspliced_mass
 
         return cls(
             node_contained_count=counts(n_nodes),
             node_contained_inv_length_sum=inv_length(n_nodes),
             node_contained_length_sum=inv_length(n_nodes),
-            node_spanning_count=counts(n_nodes),
-            node_spanning_inv_length_sum=inv_length(n_nodes),
-            node_spanning_length_sum=inv_length(n_nodes),
             node_start_count=np.zeros(n_nodes, np.uint32),
             edge_unspliced_count=counts(n_edges),
             edge_unspliced_inv_length_sum=inv_length(n_edges),
             edge_unspliced_length_sum=inv_length(n_edges),
+            edge_unspliced_mass=mass(n_edges),
             edge_spliced_count=counts(n_edges),
-            edge_spliced_inv_length_sum=inv_length(n_edges),
-            edge_spliced_length_sum=inv_length(n_edges),
+            edge_spliced_mass=mass(n_edges),
             sj_count=counts(n_sj),
             sj_inv_length_sum=inv_length(n_sj),
-            sj_length_sum=inv_length(n_sj),
             pool_lengths=np.zeros((len(FragmentPool), max_length + 1), np.int64),
             deposited_lengths=np.zeros(max_length + 1, np.uint32),
             qc={outcome.value: 0 for outcome in DepositOutcome}
@@ -815,15 +901,12 @@ class Accumulator:
         # contiguous index range and no container is needed. A node is SPANNED iff ONE segment crosses
         # both of its lines — not merely "both lines crossed", which would count a node the fragment
         # JUMPS OVER, whose two lines are touched by the two flanking segments from opposite sides.
-        edge_count, edge_inv_length, edge_length = (
-            (t.edge_spliced_count, t.edge_spliced_inv_length_sum, t.edge_spliced_length_sum)
-            if spliced
-            else (
-                t.edge_unspliced_count,
-                t.edge_unspliced_inv_length_sum,
-                t.edge_unspliced_length_sum,
-            )
-        )
+        # ⭐ TWO channels on the spliced bank, FOUR on the unspliced one, and the asymmetry is the
+        # design rather than an omission. A spliced crossing is certified RNA: nothing deconvolves it,
+        # so its length moments have no consumer and are not stored. The unspliced bank is the mixture,
+        # and `length_likelihood` is built on exactly its moments.
+        edge_count = t.edge_spliced_count if spliced else t.edge_unspliced_count
+        edge_mass = t.edge_spliced_mass if spliced else t.edge_unspliced_mass
         quantum_edge = inv_length_quantum(length - 1) if length >= 2 else 0
         quantum_node = inv_length_quantum(length)
         n_crossed, sole_line = 0, -1
@@ -832,20 +915,43 @@ class Accumulator:
             last = int(np.searchsorted(cuts, seg_end, side="left"))
             for line in range(first, last):
                 edge_count[edge_base + line - 1, column] += 1
-                edge_inv_length[edge_base + line - 1, column] += quantum_edge
-                edge_length[edge_base + line - 1, column] += length
-            for line in range(first, last - 1):  # the node between two consecutive crossed lines
-                t.node_spanning_count[node_base + line, column] += 1
-                t.node_spanning_inv_length_sum[node_base + line, column] += quantum_node
-                t.node_spanning_length_sum[node_base + line, column] += length
+                if not spliced:
+                    t.edge_unspliced_inv_length_sum[edge_base + line - 1] += quantum_edge
+                    t.edge_unspliced_length_sum[edge_base + line - 1] += length
+            # ── ⭐⭐ THE CONSERVED MASS, per SLICE rather than per line ────────────────────────────
+            # The crossed cuts split this segment into `last - first + 1` slices. A slice is bounded by
+            # one crossed line at each end, except the first and last, which have the segment's own end
+            # on one side. Its `slice_len / length` is shared equally between the lines that DO bound
+            # it, so every slice with a bounding line disposes of exactly its own bases::
+            #
+            #     Sum over the fragment  =  Sum slice_len / length  =  1
+            #
+            # ⭐ Coverage-weighted, NOT `1/K`. Both conserve; only this one says WHERE the fragment sat,
+            # and only this one is expressible per base — which is how the two are told apart at all.
+            # ⚠ A segment crossing no line contributes nothing: for a single-segment path that is the
+            # CONTAINED case, whose whole fragment is already the node's `contained_count`; for a
+            # multi-segment one it is an unannotated intron's block, and its mass has nowhere conserved
+            # to go. So the identity is exact over deposited, unspliced, annotated fragments.
+            n_slices = last - first + 1
+            for i in range(n_slices if last > first else 0):
+                lo = seg_start if i == 0 else int(cuts[first + i - 1])
+                hi = seg_end if i == n_slices - 1 else int(cuts[first + i])
+                left_line = first + i - 1 if i > 0 else -1
+                right_line = first + i if i < n_slices - 1 else -1
+                n_cross = int(left_line >= 0) + int(right_line >= 0)
+                quantum = mass_quantum(hi - lo, length, n_cross)
+                for line in (left_line, right_line):
+                    if line >= 0:
+                        edge_mass[edge_base + line - 1] += quantum
             if last > first:
                 sole_line = first if (n_crossed == 0 and last - first == 1) else -1
                 n_crossed += last - first
 
         for jid in sj_ids:
             t.sj_count[jid, column] += 1
-            t.sj_inv_length_sum[jid, column] += quantum_edge
-            t.sj_length_sum[jid, column] += length
+            # ⚠ `inv_length_sum` only. `sj_length_sum` was removed: nothing read it, and `pool_lengths`
+            # already carries the spliced population's length distribution (RNA_SPLICED) unconditioned.
+            t.sj_inv_length_sum[jid] += quantum_edge
 
         # ── contained: the WHOLE path lies inside ONE node ────────────────────────────────────────
         # ⚠ Not merely "crossed no line". An unannotated intron can swallow every line between two
@@ -858,8 +964,8 @@ class Accumulator:
         if not sj_ids and first_node == self._local_node(cuts, last_base):
             contained_node = node_base + first_node
             t.node_contained_count[contained_node, column] += 1
-            t.node_contained_inv_length_sum[contained_node, column] += quantum_node
-            t.node_contained_length_sum[contained_node, column] += length
+            t.node_contained_inv_length_sum[contained_node] += quantum_node
+            t.node_contained_length_sum[contained_node] += length
 
         pool = self._pool(spliced, contained_node, sole_line, node_base)
         if pool is not None:

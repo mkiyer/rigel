@@ -115,8 +115,8 @@ def census(payload, scored, junctions, t_ids, truth: dict[str, float] | None) ->
     #: and the supporting transcripts of the hypotheses that claim one
     empty_slot_supporters: dict[int, set[int]] = {}
 
-    sj_flux = np.asarray(payload.sj_inv_length_sum, dtype=np.float64).sum(axis=1)
-    edge_flux = np.asarray(payload.edge_unspliced_inv_length_sum, dtype=np.float64).sum(axis=1)
+    sj_flux = np.asarray(payload.sj_inv_length_sum, dtype=np.float64)
+    edge_flux = np.asarray(payload.edge_unspliced_inv_length_sum, dtype=np.float64)
 
     for i in range(deferred.n_fragments):
         ref = int(deferred.ref[i])

@@ -605,22 +605,46 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
             std::lower_bound(cuts_.begin(), cuts_.end(), seg_end) - cuts_.begin();
 
         for (std::int64_t line = first; line < last; ++line) {
+            // ⭐ TWO channels on the spliced bank, FOUR on the unspliced one, and the asymmetry is
+            // the design: a spliced crossing is certified RNA, nothing deconvolves it, so its length
+            // moments have no consumer and are not stored.
             ContiguousEdge& edge = edges_[static_cast<std::size_t>(line - 1)];
             if (spliced) {
                 edge.spliced_count[col] += 1u;
-                edge.spliced_inv_length_sum[col] += quantum_edge;
-                edge.spliced_length_sum[col] += static_cast<std::uint64_t>(length);
             } else {
                 edge.unspliced_count[col] += 1u;
-                edge.unspliced_inv_length_sum[col] += quantum_edge;
-                edge.unspliced_length_sum[col] += static_cast<std::uint64_t>(length);
+                edge.unspliced_inv_length_sum += quantum_edge;
+                edge.unspliced_length_sum += static_cast<std::uint64_t>(length);
             }
         }
-        for (std::int64_t line = first; line + 1 < last; ++line) {  // the node between two crossed lines
-            Node& node = nodes_[static_cast<std::size_t>(line)];
-            node.spanning_count[col] += 1u;
-            node.spanning_inv_length_sum[col] += quantum_node;
-            node.spanning_length_sum[col] += static_cast<std::uint64_t>(length);
+        // ── ⭐⭐ THE CONSERVED MASS, per SLICE rather than per line ────────────────────────────────
+        // The crossed cuts split this segment into `last - first + 1` slices. A slice is bounded by one
+        // crossed line at each end, except the first and last, which have the segment's own end on one
+        // side. Its `slice_len / length` is shared equally between the lines that DO bound it, so every
+        // slice disposes of exactly its own bases:  Sum over the fragment = Sum slice_len / length = 1.
+        //
+        // ⭐ Coverage-weighted, NOT `1/K`. Both conserve; only this one says WHERE the fragment sat, and
+        // only this one is expressible per base — which is how the two are told apart at all.
+        // ⚠ A segment crossing no line contributes nothing, so the loop below simply does not run: for a
+        // single-segment path that is the CONTAINED case, whose whole fragment is already the node's
+        // `contained_count`; for a multi-segment one it is an unannotated intron's block, whose mass has
+        // nowhere conserved to go. The identity is exact over deposited, unspliced, annotated fragments.
+        if (last > first) {
+            const std::int64_t n_slices = last - first + 1;
+            for (std::int64_t i = 0; i < n_slices; ++i) {
+                const std::int64_t lo = (i == 0) ? seg_start : cuts_[static_cast<std::size_t>(first + i - 1)];
+                const std::int64_t hi = (i == n_slices - 1) ? seg_end : cuts_[static_cast<std::size_t>(first + i)];
+                const std::int64_t left_line  = (i > 0) ? first + i - 1 : -1;
+                const std::int64_t right_line = (i < n_slices - 1) ? first + i : -1;
+                const std::int64_t n_cross    = (left_line >= 0 ? 1 : 0) + (right_line >= 0 ? 1 : 0);
+                const std::uint64_t quantum   = mass_quantum(hi - lo, length, n_cross);
+                for (const std::int64_t line : {left_line, right_line}) {
+                    if (line < 0) continue;
+                    ContiguousEdge& edge = edges_[static_cast<std::size_t>(line - 1)];
+                    if (spliced) edge.spliced_mass += quantum;
+                    else         edge.unspliced_mass += quantum;
+                }
+            }
         }
         if (last > first) {
             sole_line = (n_crossed == 0 && last - first == 1) ? first : -1;
@@ -631,8 +655,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     for (const std::int32_t id : sj_ids) {
         JunctionEdge& junction = junctions_[static_cast<std::size_t>(id)];
         junction.count[col] += 1u;
-        junction.inv_length_sum[col] += quantum_edge;
-        junction.length_sum[col] += static_cast<std::uint64_t>(length);
+        junction.inv_length_sum += quantum_edge;
     }
 
     // ── contained: the WHOLE path lies inside ONE node ────────────────────────────────────────────
@@ -644,8 +667,8 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         contained_node = first_node;
         Node& node = nodes_[static_cast<std::size_t>(contained_node)];
         node.contained_count[col] += 1u;
-        node.contained_inv_length_sum[col] += quantum_node;
-        node.contained_length_sum[col] += static_cast<std::uint64_t>(length);
+        node.contained_inv_length_sum += quantum_node;
+        node.contained_length_sum += static_cast<std::uint64_t>(length);
     }
 
     if (!pool_lengths_.empty()) {
@@ -774,12 +797,10 @@ void Accumulator::merge_from(const Accumulator& other) {
     for (std::size_t i = 0; i < nodes_.size(); ++i) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
             nodes_[i].contained_count[c]   += other.nodes_[i].contained_count[c];
-            nodes_[i].spanning_count[c]    += other.nodes_[i].spanning_count[c];
-            nodes_[i].contained_inv_length_sum[c] += other.nodes_[i].contained_inv_length_sum[c];
-            nodes_[i].spanning_inv_length_sum[c]  += other.nodes_[i].spanning_inv_length_sum[c];
-            nodes_[i].contained_length_sum[c] += other.nodes_[i].contained_length_sum[c];
-            nodes_[i].spanning_length_sum[c]  += other.nodes_[i].spanning_length_sum[c];
         }
+        // ⚠ Outside the column loop — these have ONE value per node, not one per strand.
+        nodes_[i].contained_inv_length_sum += other.nodes_[i].contained_inv_length_sum;
+        nodes_[i].contained_length_sum += other.nodes_[i].contained_length_sum;
         node_start_count_[i] += other.node_start_count_[i];
     }
     for (std::size_t i = 0; i < deposited_lengths_.size(); ++i) {
@@ -789,18 +810,18 @@ void Accumulator::merge_from(const Accumulator& other) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
             edges_[i].unspliced_count[c]   += other.edges_[i].unspliced_count[c];
             edges_[i].spliced_count[c]     += other.edges_[i].spliced_count[c];
-            edges_[i].unspliced_inv_length_sum[c] += other.edges_[i].unspliced_inv_length_sum[c];
-            edges_[i].spliced_inv_length_sum[c]   += other.edges_[i].spliced_inv_length_sum[c];
-            edges_[i].unspliced_length_sum[c] += other.edges_[i].unspliced_length_sum[c];
-            edges_[i].spliced_length_sum[c]   += other.edges_[i].spliced_length_sum[c];
         }
+        // ⚠ Outside the column loop — these have ONE value per edge, not one per strand.
+        edges_[i].unspliced_inv_length_sum += other.edges_[i].unspliced_inv_length_sum;
+        edges_[i].unspliced_length_sum += other.edges_[i].unspliced_length_sum;
+        edges_[i].unspliced_mass += other.edges_[i].unspliced_mass;
+        edges_[i].spliced_mass   += other.edges_[i].spliced_mass;
     }
     for (std::size_t i = 0; i < junctions_.size(); ++i) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
             junctions_[i].count[c]   += other.junctions_[i].count[c];
-            junctions_[i].inv_length_sum[c] += other.junctions_[i].inv_length_sum[c];
-            junctions_[i].length_sum[c] += other.junctions_[i].length_sum[c];
         }
+        junctions_[i].inv_length_sum += other.junctions_[i].inv_length_sum;
     }
     // ⚠ Throws rather than skipping. A size mismatch means the two were built with different `max_length`,
     // and silently not merging would lose one side's pools entirely — the same class of defect as the

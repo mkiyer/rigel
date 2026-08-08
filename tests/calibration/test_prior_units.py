@@ -67,29 +67,116 @@ def _point_pmf(mean_len: int, max_len: int = 512) -> np.ndarray:
     return p
 
 
+def _enumerate(node_len, w):
+    """Deposit EVERY length-``w`` fragment at EVERY start position, through the SPECIFICATION itself.
+
+    Returns ``(n_fragments, contained_count, crossing_count, conserved_mass)`` — the exact banks the
+    accumulator would hold for a uniform field of unit density and a point-mass length.
+    """
+    import sys
+    from pathlib import Path as _P
+
+    sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
+    from native._accumulator_reference import INV_LENGTH_SCALE, Accumulator, Partition
+
+    cuts = np.concatenate([[0.0], np.cumsum(np.asarray(node_len, dtype=np.float64))]).astype(int)
+    partition = Partition.from_cuts([cuts.tolist()], node_types=[[0] * (len(cuts) - 1)])
+    acc = Accumulator(partition, max_fragment_length=10**6)
+    n = 0
+    for start in range(0, int(cuts[-1]) - int(w) + 1):
+        acc.deposit(0, start, start + int(w))
+        n += 1
+    t = acc.tally
+    return (
+        n,
+        np.asarray(t.node_contained_count, np.int64).sum(axis=1).astype(np.float64),
+        np.asarray(t.edge_unspliced_count, np.int64).sum(axis=1).astype(np.float64),
+        np.asarray(t.edge_unspliced_mass, np.uint64).astype(np.float64) / INV_LENGTH_SCALE,
+    )
+
+
+def _mass_per_crossing(node_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
+    """The share the ACCUMULATOR itself would deposit on this tiling, by brute-force enumeration.
+
+    ⛔ **Not derived from the answer these tests check.** Every fragment of each component's length is
+    deposited at every start position through the SPECIFICATION, and the share is read off its own
+    conserved-mass bank as ``mass / count``. Enumerating every start at unit weight IS the analytic
+    uniform field the masses above model — for a point-mass pmf the two agree exactly — so the fixture
+    stays one self-consistent library rather than two models that have to be argued equal
+    (``TRAPS: a-test-that-redefines``).
+
+    ⚠ **ONE share for BOTH components, which is what ``assemble_priors`` uses.** The accumulator sees the
+    two populations mixed and cannot tell them apart, so the pooled share is
+    ``(rho_g·m_g + rho_r·m_r) / (rho_g·c_g + rho_r·c_r)``. Where the two components share a mean length
+    that is exact; where they do not it is an approximation, and these tests are where that shows.
+    """
+    import sys
+    from pathlib import Path as _P
+
+    sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
+    from native._accumulator_reference import (
+        INV_LENGTH_SCALE,
+        Accumulator,
+        Partition,
+    )
+
+    cuts = np.concatenate([[0.0], np.cumsum(np.asarray(node_len, dtype=np.float64))]).astype(int)
+    n_edges = max(len(cuts) - 2, 0)
+    mass = np.zeros(n_edges, dtype=np.float64)
+    count = np.zeros(n_edges, dtype=np.float64)
+    for rho, pmf in ((rho_g, pmf_g), (rho_r, pmf_r)):
+        w = int(np.argmax(pmf))
+        partition = Partition.from_cuts(
+            [cuts.tolist()], node_types=[[0] * (len(cuts) - 1)]
+        )
+        acc = Accumulator(partition, max_fragment_length=max(1000, w + 1))
+        for start in range(0, int(cuts[-1]) - w + 1):
+            acc.deposit(0, start, start + w)
+        t = acc.tally
+        mass += rho * np.asarray(t.edge_unspliced_mass, np.float64) / INV_LENGTH_SCALE
+        count += rho * np.asarray(t.edge_unspliced_count, np.int64).sum(axis=1).astype(np.float64)
+    out = np.ones(n_edges, dtype=np.float64)
+    np.divide(mass, count, out=out, where=count > 0)
+    return out
+
+
 def _uniform_library(node_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResult:
     """A CalibrationResult for ONE reference tiled by ``node_len``, under a UNIFORM field.
 
-    Every object carries exactly what the accumulator would deposit at densities ``rho_g``/``rho_r``:
+    ⭐⭐ **EVERY BANK IS ENUMERATED THROUGH THE SPECIFICATION, not evaluated analytically.** The masses
+    and the conserved share must describe ONE population or the fixture is internally inconsistent —
+    and that inconsistency is not hypothetical. The predecessor of this docstring used the analytic
+    infinite-chromosome forms ``rho·E[(len−w+1)+]`` and ``rho·E[w−1]`` for the masses while the share
+    came from a finite-reference enumeration. On the fine tiling the two disagreed by **10 %** and read
+    as a defect in ``assemble_priors`` (2026-08-08).
 
-        node i :  mass_c = rho_c · E_c[(len_i − w + 1)+]        (contained_eff_length)
-        line j :  mass_c = rho_c · E_c[w − 1]                   (crossing_eff_length, unbounded)
+    ⚠ For a point-mass pmf, enumerating every start at unit weight IS the analytic uniform field, so
+    nothing is lost — the fixture is still exact, deterministic arithmetic with no distributional slack.
 
-    so ``mass_c / A_c == rho_c`` on every object by construction, on any tiling.
+    ⛔ **And the target moved with the rule.** The old assembler produced ``rho·span``; the new one
+    produces the CONSERVED FRAGMENT COUNT, which on a finite reference of span ``S`` is ``rho·(S−w+1)``
+    — the number of fragments that fit. ``rho·span`` counted ``w−1`` start positions no fragment can
+    occupy, and was the approximation the density conversion happened to produce.
     """
     node_len = np.asarray(node_len, dtype=np.float64)
     n = node_len.shape[0]
     ne = max(n - 1, 0)
+    # the OPPORTUNITY arrays stay analytic — they are the divisors `gdna_eff_len` contracts against,
+    # and they are not a population statement
     a_g_node = contained_eff_length(node_len, pmf_g)
     a_r_node = contained_eff_length(node_len, pmf_r)
     a_g_edge = np.full(ne, float(crossing_eff_length(pmf_g, _UNB, _UNB)[0]))
     a_r_edge = np.full(ne, float(crossing_eff_length(pmf_r, _UNB, _UNB)[0]))
+    # ...and every MASS is what the specification actually deposits on this tiling
+    _n_g, cont_g, cross_g, _m_g = _enumerate(node_len, int(np.argmax(pmf_g)))
+    _n_r, cont_r, cross_r, _m_r = _enumerate(node_len, int(np.argmax(pmf_r)))
     return CalibrationResult(
-        mass_gdna_node=rho_g * a_g_node,
-        mass_rna_node=rho_r * a_r_node,
-        mass_gdna_edge=rho_g * a_g_edge,
-        mass_rna_edge=rho_r * a_r_edge,
+        mass_gdna_node=rho_g * cont_g,
+        mass_rna_node=rho_r * cont_r,
+        mass_gdna_edge=rho_g * cross_g,
+        mass_rna_edge=rho_r * cross_r,
         mass_rna_spliced_edge=np.zeros(ne, dtype=np.float64),
+        edge_mass_per_crossing=_mass_per_crossing(node_len, rho_g, rho_r, pmf_g, pmf_r),
         mass_rna_junction=np.zeros(0, dtype=np.float64),
         gdna_node_eff_len=a_g_node,
         gdna_edge_eff_len=a_g_edge,

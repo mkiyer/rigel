@@ -28,7 +28,6 @@ From that one set, all four deposit populations follow with no further machinery
 line ``p`` crossed   ``p-1 in covered and p in covered``   (bases on both sides, adjacent in the
                      molecule — 's definition, verbatim)
 node contained       the path used no junction and ``min(covered)``/``max(covered)`` fall in one node
-node spanned         one segment covers the node whole: ``cuts[i]-1 .. cuts[i+1]`` all covered
 ===================  =============================================================================
 
 ⭐ That crossing rule is the design's own words turned into a predicate, and it is what makes this file a
@@ -98,8 +97,12 @@ def covered_bases(ref_len: int, start: int, end: int, introns) -> set[int]:
 def oracle_deposits(cuts, ref_len: int, start: int, end: int, introns, spliced: bool):
     """Every population the deposit rule credits, derived from the covered set alone.
 
-    Returns ``(L, crossed_lines, spanned_nodes, contained_node)`` with local indices, or ``None`` for a
-    fragment that deposits nothing. ``cuts`` are this reference's cut positions.
+    Returns ``(L, crossed_lines, contained_node)`` with local indices, or ``None`` for a fragment that
+    deposits nothing. ``cuts`` are this reference's cut positions.
+
+    ⚠ A ``spanned_nodes`` set used to be derived and compared here. The bank it checked was removed on
+    evidence, and the oracle no longer computes it — an oracle deriving a quantity nothing asserts is
+    dead weight that reads as coverage.
     """
     covered = covered_bases(ref_len, start, end, introns)
     if not covered:
@@ -110,19 +113,13 @@ def oracle_deposits(cuts, ref_len: int, start: int, end: int, introns, spliced: 
     # ``edge_base + line - 1``), because cut 0 is the reference start and owns no interior line. The
     # oracle re-derives that offset rather than importing it — and it caught me getting it wrong first.
     crossed = {i - 1 for i, p in enumerate(cuts) if (p - 1) in covered and p in covered}
-    # node i (between cuts[i] and cuts[i+1]) is SPANNED iff one segment covers it whole
-    spanned = {
-        i
-        for i in range(len(cuts) - 1)
-        if all(b in covered for b in range(cuts[i] - 1, cuts[i + 1] + 1))
-    }
 
     def node_of(pos):
         return min(max(int(np.searchsorted(cuts, pos, side="right")) - 1, 0), len(cuts) - 2)
 
     lo, hi = node_of(min(covered)), node_of(max(covered))
     contained = lo if (not spliced and lo == hi) else None
-    return length, crossed, spanned, contained
+    return length, crossed, contained
 
 
 # --- the fixture ------------------------------------------------------------------------------------
@@ -152,7 +149,6 @@ def _observed(acc: Accumulator):
     t = acc.tally
     return (
         {i for i in range(t.edge_unspliced_count.shape[0]) if t.edge_unspliced_count[i].sum()},
-        {i for i in range(t.node_spanning_count.shape[0]) if t.node_spanning_count[i].sum()},
         next(
             (i for i in range(t.node_contained_count.shape[0]) if t.node_contained_count[i].sum()),
             None,
@@ -172,10 +168,10 @@ def _check_one(start: int, end: int, introns) -> None:
             f"the accumulator returned {outcome}"
         )
         return
-    length, crossed, spanned, contained = want
+    length, crossed, contained = want
     assert outcome is DepositOutcome.DEPOSITED, f"[{start},{end}) introns={introns} -> {outcome}"
 
-    got_crossed, got_spanned, got_contained = _observed(acc)
+    got_crossed, got_contained = _observed(acc)
     ctx = f"[{start},{end}) introns={introns}"
 
     # ⭐ L, read back from the DEPOSIT itself rather than from an accessor — the number that actually
@@ -196,7 +192,6 @@ def _check_one(start: int, end: int, introns) -> None:
         )
 
     assert got_crossed == crossed, f"{ctx}: crossed lines {got_crossed} != oracle {crossed}"
-    assert got_spanned == spanned, f"{ctx}: spanned nodes {got_spanned} != oracle {spanned}"
     assert got_contained == contained, f"{ctx}: contained {got_contained} != oracle {contained}"
     # the start-count invariant: exactly one, at the node holding the first COVERED base
     assert int(t.node_start_count.sum()) == 1, ctx
@@ -270,11 +265,10 @@ def test_randomised_at_realistic_scale():
         if want is None:
             assert outcome is DepositOutcome.EMPTY, ctx
             continue
-        length, crossed, spanned, contained = want
+        length, crossed, contained = want
         assert outcome is DepositOutcome.DEPOSITED, ctx
-        got_crossed, got_spanned, got_contained = _observed(acc)
+        got_crossed, got_contained = _observed(acc)
         assert got_crossed == crossed, f"{ctx}: {got_crossed} != {crossed}"
-        assert got_spanned == spanned, f"{ctx}: {got_spanned} != {spanned}"
         assert got_contained == contained, ctx
         t = acc.tally
         n_cross = int(t.edge_unspliced_count.sum())
@@ -304,7 +298,7 @@ def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
     acc = _acc()
     acc.deposit(0, 1, 11, observed_introns=[])
     assert int(acc.tally.node_contained_count.sum()) == 0
-    got_crossed, _, _ = _observed(acc)
+    got_crossed, _ = _observed(acc)
     assert got_crossed == {0, 1, 2}, (
         "the mate gap must carry the molecule across every interior line"
     )
@@ -312,7 +306,7 @@ def test_L_equals_the_covered_base_count_and_crossings_use_THAT_SAME_set():
     # the same span with the middle excised as an intron: L shrinks AND the lines under it go uncrossed
     acc2 = _acc()
     acc2.deposit(0, 1, 11, observed_introns=[(3, 9)])
-    got2, _, _ = _observed(acc2)
+    got2, _ = _observed(acc2)
     assert got2 == set(), "an intron must not carry the molecule across the lines it splices over"
     assert len(covered_bases(_REF_LEN, 1, 11, [(3, 9)])) == 4
 

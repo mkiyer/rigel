@@ -69,6 +69,10 @@ def _cal(region_arrays: RegionArrays, density, node_eff, edge_eff) -> Calibratio
         mass_gdna_edge=d[lo] * edge_eff,
         mass_rna_edge=ez.copy(),
         mass_rna_spliced_edge=ez.copy(),
+        # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
+        # identity — a line whose flanks both exceed every fragment length, where an incidence IS
+        # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
+        edge_mass_per_crossing=np.ones_like(ez),
         mass_rna_junction=np.zeros(0, dtype=np.float64),
         gdna_node_eff_len=node_eff,
         gdna_edge_eff_len=edge_eff,

@@ -203,10 +203,33 @@ def payload_schema_digest() -> str:
     inside itself and put the same invisibility one level down; :func:`_schema_names` is fully recursive
     now, and looks through ``Optional``.
 
-    Field names only: a dtype change is already caught at load by ``_bank``'s and
-    ``DeferredFragments.from_dict``'s assertions, and names are what the ``.npz`` is keyed by.
+    ⛔⛔ **AND IT HASHES THE COLUMN COUNT, NOT ONLY THE NAME — measured 2026-08-08.** The predecessor of
+    this paragraph said "field names only: a dtype change is already caught at load by ``_bank``'s
+    assertions". **That is false on the cache path.** ``_bank`` and ``_single_column_bank`` validate the
+    C++ dict in :meth:`AccumulatorPayload.from_scan_result`; :func:`_payload_from_parts` puts the
+    ``.npz`` arrays **straight into the payload with no shape check at all**. So when five length moments
+    were collapsed from ``[n, 2]`` to ``[n]``, every field name stayed identical and this digest did not
+    move — a cache written the hour before would have been ACCEPTED and then failed somewhere
+    downstream with a shape error pointing nowhere near its cause. That is exactly
+    ``TRAPS: a-hash-that-misses-its-artifact``, in the key written to prevent it.
+
+    ⚠ The column count is taken from the two axis TABLES rather than from the arrays, because the digest
+    must be computable without a payload in hand. A bank moving between ``BANK_AXES`` and
+    ``SINGLE_COLUMN_AXES`` **is** the shape change, so the tables are the honest source.
     """
-    return _digest(*(name.encode() for name in _schema_names()))
+    return _digest(
+        *(name.encode() for name in _schema_names()),
+        *(shape.encode() for shape in _schema_shapes()),
+    )
+
+
+def _schema_shapes() -> list[str]:
+    """``name:columns`` for every bank, in a stable order — the shape half of the key above."""
+    from .scan_payload import BANK_AXES, N_STRAND_COLUMNS, SINGLE_COLUMN_AXES
+
+    return [f"{name}:{N_STRAND_COLUMNS}" for name, _axis, _dtype in BANK_AXES] + [
+        f"{name}:1" for name, _axis, _dtype in SINGLE_COLUMN_AXES
+    ]
 
 
 def _scan_config_digest(scan_config) -> str:

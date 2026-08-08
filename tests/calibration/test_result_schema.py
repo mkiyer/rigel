@@ -28,6 +28,10 @@ def _valid_kwargs() -> dict:
         mass_gdna_edge=np.zeros(N_EDGES),
         mass_rna_edge=edge.copy(),
         mass_rna_spliced_edge=np.zeros(N_EDGES),
+        # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
+        # identity — a line whose flanks both exceed every fragment length, where an incidence IS
+        # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
+        edge_mass_per_crossing=np.ones(N_EDGES),
         mass_rna_junction=junction.copy(),
         gdna_node_eff_len=node.copy(),
         gdna_edge_eff_len=edge.copy(),

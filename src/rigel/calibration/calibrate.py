@@ -181,8 +181,8 @@ def _build_length_loglik(chain, geometry, region_arrays, gdna_fl_pmf, rna_fl_pmf
         build_slot_moments(chain, region_arrays, gdna_fl_pmf),
         build_slot_moments(chain, region_arrays, rna_fl_pmf),
         np.asarray(geometry.unspliced_count, np.float64).sum(axis=1),
-        np.asarray(geometry.unspliced_inv_length_sum, np.float64).sum(axis=1),
-        np.asarray(geometry.unspliced_length_sum, np.float64).sum(axis=1),
+        np.asarray(geometry.unspliced_inv_length_sum, np.float64),
+        np.asarray(geometry.unspliced_length_sum, np.float64),
         fg_grid,
     )
 
@@ -650,6 +650,9 @@ def calibrate(
     # ⚠ There is no NODE twin, and that is structural: ``node_contained`` is credited only when the
     # fragment used no junction, so a node's contained population cannot hold a spliced molecule.
     mass_rna_spliced_edge = np.asarray(substrate.edge_spliced.count, dtype=np.float64).sum(axis=1)
+    # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing at this line carries.
+    # ``assemble_priors`` needs it to turn a per-line object-incidence total into a fragment count.
+    edge_mass_per_crossing = substrate.edge_unspliced.mass_per_crossing
 
     # ⭐ The JUMPING population, exported verbatim (owner ruling, 2026-07-30). A junction edge is pure
     # mature RNA by construction, so there is nothing to deconvolve: this is ``sj_count`` summed over
@@ -664,6 +667,7 @@ def calibrate(
         mass_gdna_edge=edges.gdna_mass,
         mass_rna_edge=edges.rna_mass,
         mass_rna_spliced_edge=mass_rna_spliced_edge,
+        edge_mass_per_crossing=edge_mass_per_crossing,
         mass_rna_junction=mass_rna_junction,
         gdna_node_eff_len=node_eff_gdna,
         gdna_edge_eff_len=edge_eff_gdna,

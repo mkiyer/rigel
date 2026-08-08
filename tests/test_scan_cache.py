@@ -272,12 +272,39 @@ class TestTheKeyRefusesAMovedIndex:
 
         before = payload_schema_digest()
         original = scan_payload.AccumulatorPayload.__dataclass_fields__
-        trimmed = {k: v for k, v in original.items() if k != "sj_length_sum"}
+        trimmed = {k: v for k, v in original.items() if k != "sj_inv_length_sum"}
         try:
             scan_payload.AccumulatorPayload.__dataclass_fields__ = trimmed
             assert payload_schema_digest() != before, "dropping a field must move the digest"
         finally:
             scan_payload.AccumulatorPayload.__dataclass_fields__ = original
+        assert payload_schema_digest() == before
+
+    def test_the_schema_digest_moves_when_a_BANK_CHANGES_SHAPE(self):
+        """⛔⛔ **The gap this key had until 2026-08-08, and it is the one it exists to close.**
+
+        A bank moving from two genome-strand columns to one keeps its name, its dtype and its axis — so a
+        name-only digest does not move. And nothing downstream catches it: ``_bank`` validates the C++
+        dict in ``from_scan_result``, while ``_payload_from_parts`` puts the ``.npz`` arrays STRAIGHT
+        into the payload with no shape check. A stale cache would have been accepted by the key and then
+        failed with a shape error pointing nowhere near its cause — ``TRAPS: a-hash-that-misses-its-artifact``.
+
+        ⚠ Measured: collapsing five length moments to ``[n]`` left the digest at ``a025995ea3ce7d4f``,
+        byte for byte.
+        """
+        from rigel.scan_cache import payload_schema_digest
+
+        before = payload_schema_digest()
+        original = scan_payload.SINGLE_COLUMN_AXES
+        moved = tuple(row for row in original if row[0] != "sj_inv_length_sum")
+        try:
+            scan_payload.SINGLE_COLUMN_AXES = moved
+            assert payload_schema_digest() != before, (
+                "a bank changing its column count must move the digest — the field NAMES are identical, "
+                "so nothing else can notice"
+            )
+        finally:
+            scan_payload.SINGLE_COLUMN_AXES = original
         assert payload_schema_digest() == before
 
     def test_the_schema_digest_moves_when_a_NESTED_BANK_FIELD_moves(self):

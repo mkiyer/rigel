@@ -116,13 +116,42 @@ byte-identity to it; where it and a document disagree, the reference wins.
 
 ### 3.1 What every object stores
 
-**Three integer sums** per object per channel:
+⭐⭐ **A CHANNEL IS STORED WHERE A NAMED CONSUMER READS IT, AND NOWHERE ELSE** (owner-set, 2026-08-08).
+The populations therefore do NOT all carry the same channels, and that asymmetry is the design:
+
+    node_contained   count  inv_length_sum  length_sum
+    edge_unspliced   count  inv_length_sum  length_sum  mass
+    edge_spliced     count                              mass     certified RNA — nothing deconvolves it
+    junction         count  inv_length_sum                       inv_length_sum is LIVE in second_pass
 
 | | | |
 |---|---|---|
 | `count` | `Σ 1` | statistical power — a count is a count |
 | `inv_length_sum` | `Σ round(2³²/placements)` | an exact model-free density **at an edge**, and *not* one at a node — which is why it is not called `density` |
 | `length_sum` | `Σ L` | carries the only information about the gDNA/RNA split when the two components share a mean length; the other two carry **zero** there |
+| `mass` | `Σ (slice/w)/n_cross` | ⭐ the CONSERVED fragment count — sums to **one per fragment**, where `count` is `+1` on each of `max(K,1)` objects. `EQUATIONS.md` §3b |
+
+⛔ **Six banks were REMOVED on that rule** (2026-08-08): three `node_spanning_*`, the two spliced-edge
+length moments, and `sj_length_sum`. Structs went `Node` 80 → **24 B**, `ContiguousEdge` 80 → **48 B**,
+`JunctionEdge` 40 → **16 B**. ⚠ Deleting `node_spanning` has one structural consequence worth knowing:
+**no spliced fragment touches the node axis at all** now — a spliced fragment can never be *contained*,
+because both endpoints of an annotated intron are cuts.
+
+⛔ **THE COUNTS KEEP BOTH GENOME-STRAND COLUMNS; THE LENGTH MOMENTS AND THE MASS KEEP ONE.** Which strand
+a read aligned to says nothing about whether the molecule was gDNA or RNA, and every consumer summed the
+two columns — so a strand axis there is half the bank wasted, and worse, a claim that the split is
+meaningful. The counts keep both because the strand model is a Beta-Binomial over them, per strand.
+
+⛔⛔ **AND `sj_count` KEEPS BOTH FOR A REASON THAT IS NOT THE STRAND MODEL** (owner, 2026-08-08). A
+junction is stranded by its genomic splicing MOTIF, so the *fragments'* strand looks redundant, and every
+consumer today sums the two. It is retained for **ALIGNER-ARTIFACT DETECTION**: aligners emit
+false-positive `N` CIGAR ops from plain genomic DNA, `rigel.splice_blacklist` catches only those
+`alignable` has enumerated by coordinate, and the empirical detector is that in a **stranded** library a
+real junction inherits the global strand specificity while an artifact deposits onto BOTH strands.
+⚠ Unstranded data cannot use it (κ = ½ leaves nothing to deviate from) — a property of the detector, not
+a reason to drop the column. ⭐ The discriminating information lives ONLY in the split: a clean junction
+and an artifactual one at the same depth carry the same total. Gated by
+`test_the_junction_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION`.
 
 Fixed-point headroom is ~800×: with `L ∈ [20,2000]` each `round(2³²/L) ≤ 2.1e8`, so 1e8 fragments sum to
 ≤ 2.1e16 against a uint64 ceiling of 1.8e19. Memory is flat and small — ~85 MB at human scale (node 24 B,

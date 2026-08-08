@@ -118,7 +118,6 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(oracle):
     for key, why in [
         ("node_start_count", "nothing was deposited at all"),
         ("node_contained_count", "no fragment fitted inside a node"),
-        ("node_spanning_count", "no fragment covered a node whole"),
         (
             "edge_unspliced_count",
             "no unspliced contiguous crossing — the mixture being deconvolved",

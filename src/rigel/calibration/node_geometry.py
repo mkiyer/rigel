@@ -231,7 +231,9 @@ def build_node_geometry(
     # edge_unspliced at an EDGE — or the moments would describe a different set of fragments than the
     # count they are conditioned on.
     def _channel(node_attr: str, edge_attr: str) -> np.ndarray:
-        out = np.zeros((n, 2), dtype=np.float64)
+        # ⚠ ``(n,)`` and not ``(n, 2)``: the length moments carry no strand axis. Every consumer summed
+        # the two columns anyway, so the sum now happens once, in the accumulator.
+        out = np.zeros(n, dtype=np.float64)
         out[is_node] = np.asarray(getattr(substrate.node_contained, node_attr), np.float64)[
             obj[is_node]
         ]

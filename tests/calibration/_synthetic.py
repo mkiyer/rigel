@@ -35,7 +35,6 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     share a value, so a consumer reading the wrong one cannot pass by coincidence::
 
         node_contained_count   n0 [10, 2]   n1 [1, 20]   n2 [7, 8]
-        node_spanning_count    n0 [3, 0]    n1 [0, 5]    n2 [1, 6]
         edge_unspliced_count   e0 [4, 1]    e1 [2, 3]
         edge_spliced_count     e0 [0, 0]    e1 [6, 0]
         sj_count               j0 [9, 4]
@@ -46,7 +45,6 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         return np.asarray(values, dtype=dtype).reshape(rows, 2)
 
     contained = bank(n_nodes, [[10, 2], [1, 20], [7, 8]], np.uint32)
-    spanning = bank(n_nodes, [[3, 0], [0, 5], [1, 6]], np.uint32)
     unspliced = bank(n_edges, [[4, 1], [2, 3]], np.uint32)
     spliced = bank(n_edges, [[0, 0], [6, 0]], np.uint32)
     sj = bank(n_sj, [[9, 4]], np.uint32)
@@ -57,12 +55,25 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         ⚠ Rounds HALF AWAY FROM ZERO, exactly as ``_accumulator_reference.inv_length_quantum`` does —
         not floor. A fixture that quantised differently from the accumulator would make the decode test
         assert the fixture's own arithmetic rather than the substrate's.
+        ⚠ ONE column — the two strands are SUMMED, because the length moments carry no strand axis.
         """
         quantum = (2 * INV_LENGTH_SCALE + placements) // (2 * placements)
-        return (np.asarray(counts, np.uint64) * np.uint64(quantum)).astype(np.uint64)
+        return (np.asarray(counts, np.uint64).sum(axis=1) * np.uint64(quantum)).astype(np.uint64)
 
     def lengths(counts, length):
-        return (np.asarray(counts, np.uint64) * np.uint64(length)).astype(np.uint64)
+        """⚠ ONE column, for the same reason :func:`inv` is."""
+        return (np.asarray(counts, np.uint64).sum(axis=1) * np.uint64(length)).astype(np.uint64)
+
+    def mass(counts, per_crossing=2):
+        """The conserved mass a bank of ``counts`` crossings would deposit, at ``1/per_crossing`` each.
+
+        ⚠ ONE value per edge — the two strand columns are SUMMED, because the mass has no strand axis.
+        ⭐ And it is a plausible state rather than an arbitrary array: a crossing's share is at most one
+        fragment, so ``mass <= count`` must hold. ``per_crossing = 2`` is the value for a fragment that
+        crosses two lines, which is what the multi-line geometry this fixture describes produces.
+        """
+        total = np.asarray(counts, np.uint64).sum(axis=1)
+        return (total * np.uint64(INV_LENGTH_SCALE // per_crossing)).astype(np.uint64)
 
     payload = AccumulatorPayload(
         cut_positions=np.array([0, 100, 200, 300], dtype=np.int64),
@@ -73,19 +84,15 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         node_contained_count=contained,
         node_contained_inv_length_sum=inv(contained, 50),
         node_contained_length_sum=lengths(contained, 50),
-        node_spanning_count=spanning,
-        node_spanning_inv_length_sum=inv(spanning, 40),
-        node_spanning_length_sum=lengths(spanning, 40),
         node_start_count=np.array([11, 12, 13], dtype=np.uint32),
         edge_unspliced_count=unspliced,
         edge_unspliced_inv_length_sum=inv(unspliced, 25),
         edge_unspliced_length_sum=lengths(unspliced, 26),
+        edge_unspliced_mass=mass(unspliced),
         edge_spliced_count=spliced,
-        edge_spliced_inv_length_sum=inv(spliced, 20),
-        edge_spliced_length_sum=lengths(spliced, 21),
+        edge_spliced_mass=mass(spliced),
         sj_count=sj,
         sj_inv_length_sum=inv(sj, 10),
-        sj_length_sum=lengths(sj, 11),
         pool_lengths=np.zeros((N_FRAGMENT_POOLS, 201), dtype=np.int64),
         deposited_lengths=np.zeros(201, dtype=np.uint32),
         # ⚠ Nothing was deferred here, and that is a real state, not a stub: this fixture has no
@@ -279,10 +286,9 @@ def make_chain_parts(
         tot = counts.sum(axis=1)
         m1 = np.broadcast_to(np.asarray(m.m1, float), tot.shape)
         m2 = np.broadcast_to(np.asarray(m.m2, float), tot.shape)
-        return (
-            np.stack([tot * m1, np.zeros_like(tot)], axis=1),
-            np.stack([tot * m2, np.zeros_like(tot)], axis=1),
-        )
+        # ⚠ ONE column each: the length moments carry no strand axis, so the whole total lands in the
+        # single slot rather than being stacked beside a column of zeros.
+        return tot * m1, tot * m2
 
     node_counts = pair(node_pos, node_neg, n_nodes)
     edge_counts = pair(edge_pos, edge_neg, n_edges)
@@ -292,7 +298,6 @@ def make_chain_parts(
         node_contained=SimpleNamespace(
             count=node_counts, inv_length_sum=node_inv, length_sum=node_len_sum
         ),
-        node_spanning=SimpleNamespace(count=np.zeros((n_nodes, 2))),
         edge_unspliced=SimpleNamespace(
             count=edge_counts, inv_length_sum=edge_inv, length_sum=edge_len_sum
         ),

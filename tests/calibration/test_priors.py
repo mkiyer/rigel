@@ -43,6 +43,7 @@ def _result(
     edge_r=None,
     edge_eff=None,
     edge_spliced=None,
+    mass_per_crossing=None,
     gdna_density_global=0.01,
     rna_node_eff=None,
     rna_edge_eff=None,
@@ -71,6 +72,12 @@ def _result(
         mass_rna_edge=ez.copy() if edge_r is None else np.asarray(edge_r, dtype=np.float64),
         mass_rna_spliced_edge=(
             ez.copy() if edge_spliced is None else np.asarray(edge_spliced, dtype=np.float64)
+        ),
+        # ⭐ GEOMETRY, not a split. 1.0 is the identity — a line whose flanks both exceed every
+        # fragment length, where one crossing IS one fragment. A test exercising K-inflation overrides it.
+        edge_mass_per_crossing=(
+            np.ones_like(ez) if mass_per_crossing is None
+            else np.asarray(mass_per_crossing, dtype=np.float64)
         ),
         mass_rna_junction=np.zeros(0, dtype=np.float64),
         gdna_node_eff_len=node_eff_arr,

@@ -333,6 +333,83 @@ def oracle_priors(oracle: OracleTruth, calibration, region_arrays, multi_loci):
     return o, noop
 
 
+def share_priors(oracle: OracleTruth, calibration, region_arrays, multi_loci):
+    """**S** — the O arm, plus each component rescaled by its OWN true per-line share.
+
+    ⭐⭐ **WHY THIS ARM EXISTS.** ``assemble_priors`` rescales BOTH components at a line by ONE pooled
+    share, ``mass / count`` off the mixture. That is exact when the two components share a length
+    distribution and biased when they do not — by exactly ``share_r / share_g``, independent of the true
+    mixing ratio. ⛔ The bias is **purely compositional**: the locus total is conserved to the last
+    fragment, so no conservation gate can see it. Only a per-component comparison can.
+
+    ``O − S`` is therefore the pooled share's own contribution, isolated, and ``S − F`` is everything
+    else the assembler does wrong. Until this arm existed the two were summed inside ``O − F`` and there
+    was no way to tell which was which.
+
+    ⚠ **The assembler takes ONE share, so the arm is built by calling it TWICE** — once with the gDNA
+    truth share (keeping its gDNA arm) and once with the RNA truth share (keeping its RNA arm). That is
+    not a re-implementation: it is the shipped function, run twice with one input varied.
+
+    ⛔ **The shares are MEASURED off the origin split** (``OracleTruth.component_shares``), never derived
+    from a pmf — see that method for why an analytic share would make this a model arm.
+    """
+    override = oracle.override_masses(region_arrays)
+    shares = oracle.component_shares()
+    truth_cal = dataclasses.replace(calibration, **override)
+    gdna = PRIORS.assemble_priors(
+        dataclasses.replace(truth_cal, edge_mass_per_crossing=shares["gdna"]),
+        region_arrays, multi_loci,
+    )
+    rna = PRIORS.assemble_priors(
+        dataclasses.replace(truth_cal, edge_mass_per_crossing=shares["rna"]),
+        region_arrays, multi_loci,
+    )
+    return PRIORS.LocusPriors(
+        gdna_prior_count=gdna.gdna_prior_count,
+        rna_prior_count=rna.rna_prior_count,
+        gdna_eff_len=gdna.gdna_eff_len,
+    ), shares
+
+
+def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
+    """⭐ Is ``gdna_eff_len`` clamped by an INCIDENCE-support sum rather than the genomic span?
+
+    ``assemble_priors`` clamps ``gdna_eff_len`` to ``span = Σ share·(S_node + S_edge)``. ``S_edge`` is
+    ``E_g[w − 1] ≈ mu_g − 1`` PER LINE, so every interior line adds most of a fragment length to a
+    locus whose nodes may be a few hundred bases — an incidence-like sum, not a genomic extent. The EM
+    divides the gDNA component's abundance by this array, so an inflation here is a direct scale error
+    on one of the three numbers calibration ships.
+
+    ⚠ Reports the ratio to the locus's GENOMIC span, mass-weighted by the gDNA prior, so the number is
+    what the consumer feels rather than what an unweighted locus average would say
+    (``TRAPS: weight-it-like-the-consumer``).
+    """
+    node_support = np.maximum(np.asarray(calibration.gdna_node_eff_len, np.float64), 0.0)
+    edge_support = np.zeros_like(node_support)
+    if calibration.n_edges:
+        owner = PRIORS.edge_owner_nodes(calibration, region_arrays)
+        np.add.at(edge_support, owner,
+                  np.maximum(np.asarray(calibration.gdna_edge_eff_len, np.float64), 0.0))
+    proj = PRIORS._project_regions_to_loci(
+        region_arrays, multi_loci, len(multi_loci),
+        {
+            "support": node_support + edge_support,
+            "node_only": node_support,
+            "genomic": np.asarray(region_arrays.region_size_bp, np.float64),
+        },
+    )
+    live = proj["genomic"] > 0
+    ratio = np.divide(proj["support"], proj["genomic"], out=np.ones_like(proj["support"]), where=live)
+    node_ratio = np.divide(proj["node_only"], proj["genomic"],
+                           out=np.ones_like(proj["support"]), where=live)
+    return {
+        "median_support_over_genomic": float(np.median(ratio[live])) if live.any() else float("nan"),
+        "median_node_over_genomic": float(np.median(node_ratio[live])) if live.any() else float("nan"),
+        "total_support": float(proj["support"].sum()),
+        "total_genomic": float(proj["genomic"].sum()),
+    }
+
+
 def fragment_truth(oracle: OracleTruth, region_arrays, multi_loci):
     """**F** — the DIRECT per-locus true fragment count, from ``node_start_count`` per origin.
 
@@ -383,6 +460,8 @@ class ConditionResult:
     f_rna_upper: np.ndarray
     f_dropped: dict
     noop_identical: dict  #: field -> bool
+    #: ⭐ is gdna_eff_len clamped by an incidence sum? See :func:`eff_len_inflation`
+    eff_len: dict
     drain: dict  #: the measured drain caveat
     library: dict  #: condition-level totals, for the header row
     seconds: float
@@ -473,7 +552,9 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
         payload, strand_model, buffer, stats, index, ra, pipeline_config
     )
     o_arm, noop = oracle_priors(oracle, cal, ra, multi_loci)
+    s_arm, _shares = share_priors(oracle, cal, ra, multi_loci)
     f_gdna, f_rna_upper, f_dropped = fragment_truth(oracle, ra, multi_loci)
+    eff_len = eff_len_inflation(cal, ra, multi_loci)
 
     noop_identical = {
         f: bool(np.array_equal(getattr(noop, f), getattr(p_arm, f))) for f in PRIOR_FIELDS
@@ -544,11 +625,12 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
     return ConditionResult(
         condition=tag,
         n_loci=len(multi_loci),
-        priors={"P": p_arm, "O": o_arm},
+        priors={"P": p_arm, "O": o_arm, "S": s_arm},
         f_gdna=f_gdna,
         f_rna_upper=f_rna_upper,
         f_dropped=f_dropped,
         noop_identical=noop_identical,
+        eff_len=eff_len,
         drain=drain,
         library={
             "true_gdna_fragments": g,
@@ -686,6 +768,40 @@ def report(rows: list[dict]) -> None:
               "P_vs_F", "gdna")
     arm_table("   … RNA arm", "P_vs_F", "rna", _RNA_BOUND)
 
+    # ── ⑧ the two halves of ④, separated ──
+    arm_table("⑧ S vs F — THE ASSEMBLER WITH PERFECT PER-COMPONENT SHARES · gDNA arm",
+              "S_vs_F", "gdna",
+              "⭐ Everything ④ measures EXCEPT the pooled share. The gap between ④ and ⑧ is what one "
+              "share for two components costs.")
+    arm_table("⑨ O vs S — THE POOLED SHARE'S OWN CONTRIBUTION, ISOLATED · gDNA arm",
+              "O_vs_S", "gdna",
+              "⛔ The locus TOTAL is conserved here to the fragment, so this error is purely "
+              "compositional and no conservation gate can see it. Equal component lengths ⇒ identically "
+              "zero, which is why the ladder is structurally blind to it.")
+
+    # ── ⑩ is gdna_eff_len clamped by an incidence sum? ──
+    print()
+    print("  ⑩ ⭐ gdna_eff_len's CLAMP — is `span` a genomic extent or an INCIDENCE sum?")
+    print(f"    {'stratum':<26} {'support/genomic':>16} {'nodes only':>12} {'Σ support':>16} "
+          f"{'Σ genomic':>16}")
+    print("    " + "-" * 92)
+    for label, sel in _SELECTIONS:
+        if label is None:
+            print("    " + "-" * 92)
+            continue
+        sub_rows = [r["eff_len"] for r in rows if sel(r["condition"]) and r.get("eff_len")]
+        if not sub_rows:
+            continue
+        print(f"    {label:<26} "
+              f"{float(np.median([x['median_support_over_genomic'] for x in sub_rows])):>16.2f} "
+              f"{float(np.median([x['median_node_over_genomic'] for x in sub_rows])):>12.2f} "
+              f"{sum(x['total_support'] for x in sub_rows):>16,.0f} "
+              f"{sum(x['total_genomic'] for x in sub_rows):>16,.0f}")
+    print("    ⚠ `support/genomic` well above 1 means every interior line is adding ~mu_g − 1 to the "
+          "locus's clamp.")
+    print("    The EM divides the gDNA component's abundance by gdna_eff_len, so this is a direct "
+          "scale error on a shipped number.")
+
     # ── ② the composition claim, which is what the EM feels ──
     print()
     print("  ② THE COMPOSITION CLAIM  phi = a_g/(a_g+a_r)  — P against O")
@@ -776,15 +892,20 @@ def to_json(results: list[ConditionResult]) -> list[dict]:
             "n_loci": r.n_loci,
             "noop_identical": r.noop_identical,
             "drain": r.drain,
+            "eff_len": r.eff_len,
             "library": r.library,
             "f_dropped": r.f_dropped,
             "seconds": r.seconds,
         }
         p, o = r.priors["P"], r.priors["O"]
+        sa = r.priors["S"]
         for ref_name, gref, rref, arm in (
             ("P_vs_O", o.gdna_prior_count, o.rna_prior_count, p),
             ("O_vs_F", r.f_gdna, r.f_rna_upper, o),
             ("P_vs_F", r.f_gdna, r.f_rna_upper, p),
+            # ⭐ the two halves of O_vs_F, separated
+            ("S_vs_F", r.f_gdna, r.f_rna_upper, sa),
+            ("O_vs_S", sa.gdna_prior_count, sa.rna_prior_count, o),
         ):
             row[ref_name] = {
                 "gdna": dataclasses.asdict(score_arm(arm.gdna_prior_count, gref)),

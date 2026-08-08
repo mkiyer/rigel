@@ -251,22 +251,25 @@ class DrainQC:
 #: and miss the other.
 BANK_AXES: tuple[tuple[str, str, Any], ...] = (
     ("node_contained_count", "node", np.uint32),
-    ("node_contained_inv_length_sum", "node", np.uint64),
-    ("node_contained_length_sum", "node", np.uint64),
-    ("node_spanning_count", "node", np.uint32),
-    ("node_spanning_inv_length_sum", "node", np.uint64),
-    ("node_spanning_length_sum", "node", np.uint64),
     ("edge_unspliced_count", "edge", np.uint32),
-    ("edge_unspliced_inv_length_sum", "edge", np.uint64),
-    ("edge_unspliced_length_sum", "edge", np.uint64),
     ("edge_spliced_count", "edge", np.uint32),
-    ("edge_spliced_inv_length_sum", "edge", np.uint64),
-    ("edge_spliced_length_sum", "edge", np.uint64),
     ("sj_count", "sj", np.uint32),
-    ("sj_inv_length_sum", "sj", np.uint64),
-    ("sj_length_sum", "sj", np.uint64),
 )
 
+
+#: ⭐ The single-column additive banks, with the axis and dtype `from_scan_result` validates them on.
+#: ⚠ Kept beside `BANK_AXES` rather than folded into it: that table's contract is "every TWO-column
+#: bank", and widening it to mean "every bank" would silently give the mass a strand column in every
+#: loop that reads it.
+SINGLE_COLUMN_AXES: tuple[tuple[str, str, Any], ...] = (
+    ("node_contained_inv_length_sum", "node", np.uint64),
+    ("node_contained_length_sum", "node", np.uint64),
+    ("edge_unspliced_inv_length_sum", "edge", np.uint64),
+    ("edge_unspliced_length_sum", "edge", np.uint64),
+    ("sj_inv_length_sum", "sj", np.uint64),
+    ("edge_unspliced_mass", "edge", np.uint64),
+    ("edge_spliced_mass", "edge", np.uint64),
+)
 
 #: ⭐ **EVERY additive array channel, with the axis it is indexed on** — the two-column banks plus the
 #: three that are not banks. ``"library"`` means the axis is library-wide rather than per reference.
@@ -277,6 +280,7 @@ BANK_AXES: tuple[tuple[str, str, Any], ...] = (
 #: go quietly short, and nothing downstream would look wrong.
 ADDITIVE_AXES: tuple[tuple[str, str], ...] = (
     *((name, axis) for name, axis, _dtype in BANK_AXES),
+    *((name, axis) for name, axis, _dtype in SINGLE_COLUMN_AXES),
     ("node_start_count", "node"),
     ("pool_lengths", "library"),
     ("deposited_lengths", "library"),
@@ -470,25 +474,53 @@ class AccumulatorPayload:
 
     # -- nodes: two disjoint populations, each two genome-strand columns --
     node_contained_count: np.ndarray  # uint32[n_nodes, 2] — the whole path lies inside the node
-    node_contained_inv_length_sum: np.ndarray  # uint64[n_nodes, 2]
-    node_contained_length_sum: np.ndarray  # uint64[n_nodes, 2] — Sum L
-    node_spanning_count: np.ndarray  # uint32[n_nodes, 2] — one segment covers the node whole
-    node_spanning_inv_length_sum: np.ndarray  # uint64[n_nodes, 2]
-    node_spanning_length_sum: np.ndarray  # uint64[n_nodes, 2] — Sum L
+    #: ⭐ uint64[n_nodes] — ONE column. The length moments are strand-AGNOSTIC: which strand a read
+    #: aligned to says nothing about whether the molecule was gDNA or RNA, and every consumer summed
+    #: the two columns. ⛔ The COUNTS keep both — the strand model is a Beta-Binomial over them.
+    node_contained_inv_length_sum: np.ndarray
+    node_contained_length_sum: np.ndarray  # uint64[n_nodes] — Sum L
     node_start_count: np.ndarray  # uint32[n_nodes] — THE invariant; sums to qc.deposited
 
     # -- contiguous edges: the 0-bp line between two adjacent nodes --
     edge_unspliced_count: np.ndarray  # uint32[n_edges, 2] — the mixture being deconvolved
-    edge_unspliced_inv_length_sum: np.ndarray  # uint64[n_edges, 2]
-    edge_unspliced_length_sum: np.ndarray  # uint64[n_edges, 2] — Sum L
-    edge_spliced_count: np.ndarray  # uint32[n_edges, 2] — certified RNA: gDNA cannot be spliced
-    edge_spliced_inv_length_sum: np.ndarray  # uint64[n_edges, 2]
-    edge_spliced_length_sum: np.ndarray  # uint64[n_edges, 2] — Sum L
+    edge_unspliced_inv_length_sum: np.ndarray  # uint64[n_edges] — ONE column, strand-agnostic
+    edge_unspliced_length_sum: np.ndarray  # uint64[n_edges] — Sum L
+    #: ⭐⭐ uint64[n_edges] — **THE CONSERVED MASS**, fixed point at ``INV_LENGTH_SCALE``. A COUNT and a
+    #: MASS are two different deposits and one number cannot be both: ``edge_unspliced_count`` is ``+1``
+    #: on every line a fragment crosses, so a fragment books ``max(K, 1)`` of them; this sums to ONE per
+    #: fragment. That is what lets a consumer turn an object-incidence total into a FRAGMENT COUNT
+    #: without manufacturing one from a density. ⛔ ONE column, not two — nothing reads a mass per
+    #: strand, and the question it answers has no strand in it.
+    edge_unspliced_mass: np.ndarray
+    #: uint32[n_edges, 2] — certified RNA: gDNA cannot be spliced. ⭐ COUNT AND MASS ONLY: nothing
+    #: deconvolves a certified-RNA crossing, so its two length moments had no consumer and are gone.
+    edge_spliced_count: np.ndarray
+    #: ⭐ uint64[n_edges] — the same rule, routed by the same ``spliced`` flag, so ``mass`` is not the
+    #: one channel that ignores the split. ⛔ A PARTIAL, never a conservation ledger: it sums to
+    #: ``crossed_block_len / L`` per fragment. A per-LINE certified-RNA term, commensurate with the
+    #: unspliced mass at the same line — NOT "the number of spliced fragments here".
+    edge_spliced_mass: np.ndarray
 
     # -- junction edges: one exact donor->acceptor jump. Pure RNA by construction --
-    sj_count: np.ndarray  # uint32[n_sj, 2]
-    sj_inv_length_sum: np.ndarray  # uint64[n_sj, 2]
-    sj_length_sum: np.ndarray  # uint64[n_sj, 2] — Sum L
+    #: uint32[n_sj, 2] — ⛔⛔ **BOTH GENOME-STRAND COLUMNS ARE RETAINED, AND NOT BECAUSE ANYTHING READS
+    #: THEM YET** (owner ruling, 2026-08-08). A junction is stranded by its genomic splicing MOTIF, so
+    #: the strand of the *fragments* on it looks redundant, and every consumer today sums the two.
+    #:
+    #: ⭐ **The reason is aligner-artifact detection.** Aligners emit false-positive ``N`` CIGAR ops from
+    #: plain genomic DNA. ``rigel.splice_blacklist`` catches those the sister tool ``alignable`` has
+    #: enumerated by coordinate — an a-priori list, and far from complete. The EMPIRICAL detector is
+    #: this column: in a stranded library a real junction inherits the global strand specificity, while
+    #: an artifact deposits on BOTH strands and deviates from it. ⚠ Unstranded data cannot use it
+    #: (κ = ½ leaves nothing to deviate from), which is a property of the detector, not a reason to drop
+    #: the column.
+    #:
+    #: ⛔ The discriminating information lives ONLY in the split — a clean junction and an artifactual
+    #: one carry the same total. Gated by
+    #: ``test_the_junction_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION``.
+    sj_count: np.ndarray
+    #: uint64[n_sj] — ⭐ LIVE in ``second_pass``, which scores a held fragment's junction evidence
+    #: with it. ⚠ ``sj_length_sum`` is gone for the same reason the spliced edge moments are.
+    sj_inv_length_sum: np.ndarray
 
     # -- the fragment-length pools, binned at L, once per fragment --
     pool_lengths: np.ndarray  # int64[5, max_length + 1]
@@ -681,6 +713,8 @@ class AccumulatorPayload:
         banks: dict[str, np.ndarray] = {}
         for name, axis, dtype in BANK_AXES:
             banks[name] = _bank(cal, name, rows_on[axis], dtype)
+        for name, axis, dtype in SINGLE_COLUMN_AXES:
+            banks[name] = _single_column_bank(cal, name, rows_on[axis], dtype)
 
         node_start_count = np.ascontiguousarray(cal["node_start_count"], dtype=np.uint32)
         if node_start_count.shape != (n_nodes,):
@@ -773,6 +807,28 @@ def _bank(cal: dict[str, Any], name: str, rows: int, dtype: type) -> np.ndarray:
             f"{N_STRAND_COLUMNS} strand columns"
         )
     return array.reshape(rows, N_STRAND_COLUMNS)
+
+
+def _single_column_bank(cal: dict[str, Any], name: str, rows: int, dtype: type) -> np.ndarray:
+    """One SINGLE-column bank — the conserved masses. Same dtype contract as :func:`_bank`.
+
+    ⚠ Separate from :func:`_bank` rather than parameterised by a column count, because the two carry
+    different claims: a two-column bank asserts the strand axis is meaningful for that channel, and this
+    one asserts it is not. A shared function taking ``n_columns=1`` would read as the same statement.
+    """
+    array = np.ascontiguousarray(cal[name])
+    if array.dtype != dtype:
+        raise ValueError(
+            f"{name} has dtype {array.dtype}, expected {np.dtype(dtype)}. These are uint64 sums (a "
+            f"fixed point for the reciprocal ones), and a narrowed array wraps at realistic depth."
+        )
+    if array.shape != (rows,):
+        raise ValueError(
+            f"{name} has shape {array.shape}, expected ({rows},). This bank has ONE value per object, "
+            f"not one per strand column — a {(rows, N_STRAND_COLUMNS)} array here means the emitter "
+            f"gave it a strand axis it does not have."
+        )
+    return array
 
 
 __all__ = [

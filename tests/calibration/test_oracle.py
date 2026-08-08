@@ -128,6 +128,10 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
         mass_gdna_edge=np.zeros(e),
         mass_rna_edge=np.zeros(e),
         mass_rna_spliced_edge=np.zeros(e),
+        # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
+        # identity — a line whose flanks both exceed every fragment length, where an incidence IS
+        # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
+        edge_mass_per_crossing=np.ones(e),
         mass_rna_junction=np.zeros(j),
         gdna_node_eff_len=np.ones(n),
         gdna_edge_eff_len=np.ones(e),

@@ -448,7 +448,7 @@ def score_held_fragments(
                 for a, b in introns:
                     jid = _junction_id(junctions, cuts, cut_lo, cut_hi, a, b, motif)
                     observed_densities.append(
-                        0.0 if jid < 0 else float(payload.sj_inv_length_sum[jid].sum()) / scale
+                        0.0 if jid < 0 else float(payload.sj_inv_length_sum[jid]) / scale
                     )
                 density[slot] = _bottleneck(observed_densities)
             else:
@@ -458,7 +458,7 @@ def score_held_fragments(
                     first, last = _distinguishing_lines(cuts, cut_lo, cut_hi, a, b)
                     for line in range(first, last):
                         edge_densities.append(
-                            float(payload.edge_unspliced_inv_length_sum[edge_base + line - 1].sum())
+                            float(payload.edge_unspliced_inv_length_sum[edge_base + line - 1])
                             / scale
                         )
                 density[slot] = _bottleneck(edge_densities)

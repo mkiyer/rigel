@@ -194,7 +194,8 @@ def test_a_NODE_slot_carries_node_contained_and_an_EDGE_slot_carries_edge_unspli
 
 def test_the_count_columns_are_GENOME_STRAND_unpermuted(geometry, parts):
     """⭐ POS is column 0. The predecessor stored some banks by genome strand and others by sense, which
-    is how 40–44 % of ``node_spanning`` deposits landed in the opposite column."""
+    is how 40–44 % of the SPLICED deposits landed in the opposite column from their unspliced
+    neighbours at the same line."""
     payload, _, _, chain, _ = parts
     first_node = int(np.flatnonzero(np.asarray(chain.kind) == NODE)[0])
     assert geometry.unspliced_count[first_node, 0] == float(payload.node_contained_count[0, 0])
@@ -406,7 +407,6 @@ def test_several_junctions_on_one_line_POOL_their_counts_AND_their_divisors(part
         payload,
         sj_count=np.array([[9, 4], [5, 1]], dtype=np.uint32),
         sj_inv_length_sum=np.zeros((2, 2), dtype=np.uint64),
-        sj_length_sum=np.zeros((2, 2), dtype=np.uint64),
         ref_sj_offsets=np.array([0, 2], dtype=np.int64),
     )
     sub2 = CalibrationSubstrate.from_payload(payload2, region_arrays)
@@ -450,36 +450,23 @@ def two_reference_parts(payload):
         node_contained_count=np.vstack(
             [payload.node_contained_count, np.array([[1, 1], [2, 2]], np.uint32)]
         ),
-        node_contained_inv_length_sum=np.vstack(
-            [payload.node_contained_inv_length_sum, np.zeros((2, 2), np.uint64)]
+        node_contained_inv_length_sum=np.concatenate(
+            [payload.node_contained_inv_length_sum, np.zeros(2, np.uint64)]
         ),
-        node_contained_length_sum=np.vstack(
-            [payload.node_contained_length_sum, np.zeros((2, 2), np.uint64)]
-        ),
-        node_spanning_count=np.vstack([payload.node_spanning_count, np.zeros((2, 2), np.uint32)]),
-        node_spanning_inv_length_sum=np.vstack(
-            [payload.node_spanning_inv_length_sum, np.zeros((2, 2), np.uint64)]
-        ),
-        node_spanning_length_sum=np.vstack(
-            [payload.node_spanning_length_sum, np.zeros((2, 2), np.uint64)]
+        node_contained_length_sum=np.concatenate(
+            [payload.node_contained_length_sum, np.zeros(2, np.uint64)]
         ),
         node_start_count=np.concatenate([payload.node_start_count, np.zeros(2, np.uint32)]),
         edge_unspliced_count=np.vstack(
             [payload.edge_unspliced_count, np.array([[3, 3]], np.uint32)]
         ),
-        edge_unspliced_inv_length_sum=np.vstack(
-            [payload.edge_unspliced_inv_length_sum, np.zeros((1, 2), np.uint64)]
+        edge_unspliced_inv_length_sum=np.concatenate(
+            [payload.edge_unspliced_inv_length_sum, np.zeros(1, np.uint64)]
         ),
-        edge_unspliced_length_sum=np.vstack(
-            [payload.edge_unspliced_length_sum, np.zeros((1, 2), np.uint64)]
+        edge_unspliced_length_sum=np.concatenate(
+            [payload.edge_unspliced_length_sum, np.zeros(1, np.uint64)]
         ),
         edge_spliced_count=np.vstack([payload.edge_spliced_count, np.zeros((1, 2), np.uint32)]),
-        edge_spliced_inv_length_sum=np.vstack(
-            [payload.edge_spliced_inv_length_sum, np.zeros((1, 2), np.uint64)]
-        ),
-        edge_spliced_length_sum=np.vstack(
-            [payload.edge_spliced_length_sum, np.zeros((1, 2), np.uint64)]
-        ),
         cut_positions=np.array([0, 100, 200, 300, 0, 100, 200], dtype=np.int64),
         ref_cut_offsets=np.array([0, 4, 7], dtype=np.int64),
     )

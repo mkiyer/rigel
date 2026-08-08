@@ -101,21 +101,19 @@ def _calibration_dict(**overrides) -> dict:
         "ref_edge_offsets": ref_edge_offsets,
         "ref_sj_offsets": ref_sj_offsets,
         "node_contained_count": np.arange(n_nodes * 2, dtype=np.uint32),
-        "node_contained_inv_length_sum": np.arange(n_nodes * 2, dtype=np.uint64) * 7,
-        "node_contained_length_sum": np.arange(n_nodes * 2, dtype=np.uint64) * 11,
-        "node_spanning_count": np.arange(n_nodes * 2, dtype=np.uint32) * 2,
-        "node_spanning_inv_length_sum": np.arange(n_nodes * 2, dtype=np.uint64) * 3,
-        "node_spanning_length_sum": np.arange(n_nodes * 2, dtype=np.uint64) * 13,
+        "node_contained_inv_length_sum": np.arange(n_nodes, dtype=np.uint64) * 7,
+        "node_contained_length_sum": np.arange(n_nodes, dtype=np.uint64) * 11,
         "node_start_count": np.arange(n_nodes, dtype=np.uint32),
         "edge_unspliced_count": np.arange(n_edges * 2, dtype=np.uint32),
-        "edge_unspliced_inv_length_sum": np.arange(n_edges * 2, dtype=np.uint64),
-        "edge_unspliced_length_sum": np.arange(n_edges * 2, dtype=np.uint64) * 17,
+        "edge_unspliced_inv_length_sum": np.arange(n_edges, dtype=np.uint64),
+        "edge_unspliced_length_sum": np.arange(n_edges, dtype=np.uint64) * 17,
         "edge_spliced_count": np.arange(n_edges * 2, dtype=np.uint32),
-        "edge_spliced_inv_length_sum": np.arange(n_edges * 2, dtype=np.uint64),
-        "edge_spliced_length_sum": np.arange(n_edges * 2, dtype=np.uint64) * 19,
+        # ⭐ The conserved masses: ONE value per edge, so `n_edges` and not `n_edges * 2`. A fixture
+        # that gave them a strand axis would pass every value check and disagree with the emitter.
+        "edge_unspliced_mass": np.arange(n_edges, dtype=np.uint64) * 29,
+        "edge_spliced_mass": np.arange(n_edges, dtype=np.uint64) * 31,
         "sj_count": np.arange(n_sj * 2, dtype=np.uint32),
-        "sj_inv_length_sum": np.arange(n_sj * 2, dtype=np.uint64),
-        "sj_length_sum": np.arange(n_sj * 2, dtype=np.uint64) * 23,
+        "sj_inv_length_sum": np.arange(n_sj, dtype=np.uint64),
         "pool_lengths": np.arange(5 * (MAX_LENGTH + 1), dtype=np.int64),
         # ⭐ TRAPS: a-purity-filter-is-a-length-filter: the unconditional histogram must bin EXACTLY the deposited fragments, so this fixture
         # can no longer carry an arbitrary array — 41 here, matching qc.deposited below. That coupling is
@@ -169,26 +167,26 @@ def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
     payload = _payload()
     n_nodes, n_edges, n_sj = payload.n_nodes, payload.n_edges, payload.n_sj
     assert (n_nodes, n_edges, n_sj) == (5, 3, 3)
-    for name in (
-        "node_contained_count",
-        "node_contained_inv_length_sum",
-        "node_contained_length_sum",
-        "node_spanning_count",
-        "node_spanning_inv_length_sum",
-        "node_spanning_length_sum",
+    # ⭐ The COUNTS keep both genome-strand columns — the strand model is a Beta-Binomial over them.
+    for name, rows in (
+        ("node_contained_count", n_nodes),
+        ("edge_unspliced_count", n_edges),
+        ("edge_spliced_count", n_edges),
+        ("sj_count", n_sj),
     ):
-        assert getattr(payload, name).shape == (n_nodes, N_STRAND_COLUMNS), name
-    for name in (
-        "edge_unspliced_count",
-        "edge_unspliced_inv_length_sum",
-        "edge_unspliced_length_sum",
-        "edge_spliced_count",
-        "edge_spliced_inv_length_sum",
-        "edge_spliced_length_sum",
+        assert getattr(payload, name).shape == (rows, N_STRAND_COLUMNS), name
+    # ⛔ The length moments and the conserved masses carry ONE column: which strand a read aligned to
+    # says nothing about whether the molecule was gDNA or RNA, and every consumer summed the two.
+    for name, rows in (
+        ("node_contained_inv_length_sum", n_nodes),
+        ("node_contained_length_sum", n_nodes),
+        ("edge_unspliced_inv_length_sum", n_edges),
+        ("edge_unspliced_length_sum", n_edges),
+        ("edge_unspliced_mass", n_edges),
+        ("edge_spliced_mass", n_edges),
+        ("sj_inv_length_sum", n_sj),
     ):
-        assert getattr(payload, name).shape == (n_edges, N_STRAND_COLUMNS), name
-    for name in ("sj_count", "sj_inv_length_sum", "sj_length_sum"):
-        assert getattr(payload, name).shape == (n_sj, N_STRAND_COLUMNS), name
+        assert getattr(payload, name).shape == (rows,), name
     assert payload.node_start_count.shape == (n_nodes,)
     assert payload.pool_lengths.shape == (5, MAX_LENGTH + 1)
 
@@ -213,7 +211,11 @@ def test_the_dtypes_are_the_specifications_dtypes():
             continue
         assert getattr(payload, field.name).dtype == expected.dtype, field.name
         checked += 1
-    assert checked >= 16, f"only {checked} arrays compared; the gate has narrowed"
+    # ⚠ The floor moves only when the SCHEMA moves, and then deliberately. 18 arrays → 20 when the two
+    # conserved masses landed → 14 when the six dead banks were removed (three ``node_spanning_*``, the
+    # two spliced-edge length moments, ``sj_length_sum``). A floor that drifted down on its own would be
+    # this gate quietly narrowing, which is the one thing it exists to catch.
+    assert checked >= 14, f"only {checked} arrays compared; the gate has narrowed"
 
 
 def test_the_DEFERRED_bank_is_int64_throughout_and_carries_the_specifications_arrays():

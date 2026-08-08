@@ -37,16 +37,26 @@ def test_every_population_is_present_on_the_RIGHT_axis(substrate):
     fragments while every golden test passed, so the shapes are asserted rather than assumed.
     """
     sub, payload, _ = substrate
-    for view, n in (
-        (sub.node_contained, payload.n_nodes),
-        (sub.node_spanning, payload.n_nodes),
-        (sub.edge_unspliced, payload.n_edges),
-        (sub.edge_spliced, payload.n_edges),
-        (sub.junction, payload.n_sj),
+    # ⭐ The populations do NOT all carry the same channels — a channel is stored where a named
+    # consumer reads it. ``None`` means "this population does not measure that", which is a different
+    # statement from "it measured it and got zero", and the view keeps them distinguishable.
+    for view, n, channels in (
+        (sub.node_contained, payload.n_nodes, ("inv_length_sum", "length_sum")),
+        (sub.edge_unspliced, payload.n_edges, ("inv_length_sum", "length_sum")),
+        (sub.edge_spliced, payload.n_edges, ()),
+        (sub.junction, payload.n_sj, ("inv_length_sum",)),
     ):
         assert view.count.shape == (n, 2)
-        assert view.inv_length_sum.shape == (n, 2)
-        assert view.length_sum.shape == (n, 2)
+        for channel in ("inv_length_sum", "length_sum"):
+            value = getattr(view, channel)
+            if channel in channels:
+                # ⛔ ONE column: the length moments carry no strand axis, while ``count`` keeps two.
+                assert value is not None and value.shape == (n,)
+            else:
+                assert value is None, (
+                    f"{view.name}.{channel} must be None, not zeros — a zero array cannot be told "
+                    f"apart from a real measurement of nothing"
+                )
     assert payload.n_nodes != payload.n_edges, "the fixture must not let an axis mix-up pass"
 
 
@@ -64,7 +74,7 @@ def test_the_columns_are_GENOME_STRAND_and_nothing_is_re_oriented(substrate):
 def test_no_population_is_a_VIEW_OF_ANOTHER(substrate):
     """The old substrate's `left`/`right` were the same numbers twice. Nothing here may alias."""
     sub, _, _ = substrate
-    banks = [sub.node_contained, sub.node_spanning, sub.edge_unspliced, sub.edge_spliced]
+    banks = [sub.node_contained, sub.edge_unspliced, sub.edge_spliced]
     totals = [int(b.count.sum()) for b in banks]
     assert len(set(totals)) == len(totals), "the fixture gives every bank a distinct total"
 
@@ -92,7 +102,7 @@ def test_a_decoded_sum_recovers_the_reciprocal_placements_it_was_built_from(subs
     """The fixture deposited ``n`` fragments at 50 placements into the contained bank, so the decoded
     sum must read ``n / 50`` — the round trip, not just a division."""
     sub, payload, _ = substrate
-    counts = payload.node_contained_count.astype(np.float64)
+    counts = payload.node_contained_count.astype(np.float64).sum(axis=1)
     # ⚠ rtol above the fixed point's own quantisation, which the spec bounds at 6.9e-8 relative over
     # L in [40, 1000] — asserting tighter would be asserting the rounding, not the decode.
     np.testing.assert_allclose(sub.node_contained.inv_length_sum, counts / 50.0, rtol=1e-7)
@@ -116,7 +126,7 @@ def test_mean_length_is_length_sum_over_count(substrate):
     """The quantity `length_sum` exists for: an object's own mean fragment length, model-free."""
     sub, _, _ = substrate
     view = sub.node_contained
-    expected = view.length_sum.sum(axis=1) / view.count.sum(axis=1)
+    expected = view.length_sum / view.count.sum(axis=1)
     np.testing.assert_allclose(view.mean_length, expected)
     assert np.allclose(view.mean_length, 50.0), "the fixture deposited only 50 bp fragments here"
 
@@ -129,9 +139,10 @@ def test_mean_length_at_ZERO_count_is_NAN_not_zero():
     Zero here would read as "the fragments here are infinitely short".
     """
     view = PopulationView(
+        name="node_contained",
         count=np.zeros((2, 2), np.int64),
-        inv_length_sum=np.zeros((2, 2), np.float64),
-        length_sum=np.zeros((2, 2), np.float64),
+        inv_length_sum=np.zeros(2, np.float64),
+        length_sum=np.zeros(2, np.float64),
     )
     assert np.all(np.isnan(view.mean_length))
 

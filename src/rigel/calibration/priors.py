@@ -230,6 +230,37 @@ def _mass_where_there_is_opportunity(mass: np.ndarray, support: np.ndarray) -> n
     return np.where(np.asarray(support, dtype=np.float64) > 0.0, m, 0.0)
 
 
+def _conserved_count(
+    calibration: "CalibrationResult",
+    region_arrays: "RegionArrays",
+    mass_node: np.ndarray,
+    mass_edge: np.ndarray,
+    share: np.ndarray,
+) -> np.ndarray:
+    """One component's per-node FRAGMENT COUNT: contained mass, plus rescaled crossing mass.
+
+    ⭐ **The node term is already a fragment count.** ``mass_c_node[r]`` is ``f_c(r) · contained_count[r]``
+    and ``contained_count`` is ``+1`` per CONTAINED fragment — one object, one deposit — so nothing has
+    to be converted.
+
+    ⭐ **Only the edge term needs work, and it is one multiply.** The accumulator deposits ``+1`` on
+    EVERY line a fragment crosses, ``max(K, 1)`` of them, so ``mass_c_edge`` is an object-INCIDENCE
+    total. ``share`` — the accumulator's own conserved ``mass / count`` at that line — converts it back
+    to fragments. Each line is attributed to a flank node (:func:`edge_owner_nodes`) so the locus
+    projection can pick it up.
+
+    ⚠ **``_mass_where_there_is_opportunity`` is deliberately NOT applied here.** It exists because
+    ``rho = Σm / ΣS`` is a rate, and mass in the numerator with nothing in the denominator inflates it.
+    There is no denominator now — the mass IS the count — so dropping such mass would simply lose
+    fragments the accumulator really deposited.
+    """
+    out = np.asarray(mass_node, dtype=np.float64).copy()
+    if calibration.n_edges:
+        owner = edge_owner_nodes(calibration, region_arrays)
+        np.add.at(out, owner, np.asarray(mass_edge, dtype=np.float64) * np.asarray(share, np.float64))
+    return np.maximum(out, 0.0)
+
+
 def _density_times_span(mass: np.ndarray, support: np.ndarray, span_bp: np.ndarray) -> np.ndarray:
     """``(Σ mass / Σ support) · span_bp`` — a per-object mass total converted to a FRAGMENT COUNT.
 
@@ -375,30 +406,25 @@ def assemble_priors(
         - np.asarray(calibration.mass_rna_spliced_edge, dtype=np.float64),
         0.0,
     )
-    rna_region, rna_support, _, _ = _component_node_arrays(
-        calibration,
-        region_arrays,
-        calibration.mass_rna_node,
-        rna_edge_unspliced,
-        calibration.rna_node_eff_len,
-        calibration.rna_edge_eff_len,
-    )
-    rna_region = np.maximum(rna_region, 0.0)
+
+    # ⭐⭐ THE TWO PSEUDOCOUNTS, AS CONSERVED FRAGMENT COUNTS. ``mass_c_node`` is already
+    # ``f_c(r) · contained_count[r]`` — one deposit per contained fragment — so the node term needs no
+    # arithmetic at all. Only the EDGE term is rescaled, from the K-inflated incidence count onto the
+    # conserved mass, by the accumulator's own ``mass / count`` at that line.
+    share = np.asarray(calibration.edge_mass_per_crossing, dtype=np.float64)
+    gdna_count_region = _conserved_count(calibration, region_arrays, calibration.mass_gdna_node,
+                                         calibration.mass_gdna_edge, share)
+    rna_count_region = _conserved_count(calibration, region_arrays, calibration.mass_rna_node,
+                                        rna_edge_unspliced, share)
 
     proj = _project_regions_to_loci(
         region_arrays,
         multi_loci,
         len(multi_loci),
         {
-            "gdna": gdna_region,
-            "rna": rna_region,
-            # the two per-component OPPORTUNITY totals — the divisors that turn a mass into a density
-            "gdna_support": support_len,
-            "rna_support": rna_support,
-            # ⭐ the GENOMIC span: the number of start positions, the SAME for both components. Nodes
-            # only — an edge is a 0-bp line and contributes none.
-            "span_bp": np.asarray(region_arrays.region_size_bp, dtype=np.float64),
-            "span": support_len,  # Σ S — the EFFECTIVE support (region_eff_len + summed seams), NOT genomic
+            "gdna": gdna_count_region,
+            "rna": rna_count_region,
+            "span": support_len,  # Σ S — the EFFECTIVE support, for the eff-len clamp below
             # the CONTAINED (unique-mapper) mass per locus — the calibration-blindness discriminator for the
             # eff-len guard below (calibration's accumulator is fed by unique mappers only).
             "gdna_contained": np.asarray(calibration.mass_gdna_node, dtype=np.float64),
@@ -409,15 +435,11 @@ def assemble_priors(
     )
     span = proj["span"]
 
-    # ⭐ MASS -> DENSITY -> FRAGMENT COUNT. The pooled density is a ratio of sums (never a mean of
-    # ratios), integrated over the locus's GENOMIC span — the same span for both
-    # components, so the ratio a_g:a_r is ρ_g:ρ_r and carries no length tilt.
-    # ⛔ `where=` and not a floored divisor: a locus with no opportunity for a component must emit
-    # NOTHING, never a floored division ( — a "no data" default of 100 %
-    # gDNA was actively seeding false gDNA into neighbouring exons).
-    span_bp = proj["span_bp"]
-    gdna_locus = _density_times_span(proj["gdna"], proj["gdna_support"], span_bp)
-    rna_locus = _density_times_span(proj["rna"], proj["rna_support"], span_bp)
+    # ⭐ The projection is the whole conversion now: the per-object numbers are ALREADY fragment counts,
+    # so a locus's pseudocount is just its overlap-weighted share of them. ⛔ No density, no span
+    # integration, no support-weighted pooling — the count is in the bank.
+    gdna_locus = np.maximum(proj["gdna"], 0.0)
+    rna_locus = np.maximum(proj["rna"], 0.0)
     # gDNA EM effective length = the enrichment-weighted length of the locus's gDNA against the SHARED global
     # ρ_ref: eff = Σ_locus share·min(m_n/ρ_ref, S_n) = proj["elen"]. gDNA's node set is ALL the locus's nodes
     # (every region + boundary over its span; the intergenic regions outside are dropped by the projection).

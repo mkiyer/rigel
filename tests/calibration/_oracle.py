@@ -22,7 +22,6 @@ high-expression exons where the accumulator has the real unspliced exon-body mRN
 ⭐ **FIVE POPULATIONS ON THREE AXES**, each an integer count with two GENOME-strand columns::
 
     nodes             node_contained     the whole path lies inside the node
-                      node_spanning      one segment covers the node whole
     contiguous edges  edge_unspliced     the mixture being deconvolved
                       edge_spliced       certified RNA -- gDNA cannot be spliced
     junction edges    sj_count           pure RNA by construction
@@ -54,11 +53,15 @@ ORIGINS = ("gdna", "mrna", "nrna")
 #: this tuple is a bank the oracle would silently stop validating.
 _BANKS = (
     "node_contained_count",
-    "node_spanning_count",
     "edge_unspliced_count",
     "edge_spliced_count",
     "sj_count",
     "node_start_count",
+    # ⭐ The two CONSERVED MASS banks. They were outside this tuple when they landed, which meant the
+    # origin split was never validated on them — and they are exactly what `component_shares` reads.
+    # Integer fixed point, so sum-to-full is byte-exact here like every other bank.
+    "edge_unspliced_mass",
+    "edge_spliced_mass",
 )
 
 #: The banks a gDNA fragment can NEVER touch — it does not splice.
@@ -278,6 +281,41 @@ class OracleTruth:
         validator blind to a partition that suddenly produced one."""
         sj = lambda k: np.asarray(self.parts[k].sj_count, np.float64).sum(1)  # noqa: E731
         return {k: sj(k) for k in ORIGINS}
+
+    def component_shares(self) -> dict:
+        """⭐⭐ **THE TRUE PER-COMPONENT SHARE AT EVERY LINE, MEASURED — not modelled.**
+
+        ``mass / count`` inside one origin partition IS that component's mean conserved fragment-mass
+        per crossing, on the real partition, under the real placement. It needs **no fragment-length
+        pmf, no uniform-placement assumption and no reach model** — which is the whole point, because
+        the fitted pmfs carry a phantom length gap and an analytic share would import it.
+
+        ⛔ **This is why the arm built on it is an ORACLE arm and not a MODEL arm.** Deriving the share
+        from ``truth_fragment_lengths.tsv`` through ``crossing_eff_length`` would be a model evaluated
+        on truth inputs, and it would defeat the purpose: the arm could then be wrong in the same
+        direction as the thing it is supposed to price.
+
+        ⚠ **1.0 where a component never crossed a line** — the identity, matching
+        ``PopulationView.mass_per_crossing``. A zero there would delete mass rather than leave it
+        unscaled, and the shipped accessor makes the same choice for the same reason.
+
+        Returns ``{"gdna": float64[n_edges], "rna": float64[n_edges]}``.
+        """
+        from rigel.calibration.substrate import INV_LENGTH_SCALE
+
+        out = {}
+        for name, origins in (("gdna", ("gdna",)), ("rna", ("mrna", "nrna"))):
+            mass = sum(
+                np.asarray(self.parts[k].edge_unspliced_mass, np.float64) for k in origins
+            ) / INV_LENGTH_SCALE
+            count = sum(
+                np.asarray(self.parts[k].edge_unspliced_count, np.float64).sum(axis=1)
+                for k in origins
+            )
+            share = np.ones_like(mass)
+            np.divide(mass, count, out=share, where=count > 0)
+            out[name] = share
+        return out
 
     def override_masses(self, region_arrays) -> dict:
         """The TRUE ``CalibrationResult`` mass arrays on all three axes, built DIRECTLY from the

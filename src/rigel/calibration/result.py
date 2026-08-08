@@ -102,6 +102,21 @@ class CalibrationResult:
     #: prior arbitrates. ``mass_rna_edge`` itself stays spliced-inclusive so conservation is preserved.
     mass_rna_spliced_edge: np.ndarray
 
+    #: float64[n_edges] — ⭐⭐ **THE INCIDENCE→FRAGMENT CONVERSION, per line.** ``mass / count`` off the
+    #: accumulator's conserved-mass bank: the mean fragment-mass ONE crossing at this line carries.
+    #:
+    #: ⛔ **It is GEOMETRY, not a deconvolved mass, and the distinction is load-bearing.** Every array
+    #: above is a gDNA/RNA split that a perfect deconvolution would change; this one is a property of
+    #: the partition and the fragment-length distribution and would be identical under any split. That
+    #: is why it is NOT in ``prior_vs_oracle.OVERRIDE_FIELDS``: an oracle that overrode it would be
+    #: answering a different question.
+    #:
+    #: ⭐ ``assemble_priors`` multiplies each component's per-line mass by it, because the accumulator
+    #: deposits ``+1`` on EVERY line a fragment crosses — ``max(K, 1)`` of them — so a sum over lines is
+    #: an object-incidence count and the EM adds a FRAGMENT count. It is 1.0 where both flanking nodes
+    #: exceed every fragment length, and falls toward the node spacing where they do not.
+    edge_mass_per_crossing: np.ndarray
+
     # --- the JUMPING population, per junction edge (float64[n_junctions]) ---
     #: ⭐ **Never deconvolved: a junction edge is pure mature RNA by construction**, so this is
     #: ``sj_count`` summed over the genome-strand columns and nothing else. It is the third population
@@ -168,6 +183,7 @@ class CalibrationResult:
             "mass_gdna_edge",
             "mass_rna_edge",
             "mass_rna_spliced_edge",
+            "edge_mass_per_crossing",
             "gdna_edge_eff_len",
             "rna_edge_eff_len",
         ):

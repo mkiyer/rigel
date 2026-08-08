@@ -36,13 +36,14 @@ here that reads like a status report is a bug in this file.
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **98 rules. Read the group that matches what you are about to do, then open only those.** Cite one
+⭐ **99 rules. Read the group that matches what you are about to do, then open only those.** Cite one
 as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.py` keeps it that way.
 
 **Validation and gates**
 
 - `self-checking-validator` — A validator that calls the builder's own helper validates nothing.
 - `perturb-every-gate` — A falsification test needs PERTURBATION, not just to be written first.
+- `a-field-driven-gate-is-atomic` — A gate that enumerates the spec's fields fuses spec, implementation and schema into ONE commit.
 - `waive-with-a-measurement` — AN ASSERTION THE SHIPPED CODE VIOLATES IS WAIVED WITH ITS MEASUREMENT, NEVER WIDENED — AND
 - `a-docstring-that-misdescribes-the-graph` — A CLAIM ABOUT THE CODE, INSIDE THE CODE, THAT NOTHING
 - `a-flat-pile-is-not-a-knot` — 35 MODULES WITH NO CYCLES AND ONE IMPORTER EACH IS NOT TANGLED — IT IS
@@ -129,6 +130,7 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `credit-exactly-one-junction` — A fragment crossing K junctions must credit exactly ONE (the leftmost annotated).
 - `strand-completes-the-edge-key` — (src, kind, dst) is not a total order for junction edges — two strand-coincident junctions diffe
 - `a-hash-that-misses-its-artifact` — Cache keys that do not cover the artifact they cache.
+  ⚠ 2026-08-08: the payload digest hashed field NAMES, so collapsing a bank from `[n,2]` to `[n]` did not move it — and the cache-load path validates no shapes. It now hashes `name:columns`.
 - `integer-channels-reproduce` — Integer channels are bit-identical across worker counts; float channels are not.
 - `worktrees-run-the-wrong-code` — Worktrees silently run the wrong code — an editable install's meta-path finder beats
 - `checkout-deletes-uncommitted-work` — git checkout -- <file> does not undo a perturbation when the work is uncommitted — it deletes th
@@ -176,6 +178,25 @@ feature removed); a de-tilt test whose pool had **one length bin**, which is inv
 divisor whatsoever; and a gate written in the same session as its own fix that did not fire on its own
 named perturbation, because a redundant `var > 0` backstop was silently doing the guard's job — **two homes
 for one predicate** (TRAPS: a-test-that-redefines), inside the falsification.
+
+**a-field-driven-gate-is-atomic. A GATE THAT ENUMERATES THE SPECIFICATION'S FIELDS FUSES SPEC, IMPLEMENTATION AND SCHEMA INTO
+ONE COMMIT — plan the change that way or the tree is red in between.** `test_accumulator_native_parity`
+reads `dataclasses.fields(Tally)` and `test_accumulator_payload` does the same, deliberately: "add a
+field to the specification and it joins this gate automatically". ⭐ That is the right design and it has
+a consequence nobody had written down.
+
+⚠ Measured 2026-08-08: adding **one** field to the specification's `Tally` — nothing else — turned **10
+tests red** across the two files. The accumulator-prior plan had scheduled the work as four steps
+(spec → C++ → digest → consumer) and warned that "steps 3 and 4 must land together"; the truth is that
+**2, 3 and 4 are one commit**, and step 4 is not a step at all — `payload_schema_digest()` recurses over
+the payload's field list, so the bump happens automatically, and a gate forbids keeping the field
+accumulator-internal to dodge it.
+
+⭐ **The cheap way to learn this is to try it**: add the field, run the suite, read the failure count,
+revert. Ninety seconds, and it re-planned the commit before any C++ was written. ⛔ Do not discover it
+half way through, with the extension rebuilt and the tree red.
+⚠ The downstream cost is the real one: the digest bump invalidated **201 cached scans** across three
+panels. Budget the rebuild as part of the commit, not as cleanup after it.
 
 **waive-with-a-measurement. ⛔⛔ AN ASSERTION THE SHIPPED CODE VIOLATES IS WAIVED **WITH ITS MEASUREMENT**, NEVER WIDENED — AND
 THE COUNT IS WORTH MORE THAN THE CRASH.** Five structural invariants were added to the solver's backbone,
@@ -687,6 +708,28 @@ INTEGRAL, or the non-integer observable returns and the count stops being a coun
 
 **conservation-misses-mis-attribution. Mass conservation does not catch mis-attribution.** One fragment can credit the same boundary side
 twice, and credit a boundary it never crossed, with total mass still exactly 1.0.
+
+⭐⭐ **AND IT IS FAR WORSE THAN "a defect can slip through": AN ENTIRE ALTERNATIVE RULE CONSERVES.**
+Measured 2026-08-08 while landing `edge_unspliced_mass`. The shipped deposit shares a slice's
+`slice_len / L` between the lines that bound it; the `1/K` rule an earlier design draft proposed gives
+every crossed line an equal `1/K`. **Both sum to exactly one per fragment.** Injecting `1/K` into the
+specification left *every* conservation gate green — both per-fragment laws, the exhaustiveness sum over
+5,193 enumerated fragments, and even the closed form at a line whose flanks exceed every fragment, where
+`K == 1` makes the two rules identical.
+
+⭐ **What caught it was a re-derivation on a different axis**: attribute each fragment BASE to the lines
+bounding its own node and divide by `L`. `1/K` is not expressible that way — a base carries no knowledge
+of how many lines the whole fragment crossed — so the two rules separate immediately.
+⛔ **The general form: if a property is invariant across the rules you are choosing between, a gate on
+that property is not a gate on the choice.** Conservation was the obvious thing to test and it was the
+one thing that could not decide anything. `tests/native/test_conserved_mass.py` states the four claims
+separately for exactly this reason.
+
+⚠ And a second, cheaper trap in the same file: the law is exact in RATIONALS, while the bank is a fixed
+point. The first version of the conservation test asserted exact equality against a *quantised* array
+and failed on its own correct code. Those are two claims — the rule conserves, and the representation
+costs ≤ K quanta — and each needs its own assertion. Collapsing them either hides a real error inside a
+rounding tolerance or reports rounding as a defect.
 
 ---
 

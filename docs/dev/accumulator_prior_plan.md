@@ -1,359 +1,154 @@
-# Accumulator + prior — design and implementation plan
+# Accumulator + prior — WHERE THIS CAMPAIGN IS, AND WHAT TO DO NEXT
 
     ⚠ **A DEV DOC.** Provisional; nothing may cite it. When an item settles, MOVE it to its permanent
     home and delete it here in the same edit.
 
-    Opened 2026-08-07. ⛔ **Supersedes `prior_derivation.md` entirely** — that document accumulated
-    superseded proposals and two retracted claims and should be deleted once this one is accepted.
-    Everything below that came from it has been re-derived against the code, not copied.
-
-    **Status: DESIGN SETTLED, NOTHING IMPLEMENTED.** All three open questions were answered by the
-    owner on 2026-08-07 and are recorded in §8 with the evidence. Implementation is §7.
+    Opened 2026-08-07. **Rewritten 2026-08-08 as the RESUME POINT** — the design sections that used to
+    live here are implemented, and their content moved out: derivations to `EQUATIONS.md` §3b/§3c,
+    rulings to `DESIGN.md` §3.1, lessons to `TRAPS.md`. What is left is state, sequence and open
+    questions. ⛔ If this file starts growing design again, move it out.
 
 ---
 
-## 1. Goals
+## 1. ⭐⭐⭐ THE TREE, EXACTLY
 
-| # | goal | what it needs from the accumulator |
-|---|---|---|
-| 1 | **strand model** | DISCRETE integer counts, on BOTH genome-strand columns |
-| 2 | **length likelihood** (built, gated off) | a per-slot length moment pair — `inv_length_sum`, `length_sum` |
-| 3 | **spliced fragments deposited correctly** | correct arithmetic for multi-junction / multi-node paths |
-| 4 | **density deconvolution** | a per-NODE density (intergenic vs intronic, to peel RNA off introns) |
-| 5 | **the prior** (this campaign) | a FRACTIONAL mass that sums to 1 per fragment → conservation |
+**Committed mid-development, deliberately, with the suite RED. That is not the standing baseline.**
 
-⭐ **The organising principle, and it is what the current code violates: a COUNT and a MASS are two
-different deposits and one number cannot be both.** A count is extensive and discrete (goal 1 needs
-integers for a Beta-Binomial). A conserved mass is fractional and must sum to 1 per fragment (goal 5).
-The current accumulator deposits only counts and densities, and `assemble_priors` then manufactures a
-count from a density — which is the defect measured in §3.
-
----
-
-## 2. ⭐⭐ THE PRODUCTION ACCUMULATOR ALREADY SOLVED THIS — read it before designing
-
-`v0.7.1`, `src/rigel/native/calibration/accumulator.h`:
-
-```cpp
-struct Region   { uint32_t contained[kNChannels]; };                    // 16 B
-struct Boundary { float    mass_left[4],  mass_right[4];                // fractional, conserved
-                  uint32_t flux_left[4],  flux_right[4]; };             // discrete, for strand
-```
-
-⭐ **It carried the dual.** `flux` = discrete integer per side, NOT split (the strand model's
-Beta-Binomial input). `mass` = float, split so the fragment sums to 1. Same object, two deposits,
-two consumers. **This is the design to restore.**
-
-The deposit rule (`accumulator.cpp`, crossing path):
-
-```cpp
-share = (slice.end - slice.start) * inv_L / n_cross;   // n_cross = crosses_left + crosses_right
-if (crosses_right) { b[r+1].mass_left  += share; b[r+1].flux_left  += 1u; }
-if (crosses_left)  { b[r  ].mass_right += share; b[r  ].flux_right += 1u; }
-```
-
-* **coverage-weighted** — a slice's mass is its share of the fragment's bases, `slice_len / L`
-* **deposited at BOUNDARIES, never into the region** — edges keep ownership of crossing fragments
-* **conserved** — `Σ slices (slice_len / L) = L / L = 1`, exactly
-* a fully-traversed interior region splits 50/50 across its two boundaries (`n_cross == 2`)
-
-⚠ **It is strictly better than the `1/K` share I proposed earlier**: `1/K` gives every crossed line an
-equal share regardless of geometry; this weights by the bases actually adjacent to that line. Both
-conserve; only this one is unbiased about *where* the fragment sat.
-
-⚠ Production also carried a **left/right** split per boundary, which the new accumulator dropped. Its
-purpose is recoverable from the new `edge_unspliced` / `edge_spliced` bank split — see §5.3 — but the
-decision must be explicit, not inherited.
-
----
-
-## 3. What is wrong today, measured
-
-`assemble_priors` computes `rho_c = Σ mass_c / Σ S_c` then `a_c = rho_c · span_bp`. With a **perfect**
-deconvolution (oracle masses in), `g50 ss0.99`:
-
-| | capture OFF | capture ON |
-|---|---|---|
-| node-contained `rho` vs truth | 1.001 | **0.633** |
-| edge-crossing `rho` vs truth | 0.977 | **7.621** |
-| pooled | 0.999 | **1.247** |
-| edge share of pooled mass / support | 7.4 % / 7.5 % | **53.7 % / 8.8 %** |
-
-Capture puts gDNA on exons; a fragment on a short exon cannot be *contained*, so it deposits as a
-*crossing*, K times for K lines. `Σm/ΣS` pools a K-inflated numerator against a flat per-line divisor.
-The two halves nearly cancel, which is why it has read as roughly right. **+24.7 % genome-wide is the
-+15.1 % `prior_vs_oracle` measures through the locus projection.**
-
-⭐ Supporting fact: **40.2 % of gDNA fragments are crossings under capture, against 4.8 % off it.**
-
-⛔ **The effective-length contraction is NOT the defect and must not be removed.** Capture changes the
-sampling probability — it depletes introns and intergenic regions — so a locus's gDNA normalised by its
-full span instead of its probed footprint understates gDNA and tilts the EM toward RNA. That is
-`gdna_eff_len`'s job and it stays. What goes is the use of that machinery to *manufacture a count*.
-
----
-
-## 4. ⭐⭐⭐ A FINDING THAT CHANGES GOAL 3 — verified against the deposit code
-
-**A typical spliced fragment deposits on NO node and NO edge.** `contained` requires `not sj_ids`;
-crossings are lines *strictly* inside a block, and a spliced block begins/ends exactly at an exon edge,
-which is a cut — `searchsorted(..., 'right')` / `(..., 'left')` exclude it. Verified:
-
-| path | lines crossed |
+| | |
 |---|---|
-| spliced, 1 junction, blocks inside their exons | **none** |
-| spliced, 2 junctions, 3 blocks | **none** |
-| unspliced across one boundary | 1 |
-| unspliced spanning a whole node | 2 |
+| suite | ⛔ **40 failed / 3,197 passed** / 2 skipped / 9 xfail |
+| the 40 | `test_golden_output` **21**, `test_prior_units` **13**, `test_priors` **6** — *all* consequences of the `assemble_priors` rewrite, nothing else |
+| `payload_schema_digest` | **`19ee4ba867ff0441`** — FINAL for this campaign |
+| caches | ✅ all **176** oracle caches (ladder 36 × 4, both flgap 4 × 4) + `pilot/scan_cache` rebuilt on that digest, verified 0 stale |
+| lint | ✅ clean |
 
-⭐ **This is CORRECT, and it is why the design closes.** The prior arbitrates only the **unspliced**
-competition — spliced fragments are certified RNA (gDNA cannot splice) and the EM assigns them
-directly. So the conservation target is the unspliced population, and for an unspliced fragment
-*contained ∪ crossing* is **exhaustive**: a contiguous interval either stays inside one node or crosses
-≥ 1 boundary.
-
-⚠ It also explains two audit results that otherwise look like bugs: `edge_spliced_*`'s density channels
-are dead because that bank only ever catches the rare spliced block that spans an interior boundary,
-and `CalibrationResult` already documents `mass_rna_spliced_edge` as "routinely two orders of magnitude
-smaller than the junction flux at the same place".
-
-⛔⛔ **BUT DO NOT OVER-GENERALISE THIS — AN EARLIER DRAFT DID.** The table above was produced on a toy
-with a SINGLE isoform and no staggered exon boundary, which *by construction* cannot produce a spliced
-contiguous crossing. With staggered isoforms a spliced fragment routinely crosses a contiguous line
-(§5.1), and on the panel that population is **larger than the unspliced one at mRNA edges**.
-⚠ `test_pass0_vs_oracle`'s fixture already documents the stagger as load-bearing for exactly this bank.
-
-⭐ So goal 3 is: *a spliced fragment's junctions are accounted on the junction axis, its contiguous
-crossings on the SPLICED edge bank, and neither enters the unspliced competition.* All three channels
-already route that way; the new `mass` channel must route identically.
+⛔ **The 40 are a known, understood, deliberate state — not a mystery to debug.** See §3 step 1.
 
 ---
 
-## 5. The design
+## 2. WHAT LANDED
 
-### 5.1 Deposits to ADD
+**Accumulator schema — DONE, and FINAL unless §4 says otherwise.**
 
-    edge_unspliced_mass[l] += share       // fixed-point; share = (slice_len / w) / n_cross
-    edge_spliced_mass[l]   += share       // SAME rule, routed by the same `spliced` flag
+* ⭐ Two conserved-mass banks (`edge_unspliced_mass`, `edge_spliced_mass`), one column each.
+* ⛔ Six dead banks removed; five length moments collapsed `[n,2] → [n]`.
+* Structs: `Node` 80 → **24 B**, `ContiguousEdge` 80 → **48 B**, `JunctionEdge` 40 → **16 B**.
+* Byte-identity with the C++ restored; **16 new gates** in `tests/native/test_conserved_mass.py`.
+* ⭐ Falsified: 6 injected defects, all caught. **An exact `1/K` deposit passes every conservation
+  gate** and fails only the per-base re-derivation — conservation cannot pin this rule.
+* ⭐ `sj_count` keeps both strand columns, now as a stated ruling (aligner-artifact detection).
 
-⭐⭐ **TWO new banks, and no left/right split** (§8 Q2). Nodes need nothing new:
-`node_contained_count` is already 1 per contained fragment, i.e. already the conserved node mass.
+**`assemble_priors` — REWRITTEN, not yet green.** Sums conserved counts; no density, no `span_bp`
+integration, no support-weighted pooling. Measured `O/F` **1.149 → 1.019** on three ladder gDNA levels;
+capture-OFF `Σ|Δ|` −61 %.
 
-⛔⛔ **`edge_spliced_mass` IS REQUIRED — an earlier draft of this plan dropped it and was wrong**
-(owner, 2026-08-07). A spliced fragment CAN cross a contiguous line, whenever another isoform's exon
-boundary falls INSIDE one of its blocks:
+**Phase-0 instrumentation — DONE.** `prior_vs_oracle.py` gained arms **S** (`S_vs_F`, `O_vs_S`) and the
+`gdna_eff_len` clamp diagnostic; `OracleTruth.component_shares()` measures the true per-component share
+off the origin split; the two mass banks joined `_BANKS` so the split is validated on them.
 
-    TA+ exons (1000,2000) (9000,10000)      a TA+ fragment splicing 2000->9000 and running to 9200
-    TB+ exons (1000,2000) (9050,10000)      crosses the line at 9050 CONTIGUOUSLY
+**What phase 0 measured** (gDNA arm, `rel`):
 
-⭐ **And it is not a corner case — measured on the panel it is the DOMINANT edge population for mRNA:**
+| panel | ④ `O−F` | ⑧ `S−F` | ⑨ `O−S` | the share's portion |
+|---|---|---|---|---|
+| `flgap_long` (gDNA +40 %) | 0.0319 | **0.0229** | 0.0088 | **28 %** |
+| `flgap_short` (gDNA −41 %) | 0.0067 | **0.0050** | 0.0027 | **25 %** |
 
-| | gDNA | mRNA |
-|---|---|---|
-| `Σ edge_spliced`, capture OFF | **0** | **1,593,441** on 5,992 lines (unspliced: 1,485,580) |
-| `Σ edge_spliced`, capture ON | **0** | 1,146,842 on 3,959 lines (unspliced: 1,270,161) |
-
-Exactly zero on gDNA and larger than the unspliced crossings on mRNA — the certified-RNA signature.
-**These are proven pure RNA at that line and must never enter the unspliced competition.**
-
-⭐ **THE STRUCTURAL ARGUMENT, WHICH IS THE STRONGEST ONE.** At deposit time every edge channel is
-selected by ONE tuple — `(edge_count, edge_inv_length, edge_length) = spliced ? spliced : unspliced`.
-Adding `mass` to that tuple routes it correctly for free. **Omitting it would make `mass` the only
-channel that does not honour the spliced/unspliced split**, which is precisely the latent bug this
-guards against: a spliced fragment's mass silently landing in the unspliced bank.
-
-⚠ **THE TWO BANKS HAVE DIFFERENT CONTRACTS AND A CONSUMER MUST NOT CONFUSE THEM:**
-
-| bank | sums to, per fragment | is it a conservation ledger? |
-|---|---|---|
-| `edge_unspliced_mass` | **1** over the lines an unspliced fragment crosses | ✅ **yes** — see the proof below |
-| `edge_spliced_mass` | `crossed_block_len / w` — a PARTIAL | ⛔ **no**, and it is not meant to be |
-
-A spliced fragment's blocks that contain no interior boundary deposit nothing (their accounting is on
-the junction axis), so `edge_spliced_mass` is a partial by construction. ⭐ **That is correct, because
-it is a per-LINE certified-RNA term, not a per-FRAGMENT count** — and per line it is exactly
-commensurate with the unspliced mass, both being "the share of this fragment's bases adjacent to this
-line", which is what makes the two safe to compare at one edge. ⛔ Do not read it as "the number of
-spliced fragments at this line".
-
-**Conservation, proved on the population that matters.** An unspliced path is ONE segment. If it stays
-inside a node it is `contained` (1 deposit). Otherwise it has `n ≥ 2` slices: slice 0 crosses right only
-(`n_cross = 1`), slice `n−1` crosses left only (`n_cross = 1`), every interior slice crosses both
-(`n_cross = 2`). **Every slice has `n_cross ≥ 1`**, so `Σ share = Σ slice_len / w = 1` exactly, with
-nothing dropped by the `n_cross == 0` guard.
-
-⚠ **Fixed-point, not float.** `TRAPS: integer-channels-reproduce` — float channels are not bit-identical
-across worker counts, and the whole parity gate against `_accumulator_reference.py` rests on integer
-merges. Use the existing `INV_LENGTH_SCALE` convention.
-
-### 5.2 Deposits to REMOVE — no production consumer
-
-Traced through `CalibrationSubstrate` → `PopulationView` including the dynamic `getattr` in
-`node_geometry._channel`. Each appears only in the schema, the C++, the substrate wrapper, and parity
-fixtures.
-
-| bank | verdict |
-|---|---|
-| `edge_spliced_inv_length_sum` | ⭐ REMOVE — `length_likelihood` reads `node_contained` + `edge_unspliced` only |
-| `edge_spliced_length_sum` | ⭐ REMOVE — redundant with `pool_lengths` |
-| `sj_length_sum` | ⭐ REMOVE |
-| `node_spanning_count` / `_inv_length_sum` / `_length_sum` | ⭐ **REMOVE — decided on evidence, §8 Q3.** No consumer; the mass is already at the edges the fragment crosses; and the one argument for keeping it (spanning is the only per-node observable at short exons where `contained` is empty by geometry) **fails when measured** |
-
-### 5.3 KEEP, with the reason
-
-| bank | why |
-|---|---|
-| `node_contained_count` | goals 1, 4, 5 — the node population the solve deconvolves, the strand model's node counts (both columns), AND the conserved node mass |
-| `node_contained_inv_length_sum`, `node_contained_length_sum` | goal 2 — dormant by design; the designed input to the only channel that can give an AMBIG slot its own composition evidence |
-| `edge_unspliced_count` | goals 1, 4 — `strand_deconv` reads both columns |
-| `edge_unspliced_inv_length_sum` | ⭐ **LIVE** in `second_pass.py:461` (the drain scores held fragments) + goal 2 |
-| `edge_unspliced_length_sum` | goal 2 |
-| `edge_spliced_count` | `calibrate` (`mass_rna_spliced_edge`), `node_geometry`, `sweep` |
-| `sj_count` | `calibrate` (`mass_rna_junction`, flux), `node_geometry` |
-| `sj_inv_length_sum` | ⭐ **LIVE** in `second_pass.py:451` |
-| `node_start_count` | the conservation invariant `Σ == qc.deposited` — the only externally checkable statement the accumulator makes |
-| `pool_lengths`, `deposited_lengths` | `fl.py` — the five pure pools and the EB anchor |
-
-⭐ **Net: two banks added, six removed** — `edge_spliced_inv_length_sum`, `edge_spliced_length_sum`,
-`sj_length_sum`, and the three `node_spanning_*`.
-
-### 5.4 Collapse the unused strand splits (owner agreed)
-
-`_build_length_loglik` calls `.sum(axis=1)` on all three inputs and `length_likelihood` is explicitly
-strand-agnostic — which strand a read aligned to says nothing about whether the molecule was gDNA or
-RNA. **The `[n,2]` shape on every surviving `*_inv_length_sum` / `*_length_sum` is half wasted by
-construction**; collapsing to `[n]` touches no consumer.
-⛔ **The `count` banks keep both columns — that is goal 1.** `strand_deconv` reads
-`edge_unspliced.count` per column and `gdna_strand` reads `node_contained.count` per column, and a
-Beta-Binomial needs discrete integers on both strands.
-
-Cost at rest today: **84 B/node** (40 contained + 40 spanning + 4 start), **80 B/edge**. Scale by the
-INDEX (~1.5 M nodes genome-wide), not the panel — calibration's cost is depth-independent.
-
-### 5.5 The prior
-
-`mass_gdna_node[r]` is already `f_g(r) · contained_count[r]`, so the node term needs no arithmetic. The
-edge term rescales from the K-inflated count onto the conserved mass:
-
-    a_g(locus) = Σ_{r∈locus} share(r,locus) · mass_gdna_node[r]
-               + Σ_{l∈locus} share(l,locus) · mass_gdna_edge_unspliced[l] · (edge_unspliced_mass[l] / edge_unspliced_count[l])
-
-    a_r(locus) = the same on the RNA masses (spliced withheld, as today)
-
-* `a_g + a_r` = the locus's unspliced fragments. Exactly the population the EM arbitrates.
-* Each object's composition applies to its OWN population — a line's composition is never used for a
-  node, which matters because **mature RNA never crosses an exon↔intron seam (0 of 1,146)**, so the two
-  are different populations by construction.
-* `gdna_eff_len` unchanged.
+⭐ Two earlier claims were **corrected by measurement**: the pooled share's capture contribution is
+**0.36 %**, not the modelled −2.49 % (the uniform-placement model fails under capture); and
+`gdna_eff_len`'s clamp is **1.03–1.25×**, not the predicted ~3× — with `nodes only` at 0.70–0.84×, so
+the edge term is partly compensating a real deficit rather than purely inflating.
 
 ---
 
-## 6. Consumer impact
+## 3. ⭐⭐⭐ WHAT TO DO NEXT, IN ORDER
 
-| consumer | reads | impact |
-|---|---|---|
-| `gdna_strand.py:375` | `node_contained.count` (2 col) | none |
-| `strand_deconv.py:86` | `edge_unspliced.count` (2 col) | none |
-| `density_deconv.py:132` | `node_contained.count` | none — goal 4 is node-only, already supported |
-| `background_reference.py:92` | `node_contained.count` | none |
-| `sweep.py:634,668,669` | contained + both edge counts | none |
-| `node_geometry.py:219-224,298` | contained, edge_unspliced, edge_spliced, junction | none |
-| `calibrate.py:652,659,685` | `edge_spliced.count`, `junction.count` | none |
-| `second_pass.py:451,461` | `sj_inv_length_sum`, `edge_unspliced_inv_length_sum` | none |
-| `fl.py` | `pool_lengths`, `deposited_lengths` | none |
-| **`priors.py`** | the four eff-len arrays + masses | ⭐ **rewritten** — §5.5 |
+**1 · GET TO GREEN.** The only tree-blocking task.
 
-⭐ **Every calibration consumer is untouched.** The change is additive in the accumulator and confined
-to `assemble_priors` on the consuming side. That is what makes it a tractable commit.
+* `test_prior_units` (13) + `test_priors` (6): their target is the OLD rule's `ρ·span`. The new rule
+  produces the **conserved fragment count**, which on a finite reference of span `S` is `ρ·(S−w+1)` —
+  the number of fragments that FIT. `ρ·span` counted `w−1` start positions no fragment can occupy.
+  ⭐ `test_prior_units`'s fixture is already made self-consistent (masses AND share enumerated through
+  the specification) and **partition invariance already passes** — 1,001 on every tiling. What remains
+  is re-basing the *target* and the ratio-flatness sweep.
+* `test_golden_output` (21): the prior genuinely changed. ⛔ Regenerate **last**, after step 2, because
+  step 4 may move it again — regenerating twice is wasted.
 
----
+**2 · FIX THE pmf ESTIMATOR.** ⛔ **Prerequisite for everything downstream.** The gDNA pools are
+geometry-limited and the RNA pool splice-limited — *opposite* censorings — so the fitted `μ_g − μ_r`
+carries a phantom **+5 to +18 bp** gap that is not in the library. Both `length_likelihood` and any
+analytic share consume these pmfs; shipping either on top is the net-negative trap in
+`fragment_length_bias.md` §0. Work: pool de-tilt by **membership probability**
+(`TRAPS: divide-by-a-probability`), and the shared EB anchor (`POOL_EB_PRIOR_ESS = 1000.0`,
+`fl.py:86`, sits directly on the composition determinant).
 
-## 7. Implementation order — each step independently gated
+**3 · FIND THE 72 %.** ⭐ **The largest unexplained term, and the highest-value question.** Perfect
+per-component shares remove only **25–28 %** of the assembler's residual; the rest survives, and is **5×
+worse when gDNA is LONGER** (`S−F` 0.030 vs 0.006 at capture-ON). That asymmetry is not the share.
+⭐ Prime suspect: the **contained/crossing ROUTING** — a longer component deposits less as contained and
+more as crossings, so *which bank* it lands in is itself gap-dependent, and the fraction of its prior
+that passes through the share at all moves with the gap.
 
-### 7.0 ⚠ THE STEP-1 SUBSTRATE — decided, because it is the first thing that would block
+**4 · THE PER-COMPONENT SHARE** — re-ranked DOWN by phase 0. Prefer the hybrid: empirical scale `M(e)`
+from the accumulator, analytic ratio `r = share_g/share_r`. Gate on the flgap pair.
 
-Every panel condition is **10–20 M fragments** and `_accumulator_reference.py` is pure Python, so a
-full condition is not runnable. Three options were considered; the choice is **SUBSAMPLE**:
+**5 · `length_likelihood` ON**, scored on the library figure.
 
-* ⛔ *A vectorised numpy re-implementation of the deposit* — fast, but it is a SECOND implementation of
-  the rule under test (`TRAPS: a-test-that-redefines`) and would itself need gating against the
-  reference. Rejected: it doubles the work and adds the exact failure mode this project keeps hitting.
-* ⚠ *The toy harness alone* — proves the conservation identity exactly and in seconds, but a toy cannot
-  give the accuracy number (`TRAPS: toys-rank-hotspots-backwards`). **Necessary, not sufficient.**
-* ⭐ **SUBSAMPLE a real condition.** `a_g / truth` is a RATIO, so it is scale-invariant: a deterministic
-  subsample (hash of qname, so the full payload and the three origin partitions stay consistent)
-  preserves it. ~500 k fragments runs in ~1 min of Python and leaves the panel-level ratio tight.
-
-**So step 1 is: prove the identity on the toy, then measure the ratio on a subsample** — one
-implementation, no second one to gate. `native_parity_on_real_data.py` and `reference_on_real_data.py`
-already carry the plumbing to run the reference against a real index.
-
-1. ⭐⭐ **PROTOTYPE THE WHOLE CHANGE IN PYTHON FIRST — no production edit.** Compute
-   `edge_unspliced_mass` from `_accumulator_reference.py` on one capture-ON and one capture-OFF
-   condition, apply §5.5, and score with `prior_vs_oracle.py` against `F`. **This prices the entire
-   change before a line of C++.** Target: the **+15.1 %** under capture → ~0, and capture-OFF's 0.999
-   unchanged. ⛔ `TRAPS: measure-the-ceiling-first` — if it does not land, nothing downstream is worth
-   building. It also answers §8 Q4 for free.
-2. **Add the bank to `_accumulator_reference.py`** (the executable spec) + its gates.
-3. **Add it to the C++** and restore byte-identity parity with the reference.
-4. **Bump `payload_schema_digest`** — every scan cache invalidates by design. ⚠ The 341 M ladder oracle
-   cache and both flgap caches must be rebuilt; budget for it.
-5. **Rewrite `assemble_priors`** per §5.5. Gate with `prior_vs_oracle.py` (O vs F) and
-   `arm_identity.py`.
-6. **Remove the dead banks** (§5.2) — separate commit, after the above is green, so a regression is
-   attributable to one change.
-7. **Re-run the campaign**: `prior_vs_oracle.py`, then `quant_accuracy.py --arm base/noop/oracle`.
-   ⚠ ROADMAP §1.3's ceiling was measured with the OLD assembler and must be re-recorded
-   (`TRAPS: re-record-the-baseline`).
+⛔ **Gate everything on the flgap PAIR, both capture arms — never the ladder alone.** The ladder's
+realised gap is only +1.5–2.1 % and it is structurally blind to this whole axis.
 
 ---
 
-## 8. ✅ DECISIONS — all three answered (owner, 2026-08-07)
+## 4. DOES THE ACCUMULATOR CHANGE AGAIN?
 
-**Q1 — Is `contained ∪ crossing` exhaustive for UNSPLICED fragments?** ✅ **Sufficient for our
-purposes.** Unannotated spliced fragments are a tiny fraction and are DEFERRED, consistent with the
-other classes already held out of the accumulator (chimeras, multimappers). ⚠ Record the deferral
-rather than the assumption: conservation is exact over *deposited, unspliced, annotated* fragments, and
-the excluded classes are named.
+⚠ **Possibly once more, and it would partly UNDO a removal above.** The candidate is
+**`edge_spliced_inv_length_sum`** (8 B/edge, ~8.3 MB genome-wide). `edge_spliced_count /
+edge_spliced_inv_length_sum` is a **local, model-free mean length of the certified-RNA population** —
+gDNA cannot splice — which breaks the dependence on the globally-fitted, splice-censored `rna_pmf`.
 
-**Q2 — Does an edge need a left/right split?** ✅ **NO.** Production carried `mass_left`/`mass_right`
-and `flux_left`/`flux_right` and **never used the split — every consumer summed the two sides.** One
-number per edge. This simplifies both the deposit and §5.5's projection, and it is why the new
-accumulator's single-number-per-line shape is right rather than a regression.
+⛔ **Do not land it on that argument.** Measure first, off the existing origin-split caches: (a) is the
+*spliced* population's length representative of the *unspliced* RNA the deconvolution arbitrates? and
+(b) how many lines carry enough spliced crossings for the ratio to be stable?
 
-**Q3 — Keep or delete `node_spanning_*`?** ✅ **DELETE — decided on evidence, not argument.** The mass
-is not lost (a spanning fragment crosses ≥ 2 lines and is already deposited there), and the only
-substantive case for keeping it — that `spanning` is the sole per-node observable at short exons, where
-`contained` is empty by geometry, which is exactly ROADMAP's evidence-starved AMBIG slot — **fails when
-measured**:
+⛔⛔ **AND IF IT LANDS, BATCH IT.** Each schema change costs a digest bump plus a ~2 h rebuild of 176
+caches plus the pilot. That has been spent once. There must be exactly **one** more, carrying every
+remaining schema change at once.
 
-| in-locus nodes with NO contained evidence | capture OFF | capture ON |
-|---|---|---|
-| starved nodes | 13,544 | 19,209 |
-| …reached by `spanning` | 13,352 | 9,774 |
-| …reached by a bounding **edge** | 13,495 | **13,583** |
-| ⭐ **reachable ONLY by `spanning`** | **0** | **141 nodes / 822 fragments** |
-
-⭐ Under capture the **edges reach strictly more starved nodes than spanning does**, and the exclusive
-case is 822 fragments of ~10 M — **0.008 %**. Spanning carries no evidence the edges do not.
-⚠ Reversal is not free: re-adding a deposit is mechanical, but it costs another
-`payload_schema_digest` bump and a full cache rebuild. Deleting now, while this change is already
-paying that cost, is the cheap moment.
-
-⚠ **Q4, still open and lower stakes** — is `f_g(l)` unbiased for a crossing fragment's gDNA
-probability? Same population by construction, so it should be, but it is an assumption. Step 1
-measures it against the oracle at no cost, before any C++.
+⚠ The original removal was not wrong on its evidence — nothing read the bank. What changed is that a
+consumer may now exist. Record it as a reversal with its reason, not as a mistake.
 
 ---
 
-## 9. Risks
+## 5. OPEN — do not treat these as settled
 
-* ⛔ **The schema digest invalidates every cached scan.** ~400 MB of oracle cache across three panels.
-  This is by design and is the single largest time cost of the change.
-* ⛔ **The C++/reference byte-identity gate** is the project's strongest invariant. Steps 3 and 4 must
-  land together or the suite is red in between.
-* ⚠ **`mass_rna_edge` is spliced-INCLUSIVE** by an existing convention (`mass_gdna_edge + mass_rna_edge
-  == unspliced + spliced` per edge). §5.5 must re-read that against the new mass, or the RNA arm
-  double-counts the certified fraction.
-* ⚠ **Float vs fixed point** — see §5.1. Production used `float` and got away with it; this tree gates
-  on bit-identical worker merges and must not.
+1. ⛔ **The ladder's `O−S` is 0.0037, larger than flgap_short's 0.0027 at a 20× smaller gap.** Partly
+   explained (realised gap +1.5–2.1 %, and `share_c` is a censored functional sensitive to *shape*), but
+   the ordering is not. **Do not quote the absolute `O−S` values until it is.** The ratios between
+   panels are the trustworthy part. ⭐ The arm itself was checked and is sound: at the 11,341 lines where
+   gDNA never crossed, its truth mass is exactly 0, so the `1.0` share default is inert on that arm.
+2. ⚠ **The flgap panels vary the standard deviation as well as the mean** (1.2× and 2.0×). Every
+   analysis so far is mean-only, and `share_c` is variance-sensitive even at equal means. The "±40 %
+   gap" shorthand is not what the panels test.
+3. ⚠ **Every cached payload is `drain: null` while production always drains.** The bound on `μ_r` is
+   **[−3.96 %, −0.60 %]** — comparable to the phantom gap itself. Until that is a number, every FL
+   measurement in this campaign carries a caveat its own size.
+4. ⚠ **Unverified:** a junction inside an unsequenced mate gap may be filed as a *contiguous* unspliced
+   crossing, tilting the unspliced RNA population long exactly beside junctions. Needs checking in
+   `build_fragment`. If true it is a length-driven composition bias upstream of all of the above.
+5. ⚠ **Debt:** `_density_times_span` in `priors.py` is now **dead** (no call sites), and
+   `assemble_priors`' docstring still teaches the retired `ρ_c = Σm/ΣS; prior = ρ·span_bp` rule at
+   `priors.py:293-297`. Clear both in step 1.
+
+---
+
+## 6. WHAT NOT TO RE-LITIGATE
+
+* The conserved-mass rule is **coverage-weighted, not `1/K`** — both conserve; only one is expressible
+  per base, and that is the only gate that separates them. `EQUATIONS.md` §3b.
+* The prior's target is the **conserved fragment count**, not `ρ·span`. `ρ·span` was the approximation
+  the density conversion happened to produce.
+* The **counts** keep both strand columns; the **moments and mass** keep one. `DESIGN.md` §3.1.
+* `sj_count` keeps both columns for **aligner-artifact detection**, not for the strand model.
+* `edge_mass_per_crossing` is **geometry, not a deconvolved mass** — it must never join
+  `prior_vs_oracle.OVERRIDE_FIELDS`.
+* You may **not** make the tool gap-robust by shrinking the estimated gap: `μ_g − μ_r` is the only
+  θ-independent composition evidence an AMBIG slot can get. `EQUATIONS.md` §3c.

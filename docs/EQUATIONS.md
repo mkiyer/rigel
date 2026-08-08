@@ -535,6 +535,68 @@ must come from instead.
 
 ---
 
+## 3b. ⭐⭐⭐ THE CONSERVED MASS, AND WHY ONE SHARE FOR TWO COMPONENTS IS A BIAS
+
+Derived 2026-08-08 when `edge_unspliced_mass` landed. The accumulator deposits `+1` on every line a
+fragment crosses — `max(K, 1)` of them — so a sum over objects is an object-INCIDENCE count while the EM
+adds a FRAGMENT count. The mass bank closes that gap: it sums to ONE per fragment.
+
+**The deposit.** A fragment of length `w` is cut by the crossed lines into slices; a slice of length
+`s` bounded by `n_cross ∈ {1,2}` lines deposits `s/(w·n_cross)` at each. Every slice of a
+single-segment path has `n_cross ≥ 1`, so `Σ = Σ s/w = 1` exactly.
+
+**The opportunity.** Put the line at 0 with flanking nodes of length `a` (left) and `b` (right). A
+crossing fragment with `u ∈ [1, w−1]` bases to the left contributes `g_a(u)/w`, where `g_a(u) = u` for
+`u ≤ a` and `a/2` beyond — the second branch because the slice then has a line on both sides. Summing:
+
+    Σ_{u=1}^{w−1} g_a(u) = (w−1)w/2      if w−1 ≤ a
+                         = a·w/2          otherwise      → both equal  w·min(w−1,a)/2
+
+so, adding the mirror term and dividing by `w`,
+
+    A_mass(w; a, b) = [ min(w−1, a) + min(w−1, b) ] / 2
+
+exact regardless of how many further lines the fragment crosses, and `E[mass] = ρ_c · E_{f_c}[A_mass]`.
+⚠ **It is a CENSORED functional**, so it is sensitive to the pmf's *shape*, not only its mean.
+
+⭐⭐ **THE POOLING THEOREM — the result that matters.** Define a component's share at a line as the mean
+conserved mass one of its crossings carries, `share_c = E_c[A_mass] / E_c[w−1] ∈ (0,1]`. The accumulator
+can only measure the MIXTURE's, `share_pooled = M/C = φ·share_g + (1−φ)·share_r`. Rescaling both
+components by it gives
+
+    a_g + a_r  =  M_g + M_r                    ← the TOTAL is conserved, exactly
+    (â_g/â_r) / (a_g/a_r)  =  share_r / share_g   ← and is INDEPENDENT of the true mixing ratio
+
+⛔⛔ **So the error is purely COMPOSITIONAL, and no conservation check can ever see it** — the locus total
+is right to the fragment while the split is wrong (`TRAPS: conservation-misses-mis-attribution`). It is
+identically zero iff `share_g = share_r`, which holds whenever `f_g = f_r` — which is why an
+equal-length panel is *structurally* blind to it (`TRAPS: an-equal-length-panel-defeats-the-lift`).
+
+⚠ **Measured 2026-08-08**: the pooled share accounts for **25–28 %** of the assembler's residual error on
+the ±40 % flgap panels (42 % off capture). The other ~72 % survives perfect per-component shares.
+
+## 3c. ⭐⭐ THE MODEL-FREE LOCAL MEAN LENGTH — and its one precondition
+
+At a contiguous edge the opportunity is `w−1` and the deposit `1/(w−1)`, so they cancel:
+
+    E[count] = ρ·E[w−1],   E[inv_length_sum] = ρ    ⇒    count / inv_length_sum + 1 = E[w]
+
+⭐ **No pmf, no model, per line.** Given the two global component means it inverts directly to a local
+gDNA fraction: `φ = (E[w] − μ_r) / (μ_g − μ_r)`. ✅ Verified numerically (400 k fragments, μ 326/208,
+φ = 0.40): reads 256.6 against a true mixture mean of 255.1, giving `φ̂ = 0.413`.
+
+⛔⛔ **THE PRECONDITION, AND IT IS EASY TO VIOLATE: the identity holds only under NATURAL PLACEMENT.**
+A longer fragment is more likely to cross a given line, and the `1/(w−1)` deposit is exactly what
+cancels that length bias. Evaluated on a length-SELECTED subpopulation the cancellation fails and the
+ratio becomes a harmonic-type mean instead: forcing every fragment to cross a line in a check of this
+identity returned **185.9 — below both component means** — which is impossible for a mixture mean and is
+the signature of the violation.
+
+⭐ **And note what the denominator is**: `μ_g − μ_r`, the same 2×2 determinant §3 relies on. The
+fragment-length gap that biases every divisor is also the *only* θ-independent composition evidence an
+AMBIG slot can get. ⛔ **So the tool may not be made gap-robust by shrinking the estimated gap** — that
+destroys the identifying quantity. Robustness must come from per-component divisors.
+
 ## 4. Opportunity corrections for length pools
 
 A pool is a length-dependent **selection**, so its raw histogram is not the library's length

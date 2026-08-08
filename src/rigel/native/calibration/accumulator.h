@@ -16,11 +16,11 @@
  *   A JUNCTION EDGE is a directed donor->acceptor link taken from the annotation. A fragment is a
  *   PATH: its aligned blocks joined across the mate gap, broken by introns.
  *
- *   Nodes count fragments CONTAINED (the whole path fits inside one node) and SPANNING (one segment
- *   covers the node whole); edges count fragments CROSSING. Every object stores a uint32 count and a
- *   three integer sums: count, inv_length_sum (fixed point) and length_sum.
+ *   Nodes count fragments CONTAINED (the whole path fits inside one node); edges count fragments
+ *   CROSSING. Each population stores only the channels something READS, and they differ: count,
+ *   inv_length_sum (fixed point), length_sum, and -- on the contiguous edges -- the conserved mass.
  *
- * WHY THREE SUMS AND NOT ONE
+ * WHY MORE THAN ONE SUM
  *   With `placements` the number of admissible start positions -- L at a node, L-1 at a 0-bp line:
  *
  *       E[count]   = rho * E[placements]
@@ -96,20 +96,43 @@ inline std::uint64_t inv_length_quantum(std::int64_t placements) noexcept {
     return (2 * kInvLengthScale + p) / (2 * p);
 }
 
+/// round(kInvLengthScale * slice_len / (length * n_cross)), rounding halves AWAY FROM ZERO.
+///
+/// The CONSERVED MASS's quantum — same fixed point and same rounding mode as `inv_length_quantum`, and
+/// for the same reason: integer addition is associative, so the per-worker merge is bit-identical at any
+/// thread count. ⚠ The rounding mode is part of the byte-identity contract with the Python reference.
+///
+/// ⚠ No overflow: the numerator is 2^33 * slice_len and slice_len never exceeds the fragment length, so
+/// at any realistic max_length it stays far under the uint64 ceiling. Both arguments are positive at
+/// every call site — a slice only exists when a line bounds it.
+inline std::uint64_t mass_quantum(std::int64_t slice_len, std::int64_t length,
+                                  std::int64_t n_cross) noexcept {
+    const auto d = static_cast<std::uint64_t>(length) * static_cast<std::uint64_t>(n_cross);
+    return (2 * kInvLengthScale * static_cast<std::uint64_t>(slice_len) + d) / (2 * d);
+}
+
 // ============================================================================
 // what each object stores
 // ============================================================================
 
-/// A node: an interval. Two disjoint populations, each two columns.
+/// A node: an interval. ONE population — the fragments contained inside it — in two strand columns.
+///
+/// ⚠ A `spanning` population (one segment covering the node whole) was removed on evidence: it reached
+/// no evidence-starved node the node's own bounding EDGES did not already reach off capture, and 141
+/// nodes / 822 fragments (0.008 %) under it. Its mass is not lost — a spanning fragment crosses both of
+/// the node's lines and is deposited there.
+/// ⛔ Consequence, and it is structural: no spliced fragment touches the node axis at all, because a
+/// spliced fragment can never be `contained` (both endpoints of an annotated intron are cuts).
 struct Node {
     std::uint32_t contained_count[kNStrandColumns];
-    std::uint32_t spanning_count[kNStrandColumns];
-    std::uint64_t contained_inv_length_sum[kNStrandColumns];
-    std::uint64_t spanning_inv_length_sum[kNStrandColumns];
-    std::uint64_t contained_length_sum[kNStrandColumns];
-    std::uint64_t spanning_length_sum[kNStrandColumns];
+    /// ⭐ ONE value, while `contained_count` keeps two. The length moments are strand-AGNOSTIC -- which
+    /// strand a read aligned to says nothing about whether the molecule was gDNA or RNA -- and every
+    /// consumer summed the two columns before using them. The COUNTS keep both because the strand model
+    /// is a Beta-Binomial over them, per strand.
+    std::uint64_t contained_inv_length_sum;
+    std::uint64_t contained_length_sum;
 };
-static_assert(sizeof(Node) == 80, "Node must be 80 bytes with no padding");
+static_assert(sizeof(Node) == 24, "Node must be 24 bytes with no padding");
 
 /// A contiguous edge: the 0-bp line between two adjacent nodes. `spliced` means the FRAGMENT used an
 /// annotated junction somewhere -- not that this line is one. gDNA cannot be spliced, so a spliced
@@ -117,21 +140,36 @@ static_assert(sizeof(Node) == 80, "Node must be 80 bytes with no padding");
 struct ContiguousEdge {
     std::uint32_t unspliced_count[kNStrandColumns];
     std::uint32_t spliced_count[kNStrandColumns];
-    std::uint64_t unspliced_inv_length_sum[kNStrandColumns];
-    std::uint64_t spliced_inv_length_sum[kNStrandColumns];
-    std::uint64_t unspliced_length_sum[kNStrandColumns];
-    std::uint64_t spliced_length_sum[kNStrandColumns];
+    /// ⭐ ONE value each -- strand-agnostic, see `Node`.
+    std::uint64_t unspliced_inv_length_sum;
+    std::uint64_t unspliced_length_sum;
+    /// ⭐⭐ THE CONSERVED MASS, fixed point. A COUNT and a MASS are two different deposits and one
+    /// number cannot be both: `unspliced_count` is `+1` on every line a fragment crosses, so a fragment
+    /// books `max(K, 1)` of them; this sums to ONE per fragment, across all the lines it crosses.
+    ///
+    /// ⛔ ONE VALUE, NOT TWO, WHILE EVERY BANK ABOVE IS PER STRAND — deliberate. `strand_deconv` reads
+    /// the counts per column; nothing reads a mass per strand, because the mass exists to turn an
+    /// object-incidence total into a fragment count and that question has no strand in it.
+    std::uint64_t unspliced_mass;
+    /// ⭐ The same rule, routed by the same `spliced` flag — so `mass` is not the one channel that
+    /// ignores the split. ⛔ A PARTIAL, never a conservation ledger: a spliced fragment's blocks with no
+    /// interior line deposit nothing (their accounting is on the junction axis), so this sums to
+    /// `crossed_block_len / L`. It is a per-LINE certified-RNA term, commensurate with the unspliced
+    /// mass at the same line, and is NOT "the number of spliced fragments here".
+    std::uint64_t spliced_mass;
 };
-static_assert(sizeof(ContiguousEdge) == 80, "ContiguousEdge must be 80 bytes with no padding");
+static_assert(sizeof(ContiguousEdge) == 48, "ContiguousEdge must be 48 bytes with no padding");
 
 /// A junction edge: one exact donor->acceptor jump. Spliced by construction, so there is no unspliced
 /// population; and it is not a genomic position, so it carries no structural flags.
 struct JunctionEdge {
     std::uint32_t count[kNStrandColumns];
-    std::uint64_t inv_length_sum[kNStrandColumns];
-    std::uint64_t length_sum[kNStrandColumns];
+    /// ⭐ LIVE: `second_pass` scores a held fragment's junction evidence with it. `length_sum` was
+    /// removed — nothing read it, and `pool_lengths`' RNA_SPLICED row already carries that
+    /// population's length distribution.
+    std::uint64_t inv_length_sum;
 };
-static_assert(sizeof(JunctionEdge) == 40, "JunctionEdge must be 40 bytes with no padding");
+static_assert(sizeof(JunctionEdge) == 16, "JunctionEdge must be 16 bytes with no padding");
 
 // ============================================================================
 // the fragment-length pools

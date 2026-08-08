@@ -52,6 +52,10 @@ def _intergenic_betabinom_payload(n_nodes, depth, overdispersion, seed):
     def edge_zeros(dtype):
         return np.zeros((n_edges, 2), dtype=dtype)
 
+    def flat(rows, dtype):
+        """A single-column bank — the length moments and the conserved mass carry no strand axis."""
+        return np.zeros(rows, dtype=dtype)
+
     payload = AccumulatorPayload(
         cut_positions=np.arange(n_nodes + 1, dtype=np.int64) * 100,
         ref_cut_offsets=np.array([0, n_nodes + 1], dtype=np.int64),
@@ -59,21 +63,20 @@ def _intergenic_betabinom_payload(n_nodes, depth, overdispersion, seed):
         ref_edge_offsets=np.array([0, n_edges], dtype=np.int64),
         ref_sj_offsets=np.array([0, 0], dtype=np.int64),
         node_contained_count=contained,
-        node_contained_inv_length_sum=(contained.astype(np.uint64) * np.uint64(quantum)),
-        node_contained_length_sum=(contained.astype(np.uint64) * np.uint64(_FRAG_LEN)),
-        node_spanning_count=node_zeros(np.uint32),
-        node_spanning_inv_length_sum=node_zeros(np.uint64),
-        node_spanning_length_sum=node_zeros(np.uint64),
+        # ⚠ ONE column: the length moments carry no strand axis, so the two are summed.
+        node_contained_inv_length_sum=(contained.sum(axis=1).astype(np.uint64) * np.uint64(quantum)),
+        node_contained_length_sum=(contained.sum(axis=1).astype(np.uint64) * np.uint64(_FRAG_LEN)),
         node_start_count=contained.sum(axis=1).astype(np.uint32),
         edge_unspliced_count=edge_zeros(np.uint32),
-        edge_unspliced_inv_length_sum=edge_zeros(np.uint64),
-        edge_unspliced_length_sum=edge_zeros(np.uint64),
+        edge_unspliced_inv_length_sum=flat(n_edges, np.uint64),
+        edge_unspliced_length_sum=flat(n_edges, np.uint64),
+        # ⚠ ONE value per edge — the conserved mass has no strand axis. Zero here is a real state and
+        # not a stub: this fixture deposits no crossings at all, so there is no mass to conserve.
+        edge_unspliced_mass=np.zeros(n_edges, dtype=np.uint64),
         edge_spliced_count=edge_zeros(np.uint32),
-        edge_spliced_inv_length_sum=edge_zeros(np.uint64),
-        edge_spliced_length_sum=edge_zeros(np.uint64),
+        edge_spliced_mass=np.zeros(n_edges, dtype=np.uint64),
         sj_count=np.zeros((0, 2), dtype=np.uint32),
-        sj_inv_length_sum=np.zeros((0, 2), dtype=np.uint64),
-        sj_length_sum=np.zeros((0, 2), dtype=np.uint64),
+        sj_inv_length_sum=np.zeros(0, dtype=np.uint64),
         pool_lengths=np.zeros((N_FRAGMENT_POOLS, 201), dtype=np.int64),
         deposited_lengths=np.zeros(201, dtype=np.uint32),
         # ⚠ Nothing was deferred here, and that is a real state, not a stub: this fixture has no
