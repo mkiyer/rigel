@@ -114,8 +114,8 @@ the caveat that broke the FL measurement — ⚠ which was worth checking precis
 predictable from the FL result: there the drain was worth +4.5 bp.
 
 ⚠ **Admissibility, stated not assumed.** Sum-to-full is EXACT on every drained partition. The gDNA
-spliced leak is **1** record on `flgap_short` against **1,491 / 8,641** on `flgap_long` (⚠ re-measured
-2026-08-08; the "1,010 / 5,827" this line used to carry does not reproduce — §5 item 8), so flgap_short is
+spliced leak is **1** record on `flgap_short` against **1,491 / 8,641** on `flgap_long` (⭐ both banks
+summed; the "1,010 / 5,827" this line used to carry was `edge_spliced_count` alone — §5 item 8), so flgap_short is
 the admissible panel and flgap_long's drained arm carries real contamination — it agrees to 3 decimals
 anyway, which is why the conclusion holds on both.
 
@@ -291,11 +291,21 @@ consumer may now exist. Record it as a reversal with its reason, not as a mistak
    (`cal`, `multi_loci`, `override`, `shares`, raw per-region `starts`) and every arm is derived on load,
    with a build-time byte-identity gate proving the derivation reproduces production's own call.
    `TRAPS: a-hash-that-misses-its-artifact`, second form.
-8. ⚠ **The recorded `gdna_spliced_leak` range does not reproduce.** This doc and `CLAUDE.md` say
-   "1,010–5,827 on flgap_long"; two independent rebuilds measure **8,641** (capture ON) and **1,491**
-   (OFF), byte-stable across both (`second_pass_seed = 0`, so the drain is deterministic). flgap_short is
-   **1** either way, so no conclusion moves — but the old range was quoted as an admissibility bound and
-   should be re-derived or dropped rather than carried.
+8. ✅ **RESOLVED 2026-08-08 — it was never a reproducibility problem, it was TWO DEFINITIONS of "the
+   leak", and both numbers are correct.** The two figures come from two code paths that count different
+   things:
+
+   * `_oracle._validate` (`_oracle.py:311-314`) iterates `_RNA_ONLY_BANKS = ("edge_spliced_count",
+     "sj_count")` and **raises on the FIRST nonzero bank, naming it** — so its message reports
+     `edge_spliced_count` ALONE: **1,010** (OFF) / **5,827** (ON). The original figures were read off
+     that AssertionError text, which says `edge_spliced_count` in so many words.
+   * the study-cache builder (`flgap_study_cache.py:220-224`) **SUMS both banks**: **1,491** / **8,641**.
+
+   ⇒ `sj_count` is **481** (OFF) and **2,814** (ON), and the drain is deterministic as expected.
+   ⛔ **The lesson is the reporting, not the drain**: a validator that stops at the first violation is
+   not a census, and quoting its message as a total is how one number became two.
+   ⭐ **Quote the SUM** — both banks are spliced deposits in a partition that cannot splice, so the
+   admissibility bound is 1,491 / 8,641, and flgap_short is **1** on that definition too.
 
 ---
 
