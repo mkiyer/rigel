@@ -160,6 +160,39 @@ contiguous edge 48 B, junction edge 24 B), no hash map.
 ⭐ **Every channel is an integer, and that is what makes the tally reproducible across worker counts**
 (TRAPS: integer-channels-reproduce).
 
+### 3.1b ⭐⭐⭐ WHO OWNS A FRAGMENT — and nothing is ever re-attributed
+
+**Owner ruling, 2026-08-08.** It was already true of the accumulator, the `CalibrationResult` and the
+sweep; it is stated here because ONE consumer had drifted from it for a year.
+
+> **A NODE owns the fragments CONTAINED in it. An EDGE owns the fragments that CROSS it. No object's
+> mass is ever moved onto another object.**
+
+⭐ **A locus therefore collects BOTH kinds of object**: its NODEs by genomic overlap, and **its EDGEs are
+the edges that TOUCH its nodes**. Every node contributes both of its lines, so a locus of `k` contiguous
+nodes carries `k + 1` lines — **its two outer ones included**, because a fragment crossing a locus's
+boundary overlaps the locus and is therefore one of its EM candidates.
+
+⭐ The outer lines are unambiguous, and structurally so: a locus is bounded by intergenic sequence and
+intergenic regions carry no transcripts, so no two loci contend for a boundary line. ⚠ Contention is
+*rare rather than impossible* — 20–34 edges per flgap condition, carrying ~0.01 % of the mass — so
+`priors.contended_edges` REPORTS it and an assertion would have died on real data.
+
+⛔ **What this replaced, and why it must not come back.** `assemble_priors` folded each line's mass into
+ONE flank node, because `_project_regions_to_loci` divides by `region_size_bp` and so cannot see a 0-bp
+object. The fold then needed a second heuristic — an intergenic RE-KEY — to stop a locus's far-left line
+vanishing into its dropped flank. ⚠ The fold predates the accumulator rewrite: shipped **v0.7.1** stored
+the two boundary sides as separate banks and used them directly for RNA (no pooling, no owner) while
+sending gDNA through `_pooled_seam_arrays`, which rejoined them and had to pick an owner. Its stated
+reason is the CONTRACTION — right there, wrong for the COUNT. One object served two purposes.
+`TRAPS: a-fold-grows-a-heuristic`.
+
+⭐ **The prior's target, stated once**: `n_gdna` in `em_solver.cpp:apply_grouped_prior_update` is a soft
+count of the gDNA fragments that are candidates in ONE multi-locus, each counted once — a multi-locus
+being a connected component of transcripts linked by shared fragments. ⛔ **A first-base count of a
+locus's fragments is therefore NOT this quantity**: it drops every fragment that overlaps the locus but
+starts outside it.
+
 ### 3.2 One strand convention
 
 Everything is stored by **genome** strand (`CHANNEL_PLUS` / `CHANNEL_MINUS`). *Sense* / *antisense* is the

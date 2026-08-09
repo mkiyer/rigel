@@ -107,6 +107,7 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `fractional-mass-is-the-problem` — Fractional mass IS the partitioning problem.
 - `conservation-misses-mis-attribution` — Mass conservation does not catch mis-attribution.
 - `a-guard-outlives-its-divisor` — DELETE THE DIVISOR AND THE GUARD AGAINST IT GOES INERT — WHILE ITS TEST KEEPS PASSING.
+- `a-fold-grows-a-heuristic` — A QUANTITY FOLDED ONTO ANOTHER AXIS TO FIT A CONSUMER'S INTERFACE WILL GROW A HEURISTIC TO REPAIR THE FOLD.
 
 **Estimation and solver design**
 
@@ -758,6 +759,38 @@ and where its subject went.** A green test is no evidence either way; only injec
 (`test_prior_units.test_mass_on_a_zero_opportunity_object_STILL_COUNTS_because_a_count_has_no_divisor`
 and `test_priors.test_stray_mass_on_a_zero_opportunity_line_is_dropped_from_the_eff_len`), because either
 one alone reads as a ruling about the whole file.
+
+**a-fold-grows-a-heuristic. ⛔⛔ A QUANTITY FOLDED ONTO ANOTHER AXIS TO FIT A CONSUMER'S INTERFACE WILL GROW A
+HEURISTIC TO REPAIR THE FOLD — AND THE HEURISTIC WILL OUTLIVE EVERYONE'S MEMORY OF WHY THE FOLD WAS THERE.**
+Found 2026-08-08. A contiguous EDGE is a 0-bp line; `_project_regions_to_loci` distributes by
+`overlap / region_size_bp` and so cannot see an object with no extent. Rather than give the projection a
+point path, each line's mass was **folded into one flank node** — and `_left_keyed_edge_arrays`' own
+docstring says exactly that: *"all that remains is to hang it off a node so the genomic-overlap projection
+can reach it."*
+
+⭐ **Then the fold acquired a patch.** Keying left loses a locus's far-LEFT line into its intergenic flank,
+which the projection drops — so an intergenic RE-KEY was added to send that one line right. The patch is
+what made the attribution worst: it routes **100 %** of a boundary line into the gene when a median
+**8,066 bp** intergenic flank against a **211 bp** locus flank means ~61 % of that line's mass sits outside.
+
+⛔ **Three tells that you are looking at one of these:**
+
+1. A helper whose docstring justifies itself by a *consumer's* limitation rather than by the model.
+2. A special case that exists to undo the general case (the re-key undoes left-keying).
+3. Two callers of the same object for different purposes, where the fold is right for one and wrong for
+   the other. Shipped v0.7.1 pooled a crossing's two sides because *"the two halves are one physical
+   crossing event"* — true for the `min(m/ρ_ref, S)` CONTRACTION, false for the fragment COUNT, and one
+   object served both.
+
+⭐ **The repair is never a better heuristic; it is to give the consumer the axis it was missing.** Projecting
+an edge AS an edge deleted `edge_owner_nodes`, the re-key, `_component_node_arrays`,
+`_mass_where_there_is_opportunity` and `_left_keyed_edge_arrays` at once, needed no schema change, and was
+numerically identical on real data — the fold had been obscure rather than wrong, which is precisely why it
+survived. `DESIGN.md` §3.1b.
+
+⚠ **And the fold hid a gate hole in its own axis**: `node_right_edge[r] == r` on a single reference, so every
+fixture was blind to the difference between an edge index and a left-node index. The replacement's index
+conversion was *untested* until a perturbation said so (`TRAPS: perturb-every-gate`).
 
 ---
 

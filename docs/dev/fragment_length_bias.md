@@ -74,30 +74,26 @@ turned up). The record is `accumulator_prior_plan.md` §5.5 and it is not copied
 
 ---
 
-## 3. What to do — resequenced
+## 3. What to do — ⛔ MOVED
 
-⛔ **NOT rank 1.** The analytic per-component share must wait for the pmfs.
+⭐ **The ordered plan now lives in `accumulator_prior_plan.md` §3**, re-ranked 2026-08-08 after the
+assembler was measured to be a minor term. Two rows of the table that used to be here were retired by
+measurement and the reasons are worth keeping:
 
-| | step | why here |
-|---|---|---|
-| **A** | ⭐ **Make the O arm an actual oracle on this axis** — add the per-line share to `OVERRIDE_FIELDS`, computed from the **origin-split payloads** (`parts['gdna'].edge_unspliced_mass / …count`), which ARE `share_g` on the real partition under real, non-uniform, post-capture placement | one tuple entry; no new simulation, no solver run, oracle cache stays valid. ⛔ Compute it **empirically from the split**, never from `truth_fragment_lengths.tsv` through `crossing_eff_length` — that would make the O arm a MODEL arm and defeat its purpose |
-| **B** | Price defect 3 (`gdna_eff_len`'s incidence cap). A ~3× inflation of one of the three `LocusPriors` fields dwarfs a 0.3–2.5 % share bias | may outrank everything else |
-| ~~**C**~~ | ⛔ **The de-tilt was ALREADY divide-by-a-probability** (`fl.py:288-294`, `EQUATIONS.md` §4.1) — this row would have had someone rewrite working code. What is left of the pmf defect is 2b alone, and it is a **capture-placement** problem | superseded |
-| **D** | Only then, the per-component share — and evaluate the **hybrid** (empirical scale `M(e)`, analytic ratio `r`) against the fully-empirical route from step A | sequence set by §0 |
-| ~~**E**~~ | ✅ **DONE 2026-08-08 and it was not a footnote** — the drain is worth +4.5 bp on `μ_r` and ≤ 0.1 bp on `μ_g`. It removed ~90 % of 2a. Every other undrained measurement in the campaign inherits the warning | `accumulator_prior_plan.md` §5.3 |
+* ~~**C** "fix the pool de-tilt"~~ — ⛔ **it was ALREADY divide-by-a-probability** (`fl.py:288-294`,
+  `EQUATIONS.md` §4.1). Following that row would have had someone rewrite working code. What survives
+  of the pmf defect is **2b alone**, and it is a capture-PLACEMENT problem.
+* ~~**E** "drain one condition"~~ — ✅ **done, and it was not a footnote**: worth **+4.5 bp on `μ_r`**
+  and ≤ 0.1 bp on `μ_g`, removing ~90 % of what had been blamed on 2a.
 
-⛔ **Gate everything on the flgap PAIR, both capture arms — never the ladder**, which scores `+0.029 %`
-on this mechanism and is structurally blind to it.
-
-⚠ **Open and unresolved:** the predicted pooled-share contribution under capture (−2.49 % on
+⚠ **Still open and unresolved:** the predicted pooled-share contribution under capture (−2.49 % on
 flgap_short) **exceeds the owner's measured total** for that panel (`rel` 0.004–0.008). Either the
 uniform-placement re-weighting is wrong under capture, or the measured figure is capture-OFF only. ⛔
 **Resolve before quoting either number again** — a component larger than the total means something is
 cancelling (`TRAPS: a-cancelling-defect-pair`).
 
-⚠ **Unranked and unverified:** a junction inside an unsequenced mate gap may be filed as a *contiguous*
-unspliced crossing, tilting the unspliced RNA population long exactly beside junctions. If true it is a
-length-driven composition bias upstream of all of the above. **Needs checking in `build_fragment`.**
+✅ **Resolved:** the mate-gap junction question — a junction inside an unsequenced gap is HELD in the
+side buffer, not filed as contiguous. `accumulator_prior_plan.md` §5.4.
 
 ---
 
