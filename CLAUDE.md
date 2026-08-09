@@ -178,9 +178,11 @@ python -m pytest tests/ --update-golden        # regenerate tests/golden/ after 
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,209 passing, 2 skipped, 9 xfail** (measured
-2026-08-07, and it includes the 23 gates the validation campaign's two instruments brought with them —
-`test_prior_vs_oracle.py` 14, `test_quant_accuracy.py` 9). ⚠ **The predecessor of this paragraph claimed
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,240 passing, 2 skipped, 9 xfail** (measured
+2026-08-08, after the `assemble_priors` conserved-count re-base took `test_prior_units` to 17 and
+`test_priors` to 21 and the 21 goldens were regenerated; it includes the 23 gates the validation
+campaign's two instruments brought with them — `test_prior_vs_oracle.py` 14, `test_quant_accuracy.py` 9).
+⚠ **The predecessor of this paragraph claimed
 "22 fail / 2310 pass / 7 xfail — 21 goldens + the paralog row" and every part of it was stale**; the
 goldens were regenerated and the failures are gone. Any failure at all is now a regression, which is a
 stronger and cheaper rule than counting expected ones. See `docs/TESTING.md` §6.

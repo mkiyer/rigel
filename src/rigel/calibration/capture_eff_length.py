@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from ..types import IntervalType
-from .region_arrays import edge_node_indices
+from .region_arrays import node_right_edge
 
 if TYPE_CHECKING:
     from ..index import TranscriptIndex
@@ -45,8 +45,8 @@ def _transcript_node_incidence(
     """Per-transcript **node** membership — the regions, boundaries, AND splice junctions a component crosses.
 
     Returns ``(inc_t_reg, inc_reg, inc_t_bnd, inc_bnd, inc_t_junc, inc_junc_left, inc_junc_right)``: region
-    incidence ``(t, r)``; interior-boundary incidence ``(t, r)`` where boundary ``r`` is the seam between
-    nodes ``r`` and ``r+1`` (left-node keyed, matching ``_left_keyed_edge_arrays``); and
+    incidence ``(t, r)``; interior-boundary incidence ``(t, e)`` where ``e`` is a CONTIGUOUS EDGE INDEX —
+    a line is a first-class object on its own axis, so a consumer indexes the per-edge arrays directly; and
     SPLICE-JUNCTION incidence ``(t, r_left, r_right)`` — one per adjacent exon pair of a multi-exon mRNA,
     where ``r_left`` is the previous exon's last region and ``r_right`` this exon's first region. The intron
     between them carries no gDNA (no genomic-adjacent seam), so the junction's crossing mass is IMPUTED by
@@ -133,11 +133,17 @@ def _transcript_node_incidence(
             _add(int(t), ref_name, int(a), int(b))  # single-exon spans (nRNA) → no splice junctions
 
     e = np.empty(0, dtype=np.int64)
+    # ⭐ The boundary axis is emitted as an EDGE index, not a left-node index. A line is a first-class
+    # object with its own axis, so a consumer indexes the per-edge arrays directly — the predecessor
+    # returned ``r`` and forced every caller through a node-shaped copy (`_left_keyed_edge_arrays`),
+    # which read as an attribution of the line's mass to a node and was not one.
+    right_edge = node_right_edge(np.asarray(region_arrays.ref_id))
+    b_edges = right_edge[np.concatenate(b_r)] if b_r else e
     return (
         np.concatenate(r_t) if r_t else e,
         np.concatenate(r_r) if r_r else e,
         np.concatenate(b_t) if b_t else e,
-        np.concatenate(b_r) if b_r else e,
+        b_edges,
         np.asarray(j_t, dtype=np.int64) if j_t else e,
         np.asarray(j_l, dtype=np.int64) if j_l else e,
         np.asarray(j_r, dtype=np.int64) if j_r else e,
@@ -186,32 +192,6 @@ def _global_reference_density(mass: np.ndarray, support: np.ndarray) -> "float |
     # snap to the nearest ACTUAL node density: exact ρ under a uniform field (⇒ factor 1), a real density
     # under capture — no grid-quantization contraction is fabricated.
     return float(rho[ok][int(np.argmin(np.abs(x - mode)))])
-
-
-def _left_keyed_edge_arrays(calibration, region_arrays):
-    """The left-node-keyed crossing arrays ``(edge_mass, edge_support)``, ``float64[N]``.
-
-    Entry ``r`` carries the line between node ``r`` and ``r + 1``; the last node of every reference
-    carries ``0`` because it owns no line to its right.
-
-    ⭐ **This is a re-KEYING, not a pooling (S5.f).** ``_pooled_seam_arrays`` used to add
-    ``mass_gdna_right[r] + mass_gdna_left[r+1]`` together and sum the two halved per-side lengths
-    ``gdna_boundary_len[r] + gdna_boundary_len[r+1]`` — putting back together a split the calibrator had
-    just made. That sum-then-halve shape hid an exact factor of 2 for months.
-    trap 2), and it is gone: a contiguous edge is a 0-bp line carrying ONE mass and ONE support, and all
-    that remains is to hang it off a node so the genomic-overlap projection can reach it.
-
-    ⚠ The transcript path keys every line to its LEFT flank; the gDNA path re-keys the intergenic outer
-    ones to their right flank (:func:`priors.edge_owner_nodes`). Both read the same per-edge arrays.
-    """
-    n = int(calibration.n_nodes)
-    mass = np.zeros(n, dtype=np.float64)
-    support = np.zeros(n, dtype=np.float64)
-    if calibration.n_edges:
-        lo, _hi = edge_node_indices(np.asarray(region_arrays.ref_id))
-        mass[lo] = np.asarray(calibration.mass_gdna_edge, dtype=np.float64)
-        support[lo] = np.asarray(calibration.gdna_edge_eff_len, dtype=np.float64)
-    return mass, support
 
 
 def transcript_capture_eff_lengths(
@@ -272,7 +252,10 @@ def transcript_capture_eff_lengths(
     contained_m = np.asarray(calibration.mass_gdna_node, dtype=np.float64)
     contained_S = np.maximum(np.asarray(calibration.gdna_node_eff_len, dtype=np.float64), 1e-9)
     contained_ev = contained_m + np.asarray(calibration.mass_rna_node, dtype=np.float64)
-    seam_m, seam_S = _left_keyed_edge_arrays(calibration, region_arrays)  # the SHARED line objects
+    # ⭐ The per-LINE crossing objects, on their own axis. `inc_bnd` is an EDGE index, so these are
+    # indexed directly — no node-shaped copy, and nothing that reads as an attribution to a node.
+    seam_m = np.asarray(calibration.mass_gdna_edge, dtype=np.float64)
+    seam_S = np.maximum(np.asarray(calibration.gdna_edge_eff_len, dtype=np.float64), 0.0)
     # A SPLICE junction is not a contiguous line, so it has no entry on the edge axis — but it is still
     # a crossing, and gDNA's crossing divisor is the same everywhere (UNBOUNDED_REACH both sides ⇒
     # mu_g − 1). Take it from the edge supports rather than recomputing a length model here: one

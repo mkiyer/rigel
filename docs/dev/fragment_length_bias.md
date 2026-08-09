@@ -51,9 +51,11 @@ asymmetric". It is **symmetric** — `share_r/share_g` is bounded both ways and 
 | # | site | defect | verified |
 |---|---|---|---|
 | 1 | `priors.py` / `substrate.py` | ONE pooled share rescales both components | measured |
-| 2 | `fl.py` pool censoring | gDNA pools are geometry-limited, the RNA pool splice-limited — **opposite** censorings, so the fitted `mu_g − mu_r` carries a phantom **+5 to +18 bp** gap that is not in the library | agent |
-| 3 | `priors.py:427,436,465` | ⭐⭐ **`gdna_eff_len` is clamped by an INCIDENCE-support sum, not the genomic span** — `span = node_eff + Σ edge_eff`, and each line adds `~mu_g − 1` to a ~159 bp node, so ~**3×** inflation. The EM divides the gDNA weight by this | ✅ |
-| 4 | `fl.py:86` | `POOL_EB_PRIOR_ESS = 1000.0` — a constant sitting directly on the composition determinant | agent |
+| 2 | `fl.py` pool censoring | the fitted `mu_g − mu_r` carries a phantom **+4.7 to +14.9 bp** gap, fixed sign, **8/8** flgap conditions | ✅ **measured 2026-08-08** — and it SPLITS in two, see below |
+| 2a | ~~`junction_opportunity`~~ **the DRAIN** | ⛔ **MOSTLY NOT A DIVISOR DEFECT.** Undrained the RNA pool reads −5.0 bp off capture with per-bin `fit/true` 1.049 / 0.907 across w = 200. **Drained it is −0.5 bp and 1.006 / 0.995.** The held fragments are systematically the LONG ones, so an undrained RNA pool is missing its own tail — the second pass already handles it | ✅ **re-measured drained 2026-08-08** |
+| 2b | `gdna_opportunity` | ⭐⭐ **THE pmf DEFECT, and now the whole of it.** The four-pool de-tilt is **EXACT off capture** (+0.1 / +0.0 bp) and over-corrects **only under capture**: **+13.6** bp at a 330 bp gDNA mean, **+3.5** at 120, with drained per-bin `fit/true` running **1.22 … 4.18** in the tail. ⛔ **Untouched by the drain (Δ ≤ 0.1 bp)** | ✅ this is `EQUATIONS.md` §4.4 — a placement model, not a divisor |
+| 3 | `priors.py` eff-len clamp | ⚠ **the "~3×" here is STALE.** Phase 0 measured the clamp at **1.03–1.25×**, with `nodes only` at 0.70–0.84× — so the edge term is partly compensating a real deficit, not purely inflating | ✅ superseded |
+| 4 | `fl.py:86` | ⛔ **NOT a live defect on this substrate.** `prior_ess` 1000 → 0 moves every fitted mean by **≤ 0.1 bp**: pool totals are 0.70–4.75 M, so the shrink weight is ≤ 0.14 %. ⚠ Untested on sparse real data, where it is a different claim | ✅ ablated |
 | 5 | every cached payload | `drain: null` while production always drains; the bound on `mu_r` is **[−3.96 %, −0.60 %]**, comparable to the phantom gap itself | agent |
 | 6 | `prior_vs_oracle.py:118-125` | `edge_mass_per_crossing` is **excluded from `OVERRIDE_FIELDS`**, so the O arm inherits the pooled-share bias, `P−O` cannot see it, and the defect is mis-attributed into `O−F` | ✅ (reasoning) |
 
@@ -67,9 +69,8 @@ the tree.** ✅
 as the mean. ✅ `share_c` is a censored functional and so is strongly variance-sensitive *even at equal
 means*. Every analysis here, and the "±40 % gap" shorthand, is **mean-only** and therefore incomplete.
 
-⚠ **Debt this session created**, to clear in the stage-C commit: `_density_times_span` is now **dead**
-(no call sites ✅), and `assemble_priors`' docstring still teaches the retired
-`rho_c = Σm/ΣS; prior = rho·span_bp` rule at `priors.py:293-297` ✅.
+✅ **Debt CLEARED 2026-08-08** (`_density_times_span` deleted, the docstring re-based, plus two more it
+turned up). The record is `accumulator_prior_plan.md` §5.5 and it is not copied here.
 
 ---
 
@@ -81,9 +82,9 @@ means*. Every analysis here, and the "±40 % gap" shorthand, is **mean-only** an
 |---|---|---|
 | **A** | ⭐ **Make the O arm an actual oracle on this axis** — add the per-line share to `OVERRIDE_FIELDS`, computed from the **origin-split payloads** (`parts['gdna'].edge_unspliced_mass / …count`), which ARE `share_g` on the real partition under real, non-uniform, post-capture placement | one tuple entry; no new simulation, no solver run, oracle cache stays valid. ⛔ Compute it **empirically from the split**, never from `truth_fragment_lengths.tsv` through `crossing_eff_length` — that would make the O arm a MODEL arm and defeat its purpose |
 | **B** | Price defect 3 (`gdna_eff_len`'s incidence cap). A ~3× inflation of one of the three `LocusPriors` fields dwarfs a 0.3–2.5 % share bias | may outrank everything else |
-| **C** | Fix the pmf estimator: pool de-tilt by **membership probability** (`TRAPS: divide-by-a-probability`), and the shared EB anchor | **prerequisite** for any analytic share |
+| ~~**C**~~ | ⛔ **The de-tilt was ALREADY divide-by-a-probability** (`fl.py:288-294`, `EQUATIONS.md` §4.1) — this row would have had someone rewrite working code. What is left of the pmf defect is 2b alone, and it is a **capture-placement** problem | superseded |
 | **D** | Only then, the per-component share — and evaluate the **hybrid** (empirical scale `M(e)`, analytic ratio `r`) against the fully-empirical route from step A | sequence set by §0 |
-| **E** | Drain one condition and re-fit the FL models | until this is a number, every FL measurement here carries a caveat its own size |
+| ~~**E**~~ | ✅ **DONE 2026-08-08 and it was not a footnote** — the drain is worth +4.5 bp on `μ_r` and ≤ 0.1 bp on `μ_g`. It removed ~90 % of 2a. Every other undrained measurement in the campaign inherits the warning | `accumulator_prior_plan.md` §5.3 |
 
 ⛔ **Gate everything on the flgap PAIR, both capture arms — never the ladder**, which scores `+0.029 %`
 on this mechanism and is structurally blind to it.

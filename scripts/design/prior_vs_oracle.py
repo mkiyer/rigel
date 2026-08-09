@@ -384,19 +384,22 @@ def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
     what the consumer feels rather than what an unweighted locus average would say
     (``TRAPS: weight-it-like-the-consumer``).
     """
+    # ⭐ Nodes and edges are projected on their OWN axes, exactly as `assemble_priors` does — no line is
+    # folded onto a flank node. Re-deriving the fold here would measure a span the assembler no longer
+    # builds (`TRAPS: a-test-that-redefines`).
+    n_loci = len(multi_loci)
     node_support = np.maximum(np.asarray(calibration.gdna_node_eff_len, np.float64), 0.0)
-    edge_support = np.zeros_like(node_support)
-    if calibration.n_edges:
-        owner = PRIORS.edge_owner_nodes(calibration, region_arrays)
-        np.add.at(edge_support, owner,
-                  np.maximum(np.asarray(calibration.gdna_edge_eff_len, np.float64), 0.0))
+    edge_support = np.maximum(np.asarray(calibration.gdna_edge_eff_len, np.float64), 0.0)
     proj = PRIORS._project_regions_to_loci(
-        region_arrays, multi_loci, len(multi_loci),
+        region_arrays, multi_loci, n_loci,
         {
-            "support": node_support + edge_support,
             "node_only": node_support,
             "genomic": np.asarray(region_arrays.region_size_bp, np.float64),
         },
+    )
+    e_idx, e_lid, e_w = PRIORS._edge_locus_shares(region_arrays, multi_loci, n_loci)
+    proj["support"] = proj["node_only"] + PRIORS._sum_by_locus(
+        e_idx, e_lid, e_w, edge_support, n_loci
     )
     live = proj["genomic"] > 0
     ratio = np.divide(proj["support"], proj["genomic"], out=np.ones_like(proj["support"]), where=live)

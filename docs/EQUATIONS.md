@@ -572,6 +572,24 @@ is right to the fragment while the split is wrong (`TRAPS: conservation-misses-m
 identically zero iff `share_g = share_r`, which holds whenever `f_g = f_r` — which is why an
 equal-length panel is *structurally* blind to it (`TRAPS: an-equal-length-panel-defeats-the-lift`).
 
+⚠⚠ **THE SECOND LINE IS EXACT PER LINE AND NOT AT A LOCUS, AND THE GAP IS LARGE ENOUGH TO MIS-SIZE A
+CORRECTION** (measured 2026-08-08, `tests/calibration/test_prior_units.py`). `share_pooled` cancels from
+the ratio only where *every* fragment of both components passes through it. Two things break that at the
+scale a prior is assembled on, and they break it by very different amounts:
+
+* **Contained mass never passes through the share at all.** A contained fragment deposits on exactly one
+  node, so that term is already a fragment count and is carried through untouched — it *dilutes* the
+  tilt, and because `share_pooled` itself moves with `φ`, the dilution is mixture-dependent. Swinging
+  the mixture 900× at a fixed length gap moved the locus-level distortion **0.578 → 0.767**, where the
+  gDNA component was 53 % contained.
+* **Summing over lines with different flanks** re-introduces a weak dependence, because the cancellation
+  is per line and the two components weight the lines differently: **0.5030 → 0.5073** over the same
+  900× swing.
+
+⭐ So `share_r/share_g` is the right *mechanism* and the wrong *magnitude* for any correction applied at
+locus granularity. A repair belongs where the identity is exact — **per line, before the contained term
+is added** — and a per-locus factor derived from this ratio would be wrong by the contained fraction.
+
 ⚠ **Measured 2026-08-08**: the pooled share accounts for **25–28 %** of the assembler's residual error on
 the ±40 % flgap panels (42 % off capture). The other ~72 % survives perfect per-component shares.
 

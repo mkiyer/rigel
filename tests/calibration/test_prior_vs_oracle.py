@@ -547,17 +547,20 @@ def _in_locus_nodes(measured) -> np.ndarray:
 def _biggest_in_locus_site(measured, field):
     """The largest element of ``field`` that the locus projection actually reaches.
 
-    ⛔ Edge-indexed arrays are keyed through the SHIPPED ``edge_owner_nodes`` rather than a local rule:
-    an edge is a 0-bp line with no genomic extent of its own, and which flank carries it is exactly
-    the decision that function exists to make (a far-LEFT outer line is re-attributed to its right
-    flank, or its mass is lost). Restating it here would drift from the code under test.
+    ⛔ Edge-indexed arrays are selected through the SHIPPED ``_edge_locus_shares`` rather than a local
+    rule: a locus's edges are the edges that TOUCH its nodes, which is exactly the decision that
+    function exists to make. Restating it here would drift from the code under test.
     """
-    from rigel.calibration.priors import edge_owner_nodes
+    from rigel.calibration.priors import _edge_locus_shares
 
     arr = np.asarray(getattr(measured.calibration, field), np.float64)
     keep = _in_locus_nodes(measured)
     if "edge" in field:
-        keep = keep[edge_owner_nodes(measured.calibration, measured.region_arrays)]
+        e_idx, _lid, _w = _edge_locus_shares(
+            measured.region_arrays, measured.multi_loci, len(measured.multi_loci)
+        )
+        keep = np.zeros(int(measured.calibration.n_edges), dtype=bool)
+        keep[e_idx] = True
     if arr.shape[0] == keep.shape[0]:
         ranked = np.where(keep.reshape((-1,) + (1,) * (arr.ndim - 1)), arr, -np.inf)
     else:  # the junction axis — never projected, and never read by the prior

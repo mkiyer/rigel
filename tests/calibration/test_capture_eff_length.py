@@ -26,11 +26,10 @@ import pytest
 
 from rigel.calibration.capture_eff_length import (
     _global_reference_density,
-    _left_keyed_edge_arrays,
     _transcript_node_incidence,
     transcript_capture_eff_lengths,
 )
-from rigel.calibration.region_arrays import RegionArrays, edge_node_indices
+from rigel.calibration.region_arrays import RegionArrays, edge_node_indices, node_right_edge
 from rigel.calibration.result import CalibrationResult
 from rigel.config import CalibrationConfig
 from conftest import build_test_index
@@ -402,7 +401,11 @@ def test_a_crossing_object_under_a_uniform_field_reads_RHO(multiexon_index):
     ra = RegionArrays.from_index(multiexon_index)
     rho = 0.037
     cal = _field_cal(ra, np.full(ra.n_regions, rho))
-    edge_mass, edge_support = _left_keyed_edge_arrays(cal, ra)
+    # ⭐ Read straight off the EDGE axis. It used to go through `_left_keyed_edge_arrays`, a node-shaped
+    # copy that existed only because the incidence helper emitted a left-node index; that helper now
+    # emits an edge index and the copy is deleted, so a line's density is read where it lives.
+    edge_mass = np.asarray(cal.mass_gdna_edge, dtype=np.float64)
+    edge_support = np.asarray(cal.gdna_edge_eff_len, dtype=np.float64)
     live = edge_support > 0.0
     assert live.any(), "the fixture produced no lines"
     np.testing.assert_allclose(edge_mass[live] / edge_support[live], rho, rtol=1e-12)
@@ -426,11 +429,71 @@ def test_a_line_below_the_reference_density_CONTRACTS_rather_than_clipping(multi
     dens[-1] = rho_ref  # the last node anchors ρ_ref and is no line's LEFT flank
     cal = _field_cal(ra, dens)
 
-    edge_mass, edge_support = _left_keyed_edge_arrays(cal, ra)
+    edge_mass = np.asarray(cal.mass_gdna_edge, dtype=np.float64)
+    edge_support = np.asarray(cal.gdna_edge_eff_len, dtype=np.float64)
     band = (edge_support > 0.0) & (edge_mass > 0.0)
     assert band.any()
     ratio = (edge_mass[band] / edge_support[band]) / rho_ref
     assert np.all(ratio < 1.0 - 1e-9), (
         f"line density reads {ratio.max():.3f}×ρ_ref — at or above the reference it CLIPS and "
         "contributes no contraction, which is precisely how the factor-2 stayed invisible"
+    )
+
+
+# --- the boundary axis is an EDGE index, and only a MULTI-reference index can prove it -------------
+
+_TWO_REF_GTF = (
+    "".join(
+        f'chrA\ttest\texon\t{s + 1}\t{s + 400}\t.\t+\t.\tgene_id "ga"; transcript_id "ta";\n'
+        for s in (200, 800)
+    )
+    + "".join(
+        f'chrB\ttest\texon\t{s + 1}\t{s + 400}\t.\t+\t.\tgene_id "gb"; transcript_id "tb";\n'
+        for s in (200, 800)
+    )
+)
+
+
+@pytest.fixture(scope="module")
+def two_ref_index(tmp_path_factory):
+    return build_test_index(
+        tmp_path_factory, _TWO_REF_GTF, name="tworef", refs={"chrA": 2000, "chrB": 2000}
+    )
+
+
+def test_the_boundary_incidence_is_an_EDGE_index_not_a_left_node_index(two_ref_index):
+    """⭐⭐ **THE GATE A SINGLE-REFERENCE FIXTURE CANNOT PROVIDE, AND THE PERTURBATION THAT FOUND IT.**
+
+    ``node_right_edge`` numbers edges over adjacent same-reference node pairs, so on ONE reference
+    ``edge(r) == r`` and a left-node index is indistinguishable from an edge index. Every existing
+    fixture here is single-reference, so substituting one for the other changed nothing and the
+    conversion was effectively untested — found by injecting exactly that substitution
+    (``TRAPS: perturb-every-gate``).
+
+    ⛔ On a second reference the two axes diverge by one per preceding reference boundary, and indexing
+    a per-edge array with a node index then reads **the wrong line's mass** — silently, since both are
+    in range. This pins the axis: every emitted boundary index must be a valid edge whose flanking
+    nodes are the ones the transcript actually crosses.
+    """
+    ra = RegionArrays.from_index(two_ref_index)
+    _rt, _rr, bt, br, *_ = _transcript_node_incidence(two_ref_index, ra)
+    lo, hi = edge_node_indices(np.asarray(ra.ref_id))
+    assert br.size, "the fixture produced no interior boundaries"
+    assert br.max() < lo.shape[0], "a boundary index outside the edge axis"
+
+    # ⭐ the discriminating claim: each emitted edge's flanks are same-reference neighbours, and the
+    # transcript that emitted it overlaps BOTH of them.
+    ref_id = np.asarray(ra.ref_id)
+    np.testing.assert_array_equal(ref_id[lo[br]], ref_id[hi[br]])
+    reg_t, reg_r = _rt, _rr
+    for t, e in zip(bt.tolist(), br.tolist()):
+        owned = set(reg_r[reg_t == t].tolist())
+        assert lo[e] in owned and hi[e] in owned, (
+            f"transcript {t} was given line {e} between nodes {lo[e]},{hi[e]} — which it does not span"
+        )
+
+    # ...and the two axes genuinely differ here, so the assertions above are not vacuous
+    right_edge = node_right_edge(ref_id)
+    assert not np.array_equal(right_edge[: lo.shape[0]], np.arange(lo.shape[0])), (
+        "fixture is degenerate: the node and edge axes coincide, so this test proves nothing"
     )

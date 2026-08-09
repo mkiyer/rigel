@@ -106,6 +106,7 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `opposite-tilts-must-not-pool` — POOLS WITH OPPOSITE TILTS MUST NOT BE POOLED RAW.
 - `fractional-mass-is-the-problem` — Fractional mass IS the partitioning problem.
 - `conservation-misses-mis-attribution` — Mass conservation does not catch mis-attribution.
+- `a-guard-outlives-its-divisor` — DELETE THE DIVISOR AND THE GUARD AGAINST IT GOES INERT — WHILE ITS TEST KEEPS PASSING.
 
 **Estimation and solver design**
 
@@ -730,6 +731,33 @@ point. The first version of the conservation test asserted exact equality agains
 and failed on its own correct code. Those are two claims — the rule conserves, and the representation
 costs ≤ K quanta — and each needs its own assertion. Collapsing them either hides a real error inside a
 rounding tolerance or reports rounding as a defect.
+
+**a-guard-outlives-its-divisor. ⛔⛔ DELETE THE DIVISOR AND THE GUARD AGAINST IT GOES INERT — WHILE ITS TEST
+KEEPS PASSING.** Measured 2026-08-08, re-basing `assemble_priors` onto the conserved fragment count.
+`_mass_where_there_is_opportunity` exists because `rho = Σm/ΣS` is a rate: mass in the numerator with no
+exposure in the denominator inflates it, and the floored variant `mass / max(S, 1e-9)` reaches ~1e9. The
+rewrite removed the division — the prior now reads the count out of the bank — and **the guard's own
+perturbation test went on passing, for a reason that had nothing to do with the guard**: its fixture
+asserted `prior == 0`, and the mass really was zero on the object it was checking.
+
+⭐ **Three separate things had quietly become true, and none was visible from the test result:**
+
+1. The guard was **inert on the path the test exercised**. Injecting the floored divisor changed nothing
+   there, so the test could not have failed.
+2. The guard was **still load-bearing on a different path** — the eff-length, which still divides by
+   `ρ_ref` — where nothing gated it at all. Injecting the floor there moved `gdna_eff_len` by **+19.97 bp**
+   at 20 units of stray mass and **+44.93 bp** at 5,000, pinning against the seam ceiling.
+3. The correct behaviour on the first path had **reversed**: a count has nothing to divide by, so
+   dropping zero-opportunity mass now silently loses fragments the accumulator really deposited. The
+   test's assertion was not just unfalsifiable, it was backwards.
+
+⛔ **The tell is structural, not statistical: a guard's justification names a specific operation** — here
+a division — **so when that operation leaves the function, re-ask whether the guard still has a subject,
+and where its subject went.** A green test is no evidence either way; only injecting the defect is.
+⚠ The two halves are now a NAMED PAIR that cite each other
+(`test_prior_units.test_mass_on_a_zero_opportunity_object_STILL_COUNTS_because_a_count_has_no_divisor`
+and `test_priors.test_stray_mass_on_a_zero_opportunity_line_is_dropped_from_the_eff_len`), because either
+one alone reads as a ruling about the whole file.
 
 ---
 
