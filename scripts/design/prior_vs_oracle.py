@@ -14,18 +14,48 @@ oracle version well-defined rather than a modelling opinion. Every other instrum
 an INTERMEDIATE: ``solvability_audit.py`` and ``pass0_vs_oracle.py`` score per-object ``f_g``,
 ``calibration_truth_ab.py`` scores the library figure. Nothing scored the thing the EM actually reads.
 
-⭐ **THREE ARMS, AND THE TWO DIFFERENCES BETWEEN THEM ARE THE WHOLE DIAGNOSTIC.**
+⭐ **FIVE ARMS, AND THE DIFFERENCES BETWEEN THEM ARE THE WHOLE DIAGNOSTIC.**
 
 ===  ==========================================================  ===================================
  P   the SHIPPED prior                                           ``assemble_priors(cal, ra, loci)``
  O   the prior a PERFECT DECONVOLUTION would produce             truth masses, same assembler
- F   the DIRECT per-locus fragment truth                         ``node_start_count``, per origin
+ S   O, plus each component rescaled by its OWN true share        :func:`share_priors`
+ Fo  ⭐ the EM's OWN candidate count, per origin                  :func:`overlap_truth`
+ F   the per-locus START-BASE count                              ``node_start_count``, per origin
 ===  ==========================================================  ===================================
 
 ``P − O`` is calibration's own error — everything upstream of :func:`assemble_priors`.
-``O − F`` is the ASSEMBLER's error — the mass → density → fragment-count conversion, the
-overlap projection, and the support-weighted pooling ``assemble_priors``' own docstring flags as an
-approximation. They are different repairs in different files and pooling them would hide which.
+``O − Fo`` is the ASSEMBLER's error — the mass → fragment-count conversion, the overlap projection
+and the one pooled per-component share. ``O − S`` splits that share out of it and ``S − Fo`` is
+everything else. They are different repairs in different files and pooling them would hide which.
+
+⛔⛔ **``F`` IS NOT THE EM's TARGET, AND EVERY ``O − F`` / ``S − F`` NUMBER THIS FILE ONCE PRINTED WAS
+SCORED AGAINST A QUANTITY NOTHING CONSUMES** (found and corrected 2026-08-08; the paragraph this
+replaced claimed ``F`` was "EXACT on the gDNA arm ... with nothing to subtract"). ``node_start_count``
+deposits at the node holding a fragment's FIRST BASE, so ``F`` credits a locus only for the fragments
+that *start* inside it. The EM counts differently: ``n_gdna`` in
+``em_solver.cpp:apply_grouped_prior_update`` is the soft count over that multi-locus's own EM UNITS,
+and a fragment becomes one by being a scored CANDIDATE — which a fragment that starts in the
+intergenic flank and reaches into the locus is. ``F`` drops exactly that straddling population.
+⭐ ``F`` is retained, labelled, and priced on its own table, because the size of the correction is
+itself a result.
+
+⭐⭐ **``Fo`` (``F_overlap``) IS THAT COUNT, TAKEN FROM THE RUN'S OWN SCORING STAGE.** Every EM unit of
+a multi-locus (``MultiLocus.unit_indices``, the array ``locus_partition`` scatters by) labelled with
+the TRUE origin of its fragment (``_oracle.frag_id_origins``, joined on ``frag_id``). Nothing is
+re-implemented: the unit→locus map is ``build_multi_loci``'s own and the origin is the simulator's read
+name (TRAPS: a-test-that-redefines). ⛔ It is not circular — ``assemble_priors`` never sees a unit
+count; grep it for ``unit_indices``.
+
+⭐ **AND ``Fo`` GIVES THE RNA ARM AN EXACT TARGET FOR THE FIRST TIME.** ``rna_prior_count`` withholds
+spliced mass, and ``node_start_count`` carries no splice bit — which is why ``F_rna`` could only ever
+be an upper BOUND, "separating it needs a five-way origin×splice BAM split". A scored unit carries
+``is_spliced``, so the split is free: ``Fo`` reports the RNA arm's target (**unspliced** RNA units)
+and the EM's own RNA population (**all** RNA units) as two arrays.
+⛔ ``rna_all`` is still not the whole of the EM's ``n_rna``: ``raw_counts = unambig_totals +
+em_totals``, and the deterministic spliced-unambig fragments never become units. Their per-locus
+attribution is NOT done here; their total is reported, and table ⑫ carries what the gap does to the
+prior's composition claim.
 
 ⛔ **O IS NOT AN ESTIMATOR AND MUST NEVER BECOME ONE** (the shape ``pass0_vs_oracle.py`` refuses too).
 It is the shipped :func:`assemble_priors` fed the ONE lever that already exists —
@@ -33,14 +63,11 @@ It is the shipped :func:`assemble_priors` fed the ONE lever that already exists 
 Writing a "best possible prior" here would be the magic-number failure with an estimator in place of a
 constant.
 
-⭐ **F IS EXACT ON THE gDNA ARM AND A BOUND ON THE RNA ARM, and that asymmetry is physics.** gDNA does
-not splice, so the gdna partition's ``node_start_count`` — one deposit per accepted fragment, at the
-node holding its first base — projected through the SHIPPED
-``priors._project_regions_to_loci`` IS the true number of gDNA fragments starting in the locus, with
-nothing to subtract. The RNA arm's target is the UNSPLICED count (``assemble_priors`` withholds spliced
-mass because certified RNA has no gDNA competitor in the EM), and ``node_start_count`` carries no
-splice bit — so ``F_rna`` here is spliced-INCLUSIVE and is reported as an **upper bound**, labelled as
-one. Separating it needs a five-way origin×splice BAM split and a second oracle cache; it is not done.
+⚠ **WHAT ``F`` IS STILL GOOD FOR, stated so it is not read as the target again.** It is the only arm
+that needs no scoring stage — one deposit per accepted fragment at the node holding its first base,
+projected through the SHIPPED ``priors._project_regions_to_loci`` — so it is the arm that keeps working
+when the question is about the *projection* rather than about the EM. ``Fo − F`` is the straddling
+population, per locus, and table ⑪ is it.
 
 ⛔⛔ **UNDRAINED ON EVERY ARM, AND THAT IS FORCED — WITH A MEASUREMENT, NOT AN ASSUMPTION.**
 Production drains the side buffer before calibration. ``lift_choices`` exists to make a DRAINED oracle
@@ -90,9 +117,17 @@ import numpy as np  # noqa: E402
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "tests" / "calibration"))
 
-from _oracle import ORIGINS, OracleTruth, _split_bam  # noqa: E402
+from _oracle import (  # noqa: E402
+    ORIGIN_CODE,
+    ORIGINS,
+    OracleTruth,
+    _split_bam,
+    check_walk_alignment,
+    frag_id_origins,
+)
 
 import rigel.calibration.priors as PRIORS  # noqa: E402
+import rigel.locus as LOCUS  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.config import PipelineConfig  # noqa: E402
@@ -259,7 +294,7 @@ def score_eff_len(arm, ref, select=None) -> dict:
 
 def capture_priors(buffer, index, strand_models, fl, region_arrays, stats, calibration, payload,
                    pipeline_config):
-    """Run the production quant path far enough to get ``(multi_loci, LocusPriors)``, then STOP.
+    """Run the production quant path far enough to get ``(multi_loci, LocusPriors, units)``, then STOP.
 
     ⭐ **The loci are the production loci, not a re-derivation.** ``build_multi_loci`` builds
     connected components of transcripts linked by SCORED fragments, so the locus partition is a
@@ -267,6 +302,12 @@ def capture_priors(buffer, index, strand_models, fl, region_arrays, stats, calib
     :func:`~rigel.calibration.priors.assemble_priors` — which ``quant_from_buffer`` imports
     function-locally, so patching the module attribute is picked up at call time — takes both objects
     from the call production itself makes (TRAPS: a-test-that-redefines).
+
+    ⭐ **``units`` comes from the same run, through the same trick.** ``build_multi_loci`` is the one
+    call that sees the scored CSR, so wrapping it yields the two per-unit arrays :func:`overlap_truth`
+    needs — ``frag_ids`` (the identity that joins to origin truth) and ``is_spliced`` (the bit that
+    separates the assembler's RNA target from the EM's RNA population). ⛔ Re-scoring the buffer a
+    second time to obtain them would be a different scoring stage than the one that built the loci.
 
     ⛔ The sentinel exception is what makes this affordable: the per-locus EM is the single most
     expensive stage (47 % of a condition) and this instrument does not read its output. ⚠ Item 3 —
@@ -278,13 +319,23 @@ def capture_priors(buffer, index, strand_models, fl, region_arrays, stats, calib
 
     captured: dict = {}
     original = PRIORS.assemble_priors
+    original_ml = LOCUS.build_multi_loci
 
     def _wrapper(cal, ra, multi_loci):
         captured["multi_loci"] = multi_loci
         captured["priors"] = original(cal, ra, multi_loci)
         raise _StopAfterPriors
 
+    def _ml_wrapper(em_data, idx):
+        captured["units"] = {
+            "frag_ids": np.array(em_data.frag_ids, dtype=np.int64, copy=True),
+            "is_spliced": np.array(em_data.is_spliced, dtype=bool, copy=True),
+            "n_units": int(em_data.n_units),
+        }
+        return original_ml(em_data, idx)
+
     PRIORS.assemble_priors = _wrapper
+    LOCUS.build_multi_loci = _ml_wrapper
     try:
         quant_from_buffer(
             buffer, index, strand_models, fl, region_arrays, stats, calibration, payload,
@@ -294,7 +345,8 @@ def capture_priors(buffer, index, strand_models, fl, region_arrays, stats, calib
         pass
     finally:
         PRIORS.assemble_priors = original
-    if "priors" not in captured:
+        LOCUS.build_multi_loci = original_ml
+    if "priors" not in captured or "units" not in captured:
         # ⛔ TRAPS: an-ablation-that-never-ran. ``quant_from_buffer`` returns early on an empty unit set, and a
         # silently-absent capture would read here as a condition with no loci rather than as a
         # harness that never fired.
@@ -302,7 +354,37 @@ def capture_priors(buffer, index, strand_models, fl, region_arrays, stats, calib
             "assemble_priors was never called — quant_from_buffer returned before the prior stage "
             "(no EM units, or no multi-loci). This is not a condition with zero error."
         )
-    return captured["multi_loci"], captured["priors"]
+    return captured["multi_loci"], captured["priors"], captured["units"]
+
+
+def assemble_oracle_arm(override: dict, calibration, region_arrays, multi_loci):
+    """**O**, from a mass override dict — the shipped assembler, one lever moved.
+
+    ⭐ Split out of :func:`oracle_priors` so a caller holding a CACHED ``override_masses`` dict (the
+    flgap study cache does; it is locus-free and survives an assembler edit) assembles O through this
+    exact call rather than repeating the ``dataclasses.replace`` (TRAPS: a-test-that-redefines).
+    """
+    return PRIORS.assemble_priors(
+        dataclasses.replace(calibration, **override), region_arrays, multi_loci
+    )
+
+
+def assemble_share_arm(override: dict, shares: dict, calibration, region_arrays, multi_loci):
+    """**S**, from a mass override and the true per-component shares. See :func:`share_priors`."""
+    truth_cal = dataclasses.replace(calibration, **override)
+    gdna = PRIORS.assemble_priors(
+        dataclasses.replace(truth_cal, edge_mass_per_crossing=shares["gdna"]),
+        region_arrays, multi_loci,
+    )
+    rna = PRIORS.assemble_priors(
+        dataclasses.replace(truth_cal, edge_mass_per_crossing=shares["rna"]),
+        region_arrays, multi_loci,
+    )
+    return PRIORS.LocusPriors(
+        gdna_prior_count=gdna.gdna_prior_count,
+        rna_prior_count=rna.rna_prior_count,
+        gdna_eff_len=gdna.gdna_eff_len,
+    )
 
 
 def oracle_priors(oracle: OracleTruth, calibration, region_arrays, multi_loci):
@@ -355,20 +437,7 @@ def share_priors(oracle: OracleTruth, calibration, region_arrays, multi_loci):
     """
     override = oracle.override_masses(region_arrays)
     shares = oracle.component_shares()
-    truth_cal = dataclasses.replace(calibration, **override)
-    gdna = PRIORS.assemble_priors(
-        dataclasses.replace(truth_cal, edge_mass_per_crossing=shares["gdna"]),
-        region_arrays, multi_loci,
-    )
-    rna = PRIORS.assemble_priors(
-        dataclasses.replace(truth_cal, edge_mass_per_crossing=shares["rna"]),
-        region_arrays, multi_loci,
-    )
-    return PRIORS.LocusPriors(
-        gdna_prior_count=gdna.gdna_prior_count,
-        rna_prior_count=rna.rna_prior_count,
-        gdna_eff_len=gdna.gdna_eff_len,
-    ), shares
+    return assemble_share_arm(override, shares, calibration, region_arrays, multi_loci), shares
 
 
 def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
@@ -413,38 +482,159 @@ def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
     }
 
 
+@dataclass(frozen=True, slots=True)
+class OverlapTruth:
+    """**Fo** — the EM's OWN per-locus candidate count, by TRUE origin. See :func:`overlap_truth`."""
+
+    gdna: np.ndarray  #: float64[n_loci] — the target of ``gdna_prior_count``
+    rna_unspliced: np.ndarray  #: float64[n_loci] — the target of ``rna_prior_count``
+    rna_all: np.ndarray  #: float64[n_loci] — every RNA unit, the EM's own RNA evidence
+    diag: dict  #: the accounting a caller must report — see :func:`overlap_truth`
+
+
+def unit_origins(unit_frag_ids: np.ndarray, frag_origin: np.ndarray) -> np.ndarray:
+    """``int8[n_units]`` — each EM unit's TRUE origin, joined on ``frag_id``.
+
+    ⛔ **The range check is the whole gate and it must ABORT.** ``frag_origin`` is indexed BY
+    ``frag_id``, so a walk that grouped the BAM differently than the scanner did produces an array of
+    the wrong length — and numpy would happily wrap a negative index or raise a bare ``IndexError``
+    that reads as a bug in this file rather than as a broken join.
+    """
+    ids = np.asarray(unit_frag_ids, np.int64)
+    n = int(np.asarray(frag_origin).shape[0])
+    if ids.size and (int(ids.min()) < 0 or int(ids.max()) >= n):
+        raise RuntimeError(
+            f"unit frag_ids span [{ids.min()}, {ids.max()}] but the origin walk found {n} fragments. "
+            "The walk did not reproduce the scanner's frag_id — every origin label below would be "
+            "shifted, and a shifted label is a plausible number."
+        )
+    return np.asarray(frag_origin, np.int8)[ids]
+
+
+def overlap_truth(multi_loci, unit_origin: np.ndarray, unit_is_spliced: np.ndarray,
+                  n_units: int, walk: dict) -> OverlapTruth:
+    """**Fo** — how many of a multi-locus's EM CANDIDATES were truly gDNA, and truly RNA.
+
+    ⭐⭐ **This is the quantity the EM's prior is added to**, and it is a count of UNITS, not of
+    genomic overlaps and not of start positions: ``em_solver.cpp:apply_grouped_prior_update`` forms
+    ``G = n_gdna + a_g`` where ``n_gdna`` is the soft gDNA count over the units
+    ``locus_partition`` handed that locus — i.e. over ``MultiLocus.unit_indices`` exactly.
+
+    ⭐ **Every input is somebody else's output.** ``unit_indices`` is ``build_multi_loci``'s,
+    ``unit_is_spliced`` is the scoring stage's, and ``unit_origin`` is the simulator's read name joined
+    on ``frag_id`` by :func:`unit_origins`. Nothing here re-derives a locus, a candidate set or a
+    splice call (TRAPS: a-test-that-redefines).
+
+    ⚠ ``unit_origin`` arrives ALREADY JOINED rather than as ``(frag_ids, frag_origin)``, so a cache can
+    store one int8 per unit instead of an int64 ``frag_id`` per unit plus the whole per-fragment walk.
+    The join's own gate lives in :func:`unit_origins`, where its inputs are.
+
+    ⛔ **THREE ARRAYS BECAUSE THERE ARE THREE POPULATIONS AND THEY ARE NOT INTERCHANGEABLE.**
+
+    * ``gdna`` — the target of ``gdna_prior_count``. Exact: a spliced unit cannot be gDNA (its
+      ``gdna_log_lik`` is ``-inf``) and gDNA cannot splice, so nothing has to be withheld.
+    * ``rna_unspliced`` — the target of ``rna_prior_count``, which withholds spliced mass.
+    * ``rna_all`` — every RNA unit, which is what the EM's ``n_rna`` sees from the unit axis.
+
+    ⚠ ``diag`` carries the accounting, and a caller must report it: ``spliced_gdna_units`` is the
+    join's SECONDARY diagnostic (gDNA cannot splice; the hard gate is ``_oracle.check_walk_alignment``
+    and it is a count identity, because this one is blind to a slip smaller than a population block),
+    ``orphan_units`` counts units no multi-locus claimed, and
+    ``nonunit_fragments`` is per origin the fragments that never became a candidate at all —
+    intergenic gDNA, gated fragments, and the deterministic spliced-unambig RNA that bypasses the EM.
+    ``Σ Fo[origin] + nonunit_fragments[origin] == walk["totals"][origin]`` is then checkable rather
+    than assumed.
+    """
+    n_loci = len(multi_loci)
+    n_units = int(n_units)
+    origin = np.asarray(unit_origin, np.int8)
+    spliced = np.asarray(unit_is_spliced, bool)
+    if origin.shape != (n_units,) or spliced.shape != (n_units,):
+        raise RuntimeError(
+            f"per-unit arrays are {origin.shape} / {spliced.shape} against n_units={n_units} — these "
+            "are not the same scoring stage's units."
+        )
+
+    lid = np.full(n_units, -1, dtype=np.int64)
+    for m in multi_loci:
+        lid[np.asarray(m.unit_indices, np.int64)] = m.multi_locus_id
+    claimed = lid >= 0
+
+    def per_locus(sel: np.ndarray) -> np.ndarray:
+        return np.bincount(lid[sel & claimed], minlength=n_loci).astype(np.float64)
+
+    is_gdna = origin == ORIGIN_CODE["gdna"]
+    is_rna = ~is_gdna
+    gdna = per_locus(is_gdna)
+    rna_all = per_locus(is_rna)
+    rna_unspliced = per_locus(is_rna & ~spliced)
+
+    counted = {"gdna": float(gdna.sum()), "rna": float(rna_all.sum())}
+    diag = {
+        "n_units": n_units,
+        "orphan_units": int((~claimed).sum()),
+        "spliced_gdna_units": int((is_gdna & spliced).sum()),
+        "spliced_rna_units": int((is_rna & spliced).sum()),
+        "unit_totals": {"gdna": counted["gdna"], "rna": counted["rna"]},
+        "nonunit_fragments": {
+            "gdna": float(walk["totals"]["gdna"]) - counted["gdna"],
+            "rna": float(walk["totals"]["mrna"] + walk["totals"]["nrna"]) - counted["rna"],
+        },
+        "walk": walk,
+    }
+    return OverlapTruth(gdna=gdna, rna_unspliced=rna_unspliced, rna_all=rna_all, diag=diag)
+
+
 def fragment_truth(oracle: OracleTruth, region_arrays, multi_loci):
-    """**F** — the DIRECT per-locus true fragment count, from ``node_start_count`` per origin.
+    """**F** — the per-locus true count of fragments whose FIRST BASE lands in the locus.
 
-    ⭐ **Why this bank and no other.** ``node_start_count`` is the accumulator's one real invariant —
-    ``Σ node_start_count == qc.deposited``, one increment per accepted fragment at the node holding its
-    first base. Every other bank counts OBJECT INCIDENCES (a fragment deposits on ``max(K, 1)``
-    objects), which is exactly the unit error ``assemble_priors``' own docstring exists to correct. So
-    this is the only bank on which "the locus's true fragment count" is a count rather than a model.
+    ⛔⛔ **THIS IS NOT THE PRIOR'S TARGET — :func:`overlap_truth` IS.** ``node_start_count`` deposits at
+    the node holding a fragment's first base, so a fragment that starts in the intergenic flank and
+    reaches into the locus is a candidate the EM counts and a fragment ``F`` does not. Until
+    2026-08-08 this docstring asserted the opposite ("the same quantity ``assemble_priors`` targets, by
+    construction"), on an argument about ``rho_c · span_bp`` — a rule the assembler no longer computes.
+    ``Fo − F`` is the straddling population and is reported as such.
 
-    ⭐ **And it is the same quantity ``assemble_priors`` targets, by construction.** That function
-    computes ``rho_c · span_bp`` with ``span_bp`` the locus's GENOMIC span; under a component of
-    density ``rho`` fragment-starts-per-bp, the expected number of starts inside the span is exactly
-    ``rho · span_bp``. The comparison is therefore an identity check, not an analogy.
+    ⭐ **What it is still the right instrument for.** ``node_start_count`` is the accumulator's one real
+    invariant — ``Σ node_start_count == qc.deposited``, one increment per accepted fragment — so ``F``
+    is the only per-locus truth that needs no scoring stage, no candidate set and no EM. That makes it
+    the arm to reach for when the question is about the *projection*, and it is why it survives here
+    rather than being deleted.
 
     ⛔ **Projected through the SHIPPED ``_project_regions_to_loci``.** A second overlap-share
     implementation here would drift from the one under test and the difference would read as
     assembler error (TRAPS: a-test-that-redefines).
 
-    ⚠ **The RNA arm is spliced-INCLUSIVE and is a BOUND, not the target.** ``rna_prior_count``
-    withholds spliced mass; ``node_start_count`` has no splice bit. Returns
+    ⚠ **The RNA arm is spliced-INCLUSIVE and is a BOUND.** ``rna_prior_count`` withholds spliced mass;
+    ``node_start_count`` has no splice bit. ⭐ ``overlap_truth`` does have one, so the bound is no
+    longer the best available RNA target — this one is kept only as ``F``'s own RNA companion. Returns
     ``(f_gdna, f_rna_upper, dropped)`` where ``dropped`` is the per-origin fragment count whose start
     node overlaps no locus — intergenic, correctly outside every prior, and reported so that
     ``Σ F + dropped == the library total`` is checkable rather than assumed.
     """
-    starts = {k: np.asarray(oracle.parts[k].node_start_count, np.float64) for k in ORIGINS}
-    rna = starts["mrna"] + starts["nrna"]
+    parts = {k: np.asarray(oracle.parts[k].node_start_count, np.float64) for k in ORIGINS}
+    return project_start_counts(
+        {"gdna": parts["gdna"], "rna": parts["mrna"] + parts["nrna"]}, region_arrays, multi_loci
+    )
+
+
+def project_start_counts(starts: dict, region_arrays, multi_loci):
+    """The projection half of :func:`fragment_truth`, taking the per-region start counts directly.
+
+    ⭐ Split out for the same reason as :func:`assemble_oracle_arm`: a cache should store the raw
+    per-region counts and project them at read time, so that editing ``priors._project_regions_to_loci``
+    — which the study cache deliberately keeps OUT of its key — cannot serve a stale ``F``
+    (TRAPS: a-guard-outlives-its-divisor's shape: the exclusion was justified by "the arms are rebuilt
+    on load", and then an artifact the excluded file produces started being stored).
+    """
+    g = np.asarray(starts["gdna"], np.float64)
+    r = np.asarray(starts["rna"], np.float64)
     proj = PRIORS._project_regions_to_loci(
-        region_arrays, multi_loci, len(multi_loci), {"gdna": starts["gdna"], "rna": rna}
+        region_arrays, multi_loci, len(multi_loci), {"gdna": g, "rna": r}
     )
     dropped = {
-        "gdna": float(starts["gdna"].sum() - proj["gdna"].sum()),
-        "rna": float(rna.sum() - proj["rna"].sum()),
+        "gdna": float(g.sum() - proj["gdna"].sum()),
+        "rna": float(r.sum() - proj["rna"].sum()),
     }
     return proj["gdna"], proj["rna"], dropped
 
@@ -462,6 +652,8 @@ class ConditionResult:
     f_gdna: np.ndarray
     f_rna_upper: np.ndarray
     f_dropped: dict
+    #: ⭐ **Fo** — the EM's own candidate count by true origin. THE reference for every arm.
+    overlap: OverlapTruth
     noop_identical: dict  #: field -> bool
     #: ⭐ is gdna_eff_len clamped by an incidence sum? See :func:`eff_len_inflation`
     eff_len: dict
@@ -475,6 +667,10 @@ class ConditionResult:
     region_arrays: object = None
     multi_loci: list = None
     calibration: object = None
+    #: the Fo arm's two raw inputs, for the same reason — a gate that cannot re-tally them cannot
+    #: perturb the join, and the join is where a silent one-fragment shift would live
+    units: dict = None
+    frag_origin: np.ndarray = None
 
 
 def _oracle_parts(bam, index, scan, pipeline_config, work_dir, tag, cache_root):
@@ -528,19 +724,24 @@ def _calibrate_and_prior(payload, strand_model, buffer, stats, index, ra, pipeli
         junctions=build_junction_geometry_arrays(index),
         edge_flags=build_edge_flags_array(index),
     )
-    multi_loci, priors = capture_priors(
+    multi_loci, priors, units = capture_priors(
         buffer, index, strand_model, fl, ra, stats, cal, payload, pipeline_config
     )
-    return cal, fl, multi_loci, priors
+    return cal, fl, multi_loci, priors, units
 
 
 def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cache=None,
                       drained_arm=True, emit_masses=None) -> ConditionResult:
-    """Scan once, build P / O / F, and price the drain caveat.
+    """Scan once, build P / O / S / Fo / F, and price the drain caveat.
 
     ⚠ **Two scans of the same BAM when ``drained_arm`` is on, and they are not interchangeable.** The
     fragment BUFFER is consumed by ``quant_from_buffer`` (and freed by it), so a second prior needs a
     second scan; the payload could be cached but the buffer cannot.
+
+    ⚠ **Plus one pysam WALK of the same BAM**, for the ``frag_id → true origin`` key the ``Fo`` arm
+    joins on. Deliberately uncached: it is ~30 s at 10 M fragments against the two scans it sits beside,
+    and a cache keyed on anything weaker than the scan cache's own manifest is how a stale truth array
+    gets read as a result.
     """
     start = time.perf_counter()
     scan = dataclasses.replace(pipeline_config.scan, sj_strand_tag=_native_detect_sj_tag(bam))
@@ -550,13 +751,20 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
     n_held = int(payload.deferred.n_fragments)
     parts = _oracle_parts(bam, index, scan, pipeline_config, work_dir, tag, oracle_cache)
     oracle = OracleTruth.from_parts(payload, parts)  # sum-to-full, UNDRAINED, raises if invalid
+    frag_origin, walk = frag_id_origins(bam, scan)
+    # ⛔ Before anything is scored: the walk must have issued the same frag_ids the scan did.
+    check_walk_alignment(walk, stats)
 
-    cal, _fl, multi_loci, p_arm = _calibrate_and_prior(
+    cal, _fl, multi_loci, p_arm, units = _calibrate_and_prior(
         payload, strand_model, buffer, stats, index, ra, pipeline_config
     )
     o_arm, noop = oracle_priors(oracle, cal, ra, multi_loci)
     s_arm, _shares = share_priors(oracle, cal, ra, multi_loci)
     f_gdna, f_rna_upper, f_dropped = fragment_truth(oracle, ra, multi_loci)
+    overlap = overlap_truth(
+        multi_loci, unit_origins(units["frag_ids"], frag_origin),
+        units["is_spliced"], units["n_units"], walk,
+    )
     eff_len = eff_len_inflation(cal, ra, multi_loci)
 
     noop_identical = {
@@ -602,7 +810,7 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
         # buffer is not. The scan is a function of the BAM, the index and the scan config alone, so
         # this reproduces the first one exactly.
         _s2, sm2, buf2, _p2 = scan_and_buffer(bam, index, scan)
-        _c2, _f2, ml2, p_drained = _calibrate_and_prior(
+        _c2, _f2, ml2, p_drained, _u2 = _calibrate_and_prior(
             payload_d, sm2, buf2, _s2, index, ra, pipeline_config
         )
         # ⚠ The drained run builds its OWN loci, and they need not match: build_multi_loci depends on
@@ -632,6 +840,7 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
         f_gdna=f_gdna,
         f_rna_upper=f_rna_upper,
         f_dropped=f_dropped,
+        overlap=overlap,
         noop_identical=noop_identical,
         eff_len=eff_len,
         drain=drain,
@@ -645,6 +854,8 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
         region_arrays=ra,
         multi_loci=multi_loci,
         calibration=cal,
+        units=units,
+        frag_origin=frag_origin,
     )
 
 
@@ -706,6 +917,15 @@ _SELECTIONS = (
 )
 
 
+def _rel(x: float) -> str:
+    """``rel`` in 8 columns. ⛔ Switches to scientific below 1e-3 rather than rounding to ``0.000``:
+    the S arm's residual against Fo is ~4e-5 and the whole point of that row is that it is small but
+    NOT zero — a fixed 3-decimal format would have printed the verdict as an exact zero."""
+    if not np.isfinite(x):
+        return f"{'nan':>8}"
+    return f"{x:>8.1e}" if 0.0 < abs(x) < 1e-3 else f"{x:>8.4f}"
+
+
 def report(rows: list[dict]) -> None:
     """The whole report, from the per-condition JSON — **the only report path there is.**
 
@@ -735,6 +955,32 @@ def report(rows: list[dict]) -> None:
     print(f"\n  ✅ noop gate: re-injecting the shipped masses reproduces P byte-identically on all "
           f"{len(rows)} x {len(PRIOR_FIELDS)} arrays (TRAPS: byte-identity-gate)")
 
+    # ── ⛔ THE Fo JOIN, AND ITS TWO CHECKS ARE NOT EQUALLY STRONG.
+    # The HARD one already ran per condition (`_oracle.check_walk_alignment`: the walk's record and
+    # group counts against the scanner's own `stats.total` / `stats.n_read_names`) and raised if it
+    # failed, so reaching here means the join is exact. What is printed is the SECONDARY diagnostic —
+    # gDNA cannot splice — plus the number that says how much it is worth on this substrate: the
+    # simulator writes each population in a block, so a 10 M-fragment condition has ~15 origin
+    # transitions and a one-fragment slip would mislabel ~15 fragments. Loud for a big slip, blind to a
+    # small one, which is exactly why it is not the gate.
+    bad_align = [(r["condition"], r["overlap"]["spliced_gdna_units"], r["overlap"]["n_units"])
+                 for r in rows if r["overlap"]["spliced_gdna_units"] > r["overlap"]["n_units"] // 1000]
+    if bad_align:
+        print(f"\n  ⛔⛔ gDNA IS SPLICED on {len(bad_align)} conditions — over 0.1 % of the "
+              "gDNA-labelled units, which is impossible physics. The origin labels are wrong:")
+        for c, n, tot in bad_align[:10]:
+            print(f"       {c}  {n:,} spliced gdna units of {tot:,}")
+        raise SystemExit(2)
+    worst = max((r["overlap"]["spliced_gdna_units"] for r in rows), default=0)
+    orphans = sum(r["overlap"]["orphan_units"] for r in rows)
+    trans = sum(r["overlap"]["walk"]["n_transitions"] for r in rows)
+    print(f"  ✅ frag_id join: record+group counts match the scanner on all {len(rows)} conditions "
+          f"(hard gate). Secondary: at most {worst:,} of "
+          f"{sum(r['overlap']['n_units'] for r in rows):,} units are spliced-and-gdna, "
+          f"{orphans:,} claimed by no locus")
+    print(f"     ⚠ {trans:,} origin transitions in BAM order across the panel — the secondary "
+          "diagnostic is only sensitive to a slip larger than a population block.")
+
     def arm_table(title: str, key: str, arm: str, note: str = "") -> None:
         print()
         print(f"  {title}")
@@ -752,35 +998,94 @@ def report(rows: list[dict]) -> None:
                 print(f"    {label:<26} {'(empty)':>14}")
                 continue
             print(f"    {label:<26} {s.total_ref:>14,.0f} {s.total_arm:>14,.0f} "
-                  f"{s.abs_err:>14,.0f} {s.rel:>8.3f} {s.net_err:>+14,.0f} "
+                  f"{s.abs_err:>14,.0f} {_rel(s.rel)} {s.net_err:>+14,.0f} "
                   f"{s.cancellation:>7.1f}")
 
-    _RNA_BOUND = ("⚠ F IS AN UPPER BOUND: node_start_count carries no splice bit, so it counts the "
-                  "spliced fragments rna_prior_count deliberately withholds. A NEGATIVE net is "
-                  "expected here and is not an error.")
+    _RNA_TARGET = ("⭐ The reference is the UNSPLICED RNA units — the population rna_prior_count "
+                   "actually targets. Fo carries the splice bit per unit, so this arm is no longer a "
+                   "bound (the F_rna column was, and table ⑫ prices the difference).")
 
     arm_table("① P vs O — CALIBRATION'S OWN ERROR (a perfect deconvolution, same assembler) · gDNA arm",
               "P_vs_O", "gdna")
     arm_table("   … RNA arm", "P_vs_O", "rna")
-    arm_table("④ O vs F — THE ASSEMBLER'S OWN ERROR (truth masses in) · gDNA arm",
-              "O_vs_F", "gdna",
-              "⭐ F is EXACT here — gDNA does not splice. This prices the mass→density→fragment-count "
-              "conversion, the projection and the pooling, alone.")
-    arm_table("   … RNA arm", "O_vs_F", "rna", _RNA_BOUND)
-    arm_table("⑤ P vs F — THE TOTAL PRIOR ERROR (what the EM is handed, vs the true counts) · gDNA arm",
-              "P_vs_F", "gdna")
-    arm_table("   … RNA arm", "P_vs_F", "rna", _RNA_BOUND)
+    arm_table("④ O vs Fo — THE ASSEMBLER'S OWN ERROR (truth masses in) · gDNA arm",
+              "O_vs_FO", "gdna",
+              "⭐ Fo is the EM's own candidate count — every unit of the locus, labelled by true "
+              "origin. This prices the mass→fragment-count conversion, the projection and the pooled "
+              "share, alone.")
+    arm_table("   … RNA arm", "O_vs_FO", "rna", _RNA_TARGET)
+    arm_table("⑤ P vs Fo — THE TOTAL PRIOR ERROR (what the EM is handed, vs the true counts) · gDNA arm",
+              "P_vs_FO", "gdna")
+    arm_table("   … RNA arm", "P_vs_FO", "rna", _RNA_TARGET)
 
     # ── ⑧ the two halves of ④, separated ──
-    arm_table("⑧ S vs F — THE ASSEMBLER WITH PERFECT PER-COMPONENT SHARES · gDNA arm",
-              "S_vs_F", "gdna",
+    arm_table("⑧ S vs Fo — THE ASSEMBLER WITH PERFECT PER-COMPONENT SHARES · gDNA arm",
+              "S_vs_FO", "gdna",
               "⭐ Everything ④ measures EXCEPT the pooled share. The gap between ④ and ⑧ is what one "
               "share for two components costs.")
+    arm_table("   … RNA arm", "S_vs_FO", "rna", _RNA_TARGET)
     arm_table("⑨ O vs S — THE POOLED SHARE'S OWN CONTRIBUTION, ISOLATED · gDNA arm",
               "O_vs_S", "gdna",
               "⛔ The locus TOTAL is conserved here to the fragment, so this error is purely "
               "compositional and no conservation gate can see it. Equal component lengths ⇒ identically "
               "zero, which is why the ladder is structurally blind to it.")
+
+    # ── ⑪ what the yardstick correction is worth ──
+    print()
+    print("  ⑪ ⛔ THE YARDSTICK ITSELF — Fo (the EM's candidates) against F (first-base starts)")
+    print("  ⭐ Fo − F is the STRADDLING population: fragments that overlap a locus but start outside "
+          "it.")
+    print("  ⛔ Every O−F / S−F number printed before 2026-08-08 was scored against F. The `rel` "
+          "columns say what that cost.")
+    print(f"    {'stratum':<26} {'Σ Fo':>13} {'Σ F':>13} {'Σ|Fo−F|':>11} {'rel':>8} "
+          f"{'O−F rel':>8} {'O−Fo rel':>8} {'S−F rel':>8} {'S−Fo rel':>8}")
+    print("    " + "-" * 112)
+    for label, sel in _SELECTIONS:
+        if label is None:
+            print("    " + "-" * 112)
+            continue
+        sub = [r for r in rows if sel(r["condition"])]
+        if not sub:
+            continue
+        y = _agg([ArmScore(**r["FO_vs_F"]["gdna"]) for r in sub])
+        cells = {
+            k: _agg([ArmScore(**r[k]["gdna"]) for r in sub])
+            for k in ("O_vs_F", "O_vs_FO", "S_vs_F", "S_vs_FO")
+        }
+        print(f"    {label:<26} {y.total_arm:>13,.0f} {y.total_ref:>13,.0f} {y.abs_err:>11,.0f} "
+              f"{_rel(y.rel)} {_rel(cells['O_vs_F'].rel)} {_rel(cells['O_vs_FO'].rel)} "
+              f"{_rel(cells['S_vs_F'].rel)} {_rel(cells['S_vs_FO'].rel)}")
+
+    # ── ⑫ the prior's population vs the EM's ──
+    print()
+    print("  ⑫ ⚠ THE PRIOR'S POPULATION vs THE EM's — a FINDING, not a correction this file makes")
+    print("  `apply_grouped_prior_update` forms R = n_rna + a_r with n_rna = unambig_totals + "
+          "em_totals, so it")
+    print("  counts SPLICED RNA; assemble_priors withholds it from a_r. If the two disagree the prior's")
+    print("  composition claim is tilted even with PERFECT masses in.  phi* is over the unit axis only.")
+    print(f"    {'stratum':<26} {'RNA units':>13} {'unspliced':>13} {'gDNA units':>13} "
+          f"{'phi* true':>9} {'phi* S':>8} {'Δphi*':>8} {'non-unit RNA':>13}")
+    print("    " + "-" * 116)
+    for label, sel in _SELECTIONS:
+        if label is None:
+            print("    " + "-" * 116)
+            continue
+        sub = [r["overlap"] for r in rows if sel(r["condition"])]
+        srows = [r for r in rows if sel(r["condition"])]
+        if not sub:
+            continue
+        ru = sum(x["unit_totals"]["rna"] for x in sub)
+        rg = sum(x["unit_totals"]["gdna"] for x in sub)
+        rus = sum(x["rna_unspliced_total"] for x in sub)
+        nonunit = sum(x["nonunit_fragments"]["rna"] for x in sub)
+        s_g = sum(ArmScore(**r["S_vs_FO"]["gdna"]).total_arm for r in srows)
+        s_r = sum(ArmScore(**r["S_vs_FO"]["rna"]).total_arm for r in srows)
+        phi_true = rg / (rg + ru) if (rg + ru) > 0 else float("nan")
+        phi_s = s_g / (s_g + s_r) if (s_g + s_r) > 0 else float("nan")
+        print(f"    {label:<26} {ru:>13,.0f} {rus:>13,.0f} {rg:>13,.0f} {phi_true:>9.4f} "
+              f"{phi_s:>8.4f} {phi_s - phi_true:>+8.4f} {nonunit:>13,.0f}")
+    print("    ⚠ non-unit RNA is spliced-unambig + gated: real RNA evidence in the EM's n_rna that no "
+          "arm here attributes per locus, so Δphi* is a LOWER bound on the tilt.")
 
     # ── ⑩ is gdna_eff_len clamped by an incidence sum? ──
     print()
@@ -898,17 +1203,30 @@ def to_json(results: list[ConditionResult]) -> list[dict]:
             "eff_len": r.eff_len,
             "library": r.library,
             "f_dropped": r.f_dropped,
+            "overlap": {
+                **r.overlap.diag,
+                "rna_unspliced_total": float(r.overlap.rna_unspliced.sum()),
+            },
             "seconds": r.seconds,
         }
         p, o = r.priors["P"], r.priors["O"]
         sa = r.priors["S"]
+        fo_g, fo_r = r.overlap.gdna, r.overlap.rna_unspliced
         for ref_name, gref, rref, arm in (
             ("P_vs_O", o.gdna_prior_count, o.rna_prior_count, p),
+            # ⭐ Fo is the reference every assembler arm is scored against — the EM's own candidate
+            # count. F is kept beside it on the same arms so table ⑪ can price the correction.
+            ("O_vs_FO", fo_g, fo_r, o),
+            ("P_vs_FO", fo_g, fo_r, p),
+            ("S_vs_FO", fo_g, fo_r, sa),
             ("O_vs_F", r.f_gdna, r.f_rna_upper, o),
             ("P_vs_F", r.f_gdna, r.f_rna_upper, p),
-            # ⭐ the two halves of O_vs_F, separated
             ("S_vs_F", r.f_gdna, r.f_rna_upper, sa),
             ("O_vs_S", sa.gdna_prior_count, sa.rna_prior_count, o),
+            # ⛔ the yardstick itself, as an arm: Fo scored against F
+            ("FO_vs_F", r.f_gdna, r.f_rna_upper,
+             PRIORS.LocusPriors(gdna_prior_count=fo_g, rna_prior_count=fo_r,
+                                gdna_eff_len=np.zeros_like(fo_g))),
         ):
             row[ref_name] = {
                 "gdna": dataclasses.asdict(score_arm(arm.gdna_prior_count, gref)),

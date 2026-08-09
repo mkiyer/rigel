@@ -590,8 +590,22 @@ scale a prior is assembled on, and they break it by very different amounts:
 locus granularity. A repair belongs where the identity is exact — **per line, before the contained term
 is added** — and a per-locus factor derived from this ratio would be wrong by the contained fraction.
 
-⚠ **Measured 2026-08-08**: the pooled share accounts for **25–28 %** of the assembler's residual error on
-the ±40 % flgap panels (42 % off capture). The other ~72 % survives perfect per-component shares.
+⭐⭐ **MEASURED 2026-08-08, DRAINED, ON ALL FOUR flgap CONDITIONS: THE POOLED SHARE IS 82–99 % OF THE
+ASSEMBLER'S WHOLE RESIDUAL, AND THERE IS NOTHING ELSE LEFT TO EXPLAIN.** With the truth masses in, the
+assembler misses the EM's own candidate count by `rel` 8.8e-4 … 0.0111; give each component its own true
+per-line share as well and that falls to **2.8e-5 … 2.0e-3** — 67 to 9,653 fragments out of 2.4–4.9 M.
+`scripts/design/prior_yardstick.py`.
+
+⛔ **The predecessor of this paragraph said "25–28 % … the other ~72 % survives perfect per-component
+shares", and the 72 % did not exist.** It was scored against a per-locus count of the fragments whose
+FIRST BASE lands in the locus, and the EM counts every fragment that is a *candidate*
+(`TRAPS: score-the-consumers-own-count`). ⚠ Read the ratios rather than the absolutes: `flgap_long`
+carries a real spliced leak in its drained gDNA partition (8,641 records against `flgap_short`'s 1), so
+its 0.0020 is an upper bound and `flgap_short`'s 4.3e-5 is the admissible figure.
+
+⚠ **And `S` is a diagnostic ceiling, not a design.** It consumes the true per-component share, which
+production cannot have. What the measurement establishes is that the assembler's *arithmetic* is right
+and that a per-line share correction is the whole of the remaining work — not that the work is done.
 
 ## 3c. ⭐⭐ THE MODEL-FREE LOCAL MEAN LENGTH — and its one precondition
 

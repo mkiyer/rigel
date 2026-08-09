@@ -67,6 +67,105 @@ _BANKS = (
 #: The banks a gDNA fragment can NEVER touch — it does not splice.
 _RNA_ONLY_BANKS = ("edge_spliced_count", "sj_count")
 
+#: Origin -> code for the per-``frag_id`` truth array, so ``ORIGINS[code] == kind``. int8, because a
+#: 10 M-fragment condition is then 10 MB and can be carried in a cache blob.
+ORIGIN_CODE = {k: i for i, k in enumerate(ORIGINS)}
+
+
+def frag_id_origins(bam: str, scan_config) -> tuple[np.ndarray, dict]:
+    """⭐⭐ **EVERY FRAGMENT'S TRUE ORIGIN, KEYED BY THE SCANNER'S OWN ``frag_id``** — the join that
+    lets an instrument ask "which of THIS multi-locus's EM candidates were really gDNA?".
+
+    ``_split_bam`` answers origin questions on the *accumulator* axis: three BAMs, three payloads, one
+    per-object bank each. It cannot answer a question about an EM UNIT, because a unit is a row in the
+    scored CSR and its identity is a ``frag_id`` — and ``frag_id`` is assigned by the scanner, not by
+    the read name. This function supplies the missing key.
+
+    ⭐ **``frag_id`` is the index of the qname GROUP, over the records that survive the scanner's own
+    record filter** (``bam_scanner.cpp`` pass 1: ``current_group.frag_id = frag_id++`` once per change
+    of qname, after QC-fail / unmapped / duplicate / unpaired rejection). Both mates and every
+    secondary alignment of one molecule share a qname, hence one ``frag_id``. This walk is the same
+    rule, in the same order, over the same records — and ``rigel.annotate``'s BAM writer already
+    re-derives it the same way, which is what makes it a contract rather than an implementation detail.
+
+    ⛔ **``scan_config`` is REQUIRED and is not a convenience.** ``skip_duplicates`` decides whether a
+    duplicate-flagged record is filtered, and a filtered record must NOT advance the counter. Reading
+    it from the caller's own ``BamScanConfig`` is what stops this walk and the scan it is being joined
+    to from disagreeing about where ``frag_id`` 5,000,000 is.
+
+    ⛔⛔ **THE JOIN IS GATED BY A COUNT IDENTITY, NOT BY A STATISTICAL SMELL TEST** — see
+    :func:`check_walk_alignment`. Both this walk and pass 1 stream the same file in the same order and
+    stamp one id per qname change, so agreeing on ``n_records`` *and* ``n_groups`` is sufficient: two
+    monotone counters over one sequence that end level cannot have differed in the middle without one
+    of them double-stepping, which the record total would show.
+
+    ⚠ **Do not reach instead for "gDNA never lands on a spliced unit" as the primary check.** It is
+    carried as a secondary diagnostic and it is WEAK on this panel, measured: the simulator writes each
+    population in a block, so a 10 M-fragment condition has only **15** origin transitions in BAM order
+    and a shift of one fragment mislabels ~15 fragments in total. That detector sees a large slip and is
+    blind to a small one.
+
+    Returns ``(origins, diag)``: ``int8[n_groups]`` indexed by ``frag_id``, and the record accounting
+    (``n_records`` / ``n_filtered`` / ``n_groups`` / ``n_transitions`` / per-origin totals) a caller
+    must report — the per-origin totals are the denominators for "how many fragments of this origin
+    never became an EM candidate at all", and ``n_transitions`` is what says how sensitive the
+    secondary diagnostic is on this substrate.
+    """
+    from rigel.sim.read_name import parse_origin
+
+    skip_duplicates = bool(scan_config.skip_duplicates)
+    codes: list[int] = []
+    n_records = n_filtered = 0
+    current = None
+    with pysam.AlignmentFile(bam, "rb") as fin:
+        for rec in fin:
+            n_records += 1
+            flag = rec.flag
+            if (flag & 0x200) or (flag & 0x4) or (skip_duplicates and (flag & 0x400)):
+                n_filtered += 1
+                continue
+            if not (flag & 0x1):
+                # The scanner throws on this; a walk that silently tolerated it would be counting
+                # groups the scan never made.
+                raise AssertionError(
+                    f"{bam}: unpaired record {rec.query_name} — the production scanner refuses this "
+                    "BAM, so a frag_id walk over it means nothing."
+                )
+            qname = rec.query_name
+            if qname != current:
+                current = qname
+                codes.append(ORIGIN_CODE[parse_origin(qname).kind])
+    origins = np.asarray(codes, dtype=np.int8)
+    diag = {
+        "n_records": n_records,
+        "n_filtered": n_filtered,
+        "n_groups": int(origins.shape[0]),
+        "n_transitions": int((origins[1:] != origins[:-1]).sum()) if origins.size > 1 else 0,
+        "totals": {k: int((origins == c).sum()) for k, c in ORIGIN_CODE.items()},
+    }
+    return origins, diag
+
+
+def check_walk_alignment(walk: dict, stats) -> None:
+    """⛔⛔ **THE ``frag_id`` JOIN'S ONE HARD GATE — raise, never warn.**
+
+    ``stats.n_read_names`` is incremented once per qname group inside the scanner's own worker, so it
+    IS the number of ``frag_id``\\ s pass 1 issued; ``stats.total`` is every record it read. A walk that
+    matches both has visited the same records in the same order and cut them into the same number of
+    groups, which is the whole of what "``frag_origin[frag_id]`` is that fragment's origin" requires.
+
+    ⛔ A mismatch is not a small error: every unit's origin label shifts, ``Fo`` stays a plausible
+    array of counts, and nothing downstream can tell. Hence an exception rather than a printed warning.
+    """
+    want_records, want_groups = int(stats.total), int(stats.n_read_names)
+    if walk["n_records"] != want_records or walk["n_groups"] != want_groups:
+        raise RuntimeError(
+            f"the read-name walk does NOT reproduce the scanner's frag_id: records "
+            f"{walk['n_records']:,} vs {want_records:,}, groups {walk['n_groups']:,} vs "
+            f"{want_groups:,}. Every origin label would be shifted, and a shifted label is a "
+            "plausible wrong number — refusing to score."
+        )
+
 
 def _split_bam(bam: str, out_dir: Path, tag: str) -> tuple[dict[str, str], dict[str, int]]:
     """Split a name-sorted BAM into per-origin BAMs. Both mates share a qname ⇒ same origin ⇒ same file;

@@ -26,7 +26,8 @@ things nothing had measured before. If it grows again, prune it rather than lett
 | **Stage A — the accumulator** | ✅ **DONE**, and that is a measurement | perfecting BOTH fragment-length models is worth **2.6 %** of the deliverable, down from 22.2 % |
 | **calibration, 3 of 4 strata** | ✅ median library `f_gdna` error **0.005–0.012**, and ⭐ the PRIOR the EM reads is within **2.5–4.6 %** of a perfect one | stranded × on/off and unstranded × capture-OFF |
 | ⛔ **calibration, unstranded × capture-ON** | ⛔ **BLIND** — reports **0.033–0.058** while truth spans **0.00 → 0.98**, and hands the EM a gDNA prior **94.4 %** short | not noisy; a flat line. This is the whole open problem |
-| ⛔ **the prior ASSEMBLER, under capture** | ⛔ **+15.1 % over-call** (`rel` 0.179) with PERFECT masses in; **0.005** off capture | ⭐ NEW 2026-08-07. Larger than calibration's own error on the three strata it handles. §1.1 |
+| ✅ **the prior ASSEMBLER** | ✅ `rel` **0.0027** under capture / **0.0019** off it with perfect masses in, and **4.9e-4** with perfect per-component shares as well | ⭐ was **0.179**. Two causes, and both are measured: the conserved-count rewrite (0.179 → 0.0202 on the SAME yardstick) and then the yardstick itself (0.0202 → 0.0027). §1.1 ④ |
+| ⛔ **the prior's POPULATION vs the EM's** | ⛔ `a_r` withholds spliced RNA while `n_rna` counts it — the composition claim is tilted **+0.072 … +0.094** in `phi` with PERFECT masses in, on every stratum | ⭐ NEW 2026-08-08, and larger than everything the assembler does wrong. Needs an owner call on which semantics is intended. §1.1 ⑫ |
 | **message propagation** | ⛔ **OFF** since 2026-08-07 (`config.message_propagation`) | net better on 3 of 4 strata (−58 / −44 / −32 %); +155 % on the fourth, which carries 73 % of panel error |
 | **the price of that** | ⚠ zero-gDNA golden scenarios go **0.029 → 89.93** and **0.005 → 9.58** | both AMBIG loci — the stratum above |
 | **end to end — the LIBRARY figure** | ✅ mean `\|f_gdna − truth\|` **0.1060**, and a perfect prior takes it to **0.0097** | calibration is the whole bottleneck here. §1.3 ① |
@@ -92,8 +93,15 @@ pointing at.
 
 `scripts/design/prior_vs_oracle.py`, all 36 ladder conditions, messages OFF, `length_likelihood` OFF,
 noop gate byte-identical on all 36 × 3 arrays. `LocusPriors` is what the EM reads; **P** is the shipped
-prior, **O** is the same assembler fed the origin-split truth masses, **F** is the direct per-locus
-fragment count from `node_start_count` (EXACT on the gDNA arm — gDNA does not splice).
+prior, **O** is the same assembler fed the origin-split truth masses, **S** is O with each component
+rescaled by its own true per-line share, and ⭐ **Fo** is the EM's OWN candidate count per origin —
+every unit of the multi-locus, labelled by the true origin of its fragment.
+
+⛔⛔ **THE REFERENCE CHANGED ON 2026-08-08 AND ④ BELOW IS RE-MEASURED.** It used to be `F`, the count of
+fragments whose FIRST BASE lands in the locus, described here as "EXACT on the gDNA arm". The EM counts
+every fragment that is a *candidate*, so `F` dropped the straddling population — **1.4 M of 102.9 M on
+this panel** — and `O−F` was scored against a quantity nothing reads
+(`TRAPS: score-the-consumers-own-count`).
 
 **① `P − O`, calibration's own error, gDNA arm, as a fraction of the true prior:**
 
@@ -112,18 +120,27 @@ total pseudocount `a_g + a_r` is correct to a fraction of a percent, so the EM i
 right STRENGTH in the wrong DIRECTION. Nothing here is a regularisation or a prior-weight problem, and a
 mechanism that changes how hard the prior pulls is aimed at a number that is already right.
 
-**④ `O − F`, the ASSEMBLER's own error** — perfect masses in, true fragment counts as the reference, so
-this prices the mass → density → fragment-count conversion, the overlap projection and the
-support-weighted pooling alone:
+**④ `O − Fo`, the ASSEMBLER's own error** — perfect masses in, the EM's own candidate count as the
+reference, so this prices the mass → fragment-count conversion, the projection and the one pooled
+per-component share, alone. ⑧ is the same thing with the share made perfect too:
 
-| | capture OFF | capture ON |
-|---|---|---|
-| gDNA arm `rel` | **0.005** (both strata) | ⛔ **0.179**, net **+5.1 M on 33.9 M (+15.1 %)** |
+| gDNA arm `rel` | capture OFF | capture ON | | *the same arms against the old `F`* |
+|---|---|---|---|---|
+| ④ `O − Fo` | **0.0019** | **0.0027** | | *0.0078 / 0.0202* |
+| ⑧ `S − Fo` | **1.2e-4** | **6.9e-4** | | *0.0058 / 0.0178* |
 
-⛔ **That is bigger than calibration's own error on the three strata calibration handles (0.025–0.046).**
-So on those strata the assembler is now the dominant prior error, and it appears only under capture —
-consistent with the second-order residual `assemble_priors`' own docstring flags, since `Σm/ΣS` is the
-support-weighted mean density and capture puts a strong gradient *inside* a locus. ⚠ Diagnosed, not fixed.
+⭐⭐ **THE ASSEMBLER IS ESSENTIALLY SOLVED, AND WHAT IS LEFT IS THE POOLED SHARE.** ⑧ says that with each
+component's own true share the assembler reproduces the EM's count to **2,029 fragments in 17.0 M** off
+capture and **23,846 in 34.5 M** under it. ⚠ The ladder is *structurally* blind to the length gap the
+share depends on (equal configured lengths, +1.5–2.1 % realised), so read the flgap pair for the
+magnitude: there the share is **82–99 %** of the whole residual and `S−Fo` reaches **2.8e-5**
+(`scripts/design/prior_yardstick.py`, drained).
+
+⚠ **The predecessor of this block read `0.005` / ⛔ `0.179` (+15.1 %) and called the assembler "the
+dominant prior error" on three strata.** Both halves moved, for two separable reasons, both measured on
+this panel: the conserved-count rewrite took `O−F` from 0.179 to 0.0202 on the SAME yardstick, and the
+yardstick then took 0.0202 to 0.0027. ⛔ The 0.179 also predates the accumulator schema change, so
+"the rewrite" there means everything that landed between 2026-08-07 and 2026-08-08, not one edit.
 
 ⛔ **The `g00` ZERO-gDNA control fails at the prior, and its worst stratum is NOT the blind one.** The
 shipped prior claims **2,067,637 gDNA fragments in libraries containing none**:
@@ -145,6 +162,27 @@ nothing while `length_likelihood` is off: three strata at `rel` 0.024–0.036, u
 ⚠ **Undrained on both sides, and priced rather than waved**: the drain moves the shipped prior by
 **0.153 %** (gDNA) and **0.462 %** (RNA). A drained oracle is inadmissible on this panel —
 `TRAPS: an-equal-length-panel-defeats-the-lift`.
+
+**⑫ ⛔⛔ NEW 2026-08-08 — THE PRIOR AND THE EM ARE COUNTING DIFFERENT POPULATIONS, AND THIS IS NOW THE
+LARGEST THING WRONG WITH THE ASSEMBLED PRIOR.** `apply_grouped_prior_update` forms `R = n_rna + a_r`
+with `n_rna = unambig_totals + em_totals`, so it counts SPLICED RNA; `assemble_priors` withholds spliced
+mass from `a_r` because certified RNA has no gDNA competitor. Each is defensible alone; together
+`(a_g, a_r)` and `(n_gdna, n_rna)` describe different sets, so the prior's composition claim is tilted
+toward gDNA **with the truth masses in**:
+
+| stratum | `phi*` true | `phi*` from S | Δ | RNA units the prior withholds |
+|---|---|---|---|---|
+| stranded × capture OFF | 0.2884 | 0.3825 | **+0.0941** | 14.5 M spliced + 2.7 M non-unit |
+| stranded × capture ON | 0.4648 | 0.5367 | **+0.0719** | 10.0 M spliced + 4.9 M non-unit |
+| unstranded × capture OFF | 0.2884 | 0.3825 | **+0.0941** | |
+| unstranded × capture ON | 0.4648 | 0.5367 | **+0.0719** | |
+
+⭐ `phi*` is over the EM's UNIT axis; the deterministic spliced-unambig fragments reach `n_rna` through
+`unambig_totals` and are not on that axis at all, so every Δ is a **lower bound**. ⛔ **This is an owner
+call, not a bug to fix**: is `a_r` a fragment count commensurate with `n_rna` — then it must include
+spliced RNA — or a strength reflecting the independent evidence calibration actually has, in which case
+the EM's aggregation is what needs re-deriving? Both readings are consistent with everything else built.
+⚠ It reproduces on all four flgap conditions at **+0.071 … +0.100**, drained and undrained alike.
 
 ### §1.2 ⭐⭐⭐ ITEM 2 IS DONE — THE TOOL'S ABSOLUTE ACCURACY, END TO END
 

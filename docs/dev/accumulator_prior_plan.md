@@ -12,14 +12,19 @@
 
 ## 0. ⭐⭐⭐ START HERE — THE NEXT SESSION IN FIVE LINES
 
-1. Tree is **GREEN at `411999d5`**: 0 failed / 3,253 passed / 2 skipped / 9 xfail, lint clean.
+1. ⛔⛔ **STEP 1 IS DONE AND IT CLOSED §3 STEP 4 WITH IT.** The yardstick is `Fo` — the EM's own
+   candidate count — and against it the assembler with perfect masses **and** perfect per-component
+   shares is off by `rel` **2.8e-5 … 2.0e-3**. The pooled share is **82–99 %** of the whole residual.
+   **The "72 % open residual" was the yardstick and it does not exist.**
+   `scripts/design/prior_yardstick.py`; `TRAPS: score-the-consumers-own-count`.
 2. **`python scripts/design/flgap_study_cache.py --list`** — four conditions cached, ~1 s to load.
    `priors.py` is outside the cache key, so assembler changes are a one-second loop.
-3. ⛔⛔ **DO NOT chase the assembler's residual until §3 step 1 lands.** The yardstick it was measured
-   against (`F`) is disqualified, so `O−F` and `S−F` are currently uninterpretable.
-4. ⭐ **The assembler was never the main term.** `P−F` is **0.82–0.97** under capture against `O−F`
-   **0.008–0.04**. The error is upstream, in calibration.
-5. Two length biases remain open and are named in §3 steps 3–4.
+3. ⭐ **GO AT CALIBRATION.** `P−Fo` is **0.81–0.97** under capture against `O−Fo` **0.004–0.011**: ~99 %
+   of the prior's error is upstream. §3 step 2, and its first arm is one config flag.
+4. ⚠ **ONE NEW FINDING NEEDS AN OWNER CALL, and it is bigger than anything the assembler does wrong.**
+   `a_r` withholds spliced RNA while the EM's `n_rna` counts it, so the prior's composition claim is
+   tilted **+0.071 … +0.100** in `phi` with PERFECT masses in. §5 item 6.
+5. The gDNA pmf under capture (§3 step 3) is the one length bias still open.
 
 ---
 
@@ -27,10 +32,10 @@
 
 | | |
 |---|---|
-| HEAD | **`411999d5`** — "an edge owns its own crossings" |
-| suite | ✅ **0 failed / 3,253 passed** / 2 skipped / 9 xfail · lint clean |
+| HEAD | **`daa8e70c`** + the yardstick fix, uncommitted |
+| suite | ✅ **0 failed / 3,267 passed** / 2 skipped / 9 xfail · lint clean (⚠ 9 files were already not `ruff format`-clean before this work and still are; only `test_prior_vs_oracle.py` was formatted, because only it was clean before) |
 | `payload_schema_digest` | **`19ee4ba867ff0441`** — unchanged by the edge-ownership work, and FINAL unless §4 says otherwise |
-| caches | ✅ 176 oracle caches + `pilot/scan_cache` on that digest · ✅ the 4-condition flgap **study cache** |
+| caches | ✅ 176 oracle caches + `pilot/scan_cache` on that digest · ✅ the 4-condition flgap **study cache**, REBUILT 2026-08-08 (it now carries the per-unit origin, and its key was wrong twice — §5 item 7) |
 | switches | ⛔ `message_propagation = False`, `length_likelihood = False` — both deliberate, both study-only |
 
 ⚠ **The 9 xfails are untouched.** All five strict ones still fail as intended.
@@ -75,9 +80,12 @@ nodes. `DESIGN.md` §3.1b is the ruling, `TRAPS: a-fold-grows-a-heuristic` the l
 `gdna_eff_len` clamp diagnostic; `OracleTruth.component_shares()` measures the true per-component share
 off the origin split; the two mass banks joined `_BANKS` so the split is validated on them.
 
-**What phase 0 measured** (gDNA arm, `rel`) — ⚠ **each row is a MEAN over the panel's 4 conditions, which
-the original entry did not say, and the per-stratum spread it hides is the interesting part.
-Re-run and decomposed 2026-08-08:**
+**What phase 0 measured** (gDNA arm, `rel`) — ⛔⛔ **SUPERSEDED: every number in this block is scored
+against `F`, which §3 step 1 disqualified. It is kept because the SHAPE it reports — where the share
+matters most is not where the error is — was the observation that motivated re-checking the yardstick,
+and because a superseded measurement deleted is a measurement that gets made again.** For the live
+figures see §3 step 1. ⚠ Each row is a MEAN over the panel's 4 conditions, which the original entry did
+not say, and the per-stratum spread it hides is the interesting part. Re-run and decomposed 2026-08-08:
 
 | panel | arm | ④ `O−F` | ⑧ `S−F` | ⑨ `O−S` | the share's portion |
 |---|---|---|---|---|---|
@@ -90,9 +98,15 @@ Re-run and decomposed 2026-08-08:**
 
 ⭐ **The recorded row reproduces** — my two-condition means run 0.83–0.93× of it, the residual being the
 `ss_0.99` arms I did not run. ⛔ **But "the share is 25–28 %" is an artefact of the averaging: per
-stratum it is 14.7 % … 42.6 %**, so the open residual is **57–85 %**, not a flat 72 %. And the stratum
+stratum it is 14.7 % … 42.6 %**, so the open residual read **57–85 %**, not a flat 72 %. And the stratum
 where the share matters MOST (`flgap_long` capture OFF, 42.6 %) is *not* the one carrying the most error
 (`flgap_long` capture ON, `O−F` 0.0403) — a single panel row cannot express that and should not be quoted.
+
+⛔⛔ **AND THE WHOLE OPEN RESIDUAL WAS THE REFERENCE.** Against `Fo` the same four conditions give the
+share **82–99 %** and leave 67–9,653 fragments. The averaging critique above was right and too small: the
+number being averaged was also wrong. ⚠ Note what did NOT save it — the spread was decomposed, the drain
+was priced, the admissibility was stated, and none of that can detect a reference that measures a
+different population (`TRAPS: score-the-consumers-own-count`).
 
 ⭐⭐ **THE DRAIN DOES NOT MOVE ANY OF IT.** Re-run with both sides drained through the shipped route,
 every arm shifts by **≤ 0.0003** in `rel` and the share portion by **≤ 0.7 pp**. So the ranking survives
@@ -100,7 +114,8 @@ the caveat that broke the FL measurement — ⚠ which was worth checking precis
 predictable from the FL result: there the drain was worth +4.5 bp.
 
 ⚠ **Admissibility, stated not assumed.** Sum-to-full is EXACT on every drained partition. The gDNA
-spliced leak is **1** record on `flgap_short` against **1,010 / 5,827** on `flgap_long`, so flgap_short is
+spliced leak is **1** record on `flgap_short` against **1,491 / 8,641** on `flgap_long` (⚠ re-measured
+2026-08-08; the "1,010 / 5,827" this line used to carry does not reproduce — §5 item 8), so flgap_short is
 the admissible panel and flgap_long's drained arm carries real contamination — it agrees to 3 decimals
 anyway, which is why the conclusion holds on both.
 
@@ -126,42 +141,46 @@ realised gDNA/RNA length gap is +1.5–2.1 % and it is structurally blind to thi
 
 ---
 
-### 1 · ⛔⛔ FIX THE YARDSTICK — nothing downstream is interpretable until this lands
+### 1 · ✅ DONE 2026-08-08 — THE YARDSTICK WAS THE RESIDUAL
 
-**`prior_vs_oracle`'s `F` arm counts a gDNA fragment in whichever locus holds its FIRST BASE.** The EM
-counts every fragment that is a *candidate* — any overlap — once, in the one multi-locus it belongs to
-(`DESIGN.md` §3.1b). So `F` drops exactly the fragments that overlap a locus but start outside it, and
-`O−F` / `S−F` measure against a target the EM does not use.
+**The hypothesis held.** A straddling fragment deposits its conserved mass on lines that all touch the
+locus's nodes, so `S` gives it essentially exactly 1.0 and the assembler was already right.
 
-⭐ **The hypothesis to test, and it is cheap**: a straddling fragment deposits its conserved mass on
-lines that all touch the locus's nodes, so `S` may already give it **exactly 1.0** — in which case the
-assembler is correct and *the "72 % residual" does not exist*. ⚠ Not asserted; measured.
+`Fo` = every EM unit of a multi-locus (`MultiLocus.unit_indices`) labelled with its fragment's true
+origin, joined on the scanner's `frag_id`.
 
-* Build `F_overlap`: each gDNA fragment counted once in the multi-locus whose objects it touches.
-  ⛔ The owner's ruling that overlapping loci MERGE settles ambiguity *between* loci; it does not
-  supply the start-base-vs-overlap correction, which is what this is.
-* Re-score `O` and `S` against it on all four flgap conditions, drained.
-* ⛔ Correct `prior_vs_oracle.py`'s docstring, which still asserts `F` is exact truth for the gDNA arm.
+⛔ **THE NUMBERS ARE NOT REPEATED HERE.** They have permanent homes and a second copy is how this
+directory went wrong before: the 36-condition ladder is `ROADMAP.md` §1.1 ④/⑧/⑫, the flgap pair drained
+is `EQUATIONS.md` §3b, the lesson is `TRAPS: score-the-consumers-own-count`, and the live table is
+`python scripts/design/prior_yardstick.py` (~10 s off the cache). What belongs here is only the
+SEQUENCING consequence:
 
-**Done when**: the assembler's residual is a number measured against the EM's own semantics — or is
-demonstrated to be zero.
+⭐ **Step 4 below is CLOSED as a question and is now the entire remaining assembler task** — the pooled
+share is 82–99 % of what is left, and what survives it is 67–9,653 fragments in 2.4–4.9 M.
+⭐ **The RNA arm gained an exact target too**, so the "spliced-inclusive upper bound" that was said to
+need a five-way BAM split is gone; a scored unit already carries `is_spliced`.
+⚠ Read ratios, not absolutes: `flgap_long`'s drained gDNA partition leaks 8,641 spliced records against
+`flgap_short`'s 1, so `short` is the verdict and `long` the cross-check.
+
+⛔ Landed with it: `_oracle.check_walk_alignment` (the join's hard gate is a count identity against the
+scanner's own `stats.total`/`n_read_names`), 9 new gates with 10/10 perturbations, and two cache defects
+fixed — see §5 item 7.
 
 ---
 
-### 2 · ⭐⭐ GO AT CALIBRATION, NOT THE ASSEMBLER — this is where 95 % of the error is
+### 2 · ⭐⭐ GO AT CALIBRATION, NOT THE ASSEMBLER — this is where ~99 % of the error is
 
-Measured 2026-08-08 on the flgap pair, gDNA arm, `rel`:
+Re-measured 2026-08-08 against `Fo`, DRAINED, gDNA arm, `rel`:
 
-| | `S−F` | `O−F` | **`P−F`** |
+| | `S−Fo` | `O−Fo` | **`P−Fo`** |
 |---|---|---|---|
-| long / capture ON | 0.0302 | 0.0406 | **0.8154** |
-| short / capture ON | 0.0058 | 0.0081 | **0.9656** |
-| long / capture OFF | 0.0084 | 0.0146 | 0.0272 |
-| short / capture OFF | 0.0035 | 0.0041 | 0.0325 |
+| long / capture ON | 0.0020 | 0.0111 | **0.8108** |
+| short / capture ON | 4.3e-5 | 0.0037 | **0.9651** |
+| long / capture OFF | 2.9e-4 | 0.0061 | 0.0284 |
+| short / capture OFF | 2.8e-5 | 8.8e-4 | 0.0340 |
 
-⭐⭐ **Under capture, `P−F` is 20–100× `O−F`.** Every prior-assembly change this campaign made — the
-conserved count and the edge-ownership restore — moved the smaller term. ⚠ The `S`/`O`/`F` columns
-inherit step 1's caveat; **`P−O` does not**, and it is the one that matters here.
+⭐⭐ **Under capture, `P−Fo` is 73–260× `O−Fo`.** The yardstick correction made that ratio LARGER, not
+smaller: every prior-assembly change this campaign made moved a term that is now under 1 % of the total.
 
 ⭐ **First arm, and it is one config flag**: `message_propagation = True`. It is OFF as a study
 configuration, and `CLAUDE.md` records the price as **+154.8 % on unstranded × capture-ON** — which is
@@ -181,10 +200,12 @@ not attack it by editing `gdna_opportunity`; that divisor is measurably exact wh
 
 ---
 
-### 4 · THE PER-COMPONENT SHARE — the other length bias
+### 4 · ⭐ THE PER-COMPONENT SHARE — now the WHOLE of the assembler's remaining error
 
-One `q` for two components tilts the g:r split. `O−S` measures it at **0.0009–0.0102**, i.e.
-**14.7 %–42.6 %** of the assembler's residual depending on stratum (§2).
+One `q` for two components tilts the g:r split. `O−S` measures it at **8.7e-4 – 0.0102**, which against
+the corrected yardstick is **82 %–99 %** of the assembler's residual — not the 15–43 % the old scoring
+suggested (step 1). ⛔ There is no second mechanism to look for: what is left after it is 67–9,653
+fragments out of 2.4–4.9 M.
 
 ⛔ **It must act PER LINE, inside `assemble_priors`' crossing term, before the contained term is added.**
 `EQUATIONS.md` §3b: the cancellation is exact per line and dissolves at locus granularity, so a
@@ -220,12 +241,12 @@ consumer may now exist. Record it as a reversal with its reason, not as a mistak
 
 ## 5. OPEN — do not treat these as settled
 
-1. ⛔ **The ladder's `O−S` is 0.0037, larger than flgap_short's 0.0027 at a 20× smaller gap.**
-   ⚠ **And every `O−F`/`S−F` figure in this doc now also inherits §3 step 1's yardstick caveat.** Partly
-   explained (realised gap +1.5–2.1 %, and `share_c` is a censored functional sensitive to *shape*), but
-   the ordering is not. **Do not quote the absolute `O−S` values until it is.** The ratios between
-   panels are the trustworthy part. ⭐ The arm itself was checked and is sound: at the 11,341 lines where
-   gDNA never crossed, its truth mass is exactly 0, so the `1.0` share default is inert on that arm.
+1. ⛔ **The ladder's `O−S` is 0.0037, larger than flgap_short's 0.0036 (drained) at a 20× smaller gap.**
+   ⚠ The yardstick caveat is GONE — `O−S` never depended on it, both sides being assembler arms — so this
+   ordering is now the live puzzle rather than a possibly-artefactual one. Partly explained (realised gap
+   +1.5–2.1 %, and `share_c` is a censored functional sensitive to *shape*), but the ordering is not.
+   ⭐ The arm itself was checked and is sound: at the 11,341 lines where gDNA never crossed, its truth
+   mass is exactly 0, so the `1.0` share default is inert on that arm.
 2. ⚠ **The flgap panels vary the standard deviation as well as the mean** (1.2× and 2.0×). Every
    analysis so far is mean-only, and `share_c` is variance-sensitive even at equal means. The "±40 %
    gap" shorthand is not what the panels test.
@@ -234,8 +255,11 @@ consumer may now exist. Record it as a reversal with its reason, not as a mistak
    off capture** and it removed ~90 % of what had been attributed to the junction opportunity (§3 step 2).
    The gDNA side moved **≤ 0.1 bp**. ⛔ **So the caveat is NOT uniformly small and must not be waived by
    its old bound**: it is large and RNA-only. ⚠ Every *other* FL and share measurement in this campaign
-   is still undrained, including the phase-0 `O−F` / `S−F` decomposition — **re-run the ones that carry a
-   decision before quoting them again.**
+   is still undrained. ✅ The prior-assembly decomposition is no longer among them: `prior_yardstick.py`
+   runs every arm on the drained partitions and prints both, and the drain moves the gDNA arm by ≤ 0.0002
+   in `rel` — but it moves `S−Fo` on `flgap_long/ON` from 0.0037 to **0.0020**, a 1.8× change on the very
+   number that decides whether the share is the whole residual. ⛔ So "the drain does not move it" is
+   true of the totals and false of the smallest term; quote the drained column.
 4. ✅ **RESOLVED 2026-08-08, in the negative.** A junction inside an unsequenced mate gap is **HELD in the
    side buffer, not silently filed as contiguous** — that is what the deferred bank is for, and draining
    deposits it. The RNA pool's long-tail deficit that looked like this (per-bin `fit/true` 0.907 across
@@ -248,6 +272,30 @@ consumer may now exist. Record it as a reversal with its reason, not as a mistak
    rule's numerator — now discarded explicitly, with the reason), and the docstring taught a
    **Laplace-smoothed `(2G+1)/span` IPR that is not in the code** — the mechanism is `min(m/ρ_ref, S)`
    per object plus the `w = C/(C+1)` contained-evidence shrinkage.
+6. ⛔⛔ **NEW, NEEDS AN OWNER CALL, AND IT IS LARGER THAN EVERYTHING ELSE IN THIS DOC.** The EM forms
+   `R = n_rna + a_r` with `n_rna = unambig_totals + em_totals`, so it counts SPLICED RNA; `assemble_priors`
+   withholds spliced mass from `a_r` on the argument that certified RNA has no gDNA competitor. Both are
+   defensible alone and together they put `(a_g, a_r)` on a different population than `(n_gdna, n_rna)`:
+   measured `phi* = a_g/(a_g+a_r)` runs **+0.071 … +0.100** above the truth over the unit axis, with
+   PERFECT masses in, on all four flgap conditions. ⚠ A LOWER bound — the deterministic spliced-unambig
+   fragments are in `n_rna` and are not on the unit axis at all.
+   ⭐ **The question for the owner is which of the two is the intended semantics**, because it is a
+   modelling call: is `a_r` a fragment COUNT commensurate with `n_rna` (then it must include spliced RNA),
+   or a STRENGTH reflecting how much independent evidence calibration has (then it is right and the EM's
+   aggregation is what needs re-deriving)? `prior_vs_oracle.py` table ⑫, `prior_yardstick.py` table ④.
+7. ✅ **TWO CACHE DEFECTS, FIXED 2026-08-08 — and neither would ever have announced itself.** The study
+   cache stored `p_arm` and the projected `f_gdna`, both produced by `priors.py`, which is *deliberately*
+   outside its key: an assembler edit served a fresh O beside a stale P and F. And `_oracle.py`,
+   `prior_vs_oracle.py` and the builder itself were not in the key at all, so a change to the truth
+   masses, the shares or the walk left every blob reading `ok`. ⛔ The blob now stores INPUTS
+   (`cal`, `multi_loci`, `override`, `shares`, raw per-region `starts`) and every arm is derived on load,
+   with a build-time byte-identity gate proving the derivation reproduces production's own call.
+   `TRAPS: a-hash-that-misses-its-artifact`, second form.
+8. ⚠ **The recorded `gdna_spliced_leak` range does not reproduce.** This doc and `CLAUDE.md` say
+   "1,010–5,827 on flgap_long"; two independent rebuilds measure **8,641** (capture ON) and **1,491**
+   (OFF), byte-stable across both (`second_pass_seed = 0`, so the drain is deterministic). flgap_short is
+   **1** either way, so no conclusion moves — but the old range was quoted as an admissibility bound and
+   should be re-derived or dropped rather than carried.
 
 ---
 

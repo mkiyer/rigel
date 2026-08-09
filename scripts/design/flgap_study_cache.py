@@ -3,8 +3,10 @@
 
 Everything downstream of the BAM that a prior arm needs, cached: the scored ``multi_loci``, the
 calibration, the DRAINED payloads and their lifted origin partitions, the oracle's truth masses and
-per-component shares, and the F arm. Building costs ~5 min per condition (two scans + a calibration +
-a drain); loading costs ~1 s.
+per-component shares, the F arm, and ⭐ the per-unit ``(true origin, is_spliced)`` pair the **Fo** arm
+joins on — for BOTH the undrained and the drained scoring stage, because a drain changes the
+calibration and therefore the candidate sets. Building costs ~5 min per condition (two scans + a
+calibration + a drain + a ~30 s read-name walk); loading costs ~1 s.
 
 ⭐ **This is what makes the post-calibration work cheap.** The interrogation that found the
 edge-attribution defect ran a dozen questions against this cache; each would have been a five-minute
@@ -12,10 +14,17 @@ scan otherwise. ⛔ ``priors.py`` is deliberately **excluded from the cache key*
 assembler does NOT invalidate a scan — testing a change to ``assemble_priors`` is a one-second loop.
 
 ⛔ **KEYED, because a silently stale cache here would poison every number read off it.** The key is
-the scan cache's own manifest PLUS a content hash of every source file that produces these artifacts
-(``src/rigel/calibration/**`` except ``priors.py``, plus ``scan_payload`` / ``second_pass`` /
-``pipeline`` / ``locus``). A mismatch REBUILDS; it never warns and proceeds. Same contract as
+the scan cache's own manifest PLUS a content hash of every source file that produces these artifacts —
+see ``_KEYED_SOURCES``. A mismatch REBUILDS; it never warns and proceeds. Same contract as
 ``read_scan_cache``, whose refusal is what taught this repo that ``reach`` is covered by no other hash.
+
+⭐⭐ **``priors.py`` STAYS OUT OF THE KEY, AND THAT ONLY WORKS IF NOTHING PRODUCED BY IT IS STORED.**
+The blob therefore holds ``(cal, multi_loci, override, shares)`` and the raw per-region ``start_*``
+counts, and every ARM — P, O, S, F — is assembled at read time from those. ⛔ It used to store the
+assembled ``p_arm`` and the projected ``f_gdna``: both come out of ``priors.py``, so an assembler edit
+served a fresh O beside a stale P and F and the comparison between them was meaningless. That is
+``TRAPS: a-guard-outlives-its-divisor``'s shape — the exclusion was justified by "the arms are rebuilt
+on load" and then artifacts stopped being rebuilt on load.
 
 ⚠ **The drained arm is admissible on flgap_short and marginal on flgap_long.** Sum-to-full is exact on
 every drained partition, but the gDNA partition's spliced leak — gDNA cannot splice — is **1** record on
@@ -71,17 +80,35 @@ CONDITIONS = [
 ]
 
 #: Source files whose output is stored here. ⛔ ``priors.py`` is deliberately ABSENT — the arms are
-#: rebuilt on load so that editing the assembler does not invalidate a 5-minute scan.
+#: rebuilt on load so that editing the assembler does not invalidate a 5-minute scan, which is only
+#: sound because nothing ``priors.py`` produces is stored (see the module docstring).
+#: ⚠ ``_oracle.py`` and ``prior_vs_oracle.py`` were missing until 2026-08-08, so the truth masses, the
+#: shares and the per-unit origin — all of them produced there — could go stale with the key still
+#: reading "ok". They are hashed WHOLE rather than per-function: over-triggering costs a rebuild,
+#: under-triggering costs a wrong number. ⭐ If that loop ever becomes painful, move the four producing
+#: functions into their own small module and key that, rather than narrowing this list.
 _KEYED_SOURCES = (
     "src/rigel/scan_payload.py",
     "src/rigel/second_pass.py",
     "src/rigel/pipeline.py",
     "src/rigel/locus.py",
+    "src/rigel/scan.py",
+    "src/rigel/sim/read_name.py",
+    "tests/calibration/_oracle.py",
+    "scripts/design/prior_vs_oracle.py",
 )
 
 
 def _source_key() -> str:
     h = hashlib.blake2b(digest_size=8)
+    # ⛔⛔ THIS FILE IS PART OF ITS OWN KEY. What the blob CONTAINS is decided here, so a build that
+    # starts storing a new artifact must invalidate the blobs that lack it — otherwise `load` returns
+    # an old dict and the caller gets a KeyError, or worse, silently skips an arm. Landing
+    # ``unit_origin`` (2026-08-08) is exactly that case: the calibration sources were untouched and
+    # every stale blob still verified "ok".
+    # ⚠ The price is that editing a comment here costs a ~20-minute rebuild. Accepted: this file is
+    # small and rarely edited, and the failure it prevents is silent.
+    h.update(Path(__file__).read_bytes())
     for rel in _KEYED_SOURCES:
         h.update((_REPO / rel).read_bytes())
     for f in sorted((_REPO / "src" / "rigel" / "calibration").rglob("*.py")):
@@ -95,10 +122,39 @@ def _key(panel: str, cond: str) -> dict:
     return {"source": _source_key(), "scan": json.loads(manifest.read_text())}
 
 
+def _start_counts(oracle, origins) -> dict:
+    """``{"gdna", "rna"}`` per-region first-base counts — the RAW input to ``F``'s projection."""
+    starts = {k: np.asarray(oracle.parts[k].node_start_count, np.float64) for k in origins}
+    return {"gdna": starts["gdna"], "rna": starts["mrna"] + starts["nrna"]}
+
+
+def _gate_p_is_recomputable(priors_mod, fields, p_arm, cal, ra, ml) -> None:
+    """⛔ The blob stores no ``P``, so a reader rebuilds it as ``assemble_priors(cal, ra, ml)``. That is
+    only a legitimate substitution if it reproduces the call PRODUCTION made, byte for byte — which is
+    what this asserts at build time, once, on the real objects.
+
+    ⭐ Without it, dropping ``p_arm`` from the blob would be an unproven claim that the shipped prior is
+    a pure function of the three things that ARE stored (TRAPS: byte-identity-gate)."""
+    rebuilt = priors_mod.assemble_priors(cal, ra, ml)
+    bad = [f for f in fields if not np.array_equal(getattr(rebuilt, f), getattr(p_arm, f))]
+    if bad:
+        raise AssertionError(
+            f"assemble_priors(cal, ra, ml) does not reproduce the prior quant_from_buffer built: "
+            f"{bad}. P cannot be rebuilt from the cache and must be stored again."
+        )
+
+
 def build(panel: str, cond: str) -> dict:
     """Scan, calibrate, score, drain and lift — everything an arm needs, undrained AND drained."""
-    from _oracle import OracleTruth
-    from prior_vs_oracle import _calibrate_and_prior, _oracle_parts, fragment_truth
+    from _oracle import ORIGINS as _OR, OracleTruth, check_walk_alignment, frag_id_origins
+    from prior_vs_oracle import (
+        PRIOR_FIELDS,
+        _calibrate_and_prior,
+        _oracle_parts,
+        unit_origins,
+    )
+
+    import rigel.calibration.priors as PRIORS
 
     from rigel.calibration.region_arrays import RegionArrays
     from rigel.config import PipelineConfig
@@ -118,18 +174,32 @@ def build(panel: str, cond: str) -> dict:
             bam, index, scan, cfg, work, cond, RUNS / "suite" / panel / "oracle_cache"
         )
         oracle = OracleTruth.from_parts(payload, parts)  # sum-to-full, HARD gate
-        cal, _fl, ml, p_arm = _calibrate_and_prior(payload, sm, buf, stats, index, ra, cfg)
+        # ⭐ The frag_id -> true-origin key, walked ONCE: it is a property of the BAM alone, so the
+        # undrained and drained arms share it (the drain moves deposits, never a read name).
+        frag_origin, walk = frag_id_origins(bam, scan)
+        check_walk_alignment(walk, stats)
+        cal, _fl, ml, p_arm, units = _calibrate_and_prior(payload, sm, buf, stats, index, ra, cfg)
+        _gate_p_is_recomputable(PRIORS, PRIOR_FIELDS, p_arm, cal, ra, ml)
         out = {
             "panel": panel,
             "cond": cond,
             "cal": cal,
             "multi_loci": ml,
-            "p_arm": p_arm,
             "override": oracle.override_masses(ra),
             "shares": oracle.component_shares(),
+            # ⭐ RAW per-region start counts, not the projected F — the projection lives in priors.py,
+            # which is outside the key, so it must run at read time. See the module docstring.
+            "starts": _start_counts(oracle, _OR),
             "n_held": int(payload.deferred.n_fragments),
+            # ⭐ The Fo arm's inputs, PRE-JOINED to keep the blob small: int8 + bool per unit rather
+            # than an int64 frag_id per unit plus the whole 10 M-entry walk. ⛔ ``walk`` itself is
+            # carried because its per-origin totals are the denominators for "how many fragments of
+            # this origin never became an EM candidate at all", which ``overlap_truth`` reports.
+            "walk": walk,
+            "unit_origin": unit_origins(units["frag_ids"], frag_origin),
+            "unit_is_spliced": np.asarray(units["is_spliced"], bool),
+            "n_units": int(units["n_units"]),
         }
-        out["f_gdna"], out["f_rna_upper"], out["f_dropped"] = fragment_truth(oracle, ra, ml)
 
         if out["n_held"]:
             lift: dict = {}
@@ -161,19 +231,27 @@ def build(panel: str, cond: str) -> dict:
             # ⚠ A SECOND SCAN, and it buys one thing: a fresh fragment BUFFER. The first was consumed
             # by scoring, and a buffer is not re-scannable; the payload is cacheable and the buffer is not.
             s2, sm2, buf2, _p2 = scan_and_buffer(bam, index, scan)
-            cal_d, _fld, ml_d, p_d = _calibrate_and_prior(payload_d, sm2, buf2, s2, index, ra, cfg)
+            cal_d, _fld, ml_d, p_d, units_d = _calibrate_and_prior(
+                payload_d, sm2, buf2, s2, index, ra, cfg
+            )
             out.update(
                 {
                     "cal_d": cal_d,
                     "multi_loci_d": ml_d,
-                    "p_arm_d": p_d,
                     "override_d": oracle_d.override_masses(ra),
                     "shares_d": oracle_d.component_shares(),
                     "lift_ambiguous": int(n_amb),
                     "gdna_spliced_leak": int(leak),
+                    # ⚠ The DRAINED run scores its own fragments — the drain changes the calibration,
+                    # hence the FL models, hence the candidate sets — so it gets its own unit arrays.
+                    # The origin key is shared: a drain moves deposits, never a read name.
+                    "unit_origin_d": unit_origins(units_d["frag_ids"], frag_origin),
+                    "unit_is_spliced_d": np.asarray(units_d["is_spliced"], bool),
+                    "n_units_d": int(units_d["n_units"]),
+                    "starts_d": _start_counts(oracle_d, _OR),
                 }
             )
-            out["f_gdna_d"], out["f_rna_upper_d"], _ = fragment_truth(oracle_d, ra, ml_d)
+            _gate_p_is_recomputable(PRIORS, PRIOR_FIELDS, p_d, cal_d, ra, ml_d)
     return out
 
 

@@ -413,6 +413,7 @@ length, so the simulator draws the length marginal proportional to the capture-w
 | counts are **Poisson by construction** — a multinomial at fixed abundance, measured ω < 5e-5 | nothing dispersion-dependent validates here. Real junction overdispersion is ≤ 0.02–0.03 |
 | only **R1-antisense** libraries | `strand_specificity` is a swap probability about a *fixed* orientation, never a choice of orientation, so no condition exercises the R1-sense (KAPA-style) branch. Real cfRNA is dUTP, so this is not urgent |
 | the tool's **gDNA reach** assumption is untested | `node_geometry` says gDNA's template is the chromosome, so `taper_g = 1`. True for 50 Mb, false for a 273 bp contig. Latent: it goes live only when a short reference has two nodes, and gDNA is no longer simulated on the spike-ins at all |
+| ⭐ each **population is written as one contiguous BLOCK** of read names, not interleaved | measured 2026-08-08: a 10 M-fragment condition has **15** origin transitions in BAM order. So any per-fragment truth JOIN that is checked by "does an impossible label appear?" is nearly blind — a one-fragment slip in the `frag_id` key mislabels ~15 fragments in the whole file and need not produce a single impossible one. ⛔ Gate such a join on a COUNT IDENTITY against the scanner's own `stats.total` / `stats.n_read_names` (`_oracle.check_walk_alignment`) and keep the impossible-label check as a secondary that catches a gross slip. `tests/calibration/test_prior_vs_oracle.py` pins both halves, including that the small slip is invisible |
 
 ---
 

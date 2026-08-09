@@ -36,7 +36,8 @@ here that reads like a status report is a bug in this file.
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **99 rules. Read the group that matches what you are about to do, then open only those.** Cite one
+⭐ **102 rules, and every one has exactly one body — checked, because the header said 99 while the file
+held 101. Read the group that matches what you are about to do, then open only those.** Cite one
 as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.py` keeps it that way.
 
 **Validation and gates**
@@ -95,6 +96,7 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `a-support-ceiling-is-the-clamp` — A SUPPORT CEILING THAT MATCHES THE CLAMP IS NOT A MATCH — it is the clamp.
 - `log-variance-is-not-linear` — Every "is the declared precision earned?" number written before 2026-07-28 compared a LOG-space
 - `re-record-the-baseline` — A delta is only attributable if its baseline came from the same tree in the same session.
+- `score-the-consumers-own-count` — TRUTH IS NOT A YARDSTICK UNTIL YOU NAME THE CONSUMER — a truth nothing reads measures your choice of target.
 
 **Pools, selections and divisors**
 
@@ -133,6 +135,7 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `strand-completes-the-edge-key` — (src, kind, dst) is not a total order for junction edges — two strand-coincident junctions diffe
 - `a-hash-that-misses-its-artifact` — Cache keys that do not cover the artifact they cache.
   ⚠ 2026-08-08: the payload digest hashed field NAMES, so collapsing a bank from `[n,2]` to `[n]` did not move it — and the cache-load path validates no shapes. It now hashes `name:columns`.
+  ⚠ 2026-08-08, second form: an EXCLUSION from a key is a claim about what is stored, and the study cache stored two arrays the excluded file produced.
 - `integer-channels-reproduce` — Integer channels are bit-identical across worker counts; float channels are not.
 - `worktrees-run-the-wrong-code` — Worktrees silently run the wrong code — an editable install's meta-path finder beats
 - `checkout-deletes-uncommitted-work` — git checkout -- <file> does not undo a perturbation when the work is uncommitted — it deletes th
@@ -646,6 +649,36 @@ overconfidence figure from before that date is void, not merely imprecise.
 **re-record-the-baseline. A delta is only attributable if its baseline came from the same tree in the same session.** Re-record
 the before-picture, do not quote a stored one.
 
+**score-the-consumers-own-count. ⛔⛔ TRUTH IS NOT A YARDSTICK UNTIL YOU NAME THE CONSUMER — A TRUTH
+NOTHING READS MEASURES YOUR CHOICE OF TARGET, AND IT WILL DO IT IN THE RIGHT UNITS.** Found and fixed
+2026-08-08. `prior_vs_oracle.py`'s `F` arm was the per-locus count of gDNA fragments whose FIRST BASE
+lands in the locus, taken from `node_start_count` — the accumulator's one exact invariant, one deposit
+per accepted fragment, projected through the shipped projection. Impeccable provenance, in fragments,
+and its docstring called it "EXACT on the gDNA arm ... with nothing to subtract".
+
+⛔ **The EM counts something else.** `n_gdna` in `apply_grouped_prior_update` is the soft count over the
+multi-locus's own EM UNITS, and a fragment becomes one by being a scored CANDIDATE — which a fragment
+that starts in the intergenic flank and reaches into the locus is. `F` drops exactly that straddling
+population: **0.35 %–3.35 %** of the total, per condition.
+
+⭐⭐ **And the consequence was not a 3 % error in a number, it was a phantom research programme.** Scored
+against `F`, the prior assembler's residual with perfect masses AND perfect per-component shares read
+`rel` **0.0035–0.0302**, of which the shares explained only 15–43 % — so ~72 % was recorded as an open
+residual with two candidate mechanisms and a place in the ranked plan. Re-scored against the EM's own
+count it is **2.8e-5 … 2.0e-3**, the shares explain **82–99 %**, and *there is no residual to explain*.
+**The 72 % was the yardstick.**
+
+⛔ **The tell, and it is available before any measurement: write down which line of the consumer reads
+the number.** If that line's population is a different set than the truth arm's population, the arm is
+measuring the difference between the two sets and calling it error. Here the consumer was one C++
+function and the answer took one grep. ⚠ Provenance is not the check — `F` had the best provenance
+available and was still the wrong quantity; "exact" was a claim about the *bank*, not about the *target*.
+
+⭐ **The repair generalises: take the target from the consumer's own bookkeeping.** `Fo` is
+`MultiLocus.unit_indices` — the array `locus_partition` scatters by — labelled with each fragment's true
+origin, so the locus assignment is the EM's own and nothing is re-derived. ⛔ Check it is not circular:
+`assemble_priors` never reads a unit count, and that is gated behaviourally, not by grep.
+
 ---
 
 ## C. Pools, selections and divisors
@@ -900,6 +933,26 @@ GENCODE has zero of them, so only a synthetic stress test finds it. Sort on `(sr
 **a-hash-that-misses-its-artifact. Cache keys that do not cover the artifact they cache.** A partition hash covered only the node file;
 a flag fix rewrote every edge file while leaving every node file byte-identical, so a stale cache would
 verify CLEAN. **Never store a derived hash beside the data it describes; compute it on demand.**
+
+⚠ **A SECOND FORM, and it is the one you build deliberately: AN EXCLUSION FROM A KEY IS A CLAIM ABOUT
+WHAT IS STORED.** Measured 2026-08-08 on `scripts/design/flgap_study_cache.py`, whose docstring says
+`priors.py` is *deliberately* outside the key "so that editing the assembler does not invalidate a
+5-minute scan" — a genuinely good decision that is sound only while nothing `priors.py` produces is in
+the blob. Two things were: the assembled `p_arm` and the projected `f_gdna`. So an assembler edit served
+a **fresh O beside a stale P and F**, and the comparison between them — the whole point of the cache —
+was meaningless, with the key still reading `ok`.
+
+⭐ **The repair is not a better key, it is to store the INPUTS and derive at read time.** The blob now
+holds `cal`, `multi_loci`, the truth masses/shares and the raw per-region start counts; P, O, S and F
+are all assembled on load, so they are always the same assembler. ⛔ And the two files that *produce*
+the stored truth (`_oracle.py`, `prior_vs_oracle.py`) were missing from the key entirely, as was the
+builder itself — a build that starts storing a new artifact must invalidate the blobs that lack it.
+
+⛔ **The tell: read the key's exclusion list as a sentence.** "This file is excluded *because* nothing it
+makes is stored here" is checkable in one grep; "excluded because the loop is faster" is not a reason,
+it is the cost of one. ⚠ And a stored artifact that is a PURE FUNCTION of stored inputs should carry a
+build-time byte-identity gate proving the read-time derivation reproduces the production call
+(`_gate_p_is_recomputable`), otherwise dropping it from the blob is an unproven claim.
 
 **integer-channels-reproduce. Integer channels are bit-identical across worker counts; float channels are not.** Max relative
 3.7e-7 per cell, which propagated to a ~2.6 % difference in the calibration output. Integer addition is
