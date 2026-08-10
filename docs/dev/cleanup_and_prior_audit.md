@@ -224,6 +224,69 @@ false in premise (harmless in effect). Both have a wider blast radius than this 
 
 ---
 
+## 2b. ⭐⭐⭐ THE BANK LEDGER — what is live, what is dead, and what the mass is for
+
+**Two different things are called "mass" and only one of them is a bank.**
+
+* **`CalibrationResult.mass_*`** — `mass_gdna_node/edge`, `mass_rna_node/edge`, `mass_rna_spliced_edge`,
+  `edge_mass_per_crossing`. COMPUTED by calibration (`f_g × count`), consumed by `assemble_priors`.
+  ⭐ Untouched by the purge and verified byte-identical. These are the fraction→count conversion.
+* **`edge_unspliced_mass`** — the accumulator BANK, the conserved fragment mass, fixed point. ⭐⭐ **This
+  is the one that makes the conversion possible**: `q = mass/count` is what turns an object-INCIDENCE
+  total into a FRAGMENT count. ⛔ It must never be removed.
+
+| bank | bytes | consumer | verdict |
+|---|---|---|---|
+| `node_contained_count[2]` | 8 | geometry, strand model | ✅ LIVE |
+| `node_contained_inv_length_sum` | 8 | — | ⛔ **DEAD** |
+| `node_contained_length_sum` | 8 | — | ⛔ **DEAD** |
+| `edge_unspliced_count[2]` | 8 | geometry, strand model | ✅ LIVE |
+| `edge_spliced_count[2]` | 8 | `calibrate.py` → `mass_rna_spliced_edge` | ✅ LIVE |
+| `edge_unspliced_inv_length_sum` | 8 | `second_pass.py` genomic hypothesis | ✅ LIVE |
+| `edge_unspliced_length_sum` | 8 | — | ⛔ **DEAD** |
+| ⭐ `edge_unspliced_mass` | 8 | `mass_per_crossing` → `q` → `assemble_priors` | ✅ **LOAD-BEARING** |
+| ⚠ `edge_spliced_mass` | 8 | — | ⛔ **DEAD — but confirm intent, see below** |
+| `sj_count[2]` | 8 | geometry + aligner-artifact detection | ✅ LIVE |
+| `sj_inv_length_sum` | 8 | `second_pass.py` spliced hypothesis | ✅ LIVE |
+
+**Struct impact if the four dead banks go:** `Node` **24 → 8 B** (a 3× shrink — it becomes the two count
+columns and nothing else), `ContiguousEdge` **48 → 32 B**, `JunctionEdge` unchanged at 16 B. At human
+scale that is roughly a **40 % cut** in the accumulator's ~85 MB. ⚠ Re-measure rather than trust that
+arithmetic.
+
+### ⚠ `edge_spliced_mass` IS DEAD, AND THAT IS SUSPICIOUS RATHER THAN OBVIOUS — A DECISION FOR THE OWNER
+
+It was added deliberately, with a careful docstring calling it "a per-LINE certified-RNA term,
+commensurate with the unspliced mass at the same line". But `calibrate.py:619` builds
+`mass_rna_spliced_edge` from `substrate.edge_spliced.COUNT`, not from the mass. So the intent and the
+wiring disagree, and the question is which is right.
+
+⭐ **The current wiring is self-consistent and I believe correct.** `mass_rna_edge` is an INCIDENCE
+(`(1−f_g)·unspliced_count + spliced_count`); subtracting the spliced *count* leaves
+`(1−f_g)·unspliced_count`, which is then multiplied by `q` — and `q` is the UNSPLICED population's own
+`mass/count`. Right population, right units, at every step. The spliced mass is not needed because
+spliced crossings are removed *before* the conversion rather than converted.
+
+⛔ **So the decision is: was `edge_spliced_mass` built for a job that has since been done a better way
+(delete it), or is `calibrate.py:619` using the count where the mass was intended (wire it)?** The units
+argument above says the former, but the bank was not added by accident and the owner should confirm before
+8 bytes per edge are removed on my reading alone.
+
+## 2c. ⭐ THE REST OF THE LEDGER — everything still owed, ranked by cost
+
+| # | item | cost | risk | reversible |
+|---|---|---|---|---|
+| 1 | **Dead substrate surface**: `PopulationView.length_sum`, `.mean_length`, `.total_inv_length_sum` | minutes | none — no consumer in `src/` | trivially |
+| 2 | **Moment tests**: `contained_moments`/`crossing_moments`/`build_slot_moments` moved to `effective_length.py` WITHOUT their tests, which went with the deleted file | ~1 h | ⛔ untested geometry in a live layer-2 module — this is the highest-value item on the list | n/a |
+| 3 | **The four dead banks** (native + schema + reference spec) | ~2 h edit, **hours of re-scanning** | schema digest invalidates every cache | only by re-scanning |
+| 4 | **`mass_gdna_edge` units rename** — it is `f_g × unspliced COUNT` while `mass_gdna_node` is a per-fragment count; same prefix, different units | ~1 h | touches `result`, `priors`, `derive`, `track`, goldens | yes |
+| 5 | **`second_pass.py:443-445` comment** — measured false in premise, harmless in effect | minutes | none | yes |
+| 6 | **`module_census.py`** re-run; fix stale sibling references the purge created | minutes | none | yes |
+| 7 | **`UNDOCUMENTED_DEBT`** — 8 scripts on disk and unlisted, pre-dating this campaign | ~1 h | none | yes |
+
+⭐ **Do 1, 2, 5, 6 first — they are cheap, safe and reversible, and item 2 is a real gap.** Item 3 is the
+only one with a cost that needs a decision. Item 4 is worth doing but not urgent.
+
 ## 3. THE ORDER TO DO IT IN, AND THE GATE AT EACH STEP
 
 | step | gate |
