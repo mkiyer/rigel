@@ -246,3 +246,77 @@ cache-invalidation cost twice.
 ⛔ **If the fixed-point headroom cannot be cleared cheaply, delete all three and accept that the
 model-free node density costs a second invalidation later.** It is worth ~1 % and a diagnostic, not a
 re-scan of every panel on its own.
+
+
+---
+
+## 9. ⭐⭐⭐ THE IMPLEMENTATION PLAN — fix the node deposit to `1/A`
+
+Owner approved 2026-08-10. Two blockers were raised; **one dissolves and one is new and must land first.**
+
+### 9.0 THE TWO BLOCKERS
+
+**0a — fixed point. ✅ CLEARED BY ARITHMETIC, AND THE INTEGERS STAY.** The recorded worry was that `A` can
+be **1**, so the quantum can be `2³²`. Measured against the `uint64` ceiling of `1.845e19`:
+
+| scenario | sum | headroom |
+|---|---|---|
+| **every** one of 1e8 fragments on ONE object at `A = 1` | 4.295e17 | **42.9×** |
+| **every** one of 1e9 fragments on ONE object at `A = 1` | 4.295e18 | 4.3× |
+
+The first row is already physically impossible — 1e8 fragments spread over ~1.5 M nodes average ~67 each.
+⭐ **So the concern was right to be flagged and is resolved without changing anything.**
+
+⛔ **And the integers are NOT about precision, so "float is fine" would cost something real.**
+`_accumulator_reference.py:139`: *"integer addition is associative"* — which is what makes the tally
+**byte-identical across worker counts**. The scanner is multi-threaded. Going float would end the C++ ↔
+reference byte-identity gate (the executable specification's entire contract), `native_parity_on_real_data.py`,
+and reproducibility across `-t`. Since 0a is cleared by arithmetic, none of that has to be paid.
+⚠ Recorded for the owner to overrule if they still want float; the recommendation is not to.
+
+**0b — ⛔⛔ THE CACHE KEY DOES NOT COVER THE DEPOSIT RULE. THIS IS NEW, AND IT MUST LAND FIRST.**
+`payload_schema_digest()` hashes `AccumulatorPayload`'s field list and column counts — names and shapes,
+recursively. **A deposit-RULE change moves neither.** So `1/L → 1/A` would leave the key byte-identical
+and every cached payload would be silently accepted, serving OLD values to NEW code.
+
+⭐ That is `TRAPS: a-hash-that-misses-its-artifact`, in the key written to prevent it, for the **third**
+time (the reach digest; the `[n,2] → [n]` shape collapse; now the deposit rule).
+
+**The repair, and it must introduce no version number** (the project bans them): a **DEPOSIT-BEHAVIOUR
+DIGEST**. Run the accumulator over a fixed tiny synthetic partition and fragment set at key time, and hash
+the resulting banks. It is deterministic (integers), microseconds, needs no constant, changes **iff** the
+deposit changes, and covers every future rule change rather than this one.
+
+### 9.1 THE PHASES
+
+| # | phase | gate | needs a re-scan? |
+|---|---|---|---|
+| **1** | **The deposit-behaviour digest** — `deposit_digest()` into the cache key tuple | ⛔ perturb ANY deposit rule ⇒ the digest MOVES; perturb nothing ⇒ stable across runs AND worker counts. Existing caches must now be REJECTED — that is the point, not a regression | no |
+| **2** | **The executable specification leads** — `_accumulator_reference.py`'s node deposit becomes `1/(ell − w + 1)₊` | ⛔ **falsification first**: brute-force enumerate every placement in a node of length `ell` and assert `E[Σ1/A] = ρ` exactly for a non-degenerate pmf. **Verify it FAILS on the current `1/L` deposit before changing anything.** Then break the fixed code and watch it fire | no |
+| **3** | **The C++ matches** — `accumulator.cpp`, `accumulator.h`, rebuild | byte-identity to the reference across `tests/native/`; then `native_parity_on_real_data.py` on real cfRNA at full scale | no |
+| **4** | **Naming** — `node_contained_inv_length_sum` is no longer a function of length alone | pure rename, separate commit (`one-thing-varied`), `arm_identity.py` on every scored field | no |
+| **5** | **Re-scan the panels** — the schema key now rejects every cache | `simulator_gates.py`, `verify_toy_substrate.py` | ⛔ **yes — hours** |
+| **6** | **Wire the consumer** — `density_model.fit_node_density` reads the model-free density instead of `count/eff_gdna` | ⛔ `panel-before-src`: `ladder_arm_ab.py --jobs 8` must not be panel-negative. Plus the §7 gate extended to pure-gDNA NODES | needs 5 |
+
+⭐⭐ **Phases 1–4 need NO panel and NO re-scan** — they are gated entirely by the executable specification
+and brute-force enumeration. That is the whole value of the phase split: the risky, expensive part
+(phase 5) is separated from the part that can be proven correct offline.
+
+⛔ **Phases 1 and 2 must land TOGETHER or the caches lie.** Phase 1 alone invalidates every cache (correct
+but pointless); phase 2 alone leaves them silently stale. One commit, both changes.
+
+### 9.2 WHAT PHASE 6 IS AND IS NOT
+
+⛔ **Phase 6 is a separate decision and is NOT implied by phases 1–5.** Landing the bank makes the
+model-free node density *available*; consuming it changes production numbers and must be priced on the
+panel like any other mechanism. §8.2 says the correctness gain is ~1.1 % — real, but not obviously worth a
+panel-negative risk, and `TRAPS`'s record is that four toy-positive changes were panel-negative.
+
+⭐ **Phases 1–5 are worth doing on the diagnostic value alone**: the §7 oracle-free length-model gate
+extends from seam lines to every structurally pure-gDNA node, which is where the prior-free pass's anchor
+lives and is a far larger population.
+
+### 9.3 ROLLBACK
+
+Phases 1–4 are a code revert. Phase 5 is not — the caches are re-scanned and the old ones are gone. ⭐ So
+the decision point is **between phase 4 and phase 5**, and everything before it is free.
