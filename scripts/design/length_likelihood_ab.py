@@ -58,7 +58,34 @@ def _one_arm(inputs, on: bool):
     }
 
 
+def true_f_gdna(cond_dir: Path, index: TranscriptIndex) -> float:
+    """The condition's TRUE library ``f_gdna``, from the origin-split caches' ``node_start_count``.
+
+    ⭐ One deposit per accepted fragment, so this is a fragment COUNT and not a mass — the same source
+    ``prior_vs_oracle.measure_condition`` uses for its header row. ⛔ NaN when the origin caches are
+    absent rather than a guessed constant: the predecessor printed ``~.52`` for every contaminated
+    condition, which is not a truth and cannot be subtracted from.
+    """
+    tot = {}
+    for origin in ("gdna", "mrna", "nrna"):
+        d = cond_dir / origin
+        if not (d / "payload.npz").exists():
+            return float("nan")
+        p = read_scan_cache(d, index).payload
+        tot[origin] = float(np.asarray(p.node_start_count, np.float64).sum())
+    rna = tot["mrna"] + tot["nrna"]
+    return tot["gdna"] / (tot["gdna"] + rna) if (tot["gdna"] + rna) > 0 else float("nan")
+
+
 def ab_one(index: TranscriptIndex, cache_dir: Path) -> dict:
+    # ⭐ Two layouts: a flat cache root (``<cond>/payload.npz``) and the oracle-cache layout
+    # (``<cond>/_main/payload.npz`` beside the three origin partitions), which is what the flgap and
+    # ladder panels ship. The second one also carries the TRUTH, which is why it is worth supporting.
+    main = cache_dir / "_main"
+    truth = float("nan")
+    if (main / "payload.npz").exists():
+        truth = true_f_gdna(cache_dir, index)
+        cache_dir = main
     cache = read_scan_cache(cache_dir, index)
     inputs = calibration_inputs(cache, index)
     off, on = _one_arm(inputs, False), _one_arm(inputs, True)
@@ -71,7 +98,8 @@ def ab_one(index: TranscriptIndex, cache_dir: Path) -> dict:
         return float((d[mask] * w).sum() / w.sum()) if w.sum() > 0 else 0.0
 
     return {
-        "condition": cache_dir.name,
+        "condition": cache_dir.parent.name if cache_dir.name == "_main" else cache_dir.name,
+        "truth": truth,
         "off_fgdna": off["f_gdna"],
         "on_fgdna": on["f_gdna"],
         "off_noev": off["no_ev"],
@@ -90,23 +118,36 @@ def main() -> None:
     args = ap.parse_args()
 
     index = TranscriptIndex.load(str(args.index))
-    dirs = sorted(d for d in args.cache_root.iterdir() if (d / "payload.npz").exists())
+    dirs = sorted(
+        d for d in args.cache_root.iterdir()
+        if (d / "payload.npz").exists() or (d / "_main" / "payload.npz").exists()
+    )
     if args.conditions:
         dirs = [d for d in dirs if d.name in set(args.conditions)]
     rows = [ab_one(index, d) for d in dirs]
 
     print(
-        f"\n{'condition':46s} {'truth':>6s} {'OFF':>8s} {'ON':>8s} {'delta':>8s}   "
-        f"{'no-ev OFF':>9s} {'no-ev ON':>9s}"
+        f"\n{'condition':44s} {'truth':>6s} {'OFF':>8s} {'ON':>8s} {'delta':>8s} "
+        f"{'|err| OFF':>10s} {'|err| ON':>9s} {'verdict':>9s}  {'no-ev OFF':>9s} {'no-ev ON':>9s}"
     )
-    print("-" * 46 + " " + "-" * 60)
+    print("-" * 44 + " " + "-" * 78)
     for r in rows:
-        truth = 0.0 if "gdna_none" in r["condition"] else float("nan")
-        t = f"{truth:6.3f}" if truth == truth else "  ~.52"
+        truth = 0.0 if "gdna_none" in r["condition"] else r["truth"]
+        t = f"{truth:6.3f}" if truth == truth else "   nan"
+        eo = abs(r["off_fgdna"] - truth)
+        en = abs(r["on_fgdna"] - truth)
+        v = "—" if not (eo == eo) else ("✅ better" if en < eo else "⛔ worse")
         print(
-            f"{r['condition']:46s} {t} {r['off_fgdna']:8.4f} {r['on_fgdna']:8.4f} "
-            f"{r['on_fgdna'] - r['off_fgdna']:+8.4f}   {r['off_noev']:9.1%} {r['on_noev']:9.1%}"
+            f"{r['condition']:44s} {t} {r['off_fgdna']:8.4f} {r['on_fgdna']:8.4f} "
+            f"{r['on_fgdna'] - r['off_fgdna']:+8.4f} {eo:10.4f} {en:9.4f} {v:>9s}  "
+            f"{r['off_noev']:9.1%} {r['on_noev']:9.1%}"
         )
+    scored = [r for r in rows if r["truth"] == r["truth"]]
+    if scored:
+        eo = float(np.mean([abs(r["off_fgdna"] - r["truth"]) for r in scored]))
+        en = float(np.mean([abs(r["on_fgdna"] - r["truth"]) for r in scored]))
+        print(f"\n⭐ mean |f_gdna − truth| over {len(scored)} scored conditions: "
+              f"OFF {eo:.4f}  ->  ON {en:.4f}   ({100 * (en - eo) / max(eo, 1e-12):+.1f} %)")
 
     print(f"\n{'condition':46s} {'thin mass':>10s} {'|d f_g| N<=3':>13s} {'|d f_g| N>3':>12s}")
     print("-" * 46 + " " + "-" * 38)

@@ -105,10 +105,17 @@ def build(st: dict, ra, suffix: str) -> dict:
             "S_vs_F": score_arm(s.rna_prior_count, f_r),
             "O_vs_S": score_arm(o.rna_prior_count, s.rna_prior_count),
         },
+        # ⛔ The denominator is the UNSPLICED pool, never `rna_all`: spliced RNA has no gDNA
+        # competitor, so a prior that arbitrates that competition must not count it
+        # (`TRAPS: score-the-consumers-own-count`).
         "phi": {
-            "true": _phi(fo.gdna.sum(), fo.rna_all.sum()),
+            "true": _phi(fo.gdna.sum(), fo.rna_unspliced.sum()),
             "S": _phi(s.gdna_prior_count.sum(), s.rna_prior_count.sum()),
             "P": _phi(p.gdna_prior_count.sum(), p.rna_prior_count.sum()),
+            "strength": float(
+                (s.gdna_prior_count.sum() + s.rna_prior_count.sum())
+                / max(fo.gdna.sum() + fo.rna_unspliced.sum(), 1.0)
+            ),
         },
     }
 
@@ -239,21 +246,24 @@ def main() -> int:
         print(f"    {tag(panel, cond):<26} {label.split()[0]:<11} {o_err:>11,.0f} "
               f"{s_err:>11,.0f} {pct:>8.1f}% {s_err:>11,.0f}")
 
-    # ── ④ the composition claim vs the EM's own population ──
+    # ── ④ the composition claim, against the pool it describes ──
     print()
-    print("  ④ ⚠ THE PRIOR'S COMPOSITION CLAIM vs THE EM's OWN POPULATION — a FINDING, not a fix here")
-    print("     phi* = gDNA/(gDNA+RNA) over the UNIT axis. `true` counts every RNA unit; the prior's")
-    print("     a_r withholds the spliced ones, so a positive Δ is the prior tilting toward gDNA.")
-    print(f"    {'panel/condition':<26} {'arm':<11} {'phi* true':>10} {'phi* S':>9} {'Δ (S)':>9} "
-          f"{'phi* P':>9} {'Δ (P)':>9}")
-    print("    " + "-" * 90)
+    print("  ④ ⭐ THE COMPOSITION CLAIM, AGAINST THE UNSPLICED POOL — the population a_g:a_r describes")
+    print("     ⛔ A spliced unit never gets a gDNA candidate, so spliced RNA does not compete with gDNA")
+    print("     and must not enter this prior. phi = gDNA units / (gDNA + UNSPLICED RNA units).")
+    print(f"    {'panel/condition':<20} {'arm':<8} {'phi true':>9} {'phi S':>8} {'Δ (S)':>9} "
+          f"{'phi P':>8} {'Δ (P)':>9} {'strength':>9}")
+    print("    " + "-" * 88)
     for panel, cond, label, st, r in rows:
         ph = r["phi"]
-        print(f"    {tag(panel, cond):<26} {label.split()[0]:<11} {ph['true']:>10.4f} "
-              f"{ph['S']:>9.4f} {ph['S'] - ph['true']:>+9.4f} {ph['P']:>9.4f} "
-              f"{ph['P'] - ph['true']:>+9.4f}")
-    print("    ⚠ a LOWER bound on the tilt: the deterministic spliced-unambig fragments are in the EM's")
-    print("      n_rna via unambig_totals and are not on the unit axis at all.")
+        print(f"    {tag(panel, cond):<20} {label.split()[0]:<8} {ph['true']:>9.4f} "
+              f"{ph['S']:>8.4f} {ph['S'] - ph['true']:>+9.4f} {ph['P']:>8.4f} "
+              f"{ph['P'] - ph['true']:>+9.4f} {ph['strength']:>9.3f}")
+    print("    ⭐ Δ(S) is the assembler's own composition error with perfect masses in: ≤ 5e-4.")
+    print("    ⭐ `strength` = Σ(a_g+a_r) / the unspliced pool. ~1.000 BY CONSTRUCTION — the conserved")
+    print("       count IS that pool — so the posterior is a 50/50 blend of calibration and the EM's own")
+    print("       evidence, and there is no knob. Not a defect; a design fact nothing had priced.")
+    print("    ⚠ Δ(P) is CALIBRATION's error, and it is the real one: −0.48/−0.57 under capture.")
     return 0
 
 

@@ -157,6 +157,8 @@ Fixed-point headroom is ~800×: with `L ∈ [20,2000]` each `round(2³²/L) ≤ 
 ≤ 2.1e16 against a uint64 ceiling of 1.8e19. Memory is flat and small — ~85 MB at human scale (node 24 B,
 contiguous edge 48 B, junction edge 24 B), no hash map.
 
+⭐⭐ **AND ONE OF THEM IS ALREADY LOAD-BEARING IN A WAY WORTH STATING**: `edge_unspliced_inv_length_sum` is LIVE in `second_pass` (via `pipeline`), and being the one channel whose opportunity and deposit cancel identically — `E[inv_length_sum] = rho` exactly, at an edge, for ANY length distribution — that rho term is **the only provably fragment-length-gap-robust density estimator in the tree**. `EQUATIONS.md` §3c.
+
 ⭐ **Every channel is an integer, and that is what makes the tally reproducible across worker counts**
 (TRAPS: integer-channels-reproduce).
 
@@ -192,6 +194,35 @@ count of the gDNA fragments that are candidates in ONE multi-locus, each counted
 being a connected component of transcripts linked by shared fragments. ⛔ **A first-base count of a
 locus's fragments is therefore NOT this quantity**: it drops every fragment that overlaps the locus but
 starts outside it.
+
+### 3.1c ⭐⭐⭐ THE PRIOR ARBITRATES THE UNSPLICED POOL, AND ITS STRENGTH HAS NO KNOB
+
+**Owner ruling, 2026-08-09/10.** Two statements, both settled, both measured.
+
+> **A spliced fragment is pure RNA and never receives a gDNA candidate**
+> (`em_solver.cpp`: `has_gdna = !is_spliced && isfinite(gdna_ll)`), so it does not compete with gDNA and
+> **must not enter the pool-level prior**. An unspliced intergenic fragment has no transcript candidate
+> and never becomes an EM unit at all. What the prior arbitrates is exactly the unspliced fragments
+> inside transcript bounds.
+
+⛔ Putting spliced RNA into `a_r` would penalise gDNA with fragments it could never have won. ⭐ Measured:
+against the population it describes — gDNA units + UNSPLICED RNA units — the shipped claim
+`phi = a_g/(a_g+a_r)` is exact to **≤ 5e-4** on all four flgap conditions, drained and undrained. ⚠ An
+entry once reported a "+0.07…+0.10 tilt" here; it divided by ALL RNA units
+(`TRAPS: score-the-consumers-own-count`). The injection is population-matched too, by algebra:
+`n_rna = S_r + U_r`, so `R = n_rna + a_r = S_r + (U_r + a_r)` puts the pseudo-count on the unspliced RNA
+and leaves the spliced mass untouched; and `out[i] = raw[i]·(1 + a_r/n_rna)` is a UNIFORM scale, so it
+changes no transcript's share of RNA — which is exactly "calibration says nothing about which
+transcript".
+
+> **The prior's STRENGTH is exactly one pseudo-fragment per real unspliced fragment, by construction, and
+> there is deliberately NO knob** (owner, 2026-08-10: a strength parameter is another tunable and we are
+> not adding one).
+
+⭐ It follows from the conservation identity — `a_g + a_r` IS the locus's conserved unspliced count, which
+IS the pool — and is measured at **Σa/Σpool = 0.999–1.000**, mass-weighted median `w` 1.000, with 0–1 loci
+of ~1,300 above 2. So the MAP posterior is a 50/50 blend of calibration and the EM's own evidence.
+⚠ Consequence, recorded not acted on: where calibration is wrong by half a unit, half the answer is too.
 
 ### 3.2 One strand convention
 

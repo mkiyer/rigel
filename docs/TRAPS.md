@@ -36,7 +36,7 @@ here that reads like a status report is a bug in this file.
 
 ## THE INDEX — every rule in one line, so you can scan instead of read
 
-⭐ **102 rules, and every one has exactly one body — checked, because the header said 99 while the file
+⭐ **105 rules, and every one has exactly one body — checked, because the header said 99 while the file
 held 101. Read the group that matches what you are about to do, then open only those.** Cite one
 as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.py` keeps it that way.
 
@@ -97,6 +97,9 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `log-variance-is-not-linear` — Every "is the declared precision earned?" number written before 2026-07-28 compared a LOG-space
 - `re-record-the-baseline` — A delta is only attributable if its baseline came from the same tree in the same session.
 - `score-the-consumers-own-count` — TRUTH IS NOT A YARDSTICK UNTIL YOU NAME THE CONSUMER — a truth nothing reads measures your choice of target.
+- `a-truth-table-of-aggregates` — A TRUTH TABLE'S LABEL COLUMN MAY HOLD NESTED AGGREGATES, AND SUMMING IT DOUBLE-COUNTS.
+- `a-moment-match-is-not-sufficient` — MATCHING THE MODEL'S MOMENTS TO THE POPULATION'S CAN MAKE THE ANSWER WORSE.
+- `a-single-level-panel-cannot-see-a-constant` — A PANEL THAT HOLDS THE ANSWER FIXED CANNOT TELL A GOOD ESTIMATOR FROM A CONSTANT.
 
 **Pools, selections and divisors**
 
@@ -649,6 +652,54 @@ overconfidence figure from before that date is void, not merely imprecise.
 **re-record-the-baseline. A delta is only attributable if its baseline came from the same tree in the same session.** Re-record
 the before-picture, do not quote a stored one.
 
+**a-truth-table-of-aggregates. ⛔⛔ A TRUTH TABLE'S LABEL COLUMN MAY HOLD NESTED AGGREGATES, AND
+SUMMING IT DOUBLE-COUNTS — WITH THE CONTROL ARM UNAFFECTED, WHICH IS THE MOST PERSUASIVE SHAPE A WRONG
+RESULT CAN TAKE.** Found 2026-08-09. `truth_fragment_lengths.tsv`'s `kind` column is
+`{mrna, nrna, gdna, rna, all}`: the first three are POPULATIONS, `rna` re-counts (mrna+nrna) and `all`
+re-counts the library. A parser written as `"gdna" if kind == "gdna" else "rna"` summed **mrna + rna +
+all** into one bucket — mRNA twice plus the library once — and reported a "true RNA library" of 191.06 bp
+where mRNA is **212.20**.
+
+⛔ **The gDNA arm was untouched**, because only one kind matched it. So the control read exactly 1.000 and
+the treatment looked broken, and the conclusion "the RNA pmf is +10.7 % long, `pi(w)` is 2× too flat"
+survived TWO rounds of interpretation and two doc commits before a premise gate on an unrelated script
+caught it. ⭐ Nothing about the analysis was sloppy; the input was.
+
+⭐ **Two defences, and the second is the general one.** Enumerate the membership sets explicitly and RAISE
+on an unrecognised label — guessing a bucket is the whole bug. And **put a premise gate on any truth
+source**: the script that caught this compared read-name spans against the same table's mean and printed
+both, which is why a 21 bp disagreement became visible instead of being absorbed.
+
+**a-single-level-panel-cannot-see-a-constant. ⛔⛔ A PANEL THAT HOLDS THE QUANTITY OF INTEREST FIXED
+CANNOT DISTINGUISH A GOOD ESTIMATOR FROM A CONSTANT THAT HAPPENS TO EQUAL IT.** Measured 2026-08-10, and
+it nearly landed a feature.
+
+`length_likelihood` was A/B'd on the flgap pair — 8 conditions varying fragment length (±40 %), capture
+and strand specificity — and came back better on **7 of 8**, mean `|f_gdna − truth|` **0.133 → 0.0175
+(−87 %)**, with the long-standing unstranded × capture-ON blindness apparently resolved (0.0324 → 0.5222
+against a truth of 0.507). The one axis the flgap pair does NOT vary is the gDNA level: every condition is
+`g50`, truth ≈ 0.5.
+
+⛔ **On the `g00` zero-gDNA control the channel reports 54–57 % gDNA in a library containing none**, and at
+`g98` (truth 0.980) it reports 0.287. Unstranded, its answer is **0.539 / 0.522 / 0.287** as truth goes
+**0.00 / 0.51 / 0.98** — a near-constant near ½. The 87 % win was the panel agreeing with the constant.
+
+⭐ **The tell is structural and available before the run: list the axes the panel varies, and check that
+the DELIVERABLE is one of them.** A panel can be rich in every other dimension and still be blind, and
+"7 of 8 conditions improved" reads as breadth when it is one point measured eight ways.
+⚠ It is the mirror of `TRAPS: an-equal-length-panel-defeats-the-lift` — there the panel held the *input*
+fixed, here it holds the *answer* fixed — and of the standing rule not to score on the zero-gDNA arm
+ALONE. Both arms are required because each is one-sided on its own.
+
+**a-moment-match-is-not-sufficient. ⛔ MATCHING A MODEL'S MOMENTS TO ITS POPULATION'S CAN MAKE THE ANSWER
+WORSE, SO A MOMENT RATIO IS A NECESSARY AND NOT A SUFFICIENT GATE.** Measured 2026-08-10 on the length
+channel. A derived opportunity took the RNA crossing moments from `realised/predicted` 0.925 to 0.971 off
+capture and 0.948 to 0.983 under it — an improvement on BOTH arms. The channel's accuracy against truth
+went 0.307 → 0.177 off capture (a large win) and **0.042 → 0.080 under it** (a regression). ⭐ The
+likelihood reads a JOINT function of both components' moments and their covariance; improving one
+component's marginal moment can move the pair apart. ⛔ So a table of moment ratios ranks candidate
+repairs; it does not certify one. Score the deliverable.
+
 **score-the-consumers-own-count. ⛔⛔ TRUTH IS NOT A YARDSTICK UNTIL YOU NAME THE CONSUMER — A TRUTH
 NOTHING READS MEASURES YOUR CHOICE OF TARGET, AND IT WILL DO IT IN THE RIGHT UNITS.** Found and fixed
 2026-08-08. `prior_vs_oracle.py`'s `F` arm was the per-locus count of gDNA fragments whose FIRST BASE
@@ -678,6 +729,23 @@ available and was still the wrong quantity; "exact" was a claim about the *bank*
 `MultiLocus.unit_indices` — the array `locus_partition` scatters by — labelled with each fragment's true
 origin, so the locus assignment is the EM's own and nothing is re-derived. ⛔ Check it is not circular:
 `assemble_priors` never reads a unit count, and that is gated behaviourally, not by grep.
+
+⛔⛔ **AND THEN THE SAME COMMIT THAT WROTE THIS RULE BROKE IT AGAIN, ON THE OTHER ARM — WHICH IS THE
+PART WORTH REMEMBERING.** The corrected instrument reported a "new defect": `a_r` allegedly tilted the
+prior's composition claim by **+0.07…+0.10** because it withholds spliced RNA while the EM's `n_rna`
+counts it. It had scored `a_g/(a_g+a_r)` against a truth counting **every** RNA unit. But a spliced unit
+never receives a gDNA candidate (`em_solver.cpp`: `has_gdna = !is_spliced && isfinite(gdna_ll)`), so
+spliced RNA does not compete with gDNA and a prior that arbitrates that competition must not count it —
+doing so would penalise gDNA with fragments it could never have won. Against the population `a_g:a_r`
+actually describes, the claim is exact to **≤ 5e-4**. ⚠ The right denominator was already a column in
+the same table.
+
+⭐ **Why it recurred, and the operational form of the rule.** Naming the consumer is not enough: the
+consumer reads several arrays and each has its own population. `a_g` competes over the unspliced pool,
+`a_r` over the unspliced pool, `n_rna` spans the locus — three populations in one function. ⛔ So the
+check is **per array, not per instrument**: for each number the consumer reads, write down the SET of
+fragments it is a count of, and score it against that set. An instrument that has got one arm right is
+not thereby right about the next one.
 
 ---
 

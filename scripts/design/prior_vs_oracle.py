@@ -51,11 +51,16 @@ count; grep it for ``unit_indices``.
 spliced mass, and ``node_start_count`` carries no splice bit — which is why ``F_rna`` could only ever
 be an upper BOUND, "separating it needs a five-way origin×splice BAM split". A scored unit carries
 ``is_spliced``, so the split is free: ``Fo`` reports the RNA arm's target (**unspliced** RNA units)
-and the EM's own RNA population (**all** RNA units) as two arrays.
-⛔ ``rna_all`` is still not the whole of the EM's ``n_rna``: ``raw_counts = unambig_totals +
-em_totals``, and the deterministic spliced-unambig fragments never become units. Their per-locus
-attribution is NOT done here; their total is reported, and table ⑫ carries what the gap does to the
-prior's composition claim.
+and, separately, every RNA unit.
+
+⛔⛔ **AND ``rna_unspliced`` IS THE ONE TO SCORE ``a_r`` AGAINST — ``rna_all`` IS A TRAP THIS FILE FELL
+INTO ON THE DAY IT WAS WRITTEN.** A spliced unit never receives a gDNA candidate
+(``em_solver.cpp``: ``has_gdna = !is_spliced && isfinite(gdna_ll)``), so spliced RNA does not compete
+with gDNA and must not enter a prior that arbitrates that competition — putting it in would penalise
+gDNA with fragments it could never have won. The prior's population is therefore **gDNA units +
+UNSPLICED RNA units**, and against it the composition claim is exact to ≤ 5e-4. Scored against
+``rna_all`` instead it reads a phantom +0.07…+0.10 tilt, which is the denominator and not the prior
+(``TRAPS: score-the-consumers-own-count``, committed and then immediately repeated).
 
 ⛔ **O IS NOT AN ESTIMATOR AND MUST NEVER BECOME ONE** (the shape ``pass0_vs_oracle.py`` refuses too).
 It is the shipped :func:`assemble_priors` fed the ONE lever that already exists —
@@ -1056,15 +1061,15 @@ def report(rows: list[dict]) -> None:
               f"{_rel(y.rel)} {_rel(cells['O_vs_F'].rel)} {_rel(cells['O_vs_FO'].rel)} "
               f"{_rel(cells['S_vs_F'].rel)} {_rel(cells['S_vs_FO'].rel)}")
 
-    # ── ⑫ the prior's population vs the EM's ──
+    # ── ⑫ the prior's POPULATION, and its STRENGTH ──
     print()
-    print("  ⑫ ⚠ THE PRIOR'S POPULATION vs THE EM's — a FINDING, not a correction this file makes")
-    print("  `apply_grouped_prior_update` forms R = n_rna + a_r with n_rna = unambig_totals + "
-          "em_totals, so it")
-    print("  counts SPLICED RNA; assemble_priors withholds it from a_r. If the two disagree the prior's")
-    print("  composition claim is tilted even with PERFECT masses in.  phi* is over the unit axis only.")
-    print(f"    {'stratum':<26} {'RNA units':>13} {'unspliced':>13} {'gDNA units':>13} "
-          f"{'phi* true':>9} {'phi* S':>8} {'Δphi*':>8} {'non-unit RNA':>13}")
+    print("  ⑫ ⭐ THE PRIOR DESCRIBES THE UNSPLICED POOL — is its claim right, and how strong is it?")
+    print("  A spliced unit never gets a gDNA candidate (`em_solver.cpp`: has_gdna = !is_spliced && …),")
+    print("  so the population `a_g : a_r` describes is gDNA units + UNSPLICED RNA units. ⛔ Scoring it")
+    print("  against ALL RNA units reads a phantom +0.07…+0.10 tilt that is the denominator, not the")
+    print("  prior (`TRAPS: score-the-consumers-own-count` — committed, then repeated, 2026-08-08).")
+    print(f"    {'stratum':<26} {'pool gDNA':>13} {'pool RNA':>13} {'phi true':>9} {'phi S':>8} "
+          f"{'Δ':>8} {'strength':>9} {'spliced RNA':>13}")
     print("    " + "-" * 116)
     for label, sel in _SELECTIONS:
         if label is None:
@@ -1074,18 +1079,21 @@ def report(rows: list[dict]) -> None:
         srows = [r for r in rows if sel(r["condition"])]
         if not sub:
             continue
-        ru = sum(x["unit_totals"]["rna"] for x in sub)
         rg = sum(x["unit_totals"]["gdna"] for x in sub)
         rus = sum(x["rna_unspliced_total"] for x in sub)
-        nonunit = sum(x["nonunit_fragments"]["rna"] for x in sub)
+        spliced = sum(x["unit_totals"]["rna"] for x in sub) - rus
         s_g = sum(ArmScore(**r["S_vs_FO"]["gdna"]).total_arm for r in srows)
         s_r = sum(ArmScore(**r["S_vs_FO"]["rna"]).total_arm for r in srows)
-        phi_true = rg / (rg + ru) if (rg + ru) > 0 else float("nan")
+        pool = rg + rus
+        phi_true = rg / pool if pool > 0 else float("nan")
         phi_s = s_g / (s_g + s_r) if (s_g + s_r) > 0 else float("nan")
-        print(f"    {label:<26} {ru:>13,.0f} {rus:>13,.0f} {rg:>13,.0f} {phi_true:>9.4f} "
-              f"{phi_s:>8.4f} {phi_s - phi_true:>+8.4f} {nonunit:>13,.0f}")
-    print("    ⚠ non-unit RNA is spliced-unambig + gated: real RNA evidence in the EM's n_rna that no "
-          "arm here attributes per locus, so Δphi* is a LOWER bound on the tilt.")
+        strength = (s_g + s_r) / pool if pool > 0 else float("nan")
+        print(f"    {label:<26} {rg:>13,.0f} {rus:>13,.0f} {phi_true:>9.4f} "
+              f"{phi_s:>8.4f} {phi_s - phi_true:>+8.4f} {strength:>9.3f} {spliced:>13,.0f}")
+    print("    ⭐ `strength` is Σ(a_g+a_r) / the unspliced pool — pseudo-fragments per real fragment.")
+    print("    It is ~1.000 BY CONSTRUCTION (the conserved count is that pool), so the posterior is a")
+    print("    50/50 blend of calibration and the EM's own evidence and there is no knob. Not a defect;")
+    print("    a design fact nothing had priced.")
 
     # ── ⑩ is gdna_eff_len clamped by an incidence sum? ──
     print()

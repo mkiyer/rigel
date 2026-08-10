@@ -21,9 +21,10 @@
    `priors.py` is outside the cache key, so assembler changes are a one-second loop.
 3. ⭐ **GO AT CALIBRATION.** `P−Fo` is **0.81–0.97** under capture against `O−Fo` **0.004–0.011**: ~99 %
    of the prior's error is upstream. §3 step 2, and its first arm is one config flag.
-4. ⚠ **ONE NEW FINDING NEEDS AN OWNER CALL, and it is bigger than anything the assembler does wrong.**
-   `a_r` withholds spliced RNA while the EM's `n_rna` counts it, so the prior's composition claim is
-   tilted **+0.071 … +0.100** in `phi` with PERFECT masses in. §5 item 6.
+4. ✅ **THE PRIOR'S POPULATION IS AUDITED AND CORRECT** (2026-08-09). `a_g : a_r` describes the
+   UNSPLICED pool — a spliced unit never gets a gDNA candidate — and against that pool it is exact to
+   `Δphi` ≤ 5e-4. ⛔ A "+0.071…+0.100 tilt" was reported here on 2026-08-08 and is RETRACTED: it
+   divided by ALL RNA units. §5 item 6.
 5. The gDNA pmf under capture (§3 step 3) is the one length bias still open.
 
 ---
@@ -272,17 +273,27 @@ consumer may now exist. Record it as a reversal with its reason, not as a mistak
    rule's numerator — now discarded explicitly, with the reason), and the docstring taught a
    **Laplace-smoothed `(2G+1)/span` IPR that is not in the code** — the mechanism is `min(m/ρ_ref, S)`
    per object plus the `w = C/(C+1)` contained-evidence shrinkage.
-6. ⛔⛔ **NEW, NEEDS AN OWNER CALL, AND IT IS LARGER THAN EVERYTHING ELSE IN THIS DOC.** The EM forms
-   `R = n_rna + a_r` with `n_rna = unambig_totals + em_totals`, so it counts SPLICED RNA; `assemble_priors`
-   withholds spliced mass from `a_r` on the argument that certified RNA has no gDNA competitor. Both are
-   defensible alone and together they put `(a_g, a_r)` on a different population than `(n_gdna, n_rna)`:
-   measured `phi* = a_g/(a_g+a_r)` runs **+0.071 … +0.100** above the truth over the unit axis, with
-   PERFECT masses in, on all four flgap conditions. ⚠ A LOWER bound — the deterministic spliced-unambig
-   fragments are in `n_rna` and are not on the unit axis at all.
-   ⭐ **The question for the owner is which of the two is the intended semantics**, because it is a
-   modelling call: is `a_r` a fragment COUNT commensurate with `n_rna` (then it must include spliced RNA),
-   or a STRENGTH reflecting how much independent evidence calibration has (then it is right and the EM's
-   aggregation is what needs re-deriving)? `prior_vs_oracle.py` table ⑫, `prior_yardstick.py` table ④.
+6. ✅ **AUDITED 2026-08-09 AND THE ANSWER IS THAT NOTHING IS WRONG — the "+0.071…+0.100 tilt" reported
+   here is RETRACTED.** The owner's model, confirmed line by line against `em_solver.cpp`: a spliced
+   fragment is pure RNA and never receives a gDNA candidate (`has_gdna = !is_spliced && isfinite(…)`);
+   an unspliced intergenic fragment has no transcript candidate and never becomes a unit; the prior
+   arbitrates only the unspliced fragments inside transcript bounds. Putting spliced RNA into `a_r`
+   would penalise gDNA with fragments it could never have won.
+   ⭐ Against the pool it describes, `phi = a_g/(a_g+a_r)` is exact to **≤ 5e-4** on all four flgap
+   conditions, drained and undrained. The wrong number came from dividing by ALL RNA units — the same
+   error as the yardstick, in the same commit that named it (`TRAPS: score-the-consumers-own-count`).
+   ⭐ **The injection is population-matched too**, by algebra: `n_rna = S_r + U_r`, so
+   `R = n_rna + a_r = S_r + (U_r + a_r)` — the pseudo-count lands on the unspliced RNA and the spliced
+   mass rides along untouched; and `out[i] = raw[i]·(1 + a_r/n_rna)` is a UNIFORM scale, so it changes no
+   transcript's share of RNA and moves only the gDNA-vs-RNA balance. That is exactly "calibration says
+   nothing about which transcript".
+   ⚠ **Two discretionary choices survive the audit, and both are open by design, not defects**:
+   (a) `a_r` is allocated across transcripts ∝ TOTAL RNA evidence; ∝ UNSPLICED evidence is the other
+   model and it is the only one of the two that says anything about which transcript. (b) The prior's
+   STRENGTH is exactly **1.000** pseudo-fragment per real unspliced fragment, by construction — the
+   conserved count IS the pool — so the posterior is a 50/50 blend and there is **no knob**. ⛔ At
+   unstranded × capture-ON the prior's own `Δphi` is −0.48…−0.57, so half the answer there comes from a
+   claim wrong by half a unit. Nothing has priced that.
 7. ✅ **TWO CACHE DEFECTS, FIXED 2026-08-08 — and neither would ever have announced itself.** The study
    cache stored `p_arm` and the projected `f_gdna`, both produced by `priors.py`, which is *deliberately*
    outside its key: an assembler edit served a fresh O beside a stale P and F. And `_oracle.py`,

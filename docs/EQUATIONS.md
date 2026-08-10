@@ -629,6 +629,94 @@ fragment-length gap that biases every divisor is also the *only* θ-independent 
 AMBIG slot can get. ⛔ **So the tool may not be made gap-robust by shrinking the estimated gap** — that
 destroys the identifying quantity. Robustness must come from per-component divisors.
 
+## 3d. ⭐⭐⭐ THE LENGTH CHANNEL'S OWN PRECISION — smooth shrinkage, not a gate
+
+⚠ **DERIVED AND MEASURED, NOT YET LANDED** (2026-08-10). Recorded here so it is not re-derived; the
+reason it has not landed is at the end.
+
+**The problem.** `length_likelihood` returns a log-likelihood row over the `λ` grid, and `node_init`
+registers its curvature as source 4 of a slot's composition precision. That curvature is measured
+NUMERICALLY — normalise `exp(row)` over the grid, take the variance, invert. ⛔ A flat row normalises to
+the UNIFORM distribution on the grid, so the precision has a FLOOR that is not information:
+
+    tau_flat  =  1 / Var(uniform over the lambda grid)  =  0.029016
+
+Measured at `g00` (zero gDNA, the two fitted pmfs **1.2 bp** apart): the channel reported bias **+0.66**
+and median `|Δ| = 1.0000` on 5.1 M fragments with `med tau = 0.029` — the grid's own width sold as
+evidence, on 43–99 % of slots. ⛔ And it lands where it does most harm: `tau_len` is deliberately
+UNGATED, because the channel exists to speak on AMBIG slots where every other channel is silent, so
+there a grid-width claim at an arbitrary grid EDGE is the ONLY evidence and it wins.
+
+⛔ **A wider gate is not the repair** (owner, 2026-08-09: this codebase prefers a channel that fades to
+one that switches, and three thresholds in this family have already been refused). The channel's own
+Fisher information fades on its own.
+
+**The derivation.** The likelihood is a bivariate Gaussian on `(Σu, Σw)` whose MEAN moves with `pi`:
+
+    mean = N·mu(pi),  mu(pi) = pi·mu_g + (1−pi)·mu_r      cov = N·V(pi)
+
+For a Gaussian whose mean depends on a parameter the information from the mean is
+`(dm/dpi)' Sigma^-1 (dm/dpi)`, and with `dm/dpi = N·Delta` where `Delta = mu_g − mu_r`:
+
+    I_pi  =  (N·Delta)' (N·V)^-1 (N·Delta)  =  N · Delta' V^-1 Delta
+    I_lam =  I_pi · [pi(1−pi)]²                              (push forward, pi = sigma(lam))
+
+⭐ `Delta' V^-1 Delta` is the **squared Mahalanobis distance between the two components' length
+signatures** — how distinguishable gDNA and RNA are by length here, in the metric the noise itself sets.
+
+⭐⭐ **Why it is the right shape.** `Delta → 0 ⇒ I → 0` QUADRATICALLY, so the channel fades smoothly as
+the two pmfs converge and `Delta = 0` exactly is merely the limiting case — the existing
+exact-inequality guard stops being load-bearing and becomes numerical hygiene. It is linear in `N`. It
+never touches the grid, so it has neither floor nor ceiling. And it introduces no constant.
+
+⛔ **It deliberately omits `½ tr[(V^-1 dV/dpi)²]`**, the heteroscedastic term from the covariance also
+moving with `pi` — the same `−½ log det` that displaces the peak by **0.32 at N = 1**. That term is
+`O(1)` in `N`, so it does NOT vanish at low depth where it is least trustworthy. Omitting it is the
+conservative reading.
+
+**Measured** (`scripts/design/length_channel_census.py` table ④), NODE slots at `N >= 50`:
+
+| | tabulated `tau` | analytic `I_lam` |
+|---|---|---|
+| `g00`, pmf gap **1.2 bp** | 0.0292 (43–99 % of slots pinned at the floor) | **0.0021** |
+| `flgap_long/OFF`, gap **110 bp** | 0.2032 | **10.68** |
+
+⭐ `tau` separates "no gap" from "real gap" by **7×**; the analytic form by **5,000×**, growing smoothly
+with `N` (0.0011 → 10.68).
+
+⛔⛔ **WHY IT HAS NOT LANDED.** `tau` is bounded at BOTH ends — a floor at `1/Var(grid)` and a ceiling at
+the grid spacing — so `I/tau` runs **0.04 → 52** across the depth range. The analytic form does not only
+shrink uninformative slots, it **amplifies confident ones 40–50×**, faithfully amplifying whatever the
+moments underneath say including their error (§3e). ⭐ It affects ONLY the precision, never the mode
+(`tau_lam` feeds `own_composition_logvar`; `fg_loc` comes from ψ), and it is inert while
+`length_likelihood` is off — so it can land at any time without moving a production number.
+
+## 3e. ⚠ THE LENGTH CHANNEL'S MOMENTS MUST DESCRIBE THE POPULATION IN ITS BANK
+
+The channel models the length distribution of fragments landing at an object as `g_c(w) ∝ f_c(w)·A(w)`
+— the library pmf times the opportunity. ⭐ The opportunity is exact for a UNIFORMLY placed component and
+that is verified rather than assumed: gDNA cannot splice, and off capture its predicted moments match the
+realised bank to **1.000** (nodes) and **0.996** (lines), at every node-length stratum.
+
+⛔ **The RNA arm is off by 2.3 % (nodes) and 7.5 % (lines), and it is NOT the pmf.** `pi(w)`'s de-tilt of
+the spliced pool is essentially exact — spliced-pool ÷ `pi(w)` reads **211.77** against a true library
+**212.20** with per-bin ratios 1.005 … 0.979 — and feeding the TRUE pmf in place of the fitted one leaves
+the residual almost unchanged (193.49 → 194.00; 246.57 → 247.19). What is missing is a per-population
+SELECTION term: at a LINE, `A(w) = w − 1` counts every crossing while the bank `edge_unspliced` holds
+only the unspliced ones (a fragment that spliced elsewhere is in `edge_spliced`). At a NODE nothing is
+missing — containment excludes splicing structurally.
+
+⛔⛔ **AND THE OBVIOUS REPAIR IS NOT ADMISSIBLE.** Bounding the crossing opportunity by the containing
+exonic block closes 62–67 % of the line deficit with no free parameter, but it assumes every RNA molecule
+at a line is MATURE mRNA confined to an exon. Nascent RNA runs straight through an intron unspliced and
+violates it; and the block's extent is per-TRANSCRIPT, which is what the EM solves, so the constraint is
+circular (owner, 2026-08-10). ⭐ `A(w) = w − 1` is the CONSERVATIVE bound — exactly right for gDNA
+always, exactly right for nascent RNA always, and too permissive only for mature mRNA — so it errs in one
+direction for one sub-population. ⛔ Every panel condition is `nrna_none`, i.e. the substrate most
+favourable to the tighter bound and the least representative; a repair validated there is not
+validated. `scripts/design/length_channel_census.py` regenerates every number here, and
+`scripts/design/short_exon_fl_probe.py` prices the tighter bound.
+
 ## 4. Opportunity corrections for length pools
 
 A pool is a length-dependent **selection**, so its raw histogram is not the library's length

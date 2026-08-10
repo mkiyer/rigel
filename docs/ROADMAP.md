@@ -25,10 +25,12 @@ things nothing had measured before. If it grows again, prune it rather than lett
 |---|---|---|
 | **Stage A — the accumulator** | ✅ **DONE**, and that is a measurement | perfecting BOTH fragment-length models is worth **2.6 %** of the deliverable, down from 22.2 % |
 | **calibration, 3 of 4 strata** | ✅ median library `f_gdna` error **0.005–0.012**, and ⭐ the PRIOR the EM reads is within **2.5–4.6 %** of a perfect one | stranded × on/off and unstranded × capture-OFF |
-| ⛔ **calibration, unstranded × capture-ON** | ⛔ **BLIND** — reports **0.033–0.058** while truth spans **0.00 → 0.98**, and hands the EM a gDNA prior **94.4 %** short | not noisy; a flat line. This is the whole open problem |
-| ✅ **the prior ASSEMBLER** | ✅ `rel` **0.0027** under capture / **0.0019** off it with perfect masses in, and **4.9e-4** with perfect per-component shares as well | ⭐ was **0.179**. Two causes, and both are measured: the conserved-count rewrite (0.179 → 0.0202 on the SAME yardstick) and then the yardstick itself (0.0202 → 0.0027). §1.1 ④ |
-| ⛔ **the prior's POPULATION vs the EM's** | ⛔ `a_r` withholds spliced RNA while `n_rna` counts it — the composition claim is tilted **+0.072 … +0.094** in `phi` with PERFECT masses in, on every stratum | ⭐ NEW 2026-08-08, and larger than everything the assembler does wrong. Needs an owner call on which semantics is intended. §1.1 ⑫ |
-| **message propagation** | ⛔ **OFF** since 2026-08-07 (`config.message_propagation`) | net better on 3 of 4 strata (−58 / −44 / −32 %); +155 % on the fourth, which carries 73 % of panel error |
+| ⛔ **calibration, unstranded × capture-ON** | ⛔ **BLIND** — reports **0.033–0.058** while truth spans **0.00 → 0.98**, and hands the EM a gDNA prior **94.4 %** short | not noisy; a flat line. Still the whole open problem. ⛔ `length_likelihood` does NOT fix it — see the row below |
+| ⛔⛔ **`length_likelihood`** | ⛔ **MEASURED 2026-08-10 AND IT IS INADMISSIBLE.** On the g00 ZERO-gDNA control, truth exactly 0, it reports **0.539 / 0.573** gDNA (unstranded). Mean `|err|` over the five ladder conditions tested **0.228 → 0.393 (+72 %)** | ⚠ It looks like an **87 %** win on the flgap pair — but that panel is ALL g50 and the channel returns a near-CONSTANT ~0.5 (g00 0.539, g50 0.522, g98 0.287 unstranded), so g50's truth of ~0.5 flatters it. §1.4 |
+| ✅ **the prior ASSEMBLER and its POPULATION** | ✅ `rel` **0.0019–0.0027** with perfect masses in and **4.9e-4** with perfect per-component shares; the composition claim `a_g:a_r` is exact against the unspliced pool (`Δphi` **≤ 5e-4**) | ⭐ the assembler was **0.179**: the conserved-count rewrite took it to 0.0202 and the YARDSTICK took it to 0.0027 (`TRAPS: score-the-consumers-own-count`). ⛔ Two entries here once claimed a 72 % residual and a +0.07 tilt; both were the reference, not the tool |
+| ✅ **the fragment-length models** | ✅ accurate — `pi(w)`'s de-tilt reads **211.77** against a true **212.20**, and the gDNA pmf is exact to **0.02 bp** off capture | ⛔ a claimed +10.7 % bias was a truth-parser bug (`TRAPS: a-truth-table-of-aggregates`). ⚠ §4 retires the RNA-FL row for the DIVISOR consumer only; a pricing is per consumer |
+| ⚠ **the gDNA pmf under capture** | ⛔ the last unfixed length defect: **+13.6 bp** at a 330 bp gDNA mean and **+3.5 bp** at 120, drained per-bin `fit/true` **1.22 … 4.18** in the tail | ⭐ EXACT off capture (+0.1 / +0.0 bp) and untouched by the drain (Δ ≤ 0.1 bp), so it is a PLACEMENT problem — `EQUATIONS.md` §4.4 — and must not be attacked by editing `gdna_opportunity` |
+| **message propagation** | ⛔ **OFF**, and it stays off until the tool is optimised end to end across all scenarios (owner, 2026-08-10) | net better on 3 of 4 strata (−58 / −44 / −32 %); +155 % on the fourth. ⭐ That fourth stratum is the one `length_likelihood` just fixed, so the relay's price there must be RE-priced, never inherited |
 | **the price of that** | ⚠ zero-gDNA golden scenarios go **0.029 → 89.93** and **0.005 → 9.58** | both AMBIG loci — the stratum above |
 | **end to end — the LIBRARY figure** | ✅ mean `\|f_gdna − truth\|` **0.1060**, and a perfect prior takes it to **0.0097** | calibration is the whole bottleneck here. §1.3 ① |
 | ⛔ **end to end — TRANSCRIPT assignment** | ⛔ **31.1 %** of fragments misassigned, and a perfect prior removes only **32 %** of that | 67.5 % survives, and on capture-OFF a perfect prior is 3–4 % WORSE. §1.3 ② |
@@ -58,283 +60,98 @@ A flat line in the deliverable was already known; this is the same flat line one
 denominator the solver moves by declining to answer. And quote the SHIPPED column, not pass-0: a −37.2 %
 pass-0 win was −3.9 % shipped (TRAPS: the-intermediate-is-not-the-deliverable).
 
-## §1 ⭐⭐⭐ WHAT TO DO NEXT — **VALIDATE THE WHOLE TOOL BEFORE ADDING ANYTHING**
+## §1 ⭐⭐⭐ THE VALIDATION CAMPAIGN — items 1–3 DONE, item 4 open
 
-⛔⛔ **OWNER RULING 2026-08-07: no new features until the tool is characterised end to end.** All of the
-work below runs with **message propagation OFF** and **`length_likelihood` OFF** — the two switches stay
-down so that every number is attributable to the tool as it stands, not to a feature landing mid-campaign.
+⛔⛔ **OWNER RULING 2026-08-07, STILL IN FORCE: no new features until the tool is characterised end to
+end**, with message propagation OFF and (until 2026-08-10) `length_likelihood` OFF, so every number is
+attributable to the tool as it stands rather than to a feature landing mid-campaign.
 
-⭐ The four items are ONE campaign and they share a substrate. Do them in order: each answers a question the
-next one needs.
-
-| | the item | the question it answers | state |
+| | the item | the question | state |
 |---|---|---|---|
-| ⭐⭐⭐ **1** | **calibration-prior-vs-oracle** | Calibration's endpoint is a PRIOR for the EM — three per-locus scalars. **How wrong are they?** | ✅ **DONE** — `prior_vs_oracle.py` (+14 gates, 10/10 perturbations). **§1.1** |
-| ⭐⭐⭐ **2** | **tool-absolute-accuracy** | The panels are simulated with ground truth. **What is the tool's transcript-level accuracy, end to end?** | ✅ **DONE** — `quant_accuracy.py --arm base` (+11 gates, 8/8 perturbations). **§1.2** |
-| ⭐⭐⭐ **3** | **error-downstream-of-calibration** | Inject the ORACLE prior and re-quantify. **How much of the error is calibration's, and how much is the EM's?** | ✅ **DONE** — `--arm oracle`, `noop` byte-identical, noise floor −0.01 %. **§1.3** |
-| ⭐⭐ **4** | **performance** | It has been a while, and new code means slowdown. | ⏸ **NOT STARTED** — ⛔ profile on real cfRNA, not on this panel. §1.0 |
+| **1** | calibration-prior-vs-oracle | calibration ships a PRIOR — how wrong is it? | ✅ `prior_vs_oracle.py` (+23 gates) |
+| **2** | tool-absolute-accuracy | transcript-level accuracy, end to end? | ✅ `quant_accuracy.py --arm base` |
+| **3** | error-downstream-of-calibration | inject the oracle prior — whose error is it? | ✅ `--arm oracle` |
+| ⏸ **4** | performance | it has been a while, and new code means slowdown | **NOT STARTED** — §1.0 |
 
-⛔⛔ **ITEMS 1–3 ARE DONE (2026-08-07). THE ANSWER IS BOTH, AND THE QUESTION HAD A HIDDEN ASSUMPTION.**
-The framing was "calibration or the EM?" and it presumed one deliverable. There are two, and they
-answer differently:
+⭐⭐ **THE ANSWER TO 1–3, AND THE QUESTION HAD A HIDDEN ASSUMPTION.** "Calibration or the EM?" presumed
+ONE deliverable. There are two and they answer differently:
 
-* **the library gDNA/RNA separation** — calibration is the whole bottleneck. A perfect prior takes it
-  from 0.1060 to **0.0097** and both zero controls to exactly right (§1.3 ①). `length_likelihood` is
-  therefore confirmed as the right next build *for this deliverable*.
-* **transcript-level assignment** — calibration is **not** the bottleneck. 67.5 % of the error survives
-  a perfect prior, and on the two capture-OFF strata a perfect prior is **worse** by 3–4 %, at 57–1,129×
-  the noise floor (§1.3 ②). That is a defect in how the prior is CONSUMED and it lives in the EM.
+* **the library gDNA/RNA separation** — calibration is the whole bottleneck. A perfect prior takes mean
+  `|f_gdna − truth|` from **0.1060 to 0.0097**.
+* **transcript assignment** — it is NOT calibration. **31.1 %** of fragments are misassigned and a
+  perfect prior removes only **32 %** of that; on the two capture-OFF strata a perfect prior is **3–4 %
+  WORSE**. 95.5 % of the stranded × capture-OFF error is ordinary isoform ambiguity (6.94 M → 311 k when
+  isoforms are collapsed), which is not a Rigel-specific defect.
 
-⭐ So §2's `length_likelihood` work is unblocked and correctly aimed — but it should be scored on the
-library figure, and a second, separate line of work exists in the EM that nothing was previously
-pointing at.
+⛔ **Two things a perfect prior cannot touch, and they are §0's open rows**: the nascent channel (20.2 M
+fragments on zero-truth entities, and at `g00` a perfect prior makes it WORSE, 4.30 M → 4.64 M), and
+`g00`'s 7.05 M gene-level misassignment with no gDNA present at all.
 
-### §1.1 ⭐⭐⭐ ITEM 1 IS DONE — CALIBRATION'S ENDPOINT, MEASURED AGAINST THE ORACLE
+⛔ **THE `g00` ZERO-gDNA CONTROL FAILS AT THE PRIOR, AND ITS WORST STRATUM IS NOT THE BLIND ONE.** The
+shipped prior claims **2,067,637 gDNA fragments in libraries containing none**, and **1,707,321** of
+them are at unstranded × capture-**OFF** — a stratum that reads healthy (`rel` 0.046) on every
+contaminated row, and worse by **5.5×** than the blind one. Only a zero control could have found it.
 
-`scripts/design/prior_vs_oracle.py`, all 36 ladder conditions, messages OFF, `length_likelihood` OFF,
-noop gate byte-identical on all 36 × 3 arrays. `LocusPriors` is what the EM reads; **P** is the shipped
-prior, **O** is the same assembler fed the origin-split truth masses, **S** is O with each component
-rescaled by its own true per-line share, and ⭐ **Fo** is the EM's OWN candidate count per origin —
-every unit of the multi-locus, labelled by the true origin of its fragment.
+⭐ **Where the live numbers are.** They are not repeated here: `prior_vs_oracle.py` regenerates the
+`P−O` / `O−Fo` / `S−Fo` / `Fo−F` tables and the composition and strength diagnostics on demand
+(~48 s/condition), and §0 carries the handful that rank the work. A closed item earns a line, not a
+report.
 
-⛔⛔ **THE REFERENCE CHANGED ON 2026-08-08 AND ④ BELOW IS RE-MEASURED.** It used to be `F`, the count of
-fragments whose FIRST BASE lands in the locus, described here as "EXACT on the gDNA arm". The EM counts
-every fragment that is a *candidate*, so `F` dropped the straddling population — **1.4 M of 102.9 M on
-this panel** — and `O−F` was scored against a quantity nothing reads
-(`TRAPS: score-the-consumers-own-count`).
+### §1.4 ⛔⛔ `length_likelihood` — MEASURED FOR THE FIRST TIME 2026-08-10, AND IT IS INADMISSIBLE
 
-**① `P − O`, calibration's own error, gDNA arm, as a fraction of the true prior:**
+`scripts/design/length_likelihood_ab.py`, one thing varied (the config flag) on the same cached scan,
+scored against each condition's TRUE `f_gdna` from the origin-split caches.
 
-| stratum | `rel` | `mwae_phi` | | stratum | `rel` | `mwae_phi` |
-|---|---|---|---|---|---|---|
-| stranded × capture OFF | 0.027 | 0.0099 | | unstranded × capture OFF | 0.046 | 0.0166 |
-| stranded × capture ON | 0.025 | 0.0139 | | ⛔ unstranded × capture **ON** | **0.944** | **0.5270** |
+**On the flgap pair (8 conditions) it looks like a triumph:** better on 7 of 8, mean
+`|f_gdna − truth|` **0.133 → 0.0175 (−87 %)**, and the blind stratum apparently resolved — 0.0324 → 0.5222
+against a truth of 0.507. Mass with no own composition evidence falls **97–99 % → 5–7 %**, which is
+exactly the hole the channel was built to fill.
 
-36.8 M of the panel's 39.0 M misplaced prior fragments — **94 %** — are that one stratum, and `mwae_phi`
-there climbs monotonically with the gDNA level: 0.0345 (`g01`) → 0.3083 (`g25`) → 0.5890 (`g50`) →
-0.9486 (`g98`).
+⛔⛔ **AND THE ZERO-gDNA CONTROL DESTROYS IT.** Truth is exactly 0 at `g00`:
 
-⭐⭐ **THE SCALE IS RIGHT EVERYWHERE AND ONLY THE SPLIT IS WRONG, WHICH IS NEW AND IS ACTIONABLE.**
-`log10(scale_P / scale_O)` is **+0.000 to +0.003** on every stratum including the broken one: the prior's
-total pseudocount `a_g + a_r` is correct to a fraction of a percent, so the EM is being pulled with the
-right STRENGTH in the wrong DIRECTION. Nothing here is a regularisation or a prior-weight problem, and a
-mechanism that changes how hard the prior pulls is aimed at a number that is already right.
-
-**④ `O − Fo`, the ASSEMBLER's own error** — perfect masses in, the EM's own candidate count as the
-reference, so this prices the mass → fragment-count conversion, the projection and the one pooled
-per-component share, alone. ⑧ is the same thing with the share made perfect too:
-
-| gDNA arm `rel` | capture OFF | capture ON | | *the same arms against the old `F`* |
-|---|---|---|---|---|
-| ④ `O − Fo` | **0.0019** | **0.0027** | | *0.0078 / 0.0202* |
-| ⑧ `S − Fo` | **1.2e-4** | **6.9e-4** | | *0.0058 / 0.0178* |
-
-⭐⭐ **THE ASSEMBLER IS ESSENTIALLY SOLVED, AND WHAT IS LEFT IS THE POOLED SHARE.** ⑧ says that with each
-component's own true share the assembler reproduces the EM's count to **2,029 fragments in 17.0 M** off
-capture and **23,846 in 34.5 M** under it. ⚠ The ladder is *structurally* blind to the length gap the
-share depends on (equal configured lengths, +1.5–2.1 % realised), so read the flgap pair for the
-magnitude: there the share is **82–99 %** of the whole residual and `S−Fo` reaches **2.8e-5**
-(`scripts/design/prior_yardstick.py`, drained).
-
-⚠ **The predecessor of this block read `0.005` / ⛔ `0.179` (+15.1 %) and called the assembler "the
-dominant prior error" on three strata.** Both halves moved, for two separable reasons, both measured on
-this panel: the conserved-count rewrite took `O−F` from 0.179 to 0.0202 on the SAME yardstick, and the
-yardstick then took 0.0202 to 0.0027. ⛔ The 0.179 also predates the accumulator schema change, so
-"the rewrite" there means everything that landed between 2026-08-07 and 2026-08-08, not one edit.
-
-⛔ **The `g00` ZERO-gDNA control fails at the prior, and its worst stratum is NOT the blind one.** The
-shipped prior claims **2,067,637 gDNA fragments in libraries containing none**:
-
-| `g00` condition | false gDNA prior | `mwae_phi` |
+| ladder condition (truth 0.000) | OFF | **ON** |
 |---|---|---|
-| ⛔ ss0.50 capture **OFF** | **1,707,321** | 0.2524 |
-| ss0.50 capture ON | 312,200 | 0.0452 |
-| ss0.99 capture OFF | 28,843 | 0.0043 |
-| ss0.99 capture ON | 19,274 | 0.0028 |
+| g00 ss_0.50 capture OFF | 0.1776 | ⛔ **0.5394** |
+| g00 ss_0.50 capture ON | 0.0350 | ⛔ **0.5729** |
+| g00 ss_0.99 capture OFF | 0.0030 | 0.1059 |
+| g00 ss_0.99 capture ON | 0.0022 | 0.0539 |
+| g98 ss_0.50 capture ON (truth 0.980) | 0.0576 | 0.2865 |
 
-Unstranded × capture-OFF is worst by **5.5×** — and that is a stratum that reads healthy (`rel` 0.046) on
-every contaminated row. A zero control was the only thing that could have found it.
+Mean `|err|` over those five: **0.228 → 0.393 (+72 %)**. A library with no gDNA is reported as 54–57 %
+gDNA.
 
-⭐ **Both `flgap` panels reproduce the ladder exactly**, so a ±40 % gDNA−RNA fragment-length gap changes
-nothing while `length_likelihood` is off: three strata at `rel` 0.024–0.036, unstranded × capture-ON at
-**0.966** (`flgap_short`) and **0.837** (`flgap_long`).
+⭐⭐ **THE MECHANISM, AND IT EXPLAINS BOTH TABLES AT ONCE: on unstranded data the channel returns a
+near-CONSTANT answer of about 0.5 rather than a truth-tracking one** — 0.539 at g00, 0.522 at g50, 0.287
+at g98, while truth spans 0.00 → 0.98. **The whole flgap panel is g50, where that constant is right.**
+On stranded data the effect is much smaller (0.054–0.106 at g00) because the strand channel still
+supplies real evidence and dilutes it.
 
-⚠ **Undrained on both sides, and priced rather than waved**: the drain moves the shipped prior by
-**0.153 %** (gDNA) and **0.462 %** (RNA). A drained oracle is inadmissible on this panel —
-`TRAPS: an-equal-length-panel-defeats-the-lift`.
+⭐ It is consistent with the channel census: at `g00` the two fitted pmfs are **1.2 bp** apart (there is no
+gDNA to fit one on, so it falls back to the anchor), the channel's rows are near-flat, and its argmax
+carries bias **+0.66** with median `|Δ| = 1.0000` at a precision pinned to `1/Var(λ grid) = 0.029`
+(`EQUATIONS.md` §3d). Enabling it lets that speak at **100 %** of slots.
 
-**⑫ ⛔⛔ NEW 2026-08-08 — THE PRIOR AND THE EM ARE COUNTING DIFFERENT POPULATIONS, AND THIS IS NOW THE
-LARGEST THING WRONG WITH THE ASSEMBLED PRIOR.** `apply_grouped_prior_update` forms `R = n_rna + a_r`
-with `n_rna = unambig_totals + em_totals`, so it counts SPLICED RNA; `assemble_priors` withholds spliced
-mass from `a_r` because certified RNA has no gDNA competitor. Each is defensible alone; together
-`(a_g, a_r)` and `(n_gdna, n_rna)` describe different sets, so the prior's composition claim is tilted
-toward gDNA **with the truth masses in**:
+⛔ **So the smooth shrinkage (§3d) is NECESSARY AND NOT SUFFICIENT**: it corrects the PRECISION, and this
+failure is in the MODE — the near-flat row's argmax, added to ψ. Fixing the precision alone would not
+have prevented it.
 
-| stratum | `phi*` true | `phi*` from S | Δ | RNA units the prior withholds |
-|---|---|---|---|---|
-| stranded × capture OFF | 0.2884 | 0.3825 | **+0.0941** | 14.5 M spliced + 2.7 M non-unit |
-| stranded × capture ON | 0.4648 | 0.5367 | **+0.0719** | 10.0 M spliced + 4.9 M non-unit |
-| unstranded × capture OFF | 0.2884 | 0.3825 | **+0.0941** | |
-| unstranded × capture ON | 0.4648 | 0.5367 | **+0.0719** | |
+⚠ **THE LESSON FOR THE PANEL, NOT JUST THE CHANNEL: an 8-condition panel at ONE gDNA level cannot
+validate a composition estimator.** The flgap pair varies fragment length and capture and strand — and
+holds `g50` fixed. `TRAPS: a-single-level-panel-cannot-see-a-constant`.
 
-⭐ `phi*` is over the EM's UNIT axis; the deterministic spliced-unambig fragments reach `n_rna` through
-`unambig_totals` and are not on that axis at all, so every Δ is a **lower bound**. ⛔ **This is an owner
-call, not a bug to fix**: is `a_r` a fragment count commensurate with `n_rna` — then it must include
-spliced RNA — or a strength reflecting the independent evidence calibration actually has, in which case
-the EM's aggregation is what needs re-deriving? Both readings are consistent with everything else built.
-⚠ It reproduces on all four flgap conditions at **+0.071 … +0.100**, drained and undrained alike.
+### §1.0 ⚠ ITEM 4 — AND THE PERFORMANCE SUBSTRATE IS A TRAP
 
-### §1.2 ⭐⭐⭐ ITEM 2 IS DONE — THE TOOL'S ABSOLUTE ACCURACY, END TO END
+Measured 2026-08-07 on one 10 M-fragment ladder condition (a 35,135-node chr22 index): per-locus EM
+**15.9 s (47 %)**, native scan 6.5 s, calibration 6.5 s, second-pass drain 3.5 s, total 33.5 s.
+⚠ Message propagation costs nothing measurable (33.7 s ON vs 33.5 s OFF) — the "the relay is the
+expensive part" hypothesis is REFUTED.
 
-`scripts/design/quant_accuracy.py --arm base`, all 36 ladder conditions, seed pinned. Scored **count
-against count** against each condition's OWN `truth_abundances.tsv` (the realised observed fragment
-count). ⚠ The suite-level `truth_abundances_nrna_none.tsv` is the *pre-capture molar* abundance — a
-different quantity, log-space correlation **0.72** with the realised one under capture — and scoring
-against it would charge the tool for hybrid capture it never claims to invert.
-
-| stratum | true fragments | misassigned `Σ\|Δ\|` | **rate** | false-positive mass | Spearman | MARD |
-|---|---|---|---|---|---|---|
-| ALL (g00 excluded) | 178,399,996 | 55,488,787 | **0.311** | 16,162,221 (0.091) | 0.825 | 0.393 |
-| stranded × capture OFF | 44,599,999 | 6,936,270 | 0.156 | 1,610,144 (0.036) | 0.910 | 0.286 |
-| stranded × capture ON | 44,599,999 | 8,811,983 | 0.198 | 1,454,490 (0.033) | 0.778 | 0.448 |
-| unstranded × capture OFF | 44,599,999 | 9,205,612 | 0.206 | 1,776,020 (0.040) | 0.896 | 0.315 |
-| ⛔ unstranded × capture ON | 44,599,999 | 30,534,922 | **0.685** | 11,321,567 (0.254) | 0.716 | 0.523 |
-| ⛔ **`g00`, ZERO gDNA** | 40,000,000 | 17,149,596 | **0.429** | 2,610,770 (0.065) | 0.816 | 0.374 |
-
-⛔⛔ **READ THE `g00` ROW FIRST, AND IT IS THE MOST IMPORTANT NUMBER ON THIS PAGE.** Those four
-conditions contain **no gDNA at all** — the library is 100 % RNA — and the tool still misassigns
-**42.9 %** of its fragments, worse than three of the four contaminated strata. At the two
-`g00 ss0.99` rows the gDNA channel is *essentially silent and essentially correct*
-(`gdna_est` = 7,683 and 10,754 against a truth of 0, i.e. ~0.1 % of the library) and **38–49 % of
-fragments are still misassigned.** ⭐ That error cannot be calibration's, because at those conditions
-calibration is already right. It is transcript assignment.
-
-⭐⭐ **AND THERE IS A THIRD FALSE-POSITIVE CHANNEL THAT NOTHING WAS WATCHING.** The panel is
-`nrna_none`: the true nascent count is **exactly 0** at every condition. The EM parks **20,151,758
-fragments — 9.2 % of all true RNA — on synthetic nascent entities.** ⛔ `get_counts_df` DROPS the
-synthetics, so this is invisible in every transcript-level table ever printed here; it shows up only
-because `quant_accuracy.py` reports it on the `library` row.
-
-| stratum | `nrna_est` (truth 0) | as a share of true RNA |
-|---|---|---|
-| stranded × capture OFF | 263,818 | 0.006 |
-| unstranded × capture OFF | 816,933 | 0.018 |
-| stranded × capture ON | 1,398,112 | 0.031 |
-| ⛔ unstranded × capture ON | **13,373,410** | **0.300** |
-| ⛔ `g00` (no gDNA, no nascent) | 4,299,485 | 0.107 |
-
-⭐ **The blind stratum's missing gDNA is going into the NASCENT channel, and that is mechanically
-exactly what should happen.** gDNA is genomically continuous and unspliced; so is nascent RNA. When the
-prior cannot say "gDNA" (§1.1: `P/O = 0.040` there), the only remaining unspliced-compatible hypothesis
-is the nascent entity, and 13.4 M fragments take it. ⚠ This is an EM assignment channel, not a
-calibration population — AXIOM 0 is about the deconvolution, and the EM's mature/nascent split is
-downstream of it.
-
-⚠ **A constant, negligible floor**: 5 transcripts in each condition's truth table are absent from the
-index (the transcript filter drops them), carrying 2–327 fragments. Identical in every arm.
-
-### §1.3 ⭐⭐⭐ ITEM 3 IS DONE — AND THE ANSWER IS **BOTH, ON TWO DIFFERENT DELIVERABLES**
-
-`scripts/design/quant_accuracy.py`, `base` vs `oracle` (the §1.1 prior injected in place of
-calibration's, rebuilt in-process on the run's own loci), all 36 conditions, seed pinned.
-
-⛔ **The gate passed first**: `arm_identity.py qa_base qa_noop` is **byte-identical on all 1,296 scored
-fields of all 72 rows** — the wrapper builds O in full and discards it, so the whole injection path is
-proven inert. And the noise floor is **−0.01 %** (`base_reseed`, seed + 1, nothing else varied), so
-every effect below is 54–4,700× the size of a different draw.
-
-**① THE LIBRARY-LEVEL SEPARATION IS CALIBRATION-LIMITED, AND A PERFECT PRIOR SOLVES IT OUTRIGHT.**
-Mean `|f_gdna − truth|`, intergenic included (the `cli.py` denominator):
-
-| stratum | base | oracle |
-|---|---|---|
-| stranded × capture OFF | 0.0036 | 0.0028 |
-| stranded × capture ON | 0.0242 | 0.0158 |
-| unstranded × capture OFF | 0.0075 | 0.0018 |
-| ⛔ unstranded × capture ON | **0.3885** | **0.0183** |
-| ⛔ `g00` zero control | 0.0374 | **0.0000** |
-| **ALL (g00 excluded)** | **0.1060** | **0.0097** |
-
-**10.9× better, and the zero control goes to exactly right** — `g00 ss0.50 capture_off` falls from
-**1,263,494 phantom gDNA fragments to 42.** Nothing survives there. For the number this tool exists to
-produce, calibration is confirmed as the whole bottleneck.
-
-**② TRANSCRIPT ASSIGNMENT IS NOT, AND ON TWO STRATA A PERFECT PRIOR MAKES IT WORSE.** Misassigned
-fragments `Σ|count_est − count_true|`:
-
-| stratum | base | oracle | effect | noise floor |
-|---|---|---|---|---|
-| stranded × capture OFF | 6,936,270 | 7,161,996 | ⛔ **+3.25 %** | +0.00 % |
-| stranded × capture ON | 8,811,983 | 8,544,966 | −3.03 % | −0.06 % |
-| unstranded × capture OFF | 9,205,612 | 9,606,938 | ⛔ **+4.36 %** | +0.08 % |
-| unstranded × capture ON | 30,534,922 | 12,165,799 | **−60.16 %** | −0.02 % |
-| `g00` zero control | 17,149,596 | 16,320,735 | −4.83 % | −0.01 % |
-| **ALL (g00 excluded)** | **55,488,787** | **37,479,699** | **−32.46 %** | −0.01 % |
-
-⭐⭐ **THE TWO POSITIVE ROWS ARE THE RESULT, AND THEY ARE NOT NOISE — THEY ARE 1,129× AND 57× THE
-FLOOR.** A *more accurate* prior costs the two capture-OFF strata 3–4 % of their transcript accuracy,
-and the mechanism is visible in the directional split: false-NEGATIVE mass rises **+26.0 %** and
-**+23.6 %** on exactly those two strata while false-positive mass is flat. **The prior is correct at
-the LOCUS and the EM spends it indiscriminately WITHIN the locus** — told (truthfully) that a locus
-holds more gDNA, the EM removes it from whichever transcripts its likelihood ranks lowest, and off
-capture those are partly real RNA. ⛔ That is a defect in how the prior is *consumed*, not in the
-prior, and no improvement to calibration can reach it.
-
-⭐ **67.5 % of the transcript error survives a perfect prior**, and on the three strata where
-calibration already works the prior is worth ±4 % — i.e. nothing.
-
-**③ AT GENE LEVEL — ISOFORM AMBIGUITY SUMMED AWAY — MOST OF THE RESIDUE DISAPPEARS, AND THE PRIOR
-MATTERS TWICE AS MUCH.** Summing a gene's isoforms collapses exactly the error that comes from not
-knowing WHICH isoform a fragment came from; what survives is error in deciding whether the fragment
-was RNA from this gene at all, which is the question Rigel is for.
-
-| stratum | transcript | **gene** | gene ÷ tx | gene, as a share of true RNA | gene, oracle arm |
-|---|---|---|---|---|---|
-| stranded × capture OFF | 6,936,270 | **311,100** | 4.5 % | **0.7 %** | 532,652 (⛔ 1.71×) |
-| unstranded × capture OFF | 9,205,612 | 1,033,478 | 11.2 % | 2.3 % | 1,389,836 (⛔ 1.35×) |
-| stranded × capture ON | 8,811,983 | 2,636,387 | 29.9 % | 5.9 % | 2,373,626 (0.90×) |
-| ⛔ unstranded × capture ON | 30,534,922 | 22,951,782 | 75.2 % | **51.5 %** | 4,766,115 (**0.21×**) |
-| **ALL (g00 excluded)** | 55,488,787 | **26,932,747** | 48.5 % | 15.1 % | **9,062,229 (0.34×)** |
-| ⛔ `g00` zero control | 17,149,596 | 7,053,026 | 41.1 % | 17.6 % | 5,969,001 (0.85×) |
-
-⭐⭐ **95.5 % of the transcript error on stranded × capture-OFF is isoform ambiguity** — 6.94 M falls to
-311 k, which is **0.7 %** of the true fragments. That is an ordinary quantification result and there is
-no Rigel-specific defect there to chase. ⛔ **And a perfect prior removes 66 % of the gene-level error
-against 32 % at transcript level**, so calibration matters roughly twice as much as the transcript
-number suggested. ⚠ The two capture-OFF strata still get **WORSE** with a perfect prior, and more so
-at gene level (1.71× and 1.35×) — §1.3 ②'s finding survives the harder test.
-
-⛔⛔ **`g00` gene-level is 7.05 M with NO gDNA present, and a perfect (all-zero) prior leaves 5.97 M of
-it.** Nothing about calibration can reach that. It is the nascent channel below.
-
-⭐⭐ **THE ONE PART THAT IS CLEARLY RIGEL'S AND IS UNTOUCHED BY CALIBRATION: THE NASCENT CHANNEL.**
-§1.2's 20.2 M fragments on zero-truth nascent entities falls to 9.8 M under the oracle prior — but at
-`g00`, where there is neither gDNA nor nascent RNA, it goes **UP**: 4,299,485 → 4,636,624. The
-fragments the shipped prior was calling gDNA become *nascent* rather than mature. That channel is
-downstream of the prior and a perfect prior cannot fix it.
-
-### §1.0 ⚠ THE PERFORMANCE SUBSTRATE IS A TRAP, AND THE NUMBERS BELOW SHOW WHY
-
-Measured 2026-08-07 on one 10 M-fragment ladder condition (a **35,135-node** chr22 index):
-
-| stage | time | share |
-|---|---|---|
-| per-locus EM | **15.9 s** | **47 %** |
-| native scan | 6.5 s | 19 % |
-| calibration | 6.5 s | 19 % |
-| second-pass drain | 3.5 s | 10 % |
-| **total** | **33.5 s** | |
-
-⚠ **And message propagation costs nothing measurable** — 33.7 s ON vs 33.5 s OFF, calibration 6.6 vs 6.5 s.
-A hypothesis that the relay was the expensive part is REFUTED.
-
-⛔⛔ **BUT THIS PROFILE IS UPSIDE DOWN FROM THE REAL ONE, AND BOTH ARE CORRECT.** Calibration cost is
-**depth-INDEPENDENT** — every node in the index is solved regardless of read depth — so it scales with the
+⛔⛔ **BUT THAT PROFILE IS UPSIDE DOWN FROM THE REAL ONE AND BOTH ARE CORRECT.** Calibration is
+depth-INDEPENDENT — every node in the index is solved regardless of read depth — so it scales with the
 INDEX while the EM scales with the DATA. On real cfRNA at genome scale (~1.5 M nodes) calibration has
-measured ~66 s against the EM's ~24 s: **the exact reverse of the table above.** ⛔ So optimising against
-this panel would tune the wrong stage — `TRAPS: toys-rank-hotspots-backwards`, which cost a whole analysis
-once already. **Profile on real cfRNA.** Both are on disk: `~/Downloads/rigel_runs/cfrna/` (4 samples,
-including `mctp_vcap_rna20m_dna05m`) and the genome-scale index at `~/Downloads/rigel_runs/refs/rigel_index`.
+measured ~66 s against the EM's ~24 s: the exact reverse. **Profile on real cfRNA**
+(`~/Downloads/rigel_runs/cfrna/`, genome index at `~/Downloads/rigel_runs/refs/rigel_index`), never on
+this panel — `TRAPS: toys-rank-hotspots-backwards`, which cost a whole analysis once.
 
 ## §2 ⛔ AFTER THE CAMPAIGN — NOT NOW, kept because the briefs are complete and should not be re-derived
 

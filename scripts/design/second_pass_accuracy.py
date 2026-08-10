@@ -92,20 +92,23 @@ def truth_by_extent(bam_path: Path) -> tuple[dict[tuple[int, int, int], int], in
     return unique, ambiguous
 
 
+def intron_total(offsets: np.ndarray, flat: np.ndarray, index: np.ndarray) -> np.ndarray:
+    """Total intron length for each selected CSR row. ⚠ Module level so the per-hypothesis table below
+    uses the SAME expression the assigned length does — two implementations of one quantity is how the
+    two come to disagree."""
+    lo, hi = offsets[index], offsets[index + 1]
+    total = np.zeros(len(index), dtype=np.int64)
+    for i, (a, b) in enumerate(zip(lo, hi)):
+        if b > a:
+            pairs = flat[2 * a : 2 * b].reshape(-1, 2)
+            total[i] = int((pairs[:, 1] - pairs[:, 0]).sum())
+    return total
+
+
 def assigned_lengths(deferred, choices: np.ndarray) -> np.ndarray:
     """The `L` the drain assigned each held fragment: span minus observed minus chosen-hypothesis introns."""
     n = deferred.n_fragments
     span = deferred.end - deferred.start
-
-    def intron_total(offsets: np.ndarray, flat: np.ndarray, index: np.ndarray) -> np.ndarray:
-        lo, hi = offsets[index], offsets[index + 1]
-        total = np.zeros(len(index), dtype=np.int64)
-        for i, (a, b) in enumerate(zip(lo, hi)):
-            if b > a:
-                pairs = flat[2 * a : 2 * b].reshape(-1, 2)
-                total[i] = int((pairs[:, 1] - pairs[:, 0]).sum())
-        return total
-
     observed = intron_total(
         deferred.observed_intron_offsets, deferred.observed_introns, np.arange(n)
     )
@@ -116,6 +119,114 @@ def assigned_lengths(deferred, choices: np.ndarray) -> np.ndarray:
     return span - observed - implied
 
 
+def _defect_table(deferred, choices, truth, ref_map, payload, index, junctions, fl) -> None:
+    """⭐⭐ **DOES THE JUNCTION/LINE OPPORTUNITY MISMATCH ACTUALLY FLIP A CHOICE?**
+
+    Per held record: which hypotheses reproduce the TRUE length, whether those are genomic or spliced,
+    which one was drawn, and the BOTTLENECK exonic reach of the junctions involved. ⭐ The bottleneck is
+    the right summary because ``second_pass`` scores a spliced path with ``_bottleneck`` (a ``min``) over
+    its junctions, so the weakest junction is what the path is judged on.
+
+    ⛔ **The control is the other direction.** If truth-spliced records are lost to the genomic
+    hypothesis at short reach AND truth-genomic records are lost to the spliced one at the same rate,
+    that is difficulty, not bias. Both columns are printed, always.
+
+    ⚠ The reach bins are multiples of the library's OWN mean fragment length, because the mechanism is
+    ``A_j(w)/(w-1)`` — a function of reach RELATIVE to ``w`` — and not of any absolute number of bases.
+    """
+    from rigel.calibration.splice_graph import build_junction_geometry_arrays
+    from rigel.second_pass import _junction_id
+    from rigel.types import Strand
+
+    geom = build_junction_geometry_arrays(index)
+    bottleneck_reach = np.minimum(
+        np.asarray(geom.reach_lo, np.float64), np.asarray(geom.reach_hi, np.float64)
+    )
+    cuts = payload.cut_positions
+    n_hyp = int(deferred.hypothesis_offsets[-1])
+    implied_all = intron_total(
+        deferred.hypothesis_intron_offsets, deferred.hypothesis_introns, np.arange(n_hyp)
+    )
+    observed_all = intron_total(
+        deferred.observed_intron_offsets, deferred.observed_introns, np.arange(deferred.n_fragments)
+    )
+    span_all = deferred.end.astype(np.int64) - deferred.start.astype(np.int64)
+
+    mu = float((np.arange(fl.global_pmf.shape[0]) * fl.global_pmf).sum())
+    edges = (0.0, 0.5 * mu, 1.0 * mu, 2.0 * mu, 4.0 * mu, float("inf"))
+    labels = ("<0.5 mu", "0.5-1 mu", "1-2 mu", "2-4 mu", ">=4 mu")
+    #: [bin] -> [n_true_spliced, chose_genomic, n_true_genomic, chose_spliced]
+    tally = np.zeros((len(labels), 4), np.int64)
+    no_reach = 0
+
+    for i in range(deferred.n_fragments):
+        key = (ref_map.get(int(deferred.ref[i]), -1), int(deferred.start[i]), int(deferred.end[i]))
+        true_length = truth.get(key)
+        if true_length is None:
+            continue
+        h0, h1 = int(deferred.hypothesis_offsets[i]), int(deferred.hypothesis_offsets[i + 1])
+        base = int(span_all[i]) - int(observed_all[i])
+        kinds, lengths = [], []
+        reaches: list[float] = []
+        cut_lo = int(payload.ref_cut_offsets[int(deferred.ref[i])])
+        cut_hi = int(payload.ref_cut_offsets[int(deferred.ref[i]) + 1])
+        motif = int(deferred.sj_strand[i])
+        for h in range(h0, h1):
+            introns = [tuple(p) for p in deferred.hypothesis_introns_of(h).tolist()]
+            kinds.append(bool(introns))  # True == spliced
+            lengths.append(base - int(implied_all[h]))
+            for a, b in introns:
+                jid = _junction_id(
+                    junctions, cuts, cut_lo, cut_hi, a, b,
+                    motif if motif != int(Strand.NONE) else int(deferred.hypothesis_sj_strand[h]),
+                )
+                if jid >= 0:
+                    reaches.append(float(bottleneck_reach[jid]))
+        # ⛔ A record only speaks to this defect if BOTH kinds are on the ballot; otherwise there is no
+        # choice for the opportunity mismatch to tilt (`TRAPS: could-the-arm-have-fired`).
+        if not (any(kinds) and not all(kinds)):
+            continue
+        if not reaches:
+            no_reach += 1
+            continue
+        correct = [h - h0 for h in range(h0, h1) if lengths[h - h0] == int(true_length)]
+        if not correct:
+            continue
+        chosen = int(choices[i])
+        b = int(np.searchsorted(np.asarray(edges[1:], np.float64), min(reaches), side="right"))
+        b = min(b, len(labels) - 1)
+        true_spliced = all(kinds[c] for c in correct)
+        true_genomic = all(not kinds[c] for c in correct)
+        if true_spliced:
+            tally[b, 0] += 1
+            tally[b, 1] += int(not kinds[chosen])
+        elif true_genomic:
+            tally[b, 2] += 1
+            tally[b, 3] += int(kinds[chosen])
+
+    print("\n  ⭐⭐ SPLICED-vs-GENOMIC CONFUSION, by the junction's BOTTLENECK EXONIC REACH")
+    print(f"     (bins are multiples of this library's own mean fragment length, mu = {mu:.1f} bp;")
+    print("      only records with BOTH a genomic and a spliced candidate are counted)")
+    print(f"     {'reach':<12}{'n true-SPLICED':>16}{'-> chose genomic':>18}"
+          f"{'n true-GENOMIC':>16}{'-> chose spliced':>18}")
+    print("     " + "-" * 80)
+    for b, label in enumerate(labels):
+        ns, cg, ng, cs = (int(v) for v in tally[b])
+        if ns == 0 and ng == 0:
+            continue
+        print(f"     {label:<12}{ns:>16,}{100 * cg / ns if ns else 0:>17.1f}%"
+              f"{ng:>16,}{100 * cs / ng if ng else 0:>17.1f}%")
+    ts, tg = int(tally[:, 0].sum()), int(tally[:, 2].sum())
+    print("     " + "-" * 80)
+    print(f"     {'ALL':<12}{ts:>16,}{100 * int(tally[:, 1].sum()) / ts if ts else 0:>17.1f}%"
+          f"{tg:>16,}{100 * int(tally[:, 3].sum()) / tg if tg else 0:>17.1f}%")
+    print(f"     records with no resolvable junction: {no_reach:,}")
+    print("     ⛔ THE DEFECT PREDICTS the 'chose genomic' column RISES as reach falls, while the")
+    print("       'chose spliced' control does NOT. Both rising together is difficulty, not bias.")
+    if ts == 0 and tg == 0:
+        print("     ⛔ EMPTY — no record had both kinds on the ballot, so this table tests NOTHING.")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--pilot", type=Path, default=DEFAULT_PILOT)
@@ -124,6 +235,17 @@ def main() -> int:
     ap.add_argument("--conditions", nargs="*", default=[DEFAULT_CONDITION])
     ap.add_argument("--seed", type=int, default=0, help="the drain's multinomial seed")
     ap.add_argument("--json", type=Path, default=None)
+    ap.add_argument(
+        "--defect",
+        action="store_true",
+        help="⭐⭐ the SPLICED-vs-GENOMIC confusion, stratified by the junction's EXONIC REACH. "
+             "The genomic hypothesis reads `edge_unspliced_inv_length_sum`, whose `1/(w-1)` deposit "
+             "cancels its `w-1` opportunity EXACTLY, so E = rho. The spliced hypothesis reads "
+             "`sj_inv_length_sum`, same quantum but a TAPERED opportunity, so "
+             "E = rho * E[A_j(w)/(w-1)] < rho — the shortfall growing as the flanking exons shorten. "
+             "If that biases the choice, records whose truth is SPLICED are lost to the GENOMIC "
+             "hypothesis at short reach and the effect must vanish at long reach.",
+    )
     args = ap.parse_args()
 
     suite = args.suite or args.pilot.parent
@@ -230,6 +352,11 @@ def main() -> int:
         print("  by candidate count:")
         for count, stats in row["by_candidate_count"].items():
             print(f"     {count} candidates  n={stats['n']:>9,}  exact {100 * stats['exact_fraction']:.1f} %")
+
+        if args.defect:
+            _defect_table(
+                deferred, choices, truth, bam_ref_id_of_payload_ref, payload, index, junctions, fl
+            )
 
     if args.json and rows:
         args.json.write_text(json.dumps(rows, indent=2, sort_keys=True))
