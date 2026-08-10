@@ -301,23 +301,6 @@ class CalibrationConfig:
     #: 1.6 %); every stranded scenario better or flat (R4 clean).
     intron_factory: bool = True
 
-    #: **The FRAGMENT-LENGTH composition likelihood** (`calibration.length_likelihood`, P2 —
-    # The accumulator has stored ``inv_length_sum`` and
-    #: ``length_sum`` on every population since S5.a; this turns them into an ``(m, K)`` log-likelihood on
-    #: the ``λ`` grid, added to ψ beside the strand term and the intron factory, with its curvature
-    #: registered as composition evidence ``I_length``.
-    #:
-    #: ⭐ **Why it is the only source that reaches an AMBIG node or an unstranded library.** The strand
-    #: Fisher information is ``I(f_g) ∝ (2κ−1)²`` — identically 0 at ``κ = ½`` — and on a both-strand node
-    #: the strand term is rank-1 in the tilt ``θ``, so its Schur complement on ``λ`` is exactly 0. The
-    #: length likelihood has no ``θ`` dependence at all. Measured: **13.3–40.1 % of library
-    #: mass** with no own composition evidence in EVERY chr22 pilot condition (93.3–100 % of AMBIG mass),
-    #: and **100 %** on all four zero-gDNA and both unstranded conditions.
-    #:
-    #: ⚠ **DEFAULT OFF for its first landing**, so the A/B has an arm and ``False`` is byte-identical to
-    #: the S5.f/P1 path. The measured effect is the P2 ledger entry; the default is the owner's call.
-    length_likelihood: bool = False
-
     #: ⛔⛔⛔ **MESSAGE PROPAGATION — the belief-propagation relay between neighbouring slots. DEFAULT OFF**
     #: (owner, 2026-08-07). ``False`` installs ``messages.silent.SilentPolicy``, which sends nothing: ψ
     #: carries each slot's OWN evidence alone — its two strand counts, its spliced count, the derived
@@ -344,10 +327,15 @@ class CalibrationConfig:
     #: ⭐ Both AMBIG loci, which is exactly where ``κ = ½`` makes the strand λ-term identically 0 so the
     #: slot has NO own composition evidence and a message is the only source there is.
     #:
-    #: ⚠ **So this default is a STUDY CONFIGURATION, and the way out is to give that slot its own
-    #: evidence rather than to keep tuning the relay** — ``length_likelihood`` above is the only channel
-    #: that can, being the one with no ``θ`` dependence. Until it is priced on a panel that can resolve it,
-    #: turning this back on is one word and every operator remains individually switchable.
+    #: ⚠ **So this default is a STUDY CONFIGURATION**, and turning it back on is one word — every
+    #: operator inside ``HeadPolicy`` remains individually switchable.
+    #:
+    #: ⛔ **The planned way out has been MEASURED AND REFUSED.** This comment used to say the exit was to
+    #: give that slot its own θ-independent evidence via a fragment-length composition channel. That
+    #: channel was built, priced on the drained arm and DELETED (2026-08-10): its answer is not a function
+    #: of the fragment-length gap at all — closing the gap to 1e-9 bp leaves it reporting 0.59-0.72 on
+    #: libraries whose truth is 0.00-0.57 — because a Gaussian log-likelihood is asymptotically LINEAR in
+    #: the composition, so its argmax is a SIGN saturated at a grid endpoint. See `TRAPS.md`.
     message_propagation: bool = False
 
     #: **Calibration refit iterations — the prior BOOTSTRAP.** Each iteration re-fits the population gDNA

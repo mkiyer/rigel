@@ -46,7 +46,7 @@ from .node_geometry import (
     NodeGeometry,
     NodeStatics,
     g1_locked,
-    node_global_geometry,
+    node_gdna_geometry,
 )
 from .node_init import build_node_init
 from .signature import coarse_type_array
@@ -291,7 +291,6 @@ def solve_chain(
     n_grid_ss: int | None = None,
     gdna_prior=None,
     intron_prior=None,
-    length_loglik=None,
     policy=None,
     _capture: dict | None = None,
 ) -> NodeBelief:
@@ -331,7 +330,7 @@ def solve_chain(
     u_pos, u_neg = CNT[:, 0], CNT[:, 1]
     spliced_slot = np.asarray(geometry.spliced_count, np.float64).sum(axis=1)
     # per-slot "global" gDNA support — the basis the rate prior is fit and projected on.
-    mass_global, eff_global = node_global_geometry(geometry)
+    mass_global, eff_global = node_gdna_geometry(geometry)
 
     _, solve_grid = _logodds_grid(int(n_grid), float(logodds_window))
     kappa = float(rna_sense_frac)
@@ -376,7 +375,6 @@ def solve_chain(
             # ⭐ the FRAGMENT-LENGTH λ-factor. It enters the LOCAL solve and the FINAL one, exactly like
             # the intron factory, so a slot's own length evidence both sets its belief and propagates.
             # ``None`` ⇒ byte-identical to the path without it.
-            length_loglik=length_loglik,
             fg_ref=fg_ref,
             fpos_ref=fpos_ref,
             fneg_ref=fneg_ref,
@@ -417,7 +415,6 @@ def solve_chain(
         belief=belief,
         global_logprior=global_lp,
         intron_prior=intron_prior,
-        length_loglik=length_loglik,
     )
 
     ctx = StepContext(

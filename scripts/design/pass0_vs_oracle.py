@@ -99,7 +99,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests" / "calibrat
 from _oracle import ORIGINS, OracleTruth, _split_bam  # noqa: E402
 from rigel.scan_cache import ScanCacheKeyError, read_scan_cache, write_scan_cache  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
-from rigel.calibration.length_likelihood import build_slot_moments  # noqa: E402
+from rigel.calibration.effective_length import build_slot_moments  # noqa: E402
 from rigel.calibration.node_chain import EDGE, NODE  # noqa: E402
 from rigel.calibration.node_geometry import g1_locked  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402

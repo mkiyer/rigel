@@ -32,7 +32,7 @@ from rigel.calibration.node_chain import EDGE, NODE, build_node_chain
 from rigel.calibration.node_geometry import (
     NodeGeometry,
     build_node_geometry,
-    node_global_geometry,
+    node_gdna_geometry,
     node_total_density,
 )
 from rigel.calibration.splice_graph import JunctionGeometry
@@ -542,12 +542,12 @@ def test_a_junction_on_a_LATER_REFERENCE_lands_on_that_references_own_line(parts
 # ---------------------------------------------------------------------------
 
 
-def test_node_global_geometry_no_longer_SUMS_TWO_FACES(geometry, parts):
+def test_node_gdna_geometry_no_longer_SUMS_TWO_FACES(geometry, parts):
     """The predecessor returned ``mass_l + mass_r`` over ``E_l + E_r`` at a boundary, and the docstring
     carried a long note about a ``1/2`` that was cancelling a missing ``1/2``. With one set of numbers
     there is nothing to sum and the note goes with it."""
     _, _, _, chain, _ = parts
-    mass, eff = node_global_geometry(geometry)
+    mass, eff = node_gdna_geometry(geometry)
     np.testing.assert_array_equal(mass, geometry.unspliced_count.sum(axis=1))
     np.testing.assert_array_equal(eff, geometry.eff_gdna)
 

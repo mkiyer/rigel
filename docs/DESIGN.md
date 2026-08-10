@@ -205,6 +205,16 @@ starts outside it.
 > and never becomes an EM unit at all. What the prior arbitrates is exactly the unspliced fragments
 > inside transcript bounds.
 
+⭐ **AND THE CROSSING→FRAGMENT CONVERSION IS POPULATION-BLIND, MEASURED AND BOUNDED** (2026-08-10). The
+edge term is converted by `q = mass/count`, measured per line on the POOLED population and applied to each
+component. gDNA and RNA have different true `q` — not because of fragment length (the equal-length null
+carries the LARGEST error) but because gDNA crosses lines in long intergenic nodes where `q → 1` while RNA
+sits among short exons. On the TOTAL prior the node term dilutes it to `Δphi` **+0.00013 … +0.00596**, at
+or below calibration's own noise floor, and it is not repairable in production because the driver is
+placement rather than length. ⛔ Recorded, not fixed: `TRAPS: a-pooled-conversion-applied-per-component`.
+⚠ A DIFFERENT quantity from the `Δphi ≤ 5e-4` below, which is the shipped `f_g` against the unspliced
+pool; this one isolates the `q` conversion with a perfect `f_g`.
+
 ⛔ Putting spliced RNA into `a_r` would penalise gDNA with fragments it could never have won. ⭐ Measured:
 against the population it describes — gDNA units + UNSPLICED RNA units — the shipped claim
 `phi = a_g/(a_g+a_r)` is exact to **≤ 5e-4** on all four flgap conditions, drained and undrained. ⚠ An

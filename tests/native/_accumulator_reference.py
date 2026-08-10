@@ -904,7 +904,7 @@ class Accumulator:
         # ⭐ TWO channels on the spliced bank, FOUR on the unspliced one, and the asymmetry is the
         # design rather than an omission. A spliced crossing is certified RNA: nothing deconvolves it,
         # so its length moments have no consumer and are not stored. The unspliced bank is the mixture,
-        # and `length_likelihood` is built on exactly its moments.
+        # and the length banks are built on exactly its moments.
         edge_count = t.edge_spliced_count if spliced else t.edge_unspliced_count
         edge_mass = t.edge_spliced_mass if spliced else t.edge_unspliced_mass
         quantum_edge = inv_length_quantum(length - 1) if length >= 2 else 0

@@ -76,7 +76,7 @@ from rigel.calibration.node_chain import EDGE, NODE
 from rigel.calibration.node_geometry import (
     NodeGeometry,
     init_beliefs,
-    node_global_geometry,
+    node_gdna_geometry,
     node_total_density,
 )
 from rigel.calibration.signature import BIT_EXON_POS, BIT_INTRON_POS
@@ -255,7 +255,7 @@ def test_the_two_FLANK_TOTALS_differ_by_exactly_that_flanks_own_flux():
     g, chain = parts.geometry, parts.chain
     f_g = np.full(int(chain.n_slots), 0.4)
     rho_lo, rho_hi = node_total_density(g, f_g)
-    mass, eff_g = node_global_geometry(g)
+    mass, eff_g = node_gdna_geometry(g)
     eff_r = np.asarray(g.eff_rna, float)
     unspliced = np.asarray(mass, float) * (
         0.4 / np.where(np.asarray(eff_g, float) > 0, eff_g, np.inf)

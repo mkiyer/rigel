@@ -102,7 +102,6 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
             "npmle",
             "gdna_landscape",
             "background_reference",
-            "length_likelihood",
         ),
     ),
     (

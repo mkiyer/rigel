@@ -142,7 +142,7 @@ P0 = _sibling("pass0_vs_oracle.py")
 from rigel.calibration import node_init as NI, sweep as SW  # noqa: E402
 from rigel.calibration import simplex_logodds as SL  # noqa: E402
 from rigel.calibration.node_chain import NODE  # noqa: E402
-from rigel.calibration.node_geometry import node_global_geometry  # noqa: E402
+from rigel.calibration.node_geometry import node_gdna_geometry  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
 
@@ -289,7 +289,7 @@ def _install_vertex_pin(evidence_free_only: bool, force_empty: bool = False):
         lock[tgt] = True
 
         v_fg, v_fr = NI.own_composition_logvar(f_g, tau, lock)
-        M, E_g = node_global_geometry(geometry)
+        M, E_g = node_gdna_geometry(geometry)
         M = np.asarray(M, np.float64)
         E_g = np.asarray(E_g, np.float64)
         E_r = np.asarray(geometry.eff_rna, np.float64)

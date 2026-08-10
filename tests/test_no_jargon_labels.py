@@ -15,7 +15,7 @@ would not have caught.** Measured over the whole tree before the rename:
 label         meant, in `TRAPS.md`                        …and ALSO meant
 ============  ==========================================  ===============================================
 ``A1``        a validator that checks itself              the **FIDELITY** criterion in `SUCCESS.md`
-``C1``        a purity filter is a length filter          a **moment variable** in `length_likelihood.py`
+``C1``        a purity filter is a length filter          a **moment variable** in `effective_length.py`
 ``G1``        **no magic numbers**                        a **structurally pure-gDNA object** — 201 uses
 ============  ==========================================  ===============================================
 
@@ -56,9 +56,9 @@ ALLOWED: dict[str, tuple[str, ...]] = {
     "A1": ("docs/SUCCESS.md", "docs/TRAPS.md"),
     "A2": ("docs/SUCCESS.md",),
     "A3": ("docs/SUCCESS.md",),
-    # moment variables in the length-likelihood quadrature
+    # moment variables in the opportunity-tilted length quadrature
     "C2": (
-        "src/rigel/calibration/length_likelihood.py",
+        "src/rigel/calibration/effective_length.py",
         "src/rigel/native/fast_exp.h",
         "docs/TRAPS.md",
     ),  # quoted inside the migration lesson
@@ -78,7 +78,7 @@ ALLOWED: dict[str, tuple[str, ...]] = {
     # migration was found INCOMPLETE: a Python test asserting a deletion record said "DELETED by C2" and
     # the header it reads still did, because the first pass covered only .py and .md.
     "C1": (
-        "src/rigel/calibration/length_likelihood.py",
+        "src/rigel/calibration/effective_length.py",
         "docs/TRAPS.md",
         "src/rigel/native/fast_exp.h",
     ),  # Taylor coefficients 1/n!

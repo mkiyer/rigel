@@ -58,7 +58,7 @@ from .node_geometry import (
     build_node_geometry,
     build_node_statics,
     init_beliefs,
-    node_global_geometry,
+    node_gdna_geometry,
 )
 from .sweep import chain_edge_deconv, chain_node_deconv, solve_chain
 from .density_model import node_gdna_density
@@ -155,36 +155,6 @@ def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
     return node_eff, edge_eff
 
 
-def _build_length_loglik(chain, geometry, region_arrays, gdna_fl_pmf, rna_fl_pmf, config):
-    """The per-slot FRAGMENT-LENGTH log-likelihood on the ψ solve grid → ``(n_slots, K)``, or ``None``.
-
-    ⭐ **The fourth information source, finally wired**. The accumulator
-    has measured ``inv_length_sum`` and ``length_sum`` on every population since S5.a and nothing read
-    them; `length_likelihood` turns them into evidence about ``f_g`` on the same ``λ`` grid the strand
-    term lives on, and `node_init` registers its curvature as ``I_length``.
-
-    ⚠ **Built here, once, for the same reason ``intron_prior`` is**: this is the only layer holding the
-    chain, the geometry AND both fitted pmfs at the same time, and building it twice would put two
-    implementations of one quantity in the tree.
-
-    ⚠ **Strand-agnostic**: the two genome-strand columns are summed. Which strand a read aligned to says
-    nothing about whether its molecule was gDNA or RNA; the strand Beta-Binomial keeps its own columns.
-
-    ⛔ Returns ``None`` when the switch is off, which is byte-identical to the pre-P2 path.
-    """
-    if not getattr(config, "length_likelihood", False):
-        return None
-    from .length_likelihood import build_slot_moments, length_loglik
-
-    _, fg_grid = _logodds_grid(int(config.sweep_n_grid), float(config.sweep_logodds_window))
-    return length_loglik(
-        build_slot_moments(chain, region_arrays, gdna_fl_pmf),
-        build_slot_moments(chain, region_arrays, rna_fl_pmf),
-        np.asarray(geometry.unspliced_count, np.float64).sum(axis=1),
-        np.asarray(geometry.unspliced_inv_length_sum, np.float64),
-        np.asarray(geometry.unspliced_length_sum, np.float64),
-        fg_grid,
-    )
 
 
 def _build_intron_prior(chain, substrate, region_arrays, node_eff_len, config, bg=None):
@@ -465,9 +435,6 @@ def calibrate(
         if (config.intron_factory and intron_background is not None)
         else None
     )
-    length_loglik_arr = _build_length_loglik(
-        chain, geometry, region_arrays, gdna_fl_pmf, rna_fl_pmf, config
-    )
     # Message precision is entirely SELF-CONTAINED in the sweep: the source's own honest belief precision
     # (strand + count, from `node_init.build_node_init`), degraded by the reframe's scale variance
     # (σ²_transfer = Var(log r)) and the DerSimonian–Laird composition-mismatch b̂² — all derived from counts and
@@ -495,7 +462,6 @@ def calibrate(
             n_grid_ss=config.sweep_n_grid_single_strand,
             gdna_prior=prior,
             intron_prior=intron_prior,
-            length_loglik=length_loglik_arr,
             # ⛔⛔⛔ **MESSAGE PROPAGATION IS OFF (owner, 2026-08-07), AND A MEASUREMENT PUT IT THERE.**
             # `SilentPolicy` sends nothing: psi carries each slot's OWN evidence alone — its two strand
             # counts, its spliced count, the derived reference, the fitted gDNA prior and the intron
@@ -509,10 +475,11 @@ def calibrate(
             #
             # ⚠ The panel TOTAL is +99.9 % worse, because the one stratum the messages help carries 73 % of
             # the panel's error — so this is a deliberate trade and not a free win. `ROADMAP.md` carries it.
-            # ⭐ That stratum is exactly where kappa = 1/2 makes the strand lambda-term exactly 0, so a slot
-            # has no own composition evidence at all and a message is the only source there is. The way out
-            # is to GIVE it one — `length_likelihood` is the only channel that is theta-independent and can
-            # — not to keep tuning a layer that is harmful everywhere else.
+            # ⭐ That stratum is exactly where kappa = 1/2 makes the strand lambda-term exactly 0, so a
+            # slot has no own composition evidence at all and a message is the only source there is.
+            # ⛔ The planned way out — a theta-independent FRAGMENT-LENGTH channel — was built, measured
+            # on the drained arm and DELETED (2026-08-10): its answer is not a function of the length gap
+            # at all. `TRAPS.md` carries the mechanism.
             #
             # ⛔ Switching back is ONE WORD, `HeadPolicy()`, and every operator is still there behind its
             # own named switch, so this is reversible and each operator stays individually priceable.
@@ -530,7 +497,7 @@ def calibrate(
     # RETIRED (that was a density-uniformity proxy, invalid under capture, and identically 0 in pass-0); the
     # solver now derives σ²_transfer itself. What remains is the QC report's P(ρ) landscape + the toy-injection
     # substrate, so it is fit here and consumed below, never inside the sweep.
-    mass_global, eff_global = node_global_geometry(geometry)
+    mass_global, eff_global = node_gdna_geometry(geometry)
     if inj is not None and inj.enrichment_prior is not None:
         # INJECTED population enrichment landscape — a toy has too few nodes to resolve enriched vs depleted
         # modes. (Scale note: the toy's densities must be generated at the reference library's depth so its

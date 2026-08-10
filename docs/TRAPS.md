@@ -149,6 +149,9 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 
 - `specificity-and-sense-are-complements` — Strand specificity is TWO different quantities and they are complements.
 - `strand-measures-the-tilt` — Strand measures the TILT, not the gDNA fraction.
+- `a-linear-likelihood-emits-a-sign` — A LIKELIHOOD THAT IS LINEAR IN THE PARAMETER HAS NO MODE, ONLY A DIRECTION — and on a bounded grid that is a saturated vote.
+- `amplitude-fades-influence-does-not` — A TERM THAT NORMALISES AWAY CAN STILL DECIDE THE ANSWER, BECAUSE AN ARGMAX IS SCALE-FREE.
+- `a-pooled-conversion-applied-per-component` — A RATIO MEASURED ON THE POOLED POPULATION AND APPLIED TO EACH COMPONENT IS POPULATION-BLIND.
 - `equal-lengths-carry-no-composition` — At equal component mean lengths the length channel carries EXACTLY ZERO information about
 - `capture-is-1000x-on-exons` — Hybrid capture is ~1000× on exons and only gDNA reads it cleanly.
 - `capture-selects-for-length` — Capture SELECTS FOR LENGTH, and the post-capture distributions are the baseline.
@@ -1060,6 +1063,62 @@ cfRNA is — comparing them reads as a sign error. A fitted κ of 0.0101 on a "0
 `p = ½ + (κ−½)·d` — the gDNA fraction **cancels identically**. Strand reaches gDNA only through the
 triangle bound `f_g ≤ 1 − |d|`: tight on a single-strand node, slack on a both-strand node. And
 `I(f_g) = 0` **exactly** at κ = ½, for any count and any overdispersion.
+
+**a-linear-likelihood-emits-a-sign. ⛔⛔ A LIKELIHOOD THAT IS ASYMPTOTICALLY LINEAR IN ITS PARAMETER HAS
+NO MODE, ONLY A DIRECTION — AND ON A BOUNDED GRID THAT DIRECTION SATURATES AT AN ENDPOINT.** Measured
+2026-08-10 on the drained arm; it cost a feature, and the feature was deleted at `f470a570`.
+
+A fragment-length composition channel was built on a bivariate Gaussian in `(Σ1/w, Σw)` whose mean moves
+with the composition `π` by `N·Δ`, `Δ = μ_g − μ_r`. The term quadratic in `π` is `O(Δ²)` while the linear
+term is `O(Δ)`, so as the two fitted pmfs converge the row degenerates into a straight tilt whose maximum
+can only be a grid endpoint. What it then emits is `sign(Δ' V⁻¹ (x − N·μ))` — the **direction of the
+model's residual, with the magnitude divided out** — and when `Δ ≈ 0` that residual is mis-specification,
+not composition.
+
+⭐ **The measurement that proves the answer is not a function of `Δ` at all.** Interpolating `gdna_pmf`
+toward `rna_pmf` across TWELVE orders of magnitude: at a gap of ~1e-9 bp the channel reported **0.72 /
+0.59 / 0.72** on libraries whose truths were **0.00 / 0.00 / 0.57**, and growing the gap to its real value
+made every one of them BETTER. ⛔ So closing the gap is strictly harmful and every "fix the pmf" repair is
+refused. The fragment-length MODELS were exonerated by the same run.
+
+⭐ **The tell, available before any measurement: expand the log-likelihood in the parameter and look at
+the order of the leading term.** If it is linear, the argmax is a sign and the object is a vote, not an
+estimate. The sufficient summary of such a channel is `(π̂, I)` — a location and an information — never a
+row handed to a normaliser.
+
+**amplitude-fades-influence-does-not. ⛔ A TERM THAT NORMALISES AWAY CAN STILL DECIDE THE ANSWER, BECAUSE
+AN ARGMAX IS SCALE-FREE.** Same campaign, and it is why fixing the precision was never going to be enough.
+
+The channel's row amplitude faded correctly — linearly in `Δ`, `9.69e-12` over a `1e-12` gap ratio. Its
+**participation** did not: the discrimination guard is an EXACT inequality, so `Δ = 0` gave 0 live slots
+and `Δ = 5e-12 bp` gave **100.00 %** of the library mass. Its **declared precision** did not either:
+`density_factor_precision` normalises the row and inverts the variance, so a near-flat row returns
+`1/Var(uniform over the grid)` — the grid's own width sold as evidence, on 100 % of live slots.
+
+⭐ **Three quantities, three different behaviours, and only the first one was ever checked.** When a term
+enters a normalised sum, report its amplitude, its participation and its declared precision SEPARATELY;
+they do not fade together, and it is the two that do not fade that decide the answer.
+
+**a-pooled-conversion-applied-per-component. ⛔ A RATIO MEASURED ON THE POOLED POPULATION AND APPLIED TO
+EACH COMPONENT SEPARATELY IS POPULATION-BLIND — AND THE BLINDNESS NEED NOT BE THE AXIS YOU EXPECT.**
+Measured 2026-08-10, `edge_q_population.py`.
+
+`assemble_priors` converts a line's crossing INCIDENCE to a FRAGMENT count with `q = mass/count`, measured
+per line on the whole population and applied to the gDNA and RNA parts separately. `q` is an explicit
+function of fragment length, so the obvious worry was that a length gap breaks it.
+
+⛔ **It does not. The equal-length null shows the LARGEST error.** At a 4.98 bp gap `q_g` = 0.6330 against
+`q_r` = 0.5233 and the edge term is over-counted by **+3.18 %** — five times the +0.63 % at a 17× larger
+gap, and the sign does not track the gap either. ⭐ The driver is **PLACEMENT**: gDNA is genomically
+uniform and crosses lines in long intergenic nodes where `q → 1`; RNA is confined to transcripts, where
+exon nodes are short. The two populations occupy different parts of the partition, so they differ at
+identical lengths.
+
+⭐ **Bounded and left alone deliberately**: on the TOTAL prior the node term dilutes it to `Δphi`
+**+0.00013 … +0.00596** — at most 0.6 pp, at or below calibration's own noise floor. ⚠ And it is not
+repairable in production: the driver is *where* each population sits, so `q_c` cannot be modelled from the
+fitted pmfs, and the pooled bank is the only per-line evidence there is. **Record the bound, build
+nothing.**
 
 **equal-lengths-carry-no-composition. At equal component mean lengths the length channel carries EXACTLY ZERO information about
 composition, at any depth.** The 2×2 deconvolution is identified only through `μ_g − μ_r`. A claim that

@@ -90,7 +90,7 @@ TH = _sibling("toy_harness.py", DESIGN)
 from rigel.calibration import node_init as NI, sweep as SW  # noqa: E402
 from rigel.calibration.calibrate import calibrate  # noqa: E402
 from rigel.calibration.node_chain import NODE  # noqa: E402
-from rigel.calibration.node_geometry import node_global_geometry  # noqa: E402
+from rigel.calibration.node_geometry import node_gdna_geometry  # noqa: E402
 from rigel.calibration.region_arrays import RegionArrays  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
@@ -262,7 +262,7 @@ def make_override(arm: str, region_arrays, truth):
         f_neg = np.array(ni.f_neg, np.float64)
         tau = np.array(ni.tau_lam, np.float64)
         lock = np.array(ni.struct_lock, bool)
-        M, E_g = node_global_geometry(geometry)
+        M, E_g = node_gdna_geometry(geometry)
         M = np.asarray(M, np.float64)
         E_g = np.asarray(E_g, np.float64)
         E_r = np.asarray(geometry.eff_rna, np.float64)

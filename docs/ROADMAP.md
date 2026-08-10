@@ -26,7 +26,7 @@ things nothing had measured before. If it grows again, prune it rather than lett
 | **Stage A — the accumulator** | ✅ **DONE**, and that is a measurement | perfecting BOTH fragment-length models is worth **2.6 %** of the deliverable, down from 22.2 % |
 | **calibration, 3 of 4 strata** | ✅ median library `f_gdna` error **0.005–0.012**, and ⭐ the PRIOR the EM reads is within **2.5–4.6 %** of a perfect one | stranded × on/off and unstranded × capture-OFF |
 | ⛔ **calibration, unstranded × capture-ON** | ⛔ **BLIND** — reports **0.033–0.058** while truth spans **0.00 → 0.98**, and hands the EM a gDNA prior **94.4 %** short | not noisy; a flat line. Still the whole open problem. ⛔ `length_likelihood` does NOT fix it — see the row below |
-| ⛔⛔ **`length_likelihood`** | ⛔ **MEASURED 2026-08-10 AND IT IS INADMISSIBLE.** On the g00 ZERO-gDNA control, truth exactly 0, it reports **0.539 / 0.573** gDNA (unstranded). Mean `|err|` over the five ladder conditions tested **0.228 → 0.393 (+72 %)** | ⚠ It looks like an **87 %** win on the flgap pair — but that panel is ALL g50 and the channel returns a near-CONSTANT ~0.5 (g00 0.539, g50 0.522, g98 0.287 unstranded), so g50's truth of ~0.5 flatters it. §1.4 |
+| ✅ **the fragment-length channel** | ⛔ **MEASURED TO A VERDICT AND DELETED** (2026-08-10, `f470a570`). Its answer was not a function of the pmf gap at all: at a gap of ~1e-9 bp it reported **0.72 / 0.59 / 0.72** on libraries whose truth was **0.00 / 0.00 / 0.57**, and closing the gap made every one WORSE | ⭐ A Gaussian log-likelihood is asymptotically LINEAR in the composition, so its argmax is a SIGN saturated at a grid endpoint. `TRAPS: a-linear-likelihood-emits-a-sign`. ⭐ The fragment-length MODELS were exonerated by the same run |
 | ✅ **the prior ASSEMBLER and its POPULATION** | ✅ `rel` **0.0019–0.0027** with perfect masses in and **4.9e-4** with perfect per-component shares; the composition claim `a_g:a_r` is exact against the unspliced pool (`Δphi` **≤ 5e-4**) | ⭐ the assembler was **0.179**: the conserved-count rewrite took it to 0.0202 and the YARDSTICK took it to 0.0027 (`TRAPS: score-the-consumers-own-count`). ⛔ Two entries here once claimed a 72 % residual and a +0.07 tilt; both were the reference, not the tool |
 | ✅ **the fragment-length models** | ✅ accurate — `pi(w)`'s de-tilt reads **211.77** against a true **212.20**, and the gDNA pmf is exact to **0.02 bp** off capture | ⛔ a claimed +10.7 % bias was a truth-parser bug (`TRAPS: a-truth-table-of-aggregates`). ⚠ §4 retires the RNA-FL row for the DIVISOR consumer only; a pricing is per consumer |
 | ⚠ **the gDNA pmf under capture** | ⛔ the last unfixed length defect: **+13.6 bp** at a 330 bp gDNA mean and **+3.5 bp** at 120, drained per-bin `fit/true` **1.22 … 4.18** in the tail | ⭐ EXACT off capture (+0.1 / +0.0 bp) and untouched by the drain (Δ ≤ 0.1 bp), so it is a PLACEMENT problem — `EQUATIONS.md` §4.4 — and must not be attacked by editing `gdna_opportunity` |
@@ -97,47 +97,19 @@ contaminated row, and worse by **5.5×** than the blind one. Only a zero control
 (~48 s/condition), and §0 carries the handful that rank the work. A closed item earns a line, not a
 report.
 
-### §1.4 ⛔⛔ `length_likelihood` — MEASURED FOR THE FIRST TIME 2026-08-10, AND IT IS INADMISSIBLE
+### §1.4 ✅ `length_likelihood` — MEASURED, REFUSED AND DELETED 2026-08-10
 
-`scripts/design/length_likelihood_ab.py`, one thing varied (the config flag) on the same cached scan,
-scored against each condition's TRUE `f_gdna` from the origin-split caches.
+Built, priced on the drained arm, and removed at `f470a570` along with every instrument that existed to
+price it. The mechanism and the numbers are `TRAPS: a-linear-likelihood-emits-a-sign` and
+`TRAPS: amplitude-fades-influence-does-not`; the panel lesson is
+`TRAPS: a-single-level-panel-cannot-see-a-constant`. ⛔ **Do not rebuild it.** The opportunity-tilted
+length moments it was built on survive in `effective_length.py`, where they were always a geometry rather
+than a composition claim.
 
-**On the flgap pair (8 conditions) it looks like a triumph:** better on 7 of 8, mean
-`|f_gdna − truth|` **0.133 → 0.0175 (−87 %)**, and the blind stratum apparently resolved — 0.0324 → 0.5222
-against a truth of 0.507. Mass with no own composition evidence falls **97–99 % → 5–7 %**, which is
-exactly the hole the channel was built to fill.
-
-⛔⛔ **AND THE ZERO-gDNA CONTROL DESTROYS IT.** Truth is exactly 0 at `g00`:
-
-| ladder condition (truth 0.000) | OFF | **ON** |
-|---|---|---|
-| g00 ss_0.50 capture OFF | 0.1776 | ⛔ **0.5394** |
-| g00 ss_0.50 capture ON | 0.0350 | ⛔ **0.5729** |
-| g00 ss_0.99 capture OFF | 0.0030 | 0.1059 |
-| g00 ss_0.99 capture ON | 0.0022 | 0.0539 |
-| g98 ss_0.50 capture ON (truth 0.980) | 0.0576 | 0.2865 |
-
-Mean `|err|` over those five: **0.228 → 0.393 (+72 %)**. A library with no gDNA is reported as 54–57 %
-gDNA.
-
-⭐⭐ **THE MECHANISM, AND IT EXPLAINS BOTH TABLES AT ONCE: on unstranded data the channel returns a
-near-CONSTANT answer of about 0.5 rather than a truth-tracking one** — 0.539 at g00, 0.522 at g50, 0.287
-at g98, while truth spans 0.00 → 0.98. **The whole flgap panel is g50, where that constant is right.**
-On stranded data the effect is much smaller (0.054–0.106 at g00) because the strand channel still
-supplies real evidence and dilutes it.
-
-⭐ It is consistent with the channel census: at `g00` the two fitted pmfs are **1.2 bp** apart (there is no
-gDNA to fit one on, so it falls back to the anchor), the channel's rows are near-flat, and its argmax
-carries bias **+0.66** with median `|Δ| = 1.0000` at a precision pinned to `1/Var(λ grid) = 0.029`
-(`EQUATIONS.md` §3d). Enabling it lets that speak at **100 %** of slots.
-
-⛔ **So the smooth shrinkage (§3d) is NECESSARY AND NOT SUFFICIENT**: it corrects the PRECISION, and this
-failure is in the MODE — the near-flat row's argmax, added to ψ. Fixing the precision alone would not
-have prevented it.
-
-⚠ **THE LESSON FOR THE PANEL, NOT JUST THE CHANNEL: an 8-condition panel at ONE gDNA level cannot
-validate a composition estimator.** The flgap pair varies fragment length and capture and strand — and
-holds `g50` fixed. `TRAPS: a-single-level-panel-cannot-see-a-constant`.
+⚠ **What this closes and what it does not.** It closes the "give an AMBIG slot its own θ-independent
+evidence" programme — there is no such channel and the search for one is over. It does NOT close
+unstranded × capture-ON, which remains the one blind stratum; the surviving lever there is message
+propagation, which is already measured to help exactly that stratum and is one config flag.
 
 ### §1.0 ⚠ ITEM 4 — AND THE PERFORMANCE SUBSTRATE IS A TRAP
 

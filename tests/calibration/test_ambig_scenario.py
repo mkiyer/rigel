@@ -128,7 +128,8 @@ def _ambig_gdna_fraction(work_dir, *, gdna_abundance: int, nrna_abundance: float
         "Schur complement on a both-strand node is exactly 0 — so with no message it falls back to psi's "
         "uninformative reference and reads f_g = 0.458 against a truth of 0. THIS IS THE MEASURED PRICE OF "
         "THE SWITCH, not a new defect: it read < 0.08 with messages on. ⭐ It goes GREEN the day either "
-        "(a) message_propagation is turned back on, or (b) length_likelihood gives an AMBIG slot its own "
+        "(a) message_propagation is turned back on, or (b) some future theta-independent channel gives an "
+        "AMBIG slot its own "
         "composition evidence — which is the actual fix and the reason the switch is off."
     ),
 )

@@ -111,7 +111,7 @@ import rigel.calibration.strand_balance  # noqa: E402,F401  (registers the modul
 from rigel.calibration import node_init as NI, sweep as SW  # noqa: E402
 from rigel.calibration.messages import head as HD  # noqa: E402
 from rigel.calibration.node_chain import NODE  # noqa: E402
-from rigel.calibration.node_geometry import g1_locked, node_global_geometry  # noqa: E402
+from rigel.calibration.node_geometry import g1_locked, node_gdna_geometry  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
@@ -200,7 +200,7 @@ def _rebuild_own(ni, statics, geometry, *, total_n: bool, count_live: bool):
     ``own_composition_logvar``, so an arm differs from HEAD in its named decision and in nothing else.
     ⭐ The LOCATIONS (``rho_g``/``rho_pos``/``rho_neg``) are HEAD's untouched unless ``count_live``
     zeroes a component, which is exactly what the pre-fix predicate did."""
-    M = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)  # ≡ node_global_geometry mass
+    M = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)  # ≡ node_gdna_geometry mass
     E_r = np.asarray(geometry.eff_rna, np.float64)
     f_g = np.asarray(ni.f_g, np.float64)
     v_fg, v_fr = NI.own_composition_logvar(f_g, ni.tau_lam, np.asarray(ni.struct_lock, bool))
@@ -208,7 +208,7 @@ def _rebuild_own(ni, statics, geometry, *, total_n: bool, count_live: bool):
     rho_p = np.asarray(ni.rho_pos, np.float64)
     rho_n = np.asarray(ni.rho_neg, np.float64)
 
-    E_g = np.asarray(node_global_geometry(geometry)[1], np.float64)
+    E_g = np.asarray(node_gdna_geometry(geometry)[1], np.float64)
     live_g = (rho_g > _EPS) if count_live else (E_g > 0.0)
     n_g = M if total_n else f_g * M
     prec_g = NI.own_precision(n_g, v_fg, live_g)
@@ -340,7 +340,7 @@ def _install_zc_jeffreys_mean():
         sel, _M = _zero_mass_locked(ni, geometry)
         _FIRED["zc_jeffreys_mean_slots"] = int(sel.sum())
         _fire("zc_jeffreys_mean")
-        E_g = np.asarray(node_global_geometry(geometry)[1], np.float64)
+        E_g = np.asarray(node_gdna_geometry(geometry)[1], np.float64)
         rho_g = np.array(ni.rho_g, np.float64)
         ok = sel & (E_g > 0.0)
         rho_g[ok] = 0.5 / E_g[ok]
@@ -616,7 +616,7 @@ def _install_zc_struct_lock_g1():
         _FIRED["struct_lock_slots_REVOKED"] = int((have & ~want).sum())
         _FIRED["struct_lock_slots_ADDED"] = int((want & ~have).sum())
         M = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
-        E_g = np.asarray(node_global_geometry(geometry)[1], np.float64)
+        E_g = np.asarray(node_gdna_geometry(geometry)[1], np.float64)
         E_r = np.asarray(geometry.eff_rna, np.float64)
         f_g = np.asarray(ni.f_g, np.float64)
         v_fg, v_fr = NI.own_composition_logvar(f_g, ni.tau_lam, want)
@@ -661,7 +661,7 @@ def _install_zc_logmean():
         sel, _M = _zero_mass_locked(ni, geometry)
         _FIRED["zc_logmean_slots"] = int(sel.sum())
         _fire("zc_logmean")
-        E_g = np.asarray(node_global_geometry(geometry)[1], np.float64)
+        E_g = np.asarray(node_gdna_geometry(geometry)[1], np.float64)
         rho_g = np.array(ni.rho_g, np.float64)
         ok = sel & (E_g > 0.0)
         rho_g[ok] = float(np.exp(digamma(0.5))) / E_g[ok]
@@ -951,7 +951,7 @@ def _install_face_one():
         f_neg = np.array(ni.f_neg, np.float64)
         tau = np.array(ni.tau_lam, np.float64)
         lock = np.asarray(ni.struct_lock, bool)
-        M, E_g = node_global_geometry(geometry)
+        M, E_g = node_gdna_geometry(geometry)
         M = np.asarray(M, np.float64)
         E_g = np.asarray(E_g, np.float64)
         E_r = np.asarray(geometry.eff_rna, np.float64)

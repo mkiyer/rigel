@@ -62,7 +62,7 @@ from .splice_graph import FLAG_TES_NEG, FLAG_TES_POS, FLAG_TSS_NEG, FLAG_TSS_POS
 __all__ = [
     "NodeGeometry",
     "build_node_geometry",
-    "node_global_geometry",
+    "node_gdna_geometry",
     "node_total_density",
     "NodeBelief",
     "NodeStatics",
@@ -123,13 +123,6 @@ class NodeGeometry:
     #: ⭐ It is BOTH the density numerator and the Poisson ``n``: the accumulator deposits ``+1`` on
     #: every object the fragment touched, so there is no fractional mass to carry separately.
     unspliced_count: np.ndarray
-    #: float64[n_slots, 2] — the accumulator's two LENGTH channels for the same population, same keying.
-    #: ``Σ 1/weight`` (weight = L at a node, L−1 at a line) and ``Σ L``. ⭐ Stored since S5.a and read by
-    #: nobody until P2: `length_likelihood` turns them into composition evidence on the λ axis, which is
-    #: the only source that speaks on an AMBIG node or an unstranded library
-    # (measured 13.3–40.1 % of mass blind without it).
-    unspliced_inv_length_sum: np.ndarray
-    unspliced_length_sum: np.ndarray
     #: float64[n_slots] — the gDNA divisor. Contained placements at a NODE, crossing placements at an EDGE.
     eff_gdna: np.ndarray
     #: float64[n_slots] — the RNA divisor, the same frames on the RNA length pmf.
@@ -223,28 +216,6 @@ def build_node_geometry(
     spliced_count = np.zeros((n, 2), dtype=np.float64)
     spliced_count[is_edge] = np.asarray(substrate.edge_spliced.count, np.float64)[obj[is_edge]]
 
-    # ⭐ THE TWO LENGTH CHANNELS, gathered from the SAME populations as ``unspliced_count`` — the
-    # accumulator's `inv_length_sum` (Σ 1/weight) and `length_sum` (Σ L). Stored since S5.a and read by
-    # NOBODY until P2; they are what `length_likelihood` turns into composition evidence on the λ axis,
-    # and the fourth information source in `node_init`'s list.
-    # ⚠ They must track ``unspliced_count`` population-for-population — node_contained at a NODE,
-    # edge_unspliced at an EDGE — or the moments would describe a different set of fragments than the
-    # count they are conditioned on.
-    def _channel(node_attr: str, edge_attr: str) -> np.ndarray:
-        # ⚠ ``(n,)`` and not ``(n, 2)``: the length moments carry no strand axis. Every consumer summed
-        # the two columns anyway, so the sum now happens once, in the accumulator.
-        out = np.zeros(n, dtype=np.float64)
-        out[is_node] = np.asarray(getattr(substrate.node_contained, node_attr), np.float64)[
-            obj[is_node]
-        ]
-        out[is_edge] = np.asarray(getattr(substrate.edge_unspliced, edge_attr), np.float64)[
-            obj[is_edge]
-        ]
-        return out
-
-    unspliced_inv_length_sum = _channel("inv_length_sum", "inv_length_sum")
-    unspliced_length_sum = _channel("length_sum", "length_sum")
-
     # ── the two per-component divisors ───────────────────────────────────────────────────────────
     node_len = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
     n_nodes = node_len.shape[0]
@@ -312,8 +283,6 @@ def build_node_geometry(
     return NodeGeometry(
         n_slots=int(n),
         unspliced_count=unspliced_count,
-        unspliced_inv_length_sum=unspliced_inv_length_sum,
-        unspliced_length_sum=unspliced_length_sum,
         eff_gdna=eff_gdna,
         eff_rna=eff_rna,
         spliced_count=spliced_count,
@@ -326,10 +295,17 @@ def build_node_geometry(
     )
 
 
-def node_global_geometry(geometry: NodeGeometry):
-    """Per-slot 'global' gDNA support ``(mass, eff)`` — the basis the enrichment NPMLE (`DensityNPMLE`) is
-    fit on and projected onto, shared by :func:`sweep.solve_chain` and ``calibrate`` so the fit and the
-    projection use one definition.
+def node_gdna_geometry(geometry: NodeGeometry):
+    """Per-slot gDNA support ``(unspliced count, eff_gdna)`` — the basis the enrichment NPMLE
+    (`DensityNPMLE`) is fit on and projected onto, shared by :func:`sweep.solve_chain` and ``calibrate``
+    so the fit and the projection use one definition.
+
+    ⛔ **It was called ``node_global_geometry`` and bound as ``eff_global`` until 2026-08-10, and the
+    name was a lie in the one place it could do most harm.** It returns ``eff_gdna`` and nothing else,
+    so ``rho_g = f_g·M/E_g`` — which is exactly what makes ``sum_c rho_c·E_c = M`` hold and therefore
+    what makes ``f_g`` a COUNT share rather than a density share. A reader auditing whether the EM prior
+    mixes the two had to open two files to learn that "global" meant "gDNA"
+    (`TRAPS: two-masks-one-name`).
 
     ⭐ **It no longer sums two faces.** The predecessor returned ``mass_l + mass_r`` over ``E_l + E_r`` at
     a boundary, with a long note about a ``½`` here that was silently cancelling a ``½`` missing from the
@@ -387,7 +363,7 @@ def node_total_density(geometry: NodeGeometry, f_g):
     belong in the level in principle — but the predecessor's ``mass_spliced`` entered only the strand
     solve, and folding it into ρ_tot here would be a modelling change smuggled into a rename.
     """
-    mass, eff_g = node_global_geometry(geometry)
+    mass, eff_g = node_gdna_geometry(geometry)
     fg = np.clip(np.asarray(f_g, dtype=np.float64), 0.0, 1.0)
     rho_unspl = mass * (
         _rate(fg, eff_g) + _rate(1.0 - fg, np.asarray(geometry.eff_rna, np.float64))
