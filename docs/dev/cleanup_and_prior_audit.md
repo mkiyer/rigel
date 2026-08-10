@@ -238,7 +238,7 @@ false in premise (harmless in effect). Both have a wider blast radius than this 
 | bank | bytes | consumer | verdict |
 |---|---|---|---|
 | `node_contained_count[2]` | 8 | geometry, strand model | ✅ LIVE |
-| `node_contained_inv_length_sum` | 8 | — | ⛔ **DEAD** |
+| ⚠ `node_contained_inv_length_sum` | 8 | — | **DECISION** — dead as `1/L`; becomes the model-free node density if the deposit is changed to `1/(ell−w+1)`. Same 8 bytes. `counts_densities_paradigm.md` §8 |
 | `node_contained_length_sum` | 8 | — | ⛔ **DEAD** |
 | `edge_unspliced_count[2]` | 8 | geometry, strand model | ✅ LIVE |
 | `edge_spliced_count[2]` | 8 | `calibrate.py` → `mass_rna_spliced_edge` | ✅ LIVE |
@@ -331,7 +331,7 @@ by not applying it at all.
 |---|---|---|---|---|
 | 1 | **Dead substrate surface**: `PopulationView.length_sum`, `.mean_length`, `.total_inv_length_sum` | minutes | none — no consumer in `src/` | trivially |
 | 2 | **Moment tests**: `contained_moments`/`crossing_moments`/`build_slot_moments` moved to `effective_length.py` WITHOUT their tests, which went with the deleted file | ~1 h | ⛔ untested geometry in a live layer-2 module — this is the highest-value item on the list | n/a |
-| 3 | **The three dead banks** (native + schema + reference spec) | ~2 h edit, **hours of re-scanning** | schema digest invalidates every cache | only by re-scanning |
+| 3 | **The two dead banks** + the `node_contained_inv_length_sum` deposit decision (native + schema + reference spec) | ~2 h edit, **hours of re-scanning** | schema digest invalidates every cache | only by re-scanning |
 | 4 | **`mass_gdna_edge` units rename** — it is `f_g × unspliced COUNT` while `mass_gdna_node` is a per-fragment count; same prefix, different units | ~1 h | touches `result`, `priors`, `derive`, `track`, goldens | yes |
 | 5 | **`second_pass.py:443-445` comment** — measured false in premise, harmless in effect | minutes | none | yes |
 | 6 | **`module_census.py`** re-run; fix stale sibling references the purge created | minutes | none | yes |

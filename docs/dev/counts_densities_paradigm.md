@@ -48,18 +48,22 @@ computes the same quantity as `count / eff_gdna`, a functional of the fitted gDN
 
 |  | incidence → fragment | incidence → density |
 |---|---|---|
-| **NODE** | ✅ **FREE** — containment is exclusive, they are the same number | ⛔ needs a model: the opportunity `(ell−w+1)₊` does not cancel `1/w` |
+| **NODE** | ✅ **FREE** — containment is exclusive, they are the same number | ⚠ needs a model *as deposited* — `1/w` does not cancel `(ell−w+1)₊`. ⭐ A `1/A` deposit would make it free too (§8) |
 | **EDGE** | ⚠ needs `q` — but `q` is **MEASURED**, not modelled | ✅ **FREE** — `inv_length_sum` **is** `ρ`, exactly |
 
-> **On each axis two of the three conversions are free, and they are different two. There is no axis on
-> which all three are free — and no axis on which a model is actually required.**
+> **On each axis two of the three conversions are free, and they are a different two. There is no axis on
+> which a model is actually REQUIRED — the node's density needs one only because of the deposit rule we
+> chose, and §8 prices changing it.**
 
 ⛔ **And the tree currently takes the model-dependent path on BOTH axes.** That is the paradigm defect: not
 that a choice was made badly, but that the free path exists on each axis and is unused.
 
-⚠ **`inv_length_sum` at a NODE is not a density and must never be used as one.** `scan_payload.py` says
-so explicitly, which is why the bank is not called `density`. Do not "extend the model-free density to
-nodes" — it does not exist there.
+⚠ **`inv_length_sum` AS DEPOSITED TODAY is not a density at a NODE and must never be used as one.**
+`scan_payload.py` says so explicitly, which is why the bank is not called `density`. ⭐ **But that is a
+property of the DEPOSIT RULE, not of the node**: the node deposits `1/L`, and `1/L` does not cancel
+`(ell−w+1)₊`. A deposit of `1/(ell−w+1)₊` would cancel it exactly — see §8, where that formula is
+re-derived and priced. So the NODE row of the table above reads "needs a model" **for the bank we
+currently store**, and is a choice rather than a law.
 
 ## 4. THE SITE AUDIT
 
@@ -154,3 +158,91 @@ and the bias **doubles under capture** — the direction and the capture-depende
 unfixed length defect" and rules that it must not be attacked by editing `gdna_opportunity` because it is
 a PLACEMENT problem. This measures that residual directly, at runtime, on the user's own library — which
 is the instrument that problem has been missing. It is also the natural home for a shipped QC number.
+
+
+---
+
+## 8. ⭐⭐⭐ THE MODEL-FREE NODE DENSITY — it exists, it was derived, and the answer is "yes but not as an addition"
+
+**Owner, 2026-08-10:** *"Previously we derived the model-free density for NODES. It's a different derived
+formula."* ⭐ It is, and it is already gated: `scripts/design/node_density_derivation.py` (T0–T6, each
+perturbed) and the `reciprocal-opportunity-deposit` memory. Re-derived here independently and it matches.
+
+**The formula.** The deposit weight is `1/OPPORTUNITY`, not `1/length`. At an object whose opportunity for
+a length-`w` fragment is `A(w)`, depositing `1/A(w)` gives
+
+    E[ SUM 1/A ]  =  SUM_w  rho * A(w) * f(w) * (1/A(w))  =  rho     exactly, for ANY pmf
+
+At an EDGE `A(w) = w−1`, a function of `w` alone — which is what ships. **At a NODE
+`A(w) = (ell − w + 1)₊`, which depends on the NODE LENGTH as well** — and the accumulator knows `ell` at
+deposit time, so it is depositable. That is the different formula: an edge is the `ell → 0` limit of a
+node. ⭐ Measured in the derivation: at a 1000 bp node with 200 bp fragments `count/ell` reads **0.80×**
+truth while `Σ1/A` reads **1.000000×**.
+
+### 8.1 ⛔ TWO RECORDED VERDICTS DECIDE THIS, AND NEITHER IS ABOUT THE DENSITY
+
+**T3 — model-free and informative are MUTUALLY EXCLUSIVE, and it is a theorem.** Model-free means both
+components share the coefficient, so the channel's row is `(K, K)` and its determinant against any other
+row is zero. **A channel cannot both be model-free and tell gDNA from RNA.** Measured: `Σ1/A` alone scores
+0.113 discrimination efficiency at a 151 bp node and **0.000** at 1000 bp.
+
+⭐ **So it buys a LEVEL, never a SPLIT** — and the split is what calibration is for.
+
+**And the second one is the honest limit of the whole model-free idea**: `Σ1/A = rho` is model-free with
+respect to the **LENGTH distribution**, not with respect to **PLACEMENT**. The cancellation assumes `rho`
+is uniform across the admissible start positions. At an EDGE that window is about one fragment length; at
+a NODE it is the whole node, which is kilobases. ⛔ **So the node version does NOT solve the capture
+placement problem** — it removes the length-model layer sitting on top of it, and leaves the placement
+residual exactly where `EQUATIONS.md` §4.4 says it is.
+
+### 8.2 WHAT IT WOULD ACTUALLY BUY, END TO END
+
+| need | does the model-free node density help? |
+|---|---|
+| **the EM prior's pseudo-counts** | ⛔ **No.** At a NODE incidence = fragment already; the node term needs no conversion and no density. |
+| **the composition split `f_g`** | ⛔ **No, provably** — T3. |
+| **the density surface** (`density_model`'s anchor, `background_reference`, `npmle`, `gdna_landscape`, `node_init` source 1, `priors`' `rho_ref`) | ⚠ **Yes, but by ~1 %.** The shipped path is `count / eff_gdna`, which ALREADY applies the effective-length correction — it just uses a FITTED pmf to do it. So the gain is exactly that pmf's error: **0.9937 off capture, 0.9891 under it** (§7). |
+| **diagnostics** | ⭐⭐ **Yes, and this is the real prize.** It extends §7's oracle-free gate from seam LINES to every structurally pure-gDNA NODE — the intergenic and intronic anchors — which is a far larger population and is where the prior-free pass's anchor actually lives. |
+
+⭐ **The one number that frames the decision**: the model-free node density is worth about **1.1 %** on the
+density surface, because the shipped divisor is already doing the right correction with a slightly wrong
+pmf. It is not a correctness fix; it is the removal of a dependency, plus a much better diagnostic.
+
+### 8.3 ⛔⛔ THE SEQUENCING POINT THAT CHANGES THE CLEANUP PLAN
+
+`node_contained_inv_length_sum` deposits `1/L`. That is **not** `1/A` at a node, which is exactly why it
+is model-free at an edge and not at a node, and exactly why it ended up with no consumer.
+
+> **So the choice is not "keep or delete". It is "delete it, or fix its deposit rule" — the same 8 bytes
+> either way.** Changing `1/L` to `1/(ell − w + 1)₊` turns a dead bank into the model-free node density
+> at zero net memory.
+
+⛔ **And both are cache-invalidating, so doing them separately costs TWO full re-scans of every panel.**
+Deleting the bank now and re-adding a differently-deposited one later is the expensive path.
+
+**Revised bank ledger** if the deposit rule is fixed rather than the bank deleted:
+
+| | delete all three | fix the deposit instead |
+|---|---|---|
+| `Node` | 24 → **8 B** | 24 → **16 B** |
+| `ContiguousEdge` | 48 → 40 B | 48 → 40 B |
+| model-free node density | ⛔ gone, and re-adding costs a second invalidation | ✅ available |
+
+⛔ **ONE BLOCKER IS RECORDED AND UNRESOLVED**: fixed-point headroom. `A` can be **1** (a fragment exactly
+filling its node), so the quantum can be `2³²` — far above the `L ∈ [20, 2000]` range the `uint64`
+accumulator was sized for. ⚠ `DESIGN.md` §3.1's ~800× headroom figure is computed for `1/L` and does not
+carry. **Re-price it before any of this ships.** And `Σ1/A` is ~3× noisier at the crossover `ell ≈ E[L]`,
+which is where exon nodes sit (~98 bp median against ~235 bp fragments) — ⭐ but the anchors are
+intergenic and intronic nodes, which are long, so the crossover lands away from the population that
+matters.
+
+### 8.4 RECOMMENDATION
+
+⭐ **Fix the deposit rule rather than delete the bank — but do it as ONE event with the other two
+removals, and clear the fixed-point blocker first.** The correctness gain is small (~1 %) and honest;
+the diagnostic gain is large; the memory cost is zero; and the alternative sequencing pays the
+cache-invalidation cost twice.
+
+⛔ **If the fixed-point headroom cannot be cleared cheaply, delete all three and accept that the
+model-free node density costs a second invalidation later.** It is worth ~1 % and a diagnostic, not a
+re-scan of every panel on its own.
