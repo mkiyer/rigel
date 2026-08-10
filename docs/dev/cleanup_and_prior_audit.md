@@ -245,32 +245,85 @@ false in premise (harmless in effect). Both have a wider blast radius than this 
 | `edge_unspliced_inv_length_sum` | 8 | `second_pass.py` genomic hypothesis | ✅ LIVE |
 | `edge_unspliced_length_sum` | 8 | — | ⛔ **DEAD** |
 | ⭐ `edge_unspliced_mass` | 8 | `mass_per_crossing` → `q` → `assemble_priors` | ✅ **LOAD-BEARING** |
-| ⚠ `edge_spliced_mass` | 8 | — | ⛔ **DEAD — but confirm intent, see below** |
+| ⭐ `edge_spliced_mass` | 8 | — (⛔ **should be**: the spliced half of the fragment conversion) | ✅ **KEEP** — see below |
 | `sj_count[2]` | 8 | geometry + aligner-artifact detection | ✅ LIVE |
 | `sj_inv_length_sum` | 8 | `second_pass.py` spliced hypothesis | ✅ LIVE |
 
-**Struct impact if the four dead banks go:** `Node` **24 → 8 B** (a 3× shrink — it becomes the two count
-columns and nothing else), `ContiguousEdge` **48 → 32 B**, `JunctionEdge` unchanged at 16 B. At human
+**Struct impact if the THREE dead banks go** (`edge_spliced_mass` is retained): `Node` **24 → 8 B** (a 3× shrink — it becomes the two count
+columns and nothing else), `ContiguousEdge` **48 → 40 B**, `JunctionEdge` unchanged at 16 B. At human
 scale that is roughly a **40 % cut** in the accumulator's ~85 MB. ⚠ Re-measure rather than trust that
 arithmetic.
 
-### ⚠ `edge_spliced_mass` IS DEAD, AND THAT IS SUSPICIOUS RATHER THAN OBVIOUS — A DECISION FOR THE OWNER
+### ⛔⛔⛔ RETRACTED — `edge_spliced_mass` IS NOT DEAD, AND THE ANSWER IS A LIVE DEFECT IN THE HEADLINE NUMBER
 
-It was added deliberately, with a careful docstring calling it "a per-LINE certified-RNA term,
-commensurate with the unspliced mass at the same line". But `calibrate.py:619` builds
-`mass_rna_spliced_edge` from `substrate.edge_spliced.COUNT`, not from the mass. So the intent and the
-wiring disagree, and the question is which is right.
+**Owner, 2026-08-10**: *"Displaced edge mass was computed carefully to conserve total counts, whereas the
+count does not guarantee conservation — a single spliced fragment can cross many, many different edges and
+add counts to every one. So the mass was added to normalise the edge mass so that one fragment count was
+conserved even if it crossed many edges."*
 
-⭐ **The current wiring is self-consistent and I believe correct.** `mass_rna_edge` is an INCIDENCE
-(`(1−f_g)·unspliced_count + spliced_count`); subtracting the spliced *count* leaves
-`(1−f_g)·unspliced_count`, which is then multiplied by `q` — and `q` is the UNSPLICED population's own
-`mass/count`. Right population, right units, at every step. The spliced mass is not needed because
-spliced crossings are removed *before* the conversion rather than converted.
+⭐ **That is correct and my "the units argument says it is dead" reading was wrong.** The bank is unused
+only because the conversion it exists for **is not being performed**, and finding out why exposed a defect.
 
-⛔ **So the decision is: was `edge_spliced_mass` built for a job that has since been done a better way
-(delete it), or is `calibrate.py:619` using the count where the mass was intended (wire it)?** The units
-argument above says the former, but the bank was not added by accident and the owner should confirm before
-8 bytes per edge are removed on my reading alone.
+**THE DEFECT.** `pipeline.py:993-998` computes the library gDNA and RNA totals — the tool's headline
+`f_gdna` — as
+
+    gdna = mass_gdna_node.sum() + mass_gdna_edge.sum()
+    rna  = mass_rna_node.sum()  + mass_rna_edge.sum() + mass_rna_junction.sum()
+
+with **no `q` anywhere**. Those are INCIDENCE sums. A NODE term is an exact fragment count (a contained
+fragment deposits on exactly one node), but an EDGE term counts a fragment once per line it crosses and a
+JUNCTION term once per junction it uses. ⛔ **So three differently-inflated pools are summed and called a
+fragment count** — and because the inflations differ between gDNA and RNA (`q_g` 0.53–0.74 against `q_r`
+0.52–0.59, measured), the inflation does not cancel out of the ratio.
+
+**MEASURED (drained-free, cached `_main`, shipped calibration):**
+
+| condition | truth | PIPELINE (incidence) | `q`-corrected edges | shift |
+|---|---|---|---|---|
+| ladder g50 capture_off | 0.5085 | **0.3781** | 0.4214 | **+0.0434** |
+| ladder g50 capture_on | 0.5060 | 0.0272 | 0.0295 | +0.0022 |
+| flgap_short g50 capture_off | 0.5086 | **0.3751** | 0.4183 | **+0.0432** |
+| flgap_long g50 capture_on | 0.5039 | 0.0869 | 0.0905 | +0.0037 |
+
+⭐ **Every shift is TOWARD truth, and off capture it is worth 4.3 percentage points.** ⚠ It is not the
+whole story — 0.42 against a truth of 0.51 is still short — so this is one defect among others, not the
+fix. But it is a systematic under-report of gDNA in the deliverable, and it is arithmetic, not modelling.
+
+⭐⭐ **AND THIS IS EXACTLY THE OWNER'S "PICK ONE" PROBLEM, LOCATED.** The tree already contains both
+strategies and uses them in different places without saying so:
+
+* **`assemble_priors` chose Option 1** (conserve counts): it multiplies the edge term by
+  `q = mass/count`, so `a_c = f_c × mass`, a conserved fragment count.
+* **`pipeline.py`'s library summary chose neither**: raw incidences.
+
+Two consumers of the same four fields, two conventions, and the one that is wrong is the headline.
+
+### ⭐⭐ THE RULING THIS NEEDS — one invariant, stated once
+
+> **A FRACTION IS A COUNT SHARE AND MUST MULTIPLY A CONSERVED COUNT. A DENSITY IS DERIVED FROM THAT,
+> NEVER THE REVERSE.**
+
+Option 1 (conserve counts) for anything that becomes a COUNT — the prior's pseudo-counts, the library
+summary, the QC report. It is model-free: the mass is measured, needs no divisor, and inherits no pmf
+error. Option 2 (densities) only where a DENSITY is genuinely the quantity wanted — the enrichment
+landscape, the `gdna_eff_len` contraction, the relay's message currency — because converting a density to
+a count requires an effective length, which requires a fitted pmf, which is the error we spent this whole
+campaign measuring.
+
+⛔ **Option 1 IS INCOMPLETE TODAY, and completing it means ADDING a bank, not removing one:**
+
+1. `pipeline.py` must apply `q` to its edge terms. ⭐ Free, arithmetic, worth 4.3 pp off capture.
+2. The spliced half needs its own conversion — `q_spliced = edge_spliced_mass / edge_spliced_count` —
+   because `mass_rna_edge` is spliced-INCLUSIVE. ⭐ **This is what `edge_spliced_mass` was built for and
+   it must be KEPT.**
+3. ⛔ **There is no `sj_mass` bank**, so the junction axis cannot be converted at all. A fully conserved
+   library fragment count is not computable today. That is the one genuine gap, and it is an accumulator
+   ADDITION (8 B per junction edge, `JunctionEdge` 16 → 24 B).
+
+⚠ **Option 1's irreducible floor**, already measured: `q` is pooled, so splitting a pooled mass by a
+COUNT share carries the `q_g ≠ q_r` error — `Δphi` ≤ 0.6 pp on the total prior, placement-driven, not
+repairable in production (§0.1). That is the price of Option 1 and it is far below the 4.3 pp being lost
+by not applying it at all.
 
 ## 2c. ⭐ THE REST OF THE LEDGER — everything still owed, ranked by cost
 
@@ -278,7 +331,7 @@ argument above says the former, but the bank was not added by accident and the o
 |---|---|---|---|---|
 | 1 | **Dead substrate surface**: `PopulationView.length_sum`, `.mean_length`, `.total_inv_length_sum` | minutes | none — no consumer in `src/` | trivially |
 | 2 | **Moment tests**: `contained_moments`/`crossing_moments`/`build_slot_moments` moved to `effective_length.py` WITHOUT their tests, which went with the deleted file | ~1 h | ⛔ untested geometry in a live layer-2 module — this is the highest-value item on the list | n/a |
-| 3 | **The four dead banks** (native + schema + reference spec) | ~2 h edit, **hours of re-scanning** | schema digest invalidates every cache | only by re-scanning |
+| 3 | **The three dead banks** (native + schema + reference spec) | ~2 h edit, **hours of re-scanning** | schema digest invalidates every cache | only by re-scanning |
 | 4 | **`mass_gdna_edge` units rename** — it is `f_g × unspliced COUNT` while `mass_gdna_node` is a per-fragment count; same prefix, different units | ~1 h | touches `result`, `priors`, `derive`, `track`, goldens | yes |
 | 5 | **`second_pass.py:443-445` comment** — measured false in premise, harmless in effect | minutes | none | yes |
 | 6 | **`module_census.py`** re-run; fix stale sibling references the purge created | minutes | none | yes |
