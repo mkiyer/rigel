@@ -39,9 +39,12 @@ opportunity functions assume gDNA is placed uniformly and capture does not — f
 | `deposited + deferred + dropped_* == offered` | exact, deferred **non-empty** | same |
 | the origin partitions sum to the full payload | exact, every channel | `tests/calibration/_oracle.py` |
 
-⚠ **The one open gap is coverage, not accuracy**: the simulator hard-codes an R1-ANTISENSE emission, so no
-condition exercises an R1-sense (KAPA-style) library. Filed as a strict xfail in
-`test_strand_sense_convention.py`, not fixed.
+✅ **The R1-sense coverage gap is CLOSED** (2026-08-11). `ReadSimConfig.r1_sense` selects the protocol
+DIRECTION — R1-antisense (TruSeq dUTP, the default) or R1-sense (KAPA) — independently of
+`strand_specificity`, which is the FIDELITY about it. Gated in `test_strand_sense_convention.py`: both
+directions, the per-fragment mirror (2,000/2,000 fragments have R1 on the opposite strand), and that the
+DECONVOLUTION recovers the same gDNA fraction either way. ⚠ The panel ORCHESTRATOR does not expose the
+knob, so no ladder condition is R1-sense — the engine can, the panel does not.
 
 
 ## STAGE B — calibration initialisation and pass-0

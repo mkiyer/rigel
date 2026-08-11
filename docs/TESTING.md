@@ -411,7 +411,7 @@ length, so the simulator draws the length marginal proportional to the capture-w
 | | consequence |
 |---|---|
 | counts are **Poisson by construction** — a multinomial at fixed abundance, measured ω < 5e-5 | nothing dispersion-dependent validates here. Real junction overdispersion is ≤ 0.02–0.03 |
-| only **R1-antisense** libraries | `strand_specificity` is a swap probability about a *fixed* orientation, never a choice of orientation, so no condition exercises the R1-sense (KAPA-style) branch. Real cfRNA is dUTP, so this is not urgent |
+| the PANEL is all **R1-antisense** | ⭐ The ENGINE can emit either since 2026-08-11 (`ReadSimConfig.r1_sense`, gated both ways in `test_strand_sense_convention.py`), but `orchestrator.run_condition_grid` does not expose it — so no ladder or flgap condition is R1-sense. ⚠ The gap moved from the simulator to the panel; it did not close. Real cfRNA is dUTP, so this is not urgent |
 | the tool's **gDNA reach** assumption is untested | `node_geometry` says gDNA's template is the chromosome, so `taper_g = 1`. True for 50 Mb, false for a 273 bp contig. Latent: it goes live only when a short reference has two nodes, and gDNA is no longer simulated on the spike-ins at all |
 | ⭐ each **population is written as one contiguous BLOCK** of read names, not interleaved | measured 2026-08-08: a 10 M-fragment condition has **15** origin transitions in BAM order. So any per-fragment truth JOIN that is checked by "does an impossible label appear?" is nearly blind — a one-fragment slip in the `frag_id` key mislabels ~15 fragments in the whole file and need not produce a single impossible one. ⛔ Gate such a join on a COUNT IDENTITY against the scanner's own `stats.total` / `stats.n_read_names` (`_oracle.check_walk_alignment`) and keep the impossible-label check as a secondary that catches a gross slip. `tests/calibration/test_prior_vs_oracle.py` pins both halves, including that the small slip is invisible |
 
@@ -529,8 +529,8 @@ python -m pytest tests/ -q                     # ⛔ never bare `pytest` — the
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,231 passing, 2 skipped, 9 xfail** (measured
-2026-08-11, after the numeric-convention change). **Any failure is a regression** — which is a stronger
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,235 passing, 0 skipped, 7 xfail** (measured
+2026-08-11). **Any failure is a regression** — which is a stronger
 and cheaper rule than counting expected ones. ⚠ Re-derive it rather than adjusting it; several tests are
 parametrised over doc, source and script files, so adding or retiring one moves the count by a few.
 

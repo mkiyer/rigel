@@ -25,6 +25,7 @@ one line, and a number nobody can attribute earns none.
 |---|---|---|
 | **Stage A — the accumulator** | ✅ **DONE**, and that is a measurement | perfecting BOTH fragment-length models is worth **2.6 %** of the deliverable, down from 22.2 % |
 | ✅ **the tally CONSERVES a fragment count** | ⭐ every deposited fragment places **exactly one** unit across the objects it crosses — nodes, contiguous edges and junction edges together. Measured on the origin-split oracle: **1.000× deposited, 0 unaccounted**, on BOTH origins | ⛔ RNA read **0.747×** until `sj_mass` landed (2026-08-11): a spliced fragment whose blocks cross no line deposited on no conserved bank at all — **1,222,375 of 4,830,713 (25.3 %)**. gDNA was always exact, because gDNA cannot splice |
+| ✅ **the SUITE is green with no skips** | ⭐ **3,235 passed / 0 skipped / 7 xfail** (2026-08-11). Two xfails and both skips were closed by BUILDING the missing thing, never by widening a bound | ⛔ The 7 are not one kind of thing: 2 are the recorded price of `message_propagation = False`, 5 were WRITTEN as xfail as records of two proven defects whose fixes are panel-negative alone. `CLAUDE.md` carries the split |
 | ✅ **ONE NUMERIC CONVENTION** | ⭐ a COUNT is an integer, a FRACTION is float64. No fixed point, no scale constant, nothing decodes a bank (owner, 2026-08-11) | ⭐ float64 is **1e5–7e5× MORE accurate** than the fixed point it replaced, measured against exact rational arithmetic. ⛔ The ~2.6 % once quoted against float is a **float32** number — `TRAPS: integer-channels-reproduce` |
 | **calibration, 3 of 4 strata** | ✅ median library `f_gdna` error **0.005–0.012**, and ⭐ the PRIOR the EM reads is within **2.5–4.6 %** of a perfect one | stranded × on/off and unstranded × capture-OFF |
 | ⛔ **calibration, unstranded × capture-ON** | ⛔ **BLIND** — reports **0.033–0.058** while truth spans **0.00 → 0.98**, and hands the EM a gDNA prior **94.4 %** short | not noisy; a flat line. **Still the whole open problem**, and nothing has fixed it — the length channel was tried and refused (§1.4) |
@@ -130,21 +131,47 @@ this panel — `TRAPS: toys-rank-hotspots-backwards`, which cost a whole analysi
 ## §2 ⭐⭐ WHAT TO DO NEXT, IN ORDER
 
 ⭐ **The panels are rebuilt and gated** (2026-08-11: 184 payloads across ladder / flgap_short / flgap_long /
-pilot, every non-target bank byte-identical). Every instrument under `scripts/design/` runs again.
+pilot, every non-target bank byte-identical). Every instrument under `scripts/design/` runs again — with
+one exception, which is item 1.
 
-1. ⭐⭐⭐ **Re-derive the two end-to-end numbers on the 36-condition ladder.** §0's LIBRARY row is
+1. ⛔⛔ **`ladder_arm_ab.py` IS BROKEN and it blocks items 2–4.** Lines 264 / 385 / 406 do
+   `sys.modules["rigel.calibration.enrichment_frame"]` on a module DELETED at `0d9d422b`, so the
+   `zc_transfer` and `zc_reference_var` arms raise `KeyError` today. This is the panel harness — nothing
+   below can be priced until it works. ⚠ Also check `anchor_opportunity_census.py:136`, whose comment
+   claims its population is "exactly `strand_evidence`'s `struct_lock`" while it builds
+   `g1_locked & INTERGENIC & NODE` — matching neither mask, in the instrument whose 346× verdict
+   `CLAUDE.md` quotes.
+2. ⭐⭐⭐ **Re-derive the two end-to-end numbers on the 36-condition ladder.** §0's LIBRARY row is
    unattributable and its TRANSCRIPT row predates the rebuild. `calibration_truth_ab.py` for the first,
    `quant_accuracy.py --arm base` / `--arm oracle` for the second. ⛔ The pilot panel has two gDNA levels
    and cannot carry either (`TRAPS: a-single-level-panel-cannot-see-a-constant`).
-2. ⭐⭐ **Re-price message propagation on unstranded × capture-ON.** It is the only remaining lever on the
-   one blind stratum, it is one config flag, and its recorded +155 % predates both the conserved-count
-   rewrite and the numeric convention. ⛔ RE-price, never inherit.
-3. **`mass_*_edge` → `count_*_edge`.** THREE of the five `mass_*` fields on `CalibrationResult` are
+3. ⭐⭐ **Price the CANCELLING PAIR together** — `struct_lock` rescoped to `g1_locked & NODE` AND the
+   `intergenic|exon` seam claiming its RNA-contaminated crossing mass as gDNA. Five of the seven
+   remaining xfails go green if and only if this lands. ⛔ Neither half may be priced alone: the
+   `struct_lock` half is **+3,207 %** on the zero-gDNA control by itself.
+4. **Re-price message propagation on unstranded × capture-ON.** The only remaining lever on the one blind
+   stratum, one config flag, and it closes two more xfails. Its recorded +155 % predates the
+   conserved-count rewrite AND the numeric convention. ⛔ RE-price, never inherit.
+5. **`mass_*_edge` → `count_*_edge`.** THREE of the five `mass_*` fields on `CalibrationResult` are
    incidences (`mass_gdna_edge`, `mass_rna_edge`, `mass_rna_junction`) and two are fragment counts. Its
    own commit, `one-thing-varied`.
-4. **Restore the moment tests.** `contained_moments` / `crossing_moments` / `build_slot_moments` moved to
+6. **Restore the moment tests.** `contained_moments` / `crossing_moments` / `build_slot_moments` moved to
    `effective_length.py` without their tests, which went with the deleted length channel — untested
    geometry in a live layer-2 module.
+
+7. **The cheap ledger** — moved here 2026-08-11 from a dev doc that was deleted, so it has one home:
+   * dead substrate surface: `PopulationView.length_sum` / `.mean_length` / `.total_inv_length_sum` have
+     no consumer in `src/`
+   * the two dead banks `node_contained_length_sum` and `edge_unspliced_length_sum` ⛔ removing them
+     invalidates every cache, so bundle with the next re-scan rather than paying it twice
+   * `second_pass.py:443-445`'s comment — measured false in premise, harmless in effect
+   * `module_census.py` re-run; the purge left stale sibling references
+   * `UNDOCUMENTED_DEBT` — 8 scripts on disk and unlisted, in `tests/test_scripts_index.py`
+
+⚠ **Tracked, not blocking:** two exact per-fragment mirrors of a PURE-RNA library give different
+deconvolutions — `mass_gdna_node` +5.4 % at `ss=0.75`, +2.0 % at `ss=1.0`, 0 at `ss=0.90`. Not
+boundary-only and not monotone. It is 5.4 % of the zero-gDNA false-positive channel, and an R1-sense
+library is now simulable, so it is measurable.
 
 ⛔⛔ **The two briefs below are ON HOLD by owner ruling (2026-08-07)** and are kept only because the
 analysis is complete and re-deriving it would be waste — not because they are next.

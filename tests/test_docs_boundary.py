@@ -41,12 +41,24 @@ _MAY_NAME_IT = frozenset(
     }
 )
 
-SEARCHED = sorted(
+#: ⭐ The allowlist is EXCLUDED from the parametrisation rather than skipped inside it. A generated case
+#: that skips is a case that DID NOT RUN, and two of them sat in the suite tally reading as "2 skipped" —
+#: indistinguishable from a test that could not run for an environmental reason. The exemption is still
+#: explicit, and it is now gated by :func:`test_every_ALLOWLISTED_file_actually_names_the_sandbox`, so it
+#: cannot quietly become a blanket.
+SEARCHED = [
     p
-    for base in ("docs", "src", "tests", "scripts")
-    for p in (ROOT / base).rglob("*")
-    if p.suffix in (".py", ".md", ".h", ".cpp") and p.is_file() and DEV not in p.parents
-) + [ROOT / "CLAUDE.md"]
+    for p in sorted(
+        p
+        for base in ("docs", "src", "tests", "scripts")
+        for p in (ROOT / base).rglob("*")
+        if p.suffix in (".py", ".md", ".h", ".cpp") and p.is_file() and DEV not in p.parents
+    )
+    + [ROOT / "CLAUDE.md"]
+    # ⛔ The exclusion is applied to the WHOLE list, CLAUDE.md included. Filtering only the globbed part
+    # left the one file that is appended by hand still in — and it is allowlisted, so it failed.
+    if str(p.relative_to(ROOT)) not in _MAY_NAME_IT
+]
 
 
 @pytest.mark.parametrize("path", SEARCHED, ids=lambda p: str(p.relative_to(ROOT)))
@@ -54,8 +66,6 @@ def test_nothing_outside_the_sandbox_cites_into_it(path: pathlib.Path):
     """⛔ A citation is what turns a working note into a dependency. Everything else about a dev doc —
     length, staleness, being wrong — is harmless and is explicitly permitted."""
     rel = str(path.relative_to(ROOT))
-    if rel in _MAY_NAME_IT:
-        pytest.skip("this file's job is to describe the sandbox")
     hits = sorted(set(_CITES_DEV.findall(path.read_text(errors="ignore"))))
     assert not hits, (
         f"{rel} cites the sandbox ({hits}). Nothing outside `docs/dev/` may depend on it. If the finding "
@@ -63,6 +73,27 @@ def test_nothing_outside_the_sandbox_cites_into_it(path: pathlib.Path):
         f"ruling to DESIGN.md, a derivation to EQUATIONS.md — and delete it from the dev doc in the same "
         f"edit. Copying is what creates two homes; moving does not."
     )
+
+
+def test_every_ALLOWLISTED_file_actually_names_the_sandbox():
+    """⛔ An exemption nobody re-checks becomes a blanket. Each allowlisted file is exempt because its JOB
+    is to describe the sandbox — so each one must actually do that. A file that does not need the
+    exemption should be back under the gate above.
+
+    ⭐ This replaces two ``pytest.skip`` calls, and it is strictly stronger than they were: a skip cannot
+    fail, so an allowlist entry for a deleted or repurposed file would have sat there indefinitely reading
+    as "2 skipped".
+    """
+    for rel in sorted(_MAY_NAME_IT):
+        path = ROOT / rel
+        assert path.is_file(), (
+            f"{rel} is allowlisted to cite the sandbox but does not exist — the exemption is stale"
+        )
+        hits = sorted(set(_CITES_DEV.findall(path.read_text(errors="ignore"))))
+        assert hits, (
+            f"{rel} is exempt from the sandbox-citation rule because its job is to DESCRIBE the sandbox, "
+            f"and it does not name it at all. Remove it from _MAY_NAME_IT and let the gate cover it."
+        )
 
 
 def test_the_sandbox_exists_and_says_what_it_is_for():

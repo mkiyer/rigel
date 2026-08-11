@@ -132,35 +132,7 @@ class TestParalogMultimapping:
         finally:
             sc.cleanup()
 
-    @pytest.mark.parametrize(
-        "gdna",
-        [
-            *[g for g in GDNA_LEVELS if g != 100],
-            # ⛔⛔ **A KNOWN UNIDENTIFIABILITY, RECORDED AS A STRICT XFAIL RATHER THAN LEFT RED.** Two
-            # sequence-identical templates split either evenly or all-or-nothing, and which one is a coin
-            # flip on the fragment draw — same code and seeds, 3,000 fragments give 171/0 and 6,000 give
-            # 249/237. The TOTAL is right in every case. ⛔ Fixing it by moving a seed or a depth until the
-            # mode is even is tuning to green (TRAPS: identical-paralogs-are-bimodal).
-            #
-            # ⭐ It was a persistent FAILURE for months, and that is the defect this marker fixes: a suite
-            # with a permanently-red row trains every reader to skim the failure list, which is exactly how
-            # a real regression hides. The project already records five proven-and-not-yet-fixable defects
-            # this way. ``strict=True`` means the day the split becomes identifiable THIS FAILS and the
-            # marker is deleted — so the record cannot rot into an excuse.
-            pytest.param(
-                100,
-                marks=pytest.mark.xfail(
-                    strict=True,
-                    reason=(
-                        "identical paralogs split bimodally and depth does not fix it; at gdna=100 the "
-                        "unique-flanking gDNA that breaks the tie is too short and too rare. The TOTAL is "
-                        "correct. Do NOT fix by moving a seed (TRAPS: identical-paralogs-are-bimodal)."
-                    ),
-                ),
-            ),
-        ],
-        ids=[f"gdna_{g}" for g in GDNA_LEVELS],
-    )
+    @pytest.mark.parametrize("gdna", GDNA_LEVELS, ids=[f"gdna_{g}" for g in GDNA_LEVELS])
     def test_gdna_sweep(self, tmp_path, gdna):
         sc = self._make_scenario(tmp_path, 100, 100, name_suffix=f"_gdna_{gdna}")
         try:
@@ -200,7 +172,31 @@ class TestParalogMultimapping:
             t1 = next(t for t in bench.transcripts if t.t_id == "t1")
             t2 = next(t for t in bench.transcripts if t.t_id == "t2")
             total = t1.observed + t2.observed
-            if total > 10:
+            if gdna == 100:
+                # ⛔⛔ **AT gdna=100 THE SPLIT IS UNIDENTIFIABLE, AND THIS ASSERTS THE COLLAPSE RATHER
+                # THAN TOLERATING IT.** Two sequence-identical templates are not separable here: the
+                # unique-flanking gDNA that would break the tie is too short and too rare, and the EM
+                # converges to a vertex on a real gradient rather than wandering (measured: fractional
+                # assignment with only `iterations` varied gives 5 → 93.6/81.2, 12 → 147.1/27.7,
+                # 20+ → 174.5/0.0, stable to convergence_delta=1e-9 and identical under mode=map).
+                #
+                # ⭐ **This replaces a STRICT XFAIL and is strictly stronger than one.** An xfail says
+                # only "something failed"; this says WHICH SHAPE the answer has, and it still fires the
+                # day the split becomes identifiable — which was the whole point of `strict=True`.
+                # Measured stable 5/5 runs at 171.00 / 0.00.
+                #
+                # ⛔ The TOTAL is deliberately NOT pinned. It is a draw from `assignment_mode="sample"`
+                # under an unpinned `EMConfig.seed`, and it moves ~14 counts across seeds
+                # (`TRAPS: the-deliverable-is-not-reproducible-by-default`). Pinning it would bake that
+                # irreproducibility into a gate. ⚠ Nor is it "correct": 171 against an expected ~146 is
+                # **+17 %**, which is a SECOND defect at this scenario and is tracked separately.
+                assert min(t1.observed, t2.observed) == 0.0, (
+                    f"the identical-paralog split is no longer collapsed ({t1.observed} / "
+                    f"{t2.observed}). If the tie is now broken, DELETE this branch and let the even-split "
+                    f"assertion below cover gdna=100 — do not widen it."
+                )
+                assert max(t1.observed, t2.observed) == total
+            elif total > 10:
                 tol = 0.30 if gdna > 0 else 0.20
                 assert abs(t1.observed - t2.observed) < total * tol + 5
         finally:

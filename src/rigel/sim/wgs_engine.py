@@ -234,6 +234,7 @@ class WholeGenomeSimulator:
         *,
         genomic_refs: Sequence[str],
         strand_specificity: float = 1.0,
+        r1_sense: bool = False,
         seed: int | None = None,
         capture_config: CaptureConfig | None = None,
     ):
@@ -242,6 +243,9 @@ class WholeGenomeSimulator:
         self.sim_params = sim_params
         self.gdna_config = gdna_config
         self.strand_specificity = strand_specificity
+        #: Protocol DIRECTION: False = R1-antisense (dUTP), True = R1-sense (KAPA). Independent of
+        #: ``strand_specificity``, which is the FIDELITY about whichever direction is targeted.
+        self.r1_sense = bool(r1_sense)
         eff_seed = seed if seed is not None else sim_params.sim_seed
         self._rng = np.random.default_rng(eff_seed)
         # Nascent RNA draws on a DEDICATED, independent stream (entropy key "NRNA"=0x4E524E41) so
@@ -725,7 +729,19 @@ class WholeGenomeSimulator:
                 count,
                 rng,
             )
-            flip_mask = rng.random(count) >= ss if ss < 1.0 else None
+            # The base emission is R1-ANTISENSE; a flip makes that fragment R1-sense. ``ss`` is the
+            # fidelity about the TARGETED direction, so an R1-sense protocol flips the fragments the
+            # R1-antisense protocol would have kept — the exact per-fragment mirror on one RNG stream.
+            # ⚠ The r1_sense=False path must consume the RNG exactly as before, or every existing
+            # condition's realized library moves.
+            if ss < 1.0:
+                flip_mask = rng.random(count) >= ss
+                if self.r1_sense:
+                    flip_mask = ~flip_mask
+            elif self.r1_sense:
+                flip_mask = np.ones(count, dtype=bool)
+            else:
+                flip_mask = None
             quals = self._get_quals(read_len)
 
             # Vectorized read extraction

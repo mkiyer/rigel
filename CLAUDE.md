@@ -181,13 +181,13 @@ scheme. The rename rewrote **980 citations across 114 files** and correctly left
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-python -m pytest tests/ -q                     # baseline: 0 fail / 3231 pass / 2 skip / 9 xfail
+python -m pytest tests/ -q                     # baseline: 0 fail / 3235 pass / 0 skip / 7 xfail
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,231 passing, 2 skipped, 9 xfail** (measured
-2026-08-11, after the numeric-convention change). **Any failure at all is a regression** — a stronger and
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,235 passing, 0 SKIPPED, 7 xfail** (measured
+2026-08-11). **Any failure at all is a regression** — a stronger and
 cheaper rule than counting expected ones.
 
 ⛔ **RE-DERIVE THE COUNT, NEVER ADJUST IT** (`TRAPS: re-record-the-baseline`). Several suite tests are
@@ -196,12 +196,25 @@ adding or retiring a file moves the total by a few. Account for the delta; a han
 drifted every time it has been carried. ⚠ Four successive versions of this paragraph were stale when
 read, which is why it no longer records what they said.
 
-⭐ **And 9 xfails, five of them STRICT and load-bearing.** `test_toy_harness`'s intron-composition gate is
-the project's detector for the level defect the splice-flux reframe un-masked, and `test_node_init.py` carries
-**four** more added 2026-08-06 for two PROVEN defects whose fixes are panel-negative alone: `struct_lock` is
-`~solvable & NODE` rather than `g1_locked & NODE` (19,709 slots against 1,312), and `Var(f_g)` is capped at
-`f_g(1−f_g)`, which is 0 at the `f_g = 1` default of an evidence-free slot. ⛔ All five must go GREEN — not
-be widened — when `ROADMAP.md` §1 step 1's paired arm lands.
+⭐⭐ **7 xfails, and they are NOT one kind of thing** — interrogated 2026-08-11, so do not treat the list
+as uniform:
+
+* **2 were GREEN and one config flag broke them.** `test_ambig_scenario` and `test_toy_harness`'s intron
+  gate both go green the instant `message_propagation = True` (verified: ambig `0.4577 → 0.000247`). They
+  are the *recorded price of the switch*, not defects. ⛔ Flipping it costs **+154.8 %** on the stratum
+  carrying 73 % of panel error — the owner's ruling, not a test decision.
+* **5 were WRITTEN as xfail and were never green** — executable records of two PROVEN defects found by
+  the dissect loop: `struct_lock` is `~solvable & NODE` rather than `g1_locked & NODE`, and `Var(f_g)` is
+  capped at `f_g(1−f_g)`, which is 0 at the `f_g = 1` default of an evidence-free slot. ⛔ For these
+  "fix the test" is a CATEGORY ERROR: the test is right and the code is wrong. Rescoping `struct_lock`
+  alone measures **−1.2 %** on its target stratum, **+0.4 %** worse at `g98` and **+3,207 %** on the
+  zero-gDNA control — it is half of a cancelling pair (`TRAPS: a-cancelling-defect-pair`) and must be
+  priced WITH the seam-composition arm or not at all.
+
+⛔ **Two were closed on 2026-08-11 and the method is the precedent:** the R1-sense gap by BUILDING the
+missing capability, and the paralog collapse by asserting the collapse STRUCTURALLY (`min == 0`,
+`max == total`) — which still fires the day the tie is broken AND catches a partial break a strict xfail
+could not see. ⚠ Neither was closed by widening a bound.
 
 Always set `OMP_NUM_THREADS=1` when benchmarking or comparing runs.
 

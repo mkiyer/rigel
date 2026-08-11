@@ -378,6 +378,7 @@ class Scenario:
             _to_gdna_sim(effective_gdna),
             genomic_refs=[self.ref_name],
             strand_specificity=sim_config.strand_specificity,
+            r1_sense=sim_config.r1_sense,
             capture_config=effective_capture,
         )
         gdna_abundance = effective_gdna.abundance if effective_gdna else 0.0
@@ -499,6 +500,7 @@ class Scenario:
                 _to_gdna_sim(effective_gdna),
                 genomic_refs=[self.ref_name],
                 strand_specificity=sim_config.strand_specificity,
+                r1_sense=sim_config.r1_sense,
                 capture_config=effective_capture,
             )
             n_mrna, n_nrna = sim.rna_split(n_rna)
@@ -511,6 +513,7 @@ class Scenario:
                 _to_gdna_sim(effective_gdna),
                 genomic_refs=[self.ref_name],
                 strand_specificity=sim_config.strand_specificity,
+                r1_sense=sim_config.r1_sense,
                 capture_config=effective_capture,
             )
             n_mrna, n_nrna, n_gdna = sim.pool_split(n_fragments, gdna_abundance)

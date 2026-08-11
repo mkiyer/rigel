@@ -29,6 +29,11 @@ class ReadSimConfig:
     strand_specificity : probability an RNA fragment preserves correct read orientation
         (1.0 = perfectly stranded, 0.5 = no strand information); implemented as an R1↔R2 swap
         with probability ``1 − strand_specificity`` per fragment.
+    r1_sense : which orientation the protocol *targets* — ``False`` (default) emits R1-ANTISENSE
+        (Illumina TruSeq dUTP), ``True`` emits R1-SENSE (KAPA Stranded). This is a DIRECTION and
+        ``strand_specificity`` is a FIDELITY about it; the two are independent, and conflating
+        them is what made the same non-defect get filed twice (see
+        ``tests/calibration/test_strand_sense_convention.py``).
     seed : random seed for reproducibility.
     """
 
@@ -39,6 +44,7 @@ class ReadSimConfig:
     read_length: int = 150
     error_rate: float = 0.0
     strand_specificity: float = 1.0
+    r1_sense: bool = False
     seed: int = 42
 
 

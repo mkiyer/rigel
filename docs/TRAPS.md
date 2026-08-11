@@ -965,10 +965,28 @@ default was actively seeding false gDNA into neighbouring exons.
 
 **identical-paralogs-are-bimodal. An identical-paralog split is bimodal, and depth does not fix it.** Two sequence-identical
 transcripts split either evenly or all-or-nothing, and which one is a coin flip on the fragment draw:
-same code and seeds, `n_fragments` 3,000 → 171/0, 6,000 → 249/237, 12,000 → 679/0, 20,000 → 773/795. The
-*total* is right in every case. ⛔ **Do not "fix" this by moving a seed or a depth until it lands even** —
-that is tuning to green. It is an unidentifiability, and the honest response is either to damp the
-degenerate direction or to score only what is identifiable.
+same code and seeds, `n_fragments` 3,000 → 171/0, 6,000 → 249/237, 12,000 → 679/0, 20,000 → 773/795.
+⛔ **Do not "fix" this by moving a seed or a depth until it lands even** — that is tuning to green. It is
+an unidentifiability, and the honest response is either to damp the degenerate direction or to score only
+what is identifiable.
+
+⚠ **THIS ENTRY SAID "the *total* is right in every case" AND THAT IS FALSE** (measured 2026-08-11). At
+`gdna=100` the total is **171 against an expected ~146 — +17 %** — and the test file's own comment said so
+in the same breath. Two defects live at this scenario, not one: the split is unidentifiable *and* the
+total is over-called. Scoring "only what is identifiable" is right, but it must not be read as "the rest
+is fine".
+
+⭐ **The xfail here is now GREEN and the gate is stronger** (2026-08-11). `test_gdna_sweep[gdna_100]`
+asserts the COLLAPSE structurally — `min == 0`, `max == total` — which still fires the day the tie is
+broken, and additionally catches a PARTIAL break that a strict xfail could not distinguish from the
+collapse. ⛔ The total is deliberately NOT pinned: it is a draw under an unpinned `EMConfig.seed` and moves
+~14 counts across seeds, so pinning it would bake `TRAPS: the-deliverable-is-not-reproducible-by-default`
+into a gate.
+
+⭐ **And the mechanism is not what "coin flip" suggests.** With fractional assignment and only `iterations`
+varied: 5 → 93.6/81.2, 12 → 147.1/27.7, 20+ → 174.5/0.0, stable to `convergence_delta=1e-9` and identical
+under `mode=map`. The EM *converges* to the vertex on a real gradient. So there is a TILT entering from
+outside the RNA likelihood terms, and it is a bug to localise rather than noise to tolerate.
 
 ---
 
@@ -1090,8 +1108,16 @@ months and nobody diffed them.
 `1 − ss`); a fitted `sense fraction` is **directional**. For an R1-antisense (dUTP) protocol — which real
 cfRNA is — comparing them reads as a sign error. A fitted κ of 0.0101 on a "0.99 stranded" library is
 **correct**, and forcing 0.99 measured 166× worse. The matching quantity is
-`StrandModel.strand_specificity`, which recovers the knob directly (1.00 → 1.0000, 0.75 → 0.7701,
-0.50 → 0.5020).
+`StrandModel.strand_specificity`, which recovers the knob directly.
+
+⚠ **The recovered values are NOT restated here.** They lived in this paragraph *and* in
+`test_strand_specificity_RECOVERS_the_simulated_parameter`, and both drifted: each said
+`0.75 → 0.7701, 0.50 → 0.5020` while the tree measured **0.7494 / 0.5034**. A measured number belongs in
+the test that measures it, where it cannot rot silently — one home, not two.
+
+⭐ **And the protocol DIRECTION is now simulable in both orientations** (2026-08-11): `ReadSimConfig.r1_sense`
+selects R1-antisense (TruSeq dUTP, the default) or R1-sense (KAPA), independently of the fidelity. That
+closes the coverage gap this entry describes, and the per-fragment mirror between the two is gated.
 
 **strand-measures-the-tilt. Strand measures the TILT, not the gDNA fraction.** With RNA tilt `d = f₊ − f₋`,
 `p = ½ + (κ−½)·d` — the gDNA fraction **cancels identically**. Strand reaches gDNA only through the
