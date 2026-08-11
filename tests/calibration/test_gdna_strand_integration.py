@@ -64,7 +64,7 @@ def _intergenic_betabinom_payload(n_nodes, depth, overdispersion, seed):
         ref_sj_offsets=np.array([0, 0], dtype=np.int64),
         node_contained_count=contained,
         # ⚠ ONE column: the length moments carry no strand axis, so the two are summed.
-        node_contained_inv_length_sum=(contained.sum(axis=1).astype(np.uint64) * np.uint64(quantum)),
+        node_contained_inv_opportunity_sum=(contained.sum(axis=1).astype(np.uint64) * np.uint64(quantum)),
         node_contained_length_sum=(contained.sum(axis=1).astype(np.uint64) * np.uint64(_FRAG_LEN)),
         node_start_count=contained.sum(axis=1).astype(np.uint32),
         edge_unspliced_count=edge_zeros(np.uint32),

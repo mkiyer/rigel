@@ -210,7 +210,7 @@ class CalibrationSubstrate:
             node_contained=view(
                 "node_contained",
                 payload.node_contained_count,
-                payload.node_contained_inv_length_sum,
+                payload.node_contained_inv_opportunity_sum,
                 payload.node_contained_length_sum,
             ),
             edge_unspliced=view(

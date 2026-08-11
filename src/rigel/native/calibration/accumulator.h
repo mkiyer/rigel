@@ -129,7 +129,7 @@ struct Node {
     /// strand a read aligned to says nothing about whether the molecule was gDNA or RNA -- and every
     /// consumer summed the two columns before using them. The COUNTS keep both because the strand model
     /// is a Beta-Binomial over them, per strand.
-    std::uint64_t contained_inv_length_sum;
+    std::uint64_t contained_inv_opportunity_sum;
     std::uint64_t contained_length_sum;
 };
 static_assert(sizeof(Node) == 24, "Node must be 24 bytes with no padding");

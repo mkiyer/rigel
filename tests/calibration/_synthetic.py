@@ -82,7 +82,7 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         ref_edge_offsets=np.array([0, n_edges], dtype=np.int64),
         ref_sj_offsets=np.array([0, n_sj], dtype=np.int64),
         node_contained_count=contained,
-        node_contained_inv_length_sum=inv(contained, 50),
+        node_contained_inv_opportunity_sum=inv(contained, 50),
         node_contained_length_sum=lengths(contained, 50),
         node_start_count=np.array([11, 12, 13], dtype=np.uint32),
         edge_unspliced_count=unspliced,

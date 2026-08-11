@@ -91,7 +91,7 @@ def test_the_fixed_point_is_DECODED_HERE_and_only_here(substrate):
     sub, payload, _ = substrate
     np.testing.assert_allclose(
         sub.node_contained.inv_length_sum,
-        payload.node_contained_inv_length_sum.astype(np.float64) / INV_LENGTH_SCALE,
+        payload.node_contained_inv_opportunity_sum.astype(np.float64) / INV_LENGTH_SCALE,
         rtol=0,
         atol=0,
     )

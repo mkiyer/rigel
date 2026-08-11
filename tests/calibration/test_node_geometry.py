@@ -450,8 +450,8 @@ def two_reference_parts(payload):
         node_contained_count=np.vstack(
             [payload.node_contained_count, np.array([[1, 1], [2, 2]], np.uint32)]
         ),
-        node_contained_inv_length_sum=np.concatenate(
-            [payload.node_contained_inv_length_sum, np.zeros(2, np.uint64)]
+        node_contained_inv_opportunity_sum=np.concatenate(
+            [payload.node_contained_inv_opportunity_sum, np.zeros(2, np.uint64)]
         ),
         node_contained_length_sum=np.concatenate(
             [payload.node_contained_length_sum, np.zeros(2, np.uint64)]

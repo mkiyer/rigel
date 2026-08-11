@@ -187,9 +187,12 @@ def _check_one(start: int, end: int, introns) -> None:
     if contained is not None:
         from ._accumulator_reference import inv_length_quantum
 
-        assert int(t.node_contained_inv_length_sum.sum()) == inv_length_quantum(length), (
-            f"{ctx}: the contained deposit's L disagrees with the oracle's {length}"
-        )
+        # ⭐ The contained deposit is `1/OPPORTUNITY` — `ell − L + 1` admissible starts inside the
+        # containing node — so this asserts BOTH the length the oracle derived and the node it landed in.
+        node_len = int(_CUTS[contained + 1]) - int(_CUTS[contained])
+        assert int(t.node_contained_inv_opportunity_sum.sum()) == inv_length_quantum(
+            node_len - length + 1
+        ), f"{ctx}: the contained deposit disagrees with the oracle's L={length} in a {node_len} bp node"
 
     assert got_crossed == crossed, f"{ctx}: crossed lines {got_crossed} != oracle {crossed}"
     assert got_contained == contained, f"{ctx}: contained {got_contained} != oracle {contained}"
@@ -392,3 +395,78 @@ def test_the_unconditional_histogram_is_a_SUPERSET_of_the_pure_pools():
         "a fragment in a pure pool must also be binned in the unconditional histogram, at the same L"
     )
     assert int(t.deposited_lengths.sum()) == t.qc[DepositOutcome.DEPOSITED.value]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+#  THE RECIPROCAL-OPPORTUNITY DEPOSIT AT A NODE — `1/A`, not `1/L`
+# ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+
+def _one_node_acc(node_len: int, max_fragment_length: int = 10_000) -> Accumulator:
+    """An accumulator over a SINGLE node ``[0, node_len)`` — no lines, so nothing but containment."""
+    part = Partition.from_cuts([[0, node_len]])
+    return Accumulator(part, max_fragment_length=max_fragment_length)
+
+
+@pytest.mark.parametrize("node_len", [151, 400, 1000])
+def test_the_node_deposit_is_the_RECIPROCAL_OPPORTUNITY_and_is_therefore_MODEL_FREE(node_len):
+    """⭐⭐⭐ **A NODE'S DENSITY CHANNEL MUST NOT DEPEND ON THE FRAGMENT-LENGTH DISTRIBUTION.**
+
+    The opportunity for a length-``w`` fragment inside a node of length ``ell`` is ``ell − w + 1`` start
+    positions. Deposit ``1/A`` and the two cancel identically::
+
+        E[SUM 1/A]  =  SUM_w rho * A(w) * f(w) * (1/A(w))  =  rho      for ANY f
+
+    ⭐ **The brute-force configuration below IS that identity with no expectation in it.** Placing one
+    fragment at EVERY admissible start of EVERY length is exactly the uniform field ``rho = 1``, so each
+    length must contribute exactly ``1`` regardless of which lengths were chosen — and the total must not
+    move when the length SET changes. That is model-freeness stated as an equality.
+
+    ⛔ **This test FAILS on a ``1/L`` deposit**, which is what shipped until 2026-08-10: there each length
+    contributes ``(ell − w + 1)/w``, so the total is a function of the lengths and the channel is not a
+    density (`EQUATIONS.md` §2.2). Verified failing before the fix was written.
+    """
+    from ._accumulator_reference import inv_length_quantum
+
+    lengths = [w for w in (20, 51, 97, 150, 233, 400, 999) if w <= node_len]
+    assert len(lengths) >= 3, "the parametrisation must leave a non-degenerate length SET"
+
+    acc = _one_node_acc(node_len)
+    for w in lengths:
+        for start in range(0, node_len - w + 1):  # every admissible placement, exactly once
+            assert acc.deposit(0, start, start + w) is DepositOutcome.DEPOSITED
+
+    got = int(acc.tally.node_contained_inv_opportunity_sum[0])
+    # ⭐ EXACT, not a tolerance: A placements each depositing round(2^32/A) is a closed form.
+    want = sum((node_len - w + 1) * inv_length_quantum(node_len - w + 1) for w in lengths)
+    assert got == want, f"node_len={node_len}: {got} != {want}"
+
+    # ⭐⭐ AND THE POINT: each length contributes ONE unit of density, so the total is the length COUNT.
+    # The fixed-point residue is bounded by half a quantum per placement and is reported, not waived.
+    unit = float(1 << 32)
+    assert abs(got / unit - len(lengths)) < 0.5 * len(lengths) / unit * max(lengths), (
+        f"node_len={node_len}: {got / unit:.9f} density units for {len(lengths)} lengths — "
+        "the opportunity did not cancel, so this channel is a function of the pmf"
+    )
+
+
+def test_the_node_density_channel_DOES_NOT_MOVE_when_the_length_set_changes():
+    """⛔ The falsification with the pmf VARIED — the property `1/L` cannot have.
+
+    Two disjoint length sets over the same node, each placed at every admissible start. A model-free
+    density reads the same ``rho`` per length in both; a length-dependent one does not.
+    """
+    unit = float(1 << 32)
+    node_len = 1000
+    per_length = []
+    for lengths in ((20, 51, 97), (233, 400, 999)):
+        acc = _one_node_acc(node_len)
+        for w in lengths:
+            for start in range(0, node_len - w + 1):
+                acc.deposit(0, start, start + w)
+        per_length.append(int(acc.tally.node_contained_inv_opportunity_sum[0]) / unit / len(lengths))
+    short, long_ = per_length
+    assert abs(short - long_) < 1e-6, (
+        f"density per length: short lengths {short:.9f}, long lengths {long_:.9f} — a model-free "
+        "channel reads the same rho for both; this one is a function of the fragment lengths"
+    )

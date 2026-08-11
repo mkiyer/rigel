@@ -593,7 +593,6 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     // would divide by zero. Its residue is the schema's only count/density co-support violation -- an
     // L == 1 path on an annotated junction books a count against density 0, which is correct.
     const std::uint64_t quantum_edge = length >= 2 ? inv_length_quantum(length - 1) : 0;
-    const std::uint64_t quantum_node = inv_length_quantum(length);
     const std::size_t   col          = static_cast<std::size_t>(column);
 
     std::int64_t n_crossed = 0;
@@ -666,8 +665,18 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     if (sj_ids.empty() && first_node == node_of_pos(last_base)) {
         contained_node = first_node;
         Node& node = nodes_[static_cast<std::size_t>(contained_node)];
+        // ⭐⭐⭐ THE RECIPROCAL-OPPORTUNITY DEPOSIT -- what makes this channel a DENSITY. A length-`w`
+        // fragment contained in a node of length `ell` had `ell - w + 1` admissible start positions, so
+        // `1/(ell - w + 1)` cancels the opportunity identically and E[SUM] = rho for ANY length
+        // distribution. `1/L` does NOT cancel it: measured, that channel read 25.67 density units for
+        // short fragments and 1.60 for long ones at the same true density. An EDGE is the `ell -> 0`
+        // limit, which is why `1/(L-1)` is right there and was wrong here.
+        // ⚠ `A >= 1` is structural: the fragment IS contained, so `w <= ell`.
+        const std::int64_t node_len =
+            cuts_[static_cast<std::size_t>(contained_node) + 1] -
+            cuts_[static_cast<std::size_t>(contained_node)];
         node.contained_count[col] += 1u;
-        node.contained_inv_length_sum += quantum_node;
+        node.contained_inv_opportunity_sum += inv_length_quantum(node_len - length + 1);
         node.contained_length_sum += static_cast<std::uint64_t>(length);
     }
 
@@ -799,7 +808,7 @@ void Accumulator::merge_from(const Accumulator& other) {
             nodes_[i].contained_count[c]   += other.nodes_[i].contained_count[c];
         }
         // ⚠ Outside the column loop — these have ONE value per node, not one per strand.
-        nodes_[i].contained_inv_length_sum += other.nodes_[i].contained_inv_length_sum;
+        nodes_[i].contained_inv_opportunity_sum += other.nodes_[i].contained_inv_opportunity_sum;
         nodes_[i].contained_length_sum += other.nodes_[i].contained_length_sum;
         node_start_count_[i] += other.node_start_count_[i];
     }

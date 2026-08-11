@@ -2116,7 +2116,7 @@ private:
             const auto n_sj    = static_cast<std::size_t>(ref_sj_offsets.back());
 
             std::vector<uint32_t> node_contained_count(n_nodes * kNStrandColumns, 0u);
-            std::vector<uint64_t> node_contained_inv_length_sum(n_nodes, 0u);
+            std::vector<uint64_t> node_contained_inv_opportunity_sum(n_nodes, 0u);
             std::vector<uint64_t> node_contained_length_sum(n_nodes, 0u);
             std::vector<uint32_t> node_start_count(n_nodes, 0u);
             std::vector<uint32_t> edge_unspliced_count(n_edges * kNStrandColumns, 0u);
@@ -2161,7 +2161,7 @@ private:
                         node_contained_count[o]   = nodes[i].contained_count[c];
                     }
                     // ⚠ Outside the column loop: ONE value per node, keyed without kNStrandColumns.
-                    node_contained_inv_length_sum[node_base + i] = nodes[i].contained_inv_length_sum;
+                    node_contained_inv_opportunity_sum[node_base + i] = nodes[i].contained_inv_opportunity_sum;
                     node_contained_length_sum[node_base + i] = nodes[i].contained_length_sum;
                 }
                 for (std::size_t i = 0; i < a.n_edges(); ++i) {
@@ -2221,7 +2221,7 @@ private:
 
             cal["node_contained_count"]   = vec_to_ndarray(std::move(node_contained_count));
             cal["node_contained_length_sum"] = vec_to_ndarray(std::move(node_contained_length_sum));
-            cal["node_contained_inv_length_sum"] = vec_to_ndarray(std::move(node_contained_inv_length_sum));
+            cal["node_contained_inv_opportunity_sum"] = vec_to_ndarray(std::move(node_contained_inv_opportunity_sum));
             cal["node_start_count"]       = vec_to_ndarray(std::move(node_start_count));
             cal["edge_unspliced_count"]   = vec_to_ndarray(std::move(edge_unspliced_count));
             cal["edge_unspliced_length_sum"] = vec_to_ndarray(std::move(edge_unspliced_length_sum));
@@ -2902,11 +2902,11 @@ NB_MODULE(_bam_impl, m) {
                     &a.nodes_data()[0].contained_count[0], {a.n_nodes(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
             })
-            .def_prop_ro("node_contained_inv_length_sum", [](nb::handle h) {
+            .def_prop_ro("node_contained_inv_opportunity_sum", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
                 constexpr int64_t row = sizeof(Node) / sizeof(uint64_t);
                 return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<1>>(
-                    &a.nodes_data()[0].contained_inv_length_sum, {a.n_nodes()}, h, {row}).cast();
+                    &a.nodes_data()[0].contained_inv_opportunity_sum, {a.n_nodes()}, h, {row}).cast();
             })
             .def_prop_ro("node_contained_length_sum", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);

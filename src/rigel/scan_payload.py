@@ -262,7 +262,7 @@ BANK_AXES: tuple[tuple[str, str, Any], ...] = (
 #: bank", and widening it to mean "every bank" would silently give the mass a strand column in every
 #: loop that reads it.
 SINGLE_COLUMN_AXES: tuple[tuple[str, str, Any], ...] = (
-    ("node_contained_inv_length_sum", "node", np.uint64),
+    ("node_contained_inv_opportunity_sum", "node", np.uint64),
     ("node_contained_length_sum", "node", np.uint64),
     ("edge_unspliced_inv_length_sum", "edge", np.uint64),
     ("edge_unspliced_length_sum", "edge", np.uint64),
@@ -477,7 +477,7 @@ class AccumulatorPayload:
     #: ⭐ uint64[n_nodes] — ONE column. The length moments are strand-AGNOSTIC: which strand a read
     #: aligned to says nothing about whether the molecule was gDNA or RNA, and every consumer summed
     #: the two columns. ⛔ The COUNTS keep both — the strand model is a Beta-Binomial over them.
-    node_contained_inv_length_sum: np.ndarray
+    node_contained_inv_opportunity_sum: np.ndarray
     node_contained_length_sum: np.ndarray  # uint64[n_nodes] — Sum L
     node_start_count: np.ndarray  # uint32[n_nodes] — THE invariant; sums to qc.deposited
 

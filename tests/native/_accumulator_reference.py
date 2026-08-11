@@ -520,7 +520,7 @@ class Tally:
     node_contained_count: np.ndarray  # uint32[n_nodes, 2]
     #: ⭐ uint64[n_nodes] — ONE column. See :meth:`Tally.zeros`: the length moments are
     #: strand-AGNOSTIC, and every consumer summed the two columns before using them.
-    node_contained_inv_length_sum: np.ndarray
+    node_contained_inv_opportunity_sum: np.ndarray
     node_contained_length_sum: np.ndarray  # uint64[n_nodes] — Sum L, the second length tilt
     node_start_count: np.ndarray  # uint32[n_nodes] — one per accepted fragment; THE invariant
     edge_unspliced_count: np.ndarray  # uint32[n_edges, 2]
@@ -614,7 +614,7 @@ class Tally:
 
         return cls(
             node_contained_count=counts(n_nodes),
-            node_contained_inv_length_sum=inv_length(n_nodes),
+            node_contained_inv_opportunity_sum=inv_length(n_nodes),
             node_contained_length_sum=inv_length(n_nodes),
             node_start_count=np.zeros(n_nodes, np.uint32),
             edge_unspliced_count=counts(n_edges),
@@ -908,7 +908,6 @@ class Accumulator:
         edge_count = t.edge_spliced_count if spliced else t.edge_unspliced_count
         edge_mass = t.edge_spliced_mass if spliced else t.edge_unspliced_mass
         quantum_edge = inv_length_quantum(length - 1) if length >= 2 else 0
-        quantum_node = inv_length_quantum(length)
         n_crossed, sole_line = 0, -1
         for seg_start, seg_end in segments:
             first = int(np.searchsorted(cuts, seg_start, side="right"))
@@ -963,8 +962,20 @@ class Accumulator:
         contained_node = -1
         if not sj_ids and first_node == self._local_node(cuts, last_base):
             contained_node = node_base + first_node
+            # ⭐⭐⭐ THE RECIPROCAL-OPPORTUNITY DEPOSIT, and it is what makes this channel a DENSITY.
+            # A length-`w` fragment contained in a node of length `ell` had `ell − w + 1` admissible
+            # start positions, so depositing `1/(ell − w + 1)` cancels the opportunity identically and
+            # `E[SUM] = rho` for ANY length distribution. ⛔ The predecessor deposited `1/L`, which does
+            # NOT cancel `(ell − w + 1)` — measured, that channel read 25.67 density units for short
+            # fragments and 1.60 for long ones at the same true density, a 16x swing driven by nothing
+            # but the length SET. An EDGE is the `ell -> 0` limit of this, which is why `1/(L−1)` is
+            # right there and was wrong here.
+            # ⚠ `A >= 1` is structural, not defensive: the fragment IS contained, so `w <= ell`.
+            node_len = int(cuts[first_node + 1]) - int(cuts[first_node])
             t.node_contained_count[contained_node, column] += 1
-            t.node_contained_inv_length_sum[contained_node] += quantum_node
+            t.node_contained_inv_opportunity_sum[contained_node] += inv_length_quantum(
+                node_len - length + 1
+            )
             t.node_contained_length_sum[contained_node] += length
 
         pool = self._pool(spliced, contained_node, sole_line, node_base)

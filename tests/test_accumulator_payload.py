@@ -101,7 +101,7 @@ def _calibration_dict(**overrides) -> dict:
         "ref_edge_offsets": ref_edge_offsets,
         "ref_sj_offsets": ref_sj_offsets,
         "node_contained_count": np.arange(n_nodes * 2, dtype=np.uint32),
-        "node_contained_inv_length_sum": np.arange(n_nodes, dtype=np.uint64) * 7,
+        "node_contained_inv_opportunity_sum": np.arange(n_nodes, dtype=np.uint64) * 7,
         "node_contained_length_sum": np.arange(n_nodes, dtype=np.uint64) * 11,
         "node_start_count": np.arange(n_nodes, dtype=np.uint32),
         "edge_unspliced_count": np.arange(n_edges * 2, dtype=np.uint32),
@@ -178,7 +178,7 @@ def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
     # ⛔ The length moments and the conserved masses carry ONE column: which strand a read aligned to
     # says nothing about whether the molecule was gDNA or RNA, and every consumer summed the two.
     for name, rows in (
-        ("node_contained_inv_length_sum", n_nodes),
+        ("node_contained_inv_opportunity_sum", n_nodes),
         ("node_contained_length_sum", n_nodes),
         ("edge_unspliced_inv_length_sum", n_edges),
         ("edge_unspliced_length_sum", n_edges),

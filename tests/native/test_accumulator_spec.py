@@ -71,6 +71,20 @@ def _edge(ref, line):
     return (0 if ref == 0 else len(CHR1_CUTS) - 2) + line - 1
 
 
+
+def _contained_quantum(ref, local, length):
+    """The deposit a CONTAINED length-``length`` fragment makes on node ``(ref, local)``.
+
+    ⭐⭐ **The deposit is ``1/OPPORTUNITY``, not ``1/length``** — a length-`w` fragment inside a node of
+    length `ell` had `ell − w + 1` admissible start positions, so `1/(ell − w + 1)` cancels the
+    opportunity identically and the channel is a DENSITY for any length distribution
+    (`test_fragment_length_proof.test_the_node_deposit_is_the_RECIPROCAL_OPPORTUNITY_...`). ⚠ Derived from
+    the fixture's own cuts rather than written as a number, so an assertion states the RULE.
+    """
+    cuts = CHR1_CUTS if ref == 0 else CHR2_CUTS
+    return inv_length_quantum(cuts[local + 1] - cuts[local] - length + 1)
+
+
 def _node(ref, local):
     return (0 if ref == 0 else len(CHR1_CUTS) - 1) + local
 
@@ -109,7 +123,7 @@ def test_a_contained_fragment_touches_ONE_node_and_no_edge():
     assert acc.deposit(0, 220, 380) is DepositOutcome.DEPOSITED
     t = acc.tally
     assert int(t.node_contained_count[_node(0, 3), 0]) == 1
-    assert int(t.node_contained_inv_length_sum[_node(0, 3)]) == inv_length_quantum(160)
+    assert int(t.node_contained_inv_opportunity_sum[_node(0, 3)]) == _contained_quantum(0, 3, 160)
     assert t.node_contained_count.sum() == 1
     assert t.edge_unspliced_count.sum() == 0
 
@@ -253,7 +267,7 @@ def test_an_unannotated_intron_inside_one_node_is_a_contained_unspliced_fragment
     acc.deposit(0, 210, 390, observed_introns=[(300, 340)])
     t = acc.tally
     assert int(t.node_contained_count[_node(0, 3), 0]) == 1
-    assert int(t.node_contained_inv_length_sum[_node(0, 3)]) == inv_length_quantum(180 - 40)
+    assert int(t.node_contained_inv_opportunity_sum[_node(0, 3)]) == _contained_quantum(0, 3, 180 - 40)
     assert t.qc["unannotated_introns"] == 1
 
 
@@ -425,7 +439,7 @@ def test_a_fragment_is_clipped_to_its_reference_and_L_is_the_clipped_length():
     acc.deposit(0, 950, 1200)  # chr1 ends at 1000
     t = acc.tally
     assert int(t.node_contained_count[_node(0, 5), 0]) == 1
-    assert int(t.node_contained_inv_length_sum[_node(0, 5)]) == inv_length_quantum(50)
+    assert int(t.node_contained_inv_opportunity_sum[_node(0, 5)]) == _contained_quantum(0, 5, 50)
 
 
 def test_a_single_node_reference_has_no_edges_and_still_accepts_a_fragment():
@@ -593,7 +607,7 @@ def test_the_deposit_is_independent_of_the_ORDER_fragments_arrive_in():
     a, b = run(range(len(starts))), run(order)
     for field in (
         "node_contained_count",
-        "node_contained_inv_length_sum",
+        "node_contained_inv_opportunity_sum",
         "node_start_count",
         "edge_unspliced_count",
         "edge_unspliced_inv_length_sum",
@@ -654,7 +668,7 @@ def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_be
     assert int(t.node_start_count[_node(0, 4)]) == 1, "n4, where the path actually starts"
     assert int(t.node_start_count[_node(0, 1)]) == 0, "not n1, where the extent begins"
     assert int(t.node_contained_count[_node(0, 4), 0]) == 1
-    assert int(t.node_contained_inv_length_sum[_node(0, 4)]) == inv_length_quantum(20)
+    assert int(t.node_contained_inv_opportunity_sum[_node(0, 4)]) == _contained_quantum(0, 4, 20)
 
 
 def test_a_duplicated_intron_credits_its_junction_ONCE():
@@ -1058,7 +1072,7 @@ def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
     assert int(t.node_contained_count[node, STRAND_COLUMNS[Strand.POS]]) == 1
     assert int(t.node_contained_count[node, STRAND_COLUMNS[Strand.NEG]]) == 1
     # ...and the moments pool them into the single slot
-    assert int(t.node_contained_inv_length_sum[node]) == 2 * inv_length_quantum(160)
+    assert int(t.node_contained_inv_opportunity_sum[node]) == 2 * _contained_quantum(0, 3, 160)
     assert int(t.node_contained_length_sum[node]) == 2 * 160
 
     edge_acc = _acc()
@@ -1155,4 +1169,4 @@ def test_the_density_FIELD_NAME_is_gone_everywhere():
     t = _acc().tally
     stale = [name for name in t.__slots__ if name.endswith("_density")]
     assert stale == []
-    assert {"node_contained_inv_length_sum", "node_contained_length_sum"} <= set(t.__slots__)
+    assert {"node_contained_inv_opportunity_sum", "node_contained_length_sum"} <= set(t.__slots__)
