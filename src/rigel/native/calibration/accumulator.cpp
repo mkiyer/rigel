@@ -493,14 +493,31 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     // exceeds the limit must be RNA": that hypothesis's L IS the span. There is no second rule.
     // ⚠ Unless the filter would empty the set, in which case the survivors stand and the ordinary
     // kTooLong rejection counts them, as it did before any of this.
+    // ⛔⛔ EVERY FRAGMENT HAS AT LEAST ONE HYPOTHESIS -- "cut nothing beyond what was sequenced" -- and
+    // the executable specification makes that its DEFAULT (`UNSPLICED_ONLY`), not an option:
+    // "the degenerate case is the general case, not a branch". A caller offering an EMPTY set is
+    // asking the same question, so answer it the same way rather than crashing.
+    //
+    // ⛔ Without this, an empty set walked straight past the `survivors.size() > 1` deferral and
+    // dereferenced `survivors.front()` on an EMPTY vector, indexing a NULL `hypotheses` -- a hard
+    // segfault, and one nothing could reach from the scanner because the scanner always offers the
+    // genomic path. It cost a session to find precisely because it was unreachable from production.
+    static const GapHypothesis kUnsplicedOnly{nullptr, 0, STRAND_NONE, nullptr, 0};
+    OfferedFragment offered_or_default = fragment;
+    if (fragment.n_hypotheses == 0) {
+        offered_or_default.hypotheses = &kUnsplicedOnly;
+        offered_or_default.n_hypotheses = 1;
+    }
+    const OfferedFragment& arbitrated = offered_or_default;
+
     auto& survivors = scratch.survivors;
     survivors.clear();
     bool any_spliced_hypothesis = false;
-    for (std::size_t h = 0; h < fragment.n_hypotheses; ++h) {
+    for (std::size_t h = 0; h < arbitrated.n_hypotheses; ++h) {
         std::int64_t absorbed = 0;
         const std::int64_t candidate_length =
-            hypothesis_length(fragment, fragment.hypotheses[h], start, end, scratch, &absorbed);
-        any_spliced_hypothesis |= !fragment.hypotheses[h].is_unspliced();
+            hypothesis_length(arbitrated, arbitrated.hypotheses[h], start, end, scratch, &absorbed);
+        any_spliced_hypothesis |= !arbitrated.hypotheses[h].is_unspliced();
         survivors.push_back({h, candidate_length, absorbed});
     }
     const std::size_t n_offered = survivors.size();
@@ -513,14 +530,14 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         for (std::size_t h = 0; h < n_offered; ++h) {
             std::int64_t absorbed = 0;
             const std::int64_t candidate_length =
-                hypothesis_length(fragment, fragment.hypotheses[h], start, end, scratch, &absorbed);
+                hypothesis_length(arbitrated, arbitrated.hypotheses[h], start, end, scratch, &absorbed);
             survivors.push_back({h, candidate_length, absorbed});
         }
     }
-    if (any_spliced_hypothesis) record_gap_resolution(fragment, survivors);
+    if (any_spliced_hypothesis) record_gap_resolution(arbitrated, survivors);
 
     if (survivors.size() > 1) {
-        deferred_.append(fragment, ref_id_, start, end);
+        deferred_.append(arbitrated, ref_id_, start, end);
         ++counters_.deferred_undetermined_gap;
         return DepositOutcome::kDeferred;
     }
@@ -528,7 +545,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     // The single survivor. ⚠ Re-normalised rather than cached per hypothesis: one extra normalise on the
     // winner is cheaper than carrying a normalised list for every candidate, and it keeps ONE code path
     // from a hypothesis to its introns.
-    const GapHypothesis& chosen = fragment.hypotheses[survivors.front().index];
+    const GapHypothesis& chosen = arbitrated.hypotheses[survivors.front().index];
     std::int64_t absorbed = 0;
     const std::int64_t length =
         hypothesis_length(fragment, chosen, start, end, scratch, &absorbed);

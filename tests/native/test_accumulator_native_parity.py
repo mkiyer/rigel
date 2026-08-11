@@ -722,3 +722,33 @@ def test_the_per_worker_merge_is_bit_identical_at_any_shard_count():
             assert np.array_equal(getattr(merged, field.name), getattr(whole, field.name)), (
                 f"{n_shards} shards: {field.name} is not bit-identical to the unsharded run"
             )
+
+
+def test_an_EMPTY_hypothesis_set_is_the_UNSPLICED_ONLY_set_and_does_not_CRASH():
+    """⛔⛔ **A REGRESSION GATE FOR A HARD SEGFAULT** — found 2026-08-10, latent since the arbiter landed.
+
+    The executable specification defaults ``hypotheses`` to :data:`UNSPLICED_ONLY` and says why: *"the
+    degenerate case is the general case, not a branch"*. The native binding has **no default**, so a
+    caller writing the natural ``hypotheses=()`` offered an EMPTY set — and an empty set walked straight
+    past the ``survivors.size() > 1`` deferral into ``survivors.front()`` on an EMPTY vector, indexing a
+    ``nullptr`` ``hypotheses``. ``EXC_BAD_ACCESS address=0x0``.
+
+    ⭐ **Nothing could reach it from production**, because the scanner always offers the genomic path —
+    which is exactly why it survived: it is unreachable from every code path the suite exercises, and it
+    crashes the moment anyone constructs an accumulator directly. It was found while trying to build a
+    deposit-behaviour digest, and it cost a session.
+
+    ⛔ The assertion is not "does not crash" — a crash fails the test anyway. It is that an empty set
+    means the SAME THING as the specification's default, so both must deposit identically.
+    """
+    reference, native = _pair()
+    kw = dict(start=10, end=90, observed_introns=(), align_strand=int(Strand.POS))
+
+    want = reference.deposit(REF, **kw)  # the reference's own default IS UNSPLICED_ONLY
+    got = native.deposit(**kw, hypotheses=())
+    assert got == want.value, f"empty hypotheses: native {got!r} != reference {want.value!r}"
+
+    reference_default, native_default = _pair()
+    reference_default.deposit(REF, **kw, hypotheses=UNSPLICED_ONLY)
+    native_default.deposit(**kw, hypotheses=())
+    _assert_parity(reference_default, native_default, "empty-hypotheses vs UNSPLICED_ONLY")
