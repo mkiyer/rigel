@@ -138,7 +138,23 @@ def test_the_noop_arm_reproduces_BASE_byte_identically_through_the_whole_pipelin
     base, base_fired = _quant(toy, "base", None)
     noop, noop_fired = _quant(toy, "noop", toy_oracle)
     assert base_fired["n"] >= 1 and noop_fired["n"] >= 1
-    pd.testing.assert_frame_equal(base, noop, check_exact=True)
+
+    # ⭐⭐ TWO STANDARDS, AND THEY ARE THE NUMERIC CONVENTION. Every COUNT column is integer-derived and
+    # must match EXACTLY — measured over 8 shipped multi-threaded runs, their run-to-run spread is
+    # 0.000e+00, because integer addition is associative. `posterior_mean` is float-derived and wanders
+    # by **1.503e-15** (~7 ulp) between identical runs, because the conserved-mass banks are float64 and
+    # the per-worker merge order is a data-dependent race.
+    #
+    # ⛔ The tolerance is DERIVED and GATED, not chosen: it sits ~6 orders above that measured spread
+    # (headroom for a library far deeper than this toy, since re-association scales with the number of
+    # additions) and ~9 orders below the injection it must catch — and the perturbation arm below proves
+    # it is still tight enough, because taking ONE oracle field must break the comparison.
+    # ⚠ Owner ruling 2026-08-11: the tool is not bit-reproducible and tests validate within a tolerance.
+    exact = [c for c in base.columns if c != "posterior_mean"]
+    pd.testing.assert_frame_equal(base[exact], noop[exact], check_exact=True)
+    pd.testing.assert_series_equal(
+        base["posterior_mean"], noop["posterior_mean"], check_exact=False, rtol=1e-9, atol=0.0
+    )
 
     saved = QA._ARM_FIELDS["noop"]
     try:

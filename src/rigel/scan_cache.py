@@ -220,7 +220,82 @@ def payload_schema_digest() -> str:
     return _digest(
         *(name.encode() for name in _schema_names()),
         *(shape.encode() for shape in _schema_shapes()),
+        deposit_digest().encode(),
     )
+
+
+def deposit_digest() -> str:
+    """⭐⭐⭐ **THE DEPOSIT-BEHAVIOUR DIGEST — a hash of what the accumulator DOES, not of what it is
+    called.** Scans a fixed tiny partition with a fixed fragment set and hashes the resulting banks.
+
+    ⛔⛔ **WHY THIS HAD TO EXIST.** :func:`payload_schema_digest` hashes field NAMES and column counts.
+    **A deposit-RULE change moves neither**, so a cache written under the old rule was accepted by the key
+    and silently served OLD VALUES to NEW CODE. That is ``TRAPS: a-hash-that-misses-its-artifact`` in the
+    key written to prevent it, and it has now happened FOUR times: the reach digest; the ``[n,2] → [n]``
+    shape collapse; the node deposit ``1/L → 1/A``; and the junction-boundary rule. ⚠ The third was caught
+    only because the bank had to be renamed anyway and the rename moved the key — luck, not the key doing
+    its job. The fourth changed no name at all and this function is what catches it.
+
+    ⭐ **It needs no version number** (the project bans them) and no constant to maintain: it is a
+    MEASUREMENT of the current code. Change any deposit rule and it moves; change none and it is stable
+    across runs, processes and worker counts, because every channel is an integer and integer addition is
+    associative.
+
+    ⚠ The fixture is deliberately awkward rather than minimal — two annotated junctions, a short node
+    whose far line a fragment may or may not reach, contained / crossing / spliced / junction-only
+    fragments — so that a rule change confined to ONE of those cases still moves it.
+
+    ⛔ **It runs the NATIVE accumulator, not the specification.** The cache holds what the production
+    scanner deposited, so the key must certify THAT. Reading the reference here would also make `src`
+    depend on `tests`, which is not installed with the package. The two are held byte-identical by
+    ``tests/native/test_accumulator_native_parity.py``, and a test asserts this digest agrees across
+    both — so a drift between them fails loudly rather than certifying the wrong artifact.
+    """
+    from rigel._bam_impl import Accumulator  # noqa: PLC0415
+
+    #: ⭐ Cut indices, not coordinates: the junction CSR is keyed by DONOR CUT. 260 is cut 3 and 1000 is
+    #: cut 4; 1120 is cut 6 and 2000 is cut 7.
+    cuts = np.array([0, 60, 200, 260, 1000, 1060, 1120, 2000, 2400], dtype=np.int64)
+    accumulator = Accumulator(
+        cuts=cuts,
+        node_types=np.array([0, 2, 2, 1, 2, 2, 1, 2], dtype=np.uint8),
+        max_length=1000,
+        ref=0,
+    )
+    accumulator.set_junctions(
+        np.array([0, 0, 0, 0, 1, 1, 1, 2, 2, 2], dtype=np.int32),  # per-donor-cut CSR offsets
+        np.array([4, 7], dtype=np.int32),  # acceptor cut of each junction
+        np.array([1, 1], dtype=np.int8),  # STRAND_POS
+    )
+    for start, end, introns in (
+        (10, 50, ()),  # contained in one node, crosses nothing
+        (30, 150, ()),  # crosses one line
+        (30, 280, ()),  # crosses three lines
+        (150, 1060, ((260, 1000),)),  # spliced; BOTH blocks cross a line
+        (210, 1040, ((260, 1000),)),  # spliced; NEITHER block crosses a line
+        (150, 2100, ((260, 1000), (1120, 2000))),  # two junctions AND lines
+        (1030, 2050, ((1120, 2000),)),  # one junction, one line
+    ):
+        # ⚠ ``hypotheses=()`` is REQUIRED — the native binding has no default, unlike the specification,
+        # whose default IS ``UNSPLICED_ONLY``. An empty set means "nothing to arbitrate", and it is safe
+        # to pass only because the accumulator now treats it as the unspliced-only set; before that fix
+        # it was a null dereference, which is why this digest could not be built.
+        accumulator.deposit(
+            start=start, end=end, observed_introns=introns, sj_strand=1, hypotheses=()
+        )
+
+    parts: list[bytes] = []
+    for name in sorted(_schema_names()):
+        value = getattr(accumulator, name.split("__")[0], None)
+        if isinstance(value, np.ndarray):
+            parts.append(name.encode())
+            parts.append(np.ascontiguousarray(value).tobytes())
+    if not parts:
+        raise RuntimeError(
+            "deposit_digest hashed NO bank — the native accumulator exposed none of the payload's "
+            "field names, so this key would be a constant and would certify nothing."
+        )
+    return _digest(*parts)
 
 
 def _schema_shapes() -> list[str]:

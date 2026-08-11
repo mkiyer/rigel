@@ -407,6 +407,7 @@ def test_several_junctions_on_one_line_POOL_their_counts_AND_their_divisors(part
         payload,
         sj_count=np.array([[9, 4], [5, 1]], dtype=np.uint32),
         sj_inv_length_sum=np.zeros((2, 2), dtype=np.uint64),
+        sj_mass=np.zeros(2, dtype=np.uint64),
         ref_sj_offsets=np.array([0, 2], dtype=np.int64),
     )
     sub2 = CalibrationSubstrate.from_payload(payload2, region_arrays)

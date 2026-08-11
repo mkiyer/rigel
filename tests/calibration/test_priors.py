@@ -85,6 +85,8 @@ def _result(
             else np.asarray(mass_per_crossing, dtype=np.float64)
         ),
         mass_rna_junction=np.zeros(0, dtype=np.float64),
+        edge_spliced_mass_per_crossing=np.ones_like(ez),
+        junction_mass_per_crossing=np.ones(0, dtype=np.float64),
         gdna_node_eff_len=node_eff_arr,
         gdna_edge_eff_len=edge_eff_arr,
         rna_node_eff_len=(
@@ -344,7 +346,12 @@ def test_the_junction_flux_does_NOT_enter_the_rna_prior():
     base = _result(node_g=[1.0, 1.0], node_r=[2.0, 2.0], node_eff=[100.0, 100.0], edge_eff=[50.0])
     import dataclasses
 
-    loud = dataclasses.replace(base, mass_rna_junction=np.array([10_000.0]), n_junctions=1)
+    loud = dataclasses.replace(
+        base,
+        mass_rna_junction=np.array([10_000.0]),
+        junction_mass_per_crossing=np.ones(1),
+        n_junctions=1,
+    )
     ra = _regions([0, 100], [100, 200])
     ml = [_ml(0, [(0, 0, 200)])]
     quiet_priors = assemble_priors(base, ra, ml)

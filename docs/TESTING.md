@@ -529,9 +529,10 @@ python -m pytest tests/ -q                     # ⛔ never bare `pytest` — the
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,209 passing, 2 skipped, 9 xfail** (measured
-2026-08-07). **Any failure is a regression** — which is a stronger and cheaper rule than counting expected
-ones.
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,231 passing, 2 skipped, 9 xfail** (measured
+2026-08-11, after the numeric-convention change). **Any failure is a regression** — which is a stronger
+and cheaper rule than counting expected ones. ⚠ Re-derive it rather than adjusting it; several tests are
+parametrised over doc, source and script files, so adding or retiring one moves the count by a few.
 
 ⚠ **The predecessor of this paragraph said "21 `test_golden_output` failures plus one", and both halves
 have since resolved**: the goldens were regenerated, and

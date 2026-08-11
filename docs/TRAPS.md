@@ -139,7 +139,7 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `a-hash-that-misses-its-artifact` — Cache keys that do not cover the artifact they cache.
   ⚠ 2026-08-08: the payload digest hashed field NAMES, so collapsing a bank from `[n,2]` to `[n]` did not move it — and the cache-load path validates no shapes. It now hashes `name:columns`.
   ⚠ 2026-08-08, second form: an EXCLUSION from a key is a claim about what is stored, and the study cache stored two arrays the excluded file produced.
-- `integer-channels-reproduce` — Integer channels are bit-identical across worker counts; float channels are not.
+- `integer-channels-reproduce` — Integer channels are bit-identical across worker counts; float channels are not. ⚠ Its ~2.6 % price tag is a float32 number and does NOT carry to float64, which is 3.4e9x finer — and measured MORE accurate than the fixed point it replaced.
 - `worktrees-run-the-wrong-code` — Worktrees silently run the wrong code — an editable install's meta-path finder beats
 - `checkout-deletes-uncommitted-work` — git checkout -- <file> does not undo a perturbation when the work is uncommitted — it deletes th
 - `two-masks-one-name` — TWO DIFFERENT MASKS SHARED THE WORD struct_lock, AND BOTH WERE RIGHT.
@@ -152,6 +152,7 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `a-linear-likelihood-emits-a-sign` — A LIKELIHOOD THAT IS LINEAR IN THE PARAMETER HAS NO MODE, ONLY A DIRECTION — and on a bounded grid that is a saturated vote.
 - `amplitude-fades-influence-does-not` — A TERM THAT NORMALISES AWAY CAN STILL DECIDE THE ANSWER, BECAUSE AN ARGMAX IS SCALE-FREE.
 - `a-pooled-conversion-applied-per-component` — A RATIO MEASURED ON THE POOLED POPULATION AND APPLIED TO EACH COMPONENT IS POPULATION-BLIND.
+- `an-identity-with-a-qualifier` — AN IDENTITY THAT HOLDS "OVER X" IS A MEASUREMENT WAITING TO BE MADE — PRICE THE COMPLEMENT.
 - `equal-lengths-carry-no-composition` — At equal component mean lengths the length channel carries EXACTLY ZERO information about
 - `capture-is-1000x-on-exons` — Hybrid capture is ~1000× on exons and only gDNA reads it cleanly.
 - `capture-selects-for-length` — Capture SELECTS FOR LENGTH, and the post-capture distributions are the baseline.
@@ -485,6 +486,14 @@ NO-FRAME** — the intron NODE had zero counts, so the reframe was skipped with 
 divide-by-zero guard. The only framed hops were the ones the change does not touch.
 ⭐ **For every "no change" arm, count the opportunities the change had to fire and print that count beside
 the result.** Same family as TRAPS: a-gate-that-reconstructs and TRAPS: can-the-benchmark-resolve-it: *the measurement was never in a position to say anything.*
+
+⚠ **2026-08-10, and this form is a TEST FIXTURE rather than an arm.** The `sj_mass` deposit rule shares a
+block's mass equally between the junctions bounding it. Deleting that share left **18/18 gates passing** —
+because the fixture carried ONE junction, so no block was ever bounded twice and `len(bounds)` was always
+1. The rule was unfalsifiable on its own test set. A two-junction fixture plus a per-junction attribution
+gate now catches it, and that gate is the *only* one that does: conservation cannot see the difference,
+since giving a doubly-bounded block whole to each bound still sums to 1 when no such block exists.
+⭐ **A fixture is an arm. Ask of it too: could this have failed?**
 
 **prove-the-substrate. Prove the SUBSTRATE before proving the code.** For two milestones the simulated panel's
 post-capture fragment-length distribution was byte-identical to its pre-capture one, and everything
@@ -1030,6 +1039,31 @@ build-time byte-identity gate proving the read-time derivation reproduces the pr
 associative — that is the whole fix. *Corollary:* the one bank whose ORDER is observable (a list, not a
 sum) must be sorted on its own content before it crosses the ABI.
 
+⛔⛔ **AND THE PRICE TAG ABOVE IS A float32 NUMBER. IT WAS QUOTED AGAINST float64 FOR MONTHS AND IT DOES
+NOT CARRY** (measured 2026-08-11). ``3.7e-7 relative per cell`` is ~3 float32 ulp; float64 is ~1e-16 —
+**3.4e9× finer** — reaching the deliverable at ~1e-11, five orders below ``EMConfig.convergence_delta``.
+The measured run-to-run spread of the shipped multi-threaded pipeline is **1.503e-15** on
+``posterior_mean`` and **exactly 0** on every integer-derived column.
+
+⭐⭐ **The bigger correction: the fixed point was LESS ACCURATE than the float it was defending against.**
+Against exact rational arithmetic on the reciprocal-opportunity theorem — every admissible placement
+deposits ``1/A``, so each length contributes exactly one density unit — the two representations miss the
+integer answer by::
+
+    node_len 151    fixed 7.0e-10    float64 5.8e-15      120,000x better
+    node_len 400    fixed 1.7e-08    float64 1.0e-13      170,000x better
+    node_len 1000   fixed 2.0e-07    float64 2.8e-13      714,000x better
+
+⚠ And the "exactness" two gates asserted was a property of their FIXTURES: ``1/2 + 1/3 + 1/6`` lands back
+on ``2^32`` because two rounding errors cancel, while ``1/3 + 1/3 + 1/3`` is one quantum short — and
+float64 is exact on both. Both gates asserted the fixed point's OWN closed form, so they re-derived the
+implementation and could not fail (`TRAPS: a-gate-that-reconstructs`).
+
+⭐ **The rule's FIRST sentence is still true and is why the split survives**: a COUNT is an integer and
+reproduces exactly; a FRACTION is float64 and does not. Owner ruling 2026-08-11: one numeric convention,
+the tool is not bit-reproducible, and tests validate within a DERIVED tolerance — bracketed from both
+sides, so a nudge just past it fails and one just inside it passes.
+
 **worktrees-run-the-wrong-code. Worktrees silently run the wrong code** — an editable install's meta-path finder beats
 `PYTHONPATH`, so an A/B inside a git worktree executes the main repo's source.
 
@@ -1119,6 +1153,31 @@ identical lengths.
 repairable in production: the driver is *where* each population sits, so `q_c` cannot be modelled from the
 fitted pmfs, and the pooled bank is the only per-line evidence there is. **Record the bound, build
 nothing.**
+
+**an-identity-with-a-qualifier. ⛔⛔ AN IDENTITY THAT HOLDS "OVER X" IS A MEASUREMENT WAITING TO BE MADE.
+PRICE THE COMPLEMENT, OR THE QUALIFIER IS A HOLE NOBODY HAS SIZED.** Measured 2026-08-10; it was worth
+25.3 % of the RNA library and had been documented, accurately, for months.
+
+The conserved-mass rule's own specification said its identity was exact *"over deposited, **unspliced**,
+annotated fragments"*. Every word was true and the scoping was deliberate. But nobody had ever asked how
+big the complement was — and it was **1,222,375 of 4,830,713 RNA fragments** on one ordinary panel
+condition. A spliced fragment whose every block lies inside one node crosses no line and is not
+`contained` either, so it deposited on **no conserved bank at all**: it existed on the incidence axis and
+on none of the conserved ones, which is why a library fragment count was not computable.
+
+⭐ **The complement was cheap to price and the pricing is what made the fix obvious.** One census against
+per-fragment truth: gDNA `1.000x` deposited, RNA `0.747x`. The asymmetry names its own cause — gDNA cannot
+splice — and the repair followed in one step.
+
+⛔ **The second half of the trap: a docstring had already promised the missing accounting existed.**
+`edge_spliced_mass` said a block with no interior line has *"their accounting on the junction axis"* —
+and there was no `sj_mass`, so nothing kept the promise. **A cross-reference to a bank is not evidence the
+bank exists.** Same family as TRAPS: two-docstrings-one-quantity: prose that describes an intended design reads
+as prose that describes the code.
+
+⭐ **The tell, and it is free:** grep your invariants for "over", "for", "assuming", "where". Each one
+names a population; each population has a size; and until someone measures that size the invariant's
+scope is an assumption wearing the clothes of a theorem.
 
 **equal-lengths-carry-no-composition. At equal component mean lengths the length channel carries EXACTLY ZERO information about
 composition, at any depth.** The 2×2 deconvolution is identified only through `μ_g − μ_r`. A claim that

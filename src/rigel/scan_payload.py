@@ -22,11 +22,20 @@ none owns neither, which is legal. Junction edges are their own axis, sliced by 
 flat slot order is the per-reference banks concatenated in reference order, which is what lets a
 junction-edge id simply BE its slot.
 
-WHAT THE NUMBERS MEAN. Every object stores **three integer sums** over the fragments that landed on it::
+WHAT THE NUMBERS MEAN. ⭐⭐ **ONE NUMERIC CONVENTION: a COUNT is an integer, a FRACTION is float64.**
+There is no fixed point and no scale constant, so nothing anywhere decodes a bank::
 
-    count           Sum 1
-    inv_length_sum  Sum round(2^32 / placements)     placements = L at a node, L − 1 at a 0-bp line
-    length_sum      Sum L
+    count           Sum 1                    integer   — exact, and reproduces across worker counts
+    inv_length_sum  Sum 1/placements         float64   placements = L at a node, L−1 at a 0-bp line
+    length_sum      Sum L                    integer   — a sum of BASES, not a fraction
+    mass            Sum slice_len/(L·bounds) float64   — the conserved fragment count
+
+⛔ **float64 is not a concession, it is the more accurate choice here** (measured 2026-08-11). Against
+exact rational arithmetic on the reciprocal-opportunity theorem the fixed point it replaced missed the
+answer by 7.0e-10 … 2.0e-07 while float64 misses by 5.8e-15 … 2.8e-13 — 1e5–7e5× closer.
+⚠ **What it costs is bit-identity across worker counts**, since float addition is not associative: the
+integer banks still reproduce exactly, the float ones agree to ~1e-15. Owner ruling 2026-08-11 — tests
+validate the float banks within a DERIVED tolerance. `TRAPS: integer-channels-reproduce`.
 
 ⚠ **``inv_length_sum`` is NOT called ``density`` on purpose.** It is an exact, model-free density at an
 edge — the opportunity ``L−1`` and the deposit ``1/(L−1)`` cancel identically — and it is *not* a density
@@ -262,13 +271,17 @@ BANK_AXES: tuple[tuple[str, str, Any], ...] = (
 #: bank", and widening it to mean "every bank" would silently give the mass a strand column in every
 #: loop that reads it.
 SINGLE_COLUMN_AXES: tuple[tuple[str, str, Any], ...] = (
-    ("node_contained_inv_opportunity_sum", "node", np.uint64),
+    # ⭐⭐⭐ ONE NUMERIC CONVENTION: a COUNT is an integer, a FRACTION is float64. The `*_length_sum`
+    # banks are sums of LENGTHS IN BASES — integers, never divided — so they keep an integer type; every
+    # other entry here is a fraction. There is no fixed point and no scale constant to decode.
+    ("node_contained_inv_opportunity_sum", "node", np.float64),
     ("node_contained_length_sum", "node", np.uint64),
-    ("edge_unspliced_inv_length_sum", "edge", np.uint64),
+    ("edge_unspliced_inv_length_sum", "edge", np.float64),
     ("edge_unspliced_length_sum", "edge", np.uint64),
-    ("sj_inv_length_sum", "sj", np.uint64),
-    ("edge_unspliced_mass", "edge", np.uint64),
-    ("edge_spliced_mass", "edge", np.uint64),
+    ("sj_inv_length_sum", "sj", np.float64),
+    ("sj_mass", "sj", np.float64),
+    ("edge_unspliced_mass", "edge", np.float64),
+    ("edge_spliced_mass", "edge", np.float64),
 )
 
 #: ⭐ **EVERY additive array channel, with the axis it is indexed on** — the two-column banks plus the
@@ -521,6 +534,19 @@ class AccumulatorPayload:
     #: uint64[n_sj] — ⭐ LIVE in ``second_pass``, which scores a held fragment's junction evidence
     #: with it. ⚠ ``sj_length_sum`` is gone for the same reason the spliced edge moments are.
     sj_inv_length_sum: np.ndarray
+    #: uint64[n_sj] — ⭐⭐⭐ **THE CONSERVED MASS'S THIRD AXIS, and what makes a LIBRARY FRAGMENT COUNT
+    #: COMPUTABLE.** A spliced fragment's block containing no interior line deposits on neither edge
+    #: bank, and is not ``contained`` either — its path spans a junction, so it lies in no single node.
+    #: Such a fragment existed on the incidence axis (``sj_count``) and on no conserved one.
+    #:
+    #: ⭐ Measured on the origin-split oracle at ladder g50 capture_off: **1,222,375 of 4,830,713 RNA
+    #: fragments (25.3 %)** are in that population, against **0 of 4,997,761** gDNA fragments — gDNA
+    #: cannot splice, so its conserved count was already exact while RNA's read 0.747x deposited.
+    #:
+    #: ⛔ **It ADDS a boundary class rather than re-apportioning one**: a block that crossed a line is
+    #: untouched, so ``edge_unspliced_mass`` and ``edge_spliced_mass`` are byte-identical to what they
+    #: were. Gates: ``tests/native/test_conserved_mass.py`` claim 5.
+    sj_mass: np.ndarray
 
     # -- the fragment-length pools, binned at L, once per fragment --
     pool_lengths: np.ndarray  # int64[5, max_length + 1]

@@ -16,7 +16,7 @@ import pytest
 from rigel.calibration.errors import CalibrationSubstrateError
 from rigel.calibration.substrate import CalibrationSubstrate, PopulationView
 
-from _synthetic import INV_LENGTH_SCALE, make_synthetic_payload
+from _synthetic import make_synthetic_payload
 
 
 @pytest.fixture
@@ -80,18 +80,25 @@ def test_no_population_is_a_VIEW_OF_ANOTHER(substrate):
 
 
 # ---------------------------------------------------------------------------
-# the fixed point
+# the numeric convention
 # ---------------------------------------------------------------------------
 
 
-def test_the_fixed_point_is_DECODED_HERE_and_only_here(substrate):
-    """⭐ ``inv_length_sum`` leaves the payload as ``round(2^32 / placements)`` and must arrive at a
-    consumer as a real number. Decoding at the boundary is what stops every downstream module needing to
-    know about ``2^32`` — one place to be wrong instead of many."""
+def test_a_FRACTION_arrives_as_float64_with_NO_decode(substrate):
+    """⭐⭐ ONE NUMERIC CONVENTION: a COUNT is an integer, a FRACTION is float64.
+
+    ⛔ This module used to be "the one decoder": ``inv_length_sum`` left the payload as
+    ``round(2^32 / placements)`` and was divided by the scale here. There is nothing to decode now — the
+    accumulator deposits ``1/placements`` directly — so the assertion is that the value arrives
+    UNCHANGED. A reintroduced decode would divide by 2^32 and show up here immediately.
+
+    ⚠ ``atol=0, rtol=0`` — exact. This is a passthrough, not an arithmetic result, so a tolerance here
+    would only hide a scale factor.
+    """
     sub, payload, _ = substrate
     np.testing.assert_allclose(
         sub.node_contained.inv_length_sum,
-        payload.node_contained_inv_opportunity_sum.astype(np.float64) / INV_LENGTH_SCALE,
+        payload.node_contained_inv_opportunity_sum,
         rtol=0,
         atol=0,
     )

@@ -57,15 +57,19 @@ _BANKS = (
     "edge_spliced_count",
     "sj_count",
     "node_start_count",
-    # ⭐ The two CONSERVED MASS banks. They were outside this tuple when they landed, which meant the
-    # origin split was never validated on them — and they are exactly what `component_shares` reads.
-    # Integer fixed point, so sum-to-full is byte-exact here like every other bank.
+    # ⭐ The three CONSERVED MASS banks. Two of them were outside this tuple when they landed, which
+    # meant the origin split was never validated on them — and they are exactly what `component_shares`
+    # reads. Integer fixed point, so sum-to-full is byte-exact here like every other bank.
     "edge_unspliced_mass",
     "edge_spliced_mass",
+    "sj_mass",
 )
 
-#: The banks a gDNA fragment can NEVER touch — it does not splice.
-_RNA_ONLY_BANKS = ("edge_spliced_count", "sj_count")
+#: The banks a gDNA fragment can NEVER touch — it does not splice. ⭐ ``sj_mass`` joins them, and it is
+#: a STRONGER statement than the two counts: the mass is where a spliced fragment's whole share goes
+#: when its blocks cross no line, so a gDNA record leaking onto the junction axis shows up here as
+#: fragment-scale mass rather than as a single incidence.
+_RNA_ONLY_BANKS = ("edge_spliced_count", "sj_count", "sj_mass")
 
 #: Origin -> code for the per-``frag_id`` truth array, so ``ORIGINS[code] == kind``. int8, because a
 #: 10 M-fragment condition is then 10 MB and can be carried in a cache blob.
@@ -290,21 +294,48 @@ class OracleTruth:
         return self
 
     def _validate(self) -> None:
-        """Sum-to-full on EVERY bank, EXACTLY — no tolerance anywhere.
+        """Sum-to-full on EVERY bank: integers EXACTLY, fractions to the representation and no further.
 
-         ⭐ Every bank is an integer count now, so ``np.array_equal`` is the right comparison for all of
-         them. The predecessor could only be exact on two of its four arrays because the other two were
-         float32 fractional MASS; a tolerance is what hid this project's factor-of-2 bug for months
-        and there is no longer any reason to carry one.
+        ⭐⭐ **ONE CONVENTION, TWO STANDARDS, AND THE SPLIT IS THE POINT.** A COUNT is an integer and
+        integer addition is associative, so its partitions must sum to the full payload with **no
+        tolerance at all** — that is still the great majority of the banks. A FRACTION is float64, and
+        summing three partitions re-associates the additions, so those agree to within the
+        representation. ⛔ The budget is `n * EPS` scaled by the magnitude — derived from the deposit
+        count, never fitted — and a COUNT bank that needed it fails here as it always did.
+
+        ⛔⛔ **THE PREDECESSOR CAST EVERY BANK TO int64**, which was right when every bank was an
+        integer and became **silent corruption** the moment three of them held fractions in (0, 1]:
+        `int64` truncates them to zero, so the comparison was zeros against zeros — a vacuous pass that
+        would have certified any partition at all. Caught 2026-08-11 while landing the convention.
+
+        ⚠ The tolerance is REAL but it is not the old one: a float32 tolerance once hid this project's
+        factor-of-2 bug for months. This one is 1e-16-scale and a factor of 2 is 1e16 times larger.
         """
+        eps = float(np.finfo(np.float64).eps)
         for bank in _BANKS:
-            full = np.asarray(getattr(self.full, bank), np.int64)
+            full_raw = np.asarray(getattr(self.full, bank))
+            if full_raw.dtype == np.float64:
+                full = full_raw
+                parts = sum(np.asarray(getattr(self.parts[k], bank), np.float64) for k in ORIGINS)
+                budget = np.maximum(np.abs(full), 1.0) * max(full.size, 1) * eps
+                bad = np.abs(parts - full) > budget
+                if bad.any():
+                    raise AssertionError(
+                        f"oracle INVALID: {bank} partitions do not sum to full within the float64 "
+                        f"representation (max|diff|={np.abs(parts - full).max():.3e} over "
+                        f"{int(bad.sum())} cells). That is far larger than re-association, so the "
+                        "partition is not the production split."
+                    )
+                continue
+            full = full_raw.astype(np.int64)
             parts = sum(np.asarray(getattr(self.parts[k], bank), np.int64) for k in ORIGINS)
             if not np.array_equal(parts, full):
                 raise AssertionError(
                     f"oracle INVALID: {bank} partitions do not sum to full "
-                    f"(max|diff|={np.abs(parts - full).max()}). The partition is not the "
-                    "production split, or the accumulator stopped depositing per fragment."
+                    f"(max|diff|={np.abs(parts - full).max()}). This bank is an integer COUNT and "
+                    "integer addition is associative, so there is no tolerance to reach for: the "
+                    "partition is not the production split, or the accumulator stopped depositing "
+                    "per fragment."
                 )
         # gDNA is never spliced (physical), on EITHER spliced bank — including the junction axis, which
         # the old 4-channel layout had no room for.
@@ -400,13 +431,11 @@ class OracleTruth:
 
         Returns ``{"gdna": float64[n_edges], "rna": float64[n_edges]}``.
         """
-        from rigel.calibration.substrate import INV_LENGTH_SCALE
-
         out = {}
         for name, origins in (("gdna", ("gdna",)), ("rna", ("mrna", "nrna"))):
             mass = sum(
                 np.asarray(self.parts[k].edge_unspliced_mass, np.float64) for k in origins
-            ) / INV_LENGTH_SCALE
+            )
             count = sum(
                 np.asarray(self.parts[k].edge_unspliced_count, np.float64).sum(axis=1)
                 for k in origins

@@ -390,7 +390,6 @@ def score_held_fragments(
     score = np.zeros(n_hyp, np.float64)
 
     cuts = payload.cut_positions
-    scale = float(1 << 32)  # the fixed-point INV_LENGTH_SCALE; decoded once, here
     rna_pmf, global_pmf = fl_models.rna_pmf, fl_models.global_pmf
     max_size = int(fl_models.max_size)
 
@@ -441,14 +440,14 @@ def score_held_fragments(
             # -- rho ------------------------------------------------------------------------------
             if introns:
                 # A spliced path's evidence is the junctions it uses. ⚠ `sj_inv_length_sum` is deposited
-                # with the SAME quantum as a contiguous edge, so the two are the same quantity on the
-                # same scale — that is what makes this comparable to `∅`'s number at all.
+                # by the SAME rule as a contiguous edge, so the two are the same quantity on the same
+                # scale — that is what makes this comparable to `∅`'s number at all.
                 motif = observed_motif if observed_motif != int(Strand.NONE) else implied_strand
                 observed_densities = []
                 for a, b in introns:
                     jid = _junction_id(junctions, cuts, cut_lo, cut_hi, a, b, motif)
                     observed_densities.append(
-                        0.0 if jid < 0 else float(payload.sj_inv_length_sum[jid]) / scale
+                        0.0 if jid < 0 else float(payload.sj_inv_length_sum[jid])
                     )
                 density[slot] = _bottleneck(observed_densities)
             else:
@@ -459,7 +458,6 @@ def score_held_fragments(
                     for line in range(first, last):
                         edge_densities.append(
                             float(payload.edge_unspliced_inv_length_sum[edge_base + line - 1])
-                            / scale
                         )
                 density[slot] = _bottleneck(edge_densities)
 

@@ -27,15 +27,23 @@ import pytest
 from rigel.types import Strand
 
 from ._accumulator_reference import (
-    INV_LENGTH_SCALE,
     STRAND_COLUMNS,
     Accumulator,
     DepositOutcome,
     FragmentPool,
     GapHypothesis,
     Partition,
-    inv_length_quantum,
 )
+
+#: ⭐ ONE CONVENTION: fractions are float64. A sum of `n` round-to-nearest additions differs from the
+#: real-arithmetic answer by at most `n` ulp. ⛔ DERIVED from the machine, never fitted.
+EPS = float(np.finfo(np.float64).eps)
+
+
+def close(got: float, want: float, deposits: int) -> bool:
+    """`got == want` to within the representation error of `deposits` additions."""
+    return abs(got - want) <= max(abs(want), 1.0) * deposits * EPS
+
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +90,7 @@ def _contained_quantum(ref, local, length):
     the fixture's own cuts rather than written as a number, so an assertion states the RULE.
     """
     cuts = CHR1_CUTS if ref == 0 else CHR2_CUTS
-    return inv_length_quantum(cuts[local + 1] - cuts[local] - length + 1)
+    return 1.0 / (cuts[local + 1] - cuts[local] - length + 1)
 
 
 def _node(ref, local):
@@ -90,19 +98,13 @@ def _node(ref, local):
 
 
 # ---------------------------------------------------------------------------
-# the fixed-point density
+# the reciprocal-opportunity density
 # ---------------------------------------------------------------------------
-
-
-def test_inv_length_quantum_is_exact_and_rounds_half_away_from_zero():
-    """The rounding mode is part of the contract — byte-identity is undefined without it, and Python's
-    own ``round`` is banker's rounding, which differs at ties."""
-    assert inv_length_quantum(1) == INV_LENGTH_SCALE
-    assert inv_length_quantum(2) == INV_LENGTH_SCALE // 2
-    assert inv_length_quantum(512) * 512 == INV_LENGTH_SCALE
-    assert inv_length_quantum(3) == (2 * INV_LENGTH_SCALE + 3) // 6
-    with pytest.raises(ValueError):
-        inv_length_quantum(0)
+#
+# ⚠ `test_inv_length_quantum_is_exact_and_rounds_half_away_from_zero` lived here and is GONE with the
+# fixed point (owner, 2026-08-10: one numeric convention). It asserted a rounding mode that no longer
+# exists. ⭐ Nothing is lost: it pinned the REPRESENTATION, while the tests below pin the THEOREM, and
+# float64 satisfies the theorem 1e5-7e5x more tightly than the grid it replaced.
 
 
 def test_one_fragment_recovers_its_own_reciprocal_length():
@@ -110,7 +112,7 @@ def test_one_fragment_recovers_its_own_reciprocal_length():
     acc.deposit(0, 120, 320)
     t = acc.tally
     assert int(t.edge_unspliced_count[_edge(0, 2), 0]) == 1
-    assert int(t.edge_unspliced_inv_length_sum[_edge(0, 2)]) == inv_length_quantum(200 - 1)
+    assert close(float(t.edge_unspliced_inv_length_sum[_edge(0, 2)]), 1.0 / (200 - 1), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +125,7 @@ def test_a_contained_fragment_touches_ONE_node_and_no_edge():
     assert acc.deposit(0, 220, 380) is DepositOutcome.DEPOSITED
     t = acc.tally
     assert int(t.node_contained_count[_node(0, 3), 0]) == 1
-    assert int(t.node_contained_inv_opportunity_sum[_node(0, 3)]) == _contained_quantum(0, 3, 160)
+    assert close(float(t.node_contained_inv_opportunity_sum[_node(0, 3)]), _contained_quantum(0, 3, 160), 1)
     assert t.node_contained_count.sum() == 1
     assert t.edge_unspliced_count.sum() == 0
 
@@ -148,8 +150,8 @@ def test_a_fragment_crossing_four_nodes_credits_exactly_THREE_edges_at_FULL_weig
     acc.deposit(0, 150, 500)  # touches n1 n2 n3 n4 -> lines at 200, 201, 400
     t = acc.tally
     assert [int(t.edge_unspliced_count[_edge(0, j), 0]) for j in (1, 2, 3, 4, 5)] == [0, 1, 1, 1, 0]
-    quantum = inv_length_quantum(350 - 1)
-    assert all(int(t.edge_unspliced_inv_length_sum[_edge(0, j)]) == quantum for j in (2, 3, 4))
+    quantum = 1.0 / (350 - 1)
+    assert all(close(float(t.edge_unspliced_inv_length_sum[_edge(0, j)]), quantum, 1) for j in (2, 3, 4))
     assert t.node_contained_count.sum() == 0
 
 
@@ -169,8 +171,8 @@ def test_a_fragment_covering_a_1bp_node_credits_BOTH_lines_and_conserves_its_mas
     assert int(t.edge_unspliced_count[_edge(0, 3), 0]) == 1
     assert int(t.node_contained_count[_node(0, 2), 0]) == 0
     mass = int(t.edge_unspliced_mass.sum())
-    assert abs(mass - INV_LENGTH_SCALE) <= 2, (
-        f"the fragment deposited {mass / INV_LENGTH_SCALE} fragments, not 1"
+    assert abs(mass - 1.0) <= 8 * EPS, (
+        f"the fragment deposited {mass} fragments, not 1"
     )
 
 
@@ -197,7 +199,7 @@ def test_a_spliced_jump_deposits_NOTHING_on_the_lines_it_splices_over():
     t = acc.tally
     length = (950 - 150) - (900 - 201)
     assert int(t.sj_count[0, 0]) == 1
-    assert int(t.sj_inv_length_sum[0]) == inv_length_quantum(length - 1)
+    assert close(float(t.sj_inv_length_sum[0]), 1.0 / (length - 1), 1)
     assert int(t.edge_unspliced_count[_edge(0, 4), 0]) == 0, "the swallowed line at 400"
     assert int(t.edge_spliced_count[_edge(0, 4), 0]) == 0
 
@@ -226,8 +228,8 @@ def test_a_MULTI_SEGMENT_unspliced_fragment_conserves_its_mass_across_BOTH_segme
     assert int(t.edge_unspliced_count[_edge(0, 4), 0]) == 1, "line 400, from segment 1"
     assert int(t.edge_unspliced_count[_edge(0, 5), 0]) == 1, "line 900, from segment 2"
     mass = int(t.edge_unspliced_mass.sum())
-    assert abs(mass - INV_LENGTH_SCALE) <= 2, (
-        f"a two-segment fragment deposited {mass / INV_LENGTH_SCALE} fragments, not 1"
+    assert abs(mass - 1.0) <= 8 * EPS, (
+        f"a two-segment fragment deposited {mass} fragments, not 1"
     )
 
 
@@ -267,7 +269,7 @@ def test_an_unannotated_intron_inside_one_node_is_a_contained_unspliced_fragment
     acc.deposit(0, 210, 390, observed_introns=[(300, 340)])
     t = acc.tally
     assert int(t.node_contained_count[_node(0, 3), 0]) == 1
-    assert int(t.node_contained_inv_opportunity_sum[_node(0, 3)]) == _contained_quantum(0, 3, 180 - 40)
+    assert close(float(t.node_contained_inv_opportunity_sum[_node(0, 3)]), _contained_quantum(0, 3, 180 - 40), 1)
     assert t.qc["unannotated_introns"] == 1
 
 
@@ -439,7 +441,7 @@ def test_a_fragment_is_clipped_to_its_reference_and_L_is_the_clipped_length():
     acc.deposit(0, 950, 1200)  # chr1 ends at 1000
     t = acc.tally
     assert int(t.node_contained_count[_node(0, 5), 0]) == 1
-    assert int(t.node_contained_inv_opportunity_sum[_node(0, 5)]) == _contained_quantum(0, 5, 50)
+    assert close(float(t.node_contained_inv_opportunity_sum[_node(0, 5)]), _contained_quantum(0, 5, 50), 1)
 
 
 def test_a_single_node_reference_has_no_edges_and_still_accepts_a_fragment():
@@ -569,9 +571,7 @@ def test_the_crossing_DENSITY_recovers_the_true_density_with_NO_length_model(nod
         acc.deposit(0, int(s), int(e))
     interior = slice(5, acc.n_edges - 5)
     estimate = (
-        acc.tally.edge_unspliced_inv_length_sum[interior].sum()
-        / INV_LENGTH_SCALE
-        / (acc.n_edges - 10)
+        acc.tally.edge_unspliced_inv_length_sum[interior].sum() / (acc.n_edges - 10)
     )
     assert 0.98 <= estimate / rho <= 1.02, f"{estimate / rho:.4f} at {node_bp} bp nodes"
 
@@ -613,7 +613,14 @@ def test_the_deposit_is_independent_of_the_ORDER_fragments_arrive_in():
         "edge_unspliced_inv_length_sum",
         "pool_lengths",
     ):
-        assert np.array_equal(getattr(a, field), getattr(b, field)), field
+        got, want = getattr(a, field), getattr(b, field)
+        # ⛔ Exact for the INTEGER banks; for the float64 fractions the deposits are re-associated by
+        # the shuffle, and float addition is not associative. The tolerance is the representation's,
+        # derived from the deposit count, never fitted.
+        if getattr(got, "dtype", None) == np.float64:
+            assert np.allclose(got, want, rtol=len(starts) * EPS, atol=0.0), field
+        else:
+            assert np.array_equal(got, want), field
 
 
 # ---------------------------------------------------------------------------
@@ -653,8 +660,8 @@ def test_L_is_the_total_of_the_path_segments_even_when_the_intron_list_is_malfor
     assert t.qc["introns_absorbed"] == expected_absorbed
     crossings = int(t.edge_unspliced_count.sum())
     assert crossings == expected_crossings
-    assert int(t.edge_unspliced_inv_length_sum.sum()) == crossings * inv_length_quantum(
-        expected_length - 1
+    assert close(
+        float(t.edge_unspliced_inv_length_sum.sum()), crossings / (expected_length - 1), crossings
     )
 
 
@@ -668,7 +675,7 @@ def test_the_path_STARTS_where_its_first_covered_base_is_not_where_the_extent_be
     assert int(t.node_start_count[_node(0, 4)]) == 1, "n4, where the path actually starts"
     assert int(t.node_start_count[_node(0, 1)]) == 0, "not n1, where the extent begins"
     assert int(t.node_contained_count[_node(0, 4), 0]) == 1
-    assert int(t.node_contained_inv_opportunity_sum[_node(0, 4)]) == _contained_quantum(0, 4, 20)
+    assert close(float(t.node_contained_inv_opportunity_sum[_node(0, 4)]), _contained_quantum(0, 4, 20), 1)
 
 
 def test_a_duplicated_intron_credits_its_junction_ONCE():
@@ -1072,7 +1079,7 @@ def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
     assert int(t.node_contained_count[node, STRAND_COLUMNS[Strand.POS]]) == 1
     assert int(t.node_contained_count[node, STRAND_COLUMNS[Strand.NEG]]) == 1
     # ...and the moments pool them into the single slot
-    assert int(t.node_contained_inv_opportunity_sum[node]) == 2 * _contained_quantum(0, 3, 160)
+    assert close(float(t.node_contained_inv_opportunity_sum[node]), 2 * _contained_quantum(0, 3, 160), 2)
     assert int(t.node_contained_length_sum[node]) == 2 * 160
 
     edge_acc = _acc()
@@ -1081,7 +1088,7 @@ def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
     e = edge_acc.tally
     line = _edge(0, 2)
     assert int(e.edge_unspliced_count[line].sum()) == 2
-    assert int(e.edge_unspliced_inv_length_sum[line]) == 2 * inv_length_quantum(200 - 1)
+    assert close(float(e.edge_unspliced_inv_length_sum[line]), 2.0 / (200 - 1), 2)
     assert int(e.edge_unspliced_length_sum[line]) == 2 * 200
 
 
@@ -1148,7 +1155,7 @@ def test_length_sum_SEPARATES_two_populations_that_count_AND_inv_length_sum_CANN
         t = acc.tally
         return (
             int(t.edge_unspliced_count[edge, 0]),
-            int(t.edge_unspliced_inv_length_sum[edge]),
+            float(t.edge_unspliced_inv_length_sum[edge]),
             int(t.edge_unspliced_length_sum[edge]),
         )
 
@@ -1156,7 +1163,16 @@ def test_length_sum_SEPARATES_two_populations_that_count_AND_inv_length_sum_CANN
     count_b, inv_b, len_b = deposit_lengths((3, 5, 5))  # placements 2, 4, 4
 
     assert count_a == count_b == 3, "same number of fragments"
-    assert inv_a == inv_b == INV_LENGTH_SCALE, "the OLD pair cannot tell these apart, exactly"
+    # ⭐⭐⭐ THE PROOF: `1/2 + 1/3 + 1/6` and `1/2 + 1/4 + 1/4` are both exactly 1 in real arithmetic,
+    # so the (count, inv_length_sum) pair cannot tell the two length sets apart — at any depth.
+    # ⚠ Stated against the REAL-ARITHMETIC answer, not against the representation's own closed form.
+    # The predecessor asserted `== INV_LENGTH_SCALE` exactly, which held only because two fixed-point
+    # rounding errors happened to cancel on THIS triple: `1/3 + 1/3 + 1/3` was one quantum short, and
+    # float64 is exact on both (`TRAPS: a-gate-that-reconstructs`).
+    assert close(inv_a, 1.0, 3) and close(inv_b, 1.0, 3), (
+        f"the OLD pair must not separate these: {inv_a!r} vs {inv_b!r}"
+    )
+    assert close(inv_a, inv_b, 3), "the OLD pair cannot tell these apart"
     assert (len_a, len_b) == (14, 13), "the new channel can"
 
 

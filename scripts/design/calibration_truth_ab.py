@@ -91,13 +91,21 @@ def truth_length_pmf(condition_dir: Path, kind: str, max_size: int) -> "np.ndarr
 
 
 def f_gdna_of(result) -> float:
-    """``f_gdna`` as defined it, so the two baselines are comparable.
+    """``f_gdna`` in FRAGMENT units — ``CalibrationResult``'s own conserved counts, the one definition.
 
-    ⚠ The sum runs over nodes AND edges. gDNA lives on both — contained in a node or crossing a line —
-    and summing only one axis reports a library's gDNA as a fraction of part of itself.
+    ⛔⛔ **THIS USED TO SUM INCIDENCES AND SCORE THEM AGAINST A FRAGMENT COUNT.** It added
+    ``mass_gdna_node + mass_gdna_edge`` over the raw banks, where an edge term books ``max(K,1)`` per
+    fragment, and compared the ratio to ``truth_summary.json``'s ``origin_counts`` — which are real
+    molecules. The units did not match across the subtraction, and because the two components' K
+    inflations differ they did not cancel: on ladder g50 capture_off the incidence ratio reads
+    **0.3851** against a truth of **0.5085**, while the conserved counts reproduce **0.5085** exactly.
+    It also silently omitted the junction axis, so it disagreed with ``pipeline.py``'s version too.
+
+    ⭐ Reading the result's own field is the point: the count is assembled once, in ``calibrate``, where
+    each axis is converted by its own population's ``mass / count``. A consumer recombining the banks
+    itself is how the tree came to hold three different answers to this question.
     """
-    g = float(np.asarray(result.mass_gdna_node).sum() + np.asarray(result.mass_gdna_edge).sum())
-    r = float(np.asarray(result.mass_rna_node).sum() + np.asarray(result.mass_rna_edge).sum())
+    g, r = result.library_gdna_fragments, result.library_rna_fragments
     return g / (g + r) if (g + r) > 0 else 0.0
 
 

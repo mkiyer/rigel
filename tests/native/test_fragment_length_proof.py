@@ -71,6 +71,7 @@ from __future__ import annotations
 import itertools
 
 import numpy as np
+
 import pytest
 
 from ._accumulator_reference import Accumulator, DepositOutcome, GapHypothesis, Partition
@@ -179,19 +180,15 @@ def _check_one(start: int, end: int, introns) -> None:
     t = acc.tally
     n_cross = int(t.edge_unspliced_count.sum())
     if n_cross:
-        from ._accumulator_reference import inv_length_quantum
-
-        assert int(t.edge_unspliced_inv_length_sum.sum()) == n_cross * inv_length_quantum(
-            length - 1
+        assert _close(
+            float(t.edge_unspliced_inv_length_sum.sum()), n_cross / (length - 1), n_cross
         ), f"{ctx}: the deposited L disagrees with the oracle's {length}"
     if contained is not None:
-        from ._accumulator_reference import inv_length_quantum
-
         # ⭐ The contained deposit is `1/OPPORTUNITY` — `ell − L + 1` admissible starts inside the
         # containing node — so this asserts BOTH the length the oracle derived and the node it landed in.
         node_len = int(_CUTS[contained + 1]) - int(_CUTS[contained])
-        assert int(t.node_contained_inv_opportunity_sum.sum()) == inv_length_quantum(
-            node_len - length + 1
+        assert _close(
+            float(t.node_contained_inv_opportunity_sum.sum()), 1.0 / (node_len - length + 1), 1
         ), f"{ctx}: the contained deposit disagrees with the oracle's L={length} in a {node_len} bp node"
 
     assert got_crossed == crossed, f"{ctx}: crossed lines {got_crossed} != oracle {crossed}"
@@ -276,10 +273,8 @@ def test_randomised_at_realistic_scale():
         t = acc.tally
         n_cross = int(t.edge_unspliced_count.sum())
         if n_cross:
-            from ._accumulator_reference import inv_length_quantum
-
-            assert int(t.edge_unspliced_inv_length_sum.sum()) == n_cross * inv_length_quantum(
-                length - 1
+            assert _close(
+                float(t.edge_unspliced_inv_length_sum.sum()), n_cross / (length - 1), n_cross
             ), f"{ctx}: deposited L != oracle {length}"
         n_checked += 1
     assert n_checked > 3000, (
@@ -426,26 +421,33 @@ def test_the_node_deposit_is_the_RECIPROCAL_OPPORTUNITY_and_is_therefore_MODEL_F
     contributes ``(ell − w + 1)/w``, so the total is a function of the lengths and the channel is not a
     density (`EQUATIONS.md` §2.2). Verified failing before the fix was written.
     """
-    from ._accumulator_reference import inv_length_quantum
-
     lengths = [w for w in (20, 51, 97, 150, 233, 400, 999) if w <= node_len]
     assert len(lengths) >= 3, "the parametrisation must leave a non-degenerate length SET"
 
     acc = _one_node_acc(node_len)
+    placements = 0
     for w in lengths:
         for start in range(0, node_len - w + 1):  # every admissible placement, exactly once
             assert acc.deposit(0, start, start + w) is DepositOutcome.DEPOSITED
+            placements += 1
 
-    got = int(acc.tally.node_contained_inv_opportunity_sum[0])
-    # ⭐ EXACT, not a tolerance: A placements each depositing round(2^32/A) is a closed form.
-    want = sum((node_len - w + 1) * inv_length_quantum(node_len - w + 1) for w in lengths)
-    assert got == want, f"node_len={node_len}: {got} != {want}"
+    got = float(acc.tally.node_contained_inv_opportunity_sum[0])
 
-    # ⭐⭐ AND THE POINT: each length contributes ONE unit of density, so the total is the length COUNT.
-    # The fixed-point residue is bounded by half a quantum per placement and is reported, not waived.
-    unit = float(1 << 32)
-    assert abs(got / unit - len(lengths)) < 0.5 * len(lengths) / unit * max(lengths), (
-        f"node_len={node_len}: {got / unit:.9f} density units for {len(lengths)} lengths — "
+    # ⭐⭐⭐ THE THEOREM, stated against the REAL-ARITHMETIC answer: `A` placements each depositing
+    # `1/A` is exactly one density unit per length, whatever the lengths are. The total is therefore
+    # the length COUNT — an integer — and that is what makes the channel model-free.
+    #
+    # ⚠ The predecessor asserted `got == sum(A * round(2^32/A))` EXACTLY. That is the fixed point's own
+    # closed form, so it re-derived the implementation and could not fail (`TRAPS: a-gate-that-reconstructs`).
+    # ⭐ Measured against the exact rational answer, float64 is far closer than the grid it replaced::
+    #
+    #     node_len 151    fixed 7.0e-10    float64 5.8e-15
+    #     node_len 400    fixed 1.7e-08    float64 1.0e-13
+    #     node_len 1000   fixed 2.0e-07    float64 2.8e-13
+    #
+    # ⛔ The budget is the representation's, derived from the number of additions — not fitted.
+    assert _close(got, float(len(lengths)), placements), (
+        f"node_len={node_len}: {got:.12f} density units for {len(lengths)} lengths — "
         "the opportunity did not cancel, so this channel is a function of the pmf"
     )
 
@@ -470,3 +472,11 @@ def test_the_node_density_channel_DOES_NOT_MOVE_when_the_length_set_changes():
         f"density per length: short lengths {short:.9f}, long lengths {long_:.9f} — a model-free "
         "channel reads the same rho for both; this one is a function of the fragment lengths"
     )
+
+#: ⭐ ONE CONVENTION: fractions are float64. `n` round-to-nearest additions differ from the real answer
+#: by at most `n` ulp. ⛔ DERIVED from the machine, never fitted.
+EPS = float(np.finfo(np.float64).eps)
+
+
+def _close(got: float, want: float, deposits: int) -> bool:
+    return abs(got - want) <= max(abs(want), 1.0) * deposits * EPS

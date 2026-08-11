@@ -47,10 +47,6 @@ from ..scan_payload import AccumulatorPayload
 from .errors import CalibrationSubstrateError
 from .region_arrays import RegionArrays
 
-#: The accumulator's fixed-point scale (``rigel::accumulator::kInvLengthScale``,
-#: ``_accumulator_reference.INV_LENGTH_SCALE``). Named here because this module is the only decoder.
-INV_LENGTH_SCALE = float(1 << 32)
-
 #: A geometry/payload mismatch surfaces as a shape error deep in the solver, which points nowhere near
 #: its cause. Name it at the door instead.
 PARTITION_MISMATCH_HINT = (
@@ -192,13 +188,11 @@ class CalibrationSubstrate:
             return PopulationView(
                 name=name,
                 count=np.asarray(count, dtype=np.int64),
-                inv_length_sum=(
-                    None if inv is None else np.asarray(inv, dtype=np.float64) / INV_LENGTH_SCALE
-                ),
+                inv_length_sum=None if inv is None else np.asarray(inv, dtype=np.float64),
                 length_sum=None if length is None else np.asarray(length, dtype=np.float64),
-                # ⚠ The mass is a fixed point at the SAME scale, so it decodes the same way. Doing it
-                # here keeps this module the one decoder.
-                mass=None if mass is None else np.asarray(mass, dtype=np.float64) / INV_LENGTH_SCALE,
+                # ⭐ No decode: the accumulator deposits fractions as float64 directly. This module used
+                # to be "the one decoder"; under one numeric convention there is nothing to decode.
+                mass=None if mass is None else np.asarray(mass, dtype=np.float64),
             )
 
         return cls(
@@ -223,7 +217,9 @@ class CalibrationSubstrate:
             edge_spliced=view(
                 "edge_spliced", payload.edge_spliced_count, mass=payload.edge_spliced_mass
             ),
-            junction=view("junction", payload.sj_count, payload.sj_inv_length_sum),
+            junction=view(
+                "junction", payload.sj_count, payload.sj_inv_length_sum, mass=payload.sj_mass
+            ),
         )
 
     @staticmethod
@@ -255,4 +251,4 @@ class CalibrationSubstrate:
             )
 
 
-__all__ = ["INV_LENGTH_SCALE", "CalibrationSubstrate", "PopulationView"]
+__all__ = ["CalibrationSubstrate", "PopulationView"]

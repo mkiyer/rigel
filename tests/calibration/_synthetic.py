@@ -19,9 +19,9 @@ from rigel.scan_payload import (
     ScanQC,
 )
 
-#: The fixed-point scale the accumulator deposits ``round(SCALE / placements)`` at. Decoded exactly once,
-#: in ``CalibrationSubstrate.from_payload``; a test that needs the raw integer builds it with this.
-INV_LENGTH_SCALE = 1 << 32
+#: ⭐ ONE NUMERIC CONVENTION: a COUNT is an integer, a FRACTION is float64. The accumulator deposits
+#: ``1/placements`` directly — there is no scale and nothing to decode, so this fixture builds the same
+#: number the accumulator would.
 
 
 def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
@@ -52,13 +52,9 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     def inv(counts, placements):
         """The fixed-point sum a bank of ``counts`` fragments at one placement count would deposit.
 
-        ⚠ Rounds HALF AWAY FROM ZERO, exactly as ``_accumulator_reference.inv_length_quantum`` does —
-        not floor. A fixture that quantised differently from the accumulator would make the decode test
-        assert the fixture's own arithmetic rather than the substrate's.
         ⚠ ONE column — the two strands are SUMMED, because the length moments carry no strand axis.
         """
-        quantum = (2 * INV_LENGTH_SCALE + placements) // (2 * placements)
-        return (np.asarray(counts, np.uint64).sum(axis=1) * np.uint64(quantum)).astype(np.uint64)
+        return np.asarray(counts, np.float64).sum(axis=1) / placements
 
     def lengths(counts, length):
         """⚠ ONE column, for the same reason :func:`inv` is."""
@@ -72,8 +68,7 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         fragment, so ``mass <= count`` must hold. ``per_crossing = 2`` is the value for a fragment that
         crosses two lines, which is what the multi-line geometry this fixture describes produces.
         """
-        total = np.asarray(counts, np.uint64).sum(axis=1)
-        return (total * np.uint64(INV_LENGTH_SCALE // per_crossing)).astype(np.uint64)
+        return np.asarray(counts, np.float64).sum(axis=1) / per_crossing
 
     payload = AccumulatorPayload(
         cut_positions=np.array([0, 100, 200, 300], dtype=np.int64),
@@ -93,6 +88,7 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         edge_spliced_mass=mass(spliced),
         sj_count=sj,
         sj_inv_length_sum=inv(sj, 10),
+        sj_mass=inv(sj, 10),
         pool_lengths=np.zeros((N_FRAGMENT_POOLS, 201), dtype=np.int64),
         deposited_lengths=np.zeros(201, dtype=np.uint32),
         # ⚠ Nothing was deferred here, and that is a real state, not a stub: this fixture has no
@@ -269,12 +265,8 @@ def make_chain_parts(
     node_counts = pair(node_pos, node_neg, n_nodes)
     edge_counts = pair(edge_pos, edge_neg, n_edges)
     substrate = SimpleNamespace(
-        node_contained=SimpleNamespace(
-            count=node_counts
-        ),
-        edge_unspliced=SimpleNamespace(
-            count=edge_counts
-        ),
+        node_contained=SimpleNamespace(count=node_counts),
+        edge_unspliced=SimpleNamespace(count=edge_counts),
         edge_spliced=SimpleNamespace(count=pair(edge_spliced, 0.0, n_edges)),
         junction=SimpleNamespace(
             count=np.array([[float(x[5]), 0.0] for x in j]).reshape(len(j), 2)

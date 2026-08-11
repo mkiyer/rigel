@@ -133,6 +133,8 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
         edge_mass_per_crossing=np.ones(e),
         mass_rna_junction=np.zeros(j),
+        edge_spliced_mass_per_crossing=np.ones(e),
+        junction_mass_per_crossing=np.ones(j),
         gdna_node_eff_len=np.ones(n),
         gdna_edge_eff_len=np.ones(e),
         rna_node_eff_len=np.ones(n),

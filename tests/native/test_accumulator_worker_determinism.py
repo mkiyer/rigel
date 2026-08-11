@@ -19,6 +19,7 @@ from __future__ import annotations
 import dataclasses
 
 import numpy as np
+
 import pytest
 
 from rigel.config import BamScanConfig
@@ -28,6 +29,10 @@ from rigel.sim import ReadSimConfig, Scenario
 
 
 SEED = 20260730
+
+
+#: ⭐ Derived from the machine, never fitted.
+EPS = float(np.finfo(np.float64).eps)
 
 
 @pytest.fixture
@@ -149,6 +154,9 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(oracle):
         "is bit-identical for free. The fixture must produce an undetermined gap."
     )
 
+    n_deposits = int(np.asarray(baseline.node_start_count).sum())
+    assert n_deposits > 0, "nothing was deposited, so this comparison could not have differed"
+
     for n_workers in (2, 4, 8):
         other = _tally(oracle, n_workers)
         assert other.graph_hash == baseline.graph_hash, f"{n_workers} workers: different index"
@@ -156,10 +164,28 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(oracle):
             expected = np.asarray(getattr(baseline, key))
             actual = np.asarray(getattr(other, key))
             assert actual.dtype == expected.dtype, f"{n_workers} workers: {key} dtype"
-            assert np.array_equal(actual, expected), (
-                f"{n_workers} workers: {key} is not bit-identical to the single-worker run — "
-                f"{int(np.count_nonzero(actual != expected))} of {expected.size} cells differ"
-            )
+            # ⭐⭐ ONE CONVENTION, TWO STANDARDS, AND THAT IS THE POINT. A COUNT is an integer, and
+            # integer addition IS associative — so a count bank must be bit-identical at any worker
+            # count, and that is asserted with no tolerance at all. A FRACTION is float64, and float
+            # addition is NOT associative: the per-worker merge re-associates the sum, so those banks
+            # agree only to the representation. ⛔ The budget is derived from the deposit count, never
+            # fitted, and a count bank that needed it would fail here.
+            if expected.dtype == np.float64:
+                # ⛔ The budget is `n_deposits * EPS`: each cell accumulates at most one addition per
+                # deposited fragment, and re-associating `n` round-to-nearest additions moves the sum
+                # by at most `n` ulp. DERIVED from the fragment count — not the array size, which is
+                # unrelated, and not a number anyone chose.
+                assert np.allclose(actual, expected, rtol=n_deposits * EPS, atol=0.0), (
+                    f"{n_workers} workers: {key} differs by MORE than the float64 representation — "
+                    f"that is a merge defect, not re-association"
+                )
+            else:
+                assert np.array_equal(actual, expected), (
+                    f"{n_workers} workers: {key} is not bit-identical to the single-worker run — "
+                    f"{int(np.count_nonzero(actual != expected))} of {expected.size} cells differ. "
+                    f"This bank is an INTEGER count and integer addition is associative, so a "
+                    f"difference here is a real merge defect."
+                )
         for key in deferred_keys:
             expected = getattr(baseline.deferred, key)
             actual = getattr(other.deferred, key)
@@ -189,6 +215,7 @@ def test_the_deferred_bank_holds_the_fragments_ITS_COUNTER_CLAIMS(oracle):
     assert payload.gap_resolution.gap_resolved_spliced > 0, (
         "no fragment's gap was RESOLVED, so this fixture only exercises the deferral arm"
     )
+
     # Every record replays: two or more hypotheses, an extent inside its own reference, and a strand.
     runs = np.diff(payload.deferred.hypothesis_offsets)
     assert int(runs.min()) >= 2

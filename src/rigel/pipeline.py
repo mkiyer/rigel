@@ -978,24 +978,21 @@ def run_pipeline(
     )
     calibration_diagnostics = _calib_diag.get("calibration")
 
-    # ⭐ The QC sum runs over all THREE axes. gDNA lives on two of them — it is contained in a node or
-    # it crosses a line — while RNA also jumps, and the junction flux is the population that at a donor
-    # seam IS the gene's whole mature output. Summing only nodes and lines would report a library's RNA
-    # as a fraction of itself.
+    # ⭐ FRAGMENTS, not object incidences. The sum still runs over all three axes — gDNA is contained in
+    # a node or crosses a line, RNA also jumps, and at a donor seam the junction flux IS the gene's whole
+    # mature output — but each axis is converted by its own population's mass-per-crossing first. Adding
+    # the raw banks counted one fragment once per line it crossed AND once per junction it used, which
+    # read `f_gdna` 0.3851 against a truth of 0.5085 on ladder g50 capture_off.
     logger.info(
         "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
-        "gDNA_mass=%.0f RNA_mass=%.0f (junction %.0f)",
+        "gDNA_fragments=%.0f RNA_fragments=%.0f (junction incidences %.0f)",
         calibration.n_nodes,
         calibration.n_edges,
         calibration.n_junctions,
         calibration.gdna_density_global,
         calibration.rna_sense_frac,
-        float(calibration.mass_gdna_node.sum() + calibration.mass_gdna_edge.sum()),
-        float(
-            calibration.mass_rna_node.sum()
-            + calibration.mass_rna_edge.sum()
-            + calibration.mass_rna_junction.sum()
-        ),
+        calibration.library_gdna_fragments,
+        calibration.library_rna_fragments,
         float(calibration.mass_rna_junction.sum()),
     )
 

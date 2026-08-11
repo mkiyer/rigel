@@ -18,32 +18,34 @@ trust — a number that has moved is a result, not a documentation bug.
 
 ⛔ **Re-derive rather than trust.** A number that has moved is a result, not a documentation bug.
 
-⚠ This was "six numbers" and is now ten, because the 2026-08-07 validation campaign measured four
-things nothing had measured before. If it grows again, prune it rather than letting it become a report.
+⚠ **Fourteen rows. If it grows again, PRUNE rather than let it become a report** — a closed item earns
+one line, and a number nobody can attribute earns none.
 
 | | | |
 |---|---|---|
 | **Stage A — the accumulator** | ✅ **DONE**, and that is a measurement | perfecting BOTH fragment-length models is worth **2.6 %** of the deliverable, down from 22.2 % |
+| ✅ **the tally CONSERVES a fragment count** | ⭐ every deposited fragment places **exactly one** unit across the objects it crosses — nodes, contiguous edges and junction edges together. Measured on the origin-split oracle: **1.000× deposited, 0 unaccounted**, on BOTH origins | ⛔ RNA read **0.747×** until `sj_mass` landed (2026-08-11): a spliced fragment whose blocks cross no line deposited on no conserved bank at all — **1,222,375 of 4,830,713 (25.3 %)**. gDNA was always exact, because gDNA cannot splice |
+| ✅ **ONE NUMERIC CONVENTION** | ⭐ a COUNT is an integer, a FRACTION is float64. No fixed point, no scale constant, nothing decodes a bank (owner, 2026-08-11) | ⭐ float64 is **1e5–7e5× MORE accurate** than the fixed point it replaced, measured against exact rational arithmetic. ⛔ The ~2.6 % once quoted against float is a **float32** number — `TRAPS: integer-channels-reproduce` |
 | **calibration, 3 of 4 strata** | ✅ median library `f_gdna` error **0.005–0.012**, and ⭐ the PRIOR the EM reads is within **2.5–4.6 %** of a perfect one | stranded × on/off and unstranded × capture-OFF |
-| ⛔ **calibration, unstranded × capture-ON** | ⛔ **BLIND** — reports **0.033–0.058** while truth spans **0.00 → 0.98**, and hands the EM a gDNA prior **94.4 %** short | not noisy; a flat line. Still the whole open problem. ⛔ `length_likelihood` does NOT fix it — see the row below |
-| ✅ **the fragment-length channel** | ⛔ **MEASURED TO A VERDICT AND DELETED** (2026-08-10, `f470a570`). Its answer was not a function of the pmf gap at all: at a gap of ~1e-9 bp it reported **0.72 / 0.59 / 0.72** on libraries whose truth was **0.00 / 0.00 / 0.57**, and closing the gap made every one WORSE | ⭐ A Gaussian log-likelihood is asymptotically LINEAR in the composition, so its argmax is a SIGN saturated at a grid endpoint. `TRAPS: a-linear-likelihood-emits-a-sign`. ⭐ The fragment-length MODELS were exonerated by the same run |
-| ✅ **the prior ASSEMBLER and its POPULATION** | ✅ `rel` **0.0019–0.0027** with perfect masses in and **4.9e-4** with perfect per-component shares; the composition claim `a_g:a_r` is exact against the unspliced pool (`Δphi` **≤ 5e-4**) | ⭐ the assembler was **0.179**: the conserved-count rewrite took it to 0.0202 and the YARDSTICK took it to 0.0027 (`TRAPS: score-the-consumers-own-count`). ⛔ Two entries here once claimed a 72 % residual and a +0.07 tilt; both were the reference, not the tool |
-| ✅ **the fragment-length models** | ✅ accurate — `pi(w)`'s de-tilt reads **211.77** against a true **212.20**, and the gDNA pmf is exact to **0.02 bp** off capture | ⛔ a claimed +10.7 % bias was a truth-parser bug (`TRAPS: a-truth-table-of-aggregates`). ⚠ §4 retires the RNA-FL row for the DIVISOR consumer only; a pricing is per consumer |
-| ⚠ **the gDNA pmf under capture** | ⛔ the last unfixed length defect: **+13.6 bp** at a 330 bp gDNA mean and **+3.5 bp** at 120, drained per-bin `fit/true` **1.22 … 4.18** in the tail | ⭐ EXACT off capture (+0.1 / +0.0 bp) and untouched by the drain (Δ ≤ 0.1 bp), so it is a PLACEMENT problem — `EQUATIONS.md` §4.4 — and must not be attacked by editing `gdna_opportunity` |
-| **message propagation** | ⛔ **OFF**, and it stays off until the tool is optimised end to end across all scenarios (owner, 2026-08-10) | net better on 3 of 4 strata (−58 / −44 / −32 %); +155 % on the fourth. ⭐ That fourth stratum is the one `length_likelihood` just fixed, so the relay's price there must be RE-priced, never inherited |
+| ⛔ **calibration, unstranded × capture-ON** | ⛔ **BLIND** — reports **0.033–0.058** while truth spans **0.00 → 0.98**, and hands the EM a gDNA prior **94.4 %** short | not noisy; a flat line. **Still the whole open problem**, and nothing has fixed it — the length channel was tried and refused (§1.4) |
+| ✅ **the prior ASSEMBLER and its POPULATION** | ✅ `rel` **0.0019–0.0027** with perfect masses in and **4.9e-4** with perfect per-component shares; the composition claim `a_g:a_r` is exact against the unspliced pool (`Δphi` **≤ 5e-4**) | ⭐ the assembler was **0.179**: the conserved-count rewrite took it to 0.0202 and the YARDSTICK took it to 0.0027 (`TRAPS: score-the-consumers-own-count`) |
+| ✅ **the fragment-length models** | ✅ accurate — `pi(w)`'s de-tilt reads **211.77** against a true **212.20**, and the gDNA pmf is exact to **0.02 bp** off capture | ⛔ a claimed +10.7 % bias was a truth-parser bug (`TRAPS: a-truth-table-of-aggregates`) |
+| ⚠ **the gDNA pmf under capture** | ⛔ the last unfixed length defect: **+13.6 bp** at a 330 bp gDNA mean and **+3.5 bp** at 120, drained per-bin `fit/true` **1.22 … 4.18** in the tail | ⭐ EXACT off capture and untouched by the drain, so it is a PLACEMENT problem — `EQUATIONS.md` §4.4 — and must not be attacked by editing `gdna_opportunity` |
+| **message propagation** | ⛔ **OFF**, and it stays off until the tool is optimised end to end across all scenarios (owner, 2026-08-10) | net better on 3 of 4 strata (−58 / −44 / −32 %); **+155 % on unstranded × capture-ON**, which is the blind stratum. ⛔ It is the only remaining lever there, and its price must be RE-priced on the rebuilt ladder, never inherited |
 | **the price of that** | ⚠ zero-gDNA golden scenarios go **0.029 → 89.93** and **0.005 → 9.58** | both AMBIG loci — the stratum above |
-| **end to end — the LIBRARY figure** | ✅ mean `\|f_gdna − truth\|` **0.1060**, and a perfect prior takes it to **0.0097** | calibration is the whole bottleneck here. §1.3 ① |
-| ⛔ **end to end — TRANSCRIPT assignment** | ⛔ **31.1 %** of fragments misassigned, and a perfect prior removes only **32 %** of that | 67.5 % survives, and on capture-OFF a perfect prior is 3–4 % WORSE. §1.3 ② |
-| ⛔ **the NASCENT channel** | ⛔ **20.2 M fragments** parked on entities whose truth is exactly **0** | 9.2 % of all true RNA, invisible in every transcript table. §1.2 |
-| **reproducibility** | ⛔ **the tool does not reproduce itself**: `EMConfig.seed` defaults to `None` | `TRAPS: the-deliverable-is-not-reproducible-by-default`. Counts still conserve exactly (`mrna+nrna+gdna == n_unambig+n_em`) |
+| ✅ **the LIBRARY figure is a FRAGMENT COUNT** | ⭐ it was an object-INCIDENCE sum in **all three** consumers that computed it, and the units did not match the truth it was scored against. Now `CalibrationResult.library_{gdna,rna}_fragments`, derived on read, each axis converted by its OWN `mass/count` | ⭐ On the pilot panel: better on **8 of 8** conditions, and the three contaminated ones the tool can see improve **73 / 81 / 98 %**. It RAISES the estimate on the contaminated arm and LOWERS it on the zero arm — both toward truth, which a merely-shifted number cannot do |
+| ⛔ **end to end — the LIBRARY figure** | ⛔ **NOT CURRENTLY KNOWN, and the old `0.1060 / 0.0097` pair must not be quoted.** It was unattributable: its `§1.3 ①` pointer named a section this file does not contain, and its two halves came from different instruments | ⚠ `calibration_truth_ab.py` reads mean `\|err\|` **0.1185** on the pilot panel — but that is 4 conditions on TWO gDNA levels, dominated by the blind stratum (`TRAPS: a-single-level-panel-cannot-see-a-constant`). ⭐ **The 36-condition ladder is rebuilt; re-derive there.** §2 item 1 |
+| ⛔ **end to end — TRANSCRIPT assignment** | ⛔ **31.1 %** of fragments misassigned, and a perfect prior removes only **32 %** of that | 67.5 % survives, and on capture-OFF a perfect prior is 3–4 % WORSE. ⚠ Measured 2026-08-07 on the pre-rebuild panel; re-derive alongside the row above |
+| ⛔ **the NASCENT channel** | ⛔ **20.2 M fragments** parked on entities whose truth is exactly **0** | 9.2 % of all true RNA, invisible in every transcript table |
+| ⛔ **reproducibility — TWO independent sources** | ⛔ `EMConfig.seed` defaults to `None`, **and** the scan is multi-threaded so the float banks are re-associated by the per-worker merge | `TRAPS: the-deliverable-is-not-reproducible-by-default`. Pinning the seed alone is no longer sufficient. ⭐ Owner signed this off (2026-08-11): the spread is **1.503e-15** on `posterior_mean` and **exactly 0** on every integer column, and tests validate the float banks within a DERIVED, bracketed tolerance |
 
 ⭐⭐ **THE ONE SENTENCE, AND IT NOW HAS TWO HALVES BECAUSE THE TOOL HAS TWO DELIVERABLES.**
 
 **On the LIBRARY gDNA fraction, the tool is accurate everywhere except unstranded × capture-ON, where it
 cannot see gDNA at all** — `κ = ½` makes the strand λ-term identically 0 and no other channel reaches an
-AMBIG slot. That is the whole of the calibration problem, and §1.3 ① proves it is the *whole* problem for
-this deliverable: a perfect prior fixes it completely. Everything in §2 is about giving that slot its own
-evidence.
+AMBIG slot. That is the whole of the calibration problem, and the oracle-prior injection proves it is the
+*whole* problem for this deliverable: a perfect prior fixes it completely (`quant_accuracy.py --arm
+oracle`). Everything in §2 is about giving that slot its own evidence.
 
 ⛔ **On TRANSCRIPT-LEVEL assignment, that sentence is FALSE and was never tested until 2026-08-07.** The
 tool misassigns 15.6–20.6 % of fragments even on the three strata calibration handles perfectly, and
@@ -125,12 +127,27 @@ measured ~66 s against the EM's ~24 s: the exact reverse. **Profile on real cfRN
 (`~/Downloads/rigel_runs/cfrna/`, genome index at `~/Downloads/rigel_runs/refs/rigel_index`), never on
 this panel — `TRAPS: toys-rank-hotspots-backwards`, which cost a whole analysis once.
 
-## §2 ⛔ AFTER THE CAMPAIGN — NOT NOW, kept because the briefs are complete and should not be re-derived
+## §2 ⭐⭐ WHAT TO DO NEXT, IN ORDER
 
-⛔⛔ **BOTH ITEMS BELOW ARE ON HOLD BY OWNER RULING (2026-08-07) until §1 is finished.** They are written up
-in full because the analysis is done and re-deriving it would be waste — not because they are next. ⚠ In
-particular `length_likelihood` STAYS OFF: its panels and oracle caches are built and ready, and turning it
-on mid-campaign would make every number in §1 unattributable.
+⭐ **The panels are rebuilt and gated** (2026-08-11: 184 payloads across ladder / flgap_short / flgap_long /
+pilot, every non-target bank byte-identical). Every instrument under `scripts/design/` runs again.
+
+1. ⭐⭐⭐ **Re-derive the two end-to-end numbers on the 36-condition ladder.** §0's LIBRARY row is
+   unattributable and its TRANSCRIPT row predates the rebuild. `calibration_truth_ab.py` for the first,
+   `quant_accuracy.py --arm base` / `--arm oracle` for the second. ⛔ The pilot panel has two gDNA levels
+   and cannot carry either (`TRAPS: a-single-level-panel-cannot-see-a-constant`).
+2. ⭐⭐ **Re-price message propagation on unstranded × capture-ON.** It is the only remaining lever on the
+   one blind stratum, it is one config flag, and its recorded +155 % predates both the conserved-count
+   rewrite and the numeric convention. ⛔ RE-price, never inherit.
+3. **`mass_*_edge` → `count_*_edge`.** THREE of the five `mass_*` fields on `CalibrationResult` are
+   incidences (`mass_gdna_edge`, `mass_rna_edge`, `mass_rna_junction`) and two are fragment counts. Its
+   own commit, `one-thing-varied`.
+4. **Restore the moment tests.** `contained_moments` / `crossing_moments` / `build_slot_moments` moved to
+   `effective_length.py` without their tests, which went with the deleted length channel — untested
+   geometry in a live layer-2 module.
+
+⛔⛔ **The two briefs below are ON HOLD by owner ruling (2026-08-07)** and are kept only because the
+analysis is complete and re-deriving it would be waste — not because they are next.
 
 ### §2.1 THE BRIEF FOR **the-cancelling-pair** — everything that experiment needs, in one place
 

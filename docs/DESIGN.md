@@ -127,9 +127,9 @@ The populations therefore do NOT all carry the same channels, and that asymmetry
 | | | |
 |---|---|---|
 | `count` | `Σ 1` | statistical power — a count is a count |
-| `inv_length_sum` | `Σ round(2³²/placements)` | an exact model-free density **at an edge**, and *not* one at a node — which is why it is not called `density` |
+| `inv_length_sum` | `Σ 1/placements` (float64) | an exact model-free density **at an edge**, and *not* one at a node — which is why it is not called `density` |
 | `length_sum` | `Σ L` | carries the only information about the gDNA/RNA split when the two components share a mean length; the other two carry **zero** there |
-| `mass` | `Σ (slice/w)/n_cross` | ⭐ the CONSERVED fragment count — sums to **one per fragment**, where `count` is `+1` on each of `max(K,1)` objects. `EQUATIONS.md` §3b |
+| `mass` | `Σ (slice/L)/n_bounds` (float64) | ⭐ the CONSERVED fragment count — sums to **one per fragment**, where `count` is `+1` on each of `max(K,1)` objects. ⭐⭐ A JUNCTION EDGE is a boundary exactly like a contiguous one, so a spliced fragment shares its one unit across every object it crosses, junctions included. `EQUATIONS.md` §3b |
 
 ⛔ **Six banks were REMOVED on that rule** (2026-08-08): three `node_spanning_*`, the two spliced-edge
 length moments, and `sj_length_sum`. Structs went `Node` 80 → **24 B**, `ContiguousEdge` 80 → **48 B**,
@@ -153,14 +153,26 @@ a reason to drop the column. ⭐ The discriminating information lives ONLY in th
 and an artifactual one at the same depth carry the same total. Gated by
 `test_the_junction_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION`.
 
-Fixed-point headroom is ~800×: with `L ∈ [20,2000]` each `round(2³²/L) ≤ 2.1e8`, so 1e8 fragments sum to
-≤ 2.1e16 against a uint64 ceiling of 1.8e19. Memory is flat and small — ~85 MB at human scale (node 24 B,
-contiguous edge 48 B, junction edge 24 B), no hash map.
+⛔ **THE FIXED POINT IS GONE** (owner ruling, 2026-08-11: one numeric convention, and mixing two in one
+schema is worse than either). **A COUNT is an integer; a FRACTION is float64.** There is no scale
+constant and nothing decodes a bank. Headroom is no longer a question anyone has to answer.
+⭐ It is also the more ACCURATE choice, measured against exact rational arithmetic on the
+reciprocal-opportunity theorem: the fixed point missed the answer by 7.0e-10 … 2.0e-07 where float64
+misses by 5.8e-15 … 2.8e-13 — 1e5–7e5× closer. Memory is unchanged and still flat — ~85 MB at human
+scale (node 24 B, contiguous edge 48 B, junction edge 24 B), no hash map.
 
 ⭐⭐ **AND ONE OF THEM IS ALREADY LOAD-BEARING IN A WAY WORTH STATING**: `edge_unspliced_inv_length_sum` is LIVE in `second_pass` (via `pipeline`), and being the one channel whose opportunity and deposit cancel identically — `E[inv_length_sum] = rho` exactly, at an edge, for ANY length distribution — that rho term is **the only provably fragment-length-gap-robust density estimator in the tree**. `EQUATIONS.md` §3c.
 
-⭐ **Every channel is an integer, and that is what makes the tally reproducible across worker counts**
-(TRAPS: integer-channels-reproduce).
+⛔ **THE TALLY IS NOT BIT-REPRODUCIBLE ACROSS WORKER COUNTS, and the owner has signed that off**
+(2026-08-11). Integer addition is associative, so every COUNT bank still reproduces exactly — measured
+0.000e+00 spread over 8 shipped multi-threaded runs. Float addition is not, so the FRACTION banks are
+re-associated by the per-worker merge and wander by ~1e-15; that reaches `posterior_mean` at **1.503e-15**
+and the deliverable at ~1e-11, five orders below `EMConfig.convergence_delta`.
+⭐ **Tests validate the float banks within a DERIVED tolerance, bracketed from both sides** — a nudge just
+past it must fail and one just inside must pass, so it is a tolerance rather than a threshold that never
+binds. ⚠ This is a SECOND source of irreproducibility, independent of `EMConfig.seed`
+(TRAPS: the-deliverable-is-not-reproducible-by-default); pinning the seed alone is no longer sufficient
+for byte-identical output. `TRAPS: integer-channels-reproduce` carries the numbers.
 
 ### 3.1b ⭐⭐⭐ WHO OWNS A FRAGMENT — and nothing is ever re-attributed
 

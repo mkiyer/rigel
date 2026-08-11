@@ -101,19 +101,20 @@ def _calibration_dict(**overrides) -> dict:
         "ref_edge_offsets": ref_edge_offsets,
         "ref_sj_offsets": ref_sj_offsets,
         "node_contained_count": np.arange(n_nodes * 2, dtype=np.uint32),
-        "node_contained_inv_opportunity_sum": np.arange(n_nodes, dtype=np.uint64) * 7,
+        "node_contained_inv_opportunity_sum": np.arange(n_nodes, dtype=np.float64) * 7,
         "node_contained_length_sum": np.arange(n_nodes, dtype=np.uint64) * 11,
         "node_start_count": np.arange(n_nodes, dtype=np.uint32),
         "edge_unspliced_count": np.arange(n_edges * 2, dtype=np.uint32),
-        "edge_unspliced_inv_length_sum": np.arange(n_edges, dtype=np.uint64),
+        "edge_unspliced_inv_length_sum": np.arange(n_edges, dtype=np.float64),
         "edge_unspliced_length_sum": np.arange(n_edges, dtype=np.uint64) * 17,
         "edge_spliced_count": np.arange(n_edges * 2, dtype=np.uint32),
         # ⭐ The conserved masses: ONE value per edge, so `n_edges` and not `n_edges * 2`. A fixture
         # that gave them a strand axis would pass every value check and disagree with the emitter.
-        "edge_unspliced_mass": np.arange(n_edges, dtype=np.uint64) * 29,
-        "edge_spliced_mass": np.arange(n_edges, dtype=np.uint64) * 31,
+        "edge_unspliced_mass": np.arange(n_edges, dtype=np.float64) * 29,
+        "edge_spliced_mass": np.arange(n_edges, dtype=np.float64) * 31,
         "sj_count": np.arange(n_sj * 2, dtype=np.uint32),
-        "sj_inv_length_sum": np.arange(n_sj, dtype=np.uint64),
+        "sj_inv_length_sum": np.arange(n_sj, dtype=np.float64),
+        "sj_mass": np.arange(n_sj, dtype=np.float64),
         "pool_lengths": np.arange(5 * (MAX_LENGTH + 1), dtype=np.int64),
         # ⭐ TRAPS: a-purity-filter-is-a-length-filter: the unconditional histogram must bin EXACTLY the deposited fragments, so this fixture
         # can no longer carry an arbitrary array — 41 here, matching qc.deposited below. That coupling is
@@ -185,6 +186,7 @@ def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
         ("edge_unspliced_mass", n_edges),
         ("edge_spliced_mass", n_edges),
         ("sj_inv_length_sum", n_sj),
+        ("sj_mass", n_sj),
     ):
         assert getattr(payload, name).shape == (rows,), name
     assert payload.node_start_count.shape == (n_nodes,)

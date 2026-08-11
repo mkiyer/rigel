@@ -99,7 +99,7 @@ something from a higher layer is telling you the thing belongs lower — a TYPE 
 | how many places a fragment COULD have sat | **2 · opportunity** — `effective_length` `capture_eff_length` `junction_opportunity` `gdna_opportunity` `fl` |
 | one slot's own numbers, and ψ | **3 · geometry + the per-slot solve** — `node_geometry` `simplex_logodds` |
 | which strand a fragment came from | **4 · strand** — `gdna_strand` `strand_deconv` `strand_balance` `strand_summary`, and `strand_likelihood` (an executable REFERENCE, gated) |
-| how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `npmle` `gdna_landscape` `background_reference` `length_likelihood` `run_fill` |
+| how dense a component is, and the priors | **5 · density and prior** — `density_model` `density_deconv` `npmle` `gdna_landscape` `background_reference` `run_fill` |
 | what one neighbour tells another | **6 · the solve** — `sweep` (the backbone) + `messages/` (the policy) + `node_init` |
 | turning the solve into a result | **7 · assemble** — `calibrate` `priors` `result` `derive` `diagnostics` `track` |
 
@@ -181,29 +181,27 @@ scheme. The rename rewrote **980 citations across 114 files** and correctly left
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-python -m pytest tests/ -q                     # baseline: 0 fail / 3209 pass / 2 skip / 9 xfail
+python -m pytest tests/ -q                     # baseline: 0 fail / 3231 pass / 2 skip / 9 xfail
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,272 passing, 2 skipped, 9 xfail** (measured
-2026-08-10 after the docs consolidation; it includes the 32 gates the validation campaign's two instruments
-brought with them — `test_prior_vs_oracle.py` **23**, `test_quant_accuracy.py` 9 — and the 8 in
-`test_calibration/test_edge_locus_projection.py`). ⚠ Several suite tests are PARAMETRISED OVER DOC AND
-SOURCE FILES, so adding or retiring one moves the count by a few — account for the delta, do not adjust it.
-⚠ **The predecessor said 3,255 and the tree held 3,258**, measured by stashing the working set and
-re-collecting; the +9 above is exactly the yardstick campaign's nine new gates and nothing else moved.
-A hand-carried count drifts — re-derive it rather than adjusting it (`TRAPS: re-record-the-baseline`).
-⚠ **The predecessor of this paragraph claimed
-"22 fail / 2310 pass / 7 xfail — 21 goldens + the paralog row" and every part of it was stale**; the
-goldens were regenerated and the failures are gone. Any failure at all is now a regression, which is a
-stronger and cheaper rule than counting expected ones. See `docs/TESTING.md` §6.
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,231 passing, 2 skipped, 9 xfail** (measured
+2026-08-11, after the numeric-convention change). **Any failure at all is a regression** — a stronger and
+cheaper rule than counting expected ones.
+
+⛔ **RE-DERIVE THE COUNT, NEVER ADJUST IT** (`TRAPS: re-record-the-baseline`). Several suite tests are
+PARAMETRISED OVER DOC, SOURCE AND SCRIPT FILES — roughly 2 per src module, 3 per script, 1 per doc — so
+adding or retiring a file moves the total by a few. Account for the delta; a hand-carried number has
+drifted every time it has been carried. ⚠ Four successive versions of this paragraph were stale when
+read, which is why it no longer records what they said.
+
 ⭐ **And 9 xfails, five of them STRICT and load-bearing.** `test_toy_harness`'s intron-composition gate is
 the project's detector for the level defect the splice-flux reframe un-masked, and `test_node_init.py` carries
 **four** more added 2026-08-06 for two PROVEN defects whose fixes are panel-negative alone: `struct_lock` is
 `~solvable & NODE` rather than `g1_locked & NODE` (19,709 slots against 1,312), and `Var(f_g)` is capped at
 `f_g(1−f_g)`, which is 0 at the `f_g = 1` default of an evidence-free slot. ⛔ All five must go GREEN — not
-be widened — when `ROADMAP.md` §1 step 1's paired arm lands. `TRAPS.md` A11b, D4k.
+be widened — when `ROADMAP.md` §1 step 1's paired arm lands.
 
 Always set `OMP_NUM_THREADS=1` when benchmarking or comparing runs.
 
@@ -225,6 +223,7 @@ either promote a row or delete the file, but do not assume the table is complete
 | `design/quant_accuracy.py` | ⭐⭐⭐ **THE TOOL END TO END, AND THE PRIOR-INJECTION CEILING ABOVE IT** — `--arm base` is the transcript-level accuracy table, `--arm oracle` re-quantifies with the perfect prior injected, and the three `oracle_<field>` arms say WHICH of the prior's three numbers carries the value. ⛔ Scores **count against count** against the condition's OWN `truth_abundances.tsv` (the realised observed fragment count); the suite-level table is the *pre-capture molar* abundance and is a different quantity. ⛔ Pins `EMConfig.seed` — the shipped default is `None` (`TRAPS: the-deliverable-is-not-reproducible-by-default`) — and `base_reseed` prints the noise floor beside the effect |
 | `design/mass_prior_ab.py` | ⭐⭐⭐ **THE PRIOR AS A CONSERVED FRAGMENT COUNT — plan 5.5 against the oracle arms.** `edge_unspliced_mass` sums to ONE per fragment, so the assembler can stop manufacturing a count from a density. Subsamples a real condition by qname hash (so the whole and all three origin partitions stay consistent), then re-assembles `O` and scores it against `F`. ⭐ **Verdict: the capture-ON over-call goes `O/F` 1.149 → 1.019 on three gDNA levels; capture-OFF `Σ|Δ|` falls 61 %.** ⛔ Prints the SUBSTRATE check first — the subsample must reproduce the defect before its disappearance means anything — plus a `share≡1` ablation and the plan-8-Q4 ceiling. ⚠ It MEASURES the shipped bank and never re-derives it; the rule's own gates are `tests/native/test_conserved_mass.py` |
 | `design/flgap_study_cache.py` | ⭐⭐⭐ **SCAN ONCE, INTERROGATE MANY TIMES** — the flgap pair's four conditions cached whole: scored `multi_loci`, calibration, the DRAINED payloads with their lifted origin partitions, the oracle masses and per-component shares, the raw per-region start counts, and ⭐ the per-unit `(true origin, is_spliced)` pair the `Fo` arm joins on, for both scoring stages. Building is ~5 min/condition; loading is ~1 s. ⭐ **`priors.py` is deliberately OUTSIDE the cache key**, so testing an `assemble_priors` change is a one-second loop — ⛔ which is only sound because **nothing `priors.py` produces is stored**: every arm (P, O, S, F) is derived on load. It used to store `p_arm` and `f_gdna` and served them stale beside a fresh O (`TRAPS: a-hash-that-misses-its-artifact`, second form). ⛔ Keyed on the scan manifest + a content hash of every producing source file, the builder itself included; a mismatch REBUILDS rather than warning. ⚠ Stores `gdna_spliced_leak` and `lift_ambiguous` — **1** on flgap_short vs **1,491 / 8,641** on flgap_long (⭐ BOTH spliced banks summed; the "1,010 / 5,827" once recorded here was `edge_spliced_count` alone, because `_validate` raises on the FIRST nonzero bank and its message was quoted as a total), which is why flgap_short is the admissible panel for a drained measurement and flgap_long a cross-check |
+| `design/rescan_panels.py` | ⭐⭐⭐ **RE-SCANNING IS THE FIRST IRREVERSIBLE STEP, SO IT CARRIES ITS OWN FALSIFICATION.** After a deposit-rule or schema change every cache is refused and must be rebuilt — and the old ones are then gone. This rebuilds them and GATES each condition on byte-identity: every bank the change was not supposed to touch must come back identical, and the symmetric difference must be the SAME delta on every condition. ⛔ Reads the stale `.npz` BEFORE the write, because `write_scan_cache` overwrites in place and would otherwise destroy its own baseline; a condition that fails is NOT written. ⛔ No expected delta is hard-coded — it is derived from the first condition and required of the rest, so a side effect appearing only under capture or only at `g98` is caught. ⚠ Counts an ALL-ZERO baseline as VACUOUS rather than a pass (`g00`'s gdna, every `nrna_none`'s nrna). `--self-test` perturbs the comparator with no I/O; `--jobs N` shards conditions |
 | **⭐⭐⭐ where to develop** | |
 | `design/module_census.py` | ⭐⭐⭐ **WHERE DOES A CHANGE GO?** — the calibration package's real shape, re-derived from the AST: the layering with every upward import, the graph with each module's importers inside and outside, ⭐ **docstrings that name a sibling with no import edge** (14 measured, 6 genuinely stale), and dead public surface. ⛔ It REPORTS, it does not judge — an entry point looks dead, and a gated reference implementation looks duplicated |
 | **⭐⭐⭐ the backbone** | |

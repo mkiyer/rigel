@@ -73,7 +73,6 @@ from rigel.types import Strand
 
 __all__ = [
     "UNSPLICED_ONLY",
-    "INV_LENGTH_SCALE",
     "N_STRAND_COLUMNS",
     "STRAND_COLUMNS",
     "Accumulator",
@@ -84,8 +83,6 @@ __all__ = [
     "GapHypothesis",
     "Partition",
     "Tally",
-    "inv_length_quantum",
-    "mass_quantum",
 ]
 
 #: ⭐ THE STRAND CONVENTION, and it is the same one everywhere in this file.
@@ -113,44 +110,29 @@ STRAND_COLUMNS: dict[int, int] = {Strand.POS: 0, Strand.NEG: 1}
 N_STRAND_COLUMNS = len(STRAND_COLUMNS)
 
 
-#: Densities accumulate as ``round(INV_LENGTH_SCALE / placements)`` in uint64. Integer addition is
-#: associative, so a per-worker merge is bit-identical at any thread count — which float accumulation is
-#: not, and that nondeterminism propagates to a ~2.6 % difference in the calibration output. The scale is
-#: 2^32 because it keeps the quantisation error (≤ 6.9e-8 relative over ``L`` in [40, 1000]) below
-#: float32's own epsilon while leaving ample headroom under the uint64 ceiling at realistic depth.
-INV_LENGTH_SCALE = 1 << 32
-
-
-def inv_length_quantum(placements: int) -> int:
-    """``round(INV_LENGTH_SCALE / placements)``, rounding halves AWAY FROM ZERO.
-
-    ⚠ The rounding mode is part of the contract: byte-identity across platforms and languages is
-    undefined without it, and Python's built-in ``round`` is banker's rounding, which differs at ties.
-    """
-    if placements <= 0:
-        raise ValueError(f"placements must be positive, got {placements}")
-    return (2 * INV_LENGTH_SCALE + placements) // (2 * placements)
-
-
-def mass_quantum(slice_len: int, length: int, n_cross: int) -> int:
-    """``round(INV_LENGTH_SCALE * slice_len / (length * n_cross))``, halves AWAY FROM ZERO.
-
-    The CONSERVED MASS's quantum. Same fixed point and same rounding mode as
-    :func:`inv_length_quantum`, and for the same reason: integer addition is associative, so a
-    per-worker merge is bit-identical at any thread count, which float accumulation is not.
-
-    ⚠ **The representation is not exact and the identity it carries is.** ``share`` is a rational with
-    denominator ``length * n_cross``; rounding it onto the 2^-32 grid costs at most half a quantum per
-    deposit, so a fragment's deposits sum to ``1 +/- (deposits / 2) * 2^-32``. Measured over five toy
-    rungs: worst per-fragment deviation **4.657e-10 fragments**, worst bank-total drift **2.328e-10**.
-
-    ⚠ No overflow: ``2 * INV_LENGTH_SCALE * slice_len`` is ``2^33 * slice_len`` and ``slice_len`` never
-    exceeds the fragment length, so at any realistic ``max_fragment_length`` it stays far under uint64.
-    """
-    if length <= 0 or n_cross <= 0:
-        raise ValueError(f"length and n_cross must be positive, got {length}, {n_cross}")
-    denominator = length * n_cross
-    return (2 * INV_LENGTH_SCALE * slice_len + denominator) // (2 * denominator)
+#: ⭐⭐⭐ ONE NUMERIC CONVENTION: **a COUNT is an integer, a FRACTION is float64.** There is no fixed
+#: point anywhere in the tally, and no scale constant to decode.
+#:
+#: ⛔ **The predecessor accumulated every fraction as ``round(2^32 / placements)`` in uint64**, on the
+#: argument that integer addition is associative and therefore bit-identical across worker counts.
+#: That argument was sound and the price it quoted was not: the ~2.6 % it cited was measured on a
+#: **float32** accumulator (~3.7e-7 per cell), and float64 is ~1e-16 — 3.4e9x finer, reaching the
+#: deliverable at ~1e-11, five orders below ``EMConfig.convergence_delta``.
+#:
+#: ⭐⭐ **And the fixed point was LESS accurate, measured against exact rational arithmetic.** On the
+#: reciprocal-opportunity theorem (every admissible placement deposits ``1/A``, so each length
+#: contributes exactly one density unit) the two representations miss the integer answer by::
+#:
+#:      node_len 151    fixed 7.0e-10    float64 5.8e-15      120,000x better
+#:      node_len 400    fixed 1.7e-08    float64 1.0e-13      170,000x better
+#:      node_len 1000   fixed 2.0e-07    float64 2.8e-13      714,000x better
+#:
+#: ⚠ The exactness the old gates asserted was a property of their FIXTURES, not of the representation:
+#: ``1/2 + 1/3 + 1/6`` lands back on ``2^32`` because two rounding errors cancel, while ``1/3 + 1/3 +
+#: 1/3`` is one quantum short — and float64 is exact on both.
+#:
+#: ⛔ **What is genuinely given up is bit-identity across worker counts**, since float addition is not
+#: associative. Owner ruling 2026-08-10: one convention, and this is it.
 
 
 class DepositOutcome(enum.Enum):
@@ -574,6 +556,30 @@ class Tally:
     #: uint64[n_sj] — ⭐ LIVE: ``second_pass.py`` scores a held fragment's junction evidence with it.
     #: ⚠ ``sj_length_sum`` is gone for the same reason the spliced edge moments are.
     sj_inv_length_sum: np.ndarray
+    #: uint64[n_sj] — ⭐⭐⭐ **THE CONSERVED MASS'S THIRD AXIS, AND IT IS WHAT MAKES A LIBRARY FRAGMENT
+    #: COUNT COMPUTABLE AT ALL.** A spliced fragment's block that contains no interior line deposits
+    #: nothing on either edge bank, and it is not ``contained`` either — its path spans a junction, so
+    #: it lies in no single node. Before this bank such a fragment existed on the incidence axis
+    #: (``sj_count``) and on no conserved one, so no sum over conserved banks could count it.
+    #:
+    #: ⭐ **Measured on the origin-split oracle, ladder g50 capture_off: 1,222,375 of 4,830,713 RNA
+    #: fragments — 25.3 % — are in that population**, against 0 of 4,997,761 gDNA fragments, because
+    #: gDNA cannot splice. The gDNA side's conserved count was therefore already exact (1.000x deposited)
+    #: while RNA's read 0.747x.
+    #:
+    #: ⛔ **THE RULE ADDS A BOUNDARY CLASS; IT DOES NOT RE-APPORTION AN EXISTING ONE.** A block that
+    #: crosses at least one line is unchanged — its bases go to lines exactly as before — so
+    #: ``edge_spliced_mass`` and ``edge_unspliced_mass`` are byte-identical to what they were, and the
+    #: commensurability ``edge_spliced_mass`` documents ("the share of this fragment's bases adjacent to
+    #: this line", directly comparable with the unspliced mass at the same line) survives. Only the
+    #: blocks that previously disposed of nothing are affected, and they now give their whole
+    #: ``block_len / L`` to the annotated junctions bounding them, shared equally.
+    #:
+    #: ⚠ A boundary counts only where the intron RESOLVED to an annotated junction. A block bounded
+    #: solely by unannotated introns still has nowhere conserved to send its bases — the same residual
+    #: the unspliced rule has always had — so the identity is exact over deposited, ANNOTATED fragments,
+    #: which is one qualifier weaker than before rather than none.
+    sj_mass: np.ndarray
     pool_lengths: np.ndarray  # int64[5, max_fragment_length + 1] — binned at L, once per fragment
     #: uint32[max_fragment_length + 1] — ⭐ **TRAPS: a-purity-filter-is-a-length-filter: EVERY deposited fragment, binned at its own L, with no
     # purity condition.** The five pure pools above are deliberately CONDITIONED
@@ -604,27 +610,31 @@ class Tally:
         def counts(rows):
             return np.zeros((rows, N_STRAND_COLUMNS), np.uint32)
 
-        def inv_length(rows):
+        def fraction(rows):
             # ⭐ ONE column. The length moments are strand-AGNOSTIC: which strand a read aligned to says
             # nothing about whether the molecule was gDNA or RNA, and every consumer summed the two.
+            return np.zeros(rows, np.float64)
+
+        def base_count(rows):
+            # ⚠ A SUM OF LENGTHS IN BASES — an integer, and not a fraction. It keeps an integer type
+            # under the one convention, and it is never divided (`substrate.total_length_sum`).
             return np.zeros(rows, np.uint64)
 
-        def mass(rows):
-            return np.zeros(rows, np.uint64)  # ⭐ ONE column — see Tally.edge_unspliced_mass
 
         return cls(
             node_contained_count=counts(n_nodes),
-            node_contained_inv_opportunity_sum=inv_length(n_nodes),
-            node_contained_length_sum=inv_length(n_nodes),
+            node_contained_inv_opportunity_sum=fraction(n_nodes),
+            node_contained_length_sum=base_count(n_nodes),
             node_start_count=np.zeros(n_nodes, np.uint32),
             edge_unspliced_count=counts(n_edges),
-            edge_unspliced_inv_length_sum=inv_length(n_edges),
-            edge_unspliced_length_sum=inv_length(n_edges),
-            edge_unspliced_mass=mass(n_edges),
+            edge_unspliced_inv_length_sum=fraction(n_edges),
+            edge_unspliced_length_sum=base_count(n_edges),
+            edge_unspliced_mass=fraction(n_edges),
             edge_spliced_count=counts(n_edges),
-            edge_spliced_mass=mass(n_edges),
+            edge_spliced_mass=fraction(n_edges),
             sj_count=counts(n_sj),
-            sj_inv_length_sum=inv_length(n_sj),
+            sj_inv_length_sum=fraction(n_sj),
+            sj_mass=fraction(n_sj),
             pool_lengths=np.zeros((len(FragmentPool), max_length + 1), np.int64),
             deposited_lengths=np.zeros(max_length + 1, np.uint32),
             qc={outcome.value: 0 for outcome in DepositOutcome}
@@ -866,19 +876,20 @@ class Accumulator:
         # AMBIGUOUS means the mates disagreed about the same molecule. That is contradictory EVIDENCE, not
         # missing evidence, and it is counted on its own denominator — folding it into
         # `unannotated_introns` would poison the one metric whose job is measuring annotation coverage.
+        # ⭐ Resolved PER INTRON POSITION, with -1 where the annotation has no such junction, because
+        # the conserved mass needs to know WHICH of a block's two ends is a junction boundary. A
+        # filtered list cannot answer that — dropping the unannotated entries destroys the alignment
+        # between intron `i` and the gap between blocks `i` and `i+1`.
         if sj_strand == Strand.AMBIGUOUS:
-            sj_ids: list[int] = []
+            sj_id_at_gap: list[int] = [-1] * len(cut_introns)
             self.tally.qc["contradictory_sj_strand"] += 1
         else:
-            sj_ids = [
-                jid
-                for jid in (
-                    self._sj_edge_id(ref, intron_start, intron_end, sj_strand)
-                    for intron_start, intron_end in cut_introns
-                )
-                if jid >= 0
+            sj_id_at_gap = [
+                self._sj_edge_id(ref, intron_start, intron_end, sj_strand)
+                for intron_start, intron_end in cut_introns
             ]
-            self.tally.qc["unannotated_introns"] += len(cut_introns) - len(sj_ids)
+            self.tally.qc["unannotated_introns"] += sum(1 for jid in sj_id_at_gap if jid < 0)
+        sj_ids = [jid for jid in sj_id_at_gap if jid >= 0]
         spliced = bool(sj_ids)
 
         # ⚠ The path's own first and last COVERED base, not the fragment's extent. A leading or trailing
@@ -907,41 +918,69 @@ class Accumulator:
         # and the length banks are built on exactly its moments.
         edge_count = t.edge_spliced_count if spliced else t.edge_unspliced_count
         edge_mass = t.edge_spliced_mass if spliced else t.edge_unspliced_mass
-        quantum_edge = inv_length_quantum(length - 1) if length >= 2 else 0
+        # ⚠ 0 at L == 1: a length-1 molecule cannot cross a 0-bp line, and 1/(L-1) would divide by zero.
+        inv_edge = 1.0 / (length - 1) if length >= 2 else 0.0
         n_crossed, sole_line = 0, -1
-        for seg_start, seg_end in segments:
+        for block, (seg_start, seg_end) in enumerate(segments):
             first = int(np.searchsorted(cuts, seg_start, side="right"))
             last = int(np.searchsorted(cuts, seg_end, side="left"))
             for line in range(first, last):
                 edge_count[edge_base + line - 1, column] += 1
                 if not spliced:
-                    t.edge_unspliced_inv_length_sum[edge_base + line - 1] += quantum_edge
+                    t.edge_unspliced_inv_length_sum[edge_base + line - 1] += inv_edge
                     t.edge_unspliced_length_sum[edge_base + line - 1] += length
-            # ── ⭐⭐ THE CONSERVED MASS, per SLICE rather than per line ────────────────────────────
-            # The crossed cuts split this segment into `last - first + 1` slices. A slice is bounded by
-            # one crossed line at each end, except the first and last, which have the segment's own end
-            # on one side. Its `slice_len / length` is shared equally between the lines that DO bound
-            # it, so every slice with a bounding line disposes of exactly its own bases::
+            # ── ⭐⭐⭐ THE CONSERVED MASS, per SLICE, over ONE BOUNDARY SET ─────────────────────────
+            # The crossed cuts split this block into `last - first + 1` slices. Each slice's
+            # `slice_len / length` is shared EQUALLY between the objects that bound it, so every bounded
+            # slice disposes of exactly its own bases::
             #
             #     Sum over the fragment  =  Sum slice_len / length  =  1
             #
+            # ⭐⭐ **A JUNCTION IS A BOUNDARY EXACTLY LIKE A LINE**, and that is the whole rule. A block's
+            # interior boundaries are the lines it crosses; its two ENDS are boundaries too whenever the
+            # intron there resolved to an annotated junction. So a fragment's 1.0 is shared across every
+            # object it crosses — lines and junctions together — rather than lines first and junctions
+            # only with what is left over.
+            #
+            # ⛔ The predecessor gave a line-crossing block's bases entirely to lines, so a junction whose
+            # two flanking blocks both crossed a line received NOTHING while `sj_count` credited it. That
+            # still conserved — the total was 1.0 — but it is not a sharing, and it left `q_sj = 0` on
+            # 35 of 8,436 crossed junctions on ladder g50 capture_off.
+            #
             # ⭐ Coverage-weighted, NOT `1/K`. Both conserve; only this one says WHERE the fragment sat,
             # and only this one is expressible per base — which is how the two are told apart at all.
-            # ⚠ A segment crossing no line contributes nothing: for a single-segment path that is the
-            # CONTAINED case, whose whole fragment is already the node's `contained_count`; for a
-            # multi-segment one it is an unannotated intron's block, and its mass has nowhere conserved
-            # to go. So the identity is exact over deposited, unspliced, annotated fragments.
+            # ⚠ An UNSPLICED path has no junction boundaries, so this reduces to the previous rule
+            # exactly and `edge_unspliced_mass` is byte-identical. A single block with no line and no
+            # annotated junction is bounded by nothing and deposits nothing: for a one-block path that is
+            # the CONTAINED case, already whole in `node_contained_count`; for a multi-block one it is an
+            # unannotated intron's block, whose bases have nowhere conserved to go.
+            left_junction = sj_id_at_gap[block - 1] if block > 0 else -1
+            right_junction = sj_id_at_gap[block] if block < len(sj_id_at_gap) else -1
             n_slices = last - first + 1
-            for i in range(n_slices if last > first else 0):
+            for i in range(n_slices):
                 lo = seg_start if i == 0 else int(cuts[first + i - 1])
                 hi = seg_end if i == n_slices - 1 else int(cuts[first + i])
                 left_line = first + i - 1 if i > 0 else -1
                 right_line = first + i if i < n_slices - 1 else -1
-                n_cross = int(left_line >= 0) + int(right_line >= 0)
-                quantum = mass_quantum(hi - lo, length, n_cross)
+                # The block's own ends are junction boundaries; its interior ends are lines. A slice
+                # therefore has at most one boundary of each kind on each side, never both.
+                left_jid = left_junction if left_line < 0 else -1
+                right_jid = right_junction if right_line < 0 else -1
+                n_bounds = (
+                    int(left_line >= 0)
+                    + int(right_line >= 0)
+                    + int(left_jid >= 0)
+                    + int(right_jid >= 0)
+                )
+                if n_bounds == 0:
+                    continue
+                share = (hi - lo) / (length * n_bounds)
                 for line in (left_line, right_line):
                     if line >= 0:
-                        edge_mass[edge_base + line - 1] += quantum
+                        edge_mass[edge_base + line - 1] += share
+                for jid in (left_jid, right_jid):
+                    if jid >= 0:
+                        t.sj_mass[jid] += share
             if last > first:
                 sole_line = first if (n_crossed == 0 and last - first == 1) else -1
                 n_crossed += last - first
@@ -950,7 +989,7 @@ class Accumulator:
             t.sj_count[jid, column] += 1
             # ⚠ `inv_length_sum` only. `sj_length_sum` was removed: nothing read it, and `pool_lengths`
             # already carries the spliced population's length distribution (RNA_SPLICED) unconditioned.
-            t.sj_inv_length_sum[jid] += quantum_edge
+            t.sj_inv_length_sum[jid] += inv_edge
 
         # ── contained: the WHOLE path lies inside ONE node ────────────────────────────────────────
         # ⚠ Not merely "crossed no line". An unannotated intron can swallow every line between two
@@ -973,7 +1012,7 @@ class Accumulator:
             # ⚠ `A >= 1` is structural, not defensive: the fragment IS contained, so `w <= ell`.
             node_len = int(cuts[first_node + 1]) - int(cuts[first_node])
             t.node_contained_count[contained_node, column] += 1
-            t.node_contained_inv_opportunity_sum[contained_node] += inv_length_quantum(
+            t.node_contained_inv_opportunity_sum[contained_node] += 1.0 / (
                 node_len - length + 1
             )
             t.node_contained_length_sum[contained_node] += length

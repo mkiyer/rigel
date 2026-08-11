@@ -10,14 +10,16 @@
 
 ## 0. ⭐⭐⭐ WHERE THINGS STAND
 
-**Suite: 0 failed / 3,224 passed / 2 skipped / 9 xfailed.** `ruff check src/ tests/ scripts/` clean.
-`src/rigel/` builds; the C++ was rebuilt after every native edit.
+**Suite at the time: 0 failed / 3,224 passed / 2 skipped / 9 xfailed.**
 
-⛔⛔ **EVERY SCAN CACHE IS INVALID AND NOTHING HAS BEEN RE-SCANNED.** `payload_schema_digest` moved from
-`19ee4ba867ff0441` to `cc12ee0a113d8c76` when `node_contained_inv_length_sum` was renamed. **No design
-instrument under `scripts/design/` will run until the panels are rebuilt** — that is phase 5 of the plan
-in `counts_densities_paradigm.md` §9 and it is the first irreversible step. Everything before it is a
-code revert.
+⚠⚠ **THIS FILE IS THE RECORD OF 2026-08-10 AND ITS "WHERE THINGS STAND" IS SUPERSEDED.** A further session
+on 2026-08-11 landed `sj_mass`, the junction-boundary rule, the deposit-behaviour digest, ONE NUMERIC
+CONVENTION (the fixed point is gone), and the full re-scan. ⭐ For current state read `ROADMAP.md` §0; for
+what to do next read `ROADMAP.md` §2. Suite is now **3,231 passed / 2 skipped / 9 xfailed**.
+
+⛔ In particular the paragraph that stood here — *"every scan cache is invalid and nothing has been
+re-scanned"* — is **false now**: all 184 payloads across ladder, flgap_short, flgap_long and pilot were
+rebuilt and gated on byte-identity.
 
 | flag | state |
 |---|---|
@@ -55,16 +57,18 @@ effective length. The fragment-length difference is carried by `E_g` vs `E_r` an
 FRAGMENT (`mass`, conserved), DENSITY. ⭐ The symmetry is complementary — at a NODE incidence = fragment
 is free and density needs a model; at an EDGE the reverse.
 
-### 2.1 ⛔ TWO DEFECTS FOUND, NEITHER FIXED
+### 2.1 ⛔ TWO DEFECTS FOUND — defect 1 CLOSED 2026-08-10, defect 2 still open
 
-1. **`pipeline.py:993-998` sums INCIDENCES and calls them fragments.** Applying `q = mass/count` to the
-   edge terms moves the reported library `f_gdna` **0.3781 → 0.4214** against a truth of 0.5085 — **+4.3 pp
-   toward truth**, on all four conditions tested. ⭐ This is the highest-value cheap fix outstanding.
-2. **`mass_gdna_edge` / `mass_rna_edge` are incidences under a `mass_` name** while `mass_gdna_node` is a
-   real fragment count. Defect 1 is the direct consequence of defect 2.
+1. ✅ **CLOSED, but NOT by the fix described here.** ⛔ Applying `q` alone was measured against
+   per-fragment truth and it FLIPS the error's sign rather than removing it (−0.1234 → **+0.0722** at
+   ladder g50 capture_off), because 25.3 % of RNA fragments deposit no conserved mass for `q` to convert.
+   `sj_mass` had to land first. See `counts_densities_paradigm.md` §5 and §6.
+2. ⏸ **STILL OPEN** — `mass_*` names an incidence in THREE of five fields (this entry said two; the
+   junction one was missed). Deliberately not bundled with the fix above, per `one-thing-varied`.
 
-⚠ And **there is no `sj_mass`**, so the junction axis cannot be converted to fragments at all — a fully
-conserved library fragment count is not computable today.
+⚠ The "+4.3 pp toward truth on all four conditions tested" above was measured on the SHIPPED calibration
+and is not wrong — but it is a partial correction whose remaining gap is the missing junction mass, which
+is why the sign flips once the arithmetic is completed on the oracle arm.
 
 ### 2.2 MEASURED AND CLOSED
 
@@ -167,27 +171,22 @@ the arithmetic means it is not needed.
 
 ---
 
-## 6. ⭐⭐ WHAT TO DO NEXT, RANKED
+## 6. ⛔ SUPERSEDED — the ranked list now lives in `ROADMAP.md` §2
 
-1. ⭐⭐⭐ **`pipeline.py`'s `q` conversion** (§2.1 defect 1) — arithmetic, +4.3 pp of the deliverable, and
-   the spliced half needs `q_spliced = edge_spliced_mass / edge_spliced_count`. ⛔ Needs a re-scanned
-   panel to verify, so it follows phase 5.
-2. **Phase 5 — re-scan the panels.** Nothing measurable happens until this is done. ⚠ Owner has not yet
-   chosen full (36 ladder + 8 flgap) vs the working subset (g00/g50/g98 × capture, plus flgap).
-3. **The deposit-behaviour digest** (§4.2) — now unblocked.
-4. **`mass_*_edge` → `count_*_edge`** rename (§2.1 defect 2).
-5. **Re-price message propagation** — the only remaining lever for unstranded × capture-ON, one config
-   flag, already measured to help exactly that stratum. `ROADMAP.md` §0 says re-price, never inherit.
-6. **Moment tests** — `contained_moments`/`crossing_moments`/`build_slot_moments` moved to
-   `effective_length.py` **without their tests**, which went with the deleted channel. Untested geometry
-   in a live layer-2 module.
-7. `sj_mass` decision; the two dead banks (`node_contained_length_sum`, `edge_unspliced_length_sum`);
-   `second_pass.py:443-445`'s comment; `module_census.py` re-run.
+Everything this section listed is either DONE or has MOVED to its permanent home (2026-08-11):
 
-⛔ **`edge_spliced_mass` is NOT dead — keep it.** It is the spliced half of the fragment conversion and
-the reason it looks unused is that the conversion is not being done (item 1).
+| was | now |
+|---|---|
+| 1 · `pipeline.py`'s `q` conversion | ✅ done, but NOT as described — applying `q` alone flips the error's sign. `sj_mass` had to land first |
+| 2 · phase 5 re-scan | ✅ done — 184 payloads, all four panels, byte-identity gated |
+| 3 · the deposit-behaviour digest | ✅ built — `scan_cache.deposit_digest`, folded into the cache key |
+| 4 · `mass_*_edge` rename | ⏸ `ROADMAP.md` §2 item 3. ⚠ THREE fields, not two |
+| 5 · re-price message propagation | ⏸ `ROADMAP.md` §2 item 2 |
+| 6 · moment tests | ⏸ `ROADMAP.md` §2 item 4 |
+| 7 · `sj_mass` decision | ✅ built, then extended so a junction shares at BOTH its positions |
 
----
+⛔ **Nothing further should be added here.** This file is the record of one session; the forward list has
+exactly one home and it is `ROADMAP.md` §2.
 
 ## 7. THE DOCS THIS SESSION LEFT
 

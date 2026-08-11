@@ -84,7 +84,7 @@ def _enumerate(node_len, w):
     from pathlib import Path as _P
 
     sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
-    from native._accumulator_reference import INV_LENGTH_SCALE, Accumulator, Partition
+    from native._accumulator_reference import Accumulator, Partition
 
     cuts = np.concatenate([[0.0], np.cumsum(np.asarray(node_len, dtype=np.float64))]).astype(int)
     partition = Partition.from_cuts([cuts.tolist()], node_types=[[0] * (len(cuts) - 1)])
@@ -98,7 +98,7 @@ def _enumerate(node_len, w):
         n,
         np.asarray(t.node_contained_count, np.int64).sum(axis=1).astype(np.float64),
         np.asarray(t.edge_unspliced_count, np.int64).sum(axis=1).astype(np.float64),
-        np.asarray(t.edge_unspliced_mass, np.uint64).astype(np.float64) / INV_LENGTH_SCALE,
+        np.asarray(t.edge_unspliced_mass, np.float64),
     )
 
 
@@ -122,7 +122,6 @@ def _mass_per_crossing(node_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
 
     sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
     from native._accumulator_reference import (
-        INV_LENGTH_SCALE,
         Accumulator,
         Partition,
     )
@@ -140,7 +139,7 @@ def _mass_per_crossing(node_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
         for start in range(0, int(cuts[-1]) - w + 1):
             acc.deposit(0, start, start + w)
         t = acc.tally
-        mass += rho * np.asarray(t.edge_unspliced_mass, np.float64) / INV_LENGTH_SCALE
+        mass += rho * np.asarray(t.edge_unspliced_mass, np.float64)
         count += rho * np.asarray(t.edge_unspliced_count, np.int64).sum(axis=1).astype(np.float64)
     out = np.ones(n_edges, dtype=np.float64)
     np.divide(mass, count, out=out, where=count > 0)
@@ -185,6 +184,10 @@ def _uniform_library(node_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResult:
         mass_rna_spliced_edge=np.zeros(ne, dtype=np.float64),
         edge_mass_per_crossing=_mass_per_crossing(node_len, rho_g, rho_r, pmf_g, pmf_r),
         mass_rna_junction=np.zeros(0, dtype=np.float64),
+        edge_spliced_mass_per_crossing=np.ones_like(
+            _mass_per_crossing(node_len, rho_g, rho_r, pmf_g, pmf_r)
+        ),
+        junction_mass_per_crossing=np.ones(0, dtype=np.float64),
         gdna_node_eff_len=a_g_node,
         gdna_edge_eff_len=a_g_edge,
         rna_node_eff_len=a_r_node,

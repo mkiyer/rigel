@@ -568,8 +568,14 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
 
     // ── which annotated junctions does this path use? this also picks the edge bank ────────────────
     // ⚠ Resolved BEFORE the crossing loop, because `spliced` chooses which bank the crossings land in.
-    auto& sj_ids = scratch.sj_ids;
+    // ⭐ Resolved PER INTRON POSITION into `sj_id_at_gap`, with -1 where the annotation has no such
+    // junction, because the conserved mass needs to know WHICH of a block's two ends is a junction
+    // boundary. A filtered list cannot answer that -- dropping the unannotated entries destroys the
+    // alignment between intron `i` and the gap between blocks `i` and `i+1`.
+    auto& sj_ids      = scratch.sj_ids;
+    auto& sj_id_at_gap = scratch.sj_id_at_gap;
     sj_ids.clear();
+    sj_id_at_gap.assign(scratch.introns.size(), -1);
     if (sj_strand == STRAND_AMBIGUOUS) {
         // The motif tag is read once per RECORD, so AMBIGUOUS means the mates DISAGREED about one
         // molecule: contradictory evidence, not missing evidence. Trust no splice, and count it on its own
@@ -577,9 +583,13 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         // measuring annotation coverage.
         ++counters_.contradictory_sj_strand;
     } else {
-        for (const auto& [intron_start, intron_end] : scratch.introns) {
+        for (std::size_t gap = 0; gap < scratch.introns.size(); ++gap) {
+            const auto& [intron_start, intron_end] = scratch.introns[gap];
             const std::int64_t id = sj_edge_id(intron_start, intron_end, sj_strand);
-            if (id >= 0) sj_ids.push_back(static_cast<std::int32_t>(id));
+            if (id >= 0) {
+                sj_id_at_gap[gap] = static_cast<std::int32_t>(id);
+                sj_ids.push_back(static_cast<std::int32_t>(id));
+            }
         }
         counters_.unannotated_introns +=
             static_cast<std::int64_t>(scratch.introns.size()) - static_cast<std::int64_t>(sj_ids.size());
@@ -606,15 +616,16 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     // its lines -- not merely "both lines crossed", which would count a node the fragment JUMPS OVER,
     // whose two lines are touched by the two flanking segments from opposite sides.
     //
-    // ⚠ quantum_edge is 0 at L == 1: a length-1 molecule cannot cross a 0-bp line, and `inv_length_quantum`
-    // would divide by zero. Its residue is the schema's only count/density co-support violation -- an
-    // L == 1 path on an annotated junction books a count against density 0, which is correct.
-    const std::uint64_t quantum_edge = length >= 2 ? inv_length_quantum(length - 1) : 0;
+    // ⚠ 0 at L == 1: a length-1 molecule cannot cross a 0-bp line, and 1/(L-1) would divide by zero. Its
+    // residue is the schema's only count/density co-support violation -- an L == 1 path on an annotated
+    // junction books a count against density 0, which is correct.
+    const double inv_edge = length >= 2 ? 1.0 / static_cast<double>(length - 1) : 0.0;
     const std::size_t   col          = static_cast<std::size_t>(column);
 
     std::int64_t n_crossed = 0;
     std::int64_t sole_line = -1;
-    for (const auto& [seg_start, seg_end] : scratch.segments) {
+    for (std::size_t block = 0; block < scratch.segments.size(); ++block) {
+        const auto& [seg_start, seg_end] = scratch.segments[block];
         const std::int64_t first =
             std::upper_bound(cuts_.begin(), cuts_.end(), seg_start) - cuts_.begin();
         const std::int64_t last =
@@ -629,36 +640,61 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
                 edge.spliced_count[col] += 1u;
             } else {
                 edge.unspliced_count[col] += 1u;
-                edge.unspliced_inv_length_sum += quantum_edge;
+                edge.unspliced_inv_length_sum += inv_edge;
                 edge.unspliced_length_sum += static_cast<std::uint64_t>(length);
             }
         }
-        // ── ⭐⭐ THE CONSERVED MASS, per SLICE rather than per line ────────────────────────────────
-        // The crossed cuts split this segment into `last - first + 1` slices. A slice is bounded by one
-        // crossed line at each end, except the first and last, which have the segment's own end on one
-        // side. Its `slice_len / length` is shared equally between the lines that DO bound it, so every
+        // ── ⭐⭐⭐ THE CONSERVED MASS, per SLICE, over ONE BOUNDARY SET ────────────────────────────
+        // The crossed cuts split this block into `last - first + 1` slices. Each slice's
+        // `slice_len / length` is shared EQUALLY between the objects that bound it, so every bounded
         // slice disposes of exactly its own bases:  Sum over the fragment = Sum slice_len / length = 1.
         //
+        // ⭐⭐ A JUNCTION IS A BOUNDARY EXACTLY LIKE A LINE, and that is the whole rule. A block's
+        // interior boundaries are the lines it crosses; its two ENDS are boundaries too whenever the
+        // intron there resolved to an annotated junction. So a fragment's 1.0 is shared across every
+        // object it crosses -- lines and junctions together -- rather than lines first and junctions
+        // only with whatever is left over.
+        //
+        // ⛔ The predecessor gave a line-crossing block's bases entirely to lines, so a junction whose
+        // two flanking blocks both crossed a line received NOTHING while `sj_count` credited it. That
+        // still conserved -- the total was 1.0 -- but it is not a sharing.
+        //
         // ⭐ Coverage-weighted, NOT `1/K`. Both conserve; only this one says WHERE the fragment sat, and
-        // only this one is expressible per base — which is how the two are told apart at all.
-        // ⚠ A segment crossing no line contributes nothing, so the loop below simply does not run: for a
-        // single-segment path that is the CONTAINED case, whose whole fragment is already the node's
-        // `contained_count`; for a multi-segment one it is an unannotated intron's block, whose mass has
-        // nowhere conserved to go. The identity is exact over deposited, unspliced, annotated fragments.
-        if (last > first) {
+        // only this one is expressible per base -- which is how the two are told apart at all.
+        // ⚠ An UNSPLICED path has no junction boundaries, so this reduces to the previous rule exactly
+        // and `unspliced_mass` is byte-identical. A single block with no line and no annotated junction
+        // is bounded by nothing and deposits nothing: for a one-block path that is the CONTAINED case,
+        // already whole in `contained_count`; for a multi-block one it is an unannotated intron's block.
+        {
+            const std::int32_t left_junction =
+                block > 0 ? sj_id_at_gap[block - 1] : -1;
+            const std::int32_t right_junction =
+                block < sj_id_at_gap.size() ? sj_id_at_gap[block] : -1;
             const std::int64_t n_slices = last - first + 1;
             for (std::int64_t i = 0; i < n_slices; ++i) {
                 const std::int64_t lo = (i == 0) ? seg_start : cuts_[static_cast<std::size_t>(first + i - 1)];
                 const std::int64_t hi = (i == n_slices - 1) ? seg_end : cuts_[static_cast<std::size_t>(first + i)];
                 const std::int64_t left_line  = (i > 0) ? first + i - 1 : -1;
                 const std::int64_t right_line = (i < n_slices - 1) ? first + i : -1;
-                const std::int64_t n_cross    = (left_line >= 0 ? 1 : 0) + (right_line >= 0 ? 1 : 0);
-                const std::uint64_t quantum   = mass_quantum(hi - lo, length, n_cross);
+                // The block's own ends are junction boundaries; its interior ends are lines. A slice
+                // therefore has at most one boundary of each kind on each side, never both.
+                const std::int32_t left_jid  = (left_line  < 0) ? left_junction  : -1;
+                const std::int32_t right_jid = (right_line < 0) ? right_junction : -1;
+                const std::int64_t n_bounds = (left_line >= 0 ? 1 : 0) + (right_line >= 0 ? 1 : 0)
+                                            + (left_jid  >= 0 ? 1 : 0) + (right_jid  >= 0 ? 1 : 0);
+                if (n_bounds == 0) continue;
+                // ⭐ float64, deposited directly: the share is a coverage fraction in (0, 1] and needs
+                // no fixed point. Conservation is 2.1e6x tighter than the 2^-32 grid it replaced.
+                const double share = static_cast<double>(hi - lo)
+                                   / (static_cast<double>(length) * static_cast<double>(n_bounds));
                 for (const std::int64_t line : {left_line, right_line}) {
                     if (line < 0) continue;
                     ContiguousEdge& edge = edges_[static_cast<std::size_t>(line - 1)];
-                    if (spliced) edge.spliced_mass += quantum;
-                    else         edge.unspliced_mass += quantum;
+                    if (spliced) edge.spliced_mass += share;
+                    else         edge.unspliced_mass += share;
+                }
+                for (const std::int32_t jid : {left_jid, right_jid}) {
+                    if (jid >= 0) junctions_[static_cast<std::size_t>(jid)].mass += share;
                 }
             }
         }
@@ -671,7 +707,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     for (const std::int32_t id : sj_ids) {
         JunctionEdge& junction = junctions_[static_cast<std::size_t>(id)];
         junction.count[col] += 1u;
-        junction.inv_length_sum += quantum_edge;
+        junction.inv_length_sum += inv_edge;
     }
 
     // ── contained: the WHOLE path lies inside ONE node ────────────────────────────────────────────
@@ -693,7 +729,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
             cuts_[static_cast<std::size_t>(contained_node) + 1] -
             cuts_[static_cast<std::size_t>(contained_node)];
         node.contained_count[col] += 1u;
-        node.contained_inv_opportunity_sum += inv_length_quantum(node_len - length + 1);
+        node.contained_inv_opportunity_sum += 1.0 / static_cast<double>(node_len - length + 1);
         node.contained_length_sum += static_cast<std::uint64_t>(length);
     }
 
@@ -848,6 +884,7 @@ void Accumulator::merge_from(const Accumulator& other) {
             junctions_[i].count[c]   += other.junctions_[i].count[c];
         }
         junctions_[i].inv_length_sum += other.junctions_[i].inv_length_sum;
+        junctions_[i].mass           += other.junctions_[i].mass;
     }
     // ⚠ Throws rather than skipping. A size mismatch means the two were built with different `max_length`,
     // and silently not merging would lose one side's pools entirely — the same class of defect as the

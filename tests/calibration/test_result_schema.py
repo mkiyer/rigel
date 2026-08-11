@@ -33,6 +33,8 @@ def _valid_kwargs() -> dict:
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
         edge_mass_per_crossing=np.ones(N_EDGES),
         mass_rna_junction=junction.copy(),
+        edge_spliced_mass_per_crossing=edge.copy(),
+        junction_mass_per_crossing=junction.copy(),
         gdna_node_eff_len=node.copy(),
         gdna_edge_eff_len=edge.copy(),
         rna_node_eff_len=node.copy(),
@@ -66,6 +68,7 @@ def test_a_library_with_no_junctions_constructs():
     be confused with "no junction flux"."""
     kw = _valid_kwargs()
     kw["mass_rna_junction"] = np.zeros(0)
+    kw["junction_mass_per_crossing"] = np.zeros(0)
     kw["n_junctions"] = 0
     assert CalibrationResult(**kw).mass_rna_junction.shape == (0,)
 

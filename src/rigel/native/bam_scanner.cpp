@@ -2116,18 +2116,19 @@ private:
             const auto n_sj    = static_cast<std::size_t>(ref_sj_offsets.back());
 
             std::vector<uint32_t> node_contained_count(n_nodes * kNStrandColumns, 0u);
-            std::vector<uint64_t> node_contained_inv_opportunity_sum(n_nodes, 0u);
+            std::vector<double> node_contained_inv_opportunity_sum(n_nodes, 0.0);
             std::vector<uint64_t> node_contained_length_sum(n_nodes, 0u);
             std::vector<uint32_t> node_start_count(n_nodes, 0u);
             std::vector<uint32_t> edge_unspliced_count(n_edges * kNStrandColumns, 0u);
-            std::vector<uint64_t> edge_unspliced_inv_length_sum(n_edges, 0u);
+            std::vector<double> edge_unspliced_inv_length_sum(n_edges, 0.0);
             std::vector<uint64_t> edge_unspliced_length_sum(n_edges, 0u);
             std::vector<uint32_t> edge_spliced_count(n_edges * kNStrandColumns, 0u);
             // ⚠ NOT multiplied by kNStrandColumns — the conserved mass has ONE value per edge.
-            std::vector<uint64_t> edge_unspliced_mass(n_edges, 0u);
-            std::vector<uint64_t> edge_spliced_mass(n_edges, 0u);
+            std::vector<double> edge_unspliced_mass(n_edges, 0.0);
+            std::vector<double> edge_spliced_mass(n_edges, 0.0);
             std::vector<uint32_t> sj_count(n_sj * kNStrandColumns, 0u);
-            std::vector<uint64_t> sj_inv_length_sum(n_sj, 0u);
+            std::vector<double> sj_inv_length_sum(n_sj, 0.0);
+            std::vector<double> sj_mass(n_sj, 0.0);
 
             const std::size_t pool_row = static_cast<std::size_t>(max_length_) + 1;
             std::vector<int64_t> pool_lengths(kNFragmentPools * pool_row, 0);
@@ -2182,6 +2183,7 @@ private:
                         sj_count[o]   = junctions[i].count[c];
                     }
                     sj_inv_length_sum[sj_base + i] = junctions[i].inv_length_sum;
+                    sj_mass[sj_base + i]           = junctions[i].mass;
                 }
                 // The pools are library-wide, so the per-reference histograms are SUMMED, not concatenated.
                 // ⚠ A size mismatch throws instead of being skipped: skipping would drop that reference's
@@ -2231,6 +2233,7 @@ private:
             cal["edge_spliced_mass"]      = vec_to_ndarray(std::move(edge_spliced_mass));
             cal["sj_count"]               = vec_to_ndarray(std::move(sj_count));
             cal["sj_inv_length_sum"]             = vec_to_ndarray(std::move(sj_inv_length_sum));
+            cal["sj_mass"]                = vec_to_ndarray(std::move(sj_mass));
             cal["pool_lengths"]           = vec_to_ndarray(std::move(pool_lengths));
             cal["deposited_lengths"]      = vec_to_ndarray(std::move(deposited_lengths));
 
@@ -2904,8 +2907,8 @@ NB_MODULE(_bam_impl, m) {
             })
             .def_prop_ro("node_contained_inv_opportunity_sum", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(Node) / sizeof(uint64_t);
-                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<1>>(
+                constexpr int64_t row = sizeof(Node) / sizeof(double);
+                return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
                     &a.nodes_data()[0].contained_inv_opportunity_sum, {a.n_nodes()}, h, {row}).cast();
             })
             .def_prop_ro("node_contained_length_sum", [](nb::handle h) {
@@ -2937,8 +2940,8 @@ NB_MODULE(_bam_impl, m) {
             })
             .def_prop_ro("edge_unspliced_inv_length_sum", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(uint64_t);
-                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<1>>(
+                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(double);
+                return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
                     &a.edges_data()[0].unspliced_inv_length_sum, {a.n_edges()}, h, {row}).cast();
             })
             .def_prop_ro("edge_unspliced_length_sum", [](nb::handle h) {
@@ -2951,14 +2954,14 @@ NB_MODULE(_bam_impl, m) {
             // strand. The stride is still the struct row, so this is a view into the same array.
             .def_prop_ro("edge_unspliced_mass", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(uint64_t);
-                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<1>>(
+                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(double);
+                return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
                     &a.edges_data()[0].unspliced_mass, {a.n_edges()}, h, {row}).cast();
             })
             .def_prop_ro("edge_spliced_mass", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(uint64_t);
-                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<1>>(
+                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(double);
+                return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
                     &a.edges_data()[0].spliced_mass, {a.n_edges()}, h, {row}).cast();
             })
 
@@ -2972,9 +2975,15 @@ NB_MODULE(_bam_impl, m) {
             })
             .def_prop_ro("sj_inv_length_sum", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(JunctionEdge) / sizeof(uint64_t);
-                return nb::ndarray<nb::numpy, const uint64_t, nb::ndim<1>>(
+                constexpr int64_t row = sizeof(JunctionEdge) / sizeof(double);
+                return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
                     &a.junctions_data()[0].inv_length_sum, {a.n_junctions()}, h, {row}).cast();
+            })
+            .def_prop_ro("sj_mass", [](nb::handle h) {
+                auto& a = nb::cast<Accumulator&>(h);
+                constexpr int64_t row = sizeof(JunctionEdge) / sizeof(double);
+                return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
+                    &a.junctions_data()[0].mass, {a.n_junctions()}, h, {row}).cast();
             })
 
             // ── the length pools, and the denominators ───────────────────────────────────────────────

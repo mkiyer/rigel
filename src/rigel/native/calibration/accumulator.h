@@ -76,40 +76,31 @@ inline int strand_column(std::int32_t align_strand) noexcept {
 }
 
 // ============================================================================
-// the fixed-point reciprocal-opportunity sum
+// ONE NUMERIC CONVENTION
 // ============================================================================
 
-//: Densities accumulate as round(kInvLengthScale / placements) in uint64. Integer addition is associative,
-//: so the per-worker merge is bit-identical at any thread count -- which float accumulation is not, and
-//: that nondeterminism propagated to a ~2.6 % difference in the calibration output. The scale is 2^32
-//: because it holds the quantisation error below float32's own epsilon while leaving ample headroom under
-//: the uint64 ceiling at realistic depth.
-inline constexpr std::uint64_t kInvLengthScale = 1ull << 32;
-
-/// round(kInvLengthScale / placements), rounding halves AWAY FROM ZERO.
-///
-/// ⚠ The rounding mode is part of the contract -- byte-identity with the Python reference is undefined
-/// without it. `placements` must be positive; every caller guards it (a length-1 molecule cannot cross a
-/// 0-bp line, so its edge quantum is 0 rather than a division).
-inline std::uint64_t inv_length_quantum(std::int64_t placements) noexcept {
-    const auto p = static_cast<std::uint64_t>(placements);
-    return (2 * kInvLengthScale + p) / (2 * p);
-}
-
-/// round(kInvLengthScale * slice_len / (length * n_cross)), rounding halves AWAY FROM ZERO.
-///
-/// The CONSERVED MASS's quantum — same fixed point and same rounding mode as `inv_length_quantum`, and
-/// for the same reason: integer addition is associative, so the per-worker merge is bit-identical at any
-/// thread count. ⚠ The rounding mode is part of the byte-identity contract with the Python reference.
-///
-/// ⚠ No overflow: the numerator is 2^33 * slice_len and slice_len never exceeds the fragment length, so
-/// at any realistic max_length it stays far under the uint64 ceiling. Both arguments are positive at
-/// every call site — a slice only exists when a line bounds it.
-inline std::uint64_t mass_quantum(std::int64_t slice_len, std::int64_t length,
-                                  std::int64_t n_cross) noexcept {
-    const auto d = static_cast<std::uint64_t>(length) * static_cast<std::uint64_t>(n_cross);
-    return (2 * kInvLengthScale * static_cast<std::uint64_t>(slice_len) + d) / (2 * d);
-}
+//: ⭐⭐⭐ A COUNT IS AN INTEGER. A FRACTION IS double. There is no fixed point in the tally and no
+//: scale constant to decode.
+//:
+//: ⛔ The predecessor accumulated every fraction as round(2^32 / placements) in uint64, because integer
+//: addition is associative and therefore bit-identical across worker counts. The argument was sound; the
+//: price it quoted was not. The ~2.6 % it cited was measured on a **float32** accumulator (~3.7e-7 per
+//: cell). double is ~1e-16 -- 3.4e9x finer -- reaching the deliverable at ~1e-11, five orders below
+//: EMConfig.convergence_delta = 1e-6.
+//:
+//: ⭐⭐ And the fixed point was LESS ACCURATE, measured against exact rational arithmetic on the
+//: reciprocal-opportunity theorem (each length contributes exactly one density unit):
+//:
+//:      node_len 151    fixed 7.0e-10    double 5.8e-15      120,000x better
+//:      node_len 400    fixed 1.7e-08    double 1.0e-13      170,000x better
+//:      node_len 1000   fixed 2.0e-07    double 2.8e-13      714,000x better
+//:
+//: ⚠ The exactness the old gates asserted was a property of their FIXTURES: 1/2 + 1/3 + 1/6 lands back
+//: on 2^32 because two rounding errors cancel, while 1/3 + 1/3 + 1/3 is one quantum short -- and double
+//: is exact on both.
+//:
+//: ⛔ What is genuinely given up is bit-identity across worker counts, since float addition is not
+//: associative. Owner ruling 2026-08-10: one convention, and this is it.
 
 // ============================================================================
 // what each object stores
@@ -129,7 +120,7 @@ struct Node {
     /// strand a read aligned to says nothing about whether the molecule was gDNA or RNA -- and every
     /// consumer summed the two columns before using them. The COUNTS keep both because the strand model
     /// is a Beta-Binomial over them, per strand.
-    std::uint64_t contained_inv_opportunity_sum;
+    double contained_inv_opportunity_sum;
     std::uint64_t contained_length_sum;
 };
 static_assert(sizeof(Node) == 24, "Node must be 24 bytes with no padding");
@@ -141,7 +132,7 @@ struct ContiguousEdge {
     std::uint32_t unspliced_count[kNStrandColumns];
     std::uint32_t spliced_count[kNStrandColumns];
     /// ⭐ ONE value each -- strand-agnostic, see `Node`.
-    std::uint64_t unspliced_inv_length_sum;
+    double unspliced_inv_length_sum;
     std::uint64_t unspliced_length_sum;
     /// ⭐⭐ THE CONSERVED MASS, fixed point. A COUNT and a MASS are two different deposits and one
     /// number cannot be both: `unspliced_count` is `+1` on every line a fragment crosses, so a fragment
@@ -150,13 +141,13 @@ struct ContiguousEdge {
     /// ⛔ ONE VALUE, NOT TWO, WHILE EVERY BANK ABOVE IS PER STRAND — deliberate. `strand_deconv` reads
     /// the counts per column; nothing reads a mass per strand, because the mass exists to turn an
     /// object-incidence total into a fragment count and that question has no strand in it.
-    std::uint64_t unspliced_mass;
+    double unspliced_mass;
     /// ⭐ The same rule, routed by the same `spliced` flag — so `mass` is not the one channel that
     /// ignores the split. ⛔ A PARTIAL, never a conservation ledger: a spliced fragment's blocks with no
     /// interior line deposit nothing (their accounting is on the junction axis), so this sums to
     /// `crossed_block_len / L`. It is a per-LINE certified-RNA term, commensurate with the unspliced
     /// mass at the same line, and is NOT "the number of spliced fragments here".
-    std::uint64_t spliced_mass;
+    double spliced_mass;
 };
 static_assert(sizeof(ContiguousEdge) == 48, "ContiguousEdge must be 48 bytes with no padding");
 
@@ -167,9 +158,20 @@ struct JunctionEdge {
     /// ⭐ LIVE: `second_pass` scores a held fragment's junction evidence with it. `length_sum` was
     /// removed — nothing read it, and `pool_lengths`' RNA_SPLICED row already carries that
     /// population's length distribution.
-    std::uint64_t inv_length_sum;
+    double inv_length_sum;
+    /// ⭐⭐⭐ THE CONSERVED MASS'S THIRD AXIS. A spliced fragment's block that contains no interior
+    /// line deposits on neither edge bank, and is not `contained` either -- its path spans a junction,
+    /// so it lies in no single node. Such a fragment existed on the incidence axis and on no conserved
+    /// one, which is why a library fragment count was not computable. Measured on the origin-split
+    /// oracle at ladder g50 capture_off: 1,222,375 of 4,830,713 RNA fragments (25.3 %) are in that
+    /// population, against 0 of 4,997,761 gDNA fragments, because gDNA cannot splice.
+    ///
+    /// ⛔ The rule ADDS a boundary class; it does not re-apportion an existing one. A block that
+    /// crossed a line is untouched, so `unspliced_mass` and `spliced_mass` are byte-identical to what
+    /// they were. Spec: `_accumulator_reference.py`; gates: `tests/native/test_conserved_mass.py`.
+    double mass;
 };
-static_assert(sizeof(JunctionEdge) == 16, "JunctionEdge must be 16 bytes with no padding");
+static_assert(sizeof(JunctionEdge) == 24, "JunctionEdge must be 24 bytes with no padding");
 
 // ============================================================================
 // the fragment-length pools
@@ -374,6 +376,10 @@ struct DepositScratch {
     std::vector<std::pair<std::int64_t, std::int64_t>> introns;   // normalised: sorted, disjoint, clipped
     std::vector<std::pair<std::int64_t, std::int64_t>> segments;  // the path, introns cut out
     std::vector<std::int32_t>                         sj_ids;     // annotated junction edges used
+    /// ⭐ The same resolution kept PER INTRON POSITION, -1 where unannotated. `sj_ids` is filtered, so
+    /// it cannot say which of a block's two ends is a junction — and the conserved mass needs exactly
+    /// that. One entry per intron, so block `i` is bounded by `sj_id_at_gap[i-1]` and `sj_id_at_gap[i]`.
+    std::vector<std::int32_t>                         sj_id_at_gap;
     std::vector<ScoredHypothesis>                     survivors;  // arbitration, per fragment
 };
 

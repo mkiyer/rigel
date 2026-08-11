@@ -719,9 +719,19 @@ def test_the_per_worker_merge_is_bit_identical_at_any_shard_count():
                     else:
                         assert got[key] == expected, f"{n_shards} shards: {field.name}[{key!r}]"
                 continue
-            assert np.array_equal(getattr(merged, field.name), getattr(whole, field.name)), (
-                f"{n_shards} shards: {field.name} is not bit-identical to the unsharded run"
-            )
+            got, want = getattr(merged, field.name), getattr(whole, field.name)
+            # ⭐ Integer banks bit-identical (integer addition is associative); float64 fractions to
+            # within the representation, because the merge re-associates their sums. See
+            # `test_accumulator_worker_determinism.py`.
+            if getattr(want, "dtype", None) == np.float64:
+                assert np.allclose(got, want, rtol=want.size * float(np.finfo(np.float64).eps),
+                                   atol=0.0), (
+                    f"{n_shards} shards: {field.name} differs by MORE than the float64 representation"
+                )
+            else:
+                assert np.array_equal(got, want), (
+                    f"{n_shards} shards: {field.name} is not bit-identical to the unsharded run"
+                )
 
 
 def test_an_EMPTY_hypothesis_set_is_the_UNSPLICED_ONLY_set_and_does_not_CRASH():

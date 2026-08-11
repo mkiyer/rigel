@@ -73,6 +73,8 @@ def _cal(region_arrays: RegionArrays, density, node_eff, edge_eff) -> Calibratio
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
         edge_mass_per_crossing=np.ones_like(ez),
         mass_rna_junction=np.zeros(0, dtype=np.float64),
+        edge_spliced_mass_per_crossing=np.ones_like(ez),
+        junction_mass_per_crossing=np.ones(0, dtype=np.float64),
         gdna_node_eff_len=node_eff,
         gdna_edge_eff_len=edge_eff,
         rna_node_eff_len=node_eff,

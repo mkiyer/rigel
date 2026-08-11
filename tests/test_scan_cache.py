@@ -280,6 +280,94 @@ class TestTheKeyRefusesAMovedIndex:
             scan_payload.AccumulatorPayload.__dataclass_fields__ = original
         assert payload_schema_digest() == before
 
+    def test_the_deposit_digest_is_STABLE_across_calls_and_across_PROCESSES(self):
+        """⭐ A key that wobbles refuses every cache, which is as useless as one that never moves.
+
+        Across processes as well as calls: every channel is an integer and integer addition is
+        associative, so this is deterministic by construction rather than by luck.
+        """
+        import subprocess
+        import sys
+
+        from rigel.scan_cache import deposit_digest
+
+        first = deposit_digest()
+        assert first == deposit_digest()
+        other = subprocess.run(
+            [sys.executable, "-c", "from rigel.scan_cache import deposit_digest;print(deposit_digest())"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        assert other == first, f"digest differs across processes: {other} != {first}"
+
+    def test_the_deposit_digest_ENTERS_the_schema_digest(self):
+        """⛔⛔ **THE WIRING, and without it the digest is a number nobody consults.**
+
+        ``payload_schema_digest`` hashes field NAMES and column counts, and a deposit-RULE change moves
+        neither — so a cache written under the old rule was accepted by the key and silently served OLD
+        VALUES to NEW CODE. That is ``TRAPS: a-hash-that-misses-its-artifact`` in the key written to
+        prevent it, for the FOURTH time. This asserts the deposit digest is actually folded in.
+        """
+        from rigel import scan_cache
+
+        before = scan_cache.payload_schema_digest()
+        original = scan_cache.deposit_digest
+        try:
+            scan_cache.deposit_digest = lambda: "not-the-real-digest"
+            assert scan_cache.payload_schema_digest() != before, (
+                "the deposit digest does not reach the cache key, so a deposit-rule change would "
+                "leave every stale cache accepted"
+            )
+        finally:
+            scan_cache.deposit_digest = original
+        assert scan_cache.payload_schema_digest() == before
+
+    def test_a_changed_DEPOSIT_RULE_moves_the_digest(self):
+        """⭐⭐⭐ **THE CLAIM ITSELF: the digest is a function of BEHAVIOUR, not of names.**
+
+        Perturbs the deposit rule in the executable specification — which the C++ is held byte-identical
+        to — and asserts the digest computed over it moves. ⛔ Every field name, dtype and shape is
+        untouched by the perturbation, so ``payload_schema_digest``'s name/column half cannot see it;
+        only a behavioural hash can.
+        """
+        from tests.native._accumulator_reference import Accumulator, Partition
+
+        from tests.native._digest_fixture import reference_deposit_digest
+
+        before = reference_deposit_digest(Accumulator, Partition)
+        original = Accumulator.deposit
+        try:
+            # A rule change that renames nothing: halve every conserved-mass deposit.
+            def perturbed(self, *args, **kwargs):
+                outcome = original(self, *args, **kwargs)
+                self.tally.sj_mass //= 2
+                return outcome
+
+            Accumulator.deposit = perturbed
+            assert reference_deposit_digest(Accumulator, Partition) != before, (
+                "a changed deposit rule left the digest where it was — it is hashing names, not "
+                "behaviour, and every stale cache would still be accepted"
+            )
+        finally:
+            Accumulator.deposit = original
+        assert reference_deposit_digest(Accumulator, Partition) == before
+
+    def test_the_deposit_digest_AGREES_between_the_NATIVE_and_the_SPECIFICATION(self):
+        """⛔ The key certifies what the PRODUCTION scanner deposited, so it is computed from the C++.
+
+        If the two ever drifted, the key would be certifying an artifact nothing writes. This is the
+        gate that makes reading the native side safe.
+        """
+        from tests.native._accumulator_reference import Accumulator, Partition
+
+        from rigel.scan_cache import deposit_digest
+
+        from tests.native._digest_fixture import reference_deposit_digest
+
+        assert reference_deposit_digest(Accumulator, Partition) == deposit_digest(), (
+            "the specification and the C++ disagree on the digest fixture, so the cache key certifies "
+            "an artifact the scanner does not produce"
+        )
+
     def test_the_schema_digest_moves_when_a_BANK_CHANGES_SHAPE(self):
         """⛔⛔ **The gap this key had until 2026-08-08, and it is the one it exists to close.**
 

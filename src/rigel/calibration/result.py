@@ -130,6 +130,19 @@ class CalibrationResult:
     #: population that dominates a donor seam (owner ruling, 2026-07-30).
     mass_rna_junction: np.ndarray
 
+    #: float64[n_edges] — the ``edge_spliced`` twin of ``edge_mass_per_crossing``, and
+    #: float64[n_junctions] — the junction one, ``sj_mass / sj_count``. Same kind of quantity as
+    #: ``edge_mass_per_crossing`` in every respect: GEOMETRY, identical under any split, and therefore
+    #: not in ``prior_vs_oracle.OVERRIDE_FIELDS``.
+    #:
+    #: ⛔ **The junction one did not exist until ``sj_mass`` did, and that is why a conserved LIBRARY
+    #: fragment count was not computable.** A spliced fragment whose every block lies inside one node
+    #: crosses no line and is not contained, so it deposited on no conserved bank — **1,222,375 of
+    #: 4,830,713 RNA fragments (25.3 %)** on ladder g50 capture_off, against 0 of 4,997,761 gDNA
+    #: fragments, since gDNA cannot splice.
+    edge_spliced_mass_per_crossing: np.ndarray
+    junction_mass_per_crossing: np.ndarray
+
     # --- the gDNA geometric supports: expected admissible START POSITIONS, per component ---
     #: float64[n_nodes] — ``effective_length.contained_eff_length`` on the gDNA pmf,
     #: ``E_f[(node_len − w + 1)+]``. Under uniform genomic gDNA at density ρ the expected contained
@@ -184,11 +197,13 @@ class CalibrationResult:
             "mass_rna_edge",
             "mass_rna_spliced_edge",
             "edge_mass_per_crossing",
+            "edge_spliced_mass_per_crossing",
             "gdna_edge_eff_len",
             "rna_edge_eff_len",
         ):
             _check_axis_array(getattr(self, name), name, self.n_edges)
-        _check_axis_array(self.mass_rna_junction, "mass_rna_junction", self.n_junctions)
+        for name in ("mass_rna_junction", "junction_mass_per_crossing"):
+            _check_axis_array(getattr(self, name), name, self.n_junctions)
 
         if not np.isfinite(self.gdna_density_global) or self.gdna_density_global < 0.0:
             raise ValueError(
@@ -201,6 +216,65 @@ class CalibrationResult:
         )
         _check_unit_interval(
             self.rna_strand_overdispersion, "rna_strand_overdispersion", open_upper=True
+        )
+
+    # ── ⭐⭐⭐ THE LIBRARY FRAGMENT COUNT — the deliverable, in FRAGMENT units, derived in ONE place ──
+
+    @property
+    def library_gdna_fragments(self) -> float:
+        """gDNA fragments in the library — a CONSERVED count, not an object-incidence sum.
+
+        gDNA appears on TWO axes only, because it cannot splice, and containment is exclusive — so a
+        node term is already a fragment count and only the crossing term needs converting. That is why
+        this side was exact all along while the RNA side was 25.3 % short.
+        """
+        return float(
+            np.asarray(self.mass_gdna_node, dtype=np.float64).sum()
+            + (
+                np.asarray(self.mass_gdna_edge, dtype=np.float64)
+                * np.asarray(self.edge_mass_per_crossing, dtype=np.float64)
+            ).sum()
+        )
+
+    @property
+    def library_rna_fragments(self) -> float:
+        """RNA fragments in the library — all THREE axes, each converted by its OWN population's ``q``.
+
+        ⛔⛔ **THE TREE ONCE HELD THREE DISAGREEING ANSWERS TO THIS**, and every one summed INCIDENCES:
+        ``pipeline.py`` added node + edge + junction raw, ``calibration_truth_ab.py`` added node + edge
+        and dropped the junction, and only ``assemble_priors`` converted anything. One fragment books
+        ``max(K,1)`` line crossings AND one incidence per junction it uses, so the sum over-counts and
+        the ratio is biased wherever the two components' inflations differ — which they do. Measured on
+        the origin-split oracle, ladder g50 capture_off: the incidence ratio reads ``f_gdna`` **0.3851**
+        against a truth of **0.5085**, while these conserved counts reproduce **0.5085** exactly, each
+        origin landing at **1.000x** its deposited fragments with **0** unaccounted.
+
+        ⭐ The spliced crossings and the junction flux are the SAME fragments split across two banks by
+        the deposit rule — ``edge_spliced_mass`` holds the share of a spliced fragment's bases in blocks
+        that crossed a line and ``sj_mass`` the share in blocks that crossed none — and the two sum to
+        exactly one per fragment. Adding both is conservation, not double counting.
+
+        ⚠ **A PROPERTY, never a stored field.** ``prior_vs_oracle`` swaps the mass arrays for truth with
+        ``dataclasses.replace``; a cached scalar would survive that swap and silently describe the old
+        arrays (``TRAPS: a-hash-that-misses-its-artifact``, in dataclass form). Deriving it means the
+        oracle arm's count is the oracle's by construction.
+        """
+        unspliced_edge = np.maximum(
+            np.asarray(self.mass_rna_edge, dtype=np.float64)
+            - np.asarray(self.mass_rna_spliced_edge, dtype=np.float64),
+            0.0,
+        )
+        return float(
+            np.asarray(self.mass_rna_node, dtype=np.float64).sum()
+            + (unspliced_edge * np.asarray(self.edge_mass_per_crossing, dtype=np.float64)).sum()
+            + (
+                np.asarray(self.mass_rna_spliced_edge, dtype=np.float64)
+                * np.asarray(self.edge_spliced_mass_per_crossing, dtype=np.float64)
+            ).sum()
+            + (
+                np.asarray(self.mass_rna_junction, dtype=np.float64)
+                * np.asarray(self.junction_mass_per_crossing, dtype=np.float64)
+            ).sum()
         )
 
 

@@ -628,6 +628,14 @@ def calibrate(
     # silent about the population that at a donor seam IS the gene's whole mature output.
     mass_rna_junction = np.asarray(substrate.junction.count, dtype=np.float64).sum(axis=1)
 
+    # ⭐ The two remaining INCIDENCE→FRAGMENT conversions, alongside `edge_mass_per_crossing`. Each is
+    # its own population's `mass / count`: applying one population's ratio to another is
+    # `TRAPS: a-pooled-conversion-applied-per-component`. `CalibrationResult.library_rna_fragments`
+    # derives the library count from them — a property, never a stored scalar, so an oracle arm that
+    # swaps the mass arrays cannot inherit a count describing the arrays it replaced.
+    edge_spliced_mass_per_crossing = substrate.edge_spliced.mass_per_crossing
+    junction_mass_per_crossing = substrate.junction.mass_per_crossing
+
     result = CalibrationResult(
         mass_gdna_node=nodes.gdna_mass,
         mass_rna_node=nodes.rna_mass,
@@ -636,6 +644,8 @@ def calibrate(
         mass_rna_spliced_edge=mass_rna_spliced_edge,
         edge_mass_per_crossing=edge_mass_per_crossing,
         mass_rna_junction=mass_rna_junction,
+        edge_spliced_mass_per_crossing=edge_spliced_mass_per_crossing,
+        junction_mass_per_crossing=junction_mass_per_crossing,
         gdna_node_eff_len=node_eff_gdna,
         gdna_edge_eff_len=edge_eff_gdna,
         rna_node_eff_len=node_eff_rna,
