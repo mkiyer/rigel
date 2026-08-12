@@ -51,9 +51,12 @@ _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "tests" / "calibration"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-# ⚠ Imported, not restated. ``substrate.py`` calls itself the ONE decoder of the fixed point, and a
-# second spelling of 2^32 here would quietly make that docstring false.
-from rigel.calibration.substrate import INV_LENGTH_SCALE  # noqa: E402
+# ⛔ THERE IS NOTHING TO DECODE. This module used to divide every mass bank by
+# ``substrate.INV_LENGTH_SCALE`` (2^32) because the banks were FIXED POINT. The whole fixed-point layer
+# was deleted at `94d283c0` under ONE NUMERIC CONVENTION — a count is an integer, a fraction is float64,
+# and nothing decodes a bank — so the scale factor is gone and the banks are already in real units.
+# ⚠ The recorded verdicts in this docstring are unchanged by that: they were computed from the same
+# quantity, one representation earlier.
 
 _RUNS = Path.home() / "Downloads" / "rigel_runs"
 DEFAULT_SUITE = _RUNS / "suite" / "ladder"
@@ -106,7 +109,7 @@ def edge_share(payload) -> np.ndarray:
     ⛔ Lines with no crossing get **1.0**, the identity. There is no mass there to rescale, and a 0 would
     delete whatever mass the calibration put on a line the accumulator never saw.
     """
-    mass = np.asarray(payload.edge_unspliced_mass, np.float64) / INV_LENGTH_SCALE
+    mass = np.asarray(payload.edge_unspliced_mass, np.float64)
     count = np.asarray(payload.edge_unspliced_count, np.float64).sum(axis=1)
     share = np.ones_like(mass)
     np.divide(mass, count, out=share, where=count > 0)
@@ -312,7 +315,7 @@ def report(rows, args) -> bool:
 def _pooled_share(payloads) -> np.ndarray:
     """:func:`edge_share` over several origin partitions summed — mass and count from one population."""
     payloads = list(payloads)
-    mass = sum(np.asarray(p.edge_unspliced_mass, np.float64) for p in payloads) / INV_LENGTH_SCALE
+    mass = sum(np.asarray(p.edge_unspliced_mass, np.float64) for p in payloads)
     count = sum(np.asarray(p.edge_unspliced_count, np.float64).sum(axis=1) for p in payloads)
     share = np.ones_like(mass)
     np.divide(mass, count, out=share, where=count > 0)
@@ -338,7 +341,7 @@ def _report_q4(rows) -> None:
 
         def bank(origin, _p=parts):
             payload = _p[origin]
-            return (np.asarray(payload.edge_unspliced_mass, np.float64) / INV_LENGTH_SCALE,
+            return (np.asarray(payload.edge_unspliced_mass, np.float64),
                     np.asarray(payload.edge_unspliced_count, np.float64).sum(axis=1))
 
         mass_g, count_g = bank("gdna")

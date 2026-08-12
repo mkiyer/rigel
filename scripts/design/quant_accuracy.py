@@ -519,9 +519,109 @@ def report(paths: list[Path]) -> None:
     print("    " + "-" * (26 + 34 * len(arms)))
     rank_line("⛔ g00 ZERO-gDNA control", is_zero_gdna)
 
+    # ── ⑥ THE POOL LEVEL ─────────────────────────────────────────────────────────────────────────
+    #
+    # ⛔⛔ AXIOM 0 GUARD, AND IT IS THE WHOLE REASON THIS TABLE NEEDS A HEADER. The solver has THREE
+    # populations — gDNA, RNA+, RNA− — and "nascent" is NOT one of them and never becomes one. This is
+    # an ASSIGNMENT question, not a deconvolution one: `nrna_est` is mass the EM parked on nascent
+    # entities, and reading it as a fourth component is the exact error `CLAUDE.md`'s AXIOM 0 exists to
+    # prevent.
+    # ⭐ On a `nrna_none` panel `nrna_true` is exactly 0, so every fragment in that column is a false
+    # positive with NOTHING TO CANCEL IT — the same one-sided logic that makes the `g00` control
+    # readable (`TRAPS: zero-target-guards-are-one-sided`), and it is why the column is worth printing
+    # even on a panel that contains no nascent RNA at all.
+    print()
+    print("  ⑥ ⭐⭐⭐ POOL LEVEL — where the library's fragments went: gDNA vs NASCENT vs ANNOTATED")
+    print("     ⛔ 'nascent' is a SIMULATOR input, never a population the solver has (AXIOM 0). This")
+    print("        scores ASSIGNMENT. On a nrna_none panel nascent truth is 0, so that column is pure")
+    print("        false positive and Δ% is undefined rather than large.")
+    _POOL_FIELDS = ("gdna_est", "gdna_true", "nrna_est", "nrna_true", "mrna_est", "mrna_true",
+                    "n_intergenic")
+    for a, name in arms:
+        print()
+        print(f"    arm: {name}")
+        # ⚠ An arm file written before this table existed has no pool fields. Say so and skip, rather
+        # than dying on a KeyError halfway through a report whose other seven tables are fine.
+        probe = next((a[(c, "library")] for c in conds if (c, "library") in a), None)
+        if probe is None or any(f not in probe for f in _POOL_FIELDS):
+            print("      ⚠ no pool-level fields in this arm — re-run it to get table ⑥")
+            continue
+        print(f"    {'stratum':<26} {'pool':<20} {'est':>15} {'true':>15} {'Δ':>15} {'Δ%':>8}")
+        print("    " + "-" * 102)
+
+        def pool_rows(label, sel, a=a):
+            def tot(field):
+                return sum(a[(c, "library")][field] for c in conds
+                           if sel(c) and (c, "library") in a)
+
+            # ⛔⛔ INTERGENIC FRAGMENTS ARE gDNA AND THE NUMERATOR MUST SAY SO. `gdna_est` is
+            # `gdna_em_count`, which EXCLUDES fragments that reached no locus; `gdna_true` is the
+            # simulator's origin count, which includes them. Scoring one against the other is the
+            # documented mistake in `score_library`'s own docstring — it read 0.3151 against a truth of
+            # 0.5000 and fabricated an off-capture EM under-call that does not exist. Measured here
+            # before the fix: -50.7 % panel-wide, which is the intergenic pool and nothing else.
+            # ⭐ The `of which` rows are informational and carry no truth of their own; only the TOTAL
+            # is scored, and it is `cli.py`'s own `gdna_fraction` numerator.
+            gdna_em, inter = tot("gdna_est"), tot("n_intergenic")
+            rows = [
+                ("gDNA (total)", gdna_em + inter, tot("gdna_true")),
+                ("  of which EM", gdna_em, None),
+                ("  of which intergenic", inter, None),
+                ("nascent", tot("nrna_est"), tot("nrna_true")),
+                ("annotated", tot("mrna_est"), tot("mrna_true")),
+            ]
+            first = True
+            for pretty, est, tru in rows:
+                if tru is None:
+                    print(f"    {label if first else '':<26} {pretty:<20} {est:>15,.0f} "
+                          f"{'—':>15} {'—':>15} {'—':>8}")
+                else:
+                    d = est - tru
+                    # ⛔ a relative error against a TRUE ZERO is not a large number, it is undefined —
+                    # printing `inf` or a huge % invites the misreading the header warns of.
+                    pct = f"{100.0 * d / tru:>7.1f}%" if tru > 0 else "     n/a"
+                    print(f"    {label if first else '':<26} {pretty:<20} {est:>15,.0f} "
+                          f"{tru:>15,.0f} {d:>+15,.0f} {pct:>8}")
+                first = False
+
+        pool_rows("ALL (g00 excluded)", lambda c: not is_zero_gdna(c))
+        for st in _STRATA:
+            pool_rows(" x ".join(st),
+                      lambda c, st=st: stratum(c) == st and not is_zero_gdna(c))
+        print("    " + "-" * 102)
+        pool_rows("⛔ g00 ZERO-gDNA control", is_zero_gdna)
+
+    # ── ⑦ THE POOL LEVEL, PER CONDITION ──────────────────────────────────────────────────────────
+    #
+    # ⭐ The stratum roll-up above answers "which stratum is broken"; this answers "what happened in
+    # THIS scenario", which is the row an owner reads when deciding whether a condition is usable. Same
+    # three pools, same intergenic-inclusive gDNA, one line per condition.
+    for a, name in arms:
+        probe = next((a[(c, "library")] for c in conds if (c, "library") in a), None)
+        if probe is None or any(f not in probe for f in _POOL_FIELDS):
+            continue
+        print()
+        print(f"  ⑦ PER CONDITION — the three pools, est vs true (fragments)     arm: {name}")
+        print(f"    {'condition':<44} {'gDNA est':>13} {'gDNA true':>13} {'nasc est':>11} "
+              f"{'nasc true':>10} {'annot est':>13} {'annot true':>13}")
+        print("    " + "-" * 122)
+        for c in conds:
+            r = a[(c, "library")]
+            print(f"    {c:<44} {r['gdna_est'] + r['n_intergenic']:>13,.0f} {r['gdna_true']:>13,.0f} "
+                  f"{r['nrna_est']:>11,.0f} {r['nrna_true']:>10,.0f} "
+                  f"{r['mrna_est']:>13,.0f} {r['mrna_true']:>13,.0f}")
+        tg = sum(a[(c, "library")]["gdna_est"] + a[(c, "library")]["n_intergenic"] for c in conds)
+        print("    " + "-" * 122)
+        print(f"    {'TOTAL (all ' + str(len(conds)) + ' conditions)':<44} {tg:>13,.0f} "
+              f"{sum(a[(c, 'library')]['gdna_true'] for c in conds):>13,.0f} "
+              f"{sum(a[(c, 'library')]['nrna_est'] for c in conds):>11,.0f} "
+              f"{sum(a[(c, 'library')]['nrna_true'] for c in conds):>10,.0f} "
+              f"{sum(a[(c, 'library')]['mrna_est'] for c in conds):>13,.0f} "
+              f"{sum(a[(c, 'library')]['mrna_true'] for c in conds):>13,.0f}")
+
     # the library thermometer
     print()
-    print("  ⑥ LIBRARY gDNA FRACTION — the thermometer")
+    print("  ⑧ LIBRARY gDNA FRACTION — the thermometer")
     head = f"    {'condition':<44} {'truth':>8}"
     for _a, name in arms:
         head += f" {name[:14]:>14}"
@@ -535,7 +635,7 @@ def report(paths: list[Path]) -> None:
 
     # per condition, the deliverable
     print()
-    print("  ⑦ PER CONDITION — misassigned fragments and false-positive mass")
+    print("  ⑨ PER CONDITION — misassigned fragments and false-positive mass")
     head = f"    {'condition':<44}"
     for _a, name in arms:
         head += f" {name[:12] + ' Σ|Δ|':>18}{name[:12] + ' FP':>16}"

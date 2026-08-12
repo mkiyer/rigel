@@ -1,15 +1,16 @@
 #!/usr/bin/env python
 """⭐ **THE DELIVERABLE, SCORED AGAINST TRUTH**: does the second pass reach the gDNA/RNA composition?
 
-    Baseline it replaces:, which measured `f_gdna` before ANY of the fragment-length
-    work — "within 6 % of truth on 3 of 4 gdna100 conditions", with `gdna100 ss0.50 capture_on` 25 % low.
+⛔ **THIS IS THE QUESTION THE WHOLE FRAGMENT-LENGTH TRACK EXISTS TO ANSWER.** The length work and the
+second pass are upstream plumbing: one definition of fragment length, then an accurate one, then an
+*unbiased* one. None of that is the product. The product is the library's composition, and the coupling
+was measured at **a 10 % length-model error is worth 0.010–0.026 of composition** — so a length error
+that went from +27 % to +0.00 % should be visible here, or the coupling is not what it was thought to be.
 
-⛔ **THIS IS THE QUESTION THE WHOLE FRAGMENT-LENGTH TRACK EXISTS TO ANSWER.** TRAPS: two-divisors-opposite-sign–TRAPS: pure-and-length-censored.6 and the second pass
-(P0–P4.2) are all upstream plumbing: one definition of fragment length, then an accurate one, then an
-*unbiased* one. None of that is the product. The product is the library's composition, and
- measured the coupling — **a 10 % length-model error is worth 0.010–0.026 of
-composition** — so a length error that went from +27 % to +0.00 % should be visible here or the coupling
-is not what it was thought to be.
+⚠ **Three sentences of this docstring were WRECKAGE from the numbered-label rename** — a dangling
+"Baseline it replaces:," with no referent, and a rule citation that had become
+"TRAPS: two-divisors-opposite-sign–TRAPS: pure-and-length-censored.6". They named documents and labels
+that no longer exist and are deleted rather than guessed at (2026-08-11).
 
 ⭐ **ONE THING VARIED.** The same cached scan, the same index, the same config; the only difference is
 whether the side buffer has been **drained** before calibration reads the tally. The undrained arm is
@@ -111,7 +112,17 @@ def f_gdna_of(result) -> float:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--pilot", type=Path, default=DEFAULT_PILOT)
+    # ⚠ `--pilot` is a HISTORICAL NAME: it is simply the scan-cache ROOT, and it has pointed at panels
+    # other than the pilot for a long time. Kept rather than renamed because instruments and notes call
+    # it by this name; what it means is documented here and in the module docstring.
+    ap.add_argument("--pilot", type=Path, default=DEFAULT_PILOT,
+                    help="the scan-cache ROOT — a directory of <condition>/ caches")
+    # ⭐ THE LADDER'S FULL SCAN IS CACHED ONE LEVEL DEEPER. `pass0_vs_oracle` writes the undrained main
+    # payload to `<oracle_cache>/<condition>/_main`, in exactly the `write_scan_cache` layout this
+    # reads — so the 36-condition panel needs a subdirectory, not a second 27 GB copy of the scans.
+    ap.add_argument("--cache-subdir", default="",
+                    help="subdirectory under each condition holding the cache; use `_main` to read an "
+                         "oracle_cache built by pass0_vs_oracle.py / prior_vs_oracle.py")
     ap.add_argument("--index", type=Path, default=DEFAULT_INDEX)
     ap.add_argument("--suite", type=Path, default=None, help="where the truth files live")
     ap.add_argument("--conditions", nargs="*", default=None)
@@ -162,7 +173,10 @@ def main() -> int:
     names = args.conditions or sorted(p.name for p in args.pilot.iterdir() if p.is_dir())
     rows = []
     for name in names:
-        cache = read_scan_cache(args.pilot / name, index)
+        root = args.pilot / name
+        if args.cache_subdir:
+            root = root / args.cache_subdir
+        cache = read_scan_cache(root, index)
         truth = truth_f_gdna(suite / name)
         start = time.perf_counter()
         before = f_gdna_of(run(cache.payload, cache.strand_model))

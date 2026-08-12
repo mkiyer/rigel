@@ -30,14 +30,12 @@ import pysam
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests"))
 
 from native._accumulator_reference import (  # noqa: E402
-    INV_LENGTH_SCALE,
     Accumulator,
     DepositOutcome,
     FragmentPool,
     Partition,
     _normalise_introns,
     _segments,
-    inv_length_quantum,
 )
 
 from rigel.calibration.splice_graph import (  # noqa: E402
@@ -243,7 +241,9 @@ def main() -> None:
         accepted += 1
         crossings, length, junctions = _expected(partition, ref_id, lo, hi, introns, motif)
         expect_crossings += crossings
-        expect_density += crossings * inv_length_quantum(length - 1) if length >= 2 else 0
+        # ⛔ `inv_length_quantum(p)` was `round(2^32 / p)` — the fixed-point spelling of `1/p`. The
+        # layer went at `94d283c0`; the deposit is the reciprocal itself, in float64.
+        expect_density += crossings / (length - 1) if length >= 2 else 0
         expect_junctions += junctions
         lengths.append(length)
     elapsed = time.perf_counter() - t0
@@ -301,11 +301,17 @@ def main() -> None:
     if lengths:
         arr = np.asarray(lengths)
         print(f"\nall accepted fragments: mean L {arr.mean():.1f}  median {np.median(arr):.0f}")
-    density_total = int(t.edge_unspliced_inv_length_sum.sum()) + int(t.edge_spliced_inv_length_sum.sum())
+    # ⛔ FLOAT, NOT INT, AND NO SCALE FACTOR. `inv_length_sum` was a FIXED-POINT integer bank divided by
+    # `INV_LENGTH_SCALE` (2^32); the whole fixed-point layer went at `94d283c0` under ONE NUMERIC
+    # CONVENTION, so the bank is float64 in real units. `int()` on it now TRUNCATES a density toward
+    # zero — a sum of 1/L terms is < 1 on any short region — so the cast is as dead as the scale.
+    density_total = float(t.edge_unspliced_inv_length_sum.sum()) + float(
+        t.edge_spliced_inv_length_sum.sum()
+    )
     count_total = int(t.edge_unspliced_count.sum()) + int(t.edge_spliced_count.sum())
     if density_total:
         print(
-            f"pooled count/density + 1 = {INV_LENGTH_SCALE * count_total / density_total + 1:.1f}  "
+            f"pooled count/density + 1 = {count_total / density_total + 1:.1f}  "
             f"(the crossing population's own mean L, weighted by lines crossed)"
         )
 

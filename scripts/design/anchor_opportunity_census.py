@@ -19,9 +19,36 @@ model — i.e. the TRUE post-capture gDNA pmf — so the divisor is the solver's
 exact pmf `SUCCESS.md` calls the ceiling. A census that wrote its own opportunity would be measuring a
 different program.
 
-**The three columns that answer it**, per condition, over the intergenic NODE population (the anchor
-population — `node_geometry.g1_locked` ∧ intergenic, which is exactly ``strand_evidence``'s
-``struct_lock``):
+⛔⛔ **THE POPULATION IS `g1_locked` ∧ NODE, AND IT IS *NOT* ``strand_evidence``'s ``struct_lock``.** This
+docstring and the comment at the mask both said "exactly ``struct_lock``" until 2026-08-11 and the two
+masks differ by **15–23×**:
+
+============================================  ==========  =======================================
+mask                                          size        what it is
+============================================  ==========  =======================================
+``anchor`` — what this instrument measures         1,312   ``g1_locked ∧ NODE``: RNA is inadmissible
+                                                           on both strands, so the composition is
+                                                           structurally certain
+``struct_lock`` — what the solver actually    14,875 to    ``~((free_pos|free_neg) ∧ n_node>0) ∧
+locks (`node_init.py`)                            30,423   NODE`` — which is ``g1_locked`` **∪ every
+                                                           zero-count NODE**, empty exons and
+                                                           introns included
+============================================  ==========  =======================================
+
+⭐ ``anchor`` is the mask the docstring of ``struct_lock`` *describes* ("scoped to true intergenic NODE
+nodes") and the one the standing xfail wants it rescoped to. The shipped code grants certainty to
+**13,563–29,111 further slots** whose ``f_g`` is a default belief and whose evidence is nothing at all.
+
+⛔ **So this instrument's 346× verdict is a statement about 1,312 anchors, not about the population the
+solver locks.** It is not thereby wrong — the anchors are what the question is about — but its SCOPE was
+overstated wherever it was quoted, and every run now prints both sizes so the reading cannot drift again.
+
+⚠ Measured on four ladder conditions 2026-08-11: the ``∧ intergenic`` term is **redundant** —
+``g1_locked ∧ NODE`` and ``g1_locked ∧ intergenic ∧ NODE`` are the same 1,312 slots on all four. It is
+kept and ASSERTED rather than deleted, so an index that ever separates them says so instead of silently
+widening this instrument's population.
+
+**The three columns that answer it**, per condition, over that anchor population:
 
 * ``empty%``     — share of anchors holding zero gDNA counts. These are the ones that claim ``rho_g = 0``.
 * ``rho_nb``     — the mass-weighted TRUE gDNA density at the chain neighbours of the EMPTY anchors.
@@ -133,12 +160,32 @@ def measure(parts, index, ra, junctions, edge_flags) -> dict:
     live = eff_g > 0.0
     rho_g = np.where(live, n_g / np.where(live, eff_g, 1.0), 0.0)
 
-    # the anchor population: exactly ``strand_evidence``'s ``struct_lock`` — G1-locked ∧ intergenic NODE.
+    # ⛔ THE ANCHOR POPULATION IS ``g1_locked ∧ NODE`` — NOT ``strand_evidence``'s ``struct_lock``, which
+    # is 15-23x larger. See the module docstring's table; both claimed "exactly struct_lock" until
+    # 2026-08-11 and neither mask matched it.
     rtype = coarse_type_array(np.asarray(ra.signature)).astype(np.int64)
     is_node = kind == NODE
     ntype = np.where(is_node, rtype[np.clip(obj, 0, rtype.shape[0] - 1)], -1)
-    locked = g1_locked(np.asarray(statics.free_pos, bool), np.asarray(statics.free_neg, bool))
+    fp = np.asarray(statics.free_pos, bool)
+    fn = np.asarray(statics.free_neg, bool)
+    locked = g1_locked(fp, fn)
     anchor = is_node & (ntype == INTERGENIC) & locked
+
+    # ⭐ the ``∧ intergenic`` term is measured REDUNDANT (2026-08-11, four conditions). Asserted rather
+    # than deleted: if an index ever admits a G1 NODE that is not intergenic, this instrument's
+    # population would silently narrow and its verdict would change meaning with no tell.
+    if not np.array_equal(anchor, is_node & locked):
+        raise AssertionError(
+            f"`g1_locked & NODE` ({int((is_node & locked).sum()):,}) and `g1_locked & intergenic & "
+            f"NODE` ({int(anchor.sum()):,}) have SEPARATED on this index. They were the same 1,312 "
+            f"slots when this instrument's population was defined; re-read the docstring's table "
+            f"before trusting any number below."
+        )
+
+    # the mask the SOLVER actually locks, so the scope of every verdict below is printed beside it
+    # rather than asserted in prose (`node_init.py`: `locked = ~solvable`, `solvable = (fp|fn) & n>0`).
+    mass = n_g + n_r
+    struct_lock = (~((fp | fn) & (mass > 0.0))) & is_node
 
     left, right = np.asarray(chain.left, np.int64), np.asarray(chain.right, np.int64)
     empty = anchor & (n_g <= 0.0)
@@ -148,13 +195,16 @@ def measure(parts, index, ra, junctions, edge_flags) -> dict:
         nb[idx[idx >= 0]] = True
     nb &= ~anchor  # a neighbour that is itself an anchor says nothing new
 
-    mass = n_g + n_r
     mw = lambda sel: (  # noqa: E731
         float(np.sum(mass[sel] * rho_g[sel]) / np.sum(mass[sel])) if np.sum(mass[sel]) > 0 else 0.0
     )
     full = anchor & (n_g > 0.0)
     return dict(
         n_anchor=int(anchor.sum()),
+        # ⭐ the two population sizes, side by side. `n_lock_extra` is the count of slots the solver
+        # treats as composition-CERTAIN and this instrument never looked at.
+        n_lock=int(struct_lock.sum()),
+        n_lock_extra=int((struct_lock & ~anchor).sum()),
         n_empty=int(empty.sum()),
         eff_empty=float(eff_g[empty].sum()),
         eff_anchor=float(eff_g[anchor].sum()),
@@ -190,11 +240,13 @@ def main() -> int:
     edge_flags = build_edge_flags_array(index)
     conds = args.conditions or sorted(p.name for p in cache.iterdir() if p.is_dir())
 
+    # ⭐ `anchor` is this instrument's population; `lock` is what the SOLVER locks. They are not the same
+    # mask and the ratio is the scope of every verdict on the row (see the module docstring).
     print(
-        f"{'condition':<42} {'anchor':>7} {'empty':>7} {'empty%':>7} {'Mb empty':>9} "
-        f"{'rho_full':>9} {'rho_nb':>9} {'rho_lib':>9} {'lie x':>7}"
+        f"{'condition':<42} {'anchor':>7} {'lock':>7} {'lock/anch':>9} {'empty':>7} {'empty%':>7} "
+        f"{'Mb empty':>9} {'rho_full':>9} {'rho_nb':>9} {'rho_lib':>9} {'lie x':>7}"
     )
-    print("-" * 118)
+    print("-" * 136)
     rows = []
     for tag in conds:
         try:
@@ -205,7 +257,8 @@ def main() -> int:
         pct = 100.0 * m["n_empty"] / max(m["n_anchor"], 1)
         lie = m["rho_nb"] / m["rho_full"] if m["rho_full"] > 0 else float("inf")
         print(
-            f"{tag:<42} {m['n_anchor']:>7,} {m['n_empty']:>7,} {pct:>6.1f}% "
+            f"{tag:<42} {m['n_anchor']:>7,} {m['n_lock']:>7,} "
+            f"{m['n_lock'] / max(m['n_anchor'], 1):>8.1f}x {m['n_empty']:>7,} {pct:>6.1f}% "
             f"{m['eff_empty'] / 1e6:>9.2f} {m['rho_full']:>9.5f} {m['rho_nb']:>9.5f} "
             f"{m['rho_lib']:>9.5f} {lie:>7.1f}"
         )
@@ -215,8 +268,12 @@ def main() -> int:
         print("\nnothing measured — is the oracle cache present?")
         return 1
 
-    print("\n" + "=" * 118)
+    print("\n" + "=" * 136)
     print(
+        "⛔ SCOPE: `anchor` is `g1_locked & NODE`; `lock` is the solver's own `struct_lock`, which also\n"
+        "   contains every ZERO-COUNT node (empty exons and introns). Every verdict on a row is a\n"
+        "   statement about the `anchor` column only — `lock/anch` is the factor by which the solver\n"
+        "   locks more than this instrument measured.\n"
         "⭐ rho_full = mass-weighted TRUE gDNA density at anchors that DO hold counts;\n"
         "   rho_nb   = the same at the chain neighbours of the EMPTY anchors — what the zero is asserted"
         " ONTO;\n"

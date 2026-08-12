@@ -497,6 +497,15 @@ def test_the_report_REFUSES_arms_with_different_row_sets(tmp_path):
             "mard": 0.0,
             "gdna_frac_true": 0.5,
             "gdna_frac_est": 0.5,
+            # ⭐ the POOL-LEVEL fields table ⑥ reads. They are part of the `library` row's real schema,
+            # so a fixture without them was testing the report against a row shape that never ships.
+            "gdna_est": 1.0,
+            "gdna_true": 1.0,
+            "nrna_est": 0.0,
+            "nrna_true": 0.0,
+            "mrna_est": 1.0,
+            "mrna_true": 1.0,
+            "n_intergenic": 0.0,
         }
         for g in ("01", "50")
         for ax in ("transcript", "library")

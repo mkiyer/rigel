@@ -84,6 +84,7 @@ import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
@@ -109,7 +110,7 @@ P0 = _sibling("pass0_vs_oracle.py")
 
 import rigel.calibration.strand_balance  # noqa: E402,F401  (registers the module for patching)
 from rigel.calibration import node_init as NI, sweep as SW  # noqa: E402
-from rigel.calibration.messages import head as HD  # noqa: E402
+from rigel.calibration.messages import head as HD, variance as VAR  # noqa: E402
 from rigel.calibration.node_chain import NODE  # noqa: E402
 from rigel.calibration.node_geometry import g1_locked, node_gdna_geometry  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
@@ -148,6 +149,7 @@ def _install_kappa_half():
     orig = CAL.fit_strand_balance
 
     def wrapper(strand_model):
+        _fire("kappa_half")
         return _dc.replace(orig(strand_model), rna_sense_frac=0.5)
 
     CAL.fit_strand_balance = wrapper
@@ -157,6 +159,53 @@ def _install_kappa_half():
 #: ⛔ TRAPS: an-ablation-that-never-ran — every ablation increments a counter and `main` RAISES if it did not fire. An arm that never
 #: ran scores byte-identical to base, which reads as "this change is inert" and is publishable and wrong.
 _FIRED: dict = {}
+
+#: ⛔⛔⛔ **THE ARMS THAT CAN ONLY SPEAK THROUGH THE MESSAGE LAYER — and a fire counter cannot see this.**
+#:
+#: `CalibrationConfig.message_propagation` defaults to ``False`` (owner, 2026-08-07), which installs
+#: ``messages.silent.SilentPolicy``. Every name in this set is then either UNCALLED or expresses itself
+#: only through a fusion that no longer happens, so the arm scores byte-identical to ``base`` — which is
+#: TRAPS: an-ablation-that-never-ran's published-and-wrong reading, arriving through a config flag rather than a renamed function.
+#:
+#: ⭐ **The two shapes, and they fail differently, which is why the counter alone is not enough:**
+#:
+#: * ``composition_logvar`` / ``_solve_nodes_logodds_all``'s imputation arguments are reached ONLY from
+#:   ``HeadPolicy.prepare``. Those arms never fire and the counter DOES catch them — after a full run.
+#: * ⛔ every arm that moves a PRECISION (``own_precision``, ``struct_lock``, ``own_composition_logvar``,
+#:   or a ``rho`` at a zero-mass slot) fires on tens of thousands of slots and changes NO scored field:
+#:   with no message to fuse against, ``_fuse(own, p, silent) = own`` for every ``p``. **The counter is
+#:   blind to exactly these**, and it was blind to nine of them.
+#:
+#: ⚠ MEASURED, not declared: `--self-test` runs every arm under both settings and requires this set to be
+#: precisely the arms that move nothing with messages OFF and something with them ON.
+_NEEDS_MESSAGES = frozenset({
+    "backbone_head", "backbone", "msgfree_p0", "msgfree_all",
+    "msgscale_0.001", "msgscale_0.01", "msgscale_0.1", "msgscale_0.5", "onesided_rna",
+    "zc_own_count", "zc_total_n", "zc_live_count", "zc_transfer", "zc_anchor_mute",
+    "zc_jeffreys_mean", "zc_logmean", "zc_struct_lock_g1", "zc_reference_var",
+    "zc_discrepancy", "zc_disc_var", "zc_ref_prior", "zc_ref_prior_damp",
+})
+
+#: The arms that are MEANT to score byte-identical to `base`; for these "moved nothing" is the pass.
+#: ⛔ ``zc_noop`` re-derives HEAD's own decisions through the rebuild path the three reverts use, and
+#: ``backbone_head`` asserts the shipped policy is reaching the solver. Both are TRAPS: byte-identity-gate.
+_IDENTITY_ARMS = frozenset({"zc_noop", "backbone_head"})
+
+
+def _require(arm: str, messages: bool) -> None:
+    """⛔ Refuse an arm the run's policy cannot express, BEFORE 36 conditions of compute.
+
+    The alternative is what this harness did until 2026-08-11: run for twenty minutes and either raise
+    TRAPS: an-ablation-that-never-ran at the end or — worse, for the nine precision arms — write a complete, plausible panel
+    that is byte-identical to ``base`` and reads as "the mechanism is worth nothing"."""
+    if arm in _NEEDS_MESSAGES and not messages:
+        raise SystemExit(
+            f"⛔ arm {arm!r} needs the MESSAGE LAYER and this run has message_propagation=False.\n"
+            f"   Under SilentPolicy it patches a name the solver never calls, or moves a precision that\n"
+            f"   nothing fuses against — either way it would score byte-identical to `base` and read as\n"
+            f"   'this mechanism is inert'. Re-run with --messages on, and compare it against a `base`\n"
+            f"   run with --messages on (TRAPS.md an-ablation-that-never-ran / could-the-arm-have-fired)."
+        )
 
 
 def _fire(name: str) -> None:
@@ -257,21 +306,23 @@ def _install_zc_transfer():
     was actually attributed to.
 
     ⛔⛔ **BOTH BINDINGS ARE PATCHED, and that is TRAPS: an-ablation-that-never-ran verbatim.** ``messages.head`` does
-    ``from .enrichment_frame import composition_logvar``, which makes a SEPARATE module global; patching
+    ``from .variance import composition_logvar``, which makes a SEPARATE module global; patching
     only the leaf module leaves the solver calling the original and the arm reads as inert.
     ⚠ ``transfer_logvar``'s ``~isfinite`` guard is NOT restored — it was deleted as treating the
-    symptom, and restoring it here would vary two things."""
-    EF = sys.modules["rigel.calibration.enrichment_frame"]
-    orig = EF.composition_logvar
+    symptom, and restoring it here would vary two things.
+
+    ⛔ **MESSAGE-LAYER ARM** — ``composition_logvar`` has exactly one caller, ``HeadPolicy.prepare``, so
+    this arm is structurally unreachable under ``SilentPolicy``. :func:`_require` refuses it up front."""
+    orig = VAR.composition_logvar
 
     def wrapper(f_g, E_g, E_r, var_fg, n):
         _fire("zc_transfer")
         nn = np.asarray(n, np.float64)
         with np.errstate(divide="ignore"):
             asym = np.where(nn > 0.0, 1.0 / np.maximum(nn, 1e-300), np.inf)
-        return orig(f_g, E_g, E_r, var_fg, n) - EF.count_logvar(nn) + asym
+        return orig(f_g, E_g, E_r, var_fg, n) - VAR.count_logvar(nn) + asym
 
-    EF.composition_logvar = wrapper
+    VAR.composition_logvar = wrapper
     HD.composition_logvar = wrapper
     return orig
 
@@ -380,9 +431,13 @@ def _install_zc_reference_var():
     this different from every arm above, all of which cost the ``g00`` control.
 
     ⚠ Both bindings of ``composition_logvar`` are patched (TRAPS: an-ablation-that-never-ran), and ``tau_lam``/``struct_lock``
-    are captured from the ``build_node_init`` call that ``node_sweep`` makes immediately before."""
+    are captured from the ``build_node_init`` call that ``node_sweep`` makes immediately before.
+
+    ⛔ **MESSAGE-LAYER ARM** — the patched ``composition_logvar`` is called only by ``HeadPolicy.prepare``,
+    so under ``SilentPolicy`` the ``bni`` half still runs and changes nothing. :func:`_require` refuses it
+    up front rather than letting it read as inert."""
     orig_bni = NI.build_node_init
-    orig_cl = sys.modules["rigel.calibration.enrichment_frame"].composition_logvar
+    orig_cl = VAR.composition_logvar
     state: dict = {}
 
     def bni(chain, statics, geometry, **kw):
@@ -403,7 +458,7 @@ def _install_zc_reference_var():
 
     NI.build_node_init = bni
     SW.build_node_init = bni
-    sys.modules["rigel.calibration.enrichment_frame"].composition_logvar = cl
+    VAR.composition_logvar = cl
     HD.composition_logvar = cl
     return orig_cl
 
@@ -940,12 +995,20 @@ def _install_face_one():
 
     def wrapper(chain, statics, geometry, **kw):
         ni = orig(chain, statics, geometry, **kw)
+        # ⛔ TWO SILENT EARLY RETURNS, and until 2026-08-11 this arm had no fire counter at all — so
+        # either of them made it inert with no signal whatsoever. They are counted separately from the
+        # firing, because "no region_arrays" is a WIRING failure and "no intron|exon edge on this chain"
+        # is an ordinary fact about the chain (TRAPS: could-the-arm-have-fired).
         ra = _RA.get("region_arrays")
         if ra is None:
+            _FIRED["intron_phi_NO_REGION_ARRAYS"] = _FIRED.get("intron_phi_NO_REGION_ARRAYS", 0) + 1
             return ni
         edges, srcs = _targets(chain, ra)
         if edges.size == 0:
+            _FIRED["intron_phi_no_edges"] = _FIRED.get("intron_phi_no_edges", 0) + 1
             return ni
+        _fire("intron_phi")
+        _FIRED["intron_phi_edges"] = _FIRED.get("intron_phi_edges", 0) + int(edges.size)
         f_g = np.array(ni.f_g, np.float64)
         f_pos = np.array(ni.f_pos, np.float64)
         f_neg = np.array(ni.f_neg, np.float64)
@@ -1001,52 +1064,196 @@ def _install_face_one():
     SW.build_node_init = wrapper
 
 
+#: every arm this harness carries. ⭐ ONE home: `--arm`'s choices and `--self-test`'s worklist are the
+#: same tuple, so an arm cannot be added and left out of the falsification.
+_ARM_CHOICES = (
+    "base",
+    "backbone_head",
+    "backbone",
+    "msgfree_p0",
+    "msgfree_all",
+    "msgscale_0.001",
+    "msgscale_0.01",
+    "msgscale_0.1",
+    "msgscale_0.5",
+    "onesided_rna",
+    "intron_phi",
+    "kappa_half",
+    "zc_noop",
+    "zc_own_count",
+    "zc_total_n",
+    "zc_live_count",
+    "zc_transfer",
+    "zc_anchor_mute",
+    "zc_jeffreys_mean",
+    "zc_logmean",
+    "zc_struct_lock_g1",
+    "zc_reference_var",
+    "zc_discrepancy",
+    "zc_disc_var",
+    "zc_ref_prior",
+    "zc_ref_prior_damp",
+)
+
+#: the two conditions `--self-test` runs every arm on. ⭐ TWO, not one, and they are opposite ends of the
+#: gDNA axis: the `zc_*` family acts on empty structurally-locked anchors, which `g00` has 1,312 of and a
+#: contaminated condition has ~122, so a one-condition self-test could read an arm as inert for want of a
+#: population rather than for want of a mechanism (TRAPS: could-the-arm-have-fired).
+_SELFTEST_CONDITIONS = (
+    "gdna_g50_ss_0.50_nrna_none_capture_on",  # the blind stratum — unstranded x capture-ON
+    "gdna_g00_ss_0.50_nrna_none_capture_on",  # the zero-gDNA control
+)
+
+
+def _self_test(args, arms) -> int:
+    """⭐⭐⭐ **THE HARNESS'S OWN FALSIFICATION: does each arm still REACH the solver?**
+
+    ⛔ **This exists because a fire counter answered the wrong question for three months.** Every arm here
+    increments a counter and `main` raises if it stays at zero — and on 2026-08-11, under the shipped
+    config, **nine arms fired on tens of thousands of slots and changed not one scored field**, while four
+    more patched a module that had been deleted at `0d9d422b` and five months of `zc_*` readings would have
+    been byte-identical to `base`. Firing is necessary and it is not sufficient: the question is whether the
+    arm MOVES A NUMBER.
+
+    So each arm is run under BOTH settings of `message_propagation` and classified:
+
+        RAISED   it refused to run at all
+        INERT    it ran and every scored field matched `base` for that setting
+        MOVED    at least one scored field differs
+
+    and the three claims below are then GATES rather than prose. ⚠ Each arm is a fresh PROCESS: the arms
+    install themselves by rebinding module globals, so two in one interpreter would compose."""
+    AI = _sibling("arm_identity.py")
+    conds = list(args.conditions or _SELFTEST_CONDITIONS)
+    root = args.work_dir / "_self_test"
+    root.mkdir(parents=True, exist_ok=True)
+
+    def run(arm: str, msgs: str):
+        out = root / f"{msgs}__{arm}.jsonl"
+        cmd = [sys.executable, str(Path(__file__).resolve()), "--arm", arm, "--messages", msgs,
+               "--allow-inert", "--suite", str(args.suite), "--index", str(args.index),
+               "--work-dir", str(root / f"wd_{msgs}_{arm}"), "--out", str(out),
+               "--conditions", *conds]
+        if args.oracle_cache is not None:
+            cmd += ["--oracle-cache", str(args.oracle_cache)]
+        p = subprocess.run(cmd, capture_output=True, text=True)
+        return p.returncode, out
+
+    def verdict(arm: str, msgs: str, base_out: Path):
+        rc, out = run(arm, msgs)
+        if rc != 0:
+            return "RAISED"
+        rows = {(r["condition"], r["axis"]): r
+                for r in (json.loads(x) for x in out.read_text().splitlines() if x.strip())}
+        base = {(r["condition"], r["axis"]): r
+                for r in (json.loads(x) for x in base_out.read_text().splitlines() if x.strip())}
+        # ⛔ TRAPS: byte-identity-gate — an EMPTY arm must not read as identical. `_same` is `arm_identity`'s own
+        # comparator, so two `nan`s are one absence rather than a spurious difference.
+        if not rows or set(rows) != set(base):
+            return "RAISED"
+        for k, r in rows.items():
+            for f, v in r.items():
+                # `arm` names itself and `messages` is the setting under test, not a measurement.
+                if f in ("arm", "messages"):
+                    continue
+                if not AI._same(v, base[k].get(f)):
+                    return "MOVED"
+        return "INERT"
+
+    jobs = args.jobs or 6
+    print(f"\n   THE ARM SELF-TEST — {len(arms)} arms x 2 policies on {len(conds)} conditions, "
+          f"{jobs} at a time\n")
+    # ⛔ the two `base` runs FIRST and alone: every verdict below is a diff against one of them.
+    bases = {}
+    for msgs in ("off", "on"):
+        rc, bases[msgs] = run("base", msgs)
+        if rc != 0:
+            raise SystemExit(f"⛔ `base --messages {msgs}` itself failed — nothing below can be read")
+
+    # ⚠ THREADS, not processes: each unit of work is a subprocess, so the parent only waits on it. The
+    # arms themselves are still one interpreter each — they install by rebinding module globals, and two
+    # in one process would compose into an arm nobody wrote.
+    work = [(arm, m) for arm in arms if arm != "base" for m in ("off", "on")]
+    with ThreadPoolExecutor(max_workers=jobs) as ex:
+        got = dict(zip(work, ex.map(lambda w: verdict(w[0], w[1], bases[w[1]]), work)))
+    res = {}
+    for arm in arms:
+        if arm == "base":
+            continue
+        res[arm] = {m: got[(arm, m)] for m in ("off", "on")}
+        print(f"      {arm:<20} msgOFF {res[arm]['off']:<7} msgON {res[arm]['on']:<7}", flush=True)
+
+    fails: list[str] = []
+    for arm, v in res.items():
+        if arm in _IDENTITY_ARMS:
+            # ⭐ these arms are SUPPOSED to reproduce base; "MOVED" is their failure, not their pass.
+            for m, s in v.items():
+                if s == "MOVED":
+                    fails.append(f"{arm} is an identity arm and MOVED under --messages {m}")
+            continue
+        if arm in _NEEDS_MESSAGES:
+            if v["off"] == "MOVED":
+                fails.append(f"{arm} is in _NEEDS_MESSAGES but MOVES with messages off — drop it")
+            if v["on"] != "MOVED":
+                fails.append(f"{arm} is in _NEEDS_MESSAGES and is {v['on']} WITH them on — dead arm")
+        else:
+            if v["off"] != "MOVED":
+                fails.append(f"{arm} is {v['off']} with messages off — add it to _NEEDS_MESSAGES")
+    print()
+    for f in fails:
+        print(f"   ⛔ {f}")
+    print(f"\n   {'⛔ ' + str(len(fails)) + ' FAILED' if fails else '⭐ every arm reaches the solver'}\n")
+    return 1 if fails else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--arm", choices=_ARM_CHOICES)
     ap.add_argument(
-        "--arm",
-        choices=(
-            "base",
-            "backbone_head",
-            "backbone",
-            "msgfree_p0",
-            "msgfree_all",
-            "msgscale_0.001",
-            "msgscale_0.01",
-            "msgscale_0.1",
-            "msgscale_0.5",
-            "onesided_rna",
-            "intron_phi",
-            "kappa_half",
-            "zc_noop",
-            "zc_own_count",
-            "zc_total_n",
-            "zc_live_count",
-            "zc_transfer",
-            "zc_anchor_mute",
-            "zc_jeffreys_mean",
-            "zc_logmean",
-            "zc_struct_lock_g1",
-            "zc_reference_var",
-            "zc_discrepancy",
-            "zc_disc_var",
-            "zc_ref_prior",
-            "zc_ref_prior_damp",
-        ),
-        required=True,
+        "--self-test", action="store_true",
+        help="run EVERY arm under both policies and gate that each still moves a number. This is the "
+             "harness's own falsification and needs no --arm.",
+    )
+    ap.add_argument(
+        "--allow-inert", action="store_true",
+        help="⛔ --self-test only: run an arm whose mechanism the chosen policy cannot express. Any "
+             "number it produces is byte-identical to base by construction and means nothing.",
+    )
+    # ⛔⛔ THE CONFIG IS PART OF THE ARM'S DEFINITION, AND IT USED TO BE INVISIBLE. `main` built a bare
+    # `CalibrationConfig()`, so when the shipped default of `message_propagation` flipped to False at
+    # `0d9d422b` twenty-two of the twenty-six arms silently became no-ops and NOTHING said so.
+    # ⭐ Default is the SHIPPED value, so `base` is still the tool as it ships and no existing invocation
+    # changes meaning; `on` is what items 3 and 4 of `ROADMAP.md` §2 need.
+    ap.add_argument(
+        "--messages", choices=("off", "on"), default=None,
+        help="message_propagation. Default: whatever CalibrationConfig ships. Recorded in every row, so "
+             "two arms run differently can never be diffed silently.",
     )
     ap.add_argument("--conditions", nargs="*", default=None)
     ap.add_argument("--suite", type=Path, default=P0.DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=P0.DEFAULT_INDEX)
     ap.add_argument("--oracle-cache", type=Path, default=None)
     ap.add_argument("--work-dir", type=Path, default=Path("/tmp/rigel_ladder_ceiling"))
-    ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--out", type=Path, default=None)
     ap.add_argument(
-        "--jobs", type=int, default=1,
+        "--jobs", type=int, default=None,
         help="run this many conditions CONCURRENTLY, by re-invoking this script on shards and "
-             "concatenating. The conditions are independent, so this changes no number.",
+             "concatenating. The conditions are independent, so this changes no number. Default 1; "
+             "under --self-test the unit is an ARM and the default is 6.",
     )
     args = ap.parse_args()
+
+    if args.self_test:
+        return _self_test(args, _ARM_CHOICES)
+    if not args.arm or args.out is None:
+        raise SystemExit("⛔ --arm and --out are required (or --self-test)")
+
+    #: the run's policy, resolved once and then carried everywhere it is needed.
+    messages = (
+        CalibrationConfig().message_propagation if args.messages is None else args.messages == "on"
+    )
+    if not args.allow_inert:
+        _require(args.arm, messages)
 
     # ── ⭐⭐ SHARDED PARALLELISM. Conditions are completely independent — separate BAMs, separate
     # calibrations, nothing shared but the read-only index and oracle cache — so this is a pure
@@ -1054,7 +1261,8 @@ def main() -> int:
     # a subset rather than parallelising inside it, so the arm-installation logic every arm depends on
     # is byte-for-byte the code that was verified serially.
     # ⚠ ``OMP_NUM_THREADS=1`` is already forced at import, so the workers do not fight over threads.
-    if args.jobs > 1:
+    if (args.jobs or 1) > 1:
+        args.jobs = args.jobs or 1
         names = args.conditions or sorted(
             p.name for p in args.suite.iterdir() if (p / "sim_oracle.bam").is_file()
         )
@@ -1066,7 +1274,11 @@ def main() -> int:
         for i, sh in enumerate(shards):
             o = tmp / f"{i}.jsonl"
             outs.append(o)
+            # ⛔ `--messages` is passed EXPLICITLY rather than left to the default. A shard that
+            # inherited the shipped default while the parent was told `on` would concatenate rows from
+            # two different solvers into one panel that reads as a single measurement.
             cmd = [sys.executable, str(Path(__file__).resolve()), "--arm", args.arm,
+                   "--messages", "on" if messages else "off",
                    "--suite", str(args.suite), "--index", str(args.index),
                    "--work-dir", str(args.work_dir / f"shard{i}"), "--out", str(o),
                    "--conditions", *sh]
@@ -1145,7 +1357,8 @@ def main() -> int:
         _install_zc_disc_var()
 
     index = TranscriptIndex.load(str(args.index))
-    config = CalibrationConfig()
+    config = CalibrationConfig(message_propagation=messages)
+    print(f"  arm={args.arm}  message_propagation={messages}", flush=True)
     names = args.conditions or sorted(
         p.name for p in args.suite.iterdir() if (p / "sim_oracle.bam").is_file()
     )
@@ -1185,31 +1398,34 @@ def main() -> int:
                 s["library_f_gdna_pass0"] = float(m.library_f_gdna.get("pass0", float("nan")))
                 s["library_f_gdna_final"] = float(m.library_f_gdna.get("final", float("nan")))
                 s["library_f_gdna_truth"] = float(m.library_f_gdna.get("T", float("nan")))
+                # ⭐ `messages` is stamped on every row so an arm file CARRIES ITS OWN CONFIG.
+                # `arm_identity.py` compares every field but `arm`/`seconds`, so diffing a
+                # messages-on arm against a messages-off one now FAILS on every row instead of
+                # silently reporting the config change as the mechanism's effect.
                 fh.write(json.dumps({"arm": args.arm, "condition": name, "axis": axis,
+                                     "messages": "on" if messages else "off",
                                      "f_gdna": truth, **s}) + "\n")
                 fh.flush()
             print(f"  {name} {time.perf_counter() - t0:.0f}s", flush=True)
     # ⛔⛔ TRAPS: an-ablation-that-never-ran — an ablation that never ran scores byte-identical to base and reads as "inert".
-    # ⚠ a COMPOSITE arm fires only its components' names, so require ANY zc_* firing rather than this
-    #   arm's own name. The guard tripped on `zc_ref_prior_damp` AFTER a complete, valid run — it caught a
-    #   bookkeeping gap, not a measurement one, and narrowing it here keeps TRAPS: an-ablation-that-never-ran's teeth for the real case
-    #   (nothing fired at all).
-    if (
-        args.arm in ("msgfree_p0", "msgfree_all", "onesided_rna", "backbone", "backbone_head")
-        or args.arm.startswith("msgscale_")
-    ) and not _FIRED.get(args.arm):
-        raise RuntimeError(
-            f"arm {args.arm!r} NEVER FIRED — the patched name is not the one the solver calls. "
-            f"fired: {_FIRED or '{}'} (TRAPS.md an-ablation-that-never-ran)"
-        )
-    if (
-        args.arm.startswith("zc_")
-        and not any(k.startswith("zc_") and not k.endswith("_slots") for k in _FIRED)
-    ):
-        raise RuntimeError(
-            f"arm {args.arm!r} NEVER FIRED — the patched name is not the one the solver calls. "
-            f"fired: {_FIRED or '{}'} (TRAPS.md an-ablation-that-never-ran)"
-        )
+    #
+    # ⭐ **EVERY arm is now named, and that is strictly stronger than what stood here.** The old guard
+    #   covered `msgfree_*`/`msgscale_*`/`onesided_rna`/`backbone*` by name and the whole `zc_*` family by
+    #   the weaker test "did ANY zc_ counter move" — so a `zc_` arm could pass on a SIBLING's counter. It
+    #   also covered `intron_phi` and `kappa_half` not at all; both ran unguarded, and `intron_phi` has
+    #   two silent early returns that would have made it inert.
+    # ⚠ A COMPOSITE arm fires its components' names and never its own, so it declares them here rather
+    #   than weakening the test for everyone. That is what tripped on `zc_ref_prior_damp` after a
+    #   complete, valid run.
+    _COMPOSITE = {"zc_ref_prior_damp": ("zc_ref_prior", "zc_disc_var")}
+    if args.arm != "base":
+        want = _COMPOSITE.get(args.arm, (args.arm,))
+        missing = [w for w in want if not _FIRED.get(w)]
+        if missing:
+            raise RuntimeError(
+                f"arm {args.arm!r} NEVER FIRED ({', '.join(missing)}) — the patched name is not the one "
+                f"the solver calls. fired: {_FIRED or '{}'} (TRAPS.md an-ablation-that-never-ran)"
+            )
     if _FIRED:
         print(f"  ⭐ ablation fired {_FIRED} time(s) — {args.arm}", flush=True)
     return 0

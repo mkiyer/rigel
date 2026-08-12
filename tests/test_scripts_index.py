@@ -55,6 +55,87 @@ UNDOCUMENTED_DEBT: frozenset[str] = frozenset(
 ON_DISK = frozenset(p.name for p in DESIGN_DIR.glob("*.py") if p.name != "__init__.py")
 IN_TABLE = frozenset(_ROW.findall(CLAUDE.read_text()))
 
+SIM_DIR = ROOT / "scripts" / "sim"
+
+#: ⛔⛔ **INSTRUMENTS THAT DO NOT IMPORT, EACH WITH THE REASON AND THE DECISION OWED.** Same contract as
+#: ``UNDOCUMENTED_DEBT``: adding to this is not a fix, it is a way of saying "not yet", and the list
+#: should only ever SHRINK. ⚠ A name here is still gated — the test asserts it fails for the RECORDED
+#: reason, so a script that starts working, or breaks a NEW way, both fail loudly.
+BROKEN_ON_IMPORT: dict[str, str] = {
+    # `_component_node_arrays` was deleted from `calibration/priors.py` and has no successor: the module
+    # now exposes `_region_locus_shares` / `_edge_locus_shares` / `_project_regions_to_loci`. ⭐ The
+    # DECISION is not a repair — this instrument compares the EM prior "in fragment units vs the OLD
+    # incidence sum", and `ROADMAP.md` §0 records that migration as DONE, so its question is closed.
+    # Delete it or re-point it at the surviving API; do not leave it here.
+    "prior_units_check.py": "_component_node_arrays",
+}
+
+#: every script the import gate covers, both trees.
+ALL_SCRIPTS = sorted(
+    [p for p in DESIGN_DIR.glob("*.py") if p.name != "__init__.py"]
+    + [p for p in SIM_DIR.glob("*.py") if p.name != "__init__.py"],
+    key=lambda p: p.name,
+)
+
+
+@pytest.mark.parametrize("path", ALL_SCRIPTS, ids=lambda p: p.name)
+def test_every_instrument_still_imports(path):
+    """⛔⛔ **A `src/` DELETION KILLS INSTRUMENTS SILENTLY, AND NOTHING HERE COULD SEE IT.**
+
+    This file's own docstring claimed "measured 2026-08-07, **every one of them imports cleanly**" — a
+    measurement taken once, by hand, and never gated. By 2026-08-11 it was false for **five** scripts and
+    the suite was green the whole time: three died when the fixed-point layer (`INV_LENGTH_SCALE`,
+    `inv_length_quantum`) went at `94d283c0`, one when `enrichment_frame` went at `0d9d422b`, one on
+    `_component_node_arrays`. Two commits, five dead instruments, 3,235 passing tests.
+
+    ⭐ The other tests here check that a script is INDEXED and has a DOCSTRING — both true of a script
+    that raises on line 1. Importing is the cheapest possible check that it is still connected to the
+    code it measures, and it is the one that rots.
+
+    ⚠ Import only, never execution: an instrument's numbers need its substrate, and this is a
+    connectivity gate, not a claim that the script is CORRECT. `TRAPS: a-gate-that-reconstructs` —
+    a gate that reads as more coverage than it has is worse than none.
+    """
+    import importlib.util
+    import sys
+
+    expected = BROKEN_ON_IMPORT.get(path.name)
+    name = f"_gate_{path.stem}"
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+
+    # ⛔⛔ REPRODUCE WHAT `python scripts/design/x.py` DOES, OR THE GATE TESTS A DIFFERENT PROGRAM.
+    # Two things the naive spelling gets wrong, and both were measured as FALSE FAILURES on six
+    # instruments that run perfectly (`TRAPS: a-gate-that-reconstructs` — a gate that rebuilds its
+    # subject tests the rebuild):
+    #   * the module must be in `sys.modules` BEFORE `exec_module`, or a dataclass resolving its own
+    #     `__module__` gets `None` and raises `'NoneType' object has no attribute '__dict__'`;
+    #   * the script's OWN directory is `sys.path[0]` under a real invocation, which is how the
+    #     sibling-importing instruments (`_sibling`, `from reference_on_real_data import ...`) resolve.
+    sys.modules[name] = module
+    sys.path.insert(0, str(path.parent))
+    try:
+        spec.loader.exec_module(module)
+    except SystemExit:
+        pass  # a script that argues with argv at import is still connected
+    except Exception as exc:  # noqa: BLE001
+        if expected and expected in str(exc):
+            pytest.xfail(f"{path.name}: known broken on `{expected}` — a DECISION is owed, see the dict")
+        raise AssertionError(
+            f"{path.name} no longer imports: {type(exc).__name__}: {exc}\n"
+            f"An instrument that cannot be imported cannot be run, and nothing else in this file "
+            f"would have caught it."
+        ) from exc
+    else:
+        if expected:
+            raise AssertionError(
+                f"{path.name} imports fine now, but is still listed in BROKEN_ON_IMPORT as broken on "
+                f"`{expected}`. Remove the entry — a stale exemption hides the next real break."
+            )
+    finally:
+        sys.path.remove(str(path.parent))
+        sys.modules.pop(name, None)
+
 
 def test_every_instrument_is_in_the_index_or_named_as_debt():
     """⛔ A script nobody indexed is a script the next session rebuilds."""
