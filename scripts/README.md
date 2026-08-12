@@ -1,41 +1,42 @@
 # `scripts/` — developer tooling
 
-Developer-facing tooling that is **not** part of the shipped `rigel` package. Two tiers, with
-different maintenance standards.
+Developer-facing tooling that is **not** part of the shipped `rigel` package.
 
-## Tier 1 — maintained tooling (lint-clean, no relaxations)
+⚠ **This file was rewritten on 2026-08-11 because it had rotted into fiction.** It documented a
+`benchmarking/` package (deleted the same day), a `calibration/` directory and a Tier-2 `debug/`
+toolkit — **neither of the last two has existed for months** — and it did not mention `design/` at all,
+which is 56 files and the toolkit people actually use. ⛔ A directory listing takes one second; prefer it
+to this file if the two disagree, and then fix this file.
 
-Referenced by the CI/skills/docs and expected to keep working across releases:
+## The four directories
 
 | dir | what it is |
 |---|---|
-| `sim/` | synthetic-suite drivers (`simulate_suite.py`, `evaluate_suite.py`, `simulate_reads.py`, `gen_ambig_dense.py`, …) + suite YAML configs — used by the `calibration-benchmark` skill |
-| `benchmarking/` | the real-data benchmark package, run as `python -m scripts.benchmarking` |
-| `publishing/` | release scripts (`release.sh`, `post_release.sh`, `conda_publish.sh`) |
+| ⭐⭐ `design/` | **the instrument shelf — 56 files.** The debug loop, the panel harnesses, the truth-scoring instruments. ⛔ Indexed in `CLAUDE.md`'s table, and `tests/test_scripts_index.py` enforces that the index and the disk agree in BOTH directions and that every file still IMPORTS |
+| ⭐ `sim/` | thin CLI wrappers over the simulator engine in `src/rigel/sim/`, plus the panel YAML configs in `sim/configs/`. ⭐⭐ **`panel.py` is the one entry point** — build, simulate, cache, score, report |
 | `profiling/` | profiling drivers (`profiler.py`, `pyspy_driver.py`, `scan_profile.py`) + configs |
-| `calibration/` | calibration config generators |
+| `publishing/` | release scripts (`release.sh`, `post_release.sh`, `conda_publish.sh`) |
 
-These are held to the same lint standard as `src/` and `tests/`.
+## ⭐⭐⭐ The simulation + benchmarking workflow
 
-## Tier 2 — `debug/`: a working diagnostics toolkit
+**One command per stage, each resumable, each gated.** `docs/TESTING.md` §2 is the long form.
 
-A **small, named** set of current calibration/EM diagnostics (oracle + net-flow + siphon tools). The
-canonical tools — `oracle.py`, `oracle_reattribute.py`, `oracle_leak_trace.py`, `benchmark_ab_report.py`,
-`benchmark_ab_render.py`, `dissect_loci.py`, `toy_prod.py`, `pass_trace.py`, `localize_siphon.py`,
-`layer_trace.py`, `locus_component_audit.py`, `em_multiplicity*.py`, … — are documented in
-`docs/TRAPS.md`.
+```bash
+source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
+export OMP_NUM_THREADS=1
 
-**Policy (so this dir does not regrow into an archive):**
+python scripts/sim/panel.py build    --config scripts/sim/configs/gdna_ladder.yaml
+python scripts/sim/panel.py simulate --config scripts/sim/configs/gdna_ladder.yaml --jobs 8
+python scripts/sim/panel.py cache    --config scripts/sim/configs/gdna_ladder.yaml --jobs 8
+python scripts/sim/panel.py score    --config scripts/sim/configs/gdna_ladder.yaml --jobs 8
+python scripts/sim/panel.py report   --config scripts/sim/configs/gdna_ladder.yaml
+```
 
-- Keep it a small toolkit of tools that are **current**. When a diagnostic is finished with, **delete it**
-  — git history preserves it. Do **not** accumulate a `scripts/debug/archive/` (one was deleted in the
-  v0.7.0 productionizing pass; ~110 one-off scripts, all recoverable from git).
-- Scratch/exploration that isn't a reusable tool should not be committed here at all.
-- `debug/` scripts may use quick-diagnostic idioms (one-liner `if x: y`, `a = ...; b = ...`, post-`sys.path`
-  imports, compute-and-inspect locals); those specific lint rules are relaxed for `scripts/debug/**` in
-  `pyproject.toml` (`[tool.ruff.lint.per-file-ignores]`). **Real errors — undefined names, redefinition,
-  syntax — are still enforced**, so a script that has rotted against the current API fails lint and is a
-  delete candidate.
+⛔ **`score` needs BOTH caches and `cache` builds both.** The scan cache makes calibration re-runnable
+without rescanning; the ORACLE cache is the origin-split truth (`gdna` / `mrna` / `nrna` partitions plus
+the undrained `_main` payload) that every truth-scoring instrument reads. Until 2026-08-11 the oracle
+cache had no first-class step at all — it was a side effect of running `pass0_vs_oracle.py
+--oracle-cache`, which is why the documented recipe could not reach a scored table.
 
 ## Lint
 
@@ -43,4 +44,5 @@ canonical tools — `oracle.py`, `oracle_reattribute.py`, `oracle_leak_trace.py`
 ruff check src/ tests/ scripts/
 ```
 
-Everything under `scripts/` must pass (with the `debug/` relaxations above).
+Everything under `scripts/` must pass. ⛔ **Never `ruff format scripts/`** — the instruments' aligned
+tables and banner comments are load-bearing and the formatter destroys them.

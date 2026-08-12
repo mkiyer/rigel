@@ -1,4 +1,4 @@
-"""Unit tests for the net fragment-flow deconvolution math (rigel.sim.analysis).
+"""Unit tests for the net fragment-flow deconvolution math (rigel.sim.net_flow).
 
 Uses the canonical worked example: one locus with isoforms T1/T2/T3 + a gDNA component,
 truth = 10 fragments each, and the tool observes T1=12, T2=2, T3=8, gDNA=18. The net-flow
@@ -6,7 +6,7 @@ reduction must (a) satisfy observed-expected = Σ net inflow, (b) sum to zero ov
 and (c) decompose each transcript's surplus/deficit into gDNA-source vs RNA-isoform-source.
 """
 
-from rigel.sim.analysis import FlowData, _flow_marginals, _net_flow_rows
+from rigel.sim.net_flow import FlowData, _flow_marginals, _net_flow_rows
 
 
 def _example() -> FlowData:

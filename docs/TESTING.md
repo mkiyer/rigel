@@ -417,37 +417,52 @@ length, so the simulator draws the length marginal proportional to the capture-w
 
 ---
 
-## 2. Building it
+## 2. Building it — ⭐⭐⭐ `panel.py`, ONE COMMAND PER STAGE
+
+⛔⛔ **THIS SECTION USED TO STOP HALFWAY, AND THE MISSING HALF WAS THE POINT.** It documented five manual
+steps ending at "cache the scans". **Running the tool and scoring it against truth appeared in no recipe
+anywhere** and had to be reassembled from `CLAUDE.md`'s 56-row instrument table. Worse, the ORACLE cache
+— the origin-split truth every scoring instrument reads — had no step at all: it was a *side effect* of
+`pass0_vs_oracle.py --oracle-cache`, so a reader who followed these steps ended up with a panel that
+every scorer refused. `scripts/sim/panel.py` is the whole loop (2026-08-11).
 
 ```bash
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 export OMP_NUM_THREADS=1
-SUITE=~/Downloads/rigel_runs/suite
-REFS=~/Downloads/rigel_runs/refs
+CFG=scripts/sim/configs/gdna_ladder.yaml       # or pilot.yaml / flgap_short.yaml / …
 
-# 1. carve the backbone out of the real genome + annotation   (~2 s)
+python scripts/sim/panel.py status   --config $CFG              # ⭐ ALWAYS FIRST
+python scripts/sim/panel.py build    --config $CFG              # index + capture probes
+python scripts/sim/panel.py simulate --config $CFG --jobs 8     # ~21 min, ~16 GB
+python scripts/sim/panel.py cache    --config $CFG --jobs 8     # BOTH caches
+python scripts/sim/panel.py score    --config $CFG --jobs 8 --arms base oracle noop
+python scripts/sim/panel.py report   --config $CFG --arms base oracle
+```
+
+⭐ **`status` is the command to run when you do not know where you are.** Every stage is expensive and
+resumable, and it prints what exists, what is missing, and which stage to run next. It reads real state
+— pointed at the pilot and the ladder on the same day it correctly reported the *inverse* cache pattern
+(pilot: scan cache 8/8, oracle 0/8; ladder: scan 0/36, oracle 36/36).
+
+⚠ **`build` cannot carve the reference** — that needs the source genome/GTF the panel was cut from, which
+the panel config does not name. It prints the exact `build_suite_reference.py` command and stops:
+
+```bash
 python scripts/sim/build_suite_reference.py \
     --fasta $REFS/genome_controls.fasta.bgz --gtf $REFS/genes_controls.sorted.gtf \
     --refs chr21 chr22 --ercc -o $SUITE/reference
+```
 
-# 2. index it   (~2 s, deterministic)
-rigel index --fasta $SUITE/reference/genome.fa --gtf $SUITE/reference/genes.gtf \
-    --collapse-duplicate-transcripts --no-mappability --no-tsv -o $SUITE/rigel_index
+⛔ **THE GATES — run BOTH before quoting anything.** They are not yet stages of `panel.py`:
 
-# 3. design the capture panel — this IS the density step   (~17 s)
-python scripts/sim/design_suite_probes.py --gtf $SUITE/reference/genes.gtf \
-    -o $SUITE/reference/capture_panel.tsv --capture-fraction 0.5
-
-# 4. simulate the 8 conditions   (~21 min, 8 workers, ~16 GB)
-python scripts/sim/simulate_reads.py --config scripts/sim/configs/pilot.yaml -j 8
-
-# 5. cache the scans so calibration can be iterated without rescanning   (~2 min, 198x on reload)
-python scripts/design/build_scan_cache.py --index $SUITE/rigel_index --suite $SUITE/pilot
-
-# 6. ⛔ THE GATES — run BOTH before quoting anything
+```bash
 python scripts/design/simulator_gates.py --suite $SUITE/pilot --reference $SUITE/reference
 python scripts/design/suite_resolves.py $SUITE/rigel_index --suite $SUITE/pilot
 ```
+
+⚠ **A cached oracle condition needs ALL FOUR parts** — `gdna`, `mrna`, `nrna` and the undrained `_main`
+payload. `status` counts it complete only then; counting directories would call a half-written condition
+done and fail deep inside an instrument later. Gated by `tests/test_panel_workflow.py`.
 
 ⚠ **`pilot.yaml` states `gdna.genomic_refs: [chr21, chr22]` explicitly.** The engine does **not** infer
 which references carry genomic DNA, and a config that asks for gDNA without stating it is rejected — "has
@@ -506,8 +521,18 @@ nodes and no single-stranded ones, and truth files written to sd 0 / capture off
 
 ## 5. How results are evaluated
 
-⭐ **Net fragment flow is the primary metric** — `rigel.sim.analysis` (`analyze_net_flow`, `FlowData`), via
-`scripts/sim/evaluate_suite.py`.
+⭐ **There are TWO evaluation questions and they need different instruments.**
+
+| question | instrument |
+|---|---|
+| how WRONG is the answer? — per transcript, per pool, against per-fragment truth | ⭐⭐ `panel.py score` / `report`, i.e. `quant_accuracy.py`. **The only scorer.** |
+| WHERE did the misassigned fragments go? | `rigel.sim.net_flow` (`analyze_net_flow`, `FlowData`) |
+
+⛔ **`rigel.sim.analysis` and `scripts/sim/evaluate_suite.py` were DELETED on 2026-08-11** (owner). That
+was a 1,589-line second scorer running the tool and rendering its own accuracy tables beside
+`quant_accuracy.py`'s, against its own definition of truth — and two scorers is how a baseline and a
+ceiling drift apart (`TRAPS: score-the-consumers-own-count`). The 618-line flow decomposition, which has
+no duplicate, moved to `net_flow.py` with its tests; the other 971 lines went.
 
 **Hard per-fragment label recovery is the wrong target.** An unspliced RNA fragment and a gDNA fragment
 from the same locus can be sequence-identical and genuinely unrecoverable. Build the per-locus
