@@ -283,6 +283,25 @@ class AbundanceEstimator:
     # Batch locus EM (partition-native)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _t_is_synthetic(index, n_transcripts: int) -> np.ndarray:
+        """Per-transcript flag for entities the index MANUFACTURED, as `uint8`.
+
+        Returns an EMPTY array when the index carries no such column or no such transcript, which the
+        C++ reads as "no synthetic components" and answers with the shipped code path — so a run
+        without synthetic entities is bit-identical, not merely close.
+        """
+        t_df = getattr(index, "t_df", None)
+        if t_df is None or "is_synthetic" not in getattr(t_df, "columns", ()):
+            return np.zeros(0, dtype=np.uint8)
+        flags = np.ascontiguousarray(t_df["is_synthetic"].to_numpy(), dtype=np.uint8)
+        if flags.shape[0] != n_transcripts:
+            raise ValueError(
+                f"is_synthetic length {flags.shape[0]} != n_transcripts {n_transcripts} — the index "
+                f"and the estimator disagree about how many transcripts exist."
+            )
+        return flags if flags.any() else np.zeros(0, dtype=np.uint8)
+
     def run_batch_locus_em_partitioned(
         self,
         partition_tuples: list,
@@ -342,6 +361,15 @@ class AbundanceEstimator:
         # (and inside assign_posteriors) instead of any per-fragment
         # length correction.
         t_eff_lens = np.ascontiguousarray(self._t_eff_len_em, dtype=np.float64)
+        # ⭐ WHICH COMPONENTS THE ANNOTATION DOES NOT ASSERT. A synthetic nascent entity is a shadow
+        # span this index MANUFACTURED, so the null hypothesis is that it is absent and it receives no
+        # RNA prior mass — it earns mass only from fragments the data cannot explain any other way.
+        # ⛔ `is_synthetic`, NEVER `is_nrna`: a single-exon annotated transcript carries `is_nrna` (it
+        # is at once the nascent and the mature form of a real gene) and keeps its prior like any
+        # other annotated transcript.
+        # ⚠ An EMPTY array means "no synthetic components anywhere", and the C++ then takes the
+        # shipped code path unchanged — which is what keeps a synthetic-free locus bit-identical.
+        t_is_synthetic = self._t_is_synthetic(index, n_transcripts)
         n_loci = len(partition_tuples)
 
         if gdna_eff_len is None:
@@ -403,6 +431,7 @@ class AbundanceEstimator:
             gdna_eff_len,
             self.unambig_counts,
             t_eff_lens,
+            t_is_synthetic,
             self.em_counts,
             self.gdna_locus_counts,
             self._em_posterior_sum,

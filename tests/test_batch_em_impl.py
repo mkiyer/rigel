@@ -293,3 +293,133 @@ def test_positive_gdna_prior_produces_finite_outputs():
     # Conservation up to assignment fractional remainder.
     assigned = float(locus_rna[0]) + float(locus_gdna[0])
     assert assigned == pytest.approx(30.0, rel=1e-9)
+
+
+# ── SYNTHETIC NASCENT ENTITIES GET NO RNA PRIOR ──────────────────────────────────────────────────
+#
+# A synthetic nascent entity is a shadow span the INDEX manufactured; no annotation asserts it exists.
+# The null hypothesis is therefore that it is ABSENT, and it earns mass only from fragments the data
+# cannot explain any other way. These gates pin that behaviour and, just as importantly, pin the two
+# things it must NOT do: kill an entity the data supports, and disturb a locus that has none.
+
+
+class _StubIndex:
+    """The minimum `run_batch_locus_em_partitioned` reads: `t_df["is_synthetic"]`."""
+
+    def __init__(self, flags):
+        import pandas as pd
+
+        self.t_df = pd.DataFrame({"is_synthetic": np.asarray(flags, dtype=bool)})
+
+
+def _run(est, partition, t_idx, *, index=None, rna_prior=0.0, gdna_prior=0.0, enable_gdna=1):
+    return est.run_batch_locus_em_partitioned(
+        partition_tuples=[partition],
+        locus_transcript_indices=[np.asarray(t_idx, dtype=np.int32)],
+        gdna_prior_count=np.array([gdna_prior], dtype=np.float64),
+        rna_prior_count=np.array([rna_prior], dtype=np.float64),
+        index=index,
+        enable_gdna=np.array([enable_gdna], dtype=np.uint8),
+    )
+
+
+@pytest.mark.parametrize("mode", ["map", "vbem"])
+def test_a_locus_with_no_synthetic_component_is_BIT_IDENTICAL(mode):
+    """⛔ The control. The rule must be invisible where it does not apply — and BIT-identical, not
+    close: the C++ skips the annotated/synthetic split entirely when the mask is empty, and that is
+    what makes every other number here attributable (TRAPS: byte-identity-gate)."""
+    outs = []
+    for index in (None, _StubIndex([False, False])):
+        est = _estimator(2, mode=mode)
+        _run(est, _partition(n_units=100, log_liks=(0.0, -0.5), gdna_log_lik=-1.0), [0, 1],
+             index=index, rna_prior=50.0, gdna_prior=20.0)
+        outs.append(est.em_counts.sum(axis=1).copy())
+    np.testing.assert_array_equal(outs[0], outs[1])
+
+
+@pytest.mark.parametrize("mode", ["map", "vbem"])
+def test_a_SHARED_ONLY_synthetic_entity_LOSES_mass_to_the_annotated_one(mode):
+    """⭐ The zombie. Every fragment it holds is equally well explained by the annotated transcript,
+    so it has no evidence of its own and the prior no longer props it up."""
+    part = _partition(n_units=200, log_liks=(0.0, 0.0), gdna_log_lik=-2.0)
+    counts = {}
+    for tag, index in (("shipped", None), ("gated", _StubIndex([False, True]))):
+        est = _estimator(2, mode=mode)
+        _run(est, part, [0, 1], index=index, rna_prior=100.0, gdna_prior=10.0)
+        counts[tag] = est.em_counts.sum(axis=1).copy()
+    assert counts["gated"][1] < counts["shipped"][1], (
+        f"the synthetic component did not lose mass: {counts}"
+    )
+    assert counts["gated"][0] > counts["shipped"][0], (
+        f"the annotated component did not gain what the synthetic lost: {counts}"
+    )
+
+
+@pytest.mark.parametrize("mode", ["map", "vbem"])
+def test_a_synthetic_entity_the_DATA_SUPPORTS_still_survives(mode):
+    """⛔⛔ THE GATE THAT STOPS THIS BECOMING 'KILL ALL NASCENT RNA'. A rule that zeroes everything
+    passes the zombie test above; only this one separates the two. The synthetic component is the
+    strictly better explanation here, and it must keep the mass."""
+    est = _estimator(2, mode=mode)
+    _run(est, _partition(n_units=200, log_liks=(-8.0, 0.0), gdna_log_lik=-8.0), [0, 1],
+         index=_StubIndex([False, True]), rna_prior=100.0, gdna_prior=10.0)
+    counts = est.em_counts.sum(axis=1)
+    assert counts[1] > 0.9 * counts.sum(), (
+        f"a synthetic entity with decisive likelihood support was suppressed anyway: {counts}"
+    )
+
+
+@pytest.mark.parametrize("mode", ["map", "vbem"])
+def test_an_ALL_SYNTHETIC_locus_takes_NO_rna_prior(mode):
+    """⚠ The degenerate locus of the derivation: no annotated component means no eligible recipient,
+    so the RNA prior is 0 and the pool must outcompete gDNA unaided. It must not silently fall back
+    to handing the prior to the synthetic components after all."""
+    part = _partition(n_units=100, log_liks=(0.0, 0.0), gdna_log_lik=0.0)
+    res = {}
+    for tag, rna_prior in (("no_prior", 0.0), ("big_prior", 500.0)):
+        est = _estimator(2, mode=mode)
+        _total, _rna, gdna = _run(est, part, [0, 1], index=_StubIndex([True, True]),
+                                  rna_prior=rna_prior, gdna_prior=10.0)
+        res[tag] = (est.em_counts.sum(axis=1).copy(), float(gdna[0]))
+    np.testing.assert_allclose(res["no_prior"][0], res["big_prior"][0], rtol=1e-9, atol=1e-9)
+    assert res["no_prior"][1] == pytest.approx(res["big_prior"][1], rel=1e-9), (
+        "the RNA prior reached an all-synthetic locus and moved the gDNA split"
+    )
+
+
+def test_is_synthetic_is_read_NOT_is_nrna():
+    """⛔ A single-exon annotated transcript carries `is_nrna = True` and is simultaneously the
+    nascent and the mature form of a REAL gene. It must keep its prior. The estimator must key on
+    `is_synthetic` alone, so an index carrying only `is_nrna` changes nothing."""
+    import pandas as pd
+
+    class _NrnaOnlyIndex:
+        def __init__(self):
+            self.t_df = pd.DataFrame({"is_nrna": [False, True]})
+
+    est = AbundanceEstimator(num_transcripts=2, em_config=EMConfig(mode="map"))
+    np.testing.assert_array_equal(est._t_is_synthetic(_NrnaOnlyIndex(), 2), np.zeros(0, np.uint8))
+    np.testing.assert_array_equal(est._t_is_synthetic(_StubIndex([False, False]), 2),
+                                  np.zeros(0, np.uint8))
+    np.testing.assert_array_equal(est._t_is_synthetic(_StubIndex([False, True]), 2),
+                                  np.array([0, 1], np.uint8))
+
+
+# ⛔⛔ THE ONE INVARIANT THIS DESIGN RESTS ON HAS NO TEST, AND CANNOT HAVE ONE FROM PYTHON TODAY.
+#
+# `apply_grouped_prior_update` guarantees, FOR A GIVEN raw_counts VECTOR, that the RNA components sum
+# to `rna_count + rna_prior` — so withholding the prior from synthetic components redistributes mass
+# strictly WITHIN the RNA pool. It is asserted only in a C++ comment.
+#
+# ⚠ It is a PER-M-STEP algebraic identity, NOT an end-to-end one, and conflating the two has now
+# produced a wrong test twice. End to end the gDNA total legitimately DEPENDS on `rna_prior`: setting
+# the gDNA:RNA split is the prior's whole purpose (`gdna_total = gdna_count + gdna_prior`,
+# `rna_total = rna_count + rna_prior`), and a larger RNA prior shifts theta, hence the E-step, hence
+# the next iteration's `gdna_count`. A test asserting "the gDNA total is invariant to rna_prior" is
+# therefore asserting something FALSE BY DESIGN — verified: it fails on the shipped no-synthetic
+# configuration too.
+#
+# ⭐ The function is `static` in em_solver.cpp, so nothing can call it directly. Exposing it behind a
+# test-only binding — the executable-specification pattern this repo already uses for the accumulator
+# — is the way to gate the identity, and it is a prerequisite for the per-transcript prior work
+# (a per-transcript vector makes the identity harder, not easier, to hold).

@@ -657,17 +657,43 @@ static void parallel_estep(
 // Grouped RNA/gDNA prior update
 // ================================================================
 
+// The calibration prior for one locus: how many pseudo-fragments of gDNA and of RNA to add, and who
+// is allowed to receive the RNA share.
+//
+// Field names spell the quantity out. They were `alpha_gdna_add` / `alpha_rna_add` until 2026-08-11 —
+// a spelled-out Greek letter plus an abbreviation, which said what the symbol was in a derivation
+// rather than what the number is here. It is a count of pseudo-fragments.
 struct AggregatePrior {
-    double alpha_gdna_add = 0.0;
-    double alpha_rna_add = 0.0;
-    int    gdna_idx = -1;
+    double gdna_prior_fragments = 0.0;
+    double rna_prior_fragments  = 0.0;
+    int    gdna_index = -1;
     bool   has_gdna_candidate = false;
+
+    //: Per-component flag: 1 where the component is a SYNTHETIC nascent entity — one this index
+    //: MANUFACTURED as a shadow span, which no annotation asserts exists. `nullptr` means the locus
+    //: has none, which is the common case and skips the split entirely.
+    //: ⛔ This is `is_synthetic`, NEVER `is_nrna`. A single-exon annotated transcript carries
+    //: `is_nrna = true` — it is simultaneously the nascent and the mature form of a real annotated
+    //: gene — and it must keep its prior like any other annotated transcript.
+    const uint8_t* component_is_synthetic = nullptr;
 };
 
 static inline double nonnegative_finite(double x) {
     return (std::isfinite(x) && x > 0.0) ? x : 0.0;
 }
 
+// Split the locus into gDNA and RNA, add the calibration prior to each, and hand the RNA share out
+// among the RNA components in proportion to the evidence each already carries.
+//
+// ⭐ THE RNA PRIOR GOES ONLY TO COMPONENTS THE ANNOTATION ASSERTS EXIST. A synthetic nascent entity
+// is a shadow span this index manufactured; nothing vouches for it, so the null hypothesis is that it
+// is ABSENT and it earns mass only from fragments the data cannot explain any other way. Giving it
+// prior mass would assert it exists before looking.
+//
+// ⛔ THE gDNA:RNA SPLIT IS UNCHANGED BY THAT CHOICE, EXACTLY. The RNA components still sum to
+// `rna_count + rna_prior`, because the prior is redistributed WITHIN the RNA pool rather than
+// withheld from it. So the library gDNA fraction — the number calibration exists to produce — cannot
+// move. Any movement in it is a bug in this function, not an effect of the rule.
 static void apply_grouped_prior_update(
     const double* raw_counts,
     const double* carried_state,
@@ -675,46 +701,85 @@ static void apply_grouped_prior_update(
     double* out_counts,
     int n_components)
 {
-    const int gdna_idx = aggregate_prior.gdna_idx;
+    const int gdna_index = aggregate_prior.gdna_index;
     const bool has_gdna = aggregate_prior.has_gdna_candidate
-        && gdna_idx >= 0 && gdna_idx < n_components;
+        && gdna_index >= 0 && gdna_index < n_components;
+    const uint8_t* is_synthetic = aggregate_prior.component_is_synthetic;
 
-    double n_rna = 0.0;
-    double carried_rna = 0.0;
+    // `rna_*` is the whole RNA pool and sets the gDNA:RNA split. `annotated_*` is the subset eligible
+    // to RECEIVE prior mass. They differ only where the locus holds synthetic entities.
+    double rna_count = 0.0, rna_carried = 0.0;
+    double annotated_count = 0.0, annotated_carried = 0.0;
     for (int i = 0; i < n_components; ++i) {
-        if (i == gdna_idx) continue;
-        n_rna += nonnegative_finite(raw_counts[i]);
-        if (carried_state != nullptr) {
-            carried_rna += nonnegative_finite(carried_state[i]);
+        if (i == gdna_index) continue;
+        const double count = nonnegative_finite(raw_counts[i]);
+        const double carried = (carried_state != nullptr)
+            ? nonnegative_finite(carried_state[i]) : 0.0;
+        rna_count += count;
+        rna_carried += carried;
+        if (is_synthetic == nullptr || !is_synthetic[i]) {
+            annotated_count += count;
+            annotated_carried += carried;
         }
     }
 
-    double a_g = has_gdna ? nonnegative_finite(aggregate_prior.alpha_gdna_add) : 0.0;
-    double a_r = has_gdna ? nonnegative_finite(aggregate_prior.alpha_rna_add) : 0.0;
-    if (n_rna <= EM_LOG_EPSILON && carried_rna <= EM_LOG_EPSILON) {
-        a_r = 0.0;
+    double gdna_prior = has_gdna ? nonnegative_finite(aggregate_prior.gdna_prior_fragments) : 0.0;
+    double rna_prior  = has_gdna ? nonnegative_finite(aggregate_prior.rna_prior_fragments)  : 0.0;
+    // ⚠ Gated on the ANNOTATED totals, not the RNA totals: in a locus whose every RNA component is
+    // synthetic there is no eligible recipient, so the RNA prior is zero and the locus's RNA pool
+    // must outcompete gDNA unaided. Conservation still holds — `rna_total` falls to `rna_count`.
+    //
+    // ⛔⛔ THE GATE MUST NAME THE DENOMINATOR THE CHOSEN BRANCH ACTUALLY DIVIDES BY. It briefly tested
+    // `annotated_count && annotated_carried` while the count branch divides by `annotated_count`
+    // ALONE — so a locus with zero annotated COUNT but nonzero carried alpha kept a live `rna_prior`,
+    // multiplied it by `inv = 0`, and silently dropped it: the RNA pool summed to `rna_count` while
+    // gDNA still received `gdna_count + gdna_prior`, MOVING the gDNA:RNA split this function exists to
+    // hold fixed. Reachable under VBEM, which is the shipped default and passes `alpha` as the carried
+    // state. Gate: `test_the_gDNA_RNA_split_is_UNTOUCHED_by_the_rna_prior_split`.
+    const double prior_recipients =
+        (rna_count > EM_LOG_EPSILON) ? annotated_count : annotated_carried;
+    if (prior_recipients <= EM_LOG_EPSILON) {
+        rna_prior = 0.0;
     }
 
-    const double n_gdna = has_gdna ? nonnegative_finite(raw_counts[gdna_idx]) : 0.0;
-    const double G = n_gdna + a_g;
-    const double R = n_rna + a_r;
+    const double gdna_count = has_gdna ? nonnegative_finite(raw_counts[gdna_index]) : 0.0;
+    const double gdna_total = gdna_count + gdna_prior;
+    const double rna_total  = rna_count + rna_prior;
 
     std::fill(out_counts, out_counts + n_components, 0.0);
     if (has_gdna) {
-        out_counts[gdna_idx] = G;
+        out_counts[gdna_index] = gdna_total;
     }
 
-    if (n_rna > EM_LOG_EPSILON) {
-        const double inv = 1.0 / n_rna;
+    // An eligible component takes its evidence scaled up to absorb the prior; a synthetic one keeps
+    // its evidence unscaled. Summed over the RNA components:
+    //     annotated_total * (annotated/annotated) + synthetic = annotated_count + rna_prior
+    //                                                         + synthetic_count = rna_total.
+    // ⭐ Written in exactly the shipped operation order so that a locus with NO synthetic component
+    // (`annotated_count == rna_count`) reproduces `rna_total * raw[i] * (1/rna_count)` BIT FOR BIT.
+    // That is what makes the inert-mask arm a real byte-identity control rather than an approximate
+    // one (TRAPS: byte-identity-gate).
+    if (rna_count > EM_LOG_EPSILON) {
+        const double annotated_total = annotated_count + rna_prior;
+        const double inv = (annotated_count > EM_LOG_EPSILON) ? 1.0 / annotated_count : 0.0;
         for (int i = 0; i < n_components; ++i) {
-            if (i == gdna_idx) continue;
-            out_counts[i] = R * nonnegative_finite(raw_counts[i]) * inv;
+            if (i == gdna_index) continue;
+            const double count = nonnegative_finite(raw_counts[i]);
+            const bool eligible = (is_synthetic == nullptr) || !is_synthetic[i];
+            out_counts[i] = eligible ? annotated_total * count * inv : count;
         }
-    } else if (carried_rna > EM_LOG_EPSILON && carried_state != nullptr) {
-        const double inv = 1.0 / carried_rna;
+    } else if (rna_carried > EM_LOG_EPSILON && carried_state != nullptr) {
+        // The zero-evidence path, live under VBEM (which passes `alpha` as the carried state).
+        // ⚠ Here the pool is prior-only, so a synthetic component correctly receives nothing — the
+        // locus holds no RNA evidence for it to have earned. Unreachable from the warm start, which
+        // passes `carried_state = nullptr`, so this never zeroes a component at initialisation.
+        const double inv =
+            (annotated_carried > EM_LOG_EPSILON) ? 1.0 / annotated_carried : 0.0;
         for (int i = 0; i < n_components; ++i) {
-            if (i == gdna_idx) continue;
-            out_counts[i] = R * nonnegative_finite(carried_state[i]) * inv;
+            if (i == gdna_index) continue;
+            const double carried = nonnegative_finite(carried_state[i]);
+            const bool eligible = (is_synthetic == nullptr) || !is_synthetic[i];
+            out_counts[i] = eligible ? rna_total * carried * inv : 0.0;
         }
     }
 }
@@ -1231,6 +1296,10 @@ struct LocusSubProblem {
     // Per-component
     std::vector<double>   unambig_totals;   // [n_components]
     std::vector<double>   log_eff_len;      // [n_components] log L̃ per component
+    //: [n_components] 1 where the component is a SYNTHETIC nascent entity the index manufactured.
+    //: The gDNA component is never synthetic. Empty when the locus holds none, which lets the prior
+    //: update skip the annotated/synthetic split entirely and stay bit-identical there.
+    std::vector<uint8_t>  component_is_synthetic;
 
     // Local→global transcript mapping
     std::vector<int32_t>  local_to_global_t; // [n_t]
@@ -1699,6 +1768,7 @@ static void extract_locus_sub_problem_from_partition(
     double gdna_em_llr_bias,
     const double*  all_unambig_row_sums,
     const double*  all_t_eff_lens,
+    const uint8_t* all_t_is_synthetic,
     int32_t* local_map, int local_map_size)
 {
     int n_t = pv.n_transcripts;
@@ -1828,6 +1898,24 @@ static void extract_locus_sub_problem_from_partition(
         sub.unambig_totals[i] = all_unambig_row_sums[t_arr[i]];
     }
 
+    // Synthetic nascent entities, per component. ⭐ Left EMPTY when the locus holds none — the prior
+    // update then takes the shipped code path unchanged, so the overwhelming majority of loci are
+    // bit-identical and the arm that plumbs this mask without consulting it is a true byte-identity
+    // control. The gDNA component (index n_t) is never synthetic and stays 0.
+    sub.component_is_synthetic.clear();
+    if (all_t_is_synthetic != nullptr) {
+        bool any = false;
+        for (int i = 0; i < n_t; ++i) {
+            if (all_t_is_synthetic[t_arr[i]]) { any = true; break; }
+        }
+        if (any) {
+            sub.component_is_synthetic.assign(nc, 0);
+            for (int i = 0; i < n_t; ++i) {
+                sub.component_is_synthetic[i] = all_t_is_synthetic[t_arr[i]];
+            }
+        }
+    }
+
     sub.log_eff_len.assign(nc, 0.0);
     for (int i = 0; i < n_t; ++i) {
         double Le = all_t_eff_lens[t_arr[i]];
@@ -1883,6 +1971,7 @@ batch_locus_em_partitioned(
     // Per-transcript globals
     f64_2d   unambig_counts,
     f64_1d   t_eff_lens_arr,
+    u8_1d    t_is_synthetic_arr,
     // Mutable output accumulators
     f64_2d_mut em_counts_out,
     f64_2d_mut gdna_locus_counts_out,
@@ -1951,6 +2040,11 @@ batch_locus_em_partitioned(
     const double*   gel_ptr = locus_gdna_eff_lens.data();
     const double*   uac    = unambig_counts.data();
     const double*   tel_ptr = t_eff_lens_arr.data();
+    // ⛔ `is_synthetic`, never `is_nrna`: a single-exon annotated transcript is flagged `is_nrna`
+    // because it is simultaneously the nascent and the mature form of a real gene, and it must keep
+    // its prior. Only entities this index MANUFACTURED are excluded.
+    const uint8_t*  tsyn_ptr = (t_is_synthetic_arr.size() == 0)
+        ? nullptr : t_is_synthetic_arr.data();
 
     double* em_out    = em_counts_out.data();
     double* gdna_out  = gdna_locus_counts_out.data();
@@ -2061,7 +2155,7 @@ batch_locus_em_partitioned(
                 sub, pv,
                 gel_ptr[li],
                 gdna_em_llr_bias,
-                unambig_row_sums.data(), tel_ptr,
+                unambig_row_sums.data(), tel_ptr, tsyn_ptr,
                 local_map_vec.data(), local_map_size);
             auto t2 = hrclock::now();
 
@@ -2098,6 +2192,8 @@ batch_locus_em_partitioned(
                 nonnegative_finite(rp_ptr[li]),
                 sub.gdna_idx,
                 sub.has_gdna_candidate,
+                sub.component_is_synthetic.empty()
+                    ? nullptr : sub.component_is_synthetic.data(),
             };
             std::vector<double> init_counts(nc);
             compute_grouped_warm_start(
@@ -2619,6 +2715,7 @@ NB_MODULE(_em_impl, m) {
           nb::arg("locus_gdna_eff_lens"),
           nb::arg("unambig_counts"),
           nb::arg("t_eff_lens"),
+          nb::arg("t_is_synthetic"),
           nb::arg("em_counts_out"),
           nb::arg("gdna_locus_counts_out"),
           nb::arg("posterior_sum_out"),
