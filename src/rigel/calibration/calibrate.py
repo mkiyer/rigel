@@ -140,9 +140,10 @@ def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
     prose and the code came to disagree about a ½ for months ( and 27).
     Whatever the solver divided by is what the result reports.
 
-    ⚠ It takes the ARRAY, not the geometry: ``assemble_priors`` needs the RNA divisor as well as the
-    gDNA one (a mass becomes a density only against its own component's opportunity), and one function
-    called twice is the alternative to a second copy that drifts.
+    ⚠ It takes the ARRAY, not the geometry, so ONE function serves both populations rather than a
+    second copy that drifts. ⛔ It was written because ``assemble_priors`` needed the RNA divisor as
+    well as the gDNA one; the prior no longer divides by anything, so only the gDNA projection has a
+    live consumer today. The RNA one is retained deliberately — `result.py` carries the reasoning.
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
@@ -316,9 +317,11 @@ def calibrate(
     # `priors` divides by is byte-identically the one the solver divided by. Two implementations
     # of one quantity is how they come to disagree.
     node_eff_gdna, edge_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
-    # ⭐ And the RNA twin, on the same two axes. It is what turns ``mass_rna_*`` into a DENSITY in
-    # ``assemble_priors``; without it the RNA side had no divisor at all and the prior's g:r ratio
-    # carried the ``Σ A_g / Σ A_r`` length tilt.
+    # ⭐ And the RNA twin, on the same two axes — the RNA population's own opportunity per object.
+    # ⛔ It USED to be what turned ``mass_rna_*`` into a density in ``assemble_priors``. That consumer
+    # is gone: the prior became a conserved FRAGMENT COUNT and divides by nothing on the mass path
+    # (`d045d820`, `5591cc01`). Kept because it is the RNA divisor any density-based prior needs and
+    # because it is byte-identically the opportunity the solver used — see `result.py`.
     node_eff_rna, edge_eff_rna = _project_eff(chain, geometry.eff_rna, payload)
 
     # RNA strand balance: rna_sense_frac (κ) = posterior-mean spliced sense fraction. The strand

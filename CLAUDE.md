@@ -181,14 +181,25 @@ scheme. The rename rewrote **980 citations across 114 files** and correctly left
 source "$(conda info --base)/etc/profile.d/conda.sh" && conda activate rigel
 
 pip install --no-build-isolation -e ".[dev]"   # rebuild after ANY src/rigel/native/ change
-python -m pytest tests/ -q                     # baseline: 0 fail / 3235 pass / 0 skip / 7 xfail
+python -m pytest tests/ -q                     # baseline: 0 fail / 3298 pass / 0 skip / 10 xfail
 python -m pytest tests/ --update-golden        # regenerate tests/golden/ after intended output changes
 ruff check src/ tests/ scripts/ && ruff format src/ tests/   # ⚠ NEVER format scripts/
 ```
 
-⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,235 passing, 0 SKIPPED, 7 xfail** (measured
-2026-08-11). **Any failure at all is a regression** — a stronger and
+⭐ **THE STANDING BASELINE IS GREEN: 0 failures, 3,298 passing, 0 SKIPPED, 10 xfail** (measured
+2026-08-12). **Any failure at all is a regression** — a stronger and
 cheaper rule than counting expected ones.
+
+⚠ **It was 3,235 / 7 xfail earlier the same day; the delta is ACCOUNTED, not adjusted.** `+62` is the
+new per-script import gate (`test_scripts_index.py`, one case per file across `scripts/design/` and
+`scripts/sim/`) and `+1 xfail` is `prior_units_check.py`, which is broken on a deleted API and carries a
+DECISION rather than a repair.
+
+⛔⛔ **AND THAT GATE EXISTS BECAUSE A GREEN SUITE HID FIVE DEAD INSTRUMENTS.** Nothing checked that a
+script still IMPORTS — only that it was indexed and had a docstring, both true of a file that raises on
+line 1. Two commits took five out: `94d283c0` deleted the fixed-point layer (`INV_LENGTH_SCALE`,
+`inv_length_quantum`) and killed three, `0d9d422b` deleted `enrichment_frame` and killed one, and one
+died on `_component_node_arrays`. ⭐ A `src/` deletion is the mechanism, so run the suite after one.
 
 ⛔ **RE-DERIVE THE COUNT, NEVER ADJUST IT** (`TRAPS: re-record-the-baseline`). Several suite tests are
 PARAMETRISED OVER DOC, SOURCE AND SCRIPT FILES — roughly 2 per src module, 3 per script, 1 per doc — so
@@ -256,7 +267,7 @@ either promote a row or delete the file, but do not assume the table is complete
 | `design/toy_ceiling.py` | ⭐⭐ **the RE-SOLVE ceiling** — hand one object class a different own belief and re-solve the whole chain, six arms sharing one simulation. ⛔ This is what `TRAPS.md` B17 demands instead of a substitution, and `--arms base noop` is its own falsification (must be byte-identical). Its docstring carries what it measured |
 | `design/psi_channel_ablation.py` | ⭐⭐⭐ **WHICH ψ CHANNEL IS DOING THE WORK?** — one level below `worst_objects.py`: that says which OBJECTS carry the error, this says which CHANNEL put it there. Records every argument of the final ψ combine, then re-solves with one `*_imp` channel nulled at a time, so an attribution is a re-solve of the REAL call. ⛔ A5 — the `as-is` arm must reproduce the run bit-identically, and that means reproducing the WRITE-BACK too (the first version read `max\|Δ\| = 1.0` for exactly that reason). ⭐ Read the per-slot table, not the totals: D4h says all-small-singly + large-jointly means the channels share an upstream quantity |
 | `design/arm_score.py` · `design/arm_sweep.py` | ⭐⭐ score two `ladder_arm_ab` arms against each other, and sweep a family, **per stratum**. ⛔ Never pooled — the panel total hides a sign flip between strata, and both print `abs_err_all_final` (the deliverable) beside `abs_err_all` (pass-0) on every row, per `TRAPS.md` A15. `$RIGEL_ARMS` points at the `--out` directory |
-| `design/ladder_arm_ab.py` | ⭐⭐ **the same override on the REAL 36-condition ladder**, scored by `solvability_audit.py`. ⛔⛔ **Run this before writing a mechanism into `src/`** — FOUR times now a toy- or single-condition-positive change has been panel-negative (`TRAPS.md` B18). ⭐⭐ **`--jobs 8` runs the whole 36-condition panel in ~2.2 min** (was ~20 min), byte-identical on all 648 scored fields: the two unused `c_input_*` arms are no longer built and the MAIN scan payload is cached beside the oracle cache. ⭐ Carries the eight `zc_*` arms (`TRAPS.md` C0e) plus ⭐⭐ `msgfree_p0` / `msgfree_all` / `msgscale_<k>` / `onesided_rna`, which between them price the whole message layer. `--arm zc_noop` must be BYTE-IDENTICAL to `base` and is the harness's own falsification (A5) |
+| `design/ladder_arm_ab.py` | ⭐⭐ **the same override on the REAL 36-condition ladder**, scored by `solvability_audit.py`. ⛔⛔ **Run this before writing a mechanism into `src/`** — FOUR times now a toy- or single-condition-positive change has been panel-negative (`TRAPS.md` B18). ⭐⭐ **`--jobs 8` runs the whole 36-condition panel in ~2.2 min** (was ~20 min): the two unused `c_input_*` arms are no longer built and the MAIN scan payload is cached beside the oracle cache. ⭐ Carries the eight `zc_*` arms plus ⭐⭐ `msgfree_p0` / `msgfree_all` / `msgscale_<k>` / `onesided_rna`, which between them price the whole message layer. ⛔⛔ **`--messages {off,on}` IS PART OF THE ARM AND IS STAMPED INTO EVERY ROW** — under the shipped `off`, **22 of the 26 arms cannot move a number** and 16 of those score byte-identical to `base` while their fire counter reads healthy (`TRAPS: an-ablation-that-never-ran`, third form). An arm the policy cannot express is now REFUSED up front. ⭐⭐ **`--self-test` is the harness's own falsification**: every arm under both policies, gated INERT-under-one / MOVED-under-the-other — 25/25 in ~6 min. `--arm zc_noop` must still be BYTE-IDENTICAL to `base`. ⚠ Every arm file predating 2026-08-11 lacks the `messages` field, so `arm_identity.py` correctly refuses to compare one against a fresh run |
 | `design/length_ceiling.py` | ⭐ **what a PERFECT length model is worth, on the ladder, ONE pmf at a time.** ⛔ Pricing the pair together hid a 14× split between them (`TRAPS.md` B21). Reports the pass-0 solvable yardstick beside the mass-weighted one, because they disagree |
 | `design/toy_harness.py` | ⭐⭐ **a mini chromosome you define, calibrated in 0.1–5 s** (`docs/TESTING.md` §0b), with every object's answer beside per-object truth. The library-level priors a toy cannot fit are harvested from a real cached condition and INJECTED; the gDNA depth is DERIVED to match that donor, never set by hand. `--list` for the spec ladder. ⭐ Reach for this FIRST when a mechanism needs isolating — it found C1's mechanism candidate in one sweep |
 | **the substrate** | |
@@ -278,7 +289,7 @@ either promote a row or delete the file, but do not assume the table is complete
 | `design/pass0_vs_oracle.py` | T (the origin-split payload) vs P (`calib_refit_iters=0`) vs two levered ceilings, per object and per class. ⛔⛔ **ITS HEADLINE MASS-WEIGHTED ERROR IS THE WRONG YARDSTICK FOR PASS-0** — it scores every object with mass, so honest ignorance reads as error and buried a 0.0456 answer inside a 0.3150 one. Use it for the T/C/P decomposition and the oracle plumbing; use `solvability_audit.py` to judge pass-0. ⛔ undrained on every arm. `--oracle-cache` makes repeat runs cheap: the oracle depends on the accumulator and index, never on calibration, so one cache serves a whole debugging campaign |
 | `design/worst_objects.py` | ⭐⭐ **step 3 of the debug loop** — one condition dissected to individual nodes/edges, ranked by error **MASS**. Read the CONCENTRATION curve first (concentrated ⇒ a mechanism exists; diffuse ⇒ a systematic bias). `fg_loc` vs `pred_fg` separates a wrong local solve from wrong messages |
 | **diagnostics** | |
-| `design/anchor_opportunity_census.py` | ⭐⭐ **IS A ZERO-COUNT ANCHOR'S DENSITY CLAIM TRUE OF ITS NEIGHBOURHOOD? — no solver runs.** Every slot's TRUE gDNA density re-derived from the origin-split oracle through the SHIPPED `build_node_geometry`, then the empty structurally-pure-gDNA population against what its own chain neighbours measure. ⛔ Its verdict is that the claim is false by **346×** under capture and true off it — which is NECESSARY for the "empty means no probe here" hypothesis and, as the panel arms then showed, not sufficient |
+| `design/anchor_opportunity_census.py` | ⭐⭐ **IS A ZERO-COUNT ANCHOR'S DENSITY CLAIM TRUE OF ITS NEIGHBOURHOOD? — no solver runs.** Every slot's TRUE gDNA density re-derived from the origin-split oracle through the SHIPPED `build_node_geometry`, then the empty structurally-pure-gDNA population against what its own chain neighbours measure. ⛔ Its verdict is that the claim is false by **346×** under capture and true off it — which is NECESSARY for the "empty means no probe here" hypothesis and, as the panel arms then showed, not sufficient. ⛔⛔ **THAT VERDICT IS ABOUT 1,312 ANCHORS, NOT ABOUT `struct_lock`** — the docstring AND the mask both claimed "exactly `strand_evidence`'s `struct_lock`" until 2026-08-11 and the solver's mask is **15–23× larger** (30,423 vs 1,312 at `g00`), because it also holds every zero-count NODE. This instrument's population is `g1_locked ∧ NODE` — what the standing xfail wants `struct_lock` rescoped TO. ⭐ Both sizes now print on every row, and the measured-redundant `∧ intergenic` term is ASSERTED rather than deleted |
 | `design/composition_evidence_census.py` | how much library mass reaches the solver with NO composition evidence. `--inject-kappa 0.5` is its falsification handle |
 | `design/held_flux_census.py` | how often a held candidate has ZERO flux evidence, by cause |
 | `design/prior_units_check.py` | the EM prior in fragment units vs the old incidence sum |
@@ -287,8 +298,10 @@ either promote a row or delete the file, but do not assume the table is complete
 | `design/build_scan_cache.py` | scan once, calibrate many times. ⚠ re-run after any accumulator change — the payload schema digest invalidates every cache, by design |
 | `design/native_parity_on_real_data.py` | the native-parity gate on real cfRNA at full scale |
 | `design/scan_profile.py` | ns/fragment, regressed over several BAMs |
-| `sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | build the panel |
-| `sim/evaluate_suite.py` | net fragment flow (`rigel.sim.analysis`) |
+| **⭐⭐⭐ the workflow** | |
+| `sim/panel.py` | ⭐⭐⭐ **THE SIMULATION + BENCHMARKING WORKFLOW, ONE COMMAND PER STAGE** — `status` / `build` / `simulate` / `cache` / `score` / `report`, every path derived from one panel YAML. ⛔ It adds NO measurement code: each stage shells out to the instrument that already owns it, because duplicating a scorer is how a baseline and a ceiling drift apart. ⭐⭐ **`status` FIRST** — every stage is expensive and resumable, and it names the next one. ⛔⛔ **`cache` builds BOTH caches**, and the oracle one is why this exists: it is the origin-split truth every scoring instrument reads, and until 2026-08-11 it was a SIDE EFFECT of `pass0_vs_oracle.py` with no step of its own, so the documented recipe produced a panel every scorer refused. ⚠ A cached oracle condition needs all FOUR parts (`gdna`/`mrna`/`nrna`/`_main`). Gated by `tests/test_panel_workflow.py`, falsified by perturbation |
+| `sim/build_suite_reference.py` · `design_suite_probes.py` · `simulate_reads.py` | build the panel. ⚠ `panel.py build` drives the last two; the reference carve needs the SOURCE genome/GTF, which a panel config does not name, so it stays manual |
+| `rigel.sim.net_flow` (a MODULE, not a script) | ⭐⭐ **WHERE DID EACH MISASSIGNED FRAGMENT GO?** — the one question `quant_accuracy.py` does not answer. It measures the MAGNITUDE of transcript error; this decomposes its DIRECTION, per transcript, into gDNA-sourced and RNA-isoform-sourced flow. ⛔ **All that survived `sim/analysis.py`, retired 2026-08-11** (owner): that was a 1,589-line SECOND SCORER rendering its own accuracy tables against its own truth, and two scorers is how a baseline and a ceiling drift apart. 618 lines kept with their tests, 971 deleted along with `scripts/sim/evaluate_suite.py`. Gate: `tests/test_net_flow.py` |
 
 ## CLI
 

@@ -760,6 +760,60 @@ TRAPS: no-prior-means-haldane for what omitting the term does instead.
 
 ---
 
+## 9b. ⭐⭐ THE EM's RNA PRIOR, AND WHY A SYNTHETIC NASCENT ENTITY GETS NONE
+
+`assemble_priors` hands the EM two per-locus pseudocounts. The gDNA one lands additively on the single
+gDNA component; the RNA one is shared among the RNA components in proportion to the evidence each
+already carries (`em_solver.cpp:apply_grouped_prior_update`):
+
+    rna_count      = Σ_{i ≠ g} raw[i]                       the whole RNA pool
+    annotated_count = Σ_{i ≠ g, i not synthetic} raw[i]      the prior's eligible recipients
+
+    out[g] = raw[g] + gdna_prior
+    out[i] = raw[i] · (1 + rna_prior/annotated_count)        i annotated
+    out[i] = raw[i]                                          i SYNTHETIC nascent
+
+⭐ **Summed over the RNA components this is exactly `rna_count + rna_prior` either way**, so the
+gDNA:RNA split is unchanged and the rule redistributes strictly WITHIN the RNA pool.
+
+⛔⛔ **THAT IS A PER-M-STEP IDENTITY FOR GIVEN `raw` COUNTS — NOT AN END-TO-END INVARIANT.** The EM
+iterates: a different `theta` gives a different E-step, hence different `raw`, hence a different
+converged split. Measured on the 36-condition ladder, the rule moved gDNA by **+4.21 M fragments**
+panel-wide. Three separate attempts to state this as "the library gDNA fraction cannot move" were wrong;
+the sentence above is the correct one.
+
+⚠ **The gate must name the denominator the chosen branch divides by.** It briefly tested
+`annotated_count && annotated_carried` while the count branch divides by `annotated_count` alone, so a
+locus with zero annotated count and nonzero carried alpha kept a live `rna_prior`, multiplied it by
+`inv = 0` and silently dropped it — RNA summing to `rna_count` while gDNA kept `gdna_prior`. Reachable
+under VBEM, the shipped default.
+
+### Why the synthetic branch exists
+
+A synthetic nascent entity is a shadow span the INDEX manufactured; no annotation asserts it exists. The
+null hypothesis is therefore that it is **absent until the data proves otherwise**, which is a Dirichlet
+`alpha = 0` on those components and needs no constant. Two consequences follow from the arithmetic:
+
+* **A zero-count component cannot be revived by the prior**, because `out[i]` is proportional to
+  `raw[i]`. So the coverage-weighted warm start is the ONLY spark a synthetic entity ever gets, and it
+  must stay strictly positive — with `alpha = 0`, `theta = 0` is a fixed point.
+* **A zombie decays geometrically** at `kappa/(1 + rna_prior/annotated_count)` per iteration, with
+  `kappa = w_N/w_T < 1` for free: a shadow span is LONGER than the transcript it shadows, so its
+  effective length already disfavours it.
+
+⭐ **The survival criterion is derived, not chosen.** With `m` fragments whose only RNA candidate is the
+entity, it grows iff `m·w_N > Total·theta_g·w_g` — *a nascent entity survives exactly when its
+intron-exclusive evidence exceeds what gDNA alone would explain there.*
+
+⛔ **The price, and it is strand-gated.** ~27 % of the freed mass goes to gDNA rather than annotated RNA
+(86/14 at the weakest in-scope strandedness). On a nascent-ENRICHED toy it inverts to 83 % gDNA at
+SS=0.65 and **zero at SS=1.0** — gDNA is strand-symmetric and RNA is not, so strand evidence alone
+arbitrates the contested intronic fragment when it is strong enough.
+
+⚠ `alpha = 0` is the correct null but a blunt instrument: it cannot distinguish a nascent entity with
+real intronic support from one with none. The successor is a per-transcript allocation of the RNA prior.
+
+
 ## 10. The second pass's score
 
     score  =  ρ × f(L) × s

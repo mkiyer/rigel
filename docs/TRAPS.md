@@ -125,6 +125,8 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `an-all-zero-factor-is-inert` — An all-zero factor is uninformative, not decisive.
 - `density-below-one-fragment-length` — Density below one fragment length is not resolvable by ANY design.
 - `identical-paralogs-are-bimodal` — An identical-paralog split is bimodal, and depth does not fix it.
+- `compatibility-is-geometry-not-composition` — A PREDICATE BUILT FROM WHAT A FRAGMENT IS COMPATIBLE WITH
+  CANNOT SEPARATE RNA FROM gDNA.
 
 **Structure, indexes and plumbing**
 
@@ -314,6 +316,52 @@ no `region_arrays`, and every override arm downstream would have silently overri
 that generalises:* **a patch site must assert the name it is patching still EXISTS**, because a rename turns
 a monkeypatch into a no-op with no error at all — and a no-op ablation is indistinguishable from an inert
 mechanism.
+
+⛔⛔ **AND ON 2026-08-11 THE COUNTER ITSELF WAS PROVED INSUFFICIENT — BY A CONFIG DEFAULT, NOT BY AN IMPORT.**
+`ladder_arm_ab.py` carries 26 arms, every one of them counted and guarded by the rule above. Measured under
+the shipped `message_propagation = False`: **22 could not move a number.** Six raised (four on a module
+deleted at `0d9d422b`). The other sixteen **fired on tens of thousands of slots and scored byte-identical to
+`base`** — eight muted a relay that was already silent, and eight moved a PRECISION nothing consumes, because
+`_fuse(own, p, msg)` returns `own` for every `p` when no message arrives. The counter said *fired* for all
+sixteen. ⭐ *The rule:* **a fire counter answers "was my code called"; the question is "can this arm move a
+NUMBER", and only a diff against a base run under the same config answers it.** The harness now runs every arm
+under both policies and requires INERT under one and MOVED under the other.
+⚠ *And the deeper half:* **the config is part of the arm's definition.** `main` built a bare
+`CalibrationConfig()`, so the day a shipped default flipped, twenty-two arms became no-ops with no error, no
+warning and no diff — the files still parsed, still carried every row, and still scored. The setting is now
+stamped into every row, which is `TRAPS: a-hash-that-misses-its-artifact` in its second form: **the artifact
+must carry its own key.**
+
+**compatibility-is-geometry-not-composition. ⛔⛔ A PREDICATE BUILT FROM WHAT A FRAGMENT IS COMPATIBLE
+WITH CANNOT SEPARATE RNA FROM gDNA — BECAUSE COMPATIBILITY IS GEOMETRY, AND gDNA IS COMPATIBLE WITH
+EVERYTHING UNSPLICED.** Designed and refuted the same day, 2026-08-11/12, and the refutation is the
+reusable part.
+
+The proposal was to give a synthetic nascent entity warm-start mass only if it had **RNA-unambiguous
+support** — at least one fragment whose candidate set, with the gDNA component removed, was exactly that
+entity. The separating argument looked airtight: an intronic fragment is unspliced, no annotated
+transcript admits it (the annotation splices that interval out), and only the nascent shadow span
+contains it — so `C_R(u) = {nascent}` and the entity lives, while a zombie whose every fragment is also
+admitted by a mature isoform has `|C_R| >= 2` everywhere and dies.
+
+⭐ **Nothing in that argument requires the fragment to be RNA.** A genomic-DNA fragment landing in an
+intron satisfies every clause. So the gate fires on intronic gDNA, and **the MORE gDNA a library
+carries, the MORE nascent entities are revived** — the exact inverse of the intent. The predicate is
+sound only at `f_gdna = 0`, which is the one library nobody runs.
+
+⛔ *The rule:* **any RNA-vs-gDNA question resolved by SET MEMBERSHIP will be answered by geometry.** It
+has to be resolved by LIKELIHOOD, where the two populations actually differ (strand, length, density,
+splicing). ⭐ The replacement — give the entity no prior mass and let it earn its place — is immune to
+the same counterexample precisely because it arbitrates the contested intronic fragment by likelihood
+against a gDNA component that DOES hold prior mass, instead of by asking which sets contain it.
+
+⚠ **And the measurement that motivated the refuted design was VACUOUS, which is its own warning.** It
+reported synthetic nascent entities holding 1,037,811 fragments at **0.000 %** unambiguous support
+against 15.551 % for annotated mRNA — devastating, and empty: `em_solver.cpp` appends a gDNA candidate
+to *every* unspliced fragment, so an unspliced fragment can never be `unambig`, so a nascent entity's
+`unambig_totals` is **structurally 0 on every input**. The statistic was never in a position to say
+anything about the population it was being used to indict (`TRAPS: could-the-arm-have-fired`). It was
+persuasive, and being persuasive is what made it dangerous.
 
 **a-zero-count-is-a-measurement. ⛔⛔⛔ A ZERO COUNT IS A MEASUREMENT OF A DENSITY, NOT AN ABSENCE OF DATA — AND KEYING PRECISION
 ON THE COUNT MAKES THE STRONGEST STATEMENT IN THE LIBRARY THE QUIETEST.** At `g00` (zero gDNA by
@@ -730,6 +778,17 @@ against `F`, the prior assembler's residual with perfect masses AND perfect per-
 residual with two candidate mechanisms and a place in the ranked plan. Re-scored against the EM's own
 count it is **2.8e-5 … 2.0e-3**, the shares explain **82–99 %**, and *there is no residual to explain*.
 **The 72 % was the yardstick.**
+
+⚠ **AND IT RECURRED ON 2026-08-11, IN THE SAME FILE THAT ALREADY DOCUMENTED IT.** A new pool-level table
+in `quant_accuracy.py` scored `gdna_est` against `gdna_true` and read **−50.7 %** panel-wide — a
+spectacular, publishable gDNA under-call. `gdna_est` is `gdna_em_count`, which EXCLUDES fragments that
+reached no locus; `gdna_true` is the simulator's origin count, which includes them. **Off capture more
+than half of gDNA is intergenic**, so the "defect" was the missing pool and nothing else — with them the
+same panel reads **−0.6 %**. ⭐ `score_library`'s own docstring, four lines above the field being
+misused, records the identical mistake fabricating an off-capture EM under-call (0.3151 against a truth
+of 0.5000). ⛔ *The lesson on top of the lesson:* **a documented trap does not protect the NEXT consumer
+of the same field.** The columns not summing to the library was the tell, and it was visible on the
+first render.
 
 ⛔ **The tell, and it is available before any measurement: write down which line of the consumer reads
 the number.** If that line's population is a different set than the truth arm's population, the arm is

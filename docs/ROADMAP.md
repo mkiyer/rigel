@@ -35,8 +35,12 @@ one line, and a number nobody can attribute earns none.
 | **message propagation** | ⛔ **OFF**, and it stays off until the tool is optimised end to end across all scenarios (owner, 2026-08-10) | net better on 3 of 4 strata (−58 / −44 / −32 %); **+155 % on unstranded × capture-ON**, which is the blind stratum. ⛔ It is the only remaining lever there, and its price must be RE-priced on the rebuilt ladder, never inherited |
 | **the price of that** | ⚠ zero-gDNA golden scenarios go **0.029 → 89.93** and **0.005 → 9.58** | both AMBIG loci — the stratum above |
 | ✅ **the LIBRARY figure is a FRAGMENT COUNT** | ⭐ it was an object-INCIDENCE sum in **all three** consumers that computed it, and the units did not match the truth it was scored against. Now `CalibrationResult.library_{gdna,rna}_fragments`, derived on read, each axis converted by its OWN `mass/count` | ⭐ On the pilot panel: better on **8 of 8** conditions, and the three contaminated ones the tool can see improve **73 / 81 / 98 %**. It RAISES the estimate on the contaminated arm and LOWERS it on the zero arm — both toward truth, which a merely-shifted number cannot do |
-| ⛔ **end to end — the LIBRARY figure** | ⛔ **NOT CURRENTLY KNOWN, and the old `0.1060 / 0.0097` pair must not be quoted.** It was unattributable: its `§1.3 ①` pointer named a section this file does not contain, and its two halves came from different instruments | ⚠ `calibration_truth_ab.py` reads mean `\|err\|` **0.1185** on the pilot panel — but that is 4 conditions on TWO gDNA levels, dominated by the blind stratum (`TRAPS: a-single-level-panel-cannot-see-a-constant`). ⭐ **The 36-condition ladder is rebuilt; re-derive there.** §2 item 1 |
-| ⛔ **end to end — TRANSCRIPT assignment** | ⛔ **31.1 %** of fragments misassigned, and a perfect prior removes only **32 %** of that | 67.5 % survives, and on capture-OFF a perfect prior is 3–4 % WORSE. ⚠ Measured 2026-08-07 on the pre-rebuild panel; re-derive alongside the row above |
+| ✅ **end to end — the LIBRARY figure** | ⭐ **RE-DERIVED 2026-08-11 on all 36 ladder conditions**, messages OFF, `calibration_truth_ab.py --cache-subdir _main`. Mean `\|err\|` per stratum: **0.0025 / 0.0053 / 0.0056** and ⛔ **0.4040** (max **0.9151**) on unstranded × capture-ON; `g00` control **0.0497** | ⛔ **NEVER quote the pooled 0.1043** — it is 97 % the one blind stratum (`TRAPS: never-pool-the-strata`). ⚠ The retired `0.1060` turns out to have been close, but it was unattributable and the stratified form is what ranks work. ⭐ The three good strata are ~2× better than the "0.005–0.012" row above, measured the same day |
+| ⛔ **end to end — TRANSCRIPT assignment** | ⛔ **31.3 %** of RNA fragments misassigned (**55,916,700** of 178,399,996, 32 contaminated conditions), and a perfect prior removes **32.2 %** of that, to 21.2 % | ⭐ **RE-DERIVED 2026-08-11 on the rebuilt 36-condition ladder**, messages OFF, EM seed pinned — and it lands within 0.2 pp of the pre-rebuild 31.1 %, so the rebuild did not move it. ⛔ The ceiling is ONE STRATUM: unstranded × capture-ON goes **0.405**, the other three are **1.031 / 0.981 / 1.013** — a perfect prior is NEUTRAL-TO-WORSE on them. At GENE level the split is sharper still (**0.215** vs **1.704** on stranded × capture-OFF) |
+| ⭐ **the pool level — gDNA vs NASCENT vs ANNOTATED** | ⭐ **NEW 2026-08-11**, `quant_accuracy.py --report` table ⑥. gDNA total is **−0.6 % / −6.4 % / −0.5 %** on three strata and ⛔ **−87.1 %** on unstranded × capture-ON; a perfect prior takes that last one to **−5.5 %** | ⛔ **Read `gDNA (total)`, never `gdna_est`** — the latter is `gdna_em_count` and EXCLUDES intergenic fragments, which are more than half of off-capture gDNA. Scoring it against the origin-count truth reads **−50.7 %** panel-wide that is entirely the missing pool; `score_library`'s docstring records the same mistake once fabricating an off-capture under-call (0.3151 vs a truth of 0.5000) |
+| ✅ **the NASCENT leak — FIXED 2026-08-12** | ⭐ A synthetic nascent entity now receives **ZERO RNA prior**: it is one the index MANUFACTURED, nothing asserts it exists, so the null is that it is absent until the data proves otherwise. In scope: nascent **6,238,406 → 691,796** (0.111), gene Σ\|err\| **0.608**, `g00` gene **0.476** | ⛔ It was **NOT** the prior distributing uniformly — the shipped prior is a COMMON multiplicative factor and is provably neutral on the within-RNA split. The leak was the coverage-weighted warm start; `alpha = 0` is a new sparsity prior that counteracts it. ⚠ `is_synthetic`, NEVER `is_nrna` — a single-exon annotated transcript is flagged `is_nrna` and keeps its prior. ⚠ ~27 % of the freed mass goes to gDNA, not annotated |
+| ⚠ **the price of that, and it is strand-gated** | ⚠ gDNA gains **+4.21 M** panel-wide (73 % of the freed mass returns to annotated). At the weakest in-scope strandedness the split is **86 % annotated / 14 % gDNA** | ⛔ On one nascent-ENRICHED toy (73 % nascent, a fully-nested antisense gene) it inverts to 83 % gDNA and costs 1721 → 1029 correct assignments at SS=0.65 — but **ZERO** at SS=1.0, because gDNA is strand-symmetric and RNA is not. Two strict xfails record it. ⭐ Next: an ACCURATE per-entity nascent prior instead of withholding from all (owner, 2026-08-12) |
+| ⚠ **the `noop` BYTE-IDENTITY GATE CANNOT PASS — and the arm is SOUND anyway** | `--arm noop` differs from `base` on **376 of 2,016 fields**, max **399** on `count_abs_err`. ⭐ **The noise floor `--arm base_reseed` is 1,317 fields and 6,668** — so the arm's delta is **17× BELOW the floor** on the same field and touches 3.5× fewer fields. The injection wrapper is doing nothing, as designed | ⛔ **So the gate's SPECIFICATION is wrong, not the arm.** Byte-identity is unreachable while the scan is multi-threaded (`TRAPS: the-deliverable-is-not-reproducible-by-default`'s second source — the seed is pinned, the float banks still re-associate per run), so `arm_identity.py` is the wrong instrument for a `quant_accuracy` arm. ⭐ Either re-specify it as "below the `base_reseed` floor" or make the scan merge order-independent; ⚠ until then **no `quant_accuracy` arm delta below ~6,700 fragments is attributable** |
 | ⛔ **the NASCENT channel** | ⛔ **20.2 M fragments** parked on entities whose truth is exactly **0** | 9.2 % of all true RNA, invisible in every transcript table |
 | ⛔ **reproducibility — TWO independent sources** | ⛔ `EMConfig.seed` defaults to `None`, **and** the scan is multi-threaded so the float banks are re-associated by the per-worker merge | `TRAPS: the-deliverable-is-not-reproducible-by-default`. Pinning the seed alone is no longer sufficient. ⭐ Owner signed this off (2026-08-11): the spread is **1.503e-15** on `posterior_mean` and **exactly 0** on every integer column, and tests validate the float banks within a DERIVED, bracketed tolerance |
 
@@ -134,24 +138,66 @@ this panel — `TRAPS: toys-rank-hotspots-backwards`, which cost a whole analysi
 pilot, every non-target bank byte-identical). Every instrument under `scripts/design/` runs again — with
 one exception, which is item 1.
 
-1. ⛔⛔ **`ladder_arm_ab.py` IS BROKEN and it blocks items 2–4.** Lines 264 / 385 / 406 do
-   `sys.modules["rigel.calibration.enrichment_frame"]` on a module DELETED at `0d9d422b`, so the
-   `zc_transfer` and `zc_reference_var` arms raise `KeyError` today. This is the panel harness — nothing
-   below can be priced until it works. ⚠ Also check `anchor_opportunity_census.py:136`, whose comment
-   claims its population is "exactly `strand_evidence`'s `struct_lock`" while it builds
-   `g1_locked & INTERGENIC & NODE` — matching neither mask, in the instrument whose 346× verdict
-   `CLAUDE.md` quotes.
-2. ⭐⭐⭐ **Re-derive the two end-to-end numbers on the 36-condition ladder.** §0's LIBRARY row is
-   unattributable and its TRANSCRIPT row predates the rebuild. `calibration_truth_ab.py` for the first,
-   `quant_accuracy.py --arm base` / `--arm oracle` for the second. ⛔ The pilot panel has two gDNA levels
-   and cannot carry either (`TRAPS: a-single-level-panel-cannot-see-a-constant`).
+1. ✅ **`ladder_arm_ab.py` — FIXED 2026-08-11, and the dead module path was the small half.**
+   ⛔⛔ **THE FINDING: under the shipped `message_propagation = False`, 22 of the 26 arms could not move
+   a number, and only ONE of them was supposed to be inert.** Six raised — four on
+   `rigel.calibration.enrichment_frame`, deleted at `0d9d422b`. The other sixteen ran to completion,
+   fired on tens of thousands of slots, and scored **byte-identical to `base`**: eight muted a relay that
+   was already silent, and eight moved a PRECISION that nothing consumes, because `_fuse(own, p, msg)`
+   returns `own` for every `p` when no message arrives. Only `intron_phi` and `kappa_half` were live.
+   ⭐ **A fire counter cannot see this** — it answers "was my code called", and the question is "can this
+   arm move a number". The repair is four things: `--messages {off,on}` stamped into **every row** so two
+   arms run differently cannot be diffed silently; an up-front refusal for an arm the chosen policy
+   cannot express; a fire assertion that names the arm (it covered `intron_phi` and `kappa_half` not at
+   all, and the whole `zc_*` family only by "did ANY sibling fire"); and ⭐⭐ **`--self-test`, which runs
+   every arm under BOTH policies and gates that each is INERT under one and MOVED under the other** —
+   **25/25 in ~6 min**, falsified by three perturbations that each fired their own branch.
+   ⚠ Two consequences: every arm file in `$RIGEL_ARMS` predates the `messages` field, so
+   `arm_identity.py` now refuses to compare one against a fresh run — which is
+   `TRAPS: re-record-the-baseline` doing its job, not a defect. And `anchor_opportunity_census.py` said
+   in TWO places that its population was "exactly `strand_evidence`'s `struct_lock`"; measured, the
+   solver's mask is **15–23× larger** (30,423 vs 1,312 at `g00`) because it also contains every
+   zero-count NODE. The instrument's own mask is `g1_locked ∧ NODE` — the mask the standing xfail wants
+   `struct_lock` rescoped TO — so its **346×** verdict stands but its SCOPE was overstated wherever it
+   was quoted. Both sizes now print on every row.
+2. ✅ **Re-derive the two end-to-end numbers on the 36-condition ladder — DONE 2026-08-11, BOTH halves.**
+   `quant_accuracy.py --arm base / noop / oracle / base_reseed` on all 36 (7 min each at `--jobs 8`) and
+   `calibration_truth_ab.py --pilot <ladder>/oracle_cache --cache-subdir _main`. The five §0 rows above
+   carry the numbers; `$RIGEL_ARMS/qa_ladder_*.jsonl` carry the rows.
+   ⭐⭐ **The verdict so far, and it is the one that ranks the next build:** a perfect prior is worth
+   **32.2 %** of transcript misassignment and **every bit of it is unstranded × capture-ON**; on the
+   other three strata it is neutral-to-worse, and at GENE level it makes stranded × capture-OFF **1.7×
+   worse**. ⛔ Two things a perfect prior does NOT fix: the `g00` control (0.953) and half the nascent
+   channel (15.86 M → 5.22 M, and at `g00` it goes the wrong way, 4.30 M → 4.64 M).
+2b. ✅ **THE SIMULATION + BENCHMARKING WORKFLOW — DONE 2026-08-11** (owner ruling: build the workflow
+   before the nascent panel). ⛔ **The diagnosis was THREE overlapping benchmarking stacks and no entry
+   point**, with the working one undocumented: `scripts/design/*` (campaign-built, gated — the real one),
+   `rigel.sim.analysis` (1,589 lines, a second scorer), `scripts/benchmarking/` (4,036 lines, external-tool
+   comparison, 3–5 months stale, configs naming conditions that no longer exist).
+   ⭐ **`scripts/sim/panel.py` is now the loop** — `status / build / simulate / cache / score / report`,
+   every path derived from one panel YAML, adding NO measurement code. `TESTING.md` §2 is the full recipe;
+   it previously stopped at "cache the scans" and **never mentioned running the tool or scoring it**, and
+   the ORACLE cache had no step at all (it was a side effect of `pass0_vs_oracle.py`), so the documented
+   recipe produced a panel every scorer refused.
+   ⚠ **Deleted, and recoverable from `0d9d422b`:** `scripts/benchmarking/` entire; `rigel/sim/analysis.py`
+   and `scripts/sim/evaluate_suite.py` (618 of 1,589 lines kept as `rigel/sim/net_flow.py` with its tests —
+   the flow decomposition has no duplicate; the other 971 were a second scorer). `scripts/README.md` was
+   rewritten: it documented three directories of which **two had not existed for months** and omitted
+   `design/`, which is 56 files.
 3. ⭐⭐ **Price the CANCELLING PAIR together** — `struct_lock` rescoped to `g1_locked & NODE` AND the
    `intergenic|exon` seam claiming its RNA-contaminated crossing mass as gDNA. Five of the seven
    remaining xfails go green if and only if this lands. ⛔ Neither half may be priced alone: the
    `struct_lock` half is **+3,207 %** on the zero-gDNA control by itself.
+   ⛔⛔ **AND IT CAN ONLY BE PRICED WITH `--messages on`.** `zc_struct_lock_g1` is MEASURED inert with
+   them off (2026-08-11): it rewrites the mask on 30,423 slots and changes no scored field, because
+   `struct_lock` reaches the answer only through `own_composition_logvar` → a precision → a fusion that
+   `SilentPolicy` never performs. Priced against a messages-off base it would read as "worth nothing",
+   which is the exact reading item 1 was fixed to make impossible.
 4. **Re-price message propagation on unstranded × capture-ON.** The only remaining lever on the one blind
    stratum, one config flag, and it closes two more xfails. Its recorded +155 % predates the
    conserved-count rewrite AND the numeric convention. ⛔ RE-price, never inherit.
+   ⭐ It is now one pair of commands — `ladder_arm_ab.py --arm base --messages off` against
+   `--arm base --messages on`, `--jobs 8` — with the setting stamped into every row of both.
 5. **`mass_*_edge` → `count_*_edge`.** THREE of the five `mass_*` fields on `CalibrationResult` are
    incidences (`mass_gdna_edge`, `mass_rna_edge`, `mass_rna_junction`) and two are fragment counts. Its
    own commit, `one-thing-varied`.

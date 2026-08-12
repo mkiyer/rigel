@@ -159,15 +159,25 @@ class CalibrationResult:
 
     # --- the RNA geometric supports: the SAME two frames, on the RNA pmf ---
     #: float64[n_nodes] / float64[n_edges] — ``contained_eff_length`` and ``crossing_eff_length`` on the
-    #: RNA pmf. ⭐ **They exist because a mass is not a fragment count.** ``assemble_priors`` converts
-    #: each component's per-object mass into a density before integrating it over the locus span, and a
-    #: density needs THAT COMPONENT'S OWN opportunity as its divisor: a fragment deposits on
-    #: ``max(K, 1)`` objects and longer fragments cross more lines, so dividing both components by the
-    #: gDNA opportunity — or by nothing at all, which is what shipped — tilts the prior's g:r ratio by
-    #: ``Sum A_g / Sum A_r``. Measured on the chr22 pilot: gDNA 1.031 incidences per fragment against
-    # RNA ~1.17, a 13–19 % under-call of gDNA.
-    #: ⚠ Like their gDNA twins these are PROJECTED off ``NodeGeometry.eff_rna``, never recomputed — the
-    #: number the prior divides by is byte-identically the number the solver divided by
+    #: RNA pmf: the RNA population's OWN opportunity at each object.
+    #:
+    #: ⛔⛔ **NO CONSUMER IN ``src/`` TODAY, AND THE REASON IS A DESIGN CHANGE, NOT AN OVERSIGHT.** This
+    #: docstring used to open "they exist because a mass is not a fragment count" and state that
+    #: ``assemble_priors`` divides each component's mass by its own opportunity to get a density. **That
+    #: consumer was removed.** The prior was rewritten as a conserved FRAGMENT COUNT at ``d045d820``
+    #: (2026-08-01) and ``5591cc01`` (2026-08-08); it now divides by nothing on the mass path —
+    #: ``tests/calibration/test_prior_units.py``: *"The prior no longer divides by anything."* The
+    #: quantified g:r tilt the old text cited (gDNA 1.031 incidences per fragment against RNA ~1.17) was
+    #: an argument for a density prior that no longer ships.
+    #:
+    #: ⚠ **They are ORPHANED, not dead, and deleting them would be the wrong repair.** Their gDNA twins
+    #: are load-bearing in four modules (``capture_eff_length``, ``track``, ``derive``, ``priors``); the
+    #: RNA pair is the same quantity for the other population, and any future prior that reasons about
+    #: RNA DENSITY — per transcript or per object — needs exactly this divisor.
+    #:
+    #: ⭐ Like their gDNA twins they are PROJECTED off ``NodeGeometry.eff_rna`` by ``_project_eff``,
+    #: never recomputed, so they are byte-identically the opportunity the SOLVER used. That is the
+    #: property that makes them safe to reason with.
     rna_node_eff_len: np.ndarray
     rna_edge_eff_len: np.ndarray
 
