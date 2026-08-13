@@ -9,7 +9,7 @@ import pytest
 from rigel.index import (
     TranscriptIndex,
     build_index_artifacts,
-    EDGES_FEATHER,
+    BOUNDARIES_FEATHER,
     INDEX_FORMAT_VERSION,
     INTERVALS_FEATHER,
     MANIFEST_JSON,
@@ -39,12 +39,12 @@ def _write_minimal_index(tmp_path: Path, t_df: pd.DataFrame) -> Path:
     # ref_lengths.feather: a single 1000-bp chr1.
     pd.DataFrame({"ref": ["chr1"], "length": [1000]}).to_feather(idx_dir / REF_LENGTHS_FEATHER)
 
-    # The splice graph: one INTERGENIC region tiling chr1, zero edges. Required at load, so the
+    # The splice graph: one INTERGENIC region tiling chr1, zero boundaries. Required at load, so the
     # fixture must supply it — the point of this fixture is to isolate the transcript-table
     # validation that each test below exercises, not to also fail on a missing partition.
-    _, regions, edges = build_index_artifacts([], {"chr1": 1000})
+    _, regions, boundaries = build_index_artifacts([], {"chr1": 1000})
     regions.to_feather(idx_dir / REGIONS_FEATHER)
-    edges.to_feather(idx_dir / EDGES_FEATHER)
+    boundaries.to_feather(idx_dir / BOUNDARIES_FEATHER)
 
     iv_df = pd.DataFrame(
         {

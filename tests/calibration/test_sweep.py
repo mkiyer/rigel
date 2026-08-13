@@ -1,14 +1,14 @@
 """The belief-propagation sweep (`sweep.solve_chain`) and the beliefs it starts from.
 
 ⭐ **Every fixture here is on the S5.e axes** — ``_synthetic.make_chain_parts``, i.e. a region axis, a
-contiguous-edge axis with ``k − 1`` entries per reference and **no terminal slots**, and a junction axis
-whose edges state their own ``(src, dst, strand)``. The per-FACE fixtures this file used to carry are
+contiguous-boundary axis with ``k − 1`` entries per reference and **no terminal slots**, and a junction axis
+whose boundaries state their own ``(src, dst, strand)``. The per-FACE fixtures this file used to carry are
 gone; ``RegionGeometry``'s own gate is ``test_region_geometry.py``, written from scratch against enumerated
 start positions.
 
 ⚠ **Two things the old shape hid, and their tests say so in place**: a reference terminal was a
 data-free boundary SLOT that could be G1-locked and emit structural all-gDNA into its neighbour
-(`test_gdna_sweep_zero_gdna_pin_and_monotone`), and the mature flux at an intron↔exon seam had to be
+(`test_gdna_sweep_zero_gdna_pin_and_monotone`), and the mature flux at an intron↔exon boundary had to be
 placed by hand rather than derived from a junction's endpoints (`_mature_exon_chain`).
 """
 
@@ -91,9 +91,9 @@ def test_init_boundary_continuity_gate():
         region_pos=[80.0, 40.0],
         region_neg=[4.0, 30.0],
         # the crossing: sense-tilted unspliced (κ=0.95 ⇒ +) + a certified-RNA (spliced) floor
-        edge_pos=[90.0],
-        edge_neg=[5.0],
-        edge_spliced=[50.0],
+        boundary_pos=[90.0],
+        boundary_neg=[5.0],
+        boundary_spliced=[50.0],
     )
     b = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
     # slots: N0=0, E0=1, N1=2.
@@ -110,8 +110,8 @@ def test_init_tss_boundary_is_black_hole():
         region_size_bp=[1000.0, 2000.0],
         region_pos=[50.0, 80.0],
         region_neg=[50.0, 4.0],
-        edge_pos=[90.0],
-        edge_neg=[5.0],
+        boundary_pos=[90.0],
+        boundary_neg=[5.0],
     )
     b = init_beliefs(parts.chain, parts.geometry, parts.statics, rna_sense_frac=0.95, n_grid=60)
     # slot 1 is the TSS line: a locked gDNA sink despite the sense tilt (all precision locked at 0).
@@ -186,17 +186,17 @@ def _factor1_uniform_rho():
     rho = 0.5
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
     region_eff = contained_eff_length(np.full(3, 1000.0), gdna_fl)  # [701, 701, 701]
-    edge_eff = float(
+    boundary_eff = float(
         crossing_eff_length(gdna_fl, np.full(1, UNBOUNDED_REACH), np.full(1, UNBOUNDED_REACH))[0]
     )
-    region_count, edge_count = rho * region_eff, rho * edge_eff
+    region_count, boundary_count = rho * region_eff, rho * boundary_eff
     parts = make_chain_parts(
         [0, BIT_EXON_POS | BIT_EXON_NEG, 0],
         region_size_bp=1000.0,
         region_pos=region_count / 2,
         region_neg=region_count / 2,
-        edge_pos=edge_count / 2,
-        edge_neg=edge_count / 2,
+        boundary_pos=boundary_count / 2,
+        boundary_neg=boundary_count / 2,
         gdna_fl=gdna_fl,
         rna_fl=rna_fl,
     )
@@ -264,10 +264,10 @@ def test_interior_anchor_is_immovable_and_produces_no_nan():
     assert np.allclose(rho_g[[0, 4]], rho, atol=1e-9)  # exact, not merely close
 
 
-def test_gdna_emits_across_tss_tes_seam():
+def test_gdna_emits_across_tss_tes_boundary():
     """Structural-gate regression: gDNA is genomically continuous, so the
-    gene-boundary seams (TSS/TES) flanking a SINGLE-EXON gene must RELAY a gDNA message into it from the
-    intergenic regions beyond — even though neither RNA strand is continuous across those seams. Before the
+    gene-boundary boundaries (TSS/TES) flanking a SINGLE-EXON gene must RELAY a gDNA message into it from the
+    intergenic regions beyond — even though neither RNA strand is continuous across those boundaries. Before the
     fix the gDNA message was gated by RNA strand-continuity (`solvable`), so such a gene (both flanks
     intergenic) was a no-relay region, solving on its own local belief alone.
 
@@ -279,14 +279,14 @@ def test_gdna_emits_across_tss_tes_seam():
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
     L, unb = 1000.0, np.full(1, UNBOUNDED_REACH)
     region_count = rho * float(contained_eff_length(np.full(1, L), gdna_fl)[0])
-    edge_count = rho * float(crossing_eff_length(gdna_fl, unb, unb)[0])
+    boundary_count = rho * float(crossing_eff_length(gdna_fl, unb, unb)[0])
     parts = make_chain_parts(  # intergenic | exon+ | intergenic
         [0, BIT_EXON_POS, 0],
         region_size_bp=L,
         region_pos=region_count / 2,
         region_neg=region_count / 2,
-        edge_pos=edge_count / 2,
-        edge_neg=edge_count / 2,
+        boundary_pos=boundary_count / 2,
+        boundary_neg=boundary_count / 2,
         gdna_fl=gdna_fl,
         rna_fl=rna_fl,
     )
@@ -301,9 +301,9 @@ def test_gdna_emits_across_tss_tes_seam():
         n_grid=40,
         _capture=cap,
     )
-    exon = 2  # the single-exon gene, flanked on both sides by TSS/TES seams (chain N E N E N)
-    # THE FIX — the exon receives a gDNA relay across the seam (incoming precision > 0). Pre-fix: 0 (no relay).
-    assert cap["prec_g"][exon] > 0.0, "single-exon gene got NO gDNA relay across the TSS/TES seam"
+    exon = 2  # the single-exon gene, flanked on both sides by TSS/TES boundaries (chain N E N E N)
+    # THE FIX — the exon receives a gDNA relay across the boundary (incoming precision > 0). Pre-fix: 0 (no relay).
+    assert cap["prec_g"][exon] > 0.0, "single-exon gene got NO gDNA relay across the TSS/TES boundary"
     # The intergenic flanks emit ZERO RNA authority: the exon receives no +/− RNA message from them.
     assert cap["prec_p"][exon] == 0.0 and cap["prec_n"][exon] == 0.0
     # State ⊥ messages: the intergenic regions stay locked all-gDNA (confident own-state, ignore all inputs).
@@ -314,7 +314,7 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     # ⚠ Was `xfail` as "pre-existing known-red" while σ²_transfer was identically 0 on this seedless chain:
     # the AMBIG region leant gDNA at ≈0.564 and the strand-solved introns were dragged up to ≈0.564 by the
     # directly-adjacent terminal G1 locks, whose messages were then UNDAMPED. The derived the-reframe-scale-variance σ²_transfer
-    # (`Var(log r)` from `composition_logvar`, computed per edge from counts and eff-lengths) damps them, and
+    # (`Var(log r)` from `composition_logvar`, computed per boundary from counts and eff-lengths) damps them, and
     # measured 2026-07-27 all three regions are back under the 0.50 bound. Marker removed; live guard again.
     # A pure-RNA chain intron+ | AMBIG(in+|in−) | intron−. The AMBIG starts at the all-gDNA init f_g=1; the
     # global (driven to ~0 by the RNA introns) + the RNA-neighbour messages must pull the phantom gDNA down,
@@ -328,8 +328,8 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
         region_size_bp=2000.0,
         region_pos=[95.0, 50.0, 5.0],
         region_neg=[5.0, 50.0, 95.0],
-        edge_pos=[40.0, 2.0],
-        edge_neg=[2.0, 40.0],
+        boundary_pos=[40.0, 2.0],
+        boundary_neg=[2.0, 40.0],
         gdna_fl=gdna_fl,
         rna_fl=rna_fl,
     )
@@ -368,7 +368,7 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
     # ⭐ **S5.e removed the confound this comment used to be about.** The predecessor read ~0.44 rather
     # than ~0.22 because the chain's two TERMINAL boundary slots were G1-locked and emitted their
     # structural all-gDNA into the flanking introns — an artefact of an artificial chain, since an intron
-    # running to the chain edge with no intergenic flank cannot occur in a real annotation. **Those slots
+    # running to the chain boundary with no intergenic flank cannot occur in a real annotation. **Those slots
     # no longer exist**: a reference with k regions owns k−1 lines, so there is nothing beyond the outer
     # regions to emit anything. The invariant the test protects is unchanged; the artefact is gone.
     assert final.f_g[0] < 0.50 and final.f_g[4] < 0.50
@@ -379,7 +379,7 @@ def test_gdna_sweep_zero_gdna_pin_and_monotone():
 
 def test_density_message_two_sided_mode_not_vertex():
     """A LOG-fraction gDNA message (mode=log 0.2, strong prec) on a balanced AMBIG region (flat strand) pulls
-    f_g TOWARD 0.2 — two-sided by construction (a Gaussian on log f_g, no edge wall), not to the f_g=1
+    f_g TOWARD 0.2 — two-sided by construction (a Gaussian on log f_g, no boundary wall), not to the f_g=1
     vertex. The log-density log-odds solver's message form."""
     from rigel.calibration.simplex_logodds import _solve_regions_logodds_all
 
@@ -445,16 +445,16 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
 
     ⭐ **Five regions, not three, and the extra two are load-bearing.** The predecessor put the mature
     flux on the two intron↔exon *boundaries* by hand, because the old accumulator attributed a splice to
-    the region's edge. A junction now states its own ``(src, dst)``, so it has to HAVE endpoints: the
+    the region's boundary. A junction now states its own ``(src, dst)``, so it has to HAVE endpoints: the
     junction over intron ``n1`` runs ``n0 → n2`` and the one over ``n3`` runs ``n2 → n4``, and
     `build_region_geometry` places their flux on the lines they leave and enter. The exon under test
     (``n2``) ends up with mature flux on both its flanking lines — which is what the old fixture asserted
     by construction, now derived from the graph instead.
 
     Physically consistent: every exon's contained unspliced is balanced gDNA + sense (+) mature; the
-    introns and every line carry balanced gDNA only. ⭐ **`edge_spliced` is 0 everywhere, and that is a
-    measured fact rather than a convenience** — mature RNA never crosses an exon↔intron seam (0 of 1,146
-    seams over 7 conditions). It skips the intron as a junction, never as
+    introns and every line carry balanced gDNA only. ⭐ **`boundary_spliced` is 0 everywhere, and that is a
+    measured fact rather than a convenience** — mature RNA never crosses an exon↔intron boundary (0 of 1,146
+    boundaries over 7 conditions). It skips the intron as a junction, never as
     a contiguous crossing.
     """
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
@@ -468,7 +468,7 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
     mat = rho_m * Er  # contained mature count (+ strand only)
     is_exon = np.array([1.0, 0.0, 1.0, 0.0, 1.0])
     # ``spl_scale`` < 1 models a CAPTURE-DEPLETED junction: junction-spanning reads are only partially
-    # captured, so the junction UNDER-reports the exon's true mature density ⇒ the edge→exon mature
+    # captured, so the junction UNDER-reports the exon's true mature density ⇒ the boundary→exon mature
     # MEASUREMENT disagrees with the exon's own (confident) unspliced belief. Used by the silencing test.
     j_count = rho_m * cross_r * spl_scale
     junctions = (
@@ -484,9 +484,9 @@ def _mature_exon_chain(*, spliced: bool, rho_g=0.5, rho_m=1.0, kappa=0.95, spl_s
         region_size_bp=L,
         region_pos=g_half + mat * is_exon,
         region_neg=g_half,
-        edge_pos=rho_g * cross_g / 2.0,
-        edge_neg=rho_g * cross_g / 2.0,
-        edge_spliced=0.0,
+        boundary_pos=rho_g * cross_g / 2.0,
+        boundary_neg=rho_g * cross_g / 2.0,
+        boundary_spliced=0.0,
         junctions=junctions,
         gdna_fl=gdna_fl,
         rna_fl=rna_fl,
@@ -534,9 +534,9 @@ def test_mature_no_nascent_hallucination_in_introns():
 
 # NOTE: `test_mature_absorption_lowers_nascent_message_into_junction` was RETIRED when the mature-crossing gate
 # landed (Phase 4). It asserted the exon→TRAPS: measure-the-ceiling-first +RNA message FIRES (`app[b1] > 0`) so its absorption term could
-# lower the imputed nascent; the gate now blocks that edge entirely (the exon may not manufacture nascent into
+# lower the imputed nascent; the gate now blocks that boundary entirely (the exon may not manufacture nascent into
 # its intron-side junction), so the message no longer exists to absorb. Its replacement is
-# `test_exon_does_not_manufacture_nascent_into_intron` (same fixture, same edge, inverted assertion). The
+# `test_exon_does_not_manufacture_nascent_into_intron` (same fixture, same boundary, inverted assertion). The
 # B→exon MEASUREMENT + absorption path it half-covered is still guarded by the two `test_mature_measurement_*`
 # tests below, which the gate leaves untouched.
 
@@ -561,10 +561,10 @@ def test_mature_measurement_disagreement_silenced():
 
     ⚠ **This was a `strict=True` xfail on an OPEN ITEM, and the open item is RESOLVED.** The defect was a
     real cross-component coupling: `_boundary_spliced_mass_increment` folded the SPLICED density into the
-    mature-inclusive boundary projection used for σ²_transfer on exon↔boundary edges, so depleting the
+    mature-inclusive boundary projection used for σ²_transfer on exon↔boundary boundaries, so depleting the
     spliced channel moved σ²_transfer and hence the attenuation of the **gDNA** relay — components that
     should not touch. Assertion (2) failed at |Δf_g| = 0.0612 against its 0.05 bound. σ²_transfer is now the
-    derived the-reframe-scale-variance `Var(log r)` (`composition_logvar`, per edge from counts and eff-lengths) and that projection
+    derived the-reframe-scale-variance `Var(log r)` (`composition_logvar`, per boundary from counts and eff-lengths) and that projection
     is out of the path: **measured 2026-07-27, |Δf_g| = 0.000000 — exactly zero, not merely inside the
     bound.**
 
@@ -743,7 +743,7 @@ def test_pure_gdna_region_confident_at_near_binomial_od():
 # strand is continuous on BOTH endpoints (intron↔exon in either direction, intron→boundary, boundary→exon), and
 # gDNA flows genomically. The asymmetric `send_s = mrna_active_s[dst] or not mrna_active_s[src]` gate that used
 # to silence exon→intron RNA is GONE. On the `_mature_exon_chain` fixture (intron+ | exon+ | intron+, chain
-# B0 R0 B1 R1 B2 R2 B3) EVERY continuous-strand edge now fires — including the formerly-silenced exon R1→B1
+# B0 R0 B1 R1 B2 R2 B3) EVERY continuous-strand boundary now fires — including the formerly-silenced exon R1→B1
 # (backward) and exon R1→B2 (forward). That re-opens the mature leak into the introns; the honest σ²_transfer
 # precision + the nascent factory (ρ_nascent = ρ_RNA − ρ_mature) are what will counter it (see §6 of the doc).
 # The `mrna_active_*` mask itself stays computed in the statics (the nascent factory will consume it).
@@ -776,7 +776,7 @@ def test_intron_relays_nascent_into_exon_both_directions():
 def test_mrna_active_matches_same_strand_exon_rule():
     """The `mrna_active_strands` mature-presence mask (no longer wired into the emission gate, but kept in the
     statics for the coming nascent factory `ρ_nascent = ρ_RNA − ρ_mature`) is exactly the user's rule: mature is
-    present on strand s across a seam iff the SAME-STRANDED exon bit is set on BOTH flanks. Intron bits never
+    present on strand s across a boundary iff the SAME-STRANDED exon bit is set on BOTH flanks. Intron bits never
     qualify; `EX+EX- | EX+EX-` passes on BOTH strands. Enumerate all 16×16 signature pairs (a boundary's two
     flanks) and check `mrna_active_strands` against that predicate, plus the subsumption `mrna_active_s ⇒
     nrna_active_s` (mature ⇒ nascent). Pure, no sweep."""
@@ -875,7 +875,7 @@ def test_float32_log_is_monotone_so_the_ambig_cube_may_hoist_it():
 
         rng = np.random.default_rng(4)
         grid = rng.random((60, 60)).astype(np.float32)  # the (K,K_t) fraction grid
-        grid[rng.random(grid.shape) < 0.05] = 0.0  # the tau = +-1 edges: f_s exactly 0
+        grid[rng.random(grid.shape) < 0.05] = 0.0  # the tau = +-1 boundaries: f_s exactly 0
         floor = (1.0 / (1.0 + np.exp(rng.uniform(0.0, 14.0, 500)))).astype(np.float32)[
             :, None, None
         ]

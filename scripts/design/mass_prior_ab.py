@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 """⭐⭐⭐ **THE PRIOR AS A CONSERVED FRAGMENT COUNT** — plan 5.5 against the oracle, on real conditions.
 
-**The question.** ``assemble_priors`` hands the EM a per-locus FRAGMENT COUNT, but ``edge_unspliced_count``
+**The question.** ``assemble_priors`` hands the EM a per-locus FRAGMENT COUNT, but ``boundary_unspliced_count``
 is ``+1`` on every line a fragment crosses, so a fragment books ``max(K, 1)`` of them. The shipped
 assembler repairs that with ``rho = Sum m / Sum S`` integrated over the locus span, and under capture the
 repair over-calls by **+15.1 %** with a PERFECT deconvolution fed in (``prior_vs_oracle.py``, arm ``O``
-against arm ``F``). The accumulator now carries the count directly — ``edge_unspliced_mass``, which sums
+against arm ``F``). The accumulator now carries the count directly — ``boundary_unspliced_mass``, which sums
 to one per fragment — so the assembler can stop manufacturing one from a density.
 
 This instrument scores that change end to end, against the same ``O`` and ``F`` arms, on a deterministic
@@ -98,8 +98,8 @@ def subsample_bam(source: str, out: Path, target: int, total_fragments: int) -> 
     return written, rate
 
 
-def edge_share(payload) -> np.ndarray:
-    """``edge_unspliced_mass / edge_unspliced_count`` per line — the mean conserved share of a crossing.
+def boundary_share(payload) -> np.ndarray:
+    """``boundary_unspliced_mass / boundary_unspliced_count`` per line — the mean conserved share of a crossing.
 
     ⭐ This is the whole of plan 5.5's new input: one dimensionless scalar per line that converts an
     object-incidence total into a fragment count. It is 1.0 at a line whose flanking regions both exceed
@@ -109,8 +109,8 @@ def edge_share(payload) -> np.ndarray:
     ⛔ Lines with no crossing get **1.0**, the identity. There is no mass there to rescale, and a 0 would
     delete whatever mass the calibration put on a line the accumulator never saw.
     """
-    mass = np.asarray(payload.edge_unspliced_mass, np.float64)
-    count = np.asarray(payload.edge_unspliced_count, np.float64).sum(axis=1)
+    mass = np.asarray(payload.boundary_unspliced_mass, np.float64)
+    count = np.asarray(payload.boundary_unspliced_count, np.float64).sum(axis=1)
     share = np.ones_like(mass)
     np.divide(mass, count, out=share, where=count > 0)
     return share
@@ -120,12 +120,12 @@ def assemble_priors_mass(calibration, region_arrays, multi_loci, share, eff_len_
     """⭐⭐⭐ **PLAN 5.5** — the prior as a CONSERVED FRAGMENT COUNT, with no density conversion::
 
         a_g(locus) = Sum_r share(r) * mass_gdna_region[r]
-                   + Sum_l share(l) * mass_gdna_edge[l] * (edge_unspliced_mass[l] / edge_count[l])
+                   + Sum_l share(l) * mass_gdna_boundary[l] * (boundary_unspliced_mass[l] / boundary_count[l])
 
     and the same on the RNA masses, spliced withheld exactly as the shipped assembler withholds it.
 
     ⭐ ``mass_gdna_region[r]`` is already ``f_g(r) * contained_count[r]`` — one deposit per contained
-    fragment — so the region term needs no arithmetic at all. Only the edge term is rescaled, from the
+    fragment — so the region term needs no arithmetic at all. Only the boundary term is rescaled, from the
     K-inflated incidence count onto the conserved mass. ``rho = Sum m / Sum S``, ``span_bp`` and the
     support-weighted pooling are all GONE: the count is in the bank, so nothing manufactures one.
 
@@ -136,41 +136,41 @@ def assemble_priors_mass(calibration, region_arrays, multi_loci, share, eff_len_
     ⚠ **Nothing is dropped for zero opportunity.** There is no denominator here — the mass IS the count
     — so dropping such mass would simply lose fragments the accumulator really deposited.
 
-    ⭐ **Regions and edges are projected on their own axes**, matching the shipped assembler: a region owns
-    the fragments contained in it, an edge owns the fragments that cross it, and a locus collects the
-    edges that touch its regions. No line is folded onto a flank region.
+    ⭐ **Regions and boundaries are projected on their own axes**, matching the shipped assembler: a region owns
+    the fragments contained in it, an boundary owns the fragments that cross it, and a locus collects the
+    boundaries that touch its regions. No line is folded onto a flank region.
     """
     from rigel.calibration.priors import (
         LocusPriors,
-        _edge_locus_shares,
+        _boundary_locus_shares,
         _project_regions_to_loci,
         _sum_by_locus,
     )
 
     share = np.asarray(share, np.float64)
     n_loci = len(multi_loci)
-    e_idx, e_lid, e_w = _edge_locus_shares(region_arrays, multi_loci, n_loci)
+    e_idx, e_lid, e_w = _boundary_locus_shares(region_arrays, multi_loci, n_loci)
 
-    def component(mass_region, mass_edge):
+    def component(mass_region, mass_boundary):
         region_part = _project_regions_to_loci(
             region_arrays, multi_loci, n_loci, {"m": np.asarray(mass_region, np.float64)}
         )["m"]
-        edge_part = _sum_by_locus(
-            e_idx, e_lid, e_w, np.asarray(mass_edge, np.float64) * share, n_loci
+        boundary_part = _sum_by_locus(
+            e_idx, e_lid, e_w, np.asarray(mass_boundary, np.float64) * share, n_loci
         )
-        return np.maximum(region_part + edge_part, 0.0)
+        return np.maximum(region_part + boundary_part, 0.0)
 
-    # the same spliced withholding the shipped assembler does: mass_rna_edge is spliced-INCLUSIVE by an
-    # existing per-edge conservation convention, so the certified fraction is subtracted before the
+    # the same spliced withholding the shipped assembler does: mass_rna_boundary is spliced-INCLUSIVE by an
+    # existing per-boundary conservation convention, so the certified fraction is subtracted before the
     # unspliced competition sees it.
-    rna_edge_unspliced = np.maximum(
-        np.asarray(calibration.mass_rna_edge, np.float64)
-        - np.asarray(calibration.mass_rna_spliced_edge, np.float64),
+    rna_boundary_unspliced = np.maximum(
+        np.asarray(calibration.mass_rna_boundary, np.float64)
+        - np.asarray(calibration.mass_rna_spliced_boundary, np.float64),
         0.0,
     )
     return LocusPriors(
-        gdna_prior_count=component(calibration.mass_gdna_region, calibration.mass_gdna_edge),
-        rna_prior_count=component(calibration.mass_rna_region, rna_edge_unspliced),
+        gdna_prior_count=component(calibration.mass_gdna_region, calibration.mass_gdna_boundary),
+        rna_prior_count=component(calibration.mass_rna_region, rna_boundary_unspliced),
         gdna_eff_len=np.asarray(eff_len_source.gdna_eff_len, np.float64).copy(),
     )
 
@@ -258,7 +258,7 @@ def report(rows, args) -> bool:
         oracle_calibration = dataclasses.replace(
             r.calibration, **r.oracle.override_masses(r.region_arrays)
         )
-        share = edge_share(r.oracle.full)
+        share = boundary_share(r.oracle.full)
         row["share"] = share
 
         def assemble(share_g, share_r, _c=oracle_calibration, _r=r):
@@ -275,7 +275,7 @@ def report(rows, args) -> bool:
         # — the origin split is the oracle — so it prices the one-pooled-share assumption, not a proposal.
         rna_parts = {k: v for k, v in r.oracle.parts.items() if k != "gdna"}
         split_g, split_r = assemble(
-            edge_share(r.oracle.parts["gdna"]), _pooled_share(rna_parts.values())
+            boundary_share(r.oracle.parts["gdna"]), _pooled_share(rna_parts.values())
         )
 
         row["O_new"] = PVO.score_arm(pooled_g, r.f_gdna)
@@ -313,10 +313,10 @@ def report(rows, args) -> bool:
 
 
 def _pooled_share(payloads) -> np.ndarray:
-    """:func:`edge_share` over several origin partitions summed — mass and count from one population."""
+    """:func:`boundary_share` over several origin partitions summed — mass and count from one population."""
     payloads = list(payloads)
-    mass = sum(np.asarray(p.edge_unspliced_mass, np.float64) for p in payloads)
-    count = sum(np.asarray(p.edge_unspliced_count, np.float64).sum(axis=1) for p in payloads)
+    mass = sum(np.asarray(p.boundary_unspliced_mass, np.float64) for p in payloads)
+    count = sum(np.asarray(p.boundary_unspliced_count, np.float64).sum(axis=1) for p in payloads)
     share = np.ones_like(mass)
     np.divide(mass, count, out=share, where=count > 0)
     return share
@@ -341,8 +341,8 @@ def _report_q4(rows) -> None:
 
         def bank(origin, _p=parts):
             payload = _p[origin]
-            return (np.asarray(payload.edge_unspliced_mass, np.float64),
-                    np.asarray(payload.edge_unspliced_count, np.float64).sum(axis=1))
+            return (np.asarray(payload.boundary_unspliced_mass, np.float64),
+                    np.asarray(payload.boundary_unspliced_count, np.float64).sum(axis=1))
 
         mass_g, count_g = bank("gdna")
         mass_m, count_m = bank("mrna")
@@ -386,7 +386,7 @@ def main() -> int:
     return 0 if report(rows, args) else 1
 
 
-__all__ = ["assemble_priors_mass", "edge_share", "subsample_bam"]
+__all__ = ["assemble_priors_mass", "boundary_share", "subsample_bam"]
 
 if __name__ == "__main__":
     raise SystemExit(main())

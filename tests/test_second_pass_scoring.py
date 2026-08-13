@@ -430,7 +430,7 @@ def test_a_DEEPLY_CROSSED_gap_is_won_by_the_GENOMIC_hypothesis(scored):
     assert shares[genomic] > shares[spliced], (
         f"the gap is crossed contiguously {DEEP} times and spliced only {SHALLOW} times, so ∅ must take "
         f"the larger share; got genomic={shares[genomic]:.4f} spliced={shares[spliced]:.4f}. A "
-        f"genomic share of exactly 0 means ∅'s contiguous-edge evidence set was empty — D-6."
+        f"genomic share of exactly 0 means ∅'s contiguous-boundary evidence set was empty — D-6."
     )
 
 

@@ -5,7 +5,7 @@ L > ell. So the expected contained count for component c is  rho_c * A_c(ell),  
 
     A_c(ell) = E_c[ max(0, ell - L + 1) ]      <- the component's own effective length
 
-If the edge flux already gives the TOTAL density rho = rho_g + rho_r with no FL model (the Sum 1/L
+If the boundary flux already gives the TOTAL density rho = rho_g + rho_r with no FL model (the Sum 1/L
 result), then the contained count adds a SECOND equation, and the two are solvable for the split
 exactly when A_g(ell) != A_r(ell).  Discriminability is the ratio A_g/A_r: 1.0 = no information,
 0.0 = perfect (only RNA can fit).

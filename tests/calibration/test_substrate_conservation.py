@@ -20,7 +20,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rigel.calibration.region_arrays import RegionArrays, edge_region_indices
+from rigel.calibration.region_arrays import RegionArrays, boundary_region_indices
 from rigel.calibration.substrate import CalibrationSubstrate
 from rigel.config import BamScanConfig, EMConfig, PipelineConfig
 from rigel.pipeline import scan_and_buffer
@@ -39,7 +39,7 @@ def scanned():
     sc.add_gene("g1", "+", [{"t_id": "t1", "exons": [(300, 600), (900, 1200)], "abundance": 60}])
     sc.add_gene("g2", "-", [{"t_id": "t2", "exons": [(3000, 3300), (3700, 4000)], "abundance": 40}])
     # ⚠ gDNA is not decoration here. Without it every fragment is mature RNA, which either sits inside
-    # one exon region or JUMPS — so ``edge_unspliced``, the one population calibration actually
+    # one exon region or JUMPS — so ``boundary_unspliced``, the one population calibration actually
     # deconvolves, is identically zero and a "conservation" test would pass over an empty bank.
     from rigel.sim.reads import GDNAConfig
 
@@ -82,21 +82,21 @@ def test_every_buffered_fragment_is_ACCEPTED_or_DROPPED_FOR_A_NAMED_REASON(scann
     assert qc.deposited + dropped == buffer.total_fragments
 
 
-def test_the_edge_axis_is_N_minus_the_NONEMPTY_references(scanned):
+def test_the_boundary_axis_is_N_minus_the_NONEMPTY_references(scanned):
     """``E = N − (references that own at least one region)``, re-derived from the INDEX rather than from
     the payload's own offsets. A reference with one region owns no line; a reference with none owns
     nothing at all — neither is a special case in the formula, and both were terminal slots before."""
     payload, ra, _buffer, index = scanned
     regions_per_ref = np.diff(np.asarray(ra.ref_offsets, dtype=np.int64))
-    expected_edges = int(np.maximum(regions_per_ref - 1, 0).sum())
-    assert int(payload.n_edges) == expected_edges
+    expected_boundaries = int(np.maximum(regions_per_ref - 1, 0).sum())
+    assert int(payload.n_boundaries) == expected_boundaries
     assert int(payload.n_regions) == len(index.regions_df)
 
 
 def test_contained_deposits_never_exceed_the_accepted_fragments(scanned):
     """A fragment lies wholly inside at most one region, so the contained bank cannot out-count the
     fragments. ⚠ It is an inequality, not an identity: a fragment that crosses any line is contained
-    in nothing and contributes only to the edge banks."""
+    in nothing and contributes only to the boundary banks."""
     payload, ra, _buffer, _index = scanned
     sub = CalibrationSubstrate.from_payload(payload, ra)
     contained = int(np.asarray(sub.region_contained.count).sum())
@@ -104,31 +104,31 @@ def test_contained_deposits_never_exceed_the_accepted_fragments(scanned):
 
 
 def test_no_line_STRADDLES_a_reference(scanned):
-    """Every contiguous edge joins two regions of the same reference — the invariant the ``k + 1`` axis
+    """Every contiguous boundary joins two regions of the same reference — the invariant the ``k + 1`` axis
     could not state, because its terminal slots had a region on one side only."""
     _payload, ra, _buffer, _index = scanned
-    lo, hi = edge_region_indices(np.asarray(ra.ref_id))
+    lo, hi = boundary_region_indices(np.asarray(ra.ref_id))
     ref = np.asarray(ra.ref_id)
     np.testing.assert_array_equal(ref[lo], ref[hi])
     np.testing.assert_array_equal(hi, lo + 1)
 
 
-def test_the_two_edge_banks_are_DISJOINT_populations(scanned):
-    """``edge_unspliced`` and ``edge_spliced`` are different molecules at the same line — crossed
+def test_the_two_boundary_banks_are_DISJOINT_populations(scanned):
+    """``boundary_unspliced`` and ``boundary_spliced`` are different molecules at the same line — crossed
     contiguously having spliced NOWHERE, versus having spliced ELSEWHERE — so a fragment lands in
     exactly one of them and neither is a subset of the other. Pinned here on real data as a
     non-degeneracy check: if the scan produced both, the two banks cannot be the same array."""
     payload, ra, _buffer, _index = scanned
     sub = CalibrationSubstrate.from_payload(payload, ra)
-    unspliced = np.asarray(sub.edge_unspliced.count)
-    spliced = np.asarray(sub.edge_spliced.count)
+    unspliced = np.asarray(sub.boundary_unspliced.count)
+    spliced = np.asarray(sub.boundary_spliced.count)
     assert unspliced.sum() > 0, "the fixture must exercise the unspliced bank"
     assert not np.array_equal(unspliced, spliced)
 
 
 def test_the_junction_axis_matches_the_payloads_own(scanned):
     """The substrate's junction population is exactly ``n_sj`` rows — the third axis, independent of
-    the other two, and the one a consumer must not size from ``n_regions`` or ``n_edges``."""
+    the other two, and the one a consumer must not size from ``n_regions`` or ``n_boundaries``."""
     payload, ra, _buffer, _index = scanned
     sub = CalibrationSubstrate.from_payload(payload, ra)
     assert sub.n_junctions == int(payload.n_sj)

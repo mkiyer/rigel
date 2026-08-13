@@ -1,30 +1,30 @@
 #!/usr/bin/env python
-"""⛔⛔ THE RE-SOLVE CEILING for the `intron|exon` EDGE — NOT a substitution (TRAPS: substitution-understates-a-source).
+"""⛔⛔ THE RE-SOLVE CEILING for the `intron|exon` BOUNDARY — NOT a substitution (TRAPS: substitution-understates-a-source).
 
 A substitution replaces one object's answer with the truth and re-scores; that is honest for a SINK and
 it UNDERSTATES a message SOURCE, whose whole value is what it carries to its neighbours. So every arm
-here hands the EDGE a different OWN BELIEF and then **re-solves the entire chain**, messages and all.
+here hands the BOUNDARY a different OWN BELIEF and then **re-solves the entire chain**, messages and all.
 
 ⭐ **The simulation is shared across arms.** Simulate + scan once per (condition, RNA rung), then
 re-run only `calibrate`. The arms therefore differ by EXACTLY the solver input under test — same
 fragments, same seed, same donor globals — and the extra arms are nearly free.
 
-THE ARMS — a 2x2 on (what the EDGE believes) x (may the EDGE ORIGINATE a gDNA measurement?), plus the
+THE ARMS — a 2x2 on (what the BOUNDARY believes) x (may the BOUNDARY ORIGINATE a gDNA measurement?), plus the
 handoff's literal level-transfer variant:
 
 ===============  ==========================  ==================  =====================================
-arm              the EDGE's own ``f_g``      ``struct_lock``     what the delta from `base` answers
+arm              the BOUNDARY's own ``f_g``      ``struct_lock``     what the delta from `base` answers
 ===============  ==========================  ==================  =====================================
 ``base``         its own self-solve          off                 the baseline, re-recorded here
 ``intron_phi``   the flanking INTRON's       off                 ⭐ what face (I) as DERIVED can deliver
 ``intron_rho``   from the INTRON's DENSITY   off                 the LEVEL-transfer variant
 ``oracle_phi``   ORACLE TRUTH                off                 is the intron's VALUE good enough?
-``lock_only``    its own self-solve          ⭐ ON               TRAPS: conservation-misses-mis-attribution: does the EDGE need to ORIGINATE?
+``lock_only``    its own self-solve          ⭐ ON               TRAPS: conservation-misses-mis-attribution: does the BOUNDARY need to ORIGINATE?
 ``oracle_lock``  ORACLE TRUTH                ⭐ ON               the absolute ceiling for this object
 ===============  ==========================  ==================  =====================================
 
 ⚠ ``struct_lock`` is what admits a slot to the MEASUREMENT stream (``messages.head``'s ``mg_own``), and
-`region_init.strand_evidence` scopes it to REGION slots — so an EDGE can only ever RELAY a gDNA level, never
+`region_init.strand_evidence` scopes it to REGION slots — so an BOUNDARY can only ever RELAY a gDNA level, never
 ORIGINATE one. That is `ROADMAP.md` §1 **reframe-and-level-together**= stated as code, and ``lock_only`` is its ceiling.
 
 The override reuses `region_init`'s own `own_precision` / `own_composition_logvar`, so there is no second
@@ -52,8 +52,8 @@ ALL                    0.1322      -0.009         -0.011        -0.012
 =====================  ==========  =============  ============  ============
 
 ⛔ ``intron_rho`` (transfer the intron's DENSITY rather than its SHARE) is **+0.017 panel-wide and
-+0.207 on capture-ON x unstranded** — capture depletes the intron ~1000x while enriching the EDGE, so a
-level transfer from it poisons the destination. ⛔ ``lock_only`` (let the EDGE originate with its OWN
++0.207 on capture-ON x unstranded** — capture depletes the intron ~1000x while enriching the BOUNDARY, so a
+level transfer from it poisons the destination. ⛔ ``lock_only`` (let the BOUNDARY originate with its OWN
 value) is **+0.010 / +0.19** — certainty without correctness is worse than no certainty.
 """
 
@@ -197,7 +197,7 @@ def simulate(spec, donor, work_dir: Path, pipeline_config=None) -> Substrate:
 
 
 def _slot_types(chain, region_arrays):
-    """Per slot: its coarse type if it is a REGION, and for an EDGE the pair of its two flanking NODEs."""
+    """Per slot: its coarse type if it is a REGION, and for an BOUNDARY the pair of its two flanking REGIONS."""
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
     rtype = coarse_type_array(np.asarray(region_arrays.signature)).astype(np.int64)
@@ -212,7 +212,7 @@ def _slot_types(chain, region_arrays):
 
 
 def _target_slots(chain, region_arrays):
-    """The `intron|exon` EDGE slots, each paired with the slot of its flanking INTRON REGION."""
+    """The `intron|exon` BOUNDARY slots, each paired with the slot of its flanking INTRON REGION."""
     is_region, region_type, left_t, right_t = _slot_types(chain, region_arrays)
     out = []
     for i in range(int(chain.n_slots)):
@@ -231,12 +231,12 @@ def _true_fg_per_slot(chain, region_arrays, truth):
     obj = np.asarray(chain.obj_idx, np.int64)
     ov = truth.override_masses(region_arrays)
     g = {"region": np.asarray(ov["mass_gdna_region"], np.float64),
-         "edge": np.asarray(ov["mass_gdna_edge"], np.float64)}
+         "boundary": np.asarray(ov["mass_gdna_boundary"], np.float64)}
     r = {"region": np.asarray(ov["mass_rna_region"], np.float64),
-         "edge": np.asarray(ov["mass_rna_edge"], np.float64)}
+         "boundary": np.asarray(ov["mass_rna_boundary"], np.float64)}
     out = np.full(int(chain.n_slots), np.nan)
     for s in range(int(chain.n_slots)):
-        ax = "region" if kind[s] == REGION else "edge"
+        ax = "region" if kind[s] == REGION else "boundary"
         i = int(obj[s])
         tot = g[ax][i] + r[ax][i]
         if tot > 0:
@@ -245,7 +245,7 @@ def _true_fg_per_slot(chain, region_arrays, truth):
 
 
 def make_override(arm: str, region_arrays, truth):
-    """A `build_region_init` wrapper that rewrites the two `intron|exon` EDGEs' OWN belief, then lets the
+    """A `build_region_init` wrapper that rewrites the two `intron|exon` BOUNDARIES' OWN belief, then lets the
     whole chain re-solve. Returns ``None`` for the untouched baseline.
 
     ⭐ ``noop`` runs the ENTIRE wrapper with an empty target set — the falsification arm. It must be
@@ -269,37 +269,37 @@ def make_override(arm: str, region_arrays, truth):
         n_region = np.asarray(geometry.unspliced_count, np.float64).sum(axis=1)
         true_fg = _true_fg_per_slot(chain, region_arrays, truth)
 
-        for edge, src in targets:
+        for boundary, src in targets:
             if arm in ("intron_phi", "intron_rho"):
-                tau[edge] = tau[src]
+                tau[boundary] = tau[src]
             if arm == "intron_phi":
                 new_fg = float(f_g[src])
             elif arm == "intron_rho":
                 rho_src = float(ni.rho_g[src])
                 new_fg = (
-                    float(np.clip(rho_src * E_g[edge] / M[edge], 0.0, 1.0))
-                    if M[edge] > _EPS
-                    else float(f_g[edge])
+                    float(np.clip(rho_src * E_g[boundary] / M[boundary], 0.0, 1.0))
+                    if M[boundary] > _EPS
+                    else float(f_g[boundary])
                 )
             elif arm in ("oracle_phi", "oracle_lock"):
-                new_fg = float(f_g[edge]) if not np.isfinite(true_fg[edge]) else float(true_fg[edge])
+                new_fg = float(f_g[boundary]) if not np.isfinite(true_fg[boundary]) else float(true_fg[boundary])
             else:  # lock_only — the VALUE is untouched, only the certainty changes
-                new_fg = float(f_g[edge])
+                new_fg = float(f_g[boundary])
             if arm in ("lock_only", "oracle_lock"):
-                lock[edge] = True
+                lock[boundary] = True
             # the RNA side follows from the composition: keep the slot's own TILT, rescale to 1 − f_g.
             rna = max(0.0, 1.0 - new_fg)
-            tot = f_pos[edge] + f_neg[edge]
+            tot = f_pos[boundary] + f_neg[boundary]
             if tot > _EPS:
-                f_pos[edge] *= rna / tot
-                f_neg[edge] *= rna / tot
+                f_pos[boundary] *= rna / tot
+                f_neg[boundary] *= rna / tot
             else:
-                fp_ok = bool(np.asarray(statics.free_pos, bool)[edge])
-                fn_ok = bool(np.asarray(statics.free_neg, bool)[edge])
+                fp_ok = bool(np.asarray(statics.free_pos, bool)[boundary])
+                fn_ok = bool(np.asarray(statics.free_neg, bool)[boundary])
                 k = float(fp_ok) + float(fn_ok)
-                f_pos[edge] = rna * (float(fp_ok) / k) if k else 0.0
-                f_neg[edge] = rna * (float(fn_ok) / k) if k else 0.0
-            f_g[edge] = new_fg
+                f_pos[boundary] = rna * (float(fp_ok) / k) if k else 0.0
+                f_neg[boundary] = rna * (float(fn_ok) / k) if k else 0.0
+            f_g[boundary] = new_fg
 
         # ── the densities + precisions, through `region_init`'s OWN arithmetic ──
         v_fg, v_fr = NI.own_composition_logvar(f_g, tau, lock)
@@ -312,8 +312,8 @@ def make_override(arm: str, region_arrays, truth):
         # passed — so carry the original liveness forward off the target slots and force it ON at the
         # slots being overridden, which is the whole point of the arm.
         touched = np.zeros(int(chain.n_slots), bool)
-        for edge, _ in targets:
-            touched[edge] = True
+        for boundary, _ in targets:
+            touched[boundary] = True
 
         def _rna(frac, free_s, rho_old):
             raw = np.where(
@@ -468,7 +468,7 @@ def report(rows, spec_name, refit_iters):
           f"{len(arms)} arms, refit={refit_iters}, nrna={nrna}")
     print("=" * 136)
     print("   Every arm RE-SOLVES the whole chain on the SAME simulated fragments; the arms differ only")
-    print("   in what the two `intron|exon` EDGEs believe about themselves. ⛔ Not a substitution (TRAPS: substitution-understates-a-source).")
+    print("   in what the two `intron|exon` BOUNDARIES believe about themselves. ⛔ Not a substitution (TRAPS: substitution-understates-a-source).")
 
     def _cells(fmt, cells, width=15):
         """arm 0 plain; every other arm with its DELTA from arm 0 beside it."""
@@ -530,9 +530,9 @@ def report(rows, spec_name, refit_iters):
         f"{f'{tot[a]:,.0f} ({(tot[a] - t0) / max(t0, 1e-9):+.0%})':>17}" for a in arms[1:]))
 
     print()
-    print("── 4. ⭐⭐ THE CHANNEL: is the EDGE→exon gDNA message ALIVE? (`cm_g` at the EXON slots) ────")
+    print("── 4. ⭐⭐ THE CHANNEL: is the BOUNDARY→exon gDNA message ALIVE? (`cm_g` at the EXON slots) ────")
     print("   `cm_g` is the gDNA MEASUREMENT precision ψ receives. 0 ⇒ the level is carried only as a")
-    print("   mode with no weight — `ROADMAP.md` §1 **reframe-and-level-together**=, a G1 EDGE cannot ORIGINATE.")
+    print("   mode with no weight — `ROADMAP.md` §1 **reframe-and-level-together**=, a G1 BOUNDARY cannot ORIGINATE.")
     exon_keys = [k for k in by if k.startswith("exon@")]
     print(f"\n   {'object':<26} {'arm':<14} {'cm_g':>12} {'c_tau':>12} {'% slots cm_g=0':>16}")
     for k in exon_keys:

@@ -158,7 +158,7 @@ def main() -> int:
         # and be captured. Only the INTERIOR is off-probe, and it is split out below.
     V.check(not fails, "⭐ every probed exon region is ENRICHED", "; ".join(fails))
 
-    # ── the interior/edge split, which is where "off-probe is depleted" is actually testable ──
+    # ── the interior/boundary split, which is where "off-probe is depleted" is actually testable ──
     print("\n   ⭐ A region beside a probed exon is NOT off-probe. Split each long region into the")
     print("      collar within one max-fragment-length of a probed exon, and the interior beyond it:")
     collar = int(donor_on.frag_max)
@@ -168,7 +168,7 @@ def main() -> int:
         return any(s - collar < pos < e + collar for s, e in exon_bounds)
 
     def split_counts(frags):
-        edge = interior = 0
+        boundary = interior = 0
         for f in frags:
             if f["kind"] != "gdna":
                 continue
@@ -176,10 +176,10 @@ def main() -> int:
             if any(s <= mid < e for s, e in exon_bounds):
                 continue
             if near_probe(mid):
-                edge += 1
+                boundary += 1
             else:
                 interior += 1
-        return edge, interior
+        return boundary, interior
 
     e_on, i_on = split_counts(fr_on)
     e_off, i_off = split_counts(fr_off)

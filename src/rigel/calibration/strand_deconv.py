@@ -1,9 +1,9 @@
-"""The contiguous-edge seeds for the gDNA strand-overdispersion fit.  LAYER 4 — strand.
+"""The contiguous-boundary seeds for the gDNA strand-overdispersion fit.  LAYER 4 — strand.
 
 After the bipartite belief-propagation rebuild (:mod:`rigel.calibration.sweep`), the per-region gDNA/RNA
-deconvolution lives in the chain sweep. What is left here is edge strand geometry:
+deconvolution lives in the chain sweep. What is left here is boundary strand geometry:
 
-* :func:`edge_seeds` — the exon–intron / exon–intergenic ``(sense, total, gDNA weight)`` seeds for the
+* :func:`boundary_seeds` — the exon–intron / exon–intergenic ``(sense, total, gDNA weight)`` seeds for the
   gDNA strand-overdispersion fit (:mod:`rigel.calibration.gdna_strand`), complementing the contained-region
   seeds (needed under hybrid capture, which depletes off-target intergenic / intronic gDNA).
 
@@ -12,7 +12,7 @@ of a boundary's two faces — region ``r``'s right side and region ``r+1``'s lef
 accumulator split one crossing fragment's mass across the two flanks. They are the same physical
 crossing: pooling both into one method-of-moments estimator doubles its apparent sample size and pairs
 every observation with a perfectly correlated twin, which is a dispersion estimate reading its own
-duplication. A contiguous edge is a 0-bp line with one count, so there is one seed and the whole
+duplication. A contiguous boundary is a 0-bp line with one count, so there is one seed and the whole
 ``_SideQuantities`` / ``_compute_side`` / ``_left_right_neighbors`` layer dissolves with the faces.
 
 ⭐ **And the seed WEIGHT is now exactly 1, provably.** It was
@@ -33,15 +33,15 @@ import numpy as np
 # it, which `test_layering.py` now forbids. It is re-exported here only so existing importers keep
 # working; new code should take it from `region_chain`, where the tool's central datum belongs.
 from .region_chain import RegionDeconv  # noqa: F401
-from .region_arrays import edge_region_indices
+from .region_arrays import boundary_region_indices
 from .signature import TS_NEG, TS_NONE, TS_POS
 
 
-def edge_strand_orientation(ts_lo: np.ndarray, ts_hi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """``(orient_neg, strand_observable)`` per contiguous edge, from its two flanks' strand classes.
+def boundary_strand_orientation(ts_lo: np.ndarray, ts_hi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """``(orient_neg, strand_observable)`` per contiguous boundary, from its two flanks' strand classes.
 
     A line is **strand-observable** iff its two flanks define a single consistent transcript sense:
-    ``{POS,POS}`` / ``{NEG,NEG}``, or a gene-edge ``{POS,NONE}`` / ``{NEG,NONE}``. An **intergenic
+    ``{POS,POS}`` / ``{NEG,NEG}``, or a gene-boundary ``{POS,NONE}`` / ``{NEG,NONE}``. An **intergenic
     (``TS_NONE``) flank is a strand WILDCARD** — it carries no transcript, so it is compatible with
     either strand and the line is oriented by its gene flank. Only a genuine conflict — opposite
     strands ``{POS,NEG}``, or a ``TS_AMBIG`` flank (overlapping ± transcripts) — leaves the sense
@@ -49,7 +49,7 @@ def edge_strand_orientation(ts_lo: np.ndarray, ts_hi: np.ndarray) -> tuple[np.nd
 
     ⭐ **The rule is SYMMETRIC in the two flanks**, which is precisely why the two faces of the old
     boundary always agreed about orientation and differed only in which face's count they read — the
-    duplication `edge_seeds` removes.
+    duplication `boundary_seeds` removes.
 
     ``orient_neg`` selects the NEG genome-strand column as "sense"; where it is ``False`` (and the
     line is observable) the POS column is sense.
@@ -70,8 +70,8 @@ def edge_strand_orientation(ts_lo: np.ndarray, ts_hi: np.ndarray) -> tuple[np.nd
     return cons_neg, cons_pos | cons_neg
 
 
-def edge_seeds(substrate, region_arrays, region_density) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """``(sense, total, gdna_weight)`` — ONE seed per count- and strand-observable contiguous edge.
+def boundary_seeds(substrate, region_arrays, region_density) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(sense, total, gdna_weight)`` — ONE seed per count- and strand-observable contiguous boundary.
 
     The exon–intron / exon–intergenic line seeds for the gDNA strand-overdispersion fit
     (:mod:`gdna_strand`), complementing the contained-region seeds (needed under hybrid capture, which
@@ -82,17 +82,17 @@ def edge_seeds(substrate, region_arrays, region_density) -> tuple[np.ndarray, np
     takes a per-seed weight and the contained-region seeds genuinely vary.
     """
     ts = np.asarray(region_arrays.strand_class)
-    lo, hi = edge_region_indices(np.asarray(region_arrays.ref_id))
-    count = np.asarray(substrate.edge_unspliced.count, dtype=np.float64)
+    lo, hi = boundary_region_indices(np.asarray(region_arrays.ref_id))
+    count = np.asarray(substrate.boundary_unspliced.count, dtype=np.float64)
     pos, neg = count[:, 0], count[:, 1]
     total = pos + neg
 
-    orient_neg, strand_observable = edge_strand_orientation(ts[lo], ts[hi])
-    count_observable = np.asarray(region_density.edge_count_observable, dtype=bool)
+    orient_neg, strand_observable = boundary_strand_orientation(ts[lo], ts[hi])
+    count_observable = np.asarray(region_density.boundary_count_observable, dtype=bool)
     seed = count_observable & strand_observable & (total > 0.0)
 
     sense = np.where(orient_neg, neg, pos)[seed]
     return sense, total[seed], np.ones(sense.shape[0], dtype=np.float64)
 
 
-__all__ = ["edge_seeds", "edge_strand_orientation"]
+__all__ = ["boundary_seeds", "boundary_strand_orientation"]

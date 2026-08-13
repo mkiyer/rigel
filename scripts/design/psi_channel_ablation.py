@@ -107,15 +107,15 @@ def main() -> int:
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
     n_slots = kind.shape[0]
-    n_regions, n_edges = int(m.payload.n_regions), int(m.payload.n_edges)
+    n_regions, n_boundaries = int(m.payload.n_regions), int(m.payload.n_boundaries)
     region_slot = np.full(n_regions, -1, np.int64)
-    edge_slot = np.full(n_edges, -1, np.int64)
+    boundary_slot = np.full(n_boundaries, -1, np.int64)
     region_slot[obj[kind == REGION]] = np.flatnonzero(kind == REGION)
-    edge_slot[obj[kind != REGION]] = np.flatnonzero(kind != REGION)
+    boundary_slot[obj[kind != REGION]] = np.flatnonzero(kind != REGION)
 
     def field(res, which):
         out = np.zeros(n_slots)
-        for ax, sl in (("region", region_slot), ("edge", edge_slot)):
+        for ax, sl in (("region", region_slot), ("boundary", boundary_slot)):
             ok = sl >= 0
             out[sl[ok]] = np.asarray(getattr(res, f"mass_{which}_{ax}"), np.float64)[ok]
         return out
@@ -177,7 +177,7 @@ def main() -> int:
     rt = coarse_type_array(np.asarray(ra.signature)).astype(np.int64)
     st = np.where(kind == REGION, rt[np.clip(obj, 0, rt.shape[0] - 1)], -1)
     print("\n   ⭐ WHO RECEIVES EACH CHANNEL IN HEAD (nonzero precision), by slot type")
-    print(f"      {'channel':<26} {'EDGE':>9} {'intergenic':>11} {'intron':>9} {'exon':>9}")
+    print(f"      {'channel':<26} {'BOUNDARY':>9} {'intergenic':>11} {'intron':>9} {'exon':>9}")
     chans = {
         "gdna_imp (LEVEL)": np.asarray(C["kw"]["gdna_imp_prec"], np.float64),
         "rna_imp (certified)": np.asarray(C["kw"]["rna_imp_prec"][0], np.float64)
@@ -202,7 +202,7 @@ def main() -> int:
     print("   " + "-" * 140)
     for r, s in enumerate(order, 1):
         s = int(s)
-        print(f"   {r:>3} {s:>7,} {TYPE_NAME.get(int(st[s]), 'EDGE'):<11} {total[s]:>10,.0f} "
+        print(f"   {r:>3} {s:>7,} {TYPE_NAME.get(int(st[s]), 'BOUNDARY'):<11} {total[s]:>10,.0f} "
               f"{tg[s] / total[s]:>7.4f} {fgl[s]:>7.4f} {fg[s]:>7.4f} "
               f"{chans['gdna_imp (LEVEL)'][s]:>9.3g} {chans['rna_imp (certified)'][s]:>9.3g} "
               f"{chans['lam_imp (composition)'][s]:>9.3g} {chans['theta_imp (tilt)'][s]:>9.3g} "

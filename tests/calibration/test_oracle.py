@@ -53,8 +53,8 @@ def test_oracle_validates_and_partitions_sum_to_full(oracle_scenario, tmp_path):
         parts = sum(np.asarray(getattr(orc.parts[k], bank), np.int64) for k in ORIGINS)
         np.testing.assert_array_equal(parts, full, err_msg=f"{bank} does not sum to full")
 
-    # gDNA is never spliced — on the contiguous-edge spliced bank AND on the junction axis.
-    assert np.asarray(orc.parts["gdna"].edge_spliced_count, np.int64).sum() == 0
+    # gDNA is never spliced — on the contiguous-boundary spliced bank AND on the junction axis.
+    assert np.asarray(orc.parts["gdna"].boundary_spliced_count, np.int64).sum() == 0
     assert np.asarray(orc.parts["gdna"].sj_count, np.int64).sum() == 0
 
     # ⚠ The scenario must actually EXERCISE the RNA-only banks, or "gDNA is zero there" is vacuous.
@@ -72,7 +72,7 @@ def test_oracle_override_conserves_mass_on_EACH_AXIS_SEPARATELY(oracle_scenario,
     """The override masses must equal the full object count — checked **per axis**, not pooled.
 
     ⚠ Pooling the two axes into one total would let an error on the region axis cancel an equal and
-    opposite one on the edge axis, which is exactly the class of mistake a three-axis schema makes
+    opposite one on the boundary axis, which is exactly the class of mistake a three-axis schema makes
     possible. ``E`` and ``N`` differ by only ``n_refs``, so such a cancellation is not far-fetched.
     """
     from rigel.calibration.region_arrays import RegionArrays
@@ -92,11 +92,11 @@ def test_oracle_override_conserves_mass_on_EACH_AXIS_SEPARATELY(oracle_scenario,
         ov["mass_gdna_region"] + ov["mass_rna_region"],
         np.asarray(full.region_contained.count, np.float64).sum(1),
     )
-    # EDGE axis: unspliced + spliced, because mass_rna_edge is spliced-inclusive.
+    # BOUNDARY axis: unspliced + spliced, because mass_rna_boundary is spliced-inclusive.
     np.testing.assert_allclose(
-        ov["mass_gdna_edge"] + ov["mass_rna_edge"],
-        np.asarray(full.edge_unspliced.count, np.float64).sum(1)
-        + np.asarray(full.edge_spliced.count, np.float64).sum(1),
+        ov["mass_gdna_boundary"] + ov["mass_rna_boundary"],
+        np.asarray(full.boundary_unspliced.count, np.float64).sum(1)
+        + np.asarray(full.boundary_spliced.count, np.float64).sum(1),
     )
     # JUNCTION axis: never deconvolved — the flux verbatim.
     np.testing.assert_allclose(
@@ -121,36 +121,36 @@ def test_the_oracle_result_is_a_VALID_CalibrationResult(oracle_scenario, tmp_pat
         oracle_scenario.index.regions_df, oracle_scenario.index.ref_name_to_id
     )
     ov = orc.override_masses(ra)
-    n, e, j = orc.full.n_regions, orc.full.n_edges, orc.full.n_sj
+    n, e, j = orc.full.n_regions, orc.full.n_boundaries, orc.full.n_sj
     blank = CalibrationResult(
         mass_gdna_region=np.zeros(n),
         mass_rna_region=np.zeros(n),
-        mass_gdna_edge=np.zeros(e),
-        mass_rna_edge=np.zeros(e),
-        mass_rna_spliced_edge=np.zeros(e),
+        mass_gdna_boundary=np.zeros(e),
+        mass_rna_boundary=np.zeros(e),
+        mass_rna_spliced_boundary=np.zeros(e),
         # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
         # identity — a line whose flanks both exceed every fragment length, where an incidence IS
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
-        edge_mass_per_crossing=np.ones(e),
+        boundary_mass_per_crossing=np.ones(e),
         mass_rna_junction=np.zeros(j),
-        edge_spliced_mass_per_crossing=np.ones(e),
+        boundary_spliced_mass_per_crossing=np.ones(e),
         junction_mass_per_crossing=np.ones(j),
         gdna_region_eff_len=np.ones(n),
-        gdna_edge_eff_len=np.ones(e),
+        gdna_boundary_eff_len=np.ones(e),
         rna_region_eff_len=np.ones(n),
-        rna_edge_eff_len=np.ones(e),
+        rna_boundary_eff_len=np.ones(e),
         gdna_frac_region=np.zeros(n),
         rna_pos_frac_region=np.zeros(n),
         rna_neg_frac_region=np.zeros(n),
-        gdna_frac_edge=np.zeros(e),
-        rna_pos_frac_edge=np.zeros(e),
-        rna_neg_frac_edge=np.zeros(e),
+        gdna_frac_boundary=np.zeros(e),
+        rna_pos_frac_boundary=np.zeros(e),
+        rna_neg_frac_boundary=np.zeros(e),
         gdna_density_global=0.0,
         rna_sense_frac=0.5,
         gdna_strand_overdispersion=0.0,
         rna_strand_overdispersion=0.0,
         n_regions=n,
-        n_edges=e,
+        n_boundaries=e,
         n_junctions=j,
         config=CalibrationConfig(),
     )

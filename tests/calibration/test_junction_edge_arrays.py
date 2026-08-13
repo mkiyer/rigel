@@ -1,10 +1,10 @@
-"""The junction edges, re-indexed onto the accumulator's flat CUT axis as a CSR.
+"""The junction boundaries, re-indexed onto the accumulator's flat CUT axis as a CSR.
 
 
 
 The deposit rule must answer one question per observed intron, inside the BAM-scan hot loop: *is this
-intron an annotated junction, and if so which edge?* Getting it wrong is not a rounding error — an
-intron that fails to match deposits nothing at all (an unannotated intron credits no junction edge), so
+intron an annotated junction, and if so which boundary?* Getting it wrong is not a rounding error — an
+intron that fails to match deposits nothing at all (an unannotated intron credits no junction boundary), so
 a mis-keyed table silently deletes the entire spliced-RNA signal.
 
 The table is keyed by the **donor cut index**, which is the index the deposit has already computed while
@@ -89,7 +89,7 @@ def _cut_index(cuts, offsets, ref_id, position):
 def _lookup(arrays, boundary_left, boundary_right):
     """What the deposit's inner loop does: scan the donor's CSR slice for the acceptor.
 
-    Returns the **junction-edge id, which is the CSR slot itself**, paired with its strand — or ``None``.
+    Returns the **junction-boundary id, which is the CSR slot itself**, paired with its strand — or ``None``.
     One to three iterations at human scale (measured mean fan-out over donor cuts: 1.31, max 25).
 
     ⚠ It returns ``k``, not ``edge_row[k]``. ``edge_row`` is the key for joining back to ``edges_df`` and
@@ -104,7 +104,7 @@ def _lookup(arrays, boundary_left, boundary_right):
 
 
 def test_the_csr_addresses_the_flat_cut_axis(index):
-    """One slot per cut, and the totals close against the edge table."""
+    """One slot per cut, and the totals close against the boundary table."""
     arrays = build_junction_edge_arrays(index)
     cuts, offsets, _ = build_region_partition_arrays(index)
     n_junction = int((index.edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION).sum())
@@ -180,7 +180,7 @@ def test_an_unannotated_intron_does_not_match(index):
     assert _cut_index(cuts, offsets, 0, 401) == -1
 
 
-def test_the_csr_round_trips_to_the_edge_table(index):
+def test_the_csr_round_trips_to_the_boundary_table(index):
     """Re-derive the junction set from the CSR and compare with ``edges_df`` — the two agree only if the
     region-id → cut-index shift is right on every reference, which is the one thing that can silently
     break when a reference has no regions."""
@@ -191,20 +191,20 @@ def test_the_csr_round_trips_to_the_edge_table(index):
         [cuts[donor], cuts[arrays.boundary_right], arrays.strand.astype(np.int64)], axis=1
     )
 
-    edges = index.edges_df
-    junction = edges["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
+    boundaries = index.edges_df
+    junction = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
     regions = index.regions_df
-    src, dst = edges["src"].to_numpy(np.int64)[junction], edges["dst"].to_numpy(np.int64)[junction]
-    from_edges = np.stack(
+    src, dst = boundaries["src"].to_numpy(np.int64)[junction], boundaries["dst"].to_numpy(np.int64)[junction]
+    from_boundaries = np.stack(
         [
             regions["end"].to_numpy(np.int64)[src],  # the intron starts where src ENDS
             regions["start"].to_numpy(np.int64)[dst],  # and ends where dst BEGINS
-            edges["strand"].to_numpy(np.int8)[junction].astype(np.int64),
+            boundaries["strand"].to_numpy(np.int8)[junction].astype(np.int64),
         ],
         axis=1,
     )
     order = lambda a: a[np.lexsort(a.T[::-1])]  # noqa: E731
-    assert np.array_equal(order(from_csr), order(from_edges))
+    assert np.array_equal(order(from_csr), order(from_boundaries))
 
 
 def _reference_partition(index):
@@ -216,11 +216,11 @@ def _reference_partition(index):
     ``cut_base − region_base`` shift. Only the *definition* of a junction is shared.
     """
     cuts, cut_offsets, region_types = build_region_partition_arrays(index)
-    edges, regions = index.edges_df, index.regions_df
-    junction = edges["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
-    src = edges["src"].to_numpy(np.int64)[junction]
-    dst = edges["dst"].to_numpy(np.int64)[junction]
-    strand = edges["strand"].to_numpy(np.int8)[junction]
+    boundaries, regions = index.edges_df, index.regions_df
+    junction = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
+    src = boundaries["src"].to_numpy(np.int64)[junction]
+    dst = boundaries["dst"].to_numpy(np.int64)[junction]
+    strand = boundaries["strand"].to_numpy(np.int8)[junction]
     region_end, region_start = regions["end"].to_numpy(np.int64), regions["start"].to_numpy(np.int64)
     ref_of_region = regions["ref_name"].to_numpy()
     ref_id = {name: i for i, name in enumerate(index.ref_names)}
@@ -243,7 +243,7 @@ def _reference_partition(index):
 
 @pytest.mark.parametrize("fixture", ["index", "coincident_index"])
 def test_the_csr_slot_order_matches_the_reference_accumulator(fixture, request):
-    """⛔ THE CONTRACT: the junction-edge id IS the CSR slot, so both builders must emit the slots in the
+    """⛔ THE CONTRACT: the junction-boundary id IS the CSR slot, so both builders must emit the slots in the
     SAME order — otherwise every junction row permutes and the native build's byte-identity gate compares
     two different labellings of one graph.
 
@@ -277,7 +277,7 @@ def test_the_csr_slot_order_matches_the_reference_accumulator(fixture, request):
 def test_a_strand_coincident_pair_is_two_distinct_slots(coincident_index):
     """Two genes on opposite strands sharing their intron coordinates exactly.
 
-    Both must survive as separate junction edges, in the same CSR slice and ordered by strand — that
+    Both must survive as separate junction boundaries, in the same CSR slice and ordered by strand — that
     adjacency is the only thing that makes the ordering contract above falsifiable, since every other
     junction is already separated by its donor or its acceptor.
     """
@@ -285,6 +285,6 @@ def test_a_strand_coincident_pair_is_two_distinct_slots(coincident_index):
     cuts, offsets, _ = build_region_partition_arrays(coincident_index)
     donor = _cut_index(cuts, offsets, 0, 400)
     lo, hi = int(arrays.offsets[donor]), int(arrays.offsets[donor + 1])
-    assert hi - lo == 2, "the strand-coincident pair collapsed to one junction edge"
+    assert hi - lo == 2, "the strand-coincident pair collapsed to one junction boundary"
     assert [int(cuts[arrays.boundary_right[k]]) for k in range(lo, hi)] == [800, 800]
     assert [int(arrays.strand[k]) for k in range(lo, hi)] == [int(Strand.POS), int(Strand.NEG)]

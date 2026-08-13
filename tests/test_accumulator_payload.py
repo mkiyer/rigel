@@ -81,15 +81,15 @@ def _calibration_dict(**overrides) -> dict:
     """A flat calibration dict shaped exactly as ``BamScanner::build_result`` emits one."""
     ref_cut_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
     ref_region_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
-    ref_edge_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
+    ref_boundary_offsets = np.zeros(len(CUTS_PER_REF) + 1, np.int64)
     for f, cuts in enumerate(CUTS_PER_REF):
         ref_cut_offsets[f + 1] = ref_cut_offsets[f] + len(cuts)
         ref_region_offsets[f + 1] = ref_region_offsets[f] + max(len(cuts) - 1, 0)
-        ref_edge_offsets[f + 1] = ref_edge_offsets[f] + max(len(cuts) - 2, 0)
+        ref_boundary_offsets[f + 1] = ref_boundary_offsets[f] + max(len(cuts) - 2, 0)
 
-    n_regions, n_edges, n_sj = (
+    n_regions, n_boundaries, n_sj = (
         int(ref_region_offsets[-1]),
-        int(ref_edge_offsets[-1]),
+        int(ref_boundary_offsets[-1]),
         3,
     )
     ref_sj_offsets = np.asarray([0, 2, 3, 3], np.int64)
@@ -98,18 +98,18 @@ def _calibration_dict(**overrides) -> dict:
         "cut_positions": np.asarray([c for cuts in CUTS_PER_REF for c in cuts], np.int64),
         "ref_cut_offsets": ref_cut_offsets,
         "ref_region_offsets": ref_region_offsets,
-        "ref_edge_offsets": ref_edge_offsets,
+        "ref_boundary_offsets": ref_boundary_offsets,
         "ref_sj_offsets": ref_sj_offsets,
         "region_contained_count": np.arange(n_regions * 2, dtype=np.uint32),
         "region_contained_inv_opportunity_sum": np.arange(n_regions, dtype=np.float64) * 7,
         "region_start_count": np.arange(n_regions, dtype=np.uint32),
-        "edge_unspliced_count": np.arange(n_edges * 2, dtype=np.uint32),
-        "edge_unspliced_inv_length_sum": np.arange(n_edges, dtype=np.float64),
-        "edge_spliced_count": np.arange(n_edges * 2, dtype=np.uint32),
-        # ⭐ The conserved masses: ONE value per edge, so `n_edges` and not `n_edges * 2`. A fixture
+        "boundary_unspliced_count": np.arange(n_boundaries * 2, dtype=np.uint32),
+        "boundary_unspliced_inv_length_sum": np.arange(n_boundaries, dtype=np.float64),
+        "boundary_spliced_count": np.arange(n_boundaries * 2, dtype=np.uint32),
+        # ⭐ The conserved masses: ONE value per boundary, so `n_boundaries` and not `n_boundaries * 2`. A fixture
         # that gave them a strand axis would pass every value check and disagree with the emitter.
-        "edge_unspliced_mass": np.arange(n_edges, dtype=np.float64) * 29,
-        "edge_spliced_mass": np.arange(n_edges, dtype=np.float64) * 31,
+        "boundary_unspliced_mass": np.arange(n_boundaries, dtype=np.float64) * 29,
+        "boundary_spliced_mass": np.arange(n_boundaries, dtype=np.float64) * 31,
         "sj_count": np.arange(n_sj * 2, dtype=np.uint32),
         "sj_inv_length_sum": np.arange(n_sj, dtype=np.float64),
         "sj_mass": np.arange(n_sj * 2, dtype=np.float64),
@@ -164,13 +164,13 @@ def test_the_payload_carries_every_field_of_the_specifications_Tally():
 
 def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
     payload = _payload()
-    n_regions, n_edges, n_sj = payload.n_regions, payload.n_edges, payload.n_sj
-    assert (n_regions, n_edges, n_sj) == (5, 3, 3)
+    n_regions, n_boundaries, n_sj = payload.n_regions, payload.n_boundaries, payload.n_sj
+    assert (n_regions, n_boundaries, n_sj) == (5, 3, 3)
     # ⭐ The COUNTS keep both genome-strand columns — the strand model is a Beta-Binomial over them.
     for name, rows in (
         ("region_contained_count", n_regions),
-        ("edge_unspliced_count", n_edges),
-        ("edge_spliced_count", n_edges),
+        ("boundary_unspliced_count", n_boundaries),
+        ("boundary_spliced_count", n_boundaries),
         ("sj_count", n_sj),
         ("sj_mass", n_sj),
     ):
@@ -179,9 +179,9 @@ def test_the_two_column_banks_are_reshaped_and_the_one_column_ones_are_not():
     # says nothing about whether the molecule was gDNA or RNA, and every consumer summed the two.
     for name, rows in (
         ("region_contained_inv_opportunity_sum", n_regions),
-        ("edge_unspliced_inv_length_sum", n_edges),
-        ("edge_unspliced_mass", n_edges),
-        ("edge_spliced_mass", n_edges),
+        ("boundary_unspliced_inv_length_sum", n_boundaries),
+        ("boundary_unspliced_mass", n_boundaries),
+        ("boundary_spliced_mass", n_boundaries),
         ("sj_inv_length_sum", n_sj),
     ):
         assert getattr(payload, name).shape == (rows,), name
@@ -201,7 +201,7 @@ def test_the_dtypes_are_the_specifications_dtypes():
     stopped being an array drop silently out of this gate.
     """
     payload = _payload()
-    reference = Tally.zeros(n_regions=5, n_edges=3, n_sj=3, max_length=MAX_LENGTH)
+    reference = Tally.zeros(n_regions=5, n_boundaries=3, n_sj=3, max_length=MAX_LENGTH)
     checked = 0
     for field in dataclasses.fields(Tally):
         expected = getattr(reference, field.name)
@@ -211,8 +211,8 @@ def test_the_dtypes_are_the_specifications_dtypes():
         checked += 1
     # ⚠ The floor moves only when the SCHEMA moves, and then deliberately. 18 arrays → 20 when the two
     # conserved masses landed → 14 when the six dead banks were removed (three ``region_spanning_*``, the
-    # two spliced-edge length moments, ``sj_length_sum``) → **12** on 2026-08-13 with
-    # ``region_contained_length_sum`` and ``edge_unspliced_length_sum``, whose stated justification did not
+    # two spliced-boundary length moments, ``sj_length_sum``) → **12** on 2026-08-13 with
+    # ``region_contained_length_sum`` and ``boundary_unspliced_length_sum``, whose stated justification did not
     # survive measurement (`scan_payload`'s docstring has the retraction). A floor that drifted down on
     # its own would be this gate quietly narrowing, which is the one thing it exists to catch.
     # ⚠ ``sj_mass`` going per-strand in that same change did NOT move this floor: it is one array either
@@ -228,7 +228,7 @@ def test_the_DEFERRED_bank_is_int64_throughout_and_carries_the_specifications_ar
     the ABI would compare equal by value and hide the change.
     """
     payload = _payload()
-    reference = Tally.zeros(n_regions=5, n_edges=3, n_sj=3, max_length=MAX_LENGTH)
+    reference = Tally.zeros(n_regions=5, n_boundaries=3, n_sj=3, max_length=MAX_LENGTH)
     expected = set(reference.deferred_arrays())
     actual = {f.name for f in dataclasses.fields(payload.deferred)}
     assert actual == expected, (
@@ -273,7 +273,7 @@ def test_a_reference_with_no_cuts_contributes_nothing_to_any_axis():
     """The third reference is empty. Per-reference offsets written as a plain subtraction go negative."""
     payload = _payload()
     assert payload.ref_region_offsets[-1] == payload.ref_region_offsets[-2]
-    assert payload.ref_edge_offsets[-1] == payload.ref_edge_offsets[-2]
+    assert payload.ref_boundary_offsets[-1] == payload.ref_boundary_offsets[-2]
     assert payload.n_refs == 3
 
 

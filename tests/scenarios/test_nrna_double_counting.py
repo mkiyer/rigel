@@ -188,7 +188,7 @@ class TestNrnaDoubleCounting:
 
             if gdna == 0 and ss >= 0.99:
                 # Perfect SS, no gDNA: total RNA near-exact. Tolerance 0.08 (was 0.05): the density-correct
-                # gDNA effective length (the effective-support divisor E[max(0,L−ℓ)] / averaged seam support,
+                # gDNA effective length (the effective-support divisor E[max(0,L−ℓ)] / averaged boundary support,
                 # NOT the genomic region_size_bp) is SMALLER than the old divisor, so the gDNA component
                 # competes slightly harder per position. In a truly zero-gDNA library the residual
                 # antisense-nRNA PHANTOM gDNA (a calibration-SOLVE artifact, not an eff-len one — tracked

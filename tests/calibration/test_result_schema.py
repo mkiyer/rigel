@@ -1,6 +1,6 @@
 """CalibrationResult.__post_init__ intrinsic invariants — the THREE-AXIS schema (S5.f).
 
-⭐ **Three axes, and they are different lengths on purpose.** ``n_regions``, ``n_edges`` and
+⭐ **Three axes, and they are different lengths on purpose.** ``n_regions``, ``n_boundaries`` and
 ``n_junctions`` are independent (``E = N − n_refs``, ``J`` unrelated to either), so every fixture here
 uses three DIFFERENT lengths. A fixture that used one length for all three could not tell an
 axis mix-up from a correct result, which is exactly how the predecessor's per-region ``left``/``right``
@@ -17,49 +17,49 @@ import pytest
 from rigel.calibration.result import CalibrationResult
 from rigel.config import CalibrationConfig
 
-N_REGIONS, N_EDGES, N_JUNCTIONS = 4, 3, 2
+N_REGIONS, N_BOUNDARIES, N_JUNCTIONS = 4, 3, 2
 
 
 def _valid_kwargs() -> dict:
     region = np.ones(N_REGIONS, dtype=np.float64)
-    edge = np.ones(N_EDGES, dtype=np.float64)
+    boundary = np.ones(N_BOUNDARIES, dtype=np.float64)
     return dict(
         mass_gdna_region=np.zeros(N_REGIONS),
         mass_rna_region=region.copy(),
-        mass_gdna_edge=np.zeros(N_EDGES),
-        mass_rna_edge=edge.copy(),
-        mass_rna_spliced_edge=np.zeros(N_EDGES),
+        mass_gdna_boundary=np.zeros(N_BOUNDARIES),
+        mass_rna_boundary=boundary.copy(),
+        mass_rna_spliced_boundary=np.zeros(N_BOUNDARIES),
         # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing carries. 1.0 is the
         # identity — a line whose flanks both exceed every fragment length, where an incidence IS
         # a fragment — so a fixture that does not exercise K-inflation states it explicitly.
-        edge_mass_per_crossing=np.ones(N_EDGES),
+        boundary_mass_per_crossing=np.ones(N_BOUNDARIES),
         # ⛔ These two must NOT be equal, and a `ones`/`ones` pair is what they were. `mass_rna_junction`
         # is an INCIDENCE count and `junction_mass_per_crossing` converts it to the conserved mass; with
         # the conversion at the identity no gate in this file could tell the two quantities apart, so
         # the fixture could not fail the one confusion the pair exists to prevent
         # (`TRAPS: could-the-arm-have-fired` — a fixture is an arm). Conserved mass = [2.0, 1.5].
         mass_rna_junction=np.array([4.0, 6.0]),
-        edge_spliced_mass_per_crossing=edge.copy(),
+        boundary_spliced_mass_per_crossing=boundary.copy(),
         junction_mass_per_crossing=np.array([0.5, 0.25]),
         gdna_region_eff_len=region.copy(),
-        gdna_edge_eff_len=edge.copy(),
+        gdna_boundary_eff_len=boundary.copy(),
         rna_region_eff_len=region.copy(),
-        rna_edge_eff_len=edge.copy(),
+        rna_boundary_eff_len=boundary.copy(),
         # ⭐ The three-way composition ψ solves, per object. ⛔ NOT renormalised — see the field
         # docstring: it fails to close on ~25 % of both axes on real data, so a fixture that pretends
         # otherwise would be asserting something the shipped solver does not produce.
         gdna_frac_region=np.zeros(N_REGIONS),
         rna_pos_frac_region=region.copy(),
         rna_neg_frac_region=np.zeros(N_REGIONS),
-        gdna_frac_edge=np.zeros(N_EDGES),
-        rna_pos_frac_edge=edge.copy(),
-        rna_neg_frac_edge=np.zeros(N_EDGES),
+        gdna_frac_boundary=np.zeros(N_BOUNDARIES),
+        rna_pos_frac_boundary=boundary.copy(),
+        rna_neg_frac_boundary=np.zeros(N_BOUNDARIES),
         gdna_density_global=1e-3,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,
         n_regions=N_REGIONS,
-        n_edges=N_EDGES,
+        n_boundaries=N_BOUNDARIES,
         n_junctions=N_JUNCTIONS,
         config=CalibrationConfig(),
     )
@@ -74,12 +74,12 @@ def test_zero_gdna_library_constructs():
     kw = _valid_kwargs()
     kw["gdna_density_global"] = 0.0
     kw["mass_gdna_region"] = np.zeros(N_REGIONS)
-    kw["mass_gdna_edge"] = np.zeros(N_EDGES)
+    kw["mass_gdna_boundary"] = np.zeros(N_BOUNDARIES)
     CalibrationResult(**kw)
 
 
 def test_a_library_with_no_junctions_constructs():
-    """``J = 0`` is legal — a single-exon-only reference has no junction edge at all — and must not
+    """``J = 0`` is legal — a single-exon-only reference has no junction boundary at all — and must not
     be confused with "no junction flux"."""
     kw = _valid_kwargs()
     kw["mass_rna_junction"] = np.zeros(0)
@@ -100,11 +100,11 @@ def test_a_library_with_no_junctions_constructs():
         ("mass_rna_region", N_REGIONS),
         ("gdna_region_eff_len", N_REGIONS),
         ("rna_region_eff_len", N_REGIONS),
-        ("mass_gdna_edge", N_EDGES),
-        ("mass_rna_edge", N_EDGES),
-        ("mass_rna_spliced_edge", N_EDGES),
-        ("gdna_edge_eff_len", N_EDGES),
-        ("rna_edge_eff_len", N_EDGES),
+        ("mass_gdna_boundary", N_BOUNDARIES),
+        ("mass_rna_boundary", N_BOUNDARIES),
+        ("mass_rna_spliced_boundary", N_BOUNDARIES),
+        ("gdna_boundary_eff_len", N_BOUNDARIES),
+        ("rna_boundary_eff_len", N_BOUNDARIES),
         ("mass_rna_junction", N_JUNCTIONS),
     ],
 )
@@ -112,7 +112,7 @@ def test_every_array_is_pinned_to_its_own_axis(field, n_expected):
     """⛔ The one defect this gate exists for: an array keyed to the WRONG axis. With E = N − n_refs
     the two lengths differ by only a handful genome-wide, so a mis-keyed array is a plausible shape
     and a shape check is the only thing that catches it before the numbers go silently wrong."""
-    for wrong in (N_REGIONS, N_EDGES, N_JUNCTIONS):
+    for wrong in (N_REGIONS, N_BOUNDARIES, N_JUNCTIONS):
         if wrong == n_expected:
             continue
         kw = _valid_kwargs()
@@ -123,8 +123,8 @@ def test_every_array_is_pinned_to_its_own_axis(field, n_expected):
 
 def test_the_error_names_the_axis_it_expected():
     kw = _valid_kwargs()
-    kw["mass_gdna_edge"] = np.ones(N_REGIONS)
-    with pytest.raises(ValueError, match="mass_gdna_edge"):
+    kw["mass_gdna_boundary"] = np.ones(N_REGIONS)
+    with pytest.raises(ValueError, match="mass_gdna_boundary"):
         CalibrationResult(**kw)
 
 
@@ -138,10 +138,10 @@ def test_the_error_names_the_axis_it_expected():
     [
         "mass_gdna_region",
         "gdna_region_eff_len",
-        "mass_gdna_edge",
-        "gdna_edge_eff_len",
+        "mass_gdna_boundary",
+        "gdna_boundary_eff_len",
         "rna_region_eff_len",
-        "rna_edge_eff_len",
+        "rna_boundary_eff_len",
     ],
 )
 def test_rejects_negative(field):
@@ -204,7 +204,7 @@ def test_rejects_bad_scalars(field, value):
         CalibrationResult(**kw)
 
 
-@pytest.mark.parametrize("field", ["n_regions", "n_edges", "n_junctions"])
+@pytest.mark.parametrize("field", ["n_regions", "n_boundaries", "n_junctions"])
 def test_rejects_negative_axis_length(field):
     kw = _valid_kwargs()
     kw[field] = -1
@@ -222,7 +222,7 @@ def test_the_per_face_fields_are_gone():
 
     ``gdna_boundary_len`` was ``E[min(ℓ,L)]/2`` — a per-FACE divisor, halved because a boundary had two
     sides that were then summed back together. S5.c deleted the quantity and S5.e deleted the faces;
-    its replacement is the per-edge ``gdna_edge_eff_len``, ONE number at a 0-bp line with no ½ in it.
+    its replacement is the per-boundary ``gdna_boundary_eff_len``, ONE number at a 0-bp line with no ½ in it.
     Anything still naming the old fields is reading a convention that no longer exists
 
     """
@@ -247,7 +247,7 @@ def test_mass_rna_spliced_has_no_region_twin():
     """⚠ Structural, not an omission: the accumulator credits ``region_contained`` only when the fragment
     used NO junction, so a region's contained population cannot hold a spliced molecule. A
     ``mass_rna_spliced_region`` field would be a channel that cannot exist."""
-    assert "mass_rna_spliced_edge" in CalibrationResult.__dataclass_fields__
+    assert "mass_rna_spliced_boundary" in CalibrationResult.__dataclass_fields__
     assert "mass_rna_spliced_region" not in CalibrationResult.__dataclass_fields__
 
 
@@ -260,9 +260,9 @@ def test_mass_rna_spliced_has_no_region_twin():
         "gdna_frac_region",
         "rna_pos_frac_region",
         "rna_neg_frac_region",
-        "gdna_frac_edge",
-        "rna_pos_frac_edge",
-        "rna_neg_frac_edge",
+        "gdna_frac_boundary",
+        "rna_pos_frac_boundary",
+        "rna_neg_frac_boundary",
     ],
 )
 def test_a_composition_component_above_one_is_REFUSED(name):

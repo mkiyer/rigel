@@ -98,7 +98,7 @@ def merged_region_boundaries(regions: pd.DataFrame) -> np.ndarray:
     return boundary
 
 
-def requirement_g_partition(regions: pd.DataFrame, edges: pd.DataFrame) -> list[Verdict]:
+def requirement_g_partition(regions: pd.DataFrame, boundaries: pd.DataFrame) -> list[Verdict]:
     """(g) Can the suite see a partition change at all?
 
     ⛔ The deleted suite scored **exactly** the degenerate value on both of these: 1,698 regions against
@@ -108,9 +108,9 @@ def requirement_g_partition(regions: pd.DataFrame, edges: pd.DataFrame) -> list[
     n_merged = int(boundary.sum())
     ratio = len(regions) / max(n_merged, 1)
 
-    contiguous = edges["kind"].to_numpy() == EDGE_KIND_CONTIGUOUS
-    dst = edges.loc[contiguous, "dst"].to_numpy(np.int64)
-    flags = edges.loc[contiguous, "flags"].to_numpy(np.uint16)
+    contiguous = boundaries["kind"].to_numpy() == EDGE_KIND_CONTIGUOUS
+    dst = boundaries.loc[contiguous, "dst"].to_numpy(np.int64)
+    flags = boundaries.loc[contiguous, "flags"].to_numpy(np.uint16)
     is_terminus = (flags & (TERMINUS_POS | TERMINUS_NEG)) != 0
     hidden = int((is_terminus & ~boundary[dst]).sum())
 
@@ -129,24 +129,24 @@ def requirement_g_partition(regions: pd.DataFrame, edges: pd.DataFrame) -> list[
             "transcript termini the old merge hid",
             hidden,
             0.0,
-            "seams",
-            f"{100 * hidden / max(int(is_terminus.sum()), 1):.2f} % of terminus seams. "
+            "boundaries",
+            f"{100 * hidden / max(int(is_terminus.sum()), 1):.2f} % of terminus boundaries. "
             f"This is the visibility the v8 partition exists to buy.",
         ),
     ]
 
 
-def requirement_d_interior_termini(regions: pd.DataFrame, edges: pd.DataFrame) -> list[Verdict]:
+def requirement_d_interior_termini(regions: pd.DataFrame, boundaries: pd.DataFrame) -> list[Verdict]:
     """(d) Alternative TSS/TES that fall strictly INSIDE an exon.
 
-    A terminus seam whose flanking regions are BOTH exonic on the terminus's own strand sits strictly
+    A terminus boundary whose flanking regions are BOTH exonic on the terminus's own strand sits strictly
     inside an exon of some other isoform — which is the case a merged partition cannot represent and
     the case a real annotation is full of. A generated mini-genome with one isoform per gene has none.
     """
     signature = regions["signature"].to_numpy(np.uint8)
-    contiguous = edges["kind"].to_numpy() == EDGE_KIND_CONTIGUOUS
-    dst = edges.loc[contiguous, "dst"].to_numpy(np.int64)
-    flags = edges.loc[contiguous, "flags"].to_numpy(np.uint16)
+    contiguous = boundaries["kind"].to_numpy() == EDGE_KIND_CONTIGUOUS
+    dst = boundaries.loc[contiguous, "dst"].to_numpy(np.int64)
+    flags = boundaries.loc[contiguous, "flags"].to_numpy(np.uint16)
 
     interior = np.zeros(dst.size, dtype=bool)
     for terminus_bits, exon_bit in ((TERMINUS_POS, BIT_EXON_POS), (TERMINUS_NEG, BIT_EXON_NEG)):
@@ -160,8 +160,8 @@ def requirement_d_interior_termini(regions: pd.DataFrame, edges: pd.DataFrame) -
             "termini strictly inside an exon",
             int(interior.sum()),
             0.0,
-            "seams",
-            f"{100 * interior.sum() / total_terminus:.2f} % of terminus seams have EXON on both sides "
+            "boundaries",
+            f"{100 * interior.sum() / total_terminus:.2f} % of terminus boundaries have EXON on both sides "
             f"on the terminus's own strand — an alternative TSS/TES within another isoform's exon.",
         )
     ]
@@ -464,10 +464,10 @@ def empirical_verdicts(suite: Path) -> list[Verdict]:
 
 def structural_verdicts(index_dir: Path) -> list[Verdict]:
     regions = pd.read_feather(index_dir / "nodes.feather")
-    edges = pd.read_feather(index_dir / "edges.feather")
+    boundaries = pd.read_feather(index_dir / "edges.feather")
     return [
-        *requirement_g_partition(regions, edges),
-        *requirement_d_interior_termini(regions, edges),
+        *requirement_g_partition(regions, boundaries),
+        *requirement_d_interior_termini(regions, boundaries),
         *requirement_e_single_stranded(regions),
     ]
 

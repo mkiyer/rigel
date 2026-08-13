@@ -16,7 +16,7 @@ is large, go one stage upstream*. One switch per independently-ablatable operato
 
 ⚠ **The two twins are still twins.** ``_step`` (scalar, one slot at a time) and ``deliver`` (vectorised) run
 the same transform in the same order, and the duplication is DELIBERATE: routing the sequential scan through
-the numpy form was measured at **15.7×** per operation. They also differ in three edge cases ON PURPOSE, and
+the numpy form was measured at **15.7×** per operation. They also differ in three boundary cases ON PURPOSE, and
 those differences are NOT bugs to unify — see :meth:`_HeadRelay.scan`.
 """
 
@@ -75,14 +75,14 @@ class HeadSwitches:
     #: the relay's mass pin ``Sigma_c rho_c E_c = M``, licensed in exactly two states. ⚠ Ledger: the
     #: ceiling says deleting it outright cost the panel **+0.0002** — it landed on the derivation.
     mass_pin: bool = True
-    #: GRAFT: a flanking EDGE's measured junction density joins the RNA claim entering an EXON.
+    #: GRAFT: a flanking BOUNDARY's measured junction density joins the RNA claim entering an EXON.
     graft: bool = True
     #: the-graft-frame-variance — the graft's FRAME-MISLIFT variance. Identically 0 at ``r = 1``.
     graft_frame_var: bool = True
-    #: P1d — the graft's PREMISE variance, ONE library-level scalar fitted from flanking seam pairs.
+    #: P1d — the graft's PREMISE variance, ONE library-level scalar fitted from flanking boundary pairs.
     #: ⚠ Ledger: CUT from the backbone — re-derive per class when TSS/TES land.
     graft_premise_var: bool = True
-    #: PEEL: an EXON's RNA leaving into an EDGE is scaled by the CONTINUING share ``w`` (the-continuing-share).
+    #: PEEL: an EXON's RNA leaving into an BOUNDARY is scaled by the CONTINUING share ``w`` (the-continuing-share).
     peel: bool = True
     #: sigma^2_transfer = Var(log r) (the-reframe-scale-variance) — the reframe's own scale sampling, 0 on the matched graft.
     transfer_var: bool = True
@@ -133,7 +133,7 @@ class _HeadRelay:
         n = ctx.n_slots
 
         # ── the arrays this policy works in, named as the shipped solver named them ───────────────────
-        is_bnd_a = np.asarray(ctx.is_edge, bool)
+        is_bnd_a = np.asarray(ctx.is_boundary, bool)
         ex_a = np.asarray(ctx.is_exon_region, bool)
         fp_a, fn_a = np.asarray(ctx.free_pos, bool), np.asarray(ctx.free_neg, bool)
         M = np.asarray(ctx.mass, np.float64)
@@ -185,18 +185,18 @@ class _HeadRelay:
         self._vl_a, self._vr_a, self._sl_a, self._sr_a = _vl_a, _vr_a, _sl_a, _sr_a
 
         # ── ⭐⭐⭐ THE POPULATION HALF OF THE COMPOSITION LICENCE ───────────────────────────────────────
-        # An EDGE counts what spans it CONTIGUOUSLY, so T(EDGE) = T(left) ∩ T(right), and a transcript
-        # TERMINUS at the EDGE makes one flank's RNA population strictly larger. Where two objects do not
+        # An BOUNDARY counts what spans it CONTIGUOUSLY, so T(BOUNDARY) = T(left) ∩ T(right), and a transcript
+        # TERMINUS at the BOUNDARY makes one flank's RNA population strictly larger. Where two objects do not
         # measure the same population, a density discrepancy is not attributable to capture enrichment —
         # the two are indistinguishable — so the composition may not be imputed and the level crosses
-        # unscaled. ⛔ TERMINI ONLY: a DONOR/ACCEPTOR EDGE also changes the population, but there the flux
+        # unscaled. ⛔ TERMINI ONLY: a DONOR/ACCEPTOR BOUNDARY also changes the population, but there the flux
         # is MEASURED and the graft and the peel exist to route it.
         # THE PAIR ALGEBRA: the chain strictly alternates, so exactly one slot of an adjacent pair is an
-        # EDGE and the pair ``(i, left[i])`` IS the pair ``(left[i], right[left[i]])`` — so one array
+        # BOUNDARY and the pair ``(i, left[i])`` IS the pair ``(left[i], right[left[i]])`` — so one array
         # answers it for the left-hand step of every slot and the other is that array read through
         # ``right``.
         if sw.terminus_population:
-            _rgain, _lgain = terminus_flank_gain(ctx.edge_flags)
+            _rgain, _lgain = terminus_flank_gain(ctx.boundary_flags)
             _pop_l_a = np.where(is_bnd_a, ~_lgain, ~_rgain[_sl_a]) & _vl_a
             _pop_r_a = np.where(_vr_a, _pop_l_a[_sr_a], False)
         else:
@@ -238,11 +238,11 @@ class _HeadRelay:
 
         # ── ⭐⭐⭐ THE REFRAME FRAME IS A PAIR, ONE TOTAL PER FLANK ──────────────────────────────────────
         # ``rho_lo[k]`` is the total slot ``k`` presents to its genomic-LOW neighbour and ``rho_hi[k]`` the
-        # one it presents to its genomic-HIGH neighbour; they differ only at an EDGE, and only by which
+        # one it presents to its genomic-HIGH neighbour; they differ only at an BOUNDARY, and only by which
         # junctions' flux belongs on which side.
         # ⭐⭐ THE PAIRING RULE: a hop always joins two ADJACENT slots ``(k, k+1)``, and whichever is the
         # source the pair is the SAME pair, so ``r = rho_lo[k+1] / rho_hi[k]``. ⛔ DIRECTION DOES NOT
-        # ENTER. It is NOT expressible as one array per direction: within ONE forward pass an EDGE at a
+        # ENTER. It is NOT expressible as one array per direction: within ONE forward pass an BOUNDARY at a
         # junction's low end is the DESTINATION of a hop from its low flank (junction flux INCLUDED) and
         # the SOURCE of the next hop into its high flank (EXCLUDED). Two arrays indexed by ROLE is what
         # expresses that.
@@ -256,13 +256,13 @@ class _HeadRelay:
         self._rho_lo, self._rho_hi = rho_lo, rho_hi
 
         # ── the graft's PREMISE variance: ONE library-level scalar, fitted by method of moments ─────────
-        vgp_prem, vgn_prem = self._seam_pair(rho_lo, rho_hi)
+        vgp_prem, vgn_prem = self._boundary_pair(rho_lo, rho_hi)
         if not sw.graft_premise_var:
             vgp_prem, vgn_prem = np.zeros_like(vgp_prem), np.zeros_like(vgn_prem)
         self._vgp_prem, self._vgn_prem = vgp_prem, vgn_prem
 
         # ── ⭐ THE SEQUENTIAL SCAN'S OPERANDS, AS PYTHON LISTS ──────────────────────────────────────────
-        # The scalar step reads every one of these ONE ELEMENT AT A TIME — ~6 M edge-iterations at genome
+        # The scalar step reads every one of these ONE ELEMENT AT A TIME — ~6 M boundary-iterations at genome
         # scale, ~40 reads each. ``.tolist()`` is exact on float64/int64/bool (identical IEEE-754 doubles),
         # so this is BIT-IDENTICAL by construction, and it buys ~3x: ``lst[i]`` costs a third of
         # ``arr[i]`` and yields a PYTHON float, whose arithmetic is ~3x ``np.float64``'s because no
@@ -307,9 +307,9 @@ class _HeadRelay:
             a.tolist() for a in (ex_a, is_bnd_a, fp_a, fn_a)
         )
         # the destination's own composition CERTAINTY — case (ii) of the mass pin's licence. Both axes: an
-        # ``intergenic|exon`` EDGE is as structurally pure-gDNA as an intergenic REGION, and it is gated on
+        # ``intergenic|exon`` BOUNDARY is as structurally pure-gDNA as an intergenic REGION, and it is gated on
         # ``g1_locked`` rather than on ``region_init``'s region-only ``struct_lock`` because the object in
-        # question is an EDGE.
+        # question is an BOUNDARY.
         self._g1_l = g1_locked(fp_a, fn_a).tolist()
         self._spl_p_l, self._spl_n_l = spl_p.tolist(), spl_n.tolist()
         self._SP_l, self._SN_l = SPL[:, 0].tolist(), SPL[:, 1].tolist()
@@ -349,7 +349,7 @@ class _HeadRelay:
 
     # ── the graft's premise variance ───────────────────────────────────────────────────────────────────
     def _flank_dom(self, rho_lo_a, rho_hi_a, spf):
-        """Per slot: the flux each of its two flanking EDGES sends it, ALREADY lifted into this slot's
+        """Per slot: the flux each of its two flanking BOUNDARIES sends it, ALREADY lifted into this slot's
         frame, per strand.
 
         ⭐ The lift is the same reframe ``r`` the scan uses, so it takes the same FLANK PAIR and the same
@@ -372,20 +372,20 @@ class _HeadRelay:
             _side(vr, sr, rho_hi_a, rho_lo_a),
         )
 
-    def _seam_pair(self, rho_lo_a, rho_hi_a):
+    def _boundary_pair(self, rho_lo_a, rho_hi_a):
         """Per strand: the graft's premise log-variance — ONE library-level scalar, fitted by method of
-        moments from the destination-frame disagreement of exons' flanking seam PAIRS, and applied to every
-        graft edge.
+        moments from the destination-frame disagreement of exons' flanking boundary PAIRS, and applied to every
+        graft boundary.
 
         ⚠⚠ **A DEBT, not a model.** The one scalar stands in for a quantity that splits >=30x on whether
         the boundary carries a transcript TERMINUS — a bit the region map does not have.
 
-        ⭐ The POOLED fit is applied to EVERY graft edge and the per-edge value is NOT used. ``d^2`` from
+        ⭐ The POOLED fit is applied to EVERY graft boundary and the per-boundary value is NOT used. ``d^2`` from
         ONE pair is a single draw of a scaled chi^2_1, so its own coefficient of variation is sqrt(2) — a
-        per-edge "measurement" of a variance is mostly noise, and the UNDER-charging half does the damage
-        because it REPLACES the population value on the ~48 % of edges where it fires. It also removes a
-        real BP objection: with the per-edge form the message from the LEFT seam carried a variance
-        computed from the RIGHT seam's counts, so a non-adjacent slot's data reached the destination
+        per-boundary "measurement" of a variance is mostly noise, and the UNDER-charging half does the damage
+        because it REPLACES the population value on the ~48 % of boundaries where it fires. It also removes a
+        real BP objection: with the per-boundary form the message from the LEFT boundary carried a variance
+        computed from the RIGHT boundary's counts, so a non-adjacent slot's data reached the destination
         twice."""
         cap = self.ctx.capture
         vl, vr, sl, sr = self._vl_a, self._vr_a, self._sl_a, self._sr_a
@@ -393,7 +393,7 @@ class _HeadRelay:
         out = []
         for spf, vmu in ((self._spl_p, 0), (self._spl_n, 1)):
             fl, fr = self._flank_dom(rho_lo_a, rho_hi_a, spf)
-            # each seam's own noise: its spliced COUNT (never the mass) ⊕ its lift's scale sampling (the-reframe-scale-variance's
+            # each boundary's own noise: its spliced COUNT (never the mass) ⊕ its lift's scale sampling (the-reframe-scale-variance's
             # source leg; the destination's leg is common to both lifts and cancels in ``d``).
             _lv = np.where(np.isfinite(logvar_tot), logvar_tot, 0.0)
             per, pooled = graft_premise_logvar(
@@ -464,7 +464,7 @@ class _HeadRelay:
             # (``k = rho^2/V`` then ``psi'(k)``) is EXACTLY ``psi'(1/v_log)``, and ``residual_level``'s
             # ``k >= 1`` floor is an exact limit of the TRUNCATION — but here ``k`` is a reciprocal
             # variance and not a count, so the same floor became a hard CEILING of ``psi'(1) = pi^2/6``,
-            # over-stating confidence 6x on exactly the seams where the level is least determined.
+            # over-stating confidence 6x on exactly the boundaries where the level is least determined.
             _v_nu = np.where(_live, _vlog_m, np.inf)
             _w = np.where(_live, peel_continue_share(_nu, _mu), 0.0)
             if cap is not None:
@@ -554,11 +554,11 @@ class _HeadRelay:
         the slot's genomic-LOW neighbour, so the destination presents its LOW-flank total and the source
         its HIGH-flank one; the backward pass is the mirror. Nothing else differs.
 
-        ⚠ **This is the SCALAR twin of :meth:`deliver`, and the two differ deliberately in three edge
-        cases which are NOT bugs to unify:** (1) the scan skips invalid edges with an early return while
+        ⚠ **This is the SCALAR twin of :meth:`deliver`, and the two differ deliberately in three boundary
+        cases which are NOT bugs to unify:** (1) the scan skips invalid boundaries with an early return while
         the combine masks them to ``r = 0``; (2) ``_damp`` here uses the raw ``p`` where the combine uses
         ``max(p, _EPS)``, which differ only for ``0 < p < _EPS``; (3) the scan short-circuits the graft
-        block under ``if _gr`` while the combine evaluates the frame variance on every edge and masks.
+        block under ``if _gr`` while the combine evaluates the frame variance on every boundary and masks.
         """
         sw = self.sw
         # ⚠ which NEIGHBOUR array the scan walks is the BACKBONE's business, not this policy's — all the
@@ -605,7 +605,7 @@ class _HeadRelay:
                 r = (rho_dst_i / rho_src) if (rho_src > _EPS and rho_dst_i > _EPS) else 1.0
             else:
                 r = 1.0  # no frame ⇒ pass-through
-            # GRAFT (EDGE → EXON): the EDGE's measured junction flux is a density AT THE SOURCE, so it
+            # GRAFT (BOUNDARY → EXON): the BOUNDARY's measured junction flux is a density AT THE SOURCE, so it
             # joins the source's RNA BEFORE the reframe; the peel is measured at the destination and so is
             # applied after. Only an EXON receives the graft — an intron carries no junction flux.
             _gr = sw.graft and ex_l[i] and bnd_l[s]
@@ -650,7 +650,7 @@ class _HeadRelay:
                 tpp, tmp = _damp_v(tpp, _vgp), _damp_v(tmp, _vgp)
                 tpn, tmn = _damp_v(tpn, _vgn), _damp_v(tmn, _vgn)
 
-            if sw.peel and bnd_l[i] and ex_l[s]:  # EXON → EDGE: PEEL by COMPOSITION
+            if sw.peel and bnd_l[i] and ex_l[s]:  # EXON → BOUNDARY: PEEL by COMPOSITION
                 (_wp, _vwp), (_wn, _vwn) = peel_share_scalar(i, tg, tpg, tp, tn)
                 tp, tn = tp * _wp, tn * _wn
                 tpp, tmp = _damp_v(tpp, _vwp), _damp_v(tmp, _vwp)
@@ -737,9 +737,9 @@ class _HeadRelay:
         # of the PAIR, whether the two objects measure the same RNA POPULATION. Where either fails the
         # reframe is a false premise and the gDNA LEVEL crosses UNSCALED.
         #
-        # ⚠ **A GRAFT edge does NOT license it, and that is a deliberate divergence from the lambda gate**,
-        # which counts the grafted junction precision as RNA supplied. TRAPS: mature-rna-never-crosses-a-seam: mature RNA does not
-        # cross an intron<->exon EDGE contiguously, so that EDGE's OWN spanning population is gDNA and
+        # ⚠ **A GRAFT boundary does NOT license it, and that is a deliberate divergence from the lambda gate**,
+        # which counts the grafted junction precision as RNA supplied. TRAPS: mature-rna-never-crosses-a-boundary: mature RNA does not
+        # cross an intron<->exon BOUNDARY contiguously, so that BOUNDARY's OWN spanning population is gDNA and
         # unspliced RNA, and the junction flux is a measurement of RNA that lives in the DESTINATION — the
         # routing operator exists precisely because that component cannot cross by imputation. Using it to
         # license the imputation would be circular.
@@ -760,7 +760,7 @@ class _HeadRelay:
         tmg, tmp, tmn = _dv(mg), _dv(mp), _dv(mn)  # measurement (anchor gDNA + spliced RNA)
         ttau = _dv(tau, s2t)  # composition (tau) → the lambda-message
         # the graft's MEASUREMENT precision — never tau-gated (see the twin). ``_sp`` > 0 only on a GRAFT
-        # edge, where s2t is identically 0, so the inf→0 substitution below touches only already-masked
+        # boundary, where s2t is identically 0, so the inf→0 substitution below touches only already-masked
         # entries (a zero-count slot has logvar_tot = +inf ⇒ s2t = inf, and ``0*inf`` would nan the masked
         # branch ``np.where`` evaluates).
         _sp = np.where(graft, SPL[:, 0][src], 0.0)
@@ -866,7 +866,7 @@ class _HeadRelay:
         # ── THE lambda-EMISSION GATE (structural, and PRIOR to any damping question) ───────────────────
         # A composition message is a claim about the SPLIT. A source carrying only ONE component has no
         # such claim to make — lambda is not "large" for it, it is UNDEFINED. The canonical case is exactly
-        # ``intergenic | seam | EXON``: RNA cannot cross a gene boundary, so the seam is structurally
+        # ``intergenic | boundary | EXON``: RNA cannot cross a gene boundary, so the boundary is structurally
         # RNA-free while the exon it feeds has RNA. The combine builds the lambda mode as ``mo_g - mo_R``
         # with ``mo_R`` floored, so a zero-RNA message silently becomes the maximally confident assertion
         # "this slot is 100 % gDNA" — a numerical artifact of the floor — while its precision is real,

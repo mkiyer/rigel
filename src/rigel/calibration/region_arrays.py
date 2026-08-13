@@ -1,4 +1,4 @@
-"""rigel.calibration.region_arrays — sorted region geometry + the region↔edge mapping.
+"""rigel.calibration.region_arrays — sorted region geometry + the region↔boundary mapping.
 
 Two pieces of pure geometry the calibrator builds on:
 
@@ -7,22 +7,22 @@ Two pieces of pure geometry the calibrator builds on:
   ascending. Carries the structural columns plus the int8 transcript-strand
   class derived from each region's signature (the strand-model input).
 
-* The **region↔contiguous-edge index mapping** — :func:`region_right_edge` and
-  :func:`edge_region_indices`.
+* The **region↔contiguous-boundary index mapping** — :func:`region_right_boundary` and
+  :func:`boundary_region_indices`.
 
 ⭐ **The ``k + 1`` boundary axis is retired (S5.f).** A reference with ``k`` regions used to own
-``k + 1`` boundary slots — the ``k − 1`` interior seams plus two data-free terminals that existed
-only so every region had an object on each side. A contiguous edge is the line BETWEEN two adjacent
+``k + 1`` boundary slots — the ``k − 1`` interior boundaries plus two data-free terminals that existed
+only so every region had an object on each side. A contiguous boundary is the line BETWEEN two adjacent
 regions: there is no such line before the first or after the last, so a reference owns exactly
-``k − 1`` of them and **an edge always has a region on both sides**. That kills the ``-1``-terminal
+``k − 1`` of them and **an boundary always has a region on both sides**. That kills the ``-1``-terminal
 branch, the two-spaces-off-by-one-per-reference arithmetic, and the pair of offset arrays the old
-mapping needed — the edge axis is derivable from ``ref_id`` alone.
+mapping needed — the boundary axis is derivable from ``ref_id`` alone.
 
-⚠ The derivation rests on ONE fact: edge ids are assigned per reference in genomic order, in
+⚠ The derivation rests on ONE fact: boundary ids are assigned per reference in genomic order, in
 reference order, which is exactly the order adjacent same-reference region pairs appear in a
 ``(ref_id, start)``-sorted region table. :func:`~rigel.calibration.region_chain.build_region_chain` lays
 out the same numbering by walking the payload's CSR offsets, and
-``test_edge_numbering_matches_the_chain_built_from_the_payload_offsets`` pins the two against each
+``test_boundary_numbering_matches_the_chain_built_from_the_payload_offsets`` pins the two against each
 other — a second algorithm, not a second call to the first.
 
 No tunable parameters: this module is index arithmetic only.
@@ -41,8 +41,8 @@ from .signature import transcript_strand_class
 
 __all__ = [
     "RegionArrays",
-    "edge_region_indices",
-    "region_right_edge",
+    "boundary_region_indices",
+    "region_right_boundary",
 ]
 
 
@@ -144,20 +144,20 @@ class RegionArrays:
 
 
 # ---------------------------------------------------------------------------
-# Region ↔ contiguous-edge index mapping
+# Region ↔ contiguous-boundary index mapping
 # ---------------------------------------------------------------------------
 
 
-def region_right_edge(ref_id: np.ndarray) -> np.ndarray:
-    """``int64[N]`` — the contiguous edge to the right of each region, ``-1`` at a reference's last region.
+def region_right_boundary(ref_id: np.ndarray) -> np.ndarray:
+    """``int64[N]`` — the contiguous boundary to the right of each region, ``-1`` at a reference's last region.
 
-    Regions ``r`` and ``r + 1`` share a line exactly when they are in the same reference, so the edge
+    Regions ``r`` and ``r + 1`` share a line exactly when they are in the same reference, so the boundary
     axis is the run of adjacent same-reference pairs, numbered in region order. A reference with one
-    region owns no edge; an empty reference contributes nothing.
+    region owns no boundary; an empty reference contributes nothing.
 
     ``ref_id`` must be **grouped** (all of a reference's regions contiguous), which
     :class:`RegionArrays` guarantees by sorting on ``(ref_id, start)``. Ungrouped input would
-    manufacture edges that straddle references, so it is refused rather than tolerated.
+    manufacture boundaries that straddle references, so it is refused rather than tolerated.
     """
     ref = np.asarray(ref_id)
     n = int(ref.shape[0])
@@ -176,12 +176,12 @@ def region_right_edge(ref_id: np.ndarray) -> np.ndarray:
     return out
 
 
-def edge_region_indices(ref_id: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """``(lo_region, hi_region)`` — the two regions contiguous edge ``e`` lies between, each ``int64[E]``.
+def boundary_region_indices(ref_id: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """``(lo_region, hi_region)`` — the two regions contiguous boundary ``e`` lies between, each ``int64[E]``.
 
-    The exact inverse of :func:`region_right_edge`. ``hi_region == lo_region + 1`` always, and both are in
+    The exact inverse of :func:`region_right_boundary`. ``hi_region == lo_region + 1`` always, and both are in
     the same reference by construction — there is no terminal case and no ``-1``.
     """
-    right = region_right_edge(ref_id)
+    right = region_right_boundary(ref_id)
     lo = np.flatnonzero(right >= 0).astype(np.int64)
     return lo, lo + 1

@@ -4,7 +4,7 @@ The calibration package had 35 modules and no stated shape. Measured from the AS
 **no import cycles, and 18 of 35 modules with exactly one importer** — it was a **FLAT PILE of peers**, and a
 flat pile is the one structure that cannot tell you where to add anything.
 
-`rigel.calibration._layers` names the layers that were already in the edges. This file makes them true:
+`rigel.calibration._layers` names the layers that were already in the boundaries. This file makes them true:
 
 * **every module has a declared home** — an unplaced module fails, because "nobody decided where this goes"
   is exactly the state being ended;
@@ -12,7 +12,7 @@ flat pile is the one structure that cannot tell you where to add anything.
 * **the declaration matches the tree** — a layer naming a module that does not exist fails too.
 
 ⛔ **Why a test and not a docstring.** The census that produced this found **13 module docstrings naming a
-sibling with no import edge in either direction** — prose about the code, inside the code, that nothing
+sibling with no import boundary in either direction** — prose about the code, inside the code, that nothing
 gated. A layering written only in prose would join them within a release. `scripts/design/module_census.py`
 prints the same graph for a human; this file is what stops it drifting.
 """
@@ -117,9 +117,9 @@ def test_no_import_points_UP_a_layer(path):
 
 
 def test_the_layering_is_not_vacuous():
-    """⛔ TRAPS: could-the-arm-have-fired applied to this file: a layering with everything in one layer, or with no edges
+    """⛔ TRAPS: could-the-arm-have-fired applied to this file: a layering with everything in one layer, or with no boundaries
     between layers, would pass every test above and constrain nothing. So assert the ordering is doing
-    work — several layers, and real downward edges crossing them."""
+    work — several layers, and real downward boundaries crossing them."""
     assert len(LAYERS) >= 5, "a layering with too few layers cannot express a direction"
     crossing = 0
     for p in ALL_FILES:
@@ -131,6 +131,6 @@ def test_the_layering_is_not_vacuous():
             if t and layer_of(t) is not None and layer_of(t) < mine:
                 crossing += 1
     assert crossing >= 20, (
-        f"only {crossing} downward edges cross a layer boundary — the layering would be satisfied by "
+        f"only {crossing} downward boundaries cross a layer boundary — the layering would be satisfied by "
         f"almost any assignment, so it is not constraining anything."
     )

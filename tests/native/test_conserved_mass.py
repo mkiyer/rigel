@@ -2,7 +2,7 @@
 
     Spec: ``_accumulator_reference.py``   ·   C++ parity: ``test_accumulator_native_parity.py``
 
-**Why this bank exists.** ``edge_unspliced_count`` is ``+1`` on every line a fragment crosses, so a
+**Why this bank exists.** ``boundary_unspliced_count`` is ``+1`` on every line a fragment crosses, so a
 fragment books ``max(K, 1)`` of them and a sum over objects is an object-INCIDENCE count, not a fragment
 count. The prior the EM reads is a fragment count, and manufacturing one from a density over-calls by
 +15.1 % under capture. This bank carries the count directly: **one fragment deposits exactly one.**
@@ -18,7 +18,7 @@ one numeric convention). The banks are float64 fractions; there is no quantum an
  3   the mass equals the PER-BASE attribution — which ``1/K`` cannot reproduce, because a base
      does not know how many lines its fragment crossed. **This is the claim that pins the rule.**
  4   a spliced fragment's mass reaches the SPLICED bank and nothing else
- 5   every crossed object SHARES the one fragment, junction edges included
+ 5   every crossed object SHARES the one fragment, junction boundaries included
 ===  ==========================================================================================
 
 ⚠ Claim 3 states the rule a second time, deliberately and in one place only. The specification reaches
@@ -110,7 +110,7 @@ def _exact_fragment_mass(partition, cuts, start, end) -> tuple[Fraction, int]:
     accumulator = Accumulator(partition, max_fragment_length=MAX_LENGTH)
     outcome = accumulator.deposit(0, start, end)
     assert outcome is DepositOutcome.DEPOSITED
-    total = float(np.asarray(accumulator.tally.edge_unspliced_mass, np.float64).sum())
+    total = float(np.asarray(accumulator.tally.boundary_unspliced_mass, np.float64).sum())
     contained = int(np.asarray(accumulator.tally.region_contained_count, np.int64).sum())
     return total, contained
 
@@ -187,9 +187,9 @@ def test_the_two_populations_together_are_EXHAUSTIVE_for_an_unspliced_fragment()
     same derivation as the per-fragment test above.
     """
     accumulator, n = _enumerate(_partition())
-    mass = float(np.asarray(accumulator.tally.edge_unspliced_mass, np.float64).sum())
+    mass = float(np.asarray(accumulator.tally.boundary_unspliced_mass, np.float64).sum())
     contained = int(np.asarray(accumulator.tally.region_contained_count, np.int64).sum())
-    crossings = int(np.asarray(accumulator.tally.edge_unspliced_count, np.int64).sum())
+    crossings = int(np.asarray(accumulator.tally.boundary_unspliced_count, np.int64).sum())
     assert abs(mass + contained - n) <= budget(crossings), (
         f"{n} fragments deposited {float(mass)} of mass plus {contained} contained"
     )
@@ -227,13 +227,13 @@ def test_the_mass_is_the_PER_BASE_attribution():
             for line, mass in _mass_by_base(CUTS, start, start + length).items():
                 expected[line] = expected.get(line, Fraction(0)) + mass
 
-    bank = np.asarray(accumulator.tally.edge_unspliced_mass, np.float64)
-    count = np.asarray(accumulator.tally.edge_unspliced_count, np.int64).sum(axis=1)
+    bank = np.asarray(accumulator.tally.boundary_unspliced_mass, np.float64)
+    count = np.asarray(accumulator.tally.boundary_unspliced_count, np.int64).sum(axis=1)
     for line in range(1, len(CUTS) - 1):
-        edge = line - 1
-        got = float(bank[edge])
+        boundary = line - 1
+        got = float(bank[boundary])
         want = expected.get(line, Fraction(0))
-        budget = float(count[edge])
+        budget = float(count[boundary])
         assert abs(got - want) <= budget, (
             f"line {line} @ {CUTS[line]}: bank {float(got)} vs per-base {float(want)}, "
             f"quantisation budget {float(budget):.3e}"
@@ -250,8 +250,8 @@ def test_the_mass_EQUALS_the_count_where_both_flanks_exceed_every_fragment():
     """
     partition = _partition()
     accumulator, _n = _enumerate(partition)
-    bank = np.asarray(accumulator.tally.edge_unspliced_mass, np.float64)
-    count = np.asarray(accumulator.tally.edge_unspliced_count, np.int64).sum(axis=1)
+    bank = np.asarray(accumulator.tally.boundary_unspliced_mass, np.float64)
+    count = np.asarray(accumulator.tally.boundary_unspliced_count, np.int64).sum(axis=1)
 
     wide = [
         line
@@ -297,10 +297,10 @@ def test_a_SPLICED_fragment_s_mass_reaches_the_SPLICED_bank_ALONE():
 
     tally = accumulator.tally
     assert int(np.asarray(tally.sj_count, np.int64).sum()) == 1, "the junction must be credited"
-    assert float(np.asarray(tally.edge_unspliced_mass, np.float64).sum()) == 0.0, (
+    assert float(np.asarray(tally.boundary_unspliced_mass, np.float64).sum()) == 0.0, (
         "certified RNA leaked into the bank being deconvolved"
     )
-    spliced = float(np.asarray(tally.edge_spliced_mass, np.float64).sum())
+    spliced = float(np.asarray(tally.boundary_spliced_mass, np.float64).sum())
     junction = float(np.asarray(tally.sj_mass, np.float64).sum())
     assert spliced > 0, "the contiguous crossing at 9050 deposited nothing"
     # ⭐ A PARTIAL, and the exact one the design specifies: the line takes only the bases adjacent to it,
@@ -338,7 +338,7 @@ def test_the_spliced_mass_is_a_PARTIAL_and_never_a_conservation_ledger():
         )
         assert outcome is DepositOutcome.DEPOSITED
         n += 1
-    total = float(np.asarray(accumulator.tally.edge_spliced_mass, np.float64).sum())
+    total = float(np.asarray(accumulator.tally.boundary_spliced_mass, np.float64).sum())
     assert 0 < total < n
 
 
@@ -366,7 +366,7 @@ def _total_deposited_mass(tally) -> Fraction:
     mass went missing. A falsification has to fail for the reason it is about.
     """
     total = Fraction(0)
-    for name in ("edge_unspliced_mass", "edge_spliced_mass", "sj_mass"):
+    for name in ("boundary_unspliced_mass", "boundary_spliced_mass", "sj_mass"):
         bank = getattr(tally, name, None)
         if bank is not None:
             total += float(np.asarray(bank, np.float64).sum())
@@ -495,15 +495,15 @@ def test_a_fragment_crossing_BOTH_junctions_AND_lines_gives_EVERY_crossed_object
     )
     tally = accumulator.tally
 
-    crossed_lines = np.flatnonzero(np.asarray(tally.edge_spliced_count, np.int64).sum(axis=1))
+    crossed_lines = np.flatnonzero(np.asarray(tally.boundary_spliced_count, np.int64).sum(axis=1))
     crossed_junctions = np.flatnonzero(np.asarray(tally.sj_count, np.int64).sum(axis=1))
     assert crossed_lines.size == 2, "the fixture must cross two lines or it tests one case"
     assert crossed_junctions.size == 2, "the fixture must use both junctions"
 
-    line_mass = np.asarray(tally.edge_spliced_mass, np.float64)
+    line_mass = np.asarray(tally.boundary_spliced_mass, np.float64)
     sj_mass = np.asarray(tally.sj_mass, np.float64).sum(axis=1)  # strand-agnostic, see above
-    for edge in crossed_lines:
-        assert line_mass[edge] > 0, f"line {edge} was crossed but holds no mass"
+    for boundary in crossed_lines:
+        assert line_mass[boundary] > 0, f"line {boundary} was crossed but holds no mass"
     for jid in crossed_junctions:
         assert sj_mass[jid] > 0, (
             f"junction {jid} was crossed but holds NO mass — the fragment's 1.0 is conserved yet this "
@@ -526,18 +526,18 @@ def test_a_junction_claims_at_BOTH_its_positions_and_never_ALSO_as_a_contiguous_
         TB+  exons (1000,2000) (5050,10000)
 
     A fragment with blocks ``(1800,2000)`` and ``(5000,5200)`` — ``L = 400`` — splices TA's
-    ``(2000,5000)`` and then runs CONTIGUOUSLY across TB's acceptor edge at 5050. It therefore touches
-    THREE edge positions, of which the junction accounts for two:
+    ``(2000,5000)`` and then runs CONTIGUOUSLY across TB's acceptor boundary at 5050. It therefore touches
+    THREE boundary positions, of which the junction accounts for two:
 
     ===============  ======  ==================================================  ==========
     bases            n       bounded by                                          share
     ===============  ======  ==================================================  ==========
     ``[1800,2000)``  200     the junction's DONOR side (fragment start on left)   200 junction
-    ``[5000,5050)``   50     the junction's ACCEPTOR side, and the edge @5050      25 / 25
-    ``[5050,5200)``  150     the edge @5050 (fragment end on right)               150 edge
+    ``[5000,5050)``   50     the junction's ACCEPTOR side, and the boundary @5050      25 / 25
+    ``[5050,5200)``  150     the boundary @5050 (fragment end on right)               150 boundary
     ===============  ======  ==================================================  ==========
 
-    so the junction holds ``225/400`` and the edge ``175/400``.
+    so the junction holds ``225/400`` and the boundary ``175/400``.
 
     ⛔ **The predecessor rule scored 200/200 here** — it gave a line-crossing block's bases entirely to
     lines, so the junction never collected on its ACCEPTOR side. Both rules sum to 1.0, so no
@@ -561,25 +561,25 @@ def test_a_junction_claims_at_BOTH_its_positions_and_never_ALSO_as_a_contiguous_
     tally = accumulator.tally
     length = (2000 - 1800) + (5200 - 5000)
 
-    spliced_by_edge = np.asarray(tally.edge_spliced_count, np.int64).sum(axis=1)
-    assert spliced_by_edge.tolist() == [0, 0, 0, 1, 0], (
-        "exactly one CONTIGUOUS crossing — at the edge @5050 — and none at the junction's own two "
-        f"positions, which would be the splice counted twice; got {spliced_by_edge.tolist()}"
+    spliced_by_boundary = np.asarray(tally.boundary_spliced_count, np.int64).sum(axis=1)
+    assert spliced_by_boundary.tolist() == [0, 0, 0, 1, 0], (
+        "exactly one CONTIGUOUS crossing — at the boundary @5050 — and none at the junction's own two "
+        f"positions, which would be the splice counted twice; got {spliced_by_boundary.tolist()}"
     )
     assert np.asarray(tally.sj_count, np.int64).sum(axis=1).tolist() == [1, 0], (
         "the fragment splices TA's junction, not TB's"
     )
 
-    edge_at_5050 = float(np.asarray(tally.edge_spliced_mass, np.float64)[3])
+    boundary_at_5050 = float(np.asarray(tally.boundary_spliced_mass, np.float64)[3])
     junction = float(np.asarray(tally.sj_mass, np.float64)[0].sum())
     want_junction = Fraction(200 + 25, length)
-    want_edge = Fraction(25 + 150, length)
+    want_boundary = Fraction(25 + 150, length)
     assert abs(junction - want_junction) <= budget(2), (
         f"junction holds {float(junction):.6f}, want {float(want_junction):.6f} — it must claim on "
         f"BOTH its donor and acceptor sides"
     )
-    assert abs(edge_at_5050 - want_edge) <= budget(2)
-    assert abs(junction + edge_at_5050 - 1) <= budget(4)
+    assert abs(boundary_at_5050 - want_boundary) <= budget(2)
+    assert abs(junction + boundary_at_5050 - 1) <= budget(4)
 
 
 def test_EVERY_deposited_fragment_places_exactly_ONE_fragment_of_mass_spliced_or_not():
@@ -614,8 +614,8 @@ def test_EVERY_deposited_fragment_places_exactly_ONE_fragment_of_mass_spliced_or
     tally = accumulator.tally
     contained = int(np.asarray(tally.region_contained_count, np.int64).sum())
     deposits = int(
-        np.asarray(tally.edge_unspliced_count, np.int64).sum()
-        + np.asarray(tally.edge_spliced_count, np.int64).sum()
+        np.asarray(tally.boundary_unspliced_count, np.int64).sum()
+        + np.asarray(tally.boundary_spliced_count, np.int64).sum()
         + np.asarray(tally.sj_count, np.int64).sum()
     )
     total = _total_deposited_mass(tally) + contained
@@ -629,16 +629,16 @@ def test_EVERY_deposited_fragment_places_exactly_ONE_fragment_of_mass_spliced_or
 # ---------------------------------------------------------------------------
 
 
-def test_the_mass_has_ONE_column_while_every_other_edge_bank_has_TWO():
+def test_the_mass_has_ONE_column_while_every_other_boundary_bank_has_TWO():
     """⛔ A strand axis nothing reads is half the bank wasted, and worse, it is a claim: it says the
     two genome strands are separable for this channel. They are not — the mass exists to convert an
     object-incidence total into a fragment count, and that question has no strand in it."""
     tally = Accumulator(_partition()).tally
-    n_edges = _partition().n_edges
-    assert tally.edge_unspliced_mass.shape == (n_edges,)
-    assert tally.edge_spliced_mass.shape == (n_edges,)
-    assert tally.edge_unspliced_count.shape == (n_edges, 2)
-    for name in ("edge_unspliced_mass", "edge_spliced_mass", "sj_mass"):
+    n_boundaries = _partition().n_boundaries
+    assert tally.boundary_unspliced_mass.shape == (n_boundaries,)
+    assert tally.boundary_spliced_mass.shape == (n_boundaries,)
+    assert tally.boundary_unspliced_count.shape == (n_boundaries, 2)
+    for name in ("boundary_unspliced_mass", "boundary_spliced_mass", "sj_mass"):
         assert getattr(tally, name).dtype == np.float64, (
             f"{name} must be float64. ⭐ ONE CONVENTION: a COUNT is an integer, a FRACTION is float64. "
             f"A fixed point here would be a second convention in the same schema, and it was measured "

@@ -36,7 +36,7 @@ def _crossing_vs_contained_ratio(bam_path, index) -> float:
 
     ⭐ **And a line is ONE number.** The predecessor averaged a boundary's two faces,
     ``(right[r] + left[r+1]) / 2``, because the old accumulator split one crossing across them. A
-    contiguous edge is a 0-bp line with one count, so the ½ and the loop over flanks both go.
+    contiguous boundary is a 0-bp line with one count, so the ½ and the loop over flanks both go.
     """
     _s, sm, _b, pl = scan_and_buffer(str(bam_path), index, BamScanConfig(sj_strand_tag="auto"))
     ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
@@ -47,16 +47,16 @@ def _crossing_vs_contained_ratio(bam_path, index) -> float:
     region_eff = contained_eff_length(ra.region_size_bp, gpmf)
     # gDNA's template is the chromosome, so a line's divisor is the unbounded-reach limit mu_g − 1 —
     # the SAME number at every line, which is why the crossing pool needs only a count of lines.
-    edge_eff = float(crossing_eff_length(gpmf, [UNBOUNDED_REACH], [UNBOUNDED_REACH])[0])
+    boundary_eff = float(crossing_eff_length(gpmf, [UNBOUNDED_REACH], [UNBOUNDED_REACH])[0])
     sub = CalibrationSubstrate.from_payload(pl, ra)
-    region_obs, edge_obs = count_observable_masks(np.asarray(ra.signature), np.asarray(ra.ref_id))
+    region_obs, boundary_obs = count_observable_masks(np.asarray(ra.signature), np.asarray(ra.ref_id))
 
     live_regions = region_obs & (region_eff > 1.0)
     contained = np.asarray(sub.region_contained.count, np.float64).sum(1)
     rho_contained = float(contained[live_regions].sum() / region_eff[live_regions].sum())
 
-    crossing = np.asarray(sub.edge_unspliced.count, np.float64).sum(1)
-    rho_crossing = float(crossing[edge_obs].sum() / (edge_eff * int(edge_obs.sum())))
+    crossing = np.asarray(sub.boundary_unspliced.count, np.float64).sum(1)
+    rho_crossing = float(crossing[boundary_obs].sum() / (boundary_eff * int(boundary_obs.sum())))
     return rho_crossing / rho_contained
 
 
@@ -125,23 +125,23 @@ def test_implicit_splice_routes_to_spliced_channel(tmp_path):
     gene = rid == res.index.ref_name_to_id["implicit_chan"]
 
     # (1) Implicit splices route to the JUNCTION axis — the molecule JUMPED, it did not cross. ⭐ In
-    #     the new model a splice deposits on its junction edge ONLY, never on the contiguous lines it
+    #     the new model a splice deposits on its junction boundary ONLY, never on the contiguous lines it
     #     splices over, so the evidence is `sj_count` rather than a spliced channel on a boundary.
     junction_flux = int(np.asarray(sub.junction.count, np.int64).sum())
     assert junction_flux > 1000, f"expected substantial junction flux, got {junction_flux}"
 
     # (2) The intron is CUT, not filled: the intron REGION carries no contained mass, and neither of the
     #     lines bounding it carries an unspliced crossing — the implicit molecules skip both.
-    from rigel.calibration.region_arrays import region_right_edge
+    from rigel.calibration.region_arrays import region_right_boundary
 
     intron = gene & (ctype == 1)
     assert intron.any()
     contained = np.asarray(sub.region_contained.count, np.float64).sum(1)
-    crossing = np.asarray(sub.edge_unspliced.count, np.float64).sum(1)
-    right_edge = region_right_edge(np.asarray(ra.ref_id))
+    crossing = np.asarray(sub.boundary_unspliced.count, np.float64).sum(1)
+    right_boundary = region_right_boundary(np.asarray(ra.ref_id))
     bounding = np.zeros(crossing.shape[0], dtype=bool)
     for r in np.flatnonzero(intron):
-        for e in (right_edge[r], right_edge[r - 1] if r > 0 else -1):
+        for e in (right_boundary[r], right_boundary[r - 1] if r > 0 else -1):
             if e >= 0:
                 bounding[e] = True
     intron_unspliced = float(contained[intron].sum() + crossing[bounding].sum())

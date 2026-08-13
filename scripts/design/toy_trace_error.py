@@ -7,7 +7,7 @@ one at a time to say which one is responsible.
 
 **The five sections, in the order the solver computes them:**
 
-1. **EVERY REGION AND EVERY EDGE**, with truth in FRAGMENTS beside the answer, ranked by error MASS — not
+1. **EVERY REGION AND EVERY BOUNDARY**, with truth in FRAGMENTS beside the answer, ranked by error MASS — not
    by error rate, because a small rate on a big object is what the deliverable actually pays for.
 2. **THE FOUR INIT SOURCES**, per object: is there any own evidence at all (structural certainty, the
    intron factory, the strand tilt, the length channel), and what did the message-free self-solve make of
@@ -73,7 +73,7 @@ def _labels(chain, ra):
             b = int(rtype[obj[hi]]) if hi < int(chain.n_slots) and kind[hi] == REGION else -1
             a = int(rtype[obj[lo]]) if lo >= 0 and kind[lo] == REGION else -1
             pair = "|".join(TYPES.get(x, "?") for x in sorted((a, b)) if x >= 0)
-            out.append(f"{pair}@{starts[obj[hi]]:,}" if b >= 0 else f"edge#{i}")
+            out.append(f"{pair}@{starts[obj[hi]]:,}" if b >= 0 else f"boundary#{i}")
     return out
 
 
@@ -115,9 +115,9 @@ def main() -> int:
 
     ov = sub.truth.override_masses(ra)
     T = {"region": (np.asarray(ov["mass_gdna_region"], float), np.asarray(ov["mass_rna_region"], float)),
-         "edge": (np.asarray(ov["mass_gdna_edge"], float), np.asarray(ov["mass_rna_edge"], float))}
+         "boundary": (np.asarray(ov["mass_gdna_boundary"], float), np.asarray(ov["mass_rna_boundary"], float))}
     # the shipped per-object answer, in the same currency as the truth
-    res_g = {"region": np.asarray(cap["f_g"], float), "edge": np.asarray(cap["f_g"], float)}
+    res_g = {"region": np.asarray(cap["f_g"], float), "boundary": np.asarray(cap["f_g"], float)}
 
     print("=" * 132)
     print(f"⭐⭐⭐ ERROR TRACE — {args.condition}")
@@ -129,13 +129,13 @@ def main() -> int:
     print("=" * 132)
 
     # ── 1. every object ──────────────────────────────────────────────────────────────────────────
-    print("\n── 1. EVERY REGION AND EVERY EDGE, ranked by error MASS (fragments of gDNA mis-assigned) ──")
+    print("\n── 1. EVERY REGION AND EVERY BOUNDARY, ranked by error MASS (fragments of gDNA mis-assigned) ──")
     print(f"\n   {'slot':<28} {'n':>6} {'gDNA':>6} {'RNA':>6} {'true f_g':>9} {'f_g':>8} "
           f"{'Δf_g':>8} {'err frags':>10} {'share':>7}")
     print("   " + "-" * 118)
     recs = []
     for s in range(n_slots):
-        ax = "region" if kind[s] == REGION else "edge"
+        ax = "region" if kind[s] == REGION else "boundary"
         i = int(obj[s])
         g, r = T[ax][0][i], T[ax][1][i]
         tot = g + r
@@ -300,8 +300,8 @@ def main() -> int:
 
     orig = BP.terminus_flank_gain
 
-    def all_gain(edge_flags):
-        rgain, lgain = orig(edge_flags)
+    def all_gain(boundary_flags):
+        rgain, lgain = orig(boundary_flags)
         return (np.ones_like(np.asarray(rgain, bool)),
                 np.ones_like(np.asarray(lgain, bool)))
 

@@ -15,12 +15,12 @@ THE AXES — three of them, off by one from each other per reference::
 
     cuts    0        100       200       600        c = 4 cuts on this reference
     regions   [  n0  ][   n1   ][   n2   ]            c - 1 = 3 regions
-    lines            line 1    line 2               c - 2 = 2 contiguous edges
+    lines            line 1    line 2               c - 2 = 2 contiguous boundaries
 
 A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` interior lines; one contributing
-none owns neither, which is legal. Junction edges are their own axis, sliced by ``ref_sj_offsets``; the
+none owns neither, which is legal. Junction boundaries are their own axis, sliced by ``ref_sj_offsets``; the
 flat slot order is the per-reference banks concatenated in reference order, which is what lets a
-junction-edge id simply BE its slot.
+junction-boundary id simply BE its slot.
 
 WHAT THE NUMBERS MEAN. ⭐⭐ **ONE NUMERIC CONVENTION: a COUNT is an integer, a FRACTION is float64.**
 There is no fixed point and no scale constant, so nothing anywhere decodes a bank::
@@ -37,12 +37,12 @@ integer banks still reproduce exactly, the float ones agree to ~1e-15. Owner rul
 validate the float banks within a DERIVED tolerance. `TRAPS: integer-channels-reproduce`.
 
 ⚠ **``inv_length_sum`` is NOT called ``density`` on purpose.** It is an exact, model-free density at an
-edge — the opportunity ``L−1`` and the deposit ``1/(L−1)`` cancel identically — and it is *not* a density
+boundary — the opportunity ``L−1`` and the deposit ``1/(L−1)`` cancel identically — and it is *not* a density
 at a region, where the opportunity is ``(region − L + 1)₊`` and nothing cancels. One word for two concepts is
 the defect this naming avoids.
 
 ⛔⛔ **RETRACTED, AND DELETED WITH ITS BANKS (2026-08-13).** This paragraph read: *"``length_sum`` exists
-because the other two are blind to one real case. At an edge the count row is ``(mu_g − 1, mu_r − 1)``
+because the other two are blind to one real case. At an boundary the count row is ``(mu_g − 1, mu_r − 1)``
 and the inv-length row is ``(1, 1)``, so the determinant is ``mu_g − mu_r``: when gDNA and RNA share a
 mean fragment length the pair carries zero information about the split, at any depth. ``length_sum`` is
 an independent tilt and removes that blind spot."*
@@ -270,15 +270,15 @@ class DrainQC:
 #: and miss the other.
 BANK_AXES: tuple[tuple[str, str, Any], ...] = (
     ("region_contained_count", "region", np.uint32),
-    ("edge_unspliced_count", "edge", np.uint32),
-    ("edge_spliced_count", "edge", np.uint32),
+    ("boundary_unspliced_count", "boundary", np.uint32),
+    ("boundary_spliced_count", "boundary", np.uint32),
     ("sj_count", "sj", np.uint32),
     # ⭐⭐ THE ONE MASS WITH A STRAND, and the only non-integer row in this table. `accumulator.h`'s
     # one-value ruling was reversed on the SJ axis alone (owner, 2026-08-12) because its premise
     # changed: an artifactual junction accumulates SYMMETRICALLY on both strands like gDNA, so the
     # existing strand model can detect one — given a per-strand observable. `JunctionEdge::mass` carries
     # the full reversal. ⛔ The columns are `sj_count`'s columns, so `mass[c]/count[c]` is a per-strand
-    # mean. ⚠ The ruling still STANDS for `edge_unspliced_mass`, which has no such consumer.
+    # mean. ⚠ The ruling still STANDS for `boundary_unspliced_mass`, which has no such consumer.
     ("sj_mass", "sj", np.float64),
 )
 
@@ -293,10 +293,10 @@ SINGLE_COLUMN_AXES: tuple[tuple[str, str, Any], ...] = (
     # ⚠ The two `*_length_sum` banks were the integer exception and are GONE (2026-08-13) — see the
     # module docstring for why their stated justification did not survive measurement.
     ("region_contained_inv_opportunity_sum", "region", np.float64),
-    ("edge_unspliced_inv_length_sum", "edge", np.float64),
+    ("boundary_unspliced_inv_length_sum", "boundary", np.float64),
     ("sj_inv_length_sum", "sj", np.float64),
-    ("edge_unspliced_mass", "edge", np.float64),
-    ("edge_spliced_mass", "edge", np.float64),
+    ("boundary_unspliced_mass", "boundary", np.float64),
+    ("boundary_spliced_mass", "boundary", np.float64),
 )
 
 #: ⭐ **EVERY additive array channel, with the axis it is indexed on** — the two-column banks plus the
@@ -497,8 +497,8 @@ class AccumulatorPayload:
     cut_positions: np.ndarray  # int64[n_cuts] — flat, reference-major, ascending within a reference
     ref_cut_offsets: np.ndarray  # int64[n_refs + 1] — CSR over cut_positions
     ref_region_offsets: np.ndarray  # int64[n_refs + 1]
-    ref_edge_offsets: np.ndarray  # int64[n_refs + 1] — contiguous edges
-    ref_sj_offsets: np.ndarray  # int64[n_refs + 1] — junction edges
+    ref_boundary_offsets: np.ndarray  # int64[n_refs + 1] — contiguous boundaries
+    ref_sj_offsets: np.ndarray  # int64[n_refs + 1] — junction boundaries
 
     # -- regions: two disjoint populations, each two genome-strand columns --
     region_contained_count: np.ndarray  # uint32[n_regions, 2] — the whole path lies inside the region
@@ -508,26 +508,26 @@ class AccumulatorPayload:
     region_contained_inv_opportunity_sum: np.ndarray
     region_start_count: np.ndarray  # uint32[n_regions] — THE invariant; sums to qc.deposited
 
-    # -- contiguous edges: the 0-bp line between two adjacent regions --
-    edge_unspliced_count: np.ndarray  # uint32[n_edges, 2] — the mixture being deconvolved
-    edge_unspliced_inv_length_sum: np.ndarray  # uint64[n_edges] — ONE column, strand-agnostic
-    #: ⭐⭐ uint64[n_edges] — **THE CONSERVED MASS**, fixed point at ``INV_LENGTH_SCALE``. A COUNT and a
-    #: MASS are two different deposits and one number cannot be both: ``edge_unspliced_count`` is ``+1``
+    # -- contiguous boundaries: the 0-bp line between two adjacent regions --
+    boundary_unspliced_count: np.ndarray  # uint32[n_boundaries, 2] — the mixture being deconvolved
+    boundary_unspliced_inv_length_sum: np.ndarray  # uint64[n_boundaries] — ONE column, strand-agnostic
+    #: ⭐⭐ uint64[n_boundaries] — **THE CONSERVED MASS**, fixed point at ``INV_LENGTH_SCALE``. A COUNT and a
+    #: MASS are two different deposits and one number cannot be both: ``boundary_unspliced_count`` is ``+1``
     #: on every line a fragment crosses, so a fragment books ``max(K, 1)`` of them; this sums to ONE per
     #: fragment. That is what lets a consumer turn an object-incidence total into a FRAGMENT COUNT
     #: without manufacturing one from a density. ⛔ ONE column, not two — nothing reads a mass per
     #: strand, and the question it answers has no strand in it.
-    edge_unspliced_mass: np.ndarray
-    #: uint32[n_edges, 2] — certified RNA: gDNA cannot be spliced. ⭐ COUNT AND MASS ONLY: nothing
+    boundary_unspliced_mass: np.ndarray
+    #: uint32[n_boundaries, 2] — certified RNA: gDNA cannot be spliced. ⭐ COUNT AND MASS ONLY: nothing
     #: deconvolves a certified-RNA crossing, so its two length moments had no consumer and are gone.
-    edge_spliced_count: np.ndarray
-    #: ⭐ uint64[n_edges] — the same rule, routed by the same ``spliced`` flag, so ``mass`` is not the
+    boundary_spliced_count: np.ndarray
+    #: ⭐ uint64[n_boundaries] — the same rule, routed by the same ``spliced`` flag, so ``mass`` is not the
     #: one channel that ignores the split. ⛔ A PARTIAL, never a conservation ledger: it sums to
     #: ``crossed_block_len / L`` per fragment. A per-LINE certified-RNA term, commensurate with the
     #: unspliced mass at the same line — NOT "the number of spliced fragments here".
-    edge_spliced_mass: np.ndarray
+    boundary_spliced_mass: np.ndarray
 
-    # -- junction edges: one exact donor->acceptor jump. Pure RNA by construction --
+    # -- junction boundaries: one exact donor->acceptor jump. Pure RNA by construction --
     #: uint32[n_sj, 2] — ⛔⛔ **BOTH GENOME-STRAND COLUMNS ARE RETAINED, AND NOT BECAUSE ANYTHING READS
     #: THEM YET** (owner ruling, 2026-08-08). A junction is stranded by its genomic splicing MOTIF, so
     #: the strand of the *fragments* on it looks redundant, and every consumer today sums the two.
@@ -545,10 +545,10 @@ class AccumulatorPayload:
     #: ``test_the_junction_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION``.
     sj_count: np.ndarray
     #: uint64[n_sj] — ⭐ LIVE in ``second_pass``, which scores a held fragment's junction evidence
-    #: with it. ⚠ ``sj_length_sum`` is gone for the same reason the spliced edge moments are.
+    #: with it. ⚠ ``sj_length_sum`` is gone for the same reason the spliced boundary moments are.
     sj_inv_length_sum: np.ndarray
     #: uint64[n_sj] — ⭐⭐⭐ **THE CONSERVED MASS'S THIRD AXIS, and what makes a LIBRARY FRAGMENT COUNT
-    #: COMPUTABLE.** A spliced fragment's block containing no interior line deposits on neither edge
+    #: COMPUTABLE.** A spliced fragment's block containing no interior line deposits on neither boundary
     #: bank, and is not ``contained`` either — its path spans a junction, so it lies in no single region.
     #: Such a fragment existed on the incidence axis (``sj_count``) and on no conserved one.
     #:
@@ -557,7 +557,7 @@ class AccumulatorPayload:
     #: cannot splice, so its conserved count was already exact while RNA's read 0.747x deposited.
     #:
     #: ⛔ **It ADDS a boundary class rather than re-apportioning one**: a block that crossed a line is
-    #: untouched, so ``edge_unspliced_mass`` and ``edge_spliced_mass`` are byte-identical to what they
+    #: untouched, so ``boundary_unspliced_mass`` and ``boundary_spliced_mass`` are byte-identical to what they
     #: were. Gates: ``tests/native/test_conserved_mass.py`` claim 5.
     sj_mass: np.ndarray
 
@@ -586,7 +586,7 @@ class AccumulatorPayload:
     max_length: int  # the fragment-length limit applied to L, and the pool-histogram width
     n_refs: int
 
-    #: ⭐ Provenance, and it must cover **regions AND edges**. The payload is edge-keyed by construction —
+    #: ⭐ Provenance, and it must cover **regions AND boundaries**. The payload is boundary-keyed by construction —
     #: its junction axis is meaningless against a different junction CSR — and `index.partition_hash`
     #: deliberately covers `regions.feather` only. A 2026-07-29 flag fix rewrote every `edges.feather` while
     #: leaving every `regions.feather` byte-identical, so a regions-only key would have verified CLEAN against
@@ -611,8 +611,8 @@ class AccumulatorPayload:
         return int(self.region_start_count.shape[0])
 
     @property
-    def n_edges(self) -> int:
-        return int(self.edge_unspliced_count.shape[0])
+    def n_boundaries(self) -> int:
+        return int(self.boundary_unspliced_count.shape[0])
 
     @property
     def n_sj(self) -> int:
@@ -715,7 +715,7 @@ class AccumulatorPayload:
             for name in (
                 "ref_cut_offsets",
                 "ref_region_offsets",
-                "ref_edge_offsets",
+                "ref_boundary_offsets",
                 "ref_sj_offsets",
             )
         }
@@ -732,7 +732,7 @@ class AccumulatorPayload:
         per_ref_cuts = np.diff(offsets["ref_cut_offsets"])
         for name, per_ref in (
             ("ref_region_offsets", np.maximum(per_ref_cuts - 1, 0)),
-            ("ref_edge_offsets", np.maximum(per_ref_cuts - 2, 0)),
+            ("ref_boundary_offsets", np.maximum(per_ref_cuts - 2, 0)),
         ):
             expected = np.zeros(n_refs + 1, np.int64)
             np.cumsum(np.where(per_ref_cuts > 0, per_ref, 0), out=expected[1:])
@@ -745,10 +745,10 @@ class AccumulatorPayload:
                 )
 
         n_regions = int(offsets["ref_region_offsets"][-1])
-        n_edges = int(offsets["ref_edge_offsets"][-1])
+        n_boundaries = int(offsets["ref_boundary_offsets"][-1])
         n_sj = int(offsets["ref_sj_offsets"][-1])
 
-        rows_on = {"region": n_regions, "edge": n_edges, "sj": n_sj}
+        rows_on = {"region": n_regions, "boundary": n_boundaries, "sj": n_sj}
         banks: dict[str, np.ndarray] = {}
         for name, axis, dtype in BANK_AXES:
             banks[name] = _bank(cal, name, rows_on[axis], dtype)

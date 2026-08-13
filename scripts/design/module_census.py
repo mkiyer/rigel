@@ -4,14 +4,14 @@
 ⛔ **THE PROBLEM THIS EXISTS FOR, stated as the owner stated it: 35 modules and no sense of how or where to
 develop.** And the graph says why, which is not what it looks like from the outside: there are **no import
 cycles**, and **18 of the 35 modules have exactly one importer**. It is not a knot. It is a FLAT PILE of 35
-peers, and nothing in the tree names the layers that already exist in the edges.
+peers, and nothing in the tree names the layers that already exist in the boundaries.
 
 ⭐⭐ **The second finding is the one that actually blocks a reader, and this instrument is the only thing
 that can see it: the module docstrings MISDESCRIBE THE GRAPH.** ``run_fill`` said it was "shared by
 `density_model`, `strand_deconv`, `priors`, and the `sweep` chain geometry" and had **one** importer.
 ``strand_likelihood`` said it was "Used by the per-region strand module (`strand_deconv`)" and
 ``strand_deconv`` does not import it at all. A developer who trusts either sentence goes looking for code
-that is not there — and neither sentence can rot *loudly*, because nothing checks prose against edges.
+that is not there — and neither sentence can rot *loudly*, because nothing checks prose against boundaries.
 ⛔ That is the same failure as a stale doc citation, one layer down: **a claim about the code, inside the
 code, that nothing gates.** Measured 14 on 2026-08-07; **6 were genuinely stale and are fixed**, and the
 rest are data-flow statements the instrument cannot tell apart — see below.
@@ -25,7 +25,7 @@ What it reports
    outside it. ⭐ A module with no importer inside the package is an ENTRY POINT or it is DEAD, and the two
    are distinguished by whether anything outside the package calls it.
 3. ⭐⭐ **STALE DOCSTRING CROSS-REFERENCES** — every sibling module a docstring names for which **no import
-   edge exists in either direction**. Each one is a sentence pointing at code that is not connected.
+   boundary exists in either direction**. Each one is a sentence pointing at code that is not connected.
 4. **DEAD PUBLIC SURFACE** — exported names that nothing anywhere imports. ⚠ Not automatically a cut: a
    name may be an executable reference that a test gates, which is a legitimate second home. The report
    says which, by naming the importers it does have.
@@ -66,7 +66,7 @@ def _modules(pkg: pathlib.Path) -> dict[str, dict]:
         tree = ast.parse(src)
         imports: set[str] = set()
         typing_only: set[str] = set()
-        # ⭐ An import inside ``if TYPE_CHECKING:`` is an ANNOTATION, not an edge — it cannot form a cycle
+        # ⭐ An import inside ``if TYPE_CHECKING:`` is an ANNOTATION, not an boundary — it cannot form a cycle
         # and it does not constrain the layering. It is still reported, because an annotation reaching
         # upward is a hint that a TYPE belongs lower, which is exactly what it was here.
         guarded: set[int] = set()
@@ -101,8 +101,8 @@ def _modules(pkg: pathlib.Path) -> dict[str, dict]:
     return out
 
 
-def _edges(mods: dict[str, dict]) -> tuple[dict, dict]:
-    """``(uses, used_by)`` over intra-package edges, keyed by the module's own short name."""
+def _boundaries(mods: dict[str, dict]) -> tuple[dict, dict]:
+    """``(uses, used_by)`` over intra-package boundaries, keyed by the module's own short name."""
     short = {n.split("/")[-1]: n for n in mods}
     uses = collections.defaultdict(set)
     used_by = collections.defaultdict(set)
@@ -151,7 +151,7 @@ def main() -> int:
     if not pkg.is_dir():
         raise SystemExit(f"⛔ no such package: {pkg}")
     mods = _modules(pkg)
-    uses, used_by = _edges(mods)
+    uses, used_by = _boundaries(mods)
     outside = _outside(pkg, mods)
     short = {n.split("/")[-1]: n for n in mods}
 
@@ -183,7 +183,7 @@ def main() -> int:
                 )
                 mark = "  ⛔ imports UP: " + ", ".join(up) if up else ""
                 if ann and not up:
-                    mark = "  ⚠ annotates UP (TYPE_CHECKING, not an edge): " + ", ".join(ann)
+                    mark = "  ⚠ annotates UP (TYPE_CHECKING, not an boundary): " + ", ".join(ann)
                 print(f"        {m:<24} {mods[m]['loc']:>5}{mark}")
                 viol += [(m, t) for t in up]
             for m in missing:
@@ -196,9 +196,9 @@ def main() -> int:
 
     # ── 3. STALE DOCSTRING CROSS-REFERENCES ────────────────────────────────────────────────────────────
     print()
-    print("   ⭐⭐ UNBACKED DOCSTRING CROSS-REFERENCES — a sibling named in prose with NO import edge either way")
+    print("   ⭐⭐ UNBACKED DOCSTRING CROSS-REFERENCES — a sibling named in prose with NO import boundary either way")
     print("      ⚠ NOT automatically wrong, and this is the distinction the instrument CANNOT make:")
-    print("        an IMPORT claim (\"shared by X\", \"used by X\") with no edge is STALE and must be fixed;")
+    print("        an IMPORT claim (\"shared by X\", \"used by X\") with no boundary is STALE and must be fixed;")
     print("        a DATA-FLOW claim (\"fitted in X\", \"X consumes this\") is true of a value passed through")
     print("        a caller and is worth keeping. Read the sentence; the count is a worklist, not a verdict.")
     n_stale = 0

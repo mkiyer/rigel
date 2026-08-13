@@ -77,9 +77,9 @@ DEPOSIT_SENSITIVE_SCALARS = ("qc", "gap_resolution")
 #: can be claimed at BOTH its positions.
 FLOAT_BANK_DEPOSITS = {
     "region_contained_inv_opportunity_sum": ("region_contained_count", 1),
-    "edge_unspliced_inv_length_sum": ("edge_unspliced_count", 1),
-    "edge_unspliced_mass": ("edge_unspliced_count", 2),
-    "edge_spliced_mass": ("edge_spliced_count", 2),
+    "boundary_unspliced_inv_length_sum": ("boundary_unspliced_count", 1),
+    "boundary_unspliced_mass": ("boundary_unspliced_count", 2),
+    "boundary_spliced_mass": ("boundary_spliced_count", 2),
     "sj_inv_length_sum": ("sj_count", 1),
     "sj_mass": ("sj_count", 2),
 }

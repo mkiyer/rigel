@@ -4,7 +4,7 @@
 
 ⛔ **What this replaces.** ``CalibrationSubstrate`` held three per-REGION views (contained / left / right)
 and ``BoundarySubstrate`` held the same numbers re-keyed by boundary. Two classes, one set of numbers,
-two keyings — and they existed solely because a boundary had two sides. A contiguous edge is a 0-bp line
+two keyings — and they existed solely because a boundary had two sides. A contiguous boundary is a 0-bp line
 with ONE set of numbers, so both the second class and the whole left/right axis dissolve.
 """
 
@@ -31,7 +31,7 @@ def substrate():
 
 
 def test_every_population_is_present_on_the_RIGHT_axis(substrate):
-    """Regions, contiguous edges and junctions are three axes off by one per reference.
+    """Regions, contiguous boundaries and junctions are three axes off by one per reference.
 
     A population read against the wrong axis is the defect class that once dropped 476,719 of 476,732
     fragments while every golden test passed, so the shapes are asserted rather than assumed.
@@ -42,8 +42,8 @@ def test_every_population_is_present_on_the_RIGHT_axis(substrate):
     # statement from "it measured it and got zero", and the view keeps them distinguishable.
     for view, n, channels in (
         (sub.region_contained, payload.n_regions, ("inv_length_sum",)),
-        (sub.edge_unspliced, payload.n_edges, ("inv_length_sum", "mass")),
-        (sub.edge_spliced, payload.n_edges, ("mass",)),
+        (sub.boundary_unspliced, payload.n_boundaries, ("inv_length_sum", "mass")),
+        (sub.boundary_spliced, payload.n_boundaries, ("mass",)),
         (sub.junction, payload.n_sj, ("inv_length_sum", "mass")),
     ):
         assert view.count.shape == (n, 2)
@@ -60,7 +60,7 @@ def test_every_population_is_present_on_the_RIGHT_axis(substrate):
                     f"{view.name}.{channel} must be None, not zeros — a zero array cannot be told "
                     f"apart from a real measurement of nothing"
                 )
-    assert payload.n_regions != payload.n_edges, "the fixture must not let an axis mix-up pass"
+    assert payload.n_regions != payload.n_boundaries, "the fixture must not let an axis mix-up pass"
 
 
 def test_the_columns_are_GENOME_STRAND_and_nothing_is_re_oriented(substrate):
@@ -77,7 +77,7 @@ def test_the_columns_are_GENOME_STRAND_and_nothing_is_re_oriented(substrate):
 def test_no_population_is_a_VIEW_OF_ANOTHER(substrate):
     """The old substrate's `left`/`right` were the same numbers twice. Nothing here may alias."""
     sub, _, _ = substrate
-    banks = [sub.region_contained, sub.edge_unspliced, sub.edge_spliced]
+    banks = [sub.region_contained, sub.boundary_unspliced, sub.boundary_spliced]
     totals = [int(b.count.sum()) for b in banks]
     assert len(set(totals)) == len(totals), "the fixture gives every bank a distinct total"
 
@@ -211,7 +211,7 @@ def test_a_None_payload_is_refused_by_NAME():
 
 def test_BoundarySubstrate_and_the_left_right_axis_are_GONE():
     """Two classes holding one set of numbers in two keyings existed only because a boundary had two
-    sides. An edge does not, so both go — and with them ``_make_view`` and the re-keying identity."""
+    sides. An boundary does not, so both go — and with them ``_make_view`` and the re-keying identity."""
     from rigel.calibration import substrate as mod
 
     assert not hasattr(mod, "BoundarySubstrate")

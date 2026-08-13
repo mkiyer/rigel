@@ -6,16 +6,16 @@
 reproduce it byte for byte. This module is what "correct" means for both.
 
 THE RULE UNDER TEST, in five lines. The genome is a graph: REGIONS are half-open intervals tiling each
-reference, and the 0-bp LINES between adjacent regions are CONTIGUOUS edges. A JUNCTION edge is a directed
+reference, and the 0-bp LINES between adjacent regions are CONTIGUOUS boundaries. A JUNCTION boundary is a directed
 donor→acceptor link from the annotation. A fragment is a PATH — its aligned blocks joined across mate
-gaps and broken by introns — of length ``L = span − Σ intron``. Regions count fragments CONTAINED; edges
+gaps and broken by introns — of length ``L = span − Σ intron``. Regions count fragments CONTAINED; boundaries
 count fragments CROSSING. Each population stores only the channels something READS — an integer count, a
-fixed-point ``round(2^32 / placements)`` with ``placements = L`` at a region and ``L − 1`` at an edge, a
-``Σ L``, and on the contiguous edges the CONSERVED MASS, which sums to one per fragment.
+fixed-point ``round(2^32 / placements)`` with ``placements = L`` at a region and ``L − 1`` at an boundary, a
+``Σ L``, and on the contiguous boundaries the CONSERVED MASS, which sums to one per fragment.
 
-⚠ **No partitioning.** Every crossed edge receives the FULL weight. The chance that a length-``L``
+⚠ **No partitioning.** Every crossed boundary receives the FULL weight. The chance that a length-``L``
 fragment crosses a given line is proportional to ``L`` and the deposit is ``1/L``, so the two cancel and
-every fragment length contributes equally to each edge. Dividing by the number of edges crossed destroys
+every fragment length contributes equally to each boundary. Dividing by the number of boundaries crossed destroys
 that cancellation and makes the answer depend on region spacing — measured up to **3.6× low**.
 """
 
@@ -74,8 +74,8 @@ def _acc(junctions=(), **kw):
     return Accumulator(_partition(junctions), **kw)
 
 
-def _edge(ref, line):
-    """Global contiguous-edge id of the line at local cut index ``line``."""
+def _boundary(ref, line):
+    """Global contiguous-boundary id of the line at local cut index ``line``."""
     return (0 if ref == 0 else len(CHR1_CUTS) - 2) + line - 1
 
 
@@ -111,8 +111,8 @@ def test_one_fragment_recovers_its_own_reciprocal_length():
     acc = _acc()
     acc.deposit(0, 120, 320)
     t = acc.tally
-    assert int(t.edge_unspliced_count[_edge(0, 2), 0]) == 1
-    assert close(float(t.edge_unspliced_inv_length_sum[_edge(0, 2)]), 1.0 / (200 - 1), 1)
+    assert int(t.boundary_unspliced_count[_boundary(0, 2), 0]) == 1
+    assert close(float(t.boundary_unspliced_inv_length_sum[_boundary(0, 2)]), 1.0 / (200 - 1), 1)
 
 
 # ---------------------------------------------------------------------------
@@ -120,38 +120,38 @@ def test_one_fragment_recovers_its_own_reciprocal_length():
 # ---------------------------------------------------------------------------
 
 
-def test_a_contained_fragment_touches_ONE_region_and_no_edge():
+def test_a_contained_fragment_touches_ONE_region_and_no_boundary():
     acc = _acc()
     assert acc.deposit(0, 220, 380) is DepositOutcome.DEPOSITED
     t = acc.tally
     assert int(t.region_contained_count[_region(0, 3), 0]) == 1
     assert close(float(t.region_contained_inv_opportunity_sum[_region(0, 3)]), _contained_quantum(0, 3, 160), 1)
     assert t.region_contained_count.sum() == 1
-    assert t.edge_unspliced_count.sum() == 0
+    assert t.boundary_unspliced_count.sum() == 0
 
 
 def test_a_fragment_ENDING_AT_a_line_does_not_cross_it():
     """A line is 0 bp wide: crossing needs a base on each side."""
     acc = _acc()
     acc.deposit(0, 120, 200)
-    assert acc.tally.edge_unspliced_count.sum() == 0
+    assert acc.tally.boundary_unspliced_count.sum() == 0
     assert int(acc.tally.region_contained_count[_region(0, 1), 0]) == 1
 
 
 def test_a_fragment_STARTING_AT_a_line_does_not_cross_it():
     acc = _acc()
     acc.deposit(0, 201, 390)
-    assert acc.tally.edge_unspliced_count.sum() == 0
+    assert acc.tally.boundary_unspliced_count.sum() == 0
     assert int(acc.tally.region_contained_count[_region(0, 3), 0]) == 1
 
 
-def test_a_fragment_crossing_four_regions_credits_exactly_THREE_edges_at_FULL_weight():
+def test_a_fragment_crossing_four_regions_credits_exactly_THREE_boundaries_at_FULL_weight():
     acc = _acc()
     acc.deposit(0, 150, 500)  # touches n1 n2 n3 n4 -> lines at 200, 201, 400
     t = acc.tally
-    assert [int(t.edge_unspliced_count[_edge(0, j), 0]) for j in (1, 2, 3, 4, 5)] == [0, 1, 1, 1, 0]
+    assert [int(t.boundary_unspliced_count[_boundary(0, j), 0]) for j in (1, 2, 3, 4, 5)] == [0, 1, 1, 1, 0]
     quantum = 1.0 / (350 - 1)
-    assert all(close(float(t.edge_unspliced_inv_length_sum[_edge(0, j)]), quantum, 1) for j in (2, 3, 4))
+    assert all(close(float(t.boundary_unspliced_inv_length_sum[_boundary(0, j)]), quantum, 1) for j in (2, 3, 4))
     assert t.region_contained_count.sum() == 0
 
 
@@ -167,10 +167,10 @@ def test_a_fragment_covering_a_1bp_region_credits_BOTH_lines_and_conserves_its_m
     acc = _acc()
     acc.deposit(0, 150, 300)
     t = acc.tally
-    assert int(t.edge_unspliced_count[_edge(0, 2), 0]) == 1
-    assert int(t.edge_unspliced_count[_edge(0, 3), 0]) == 1
+    assert int(t.boundary_unspliced_count[_boundary(0, 2), 0]) == 1
+    assert int(t.boundary_unspliced_count[_boundary(0, 3), 0]) == 1
     assert int(t.region_contained_count[_region(0, 2), 0]) == 0
-    mass = int(t.edge_unspliced_mass.sum())
+    mass = int(t.boundary_unspliced_mass.sum())
     assert abs(mass - 1.0) <= 8 * EPS, (
         f"the fragment deposited {mass} fragments, not 1"
     )
@@ -183,7 +183,7 @@ def test_a_fragment_LONGER_than_a_region_is_not_contained_and_crosses_exactly_on
     acc.deposit(0, 200, 202)  # n2 is 1 bp, L = 2
     t = acc.tally
     assert t.region_contained_count.sum() == 0
-    assert int(t.edge_unspliced_count[_edge(0, 3), 0]) == 1
+    assert int(t.boundary_unspliced_count[_boundary(0, 3), 0]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -200,18 +200,18 @@ def test_a_spliced_jump_deposits_NOTHING_on_the_lines_it_splices_over():
     length = (950 - 150) - (900 - 201)
     assert int(t.sj_count[0, 0]) == 1
     assert close(float(t.sj_inv_length_sum[0]), 1.0 / (length - 1), 1)
-    assert int(t.edge_unspliced_count[_edge(0, 4), 0]) == 0, "the swallowed line at 400"
-    assert int(t.edge_spliced_count[_edge(0, 4), 0]) == 0
+    assert int(t.boundary_unspliced_count[_boundary(0, 4), 0]) == 0, "the swallowed line at 400"
+    assert int(t.boundary_spliced_count[_boundary(0, 4), 0]) == 0
 
 
 def test_a_spliced_fragments_own_BLOCK_crossings_go_in_the_SPLICED_bank():
     """A spliced fragment is certified RNA — gDNA cannot be spliced — so a line its block genuinely
-    crosses is the cleanest RNA marker available at a seam."""
+    crosses is the cleanest RNA marker available at a boundary."""
     acc = _acc(junctions=[JUNCTION])
     acc.deposit(0, 150, 950, observed_introns=[(201, 900)], sj_strand=Strand.POS)
     t = acc.tally
-    assert int(t.edge_spliced_count[_edge(0, 2), 0]) == 1, "block [150,201) crosses the line at 200"
-    assert t.edge_unspliced_count.sum() == 0
+    assert int(t.boundary_spliced_count[_boundary(0, 2), 0]) == 1, "block [150,201) crosses the line at 200"
+    assert t.boundary_unspliced_count.sum() == 0
 
 
 def test_a_MULTI_SEGMENT_unspliced_fragment_conserves_its_mass_across_BOTH_segments():
@@ -225,9 +225,9 @@ def test_a_MULTI_SEGMENT_unspliced_fragment_conserves_its_mass_across_BOTH_segme
     acc = _acc()
     acc.deposit(0, 380, 950, observed_introns=[(500, 600)])
     t = acc.tally
-    assert int(t.edge_unspliced_count[_edge(0, 4), 0]) == 1, "line 400, from segment 1"
-    assert int(t.edge_unspliced_count[_edge(0, 5), 0]) == 1, "line 900, from segment 2"
-    mass = int(t.edge_unspliced_mass.sum())
+    assert int(t.boundary_unspliced_count[_boundary(0, 4), 0]) == 1, "line 400, from segment 1"
+    assert int(t.boundary_unspliced_count[_boundary(0, 5), 0]) == 1, "line 900, from segment 2"
+    mass = int(t.boundary_unspliced_mass.sum())
     assert abs(mass - 1.0) <= 8 * EPS, (
         f"a two-segment fragment deposited {mass} fragments, not 1"
     )
@@ -241,11 +241,11 @@ def test_an_UNANNOTATED_intron_credits_no_junction_and_nothing_across_the_gap():
     acc.deposit(0, 50, 500, observed_introns=[(200, 400)], sj_strand=Strand.POS)
     t = acc.tally
     assert t.sj_count.sum() == 0
-    assert t.edge_spliced_count.sum() == 0, "not certified RNA — it competes with gDNA"
-    assert int(t.edge_unspliced_count[_edge(0, 1), 0]) == 1, (
+    assert t.boundary_spliced_count.sum() == 0, "not certified RNA — it competes with gDNA"
+    assert int(t.boundary_unspliced_count[_boundary(0, 1), 0]) == 1, (
         "block [50,200) crosses the line at 100"
     )
-    assert int(t.edge_unspliced_count[_edge(0, 3), 0]) == 0, "the swallowed line at 201"
+    assert int(t.boundary_unspliced_count[_boundary(0, 3), 0]) == 0, "the swallowed line at 201"
     assert t.qc["unannotated_introns"] == 1
 
 
@@ -259,7 +259,7 @@ def test_a_fragment_straddling_two_regions_without_crossing_a_line_is_NOT_contai
         0, 120, 500, observed_introns=[(200, 400)]
     )  # blocks land in n1 and n4, crossing no line
     t = acc.tally
-    assert t.edge_unspliced_count.sum() == 0
+    assert t.boundary_unspliced_count.sum() == 0
     assert t.region_contained_count.sum() == 0
     assert int(t.region_start_count.sum()) == 1, "still counted"
 
@@ -273,7 +273,7 @@ def test_an_unannotated_intron_inside_one_region_is_a_contained_unspliced_fragme
     assert t.qc["unannotated_introns"] == 1
 
 
-def test_opposite_strand_junctions_at_the_same_coordinates_are_DISTINCT_edges():
+def test_opposite_strand_junctions_at_the_same_coordinates_are_DISTINCT_boundaries():
     """Biologically impossible — splice motifs are not palindromic — so only a synthetic stress test can
     reach it, which is exactly why one exists."""
     acc = _acc(junctions=[(0, 201, 900, Strand.POS), (0, 201, 900, Strand.NEG)])
@@ -282,12 +282,12 @@ def test_opposite_strand_junctions_at_the_same_coordinates_are_DISTINCT_edges():
     )
     t = acc.tally
     assert t.sj_count.sum() == 1
-    assert int(t.sj_count[1, STRAND_COLUMNS[Strand.NEG]]) == 1, "the NEG edge (id 1), genome minus"
+    assert int(t.sj_count[1, STRAND_COLUMNS[Strand.NEG]]) == 1, "the NEG boundary (id 1), genome minus"
 
 
 @pytest.mark.parametrize("order", [("POS_first", 1), ("NEG_first", -1)])
 def test_a_junction_id_is_a_function_of_the_PARTITION_not_of_argument_order(order):
-    """⛔ The junction-edge id IS the rank in the sort, so the sort must be total — otherwise the id
+    """⛔ The junction-boundary id IS the rank in the sort, so the sort must be total — otherwise the id
     depends on the order the caller happened to list the junctions in, and the same graph gets two
     labellings.
 
@@ -305,7 +305,7 @@ def test_a_junction_id_is_a_function_of_the_PARTITION_not_of_argument_order(orde
 
 
 def test_a_fragment_using_TWO_junctions_credits_BOTH():
-    """Owner ruling: each edge owns its own expectation, and the strand model is fitted from a separate
+    """Owner ruling: each boundary owns its own expectation, and the strand model is fitted from a separate
     scan output, so crediting every junction distorts nothing.
 
     ⚠ The two introns must be separated by a real exon. Abutting introns imply a zero-length exon and are
@@ -333,12 +333,12 @@ def test_the_unspliced_bank_is_indexed_by_GENOME_strand():
     acc = _acc()
     acc.deposit(0, 150, 300, align_strand=Strand.NEG)
     t = acc.tally
-    assert int(t.edge_unspliced_count[_edge(0, 2), 1]) == 1
-    assert int(t.edge_unspliced_count[_edge(0, 2), 0]) == 0
+    assert int(t.boundary_unspliced_count[_boundary(0, 2), 1]) == 1
+    assert int(t.boundary_unspliced_count[_boundary(0, 2), 0]) == 0
 
 
 def test_EVERY_bank_including_the_junctions_is_indexed_by_GENOME_strand():
-    """⭐ One convention throughout. Sense/antisense is DERIVED, never stored: the junction edge carries
+    """⭐ One convention throughout. Sense/antisense is DERIVED, never stored: the junction boundary carries
     its own genomic strand, so a consumer computes ``sense = (fragment strand == junction strand)``.
 
     Here a genome-minus fragment splices across a ``+`` junction. Under a sense convention it would land
@@ -410,7 +410,7 @@ def test_the_junction_MASS_KEEPS_THE_SAME_SPLIT_and_it_is_the_ONLY_mass_that_doe
     ⛔ The gate is that the mass lands in the SAME column the count does. If the two used different
     conventions, ``mass[c]/count[c]`` would be a ratio across two different populations and the detector
     would be reading noise.
-    ⚠ The ruling still STANDS for ``edge_unspliced_mass`` and ``edge_spliced_mass``, which have no such
+    ⚠ The ruling still STANDS for ``boundary_unspliced_mass`` and ``boundary_spliced_mass``, which have no such
     consumer — ``one-thing-varied``, checked by the shape gate in ``test_accumulator_payload``.
     """
     pos, neg = STRAND_COLUMNS[Strand.POS], STRAND_COLUMNS[Strand.NEG]
@@ -446,7 +446,7 @@ def test_a_SENSE_fragment_on_the_minus_strand_is_still_booked_as_MINUS():
     t = acc.tally
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.POS]]) == 0
-    assert int(t.edge_spliced_count[_edge(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1
+    assert int(t.boundary_spliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -455,12 +455,12 @@ def test_a_SENSE_fragment_on_the_minus_strand_is_still_booked_as_MINUS():
 
 
 def test_a_fragment_over_the_length_limit_deposits_NOTHING_and_is_COUNTED():
-    """⭐ Bounded influence. Unbounded, 1,000 read groups own 99.8 % of all edge crossings on a real
+    """⭐ Bounded influence. Unbounded, 1,000 read groups own 99.8 % of all boundary crossings on a real
     library; with the limit on ``L`` they own 4.16 %. A silent drop would hide that."""
     acc = _acc(max_fragment_length=200)
     assert acc.deposit(0, 100, 500) is DepositOutcome.TOO_LONG
     t = acc.tally
-    assert t.edge_unspliced_count.sum() == 0
+    assert t.boundary_unspliced_count.sum() == 0
     assert t.region_start_count.sum() == 0
     assert t.qc["dropped_too_long"] == 1
 
@@ -482,9 +482,9 @@ def test_a_fragment_is_clipped_to_its_reference_and_L_is_the_clipped_length():
     assert close(float(t.region_contained_inv_opportunity_sum[_region(0, 5)]), _contained_quantum(0, 5, 50), 1)
 
 
-def test_a_single_region_reference_has_no_edges_and_still_accepts_a_fragment():
+def test_a_single_region_reference_has_no_boundaries_and_still_accepts_a_fragment():
     acc = Accumulator(Partition.from_cuts([[0, 1000]], region_types=[[0]]))
-    assert acc.n_edges == 0
+    assert acc.n_boundaries == 0
     acc.deposit(0, 100, 300)
     assert int(acc.tally.region_contained_count[0, 0]) == 1
 
@@ -496,8 +496,8 @@ def test_the_per_reference_offsets_do_not_bleed():
     acc.deposit(0, 150, 300)  # crosses the lines at 200 AND 201
     acc.deposit(1, 400, 700)  # crosses chr2's line at 500
     t = acc.tally
-    assert [int(t.edge_unspliced_count[e, 0]) for e in range(acc.n_edges)] == [0, 1, 1, 0, 0, 1]
-    assert int(t.edge_unspliced_count.sum()) == 3
+    assert [int(t.boundary_unspliced_count[e, 0]) for e in range(acc.n_boundaries)] == [0, 1, 1, 0, 0, 1]
+    assert int(t.boundary_unspliced_count.sum()) == 3
     assert int(t.region_start_count[_region(0, 1)]) == 1
     assert int(t.region_start_count[_region(1, 0)]) == 1
 
@@ -567,7 +567,7 @@ def test_a_pool_is_binned_at_L_and_only_ONCE_per_fragment():
 
 
 def test_a_multi_line_crossing_enters_NO_pool():
-    """A splash read straddles ONE probe edge. A fragment crossing several lines has no single
+    """A splash read straddles ONE probe boundary. A fragment crossing several lines has no single
     structural class, and an impure pool is worse than a missing one."""
     acc = _acc()
     acc.deposit(0, 150, 500)
@@ -595,9 +595,9 @@ def _uniform_accumulator(region_bp, ref_len):
 @pytest.mark.parametrize("region_bp", [50, 200, 1000])
 def test_the_crossing_DENSITY_recovers_the_true_density_with_NO_length_model(region_bp):
     """⭐ ``E[Σ 1/(L−1)] = ρ`` exactly, for ANY fragment-length distribution. This is the identity the
-    whole design rests on and the reason no divisor and no length model appear at an edge.
+    whole design rests on and the reason no divisor and no length model appear at an boundary.
 
-    It must hold at every region spacing. Partitioning the weight by the number of edges crossed breaks
+    It must hold at every region spacing. Partitioning the weight by the number of boundaries crossed breaks
     it — measured 0.28× at 50 bp regions, 0.54× at 100 bp, 0.91× at 200 bp — so this test is also what
     forbids partitioning.
     """
@@ -607,9 +607,9 @@ def test_the_crossing_DENSITY_recovers_the_true_density_with_NO_length_model(reg
     starts, ends, _ = _corpus(rng, int(rho * ref_len), ref_len)
     for s, e in zip(starts, ends):
         acc.deposit(0, int(s), int(e))
-    interior = slice(5, acc.n_edges - 5)
+    interior = slice(5, acc.n_boundaries - 5)
     estimate = (
-        acc.tally.edge_unspliced_inv_length_sum[interior].sum() / (acc.n_edges - 10)
+        acc.tally.boundary_unspliced_inv_length_sum[interior].sum() / (acc.n_boundaries - 10)
     )
     assert 0.98 <= estimate / rho <= 1.02, f"{estimate / rho:.4f} at {region_bp} bp regions"
 
@@ -623,10 +623,10 @@ def test_the_crossing_COUNT_recovers_density_times_mean_length():
     starts, ends, lengths = _corpus(rng, int(rho * ref_len), ref_len)
     for s, e in zip(starts, ends):
         acc.deposit(0, int(s), int(e))
-    interior = slice(5, acc.n_edges - 5)
-    per_edge = acc.tally.edge_unspliced_count[interior, :].sum() / (acc.n_edges - 10)
+    interior = slice(5, acc.n_boundaries - 5)
+    per_boundary = acc.tally.boundary_unspliced_count[interior, :].sum() / (acc.n_boundaries - 10)
     expected = rho * (lengths.mean() - 1.0)
-    assert 0.98 <= per_edge / expected <= 1.02, f"{per_edge / expected:.4f}"
+    assert 0.98 <= per_boundary / expected <= 1.02, f"{per_boundary / expected:.4f}"
 
 
 def test_the_deposit_is_independent_of_the_ORDER_fragments_arrive_in():
@@ -647,8 +647,8 @@ def test_the_deposit_is_independent_of_the_ORDER_fragments_arrive_in():
         "region_contained_count",
         "region_contained_inv_opportunity_sum",
         "region_start_count",
-        "edge_unspliced_count",
-        "edge_unspliced_inv_length_sum",
+        "boundary_unspliced_count",
+        "boundary_unspliced_inv_length_sum",
         "pool_lengths",
     ):
         got, want = getattr(a, field), getattr(b, field)
@@ -696,10 +696,10 @@ def test_L_is_the_total_of_the_path_segments_even_when_the_intron_list_is_malfor
     assert acc.deposit(0, 50, 500, observed_introns=introns) is DepositOutcome.DEPOSITED
     t = acc.tally
     assert t.qc["introns_absorbed"] == expected_absorbed
-    crossings = int(t.edge_unspliced_count.sum())
+    crossings = int(t.boundary_unspliced_count.sum())
     assert crossings == expected_crossings
     assert close(
-        float(t.edge_unspliced_inv_length_sum.sum()), crossings / (expected_length - 1), crossings
+        float(t.boundary_unspliced_inv_length_sum.sum()), crossings / (expected_length - 1), crossings
     )
 
 
@@ -763,7 +763,7 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
     """⚠ One array, one convention.
 
     A spliced fragment cannot be *contained* — both endpoints of an annotated intron are cuts, so it
-    always crosses its junction edge — but its blocks routinely SPAN a region whole. Measured on real
+    always crosses its junction boundary — but its blocks routinely SPAN a region whole. Measured on real
     cfRNA, **65–69 % of all region_spanning deposits came from spliced fragments**. Indexing those by
     sense-relative-to-motif while the unspliced ones beside them use genome strand would put one array
     into two conventions, and 40–44 % of the spliced deposits would land in the opposite column from
@@ -773,7 +773,7 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
     and removing it took away the only REGION-axis population a spliced fragment can reach, since a
     spliced fragment can never be *contained* (both endpoints of an annotated intron are cuts). The
     claim is about the CONVENTION, not about that bank, so it now rides on the two banks a spliced
-    fragment does reach: ``edge_spliced_count`` beside ``edge_unspliced_count`` at the SAME line, and
+    fragment does reach: ``boundary_spliced_count`` beside ``boundary_unspliced_count`` at the SAME line, and
     ``sj_count``. ⛔ Deleting it with its old vehicle would have retired the only gate on a rule this
     codebase has already broken once.
     """
@@ -785,16 +785,16 @@ def test_a_spliced_and_an_unspliced_fragment_of_the_SAME_genome_strand_share_a_c
     t = acc.tally
     # ⭐ ONE line, TWO banks, one column: the unspliced fragment and the spliced one both cross the
     # line at 200, and both are genome-minus. A sense-relative convention would split them.
-    assert int(t.edge_unspliced_count[_edge(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1, "genome minus"
-    assert int(t.edge_spliced_count[_edge(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1, (
+    assert int(t.boundary_unspliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1, "genome minus"
+    assert int(t.boundary_spliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1, (
         "the spliced one is ANTISENSE to its + junction, and still books genome minus"
     )
-    assert int(t.edge_unspliced_count[_edge(0, 2), STRAND_COLUMNS[Strand.POS]]) == 0
-    assert int(t.edge_spliced_count[_edge(0, 2), STRAND_COLUMNS[Strand.POS]]) == 0
+    assert int(t.boundary_unspliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.POS]]) == 0
+    assert int(t.boundary_spliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.POS]]) == 0
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1, "the junction bank too"
 
 
-def test_a_spliced_SENSE_fragment_books_EDGE_AND_junction_by_GENOME_strand():
+def test_a_spliced_SENSE_fragment_books_BOUNDARY_AND_junction_by_GENOME_strand():
     """The discriminating case: sense-to-motif would say column 0 for both; genome strand says 1."""
     acc = _acc(junctions=[SPAN_JUNCTION_NEG])
     acc.deposit(
@@ -802,7 +802,7 @@ def test_a_spliced_SENSE_fragment_books_EDGE_AND_junction_by_GENOME_strand():
     )
     t = acc.tally
     assert int(t.sj_count[0, STRAND_COLUMNS[Strand.NEG]]) == 1
-    assert int(t.edge_spliced_count[_edge(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1
+    assert int(t.boundary_spliced_count[_boundary(0, 2), STRAND_COLUMNS[Strand.NEG]]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -872,8 +872,8 @@ def test_TWO_SURVIVING_HYPOTHESES_deposit_on_NOTHING_and_are_BUFFERED_WHOLE():
     for name in (
         "region_contained_count",
         "region_start_count",
-        "edge_unspliced_count",
-        "edge_spliced_count",
+        "boundary_unspliced_count",
+        "boundary_spliced_count",
         "sj_count",
         "pool_lengths",
     ):
@@ -982,7 +982,7 @@ def test_when_the_limit_would_rule_out_EVERY_hypothesis_the_survivors_stand():
 # AMBIGUOUS as though it were a definite strand:
 #
 #   NONE       no strand tag in the BAM at all  ->  no information; match on coordinates alone
-#   POS / NEG  one definite observed strand      ->  must agree with the junction edge's own strand
+#   POS / NEG  one definite observed strand      ->  must agree with the junction boundary's own strand
 #   AMBIGUOUS  the two mates' tags DISAGREE      ->  contradictory evidence; trust no splice
 #
 # ⚠ NONE must stay permissive. Aligners differ — STAR writes ``XS``, minimap2 writes ``ts``, and some
@@ -1038,12 +1038,12 @@ def test_an_AMBIGUOUS_sj_strand_is_CONTRADICTORY_and_credits_NO_junction():
     assert t.qc["contradictory_sj_strand"] == 1
     assert t.qc["unannotated_introns"] == 0, "the annotation-coverage metric must not be poisoned"
     assert int(t.pool_lengths[FragmentPool.RNA_SPLICED].sum()) == 0, "not certified RNA"
-    assert int(t.edge_unspliced_count.sum()) > 0, "it competes with gDNA, the safe direction"
+    assert int(t.boundary_unspliced_count.sum()) > 0, "it competes with gDNA, the safe direction"
 
 
 def test_a_DEFINITE_but_WRONG_sj_strand_still_misses():
     """The third arm, so the rule above cannot be over-applied: a definite strand that disagrees with the
-    junction edge's own strand is a real disagreement, and it IS an unannotated intron — that coordinate
+    junction boundary's own strand is a real disagreement, and it IS an unannotated intron — that coordinate
     pair is not annotated on the strand it was observed on."""
     acc = _acc(junctions=[JUNCTION])  # (0, 201, 900, POS)
     acc.deposit(
@@ -1053,7 +1053,7 @@ def test_a_DEFINITE_but_WRONG_sj_strand_still_misses():
     assert int(t.sj_count.sum()) == 0
     assert t.qc["unannotated_introns"] == 1
     assert t.qc["contradictory_sj_strand"] == 0
-    assert int(t.edge_spliced_count.sum()) == 0, "not certified RNA — the strand disagreed"
+    assert int(t.boundary_spliced_count.sum()) == 0, "not certified RNA — the strand disagreed"
 
 
 # ---------------------------------------------------------------------------
@@ -1082,19 +1082,19 @@ def test_BOTH_genome_strands_land_in_the_ONE_length_moment_slot():
     # ...and the moments pool them into the single slot
     assert close(float(t.region_contained_inv_opportunity_sum[region]), 2 * _contained_quantum(0, 3, 160), 2)
 
-    edge_acc = _acc()
-    edge_acc.deposit(0, 120, 320, align_strand=Strand.POS)
-    edge_acc.deposit(0, 120, 320, align_strand=Strand.NEG)
-    e = edge_acc.tally
-    line = _edge(0, 2)
-    assert int(e.edge_unspliced_count[line].sum()) == 2
-    assert close(float(e.edge_unspliced_inv_length_sum[line]), 2.0 / (200 - 1), 2)
+    boundary_acc = _acc()
+    boundary_acc.deposit(0, 120, 320, align_strand=Strand.POS)
+    boundary_acc.deposit(0, 120, 320, align_strand=Strand.NEG)
+    e = boundary_acc.tally
+    line = _boundary(0, 2)
+    assert int(e.boundary_unspliced_count[line].sum()) == 2
+    assert close(float(e.boundary_unspliced_inv_length_sum[line]), 2.0 / (200 - 1), 2)
 
 
 def test_the_density_FIELD_NAME_is_gone_everywhere():
     """The rename is complete, so no consumer can reach a half-migrated schema.
 
-    ``inv_length_sum`` is an exact density at an edge and is NOT one at a region; keeping the old name
+    ``inv_length_sum`` is an exact density at an boundary and is NOT one at a region; keeping the old name
     would put one word on two concepts, which is.
     """
     t = _acc().tally

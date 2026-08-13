@@ -139,7 +139,7 @@ def test_an_object_with_NO_MASS_never_appears_in_the_table(measured):
 def test_the_neighbour_errors_are_ADJACENT_CHAIN_SLOTS_not_adjacent_objects(measured):
     """⭐ On an object with no own evidence the neighbour columns are the whole explanation, so they
     must be the objects that actually message it. The chain is ``N E N E … N``, so a REGION's
-    neighbours are two EDGES — **not** the regions at ``obj ± 1``, which are two slots away and do not
+    neighbours are two BOUNDARIES — **not** the regions at ``obj ± 1``, which are two slots away and do not
     message it directly.
 
     PERTURBATION: compute the same-axis ``obj ± 1`` errors and require them to DIFFER, so the gate
@@ -147,13 +147,13 @@ def test_the_neighbour_errors_are_ADJACENT_CHAIN_SLOTS_not_adjacent_objects(meas
     """
     m, d = _dissect(measured)
     chain = m.debug_pass0["chain"]
-    n_regions, n_edges = int(m.payload.n_regions), int(m.payload.n_edges)
-    region_slot, edge_slot = WO._slot_lookup(chain, n_regions, n_edges)
+    n_regions, n_boundaries = int(m.payload.n_regions), int(m.payload.n_boundaries)
+    region_slot, boundary_slot = WO._slot_lookup(chain, n_regions, n_boundaries)
     kind = np.asarray(chain.kind)
     obj_idx = np.asarray(chain.obj_idx, dtype=np.int64)
 
-    edge_err = np.asarray(m.arms["pass0"].mass_gdna_edge, np.float64) - np.asarray(
-        m.truth.mass_gdna_edge, np.float64
+    boundary_err = np.asarray(m.arms["pass0"].mass_gdna_boundary, np.float64) - np.asarray(
+        m.truth.mass_gdna_boundary, np.float64
     )
     region_err = np.asarray(m.arms["pass0"].mass_gdna_region, np.float64) - np.asarray(
         m.truth.mass_gdna_region, np.float64
@@ -165,8 +165,8 @@ def test_the_neighbour_errors_are_ADJACENT_CHAIN_SLOTS_not_adjacent_objects(meas
         for side, nb in zip((s - 1, s + 1), r["nb_err"]):
             if np.isnan(nb) or not 0 <= side < kind.shape[0]:
                 continue  # a reference boundary has no neighbour on that side
-            assert kind[side] == WO.EDGE, "a REGION's chain neighbour must be an EDGE slot"
-            np.testing.assert_allclose(nb, edge_err[obj_idx[side]], rtol=1e-9, atol=1e-6)
+            assert kind[side] == WO.BOUNDARY, "a REGION's chain neighbour must be an BOUNDARY slot"
+            np.testing.assert_allclose(nb, boundary_err[obj_idx[side]], rtol=1e-9, atol=1e-6)
             checked += 1
         # the same-axis alternative must not coincide, or the gate cannot see the difference
         for other in (r["obj"] - 1, r["obj"] + 1):
@@ -235,7 +235,7 @@ def test_the_classes_are_the_SCORED_ones_not_a_second_computation(measured):
         m.debug_pass0["capture"],
         m.debug_pass0["chain"],
         int(m.payload.n_regions),
-        int(m.payload.n_edges),
+        int(m.payload.n_boundaries),
     )["region"]
     for name in P0.SOLVER_CLASSES:
         np.testing.assert_array_equal(d["solver"][name], fresh[name])

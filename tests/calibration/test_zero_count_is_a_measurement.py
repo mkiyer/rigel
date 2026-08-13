@@ -137,7 +137,7 @@ def test_Z5_the_composition_identity_is_EXACT_so_the_location_may_not_gain_the_h
 
 def test_Z6_precision_is_MONOTONE_in_the_count_across_zero():
     """⭐ There must be no step at ``n = 0 → 1``: the old code jumped from "silent" to "as precise as
-    the count allows", and a discontinuity there is what let a whole population fall off the edge."""
+    the count allows", and a discontinuity there is what let a whole population fall off the boundary."""
     n = np.arange(0.0, 40.0)
     v0 = np.zeros_like(n)
     p = own_precision(n, v0, np.ones(n.shape, bool))

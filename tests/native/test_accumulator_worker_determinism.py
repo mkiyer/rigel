@@ -40,8 +40,8 @@ def oracle(tmp_path):
     """A scenario built so that **every** bank of the tally receives something.
 
     ⚠ The obvious scenario does not. Two single-isoform genes deposit into the regions and the junction
-    edges and leave **both contiguous-edge banks identically zero**: every cut is an exon boundary, so a
-    mature fragment either fits inside an exon (contained) or splices across the gap (junction edge), and
+    boundaries and leave **both contiguous-boundary banks identically zero**: every cut is an exon boundary, so a
+    mature fragment either fits inside an exon (contained) or splices across the gap (junction boundary), and
     it never has bases on both sides of a line. A bit-identity gate over an all-zero array passes for the
     wrong reason — this project has already had one report "32/32 IDENTICAL" on an arm with zero rows. So:
 
@@ -124,10 +124,10 @@ def test_the_tally_is_bit_identical_at_1_2_4_and_8_workers(oracle):
         ("region_start_count", "nothing was deposited at all"),
         ("region_contained_count", "no fragment fitted inside a region"),
         (
-            "edge_unspliced_count",
+            "boundary_unspliced_count",
             "no unspliced contiguous crossing — the mixture being deconvolved",
         ),
-        ("edge_spliced_count", "no SPLICED contiguous crossing — the certified-RNA channel"),
+        ("boundary_spliced_count", "no SPLICED contiguous crossing — the certified-RNA channel"),
         ("sj_count", "no annotated junction was used"),
         ("pool_lengths", "no fragment entered a length pool"),
     ]:

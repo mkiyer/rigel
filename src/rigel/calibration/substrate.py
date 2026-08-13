@@ -10,14 +10,14 @@ THE FOUR POPULATIONS, on three axes off by one from each other per reference —
 carry the same channels, because a channel is stored where a named consumer reads it::
 
     regions             contained   count  inv_length_sum  length_sum
-    contiguous edges  unspliced   count  inv_length_sum  length_sum   the mixture being deconvolved
+    contiguous boundaries  unspliced   count  inv_length_sum  length_sum   the mixture being deconvolved
                       spliced     count                               certified RNA -- gDNA cannot splice
-    junction edges    (one)       count  inv_length_sum               pure RNA by construction
+    junction boundaries    (one)       count  inv_length_sum               pure RNA by construction
 
 ⭐ **ONE type, and that is the change.** The predecessor had ``CalibrationSubstrate`` holding three
 per-region views (contained / left / right) and ``BoundarySubstrate`` holding the same numbers re-keyed
 by boundary. Two classes, one set of numbers, two keyings — and they existed **solely because a boundary
-had two sides**. A contiguous edge is a 0-bp line with one set of numbers, so the second class, the
+had two sides**. A contiguous boundary is a 0-bp line with one set of numbers, so the second class, the
 left/right axis, the re-keying identity and ``_make_view`` all dissolve together.
 
 ⭐ **THE COLUMNS ARE GENOME STRAND, WITHOUT EXCEPTION.** Sense/antisense is transcript-relative,
@@ -63,7 +63,7 @@ class PopulationView:
 
     They answer different questions and are never interchangeable: ``count`` carries the statistical
     power (a Beta-Binomial needs an integer, per strand) and ``inv_length_sum`` carries the level — an
-    exact model-free density at an edge, and *not* a density at a region.
+    exact model-free density at an boundary, and *not* a density at a region.
 
     ⛔ **A population carries only the channels a named consumer reads**, and that rule has teeth: the
     ``length_sum`` channel was deleted in 2026-08-13's schema change precisely because it had none. The
@@ -142,7 +142,7 @@ class CalibrationSubstrate:
     """Every per-object statistic the calibrator reads, on the payload's own axes."""
 
     n_regions: int
-    n_edges: int
+    n_boundaries: int
     n_junctions: int
 
     strand_class: np.ndarray  # int8[n_regions] — the region's transcript-strand class
@@ -152,16 +152,16 @@ class CalibrationSubstrate:
     #: consumer reads it and nowhere else::
     #:
     #:     region_contained   count  inv_length_sum  length_sum
-    #:     edge_unspliced   count  inv_length_sum  length_sum  mass
-    #:     edge_spliced     count                              mass   certified RNA — not deconvolved
+    #:     boundary_unspliced   count  inv_length_sum  length_sum  mass
+    #:     boundary_spliced     count                              mass   certified RNA — not deconvolved
     #:     junction         count  inv_length_sum                     LIVE in second_pass
     #:
     #: ⚠ A fifth, ``region_spanning``, was removed on evidence. ⛔ Its removal means **no spliced fragment
     #: touches the region axis at all** — a spliced fragment can never be *contained*, because both
     #: endpoints of an annotated intron are cuts.
     region_contained: PopulationView
-    edge_unspliced: PopulationView
-    edge_spliced: PopulationView
+    boundary_unspliced: PopulationView
+    boundary_spliced: PopulationView
     junction: PopulationView
 
     @classmethod
@@ -194,7 +194,7 @@ class CalibrationSubstrate:
 
         return cls(
             n_regions=payload.n_regions,
-            n_edges=payload.n_edges,
+            n_boundaries=payload.n_boundaries,
             n_junctions=payload.n_sj,
             strand_class=np.ascontiguousarray(region_arrays.strand_class, dtype=np.int8),
             region_start_count=np.asarray(payload.region_start_count, dtype=np.int64),
@@ -203,14 +203,14 @@ class CalibrationSubstrate:
                 payload.region_contained_count,
                 payload.region_contained_inv_opportunity_sum,
             ),
-            edge_unspliced=view(
-                "edge_unspliced",
-                payload.edge_unspliced_count,
-                payload.edge_unspliced_inv_length_sum,
-                mass=payload.edge_unspliced_mass,
+            boundary_unspliced=view(
+                "boundary_unspliced",
+                payload.boundary_unspliced_count,
+                payload.boundary_unspliced_inv_length_sum,
+                mass=payload.boundary_unspliced_mass,
             ),
-            edge_spliced=view(
-                "edge_spliced", payload.edge_spliced_count, mass=payload.edge_spliced_mass
+            boundary_spliced=view(
+                "boundary_spliced", payload.boundary_spliced_count, mass=payload.boundary_spliced_mass
             ),
             junction=view(
                 "junction", payload.sj_count, payload.sj_inv_length_sum, mass=payload.sj_mass

@@ -18,7 +18,7 @@ object's own belief unconditionally, with no licence and no inverse-variance fus
 loses, the built form cannot win; if it wins, the built form still has to earn it.
 
 ⛔⛔ **THE ARM IT CARRIES, AND ITS VERDICT (2026-08-04).** ``intron_phi`` is `EQUATIONS.md` §3.6 face (I):
-an `intron|exon` EDGE takes the flanking INTRON's COMPOSITION — never its level — and closes the level
+an `intron|exon` BOUNDARY takes the flanking INTRON's COMPOSITION — never its level — and closes the level
 with its own observed mass. On the toy it was worth −0.009 panel-wide and −0.027 on capture-ON ×
 unstranded. On the ladder, 32 contaminated conditions, region axis:
 
@@ -31,8 +31,8 @@ declared-precision      2.688       **2.821**       6 / 26 / 0
 relay Δ                 +0.0021     **+0.0034**    14 / 18 / 0
 ======================  ==========  =============  ===================
 
-⛔ **REFUTED.** And on the EDGE axis it is worse still (mwae 0.0216 → 0.1449) because it ADMITS those
-EDGEs into the scored population (``solv%`` 43.1 → 48.2) carrying a wrong composition — TRAPS: excluding-a-population-hides-it
+⛔ **REFUTED.** And on the BOUNDARY axis it is worse still (mwae 0.0216 → 0.1449) because it ADMITS those
+BOUNDARIES into the scored population (``solv%`` 43.1 → 48.2) carrying a wrong composition — TRAPS: excluding-a-population-hides-it
 inverted. ⭐ The one real signal in it: the split is by STRAND, not by capture. Every unstranded row is
 worse and every stranded capture-OFF row is better, which is the DL mismatch test having nothing to
 check an imported composition against when the destination has no self-solve.
@@ -728,9 +728,9 @@ def _install_zc_logmean():
 
 
 def _targets(chain, region_arrays):
-    """Vectorised: every `intron|exon` EDGE slot and the slot of its flanking INTRON REGION.
+    """Vectorised: every `intron|exon` BOUNDARY slot and the slot of its flanking INTRON REGION.
 
-    ⭐ Genomic order IS slot order and the chain strictly alternates REGION/EDGE, so an EDGE's flanks are
+    ⭐ Genomic order IS slot order and the chain strictly alternates REGION/BOUNDARY, so an BOUNDARY's flanks are
     ``i-1`` and ``i+1`` and no traversal is needed. Breaks at a reference terminal are handled by
     `chain.left`/`chain.right` being −1 there."""
     kind = np.asarray(chain.kind)
@@ -744,9 +744,9 @@ def _targets(chain, region_arrays):
     lt = np.where(ok, ntype[np.clip(left, 0, ntype.size - 1)], -1)
     rt = np.where(ok, ntype[np.clip(right, 0, ntype.size - 1)], -1)
     hit = ok & (((lt == INTRON) & (rt == EXON)) | ((lt == EXON) & (rt == INTRON)))
-    edges = np.flatnonzero(hit)
-    srcs = np.where(lt[edges] == INTRON, left[edges], right[edges])
-    return edges, srcs
+    boundaries = np.flatnonzero(hit)
+    srcs = np.where(lt[boundaries] == INTRON, left[boundaries], right[boundaries])
+    return boundaries, srcs
 
 
 def _install_backbone(silent: bool):
@@ -984,31 +984,31 @@ def _install_msgfree(where: str):
 
 
 def _install_face_one():
-    """⭐ FACE (I) AS DERIVED (`EQUATIONS.md` §3.6): the `intron|exon` EDGE takes the flanking INTRON's
+    """⭐ FACE (I) AS DERIVED (`EQUATIONS.md` §3.6): the `intron|exon` BOUNDARY takes the flanking INTRON's
     COMPOSITION — never its level — and closes the level with its OWN observed mass.
 
-    ``T(INTRON) = {gDNA, nascent} = T(EDGE, unspliced only)``, so the two measure the same population and
+    ``T(INTRON) = {gDNA, nascent} = T(BOUNDARY, unspliced only)``, so the two measure the same population and
     the share may cross. ⛔ The LEVEL may not: measured on the toy, transferring the intron's gDNA
     DENSITY instead is **+0.017 panel-wide and +0.207 on capture-ON × unstranded**, because capture
-    depletes the intron ~1000× while enriching the EDGE."""
+    depletes the intron ~1000× while enriching the BOUNDARY."""
     orig = NI.build_region_init
 
     def wrapper(chain, statics, geometry, **kw):
         ni = orig(chain, statics, geometry, **kw)
         # ⛔ TWO SILENT EARLY RETURNS, and until 2026-08-11 this arm had no fire counter at all — so
         # either of them made it inert with no signal whatsoever. They are counted separately from the
-        # firing, because "no region_arrays" is a WIRING failure and "no intron|exon edge on this chain"
+        # firing, because "no region_arrays" is a WIRING failure and "no intron|exon boundary on this chain"
         # is an ordinary fact about the chain (TRAPS: could-the-arm-have-fired).
         ra = _RA.get("region_arrays")
         if ra is None:
             _FIRED["intron_phi_NO_REGION_ARRAYS"] = _FIRED.get("intron_phi_NO_REGION_ARRAYS", 0) + 1
             return ni
-        edges, srcs = _targets(chain, ra)
-        if edges.size == 0:
-            _FIRED["intron_phi_no_edges"] = _FIRED.get("intron_phi_no_edges", 0) + 1
+        boundaries, srcs = _targets(chain, ra)
+        if boundaries.size == 0:
+            _FIRED["intron_phi_no_boundaries"] = _FIRED.get("intron_phi_no_boundaries", 0) + 1
             return ni
         _fire("intron_phi")
-        _FIRED["intron_phi_edges"] = _FIRED.get("intron_phi_edges", 0) + int(edges.size)
+        _FIRED["intron_phi_boundaries"] = _FIRED.get("intron_phi_boundaries", 0) + int(boundaries.size)
         f_g = np.array(ni.f_g, np.float64)
         f_pos = np.array(ni.f_pos, np.float64)
         f_neg = np.array(ni.f_neg, np.float64)
@@ -1022,18 +1022,18 @@ def _install_face_one():
 
         new_fg = f_g[srcs]
         rna = np.maximum(0.0, 1.0 - new_fg)
-        tot = f_pos[edges] + f_neg[edges]
-        fp_ok = np.asarray(statics.free_pos, bool)[edges]
-        fn_ok = np.asarray(statics.free_neg, bool)[edges]
+        tot = f_pos[boundaries] + f_neg[boundaries]
+        fp_ok = np.asarray(statics.free_pos, bool)[boundaries]
+        fn_ok = np.asarray(statics.free_neg, bool)[boundaries]
         k = fp_ok.astype(np.float64) + fn_ok.astype(np.float64)
-        share_p = np.where(tot > _EPS, f_pos[edges] / np.maximum(tot, _EPS),
+        share_p = np.where(tot > _EPS, f_pos[boundaries] / np.maximum(tot, _EPS),
                            np.where(k > 0, fp_ok / np.maximum(k, 1.0), 0.0))
-        share_n = np.where(tot > _EPS, f_neg[edges] / np.maximum(tot, _EPS),
+        share_n = np.where(tot > _EPS, f_neg[boundaries] / np.maximum(tot, _EPS),
                            np.where(k > 0, fn_ok / np.maximum(k, 1.0), 0.0))
-        f_pos[edges] = rna * share_p
-        f_neg[edges] = rna * share_n
-        f_g[edges] = new_fg
-        tau[edges] = tau[srcs]
+        f_pos[boundaries] = rna * share_p
+        f_neg[boundaries] = rna * share_n
+        f_g[boundaries] = new_fg
+        tau[boundaries] = tau[srcs]
 
         v_fg, v_fr = NI.own_composition_logvar(f_g, tau, lock)
         rho_g = np.maximum(
@@ -1041,7 +1041,7 @@ def _install_face_one():
         )
         prec_g = NI.own_precision(n_region, v_fg, rho_g > _EPS)
         touched = np.zeros(f_g.shape[0], bool)
-        touched[edges] = True
+        touched[boundaries] = True
 
         def _rna(frac, free_s, rho_old):
             raw = np.where(
@@ -1378,7 +1378,7 @@ def main() -> int:
                 truth_pmfs=None,
                 oracle_cache=args.oracle_cache,
             )
-            for axis in ("region", "edge"):
+            for axis in ("region", "boundary"):
                 s = SA.summarise(SA.audit(m, axis=axis, config=config))
                 # ⛔⛔ FIXED-DENOMINATOR COMPANIONS. `solvable_mwae`'s denominator is the SOLVABLE set,
                 # and an arm that changes what counts as solvable changes its own denominator — so a

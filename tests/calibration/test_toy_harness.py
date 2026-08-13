@@ -83,7 +83,7 @@ def donor(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def spec():
-    """Two exons and one intron — the smallest structure with a junction and both edge kinds."""
+    """Two exons and one intron — the smallest structure with a junction and both boundary kinds."""
     return TH.ToySpec(
         name="gate_two_exon",
         what_it_probes="gate fixture",
@@ -226,14 +226,14 @@ def test_EVERY_object_with_mass_is_reported(donor, spec, tmp_path):
     """⭐ The point of a toy is that you can read every row. A report that dropped objects would hide
     exactly the one being interrogated.
 
-    PERTURBATION: the row set must cover every chain slot, and the region/edge split must be non-trivial
-    — a toy with no edges could not exercise the edge classes at all.
+    PERTURBATION: the row set must cover every chain slot, and the region/boundary split must be non-trivial
+    — a toy with no boundaries could not exercise the boundary classes at all.
     """
     r = TH.run_toy(spec, donor, tmp_path / "h")
     rows = TH.object_rows(r)
     assert len(rows) == int(r.chain.n_slots), "object_rows does not cover every chain slot"
     kinds = {row["axis"] for row in rows}
-    assert kinds == {"region", "edge"}, f"the toy has only {kinds}; it cannot exercise both axes"
+    assert kinds == {"region", "boundary"}, f"the toy has only {kinds}; it cannot exercise both axes"
     types = {row["type"] for row in rows}
     for expected in ("intergenic", "exon", "intron", "intron|exon", "intergenic|exon"):
         assert expected in types, f"the two-exon toy produced no {expected!r} object"
@@ -249,7 +249,7 @@ def test_EVERY_object_with_mass_is_reported(donor, spec, tmp_path):
     "KEPT AGAINST THE TRUTH rather than widened to the number reached, because it is measuring a real "
     "interaction and not a defect in the reframe.\n"
     "⭐ What it is measuring: correcting the junction leak removes ONE error from a compensating PAIR "
-    "(TRAPS: a-cancelling-defect-pair). An evidence-free exon is fed through `intron -> EDGE -> exon`; the two hops' errors "
+    "(TRAPS: a-cancelling-defect-pair). An evidence-free exon is fed through `intron -> BOUNDARY -> exon`; the two hops' errors "
     "cancelled under the old junction-inclusive total, and the second hop still carries its own defect — a "
     "correct composition ratio applied to a LEVEL (`EQUATIONS.md` §3.5/§3.5d). So this gate is now the "
     "project's detector for THAT defect, and it must go green again when the pair is fixed jointly.\n"

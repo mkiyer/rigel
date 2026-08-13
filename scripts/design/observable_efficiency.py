@@ -85,14 +85,14 @@ def fl_pmf(mean: float, cv: float, family: str = "gamma") -> np.ndarray:
     from scipy.stats import gamma, lognorm, norm
 
     sd = mean * cv
-    edges = np.arange(0, MAX_W + 2, dtype=np.float64)
+    boundaries = np.arange(0, MAX_W + 2, dtype=np.float64)
     if family == "gamma":
-        cdf = gamma.cdf(edges, a=(mean / sd) ** 2, scale=sd**2 / mean)
+        cdf = gamma.cdf(boundaries, a=(mean / sd) ** 2, scale=sd**2 / mean)
     elif family == "lognormal":
         sigma2 = np.log1p(cv**2)
-        cdf = lognorm.cdf(edges, s=np.sqrt(sigma2), scale=mean / np.sqrt(1.0 + cv**2))
+        cdf = lognorm.cdf(boundaries, s=np.sqrt(sigma2), scale=mean / np.sqrt(1.0 + cv**2))
     elif family == "normal":
-        cdf = norm.cdf(edges, loc=mean, scale=sd)
+        cdf = norm.cdf(boundaries, loc=mean, scale=sd)
     else:
         raise ValueError(f"unknown family {family!r}")
     p = np.diff(cdf)
@@ -119,11 +119,11 @@ def opportunity(population: str, region_len: float) -> np.ndarray:
     raise ValueError(population)
 
 
-#: Fixed, GLOBAL histogram bin edges -- chosen once and used for every object and every grid cell.
+#: Fixed, GLOBAL histogram bin boundaries -- chosen once and used for every object and every grid cell.
 #: Tuning these per library (or per cell) would be cheating: the accumulator must pick its bins before
 #: it has seen a fragment, exactly as it must pick a deposit weight.
-def hist_edges(n_bins: int, scheme: str = "geometric", top: float = 1000.0) -> np.ndarray:
-    """`n_bins` edges over plausible fragment lengths, with the last bin absorbing the overflow."""
+def hist_boundaries(n_bins: int, scheme: str = "geometric", top: float = 1000.0) -> np.ndarray:
+    """`n_bins` boundaries over plausible fragment lengths, with the last bin absorbing the overflow."""
     if scheme == "geometric":
         inner = np.geomspace(20.0, top, n_bins)
     elif scheme == "uniform":
@@ -142,7 +142,7 @@ def weight(kind: str, population: str, region_len: float = 0.0) -> np.ndarray:
     ``invA`` is the RECIPROCAL OPPORTUNITY -- the derivation in
     ``scripts/design/region_density_derivation.py``. It is the unique weight for which E[sum h] is
     proportional to the start density with a length-distribution-independent constant, and the shipped
-    edge rule is its ``A(w) = w - 1`` special case. At a region it is ``1/(l - L + 1)`` when contained and
+    boundary rule is its ``A(w) = w - 1`` special case. At a region it is ``1/(l - L + 1)`` when contained and
     ``1/(L - l - 1)`` when spanning, neither of which has ever been tried.
     """
     if kind == "count":
@@ -155,8 +155,8 @@ def weight(kind: str, population: str, region_len: float = 0.0) -> np.ndarray:
         spec, k = kind[4:].split("_")
         scheme = "uniform" if spec[0] == "u" else "geometric"
         n_bins = int(spec[1:])
-        edges = hist_edges(n_bins, scheme)
-        lo, hi = edges[int(k)], edges[int(k) + 1] if int(k) + 1 < edges.size else float(MAX_W + 1)
+        boundaries = hist_boundaries(n_bins, scheme)
+        lo, hi = boundaries[int(k)], boundaries[int(k) + 1] if int(k) + 1 < boundaries.size else float(MAX_W + 1)
         return ((W >= lo) & (W < hi)).astype(np.float64)
     out = np.zeros_like(W)
     if kind == "invA":
@@ -199,7 +199,7 @@ def verify_opportunity_counts() -> int:
 
 #: A "frame" is the set of populations that co-occur at ONE object, with its geometry.
 FRAMES = {**{f"region {ell} bp": ("contained", "spanning", float(ell)) for ell in REGION_LENGTHS},
-          "contiguous edge": ("crossing", None, 0.0)}
+          "contiguous boundary": ("crossing", None, 0.0)}
 
 
 def _populations(frame):
@@ -208,7 +208,7 @@ def _populations(frame):
 
 
 #: Candidate storage choices, as (population, channel) lists. `_expand` fills in the frame's
-#: populations so one definition covers both region populations and the single edge population.
+#: populations so one definition covers both region populations and the single boundary population.
 CANDIDATE_SETS = {
     "SHIPS: count + Sum1/L": [("*", "count"), ("*", "invL")],
     "count + Sum1/L + SumL": [("*", "count"), ("*", "invL"), ("*", "sumL")],
@@ -392,8 +392,8 @@ def validate(family: str, phi_g: float, rho_tot: float, n_trials: int, seed: int
         ((100.0, 0.35), (200.0, 0.35), "region 400 bp"),
         ((200.0, 0.35), (100.0, 0.35), "region 400 bp"),   # the inverted case: gDNA longer
         ((100.0, 1.00), (200.0, 0.15), "region 400 bp"),   # broad vs narrow
-        ((100.0, 0.35), (200.0, 0.35), "contiguous edge"),
-        ((200.0, 1.00), (100.0, 0.15), "contiguous edge"),
+        ((100.0, 0.35), (200.0, 0.35), "contiguous boundary"),
+        ((200.0, 1.00), (100.0, 0.15), "contiguous boundary"),
     ]
     print(f"{'gDNA':>13}{'RNA':>13}{'frame':>17}{'set':>28}{'predicted sd':>15}{'realised sd':>14}"
           f"{'robust':>12}{'ratio':>8}")
@@ -552,7 +552,7 @@ def main() -> None:
             f"{family.upper()} fragment lengths   (true phi_g={args.phi}, rho_tot={args.rho}/bp)",
         )
 
-    for frame in ("region 151 bp", "contiguous edge"):
+    for frame in ("region 151 bp", "contiguous boundary"):
         hardest_cells("gamma", args.phi, args.rho, frame, "SHIPS: count + Sum1/L")
         hardest_cells("gamma", args.phi, args.rho, frame, "DERIVED: count + Sum1/A")
         hardest_cells("gamma", args.phi, args.rho, frame, "count + Sum1/A + SumL")

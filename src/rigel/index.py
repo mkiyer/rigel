@@ -53,8 +53,8 @@ INTERVALS_TSV = "intervals.tsv"
 REGIONS_FEATHER = "nodes.feather"
 REGIONS_TSV = "regions.tsv"
 
-EDGES_FEATHER = "edges.feather"
-EDGES_TSV = "edges.tsv"
+BOUNDARIES_FEATHER = "edges.feather"
+BOUNDARIES_TSV = "boundaries.tsv"
 
 SJ_FEATHER = "sj.feather"
 SJ_TSV = "sj.tsv"
@@ -790,7 +790,7 @@ def build_index_artifacts(
     transcripts: list[Transcript],
     ref_lengths: dict[str, int],
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Build ``intervals.feather`` and the v8 splice graph (``regions`` + ``edges``).
+    """Build ``intervals.feather`` and the v8 splice graph (``regions`` + ``boundaries``).
 
     The per-reference layout (intergenic / genic spans) feeds ONLY the cgranges-style annotated
     interval table (:func:`_emit_genomic_intervals`). The calibration partition is built
@@ -910,8 +910,8 @@ class TranscriptIndex:
         ⚠ **It covers ``regions.feather`` only, and that is deliberate** — it is the key for a cached
         SCAN, and the scan sees the cut array and nothing else. ``edges.feather`` (the flags and
         reaches) can change without invalidating a payload, and does: the 2026-07-29 flag-filter fix
-        rewrote every edge file while leaving every region file byte-identical. Anything that caches an
-        *edge*-derived artifact must carry its own provenance; this hash will not catch it.
+        rewrote every boundary file while leaving every region file byte-identical. Anything that caches an
+        *boundary*-derived artifact must carry its own provenance; this hash will not catch it.
 
         Cost at human scale: ~60 ms (8.4 MB of int64 through blake2b plus the groupby that builds
         it) — negligible against the BAM scan it gates.
@@ -931,7 +931,7 @@ class TranscriptIndex:
 
     @property
     def graph_hash(self) -> str:
-        """16-hex-char content hash of **everything the accumulator payload depends on** — regions AND edges.
+        """16-hex-char content hash of **everything the accumulator payload depends on** — regions AND boundaries.
 
         ⚠ **`partition_hash` is not enough for a payload, and that is not an oversight in either of them.**
         That hash keys a cached *scan*, and a scan sees the cut array; this one keys a cached *tally*, whose
@@ -954,7 +954,7 @@ class TranscriptIndex:
         h.update(self.partition_hash.encode())
         junctions = build_junction_edge_arrays(self)
         # ⚠ `edge_row` is deliberately absent: it is a join key back to `edges_df`, it never crosses the
-        # ABI, and hashing it would invalidate a perfectly good payload whenever an unrelated edge row moved.
+        # ABI, and hashing it would invalidate a perfectly good payload whenever an unrelated boundary row moved.
         for array in (junctions.offsets, junctions.boundary_right, junctions.strand):
             contiguous = np.ascontiguousarray(array)
             h.update(str(contiguous.dtype).encode())
@@ -1098,7 +1098,7 @@ class TranscriptIndex:
         logger.info("[START] Building genomic intervals + the splice graph")
         iv_df, regions_df, edges_df = build_index_artifacts(transcripts, ref_lengths)
         logger.info(
-            f"[DONE] {len(iv_df)} genomic intervals, {len(regions_df)} regions, {len(edges_df)} edges"
+            f"[DONE] {len(iv_df)} genomic intervals, {len(regions_df)} regions, {len(edges_df)} boundaries"
         )
 
         iv_df.to_feather(output_dir / INTERVALS_FEATHER, **feather_kwargs)
@@ -1106,10 +1106,10 @@ class TranscriptIndex:
             iv_df.to_csv(output_dir / INTERVALS_TSV, sep="\t", index=False)
 
         regions_df.to_feather(output_dir / REGIONS_FEATHER, **feather_kwargs)
-        edges_df.to_feather(output_dir / EDGES_FEATHER, **feather_kwargs)
+        edges_df.to_feather(output_dir / BOUNDARIES_FEATHER, **feather_kwargs)
         if write_tsv:
             regions_df.to_csv(output_dir / REGIONS_TSV, sep="\t", index=False)
-            edges_df.to_csv(output_dir / EDGES_TSV, sep="\t", index=False)
+            edges_df.to_csv(output_dir / BOUNDARIES_TSV, sep="\t", index=False)
 
         # -- Splice-junction artifact blacklist (from alignable Zarr) -------
         if alignable_zarr_path is not None:
@@ -1310,19 +1310,19 @@ class TranscriptIndex:
         # `signature` or `flags` column that has drifted from the annotation loads clean; what this
         # catches is a graph that is internally inconsistent or truncated, which is what has
         # historically gone wrong with a stale index.
-        from .calibration.splice_graph import load_edges, load_regions, validate_graph
+        from .calibration.splice_graph import load_boundaries, load_regions, validate_graph
 
         logger.debug("Reading splice graph")
         regions_path = os.path.join(index_dir, REGIONS_FEATHER)
-        edges_path = os.path.join(index_dir, EDGES_FEATHER)
-        for name, path in ((REGIONS_FEATHER, regions_path), (EDGES_FEATHER, edges_path)):
+        boundaries_path = os.path.join(index_dir, BOUNDARIES_FEATHER)
+        for name, path in ((REGIONS_FEATHER, regions_path), (BOUNDARIES_FEATHER, boundaries_path)):
             if not os.path.exists(path):
                 raise RuntimeError(
                     f"Index at {index_dir} is missing {name} (the v8 splice graph). "
                     f"Rebuild the index (rigel index --fasta ... --gtf ... -o {index_dir})."
                 )
         self.regions_df = load_regions(regions_path)
-        self.edges_df = load_edges(edges_path)
+        self.edges_df = load_boundaries(boundaries_path)
         validate_graph(self.regions_df, self.edges_df, self.ref_lengths)
 
         # -- interval index (unified cgranges) ---------------------------------

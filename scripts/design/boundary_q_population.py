@@ -4,8 +4,8 @@
 **The defect under test.** ``assemble_priors`` turns each line's crossing INCIDENCE into a FRAGMENT count
 with one scalar per line (``priors.py``)::
 
-    q = calibration.edge_mass_per_crossing = mass / count      # measured, not modelled
-    gdna_edge = mass_gdna_edge * q ;   rna_edge = (mass_rna_edge - spliced) * q
+    q = calibration.boundary_mass_per_crossing = mass / count      # measured, not modelled
+    gdna_boundary = mass_gdna_boundary * q ;   rna_boundary = (mass_rna_boundary - spliced) * q
 
 ⭐ The logic is right: a fragment crossing ``K`` lines is ``+1`` on each, so an incidence total must be
 divided by the mean number of lines crossed, and ``mass/count`` is exactly that.
@@ -18,7 +18,7 @@ the same one.** It vanishes exactly when the two distributions coincide, which i
 ladder cannot see it and why nothing has measured it.
 
 ⭐ **THE MEASUREMENT ISOLATES THE DEFECT FROM CALIBRATION'S OWN ERROR.** Feed the assembler a PERFECT
-``f_g`` — the origin-split oracle's own per-edge gDNA share — and compare what it then computes against
+``f_g`` — the origin-split oracle's own per-boundary gDNA share — and compare what it then computes against
 what the conserved mass says is true::
 
     A_c = SUM_e count_c[e] * q_pooled[e]      what the assembler computes with a perfect f_g
@@ -37,7 +37,7 @@ something else (`TRAPS: could-the-arm-have-fired`).
 
 Usage::
 
-    python scripts/design/edge_q_population.py                # flgap pair + the ladder null
+    python scripts/design/boundary_q_population.py                # flgap pair + the ladder null
 """
 
 from __future__ import annotations
@@ -81,8 +81,8 @@ def _gate(name: str, ok: bool, detail: str) -> None:
         _FAILED.append(name)
 
 
-def _edge_banks(payload):
-    """``(count, mass)`` per contiguous edge, both strand columns summed and the mass descaled.
+def _boundary_banks(payload):
+    """``(count, mass)`` per contiguous boundary, both strand columns summed and the mass descaled.
 
     ⚠ The descale is ``substrate.INV_LENGTH_SCALE`` because the mass is a fixed point at the SAME scale
     as ``inv_length_sum`` — decoding it any other way here would be a second decoder
@@ -90,10 +90,10 @@ def _edge_banks(payload):
     """
     from rigel.calibration.substrate import INV_LENGTH_SCALE
 
-    count = np.asarray(payload.edge_unspliced_count, np.float64)
+    count = np.asarray(payload.boundary_unspliced_count, np.float64)
     if count.ndim == 2:
         count = count.sum(axis=1)
-    mass = np.asarray(payload.edge_unspliced_mass, np.float64) / INV_LENGTH_SCALE
+    mass = np.asarray(payload.boundary_unspliced_mass, np.float64) / INV_LENGTH_SCALE
     return count, mass
 
 
@@ -153,8 +153,8 @@ def main() -> int:  # noqa: C901
     print("=" * 116)
     print("  ⭐⭐⭐ IS THE PRIOR'S CROSSING→FRAGMENT CONVERSION POPULATION-BLIND?   (DRAINED, no solver)")
     print("=" * 116)
-    print(f"\n  {'condition':<40}{'mu_g-mu_r':>10}{'q_g':>7}{'q_r':>7}{'edge%':>8}"
-          f"{'EDGE err':>11}{'TOTAL err':>11}{'d phi edge':>10}{'d phi TOT':>10}")
+    print(f"\n  {'condition':<40}{'mu_g-mu_r':>10}{'q_g':>7}{'q_r':>7}{'boundary%':>8}"
+          f"{'BOUNDARY err':>11}{'TOTAL err':>11}{'d phi boundary':>10}{'d phi TOT':>10}")
     print("  " + "-" * 114)
 
     rows = []
@@ -164,12 +164,12 @@ def main() -> int:  # noqa: C901
             continue
         payload, parts, _n_amb = load_drained(panel, cond, cfg, index)
 
-        c_all, m_all = _edge_banks(payload)
-        c_g, m_g = _edge_banks(parts["gdna"])
+        c_all, m_all = _boundary_banks(payload)
+        c_g, m_g = _boundary_banks(parts["gdna"])
         c_r = np.zeros_like(c_all)
         m_r = np.zeros_like(m_all)
         for k in ("mrna", "nrna"):
-            a, b = _edge_banks(parts[k])
+            a, b = _boundary_banks(parts[k])
             c_r += a
             m_r += b
 
@@ -179,7 +179,7 @@ def main() -> int:  # noqa: C901
         if not rows:
             print()
         sub = CalibrationSubstrate.from_payload(payload, ra)
-        shipped_q = np.asarray(sub.edge_unspliced.mass_per_crossing, np.float64)
+        shipped_q = np.asarray(sub.boundary_unspliced.mass_per_crossing, np.float64)
         _gate(f"Ⓖ1 pooled q reproduces the shipped one — {cond[:22]}",
               float(np.abs(q_pool - shipped_q).max()) == 0.0,
               f"max|Δ| = {float(np.abs(q_pool - shipped_q).max()):.3e}")
@@ -191,8 +191,8 @@ def main() -> int:  # noqa: C901
 
         # ── the defect, with a PERFECT f_g ────────────────────────────────────────────────────────
         # ⭐ The REGION term needs no conversion (a contained fragment deposits on exactly one region), so it
-        # enters both arms identically and DILUTES the edge error. The EM sees the total, so the total is
-        # what must be reported beside the edge-only figure — an edge-only number overstates the defect
+        # enters both arms identically and DILUTES the boundary error. The EM sees the total, so the total is
+        # what must be reported beside the boundary-only figure — an boundary-only number overstates the defect
         # by exactly the region share.
         def _region_count(p):
             v = np.asarray(p.region_contained_count, np.float64)
@@ -205,7 +205,7 @@ def main() -> int:  # noqa: C901
         a_r, t_r = float((c_r * q_pool).sum()), float(m_r.sum())
         tot_a_g, tot_t_g = n_g + a_g, n_g + t_g
         tot_a_r, tot_t_r = n_r + a_r, n_r + t_r
-        edge_share = t_g / tot_t_g if tot_t_g > 0 else float("nan")
+        boundary_share = t_g / tot_t_g if tot_t_g > 0 else float("nan")
         err_tot_g = tot_a_g / tot_t_g - 1.0 if tot_t_g > 0 else float("nan")
         phi_tot_a = tot_a_g / (tot_a_g + tot_a_r) if (tot_a_g + tot_a_r) > 0 else float("nan")
         phi_tot_t = tot_t_g / (tot_t_g + tot_t_r) if (tot_t_g + tot_t_r) > 0 else float("nan")
@@ -230,7 +230,7 @@ def main() -> int:  # noqa: C901
 
         rows.append((f"{panel}/{cond}", gap, qg, qr, qp, err_g, err_r, phi_a - phi_t))
         print(f"  {panel + '/' + cond.replace('nrna_none_', ''):<40}{gap:>+10.2f}{qg:>7.4f}{qr:>7.4f}"
-              f"{100 * edge_share:>8.1f}%{100 * err_g:>10.3f}%{100 * err_tot_g:>10.3f}%"
+              f"{100 * boundary_share:>8.1f}%{100 * err_g:>10.3f}%{100 * err_tot_g:>10.3f}%"
               f"{phi_a - phi_t:>+10.5f}{phi_tot_a - phi_tot_t:>+10.5f}")
 
     print("  " + "-" * 114)

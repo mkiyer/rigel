@@ -63,7 +63,7 @@ SIM_DIR = ROOT / "scripts" / "sim"
 #: reason, so a script that starts working, or breaks a NEW way, both fail loudly.
 BROKEN_ON_IMPORT: dict[str, str] = {
     # `_component_region_arrays` was deleted from `calibration/priors.py` and has no successor: the module
-    # now exposes `_region_locus_shares` / `_edge_locus_shares` / `_project_regions_to_loci`. ⭐ The
+    # now exposes `_region_locus_shares` / `_boundary_locus_shares` / `_project_regions_to_loci`. ⭐ The
     # DECISION is not a repair — this instrument compares the EM prior "in fragment units vs the OLD
     # incidence sum", and `ROADMAP.md` §0 records that migration as DONE, so its question is closed.
     # Delete it or re-point it at the surviving API; do not leave it here.

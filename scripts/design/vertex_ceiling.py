@@ -72,7 +72,7 @@ arm, so none of this is a denominator move):
 axis       base    vertex_free   Σ\\|err\\| frags   better/worse
 =========  ======  ============  ==============  ==============
 region       0.1247  **0.0975**    −149,267        27 / 9
-edge       0.1434  **0.1127**    −161,302        29 / 3
+boundary       0.1434  **0.1127**    −161,302        29 / 3
 =========  ======  ============  ==============  ==============
 
 ⭐⭐⭐ **AND IT SPLITS ON EXACTLY ONE AXIS — STRAND — which is what the mechanism predicts.** Pass-0
@@ -82,7 +82,7 @@ The strand channel's Fisher information is ``∝ (2κ−1)²`` and is EXACTLY ze
 unstranded library ψ's reference is the only term left with a gradient at the vertex, while on a stranded
 one the strand term supplies the λ information and the vertex is already reached. ⭐ The ceiling is
 therefore entirely on unstranded data — which is also the panel's worst stratum
-(``capture_ON × ss0.50``: base 0.3235 region / 0.2922 edge). Largest single row:
+(``capture_ON × ss0.50``: base 0.3235 region / 0.2922 boundary). Largest single row:
 ``gdna_g01_ss_0.50_capture_on``, **−0.2188**.
 
 ⛔⛔ **TWO WARNINGS THAT MUST TRAVEL WITH THE NUMBER.**
@@ -92,7 +92,7 @@ therefore entirely on unstranded data — which is also the panel's worst stratu
   evidence, and declaring them certain overrides it and propagates. That is TRAPS: admitting-an-object-costs's shape
   reached with the TRUTH, so the harm is in the relay's dynamics and not in the values. ⭐ Quote
   ``vertex_free``, and note that a fix which hands out certainty broadly can lose even when it is right.
-* **The honesty columns move the WRONG way** — confidently-wrong Σ\\|err\\| +9,175 (region) / +893 (edge),
+* **The honesty columns move the WRONG way** — confidently-wrong Σ\\|err\\| +9,175 (region) / +893 (boundary),
   28 and 16 rows worse — while accuracy improves 22 %. TRAPS: honesty-metrics-reward-ignorance exactly: certainty handed to an
   object moves it into the confident population. Read ``mwae_all`` and ``abs_err_all``, never these.
 
@@ -190,7 +190,7 @@ def _wrap_region_sweep():
 def _truth_fg_per_slot(chain):
     """The ORACLE's true ``f_g`` per SLOT, and the mass behind it.
 
-    ⚠ ``RegionInit``'s arrays are indexed by SLOT (the chain's alternating REGION/EDGE sequence), while the
+    ⚠ ``RegionInit``'s arrays are indexed by SLOT (the chain's alternating REGION/BOUNDARY sequence), while the
     oracle's masses are per OBJECT on two separate axes — so the mapping goes through
     ``chain.kind``/``chain.obj_idx`` rather than being assumed."""
     oracle = _CTX.get("oracle")
@@ -200,11 +200,11 @@ def _truth_fg_per_slot(chain):
     ov = oracle.override_masses(ra)
     g = {
         "region": np.asarray(ov["mass_gdna_region"], np.float64),
-        "edge": np.asarray(ov["mass_gdna_edge"], np.float64),
+        "boundary": np.asarray(ov["mass_gdna_boundary"], np.float64),
     }
     r = {
         "region": np.asarray(ov["mass_rna_region"], np.float64),
-        "edge": np.asarray(ov["mass_rna_edge"], np.float64),
+        "boundary": np.asarray(ov["mass_rna_boundary"], np.float64),
     }
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
@@ -212,7 +212,7 @@ def _truth_fg_per_slot(chain):
     n = int(chain.n_slots)
     tg = np.zeros(n)
     tr = np.zeros(n)
-    for axis, msk in (("region", is_region), ("edge", ~is_region)):
+    for axis, msk in (("region", is_region), ("boundary", ~is_region)):
         idx = np.flatnonzero(msk)
         if idx.size == 0:
             continue
@@ -379,7 +379,7 @@ def _compare(paths: list[Path]) -> int:
         ("conf_wrong_objects", "conf-wrong objects", "lower"),
         ("library_f_gdna_pass0", "library f_g pass0", "context"),
     ]
-    for axis in ("region", "edge"):
+    for axis in ("region", "boundary"):
         print(f"\n{'=' * 118}\n⭐ AXIS = {axis}\n{'=' * 118}")
         print(f"   {'metric':<22}{'arm':<16}{'mean':>12}{'vs base':>12}{'better':>9}"
               f"{'worse':>7}{'flat':>6}   rows")
@@ -495,7 +495,7 @@ def main() -> int:
                         f"⛔ TRAPS: an-ablation-that-never-ran: arm {arm!r} did not fire on {name} (counter {k} = 0). "
                         "An override that never ran reads as 'no effect'."
                     )
-            for axis in ("region", "edge"):
+            for axis in ("region", "boundary"):
                 s = SA.summarise(SA.audit(m, axis=axis, config=config))
                 sc = m.scores["pass0"][axis]["ALL"]
                 s["mwae_all"] = float(sc.mwae)

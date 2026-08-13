@@ -31,10 +31,10 @@ _FRAG_LEN = 50  # the delta the gDNA pmf sits at; every fixture fragment is this
 def _intergenic_betabinom_payload(n_regions, depth, overdispersion, seed):
     """A 1-reference payload of ``n_regions`` intergenic regions; contained gDNA ~ BetaBinom(½, od).
 
-    ⚠ **The edge axis is empty of COUNTS but not of ROWS.** One reference with ``k`` regions owns
+    ⚠ **The boundary axis is empty of COUNTS but not of ROWS.** One reference with ``k`` regions owns
     ``k − 1`` lines, and the payload must carry them or the chain builder refuses it. Leaving the
     counts at zero is what makes this test isolate the CONTAINED-region seed arm: with no crossing
-    fragments there are no edge seeds, so a recovered overdispersion can only have come from the regions.
+    fragments there are no boundary seeds, so a recovered overdispersion can only have come from the regions.
     """
     rng = np.random.default_rng(seed)
     a = 0.5 * (1.0 - overdispersion) / overdispersion if overdispersion > 0 else 1e9
@@ -43,14 +43,14 @@ def _intergenic_betabinom_payload(n_regions, depth, overdispersion, seed):
     neg = depth - pos
 
     contained = np.stack([pos, neg], axis=1).astype(np.uint32)
-    n_edges = n_regions - 1
+    n_boundaries = n_regions - 1
     quantum = 1.0 / _FRAG_LEN
 
     def region_zeros(dtype):
         return np.zeros((n_regions, 2), dtype=dtype)
 
-    def edge_zeros(dtype):
-        return np.zeros((n_edges, 2), dtype=dtype)
+    def boundary_zeros(dtype):
+        return np.zeros((n_boundaries, 2), dtype=dtype)
 
     def flat(rows, dtype):
         """A single-column bank — the length moments and the conserved mass carry no strand axis."""
@@ -60,7 +60,7 @@ def _intergenic_betabinom_payload(n_regions, depth, overdispersion, seed):
         cut_positions=np.arange(n_regions + 1, dtype=np.int64) * 100,
         ref_cut_offsets=np.array([0, n_regions + 1], dtype=np.int64),
         ref_region_offsets=np.array([0, n_regions], dtype=np.int64),
-        ref_edge_offsets=np.array([0, n_edges], dtype=np.int64),
+        ref_boundary_offsets=np.array([0, n_boundaries], dtype=np.int64),
         ref_sj_offsets=np.array([0, 0], dtype=np.int64),
         region_contained_count=contained,
         # ⚠ ONE column: the length moments carry no strand axis, so the two are summed.
@@ -68,13 +68,13 @@ def _intergenic_betabinom_payload(n_regions, depth, overdispersion, seed):
             contained.sum(axis=1).astype(np.uint64) * np.uint64(quantum)
         ),
         region_start_count=contained.sum(axis=1).astype(np.uint32),
-        edge_unspliced_count=edge_zeros(np.uint32),
-        edge_unspliced_inv_length_sum=flat(n_edges, np.float64),
-        # ⚠ ONE value per edge — the conserved mass has no strand axis. Zero here is a real state and
+        boundary_unspliced_count=boundary_zeros(np.uint32),
+        boundary_unspliced_inv_length_sum=flat(n_boundaries, np.float64),
+        # ⚠ ONE value per boundary — the conserved mass has no strand axis. Zero here is a real state and
         # not a stub: this fixture deposits no crossings at all, so there is no mass to conserve.
-        edge_unspliced_mass=np.zeros(n_edges, dtype=np.float64),
-        edge_spliced_count=edge_zeros(np.uint32),
-        edge_spliced_mass=np.zeros(n_edges, dtype=np.float64),
+        boundary_unspliced_mass=np.zeros(n_boundaries, dtype=np.float64),
+        boundary_spliced_count=boundary_zeros(np.uint32),
+        boundary_spliced_mass=np.zeros(n_boundaries, dtype=np.float64),
         sj_count=np.zeros((0, 2), dtype=np.uint32),
         sj_inv_length_sum=np.zeros(0, dtype=np.float64),
         sj_mass=np.zeros(0, dtype=np.float64),
@@ -140,7 +140,7 @@ def test_calibrate_binomial_gdna_floors_to_zero():
 
 def test_a_junction_free_library_calibrates(od_true=0.10):
     """⚠ ``n_sj == 0`` is legal and must not be confused with "no junction flux": this payload's
-    references are all single-region-signature intergenic, so the graph has no junction edge at all.
+    references are all single-region-signature intergenic, so the graph has no junction boundary at all.
     ``calibrate`` defaults to an empty junction axis and the result carries a length-0 array."""
     payload, ra = _intergenic_betabinom_payload(
         n_regions=400, depth=150, overdispersion=od_true, seed=11
@@ -148,4 +148,4 @@ def test_a_junction_free_library_calibrates(od_true=0.10):
     result = _calibrate(payload, ra)
     assert result.n_junctions == 0
     assert result.mass_rna_junction.shape == (0,)
-    assert result.n_edges == result.n_regions - 1
+    assert result.n_boundaries == result.n_regions - 1

@@ -17,9 +17,9 @@ so the prior's g:r ratio under-calls gDNA by 13–19 %.
 count — a contained fragment deposits on exactly one region. Only the crossing term is converted, by the
 accumulator's own conserved ``mass / count`` at that line::
 
-    prior_c = SUM_locus share · [ mass_c_region[r] + SUM_{e owned by r} mass_c_edge[e] · q[e] ]
+    prior_c = SUM_locus share · [ mass_c_region[r] + SUM_{e owned by r} mass_c_boundary[e] · q[e] ]
 
-    q[e] = edge_mass_per_crossing = [ min(w−1,a) + min(w−1,b) ] / 2(w−1)    under a uniform field
+    q[e] = boundary_mass_per_crossing = [ min(w−1,a) + min(w−1,b) ] / 2(w−1)    under a uniform field
 
 ⛔ **The predecessor rule was ``rho_c = SUM m / SUM A ; prior_c = rho_c · span_bp``**, and these tests
 used to target it. It reached fragment units by dividing out the opportunity and re-integrating over the
@@ -97,8 +97,8 @@ def _enumerate(region_len, w):
     return (
         n,
         np.asarray(t.region_contained_count, np.int64).sum(axis=1).astype(np.float64),
-        np.asarray(t.edge_unspliced_count, np.int64).sum(axis=1).astype(np.float64),
-        np.asarray(t.edge_unspliced_mass, np.float64),
+        np.asarray(t.boundary_unspliced_count, np.int64).sum(axis=1).astype(np.float64),
+        np.asarray(t.boundary_unspliced_mass, np.float64),
     )
 
 
@@ -127,9 +127,9 @@ def _mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
     )
 
     cuts = np.concatenate([[0.0], np.cumsum(np.asarray(region_len, dtype=np.float64))]).astype(int)
-    n_edges = max(len(cuts) - 2, 0)
-    mass = np.zeros(n_edges, dtype=np.float64)
-    count = np.zeros(n_edges, dtype=np.float64)
+    n_boundaries = max(len(cuts) - 2, 0)
+    mass = np.zeros(n_boundaries, dtype=np.float64)
+    count = np.zeros(n_boundaries, dtype=np.float64)
     for rho, pmf in ((rho_g, pmf_g), (rho_r, pmf_r)):
         w = int(np.argmax(pmf))
         partition = Partition.from_cuts(
@@ -139,9 +139,9 @@ def _mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r) -> np.ndarray:
         for start in range(0, int(cuts[-1]) - w + 1):
             acc.deposit(0, start, start + w)
         t = acc.tally
-        mass += rho * np.asarray(t.edge_unspliced_mass, np.float64)
-        count += rho * np.asarray(t.edge_unspliced_count, np.int64).sum(axis=1).astype(np.float64)
-    out = np.ones(n_edges, dtype=np.float64)
+        mass += rho * np.asarray(t.boundary_unspliced_mass, np.float64)
+        count += rho * np.asarray(t.boundary_unspliced_count, np.int64).sum(axis=1).astype(np.float64)
+    out = np.ones(n_boundaries, dtype=np.float64)
     np.divide(mass, count, out=out, where=count > 0)
     return out
 
@@ -171,39 +171,39 @@ def _uniform_library(region_len, rho_g, rho_r, pmf_g, pmf_r) -> CalibrationResul
     # and they are not a population statement
     a_g_region = contained_eff_length(region_len, pmf_g)
     a_r_region = contained_eff_length(region_len, pmf_r)
-    a_g_edge = np.full(ne, float(crossing_eff_length(pmf_g, _UNB, _UNB)[0]))
-    a_r_edge = np.full(ne, float(crossing_eff_length(pmf_r, _UNB, _UNB)[0]))
+    a_g_boundary = np.full(ne, float(crossing_eff_length(pmf_g, _UNB, _UNB)[0]))
+    a_r_boundary = np.full(ne, float(crossing_eff_length(pmf_r, _UNB, _UNB)[0]))
     # ...and every MASS is what the specification actually deposits on this tiling
     _n_g, cont_g, cross_g, _m_g = _enumerate(region_len, int(np.argmax(pmf_g)))
     _n_r, cont_r, cross_r, _m_r = _enumerate(region_len, int(np.argmax(pmf_r)))
     return CalibrationResult(
         mass_gdna_region=rho_g * cont_g,
         mass_rna_region=rho_r * cont_r,
-        mass_gdna_edge=rho_g * cross_g,
-        mass_rna_edge=rho_r * cross_r,
-        mass_rna_spliced_edge=np.zeros(ne, dtype=np.float64),
-        edge_mass_per_crossing=_mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r),
+        mass_gdna_boundary=rho_g * cross_g,
+        mass_rna_boundary=rho_r * cross_r,
+        mass_rna_spliced_boundary=np.zeros(ne, dtype=np.float64),
+        boundary_mass_per_crossing=_mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r),
         mass_rna_junction=np.zeros(0, dtype=np.float64),
-        edge_spliced_mass_per_crossing=np.ones_like(
+        boundary_spliced_mass_per_crossing=np.ones_like(
             _mass_per_crossing(region_len, rho_g, rho_r, pmf_g, pmf_r)
         ),
         junction_mass_per_crossing=np.ones(0, dtype=np.float64),
         gdna_region_eff_len=a_g_region,
-        gdna_edge_eff_len=a_g_edge,
+        gdna_boundary_eff_len=a_g_boundary,
         rna_region_eff_len=a_r_region,
-        rna_edge_eff_len=a_r_edge,
+        rna_boundary_eff_len=a_r_boundary,
         gdna_frac_region=np.zeros_like(cont_g),
         rna_pos_frac_region=np.zeros_like(cont_g),
         rna_neg_frac_region=np.zeros_like(cont_g),
-        gdna_frac_edge=np.zeros_like(cross_g),
-        rna_pos_frac_edge=np.zeros_like(cross_g),
-        rna_neg_frac_edge=np.zeros_like(cross_g),
+        gdna_frac_boundary=np.zeros_like(cross_g),
+        rna_pos_frac_boundary=np.zeros_like(cross_g),
+        rna_neg_frac_boundary=np.zeros_like(cross_g),
         gdna_density_global=rho_g,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,
         n_regions=n,
-        n_edges=ne,
+        n_boundaries=ne,
         n_junctions=0,
         config=CalibrationConfig(),
     )
@@ -355,7 +355,7 @@ def test_each_component_is_its_true_fragment_count_where_the_two_shares_agree(na
 def test_the_split_carries_exactly_the_POOLED_SHARE_bias(name, gdna_bias):
     """⛔⛔ WHERE THE TWO SHARES DISAGREE THE SPLIT IS WRONG, AND THIS PINS THE WRONG VALUE EXACTLY.
 
-    The accumulator cannot tell the two populations apart, so ``edge_mass_per_crossing`` is the
+    The accumulator cannot tell the two populations apart, so ``boundary_mass_per_crossing`` is the
     MIXTURE's share and both components are rescaled by it. The measured consequence, with the library
     physically unchanged and only the bookkeeping grid moved:
 
@@ -503,6 +503,6 @@ def _zero_rna_opportunity(cal: CalibrationResult) -> CalibrationResult:
     """Remove every RNA crossing opportunity, so the RNA support is identically 0 on all objects."""
     return dataclasses.replace(
         cal,
-        rna_edge_eff_len=np.zeros_like(cal.rna_edge_eff_len),
-        mass_rna_edge=np.zeros_like(cal.mass_rna_edge),
+        rna_boundary_eff_len=np.zeros_like(cal.rna_boundary_eff_len),
+        mass_rna_boundary=np.zeros_like(cal.mass_rna_boundary),
     )

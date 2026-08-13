@@ -230,12 +230,12 @@ class TestScannerAccumulatorIntegration:
 
         diffs = np.diff(ref_cut_offsets)
         expected_regions = int(np.sum(np.maximum(diffs - 1, 0)))
-        expected_edges = int(np.sum(np.maximum(diffs - 2, 0)))
+        expected_boundaries = int(np.sum(np.maximum(diffs - 2, 0)))
         assert payload.n_regions == expected_regions
-        assert payload.n_edges == expected_edges
+        assert payload.n_boundaries == expected_boundaries
         # ⚠ E = N − (non-empty refs), stated a second way: the two derivations must agree.
         n_live_refs = int(np.sum(diffs > 1))
-        assert payload.n_edges == payload.n_regions - n_live_refs
+        assert payload.n_boundaries == payload.n_regions - n_live_refs
 
     def test_fl_pools_emitted(self, oracle):
         """The scan emits the FIVE PURE fragment-length pools, binned at the same L as every other

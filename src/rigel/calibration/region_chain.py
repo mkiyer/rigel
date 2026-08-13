@@ -1,8 +1,8 @@
-"""rigel.calibration.region_chain — the region<->edge chain the belief-propagation sweep traverses.
+"""rigel.calibration.region_chain — the region<->boundary chain the belief-propagation sweep traverses.
 
        Gate: ``tests/calibration/test_region_chain.py``
 
-The calibration graph is a **linear bipartite chain of REGION and EDGE slots, interleaved in genomic
+The calibration graph is a **linear bipartite chain of REGION and BOUNDARY slots, interleaved in genomic
 order**. A reference with ``k`` regions owns exactly ``k − 1`` interior lines, so its slot sequence is::
 
     N0  E0  N1  E1  ...  E(k-2)  N(k-1)          2k − 1 slots
@@ -10,21 +10,21 @@ order**. A reference with ``k`` regions owns exactly ``k − 1`` interior lines,
 ⭐ **It starts and ends with a REGION, and there are no terminal slots.** That is the whole shape change
 from the predecessor, which ran ``B R B R … R B`` with ``k + 1`` boundary slots per reference — the two
 outermost carrying no data and existing only so every region had an object on each side. A contiguous
-edge is the line BETWEEN two adjacent regions; there is no such line before the first or after the last, so
-the object does not exist rather than existing empty. **An edge therefore always has a region on both
+boundary is the line BETWEEN two adjacent regions; there is no such line before the first or after the last, so
+the object does not exist rather than existing empty. **An boundary therefore always has a region on both
 sides**, an invariant the old shape could not state.
 
-Edge endpoints are **implicit**: edge ``i`` lies between region ``i`` and region ``i + 1``. Nothing stores
+Boundary endpoints are **implicit**: boundary ``i`` lies between region ``i`` and region ``i + 1``. Nothing stores
 them, and this module is the one place that arithmetic lives.
 
-A slot is addressed by ``(kind, obj_idx)``: ``kind`` is :data:`REGION` or :data:`EDGE`, and ``obj_idx``
-indexes the region axis or the contiguous-edge axis respectively. That keeps every per-object statistic in
+A slot is addressed by ``(kind, obj_idx)``: ``kind`` is :data:`REGION` or :data:`BOUNDARY`, and ``obj_idx``
+indexes the region axis or the contiguous-boundary axis respectively. That keeps every per-object statistic in
 its own payload-shaped array — the chain only sequences and links them.
 
-⚠ **Junction edges are NOT chain slots.** The graph is a DAG but not a polytree: every junction edge
+⚠ **Junction boundaries are NOT chain slots.** The graph is a DAG but not a polytree: every junction boundary
 closes an undirected loop, so a junction must be a FACTOR on its endpoint regions and never a message
-channel (— never break a cycle by dropping a junction edge,
-that re-isolates the exon the edge exists for).
+channel (— never break a cycle by dropping a junction boundary,
+that re-isolates the exon the boundary exists for).
 """
 
 from __future__ import annotations
@@ -33,27 +33,27 @@ from dataclasses import dataclass
 
 import numpy as np
 
-__all__ = ["EDGE", "REGION", "RegionChain", "RegionDeconv", "build_region_chain"]
+__all__ = ["BOUNDARY", "REGION", "RegionChain", "RegionDeconv", "build_region_chain"]
 
 REGION = 0
-EDGE = 1
+BOUNDARY = 1
 
 
 @dataclass(frozen=True, slots=True)
 class RegionChain:
-    """The genomic-ordered region∪edge chain and its adjacency. All arrays have length ``n_slots``.
+    """The genomic-ordered region∪boundary chain and its adjacency. All arrays have length ``n_slots``.
 
     Slot ids are assigned in genomic visiting order, so ``order`` would be ``arange`` and is not stored.
     ``left``/``right`` give each slot its single adjacent slot of the OTHER kind, ``-1`` at a reference
     terminal — which is a propagation sink, and is now always a REGION.
     """
 
-    kind: np.ndarray  # int8[n_slots] — REGION or EDGE
-    obj_idx: np.ndarray  # int64[n_slots] — index into the region axis, or the contiguous-edge axis
+    kind: np.ndarray  # int8[n_slots] — REGION or BOUNDARY
+    obj_idx: np.ndarray  # int64[n_slots] — index into the region axis, or the contiguous-boundary axis
     left: np.ndarray  # int64[n_slots] — adjacent slot id, -1 at a reference start
     right: np.ndarray  # int64[n_slots] — adjacent slot id, -1 at a reference end
     n_regions_total: int
-    n_edges_total: int
+    n_boundaries_total: int
 
     @property
     def n_slots(self) -> int:
@@ -64,8 +64,8 @@ class RegionChain:
         return self.kind == REGION
 
     @property
-    def is_edge(self) -> np.ndarray:
-        return self.kind == EDGE
+    def is_boundary(self) -> np.ndarray:
+        return self.kind == BOUNDARY
 
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ class RegionDeconv:
     * the per-region SOLVE (`simplex_logodds._solve_regions_logodds_all`) returns the **composition** —
       ``*_frac`` + ``*_frac_var`` — and no mass (a region's mass is a per-FACE quantity; the solve is
       face-invariant, so a single ``*_mass`` here would be meaningless);
-    * the chain PROJECTION (`sweep.chain_region_deconv` / `chain_edge_deconv`) returns the
+    * the chain PROJECTION (`sweep.chain_region_deconv` / `chain_boundary_deconv`) returns the
       **mass** the downstream `CalibrationResult` consumes, and no precision.
     """
 
@@ -112,37 +112,37 @@ class RegionDeconv:
     rna_neg_frac_var: "np.ndarray | None" = None  # float64[K] — Var(log f_neg)
 
 
-def build_region_chain(ref_region_offsets: np.ndarray, ref_edge_offsets: np.ndarray) -> RegionChain:
+def build_region_chain(ref_region_offsets: np.ndarray, ref_boundary_offsets: np.ndarray) -> RegionChain:
     """Build the chain from the payload's two per-reference CSR offset arrays.
 
-    Reference ``f`` owns regions ``[rno[f], rno[f+1])`` and contiguous edges ``[reo[f], reo[f+1])``, with
-    ``edges == max(regions − 1, 0)``. A reference with no regions contributes nothing at all, which is legal.
+    Reference ``f`` owns regions ``[rno[f], rno[f+1])`` and contiguous boundaries ``[reo[f], reo[f+1])``, with
+    ``boundaries == max(regions − 1, 0)``. A reference with no regions contributes nothing at all, which is legal.
 
     ⚠ Both arrays come from ONE accumulator payload, so a mismatch between them is an accumulator /
     payload inconsistency and **not** a stale index — rebuilding will not fix it, and the error says so.
     """
     region_offsets = np.asarray(ref_region_offsets, dtype=np.int64)
-    edge_offsets = np.asarray(ref_edge_offsets, dtype=np.int64)
-    if region_offsets.shape != edge_offsets.shape:
+    boundary_offsets = np.asarray(ref_boundary_offsets, dtype=np.int64)
+    if region_offsets.shape != boundary_offsets.shape:
         raise ValueError(
-            f"ref_region_offsets has shape {region_offsets.shape} and ref_edge_offsets "
-            f"{edge_offsets.shape}; both are per-reference CSR arrays of length n_refs + 1."
+            f"ref_region_offsets has shape {region_offsets.shape} and ref_boundary_offsets "
+            f"{boundary_offsets.shape}; both are per-reference CSR arrays of length n_refs + 1."
         )
     n_refs = region_offsets.shape[0] - 1
     regions_per_ref = np.diff(region_offsets)
-    edges_per_ref = np.diff(edge_offsets)
+    boundaries_per_ref = np.diff(boundary_offsets)
     expected = np.maximum(regions_per_ref - 1, 0)
-    if not np.array_equal(edges_per_ref, expected):
-        bad = int(np.argmax(edges_per_ref != expected))
+    if not np.array_equal(boundaries_per_ref, expected):
+        bad = int(np.argmax(boundaries_per_ref != expected))
         raise ValueError(
-            f"reference {bad}: the payload reports {int(edges_per_ref[bad])} contiguous edges for "
+            f"reference {bad}: the payload reports {int(boundaries_per_ref[bad])} contiguous boundaries for "
             f"{int(regions_per_ref[bad])} regions, but a reference with k regions has exactly k-1 interior "
-            f"lines (expected {int(expected[bad])}). There are no terminal edge slots: an edge is the "
+            f"lines (expected {int(expected[bad])}). There are no terminal boundary slots: an boundary is the "
             f"line BETWEEN two adjacent regions. Both offset arrays come from ONE accumulator payload, so "
             f"this is an accumulator/payload inconsistency, not a stale index — rebuilding will not fix it."
         )
 
-    n_slots = int(regions_per_ref.sum() + edges_per_ref.sum())
+    n_slots = int(regions_per_ref.sum() + boundaries_per_ref.sum())
     kind = np.empty(n_slots, dtype=np.int8)
     obj_idx = np.empty(n_slots, dtype=np.int64)
     left = np.full(n_slots, -1, dtype=np.int64)
@@ -153,16 +153,16 @@ def build_region_chain(ref_region_offsets: np.ndarray, ref_edge_offsets: np.ndar
         k = int(regions_per_ref[f])
         if k == 0:
             continue
-        region_base, edge_base = int(region_offsets[f]), int(edge_offsets[f])
+        region_base, boundary_base = int(region_offsets[f]), int(boundary_offsets[f])
         first_slot = slot
-        # N0 E0 N1 E1 ... E(k-2) N(k-1): a region, then the edge to its right, except after the last region
+        # N0 E0 N1 E1 ... E(k-2) N(k-1): a region, then the boundary to its right, except after the last region
         for i in range(k):
             kind[slot] = REGION
             obj_idx[slot] = region_base + i
             slot += 1
             if i < k - 1:
-                kind[slot] = EDGE
-                obj_idx[slot] = edge_base + i
+                kind[slot] = BOUNDARY
+                obj_idx[slot] = boundary_base + i
                 slot += 1
         # link consecutive slots WITHIN this reference; the two terminals keep -1, so a sweep cannot
         # relay across a reference boundary
@@ -176,5 +176,5 @@ def build_region_chain(ref_region_offsets: np.ndarray, ref_edge_offsets: np.ndar
         left=left,
         right=right,
         n_regions_total=int(region_offsets[-1]),
-        n_edges_total=int(edge_offsets[-1]),
+        n_boundaries_total=int(boundary_offsets[-1]),
     )

@@ -27,26 +27,26 @@ from rigel.scan_payload import (
 def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     """A 1-reference, 3-region payload + aligned :class:`RegionArrays`, with every bank distinct.
 
-    chr1 is cut at 0/100/200/300, so it owns **3 regions and 2 contiguous edges** — the axes are off by one
+    chr1 is cut at 0/100/200/300, so it owns **3 regions and 2 contiguous boundaries** — the axes are off by one
     per reference, and a fixture that used the same length for both would hide an axis mix-up. One
-    junction edge exists so the third axis is non-trivial.
+    junction boundary exists so the third axis is non-trivial.
 
     Regions: n0 +exon, n1 −exon, n2 intergenic. Every population gets its own values, and no two banks
     share a value, so a consumer reading the wrong one cannot pass by coincidence::
 
         region_contained_count   n0 [10, 2]   n1 [1, 20]   n2 [7, 8]
-        edge_unspliced_count   e0 [4, 1]    e1 [2, 3]
-        edge_spliced_count     e0 [0, 0]    e1 [6, 0]
+        boundary_unspliced_count   e0 [4, 1]    e1 [2, 3]
+        boundary_spliced_count     e0 [0, 0]    e1 [6, 0]
         sj_count               j0 [9, 4]
     """
-    n_regions, n_edges, n_sj = 3, 2, 1
+    n_regions, n_boundaries, n_sj = 3, 2, 1
 
     def bank(rows, values, dtype):
         return np.asarray(values, dtype=dtype).reshape(rows, 2)
 
     contained = bank(n_regions, [[10, 2], [1, 20], [7, 8]], np.uint32)
-    unspliced = bank(n_edges, [[4, 1], [2, 3]], np.uint32)
-    spliced = bank(n_edges, [[0, 0], [6, 0]], np.uint32)
+    unspliced = bank(n_boundaries, [[4, 1], [2, 3]], np.uint32)
+    spliced = bank(n_boundaries, [[0, 0], [6, 0]], np.uint32)
     sj = bank(n_sj, [[9, 4]], np.uint32)
 
     def inv(counts, placements):
@@ -63,7 +63,7 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
     def mass(counts, per_crossing=2):
         """The conserved mass a bank of ``counts`` crossings would deposit, at ``1/per_crossing`` each.
 
-        ⚠ ONE value per edge — the two strand columns are SUMMED, because the mass has no strand axis.
+        ⚠ ONE value per boundary — the two strand columns are SUMMED, because the mass has no strand axis.
         ⭐ And it is a plausible state rather than an arbitrary array: a crossing's share is at most one
         fragment, so ``mass <= count`` must hold. ``per_crossing = 2`` is the value for a fragment that
         crosses two lines, which is what the multi-line geometry this fixture describes produces.
@@ -74,16 +74,16 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
         cut_positions=np.array([0, 100, 200, 300], dtype=np.int64),
         ref_cut_offsets=np.array([0, 4], dtype=np.int64),
         ref_region_offsets=np.array([0, n_regions], dtype=np.int64),
-        ref_edge_offsets=np.array([0, n_edges], dtype=np.int64),
+        ref_boundary_offsets=np.array([0, n_boundaries], dtype=np.int64),
         ref_sj_offsets=np.array([0, n_sj], dtype=np.int64),
         region_contained_count=contained,
         region_contained_inv_opportunity_sum=inv(contained, 50),
         region_start_count=np.array([11, 12, 13], dtype=np.uint32),
-        edge_unspliced_count=unspliced,
-        edge_unspliced_inv_length_sum=inv(unspliced, 25),
-        edge_unspliced_mass=mass(unspliced),
-        edge_spliced_count=spliced,
-        edge_spliced_mass=mass(spliced),
+        boundary_unspliced_count=unspliced,
+        boundary_unspliced_inv_length_sum=inv(unspliced, 25),
+        boundary_unspliced_mass=mass(unspliced),
+        boundary_spliced_count=spliced,
+        boundary_spliced_mass=mass(spliced),
         sj_count=sj,
         sj_inv_length_sum=inv(sj, 10),
         # ⭐ TWO COLUMNS, and they SUM to what the one-column bank held (1.3), so every
@@ -123,15 +123,15 @@ def make_synthetic_payload() -> tuple[AccumulatorPayload, RegionArrays]:
 
 
 def make_synthetic_junctions():
-    """The :class:`JunctionGeometry` matching :func:`make_synthetic_payload`'s one junction edge.
+    """The :class:`JunctionGeometry` matching :func:`make_synthetic_payload`'s one junction boundary.
 
     ⚠ **It must exist, and match.** The payload declares ``n_sj = 1``; ``calibrate`` refuses a junction
     axis of a different length, because an axis addressing a different graph would place every splice
     on the wrong line and nothing downstream would fault on it.
 
     The junction runs ``region 0 → region 2``, i.e. it splices OVER region 1 — the only shape a 3-region
-    reference admits, and the one that makes the donor and acceptor two DIFFERENT lines (edge 0 and
-    edge 1). A ``0 → 1`` junction would put both endpoints on the same line and hide an
+    reference admits, and the one that makes the donor and acceptor two DIFFERENT lines (boundary 0 and
+    boundary 1). A ``0 → 1`` junction would put both endpoints on the same line and hide an
     endpoint mix-up.
     """
     from rigel.calibration.splice_graph import JunctionGeometry
@@ -186,7 +186,7 @@ def make_strand_models(p_r1_sense: float, n_observations: int, n_junctions: int 
 
 
 # ---------------------------------------------------------------------------
-# The S5.e chain fixture — hand-built numbers on the region / edge / junction axes.
+# The S5.e chain fixture — hand-built numbers on the region / boundary / junction axes.
 # ---------------------------------------------------------------------------
 
 
@@ -203,9 +203,9 @@ def make_chain_parts(
     region_size_bp=1000.0,
     region_pos=0.0,
     region_neg=0.0,
-    edge_pos=0.0,
-    edge_neg=0.0,
-    edge_spliced=0.0,
+    boundary_pos=0.0,
+    boundary_neg=0.0,
+    boundary_spliced=0.0,
     junctions=None,
     gdna_fl=None,
     rna_fl=None,
@@ -214,7 +214,7 @@ def make_chain_parts(
     """A chain + substrate + geometry + statics over ``signatures``, on the S5.e axes.
 
     ⭐ **The axes are off by one per reference and that is the point of the helper**: a reference with
-    ``k`` regions owns ``k`` region rows and ``k − 1`` contiguous-edge rows, with **no terminal slots**. Every
+    ``k`` regions owns ``k`` region rows and ``k − 1`` contiguous-boundary rows, with **no terminal slots**. Every
     per-object argument is broadcast, so a test states only the numbers it cares about.
 
     ``junctions`` is a list of ``(src_region, dst_region, strand, reach_lo, reach_hi, count)``; each becomes a
@@ -239,7 +239,7 @@ def make_chain_parts(
     np.cumsum(np.bincount(ref_id, minlength=rno.shape[0] - 1), out=rno[1:])
     reo = np.zeros_like(rno)
     np.cumsum(np.maximum(np.diff(rno) - 1, 0), out=reo[1:])
-    n_edges = int(reo[-1])
+    n_boundaries = int(reo[-1])
 
     def pair(pos, neg, n):
         return np.stack(
@@ -263,11 +263,11 @@ def make_chain_parts(
     region_sz = np.broadcast_to(np.asarray(region_size_bp, float), (n_regions,)).copy()
 
     region_counts = pair(region_pos, region_neg, n_regions)
-    edge_counts = pair(edge_pos, edge_neg, n_edges)
+    boundary_counts = pair(boundary_pos, boundary_neg, n_boundaries)
     substrate = SimpleNamespace(
         region_contained=SimpleNamespace(count=region_counts),
-        edge_unspliced=SimpleNamespace(count=edge_counts),
-        edge_spliced=SimpleNamespace(count=pair(edge_spliced, 0.0, n_edges)),
+        boundary_unspliced=SimpleNamespace(count=boundary_counts),
+        boundary_spliced=SimpleNamespace(count=pair(boundary_spliced, 0.0, n_boundaries)),
         junction=SimpleNamespace(
             count=np.array([[float(x[5]), 0.0] for x in j]).reshape(len(j), 2)
         ),

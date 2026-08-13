@@ -18,7 +18,7 @@ input                        origin                                      cached?
 ``payload``                  the scan                                    **yes**
 ``strand_model``             the scan                                    **yes**
 ``region_arrays``            ``RegionArrays.from_index``   (0.11 s)      no
-``edge_flags``               ``build_edge_flags_array``    (0.04 s)      no
+``boundary_flags``               ``build_boundary_flags_array``    (0.04 s)      no
 ``junctions``                ``build_junction_geometry_arrays``          no
 ``gdna_fl_pmf``/``rna_fl_pmf``  ``build_fl_models(payload)``             no — derived
 ``config``                   the thing you are varying                   no
@@ -116,21 +116,21 @@ def _digest(*parts: bytes) -> str:
 
 
 def reach_digest(index: "TranscriptIndex") -> str:
-    """Hash the edge reach columns — the part of the index calibration reads and no other key covers.
+    """Hash the boundary reach columns — the part of the index calibration reads and no other key covers.
 
     ⚠ Computed on demand, never stored beside the index. It is stored in
     the CACHE's manifest, which is a different thing: the cache is describing an external artifact it
     cannot recompute, exactly as `index.source_record` does for the FASTA and the GTF.
     """
-    edges = index.edges_df
-    if edges is None:
+    boundaries = index.edges_df
+    if boundaries is None:
         raise ScanCacheKeyError("index has no edges_df loaded; cannot compute the reach digest")
-    missing = [column for column in REACH_COLUMNS if column not in edges.columns]
+    missing = [column for column in REACH_COLUMNS if column not in boundaries.columns]
     if missing:
         raise ScanCacheKeyError(f"edges.feather is missing reach columns {missing}")
     parts: list[bytes] = []
     for column in REACH_COLUMNS:
-        values = np.ascontiguousarray(edges[column].to_numpy())
+        values = np.ascontiguousarray(boundaries[column].to_numpy())
         parts.append(column.encode())
         parts.append(str(values.dtype).encode())
         parts.append(values.tobytes())
@@ -458,7 +458,7 @@ def read_scan_cache(cache_dir: str | Path, index: "TranscriptIndex", scan_config
     if manifest["reach_digest"] != expected_reach:
         raise ScanCacheKeyError(
             f"cache reach digest {manifest['reach_digest']} != index reach digest {expected_reach}. "
-            f"The edge reaches moved. ⚠ Neither partition_hash nor graph_hash covers reach, so this is "
+            f"The boundary reaches moved. ⚠ Neither partition_hash nor graph_hash covers reach, so this is "
             f"the only check that notices — a 2026-07-30 rebuild moved ~38 % of human contiguous "
             f"reaches with both of those byte-identical. Re-scan against this index."
         )
@@ -566,13 +566,13 @@ def index_derived_inputs(index: "TranscriptIndex") -> dict:
     """
     from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import (
-        build_edge_flags_array,
+        build_boundary_flags_array,
         build_junction_geometry_arrays,
     )
 
     return {
         "region_arrays": RegionArrays.from_index(index),
-        "edge_flags": build_edge_flags_array(index),
+        "boundary_flags": build_boundary_flags_array(index),
         # ⚠ The JUNCTION axis is index-derived too, and it is not optional: `calibrate` refuses an axis
         # whose length disagrees with the payload's `n_sj`, because one addressing a different graph
         # would place every splice on the wrong line. Omitting it here was an S5.f miss that only the

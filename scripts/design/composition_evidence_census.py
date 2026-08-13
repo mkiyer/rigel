@@ -35,7 +35,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np  # noqa: E402
 
 from rigel.calibration.calibrate import calibrate  # noqa: E402
-from rigel.calibration.region_chain import EDGE, REGION  # noqa: E402
+from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
 from rigel.calibration.region_geometry import g1_locked  # noqa: E402
 from rigel.config import CalibrationConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
@@ -83,12 +83,12 @@ def census_one(index: TranscriptIndex, cache_dir: Path, inject_kappa: float | No
     kind = np.asarray(chain.kind)
 
     is_region = kind == REGION
-    is_edge = kind == EDGE
+    is_boundary = kind == BOUNDARY
     #   struct_lock   = the G1 class (composition CERTAIN, pinned {0,0,1} at var 0)
     #   single_strand = free_pos XOR free_neg         (the strand λ-term is gated to these)
     # ⛔ struct_lock is BOTH AXES, and it comes from the ONE definition
     # (`region_geometry.g1_locked`) rather than being re-derived here. It was `(~solvable) & is_region`,
-    # which filed every structurally-locked EDGE — an intergenic<->exon seam, where RNA cannot cross a
+    # which filed every structurally-locked BOUNDARY — an intergenic<->exon boundary, where RNA cannot cross a
     # gene boundary — as a slot with NO EVIDENCE rather than as one that is certain.
     # ⚠⚠ NOT the same mask as `region_init.strand_evidence`'s own `struct_lock`, which is region-only ON
     # PURPOSE (it governs whether a slot may EMIT certainty into its messages). See `g1_locked`.
@@ -112,13 +112,13 @@ def census_one(index: TranscriptIndex, cache_dir: Path, inject_kappa: float | No
         "mass": total,
         "no_evidence": share(no_evidence),
         "no_evidence_region": share(no_evidence & is_region),
-        "no_evidence_edge": share(no_evidence & is_edge),
+        "no_evidence_boundary": share(no_evidence & is_boundary),
         "no_evidence_ambig": share(no_evidence & ambig),
         "no_evidence_ss": share(no_evidence & single_strand),
         "struct_lock": share(struct_lock),
         "mass_ambig": share(ambig),
         "mass_ss": share(single_strand),
-        "mass_edge": share(is_edge),
+        "mass_boundary": share(is_boundary),
         # ⚠ The conditional shares: of the mass on AMBIG slots, how much has no evidence? This is the
         # number the Schur gate predicts should be ~1 wherever the intron factory is silent.
         "ambig_no_ev_frac": _cond(count, no_evidence, ambig),
@@ -136,8 +136,8 @@ def _f_gdna(result) -> float:
     """The library gDNA fraction as the LEDGER reports it. ⚠ This is an incidence-weighted sum, not a
     fragment count — quoted here only to key the row to the
     baseline table."""
-    g = float(np.asarray(result.mass_gdna_region).sum() + np.asarray(result.mass_gdna_edge).sum())
-    r = float(np.asarray(result.mass_rna_region).sum() + np.asarray(result.mass_rna_edge).sum())
+    g = float(np.asarray(result.mass_gdna_region).sum() + np.asarray(result.mass_gdna_boundary).sum())
+    r = float(np.asarray(result.mass_rna_region).sum() + np.asarray(result.mass_rna_boundary).sum())
     return g / (g + r) if (g + r) > 0 else 0.0
 
 
@@ -164,13 +164,13 @@ def main() -> None:
 
     print(
         f"\n{'condition':46s} {'kappa':>6s} {'f_gdna':>7s} "
-        f"{'NO-EV':>7s} {'region':>7s} {'edge':>7s} {'AMBIG':>7s} {'1-str':>7s} {'lock':>6s}"
+        f"{'NO-EV':>7s} {'region':>7s} {'boundary':>7s} {'AMBIG':>7s} {'1-str':>7s} {'lock':>6s}"
     )
     print("-" * 46 + " " + "-" * 63)
     for r in rows:
         print(
             f"{r['condition']:46s} {r['kappa']:6.4f} {r['f_gdna']:7.4f} "
-            f"{r['no_evidence']:7.1%} {r['no_evidence_region']:7.1%} {r['no_evidence_edge']:7.1%} "
+            f"{r['no_evidence']:7.1%} {r['no_evidence_region']:7.1%} {r['no_evidence_boundary']:7.1%} "
             f"{r['no_evidence_ambig']:7.1%} {r['no_evidence_ss']:7.1%} {r['struct_lock']:6.1%}"
         )
 

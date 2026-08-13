@@ -31,8 +31,8 @@ holds*, which no existing gate does:
 * the path is the fragment's contiguous genomic SEGMENTS; a junction splits it in two;
 * ``region_start_count`` gets +1 at the region containing the path's FIRST covered base — one per accepted
   fragment, so its sum is the deposited count;
-* a cut line strictly inside a segment is CROSSED: ``edge_spliced`` if the path used any annotated
-  junction, else ``edge_unspliced``;
+* a cut line strictly inside a segment is CROSSED: ``boundary_spliced`` if the path used any annotated
+  junction, else ``boundary_unspliced``;
 * a region between two consecutively-crossed lines OF ONE SEGMENT is SPANNED;
 * every annotated junction used gets ``sj_count`` +1;
 * CONTAINED — ``region_contained`` — iff the path used no junction AND its first and last bases are in
@@ -40,11 +40,11 @@ holds*, which no existing gate does:
 
 ⭐⭐ **What that predicts for a ONE-transcript toy, and it is worth stating before measuring it:** on a
 pure-mRNA two-exon transcript whose exons ARE the regions, every fragment deposits either one
-``region_contained`` (in exon 1 or exon 2) or one ``sj_count`` — and ``edge_unspliced`` at the two
-``intron|exon`` lines is **exactly zero**, because mature RNA cannot cross an exon↔intron seam
+``region_contained`` (in exon 1 or exon 2) or one ``sj_count`` — and ``boundary_unspliced`` at the two
+``intron|exon`` lines is **exactly zero**, because mature RNA cannot cross an exon↔intron boundary
 contiguously. ⛔ **That last clause is NOT "zero everywhere"**, and the difference is the whole reason the
 structural gate is now a SET: as soon as another transcript's exon spans the intron, mature RNA crosses
-that line legitimately. On `splice_both_strands` TB+ and TC− both do, at all six interior EDGEs.
+that line legitimately. On `splice_both_strands` TB+ and TC− both do, at all six interior BOUNDARIES.
 
 ⭐⭐⭐ **ANY NUMBER OF TRANSCRIPTS, ON EITHER STRAND (2026-08-05).** The predecessor refused a ``−``
 transcript and refused more than one, which made the rung the splice-flux reframe must be derived against
@@ -76,7 +76,7 @@ edit so every claim here is reproducible.** All six fire:
 | `pos_premrna` | ⭐ the deposit gate — same for nascent, against the transcript's genomic SPAN |
 | `transcript_order` | the deposit gate, and 2,586 fragments stop mapping at all |
 | `single_geom` | the deposit gate — the old one-transcript assumption loses HALF the deposits |
-| `unspliced_zero_everywhere` | ⭐⭐ the structural-set gate, naming all six EDGEs. ⚠ Only on the
+| `unspliced_zero_everywhere` | ⭐⭐ the structural-set gate, naming all six BOUNDARIES. ⚠ Only on the
   pure-mRNA arm, because that is the only arm the claim is about — a scope statement, not a hole |
 | `drop_junction` | the junction-axis equality AND the deposit gate |
 
@@ -137,7 +137,7 @@ PERTURBATIONS = {
     "junction u-cut and its exon lengths swap",
     "single_geom": "route every RNA fragment through the FIRST transcript's geometry — the "
     "one-transcript assumption this file used to make",
-    "unspliced_zero_everywhere": "assert the OLD structural claim (edge_unspliced == 0 everywhere on "
+    "unspliced_zero_everywhere": "assert the OLD structural claim (boundary_unspliced == 0 everywhere on "
     "a pure-mRNA library), which is true only of a one-transcript two-exon toy",
     "drop_junction": "hide one of the spec's introns from the junction map, so its crossings read as "
     "contiguous",
@@ -290,13 +290,13 @@ class TruthTally:
     read name, mapped through the annotation) rather than the aligned records, so a disagreement with
     the payload is a real statement about fidelity and not a tautology (TRAPS: self-checking-validator)."""
 
-    def __init__(self, cuts: np.ndarray, n_regions: int, n_edges: int, junctions: dict):
+    def __init__(self, cuts: np.ndarray, n_regions: int, n_boundaries: int, junctions: dict):
         self.cuts = np.asarray(cuts, np.int64)
         self.region_contained = np.zeros(n_regions, np.int64)
         self.region_spanning = np.zeros(n_regions, np.int64)
         self.region_start = np.zeros(n_regions, np.int64)
-        self.edge_unspliced = np.zeros(n_edges, np.int64)
-        self.edge_spliced = np.zeros(n_edges, np.int64)
+        self.boundary_unspliced = np.zeros(n_boundaries, np.int64)
+        self.boundary_spliced = np.zeros(n_boundaries, np.int64)
         self.sj = Counter()
         self.junctions = junctions  #: (intron_start, intron_end) -> jid
         self.n_deposited = 0
@@ -316,15 +316,15 @@ class TruthTally:
         first_base, last_base = segments[0][0], segments[-1][1] - 1
         self.region_start[self._region_of(first_base)] += 1
         self.n_deposited += 1
-        edge = self.edge_spliced if spliced else self.edge_unspliced
+        boundary = self.boundary_spliced if spliced else self.boundary_unspliced
         for seg_start, seg_end in segments:
             first = int(np.searchsorted(self.cuts, seg_start, side="right"))
             last = int(np.searchsorted(self.cuts, seg_end, side="left"))
             for line in range(first, last):
-                edge[line - 1] += 1
+                boundary[line - 1] += 1
             for line in range(first, last - 1):
                 self.region_spanning[line] += 1
-        # ⚠ ``line`` indexes ``cuts``; edge ``line-1`` and region ``line`` follow the reference exactly.
+        # ⚠ ``line`` indexes ``cuts``; boundary ``line-1`` and region ``line`` follow the reference exactly.
         for jid in sj_ids:
             self.sj[jid] += 1
         if not sj_ids and self._region_of(first_base) == self._region_of(last_base):
@@ -662,7 +662,7 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
     print("\n── GATE TRAPS: self-checking-validator: THE ACCUMULATOR, AGAINST TRUTH-DERIVED DEPOSITS ──────────────────────────")
     index = res.index
     cuts = np.asarray(payload.cut_positions, np.int64)
-    n_regions, n_edges = int(payload.n_regions), int(payload.n_edges)
+    n_regions, n_boundaries = int(payload.n_regions), int(payload.n_boundaries)
     # the junction map: (intron_start, intron_end) -> jid, from the index's own junction axis
     from rigel.calibration.splice_graph import build_junction_geometry_arrays
 
@@ -684,7 +684,7 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
           "⭐ the index's junction axis is EXACTLY the set of introns the spec declares",
           f"spec {sorted(declared)} vs index {sorted(junctions)}")
 
-    tt = TruthTally(cuts, n_regions, n_edges, junctions)
+    tt = TruthTally(cuts, n_regions, n_boundaries, junctions)
 
     first_tid = sorted(geoms)[0]
     for f in frags:
@@ -711,8 +711,8 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
         "region_contained": (col(payload.region_contained_count), tt.region_contained, "region"),
         "region_spanning": (col(payload.region_spanning_count), tt.region_spanning, "region"),
         "region_start": (np.asarray(payload.region_start_count, np.int64), tt.region_start, "region"),
-        "edge_unspliced": (col(payload.edge_unspliced_count), tt.edge_unspliced, "edge"),
-        "edge_spliced": (col(payload.edge_spliced_count), tt.edge_spliced, "edge"),
+        "boundary_unspliced": (col(payload.boundary_unspliced_count), tt.boundary_unspliced, "boundary"),
+        "boundary_spliced": (col(payload.boundary_spliced_count), tt.boundary_spliced, "boundary"),
     }
     for i in range(n_regions):
         label = f"REGION {TYPE_NAMES[int(rtype[i])]} [{starts[i]:,},{starts[i] + sizes[i]:,})"
@@ -722,10 +722,10 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
             d = int(got[i]) - int(exp[i])
             ok_all &= d == 0
             print(f"   {label:<30} {bank:<16} {int(exp[i]):>9,} {int(got[i]):>12,} {d:>+8,}")
-    for i in range(n_edges):
-        label = f"EDGE @{starts[i + 1]:,}" if i + 1 < n_regions else f"EDGE #{i}"
+    for i in range(n_boundaries):
+        label = f"BOUNDARY @{starts[i + 1]:,}" if i + 1 < n_regions else f"BOUNDARY #{i}"
         for bank, (got, exp, axis) in pay.items():
-            if axis != "edge" or (got[i] == 0 and exp[i] == 0):
+            if axis != "boundary" or (got[i] == 0 and exp[i] == 0):
                 continue
             d = int(got[i]) - int(exp[i])
             ok_all &= d == 0
@@ -734,36 +734,36 @@ def gate_accumulator(frags, geoms, res, payload, ra, spec):
     for k in range(sj_got.shape[0]):
         d = int(sj_got[k]) - int(tt.sj.get(k, 0))
         ok_all &= d == 0
-        print(f"   {'JUNCTION edge #' + str(k):<30} {'sj_count':<16} "
+        print(f"   {'JUNCTION boundary #' + str(k):<30} {'sj_count':<16} "
               f"{tt.sj.get(k, 0):>9,} {int(sj_got[k]):>12,} {d:>+8,}")
     print()
     check(ok_all, "⭐⭐ EVERY BANK MATCHES THE TRUTH-DERIVED DEPOSIT EXACTLY")
 
     # ── ⭐⭐ THE ZERO THAT IS STRUCTURAL, PREDICTED FROM THE ANNOTATION ALONE ──────────────────────
-    # On a pure-mRNA library an EDGE can carry unspliced flux only where some transcript's EXON spans
-    # its position — mature RNA cannot cross an exon↔intron seam contiguously (TRAPS: mature-rna-never-crosses-a-seam). ⛔ The
-    # predecessor asserted `edge_unspliced == 0` EVERYWHERE, which is true only of a one-transcript
+    # On a pure-mRNA library an BOUNDARY can carry unspliced flux only where some transcript's EXON spans
+    # its position — mature RNA cannot cross an exon↔intron boundary contiguously (TRAPS: mature-rna-never-crosses-a-boundary). ⛔ The
+    # predecessor asserted `boundary_unspliced == 0` EVERYWHERE, which is true only of a one-transcript
     # two-exon toy and false the moment another transcript's exon spans the intron: on
     # `splice_both_strands` TB+ and TC− both do. So the prediction is now a SET, derived from the exon
     # intervals with no reference to the fragments, and the gate is an EQUALITY in both directions —
     # a spurious nonzero and a missing one are both failures (TRAPS: self-checking-validator's "emit all classes").
-    e_un = col(payload.edge_unspliced_count)
+    e_un = col(payload.boundary_unspliced_count)
     mrna_only = all(f["kind"] == "mrna" for f in frags)
     if mrna_only:
         exonic = {
             int(starts[i + 1])
-            for i in range(n_edges)
+            for i in range(n_boundaries)
             if i + 1 < n_regions
             and any(s < int(starts[i + 1]) < e for g in geoms.values() for s, e in g.exons)
         }
         if PERTURB == "unspliced_zero_everywhere":
             exonic = set()
-        got = {int(starts[i + 1]) for i in range(n_edges)
+        got = {int(starts[i + 1]) for i in range(n_boundaries)
                if i + 1 < n_regions and int(e_un[i]) > 0}
-        print(f"   EDGEs an exon spans contiguously: {sorted(exonic)}")
-        print(f"   EDGEs with nonzero edge_unspliced: {sorted(got)}")
+        print(f"   BOUNDARIES an exon spans contiguously: {sorted(exonic)}")
+        print(f"   BOUNDARIES with nonzero boundary_unspliced: {sorted(got)}")
         check(got == exonic,
-              "⛔ pure-mRNA library: edge_unspliced is nonzero EXACTLY where an exon spans the EDGE",
+              "⛔ pure-mRNA library: boundary_unspliced is nonzero EXACTLY where an exon spans the BOUNDARY",
               f"only-observed {sorted(got - exonic)} · only-predicted {sorted(exonic - got)}")
     return tt
 

@@ -67,7 +67,7 @@ _GDNA_CONTAINED_POOLS = (POOL_DNA_INTERGENIC, POOL_DNA_INTRONIC)
 
 #: gDNA crossing exactly one line whose flanks are {intron, exon} or {intergenic, exon}. ⭐ Dominant
 #: UNDER capture: a fragment beside a probe reaches the exon boundary, so it leaves the contained pools
-#: and arrives here. Mature RNA never crosses an exon<->intron seam, so these are gDNA by construction.
+#: and arrives here. Mature RNA never crosses an exon<->intron boundary, so these are gDNA by construction.
 _GDNA_CROSSING_POOLS = (POOL_DNA_INTRON_EXON, POOL_DNA_INTERGENIC_EXON)
 
 #: ⭐ All four, in ``rigel.scan_payload`` pool order so they pair 1:1 with ``GdnaOpportunity.pools``.

@@ -1,10 +1,10 @@
-"""rigel.calibration.splice_graph — the v8 SPLICE GRAPH: regions + edges.
+"""rigel.calibration.splice_graph — the v8 SPLICE GRAPH: regions + boundaries.
 
 The calibration partition: what the accumulator deposits into, and the structure the solver reads.
 
 
 **A region** is a genomic interval; regions tile each reference and are numbered in genomic order.
-**An edge** is a transition, always ``src < dst`` so genomic order is a topological order:
+**An boundary** is a transition, always ``src < dst`` so genomic order is a topological order:
 
 * ``CONTIGUOUS(i, i+1)`` — the genomic point ``end(i) == start(i+1)``. Carries the 8 structural
   :ref:`flag bits <flags>`.
@@ -14,7 +14,7 @@ The calibration partition: what the accumulator deposits into, and the structure
 what the predecessor partition did and what made it blind to transcript termini: ⭐ **53.4 %** of real human
 transcript termini (232,451 of 435,291) fall strictly *inside* a merged region and vanish from the partition
 entirely. Measured consequence: 752,654 merged regions → **1,043,881** regions (+38.7 %), median 151 bp,
-15,687 of length 1, plus **404,168** junction edges.
+15,687 of length 1, plus **404,168** junction boundaries.
 
 ⚠ The often-quoted **59.5 %** is that same statistic computed under the ``~is_synthetic & ~is_nrna``
 transcript filter — i.e. with 26,475 real single-exon transcripts excluded, which is the very bug
@@ -22,7 +22,7 @@ described below. Under the shipped filter it is **53.4 %**.
 
 ⭐ **ONE transcript filter: ``~is_synthetic``.** Every manufactured nRNA span row is ``is_synthetic``,
 so that single predicate already excludes all of them — which is what P1G_SCOPE §5's "211/211 signature
-false positives are nRNA-span edges" actually requires.
+false positives are nRNA-span boundaries" actually requires.
 
 ⚠ **It was briefly TWO filters, and the second one was a measured bug** (plan TRAPS: specificity-and-sense-are-complements proposed
 ``~is_synthetic & ~is_nrna`` for the flags and reaches, reasoning that "an nRNA span's ends are not real
@@ -35,33 +35,33 @@ is exactly the visibility v8 exists to buy.
 
 .. _flags:
 
-**Structural flags** (contiguous edges): ``TSS_s``/``TES_s``/``DONOR_s``/``ACCEPTOR_s`` for ``s ∈ {+,−}``.
+**Structural flags** (contiguous boundaries): ``TSS_s``/``TES_s``/``DONOR_s``/``ACCEPTOR_s`` for ``s ∈ {+,−}``.
 They are NOT mutually exclusive — a position that is both a terminus for one transcript and a splice site
 for another is exactly the case the 4-bit signature is structurally blind to.
 
-**Reaches** — how many bases of the molecule's own sequence remain either side of an edge. An RNA
+**Reaches** — how many bases of the molecule's own sequence remain either side of an boundary. An RNA
 molecule must fit inside its transcript, so this is what makes the crossing divisor taper near a
 terminus (measured worth 11.0 % of the mature opportunity genome-wide, and ⭐ `Σ1/(L−1)` reads only
 0.108 ρ twenty bases from a transcript end).
 
-⚠ **The two edge kinds carry DIFFERENT reaches, deliberately.**
+⚠ **The two boundary kinds carry DIFFERENT reaches, deliberately.**
 
-* A **CONTIGUOUS** edge is crossed by gDNA, by nascent RNA and by mature RNA alike. Nascent RNA is an
+* A **CONTIGUOUS** boundary is crossed by gDNA, by nascent RNA and by mature RNA alike. Nascent RNA is an
   ordinary transcript that happens to be single-exon and to span its whole gene, and a genomic distance
   is never shorter than the exonic distance within the same span — so the widest RNA molecule covering
   a position is the nascent one, and the reach is the **genomic** distance to a covering transcript's
   span ends. ⚠ It is therefore **nonzero inside an intron**: that is where nascent RNA lives, and an
   exonic reach would declare zero RNA opportunity across every intron in the genome.
-* A **JUNCTION** edge is used only by a molecule that spliced across it, so what remains either side is
+* A **JUNCTION** boundary is used only by a molecule that spliced across it, so what remains either side is
   **exonic**. :func:`_junction_edges` is deliberately left on the exonic reach.
 
-⚠ **Named ``lo``/``hi``, NOT ``donor``/``acceptor``.** Edges store ``src < dst``, so ``src`` is genomically
+⚠ **Named ``lo``/``hi``, NOT ``donor``/``acceptor``.** Boundaries store ``src < dst``, so ``src`` is genomically
 LEFT whatever the strand — but for a NEG-strand junction the biological donor is on the RIGHT. The
 divisor is symmetric in the two reaches so no number changes, but ``reach_left``/``reach_right`` name the two sides genomically; a
 ``reach_donor`` would mislabel roughly
 half of the 404,168 junctions. ``lo``/``hi`` means genomically lower/higher and cannot be misread.
 
-⚠ **Per STRAND**, because the mature-crossing gate is per strand: at an AMBIG seam a ``+`` and a ``−``
+⚠ **Per STRAND**, because the mature-crossing gate is per strand: at an AMBIG boundary a ``+`` and a ``−``
 transcript have different reaches, and a strand-agnostic maximum would over-state one of them — on exactly
 the population that carries 31.6 % of the calibration suite's error mass.
 
@@ -73,8 +73,8 @@ of **0.9989**, so the simple independent maximum is used. It is one-sided — it
 hence under-states ``ρ_mature``, hence over-states ``f_g``.
 
 **A reach of 0 is meaningful, not a sentinel:** no strand-``s`` RNA molecule can occupy that side of the
-edge, so the opportunity is genuinely zero and the trapezoid returns 0 for free. On a contiguous edge
-that now means *outside every transcript span on that strand*; on a junction edge, *no strand-``s``
+boundary, so the opportunity is genuinely zero and the trapezoid returns 0 for free. On a contiguous boundary
+that now means *outside every transcript span on that strand*; on a junction boundary, *no strand-``s``
 molecule splices across it*.
 """
 
@@ -102,8 +102,8 @@ from .signature import (
 __all__ = [
     "REGION_COLUMNS",
     "REGION_COLUMN_DTYPES",
-    "EDGE_COLUMNS",
-    "EDGE_COLUMN_DTYPES",
+    "BOUNDARY_COLUMNS",
+    "BOUNDARY_COLUMN_DTYPES",
     "EDGE_KIND_CONTIGUOUS",
     "EDGE_KIND_JUNCTION",
     "FLAG_TSS_POS",
@@ -116,9 +116,9 @@ __all__ = [
     "FLAG_ACCEPTOR_NEG",
     "build_splice_graph",
     "build_region_partition_arrays",
-    "build_edge_flags_array",
+    "build_boundary_flags_array",
     "build_junction_edge_arrays",
-    "build_contiguous_edge_reach_arrays",
+    "build_contiguous_boundary_reach_arrays",
     "build_junction_geometry_arrays",
     "build_transcript_path",
     "JunctionEdgeArrays",
@@ -131,7 +131,7 @@ __all__ = [
     "is_splice_site",
     "validate_graph",
     "load_regions",
-    "load_edges",
+    "load_boundaries",
 ]
 
 REGION_COLUMNS = ["node_id", "ref_name", "start", "end", "length", "signature"]
@@ -148,7 +148,7 @@ EMPTY_I64 = np.zeros(0, np.int64)
 EDGE_KIND_CONTIGUOUS = 0
 EDGE_KIND_JUNCTION = 1
 
-EDGE_COLUMNS = [
+BOUNDARY_COLUMNS = [
     "edge_id",
     "src",
     "dst",
@@ -160,7 +160,7 @@ EDGE_COLUMNS = [
     "reach_lo_neg",
     "reach_hi_neg",
 ]
-EDGE_COLUMN_DTYPES: dict[str, type | np.dtype] = {
+BOUNDARY_COLUMN_DTYPES: dict[str, type | np.dtype] = {
     "edge_id": np.int64,
     "src": np.int64,
     "dst": np.int64,
@@ -173,7 +173,7 @@ EDGE_COLUMN_DTYPES: dict[str, type | np.dtype] = {
     "reach_hi_neg": np.int32,
 }
 
-# Structural bits on a CONTIGUOUS edge, at its genomic position. Not mutually exclusive.
+# Structural bits on a CONTIGUOUS boundary, at its genomic position. Not mutually exclusive.
 FLAG_TSS_POS = np.uint16(1 << 0)
 FLAG_TSS_NEG = np.uint16(1 << 1)
 FLAG_TES_POS = np.uint16(1 << 2)
@@ -267,7 +267,7 @@ def build_splice_graph(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Build ``(regions_df, edges_df)`` — the v8 splice graph. Fully vectorised; no per-region Python object.
 
-    Deterministic by construction: ``np.unique`` sorts, region ids are assigned by position, edges by
+    Deterministic by construction: ``np.unique`` sorts, region ids are assigned by position, boundaries by
     ``(src, kind, dst)``. No dict iteration order, no hashing, no parallel reduction ⇒ byte-identical
     across runs and platforms.
     """
@@ -324,7 +324,7 @@ def build_splice_graph(
             )
         )
 
-        # ── 3. contiguous edges: flags + per-strand reaches at each interior interface ────────────
+        # ── 3. contiguous boundaries: flags + per-strand reaches at each interior interface ────────────
         pos = cuts[1:-1]  # the n-1 interior interfaces
         flags = np.zeros(pos.shape[0], np.uint16)
         if pos.size:
@@ -335,7 +335,7 @@ def build_splice_graph(
                     np.bitwise_or.at(flags, hit[ok], bit)
         c_reach = _contiguous_reaches(ex, rows, pos)
 
-        # ── 4. junction edges: one per distinct (intron_start, intron_end, strand) ────────────────
+        # ── 4. junction boundaries: one per distinct (intron_start, intron_end, strand) ────────────────
         j_src, j_dst, j_strand, j_reach = _junction_edges(cuts, intr, i_rows, name)
 
         src = np.concatenate([np.arange(n - 1, dtype=np.int64), j_src]) + region_base
@@ -367,21 +367,21 @@ def build_splice_graph(
         pd.concat(n_rows, ignore_index=True) if n_rows else pd.DataFrame(columns=REGION_COLUMNS)
     )
     edges_df = (
-        pd.concat(e_rows, ignore_index=True) if e_rows else pd.DataFrame(columns=EDGE_COLUMNS[1:])
+        pd.concat(e_rows, ignore_index=True) if e_rows else pd.DataFrame(columns=BOUNDARY_COLUMNS[1:])
     )
     if len(edges_df):
         # ⚠ sorted by (src, kind, dst, STRAND). The design doc says (src, kind, dst), but that is not a
         # TOTAL order: two strand-coincident junctions (§3.3, G18) share all three and differ only in
         # strand, so the order would be ambiguous and determinism would depend on the input order.
         # GENCODE contains zero such junctions — which is exactly why only a synthetic case can catch it.
-        # Adding strand REFINES the documented order, so the "out-edges of a region are contiguous" CSR
+        # Adding strand REFINES the documented order, so the "out-boundaries of a region are contiguous" CSR
         # contract is unchanged.
         edges_df = edges_df.sort_values(
             ["src", "kind", "dst", "strand"], kind="stable"
         ).reset_index(drop=True)
     edges_df.insert(0, "edge_id", np.arange(len(edges_df), dtype=np.int64))
     return _coerce(regions_df, REGION_COLUMNS, REGION_COLUMN_DTYPES), _coerce(
-        edges_df, EDGE_COLUMNS, EDGE_COLUMN_DTYPES
+        edges_df, BOUNDARY_COLUMNS, BOUNDARY_COLUMN_DTYPES
     )
 
 
@@ -470,13 +470,13 @@ def _terminus_and_splice_events(ma: _Exons, mj, ma_i, mi_):
     for st, tss_bit, tes_bit, don_bit, acc_bit in _BIT_SPEC:
         m = mj[ma.strand[mj] == st] if mj.size else mj
         if m.size:
-            # a transcript's own outer edges: exonic offset 0 and offset == total
+            # a transcript's own outer boundaries: exonic offset 0 and offset == total
             first = m[ma.before[m] == 0]
             last = m[(ma.before[m] + (ma.end - ma.start)[m]) == ma.total[m]]
-            lo_edge, hi_edge = ma.start[first], ma.end[last]
-            # 5' terminus is the genomically-low edge on +, the high edge on −
-            tss = lo_edge if st == Strand.POS else hi_edge
-            tes = hi_edge if st == Strand.POS else lo_edge
+            lo_boundary, hi_boundary = ma.start[first], ma.end[last]
+            # 5' terminus is the genomically-low boundary on +, the high boundary on −
+            tss = lo_boundary if st == Strand.POS else hi_boundary
+            tes = hi_boundary if st == Strand.POS else lo_boundary
             out.append((np.unique(tss), tss_bit))
             out.append((np.unique(tes), tes_bit))
         k = mi_[ma_i[3][mi_] == st] if mi_.size else mi_
@@ -538,7 +538,7 @@ def _contiguous_reaches(ex: _Exons, rows, pos):
     lives. An exonic reach declares zero RNA opportunity across every intron in the genome, which is
     backwards.
 
-    ⚠ This is the **contiguous-edge** rule only. A junction edge is used solely by a molecule that
+    ⚠ This is the **contiguous-boundary** rule only. A junction boundary is used solely by a molecule that
     spliced across it, so what remains either side of it is exonic — see :func:`_junction_edges`, which
     is deliberately left on the exonic reach.
     """
@@ -563,22 +563,22 @@ def _contiguous_reaches(ex: _Exons, rows, pos):
         keep = strand_of == s
         if not keep.any():
             continue
-        lo_edge, hi_edge = span_start[keep], span_end[keep]
+        lo_boundary, hi_boundary = span_start[keep], span_end[keep]
 
         # HIGH side: among spans starting at or before p, the one reaching furthest right. If that
         # furthest end is still left of p then no span covers p and the reach is 0.
-        n_span = lo_edge.size
-        by_start = np.argsort(lo_edge, kind="stable")
-        furthest_end = np.maximum.accumulate(hi_edge[by_start])
-        i = np.searchsorted(lo_edge[by_start], pos, side="right")
+        n_span = lo_boundary.size
+        by_start = np.argsort(lo_boundary, kind="stable")
+        furthest_end = np.maximum.accumulate(hi_boundary[by_start])
+        i = np.searchsorted(lo_boundary[by_start], pos, side="right")
         covered = i > 0  # some span starts at or before p
         far = furthest_end[np.maximum(i, 1) - 1]  # clamped: the value is discarded where ~covered
         out[key_hi] = np.maximum(np.where(covered, far, pos) - pos, 0)
 
         # LOW side: among spans ending at or after p, the one starting furthest left. Symmetric.
-        by_end = np.argsort(hi_edge, kind="stable")
-        furthest_start = np.minimum.accumulate(lo_edge[by_end][::-1])[::-1]
-        j = np.searchsorted(hi_edge[by_end], pos, side="left")
+        by_end = np.argsort(hi_boundary, kind="stable")
+        furthest_start = np.minimum.accumulate(lo_boundary[by_end][::-1])[::-1]
+        j = np.searchsorted(hi_boundary[by_end], pos, side="left")
         covered = j < n_span  # some span ends at or after p
         near = furthest_start[np.minimum(j, n_span - 1)]  # clamped, as above
         out[key_lo] = np.maximum(pos - np.where(covered, near, pos), 0)
@@ -586,7 +586,7 @@ def _contiguous_reaches(ex: _Exons, rows, pos):
 
 
 def _junction_edges(cuts, ma_i, mi_, ref_name):
-    """Distinct junction edges for one reference: ``(src, dst, strand, reach dict)``, region-local ids."""
+    """Distinct junction boundaries for one reference: ``(src, dst, strand, reach dict)``, region-local ids."""
     empty = np.zeros(0, np.int64)
     keys = {
         k: empty.copy() for k in ("reach_lo_pos", "reach_hi_pos", "reach_lo_neg", "reach_hi_neg")
@@ -688,11 +688,11 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
     kind = edges_df["kind"].to_numpy(np.uint8)
     estrand = edges_df["strand"].to_numpy(np.int8)
 
-    # I8 — src < dst on EVERY edge  ⇒ genomic order is a topological order
+    # I8 — src < dst on EVERY boundary  ⇒ genomic order is a topological order
     if src.size and not np.all(src < dst):
-        raise ValueError("I8: an edge has src >= dst; genomic order is not a topological order.")
+        raise ValueError("I8: an boundary has src >= dst; genomic order is not a topological order.")
     if src.size and not np.all(ref[src] == ref[dst]):
-        raise ValueError("I5: an edge crosses references.")
+        raise ValueError("I5: an boundary crosses references.")
     # I12 — row order is the id order
     if not np.array_equal(edges_df["edge_id"].to_numpy(np.int64), np.arange(src.size)):
         raise ValueError("I12: edge_id is not the row index.")
@@ -704,34 +704,34 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
         key = ((src * 2 + kind.astype(np.int64)) * n_regions_ + dst) * 4 + estrand.astype(np.int64)
         if not np.all(np.diff(key) > 0):
             raise ValueError(
-                "I12: edges are not sorted by (src, kind, dst, strand), or a duplicate exists."
+                "I12: boundaries are not sorted by (src, kind, dst, strand), or a duplicate exists."
             )
 
-    # I7 — contiguous edges are exactly {(i, i+1)} within each reference
+    # I7 — contiguous boundaries are exactly {(i, i+1)} within each reference
     c = kind == EDGE_KIND_CONTIGUOUS
     if not np.all(dst[c] == src[c] + 1):
-        raise ValueError("I7: a CONTIGUOUS edge is not between adjacent regions.")
+        raise ValueError("I7: a CONTIGUOUS boundary is not between adjacent regions.")
     # ⚠ `sum(... (ref == name).any())` here was 286 full-array object-dtype comparisons over 1.04 M
     # rows — 1.68 s of a 1.91 s load-time validate_graph, i.e. 88 % of it — and it recomputed a
     # number `slices` already holds. This is the same trap the I1 block above documents.
     n_expected = nid.size - len(slices)
     if int(c.sum()) != n_expected:
-        raise ValueError(f"I7: {int(c.sum())} contiguous edges, expected {n_expected}.")
+        raise ValueError(f"I7: {int(c.sum())} contiguous boundaries, expected {n_expected}.")
     if np.any(estrand[c] != 0):
-        raise ValueError("I7: a CONTIGUOUS edge carries a strand.")
+        raise ValueError("I7: a CONTIGUOUS boundary carries a strand.")
 
     # I5/I6 — junctions land on interfaces, one row per distinct (ref, donor, acceptor, strand)
     j = kind == EDGE_KIND_JUNCTION
     if j.any():
         if not np.all(np.isin(estrand[j], [Strand.POS, Strand.NEG])):
-            raise ValueError("I6: a JUNCTION edge has an invalid strand.")
+            raise ValueError("I6: a JUNCTION boundary has an invalid strand.")
         # ⚠ STRAND-COINCIDENT junctions are BIOLOGICALLY IMPOSSIBLE and are reported, not tolerated
         # silently. Splicing reads a non-palindromic motif: the reverse complement of a GT..AG intron
         # begins CT, so the same interval cannot be a valid intron on both strands. Measured: ZERO in
         # GENCODE. One in a GTF therefore means the ANNOTATION is wrong (a simulator, or a strand
         # column filled in by hand), and silence would let it propagate into every downstream density.
         # It is a WARNING rather than an error on purpose: the graph handles the case correctly (the
-        # sort key carries strand, so the two edges stay distinct and ordered), and the G18 test builds
+        # sort key carries strand, so the two boundaries stay distinct and ordered), and the G18 test builds
         # exactly this input to prove that. Raising would make the guard untestable.
         pair = src[j] * max(nid.size, 1) + dst[j]
         _u, _cnt = np.unique(pair, return_counts=True)
@@ -741,7 +741,7 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
                 f"{n_coincident} strand-coincident splice junction(s): the same (donor, acceptor) "
                 f"annotated on BOTH strands. This is biologically impossible — splice motifs are "
                 f"non-palindromic (a GT..AG intron reverse-complements to CT..AC) — so the source "
-                f"annotation is likely wrong. The graph keeps them as distinct edges and is correct "
+                f"annotation is likely wrong. The graph keeps them as distinct boundaries and is correct "
                 f"either way.",
                 RuntimeWarning,
                 stacklevel=2,
@@ -784,7 +784,7 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
     intr_by_ref = _ref_slices(intr[0])
 
     cm = kind == EDGE_KIND_CONTIGUOUS
-    csrc = src[cm]  # already ascending: edges sort by (src, kind, dst, strand)
+    csrc = src[cm]  # already ascending: boundaries sort by (src, kind, dst, strand)
     cflags = edges_df["flags"].to_numpy(np.uint16)[cm]
 
     n_regions = ref.size
@@ -869,7 +869,7 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
                         f"{'is missing' if want[k] else 'wrongly carries'} flag bit {int(bit):#06x}."
                     )
 
-        # I11a — every mature exon edge lands exactly on a region interface
+        # I11a — every mature exon boundary lands exactly on a region interface
         if rows.size:
             for arr, what in ((ex.start[rows], "start"), (ex.end[rows], "end")):
                 hit = np.searchsorted(cuts, arr)
@@ -880,7 +880,7 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
                         f"interfaces (first at {int(arr[bad][0])})."
                     )
 
-        # I11b — every mature intron is realised by a JUNCTION edge on that strand
+        # I11b — every mature intron is realised by a JUNCTION boundary on that strand
         if i_rows.size:
             a, b, st = intr[1][i_rows], intr[2][i_rows], intr[3][i_rows].astype(np.int64)
             js = base + np.searchsorted(cuts, a) - 1
@@ -895,7 +895,7 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
                 k = int(np.flatnonzero(miss)[0])
                 raise ValueError(
                     f"I11: reference {name!r} has {int(miss.sum())} mature introns with no JUNCTION "
-                    f"edge (first [{int(a[k])}, {int(b[k])}) strand {int(st[k])})."
+                    f"boundary (first [{int(a[k])}, {int(b[k])}) strand {int(st[k])})."
                 )
 
 
@@ -952,10 +952,10 @@ def build_region_partition_arrays(index) -> tuple[np.ndarray, np.ndarray, np.nda
 
 @dataclass(frozen=True, slots=True)
 class JunctionEdgeArrays:
-    """The junction edges, re-indexed onto **the accumulator's flat cut axis** as a CSR.
+    """The junction boundaries, re-indexed onto **the accumulator's flat cut axis** as a CSR.
 
     The deposit rule has to answer one question per observed intron, in the BAM-scan hot loop: *is this
-    intron an annotated junction, and if so which edge?* This is the lookup table for it.
+    intron an annotated junction, and if so which boundary?* This is the lookup table for it.
 
     ⭐ It is cheap because of a measured property of the graph: **every annotated intron has both of its
     endpoints as partition cuts** (100.00 % of 404,168 on the human annotation — forced, since a cut is
@@ -969,9 +969,9 @@ class JunctionEdgeArrays:
 
         for k in range(offsets[boundary_left], offsets[boundary_left + 1]):
             if boundary_right[k] == observed_right_boundary:   # 1-3 iterations at human scale
-                credit junction edge k          # <- the SLOT is the id; see below
+                credit junction boundary k          # <- the SLOT is the id; see below
 
-    ⚠ **The junction-edge id IS the CSR slot ``k``.** ``edge_row`` is *not* the id — it is the key for
+    ⚠ **The junction-boundary id IS the CSR slot ``k``.** ``edge_row`` is *not* the id — it is the key for
     joining a payload row back to ``index.edges_df``, and using it to index a junction bank is a
     memory-safety bug: the highest junction row is **1,447,755** in a **404,168**-entry bank, so the write
     lands past the end, and even in bounds it permutes every surviving row. The accumulator never receives
@@ -990,14 +990,14 @@ class JunctionEdgeArrays:
 
     offsets: np.ndarray  # int64[P + 1] — CSR over the flat cut axis, P = cut_positions.size
     boundary_right: np.ndarray  # int64[J] — flat cut index of the intron's HIGH endpoint
-    edge_row: np.ndarray  # int64[J] — row in index.edges_df. A JOIN KEY, not the junction-edge id
+    edge_row: np.ndarray  # int64[J] — row in index.edges_df. A JOIN KEY, not the junction-boundary id
     strand: np.ndarray  # int8[J]  — the junction's genomic strand (Strand POS/NEG)
 
 
 def build_junction_edge_arrays(index) -> JunctionEdgeArrays:
     """Build the :class:`JunctionEdgeArrays` CSR for ``index``.
 
-    A junction edge stores region ids; the accumulator works in cut indices. For a reference whose first
+    A junction boundary stores region ids; the accumulator works in cut indices. For a reference whose first
     region is ``region_base`` and whose first cut is ``cut_base``, region ``i`` spans
     ``[cuts[cut_base + i - region_base], cuts[cut_base + i - region_base + 1])``, so::
 
@@ -1027,7 +1027,7 @@ def build_junction_edge_arrays(index) -> JunctionEdgeArrays:
     boundary_right = dst + shift
 
     # ⚠ The sort key includes STRAND, and it must match the reference accumulator's
-    # ``Partition.from_cuts`` exactly — the junction-edge id IS the rank in this order, so the two
+    # ``Partition.from_cuts`` exactly — the junction-boundary id IS the rank in this order, so the two
     # disagreeing would permute every row and break byte-identity. It shows up only on a donor/acceptor
     # pair carrying two strands, which is biologically impossible and therefore only ever reachable from
     # a synthetic stress test.
@@ -1038,21 +1038,21 @@ def build_junction_edge_arrays(index) -> JunctionEdgeArrays:
     return JunctionEdgeArrays(offsets, boundary_right, edge_row[order], strand[order])
 
 
-def build_edge_flags_array(index) -> np.ndarray:
-    """The structural flags on **the accumulator's contiguous-edge axis** — one entry per edge.
+def build_boundary_flags_array(index) -> np.ndarray:
+    """The structural flags on **the accumulator's contiguous-boundary axis** — one entry per boundary.
 
     ⭐ **There is no padding, because there are no terminal slots.** The predecessor
     (``build_boundary_flags_array``) emitted ``k + 1`` entries per reference — the ``k − 1`` interior
     interfaces plus two data-free terminals — purely so every region had an object on each side. A
-    contiguous edge is the line BETWEEN two adjacent regions and there is no such line before the first or
+    contiguous boundary is the line BETWEEN two adjacent regions and there is no such line before the first or
     after the last, so a reference with ``k`` regions contributes exactly ``k − 1`` entries and the
     off-by-one commentary that used to live here goes with the slots.
 
-    A contiguous edge IS the interface to the right of its ``src`` region, so the flags are keyed by
-    ``src``. Junction edges carry no flags — they are not a genomic position — and are excluded.
+    A contiguous boundary IS the interface to the right of its ``src`` region, so the flags are keyed by
+    ``src``. Junction boundaries carry no flags — they are not a genomic position — and are excluded.
 
-    Returns ``uint16[E]`` with ``E == ref_edge_offsets[-1]``, aligned element for element with the
-    payload's contiguous-edge axis.
+    Returns ``uint16[E]`` with ``E == ref_boundary_offsets[-1]``, aligned element for element with the
+    payload's contiguous-boundary axis.
     """
     regions_df, edges_df = index.regions_df, index.edges_df
     contiguous = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_CONTIGUOUS
@@ -1074,8 +1074,8 @@ def build_edge_flags_array(index) -> np.ndarray:
     return np.concatenate(out) if out else np.zeros(0, dtype=np.uint16)
 
 
-def build_contiguous_edge_reach_arrays(index) -> tuple[np.ndarray, np.ndarray]:
-    """The RNA **reach** on the accumulator's contiguous-edge axis — ``(reach_lo, reach_hi)``,
+def build_contiguous_boundary_reach_arrays(index) -> tuple[np.ndarray, np.ndarray]:
+    """The RNA **reach** on the accumulator's contiguous-boundary axis — ``(reach_lo, reach_hi)``,
      ``float64[E, 2]``, column 0 the POS-strand transcript's and column 1 the NEG's.
 
      A crossing molecule must fit in what remains of **its own template** either side of the line. gDNA's
@@ -1096,9 +1096,9 @@ def build_contiguous_edge_reach_arrays(index) -> tuple[np.ndarray, np.ndarray]:
      ⚠ **A reach of 0 is the ANSWER, not a missing value** — no template of that strand at that line, so
      that strand's RNA has zero opportunity and the divisor is legitimately 0. The consumer must treat 0
      as "emit nothing" rather than flooring it. Measured on the chr22
-     pilot index: **40.6 %** of contiguous edges have no POS template and **42.9 %** no NEG template.
+     pilot index: **40.6 %** of contiguous boundaries have no POS template and **42.9 %** no NEG template.
 
-     ⭐ **Keyed by ``src``, exactly as :func:`build_edge_flags_array` is**, and laid out per reference in
+     ⭐ **Keyed by ``src``, exactly as :func:`build_boundary_flags_array` is**, and laid out per reference in
      ``index.ref_names`` order, so the two arrays are the SAME axis element for element and a consumer
      indexes both with one index. A reference with ``k`` regions contributes ``k − 1`` entries; one with a
      single region contributes none.
@@ -1107,8 +1107,8 @@ def build_contiguous_edge_reach_arrays(index) -> tuple[np.ndarray, np.ndarray]:
     contiguous = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_CONTIGUOUS
     src = edges_df["src"].to_numpy(np.int64)[contiguous]
 
-    # (n_regions, 2) scratch keyed by the region whose RIGHT interface the edge is, then sliced per
-    # reference. Regions with no outgoing contiguous edge keep 0, which is also the correct reach for a
+    # (n_regions, 2) scratch keyed by the region whose RIGHT interface the boundary is, then sliced per
+    # reference. Regions with no outgoing contiguous boundary keep 0, which is also the correct reach for a
     # line that does not exist — they are dropped by the ``[:-1]`` slice below either way.
     def by_region(column_pos: str, column_neg: str) -> np.ndarray:
         out = np.zeros((len(regions_df), 2), dtype=np.float64)
@@ -1140,9 +1140,9 @@ def build_contiguous_edge_reach_arrays(index) -> tuple[np.ndarray, np.ndarray]:
 
 @dataclass(frozen=True, slots=True)
 class JunctionGeometry:
-    """The junction edges on **the accumulator's junction axis**, in its own slot order.
+    """The junction boundaries on **the accumulator's junction axis**, in its own slot order.
 
-    A junction edge is not a chain slot — the graph is a DAG but not a polytree, so a junction must be a
+    A junction boundary is not a chain slot — the graph is a DAG but not a polytree, so a junction must be a
     **factor on its endpoint regions** and never a message channel. This
     is what a consumer needs to place that factor: where the junction attaches, whose transcript it
     belongs to, and how much of its own template remains either side.
@@ -1152,12 +1152,12 @@ class JunctionGeometry:
     to; which transcript the molecule came from is a property of the annotation, stated here. "Sense
     derived from a junction's own strand" is exactly this join.
 
-    ⚠ **``reach_lo``/``reach_hi`` are EXONIC**, unlike a contiguous edge's (which are genomic spans, so
+    ⚠ **``reach_lo``/``reach_hi`` are EXONIC**, unlike a contiguous boundary's (which are genomic spans, so
     that nascent RNA inside an intron is not declared impossible). Only a spliced molecule uses a
     junction, so what remains either side of it is exonic — see the module docstring. A reach of 0 is
     meaningful, not a sentinel.
 
-    ⚠ ``lo``/``hi`` are genomically lower/higher, never donor/acceptor: edges store ``src < dst``, so on
+    ⚠ ``lo``/``hi`` are genomically lower/higher, never donor/acceptor: boundaries store ``src < dst``, so on
     a NEG-strand junction the biological donor is on the right.
     """
 
@@ -1182,8 +1182,8 @@ def build_junction_geometry_arrays(index) -> JunctionGeometry:
     differ in two places — so there is one, and this joins through it.
     """
     rows = build_junction_edge_arrays(index).edge_row
-    edges = index.edges_df
-    strand = edges["strand"].to_numpy(np.int8)[rows]
+    boundaries = index.edges_df
+    strand = boundaries["strand"].to_numpy(np.int8)[rows]
     is_pos = strand == np.int8(Strand.POS)
 
     def reach(column_pos: str, column_neg: str) -> np.ndarray:
@@ -1192,13 +1192,13 @@ def build_junction_geometry_arrays(index) -> JunctionGeometry:
         # declaring itself opportunity-free.
         return np.where(
             is_pos,
-            edges[column_pos].to_numpy(np.int64)[rows],
-            edges[column_neg].to_numpy(np.int64)[rows],
+            boundaries[column_pos].to_numpy(np.int64)[rows],
+            boundaries[column_neg].to_numpy(np.int64)[rows],
         ).astype(np.float64)
 
     return JunctionGeometry(
-        src_region=edges["src"].to_numpy(np.int64)[rows],
-        dst_region=edges["dst"].to_numpy(np.int64)[rows],
+        src_region=boundaries["src"].to_numpy(np.int64)[rows],
+        dst_region=boundaries["dst"].to_numpy(np.int64)[rows],
         strand=strand,
         reach_lo=reach("reach_lo_pos", "reach_lo_neg"),
         reach_hi=reach("reach_hi_pos", "reach_hi_neg"),
@@ -1216,9 +1216,9 @@ def is_splice_site(flags: np.ndarray, strand: int) -> np.ndarray:
 
     ⚠ NOT the complement of :func:`is_terminus`: the two are independent bits, and a position can be
     both — the case a 4-bit signature is structurally blind to. ⭐ Measured over all 1,043,595 human
-    contiguous edges: **terminus-only 40.70 %, splice-only 58.31 %, BOTH 0.99 %** (10,337 edges), and
+    contiguous boundaries: **terminus-only 40.70 %, splice-only 58.31 %, BOTH 0.99 %** (10,337 boundaries), and
     **zero** carrying neither. So the both-bits case is real and worth handling, but it is 1 % of
-    seams — not "the majority", as the design doc and an earlier draft of this docstring claimed.
+    boundaries — not "the majority", as the design doc and an earlier draft of this docstring claimed.
     """
     bits = (
         (FLAG_DONOR_POS | FLAG_ACCEPTOR_POS)
@@ -1238,14 +1238,14 @@ def load_regions(path) -> pd.DataFrame:
     return _coerce(df, REGION_COLUMNS, REGION_COLUMN_DTYPES)
 
 
-def load_edges(path) -> pd.DataFrame:
+def load_boundaries(path) -> pd.DataFrame:
     df = pd.read_feather(str(path))
-    missing = set(EDGE_COLUMNS) - set(df.columns)
+    missing = set(BOUNDARY_COLUMNS) - set(df.columns)
     if missing:
         raise ValueError(
             f"edges.feather at {path} is missing {sorted(missing)}. Rebuild the index."
         )
-    return _coerce(df, EDGE_COLUMNS, EDGE_COLUMN_DTYPES)
+    return _coerce(df, BOUNDARY_COLUMNS, BOUNDARY_COLUMN_DTYPES)
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════
@@ -1303,7 +1303,7 @@ def _splice_junction_by_intron(index) -> dict[tuple, int]:
     while the graph axis uses ``index.ref_names`` (FASTA order), which diverge on any genome carrying
     chr1/chr2/chr10.
 
-    ⚠ The ``sj_id`` is a DENSE RANK over the junction edges, so it is a within-run join key and never a
+    ⚠ The ``sj_id`` is a DENSE RANK over the junction boundaries, so it is a within-run join key and never a
     durable identifier: dropping one annotated intron renumbers almost every surviving slot.
     """
     ja = build_junction_edge_arrays(index)
@@ -1354,12 +1354,12 @@ def build_transcript_path(index, region_arrays) -> TranscriptPath:
     import os
 
     from ..types import IntervalType
-    from .region_arrays import region_right_edge
+    from .region_arrays import region_right_boundary
 
     starts = np.asarray(region_arrays.start, dtype=np.int64)
     ends = np.asarray(region_arrays.end, dtype=np.int64)
     ref_off = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
-    right_boundary = region_right_edge(np.asarray(region_arrays.ref_id))
+    right_boundary = region_right_boundary(np.asarray(region_arrays.ref_id))
     name_to_id = index.ref_name_to_id
     sj_of_intron = _splice_junction_by_intron(index)
 

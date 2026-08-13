@@ -15,7 +15,7 @@ positive with nothing to cancel against it:
 ⭐⭐ **THE ZERO-RNA ARM IS THE BIOLOGICALLY DOMINANT CASE AND IT IS NOT A CORNER.** The annotation has
 >50,000 genes and perhaps ~10,000 are expressed in any one sample, so **most annotated transcripts are
 simply OFF**. Their objects are pure gDNA, they are the majority of the genome's objects, and they carry
-real mass — so an error there is not an edge case, it is the modal case. It should also be the easiest
+real mass — so an error there is not an boundary case, it is the modal case. It should also be the easiest
 thing the solver ever does: there is nothing to deconvolve.
 
 **The three-rung ladder is printed per object, because it localises the defect with no guessing:**

@@ -2,12 +2,12 @@
 """⭐⭐⭐ THE REFRAME, WALKED — every count, both flank totals, and every hop in BOTH directions.
 
 ⛔ **This is not a summary statistic.** It prints one toy transcript's whole chain and then walks the
-message layer hop by hop, so the include/exclude decision at each `(EDGE, side)` is visible as a number
+message layer hop by hop, so the include/exclude decision at each `(BOUNDARY, side)` is visible as a number
 rather than inferred from an aggregate.
 
 **Five sections:**
 
-1. **THE COUNTS** — every REGION and every EDGE: the unspliced crossing per genome strand, the spliced
+1. **THE COUNTS** — every REGION and every BOUNDARY: the unspliced crossing per genome strand, the spliced
    crossing, the junction flux per transcript strand, and the three divisors. Plus the junction axis.
 2. ⭐⭐ **THE FLANK PAIR** — per slot, ``rho_unspliced``, ``rho_lo``, ``rho_hi``, and which side the
    junction flux landed on. ⛔ This is the whole change: a slot where the two differ is a slot the
@@ -83,7 +83,7 @@ ARMS = {
 
 
 def labels(chain, ra):
-    """A readable name per slot: the coarse type at a REGION, the flanking pair at an EDGE."""
+    """A readable name per slot: the coarse type at a REGION, the flanking pair at an BOUNDARY."""
     kind, obj = np.asarray(chain.kind), np.asarray(chain.obj_idx, np.int64)
     rtype = coarse_type_array(np.asarray(ra.signature)).astype(np.int64)
     starts, sizes = np.asarray(ra.start, np.int64), np.asarray(ra.region_size_bp, np.int64)
@@ -97,7 +97,7 @@ def labels(chain, ra):
             b = int(rtype[obj[hi]]) if hi < int(chain.n_slots) and kind[hi] == REGION else -1
             a = int(rtype[obj[lo]]) if lo >= 0 and kind[lo] == REGION else -1
             pair = "|".join(TYPES.get(x, "?") for x in sorted((a, b)) if x >= 0)
-            out.append(f"{pair} @{starts[obj[hi]]:,}" if b >= 0 else f"edge #{i}")
+            out.append(f"{pair} @{starts[obj[hi]]:,}" if b >= 0 else f"boundary #{i}")
     return out
 
 
@@ -119,7 +119,7 @@ def truth_slot_arrays(r):
     """Per SLOT, from the oracle's origin split: gDNA / RNA unspliced counts, and the junction flux.
 
     ⚠ Built from ``truth.parts`` directly rather than from ``override_masses``, because that helper folds
-    the SPLICED crossing into the RNA edge mass and `region_total_density` deliberately excludes it from
+    the SPLICED crossing into the RNA boundary mass and `region_total_density` deliberately excludes it from
     both flank totals — so using it here would compare two different populations."""
     ra = r.region_arrays
     subs = {k: CalibrationSubstrate.from_payload(r.truth.parts[k], ra) for k in ("gdna", "mrna", "nrna")}
@@ -127,18 +127,18 @@ def truth_slot_arrays(r):
     kind, obj = np.asarray(r.chain.kind), np.asarray(r.chain.obj_idx, np.int64)
     n = int(r.chain.n_slots)
 
-    def per_slot(sub, region_pop, edge_pop):
+    def per_slot(sub, region_pop, boundary_pop):
         nd = np.asarray(getattr(sub, region_pop).count, np.float64).sum(1)
-        eg = np.asarray(getattr(sub, edge_pop).count, np.float64).sum(1)
+        eg = np.asarray(getattr(sub, boundary_pop).count, np.float64).sum(1)
         out = np.zeros(n)
         for s in range(n):
             i = int(obj[s])
             out[s] = nd[i] if kind[s] == REGION else eg[i]
         return out
 
-    g = per_slot(subs["gdna"], "region_contained", "edge_unspliced")
-    rna = per_slot(subs["mrna"], "region_contained", "edge_unspliced") + per_slot(
-        subs["nrna"], "region_contained", "edge_unspliced"
+    g = per_slot(subs["gdna"], "region_contained", "boundary_unspliced")
+    rna = per_slot(subs["mrna"], "region_contained", "boundary_unspliced") + per_slot(
+        subs["nrna"], "region_contained", "boundary_unspliced"
     )
     return g, rna, full
 
@@ -171,7 +171,7 @@ def truth_flank_pair(r, geom, g_cnt, rna_cnt):
 
 
 def section_counts(r, geom, lab, g_cnt, rna_cnt):
-    print("\n── 1. THE COUNTS, every REGION and every EDGE ─────────────────────────────────────────────")
+    print("\n── 1. THE COUNTS, every REGION and every BOUNDARY ─────────────────────────────────────────────")
     ra = r.region_arrays
     kind, obj = np.asarray(r.chain.kind), np.asarray(r.chain.obj_idx, np.int64)
     sizes = np.asarray(ra.region_size_bp, np.int64)
@@ -188,7 +188,7 @@ def section_counts(r, geom, lab, g_cnt, rna_cnt):
     for s in range(int(r.chain.n_slots)):
         i = int(obj[s])
         bp = int(sizes[i]) if kind[s] == REGION else 0
-        print(f"   {s:>4} {'region' if kind[s] == REGION else 'edge':<5} {lab[s]:<26} {bp:>6,} "
+        print(f"   {s:>4} {'region' if kind[s] == REGION else 'boundary':<5} {lab[s]:<26} {bp:>6,} "
               f"{U[s, 0]:>8,.0f} {U[s, 1]:>8,.0f} {SP[s].sum():>8,.0f} "
               f"{JL[s].sum():>7,.0f} {JH[s].sum():>7,.0f} "
               f"{E_g[s]:>8,.1f} {E_r[s]:>8,.1f} {EJ[s].sum():>8,.1f}")
@@ -202,9 +202,9 @@ def section_counts(r, geom, lab, g_cnt, rna_cnt):
         lo = int(starts[src] + sizes[src])
         hi = int(starts[dst])
         print(f"   ⭐ JUNCTION #{k}: {lo:,} → {hi:,}  strand {st}   flux = {flux:,.0f} fragments")
-        print(f"      its genomic-LOW end is the EDGE @{lo:,} (index bit DONOR{st.upper()}) — its exon "
+        print(f"      its genomic-LOW end is the BOUNDARY @{lo:,} (index bit DONOR{st.upper()}) — its exon "
               f"is on the LOW side there")
-        print(f"      its genomic-HIGH end is the EDGE @{hi:,} (index bit ACCEPTOR{st.upper()}) — its "
+        print(f"      its genomic-HIGH end is the BOUNDARY @{hi:,} (index bit ACCEPTOR{st.upper()}) — its "
               f"exon is on the HIGH side there")
     print("\n   ⭐ TRUTH's origin split, per slot (the oracle BAM's per-fragment read names):")
     print(f"   {'slot':>4} {'what':<26} {'gDNA':>10} {'RNA unspl':>10} {'true f_g':>9}")
@@ -215,7 +215,7 @@ def section_counts(r, geom, lab, g_cnt, rna_cnt):
 
 
 def section_flank_pair(r, geom, lab, st_cap, t_unspl, t_lo, t_hi):
-    print("\n── 2. ⭐⭐ THE FLANK PAIR — which side of each EDGE the junction flux belongs to ──────────")
+    print("\n── 2. ⭐⭐ THE FLANK PAIR — which side of each BOUNDARY the junction flux belongs to ──────────")
     print("   ⛔ `rho_lo` is what this slot presents to its genomic-LOW neighbour, `rho_hi` to its")
     print("      genomic-HIGH one. They differ ONLY where junction flux attaches, and the predecessor")
     print("      used ONE number — the junction-INCLUSIVE total — on both sides of every such slot.")
@@ -342,7 +342,7 @@ def section_decompose(r, geom, lab, g_cnt, rna_cnt):
     ratio here SHOULD be: capture is off, so the true enrichment is 1 and gDNA is uniform along the genome
     while mature RNA is uniform along its transcript. Then:
 
-    * the **gDNA** arm at an EDGE is NOISE-limited — an EDGE is 0 bp, so its opportunity is ~one mean
+    * the **gDNA** arm at an BOUNDARY is NOISE-limited — an BOUNDARY is 0 bp, so its opportunity is ~one mean
       fragment length whatever the chromosome does, and it holds tens of counts against a REGION's hundreds.
       Its ratio sits ~1-2 se from 1.0. ⭐ More depth DOES shrink this.
     * the **RNA** arm across a junction is BIAS-limited — it sits >13 se from 1.0 and more depth makes it

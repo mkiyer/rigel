@@ -9,7 +9,7 @@ modules have exactly one importer**. It was never a knot. It was a **FLAT PILE o
 pile is the one structure that cannot tell you where to add anything, because every file is equally
 plausible.
 
-⭐ The layers below were not invented. They were **read off the existing import edges**: every one of them
+⭐ The layers below were not invented. They were **read off the existing import boundaries**: every one of them
 was already there, and the only thing missing was a name and a gate. That is why declaring them costs no
 behaviour change — ``test_layering.py`` passed on the tree as it stood.
 

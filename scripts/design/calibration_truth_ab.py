@@ -95,7 +95,7 @@ def f_gdna_of(result) -> float:
     """``f_gdna`` in FRAGMENT units — ``CalibrationResult``'s own conserved counts, the one definition.
 
     ⛔⛔ **THIS USED TO SUM INCIDENCES AND SCORE THEM AGAINST A FRAGMENT COUNT.** It added
-    ``mass_gdna_region + mass_gdna_edge`` over the raw banks, where an edge term books ``max(K,1)`` per
+    ``mass_gdna_region + mass_gdna_boundary`` over the raw banks, where an boundary term books ``max(K,1)`` per
     fragment, and compared the ratio to ``truth_summary.json``'s ``origin_counts`` — which are real
     molecules. The units did not match across the subtraction, and because the two components' K
     inflations differ they did not cancel: on ladder g50 capture_off the incidence ratio reads

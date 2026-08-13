@@ -1570,7 +1570,7 @@ static void assign_posteriors(
                         break;
                     }
                 }
-                // Edge case: rounding — assign to last non-zero
+                // Boundary case: rounding — assign to last non-zero
                 if (winner < 0) {
                     for (int j = seg_len - 1; j >= 0; --j) {
                         if (weights[j] > 0.0) { winner = j; break; }

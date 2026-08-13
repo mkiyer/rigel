@@ -78,7 +78,7 @@ population, per locus, and table ⑪ is it.
 Production drains the side buffer before calibration. ``lift_choices`` exists to make a DRAINED oracle
 valid, and on this panel it is **not**: measured at ``g25 ss0.50 capture_on``, 6,450 of 209,658 held
 fragments (3.08 %) tie on the deferred bank's canonical key across origins, and replaying the whole's
-choices then deposits 1,026 ``edge_spliced`` + 526 ``sj`` records inside the **gdna** partition —
+choices then deposits 1,026 ``boundary_spliced`` + 526 ``sj`` records inside the **gdna** partition —
 which ``OracleTruth._validate`` refuses, correctly, because gDNA cannot splice. The ladder is built
 with EQUAL configured fragment lengths, so span collisions are the common case there by construction.
 ⭐ So both sides run undrained, and the caveat is PRICED rather than waved at: the ``drained`` arm
@@ -158,9 +158,9 @@ PRIOR_FIELDS = ("gdna_prior_count", "rna_prior_count", "gdna_eff_len")
 OVERRIDE_FIELDS = (
     "mass_gdna_region",
     "mass_rna_region",
-    "mass_gdna_edge",
-    "mass_rna_edge",
-    "mass_rna_spliced_edge",
+    "mass_gdna_boundary",
+    "mass_rna_boundary",
+    "mass_rna_spliced_boundary",
     "mass_rna_junction",
 )
 
@@ -378,11 +378,11 @@ def assemble_share_arm(override: dict, shares: dict, calibration, region_arrays,
     """**S**, from a mass override and the true per-component shares. See :func:`share_priors`."""
     truth_cal = dataclasses.replace(calibration, **override)
     gdna = PRIORS.assemble_priors(
-        dataclasses.replace(truth_cal, edge_mass_per_crossing=shares["gdna"]),
+        dataclasses.replace(truth_cal, boundary_mass_per_crossing=shares["gdna"]),
         region_arrays, multi_loci,
     )
     rna = PRIORS.assemble_priors(
-        dataclasses.replace(truth_cal, edge_mass_per_crossing=shares["rna"]),
+        dataclasses.replace(truth_cal, boundary_mass_per_crossing=shares["rna"]),
         region_arrays, multi_loci,
     )
     return PRIORS.LocusPriors(
@@ -448,7 +448,7 @@ def share_priors(oracle: OracleTruth, calibration, region_arrays, multi_loci):
 def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
     """⭐ Is ``gdna_eff_len`` clamped by an INCIDENCE-support sum rather than the genomic span?
 
-    ``assemble_priors`` clamps ``gdna_eff_len`` to ``span = Σ share·(S_region + S_edge)``. ``S_edge`` is
+    ``assemble_priors`` clamps ``gdna_eff_len`` to ``span = Σ share·(S_region + S_boundary)``. ``S_boundary`` is
     ``E_g[w − 1] ≈ mu_g − 1`` PER LINE, so every interior line adds most of a fragment length to a
     locus whose regions may be a few hundred bases — an incidence-like sum, not a genomic extent. The EM
     divides the gDNA component's abundance by this array, so an inflation here is a direct scale error
@@ -458,12 +458,12 @@ def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
     what the consumer feels rather than what an unweighted locus average would say
     (``TRAPS: weight-it-like-the-consumer``).
     """
-    # ⭐ Regions and edges are projected on their OWN axes, exactly as `assemble_priors` does — no line is
+    # ⭐ Regions and boundaries are projected on their OWN axes, exactly as `assemble_priors` does — no line is
     # folded onto a flank region. Re-deriving the fold here would measure a span the assembler no longer
     # builds (`TRAPS: a-test-that-redefines`).
     n_loci = len(multi_loci)
     region_support = np.maximum(np.asarray(calibration.gdna_region_eff_len, np.float64), 0.0)
-    edge_support = np.maximum(np.asarray(calibration.gdna_edge_eff_len, np.float64), 0.0)
+    boundary_support = np.maximum(np.asarray(calibration.gdna_boundary_eff_len, np.float64), 0.0)
     proj = PRIORS._project_regions_to_loci(
         region_arrays, multi_loci, n_loci,
         {
@@ -471,9 +471,9 @@ def eff_len_inflation(calibration, region_arrays, multi_loci) -> dict:
             "genomic": np.asarray(region_arrays.region_size_bp, np.float64),
         },
     )
-    e_idx, e_lid, e_w = PRIORS._edge_locus_shares(region_arrays, multi_loci, n_loci)
+    e_idx, e_lid, e_w = PRIORS._boundary_locus_shares(region_arrays, multi_loci, n_loci)
     proj["support"] = proj["region_only"] + PRIORS._sum_by_locus(
-        e_idx, e_lid, e_w, edge_support, n_loci
+        e_idx, e_lid, e_w, boundary_support, n_loci
     )
     live = proj["genomic"] > 0
     ratio = np.divide(proj["support"], proj["genomic"], out=np.ones_like(proj["support"]), where=live)
@@ -709,7 +709,7 @@ def _calibrate_and_prior(payload, strand_model, buffer, stats, index, ra, pipeli
     from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
     from rigel.calibration.junction_opportunity import crossing_probability_from_index
     from rigel.calibration.splice_graph import (
-        build_edge_flags_array,
+        build_boundary_flags_array,
         build_junction_geometry_arrays,
     )
 
@@ -727,7 +727,7 @@ def _calibrate_and_prior(payload, strand_model, buffer, stats, index, ra, pipeli
         rna_fl_pmf=fl.rna_pmf,
         config=pipeline_config.calibration,
         junctions=build_junction_geometry_arrays(index),
-        edge_flags=build_edge_flags_array(index),
+        boundary_flags=build_boundary_flags_array(index),
     )
     multi_loci, priors, units = capture_priors(
         buffer, index, strand_model, fl, ra, stats, cal, payload, pipeline_config
@@ -807,7 +807,7 @@ def measure_condition(bam, index, pipeline_config, work_dir, tag, *, oracle_cach
         }
         drain["n_ambiguous"] = int(n_amb)
         drain["gdna_spliced_leak"] = int(
-            np.asarray(parts_d["gdna"].edge_spliced_count, np.int64).sum()
+            np.asarray(parts_d["gdna"].boundary_spliced_count, np.int64).sum()
             + np.asarray(parts_d["gdna"].sj_count, np.int64).sum()
         )
         # ⚠ A SECOND SCAN, and it buys one thing: a fresh fragment BUFFER. The first was handed to

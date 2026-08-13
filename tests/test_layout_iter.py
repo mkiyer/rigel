@@ -67,7 +67,7 @@ def test_single_transcript_in_middle_three_spans():
     assert spans[2] == _IntergenicSpan(400, 1000)
 
 
-def test_transcript_at_left_edge_no_left_intergenic():
+def test_transcript_at_left_boundary_no_left_intergenic():
     t = _mk_tx(0, "chr1", Strand.POS, [(0, 200)])
     spans = list(_iter_reference_layout(500, [t]))
     _assert_tiles(spans, 500)
@@ -76,7 +76,7 @@ def test_transcript_at_left_edge_no_left_intergenic():
     assert spans[1] == _IntergenicSpan(200, 500)
 
 
-def test_transcript_at_right_edge_no_right_intergenic():
+def test_transcript_at_right_boundary_no_right_intergenic():
     t = _mk_tx(0, "chr1", Strand.POS, [(800, 1000)])
     spans = list(_iter_reference_layout(1000, [t]))
     _assert_tiles(spans, 1000)

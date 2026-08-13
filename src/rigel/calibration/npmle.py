@@ -357,7 +357,7 @@ class DensityNPMLE:
         In a mode the responsibilities concentrate ⇒ ``var_proj ≈ h²`` (the count-zero-information max-precision
         floor); in the valley between two modes they split ⇒ the between-component term (the mode gap²) spikes.
         COUNT-FREE — the enrichment landscape only; the count enters the message precision solely as ``1/M_src``.
-        The per-edge transfer variance is ``var_proj[dst] + (mu_proj[dst] − mu_proj[src])²`` (TRAPS: specificity-and-sense-are-complements). Chunked for
+        The per-boundary transfer variance is ``var_proj[dst] + (mu_proj[dst] − mu_proj[src])²`` (TRAPS: specificity-and-sense-are-complements). Chunked for
         genome scale (the ``(n, G)`` responsibility matrix never materialises whole)."""
         eff = np.maximum(np.asarray(eff, dtype=np.float64), _EPS)
         mass = np.maximum(np.asarray(mass, dtype=np.float64), _EPS)

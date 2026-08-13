@@ -77,7 +77,7 @@ def _sorted_counts(pr, index):
     return pr.estimator.get_counts_df(index).sort_values("transcript_id").reset_index(drop=True)
 
 
-def test_scan_read_name_batch_size_edges_match(tmp_path):
+def test_scan_read_name_batch_size_boundaries_match(tmp_path):
     sc, result = _make_scenario(tmp_path, n_fragments=120)
     index = result.index
     try:

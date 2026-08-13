@@ -192,7 +192,7 @@ def main() -> int:
         tot_diff += nd
 
     sub = g["region_arrays"]
-    for nm, fn in (("chain_region_deconv", SW.chain_region_deconv), ("chain_edge_deconv", SW.chain_edge_deconv)):
+    for nm, fn in (("chain_region_deconv", SW.chain_region_deconv), ("chain_boundary_deconv", SW.chain_boundary_deconv)):
         try:
             a = fn(g["chain"], old, sub)
             b = fn(g["chain"], new, sub)

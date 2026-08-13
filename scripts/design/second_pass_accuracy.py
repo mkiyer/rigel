@@ -153,7 +153,7 @@ def _defect_table(deferred, choices, truth, ref_map, payload, index, junctions, 
     span_all = deferred.end.astype(np.int64) - deferred.start.astype(np.int64)
 
     mu = float((np.arange(fl.global_pmf.shape[0]) * fl.global_pmf).sum())
-    edges = (0.0, 0.5 * mu, 1.0 * mu, 2.0 * mu, 4.0 * mu, float("inf"))
+    boundaries = (0.0, 0.5 * mu, 1.0 * mu, 2.0 * mu, 4.0 * mu, float("inf"))
     labels = ("<0.5 mu", "0.5-1 mu", "1-2 mu", "2-4 mu", ">=4 mu")
     #: [bin] -> [n_true_spliced, chose_genomic, n_true_genomic, chose_spliced]
     tally = np.zeros((len(labels), 4), np.int64)
@@ -193,7 +193,7 @@ def _defect_table(deferred, choices, truth, ref_map, payload, index, junctions, 
         if not correct:
             continue
         chosen = int(choices[i])
-        b = int(np.searchsorted(np.asarray(edges[1:], np.float64), min(reaches), side="right"))
+        b = int(np.searchsorted(np.asarray(boundaries[1:], np.float64), min(reaches), side="right"))
         b = min(b, len(labels) - 1)
         true_spliced = all(kinds[c] for c in correct)
         true_genomic = all(not kinds[c] for c in correct)
@@ -239,7 +239,7 @@ def main() -> int:
         "--defect",
         action="store_true",
         help="⭐⭐ the SPLICED-vs-GENOMIC confusion, stratified by the junction's EXONIC REACH. "
-             "The genomic hypothesis reads `edge_unspliced_inv_length_sum`, whose `1/(w-1)` deposit "
+             "The genomic hypothesis reads `boundary_unspliced_inv_length_sum`, whose `1/(w-1)` deposit "
              "cancels its `w-1` opportunity EXACTLY, so E = rho. The spliced hypothesis reads "
              "`sj_inv_length_sum`, same quantum but a TAPERED opportunity, so "
              "E = rho * E[A_j(w)/(w-1)] < rho — the shortfall growing as the flanking exons shorten. "

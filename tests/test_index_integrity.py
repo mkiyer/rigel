@@ -572,12 +572,12 @@ class TestLargerIndex:
 
 
 # ═════════════════════════════════════════════════════════════════════
-# Edge cases
+# Boundary cases
 # ═════════════════════════════════════════════════════════════════════
 
 
 class TestEdgeCases:
-    """Edge cases: empty SJs, single-exon transcripts."""
+    """Boundary cases: empty SJs, single-exon transcripts."""
 
     @pytest.fixture
     def single_exon_index(self, tmp_path_factory):

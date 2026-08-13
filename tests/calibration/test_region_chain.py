@@ -1,4 +1,4 @@
-"""The region<->edge chain: `N E N E ... E N`, and there are NO terminal slots.
+"""The region<->boundary chain: `N E N E ... E N`, and there are NO terminal slots.
 
      (S5.d)
 
@@ -16,21 +16,21 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rigel.calibration.region_chain import EDGE, REGION, build_region_chain
+from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain
 
 
 def _chain(regions_per_ref):
-    """Build from per-reference region counts, deriving the edge offsets the way the payload does."""
+    """Build from per-reference region counts, deriving the boundary offsets the way the payload does."""
     region_offsets = np.concatenate([[0], np.cumsum(regions_per_ref)]).astype(np.int64)
-    edges_per_ref = np.maximum(np.asarray(regions_per_ref) - 1, 0)
-    edge_offsets = np.concatenate([[0], np.cumsum(edges_per_ref)]).astype(np.int64)
-    return build_region_chain(region_offsets, edge_offsets)
+    boundaries_per_ref = np.maximum(np.asarray(regions_per_ref) - 1, 0)
+    boundary_offsets = np.concatenate([[0], np.cumsum(boundaries_per_ref)]).astype(np.int64)
+    return build_region_chain(region_offsets, boundary_offsets)
 
 
-def test_a_reference_alternates_REGION_EDGE_and_ENDS_ON_A_REGION():
+def test_a_reference_alternates_REGION_BOUNDARY_and_ENDS_ON_A_REGION():
     chain = _chain([4])
-    assert chain.n_regions_total == 4 and chain.n_edges_total == 3
-    assert list(chain.kind) == [REGION, EDGE, REGION, EDGE, REGION, EDGE, REGION]
+    assert chain.n_regions_total == 4 and chain.n_boundaries_total == 3
+    assert list(chain.kind) == [REGION, BOUNDARY, REGION, BOUNDARY, REGION, BOUNDARY, REGION]
     assert list(chain.obj_idx) == [0, 0, 1, 1, 2, 2, 3]
 
 
@@ -41,7 +41,7 @@ def test_the_chain_length_is_2k_minus_1_not_2k_plus_1():
         assert _chain([k]).n_slots == 2 * k - 1
 
 
-def test_a_SINGLE_REGION_reference_has_no_edges_and_is_still_a_slot():
+def test_a_SINGLE_REGION_reference_has_no_boundaries_and_is_still_a_slot():
     """1 bp and single-region references are legal — 15,687 regions of length 1 exist at human scale — and a
     reference with one region has zero interior lines, not one."""
     chain = _chain([1])
@@ -53,7 +53,7 @@ def test_a_SINGLE_REGION_reference_has_no_edges_and_is_still_a_slot():
 def test_a_reference_with_NO_regions_contributes_NOTHING():
     chain = _chain([3, 0, 2])
     assert chain.n_slots == (2 * 3 - 1) + 0 + (2 * 2 - 1)
-    assert chain.n_regions_total == 5 and chain.n_edges_total == 3
+    assert chain.n_regions_total == 5 and chain.n_boundaries_total == 3
 
 
 def test_references_do_not_BLEED_into_each_other():
@@ -76,33 +76,33 @@ def test_adjacency_is_symmetric_and_alternates_TYPE():
             assert chain.kind[right] != chain.kind[slot], "the chain is bipartite"
 
 
-def test_an_EDGE_always_has_a_region_on_BOTH_sides():
-    """An edge is the line BETWEEN two regions, so it can never be a terminal. This is the invariant the
+def test_an_BOUNDARY_always_has_a_region_on_BOTH_sides():
+    """An boundary is the line BETWEEN two regions, so it can never be a terminal. This is the invariant the
     old shape could not state: its terminal boundaries had exactly one flank."""
     chain = _chain([5, 2, 1])
-    for slot in np.flatnonzero(np.asarray(chain.kind) == EDGE):
+    for slot in np.flatnonzero(np.asarray(chain.kind) == BOUNDARY):
         assert chain.left[slot] >= 0 and chain.right[slot] >= 0
 
 
-def test_edge_e_sits_between_region_e_and_region_e_plus_one():
+def test_boundary_e_sits_between_region_e_and_region_e_plus_one():
     """The endpoints are IMPLICIT — that is the design's word — so this arithmetic is the contract."""
     chain = _chain([4])
-    for slot in np.flatnonzero(np.asarray(chain.kind) == EDGE):
+    for slot in np.flatnonzero(np.asarray(chain.kind) == BOUNDARY):
         e = int(chain.obj_idx[slot])
         assert int(chain.obj_idx[chain.left[slot]]) == e
         assert int(chain.obj_idx[chain.right[slot]]) == e + 1
 
 
 def test_obj_idx_is_a_bijection_onto_each_axis():
-    """Every region and every edge appears exactly once; nothing is visited twice or skipped."""
+    """Every region and every boundary appears exactly once; nothing is visited twice or skipped."""
     chain = _chain([4, 1, 3])
     kind = np.asarray(chain.kind)
     idx = np.asarray(chain.obj_idx)
     assert sorted(idx[kind == REGION]) == list(range(chain.n_regions_total))
-    assert sorted(idx[kind == EDGE]) == list(range(chain.n_edges_total))
+    assert sorted(idx[kind == BOUNDARY]) == list(range(chain.n_boundaries_total))
 
 
-def test_an_INCONSISTENT_edge_count_is_REFUSED_with_the_arithmetic_named():
+def test_an_INCONSISTENT_boundary_count_is_REFUSED_with_the_arithmetic_named():
     """Both offset arrays come from ONE payload, so a mismatch is an accumulator inconsistency rather
     than a stale index — and the error must say so, or the reader rebuilds the index for nothing."""
     with pytest.raises(ValueError, match="k regions has exactly k-1"):
@@ -126,7 +126,7 @@ def test_the_predecessors_TERMINAL_SLOT_SHAPE_is_GONE():
     assert chain.n_slots == 2 * 4 - 1, "k regions must give 2k-1 slots, never k + (k+1)"
     assert chain.kind[0] == REGION and chain.kind[-1] == REGION, "the chain starts and ends with a REGION"
     # ⭐ the invariant the predecessor could not state: every BOUNDARY has a region on BOTH sides.
-    # ⚠ The constant is still spelled EDGE until stage 3 of the rename; the SHAPE is what is pinned.
+    # ⚠ The constant is still spelled BOUNDARY until stage 3 of the rename; the SHAPE is what is pinned.
     for i in range(chain.n_slots):
-        if chain.kind[i] == EDGE:
+        if chain.kind[i] == BOUNDARY:
             assert chain.left[i] >= 0 and chain.right[i] >= 0

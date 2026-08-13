@@ -296,7 +296,7 @@ class _Accumulators:
     observed intron reads as unannotated, so the junction banks stay at zero and the tally still looks
     well-formed — the C++ refuses the same omission on the scan path for exactly this reason. The scorer
     only needs ``length_under`` and would survive without it; the drain would silently credit no junction
-    edge at all.
+    boundary at all.
 
     ⚠ ``region_types`` comes from the INDEX. The payload echoes the cut axis but not the typing, and the
     typing is what assigns a deposit to a length pool.
@@ -412,7 +412,7 @@ def score_held_fragments(
         ]
         acc = accumulators[ref]
         cut_lo, cut_hi = int(payload.ref_cut_offsets[ref]), int(payload.ref_cut_offsets[ref + 1])
-        edge_base = int(payload.ref_edge_offsets[ref])
+        boundary_base = int(payload.ref_boundary_offsets[ref])
         # ⭐ The region the GENOMIC hypothesis claims is contiguous and every spliced one jumps: the union
         # of the competing implied introns. Scoring `∅` over exactly this — rather than over its whole
         # path — is what keeps the comparison symmetric, since otherwise `∅` is penalised simply for
@@ -440,7 +440,7 @@ def score_held_fragments(
             # -- rho ------------------------------------------------------------------------------
             if introns:
                 # A spliced path's evidence is the junctions it uses. ⚠ `sj_inv_length_sum` is deposited
-                # by the SAME rule as a contiguous edge, so the two are the same quantity on the same
+                # by the SAME rule as a contiguous boundary, so the two are the same quantity on the same
                 # scale — that is what makes this comparable to `∅`'s number at all.
                 motif = observed_motif if observed_motif != int(Strand.NONE) else implied_strand
                 observed_densities = []
@@ -452,14 +452,14 @@ def score_held_fragments(
                 density[slot] = _bottleneck(observed_densities)
             else:
                 # The genomic path's evidence is the unspliced crossing density where the others jump.
-                edge_densities = []
+                boundary_densities = []
                 for a, b in contested:
                     first, last = _distinguishing_lines(cuts, cut_lo, cut_hi, a, b)
                     for line in range(first, last):
-                        edge_densities.append(
-                            float(payload.edge_unspliced_inv_length_sum[edge_base + line - 1])
+                        boundary_densities.append(
+                            float(payload.boundary_unspliced_inv_length_sum[boundary_base + line - 1])
                         )
-                density[slot] = _bottleneck(edge_densities)
+                density[slot] = _bottleneck(boundary_densities)
 
             # -- f(L) -----------------------------------------------------------------------------
             pmf = rna_pmf if introns else global_pmf
@@ -713,7 +713,7 @@ def _gather_delta(
     """
     axis_offsets = {
         "region": payload.ref_region_offsets,
-        "edge": payload.ref_edge_offsets,
+        "boundary": payload.ref_boundary_offsets,
         "sj": payload.ref_sj_offsets,
     }
     delta = {name: np.zeros_like(getattr(payload, name)) for name, _axis in ADDITIVE_AXES}

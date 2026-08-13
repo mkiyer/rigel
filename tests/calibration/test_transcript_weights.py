@@ -45,7 +45,7 @@ PMF[FL] = 1.0
 def _patched_junctions(monkeypatch):
     """⚠ A pytest fixture does not cross modules, so this is declared here rather than imported —
     the same stub ``test_transcript_path`` uses, for the same reason: the fixture index carries its
-    junction edges directly, and these gates are about the WEIGHT, not about the CSR builder."""
+    junction boundaries directly, and these gates are about the WEIGHT, not about the CSR builder."""
     import rigel.calibration.splice_graph as SG
 
     class _JA:
@@ -57,38 +57,38 @@ def _patched_junctions(monkeypatch):
 
 
 def _calibration(
-    n_regions, n_edges, n_junctions, *, region_mass, region_opp, edge_mass=None, edge_opp=None
+    n_regions, n_boundaries, n_junctions, *, region_mass, region_opp, boundary_mass=None, boundary_opp=None
 ) -> CalibrationResult:
     """A real ``CalibrationResult`` — not a stand-in, so a schema change reaches these gates."""
-    z_n, z_e, z_j = (np.zeros(n) for n in (n_regions, n_edges, n_junctions))
+    z_n, z_e, z_j = (np.zeros(n) for n in (n_regions, n_boundaries, n_junctions))
     return CalibrationResult(
         mass_gdna_region=z_n.copy(),
         mass_rna_region=np.asarray(region_mass, dtype=np.float64),
-        mass_gdna_edge=z_e.copy(),
-        mass_rna_edge=z_e.copy() if edge_mass is None else np.asarray(edge_mass, dtype=np.float64),
-        mass_rna_spliced_edge=z_e.copy(),
-        edge_mass_per_crossing=np.ones(n_edges),
+        mass_gdna_boundary=z_e.copy(),
+        mass_rna_boundary=z_e.copy() if boundary_mass is None else np.asarray(boundary_mass, dtype=np.float64),
+        mass_rna_spliced_boundary=z_e.copy(),
+        boundary_mass_per_crossing=np.ones(n_boundaries),
         mass_rna_junction=z_j.copy(),
-        edge_spliced_mass_per_crossing=np.ones(n_edges),
+        boundary_spliced_mass_per_crossing=np.ones(n_boundaries),
         junction_mass_per_crossing=np.ones(n_junctions),
         gdna_region_eff_len=np.ones(n_regions),
-        gdna_edge_eff_len=np.ones(n_edges),
+        gdna_boundary_eff_len=np.ones(n_boundaries),
         rna_region_eff_len=np.asarray(region_opp, dtype=np.float64),
-        rna_edge_eff_len=np.ones(n_edges)
-        if edge_opp is None
-        else np.asarray(edge_opp, dtype=np.float64),
+        rna_boundary_eff_len=np.ones(n_boundaries)
+        if boundary_opp is None
+        else np.asarray(boundary_opp, dtype=np.float64),
         gdna_frac_region=z_n.copy(),
         rna_pos_frac_region=np.ones(n_regions),
         rna_neg_frac_region=z_n.copy(),
-        gdna_frac_edge=z_e.copy(),
-        rna_pos_frac_edge=np.ones(n_edges),
-        rna_neg_frac_edge=z_e.copy(),
+        gdna_frac_boundary=z_e.copy(),
+        rna_pos_frac_boundary=np.ones(n_boundaries),
+        rna_neg_frac_boundary=z_e.copy(),
         gdna_density_global=0.0,
         rna_sense_frac=1.0,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,
         n_regions=n_regions,
-        n_edges=n_edges,
+        n_boundaries=n_boundaries,
         n_junctions=n_junctions,
         config=CalibrationConfig(),
     )
@@ -126,17 +126,17 @@ def test_a_transcript_ALONE_on_its_path_recovers_its_OWN_abundance(
     region_mass = np.zeros(regions.n_regions)
     region_mass[1] = region_mass[2] = rate * ceff_region
     region_opp = np.full(regions.n_regions, ceff_region)
-    n_edges = regions.n_regions - 1
-    edge_mass = np.zeros(n_edges)
-    edge_mass[1] = rate * crossing_opp
+    n_boundaries = regions.n_regions - 1
+    boundary_mass = np.zeros(n_boundaries)
+    boundary_mass[1] = rate * crossing_opp
     cal = _calibration(
         regions.n_regions,
-        n_edges,
+        n_boundaries,
         1,
         region_mass=region_mass,
         region_opp=region_opp,
-        edge_mass=edge_mass,
-        edge_opp=np.full(n_edges, crossing_opp),
+        boundary_mass=boundary_mass,
+        boundary_opp=np.full(n_boundaries, crossing_opp),
     )
 
     w = TW.build_weights(cal, regions, idx, PMF, mode=mode, opportunity="total")
@@ -239,7 +239,7 @@ def test_the_two_opportunities_are_DIFFERENT_quantities(tmp_path, _patched_junct
 def test_a_path_that_is_ENTIRELY_ZERO_gets_weight_EXACTLY_ZERO(
     tmp_path, _patched_junctions, mode, opportunity
 ):
-    """⛔⛔ **THE LOAD-BEARING CASE, NOT AN EDGE CASE.** 4,579 of 8,750 annotated transcripts are silent
+    """⛔⛔ **THE LOAD-BEARING CASE, NOT AN BOUNDARY CASE.** 4,579 of 8,750 annotated transcripts are silent
     at ``g00``, and a zero weight is EXACTLY absorbing — so this is the whole of the prior's ability to
     say a transcript is absent. Every one of `ROADMAP.md` §4.1's eleven refused mechanisms was a rule
     for resolving doubt that lifted an evidence-free object OFF zero, and the refused first attempt's

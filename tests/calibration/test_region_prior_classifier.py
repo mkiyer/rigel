@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from rigel.calibration.region_chain import EDGE, REGION, build_region_chain
+from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain
 from rigel.calibration.region_geometry import build_region_statics
 from rigel.calibration.signature import (
     BIT_EXON_NEG,
@@ -20,15 +20,15 @@ from rigel.calibration.signature import (
 )
 
 
-def _substrate(n_regions, n_edges):
+def _substrate(n_regions, n_boundaries):
     """A zero-count substrate of the right shape — the classifier under test is signature-only, so the
-    counts are irrelevant and only ``edge_spliced`` is read (for ``spliced_count``)."""
+    counts are irrelevant and only ``boundary_spliced`` is read (for ``spliced_count``)."""
 
     def view(n):
         return SimpleNamespace(count=np.zeros((n, 2)))
 
     return SimpleNamespace(
-        region_contained=view(n_regions), edge_unspliced=view(n_edges), edge_spliced=view(n_edges)
+        region_contained=view(n_regions), boundary_unspliced=view(n_boundaries), boundary_spliced=view(n_boundaries)
     )
 
 
@@ -37,7 +37,7 @@ def _build_statics(region_sigs):
     ``(chain, statics)``.
 
     ⭐ ``k`` regions own ``k − 1`` interior lines and there are **no terminal slots** — so the old
-    "boundary 0 is the reference-start sink" case does not exist to be classified any more. An edge
+    "boundary 0 is the reference-start sink" case does not exist to be classified any more. An boundary
     always has a region on both sides, which is what lets `build_region_statics` read its flanks straight
     off the chain's adjacency instead of a ``left_region``/``right_region`` array with ``-1`` holes.
     """
@@ -48,14 +48,14 @@ def _build_statics(region_sigs):
         signature=sig,
         region_size_bp=np.full(n_reg, 1000.0),
     )
-    n_edge = max(n_reg - 1, 0)
-    chain = build_region_chain(np.array([0, n_reg]), np.array([0, n_edge]))
+    n_boundary = max(n_reg - 1, 0)
+    chain = build_region_chain(np.array([0, n_reg]), np.array([0, n_boundary]))
     return chain, build_region_statics(chain, region_arrays)
 
 
 def test_classifier_covers_region_and_boundary_types():
     # N0 exon+ | N1 exon+ | N2 intron+ | N3 intergenic | N4 ambig-exon | N5 ambig-exon
-    # edges (5): E0(N0|N1) E1(N1|N2) E2(N2|N3) E3(N3|N4) E4(N4|N5) — no terminals
+    # boundaries (5): E0(N0|N1) E1(N1|N2) E2(N2|N3) E3(N3|N4) E4(N4|N5) — no terminals
     sigs = [
         BIT_EXON_POS,
         BIT_EXON_POS,
@@ -74,7 +74,7 @@ def test_classifier_covers_region_and_boundary_types():
 
     kind, ref = np.asarray(chain.kind), np.asarray(chain.obj_idx)
     reg = np.where(kind == REGION)[0]  # N0..N5 (genomic order)
-    bnd = np.where(kind == EDGE)[0]  # E0..E4
+    bnd = np.where(kind == BOUNDARY)[0]  # E0..E4
     np.testing.assert_array_equal(ref[reg], np.arange(6))  # confirm genomic ordering
     np.testing.assert_array_equal(ref[bnd], np.arange(5))
 
@@ -97,7 +97,7 @@ def test_classifier_covers_region_and_boundary_types():
     assert state(reg[3]) == (False, False, False, False)  # intergenic: gDNA sink
     assert state(reg[4]) == (True, True, True, True)  # ambig-exon: mature-capable both strands
 
-    # --- edges: the four types. ⚠ Indices shift by one against the predecessor because the
+    # --- boundaries: the four types. ⚠ Indices shift by one against the predecessor because the
     # reference-start terminal slot no longer exists; E0 is now the first REAL line, N0|N1.
     assert state(bnd[0]) == (True, False, True, False)  # exon↔exon+   : MATURE-CAPABLE
     assert state(bnd[1]) == (True, False, False, False)  # exon↔intron+ : NASCENT-ONLY

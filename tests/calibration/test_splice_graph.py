@@ -57,32 +57,32 @@ def _tx(exons, strand=Strand.POS, ref="chr1", t_id=None, **kw):
 
 def _graph(transcripts, reflen=None):
     reflen = reflen or REF
-    regions, edges = build_splice_graph(transcripts, reflen)
+    regions, boundaries = build_splice_graph(transcripts, reflen)
     with warnings.catch_warnings():
         # Several cases here deliberately build strand-coincident junctions (G18, the per-strand reach
         # case). validate_graph warns on those because they are biologically impossible; the warning
         # itself is asserted by test_strand_coincident_junctions_warn_but_still_work, so it is muted
         # here to keep the suite warning-clean rather than swallowed anywhere it is not already tested.
         warnings.simplefilter("ignore", RuntimeWarning)
-        validate_graph(regions, edges, reflen, transcripts=transcripts)  # I1-I12 on every case
-    return regions, edges
+        validate_graph(regions, boundaries, reflen, transcripts=transcripts)  # I1-I12 on every case
+    return regions, boundaries
 
 
 def _regions(regions):
     return list(zip(regions["start"].tolist(), regions["end"].tolist()))
 
 
-def _junctions(edges):
-    j = edges[edges["kind"] == EDGE_KIND_JUNCTION]
+def _junctions(boundaries):
+    j = boundaries[boundaries["kind"] == EDGE_KIND_JUNCTION]
     return list(zip(j["src"].tolist(), j["dst"].tolist(), j["strand"].tolist()))
 
 
-def _flags_at(regions, edges, pos):
-    """The flags on the contiguous edge at genomic position ``pos``."""
-    c = edges[edges["kind"] == EDGE_KIND_CONTIGUOUS]
+def _flags_at(regions, boundaries, pos):
+    """The flags on the contiguous boundary at genomic position ``pos``."""
+    c = boundaries[boundaries["kind"] == EDGE_KIND_CONTIGUOUS]
     ends = regions["end"].to_numpy()
     hit = [int(f) for s, f in zip(c["src"].tolist(), c["flags"].tolist()) if ends[s] == pos]
-    assert len(hit) == 1, f"expected one contiguous edge at {pos}, found {len(hit)}"
+    assert len(hit) == 1, f"expected one contiguous boundary at {pos}, found {len(hit)}"
     return hit[0]
 
 
@@ -92,17 +92,17 @@ def _flags_at(regions, edges, pos):
 
 
 def test_G1_single_exon_transcript():
-    """3 regions (upstream / exon / downstream), 2 contiguous edges, 0 junctions, TSS+TES on the two."""
+    """3 regions (upstream / exon / downstream), 2 contiguous boundaries, 0 junctions, TSS+TES on the two."""
     n, e = _graph([_tx([(500, 800)])])
     assert _regions(n) == [(0, 500), (500, 800), (800, 2000)]
     assert int((e["kind"] == EDGE_KIND_CONTIGUOUS).sum()) == 2
     assert _junctions(e) == []
-    assert _flags_at(n, e, 500) & FLAG_TSS_POS  # + strand: 5' end is the low edge
+    assert _flags_at(n, e, 500) & FLAG_TSS_POS  # + strand: 5' end is the low boundary
     assert _flags_at(n, e, 800) & FLAG_TES_POS
 
 
 def test_G2_two_exon_transcript():
-    """One junction edge donor→acceptor; the intron region exists and is not on the transcript's path."""
+    """One junction boundary donor→acceptor; the intron region exists and is not on the transcript's path."""
     n, e = _graph([_tx([(500, 700), (1200, 1500)])])
     assert _regions(n) == [(0, 500), (500, 700), (700, 1200), (1200, 1500), (1500, 2000)]
     assert _junctions(e) == [(1, 3, Strand.POS)]
@@ -130,14 +130,14 @@ def test_G5_alternative_TES_inside_another_exon():
 
 
 def test_G6_position_is_both_terminus_and_junction():
-    """⭐ TES_s AND DONOR_s on one edge — the case the 4-bit signature is structurally blind to."""
+    """⭐ TES_s AND DONOR_s on one boundary — the case the 4-bit signature is structurally blind to."""
     n, e = _graph([_tx([(400, 800)], t_id="ends"), _tx([(200, 800), (1200, 1500)], t_id="splices")])
     f = _flags_at(n, e, 800)
     assert f & FLAG_TES_POS and f & FLAG_DONOR_POS
 
 
 def test_G7_exon_skipping():
-    """Two junction edges out of A's last region; the undirected graph now has a cycle."""
+    """Two junction boundaries out of A's last region; the undirected graph now has a cycle."""
     n, e = _graph(
         [
             _tx([(200, 400), (700, 900), (1200, 1400)], t_id="abc"),
@@ -157,12 +157,12 @@ def test_G8_mutually_exclusive_exons():
     )
     assert len(_junctions(e)) == 4
     ns = _regions(n)
-    # no edge joins the two alternative exons directly
+    # no boundary joins the two alternative exons directly
     assert (ns.index((500, 700)), ns.index((900, 1100)), Strand.POS) not in _junctions(e)
 
 
 def test_G9_retained_intron():
-    """The intron region carries exon_s AND intron_s; the junction edge spans it."""
+    """The intron region carries exon_s AND intron_s; the junction boundary spans it."""
     n, e = _graph(
         [
             _tx([(300, 500), (800, 1000)], t_id="spliced"),
@@ -175,7 +175,7 @@ def test_G9_retained_intron():
 
 
 def test_G10_overlapping_transcripts_opposite_strands():
-    """AMBIG signature regions; junction edges keep distinct strand; no strand leakage in the flags."""
+    """AMBIG signature regions; junction boundaries keep distinct strand; no strand leakage in the flags."""
     n, e = _graph(
         [
             _tx([(200, 500), (900, 1200)], strand=Strand.POS, t_id="p"),
@@ -203,7 +203,7 @@ def test_G11_nested_transcript_inside_another_intron():
 
 
 def test_G12_shared_exon_endpoint_across_transcripts():
-    """Exactly one cut, one edge — the cut set dedups."""
+    """Exactly one cut, one boundary — the cut set dedups."""
     n, e = _graph([_tx([(400, 800)], t_id="a"), _tx([(400, 800)], t_id="b")])
     assert _regions(n) == [(0, 400), (400, 800), (800, 2000)]
 
@@ -216,13 +216,13 @@ def test_G13_one_bp_region():
 
 
 def test_G14_bookended_exons_no_intron():
-    """Adjacent exons with a zero-length intron: a contiguous edge, NO junction edge."""
+    """Adjacent exons with a zero-length intron: a contiguous boundary, NO junction boundary."""
     n, e = _graph([_tx([(400, 700), (700, 1000)])])
     assert _junctions(e) == []
     assert 700 in n["end"].tolist()
 
 
-def test_G15_transcript_at_reference_edges():
+def test_G15_transcript_at_reference_boundaries():
     """No zero-length region and no duplicate cut when an exon touches 0 or ref_length."""
     n, _e = _graph([_tx([(0, 300), (1700, 2000)])])
     assert int(n["length"].min()) > 0
@@ -237,7 +237,7 @@ def test_G16_reference_with_no_transcripts():
 
 
 def test_G17_two_references():
-    """Region/edge ids contiguous per reference; NO cross-reference edge."""
+    """Region/boundary ids contiguous per reference; NO cross-reference boundary."""
     reflen = {"chr1": 1500, "chr2": 1500}
     n, e = _graph(
         [_tx([(200, 400), (900, 1100)], ref="chr1"), _tx([(300, 500)], ref="chr2")], reflen=reflen
@@ -250,7 +250,7 @@ def test_G17_two_references():
 
 
 def test_G18_coincident_opposite_strand_junctions():
-    """Two junction edges at the same donor/acceptor, distinct strand. Zero occurrences in GENCODE
+    """Two junction boundaries at the same donor/acceptor, distinct strand. Zero occurrences in GENCODE
     (verified on the real index), so this exists to prove it WORKS, not because it fires."""
     n, e = _graph(
         [
@@ -269,8 +269,8 @@ def test_G18_coincident_opposite_strand_junctions():
 # ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 
-def _reach(edges, src, dst, kind, strand=None):
-    row = edges[(edges["src"] == src) & (edges["dst"] == dst) & (edges["kind"] == kind)]
+def _reach(boundaries, src, dst, kind, strand=None):
+    row = boundaries[(boundaries["src"] == src) & (boundaries["dst"] == dst) & (boundaries["kind"] == kind)]
     if strand is not None:
         row = row[row["strand"] == strand]
     assert len(row) == 1
@@ -308,7 +308,7 @@ def test_reach_is_maximal_over_isoforms_independently_per_side():
 def test_reach_is_per_strand_and_does_not_mix():
     """⚠ plan TRAPS: pure-and-length-censored: the two strands have different reaches at the SAME endpoints and must not be conflated.
 
-    Both transcripts splice 200→600, so this is also a G18 coincident-junction pair: two edges sharing
+    Both transcripts splice 200→600, so this is also a G18 coincident-junction pair: two boundaries sharing
     ``(src, dst)`` and differing only in strand. Each must carry its OWN reach in its OWN columns and
     zero in the other strand's — a strand-agnostic maximum would give the + junction the − transcript's
     1000 bp downstream reach and over-state its mature opportunity 10-fold.
@@ -325,8 +325,8 @@ def test_reach_is_per_strand_and_does_not_mix():
     assert _reach(e, src, dst, EDGE_KIND_JUNCTION, Strand.NEG) == (0, 0, 200, 1000)
 
 
-def test_reach_on_a_contiguous_edge_inside_an_exon():
-    """⭐ plan TRAPS: a-purity-filter-is-a-length-filter/Q1: reaches live on CONTIGUOUS edges too, which is where the taper near a TES bites."""
+def test_reach_on_a_contiguous_boundary_inside_an_exon():
+    """⭐ plan TRAPS: a-purity-filter-is-a-length-filter/Q1: reaches live on CONTIGUOUS boundaries too, which is where the taper near a TES bites."""
     n, e = _graph([_tx([(400, 1000)], t_id="a"), _tx([(700, 1000)], t_id="b")])
     ns = _regions(n)
     i = ns.index((400, 700))
@@ -335,7 +335,7 @@ def test_reach_on_a_contiguous_edge_inside_an_exon():
 
 
 def test_contiguous_reach_is_NONZERO_INSIDE_AN_INTRON():
-    """⭐ The reach on a CONTIGUOUS edge is the genomic distance to the transcript's span ends.
+    """⭐ The reach on a CONTIGUOUS boundary is the genomic distance to the transcript's span ends.
 
     Nascent RNA is an ordinary transcript spanning its gene, so RNA opportunity inside an intron is
     real — the intron is where nascent RNA lives. An exonic reach would report 0 here and so declare
@@ -346,8 +346,8 @@ def test_contiguous_reach_is_NONZERO_INSIDE_AN_INTRON():
     """
     n, e = _graph([_tx([(500, 700), (1200, 1500)])])
     ns = _regions(n)
-    at_left_boundary = ns.index((500, 700))  # the edge at 700, the intron's low end
-    at_right_boundary = ns.index((700, 1200))  # the edge at 1200, the intron's high end
+    at_left_boundary = ns.index((500, 700))  # the boundary at 700, the intron's low end
+    at_right_boundary = ns.index((700, 1200))  # the boundary at 1200, the intron's high end
     assert _reach(e, at_left_boundary, at_left_boundary + 1, EDGE_KIND_CONTIGUOUS) == (200, 800, 0, 0)
     assert _reach(e, at_right_boundary, at_right_boundary + 1, EDGE_KIND_CONTIGUOUS) == (700, 300, 0, 0)
 
@@ -355,13 +355,13 @@ def test_contiguous_reach_is_NONZERO_INSIDE_AN_INTRON():
 def test_reach_is_zero_outside_a_span_and_on_a_strand_with_no_transcript():
     """A reach of 0 is meaningful, not a sentinel — but it now means *no RNA of any form* here.
 
-    Two ways to earn a zero, both asserted: the outward side of a span's own edge (nothing continues
+    Two ways to earn a zero, both asserted: the outward side of a span's own boundary (nothing continues
     past a transcript end), and every position on a strand carrying no transcript at all.
     """
     n, e = _graph([_tx([(500, 700), (1200, 1500)], strand=Strand.POS)])
     ns = _regions(n)
-    at_tss = ns.index((0, 500))  # the edge at 500 — the span's low edge
-    at_tes = ns.index((1200, 1500))  # the edge at 1500 — the span's high edge
+    at_tss = ns.index((0, 500))  # the boundary at 500 — the span's low boundary
+    at_tes = ns.index((1200, 1500))  # the boundary at 1500 — the span's high boundary
     assert _reach(e, at_tss, at_tss + 1, EDGE_KIND_CONTIGUOUS) == (0, 1000, 0, 0)
     assert _reach(e, at_tes, at_tes + 1, EDGE_KIND_CONTIGUOUS) == (1000, 0, 0, 0)
 
@@ -510,7 +510,7 @@ def test_P4_determinism_build_twice_is_identical():
     a_n, a_e = build_splice_graph(txs, REF)
     b_n, b_e = build_splice_graph(list(reversed(txs)), REF)
     assert a_n.equals(b_n), "region table depends on transcript ORDER"
-    assert a_e.equals(b_e), "edge table depends on transcript ORDER"
+    assert a_e.equals(b_e), "boundary table depends on transcript ORDER"
 
 
 def test_P5_every_transcript_walks_on_a_realistic_multilocus_case():
@@ -529,7 +529,7 @@ def test_P5_every_transcript_walks_on_a_realistic_multilocus_case():
 
 
 def test_edge_rows_are_sorted_by_src_kind_dst():
-    """I12 as a contract, not just a validator: out-edges of a region are contiguous ⇒ CSR is one
+    """I12 as a contract, not just a validator: out-boundaries of a region are contiguous ⇒ CSR is one
     searchsorted, which every downstream consumer depends on."""
     n, e = build_splice_graph(_RANDOM_CASES[3] + _RANDOM_CASES[1], REF)
     key = list(zip(e["src"].tolist(), e["kind"].tolist(), e["dst"].tolist()))
@@ -574,7 +574,7 @@ chr1\ttest\texon\t1701\t1900\t.\t-\t.\tgene_id "g2"; transcript_id "t2";
 
 def test_TD1_rebuilds_are_byte_identical(tmp_path_factory):
     """Determinism is an INVARIANT, not an observation: the output is a pure function of
-    (transcripts, ref_lengths) — np.unique sorts, ids come from position, edges from an explicit
+    (transcripts, ref_lengths) — np.unique sorts, ids come from position, boundaries from an explicit
     total order. No dict iteration, no hashing, no parallel reduction."""
     from conftest import build_test_index
 
@@ -594,8 +594,8 @@ def test_index_build_writes_and_loads_the_graph(tmp_path_factory):
     idx = build_test_index(tmp_path_factory, _INTEGRATION_GTF, genome_size=2000, name="sg_int")
     assert idx.regions_df is not None and idx.edges_df is not None
     validate_graph(idx.regions_df, idx.edges_df, idx.ref_lengths)
-    # I6 — ONE edge per DISTINCT (donor, acceptor, strand). t0 and t1 share intron [400,700) despite
-    # different exon extents, so three intron INSTANCES dedup to two junction EDGES.
+    # I6 — ONE boundary per DISTINCT (donor, acceptor, strand). t0 and t1 share intron [400,700) despite
+    # different exon extents, so three intron INSTANCES dedup to two junction BOUNDARIES.
     assert int((idx.edges_df["kind"] == EDGE_KIND_JUNCTION).sum()) == 2
 
 
@@ -620,7 +620,7 @@ def test_strand_coincident_junctions_warn_but_still_work():
     cannot be a valid intron on both strands (a GT..AG intron reverse-complements to CT..AC). Measured:
     ZERO in GENCODE. One in a GTF means the ANNOTATION is wrong.
 
-    The graph must (a) still be CORRECT — two distinct edges, kept apart by the strand in the sort key —
+    The graph must (a) still be CORRECT — two distinct boundaries, kept apart by the strand in the sort key —
     and (b) SAY SO, because silence would let a bad annotation propagate into every downstream density.
     Warning rather than raising, so that this very case stays testable.
     """
@@ -628,16 +628,16 @@ def test_strand_coincident_junctions_warn_but_still_work():
         _tx([(300, 500), (900, 1100)], strand=Strand.POS, t_id="p"),
         _tx([(300, 500), (900, 1100)], strand=Strand.NEG, t_id="m"),
     ]
-    regions, edges = build_splice_graph(txs, REF)
+    regions, boundaries = build_splice_graph(txs, REF)
     with pytest.warns(RuntimeWarning, match="strand-coincident"):
-        validate_graph(regions, edges, REF, transcripts=txs)
-    js = _junctions(edges)
+        validate_graph(regions, boundaries, REF, transcripts=txs)
+    js = _junctions(boundaries)
     assert len(js) == 2 and {st for _s, _d, st in js} == {Strand.POS, Strand.NEG}
 
 
 def test_no_warning_on_a_biologically_normal_annotation():
     txs = [_tx([(300, 500), (900, 1100)], strand=Strand.POS), _tx([(1300, 1400), (1600, 1700)])]
-    regions, edges = build_splice_graph(txs, REF)
+    regions, boundaries = build_splice_graph(txs, REF)
     with warnings.catch_warnings():
         warnings.simplefilter("error")  # any warning fails the test
-        validate_graph(regions, edges, REF, transcripts=txs)
+        validate_graph(regions, boundaries, REF, transcripts=txs)

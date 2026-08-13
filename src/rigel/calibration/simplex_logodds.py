@@ -74,7 +74,7 @@ _JEFFREYS_REF = 0.5
 
 #: ⛔⛔ **THE CERTIFIED-RNA CLAIM IS A LOWER BOUND, AND ψ HAS ALWAYS APPLIED IT AS A TWO-SIDED GAUSSIAN.**
 #: the message policy states the premise in its own words — ``rho_R(exon) >= rho_nu(B) + rho_mu(B)``, because
-#: the exon may also hold molecules that never touch that seam — "and it uses it as an equality". Three
+#: the exon may also hold molecules that never touch that boundary — "and it uses it as an equality". Three
 #: operators price that inequality as a VARIANCE and none prices it as a DIRECTION, which is `TRAPS.md`
 #: TRAPS: a-variance-cannot-fix-a-bias: a variance cannot move a mode toward truth.
 #: ⭐ ``True`` selects the one-sided form: no penalty when the destination holds MORE RNA than the bound,
@@ -277,7 +277,7 @@ def _tilt_grid(n_tilt: int) -> np.ndarray:
 
     Resolution follows the reference measure rather than being uniform in τ: at ``K_t=60`` the τ-spacing is
     ~0.053 near balanced tilt and ~0.0014 near strand-purity (vs a flat 0.034). That is the intended trade —
-    it spends grid on the strand-pure edges, where distinguishing a pure strand from a small antisense leak is
+    it spends grid on the strand-pure boundaries, where distinguishing a pure strand from a small antisense leak is
     the high-stakes call, and economizes on the balanced middle, where the distinction rarely matters.
 
     ``θ = ±π/2`` ⇒ ``τ = ±1`` ⇒ all RNA on one strand; ``θ = 0`` ⇒ balanced. Only AMBIG regions integrate it."""
@@ -369,7 +369,7 @@ def _local_loglik_logodds(
     # ── imputation messages: LOG-FRACTION Gaussians (the overhaul). The mode is a log-FRACTION target
     #    (``log`` of the imputed fraction, built in ``_scan``); evaluated against ``log f_c(λ)``. No clip —
     #    an off-grid target (source denser than the dst can hold) is a bounded monotone pull toward the
-    #    edge, governed by precision (D-plan P6, verify-don't-clip). ──
+    #    boundary, governed by precision (D-plan P6, verify-don't-clip). ──
     log_fg = _log_fg(lam)[None, :]  # log f_g = log σ(λ)
     log_fact = _log1m_fg(lam)[None, :]  # log(1−f_g) = log f_active (the single live strand)
     if gdna_imp_mode is not None and gdna_imp_prec is not None:
@@ -556,7 +556,7 @@ def _solve_ambig_logodds(
         np.asarray(f_neg_ref, F)[:, None, None],
     )
     # ── LOG-fraction grids (the overhaul): log f_g (τ-independent) + log f_pos/f_neg over the cube,
-    #    floored at one pseudo-fragment 1/(n+1) (TRAPS: no-prior-means-haldane: the τ=±1 edges have f_s=0 → log(0); the count floor
+    #    floored at one pseudo-fragment 1/(n+1) (TRAPS: no-prior-means-haldane: the τ=±1 boundaries have f_s=0 → log(0); the count floor
     #    keeps it finite + consistent with pois_log). ──
     log_fg_grid = _log_fg(lam)  # (K,) f64 = log f_g (moments use f64)
     log_fg32 = log_fg_grid.astype(F)  # (K,) f32 for the cube message

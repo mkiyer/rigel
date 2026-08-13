@@ -810,7 +810,7 @@ class TestCombinedStress:
 
 
 class TestEdgeCases:
-    """Boundary conditions and edge cases."""
+    """Boundary conditions and boundary cases."""
 
     def test_extreme_abundance_ratio(self, tmp_path, update_golden):
         """100:1 abundance ratio between isoforms."""

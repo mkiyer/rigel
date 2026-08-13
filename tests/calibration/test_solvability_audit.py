@@ -396,14 +396,14 @@ def test_the_sd_LAMBDA_is_the_solvers_own_tau_and_locked_slots_are_CERTAIN(audit
         assert np.all(np.diff(s) <= 1e-12), "sd(λ) is not monotone-decreasing in τ"
 
 
-def test_a_STRUCTURALLY_LOCKED_EDGE_is_as_DETERMINED_as_a_locked_region(audited):
-    """⛔ ``locked`` was ``~solvable & (kind == REGION)``, so a G1 **edge** — an intergenic↔exon seam,
+def test_a_STRUCTURALLY_LOCKED_BOUNDARY_is_as_DETERMINED_as_a_locked_region(audited):
+    """⛔ ``locked`` was ``~solvable & (kind == REGION)``, so a G1 **boundary** — an intergenic↔exon boundary,
     where RNA cannot cross a gene boundary and the solver pins ``{0,0,1}`` at ``Var(log f_g) = 0`` —
     fell into ``none`` and was EXCLUDED from the scored population as "honest ignorance". It is the
     opposite: it is structurally certain, and correct. Structural certainty is a property of the
     signature, not of which axis the object lives on.
 
-    PERTURBATION: the fixture must actually contain locked edges, and folding them in must move the
+    PERTURBATION: the fixture must actually contain locked boundaries, and folding them in must move the
     scored mass — otherwise the gate is vacuous.
     """
     m, a, cfg = audited
@@ -414,17 +414,17 @@ def test_a_STRUCTURALLY_LOCKED_EDGE_is_as_DETERMINED_as_a_locked_region(audited)
     g1 = ~fp & ~fn
 
     ch = SA.channel_masks(cap, chain, cfg)
-    locked_edges = ch["locked"] & (kind != REGION)
-    assert (g1 & (kind != REGION)).sum() > 0, "no G1 edges in the fixture; the gate is vacuous"
-    assert locked_edges.sum() > 0, "a G1 edge is not classed locked"
+    locked_boundaries = ch["locked"] & (kind != REGION)
+    assert (g1 & (kind != REGION)).sum() > 0, "no G1 boundaries in the fixture; the gate is vacuous"
+    assert locked_boundaries.sum() > 0, "a G1 boundary is not classed locked"
     np.testing.assert_array_equal(ch["locked"], g1)
     assert not (ch["locked"] & ch["none"]).any(), "a locked slot is also 'none'"
 
-    # PERTURBATION: on the EDGE axis those objects must carry mass, or excluding them cost nothing.
-    edge_audit = SA.audit(m, axis="edge", config=cfg)
-    assert edge_audit["channels"]["locked"].sum() > 0, "no locked objects on the edge axis"
-    assert edge_audit["total"][edge_audit["channels"]["locked"] & edge_audit["live"]].sum() > 0, (
-        "the locked edges carry no mass, so their misclassification cost nothing and this gate "
+    # PERTURBATION: on the BOUNDARY axis those objects must carry mass, or excluding them cost nothing.
+    boundary_audit = SA.audit(m, axis="boundary", config=cfg)
+    assert boundary_audit["channels"]["locked"].sum() > 0, "no locked objects on the boundary axis"
+    assert boundary_audit["total"][boundary_audit["channels"]["locked"] & boundary_audit["live"]].sum() > 0, (
+        "the locked boundaries carry no mass, so their misclassification cost nothing and this gate "
         "cannot demonstrate the defect"
     )
 

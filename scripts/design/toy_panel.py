@@ -16,9 +16,9 @@ solver has to resolve is the RATIO, and the left_boundaries' gDNA rates span ~10
 density would put different left_boundaries at completely different true ``f_g`` on the "same" rung.
 
 ⚠ **What it cannot say.** Every cached condition is ``nrna_none``, so on any spec with an intron the
-intron↔exon EDGEs have truth exactly 1.0 and the panel structurally cannot distinguish "no RNA crosses this
-seam" from "no *mature* RNA crosses it". ⛔ Read `docs/TESTING.md` on the panels before concluding anything
-about a seam.
+intron↔exon BOUNDARIES have truth exactly 1.0 and the panel structurally cannot distinguish "no RNA crosses this
+boundary" from "no *mature* RNA crosses it". ⛔ Read `docs/TESTING.md` on the panels before concluding anything
+about a boundary.
 
 ⚠ **Harvesting is 30 s per donor and is deliberately not cached to disk** (`DonorGlobals`' own docstring:
 a stored bundle goes stale on exactly the changes this harness exists to test). So a full 36-condition run
@@ -239,11 +239,11 @@ def main() -> int:
     ap.add_argument("--genome-length", type=int, default=0,
                     help="⛔ CAPTURE-ON NEEDS THIS. The gDNA budget is rate x genome_length while the "
                          "probe footprint is fixed, so a longer chromosome lets capture concentrate a "
-                         "bigger budget onto the same probes and an EDGE's count grows with it. "
+                         "bigger budget onto the same probes and an BOUNDARY's count grows with it. "
                          "`spliced_exons` needs ~120000 on a capture-ON donor (docs/TESTING.md 0b)")
     ap.add_argument("--nrna", type=float, default=0.0,
                     help="nascent abundance. ⭐ THE CONTROL every cached condition lacks: with "
-                         "nrna_none an intron|exon EDGE's truth is exactly 1.000, so the intron-facing "
+                         "nrna_none an intron|exon BOUNDARY's truth is exactly 1.000, so the intron-facing "
                          "identity is only testable non-trivially with this > 0")
     ap.add_argument("--work-dir", type=Path,
                     default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")) / "rigel_toy_panel")

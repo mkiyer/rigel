@@ -154,7 +154,7 @@ def composition_logvar(f_g, E_g, E_r, var_fg, n):
     for a long contained region (composition barely matters), ≈0.4 for a boundary crossing (E_g≠E_r), and
     diverges as ``E_g`` collapses on a short region — so a short region down-weights *itself* as an enrichment
     reference exactly where §2 says it must be excluded, with no ``L ≲ fl_mean`` threshold. At the structural
-    ``f_g = 1`` corner (intergenic / seam, ``Var(f_g) = 0``) it reduces to the pure counting precision ``1/n``,
+    ``f_g = 1`` corner (intergenic / boundary, ``Var(f_g) = 0``) it reduces to the pure counting precision ``1/n``,
     which is why ``M/E_g`` and the blended estimator are bit-identical there (E0 finding 2)."""
     fg, eg, er = _f(f_g), _f(E_g), _f(E_r)
     vfg, nn = _f(var_fg), _f(n)
@@ -168,7 +168,7 @@ def composition_logvar(f_g, E_g, E_r, var_fg, n):
 def graft_frame_logvar(r):
     """the-graft-frame-variance — the GRAFT's **frame-mislift** log-variance: ``(log r)²`` on the MEASURED spliced component.
 
-    the-reframe-scale-variance sets ``σ²_transfer = 0`` on a graft edge because ``r`` is common-mode across the matched set ``{g, R}``
+    the-reframe-scale-variance sets ``σ²_transfer = 0`` on a graft boundary because ``r`` is common-mode across the matched set ``{g, R}``
     and cancels in the composition. That is true of the IMPUTED continue ``ρ_ν``, which travels with ``ρ_g``
     from the same source — but it is **false of the grafted ``ρ_μ``**. The delivered share is
 
@@ -198,7 +198,7 @@ def graft_frame_logvar(r):
     ``w_μ²`` arises implicitly from the inverse-variance fusion with the correctly-framed ``ρ_ν`` arm — a
     graft that is a minority of the RNA is damped proportionately less.
 
-    Calibration (delivered ``λ`` vs oracle, graft edges into exons): ``z2 = E[Δ²]/E[v]`` 58–310 → **2.1–3.8**,
+    Calibration (delivered ``λ`` vs oracle, graft boundaries into exons): ``z2 = E[Δ²]/E[v]`` 58–310 → **2.1–3.8**,
     consistently across capture off and on."""
     rr = _f(r)
     lr = np.log(np.where(rr > _EPS, rr, 1.0))
@@ -234,10 +234,10 @@ def peel_rna_logvar(v_log_rho_R, s2_transfer, v_mu, u):
 
 
 def peel_continue_share(rho_nu, rho_mu):
-    """the-continuing-share — the fraction of a seam's RNA that CONTINUES unspliced: ``w = ρ_ν/(ρ_ν + ρ_μ)``.
+    """the-continuing-share — the fraction of a boundary's RNA that CONTINUES unspliced: ``w = ρ_ν/(ρ_ν + ρ_μ)``.
 
     This is the object that retires the peel's SUBTRACTION. What continues past a junction is a *share* of the
-    RNA at the seam, and a share is **enrichment-free**: capture multiplies the continuing and the splicing
+    RNA at the boundary, and a share is **enrichment-free**: capture multiplies the continuing and the splicing
     channels alike (``ρ_ν = e·c_ν``, ``ρ_μ = e·c_μ``), so ``e`` cancels identically inside ``w``. Both inputs
     are taken in the BOUNDARY's own frame — its solved unspliced-RNA density and its measured spliced density.
 
@@ -252,7 +252,7 @@ def peel_continue_share(rho_nu, rho_mu):
     ``u``'s p75 on real junctions is ≈ 3. MC: `message_variance_mc.py` the-continuing-share, exact to 1e-12.
 
     Degenerate limits, both structural: no spliced flux (``ρ_μ = 0``) ⇒ ``w = 1``, nothing splices away and
-    nothing is peeled; no RNA at the seam at all (``ρ_ν + ρ_μ = 0``) ⇒ ``w = 1``, there is nothing to
+    nothing is peeled; no RNA at the boundary at all (``ρ_ν + ρ_μ = 0``) ⇒ ``w = 1``, there is nothing to
     apportion and the caller's own gates decide. ``w`` is always in ``[0, 1]`` — the peel can no longer go
     negative, which retires the zero-truncation defect (a fully-consumed peel used to emit ``ρ_ν = 0``, "no
     RNA continues past here", at a live precision)."""
@@ -290,8 +290,8 @@ def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
 
     This is the generic DENSITY DECONVOLUTION (`density_deconv`, of which the intron factory is the intron
     special case) with the gDNA density prior supplied by a NEIGHBOUR instead of by the intergenic pool. It is
-    the only gDNA/RNA split available at a seam with no factory within reach and no strand — i.e. at
-    ``exon|exon`` boundaries (97 % have no factory neighbour) and at every seam of a low-gDNA library — and it
+    the only gDNA/RNA split available at a boundary with no factory within reach and no strand — i.e. at
+    ``exon|exon`` boundaries (97 % have no factory neighbour) and at every boundary of a low-gDNA library — and it
     is count-zero-information-legal for the same reason the factory is: the *information* is the imputed gDNA
     DENSITY, and the count only converts that density into a composition::
 
@@ -311,11 +311,11 @@ def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
     non-negative). The estimator is the moment-matched two-sided truncated normal ``f_R | 0 ≤ f_R ≤ 1`` with
     ``f_R ~ N(1−φ, σ_f²)``; ``ρ_ν = E[f_R]·M/E_r``. Each bound earns its keep and neither is optional:
 
-    * **the LOWER bound** is what lets the estimator say something at an RNA-free seam. A naive ``max(·, 0)``
+    * **the LOWER bound** is what lets the estimator say something at an RNA-free boundary. A naive ``max(·, 0)``
       would report density 0 at infinite variance — "no opinion" — exactly where the region in fact holds a
       strong one: that its RNA is below its own noise floor.
     * **the UPPER bound** is what stops it inventing one. The imputed gDNA claim routinely arrives at
-      ``√v_g ≈ 1.0–1.2 nats`` (measured at exon→boundary edges under capture), which makes ``σ_f`` of order 1;
+      ``√v_g ≈ 1.0–1.2 nats`` (measured at exon→boundary boundaries under capture), which makes ``σ_f`` of order 1;
       a one-sided positive part then returns ``E[f_R] ≈ 0.8·σ_f``, i.e. *"most of my mass is RNA"*, asserted
       **out of pure ignorance** and at a confident-looking ``k ≈ 2``. With the upper bound the same ignorance
       degrades to its correct limit — ``σ_f ≫ 1`` ⇒ ``f_R ~ Uniform(0,1)`` ⇒ ``E = ½`` at ``k = 3`` — a wide
@@ -344,7 +344,7 @@ def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
     The three operating limits, and they are the reason this exists:
     * **``ρ_g E_g ≪ M``** (a low-gDNA library — where RNA is the entire signal and the peel's old
       no-evidence default silenced the channel outright): ``ρ_ν → M/E_r`` at ``Var → 1/n``. A MEASUREMENT.
-    * **``ρ_g E_g → M`` with a precise gDNA claim** (an RNA-free seam): ``ρ_ν → 0``, and the log-variance
+    * **``ρ_g E_g → M`` with a precise gDNA claim** (an RNA-free boundary): ``ρ_ν → 0``, and the log-variance
       grows without bound — but the LINEAR statement stays tight (``sd(ρ_ν) ∝ M/(E_r√n)``, i.e. *"below a few
       percent of my mass"*), which is exactly the information a near-zero level carries and exactly why the
       consumer fuses in linear space. This is what reproduces "intronic unspliced fragments are gDNA until
@@ -563,35 +563,35 @@ def mismatch_deflate(precision, gap, contradicted, var_own):
 
 
 def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
-    """⭐ P1d — the GRAFT's PREMISE log-variance, measured from an exon's two flanking seams.
+    """⭐ P1d — the GRAFT's PREMISE log-variance, measured from an exon's two flanking boundaries.
 
-    **The event it prices.** The graft hands an exon the RNA at one seam — ``ρ_ν + ρ_μ`` — as *the* exon's
+    **The event it prices.** The graft hands an exon the RNA at one boundary — ``ρ_ν + ρ_μ`` — as *the* exon's
     RNA density. Every molecule counted there is in the exon, but the exon may also hold molecules that
-    never touch that seam: ones that reach it by the other flank, or that start or end inside it. So what
+    never touch that boundary: ones that reach it by the other flank, or that start or end inside it. So what
     the graft knows is an **inequality**, ``ρ_R(exon) ≥ ρ_ν(B) + ρ_μ(B)``, and it uses it as an equality.
     Nothing else in the ledger prices that. **the-graft-frame-variance comes closest and does not cover it**: the-graft-frame-variance charges
-    ``(log r)²``, i.e. it assumes the only reason a seam and an exon differ is the capture step between
-    them — so off-capture ``r = 1`` and the-graft-frame-variance charges exactly zero, while a seam and a region still differ.
+    ``(log r)²``, i.e. it assumes the only reason a boundary and an exon differ is the capture step between
+    them — so off-capture ``r = 1`` and the-graft-frame-variance charges exactly zero, while a boundary and a region still differ.
     ``1/n_spl`` does not cover it either, and never will however large it grows: a count says *how many I
     counted*, this says *whether what I counted speaks for the exon*.
 
-    **The estimator.** The exon's two flanking seams are two INDEPENDENT statements of the same claim —
+    **The estimator.** The exon's two flanking boundaries are two INDEPENDENT statements of the same claim —
     measured, not assumed: ``corr(log φ_left, log φ_right)`` is **0.017 raw, −0.036 after the Poisson part**
     at capture-OFF over 14 conditions (0.30 under capture, where the two do share a frame error). So the
     part of their squared gap that their own noise cannot explain IS the premise variance, halved because
-    each seam carries half of the gap::
+    each boundary carries half of the gap::
 
         v_premise = max(0, d² − v_a − v_b) / 2 ,      d = log(ρ_μ^a / ρ_μ^b)
 
     the same **method of moments** the calibrator already uses for ``κ`` and for both strand
     overdispersions — a fitted quantity, not a tuned constant, and there is no coefficient to choose: the
     ``/2`` is the measured independence and the truncation at 0 is the method's own ("no detectable
-    premise error"). Returns ``(per_edge, pooled)``.
+    premise error"). Returns ``(per_boundary, pooled)``.
 
     ⚠⚠ **`ω_graft` IS A DEBT, NOT A MODEL.** It partially compensates for a FAILURE IN THE STRUCTURAL
     REPRESENTATION: the region/boundary map has no TSS/TES, so the solver cannot tell a splice junction from
     a transcript terminus — and that distinction is the whole of the effect this term prices (`ω̂` 1.7–1.9 at
-    terminus boundaries vs 0.04–0.06 at junction-only ones, a ≥30× split, with 20.8 % of edges carrying
+    terminus boundaries vs 0.04–0.06 at junction-only ones, a ≥30× split, with 20.8 % of boundaries carrying
     71.7 % of the error). One library-wide average is standing in for a bimodal quantity. It works because
     over-charging a variance is cheap and under-charging is expensive, **not because it is right**, and it is
     expected to be FRAGILE ON REAL DATA (fitted on ~200 exons at 30–50 % SE, on a Poisson-by-construction
@@ -599,14 +599,14 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
     quantity the moment TSS/TES enter the region map (P1g)** — same equation, one scalar per structural class;
     the partial-pooling block below is the plug-in point.
 
-    **⭐ The POOLED value is what is used — the per-edge one is returned for diagnostics only.** Both halves
+    **⭐ The POOLED value is what is used — the per-boundary one is returned for diagnostics only.** Both halves
     of that were wrong in the first landing (2026-07-26) and are corrected here:
 
     * **Statistically**, ``d²`` from ONE pair is a single draw of a χ²₁ scaled by the true variance, so its
-      own coefficient of variation is √2. A per-edge "measurement" of a variance from one pair is mostly
+      own coefficient of variation is √2. A per-boundary "measurement" of a variance from one pair is mostly
       noise, and it both over- and UNDER-charges around the right mean — the under-charging half doing the
-      damage, because it REPLACES the population value on the ~48 % of edges where a pair exists. Measured:
-      per-edge+pooled 870,245 confidently-wrong reads at ``z2`` 11.12; pooled alone **762,000 at 8.98**, with
+      damage, because it REPLACES the population value on the ~48 % of boundaries where a pair exists. Measured:
+      per-boundary+pooled 870,245 confidently-wrong reads at ``z2`` 11.12; pooled alone **762,000 at 8.98**, with
       exon-single ``z2`` 5.68 → **2.46**. A derived PARTIAL-POOLING variant (James–Stein, with the shrinkage
       weight ``B = τ²_b/(τ²_b + Var(ω̂_i))`` and ``Var(ω̂_i) = (2ω+v_i)²/2`` exact from the χ²₁) was also
       implemented and **deleted**: its own weight comes out **B = 0.82–0.89** — the between-region heterogeneity
@@ -615,10 +615,10 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
       and the loss is asymmetric: over-charging only widens a message, under-charging leaves a region
       confidently wrong. **The population mean is right precisely because the loss is asymmetric.**
       Do not rebuild the per-region form.
-    * **Structurally** (owner, 2026-07-26), a per-edge form makes the message from the LEFT seam carry a
-      variance computed from the RIGHT seam's counts, so a non-adjacent region's data reaches the destination
+    * **Structurally** (owner, 2026-07-26), a per-boundary form makes the message from the LEFT boundary carry a
+      variance computed from the RIGHT boundary's counts, so a non-adjacent region's data reaches the destination
       twice — a real BP violation. With the pooled form no message's precision depends on anything but its
-      own edge and one library constant, which is exactly the standing ``κ`` and both strand overdispersions
+      own boundary and one library constant, which is exactly the standing ``κ`` and both strand overdispersions
       already have.
 
     **Two things about the fit that were asked and are settled by measurement (2026-07-26):**
@@ -626,7 +626,7 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
     * **A plain average, not an inverse-variance (DerSimonian–Laird) one.** DL is the efficient estimator of
       a *common* effect; there is no common effect here (`τ²_between` = 1.35–3.0 against a sampling variance
       of 0.26–0.78). What must be charged to a message is the EXPECTED squared premise error of a
-      randomly-drawn edge, i.e. the arithmetic mean `E[ω_i]` — which is exactly what the plain moment
+      randomly-drawn boundary, i.e. the arithmetic mean `E[ω_i]` — which is exactly what the plain moment
       difference estimates and DL does not. Measured, the two land within ~1 % of each other anyway
       (confidently-wrong 762,000 vs 755,727; DL slightly worse on error mass), so this is a correctness
       argument, not a scoring one.
@@ -636,22 +636,22 @@ def graft_premise_logvar(flux_a, flux_b, var_a, var_b):
       data. The feedback loop this creates can only ever WIDEN a message, so it cannot manufacture
       confidence.
 
-    The *population* the scalar is fitted on is still exons that have two live seams — and that population
+    The *population* the scalar is fitted on is still exons that have two live boundaries — and that population
     is not representative in the owner's sense: an exon whose flank is a transcript terminus or an
-    exon↔exon boundary has no second seam and never enters the fit, and it is measurably the WORSE-behaved
-    half (premise 0.60 with one seam, 2.69 with none, against 0.48 with two). So the fit UNDER-states:
+    exon↔exon boundary has no second boundary and never enters the fit, and it is measurably the WORSE-behaved
+    half (premise 0.60 with one boundary, 2.69 with none, against 0.48 with two). So the fit UNDER-states:
     the count-zero-information-safe direction, and the "weak and correctable" one.
 
-    **What the term does NOT claim.** It does not claim the second seam is a good proxy for the exon's RNA on
-    any individual exon. It uses the seam pairs only to estimate ONE library-level number — the typical size
+    **What the term does NOT claim.** It does not claim the second boundary is a good proxy for the exon's RNA on
+    any individual exon. It uses the boundary pairs only to estimate ONE library-level number — the typical size
     of the graft's premise failure — because that failure is an UNDER-claim, and an under-claim has **no
-    local signature**: a seam accounting for less mass than the exon holds is indistinguishable from an exon
+    local signature**: a boundary accounting for less mass than the exon holds is indistinguishable from an exon
     with more gDNA, which is count-zero-information exactly. The over-claim direction *is* locally visible
     (``claim/obs``) and belongs to P1e.
 
     **What the caller must pass.** Both fluxes ALREADY LIFTED into the destination's frame, so a capture
-    step common to the two seams cancels out of ``d`` and only a genuine abundance difference is charged;
-    and each ``var`` must carry every noise source the model knows — the seam's spliced COUNT (never its
+    step common to the two boundaries cancels out of ``d`` and only a genuine abundance difference is charged;
+    and each ``var`` must carry every noise source the model knows — the boundary's spliced COUNT (never its
     mass) **⊕ its lift's own scale sampling** (the-reframe-scale-variance's source leg; the destination's leg is common to both
     lifts and cancels in ``d``). Method of moments books as premise error every noise it fails to subtract,
     and omitting the lift term inflates the fit in proportion to gDNA depth (the frame is read off ``ρ_tot``,

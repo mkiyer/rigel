@@ -19,7 +19,7 @@ and a 5 M-fragment simulated condition costs far more than that to scan. Caching
 * **the scan config**, because two scans of one BAM under different settings are different tallies.
 
 ⚠ Anything derivable from the index is **rebuilt on load, never stored** — `RegionArrays.from_index` is
-0.11 s and `build_edge_flags_array` is 0.04 s against an 8.45 s index load that happens anyway.
+0.11 s and `build_boundary_flags_array` is 0.04 s against an 8.45 s index load that happens anyway.
 Storing them is how a cache goes stale against the thing it describes.
 """
 
@@ -482,7 +482,7 @@ class TestTheKeyRefusesAMovedIndex:
 
 
 class TestNothingDerivableFromTheIndexIsStored:
-    def test_the_cache_holds_no_region_arrays_or_edge_flags(self, scanned, tmp_path):
+    def test_the_cache_holds_no_region_arrays_or_boundary_flags(self, scanned, tmp_path):
         """They are 0.15 s to rebuild and a stale copy of them is a silent wrong answer."""
         cache_dir, _cache = round_trip(scanned, tmp_path)
         stored = {p.name for p in cache_dir.iterdir()}
@@ -491,11 +491,11 @@ class TestNothingDerivableFromTheIndexIsStored:
     def test_the_index_derived_inputs_are_rebuilt_not_loaded(self, scanned, tmp_path):
         index = scanned[0]
         from rigel.calibration.region_arrays import RegionArrays
-        from rigel.calibration.splice_graph import build_edge_flags_array
+        from rigel.calibration.splice_graph import build_boundary_flags_array
 
         inputs = index_derived_inputs(index)
         assert inputs["region_arrays"].n_regions == RegionArrays.from_index(index).n_regions
-        assert np.array_equal(inputs["edge_flags"], build_edge_flags_array(index))
+        assert np.array_equal(inputs["boundary_flags"], build_boundary_flags_array(index))
 
     def test_the_index_derived_names_are_ones_calibrate_accepts(self, scanned):
         """⭐ Read off `calibrate`'s signature, never written out here — a renamed parameter fails this

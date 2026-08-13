@@ -175,7 +175,7 @@ def knn_widths(centres: np.ndarray, grid_step: float, scale: float = _KNN_SCALE)
     merging).
 
     ⚠⚠ **This must be the true k-th-nearest-neighbour distance, and getting it wrong is not cosmetic.** The
-    first implementation used ``max(a_i − a_{i−k}, a_{i+k} − a_i)`` — the FAR edge of a 2k window, which is
+    first implementation used ``max(a_i − a_{i−k}, a_{i+k} − a_i)`` — the FAR boundary of a 2k window, which is
     systematically larger and, for a region with no near neighbours on one side, reaches all the way back into
     the bulk. That hands **the widest kernel in the fit to the most isolated region**, which is precisely
     backwards: an isolated observation is one observation, and smearing it across decades asserts population
@@ -244,11 +244,11 @@ def _render(
     which is why kernels can be grouped by width and each group convolved once (:data:`_WIDTH_BINS`).
     """
     step = float(grid[1] - grid[0])
-    edges = np.quantile(widths, np.linspace(0.0, 1.0, _WIDTH_BINS + 1))
+    boundaries = np.quantile(widths, np.linspace(0.0, 1.0, _WIDTH_BINS + 1))
     out = np.zeros_like(grid)
     for b in range(_WIDTH_BINS):
-        upper = widths <= edges[b + 1] if b == _WIDTH_BINS - 1 else widths < edges[b + 1]
-        m = (widths >= edges[b]) & upper
+        upper = widths <= boundaries[b + 1] if b == _WIDTH_BINS - 1 else widths < boundaries[b + 1]
+        m = (widths >= boundaries[b]) & upper
         if not m.any():
             continue
         d = (weights[m][:, None] * kernels[m]).sum(0)

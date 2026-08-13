@@ -474,7 +474,7 @@ def unspliced_truth_weights(truth_by_transcript: Path, index) -> np.ndarray:
 def install_computed_weights(mode: str, opportunity: str, index, granularity: str = "transcript"):
     """⭐⭐⭐ STAGE 6 — compute the weights from CALIBRATION and hand them to the EM.
 
-    ⛔ **Three seams, because the inputs appear at three different moments.** ``rna_fl_pmf`` is an
+    ⛔ **Three boundaries, because the inputs appear at three different moments.** ``rna_fl_pmf`` is an
     argument to ``calibrate`` and is on no published object; the ``CalibrationResult`` first exists at
     ``assemble_priors``; and the weights are consumed per locus below that. Each is patched at the
     module attribute the caller imports FUNCTION-LOCALLY, so the patch is picked up at call time — the
@@ -505,7 +505,7 @@ def install_computed_weights(mode: str, opportunity: str, index, granularity: st
     def assemble_wrapper(calibration, region_arrays, multi_loci):
         if box["w"] is None:
             if box["rna_pmf"] is None:
-                raise RuntimeError("⛔ assemble_priors ran before calibrate — the pmf seam moved")
+                raise RuntimeError("⛔ assemble_priors ran before calibrate — the pmf boundary moved")
             box["w"] = TW.build_weights(
                 calibration, region_arrays, index, box["rna_pmf"],
                 mode=mode, opportunity=opportunity, granularity=granularity,

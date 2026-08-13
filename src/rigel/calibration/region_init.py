@@ -113,7 +113,7 @@ def own_composition_logvar(f_g, tau_lam, struct_lock):
     * **real evidence ``τ_λ > 0``** → ``Var(log f_g) = (1−f_g)²/τ_λ`` and ``Var(log f_r) = f_g²/τ_λ`` (the
       Jacobians of ``log f_g`` / ``log f_r`` w.r.t. ``λ = logit f_g``);
     * **no evidence ``τ_λ = 0``** → composition UNSEEN → variance ``∞`` (⇒ own precision 0 — the unsolved
-      default). ``∞`` is set DIRECTLY (never ``fr²·∞``, which would be ``0·∞ = nan`` at the window edge).
+      default). ``∞`` is set DIRECTLY (never ``fr²·∞``, which would be ``0·∞ = nan`` at the window boundary).
 
     Returns ``(v_log_fg, v_log_fr)``, same shape as ``f_g``."""
     fg = np.clip(np.asarray(f_g, np.float64), 0.0, 1.0)
@@ -170,7 +170,7 @@ def strand_evidence(
     disc=0).
 
     ``struct_lock`` (**I_struct**) — composition CERTAIN — is scoped to true intergenic REGION regions, never a
-    G1 EDGE seam (TSS/TES): a seam is structurally gDNA but sits between RNA-carrying exons, so its
+    G1 BOUNDARY boundary (TSS/TES): a boundary is structurally gDNA but sits between RNA-carrying exons, so its
     crossing mass is RNA-contaminated and a certainty there compounds into a phantom-gDNA emitter; a true
     intergenic region carries ~0 mass in a zero-gDNA library, so it is safe."""
     n_raw = np.asarray(u_pos, np.float64) + np.asarray(u_neg, np.float64)

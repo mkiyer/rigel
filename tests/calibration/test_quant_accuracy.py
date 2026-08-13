@@ -272,9 +272,9 @@ class _FakeCal:
 
     mass_gdna_region: object = None
     mass_rna_region: object = None
-    mass_gdna_edge: object = None
-    mass_rna_edge: object = None
-    mass_rna_spliced_edge: object = None
+    mass_gdna_boundary: object = None
+    mass_rna_boundary: object = None
+    mass_rna_spliced_boundary: object = None
     mass_rna_junction: object = None
 
 

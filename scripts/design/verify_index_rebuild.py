@@ -1,14 +1,14 @@
-"""Verify a rebuilt index against the one it replaces: regions UNCHANGED, edges changed only in `reach`.
+"""Verify a rebuilt index against the one it replaces: regions UNCHANGED, boundaries changed only in `reach`.
 
     TODO item 1   ·   Ledger: S1 (what changed and why)
 
-⭐ WHY THIS CHECK IS THE WHOLE POINT. S1 changed `_contiguous_reaches` — the reach a contiguous edge
+⭐ WHY THIS CHECK IS THE WHOLE POINT. S1 changed `_contiguous_reaches` — the reach a contiguous boundary
 reports — and **nothing else**. So a correct rebuild has an exactly predictable shape:
 
 * `regions.feather` **byte-identical**. The partition did not move. ⚠ This is also the check that the rebuild
   used the RIGHT SOURCE: a different FASTA or GTF moves the cuts, and regions would differ immediately.
 * `edges.feather` differing in the four `reach_*` columns of the **contiguous** rows and nowhere else.
-  ⚠ Junction reach is deliberately unchanged — a junction edge is only used by a molecule that spliced
+  ⚠ Junction reach is deliberately unchanged — a junction boundary is only used by a molecule that spliced
   across it, so what remains either side is exonic, and `_junction_edges` stays on the exonic reach.
 
 Anything else is a finding, not a rebuild. A "rebuild" that also moved the flags, the kinds, or the region
@@ -58,31 +58,31 @@ def main() -> None:
             )
             print(f"  FAIL  regions.feather changed: {len(old_regions):,} -> {len(new_regions):,} rows")
 
-    # ── edges: only the reach columns, only on contiguous rows ────────────────────────────────────────
-    old_edges = pd.read_feather(old / "edges.feather")
-    new_edges = pd.read_feather(new / "edges.feather")
-    if len(old_edges) != len(new_edges):
-        failures.append(f"edges.feather row count {len(old_edges):,} -> {len(new_edges):,}")
-        print(f"  FAIL  edges.feather row count {len(old_edges):,} -> {len(new_edges):,}")
-    elif list(old_edges.columns) != list(new_edges.columns):
+    # ── boundaries: only the reach columns, only on contiguous rows ────────────────────────────────────────
+    old_boundaries = pd.read_feather(old / "edges.feather")
+    new_boundaries = pd.read_feather(new / "edges.feather")
+    if len(old_boundaries) != len(new_boundaries):
+        failures.append(f"edges.feather row count {len(old_boundaries):,} -> {len(new_boundaries):,}")
+        print(f"  FAIL  edges.feather row count {len(old_boundaries):,} -> {len(new_boundaries):,}")
+    elif list(old_boundaries.columns) != list(new_boundaries.columns):
         failures.append("edges.feather columns changed")
         print("  FAIL  edges.feather columns changed")
     else:
-        contiguous = new_edges["kind"].to_numpy() == EDGE_KIND_CONTIGUOUS
-        for column in old_edges.columns:
-            same = old_edges[column].equals(new_edges[column])
+        contiguous = new_boundaries["kind"].to_numpy() == EDGE_KIND_CONTIGUOUS
+        for column in old_boundaries.columns:
+            same = old_boundaries[column].equals(new_boundaries[column])
             if column in REACH_COLUMNS:
-                moved = int((old_edges[column].to_numpy() != new_edges[column].to_numpy()).sum())
+                moved = int((old_boundaries[column].to_numpy() != new_boundaries[column].to_numpy()).sum())
                 junction_moved = int(
                     (
-                        old_edges.loc[~contiguous, column].to_numpy()
-                        != new_edges.loc[~contiguous, column].to_numpy()
+                        old_boundaries.loc[~contiguous, column].to_numpy()
+                        != new_boundaries.loc[~contiguous, column].to_numpy()
                     ).sum()
                 )
                 mark = "OK  " if junction_moved == 0 else "FAIL"
                 print(
                     f"  {mark}  {column:<16} {moved:>10,} rows moved "
-                    f"({100 * moved / len(old_edges):5.1f} %), of which junction rows: {junction_moved:,}"
+                    f"({100 * moved / len(old_boundaries):5.1f} %), of which junction rows: {junction_moved:,}"
                 )
                 if junction_moved:
                     failures.append(
@@ -90,7 +90,7 @@ def main() -> None:
                         f"design and S1 did not touch it."
                     )
             elif not same:
-                changed = int((old_edges[column].to_numpy() != new_edges[column].to_numpy()).sum())
+                changed = int((old_boundaries[column].to_numpy() != new_boundaries[column].to_numpy()).sum())
                 failures.append(f"{column}: {changed:,} rows changed, but only reach may move")
                 print(f"  FAIL  {column:<16} {changed:>10,} rows changed — NOT a reach column")
 
@@ -100,7 +100,7 @@ def main() -> None:
         for line in failures:
             print(f"  {line}")
         sys.exit(1)
-    print("✅ regions unchanged; edges changed only in contiguous reach — exactly what S1 did")
+    print("✅ regions unchanged; boundaries changed only in contiguous reach — exactly what S1 did")
 
 
 if __name__ == "__main__":

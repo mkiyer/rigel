@@ -6,25 +6,25 @@
 graph, and the graph has three kinds of object, so the result has three axes::
 
     regions            N            deconvolved contained mass + its geometric support
-    contiguous edges E = N − refs deconvolved crossing mass + its geometric support
-    junction edges   J            the jumping flux -- certified RNA, never deconvolved
+    contiguous boundaries E = N − refs deconvolved crossing mass + its geometric support
+    junction boundaries   J            the jumping flux -- certified RNA, never deconvolved
 
 ⛔ **THE ``left``/``right`` PAIR IS GONE, AND SO IS THE ½ IT CARRIED.** The predecessor carried SIX
 per-region mass arrays — ``mass_{gdna,rna}_{contained,left,right}`` — because a boundary had two sides
 sitting in differently-sized flanks. ``priors.assemble_priors`` then pooled two of them straight back
-as ``mass_gdna_right[r] + mass_gdna_left[r+1]``, and ``capture_eff_length._pooled_seam_arrays`` did the
+as ``mass_gdna_right[r] + mass_gdna_left[r+1]``, and ``capture_eff_length._pooled_boundary_arrays`` did the
 identical thing. That split-then-re-pool was a no-op with a history: the same sum-then-halve pattern hid
-an exact factor of 2 for months. A contiguous edge is a 0-bp line with
-ONE set of numbers, so the pair collapses to ``mass_{gdna,rna}_edge`` and the pooling **disappears
+an exact factor of 2 for months. A contiguous boundary is a 0-bp line with
+ONE set of numbers, so the pair collapses to ``mass_{gdna,rna}_boundary`` and the pooling **disappears
 rather than being re-derived** (owner ruling).
 
 ⛔ **``gdna_boundary_len`` HAS NO SUCCESSOR.** It was ``boundary_side_eff_length = E[min(ℓ,L)]/2``, a
 per-FACE divisor whose ½ existed only because the face's mass was half a crossing. S5.c deleted it. The
-per-edge divisor is ``crossing_eff_length``, one number, no ½ — carried here as ``gdna_edge_eff_len``.
+per-boundary divisor is ``crossing_eff_length``, one number, no ½ — carried here as ``gdna_boundary_eff_len``.
 Any comment claiming ``gdna_boundary_len`` "IS the halved per-side density length" describes a quantity
 that no longer exists.
 
-⚠ **``mass_rna_spliced_edge`` has no region twin, structurally.** ``region_contained`` is credited only when
+⚠ **``mass_rna_spliced_boundary`` has no region twin, structurally.** ``region_contained`` is credited only when
 the fragment used no junction, so a region's contained population cannot hold a spliced molecule.
 
 ``__post_init__`` enforces the intrinsic invariants (per-axis shape, dtype, finiteness, sign); mass
@@ -78,7 +78,7 @@ def _check_unit_interval(value: float, name: str, *, open_upper: bool = False) -
 
 @dataclass(frozen=True, slots=True)
 class CalibrationResult:
-    """Deconvolved gDNA / RNA mass on the region and contiguous-edge axes, the junction flux, the two
+    """Deconvolved gDNA / RNA mass on the region and contiguous-boundary axes, the junction flux, the two
     gDNA geometric supports, and the library scalars."""
 
     # --- the deconvolved MIXTURE, per region (float64[n_regions]) ---
@@ -86,23 +86,23 @@ class CalibrationResult:
     mass_gdna_region: np.ndarray
     mass_rna_region: np.ndarray
 
-    # --- the deconvolved MIXTURE, per contiguous edge (float64[n_edges]) ---
-    #: ``chain_edge_deconv``: the line's unspliced crossing count split by the converged belief.
-    #: ``mass_rna_edge`` is spliced-INCLUSIVE — an edge's certified-RNA crossings are RNA whatever the
-    #: unspliced mixture resolves to, since gDNA cannot be spliced — so per-edge conservation
-    #: ``mass_gdna_edge + mass_rna_edge == unspliced + spliced`` holds.
-    mass_gdna_edge: np.ndarray
-    mass_rna_edge: np.ndarray
+    # --- the deconvolved MIXTURE, per contiguous boundary (float64[n_boundaries]) ---
+    #: ``chain_boundary_deconv``: the line's unspliced crossing count split by the converged belief.
+    #: ``mass_rna_boundary`` is spliced-INCLUSIVE — an boundary's certified-RNA crossings are RNA whatever the
+    #: unspliced mixture resolves to, since gDNA cannot be spliced — so per-boundary conservation
+    #: ``mass_gdna_boundary + mass_rna_boundary == unspliced + spliced`` holds.
+    mass_gdna_boundary: np.ndarray
+    mass_rna_boundary: np.ndarray
 
-    #: float64[n_edges] — the ``edge_spliced`` part of ``mass_rna_edge``: molecules that crossed this
+    #: float64[n_boundaries] — the ``boundary_spliced`` part of ``mass_rna_boundary``: molecules that crossed this
     #: line CONTIGUOUSLY having spliced somewhere else. Carried so ``assemble_priors`` can **withhold**
     #: it from ``rna_prior_count``: a spliced fragment has no gDNA candidate in the EM (gDNA does not
     #: splice), so it is guaranteed-RNA and assigned directly — counting it in the prior would double
     #: it and inflate the RNA side of the gDNA-vs-RNA *unspliced* split, which is the only thing the
-    #: prior arbitrates. ``mass_rna_edge`` itself stays spliced-inclusive so conservation is preserved.
-    mass_rna_spliced_edge: np.ndarray
+    #: prior arbitrates. ``mass_rna_boundary`` itself stays spliced-inclusive so conservation is preserved.
+    mass_rna_spliced_boundary: np.ndarray
 
-    #: float64[n_edges] — ⭐⭐ **THE INCIDENCE→FRAGMENT CONVERSION, per line.** ``mass / count`` off the
+    #: float64[n_boundaries] — ⭐⭐ **THE INCIDENCE→FRAGMENT CONVERSION, per line.** ``mass / count`` off the
     #: accumulator's conserved-mass bank: the mean fragment-mass ONE crossing at this line carries.
     #:
     #: ⛔ **It is GEOMETRY, not a deconvolved mass, and the distinction is load-bearing.** Every array
@@ -115,9 +115,9 @@ class CalibrationResult:
     #: deposits ``+1`` on EVERY line a fragment crosses — ``max(K, 1)`` of them — so a sum over lines is
     #: an object-incidence count and the EM adds a FRAGMENT count. It is 1.0 where both flanking regions
     #: exceed every fragment length, and falls toward the region spacing where they do not.
-    edge_mass_per_crossing: np.ndarray
+    boundary_mass_per_crossing: np.ndarray
 
-    # --- the JUMPING population, per junction edge (float64[n_junctions]) ---
+    # --- the JUMPING population, per junction boundary (float64[n_junctions]) ---
     #: ⛔⛔ **AN INCIDENCE COUNT DESPITE THE NAME — IT IS NOT A MASS, AND THE GAP IS LARGE.** This is
     #: ``sj_count`` summed over the genome-strand columns and nothing else, and a fragment deposits
     #: ``+1`` on EVERY junction it uses. Measured on ``g00 ss0.99 capture_off``: **2.0719 incidences per
@@ -126,23 +126,23 @@ class CalibrationResult:
     #: :attr:`junction_conserved_mass`**, which is this array converted; reading this one instead is
     #: wrong in proportion to how SPLICED the object is, and for a per-transcript weight that is exactly
     #: the axis the answer varies over. ⚠ ``ROADMAP.md`` §2.5 renames it to ``count_rna_junction``
-    #: alongside the two ``mass_*_edge`` incidences; that rename is its own commit.
+    #: alongside the two ``mass_*_boundary`` incidences; that rename is its own commit.
     #:
-    #: ⭐ **Never deconvolved: a junction edge is pure mature RNA by construction**, so there is nothing
+    #: ⭐ **Never deconvolved: a junction boundary is pure mature RNA by construction**, so there is nothing
     #: to split. It is the third population at a line, and it is routinely two orders of magnitude
-    #: larger than ``mass_rna_spliced_edge`` at the same place: at a donor seam the junction flux is the
+    #: larger than ``mass_rna_spliced_boundary`` at the same place: at a donor boundary the junction flux is the
     #: gene's whole mature output while the spliced crossing is the handful of molecules that read
     #: through without splicing.
     #: ⚠ **``assemble_priors`` does NOT consume it, and that is deliberate.** Junction fragments are
-    #: certified RNA in exactly the sense ``mass_rna_spliced_edge`` is withheld for, so feeding them to
+    #: certified RNA in exactly the sense ``mass_rna_spliced_boundary`` is withheld for, so feeding them to
     #: ``rna_prior_count`` would load the RNA side of a split that arbitrates only unspliced fragments.
     #: It is exported for QC and reporting — the calibration's output should not be silent about the
-    #: population that dominates a donor seam (owner ruling, 2026-07-30).
+    #: population that dominates a donor boundary (owner ruling, 2026-07-30).
     mass_rna_junction: np.ndarray
 
-    #: float64[n_edges] — the ``edge_spliced`` twin of ``edge_mass_per_crossing``, and
+    #: float64[n_boundaries] — the ``boundary_spliced`` twin of ``boundary_mass_per_crossing``, and
     #: float64[n_junctions] — the junction one, ``sj_mass / sj_count``. Same kind of quantity as
-    #: ``edge_mass_per_crossing`` in every respect: GEOMETRY, identical under any split, and therefore
+    #: ``boundary_mass_per_crossing`` in every respect: GEOMETRY, identical under any split, and therefore
     #: not in ``prior_vs_oracle.OVERRIDE_FIELDS``.
     #:
     #: ⛔ **The junction one did not exist until ``sj_mass`` did, and that is why a conserved LIBRARY
@@ -150,7 +150,7 @@ class CalibrationResult:
     #: crosses no line and is not contained, so it deposited on no conserved bank — **1,222,375 of
     #: 4,830,713 RNA fragments (25.3 %)** on ladder g50 capture_off, against 0 of 4,997,761 gDNA
     #: fragments, since gDNA cannot splice.
-    edge_spliced_mass_per_crossing: np.ndarray
+    boundary_spliced_mass_per_crossing: np.ndarray
     junction_mass_per_crossing: np.ndarray
 
     # --- the gDNA geometric supports: expected admissible START POSITIONS, per component ---
@@ -161,14 +161,14 @@ class CalibrationResult:
     #: length, is the density-correct divisor: the raw length ignores the fit-inside constraint and so
     #: understates a short region's density, manufacturing a spurious contraction in an unenriched library.
     gdna_region_eff_len: np.ndarray
-    #: float64[n_edges] — ``effective_length.crossing_eff_length`` on the gDNA pmf. ⚠ **Uniform across
-    #: edges today, and that is physics rather than a placeholder**: gDNA's template is the chromosome,
+    #: float64[n_boundaries] — ``effective_length.crossing_eff_length`` on the gDNA pmf. ⚠ **Uniform across
+    #: boundaries today, and that is physics rather than a placeholder**: gDNA's template is the chromosome,
     #: so it takes ``UNBOUNDED_REACH`` on both sides at every line and the divisor collapses to
-    #: ``mu_g − 1``. It stays a per-edge array because that is the axis its consumers index it on.
-    gdna_edge_eff_len: np.ndarray
+    #: ``mu_g − 1``. It stays a per-boundary array because that is the axis its consumers index it on.
+    gdna_boundary_eff_len: np.ndarray
 
     # --- the RNA geometric supports: the SAME two frames, on the RNA pmf ---
-    #: float64[n_regions] / float64[n_edges] — ``contained_eff_length`` and ``crossing_eff_length`` on the
+    #: float64[n_regions] / float64[n_boundaries] — ``contained_eff_length`` and ``crossing_eff_length`` on the
     #: RNA pmf: the RNA population's OWN opportunity at each object.
     #:
     #: ⛔⛔ **NO CONSUMER IN ``src/`` TODAY, AND THE REASON IS A DESIGN CHANGE, NOT AN OVERSIGHT.** This
@@ -189,10 +189,10 @@ class CalibrationResult:
     #: never recomputed, so they are byte-identically the opportunity the SOLVER used. That is the
     #: property that makes them safe to reason with.
     rna_region_eff_len: np.ndarray
-    rna_edge_eff_len: np.ndarray
+    rna_boundary_eff_len: np.ndarray
 
     # --- ⭐⭐ THE THREE-WAY COMPOSITION — the simplex ψ actually solves, per object ---
-    #: float64[n_regions] / float64[n_edges] — the solved ``(f_g, f_pos, f_neg)`` at each object: the
+    #: float64[n_regions] / float64[n_boundaries] — the solved ``(f_g, f_pos, f_neg)`` at each object: the
     #: gDNA share and the two RNA STRAND shares of that object's unspliced population.
     #:
     #: ⭐⭐ **THIS IS AXIOM 0's ``T(slot)``, PUBLISHED.** The solve is over
@@ -200,8 +200,8 @@ class CalibrationResult:
     #: three numbers; ``mass_gdna_*`` and ``mass_rna_*`` are that answer with the two RNA strands summed.
     #: A consumer asking "which STRAND's RNA is here" had to re-derive it or go without.
     #:
-    #: ⛔ **The crossing axis published ``0`` for both RNA strands until 2026-08-12** — ``chain_edge_deconv``
-    #: projected ``f_g`` and emitted ``np.zeros(n)`` for ``f_pos``/``f_neg``, so the edge composition
+    #: ⛔ **The crossing axis published ``0`` for both RNA strands until 2026-08-12** — ``chain_boundary_deconv``
+    #: projected ``f_g`` and emitted ``np.zeros(n)`` for ``f_pos``/``f_neg``, so the boundary composition
     #: summed to ``f_g`` alone rather than to 1. Nothing consumed it, which is why it survived.
     #:
     #: ⛔⛔ **THE THREE DO NOT SUM TO 1 ON ABOUT A QUARTER OF EVERY AXIS, AND THAT IS A MEASURED DEFECT
@@ -213,7 +213,7 @@ class CalibrationResult:
     #: axis   sums to 1      sums into (0, 1)                   sums > 1
     #: ====== ============== ================================== =========
     #: REGION   74.72 %        **25.25 %** — median 0.978, p5 0.869   12
-    #: EDGE   77.24 %        **22.71 %** — median 0.979, p5 0.850   16
+    #: BOUNDARY   77.24 %        **22.71 %** — median 0.979, p5 0.850   16
     #: ====== ============== ================================== =========
     #:
     #: The mechanism is visible at ``sweep.py``'s write-back: the three posterior means are
@@ -228,9 +228,9 @@ class CalibrationResult:
     gdna_frac_region: np.ndarray
     rna_pos_frac_region: np.ndarray
     rna_neg_frac_region: np.ndarray
-    gdna_frac_edge: np.ndarray
-    rna_pos_frac_edge: np.ndarray
-    rna_neg_frac_edge: np.ndarray
+    gdna_frac_boundary: np.ndarray
+    rna_pos_frac_boundary: np.ndarray
+    rna_neg_frac_boundary: np.ndarray
 
     # --- library scalars ---
     gdna_density_global: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
@@ -240,12 +240,12 @@ class CalibrationResult:
 
     # --- provenance: the three axis lengths, independent of each other ---
     n_regions: int
-    n_edges: int
+    n_boundaries: int
     n_junctions: int
     config: CalibrationConfig
 
     def __post_init__(self) -> None:
-        for axis in ("n_regions", "n_edges", "n_junctions"):
+        for axis in ("n_regions", "n_boundaries", "n_junctions"):
             if int(getattr(self, axis)) < 0:
                 raise ValueError(
                     f"CalibrationResult.{axis} must be >= 0; got {getattr(self, axis)}."
@@ -262,18 +262,18 @@ class CalibrationResult:
         ):
             _check_axis_array(getattr(self, name), name, self.n_regions)
         for name in (
-            "mass_gdna_edge",
-            "mass_rna_edge",
-            "mass_rna_spliced_edge",
-            "edge_mass_per_crossing",
-            "edge_spliced_mass_per_crossing",
-            "gdna_edge_eff_len",
-            "rna_edge_eff_len",
-            "gdna_frac_edge",
-            "rna_pos_frac_edge",
-            "rna_neg_frac_edge",
+            "mass_gdna_boundary",
+            "mass_rna_boundary",
+            "mass_rna_spliced_boundary",
+            "boundary_mass_per_crossing",
+            "boundary_spliced_mass_per_crossing",
+            "gdna_boundary_eff_len",
+            "rna_boundary_eff_len",
+            "gdna_frac_boundary",
+            "rna_pos_frac_boundary",
+            "rna_neg_frac_boundary",
         ):
-            _check_axis_array(getattr(self, name), name, self.n_edges)
+            _check_axis_array(getattr(self, name), name, self.n_boundaries)
 
         # ⭐ Each component is a FRACTION, so it is bounded by 1 — the one thing that is true of all
         # three today. ⛔ Closure (`f_g + f_pos + f_neg == 1`) is deliberately NOT asserted: it fails on
@@ -284,9 +284,9 @@ class CalibrationResult:
             "gdna_frac_region",
             "rna_pos_frac_region",
             "rna_neg_frac_region",
-            "gdna_frac_edge",
-            "rna_pos_frac_edge",
-            "rna_neg_frac_edge",
+            "gdna_frac_boundary",
+            "rna_pos_frac_boundary",
+            "rna_neg_frac_boundary",
         ):
             arr = np.asarray(getattr(self, name), dtype=np.float64)
             if np.any(arr > 1.0 + 1e-9):
@@ -360,8 +360,8 @@ class CalibrationResult:
         return float(
             np.asarray(self.mass_gdna_region, dtype=np.float64).sum()
             + (
-                np.asarray(self.mass_gdna_edge, dtype=np.float64)
-                * np.asarray(self.edge_mass_per_crossing, dtype=np.float64)
+                np.asarray(self.mass_gdna_boundary, dtype=np.float64)
+                * np.asarray(self.boundary_mass_per_crossing, dtype=np.float64)
             ).sum()
         )
 
@@ -370,7 +370,7 @@ class CalibrationResult:
         """RNA fragments in the library — all THREE axes, each converted by its OWN population's ``q``.
 
         ⛔⛔ **THE TREE ONCE HELD THREE DISAGREEING ANSWERS TO THIS**, and every one summed INCIDENCES:
-        ``pipeline.py`` added region + edge + junction raw, ``calibration_truth_ab.py`` added region + edge
+        ``pipeline.py`` added region + boundary + junction raw, ``calibration_truth_ab.py`` added region + boundary
         and dropped the junction, and only ``assemble_priors`` converted anything. One fragment books
         ``max(K,1)`` line crossings AND one incidence per junction it uses, so the sum over-counts and
         the ratio is biased wherever the two components' inflations differ — which they do. Measured on
@@ -379,7 +379,7 @@ class CalibrationResult:
         origin landing at **1.000x** its deposited fragments with **0** unaccounted.
 
         ⭐ The spliced crossings and the junction flux are the SAME fragments split across two banks by
-        the deposit rule — ``edge_spliced_mass`` holds the share of a spliced fragment's bases in blocks
+        the deposit rule — ``boundary_spliced_mass`` holds the share of a spliced fragment's bases in blocks
         that crossed a line and ``sj_mass`` the share in blocks that crossed none — and the two sum to
         exactly one per fragment. Adding both is conservation, not double counting.
 
@@ -388,17 +388,17 @@ class CalibrationResult:
         arrays (``TRAPS: a-hash-that-misses-its-artifact``, in dataclass form). Deriving it means the
         oracle arm's count is the oracle's by construction.
         """
-        unspliced_edge = np.maximum(
-            np.asarray(self.mass_rna_edge, dtype=np.float64)
-            - np.asarray(self.mass_rna_spliced_edge, dtype=np.float64),
+        unspliced_boundary = np.maximum(
+            np.asarray(self.mass_rna_boundary, dtype=np.float64)
+            - np.asarray(self.mass_rna_spliced_boundary, dtype=np.float64),
             0.0,
         )
         return float(
             np.asarray(self.mass_rna_region, dtype=np.float64).sum()
-            + (unspliced_edge * np.asarray(self.edge_mass_per_crossing, dtype=np.float64)).sum()
+            + (unspliced_boundary * np.asarray(self.boundary_mass_per_crossing, dtype=np.float64)).sum()
             + (
-                np.asarray(self.mass_rna_spliced_edge, dtype=np.float64)
-                * np.asarray(self.edge_spliced_mass_per_crossing, dtype=np.float64)
+                np.asarray(self.mass_rna_spliced_boundary, dtype=np.float64)
+                * np.asarray(self.boundary_spliced_mass_per_crossing, dtype=np.float64)
             ).sum()
             # ⭐ ONE home for the junction conversion — this term used to spell the product out a second
             # time, so a caller reading the property and a caller reading this sum could disagree.

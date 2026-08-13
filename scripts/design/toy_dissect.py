@@ -23,7 +23,7 @@ exactly 0) — the chain, measured:
 * so the only channel left is the certified-RNA measurement grafted from the junction, and taken at
   face value it is RIGHT: it implies ``f_g = -0.003``;
 * ⛔ but its precision is capped by ``spl_prec = J/(1 + J·(log r)²)`` with
-  ``r = rho_tot(exon)/rho_tot(intron|exon EDGE)``. Measured r = 0.914 where it should be 1, so 15,639
+  ``r = rho_tot(exon)/rho_tot(intron|exon BOUNDARY)``. Measured r = 0.914 where it should be 1, so 15,639
   junction reads deliver **122** effective observations and the phantom gDNA is FLAT at ~2 % over a
   64x depth range. Handing the solver the toy's own realised RNA length pmf moves r to 0.964,
   ``spl_prec`` to 714, and halves the error.
@@ -84,9 +84,9 @@ def dissect(cond: str, *, n_rna: int, genome_length: int, work_dir: Path):
 
     ov = sub.truth.override_masses(ra)
     tg = {"region": np.asarray(ov["mass_gdna_region"], float),
-          "edge": np.asarray(ov["mass_gdna_edge"], float)}
+          "boundary": np.asarray(ov["mass_gdna_boundary"], float)}
     tr = {"region": np.asarray(ov["mass_rna_region"], float),
-          "edge": np.asarray(ov["mass_rna_edge"], float)}
+          "boundary": np.asarray(ov["mass_rna_boundary"], float)}
 
     print("=" * 132)
     print(f"⭐⭐ DISSECTION — {cond}")
@@ -102,7 +102,7 @@ def dissect(cond: str, *, n_rna: int, genome_length: int, work_dir: Path):
     rows = []
     for s in range(int(chain.n_slots)):
         i = int(obj[s])
-        ax = "region" if kind[s] == REGION else "edge"
+        ax = "region" if kind[s] == REGION else "boundary"
         if ax == "region":
             label = f"{TYPES[int(rtype[i])]} [{starts[i]:,},{starts[i] + sizes[i]:,})"
         else:

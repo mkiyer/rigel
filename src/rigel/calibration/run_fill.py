@@ -24,7 +24,7 @@ def same_ref_left_right(ref_id: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """``(left_same, right_same)`` — does region ``i`` have a same-reference neighbour on each side?
 
     ``left_same[i]`` is True iff region ``i−1`` exists and shares ``i``'s reference (so ``i`` has a
-    left neighbour); ``right_same[i]`` likewise for ``i+1``. The reference edges are False. Both are
+    left neighbour); ``right_same[i]`` likewise for ``i+1``. The reference boundaries are False. Both are
     ``bool[R]``. This is the single source of the ``ref_id[1:] == ref_id[:-1]`` / ``[:-1] == [1:]``
     shifted-equality bookkeeping used across the package; the per-boundary form (length ``R−1``) is
     ``right_same[:-1]`` (equivalently ``left_same[1:]``).

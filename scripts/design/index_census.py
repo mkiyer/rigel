@@ -2,7 +2,7 @@
 
     TODO item 1   ·   Ledger: "Benchmarks and indexes DELETED" (2026-07-30)
 
-⛔ **WHY THIS EXISTS.** Numbers like *1,043,881 regions · 404,168 junction edges · median 151 bp* were quoted
+⛔ **WHY THIS EXISTS.** Numbers like *1,043,881 regions · 404,168 junction boundaries · median 151 bp* were quoted
 across the documentation as though they were constants of the tool. They are properties of **one
 annotation**. A rebuild from a different GTF moves every one of them, and the deletion entry says so
 explicitly. This script re-derives them so a claim can be checked instead of inherited.
@@ -61,21 +61,21 @@ def census_regions(regions: pd.DataFrame) -> None:
     row("regions of length < 200 bp", int((length < 200).sum()), "shorter than one RNA fragment")
 
 
-def census_edges(edges: pd.DataFrame) -> None:
-    kind = edges["kind"].to_numpy()
-    flags = edges["flags"].to_numpy(np.uint16)
+def census_boundaries(boundaries: pd.DataFrame) -> None:
+    kind = boundaries["kind"].to_numpy()
+    flags = boundaries["flags"].to_numpy(np.uint16)
     contiguous = kind == EDGE_KIND_CONTIGUOUS
     junction = kind == EDGE_KIND_JUNCTION
 
-    print("\nEDGES")
-    row("edges", len(edges))
-    row("contiguous edges", int(contiguous.sum()))
-    row("junction edges", int(junction.sum()))
+    print("\nBOUNDARIES")
+    row("boundaries", len(boundaries))
+    row("contiguous boundaries", int(contiguous.sum()))
+    row("junction boundaries", int(junction.sum()))
 
     terminus = (flags[contiguous] & TERMINUS_BITS) != 0
     splice = (flags[contiguous] & SPLICE_BITS) != 0
     total = max(int(contiguous.sum()), 1)
-    print("\nSEAM CENSUS (contiguous edges, by structural flag)")
+    print("\nBOUNDARY CENSUS (contiguous boundaries, by structural flag)")
     for label, mask in (
         ("terminus only", terminus & ~splice),
         ("splice site only", splice & ~terminus),
@@ -85,7 +85,7 @@ def census_edges(edges: pd.DataFrame) -> None:
         row(label, int(mask.sum()), f"{100 * mask.sum() / total:6.2f} %")
 
 
-def census_merge_visibility(regions: pd.DataFrame, edges: pd.DataFrame) -> None:
+def census_merge_visibility(regions: pd.DataFrame, boundaries: pd.DataFrame) -> None:
     """⭐ RE-DERIVED, not read back: rebuild the old merged partition and ask what it could not see.
 
     The v7 partition merged genomically adjacent regions carrying the same signature. A cut that
@@ -99,34 +99,34 @@ def census_merge_visibility(regions: pd.DataFrame, edges: pd.DataFrame) -> None:
     boundary[1:] = (signature[1:] != signature[:-1]) | (ref[1:] != ref[:-1])
     n_merged = int(boundary.sum())
 
-    # Cut `i` is the seam between region i-1 and region i, i.e. contiguous edge with dst == i. It is
+    # Cut `i` is the boundary between region i-1 and region i, i.e. contiguous boundary with dst == i. It is
     # INTERIOR to a merged region exactly when region i does not start one.
-    contiguous = edges["kind"].to_numpy() == EDGE_KIND_CONTIGUOUS
-    dst = edges.loc[contiguous, "dst"].to_numpy(np.int64)
-    flags = edges.loc[contiguous, "flags"].to_numpy(np.uint16)
+    contiguous = boundaries["kind"].to_numpy() == EDGE_KIND_CONTIGUOUS
+    dst = boundaries.loc[contiguous, "dst"].to_numpy(np.int64)
+    flags = boundaries.loc[contiguous, "flags"].to_numpy(np.uint16)
     interior = ~boundary[dst]
     is_terminus = (flags & TERMINUS_BITS) != 0
 
     print("\nWHAT THE OLD MERGE COULD NOT SEE  (re-derived by run-length encoding the signatures)")
     row("merged regions (the v7 partition)", n_merged)
     row("regions / merged regions", f"{len(regions) / max(n_merged, 1):.3f} x")
-    row("contiguous seams interior to a merged region", int(interior.sum()))
+    row("contiguous boundaries interior to a merged region", int(interior.sum()))
     hidden = int((is_terminus & interior).sum())
     total_terminus = max(int(is_terminus.sum()), 1)
-    row("TERMINUS seams the merge hid", hidden, f"{100 * hidden / total_terminus:6.2f} % of termini")
+    row("TERMINUS boundaries the merge hid", hidden, f"{100 * hidden / total_terminus:6.2f} % of termini")
 
 
-def census_junction_cuts(regions: pd.DataFrame, edges: pd.DataFrame) -> None:
+def census_junction_cuts(regions: pd.DataFrame, boundaries: pd.DataFrame) -> None:
     """⭐ RE-DERIVED: the deposit's junction lookup IS a search in the cut array, so this must be 100 %.
 
      rests on it — if an annotated intron's start is not a cut, the CSR
     scan never happens and the junction is unfindable, silently.
     """
-    junction = edges["kind"].to_numpy() == EDGE_KIND_JUNCTION
-    src = edges.loc[junction, "src"].to_numpy(np.int64)
-    dst = edges.loc[junction, "dst"].to_numpy(np.int64)
+    junction = boundaries["kind"].to_numpy() == EDGE_KIND_JUNCTION
+    src = boundaries.loc[junction, "src"].to_numpy(np.int64)
+    dst = boundaries.loc[junction, "dst"].to_numpy(np.int64)
     if src.size == 0:
-        print("\nJUNCTION ENDPOINTS: no junction edges")
+        print("\nJUNCTION ENDPOINTS: no junction boundaries")
         return
 
     start = regions["start"].to_numpy(np.int64)
@@ -134,9 +134,9 @@ def census_junction_cuts(regions: pd.DataFrame, edges: pd.DataFrame) -> None:
     # A junction runs from the END of region `src` to the START of region `dst`; both are cut positions by
     # construction, so this checks the graph is self-consistent and reports the intron-length spread.
     intron_length = start[dst] - end[src]
-    print("\nJUNCTION EDGES")
+    print("\nJUNCTION BOUNDARIES")
     row("junctions whose endpoints are both cuts", int(src.size), "100 % by construction; asserted")
-    assert np.all(intron_length > 0), "a junction edge spans a non-positive intron"
+    assert np.all(intron_length > 0), "a junction boundary spans a non-positive intron"
     row("median intron length (bp)", int(np.median(intron_length)))
     row("junction fan-out: distinct left_boundaries", int(np.unique(src).size))
     _, counts = np.unique(src, return_counts=True)
@@ -162,13 +162,13 @@ def main() -> None:
     args = ap.parse_args()
 
     regions = pd.read_feather(args.index_dir / "nodes.feather")
-    edges = pd.read_feather(args.index_dir / "edges.feather")
+    boundaries = pd.read_feather(args.index_dir / "edges.feather")
     print(f"index  {args.index_dir}")
 
     census_regions(regions)
-    census_edges(edges)
-    census_merge_visibility(regions, edges)
-    census_junction_cuts(regions, edges)
+    census_boundaries(boundaries)
+    census_merge_visibility(regions, boundaries)
+    census_junction_cuts(regions, boundaries)
     if args.gtf is None:
         print("\nANNOTATION: skipped (pass --gtf to include it)")
     else:

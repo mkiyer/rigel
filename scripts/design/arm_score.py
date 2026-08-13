@@ -72,7 +72,7 @@ def main():
             return _in(k, s)
         line(" x ".join(s), pred, sum(1 for k in keys if pred(k)))
     print("   " + "-" * 112)
-    for ax in ("region", "edge"):
+    for ax in ("region", "boundary"):
         def pred(k, ax=ax):
             return k[1] == ax and not is_g00(k)
         line(f"axis: {ax}", pred, sum(1 for k in keys if pred(k)))

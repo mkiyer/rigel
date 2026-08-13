@@ -55,11 +55,11 @@ _AXIS = {
     "region_spanning_inv_length_sum": "region",
     "region_spanning_length_sum": "region",
     "region_start_count": "region",
-    "edge_unspliced_count": "edge",
-    "edge_unspliced_inv_length_sum": "edge",
-    "edge_spliced_count": "edge",
-    "edge_spliced_inv_length_sum": "edge",
-    "edge_spliced_length_sum": "edge",
+    "boundary_unspliced_count": "boundary",
+    "boundary_unspliced_inv_length_sum": "boundary",
+    "boundary_spliced_count": "boundary",
+    "boundary_spliced_inv_length_sum": "boundary",
+    "boundary_spliced_length_sum": "boundary",
     "sj_count": "sj",
     "sj_inv_length_sum": "sj",
     "sj_mass": "sj",
@@ -71,7 +71,7 @@ def ref_sj_offsets(partition) -> np.ndarray:
     """Per-reference offsets into the junction axis, from the CSR alone.
 
     The CSR is keyed by the flat donor cut index and references are cut-major, so a reference's junctions
-    are the contiguous slot range ``[sj_offsets[c0], sj_offsets[c1])``. That is also why the junction-edge
+    are the contiguous slot range ``[sj_offsets[c0], sj_offsets[c1])``. That is also why the junction-boundary
     id can BE the slot: the flat slot order is already the per-reference banks concatenated in order.
     """
     return partition.sj_offsets[partition.ref_cut_offsets]
@@ -108,8 +108,8 @@ def main() -> None:
     sj_offsets = ref_sj_offsets(partition)
     print(f"index      {args.index}")
     print(
-        f"partition  {partition.n_regions:,} regions  {partition.n_edges:,} contiguous edges  "
-        f"{partition.n_sj:,} junction edges  {partition.cut_positions.size:,} cuts"
+        f"partition  {partition.n_regions:,} regions  {partition.n_boundaries:,} contiguous boundaries  "
+        f"{partition.n_sj:,} junction boundaries  {partition.cut_positions.size:,} cuts"
     )
     print(f"bam        {args.bam}\n")
 
@@ -177,8 +177,8 @@ def main() -> None:
             actual = getattr(native, field.name)
             if axis == "region":
                 lo, hi = partition.ref_region_offsets[ref_id], partition.ref_region_offsets[ref_id + 1]
-            elif axis == "edge":
-                lo, hi = partition.ref_edge_offsets[ref_id], partition.ref_edge_offsets[ref_id + 1]
+            elif axis == "boundary":
+                lo, hi = partition.ref_boundary_offsets[ref_id], partition.ref_boundary_offsets[ref_id + 1]
             else:
                 lo, hi = sj_offsets[ref_id], sj_offsets[ref_id + 1]
             expected = expected_flat[int(lo) : int(hi)]

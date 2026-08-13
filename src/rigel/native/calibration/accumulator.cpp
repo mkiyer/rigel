@@ -260,9 +260,9 @@ Accumulator::Accumulator(std::vector<std::int64_t> cuts,
     // A reference contributing c cuts owns c-1 regions and c-2 interior lines; one contributing fewer than
     // two cuts owns neither, which is legal and deposits nothing.
     const std::size_t n_regions = cuts_.size() >= 2 ? cuts_.size() - 1 : 0;
-    const std::size_t n_edges = cuts_.size() >= 2 ? cuts_.size() - 2 : 0;
+    const std::size_t n_boundaries = cuts_.size() >= 2 ? cuts_.size() - 2 : 0;
     regions_.assign(n_regions, Region{});
-    edges_.assign(n_edges, ContiguousEdge{});
+    boundaries_.assign(n_boundaries, Boundary{});
     region_start_count_.assign(n_regions, 0u);
 
     // ⚠ REQUIRED whenever this reference owns a region, and it throws rather than quietly skipping the
@@ -566,7 +566,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     }
     counters_.introns_absorbed += absorbed;
 
-    // ── which annotated junctions does this path use? this also picks the edge bank ────────────────
+    // ── which annotated junctions does this path use? this also picks the boundary bank ────────────────
     // ⚠ Resolved BEFORE the crossing loop, because `spliced` chooses which bank the crossings land in.
     // ⭐ Resolved PER INTRON POSITION into `sj_id_at_gap`, with -1 where the annotation has no such
     // junction, because the conserved mass needs to know WHICH of a block's two ends is a junction
@@ -619,7 +619,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     // ⚠ 0 at L == 1: a length-1 molecule cannot cross a 0-bp line, and 1/(L-1) would divide by zero. Its
     // residue is the schema's only count/density co-support violation -- an L == 1 path on an annotated
     // junction books a count against density 0, which is correct.
-    const double inv_edge = length >= 2 ? 1.0 / static_cast<double>(length - 1) : 0.0;
+    const double inv_boundary = length >= 2 ? 1.0 / static_cast<double>(length - 1) : 0.0;
     const std::size_t   col          = static_cast<std::size_t>(column);
 
     std::int64_t n_crossed = 0;
@@ -635,12 +635,12 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
             // ⭐ TWO channels on the spliced bank, FOUR on the unspliced one, and the asymmetry is
             // the design: a spliced crossing is certified RNA, nothing deconvolves it, so its length
             // moments have no consumer and are not stored.
-            ContiguousEdge& edge = edges_[static_cast<std::size_t>(line - 1)];
+            Boundary& boundary = boundaries_[static_cast<std::size_t>(line - 1)];
             if (spliced) {
-                edge.spliced_count[col] += 1u;
+                boundary.spliced_count[col] += 1u;
             } else {
-                edge.unspliced_count[col] += 1u;
-                edge.unspliced_inv_length_sum += inv_edge;
+                boundary.unspliced_count[col] += 1u;
+                boundary.unspliced_inv_length_sum += inv_boundary;
             }
         }
         // ── ⭐⭐⭐ THE CONSERVED MASS, per SLICE, over ONE BOUNDARY SET ────────────────────────────
@@ -688,9 +688,9 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
                                    / (static_cast<double>(length) * static_cast<double>(n_bounds));
                 for (const std::int64_t line : {left_line, right_line}) {
                     if (line < 0) continue;
-                    ContiguousEdge& edge = edges_[static_cast<std::size_t>(line - 1)];
-                    if (spliced) edge.spliced_mass += share;
-                    else         edge.unspliced_mass += share;
+                    Boundary& boundary = boundaries_[static_cast<std::size_t>(line - 1)];
+                    if (spliced) boundary.spliced_mass += share;
+                    else         boundary.unspliced_mass += share;
                 }
                 for (const std::int32_t jid : {left_jid, right_jid}) {
                     // ⭐ `col` — the SAME genome-strand column `count` is deposited at below, so
@@ -708,7 +708,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
     for (const std::int32_t id : sj_ids) {
         JunctionEdge& junction = junctions_[static_cast<std::size_t>(id)];
         junction.count[col] += 1u;
-        junction.inv_length_sum += inv_edge;
+        junction.inv_length_sum += inv_boundary;
     }
 
     // ── contained: the WHOLE path lies inside ONE region ────────────────────────────────────────────
@@ -723,7 +723,7 @@ DepositOutcome Accumulator::deposit(const OfferedFragment& fragment, DepositScra
         // fragment contained in a region of length `ell` had `ell - w + 1` admissible start positions, so
         // `1/(ell - w + 1)` cancels the opportunity identically and E[SUM] = rho for ANY length
         // distribution. `1/L` does NOT cancel it: measured, that channel read 25.67 density units for
-        // short fragments and 1.60 for long ones at the same true density. An EDGE is the `ell -> 0`
+        // short fragments and 1.60 for long ones at the same true density. An BOUNDARY is the `ell -> 0`
         // limit, which is why `1/(L-1)` is right there and was wrong here.
         // ⚠ `A >= 1` is structural: the fragment IS contained, so `w <= ell`.
         const std::int64_t region_len =
@@ -867,15 +867,15 @@ void Accumulator::merge_from(const Accumulator& other) {
     for (std::size_t i = 0; i < deposited_lengths_.size(); ++i) {
         deposited_lengths_[i] += other.deposited_lengths_[i];
     }
-    for (std::size_t i = 0; i < edges_.size(); ++i) {
+    for (std::size_t i = 0; i < boundaries_.size(); ++i) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {
-            edges_[i].unspliced_count[c]   += other.edges_[i].unspliced_count[c];
-            edges_[i].spliced_count[c]     += other.edges_[i].spliced_count[c];
+            boundaries_[i].unspliced_count[c]   += other.boundaries_[i].unspliced_count[c];
+            boundaries_[i].spliced_count[c]     += other.boundaries_[i].spliced_count[c];
         }
-        // ⚠ Outside the column loop — these have ONE value per edge, not one per strand.
-        edges_[i].unspliced_inv_length_sum += other.edges_[i].unspliced_inv_length_sum;
-        edges_[i].unspliced_mass += other.edges_[i].unspliced_mass;
-        edges_[i].spliced_mass   += other.edges_[i].spliced_mass;
+        // ⚠ Outside the column loop — these have ONE value per boundary, not one per strand.
+        boundaries_[i].unspliced_inv_length_sum += other.boundaries_[i].unspliced_inv_length_sum;
+        boundaries_[i].unspliced_mass += other.boundaries_[i].unspliced_mass;
+        boundaries_[i].spliced_mass   += other.boundaries_[i].spliced_mass;
     }
     for (std::size_t i = 0; i < junctions_.size(); ++i) {
         for (std::size_t c = 0; c < kNStrandColumns; ++c) {

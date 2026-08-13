@@ -9,7 +9,7 @@ required to reproduce it **byte for byte**. Where this file and a document disag
 
 THE MODEL
     The genome is a graph. **Regions** are half-open intervals tiling each reference, numbered in genomic
-    order. The 0-bp **lines** between adjacent regions are **contiguous edges**; a **junction edge** is a
+    order. The 0-bp **lines** between adjacent regions are **contiguous boundaries**; a **junction boundary** is a
     directed donor→acceptor link taken from the annotation. A **fragment is a path** — its aligned
     blocks, joined across mate gaps and broken by introns::
 
@@ -19,14 +19,14 @@ THE MODEL
         path        [====== block ======]                       crosses line 1
         path        [= block =]~~intron~~[==== block ====]       crosses nothing; uses a junction
 
-    Regions count fragments **contained** (they fit inside); edges count fragments **crossing**.
+    Regions count fragments **contained** (they fit inside); boundaries count fragments **crossing**.
     ⭐ **Each population stores only the channels something reads**, and they differ: the two banks the
     deconvolution consumes carry ``count`` = Sum 1, ``inv_length_sum`` = Sum 1/placements (fixed
     point) and ``length_sum`` = Sum L; the certified-RNA banks carry fewer, because nothing
     deconvolves a fragment that is already known to be RNA.
 
     ⚠ A ``spanning`` population — one segment covering a region whole — used to exist and was **deleted
-    on evidence**: measured on the panel it reached **0 starved regions** the bounding edges did not
+    on evidence**: measured on the panel it reached **0 starved regions** the bounding boundaries did not
     already reach off capture, and 141 regions / 822 fragments (0.008 %) under it. Its mass is not lost,
     since a spanning fragment crosses both of the region's lines and is deposited there.
     ⛔ One consequence, and it is structural: **no spliced fragment now touches the region axis at all**
@@ -37,27 +37,27 @@ WHAT EACH OBJECT'S NUMBERS MEAN
     line — and a component of start-density ``rho`` and length distribution ``f``::
 
         E[count]          =  rho * E_f[placements]
-        E[inv_length_sum]  =  rho * E_f[placements * (1/placements)]  =  rho   <- at an EDGE, exactly
+        E[inv_length_sum]  =  rho * E_f[placements * (1/placements)]  =  rho   <- at an BOUNDARY, exactly
         E[length_sum]      =  rho * E_f[placements * L]
 
-    The opportunity factor cancels identically at an edge, for **any** length distribution, which is why
+    The opportunity factor cancels identically at an boundary, for **any** length distribution, which is why
     no divisor and no length model appear there. It does **not** cancel at a region, where the opportunity
     is ``max(0, region − L + 1)``; there the term is a better-conditioned second moment and nothing more.
 
     ⚠ **This is why the channel is called ``inv_length_sum`` and NOT ``density``.** It IS a density at an
-    edge, exactly; at a region it is not one. Naming it ``density`` put one word on two concepts and would
+    boundary, exactly; at a region it is not one. Naming it ``density`` put one word on two concepts and would
     mislead every consumer that reads a region. The three names are three sums and are honest everywhere.
 
-    ⭐ **``length_sum`` is what separates two components that share a mean length.** At an edge the count
+    ⭐ **``length_sum`` is what separates two components that share a mean length.** At an boundary the count
     row is ``(mu_g - 1, mu_r - 1)`` and the inv-length row is ``(1, 1)``, so the pair's determinant is
     ``mu_g - mu_r`` and it carries ZERO information about the gDNA/RNA split when the two means agree --
     at any depth. ``length_sum`` is a second, independent tilt and removes that blind spot.
     See and ``scripts/design/observable_efficiency.py``.
 
-⚠ NO PARTITIONING. Every crossed edge receives the FULL weight. The chance that a length-``L`` fragment
+⚠ NO PARTITIONING. Every crossed boundary receives the FULL weight. The chance that a length-``L`` fragment
 crosses a given line is proportional to ``L`` and the deposit is ``1/L``, so the two cancel and every
-fragment length contributes equally to each edge. Dividing by the number of edges crossed destroys that
-cancellation and makes the answer depend on region spacing — measured up to **3.6× low**. An edge count is
+fragment length contributes equally to each boundary. Dividing by the number of boundaries crossed destroys that
+cancellation and makes the answer depend on region spacing — measured up to **3.6× low**. An boundary count is
 not a share of a conserved total; there is no total. Density is intensive, not extensive.
 """
 
@@ -91,7 +91,7 @@ __all__ = [
 #: strands — ``Strand.POS`` and ``Strand.NEG`` — following the index's own ``_pos``/``_neg`` column naming
 #: (``reach_lo_pos``, ``reach_lo_neg``, …). Nothing is stored transcript-relative.
 #:
-#: **Sense / antisense is derived, never stored.** A junction edge carries its own genomic strand, so a
+#: **Sense / antisense is derived, never stored.** A junction boundary carries its own genomic strand, so a
 #: consumer that wants transcript-relative counts computes ``sense = (fragment strand == junction
 #: strand)``. Storing it instead would put two conventions into one schema — which is exactly the defect
 #: this replaced.
@@ -303,7 +303,7 @@ _CONTAINED_POOL = {
 class Partition:
     """Everything the deposit addresses. Three axes, off by one from each other per reference.
 
-    A reference contributing ``c`` cut positions owns ``c − 1`` regions and ``c − 2`` contiguous edges
+    A reference contributing ``c`` cut positions owns ``c − 1`` regions and ``c − 2`` contiguous boundaries
     (its interior lines). A reference with no regions contributes no cuts at all::
 
         cuts    0        100       200       600        c = 4
@@ -320,7 +320,7 @@ class Partition:
     ref_cut_offsets: np.ndarray  # int64[n_refs + 1] — CSR over cut_positions
     region_types: np.ndarray  # uint8[n_regions] — 0 intergenic / 1 intron / 2 exon
     ref_region_offsets: np.ndarray  # int64[n_refs + 1]
-    ref_edge_offsets: np.ndarray  # int64[n_refs + 1]
+    ref_boundary_offsets: np.ndarray  # int64[n_refs + 1]
     sj_offsets: np.ndarray  # int64[n_cuts + 1] — CSR over the donor cut index
     sj_boundary_right: np.ndarray  # int64[n_sj] — flat cut index of the intron's high end
     sj_strand: np.ndarray  # int8[n_sj]
@@ -334,8 +334,8 @@ class Partition:
         return int(self.ref_region_offsets[-1])
 
     @property
-    def n_edges(self) -> int:
-        return int(self.ref_edge_offsets[-1])
+    def n_boundaries(self) -> int:
+        return int(self.ref_boundary_offsets[-1])
 
     @property
     def n_sj(self) -> int:
@@ -357,11 +357,11 @@ class Partition:
 
         cut_offsets = np.zeros(n_refs + 1, np.int64)
         region_offsets = np.zeros(n_refs + 1, np.int64)
-        edge_offsets = np.zeros(n_refs + 1, np.int64)
+        boundary_offsets = np.zeros(n_refs + 1, np.int64)
         for r, c in enumerate(cuts_per_ref):
             cut_offsets[r + 1] = cut_offsets[r] + c.size
             region_offsets[r + 1] = region_offsets[r] + max(c.size - 1, 0)
-            edge_offsets[r + 1] = edge_offsets[r] + max(c.size - 2, 0)
+            boundary_offsets[r + 1] = boundary_offsets[r] + max(c.size - 2, 0)
 
         cut_positions = np.concatenate(cuts_per_ref) if n_refs else np.zeros(0, np.int64)
         if region_types is None:
@@ -401,7 +401,7 @@ class Partition:
             ref_cut_offsets=cut_offsets,
             region_types=types,
             ref_region_offsets=region_offsets,
-            ref_edge_offsets=edge_offsets,
+            ref_boundary_offsets=boundary_offsets,
             sj_offsets=sj_offsets,
             sj_boundary_right=boundary_right,
             sj_strand=sj_strand,
@@ -479,7 +479,7 @@ class Tally:
 
     ``count`` = ``Sum 1`` carries the statistical power (a Beta-Binomial needs an integer);
     ``inv_length_sum`` = ``Sum 1/placements`` carries the level, and is an exact model-free density at an
-    edge but NOT at a region; ``length_sum`` = ``Sum L`` is the second length tilt, and is what lets two
+    boundary but NOT at a region; ``length_sum`` = ``Sum L`` is the second length tilt, and is what lets two
     components with the same mean fragment length be told apart at all; ``mass`` is the conserved
     fragment count, and sums to ONE per fragment.
 
@@ -487,11 +487,11 @@ class Tally:
     stored where something reads it and nowhere else::
 
         region_contained    count  inv_length_sum  length_sum       the mixture, on the region axis
-        edge_unspliced    count  inv_length_sum  length_sum  mass the mixture, on the line axis
-        edge_spliced      count                              mass certified RNA — nothing deconvolves it
+        boundary_unspliced    count  inv_length_sum  length_sum  mass the mixture, on the line axis
+        boundary_spliced      count                              mass certified RNA — nothing deconvolves it
         junction          count  inv_length_sum                   inv_length_sum is LIVE in second_pass
 
-    ⛔ Six banks were removed on that rule (three ``region_spanning_*``, the two spliced-edge moments and
+    ⛔ Six banks were removed on that rule (three ``region_spanning_*``, the two spliced-boundary moments and
     ``sj_length_sum``). ⚠ A future channel is added the same way — because a named consumer needs it,
     not because the shape would be tidier.
 
@@ -504,25 +504,25 @@ class Tally:
     #: strand-AGNOSTIC, and every consumer summed the two columns before using them.
     region_contained_inv_opportunity_sum: np.ndarray
     region_start_count: np.ndarray  # uint32[n_regions] — one per accepted fragment; THE invariant
-    edge_unspliced_count: np.ndarray  # uint32[n_edges, 2]
-    edge_unspliced_inv_length_sum: np.ndarray  # uint64[n_edges] — ONE column
-    #: ⭐⭐ uint64[n_edges] — **THE CONSERVED MASS**, fixed point. See :meth:`Accumulator.deposit`.
+    boundary_unspliced_count: np.ndarray  # uint32[n_boundaries, 2]
+    boundary_unspliced_inv_length_sum: np.ndarray  # uint64[n_boundaries] — ONE column
+    #: ⭐⭐ uint64[n_boundaries] — **THE CONSERVED MASS**, fixed point. See :meth:`Accumulator.deposit`.
     #: A COUNT and a MASS are two different deposits and one number cannot be both: ``count`` is
     #: extensive and discrete (a Beta-Binomial needs integers) and is ``+1`` on every line a fragment
     #: crosses, so a fragment contributes ``max(K, 1)`` of them; this sums to ONE per fragment.
     #:
-    #: ⛔ **ONE COLUMN, NOT TWO, AND THAT IS DELIBERATE.** Every other edge bank is ``[n_edges, 2]``
+    #: ⛔ **ONE COLUMN, NOT TWO, AND THAT IS DELIBERATE.** Every other boundary bank is ``[n_boundaries, 2]``
     #: because the two genome strands are read separately — ``strand_deconv`` reads
-    #: ``edge_unspliced.count`` per column. Nothing reads a mass per strand: the mass exists to convert
+    #: ``boundary_unspliced.count`` per column. Nothing reads a mass per strand: the mass exists to convert
     #: an object-incidence total into a fragment count, and that question has no strand in it. A column
     #: nothing reads is half the bank wasted by construction, which is the defect the surviving
     #: ``*_length_sum`` banks already carry and this one declines to repeat.
-    edge_unspliced_mass: np.ndarray
-    #: uint32[n_edges, 2] — certified RNA: gDNA cannot be spliced. ⭐ **COUNT AND MASS ONLY.** Its two
+    boundary_unspliced_mass: np.ndarray
+    #: uint32[n_boundaries, 2] — certified RNA: gDNA cannot be spliced. ⭐ **COUNT AND MASS ONLY.** Its two
     #: length moments were removed: nothing deconvolves a certified-RNA crossing, so they had no
     #: consumer, and `pool_lengths`' RNA_SPLICED row already carries that population's lengths.
-    edge_spliced_count: np.ndarray
-    #: ⭐ uint64[n_edges] — the same rule, routed by the same ``spliced`` flag.
+    boundary_spliced_count: np.ndarray
+    #: ⭐ uint64[n_boundaries] — the same rule, routed by the same ``spliced`` flag.
     #:
     #: ⛔ **A PARTIAL BY CONSTRUCTION, AND NOT A CONSERVATION LEDGER.** A spliced fragment's blocks that
     #: contain no interior line deposit nothing here — their accounting is on the junction axis — so
@@ -532,9 +532,9 @@ class Tally:
     #: two safe to compare there. ⛔ It is NOT "the number of spliced fragments at this line".
     #:
     #: ⭐ It exists so that ``mass`` is not the ONE channel that ignores the spliced/unspliced split.
-    #: Every edge channel is selected by one tuple at deposit time; a spliced fragment's mass landing
+    #: Every boundary channel is selected by one tuple at deposit time; a spliced fragment's mass landing
     #: in the unspliced bank would put certified RNA into the competition the prior arbitrates.
-    edge_spliced_mass: np.ndarray
+    boundary_spliced_mass: np.ndarray
     #: uint32[n_sj, 2] — ⛔⛔ **BOTH GENOME-STRAND COLUMNS ARE RETAINED, AND NOT BECAUSE ANYTHING READS
     #: THEM YET** (owner ruling, 2026-08-08). A junction is stranded by its genomic splicing MOTIF, so
     #: the strand of the *fragments* on it looks redundant, and every consumer today sums the two.
@@ -552,11 +552,11 @@ class Tally:
     #: ``test_the_junction_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION``.
     sj_count: np.ndarray
     #: uint64[n_sj] — ⭐ LIVE: ``second_pass.py`` scores a held fragment's junction evidence with it.
-    #: ⚠ ``sj_length_sum`` is gone for the same reason the spliced edge moments are.
+    #: ⚠ ``sj_length_sum`` is gone for the same reason the spliced boundary moments are.
     sj_inv_length_sum: np.ndarray
     #: uint64[n_sj] — ⭐⭐⭐ **THE CONSERVED MASS'S THIRD AXIS, AND IT IS WHAT MAKES A LIBRARY FRAGMENT
     #: COUNT COMPUTABLE AT ALL.** A spliced fragment's block that contains no interior line deposits
-    #: nothing on either edge bank, and it is not ``contained`` either — its path spans a junction, so
+    #: nothing on either boundary bank, and it is not ``contained`` either — its path spans a junction, so
     #: it lies in no single region. Before this bank such a fragment existed on the incidence axis
     #: (``sj_count``) and on no conserved one, so no sum over conserved banks could count it.
     #:
@@ -567,8 +567,8 @@ class Tally:
     #:
     #: ⛔ **THE RULE ADDS A BOUNDARY CLASS; IT DOES NOT RE-APPORTION AN EXISTING ONE.** A block that
     #: crosses at least one line is unchanged — its bases go to lines exactly as before — so
-    #: ``edge_spliced_mass`` and ``edge_unspliced_mass`` are byte-identical to what they were, and the
-    #: commensurability ``edge_spliced_mass`` documents ("the share of this fragment's bases adjacent to
+    #: ``boundary_spliced_mass`` and ``boundary_unspliced_mass`` are byte-identical to what they were, and the
+    #: commensurability ``boundary_spliced_mass`` documents ("the share of this fragment's bases adjacent to
     #: this line", directly comparable with the unspliced mass at the same line) survives. Only the
     #: blocks that previously disposed of nothing are affected, and they now give their whole
     #: ``block_len / L`` to the annotated junctions bounding them, shared equally.
@@ -610,7 +610,7 @@ class Tally:
     gap_resolution: dict[str, int] = field(default_factory=dict)
 
     @classmethod
-    def zeros(cls, n_regions: int, n_edges: int, n_sj: int, max_length: int) -> "Tally":
+    def zeros(cls, n_regions: int, n_boundaries: int, n_sj: int, max_length: int) -> "Tally":
         def counts(rows):
             return np.zeros((rows, N_STRAND_COLUMNS), np.uint32)
 
@@ -623,11 +623,11 @@ class Tally:
             region_contained_count=counts(n_regions),
             region_contained_inv_opportunity_sum=fraction(n_regions),
             region_start_count=np.zeros(n_regions, np.uint32),
-            edge_unspliced_count=counts(n_edges),
-            edge_unspliced_inv_length_sum=fraction(n_edges),
-            edge_unspliced_mass=fraction(n_edges),
-            edge_spliced_count=counts(n_edges),
-            edge_spliced_mass=fraction(n_edges),
+            boundary_unspliced_count=counts(n_boundaries),
+            boundary_unspliced_inv_length_sum=fraction(n_boundaries),
+            boundary_unspliced_mass=fraction(n_boundaries),
+            boundary_spliced_count=counts(n_boundaries),
+            boundary_spliced_mass=fraction(n_boundaries),
             sj_count=counts(n_sj),
             sj_inv_length_sum=fraction(n_sj),
             # ⭐ TWO COLUMNS, unlike every other mass here — see the field.
@@ -734,12 +734,12 @@ class Accumulator:
         self.partition = partition
         self.max_fragment_length = int(max_fragment_length)
         self.tally = Tally.zeros(
-            partition.n_regions, partition.n_edges, partition.n_sj, self.max_fragment_length
+            partition.n_regions, partition.n_boundaries, partition.n_sj, self.max_fragment_length
         )
 
     @property
-    def n_edges(self) -> int:
-        return self.partition.n_edges
+    def n_boundaries(self) -> int:
+        return self.partition.n_boundaries
 
     def deposit(
         self,
@@ -803,7 +803,7 @@ class Accumulator:
         the column labelled *sense*.
 
         ⚠ ``sj_strand`` here is **observed**, per fragment. ``Partition.sj_strand`` is **annotated**, per
-        junction edge. One quantity, two sources; :meth:`_sj_edge_id` compares them.
+        junction boundary. One quantity, two sources; :meth:`_sj_edge_id` compares them.
         """
         # ⚠ Checked FIRST, and before any geometry: the strand is a property of the fragment alone, and a
         # fragment with no single genome strand has no column in any bank. The scanner's gate at
@@ -896,7 +896,7 @@ class Accumulator:
         first_base, last_base = segments[0][0], segments[-1][1] - 1
 
         t = self.tally
-        region_base, edge_base = int(p.ref_region_offsets[ref]), int(p.ref_edge_offsets[ref])
+        region_base, boundary_base = int(p.ref_region_offsets[ref]), int(p.ref_boundary_offsets[ref])
         t.region_start_count[region_base + self._local_region(cuts, first_base)] += 1
         # ⭐ TRAPS: a-purity-filter-is-a-length-filter: the unconditional length histogram, incremented HERE — beside the start count and the
         # DEPOSITED counter — so all three describe one population by construction rather than by
@@ -913,18 +913,18 @@ class Accumulator:
         # design rather than an omission. A spliced crossing is certified RNA: nothing deconvolves it,
         # so its length moments have no consumer and are not stored. The unspliced bank is the mixture,
         # and the length banks are built on exactly its moments.
-        edge_count = t.edge_spliced_count if spliced else t.edge_unspliced_count
-        edge_mass = t.edge_spliced_mass if spliced else t.edge_unspliced_mass
+        boundary_count = t.boundary_spliced_count if spliced else t.boundary_unspliced_count
+        boundary_mass = t.boundary_spliced_mass if spliced else t.boundary_unspliced_mass
         # ⚠ 0 at L == 1: a length-1 molecule cannot cross a 0-bp line, and 1/(L-1) would divide by zero.
-        inv_edge = 1.0 / (length - 1) if length >= 2 else 0.0
+        inv_boundary = 1.0 / (length - 1) if length >= 2 else 0.0
         n_crossed, sole_line = 0, -1
         for block, (seg_start, seg_end) in enumerate(segments):
             first = int(np.searchsorted(cuts, seg_start, side="right"))
             last = int(np.searchsorted(cuts, seg_end, side="left"))
             for line in range(first, last):
-                edge_count[edge_base + line - 1, column] += 1
+                boundary_count[boundary_base + line - 1, column] += 1
                 if not spliced:
-                    t.edge_unspliced_inv_length_sum[edge_base + line - 1] += inv_edge
+                    t.boundary_unspliced_inv_length_sum[boundary_base + line - 1] += inv_boundary
             # ── ⭐⭐⭐ THE CONSERVED MASS, per SLICE, over ONE BOUNDARY SET ─────────────────────────
             # The crossed cuts split this block into `last - first + 1` slices. Each slice's
             # `slice_len / length` is shared EQUALLY between the objects that bound it, so every bounded
@@ -946,7 +946,7 @@ class Accumulator:
             # ⭐ Coverage-weighted, NOT `1/K`. Both conserve; only this one says WHERE the fragment sat,
             # and only this one is expressible per base — which is how the two are told apart at all.
             # ⚠ An UNSPLICED path has no junction boundaries, so this reduces to the previous rule
-            # exactly and `edge_unspliced_mass` is byte-identical. A single block with no line and no
+            # exactly and `boundary_unspliced_mass` is byte-identical. A single block with no line and no
             # annotated junction is bounded by nothing and deposits nothing: for a one-block path that is
             # the CONTAINED case, already whole in `region_contained_count`; for a multi-block one it is an
             # unannotated intron's block, whose bases have nowhere conserved to go.
@@ -973,7 +973,7 @@ class Accumulator:
                 share = (hi - lo) / (length * n_bounds)
                 for line in (left_line, right_line):
                     if line >= 0:
-                        edge_mass[edge_base + line - 1] += share
+                        boundary_mass[boundary_base + line - 1] += share
                 for jid in (left_jid, right_jid):
                     if jid >= 0:
                         # ⭐ `column` — the SAME column `sj_count` is deposited at below, so
@@ -987,7 +987,7 @@ class Accumulator:
             t.sj_count[jid, column] += 1
             # ⚠ `inv_length_sum` only. `sj_length_sum` was removed: nothing read it, and `pool_lengths`
             # already carries the spliced population's length distribution (RNA_SPLICED) unconditioned.
-            t.sj_inv_length_sum[jid] += inv_edge
+            t.sj_inv_length_sum[jid] += inv_boundary
 
         # ── contained: the WHOLE path lies inside ONE region ────────────────────────────────────────
         # ⚠ Not merely "crossed no line". An unannotated intron can swallow every line between two
@@ -1005,7 +1005,7 @@ class Accumulator:
             # `E[SUM] = rho` for ANY length distribution. ⛔ The predecessor deposited `1/L`, which does
             # NOT cancel `(ell − w + 1)` — measured, that channel read 25.67 density units for short
             # fragments and 1.60 for long ones at the same true density, a 16x swing driven by nothing
-            # but the length SET. An EDGE is the `ell -> 0` limit of this, which is why `1/(L−1)` is
+            # but the length SET. An BOUNDARY is the `ell -> 0` limit of this, which is why `1/(L−1)` is
             # right there and was wrong here.
             # ⚠ `A >= 1` is structural, not defensive: the fragment IS contained, so `w <= ell`.
             region_len = int(cuts[first_region + 1]) - int(cuts[first_region])
@@ -1166,7 +1166,7 @@ class Accumulator:
         return min(max(int(np.searchsorted(cuts, position, side="right")) - 1, 0), cuts.size - 2)
 
     def _sj_edge_id(self, ref: int, intron_start: int, intron_end: int, sj_strand: int) -> int:
-        """The junction-edge id for this intron, or -1 if it is not annotated.
+        """The junction-boundary id for this intron, or -1 if it is not annotated.
 
         One to three iterations at human scale: 70.4 % of cuts are not a donor at all, and over those
         that are, the mean fan-out is 1.31.

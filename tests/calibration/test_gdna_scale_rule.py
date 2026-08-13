@@ -2,7 +2,7 @@
 
 The reframe ``r = rho_tot(dst)/rho_tot(src)`` delivers ``phi_c(src)·rho_tot(dst)``: the source's density
 SHARE applied to the destination's observed total. It is a composition imputation, and it is exact only
-where the two objects share a composition. At an ``intergenic|exon edge -> EXON`` step the source is
+where the two objects share a composition. At an ``intergenic|exon boundary -> EXON`` step the source is
 structurally 100 % gDNA and the destination is not, so ``phi_g(src) = 1`` and the delivered gDNA level
 collapses to the destination's **own** total — TRAPS: a-message-from-the-destinations-belief, the message carrying zero information and
 confirming the destination.
@@ -11,11 +11,11 @@ The rule under test: a COMPOSITION crosses by ``r``, licensed by the λ-emission
 (the source must have SUPPLIED both components of the pair); a gDNA LEVEL crosses UNSCALED, because gDNA
 is uniform along the genome before capture. Capture needs no branch and no scale factor: it is carried by
 the pure-gDNA population's OWN measurements, which the relay's mass pin restores at every such object,
-so the level an exon receives is its flanking EDGE's enriched measurement rather than the off-target floor.
+so the level an exon receives is its flanking BOUNDARY's enriched measurement rather than the off-target floor.
 
 ⭐ Six gates. The base fixture is the owner's ``TA_single_exon`` geometry in unit-test form:
 ``intergenic | exon+ | intergenic``, chain ``N E N E N``, so the exon (slot 2) can ONLY be solved through
-its two flanking gene-boundary EDGEs (slots 1, 3) — a wrong exon there is a message-passing failure and
+its two flanking gene-boundary BOUNDARIES (slots 1, 3) — a wrong exon there is a message-passing failure and
 nothing else. Gate 5 extends it to an interior exon, which is where TRAPS: a-purity-filter-is-a-length-filter's panel mass actually lives.
 
 ⚠ **Perturbation-verified, and here is what they cover** (`scratchpad/perturb_gates.py`): reverting the
@@ -53,9 +53,9 @@ from _synthetic import make_chain_parts
 #: is TRAPS: could-the-arm-have-fired exactly ("check the arm COULD have changed something").
 region_sweep = functools.partial(solve_chain, policy=HeadPolicy())
 
-#: the chain is ``N E N E N``: intergenic(0) EDGE(1) EXON(2) EDGE(3) intergenic(4)
-IG_LEFT, SEAM_LEFT, EXON, SEAM_RIGHT, IG_RIGHT = 0, 1, 2, 3, 4
-PURE = (IG_LEFT, SEAM_LEFT, SEAM_RIGHT, IG_RIGHT)
+#: the chain is ``N E N E N``: intergenic(0) BOUNDARY(1) EXON(2) BOUNDARY(3) intergenic(4)
+IG_LEFT, BOUNDARY_LEFT, EXON, BOUNDARY_RIGHT, IG_RIGHT = 0, 1, 2, 3, 4
+PURE = (IG_LEFT, BOUNDARY_LEFT, BOUNDARY_RIGHT, IG_RIGHT)
 
 
 def _delta_pmf(length):
@@ -64,13 +64,13 @@ def _delta_pmf(length):
     return p
 
 
-def _single_exon_chain(*, rho_region, rho_edge, rna_counts, region_bp=1000.0):
+def _single_exon_chain(*, rho_region, rho_boundary, rna_counts, region_bp=1000.0):
     """``intergenic | exon+ | intergenic`` with a gDNA field laid down as ``rho x own opportunity``, plus
     ``rna_counts`` extra UNSTRANDED RNA counts on the exon only.
 
-    ``rho_region`` / ``rho_edge`` are the gDNA densities of the off-probe REGION class and the exon-adjacent
-    EDGE class. Equal ⇒ a flat landscape (capture OFF). Unequal ⇒ a capture step, with the exon's own
-    gDNA laid at the on-probe level ``rho_edge`` — the geometry hybrid capture produces.
+    ``rho_region`` / ``rho_boundary`` are the gDNA densities of the off-probe REGION class and the exon-adjacent
+    BOUNDARY class. Equal ⇒ a flat landscape (capture OFF). Unequal ⇒ a capture step, with the exon's own
+    gDNA laid at the on-probe level ``rho_boundary`` — the geometry hybrid capture produces.
 
     ⚠ The RNA is split evenly across the two GENOME strands, which is what an unstranded library
     deposits, so the strand channel carries exactly zero composition information (`EQUATIONS.md` §5.2)
@@ -79,18 +79,18 @@ def _single_exon_chain(*, rho_region, rho_edge, rna_counts, region_bp=1000.0):
     gdna_fl, rna_fl = _delta_pmf(300), _delta_pmf(200)
     region_eff = contained_eff_length(np.full(3, region_bp), gdna_fl)
     unb = np.full(1, UNBOUNDED_REACH)
-    edge_eff = float(crossing_eff_length(gdna_fl, unb, unb)[0])
+    boundary_eff = float(crossing_eff_length(gdna_fl, unb, unb)[0])
     # gDNA: the flanks at the off-probe rate, the exon at the on-probe rate (== off-probe when flat).
-    g_region = np.array([rho_region, rho_edge, rho_region]) * region_eff
-    g_edge = rho_edge * edge_eff
+    g_region = np.array([rho_region, rho_boundary, rho_region]) * region_eff
+    g_boundary = rho_boundary * boundary_eff
     region_count = g_region + np.array([0.0, float(rna_counts), 0.0])
     return make_chain_parts(
         [0, BIT_EXON_POS, 0],
         region_size_bp=region_bp,
         region_pos=region_count / 2,
         region_neg=region_count / 2,
-        edge_pos=g_edge / 2,
-        edge_neg=g_edge / 2,
+        boundary_pos=g_boundary / 2,
+        boundary_neg=g_boundary / 2,
         gdna_fl=gdna_fl,
         rna_fl=rna_fl,
     )
@@ -122,11 +122,11 @@ def _solve(parts, *, kappa=0.5):
     return final, cap, final.f_g * count / eff_g
 
 
-def _sweep(rho_region, rho_edge, rna_ladder):
+def _sweep(rho_region, rho_boundary, rna_ladder):
     """The delivered gDNA level at the exon, and its own f_g, as the exon's RNA content moves."""
     out = []
     for rna in rna_ladder:
-        parts = _single_exon_chain(rho_region=rho_region, rho_edge=rho_edge, rna_counts=rna)
+        parts = _single_exon_chain(rho_region=rho_region, rho_boundary=rho_boundary, rna_counts=rna)
         final, cap, rho_g = _solve(parts)
         count = np.asarray(parts.geometry.unspliced_count, float).sum(axis=1)
         eff_g = np.asarray(parts.geometry.eff_gdna, float)
@@ -137,7 +137,7 @@ def _sweep(rho_region, rho_edge, rna_ladder):
                 "cg": float(np.asarray(cap["_uni"][-1]["cg"], float)[EXON]),
                 # the CONSEQUENCE: the exon's own answer, and the truth the fixture laid down
                 "pred_fg": float(final.f_g[EXON]),
-                "true_fg": float(rho_edge * eff_g[EXON] / count[EXON]),
+                "true_fg": float(rho_boundary * eff_g[EXON] / count[EXON]),
                 # the destination's OWN total density — what TRAPS: a-message-from-the-destinations-belief delivers, kept so a failure can name it
                 "m_over_eg": float(count[EXON] / eff_g[EXON]),
                 "rho_g_out": float(rho_g[EXON]),
@@ -196,7 +196,7 @@ def test_exon_fg_tracks_its_truth_across_the_density_sweep():
 
 def test_every_structurally_pure_gdna_object_stays_exact():
     """⭐ **GATE 3 — a fix that breaks the anchors has traded one error for another.** Both intergenic
-    regions and both gene-boundary EDGEs are structurally pure gDNA; all four must read exactly 1.0 on
+    regions and both gene-boundary BOUNDARIES are structurally pure gDNA; all four must read exactly 1.0 on
     every rung of the ladder."""
     for row in _sweep(1.0, 1.0, _RNA_LADDER):
         assert np.all(row["pure_fg"] == 1.0), f"rna={row['rna']}: pure objects {row['pure_fg']}"
@@ -205,18 +205,18 @@ def test_every_structurally_pure_gdna_object_stays_exact():
 @pytest.mark.parametrize("step", (1.0, 20.0, 200.0))
 def test_capture_step_is_carried_and_the_off_probe_floor_is_not(step):
     """⭐⭐⭐ **GATE 4 — THE SAME EXPRESSION UNDER BOTH CAPTURE ARMS, AND THIS IS WHERE 'NO BRANCH' IS
-    PROVED.** The off-probe flanks sit ``step`` x below the gene-boundary EDGEs and the exon's own gDNA,
+    PROVED.** The off-probe flanks sit ``step`` x below the gene-boundary BOUNDARIES and the exon's own gDNA,
     which is the geometry hybrid capture produces; ``step = 1`` is capture-OFF and is the SAME row of the
     same parametrization, not a separate case.
 
-    The exon must receive the **ON-PROBE** level — its flanking EDGEs' own measurement — on every rung.
+    The exon must receive the **ON-PROBE** level — its flanking BOUNDARIES' own measurement — on every rung.
     That is a three-way discrimination and each wrong answer has a name:
 
-    * ``step`` (correct) — the EDGE's own enriched measurement;
+    * ``step`` (correct) — the BOUNDARY's own enriched measurement;
     * ``1.0`` — the off-probe floor leaking through an unscaled relay that never re-anchors;
     * ``rho_tot(exon)`` — TRAPS: a-message-from-the-destinations-belief again.
 
-    ⭐ Nothing scales the level here: it arrives unscaled and is re-anchored at the EDGE by the relay's
+    ⭐ Nothing scales the level here: it arrives unscaled and is re-anchored at the BOUNDARY by the relay's
     mass identity, which is what makes the capture landscape a MEASUREMENT rather than a model. Run at
     high RNA so ``rho_tot(exon)`` is far from every candidate."""
     rows = _sweep(1.0, step, (70_000.0,))
@@ -272,7 +272,7 @@ def test_level_survives_two_hops_through_an_rna_rich_exon():
     rho, bp_ = 1.0, 1_000.0
     region_eff = contained_eff_length(np.full(5, bp_), gdna_fl)
     unb = np.full(1, UNBOUNDED_REACH)
-    edge_eff = float(crossing_eff_length(gdna_fl, unb, unb)[0])
+    boundary_eff = float(crossing_eff_length(gdna_fl, unb, unb)[0])
     # a UNIFORM gDNA field on every object, plus heavy RNA on the two OUTER exons only
     region_count = rho * region_eff + np.array([0.0, 60_000.0, 0.0, 60_000.0, 0.0])
     parts = make_chain_parts(
@@ -280,8 +280,8 @@ def test_level_survives_two_hops_through_an_rna_rich_exon():
         region_size_bp=bp_,
         region_pos=region_count / 2,
         region_neg=region_count / 2,
-        edge_pos=rho * edge_eff / 2,
-        edge_neg=rho * edge_eff / 2,
+        boundary_pos=rho * boundary_eff / 2,
+        boundary_neg=rho * boundary_eff / 2,
         gdna_fl=gdna_fl,
         rna_fl=rna_fl,
     )
@@ -302,7 +302,7 @@ def test_composition_shared_hops_keep_the_total_density_reframe():
 
     The fixture is a STRANDED chain (κ = 0.95, library sample sizes large enough to open the strand
     deadband), so the exon and intron regions earn real composition evidence and can lend a composition,
-    while the two gene-boundary EDGEs and the intergenic flanks still cannot.
+    while the two gene-boundary BOUNDARIES and the intergenic flanks still cannot.
 
     ⚠ **Both populations must be non-empty**, and that is what makes the gate two-sided: forcing the
     licence always-on or always-off each empties one of them. Without this gate the single-exon fixture
@@ -312,8 +312,8 @@ def test_composition_shared_hops_keep_the_total_density_reframe():
         region_size_bp=1000.0,
         region_pos=[100.0, 900.0, 400.0, 900.0, 100.0],  # sense-tilted RNA on the genic regions
         region_neg=[100.0, 50.0, 30.0, 50.0, 100.0],
-        edge_pos=[20.0, 60.0, 60.0, 20.0],
-        edge_neg=[20.0, 10.0, 10.0, 20.0],
+        boundary_pos=[20.0, 60.0, 60.0, 20.0],
+        boundary_neg=[20.0, 10.0, 10.0, 20.0],
     )
     cap = {}
     region_sweep(

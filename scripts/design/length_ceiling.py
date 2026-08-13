@@ -108,7 +108,7 @@ def main() -> int:
             # aggregate anyway. Record the absence rather than crashing on it.
             row["has_ceiling"] = "c_input_pass0" in m.scores
             arms = ("pass0", "c_input_pass0") if row["has_ceiling"] else ("pass0",)
-            for axis in ("region", "edge"):
+            for axis in ("region", "boundary"):
                 for arm in arms:
                     row[f"mwae_all_{arm}_{axis}"] = float(m.scores[arm][axis]["ALL"].mwae)
                     row[f"mwae_solvable_{arm}_{axis}"] = solvable_mwae(m, arm, axis, config)

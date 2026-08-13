@@ -53,7 +53,7 @@ class TestFastExpAccuracy:
 
 
 # ---------------------------------------------------------------------------
-# Edge cases and cutoff behavior
+# Boundary cases and cutoff behavior
 # ---------------------------------------------------------------------------
 
 

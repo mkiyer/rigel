@@ -113,8 +113,8 @@ def build_test_index(tmp_path_factory, gtf_text, genome_size=2000, name="idx", r
     refs : dict[str, int] | None
         Optional ``{reference_name: length}`` for a MULTI-reference index. ``None`` (the default) builds
         the single ``chr1`` of ``genome_size`` bp that every existing caller expects, so this parameter
-        is purely additive. Needed by the splice-graph matrix, whose G17 asserts that region/edge ids stay
-        contiguous per reference and that no edge crosses references.
+        is purely additive. Needed by the splice-graph matrix, whose G17 asserts that region/boundary ids stay
+        contiguous per reference and that no boundary crosses references.
 
     Returns
     -------

@@ -26,7 +26,7 @@ def build_gdna_track(calibration, region_arrays, ref_names) -> pd.DataFrame:
     (mass / ``gdna_region_eff_len``); ``gdna_frac`` is gDNA's share of the region's
     contained mass.
 
-    ⚠ **Contained only, deliberately.** A contiguous edge is a 0-bp line: it has no genomic extent to
+    ⚠ **Contained only, deliberately.** A contiguous boundary is a 0-bp line: it has no genomic extent to
     occupy a row of a track, and attributing its crossing mass to a flank region would report a density
     at a position where that mass was never contained.
     """

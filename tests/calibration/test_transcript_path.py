@@ -87,7 +87,7 @@ class _Index:
                 "end": np.asarray(bounds[1:], dtype=np.int64),
             }
         )
-        # junction edges: one per adjacent exon pair, keyed by the regions the intron separates
+        # junction boundaries: one per adjacent exon pair, keyed by the regions the intron separates
         jr = []
         for t, exons in exons_by_t.items():
             for (_, e0), (s1, _) in zip(exons[:-1], exons[1:], strict=True):
@@ -108,7 +108,7 @@ class _Index:
 
 @pytest.fixture
 def _patched_junctions(monkeypatch):
-    """The fixture index carries junction edges directly, so the CSR builder is stubbed to the
+    """The fixture index carries junction boundaries directly, so the CSR builder is stubbed to the
     identity — this file gates the PATH, not `build_junction_edge_arrays` (which has its own gates and
     was verified 13,482/13,482 against `sj.feather` on the real index)."""
     import rigel.calibration.splice_graph as SG

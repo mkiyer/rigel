@@ -31,7 +31,7 @@ sense rate, the overdispersion is identified from the **excess variance of the s
 Binomial**, attributable to the gDNA fragments.
 
 **Estimator — pooled method of moments.** For each seed region ``s`` (a count-observable region or
-boundary side — intergenic, intronic, exon–intron / exon–intergenic seam) with ``sense_s`` of
+boundary side — intergenic, intronic, exon–intron / exon–intergenic boundary) with ``sense_s`` of
 ``n_s`` gDNA-eligible unspliced fragments and count-derived gDNA weight ``w_s``:
 
     mean_s        = ½·w_s + rna_sense_frac·(1 − w_s)        # mixture sense rate
@@ -73,7 +73,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .strand_deconv import edge_seeds
+from .strand_deconv import boundary_seeds
 from .signature import TS_AMBIG, TS_NEG
 
 #: Hard floor on overdispersion — the Binomial limit (no negative overdispersion).
@@ -395,20 +395,20 @@ def fit_gdna_strand_from_substrate(
     Pools two kinds of count-observable seed (the same seeds the density estimator trusts):
 
     * **contained regions** — intergenic + intron-only (:func:`_region_seeds`);
-    * **contiguous edges** — exon–intron / exon–intergenic lines
-      (:func:`strand_deconv.edge_seeds`), needed under hybrid capture, which depletes off-target
+    * **contiguous boundaries** — exon–intron / exon–intergenic lines
+      (:func:`strand_deconv.boundary_seeds`), needed under hybrid capture, which depletes off-target
       intergenic/intronic gDNA.
 
     Both contribute ``(sense, total, gdna_weight)`` on the same footing, and the pooled estimator fits
     one global overdispersion, shrunk toward ``prior_overdispersion`` (strength ``prior_weight``).
 
-    ⚠ **The edge arm contributes one seed per line, not two per boundary** (S5.f). The predecessor
+    ⚠ **The boundary arm contributes one seed per line, not two per boundary** (S5.f). The predecessor
     counted each physical crossing twice — once from each face — which inflated the pooled sample size
     2× and paired every observation with a perfectly correlated twin. A dispersion estimator reading
     its own duplication is the failure mode this removes; see :mod:`strand_deconv`.
     """
     n_sense, n_total, n_weight = _region_seeds(substrate, region_arrays, region_density)
-    e_sense, e_total, e_weight = edge_seeds(substrate, region_arrays, region_density)
+    e_sense, e_total, e_weight = boundary_seeds(substrate, region_arrays, region_density)
     sense = np.concatenate([n_sense, e_sense])
     total = np.concatenate([n_total, e_total])
     weight = np.concatenate([n_weight, e_weight])

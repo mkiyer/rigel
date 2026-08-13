@@ -9,7 +9,7 @@ calibration and therefore the candidate sets. Building costs ~5 min per conditio
 calibration + a drain + a ~30 s read-name walk); loading costs ~1 s.
 
 ⭐ **This is what makes the post-calibration work cheap.** The interrogation that found the
-edge-attribution defect ran a dozen questions against this cache; each would have been a five-minute
+boundary-attribution defect ran a dozen questions against this cache; each would have been a five-minute
 scan otherwise. ⛔ ``priors.py`` is deliberately **excluded from the cache key**, so editing the
 assembler does NOT invalidate a scan — testing a change to ``assemble_priors`` is a one-second loop.
 
@@ -219,7 +219,7 @@ def build(panel: str, cond: str) -> dict:
             # admissible panel for a drained measurement and flgap_long a cross-check.
             leak = sum(
                 int(np.asarray(getattr(parts_d["gdna"], b), np.int64).sum())
-                for b in ("edge_spliced_count", "sj_count")
+                for b in ("boundary_spliced_count", "sj_count")
                 if hasattr(parts_d["gdna"], b)
             )
             oracle_d = OracleTruth(

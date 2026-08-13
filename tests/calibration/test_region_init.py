@@ -47,7 +47,7 @@ def _delta_pmf(length):
 def _scenario(kappa=0.9):
     """One ref, 3 regions: intergenic (pure gDNA) | exon+ (single-strand) | AMBIG.
 
-    ⭐ The chain is ``N E N E N`` — 5 slots, the regions at 0/2/4 — and the two edges carry no counts, so
+    ⭐ The chain is ``N E N E N`` — 5 slots, the regions at 0/2/4 — and the two boundaries carry no counts, so
     this exercises the region axis alone. The predecessor built ``B R B R B R B`` with four boundary slots
     including two data-free terminals; those do not exist.
     """
@@ -166,7 +166,7 @@ def test_strand_evidence_deadband_kills_unstranded():
 
 
 def test_strand_evidence_struct_lock_regions_only():
-    """I_struct (struct_lock) is composition-certainty for LOCKED REGION regions only — never a boundary seam."""
+    """I_struct (struct_lock) is composition-certainty for LOCKED REGION regions only — never a boundary boundary."""
     z = np.zeros(4)
     _, lock = strand_evidence(
         z,
@@ -356,12 +356,12 @@ def test_density_factor_precision_flows_into_region_init():
 #: (`ladder_arm_ab.py --arm zc_struct_lock_g1`): the stranded × capture-ON row it was aimed at moved only
 #: **−1.2 %**, ``g98`` went **+0.4 %** (worse), and the zero-gDNA control went **+3,207 %** (2,103 →
 #: 69,532 fragments) — the mis-scoped mask is load-bearing for the zero-gDNA win. TRAPS: a-cancelling-defect-pair: it is half
-#: of a cancelling pair, and the other half is the ``intergenic|exon`` seam claiming its whole
+#: of a cancelling pair, and the other half is the ``intergenic|exon`` boundary claiming its whole
 #: RNA-contaminated crossing mass as gDNA. Price them TOGETHER or not at all.
 _STRUCT_LOCK_XFAIL = pytest.mark.xfail(
     strict=True,
     reason="struct_lock is ~solvable & REGION, not g1_locked & REGION — proven, and the scoping fix is "
-    "panel-negative alone (zero-gDNA control +3,207 %). Must go green with the seam-composition arm.",
+    "panel-negative alone (zero-gDNA control +3,207 %). Must go green with the boundary-composition arm.",
 )
 
 

@@ -227,6 +227,18 @@ on both sides — the invariant the predecessor could not state. That is strictl
 check it replaces (`TRAPS: a-gate-that-reconstructs` — prefer an invariance).
 ⚠ **Expect the same collision in stages 3–6**, since `boundary` is the other re-adopted word.
 
+**④ ⭐ STAGE 3 ADDED TWO MORE SENSES AND THREE MISSED FORMS.** `edge` turned out to have FOUR senses,
+not two: the 0-bp boundary; a **junction edge**, which is a SPLICE JUNCTION and emphatically *not* a
+boundary (it CONNECTS two); the mixed `edges_df` table, which holds both kinds and is therefore neither;
+and ⭐ **`TestEdgeCases` — the English idiom "edge case"**, which the word-boundary rules left alone by
+luck rather than by design. 128 SENSE-B identifiers were protected verbatim and belong to stage 6.
+⛔ **Three FORMS escaped both stages' rules and each needs its own pattern:**
+`NODEs`/`EDGEs` (an uppercase constant pluralised with a lowercase `s`, prose only — 65 sites, and the
+`NODEs` half was a stage-2 leftover); `ContiguousEdge` (a lookbehind assuming a word boundary is blocked
+by the `s` of "Contiguous"); and ⭐⭐ `"\nEDGES"` — **the `n` of an ESCAPE SEQUENCE reads as a word
+character**, so a lookbehind refuses it. That last one lives only in output strings, which is exactly why
+no test could see it.
+
 **⚠ And one false positive the census did not predict:** `request.node` is **pytest's API**. It was
 renamed to `request.region` and two scenario tests failed. Nothing else in the tree hit a third-party
 `node` API, but the class of error is real — a token can belong to a LIBRARY, not just to two of our own

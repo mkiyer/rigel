@@ -1,23 +1,23 @@
 #!/usr/bin/env python
-"""⭐⭐⭐ IS THE CERTIFIED-RNA CHANNEL WIRED AT A TERMINUS EDGE? — the audit, on a TA x TB abundance grid.
+"""⭐⭐⭐ IS THE CERTIFIED-RNA CHANNEL WIRED AT A TERMINUS BOUNDARY? — the audit, on a TA x TB abundance grid.
 
-A **spliced** fragment cannot be gDNA, so ``edge_spliced`` is the one observation in the tool that needs no
+A **spliced** fragment cannot be gDNA, so ``boundary_spliced`` is the one observation in the tool that needs no
 deconvolution: it is certified RNA. The solver's job is to deconvolve the **unspliced** population, and any
 certified fragment that leaks into it is RNA handed to the gDNA solver.
 
-⛔ **THE CASE THIS EXISTS FOR** (owner, 2026-08-05). The accumulator now creates an EDGE at every
-transcript start and end. **Those EDGEs carry no splice junction** — nothing splices there — **yet spliced
+⛔ **THE CASE THIS EXISTS FOR** (owner, 2026-08-05). The accumulator now creates an BOUNDARY at every
+transcript start and end. **Those BOUNDARIES carry no splice junction** — nothing splices there — **yet spliced
 fragments cross them**, because transcription of a longer overlapping transcript continues straight past.
-Unless such a fragment is binned as ``edge_spliced`` it lands in the unspliced pool and is deconvolved.
+Unless such a fragment is binned as ``boundary_spliced`` it lands in the unspliced pool and is deconvolved.
 
 The rung is ``tes_readthrough``::
 
     TA+ (1,050, 2,000) (9,000,  9,100)      junction 2,000 -> 9,000
     TB+ (1,000, 2,000) (9,050, 11,000)      junction 2,000 -> 9,050
 
-⭐ **EDGE @9,100 is TA's TES and no junction touches it**, but TB's exon 2 runs to 11,000 — so a TB
+⭐ **BOUNDARY @9,100 is TA's TES and no junction touches it**, but TB's exon 2 runs to 11,000 — so a TB
 fragment that used TB's junction and reaches past 9,100 crosses it CONTIGUOUSLY HAVING SPLICED ELSEWHERE.
-⭐ **EDGE @9,050 is TB's junction acceptor AND a plain contiguity line for TA**, whose exon 2 spans
+⭐ **BOUNDARY @9,050 is TB's junction acceptor AND a plain contiguity line for TA**, whose exon 2 spans
 9,000-9,100 unbroken. One line, junction flux for one transcript and an unspliced RNA crossing for another.
 
 ⛔⛔ **SCORE THE MASS, NOT ``f_g`` — AND THIS INSTRUMENT LEARNED THAT THE HARD WAY.** The solver's
@@ -32,7 +32,7 @@ silently produces the same symptom:
 ===  ====================================================================================
 (a)  is the BANK populated?          ``spliced_count`` > 0 where the geometry says it must be
 (b)  does it have a DIVISOR?         ``eff_rna`` > 0, since there is no ``eff_junction`` at a
-                                     terminus EDGE to price it against
+                                     terminus BOUNDARY to price it against
 (c)  is a PRECISION EMITTED?         the relay's own RNA measurement precision (``cm_p``/``cm_n``)
                                      — a bank with a divisor and no precision is inert
 ===  ====================================================================================
@@ -41,8 +41,8 @@ silently produces the same symptom:
 
 ⭐⭐⭐ **WHAT IT MEASURED, 2026-08-05 — 24 of 24 grid cells, and the verdict has two halves.**
 
-✅ **(a) and (b) PASS, and the design intent is implemented.** ``edge_spliced`` is populated at both
-terminus/contiguity EDGEs, it has ``eff_rna`` = 202.8 as its divisor, it is held OUT of the deconvolution,
+✅ **(a) and (b) PASS, and the design intent is implemented.** ``boundary_spliced`` is populated at both
+terminus/contiguity BOUNDARIES, it has ``eff_rna`` = 202.8 as its divisor, it is held OUT of the deconvolution,
 and it is added back as RNA: ``PRED rna`` tracks ``TRUE rna`` to <2 % (11,205 vs 11,380 · 9,001 vs 9,018 ·
 2,747 vs 2,784). Certified RNA is not being fed to the gDNA solver.
 
@@ -81,7 +81,7 @@ only in acceptor (9,000 vs 9,050), so a fragment whose UNSEQUENCED mate gap coul
 different ``L`` values and is DEFERRED to the second pass rather than deposited — the owner's ruling, in
 `tests/native/_accumulator_reference.py`. Measured on the pure-RNA arm: 1,298 of 200,000 fragments, which
 is **13.5 % of the certified channel at @9,100** (9,627 truth vs 8,329 accumulated). ⛔ So the channel is
-systematically UNDER-counted at a terminus EDGE wherever alternative right_boundaries exist, and that is a
+systematically UNDER-counted at a terminus BOUNDARY wherever alternative right_boundaries exist, and that is a
 property of the channel rather than a bug. It is printed per cell.
 """
 
@@ -208,7 +208,7 @@ def main() -> int:
         for f_ in fails[:30]:
             print(f"     - {f_}")
     else:
-        print("✅ every populated `edge_spliced` bank has a divisor AND emits a precision.")
+        print("✅ every populated `boundary_spliced` bank has a divisor AND emits a precision.")
         print("   ⚠ That is (a)+(b)+(c) only. It does NOT say the precision is the RIGHT SIZE, nor that")
         print("     ψ uses it for the object's OWN belief — ψ has no spliced term at all")
         print("     (`tests/calibration/test_vertex_reference.py`'s certified-RNA-blindness gate pins that).")

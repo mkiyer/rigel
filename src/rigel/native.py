@@ -1,7 +1,7 @@
 """rigel.native — Public interface to Rigel's C++ native extensions.
 
 All C++ functionality used by Python code is imported through this module.
-This is the single seam between Python orchestration and C++ hot paths.
+This is the single boundary between Python orchestration and C++ hot paths.
 
 Modules
 -------

@@ -5,7 +5,7 @@ Ground truth: molecules of length L ~ f(L) are deposited on a template with STAR
 
   (a) COUNT of molecules COVERING a point p
   (b) SUM 1/L over molecules COVERING p
-  (c) SUM 1/L over molecules SPANNING a seam (>=1 base on each side)
+  (c) SUM 1/L over molecules SPANNING a boundary (>=1 base on each side)
   (d) COUNT of molecules CONTAINED in a region of length ell
 """
 
@@ -51,7 +51,7 @@ for i, p in enumerate(probes):
     cov = e > p  # covers position p  (start <= p < end)
     cov_count[i] = cov.sum()
     cov_dens[i] = (1.0 / L[cov]).sum()
-    span = (s <= p - 1) & (e > p)  # >=1 base each side of the seam between p-1 and p
+    span = (s <= p - 1) & (e > p)  # >=1 base each side of the boundary between p-1 and p
     span_dens[i] = (1.0 / L[span]).sum()
 
 print()
@@ -63,7 +63,7 @@ print(
     f"ratio {cov_dens.mean() / RHO:.5f}"
 )
 print(f"    var  {cov_dens.var():.3e}    predicted rho*E[1/L]= {RHO * EinvL:.3e}")
-print("(c) SUM 1/L SPANNING a seam")
+print("(c) SUM 1/L SPANNING a boundary")
 print(
     f"    mean {span_dens.mean():.6f}   predicted rho*(1-E[1/L]) = {RHO * (1 - EinvL):.6f}   "
     f"ratio {span_dens.mean() / RHO:.5f}  <- {100 * EinvL:.3f}% LOW"

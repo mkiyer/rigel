@@ -136,8 +136,8 @@ def test_projection_floor_is_h_squared():
 
 
 def test_projection_crossing_dominates_within_mode():
-    """The per-edge transfer variance TRAPS: specificity-and-sense-are-complements = ``var_dst + (mu_dst − mu_src)²``: a depleted↔enriched crossing is
-    orders of magnitude larger than a within-mode edge — this is the enrichment-crossing damping that gags a
+    """The per-boundary transfer variance TRAPS: specificity-and-sense-are-complements = ``var_dst + (mu_dst − mu_src)²``: a depleted↔enriched crossing is
+    orders of magnitude larger than a within-mode boundary — this is the enrichment-crossing damping that gags a
     message across a capture boundary while letting same-mode messages flow."""
     count, eff = _bimodal_counts()
     pr = DensityNPMLE.fit(count, eff, bandwidth=0.15)

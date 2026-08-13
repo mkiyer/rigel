@@ -120,7 +120,7 @@ def test_knn_width_never_below_the_grid_step():
 
 
 def test_knn_width_is_the_exact_kth_nearest_neighbour_distance():
-    """Not "the far edge of a 2k window" — that hands the WIDEST kernel in the fit to the most ISOLATED
+    """Not "the far boundary of a 2k window" — that hands the WIDEST kernel in the fit to the most ISOLATED
     region, which is backwards and was measured as the false-positive channel on zero-gDNA libraries. Checked
     against brute force on samples deliberately built as a bulk plus outliers."""
     rng = np.random.default_rng(0)

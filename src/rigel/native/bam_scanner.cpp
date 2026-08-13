@@ -1213,7 +1213,7 @@ public:
     }
 
     // ----------------------------------------------------------------
-    // The accumulator's junction edges
+    // The accumulator's junction boundaries
     // ----------------------------------------------------------------
     //
     // A SECOND method rather than two more arguments to set_regions, because that one throws if called
@@ -1295,12 +1295,12 @@ public:
         if (qname_batch_size < 1) qname_batch_size = 1;
 
         // ⚠ Explicit rather than defaulted, because the failure is invisible: with no junction table every
-        // observed intron reads as unannotated, so the spliced banks and every junction edge stay at zero
+        // observed intron reads as unannotated, so the spliced banks and every junction boundary stay at zero
         // and the tally still looks well-formed. Pass empty arrays to declare an annotation with none.
         if (acc_set_ && !junctions_set_) {
             throw std::runtime_error(
                 "scan: set_regions was called but set_junctions was not. The junction table is not "
-                "optional — without it every observed intron reads as unannotated, so the junction edges "
+                "optional — without it every observed intron reads as unannotated, so the junction boundaries "
                 "and the spliced banks are silently empty. Call set_junctions with empty arrays if this "
                 "annotation genuinely has no junctions.");
         }
@@ -2091,7 +2091,7 @@ private:
         // O(partition) once per scan, the deposit is O(fragments).
         if (acc_set_) {
             using rigel::accumulator::Accumulator;
-            using rigel::accumulator::ContiguousEdge;
+            using rigel::accumulator::Boundary;
             using rigel::accumulator::JunctionEdge;
             using rigel::accumulator::Region;
             using rigel::accumulator::kNFragmentPools;
@@ -2100,30 +2100,30 @@ private:
             const std::size_t n_refs = acc_set_->n_refs();
 
             std::vector<int64_t> ref_region_offsets(n_refs + 1, 0);
-            std::vector<int64_t> ref_edge_offsets(n_refs + 1, 0);
+            std::vector<int64_t> ref_boundary_offsets(n_refs + 1, 0);
             std::vector<int64_t> ref_sj_offsets(n_refs + 1, 0);
             for (std::size_t f = 0; f < n_refs; ++f) {
                 const Accumulator& a = acc_set_->at(static_cast<int32_t>(f));
                 ref_region_offsets[f + 1] =
                     ref_region_offsets[f] + static_cast<int64_t>(a.n_regions());
-                ref_edge_offsets[f + 1] =
-                    ref_edge_offsets[f] + static_cast<int64_t>(a.n_edges());
+                ref_boundary_offsets[f + 1] =
+                    ref_boundary_offsets[f] + static_cast<int64_t>(a.n_boundaries());
                 ref_sj_offsets[f + 1] =
                     ref_sj_offsets[f] + static_cast<int64_t>(a.n_junctions());
             }
             const auto n_regions = static_cast<std::size_t>(ref_region_offsets.back());
-            const auto n_edges = static_cast<std::size_t>(ref_edge_offsets.back());
+            const auto n_boundaries = static_cast<std::size_t>(ref_boundary_offsets.back());
             const auto n_sj    = static_cast<std::size_t>(ref_sj_offsets.back());
 
             std::vector<uint32_t> region_contained_count(n_regions * kNStrandColumns, 0u);
             std::vector<double> region_contained_inv_opportunity_sum(n_regions, 0.0);
             std::vector<uint32_t> region_start_count(n_regions, 0u);
-            std::vector<uint32_t> edge_unspliced_count(n_edges * kNStrandColumns, 0u);
-            std::vector<double> edge_unspliced_inv_length_sum(n_edges, 0.0);
-            std::vector<uint32_t> edge_spliced_count(n_edges * kNStrandColumns, 0u);
-            // ⚠ NOT multiplied by kNStrandColumns — the conserved mass has ONE value per edge.
-            std::vector<double> edge_unspliced_mass(n_edges, 0.0);
-            std::vector<double> edge_spliced_mass(n_edges, 0.0);
+            std::vector<uint32_t> boundary_unspliced_count(n_boundaries * kNStrandColumns, 0u);
+            std::vector<double> boundary_unspliced_inv_length_sum(n_boundaries, 0.0);
+            std::vector<uint32_t> boundary_spliced_count(n_boundaries * kNStrandColumns, 0u);
+            // ⚠ NOT multiplied by kNStrandColumns — the conserved mass has ONE value per boundary.
+            std::vector<double> boundary_unspliced_mass(n_boundaries, 0.0);
+            std::vector<double> boundary_spliced_mass(n_boundaries, 0.0);
             std::vector<uint32_t> sj_count(n_sj * kNStrandColumns, 0u);
             std::vector<double> sj_inv_length_sum(n_sj, 0.0);
             // ⭐ MULTIPLIED by kNStrandColumns, unlike every other mass here — the junction mass is
@@ -2148,11 +2148,11 @@ private:
                 deferred.merge_from(a.deferred_canonical());
                 gap_census.merge_from(a.gap_census());
                 const Region* regions = a.regions_data();
-                const ContiguousEdge* edges = a.edges_data();
+                const Boundary* boundaries = a.boundaries_data();
                 const JunctionEdge* junctions = a.junctions_data();
                 const uint32_t* starts = a.region_start_count_data();
                 const auto region_base = static_cast<std::size_t>(ref_region_offsets[f]);
-                const auto edge_base = static_cast<std::size_t>(ref_edge_offsets[f]);
+                const auto boundary_base = static_cast<std::size_t>(ref_boundary_offsets[f]);
                 const auto sj_base   = static_cast<std::size_t>(ref_sj_offsets[f]);
 
                 for (std::size_t i = 0; i < a.n_regions(); ++i) {
@@ -2164,16 +2164,16 @@ private:
                     // ⚠ Outside the column loop: ONE value per region, keyed without kNStrandColumns.
                     region_contained_inv_opportunity_sum[region_base + i] = regions[i].contained_inv_opportunity_sum;
                 }
-                for (std::size_t i = 0; i < a.n_edges(); ++i) {
+                for (std::size_t i = 0; i < a.n_boundaries(); ++i) {
                     for (std::size_t c = 0; c < kNStrandColumns; ++c) {
-                        const std::size_t o = (edge_base + i) * kNStrandColumns + c;
-                        edge_unspliced_count[o]   = edges[i].unspliced_count[c];
-                        edge_spliced_count[o]     = edges[i].spliced_count[c];
+                        const std::size_t o = (boundary_base + i) * kNStrandColumns + c;
+                        boundary_unspliced_count[o]   = boundaries[i].unspliced_count[c];
+                        boundary_spliced_count[o]     = boundaries[i].spliced_count[c];
                     }
-                    // ⚠ Outside the column loop, and keyed WITHOUT kNStrandColumns: one value per edge.
-                    edge_unspliced_inv_length_sum[edge_base + i] = edges[i].unspliced_inv_length_sum;
-                    edge_unspliced_mass[edge_base + i] = edges[i].unspliced_mass;
-                    edge_spliced_mass[edge_base + i]   = edges[i].spliced_mass;
+                    // ⚠ Outside the column loop, and keyed WITHOUT kNStrandColumns: one value per boundary.
+                    boundary_unspliced_inv_length_sum[boundary_base + i] = boundaries[i].unspliced_inv_length_sum;
+                    boundary_unspliced_mass[boundary_base + i] = boundaries[i].unspliced_mass;
+                    boundary_spliced_mass[boundary_base + i]   = boundaries[i].spliced_mass;
                 }
                 for (std::size_t i = 0; i < a.n_junctions(); ++i) {
                     for (std::size_t c = 0; c < kNStrandColumns; ++c) {
@@ -2216,17 +2216,17 @@ private:
             cal["cut_positions"]   = vec_to_ndarray(std::vector<int64_t>(cut_positions_));
             cal["ref_cut_offsets"] = vec_to_ndarray(std::vector<int64_t>(ref_cut_offsets_));
             cal["ref_region_offsets"] = vec_to_ndarray(std::move(ref_region_offsets));
-            cal["ref_edge_offsets"] = vec_to_ndarray(std::move(ref_edge_offsets));
+            cal["ref_boundary_offsets"] = vec_to_ndarray(std::move(ref_boundary_offsets));
             cal["ref_sj_offsets"]   = vec_to_ndarray(std::move(ref_sj_offsets));
 
             cal["region_contained_count"]   = vec_to_ndarray(std::move(region_contained_count));
             cal["region_contained_inv_opportunity_sum"] = vec_to_ndarray(std::move(region_contained_inv_opportunity_sum));
             cal["region_start_count"]       = vec_to_ndarray(std::move(region_start_count));
-            cal["edge_unspliced_count"]   = vec_to_ndarray(std::move(edge_unspliced_count));
-            cal["edge_unspliced_inv_length_sum"] = vec_to_ndarray(std::move(edge_unspliced_inv_length_sum));
-            cal["edge_spliced_count"]     = vec_to_ndarray(std::move(edge_spliced_count));
-            cal["edge_unspliced_mass"]    = vec_to_ndarray(std::move(edge_unspliced_mass));
-            cal["edge_spliced_mass"]      = vec_to_ndarray(std::move(edge_spliced_mass));
+            cal["boundary_unspliced_count"]   = vec_to_ndarray(std::move(boundary_unspliced_count));
+            cal["boundary_unspliced_inv_length_sum"] = vec_to_ndarray(std::move(boundary_unspliced_inv_length_sum));
+            cal["boundary_spliced_count"]     = vec_to_ndarray(std::move(boundary_spliced_count));
+            cal["boundary_unspliced_mass"]    = vec_to_ndarray(std::move(boundary_unspliced_mass));
+            cal["boundary_spliced_mass"]      = vec_to_ndarray(std::move(boundary_spliced_mass));
             cal["sj_count"]               = vec_to_ndarray(std::move(sj_count));
             cal["sj_inv_length_sum"]             = vec_to_ndarray(std::move(sj_inv_length_sum));
             cal["sj_mass"]                = vec_to_ndarray(std::move(sj_mass));
@@ -2837,7 +2837,7 @@ NB_MODULE(_bam_impl, m) {
     // old `Region` was exactly four contiguous uint32.
     {
         using rigel::accumulator::Accumulator;
-        using rigel::accumulator::ContiguousEdge;
+        using rigel::accumulator::Boundary;
         using rigel::accumulator::DepositScratch;
         using rigel::accumulator::GapHypothesis;
         using rigel::accumulator::OfferedFragment;
@@ -2886,9 +2886,9 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("boundary_right"),
                  nb::arg("sj_strand"),
                  "The junction CSR for THIS reference, keyed by the ref-local donor cut\n"
-                 "index. The junction-edge id is the slot; slot order is a contract.")
+                 "index. The junction-boundary id is the slot; slot order is a contract.")
             .def_prop_ro("n_regions",     [](const Accumulator& a) { return a.n_regions(); })
-            .def_prop_ro("n_edges",     [](const Accumulator& a) { return a.n_edges(); })
+            .def_prop_ro("n_boundaries",     [](const Accumulator& a) { return a.n_boundaries(); })
             .def_prop_ro("n_junctions", [](const Accumulator& a) { return a.n_junctions(); })
             .def_prop_ro("n_cuts",      [](const Accumulator& a) { return a.n_cuts(); })
             .def_prop_ro("max_length",  [](const Accumulator& a) { return a.max_length(); })
@@ -2913,43 +2913,43 @@ NB_MODULE(_bam_impl, m) {
                     a.region_start_count_data(), {a.n_regions()}, h).cast();
             })
 
-            // ── contiguous edges ─────────────────────────────────────────────────────────────────────
-            .def_prop_ro("edge_unspliced_count", [](nb::handle h) {
+            // ── contiguous boundaries ─────────────────────────────────────────────────────────────────────
+            .def_prop_ro("boundary_unspliced_count", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(uint32_t);
+                constexpr int64_t row = sizeof(Boundary) / sizeof(uint32_t);
                 return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
-                    &a.edges_data()[0].unspliced_count[0], {a.n_edges(), kNStrandColumns}, h,
+                    &a.boundaries_data()[0].unspliced_count[0], {a.n_boundaries(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
             })
-            .def_prop_ro("edge_spliced_count", [](nb::handle h) {
+            .def_prop_ro("boundary_spliced_count", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(uint32_t);
+                constexpr int64_t row = sizeof(Boundary) / sizeof(uint32_t);
                 return nb::ndarray<nb::numpy, const uint32_t, nb::ndim<2>>(
-                    &a.edges_data()[0].spliced_count[0], {a.n_edges(), kNStrandColumns}, h,
+                    &a.boundaries_data()[0].spliced_count[0], {a.n_boundaries(), kNStrandColumns}, h,
                     {row, int64_t{1}}).cast();
             })
-            .def_prop_ro("edge_unspliced_inv_length_sum", [](nb::handle h) {
+            .def_prop_ro("boundary_unspliced_inv_length_sum", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(double);
+                constexpr int64_t row = sizeof(Boundary) / sizeof(double);
                 return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
-                    &a.edges_data()[0].unspliced_inv_length_sum, {a.n_edges()}, h, {row}).cast();
+                    &a.boundaries_data()[0].unspliced_inv_length_sum, {a.n_boundaries()}, h, {row}).cast();
             })
-            // ⭐ The conserved mass — ndim<1>, because it has one value per edge and not one per
+            // ⭐ The conserved mass — ndim<1>, because it has one value per boundary and not one per
             // strand. The stride is still the struct row, so this is a view into the same array.
-            .def_prop_ro("edge_unspliced_mass", [](nb::handle h) {
+            .def_prop_ro("boundary_unspliced_mass", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(double);
+                constexpr int64_t row = sizeof(Boundary) / sizeof(double);
                 return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
-                    &a.edges_data()[0].unspliced_mass, {a.n_edges()}, h, {row}).cast();
+                    &a.boundaries_data()[0].unspliced_mass, {a.n_boundaries()}, h, {row}).cast();
             })
-            .def_prop_ro("edge_spliced_mass", [](nb::handle h) {
+            .def_prop_ro("boundary_spliced_mass", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
-                constexpr int64_t row = sizeof(ContiguousEdge) / sizeof(double);
+                constexpr int64_t row = sizeof(Boundary) / sizeof(double);
                 return nb::ndarray<nb::numpy, const double, nb::ndim<1>>(
-                    &a.edges_data()[0].spliced_mass, {a.n_edges()}, h, {row}).cast();
+                    &a.boundaries_data()[0].spliced_mass, {a.n_boundaries()}, h, {row}).cast();
             })
 
-            // ── junction edges ───────────────────────────────────────────────────────────────────────
+            // ── junction boundaries ───────────────────────────────────────────────────────────────────────
             .def_prop_ro("sj_count", [](nb::handle h) {
                 auto& a = nb::cast<Accumulator&>(h);
                 constexpr int64_t row = sizeof(JunctionEdge) / sizeof(uint32_t);
@@ -3173,12 +3173,12 @@ NB_MODULE(_bam_impl, m) {
                  nb::arg("offsets"),
                  nb::arg("boundary_right"),
                  nb::arg("sj_strand"),
-                 "Install the annotated junction edges, as build_junction_edge_arrays\n"
+                 "Install the annotated junction boundaries, as build_junction_edge_arrays\n"
                  "emits them. A SECOND call because set_regions refuses to run twice.\n\n"
                  "offsets : int64[n_cuts_total + 1]\n"
                  "    CSR over the flat cut axis, keyed by the DONOR cut index.\n"
                  "boundary_right : int64[n_junctions]\n"
-                 "    Flat cut index of each junction's high end. The junction-edge id\n"
+                 "    Flat cut index of each junction's high end. The junction-boundary id\n"
                  "    IS the slot here; edges_df.edge_row is a join key and is not\n"
                  "    passed. Slot order is a contract: sort on\n"
                  "    (donor cut, acceptor cut, sj_strand).\n"
@@ -3186,7 +3186,7 @@ NB_MODULE(_bam_impl, m) {
                  "    Each junction's ANNOTATED strand.\n\n"
                  "Not optional: scan() refuses to run without it, because a missing\n"
                  "table makes every observed intron read as unannotated and empties\n"
-                 "the junction edges silently. Pass empty arrays to declare none.\n")
+                 "the junction boundaries silently. Pass empty arrays to declare none.\n")
         ;
 
     nb::class_<BamAnnotationWriter>(m, "BamAnnotationWriter")

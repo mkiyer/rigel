@@ -1,7 +1,7 @@
 """Fragment span / path-length census on a real BAM -- the evidence for the length limit (design 3.2).
 
 Groups a name-collated BAM by query name, builds each group's genomic span on its dominant reference,
-subtracts CIGAR-N introns to get L, and reports how concentrated the edge-crossing load is with and
+subtracts CIGAR-N introns to get L, and reports how concentrated the boundary-crossing load is with and
 without a limit on L.
 
 ⚠ **PRE-DATES THE CURRENT CAMPAIGN AND HAS NOT BEEN RE-RUN IN IT** — it is carried in

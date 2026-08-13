@@ -45,22 +45,22 @@ def _arms(calibration, region_arrays, multi_loci):
         calibration,
         region_arrays,
         calibration.mass_gdna_region,
-        calibration.mass_gdna_edge,
+        calibration.mass_gdna_boundary,
         calibration.gdna_region_eff_len,
-        calibration.gdna_edge_eff_len,
+        calibration.gdna_boundary_eff_len,
     )
-    rna_edge = np.maximum(
-        np.asarray(calibration.mass_rna_edge, np.float64)
-        - np.asarray(calibration.mass_rna_spliced_edge, np.float64),
+    rna_boundary = np.maximum(
+        np.asarray(calibration.mass_rna_boundary, np.float64)
+        - np.asarray(calibration.mass_rna_spliced_boundary, np.float64),
         0.0,
     )
     r_mass, r_sup, _, _ = _component_region_arrays(
         calibration,
         region_arrays,
         calibration.mass_rna_region,
-        rna_edge,
+        rna_boundary,
         calibration.rna_region_eff_len,
-        calibration.rna_edge_eff_len,
+        calibration.rna_boundary_eff_len,
     )
     proj = _project_regions_to_loci(
         region_arrays,
@@ -105,9 +105,9 @@ def check_one(index: TranscriptIndex, cache_dir: Path) -> dict:
     unspliced_mass = float(
         np.asarray(cal.mass_gdna_region).sum()
         + np.asarray(cal.mass_rna_region).sum()
-        + np.asarray(cal.mass_gdna_edge).sum()
-        + np.asarray(cal.mass_rna_edge).sum()
-        - np.asarray(cal.mass_rna_spliced_edge).sum()
+        + np.asarray(cal.mass_gdna_boundary).sum()
+        + np.asarray(cal.mass_rna_boundary).sum()
+        - np.asarray(cal.mass_rna_spliced_boundary).sum()
     )
     return {
         "condition": cache_dir.name,

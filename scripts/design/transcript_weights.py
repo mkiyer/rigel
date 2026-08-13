@@ -64,7 +64,7 @@ rungs are the owner's own candidate list. ⛔ Pick it by measurement, not by tas
 ⭐ **ZEROS ARE OMITTED, NOT RESCUED.** A zero over a large opportunity is a strong statement, but under
 hybrid capture it may equally mean *no probe here* — the same ambiguity the effective-length shrinkage
 already refuses to resolve. So a zero object leaves the mean. ⛔⛔ **A transcript whose path is
-ENTIRELY zero gets weight 0, and that is the load-bearing case, not an edge case:** 4,579 of 8,750
+ENTIRELY zero gets weight 0, and that is the load-bearing case, not an boundary case:** 4,579 of 8,750
 annotated transcripts are silent at `g00`, and the refused first attempt's per-object `+½` revived
 exactly that half and took false-positive mass **18.6 M → 41.6 M** (`ROADMAP.md` §4). ⛔ There is no
 floor here and there must not be one — `g00`'s lesson transposed is that doubt resolves to ABSENT.
@@ -171,18 +171,18 @@ def region_unspliced_density(calibration) -> np.ndarray:
 def boundary_unspliced_density(calibration) -> np.ndarray:
     """float64[n_boundaries] — the same quantity on the crossing axis.
 
-    ⛔ **Three corrections, and dropping any one changes the units.** ``mass_rna_edge`` is
+    ⛔ **Three corrections, and dropping any one changes the units.** ``mass_rna_boundary`` is
     spliced-INCLUSIVE, so the spliced part is subtracted first; the remainder is an object-INCIDENCE
-    count, so it is converted to fragments by the unspliced pool's own ``edge_mass_per_crossing``; only
+    count, so it is converted to fragments by the unspliced pool's own ``boundary_mass_per_crossing``; only
     then is it a numerator commensurate with the region axis's.
     """
     unspliced = np.maximum(
-        np.asarray(calibration.mass_rna_edge, dtype=np.float64)
-        - np.asarray(calibration.mass_rna_spliced_edge, dtype=np.float64),
+        np.asarray(calibration.mass_rna_boundary, dtype=np.float64)
+        - np.asarray(calibration.mass_rna_spliced_boundary, dtype=np.float64),
         0.0,
     )
-    frags = unspliced * np.asarray(calibration.edge_mass_per_crossing, dtype=np.float64)
-    opp = np.asarray(calibration.rna_edge_eff_len, dtype=np.float64)
+    frags = unspliced * np.asarray(calibration.boundary_mass_per_crossing, dtype=np.float64)
+    opp = np.asarray(calibration.rna_boundary_eff_len, dtype=np.float64)
     out = np.zeros_like(frags)
     np.divide(frags, opp, out=out, where=opp > 0.0)
     return out
@@ -268,7 +268,7 @@ def build_weights(
     d_region = region_unspliced_density(calibration)
     d_boundary = boundary_unspliced_density(calibration)
     o_region = np.asarray(calibration.rna_region_eff_len, dtype=np.float64)
-    o_boundary = np.asarray(calibration.rna_edge_eff_len, dtype=np.float64)
+    o_boundary = np.asarray(calibration.rna_boundary_eff_len, dtype=np.float64)
 
     kind = np.asarray(path.kind)
     obj = np.asarray(path.obj_id, dtype=np.int64)

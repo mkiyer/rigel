@@ -2,7 +2,7 @@
 """⭐⭐⭐ IS THE CERTIFIED COUNT COMPOSITION EVIDENCE? — the splice-visibility `q`, measured against TRUTH.
 
 ⛔ **THIS INSTRUMENT'S VERDICT IS A NEGATIVE, AND IT IS THE POINT OF THE FILE.** A spliced fragment cannot
-be gDNA, so ``edge_spliced`` is certified RNA — and the obvious next step is to make that certified count
+be gDNA, so ``boundary_spliced`` is certified RNA — and the obvious next step is to make that certified count
 speak about the slot's own gDNA-vs-RNA split. It cannot, and this measures why.
 
 **The derivation being tested.** At one line the unspliced bank holds ``M`` crossings split ``f_g``
@@ -37,7 +37,7 @@ to the term being kept.
 
 **2. The raw-count term is therefore not a floor — it is a PRIOR TOWARD RNA, and it is panel-negative on
 a third of the ladder.** Scoring the median of Beta(½, ½+S) — which is exactly ψ's reference plus the term
-with nothing else speaking — against per-EDGE truth, mass-weighted over the EDGEs the term fires on:
+with nothing else speaking — against per-BOUNDARY truth, mass-weighted over the BOUNDARIES the term fires on:
 
 =========================  ==========  ==========  ==========  ==========
 condition                  q med       mwae term   mwae ref    Δ
@@ -50,7 +50,7 @@ g98 ss0.50 capture_on      0.694       0.9230      0.4779      +0.4451
 =========================  ==========  ==========  ==========  ==========
 
 **WORSE on 12 of 36 conditions**; worst **+0.4578** at ``g90 ss0.50 capture_on``, where **98.3 % of the
-mass** sits on EDGEs whose truth is gDNA-rich (mean true ``f_g`` = 0.84) and the term answers ``0.04``.
+mass** sits on BOUNDARIES whose truth is gDNA-rich (mean true ``f_g`` = 0.84) and the term answers ``0.04``.
 
 ⭐⭐ **3. And the two arms of the ladder ARE the two zero controls, which is what makes the diagnosis
 certain rather than suggestive.** At ``g00`` the truth is all-RNA and the term is worth −0.49 — the best
@@ -58,13 +58,13 @@ result on the panel. At ``g98`` the truth is nearly all-gDNA and the term is wor
 sign of the effect is the sign of the truth. ⛔ **A channel whose benefit tracks the answer rather than
 the evidence has not added information; it has added a prior** (TRAPS: honesty-metrics-reward-ignorance's shape).
 
-**4. And ``q`` is a property of the RNA GEOMETRY, not of the composition.** Per-EDGE ``q`` at ``g00`` vs
-``g50`` agrees to a Spearman **ρ = 0.9257** on 5,241 shared EDGEs — a 50-point swing in the gDNA fraction
+**4. And ``q`` is a property of the RNA GEOMETRY, not of the composition.** Per-BOUNDARY ``q`` at ``g00`` vs
+``g50`` agrees to a Spearman **ρ = 0.9257** on 5,241 shared BOUNDARIES — a 50-point swing in the gDNA fraction
 barely moves it, because ``q`` asks only "of the RNA crossing this line, what fraction shows a splice?".
 ⭐ So the missing quantity is
 computable in principle: ``1−q`` is the share of the crossing opportunity that fits inside the unbroken
 EXONIC reach either side of the line. ⛔ But that array does not exist —
-``splice_graph.build_contiguous_edge_reach_arrays`` is deliberately GENOMIC (a contiguous line is also
+``splice_graph.build_contiguous_boundary_reach_arrays`` is deliberately GENOMIC (a contiguous line is also
 crossed by nascent RNA, which does not splice), and the exonic version is per-TRANSCRIPT and
 abundance-weighted, which calibration does not know at pass-0. That is the build this channel is blocked
 on, and it needs its own brute-force enumeration gate.
@@ -111,14 +111,14 @@ def _load(cache_root: Path, suite: Path, tag: str, index, cfg):
 
 
 def measure(parts) -> dict:
-    """Per-EDGE truth on the CERTIFIED axis. Everything here is an identity on the oracle, not a fit.
+    """Per-BOUNDARY truth on the CERTIFIED axis. Everything here is an identity on the oracle, not a fit.
 
     ⚠ ``true_fg`` is the gDNA fraction of the **unspliced** bank — the solver's own definition. Scoring
     against a spliced-INCLUSIVE fraction reads a small mass defect as a half-unit error, which is how the
     first run of `certified_rna_audit.py` mis-reported this channel.
     """
-    es = sum(np.asarray(parts[k].edge_spliced_count, np.float64).sum(1) for k in ORIGINS)
-    eu = {k: np.asarray(parts[k].edge_unspliced_count, np.float64).sum(1) for k in ORIGINS}
+    es = sum(np.asarray(parts[k].boundary_spliced_count, np.float64).sum(1) for k in ORIGINS)
+    eu = {k: np.asarray(parts[k].boundary_unspliced_count, np.float64).sum(1) for k in ORIGINS}
     c_g, c_r = eu["gdna"], eu["mrna"] + eu["nrna"]
     mass = c_g + c_r
     live = (es > 0) & (mass > 0)
@@ -158,10 +158,10 @@ def main() -> int:
     cfg = PipelineConfig()
     conds = args.conditions or sorted(p.name for p in cache.iterdir() if p.is_dir())
 
-    print(f"{'condition':<42} {'nEDGE':>7} {'mass':>10} {'q med':>6} {'q<.9':>6} "
+    print(f"{'condition':<42} {'nBOUNDARY':>7} {'mass':>10} {'q med':>6} {'q<.9':>6} "
           f"{'mwae term':>9} {'mwae ref':>8} {'Δ':>8} {'harm n':>7} {'harm%':>6}")
     print("-" * 120)
-    agg, per_edge = [], {}
+    agg, per_boundary = [], {}
     for tag in conds:
         try:
             m = measure(_load(cache, suite, tag, index, cfg))
@@ -169,7 +169,7 @@ def main() -> int:
             print(f"{tag:<42} SKIP  {type(e).__name__}: {e}")
             continue
         if m["S"].size == 0:
-            print(f"{tag:<42} — no EDGE carries edge_spliced")
+            print(f"{tag:<42} — no BOUNDARY carries boundary_spliced")
             continue
         M, t = m["M"], m["true_fg"]
         mw = lambda x: float(np.sum(M * np.abs(x - t)) / M.sum())  # noqa: E731
@@ -181,7 +181,7 @@ def main() -> int:
               f"{term:>9.4f} {ref:>8.4f} {term - ref:>+8.4f} {int(harm.sum()):>7,} "
               f"{100 * M[harm].sum() / M.sum():>5.1f}%")
         agg.append((tag, term - ref))
-        per_edge[tag] = (m["live"], m["q"])
+        per_boundary[tag] = (m["live"], m["q"])
 
     if not agg:
         print("\nnothing measured — is the oracle cache present?")
@@ -203,16 +203,16 @@ def main() -> int:
     #   ONLY in gDNA share the same transcripts, so a q that moves with gDNA would mean q is not
     #   geometry — and then no annotation-derived divisor could ever recover it.
     pair = [t for t in ("gdna_g00_ss_0.50_nrna_none_capture_off",
-                        "gdna_g50_ss_0.50_nrna_none_capture_off") if t in per_edge]
+                        "gdna_g50_ss_0.50_nrna_none_capture_off") if t in per_boundary]
     if len(pair) == 2:
-        (la, qa), (lb, qb) = per_edge[pair[0]], per_edge[pair[1]]
+        (la, qa), (lb, qb) = per_boundary[pair[0]], per_boundary[pair[1]]
         both = la & lb
         xa, xb = qa[both[la]], qb[both[lb]]
         if xa.size > 2:
             from scipy.stats import spearmanr
 
             r = float(spearmanr(xa, xb).statistic)
-            print(f"\n⭐ q is GEOMETRY, not composition: q(g00) vs q(g50) on {xa.size:,} shared EDGEs "
+            print(f"\n⭐ q is GEOMETRY, not composition: q(g00) vs q(g50) on {xa.size:,} shared BOUNDARIES "
                   f"— Spearman ρ = {r:.4f}")
             print("   ⇒ the missing quantity is the unbroken EXONIC reach either side of the line, which "
                   "is\n     annotation-derivable in principle and does NOT exist as an array today.")

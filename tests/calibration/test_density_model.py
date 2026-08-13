@@ -2,11 +2,11 @@
 
 The count module estimates gDNA density from RAW unspliced counts — no strand cleaning. Observable
 regions use their own contained density; non-observable (exon/AMBIG) regions are anchored from their
-observable flanking EDGES; run interiors are carried inward; a region with no observable neighbour
+observable flanking BOUNDARIES; run interiors are carried inward; a region with no observable neighbour
 anywhere takes the global count-weighted-mean observable density.
 
 ⭐ **What S5.e changed here.** A region used to carry its own ``left``/``right`` per-side views of the
-flanking boundary flux, and the crossing divisor arrived separately as a scalar ``fl_mean``. An edge is
+flanking boundary flux, and the crossing divisor arrived separately as a scalar ``fl_mean``. An boundary is
 a 0-bp line with ONE count, shared by the two regions it separates, and its divisor is the same
 ``eff_gdna`` array the solver uses — so both the side views and the second length model are gone, and a
 caller can no longer hand this a divisor that disagrees with the geometry's.
@@ -68,11 +68,11 @@ def _region_arrays(signatures, ref_names=None) -> RegionArrays:
     return RegionArrays.from_frame(df, refmap)
 
 
-def _parts(signatures, region_count, region_eff, edge_count, edge_eff, ref_names=None):
+def _parts(signatures, region_count, region_eff, boundary_count, boundary_eff, ref_names=None):
     """A chain + a hand-built :class:`RegionGeometry` over ``signatures``.
 
-    ``region_count``/``region_eff`` are per REGION, ``edge_count``/``edge_eff`` per contiguous EDGE — and a
-    reference with ``k`` regions owns exactly ``k - 1`` edges, with no terminal slots.
+    ``region_count``/``region_eff`` are per REGION, ``boundary_count``/``boundary_eff`` per contiguous BOUNDARY — and a
+    reference with ``k`` regions owns exactly ``k - 1`` boundaries, with no terminal slots.
     """
     ra = _region_arrays(signatures, ref_names)
     rno = np.asarray(ra.ref_offsets, dtype=np.int64)
@@ -89,8 +89,8 @@ def _parts(signatures, region_count, region_eff, edge_count, edge_eff, ref_names
     count[is_region, 0] = np.asarray(region_count, float)[obj[is_region]]
     eff[is_region] = np.asarray(region_eff, float)[obj[is_region]]
     if np.any(~is_region):
-        count[~is_region, 0] = np.asarray(edge_count, float)[obj[~is_region]]
-        eff[~is_region] = np.asarray(edge_eff, float)[obj[~is_region]]
+        count[~is_region, 0] = np.asarray(boundary_count, float)[obj[~is_region]]
+        eff[~is_region] = np.asarray(boundary_eff, float)[obj[~is_region]]
     geometry = RegionGeometry(
         n_slots=n_slots,
         unspliced_count=count,
@@ -122,8 +122,8 @@ def test_exon_between_introns_recovers_uniform_density():
         [INTRON, EXON, INTRON],
         region_count=[200, 0, 200],
         region_eff=[100.0, 100.0, 100.0],
-        edge_count=[100, 100],
-        edge_eff=[50.0, 50.0],
+        boundary_count=[100, 100],
+        boundary_eff=[50.0, 50.0],
     )
     # rho = 200/100 = 2 (introns) and 100/50 = 2 (exon from each line) -> uniform 2.
     assert np.allclose(nd.density, [2.0, 2.0, 2.0])
@@ -136,22 +136,22 @@ def test_tiny_observable_region_anchors_from_boundaries():
         [INTERGENIC, INTRON, INTERGENIC],
         region_count=[200, 0, 200],
         region_eff=[100.0, 0.0, 100.0],
-        edge_count=[60, 80],
-        edge_eff=[50.0, 50.0],
+        boundary_count=[60, 80],
+        boundary_eff=[50.0, 50.0],
     )
     assert np.isfinite(nd.density[1])  # not inf from /eff_len = 0
     assert nd.density[1] == pytest.approx(np.mean([1.2, 1.6]))
 
 
-def test_run_interior_filled_from_anchored_edges():
+def test_run_interior_filled_from_anchored_boundaries():
     # intron+ | exon+ | exon+ | exon+ | intron+ : the middle exon has BOTH lines non-observable
     # (shared exon bit) and is reachable only by the inward carry.
     nd = _parts(
         [INTRON, EXON, EXON, EXON, INTRON],
         region_count=[200, 0, 0, 0, 200],
         region_eff=np.full(5, 100.0),
-        edge_count=[100, 0, 0, 200],
-        edge_eff=np.full(4, 50.0),
+        boundary_count=[100, 0, 0, 200],
+        boundary_eff=np.full(4, 50.0),
     )
     assert nd.density[1] == pytest.approx(2.0)  # 100/50, from its observable LEFT line
     assert nd.density[3] == pytest.approx(4.0)  # 200/50, from its observable RIGHT line
@@ -165,8 +165,8 @@ def test_count_gdna_frac_is_density_ratio():
         [INTRON, EXON, INTRON],
         region_count=[200, 0, 200],
         region_eff=np.full(3, 100.0),
-        edge_count=[100, 100],
-        edge_eff=[50.0, 50.0],
+        boundary_count=[100, 100],
+        boundary_eff=[50.0, 50.0],
     )
     assert nd.count_gdna_frac[0] == pytest.approx(1.0)  # density·eff = 2·100 = 200 = the count
     assert nd.count_gdna_frac[2] == pytest.approx(1.0)
@@ -177,7 +177,7 @@ def test_count_gdna_frac_is_density_ratio():
 def test_no_observable_region_takes_zero_baseline():
     # A single exon-only reference: no observable region, and with one region there is no line at all.
     # Density takes the global baseline, which is 0 (there is no observable region anywhere).
-    nd = _parts([EXON], region_count=[0], region_eff=[100.0], edge_count=[], edge_eff=[])
+    nd = _parts([EXON], region_count=[0], region_eff=[100.0], boundary_count=[], boundary_eff=[])
     assert nd.density[0] == 0.0
     assert nd.count_gdna_frac[0] == 0.0
 
@@ -192,8 +192,8 @@ def test_density_does_not_cross_references():
         [INTRON, EXON],
         region_count=[400, 0],
         region_eff=[100.0, 100.0],
-        edge_count=[],
-        edge_eff=[],
+        boundary_count=[],
+        boundary_eff=[],
         ref_names=["chr1", "chr2"],
     )
     assert nd.density[0] == pytest.approx(4.0)  # chr1 observable intron: 400 / 100

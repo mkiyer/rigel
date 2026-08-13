@@ -326,7 +326,7 @@ class ToyResult:
     n_gdna_target: int
     seconds: float
     #: ⭐ the toy's OWN index, so a caller can rebuild anything index-derived — in particular
-    #: `splice_graph.build_edge_flags_array`, the TSS/TES/DONOR/ACCEPTOR bits per EDGE.
+    #: `splice_graph.build_boundary_flags_array`, the TSS/TES/DONOR/ACCEPTOR bits per BOUNDARY.
     index: object = None
 
 
@@ -349,21 +349,21 @@ def _toy_probes(spec: "ToySpec", out: Path, knobs: dict) -> str:
             if spec.captured is not None and t["t_id"] not in spec.captured:
                 continue
             # ⭐⭐ TILED, not one centred probe. A single central probe leaves a 2 kb transcript's ENDS
-            # uncovered, so its `intergenic|exon` edges stay at off-target density -- and a 0-bp line's
+            # uncovered, so its `intergenic|exon` boundaries stay at off-target density -- and a 0-bp line's
             # counts are `density x mean_FL` no matter how long the chromosome is, so those objects then
             # have ~0.26 counts and the chain has nothing to propagate. The donor panels are built with
             # `design_suite_probes.py` at probe_density 1.0, i.e. tiled, which is what enriches a
             # first/last exon's boundary in the first place. Match that.
             #
-            # ⭐⭐⭐ AND TILED **PER EXON**, SO EVERY PROBE ABUTS THE intron|exon EDGES AND NONE STRADDLES
+            # ⭐⭐⭐ AND TILED **PER EXON**, SO EVERY PROBE ABUTS THE intron|exon BOUNDARIES AND NONE STRADDLES
             # A JUNCTION. Probes are written in TRANSCRIPT space, so a probe spanning an internal junction
             # offset has a genomic footprint in TWO blocks -- and `capture/sampler._split_scale` then
             # multiplies every gDNA fragment overlapping it by ``gdna_split_penalty``. Tiling across the
             # whole transcript put a split probe over each internal junction, which SUPPRESSED exactly the
-            # population that spans an intron|exon EDGE: measured on `spliced_exons` x
-            # `g75 ss0.50 capture_on`, the two edges carried 2 and 5 gDNA counts while the exon interiors
+            # population that spans an intron|exon BOUNDARY: measured on `spliced_exons` x
+            # `g75 ss0.50 capture_on`, the two boundaries carried 2 and 5 gDNA counts while the exon interiors
             # carried 16 and 14. Per-exon tiling leaves every probe inside one exon, so it is unsplit, it
-            # ends exactly ON the edge, and an edge-crossing fragment takes the full binding weight for
+            # ends exactly ON the boundary, and an boundary-crossing fragment takes the full binding weight for
             # its exon-side overlap.
             # ⚠ It is also the honest geometry for the question: a probe boundary at an exon end is what a
             # real panel produces, and the split-probe case is a SEPARATE population worth its own rung
@@ -511,7 +511,7 @@ def run_toy(
 
 
 def object_rows(r: ToyResult) -> list[dict]:
-    """One row per region and per contiguous edge, in genomic order along the chain."""
+    """One row per region and per contiguous boundary, in genomic order along the chain."""
     chain, ra = r.chain, r.region_arrays
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
@@ -530,18 +530,18 @@ def object_rows(r: ToyResult) -> list[dict]:
 
     ov = r.truth.override_masses(ra)
     tg = {"region": np.asarray(ov["mass_gdna_region"], np.float64),
-          "edge": np.asarray(ov["mass_gdna_edge"], np.float64)}
+          "boundary": np.asarray(ov["mass_gdna_boundary"], np.float64)}
     tr = {"region": np.asarray(ov["mass_rna_region"], np.float64),
-          "edge": np.asarray(ov["mass_rna_edge"], np.float64)}
+          "boundary": np.asarray(ov["mass_rna_boundary"], np.float64)}
     pg = {"region": np.asarray(r.result.mass_gdna_region, np.float64),
-          "edge": np.asarray(r.result.mass_gdna_edge, np.float64)}
+          "boundary": np.asarray(r.result.mass_gdna_boundary, np.float64)}
     pr = {"region": np.asarray(r.result.mass_rna_region, np.float64),
-          "edge": np.asarray(r.result.mass_rna_edge, np.float64)}
+          "boundary": np.asarray(r.result.mass_rna_boundary, np.float64)}
 
     rows = []
     for s in range(int(chain.n_slots)):
         i = int(obj[s])
-        axis = "region" if kind[s] == REGION else "edge"
+        axis = "region" if kind[s] == REGION else "boundary"
         if axis == "region":
             label = TYPE_NAMES[int(rtype[i])]
             where = f"{int(start[i]):,}–{int(start[i] + size[i]):,}"
@@ -551,7 +551,7 @@ def object_rows(r: ToyResult) -> list[dict]:
             a = int(rtype[obj[lo]]) if lo >= 0 and kind[lo] == REGION else -1
             b = int(rtype[obj[hi]]) if hi < int(chain.n_slots) and kind[hi] == REGION else -1
             pair = "|".join(TYPE_NAMES.get(x, "?") for x in sorted((a, b)) if x >= 0)
-            label = pair or "edge"
+            label = pair or "boundary"
             where = f"@{int(start[obj[hi]]):,}" if b >= 0 else f"#{i}"
             bp = 0
         t_tot = tg[axis][i] + tr[axis][i]
@@ -652,7 +652,7 @@ SPECS: dict[str, ToySpec] = {
         name="TA_single_exon",
         what_it_probes="⭐⭐ OWNER'S SPEC. 5 kb chromosome, ONE single-exon transcript TA+ (1000,3000). "
         "NO introns and NO junctions, so the exon can ONLY be solved through the two "
-        "intergenic|exon EDGES: intergenic -> edge -> exon -> edge -> intergenic. It therefore "
+        "intergenic|exon BOUNDARIES: intergenic -> boundary -> exon -> boundary -> intergenic. It therefore "
         "tests exactly one thing — can an accurate intergenic gDNA level reach a single-stranded "
         "exon by message passing?",
         genome_length=5_000,
@@ -661,13 +661,13 @@ SPECS: dict[str, ToySpec] = {
     ),
     "one_exon": ToySpec(
         name="one_exon",
-        what_it_probes="a single-exon gene: one exon region, two intergenic|exon edges, no junction",
+        what_it_probes="a single-exon gene: one exon region, two intergenic|exon boundaries, no junction",
         genome_length=60_000,
         genes=[_gene("g1", "+", [(20_000, 23_000)], 400.0)],
     ),
     "two_exon": ToySpec(
         name="two_exon",
-        what_it_probes="ONE intron between two exons — the intron|exon edges and the junction flux",
+        what_it_probes="ONE intron between two exons — the intron|exon boundaries and the junction flux",
         genome_length=60_000,
         genes=[_gene("g1", "+", [(20_000, 23_000), (28_000, 31_000)], 400.0)],
     ),
@@ -676,28 +676,28 @@ SPECS: dict[str, ToySpec] = {
         what_it_probes="⭐⭐ OWNER'S SPEC. ONE two-exon transcript TA+ (1,000, 2,000) (9,000, 10,000) "
         "— so this is `nested_exons`'s TWIN at the same gene boundaries on the same 12 kb "
         "chromosome, with an INTRON and a JUNCTION where the nesting was. FIVE REGIONS, FOUR "
-        "contiguous EDGES and ⭐ the ladder's first JUNCTION EDGE:\n"
-        "          REGION intergenic [0, 1000)        EDGE @1,000   intergenic|exon, pure gDNA (TSS+)\n"
-        "          REGION exon  [1000, 2000)   TA e1  EDGE @2,000   intron|exon, the DONOR+ side\n"
-        "          REGION intron [2000, 9000)  TA i1  EDGE @9,000   intron|exon, the ACCEPTOR+ side\n"
-        "          REGION exon  [9000, 10000)  TA e2  EDGE @10,000  intergenic|exon, pure gDNA (TES+)\n"
+        "contiguous BOUNDARIES and ⭐ the ladder's first JUNCTION BOUNDARY:\n"
+        "          REGION intergenic [0, 1000)        BOUNDARY @1,000   intergenic|exon, pure gDNA (TSS+)\n"
+        "          REGION exon  [1000, 2000)   TA e1  BOUNDARY @2,000   intron|exon, the DONOR+ side\n"
+        "          REGION intron [2000, 9000)  TA i1  BOUNDARY @9,000   intron|exon, the ACCEPTOR+ side\n"
+        "          REGION exon  [9000, 10000)  TA e2  BOUNDARY @10,000  intergenic|exon, pure gDNA (TES+)\n"
         "          REGION intergenic [10000, 12000)\n"
-        "          JUNCTION EDGE 2,000 → 9,000 (+), pure mature RNA, NOT a chain slot\n"
+        "          JUNCTION BOUNDARY 2,000 → 9,000 (+), pure mature RNA, NOT a chain slot\n"
         "        ⭐⭐ What it adds over every rung before it, and why it is the hard one: the two "
-        "exon↔intron EDGES. Mature RNA cannot cross an exon↔intron seam contiguously, so their truth "
+        "exon↔intron BOUNDARIES. Mature RNA cannot cross an exon↔intron boundary contiguously, so their truth "
         "is pure gDNA — but the solver's own continuity gate says a strand IS admissible there "
         "(nascent RNA could cross), so they are NOT TRAPS: no-magic-numbers and the solver must *derive* what the structure "
         "already implies. ⛔ On an `nrna_none` donor that is the maximally-violated case of the "
         "intron↔exon imputation premise, so a nascent rung is the control this one needs.\n"
         "        ⛔⛔ CAPTURE-ON NEEDS `--genome-length 120000` ON THIS RUNG. At 12 kb the whole "
-        "chromosome gets ~39 gDNA fragments and the two exon↔intron EDGES carry 2 and 5 — not a solve, an "
+        "chromosome gets ~39 gDNA fragments and the two exon↔intron BOUNDARIES carry 2 and 5 — not a solve, an "
         "empty chromosome. At 120 kb they carry 20 and 36 at the EXON's own capture stratum (density "
         "0.079–0.142 against the exon interior's 0.158–0.162 and the intron interior's 0.00015), which is "
         "the regime the object actually matters in. ⭐ That is capture working as intended: the gDNA "
-        "signal LEAVES the intergenic and intronic REGIONS and arrives at the EDGES abutting the exon.\n"
+        "signal LEAVES the intergenic and intronic REGIONS and arrives at the BOUNDARIES abutting the exon.\n"
         "        ⭐ And unlike `nested_exons` there IS own evidence inside the gene: the 7,000 bp intron "
         "REGION is where the intron factory lives, so the gDNA level does not have to travel from the "
-        "gene ends. The two exons each sit between a G1 gene-boundary EDGE and an exon|intron EDGE, and "
+        "gene ends. The two exons each sit between a G1 gene-boundary BOUNDARY and an exon|intron BOUNDARY, and "
         "the junction's flux is the only measurement of their mature RNA.",
         genome_length=12_000,
         genes=[_gene("g1", "+", [(1_000, 2_000), (9_000, 10_000)], 300.0, t_id="TA")],
@@ -705,24 +705,24 @@ SPECS: dict[str, ToySpec] = {
     "alt_splice": ToySpec(
         name="alt_splice",
         what_it_probes="⭐⭐⭐ OWNER'S SPEC, 2026-08-05 — ALTERNATIVE SPLICING: several junctions meeting "
-        "at ONE edge, which is the case a per-EDGE junction total cannot represent.\n"
+        "at ONE boundary, which is the case a per-BOUNDARY junction total cannot represent.\n"
         "          TA+ (1,000, 2,000) (5,000, 6,000) (9,000, 10,000)   3 exons — the INCLUSION isoform\n"
         "          TB+ (1,000, 2,000) (9,000, 10,000)                  2 exons — the SKIPPING isoform\n"
         "        THREE junctions over TWO shared sites:\n"
         "          j 2,000 -> 5,000   (TA's first intron)\n"
         "          j 6,000 -> 9,000   (TA's second intron)\n"
         "          j 2,000 -> 9,000   (TB's only intron — the exon-skipping jump)\n"
-        "        ⭐⭐ SO THE SITES ARE SHARED, AND THAT IS THE POINT: the EDGE @2,000 is the genomic-LOW "
-        "end of TWO junctions and the EDGE @9,000 is the genomic-HIGH end of TWO. Both of @2,000's fluxes "
+        "        ⭐⭐ SO THE SITES ARE SHARED, AND THAT IS THE POINT: the BOUNDARY @2,000 is the genomic-LOW "
+        "end of TWO junctions and the BOUNDARY @9,000 is the genomic-HIGH end of TWO. Both of @2,000's fluxes "
         "belong to its LOW flank and both of @9,000's to its HIGH flank, so each bank must POOL them as "
         "`Sum(count)/Sum(E)` — the ratio of sums, never the mean of ratios. ⛔ A single junction-inclusive "
-        "total per EDGE cannot express this at all, and neither can a per-junction rule that forgets the "
+        "total per BOUNDARY cannot express this at all, and neither can a per-junction rule that forgets the "
         "two share a line.\n"
         "        ⭐ It also adds a region that is exon AND intron on the SAME strand: [5,000, 6,000) is TA's "
         "middle exon and lies inside TB's intron. `splice_both_strands` had that contrast only ACROSS "
         "strands; here it is within one, so no strand bit can separate them and `coarse_type_array` calls "
         "it `exon`.\n"
-        "        ⚠ What it does NOT cover: an EDGE that is one junction's LOW end and another's HIGH end "
+        "        ⚠ What it does NOT cover: an BOUNDARY that is one junction's LOW end and another's HIGH end "
         "at once. That needs one transcript's intron to END where another's BEGINS, and it is gated in "
         "`tests/calibration/test_splice_flux_reframe.py` rather than simulated here.",
         genome_length=12_000,
@@ -744,26 +744,26 @@ SPECS: dict[str, ToySpec] = {
     ),
     "tes_readthrough": ToySpec(
         name="tes_readthrough",
-        what_it_probes="⭐⭐⭐ OWNER'S SPEC, 2026-08-05 — the CERTIFIED-RNA CHANNEL AT A TERMINUS EDGE, "
+        what_it_probes="⭐⭐⭐ OWNER'S SPEC, 2026-08-05 — the CERTIFIED-RNA CHANNEL AT A TERMINUS BOUNDARY, "
         "which is the case no other rung can produce at all.\n"
         "          TA+ (1,050, 2,000) (9,000,  9,100)\n"
         "          TB+ (1,000, 2,000) (9,050, 11,000)\n"
         "        Two junctions from ONE shared donor: j 2,000 -> 9,000 (TA) and j 2,000 -> 9,050 (TB).\n"
-        "        ⭐⭐⭐ **EDGE @9,100 IS THE POINT.** It is TA's TES and NO junction touches it — yet "
+        "        ⭐⭐⭐ **BOUNDARY @9,100 IS THE POINT.** It is TA's TES and NO junction touches it — yet "
         "transcription CONTINUES past it, because TB's second exon runs to 11,000. A TB fragment that "
         "USED TB's junction and reaches >50 bp past 9,050 crosses 9,100 **contiguously having spliced "
-        "elsewhere**, so it lands in `edge_spliced` at a line with no junction to price it against. That "
-        "is exactly the population the new TSS/TES edges create, and if it is not binned as spliced it "
+        "elsewhere**, so it lands in `boundary_spliced` at a line with no junction to price it against. That "
+        "is exactly the population the new TSS/TES boundaries create, and if it is not binned as spliced it "
         "falls into the UNSPLICED pool and gets deconvolved — certified RNA fed to the gDNA solver.\n"
         "        ⛔ **No previous toy can make this fragment.** On every earlier rung the exons ARE the "
-        "regions, so a spliced molecule never crosses an interior line contiguously and `edge_spliced` is "
+        "regions, so a spliced molecule never crosses an interior line contiguously and `boundary_spliced` is "
         "structurally zero everywhere (measured 0 on `alt_splice`, including at exons holding 68,000 RNA "
         "fragments).\n"
         "        ⭐ The other three structures, each a separate stress:\n"
-        "          EDGE @9,050 — TB's junction ACCEPTOR **and** a plain contiguity line for TA, whose "
+        "          BOUNDARY @9,050 — TB's junction ACCEPTOR **and** a plain contiguity line for TA, whose "
         "exon 2 spans 9,000-9,100 unbroken. So one line carries junction flux for one transcript and an "
         "unspliced RNA crossing for another.\n"
-        "          EDGE @1,050 — TA's TSS, with TB already transcribing through it.\n"
+        "          BOUNDARY @1,050 — TA's TSS, with TB already transcribing through it.\n"
         "          REGION [9,000, 9,050) — TA exon AND TB intron on the SAME strand, 50 bp wide, so it is "
         "also below one fragment length and has no resolvable density of its own (TRAPS: density-below-one-fragment-length).\n"
         "        ⚠ Both `abundance` values are meant to be SWEPT: the certified channel's strength at "
@@ -791,13 +791,13 @@ SPECS: dict[str, ToySpec] = {
         "          TB+ (2,000, 10,000)                     1 exon,  + strand, spans TA's intron\n"
         "          TC− (1,000, 11,000)                     1 exon,  − strand, spans everything\n"
         "          TD− (1,000, 2,500) (8,500, 11,000)      2 exons, − strand, intron 2,500-8,500\n"
-        "        ⭐⭐ WHY THIS ONE. Every previous rung let an EDGE answer 'is my neighbour an exon?' "
+        "        ⭐⭐ WHY THIS ONE. Every previous rung let an BOUNDARY answer 'is my neighbour an exon?' "
         "with a yes or a no. Here it cannot: THREE regions are simultaneously an INTRON on one strand and "
         "an EXON on the other — [2,500, 3,000), [3,000, 8,500) and [8,500, 9,000) — so 'exon' is not a "
         "property of a region at all, it is a property of (region, strand). And the two junctions are on "
-        "OPPOSITE strands, so an edge can be the DONOR of one and sit beside the ACCEPTOR of the other.\n"
-        "        ⛔ The question it exists to answer is per (EDGE, side, strand, donor-or-acceptor, "
-        "message direction): when this edge reframes against that neighbour, does its splice flux belong "
+        "OPPOSITE strands, so an boundary can be the DONOR of one and sit beside the ACCEPTOR of the other.\n"
+        "        ⛔ The question it exists to answer is per (BOUNDARY, side, strand, donor-or-acceptor, "
+        "message direction): when this boundary reframes against that neighbour, does its splice flux belong "
         "in the total or not? The derivation is open.\n"
         "        ⚠ MY READING OF THE OWNER'S SPEC, flagged rather than assumed: the owner wrote the last "
         "two transcripts both as `TC-`. Two transcripts cannot share an id, so they are TC− and TD− "
@@ -827,19 +827,19 @@ SPECS: dict[str, ToySpec] = {
         name="nested_exons",
         what_it_probes="⭐⭐ NESTED EXONS (owner's spec). THREE nested single-exon transcripts on one gene:\n"
         "                     TA+ (1,000, 10,000)   TB+ (2,000, 9,000)   TC+ (3,000, 8,000)\n"
-        "        The partition is therefore SEVEN REGIONS and SIX EDGES, and there is NO INTRON "
+        "        The partition is therefore SEVEN REGIONS and SIX BOUNDARIES, and there is NO INTRON "
         "anywhere:\n"
-        "          REGION intergenic [0, 1000)        EDGE @1,000   intergenic|exon, pure gDNA\n"
-        "          REGION exon [1000, 2000)   TA      EDGE @2,000   exon|exon\n"
-        "          REGION exon [2000, 3000)   TA+TB   EDGE @3,000   exon|exon\n"
-        "          REGION exon [3000, 8000)   TA+B+C  EDGE @8,000   exon|exon\n"
-        "          REGION exon [8000, 9000)   TA+TB   EDGE @9,000   exon|exon\n"
-        "          REGION exon [9000, 10000)  TA      EDGE @10,000  intergenic|exon, pure gDNA\n"
+        "          REGION intergenic [0, 1000)        BOUNDARY @1,000   intergenic|exon, pure gDNA\n"
+        "          REGION exon [1000, 2000)   TA      BOUNDARY @2,000   exon|exon\n"
+        "          REGION exon [2000, 3000)   TA+TB   BOUNDARY @3,000   exon|exon\n"
+        "          REGION exon [3000, 8000)   TA+B+C  BOUNDARY @8,000   exon|exon\n"
+        "          REGION exon [8000, 9000)   TA+TB   BOUNDARY @9,000   exon|exon\n"
+        "          REGION exon [9000, 10000)  TA      BOUNDARY @10,000  intergenic|exon, pure gDNA\n"
         "          REGION intergenic [10000, 12000)\n"
         "        ⭐ Every one of the five exon REGIONS carries RNA and the library is unstranded, so NONE "
         "of them has composition evidence of its own; and with no intron there is no object in the "
         "middle of the gene that can re-derive the gDNA level for itself. So the gDNA level has to "
-        "travel from the two pure-gDNA EDGES at the gene ends through five evidence-free objects. "
+        "travel from the two pure-gDNA BOUNDARIES at the gene ends through five evidence-free objects. "
         "⭐⭐ Because the transcripts are NESTED, the RNA density is a symmetric staircase (1, 2, 3, 2, 1 "
         "transcripts) while the gDNA density is UNIFORM — so the truth is known per object and any "
         "systematic drift in the delivered gDNA level is visible against it.",
@@ -888,7 +888,7 @@ SPECS: dict[str, ToySpec] = {
     ),
     "nascent": ToySpec(
         name="nascent",
-        what_it_probes="two_exon plus NASCENT RNA — the only way an intron|exon edge legitimately "
+        what_it_probes="two_exon plus NASCENT RNA — the only way an intron|exon boundary legitimately "
         "carries RNA, which the whole ladder panel cannot express",
         genome_length=60_000,
         genes=[_gene("g1", "+", [(20_000, 23_000), (28_000, 31_000)], 400.0)],
@@ -949,7 +949,7 @@ def sweep_density(
     print("   the ONLY thing varied is the transcript's RNA density.")
     print()
     print(f"   {'RNA density':>12} {'vs gDNA':>8} {'RNA':>8} {'gDNA':>6} | "
-          f"{'intergenic':^14} | {'edge@lo':^20} | {'EXON':^20} | {'edge@hi':^20} | {'toy':>7}")
+          f"{'intergenic':^14} | {'boundary@lo':^20} | {'EXON':^20} | {'boundary@hi':^20} | {'toy':>7}")
     print(f"   {'counts/bp':>12} {'x':>8} {'counts':>8} {'counts':>6} | "
           f"{'true':>6} {'pred':>6} | {'true':>6} {'loc':>6} {'pred':>6} | "
           f"{'true':>6} {'loc':>6} {'pred':>6} | {'true':>6} {'loc':>6} {'pred':>6} | {'mwae':>7}")
@@ -994,23 +994,23 @@ def sweep_density(
         print("      changed. Which lever helps depends on WHICH object is starved:")
         print("      • an intergenic REGION  — lengthen the chromosome (--genome-length): counts scale")
         print("        with bp at fixed density;")
-        print("      • an EDGE, capture OFF — ⛔ lengthening does NOTHING. A 0-bp line's counts are")
+        print("      • an BOUNDARY, capture OFF — ⛔ lengthening does NOTHING. A 0-bp line's counts are")
         print("        `density x mean_FL`, independent of the chromosome, so the only lever is depth.")
-        print("      • ⭐⭐ an EDGE, capture ON — LENGTHEN IT. This is the opposite of the capture-OFF")
+        print("      • ⭐⭐ an BOUNDARY, capture ON — LENGTHEN IT. This is the opposite of the capture-OFF")
         print("        case and the reason is the sampler's own mass split: the gDNA budget is")
         print("        `rate x genome_length` while the probe footprint is FIXED, and the on-probe share")
         print("        is `binding x overlap / (off_target x L + binding x overlap)`. So a longer")
         print("        chromosome hands capture a bigger budget to concentrate onto the same probes, and")
-        print("        the edge count grows with L until that ratio saturates. ⭐ Measured on")
+        print("        the boundary count grows with L until that ratio saturates. ⭐ Measured on")
         print("        `spliced_exons` x `g75 ss0.50 capture_on`, 12 kb -> 120 kb: the two intron|exon")
-        print("        EDGEs go 2 -> 20 and 5 -> 36 counts and the gene-boundary EDGEs 1 -> 41 and")
+        print("        BOUNDARIES go 2 -> 20 and 5 -> 36 counts and the gene-boundary BOUNDARIES 1 -> 41 and")
         print("        2 -> 35, while the intron REGION stays at 1 and the intergenic REGION at ~0 density")
-        print("        — i.e. the signal moves to the EDGES abutting the exon, which is what capture")
+        print("        — i.e. the signal moves to the BOUNDARIES abutting the exon, which is what capture")
         print("        does. ⚠ Raising `binding_per_base` also works but un-matches the toy from the")
         print("        donor's chemistry; lengthening keeps every harvested global intact.")
         print()
-    print("   ⭐ THE CHAIN under test:  intergenic → edge → EXON → edge → intergenic. With no intron")
-    print("      and no junction, the exon's only route to an answer is the two edges, so a wrong")
+    print("   ⭐ THE CHAIN under test:  intergenic → boundary → EXON → boundary → intergenic. With no intron")
+    print("      and no junction, the exon's only route to an answer is the two boundaries, so a wrong")
     print("      exon here is a message-passing failure and nothing else.")
     print("   ⭐ loc = the message-free local solve; pred = after the relay. loc ≈ pred means the")
     print("      messages did nothing; loc far from truth with pred near it means they carried it.")

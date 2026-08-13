@@ -17,7 +17,7 @@ its regions), so a uniform enrichment reduces *exactly* to the input length ⇒ 
 only the captured case contracts. No new readout — it reuses the calibration's per-region gDNA mass and the
 same IPR shape as the gDNA component (the standard 1-pseudocount convention + ``1e-9`` numerical floors used
 throughout calibration; not tuned constants). The density-correct region model (effective-support
-divisors, summed-side-density pooled seams, transport-free) is the shape this module implements.
+divisors, summed-side-density pooled boundaries, transport-free) is the shape this module implements.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 from ..types import IntervalType
-from .region_arrays import region_right_edge
+from .region_arrays import region_right_boundary
 
 if TYPE_CHECKING:
     from ..index import TranscriptIndex
@@ -45,11 +45,11 @@ def _transcript_region_incidence(
     """Per-transcript **region** membership — the regions, boundaries, AND splice junctions a component crosses.
 
     Returns ``(inc_t_reg, inc_reg, inc_t_bnd, inc_bnd, inc_t_junc, inc_junc_left, inc_junc_right)``: region
-    incidence ``(t, r)``; interior-boundary incidence ``(t, e)`` where ``e`` is a CONTIGUOUS EDGE INDEX —
-    a line is a first-class object on its own axis, so a consumer indexes the per-edge arrays directly; and
+    incidence ``(t, r)``; interior-boundary incidence ``(t, e)`` where ``e`` is a CONTIGUOUS BOUNDARY INDEX —
+    a line is a first-class object on its own axis, so a consumer indexes the per-boundary arrays directly; and
     SPLICE-JUNCTION incidence ``(t, r_left, r_right)`` — one per adjacent exon pair of a multi-exon mRNA,
     where ``r_left`` is the previous exon's last region and ``r_right`` this exon's first region. The intron
-    between them carries no gDNA (no genomic-adjacent seam), so the junction's crossing mass is IMPUTED by
+    between them carries no gDNA (no genomic-adjacent boundary), so the junction's crossing mass is IMPUTED by
     ``transcript_capture_eff_lengths`` from the two flanking exon densities — stitching the spliced
     transcript into one contiguous ruler so its ``span_full`` equals its FL-marginal length (else the
     junction-dropped ``span_full`` under-states the mature footprint and the ``fl/span_full`` inflation
@@ -61,9 +61,9 @@ def _transcript_region_incidence(
     * A **region** is in the set if an exon (mRNA) / the full span (nRNA) overlaps it.
     * A **boundary** is in the set iff the component crosses it *without a splice* — i.e. it lies STRICTLY
       INTERIOR to a single exon / span. For an exon ``[a, b)`` spanning region range ``[lo, hi)`` the interior
-      seams are ``r ∈ [lo, hi-1)``: their genomic positions ``end[r] = start[r+1]`` all satisfy ``a < · < b``
-      (``lo`` is the first region with ``end > a``; ``hi-1`` the last with ``start < b``). Seams at the exon
-      EDGES (splice donor/acceptor, or the transcript's outer ends) sit at ``a`` or ``b`` ⇒ index ``< lo`` or
+      boundaries are ``r ∈ [lo, hi-1)``: their genomic positions ``end[r] = start[r+1]`` all satisfy ``a < · < b``
+      (``lo`` is the first region with ``end > a``; ``hi-1`` the last with ``start < b``). Boundaries at the exon
+      BOUNDARIES (splice donor/acceptor, or the transcript's outer ends) sit at ``a`` or ``b`` ⇒ index ``< lo`` or
       ``≥ hi-1`` ⇒ excluded automatically. Introns lie in no exon's range ⇒ their regions and boundaries are
       excluded. So a MULTI-exon mRNA drops its introns + splice-junction boundaries but KEEPS an
       exon-interior boundary that merely marks a signature change (an antisense feature overlapping on the
@@ -79,7 +79,7 @@ def _transcript_region_incidence(
     r_r: list[np.ndarray] = []
     b_t: list[np.ndarray] = []
     b_r: list[np.ndarray] = []
-    j_t: list[int] = []  # splice-junction seam: transcript
+    j_t: list[int] = []  # splice-junction boundary: transcript
     j_l: list[int] = []  # left-flank region (the previous exon's LAST region)
     j_r: list[int] = []  # right-flank region (this exon's FIRST region)
     seen: set[int] = set()
@@ -98,7 +98,7 @@ def _transcript_region_incidence(
             r_t.append(np.full(hi - lo, int(t), dtype=np.int64))
             if (
                 hi - 1 > lo
-            ):  # interior seams r ∈ [lo, hi-1): boundaries crossed contiguously (no splice)
+            ):  # interior boundaries r ∈ [lo, hi-1): boundaries crossed contiguously (no splice)
                 b_r.append(np.arange(lo, hi - 1, dtype=np.int64))
                 b_t.append(np.full(hi - 1 - lo, int(t), dtype=np.int64))
             return lo, hi
@@ -108,7 +108,7 @@ def _transcript_region_incidence(
     ex = iv[(iv["interval_type"] == int(IntervalType.EXON)) & (iv["t_index"] >= 0)]
     # genomic order per transcript so consecutive rows of one transcript are ADJACENT exons — the pairs
     # whose SPLICE JUNCTION must be stitched (the intron between them carries no gDNA ⇒ it is not a
-    # genomic-adjacent seam; its crossing mass is imputed downstream from the flanking EXON densities).
+    # genomic-adjacent boundary; its crossing mass is imputed downstream from the flanking EXON densities).
     ex = ex.sort_values(["t_index", "start"], kind="stable")
     for t, ref_name, a, b in zip(ex["t_index"], ex["ref"], ex["start"], ex["end"], strict=True):
         t = int(t)
@@ -133,17 +133,17 @@ def _transcript_region_incidence(
             _add(int(t), ref_name, int(a), int(b))  # single-exon spans (nRNA) → no splice junctions
 
     e = np.empty(0, dtype=np.int64)
-    # ⭐ The boundary axis is emitted as an EDGE index, not a left-region index. A line is a first-class
-    # object with its own axis, so a consumer indexes the per-edge arrays directly — the predecessor
-    # returned ``r`` and forced every caller through a region-shaped copy (`_left_keyed_edge_arrays`),
+    # ⭐ The boundary axis is emitted as an BOUNDARY index, not a left-region index. A line is a first-class
+    # object with its own axis, so a consumer indexes the per-boundary arrays directly — the predecessor
+    # returned ``r`` and forced every caller through a region-shaped copy (`_left_keyed_boundary_arrays`),
     # which read as an attribution of the line's mass to a region and was not one.
-    right_edge = region_right_edge(np.asarray(region_arrays.ref_id))
-    b_edges = right_edge[np.concatenate(b_r)] if b_r else e
+    right_boundary = region_right_boundary(np.asarray(region_arrays.ref_id))
+    b_boundaries = right_boundary[np.concatenate(b_r)] if b_r else e
     return (
         np.concatenate(r_t) if r_t else e,
         np.concatenate(r_r) if r_r else e,
         np.concatenate(b_t) if b_t else e,
-        b_edges,
+        b_boundaries,
         np.asarray(j_t, dtype=np.int64) if j_t else e,
         np.asarray(j_l, dtype=np.int64) if j_l else e,
         np.asarray(j_r, dtype=np.int64) if j_r else e,
@@ -209,8 +209,8 @@ def transcript_capture_eff_lengths(
     set:
 
     * a per-region CONTAINED region at effective support ``S_r = E[max(0, L_r − ℓ)]`` (mass ``m_r``);
-    * a per-interior-LINE crossing object at support ``S_e = gdna_edge_eff_len[e] = E_f[w − 1]``
-      (mass ``m_e = mass_gdna_edge[e]``) — for lines the transcript crosses without a splice (interior
+    * a per-interior-LINE crossing object at support ``S_e = gdna_boundary_eff_len[e] = E_f[w − 1]``
+      (mass ``m_e = mass_gdna_boundary[e]``) — for lines the transcript crosses without a splice (interior
       to an exon);
     * a per-SPLICE-JUNCTION crossing object (multi-exon mRNA), same crossing support ``S_j`` but with its mass
       IMPUTED from the two flanking exon densities ``m_j = ½·(ρ_left + ρ_right)·S_j`` — the intron between
@@ -218,8 +218,8 @@ def transcript_capture_eff_lengths(
       fragment covers, not zero (dropping it) nor full length (the FL-marginal's implicit weight).
 
     gDNA (contiguous genomic interval) takes ALL regions; nRNA (single unspliced exon) keeps every interior
-    region (introns included); a spliced mRNA takes its exon regions + its interior + splice-junction seams
-    (dropping only the introns). Keeping the junction seams makes a spliced mRNA's ``span_full`` equal its
+    region (introns included); a spliced mRNA takes its exon regions + its interior + splice-junction boundaries
+    (dropping only the introns). Keeping the junction boundaries makes a spliced mRNA's ``span_full`` equal its
     FL-marginal length — WITHOUT them the ``fl/span_full`` ratio exceeds 1 (growing with exon count) and
     inflates a spliced mRNA's eff-length ABOVE its nascent parent's, the physically impossible inversion
     (a nascent's genomic region set strictly contains its mature child's).
@@ -252,15 +252,15 @@ def transcript_capture_eff_lengths(
     contained_m = np.asarray(calibration.mass_gdna_region, dtype=np.float64)
     contained_S = np.maximum(np.asarray(calibration.gdna_region_eff_len, dtype=np.float64), 1e-9)
     contained_ev = contained_m + np.asarray(calibration.mass_rna_region, dtype=np.float64)
-    # ⭐ The per-LINE crossing objects, on their own axis. `inc_bnd` is an EDGE index, so these are
+    # ⭐ The per-LINE crossing objects, on their own axis. `inc_bnd` is an BOUNDARY index, so these are
     # indexed directly — no region-shaped copy, and nothing that reads as an attribution to a region.
-    seam_m = np.asarray(calibration.mass_gdna_edge, dtype=np.float64)
-    seam_S = np.maximum(np.asarray(calibration.gdna_edge_eff_len, dtype=np.float64), 0.0)
-    # A SPLICE junction is not a contiguous line, so it has no entry on the edge axis — but it is still
+    boundary_m = np.asarray(calibration.mass_gdna_boundary, dtype=np.float64)
+    boundary_S = np.maximum(np.asarray(calibration.gdna_boundary_eff_len, dtype=np.float64), 0.0)
+    # A SPLICE junction is not a contiguous line, so it has no entry on the boundary axis — but it is still
     # a crossing, and gDNA's crossing divisor is the same everywhere (UNBOUNDED_REACH both sides ⇒
-    # mu_g − 1). Take it from the edge supports rather than recomputing a length model here: one
+    # mu_g − 1). Take it from the boundary supports rather than recomputing a length model here: one
     # definition, and it cannot drift from the one the calibrator divided by.
-    crossing_S = float(seam_S[seam_S > 0.0][0]) if np.any(seam_S > 0.0) else 0.0
+    crossing_S = float(boundary_S[boundary_S > 0.0][0]) if np.any(boundary_S > 0.0) else 0.0
 
     rt, rr, bt, br, jt, jl, jr = _transcript_region_incidence(index, region_arrays)
     # GLOBAL reference density ρ_ref = the enriched mode of the MASS-WEIGHTED region-density KDE — the
@@ -275,7 +275,7 @@ def transcript_capture_eff_lengths(
     inv = 1.0 / rho_ref
     # Per-transcript enrichment-weighted length num = Σ_n min(m_n/ρ_ref, S_n) = Σ_n S_n·min(ρ_n/ρ_ref, 1),
     # the uniform-case length span_full = Σ_n S_n, and the contained evidence (multimapper shrinkage), over
-    # the region set (regions + interior seams + splice-junction seams). factor = num/span_full ∈ (0, 1].
+    # the region set (regions + interior boundaries + splice-junction boundaries). factor = num/span_full ∈ (0, 1].
     num = np.zeros(n_t)
     span_full = np.zeros(n_t)
     c_ev = np.zeros(n_t)
@@ -284,24 +284,24 @@ def transcript_capture_eff_lengths(
         np.add.at(span_full, rt, contained_S[rr])
         np.add.at(c_ev, rt, contained_ev[rr])
     if bt.size:
-        np.add.at(num, bt, np.minimum(seam_m[br] * inv, seam_S[br]))
-        np.add.at(span_full, bt, seam_S[br])
+        np.add.at(num, bt, np.minimum(boundary_m[br] * inv, boundary_S[br]))
+        np.add.at(span_full, bt, boundary_S[br])
     if jt.size:
-        # SPLICE-JUNCTION seams (multi-exon mRNA). The intron between the two exons carries no gDNA, so
-        # the junction crossing is NOT a genomic-adjacent seam — its mass is IMPUTED from the two flanking
+        # SPLICE-JUNCTION boundaries (multi-exon mRNA). The intron between the two exons carries no gDNA, so
+        # the junction crossing is NOT a genomic-adjacent boundary — its mass is IMPUTED from the two flanking
         # EXON densities ρ = m/S (the exonic sequence a junction-spanning fragment actually covers), at the
         # SAME pooled crossing support S_j = ½·(gdna_boundary_len[left] + gdna_boundary_len[right]) the
-        # genomic seams use. Stitching these in makes span_full == fl for a spliced mRNA, so the
+        # genomic boundaries use. Stitching these in makes span_full == fl for a spliced mRNA, so the
         # junction-dropped fl/span_full inflation (which lifted eff_em(mature) ABOVE eff_em(nascent) — the
         # physically impossible inversion) vanishes. Under uniform gDNA m_j = ρ·S_j like every other region,
         # so factor stays EXACTLY 1 (capture-off bit-identical); under capture the junction contributes at
         # its flanking-exon enrichment, not the fabricated full-length weight.
         rho_l = contained_m[jl] / contained_S[jl]
         rho_r = contained_m[jr] / contained_S[jr]
-        # ⭐ The junction seam's SUPPORT is the gDNA crossing effective length — ONE number, the same
-        # every contiguous line uses, taken from the edge supports rather than re-derived. The
+        # ⭐ The junction boundary's SUPPORT is the gDNA crossing effective length — ONE number, the same
+        # every contiguous line uses, taken from the boundary supports rather than re-derived. The
         # predecessor summed two halved per-side lengths here and had to keep that sum in step with
-        # `_pooled_seam_arrays`'s by hand; there is one quantity now, so there is nothing to keep in step.
+        # `_pooled_boundary_arrays`'s by hand; there is one quantity now, so there is nothing to keep in step.
         # The `0.5·(rho_l + rho_r)` below is a genuine AVERAGE OF DENSITIES — the junction's imputed
         # density is the mean of its two flanks — and is unrelated to the support. It stays.
         s_j = np.full(jt.shape[0], crossing_S, dtype=np.float64)

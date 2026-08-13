@@ -99,7 +99,7 @@ using f64_2d_mut = nb::ndarray<double, nb::ndim<2>, nb::c_contig>;
 //   min(x, w, L - x)   where  w = min(f, L/2).
 //
 // A fragment in the plateau region gets weight 1.0.  A fragment near
-// a transcript edge gets weight > 1.0, reflecting that it is less
+// a transcript boundary gets weight > 1.0, reflecting that it is less
 // likely to be generated yet was still observed — stronger evidence
 // for that transcript.
 
@@ -1211,7 +1211,7 @@ NB_MODULE(_scoring_impl, m) {
           nb::arg("frag_start"), nb::arg("frag_end"),
           nb::arg("transcript_length"),
           "Inverse coverage-capacity weight for a fragment on a transcript.\n\n"
-          "Uses the trapezoid coverage model.  Plateau → 1.0; edge → > 1.0.");
+          "Uses the trapezoid coverage model.  Plateau → 1.0; boundary → > 1.0.");
 
     nb::class_<NativeFragmentScorer>(m, "NativeFragmentScorer")
         .def(nb::init<

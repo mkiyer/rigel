@@ -60,7 +60,7 @@ so ``L`` and all four populations are untouched. The counter is pinned separatel
 claim demonstrated: normalisation is exactly what makes the two formulas agree.
 
 ⛔ **WHAT THIS FILE DOES NOT PROVE.** The fixture carries no annotated junctions, so every fragment is
-unspliced and the **spliced routing** (``edge_spliced`` vs ``edge_unspliced``, junction credit, and the
+unspliced and the **spliced routing** (``boundary_spliced`` vs ``boundary_unspliced``, junction credit, and the
 containment block) is not exercised here — it is covered by ``test_accumulator_spec``'s dedicated cases.
 That is the right scope for TRAPS: a-purity-filter-is-a-length-filter's purpose: the unconditional histogram bins by ``L``, and ``L`` does not
 depend on which population the fragment is routed to.
@@ -110,8 +110,8 @@ def oracle_deposits(cuts, ref_len: int, start: int, end: int, introns, spliced: 
         return None
     length = len(covered)
     # A line at cut position p is crossed iff the molecule holds the bases on BOTH sides of it.
-    # ⚠ Reported as EDGE indices: a reference's cut ``i`` is its edge ``i − 1`` (the deposit writes
-    # ``edge_base + line - 1``), because cut 0 is the reference start and owns no interior line. The
+    # ⚠ Reported as BOUNDARY indices: a reference's cut ``i`` is its boundary ``i − 1`` (the deposit writes
+    # ``boundary_base + line - 1``), because cut 0 is the reference start and owns no interior line. The
     # oracle re-derives that offset rather than importing it — and it caught me getting it wrong first.
     crossed = {i - 1 for i, p in enumerate(cuts) if (p - 1) in covered and p in covered}
 
@@ -137,7 +137,7 @@ def _acc(max_fragment_length: int = 10_000) -> Accumulator:
         cut_positions=_CUTS.copy(),
         ref_cut_offsets=np.array([0, _CUTS.size], dtype=np.int64),
         ref_region_offsets=np.array([0, n_regions], dtype=np.int64),
-        ref_edge_offsets=np.array([0, n_regions - 1], dtype=np.int64),
+        ref_boundary_offsets=np.array([0, n_regions - 1], dtype=np.int64),
         sj_offsets=np.zeros(_CUTS.size + 1, dtype=np.int64),
         sj_boundary_right=np.zeros(0, dtype=np.int64),
         sj_strand=np.zeros(0, dtype=np.int8),
@@ -149,7 +149,7 @@ def _acc(max_fragment_length: int = 10_000) -> Accumulator:
 def _observed(acc: Accumulator):
     t = acc.tally
     return (
-        {i for i in range(t.edge_unspliced_count.shape[0]) if t.edge_unspliced_count[i].sum()},
+        {i for i in range(t.boundary_unspliced_count.shape[0]) if t.boundary_unspliced_count[i].sum()},
         next(
             (i for i in range(t.region_contained_count.shape[0]) if t.region_contained_count[i].sum()),
             None,
@@ -176,12 +176,12 @@ def _check_one(start: int, end: int, introns) -> None:
     ctx = f"[{start},{end}) introns={introns}"
 
     # ⭐ L, read back from the DEPOSIT itself rather than from an accessor — the number that actually
-    # reached the tally is the one that matters. An edge deposit carries round(2^32/(L-1)).
+    # reached the tally is the one that matters. An boundary deposit carries round(2^32/(L-1)).
     t = acc.tally
-    n_cross = int(t.edge_unspliced_count.sum())
+    n_cross = int(t.boundary_unspliced_count.sum())
     if n_cross:
         assert _close(
-            float(t.edge_unspliced_inv_length_sum.sum()), n_cross / (length - 1), n_cross
+            float(t.boundary_unspliced_inv_length_sum.sum()), n_cross / (length - 1), n_cross
         ), f"{ctx}: the deposited L disagrees with the oracle's {length}"
     if contained is not None:
         # ⭐ The contained deposit is `1/OPPORTUNITY` — `ell − L + 1` admissible starts inside the
@@ -244,7 +244,7 @@ def test_randomised_at_realistic_scale():
         cut_positions=cuts.copy(),
         ref_cut_offsets=np.array([0, cuts.size], dtype=np.int64),
         ref_region_offsets=np.array([0, n_regions], dtype=np.int64),
-        ref_edge_offsets=np.array([0, n_regions - 1], dtype=np.int64),
+        ref_boundary_offsets=np.array([0, n_regions - 1], dtype=np.int64),
         sj_offsets=np.zeros(cuts.size + 1, dtype=np.int64),
         sj_boundary_right=np.zeros(0, dtype=np.int64),
         sj_strand=np.zeros(0, dtype=np.int8),
@@ -271,10 +271,10 @@ def test_randomised_at_realistic_scale():
         assert got_crossed == crossed, f"{ctx}: {got_crossed} != {crossed}"
         assert got_contained == contained, ctx
         t = acc.tally
-        n_cross = int(t.edge_unspliced_count.sum())
+        n_cross = int(t.boundary_unspliced_count.sum())
         if n_cross:
             assert _close(
-                float(t.edge_unspliced_inv_length_sum.sum()), n_cross / (length - 1), n_cross
+                float(t.boundary_unspliced_inv_length_sum.sum()), n_cross / (length - 1), n_cross
             ), f"{ctx}: deposited L != oracle {length}"
         n_checked += 1
     assert n_checked > 3000, (

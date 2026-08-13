@@ -70,9 +70,9 @@ def toy(tmp_path_factory):
 
     ⭐ Two structures here are load-bearing, and without them two gates below are vacuous:
 
-    * **staggered isoform boundaries.** ``edge_spliced`` — a molecule that crossed a contiguous line
+    * **staggered isoform boundaries.** ``boundary_spliced`` — a molecule that crossed a contiguous line
       having spliced *elsewhere* — can only be deposited where a cut falls INSIDE another
-      transcript's exon. A single-isoform gene has no such cut, so its spliced-edge bank is
+      transcript's exon. A single-isoform gene has no such cut, so its spliced-boundary bank is
       identically zero and GATE 2's perturbation removes nothing.
     * **a region shorter than the minimum fragment length.** ``region_contained`` requires the fragment
       to fit, so a 40 bp region can never hold one. That is what gives the toy genuinely EMPTY objects
@@ -276,23 +276,23 @@ def test_a_corrupted_partition_ABORTS_the_measurement(toy, tmp_path, monkeypatch
 def test_T_totals_equal_the_full_payload_PER_AXIS(measured, toy):
     """``check_same_basis`` must hold between T and the payload it claims to partition, **per axis**.
 
-    ⚠ Per axis, never pooled: ``n_regions`` and ``n_edges`` differ by only ``n_refs``, so an error on
+    ⚠ Per axis, never pooled: ``n_regions`` and ``n_boundaries`` differ by only ``n_refs``, so an error on
     one axis cancelling an equal and opposite one on the other is not far-fetched.
 
-    PERTURBATION: drop the spliced term from ``mass_rna_edge``. That is the exact schema mistake
-    ``override_masses`` exists to avoid — ``chain_edge_deconv`` builds ``rna = (1−f_g)·unspliced +
+    PERTURBATION: drop the spliced term from ``mass_rna_boundary``. That is the exact schema mistake
+    ``override_masses`` exists to avoid — ``chain_boundary_deconv`` builds ``rna = (1−f_g)·unspliced +
     spliced``, so a T without the spliced term is on a different basis from every P.
     """
     ra = RegionArrays.from_frame(toy.index.regions_df, toy.index.ref_name_to_id)
     full = CalibrationSubstrate.from_payload(measured.oracle.full, ra)
     P0.check_same_basis("T", measured.truth, full)  # holds
 
-    spliced = np.asarray(full.edge_spliced.count, np.float64).sum(axis=1)
+    spliced = np.asarray(full.boundary_spliced.count, np.float64).sum(axis=1)
     assert spliced.sum() > 0, "the toy must EXERCISE the spliced bank or this perturbation is inert"
     broken = dataclasses.replace(
-        measured.truth, mass_rna_edge=measured.truth.mass_rna_edge - spliced
+        measured.truth, mass_rna_boundary=measured.truth.mass_rna_boundary - spliced
     )
-    with pytest.raises(ValueError, match="edge"):
+    with pytest.raises(ValueError, match="boundary"):
         P0.check_same_basis("T", broken, full)
 
 
@@ -304,7 +304,7 @@ def test_P_and_T_are_on_the_SAME_BASIS_per_object(measured, toy):
     ``f_g`` comparable at all: two arrays of fractions over different denominators subtract to a
     number that means nothing.
 
-    PERTURBATION (a): score the region axis against the edge axis' truth.
+    PERTURBATION (a): score the region axis against the boundary axis' truth.
     PERTURBATION (b): scale one arm's masses, i.e. put P on a different denominator.
     """
     ra = RegionArrays.from_frame(toy.index.regions_df, toy.index.ref_name_to_id)
@@ -317,8 +317,8 @@ def test_P_and_T_are_on_the_SAME_BASIS_per_object(measured, toy):
         P0.score_axis(
             p.mass_gdna_region,
             p.mass_rna_region,
-            measured.truth.mass_gdna_edge,
-            measured.truth.mass_rna_edge,
+            measured.truth.mass_gdna_boundary,
+            measured.truth.mass_rna_boundary,
         )
     with pytest.raises(ValueError):
         P0.score_axis(
@@ -380,7 +380,7 @@ def test_the_UNDETERMINED_class_is_reported_and_tracks_the_length_gap(measured, 
     flat = P0.info_class_masks(chain, ra, substrate, same, same.copy())
     apart = P0.info_class_masks(chain, ra, substrate, _spike_pmf(150, size), _spike_pmf(330, size))
 
-    for axis in ("region", "edge"):
+    for axis in ("region", "boundary"):
         live = ~flat[axis]["absent"]
         assert live.sum() > 0, f"the toy has no live {axis} objects; the gate would be vacuous"
         # equal means ⇒ the length channel carries EXACTLY zero information, at any depth.
@@ -455,7 +455,7 @@ def test_the_solver_classes_match_the_composition_evidence_census(measured, toy)
     tau = np.asarray(cap["_tau0_lam"], np.float64)
     is_region = np.asarray(chain.kind) == P0.REGION
     # ⛔ TRAPS: no-magic-numbers, on BOTH axes — `_type_belief` locks the class without consulting the axis. The earlier
-    # `(~solvable) & is_region` filed every structurally-locked EDGE as `relay_only`, i.e. as an object
+    # `(~solvable) & is_region` filed every structurally-locked BOUNDARY as `relay_only`, i.e. as an object
     # whose answer came from its neighbours, when nothing was ever asked of it.
     census_lock = ~np.asarray(cap["free_pos"], bool) & ~np.asarray(cap["free_neg"], bool)
     # ⭐ the census asks the SOLVER's question by calling the solver's own predicate — imported, not
@@ -480,7 +480,7 @@ def test_the_solver_classes_match_the_composition_evidence_census(measured, toy)
     region_only_lock = (~np.asarray(cap["solvable"], bool)) & is_region
     assert not np.array_equal(region_only_lock, census_lock), (
         "the region-only and both-axes locks agree on this fixture, so it cannot demonstrate the "
-        "defect — the scenario needs a G1 EDGE carrying mass (an intergenic<->exon seam)"
+        "defect — the scenario needs a G1 BOUNDARY carrying mass (an intergenic<->exon boundary)"
     )
 
     # ⭐ AND this partition must stay the SOLVER's gate, not a judgement about scoreability. The
@@ -512,7 +512,7 @@ def test_the_classes_PARTITION_the_mass_and_the_error(measured):
     for kind, table in (("solver", measured.scores), ("info", measured.info_scores)):
         names = P0.SOLVER_CLASSES if kind == "solver" else P0.INFO_CLASSES
         for arm in table:
-            for axis in ("region", "edge"):
+            for axis in ("region", "boundary"):
                 per_class = table[arm][axis]
                 whole = per_class["ALL"]
                 classes = [per_class[c] for c in names]
@@ -541,7 +541,7 @@ def test_the_directional_split_is_reported_and_the_net_is_their_DIFFERENCE(measu
     both are always populated the split is measuring noise, not direction.
     """
     for arm in measured.scores:
-        for axis in ("region", "edge"):
+        for axis in ("region", "boundary"):
             s = measured.scores[arm][axis]["ALL"]
             np.testing.assert_allclose(s.over_call - s.under_call, s.net_err, atol=1e-6)
             np.testing.assert_allclose(s.over_call + s.under_call, s.abs_err, rtol=1e-9)

@@ -33,7 +33,7 @@ two states where nothing believed reaches ``S``:
 
 Anywhere else, the identity is not implied and there is nothing for the pin to restore.
 
-⭐ **AND IT IS NOT A DELETION — case (ii) is load-bearing, not a caveat.** A pure-gDNA EDGE measures the
+⭐ **AND IT IS NOT A DELETION — case (ii) is load-bearing, not a caveat.** A pure-gDNA BOUNDARY measures the
 gDNA density at its own capture stratum and the exon behind it has no other way to hear it, so dropping
 that branch delivers the off-probe floor to every exon under capture (measured: it fires
 `test_gdna_scale_rule`'s capture gate at 20x and 200x). It is also why a per-capture-class landscape ratio
@@ -43,7 +43,7 @@ p99 = 31–288x and max 519x, and rescaling all three components blindly regress
 `test_the_pin_fires_ONLY_where_no_belief_can_reach_its_budget` is what keeps this a licence.
 
 ⭐ Measured on the simulated toy chromosome (`toy_harness.py --spec nested_exons` — three NESTED
-single-exon transcripts, so the gene is five exon NODEs and four ``exon|exon`` EDGEs with no intron
+single-exon transcripts, so the gene is five exon REGIONS and four ``exon|exon`` BOUNDARIES with no intron
 anywhere; donor `g75 ss0.50 capture_off`; gDNA uniform at 0.0769 counts/bp). Before, the delivered level
 rose monotonically and symmetrically with step distance from the gene ends — **0.071 → 0.102 → 0.097 →
 0.162 → 0.192 → 0.215**, reaching **2.8x** the truth, and the gene's mass-weighted ``|Δf_g|`` was
@@ -68,7 +68,7 @@ measured consequence and neither is decoration:
                                                                    20x and 200x, + the own-measurement gate here
     ``if True``                   (the pre-fix behaviour)        7: every effect gate in this file
     ``if False``                  (delete the pin)               5: the union of the two above
-    ``_struct`` for ``g1_locked`` (region-only, so not the EDGE)   3: as ``if _lend``
+    ``_struct`` for ``g1_locked`` (region-only, so not the BOUNDARY)   3: as ``if _lend``
     ``and`` for ``or``                                           5: the union
 """
 
@@ -124,7 +124,7 @@ def _uniform_field_chain(*, rho=1.0, rna, bp=1000.0, rho_first=None):
     n = len(rna)
     region_eff = contained_eff_length(np.full(n, bp), gdna_fl)
     unb = np.full(1, UNBOUNDED_REACH)
-    edge_eff = float(crossing_eff_length(gdna_fl, unb, unb)[0])
+    boundary_eff = float(crossing_eff_length(gdna_fl, unb, unb)[0])
     field = np.full(n, float(rho))
     if rho_first is not None:
         field[0] = float(rho_first)
@@ -134,8 +134,8 @@ def _uniform_field_chain(*, rho=1.0, rna, bp=1000.0, rho_first=None):
         region_size_bp=bp,
         region_pos=region_count / 2,
         region_neg=region_count / 2,
-        edge_pos=rho * edge_eff / 2,
-        edge_neg=rho * edge_eff / 2,
+        boundary_pos=rho * boundary_eff / 2,
+        boundary_neg=rho * boundary_eff / 2,
         gdna_fl=gdna_fl,
         rna_fl=rna_fl,
     )
@@ -145,7 +145,7 @@ def _stranded_chain():
     """``intergenic | exon+ | intron+ | exon+ | intergenic`` on a STRANDED library.
 
     ⭐ **The two-sided fixture**: the genic regions earn real composition evidence from the strand tilt and
-    can therefore lend one, while the intergenic flanks and the gene-boundary EDGEs cannot. So the same
+    can therefore lend one, while the intergenic flanks and the gene-boundary BOUNDARIES cannot. So the same
     chain carries licensed and unlicensed steps, which is what makes "the pin fires iff licensed"
     falsifiable in both directions. Same geometry as `test_gdna_scale_rule`'s licence gate.
     """
@@ -154,8 +154,8 @@ def _stranded_chain():
         region_size_bp=1000.0,
         region_pos=[100.0, 900.0, 400.0, 900.0, 100.0],  # sense-tilted RNA on the genic regions
         region_neg=[100.0, 50.0, 30.0, 50.0, 100.0],
-        edge_pos=[20.0, 60.0, 60.0, 20.0],
-        edge_neg=[20.0, 10.0, 10.0, 20.0],
+        boundary_pos=[20.0, 60.0, 60.0, 20.0],
+        boundary_neg=[20.0, 10.0, 10.0, 20.0],
     )
 
 
@@ -287,7 +287,7 @@ def test_the_pin_fires_ONLY_where_no_belief_can_reach_its_budget():
 
     * **(ii) the destination is structurally pure gDNA.** There is no unsupplied component to fill in:
       ``f_g = 1`` is STRUCTURE, so the budget is ``rho_g·E_g`` and the pin hands the object its own
-      MEASURED density ``M/E_g``. Both ``intergenic|exon`` EDGEs of this fixture are that object.
+      MEASURED density ``M/E_g``. Both ``intergenic|exon`` BOUNDARIES of this fixture are that object.
     * **not licensed anywhere else on this chain** — unstranded, no junction, so no slot earns RNA
       precision and nothing can lend a composition. Every other step must leave the level alone.
 
@@ -332,7 +332,7 @@ def test_the_lend_branch_of_the_licence_is_live():
     pure gDNA — i.e. that it decides something the structural branch does not.
 
     The fixture is STRANDED, so the genic regions earn composition evidence of their own and can lend one,
-    while the intergenic flanks and the gene-boundary EDGEs cannot. ⚠ The effect on the delivered level
+    while the intergenic flanks and the gene-boundary BOUNDARIES cannot. ⚠ The effect on the delivered level
     is not readable here (see the note in the gate above); what is asserted is the predicate."""
     walk, _, _ = _relay_walk(_stranded_chain(), kappa=0.95, n_obs=10_000.0)
     steps = [r for r in walk if r["pinned"] is not None]
@@ -431,7 +431,7 @@ def test_the_delivered_level_tracks_the_gdna_FIELD_and_not_any_destinations_own_
 
     ⭐ **What makes this a discrimination and not a scaling identity**: the RNA is unchanged, so the
     RNA-carrying exons' own totals ``M/E_g`` move by only ~1.1x over the same 10x field, while the field
-    itself moves 10x. On those slots the two hypotheses are an order of magnitude apart. ⚠ The EDGEs of
+    itself moves 10x. On those slots the two hypotheses are an order of magnitude apart. ⚠ The BOUNDARIES of
     this fixture carry no RNA, so their own total and the field are the SAME quantity and they
     discriminate nothing — they are asserted on for completeness, and the gate requires that at least one
     genuinely discriminating slot exists."""
@@ -462,26 +462,26 @@ def test_a_structurally_pure_gdna_destination_IS_told_its_own_measurement():
     and it must, because an upstream level that disagrees is simply worse evidence about the gDNA density
     at this position than the position's own count.
 
-    ⭐⭐ **THIS IS THE OPERATOR THE CAPTURE LANDSCAPE TRAVELS ON.** An ``intergenic|exon`` EDGE measures
+    ⭐⭐ **THIS IS THE OPERATOR THE CAPTURE LANDSCAPE TRAVELS ON.** An ``intergenic|exon`` BOUNDARY measures
     the gDNA density at its own capture stratum, and the exon behind it has no other way to hear it — a
-    G1 EDGE carries ``prec_g = 0`` and so cannot ORIGINATE a level through the fuse (`ROADMAP.md` §1 **reframe-and-level-together**=). Drop
+    G1 BOUNDARY carries ``prec_g = 0`` and so cannot ORIGINATE a level through the fuse (`ROADMAP.md` §1 **reframe-and-level-together**=). Drop
     case (ii) and the off-probe intergenic floor leaks straight through to the exon: measured, and it
     fires `test_gdna_scale_rule.test_capture_step_is_carried_and_the_off_probe_floor_is_not` at 20x and
     200x. A per-capture-class landscape ratio built to do this job explicitly measured inert
     (`region_geometry`'s deleted-landscape note) because this pin already did it.
 
     The fixture disagrees on purpose: the field on the FIRST region alone is scaled 10x, so the level
-    arriving at the EDGE is 10x the EDGE's own measurement, and the EDGE's answer must be its own."""
-    EDGE = 1  # chain N E N E N E N E N → the intergenic|exon line, structurally pure gDNA
+    arriving at the BOUNDARY is 10x the BOUNDARY's own measurement, and the BOUNDARY's answer must be its own."""
+    BOUNDARY = 1  # chain N E N E N E N E N → the intergenic|exon line, structurally pure gDNA
     levels = []
     for rho_first in (1.0, 10.0):
         walk, _, _ = _relay_walk(_uniform_field_chain(rna=_RNA, rho=1.0, rho_first=rho_first))
-        row = walk[EDGE]
+        row = walk[BOUNDARY]
         assert row["g1"] and not row["lend"], (
-            f"slot {EDGE} is not the structural case (g1={row['g1']}, lend={row['lend']})"
+            f"slot {BOUNDARY} is not the structural case (g1={row['g1']}, lend={row['lend']})"
         )
         assert row["level_in"] == pytest.approx(rho_first, rel=0.05), (
-            f"the upstream field did not reach the EDGE: level_in {row['level_in']:.4g}"
+            f"the upstream field did not reach the BOUNDARY: level_in {row['level_in']:.4g}"
         )
         assert row["level_out"] == pytest.approx(row["M_over_Eg"], rel=1e-12), (
             f"level_out {row['level_out']:.9g} != its own measured density {row['M_over_Eg']:.9g}"

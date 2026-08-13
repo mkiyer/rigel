@@ -18,7 +18,7 @@ is the belief-propagation SWEEP over the ``N E N E … N`` chain (:mod:`rigel.ca
       -> train the Phase-2 gDNA-density KDE on the pass-1 belief
       -> PASS 2 region_sweep (the KDE prior added per object) -> the converged per-object pie
       -> chain_region_deconv  -> per-REGION gDNA / RNA contained mass
-      -> chain_edge_deconv  -> per-EDGE gDNA / RNA crossing mass, for the per-locus prior
+      -> chain_boundary_deconv  -> per-BOUNDARY gDNA / RNA crossing mass, for the per-locus prior
       -> gdna_density_global (the library-average density QC scalar)
 
 ⭐ **THE GEOMETRY IS BUILT FIRST, AND IT OWNS EVERY DIVISOR.** The predecessor computed three effective
@@ -30,16 +30,16 @@ clue, the background pool, the intron factory, the result's two supports — rea
 
 
 ⛔ **The per-face boundary machinery is gone.** ``boundary_substrate``, the ``left``/``right`` views and
-``boundary_side_eff_length``'s ``E[min(ℓ,L)]/2`` had no successor: a contiguous edge is a 0-bp line with
+``boundary_side_eff_length``'s ``E[min(ℓ,L)]/2`` had no successor: a contiguous boundary is a 0-bp line with
 one count and one divisor, ``crossing_eff_length``. A zero-gDNA library
 (``gdna_density_global == 0``, per-object gDNA mass ``0``) remains a valid, graceful output.
 
-⚠ **TRAPS: prove-the-substrate IS OFF AT CONTIGUOUS EDGES, AND THE FIRST BASELINE CARRIES ITS BIAS.** The RNA half of an
+⚠ **TRAPS: prove-the-substrate IS OFF AT CONTIGUOUS BOUNDARIES, AND THE FIRST BASELINE CARRIES ITS BIAS.** The RNA half of an
 unspliced crossing takes ``UNBOUNDED_REACH`` rather than its transcript's real remaining length
 (owner-ruled). Cost, already measured: an **11.0 %** genome-wide gDNA
 over-call and **+0.36** in the last region before a polyA site. It is
 sequenced after this step so that turning it on can be A/B'd against the baseline this step produces.
-Junction edges DO take their real exonic reach — they are a new population with no predecessor divisor.
+Junction boundaries DO take their real exonic reach — they are a new population with no predecessor divisor.
 """
 
 from __future__ import annotations
@@ -53,14 +53,14 @@ import numpy as np
 from .background_reference import BackgroundReference, measure_background
 from .messages.head import HeadPolicy
 from .messages.silent import SilentPolicy
-from .region_chain import EDGE, REGION
+from .region_chain import BOUNDARY, REGION
 from .region_geometry import (
     build_region_geometry,
     build_region_statics,
     init_beliefs,
     region_gdna_geometry,
 )
-from .sweep import chain_edge_deconv, chain_region_deconv, solve_chain
+from .sweep import chain_boundary_deconv, chain_region_deconv, solve_chain
 from .density_model import region_gdna_density
 from .derive import gdna_density_global
 from .errors import CalibrationStrandError
@@ -132,10 +132,10 @@ def _empty_junction_geometry() -> "JunctionGeometry":
 
 
 def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
-    """Split a per-SLOT divisor back onto the region and contiguous-edge axes.
+    """Split a per-SLOT divisor back onto the region and contiguous-boundary axes.
 
     ⭐ **A projection, not a recomputation.** ``build_region_geometry`` already applied
-    ``contained_eff_length`` at REGION slots and ``crossing_eff_length`` at EDGE slots; calling those
+    ``contained_eff_length`` at REGION slots and ``crossing_eff_length`` at BOUNDARY slots; calling those
     again here would put two implementations of one quantity in the tree, which is precisely how the
     prose and the code came to disagree about a ½ for months ( and 27).
     Whatever the solver divided by is what the result reports.
@@ -148,12 +148,12 @@ def _project_eff(chain, eff_slots, payload) -> tuple[np.ndarray, np.ndarray]:
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
     eff = np.asarray(eff_slots, dtype=np.float64)
-    is_region, is_edge = kind == REGION, kind == EDGE
+    is_region, is_boundary = kind == REGION, kind == BOUNDARY
     region_eff = np.zeros(int(payload.n_regions), dtype=np.float64)
-    edge_eff = np.zeros(int(payload.n_edges), dtype=np.float64)
+    boundary_eff = np.zeros(int(payload.n_boundaries), dtype=np.float64)
     region_eff[obj[is_region]] = eff[is_region]
-    edge_eff[obj[is_edge]] = eff[is_edge]
-    return region_eff, edge_eff
+    boundary_eff[obj[is_boundary]] = eff[is_boundary]
+    return region_eff, boundary_eff
 
 
 
@@ -169,7 +169,7 @@ def _build_intron_prior(chain, substrate, region_arrays, region_eff_len, config,
     ``λ`` (peels gDNA; the residual RNA's tilt is left to the solver), and is consumed identically by the
     single-strand and AMBIG per-region solves.
 
-    ⚠ **EDGE slots are zero, structurally.** The factor scores a CONTAINED count against a CONTAINED
+    ⚠ **BOUNDARY slots are zero, structurally.** The factor scores a CONTAINED count against a CONTAINED
     support; a line's count is a crossing and its divisor a different formula, so applying the same
     NegBinom there would be scoring one frame's evidence against another frame's support.
 
@@ -269,11 +269,11 @@ def calibrate(
     rna_fl_pmf: "np.ndarray",
     config: "CalibrationConfig",
     junctions: "JunctionGeometry | None" = None,
-    edge_rna_reach=None,
+    boundary_rna_reach=None,
     _debug: dict | None = None,
     diagnostics_out: dict | None = None,
     injected_priors: "InjectedCalibrationPriors | None" = None,
-    edge_flags: "np.ndarray | None" = None,
+    boundary_flags: "np.ndarray | None" = None,
 ) -> CalibrationResult:
     """Deconvolve the library into gDNA / RNA per object, then derive gdna_density_global.
 
@@ -285,19 +285,19 @@ def calibrate(
     ``junctions`` is the splice graph's junction axis
     (:func:`~rigel.calibration.splice_graph.build_junction_geometry_arrays`), in the accumulator's own
     junction slot order — where each junction attaches, its transcript strand, and its exonic reach.
-    ``None`` means "this library's graph has no junction edges", which is legal (a single-exon-only
+    ``None`` means "this library's graph has no junction boundaries", which is legal (a single-exon-only
     reference) and is NOT the same as "no junction flux".
 
-    ``edge_flags`` is the splice graph's per-contiguous-edge structural bits
-    (:func:`~rigel.calibration.splice_graph.build_edge_flags_array`), carried onto the chain as
-    ``RegionStatics.edge_flags``. ``None`` (the default) leaves them zero.
+    ``boundary_flags`` is the splice graph's per-contiguous-boundary structural bits
+    (:func:`~rigel.calibration.splice_graph.build_boundary_flags_array`), carried onto the chain as
+    ``RegionStatics.boundary_flags``. ``None`` (the default) leaves them zero.
     """
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
     inj = injected_priors  # population-scale priors to inject in place of the internal (toy-untrustworthy) fits
     junctions = _empty_junction_geometry() if junctions is None else junctions
     if int(junctions.n_junctions) != int(substrate.n_junctions):
         raise ValueError(
-            f"the junction axis has {int(junctions.n_junctions)} edges but the payload has "
+            f"the junction axis has {int(junctions.n_junctions)} boundaries but the payload has "
             f"{int(substrate.n_junctions)}. Build it with "
             "splice_graph.build_junction_geometry_arrays(index) against the SAME index the payload "
             "was scanned on — a junction axis addressing a different graph would place every splice "
@@ -306,23 +306,23 @@ def calibrate(
 
     # ⭐ THE CHAIN AND ITS GEOMETRY COME FIRST, and the geometry owns every divisor from here down:
     # `eff_gdna`/`eff_rna` are the CONTAINED placements at a REGION slot and the CROSSING placements at an
-    # EDGE slot, one rule, one array. Nothing below computes a second length model.
-    chain = build_region_chain(payload.ref_region_offsets, payload.ref_edge_offsets)
+    # BOUNDARY slot, one rule, one array. Nothing below computes a second length model.
+    chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     geometry = build_region_geometry(
-        chain, substrate, region_arrays, junctions, gdna_fl_pmf, rna_fl_pmf, edge_rna_reach
+        chain, substrate, region_arrays, junctions, gdna_fl_pmf, rna_fl_pmf, boundary_rna_reach
     )
-    statics = build_region_statics(chain, region_arrays, edge_flags)
+    statics = build_region_statics(chain, region_arrays, boundary_flags)
 
     # The result's two gDNA supports, PROJECTED off the geometry rather than recomputed — so the number
     # `priors` divides by is byte-identically the one the solver divided by. Two implementations
     # of one quantity is how they come to disagree.
-    region_eff_gdna, edge_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
+    region_eff_gdna, boundary_eff_gdna = _project_eff(chain, geometry.eff_gdna, payload)
     # ⭐ And the RNA twin, on the same two axes — the RNA population's own opportunity per object.
     # ⛔ It USED to be what turned ``mass_rna_*`` into a density in ``assemble_priors``. That consumer
     # is gone: the prior became a conserved FRAGMENT COUNT and divides by nothing on the mass path
     # (`d045d820`, `5591cc01`). Kept because it is the RNA divisor any density-based prior needs and
     # because it is byte-identically the opportunity the solver used — see `result.py`.
-    region_eff_rna, edge_eff_rna = _project_eff(chain, geometry.eff_rna, payload)
+    region_eff_rna, boundary_eff_rna = _project_eff(chain, geometry.eff_rna, payload)
 
     # RNA strand balance: rna_sense_frac (κ) = posterior-mean spliced sense fraction. The strand
     # channel's discriminability w=(2κ−1)² (set inside the deconv) is the smooth strand→count
@@ -345,7 +345,7 @@ def calibrate(
         n_rna_obs = float(balance.n_observations)
 
     # Count clue on RAW counts (the count module, pre-cleaning): per-region gDNA density by LOCAL
-    # edge-anchored imputation. Needed here only to fit the gDNA strand overdispersion (its seed
+    # boundary-anchored imputation. Needed here only to fit the gDNA strand overdispersion (its seed
     # identification is pre-cleaning) — the cleaning below depends on that overdispersion, so the raw
     # pass must come first. This is NOT the region answer (the sweep below is).
     region_density_raw = region_gdna_density(chain, geometry, region_arrays)
@@ -568,7 +568,7 @@ def calibrate(
         )
 
     regions = chain_region_deconv(chain, belief, substrate)
-    edges = chain_edge_deconv(chain, belief, substrate)
+    boundaries = chain_boundary_deconv(chain, belief, substrate)
 
     if (
         _debug is not None
@@ -586,7 +586,7 @@ def calibrate(
             gdna_hyperprior=gdna_hyperprior,  # the DECONVOLVED-gDNA composition hyperprior (None if no refit)
             rna_sense_frac=rna_sense_frac,
             region_eff_gdna=region_eff_gdna,
-            edge_eff_gdna=edge_eff_gdna,
+            boundary_eff_gdna=boundary_eff_gdna,
             # the fitted-or-injected population priors — extract from a population scenario, inject into a toy
             calibration_priors=InjectedCalibrationPriors(
                 rna_sense_frac=rna_sense_frac,
@@ -608,65 +608,65 @@ def calibrate(
         diagnostics_out["calibration"] = CalibrationDiagnostics.from_prior(enrichment_prior)
 
     # Derive gdna_density_global (the library-average density QC scalar).
-    density_global = gdna_density_global(regions, edges, region_eff_gdna, edge_eff_gdna)
+    density_global = gdna_density_global(regions, boundaries, region_eff_gdna, boundary_eff_gdna)
 
     # The certified-RNA crossings per LINE: molecules that crossed contiguously having spliced
-    # elsewhere. ``chain_edge_deconv`` adds the whole of this to ``rna_mass`` (rna = (1−g)·unspliced +
-    # spliced), so it is exactly the spliced component of ``mass_rna_edge``. ``assemble_priors``
+    # elsewhere. ``chain_boundary_deconv`` adds the whole of this to ``rna_mass`` (rna = (1−g)·unspliced +
+    # spliced), so it is exactly the spliced component of ``mass_rna_boundary``. ``assemble_priors``
     # withholds it from ``rna_prior_count`` — a spliced fragment is guaranteed-RNA in the EM (no gDNA
-    # candidate), so it must not load the RNA side of the gDNA-vs-RNA *unspliced* split. ``mass_rna_edge``
+    # candidate), so it must not load the RNA side of the gDNA-vs-RNA *unspliced* split. ``mass_rna_boundary``
     # stays spliced-inclusive so per-line conservation gdna + rna = unspliced + spliced holds.
     #
     # ⚠ There is no REGION twin, and that is structural: ``region_contained`` is credited only when the
     # fragment used no junction, so a region's contained population cannot hold a spliced molecule.
-    mass_rna_spliced_edge = np.asarray(substrate.edge_spliced.count, dtype=np.float64).sum(axis=1)
+    mass_rna_spliced_boundary = np.asarray(substrate.boundary_spliced.count, dtype=np.float64).sum(axis=1)
     # ⭐ GEOMETRY, not a split: the mean conserved fragment-mass one crossing at this line carries.
     # ``assemble_priors`` needs it to turn a per-line object-incidence total into a fragment count.
-    edge_mass_per_crossing = substrate.edge_unspliced.mass_per_crossing
+    boundary_mass_per_crossing = substrate.boundary_unspliced.mass_per_crossing
 
-    # ⭐ The JUMPING population, exported verbatim (owner ruling, 2026-07-30). A junction edge is pure
+    # ⭐ The JUMPING population, exported verbatim (owner ruling, 2026-07-30). A junction boundary is pure
     # mature RNA by construction, so there is nothing to deconvolve: this is ``sj_count`` summed over
     # the genome-strand columns. ``assemble_priors`` does not read it — it is certified RNA in exactly
     # the sense the spliced crossings are withheld for — but the calibration's output should not be
-    # silent about the population that at a donor seam IS the gene's whole mature output.
+    # silent about the population that at a donor boundary IS the gene's whole mature output.
     mass_rna_junction = np.asarray(substrate.junction.count, dtype=np.float64).sum(axis=1)
 
-    # ⭐ The two remaining INCIDENCE→FRAGMENT conversions, alongside `edge_mass_per_crossing`. Each is
+    # ⭐ The two remaining INCIDENCE→FRAGMENT conversions, alongside `boundary_mass_per_crossing`. Each is
     # its own population's `mass / count`: applying one population's ratio to another is
     # `TRAPS: a-pooled-conversion-applied-per-component`. `CalibrationResult.library_rna_fragments`
     # derives the library count from them — a property, never a stored scalar, so an oracle arm that
     # swaps the mass arrays cannot inherit a count describing the arrays it replaced.
-    edge_spliced_mass_per_crossing = substrate.edge_spliced.mass_per_crossing
+    boundary_spliced_mass_per_crossing = substrate.boundary_spliced.mass_per_crossing
     junction_mass_per_crossing = substrate.junction.mass_per_crossing
 
     result = CalibrationResult(
         mass_gdna_region=regions.gdna_mass,
         mass_rna_region=regions.rna_mass,
-        mass_gdna_edge=edges.gdna_mass,
-        mass_rna_edge=edges.rna_mass,
-        mass_rna_spliced_edge=mass_rna_spliced_edge,
-        edge_mass_per_crossing=edge_mass_per_crossing,
+        mass_gdna_boundary=boundaries.gdna_mass,
+        mass_rna_boundary=boundaries.rna_mass,
+        mass_rna_spliced_boundary=mass_rna_spliced_boundary,
+        boundary_mass_per_crossing=boundary_mass_per_crossing,
         mass_rna_junction=mass_rna_junction,
-        edge_spliced_mass_per_crossing=edge_spliced_mass_per_crossing,
+        boundary_spliced_mass_per_crossing=boundary_spliced_mass_per_crossing,
         junction_mass_per_crossing=junction_mass_per_crossing,
         gdna_region_eff_len=region_eff_gdna,
-        gdna_edge_eff_len=edge_eff_gdna,
+        gdna_boundary_eff_len=boundary_eff_gdna,
         rna_region_eff_len=region_eff_rna,
-        rna_edge_eff_len=edge_eff_rna,
+        rna_boundary_eff_len=boundary_eff_rna,
         # ⭐ The simplex ψ solved, published per object rather than summed away. `mass_*` above is this
         # same answer with the two RNA strands added together.
         gdna_frac_region=regions.gdna_frac,
         rna_pos_frac_region=regions.rna_pos_frac,
         rna_neg_frac_region=regions.rna_neg_frac,
-        gdna_frac_edge=edges.gdna_frac,
-        rna_pos_frac_edge=edges.rna_pos_frac,
-        rna_neg_frac_edge=edges.rna_neg_frac,
+        gdna_frac_boundary=boundaries.gdna_frac,
+        rna_pos_frac_boundary=boundaries.rna_pos_frac,
+        rna_neg_frac_boundary=boundaries.rna_neg_frac,
         gdna_density_global=density_global,
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,
         rna_strand_overdispersion=rna_strand_overdispersion,
         n_regions=int(substrate.n_regions),
-        n_edges=int(substrate.n_edges),
+        n_boundaries=int(substrate.n_boundaries),
         n_junctions=int(substrate.n_junctions),
         config=config,
     )
@@ -685,7 +685,7 @@ def calibrate(
         "rna_strand_overdispersion=%.4g (%d junctions, %d frags%s) "
         "[junction sense_frac=%.3f vs κ=%.3f]",
         result.n_regions,
-        result.n_edges,
+        result.n_boundaries,
         result.n_junctions,
         result.gdna_density_global,
         rna_sense_frac,

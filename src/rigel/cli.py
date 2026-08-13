@@ -421,7 +421,7 @@ def _write_quant_outputs(result, index, output_dir: Path, args) -> None:
             "gdna_strand_overdispersion": round(float(cal.gdna_strand_overdispersion), 6),
             "rna_strand_overdispersion": round(float(cal.rna_strand_overdispersion), 6),
             "n_regions": int(cal.n_regions),
-            "n_edges": int(cal.n_edges),
+            "n_boundaries": int(cal.n_boundaries),
             "n_junctions": int(cal.n_junctions),
         }
     )
@@ -867,7 +867,7 @@ _REMOVED_PRIOR_CONFIG_KEYS: frozenset[str] = frozenset(
         "rna_lower_confidence",
         "gdna_density_confidence",
         "aggregate_prior_strength",
-        "aggregate_prior_edge_count",
+        "aggregate_prior_boundary_count",
         "aggregate_prior_max_count",
         "gdna_prior_logit_bias",
     }

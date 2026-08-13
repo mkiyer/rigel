@@ -51,8 +51,8 @@ def build_partition(index) -> Partition:
     """The real index, in the reference's own terms."""
     cuts, cut_offsets, region_types = build_region_partition_arrays(index)
     arrays = build_junction_edge_arrays(index)
-    edges = index.edges_df
-    is_junction = edges["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
+    boundaries = index.edges_df
+    is_junction = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
     n_junction = int(is_junction.sum())
     if arrays.boundary_right.shape[0] != n_junction:
         raise SystemExit("junction CSR disagrees with edges.feather on the junction count")
@@ -61,7 +61,7 @@ def build_partition(index) -> Partition:
         ref_cut_offsets=cut_offsets,
         region_types=region_types,
         ref_region_offsets=_offsets(cut_offsets, per_ref=1),
-        ref_edge_offsets=_offsets(cut_offsets, per_ref=2),
+        ref_boundary_offsets=_offsets(cut_offsets, per_ref=2),
         sj_offsets=arrays.offsets,
         sj_boundary_right=arrays.boundary_right,
         sj_strand=arrays.strand,
@@ -69,7 +69,7 @@ def build_partition(index) -> Partition:
 
 
 def _offsets(cut_offsets: np.ndarray, per_ref: int) -> np.ndarray:
-    """Region (``per_ref=1``) or contiguous-edge (``per_ref=2``) CSR offsets from the cut offsets.
+    """Region (``per_ref=1``) or contiguous-boundary (``per_ref=2``) CSR offsets from the cut offsets.
 
     A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` lines; one contributing none
     owns neither, which is why the subtraction is clamped at zero rather than applied blindly.
@@ -215,8 +215,8 @@ def main() -> None:
     partition = build_partition(index)
     print(f"index      {args.index}")
     print(
-        f"partition  {partition.n_regions:,} regions  {partition.n_edges:,} contiguous edges  "
-        f"{partition.n_sj:,} junction edges  {partition.cut_positions.size:,} cuts"
+        f"partition  {partition.n_regions:,} regions  {partition.n_boundaries:,} contiguous boundaries  "
+        f"{partition.n_sj:,} junction boundaries  {partition.cut_positions.size:,} cuts"
     )
     print(f"bam        {args.bam}\n")
 
@@ -262,13 +262,13 @@ def main() -> None:
     checks = [
         ("start_count total == accepted", int(t.region_start_count.sum()), accepted),
         (
-            "edge crossings",
-            int(t.edge_unspliced_count.sum()) + int(t.edge_spliced_count.sum()),
+            "boundary crossings",
+            int(t.boundary_unspliced_count.sum()) + int(t.boundary_spliced_count.sum()),
             expect_crossings,
         ),
         (
-            "edge density",
-            int(t.edge_unspliced_inv_length_sum.sum()) + int(t.edge_spliced_inv_length_sum.sum()),
+            "boundary density",
+            int(t.boundary_unspliced_inv_length_sum.sum()) + int(t.boundary_spliced_inv_length_sum.sum()),
             expect_density,
         ),
         ("junction crossings", int(t.sj_count.sum()), expect_junctions),
@@ -287,7 +287,7 @@ def main() -> None:
     )
     print(f"  spanning             {spanning:>12,}")
     print(f"  regions with any count {int((t.region_contained_count.sum(1) > 0).sum()):>12,}")
-    print(f"  edges with any count {int((t.edge_unspliced_count.sum(1) > 0).sum()):>12,}")
+    print(f"  boundaries with any count {int((t.boundary_unspliced_count.sum(1) > 0).sum()):>12,}")
     print(f"  junctions used       {int((t.sj_count.sum(1) > 0).sum()):>12,}")
 
     print("\nFRAGMENT-LENGTH POOLS (mean L, from the histogram)")
@@ -305,10 +305,10 @@ def main() -> None:
     # `INV_LENGTH_SCALE` (2^32); the whole fixed-point layer went at `94d283c0` under ONE NUMERIC
     # CONVENTION, so the bank is float64 in real units. `int()` on it now TRUNCATES a density toward
     # zero — a sum of 1/L terms is < 1 on any short region — so the cast is as dead as the scale.
-    density_total = float(t.edge_unspliced_inv_length_sum.sum()) + float(
-        t.edge_spliced_inv_length_sum.sum()
+    density_total = float(t.boundary_unspliced_inv_length_sum.sum()) + float(
+        t.boundary_spliced_inv_length_sum.sum()
     )
-    count_total = int(t.edge_unspliced_count.sum()) + int(t.edge_spliced_count.sum())
+    count_total = int(t.boundary_unspliced_count.sum()) + int(t.boundary_spliced_count.sum())
     if density_total:
         print(
             f"pooled count/density + 1 = {count_total / density_total + 1:.1f}  "

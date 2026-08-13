@@ -80,7 +80,7 @@ def _sibling(name: str):
 P0 = _sibling("pass0_vs_oracle.py")
 
 from rigel.calibration.density_deconv import density_factor_precision  # noqa: E402
-from rigel.calibration.region_chain import EDGE, REGION  # noqa: E402
+from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
 from rigel.calibration.region_geometry import g1_locked  # noqa: E402
 from rigel.calibration.simplex_logodds import _logodds_grid  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
@@ -134,13 +134,13 @@ def channel_masks(capture, chain, config) -> dict[str, np.ndarray]:
     are the solver's own numbers, split, not a second opinion about them.
 
     ⛔ **``locked`` IS THE TRAPS: no-magic-numbers CLASS ON BOTH AXES** (:func:`~rigel.calibration.region_geometry.g1_locked`).
-    It used to be ``~solvable & (kind == REGION)``, which dropped every structurally-locked **edge** — an
-    intergenic↔exon seam, where RNA cannot cross a gene boundary and ``_type_belief`` pins ``{0,0,1}``
+    It used to be ``~solvable & (kind == REGION)``, which dropped every structurally-locked **boundary** — an
+    intergenic↔exon boundary, where RNA cannot cross a gene boundary and ``_type_belief`` pins ``{0,0,1}``
     at ``Var(log f_g) = 0`` — into ``none``, i.e. excluded it from the scored population as honest
     ignorance. Those objects are the opposite of ignorant: they are structurally certain, and right.
     ⚠⚠ **This is NOT ``region_init.strand_evidence``'s ``struct_lock``, which is region-only ON PURPOSE** —
-    that one governs whether a slot may EMIT certainty into its messages, and excludes G1 edges because
-    a seam's crossing mass is RNA-contaminated. Two questions, one word; see ``g1_locked``.
+    that one governs whether a slot may EMIT certainty into its messages, and excludes G1 boundaries because
+    a boundary's crossing mass is RNA-contaminated. Two questions, one word; see ``g1_locked``.
 
     ⚠ **The τ tests here stay at the solver's own ``_EPS``**, so "has a channel" means what
     ``own_composition_logvar`` means by it. Strength is a separate question and it is reported as a
@@ -192,11 +192,11 @@ def audit(m, *, axis: str = "region", config=None) -> dict:
     """Partition one axis into undetermined / solvable-right / solvable-wrong and standardise."""
     config = config or CalibrationConfig()
     cap, chain = m.debug_pass0["capture"], m.debug_pass0["chain"]
-    n_regions, n_edges = int(m.payload.n_regions), int(m.payload.n_edges)
+    n_regions, n_boundaries = int(m.payload.n_regions), int(m.payload.n_boundaries)
 
     slots = channel_masks(cap, chain, config)
     per_axis = {
-        name: P0._project(mask, chain, n_regions, n_edges)[axis] for name, mask in slots.items()
+        name: P0._project(mask, chain, n_regions, n_boundaries)[axis] for name, mask in slots.items()
     }
 
     g_p = np.asarray(getattr(m.arms["pass0"], f"mass_gdna_{axis}"), np.float64)
@@ -209,7 +209,7 @@ def audit(m, *, axis: str = "region", config=None) -> dict:
 
     # the solver's per-slot state, projected onto this axis
     def onto(values):
-        out = np.zeros(n_regions if axis == "region" else n_edges, np.float64)
+        out = np.zeros(n_regions if axis == "region" else n_boundaries, np.float64)
         kind = np.asarray(chain.kind)
         obj = np.asarray(chain.obj_idx, np.int64)
         sel = (kind == REGION) if axis == "region" else (kind != REGION)
@@ -453,29 +453,29 @@ def report(m, a: dict, config=None) -> None:
 #: 1. ``region/intergenic`` — structurally pure gDNA. If these are wrong, nothing else can be right.
 #: 2. ``region/intron``     — the DENSITY PEEL: intron density against the intergenic background. On an
 #:                          unstranded library this is the ONLY own-evidence channel there is.
-#: 3. ``edge/intron|exon``      — must infer gDNA/RNA by propagation FROM the resolved intron region.
-#: 4. ``edge/intergenic|exon``  — must impute from the resolved intergenic region.
+#: 3. ``boundary/intron|exon``      — must infer gDNA/RNA by propagation FROM the resolved intron region.
+#: 4. ``boundary/intergenic|exon``  — must impute from the resolved intergenic region.
 CHAIN = (
     "region/intergenic",
     "region/intron",
     "region/exon",
-    "edge/intergenic|intron",
-    "edge/intron|exon",
-    "edge/intergenic|exon",
-    "edge/exon|exon",
-    "edge/intron|intron",
-    "edge/intergenic|intergenic",
+    "boundary/intergenic|intron",
+    "boundary/intron|exon",
+    "boundary/intergenic|exon",
+    "boundary/exon|exon",
+    "boundary/intron|intron",
+    "boundary/intergenic|intergenic",
 )
 
 
 def structural_classes(m, axis: str, config) -> dict[str, np.ndarray]:
-    """Label each object by what it IS, structurally — a region's region type, or for a contiguous edge
+    """Label each object by what it IS, structurally — a region's region type, or for a contiguous boundary
     the PAIR of region types it separates.
 
-    ⭐ The edge pair is the axis the debug chain turns on. An ``intron|exon`` line and an
+    ⭐ The boundary pair is the axis the debug chain turns on. An ``intron|exon`` line and an
     ``intergenic|exon`` line are the same kind of object to the solver and completely different
     problems: the first must inherit its answer from an intron region the density peel resolved, the
-    second from a structurally-locked intergenic region. Lumping them as "edges" hides which
+    second from a structurally-locked intergenic region. Lumping them as "boundaries" hides which
     propagation path is broken.
 
     ⚠ The pair is unordered (``intron|exon`` and ``exon|intron`` are one class) — the chain is
@@ -489,7 +489,7 @@ def structural_classes(m, axis: str, config) -> dict[str, np.ndarray]:
     rtype = coarse_type_array(np.asarray(ra.signature)).astype(np.int64)
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, np.int64)
-    n = int(m.payload.n_regions) if axis == "region" else int(m.payload.n_edges)
+    n = int(m.payload.n_regions) if axis == "region" else int(m.payload.n_boundaries)
     out = {c: np.zeros(n, bool) for c in CHAIN}
 
     if axis == "region":
@@ -499,13 +499,13 @@ def structural_classes(m, axis: str, config) -> dict[str, np.ndarray]:
                 out[key][rtype == t] = True
         return out
 
-    # a contiguous edge sits at chain slot s between region slots s-1 and s+1
-    for s in np.flatnonzero(kind == EDGE):
+    # a contiguous boundary sits at chain slot s between region slots s-1 and s+1
+    for s in np.flatnonzero(kind == BOUNDARY):
         lo, hi = s - 1, s + 1
         if lo < 0 or hi >= kind.shape[0] or kind[lo] != REGION or kind[hi] != REGION:
             continue
         a, b = sorted((int(rtype[obj[lo]]), int(rtype[obj[hi]])))
-        key = f"edge/{names[a]}|{names[b]}"
+        key = f"boundary/{names[a]}|{names[b]}"
         if key in out:
             out[key][obj[s]] = True
     return out
@@ -651,7 +651,7 @@ def main() -> int:
     ap.add_argument("--condition", default=None, help="one condition; omit for the whole panel")
     ap.add_argument("--suite", type=Path, default=P0.DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=P0.DEFAULT_INDEX)
-    ap.add_argument("--axis", default="region", choices=("region", "edge", "both"))
+    ap.add_argument("--axis", default="region", choices=("region", "boundary", "both"))
     ap.add_argument("--work-dir", type=Path, default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")))
     ap.add_argument("--oracle-cache", type=Path, default=None)
     args = ap.parse_args()
@@ -680,12 +680,12 @@ def main() -> int:
             ),
             oracle_cache=args.oracle_cache,
         )
-        for axis in (("region", "edge") if args.axis == "both" else (args.axis,)):
+        for axis in (("region", "boundary") if args.axis == "both" else (args.axis,)):
             a = audit(m, axis=axis, config=config)
             if len(names) == 1:
                 report(m, a, config)
                 chain_report(m, a, config)
-            if axis == ("region" if args.axis != "edge" else "edge"):
+            if axis == ("region" if args.axis != "boundary" else "boundary"):
                 panel.append((name, truth, summarise(a)))
     if len(panel) > 1:
         panel_report(panel)

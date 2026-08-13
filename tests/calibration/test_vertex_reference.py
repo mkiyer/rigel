@@ -19,7 +19,7 @@ up — and reaching ``f_g = 0.999`` would need ``p ≈ 5e5``, some 40,000× more
 
 ⛔ **AND THE ROOT CAUSE IS NOT THE REFERENCE, IT IS A MISSING CHANNEL** — G6. ``f_g = 1`` is a statement
 about ``ρ_r = 0``, and no gDNA-side channel can make it however precise it is. The one channel that CAN
-is the CERTIFIED-SPLICE mass (``edge_spliced``) — a spliced fragment cannot be gDNA — whose value at a
+is the CERTIFIED-SPLICE mass (``boundary_spliced``) — a spliced fragment cannot be gDNA — whose value at a
 silent gene is exactly zero, the strongest possible evidence for the vertex. ψ never reads it.
 ⛔ There are TWO components, gDNA and RNA; spliced-vs-unspliced is a property of the FRAGMENT, never a
 second RNA species.
@@ -265,7 +265,7 @@ def test_G6_psi_is_BLIND_to_the_certified_RNA_channel():
     """⛔⛔ THE ROOT CAUSE, AS AN OBSERVABLE — and the one a fix MUST move (TRAPS: name-the-observable-per-site).
 
     ``f_g = 1`` is a claim about ``ρ_r = 0``. No gDNA-side message can establish it at any precision (TRAPS: no-magic-numbers
-    prices exactly that attempt). The channel that CAN is the CERTIFIED SPLICE — ``edge_spliced``, the
+    prices exactly that attempt). The channel that CAN is the CERTIFIED SPLICE — ``boundary_spliced``, the
     fragments that crossed this line contiguously having spliced elsewhere. A spliced fragment cannot be
     gDNA, so this channel has no gDNA term at all; at a silent gene it is exactly zero, which is the
     strongest available evidence for the vertex.
@@ -273,9 +273,9 @@ def test_G6_psi_is_BLIND_to_the_certified_RNA_channel():
     ⛔ RNA IS RNA. There are two components. Spliced-vs-unspliced is a property of the FRAGMENT (spliced
     ⇒ certified RNA, unspliced ⇒ must be deconvolved), never a second species of RNA.
 
-    ⚠ ``edge_spliced`` is EDGE-only and is structurally ZERO on every toy geometry (a toy's exons ARE its
+    ⚠ ``boundary_spliced`` is BOUNDARY-only and is structurally ZERO on every toy geometry (a toy's exons ARE its
     regions, so no spliced molecule crosses an interior line contiguously). On the real panel it carries
-    85.3 %% of EDGE unspliced mass off capture. So this gate uses ``mass_spliced`` as a pure SWEEP HANDLE
+    85.3 %% of BOUNDARY unspliced mass off capture. So this gate uses ``mass_spliced`` as a pure SWEEP HANDLE
     to prove ψ ignores the channel — it is not a claim about the channel's size.
 
     ψ does not read it: sweeping ``mass_spliced`` from 0 to 1e5 at fixed strand counts leaves ``f_g``

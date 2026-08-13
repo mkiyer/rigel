@@ -1,4 +1,4 @@
-"""RegionArrays geometry + the region↔contiguous-edge index mapping."""
+"""RegionArrays geometry + the region↔contiguous-boundary index mapping."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from rigel.calibration.region_chain import EDGE, build_region_chain
+from rigel.calibration.region_chain import BOUNDARY, build_region_chain
 from rigel.calibration.region_arrays import (
     RegionArrays,
-    edge_region_indices,
-    region_right_edge,
+    boundary_region_indices,
+    region_right_boundary,
 )
 from rigel.calibration.signature import (
     BIT_EXON_NEG,
@@ -69,77 +69,77 @@ def test_from_region_df_requires_signature():
 
 
 # ---------------------------------------------------------------------------
-# The region ↔ contiguous-edge mapping (S5.f) — the k+1 boundary axis is retired.
+# The region ↔ contiguous-boundary mapping (S5.f) — the k+1 boundary axis is retired.
 # ---------------------------------------------------------------------------
 #
 # ⭐ Topology deliberately MULTI-REFERENCE with three different shapes, because the whole class of
-# defect here is "the first reference happens to work". ref0 = 3 regions / 2 edges, ref1 = 2 regions /
-# 1 edge, ref2 = 1 region / 0 edges (a legal reference that owns no line at all). E == N − n_refs
-# only counts non-empty refs: 6 regions, 3 refs, 3 edges.
+# defect here is "the first reference happens to work". ref0 = 3 regions / 2 boundaries, ref1 = 2 regions /
+# 1 boundary, ref2 = 1 region / 0 boundaries (a legal reference that owns no line at all). E == N − n_refs
+# only counts non-empty refs: 6 regions, 3 refs, 3 boundaries.
 REF_ID = np.array([0, 0, 0, 1, 1, 2], dtype=np.int32)
 REF_REGION_OFFSETS = np.array([0, 3, 5, 6], dtype=np.int64)
-REF_EDGE_OFFSETS = np.array([0, 2, 3, 3], dtype=np.int64)
+REF_BOUNDARY_OFFSETS = np.array([0, 2, 3, 3], dtype=np.int64)
 
 
-def test_region_right_edge_is_minus_one_at_every_reference_end():
+def test_region_right_boundary_is_minus_one_at_every_reference_end():
     # region 2 is chr0's last, region 4 chr1's last, region 5 chr2's only — none owns a line to its right.
-    np.testing.assert_array_equal(region_right_edge(REF_ID), [0, 1, -1, 2, -1, -1])
+    np.testing.assert_array_equal(region_right_boundary(REF_ID), [0, 1, -1, 2, -1, -1])
 
 
-def test_edge_region_indices_are_the_adjacent_pair():
-    lo, hi = edge_region_indices(REF_ID)
+def test_boundary_region_indices_are_the_adjacent_pair():
+    lo, hi = boundary_region_indices(REF_ID)
     np.testing.assert_array_equal(lo, [0, 1, 3])
     np.testing.assert_array_equal(hi, [1, 2, 4])
-    # An edge NEVER straddles two references — that is the invariant the old k+1 axis could not state.
+    # An boundary NEVER straddles two references — that is the invariant the old k+1 axis could not state.
     assert np.all(REF_ID[lo] == REF_ID[hi])
 
 
-def test_a_single_region_reference_owns_no_edge():
-    lo, _ = edge_region_indices(np.array([0, 1, 2], dtype=np.int32))
+def test_a_single_region_reference_owns_no_boundary():
+    lo, _ = boundary_region_indices(np.array([0, 1, 2], dtype=np.int32))
     assert lo.size == 0
     np.testing.assert_array_equal(
-        region_right_edge(np.array([0, 1, 2], dtype=np.int32)), [-1, -1, -1]
+        region_right_boundary(np.array([0, 1, 2], dtype=np.int32)), [-1, -1, -1]
     )
 
 
 def test_the_two_directions_round_trip():
-    lo, hi = edge_region_indices(REF_ID)
-    right = region_right_edge(REF_ID)
-    np.testing.assert_array_equal(right[lo], np.arange(lo.size))  # edge → its left region → itself
-    has_edge = right >= 0
-    np.testing.assert_array_equal(lo[right[has_edge]], np.flatnonzero(has_edge))
+    lo, hi = boundary_region_indices(REF_ID)
+    right = region_right_boundary(REF_ID)
+    np.testing.assert_array_equal(right[lo], np.arange(lo.size))  # boundary → its left region → itself
+    has_boundary = right >= 0
+    np.testing.assert_array_equal(lo[right[has_boundary]], np.flatnonzero(has_boundary))
 
 
-def test_edge_numbering_matches_the_chain_built_from_the_payload_offsets():
+def test_boundary_numbering_matches_the_chain_built_from_the_payload_offsets():
     """⭐ The gate that matters: re-derive the SAME numbering by a DIFFERENT algorithm.
 
-    ``edge_region_indices`` counts adjacent same-reference region pairs; ``build_region_chain`` walks the
+    ``boundary_region_indices`` counts adjacent same-reference region pairs; ``build_region_chain`` walks the
     payload's two CSR offset arrays and lays out ``N E N E … N`` slot by slot. They must agree, or the
-    calibration result's per-edge arrays are keyed to a different axis than the payload's — the exact
+    calibration result's per-boundary arrays are keyed to a different axis than the payload's — the exact
     class of defect that once dropped 476,719 of 476,732 real fragments
     while every golden test passed. A validator that called the builder's own helper would prove
     nothing here (trap 1).
     """
-    chain = build_region_chain(REF_REGION_OFFSETS, REF_EDGE_OFFSETS)
-    is_edge = np.asarray(chain.kind) == EDGE
+    chain = build_region_chain(REF_REGION_OFFSETS, REF_BOUNDARY_OFFSETS)
+    is_boundary = np.asarray(chain.kind) == BOUNDARY
     obj = np.asarray(chain.obj_idx)
-    left_slot = np.asarray(chain.left)[is_edge]
-    right_slot = np.asarray(chain.right)[is_edge]
+    left_slot = np.asarray(chain.left)[is_boundary]
+    right_slot = np.asarray(chain.right)[is_boundary]
 
-    # the chain's own answer: edge obj_idx e sits between these two region obj_idx values
-    chain_edge_id = obj[is_edge]
+    # the chain's own answer: boundary obj_idx e sits between these two region obj_idx values
+    chain_edge_id = obj[is_boundary]
     chain_lo = obj[left_slot]
     chain_hi = obj[right_slot]
     order = np.argsort(chain_edge_id)
 
-    lo, hi = edge_region_indices(REF_ID)
+    lo, hi = boundary_region_indices(REF_ID)
     np.testing.assert_array_equal(chain_edge_id[order], np.arange(lo.size))
     np.testing.assert_array_equal(chain_lo[order], lo)
     np.testing.assert_array_equal(chain_hi[order], hi)
 
 
 def test_ref_id_must_be_grouped():
-    """A scrambled ``ref_id`` cannot produce a valid edge axis, and must say so rather than
-    silently manufacturing edges that straddle references."""
+    """A scrambled ``ref_id`` cannot produce a valid boundary axis, and must say so rather than
+    silently manufacturing boundaries that straddle references."""
     with pytest.raises(ValueError, match="grouped"):
-        region_right_edge(np.array([0, 1, 0], dtype=np.int32))
+        region_right_boundary(np.array([0, 1, 0], dtype=np.int32))

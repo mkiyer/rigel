@@ -1,12 +1,12 @@
 """assemble_priors — acyclic CalibrationResult → per-locus EM prior.
 
-⭐⭐ **A REGION OWNS THE FRAGMENTS CONTAINED IN IT; AN EDGE OWNS THE FRAGMENTS THAT CROSS IT.** A locus
-collects both — its regions by genomic overlap, its edges by touching those regions — and no line's mass is
-ever folded into a region's total. The rule itself is gated in `test_edge_locus_projection.py`; this file
+⭐⭐ **A REGION OWNS THE FRAGMENTS CONTAINED IN IT; AN BOUNDARY OWNS THE FRAGMENTS THAT CROSS IT.** A locus
+collects both — its regions by genomic overlap, its boundaries by touching those regions — and no line's mass is
+ever folded into a region's total. The rule itself is gated in `test_boundary_locus_projection.py`; this file
 gates what ``assemble_priors`` builds on top of it.
 
 The object set is a per-region CONTAINED object at effective support ``S_r = E_f[(L_r − w + 1)+] =
-gdna_region_eff_len`` plus a per-line CROSSING object at ``S_e = E_f[w − 1] = gdna_edge_eff_len``. The
+gdna_region_eff_len`` plus a per-line CROSSING object at ``S_e = E_f[w − 1] = gdna_boundary_eff_len``. The
 bedrock invariant these tests pin: under a UNIFORM gDNA field (every object's mass = ρ·S) every
 object's ``min(m/ρ_ref, S)`` returns ``S``, so ``gdna_eff_len == span == ΣS`` exactly — an unenriched
 library contracts NOTHING (factor 1). Using the genomic ``region_size_bp`` as the divisor instead would
@@ -18,7 +18,7 @@ ten-line note explaining that ``gdna_boundary_len`` was ALREADY the halved per-s
 ``E[min(ℓ,L)]/2``, that each face therefore deposited ``ρ·gdna_boundary_len``, and that an earlier
 version of the fixture had stored the UN-halved length while depositing half the mass — cancelling
 exactly, and hiding a factor of 2 from every assertion in this file for months
-A contiguous edge is a 0-bp line with one mass and one support, so a
+A contiguous boundary is a 0-bp line with one mass and one support, so a
 uniform field is just ``mass = ρ·support`` on both axes and there is no ½ left to get wrong.
 
 ⚠ **Every span below is byte-identical to the pre-S5.f value** (640 / 650 / 700 / 400 / 850). The
@@ -31,7 +31,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rigel.calibration.priors import assemble_priors, contended_edges
+from rigel.calibration.priors import assemble_priors, contended_boundaries
 from rigel.calibration.region_arrays import RegionArrays
 from rigel.calibration.result import CalibrationResult
 from rigel.calibration.signature import BIT_EXON_POS
@@ -44,20 +44,20 @@ def _result(
     region_g,
     region_r,
     region_eff,
-    edge_g=None,
-    edge_r=None,
-    edge_eff=None,
-    edge_spliced=None,
+    boundary_g=None,
+    boundary_r=None,
+    boundary_eff=None,
+    boundary_spliced=None,
     mass_per_crossing=None,
     gdna_density_global=0.01,
     rna_region_eff=None,
-    rna_edge_eff=None,
+    rna_boundary_eff=None,
 ) -> CalibrationResult:
     """Build a result on the three axes. One reference with ``n`` regions owns exactly ``n − 1`` lines.
 
-    ``edge_*`` default to zeros, so a caller that cares only about contained mass writes only the region
-    arrays — but the edge axis is still the RIGHT LENGTH, because an edge axis inconsistent with its
-    own region axis is a mis-shaped fixture, not a "no edges" one.
+    ``boundary_*`` default to zeros, so a caller that cares only about contained mass writes only the region
+    arrays — but the boundary axis is still the RIGHT LENGTH, because an boundary axis inconsistent with its
+    own region axis is a mis-shaped fixture, not a "no boundaries" one.
 
     ⭐ **The RNA supports default to the gDNA ones**, so a test that is about projection, conservation
     or re-keying — not about the length tilt — keeps both components on one support and its ``g:r``
@@ -69,50 +69,50 @@ def _result(
     ne = max(n - 1, 0)
     ez = np.zeros(ne, dtype=np.float64)
     region_eff_arr = np.asarray(region_eff, dtype=np.float64)
-    edge_eff_arr = ez.copy() if edge_eff is None else np.asarray(edge_eff, dtype=np.float64)
+    boundary_eff_arr = ez.copy() if boundary_eff is None else np.asarray(boundary_eff, dtype=np.float64)
     return CalibrationResult(
         mass_gdna_region=ng,
         mass_rna_region=np.asarray(region_r, dtype=np.float64),
-        mass_gdna_edge=ez.copy() if edge_g is None else np.asarray(edge_g, dtype=np.float64),
-        mass_rna_edge=ez.copy() if edge_r is None else np.asarray(edge_r, dtype=np.float64),
-        mass_rna_spliced_edge=(
-            ez.copy() if edge_spliced is None else np.asarray(edge_spliced, dtype=np.float64)
+        mass_gdna_boundary=ez.copy() if boundary_g is None else np.asarray(boundary_g, dtype=np.float64),
+        mass_rna_boundary=ez.copy() if boundary_r is None else np.asarray(boundary_r, dtype=np.float64),
+        mass_rna_spliced_boundary=(
+            ez.copy() if boundary_spliced is None else np.asarray(boundary_spliced, dtype=np.float64)
         ),
         # ⭐ GEOMETRY, not a split. 1.0 is the identity — a line whose flanks both exceed every
         # fragment length, where one crossing IS one fragment. A test exercising K-inflation overrides it.
-        edge_mass_per_crossing=(
+        boundary_mass_per_crossing=(
             np.ones_like(ez) if mass_per_crossing is None
             else np.asarray(mass_per_crossing, dtype=np.float64)
         ),
         mass_rna_junction=np.zeros(0, dtype=np.float64),
-        edge_spliced_mass_per_crossing=np.ones_like(ez),
+        boundary_spliced_mass_per_crossing=np.ones_like(ez),
         junction_mass_per_crossing=np.ones(0, dtype=np.float64),
         gdna_region_eff_len=region_eff_arr,
-        gdna_edge_eff_len=edge_eff_arr,
+        gdna_boundary_eff_len=boundary_eff_arr,
         rna_region_eff_len=(
             region_eff_arr if rna_region_eff is None else np.asarray(rna_region_eff, dtype=np.float64)
         ),
-        rna_edge_eff_len=(
-            edge_eff_arr if rna_edge_eff is None else np.asarray(rna_edge_eff, dtype=np.float64)
+        rna_boundary_eff_len=(
+            boundary_eff_arr if rna_boundary_eff is None else np.asarray(rna_boundary_eff, dtype=np.float64)
         ),
         gdna_frac_region=np.zeros_like(ng),
         rna_pos_frac_region=np.zeros_like(ng),
         rna_neg_frac_region=np.zeros_like(ng),
-        gdna_frac_edge=ez.copy(),
-        rna_pos_frac_edge=ez.copy(),
-        rna_neg_frac_edge=ez.copy(),
+        gdna_frac_boundary=ez.copy(),
+        rna_pos_frac_boundary=ez.copy(),
+        rna_neg_frac_boundary=ez.copy(),
         gdna_density_global=gdna_density_global,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
         rna_strand_overdispersion=0.05,
         n_regions=n,
-        n_edges=ne,
+        n_boundaries=ne,
         n_junctions=0,
         config=CalibrationConfig(),
     )
 
 
-def _uniform_field(region_eff, edge_eff, rho) -> CalibrationResult:
+def _uniform_field(region_eff, boundary_eff, rho) -> CalibrationResult:
     """A genuinely UNIFORM gDNA field: every object's mass is ``ρ × its own effective support``.
 
     That is the accumulator's deposition law stated directly — ``ρ·E_f[(L−w+1)+]`` contained,
@@ -120,13 +120,13 @@ def _uniform_field(region_eff, edge_eff, rho) -> CalibrationResult:
     then says ``gdna_eff_len == span == Σ S`` exactly, and ``G/eff_len`` recovers the true ρ.
     """
     region_eff = np.asarray(region_eff, dtype=np.float64)
-    edge_eff = np.asarray(edge_eff, dtype=np.float64)
+    boundary_eff = np.asarray(boundary_eff, dtype=np.float64)
     return _result(
         region_g=rho * region_eff,
         region_r=np.zeros_like(region_eff),
         region_eff=region_eff,
-        edge_g=rho * edge_eff,
-        edge_eff=edge_eff,
+        boundary_g=rho * boundary_eff,
+        boundary_eff=boundary_eff,
         gdna_density_global=rho,
     )
 
@@ -166,23 +166,23 @@ def _ml(locus_id, blocks) -> MultiLocus:
 def test_factor_one_under_uniform_gdna():
     # THE correctness criterion. A uniform (unenriched) gDNA field — every object's density = ρ — must
     # contract NOTHING: gdna_eff_len = span = Σ S EXACTLY, and the gDNA per-position rate G/eff_len
-    # recovers the true ρ. region_eff=[120,200,80] (region 1 is SHORT), edge_eff=[120,120], ρ=0.02 over
+    # recovers the true ρ. region_eff=[120,200,80] (region 1 is SHORT), boundary_eff=[120,120], ρ=0.02 over
     # 3 same-ref regions ⇒ span = 400 + 240 = 640.
     region_eff = [120.0, 200.0, 80.0]
-    edge_eff = [120.0, 120.0]
+    boundary_eff = [120.0, 120.0]
     rho = 0.02
-    span = sum(region_eff) + sum(edge_eff)  # 640
-    cal = _uniform_field(region_eff, edge_eff, rho)
+    span = sum(region_eff) + sum(boundary_eff)  # 640
+    cal = _uniform_field(region_eff, boundary_eff, rho)
     ra = _regions([0, 120, 320], [120, 320, 400])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 400)])])
     np.testing.assert_allclose(priors.gdna_eff_len, [span], rtol=1e-9)
     # ⭐ The prior is a CONSERVED FRAGMENT COUNT read out of the bank: the contained mass ρ·Σregion_eff
-    # (8.0) plus the crossing mass ρ·Σedge_eff (4.8) rescaled by q, which this fixture sets to the
+    # (8.0) plus the crossing mass ρ·Σboundary_eff (4.8) rescaled by q, which this fixture sets to the
     # identity 1.0 — flanks exceeding every fragment length, where one crossing IS one fragment.
     # ⚠ It replaces `ρ · span_bp` = 8.0, the retired density rule: that reached fragment units by
     # dividing the mass by its own opportunity and re-integrating, and dropped the 4.8 of crossing
     # fragments entirely, because a 0-bp line contributes no genomic span to integrate over.
-    np.testing.assert_allclose(priors.gdna_prior_count, [rho * (sum(region_eff) + sum(edge_eff))], rtol=1e-9)
+    np.testing.assert_allclose(priors.gdna_prior_count, [rho * (sum(region_eff) + sum(boundary_eff))], rtol=1e-9)
     assert not np.isclose(priors.gdna_prior_count[0], rho * 400.0)  # ⛔ not the retired ρ·span_bp
 
 
@@ -190,12 +190,12 @@ def test_factor_one_holds_for_any_density():
     # The factor-1 identity is exact for ANY ρ (the Laplace term cancels algebraically), so a 50000×
     # denser uniform library still contracts nothing. Guards against a ρ-dependent contraction.
     region_eff = [300.0, 150.0]
-    edge_eff = [200.0]
+    boundary_eff = [200.0]
     span = 650.0
     ra = _regions([0, 300], [300, 450])
     for rho in (1e-4, 0.01, 0.5, 5.0):
         priors = assemble_priors(
-            _uniform_field(region_eff, edge_eff, rho), ra, [_ml(0, [(0, 0, 450)])]
+            _uniform_field(region_eff, boundary_eff, rho), ra, [_ml(0, [(0, 0, 450)])]
         )
         np.testing.assert_allclose(priors.gdna_eff_len, [span], rtol=1e-9)
 
@@ -207,13 +207,13 @@ def test_eff_len_uses_effective_support_not_genomic_size():
     # never the genomic-based 300 + lines. If the method still used region_size_bp, the field would NOT
     # be uniform in its eyes and the factor would drift off 1.
     region_eff = [120.0, 200.0, 80.0]
-    edge_eff = [150.0, 150.0]
+    boundary_eff = [150.0, 150.0]
     span = 700.0
-    cal = _uniform_field(region_eff, edge_eff, 0.03)
+    cal = _uniform_field(region_eff, boundary_eff, 0.03)
     ra = _regions([0, 100, 200], [100, 200, 300])  # genomic sizes 100,100,100 (Σ=300) ≠ region_eff
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
     np.testing.assert_allclose(priors.gdna_eff_len, [span], rtol=1e-9)
-    assert not np.isclose(priors.gdna_eff_len[0], 300.0 + sum(edge_eff))
+    assert not np.isclose(priors.gdna_eff_len[0], 300.0 + sum(boundary_eff))
 
 
 def test_every_OBJECT_has_the_same_density_under_a_uniform_field():
@@ -222,14 +222,14 @@ def test_every_OBJECT_has_the_same_density_under_a_uniform_field():
 
     ⛔ It used to read through ``_component_region_arrays``, which summed each line's mass into a flank
     region before dividing — so it could only ever check the FOLD's density, never a line's own. Regions and
-    edges are peers now, so each axis is checked on its own axis.
+    boundaries are peers now, so each axis is checked on its own axis.
     """
     region_eff = np.array([120.0, 200.0, 80.0])
-    edge_eff = np.array([120.0, 120.0])
+    boundary_eff = np.array([120.0, 120.0])
     rho = 0.02
-    cal = _uniform_field(region_eff, edge_eff, rho)
+    cal = _uniform_field(region_eff, boundary_eff, rho)
     np.testing.assert_allclose(cal.mass_gdna_region / cal.gdna_region_eff_len, rho, rtol=1e-9)
-    np.testing.assert_allclose(cal.mass_gdna_edge / cal.gdna_edge_eff_len, rho, rtol=1e-9)
+    np.testing.assert_allclose(cal.mass_gdna_boundary / cal.gdna_boundary_eff_len, rho, rtol=1e-9)
 
 
 # --- mass / projection (independent of the support choice) ----------------------------------------
@@ -246,7 +246,7 @@ def test_single_locus_projects_both_components():
         region_g=[1.0, 2.0, 1.5],
         region_r=[3.0, 4.0, 5.0],
         region_eff=[100.0, 200.0, 150.0],
-        edge_eff=[150.0, 150.0],
+        boundary_eff=[150.0, 150.0],
     )
     ra = _regions([0, 100, 300], [100, 300, 450])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 450)])])
@@ -268,8 +268,8 @@ def test_gdna_mass_conservation_regions_plus_lines():
         region_g=[2.0, 3.0, 1.0],
         region_r=[0.0, 0.0, 0.0],
         region_eff=[100.0, 100.0, 100.0],
-        edge_g=[2.0, 3.0],
-        edge_eff=[50.0, 50.0],
+        boundary_g=[2.0, 3.0],
+        boundary_eff=[50.0, 50.0],
     )
     ra = _regions([0, 100, 200], [100, 200, 300])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
@@ -280,17 +280,17 @@ def test_gdna_mass_conservation_regions_plus_lines():
     # test CANNOT tell the two rules apart. The discrimination lives in the q ≠ 1 test below and in
     # `test_prior_units.py`; asserting 11.0 here would otherwise read as a ruling that it is a raw sum.
     np.testing.assert_allclose(priors.gdna_prior_count, [11.0])
-    np.testing.assert_allclose(cal.edge_mass_per_crossing, 1.0)  # ...the reason it coincides, pinned
+    np.testing.assert_allclose(cal.boundary_mass_per_crossing, 1.0)  # ...the reason it coincides, pinned
     np.testing.assert_allclose(
-        priors.gdna_prior_count.sum(), cal.mass_gdna_region.sum() + cal.mass_gdna_edge.sum()
+        priors.gdna_prior_count.sum(), cal.mass_gdna_region.sum() + cal.mass_gdna_boundary.sum()
     )
-    assert contended_edges(ra, [_ml(0, [(0, 0, 300)])], 1).size == 0  # nothing double-claimed
+    assert contended_boundaries(ra, [_ml(0, [(0, 0, 300)])], 1).size == 0  # nothing double-claimed
 
 
 def test_the_crossing_mass_is_rescaled_by_the_conserved_share():
     """⭐⭐ **THE ONE TEST IN THIS FILE THAT SEPARATES A CONSERVED COUNT FROM A RAW INCIDENCE SUM.**
 
-    Every other fixture here leaves ``edge_mass_per_crossing`` at the identity 1.0, where one crossing
+    Every other fixture here leaves ``boundary_mass_per_crossing`` at the identity 1.0, where one crossing
     IS one fragment and the two rules coincide — so they all pass under either. This one sets ``q`` to
     ``[0.5, 0.25]``: a fragment crossing line 0 deposited on 2 objects on average, line 1 on 4.
 
@@ -304,9 +304,9 @@ def test_the_crossing_mass_is_rescaled_by_the_conserved_share():
         region_g=[1.0, 1.0, 1.0],
         region_r=[2.0, 2.0, 2.0],
         region_eff=[100.0, 100.0, 100.0],
-        edge_g=[4.0, 8.0],
-        edge_r=[4.0, 4.0],
-        edge_eff=[50.0, 50.0],
+        boundary_g=[4.0, 8.0],
+        boundary_r=[4.0, 4.0],
+        boundary_eff=[50.0, 50.0],
         mass_per_crossing=[0.5, 0.25],
     )
     ra = _regions([0, 100, 200], [100, 200, 300])
@@ -329,9 +329,9 @@ def test_spliced_mass_withheld_from_rna_prior():
         region_g=[1.0, 2.0, 1.5],
         region_r=[3.0, 4.0, 5.0],
         region_eff=[100.0, 200.0, 150.0],
-        edge_r=[4.0, 4.0],
-        edge_spliced=[1.0, 3.0],
-        edge_eff=[150.0, 150.0],
+        boundary_r=[4.0, 4.0],
+        boundary_spliced=[1.0, 3.0],
+        boundary_eff=[150.0, 150.0],
     )
     ra = _regions([0, 100, 200], [100, 200, 300])
     priors = assemble_priors(cal, ra, [_ml(0, [(0, 0, 300)])])
@@ -349,7 +349,7 @@ def test_the_junction_flux_does_NOT_enter_the_rna_prior():
     ⚠ The result carries the flux for QC (`test_calibrate`); ``assemble_priors`` must ignore it, and
     that is a deliberate asymmetry rather than an oversight.
     """
-    base = _result(region_g=[1.0, 1.0], region_r=[2.0, 2.0], region_eff=[100.0, 100.0], edge_eff=[50.0])
+    base = _result(region_g=[1.0, 1.0], region_r=[2.0, 2.0], region_eff=[100.0, 100.0], boundary_eff=[50.0])
     import dataclasses
 
     loud = dataclasses.replace(
@@ -403,14 +403,14 @@ def test_a_locus_keeps_the_outer_line_against_its_INTERGENIC_flank():
         region_g=[0.0, 0.0, 0.0],
         region_r=[0.0, 0.0, 0.0],
         region_eff=[100.0, 100.0, 100.0],
-        edge_g=[7.0, 3.0],
-        edge_eff=[50.0, 50.0],
+        boundary_g=[7.0, 3.0],
+        boundary_eff=[50.0, 50.0],
     )
     ra = _regions([0, 100, 200], [100, 200, 300], signature=[0, BIT_EXON_POS, BIT_EXON_POS])
     ml = [_ml(0, [(0, 100, 300)])]  # the locus is regions 1-2 only
     priors = assemble_priors(cal, ra, ml)
     np.testing.assert_allclose(priors.gdna_prior_count, [10.0])  # 7 + 3, nothing lost
-    assert contended_edges(ra, ml, 1).size == 0
+    assert contended_boundaries(ra, ml, 1).size == 0
 
 
 # --- Laplace shrinkage toward the (effective) span ------------------------------------------------
@@ -445,7 +445,7 @@ def _global_bimodal_cal(rna0: float, gdna0: float = 1.0) -> CalibrationResult:
         region_g=mg,
         region_r=mr,
         region_eff=np.full(6, 100.0),
-        edge_eff=np.full(5, 50.0),
+        boundary_eff=np.full(5, 50.0),
         gdna_density_global=0.5,
     )
 
@@ -464,13 +464,13 @@ def test_eff_len_shrinks_toward_span_for_sparse_gdna():
 def _blind_line_cal(contained_rna: float) -> CalibrationResult:
     """A locus whose gDNA contraction is driven by FIXED crossing mass (no contained gDNA), with a
     tunable amount of CONTAINED RNA — to isolate the contained-evidence shrinkage. region_eff=100 each,
-    edge_eff=50 each ⇒ effective span = 300 + 2·50 = 400."""
+    boundary_eff=50 each ⇒ effective span = 300 + 2·50 = 400."""
     return _result(
         region_g=[0.0, 0.0, 0.0],  # no contained gDNA — all signal is crossing
         region_r=[contained_rna, 0.0, 0.0],  # the only contained (unique-mapper) evidence
         region_eff=[100.0, 100.0, 100.0],
-        edge_g=[2.0, 3.0],
-        edge_eff=[50.0, 50.0],
+        boundary_g=[2.0, 3.0],
+        boundary_eff=[50.0, 50.0],
     )
 
 
@@ -489,17 +489,17 @@ def test_contained_evidence_shrinkage_reverts_to_span_when_blind():
 def _stray_on_a_dead_line_cal(stray: float) -> CalibrationResult:
     """7 regions at a UNIFORM gDNA density of 1.0 (so ρ_ref = 1.0 and the KDE fires), 6 lines.
 
-    Region 0 is intergenic, so ``edge_owner_regions`` re-keys line 0 onto region 1 — which therefore owns
+    Region 0 is intergenic, so ``boundary_owner_regions`` re-keys line 0 onto region 1 — which therefore owns
     BOTH line 0 (support **0**, carrying ``stray``) and line 1 (support 50, DEPLETED at mass 5). The
-    depletion is what makes ``min(pooled/ρ_ref, seam_len)`` bind on the mass side, so stray mass there
+    depletion is what makes ``min(pooled/ρ_ref, boundary_len)`` bind on the mass side, so stray mass there
     can actually move the answer.
     """
     return _result(
         region_g=[100.0] * 7,
         region_r=[0.0] * 7,
         region_eff=[100.0] * 7,
-        edge_g=[stray, 5.0, 50.0, 50.0, 50.0, 50.0],
-        edge_eff=[0.0, 50.0, 50.0, 50.0, 50.0, 50.0],
+        boundary_g=[stray, 5.0, 50.0, 50.0, 50.0, 50.0],
+        boundary_eff=[0.0, 50.0, 50.0, 50.0, 50.0, 50.0],
         gdna_density_global=1.0,
     )
 
@@ -522,7 +522,7 @@ def test_stray_mass_on_a_zero_opportunity_line_is_dropped_from_the_eff_len():
       exposure to pay for it. **Both sides of a pooled rate, or neither.**
 
     Either one moves the eff-length by **+19.97 bp** at ``stray = 20`` and **+44.93 bp** at
-    ``stray = 5000``, where it pins against the 850 bp seam ceiling. With the drop it does not move at
+    ``stray = 5000``, where it pins against the 850 bp boundary ceiling. With the drop it does not move at
     all, and this test sweeps 250× of stray mass to say so.
     """
     ra = _regions(list(range(0, 700, 100)), list(range(100, 800, 100)),
@@ -532,7 +532,7 @@ def test_stray_mass_on_a_zero_opportunity_line_is_dropped_from_the_eff_len():
     for stray in (20.0, 5000.0):
         loud = assemble_priors(_stray_on_a_dead_line_cal(stray), ra, ml)
         np.testing.assert_allclose(loud.gdna_eff_len, [quiet], rtol=1e-12)
-        # ⛔ non-vacuity: the eff-len is genuinely contracted below the seam ceiling the undropped
+        # ⛔ non-vacuity: the eff-len is genuinely contracted below the boundary ceiling the undropped
         # mass would push it to, so "unchanged" is a real constraint and not both arms at the clamp.
         assert quiet < 850.0
         # ...and the stray mass is NOT silently discarded everywhere — the prior still counts it.
@@ -615,8 +615,8 @@ def test_the_contraction_is_applied_PER_OBJECT_not_over_a_folded_total():
         region_g=mg,
         region_r=np.zeros(6),
         region_eff=np.full(6, 100.0),
-        edge_g=eg,
-        edge_eff=np.full(5, 50.0),
+        boundary_g=eg,
+        boundary_eff=np.full(5, 50.0),
         gdna_density_global=1.0,
     )
     ml = [_ml(0, [(0, 0, 100)])]

@@ -22,13 +22,13 @@ high-expression exons where the accumulator has the real unspliced exon-body mRN
 ⭐ **FIVE POPULATIONS ON THREE AXES**, each an integer count with two GENOME-strand columns::
 
     regions             region_contained     the whole path lies inside the region
-    contiguous edges  edge_unspliced     the mixture being deconvolved
-                      edge_spliced       certified RNA -- gDNA cannot be spliced
-    junction edges    sj_count           pure RNA by construction
+    contiguous boundaries  boundary_unspliced     the mixture being deconvolved
+                      boundary_spliced       certified RNA -- gDNA cannot be spliced
+    junction boundaries    sj_count           pure RNA by construction
 
 ⛔ **"Spliced" is a BANK now, not a channel.** The predecessor packed unspliced-± and spliced-sense/
 antisense into one 4-column array, which put two strand conventions in one schema. gDNA fragments are
-never spliced, and that is validated here as ``edge_spliced`` and ``sj_count`` being identically zero in
+never spliced, and that is validated here as ``boundary_spliced`` and ``sj_count`` being identically zero in
 the gdna partition — a stronger statement than "columns 2 and 3 are zero", because it covers the
 junction axis the old layout had no room for.
 """
@@ -53,15 +53,15 @@ ORIGINS = ("gdna", "mrna", "nrna")
 #: this tuple is a bank the oracle would silently stop validating.
 _BANKS = (
     "region_contained_count",
-    "edge_unspliced_count",
-    "edge_spliced_count",
+    "boundary_unspliced_count",
+    "boundary_spliced_count",
     "sj_count",
     "region_start_count",
     # ⭐ The three CONSERVED MASS banks. Two of them were outside this tuple when they landed, which
     # meant the origin split was never validated on them — and they are exactly what `component_shares`
     # reads. Integer fixed point, so sum-to-full is byte-exact here like every other bank.
-    "edge_unspliced_mass",
-    "edge_spliced_mass",
+    "boundary_unspliced_mass",
+    "boundary_spliced_mass",
     "sj_mass",
 )
 
@@ -69,7 +69,7 @@ _BANKS = (
 #: a STRONGER statement than the two counts: the mass is where a spliced fragment's whole share goes
 #: when its blocks cross no line, so a gDNA record leaking onto the junction axis shows up here as
 #: fragment-scale mass rather than as a single incidence.
-_RNA_ONLY_BANKS = ("edge_spliced_count", "sj_count", "sj_mass")
+_RNA_ONLY_BANKS = ("boundary_spliced_count", "sj_count", "sj_mass")
 
 #: Origin -> code for the per-``frag_id`` truth array, so ``ORIGINS[code] == kind``. int8, because a
 #: 10 M-fragment condition is then 10 MB and can be carried in a cache blob.
@@ -380,19 +380,19 @@ class OracleTruth:
             nas_uns_neg=n[:, 1],
         )
 
-    def edge_pools(self) -> dict:
+    def boundary_pools(self) -> dict:
         """Per-LINE TRUE crossing counts by ORIGIN × GENOME strand, plus the certified-RNA bank.
 
-        ⭐ The exact mirror of :meth:`region_pools`, on the basis the solver's EDGE slots use — and it is
+        ⭐ The exact mirror of :meth:`region_pools`, on the basis the solver's BOUNDARY slots use — and it is
         ONE set of numbers per line, not a left/right pair. The predecessor summed ``left + right``
         because the old accumulator split one crossing across two faces; there is nothing to sum.
 
-        ``*_spl`` is ``edge_spliced``: molecules that crossed this line CONTIGUOUSLY having spliced
+        ``*_spl`` is ``boundary_spliced``: molecules that crossed this line CONTIGUOUSLY having spliced
         elsewhere. It is a different population from ``sj_count`` (:meth:`junction_flux`), which never
         crossed the line at all — it jumped.
         """
-        eu = lambda k: np.asarray(self.parts[k].edge_unspliced_count, np.float64)  # noqa: E731
-        es = lambda k: np.asarray(self.parts[k].edge_spliced_count, np.float64)  # noqa: E731
+        eu = lambda k: np.asarray(self.parts[k].boundary_unspliced_count, np.float64)  # noqa: E731
+        es = lambda k: np.asarray(self.parts[k].boundary_spliced_count, np.float64)  # noqa: E731
         g, m, n = eu("gdna"), eu("mrna"), eu("nrna")
         return dict(
             gdna_pos=g[:, 0],
@@ -429,15 +429,15 @@ class OracleTruth:
         ``PopulationView.mass_per_crossing``. A zero there would delete mass rather than leave it
         unscaled, and the shipped accessor makes the same choice for the same reason.
 
-        Returns ``{"gdna": float64[n_edges], "rna": float64[n_edges]}``.
+        Returns ``{"gdna": float64[n_boundaries], "rna": float64[n_boundaries]}``.
         """
         out = {}
         for name, origins in (("gdna", ("gdna",)), ("rna", ("mrna", "nrna"))):
             mass = sum(
-                np.asarray(self.parts[k].edge_unspliced_mass, np.float64) for k in origins
+                np.asarray(self.parts[k].boundary_unspliced_mass, np.float64) for k in origins
             )
             count = sum(
-                np.asarray(self.parts[k].edge_unspliced_count, np.float64).sum(axis=1)
+                np.asarray(self.parts[k].boundary_unspliced_count, np.float64).sum(axis=1)
                 for k in origins
             )
             share = np.ones_like(mass)
@@ -450,8 +450,8 @@ class OracleTruth:
         per-origin substrates — the exact schema ``calibrate`` assembles, so it can be fed via
         ``dataclasses.replace(cal, **override_masses(ra))`` as the perfect-calibration lever.
 
-        gDNA = the gdna partition's count; RNA = the (mrna + nrna) count, spliced-INCLUSIVE on the edge
-        axis to match ``chain_edge_deconv``'s ``rna = (1−f_g)·unspliced + spliced``. Conservation
+        gDNA = the gdna partition's count; RNA = the (mrna + nrna) count, spliced-INCLUSIVE on the boundary
+        axis to match ``chain_boundary_deconv``'s ``rna = (1−f_g)·unspliced + spliced``. Conservation
         ``gdna + rna = the full object count`` holds on both axes because the partitions sum to the full
         payload (the validated identity).
 
@@ -467,16 +467,16 @@ class OracleTruth:
             return np.asarray(getattr(sub, population).count, np.float64).sum(1)
 
         rna_region = total(subs["mrna"], "region_contained") + total(subs["nrna"], "region_contained")
-        rna_edge_unspliced = total(subs["mrna"], "edge_unspliced") + total(
-            subs["nrna"], "edge_unspliced"
+        rna_boundary_unspliced = total(subs["mrna"], "boundary_unspliced") + total(
+            subs["nrna"], "boundary_unspliced"
         )
-        spliced_edge = total(full, "edge_spliced")
+        spliced_boundary = total(full, "boundary_spliced")
         return dict(
             mass_gdna_region=total(subs["gdna"], "region_contained"),
             mass_rna_region=rna_region,
-            mass_gdna_edge=total(subs["gdna"], "edge_unspliced"),
-            mass_rna_edge=rna_edge_unspliced + spliced_edge,
-            mass_rna_spliced_edge=spliced_edge,
+            mass_gdna_boundary=total(subs["gdna"], "boundary_unspliced"),
+            mass_rna_boundary=rna_boundary_unspliced + spliced_boundary,
+            mass_rna_spliced_boundary=spliced_boundary,
             mass_rna_junction=total(full, "junction"),
         )
 
@@ -509,7 +509,7 @@ def _main():
     from rigel.calibration.region_arrays import RegionArrays
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.splice_graph import (
-        build_edge_flags_array,
+        build_boundary_flags_array,
         build_junction_geometry_arrays,
     )
     from dataclasses import replace as dc
@@ -539,7 +539,7 @@ def _main():
         rna_fl_pmf=fl.rna_pmf,
         config=cfg.calibration,
         junctions=build_junction_geometry_arrays(index),
-        edge_flags=build_edge_flags_array(index),
+        boundary_flags=build_boundary_flags_array(index),
     )
     cal_g = np.asarray(cal.mass_gdna_region, np.float64)
     cal_r = np.asarray(cal.mass_rna_region, np.float64)

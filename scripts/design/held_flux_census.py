@@ -25,11 +25,11 @@ The four causes, and why the split matters
 ``unannotated``         the implied intron resolves to no junction slot (`jid < 0`). ⚠ Not a flux
                         question at all — a lookup miss, and a different decision from D-3's
 ``annotated_empty``     the slot exists and `sj_inv_length_sum == 0`. ⭐ **THIS IS D-3'S POPULATION**
-``no_evidence_set``     ⛔ ∅ only, and it is an ARTEFACT: the scorer's contiguous-edge set is empty.
+``no_evidence_set``     ⛔ ∅ only, and it is an ARTEFACT: the scorer's contiguous-boundary set is empty.
                         See :func:`_lines_inside_inclusive` — the deposit rule says which lines
                         distinguish ∅ from a spliced path, and the shipped scorer asks for a strict
                         subset of them, empty whenever the intron spans exactly one region
-``zero_edge``           ∅'s evidence set is non-empty but some edge in it carries no unspliced mass
+``zero_boundary``           ∅'s evidence set is non-empty but some boundary in it carries no unspliced mass
 ======================  ============================================================================
 
 ⛔ **The ∅ arm is reported TWICE**, under the shipped exclusive rule and under the rule derived from the
@@ -105,7 +105,7 @@ def census(payload, scored, junctions, t_ids, truth: dict[str, float] | None) ->
     is_spliced = n_introns > 0
 
     cause = np.zeros(deferred.n_hypotheses, dtype=np.int8)  # 0 = positive
-    CAUSE = {1: "unannotated", 2: "annotated_empty", 3: "no_evidence_set", 4: "zero_edge"}
+    CAUSE = {1: "unannotated", 2: "annotated_empty", 3: "no_evidence_set", 4: "zero_boundary"}
     #: ⭐ The ∅ arm under the PRE-D-6 rule — the artefact's size, isolated.
     empty_old_zero = np.zeros(deferred.n_hypotheses, dtype=bool)
     reconstructed = np.zeros(deferred.n_hypotheses, dtype=bool)
@@ -116,7 +116,7 @@ def census(payload, scored, junctions, t_ids, truth: dict[str, float] | None) ->
     empty_slot_supporters: dict[int, set[int]] = {}
 
     sj_flux = np.asarray(payload.sj_inv_length_sum, dtype=np.float64)
-    edge_flux = np.asarray(payload.edge_unspliced_inv_length_sum, dtype=np.float64)
+    boundary_flux = np.asarray(payload.boundary_unspliced_inv_length_sum, dtype=np.float64)
 
     for i in range(deferred.n_fragments):
         ref = int(deferred.ref[i])
@@ -124,7 +124,7 @@ def census(payload, scored, junctions, t_ids, truth: dict[str, float] | None) ->
         h0, h1 = int(deferred.hypothesis_offsets[i]), int(deferred.hypothesis_offsets[i + 1])
         cut_lo = int(payload.ref_cut_offsets[ref])
         cut_hi = int(payload.ref_cut_offsets[ref + 1])
-        edge_base = int(payload.ref_edge_offsets[ref])
+        boundary_base = int(payload.ref_boundary_offsets[ref])
 
         contested = [
             tuple(pair)
@@ -160,7 +160,7 @@ def census(payload, scored, junctions, t_ids, truth: dict[str, float] | None) ->
                     for a, b in contested:
                         first, last = rule(cuts, cut_lo, cut_hi, a, b)
                         values.extend(
-                            edge_flux[edge_base + line - 1] for line in range(first, last)
+                            boundary_flux[boundary_base + line - 1] for line in range(first, last)
                         )
                     zero = (not values) or min(values) <= 0.0
                     if sink == "shipped":
@@ -325,7 +325,7 @@ def main() -> int:
             f"{r['condition']:<44} {z['spliced']['frac']:>15.4f} "
             f"{z['empty_shipped']['frac']:>15.4f} {z['empty_pre_d6']['frac']:>15.4f}"
         )
-    print("   ⛔ ONE THING VARIED: the contiguous-edge set. `shipped` is the rule the deposit implies;")
+    print("   ⛔ ONE THING VARIED: the contiguous-boundary set. `shipped` is the rule the deposit implies;")
     print("      `pre-D-6` is the strictly-between rule that shipped until 2026-08-02.")
 
     print()

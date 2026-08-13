@@ -1,6 +1,6 @@
 """⛔⛔ WHAT A CERTIFIED-RNA COUNT MAY AND MAY NOT CLAIM — the licence, as brute-force arithmetic.
 
-A spliced fragment cannot be gDNA, so ``edge_spliced`` (and ``sj_count``) are **certified RNA**: the one
+A spliced fragment cannot be gDNA, so ``boundary_spliced`` (and ``sj_count``) are **certified RNA**: the one
 observation in the tool that needs no deconvolution. The standing proposal is to turn that into per-slot
 composition evidence by adding a coefficient ``S`` to ψ's RNA arm — ``(½ + S)·log(1 − f_g)`` in place of
 the bare Jeffreys reference ``½·log(1 − f_g)``.
@@ -180,7 +180,7 @@ def test_C3_the_raw_count_term_is_ONE_SIDED_and_UNBOUNDED_in_S(S, ceiling):
     """⛔ The term can only lower ``f_g``, never raise it, and it does so without limit — the answer is
     ``Beta(½, ½+S)``'s median regardless of how much gDNA the slot actually holds. ``M`` never enters.
 
-    ⭐ That is the mechanism behind the panel measurement: 2,565 EDGEs at ``g90 capture_on`` carrying
+    ⭐ That is the mechanism behind the panel measurement: 2,565 BOUNDARIES at ``g90 capture_on`` carrying
     **98.3 %** of the certified-bearing mass have a true ``f_g`` of 0.84, and this answers 0.04.
     """
     med = float(_Beta.ppf(0.5, 0.5, 0.5 + S))

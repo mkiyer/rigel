@@ -8,7 +8,7 @@ turns an observed count into a start density. There is one formula per frame and
     contained   E_f[ (region_len − w + 1)+ ]
     crossing    E_f[ max(0, min(w−1, R_lo, R_hi, R_lo + R_hi − w + 1)) ]
 
-⭐ **The crossing formula covers BOTH edge kinds and both components.** Mean fragment length is its
+⭐ **The crossing formula covers BOTH boundary kinds and both components.** Mean fragment length is its
 large-reach limit, not a separate case: gDNA's template is the chromosome, so its reaches are unbounded
 and its divisor collapses to ``mu − 1``. RNA's template ends where its transcript ends.
 
@@ -97,7 +97,7 @@ def test_contained_is_never_negative():
 
 
 # ---------------------------------------------------------------------------
-# crossing — the one formula, both edge kinds, both components
+# crossing — the one formula, both boundary kinds, both components
 # ---------------------------------------------------------------------------
 
 
@@ -171,7 +171,7 @@ def test_the_taper_is_a_MULTI_FOLD_error_if_ignored():
 
 
 def test_crossing_is_vectorised_over_objects_and_agrees_elementwise():
-    """The real call site passes a whole edge axis at once; a broadcasting slip would mix objects."""
+    """The real call site passes a whole boundary axis at once; a broadcasting slip would mix objects."""
     pmf = _normal_pmf(200.0, 50.0)
     lo = np.array([50.0, 120.0, UNBOUNDED, 0.0])
     hi = np.array([500.0, 300.0, UNBOUNDED, 500.0])
@@ -190,7 +190,7 @@ def test_the_THREE_OLD_DIVISORS_ARE_GONE():
     """The mass-era divisors described a deposit rule that no longer exists.
 
     ``boundary_side_eff_length`` (``E[min(l,R)]/2``), ``spliced_side_eff_length`` (``E[min^2/2l]``) and
-    ``boundary_side_crossing_count_eff_length`` all divided a per-FACE quantity, and a contiguous edge no
+    ``boundary_side_crossing_count_eff_length`` all divided a per-FACE quantity, and a contiguous boundary no
     longer has faces — it is a 0-bp line with one set of numbers. Keeping them would leave two answers
     for one question, which is how an exact factor of 2 survived 29 tests.
     trap 2).

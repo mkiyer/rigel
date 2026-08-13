@@ -29,7 +29,7 @@ Two gates on this slot in the pipeline
 Both come from the region SIGNATURE and never from the counts:
 
 * the SOLVE gate (``solvable``) — a slot deconvolves its own split iff it admits >= 1 RNA strand and has
-  unspliced mass. A slot with no admissible RNA strand (an intergenic region, or a gene-boundary seam) is a
+  unspliced mass. A slot with no admissible RNA strand (an intergenic region, or a gene-boundary boundary) is a
   LOCKED all-gDNA object; it is not solved and keeps its signature-binary init, because RNA cannot cross a
   gene boundary so its unspliced mass is purely gDNA.
 * the EMISSION gate — which MESSAGES a slot sends. That is a policy question and lives there.
@@ -56,9 +56,9 @@ from .simplex_logodds import (
     _solve_regions_logodds_all,
     _tilt_grid,
 )
-from .region_chain import EDGE, REGION, RegionChain, RegionDeconv
+from .region_chain import BOUNDARY, REGION, RegionChain, RegionDeconv
 
-__all__ = ["AssertionCounts", "chain_edge_deconv", "chain_region_deconv", "solve_chain"]
+__all__ = ["AssertionCounts", "chain_boundary_deconv", "chain_region_deconv", "solve_chain"]
 
 
 # ⛔⛔ ASSERTIONS THE SHIPPED POLICY IS KNOWN TO VIOLATE, with the measurement beside each. They are
@@ -431,12 +431,12 @@ def solve_chain(
         # geometry / structure
         left=left,
         right=right,
-        is_edge=np.asarray(chain.kind) != REGION,
+        is_boundary=np.asarray(chain.kind) != REGION,
         is_exon_region=is_exon_region,
         free_pos=np.asarray(fp, bool),
         free_neg=np.asarray(fn, bool),
         g1_locked=g1_locked(np.asarray(fp, bool), np.asarray(fn, bool)),
-        edge_flags=statics.edge_flags,
+        boundary_flags=statics.boundary_flags,
         geometry=geometry,
         order=order_list,
         left_list=left.tolist(),
@@ -646,38 +646,38 @@ def chain_region_deconv(chain: RegionChain, belief: RegionBelief, substrate) -> 
     )
 
 
-def chain_edge_deconv(chain: RegionChain, belief: RegionBelief, substrate) -> RegionDeconv:
-    """Project the chain belief's EDGE slots onto the CONTIGUOUS-EDGE axis — the crossing flux that
+def chain_boundary_deconv(chain: RegionChain, belief: RegionBelief, substrate) -> RegionDeconv:
+    """Project the chain belief's BOUNDARY slots onto the CONTIGUOUS-BOUNDARY axis — the crossing flux that
     ``priors`` and ``derive`` consume.
 
-    ⭐ **ONE per-edge result, not a ``(left, right)`` pair of per-region ones.** The predecessor split
-    each edge's flux onto its two flanking regions and ``priors`` then pooled the two halves straight
+    ⭐ **ONE per-boundary result, not a ``(left, right)`` pair of per-region ones.** The predecessor split
+    each boundary's flux onto its two flanking regions and ``priors`` then pooled the two halves straight
     back together — so the split and the re-pool were a no-op, and that exact sum-then-halve pattern is
     what hid a factor of 2 for months. Owner ruling, 2026-07-30:
-    ``CalibrationResult``'s per-region ``mass_*_left/right`` become per-edge arrays.
+    ``CalibrationResult``'s per-region ``mass_*_left/right`` become per-boundary arrays.
 
-    The RNA mass is spliced-inclusive: an edge's certified-RNA crossings (``edge_spliced``) are RNA
+    The RNA mass is spliced-inclusive: an boundary's certified-RNA crossings (``boundary_spliced``) are RNA
     whatever the unspliced mixture resolves to, since gDNA cannot be spliced.
     """
     kind = np.asarray(chain.kind)
     idx = np.asarray(chain.obj_idx, dtype=np.int64)
-    edge = kind == EDGE
-    unspliced = np.asarray(substrate.edge_unspliced.count, dtype=np.float64).sum(axis=1)
-    spliced = np.asarray(substrate.edge_spliced.count, dtype=np.float64).sum(axis=1)
+    boundary = kind == BOUNDARY
+    unspliced = np.asarray(substrate.boundary_unspliced.count, dtype=np.float64).sum(axis=1)
+    spliced = np.asarray(substrate.boundary_spliced.count, dtype=np.float64).sum(axis=1)
     n = unspliced.shape[0]
-    ei = idx[edge]
+    ei = idx[boundary]
     f_g = np.zeros(n)
     f_pos = np.zeros(n)
     f_neg = np.zeros(n)
-    f_g[ei] = np.asarray(belief.f_g, dtype=np.float64)[edge]
+    f_g[ei] = np.asarray(belief.f_g, dtype=np.float64)[boundary]
     # ⭐ THE PER-STRAND RNA SPLIT, PROJECTED ON THIS AXIS TOO. ψ solves the simplex
     # ``(f_g, f_pos, f_neg)`` at EVERY slot — AXIOM 0's `T(slot)`, which is a function of the two
-    # `free_*` bits and never of the slot's kind — so an EDGE slot has the same three-way composition a
+    # `free_*` bits and never of the slot's kind — so an BOUNDARY slot has the same three-way composition a
     # REGION slot does. ⛔ This projection used to emit ``np.zeros(n)`` for both RNA strands, so the
     # crossing axis published a composition that summed to ``f_g`` alone. Nothing consumed it, which is
     # why it survived; a per-transcript prior reading composition per object does.
-    f_pos[ei] = np.asarray(belief.f_pos, dtype=np.float64)[edge]
-    f_neg[ei] = np.asarray(belief.f_neg, dtype=np.float64)[edge]
+    f_pos[ei] = np.asarray(belief.f_pos, dtype=np.float64)[boundary]
+    f_neg[ei] = np.asarray(belief.f_neg, dtype=np.float64)[boundary]
     return RegionDeconv(
         gdna_mass=f_g * unspliced,
         rna_mass=(1.0 - f_g) * unspliced + spliced,

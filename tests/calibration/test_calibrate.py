@@ -7,7 +7,7 @@ data and is covered by the scenario suite.
 ⭐ **Every expected number here is arithmetic on ``_synthetic.make_synthetic_payload``'s banks**, not a
 recorded output — so a change in the solver moves the composition but never the totals, and a change in
 the AXES fails immediately. The fixture's three axes are deliberately three different lengths
-(3 regions / 2 edges / 1 junction).
+(3 regions / 2 boundaries / 1 junction).
 """
 
 from __future__ import annotations
@@ -27,9 +27,9 @@ from rigel.config import CalibrationConfig
 
 # region_contained_count summed over the two genome-strand columns: [10+2, 1+20, 7+8]
 REGION_TOTAL = np.array([12.0, 21.0, 15.0])
-# edge_unspliced + edge_spliced: [4+1, 2+3] + [0+0, 6+0]
-EDGE_TOTAL = np.array([5.0, 11.0])
-EDGE_SPLICED = np.array([0.0, 6.0])
+# boundary_unspliced + boundary_spliced: [4+1, 2+3] + [0+0, 6+0]
+BOUNDARY_TOTAL = np.array([5.0, 11.0])
+BOUNDARY_SPLICED = np.array([0.0, 6.0])
 JUNCTION_FLUX = np.array([13.0])  # sj_count [9, 4]
 
 
@@ -52,7 +52,7 @@ def _run(config=None, junctions=_UNSET):
 def test_returns_valid_result_on_all_three_axes():
     result = _run()
     assert isinstance(result, CalibrationResult)
-    assert (result.n_regions, result.n_edges, result.n_junctions) == (3, 2, 1)
+    assert (result.n_regions, result.n_boundaries, result.n_junctions) == (3, 2, 1)
 
 
 def test_mass_conserved_per_region():
@@ -62,22 +62,22 @@ def test_mass_conserved_per_region():
     np.testing.assert_allclose(result.mass_gdna_region + result.mass_rna_region, REGION_TOTAL)
 
 
-def test_mass_conserved_per_edge_INCLUDING_the_spliced_crossings():
-    """A line's gDNA + RNA equals unspliced + spliced. ``mass_rna_edge`` is spliced-INCLUSIVE — a
+def test_mass_conserved_per_boundary_INCLUDING_the_spliced_crossings():
+    """A line's gDNA + RNA equals unspliced + spliced. ``mass_rna_boundary`` is spliced-INCLUSIVE — a
     certified-RNA crossing is RNA whatever the unspliced mixture resolves to, since gDNA cannot splice
-    — so dropping it here would lose 6 of edge 1's 11 fragments."""
+    — so dropping it here would lose 6 of boundary 1's 11 fragments."""
     result = _run()
-    np.testing.assert_allclose(result.mass_gdna_edge + result.mass_rna_edge, EDGE_TOTAL)
-    np.testing.assert_allclose(result.mass_rna_spliced_edge, EDGE_SPLICED)
-    assert np.all(result.mass_rna_edge >= result.mass_rna_spliced_edge - 1e-9)
+    np.testing.assert_allclose(result.mass_gdna_boundary + result.mass_rna_boundary, BOUNDARY_TOTAL)
+    np.testing.assert_allclose(result.mass_rna_spliced_boundary, BOUNDARY_SPLICED)
+    assert np.all(result.mass_rna_boundary >= result.mass_rna_spliced_boundary - 1e-9)
 
 
 def test_junction_flux_is_exported_VERBATIM_and_never_deconvolved():
-    """⭐ The third axis (owner ruling, 2026-07-30). A junction edge is pure mature RNA by
+    """⭐ The third axis (owner ruling, 2026-07-30). A junction boundary is pure mature RNA by
     construction, so there is nothing to split: the result carries ``sj_count`` summed over the
     genome-strand columns, exactly.
 
-    ⚠ It is two orders of magnitude away from ``mass_rna_spliced_edge`` on real data at the same line
+    ⚠ It is two orders of magnitude away from ``mass_rna_spliced_boundary`` on real data at the same line
     — 13 vs 0/6 even in this toy — which is why folding the two into one "mature" number names
     nothing.
     """
@@ -113,7 +113,7 @@ def test_masses_bounded_by_their_own_totals():
     result = _run()
     for g, tot in (
         (result.mass_gdna_region, REGION_TOTAL),
-        (result.mass_gdna_edge, EDGE_TOTAL),
+        (result.mass_gdna_boundary, BOUNDARY_TOTAL),
     ):
         assert np.all(g >= -1e-9)
         assert np.all(g <= tot + 1e-9)
@@ -142,15 +142,15 @@ def test_the_supports_are_the_TWO_FRAMES_of_one_formula_family():
     """
     result = _run()
     np.testing.assert_allclose(result.gdna_region_eff_len, [51.0, 51.0, 51.0])
-    np.testing.assert_allclose(result.gdna_edge_eff_len, [49.0, 49.0])
+    np.testing.assert_allclose(result.gdna_boundary_eff_len, [49.0, 49.0])
 
 
 def test_gdna_density_global_is_a_ratio_of_SUMS_over_both_axes():
     """Σ gDNA mass / Σ gDNA support, pooled across regions AND lines — never a mean of per-object
     ratios, which is a different number whenever the supports differ."""
     result = _run()
-    expected = (result.mass_gdna_region.sum() + result.mass_gdna_edge.sum()) / (
-        result.gdna_region_eff_len.sum() + result.gdna_edge_eff_len.sum()
+    expected = (result.mass_gdna_region.sum() + result.mass_gdna_boundary.sum()) / (
+        result.gdna_region_eff_len.sum() + result.gdna_boundary_eff_len.sum()
     )
     assert result.gdna_density_global == pytest.approx(expected)
 
@@ -178,7 +178,7 @@ def test_kappa_matches_strand_balance():
 def test_density_and_supports_sane():
     result = _run()
     assert np.isfinite(result.gdna_density_global) and result.gdna_density_global >= 0.0
-    for arr in (result.gdna_region_eff_len, result.gdna_edge_eff_len):
+    for arr in (result.gdna_region_eff_len, result.gdna_boundary_eff_len):
         assert np.all(np.isfinite(arr)) and np.all(arr >= 0.0)
     assert 0.0 <= result.rna_sense_frac <= 1.0
 
@@ -206,7 +206,7 @@ def test_the_junction_axis_length_is_what_is_checked_not_its_content():
         reach_lo=np.full(2, 100.0),
         reach_hi=np.full(2, 100.0),
     )
-    with pytest.raises(ValueError, match="2 edges but the payload has 1"):
+    with pytest.raises(ValueError, match="2 boundaries but the payload has 1"):
         _run(junctions=two)
 
 

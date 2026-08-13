@@ -321,7 +321,7 @@ def test_peel_continue_share_is_enrichment_free():
 
 
 def test_peel_continue_share_structural_limits():
-    """No spliced flux ⇒ nothing is peeled (w = 1). No RNA at the seam at all ⇒ nothing to apportion (w = 1),
+    """No spliced flux ⇒ nothing is peeled (w = 1). No RNA at the boundary at all ⇒ nothing to apportion (w = 1),
     the caller's own gates decide. And w never leaves [0, 1] — which is what retires the old peel's
     zero-truncation (a fully-consumed subtraction emitted ρ_ν = 0 at a LIVE precision)."""
     assert float(peel_continue_share(5.0, 0.0)) == 1.0
@@ -384,7 +384,7 @@ def test_residual_level_gdna_explains_everything_gives_a_tight_linear_zero():
 
 def test_residual_level_ignorance_is_bounded_and_declared():
     """the-residual-level limit 3 — the upper truncation. An imputed gDNA claim carrying ~1 nat of log-variance (routine at
-    exon→boundary edges under capture) makes σ_f of order 1. A one-sided positive part would return
+    exon→boundary boundaries under capture) makes σ_f of order 1. A one-sided positive part would return
     ``E ≈ 0.8σ`` — "most of my mass is RNA" — asserted out of pure ignorance at a confident-looking k ≈ 2.
     Bounded above, the same ignorance degrades to its correct limit: the uniform posterior, ``f_R = ½`` at
     ``k = 3``, wide enough for any real evidence in the fuse to out-weigh it."""
@@ -437,13 +437,13 @@ def _cr_total(rho):
     return (rho * _CR_EFF).sum(axis=1)
 
 
-# ── P1d: graft_premise_logvar — the two-seam method-of-moments premise variance ──────────────────────
-# ⚠ The SOLVER uses only the pooled (second) return value; the per-edge array is a diagnostic. A variance
-# estimated from a single pair is a χ²₁ (CV = √2), so per-edge is mostly noise — see the docstring.
+# ── P1d: graft_premise_logvar — the two-boundary method-of-moments premise variance ──────────────────────
+# ⚠ The SOLVER uses only the pooled (second) return value; the per-boundary array is a diagnostic. A variance
+# estimated from a single pair is a χ²₁ (CV = √2), so per-boundary is mostly noise — see the docstring.
 
 
-def test_graft_premise_logvar_agreeing_seams_charge_nothing():
-    """Two seams that agree carry no detectable premise error — the truncation is the method's own."""
+def test_graft_premise_logvar_agreeing_boundaries_charge_nothing():
+    """Two boundaries that agree carry no detectable premise error — the truncation is the method's own."""
     per, pooled = graft_premise_logvar(
         np.array([3.0, 7.0]), np.array([3.0, 7.0]), np.array([0.01, 0.01]), np.array([0.01, 0.01])
     )
@@ -460,7 +460,7 @@ def test_graft_premise_logvar_is_the_mom_second_moment_halved():
 
 
 def test_graft_premise_logvar_subtracts_noise_and_is_direction_free():
-    """A gap fully explained by the seams' own noise leaves nothing; a↔b swap cannot change the answer."""
+    """A gap fully explained by the boundaries' own noise leaves nothing; a↔b swap cannot change the answer."""
     fa, fb = np.array([np.e]), np.array([1.0])  # d = 1
     per, _ = graft_premise_logvar(fa, fb, np.array([0.6]), np.array([0.6]))  # noise 1.2 > d² = 1
     assert float(per[0]) == 0.0
@@ -469,31 +469,31 @@ def test_graft_premise_logvar_subtracts_noise_and_is_direction_free():
     assert float(p1[0]) == pytest.approx(float(p2[0]), rel=1e-14)
 
 
-def test_graft_premise_logvar_needs_two_live_seams():
-    """One live seam ⇒ no second study ⇒ per-edge 0, and the pooled fit ignores that edge entirely."""
+def test_graft_premise_logvar_needs_two_live_boundaries():
+    """One live boundary ⇒ no second study ⇒ per-boundary 0, and the pooled fit ignores that boundary entirely."""
     per, pooled = graft_premise_logvar(
         np.array([5.0, np.e**2]), np.array([0.0, 1.0]), np.array([0.0, 0.0]), np.array([0.0, 0.0])
     )
     assert float(per[0]) == 0.0
     assert float(per[1]) == pytest.approx(2.0, rel=1e-12)
-    assert pooled == pytest.approx(2.0, rel=1e-12)  # fitted on the ONE edge that has a pair
+    assert pooled == pytest.approx(2.0, rel=1e-12)  # fitted on the ONE boundary that has a pair
 
 
 def test_graft_premise_logvar_pooled_is_the_population_second_moment():
-    """The pooled fit is the same estimator over the population — NOT the mean of the per-edge values,
-    which would truncate each edge separately and bias the fit upward."""
-    fa = np.exp(np.array([2.0, 0.0, 0.0]))  # d² = 4, 0, 0 against a per-seam noise of 0.5+0.5
+    """The pooled fit is the same estimator over the population — NOT the mean of the per-boundary values,
+    which would truncate each boundary separately and bias the fit upward."""
+    fa = np.exp(np.array([2.0, 0.0, 0.0]))  # d² = 4, 0, 0 against a per-boundary noise of 0.5+0.5
     fb = np.ones(3)
     v = np.full(3, 0.5)
     per, pooled = graft_premise_logvar(fa, fb, v, v)
     d2 = np.array([4.0, 0.0, 0.0])
     assert list(per) == pytest.approx([1.5, 0.0, 0.0], rel=1e-12)
     assert pooled == pytest.approx(max(0.0, d2.mean() - 1.0) / 2.0, rel=1e-12)
-    assert pooled < float(np.mean(per))  # the per-edge truncation really does bias upward
+    assert pooled < float(np.mean(per))  # the per-boundary truncation really does bias upward
 
 
 def test_graft_premise_logvar_infinite_noise_is_ignored_not_propagated():
-    """A seam with no count (var = inf) must not nan the estimate — it contributes no subtraction."""
+    """A boundary with no count (var = inf) must not nan the estimate — it contributes no subtraction."""
     per, pooled = graft_premise_logvar(
         np.array([np.e**2]), np.array([1.0]), np.array([np.inf]), np.array([0.0])
     )
@@ -511,9 +511,9 @@ def test_graft_premise_logvar_never_negative_and_finite():
 
 
 def test_graft_premise_logvar_pooled_is_the_load_bearing_return():
-    """The solver applies the POOLED scalar to every edge. It must therefore exist and be finite even when
-    most edges have no pair at all — the terminal-exon / exon↔exon-boundary case the owner flagged."""
-    fa = np.array([np.e, 0.0, 0.0, 0.0, 0.0])  # one pair, four seams with no partner
+    """The solver applies the POOLED scalar to every boundary. It must therefore exist and be finite even when
+    most boundaries have no pair at all — the terminal-exon / exon↔exon-boundary case the owner flagged."""
+    fa = np.array([np.e, 0.0, 0.0, 0.0, 0.0])  # one pair, four boundaries with no partner
     fb = np.array([1.0, 0.0, 0.0, 0.0, 0.0])
     v = np.zeros(5)
     per, pooled = graft_premise_logvar(fa, fb, v, v)

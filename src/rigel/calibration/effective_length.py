@@ -12,15 +12,15 @@ TWO FRAMES, ONE FAMILY. With ``w`` the molecule length and ``f`` its pmf::
     contained   E_f[ (region_len − w + 1)+ ]                                   fits wholly inside a region
     crossing    E_f[ max(0, min(w−1, R_lo, R_hi, R_lo + R_hi − w + 1)) ]     spans a 0-bp line
 
-⭐ **The crossing formula covers BOTH edge kinds and BOTH components**, with ``R_lo``/``R_hi`` the
+⭐ **The crossing formula covers BOTH boundary kinds and BOTH components**, with ``R_lo``/``R_hi`` the
 molecule's own remaining template either side of the line. Mean fragment length is its large-reach limit,
 not a separate case: gDNA's template is the chromosome, so ``taper_g = 1``, its reaches are
 :data:`UNBOUNDED_REACH` and the divisor collapses to ``mu − 1``. RNA's template ends where its transcript
 ends, so its reaches come from the annotation.
 
-⚠ **REACH IS PER COMPONENT, NOT PER EDGE, AND THAT IS WHAT MAKES IT AWKWARD.** An *unspliced* crossing is
-a gDNA/RNA MIXTURE: the RNA part is bounded by its transcript, the gDNA part is not. So an edge does not
-have "a" reach — each component has its own, and only the RNA one is finite. A junction edge is the easy
+⚠ **REACH IS PER COMPONENT, NOT PER BOUNDARY, AND THAT IS WHAT MAKES IT AWKWARD.** An *unspliced* crossing is
+a gDNA/RNA MIXTURE: the RNA part is bounded by its transcript, the gDNA part is not. So an boundary does not
+have "a" reach — each component has its own, and only the RNA one is finite. A junction boundary is the easy
 case, since only a spliced molecule uses it. ⛔ Production has ignored reach entirely up to now; whether
 to keep ignoring it is an open decision, and this module is written so that
 "ignore it" is expressible as ``UNBOUNDED_REACH`` rather than as a second code path.
@@ -36,7 +36,7 @@ and a floored division turns "no data" into a confident wrong answer.
 
 ⛔ **The three mass-era divisors are DELETED** — ``boundary_side_eff_length`` (``E[min(l,R)]/2``),
 ``spliced_side_eff_length`` (``E[min²/2l]``) and ``boundary_side_crossing_count_eff_length``. They divided
-a per-FACE mass, and a contiguous edge no longer has faces: it is a 0-bp line carrying one set of numbers.
+a per-FACE mass, and a contiguous boundary no longer has faces: it is a 0-bp line carrying one set of numbers.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .region_chain import EDGE, REGION, RegionChain
+from .region_chain import BOUNDARY, REGION, RegionChain
 
 __all__ = [
     "UNBOUNDED_REACH",
@@ -103,7 +103,7 @@ def contained_eff_length(region_len_bp: np.ndarray, fl_pmf: np.ndarray) -> np.nd
 def crossing_eff_length(
     fl_pmf: np.ndarray, reach_lo: np.ndarray, reach_hi: np.ndarray
 ) -> np.ndarray:
-    """``E_f[max(0, min(w−1, R_lo, R_hi, R_lo + R_hi − w + 1))]`` per object — one formula, both edge kinds.
+    """``E_f[max(0, min(w−1, R_lo, R_hi, R_lo + R_hi − w + 1))]`` per object — one formula, both boundary kinds.
 
     A molecule of length ``w`` crossing the line lies ``a`` bases to its left and ``w − a`` to its right,
     with ``1 ≤ a ≤ w − 1``; it must fit in what remains of its own template on each side, so
@@ -233,7 +233,7 @@ def crossing_moments(fl_pmf: np.ndarray) -> LandedMoments:
     """Moments for the CROSSING population at UNBOUNDED reach: ``A(w) = (w−1)+``, ``u(w) = 1/(w−1)``.
 
     Every entry is a scalar — under unbounded reach a line's opportunity does not depend on where it is,
-    which is the "every edge has the same expectation" property stated in moments.
+    which is the "every boundary has the same expectation" property stated in moments.
 
         E[A]     = mu − 1                    <- IS crossing_eff_length at UNBOUNDED_REACH
         E[A·u]   = P(w >= 2)
@@ -243,7 +243,7 @@ def crossing_moments(fl_pmf: np.ndarray) -> LandedMoments:
         E[A·u·w] = mu                        (u(w)·w = w/(w−1), so Σ f(w)(w−1)·w/(w−1) = mu)
 
     ⚠ **Unbounded reach only, matching `build_region_geometry`'s default.** With the TRAPS: prove-the-substrate taper switched on
-    (``edge_rna_reach``) the opportunity becomes per-edge and these moments would have to as well. The
+    (``boundary_rna_reach``) the opportunity becomes per-boundary and these moments would have to as well. The
     taper was measured as a null (≤ 0.0002), so the default path is the one wired;
     a consumer that turns the taper on must extend this function rather than silently mismatch.
     """
@@ -282,7 +282,7 @@ def _normalise(eff, e_u, e_w, e_uu, e_ww, e_uw) -> LandedMoments:
     return LandedMoments(m1=d(e_u), m2=d(e_w), q1=d(e_uu), q2=d(e_ww), q12=d(e_uw), eff=eff)
 
 def build_slot_moments(chain: RegionChain, region_arrays, fl_pmf: np.ndarray) -> LandedMoments:
-    """Scatter the two frames' moments onto the chain: contained at REGION slots, crossing at EDGE slots.
+    """Scatter the two frames' moments onto the chain: contained at REGION slots, crossing at BOUNDARY slots.
 
     The same slot layout `build_region_geometry` uses for ``eff_gdna``/``eff_rna``, so ``moments.eff`` is
     that array — asserted by ``test_eff_matches_the_solver_divisor``, because two implementations of one
@@ -290,18 +290,18 @@ def build_slot_moments(chain: RegionChain, region_arrays, fl_pmf: np.ndarray) ->
     """
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
-    is_region, is_edge = kind == REGION, kind == EDGE
+    is_region, is_boundary = kind == REGION, kind == BOUNDARY
     n = int(chain.n_slots)
 
     region_len = np.asarray(region_arrays.region_size_bp, dtype=np.float64)
     region_m = contained_moments(region_len, fl_pmf) if region_len.shape[0] else None
-    edge_m = crossing_moments(fl_pmf)
+    boundary_m = crossing_moments(fl_pmf)
 
     fields = {}
     for name in ("m1", "m2", "q1", "q2", "q12", "eff"):
         out = np.zeros(n, dtype=np.float64)
         if region_m is not None:
             out[is_region] = getattr(region_m, name)[obj[is_region]]
-        out[is_edge] = float(getattr(edge_m, name))
+        out[is_boundary] = float(getattr(boundary_m, name))
         fields[name] = out
     return LandedMoments(**fields)

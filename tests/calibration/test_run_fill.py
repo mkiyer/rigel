@@ -7,8 +7,8 @@ import numpy as np
 from rigel.calibration.run_fill import runfill_bidirectional, same_ref_left_right
 
 
-def test_same_ref_left_right_edges_and_breaks():
-    # Two references: [0,0,0 | 1,1]. Reference edges and cross-ref seams have no same-ref neighbour.
+def test_same_ref_left_right_boundaries_and_breaks():
+    # Two references: [0,0,0 | 1,1]. Reference boundaries and cross-ref boundaries have no same-ref neighbour.
     ref = np.array([0, 0, 0, 1, 1])
     left, right = same_ref_left_right(ref)
     # left_same[i]: region i has a same-ref LEFT neighbour
@@ -18,7 +18,7 @@ def test_same_ref_left_right_edges_and_breaks():
 
 
 def test_same_ref_left_right_singletons():
-    # A length-1 array (both edges) and a per-region singleton run.
+    # A length-1 array (both boundaries) and a per-region singleton run.
     left, right = same_ref_left_right(np.array([7]))
     assert not left[0] and not right[0]
     left, right = same_ref_left_right(np.array([0, 1, 2]))  # every region its own reference
@@ -50,7 +50,7 @@ def test_runfill_does_not_cross_reference():
     assert out[1] == 5.0  # filled within ref 0
     assert np.isnan(out[2]) and np.isnan(
         out[3]
-    )  # ref 1 has no anchor — not carried across the seam
+    )  # ref 1 has no anchor — not carried across the boundary
 
 
 def test_runfill_unreachable_run_stays_nan():

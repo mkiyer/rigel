@@ -163,12 +163,12 @@ class StepContext:
     # ── GEOMETRY / STRUCTURE — readable at either end, and belief-free by construction ────────────────
     left: np.ndarray  # adjacent slot of the other kind, -1 at a reference start
     right: np.ndarray
-    is_edge: np.ndarray  # ~is_region; the chain strictly alternates N E N E … N
+    is_boundary: np.ndarray  # ~is_region; the chain strictly alternates N E N E … N
     is_exon_region: np.ndarray  # a REGION whose region signature is EXON — the graft's destination
     free_pos: np.ndarray  # does the annotation admit +RNA here?  ⭐ one of AXIOM 0's TWO BITS
     free_neg: np.ndarray  # …and -RNA?                            ⭐ the other
-    g1_locked: np.ndarray  # structurally pure-gDNA, BOTH axes (an intergenic|exon EDGE included)
-    edge_flags: np.ndarray  # for terminus_flank_gain — does a flank's RNA population grow?
+    g1_locked: np.ndarray  # structurally pure-gDNA, BOTH axes (an intergenic|exon BOUNDARY included)
+    boundary_flags: np.ndarray  # for terminus_flank_gain — does a flank's RNA population grow?
     geometry: object  # RegionGeometry, for the frame pair (a policy-owned derivation)
     order: list  # the genomic visiting order — slot ids ARE it, so this is range(n)
     left_list: list  # ``left`` as a Python list: the scan reads it one element at a time

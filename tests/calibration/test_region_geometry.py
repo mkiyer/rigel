@@ -6,11 +6,11 @@
 ⛔ **What this replaces.** ``build_region_geometry`` was 213 lines producing **18 per-face arrays** — a
 ``_left``/``_right`` pair for the unspliced mass, its integer flux, three effective lengths and four
 spliced channels. The pairs existed because a boundary's two sides lay in differently-sized flanks and
-therefore had **different divisors**. A contiguous edge is a 0-bp line: one set of numbers, seen
+therefore had **different divisors**. A contiguous boundary is a 0-bp line: one set of numbers, seen
 identically from both sides. So the pairs go, and with them the junction-strand routing, the exon-bit
 flank gating and the ``_continues``/``_eff_spl_face`` far-boundary machinery — all of which existed to
 *guess* which flank a spliced deposit belonged to, because the old accumulator attributed a splice to
-the region's edge rather than to the junction's own coordinate. The v8
+the region's boundary rather than to the junction's own coordinate. The v8
 index states ``(src, dst, strand)`` explicitly, so the guess is replaced by index arithmetic.
 
 ⭐ **TWO STRAND AXES, AND THEY ARE NOT THE SAME AXIS.** ``count`` is keyed by **genome** strand — where
@@ -28,7 +28,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rigel.calibration.region_chain import EDGE, REGION, build_region_chain
+from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain
 from rigel.calibration.region_geometry import (
     RegionGeometry,
     build_region_geometry,
@@ -87,7 +87,7 @@ def two_point_pmf(a: int, b: int, wa: float = 0.5, max_size: int = 200) -> np.nd
 
 
 # ---------------------------------------------------------------------------
-# the fixture: the 3-region / 2-edge / 1-junction synthetic payload
+# the fixture: the 3-region / 2-boundary / 1-junction synthetic payload
 # ---------------------------------------------------------------------------
 
 GDNA_PMF = spike_pmf(50)
@@ -98,7 +98,7 @@ RNA_PMF = spike_pmf(80)
 def parts():
     payload, region_arrays = make_synthetic_payload()
     substrate = CalibrationSubstrate.from_payload(payload, region_arrays)
-    chain = build_region_chain(payload.ref_region_offsets, payload.ref_edge_offsets)
+    chain = build_region_chain(payload.ref_region_offsets, payload.ref_boundary_offsets)
     # the fixture's one junction: regions are [0,100) [100,200) [200,300), so an intron running from the
     # end of region 0 to the start of region 2 has its DONOR at line 0 and its ACCEPTOR at line 1.
     junctions = JunctionGeometry(
@@ -162,12 +162,12 @@ def test_ONE_SET_OF_NUMBERS_PER_SLOT(geometry, parts):
 
 
 def test_the_chain_is_N_E_N_E_N_and_the_geometry_is_addressed_by_SLOT(parts, geometry):
-    """3 regions and 2 edges interleave into 5 slots. A geometry keyed by region id or by edge id instead
+    """3 regions and 2 boundaries interleave into 5 slots. A geometry keyed by region id or by boundary id instead
     would have the wrong length, which is the axis mix-up that once dropped 476,719 of 476,732
     fragments while every golden test passed."""
     _, _, _, chain, _ = parts
     assert chain.n_slots == 5
-    np.testing.assert_array_equal(chain.kind, [REGION, EDGE, REGION, EDGE, REGION])
+    np.testing.assert_array_equal(chain.kind, [REGION, BOUNDARY, REGION, BOUNDARY, REGION])
     assert geometry.unspliced_count.shape[0] == 5
 
 
@@ -176,19 +176,19 @@ def test_the_chain_is_N_E_N_E_N_and_the_geometry_is_addressed_by_SLOT(parts, geo
 # ---------------------------------------------------------------------------
 
 
-def test_a_REGION_slot_carries_region_contained_and_an_EDGE_slot_carries_edge_unspliced(
+def test_a_REGION_slot_carries_region_contained_and_an_BOUNDARY_slot_carries_boundary_unspliced(
     geometry, parts
 ):
     """The two populations live on axes that are off by one per reference, and the fixture gives every
     bank a distinct total so a consumer reading the wrong one cannot pass by coincidence."""
     payload, _, _, chain, _ = parts
     region_slots = np.flatnonzero(np.asarray(chain.kind) == REGION)
-    edge_slots = np.flatnonzero(np.asarray(chain.kind) == EDGE)
+    boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
     np.testing.assert_array_equal(
         geometry.unspliced_count[region_slots], payload.region_contained_count.astype(np.float64)
     )
     np.testing.assert_array_equal(
-        geometry.unspliced_count[edge_slots], payload.edge_unspliced_count.astype(np.float64)
+        geometry.unspliced_count[boundary_slots], payload.boundary_unspliced_count.astype(np.float64)
     )
 
 
@@ -236,8 +236,8 @@ def test_a_REGION_divisor_is_the_CONTAINED_placements_count(geometry, parts):
         assert geometry.eff_rna[slot] == pytest.approx(brute_contained(length, RNA_PMF))
 
 
-def test_a_CONTIGUOUS_EDGE_divisor_is_the_UNBOUNDED_crossing_count__the_A7_RULING(geometry, parts):
-    """⭐ **TRAPS: prove-the-substrate, ruled 2026-07-30**: at a contiguous edge BOTH components pass ``UNBOUNDED_REACH``, so
+def test_a_CONTIGUOUS_BOUNDARY_divisor_is_the_UNBOUNDED_crossing_count__the_A7_RULING(geometry, parts):
+    """⭐ **TRAPS: prove-the-substrate, ruled 2026-07-30**: at a contiguous boundary BOTH components pass ``UNBOUNDED_REACH``, so
     both divisors collapse to ``mu - 1`` exactly. gDNA is unbounded by physics (its template is the
     chromosome, ``taper_g = 1``); RNA is unbounded **by the ruling**, which keeps S5.e varying exactly
     one thing and defers the taper to S5.g where it can be A/B'd against S5.f's first baseline.
@@ -245,10 +245,10 @@ def test_a_CONTIGUOUS_EDGE_divisor_is_the_UNBOUNDED_crossing_count__the_A7_RULIN
     ⚠ This test PINS the ruling. Turning the RNA taper on later must break it — that is the point.
     """
     _, _, _, chain, _ = parts
-    edge_slots = np.flatnonzero(np.asarray(chain.kind) == EDGE)
+    boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
     mu_g = float(np.dot(np.arange(GDNA_PMF.size), GDNA_PMF))
     mu_r = float(np.dot(np.arange(RNA_PMF.size), RNA_PMF))
-    for slot in edge_slots:
+    for slot in boundary_slots:
         assert geometry.eff_gdna[slot] == pytest.approx(mu_g - 1.0)
         assert geometry.eff_rna[slot] == pytest.approx(mu_r - 1.0)
         # and against the enumerator, so this is not just restating `fl_mean - 1`
@@ -256,7 +256,7 @@ def test_a_CONTIGUOUS_EDGE_divisor_is_the_UNBOUNDED_crossing_count__the_A7_RULIN
 
 
 def test_the_JUNCTION_divisor_uses_its_REAL_EXONIC_REACH__the_other_half_of_A7(parts):
-    """⭐ **TRAPS: prove-the-substrate, ruled**: a junction edge is used only by a molecule that spliced across it, so what
+    """⭐ **TRAPS: prove-the-substrate, ruled**: a junction boundary is used only by a molecule that spliced across it, so what
     remains either side is exonic and the reach is real. A junction is a BRAND-NEW population — the
     predecessor had no junction divisor at all — so wiring it regresses nothing, while leaving it
     unbounded would ship a divisor wrong by up to 4x at a first exon (199.0 at
@@ -278,9 +278,9 @@ def test_the_JUNCTION_divisor_uses_its_REAL_EXONIC_REACH__the_other_half_of_A7(p
     assert expected < mu_r_minus_1, (
         "the fixture must make the reach BIND, or the test proves nothing"
     )
-    edge_slots = np.flatnonzero(np.asarray(chain.kind) == EDGE)
-    live = [s for s in edge_slots if g.junction_count[s].sum() > 0]
-    assert live, "the junction must reach some edge slot"
+    boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
+    live = [s for s in boundary_slots if g.junction_count[s].sum() > 0]
+    assert live, "the junction must reach some boundary slot"
     for slot in live:
         assert g.eff_junction[slot, 0] == pytest.approx(expected)
 
@@ -297,8 +297,8 @@ def test_a_reach_of_ZERO_gives_ZERO_opportunity_and_is_not_a_sentinel(parts):
         reach_hi=np.array([1000.0]),
     )
     g = build_region_geometry(chain, substrate, region_arrays, dead, GDNA_PMF, RNA_PMF)
-    edge_slots = np.flatnonzero(np.asarray(chain.kind) == EDGE)
-    assert np.all(g.eff_junction[edge_slots, 0] == 0.0)
+    boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
+    assert np.all(g.eff_junction[boundary_slots, 0] == 0.0)
 
 
 def test_a_divisor_of_ZERO_is_NOT_FLOORED(parts):
@@ -340,7 +340,7 @@ def test_a_MIXED_pmf_is_not_collapsed_to_its_mean(parts):
 
 
 # ---------------------------------------------------------------------------
-# 4. the junction -> edge incidence, and the transcript-strand keying
+# 4. the junction -> boundary incidence, and the transcript-strand keying
 # ---------------------------------------------------------------------------
 
 
@@ -350,14 +350,14 @@ def test_a_junction_deposits_on_BOTH_the_donor_and_the_acceptor_line(geometry, p
     second, so both lines genuinely saw the flux — and the index states both explicitly, which is what
     replaces the old exon-bit guess.
 
-    The fixture's junction runs region 0 -> region 2, so it lands on edge 0 (donor) and edge 1 (acceptor)
-    — i.e. on BOTH edge slots.
+    The fixture's junction runs region 0 -> region 2, so it lands on boundary 0 (donor) and boundary 1 (acceptor)
+    — i.e. on BOTH boundary slots.
     """
     payload, _, _, chain, _ = parts
-    edge_slots = np.flatnonzero(np.asarray(chain.kind) == EDGE)
+    boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
     flux = float(payload.sj_count[0].sum())
     assert flux > 0
-    for slot in edge_slots:
+    for slot in boundary_slots:
         assert geometry.junction_count[slot, 0] == pytest.approx(flux)
 
 
@@ -377,12 +377,12 @@ def test_the_mature_flux_is_keyed_by_the_JUNCTIONS_OWN_STRAND_not_the_align_colu
         reach_hi=np.array([1000.0]),
     )
     g = build_region_geometry(chain, substrate, region_arrays, neg, GDNA_PMF, RNA_PMF)
-    edge_slots = np.flatnonzero(np.asarray(chain.kind) == EDGE)
+    boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
     total = float(payload.sj_count[0].sum())
     assert payload.sj_count[0, 0] != payload.sj_count[0, 1], (
         "the fixture must make the axes distinct"
     )
-    for slot in edge_slots:
+    for slot in boundary_slots:
         assert g.junction_count[slot, 1] == pytest.approx(total)  # the - transcript column
         assert g.junction_count[slot, 0] == 0.0
 
@@ -419,7 +419,7 @@ def test_several_junctions_on_one_line_POOL_their_counts_AND_their_divisors(part
         gdna_fl_pmf=GDNA_PMF,
         rna_fl_pmf=RNA_PMF,
     )
-    slot = int(np.flatnonzero(np.asarray(chain.kind) == EDGE)[0])
+    slot = int(np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)[0])
     assert g.junction_count[slot, 0] == pytest.approx(9 + 4 + 5 + 1)
     assert g.eff_junction[slot, 0] == pytest.approx(
         brute_crossing(RNA_PMF, 1e12, 1e12) + brute_crossing(RNA_PMF, 30.0, 30.0)
@@ -427,7 +427,7 @@ def test_several_junctions_on_one_line_POOL_their_counts_AND_their_divisors(part
 
 
 def two_reference_parts(payload):
-    """chr1 with 3 regions / 2 edges, then chr2 with 2 regions / 1 edge.
+    """chr1 with 3 regions / 2 boundaries, then chr2 with 2 regions / 1 boundary.
 
     ⭐ **The second reference is the point.** Slot ids run ``N E N E N`` per reference, so within the
     FIRST reference region ``i`` always sits at slot ``2i`` — which means a geometry that assumes that
@@ -445,7 +445,7 @@ def two_reference_parts(payload):
     p2 = dataclasses.replace(
         payload,
         ref_region_offsets=np.array([0, 3, 5], dtype=np.int64),
-        ref_edge_offsets=np.array([0, 2, 3], dtype=np.int64),
+        ref_boundary_offsets=np.array([0, 2, 3], dtype=np.int64),
         ref_sj_offsets=np.array([0, 0, 1], dtype=np.int64),
         n_refs=2,
         region_contained_count=np.vstack(
@@ -455,13 +455,13 @@ def two_reference_parts(payload):
             [payload.region_contained_inv_opportunity_sum, np.zeros(2, np.uint64)]
         ),
         region_start_count=np.concatenate([payload.region_start_count, np.zeros(2, np.uint32)]),
-        edge_unspliced_count=np.vstack(
-            [payload.edge_unspliced_count, np.array([[3, 3]], np.uint32)]
+        boundary_unspliced_count=np.vstack(
+            [payload.boundary_unspliced_count, np.array([[3, 3]], np.uint32)]
         ),
-        edge_unspliced_inv_length_sum=np.concatenate(
-            [payload.edge_unspliced_inv_length_sum, np.zeros(1, np.uint64)]
+        boundary_unspliced_inv_length_sum=np.concatenate(
+            [payload.boundary_unspliced_inv_length_sum, np.zeros(1, np.uint64)]
         ),
-        edge_spliced_count=np.vstack([payload.edge_spliced_count, np.zeros((1, 2), np.uint32)]),
+        boundary_spliced_count=np.vstack([payload.boundary_spliced_count, np.zeros((1, 2), np.uint32)]),
         cut_positions=np.array([0, 100, 200, 300, 0, 100, 200], dtype=np.int64),
         ref_cut_offsets=np.array([0, 4, 7], dtype=np.int64),
     )
@@ -477,14 +477,14 @@ def two_reference_parts(payload):
     )
     ra2 = RegionArrays.from_frame(df, {"chr1": 0, "chr2": 1})
     sub2 = CalibrationSubstrate.from_payload(p2, ra2)
-    chain2 = build_region_chain(p2.ref_region_offsets, p2.ref_edge_offsets)
+    chain2 = build_region_chain(p2.ref_region_offsets, p2.ref_boundary_offsets)
     return p2, ra2, sub2, chain2
 
 
-def _edge_slot_of(chain, edge_obj_id: int) -> int:
-    edge_slots = np.flatnonzero(np.asarray(chain.kind) == EDGE)
-    obj = np.asarray(chain.obj_idx)[edge_slots]
-    return int(edge_slots[obj == edge_obj_id][0])
+def _boundary_slot_of(chain, boundary_obj_id: int) -> int:
+    boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
+    obj = np.asarray(chain.obj_idx)[boundary_slots]
+    return int(boundary_slots[obj == boundary_obj_id][0])
 
 
 def test_a_junction_never_lands_on_ANOTHER_REFERENCE(parts):
@@ -501,7 +501,7 @@ def test_a_junction_never_lands_on_ANOTHER_REFERENCE(parts):
         reach_hi=np.array([1000.0]),
     )
     g = build_region_geometry(chain2, sub2, ra2, j, GDNA_PMF, RNA_PMF)
-    assert g.junction_count[_edge_slot_of(chain2, 2)].sum() == 0.0, "a chr1 junction reached chr2"
+    assert g.junction_count[_boundary_slot_of(chain2, 2)].sum() == 0.0, "a chr1 junction reached chr2"
 
 
 def test_a_junction_on_a_LATER_REFERENCE_lands_on_that_references_own_line(parts):
@@ -524,12 +524,12 @@ def test_a_junction_on_a_LATER_REFERENCE_lands_on_that_references_own_line(parts
     )
     g = build_region_geometry(chain2, sub2, ra2, j, GDNA_PMF, RNA_PMF)
     flux = float(p2.sj_count[0].sum())
-    chr2_edge = _edge_slot_of(chain2, 2)
+    chr2_boundary = _boundary_slot_of(chain2, 2)
     # donor (right of region 3) and acceptor (left of region 4) are the SAME line, so it takes the flux twice
-    assert g.junction_count[chr2_edge, 0] == pytest.approx(2.0 * flux)
+    assert g.junction_count[chr2_boundary, 0] == pytest.approx(2.0 * flux)
     assert np.all(g.junction_count[np.asarray(chain2.kind) == REGION] == 0.0)
     for e in (0, 1):  # chr1's two lines saw nothing
-        assert g.junction_count[_edge_slot_of(chain2, e)].sum() == 0.0
+        assert g.junction_count[_boundary_slot_of(chain2, e)].sum() == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -628,20 +628,20 @@ def test_spliced_count_and_junction_count_are_DIFFERENT_POPULATIONS(geometry, pa
     * ``spliced_count`` — crossed this line CONTIGUOUSLY, having spliced somewhere else;
     * ``junction_count`` — never crossed it, it JUMPED from here.
 
-    The fixture makes them differ on both axes at once. At edge 0 the junction's donor sits on the line
-    but nothing crossed it contiguously (13 vs 0); at edge 1 both are live and unequal (13 vs 6). A
-    consumer that read one for the other would be off by the whole gene's mature output at a donor seam
+    The fixture makes them differ on both axes at once. At boundary 0 the junction's donor sits on the line
+    but nothing crossed it contiguously (13 vs 0); at boundary 1 both are live and unequal (13 vs 6). A
+    consumer that read one for the other would be off by the whole gene's mature output at a donor boundary
     — which is the 2-versus-251 case in the design log.
     """
     payload, _, _, chain, _ = parts
-    edge_slots = np.flatnonzero(np.asarray(chain.kind) == EDGE)
-    spliced = geometry.spliced_count[edge_slots].sum(axis=1)
-    junction = geometry.junction_count[edge_slots].sum(axis=1)
-    np.testing.assert_array_equal(spliced, payload.edge_spliced_count.sum(axis=1))
+    boundary_slots = np.flatnonzero(np.asarray(chain.kind) == BOUNDARY)
+    spliced = geometry.spliced_count[boundary_slots].sum(axis=1)
+    junction = geometry.junction_count[boundary_slots].sum(axis=1)
+    np.testing.assert_array_equal(spliced, payload.boundary_spliced_count.sum(axis=1))
     assert junction[0] == pytest.approx(float(payload.sj_count[0].sum()))
-    # edge 0: junction flux with NO contiguous spliced crossing — they cannot be the same array
+    # boundary 0: junction flux with NO contiguous spliced crossing — they cannot be the same array
     assert spliced[0] == 0.0 and junction[0] > 0.0
-    # edge 1: both live, and unequal
+    # boundary 1: both live, and unequal
     assert spliced[1] > 0.0 and junction[1] > 0.0 and spliced[1] != junction[1]
 
 

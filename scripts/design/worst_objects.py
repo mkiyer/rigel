@@ -2,7 +2,7 @@
 """⭐⭐ **STEP 3 OF THE DEBUG LOOP** — dissect one condition's error down to individual objects.
 
 The loop is: run the panel → measure the full error table → take the worst conditions → **dissect
-them to individual regions/edges** → find the mechanism → fix → start again.
+them to individual regions/boundaries** → find the mechanism → fix → start again.
 ``pass0_vs_oracle.py`` does the table and ranks CLASSES; this does the last step, which no instrument
 covered. A class share says *where* the error lives; it cannot say *why*, and "the relay" is a name
 for a set of objects, not a mechanism.
@@ -28,7 +28,7 @@ is debugging a different program.
 
 ⚠ **THE NEIGHBOUR COLUMNS ARE THE POINT ON RELAY-ONLY OBJECTS.** An object with no own evidence takes
 its answer from its neighbours, so its error is only interpretable beside theirs. For a REGION the
-neighbours are the two flanking EDGE slots and vice versa — the chain is ``N E N E … N`` per
+neighbours are the two flanking BOUNDARY slots and vice versa — the chain is ``N E N E … N`` per
 reference, so "neighbour" is unambiguous and needs no graph traversal.
 
 ⛔ Undrained, like the instrument it builds on, and for the same forced reason (see that module).
@@ -67,7 +67,7 @@ def _sibling(name: str):
 
 P0 = _sibling("pass0_vs_oracle.py")
 
-from rigel.calibration.region_chain import EDGE, REGION  # noqa: E402
+from rigel.calibration.region_chain import BOUNDARY, REGION  # noqa: E402
 from rigel.calibration.signature import coarse_type_array  # noqa: E402
 from rigel.config import CalibrationConfig, PipelineConfig  # noqa: E402
 from rigel.index import TranscriptIndex  # noqa: E402
@@ -105,16 +105,16 @@ def concentration(err: np.ndarray) -> list[tuple[int, float, float]]:
     return out
 
 
-def _slot_lookup(chain, n_regions: int, n_edges: int):
-    """``(region_slot, edge_slot)`` — the chain slot each object occupies. The chain is ``N E N E … N``
+def _slot_lookup(chain, n_regions: int, n_boundaries: int):
+    """``(region_slot, boundary_slot)`` — the chain slot each object occupies. The chain is ``N E N E … N``
     per reference, so this is a bijection per axis and there is nothing to pool."""
     kind = np.asarray(chain.kind)
     obj = np.asarray(chain.obj_idx, dtype=np.int64)
     region_slot = np.full(n_regions, -1, np.int64)
-    edge_slot = np.full(n_edges, -1, np.int64)
+    boundary_slot = np.full(n_boundaries, -1, np.int64)
     region_slot[obj[kind == REGION]] = np.flatnonzero(kind == REGION)
-    edge_slot[obj[kind == EDGE]] = np.flatnonzero(kind == EDGE)
-    return region_slot, edge_slot
+    boundary_slot[obj[kind == BOUNDARY]] = np.flatnonzero(kind == BOUNDARY)
+    return region_slot, boundary_slot
 
 
 def dissect(m, *, axis: str, arm: str, top: int, index) -> dict:
@@ -129,9 +129,9 @@ def dissect(m, *, axis: str, arm: str, top: int, index) -> dict:
 
     cap, chain = m.debug_pass0["capture"], m.debug_pass0["chain"]
     ra = m.debug_pass0["region_arrays"]
-    n_regions, n_edges = int(m.payload.n_regions), int(m.payload.n_edges)
-    region_slot, edge_slot = _slot_lookup(chain, n_regions, n_edges)
-    slot_of = region_slot if axis == "region" else edge_slot
+    n_regions, n_boundaries = int(m.payload.n_regions), int(m.payload.n_boundaries)
+    region_slot, boundary_slot = _slot_lookup(chain, n_regions, n_boundaries)
+    slot_of = region_slot if axis == "region" else boundary_slot
 
     solver, info = m.solver_masks[axis], m.info_masks[axis]
     tau = np.asarray(cap["_tau0_lam"], np.float64)
@@ -148,7 +148,7 @@ def dissect(m, *, axis: str, arm: str, top: int, index) -> dict:
 
     # per-slot error, so a neighbour's error can be read off directly
     slot_err = np.zeros(chain.kind.shape[0], np.float64)
-    for ax, sl in (("region", region_slot), ("edge", edge_slot)):
+    for ax, sl in (("region", region_slot), ("boundary", boundary_slot)):
         tg = np.asarray(getattr(truth, f"mass_gdna_{ax}"), np.float64)
         pg = np.asarray(getattr(res, f"mass_gdna_{ax}"), np.float64)
         ok = sl >= 0
@@ -167,7 +167,7 @@ def dissect(m, *, axis: str, arm: str, top: int, index) -> dict:
             kind_txt = TYPE_NAME.get(int(rtype[obj]), "?")
             sc = STRAND_NAME.get(int(strand_class[obj]), "?")
             span = int(end[obj] - start[obj])
-        else:  # a contiguous edge is a 0-bp line; name it by the slot's neighbours
+        else:  # a contiguous boundary is a 0-bp line; name it by the slot's neighbours
             where, kind_txt, sc, span = f"line#{obj}", "line", "-", 0
         rows.append(
             {
@@ -272,7 +272,7 @@ def main() -> int:
     ap.add_argument("--suite", type=Path, default=P0.DEFAULT_SUITE)
     ap.add_argument("--index", type=Path, default=P0.DEFAULT_INDEX)
     ap.add_argument("--arm", default="pass0", choices=("pass0", "final"))
-    ap.add_argument("--axis", default="region", choices=("region", "edge", "both"))
+    ap.add_argument("--axis", default="region", choices=("region", "boundary", "both"))
     ap.add_argument("--top", type=int, default=40)
     ap.add_argument("--work-dir", type=Path, default=Path(os.environ.get("RIGEL_SCRATCH", "/tmp")))
     ap.add_argument("--oracle-cache", type=Path, default=None)
@@ -297,7 +297,7 @@ def main() -> int:
         ),
         oracle_cache=args.oracle_cache,
     )
-    for axis in (("region", "edge") if args.axis == "both" else (args.axis,)):
+    for axis in (("region", "boundary") if args.axis == "both" else (args.axis,)):
         report(m, dissect(m, axis=axis, arm=args.arm, top=args.top, index=index), axis, args.arm,
                args.top)
     return 0

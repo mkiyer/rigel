@@ -97,7 +97,7 @@ def capture(suite: Path, index_dir: Path, condition: str) -> dict:
         em=dataclasses.replace(base.em, seed=EM_SEED),
     )
     # ⭐ The PAYLOAD is not on `PipelineResult`, and it holds the very banks being renamed — so it is
-    # captured at the `calibrate` seam rather than by scanning a second time. `calibrate` is imported
+    # captured at the `calibrate` boundary rather than by scanning a second time. `calibrate` is imported
     # FUNCTION-LOCALLY by the pipeline, so patching the module attribute is picked up at call time.
     import rigel.calibration as CAL
 
@@ -114,7 +114,7 @@ def capture(suite: Path, index_dir: Path, condition: str) -> dict:
     finally:
         CAL.calibrate = original
     if "payload" not in box:
-        raise RuntimeError("⛔ calibrate was never called — the capture seam moved, and a capture "
+        raise RuntimeError("⛔ calibrate was never called — the capture boundary moved, and a capture "
                            "missing the payload would silently gate less than it claims")
 
     quant = result.estimator.get_counts_df(index)

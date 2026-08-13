@@ -1,4 +1,4 @@
-"""The per-contiguous-edge RNA REACH, on the accumulator's edge axis — S5.g's input.
+"""The per-contiguous-boundary RNA REACH, on the accumulator's boundary axis — S5.g's input.
 
     Ruling: · Equation:
 
@@ -12,7 +12,7 @@ genome-wide and by **+0.36** in the last region before a polyA site.
 independently per side AND per strand". A POS-strand transcript and a NEG-strand one ending at
 different places give a line two different RNA reaches, and averaging them would describe neither.
 
-⚠ **A contiguous edge's reach is GENOMIC, unlike a junction's, which is EXONIC.** A junction is used
+⚠ **A contiguous boundary's reach is GENOMIC, unlike a junction's, which is EXONIC.** A junction is used
 only by a spliced molecule, so what remains either side of it is exonic. A contiguous line is crossed by
 *nascent* RNA too, which is genomic — taking the exonic reach there would declare an intronic nascent
 fragment impossible (`splice_graph.JunctionGeometry`).
@@ -29,8 +29,8 @@ import numpy as np
 import pytest
 
 from rigel.calibration.splice_graph import (
-    build_contiguous_edge_reach_arrays,
-    build_edge_flags_array,
+    build_contiguous_boundary_reach_arrays,
+    build_boundary_flags_array,
     build_region_partition_arrays,
 )
 
@@ -52,11 +52,11 @@ REFS = {"chr1": 1500, "chr2": 1500}
 
 @pytest.fixture(scope="module")
 def index(tmp_path_factory):
-    return build_test_index(tmp_path_factory, GTF, name="edge_reach", refs=REFS)
+    return build_test_index(tmp_path_factory, GTF, name="boundary_reach", refs=REFS)
 
 
-def _edge_positions(index) -> np.ndarray:
-    """Genomic position of every contiguous edge, in edge order — the independent coordinate.
+def _boundary_positions(index) -> np.ndarray:
+    """Genomic position of every contiguous boundary, in boundary order — the independent coordinate.
 
     A reference contributing ``c`` cuts owns ``c − 1`` regions and ``c − 2`` interior lines, and line
     ``e`` sits at cut ``e + 1``. Derived from the PARTITION, not from the reach builder, so the two
@@ -72,18 +72,18 @@ def _edge_positions(index) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# Shape: the SAME axis as everything else on the edge side.
+# Shape: the SAME axis as everything else on the boundary side.
 # ---------------------------------------------------------------------------
 
 
 def test_one_entry_per_line_on_the_SAME_axis_as_the_flags(index):
     """⭐ The reach array and the flags array must be the same axis, element for element — both are
-    per contiguous edge, and a consumer indexes them with one index."""
-    reach_lo, reach_hi = build_contiguous_edge_reach_arrays(index)
-    n_edges = build_edge_flags_array(index).shape[0]
-    assert reach_lo.shape == (n_edges, 2)
-    assert reach_hi.shape == (n_edges, 2)
-    assert reach_lo.shape[0] == _edge_positions(index).shape[0]
+    per contiguous boundary, and a consumer indexes them with one index."""
+    reach_lo, reach_hi = build_contiguous_boundary_reach_arrays(index)
+    n_boundaries = build_boundary_flags_array(index).shape[0]
+    assert reach_lo.shape == (n_boundaries, 2)
+    assert reach_hi.shape == (n_boundaries, 2)
+    assert reach_lo.shape[0] == _boundary_positions(index).shape[0]
 
 
 def test_the_strand_axis_is_POS_then_NEG(index):
@@ -94,7 +94,7 @@ def test_the_strand_axis_is_POS_then_NEG(index):
     are disjoint — so there are lines where exactly one column is non-zero, and a transposed strand
     axis moves the non-zero to the wrong line rather than merely permuting a pair.
     """
-    reach_lo, reach_hi = build_contiguous_edge_reach_arrays(index)
+    reach_lo, reach_hi = build_contiguous_boundary_reach_arrays(index)
     pos_live = (reach_lo[:, 0] > 0) | (reach_hi[:, 0] > 0)
     neg_live = (reach_lo[:, 1] > 0) | (reach_hi[:, 1] > 0)
     assert pos_live.any() and neg_live.any(), "the fixture must exercise both strands"
@@ -105,25 +105,25 @@ def test_the_strand_axis_is_POS_then_NEG(index):
 def test_reach_is_ZERO_where_the_strand_carries_no_transcript(index):
     """⚠ Zero is the ANSWER, not a missing value. A line with no POS-strand template gives POS-RNA no
     opportunity, and the consuming divisor must return 0 so the rate emits nothing (trap 23)."""
-    reach_lo, reach_hi = build_contiguous_edge_reach_arrays(index)
+    reach_lo, reach_hi = build_contiguous_boundary_reach_arrays(index)
     assert int((reach_lo[:, 0] == 0).sum()) > 0
     assert np.all(reach_lo >= 0) and np.all(reach_hi >= 0)
 
 
 def test_reach_matches_the_INDEX_keyed_by_src_region(index):
-    """The values are the edges_df reach columns of the edge whose ``src`` is the line's left region —
+    """The values are the edges_df reach columns of the boundary whose ``src`` is the line's left region —
     read back from the frame directly rather than re-derived."""
-    edges = index.edges_df
-    contiguous = edges[edges["kind"] == 0]
+    boundaries = index.edges_df
+    contiguous = boundaries[boundaries["kind"] == 0]
     by_src = {
         int(s): row for s, row in zip(contiguous["src"], contiguous.itertuples(), strict=True)
     }
 
-    reach_lo, reach_hi = build_contiguous_edge_reach_arrays(index)
-    from rigel.calibration.region_arrays import RegionArrays, edge_region_indices
+    reach_lo, reach_hi = build_contiguous_boundary_reach_arrays(index)
+    from rigel.calibration.region_arrays import RegionArrays, boundary_region_indices
 
     ra = RegionArrays.from_index(index)
-    lo_region, _hi_region = edge_region_indices(np.asarray(ra.ref_id))
+    lo_region, _hi_region = boundary_region_indices(np.asarray(ra.ref_id))
     assert lo_region.shape[0] == reach_lo.shape[0]
     for e, src in enumerate(lo_region):
         row = by_src[int(src)]
@@ -139,11 +139,11 @@ def test_a_single_region_reference_contributes_no_entry(tmp_path_factory):
     one = build_test_index(
         tmp_path_factory,
         'chr1\ttest\texon\t201\t400\t.\t+\t.\tgene_id "g"; transcript_id "t";\n',
-        name="edge_reach_one",
+        name="boundary_reach_one",
         refs={"chr1": 600, "chrE": 400},  # chrE has no feature at all
     )
-    reach_lo, _ = build_contiguous_edge_reach_arrays(one)
-    assert reach_lo.shape[0] == build_edge_flags_array(one).shape[0]
+    reach_lo, _ = build_contiguous_boundary_reach_arrays(one)
+    assert reach_lo.shape[0] == build_boundary_flags_array(one).shape[0]
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +165,7 @@ def test_the_taper_COLLAPSES_the_divisor_near_a_terminus(index):
     unbounded = float(crossing_eff_length(pmf, [UNBOUNDED_REACH], [UNBOUNDED_REACH])[0])
     assert unbounded == pytest.approx(199.0)
 
-    reach_lo, reach_hi = build_contiguous_edge_reach_arrays(index)
+    reach_lo, reach_hi = build_contiguous_boundary_reach_arrays(index)
     tapered = crossing_eff_length(pmf, reach_lo[:, 0], reach_hi[:, 0])
     assert np.all(tapered <= unbounded + 1e-9)
     # ⚠ Strictly smaller somewhere, or the taper is inert on this fixture and proves nothing.

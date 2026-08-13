@@ -1,16 +1,16 @@
-"""The reciprocal-opportunity deposit: one density rule for every object, region or edge.
+"""The reciprocal-opportunity deposit: one density rule for every object, region or boundary.
 
     Write-up: · /§10.1
 
 THE CLAIM UNDER TEST
-    At an edge the accumulator deposits ``1/(L-1)`` and the result is an exactly model-free estimate of
+    At an boundary the accumulator deposits ``1/(L-1)`` and the result is an exactly model-free estimate of
     the start density. The reason usually given is "the reciprocal of the fragment length cancels the
-    opportunity". That is a coincidence of the edge frame: the opportunity to cross a 0-bp line happens
+    opportunity". That is a coincidence of the boundary frame: the opportunity to cross a 0-bp line happens
     to BE ``L-1``. The general statement is
 
         deposit  h(w) = 1 / A(w)     where A(w) is that population's OPPORTUNITY
 
-    and the edge rule is its ``A(w) = w - 1`` special case. Applied to a region, where the contained
+    and the boundary rule is its ``A(w) = w - 1`` special case. Applied to a region, where the contained
     opportunity is ``(l - w + 1)_+`` and the spanning opportunity is ``(w - l - 1)_+``, this predicts a
     deposit that has never been tried: ``1/(l - L + 1)`` and ``1/(L - l - 1)``.
 
@@ -21,7 +21,7 @@ WHAT THIS SCRIPT VERIFIES
     T3  contained + spanning together estimate rho * (1 - f(l+1)) -- the two truncations are
         complementary and close to exactly, the single missing length being w = l + 1.
     T4  The two limits the owner predicted:
-          l = 0        -> the region rule degenerates to the edge rule EXACTLY
+          l = 0        -> the region rule degenerates to the boundary rule EXACTLY
           l >> E[L]    -> the deposit tends to 1/l, i.e. count / region_length
     T5  The shipped region weight ``1/L`` does NOT have property T2, and the size of its bias.
     T6  ``count / l`` (the naive density) is biased by (l - mu + 1)/l; the reciprocal deposit removes
@@ -46,13 +46,13 @@ def fl_pmf(mean: float, cv: float, family: str = "gamma") -> np.ndarray:
     from scipy.stats import gamma, lognorm, norm
 
     sd = mean * cv
-    edges = np.arange(0, MAX_W + 2, dtype=np.float64)
+    boundaries = np.arange(0, MAX_W + 2, dtype=np.float64)
     if family == "gamma":
-        cdf = gamma.cdf(edges, a=(mean / sd) ** 2, scale=sd**2 / mean)
+        cdf = gamma.cdf(boundaries, a=(mean / sd) ** 2, scale=sd**2 / mean)
     elif family == "lognormal":
-        cdf = lognorm.cdf(edges, s=np.sqrt(np.log1p(cv**2)), scale=mean / np.sqrt(1.0 + cv**2))
+        cdf = lognorm.cdf(boundaries, s=np.sqrt(np.log1p(cv**2)), scale=mean / np.sqrt(1.0 + cv**2))
     else:
-        cdf = norm.cdf(edges, loc=mean, scale=sd)
+        cdf = norm.cdf(boundaries, loc=mean, scale=sd)
     p = np.diff(cdf)
     p[0] = 0.0
     return p / p.sum()
@@ -171,16 +171,16 @@ def check_T3_complementary(rho: float = 0.05) -> tuple[int, float]:
 
 
 def check_T4_limits(rho: float = 0.05) -> None:
-    """T4: the two limits -- l = 0 is the edge rule exactly; l >> E[L] tends to count / region_length."""
-    print("\n  T4a  l = 0 reduces to the edge rule (region spanning weight vs the 0-bp line weight)")
+    """T4: the two limits -- l = 0 is the boundary rule exactly; l >> E[L] tends to count / region_length."""
+    print("\n  T4a  l = 0 reduces to the boundary rule (region spanning weight vs the 0-bp line weight)")
     for spec in GRID[:6]:
         pmf = fl_pmf(*spec)
         region0 = expected_deposit(pmf, "spanning", 0.0, "invA", rho)
-        edge = expected_deposit(pmf, "crossing", 0.0, "invA", rho)
+        boundary = expected_deposit(pmf, "crossing", 0.0, "invA", rho)
         contained0 = expected_deposit(pmf, "contained", 0.0, "invA", rho)
-        tag = PASS if abs(region0 - edge) < 1e-12 and contained0 == 0.0 else FAIL
+        tag = PASS if abs(region0 - boundary) < 1e-12 and contained0 == 0.0 else FAIL
         print(f"   {tag} FL {spec[0]:5.0f}/{spec[1]:4.2f}:  region l=0 spanning {region0:.10f}  "
-              f"edge {edge:.10f}   (contained at l=0 is {contained0:.1f}, as it must be)")
+              f"boundary {boundary:.10f}   (contained at l=0 is {contained0:.1f}, as it must be)")
 
     print("\n  T4b  l >> E[L]: the reciprocal deposit -> 1/l, so the sum -> count / region_length")
     pmf = fl_pmf(200.0, 0.35)

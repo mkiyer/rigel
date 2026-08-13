@@ -348,7 +348,7 @@ def scan_and_buffer(
     from .scan_payload import AccumulatorPayload
 
     if result.get("calibration") is not None:
-        # ⚠ The provenance covers regions AND edges. The payload is edge-keyed by construction — its
+        # ⚠ The provenance covers regions AND boundaries. The payload is boundary-keyed by construction — its
         # junction axis is meaningless against a different junction CSR — and `partition_hash` covers
         # `regions.feather` only, deliberately.
         calibration_payload = AccumulatorPayload.from_scan_result(
@@ -460,7 +460,7 @@ def _wire_calibration_regions(
 
     ⚠ **Two calls, and both are required.** ``set_regions`` refuses to run twice, which is why the junctions
     are separate; and ``scan`` refuses to run if the second call is missing, because a missing junction table
-    is invisible — every observed intron would simply read as unannotated, so all 404,168 junction edges and
+    is invisible — every observed intron would simply read as unannotated, so all 404,168 junction boundaries and
     both spliced banks would come back empty from a scan that looked perfectly well-formed.
     """
     from .calibration.splice_graph import build_junction_edge_arrays, build_region_partition_arrays
@@ -475,7 +475,7 @@ def _wire_calibration_regions(
         int(max_frag_length),
     )
     # ⚠ ``edge_row`` is deliberately NOT passed. It is a join key back to ``index.edges_df``, not the
-    # junction-edge id — that IS the CSR slot — and using it to index a junction bank would write 1.04 M
+    # junction-boundary id — that IS the CSR slot — and using it to index a junction bank would write 1.04 M
     # rows past the end of a 404,168-entry array.
     junctions = build_junction_edge_arrays(index)
     scanner.set_junctions(
@@ -916,7 +916,7 @@ def run_pipeline(
     from .calibration import calibrate
     from .calibration.region_arrays import RegionArrays
     from .calibration.splice_graph import (
-        build_edge_flags_array,
+        build_boundary_flags_array,
         build_junction_geometry_arrays,
     )
 
@@ -932,7 +932,7 @@ def run_pipeline(
     # ⚠ No alignment check here: CalibrationSubstrate.from_payload runs the identical one inside
     # calibrate(), microseconds later, and two copies of an invariant is one too many.
     region_arrays = RegionArrays.from_index(index)
-    edge_flags = build_edge_flags_array(index)
+    boundary_flags = build_boundary_flags_array(index)
     # The junction axis, in the accumulator's own junction slot order: where each junction attaches,
     # its TRANSCRIPT strand, and its exonic reach either side. The calibrator places it as a FACTOR on
     # its two endpoint regions — never as a message channel, since every junction closes an undirected
@@ -988,12 +988,12 @@ def run_pipeline(
         config=config.calibration,
         junctions=junctions,
         diagnostics_out=_calib_diag,
-        edge_flags=edge_flags,
+        boundary_flags=boundary_flags,
     )
     calibration_diagnostics = _calib_diag.get("calibration")
 
     # ⭐ FRAGMENTS, not object incidences. The sum still runs over all three axes — gDNA is contained in
-    # a region or crosses a line, RNA also jumps, and at a donor seam the junction flux IS the gene's whole
+    # a region or crosses a line, RNA also jumps, and at a donor boundary the junction flux IS the gene's whole
     # mature output — but each axis is converted by its own population's mass-per-crossing first. Adding
     # the raw banks counted one fragment once per line it crossed AND once per junction it used, which
     # read `f_gdna` 0.3851 against a truth of 0.5085 on ladder g50 capture_off.
@@ -1001,7 +1001,7 @@ def run_pipeline(
         "calibration: N=%d E=%d J=%d gdna_density_global=%.4g rna_sense_frac=%.3f "
         "gDNA_fragments=%.0f RNA_fragments=%.0f (junction incidences %.0f)",
         calibration.n_regions,
-        calibration.n_edges,
+        calibration.n_boundaries,
         calibration.n_junctions,
         calibration.gdna_density_global,
         calibration.rna_sense_frac,

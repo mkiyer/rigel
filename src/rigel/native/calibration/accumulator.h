@@ -7,32 +7,32 @@
  * THE MODEL
  *   The genome is a graph. One Accumulator holds ONE reference, described by its sorted CUT positions.
  *   A reference contributing `c` cuts owns `c - 1` REGIONS and `c - 2` interior LINES, and a line is a
- *   0-bp CONTIGUOUS EDGE between two adjacent regions:
+ *   0-bp CONTIGUOUS BOUNDARY between two adjacent regions:
  *
  *       cuts    0        100       200       600        c = 4
  *       regions   [  n0  ][   n1   ][   n2   ]            c - 1 = 3
  *       lines            line 1    line 2               c - 2 = 2
  *
- *   A JUNCTION EDGE is a directed donor->acceptor link taken from the annotation. A fragment is a
+ *   A JUNCTION BOUNDARY is a directed donor->acceptor link taken from the annotation. A fragment is a
  *   PATH: its aligned blocks joined across the mate gap, broken by introns.
  *
- *   Regions count fragments CONTAINED (the whole path fits inside one region); edges count fragments
+ *   Regions count fragments CONTAINED (the whole path fits inside one region); boundaries count fragments
  *   CROSSING. Each population stores only the channels something READS, and they differ: count,
- *   inv_length_sum (fixed point), length_sum, and -- on the contiguous edges -- the conserved mass.
+ *   inv_length_sum (fixed point), length_sum, and -- on the contiguous boundaries -- the conserved mass.
  *
  * WHY MORE THAN ONE SUM
  *   With `placements` the number of admissible start positions -- L at a region, L-1 at a 0-bp line:
  *
  *       E[count]   = rho * E[placements]
- *       E[inv_length_sum] = rho * E[placements * (1/placements)] = rho   <- at an EDGE, exactly
+ *       E[inv_length_sum] = rho * E[placements * (1/placements)] = rho   <- at an BOUNDARY, exactly
  *       E[length_sum]     = rho * E[placements * L]
  *
- * `inv_length_sum` is deliberately NOT called `density`: it is one at an edge, exactly, and is NOT one
+ * `inv_length_sum` is deliberately NOT called `density`: it is one at an boundary, exactly, and is NOT one
  * at a region, where the opportunity (region - L + 1)+ does not cancel. `length_sum` is the second tilt, and
  * without it the (count, inv_length_sum) pair has determinant mu_g - mu_r and so carries NO information
  * about the gDNA/RNA split whenever the two components share a mean length. See
  *
- *   The opportunity factor cancels identically at an edge for ANY length distribution, which is why no
+ *   The opportunity factor cancels identically at an boundary for ANY length distribution, which is why no
  *   divisor and no length model appear there. It does not cancel at a region.
  *
  * TWO STRANDS, AND THEY ARE INDEPENDENT
@@ -109,7 +109,7 @@ inline int strand_column(std::int32_t align_strand) noexcept {
 /// A region: an interval. ONE population — the fragments contained inside it — in two strand columns.
 ///
 /// ⚠ A `spanning` population (one segment covering the region whole) was removed on evidence: it reached
-/// no evidence-starved region the region's own bounding EDGES did not already reach off capture, and 141
+/// no evidence-starved region the region's own bounding BOUNDARIES did not already reach off capture, and 141
 /// regions / 822 fragments (0.008 %) under it. Its mass is not lost — a spanning fragment crosses both of
 /// the region's lines and is deposited there.
 /// ⛔ Consequence, and it is structural: no spliced fragment touches the region axis at all, because a
@@ -124,10 +124,10 @@ struct Region {
 };
 static_assert(sizeof(Region) == 16, "Region must be 16 bytes with no padding");
 
-/// A contiguous edge: the 0-bp line between two adjacent regions. `spliced` means the FRAGMENT used an
+/// A contiguous boundary: the 0-bp line between two adjacent regions. `spliced` means the FRAGMENT used an
 /// annotated junction somewhere -- not that this line is one. gDNA cannot be spliced, so a spliced
 /// crossing is a certified RNA crossing.
-struct ContiguousEdge {
+struct Boundary {
     std::uint32_t unspliced_count[kNStrandColumns];
     std::uint32_t spliced_count[kNStrandColumns];
     /// ⭐ ONE value -- strand-agnostic, see `Region`.
@@ -150,9 +150,9 @@ struct ContiguousEdge {
     /// mass at the same line, and is NOT "the number of spliced fragments here".
     double spliced_mass;
 };
-static_assert(sizeof(ContiguousEdge) == 40, "ContiguousEdge must be 40 bytes with no padding");
+static_assert(sizeof(Boundary) == 40, "Boundary must be 40 bytes with no padding");
 
-/// A junction edge: one exact donor->acceptor jump. Spliced by construction, so there is no unspliced
+/// A junction boundary: one exact donor->acceptor jump. Spliced by construction, so there is no unspliced
 /// population; and it is not a genomic position, so it carries no structural flags.
 struct JunctionEdge {
     std::uint32_t count[kNStrandColumns];
@@ -161,7 +161,7 @@ struct JunctionEdge {
     /// population's length distribution.
     double inv_length_sum;
     /// ⭐⭐⭐ THE CONSERVED MASS'S THIRD AXIS. A spliced fragment's block that contains no interior
-    /// line deposits on neither edge bank, and is not `contained` either -- its path spans a junction,
+    /// line deposits on neither boundary bank, and is not `contained` either -- its path spans a junction,
     /// so it lies in no single region. Such a fragment existed on the incidence axis and on no conserved
     /// one, which is why a library fragment count was not computable. Measured on the origin-split
     /// oracle at ladder g50 capture_off: 1,222,375 of 4,830,713 RNA fragments (25.3 %) are in that
@@ -171,7 +171,7 @@ struct JunctionEdge {
     /// crossed a line is untouched, so `unspliced_mass` and `spliced_mass` are byte-identical to what
     /// they were. Spec: `_accumulator_reference.py`; gates: `tests/native/test_conserved_mass.py`.
     ///
-    /// ⭐⭐⭐ **TWO VALUES, AND THIS REVERSES `ContiguousEdge::unspliced_mass`'s ONE-VALUE RULING ON
+    /// ⭐⭐⭐ **TWO VALUES, AND THIS REVERSES `Boundary::unspliced_mass`'s ONE-VALUE RULING ON
     /// THIS AXIS ONLY (owner, 2026-08-12). THE REVERSAL IS ADMISSIBLE BECAUSE THE PREMISE CHANGED, AND
     /// THE PREMISE IS RECORDED HERE SO IT IS NOT RE-LITIGATED IN EITHER DIRECTION.**
     /// The ruling was *"nothing reads a mass per strand"*. That is now false for junctions and only for
@@ -394,7 +394,7 @@ struct ScoredHypothesis {
 struct DepositScratch {
     std::vector<std::pair<std::int64_t, std::int64_t>> introns;   // normalised: sorted, disjoint, clipped
     std::vector<std::pair<std::int64_t, std::int64_t>> segments;  // the path, introns cut out
-    std::vector<std::int32_t>                         sj_ids;     // annotated junction edges used
+    std::vector<std::int32_t>                         sj_ids;     // annotated junction boundaries used
     /// ⭐ The same resolution kept PER INTRON POSITION, -1 where unannotated. `sj_ids` is filtered, so
     /// it cannot say which of a block's two ends is a junction — and the conserved mass needs exactly
     /// that. One entry per intron, so block `i` is bounded by `sj_id_at_gap[i-1]` and `sj_id_at_gap[i]`.
@@ -444,10 +444,10 @@ public:
                          int max_length,
                          std::int32_t ref_id);
 
-    /// Install this reference's junction edges as a CSR keyed by DONOR CUT INDEX -- the index the
+    /// Install this reference's junction boundaries as a CSR keyed by DONOR CUT INDEX -- the index the
     /// deposit already computes while locating the lines its path crosses.
     ///
-    /// ⚠ The junction-edge id IS the slot: `sj_boundary_right[k]` and the bank entry `k` are the same k.
+    /// ⚠ The junction-boundary id IS the slot: `sj_boundary_right[k]` and the bank entry `k` are the same k.
     /// There is no indirection to a row in `edges.feather`; using that row as a bank index writes past
     /// the end of a 404,168-entry array, because the highest such row is 1,447,755.
     ///
@@ -458,15 +458,15 @@ public:
                        std::vector<std::int8_t>  sj_strand);    // the junction's ANNOTATED strand
 
     std::size_t n_regions()    const noexcept { return regions_.size(); }
-    std::size_t n_edges()    const noexcept { return edges_.size(); }
+    std::size_t n_boundaries()    const noexcept { return boundaries_.size(); }
     std::size_t n_junctions() const noexcept { return junctions_.size(); }
     std::size_t n_cuts()     const noexcept { return cuts_.size(); }
 
     const std::int64_t* cuts_data() const noexcept { return cuts_.data(); }
     Region*               regions_data()      noexcept { return regions_.data(); }
     const Region*         regions_data() const noexcept { return regions_.data(); }
-    ContiguousEdge*     edges_data()      noexcept { return edges_.data(); }
-    const ContiguousEdge* edges_data() const noexcept { return edges_.data(); }
+    Boundary*     boundaries_data()      noexcept { return boundaries_.data(); }
+    const Boundary* boundaries_data() const noexcept { return boundaries_.data(); }
     JunctionEdge*       junctions_data()      noexcept { return junctions_.data(); }
     const JunctionEdge* junctions_data() const noexcept { return junctions_.data(); }
 
@@ -565,7 +565,7 @@ private:
     void record_gap_resolution(const OfferedFragment& fragment,
                                const std::vector<ScoredHypothesis>& survivors) noexcept;
 
-    /// The annotated junction-edge id for one intron, or -1 if it is not an annotated junction.
+    /// The annotated junction-boundary id for one intron, or -1 if it is not an annotated junction.
     std::int64_t sj_edge_id(std::int64_t intron_start,
                             std::int64_t intron_end,
                             std::int32_t sj_strand) const noexcept;
@@ -575,7 +575,7 @@ private:
 
     std::vector<std::int64_t>  cuts_;              // n_cuts, strictly increasing
     std::vector<Region>          regions_;             // n_cuts - 1
-    std::vector<ContiguousEdge> edges_;            // n_cuts - 2, the interior lines
+    std::vector<Boundary> boundaries_;            // n_cuts - 2, the interior lines
     std::vector<JunctionEdge>  junctions_;         // one per annotated junction on this reference
     std::vector<std::uint32_t> region_start_count_;  // n_regions -- its own array, so Region stays 48 B
 
@@ -599,7 +599,7 @@ private:
 //
 // `cut_positions` is the concatenated, reference-major cut array; reference f owns
 // cut_positions[ref_cut_offsets[f] .. ref_cut_offsets[f+1]). A reference with fewer than 2 cuts owns no
-// regions and no edges, which is legal.
+// regions and no boundaries, which is legal.
 //
 class AccumulatorSet {
 public:
@@ -623,7 +623,7 @@ public:
     ///     offsets      -> offsets[c0 .. c1]      - offsets[c0]      (length n_cuts + 1)
     ///     boundary_right -> boundary_right[j0 .. j1] - c0               (a ref-local cut index)
     ///
-    /// ⚠ Two consequences, both load-bearing. A reference's junction-edge ids are `slot - j0`, so the
+    /// ⚠ Two consequences, both load-bearing. A reference's junction-boundary ids are `slot - j0`, so the
     /// payload's junction axis is exactly the flat slot order concatenated in reference order — which is
     /// what lets `edges_df.edge_row` stay a join key that never crosses the ABI. And the narrowing to
     /// int32 is safe by census: 1.04 M cuts and 404,168 junctions at human scale.

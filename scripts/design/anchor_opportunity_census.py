@@ -59,7 +59,7 @@ widening this instrument's population.
                    the probe-retention factor and nowhere else.
 
 ⚠ **The neighbour set is the chain's own adjacency** (`chain.left`/`chain.right`), not a re-derived
-traversal: genomic order IS slot order and the chain strictly alternates REGION/EDGE, so an anchor's
+traversal: genomic order IS slot order and the chain strictly alternates REGION/BOUNDARY, so an anchor's
 neighbours are ``i-1`` and ``i+1`` and a reference terminal links to ``-1``.
 
 ⛔ **This instrument cannot say the anchor caused the regression** — it says only whether the anchor's
@@ -82,7 +82,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import numpy as np  # noqa: E402
 
-from rigel.calibration.region_chain import EDGE, REGION, build_region_chain  # noqa: E402
+from rigel.calibration.region_chain import BOUNDARY, REGION, build_region_chain  # noqa: E402
 from rigel.calibration.region_geometry import (  # noqa: E402
     build_region_geometry,
     build_region_statics,
@@ -112,15 +112,15 @@ def _payloads(cache_root: Path, suite: Path, tag: str, index, cfg):
     return {k: read_scan_cache(cache_root / tag / k, index, scan).payload for k in ORIGINS}
 
 
-def measure(parts, index, ra, junctions, edge_flags) -> dict:
+def measure(parts, index, ra, junctions, boundary_flags) -> dict:
     """Per-slot TRUE gDNA density, and the anchor population's own view of it."""
     from rigel.calibration.fl import build_fl_models
     from rigel.calibration.gdna_opportunity import gdna_opportunity_from_index
     from rigel.calibration.junction_opportunity import crossing_probability_from_index
 
     gp = parts["gdna"]
-    chain = build_region_chain(gp.ref_region_offsets, gp.ref_edge_offsets)
-    statics = build_region_statics(chain, ra, edge_flags)
+    chain = build_region_chain(gp.ref_region_offsets, gp.ref_boundary_offsets)
+    statics = build_region_statics(chain, ra, boundary_flags)
 
     # ⭐ the divisor comes from the gDNA partition's OWN length model — the true post-capture gDNA pmf.
     size = int(gp.max_length)
@@ -150,8 +150,8 @@ def measure(parts, index, ra, junctions, edge_flags) -> dict:
         out[kind == REGION] = np.asarray(sub.region_contained.count, np.float64).sum(1)[
             obj[kind == REGION]
         ]
-        out[kind == EDGE] = np.asarray(sub.edge_unspliced.count, np.float64).sum(1)[
-            obj[kind == EDGE]
+        out[kind == BOUNDARY] = np.asarray(sub.boundary_unspliced.count, np.float64).sum(1)[
+            obj[kind == BOUNDARY]
         ]
         return out
 
@@ -232,12 +232,12 @@ def main() -> int:
     cfg = PipelineConfig()
     ra = RegionArrays.from_frame(index.regions_df, index.ref_name_to_id)
     from rigel.calibration.splice_graph import (
-        build_edge_flags_array,
+        build_boundary_flags_array,
         build_junction_geometry_arrays,
     )
 
     junctions = build_junction_geometry_arrays(index)
-    edge_flags = build_edge_flags_array(index)
+    boundary_flags = build_boundary_flags_array(index)
     conds = args.conditions or sorted(p.name for p in cache.iterdir() if p.is_dir())
 
     # ⭐ `anchor` is this instrument's population; `lock` is what the SOLVER locks. They are not the same
@@ -250,7 +250,7 @@ def main() -> int:
     rows = []
     for tag in conds:
         try:
-            m = measure(_payloads(cache, suite, tag, index, cfg), index, ra, junctions, edge_flags)
+            m = measure(_payloads(cache, suite, tag, index, cfg), index, ra, junctions, boundary_flags)
         except Exception as e:  # noqa: BLE001
             print(f"{tag:<42} SKIP  {type(e).__name__}: {e}")
             continue

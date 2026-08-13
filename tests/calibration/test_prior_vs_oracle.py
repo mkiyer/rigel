@@ -61,7 +61,7 @@ PV = _load_sibling("prior_vs_oracle.py")
 def _scenario(name: str, seed: int, work_dir) -> Scenario:
     """Three genes, staggered isoforms, and one region shorter than the shortest fragment.
 
-    ⭐ The stagger is load-bearing for the ``edge_spliced`` bank (a contiguous crossing by a molecule
+    ⭐ The stagger is load-bearing for the ``boundary_spliced`` bank (a contiguous crossing by a molecule
     that spliced elsewhere can only land where a cut falls inside another transcript's exon), and the
     short region is what gives the toy genuinely EMPTY objects — the population the NaN-not-zero gate is
     about. Both are the same structures ``test_pass0_vs_oracle`` relies on, for the same reasons.
@@ -413,13 +413,13 @@ def test_the_gdna_partition_carries_NO_spliced_deposit_so_F_gdna_needs_no_subtra
     from _oracle import OracleTruth
 
     g = measured.oracle.parts["gdna"]
-    assert int(np.asarray(g.edge_spliced_count).sum()) == 0
+    assert int(np.asarray(g.boundary_spliced_count).sum()) == 0
     assert int(np.asarray(g.sj_count).sum()) == 0
 
-    poisoned = np.array(g.edge_spliced_count, copy=True)
+    poisoned = np.array(g.boundary_spliced_count, copy=True)
     poisoned[0, 0] += 1
-    fake = dataclasses.replace(g, edge_spliced_count=poisoned)
-    with pytest.raises(AssertionError, match="edge_spliced_count"):
+    fake = dataclasses.replace(g, boundary_spliced_count=poisoned)
+    with pytest.raises(AssertionError, match="boundary_spliced_count"):
         OracleTruth.from_parts(measured.oracle.full, {**measured.oracle.parts, "gdna": fake})
 
 
@@ -577,7 +577,7 @@ def test_the_SPLICED_gDNA_diagnostic_fires_on_a_BLOCK_SIZED_slip_and_is_blind_to
     ⛔⛔ **AND ITS SENSITIVITY IS MEASURED HERE RATHER THAN ASSUMED, because the first version of this
     gate asserted the opposite and failed.** The simulator writes each population as a CONTIGUOUS BLOCK,
     so BAM order has a handful of origin transitions (15 on a 10 M-fragment panel condition) and a
-    one-fragment roll mislabels only the fragments sitting on those seams — a couple, none of them
+    one-fragment roll mislabels only the fragments sitting on those boundaries — a couple, none of them
     necessarily spliced. ⭐ So this test pins BOTH halves: a roll of one is invisible, a roll across a
     block is loud. That is why the hard gate is the count identity and not this.
     """
@@ -879,19 +879,19 @@ def _in_locus_regions(measured) -> np.ndarray:
 def _biggest_in_locus_site(measured, field):
     """The largest element of ``field`` that the locus projection actually reaches.
 
-    ⛔ Edge-indexed arrays are selected through the SHIPPED ``_edge_locus_shares`` rather than a local
-    rule: a locus's edges are the edges that TOUCH its regions, which is exactly the decision that
+    ⛔ Boundary-indexed arrays are selected through the SHIPPED ``_boundary_locus_shares`` rather than a local
+    rule: a locus's boundaries are the boundaries that TOUCH its regions, which is exactly the decision that
     function exists to make. Restating it here would drift from the code under test.
     """
-    from rigel.calibration.priors import _edge_locus_shares
+    from rigel.calibration.priors import _boundary_locus_shares
 
     arr = np.asarray(getattr(measured.calibration, field), np.float64)
     keep = _in_locus_regions(measured)
-    if "edge" in field:
-        e_idx, _lid, _w = _edge_locus_shares(
+    if "boundary" in field:
+        e_idx, _lid, _w = _boundary_locus_shares(
             measured.region_arrays, measured.multi_loci, len(measured.multi_loci)
         )
-        keep = np.zeros(int(measured.calibration.n_edges), dtype=bool)
+        keep = np.zeros(int(measured.calibration.n_boundaries), dtype=bool)
         keep[e_idx] = True
     if arr.shape[0] == keep.shape[0]:
         ranked = np.where(keep.reshape((-1,) + (1,) * (arr.ndim - 1)), arr, -np.inf)
