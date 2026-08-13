@@ -1,6 +1,6 @@
 """Genome-wide gDNA track from the calibration result.
 
-Calibration solves each region region for a gDNA/RNA split; joined to the region
+Calibration solves each region for a gDNA/RNA split; joined to the region
 coordinates this yields a per-region gDNA level across the genome — a QC track
 that traces contamination and, on capture libraries, on-target enrichment.
 

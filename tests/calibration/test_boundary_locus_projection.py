@@ -13,7 +13,7 @@ gone: an boundary is projected as an boundary.
 
 ⭐ **The outer boundaries are unambiguous, and that is structural, not lucky.** A locus is bounded by
 intergenic sequence and intergenic regions carry no transcripts, so no two loci can contend for a
-boundary boundary. Where two loci *could* contend — adjacent regions in different multi-loci — any fragment
+boundary. Where two loci *could* contend — adjacent regions in different multi-loci — any fragment
 crossing the shared boundary overlaps transcripts in both and would have MERGED them into one multi-locus.
 The configuration is therefore unreachable for any boundary that carries mass, which is what
 :func:`test_a_contended_boundary_carries_no_mass` states as a measurable claim rather than an assumption.

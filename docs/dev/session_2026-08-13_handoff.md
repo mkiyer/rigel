@@ -55,7 +55,7 @@ was deleted. ⭐ The rewrite is measured, not asserted, and the owner's own desi
 
 ## 1b. ⭐⭐ WHAT THE 2026-08-13 (later) SESSION DID — read this before §2, which it partly supersedes
 
-1. ✅ **The conserved junction mass is published** — `CalibrationResult.junction_conserved_mass`, a
+1. ✅ **The conserved sj mass is published** — `CalibrationResult.junction_conserved_mass`, a
    PROPERTY not a field. `ROADMAP.md` §2 item **0c0** has the reasoning and the numbers. §2.1's warning
    below is discharged: it was ~40 lines and **zero** fixture churn, because the thing that made the
    earlier attempt a mess was adding a stored FIELD, and a stored field is exactly what
@@ -93,14 +93,14 @@ In order:
    and error (2) above.
 
    ⭐⭐ **THE SPLICE-JUNCTION MASS IS AVAILABLE TODAY AND STAGE 6 IS NOT BLOCKED ON `sj_mass[2]`.** The
-   conserved per-junction mass is exactly `mass_rna_junction * junction_mass_per_crossing` — verified on
+   conserved per-sj mass is exactly `mass_rna_junction * junction_mass_per_crossing` — verified on
    `g00 ss0.99 capture_off` to **9.1e-13**. Item 0c adds the per-STRAND split, whose consumer is artifact
    detection, not the weight.
 
    ⛔⛔ **BUT DO NOT READ `mass_rna_junction` AS A MASS — IT IS AN INCIDENCE COUNT DESPITE ITS NAME.** A
-   fragment deposits `+1` on EVERY junction it uses, so measured on that condition there are **2.0719
+   fragment deposits `+1` on EVERY sj it uses, so measured on that condition there are **2.0719
    incidences per unit of conserved mass** (5,668,526 against 2,735,958.8), and the over-count is worst
-   for multi-junction fragments. A weight that reads the count is wrong in proportion to how spliced a
+   for multi-sj fragments. A weight that reads the count is wrong in proportion to how spliced a
    transcript is — which is exactly the axis a per-transcript prior varies over.
    ⚠ Publishing the conserved mass as its own field would remove the trap and is ~6 lines plus fixture
    updates in five files; it was started at the end of the last session, made a mess, and was reverted.
@@ -142,11 +142,11 @@ attributable.
 
 * `scripts/design/transcript_truth.py` — true per-transcript counts split by splicedness. 10 M records in
   **41 s**, read names only. ⛔ Splicedness from the read name's interval in SPLICED TRANSCRIPT
-  coordinates, **never the CIGAR** (1,233,452 of 10 M truly-spliced fragments carry no `N` — the junction
+  coordinates, **never the CIGAR** (1,233,452 of 10 M truly-spliced fragments carry no `N` — the sj
   is in the unsequenced inner gap). Seven named gates, all passing.
 * `splice_graph.build_transcript_path` — the transcript → ordered `(kind, id)` walk, transcription order.
 * `EMConfig.warm_start` = `coverage` (shipped) / `prior` / `uniform`.
-* `CalibrationResult` — `{gdna,rna_pos,rna_neg}_frac_{node,edge}`. ⛔ Published as solved and NOT
+* `CalibrationResult` — `{gdna,rna_pos,rna_neg}_frac_{region,boundary}`. ⛔ Published as solved and NOT
   renormalised; the schema asserts `[0,1]` and deliberately not closure.
 * `_apply_grouped_prior_update_test` — the C++ prior update reachable from Python; 24 gates, 12
   perturbations (11 caught, 1 proven inert), 0 holes.

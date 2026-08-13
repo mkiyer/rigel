@@ -315,7 +315,7 @@ def residual_level(mass, n_mass, rho_g, E_g, E_r, v_g):
       would report density 0 at infinite variance — "no opinion" — exactly where the region in fact holds a
       strong one: that its RNA is below its own noise floor.
     * **the UPPER bound** is what stops it inventing one. The imputed gDNA claim routinely arrives at
-      ``√v_g ≈ 1.0–1.2 nats`` (measured at exon→boundary boundaries under capture), which makes ``σ_f`` of order 1;
+      ``√v_g ≈ 1.0–1.2 nats`` (measured at exon boundaries under capture), which makes ``σ_f`` of order 1;
       a one-sided positive part then returns ``E[f_R] ≈ 0.8·σ_f``, i.e. *"most of my mass is RNA"*, asserted
       **out of pure ignorance** and at a confident-looking ``k ≈ 2``. With the upper bound the same ignorance
       degrades to its correct limit — ``σ_f ≫ 1`` ⇒ ``f_R ~ Uniform(0,1)`` ⇒ ``E = ½`` at ``k = 3`` — a wide

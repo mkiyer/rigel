@@ -105,7 +105,7 @@ __all__ = [
     "BOUNDARY_COLUMNS",
     "BOUNDARY_COLUMN_DTYPES",
     "EDGE_KIND_CONTIGUOUS",
-    "EDGE_KIND_JUNCTION",
+    "EDGE_KIND_SJ",
     "FLAG_TSS_POS",
     "FLAG_TSS_NEG",
     "FLAG_TES_POS",
@@ -146,7 +146,7 @@ REGION_COLUMN_DTYPES: dict[str, type | np.dtype] = {
 EMPTY_I64 = np.zeros(0, np.int64)
 
 EDGE_KIND_CONTIGUOUS = 0
-EDGE_KIND_JUNCTION = 1
+EDGE_KIND_SJ = 1
 
 BOUNDARY_COLUMNS = [
     "edge_id",
@@ -343,7 +343,7 @@ def build_splice_graph(
         kind = np.concatenate(
             [
                 np.full(max(n - 1, 0), EDGE_KIND_CONTIGUOUS, np.uint8),
-                np.full(j_src.size, EDGE_KIND_JUNCTION, np.uint8),
+                np.full(j_src.size, EDGE_KIND_SJ, np.uint8),
             ]
         )
         strand = np.concatenate([np.zeros(max(n - 1, 0), np.int8), j_strand])
@@ -721,7 +721,7 @@ def validate_graph(regions_df, edges_df, ref_lengths: Mapping[str, int], transcr
         raise ValueError("I7: a CONTIGUOUS boundary carries a strand.")
 
     # I5/I6 — sj land on interfaces, one row per distinct (ref, donor, acceptor, strand)
-    j = kind == EDGE_KIND_JUNCTION
+    j = kind == EDGE_KIND_SJ
     if j.any():
         if not np.all(np.isin(estrand[j], [Strand.POS, Strand.NEG])):
             raise ValueError("I6: a SJ boundary has an invalid strand.")
@@ -788,7 +788,7 @@ def _validate_against_transcripts(transcripts, reflen, regions_df, edges_df) -> 
     cflags = edges_df["flags"].to_numpy(np.uint16)[cm]
 
     n_regions = ref.size
-    jm = kind == EDGE_KIND_JUNCTION
+    jm = kind == EDGE_KIND_SJ
     jkey = np.sort((src[jm] * n_regions + dst[jm]) * 4 + estrand[jm].astype(np.int64))
 
     slices = _ref_slices(ref)
@@ -1014,7 +1014,7 @@ def build_sj_arrays(index) -> SpliceJunctionArrays:
     for i, ref in enumerate(index.ref_names):
         region_base[i + 1] = region_base[i] + int(counts.get(ref, 0))
 
-    is_sj = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
+    is_sj = edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_SJ
     src = edges_df["src"].to_numpy(np.int64)[is_sj]
     dst = edges_df["dst"].to_numpy(np.int64)[is_sj]
     strand = edges_df["strand"].to_numpy(np.int8)[is_sj]
@@ -1298,7 +1298,7 @@ def _splice_sj_by_intron(index) -> dict[tuple, int]:
 
     ⛔ **NOT the flanking region pair, and not a row order.** The region pair happens to be unique on
     the shipped partition — 13,482 distinct pairs for 13,482 sj — but only because every exon
-    endpoint is forced to be a region region_bound; on a coarsened partition it collides (measured: 638 ambiguous
+    endpoint is forced to be a region bound; on a coarsened partition it collides (measured: 638 ambiguous
     pairs hiding 1,552 sj). And ``sj.feather``'s row order is grouped ALPHABETICALLY by reference
     while the graph axis uses ``index.ref_names`` (FASTA order), which diverge on any genome carrying
     chr1/chr2/chr10.
@@ -1424,7 +1424,7 @@ def build_transcript_path(index, region_arrays) -> TranscriptPath:
         raise ValueError(
             f"{len(unresolved)} annotated intron(s) resolved to no splice-junction slot; first is "
             f"transcript {t0} intron {k0!r}. The sj axis is keyed on region boundaries, so this "
-            f"means an exon endpoint is not a region region_bound — the index and the partition disagree."
+            f"means an exon endpoint is not a region bound — the index and the partition disagree."
         )
 
     if tdf is not None and "is_synthetic" in tdf.columns:

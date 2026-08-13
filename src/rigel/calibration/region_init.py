@@ -169,7 +169,7 @@ def strand_evidence(
     deadband that kills the unstranded phantom). ``1/N_gdna`` gates a gDNA-free library (N_gdna=0 ⇒ σ²_d→∞ ⇒
     disc=0).
 
-    ``struct_lock`` (**I_struct**) — composition CERTAIN — is scoped to true intergenic REGION regions, never a
+    ``struct_lock`` (**I_struct**) — composition CERTAIN — is scoped to true intergenic REGIONs, never a
     G1 BOUNDARY boundary (TSS/TES): a boundary is structurally gDNA but sits between RNA-carrying exons, so its
     crossing mass is RNA-contaminated and a certainty there compounds into a phantom-gDNA emitter; a true
     intergenic region carries ~0 mass in a zero-gDNA library, so it is safe."""

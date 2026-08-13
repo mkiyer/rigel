@@ -66,7 +66,7 @@ tells you *why*, because it is small enough to read every object and cheap enoug
 seven times.
 
 ⛔ **What it replaces.** Every defect found before it was found by sifting a 36-condition, 10-million
-fragment panel for badly-behaved objects and reasoning backwards from a node id. That is slow, the
+fragment panel for badly-behaved objects and reasoning backwards from a region id. That is slow, the
 example is never quite the one you wanted, and a fix can only be measured in aggregate where two errors
 cancel. The harness root-caused TRAPS: a-purity-filter-is-a-length-filter in **five objects and 0.1 s** after weeks of panel-level work.
 
@@ -76,12 +76,12 @@ A toy cannot fit the library-level quantities calibration needs — one transcri
 estimate a strand balance, an enrichment landscape or an intergenic background from. So **a real cached
 condition acts as DONOR**: it is calibrated once, and its fitted bundle is injected
 (`InjectedCalibrationPriors`, whose docstring already specified this use). The toy supplies only the
-controlled per-node **geometry**, which is the thing under study.
+controlled per-region **geometry**, which is the thing under study.
 
 | the donor supplies | so the toy never invents |
 |---|---|
 | κ, both strand overdispersions, the Fisher noise-floor sample sizes | the strand deadband behaves exactly as it does on real data |
-| the enrichment NPMLE, the intron background, ρ_bg | a handful of nodes cannot fit these |
+| the enrichment NPMLE, the intron background, ρ_bg | a handful of regions cannot fit these |
 | both fragment-length pmfs | passed as `calibrate` kwargs, not part of the priors bundle |
 | capture on/off + its numeric knobs | reproduced in the toy's own **simulation**, with probes written from the spec |
 | frag mean/sd/min/max, read length, strand specificity | read from the donor's post-capture truth |
@@ -90,7 +90,7 @@ controlled per-node **geometry**, which is the thing under study.
 ⭐⭐ **THE gDNA LEVEL IS DERIVED, NOT CHOSEN, AND THAT IS NOT NEGOTIABLE.** The injected enrichment
 landscape is an **absolute** log-density model, so a toy at the wrong depth is a *different* library, not
 a small one. The harness measures the donor's gDNA counts-per-base on the donor's own
-structurally-pure-gDNA nodes (`Σcount / ΣE`, `EQUATIONS.md` §7.1) and simulates the toy to match it.
+structurally-pure-gDNA regions (`Σcount / ΣE`, `EQUATIONS.md` §7.1) and simulates the toy to match it.
 `ToySpec` therefore has **no gDNA field**, and a gate asserts it never grows one.
 
 ### ⭐ Terminology — one word per concept (owner, 2026-08-04)
@@ -101,7 +101,7 @@ structurally-pure-gDNA nodes (`Σcount / ΣE`, `EQUATIONS.md` §7.1) and simulat
 | **density** = **abundance** | **counts per base.** The two words mean the same thing and are used interchangeably |
 
 ⛔ Not the simulator's molar `abundance=` field, which is a per-transcript weight, not a density.
-⚠ And a node's stored counts are **contained** counts, so `counts = density × effective_length`, never
+⚠ And a region's stored counts are **contained** counts, so `counts = density × effective_length`, never
 `density × bp`. The sweep reports the density it *asked* for and the counts each object *received*, side
 by side, and never converts one into the other.
 
@@ -134,37 +134,37 @@ code that fit it, so a stored copy would go stale on exactly the changes the har
 ### ⭐⭐⭐ `spliced_exons` — the CURRENT TARGET RUNG, and the one to understand first
 
 **Owner's spec: ONE gene, ONE transcript, `TA+ (1,000, 2,000) (9,000, 10,000)` on 12 kb.** Deliberately
-`nested_exons`' **twin** — same chromosome, same gene boundaries — with an INTRON and a JUNCTION where the
+`nested_exons`' **twin** — same chromosome, same gene boundaries — with an INTRON and an SJ where the
 nesting was, so the two rungs differ by exactly one structure.
 
 ```
-NODE intergenic [0, 1000)         EDGE @1,000   intergenic|exon, pure gDNA (TSS+)   TRAPS: no-magic-numbers
-NODE exon  [1000, 2000)   TA e1   EDGE @2,000   intron|exon, the DONOR+ side        ⭐ NOT TRAPS: no-magic-numbers
-NODE intron [2000, 9000)  TA i1   EDGE @9,000   intron|exon, the ACCEPTOR+ side     ⭐ NOT TRAPS: no-magic-numbers
-NODE exon  [9000, 10000)  TA e2   EDGE @10,000  intergenic|exon, pure gDNA (TES+)   TRAPS: no-magic-numbers
-NODE intergenic [10000, 12000)
-JUNCTION EDGE 2,000 → 9,000 (+), pure mature RNA, ⚠ NOT a chain slot
+REGION intergenic [0, 1000)         BOUNDARY @1,000   intergenic|exon, pure gDNA (TSS+)   TRAPS: no-magic-numbers
+REGION exon  [1000, 2000)   TA e1   BOUNDARY @2,000   intron|exon, the DONOR+ side        ⭐ NOT TRAPS: no-magic-numbers
+REGION intron [2000, 9000)  TA i1   BOUNDARY @9,000   intron|exon, the ACCEPTOR+ side     ⭐ NOT TRAPS: no-magic-numbers
+REGION exon  [9000, 10000)  TA e2   BOUNDARY @10,000  intergenic|exon, pure gDNA (TES+)   TRAPS: no-magic-numbers
+REGION intergenic [10000, 12000)
+SJ BOUNDARY 2,000 → 9,000 (+), pure mature RNA, ⚠ NOT a chain slot
 ```
 
-⭐ **What it adds, and why it is the hard rung: the two exon↔intron EDGEs.** Mature RNA cannot cross an
-exon↔intron seam contiguously (TRAPS: mature-rna-never-crosses-a-seam), so their truth is pure gDNA — but the solver's own
+⭐ **What it adds, and why it is the hard rung: the two exon↔intron BOUNDARIES.** Mature RNA cannot cross an
+exon↔intron boundary contiguously (TRAPS: mature-rna-never-crosses-a-boundary), so their truth is pure gDNA — but the solver's own
 continuity gate says a strand IS admissible there (nascent could cross), so they are **not** TRAPS: no-magic-numbers and the
 solver has to *derive* what the structure already implies. ⛔ Every cached condition is `nrna_none`, so
 their truth is exactly 1.000 and the panel cannot distinguish "no RNA crosses" from "no *mature* RNA
 crosses". Use `nrna_abundance > 0` as the control — it is the only way to test that face non-trivially.
 
-⭐ And unlike `nested_exons` there **is** own evidence inside the gene: the 7,000 bp intron NODE is where
+⭐ And unlike `nested_exons` there **is** own evidence inside the gene: the 7,000 bp intron REGION is where
 the intron factory lives (τ ≈ 0.18–0.38, |Δf_g| 0.05–0.08), so the gDNA level need not travel from the
 gene ends. The two exons have essentially **no** own evidence on an unstranded library (τ ≈ 5e−6) and are
 carried entirely by messages.
 
-⭐⭐ **The two FACES of an `intron|exon` EDGE** — the derivation this rung exists to land is
+⭐⭐ **The two FACES of an `intron|exon` BOUNDARY** — the derivation this rung exists to land is
 `EQUATIONS.md` §3.6. Read it before touching the solver.
 
 ### ⭐⭐⭐ `splice_both_strands` — the rung the SPLICE-FLUX REFRAME must be derived against
 
 **Owner's spec, 2026-08-05.** Four transcripts, both strands, overlapping exons AND overlapping introns,
-two junctions pointing opposite ways, on the same 12 kb chromosome:
+two sj pointing opposite ways, on the same 12 kb chromosome:
 
 ```
 TA+ (2,000, 3,000) (9,000, 10,000)     2 exons, + strand, intron 3,000–8,999
@@ -173,11 +173,11 @@ TC− (1,000, 11,000)                    1 exon,  − strand, spans everything
 TD− (1,000, 2,500) (8,500, 11,000)     2 exons, − strand, intron 2,500–8,499
 ```
 
-⭐⭐ **What it breaks, and it breaks it immediately.** Every earlier rung let an EDGE ask "is my
+⭐⭐ **What it breaks, and it breaks it immediately.** Every earlier rung let a BOUNDARY ask "is my
 neighbour an exon?" and get a yes or a no. Here the question has no answer — the 4-bit signature the
-index stores is `{intron₊, intron₋, exon₊, exon₋}` and three nodes carry both kinds at once:
+index stores is `{intron₊, intron₋, exon₊, exon₋}` and three regions carry both kinds at once:
 
-| node | signature | what it is |
+| region | signature | what it is |
 |---|---|---|
 | [1,000, 2,000) | `0001` | exon₋ |
 | [2,000, 2,500) | `0011` | exon₊ + exon₋ |
@@ -189,17 +189,17 @@ index stores is `{intron₊, intron₋, exon₊, exon₋}` and three nodes carry
 
 ⛔⛔ **And `coarse_type_array` reports EVERY one of them as `exon`** — exon wins over intron, and the
 strand is collapsed. So on this rung the string `intron|exon` never appears, and any rule phrased on the
-coarse node type is silent exactly where it is needed. ⭐ The information is not missing; it is discarded
+coarse region type is silent exactly where it is needed. ⭐ The information is not missing; it is discarded
 one layer above the place that needs it.
 
-⭐ **The junction axis and the edge flags carry the rest of it, already plumbed:**
+⭐ **The sj axis and the boundary flags carry the rest of it, already plumbed:**
 
 | | src → dst | genomic | strand |
 |---|---|---|---|
-| junction 0 | node 2 → node 5 | 2,500 → 8,500 | − |
-| junction 1 | node 3 → node 6 | 3,000 → 9,000 | + |
+| sj 0 | region 2 → region 5 | 2,500 → 8,500 | − |
+| sj 1 | region 3 → region 6 | 3,000 → 9,000 | + |
 
-| edge | position | flag bits |
+| boundary | position | flag bits |
 |---|---|---|
 | #0 | 1,000 | `FLAG_TES_NEG` |
 | #1 | 2,000 | `FLAG_TSS_POS` |
@@ -210,7 +210,7 @@ one layer above the place that needs it.
 | #6 | 10,000 | `FLAG_TES_POS` |
 | #7 | 11,000 | `FLAG_TSS_NEG` |
 
-⚠⚠ **CHECK THE `_NEG` CONVENTION BEFORE RELYING ON IT.** Edge 2,500 is flagged `DONOR_NEG` and edge
+⚠⚠ **CHECK THE `_NEG` CONVENTION BEFORE RELYING ON IT.** Boundary 2,500 is flagged `DONOR_NEG` and boundary
 8,500 `ACCEPTOR_NEG` — but on a **−** transcript the molecule runs right-to-left, so the biological
 splice **donor** of TD−'s intron is at 8,500 and the **acceptor** at 2,500. Whether these bits mean
 "genomic-low end of a − intron" or "the transcript's actual donor" decides the sign of the whole
@@ -285,31 +285,31 @@ consequences, all measured, and the sweep prints a ⛔ STARVED banner naming whi
 
 | starved object | does `--genome-length` help? | why |
 |---|---|---|
-| intergenic **node** | ⚠ barely | counts scale with bp at fixed density, but capture depletes off-target so hard that 57 kb yields **2 counts**. You would need megabases — which is exactly why the real panel is 93 Mb of chr21+chr22, and exactly why the donor **injects** `background` / `intron_background` / ρ_bg. ⭐ Under capture the toy's own intergenic nodes are decoration; the background comes from the donor by design |
-| an **edge**, capture **OFF** | ⛔ **no, not at all** | a 0-bp line's counts are `density × mean_FL`, **independent of the chromosome length**. The only lever off capture is library depth |
-| ⭐⭐ an **edge**, capture **ON** | ⭐⭐ **YES — LENGTHEN IT** | and this is the OPPOSITE of the capture-OFF row, which is why the two are listed separately. The gDNA budget is `rate × genome_length` while the probe footprint is **fixed**, and the sampler's on-probe share is `binding·overlap / (off_target·L + binding·overlap)` — so a longer chromosome hands capture a bigger budget to concentrate onto the same probes, and an edge's count grows with `L` until that ratio saturates |
-| … and what else lifts an edge? | ⭐ **probe geometry, then binding strength** | probes must **tile PER EXON** so each one abuts the exon↔intron edges and none straddles a junction (below). Raising `binding_per_base` also works but **un-matches the toy from the donor's chemistry**; lengthening keeps every harvested global intact, so it is the clean lever |
+| intergenic **region** | ⚠ barely | counts scale with bp at fixed density, but capture depletes off-target so hard that 57 kb yields **2 counts**. You would need megabases — which is exactly why the real panel is 93 Mb of chr21+chr22, and exactly why the donor **injects** `background` / `intron_background` / ρ_bg. ⭐ Under capture the toy's own intergenic regions are decoration; the background comes from the donor by design |
+| an **boundary**, capture **OFF** | ⛔ **no, not at all** | a 0-bp boundary's counts are `density × mean_FL`, **independent of the chromosome length**. The only lever off capture is library depth |
+| ⭐⭐ an **boundary**, capture **ON** | ⭐⭐ **YES — LENGTHEN IT** | and this is the OPPOSITE of the capture-OFF row, which is why the two are listed separately. The gDNA budget is `rate × genome_length` while the probe footprint is **fixed**, and the sampler's on-probe share is `binding·overlap / (off_target·L + binding·overlap)` — so a longer chromosome hands capture a bigger budget to concentrate onto the same probes, and a boundary's count grows with `L` until that ratio saturates |
+| … and what else lifts a boundary? | ⭐ **probe geometry, then binding strength** | probes must **tile PER EXON** so each one abuts the exon↔intron boundaries and none straddles a sj (below). Raising `binding_per_base` also works but **un-matches the toy from the donor's chemistry**; lengthening keeps every harvested global intact, so it is the clean lever |
 
 ⭐⭐ **Measured, `spliced_exons` × `g75 ss0.50 capture_on`, 12 kb → 120 kb, same donor and same
 chemistry** — this is the table that says capture-ON depletion is *the signal moving*, not starvation:
 
 | object | 12 kb | 120 kb | gDNA density at 120 kb |
 |---|---|---|---|
-| `intron\|exon` EDGE @2,000 | 2 | **20** | 0.0788 |
-| `intron\|exon` EDGE @9,000 | 5 | **36** | 0.1418 |
-| `intergenic\|exon` EDGE @1,000 | 1 | **41** | 0.1615 |
-| exon NODE interiors | 16 / 12 | 121 / 118 | 0.162 / 0.158 |
-| intron NODE (7,000 bp) | 1 | **1** | 0.00015 |
-| intergenic NODE | 0 | 13 / 110 kb | 0.00012 |
+| `intron\|exon` BOUNDARY @2,000 | 2 | **20** | 0.0788 |
+| `intron\|exon` BOUNDARY @9,000 | 5 | **36** | 0.1418 |
+| `intergenic\|exon` BOUNDARY @1,000 | 1 | **41** | 0.1615 |
+| exon REGION interiors | 16 / 12 | 121 / 118 | 0.162 / 0.158 |
+| intron REGION (7,000 bp) | 1 | **1** | 0.00015 |
+| intergenic REGION | 0 | 13 / 110 kb | 0.00012 |
 
-⭐ So under capture the gDNA signal **leaves the intergenic and intronic NODEs and arrives at the EDGEs
+⭐ So under capture the gDNA signal **leaves the intergenic and intronic REGIONs and arrives at the BOUNDARIES
 abutting the exon**, which end up within 2× of the exon interior and ~1000× above the intron interior.
-⛔ **That makes the capture-ON rung the one the `intron|exon` EDGE actually matters in** — it is then a
+⛔ **That makes the capture-ON rung the one the `intron|exon` BOUNDARY actually matters in** — it is then a
 well-counted object at the exon's own capture stratum whose component set excludes mature RNA.
 
 ##### ⛔⛔ …BUT THAT TABLE IS ONE CONDITION (`g75`), AND 20–40 COUNTS IS **NOT** TRUE ACROSS THE LADDER
 
-Re-measured 2026-08-04 on all 18 capture-ON conditions × 7 RNA rungs at 120 kb. The `intron|exon` EDGE's
+Re-measured 2026-08-04 on all 18 capture-ON conditions × 7 RNA rungs at 120 kb. The `intron|exon` BOUNDARY's
 count range, min–max over the rungs:
 
 | donor | `@2,000` | `@9,000` | | donor | `@2,000` | `@9,000` |
@@ -333,13 +333,13 @@ does not depend on `L`):
 |---|---|---|---|
 | `g25` `intron\|exon` @2,000 / @9,000 | 5 / 9 | **28 / 18** | **50 / 46** |
 | `g05` `intron\|exon` @2,000 / @9,000 | 1 / 1 | 4 / 5 | 7 / 12 |
-| ⛔ the intron NODE (7,000 bp), `g25` | **0** | **1** | **0** |
+| ⛔ the intron REGION (7,000 bp), `g25` | **0** | **1** | **0** |
 
-⭐⭐ **And the row that matters most is the last one: the intron NODE is dead under capture at EVERY
+⭐⭐ **And the row that matters most is the last one: the intron REGION is dead under capture at EVERY
 chromosome length.** Its bp is fixed and its density is off-probe, so lengthening cannot reach it — while
-the EDGE beside it grows without bound. ⛔ **The well-counted side therefore INVERTS with capture**
-(TRAPS: capture-inverts-the-counted-side): off capture the intron holds ~315 counts against the EDGE's 12–13, on capture it holds 1
-against the EDGE's 20–40.
+the BOUNDARY beside it grows without bound. ⛔ **The well-counted side therefore INVERTS with capture**
+(TRAPS: capture-inverts-the-counted-side): off capture the intron holds ~315 counts against the BOUNDARY's 12–13, on capture it holds 1
+against the BOUNDARY's 20–40.
 
 ⚠ **Two length slips in the harness itself, found on the way and worth fixing** (`_donor_sim_params`):
 `frag_mean` is read from `truth_summary.json`'s **`all`** row — the gDNA+RNA MIXTURE — and handed to the
@@ -351,11 +351,11 @@ units and they add.
 
 #### ⛔ PROBES TILE PER EXON, and the reason is a real suppression
 
-Probes are written in **transcript** space, so a probe spanning an internal junction offset has a genomic
+Probes are written in **transcript** space, so a probe spanning an internal sj offset has a genomic
 footprint in **two blocks** — and `sim/capture/sampler._split_scale` then multiplies every gDNA fragment
 overlapping it by `gdna_split_penalty`. Tiling across the whole transcript put such a split probe over
-every internal junction and thereby suppressed exactly the population that spans an `intron|exon` EDGE.
-`_toy_probes` now tiles **within each exon**, so every probe is unsplit and ends **on** the edge.
+every internal sj and thereby suppressed exactly the population that spans an `intron|exon` BOUNDARY.
+`_toy_probes` now tiles **within each exon**, so every probe is unsplit and ends **on** the boundary.
 ⚠ The split-probe case is real in a real panel and deserves its own rung; it should not be an accident of
 how a tiling loop was written.
 
@@ -394,8 +394,8 @@ Config: `scripts/sim/configs/pilot.yaml`.
 
 ⚠ **`10,000,000` is the RNA depth**, and gDNA is added **on top** at `rate × n_rna` — so a `gdna100`
 condition is 20 M fragments and a `gdna_none` condition is 10 M. The depth is set so that fragments per
-annotated base — and therefore per **node** — matches the chr22-only panel it replaced; calibration
-accuracy depends on per-node counts, so holding that fixed is what keeps a re-baseline attributable to a
+annotated base — and therefore per **region** — matches the chr22-only panel it replaced; calibration
+accuracy depends on per-region counts, so holding that fixed is what keeps a re-baseline attributable to a
 code change.
 
 ⚠ **Every fragment-length parameter is measured, not chosen** — the count-weighted mean and sd of a real
@@ -410,9 +410,9 @@ length, so the simulator draws the length marginal proportional to the capture-w
 
 | | consequence |
 |---|---|
-| counts are **Poisson by construction** — a multinomial at fixed abundance, measured ω < 5e-5 | nothing dispersion-dependent validates here. Real junction overdispersion is ≤ 0.02–0.03 |
+| counts are **Poisson by construction** — a multinomial at fixed abundance, measured ω < 5e-5 | nothing dispersion-dependent validates here. Real sj overdispersion is ≤ 0.02–0.03 |
 | the PANEL is all **R1-antisense** | ⭐ The ENGINE can emit either since 2026-08-11 (`ReadSimConfig.r1_sense`, gated both ways in `test_strand_sense_convention.py`), but `orchestrator.run_condition_grid` does not expose it — so no ladder or flgap condition is R1-sense. ⚠ The gap moved from the simulator to the panel; it did not close. Real cfRNA is dUTP, so this is not urgent |
-| the tool's **gDNA reach** assumption is untested | `node_geometry` says gDNA's template is the chromosome, so `taper_g = 1`. True for 50 Mb, false for a 273 bp contig. Latent: it goes live only when a short reference has two nodes, and gDNA is no longer simulated on the spike-ins at all |
+| the tool's **gDNA reach** assumption is untested | `node_geometry` says gDNA's template is the chromosome, so `taper_g = 1`. True for 50 Mb, false for a 273 bp contig. Latent: it goes live only when a short reference has two regions, and gDNA is no longer simulated on the spike-ins at all |
 | ⭐ each **population is written as one contiguous BLOCK** of read names, not interleaved | measured 2026-08-08: a 10 M-fragment condition has **15** origin transitions in BAM order. So any per-fragment truth JOIN that is checked by "does an impossible label appear?" is nearly blind — a one-fragment slip in the `frag_id` key mislabels ~15 fragments in the whole file and need not produce a single impossible one. ⛔ Gate such a join on a COUNT IDENTITY against the scanner's own `stats.total` / `stats.n_read_names` (`_oracle.check_walk_alignment`) and keep the impossible-label check as a secondary that catches a gross slip. `tests/calibration/test_prior_vs_oracle.py` pins both halves, including that the small slip is invisible |
 
 ---
@@ -444,7 +444,7 @@ resumable, and it prints what exists, what is missing, and which stage to run ne
 — pointed at the pilot and the ladder on the same day it correctly reported the *inverse* cache pattern
 (pilot: scan cache 8/8, oracle 0/8; ladder: scan 0/36, oracle 36/36).
 
-⚠ **`build` cannot carve the reference** — that needs the source genome/GTF the panel was cut from, which
+⚠ **`build` cannot carve the reference** — that needs the source genome/GTF the panel was region bound from, which
 the panel config does not name. It prints the exact `build_suite_reference.py` command and stops:
 
 ```bash
@@ -504,18 +504,18 @@ a suite with no length variation has variance *exactly* 0, a Poisson simulator h
 capture arm that is length-neutral narrows the length gap by *exactly* 0.00.
 
 The requirements: (a) a capture **density step**, (b) fragment-length **variance**, (c) non-Poisson
-**counts**, (d) termini strictly **inside an exon**, (e) ample **single-stranded** nodes, (f) a low-gDNA ×
+**counts**, (d) termini strictly **inside an exon**, (e) ample **single-stranded** regions, (f) a low-gDNA ×
 strong-capture **corner**, (g) **partition resolution**, (h) a **narrowed length-gap** regime.
 
 ⚠ **Two are known-failing and both are named work**, not suite defects:
 * **(c)** needs the overdispersion mechanism built in *and* replicate conditions.
-* **(f)** needs one gDNA rate in the 1–10 % band real libraries live in — one line of `pilot.yaml` plus a
+* **(f)** needs one gDNA rate in the 1–10 % band real libraries live in — one boundary of `pilot.yaml` plus a
   re-run of the affected conditions. It opens exactly the regime where TRAPS: capture-is-1000x-on-exons says the hardest
   failure mode lives.
 
 ⭐ **The gate's teeth are proven on three degenerate inputs**, each failing for its own reason: a reference
-shaped like the deleted 10 Mb suite (121 nodes == 121 merged regions), a "starved toy" with both-strand
-nodes and no single-stranded ones, and truth files written to sd 0 / capture off / no replicates.
+shaped like the deleted 10 Mb suite (121 regions == 121 merged regions), a "starved toy" with both-strand
+regions and no single-stranded ones, and truth files written to sd 0 / capture off / no replicates.
 
 ---
 
@@ -580,7 +580,7 @@ two end-to-end runs (`quant_accuracy.py` does, and prints a `base_reseed` noise 
 **Develop on controlled toys, validate on real data.** A big suite has confounds that hide mechanisms; a
 toy ranks hotspots backwards (TRAPS: toys-rank-hotspots-backwards). Both, in that order.
 
-**Any both-strand stress test needs ample single-stranded nodes** — the population prior trains on them,
+**Any both-strand stress test needs ample single-stranded regions** — the population prior trains on them,
 and a "starved toy" is one of the three degenerate inputs `suite_resolves.py` is proven against.
 
 **How to A/B honestly:** in-process, opposite extremes, never on a saturated condition, one thing varied,

@@ -249,7 +249,7 @@ def test_interior_anchor_is_immovable_and_produces_no_nan():
     """The `struct_lock` interior-anchor regression (HANDOFF_5 §6). A composition-CERTAIN region has
     ``Var(log f_c) = 0``, so any code path that forms a fusion weight as ``1/Var`` produces ``∞`` and cascades
     a nan through the whole chain. Pin both halves of the contract on the factor-1 chain, whose two intergenic
-    REGION regions are exactly such anchors sitting INTERIOR to the chain (each has a live neighbour):
+    REGIONs are exactly such anchors sitting INTERIOR to the chain (each has a live neighbour):
 
     1. **no nan anywhere** — beliefs and variances stay finite (``∞`` is the honest 'unsolved' state and is
        allowed on a variance; nan never is);

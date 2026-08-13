@@ -29,7 +29,7 @@ Two gates on this slot in the pipeline
 Both come from the region SIGNATURE and never from the counts:
 
 * the SOLVE gate (``solvable``) — a slot deconvolves its own split iff it admits >= 1 RNA strand and has
-  unspliced mass. A slot with no admissible RNA strand (an intergenic region, or a gene-boundary boundary) is a
+  unspliced mass. A slot with no admissible RNA strand (an intergenic region, or a gene boundary) is a
   LOCKED all-gDNA object; it is not solved and keeps its signature-binary init, because RNA cannot cross a
   gene boundary so its unspliced mass is purely gDNA.
 * the EMISSION gate — which MESSAGES a slot sends. That is a policy question and lives there.

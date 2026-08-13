@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 
 from rigel.calibration.splice_graph import (
-    EDGE_KIND_JUNCTION,
+    EDGE_KIND_SJ,
     build_sj_arrays,
     build_region_partition_arrays,
 )
@@ -107,7 +107,7 @@ def test_the_csr_addresses_the_flat_region_bound_axis(index):
     """One slot per region_bound, and the totals close against the boundary table."""
     arrays = build_sj_arrays(index)
     region_bounds, offsets, _ = build_region_partition_arrays(index)
-    n_sj = int((index.edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION).sum())
+    n_sj = int((index.edges_df["kind"].to_numpy(np.uint8) == EDGE_KIND_SJ).sum())
     assert arrays.offsets.shape == (region_bounds.shape[0] + 1,)
     assert int(arrays.offsets[0]) == 0
     assert int(arrays.offsets[-1]) == n_sj
@@ -136,7 +136,7 @@ def test_every_annotated_intron_is_found_at_its_LEFT_BOUNDARY(index):
         slot, got_strand = hit
         assert 0 <= slot < arrays.boundary_right.shape[0]
         row = index.edges_df.iloc[int(arrays.edge_row[slot])]  # the JOIN, not the id
-        assert int(row["kind"]) == EDGE_KIND_JUNCTION
+        assert int(row["kind"]) == EDGE_KIND_SJ
         assert got_strand == int(strand)
 
 
@@ -192,7 +192,7 @@ def test_the_csr_round_trips_to_the_boundary_table(index):
     )
 
     boundaries = index.edges_df
-    sj = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
+    sj = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_SJ
     regions = index.regions_df
     src, dst = boundaries["src"].to_numpy(np.int64)[sj], boundaries["dst"].to_numpy(np.int64)[sj]
     from_boundaries = np.stack(
@@ -217,7 +217,7 @@ def _reference_partition(index):
     """
     region_bounds, region_bound_offsets, region_types = build_region_partition_arrays(index)
     boundaries, regions = index.edges_df, index.regions_df
-    sj = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
+    sj = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_SJ
     src = boundaries["src"].to_numpy(np.int64)[sj]
     dst = boundaries["dst"].to_numpy(np.int64)[sj]
     strand = boundaries["strand"].to_numpy(np.int8)[sj]

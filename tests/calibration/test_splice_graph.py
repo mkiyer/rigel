@@ -26,7 +26,7 @@ from rigel.index import TranscriptIndex
 
 from rigel.calibration.splice_graph import (
     EDGE_KIND_CONTIGUOUS,
-    EDGE_KIND_JUNCTION,
+    EDGE_KIND_SJ,
     FLAG_ACCEPTOR_NEG,
     FLAG_ACCEPTOR_POS,
     FLAG_DONOR_NEG,
@@ -73,7 +73,7 @@ def _regions(regions):
 
 
 def _sj(boundaries):
-    j = boundaries[boundaries["kind"] == EDGE_KIND_JUNCTION]
+    j = boundaries[boundaries["kind"] == EDGE_KIND_SJ]
     return list(zip(j["src"].tolist(), j["dst"].tolist(), j["strand"].tolist()))
 
 
@@ -287,7 +287,7 @@ def test_reach_on_a_sj_is_the_exonic_length_either_side():
     """The owner's worked example: TSS 500, first exon [500,550), sj at 550 ⇒ reach_lo = 50."""
     n, e = _graph([_tx([(500, 550), (1000, 1300)])])
     ns = _regions(n)
-    lo, hi, nlo, nhi = _reach(e, ns.index((500, 550)), ns.index((1000, 1300)), EDGE_KIND_JUNCTION)
+    lo, hi, nlo, nhi = _reach(e, ns.index((500, 550)), ns.index((1000, 1300)), EDGE_KIND_SJ)
     assert (lo, hi) == (50, 300)  # 50 exonic bases before the intron, 300 after
     assert (nlo, nhi) == (0, 0)  # nothing on the − strand
 
@@ -301,7 +301,7 @@ def test_reach_is_maximal_over_isoforms_independently_per_side():
         ]
     )
     ns = _regions(n)
-    lo, hi, _, _ = _reach(e, ns.index((400, 600)), ns.index((1000, 1100)), EDGE_KIND_JUNCTION)
+    lo, hi, _, _ = _reach(e, ns.index((400, 600)), ns.index((1000, 1100)), EDGE_KIND_SJ)
     assert (lo, hi) == (300, 400)
 
 
@@ -321,8 +321,8 @@ def test_reach_is_per_strand_and_does_not_mix():
     )
     ns = _regions(n)
     src, dst = ns.index((0, 200)), ns.index((600, 700))
-    assert _reach(e, src, dst, EDGE_KIND_JUNCTION, Strand.POS) == (200, 100, 0, 0)
-    assert _reach(e, src, dst, EDGE_KIND_JUNCTION, Strand.NEG) == (0, 0, 200, 1000)
+    assert _reach(e, src, dst, EDGE_KIND_SJ, Strand.POS) == (200, 100, 0, 0)
+    assert _reach(e, src, dst, EDGE_KIND_SJ, Strand.NEG) == (0, 0, 200, 1000)
 
 
 def test_reach_on_a_contiguous_boundary_inside_an_exon():
@@ -426,7 +426,7 @@ def test_I_validators_fire_when_violated(sample_graph, inv, mutate):
 
 def test_I11_fires_when_a_sj_edge_is_missing(sample_graph):
     n, e, txs = sample_graph
-    e = e[e["kind"] != EDGE_KIND_JUNCTION].reset_index(drop=True)
+    e = e[e["kind"] != EDGE_KIND_SJ].reset_index(drop=True)
     e["edge_id"] = np.arange(len(e), dtype=np.int64)
     with pytest.raises(ValueError, match="I11"):
         validate_graph(n, e, REF, transcripts=txs)
@@ -596,7 +596,7 @@ def test_index_build_writes_and_loads_the_graph(tmp_path_factory):
     validate_graph(idx.regions_df, idx.edges_df, idx.ref_lengths)
     # I6 — ONE boundary per DISTINCT (donor, acceptor, strand). t0 and t1 share intron [400,700) despite
     # different exon extents, so three intron INSTANCES dedup to two sj BOUNDARIES.
-    assert int((idx.edges_df["kind"] == EDGE_KIND_JUNCTION).sum()) == 2
+    assert int((idx.edges_df["kind"] == EDGE_KIND_SJ).sum()) == 2
 
 
 def test_graph_is_REQUIRED_at_load(tmp_path_factory):

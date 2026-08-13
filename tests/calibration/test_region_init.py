@@ -166,7 +166,7 @@ def test_strand_evidence_deadband_kills_unstranded():
 
 
 def test_strand_evidence_struct_lock_regions_only():
-    """I_struct (struct_lock) is composition-certainty for LOCKED REGION regions only — never a boundary boundary."""
+    """I_struct (struct_lock) is composition-certainty for LOCKED REGIONs only — never a boundary."""
     z = np.zeros(4)
     _, lock = strand_evidence(
         z,
@@ -346,7 +346,7 @@ def test_density_factor_precision_flows_into_region_init():
 #: ``struct_lock = locked & is_region`` with ``locked = ~solvable`` declares composition CERTAINTY at every
 #: zero-count REGION: measured **19,709** slots on the gDNA ladder against **1,312** that are actually
 #: ``g1_locked``, so **18,397** empty exons and introns claim a certainty they have not earned. That
-#: contradicts ``strand_evidence``'s own docstring ("scoped to true intergenic REGION regions") and bypasses
+#: contradicts ``strand_evidence``'s own docstring ("scoped to true intergenic REGIONs") and bypasses
 #: `region_geometry.g1_locked`, the designated ONE HOME for the predicate.
 #:
 #: ⚠ It was INERT until 2026-08-06: ``own_precision``'s ``n > 0`` gate silenced every zero-count slot, so the

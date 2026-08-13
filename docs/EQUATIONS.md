@@ -11,11 +11,11 @@ degenerate case, a worked value that makes the shape concrete), never a property
 
 ## 1. The deposit rule
 
-**Notation.** A fragment is an interval `[s, s+w)` of *molecule* length `w`. A reference is cut into
-**nodes** at every exon endpoint of every non-synthetic transcript; the 0-bp boundaries between adjacent
-nodes are **lines** (contiguous edges). `ell` is a node length.
+**Notation.** A fragment is an interval `[s, s+w)` of *molecule* length `w`. A reference is region bound into
+**regions** at every exon endpoint of every non-synthetic transcript; the 0-bp boundaries between adjacent
+regions are **boundaries** (contiguous boundaries). `ell` is a region length.
 
-**1.1 Fragment length `L` — ONE definition.** `L` = genomic span **minus cut introns**. A paired-end mate
+**1.1 Fragment length `L` — ONE definition.** `L` = genomic span **minus region bound introns**. A paired-end mate
 gap counts toward `L`; an intron does not. Whatever counts toward `L` must also count as coverage for
 crossing, or the estimator is biased.
 
@@ -24,38 +24,38 @@ crossing, or the estimator is biased.
 
     E[count at p]  =  ρ · Σ_w f(w)·w  =  ρ · mean_FL
 
-exactly, for any fragment-length distribution, and **independent of both flanking node sizes**. This is
-why the partitioning problem dissolves: a count at a 0-bp line depends on nothing but the density and the
+exactly, for any fragment-length distribution, and **independent of both flanking region sizes**. This is
+why the partitioning problem dissolves: a count at a 0-bp boundary depends on nothing but the density and the
 length distribution.
 
-**1.3 Contained opportunity.** The starts at which a length-`w` fragment fits wholly inside a node of
+**1.3 Contained opportunity.** The starts at which a length-`w` fragment fits wholly inside a region of
 length `ell`:
 
     (ell − w + 1)₊
 
-and over a set of nodes, `A(w) = Σ_n (ell_n − w + 1)₊`. Its fragment-length expectation is
+and over a set of regions, `A(w) = Σ_n (ell_n − w + 1)₊`. Its fragment-length expectation is
 `E_f[(L−w+1)₊] = (L+1)·F(L) − S(L)` with `F` the FL CDF and `S(L) = Σ_{w≤L} w·f(w)`; beyond the support it
 is `L + 1 − mean_FL`.
 ⛔ **The `+1` is the discrete count of start positions, not a fudge** — drop it and the divisor is exactly
-0 when a node is one fragment long.
+0 when a region is one fragment long.
 
-**1.4 Crossing-exactly-one-line opportunity.** For a line with flanking node lengths `a` (left) and `b`
+**1.4 Crossing-exactly-one-line opportunity.** For a boundary with flanking region lengths `a` (left) and `b`
 (right):
 
     A(w)  =  (w−1)₊  −  (w−1−a)₊  −  (w−1−b)₊  +  (w−1−a−b)₊
 
-⭐ **The two nearest lines are the only ones that need excluding**, so this is exact rather than a
-truncation: a fragment is an interval containing the line, so if it reaches any line beyond `p−a` it must
-also cross `p−a`. ⚠ Reference ends need no special case — the partition cuts at `0` and `L_ref`, so the
-outermost node's length *is* the distance to the wall.
+⭐ **The two nearest boundaries are the only ones that need excluding**, so this is exact rather than a
+truncation: a fragment is an interval containing the boundary, so if it reaches any boundary beyond `p−a` it must
+also cross `p−a`. ⚠ Reference ends need no special case — the partition region bounds at `0` and `L_ref`, so the
+outermost region's length *is* the distance to the wall.
 
-**1.5 General crossing divisor — ONE formula for both edge kinds.** With `R_lo`, `R_hi` the molecule's own
+**1.5 General crossing divisor — ONE formula for both boundary kinds.** With `R_lo`, `R_hi` the molecule's own
 remaining sequence either side:
 
     E_J  =  E_f[ min(w−1, R_lo, R_hi, R_lo + R_hi − w + 1)₊ ]
 
 Mean fragment length is its **large-reach limit**, not a separate case. On RNA N(200,50): 199.0 at R=550
-(so mid-transcript junctions are exact), 160.1 at 200, 87.8 at 147, 19.6 at 100, 50.0 at R=50 — a **4×
+(so mid-transcript sj are exact), 160.1 at 200, 87.8 at 147, 19.6 at 100, 50.0 at R=50 — a **4×
 error** if mean length is used blindly at a first exon.
 
 **1.6 Reach.** At position `p` inside exon `e`: `reach_lo = exonic_bases_before(e) + (p − e.start)`,
@@ -63,23 +63,23 @@ error** if mean length is used blindly at a first exon.
 gDNA is unbounded on a chromosome; mature RNA stops at the polyA site. **A reach of 0 is meaningful, not a
 sentinel.**
 
-**1.7 Partition rule.** `cuts = unique({exon.start, exon.end over all non-synthetic transcripts} ∪
-{0, ref_length})`, node `i` = `[cuts[i], cuts[i+1])`, **no merging**. Introns and termini are already exon
-endpoints, so only the merge step was removed. Edges always run `src < dst`, so **genomic order is a
+**1.7 Partition rule.** `region bounds = unique({exon.start, exon.end over all non-synthetic transcripts} ∪
+{0, ref_length})`, region `i` = `[region bounds[i], region bounds[i+1])`, **no merging**. Introns and termini are already exon
+endpoints, so only the merge step was removed. Boundaries always run `src < dst`, so **genomic order is a
 topological order** and there is no graph traversal anywhere.
 
 ---
 
 ## 2. Reciprocal length, and where it is model-free
 
-**2.1 At an EDGE it is exactly model-free.**
+**2.1 At a BOUNDARY it is exactly model-free.**
 
     E[Σ 1/L]  =  Σ_c Σ_w ρ_c·w·f_c(w)·(1/w)  =  Σ_c ρ_c
 
 the opportunity factor `w` cancels identically, across a mixture with different component lengths.
 
-**2.2 At a NODE it is not.** There the opportunity is `(ell − w + 1)₊`, which `1/w` does not cancel;
-`Σ1/L` is then only a better-conditioned second moment. ⛔ **Do not claim node-level model-freeness.**
+**2.2 At a REGION it is not.** There the opportunity is `(ell − w + 1)₊`, which `1/w` does not cancel;
+`Σ1/L` is then only a better-conditioned second moment. ⛔ **Do not claim region-level model-freeness.**
 
 **2.3 And it fails at a terminus, exactly.** `E[Σ1/L] = ρ · E_f[placements(w)/w]`, which equals `ρ` only
 where placements ∝ `w`. At a point 50 bases from an end, placements = 50 for **every** `w > 51`,
@@ -111,7 +111,7 @@ log-odds shifts between frames by exactly `log(E_g^dst/E_g^src) − log(E_r^dst/
 cancels identically** — a ratio transports across a capture cliff, an absolute density does not.
 
 **3.3 Conservation with unequal effective lengths is `Σ_c ρ_c·E_c = M`**, not `Σ_c ρ_c = M/E`. Its
-sensitivity is bounded: a purely compositional error moves `M/Σρ_c E_c` by only ×1.04 on a contained node
+sensitivity is bounded: a purely compositional error moves `M/Σρ_c E_c` by only ×1.04 on a contained region
 and ×1.50 at a crossing, so a large violation is accumulated drift, never one hop.
 
 **3.4 Why an integer count must be stored.** `Var(log ρ_c) = 1/(f_c·n) ≡ Var(log f_c) + 1/n`, exactly.
@@ -143,22 +143,22 @@ composition may be imputed across a step iff **both** hold:
 | **SUPPLY** | the source **SUPPLIED both components** of the pair — the λ-emission gate's own predicate, a statement about **precision**, not density | a source carrying one component has no share to lend; λ is not "large" for it, it is UNDEFINED |
 | **POPULATION** | the two objects measure the **same RNA population** | otherwise enrichment and a population difference are indistinguishable, and the imputation reads one as the other |
 
-⭐ The population conjunct is set algebra, not a model. An EDGE counts what spans it **contiguously**, so
+⭐ The population conjunct is set algebra, not a model. An BOUNDARY counts what spans it **contiguously**, so
 
-    T(EDGE)  =  T(NODE_left) ∩ T(NODE_right)
+    T(BOUNDARY)  =  T(NODE_left) ∩ T(NODE_right)
 
-and `T(EDGE) = T(right)` fails iff a transcript's body **begins** at the EDGE, `T(EDGE) = T(left)` iff one
+and `T(BOUNDARY) = T(right)` fails iff a transcript's body **begins** at the BOUNDARY, `T(BOUNDARY) = T(left)` iff one
 **ends** there. So a transcript **terminus** is exactly what makes one flank's population larger, the test
-is an **equality** per `(EDGE, side)` pair (both directions of mismatch corrupt `φ_g`), and it is per-step
+is an **equality** per `(BOUNDARY, side)` pair (both directions of mismatch corrupt `φ_g`), and it is per-step
 rather than per-object. `node_geometry.terminus_flank_gain`.
 
 ⛔⛔ **WRITE IT IN GENOMIC TERMS, NEVER IN TSS/TES.** TSS/TES is transcript-relative and the strand flips
 it:
 
-    the RIGHT flank gains RNA at an EDGE  ⟺  a transcript's genomic LOW  end is there  ⟺  TSS₊ or TES₋
-    the LEFT  flank gains RNA at an EDGE  ⟺  a transcript's genomic HIGH end is there  ⟺  TES₊ or TSS₋
+    the RIGHT flank gains RNA at a BOUNDARY  ⟺  a transcript's genomic LOW  end is there  ⟺  TSS₊ or TES₋
+    the LEFT  flank gains RNA at a BOUNDARY  ⟺  a transcript's genomic HIGH end is there  ⟺  TES₊ or TSS₋
 
-⛔ **TERMINI ONLY.** A DONOR/ACCEPTOR EDGE also changes the population, but there the flux is **measured**
+⛔ **TERMINI ONLY.** A DONOR/ACCEPTOR BOUNDARY also changes the population, but there the flux is **measured**
 (`junction_count`) and the graft and the peel exist to route it. A terminus has no flux to measure: a
 transcript simply begins. That is the derived boundary between the two treatments.
 
@@ -169,7 +169,7 @@ observations, never its beliefs — so the pin is licensed in exactly the two st
 `S`: **(i)** the message supplied the composition (§3.5b, nothing is filled in), or **(ii)** the
 destination is a **structurally pure-gDNA object**, where there is no unsupplied component and `f_g = 1` is
 structure, so `S = ρ_g·E_g` and the pin hands the object its own **measured** `M/E_g`.
-⭐ Case (ii) is how the capture landscape reaches an exon at all — a G1 EDGE has `prec_g = 0` and cannot
+⭐ Case (ii) is how the capture landscape reaches an exon at all — a G1 BOUNDARY has `prec_g = 0` and cannot
 originate a level through the fuse, so the pin is its only channel. Unlicensed, the pin was TRAPS: a-message-from-the-destinations-belief at full
 strength: `k = 1/(φ_msg + R_own)`, fixed point `(1−R_own)·ρ_tot`, and `R_own` is **exactly ½** at a slot
 with no composition evidence — so it drove the delivered gDNA *fraction* to ½ regardless of the truth.
@@ -182,7 +182,7 @@ density at its own capture stratum. A per-capture-class landscape ratio built to
 **byte-identical off capture** and 1.2 % of one class on one capture-ON condition, and was deleted.
 
 ⚠ **One residual is separate and is not this**, so a reader does not attribute it here: the level an exon
-receives is the one measured at its flanking EDGE, and a fragment spanning an EDGE at a gene end lies only
+receives is the one measured at its flanking BOUNDARY, and a fragment spanning a BOUNDARY at a gene end lies only
 PARTLY under the capture probe while one contained in the exon lies wholly under it — so that level is a
 **lower bound** under capture, and closing the gap needs a probe-geometry model the tool does not have.
 ⭐ The second residual that used to be listed here — the mass pin filling unsupplied components from the
@@ -202,7 +202,7 @@ exist. Two immediate consequences:
 
 | `φ_g(src)` | what `r_tot` is | is scaling the gDNA arm by it valid? |
 |---|---|---|
-| **1** (intron, intergenic NODE, a gDNA-only EDGE flank) | `r_tot ≡ r_g`, identically | ⭐ **yes** — nothing foreign enters |
+| **1** (intron, intergenic REGION, a gDNA-only BOUNDARY flank) | `r_tot ≡ r_g`, identically | ⭐ **yes** — nothing foreign enters |
 | **≈ 0.0006** (an expressed exon) | `0.9994·r_R + 0.0006·r_g` | ⛔ **no** — it is the RNA ratio wearing a total's name |
 
 Measured, `spliced_exons` × `g75 ss0.50 capture_off`, 200 k RNA: at `exon → intron|exon @2,000`,
@@ -213,11 +213,11 @@ Measured, `spliced_exons` × `g75 ss0.50 capture_off`, 200 k RNA: at `exon → i
 off every one of these ratios should be exactly **1.0** — the true enrichment is 1, gDNA is uniform along
 the genome, mature RNA is uniform along its transcript. Standard errors from 1.0, same run:
 
-* the **gDNA** arm at an EDGE: **0.6–1.8 se**. That is NOISE, and depth shrinks it. An EDGE is 0 bp, so its
+* the **gDNA** arm at a BOUNDARY: **0.6–1.8 se**. That is NOISE, and depth shrinks it. An BOUNDARY is 0 bp, so its
   opportunity is ~one mean fragment length whatever the chromosome does (`E_g = 215.7`, `E_J = 202.7`) —
-  measured, the 7,000 bp intron NODE holds **518** gDNA counts while the two EDGEs hold **19** and **24**.
+  measured, the 7,000 bp intron REGION holds **518** gDNA counts while the two BOUNDARIES hold **19** and **24**.
   ⚠ Only library DEPTH helps; lengthening the reference does nothing off capture (`TESTING.md` §0b).
-* the **RNA** arm across a junction: **13.5–13.7 se**. That is a BIAS. Depth makes it MORE significant, not
+* the **RNA** arm across a sj: **13.5–13.7 se**. That is a BIAS. Depth makes it MORE significant, not
   smaller. It is §3.6b's frame gap: `E_J = E[w]−1` rises with the fitted mean fragment length while
   `E_r = e−E[w]+1` falls, so a length-model error is amplified with opposite sign at 0.62 %/bp.
   ⛔ TRAPS: a-variance-cannot-fix-a-bias — a variance cannot fix a biased mode.
@@ -246,19 +246,19 @@ shape §3.6 already uses for its two closures and the-residual-level for the lev
 a threshold here has been refused three times (TRAPS: a-threshold-on-a-fitted-residue, TRAPS: a-licence-with-no-floor, TRAPS: a-multiplication-gated-by-a-trace). ⚠ Unbuilt and unpriced: the
 ceiling to measure first is what a PERFECT per-component `r_g` at every hop is worth, re-solved.
 
-**3.6 ⭐⭐⭐ THE TWO FACES OF AN `intron|exon` EDGE — component-set matching, derived and verified.**
+**3.6 ⭐⭐⭐ THE TWO FACES OF AN `intron|exon` BOUNDARY — component-set matching, derived and verified.**
 (Owner, 2026-08-04. Verified against oracle truth on `toy_harness --spec spliced_exons`.)
 
-At **one line** the accumulator stores three populations, and their COMPONENT SETS DIFFER — which is the
+At **one boundary** the accumulator stores three populations, and their COMPONENT SETS DIFFER — which is the
 whole content of this section:
 
 | bank | what it counted | components |
 |---|---|---|
-| `unspliced_count` = `U` | crossed the line **contiguously**, spliced nowhere | gDNA + **nascent** |
+| `unspliced_count` = `U` | crossed the boundary **contiguously**, spliced nowhere | gDNA + **nascent** |
 | `junction_count` = `J` | never crossed it — it **JUMPED** from here | **mature**, certified |
 | `spliced_count` = `S` | crossed contiguously, spliced *elsewhere* | mature, certified |
 
-⛔ Mature RNA cannot cross an exon↔intron seam contiguously (TRAPS: mature-rna-never-crosses-a-seam), so it is **absent from `U`**
+⛔ Mature RNA cannot cross an exon↔intron boundary contiguously (TRAPS: mature-rna-never-crosses-a-boundary), so it is **absent from `U`**
 and present in `J`. Three densities, one of which needs no deconvolution at all:
 
     rho_g   = C_g / E_g       unknown split of U          U = C_g + C_nas
@@ -267,17 +267,17 @@ and present in `J`. Three densities, one of which needs no deconvolution at all:
 
 Now match component sets against each flank:
 
-    T(INTRON) = {gDNA, nascent}            = T(EDGE, U only)        ⇒ shares transferable
-    T(EXON)   = {gDNA, nascent, mature}    = T(EDGE, U + J)         ⇒ shares transferable
+    T(INTRON) = {gDNA, nascent}            = T(BOUNDARY, U only)        ⇒ shares transferable
+    T(EXON)   = {gDNA, nascent, mature}    = T(BOUNDARY, U + J)         ⇒ shares transferable
 
 so, with **the same `rho_g` in both numerators** and only the denominator changing:
 
-    (I)  INTRON face:  phi_g(EDGE) = rho_g / (rho_g + rho_nas)             ==  phi_g(INTRON)
-    (II) EXON   face:  phi_g(EDGE) = rho_g / (rho_g + rho_nas + rho_mat)   ==  phi_g(EXON)
+    (I)  INTRON face:  phi_g(BOUNDARY) = rho_g / (rho_g + rho_nas)             ==  phi_g(INTRON)
+    (II) EXON   face:  phi_g(BOUNDARY) = rho_g / (rho_g + rho_nas + rho_mat)   ==  phi_g(EXON)
 
-⭐⭐ **One EDGE, one gDNA density, TWO composition statements — differing only in whether the junction
-term is in the total.** This is what makes the EDGE a *solvable* object rather than a relay: (I) plus the
-edge's own mass identity `U = rho_g·E_g + rho_nas·E_r` is two equations in two unknowns, and the intron's
+⭐⭐ **One BOUNDARY, one gDNA density, TWO composition statements — differing only in whether the sj
+term is in the total.** This is what makes the BOUNDARY a *solvable* object rather than a relay: (I) plus the
+boundary's own mass identity `U = rho_g·E_g + rho_nas·E_r` is two equations in two unknowns, and the intron's
 composition is prior-free (the intron factory). Then (II) delivers the exon's composition with **every
 term measured** — no imputation, no prior, no strand, no length model.
 
@@ -289,17 +289,17 @@ term measured** — no imputation, no prior, no strand, no length model.
 | m=100, **nrna = 60** (the non-trivial control) | +0.0266 / −0.0198 | +0.0039 / −0.0012 |
 
 ⚠ The `nrna_none` arm tests (I) only trivially (both sides are 1.000); the nascent arm is the real one, and
-there the edge's nascent density reads 0.572 / 0.631 against the intron's 0.578 — the two edges straddling
+there the boundary's nascent density reads 0.572 / 0.631 against the intron's 0.578 — the two boundaries straddling
 it on 15 and 9 gDNA counts against the intron's 349, i.e. Poisson, not bias.
 
-⛔⛔ **THE ESTIMATOR IS NOT THE IDENTITY, AND THIS IS WHERE IT FAILS.** The junction sees only
+⛔⛔ **THE ESTIMATOR IS NOT THE IDENTITY, AND THIS IS WHERE IT FAILS.** The sj sees only
 `E_J/(E_J + Σ E_r)` ≈ **11 %** of a two-exon transcript's mature fragments, so at low RNA `rho_mat` is a
-handful of counts: at m=1 with `J = 3`, face (II) returns 0.715 against a truth of 0.458. And an EDGE's
+handful of counts: at m=1 with `J = 3`, face (II) returns 0.715 against a truth of 0.458. And a BOUNDARY's
 gDNA count is 8–36 where the intron's is ~349. So:
 
-* ⭐ **face (I)'s job is to transport a WELL-COUNTED gDNA level from the intron to the edge**, not to take
-  the edge's 8 counts as authoritative — measured at m=1, referencing the intron gives the exon
-  `f_g = 0.499` and referencing the edge gives 0.350, against a truth of 0.458 and a shipped answer of
+* ⭐ **face (I)'s job is to transport a WELL-COUNTED gDNA level from the intron to the boundary**, not to take
+  the boundary's 8 counts as authoritative — measured at m=1, referencing the intron gives the exon
+  `f_g = 0.499` and referencing the boundary gives 0.350, against a truth of 0.458 and a shipped answer of
   0.625;
 * ⭐ **face (II) closes the composition two ways** — via `rho_mat` (tight at high RNA, over-stated by
   §3.6b, useless at low) or via the exon's own mass identity closed with `rho_g` (strong at low RNA, a
@@ -307,43 +307,43 @@ gDNA count is 8–36 where the intron's is ~349. So:
   inverse variance rather than by precedence.
 
 ⛔⛔ **AND THE WELL-COUNTED SIDE IS NOT A FIXED SIDE.** The 349-vs-8 ranking above is capture-OFF. Under
-capture the intron NODE holds **1** count — median 0, max 3, unchanged from 120 kb to 1.08 Mb, because its
-bp is fixed and its density is off-probe — while the `intron|exon` EDGE holds **20–40** at the exon's own
+capture the intron REGION holds **1** count — median 0, max 3, unchanged from 120 kb to 1.08 Mb, because its
+bp is fixed and its density is off-probe — while the `intron|exon` BOUNDARY holds **20–40** at the exon's own
 capture stratum. So the direction of transport inverts with capture, and only the SHARE survives that:
 transferring the intron's DENSITY instead is measured at **+0.207** mass-weighted `|Δf_g|` on capture-ON ×
 unstranded. TRAPS: capture-inverts-the-counted-side.
 
 ⛔⛔ **WHAT THE CEILING SAID, AND IT IS THE REASON NOTHING WAS BUILT** (2026-08-04, `toy_ceiling.py` then
-`ladder_arm_ab.py`). Handing both `intron|exon` EDGEs the ORACLE truth and **re-solving the whole chain**
+`ladder_arm_ab.py`). Handing both `intron|exon` BOUNDARIES the ORACLE truth and **re-solving the whole chain**
 is worth **−0.000** on capture-OFF × unstranded and −0.033 on capture-ON × unstranded; the achievable
 form (the intron's share) captures 82 % of that. Carried to the 36-condition ladder it is **negative**:
 solvable mwae 0.0413 → 0.0426, confidently-wrong 20,173 → 22,336. ⭐ The identity above is not what
-failed — improving that EDGE is simply not worth anything where the tool is wrong. `ROADMAP.md` §3.
+failed — improving that BOUNDARY is simply not worth anything where the tool is wrong. `ROADMAP.md` §3.
 
-**3.6c ⭐⭐⭐ THE SPLICE-FLUX REFRAME — AN EDGE HAS TWO TOTALS, ONE PER FLANK.** (Owner's framing
+**3.6c ⭐⭐⭐ THE SPLICE-FLUX REFRAME — AN BOUNDARY HAS TWO TOTALS, ONE PER FLANK.** (Owner's framing
 2026-08-05; derived and gated the same day. `test_splice_flux_reframe`, `node_total_density`.)
 
-§3.6 gives the two faces of an `intron|exon` EDGE as a property of the OBJECT. Made per-STEP it becomes a
-statement about which of the two flanks a hop is talking to, and then it applies at every EDGE with
-junction flux rather than only where the coarse types happen to read `intron|exon`.
+§3.6 gives the two faces of an `intron|exon` BOUNDARY as a property of the OBJECT. Made per-STEP it becomes a
+statement about which of the two flanks a hop is talking to, and then it applies at every BOUNDARY with
+sj flux rather than only where the coarse types happen to read `intron|exon`.
 
 The reframe is a composition imputation, so numerator and denominator must be totals over the **same
-component set** — the intersection of what the two slots can carry. At an EDGE the accumulator holds two
-disjoint populations: what crosses **contiguously** (`U`, a gDNA/RNA mixture) and the **junction flux**
+component set** — the intersection of what the two slots can carry. At a BOUNDARY the accumulator holds two
+disjoint populations: what crosses **contiguously** (`U`, a gDNA/RNA mixture) and the **sj flux**
 (`J`, certified mature). A molecule counted in `J` spliced *at this position*, so its body lies in the
 exon on exactly **one** side of it and it never enters the other flank:
 
-    at a junction's genomic-LOW  end   its exon is on the LOW  side
-    at a junction's genomic-HIGH end   its exon is on the HIGH side
+    at a sj's genomic-LOW  end   its exon is on the LOW  side
+    at a sj's genomic-HIGH end   its exon is on the HIGH side
 
-⭐⭐ Hence one total per flank, and the split is **per junction**, summed over the junctions attached that
+⭐⭐ Hence one total per flank, and the split is **per sj**, summed over the sj attached that
 way:
 
     rho_lo  =  rho_U  +  Σ_{j : low end here}   J_j / E_J,j          — used against the LOW  neighbour
     rho_hi  =  rho_U  +  Σ_{j : high end here}  J_j / E_J,j          — used against the HIGH neighbour
 
-and at a NODE both sums are empty — a NODE stores only CONTAINED fragments and a contained fragment used
-no junction — so `rho_lo = rho_hi = rho_U` there and every junction-free chain is unchanged.
+and at a REGION both sums are empty — a REGION stores only CONTAINED fragments and a contained fragment used
+no sj — so `rho_lo = rho_hi = rho_U` there and every junction-free chain is unchanged.
 
 ⭐⭐⭐ **THE PAIRING RULE, AND DIRECTION DOES NOT ENTER IT.** A hop joins adjacent slots `(k, k+1)`.
 Whichever is the source, the pair is the same pair, so
@@ -352,23 +352,23 @@ Whichever is the source, the pair is the same pair, so
 
 always. Travelling low→high (mature departing — a **splice-out**, `DESIGN.md` §0) versus high→low (mature
 arriving — a **splice-in**) changes only which is numerator; it never changes which total each slot
-presents. ⛔ **But it is NOT one array per direction**: within ONE forward pass an EDGE at a junction's low
+presents. ⛔ **But it is NOT one array per direction**: within ONE forward pass a BOUNDARY at a sj's low
 end is the DESTINATION of the hop from its low flank (flux INCLUDED) and the SOURCE of the next hop into
 its high flank (EXCLUDED). Two arrays indexed by ROLE is what expresses that; one per pass is not.
 
 ⛔⛔ **WHAT THE PREDECESSOR DID AND WHAT IT COST.** One junction-inclusive total per slot, on every hop, in
 both directions and in both twins. Measured against origin-split truth on `g50 ss0.50 nrna_none
-capture_off`, the intron-facing side of the two `intron|exon` EDGEs is inflated by exactly `J/E_J`:
+capture_off`, the intron-facing side of the two `intron|exon` BOUNDARIES is inflated by exactly `J/E_J`:
 
 | step | shipped `r` | flank-pair `r` | TRUTH ratio | shipped/true | pair/true |
 |---|---|---|---|---|---|
-| intron → EDGE @9,000 | 1.4595 | **1.1789** | 1.1421 | ⛔ 1.28× | ✅ 1.03× |
-| intron → EDGE @2,000 | 1.0061 | **0.7255** | 0.7029 | ⛔ 1.43× | ✅ 1.03× |
+| intron → BOUNDARY @9,000 | 1.4595 | **1.1789** | 1.1421 | ⛔ 1.28× | ✅ 1.03× |
+| intron → BOUNDARY @2,000 | 1.0061 | **0.7255** | 0.7029 | ⛔ 1.43× | ✅ 1.03× |
 
 ⚠ It inflates the two hops of a two-hop pair in opposite directions and therefore **cancels in a
 compounded ratio** (2.159 used vs 2.153 true), which is why no endpoint, conservation or aggregate check
 saw it — TRAPS: recompute-from-the-oracle. ⛔ And the opposite error is not available either: using `rho_U` on both sides was
-measured WORSE, because at an EDGE→EXON step the exon genuinely contains the spliced population.
+measured WORSE, because at a BOUNDARY→EXON step the exon genuinely contains the spliced population.
 
 ⛔⛔ **WRITE THE PREDICATE IN GENOMIC TERMS — §3.5b's ruling, and here is where it bites.**
 `splice_graph`'s `FLAG_DONOR_s` marks the genomic-LOW end of an `s`-strand intron on **both** strands
@@ -376,26 +376,26 @@ measured WORSE, because at an EDGE→EXON step the exon genuinely contains the s
 transcript's biological **acceptor**. The names are a misnomer on `−` and the data is uniform, which is
 exactly the arrangement in which a genomically-phrased predicate is safe and a biologically-phrased one
 flips sign silently. The derivation above never asks the biological question, the fields are named
-`_lo`/`_hi`, and keying the split on the junction's strand instead fires **exactly one** of twelve gates.
+`_lo`/`_hi`, and keying the split on the sj's strand instead fires **exactly one** of twelve gates.
 
-⭐ **And a rule keyed on the coarse node type provably cannot do this.** On `splice_both_strands` three
-nodes are simultaneously intron and exon and `coarse_type_array` reports **every** gene-body node as
+⭐ **And a rule keyed on the coarse region type provably cannot do this.** On `splice_both_strands` three
+regions are simultaneously intron and exon and `coarse_type_array` reports **every** gene-body region as
 `exon`, so `intron|exon` never appears. Nor is "does the neighbour admit mature RNA on strand `s`?"
-enough: at EDGE @3,000 the flanking node carries mature⁺ (from a single-exon transcript spanning the
-intron) but not the mature⁺ population *that junction's* flux belongs to.
+enough: at BOUNDARY @3,000 the flanking region carries mature⁺ (from a single-exon transcript spanning the
+intron) but not the mature⁺ population *that sj's* flux belongs to.
 
 ⛔⛔ **BUILT AND MEASURED, AND IT DOES NOT PAY ON ITS OWN (2026-08-05).** The derivation above is not what
 failed — it reproduces the truth ratio to 3 % where the shipped total is 28–43 % off. What the panel says is
-that the **EDGEs improve and the NODEs get worse**: on a 6-condition shard spanning all four strata, the
-edge axis moves mwae 0.16046 → 0.16000 with confidently-wrong −7.7 % and the shipped solve better on 6 of 6,
-while the node axis moves 0.12232 → **0.12297** with confidently-wrong **+36.9 %** and Σ|err| +20,884
+that the **BOUNDARIES improve and the REGIONs get worse**: on a 6-condition shard spanning all four strata, the
+boundary axis moves mwae 0.16046 → 0.16000 with confidently-wrong −7.7 % and the shipped solve better on 6 of 6,
+while the region axis moves 0.12232 → **0.12297** with confidently-wrong **+36.9 %** and Σ|err| +20,884
 fragments. `solv%` is byte-identical in both arms, so this is not a moved denominator.
 ⭐ **The reason is TRAPS: a-cancelling-defect-pair and it was predictable from TRAPS: recompute-from-the-oracle**: an evidence-free exon is fed through
-`intron → EDGE → exon`, the two hops' errors cancel, and the second hop carries a *different* defect (§3.5's
+`intron → BOUNDARY → exon`, the two hops' errors cancel, and the second hop carries a *different* defect (§3.5's
 composition ratio applied to a level). Correcting one of a cancelling pair is worse than correcting neither.
 ⛔ **So this is priced jointly with that defect or not at all** — `EQUATIONS.md` §3.6c.
 
-**3.6b ⭐⭐ THE JUNCTION AND CONTAINED FRAMES ARE A LEVER ON THE FRAGMENT-LENGTH MEAN, AT 0.62 %/bp.**
+**3.6b ⭐⭐ THE SJ AND CONTAINED FRAMES ARE A LEVER ON THE FRAGMENT-LENGTH MEAN, AT 0.62 %/bp.**
 `E_J` and the exon's `E_r` are built from one pmf and are exactly consistent — measured 202.8 and 797.2 on
 a 1,000 bp exon, summing to 1,000.0. But they differentiate with **opposite sign**:
 
@@ -403,7 +403,7 @@ a 1,000 bp exon, summing to 1,000.0. But they differentiate with **opposite sign
     E_r   = e − E[w] + 1      →   dE_r/dE[w]  = −1
     ⇒  d log(rho_mat / rho_R) / dE[w]  =  1/E_J + 1/E_r  =  0.0062 per bp
 
-so a length model that is wrong by `Δ` reports the junction estimator as `1 + 0.0062·Δ` times the exon's
+so a length model that is wrong by `Δ` reports the sj estimator as `1 + 0.0062·Δ` times the exon's
 own. Measured: the fitted RNA pmf's mean is **203.80 against a true 212.20 on all 36 ladder conditions**
 (−8.4 bp off capture, −3.5 bp under it), and −8.4 bp predicts **1.1125** against a measured 1.103 / 1.111.
 ✅ **AND THERE IS NO SECOND TERM.** A "finite-transcript placement" contribution of 1.024 was recorded
@@ -440,7 +440,7 @@ and the error matters because it is the difference between a belief-free exact o
 
 **What actually transfers is the DENSITY, not the share.** "gDNA is uniform" and "the same transcripts run
 through both slots" are statements about *densities*. Shares are derived, and they move whenever the two
-slots' opportunity ratio differs — which between a NODE and an EDGE it always does. Verified:
+slots' opportunity ratio differs — which between a REGION and a BOUNDARY it always does. Verified:
 
 | `E_g,E_r` at source → destination | `φ_g` | `λ` | `η` |
 |---|---|---|---|
@@ -452,7 +452,7 @@ Since `λ = log(φ_g/φ_R) = log(ρ_g/ρ_R) + log(E_g/E_r)`, define
 
 $$\boxed{\;\eta \;\equiv\; \lambda - \log\frac{E_g}{E_r} \;=\; \log\frac{\rho_g}{\rho_R}\;}$$
 
-**`η` is the frame-free composition coordinate, and it transfers as the IDENTITY across any edge with
+**`η` is the frame-free composition coordinate, and it transfers as the IDENTITY across any boundary with
 `T_s = T_d`.** The tilt `θ` — built from `(ρ_p − ρ_n)/ρ_R`, in which the common `E_r` cancels — likewise
 transfers as the identity.
 
@@ -485,9 +485,9 @@ RNA side. The identity above is over the **unspliced** bank, which is what needs
 
 ---
 
-### 3.8 THE MISMATCHED EDGE — under the null there is NO UNKNOWN
+### 3.8 THE MISMATCHED BOUNDARY — under the null there is NO UNKNOWN
 
-`T_s ⊊ T_d`: the source (say an `intergenic|exon` seam, `T_s = {g}`) knows only `ρ_g`.
+`T_s ⊊ T_d`: the source (say an `intergenic|exon` boundary, `T_s = {g}`) knows only `ρ_g`.
 
 ⭐ **A density is already frame-free.** So under the null — gDNA uniform, no capture enrichment —
 `ρ_g` crosses **unchanged**, and the destination's own observations convert it:
@@ -515,7 +515,7 @@ Let `C = T_s \cap T_d` (shared) and `N = T_d \setminus T_s` (newly active). Unde
 |---|---|---|
 | 0 | `T_s = T_d` | §4 — nothing new; the message is complete |
 | 1 | a `+`-strand TSS: `{g} → {g, R⁺}`; or `{g,R⁺} → {g,R⁺,R⁻}` | **determined** — one unknown, one equation |
-| 2 | `{g} → {g, R⁺, R⁻}` (an intergenic seam into a both-strand exon) | the RNA **total** is determined; the **tilt** `θ` is not, and falls to ψ's reference |
+| 2 | `{g} → {g, R⁺, R⁻}` (an intergenic boundary into a both-strand exon) | the RNA **total** is determined; the **tilt** `θ` is not, and falls to ψ's reference |
 
 ⭐⭐⭐ **So the only thing a component mismatch ever leaves undetermined is the TILT, and only when both
 strands are newly active.** The gDNA-vs-RNA split — the quantity the tool exists to estimate — is
@@ -537,17 +537,17 @@ must come from instead.
 
 ## 3b. ⭐⭐⭐ THE CONSERVED MASS, AND WHY ONE SHARE FOR TWO COMPONENTS IS A BIAS
 
-Derived 2026-08-08 when `edge_unspliced_mass` landed. The accumulator deposits `+1` on every line a
+Derived 2026-08-08 when `edge_unspliced_mass` landed. The accumulator deposits `+1` on every boundary a
 fragment crosses — `max(K, 1)` of them — so a sum over objects is an object-INCIDENCE count while the EM
 adds a FRAGMENT count. The mass bank closes that gap: it sums to ONE per fragment.
 
-**The deposit.** A fragment of length `w` is cut by the crossed lines into slices; a slice of length
-`s` bounded by `n_cross ∈ {1,2}` lines deposits `s/(w·n_cross)` at each. Every slice of a
+**The deposit.** A fragment of length `w` is region bound by the crossed boundaries into slices; a slice of length
+`s` bounded by `n_cross ∈ {1,2}` boundaries deposits `s/(w·n_cross)` at each. Every slice of a
 single-segment path has `n_cross ≥ 1`, so `Σ = Σ s/w = 1` exactly.
 
-**The opportunity.** Put the line at 0 with flanking nodes of length `a` (left) and `b` (right). A
+**The opportunity.** Put the boundary at 0 with flanking regions of length `a` (left) and `b` (right). A
 crossing fragment with `u ∈ [1, w−1]` bases to the left contributes `g_a(u)/w`, where `g_a(u) = u` for
-`u ≤ a` and `a/2` beyond — the second branch because the slice then has a line on both sides. Summing:
+`u ≤ a` and `a/2` beyond — the second branch because the slice then has a boundary on both sides. Summing:
 
     Σ_{u=1}^{w−1} g_a(u) = (w−1)w/2      if w−1 ≤ a
                          = a·w/2          otherwise      → both equal  w·min(w−1,a)/2
@@ -556,10 +556,10 @@ so, adding the mirror term and dividing by `w`,
 
     A_mass(w; a, b) = [ min(w−1, a) + min(w−1, b) ] / 2
 
-exact regardless of how many further lines the fragment crosses, and `E[mass] = ρ_c · E_{f_c}[A_mass]`.
+exact regardless of how many further boundaries the fragment crosses, and `E[mass] = ρ_c · E_{f_c}[A_mass]`.
 ⚠ **It is a CENSORED functional**, so it is sensitive to the pmf's *shape*, not only its mean.
 
-⭐⭐ **THE POOLING THEOREM — the result that matters.** Define a component's share at a line as the mean
+⭐⭐ **THE POOLING THEOREM — the result that matters.** Define a component's share at a boundary as the mean
 conserved mass one of its crossings carries, `share_c = E_c[A_mass] / E_c[w−1] ∈ (0,1]`. The accumulator
 can only measure the MIXTURE's, `share_pooled = M/C = φ·share_g + (1−φ)·share_r`. Rescaling both
 components by it gives
@@ -572,22 +572,22 @@ is right to the fragment while the split is wrong (`TRAPS: conservation-misses-m
 identically zero iff `share_g = share_r`, which holds whenever `f_g = f_r` — which is why an
 equal-length panel is *structurally* blind to it (`TRAPS: an-equal-length-panel-defeats-the-lift`).
 
-⚠⚠ **THE SECOND LINE IS EXACT PER LINE AND NOT AT A LOCUS, AND THE GAP IS LARGE ENOUGH TO MIS-SIZE A
+⚠⚠ **THE SECOND BOUNDARY IS EXACT PER BOUNDARY AND NOT AT A LOCUS, AND THE GAP IS LARGE ENOUGH TO MIS-SIZE A
 CORRECTION** (measured 2026-08-08, `tests/calibration/test_prior_units.py`). `share_pooled` cancels from
 the ratio only where *every* fragment of both components passes through it. Two things break that at the
 scale a prior is assembled on, and they break it by very different amounts:
 
 * **Contained mass never passes through the share at all.** A contained fragment deposits on exactly one
-  node, so that term is already a fragment count and is carried through untouched — it *dilutes* the
+  region, so that term is already a fragment count and is carried through untouched — it *dilutes* the
   tilt, and because `share_pooled` itself moves with `φ`, the dilution is mixture-dependent. Swinging
   the mixture 900× at a fixed length gap moved the locus-level distortion **0.578 → 0.767**, where the
   gDNA component was 53 % contained.
-* **Summing over lines with different flanks** re-introduces a weak dependence, because the cancellation
-  is per line and the two components weight the lines differently: **0.5030 → 0.5073** over the same
+* **Summing over boundaries with different flanks** re-introduces a weak dependence, because the cancellation
+  is per boundary and the two components weight the boundaries differently: **0.5030 → 0.5073** over the same
   900× swing.
 
 ⭐ So `share_r/share_g` is the right *mechanism* and the wrong *magnitude* for any correction applied at
-locus granularity. A repair belongs where the identity is exact — **per line, before the contained term
+locus granularity. A repair belongs where the identity is exact — **per boundary, before the contained term
 is added** — and a per-locus factor derived from this ratio would be wrong by the contained fraction.
 
 ⭐⭐ **MEASURED 2026-08-08, DRAINED, ON ALL FOUR flgap CONDITIONS: THE POOLED SHARE IS 82–99 % OF THE
@@ -609,18 +609,18 @@ and that a per-line share correction is the whole of the remaining work — not 
 
 ## 3c. ⭐⭐ THE MODEL-FREE LOCAL MEAN LENGTH — and its one precondition
 
-At a contiguous edge the opportunity is `w−1` and the deposit `1/(w−1)`, so they cancel:
+At a contiguous boundary the opportunity is `w−1` and the deposit `1/(w−1)`, so they cancel:
 
     E[count] = ρ·E[w−1],   E[inv_length_sum] = ρ    ⇒    count / inv_length_sum + 1 = E[w]
 
-⭐ **No pmf, no model, per line.** Given the two global component means it inverts directly to a local
+⭐ **No pmf, no model, per boundary.** Given the two global component means it inverts directly to a local
 gDNA fraction: `φ = (E[w] − μ_r) / (μ_g − μ_r)`. ✅ Verified numerically (400 k fragments, μ 326/208,
 φ = 0.40): reads 256.6 against a true mixture mean of 255.1, giving `φ̂ = 0.413`.
 
 ⛔⛔ **THE PRECONDITION, AND IT IS EASY TO VIOLATE: the identity holds only under NATURAL PLACEMENT.**
-A longer fragment is more likely to cross a given line, and the `1/(w−1)` deposit is exactly what
+A longer fragment is more likely to cross a given boundary, and the `1/(w−1)` deposit is exactly what
 cancels that length bias. Evaluated on a length-SELECTED subpopulation the cancellation fails and the
-ratio becomes a harmonic-type mean instead: forcing every fragment to cross a line in a check of this
+ratio becomes a harmonic-type mean instead: forcing every fragment to cross a boundary in a check of this
 identity returned **185.9 — below both component means** — which is impossible for a mixture mean and is
 the signature of the violation.
 
@@ -659,13 +659,13 @@ population.
 
 ⛔ Never `count(w)/A(w)` — see TRAPS: divide-by-a-probability.
 
-**4.2 The junction pool** (`calibration/junction_opportunity.py`). For a transcript with exon lengths
+**4.2 The sj pool** (`calibration/junction_opportunity.py`). For a transcript with exon lengths
 `e_1..e_K` and total `L = Σ e_i`, the starts at which a length-`w` window crosses **at least one**
-junction:
+sj:
 
     A_j(w)  =  (L − w + 1)₊  −  Σ_i (e_i − w + 1)₊
 
-⭐ Derived via the **complement** — a window crosses no junction iff it lies wholly inside one exon, and
+⭐ Derived via the **complement** — a window crosses no sj iff it lies wholly inside one exon, and
 the exons are disjoint — so there is no inclusion-exclusion. The library quantities are abundance-weighted
 sums, `T(w) = Σ_t θ_t (L_t − w + 1)₊` and `A(w) = Σ_t θ_t A_j(w,t)`.
 ⚠ `θ` is a **molar** abundance (copies), not an observed fragment count — `A_j` already counts start
@@ -747,8 +747,8 @@ Treat a claim and the destination's own estimate as two studies of one quantity:
 
     b̂² = max(0, G² − v_msg − v_own)        ⇒     p_eff = 1 / max(v_msg, G² − v_own)
 
-with `G` the log gap. Exact safety property: **a claim can outweigh a node's own belief only if it agrees
-within `√2·σ_own`**, and where a node has no evidence `v_own = ∞` and the term switches itself off. No
+with `G` the log gap. Exact safety property: **a claim can outweigh a region's own belief only if it agrees
+within `√2·σ_own`**, and where a region has no evidence `v_own = ∞` and the term switches itself off. No
 knob.
 
 ---

@@ -8,7 +8,7 @@ Now, we need to design a more intelligent method. Our grouped UNSPLICED RNA prio
 
 There are several issues that this session must address:
 
-1) calibration has node/edge granularity (each node/edge has a gDNA vs RNA compositional breakdown). We have data that could estimate unspliced counts per transcript, but don't use it.
+1) calibration has region/boundary granularity (each region/boundary has a gDNA vs RNA compositional breakdown). We have data that could estimate unspliced counts per transcript, but don't use it.
 
 2) transcript GEOMETRY governs how many unspliced fragments it can support. If a transcript has many tiny exons, all of its counts could be spliced. If a transcript has a few large exons, all of its counts will be unspliced. We do not regard transcript geometry
 
@@ -16,20 +16,20 @@ There are several issues that this session must address:
 
 The goal: after calibration finishes, we run "assemble priors" per locus. Assemble priors produces a gDNA prior in pseudocounts, and an RNA prior in pseudocounts. The gDNA prior will not change.
 
-In this new version, we will partition the RNA prior pseudocounts across the different transcripts. Each transcript will be given a portion of the RNA prior pseudocounts relative to its calibrated nodes/edges.
+In this new version, we will partition the RNA prior pseudocounts across the different transcripts. Each transcript will be given a portion of the RNA prior pseudocounts relative to its calibrated regions/boundaries.
 
 The challenge is HOW to assign a per-transcript prior
 
 ----
 
-# Transcript to NODE/EDGE map
+# Transcript to REGION/BOUNDARY map
 
-A transcript consists of exons (contiguous genomic intervals.We already have a method to map a transcript onto the splice graph (nodes are genomic spans, boundary edges are points between nodes, splice junctions are jumps between two edges).
+A transcript consists of exons (contiguous genomic intervals.We already have a method to map a transcript onto the splice graph (regions are genomic spans, boundary boundaries are points between regions, splice junctions are jumps between two boundaries).
 
 Each transcript must be mapped to:
-- nodes (contiguous genomic spans completely overlapped by the transcript)
+- regions (contiguous genomic spans completely overlapped by the transcript)
 - splice junctions that are used by the transcript
-- edges that the transcript crosses contiguous (on both sides)
+- boundaries that the transcript crosses contiguous (on both sides)
 
 This already exists in the `_transcript_node_incidence` function.
 
@@ -38,23 +38,23 @@ This already exists in the `_transcript_node_incidence` function.
 
 # Transcript upper bound density can be computed
 
-If we transform a transcript to its node/edge map, the transcript becomes a SEQUENCE of (node/edge/sj) objects.
+If we transform a transcript to its region/boundary map, the transcript becomes a SEQUENCE of (region/boundary/sj) objects.
 
-If we iterate along the sequence of node/edge/sj objects:
+If we iterate along the sequence of region/boundary/sj objects:
 
-1) NODES: have a contained mass equal to integer count of fragments contained
-2) EDGES: have a fractional mass, if a fragment overlaps multiple edges its mass its 1.0 count shared among its edges
-3) SPLICE JUNCTIONS: have a fractional mass, if a fragment crosses multiple splice junctions/edges its 1.0 count is portioned among the these sj + edges.
+1) REGIONS: have a contained mass equal to integer count of fragments contained
+2) BOUNDARIES: have a fractional mass, if a fragment overlaps multiple boundaries its mass its 1.0 count shared among its boundaries
+3) SPLICE JUNCTIONS: have a fractional mass, if a fragment crosses multiple splice junctions/boundaries its 1.0 count is portioned among the these sj + boundaries.
 
-Remember, the mass along this sequence of node/edge/sj is SHARED among all transcripts that are compatible. The deconvolution has been done for gDNA vs RNA, but not per-transcript yet.
+Remember, the mass along this sequence of region/boundary/sj is SHARED among all transcripts that are compatible. The deconvolution has been done for gDNA vs RNA, but not per-transcript yet.
 
 
 # Theorem for transcript prior allocation
 
 Our theorem is as follows:
-- A transcript's upper bound density is the MINIMUM of densities of its node/edge/sj objects.
+- A transcript's upper bound density is the MINIMUM of densities of its region/boundary/sj objects.
 
-However, a naive implementation of this theorem will fail catastrophically. This is because fragments can land sparsely along a transcript. Any node/edge/sj with a low randomly sampled density will crush the entire transcript, just due to sampling variation. Sampling variation is worse when nodes/edges/sj are small. Edges and SJ have a short length. So the transcript's entire density hangs in the balance of the weakest, lowest count edge/sj along its entire path.
+However, a naive implementation of this theorem will fail catastrophically. This is because fragments can land sparsely along a transcript. Any region/boundary/sj with a low randomly sampled density will crush the entire transcript, just due to sampling variation. Sampling variation is worse when regions/boundaries/sj are small. Boundaries and SJ have a short length. So the transcript's entire density hangs in the balance of the weakest, lowest count boundary/sj along its entire path.
 
 
 # Naive solution for transcript prior allocation
@@ -62,7 +62,7 @@ However, a naive implementation of this theorem will fail catastrophically. This
 Our first prior allocation method aims to balance simplicity with accuracy.
 
 We have several candidates:
-- harmonic mean along transcript node/edge/sj
+- harmonic mean along transcript region/boundary/sj
 - geometric mean
 - arithmetic mean
 
@@ -75,16 +75,16 @@ Open question:
 
 Options for the harmonic mean: 
 - add a small constant to 'rescue' zeros
-- omit nodes/edge/sj that are zero
+- omit regions/boundary/sj that are zero
 
 Remember that this method approximates the MASS for each transcript. The MASS is different from density. 
 
-Density is computed by an effective length computation. We use an 'effective length shrinkage' method that accounts for enrichment/depletion by hybrid capture. So nodes/edge/sj that are ZERO may be zero because they are off-target (no probes to capture them). 
+Density is computed by an effective length computation. We use an 'effective length shrinkage' method that accounts for enrichment/depletion by hybrid capture. So regions/boundary/sj that are ZERO may be zero because they are off-target (no probes to capture them). 
 
-The analogous approach for the harmonic mean would be to omit nodes/edge/sj that are ZERO. Our effective length method also ignores nodes/edge/sj that are zero.. they are not usable because we don't know whether it is a true zero or an off-target/depleted zero.
+The analogous approach for the harmonic mean would be to omit regions/boundary/sj that are ZERO. Our effective length method also ignores regions/boundary/sj that are zero.. they are not usable because we don't know whether it is a true zero or an off-target/depleted zero.
 
 In summary:
-- We compute a per-transcript MASS which is the harmonic (geometric?) mean over the SEQUENCE of nodes/edges/sj in its path. This becomes a WEIGHT for each transcript.
+- We compute a per-transcript MASS which is the harmonic (geometric?) mean over the SEQUENCE of regions/boundaries/sj in its path. This becomes a WEIGHT for each transcript.
 
 **KEY REALIZATION**
 
@@ -122,38 +122,38 @@ The rigel accumulator should maintain a splice junction accumulator that tracks 
 
 - ref, strand, start, end (the sj key)
 - counts[2] (2-integer vector with counts on each aligned strand)
-- mass[2] (2-float vector, a spliced fragment may cross multiple junctions but its mass must be conserved and shared, so that its 1.0 count is divided across all of the splice junctions the fragment crosses. So the mass of a spliced fragment equals 1.0 if it only crosses one junction, otherwise, the mass is <1). We allocate the mass proportionally based on the overlap bases related to either junction. Spliced junctions may cross OTHER edges (contiguously, not spliced), which can also decrease their overall mass. This guarantees conservation of fragment mass.
+- mass[2] (2-float vector, a spliced fragment may cross multiple sj but its mass must be conserved and shared, so that its 1.0 count is divided across all of the splice junctions the fragment crosses. So the mass of a spliced fragment equals 1.0 if it only crosses one sj, otherwise, the mass is <1). We allocate the mass proportionally based on the overlap bases related to either sj. Spliced sj may cross OTHER boundaries (contiguously, not spliced), which can also decrease their overall mass. This guarantees conservation of fragment mass.
 
 ---
 
-# Edges versus Splice Junctions
+# Boundaries versus Splice Junctions
 
-The true theoretical rigel index is a graph. Nodes are contiguous genomic intervals. Edges connect nodes.
+The true theoretical rigel index is a graph. Regions are contiguous genomic intervals. Boundaries connect regions.
 
-The current implementation uses shortcuts and avoids building a formal graph structure. Instead it uses genomic contiguity to index nodes and edges.
+The current implementation uses shortcuts and avoids building a formal graph structure. Instead it uses genomic contiguity to index regions and boundaries.
 
 So for example:
-- node A (chr1, 1000,2000)
-- node B (chr1, 2000,4000)
-- node C (chr1, 4000,6000)
-- node D (chr1, 6000,10000)
+- region A (chr1, 1000,2000)
+- region B (chr1, 2000,4000)
+- region C (chr1, 4000,6000)
+- region D (chr1, 6000,10000)
 
-Nodes are contiguous across the genome. There is ALWAYS a contiguous edge between two nodes: for example, there is edge at position 2000 (A <-> B), 4000 (B <-> C), and 6000 (C <-> D). Rigel shortcuts building these edge structures because the genome is contiguous the next index is the contiguous node.
+Regions are contiguous across the genome. There is ALWAYS a contiguous boundary between two regions: for example, there is boundary at position 2000 (A <-> B), 4000 (B <-> C), and 6000 (C <-> D). Rigel shortcuts building these boundary structures because the genome is contiguous the next index is the contiguous region.
 
-So, currently rigel refers to 'edges' as boundaries between two contiguous nodes.
+So, currently rigel refers to 'boundaries' as boundaries between two contiguous regions.
 
-However, splice junctions are also 'edges', but they are between discontiguous nodes. 
+However, splice junctions are also 'boundaries', but they are between discontiguous regions. 
 
 For example, we could have a splice junction:
 - sj AC+ (chr1, +, 2000, 4000)
 
-This becomes an unidirectional edge connecting A -> C. 
+This becomes an unidirectional boundary connecting A -> C. 
 
 ---
 
 In order for us to compute our per-transcript priors, we need to access the individual splice junction data for each transcript.
 
-A transcript will map to an explicit sequence of nodes and edges. We need to be able to lookup these counts EXACTLY.
+A transcript will map to an explicit sequence of regions and boundaries. We need to be able to lookup these counts EXACTLY.
 
 We need a detailed architectural audit to ensure we have the efficient data model and accumulator structures to support this project.
 
@@ -198,7 +198,7 @@ TD+ exons (4000, 6000), (9000, 11000)
 
 Take a 200bp fragment at (5500, 5700). It is compatible with TB+ and TC+. The fragment must be extended to the left (lower genomic coordinates) and to the right (higher genomic coordinates) until it reaches TSS (transcript start) and TES (transcript end).
 
-In order to do the smoothing, every node/edge/sj needs to track the ends of fragments, so that the algorithm can extend fragment ends upstream (5', toward the TSS) and downstream (3' toward the TES).
+In order to do the smoothing, every region/boundary/sj needs to track the ends of fragments, so that the algorithm can extend fragment ends upstream (5', toward the TSS) and downstream (3' toward the TES).
 
 **The accumulator does not currently track fragment ends** It would need to store 'count_left' and 'count_right'. 
 

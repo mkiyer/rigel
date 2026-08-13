@@ -647,7 +647,7 @@ def _install_zc_struct_lock_g1():
     ``strand_evidence`` is handed ``locked = ~solvable`` with
     ``solvable = (free_pos | free_neg) & (n_region > 0)``, so ``struct_lock = locked & is_region`` is true at
     **every REGION with zero counts** — an empty EXON and an empty INTRON included, not only at the "true
-    intergenic REGION regions" the docstring scopes it to. ``own_composition_logvar`` then returns
+    intergenic REGIONs" the docstring scopes it to. ``own_composition_logvar`` then returns
     ``Var(log f_g) = 0`` there: **composition CERTAIN**, on a slot whose ``f_g`` is a default belief and
     whose evidence is nothing at all.
 

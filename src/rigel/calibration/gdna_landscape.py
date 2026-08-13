@@ -11,7 +11,7 @@ same axis, which is what fixes the design below.
 
 **Three decisions, each measured**:
 
-1. **SUBSTRATE** — REGION regions only, AMBIG excluded, plus the zero-count structural anchor. Boundaries are
+1. **SUBSTRATE** — REGIONs only, AMBIG excluded, plus the zero-count structural anchor. Boundaries are
    excluded (owner, 2026-07-27): they are ~as numerous as regions but only 5.1 % of them are truly enriched
    against the regions' 12.1 %, so including them nearly halves the enriched component's census and their
    two-flank mixture fills the valley between the two true modes (74 % of all valley mass). The zero-count

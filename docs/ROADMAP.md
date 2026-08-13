@@ -24,11 +24,11 @@ one line, and a number nobody can attribute earns none.
 | | | |
 |---|---|---|
 | **Stage A — the accumulator** | ✅ **DONE**, and that is a measurement | perfecting BOTH fragment-length models is worth **2.6 %** of the deliverable, down from 22.2 % |
-| ✅ **the tally CONSERVES a fragment count** | ⭐ every deposited fragment places **exactly one** unit across the objects it crosses — nodes, contiguous edges and junction edges together. Measured on the origin-split oracle: **1.000× deposited, 0 unaccounted**, on BOTH origins | ⛔ RNA read **0.747×** until `sj_mass` landed (2026-08-11): a spliced fragment whose blocks cross no line deposited on no conserved bank at all — **1,222,375 of 4,830,713 (25.3 %)**. gDNA was always exact, because gDNA cannot splice |
+| ✅ **the tally CONSERVES a fragment count** | ⭐ every deposited fragment places **exactly one** unit across the objects it crosses — regions, contiguous boundaries and sj boundaries together. Measured on the origin-split oracle: **1.000× deposited, 0 unaccounted**, on BOTH origins | ⛔ RNA read **0.747×** until `sj_mass` landed (2026-08-11): a spliced fragment whose blocks cross no boundary deposited on no conserved bank at all — **1,222,375 of 4,830,713 (25.3 %)**. gDNA was always exact, because gDNA cannot splice |
 | ✅ **the SUITE is green with no skips** | ⭐ **3,235 passed / 0 skipped / 7 xfail** (2026-08-11). Two xfails and both skips were closed by BUILDING the missing thing, never by widening a bound | ⛔ The 7 are not one kind of thing: 2 are the recorded price of `message_propagation = False`, 5 were WRITTEN as xfail as records of two proven defects whose fixes are panel-negative alone. `CLAUDE.md` carries the split |
 | ✅ **ONE NUMERIC CONVENTION** | ⭐ a COUNT is an integer, a FRACTION is float64. No fixed point, no scale constant, nothing decodes a bank (owner, 2026-08-11) | ⭐ float64 is **1e5–7e5× MORE accurate** than the fixed point it replaced, measured against exact rational arithmetic. ⛔ The ~2.6 % once quoted against float is a **float32** number — `TRAPS: integer-channels-reproduce` |
 | **calibration, 3 of 4 strata** | ✅ median library `f_gdna` error **0.005–0.012**, and ⭐ the PRIOR the EM reads is within **2.5–4.6 %** of a perfect one | stranded × on/off and unstranded × capture-OFF |
-| ⛔ **calibration, unstranded × capture-ON** | ⛔ **BLIND** — reports **0.033–0.058** while truth spans **0.00 → 0.98**, and hands the EM a gDNA prior **94.4 %** short | not noisy; a flat line. **Still the whole open problem**, and nothing has fixed it — the length channel was tried and refused (§1.4) |
+| ⛔ **calibration, unstranded × capture-ON** | ⛔ **BLIND** — reports **0.033–0.058** while truth spans **0.00 → 0.98**, and hands the EM a gDNA prior **94.4 %** short | not noisy; a flat boundary. **Still the whole open problem**, and nothing has fixed it — the length channel was tried and refused (§1.4) |
 | ✅ **the prior ASSEMBLER and its POPULATION** | ✅ `rel` **0.0019–0.0027** with perfect masses in and **4.9e-4** with perfect per-component shares; the composition claim `a_g:a_r` is exact against the unspliced pool (`Δphi` **≤ 5e-4**) | ⭐ the assembler was **0.179**: the conserved-count rewrite took it to 0.0202 and the YARDSTICK took it to 0.0027 (`TRAPS: score-the-consumers-own-count`) |
 | ✅ **the fragment-length models** | ✅ accurate — `pi(w)`'s de-tilt reads **211.77** against a true **212.20**, and the gDNA pmf is exact to **0.02 bp** off capture | ⛔ a claimed +10.7 % bias was a truth-parser bug (`TRAPS: a-truth-table-of-aggregates`) |
 | ⚠ **the gDNA pmf under capture** | ⛔ the last unfixed length defect: **+13.6 bp** at a 330 bp gDNA mean and **+3.5 bp** at 120, drained per-bin `fit/true` **1.22 … 4.18** in the tail | ⭐ EXACT off capture and untouched by the drain, so it is a PLACEMENT problem — `EQUATIONS.md` §4.4 — and must not be attacked by editing `gdna_opportunity` |
@@ -61,7 +61,7 @@ conflating them is how "is calibration the bottleneck?" got asked for months wit
 ⭐ **And the blindness now has a second, sharper statement, in the EM's own units.** The gDNA prior at
 unstranded × capture-ON is not merely wrong, it is **PINNED**: `P/O = 0.040` at every one of
 `g50 / g75 / g90 / g98`, with `P_g` sitting at 221 k → 428 k while the truth `O_g` runs 5.5 M → 10.8 M.
-A flat line in the deliverable was already known; this is the same flat line one stage earlier.
+A flat boundary in the deliverable was already known; this is the same flat boundary one stage earlier.
 
 ⛔ **Read `mwae_all` / `Σ|err|`, never `solv%` / `mwae` / `conf-wrong` / `calib`** — those four share a
 denominator the solver moves by declining to answer. And quote the SHIPPED column, not pass-0: a −37.2 %
@@ -126,8 +126,8 @@ Measured 2026-08-07 on one 10 M-fragment ladder condition (a 35,135-node chr22 i
 expensive part" hypothesis is REFUTED.
 
 ⛔⛔ **BUT THAT PROFILE IS UPSIDE DOWN FROM THE REAL ONE AND BOTH ARE CORRECT.** Calibration is
-depth-INDEPENDENT — every node in the index is solved regardless of read depth — so it scales with the
-INDEX while the EM scales with the DATA. On real cfRNA at genome scale (~1.5 M nodes) calibration has
+depth-INDEPENDENT — every region in the index is solved regardless of read depth — so it scales with the
+INDEX while the EM scales with the DATA. On real cfRNA at genome scale (~1.5 M regions) calibration has
 measured ~66 s against the EM's ~24 s: the exact reverse. **Profile on real cfRNA**
 (`~/Downloads/rigel_runs/cfrna/`, genome index at `~/Downloads/rigel_runs/refs/rigel_index`), never on
 this panel — `TRAPS: toys-rank-hotspots-backwards`, which cost a whole analysis once.
@@ -157,7 +157,7 @@ one exception, which is item 1.
    `TRAPS: re-record-the-baseline` doing its job, not a defect. And `anchor_opportunity_census.py` said
    in TWO places that its population was "exactly `strand_evidence`'s `struct_lock`"; measured, the
    solver's mask is **15–23× larger** (30,423 vs 1,312 at `g00`) because it also contains every
-   zero-count NODE. The instrument's own mask is `g1_locked ∧ NODE` — the mask the standing xfail wants
+   zero-count REGION. The instrument's own mask is `g1_locked ∧ REGION` — the mask the standing xfail wants
    `struct_lock` rescoped TO — so its **346×** verdict stands but its SCOPE was overstated wherever it
    was quoted. Both sizes now print on every row.
 2. ✅ **Re-derive the two end-to-end numbers on the 36-condition ladder — DONE 2026-08-11, BOTH halves.**
@@ -228,9 +228,9 @@ one exception, which is item 1.
    `transcript_weights.build_weights` + one `alloc_*` arm.
    ⛔ An EARLIER first attempt was also built and REFUSED (§4) — soft-min over EXCLUSIVE objects with a
    per-object Jeffreys half. That one failed for three unrelated reasons and is a different row.
-   ⭐ **Vocabulary ruling (owner):** REGION / BOUNDARY / SPLICE JUNCTION replace node / edge·line·cut /
-   junction; `donor`/`acceptor` are banned as strand-dependent (the code is genomically ordered, so the
-   name is backwards for 48.4 % of junctions). A CONVERGENCE, not an invention — all three axes already
+   ⭐ **Vocabulary ruling (owner):** REGION / BOUNDARY / SPLICE JUNCTION replace region / boundary·boundary·region bound /
+   sj; `donor`/`acceptor` are banned as strand-dependent (the code is genomically ordered, so the
+   name is backwards for 48.4 % of sj). A CONVERGENCE, not an invention — all three axes already
    carry two live names each. `DESIGN.md` §0 is not updated until the bulk rename lands.
    ⚠ **Identifiability, measured, because it was the objection:** 70.43 % of fragments are compatible
    with 2+ annotated transcripts, but only **0.29 %** of true mass lies in likelihood-flat directions
@@ -247,8 +247,8 @@ one exception, which is item 1.
 
    | axis | sums to 1 | sums into (0,1) | sums > 1 |
    |---|---|---|---|
-   | REGION (node) | 74.72 % | **25.25 %** — median 0.978, p5 **0.869** | 12 |
-   | BOUNDARY (edge) | 77.24 % | **22.71 %** — median 0.979, p5 **0.850** | 16 |
+   | REGION (region) | 74.72 % | **25.25 %** — median 0.978, p5 **0.869** | 12 |
+   | BOUNDARY (boundary) | 77.24 % | **22.71 %** — median 0.979, p5 **0.850** | 16 |
 
    ⭐ **The mechanism is visible at `sweep.py`'s write-back**: the three posterior means are
    `np.clip(·, 0, 1)`-ed **INDEPENDENTLY**, and an unsolvable slot keeps an init instead — neither
@@ -260,7 +260,7 @@ one exception, which is item 1.
    indistinguishable from a solved one. `CalibrationResult` publishes the values as solved, bounds each
    to `[0,1]`, and asserts no closure; `test_a_composition_that_does_NOT_close_is_ACCEPTED_and_that_is_deliberate`
    pins that as a decision so the assertion is not added before ψ is fixed.
-0c0. ✅ **THE CONSERVED JUNCTION MASS IS PUBLISHED — DONE 2026-08-13, and it needed no re-scan.**
+0c0. ✅ **THE CONSERVED SJ MASS IS PUBLISHED — DONE 2026-08-13, and it needed no re-scan.**
    `CalibrationResult.junction_conserved_mass` is `float64[n_junctions]`, the accumulator's `sj_mass`
    bank recovered exactly (12,758 of 13,482 elements bit-identical, worst 9.1e-13 on
    `g00 ss0.99 capture_off`). ⛔ It exists because the derivation was reachable only by knowing to
@@ -272,12 +272,12 @@ one exception, which is item 1.
    (`TRAPS: a-hash-that-misses-its-artifact`, dataclass form — the same reason `library_rna_fragments`
    is derived). ⭐ `library_rna_fragments` now reads it, so the conversion has ONE home.
    ⭐ Six gates, four perturbations, and the sharpest is that a `where(count > 0, …)` fallback to the
-   `1.0` identity would publish phantom mass on **4,636 of 13,482** zero-count junctions — a third of
+   `1.0` identity would publish phantom mass on **4,636 of 13,482** zero-count sj — a third of
    the axis, on the one axis that is certified RNA by construction. Exactly one gate catches that.
 0c. ✅ **`sj_mass[2]` — THE PER-STRAND SPLICE-JUNCTION MASS, AND THE RULING IT REVERSES — LANDED
    2026-08-13** (owner, 2026-08-12), bundled with the two dead banks exactly as planned.
    ⭐ **The bundle is three parts pulling one way:** `JunctionEdge::mass` → `mass[2]` deposited at the
-   same `col` the count uses (24 → 32 B); `Node::contained_length_sum` and
+   same `col` the count uses (24 → 32 B); `Region::contained_length_sum` and
    `ContiguousEdge::unspliced_length_sum` deleted (24 → 16 B, 48 → 40 B). Net memory at genome scale is
    **down** ~19 MB. `sj_mass` moved `SINGLE_COLUMN_AXES` → `BANK_AXES`, and since the shape digest is
    DERIVED from those two tables it moved itself.
@@ -354,8 +354,8 @@ one exception, which is item 1.
    assuming the caches survive.
    ⚠ Then DELETE `transcript_truth.py`'s local `duplicate_map` and read the index's — moving it, not
    copying it, so there is one home.
-3. ⭐⭐ **Price the CANCELLING PAIR together** — `struct_lock` rescoped to `g1_locked & NODE` AND the
-   `intergenic|exon` seam claiming its RNA-contaminated crossing mass as gDNA. Five of the seven
+3. ⭐⭐ **Price the CANCELLING PAIR together** — `struct_lock` rescoped to `g1_locked & REGION` AND the
+   `intergenic|exon` boundary claiming its RNA-contaminated crossing mass as gDNA. Five of the seven
    remaining xfails go green if and only if this lands. ⛔ Neither half may be priced alone: the
    `struct_lock` half is **+3,207 %** on the zero-gDNA control by itself.
    ⛔⛔ **AND IT CAN ONLY BE PRICED WITH `--messages on`.** `zc_struct_lock_g1` is MEASURED inert with
@@ -397,7 +397,7 @@ analysis is complete and re-deriving it would be waste — not because they are 
 ⭐ Promoted from a working doc when it was deleted (2026-08-07). This is the next build.
 
 **THE TWO HALVES, AND WHY NEITHER HAS AN HONEST PRICE ALONE.** The certified-RNA channel is a LOWER BOUND
-(`ρ_R(exon) ≥ ρ_ν(B) + ρ_μ(B)` — the exon may hold molecules that never touch that seam) and ψ delivers it
+(`ρ_R(exon) ≥ ρ_ν(B) + ρ_μ(B)` — the exon may hold molecules that never touch that boundary) and ψ delivers it
 as a two-sided Gaussian, penalising a destination holding MORE RNA exactly as hard as one holding less.
 Making it one-sided — `−½·p·max(0, mo − log f)²`, no new constant — is **the only mechanism the zero-gDNA
 control has ever ENDORSED: −81.9 %, 8/8.** The panel is nonetheless **+5.2 %**, and the reason is
@@ -408,15 +408,15 @@ stratum with no working level channel and −9.2 % where the prior already suffi
 ⛔⛔ **AND THE LEVEL CHANNEL IS STRUCTURALLY DISCONNECTED, WHICH IS A THEOREM AND NOT A MEASUREMENT.**
 Receivers of a one-slot-step channel at `g00`, by slot type:
 
-| channel | EDGE | intergenic NODE | intron NODE | exon NODE |
+| channel | BOUNDARY | intergenic REGION | intron REGION | exon REGION |
 |---|---|---|---|---|
 | gDNA level | 2,592 | 0 | 0 | **0** |
 | certified RNA | **0** | 0 | 0 | 10,493 |
 
-The chain is strictly `N E N E … N`, so a one-slot-step channel is **BIPARTITE**: a NODE emitter can only
-reach an EDGE. The only licensed originators of a gDNA level are structurally pure-gDNA objects, which are
-NODEs — so **no NODE can ever receive a gDNA level.** It is not weak, it is disconnected from every object
-carrying mass. ⛔ Two repairs are already refused: letting an EDGE originate a level (a patch on a
+The chain is strictly `N E N E … N`, so a one-slot-step channel is **BIPARTITE**: a REGION emitter can only
+reach a BOUNDARY. The only licensed originators of a gDNA level are structurally pure-gDNA objects, which are
+REGIONs — so **no REGION can ever receive a gDNA level.** It is not weak, it is disconnected from every object
+carrying mass. ⛔ Two repairs are already refused: letting a BOUNDARY originate a level (a patch on a
 symptom), and letting the level cross two steps (the chain-fused level is dominated by the 1,312 intergenic
 anchors and hands every exon the off-probe floor, against a true neighbouring density **346×** higher).
 
@@ -430,7 +430,7 @@ certified-RNA channel alone recovers the truth at 8 of the 12.
 
 `length_likelihood` defaults **False** and is the **only** channel that can give an unstranded slot its OWN
 composition evidence: it is θ-independent, so the Schur complement that zeroes the strand term at an AMBIG
-node does not apply, and it enters `tau_lam` ungated. ⛔ But `TRAPS: equal-lengths-carry-no-composition` —
+region does not apply, and it enters `tau_lam` ungated. ⛔ But `TRAPS: equal-lengths-carry-no-composition` —
 at equal component mean lengths the 2×2 is identified only through `μ_g − μ_r`, and the ladder was built
 with equal configured lengths: the realised post-capture gap is **+1.5 %**. Enabling it there would measure
 approximately nothing and that would be read as "the feature does not work".
@@ -463,14 +463,14 @@ supplied vertex evidence — a zero certified count is consistent with `f_g = 1`
 hypothesis, the **phantom-gDNA floor**, turned out to be a DIFFERENT and much larger bug and is now
 fixed: TRAPS: a-zero-count-is-a-measurement/TRAPS: a-ratio-cannot-carry-zero, §0's 39 %.
 
-## §4 ⛔ WHAT IS DELIBERATELY NOT NEXT — one line each, so it is not rebuilt
+## §4 ⛔ WHAT IS DELIBERATELY NOT NEXT — one boundary each, so it is not rebuilt
 
 | | closed by | verdict |
 |---|---|---|
 | **the gDNA scale rule** · **the mass pin** · **TSS/TES as the population licence** | landed 2026-08-04 | ✅ `EQUATIONS.md` §3.5/§3.5b/§3.5c, gates in `test_gdna_scale_rule.py`, `test_relay_mass_pin.py`, `test_terminus_population_licence.py`. ⚠ The ceiling says the mass pin cost the panel **nothing** (+0.0002 to delete it outright); it landed on the derivation and on being free |
-| **face (I) of the `intron\|exon` EDGE** | re-solve ceiling + panel arm | ⛔ **DO NOT BUILD.** The derivation (`EQUATIONS.md` §3.6) is re-verified and is not what failed: handing both EDGEs the ORACLE truth and re-solving is worth **−0.000** off capture, and the ladder prototype is **negative** (mwae 0.0413 → 0.0426, confidently-wrong +10.7 %). TRAPS: panel-before-src |
+| **face (I) of the `intron\|exon` BOUNDARY** | re-solve ceiling + panel arm | ⛔ **DO NOT BUILD.** The derivation (`EQUATIONS.md` §3.6) is re-verified and is not what failed: handing both BOUNDARIES the ORACLE truth and re-solving is worth **−0.000** off capture, and the ladder prototype is **negative** (mwae 0.0413 → 0.0426, confidently-wrong +10.7 %). TRAPS: panel-before-src |
 | **a LEVEL transfer from the intron** | toy + panel | ⛔ **REFUTED**, +0.207 on capture-ON × unstranded — capture inverts which side is well-counted (TRAPS: capture-inverts-the-counted-side) |
-| **the RNA fragment-length model** | `length_ceiling.py`, one pmf at a time | ⛔ **−0.02 %** at pass-0, **+0.21 % (worse)** over all objects. Root cause exact (`pi(w)` scores junction *crossing*, the pool requires the splice to be *seen*). ⭐ Its value is the BOUND: the whole fragment-length-model cluster costs ≤0.43 % of the shipped solve. TRAPS: price-the-halves-separately |
+| **the RNA fragment-length model** | `length_ceiling.py`, one pmf at a time | ⛔ **−0.02 %** at pass-0, **+0.21 % (worse)** over all objects. Root cause exact (`pi(w)` scores sj *crossing*, the pool requires the splice to be *seen*). ⭐ Its value is the BOUND: the whole fragment-length-model cluster costs ≤0.43 % of the shipped solve. TRAPS: price-the-halves-separately |
 | **TRAPS: pure-and-length-censored's κ residue, as an ACCURACY fix** | κ injected at exactly ½, all 36 conditions | ⛔ **−0.2 %** unstranded, worse on the shipped solve. ⭐ But the *general* defect — a boolean licence flipped by a small residue — is **the-capture-level-residual**, and the destruction control taught TRAPS: honesty-metrics-reward-ignorance |
 | **a nascent-bearing ladder condition** | toy, 36 conditions × 7 rungs | ⚠ **−5 %**, and the wrong way on one stratum. Keep it as a harness arm (`--nrna 60`); it no longer justifies re-simulating the panel |
 | **the gDNA prior's BIMODAL CAPACITY, and "give the prior more signal"** | a read of `gdna_landscape.py` + the production refit on real conditions | ⛔ **BOTH BRANCHES CLOSED.** The prior already renders the landscape correctly — **2.98 decades** of mode separation at `g75 ss0.99 capture_ON`, 30× more enriched mass ON than OFF, a single pile at the wall at `g00`. And a prior fitted from ORACLE truth is the same prior (0.04 dec). Not capacity, not signal, not location. §3 below |
@@ -491,7 +491,7 @@ mechanism can look good on its target and still be inadmissible.
 | `zc_jeffreys_mean` | `ρ_g = ½/E_g` at zero mass | ⛔ +7,269 % | −13.9 % | moves the mode UP |
 | `zc_logmean` | `ρ_g = e^{ψ₀(½)}/E_g` | ⛔ +6,264 % | −11.3 % | moves the mode UP |
 | `zc_anchor_mute` | no `prec_g` at empty locked slots | ⛔ +5,554 % | −7.7 % | kills the zero-gDNA win |
-| `zc_struct_lock_g1` | scope `struct_lock` to `g1_locked ∧ NODE` | ⛔ +3,207 % | −1.2 % | ⭐ the MIS-SCOPED mask is load-bearing |
+| `zc_struct_lock_g1` | scope `struct_lock` to `g1_locked ∧ REGION` | ⛔ +3,207 % | −1.2 % | ⭐ the MIS-SCOPED mask is load-bearing |
 | `zc_reference_var` | `Var(f_g) = ⅛` where `τ = 0` | ✅ +0.0 % | −0.3 % | ⭐ passes the control and is INERT |
 | `zc_discrepancy` | `+½ log D` shift, `(log D)²/12` | ⛔ +982 % | panel +4.5 % | moves the mode UP |
 | `zc_disc_var` | the variance alone, mode untouched | ⛔ +255 % | panel +0.9 % | damping cannot bite |
@@ -531,7 +531,7 @@ the one-sided certified-RNA bound (−81.9 %, 8/8), and that one is panel-negati
 2. ⭐⭐ **What is the joint price of the splice-flux reframe and the level defect?** **the-cancelling-pair**. Neither has an
    honest price alone, and one of them is already in `src/`.
 3. ⭐ **Do we solve ALTERNATIVE SPLICING correctly?** The `alt_splice` rung exists and is **unverified** — see
-   the handoff. Cheap, and it is the only structure where several junctions share an EDGE.
+   the handoff. Cheap, and it is the only structure where several sj share a BOUNDARY.
 4. ⚠ **The two capture-ON pilot rows disagree about the SIGN of every length correction**, across two
    independently built panels. Unexplained. ⛔ Do not average them; find which one is lying.
 5. ⚠ **Does the reframe's own `σ²_transfer` correctly price a ratio built on 19 counts?** `EQUATIONS.md`

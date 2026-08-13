@@ -57,7 +57,7 @@ being sane, and TRAPS: variance-fitted-on-the-belief is what happens when a prio
 ### The oracle, and what it buys
 
 `tests/calibration/_oracle.py` already produces the object we need: **the production accumulator run on
-the BAM split by true origin**, so for every node and every edge we have the *true* gDNA and RNA counts on
+the BAM split by true origin**, so for every region and every boundary we have the *true* gDNA and RNA counts on
 each strand. Three quantities follow, and the differences between them are the whole diagnostic:
 
 | | quantity | what a gap to the next one means |
@@ -96,7 +96,7 @@ TRAPS: log-variance-is-not-linear), and the headline is a calibration curve, whi
 ⛔⛔ **AND THE PARTITION ALONE IS NOT ENOUGH — "no own evidence" IS NOT A BINARY.** Step 1 was
 implemented as `tau_lam > 1e-9`, and the strand arm's information `I(f_g) ∝ (2κ−1)²` is exactly zero
 only at κ = **½** while κ is *fitted*. At 10 M fragments a genuinely unstranded library fits
-κ̂ = 0.500689, so τ lands at ~5e-7 and the cut promotes the object to "solvable" while its own statement
+κ̂ = 0.500689, so τ lands at ~5e-7 and the region bound promotes the object to "solvable" while its own statement
 has **sd(λ) = 1,377 nats against a solver that represents λ only on ±10**. Measured:
 **79.1 % of the "solvable" error sat on objects with no usable answer of their own** (TRAPS: a-threshold-on-a-fitted-residue).
 
@@ -107,7 +107,7 @@ conditions, so any floor would be a tuned constant. ⭐⭐ **Read `weak%` before
 `weak%` near 100 is reporting the relay and the reference, not a solve.
 
 ⚠ And `locked` is the **TRAPS: no-magic-numbers** class on *both* axes (`node_geometry.g1_locked`), never
-`~solvable & is_node` — a structurally-locked *edge* is certain, not ignorant. ⛔ It is deliberately
+`~solvable & is_node` — a structurally-locked *boundary* is certain, not ignorant. ⛔ It is deliberately
 **not** the same mask as `node_init`'s node-only `struct_lock`, which governs message *emission*
 (TRAPS: two-masks-one-name).
 
@@ -133,7 +133,7 @@ next lever and a separate measurement.
 ⭐⭐ **The cross-tab is the point.** Objects **undetermined by C_info** *and* carried **entirely by the
 relay** have no answer of their own at all — whatever pass-0 reports there came from neighbours and the
 population prior. That cell is reported with its mass share and its error share, and it needs no
-confidence threshold because it is a cell of a partition rather than a cut.
+confidence threshold because it is a cell of a partition rather than a region bound.
 
 The two classifications, both mutually exclusive and exhaustive (gated: the mass *and* the error
 decompose over each exactly):
@@ -160,7 +160,7 @@ different axis, measured by `second_pass_accuracy.py` and `calibration_truth_ab.
 15 %-wrong length model on exactly the conditions it is meant to rescue would be tuned against a
 manufactured discriminant, and every conclusion drawn from it would have to be thrown away when the model
 was fixed. That has already happened once here, on a substrate defect (TRAPS: prove-the-substrate). ⚠ **It is live
-again for the per-node length likelihood**: the fitted gap's sign is currently wrong, so wiring that
+again for the per-region length likelihood**: the fitted gap's sign is currently wrong, so wiring that
 channel now would repeat exactly this — see `ROADMAP.md` §2 **the-cancelling-pair**.
 
 ---

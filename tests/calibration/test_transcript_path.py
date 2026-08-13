@@ -12,7 +12,7 @@ of it, stated as a property rather than as a recorded output:
 * ⭐ the steps run in TRANSCRIPTION order, so a minus-strand path descends in genomic coordinate.
 
 ⛔ **The sj join goes through INTRON COORDINATES and never through the flanking region pair.** The
-pair is unique on the shipped partition only because every exon endpoint is forced to be a region region_bound;
+pair is unique on the shipped partition only because every exon endpoint is forced to be a region bound;
 on a coarsened partition it collides, and it carries no strand.
 """
 
@@ -100,7 +100,7 @@ class _Index:
                 "edge_id": np.arange(len(jr), dtype=np.int64),
                 "src": [r[0] for r in jr],
                 "dst": [r[1] for r in jr],
-                "kind": np.ones(len(jr), dtype=np.uint8),  # EDGE_KIND_JUNCTION
+                "kind": np.ones(len(jr), dtype=np.uint8),  # EDGE_KIND_SJ
                 "strand": np.asarray([r[2] for r in jr], dtype=np.int8),
             }
         )

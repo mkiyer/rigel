@@ -13,7 +13,7 @@ Cutting a new release is now two commands, plus one wait.
 
 ```bash
 # 1. Add a `## [Unreleased]` section to CHANGELOG.md with your notes,
-#    then cut the release:
+#    then region bound the release:
 ./scripts/publishing/release.sh 0.4.0
 
 # 2. Wait for the GitHub Actions publish workflow to go green

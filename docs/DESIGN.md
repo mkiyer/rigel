@@ -13,42 +13,42 @@ was in use for a concept that already had a name, and the ambiguity cost a reade
 
 | ✅ the term | what it means | ⛔ the banned synonym |
 |---|---|---|
-| **NODE** | a **contiguous genomic interval** — a region of the partition. Has a length in bp | `region` is tolerated: it is the index's own word for the same thing |
-| **EDGE** | a **single genomic position** separating two adjacent NODEs. Zero bp wide | `line` · `seam` · `crossing` (as a noun for an object) |
-| **BOUNDARY** | ⭐ an accepted synonym for EDGE, kept because the code and the earlier docs are full of it | — |
-| **junction** | ⚠ a **splice** junction — a *different* object on a *different* axis, directed donor→acceptor. Never a synonym for EDGE | — |
-| **slot** | one entry of the chain, which alternates NODE, EDGE, NODE, EDGE … A slot is a NODE **or** an EDGE | — |
-| **step** | one adjacency move along the chain: NODE→EDGE or EDGE→NODE. So NODE→EDGE→NODE is **two steps** | `hop` |
-| **structurally pure-gDNA object** (**G1 object**) | a slot at which no RNA strand is admissible, so its composition is CERTAIN: an intergenic NODE, or an `intergenic\|exon` EDGE. Its gDNA density is directly observed, with nothing to deconvolve. The predicate is `node_geometry.g1_locked` | `anchor` — ⛔ that word had two meanings at once and now has only the one below |
+| **REGION** | a **contiguous genomic interval** — a region of the partition. Has a length in bp | `region` is tolerated: it is the index's own word for the same thing |
+| **BOUNDARY** | a **single genomic position** separating two adjacent REGIONs. Zero bp wide | `boundary` · `boundary` · `crossing` (as a noun for an object) |
+| **BOUNDARY** | ⭐ an accepted synonym for BOUNDARY, kept because the code and the earlier docs are full of it | — |
+| **sj** | ⚠ a **splice** sj — a *different* object on a *different* axis, directed donor→acceptor. Never a synonym for BOUNDARY | — |
+| **slot** | one entry of the chain, which alternates REGION, BOUNDARY, REGION, BOUNDARY … A slot is a REGION **or** a BOUNDARY | — |
+| **step** | one adjacency move along the chain: REGION→BOUNDARY or BOUNDARY→REGION. So REGION→BOUNDARY→REGION is **two steps** | `hop` |
+| **structurally pure-gDNA object** (**G1 object**) | a slot at which no RNA strand is admissible, so its composition is CERTAIN: an intergenic REGION, or an `intergenic\|exon` BOUNDARY. Its gDNA density is directly observed, with nothing to deconvolve. The predicate is `node_geometry.g1_locked` | `anchor` — ⛔ that word had two meanings at once and now has only the one below |
 | **the mass pin** | the operator that rescales a message so that `Σ_c ρ_c·E_c = M` at the destination (`messages/head.py`'s `_pin_v` and its scalar twin inside the scan kernel). "Pin" because the function is named for it | `the mass anchor` |
 | **counts** | discrete integer fragment counts | — |
 | **density** = **abundance** | counts per base. The two words mean the same thing | ⛔ not the simulator's molar `abundance=` field, which is a per-transcript weight |
-| **crossing fragment** | ⭐ a **fragment** that spans an EDGE. Legitimate and necessary — `crossing_eff_length` is the opportunity for exactly this — and it stays | ⛔ only the *object* sense is banned: objects are NODEs and EDGEs, never "crossings" |
+| **crossing fragment** | ⭐ a **fragment** that spans a BOUNDARY. Legitimate and necessary — `crossing_eff_length` is the opportunity for exactly this — and it stays | ⛔ only the *object* sense is banned: objects are REGIONs and BOUNDARIES, never "crossings" |
 | **switched off** | an A/B in which one code path is disabled and the run repeated, to establish that it is the cause | `ablated` |
-| **splice-out** | ⭐ owner, 2026-08-05. A message crossing an EDGE **in the direction in which mature RNA departs** through the junction there. The fragments that splice away leave the contiguous population; the residual continues | ⛔ `peel` |
-| **splice-in** | ⭐ owner, 2026-08-05. A message crossing an EDGE **in the direction in which mature RNA arrives** through the junction there — the spliced flux joins the destination's population | ⛔ `graft` |
+| **splice-out** | ⭐ owner, 2026-08-05. A message crossing a BOUNDARY **in the direction in which mature RNA departs** through the sj there. The fragments that splice away leave the contiguous population; the residual continues | ⛔ `peel` |
+| **splice-in** | ⭐ owner, 2026-08-05. A message crossing a BOUNDARY **in the direction in which mature RNA arrives** through the sj there — the spliced flux joins the destination's population | ⛔ `graft` |
 
 ⭐⭐ **`splice-out` / `splice-in` are DIRECTIONAL, and that is the whole reason for the rename.** "Peel"
-and "graft" named two operators; the same EDGE is a splice-out for a message travelling one way and a
+and "graft" named two operators; the same BOUNDARY is a splice-out for a message travelling one way and a
 splice-in for a message travelling the other, so the pair names one thing seen from two sides. ⚠ The old
 words are everywhere in `src/` (`_peel_share`, `graft_frame_logvar`, `graft_premise_logvar`, `_gr`) and
 are converged as each area is touched, per this section's standing policy — not in one sweep.
 
 ⭐⭐⭐ **AND THE DERIVATION SHARPENED THAT INTO A RULING (2026-08-05, `EQUATIONS.md` §3.6c).** The two words
-name the SEMANTICS of a step and **not** its arithmetic. An EDGE presents one total to its genomic-LOW
+name the SEMANTICS of a step and **not** its arithmetic. An BOUNDARY presents one total to its genomic-LOW
 neighbour and another to its genomic-HIGH one, and a hop between adjacent slots always uses the low slot's
 HIGH-flank total against the high slot's LOW-flank total — *whichever* of them is the source. So the
 message direction decides only whether the step is called a splice-out or a splice-in; it never decides
 which number is used. ⛔ **A predicate on the message direction is therefore the wrong shape for anything in
 this family, and one on the SIDE is the right one.** ⚠ The corollary that matters when writing the plumbing:
-this is still not expressible as one array per pass, because within a single forward pass an EDGE presents
+this is still not expressible as one array per pass, because within a single forward pass a BOUNDARY presents
 its LOW-flank total as a destination and its HIGH-flank total as the very next hop's source.
 
 ⚠ **`docs/TESTING.md` §0b carries the counts/density half of this table** for readers who arrive there
 first; this section is the canonical one.
 
 ⚠⚠ **The banned words are still widespread in code written before this ruling** — ~1,500 occurrences of
-`line` / `seam` / `crossing` / `anchor` across `src/`, `tests/` and `scripts/`, almost all in comments and
+`boundary` / `boundary` / `crossing` / `anchor` across `src/`, `tests/` and `scripts/`, almost all in comments and
 docstrings. They are being converged as each area is touched, not in one sweep: a blanket regex over that
 much prose mis-fires (`crossing_eff_length` and "crossing fragment" are correct; the fragment-length
 "anchor" is a third, unrelated meaning), and a 1,500-line mechanical diff is not reviewable.
@@ -64,12 +64,12 @@ Three stages, `pipeline.py`:
    `FragmentBuffer`, and deposits per-object tallies into the C++ **accumulator** → `AccumulatorPayload`.
 2. **Second pass** (`_drain_side_buffer`) — drains the fragments pass 1 held, then
    **Calibrate** (`calibration.calibrate`) — deconvolves each object's unspliced mass into gDNA vs RNA by
-   a belief-propagation sweep over the node chain, and fits the library-level parameters.
+   a belief-propagation sweep over the region chain, and fits the library-level parameters.
 3. **Quantify** (`quant_from_buffer`) — scores fragments, builds loci by connected components, runs a
    per-locus EM with `n_transcripts + 1` components. The calibration prior enters as **two per-locus
    Dirichlet scalars**, never per-transcript.
 
-⚠ **Calibration cost is depth-INDEPENDENT** — every node in the index is solved regardless of read depth,
+⚠ **Calibration cost is depth-INDEPENDENT** — every region in the index is solved regardless of read depth,
 so a 971 k-fragment targeted BAM pays full genome-scale cost. On one real run: index load ~7 s, BAM scan
 ~2 s, calibration ~66 s, per-locus EM ~24 s. **The scan is ~2 % of runtime — accumulator work is
 essentially free and calibration is the whole budget.**
@@ -81,26 +81,26 @@ essentially free and calibration is the whole budget.**
 `INDEX_FORMAT_VERSION 8`, shipped as `nodes.feather` + `edges.feather`, built and checked by
 `calibration/splice_graph.py`.
 
-> The genome is a graph. **Nodes** are intervals; **edges** connect them. A fragment is a **path**.
-> Nodes count fragments *contained*; edges count fragments *crossing* (a 0-bp line, no width).
+> The genome is a graph. **Regions** are intervals; **boundaries** connect them. A fragment is a **path**.
+> Regions count fragments *contained*; boundaries count fragments *crossing* (a 0-bp boundary, no width).
 
-- **Nodes** tile each reference, cut at **every exon endpoint** of every non-synthetic transcript, with
-  **no merging** (`EQUATIONS.md` §1.7). 1 bp nodes are legal and common — nothing may assume length > 1.
-- **Two edge kinds.** *Contiguous* edges are the seam between genomically adjacent nodes: bidirectional,
-  carrying gDNA + RNA, endpoints **implicit** (edge `i` sits between node `i` and `i+1`). *Junction* edges
+- **Regions** tile each reference, region bound at **every exon endpoint** of every non-synthetic transcript, with
+  **no merging** (`EQUATIONS.md` §1.7). 1 bp regions are legal and common — nothing may assume length > 1.
+- **Two boundary kinds.** *Contiguous* boundaries are the boundary between genomically adjacent regions: bidirectional,
+  carrying gDNA + RNA, endpoints **implicit** (boundary `i` sits between region `i` and `i+1`). *Junction* boundaries
   are directed donor→acceptor, **pure mature RNA** by construction, need explicit `(src, dst, strand)`,
   and carry no unspliced channel and no structural flags.
-- A splice jump deposits on its **junction edge only** — never on the contiguous edges it splices over.
-- Edges always run `src < dst`, so **genomic order is a topological order and there is no graph traversal
-  anywhere.** The graph is a DAG but **not** a polytree (every junction edge closes one undirected loop),
-  so junction edges must be *factors on their endpoint nodes*, never message channels (TRAPS: splicing-makes-the-graph-cyclic).
-- **8 structural flag bits per contiguous edge**: TSS / TES / DONOR / ACCEPTOR × {+,−}, not mutually
+- A splice jump deposits on its **sj boundary only** — never on the contiguous boundaries it splices over.
+- Boundaries always run `src < dst`, so **genomic order is a topological order and there is no graph traversal
+  anywhere.** The graph is a DAG but **not** a polytree (every sj boundary closes one undirected loop),
+  so sj boundaries must be *factors on their endpoint regions*, never message channels (TRAPS: splicing-makes-the-graph-cyclic).
+- **8 structural flag bits per contiguous boundary**: TSS / TES / DONOR / ACCEPTOR × {+,−}, not mutually
   exclusive. Carry the raw bits to the consumer; do not pre-derive predicates in the plumbing.
 - Validated by invariants I1–I13, two of which re-derive the answer by a **different algorithm**
   (TRAPS: self-checking-validator).
 - `manifest.json` records the sources, their sha256 and the build flags. The build is deterministic.
 
-⛔ **Never quote a stored census.** Node and edge counts are properties of an *annotation*, not of the
+⛔ **Never quote a stored census.** Region and boundary counts are properties of an *annotation*, not of the
 tool: run `scripts/design/index_census.py`.
 
 ⚠ **`reach` is covered by no existing hash.** A rebuild moved 38 % of human reaches with both
@@ -122,20 +122,20 @@ The populations therefore do NOT all carry the same channels, and that asymmetry
     node_contained   count  inv_length_sum  length_sum
     edge_unspliced   count  inv_length_sum  length_sum  mass
     edge_spliced     count                              mass     certified RNA — nothing deconvolves it
-    junction         count  inv_length_sum                       inv_length_sum is LIVE in second_pass
+    sj         count  inv_length_sum                       inv_length_sum is LIVE in second_pass
 
 | | | |
 |---|---|---|
 | `count` | `Σ 1` | statistical power — a count is a count |
-| `inv_length_sum` | `Σ 1/placements` (float64) | an exact model-free density **at an edge**, and *not* one at a node — which is why it is not called `density` |
+| `inv_length_sum` | `Σ 1/placements` (float64) | an exact model-free density **at a boundary**, and *not* one at a region — which is why it is not called `density` |
 | `length_sum` | `Σ L` | carries the only information about the gDNA/RNA split when the two components share a mean length; the other two carry **zero** there |
-| `mass` | `Σ (slice/L)/n_bounds` (float64) | ⭐ the CONSERVED fragment count — sums to **one per fragment**, where `count` is `+1` on each of `max(K,1)` objects. ⭐⭐ A JUNCTION EDGE is a boundary exactly like a contiguous one, so a spliced fragment shares its one unit across every object it crosses, junctions included. `EQUATIONS.md` §3b |
+| `mass` | `Σ (slice/L)/n_bounds` (float64) | ⭐ the CONSERVED fragment count — sums to **one per fragment**, where `count` is `+1` on each of `max(K,1)` objects. ⭐⭐ A SJ BOUNDARY is a boundary exactly like a contiguous one, so a spliced fragment shares its one unit across every object it crosses, sj included. `EQUATIONS.md` §3b |
 
 ⛔ **Six banks were REMOVED on that rule** (2026-08-08): three `node_spanning_*`, the two spliced-edge
-length moments, and `sj_length_sum`. Structs went `Node` 80 → **24 B**, `ContiguousEdge` 80 → **48 B**,
+length moments, and `sj_length_sum`. Structs went `Region` 80 → **24 B**, `ContiguousEdge` 80 → **48 B**,
 `JunctionEdge` 40 → **16 B**. ⚠ Deleting `node_spanning` has one structural consequence worth knowing:
-**no spliced fragment touches the node axis at all** now — a spliced fragment can never be *contained*,
-because both endpoints of an annotated intron are cuts.
+**no spliced fragment touches the region axis at all** now — a spliced fragment can never be *contained*,
+because both endpoints of an annotated intron are region bounds.
 
 ⛔ **THE COUNTS KEEP BOTH GENOME-STRAND COLUMNS; THE LENGTH MOMENTS AND THE MASS KEEP ONE.** Which strand
 a read aligned to says nothing about whether the molecule was gDNA or RNA, and every consumer summed the
@@ -143,13 +143,13 @@ two columns — so a strand axis there is half the bank wasted, and worse, a cla
 meaningful. The counts keep both because the strand model is a Beta-Binomial over them, per strand.
 
 ⛔⛔ **AND `sj_count` KEEPS BOTH FOR A REASON THAT IS NOT THE STRAND MODEL** (owner, 2026-08-08). A
-junction is stranded by its genomic splicing MOTIF, so the *fragments'* strand looks redundant, and every
+sj is stranded by its genomic splicing MOTIF, so the *fragments'* strand looks redundant, and every
 consumer today sums the two. It is retained for **ALIGNER-ARTIFACT DETECTION**: aligners emit
 false-positive `N` CIGAR ops from plain genomic DNA, `rigel.splice_blacklist` catches only those
 `alignable` has enumerated by coordinate, and the empirical detector is that in a **stranded** library a
-real junction inherits the global strand specificity while an artifact deposits onto BOTH strands.
+real sj inherits the global strand specificity while an artifact deposits onto BOTH strands.
 ⚠ Unstranded data cannot use it (κ = ½ leaves nothing to deviate from) — a property of the detector, not
-a reason to drop the column. ⭐ The discriminating information lives ONLY in the split: a clean junction
+a reason to drop the column. ⭐ The discriminating information lives ONLY in the split: a clean sj
 and an artifactual one at the same depth carry the same total. Gated by
 `test_the_junction_STRAND_SPLIT_IS_RETAINED_FOR_ALIGNER_ARTIFACT_DETECTION`.
 
@@ -159,9 +159,9 @@ constant and nothing decodes a bank. Headroom is no longer a question anyone has
 ⭐ It is also the more ACCURATE choice, measured against exact rational arithmetic on the
 reciprocal-opportunity theorem: the fixed point missed the answer by 7.0e-10 … 2.0e-07 where float64
 misses by 5.8e-15 … 2.8e-13 — 1e5–7e5× closer. Memory is unchanged and still flat — ~85 MB at human
-scale (node 24 B, contiguous edge 48 B, junction edge 24 B), no hash map.
+scale (region 24 B, contiguous boundary 48 B, sj boundary 24 B), no hash map.
 
-⭐⭐ **AND ONE OF THEM IS ALREADY LOAD-BEARING IN A WAY WORTH STATING**: `edge_unspliced_inv_length_sum` is LIVE in `second_pass` (via `pipeline`), and being the one channel whose opportunity and deposit cancel identically — `E[inv_length_sum] = rho` exactly, at an edge, for ANY length distribution — that rho term is **the only provably fragment-length-gap-robust density estimator in the tree**. `EQUATIONS.md` §3c.
+⭐⭐ **AND ONE OF THEM IS ALREADY LOAD-BEARING IN A WAY WORTH STATING**: `edge_unspliced_inv_length_sum` is LIVE in `second_pass` (via `pipeline`), and being the one channel whose opportunity and deposit cancel identically — `E[inv_length_sum] = rho` exactly, at a boundary, for ANY length distribution — that rho term is **the only provably fragment-length-gap-robust density estimator in the tree**. `EQUATIONS.md` §3c.
 
 ⛔ **THE TALLY IS NOT BIT-REPRODUCIBLE ACROSS WORKER COUNTS, and the owner has signed that off**
 (2026-08-11). Integer addition is associative, so every COUNT bank still reproduces exactly — measured
@@ -179,22 +179,22 @@ for byte-identical output. `TRAPS: integer-channels-reproduce` carries the numbe
 **Owner ruling, 2026-08-08.** It was already true of the accumulator, the `CalibrationResult` and the
 sweep; it is stated here because ONE consumer had drifted from it for a year.
 
-> **A NODE owns the fragments CONTAINED in it. An EDGE owns the fragments that CROSS it. No object's
+> **A REGION owns the fragments CONTAINED in it. An BOUNDARY owns the fragments that CROSS it. No object's
 > mass is ever moved onto another object.**
 
-⭐ **A locus therefore collects BOTH kinds of object**: its NODEs by genomic overlap, and **its EDGEs are
-the edges that TOUCH its nodes**. Every node contributes both of its lines, so a locus of `k` contiguous
-nodes carries `k + 1` lines — **its two outer ones included**, because a fragment crossing a locus's
+⭐ **A locus therefore collects BOTH kinds of object**: its REGIONs by genomic overlap, and **its BOUNDARIES are
+the boundaries that TOUCH its regions**. Every region contributes both of its boundaries, so a locus of `k` contiguous
+regions carries `k + 1` boundaries — **its two outer ones included**, because a fragment crossing a locus's
 boundary overlaps the locus and is therefore one of its EM candidates.
 
-⭐ The outer lines are unambiguous, and structurally so: a locus is bounded by intergenic sequence and
-intergenic regions carry no transcripts, so no two loci contend for a boundary line. ⚠ Contention is
-*rare rather than impossible* — 20–34 edges per flgap condition, carrying ~0.01 % of the mass — so
+⭐ The outer boundaries are unambiguous, and structurally so: a locus is bounded by intergenic sequence and
+intergenic regions carry no transcripts, so no two loci contend for a boundary. ⚠ Contention is
+*rare rather than impossible* — 20–34 boundaries per flgap condition, carrying ~0.01 % of the mass — so
 `priors.contended_edges` REPORTS it and an assertion would have died on real data.
 
-⛔ **What this replaced, and why it must not come back.** `assemble_priors` folded each line's mass into
-ONE flank node, because `_project_regions_to_loci` divides by `region_size_bp` and so cannot see a 0-bp
-object. The fold then needed a second heuristic — an intergenic RE-KEY — to stop a locus's far-left line
+⛔ **What this replaced, and why it must not come back.** `assemble_priors` folded each boundary's mass into
+ONE flank region, because `_project_regions_to_loci` divides by `region_size_bp` and so cannot see a 0-bp
+object. The fold then needed a second heuristic — an intergenic RE-KEY — to stop a locus's far-left boundary
 vanishing into its dropped flank. ⚠ The fold predates the accumulator rewrite: shipped **v0.7.1** stored
 the two boundary sides as separate banks and used them directly for RNA (no pooling, no owner) while
 sending gDNA through `_pooled_seam_arrays`, which rejoined them and had to pick an owner. Its stated
@@ -218,10 +218,10 @@ starts outside it.
 > inside transcript bounds.
 
 ⭐ **AND THE CROSSING→FRAGMENT CONVERSION IS POPULATION-BLIND, MEASURED AND BOUNDED** (2026-08-10). The
-edge term is converted by `q = mass/count`, measured per line on the POOLED population and applied to each
+boundary term is converted by `q = mass/count`, measured per boundary on the POOLED population and applied to each
 component. gDNA and RNA have different true `q` — not because of fragment length (the equal-length null
-carries the LARGEST error) but because gDNA crosses lines in long intergenic nodes where `q → 1` while RNA
-sits among short exons. On the TOTAL prior the node term dilutes it to `Δphi` **+0.00013 … +0.00596**, at
+carries the LARGEST error) but because gDNA crosses boundaries in long intergenic regions where `q → 1` while RNA
+sits among short exons. On the TOTAL prior the region term dilutes it to `Δphi` **+0.00013 … +0.00596**, at
 or below calibration's own noise floor, and it is not repairable in production because the driver is
 placement rather than length. ⛔ Recorded, not fixed: `TRAPS: a-pooled-conversion-applied-per-component`.
 ⚠ A DIFFERENT quantity from the `Δphi ≤ 5e-4` below, which is the shipped `f_g` against the unspliced
@@ -258,11 +258,11 @@ transcript-relative notion and is **derived, never stored**. Two strands exist a
 
 ### 3.4 Fragment length — ONE definition
 
-`L` = genomic span minus cut introns. The scanner's rival histogram, `FragmentLengthModels` and the
+`L` = genomic span minus region bound introns. The scanner's rival histogram, `FragmentLengthModels` and the
 transcript-space definition are **deleted**, and every histogram `build_fl_models` reads comes from the
 payload, so a mixed-frame call is unrepresentable.
 
-⭐ **A gap intron is cut on EVERY fragment**, not only unspliced ones, with the gaps the CIGAR already
+⭐ **A gap intron is region bound on EVERY fragment**, not only unspliced ones, with the gaps the CIGAR already
 explained excluded by **exact `(start, end)` equality** — overlap would let a different nearby intron
 answer for one and make `L` too short.
 
@@ -275,11 +275,11 @@ population known to be one component, so nothing is estimated from the fragments
 
 | pool | rule | component |
 |---|---|---|
-| `DNA_INTERGENIC` | contained in exactly one intergenic node | gDNA |
-| `DNA_INTRONIC` | contained in exactly one intronic node | gDNA |
-| `DNA_INTRON_EXON` | crosses exactly one line, flanks {intron, exon} | gDNA |
-| `DNA_INTERGENIC_EXON` | crosses exactly one line, flanks {intergenic, exon} | gDNA |
-| `RNA_SPLICED` | used an annotated junction, splice **observed** | RNA |
+| `DNA_INTERGENIC` | contained in exactly one intergenic region | gDNA |
+| `DNA_INTRONIC` | contained in exactly one intronic region | gDNA |
+| `DNA_INTRON_EXON` | crosses exactly one boundary, flanks {intron, exon} | gDNA |
+| `DNA_INTERGENIC_EXON` | crosses exactly one boundary, flanks {intergenic, exon} | gDNA |
+| `RNA_SPLICED` | used an annotated sj, splice **observed** | RNA |
 
 ⭐ There is deliberately **no pool** for an exonic contained fragment or a multi-line crossing — those are
 mixtures, and an impure pool is worse than a missing one.
@@ -287,14 +287,14 @@ mixtures, and an impure pool is worse than a missing one.
 ⭐ **The pool is keyed on DETERMINACY, not provenance**: a fragment enters when exactly **one** hypothesis
 survived, however it got there (TRAPS: a-purity-filter-is-a-length-filter).
 
-⭐ **The two exon-crossing pools are gDNA**, because mature RNA never crosses an exon↔intron seam
-(TRAPS: mature-rna-never-crosses-a-seam). They were filed for two milestones as "not gDNA"; they are.
+⭐ **The two exon-crossing pools are gDNA**, because mature RNA never crosses an exon↔intron boundary
+(TRAPS: mature-rna-never-crosses-a-boundary). They were filed for two milestones as "not gDNA"; they are.
 
 ### 3.6 Each pool is divided by its OWN opportunity
 
 The gDNA model is fitted from **all four** gDNA pools, each divided by its own opportunity and then
 combined — `calibration/gdna_opportunity.py`, derivation in `EQUATIONS.md` §4.3. The RNA model is the
-junction pool divided by its own — `calibration/junction_opportunity.py`, `EQUATIONS.md` §4.2.
+sj pool divided by its own — `calibration/junction_opportunity.py`, `EQUATIONS.md` §4.2.
 
 ⛔ **The four gDNA pools must never be pooled raw** (TRAPS: opposite-tilts-must-not-pool), and every divisor is a
 **probability**, not a count (TRAPS: divide-by-a-probability).
@@ -411,7 +411,7 @@ argument about what a message should say were interleaved. It is now two things,
 | | | |
 |---|---|---|
 | `sweep.py` | ⭐ **THE BACKBONE.** Two directional scans, one combine, one ψ solve, one write-back, **five assertions**. | It knows nothing about capture, grafts, reframes, pins or enrichment — ⛔ and `test_sweep_backbone.py` asserts those words appear in none of its IDENTIFIERS, read from the AST rather than grepped, because grepping matches the docstring that says they are absent |
-| `messages/silent.py` | ⭐ `SilentPolicy` — sends nothing. **THE DEFAULT**, five lines. | A reader who holds `sweep.py` plus this holds the entire working system |
+| `messages/silent.py` | ⭐ `SilentPolicy` — sends nothing. **THE DEFAULT**, five boundaries. | A reader who holds `sweep.py` plus this holds the entire working system |
 | `messages/head.py` | `HeadPolicy` — every operator the evolved solver carried, each behind a NAMED switch (**17** of them) | So the panel prices them ONE AT A TIME rather than as a block |
 | `messages/variance.py` | was `enrichment_frame.py` — the policy's variance toolbox | ⚠ `count_logvar` is also imported by `node_init`; it has ONE home and this is it |
 
@@ -431,7 +431,7 @@ the relay reaches the answer ONLY through ψ's four imputed channels**.
 ⛔ **The alternative was tried and is why this route was chosen.** A clean rebuild came out **+103 %** and
 took two sessions to decompose into a correct derivation, a UNIT ERROR (a log-odds delivered into an
 angle's grid) and a STRUCTURAL disconnection (a one-slot-step channel on a bipartite chain reaches 0
-NODEs). One of the three was a typo-class error no amount of derivation review would have caught. **A
+REGIONs). One of the three was a typo-class error no amount of derivation review would have caught. **A
 refactor gated on byte-identity has exactly zero of that risk: any difference is a bug, full stop.**
 
 #### The interface, and its one contract
@@ -475,7 +475,7 @@ facts about the shipped message layer.** The two that matter most:
   than the slot observed.** That is the identity `Σ_c ρ_c·E_c = M` the mass pin exists to restore, and the
   pin is licensed in only two states, so everywhere else the residual is *delivered* rather than fixed. ⭐ It
   is consistent with a number already in the tree — `messages/variance.py` records the over-claim on 52–71 %
-  of nodes — but nothing had surfaced it as a **checkable invariant**, so nothing could rank it.
+  of regions — but nothing had surfaced it as a **checkable invariant**, so nothing could rank it.
 * ⛔ **29.9 % of live gDNA level modes are outside ψ's own log-share grid**, whose domain is
   `[log σ(−L), log σ(+L)] = [−10.000045, −4.54e-5]` and **not** `(−inf, 0]`. The cause is the `_EPS = 1e-9`
   floor: `log(1e-9) = −20.723`, **10.72 nats** below the low end. ⚠ **This is not 29.9 % of the error, and
@@ -511,9 +511,9 @@ apart, so no threshold is being bought.
 Two measurements that shape every design choice above, both worth keeping because they are about the
 *structure* rather than about a particular library:
 
-**Nodes and edges measure different components.** The gDNA/RNA opportunity ratio is **0.25 at a crossing
-point** (4× RNA-selective) against **115.7 at a 100 bp node**, 25.5 at 147 bp, 2.5 at 300 bp, 1.19 at
-1000 bp. A 200 bp RNA fragment cannot fit in a 147 bp node, so a short node is a good gDNA measurement and
+**Regions and boundaries measure different components.** The gDNA/RNA opportunity ratio is **0.25 at a crossing
+point** (4× RNA-selective) against **115.7 at a 100 bp region**, 25.5 at 147 bp, 2.5 at 300 bp, 1.19 at
+1000 bp. A 200 bp RNA fragment cannot fit in a 147 bp region, so a short region is a good gDNA measurement and
 says nothing about RNA. **Carry per-component precision, not one scalar.**
 
 **Most of the error is in objects with no evidence of their own.** Over a 32-condition sweep, objects
@@ -530,9 +530,9 @@ different instrument. Two things the older sweep could not say:
   strand λ-term is exactly 0 (`EQUATIONS.md` §5.2), and the intron factory still reaches **100 % of
   intron-node mass — both-stranded as well as single-stranded**. Density, not strand, is what makes an
   unstranded library solvable at all.
-* ⛔ **But the factory is wired to `(NODE, INTRON)` and to nothing else**, so on an unstranded library
-  the relay-only set is exactly *exon nodes plus contiguous edges*: 27.6 % + 20.6 % of mass off capture,
-  53.3 % + 44.6 % on it. ⚠ **Edges are the smaller half** — the earlier framing of this as an
+* ⛔ **But the factory is wired to `(REGION, INTRON)` and to nothing else**, so on an unstranded library
+  the relay-only set is exactly *exon regions plus contiguous boundaries*: 27.6 % + 20.6 % of mass off capture,
+  53.3 % + 44.6 % on it. ⚠ **Boundaries are the smaller half** — the earlier framing of this as an
   edge-axis property was wrong.
 * ⭐⭐ **100.0 % of the relay-only mass sits on slots that HAVE a count and a gDNA opportunity.**
   Relay-only never meant "no information"; it means no channel is wired to read the information present.
@@ -550,6 +550,6 @@ because a wrong value with a tight variance outvotes correct neighbours and anch
 (`scripts/design/solvability_audit.py`; the retired `node_error_attribution.py` and
 `confident_fp_trace.py` had this before the refactor and it was lost).
 
-⚠ On real cfRNA most confident-gDNA nodes have **zero** counts (64–94 % across libraries), and genome-wide
-80.5 % of nodes carry no fragments at all. A density-space estimator floors at `1/E` and discards most of
+⚠ On real cfRNA most confident-gDNA regions have **zero** counts (64–94 % across libraries), and genome-wide
+80.5 % of regions carry no fragments at all. A density-space estimator floors at `1/E` and discards most of
 the evidence.

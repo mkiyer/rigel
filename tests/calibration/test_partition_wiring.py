@@ -3,7 +3,7 @@
      (W1b) · Graph:
 
 ``build_region_partition_arrays`` is the one function that decides which genomic partition the C++
-accumulator deposits into: the v8 region region_bound array. :meth:`RegionArrays.from_index` reads the same
+accumulator deposits into: the v8 region bound array. :meth:`RegionArrays.from_index` reads the same
 frame, so the calibration geometry and the scanner cannot address different partitions.
 
 ⚠ **This module exists because the standard 32-condition bench CANNOT see that change.** Measured
@@ -152,7 +152,7 @@ def test_partition_hash_distinguishes_a_signature_invisible_region_bound(alt_tss
     Under the retired merged partition they produced identical arrays and hashed the SAME
     (``645a0dd8aa560236``, measured) — so a payload scanned against one would have loaded silently
     against the other. That is the stale-cache failure ``partition_hash`` exists to make impossible,
-    and it was live until the partition became the region region_bound array.
+    and it was live until the partition became the region bound array.
     """
     assert len(alt_tss_index.regions_df) == len(no_alt_tss_index.regions_df) + 1
     assert alt_tss_index.partition_hash != no_alt_tss_index.partition_hash

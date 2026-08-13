@@ -39,7 +39,7 @@ from native._accumulator_reference import (  # noqa: E402
 )
 
 from rigel.calibration.splice_graph import (  # noqa: E402
-    EDGE_KIND_JUNCTION,
+    EDGE_KIND_SJ,
     build_sj_arrays,
     build_region_partition_arrays,
 )
@@ -52,7 +52,7 @@ def build_partition(index) -> Partition:
     region_bounds, region_bound_offsets, region_types = build_region_partition_arrays(index)
     arrays = build_sj_arrays(index)
     boundaries = index.edges_df
-    is_sj = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_JUNCTION
+    is_sj = boundaries["kind"].to_numpy(np.uint8) == EDGE_KIND_SJ
     n_sj = int(is_sj.sum())
     if arrays.boundary_right.shape[0] != n_sj:
         raise SystemExit("sj CSR disagrees with edges.feather on the sj count")

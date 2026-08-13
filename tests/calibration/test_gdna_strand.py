@@ -272,7 +272,7 @@ def test_boundary_seed_sense_follows_the_flanking_transcript_strand():
 
 
 def test_an_intergenic_flank_is_a_strand_WILDCARD():
-    """Intergenic carries no transcript, so a gene-boundary boundary is oriented by its gene flank."""
+    """Intergenic carries no transcript, so a gene boundary is oriented by its gene flank."""
     from rigel.calibration.strand_deconv import boundary_seeds
 
     substrate, region_arrays, region_density = _boundary_parts(

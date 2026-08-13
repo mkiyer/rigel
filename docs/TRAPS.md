@@ -21,7 +21,7 @@ because they were the other meanings above. A name cannot collide that way: noth
 called `no-magic-numbers`.
 
 ⛔⛔ **THE SHAPE OF AN ENTRY, AND IT IS ENFORCED BY PRUNING.** A trap is **the mistake, the tell, and the
-rule** — three or four lines. The investigation that produced it is in git; the number that describes
+rule** — three or four boundaries. The investigation that produced it is in git; the number that describes
 current state is in `ROADMAP.md`. ⚠ This file reached 741 lines and 91 entries before its first prune
 (2026-08-05) because entries were being *appended to* as new instances arrived. ⭐ **Instances of ONE lesson
 belong in a LIST inside that lesson, not as new entries** — see `TRAPS: a-message-from-the-destinations-belief`, which is nine costumes of one mistake.
@@ -78,7 +78,7 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `zero-target-guards-are-one-sided` — A zero-target guard is ONE-SIDED.
 - `hard-labels-miss-soft-change` — Hard-label metrics are nearly blind to soft changes.
 - `never-pool-the-strata` — THE DEFAULT INSTINCT IS A POOLED AVERAGE, AND IT IS WRONG HERE THREE WAYS.
-- `a-threshold-on-a-fitted-residue` — A BINARY CUT ON A FITTED PARAMETER'S RESIDUE IS NOT A POPULATION TEST — AND A BETTER THRESHOLD I
+- `a-threshold-on-a-fitted-residue` — A BINARY REGION_BOUND ON A FITTED PARAMETER'S RESIDUE IS NOT A POPULATION TEST — AND A BETTER THRESHOLD I
 - `excluding-a-population-hides-it` — EXCLUDING A POPULATION FROM THE DENOMINATOR WITHOUT GATING ITS OWN FAILURE MODE HIDES THE
 - `name-the-observable-per-site` — IF EVERY GATE FOR A CHANGE READS ONE INSTRUMENT, THE CHANGE IS GATED IN ONE PLACE — AND
 - `starved-is-not-depleted` — "STARVED" AND "DEPLETED" ARE NOT THE SAME DIAGNOSIS.
@@ -142,12 +142,12 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 
 - `one-reference-hides-refid-bugs` — Single-reference synthetic indexes hide reference-id-space mismatches.
 - `annotated-is-not-genomic` — "HAS AN ANNOTATION" IS NOT "IS GENOMIC" — a classification must be an INPUT, not a proxy.
-- `a-junction-is-not-a-gap` — A splice junction CANNOT be detected from a gap between deposited slices.
-- `deposit-at-the-junction` — A splice deposit belongs at the JUNCTION's coordinate, not the node's edge.
-- `splicing-makes-the-graph-cyclic` — Alternative splicing makes a node↔junction graph CYCLIC, and cycles are the common case — a
+- `an-sj-is-not-a-gap` — A splice junction CANNOT be detected from a gap between deposited slices.
+- `deposit-at-the-sj` — A splice deposit belongs at the SJ's coordinate, not the region's boundary.
+- `splicing-makes-the-graph-cyclic` — Alternative splicing makes a region↔sj graph CYCLIC, and cycles are the common case — a
 - `nrna-does-not-mean-synthetic` — ~is_synthetic & ~is_nrna as the "real transcript" filter deleted 52,104 real termini.
-- `credit-exactly-one-junction` — A fragment crossing K junctions must credit exactly ONE (the leftmost annotated).
-- `strand-completes-the-edge-key` — (src, kind, dst) is not a total order for junction edges — two strand-coincident junctions diffe
+- `credit-exactly-one-sj` — A fragment crossing K sj must credit exactly ONE (the leftmost annotated).
+- `strand-completes-the-sj-key` — (src, kind, dst) is not a total order for sj boundaries — two strand-coincident sj diffe
 - `a-hash-that-misses-its-artifact` — Cache keys that do not cover the artifact they cache.
   ⚠ 2026-08-08: the payload digest hashed field NAMES, so collapsing a bank from `[n,2]` to `[n]` did not move it — and the cache-load path validates no shapes. It now hashes `name:columns`.
   ⚠ 2026-08-08, second form: an EXCLUSION from a key is a claim about what is stored, and the study cache stored two arrays the excluded file produced.
@@ -170,10 +170,10 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `capture-selects-for-length` — Capture SELECTS FOR LENGTH, and the post-capture distributions are the baseline.
 - `on-target-by-start-is-geometry` — "On-target" defined by the START's territory is geometry, not capture efficiency.
 - `real-data-is-a-test-input` — Real data is a TEST input, never a DESIGN input.
-- `eff-lengths-do-not-cancel-at-an-end` — "Effective lengths cancel, so a node's marginal is just its length" is FALSE near any transcript
+- `eff-lengths-do-not-cancel-at-an-end` — "Effective lengths cancel, so a region's marginal is just its length" is FALSE near any transcript
 - `configured-lengths-are-not-realised` — EQUAL CONFIGURED FRAGMENT LENGTHS DO NOT GIVE EQUAL REALISED ONES.
-- `mature-rna-never-crosses-a-seam` — Mature RNA never crosses an exon↔intron seam (0 of 1,146 seams, 7/7 conditions).
-- `a-seam-with-rna-is-not-a-junction` — But a seam with RNA crossing it need not be a junction.
+- `mature-rna-never-crosses-a-boundary` — Mature RNA never crosses an exon↔intron boundary (0 of 1,146 boundaries, 7/7 conditions).
+- `a-boundary-with-rna-is-not-an-sj` — But a boundary with RNA crossing it need not be a sj.
 
 **Process**
 
@@ -242,9 +242,9 @@ the rate before touching the predicate**; then either the predicate was wrong ab
 **a-docstring-that-misdescribes-the-graph. ⛔⛔ A CLAIM ABOUT THE CODE, INSIDE THE CODE, THAT NOTHING
 GATES — AND IT ROTS EXACTLY LIKE A STALE DOC CITATION, ONE LAYER DOWN.** `run_fill` said it was "shared by
 `density_model`, `strand_deconv`, `priors`, and the `sweep` chain geometry" and had **one** importer;
-`strand_likelihood` said "Used by the per-node strand module (`strand_deconv`)" and `strand_deconv` does not
+`strand_likelihood` said "Used by the per-region strand module (`strand_deconv`)" and `strand_deconv` does not
 import it at all. A developer who trusts either sentence goes looking for code that is not there. Measured
-across the package: **14 module docstrings named a sibling with no import edge in either direction, and 6
+across the package: **14 module docstrings named a sibling with no import boundary in either direction, and 6
 were genuinely stale.** ⭐ *The tell is free and nobody was reading it:* the import graph is in the AST, so
 prose about it can be CHECKED — `scripts/design/module_census.py` does. ⚠ *And the instrument cannot finish
 the job:* "fitted in X" is a DATA-FLOW claim, true of a value passed through a caller, and only a human can
@@ -254,7 +254,7 @@ tell it from an import claim. The count is a worklist, not a verdict.
 UNLAYERED, AND THE TWO NEED OPPOSITE FIXES.** The calibration package read as unmaintainable and the
 instinct was to merge files. Measured from the AST it had **no import cycles at all** and **18 of 35 modules
 had exactly one importer** — so nothing was entangled; there was simply no stated ORDER, and a flat pile of
-peers is the one shape that cannot tell you where to add anything. ⭐ The layers were already in the edges:
+peers is the one shape that cannot tell you where to add anything. ⭐ The layers were already in the boundaries:
 naming them in `_layers.py` and gating them cost **zero behaviour change**, and the gate immediately found
 two upward imports that were the same defect twice — `NodeDeconv`, the tool's central datum, defined in the
 STRAND family and reached up for by three layers. ⛔ *The rule:* **before merging modules, ask whether the
@@ -301,7 +301,7 @@ output moves run to run is a defensible design (the draw is how a hard assignmen
 and it is also a surprise to a user diffing two runs. Whether the default should change is an owner call;
 what is settled is that **no measurement of the deliverable is attributable without pinning it.**
 
-**a-clip-hides-a-scale-error. A `min()` clip hid an exact factor of 2 for months.** Pooled seam density read 1.994× truth
+**a-clip-hides-a-scale-error. A `min()` clip hid an exact factor of 2 for months.** Pooled boundary density read 1.994× truth
 because the code SUMMED two faces' mass and divided by their AVERAGE. It survived 29 tests: all four
 fixtures stored an un-halved length AND deposited half the mass (cancelling exactly), and `min(2S,S)=S`
 under a uniform field, so the "contraction is 1 under a uniform field" bedrock invariant — written to
@@ -377,9 +377,9 @@ persuasive, and being persuasive is what made it dangerous.
 ON THE COUNT MAKES THE STRONGEST STATEMENT IN THE LIBRARY THE QUIETEST.** At `g00` (zero gDNA by
 construction) pass-0 attributes **34–38 %** of unstranded mass to gDNA, Σ|err| **1.56 M / 1.95 M**
 fragments, and **100 %** of it is `relay_only` with **0 %** `own_evidence` and **0 %** `struct_lock` on
-both axes. The reason is a single census: all **1,298** intergenic nodes hold **exactly zero** counts
+both axes. The reason is a single census: all **1,298** intergenic regions hold **exactly zero** counts
 over **50.7 Mb** of gDNA opportunity, and **all 1,298 emit nothing** — against 915–959 emitting at
-`g25`/`g50`, so the anchor is healthy elsewhere and completely silent here. ⭐ Those nodes are
+`g25`/`g50`, so the anchor is healthy elsewhere and completely silent here. ⭐ Those regions are
 structurally pure gDNA and `struct_lock`ed, i.e. composition-**CERTAIN** — and `own_precision`'s
 `n > 0` still zeroes them, so they are *certain and silent at the same time*. ⛔ **The general defect is
 that `p = n/(n·Var+1)` reads the COUNT as the evidence when the claim is a DENSITY: zero over 50.7 Mb
@@ -416,7 +416,7 @@ logvar_tot[dst] + logvar_tot[src]`` no longer being ``∞``. Reverting only that
 "before" column **to the fragment** (295,453 and 304,815), and a from-git pre-fix tree agrees to 0.17 %.
 ⭐⭐ **The mechanism is not the zero-count SOURCE, it is every hop that TOUCHES a zero-mass slot.**
 ``1/(1/p + ∞) = 0`` annihilated messages in both directions, so ``_fuse`` fell back to the destination's own
-belief and **the chain was cut into segments at every empty slot**. Under capture the off-probe gaps between
+belief and **the chain was region bound into segments at every empty slot**. Under capture the off-probe gaps between
 probe islands ARE the zero-mass slots, so a gDNA level now travels between capture strata that were
 isolated — and it crosses UNSCALED, because ``framed`` needs ``ρ_tot > 0`` at both ends and forces ``r = 1``.
 ⛔ Muting every zero-mass emitter recovers **1.2–7.7 %**; restoring the barrier recovers **100 %**. So it is
@@ -425,7 +425,7 @@ PROPAGATION, not origination, and the previous session's hypothesis — an empty
 those anchors' neighbours is **346×** what a non-empty anchor reports). ⭐ **The lesson: before crediting a
 divergence's removal, ask what the divergence was suppressing.** An ``∞`` in a damping term is a
 STRUCTURAL gate wearing a variance's clothes, and it had been the only thing pricing a premise nothing else
-prices — here "a gDNA level does not change across an EDGE", which capture falsifies by ~350×.
+prices — here "a gDNA level does not change across a BOUNDARY", which capture falsifies by ~350×.
 
 **deadband-from-the-wrong-sample. ⛔⛔ A NOISE DEADBAND WHOSE CUSHION IS SUPPLIED BY AN UNRELATED SAMPLE SIZE FAILS EXACTLY WHERE
 THAT SAMPLE GETS BIG — AND IT FAILS SILENTLY, INTO THE HONESTY COLUMNS.** `strand_evidence` gates the
@@ -456,9 +456,9 @@ the same arm over 16 conditions is −0.2 %.
 
 **predicate-contradicts-its-docstring. ⛔⛔ A PREDICATE CAN CONTRADICT ITS OWN DOCSTRING FOR MONTHS IF SOMETHING ELSE IS MASKING IT —
 AND THE WRONG VERSION CAN BE LOAD-BEARING.** ``strand_evidence``'s ``struct_lock`` is documented as "scoped
-to true intergenic NODE nodes" — i.e. ``g1_locked ∧ NODE``, and `node_geometry.g1_locked` exists as the
+to true intergenic REGIONs" — i.e. ``g1_locked ∧ REGION``, and `node_geometry.g1_locked` exists as the
 designated ONE HOME for exactly that predicate (TRAPS: a-test-that-redefines). The code is handed ``locked = ~solvable`` with
-``solvable = (free_pos|free_neg) & (n > 0)``, so it is true at **every zero-count NODE**: measured **19,709**
+``solvable = (free_pos|free_neg) & (n > 0)``, so it is true at **every zero-count REGION**: measured **19,709**
 ladder slots against **1,312** that are actually TRAPS: no-magic-numbers, so **18,397** empty exons and introns declare their
 composition CERTAIN. ⚠ It was INERT until 2026-08-06 because ``own_precision``'s ``n > 0`` gate silenced
 every zero-count slot; removing that gate un-masked it. ⛔⛔ **And scoping it correctly is
@@ -520,7 +520,7 @@ dominated by the intergenic anchors and hands every exon the off-probe floor, 34
 **before repeating a source comment as a finding, check what the comment was written to justify** — and
 never let a term of art cross from a code comment into a design doc without re-deriving it from the code.
 ⭐ **Settled by construction 2026-08-07:** the backbone's `_scan` is now literally `for i in seq: step(s, i)`
-over one direction, called twice, so "one forward pass and one backward pass" is readable in six lines
+over one direction, called twice, so "one forward pass and one backward pass" is readable in six boundaries
 instead of inferred from a 1,635-line function — and the word is gone from the tree.
 Same family as TRAPS: two-docstrings-one-quantity, one layer up: there, two docstrings disagreed about one quantity; here, a docstring
 and a document agreed on a word that meant different things in each.
@@ -540,15 +540,15 @@ whole time: the instrument already emitted the downstream number.
 SOMETHING.** A zero-gDNA condition was reported as a free falsification control because the new and old
 reframe ratios agreed on every hop. They did, and the arm tested nothing: the composition licence was
 withheld everywhere (no gDNA ⇒ no gDNA precision ⇒ no source can lend), and **6 of 8 hops per direction were
-NO-FRAME** — the intron NODE had zero counts, so the reframe was skipped with `r` forced to 1 by the
+NO-FRAME** — the intron REGION had zero counts, so the reframe was skipped with `r` forced to 1 by the
 divide-by-zero guard. The only framed hops were the ones the change does not touch.
 ⭐ **For every "no change" arm, count the opportunities the change had to fire and print that count beside
 the result.** Same family as TRAPS: a-gate-that-reconstructs and TRAPS: can-the-benchmark-resolve-it: *the measurement was never in a position to say anything.*
 
 ⚠ **2026-08-10, and this form is a TEST FIXTURE rather than an arm.** The `sj_mass` deposit rule shares a
-block's mass equally between the junctions bounding it. Deleting that share left **18/18 gates passing** —
-because the fixture carried ONE junction, so no block was ever bounded twice and `len(bounds)` was always
-1. The rule was unfalsifiable on its own test set. A two-junction fixture plus a per-junction attribution
+block's mass equally between the sj bounding it. Deleting that share left **18/18 gates passing** —
+because the fixture carried ONE sj, so no block was ever bounded twice and `len(bounds)` was always
+1. The rule was unfalsifiable on its own test set. A two-sj fixture plus a per-sj attribution
 gate now catches it, and that gate is the *only* one that does: conservation cannot see the difference,
 since giving a doubly-bounded block whole to each bound still sums to 1 when no such block exists.
 ⭐ **A fixture is an arm. Ask of it too: could this have failed?**
@@ -559,13 +559,13 @@ measured against it inherited that. The tell was free the whole time: diff the t
 files. **When a simulated axis is the axis you are judging, gate the simulator on it.**
 
 **can-the-benchmark-resolve-it. Before running a benchmark, prove it can resolve the axis you are changing.** A 32-condition suite
-was used for months to judge a partition change it was structurally incapable of seeing: its fine node
+was used for months to judge a partition change it was structurally incapable of seeing: its fine region
 set was row-for-row identical to its merged set. It also had `frag_std = 0`, was Poisson by construction,
-and over-represented the terminus+splice-site seam **12×**. `scripts/design/suite_resolves.py` is this
+and over-represented the terminus+splice-site boundary **12×**. `scripts/design/suite_resolves.py` is this
 lesson made executable — every requirement scored against its *degenerate* value, no tuned thresholds.
 
-**toys-rank-hotspots-backwards. A toy ranks performance hotspots BACKWARDS.** At 3.4 k vs 1.5 M nodes: message relay 34 % → 81 %,
-per-node solves 9 % → 29 %, the prior's EM **28 % → 0.7 %**. A whole analysis was spent on the toy's #1
+**toys-rank-hotspots-backwards. A toy ranks performance hotspots BACKWARDS.** At 3.4 k vs 1.5 M regions: message relay 34 % → 81 %,
+per-region solves 9 % → 29 %, the prior's EM **28 % → 0.7 %**. A whole analysis was spent on the toy's #1
 hotspot. Profile on cached real data.
 
 ---
@@ -602,7 +602,7 @@ over objects that cannot be solved buries the answer — but an exclusion is a p
 some other way (TRAPS: excluding-a-population-hides-it); (ii) a pooled mean hides a sign flip between strata; (iii) mass-weighting lets one
 huge object set the number. ⭐ Report per stratum, with the denominator named.
 
-**a-threshold-on-a-fitted-residue. A BINARY CUT ON A FITTED PARAMETER'S RESIDUE IS NOT A POPULATION TEST — AND A BETTER THRESHOLD IS
+**a-threshold-on-a-fitted-residue. A BINARY REGION_BOUND ON A FITTED PARAMETER'S RESIDUE IS NOT A POPULATION TEST — AND A BETTER THRESHOLD IS
 NOT THE FIX.** `τ > 1e-9` promoted objects whose own statement was 1,377 nats wide into the scored
 population, hiding a 1.06 M-fragment error. ⛔ A floor was implemented and refuted: τ is continuous across
 the region, so any floor is a tuned constant. ⭐ The honest repair is to propagate the fitted parameter's
@@ -630,10 +630,10 @@ threw away half a session chasing depth. ⭐ Decide which by asking whether the 
 you have.
 
 **the-substrate-knob-fought-back. A TILING LOOP CAN SUPPRESS THE VERY POPULATION UNDER STUDY.** Toy capture probes are written in
-TRANSCRIPT space, so a probe spanning an internal junction offset has a genomic footprint in **two blocks**
+TRANSCRIPT space, so a probe spanning an internal sj offset has a genomic footprint in **two blocks**
 — and `sim/capture/sampler._split_scale` then multiplies every gDNA fragment overlapping it by
 `gdna_split_penalty`. Tiling across the whole transcript therefore put a split probe over every internal
-junction and depressed exactly the fragments that span an `intron|exon` EDGE. ⭐ The lesson is not "tile per
+sj and depressed exactly the fragments that span an `intron|exon` BOUNDARY. ⭐ The lesson is not "tile per
 exon" (though that is the fix); it is that **a substrate knob can be adversarial to the object you are
 measuring, and the way to find out is to read the sampler's weight for that object's own population** —
 here, one `if len(blocks) > 1` in code nobody had reason to open.
@@ -655,8 +655,8 @@ toy-positive and panel-negative the same way; a third improved its target rung 2
 axis that carries the mass. ⛔ **Run the panel arm before writing a mechanism into `src/`.** ⚠ And when the
 panel disagrees, ask whether the defect is half of a cancelling pair before concluding (TRAPS: a-cancelling-defect-pair).
 
-**capture-inverts-the-counted-side. ⛔ "THE WELL-COUNTED SIDE" IS NOT A FIXED SIDE — CAPTURE INVERTS IT.** Off capture an intron NODE
-holds ~349 gDNA counts against a flanking EDGE's 8–36; under capture the intron holds **1** and the EDGE
+**capture-inverts-the-counted-side. ⛔ "THE WELL-COUNTED SIDE" IS NOT A FIXED SIDE — CAPTURE INVERTS IT.** Off capture an intron REGION
+holds ~349 gDNA counts against a flanking BOUNDARY's 8–36; under capture the intron holds **1** and the BOUNDARY
 holds 20–40, unchanged from 120 kb to 1.08 Mb. So a rule that transports from "the well-counted side"
 silently reverses direction with the protocol, and transferring a DENSITY instead of a SHARE measured
 **+0.207** on capture-ON × unstranded.
@@ -668,18 +668,18 @@ prototype gave a class certainty it had not earned; `solv%` rose 43.1 → 48.2 a
 
 **substitution-understates-a-source. A CEILING BY SUBSTITUTION UNDERSTATES A MESSAGE SOURCE.** Replacing one object's answer with the
 truth and re-scoring is the honest ceiling for a SINK — but a source's value is what it *carries*, and a
-substitution does not propagate. Measured: substituting both `intron|exon` EDGEs removed 9.1 % of the
+substitution does not propagate. Measured: substituting both `intron|exon` BOUNDARIES removed 9.1 % of the
 gene's error, while the object they feed accounted for 82.7 %. ⭐ For a source the ceiling must be a real
 arm — pin it and RE-SOLVE — and an instrument that offers substitution must say which of the two it is
 doing (`toy_panel.py` now does).
 
-**a-locked-object-is-not-a-control. A STRUCTURALLY LOCKED OBJECT IS NOT A CONTROL.** An `intergenic|exon` seam predicts
+**a-locked-object-is-not-a-control. A STRUCTURALLY LOCKED OBJECT IS NOT A CONTROL.** An `intergenic|exon` boundary predicts
 `f_g = 1.0000` exactly against a truth of 1.0, and that was read as the healthy twin of the broken
-`intron|exon` seam beside it — "the same object structurally, and the only difference is the junction
+`intron|exon` boundary beside it — "the same object structurally, and the only difference is the sj
 flux". It is not: it is **G1**, so it is never solved at all and keeps its pinned `{0,0,1}` init. It
 cannot be wrong, so its correctness measures nothing. ⭐ *The control that works is the same class
-split on the variable* — `intron|exon` lines **with** vs **without** junction flux — and it reversed
-the conclusion: the class is 23 % low where **no** junction attaches, so the flux explains 26 % of its
+split on the variable* — `intron|exon` boundaries **with** vs **without** sj flux — and it reversed
+the conclusion: the class is 23 % low where **no** sj attaches, so the flux explains 26 % of its
 error unstranded and **2.5–4 % on the strata where the class has own evidence at all.**
 
 **draining-breaks-the-oracle. A per-fragment-independent partition stops being one the moment a downstream step conditions on
@@ -794,14 +794,14 @@ in `quant_accuracy.py` scored `gdna_est` against `gdna_true` and read **−50.7 
 spectacular, publishable gDNA under-call. `gdna_est` is `gdna_em_count`, which EXCLUDES fragments that
 reached no locus; `gdna_true` is the simulator's origin count, which includes them. **Off capture more
 than half of gDNA is intergenic**, so the "defect" was the missing pool and nothing else — with them the
-same panel reads **−0.6 %**. ⭐ `score_library`'s own docstring, four lines above the field being
+same panel reads **−0.6 %**. ⭐ `score_library`'s own docstring, four boundaries above the field being
 misused, records the identical mistake fabricating an off-capture EM under-call (0.3151 against a truth
 of 0.5000). ⛔ *The lesson on top of the lesson:* **a documented trap does not protect the NEXT consumer
 of the same field.** The columns not summing to the library was the tell, and it was visible on the
 first render.
 
-⛔ **The tell, and it is available before any measurement: write down which line of the consumer reads
-the number.** If that line's population is a different set than the truth arm's population, the arm is
+⛔ **The tell, and it is available before any measurement: write down which boundary of the consumer reads
+the number.** If that boundary's population is a different set than the truth arm's population, the arm is
 measuring the difference between the two sets and calling it error. Here the consumer was one C++
 function and the answer took one grep. ⚠ Provenance is not the check — `F` had the best provenance
 available and was still the wrong quantity; "exact" was a claim about the *bank*, not about the *target*.
@@ -866,7 +866,7 @@ axis being measured, purity and accuracy point in opposite directions.
 exactly one hypothesis survived, however it got there.
 
 **pure-and-length-censored. A POOL CAN BE COMPOSITION-PURE AND LENGTH-CENSORED AT THE SAME TIME, and the second is invisible to
-every purity argument.** "gDNA contained in an intergenic or intronic node" is 100 % gDNA by construction
+every purity argument.** "gDNA contained in an intergenic or intronic region" is 100 % gDNA by construction
 and, under hybrid capture, ~15 % short — because a long fragment beside a probe *reaches* the exon
 boundary and stops being *contained*. It reads as contamination: the pools it spills into resemble the RNA
 pool and were filed for two milestones as "not gDNA". They are gDNA. **Ask what a pool's selection rule
@@ -886,12 +886,12 @@ per-pool opportunities is a *different* operation and is correct — it is the o
 of the per-pool estimates, and under Poisson counts those weights are exactly inverse-variance.
 
 **a-mean-of-ratios-inherits-the-partition. ⭐⭐ AN ESTIMATOR THAT AVERAGES PER-OBJECT RATIOS IS A FUNCTION
-OF WHERE THE ANNOTATION DREW ITS BOUNDARIES.** A node boundary appears wherever a signature changes — an
+OF WHERE THE ANNOTATION DREW ITS BOUNDARIES.** A region boundary appears wherever a signature changes — an
 antisense feature overlapping on the other strand will split a uniform stretch in two — so how many
 objects a transcript's path contains is an artefact, not biology. Averaging densities (harmonic,
 geometric or arithmetic) weights each object by that artefact; `Σmass / Σopportunity` does not, because
 splitting an object splits both sums together. Measured while designing the per-transcript RNA prior:
-subdividing one 20 kb intron from **1 node to 4 to 10**, total mass and total opportunity held constant,
+subdividing one 20 kb intron from **1 region to 4 to 10**, total mass and total opportunity held constant,
 moved a shadow span's share of its locus's prior from **9.4 % → 18.6 % → 32.4 %**; the pooled form gives
 the same answer at 1, 4 and 10. ⭐ `node_geometry` already states the rule for a different pool —
 *"the ratio of sums, never the mean of ratios"* — and it generalises: **an estimator must be invariant to
@@ -961,7 +961,7 @@ wrong answer is numerically different. ⚠ And (2) is `could-the-arm-have-fired`
 the fixture was drawn from the majority population (single-exon transcripts are most of the annotation by
 count) and the majority population is exactly where the two branches coincide.
 
-**fractional-mass-is-the-problem. Fractional mass IS the partitioning problem.** A fragment spanning 4 nodes writes six fractional
+**fractional-mass-is-the-problem. Fractional mass IS the partitioning problem.** A fragment spanning 4 regions writes six fractional
 numbers whose values depend on region sizes, purely because a mass is conserved; the same fragment's
 three crossing counts depend on nothing. *Corollary:* multimapper and ambiguous-path assignment must stay
 INTEGRAL, or the non-integer observable returns and the count stops being a count.
@@ -971,15 +971,15 @@ twice, and credit a boundary it never crossed, with total mass still exactly 1.0
 
 ⭐⭐ **AND IT IS FAR WORSE THAN "a defect can slip through": AN ENTIRE ALTERNATIVE RULE CONSERVES.**
 Measured 2026-08-08 while landing `edge_unspliced_mass`. The shipped deposit shares a slice's
-`slice_len / L` between the lines that bound it; the `1/K` rule an earlier design draft proposed gives
-every crossed line an equal `1/K`. **Both sum to exactly one per fragment.** Injecting `1/K` into the
+`slice_len / L` between the boundaries that bound it; the `1/K` rule an earlier design draft proposed gives
+every crossed boundary an equal `1/K`. **Both sum to exactly one per fragment.** Injecting `1/K` into the
 specification left *every* conservation gate green — both per-fragment laws, the exhaustiveness sum over
-5,193 enumerated fragments, and even the closed form at a line whose flanks exceed every fragment, where
+5,193 enumerated fragments, and even the closed form at a boundary whose flanks exceed every fragment, where
 `K == 1` makes the two rules identical.
 
-⭐ **What caught it was a re-derivation on a different axis**: attribute each fragment BASE to the lines
-bounding its own node and divide by `L`. `1/K` is not expressible that way — a base carries no knowledge
-of how many lines the whole fragment crossed — so the two rules separate immediately.
+⭐ **What caught it was a re-derivation on a different axis**: attribute each fragment BASE to the boundaries
+bounding its own region and divide by `L`. `1/K` is not expressible that way — a base carries no knowledge
+of how many boundaries the whole fragment crossed — so the two rules separate immediately.
 ⛔ **The general form: if a property is invariant across the rules you are choosing between, a gate on
 that property is not a gate on the choice.** Conservation was the obvious thing to test and it was the
 one thing that could not decide anything. `tests/native/test_conserved_mass.py` states the four claims
@@ -1005,7 +1005,7 @@ asserted `prior == 0`, and the mass really was zero on the object it was checkin
    there, so the test could not have failed.
 2. The guard was **still load-bearing on a different path** — the eff-length, which still divides by
    `ρ_ref` — where nothing gated it at all. Injecting the floor there moved `gdna_eff_len` by **+19.97 bp**
-   at 20 units of stray mass and **+44.93 bp** at 5,000, pinning against the seam ceiling.
+   at 20 units of stray mass and **+44.93 bp** at 5,000, pinning against the boundary ceiling.
 3. The correct behaviour on the first path had **reversed**: a count has nothing to divide by, so
    dropping zero-opportunity mass now silently loses fragments the accumulator really deposited. The
    test's assertion was not just unfalsifiable, it was backwards.
@@ -1020,16 +1020,16 @@ one alone reads as a ruling about the whole file.
 
 **a-fold-grows-a-heuristic. ⛔⛔ A QUANTITY FOLDED ONTO ANOTHER AXIS TO FIT A CONSUMER'S INTERFACE WILL GROW A
 HEURISTIC TO REPAIR THE FOLD — AND THE HEURISTIC WILL OUTLIVE EVERYONE'S MEMORY OF WHY THE FOLD WAS THERE.**
-Found 2026-08-08. A contiguous EDGE is a 0-bp line; `_project_regions_to_loci` distributes by
+Found 2026-08-08. A contiguous BOUNDARY is a 0-bp boundary; `_project_regions_to_loci` distributes by
 `overlap / region_size_bp` and so cannot see an object with no extent. Rather than give the projection a
-point path, each line's mass was **folded into one flank node** — and `_left_keyed_edge_arrays`' own
-docstring says exactly that: *"all that remains is to hang it off a node so the genomic-overlap projection
+point path, each boundary's mass was **folded into one flank region** — and `_left_keyed_edge_arrays`' own
+docstring says exactly that: *"all that remains is to hang it off a region so the genomic-overlap projection
 can reach it."*
 
-⭐ **Then the fold acquired a patch.** Keying left loses a locus's far-LEFT line into its intergenic flank,
-which the projection drops — so an intergenic RE-KEY was added to send that one line right. The patch is
-what made the attribution worst: it routes **100 %** of a boundary line into the gene when a median
-**8,066 bp** intergenic flank against a **211 bp** locus flank means ~61 % of that line's mass sits outside.
+⭐ **Then the fold acquired a patch.** Keying left loses a locus's far-LEFT boundary into its intergenic flank,
+which the projection drops — so an intergenic RE-KEY was added to send that one boundary right. The patch is
+what made the attribution worst: it routes **100 %** of a boundary into the gene when a median
+**8,066 bp** intergenic flank against a **211 bp** locus flank means ~61 % of that boundary's mass sits outside.
 
 ⛔ **Three tells that you are looking at one of these:**
 
@@ -1041,13 +1041,13 @@ what made the attribution worst: it routes **100 %** of a boundary line into the
    object served both.
 
 ⭐ **The repair is never a better heuristic; it is to give the consumer the axis it was missing.** Projecting
-an edge AS an edge deleted `edge_owner_nodes`, the re-key, `_component_node_arrays`,
+a boundary AS a boundary deleted `edge_owner_nodes`, the re-key, `_component_node_arrays`,
 `_mass_where_there_is_opportunity` and `_left_keyed_edge_arrays` at once, needed no schema change, and was
 numerically identical on real data — the fold had been obscure rather than wrong, which is precisely why it
 survived. `DESIGN.md` §3.1b.
 
 ⚠ **And the fold hid a gate hole in its own axis**: `node_right_edge[r] == r` on a single reference, so every
-fixture was blind to the difference between an edge index and a left-node index. The replacement's index
+fixture was blind to the difference between a boundary index and a left-node index. The replacement's index
 conversion was *untested* until a perturbation said so (`TRAPS: perturb-every-gate`).
 
 ---
@@ -1055,15 +1055,15 @@ conversion was *untested* until a perturbation said so (`TRAPS: perturb-every-ga
 ## D. Estimation and solver design
 
 **a-variance-cannot-fix-a-bias. You cannot fix a biased mode with a variance.** Established three times independently. Under
-capture a counting estimate was systematically ~2× low but PRECISE — both flanking seams sat at the same
-enriched edge and agreed on the same biased-low density, so the bias was trusted. **A disagreement-based
+capture a counting estimate was systematically ~2× low but PRECISE — both flanking boundaries sat at the same
+enriched boundary and agreed on the same biased-low density, so the bias was trusted. **A disagreement-based
 variance model structurally cannot fix a bias.**
 
 **two-gaussians-one-latent. Never hand a solver two Gaussians built from one latent.** A message on `log f` and one on
 `log(1−f)` are rank-1 with correlation exactly −1, so adding their Fisher information is exactly **2×**
 over-confident, rising to ~7× with deep spliced content.
 
-**variance-fitted-on-the-belief. Never fit a variance on the current, not-yet-solved belief.** Adjacent WRONG nodes agree, so the
+**variance-fitted-on-the-belief. Never fit a variance on the current, not-yet-solved belief.** Adjacent WRONG regions agree, so the
 variance collapses, the messages turn confident, and the error propagates. *Honesty measured against a
 wrong belief is not honesty.* Same family: **any component trained on the solver's own output is
 self-confirming** — refit iterations 1→5 went 0.0840 → 0.1056, monotonically worse.
@@ -1094,15 +1094,15 @@ source and tests, so the labels are kept; the investigations that produced them 
 (`p(x) ∝ 1/x`, improper, an amplifier toward the vertices). Posterior median spread over grid half-widths
 4–20 is **0.045** at Jeffreys and **0.525** at Haldane.
 
-**prefer-shares-to-differences. Sums are well conditioned; differences are not.** Subtracting across a junction gives
+**prefer-shares-to-differences. Sums are well conditioned; differences are not.** Subtracting across a sj gives
 `Var(log ρ) = u²σ_T² + (u−1)²σ_μ²` with `u = 1/(continuing share)` — at the real median u = 2.3 already at
-the edge of validity, at p75 u = 5.3 hopeless at any depth. **Prefer shares.**
+the boundary of validity, at p75 u = 5.3 hopeless at any depth. **Prefer shares.**
 
 **an-all-zero-factor-is-inert. An all-zero factor is uninformative, not decisive.** In a multiplicative score, a factor that is
 zero for every candidate used to annihilate the other factors and collapse the record to a coin toss.
 Skip a flat-zero factor; do not multiply by it.
 
-**density-below-one-fragment-length. Density below one fragment length is not resolvable by ANY design.** A 1 bp node has no
+**density-below-one-fragment-length. Density below one fragment length is not resolvable by ANY design.** A 1 bp region has no
 independently measurable density and never will (*composition* still does, since it depends on what the
 fragments are, not where). *Corollaries:* an object with zero opportunity for a component must emit
 nothing at zero precision, not a floored division; and "no data" must be inert, never "100 % gDNA" — that
@@ -1149,32 +1149,32 @@ exactly one transcript, so every one qualified, and the panel filled with gDNA o
 references — on the very templates whose truth abundance of zero is the false-positive control. **And a
 mis-stated classification must raise, not silently produce nothing.**
 
-**a-junction-is-not-a-gap. A splice junction CANNOT be detected from a gap between deposited slices.** A contiguous spliced
-read whose exon body straddles an internal cut has no gap at all. The junction's identity is the cut-intron
+**an-sj-is-not-a-gap. A splice junction CANNOT be detected from a gap between deposited slices.** A contiguous spliced
+read whose exon body straddles an internal region bound has no gap at all. The sj's identity is the cut-intron
 coordinates, which the scanner already has — pass them through.
 
-**deposit-at-the-junction. A splice deposit belongs at the JUNCTION's coordinate, not the node's edge.** Invisible for
-annotated introns (their ends are cuts); for unannotated junctions the mass lands kilobases away.
+**deposit-at-the-sj. A splice deposit belongs at the SJ's coordinate, not the region's boundary.** Invisible for
+annotated introns (their ends are region bounds); for unannotated sj the mass lands kilobases away.
 
-**splicing-makes-the-graph-cyclic. Alternative splicing makes a node↔junction graph CYCLIC, and cycles are the common case** — a
-cassette exon is a 4-cycle, and the human graph has ~404,000 independent cycles, one per junction.
-Two-sweep forward-backward is exact only on a tree. **Never break a cycle by dropping a junction edge** —
-that re-isolates the exon the edge exists for.
+**splicing-makes-the-graph-cyclic. Alternative splicing makes a region↔sj graph CYCLIC, and cycles are the common case** — a
+cassette exon is a 4-cycle, and the human graph has ~404,000 independent cycles, one per sj.
+Two-sweep forward-backward is exact only on a tree. **Never break a cycle by dropping a sj boundary** —
+that re-isolates the exon the boundary exists for.
 
 **nrna-does-not-mean-synthetic. `~is_synthetic & ~is_nrna` as the "real transcript" filter deleted 52,104 real termini.** On a
 non-synthetic row `is_nrna` means "single-exon, so mature ≡ nascent", NOT "manufactured span". **ONE
 filter: `~is_synthetic`.**
 
-**credit-exactly-one-junction. A fragment crossing K junctions must credit exactly ONE** (the leftmost annotated). Crediting all K
+**credit-exactly-one-sj. A fragment crossing K sj must credit exactly ONE** (the leftmost annotated). Crediting all K
 shifts the library sense fraction 21–34 % and creates between-side correlation that reads as
 overdispersion (a zero-overdispersion simulator fit 0.092). A `1/K` split is provably biased by 4–12 σ.
 
-**strand-completes-the-edge-key. `(src, kind, dst)` is not a total order for junction edges** — two strand-coincident junctions differ
+**strand-completes-the-sj-key. `(src, kind, dst)` is not a total order for sj boundaries** — two strand-coincident sj differ
 only in strand, so ordering becomes input-order-dependent and the duplicate check reads them as duplicates.
 GENCODE has zero of them, so only a synthetic stress test finds it. Sort on `(src, kind, dst, strand)`.
 
-**a-hash-that-misses-its-artifact. Cache keys that do not cover the artifact they cache.** A partition hash covered only the node file;
-a flag fix rewrote every edge file while leaving every node file byte-identical, so a stale cache would
+**a-hash-that-misses-its-artifact. Cache keys that do not cover the artifact they cache.** A partition hash covered only the region file;
+a flag fix rewrote every boundary file while leaving every region file byte-identical, so a stale cache would
 verify CLEAN. **Never store a derived hash beside the data it describes; compute it on demand.**
 
 ⚠ **A SECOND FORM, and it is the one you build deliberately: AN EXCLUSION FROM A KEY IS A CLAIM ABOUT
@@ -1236,7 +1236,7 @@ re-implementation.
 
 **two-masks-one-name. TWO DIFFERENT MASKS SHARED THE WORD `struct_lock`, AND BOTH WERE RIGHT.** One answers "is this
 belief pinned and certain?" (both axes); the other "may this slot EMIT composition certainty into its
-messages?" (NODE-only on purpose, because a seam is structurally gDNA but sits between RNA-carrying exons).
+messages?" (NODE-only on purpose, because a boundary is structurally gDNA but sits between RNA-carrying exons).
 ⭐ Two correct predicates under one name is worse than either being wrong: give each its own name and ONE
 home, and let every consumer import it (TRAPS: a-test-that-redefines).
 
@@ -1266,7 +1266,7 @@ closes the coverage gap this entry describes, and the per-fragment mirror betwee
 
 **strand-measures-the-tilt. Strand measures the TILT, not the gDNA fraction.** With RNA tilt `d = f₊ − f₋`,
 `p = ½ + (κ−½)·d` — the gDNA fraction **cancels identically**. Strand reaches gDNA only through the
-triangle bound `f_g ≤ 1 − |d|`: tight on a single-strand node, slack on a both-strand node. And
+triangle bound `f_g ≤ 1 − |d|`: tight on a single-strand region, slack on a both-strand region. And
 `I(f_g) = 0` **exactly** at κ = ½, for any count and any overdispersion.
 
 **a-linear-likelihood-emits-a-sign. ⛔⛔ A LIKELIHOOD THAT IS ASYMPTOTICALLY LINEAR IN ITS PARAMETER HAS
@@ -1308,18 +1308,18 @@ they do not fade together, and it is the two that do not fade that decide the an
 EACH COMPONENT SEPARATELY IS POPULATION-BLIND — AND THE BLINDNESS NEED NOT BE THE AXIS YOU EXPECT.**
 Measured 2026-08-10, `edge_q_population.py`.
 
-`assemble_priors` converts a line's crossing INCIDENCE to a FRAGMENT count with `q = mass/count`, measured
-per line on the whole population and applied to the gDNA and RNA parts separately. `q` is an explicit
+`assemble_priors` converts a boundary's crossing INCIDENCE to a FRAGMENT count with `q = mass/count`, measured
+per boundary on the whole population and applied to the gDNA and RNA parts separately. `q` is an explicit
 function of fragment length, so the obvious worry was that a length gap breaks it.
 
 ⛔ **It does not. The equal-length null shows the LARGEST error.** At a 4.98 bp gap `q_g` = 0.6330 against
-`q_r` = 0.5233 and the edge term is over-counted by **+3.18 %** — five times the +0.63 % at a 17× larger
+`q_r` = 0.5233 and the boundary term is over-counted by **+3.18 %** — five times the +0.63 % at a 17× larger
 gap, and the sign does not track the gap either. ⭐ The driver is **PLACEMENT**: gDNA is genomically
-uniform and crosses lines in long intergenic nodes where `q → 1`; RNA is confined to transcripts, where
-exon nodes are short. The two populations occupy different parts of the partition, so they differ at
+uniform and crosses boundaries in long intergenic regions where `q → 1`; RNA is confined to transcripts, where
+exon regions are short. The two populations occupy different parts of the partition, so they differ at
 identical lengths.
 
-⭐ **Bounded and left alone deliberately**: on the TOTAL prior the node term dilutes it to `Δphi`
+⭐ **Bounded and left alone deliberately**: on the TOTAL prior the region term dilutes it to `Δphi`
 **+0.00013 … +0.00596** — at most 0.6 pp, at or below calibration's own noise floor. ⚠ And it is not
 repairable in production: the driver is *where* each population sits, so `q_c` cannot be modelled from the
 fitted pmfs, and the pooled bank is the only per-line evidence there is. **Record the bound, build
@@ -1332,7 +1332,7 @@ PRICE THE COMPLEMENT, OR THE QUALIFIER IS A HOLE NOBODY HAS SIZED.** Measured 20
 The conserved-mass rule's own specification said its identity was exact *"over deposited, **unspliced**,
 annotated fragments"*. Every word was true and the scoping was deliberate. But nobody had ever asked how
 big the complement was — and it was **1,222,375 of 4,830,713 RNA fragments** on one ordinary panel
-condition. A spliced fragment whose every block lies inside one node crosses no line and is not
+condition. A spliced fragment whose every block lies inside one region crosses no boundary and is not
 `contained` either, so it deposited on **no conserved bank at all**: it existed on the incidence axis and
 on none of the conserved ones, which is why a library fragment count was not computable.
 
@@ -1341,7 +1341,7 @@ per-fragment truth: gDNA `1.000x` deposited, RNA `0.747x`. The asymmetry names i
 splice — and the repair followed in one step.
 
 ⛔ **The second half of the trap: a docstring had already promised the missing accounting existed.**
-`edge_spliced_mass` said a block with no interior line has *"their accounting on the junction axis"* —
+`edge_spliced_mass` said a block with no interior boundary has *"their accounting on the sj axis"* —
 and there was no `sj_mass`, so nothing kept the promise. **A cross-reference to a bank is not evidence the
 bank exists.** Same family as TRAPS: two-docstrings-one-quantity: prose that describes an intended design reads
 as prose that describes the code.
@@ -1352,7 +1352,7 @@ scope is an assumption wearing the clothes of a theorem.
 
 **equal-lengths-carry-no-composition. At equal component mean lengths the length channel carries EXACTLY ZERO information about
 composition, at any depth.** The 2×2 deconvolution is identified only through `μ_g − μ_r`. A claim that
-one storage choice beats another was measured at a 4× mean separation and is **false** at every node
+one storage choice beats another was measured at a 4× mean separation and is **false** at every region
 ≥ 250 bp and reversed at equal means.
 
 **capture-is-1000x-on-exons. Hybrid capture is ~1000× on exons and only gDNA reads it cleanly.** RNA's own 10⁴ expression range
@@ -1376,7 +1376,7 @@ spectrum, not a sample of it. Sweep the plausible space, report the worst case, 
 the owner. In particular: **never assume RNA fragments are longer than gDNA** — true for cfRNA, false
 elsewhere.
 
-**eff-lengths-do-not-cancel-at-an-end. "Effective lengths cancel, so a node's marginal is just its length" is FALSE near any transcript
+**eff-lengths-do-not-cancel-at-an-end. "Effective lengths cancel, so a region's marginal is just its length" is FALSE near any transcript
 end** — a mature fragment must fit in the remaining transcript; gDNA need not.
 
 **configured-lengths-are-not-realised. EQUAL CONFIGURED FRAGMENT LENGTHS DO NOT GIVE EQUAL REALISED ONES.** Handing the simulator one
@@ -1385,12 +1385,12 @@ reweighted by its own template opportunity — a 2 kb transcript truncates the t
 does not. ⭐ So "equal lengths" is a claim about the CONFIG and never about the library; gate the axis on the
 realised truth (TRAPS: prove-the-substrate).
 
-**mature-rna-never-crosses-a-seam. Mature RNA never crosses an exon↔intron seam** (0 of 1,146 seams, 7/7 conditions). Exon↔exon seams
-do. This is the hard empirical case that a contiguous seam and a splice junction are physically different
+**mature-rna-never-crosses-a-boundary. Mature RNA never crosses an exon↔intron boundary** (0 of 1,146 boundaries, 7/7 conditions). Exon↔exon boundaries
+do. This is the hard empirical case that a contiguous boundary and a splice junction are physically different
 objects — and it is what makes the two exon-crossing gDNA pools pure.
 
-**a-seam-with-rna-is-not-a-junction. But a seam with RNA crossing it need not be a junction.** One position can be a splice donor for
-transcript A and plain contiguous exon for transcript B; zero-gDNA libraries show seams with 44–55 k
+**a-boundary-with-rna-is-not-an-sj. But a boundary with RNA crossing it need not be a sj.** One position can be a splice donor for
+transcript A and plain contiguous exon for transcript B; zero-gDNA libraries show boundaries with 44–55 k
 unspliced fragments that are 100 % RNA.
 
 ---
@@ -1418,11 +1418,11 @@ start-up, so a mid-flight edit silently changes what half the shards measured. A
 `scripts/` is safe. (ii) ⛔ **zsh does not word-split an unquoted variable** — use an array and
 `"${CONDS[@]}"`. (iii) ⛔ **A wait-loop whose `pgrep` pattern matches its own wrapper deadlocks** — wait on
 a log marker instead. (iv) ⚠ **`pass0_vs_oracle.DEFAULT_SUITE` is the PILOT, not the ladder** — always pass
-`--suite .../suite/ladder` explicitly. (v) ⚠ **Node-axis and node+edge figures differ by ~2×** — say which
+`--suite .../suite/ladder` explicitly. (v) ⚠ **Node-axis and region+boundary figures differ by ~2×** — say which
 one, every time. (vi) ⚠ **A composite arm fires only its COMPONENTS' names**, so an
 `TRAPS: an-ablation-that-never-ran` guard keyed on the arm's own name trips after a complete, valid run —
 check WHY a guard fired before distrusting the data.
 
 **no-enumeration-without-a-census. Do not re-propose path or cell enumeration without a memory census.** Possible unspliced paths ≈
-1 M nodes × 3–6 reachable ends at ~100 B each = 0.3–0.6 GB, plus spliced paths. It was killed by memory,
+1 M regions × 3–6 reachable ends at ~100 B each = 0.3–0.6 GB, plus spliced paths. It was killed by memory,
 and no consumer needs it.

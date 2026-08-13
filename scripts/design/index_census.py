@@ -30,7 +30,7 @@ import pandas as pd
 
 from rigel.calibration.splice_graph import (
     EDGE_KIND_CONTIGUOUS,
-    EDGE_KIND_JUNCTION,
+    EDGE_KIND_SJ,
     FLAG_ACCEPTOR_NEG,
     FLAG_ACCEPTOR_POS,
     FLAG_DONOR_NEG,
@@ -65,7 +65,7 @@ def census_boundaries(boundaries: pd.DataFrame) -> None:
     kind = boundaries["kind"].to_numpy()
     flags = boundaries["flags"].to_numpy(np.uint16)
     contiguous = kind == EDGE_KIND_CONTIGUOUS
-    sj = kind == EDGE_KIND_JUNCTION
+    sj = kind == EDGE_KIND_SJ
 
     print("\nBOUNDARIES")
     row("boundaries", len(boundaries))
@@ -122,7 +122,7 @@ def census_sj_region_bounds(regions: pd.DataFrame, boundaries: pd.DataFrame) -> 
      rests on it — if an annotated intron's start is not a region_bound, the CSR
     scan never happens and the sj is unfindable, silently.
     """
-    sj = boundaries["kind"].to_numpy() == EDGE_KIND_JUNCTION
+    sj = boundaries["kind"].to_numpy() == EDGE_KIND_SJ
     src = boundaries.loc[sj, "src"].to_numpy(np.int64)
     dst = boundaries.loc[sj, "dst"].to_numpy(np.int64)
     if src.size == 0:

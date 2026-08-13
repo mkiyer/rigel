@@ -122,7 +122,7 @@ rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o 
 | `-o`, `--output-dir` | required | Output directory for index files |
 | `--alignable-zarr PATH` | — | Alignable Zarr store built for the same genome + aligner. Provides per-base fractional mappability (for gDNA-aware effective length) **and** the splice-junction artifact blacklist (applied at BAM-scan time). Required unless `--no-mappability` is set. |
 | `--no-mappability` | off | Explicitly opt out of mappability + splice-blacklist ingestion (synthetic genomes, stranded-only benchmarks). Mutually exclusive with `--alignable-zarr`. |
-| `--splice-blacklist-min-count N` | `2` | (Advanced) Minimum unique-fragment support per `(chrom, intron, read_length)` for a junction to enter the blacklist. Lower admits more singletons; higher keeps only the most reproducible artifacts. Ignored under `--no-mappability`. |
+| `--splice-blacklist-min-count N` | `2` | (Advanced) Minimum unique-fragment support per `(chrom, intron, read_length)` for a sj to enter the blacklist. Lower admits more singletons; higher keeps only the most reproducible artifacts. Ignored under `--no-mappability`. |
 | `--nrna-tolerance N` | `20` | Max distance (bp) for clustering transcript start/end sites into shared synthetic nRNA spans |
 | `--collapse-duplicate-transcripts` | off | Collapse transcripts sharing identical exon coordinates (keeps the lexicographically-smallest ID). Default: fail with a report. Useful for GENCODE, which has a few byte-identical annotations. |
 | `--gtf-parse-mode {strict,warn-skip}` | `strict` | `strict` fails on malformed GTF records; `warn-skip` logs warnings and skips them |
@@ -130,10 +130,10 @@ rigel index --fasta genome.fa --gtf annotation.gtf --alignable-zarr map.zarr -o 
 | `--no-tsv` | off | Skip writing TSV mirrors of index files |
 
 **Index artifacts** (Feather, plus `.tsv` mirrors unless `--no-tsv`):
-`transcripts`, `intervals`, `nodes` and `edges` (the splice graph),
+`transcripts`, `intervals`, `regions` and `boundaries` (the splice graph),
 `ref_lengths`, `sj`, `splice_blacklist`, and `manifest.json`.
 `nodes.feather` and `edges.feather` are **core** calibration artifacts — the
-genome partition and the contiguous/junction edges between its pieces,
+genome partition and the contiguous/sj boundaries between its pieces,
 consumed directly by calibration.
 
 ### rigel quant
@@ -196,7 +196,7 @@ Every flag is also documented by `rigel <subcommand> --help`.
 |------|---------|-------------|
 | `--assignment-min-posterior P` | `0.01` | Minimum posterior for a component to be eligible for discrete assignment (map/sample modes) |
 | `--em-convergence-delta D` | `1e-6` | Convergence threshold for EM parameter updates |
-| `--sweep-n-grid-single-strand N` | `256` | Calibration single-strand log-odds grid resolution. Single-strand nodes solve a cheap 1-D grid, so a fine grid de-quantizes the gDNA-fraction readout. Decoupled from the AMBIG 2-D grid (`sweep_n_grid`, which stays coarse for genome-scale memory). Advanced calibration knob. |
+| `--sweep-n-grid-single-strand N` | `256` | Calibration single-strand log-odds grid resolution. Single-strand regions solve a cheap 1-D grid, so a fine grid de-quantizes the gDNA-fraction readout. Decoupled from the AMBIG 2-D grid (`sweep_n_grid`, which stays coarse for genome-scale memory). Advanced calibration knob. |
 | `--gdna-em-llr-bias B` | `0.0` | gDNA false-positive-aversion: a log-odds (LLR) bias in nats added to the gDNA component in the locus EM. Positive favors gDNA (trades the gDNA→RNA leak for an RNA→gDNA siphon), e.g. `2.2` ≈ require 9:1 RNA evidence before calling a fragment RNA. |
 | `--calib-refit-iters N` | `3` | Number of times calibration re-solves after refitting its population gDNA prior. `0` gives the prior-free first solve only. |
 | `--gdna-rate-prior-bandwidth W` | `0.15` | Kernel width (in log10 density) for the population gDNA-density prior. Advanced calibration knob. |
@@ -265,7 +265,7 @@ The report covers alignment fates, fragment composition (including the
 splice-artifact blacklist status), the strand model, per-category fragment-length
 distributions, the mature-mRNA / nascent-RNA / gDNA split, capture on-target
 enrichment, a genome-wide gDNA-density track, and a searchable gene-expression
-table. The output is a single offline file — no CDN, server, or Node dependency.
+table. The output is a single offline file — no CDN, server, or Region dependency.
 
 `rigel report` needs the `[report]` extra
 (`pip install 'rigel-rnaseq[report]'`, or `conda install -c conda-forge
@@ -284,7 +284,7 @@ at index time via `--alignable-zarr`. It is used for two things:
 1. **gDNA-aware effective length** — the mappable fraction shortens the
    effective length used in quantification, so unmappable stretches do not
    inflate or deflate abundance.
-2. **Splice-junction artifact blacklist** — spurious junctions (recurrent
+2. **Splice-junction artifact blacklist** — spurious sj (recurrent
    alignment artifacts) are recorded at index time and treated as unspliced
    during scoring, which the annotated BAM reports per record via the `ZB`
    tag.
@@ -372,7 +372,7 @@ Pass `--tsv` to also write `.tsv` mirrors, or convert afterward with
 
 The `calibration_*` and `gdna_density_*` files are written only when calibration
 runs and, for the KDE, only when the Phase-2 gDNA-density prior is fit (enough
-training nodes). Build the HTML report from all of the above with `rigel report`.
+training regions). Build the HTML report from all of the above with `rigel report`.
 | `locus_stats.feather` | Per-locus EM convergence profiling — **only** with `--emit-locus-stats` |
 
 A `config.yaml` is always written, recording all resolved parameters and I/O
@@ -490,7 +490,7 @@ components (one per transcript row + one gDNA).
 
 Raw fragment-length histograms in tidy long form — one row per non-empty 1-bp
 bin. This is the plotting substrate for the fragment-length distributions
-(kept out of `summary.json`, where it previously added thousands of lines).
+(kept out of `summary.json`, where it previously added thousands of boundaries).
 
 | Column | Description |
 |--------|-------------|
@@ -526,7 +526,7 @@ the current version is **2**. Top-level keys:
 | `quantification` | `n_transcripts`, `n_genes`, `n_loci`, assignment counts, and mRNA/nRNA/gDNA totals + fractions |
 
 > **Schema v2 (breaking change from v1).** The full per-bin FL histograms were
-> removed from `summary.json` — they inflated the file by thousands of lines —
+> removed from `summary.json` — they inflated the file by thousands of boundaries —
 > and moved to `fragment_lengths.feather`. `fragment_length` now carries only
 > summary statistics. The `overflow` object is flattened to `overflow_count` /
 > `overflow_fraction`. New: `schema_version`, `fragment_stats.splice`, and
@@ -558,7 +558,7 @@ scalars (it is `null` if calibration did not run):
 
 The `capture` block is **descriptive only** (no pass/fail verdict). It is
 **mass-weighted**: on hybrid-capture RNA-seq the on-target regions are a small
-minority of nodes but carry the captured gDNA *mass*, so weighting the per-region
+minority of regions but carry the captured gDNA *mass*, so weighting the per-region
 density by gDNA mass surfaces the on-target mode that an equal-weight view
 misses. `enrichment_factor` is the peak-to-peak fold (how enriched); the smaller
 `mass_frac_ontarget` (how much of the gDNA is actually on-target) is the
@@ -680,19 +680,19 @@ Rigel's model has three competing fragment origins:
   genome-wide, and (under hybrid capture) enriched on probed exons.
 
 Calibration models **only RNA-vs-gDNA** — it deconvolves each genomic
-node's *unspliced* mass into the 2-simplex `(f_rna+, f_rna-, f_g)`
+region's *unspliced* mass into the 2-simplex `(f_rna+, f_rna-, f_g)`
 (sense-RNA / antisense-RNA / gDNA). The nascent-vs-mature split is left to
 the per-locus EM downstream.
 
 ### The bipartite belief-propagation sweep
 
-Calibration builds a **bipartite region↔boundary node chain** from the
+Calibration builds a **bipartite region↔boundary region chain** from the
 index's `regions` and `boundaries` partitions and runs a **single
 forward-backward belief-propagation pass** over it (exact on the chain,
 which is a forest of linear paths). There is no outer fixed-point loop.
 
 The design principle is **count-zero-information**: a fragment count carries
-no intrinsic gDNA/RNA information. A node's composition is set by exactly
+no intrinsic gDNA/RNA information. A region's composition is set by exactly
 three sources:
 
 1. **Strand likelihood** — the Beta-Binomial tilt of the per-strand counts.
@@ -701,11 +701,11 @@ three sources:
 2. **Cross-node imputation** — neighbour *density* messages passed at the
    belief-free Poisson disagreement variance `sigma2_imp` (fit once, before
    the pass). gDNA flows genomically; per-strand RNA flows only across an
-   edge where that strand is continuous (the transcript-structure gate).
+   boundary where that strand is continuous (the transcript-structure gate).
 3. **The global gDNA prior** — the population baseline `rho_global` plus a
    trained Phase-2 gDNA-density KDE, at MAD-spread precision.
 
-The pass resolves each node's `(f+, f-, f_g)` pie, then projects the result
+The pass resolves each region's `(f+, f-, f_g)` pie, then projects the result
 onto per-region and per-boundary-side deconvolved gDNA/RNA mass.
 
 ### What calibration produces
@@ -723,7 +723,7 @@ onto per-region and per-boundary-side deconvolved gDNA/RNA mass.
 
 All are advanced; defaults suit standard libraries. Exposed on `rigel quant`:
 
-- `--sweep-n-grid-single-strand` (default `256`) — single-strand node
+- `--sweep-n-grid-single-strand` (default `256`) — single-strand region
   log-odds grid resolution (de-quantizes the gDNA-fraction readout).
 - `--gdna-em-llr-bias` (default `0.0`) — a downstream EM knob, not part of
   the calibration sweep: biases the gDNA component in the locus EM to trade
@@ -1012,10 +1012,10 @@ near 0.5.
 **How does calibration use strand information?**
 The per-strand counts are the *only* intrinsic gDNA/RNA signal in the model
 (the count itself carries no gDNA/RNA information — the count-zero-information
-principle). Each node's strand likelihood is a Beta-Binomial tilt; the count
+principle). Each region's strand likelihood is a Beta-Binomial tilt; the count
 enters only as its overdispersed Fisher information, so an unstranded or
-low-count node contributes a weak, uninformative tilt and the node's
-composition is then set by cross-node imputation and the global gDNA prior.
+low-count region contributes a weak, uninformative tilt and the region's
+composition is then set by cross-region imputation and the global gDNA prior.
 There is no on/off "strand-mode switch."
 
 **Do I need the alignable Zarr store?**
