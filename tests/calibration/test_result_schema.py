@@ -39,6 +39,15 @@ def _valid_kwargs() -> dict:
         gdna_edge_eff_len=edge.copy(),
         rna_node_eff_len=node.copy(),
         rna_edge_eff_len=edge.copy(),
+        # ⭐ The three-way composition ψ solves, per object. ⛔ NOT renormalised — see the field
+        # docstring: it fails to close on ~25 % of both axes on real data, so a fixture that pretends
+        # otherwise would be asserting something the shipped solver does not produce.
+        gdna_frac_node=np.zeros(N_NODES),
+        rna_pos_frac_node=node.copy(),
+        rna_neg_frac_node=np.zeros(N_NODES),
+        gdna_frac_edge=np.zeros(N_EDGES),
+        rna_pos_frac_edge=edge.copy(),
+        rna_neg_frac_edge=np.zeros(N_EDGES),
         gdna_density_global=1e-3,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,
@@ -232,3 +241,48 @@ def test_mass_rna_spliced_has_no_node_twin():
     ``mass_rna_spliced_node`` field would be a channel that cannot exist."""
     assert "mass_rna_spliced_edge" in CalibrationResult.__dataclass_fields__
     assert "mass_rna_spliced_node" not in CalibrationResult.__dataclass_fields__
+
+
+# ── the three-way composition ─────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "gdna_frac_node",
+        "rna_pos_frac_node",
+        "rna_neg_frac_node",
+        "gdna_frac_edge",
+        "rna_pos_frac_edge",
+        "rna_neg_frac_edge",
+    ],
+)
+def test_a_composition_component_above_one_is_REFUSED(name):
+    """⭐ Each of the three is a FRACTION of its object's unspliced population, so it is bounded by 1.
+    ⚠ Non-negativity and finiteness come from the shared axis check; this is the upper bound, which is
+    the half a "sum of shares" schema cannot get from the axis check alone."""
+    kw = _valid_kwargs()
+    arr = np.asarray(kw[name], dtype=np.float64).copy()
+    arr[0] = 1.5
+    kw[name] = arr
+    with pytest.raises(ValueError, match="must not exceed 1"):
+        CalibrationResult(**kw)
+
+
+def test_a_composition_that_does_NOT_close_is_ACCEPTED_and_that_is_deliberate():
+    """⛔⛔ **PINNING A DECISION, NOT A BEHAVIOUR.** ``f_g + f_pos + f_neg`` fails to reach 1 on ~25 % of
+    both axes on real data — measured 74.72 % / 77.24 % closing, the rest with median 0.978 and a p5 of
+    0.869 — because ``sweep``'s write-back clips the three posterior means INDEPENDENTLY and an
+    unsolvable slot keeps an init instead.
+
+    ⭐ The schema therefore does NOT assert closure, and this test exists so that nobody adds the
+    assertion without first fixing ψ, and nobody "repairs" the symptom by renormalising the arrays at
+    publication — which would make a 15 %-short object indistinguishable from a solved one.
+    """
+    kw = _valid_kwargs()
+    kw["gdna_frac_node"] = np.full(N_NODES, 0.25)
+    kw["rna_pos_frac_node"] = np.full(N_NODES, 0.25)
+    kw["rna_neg_frac_node"] = np.full(N_NODES, 0.25)  # sums to 0.75, not 1
+    res = CalibrationResult(**kw)
+    total = res.gdna_frac_node + res.rna_pos_frac_node + res.rna_neg_frac_node
+    assert np.allclose(total, 0.75), "the composition was silently renormalised at publication"

@@ -184,6 +184,94 @@ one exception, which is item 1.
    the flow decomposition has no duplicate; the other 971 were a second scorer). `scripts/README.md` was
    rewritten: it documented three directories of which **two had not existed for months** and omitted
    `design/`, which is 56 files.
+0. ⭐⭐⭐ **THE PER-TRANSCRIPT RNA PRIOR — THE FOUNDATION IS BUILT AND PROVEN; THE WEIGHTING FUNCTION IS
+   THE WORK** (owner, 2026-08-12/13). The end goal is a prior that says WHICH transcript a locus's RNA
+   pseudocounts belong to.
+   ⭐⭐ **PROVEN 2026-08-13, `g00 ss0.99 capture_off`, true relative abundances as weights with the warm
+   start zeroed:** transcript Σ|err| **4,275,988 → 696,900 (0.16×)**, gene **445,944 → 57,154 (0.13×)**,
+   gene false-positive mass **23,529 → 0**. A deliberately FLIPPED allocation is **1.26×** worse. So the
+   machinery converts good weights into good answers and a weighting function is worth designing.
+   ⛔⛔ **THREE LIMITS TRAVEL WITH THAT NUMBER.** It is a CAPABILITY proof, not a ceiling — it does not
+   price what a reachable weighting function could earn. True weights also hand over the true SUPPORT (a
+   zero weight is EXACTLY absorbing, measured 0.0000 in all four mode × warm-start combinations), and
+   4,579 of 8,750 annotated transcripts are silent at `g00`, so most of the fp_mass collapse is free
+   rather than earned. And it is ONE condition on the stratum the tool already handles — the blind
+   stratum is untested.
+   ⭐ **What is built:** `splice_graph.build_transcript_path` (the transcript → ordered
+   REGION/BOUNDARY/SPLICE-JUNCTION walk, 0/15,669 disagreements against the verified incidence, 45,609
+   splice steps, transcription order on 7,312/7,312 minus-strand); the per-transcript weight LANE into
+   the EM; `EMConfig.warm_start` = `coverage`/`prior`/`uniform`; the three-way composition published per
+   object; `scripts/design/transcript_truth.py` (true per-transcript counts split by splicedness, 41 s
+   per 10 M-fragment condition, seven named gates all passing).
+   ⛔ **What is NOT built: the weighting function.** A first attempt was built and REFUSED (§4).
+   ⭐ **Vocabulary ruling (owner):** REGION / BOUNDARY / SPLICE JUNCTION replace node / edge·line·cut /
+   junction; `donor`/`acceptor` are banned as strand-dependent (the code is genomically ordered, so the
+   name is backwards for 48.4 % of junctions). A CONVERGENCE, not an invention — all three axes already
+   carry two live names each. `DESIGN.md` §0 is not updated until the bulk rename lands.
+   ⚠ **Identifiability, measured, because it was the objection:** 70.43 % of fragments are compatible
+   with 2+ annotated transcripts, but only **0.29 %** of true mass lies in likelihood-flat directions
+   (0.96 % by an independent null-space measure) and a census over 952 loci found **zero**
+   exactly-exchangeable groups. An oracle per-transcript prior is not meaningfully fake. ⛔ The real
+   difficulty is the middle tier: **23.99 %** of true mass sits on 4,277 transcripts with no fragment of
+   their own.
+   ⚠ **The shipped warm start is NOT the cause of the tool's error** — a UNIFORM start scores 0.976–1.024×
+   against base on four conditions, at the noise floor.
+0b. ⛔⛔⛔ **ψ's COMPOSITION DOES NOT CLOSE — a defect, and its own work path** (found 2026-08-12 while
+   publishing the three-way composition; owner ruled it a separate branch, taken up after the
+   per-transcript prior lands). `NodeDeconv` asserts *"posterior means; f_pos+f_neg+gdna_frac = 1"*.
+   Measured on `g00 ss0.99 capture_off`, every object addressed by a chain slot:
+
+   | axis | sums to 1 | sums into (0,1) | sums > 1 |
+   |---|---|---|---|
+   | REGION (node) | 74.72 % | **25.25 %** — median 0.978, p5 **0.869** | 12 |
+   | BOUNDARY (edge) | 77.24 % | **22.71 %** — median 0.979, p5 **0.850** | 16 |
+
+   ⭐ **The mechanism is visible at `sweep.py`'s write-back**: the three posterior means are
+   `np.clip(·, 0, 1)`-ed **INDEPENDENTLY**, and an unsolvable slot keeps an init instead — neither
+   preserves a simplex. ⚠ By linearity of expectation three posterior means over ONE lattice should
+   close, so the deficit is not inherent to taking means and the clip is a symptom rather than the whole
+   cause. ⛔ It was invisible because nothing consumed the strand split: the crossing axis published
+   `0` for both RNA strands, so its composition summed to `f_g` alone.
+   ⛔ **Do NOT repair it by renormalising at publication** — that makes a 15 %-short object
+   indistinguishable from a solved one. `CalibrationResult` publishes the values as solved, bounds each
+   to `[0,1]`, and asserts no closure; `test_a_composition_that_does_NOT_close_is_ACCEPTED_and_that_is_deliberate`
+   pins that as a decision so the assertion is not added before ψ is fixed.
+0c. ⭐⭐ **`sj_mass[2]` — THE PER-STRAND SPLICE-JUNCTION MASS, AND THE RULING IT REVERSES** (owner,
+   2026-08-12). `accumulator.h` ruled that a mass bank is ONE value, not two, because *"nothing reads a
+   mass per strand"*. ⭐ **That premise is now FALSE, which is what makes the reversal admissible:**
+   artifactual splice junctions accumulate SYMMETRICALLY on both strands, like gDNA, so they are
+   detectable by the strand model the tool already has — and a per-strand mass is the observable that
+   model needs. ⚠ A second, structural reason: without it, artifact filtering needs TWO passes over the
+   BAM (tally, filter, re-accumulate mass), which is the one thing the single-pass architecture exists
+   to avoid.
+   ⛔ **Record the reversal WITH the premise that changed**, or it gets re-litigated in both directions.
+   ⛔ **Scope it deliberately.** The reversal is for the SJ axis, where the consumer is. Whether the
+   BOUNDARY axis's `unspliced_mass`/`spliced_mass` also go per-strand is a SEPARATE question with no
+   consumer named — `one-thing-varied` says do not bundle it.
+   ⭐ **Price: the payload schema digest moves, so every scan cache is refused and rebuilds — 8.3 s per
+   condition, ~6 min for the 36-condition ladder.** ⭐⭐ Bundle it with the two dead banks §2.7 already
+   wants removed (`node_contained_length_sum`, `edge_unspliced_length_sum`), so the re-scan is paid once.
+   ⛔ Drive it with `rescan_panels.py`, which gates every non-target bank on byte-identity and requires
+   the SAME delta on every condition — that is only interpretable if ONE schema change lands at a time.
+0d. ⭐ **THE INDEX SHOULD EMIT ITS DUPLICATE MAP** (owner, 2026-08-13). The index drops EXACT duplicates
+   — same ref, strand and sorted exon tuple — and is right to: they are *"mathematically unidentifiable
+   from any read data"* (`index.py`'s own words). ⛔ But it records NOTHING about what it dropped:
+   `_collapse_duplicate_transcripts` logs a truncated summary and returns a filtered list. So a dropped
+   id is unfindable through the index, and every consumer re-derives the map by re-parsing the GTF —
+   which defeats the index being freestanding. Measured on the suite reference: 8,755 GTF transcripts, 5
+   duplicate groups over 10 transcripts, 5 dropped → the 8,750 indexed; 2 of the 5 carry simulated
+   fragments (329 at `g00`).
+   ⭐ **The fix is an ALIAS MAP, not re-admission** — `dropped_t_id → kept_t_id` in the manifest, exposed
+   as `TranscriptIndex.duplicate_map` defaulting to `{}` so an older index still loads. Re-admitting the
+   transcripts would undo a collapse that is correct.
+   ⭐⭐ **It needs an index rebuild but NOT a panel re-scan**, and that is worth stating because the two
+   were conflated once: the scan cache is keyed on `graph_hash` / `reach_digest` /
+   `payload_schema_digest` / `scan_config_digest`, and a metadata field on the same partition changes
+   none of them. ⚠ A rebuild can still move `reach_digest` on its own (`reach` is covered by no other
+   hash, and a rebuild once moved 38 % of human reaches), so verify with `rescan_panels.py` rather than
+   assuming the caches survive.
+   ⚠ Then DELETE `transcript_truth.py`'s local `duplicate_map` and read the index's — moving it, not
+   copying it, so there is one home.
 3. ⭐⭐ **Price the CANCELLING PAIR together** — `struct_lock` rescoped to `g1_locked & NODE` AND the
    `intergenic|exon` seam claiming its RNA-contaminated crossing mass as gDNA. Five of the seven
    remaining xfails go green if and only if this lands. ⛔ Neither half may be priced alone: the
@@ -305,6 +393,7 @@ fixed: TRAPS: a-zero-count-is-a-measurement/TRAPS: a-ratio-cannot-carry-zero, §
 | **a nascent-bearing ladder condition** | toy, 36 conditions × 7 rungs | ⚠ **−5 %**, and the wrong way on one stratum. Keep it as a harness arm (`--nrna 60`); it no longer justifies re-simulating the panel |
 | **the gDNA prior's BIMODAL CAPACITY, and "give the prior more signal"** | a read of `gdna_landscape.py` + the production refit on real conditions | ⛔ **BOTH BRANCHES CLOSED.** The prior already renders the landscape correctly — **2.98 decades** of mode separation at `g75 ss0.99 capture_ON`, 30× more enriched mass ON than OFF, a single pile at the wall at `g00`. And a prior fitted from ORACLE truth is the same prior (0.04 dec). Not capacity, not signal, not location. §3 below |
 | **§2's Jeffreys MEAN density location** | `--arm eta`, the `g00` zero control | ⛔ **REFUTED at +96,299 %.** It cannot say ZERO (`node_init.rho_g` is an exact 0 at 60,544/70,176 slots — the statement earning the −98 % at `g00`), and the TRAPS: a-ratio-cannot-carry-zero benefit it was credited with belongs to **§4**. ⭐ If revisited the derived form is the Gamma **MODE** `max(a−½,0)/E`, which is exactly 0 at a zero count |
+| ⛔⛔ **A SPECIFIC per-transcript allocation RULE — soft-min over exclusive objects with a per-object Jeffreys half** | built end to end and A/B'd on all 36 conditions, seed pinned | ⛔ **REFUSED — worse on EVERY stratum and on the zero control**, transcript Σ\|err\| **57.5 M → 81.6 M (1.42×)**, and a length-proportional variant **2.10×**. ⭐ **The MECHANISM is not what failed** — the gDNA:RNA split moved **+0.2 %**, exactly as the conservation identity requires, so the A/B priced the ALLOCATION alone. Three defects, each measured: exclusivity hard-zeroed **38.7 %** of transcripts; estimating a density on a tiny exclusive region and extrapolating over the whole transcript amplified variance up to **6,534×** (44.6 % of weighted transcripts had their density from <200 bp); and a per-object `+½` revived the silent half of the annotation (`frac_expressed: 0.5`), taking false-positive mass **18.6 M → 41.6 M**. ⛔ The rule and its config flag were DELETED; the LANE it rode on was kept and is now proven (item 0). ⚠ The Jeffreys-mean half of it is §4.1 graveyard row one — see `TRAPS: a-trap-names-the-defect-not-the-repair` |
 | **a threshold anywhere in the licence family** | TRAPS: a-threshold-on-a-fitted-residue implemented and refuted one | ⛔ τ is continuous across the region, so any floor is a tuned constant (TRAPS: a-threshold-on-a-fitted-residue, TRAPS: a-licence-with-no-floor, TRAPS: a-multiplication-gated-by-a-trace — refused three times) |
 
 ### §4.1 ⛔⛔⛔ THE GRAVEYARD — ELEVEN MECHANISMS PRICED, ELEVEN REFUSED. DO NOT REBUILD THESE.

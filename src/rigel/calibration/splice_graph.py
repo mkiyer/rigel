@@ -79,6 +79,7 @@ molecule splices across it*.
 
 from __future__ import annotations
 
+import dataclasses
 import warnings
 from dataclasses import dataclass
 from typing import Mapping
@@ -118,8 +119,13 @@ __all__ = [
     "build_junction_edge_arrays",
     "build_contiguous_edge_reach_arrays",
     "build_junction_geometry_arrays",
+    "build_transcript_path",
     "JunctionEdgeArrays",
     "JunctionGeometry",
+    "TranscriptPath",
+    "STEP_REGION",
+    "STEP_BOUNDARY",
+    "STEP_SPLICE_JUNCTION",
     "is_terminus",
     "is_splice_site",
     "validate_graph",
@@ -1239,3 +1245,213 @@ def load_edges(path) -> pd.DataFrame:
             f"edges.feather at {path} is missing {sorted(missing)}. Rebuild the index."
         )
     return _coerce(df, EDGE_COLUMNS, EDGE_COLUMN_DTYPES)
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+# THE TRANSCRIPT PATH — a transcript as an ordered walk over REGIONs, BOUNDARYs and SPLICE JUNCTIONs
+# ══════════════════════════════════════════════════════════════════════════════════════════════════
+
+#: The three kinds of step a transcript's path takes. ⭐ Deliberately the same ``(kind, obj_id)`` idiom
+#: ``NodeChain`` already uses for the solve's slots — one addressing convention for one graph — with a
+#: third kind, because a splice junction is neither a position nor an interval.
+STEP_REGION = 0
+STEP_BOUNDARY = 1
+STEP_SPLICE_JUNCTION = 2
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class TranscriptPath:
+    """A CSR of every transcript's ordered walk through the graph.
+
+    ``offsets[t]:offsets[t + 1]`` is transcript ``t``'s steps, and step ``s`` is
+    ``(kind[s], obj_id[s])`` where ``obj_id`` indexes the REGION axis, the BOUNDARY axis or the SPLICE
+    JUNCTION axis according to ``kind``.
+
+    ⭐⭐ **THE STEPS ARE IN TRANSCRIPTION ORDER, 5' to 3'** — so a minus-strand transcript's steps run
+    DESCENDING in genomic coordinate. ⚠ That is the one property a genomic-order implementation gets
+    silently wrong: it is invisible to a consumer that treats a path as a SET or averages symmetrically
+    over it, and wrong for every consumer that reads it as a sequence.
+
+    ⭐ Verified on the shipped suite index against the independently-checked ``_transcript_node_incidence``
+    (2026-08-12): **0 of 15,669 transcripts differ** on the region axis or the boundary axis, the splice
+    steps number **45,609** — exactly the annotated (transcript, intron) count — and the ordering holds
+    on **7,312/7,312** minus-strand and **8,357/8,357** plus-strand transcripts.
+    """
+
+    offsets: np.ndarray  # int64[n_transcripts + 1]
+    kind: np.ndarray  # int8[n_steps]
+    obj_id: np.ndarray  # int64[n_steps]
+
+    @property
+    def n_transcripts(self) -> int:
+        return int(self.offsets.shape[0]) - 1
+
+    def steps(self, t: int) -> tuple[np.ndarray, np.ndarray]:
+        """``(kind, obj_id)`` for one transcript, in transcription order."""
+        lo, hi = int(self.offsets[t]), int(self.offsets[t + 1])
+        return self.kind[lo:hi], self.obj_id[lo:hi]
+
+
+def _splice_junction_by_intron(index) -> dict[tuple, int]:
+    """``(ref_name, intron_start, intron_end, strand) -> sj_id``, the ONLY admissible join key.
+
+    ⛔ **NOT the flanking region pair, and not a row order.** The region pair happens to be unique on
+    the shipped partition — 13,482 distinct pairs for 13,482 junctions — but only because every exon
+    endpoint is forced to be a region cut; on a coarsened partition it collides (measured: 638 ambiguous
+    pairs hiding 1,552 junctions). And ``sj.feather``'s row order is grouped ALPHABETICALLY by reference
+    while the graph axis uses ``index.ref_names`` (FASTA order), which diverge on any genome carrying
+    chr1/chr2/chr10.
+
+    ⚠ The ``sj_id`` is a DENSE RANK over the junction edges, so it is a within-run join key and never a
+    durable identifier: dropping one annotated intron renumbers almost every surviving slot.
+    """
+    ja = build_junction_edge_arrays(index)
+    rows = index.edges_df.iloc[np.asarray(ja.edge_row, dtype=np.int64)]
+    src = rows["src"].to_numpy(np.int64)
+    dst = rows["dst"].to_numpy(np.int64)
+    strand = rows["strand"].to_numpy(np.int64)
+    nodes = index.nodes_df
+    n_end = nodes["end"].to_numpy(np.int64)
+    n_start = nodes["start"].to_numpy(np.int64)
+    n_ref = nodes["ref_name"].to_numpy()
+    # ⭐ `src` is the genomically LOWER region on BOTH strands, so the intron is [end[src], start[dst]).
+    # Never `donor`/`acceptor`: those are 5'/3' and therefore strand-dependent, and on this index they
+    # would name the wrong end of 6,527 of 13,482 junctions.
+    return {
+        (str(n_ref[s]), int(n_end[s]), int(n_start[d]), int(st)): j
+        for j, (s, d, st) in enumerate(zip(src, dst, strand, strict=True))
+    }
+
+
+def build_transcript_path(index, region_arrays) -> TranscriptPath:
+    """Every transcript's ordered walk over REGIONs, BOUNDARYs and SPLICE JUNCTIONs.
+
+    ⭐⭐ **WHAT A TRANSCRIPT'S PATH IS, AND WHAT IT DELIBERATELY EXCLUDES** — the include/exclude rule is
+    the whole content of this function, and it is derived from what a fragment FROM this transcript can
+    physically occupy:
+
+    * **REGION** — every region an exon overlaps. A multi-exon transcript therefore takes its exonic
+      regions and NOT its intronic ones: a mature molecule has no intronic bases. A single-exon
+      transcript, and a synthetic span the index manufactured, take every region they cover.
+    * **BOUNDARY** — a boundary the transcript crosses *contiguously*, i.e. one strictly INTERIOR to a
+      single exon. ⭐ An exon-interior boundary that merely marks a signature change (an antisense
+      feature overlapping on the other strand) IS crossed and IS included.
+    * ⛔ **The transcript's OUTER boundaries are excluded** — its TSS and TES. Nothing from this
+      transcript crosses them, because the molecule ends there.
+    * ⛔ **A splice donor/acceptor boundary is excluded as a BOUNDARY step** and appears as the
+      SPLICE JUNCTION step instead. A molecule at that position either splices (the sj) or reads
+      through (a different molecule, and a different transcript's path).
+    * **SPLICE JUNCTION** — one per adjacent exon pair, resolved to its exact ``sj_id`` by intron
+      coordinates.
+
+    ⚠ **Steps are emitted in TRANSCRIPTION order.** The regions and boundaries of one exon run
+    ascending in genomic coordinate; the whole path is then reversed for a minus-strand transcript.
+
+    ⛔ Annotation-only and sample-independent — it reads the index and the partition and nothing else,
+    so it is valid for every condition and could be precomputed at index build.
+    """
+    import os
+
+    from ..types import IntervalType
+    from .region_arrays import node_right_edge
+
+    starts = np.asarray(region_arrays.start, dtype=np.int64)
+    ends = np.asarray(region_arrays.end, dtype=np.int64)
+    ref_off = np.asarray(region_arrays.ref_offsets, dtype=np.int64)
+    right_boundary = node_right_edge(np.asarray(region_arrays.ref_id))
+    name_to_id = index.ref_name_to_id
+    sj_of_intron = _splice_junction_by_intron(index)
+
+    n_t = int(index.num_transcripts)
+    per_t: list[list[tuple[int, int]]] = [[] for _ in range(n_t)]
+    # ⛔ Resolved BEFORE the exon walk, not after: the splice-junction join key contains the strand, so
+    # a strand read later is a strand read as 0 — which silently resolves no junction at all.
+    strand_of = np.zeros(n_t, dtype=np.int64)
+    tdf = index.t_df
+    if tdf is not None and "strand" in tdf.columns:
+        strand_of[tdf["t_index"].to_numpy(np.int64)] = tdf["strand"].to_numpy().astype(np.int64)
+
+    def _exon_steps(ref_name, a: int, b: int):
+        """One exon's REGION and interior BOUNDARY steps, interleaved, genomically ascending."""
+        rid = name_to_id.get(str(ref_name))
+        if rid is None:
+            return None
+        lo0, hi0 = int(ref_off[rid]), int(ref_off[rid + 1])
+        lo = lo0 + int(np.searchsorted(ends[lo0:hi0], a, side="right"))
+        hi = lo0 + int(np.searchsorted(starts[lo0:hi0], b, side="left"))
+        if hi <= lo:
+            return None
+        out: list[tuple[int, int]] = [(STEP_REGION, lo)]
+        for r in range(lo + 1, hi):
+            # the boundary between region r-1 and r is INTERIOR to this exon, so it is crossed
+            out.append((STEP_BOUNDARY, int(right_boundary[r - 1])))
+            out.append((STEP_REGION, r))
+        return out, lo, hi - 1
+
+    iv = pd.read_feather(os.path.join(index.index_dir, "intervals.feather"))
+    ex = iv[(iv["interval_type"] == int(IntervalType.EXON)) & (iv["t_index"] >= 0)]
+    ex = ex.sort_values(["t_index", "start"], kind="stable")
+    seen: set[int] = set()
+    prev_end: dict[int, int] = {}  # t -> the previous exon's genomic END (the intron's low side)
+    unresolved: list[tuple[int, tuple]] = []
+
+    for t, ref_name, a, b in zip(ex["t_index"], ex["ref"], ex["start"], ex["end"], strict=True):
+        t = int(t)
+        seen.add(t)
+        res = _exon_steps(ref_name, int(a), int(b))
+        if res is None:
+            continue
+        steps, _lo, _hi = res
+        if t in prev_end:
+            key = (str(ref_name), prev_end[t], int(a), int(strand_of[t]))
+            sj = sj_of_intron.get(key)
+            if sj is None:
+                unresolved.append((t, key))
+            else:
+                per_t[t].append((STEP_SPLICE_JUNCTION, int(sj)))
+        per_t[t].extend(steps)
+        prev_end[t] = int(b)
+
+    # ⛔⛔ A TRANSCRIPT'S ANNOTATED INTRON THAT RESOLVES TO NO SLOT IS A DEFECT, NOT A GAP TO SKIP.
+    # The junction key is derived from REGION boundaries (`end[src]`, `start[dst]`), which equal the
+    # intron's coordinates only because the partition cuts at every exon endpoint — measured 0 of 45,609
+    # violations on the shipped index. That invariant is ASSUMED by the derivation, so it is asserted
+    # here: were it ever to break, every affected transcript would silently lose a step and its path
+    # would read as a shorter, well-formed walk. A silent wrong answer is the one outcome to refuse.
+    if unresolved:
+        t0, k0 = unresolved[0]
+        raise ValueError(
+            f"{len(unresolved)} annotated intron(s) resolved to no splice-junction slot; first is "
+            f"transcript {t0} intron {k0!r}. The junction axis is keyed on region boundaries, so this "
+            f"means an exon endpoint is not a region cut — the index and the partition disagree."
+        )
+
+    if tdf is not None and "is_synthetic" in tdf.columns:
+        syn = tdf[tdf["is_synthetic"].to_numpy(dtype=bool)]
+        for t, ref_name, a, b in zip(
+            syn["t_index"], syn["ref"], syn["start"], syn["end"], strict=True
+        ):
+            if int(t) in seen:
+                continue
+            res = _exon_steps(ref_name, int(a), int(b))
+            if res is not None:
+                per_t[int(t)].extend(res[0])
+
+    # ⭐ TRANSCRIPTION ORDER. Everything above is genomically ascending; a minus-strand transcript is
+    # transcribed from its high coordinate down, so its whole path reverses — steps AND their order.
+    for t in np.flatnonzero(strand_of == int(Strand.NEG)):
+        per_t[int(t)].reverse()
+
+    counts = np.fromiter((len(p) for p in per_t), dtype=np.int64, count=n_t)
+    offsets = np.zeros(n_t + 1, dtype=np.int64)
+    np.cumsum(counts, out=offsets[1:])
+    total = int(offsets[-1])
+    kind = np.empty(total, dtype=np.int8)
+    obj_id = np.empty(total, dtype=np.int64)
+    i = 0
+    for p in per_t:
+        for k, o in p:
+            kind[i] = k
+            obj_id[i] = o
+            i += 1
+    return TranscriptPath(offsets=offsets, kind=kind, obj_id=obj_id)

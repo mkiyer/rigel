@@ -95,6 +95,12 @@ def _result(
         rna_edge_eff_len=(
             edge_eff_arr if rna_edge_eff is None else np.asarray(rna_edge_eff, dtype=np.float64)
         ),
+        gdna_frac_node=np.zeros_like(ng),
+        rna_pos_frac_node=np.zeros_like(ng),
+        rna_neg_frac_node=np.zeros_like(ng),
+        gdna_frac_edge=ez.copy(),
+        rna_pos_frac_edge=ez.copy(),
+        rna_neg_frac_edge=ez.copy(),
         gdna_density_global=gdna_density_global,
         rna_sense_frac=0.9,
         gdna_strand_overdispersion=0.05,

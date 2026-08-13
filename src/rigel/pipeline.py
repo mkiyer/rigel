@@ -662,6 +662,7 @@ def _run_locus_em_partitioned(
     gdna_eff_len: np.ndarray,
     *,
     em_config: EMConfig,
+    rna_prior_weight: np.ndarray | None = None,
     annotations: "AnnotationTable | None" = None,
     emit_locus_stats: bool = False,
 ) -> None:
@@ -673,6 +674,12 @@ def _run_locus_em_partitioned(
     ``get_loci_df``. The calibration prior enters as the two per-locus alpha
     scalars; ``enable_gdna`` is the structural eligibility (any unspliced unit
     carrying a finite gDNA log-lik — the rule the C++ extractor uses).
+
+    ⭐ ``rna_prior_weight`` is the one PER-TRANSCRIPT array here and it is passed **flat**, while every
+    other prior array is subscripted by ``ids`` into per-locus order. That asymmetry is the point: the
+    RNA prior's TOTAL is a property of the locus, its ALLOCATION is a property of the transcripts, and
+    the C++ remaps the latter itself when it builds each sub-problem. ⛔ Subscripting it by ``ids``
+    would silently read transcript rows at locus positions.
     """
     if not multi_loci:
         return
@@ -712,6 +719,13 @@ def _run_locus_em_partitioned(
         gdna_prior,
         index,
         rna_prior_count=rna_prior,
+        # ⛔ FLAT and per-TRANSCRIPT — deliberately not `[ids]`. ⚠ This line was dropped once while
+        # deleting an unrelated caller, leaving the parameter accepted and silently ignored: every
+        # allocation, however extreme, produced byte-identical output. A FIRE COUNTER CANNOT SEE THAT —
+        # it counts nonzero weights, not weights the solver read. What caught it was an arm that
+        # injected a maximally WRONG allocation and still matched `base` exactly
+        # (`quant_accuracy.py --arm oracle_alloc_flip`, TRAPS: could-the-arm-have-fired).
+        rna_prior_weight=rna_prior_weight,
         gdna_eff_len=g_eff,
         enable_gdna=enable_gdna,
         em_iterations=em_config.iterations,

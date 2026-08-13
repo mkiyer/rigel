@@ -121,7 +121,15 @@ LAYERS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
     (
         7,
         "assemble — turning the solve into a result",
-        ("derive", "priors", "result", "diagnostics", "track", "calibrate", "<pkg>"),
+        (
+            "derive",
+            "priors",
+            "result",
+            "diagnostics",
+            "track",
+            "calibrate",
+            "<pkg>",
+        ),
     ),
 )
 

@@ -813,6 +813,33 @@ arbitrates the contested intronic fragment when it is strong enough.
 ⚠ `alpha = 0` is the correct null but a blunt instrument: it cannot distinguish a nascent entity with
 real intronic support from one with none. The successor is a per-transcript allocation of the RNA prior.
 
+### 9c. ⭐⭐ THE PRIOR IS ALREADY AN ADDITIVE PER-COMPONENT PSEUDOCOUNT — the weights are the design
+
+The rule above is habitually described as "multiplicative, hence neutral on the within-RNA split". That
+is a description of one CHOICE OF WEIGHTS, not of a different kind of update. Writing `A` for
+`annotated_count` and `P` for `rna_prior`:
+
+    out[i] = raw[i]·(1 + P/A)  ==  raw[i] + P·raw[i]/A  ==  raw[i] + a_i,    Σ a_i = P
+
+so the shipped prior is `a_i = P · w_i / Σ_eligible w` at **`w_i = raw[i]`** — an allocation in
+proportion to the EM's own current belief. ⭐ **A prior that echoes the posterior carries no information,
+which is exactly why it is neutral.** Any per-transcript scheme differs from it in the weights alone.
+
+⛔⛔ **THE ONE PLACE THE WEIGHTS ARE NOT INTERCHANGEABLE IS `raw[i] = 0`, AND IT IS THE CONSEQUENTIAL
+ONE.** With `w_i = raw[i]`, `out[i] = 0` is an ABSORBING STATE: no prior magnitude whatsoever revives a
+component with no warm-start evidence, since `alpha` floors to `EM_LOG_EPSILON` and `digamma` of that is
+`−1e300`. Any strictly positive weight has no such state. That absorbing state is the structural guard
+against zombie revival named above, so **a weight vector that lifts every entity off zero removes it**.
+
+⚠ **And the threshold that replaces it is not the one to design against.** With per-row max subtraction,
+`EXP_CUTOFF = −708` and `digamma(a) ≈ −1/a`, a component's responsibility underflows to exactly zero
+below **0.00142** alpha units. That point is real and is never binding: measured on the shipped native
+EM, a component actually activates at **0.4709** alpha units when its candidates are equally likely and
+**0.1625** at a 2-nat likelihood advantage — 331× and 115× higher — because the binding constraint is the
+VBEM fixed point `alpha = Σ_u resp(alpha)`, not the exponential cutoff. ⛔ Separately, `assign_posteriors`
+uses `log(theta + eps)` with `std::exp` and **no** cutoff, so a component whose E-step responsibility is
+identically zero still collects posterior mass. Design against ~0.16–0.47, not against 0.0014.
+
 
 ## 10. The second pass's score
 

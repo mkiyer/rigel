@@ -109,6 +109,10 @@ as `TRAPS: <name>`; the name is the identifier and `tests/test_no_jargon_labels.
 - `pure-and-length-censored` — A POOL CAN BE COMPOSITION-PURE AND LENGTH-CENSORED AT THE SAME TIME, and the second is invisible
 - `divide-by-a-probability` — A POOL DIVIDED BY ITS OPPORTUNITY MUST BE DIVIDED BY A PROBABILITY, NOT BY A COUNT.
 - `opposite-tilts-must-not-pool` — POOLS WITH OPPOSITE TILTS MUST NOT BE POOLED RAW.
+- `a-mean-of-ratios-inherits-the-partition` — AN ESTIMATOR THAT AVERAGES PER-OBJECT RATIOS IS A FUNCTION OF WHERE THE
+  ANNOTATION DREW ITS BOUNDARIES.
+- `a-trap-names-the-defect-not-the-repair` — CITING A TRAP DOES NOT LICENSE A MECHANISM. CHECK THE GRAVEYARD FOR THE
+  MECHANISM ITSELF.
 - `fractional-mass-is-the-problem` — Fractional mass IS the partitioning problem.
 - `conservation-misses-mis-attribution` — Mass conservation does not catch mis-attribution.
 - `a-guard-outlives-its-divisor` — DELETE THE DIVISOR AND THE GUARD AGAINST IT GOES INERT — WHILE ITS TEST KEEPS PASSING.
@@ -874,6 +878,31 @@ length; a *crossing* pool's rises. Summing the histograms and applying one divis
 **146.05** where the contained pool alone said **88.0**. ⭐ Summing the counts **and** the matching
 per-pool opportunities is a *different* operation and is correct — it is the opportunity-weighted average
 of the per-pool estimates, and under Poisson counts those weights are exactly inverse-variance.
+
+**a-mean-of-ratios-inherits-the-partition. ⭐⭐ AN ESTIMATOR THAT AVERAGES PER-OBJECT RATIOS IS A FUNCTION
+OF WHERE THE ANNOTATION DREW ITS BOUNDARIES.** A node boundary appears wherever a signature changes — an
+antisense feature overlapping on the other strand will split a uniform stretch in two — so how many
+objects a transcript's path contains is an artefact, not biology. Averaging densities (harmonic,
+geometric or arithmetic) weights each object by that artefact; `Σmass / Σopportunity` does not, because
+splitting an object splits both sums together. Measured while designing the per-transcript RNA prior:
+subdividing one 20 kb intron from **1 node to 4 to 10**, total mass and total opportunity held constant,
+moved a shadow span's share of its locus's prior from **9.4 % → 18.6 % → 32.4 %**; the pooled form gives
+the same answer at 1, 4 and 10. ⭐ `node_geometry` already states the rule for a different pool —
+*"the ratio of sums, never the mean of ratios"* — and it generalises: **an estimator must be invariant to
+a re-partition that leaves the data unchanged, and that is a property you can test directly.**
+
+**a-trap-names-the-defect-not-the-repair. ⛔⛔ CITING A TRAP DOES NOT LICENSE A MECHANISM — THE TRAP NAMES
+THE DEFECT, NOT WHICH QUANTITY TO REPAIR.** `TRAPS: a-zero-count-is-a-measurement` says a zero count over
+a large exposure is a strong statement and must not be read as no data. From that, a per-transcript prior
+was designed around the Jeffreys posterior MEAN as a density LOCATION, `(mass + ½)/opportunity`, and the
+trap was cited as licensing it. ⭐ **It licenses no such thing: the same trap's shipped repair put the
+half on the PRECISION (`trigamma(n+½)`), which measured +0.0 % with the zero-control rows byte-identical,
+and the LOCATION form is in `ROADMAP.md` §4.1's graveyard at +7,269 % on `g00` (a second form at
++96,299 %).** `node_init.py` states the arithmetic in one line — three components each gaining `+½` breaks
+`Σ_c ρ_c·E_c = M` by exactly 3/2 — and the sentence to remember is **"the half belongs to the rate's
+VARIANCE, not to a share of a total."** ⛔ The rule: before adopting a mechanism because a trap seems to
+motivate it, grep the GRAVEYARD for the mechanism. Eleven were priced and refused; a twelfth was
+re-derived from first principles and was already row one.
 
 **fractional-mass-is-the-problem. Fractional mass IS the partitioning problem.** A fragment spanning 4 nodes writes six fractional
 numbers whose values depend on region sizes, purely because a mass is conserved; the same fragment's

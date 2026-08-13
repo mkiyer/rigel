@@ -130,6 +130,7 @@ class CalibrationResult:
     #: population that dominates a donor seam (owner ruling, 2026-07-30).
     mass_rna_junction: np.ndarray
 
+
     #: float64[n_edges] — the ``edge_spliced`` twin of ``edge_mass_per_crossing``, and
     #: float64[n_junctions] — the junction one, ``sj_mass / sj_count``. Same kind of quantity as
     #: ``edge_mass_per_crossing`` in every respect: GEOMETRY, identical under any split, and therefore
@@ -181,6 +182,47 @@ class CalibrationResult:
     rna_node_eff_len: np.ndarray
     rna_edge_eff_len: np.ndarray
 
+    # --- ⭐⭐ THE THREE-WAY COMPOSITION — the simplex ψ actually solves, per object ---
+    #: float64[n_nodes] / float64[n_edges] — the solved ``(f_g, f_pos, f_neg)`` at each object: the
+    #: gDNA share and the two RNA STRAND shares of that object's unspliced population.
+    #:
+    #: ⭐⭐ **THIS IS AXIOM 0's ``T(slot)``, PUBLISHED.** The solve is over
+    #: ``{gDNA} ∪ {RNA+ if free_pos} ∪ {RNA− if free_neg}`` at every slot, so the answer has always been
+    #: three numbers; ``mass_gdna_*`` and ``mass_rna_*`` are that answer with the two RNA strands summed.
+    #: A consumer asking "which STRAND's RNA is here" had to re-derive it or go without.
+    #:
+    #: ⛔ **The crossing axis published ``0`` for both RNA strands until 2026-08-12** — ``chain_edge_deconv``
+    #: projected ``f_g`` and emitted ``np.zeros(n)`` for ``f_pos``/``f_neg``, so the edge composition
+    #: summed to ``f_g`` alone rather than to 1. Nothing consumed it, which is why it survived.
+    #:
+    #: ⛔⛔ **THE THREE DO NOT SUM TO 1 ON ABOUT A QUARTER OF EVERY AXIS, AND THAT IS A MEASURED DEFECT
+    #: IN ψ RATHER THAN A PROPERTY OF THIS PROJECTION.** ``NodeDeconv`` asserts
+    #: *"posterior means; f_pos+f_neg+gdna_frac = 1"*. Measured on ``g00 ss0.99 capture_off``
+    #: (2026-08-12), with every object addressed by a chain slot:
+    #:
+    #: ====== ============== ================================== =========
+    #: axis   sums to 1      sums into (0, 1)                   sums > 1
+    #: ====== ============== ================================== =========
+    #: NODE   74.72 %        **25.25 %** — median 0.978, p5 0.869   12
+    #: EDGE   77.24 %        **22.71 %** — median 0.979, p5 0.850   16
+    #: ====== ============== ================================== =========
+    #:
+    #: The mechanism is visible at ``sweep.py``'s write-back: the three posterior means are
+    #: ``np.clip(·, 0, 1)``-ed **INDEPENDENTLY**, and an unsolvable slot keeps an init instead. Clipping
+    #: a simplex component-wise does not preserve the sum. ⚠ By linearity of expectation three posterior
+    #: means over one lattice *should* close, so the deficit is not inherent to taking means.
+    #:
+    #: ⛔ **Published AS SOLVED and deliberately NOT renormalised.** Dividing by the sum would make the
+    #: arrays look like a composition while hiding how far ψ's answer is from being one, and a consumer
+    #: cannot then tell a solved object from a 15 %-short one. The schema gate therefore bounds each
+    #: component to ``[0, 1]`` — which is true — and does not assert closure, which is not.
+    gdna_frac_node: np.ndarray
+    rna_pos_frac_node: np.ndarray
+    rna_neg_frac_node: np.ndarray
+    gdna_frac_edge: np.ndarray
+    rna_pos_frac_edge: np.ndarray
+    rna_neg_frac_edge: np.ndarray
+
     # --- library scalars ---
     gdna_density_global: float  # >= 0, global gDNA density (mass/bp); 0 in a zero-gDNA library
     rna_sense_frac: float  # in [0, 1], RNA sense fraction used by the strand clue
@@ -200,7 +242,15 @@ class CalibrationResult:
                     f"CalibrationResult.{axis} must be >= 0; got {getattr(self, axis)}."
                 )
 
-        for name in ("mass_gdna_node", "mass_rna_node", "gdna_node_eff_len", "rna_node_eff_len"):
+        for name in (
+            "mass_gdna_node",
+            "mass_rna_node",
+            "gdna_node_eff_len",
+            "rna_node_eff_len",
+            "gdna_frac_node",
+            "rna_pos_frac_node",
+            "rna_neg_frac_node",
+        ):
             _check_axis_array(getattr(self, name), name, self.n_nodes)
         for name in (
             "mass_gdna_edge",
@@ -210,8 +260,32 @@ class CalibrationResult:
             "edge_spliced_mass_per_crossing",
             "gdna_edge_eff_len",
             "rna_edge_eff_len",
+            "gdna_frac_edge",
+            "rna_pos_frac_edge",
+            "rna_neg_frac_edge",
         ):
             _check_axis_array(getattr(self, name), name, self.n_edges)
+
+        # ⭐ Each component is a FRACTION, so it is bounded by 1 — the one thing that is true of all
+        # three today. ⛔ Closure (`f_g + f_pos + f_neg == 1`) is deliberately NOT asserted: it fails on
+        # ~25 % of both axes, for the reason the field docstring records, and a gate that fails on the
+        # shipped configuration is a gate nobody can keep green. Assert it the day ψ's write-back stops
+        # clipping the three independently.
+        for name in (
+            "gdna_frac_node",
+            "rna_pos_frac_node",
+            "rna_neg_frac_node",
+            "gdna_frac_edge",
+            "rna_pos_frac_edge",
+            "rna_neg_frac_edge",
+        ):
+            arr = np.asarray(getattr(self, name), dtype=np.float64)
+            if np.any(arr > 1.0 + 1e-9):
+                i = int(np.flatnonzero(arr > 1.0 + 1e-9)[0])
+                raise ValueError(
+                    f"CalibrationResult.{name} is a fraction and must not exceed 1; index {i} is "
+                    f"{float(arr[i])!r}."
+                )
         for name in ("mass_rna_junction", "junction_mass_per_crossing"):
             _check_axis_array(getattr(self, name), name, self.n_junctions)
 

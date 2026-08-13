@@ -61,6 +61,24 @@ class EMConfig:
     Any positive value → cap at that many threads.
     Ignored when the C++ extension was built without OpenMP.
     """
+    warm_start: Literal["coverage", "prior", "uniform"] = "coverage"
+    """⭐ What the EM's initial ``theta`` is derived FROM.
+
+    ``"coverage"`` (the default and the shipped behaviour) seeds it with each component's unambiguous
+    total plus a coverage-weighted share of the ambiguous fragments, and then projects that seed through
+    the calibration prior.
+
+    ``"uniform"`` seeds every component equally, so the seed asserts NOTHING — the EM's landing point
+    is then a property of the likelihood rather than of where it was put down. ⭐ It is the control that
+    separates *"the shipped seed steers the solver into a bad basin"* from *"the objective has one"*.
+
+    ``"prior"`` zeroes the seed, so ``theta`` starts proportional to the prior alone. ⛔ It exists
+    because the seed and the prior are two different methods and the projection MULTIPLIES them — a
+    coverage-weighted share scaled by a per-transcript allocation derived some other way is neither
+    method's answer. ⚠ Only meaningful together with a per-transcript weight: under the shipped
+    evidence-proportional rule an all-zero seed leaves the RNA pool at zero and hands the locus to gDNA,
+    because ``out[i]`` is proportional to ``raw[i]``."""
+
     gdna_em_llr_bias: float = 0.0
     """Global gDNA false-positive-aversion dial — a pure log-odds (LLR) bias added
     to the gDNA component's per-fragment weight in the locus EM (``0.0`` = neutral,
@@ -77,6 +95,11 @@ class EMConfig:
             raise ValueError(f"Unknown EM mode: {self.mode!r}")
         if self.assignment_mode not in ("fractional", "map", "sample"):
             raise ValueError(f"Unknown assignment mode: {self.assignment_mode!r}")
+        # ⚠ `Literal` is a type-checker annotation and not a runtime constraint, so an unrecognised
+        # value would otherwise fall through to the shipped path — a config field that reads as applied
+        # and is not.
+        if self.warm_start not in ("coverage", "prior", "uniform"):
+            raise ValueError(f"Unknown warm start: {self.warm_start!r}")
         if not math.isfinite(float(self.gdna_em_llr_bias)):
             raise ValueError(
                 f"EMConfig.gdna_em_llr_bias must be finite; got {self.gdna_em_llr_bias}."

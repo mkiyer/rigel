@@ -653,6 +653,14 @@ def calibrate(
         gdna_edge_eff_len=edge_eff_gdna,
         rna_node_eff_len=node_eff_rna,
         rna_edge_eff_len=edge_eff_rna,
+        # ⭐ The simplex ψ solved, published per object rather than summed away. `mass_*` above is this
+        # same answer with the two RNA strands added together.
+        gdna_frac_node=nodes.gdna_frac,
+        rna_pos_frac_node=nodes.rna_pos_frac,
+        rna_neg_frac_node=nodes.rna_neg_frac,
+        gdna_frac_edge=edges.gdna_frac,
+        rna_pos_frac_edge=edges.rna_pos_frac,
+        rna_neg_frac_edge=edges.rna_neg_frac,
         gdna_density_global=density_global,
         rna_sense_frac=rna_sense_frac,
         gdna_strand_overdispersion=gdna_strand_overdispersion,

@@ -90,7 +90,25 @@ _RUNS = Path.home() / "Downloads" / "rigel_runs"
 DEFAULT_SUITE = _RUNS / "suite" / "ladder"
 DEFAULT_INDEX = _RUNS / "suite" / "rigel_index"
 
-ARMS = ("base", "base_reseed", "noop", "oracle", "oracle_gdna", "oracle_rna", "oracle_efflen")
+#: ⭐⭐ ``warm_uniform`` seeds every component EQUALLY instead of by coverage-weighted share. It varies
+#: ONE thing against ``base`` — where the EM is put down — so a difference is the seed's BASIN and
+#: nothing else. ⛔ It exists because the true per-transcript split was measured to be a fixed point of
+#: the prior-free objective (drifting 1.0 % of RNA mass over 200 iterations) while the shipped answer
+#: sits 444,595 nats WORSE in data likelihood: the solver is not failing on ambiguity, it is landing
+#: somewhere else, and this says whether the seed is what puts it there.
+#: ⭐⭐⭐ ``oracle_alloc`` IS STAGE 5, AND IT IS A CAPABILITY PROOF RATHER THAN A CEILING. It hands the
+#: EM the TRUE relative transcript abundances as the per-transcript allocation weights and zeroes the
+#: coverage seed, so `theta` starts from the prior alone. The question is narrow and the answer is
+#: binary: *given correct weights, does the machinery produce correct per-transcript abundances?* If it
+#: does, a weighting function is worth designing; if it does not, no weighting function can help and the
+#: work stops here.
+#:
+#: ⛔ **It is NOT a claim about reachable headroom**, and must not be quoted as one. Truth-derived
+#: weights also hand over the true SUPPORT — a zero weight is exactly absorbing, so every silent
+#: transcript is switched off for free, and silent transcripts carry 23.1 % of the transcript error at
+#: g00. Pricing what a REAL weighting function could earn needs controls this arm deliberately omits.
+ARMS = ("base", "base_reseed", "noop", "oracle", "oracle_gdna", "oracle_rna", "oracle_efflen",
+        "warm_uniform", "oracle_alloc", "oracle_alloc_seed", "oracle_alloc_flip")
 
 #: ⛔⛔ **THE SHIPPED PIPELINE IS NOT REPRODUCIBLE RUN TO RUN, AND EVERY ARM HERE PINS THE SEED THAT
 #: MAKES IT SO.** ``EMConfig.seed`` defaults to ``None`` and ``assignment_mode`` to ``"sample"``, so
@@ -157,13 +175,14 @@ def install_arm(arm: str, oracle: OracleTruth | None):
     ran reads as "no effect", which is the most flattering possible failure (TRAPS: an-ablation-that-never-ran).
     """
     original = PRIORS.assemble_priors
-    fields = _ARM_FIELDS[arm]
 
-    if arm in ("base", "base_reseed"):
+    if arm in ("base", "base_reseed", "warm_uniform"):
         # ⚠ Counted as fired: ``base`` installs nothing by design, so the "did the override run?"
         # check must not fail on the one arm that has no override. The thing it guards — an
         # injection that silently did not happen — cannot occur here.
         return (lambda: None), {"n": 1}
+
+    fields = _ARM_FIELDS[arm]
 
     fired = {"n": 0}
 
@@ -369,11 +388,86 @@ def score_library(result, quant: pd.DataFrame, truth_summary: dict) -> dict:
 
 def seeded(pipeline_config, arm: str, em_seed: int):
     """The arm's pipeline config. ⭐ ``base_reseed`` differs from ``base`` in the SEED ALONE, so the
-    gap between them is the sampling noise of the EM's own hard assignment and nothing else."""
+    gap between them is the sampling noise of the EM's own hard assignment and nothing else.
+
+    """
     seed = em_seed + 1 if arm == "base_reseed" else em_seed
+    warm = pipeline_config.em.warm_start
+    if arm == "warm_uniform":
+        warm = "uniform"
+    elif arm == "oracle_alloc":
+        # ⭐ the seed is zeroed so `theta` starts proportional to the prior ALONE — otherwise a
+        # coverage-weighted seed is MULTIPLIED by an allocation from a different method and the result
+        # is neither method's answer.
+        warm = "prior"
     return dataclasses.replace(
-        pipeline_config, em=dataclasses.replace(pipeline_config.em, seed=seed)
+        pipeline_config, em=dataclasses.replace(pipeline_config.em, seed=seed, warm_start=warm)
     )
+
+
+def truth_weights(truth: pd.DataFrame, index) -> np.ndarray:
+    """``float64[n_transcripts]`` — the TRUE realised fragment count per transcript, on the EM's axis.
+
+    ⭐ This is the whole of stage 5's input: the relative abundances the simulator actually produced.
+    Within a locus the EM only reads their RATIOS, so no normalisation is needed here.
+
+    ⚠ Exact-duplicate transcripts are folded onto the twin the index kept — the truth table is keyed on
+    the un-collapsed annotation, so without the fold their fragments would be dropped rather than
+    attributed. ⛔ For such a pair the per-transcript truth is not merely awkward, it is UNDEFINED: the
+    two are the same molecule and only the group total is a fact about the world.
+    """
+    col = next((c for c in ("observed_mrna_fragments", "mrna_abundance") if c in truth.columns), None)
+    if col is None:
+        raise SystemExit("⛔ truth table has neither observed_mrna_fragments nor mrna_abundance")
+    t_index = dict(zip(index.t_df["t_id"].to_numpy(), index.t_df["t_index"].to_numpy(), strict=True))
+    w = np.zeros(int(index.num_transcripts), dtype=np.float64)
+    for tid, n in zip(truth["transcript_id"], truth[col], strict=True):
+        i = t_index.get(str(tid))
+        if i is not None:
+            w[int(i)] += float(n)
+    return w
+
+
+def install_truth_weights(weights: np.ndarray):
+    """Pass per-transcript weights into the EM, and COUNT THE ARM AT THE DEEPEST POINT IT CAN OBSERVE.
+
+    ⭐ A wrapper rather than a config field: the weights are a per-run ARRAY, and an experiment that
+    injects one should not add production surface.
+
+    ⛔⛔ **THE COUNTER WATCHES THE ESTIMATOR, NOT THE INJECTION, AND THAT DISTINCTION COST A SESSION.**
+    An earlier version counted nonzero entries in ``weights`` — a property of the array this function
+    was handed, true whatever the pipeline then did with it. Meanwhile
+    ``pipeline._run_locus_em_partitioned`` accepted ``rna_prior_weight`` and silently dropped it, so
+    every allocation, however extreme, produced byte-identical output while the counter read healthy.
+    ⭐ Counting where the SOLVER receives the array makes a dropped parameter impossible to miss, and
+    ``--arm oracle_alloc_flip`` (a maximally WRONG allocation, which must move the answer) is the
+    end-to-end half of the same check.
+    """
+    import rigel.pipeline as PL
+    from rigel.estimator import AbundanceEstimator
+
+    inner = PL._run_locus_em_partitioned
+    inner_em = AbundanceEstimator.run_batch_locus_em_partitioned
+    fired = {"n": 0}
+
+    def wrapper(*args, **kw):
+        kw["rna_prior_weight"] = weights
+        return inner(*args, **kw)
+
+    def em_wrapper(self, *args, **kw):
+        w = kw.get("rna_prior_weight")
+        if w is not None and int(np.asarray(w).size) and float(np.asarray(w).sum()) > 0.0:
+            fired["n"] += 1
+        return inner_em(self, *args, **kw)
+
+    PL._run_locus_em_partitioned = wrapper
+    AbundanceEstimator.run_batch_locus_em_partitioned = em_wrapper
+
+    def restore():
+        PL._run_locus_em_partitioned = inner
+        AbundanceEstimator.run_batch_locus_em_partitioned = inner_em
+
+    return restore, fired
 
 
 def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
@@ -384,12 +478,27 @@ def run_condition(arm: str, suite: Path, index, condition: str, pipeline_config,
     pipeline_config = seeded(pipeline_config, arm, em_seed)
 
     oracle = None
-    if arm not in ("base", "base_reseed"):
+    if arm not in ("base", "base_reseed", "warm_uniform", "oracle_alloc", "oracle_alloc_seed", "oracle_alloc_flip"):
         if oracle_cache is None:
             raise SystemExit(f"⛔ arm {arm!r} needs --oracle-cache")
         oracle = load_oracle(bam, index, pipeline_config, oracle_cache, condition)
 
-    restore, fired = install_arm(arm, oracle)
+    if arm == "oracle_alloc_flip":
+        w = truth_weights(truth, index)
+        # ⛔ FALSIFICATION OF THE HARNESS, not a treatment: put the weight where the truth is NOT.
+        # If a maximally wrong allocation moves nothing, the allocation never reached the solver.
+        flip = np.zeros_like(w)
+        nz = np.flatnonzero(w > 0)
+        if nz.size:
+            flip[nz] = w[nz][::-1]
+        restore, fired = install_truth_weights(flip)
+    elif arm.startswith("oracle_alloc"):
+        # ⭐ `oracle_alloc_seed` keeps the SHIPPED coverage seed, so it varies ONE thing against `base`:
+        # the allocation. `oracle_alloc` also zeroes the seed, which additionally removes RNA's evidence
+        # advantage over calibration's gDNA prior — two changes, not one.
+        restore, fired = install_truth_weights(truth_weights(truth, index))
+    else:
+        restore, fired = install_arm(arm, oracle)
     start = time.perf_counter()
     try:
         result = run_pipeline(bam, index, pipeline_config)

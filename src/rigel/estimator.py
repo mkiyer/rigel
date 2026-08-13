@@ -310,6 +310,7 @@ class AbundanceEstimator:
         index,
         *,
         rna_prior_count: np.ndarray | None = None,
+        rna_prior_weight: np.ndarray | None = None,
         gdna_eff_len: np.ndarray | None = None,
         enable_gdna: np.ndarray | None = None,
         em_iterations: int = 1000,
@@ -330,6 +331,17 @@ class AbundanceEstimator:
         rna_prior_count : np.ndarray, optional
             float64 — additive aggregate RNA alpha per locus. Defaults to zeros
             for wrapper-level compatibility.
+        rna_prior_weight : np.ndarray, optional
+            ⭐ float64[**n_transcripts**] — how the per-locus RNA prior is SHARED
+            OUT among a locus's eligible components. ``None`` (the default and the
+            shipped behaviour) means "in proportion to the evidence each component
+            already carries".
+
+            ⛔ **This rides the PER-TRANSCRIPT lane, like ``t_eff_lens`` and
+            ``t_is_synthetic`` — not the per-locus one.** It is passed to the C++
+            FLAT and whole; it is never indexed by ``multi_locus_id``. Mixing the
+            two conventions is the plumbing error this axis invites, so the C++
+            refuses any length but ``n_transcripts`` or 0.
         index : TranscriptIndex
             Reference index.
         gdna_eff_len : np.ndarray, optional
@@ -388,6 +400,25 @@ class AbundanceEstimator:
                     f"rna_prior_count length {rna_prior_count.shape[0]} != n_loci {n_loci}."
                 )
 
+        # ⭐ The allocation weight rides the PER-TRANSCRIPT lane, flat and whole — never `[ids]`. An
+        # EMPTY array means "share the prior out by current evidence", the shipped rule, and the C++
+        # reaches it through the same `nullptr` test `t_is_synthetic` uses.
+        if rna_prior_weight is None:
+            t_rna_prior_weight = np.zeros(0, dtype=np.float64)
+        else:
+            t_rna_prior_weight = np.ascontiguousarray(rna_prior_weight, dtype=np.float64)
+            if t_rna_prior_weight.shape[0] != n_transcripts:
+                raise ValueError(
+                    f"rna_prior_weight length {t_rna_prior_weight.shape[0]} != n_transcripts "
+                    f"{n_transcripts} — this array rides the per-TRANSCRIPT lane, not the per-locus "
+                    f"one."
+                )
+            if not np.all(np.isfinite(t_rna_prior_weight)) or np.any(t_rna_prior_weight < 0.0):
+                raise ValueError(
+                    "rna_prior_weight must be finite and non-negative — it is a share of a "
+                    "pseudo-fragment count."
+                )
+
         if self._em_posterior_sum is None:
             self._em_posterior_sum = np.zeros(n_transcripts, dtype=np.float64)
             self._em_n_assigned = np.zeros(n_transcripts, dtype=np.float64)
@@ -432,6 +463,8 @@ class AbundanceEstimator:
             self.unambig_counts,
             t_eff_lens,
             t_is_synthetic,
+            t_rna_prior_weight,
+            {"coverage": 0, "prior": 1, "uniform": 2}[self.em_config.warm_start],
             self.em_counts,
             self.gdna_locus_counts,
             self._em_posterior_sum,

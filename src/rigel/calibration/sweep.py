@@ -665,12 +665,23 @@ def chain_edge_deconv(chain: NodeChain, belief: NodeBelief, substrate) -> NodeDe
     unspliced = np.asarray(substrate.edge_unspliced.count, dtype=np.float64).sum(axis=1)
     spliced = np.asarray(substrate.edge_spliced.count, dtype=np.float64).sum(axis=1)
     n = unspliced.shape[0]
+    ei = idx[edge]
     f_g = np.zeros(n)
-    f_g[idx[edge]] = np.asarray(belief.f_g, dtype=np.float64)[edge]
+    f_pos = np.zeros(n)
+    f_neg = np.zeros(n)
+    f_g[ei] = np.asarray(belief.f_g, dtype=np.float64)[edge]
+    # ⭐ THE PER-STRAND RNA SPLIT, PROJECTED ON THIS AXIS TOO. ψ solves the simplex
+    # ``(f_g, f_pos, f_neg)`` at EVERY slot — AXIOM 0's `T(slot)`, which is a function of the two
+    # `free_*` bits and never of the slot's kind — so an EDGE slot has the same three-way composition a
+    # NODE slot does. ⛔ This projection used to emit ``np.zeros(n)`` for both RNA strands, so the
+    # crossing axis published a composition that summed to ``f_g`` alone. Nothing consumed it, which is
+    # why it survived; a per-transcript prior reading composition per object does.
+    f_pos[ei] = np.asarray(belief.f_pos, dtype=np.float64)[edge]
+    f_neg[ei] = np.asarray(belief.f_neg, dtype=np.float64)[edge]
     return NodeDeconv(
         gdna_mass=f_g * unspliced,
         rna_mass=(1.0 - f_g) * unspliced + spliced,
         gdna_frac=f_g,
-        rna_pos_frac=np.zeros(n),
-        rna_neg_frac=np.zeros(n),
+        rna_pos_frac=f_pos,
+        rna_neg_frac=f_neg,
     )
